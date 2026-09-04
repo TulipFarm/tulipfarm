@@ -22,7 +22,9 @@ test("renders description and actions alongside the title", () => {
   );
 
   expect(screen.getByText("Values are never shown again.")).toBeInTheDocument();
-  expect(screen.getByRole("button", { name: "Add" })).toBeInTheDocument();
+  const action = screen.getByRole("button", { name: "Add" });
+  expect(action).toBeInTheDocument();
+  expect(action.parentElement).toHaveClass("w-full", "sm:w-auto");
 });
 
 test("omits the header region entirely when unlabelled", () => {

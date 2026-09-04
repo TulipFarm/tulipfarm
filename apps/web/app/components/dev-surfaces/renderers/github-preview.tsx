@@ -5,6 +5,9 @@ import {
   githubCheckRunRenderer,
   githubCommentRenderer,
 } from "@tulipfarm/surface-github";
+import { useMemo, useState } from "react";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import {
   Check,
   CheckCircle2,
@@ -13,10 +16,7 @@ import {
   ShieldAlert,
   Terminal,
   XCircle,
-} from "lucide-react";
-import { useMemo, useState } from "react";
-import ReactMarkdown from "react-markdown";
-import remarkGfm from "remark-gfm";
+} from "~/components/icons";
 import { Badge } from "~/components/ui/badge";
 import { Button } from "~/components/ui/button";
 import { copyText } from "~/lib/clipboard";
@@ -174,7 +174,7 @@ export function GitHubPreview({ artifact, onInteraction }: GitHubPreviewProps) {
         </div>
       ) : surfaceType === "comment" && commentPayload ? (
         /* GitHub Comment Card */
-        <div className="rounded-md border border-border bg-card shadow-xs">
+        <div className="rounded-lg border border-border bg-card shadow-xs">
           <div className="flex items-center justify-between border-b border-border bg-muted/30 px-3.5 py-2 text-xs">
             <div className="flex items-center gap-2">
               <div className="flex size-5 items-center justify-center rounded-full bg-primary font-bold text-[10px] text-primary-foreground">
@@ -194,7 +194,7 @@ export function GitHubPreview({ artifact, onInteraction }: GitHubPreviewProps) {
         </div>
       ) : surfaceType === "check-run" && checkRunPayload ? (
         /* GitHub Check Run Card */
-        <div className="rounded-md border border-border bg-card shadow-xs">
+        <div className="rounded-lg border border-border bg-card shadow-xs">
           <div className="flex items-center justify-between border-b border-border bg-muted/30 px-3.5 py-2.5 text-xs">
             <div className="flex items-center gap-2.5">
               {checkRunPayload.conclusion === "success" ? (

@@ -47,9 +47,9 @@ test("renders an x-links field as a link to the target resource", () => {
   );
 });
 
-test("separates a [system] block carrying version and timestamps", () => {
+test("separates a System block carrying version and timestamps", () => {
   renderDetail();
-  expect(screen.getByText("system")).toBeInTheDocument();
+  expect(screen.getByText("System")).toBeInTheDocument();
   expect(screen.getByText("version")).toBeInTheDocument();
   expect(screen.getByText("4")).toBeInTheDocument();
 });

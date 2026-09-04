@@ -23,7 +23,7 @@ export function InboxItem({
   return (
     <article className="border border-border bg-card">
       <header className="flex flex-wrap items-center gap-2 border-b border-border px-3 py-2">
-        <span className="text-xs uppercase tracking-[0.2em] text-muted-foreground">
+        <span className="text-xs capitalize text-muted-foreground">
           {item.kind.replace("_", " ")}
         </span>
         <h2 className="text-sm font-medium">{item.title}</h2>

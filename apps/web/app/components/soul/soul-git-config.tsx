@@ -1,5 +1,5 @@
-import { GitBranch } from "lucide-react";
 import { type FormEvent, useState } from "react";
+import { GitBranch } from "~/components/icons";
 import { StatusBadge, type StatusTone } from "~/components/status-badge";
 import { Button } from "~/components/ui/button";
 import { Field } from "~/components/ui/field";

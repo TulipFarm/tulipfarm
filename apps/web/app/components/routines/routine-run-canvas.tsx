@@ -16,7 +16,7 @@ export function RoutineRunCanvas({ graph, overlay, events }: Props) {
           aria-expanded={journalOpen}
           aria-controls="run-journal"
           onClick={() => setJournalOpen((open) => !open)}
-          className="min-h-11 cursor-pointer px-4 py-3 font-mono text-[0.625rem] uppercase tracking-[0.16em] text-muted-foreground outline-none hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring"
+          className="min-h-11 cursor-pointer px-4 py-3 font-mono text-xs text-muted-foreground outline-none hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring"
         >
           Journal
         </button>

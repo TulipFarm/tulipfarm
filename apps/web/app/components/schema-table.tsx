@@ -16,7 +16,10 @@ export function ValueCell({ cell }: { cell: RenderedCell }) {
       return <span className="text-muted-foreground">{cell.text}</span>;
     case "link":
       return (
-        <Link to={cell.to} className="text-primary hover:underline">
+        <Link
+          to={cell.to}
+          className="text-foreground underline decoration-border underline-offset-[3px] transition-colors hover:decoration-foreground"
+        >
           {cell.label}
           <span aria-hidden> ↗</span>
         </Link>
@@ -74,11 +77,11 @@ export function SchemaTable({
   onToggleSort?: (column: string) => void;
   density?: Density;
 }) {
-  const cellPad = density === "compact" ? "px-3 py-1" : "px-3 py-2";
+  const cellPad = density === "compact" ? "px-3 py-1" : "px-3 py-1.5";
   return (
     /* The grid owns its own vertical scroll so the header can stick to it. Scrolling the page
        instead would carry the header off-screen and leave a wide table with unlabelled columns. */
-    <div className="max-h-[70svh] overflow-auto rounded-md border border-border">
+    <div className="max-h-[70svh] overflow-auto rounded-lg border border-border bg-card">
       {/* border-separate, not collapse: a collapsed border is painted by the table rather than the
           cell, so the sticky header loses its rule the moment the body scrolls under it. */}
       <table className="w-full border-separate border-spacing-0 text-left text-sm">
@@ -101,7 +104,7 @@ export function SchemaTable({
             cells. The last row leans on the container's own border instead. */}
         <tbody className="[&>tr:last-child>td]:border-b-0 [&>tr>td]:border-b [&>tr>td]:border-border">
           {records.map((record) => (
-            <tr key={record.id} className="transition-colors duration-150 hover:bg-accent">
+            <tr key={record.id} className="transition-colors hover:bg-muted/60">
               {columns.map((col) => {
                 const value = record[col.name];
                 const numeric = col.kind === "number";
@@ -112,7 +115,7 @@ export function SchemaTable({
                       <Cell text={label}>
                         <Link
                           to={`/resources/${encodeURIComponent(type)}/${encodeURIComponent(record.id)}`}
-                          className="font-medium text-primary hover:underline"
+                          className="font-medium text-foreground underline decoration-border underline-offset-[3px] transition-colors hover:decoration-foreground"
                         >
                           {label}
                         </Link>

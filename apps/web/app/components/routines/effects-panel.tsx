@@ -1,4 +1,4 @@
-import { Bot, Braces, Clock, GitBranch, Hand, Radio, Wrench } from "lucide-react";
+import { Bot, Braces, Clock, GitBranch, Hand, Radio, Wrench } from "~/components/icons";
 import { Badge } from "~/components/ui/badge";
 import { Panel } from "~/components/ui/panel";
 import type { RoutineEffectKind } from "~/lib/routines";

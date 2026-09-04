@@ -97,13 +97,21 @@ export async function sessionNavigationCapabilities<Principal>(
   principal: Principal,
   check: NavigationAuthorizationCheck<Principal>
 ): Promise<{ isAdmin: boolean; visiblePaths: string[] }> {
+  const decisions = new Map<string, Promise<boolean>>();
+  const evaluate = (authorization: NavigationAuthorization) => {
+    const key = `${authorization.action}:${authorization.resourceType}:${authorization.fallback}`;
+    const existing = decisions.get(key);
+    if (existing) return existing;
+    const decision = check(principal, authorization);
+    decisions.set(key, decision);
+    return decision;
+  };
+
   const [isAdmin, visiblePaths] = await Promise.all([
-    check(principal, USER_MANAGE).catch(() => false),
+    evaluate(USER_MANAGE).catch(() => false),
     Promise.all(
       NAVIGATION_REQUIREMENTS.map(async ({ path, authorizations }) => {
-        const allowed = await Promise.all(
-          authorizations.map((authorization) => check(principal, authorization))
-        ).catch(() => []);
+        const allowed = await Promise.all(authorizations.map(evaluate)).catch(() => []);
         return allowed.length === authorizations.length && allowed.every(Boolean)
           ? path
           : undefined;

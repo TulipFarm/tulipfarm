@@ -1,5 +1,5 @@
-import { Check, Copy } from "lucide-react";
 import { useState } from "react";
+import { Check, Copy } from "~/components/icons";
 import type { TimelinePart, ToolPreview } from "~/lib/chat/types";
 import { copyText } from "~/lib/clipboard";
 import { cn } from "~/lib/utils";
@@ -21,7 +21,7 @@ function CopyButton({ value, label }: { value: string; label: string }) {
         }
       }}
       aria-label={label}
-      className="inline-flex items-center gap-1 rounded-sm px-1.5 py-0.5 text-[11px] text-muted-foreground transition-colors hover:bg-run-surface-hover hover:text-foreground"
+      className="inline-flex min-h-6 items-center gap-1 rounded-sm px-1.5 py-0.5 text-[11px] text-muted-foreground transition-colors hover:bg-run-surface-hover hover:text-foreground"
     >
       {copied ? <Check aria-hidden className="size-3" /> : <Copy aria-hidden className="size-3" />}
       {copied ? "Copied" : "Copy"}
@@ -45,9 +45,7 @@ function InspectPane({
   return (
     <section className="overflow-hidden rounded-md border border-code-border bg-code-surface">
       <header className="flex items-center justify-between gap-2 border-b border-code-border px-3 py-1.5">
-        <h4 className="font-mono text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
-          {label}
-        </h4>
+        <h4 className="font-mono text-xs font-medium text-muted-foreground">{label}</h4>
         <CopyButton value={json} label={`Copy ${label.toLowerCase()}`} />
       </header>
       <div className="px-3 py-2">
@@ -98,7 +96,7 @@ export function toolHasDetails(part: ToolPart): boolean {
 function Meta({ label, value, mono }: { label: string; value: string; mono?: boolean }) {
   return (
     <span className="flex items-center gap-1.5">
-      <dt className="uppercase tracking-wide opacity-70">{label}</dt>
+      <dt className=" opacity-70">{label}</dt>
       <dd className={cn("text-foreground/80", mono === true && "font-mono")}>{value}</dd>
     </span>
   );

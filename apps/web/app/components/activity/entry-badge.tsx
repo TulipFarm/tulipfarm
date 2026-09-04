@@ -4,9 +4,9 @@ import {
   CircleDot,
   CircleSlash,
   Clock,
-  type LucideIcon,
+  type Icon,
   TriangleAlert,
-} from "lucide-react";
+} from "~/components/icons";
 import { StatusBadge } from "~/components/status-badge";
 import { Badge } from "~/components/ui/badge";
 import type { ActivityEntry } from "~/lib/activity-feed";
@@ -56,7 +56,7 @@ const TONE_ICON = {
   error: CircleAlert,
   blocked: TriangleAlert,
   skipped: CircleSlash,
-} satisfies Record<Exclude<RunTone, "ok">, LucideIcon>;
+} satisfies Record<Exclude<RunTone, "ok">, Icon>;
 
 /** Success, drawn flat: same icon, same word, without the fill that would make it compete. */
 function Settled({ label }: { label: string }) {

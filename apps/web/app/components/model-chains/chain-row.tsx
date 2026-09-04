@@ -1,5 +1,5 @@
-import { ArrowDown, ArrowUp, KeyRound, Trash2 } from "lucide-react";
 import type { ReactNode } from "react";
+import { ArrowDown, ArrowUp, KeyRound, Trash2 } from "~/components/icons";
 import {
   capabilityLabels,
   isEntryReady,

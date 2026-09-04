@@ -28,7 +28,7 @@ export function AgentGovernanceCard({
   return (
     <section className="border border-border bg-card" aria-labelledby="agent-governance-title">
       <div className="flex flex-wrap items-center gap-2 border-b border-border px-3 py-2">
-        <h2 id="agent-governance-title" className="text-xs font-medium uppercase tracking-[0.2em]">
+        <h2 id="agent-governance-title" className="text-xs font-medium ">
           Governance
         </h2>
         <span className="text-xs text-muted-foreground">version {governance.version}</span>

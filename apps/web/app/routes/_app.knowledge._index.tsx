@@ -1,5 +1,5 @@
 import { type MetaFunction, useLoaderData, useRouteError } from "@remix-run/react";
-import { BookText, FileText, Plus, Waypoints } from "lucide-react";
+import { BookText, FileText, Plus, Waypoints } from "~/components/icons";
 import { AgentAuthoredBadge } from "~/components/knowledge/agent-authored-badge";
 import { VisibilityBadge } from "~/components/knowledge/visibility-badge";
 import { ErrorState } from "~/components/states";

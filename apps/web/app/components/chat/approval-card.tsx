@@ -1,5 +1,5 @@
-import { Check, Clock, ShieldAlert, X } from "lucide-react";
 import { type ComponentType, useEffect, useState } from "react";
+import { Check, Clock, ShieldAlert, X } from "~/components/icons";
 import { Button } from "~/components/ui/button";
 import { ToolChip } from "~/components/ui/tool-chip";
 import type { ApprovalState } from "~/lib/chat/types";

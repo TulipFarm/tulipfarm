@@ -33,12 +33,16 @@ Terminology is binding: [`metadata/terminologies.md`](metadata/terminologies.md)
 
 - **Work surface first.** Keep navigation compact and content readable. One primary action per
   view; subordinate everything else.
-- **Neutral by default.** Achromatic surfaces, quiet hairlines. Ruby is for brand, selection,
-  focus, links, and primary actions. Destructive red is for danger. Nothing else.
-- **Structure before decoration.** Hierarchy comes from layout, type, and spacing. Not from
-  gradients, glass, shadows, or card grids without a content reason. The integrations catalog is
-  the one place both a card grid and a hairline lift are sanctioned, on grounds named in §6 and in
-  "The integrations catalog".
+- **Neutral by default.** Achromatic surfaces, quiet hairlines, near-black ink for the one
+  committing action. Ruby is the product's own mark and nothing else. Destructive red is for
+  danger. Nothing else.
+- **Structure should be felt, not seen.** Hierarchy comes from layout, type, and spacing. A
+  resting surface separates on a hairline and a one-step change of ground — **no shadow at all**
+  (§6). Shadow is reserved for things that genuinely float above the page. Never a gradient,
+  glass, or a card grid without a content reason.
+- **Do not compete for attention you have not earned.** Chrome recedes; content does not. The
+  sidebar sits one step away from the content in both themes so it falls back whichever way the
+  theme runs.
 - **Color never carries meaning alone.** Every tone ships with a label, an icon, or a shape.
 - **Motion must report real state.** An animation that runs regardless of what is happening is
   decoration, and decoration is not permitted. See §7.
@@ -49,18 +53,26 @@ Terminology is binding: [`metadata/terminologies.md`](metadata/terminologies.md)
 
 ## 2. Two surfaces, one language
 
-Both surfaces share the ruby brand hue, both typefaces, the focus treatment, the no-shadow rule,
-and every rule in §§3–8. They diverge in three places, deliberately.
+Both surfaces share the typeface, the type scale, the surface ramp, the ruby brand hue, the focus
+treatment, and every rule in §§3–8. They diverge in exactly two places.
 
 | Decision | `apps/web` | `apps/docs` | Why |
 | --- | --- | --- | --- |
-| Canvas | Cool-neutral: `oklch(1 0 0)` light, near-black `oklch(0.145 0.002 286)` dark | Warm: cream `oklch(0.992 0.003 60)`, warm near-black `oklch(0.178 0.009 55)` | The app is a work surface and stays out of the way. The docs are a reading surface and are allowed warmth. |
-| Radius | `--radius: 0.5rem`, scaled ±4px | Square-leaning: 2px / 4px / 6px, capped at 6px | The docs site is terminal-native by design; the app is a conventional product shell. |
+| Material | Grain and ambient wash on full-bleed marketing bands | Not used | Elevation lifts a *control*; a full-bleed band is a ground. Grain gives that ground a material without lifting it. |
 | Theme selector | `[data-theme="dark"]` on `<html>` | `.dark` on `<html>` (fumadocs' convention) | fumadocs owns its own theme switch. Do not fight it. |
 
+**The canvas used to be a third row, and is not any more.** The docs previously ran a warm cream
+canvas (hue ~60) against the app's cool neutral, on the reasoning that a reading surface is allowed
+warmth. In practice it meant a reader crossing from the docs into their own instance met a
+different cast of grey and read it as a different product. Both surfaces now run the same
+achromatic light ramp and the same faint-cool dark ramp (§3). If you are tempted to re-warm the
+docs, note that the cast has to be paid for on every shared token, not just the canvas.
+
 Everything else must match. When you change a shared value in one, change it in the other:
-`apps/docs/app/global.css` states this in its header comment, and the ruby primary
-`oklch(0.46 0.17 25)` is byte-identical in both files.
+`apps/docs/app/global.css` states this in its header comment, and the ruby
+`oklch(0.46 0.17 25)` is byte-identical in both files — `--brand` in the app, the brand primary in
+the docs. The docs site is marketing, where the brand *is* the call to action, so it keeps ruby on
+its CTA; the app is a work surface, where it is not (§3.1).
 
 ### Naming
 
@@ -81,8 +93,10 @@ semantic too: `bg-run-surface`, `text-run-ok`, `border-run-border`, `text-data-3
 | --- | --- | --- |
 | Canvas | `background`, `foreground` | Work surface and readable ink |
 | Surface | `card`, `popover`, `secondary`, `muted`, `accent` | Increasing neutral separation |
-| Structure | `border`, `input`, `ring` | Hairlines, controls, ruby focus |
-| Brand | `primary`, `primary-foreground` | Ruby. Use sparingly |
+| Structure | `border`, `input`, `ring` | Hairlines, controls, neutral focus |
+| Action | `primary`, `primary-foreground` | Near-black ink. The one committing action per view |
+| Brand | `brand`, `brand-foreground` | Coral. Identity only — never a control (§3.1) |
+| Elevation | `elevation-xs/sm/md/lg` | The whole permitted depth ladder (§6) |
 | Danger | `destructive`, `destructive-foreground` | Destructive actions and failures only |
 | Status | `status-neutral/info/success/warning/danger` | Content lifecycle (§4.1) |
 | Status tint | `status-*-surface` | Filled chips and callout grounds (§4.7) |
@@ -98,9 +112,55 @@ semantic too: `bg-run-surface`, `text-run-ok`, `border-run-border`, `text-data-3
 | Tulip | `tulip-stem`, `tulip-seed`, `tulip-petal-deep` | `/farm` and onboarding growth |
 | Shell | `sidebar-*` | Sidebar surface, border, and selected-row layers |
 
-Light: white canvas, near-black ink, 0.94–0.99 surfaces, 0.90–0.92 borders. Dark: 0.145 near-black
+Light: white canvas, near-black ink, 0.94–0.99 surfaces, 0.91–0.92 borders. Dark: 0.145 near-black
 canvas, 0.13–0.24 surfaces, 0.95 ink, 9–13% white borders. Dark neutrals carry a trace of hue 286;
 see the block comment in `tokens.css` for why they are not achromatic.
+
+### 3.1 `primary` is ink, `brand` is identity
+
+**The committing action is neutral, not coral.** A page carries at most one of these, and its job
+is to be the single darkest fill on the screen. A coral fill could not do that job: it competed
+with every status tone, every chart series and the product's own mark for the same attention, and
+on a screen with a warning chip and a Save button the two read as equally urgent.
+
+So `--primary` is near-black in the light theme and near-white in the dark one — the same job, read
+the other way up — and coral moved to `--brand`.
+
+`--brand` is identity and nothing else: the wordmark, the onboarding tulip, an active agent glyph.
+The moment it fills a control it stops reading as the product's mark and starts reading as a
+meaning the control does not have. It is never a call to action, never a status, never a chart
+series, and never a focus ring.
+
+#### Ruby does three jobs (this reverses an earlier rule)
+
+An earlier version of this section said ruby "is never a call to action, never a status, never a
+chart series, and **never a focus ring**". The first three still hold. The last one does not, and
+the reasoning that produced it was too broad: it treated *filling a control* and *marking a
+control* as the same act. They are not.
+
+Ruby now owns three states, and only these three:
+
+| Job | Token / class | Why it is safe |
+| --- | --- | --- |
+| Focus ring | `--ring` | Transient, keyboard-only, and never present on more than one element |
+| Link ink | `text-brand` | Identifies a link as *the product's own* navigation |
+| Selection | ruby ink on a neutral ground | Marks one row out of a list |
+
+What has **not** changed: ruby never *fills* a committing control. `--primary` stays neutral ink.
+A selected sidebar row is ruby **ink on a neutral ground**, not a ruby band — a filled ruby row was
+tried and read as an error banner, because a saturated fill at that size is the same signal the
+destructive tone uses.
+
+**Links.** `text-brand` now tells a link apart on its own, so UI links dropped the permanent
+hairline underline they carried as a crutch for a neutral `--primary`. **Prose keeps its
+underline**: inside running text, colour alone is not a reliable cue, and the underline is the only
+thing that survives a colourblind reader or a monochrome print. So:
+
+- UI link (a nav item, an inline action): `text-brand`, underline on hover only.
+- Prose link (markdown body, docs, editor): `text-brand` **plus** a persistent underline.
+
+`text-primary` is *not* a link colour. It was doing double duty across the app — links and plain
+emphasis — and only the link usages moved.
 
 ### Docs families (`apps/docs/app/global.css`)
 
@@ -113,12 +173,14 @@ canvas, while `tf-fill` must stay legible as a *background under* near-white tex
 fill to the text token is what once turned the dark button into a pastel. Use `bg-tf-fill` for
 filled brand surfaces, `text-fd-primary` for brand text.
 
-Two dark-theme values are load-bearing and carry their reasoning in the file:
+The docs surfaces map onto the same `level-0..3` ramp as the app (§3), so `--color-fd-background`,
+`--color-fd-card` and `--color-fd-popover` are the app's ramp values under fumadocs' names. The
+docs sidebar deliberately sits one step *below* the page rather than above it, so chrome recedes
+and the prose is the brightest thing on screen.
 
-- Canvas chroma is `0.009`, not `0.004`. Below roughly `0.007` the warmth is imperceptible at these
-  lightnesses and the whole ramp reads as flat neutral grey.
-- Dark primary is `oklch(0.65 0.2 25)`, not `0.72`. At L 0.72 hue 25 resolves to a coral; L 0.65
-  with more chroma still clears AA (5.3:1) while staying recognisably the same red as `--tf-fill`.
+One dark-theme value is load-bearing and carries its reasoning in the file: dark primary is
+`oklch(0.65 0.2 25)`, not `0.72`. At L 0.72 hue 25 resolves to a coral; L 0.65 with more chroma
+still clears AA on this canvas while staying recognisably the same red as `--tf-fill`.
 
 ### External brand color: the one exception
 
@@ -148,7 +210,8 @@ Status is domain-owned and maps to exactly one tone: `neutral`, `info`, `success
 `danger`. Never infer it with broad regex matching.
 
 Priority is closed: `low` → neutral, `medium` → info, `high` → warning, `critical` → danger.
-Priority describes urgency; status describes lifecycle. Neither uses ruby.
+Priority describes urgency; status describes lifecycle. Neither uses ruby, and neither uses
+`primary` — an ink-filled chip would read as the page's one action.
 
 ### 4.2 Categorical data: `data-1` … `data-10`
 
@@ -232,28 +295,78 @@ value too, so the ramp reinforces and never carries the fact alone.
 
 ## 5. Typography
 
-**Instrument Sans Variable** for headings, controls, navigation, and prose. **JetBrains Mono
-Variable** for code, paths, IDs, logs, timestamps, command output, and dense tabular diagnostics.
-Both are loaded from `@fontsource-variable/*` in each app's root layout.
+**Inter Variable** for headings, controls, navigation, and prose. **JetBrains Mono Variable** for
+code, paths, IDs, logs, timestamps, command output, and dense tabular diagnostics. Both are loaded
+from `@fontsource-variable/*` in each app's root layout.
 
-| Role | Size / line | Weight | Use |
-| --- | --- | --- | --- |
-| Caption | 12 / 16 | 400–500 | Metadata, compact labels |
-| Label | 14 / 20 | 500 | Controls, navigation |
-| Body | 16 / 24 | 400 | Reading text, mobile inputs |
-| Title small | 18 / 26 | 600 | Panel titles |
-| Title | 20 / 28 | 600 | Page title |
-| Heading | 24 / 32 | 600 | Major content heading |
-| Display | 32 / 40 | 600 | Rare empty-state or welcome moment |
+**Import the `opsz` entrypoint, not the default one.**
+
+```ts
+import "@fontsource-variable/inter/opsz.css"; // correct
+import "@fontsource-variable/inter";          // WRONG — weight axis only, no optical size
+```
+
+Inter v4 carries an optical-size axis, and `html { font-optical-sizing: auto }` lets it track the
+rendered size: large text automatically gets the tighter, more tightly-spaced cut that would
+otherwise need a separate "Display" family. The plain fontsource entrypoint ships `wght` only, so
+importing it leaves `font-optical-sizing` with nothing to act on and **fails silently** — the type
+just looks slightly loose at display sizes and nothing errors.
+
+We also enable `font-feature-settings: "cv01", "ss03"` — a single-storey `a` and disambiguated
+`l`/`I`, which matter on a surface full of IDs and paths.
+
+### The scale
+
+Sizes are set as Tailwind's `--text-*` theme variables, so the utility names are unchanged and
+every existing call site inherits the new value. **Two things differ from stock Tailwind**: the
+sizes, and the fact that every reading size carries *negative* tracking (Tailwind ships 0). Tight
+tracking is a large part of why the type reads as dense rather than merely small.
+
+| Utility | Size / line-height / tracking | Use |
+| --- | --- | --- |
+| `text-2xs` | 10 / 1.5 / −0.015em | Rare — dense tabular metadata |
+| `text-xs` | 12 / 1.4 / 0 | Metadata, compact labels |
+| `text-sm` | **13** / 1.5 / −0.01em | **Chrome default**: controls, navigation, table cells |
+| `text-base` | **15** / 1.6 / −0.011em | **Reading default**: prose, chat, inputs you type into |
+| `text-lg` | 17 / 1.6 / 0 | Panel titles |
+| `text-xl` | 20 / 1.33 / −0.012em | Page title |
+| `text-2xl` | 24 / 1.33 / −0.012em | Major content heading |
+| `text-3xl` | 32 / 1.125 / −0.022em | Rare empty-state or welcome moment |
+
+Weights are **non-integer variable-font values** — `medium: 510`, `semibold: 590`, `bold: 680`.
+These are not typos. On a variable font the named stops are arbitrary, and these sit slightly
+heavier than the round numbers, which is what keeps 13px text legible without looking bolded.
+
+### `text-sm` is chrome. `text-base` is reading. Do not mix them up.
+
+This is the single easiest mistake to make in this codebase, because `text-sm` used to be 14px and
+was used for *both* jobs. It is now 13px, which is correct for a table cell and too small for a
+paragraph someone reads for a minute.
+
+**A surface is a reading surface if the user reads more than one sentence in a row.** Chat
+messages, markdown prose, knowledge pages, skill and agent bodies, setup guides, and any input
+whose content is later read back all take `text-base`. `MarkdownView` pins `text-base` at its root
+for exactly this reason — it renders inside both a transcript and a chrome panel, and inheriting
+would let the chrome context silently shrink prose.
 
 Use tabular figures for changing numbers. Never all-monospace prose, uppercase tracking on normal
 labels, or body text below 12px.
 
+**No uppercase micro-label anywhere.** Not on section headings, not on table columns, not on
+badges, not as a bracketed eyebrow over a form. The convention had spread to 71 sites against the
+rule above, and each one shouted a word the reader was not looking for — the pattern is
+self-propagating, because a new label copies its neighbour. Small and quiet is a size and a colour
+decision; it is not a letterform decision. A `caps`-style prop may change size and weight, but it
+must not transform case or add tracking.
+
 ### Measure
 
-Keep running text at 45–75 characters. **Never trust `ch` as a character count**: Instrument Sans
-renders roughly 0.666em per `ch`, so `68ch` sets about 101 actual characters. Measure the rendered
-line.
+Keep running text at 45–75 characters. **Never trust `ch` as a character count**: `ch` is the
+advance of the digit zero, which is wider than the average lowercase letter in every proportional
+face. Inter measures 0.6023em per `ch` against an average
+character advance of 0.4113em, so a `68ch` cap sets about **100** actual characters. Measure the rendered line rather than trusting the unit. (This ratio is font-specific
+and had to be re-measured when we moved off Instrument Sans — if the typeface changes again, it
+changes again.)
 
 The docs article column is 900px so tables, cards, and code can breathe. Running text at that width
 sets ~99 characters, so `apps/docs/app/global.css` caps the *text-level* blocks only:
@@ -263,34 +376,67 @@ sets ~99 characters, so `apps/docs/app/global.css` caps the *text-level* blocks 
 #nd-page .prose > ul,
 #nd-page .prose > ol,
 #nd-page .prose > blockquote {
-  max-width: 38rem;
+  max-width: 29em;
 }
 ```
 
 Capping the container instead would shrink code blocks, tables, and cards along with the prose.
 
-### Top bar page title
+**Use `em` for a measure cap, never `rem`.** `em` is relative to the element's own font size, so
+the cap holds at ~70 characters whatever the prose ends up at. A `rem` cap is silently tied to the
+root size and drifts the moment the body scale moves — this cap was `38rem`, calibrated for
+Instrument Sans at 16px, and the move to Inter at 15px pushed the very same value to ~99
+characters without anything appearing to change.
+
+### Chrome bar page title
 
 Navigation chrome. It takes Label, not Title, even though it names the current page. Reserve
-Title for a heading the content area owns, and only when it says something the top bar does not.
+Title for a heading the content area owns, and only when it says something the bar does not.
 
 ## 6. Shape, depth, and material
 
-- **No shadows, anywhere, with one named exception.** Both apps zero the entire Tailwind shadow
-  scale. Depth comes from hairline borders and lifted surfaces. The exception is
-  **catalog elevation**: a grid of third-party brand tiles, where each tile is a separate
-  destination and the marks are supplied by other people. There, and only there, a tile may carry
-  a 1-2px, ≤8% black hairline lift, and a segmented control's active pill may carry the same. It
-  is a *seam*, not a glow — if it reads as a drop shadow at 100% zoom it is too big. Everything
-  else in the product app stays flat.
-- **Do not reach for an arbitrary `shadow-[…]` value elsewhere.** The scale is zeroed on purpose;
-  an arbitrary value is a circumvention, not an exemption. Widen this rule in this file first.
-- **Radius**: app 4/6/8px; docs 2/4/6px capped. Prefer the restrained end. Oversized radii are a
-  smell.
-- **Icons** at 14/16/20/24px, Lucide outline. Never emoji.
-- **Hairlines carry more weight on the dark canvas.** With shadows disabled, the border is the only
-  separation a surface gets, which is why docs dark mode uses 16% white rather than the 12% that
-  read as a smudge.
+The elevation ladder below applies to **both apps** — `apps/docs` mirrors the same four steps onto
+its own tokens. The two docs-only material effects at the end of this section are the one thing the
+marketing surface has that the product app does not.
+
+- **Resting chrome carries no shadow at all.** This reverses an earlier rule, which put `shadow-xs`
+  on every input, button, card, table and panel. A shadow on something that is not floating is
+  decoration, and at that density it accumulated into a general haze. **A button, input, card,
+  table or panel separates on a hairline and a one-step change of ground — nothing else.** If you
+  cannot see the element without a shadow, the *ground* is wrong (§3), not the elevation.
+- **Four steps, and there is no fifth.** `--elevation-xs/sm/md/lg` in `tokens.css` are the whole
+  ladder, and Tailwind's `shadow-*` utilities are redefined onto them so the two cannot drift.
+  Which step a thing gets is decided by whether it genuinely floats, not by how important it is:
+
+  | Step | For | Because |
+  | --- | --- | --- |
+  | *none* | Input, button, card, table, panel | It **is** the canvas — a hairline is enough |
+  | `shadow-xs` | A raised chip: switch thumb, active segment | It rides *on top of* a track, and the ground alone cannot say so |
+  | `shadow-md` | Popover, menu, tooltip, combobox list | It floats *over* the canvas |
+  | `shadow-lg` | Modal, sheet, command palette | The reader can dismiss it, so it must read as detached |
+
+- **Hover does not promote an elevation step.** It changes the ground. Lifting on hover was part of
+  the same haze, and it made every row in a long list twitch as the pointer crossed it.
+- **Never an arbitrary `shadow-[…]`.** The ladder exists so elevation stays comparable across
+  screens; an arbitrary value is a circumvention, not an exemption. Widen this rule here first.
+- **Never a shadow with no border.** The hairline is what holds the shape in dark mode and in
+  forced-colours, where the shadow is not painted at all.
+- **Radius**: 4/6/8/12/16px off `--radius: 0.5rem`. Corners came down from 10–14px, because a large
+  radius on a 28px control reads as a pill and eats the horizontal space the label needs. A control
+  that is a choice between siblings — a chip, a badge, a switch, an avatar — is a full pill;
+  everything that holds content is a corner. Prefer the restrained end within each.
+- **Hairlines are 1px. Not 0.5px.** A sub-pixel border was proposed and rejected twice: it rounds to
+  zero on some engines, and a base-layer `border-width` override loses to Tailwind's `border`
+  utility anyway, so the rule would have silently done nothing. The impression of a near-invisible
+  seam comes from the border *colour* (§3), never from its width.
+- **Icons** at 14/16/20/24px, using the exact-pinned `reicon-react@1.2.4` outline set at
+  **`stroke-width: 1.5`**. App code imports the local icon module, never the package or a CDN; the
+  module uses Reicon's per-icon exports so Vite never prebundles the 16.6MB catalog, preserves
+  semantic names, supplies the few missing glyphs as local 24px SVGs, and makes icons decorative
+  by default unless a caller gives one an accessible name. Do not set
+  `strokeWidth` per icon without a concrete emphasis need. Never emoji.
+- **Hairlines carry more weight on the dark canvas.** Shadows go nearly black there and read as
+  absence rather than as lift, so the border does most of the separating.
 
 Two material effects are sanctioned on the docs marketing surface, and only there, because a
 full-bleed section with no shadow and no gradient is otherwise an unbroken fill that reads as dead
@@ -315,9 +461,33 @@ test and are the precedent for judging a fourth:
   keeps the claim honest.
 - The onboarding tulip's growth stage is answered-input count, not ornament.
 
+### Most state changes are not animated
+
+**The single biggest contributor to an interface feeling fast is the absence of transitions, not
+the presence of quick ones.** A 150ms hover fade means the interface acknowledges the pointer 150ms
+after it arrives, and across a dense screen that reads as lag no matter how quick each individual
+step is.
+
+So the default transition duration is **80ms** (`--default-transition-duration`), not Tailwind's
+150ms, and a bare `transition-colors` now inherits it. Do not write `duration-150` — there are zero
+occurrences left in **either** app, and a new one is a regression.
+
+| Interaction | Duration |
+| --- | --- |
+| Hover / active colour change | **0–80ms** |
+| Selection, checkbox, switch | 100ms |
+| Popover, menu, tooltip enter | 150ms |
+| Modal, sheet enter | 200ms |
+| Everything else | **it does not animate** |
+
+Default easing is `ease-out`. Layer entry uses `--ease-layer`
+(`cubic-bezier(.165, .84, .44, 1)`), which decelerates harder so a panel appears to settle rather
+than glide.
+
+The last row is the load-bearing one. Reach for "no transition" first and justify anything else.
+
 Rules:
 
-- 150–240ms for color, opacity, and transform transitions.
 - **No artificial stagger.** Reference implementations delay row *i* by `i × 120ms` because their
   data is fake and arrives at once. Ours arrives when the work happens, so each row animates on its
   own mount and the timing carries real information.
@@ -374,13 +544,42 @@ leaves every revealed section (four of six on the home page, plus its only CTA) 
 
 ### Contrast
 
-Body and control text must clear WCAG AA against its actual rendered pair. Two notes from real
-failures:
+Body and control text must clear WCAG AA against its actual rendered pair.
+
+**The `level-0..3` ramp (§3) was re-verified after it landed**, by painting each token into a
+canvas pixel and comparing luminance. Every ground x ink pair clears AA in both themes:
+
+| | `foreground` | `muted-foreground` | `brand` |
+| --- | --- | --- | --- |
+| Light, worst ground (`accent`) | 16.44 | **5.13** | 6.83 |
+| Dark, worst ground (`popover`) | 14.89 | **5.15** | 6.31 |
+
+`muted-foreground` on the most-elevated ground is the tightest pair in the system, and it holds at
+~5.1:1. If you darken a ground or lighten `muted-foreground`, that is the number to re-check first.
+
+**The closed axes (§4.1–§4.8) were re-verified numerically against the same new grounds** by
+resolving OKLCH to sRGB and comparing luminance. The tightest pairs are:
+
+| Axis | Light worst pair | Dark worst pair | Required |
+| --- | --- | --- | --- |
+| Status ink | `status-warning` on `accent` — 4.53 | `status-neutral` on `accent` — 5.17 | 4.5 |
+| Status tint | `status-danger` on `status-danger-surface` — 4.72 | `status-neutral` on `status-neutral-surface` — 4.87 | 4.5 |
+| Data swatch | `data-9` on `accent` — 3.21 | `data-8` on `accent` — 6.27 | 3.0 |
+| Run ink | `run-blocked` on `accent` — 4.53 | `run-skipped` on `accent` — 4.60 | 4.5 |
+| Signal ink | `signal-medium` on `accent` — 4.53 | `signal-low` on `accent` — 4.60 | 4.5 |
+| Diff ink/tint | `diff-removed` on `diff-removed-surface` — 5.04 | `diff-removed` on `diff-removed-surface` — 6.28 | 4.5 |
+| Tool ink | `tool-mutating` on `accent` — 4.53 | `tool-tier-system` on `accent` — 6.15 | 4.5 |
+| Heat text | `heat-ink` on `heat-3` — 4.78 | `heat-ink-peak` on `heat-4` — 4.50 | 4.5 |
+
+`heat-*` was checked as §4.8 uses it today: a cell ground with `heat-ink` text, not a standalone
+chart series. A future pure heat swatch must clear 3:1 against its own rendered ground.
+
+Notes from real failures:
 
 - **A tinted ground is a new contrast pair, not a free one.** `status-*-surface` is verified against
   its own `status-*` ink and nothing else. The light amber pair is why `--status-warning` is
-  `oklch(0.55 0.11 75)` and not the lighter value it once held: at L 0.58 it cleared neither its own
-  tint (3.9:1) nor the white canvas (4.37:1). `run-blocked`, `signal-medium`, and `tool-mutating`
+  `oklch(0.54 0.11 75)` and not the lighter value it once held: at L 0.55 it missed the new
+  `accent` ground (4.34:1). `run-blocked`, `signal-medium`, and `tool-mutating`
   track it byte-for-byte — an amber that is legible in one token and not in its three twins is the
   drift this file exists to prevent.
 - **Encoding is 3:1, labels are 4.5:1.** `data-*` and `heat-*` are graphical objects under WCAG
@@ -397,28 +596,30 @@ failures:
 
 ### Layout
 
-One sidebar, 256px, top bar 52px. There is no rail and no second panel: every destination the
-reader may reach is a row in one flat list, under a Work or Build heading, so nothing is
-two clicks from something already visible. Settings is pinned below that list, above the account
-card, so the door to configuration sits at a fixed spot instead of drifting as the list grows.
-The mobile drawer is that same 256px sidebar, so docking
-it does not change the layout's width. The sidebar header and the top bar share one 52px header row
-so both columns start on the same line.
+One sidebar, 248px, one chrome bar 40px. There is no rail and no second panel. In product mode,
+every daily destination is a row in one flat list under a Work or Build heading. Farm and Settings
+are pinned below that list, above the account card, so those utility destinations stay fixed
+instead of drifting as the list grows. Settings routes reuse the same sidebar frame and replace its
+contents with configuration navigation; they never add another shell column. The mobile drawer is
+that same 248px sidebar, so docking it does not change the layout's width. The sidebar header and
+the content column share that one 40px row so both columns start on the same line.
 
 - `>=1024px`: persistent sidebar, collapsible to a 56px icon column
 - `<1024px`: one menu opens it as an overlay drawer, always full width
 
 Collapsing trades each label for a tooltip placed to the *right* of the icon, never above it —
-above the rail there is no room, and a centred label on a 36px icon starts at a negative x, which
+above the rail there is no room, and a centred label on a 28px icon starts at a negative x, which
 cut the first letter off "Knowledge". Tooltips measure themselves, flip to the opposite side when
 that side is cramped, then clamp to the viewport. It never removes a destination, and a count that
 no longer fits becomes a dot on the icon with the number moved into the row's accessible name. The
 choice persists to `localStorage` and is mirrored onto `[data-sidebar]` before hydration so the
-prerendered skeleton paints at the right width.
+prerendered boot state paints at the right width. That state shows only the real outer frame and
+the centered TulipFarm mark. It never draws fake labels, controls or content: dead skeleton
+chrome makes an unfinished app look broken rather than fast.
 
 **One collapse control, and it moves.** Expanded, it sits in the sidebar's own header beside the
 mark, next to the thing it resizes. Collapsed, that header only has room for the mark, so the way
-back out is the top bar's. Never both: two controls claiming one job make a reader wonder which is
+back out is the chrome bar's. Never both: two controls claiming one job make a reader wonder which is
 authoritative.
 
 **Groups close, the width does not.** Each heading is a disclosure — an `h2` wrapping the button,
@@ -437,7 +638,7 @@ promises navigation.
 **The command menu is a dialog, not a dropdown.** It is centred over a scrim and portalled to
 `document.body`. That is not a preference: the sidebar carries a `transform`, which makes it the
 containing block for every `position: fixed` descendant, so an overlay rendered in place is trapped
-inside the 256px column. Anything overlaying the app from inside the sidebar must portal out.
+inside the 248px column. Anything overlaying the app from inside the sidebar must portal out.
 
 **A `+` must open something.** Only a row whose section owns a real create route declares
 `create` in `app/lib/nav.ts` — today Resources and Knowledge. Agents, Skills and Routines are built
@@ -445,23 +646,30 @@ by chatting, so they get no `+`, and group headings get none either: one fake af
 reader to distrust every real one. The quick-create link sits outside the `NavLink`, so the row's
 accessible name stays the destination's name.
 
-**Two verbs, and a door.** Work is what you watch (Chats, Inbox, Activity, Farm); Build is what
-you assemble (Resources, Agents, Skills, Routines, Knowledge). Everything visited rarely and
-deliberately lives behind Settings — including Operations and Observability, which are operator
-surfaces rather than daily work. A group in the sidebar must be a verb a reader performs; when one
-shrinks to a heading nobody can name, its contents belong behind the door, not under a fudge.
+**Two verbs, a place, and a door.** Work is what you watch (Chats, Inbox, Activity); Build is what
+you assemble (Resources, Agents, Skills, Routines, Knowledge). Farm is the place those artifacts
+become visible, so it sits in the fixed utility area directly above Settings rather than inside
+either verb group. Everything visited rarely and deliberately lives behind Settings — including
+Operations and Observability, which are operator surfaces rather than daily work.
 
-**One icon spine.** New chat, every nav row and the account button share one box model — a 1px
-border (transparent on the rows, real on New chat) plus `px-3` — so all three icons land on the
-same x. Add a bordered control to the sidebar and it must join that spine, not sit 1px off it.
-Collapsed, all three become the same 36px square on the centre line, so no block is wider than its
-neighbour. The header mark keeps its own 52px band and is exempt.
+**The sidebar is product navigation, not a promotion surface.** A dismissible “Star on GitHub”
+card once sat between the destination list and Settings. At common laptop heights it displaced
+Build destinations from the visible viewport and made an external growth ask more persistent than
+the product's own navigation. Promotion belongs on the public site. Nothing may interrupt the
+sidebar's destination list, regardless of whether it is an upsell.
 
-**Active is brand, hover is grey.** An active row is `bg-sidebar-primary/12` with
-`text-sidebar-primary`, and its icon follows via `group-aria-[current=page]`. Hover is the full
-`bg-sidebar-accent`. Active must never be a shade of the hover token: the two were once the same
-colour at 100% and 60%, a 4% lightness step that read as smudged grey rather than "you are here".
-Both states clear AA on their own background (5.9:1 light, 6.4:1 dark).
+**One icon spine.** Every navigation row and the account button share one box model, so their icons
+land on the same x. Search and New chat are compact controls in the 40px header beside the
+workspace name. Collapsed, all controls become squares on the centre line, so no block is wider
+than its neighbour.
+
+**Active is ground and weight, never colour.** An active row is `bg-sidebar-accent` with
+`text-sidebar-accent-foreground` and `font-medium`; its icon follows via
+`group-aria-[current=page]`. It was ruby ink on a ruby tint, and that was wrong: the row a reader
+is *already on* became the loudest thing on the screen, competing for attention it had not earned.
+The reader knows where they are — the row only has to confirm it. Colour in the sidebar is reserved
+for something that wants action. Hover is the same ground without the weight, so the two never
+collapse into one another. Both states clear AA on their own background.
 
 **A count is a numeral, not a pill.** The row is already the alarm; boxing the number makes two.
 An alert count renders as a `text-status-danger` numeral with a hairline rule beneath it, followed
@@ -476,29 +684,54 @@ raise its voice.
 can only answer for one page of a longer list, contributes nothing at all — a wrong number is worse
 than no number, because the reader stops opening the page.
 
-The sidebar carries what you *do and watch*. What you *configure* lives behind Settings, which is a
-hub page rather than a redirect — a sidebar listing every configuration surface stops being
-scannable. A section that needs its own hierarchy (Knowledge's space tree) owns it inside its own
-page, never as a second shell column.
+The sidebar carries what you *do and watch* until the reader enters Settings. Then its contents
+switch in place to You, Business, Operate and Developer groups, with a local filter and a stable
+Back to app action. `/settings` redirects to the first visible destination instead of duplicating
+the navigation as a card hub. Focused forms cap their own content width; operational tables and
+canvases stay fluid. A section that needs deeper hierarchy (Knowledge's space tree) still owns it
+inside its page, never as a second shell column.
 
 Breakpoints at 375 / 768 / 1024 / 1440px. Scroll tables locally rather than the page.
 
-Destinations: Work (Chats, Inbox, Activity, Farm); Build (Resources, Agents, Skills, Routines,
-Knowledge); Settings, pinned, holding You, Business, Operate (Operations, Observability) and
-Developer.
+Product destinations: Work (Chats, Inbox, Activity); Build (Resources, Agents, Skills, Routines,
+Knowledge); Farm and Settings pinned below. Settings destinations replace that list with You,
+Business, Operate (Operations, Observability) and Developer.
 
 ### Component hierarchy
 
 1. **Foundations**: tokens, type, spacing, radius, motion, icons, breakpoints
-2. **Primitives**: Button, Badge, Input, Textarea, Select, Checkbox, Tooltip, Separator, Tabs,
-   Modal, Sheet, LoadingState, Trace, ToolChip, DiffChip
-3. **Composites**: AppPage, TopBar, Breadcrumbs, Panel, Field, StatusBadge, PriorityBadge,
-   feedback states, table/list framing, navigation sections
+2. **Primitives**: Button, Badge, Input, Textarea, Select, Checkbox, Switch, Segmented, Avatar,
+   Tooltip, Separator, Modal, Sheet, LoadingState, Trace, ToolChip, DiffChip
+3. **Composites**: AppPage, TopBar, Breadcrumbs, Panel, PanelRow, SettingRow, Field, StatusBadge,
+   PriorityBadge, feedback states, table/list framing, navigation sections
 4. **Features**: Chat, Resources, Agents, Skills, Routines, Runs, Knowledge, Inbox, Integrations,
    Operations, Settings, Admin, Auth, Onboarding
 
 Promote a pattern only after it repeats, or when consistency and accessibility make central
 ownership safer. Keep domain fetching and mutations out of primitives.
+
+**One of a closed set is a segmented control; a switch means it already applied.** `Segmented`
+replaced the underline tab bar because an underline is a hairline the reader has to hunt for, while
+a filled pill says which view is showing at a glance. Use it only where every option is present at
+once, the set is short enough for one line, and the options are genuine alternatives to each other
+— anything else is navigation and belongs in the sidebar. It carries no `role="tablist"`: without
+real `tabpanel`s that would promise arrow-key roving focus these segments do not implement.
+
+`Switch` is for a change that takes effect on the spot. A setting that needs a Save press is a
+`Checkbox` — a switch that has not applied yet reports a state the system is not in, and nothing on
+screen tells the two apart.
+
+**A setting is two columns: what it is, then the control that changes it.** `SettingRow` puts the
+label and its explanation on the left and the control alone on the right, hairline-separated. A
+control inlined after the description puts the target somewhere different on every row, so the
+reader re-finds it each time. The columns stack below `md`, where two of them leave the control too
+narrow to operate.
+
+**An identity mark is a hash, never a random pick.** `Avatar` derives its gradient from an FNV-1a
+hash of the identity, the same construction `lib/farm.ts` uses, and draws from `--glyph-hue-*`
+rather than opening an eighth palette — an avatar and an agent glyph both answer "which one is
+this?" and nothing more. It is `aria-hidden`, because the name it decorates is always rendered
+beside it.
 
 **A titled `Panel` is a landmark, and that is the shared component's job.** A `<section>` is only
 exposed as a region once it has an accessible name, so `Panel` wires `aria-labelledby` from its own
@@ -514,29 +747,79 @@ second frame is not a style choice, it is a defect: two frames drift on width, o
 treatment, and on whether a page states its own name, and the reader pays that difference on every
 navigation between them.
 
-**The column is `max-w-7xl`, centred, on every page without exception.** It was briefly a per-page
-prop, and that was wrong: the page title landed at 288px on `/agents`, 368px on `/agents/:name` and
-481px on an empty `/routines`, so the title visibly jumped on every navigation and the app read as
-if it had reloaded into something else. Content that wants a narrower measure caps *itself* — a
-form, a paragraph, `max-w-prose` on a description — and never pulls the page in around it. An empty
-state, an error and a 404 sit in the same column as the loaded page, because they are still that
-page.
+**The workspace is fluid and uses one shared set of gutters.** A global centred max-width turns
+dense lists into a dashboard card with unused space on both sides. Lists, grids and canvases use
+the available workspace. Content that needs a narrower measure caps *itself* — a form, a paragraph,
+`max-w-prose` on a description or a focused composer — and never pulls the page in around it. An
+empty state, an error and a 404 keep the same gutters as the loaded page, because they are still
+that page.
 
-**Every page states its own name once.** The shell renders the `h1` from `title` and drops the last
-breadcrumb, because that crumb *is* the title and a breadcrumb is a `<nav>`, not a heading. A page
-whose only name is a 10px uppercase crumb has no heading at all — that is an accessibility failure,
-not a minimal aesthetic. Do not add a second `h1` inside the content; pass `title`, `meta` and
-`actions` to the shell instead.
+**New Chat begins as one focused task.** Before the first message, a quiet heading and a locally
+capped composer sit together at the centre of the workspace. Suggestions wrap directly beneath
+the composer; Tasks may follow as a flat, hairline-separated list, never a competing card.
+Context shortcuts belong inside the composer, not in a second help column. Once a message exists,
+the heading, suggestions and Tasks leave, and that same composer docks beneath the transcript.
 
-The top bar owns page identity. It names *what is open*, not the route that rendered it, so a
-conversation shows its own title. Show a parent crumb only when it points somewhere else and says
-something the current crumb does not. A record title must come from that record's own route data,
-never from a capped sidebar list. A route that also renders its own title band names the page
-twice. Keep in-page headers for what the top bar cannot say.
+**Every page states its own name once, and the bar says it.** The page's `title` is *published*
+to the one chrome bar rather than painted into the content column, and the shell keeps a matching
+`sr-only` `h1` so the document still has a heading and heading navigation still lands. A page whose
+only name is a 10px crumb has no heading at all — that is an accessibility failure, not a minimal
+aesthetic. Do not add a second `h1` inside the content; pass `title`, `meta` and `actions` to the
+shell instead.
 
-The sidebar and the top bar read page identity from one shared map (`app/lib/nav.ts`). No shell
+**One bar, 40px, and it is the sidebar's.** The app renders exactly one chrome row: the `<header>`
+in `app-sidebar.tsx`, spanning the sidebar and the content column so both start on the same line.
+`PageShell` does **not** render a second one. This is worth stating because the mistake is easy and
+was made: adding a header block to `PageShell` produced two stacked bars, since the shell already
+had one. Before adding chrome, check what the shell already renders.
+
+**The sidebar is the frame; the workspace is the surface.** On desktop, the work area sits inside
+the sidebar ground with a small outer gap, a faint border and one rounded edge. This makes the
+global chrome read as an inverted L around the task instead of two rectangles separated by a hard
+rule. Search and New chat live as quiet icon controls beside the workspace name. Do not add
+horizontal divider bands between the header, navigation groups, Settings and the user control;
+spacing provides that structure.
+
+Page actions reach that bar by **portal**, not by prop-drilling, and the title reaches it by
+**state**. The asymmetry is deliberate and load-bearing:
+
+| Travels | As | Why not the other way |
+| --- | --- | --- |
+| `title` | React state (`string`) | Strings compare by value, so the effect settles in one pass |
+| `actions` | Portal (`ReactNode`) | A node is a new object every render and never compares equal — in state it re-renders forever |
+
+**Actions must render even with no slot.** Treating the portal target as guaranteed made them
+vanish entirely on any surface that mounts `PageShell` outside the provider. The shell falls back
+to rendering them in place. A portal whose target may be absent needs a fallback, not an
+assumption.
+
+The bar owns page identity. It names *what is open*, not the route that rendered it, so a
+conversation shows its own title and `/skills/agent-forge` reads `agent-forge`, not "Skills". A
+record title must come from that record's own route data, never from a capped sidebar list. A route
+that also renders its own title band names the page twice. Keep in-page headers for what the bar
+cannot say.
+
+The sidebar and the bar read page identity from one shared map (`app/lib/nav.ts`). No shell
 surface hardcodes another destination's label or icon. With the hierarchy flat and visible in the
-sidebar, the top bar carries no parent crumb — it would only repeat the highlighted row.
+sidebar, the bar carries no parent crumb — it would only repeat the highlighted row.
+
+### Catalog pages carry no stat strip
+
+**A list page opens on the list.** Skills, Agents and Routines each led with three large numerals
+over the filters, and all three were removed. The rule behind it is the one §*Surfaces that ask*
+already states for forms — *no self-count* — generalised: a number that counts what is visible
+below it labels what the reader can already see. "7 skills" restated the `core 2` and `forge 5`
+beside the group headings; "2 categories" restated the two headings themselves.
+
+Two things made it worse than merely redundant. The numerals were the **largest type on the
+page** — bigger than the page's own title — so the loudest element said "7". And the ones that
+were not redundant, `need a look` and `read only`, were **dead numbers**: not links, not filters.
+They raised an alarm and then left the reader to find the rows themselves, which is the worst of
+both — the cost of the signal without the use of it.
+
+A count belongs next to the thing it counts (the group heading already does this) or attached to
+the control that acts on it. An aggregate worth showing is worth making clickable; if it is not
+worth a click, it is not worth the top of the page.
 
 ### The Trace: the one presentation a run of work gets
 
@@ -600,7 +883,7 @@ A Surface that asks the reader something (`Choices`, `Form`, `MultiChoice`) is t
 is earned, because it bounds a region the reader acts inside. Everything else on it obeys the same
 de-chroming as the Trace.
 
-- **The container stays; the accent bar goes.** A left ruby bar competes with the submit button for
+- **The container stays; the accent bar goes.** A left brand bar competes with the submit button for
   the one accent on screen.
 - **No eyebrow, no self-count.** "Input requested" above a form full of inputs, or "5 fields" above
   five visible fields, label what the reader can already see.
@@ -644,11 +927,11 @@ importing from the chat layer, so the primitive layer never depends on a feature
 
 ### Data grids and the catalog frame
 
-A surface whose job is *reading a lot of rows* — Resources and the record grid inside a type — runs
-in the same `max-w-7xl` column as every other page, and takes all of it. Do not cap a table to a
-reading measure: that is a second, narrower viewport inside the one the reader already has, and the
-columns pay for it. The frame is the shell header plus a stat strip, not a box. No page in this app
-wraps its content in a centred card — a card around a scrolling table gives it two nested frames.
+A surface whose job is *reading a lot of rows* — Resources and the record grid inside a type — uses
+the full workspace. Do not cap a table to a reading measure: that is a second, narrower viewport
+inside the one the reader already has, and the columns pay for it. The frame is the shell header
+plus a stat strip, not a box. No page in this app wraps its content in a centred card — a card
+around a scrolling table gives it two nested frames.
 
 **The stat strip is evidence, not decoration.** A `<dl>` of at most five figures directly under the
 page title, tabular figures throughout, each one a number the reader would otherwise have to count.
@@ -812,8 +1095,16 @@ network" is a list question and answering it per row from the detail route is on
 it runs under whatever the agent that loaded it may already do. `SkillReach` — `instructions-only` →
 `runs-code` → `reaches-network` → `needs-secrets` — is therefore ordered by *how far the package
 reaches*, and the badge names the furthest rung, not the first that matched. Because it is ordered it
-takes the `status-*` ramp read as a ladder (success → info → warning → danger), and always spells the
+takes the `status-*` ramp read as a ladder (neutral → info → warning → danger), and always spells the
 value out beside the color.
+
+**Colour a state, never a static property — and never the common case.** The bottom rung of both
+reach ladders (`instructions-only`, `read-only`) was green. Each was defensible alone and wrong
+together: those are the *most common* values, so a catalog rendered as a wall of badges all
+announcing that nothing was wrong, and the eye was pulled to every row that had earned no
+attention. The bottom rung is now `neutral` on both. Run health keeps its colour, and that is the
+line: health is a state that changes and may need action, reach is a fact about the artifact that
+never moves. Colour marks the exception; the word carries the fact either way.
 
 **An empty declaration reads "none declared", never "everything".** This inverts the agent rule
 deliberately (§ *The agent roster and profile*): an agent with no limits really is unrestricted, so
@@ -921,8 +1212,11 @@ component contract.
 
 `apps/docs` is a Fumadocs site, so most chrome is fumadocs' own. What we own:
 
-- **The visual language mapping** in `global.css`: warm canvas, ruby brand, square radii, no
-  shadows, grain and ambient wash on marketing surfaces only.
+- **The visual language mapping** in `global.css`: warm canvas, ruby brand and ruby CTA, and grain
+  and ambient wash on marketing surfaces only. Radius and the elevation ladder now match the app
+  exactly (§6) — the values are duplicated, not imported, because the two apps share no
+  stylesheet, so a change to one is a change to both. The app's near-black `--primary` (§3.1) does
+  **not** cross over: on a marketing page the brand *is* the call to action.
 - **`PromptBlock`**: the ` ```prompt ` block. Prompts never route through the syntax highlighter.
 - **Page actions**: Copy Markdown and the Open menu. Both carry the failure contract from §8.
 - **Search**: including a real empty state that names the query and offers an exit.
@@ -950,6 +1244,8 @@ in [`apps/docs/AGENTS.md`](apps/docs/AGENTS.md) and the `tulipfarm-docs` skill, 
   it; there is no shared React package to reach for.
 - kebab-case files, named exports, type-only imports, `cn()` for class composition, CVA for closed
   variants.
+- Elevation, radius and colour come from tokens via Tailwind utilities. Never a raw
+  `shadow-[…]`, `rounded-[…]`, or hex in a component.
 - Colocate `*.test.tsx`. Use Remix `Link`/`NavLink` and the shared API client.
 - Keep changes surgical. Never reformat adjacent code.
 - Never call secure-context-only browser APIs directly. Prod is plain HTTP on a LAN IP. Use
@@ -960,7 +1256,12 @@ in [`apps/docs/AGENTS.md`](apps/docs/AGENTS.md) and the `tulipfarm-docs` skill, 
 **Color**
 
 - Raw hex, `text-white`, or framework palette colors inside a component.
-- Ruby for status, counts, large fills, or decoration; destructive red for emphasis.
+- Ruby (`--brand`) *filling* a control, or used for a status, a count, or a chart series;
+  destructive red for emphasis. Ruby marks focus, links and selection, and is identity everywhere
+  else (§3.1).
+- `text-primary` on a link. `primary` is ink — it renders identically to body text. Links are
+  `text-brand`.
+- A prose link with no underline. Inside running text, colour alone is not a sufficient cue.
 - Encoding run state with `status-*`, or content state with `run-*`.
 - `data-*` for chrome, status, brand, selection, focus, or decoration.
 - Borrowing `run-ok`/`run-error` for a diff. Removing a line is authorship, not failure.
@@ -997,7 +1298,14 @@ in [`apps/docs/AGENTS.md`](apps/docs/AGENTS.md) and the `tulipfarm-docs` skill, 
 
 - Rebuilding buttons, badges, fields, panels, or headers with route-local class strings.
 - Hardcoding one mode's icon or label into shared shell chrome.
-- A route header that repeats the top bar.
+- A route header that repeats the chrome bar, or a second chrome bar added without checking that
+  `app-sidebar.tsx` already renders one.
+- Putting a `ReactNode` into React state to move it across the tree — it never compares equal, so
+  it re-renders forever. Portal it.
+- Assuming a portal target exists. With no slot mounted, the content disappears silently.
+- An `inline-flex` control inside a `flex flex-col` column: it becomes a flex item and stretches to
+  full width. `Segmented` sat at 960px in a 1024px parent this way. Scope `self-start` to the
+  controls that must never stretch — a blanket rule breaks the intentionally full-width ones.
 - Asking the participant to pick a model, or reporting `Auto` as the effort a reply ran at.
 
 **Accessibility**
@@ -1022,7 +1330,15 @@ in [`apps/docs/AGENTS.md`](apps/docs/AGENTS.md) and the `tulipfarm-docs` skill, 
 - Cycling the loader's word or pattern mid-wait.
 - Artificial per-row stagger on data that arrives when the work happens.
 - A JS-driven entrance whose hidden start state is not guarded by `@media (scripting: enabled)`.
-- Decorative shadows, gradients, glass, oversized radii, emoji icons, gratuitous animation.
+- Decorative shadows, an arbitrary `shadow-[…]`, a shadow with no hairline under it, gradients,
+  glass, oversized radii, emoji icons, gratuitous animation.
+- **Putting a shadow on resting chrome** — a button, input, card, table or panel. It separates on a
+  hairline and its ground (§6).
+- **Writing `duration-150`.** The default is 80ms and a bare `transition-colors` inherits it. There
+  are zero occurrences left in `apps/web`; adding one is a regression.
+- Promoting an elevation step on hover instead of changing the ground.
+- Importing `reicon-react` outside the app's central icon module, loading icons from a CDN, or
+  replacing a missing semantic glyph with a misleading one.
 - Porting the docs grain or ambient wash into the product app.
 
 **Skills**
@@ -1036,6 +1352,11 @@ in [`apps/docs/AGENTS.md`](apps/docs/AGENTS.md) and the `tulipfarm-docs` skill, 
 **General**
 
 - All-monospace prose, uppercase tracking on normal labels, body text below 12px.
+- **Using `text-sm` for something the reader reads more than one sentence of.** It is 13px chrome.
+  Prose, chat and anything typed then read back is `text-base` (§5).
+- **Capping a measure in `rem`.** Use `em`, so the cap survives a change to the body size (§5).
+- Importing `@fontsource-variable/inter` instead of `@fontsource-variable/inter/opsz.css`. The
+  former has no optical-size axis and fails silently.
 - Trusting `ch` as a character count.
 - Nested page scroll areas, covered content, desktop-only navigation, broken browser back.
 - Demo-only components on `/design-guide` that can drift from production.

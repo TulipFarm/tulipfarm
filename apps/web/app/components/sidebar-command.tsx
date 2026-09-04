@@ -1,10 +1,11 @@
 import { useNavigate } from "@remix-run/react";
-import { type LucideIcon, MessageSquare, Plus, Search } from "lucide-react";
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import { type Icon, MessageSquare, Plus, Search } from "~/components/icons";
 import { useConversations } from "~/lib/conversations-context";
 import {
   type NavigationVisibility,
+  visibleFarmItem,
   visibleSettingsGroups,
   visibleSettingsItem,
   visibleSidebarGroups,
@@ -21,7 +22,7 @@ export type CommandEntry = {
   /** Where the entry lives, so two rows named alike are still told apart. */
   hint: string;
   section: CommandSection;
-  icon: LucideIcon;
+  icon: Icon;
   /** Set for anything that is a place. Actions carry `run` instead. */
   to?: string;
   run?: () => void;
@@ -42,6 +43,7 @@ export function commandEntries(
   actions: CommandActions
 ): CommandEntry[] {
   const groups = visibleSidebarGroups(visibility);
+  const farmItem = visibleFarmItem(visibility);
   const settingsItem = visibleSettingsItem(visibility);
   const creatable = groups.flatMap((group) =>
     group.items.flatMap((item) => (item.create ? [{ item, create: item.create }] : []))
@@ -74,6 +76,18 @@ export function commandEntries(
         to: item.to,
       }))
     ),
+    ...(farmItem
+      ? [
+          {
+            id: farmItem.to,
+            label: farmItem.label,
+            hint: "Workspace",
+            section: "Pages" as const,
+            icon: farmItem.icon,
+            to: farmItem.to,
+          },
+        ]
+      : []),
     ...chats.map((chat) => ({
       id: `chat:${chat.id}`,
       label: chat.title ?? "New chat",
@@ -206,7 +220,7 @@ function CommandDialog({ entries, onClose }: { entries: CommandEntry[]; onClose:
         aria-label="Command menu"
         onKeyDown={onKeyDown}
         className={cn(
-          "relative flex w-full max-w-xl flex-col overflow-hidden rounded-xl",
+          "relative flex w-full max-w-xl flex-col overflow-hidden rounded-lg",
           "border border-border bg-popover shadow-2xl"
         )}
       >
@@ -242,7 +256,7 @@ function CommandDialog({ entries, onClose }: { entries: CommandEntry[]; onClose:
             results.map((entry, index) => (
               <li key={entry.id}>
                 {starts.has(index) ? (
-                  <p className="px-2 pt-3 pb-1 text-[0.6875rem] font-medium uppercase tracking-[0.14em] text-muted-foreground first:pt-1">
+                  <p className="px-2 pt-3 pb-1 text-xs font-medium text-muted-foreground first:pt-1">
                     {starts.get(index)}
                   </p>
                 ) : null}
@@ -288,16 +302,18 @@ function CommandDialog({ entries, onClose }: { entries: CommandEntry[]; onClose:
 }
 
 /**
- * The sidebar's search affordance. Collapsed it is the same 36px square as every other row, so
+ * The sidebar's search affordance. Collapsed it is the same 28px square as every other row, so
  * the icon spine survives the width change.
  */
 export function SidebarCommand({
   visibility,
   collapsed,
+  compact = false,
   className,
 }: {
   visibility: NavigationVisibility;
   collapsed: boolean;
+  compact?: boolean;
   className?: string;
 }) {
   const [open, setOpen] = useState(false);
@@ -341,15 +357,19 @@ export function SidebarCommand({
         aria-label="Search pages, chats and actions"
         aria-keyshortcuts="Meta+K Control+K /"
         className={cn(
-          "flex min-h-9 items-center rounded-md border border-sidebar-border bg-background",
-          "text-sm text-muted-foreground transition-colors duration-150",
+          "flex min-h-7 items-center rounded-md border border-sidebar-border bg-background",
+          "text-sm text-muted-foreground transition-colors",
           "hover:border-primary/50 hover:bg-sidebar-accent",
-          collapsed ? "size-9 shrink-0 justify-center px-0 mx-auto" : "mx-2 gap-2.5 px-3",
+          collapsed
+            ? "size-7 shrink-0 justify-center px-0 mx-auto"
+            : compact
+              ? "size-7 shrink-0 justify-center border-transparent bg-transparent px-0"
+              : "mx-2 gap-2.5 px-3",
           className
         )}
       >
         <Search className="size-4 shrink-0" aria-hidden />
-        {collapsed ? null : (
+        {collapsed || compact ? null : (
           <>
             <span className="min-w-0 flex-1 truncate text-left">Search</span>
             <kbd className="shrink-0 font-sans text-[0.6875rem] tracking-wide text-muted-foreground">

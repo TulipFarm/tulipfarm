@@ -75,10 +75,9 @@ function detail(overrides: Partial<SkillDetailData> = {}): { skill: SkillDetailD
   };
 }
 
-test("index counts skills, offers the tabs, and links each row to its detail page", () => {
+test("index offers the tabs and links each row to its detail page", () => {
   renderWithData(<SkillsIndex />, { skills: SKILLS });
 
-  expect(screen.getByText("skills").previousElementSibling).toHaveTextContent("2");
   expect(screen.getByRole("link", { name: /demo-skill/ })).toHaveAttribute(
     "href",
     "/skills/demo-skill"

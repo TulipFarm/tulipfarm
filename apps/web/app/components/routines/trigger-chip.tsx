@@ -1,4 +1,4 @@
-import { Calendar, Hand, Radio, Webhook } from "lucide-react";
+import { Calendar, Hand, Radio, Webhook } from "~/components/icons";
 import { Badge } from "~/components/ui/badge";
 import { Tooltip } from "~/components/ui/tooltip";
 import type { RoutineTrigger } from "~/lib/routines";
@@ -19,9 +19,8 @@ const KIND_ICON: Record<TriggerKind, typeof Calendar> = {
 /**
  * One way this Routine starts, as a sentence.
  *
- * Not upper-cased and not letter-spaced, unlike the label styles used elsewhere on the page: the
- * chip carries a value, not a label. A cron expression is translated into English where that can
- * be done exactly, with the expression itself kept in the tooltip.
+ * The chip carries a value, not a label. A cron expression is translated into English where that
+ * can be done exactly, with the expression itself kept in the tooltip.
  */
 export function TriggerChip({ trigger }: { trigger: RoutineTrigger }) {
   const kind = triggerKind(trigger);

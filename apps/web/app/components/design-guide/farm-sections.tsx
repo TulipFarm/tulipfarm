@@ -65,7 +65,7 @@ export function FarmSections() {
 
         <div>
           <h3 className="mb-2 text-sm font-medium">Head states</h3>
-          <ul className="flex flex-col gap-1 text-sm text-muted-foreground">
+          <ul className="flex flex-col gap-1 text-base text-muted-foreground">
             <li>
               <code className="font-mono text-foreground">(@)</code>, an open bloom. The artifact
               can act.
@@ -88,7 +88,7 @@ export function FarmSections() {
 
         <div>
           <h3 className="mb-2 text-sm font-medium">Ground</h3>
-          <ul className="flex flex-col gap-1 text-sm text-muted-foreground">
+          <ul className="flex flex-col gap-1 text-base text-muted-foreground">
             <li>
               <span className="text-foreground">Beds</span>, one contiguous stripe per kind, as wide
               as that kind's real share of the farm, in the palette order above.
@@ -121,7 +121,7 @@ export function FarmSections() {
 
         <div>
           <h3 className="mb-2 text-sm font-medium">Seasons</h3>
-          <p className="mb-2 text-sm text-muted-foreground">
+          <p className="mb-2 text-base text-muted-foreground">
             Named by how much of the crop catalog the farm actually grows, so the denominator is a
             real one. Size alone earns no title.
           </p>

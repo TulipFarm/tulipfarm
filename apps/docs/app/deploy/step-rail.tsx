@@ -49,7 +49,7 @@ export function StepIndex({ steps, done }: { steps: WizardStep[]; done: Readonly
             <a
               href={`#${stepDomId(step)}`}
               data-done={done.has(step.id) ? "" : undefined}
-              className="flex items-baseline gap-2 border-l-2 border-transparent py-1 pl-2 text-xs leading-6 text-fd-muted-foreground transition-colors duration-150 hover:border-fd-primary hover:text-fd-foreground focus-visible:-outline-offset-2 data-[done]:text-fd-muted-foreground/60 data-[done]:line-through"
+              className="flex items-baseline gap-2 border-l-2 border-transparent py-1 pl-2 text-xs leading-6 text-fd-muted-foreground transition-colors hover:border-fd-primary hover:text-fd-foreground focus-visible:-outline-offset-2 data-[done]:text-fd-muted-foreground/60 data-[done]:line-through"
             >
               <span className="tabular-nums">{ordinal(index)}</span>
               <span className="truncate">{step.title}</span>
@@ -92,7 +92,7 @@ function StepRow({
         />
         <span
           aria-hidden
-          className="grid size-6 place-items-center border border-fd-border bg-fd-background text-[11px] leading-none text-fd-primary transition-colors duration-150 peer-checked:border-fd-primary peer-hover:border-fd-primary peer-focus-visible:outline peer-focus-visible:outline-2 peer-focus-visible:outline-offset-2 peer-focus-visible:outline-fd-ring"
+          className="grid size-6 place-items-center border border-fd-border bg-fd-background text-[11px] leading-none text-fd-primary transition-colors peer-checked:border-fd-primary peer-hover:border-fd-primary peer-focus-visible:outline peer-focus-visible:outline-2 peer-focus-visible:outline-offset-2 peer-focus-visible:outline-fd-ring"
         >
           {done ? "✓" : ""}
         </span>
@@ -106,7 +106,7 @@ function StepRow({
           </h3>
           <Link
             href={targetDocHref(target, step)}
-            className="shrink-0 content-center self-stretch pl-3 text-xs text-fd-muted-foreground transition-colors duration-150 hover:text-fd-primary"
+            className="shrink-0 content-center self-stretch pl-3 text-xs text-fd-muted-foreground transition-colors hover:text-fd-primary"
           >
             full step →
           </Link>

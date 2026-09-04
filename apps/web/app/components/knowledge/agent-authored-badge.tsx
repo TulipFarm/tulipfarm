@@ -1,5 +1,5 @@
-import { Bot } from "lucide-react";
 import type { ReactElement } from "react";
+import { Bot } from "~/components/icons";
 
 /**
  * Marks a Page an Agent wrote.

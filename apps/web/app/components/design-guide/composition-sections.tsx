@@ -1,9 +1,9 @@
-import { Check, Search, Settings } from "lucide-react";
 import { lazy, Suspense } from "react";
 import { Composer } from "~/components/chat/composer";
 import { RemovedAttachment } from "~/components/chat/file-attachment";
 import { GuideSection } from "~/components/design-guide/guide-section";
 import { FileList } from "~/components/files/file-list";
+import { Check, Search, Settings } from "~/components/icons";
 import type { ChatMessage } from "~/lib/chat/types";
 
 // Matches how Chat loads the transcript. A static import here would defeat that split entirely:
@@ -86,7 +86,7 @@ export function CompositionSections() {
         title="Composition patterns"
         description="Panels, navigation, and feedback use the same spacing and hierarchy."
       >
-        <div className="mb-6 overflow-hidden rounded-md border border-border bg-background px-4 py-4">
+        <div className="mb-6 overflow-hidden rounded-lg border border-border bg-background px-4 py-4">
           <Suspense fallback={null}>
             <Transcript
               messages={TRANSCRIPT_MESSAGES}
@@ -96,7 +96,7 @@ export function CompositionSections() {
             />
           </Suspense>
         </div>
-        <div className="mb-6 overflow-hidden rounded-md border border-border bg-background">
+        <div className="mb-6 overflow-hidden rounded-lg border border-border bg-background">
           <Composer
             onSend={() => undefined}
             activeAgent={{ name: "InventoryPlanner", label: "Inventory planner" }}
@@ -116,7 +116,7 @@ export function CompositionSections() {
         </div>
         <div className="mb-6">
           <h3 className="mb-2 text-sm font-semibold">Files library rows</h3>
-          <p className="mb-3 text-sm text-muted-foreground">
+          <p className="mb-3 text-base text-muted-foreground">
             One row shape carries both a screenshot and a document. Origin is an icon plus a word,
             never a tint alone, so who made a File survives a greyscale screen. Share and Delete
             appear only on a File the viewer owns. A recipient cannot share one on and cannot
@@ -133,7 +133,7 @@ export function CompositionSections() {
         </div>
         <div className="mb-6">
           <h3 className="mb-2 text-sm font-semibold">A removed attachment</h3>
-          <p className="mb-3 text-sm text-muted-foreground">
+          <p className="mb-3 text-base text-muted-foreground">
             Messages are immutable, so a File that was destroyed (or unshared) cannot be edited out
             of the Chat that named it. The reference stays and says what happened, next to one that
             is still there. It never says which of the two occurred: to this reader they are the
@@ -145,14 +145,14 @@ export function CompositionSections() {
           </div>
         </div>
         <div className="grid gap-4 lg:grid-cols-3">
-          <article className="rounded-md border border-border bg-card">
+          <article className="rounded-lg border border-border bg-card">
             <header className="flex items-center gap-2 border-b border-border px-4 py-3">
               <Search className="size-4 text-muted-foreground" aria-hidden />
               <h3 className="text-sm font-semibold">Search results</h3>
             </header>
             <div className="px-4 py-5 text-sm text-muted-foreground">No matching Records yet.</div>
           </article>
-          <article className="rounded-md border border-border bg-card">
+          <article className="rounded-lg border border-border bg-card">
             <header className="flex items-center gap-2 border-b border-border px-4 py-3">
               <Check className="size-4 text-status-success" aria-hidden />
               <h3 className="text-sm font-semibold">Ready</h3>
@@ -161,7 +161,7 @@ export function CompositionSections() {
               All systems are available.
             </div>
           </article>
-          <article className="rounded-md border border-border bg-card">
+          <article className="rounded-lg border border-border bg-card">
             <header className="flex items-center gap-2 border-b border-border px-4 py-3">
               <Settings className="size-4 text-muted-foreground" aria-hidden />
               <h3 className="text-sm font-semibold">Configuration</h3>

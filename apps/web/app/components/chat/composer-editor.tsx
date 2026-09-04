@@ -4,6 +4,8 @@ import { EditorContent, useEditor, useEditorState } from "@tiptap/react";
 import { BubbleMenu } from "@tiptap/react/menus";
 import StarterKit from "@tiptap/starter-kit";
 import { ALLOWED_MEDIA_TYPES } from "@tulipfarm/files/limits";
+import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
+import { AgentGlyph } from "~/components/agent-glyph";
 import {
   ArrowUp,
   AtSign,
@@ -17,9 +19,7 @@ import {
   Paperclip,
   Slash,
   Square,
-} from "lucide-react";
-import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
-import { AgentGlyph } from "~/components/agent-glyph";
+} from "~/components/icons";
 import { Tooltip } from "~/components/ui/tooltip";
 import type { Autonomy } from "~/lib/agents";
 import type { AttachedFile, ChatModelSelector } from "~/lib/chat/types";
@@ -66,6 +66,7 @@ export type ComposerProps = {
   onSend: (text: string, opts: ComposerSendOptions) => void;
   onStop?: () => void;
   busy?: boolean;
+  placement?: "centered" | "docked";
   defaultModel?: ChatModelSelector;
   activeAgentPreset?: ChatModelSelector;
   presetById?: (id: string) => ChatModelSelector | undefined;
@@ -82,6 +83,7 @@ export function ComposerEditor({
   onSend,
   onStop,
   busy,
+  placement = "docked",
   defaultModel = DEFAULT_CHAT_MODEL_SELECTOR,
   activeAgentPreset,
   presetById,
@@ -119,7 +121,8 @@ export function ComposerEditor({
     editorProps: {
       attributes: {
         class:
-          "tf-editor max-h-[220px] min-h-[4.25rem] overflow-y-auto px-4 py-3 text-sm leading-relaxed text-foreground outline-none",
+          /* Matches the transcript: what you type and what you read back must be the same size. */
+          "tf-editor max-h-[220px] min-h-[4.25rem] overflow-y-auto px-3.5 py-2.5 text-base text-foreground outline-none",
         "aria-label": "Message",
       },
       handleKeyDown: (view, event) => {
@@ -257,8 +260,17 @@ export function ComposerEditor({
   }, [editor, initialDraft]);
 
   return (
-    <div className="shrink-0 border-t border-border/70 bg-background">
-      <div className="mx-auto w-full max-w-4xl px-4 pb-4 pt-2 sm:px-6">
+    <div
+      data-composer-placement={placement}
+      className={
+        placement === "centered" ? "w-full" : "shrink-0 border-t border-border/70 bg-background"
+      }
+    >
+      <div
+        className={
+          placement === "centered" ? "w-full" : "mx-auto w-full max-w-4xl px-4 pb-4 pt-2 sm:px-6"
+        }
+      >
         <div className="mb-1.5 flex min-h-8 items-center gap-2 px-1 text-xs text-muted-foreground">
           <ModelSelector value={model} onChange={setModel} disabled={busy} />
           {activeAgent ? (
@@ -410,11 +422,8 @@ export function ComposerEditor({
           </div>
         </div>
         {suggestions.length > 0 ? (
-          <div className="mt-2 flex min-w-0 items-center gap-2">
-            <p className="hidden shrink-0 text-xs font-medium text-muted-foreground sm:block">
-              Suggested prompts
-            </p>
-            <fieldset className="flex min-w-0 flex-1 gap-2 overflow-x-auto px-0.5 pb-1">
+          <div className="mt-2">
+            <fieldset className="flex flex-wrap gap-2 px-0.5">
               <legend className="sr-only">Suggested prompts</legend>
               {suggestions.map((suggestion) => (
                 <button

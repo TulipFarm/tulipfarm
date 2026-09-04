@@ -44,12 +44,12 @@ export default function NotFound() {
             <Link
               key={route.href}
               href={route.href}
-              className="group flex min-h-14 items-center justify-between gap-4 border-l-2 border-transparent px-3 text-sm transition-colors duration-150 hover:border-fd-primary hover:bg-fd-accent/60 sm:px-5"
+              className="group flex min-h-14 items-center justify-between gap-4 border-l-2 border-transparent px-3 text-sm transition-colors hover:border-fd-primary hover:bg-fd-accent/60 sm:px-5"
             >
               <span>{route.label}</span>
               <span
                 aria-hidden
-                className="text-fd-primary transition-transform duration-150 group-hover:translate-x-1"
+                className="text-fd-primary transition-transform duration-100 group-hover:translate-x-1"
               >
                 →
               </span>

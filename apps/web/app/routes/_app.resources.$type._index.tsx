@@ -5,8 +5,8 @@ import {
   useNavigate,
   useRouteError,
 } from "@remix-run/react";
-import { ChevronRight, Columns3, Pencil, Plus, Search, Trash2, Zap } from "lucide-react";
 import { useMemo, useState } from "react";
+import { ChevronRight, Columns3, Pencil, Plus, Search, Trash2, Zap } from "~/components/icons";
 import { PageShell } from "~/components/page-shell";
 import { SchemaSummary } from "~/components/resources/schema-summary";
 import { StatStrip } from "~/components/resources/stat-strip";
@@ -212,7 +212,7 @@ function ResourceListView() {
             <Link key={target} to={`/resources/${encodeURIComponent(target)}`}>
               <Badge
                 variant="neutral"
-                className="transition-colors duration-150 hover:border-primary/40 hover:text-foreground"
+                className="transition-colors hover:border-primary/40 hover:text-foreground"
               >
                 {"\u2192"} {target}
               </Badge>
@@ -328,7 +328,7 @@ function ResourceListView() {
                       aria-pressed={density === option}
                       onClick={() => setDensity(option)}
                       className={cn(
-                        "rounded-sm px-2 py-1 text-xs capitalize transition-colors duration-150",
+                        "rounded-sm px-2 py-1 text-xs capitalize transition-colors",
                         density === option
                           ? "bg-accent text-foreground"
                           : "text-muted-foreground hover:text-foreground"
@@ -349,11 +349,11 @@ function ResourceListView() {
 
             {/* Expands in flow rather than overlaying: no z-index, no click-outside to get wrong. */}
             {records.length > 0 ? (
-              <details className="group rounded-md border border-border bg-card">
-                <summary className="flex cursor-pointer list-none items-center gap-2 rounded-md px-3 py-2 text-sm transition-colors duration-150 hover:bg-accent">
+              <details className="group rounded-lg border border-border bg-card">
+                <summary className="flex cursor-pointer list-none items-center gap-2 rounded-md px-3 py-2 text-sm transition-colors hover:bg-accent">
                   <ChevronRight
                     aria-hidden
-                    className="size-4 text-muted-foreground transition-transform duration-150 group-open:rotate-90"
+                    className="size-4 text-muted-foreground transition-transform duration-100 group-open:rotate-90"
                   />
                   <Columns3 aria-hidden className="size-4 text-muted-foreground" />
                   Columns
@@ -383,10 +383,7 @@ function ResourceListView() {
                         {col.name}
                       </span>
                       {isSystemFieldName(col.name) ? (
-                        <span
-                          aria-hidden
-                          className="text-[0.6875rem] uppercase tracking-wide text-muted-foreground"
-                        >
+                        <span aria-hidden className="text-xs text-muted-foreground">
                           system
                         </span>
                       ) : null}

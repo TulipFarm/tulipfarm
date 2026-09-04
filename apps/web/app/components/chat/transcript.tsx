@@ -1,5 +1,5 @@
-import { Check, ChevronsUp, Copy, RotateCcw, ThumbsDown, ThumbsUp } from "lucide-react";
 import { memo, type ReactNode, useEffect, useMemo, useRef, useState } from "react";
+import { Check, ChevronsUp, Copy, RotateCcw, ThumbsDown, ThumbsUp } from "~/components/icons";
 import { MarkdownView } from "~/components/markdown-view";
 import { LoadingState } from "~/components/ui/loading-state";
 import { nextEffortPreset } from "~/lib/chat/effort-escalation";
@@ -86,7 +86,7 @@ function AssistantMetaRow({
           type="button"
           onClick={onTryHarder}
           aria-label={`Try harder with ${requiredEffortLabel(tryHarderTarget)} effort`}
-          className="inline-flex min-h-11 items-center gap-1.5 rounded-md border border-border bg-background px-2 text-xs font-medium text-muted-foreground transition hover:bg-accent hover:text-foreground active:translate-y-px sm:min-h-7"
+          className="inline-flex min-h-11 items-center gap-1.5 rounded-lg border border-border bg-background px-2 text-xs font-medium text-muted-foreground transition hover:bg-accent hover:text-foreground active:translate-y-px sm:min-h-7"
         >
           <ChevronsUp aria-hidden className="size-3.5 text-primary" />
           <span>Try harder: {requiredEffortLabel(tryHarderTarget)}</span>
@@ -99,7 +99,7 @@ function AssistantMetaRow({
 // Shared action-row chrome. `toolbarBase` keeps the layout; visibility (opacity) is applied by the
 // caller so the assistant row can stay visible once a vote is active while un-voted rows hover-gate.
 const toolbarBase =
-  "flex items-center gap-1 pt-1 text-xs text-muted-foreground opacity-100 transition-opacity duration-150 focus-within:opacity-100 sm:opacity-0 sm:group-hover:opacity-100";
+  "flex items-center gap-1 pt-1 text-xs text-muted-foreground opacity-100 transition-opacity focus-within:opacity-100 sm:opacity-0 sm:group-hover:opacity-100";
 const toolbar = toolbarBase;
 // `active:scale-90` gives a press cue on click; `transition` (not just colors) animates the scale.
 const iconBtn =
@@ -280,7 +280,7 @@ function UserMessage({ message, mentions }: { message: ChatMessage; mentions?: M
         </div>
       ) : null}
       {text.length > 0 ? (
-        <div className="max-w-[90%] rounded-lg bg-secondary px-3.5 py-2.5 text-sm leading-6 text-foreground sm:max-w-[78%] [&_:first-child]:mt-0 [&_:last-child]:mb-0">
+        <div className="max-w-[90%] rounded-lg bg-secondary px-3 py-2 text-base text-foreground sm:max-w-[78%] [&_:first-child]:mt-0 [&_:last-child]:mb-0">
           <MarkdownView mentions={mentions}>{text}</MarkdownView>
         </div>
       ) : null}

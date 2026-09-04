@@ -1,6 +1,6 @@
-import { X } from "lucide-react";
 import type * as React from "react";
 import { useEffect, useId, useRef } from "react";
+import { X } from "~/components/icons";
 import { Button } from "~/components/ui/button";
 import { cn } from "~/lib/utils";
 
@@ -73,7 +73,7 @@ export function Modal({
       aria-labelledby={titleId}
       onClick={onBackdropClick}
       className={cn(
-        "m-auto w-full max-w-sm rounded-sm border border-border bg-card p-0 text-foreground",
+        "m-auto w-full max-w-sm rounded-lg border border-border bg-popover p-0 text-foreground shadow-lg",
         "[&::backdrop]:bg-foreground/30",
         className
       )}
@@ -86,7 +86,7 @@ export function Modal({
           type="button"
           aria-label="Close"
           onClick={onClose}
-          className="rounded-sm p-1 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+          className="rounded-md p-1 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
         >
           <X className="size-4" />
         </button>

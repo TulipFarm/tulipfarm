@@ -28,7 +28,7 @@ export function GlobalPending() {
   return (
     <div
       aria-hidden={!visible}
-      className={`pointer-events-none fixed inset-x-0 top-0 z-[200] h-0.5 transition-opacity duration-150 ${
+      className={`pointer-events-none fixed inset-x-0 top-0 z-[200] h-0.5 transition-opacity ${
         visible ? "opacity-100" : "opacity-0"
       }`}
     >

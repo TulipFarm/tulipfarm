@@ -1,7 +1,7 @@
 "use client";
 
-import { Check, Copy, Sparkles } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
+import { Check, Copy, Sparkles } from "@/components/icons";
 
 type CopyState = "idle" | "copied" | "failed";
 

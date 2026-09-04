@@ -1,4 +1,5 @@
 import type { SurfaceRenderIssue } from "@tulipfarm/surface/client";
+import { useState } from "react";
 import {
   AlertCircle,
   AlertTriangle,
@@ -8,8 +9,7 @@ import {
   Copy,
   RotateCcw,
   Sparkles,
-} from "lucide-react";
-import { useState } from "react";
+} from "~/components/icons";
 import { Badge } from "~/components/ui/badge";
 import { Button } from "~/components/ui/button";
 import { Textarea } from "~/components/ui/textarea";

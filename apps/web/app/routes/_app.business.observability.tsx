@@ -186,7 +186,7 @@ export default function SettingsObservability() {
         ) : (
           <table className="w-full text-sm">
             <thead>
-              <tr className="border-border border-b text-left text-xs uppercase tracking-wide text-muted-foreground">
+              <tr className="border-border border-b text-left text-xs text-muted-foreground">
                 <th className="py-1.5 font-normal">Model</th>
                 <th className="py-1.5 text-right font-normal">Calls</th>
                 <th className="py-1.5 text-right font-normal">Cost</th>
@@ -333,7 +333,7 @@ function TraceRow({ e }: { e: TraceEvent }) {
       />
       <span className="min-w-0 flex-1">
         <span className="flex items-center gap-2">
-          <span className="text-xs uppercase tracking-wide text-muted-foreground">{e.type}</span>
+          <span className="text-xs capitalize text-muted-foreground">{e.type}</span>
           <span className="truncate text-sm text-foreground">{label}</span>
           {e.status && e.status !== "ok" ? (
             <span className="rounded-sm bg-destructive/10 px-1 text-xs text-destructive">
@@ -375,7 +375,7 @@ function GrafanaExportPanel({ config }: { config: ObsConfigStatus }) {
             <span className="truncate text-xs text-muted-foreground">→ {config.endpoint}</span>
           ) : null}
         </div>
-        <p className="text-muted-foreground">
+        <p className="text-base text-muted-foreground">
           Push cost, token, error, fallback, and tool metrics to Grafana Cloud (Mimir) for richer
           dashboards and alerting. Configure <code className="text-foreground">otlp</code> in{" "}
           <code className="text-foreground">soul/observability.config.yaml</code> with your

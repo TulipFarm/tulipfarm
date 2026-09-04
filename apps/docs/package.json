@@ -11,17 +11,17 @@
     "lint": "biome check --no-errors-on-unmatched ."
   },
   "dependencies": {
-    "@fontsource-variable/instrument-sans": "^5.3.0",
+    "@fontsource-variable/inter": "^5.3.0",
     "@fontsource-variable/jetbrains-mono": "^5.3.0",
     "@tulipfarm/deploy-render": "workspace:*",
     "@tulipfarm/schema": "workspace:*",
     "fumadocs-core": "16.15.1",
     "fumadocs-mdx": "15.3.1",
     "fumadocs-ui": "16.15.1",
-    "lucide-react": "^1.33.0",
     "next": "16.3.2",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
+    "reicon-react": "1.2.4",
     "tailwind-merge": "^3.6.0"
   },
   "devDependencies": {

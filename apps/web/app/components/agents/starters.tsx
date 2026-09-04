@@ -39,7 +39,7 @@ export function AgentStarters({
           <Link
             key={starter}
             to={chatHref(name, starter)}
-            className="rounded-md border border-border bg-background px-3 py-1.5 text-sm text-foreground outline-none transition-colors hover:border-primary/40 hover:bg-accent focus-visible:ring-[3px] focus-visible:ring-ring/50"
+            className="rounded-lg border border-border bg-background px-3 py-1.5 text-sm text-foreground outline-none transition-colors hover:border-primary/40 hover:bg-accent focus-visible:ring-[3px] focus-visible:ring-ring/50"
           >
             {starter}
           </Link>

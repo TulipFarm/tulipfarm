@@ -7,8 +7,8 @@
  * recognise.
  */
 
-import { AlertTriangle, Check, Loader2, Pencil, Search } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
+import { AlertTriangle, Check, Loader2, Pencil, Search } from "~/components/icons";
 import { Badge } from "~/components/ui/badge";
 import { Button } from "~/components/ui/button";
 import { Checkbox } from "~/components/ui/checkbox";
@@ -135,7 +135,7 @@ export function LevelBuilder({
       title={editing ? `Edit ${editing.displayName}` : "Create an access level"}
     >
       <div className="space-y-6">
-        <p className="text-sm text-muted-foreground">
+        <p className="text-base text-muted-foreground">
           {editing
             ? "Change the name or what people at this level can do. Everybody who already has this level keeps it, and picks up the change straight away."
             : "An access level is a named bundle of things someone is allowed to do. Give it a name your team would recognise, then tick what people at that level can do."}

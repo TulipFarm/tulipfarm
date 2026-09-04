@@ -1,6 +1,6 @@
-import { Plus, UserPlus } from "lucide-react";
 import { type FormEvent, useState } from "react";
 import { LevelBuilder } from "~/components/access/level-builder";
+import { Plus, UserPlus } from "~/components/icons";
 import { Button } from "~/components/ui/button";
 import { Field, FieldAction } from "~/components/ui/field";
 import { Select } from "~/components/ui/select";

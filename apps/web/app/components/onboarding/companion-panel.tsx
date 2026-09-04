@@ -1,6 +1,6 @@
 import { useNavigate } from "@remix-run/react";
-import { ArrowRight, Check, MessageCircle, X } from "lucide-react";
 import { useState } from "react";
+import { ArrowRight, Check, MessageCircle, X } from "~/components/icons";
 import { ApiError } from "~/lib/api";
 import { answerTask, completeTask, type Task, type TaskAction } from "~/lib/tasks";
 
@@ -45,12 +45,12 @@ function AnswerTask({
           value={value}
           onChange={(e) => setValue(e.target.value)}
           disabled={busy}
-          className="h-9 min-w-0 flex-1 rounded-md border border-input bg-background px-2.5 text-sm text-foreground outline-none focus-visible:ring-[3px] focus-visible:ring-ring/25"
+          className="h-7 pointer-coarse:h-8 min-w-0 flex-1 rounded-md border border-input bg-background px-2.5 text-sm text-foreground outline-none focus-visible:ring-[3px] focus-visible:ring-ring/25"
         />
         <button
           type="submit"
           disabled={busy || !value.trim()}
-          className="inline-flex h-9 shrink-0 items-center rounded-md bg-primary px-3 text-sm font-medium text-primary-foreground transition hover:bg-primary/90 disabled:opacity-40"
+          className="inline-flex h-7 pointer-coarse:h-8 shrink-0 items-center rounded-md bg-primary px-3 text-sm font-medium text-primary-foreground transition hover:bg-primary/90 disabled:opacity-40"
         >
           Save
         </button>
@@ -90,7 +90,7 @@ function TaskRow({
   }
 
   return (
-    <li className="flex items-start gap-2 rounded-md border border-border bg-background p-3">
+    <li className="flex items-start gap-2 rounded-lg border border-border bg-background p-3">
       <div className="min-w-0 flex-1">
         {task.action.kind === "answer" ? (
           <AnswerTask task={task} action={task.action} onAnswered={onAnswered} />

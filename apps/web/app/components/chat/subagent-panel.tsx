@@ -35,9 +35,7 @@ export function SubagentPanel({ part }: { part: ToolPart }) {
     <div className="space-y-2 border-l-2 border-tool-mutating/30 pl-3">
       <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
         <span className="font-medium text-foreground">{trace.name ?? "Helper"}</span>
-        <span className="text-[11px] uppercase tracking-wide text-muted-foreground">
-          agent-written helper
-        </span>
+        <span className="text-xs text-muted-foreground">agent-written helper</span>
       </div>
 
       {trace.instructions === undefined ? null : (
@@ -69,7 +67,7 @@ export function SubagentPanel({ part }: { part: ToolPart }) {
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <div className="space-y-0.5">
-      <div className="text-[11px] uppercase tracking-wide text-muted-foreground">{label}</div>
+      <div className="text-xs text-muted-foreground">{label}</div>
       <div className="whitespace-pre-wrap break-words text-foreground/90">{children}</div>
     </div>
   );

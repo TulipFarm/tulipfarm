@@ -22,7 +22,7 @@ export default function Layout({ children }: LayoutProps<"/docs">) {
         footer: (
           <a
             href="/llms.txt"
-            className="cursor-pointer px-2 py-1 text-xs text-fd-muted-foreground transition-colors duration-150 hover:text-fd-foreground"
+            className="cursor-pointer px-2 py-1 text-xs text-fd-muted-foreground transition-colors hover:text-fd-foreground"
           >
             llms.txt, these docs for your agent
           </a>

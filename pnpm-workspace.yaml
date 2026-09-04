@@ -73,6 +73,7 @@ minimumReleaseAgeExclude:
   - '@vitest/spy@5.0.0'
   - vitest@5.0.0
   - '@vitest/coverage-v8@5.0.0'
+  - reicon-react@1.2.4
 overrides:
   '@fastify/static@<=10.1.0': ^10.1.1
   '@fastify/static@<=10.1.1': ^10.1.2

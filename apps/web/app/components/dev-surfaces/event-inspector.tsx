@@ -1,5 +1,5 @@
-import { Activity, Check, Copy, Trash2 } from "lucide-react";
 import { useState } from "react";
+import { Activity, Check, Copy, Trash2 } from "~/components/icons";
 import { Badge } from "~/components/ui/badge";
 import { Button } from "~/components/ui/button";
 import { copyText } from "~/lib/clipboard";
@@ -70,7 +70,7 @@ export function EventInspector({ events, onClear }: EventInspectorProps) {
               <div
                 key={event.id}
                 data-testid="logged-event-card"
-                className="rounded-md border border-border bg-background p-3 text-xs shadow-xs"
+                className="rounded-lg border border-border bg-background p-3 text-xs shadow-xs"
               >
                 <div className="flex flex-wrap items-center justify-between gap-1.5 border-b border-border/40 pb-2">
                   <div className="flex flex-wrap items-center gap-1.5">

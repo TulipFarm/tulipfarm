@@ -155,7 +155,7 @@ export default function ResourceTypeNew() {
         </div>
 
         <div className="flex flex-col gap-2">
-          <p className="text-xs uppercase tracking-[0.15em] text-muted-foreground">fields</p>
+          <p className="text-xs text-muted-foreground">Fields</p>
           <p className="text-xs text-muted-foreground">
             id, createdAt, updatedAt and version are added automatically.
           </p>

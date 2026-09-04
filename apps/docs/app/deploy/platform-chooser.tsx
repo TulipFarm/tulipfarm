@@ -18,7 +18,7 @@ export function PlatformChooser({
       {targets.map((target) => (
         <label
           key={target.name}
-          className="group grid cursor-pointer gap-2 border-b border-fd-border border-l-2 border-l-transparent px-3 py-5 transition-colors duration-150 has-[:checked]:border-l-fd-primary has-[:checked]:bg-fd-accent/60 hover:bg-fd-accent/40 sm:grid-cols-[14rem_1fr] sm:items-baseline sm:gap-5 sm:px-5"
+          className="group grid cursor-pointer gap-2 border-b border-fd-border border-l-2 border-l-transparent px-3 py-5 transition-colors has-[:checked]:border-l-fd-primary has-[:checked]:bg-fd-accent/60 hover:bg-fd-accent/40 sm:grid-cols-[14rem_1fr] sm:items-baseline sm:gap-5 sm:px-5"
         >
           <span className="flex items-center gap-3">
             <input
@@ -36,7 +36,7 @@ export function PlatformChooser({
           </span>
         </label>
       ))}
-      <label className="group grid cursor-pointer gap-2 border-l-2 border-transparent px-3 py-5 transition-colors duration-150 has-[:checked]:border-fd-primary has-[:checked]:bg-fd-accent/60 hover:bg-fd-accent/40 sm:grid-cols-[14rem_1fr] sm:items-baseline sm:gap-5 sm:px-5">
+      <label className="group grid cursor-pointer gap-2 border-l-2 border-transparent px-3 py-5 transition-colors has-[:checked]:border-fd-primary has-[:checked]:bg-fd-accent/60 hover:bg-fd-accent/40 sm:grid-cols-[14rem_1fr] sm:items-baseline sm:gap-5 sm:px-5">
         <span className="flex items-center gap-3">
           <input
             type="radio"

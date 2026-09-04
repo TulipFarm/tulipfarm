@@ -1,6 +1,6 @@
-import { Ban, ShieldAlert } from "lucide-react";
 import { useId, useState } from "react";
 import { FormStatus } from "~/components/form-status";
+import { Ban, ShieldAlert } from "~/components/icons";
 import { Badge } from "~/components/ui/badge";
 import { Button } from "~/components/ui/button";
 import { Field } from "~/components/ui/field";

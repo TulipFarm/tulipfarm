@@ -26,15 +26,6 @@ const HEALTH_LABEL: Record<RunHealth, string> = {
 /** The newest Run of each Routine, keyed by routine id. */
 export type LatestRuns = Record<string, { id: string; status: RunStatus; createdAt: string }>;
 
-function Stat({ value, label }: { value: number; label: string }) {
-  return (
-    <div>
-      <p className="font-mono text-lg tabular-nums text-foreground">{value}</p>
-      <p className="text-xs text-muted-foreground">{label}</p>
-    </div>
-  );
-}
-
 function RoutineList({
   routines,
   latest,
@@ -99,26 +90,10 @@ export function RoutineCatalog({
   );
 
   const groups = useMemo(() => groupByTriggerKind(visible), [visible]);
-  const automatic = useMemo(
-    () => routines.filter((routine) => routine.triggers.length > 0).length,
-    [routines]
-  );
-  const unhealthy = useMemo(
-    () =>
-      routines.filter((routine) => ["failing", "attention"].includes(runHealth(latest[routine.id])))
-        .length,
-    [routines, latest]
-  );
   const filtered = visible.length !== routines.length;
 
   return (
     <div className="flex flex-col gap-5">
-      <div className="flex flex-wrap items-end gap-x-8 gap-y-4 border-b border-border pb-5">
-        <Stat value={routines.length} label={routines.length === 1 ? "routine" : "routines"} />
-        <Stat value={automatic} label="run on their own" />
-        <Stat value={unhealthy} label="need a look" />
-      </div>
-
       <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
         <div className="min-w-0 flex-1">
           <label htmlFor={searchId} className="mb-1 block text-xs text-muted-foreground">
@@ -186,7 +161,7 @@ export function RoutineCatalog({
             <div className="flex items-baseline gap-2">
               <h2
                 id={`${searchId}-group-${index}`}
-                className="text-[0.625rem] font-medium uppercase tracking-[0.2em] text-muted-foreground"
+                className="text-xs font-medium text-muted-foreground"
               >
                 {GROUP_LABEL[key]}
               </h2>

@@ -1,6 +1,6 @@
-import type { LucideIcon } from "lucide-react";
-import { Monitor, Moon, Sun } from "lucide-react";
 import { useEffect, useState } from "react";
+import type { Icon } from "~/components/icons";
+import { Monitor, Moon, Sun } from "~/components/icons";
 import { Panel } from "~/components/ui/panel";
 import {
   applyThemePreference,
@@ -11,7 +11,7 @@ import {
 } from "~/lib/theme";
 import { cn } from "~/lib/utils";
 
-const OPTIONS: { value: ThemePreference; label: string; icon: LucideIcon; help: string }[] = [
+const OPTIONS: { value: ThemePreference; label: string; icon: Icon; help: string }[] = [
   { value: "system", label: "System", icon: Monitor, help: "Follows your device setting" },
   { value: "light", label: "Light", icon: Sun, help: "Always light" },
   { value: "dark", label: "Dark", icon: Moon, help: "Always dark" },
@@ -47,7 +47,7 @@ export default function AppearanceSettings() {
               <label
                 key={value}
                 className={cn(
-                  "flex cursor-pointer flex-col gap-2 rounded-md border p-3 transition-colors",
+                  "flex cursor-pointer flex-col gap-2 rounded-lg border p-3 transition-colors",
                   selected
                     ? "border-primary bg-primary/5"
                     : "border-border bg-card hover:bg-accent/50"

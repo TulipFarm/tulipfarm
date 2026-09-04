@@ -1,4 +1,4 @@
-import { ArrowRightLeft, BookOpen, Brain, ExternalLink, ShieldAlert } from "lucide-react";
+import { ArrowRightLeft, BookOpen, Brain, ExternalLink, ShieldAlert } from "~/components/icons";
 import { SurfaceArtifact } from "~/components/surface-artifact";
 import { Link } from "~/components/ui/link";
 import { Trace, TraceNote, TraceSource } from "~/components/ui/trace";
@@ -45,9 +45,7 @@ function sourceHost(url: string | undefined): string | undefined {
 function SourcesPart({ sources }: { sources: SourceRef[] }) {
   return (
     <div>
-      <h3 className="mb-1 text-xs font-medium uppercase tracking-wide text-muted-foreground">
-        Sources
-      </h3>
+      <h3 className="mb-1 text-xs font-medium text-muted-foreground">Sources</h3>
       <ul>
         {sources.map((source, index) => {
           const internal = source.url?.startsWith("/") === true;

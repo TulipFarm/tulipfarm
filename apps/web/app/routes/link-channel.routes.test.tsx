@@ -63,6 +63,7 @@ test("describes the offer without spending it", async () => {
 test("names the sender and the account before anything is bound", () => {
   renderPage({ token: "abc", offer: OFFER });
 
+  expect(screen.getByRole("heading", { level: 1, name: "Link channel" })).toBeInTheDocument();
   expect(screen.getByText("U123")).toBeInTheDocument();
   expect(screen.getByText("chatapp")).toBeInTheDocument();
   expect(screen.getByText("alice@example.com")).toBeInTheDocument();
@@ -101,6 +102,7 @@ test("tells a holder of a dead link how to get a live one", () => {
 
   render(<ErrorBoundary />);
 
+  expect(screen.getByRole("heading", { level: 1, name: "Link channel" })).toBeInTheDocument();
   expect(screen.getByText(/400 bind link is not usable/)).toBeInTheDocument();
   expect(screen.getByText(/works once and expires/)).toBeInTheDocument();
 });

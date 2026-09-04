@@ -7,9 +7,9 @@ import {
   Scripts,
   ScrollRestoration,
 } from "@remix-run/react";
-import "@fontsource-variable/instrument-sans";
+import "@fontsource-variable/inter/opsz.css";
 import "@fontsource-variable/jetbrains-mono";
-import instrumentSansLatin from "@fontsource-variable/instrument-sans/files/instrument-sans-latin-wght-normal.woff2?url";
+import interLatin from "@fontsource-variable/inter/files/inter-latin-opsz-normal.woff2?url";
 import { NuqsAdapter } from "nuqs/adapters/remix";
 import { type ReactNode, useEffect } from "react";
 import { readThemePreference, resolveTheme } from "~/lib/theme";
@@ -33,9 +33,11 @@ export const links = (): HtmlLinkDescriptor[] => [
   // fallback face and then reflows. Preloading the Latin subset starts it in the first request wave.
   // Only the sans face is preloaded: the mono face is used by code blocks, which are below the fold
   // on first paint and rightly stay lazy.
+  // This is the `opsz` cut, carrying Inter v4's optical-size axis as well as weight, so
+  // `font-optical-sizing: auto` can apply the Display drawing at large sizes from one file.
   {
     rel: "preload",
-    href: instrumentSansLatin,
+    href: interLatin,
     as: "font",
     type: "font/woff2",
     crossOrigin: "anonymous",
@@ -104,26 +106,28 @@ export default function App() {
  * Required in Remix SPA mode: rendered into build/client/index.html at build time, so this markup is
  * the very first thing the browser can paint — before a single byte of route JS is parsed, and long
  * before the shell's clientLoader resolves. It must therefore stay static: no hooks, no data, no
- * imports beyond the document shell. It mirrors AppShell's frame (sidebar + 52px header + main) so
- * the real UI fills into the same boxes instead of replacing a blank page.
+ * imports beyond the document shell. It mirrors AppShell's outer frame but never invents labels or
+ * controls: one quiet progress mark is more honest than a dead imitation of the loaded app.
  */
 export function HydrateFallback() {
   return (
     <Document>
       <div className="flex h-svh overflow-hidden bg-background">
-        <div className="hidden w-[var(--shell-sidebar-width)] shrink-0 border-sidebar-border border-r bg-sidebar lg:block">
-          <div className="flex h-[52px] items-center gap-2 overflow-hidden border-sidebar-border border-b px-4">
-            <span className="size-6 shrink-0 rounded-md bg-muted" />
-            <span className="h-3.5 w-20 rounded-sm bg-muted" />
+        <div className="hidden w-[var(--shell-sidebar-width)] shrink-0 bg-sidebar lg:block" />
+        <div className="flex h-svh min-w-0 flex-1 bg-background lg:my-1 lg:mr-1 lg:h-[calc(100svh-0.5rem)] lg:overflow-hidden lg:rounded-lg lg:border lg:border-border">
+          <div
+            role="status"
+            aria-label="Loading TulipFarm"
+            className="flex min-h-0 flex-1 items-center justify-center"
+          >
+            <img
+              src="/logo-128.png"
+              alt=""
+              width={24}
+              height={24}
+              className="size-6 animate-pulse opacity-80"
+            />
           </div>
-        </div>
-        <div className="flex h-svh min-w-0 flex-1 flex-col">
-          <div className="flex h-[52px] shrink-0 items-center gap-2 border-border border-b px-3 sm:px-4">
-            <span className="size-9 rounded-md bg-muted" />
-            <span className="h-4 w-32 rounded-sm bg-muted" />
-            <span className="ml-auto size-8 rounded-full bg-muted" />
-          </div>
-          <div className="min-h-0 flex-1" />
         </div>
       </div>
     </Document>

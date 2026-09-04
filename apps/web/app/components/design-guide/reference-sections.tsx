@@ -27,7 +27,7 @@ export function ReferenceSections() {
         title="Common mistakes to avoid"
         description="Do not introduce raw colors, duplicated controls, all-monospace prose, color-only feedback, tiny targets, or decorative effects."
       >
-        <p className="max-w-3xl text-sm text-muted-foreground">
+        <p className="max-w-3xl text-base text-muted-foreground">
           Search for an existing token or component first. If the public vocabulary changes, update
           this page and the repository skill in the same change.
         </p>

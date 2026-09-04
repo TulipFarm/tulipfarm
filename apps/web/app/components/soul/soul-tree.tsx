@@ -1,5 +1,5 @@
-import { ChevronRight, FileText, Folder } from "lucide-react";
 import { useState } from "react";
+import { ChevronRight, FileText, Folder } from "~/components/icons";
 import type { SoulTreeNode } from "~/lib/soul";
 import { cn } from "~/lib/utils";
 
@@ -43,7 +43,7 @@ function Node({
             onClick={() => setOpen((v) => !v)}
             aria-expanded={open}
             aria-label={open ? "Collapse" : "Expand"}
-            className="cursor-pointer rounded-sm p-0.5 text-muted-foreground"
+            className="grid size-6 cursor-pointer place-items-center rounded-sm text-muted-foreground"
           >
             <ChevronRight
               className={cn("size-3.5 transition-transform", open && "rotate-90")}
@@ -54,7 +54,7 @@ function Node({
           <button
             type="button"
             onClick={() => setOpen((v) => !v)}
-            className="min-w-0 flex-1 cursor-pointer truncate py-1 text-left font-medium text-foreground"
+            className="min-h-6 min-w-0 flex-1 cursor-pointer truncate py-1 text-left font-medium text-foreground"
             title={node.name}
           >
             {node.name}
@@ -94,7 +94,7 @@ function Node({
           onClick={() => onSelect(node.path)}
           aria-current={isActive ? "true" : undefined}
           className={cn(
-            "min-w-0 flex-1 cursor-pointer truncate py-1 text-left",
+            "min-h-6 min-w-0 flex-1 cursor-pointer truncate py-1 text-left",
             isActive ? "font-medium text-sidebar-primary" : "text-foreground"
           )}
           title={node.name}

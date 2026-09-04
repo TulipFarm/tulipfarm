@@ -1,4 +1,4 @@
-import { PenLine } from "lucide-react";
+import { PenLine } from "~/components/icons";
 import { Link } from "~/components/ui/link";
 import { TraceStep } from "~/components/ui/trace";
 import type { TimelinePart } from "~/lib/chat/types";
@@ -135,7 +135,10 @@ function detailOf(
       {connectUrl === undefined ? null : isSecretsUrl(connectUrl) && !isAdmin ? (
         <p className="text-muted-foreground">Ask an administrator to add this Credential.</p>
       ) : (
-        <Link to={connectUrl} className="block text-primary hover:underline">
+        <Link
+          to={connectUrl}
+          className="block text-foreground underline decoration-border underline-offset-[3px] transition-colors hover:decoration-foreground"
+        >
           {isSecretsUrl(connectUrl) ? "Add the required Credential →" : "Connect your account →"}
         </Link>
       )}

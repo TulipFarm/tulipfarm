@@ -1,5 +1,5 @@
-import { Play, ShieldCheck } from "lucide-react";
 import { useId, useState } from "react";
+import { Play, ShieldCheck } from "~/components/icons";
 import { Button } from "~/components/ui/button";
 import { Checkbox } from "~/components/ui/checkbox";
 import { Field } from "~/components/ui/field";

@@ -29,7 +29,7 @@ export function SortHeader<K extends string>({
       scope="col"
       aria-sort={onSort && active ? (dir === "asc" ? "ascending" : "descending") : undefined}
       className={cn(
-        "whitespace-nowrap bg-card px-3 py-2 text-xs font-medium text-muted-foreground",
+        "whitespace-nowrap bg-muted/70 px-3 py-1.5 text-xs font-medium text-muted-foreground backdrop-blur-sm",
         align === "end" ? "text-end" : "text-start",
         className
       )}
@@ -44,7 +44,7 @@ export function SortHeader<K extends string>({
           title={`Sort by ${label}, ${nextDir}`}
           className={cn(
             // -my-1 keeps the header's visual height while the target clears WCAG 2.5.8's 24px.
-            "-my-1 inline-flex items-center gap-1 rounded-sm py-1 transition-colors duration-150 hover:text-foreground",
+            "-my-1 inline-flex items-center gap-1 rounded-md py-1 transition-colors hover:text-foreground",
             align === "end" && "flex-row-reverse",
             active && "text-foreground"
           )}

@@ -1,5 +1,5 @@
-import { ArrowUpRight, Check, Loader2 } from "lucide-react";
 import { useEffect, useState } from "react";
+import { ArrowUpRight, Check, Loader2 } from "~/components/icons";
 import { StatusBadge } from "~/components/status-badge";
 import { Badge } from "~/components/ui/badge";
 import { Link } from "~/components/ui/link";
@@ -188,7 +188,7 @@ function Body({ detail }: { detail: IntegrationDetail }) {
                     </span>
                     <span
                       className={cn(
-                        "shrink-0 text-[0.625rem] font-medium uppercase tracking-wide",
+                        "shrink-0 text-xs font-medium",
                         step.satisfied ? "text-primary" : "text-muted-foreground"
                       )}
                     >

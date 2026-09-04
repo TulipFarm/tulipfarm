@@ -171,7 +171,7 @@ export function MarketplaceBrowser({
           <div className="flex flex-col gap-5">
             {grouped.map(([groupName, skills]) => (
               <section key={groupName} className="flex flex-col gap-1.5">
-                <h3 className="text-xs font-medium uppercase tracking-[0.12em] text-muted-foreground">
+                <h3 className="text-xs font-medium capitalize text-muted-foreground">
                   {groupName.replaceAll("-", " ")}
                 </h3>
                 <ul className="divide-y divide-border overflow-hidden rounded-md border border-border">

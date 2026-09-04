@@ -15,15 +15,6 @@ import { AgentRow } from "./agent-row";
 const AUTONOMY_OPTIONS: readonly Autonomy[] = ["manual", "approval-required", "supervised", "full"];
 const REACH_OPTIONS: readonly Reach[] = ["read-only", "changes-data", "unrestricted"];
 
-function Stat({ value, label }: { value: number; label: string }) {
-  return (
-    <div>
-      <p className="font-mono text-lg tabular-nums text-foreground">{value}</p>
-      <p className="text-xs text-muted-foreground">{label}</p>
-    </div>
-  );
-}
-
 function AgentList({
   agents,
   headingLevel,
@@ -71,23 +62,10 @@ export function AgentRoster({ agents }: { agents: readonly AgentSummary[] }) {
 
   const groups = useMemo(() => groupByDomain(visible), [visible]);
   const grouped = useMemo(() => shouldGroupByDomain(groups), [groups]);
-  const readOnly = useMemo(
-    () =>
-      agents.filter((agent) => capabilityFacts(agent.capabilityRestrictions).reach === "read-only")
-        .length,
-    [agents]
-  );
-  const domains = useMemo(() => groupByDomain(agents).length, [agents]);
   const filtered = visible.length !== agents.length;
 
   return (
     <div className="flex flex-col gap-5">
-      <div className="flex flex-wrap items-end gap-x-8 gap-y-4 border-b border-border pb-5">
-        <Stat value={agents.length} label={agents.length === 1 ? "agent" : "agents"} />
-        <Stat value={domains} label={domains === 1 ? "domain" : "domains"} />
-        <Stat value={readOnly} label="read only" />
-      </div>
-
       <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
         <div className="min-w-0 flex-1">
           <label htmlFor={searchId} className="mb-1 block text-xs text-muted-foreground">
@@ -155,7 +133,7 @@ export function AgentRoster({ agents }: { agents: readonly AgentSummary[] }) {
             <div className="flex items-baseline gap-2">
               <h2
                 id={`${searchId}-domain-${index}`}
-                className="text-[0.625rem] font-medium uppercase tracking-[0.2em] text-muted-foreground"
+                className="text-xs font-medium text-muted-foreground"
               >
                 {domain}
               </h2>

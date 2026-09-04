@@ -9,7 +9,6 @@ import {
   useRouteError,
   useSearchParams,
 } from "@remix-run/react";
-import { Search, UserPlus, Users } from "lucide-react";
 import { useMemo, useState } from "react";
 import { PartyLine } from "~/components/access/access-bits";
 import { InviteForm, IssuedLink } from "~/components/access/invite-flow";
@@ -17,6 +16,7 @@ import { LevelsPanel } from "~/components/access/levels-panel";
 import { PersonDetail, PersonRow } from "~/components/access/person-panel";
 import { AccessTabs } from "~/components/access-tabs";
 import { FormStatus } from "~/components/form-status";
+import { Search, UserPlus, Users } from "~/components/icons";
 import { Button } from "~/components/ui/button";
 import { Input } from "~/components/ui/input";
 import { Modal } from "~/components/ui/modal";
@@ -166,22 +166,22 @@ export default function AccessPeople() {
         title="Who can do what"
         description="Everyone who can sign in, and what each of them is allowed to do."
         actions={
-          <div className="flex items-center gap-2">
-            <div className="relative">
+          <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:items-center">
+            <div className="relative w-full sm:w-auto">
               <Search
                 aria-hidden
                 className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground"
               />
               <Input
                 type="search"
-                className="w-56 pl-8"
+                className="w-full pl-8 sm:w-56"
                 placeholder="Search people"
                 aria-label="Search people"
                 value={query}
                 onChange={(event) => setQuery(event.target.value)}
               />
             </div>
-            <Button onClick={() => setInviting(true)}>
+            <Button className="w-full sm:w-auto" onClick={() => setInviting(true)}>
               <UserPlus aria-hidden className="size-4" />
               Invite someone
             </Button>

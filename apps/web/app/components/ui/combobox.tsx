@@ -1,5 +1,5 @@
-import { ChevronsUpDown } from "lucide-react";
 import { useEffect, useId, useRef, useState } from "react";
+import { ChevronsUpDown } from "~/components/icons";
 import { cn } from "~/lib/utils";
 
 /**
@@ -139,7 +139,7 @@ export function Combobox({
           }
         }}
         className={cn(
-          "h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 pr-9 text-sm text-foreground shadow-xs transition-[color,box-shadow] outline-none",
+          "h-7 w-full rounded-md border border-input bg-background px-2.5 py-1 pr-8 text-sm text-foreground transition-[color,border-color] outline-none pointer-coarse:h-8",
           "placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50",
           "aria-invalid:border-destructive aria-invalid:ring-destructive/20",
           inputClassName
@@ -151,7 +151,7 @@ export function Combobox({
       />
 
       {open ? (
-        <div className="absolute z-50 mt-1 w-full rounded-md border border-border bg-popover shadow-md">
+        <div className="absolute z-50 mt-1 w-full rounded-lg border border-border bg-popover shadow-md">
           {/*
             Roles on generic elements, not ul/li: an `li` carrying role="option" is a
             non-interactive element given an interactive role, which is both a lint error and a
@@ -179,7 +179,7 @@ export function Combobox({
                 }}
                 onMouseEnter={() => setActive(i)}
                 className={cn(
-                  "cursor-pointer truncate rounded-sm px-3 py-1.5 font-mono text-sm text-foreground",
+                  "cursor-pointer truncate rounded-md px-3 py-1.5 font-mono text-sm text-foreground",
                   i === active && "bg-accent text-accent-foreground"
                 )}
               >

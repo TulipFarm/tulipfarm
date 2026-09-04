@@ -19,7 +19,7 @@ export function ComingSoonState({ name }: { name: string }) {
         </p>
         <Link
           to="/integrations"
-          className="w-fit rounded-sm font-medium text-primary transition-colors duration-150 hover:underline"
+          className="w-fit rounded-sm font-medium text-brand transition-colors hover:underline"
         >
           Back to integrations
         </Link>

@@ -53,7 +53,7 @@ function BudgetRow({ budget }: { budget: RunBudget }) {
       <div className="flex items-center justify-between gap-2 text-[11px] text-muted-foreground">
         <span>{POLICY_LABEL[budget.exhaustionPolicy]}</span>
         {exhausted ? (
-          <span className="font-medium uppercase tracking-wide text-status-danger">Exhausted</span>
+          <span className="font-medium text-status-danger">Exhausted</span>
         ) : (
           <span className="font-mono tabular-nums">{remaining.toLocaleString("en-US")} left</span>
         )}
@@ -69,9 +69,7 @@ function BudgetRow({ budget }: { budget: RunBudget }) {
 export function RunBudgets({ state }: { state: RunBudgetsState }) {
   return (
     <section className="border border-border bg-card">
-      <h2 className="border-b border-border px-3 py-2 text-xs font-medium uppercase tracking-[0.2em]">
-        Budgets
-      </h2>
+      <h2 className="border-b border-border px-3 py-2 text-xs font-medium ">Budgets</h2>
       {state.status === "loading" ? (
         <p className="px-3 py-3 text-xs text-muted-foreground">Loading budgets…</p>
       ) : state.status === "error" ? (

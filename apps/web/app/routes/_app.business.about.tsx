@@ -1,6 +1,6 @@
-import { CheckCircle2, RefreshCw } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { FormStatus } from "~/components/form-status";
+import { CheckCircle2, RefreshCw } from "~/components/icons";
 import { Button } from "~/components/ui/button";
 import { CopyField } from "~/components/ui/copy-field";
 import { Field } from "~/components/ui/field";

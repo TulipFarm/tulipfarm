@@ -1,5 +1,5 @@
-import { Pencil, Plus, Trash2 } from "lucide-react";
 import { useState } from "react";
+import { Pencil, Plus, Trash2 } from "~/components/icons";
 import { Button } from "~/components/ui/button";
 import { Panel, PanelEmpty } from "~/components/ui/panel";
 import { roleTitle, summarizeRole } from "~/lib/access-language";

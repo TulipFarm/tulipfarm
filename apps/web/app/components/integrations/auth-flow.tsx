@@ -1,6 +1,6 @@
-import { Check, ExternalLink } from "lucide-react";
 import type * as React from "react";
 import { useState } from "react";
+import { Check, ExternalLink } from "~/components/icons";
 import { Button } from "~/components/ui/button";
 import { Input } from "~/components/ui/input";
 import { ApiError } from "~/lib/api";

@@ -1,8 +1,8 @@
 import { asEffortPreset } from "@tulipfarm/schema/model-catalog";
-import { Check, ChevronDown } from "lucide-react";
 import type { KeyboardEvent as ReactKeyboardEvent } from "react";
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import { Check, ChevronDown } from "~/components/icons";
 import type { ChatModelSelector } from "~/lib/chat/types";
 import { cn } from "~/lib/utils";
 
@@ -214,7 +214,7 @@ export function ModelSelector({
         <SignalBars level={current.level} />
         <span>{current.label}</span>
         {current.default ? (
-          <span className="rounded-sm bg-secondary px-1 text-[0.625rem] font-medium uppercase tracking-wide text-muted-foreground">
+          <span className="rounded-sm bg-secondary px-1 text-xs font-medium text-muted-foreground">
             Default
           </span>
         ) : null}
@@ -253,7 +253,7 @@ export function ModelSelector({
                       <SignalBars level={option.level} />
                       <span className="font-medium">{option.label}</span>
                       {option.default ? (
-                        <span className="rounded-sm bg-background px-1 text-[0.625rem] font-medium uppercase tracking-wide text-muted-foreground">
+                        <span className="rounded-sm bg-background px-1 text-xs font-medium text-muted-foreground">
                           Default
                         </span>
                       ) : null}

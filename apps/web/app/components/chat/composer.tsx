@@ -1,5 +1,5 @@
-import { ArrowUp } from "lucide-react";
 import { lazy, Suspense, useState } from "react";
+import { ArrowUp } from "~/components/icons";
 import type { ComposerProps } from "./composer-editor";
 import { DEFAULT_CHAT_MODEL_SELECTOR } from "./model-selector";
 
@@ -38,6 +38,7 @@ export function Composer(props: ComposerProps) {
         <ComposerFallback
           busy={props.busy}
           draft={draft}
+          placement={props.placement}
           onDraftChange={setDraft}
           onSend={sendPlain}
         />
@@ -57,11 +58,13 @@ export function Composer(props: ComposerProps) {
 function ComposerFallback({
   busy,
   draft,
+  placement = "docked",
   onDraftChange,
   onSend,
 }: {
   busy?: boolean;
   draft: string;
+  placement?: "centered" | "docked";
   onDraftChange: (value: string) => void;
   onSend: (text: string) => void;
 }) {
@@ -72,13 +75,22 @@ function ComposerFallback({
   };
 
   return (
-    <div className="shrink-0 border-t border-border/70 bg-background">
-      <div className="mx-auto w-full max-w-4xl px-4 pb-4 pt-2 sm:px-6">
+    <div
+      data-composer-placement={placement}
+      className={
+        placement === "centered" ? "w-full" : "shrink-0 border-t border-border/70 bg-background"
+      }
+    >
+      <div
+        className={
+          placement === "centered" ? "w-full" : "mx-auto w-full max-w-4xl px-4 pb-4 pt-2 sm:px-6"
+        }
+      >
         <div className="mb-1.5 flex min-h-8 items-center gap-2 px-1" />
         <div className="overflow-hidden rounded-lg border border-input bg-card transition-[border-color,box-shadow] focus-within:border-primary focus-within:ring-[3px] focus-within:ring-ring/15">
           <textarea
             aria-label="Message"
-            className="max-h-48 min-h-[3.25rem] w-full resize-none bg-transparent px-3 py-3 text-sm outline-none placeholder:text-muted-foreground"
+            className="max-h-48 min-h-[3.25rem] w-full resize-none bg-transparent px-3 py-2.5 text-base outline-none placeholder:text-muted-foreground"
             onChange={(event) => onDraftChange(event.target.value)}
             onKeyDown={(event) => {
               if (event.key !== "Enter" || event.shiftKey) return;

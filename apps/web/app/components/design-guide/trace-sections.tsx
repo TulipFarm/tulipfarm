@@ -1,6 +1,6 @@
-import { BookOpen, ExternalLink } from "lucide-react";
 import { useEffect, useState } from "react";
 import { GuideSection } from "~/components/design-guide/guide-section";
+import { BookOpen, ExternalLink } from "~/components/icons";
 import { Button } from "~/components/ui/button";
 import { DiffChip, DiffChipGroup, type DiffLine, ToolChip } from "~/components/ui/tool-chip";
 import { Trace, TraceNote, TraceQuery, TraceSource, TraceStep } from "~/components/ui/trace";
@@ -103,11 +103,9 @@ function TraceReplay() {
   const done = REPLAY.filter((step) => tick >= step.end).length;
 
   return (
-    <div className="rounded-md border border-border bg-card p-4">
+    <div className="rounded-lg border border-border bg-card p-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <p className="text-xs font-medium uppercase tracking-[0.16em] text-muted-foreground">
-          Following live work
-        </p>
+        <p className="text-xs font-medium text-muted-foreground">Following live work</p>
         <Button
           variant="secondary"
           size="sm"
@@ -144,7 +142,7 @@ function TraceReplay() {
         </Trace>
       </div>
 
-      <p className="mt-4 max-w-2xl text-sm text-muted-foreground">
+      <p className="mt-4 max-w-2xl text-base text-muted-foreground">
         Rows arrive when their work starts, the step in flight shows its detail, and finished steps
         drop back to one line, {done} of {REPLAY.length} settled. When the last one lands the whole
         trace folds to its header. Toggle anything by hand and the policy stops steering it, because
@@ -156,10 +154,8 @@ function TraceReplay() {
 
 function Specimen({ caption, children }: { caption: string; children: React.ReactNode }) {
   return (
-    <div className="rounded-md border border-border bg-card p-4">
-      <p className="mb-3 text-xs font-medium uppercase tracking-[0.16em] text-muted-foreground">
-        {caption}
-      </p>
+    <div className="rounded-lg border border-border bg-card p-4">
+      <p className="mb-3 text-xs font-medium text-muted-foreground">{caption}</p>
       {children}
     </div>
   );
@@ -298,7 +294,7 @@ export function TraceSections() {
             <div className="mt-3 border-t border-run-border pt-3">
               <DiffChipGroup files={CHANGED_FILES} />
             </div>
-            <p className="mt-3 max-w-2xl text-sm text-muted-foreground">
+            <p className="mt-3 max-w-2xl text-base text-muted-foreground">
               The chip strip is the receipt of a Turn that wrote to the Soul. `+N more` reveals the
               rest rather than being a count with nothing behind it.
             </p>

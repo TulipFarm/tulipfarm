@@ -7,6 +7,7 @@ const TOKENS = [
   ["Muted", "bg-muted"],
   ["Accent", "bg-accent"],
   ["Primary", "bg-primary"],
+  ["Brand", "bg-brand"],
   ["Destructive", "bg-destructive"],
 ] as const;
 

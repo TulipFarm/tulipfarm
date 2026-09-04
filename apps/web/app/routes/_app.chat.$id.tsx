@@ -14,8 +14,11 @@ import type { ChatModelSelector } from "~/lib/chat/types";
 import { getConversation, getConversationMessages } from "~/lib/conversations";
 import { useConversations } from "~/lib/conversations-context";
 import { getConversationFeedback } from "~/lib/feedback";
+import { useSessionUser } from "~/lib/use-session-user";
 
 export const meta: MetaFunction = () => [{ title: "Chat · tulipfarm" }];
+
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 // Restore a persisted chat (UUID-chat persistence). Fetch the conversation + its messages, rehydrate
 // the timeline, and seed ChatPanel so the transcript renders and follow-up turns reuse the same id. A
@@ -23,6 +26,7 @@ export const meta: MetaFunction = () => [{ title: "Chat · tulipfarm" }];
 // effort preset is derived from the conversation's agent, mirroring the index route.
 export async function clientLoader({ params }: ClientLoaderFunctionArgs) {
   const id = params.id as string;
+  if (!UUID_PATTERN.test(id)) throw redirect("/");
   // A deep link renders a full transcript on arrival, so start its lazily-split chunk now rather
   // than after the data resolves — the two then land together instead of end to end.
   void import("~/components/chat/transcript");
@@ -71,20 +75,25 @@ export default function ChatConversationRoute() {
   const { id, title, agentId, defaultModel, messages, latestTurn } =
     useLoaderData<typeof clientLoader>();
   const { refresh, setActiveChatTitle } = useConversations();
+  const user = useSessionUser();
   // The top bar names the conversation. Publish the loader's title so it is right immediately, and
   // stays right for chats older than the sidebar's Recent list.
   useEffect(() => {
     setActiveChatTitle(id, title ?? null);
   }, [id, title, setActiveChatTitle]);
   return (
-    <ChatPanel
-      key={id}
-      agentId={agentId}
-      defaultModel={defaultModel}
-      initialConversationId={id}
-      initialMessages={messages}
-      initialTurn={latestTurn}
-      onConversationChange={refresh}
-    />
+    <>
+      {messages.length > 0 ? <h1 className="sr-only">{title ?? "Chat"}</h1> : null}
+      <ChatPanel
+        key={id}
+        agentId={agentId}
+        defaultModel={defaultModel}
+        userName={user?.name ?? undefined}
+        initialConversationId={id}
+        initialMessages={messages}
+        initialTurn={latestTurn}
+        onConversationChange={refresh}
+      />
+    </>
   );
 }

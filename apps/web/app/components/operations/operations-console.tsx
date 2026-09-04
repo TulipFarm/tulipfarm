@@ -1,3 +1,4 @@
+import { type ReactNode, useState } from "react";
 import {
   Activity,
   AlertTriangle,
@@ -7,8 +8,7 @@ import {
   RefreshCw,
   Search,
   ShieldAlert,
-} from "lucide-react";
-import { type ReactNode, useState } from "react";
+} from "~/components/icons";
 import { DestructivePreview } from "~/components/shell/states";
 import { StatusBadge as SemanticStatusBadge, type StatusTone } from "~/components/status-badge";
 import { Link } from "~/components/ui/link";
@@ -76,7 +76,7 @@ function Section({
     <section className="min-w-0 border border-border bg-card">
       <header className="flex items-center gap-2 border-b border-border px-3 py-2.5">
         <span className="text-muted-foreground">{icon}</span>
-        <h2 className="text-xs font-medium uppercase tracking-[0.18em]">{title}</h2>
+        <h2 className="text-xs font-medium">{title}</h2>
         {count === undefined ? null : (
           <span className="ml-auto text-[0.625rem] tabular-nums text-muted-foreground">
             {count}
@@ -337,7 +337,7 @@ function OperationalActivityTable({ items }: { items: readonly OperationalItem[]
                 className="w-full min-w-[46rem] text-left"
               >
                 <thead>
-                  <tr className="border-b border-border text-[0.625rem] uppercase tracking-wider text-muted-foreground">
+                  <tr className="border-b border-border text-xs text-muted-foreground">
                     <th className="w-[42%] px-3 py-2 font-medium">Event</th>
                     <th className="px-3 py-2 font-medium">Actor</th>
                     <th className="px-3 py-2 font-medium">Target</th>

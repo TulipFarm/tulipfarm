@@ -34,7 +34,7 @@ export default function SpaceGraphRoute() {
       <div className="mx-auto flex w-full max-w-4xl flex-col gap-4 px-6 py-8">
         <nav
           aria-label="Breadcrumb"
-          className="flex items-center gap-1 text-[0.625rem] font-medium uppercase tracking-[0.2em] text-muted-foreground"
+          className="flex items-center gap-1 text-xs font-medium text-muted-foreground"
         >
           <Link to={base} className="transition-colors hover:text-foreground">
             {space.name}

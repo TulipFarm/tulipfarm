@@ -1,5 +1,5 @@
-import { FileText, History, MoreHorizontal, Pencil, Trash2 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
+import { FileText, History, MoreHorizontal, Pencil, Trash2 } from "~/components/icons";
 import { AgentAuthoredBadge } from "~/components/knowledge/agent-authored-badge";
 import { BacklinksPanel } from "~/components/knowledge/backlinks-panel";
 import { HistoryDrawer } from "~/components/knowledge/history-panel";

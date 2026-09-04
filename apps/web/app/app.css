@@ -13,15 +13,89 @@
 /* Map CSS vars into Tailwind v4 theme tokens so bg-background / text-foreground etc. exist. */
 @theme inline {
   --font-mono: "JetBrains Mono Variable", ui-monospace, "SFMono-Regular", Menlo, monospace;
-  --font-sans: "Instrument Sans Variable", "Instrument Sans", ui-sans-serif, system-ui, sans-serif;
+  --font-sans:
+    "Inter Variable", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, ui-sans-serif,
+    system-ui, sans-serif;
+
+  /*
+   * Compact type scale, remapped onto Tailwind's names so the ~1000 existing `text-*` call sites
+   * move without being touched. Two consequences worth knowing
+   * before adding a class:
+   *
+   *   - `text-sm` is 13px, not 14. It is the *chrome* size — labels, buttons, table cells, nav.
+   *   - `text-base` is 15px, not 16. It is the *reading* size — chat messages, prose, long
+   *     descriptions. Anything a person reads a paragraph of belongs here, never `text-sm`.
+   *
+   * Every body size carries negative tracking; Tailwind ships 0, and at these sizes the difference
+   * between 0 and -0.011em is most of what separates "dense" from "cramped".
+   */
+  --text-2xs: 0.625rem; /* 10px */
+  --text-2xs--line-height: 1.5;
+  --text-2xs--letter-spacing: -0.015em;
+  --text-xs: 0.75rem; /* 12px */
+  --text-xs--line-height: 1.4;
+  --text-xs--letter-spacing: 0em;
+  --text-sm: 0.8125rem; /* 13px */
+  --text-sm--line-height: 1.5;
+  --text-sm--letter-spacing: -0.01em;
+  --text-base: 0.9375rem; /* 15px */
+  --text-base--line-height: 1.6;
+  --text-base--letter-spacing: -0.011em;
+  --text-lg: 1.0625rem; /* 17px */
+  --text-lg--line-height: 1.6;
+  --text-lg--letter-spacing: 0em;
+  --text-xl: 1.25rem; /* 20px */
+  --text-xl--line-height: 1.33;
+  --text-xl--letter-spacing: -0.012em;
+  --text-2xl: 1.5rem; /* 24px */
+  --text-2xl--line-height: 1.33;
+  --text-2xl--letter-spacing: -0.012em;
+  --text-3xl: 2rem; /* 32px */
+  --text-3xl--line-height: 1.125;
+  --text-3xl--letter-spacing: -0.022em;
+
+  /*
+   * Non-integer weights. Inter is a variable font, so 510 and 590 are real instances rather than
+   * rounded ones, and the half-step below the usual 500/600 is a large part of why dense UI text
+   * reads as quiet rather than shouted. Do not round these back to hundreds.
+   */
+  --font-weight-medium: 510;
+  --font-weight-semibold: 590;
+  --font-weight-bold: 680;
+
+  /*
+   * Motion. Most state changes should not animate at all — a hover that fades in over 150ms is
+   * the single most common reason an interface feels sluggish, because the delay is on the
+   * feedback rather than the work. The default below applies to any bare `transition-*` utility;
+   * reach for an explicit `duration-*` only for a layer that genuinely enters (100ms selection,
+   * 150ms popover, 200ms modal).
+   */
+  --default-transition-duration: 80ms;
+  --default-transition-timing-function: ease-out;
 
   /* Crafted easing for enter/emphasis motion (terminal honors quick, decisive curves). */
   --ease-snappy: cubic-bezier(0.23, 1, 0.32, 1);
+  /* Ease-out-quart — for a layer arriving over content: fast start, long settle. */
+  --ease-layer: cubic-bezier(0.165, 0.84, 0.44, 1);
 
   --radius-sm: calc(var(--radius) - 4px);
   --radius-md: calc(var(--radius) - 2px);
   --radius-lg: var(--radius);
   --radius-xl: calc(var(--radius) + 4px);
+  --radius-2xl: calc(var(--radius) + 8px);
+
+  /*
+   * The whole permitted depth ladder. Tailwind's stock shadow scale is redefined onto these four
+   * so `shadow-xs`/`shadow-sm`/`shadow-md`/`shadow-lg` cannot drift from the tokens, and the
+   * heavier stock steps collapse onto `lg` rather than opening a fifth, louder level.
+   */
+  --shadow-xs: var(--elevation-xs);
+  --shadow-sm: var(--elevation-sm);
+  --shadow: var(--elevation-sm);
+  --shadow-md: var(--elevation-md);
+  --shadow-lg: var(--elevation-lg);
+  --shadow-xl: var(--elevation-lg);
+  --shadow-2xl: var(--elevation-lg);
 
   --color-background: var(--background);
   --color-foreground: var(--foreground);
@@ -31,15 +105,30 @@
   --color-popover-foreground: var(--popover-foreground);
   --color-primary: var(--primary);
   --color-primary-foreground: var(--primary-foreground);
+  --color-brand: var(--brand);
+  --color-brand-foreground: var(--brand-foreground);
+  --color-brand-surface: var(--brand-surface);
+
+  /*
+   * The raw surface ramp. Prefer a semantic token (`bg-card`, `bg-popover`, `bg-muted`) — those
+   * already sit on the ramp and say *why* the surface is there. Reach for `bg-level-2` only when a
+   * surface genuinely has no semantic name.
+   */
+  --color-level-0: var(--level-0);
+  --color-level-1: var(--level-1);
+  --color-level-2: var(--level-2);
+  --color-level-3: var(--level-3);
   --color-secondary: var(--secondary);
   --color-secondary-foreground: var(--secondary-foreground);
   --color-muted: var(--muted);
   --color-muted-foreground: var(--muted-foreground);
   --color-accent: var(--accent);
   --color-accent-foreground: var(--accent-foreground);
+  --color-raised: var(--raised);
   --color-destructive: var(--destructive);
   --color-destructive-foreground: var(--destructive-foreground);
   --color-border: var(--border);
+  --color-border-strong: var(--border-strong);
   --color-input: var(--input);
   --color-ring: var(--ring);
   --color-sidebar: var(--sidebar);
@@ -136,6 +225,13 @@
   }
   html {
     font-family: var(--font-sans);
+    /*
+     * Inter v4 carries an optical-size axis, so one file covers both text and Display cuts. The
+     * drawing tightens automatically as size grows. Requires the `opsz` cut imported in root.tsx;
+     * the plain `wght` cut has no such axis. `cv01` and `ss03` keep ambiguous characters distinct.
+     */
+    font-optical-sizing: auto;
+    font-feature-settings: "cv01", "ss03";
   }
   body {
     @apply bg-background text-foreground;
@@ -145,11 +241,12 @@
   [role="button"]:not([aria-disabled="true"]) {
     cursor: pointer;
   }
-  /* Crisp ruby focus halo (outset) for keyboard nav — links, rows, inputs. */
+  /* Crisp focus halo (outset) for keyboard nav — links, rows, inputs. Ruby, because focus is one
+     of the three things in the app allowed to use the brand hue. */
   :focus-visible {
     outline: 2px solid var(--ring);
     outline-offset: 2px;
-    border-radius: 2px;
+    border-radius: 4px;
   }
 }
 
@@ -582,13 +679,15 @@
 .tf-mention {
   border-radius: 3px;
   padding: 0 2px;
-  font-weight: 500;
+  font-weight: 510;
   white-space: nowrap;
-  color: var(--primary);
-  background: color-mix(in oklab, var(--primary) 12%, transparent);
+  color: var(--brand);
+  background: color-mix(in oklab, var(--brand) 12%, transparent);
 }
+/* Prose links keep their underline. Inside running text the colour alone is not a reliable cue —
+   a reader scanning a paragraph should not have to compare hues to find what is clickable. */
 .tf-editor-link {
-  color: var(--primary);
+  color: var(--brand);
   text-decoration: underline;
   text-underline-offset: 2px;
 }
@@ -637,7 +736,7 @@
   padding: 0.5rem 0.75rem;
   overflow-x: auto;
   border: 1px solid var(--border);
-  border-radius: 4px;
+  border-radius: calc(var(--radius) - 2px);
   background: var(--muted);
 }
 .tf-editor :where(pre) code {
@@ -665,10 +764,10 @@
   max-height: 18rem;
   overflow-y: auto;
   border: 1px solid var(--border);
-  border-radius: 4px;
-  background: var(--card);
+  border-radius: var(--radius);
+  background: var(--popover);
   padding: 0.25rem;
-  box-shadow: 0 6px 24px -8px rgb(0 0 0 / 0.4);
+  box-shadow: var(--elevation-lg);
   font-size: 0.8125rem;
 }
 .tf-slash-item,
@@ -678,7 +777,7 @@
   align-items: baseline;
   gap: 0.5rem;
   cursor: pointer;
-  border-radius: 3px;
+  border-radius: calc(var(--radius) - 4px);
   padding: 0.3rem 0.5rem;
   text-align: left;
   color: var(--foreground);
@@ -718,7 +817,7 @@
 
 /* Inline `#tag` chip in a rendered concept body (links to the tag-filtered listing). */
 .tf-tag-chip {
-  border-radius: 3px;
+  border-radius: calc(var(--radius) - 5px);
   padding: 0 4px;
   font-weight: 500;
   white-space: nowrap;

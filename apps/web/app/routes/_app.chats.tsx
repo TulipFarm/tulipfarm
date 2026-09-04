@@ -1,5 +1,4 @@
 import { type MetaFunction, useLoaderData, useRouteError } from "@remix-run/react";
-import { MessageSquare, Plus, Search, Star } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import {
   ChatActionsMenu,
@@ -7,6 +6,7 @@ import {
   DeleteChatModal,
   useChatTitleActions,
 } from "~/components/chat/chat-title-actions";
+import { MessageSquare, Plus, Search, Star } from "~/components/icons";
 import { PageShell } from "~/components/page-shell";
 import { ErrorState } from "~/components/states";
 import { Button } from "~/components/ui/button";
@@ -22,7 +22,7 @@ import { useConversations } from "~/lib/conversations-context";
 export const meta: MetaFunction = () => [{ title: "Chats · tulipfarm" }];
 
 const inputClass =
-  "h-10 w-full rounded-md border border-input bg-background pl-10 pr-3 text-sm text-foreground placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/25";
+  "h-8 w-full rounded-md border border-input bg-background pl-9 pr-3 text-sm text-foreground placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/25";
 
 // Browse + search every persisted chat (UUID-chat persistence). The sidebar "Chats" header links
 // here. Search is server-side across all the caller's chats by title (debounced); each row's three-dots
@@ -161,7 +161,10 @@ export default function ChatsRoute() {
                 : "Start a chat and it will appear here for you to revisit."}
             </p>
             {!query.trim() ? (
-              <Link to="/" className="mt-4 text-sm font-medium text-primary hover:underline">
+              <Link
+                to="/"
+                className="mt-4 text-sm font-medium text-foreground underline decoration-border underline-offset-[3px] transition-colors hover:decoration-foreground"
+              >
                 Start a new chat
               </Link>
             ) : null}

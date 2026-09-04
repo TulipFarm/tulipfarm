@@ -1,6 +1,6 @@
-import { Bug, Check, Copy, RefreshCw, X } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { CodeBlock, CollapsibleSection } from "~/components/chat/debug-code";
+import { Bug, Check, Copy, RefreshCw, X } from "~/components/icons";
 import { copyText } from "~/lib/clipboard";
 import { type DebugContext, type DebugTool, getDebugContext } from "~/lib/conversations";
 import { cn } from "~/lib/utils";

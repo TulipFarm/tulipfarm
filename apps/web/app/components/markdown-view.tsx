@@ -31,7 +31,7 @@ function makeAnchorRenderer(opts: { wikiLinks: boolean; citations: boolean }): C
           to={target}
           target="_blank"
           rel="noreferrer"
-          className="font-medium text-primary no-underline hover:underline cursor-pointer"
+          className="font-medium text-brand no-underline hover:underline cursor-pointer"
           title={`Open cited source (${target}) in a new tab`}
         >
           {children}
@@ -42,7 +42,7 @@ function makeAnchorRenderer(opts: { wikiLinks: boolean; citations: boolean }): C
       const cls =
         typeof className === "string"
           ? className
-          : "text-primary underline underline-offset-2 hover:opacity-80 cursor-pointer";
+          : "text-brand underline underline-offset-2 hover:opacity-80 cursor-pointer";
       return (
         <Link to={target} className={cls}>
           {children}
@@ -58,7 +58,7 @@ function makeAnchorRenderer(opts: { wikiLinks: boolean; citations: boolean }): C
     }
     return (
       <a
-        className="text-primary underline underline-offset-2 hover:opacity-80 cursor-pointer"
+        className="text-brand underline underline-offset-2 hover:opacity-80 cursor-pointer"
         target="_blank"
         rel="noreferrer"
         href={target}
@@ -82,28 +82,28 @@ function calloutBorder(kind: string): string {
 
 const components: Components = {
   h1: ({ node: _n, children, ...p }) => (
-    <h1 className="mt-6 mb-3 text-lg font-bold tracking-tight first:mt-0" {...p}>
+    <h1 className="mt-6 mb-3 text-xl font-semibold first:mt-0" {...p}>
       {children}
     </h1>
   ),
   h2: ({ node: _n, children, ...p }) => (
-    <h2 className="mt-6 mb-2 text-base font-bold tracking-tight first:mt-0" {...p}>
+    <h2 className="mt-6 mb-2 text-lg font-semibold first:mt-0" {...p}>
       {children}
     </h2>
   ),
   h3: ({ node: _n, children, ...p }) => (
-    <h3 className="mt-4 mb-2 font-medium tracking-tight first:mt-0" {...p}>
+    <h3 className="mt-4 mb-2 text-base font-semibold first:mt-0" {...p}>
       {children}
     </h3>
   ),
   p: ({ node: _n, children, ...p }) => (
-    <p className="my-3 leading-relaxed text-foreground" {...p}>
+    <p className="my-3 text-foreground" {...p}>
       {children}
     </p>
   ),
   a: ({ node: _n, children, ...p }) => (
     <a
-      className="text-primary underline underline-offset-2 hover:opacity-80"
+      className="text-brand underline underline-offset-2 hover:opacity-80"
       target="_blank"
       rel="noreferrer"
       {...p}
@@ -112,7 +112,7 @@ const components: Components = {
     </a>
   ),
   ul: ({ node: _n, children, ...p }) => (
-    <ul className="my-3 ml-5 list-disc space-y-1 marker:text-primary" {...p}>
+    <ul className="my-3 ml-5 list-disc space-y-1 marker:text-muted-foreground" {...p}>
       {children}
     </ul>
   ),
@@ -135,9 +135,7 @@ const components: Components = {
           data-callout={kind}
           className={`my-3 rounded-sm border-l-2 ${calloutBorder(kind)} bg-muted/40 px-3 py-2 text-foreground`}
         >
-          <p className="mb-1 text-[0.625rem] font-semibold uppercase tracking-[0.15em] text-muted-foreground">
-            {kind}
-          </p>
+          <p className="mb-1 text-xs font-medium capitalize text-muted-foreground">{kind}</p>
           <div className="[&>:first-child]:mt-0 [&>:last-child]:mb-0">{children}</div>
         </div>
       );
@@ -180,7 +178,7 @@ const components: Components = {
   ),
   th: ({ node: _n, children, ...p }) => (
     <th
-      className="border border-border bg-muted px-2 py-1 text-left text-xs uppercase tracking-[0.1em] text-muted-foreground"
+      className="border border-border bg-muted px-2 py-1 text-left text-xs text-muted-foreground"
       {...p}
     >
       {children}
@@ -238,7 +236,10 @@ export function MarkdownView({
     return resolved;
   }, [active, byPhrase, wikiLinks, citationsOn, anchor]);
   return (
-    <div className="text-sm">
+    /* Every caller — transcript, knowledge page, skill body, agent body, setup guide — is prose
+       someone reads at length, so this is pinned to the reading size rather than the 13px the
+       type scale gives chrome. */
+    <div className="text-base">
       <ReactMarkdown
         remarkPlugins={REMARK_PLUGINS}
         rehypePlugins={rehypePlugins}

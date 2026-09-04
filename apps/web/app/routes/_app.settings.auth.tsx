@@ -1,6 +1,6 @@
-import { Trash2 } from "lucide-react";
 import { type FormEvent, useEffect, useState } from "react";
 import { FormStatus } from "~/components/form-status";
+import { Trash2 } from "~/components/icons";
 import { Button } from "~/components/ui/button";
 import { CopyField } from "~/components/ui/copy-field";
 import { Field } from "~/components/ui/field";

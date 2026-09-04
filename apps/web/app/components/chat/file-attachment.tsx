@@ -1,6 +1,6 @@
 import { isInlineRenderable } from "@tulipfarm/files/limits";
-import { FileX2, Paperclip } from "lucide-react";
 import { useEffect, useState } from "react";
+import { FileX2, Paperclip } from "~/components/icons";
 import { fetchFileObjectUrl } from "~/lib/files";
 
 /**
@@ -94,7 +94,7 @@ export function FileAttachment({
 }
 
 const CHIP =
-  "inline-flex items-center gap-2 rounded-md border border-border bg-background px-2.5 py-1.5 text-xs text-foreground";
+  "inline-flex items-center gap-2 rounded-lg border border-border bg-background px-2.5 py-1.5 text-xs text-foreground";
 
 function PendingChip({ name }: { name: string }) {
   return (

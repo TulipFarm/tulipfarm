@@ -1,10 +1,10 @@
 import { useNavigate } from "@remix-run/react";
-import { ArrowRight, MessageCircle } from "lucide-react";
+import { ArrowRight, MessageCircle } from "~/components/icons";
 import { StatusBadge, type StatusTone } from "~/components/status-badge";
 import { useCompanion } from "~/lib/companion-context";
 import type { Task } from "~/lib/tasks";
 
-const MAX_ROWS = 8;
+const MAX_ROWS = 3;
 
 function statusFor(task: Task): { label: string; tone: StatusTone } {
   if (task.blocking && task.status === "open") return { label: "Urgent", tone: "danger" };
@@ -35,21 +35,21 @@ export function TasksPreviewCard({
   const rows = tasks.slice(0, MAX_ROWS);
 
   return (
-    <section className="w-full rounded-md border border-border bg-card p-4 sm:p-5">
-      <div className="flex items-center justify-between gap-4">
-        <h2 className="text-sm font-semibold text-foreground">
+    <section className="mt-5 w-full border-t border-border pt-3">
+      <div className="flex items-center justify-between gap-4 px-1">
+        <h2 className="text-xs font-medium text-muted-foreground">
           My Tasks <span className="font-normal text-muted-foreground">{tasks.length}</span>
         </h2>
         <button
           type="button"
           onClick={() => setOpen(true)}
-          className="shrink-0 text-xs font-medium text-primary hover:underline"
+          className="shrink-0 text-xs text-muted-foreground transition-colors hover:text-foreground"
         >
           View all
         </button>
       </div>
 
-      <ul className="mt-4 flex flex-col divide-y divide-border border-t border-border">
+      <ul className="mt-1 flex flex-col">
         {rows.map((task) => {
           const status = statusFor(task);
           return (
@@ -61,7 +61,7 @@ export function TasksPreviewCard({
                   else if (task.action.kind === "chat") onPick(task.action.prompt);
                   else setOpen(true);
                 }}
-                className="group -mx-4 flex w-[calc(100%+2rem)] items-center gap-3 px-4 py-2.5 text-left transition hover:bg-accent sm:-mx-5 sm:w-[calc(100%+2.5rem)] sm:px-5"
+                className="group flex w-full items-center gap-3 rounded-md px-1 py-2 text-left transition-colors hover:bg-accent"
               >
                 <span
                   className={`size-1.5 shrink-0 rounded-full ${

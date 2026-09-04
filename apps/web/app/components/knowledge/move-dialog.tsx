@@ -99,18 +99,14 @@ export function MoveDialog({
 
       {preview.gained.length > 0 && (
         <div data-testid="gained" className="mt-3">
-          <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-            Gains access
-          </p>
+          <p className="text-xs font-medium text-muted-foreground">Gains access</p>
           <p className="text-foreground">{preview.gained.map(label).join(", ")}</p>
         </div>
       )}
 
       {preview.lost.length > 0 && (
         <div data-testid="lost" className="mt-3">
-          <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-            Loses access
-          </p>
+          <p className="text-xs font-medium text-muted-foreground">Loses access</p>
           <p className="text-foreground">{preview.lost.map(label).join(", ")}</p>
         </div>
       )}
@@ -125,7 +121,7 @@ export function MoveDialog({
 
       {nested.length > 0 && (
         <div data-testid="descendants" className="mt-3">
-          <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+          <p className="text-xs font-medium text-muted-foreground">
             {nested.length} {nested.length === 1 ? "page" : "pages"} nested beneath move too
           </p>
           {changedNested.length === 0 ? (

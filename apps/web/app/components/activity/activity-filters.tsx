@@ -1,5 +1,5 @@
-import { RotateCw } from "lucide-react";
 import { useId } from "react";
+import { RotateCw } from "~/components/icons";
 import {
   ACTIVITY_RANGES,
   ACTIVITY_SOURCES,
@@ -32,7 +32,8 @@ export type ActivityFilterState = {
   refreshSeconds: RefreshSeconds;
 };
 
-const CONTROL = "h-11 w-auto rounded-md border border-input bg-background px-2 text-sm sm:h-9";
+const CONTROL =
+  "h-8 w-auto rounded-md border border-input bg-background px-2 text-sm pointer-coarse:h-9 sm:h-7";
 
 /** The control is a component, so the association has to be spelled out rather than nested. */
 function Labelled({
@@ -92,7 +93,7 @@ export function ActivityFilters({
             <label
               key={source}
               className={cn(
-                "flex h-11 cursor-pointer items-center rounded-md border px-3 text-sm transition-colors sm:h-9",
+                "flex h-8 cursor-pointer items-center rounded-md border px-2.5 text-sm transition-colors pointer-coarse:h-9 sm:h-7",
                 "has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-offset-2 has-[:focus-visible]:outline-ring",
                 active
                   ? "border-primary/40 bg-primary/10 font-medium text-foreground"
@@ -184,7 +185,7 @@ export function ActivityFilters({
           <button
             type="button"
             onClick={onReset}
-            className="ml-auto flex h-11 cursor-pointer items-center gap-1.5 text-sm text-primary underline-offset-4 transition-colors hover:underline active:text-primary/70 sm:h-9"
+            className="ml-auto flex h-8 cursor-pointer items-center gap-1.5 text-sm text-brand underline-offset-4 transition-colors hover:underline active:text-brand/70 pointer-coarse:h-9 sm:h-7"
           >
             <RotateCw className="size-3.5" aria-hidden />
             Reset filters

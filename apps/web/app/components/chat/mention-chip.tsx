@@ -36,7 +36,7 @@ function MentionChip({ entry, children }: { entry?: MentionEntry; children: Reac
           <span className="min-w-0 flex-1 truncate text-xs font-medium text-foreground">
             {entry.label}
           </span>
-          <span className="shrink-0 rounded-sm bg-muted px-1.5 py-0.5 text-[0.625rem] uppercase tracking-[0.12em] text-muted-foreground">
+          <span className="shrink-0 rounded-sm bg-muted px-1.5 py-0.5 text-xs text-muted-foreground">
             {KIND_LABEL[entry.kind]}
           </span>
         </span>

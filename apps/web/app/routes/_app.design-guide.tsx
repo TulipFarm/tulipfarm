@@ -45,6 +45,8 @@ const GUIDE_LINKS = [
   ["hierarchy", "Component hierarchy"],
   ["composition", "Composition patterns"],
   ["actions", "Interactive patterns"],
+  ["material", "Material & elevation"],
+  ["controls", "Segments, switches, and marks"],
   ["layout", "Layout system"],
   ["guide-page", "The /design-guide page"],
   ["forms", "Component index"],
@@ -92,7 +94,7 @@ export default function DesignGuideRoute() {
               "Reserve coral for brand, selection, focus, and primary action.",
               "Treat keyboard, contrast, motion, and long content as component states.",
             ].map((item) => (
-              <li key={item} className="rounded-md border border-border bg-card px-4 py-3">
+              <li key={item} className="rounded-lg border border-border bg-card px-4 py-3">
                 {item}
               </li>
             ))}

@@ -1,7 +1,7 @@
 import { useLoaderData, useRevalidator, useRouteError, useSearchParams } from "@remix-run/react";
-import { ChevronRight, Trash2 } from "lucide-react";
 import { type FormEvent, useMemo, useState } from "react";
 import { FormStatus } from "~/components/form-status";
+import { ChevronRight, Trash2 } from "~/components/icons";
 import { PageShell } from "~/components/page-shell";
 import { ErrorState } from "~/components/states";
 import { Badge } from "~/components/ui/badge";
@@ -183,7 +183,7 @@ export default function BusinessSecrets() {
                   <div className="flex items-center gap-3 px-4 py-3">
                     <button
                       type="button"
-                      className="flex min-w-0 flex-1 items-center gap-2 rounded-sm text-left focus-visible:-outline-offset-2"
+                      className="flex min-h-7 min-w-0 flex-1 items-center gap-2 rounded-sm text-left focus-visible:-outline-offset-2"
                       aria-expanded={open}
                       aria-label={`Edit ${g.provider.label}`}
                       disabled={busy}

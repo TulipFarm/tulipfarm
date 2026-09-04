@@ -30,7 +30,7 @@ export function SkillRow({
   return (
     <Link
       to={`/skills/${encodeURIComponent(skill.name)}`}
-      className="flex flex-col gap-2 px-3 py-2.5 outline-none transition-colors hover:bg-muted/40 focus-visible:bg-muted/50 focus-visible:ring-[3px] focus-visible:ring-inset focus-visible:ring-ring/50 sm:flex-row sm:items-center sm:gap-4"
+      className="flex flex-col gap-1.5 px-3 py-2 outline-none transition-colors hover:bg-muted/40 focus-visible:bg-muted/50 focus-visible:ring-[3px] focus-visible:ring-inset focus-visible:ring-ring/50 sm:flex-row sm:items-center sm:gap-4"
     >
       <div className="min-w-0 sm:w-52 sm:shrink-0 lg:w-60">
         <Heading className="truncate text-sm font-medium leading-tight text-foreground">

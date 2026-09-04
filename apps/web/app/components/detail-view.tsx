@@ -48,9 +48,7 @@ export function DetailView({
       ))}
       {systemFields.length > 0 ? (
         <>
-          <p className="mt-4 px-3 pb-1 text-xs uppercase tracking-[0.2em] text-muted-foreground">
-            <span className="text-primary">[</span>system<span className="text-primary">]</span>
-          </p>
+          <p className="mt-4 px-3 pb-1 text-xs text-muted-foreground">System</p>
           {systemFields.map((field) => (
             <Row key={field.name} field={field} record={record} linkLabels={linkLabels} />
           ))}

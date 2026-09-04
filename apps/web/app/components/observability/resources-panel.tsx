@@ -1,5 +1,5 @@
-import { RefreshCw } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { RefreshCw } from "~/components/icons";
 import { ChartCanvas } from "~/components/observability/chart-canvas";
 import { Panel, PanelEmpty } from "~/components/ui/panel";
 import { ApiError } from "~/lib/api";

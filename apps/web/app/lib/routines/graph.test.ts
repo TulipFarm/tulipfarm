@@ -116,6 +116,7 @@ describe("projectRoutineGraph", () => {
           {
             type: "compute",
             name: "Derive",
+            // biome-ignore lint/suspicious/noTemplateCurlyInString: routine placeholders are data here.
             input: { label: "need-triage", issue: "${ input.issueId }" },
             end: true,
           },

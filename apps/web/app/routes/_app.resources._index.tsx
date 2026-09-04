@@ -1,6 +1,6 @@
 import { type MetaFunction, useLoaderData, useRouteError } from "@remix-run/react";
-import { Plus, Search } from "lucide-react";
 import { useMemo, useState } from "react";
+import { Plus, Search } from "~/components/icons";
 import { PageShell } from "~/components/page-shell";
 import { CatalogTable } from "~/components/resources/catalog-table";
 import { StatStrip } from "~/components/resources/stat-strip";
@@ -84,7 +84,7 @@ export default function ResourcesIndex() {
       <PageShell crumbs={[{ label: "Resources" }]} title="Resources" actions={newTypeButton}>
         <div className="rounded-md border border-dashed border-border px-6 py-12 text-center">
           <p className="text-sm font-medium text-foreground">No resource types yet</p>
-          <p className="mx-auto mt-1 max-w-prose text-sm text-muted-foreground">
+          <p className="mx-auto mt-1 max-w-prose text-base text-muted-foreground">
             A resource type is a table your agents can read and write — a Ticket, a Customer, an
             Invoice. Describe one in chat and an agent will build it, or define the schema yourself.
           </p>

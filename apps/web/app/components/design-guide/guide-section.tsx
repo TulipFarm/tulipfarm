@@ -18,7 +18,7 @@ export function GuideSection({ id, title, description, children }: GuideSectionP
         <h2 id={`${id}-title`} className="text-xl font-semibold">
           {title}
         </h2>
-        <p className="mt-1 text-sm text-muted-foreground">{description}</p>
+        <p className="mt-1 text-base text-muted-foreground">{description}</p>
       </div>
       {children}
     </section>

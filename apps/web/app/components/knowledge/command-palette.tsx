@@ -147,7 +147,7 @@ export function CommandPalette({ spaceId }: { spaceId?: string | null }) {
                 {isZeroQuery ? "No recent pages." : "No pages found."}
               </Command.Empty>
               {isZeroQuery && results.length > 0 ? (
-                <div className="px-3 pt-2 pb-1 text-[0.625rem] font-medium uppercase tracking-[0.15em] text-muted-foreground">
+                <div className="px-3 pt-2 pb-1 text-xs font-medium text-muted-foreground">
                   Recently edited
                 </div>
               ) : null}
@@ -157,7 +157,7 @@ export function CommandPalette({ spaceId }: { spaceId?: string | null }) {
                   heading={
                     !isZeroQuery ? (spaceNames.get(group.spaceId ?? "") ?? "Other") : undefined
                   }
-                  className="[&_[cmdk-group-heading]]:px-3 [&_[cmdk-group-heading]]:py-1 [&_[cmdk-group-heading]]:text-[0.625rem] [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-[0.15em] [&_[cmdk-group-heading]]:text-muted-foreground"
+                  className="[&_[cmdk-group-heading]]:px-3 [&_[cmdk-group-heading]]:py-1 [&_[cmdk-group-heading]]:text-[0.625rem] [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:capitalize [&_[cmdk-group-heading]]:text-muted-foreground"
                 >
                   {group.hits.map((hit) => (
                     <Command.Item

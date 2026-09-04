@@ -1,4 +1,3 @@
-import { AlertTriangle, Check, ChevronDown, Circle, Loader2, Search, Sparkles } from "lucide-react";
 import {
   type ComponentType,
   type ElementType,
@@ -7,6 +6,15 @@ import {
   useId,
   useState,
 } from "react";
+import {
+  AlertTriangle,
+  Check,
+  ChevronDown,
+  Circle,
+  Loader2,
+  Search,
+  Sparkles,
+} from "~/components/icons";
 import { cn } from "~/lib/utils";
 import { DiffCount, ToolChip } from "./tool-chip";
 
@@ -158,7 +166,7 @@ export function Trace({
         <ChevronDown
           aria-hidden
           className={cn(
-            "size-3.5 shrink-0 text-muted-foreground/50 transition-transform duration-150 ease-snappy",
+            "size-3.5 shrink-0 text-muted-foreground/50 transition-transform duration-100 ease-snappy",
             open && "rotate-180"
           )}
         />
@@ -252,7 +260,7 @@ export function TraceStep({
         <ChevronDown
           aria-hidden
           className={cn(
-            "ml-auto size-3.5 shrink-0 text-muted-foreground/0 transition-[transform,color] duration-150 ease-snappy group-hover/step:text-muted-foreground",
+            "ml-auto size-3.5 shrink-0 text-muted-foreground/0 transition-[transform,color] duration-100 ease-snappy group-hover/step:text-muted-foreground",
             open && "rotate-180 text-muted-foreground/60"
           )}
         />
@@ -321,7 +329,10 @@ export function TraceQuery({ children }: { children: ReactNode }) {
 }) {
   return (
     <p
-      className={cn("tf-trace-row py-0.5 text-sm leading-relaxed text-muted-foreground", className)}
+      className={cn(
+        "tf-trace-row py-0.5 text-base leading-relaxed text-muted-foreground",
+        className
+      )}
     >
       {children}
     </p>

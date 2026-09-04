@@ -1,4 +1,4 @@
-import { ChevronRight, KeyRound, Link2, Lock } from "lucide-react";
+import { ChevronRight, KeyRound, Link2, Lock } from "~/components/icons";
 import type { FieldDescriptor } from "~/lib/schema";
 import { cn } from "~/lib/utils";
 
@@ -43,11 +43,11 @@ export function SchemaSummary({
   const systemCount = fields.filter((f) => f.isSystem).length;
   const ownCount = fields.length - systemCount;
   return (
-    <details open={defaultOpen} className="group rounded-md border border-border bg-card">
-      <summary className="flex cursor-pointer list-none items-center gap-2 rounded-md px-3 py-2.5 text-sm font-medium text-foreground transition-colors duration-150 hover:bg-accent">
+    <details open={defaultOpen} className="group rounded-lg border border-border bg-card">
+      <summary className="flex cursor-pointer list-none items-center gap-2 rounded-md px-3 py-2.5 text-sm font-medium text-foreground transition-colors hover:bg-accent">
         <ChevronRight
           aria-hidden
-          className="size-4 text-muted-foreground transition-transform duration-150 group-open:rotate-90"
+          className="size-4 text-muted-foreground transition-transform duration-100 group-open:rotate-90"
         />
         Schema
         {/* Names both numbers, because the stat strip above counts only the type's own fields and

@@ -5,8 +5,8 @@ import {
   useNavigate,
   useOutletContext,
 } from "@remix-run/react";
-import { Network, Pencil, Plus, Settings, Trash2 } from "lucide-react";
 import { useState } from "react";
+import { Network, Pencil, Plus, Settings, Trash2 } from "~/components/icons";
 import { MarkdownView } from "~/components/markdown-view";
 import { Button } from "~/components/ui/button";
 import { Link } from "~/components/ui/link";
