@@ -1,3 +1,4 @@
+import type { TeamBusinessAssetOwnership } from "@tulipfarm/schema";
 import { apiCommand, apiGet, CATALOG_TTL_MS, shareInFlight } from "./api";
 
 /* Cookie-first read client for soul-backed Agents; non-2xx responses throw `ApiError`. */
@@ -31,6 +32,7 @@ export type AgentSummary = {
   model?: string;
   autonomy?: Autonomy;
   capabilityRestrictions?: AgentCapabilityRestrictions;
+  ownership?: TeamBusinessAssetOwnership;
 };
 
 export type AgentDetail = AgentSummary & {

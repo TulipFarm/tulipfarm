@@ -1,4 +1,4 @@
-import type { routine as routineSchema } from "@tulipfarm/schema";
+import type { routine as routineSchema, TeamBusinessAssetOwnership } from "@tulipfarm/schema";
 import { apiGet, apiWrite } from "./api";
 
 /* Cookie-first routines client. */
@@ -24,6 +24,7 @@ export type RiskClass = "low" | "medium" | "high";
 /** What the catalog derived from the Routine document, so the list need not fetch each one. */
 export type RoutineCatalogSummary = {
   owner: string | null;
+  ownership?: TeamBusinessAssetOwnership;
   stateCount: number;
   stateTypes: string[];
   effects: RoutineEffectKind[];

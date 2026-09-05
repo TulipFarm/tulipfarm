@@ -3,7 +3,7 @@ import Placeholder from "@tiptap/extension-placeholder";
 import { EditorContent, useEditor, useEditorState } from "@tiptap/react";
 import { BubbleMenu } from "@tiptap/react/menus";
 import StarterKit from "@tiptap/starter-kit";
-import { ALLOWED_MEDIA_TYPES } from "@tulipfarm/files/limits";
+import { ALLOWED_MEDIA_TYPES, MAX_FILES_PER_MESSAGE } from "@tulipfarm/files/limits";
 import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { AgentGlyph } from "~/components/agent-glyph";
 import {
@@ -14,6 +14,7 @@ import {
   Code,
   CornerDownRight,
   Database,
+  FileText,
   Italic,
   Link as LinkIcon,
   Paperclip,
@@ -179,6 +180,7 @@ export function ComposerEditor({
   // Only for the border highlight while a drag is over the composer; `onDrop` re-uses the same
   // `add` the file input and paste already call, so there is no second upload path to keep in sync.
   const [dragActive, setDragActive] = useState(false);
+  const [fileMentionError, setFileMentionError] = useState<string | null>(null);
 
   // A File the Files library handed over, staged without re-uploading its bytes. The id arrives as
   // a prop rather than being read from the URL here: the composer is rendered outside a router in
@@ -199,16 +201,35 @@ export function ComposerEditor({
   submitRef.current = () => {
     if (!editor || busy) return;
     const doc = editor.getJSON() as PMNode;
-    const { text, agentId, skills, resources, knowledge } = serializeDoc(doc);
+    const {
+      text,
+      agentId,
+      skills,
+      resources,
+      knowledge,
+      files: mentionedFiles,
+    } = serializeDoc(doc);
     // An attachment alone is a message: "what is this?" is often the whole question.
-    const files = readyFiles.map((file) => ({
-      fileId: file.fileId as string,
-      mediaType: file.mediaType,
-      name: file.name,
-    }));
+    const files = Array.from(
+      new Map(
+        [
+          ...readyFiles.map((file) => ({
+            fileId: file.fileId as string,
+            mediaType: file.mediaType,
+            name: file.name,
+          })),
+          ...mentionedFiles,
+        ].map((file) => [file.fileId, file])
+      ).values()
+    );
     if (!text && files.length === 0) return;
     // Sending now would drop whatever is still in flight, silently.
     if (uploading) return;
+    if (files.length > MAX_FILES_PER_MESSAGE) {
+      setFileMentionError(`You can attach at most ${MAX_FILES_PER_MESSAGE} files to one message.`);
+      return;
+    }
+    setFileMentionError(null);
     onSend(text, { model, agentId, skills, resources, knowledgePages: knowledge, files });
     lastSentDocRef.current = doc;
     clear();
@@ -236,7 +257,7 @@ export function ComposerEditor({
     else chain.setLink({ href: url }).run();
   }
 
-  function insertContextTrigger(trigger: "@" | "/" | "#" | "~") {
+  function insertContextTrigger(trigger: "@" | "/" | "#" | "~" | "+") {
     if (!editor) return;
     editor.commands.insertContent(trigger);
     editor.view.focus();
@@ -347,6 +368,11 @@ export function ComposerEditor({
           ) : null}
           <EditorContent editor={editor} />
           <AttachmentStrip attachments={attachments} onRemove={remove} />
+          {fileMentionError ? (
+            <p className="px-3.5 pb-1 text-xs text-destructive" role="alert">
+              {fileMentionError}
+            </p>
+          ) : null}
           <div className="flex items-center gap-1 px-2 pb-2 pt-0.5">
             <input
               accept={ALLOWED_MEDIA_TYPES.join(",")}
@@ -362,6 +388,9 @@ export function ComposerEditor({
             />
             <ContextTrigger label="Attach file" onClick={() => fileInputRef.current?.click()}>
               <Paperclip aria-hidden className="size-4" />
+            </ContextTrigger>
+            <ContextTrigger label="Add File" shortcut="+" onClick={() => insertContextTrigger("+")}>
+              <FileText aria-hidden className="size-4" />
             </ContextTrigger>
             <ContextTrigger
               label="Mention Agent"

@@ -28,6 +28,7 @@ export async function generatedAudience(
     readonly businessId: string;
     readonly readableBy?: FileGrantee;
     readonly authoredByAgentId?: string;
+    readonly subjectPrincipalId?: string;
   },
   rolesOf?: (businessId: string, principalId: string) => Promise<readonly string[]>
 ): Promise<readonly FileGrantee[]> {
@@ -35,6 +36,14 @@ export async function generatedAudience(
   if (request.readableBy !== undefined) candidates.push(request.readableBy);
   if (request.authoredByAgentId !== undefined) {
     const held = await rolesOf?.(request.businessId, request.authoredByAgentId);
+    candidates.push(...roleGrantees(held ?? []));
+  }
+  // An unattended Run has no requester, so without the subject's own Roles a scheduled Routine
+  // whose Agent holds none produces a File owned by the business and shared with nobody — which
+  // no listing can return and no person can ever open. Only consulted when nobody asked, so an
+  // interactive Run's audience is exactly what it was.
+  if (request.readableBy === undefined && request.subjectPrincipalId !== undefined) {
+    const held = await rolesOf?.(request.businessId, request.subjectPrincipalId);
     candidates.push(...roleGrantees(held ?? []));
   }
 

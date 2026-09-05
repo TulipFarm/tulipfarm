@@ -2,13 +2,26 @@ import { createHash, randomUUID } from "node:crypto";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { FileSystemBlobPort } from "@tulipfarm/storage";
+import { type BlobRef, FileSystemBlobPort } from "@tulipfarm/storage";
 import { Jimp } from "jimp";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { imageSize } from "./dimensions";
 import { BUSINESS_PRINCIPAL_ID, MAX_FILE_BYTES } from "./limits";
-import type { FileGrantee, FileRecord, FileRepo, FileShare, NewFile } from "./repo";
-import { FileError, FileService } from "./service";
+import type {
+  FileDraftRecord,
+  FileFolderRecord,
+  FileGrantee,
+  FileRecord,
+  FileRepo,
+  FileShare,
+  FileVersionRecord,
+  NewFile,
+  NewFileDraft,
+  NewFileFolder,
+  NewFileVersion,
+  RestoreFileVersion,
+} from "./repo";
+import { type FileAssetOwnership, FileError, type FileOwnershipPort, FileService } from "./service";
 
 /**
  * Teardown retries because a test that fails mid-upload can leave a write in flight, and a
@@ -26,28 +39,395 @@ const PNG = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 2
 /** An in-memory repo, so these tests are about the pipeline rather than about SQL. */
 class MemoryFileRepo implements FileRepo {
   readonly rows: FileRecord[] = [];
+  readonly versions: FileVersionRecord[] = [];
+  readonly drafts: FileDraftRecord[] = [];
+  readonly cleanup: BlobRef[] = [];
+  readonly folders: FileFolderRecord[] = [];
+
+  async withBlobLock<T>(_hash: string, task: (repo: FileRepo) => Promise<T>): Promise<T> {
+    return await task(this);
+  }
 
   async create(file: NewFile): Promise<FileRecord> {
+    const createdAt = new Date();
     const record: FileRecord = {
       ...file,
+      folderId: file.folderId ?? null,
       origin: file.origin ?? "uploaded",
       sourceConversationId: null,
       sourceRunId: file.sourceRunId ?? null,
+      sourceToolCallId: file.sourceToolCallId ?? null,
       knowledgeRequestedAt: null,
-      createdAt: new Date(),
+      currentVersionId: file.id,
+      revision: 1,
+      modifiedAt: createdAt,
+      archivedAt: null,
+      createdAt,
     };
     this.rows.push(record);
+    this.versions.push({
+      id: file.id,
+      businessId: file.businessId,
+      fileId: file.id,
+      versionNumber: 1,
+      mediaType: file.mediaType,
+      claimedMediaType: file.claimedMediaType,
+      sizeBytes: file.sizeBytes,
+      blob: file.blob,
+      actorKind: file.versionActorKind ?? "principal",
+      actorId: file.versionActorId ?? file.ownerPrincipalId,
+      reason: "created",
+      sourceConversationId: null,
+      sourceRunId: file.sourceRunId ?? null,
+      restoredFromVersionId: null,
+      createdAt,
+    });
     return record;
+  }
+
+  async createGenerated(file: NewFile): Promise<{ file: FileRecord; created: boolean }> {
+    const existing = this.rows.find(
+      (row) =>
+        row.businessId === file.businessId &&
+        row.sourceRunId === file.sourceRunId &&
+        row.sourceToolCallId === file.sourceToolCallId
+    );
+    if (existing !== undefined) return { file: existing, created: false };
+    return { file: await this.create(file), created: true };
+  }
+
+  async createDraft(draft: NewFileDraft): Promise<{ draft: FileDraftRecord; created: boolean }> {
+    const existing = this.drafts.find(
+      (row) =>
+        row.businessId === draft.businessId &&
+        row.sourceRunId === draft.sourceRunId &&
+        row.sourceToolCallId === draft.sourceToolCallId
+    );
+    if (existing !== undefined) return { draft: existing, created: false };
+    const record: FileDraftRecord = {
+      ...draft,
+      authoredByAgentId: draft.authoredByAgentId ?? null,
+      savedFileId: null,
+      createdAt: new Date(),
+    };
+    this.drafts.push(record);
+    return { draft: record, created: true };
+  }
+
+  async getDraft(
+    businessId: string,
+    id: string,
+    creatorPrincipalId: string
+  ): Promise<FileDraftRecord | null> {
+    return (
+      this.drafts.find(
+        (draft) =>
+          draft.businessId === businessId &&
+          draft.id === id &&
+          draft.creatorPrincipalId === creatorPrincipalId
+      ) ?? null
+    );
+  }
+
+  async saveDraft(
+    businessId: string,
+    id: string,
+    creatorPrincipalId: string,
+    fileId: string
+  ): Promise<FileRecord | null> {
+    const index = this.drafts.findIndex(
+      (draft) =>
+        draft.businessId === businessId &&
+        draft.id === id &&
+        draft.creatorPrincipalId === creatorPrincipalId
+    );
+    const draft = this.drafts[index];
+    if (draft === undefined || draft.expiresAt.getTime() <= Date.now()) return null;
+    if (draft.savedFileId !== null) return await this.get(businessId, draft.savedFileId);
+    const file = await this.create({
+      id: fileId,
+      businessId,
+      ownerPrincipalId: creatorPrincipalId,
+      filename: draft.filename,
+      mediaType: draft.mediaType,
+      claimedMediaType: draft.mediaType,
+      sizeBytes: draft.sizeBytes,
+      blob: draft.blob,
+      origin: "generated",
+      sourceRunId: draft.sourceRunId,
+      sourceToolCallId: draft.sourceToolCallId,
+      versionActorKind: draft.authoredByAgentId === null ? "system" : "agent",
+      versionActorId: draft.authoredByAgentId ?? BUSINESS_PRINCIPAL_ID,
+    });
+    this.drafts[index] = { ...draft, savedFileId: file.id };
+    return file;
+  }
+
+  async expireDrafts(_limit: number): Promise<number> {
+    const before = this.drafts.length;
+    const now = Date.now();
+    for (let index = this.drafts.length - 1; index >= 0; index -= 1) {
+      const draft = this.drafts[index];
+      if (
+        (draft?.expiresAt.getTime() ?? Number.POSITIVE_INFINITY) <= now &&
+        draft?.savedFileId === null
+      ) {
+        if (
+          !this.cleanup.some((blob) => blob.key === draft.blob.key && blob.hash === draft.blob.hash)
+        ) {
+          this.cleanup.push(draft.blob);
+        }
+        this.drafts.splice(index, 1);
+      }
+    }
+    return before - this.drafts.length;
   }
 
   async get(businessId: string, id: string): Promise<FileRecord | null> {
     return this.rows.find((r) => r.businessId === businessId && r.id === id) ?? null;
   }
 
+  async getMany(businessId: string, ids: readonly string[]): Promise<FileRecord[]> {
+    const wanted = new Set(ids);
+    return this.rows.filter((row) => row.businessId === businessId && wanted.has(row.id));
+  }
+
+  async createFolder(folder: NewFileFolder): Promise<FileFolderRecord | null> {
+    if (
+      this.folders.some(
+        (candidate) =>
+          candidate.businessId === folder.businessId &&
+          candidate.ownerPrincipalId === folder.ownerPrincipalId &&
+          candidate.parentId === (folder.parentId ?? null) &&
+          candidate.name.toLowerCase() === folder.name.toLowerCase()
+      )
+    ) {
+      return null;
+    }
+    if (
+      folder.parentId !== undefined &&
+      !this.folders.some(
+        (candidate) =>
+          candidate.id === folder.parentId &&
+          candidate.businessId === folder.businessId &&
+          candidate.ownerPrincipalId === folder.ownerPrincipalId
+      )
+    ) {
+      return null;
+    }
+    const now = new Date();
+    const record: FileFolderRecord = {
+      ...folder,
+      parentId: folder.parentId ?? null,
+      createdAt: now,
+      modifiedAt: now,
+    };
+    this.folders.push(record);
+    return record;
+  }
+
+  async getFolder(businessId: string, id: string): Promise<FileFolderRecord | null> {
+    return (
+      this.folders.find((folder) => folder.businessId === businessId && folder.id === id) ?? null
+    );
+  }
+
+  async listFolders(businessId: string, ownerPrincipalId: string): Promise<FileFolderRecord[]> {
+    return this.folders.filter(
+      (folder) => folder.businessId === businessId && folder.ownerPrincipalId === ownerPrincipalId
+    );
+  }
+
+  async renameFolder(
+    businessId: string,
+    id: string,
+    ownerPrincipalId: string,
+    name: string
+  ): Promise<FileFolderRecord | null> {
+    const index = this.folders.findIndex(
+      (folder) =>
+        folder.businessId === businessId &&
+        folder.id === id &&
+        folder.ownerPrincipalId === ownerPrincipalId
+    );
+    if (index === -1) return null;
+    const folder = this.folders[index];
+    if (
+      this.folders.some(
+        (sibling) =>
+          sibling.businessId === businessId &&
+          sibling.ownerPrincipalId === ownerPrincipalId &&
+          sibling.id !== id &&
+          sibling.parentId === folder.parentId &&
+          sibling.name.toLowerCase() === name.toLowerCase()
+      )
+    ) {
+      return null;
+    }
+    const renamed = { ...folder, name, modifiedAt: new Date() };
+    this.folders[index] = renamed;
+    return renamed;
+  }
+
+  async deleteFolder(businessId: string, id: string, ownerPrincipalId: string): Promise<boolean> {
+    const index = this.folders.findIndex(
+      (folder) =>
+        folder.businessId === businessId &&
+        folder.id === id &&
+        folder.ownerPrincipalId === ownerPrincipalId
+    );
+    if (index === -1) return false;
+    if (this.rows.some((row) => row.folderId === id)) return false;
+    if (this.folders.some((folder) => folder.parentId === id)) return false;
+    this.folders.splice(index, 1);
+    return true;
+  }
+
+  async moveFile(
+    businessId: string,
+    id: string,
+    ownerPrincipalId: string,
+    folderId: string | null,
+    expectedRevision: number
+  ): Promise<FileRecord | null> {
+    const index = this.rows.findIndex(
+      (row) =>
+        row.businessId === businessId &&
+        row.id === id &&
+        row.ownerPrincipalId === ownerPrincipalId &&
+        row.revision === expectedRevision &&
+        row.archivedAt === null
+    );
+    const current = this.rows[index];
+    if (current === undefined) return null;
+    const updated = {
+      ...current,
+      folderId,
+      revision: current.revision + 1,
+      modifiedAt: new Date(),
+    };
+    this.rows[index] = updated;
+    return updated;
+  }
+
   async listByOwner(businessId: string, owner: string, limit: number): Promise<FileRecord[]> {
     return this.rows
-      .filter((r) => r.businessId === businessId && r.ownerPrincipalId === owner)
+      .filter(
+        (r) => r.businessId === businessId && r.ownerPrincipalId === owner && r.archivedAt === null
+      )
       .slice(0, limit);
+  }
+
+  async listArchivedByOwner(
+    businessId: string,
+    owner: string,
+    limit: number
+  ): Promise<FileRecord[]> {
+    return this.rows
+      .filter(
+        (r) => r.businessId === businessId && r.ownerPrincipalId === owner && r.archivedAt !== null
+      )
+      .slice(0, limit);
+  }
+
+  async replaceVersion(version: NewFileVersion): Promise<FileRecord | null> {
+    const index = this.rows.findIndex(
+      (row) =>
+        row.businessId === version.businessId &&
+        row.id === version.fileId &&
+        row.revision === version.expectedRevision &&
+        row.archivedAt === null
+    );
+    const current = this.rows[index];
+    if (current === undefined) return null;
+    const createdAt = new Date();
+    const next: FileVersionRecord = {
+      id: version.id,
+      businessId: version.businessId,
+      fileId: version.fileId,
+      versionNumber: this.versions.filter((item) => item.fileId === version.fileId).length + 1,
+      mediaType: version.mediaType,
+      claimedMediaType: version.claimedMediaType,
+      sizeBytes: version.sizeBytes,
+      blob: version.blob,
+      actorKind: version.actorKind,
+      actorId: version.actorId,
+      reason: "replaced",
+      sourceConversationId: null,
+      sourceRunId: null,
+      restoredFromVersionId: null,
+      createdAt,
+    };
+    this.versions.push(next);
+    const updated = {
+      ...current,
+      mediaType: next.mediaType,
+      claimedMediaType: next.claimedMediaType,
+      sizeBytes: next.sizeBytes,
+      blob: next.blob,
+      currentVersionId: next.id,
+      revision: current.revision + 1,
+      modifiedAt: createdAt,
+    };
+    this.rows[index] = updated;
+    return updated;
+  }
+
+  async restoreVersion(version: RestoreFileVersion): Promise<FileRecord | null> {
+    const source = this.versions.find(
+      (item) =>
+        item.businessId === version.businessId &&
+        item.fileId === version.fileId &&
+        item.id === version.versionId
+    );
+    if (source === undefined) return null;
+    return await this.replaceVersion({
+      id: version.id,
+      businessId: version.businessId,
+      fileId: version.fileId,
+      expectedRevision: version.expectedRevision,
+      mediaType: source.mediaType,
+      claimedMediaType: source.claimedMediaType,
+      sizeBytes: source.sizeBytes,
+      blob: source.blob,
+      actorKind: version.actorKind,
+      actorId: version.actorId,
+      reason: "replaced",
+    }).then((file) => {
+      const restored = this.versions.at(-1);
+      if (file && restored) {
+        this.versions[this.versions.length - 1] = {
+          ...restored,
+          reason: "restored",
+          restoredFromVersionId: version.versionId,
+        };
+      }
+      return file;
+    });
+  }
+
+  async setArchived(
+    businessId: string,
+    id: string,
+    expectedRevision: number,
+    archived: boolean
+  ): Promise<FileRecord | null> {
+    const index = this.rows.findIndex(
+      (row) =>
+        row.businessId === businessId &&
+        row.id === id &&
+        row.revision === expectedRevision &&
+        (archived ? row.archivedAt === null : row.archivedAt !== null)
+    );
+    const current = this.rows[index];
+    if (current === undefined) return null;
+    const updated = {
+      ...current,
+      archivedAt: archived ? new Date() : null,
+      revision: current.revision + 1,
+    };
+    this.rows[index] = updated;
+    return updated;
   }
 
   readonly shares: FileShare[] = [];
@@ -102,9 +482,54 @@ class MemoryFileRepo implements FileRepo {
     return this.rows
       .filter(
         (r) =>
-          r.businessId === businessId && r.ownerPrincipalId !== ownerPrincipalId && shared.has(r.id)
+          r.businessId === businessId &&
+          r.ownerPrincipalId !== ownerPrincipalId &&
+          shared.has(r.id) &&
+          r.archivedAt === null
       )
       .slice(0, limit);
+  }
+
+  async searchReadable(
+    businessId: string,
+    principalId: string,
+    grantees: readonly FileGrantee[],
+    query: string,
+    limit: number
+  ): Promise<FileRecord[]> {
+    return this.rows
+      .filter(
+        (row) =>
+          row.businessId === businessId &&
+          row.archivedAt === null &&
+          row.filename.toLowerCase().includes(query.toLowerCase()) &&
+          (row.ownerPrincipalId === principalId ||
+            this.shares.some(
+              (share) =>
+                share.fileId === row.id &&
+                grantees.some((grantee) => grantee.kind === share.kind && grantee.id === share.id)
+            ))
+      )
+      .slice(0, limit);
+  }
+
+  async listVersions(businessId: string, fileId: string): Promise<FileVersionRecord[]> {
+    return this.versions
+      .filter((version) => version.businessId === businessId && version.fileId === fileId)
+      .sort((a, b) => b.versionNumber - a.versionNumber);
+  }
+
+  async getVersion(
+    businessId: string,
+    fileId: string,
+    versionId: string
+  ): Promise<FileVersionRecord | null> {
+    return (
+      this.versions.find(
+        (version) =>
+          version.businessId === businessId && version.fileId === fileId && version.id === versionId
+      ) ?? null
+    );
   }
 
   async recordFirstConversation(
@@ -125,16 +550,31 @@ class MemoryFileRepo implements FileRepo {
     if (row !== undefined) this.rows[i] = { ...row, knowledgeRequestedAt: at };
   }
 
-  async delete(businessId: string, id: string): Promise<boolean> {
+  async deleteArchived(
+    businessId: string,
+    id: string,
+    expectedRevision: number
+  ): Promise<FileRecord | null> {
     const index = this.rows.findIndex((r) => r.businessId === businessId && r.id === id);
-    if (index === -1) return false;
+    const file = this.rows[index];
+    if (file === undefined || file.revision !== expectedRevision || file.archivedAt === null) {
+      return null;
+    }
+    for (const version of this.versions.filter((item) => item.fileId === id)) {
+      if (!this.cleanup.some((blob) => blob.key === version.blob.key)) {
+        this.cleanup.push(version.blob);
+      }
+    }
     this.rows.splice(index, 1);
+    for (let i = this.versions.length - 1; i >= 0; i--) {
+      if (this.versions[i]?.fileId === id) this.versions.splice(i, 1);
+    }
     // Mirrors `file_shares.file_id ... ON DELETE CASCADE`. A memory repo that kept the shares
     // would be a repo in which revocation-by-deletion appears to work and does not.
     for (let i = this.shares.length - 1; i >= 0; i--) {
       if (this.shares[i]?.fileId === id) this.shares.splice(i, 1);
     }
-    return true;
+    return file;
   }
 
   async readableIds(
@@ -157,8 +597,24 @@ class MemoryFileRepo implements FileRepo {
   }
 
   async anyReferencesBlob(hash: string): Promise<boolean> {
-    return this.rows.some((r) => r.blob.hash === hash);
+    return (
+      this.versions.some((version) => version.blob.hash === hash) ||
+      this.drafts.some((draft) => draft.blob.hash === hash)
+    );
   }
+
+  async claimBlobCleanup(): Promise<readonly { blob: BlobRef; attempts: number }[]> {
+    return this.cleanup.map((blob) => ({ blob, attempts: 1 }));
+  }
+
+  async completeBlobCleanup(blob: BlobRef): Promise<void> {
+    const index = this.cleanup.findIndex(
+      (candidate) => candidate.key === blob.key && candidate.hash === blob.hash
+    );
+    if (index !== -1) this.cleanup.splice(index, 1);
+  }
+
+  async retryBlobCleanup(): Promise<void> {}
 }
 
 async function* once(bytes: Uint8Array): AsyncIterable<Uint8Array> {
@@ -204,6 +660,191 @@ describe("FileService.upload", () => {
   it("owns the File by the uploading Principal", async () => {
     const file = await upload();
     expect(file.ownerPrincipalId).toBe(OWNER);
+  });
+
+  describe("Team ownership", () => {
+    function teamOwnership(
+      access: Map<string, { levels: Array<"view" | "use" | "edit">; manage: boolean }>,
+      onConsume?: (operationId: string) => void
+    ): FileOwnershipPort {
+      const records = new Map<string, FileAssetOwnership>();
+      return {
+        async createPersonal(businessId, fileId, principalId) {
+          records.set(fileId, {
+            businessId,
+            assetType: "file",
+            assetId: fileId,
+            owners: [{ kind: "principal", principalId, principalKind: "user" }],
+            shares: [],
+            revision: 1,
+            createdAt: new Date(),
+            updatedAt: new Date(),
+          });
+        },
+        async get(_businessId, fileId) {
+          return records.get(fileId);
+        },
+        async accessFor(_ownership, principalId) {
+          const projected = access.get(principalId);
+          return {
+            levels: projected?.levels ?? [],
+            canManageOwnership: projected?.manage ?? false,
+          };
+        },
+        async consumeDestructiveApproval(ownership, action, operationId) {
+          const joint = ownership.owners.filter((owner) => owner.kind === "team").length > 1;
+          if (joint && operationId !== `${action}-operation`) {
+            throw new FileError("invalid_state", "joint owner Approval required");
+          }
+          if (operationId) onConsume?.(operationId);
+        },
+      };
+    }
+
+    async function teamOwnedFile(
+      access: Map<string, { levels: Array<"view" | "use" | "edit">; manage: boolean }>,
+      owners?: FileAssetOwnership["owners"],
+      onConsume?: (operationId: string) => void
+    ) {
+      const file = await upload();
+      const ownership = teamOwnership(access, onConsume);
+      const record: FileAssetOwnership = {
+        businessId: BUSINESS,
+        assetType: "file",
+        assetId: file.id,
+        owners: owners ?? [{ kind: "team", teamId: "team-owner" }],
+        shares: [],
+        revision: 1,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      };
+      const originalGet = ownership.get;
+      ownership.get = async (businessId, fileId) =>
+        fileId === file.id ? record : originalGet(businessId, fileId);
+      service = new FileService({
+        repo,
+        blobs,
+        newId: () => randomUUID(),
+        ownership,
+      });
+      return file;
+    }
+
+    it("projects owner members, exact admins, descendants, and explicit Edit into existing gates", async () => {
+      const access = new Map([
+        ["member", { levels: ["view", "use"] as Array<"view" | "use">, manage: false }],
+        ["owner-admin", { levels: ["view", "use", "edit"] as const, manage: true }],
+        ["child-admin", { levels: ["view", "use"] as Array<"view" | "use">, manage: false }],
+        ["shared-editor", { levels: ["view", "use", "edit"] as const, manage: false }],
+      ]);
+      const file = await teamOwnedFile(
+        access as Map<string, { levels: Array<"view" | "use" | "edit">; manage: boolean }>
+      );
+
+      await expect(service.read(BUSINESS, file.id, "member")).resolves.toMatchObject({
+        id: file.id,
+      });
+      await expect(service.read(BUSINESS, file.id, "child-admin")).resolves.toMatchObject({
+        id: file.id,
+      });
+      await expect(
+        service.replace({
+          businessId: BUSINESS,
+          ownerPrincipalId: "shared-editor",
+          fileId: file.id,
+          expectedRevision: file.revision,
+          claimedMediaType: "image/png",
+          declaredBytes: PNG.byteLength,
+          body: once(PNG),
+        })
+      ).resolves.toMatchObject({ revision: 2 });
+      await expect(
+        service.share(BUSINESS, file.id, "shared-editor", { kind: "user", id: STRANGER })
+      ).rejects.toMatchObject({ reason: "not_found" });
+    });
+
+    it("applies Team revocation to the next read without cached membership", async () => {
+      const access = new Map<string, { levels: Array<"view" | "use" | "edit">; manage: boolean }>([
+        ["member", { levels: ["view", "use"], manage: false }],
+      ]);
+      const file = await teamOwnedFile(access);
+      await expect(service.read(BUSINESS, file.id, "member")).resolves.toMatchObject({
+        id: file.id,
+      });
+      access.delete("member");
+      await expect(service.read(BUSINESS, file.id, "member")).rejects.toMatchObject({
+        reason: "not_found",
+      });
+    });
+
+    it("keeps a personal File private", async () => {
+      const ownership = teamOwnership(
+        new Map([[OWNER, { levels: ["view", "use", "edit"], manage: true }]])
+      );
+      service = new FileService({ repo, blobs, newId: () => randomUUID(), ownership });
+      const file = await upload();
+      await expect(service.read(BUSINESS, file.id, OWNER)).resolves.toMatchObject({ id: file.id });
+      await expect(service.read(BUSINESS, file.id, STRANGER)).rejects.toMatchObject({
+        reason: "not_found",
+      });
+    });
+
+    it("consumes a pending T11 Approval as part of a joint-owner archive", async () => {
+      const access = new Map<string, { levels: Array<"view" | "use" | "edit">; manage: boolean }>([
+        ["owner-admin", { levels: ["view", "use", "edit"], manage: true }],
+      ]);
+      const consumed: string[] = [];
+      const file = await teamOwnedFile(
+        access,
+        [
+          { kind: "team", teamId: "team-a" },
+          { kind: "team", teamId: "team-b" },
+        ],
+        (operationId) => consumed.push(operationId)
+      );
+      await expect(
+        service.archive(BUSINESS, file.id, "owner-admin", file.revision)
+      ).rejects.toMatchObject({ reason: "invalid_state" });
+      await expect(
+        service.archive(
+          BUSINESS,
+          file.id,
+          "owner-admin",
+          file.revision,
+          undefined,
+          "archive-operation"
+        )
+      ).resolves.toMatchObject({ archivedAt: expect.any(Date) });
+      expect(consumed).toEqual(["archive-operation"]);
+    });
+
+    it("consumes the exact pending Approval before a joint-owner permanent delete", async () => {
+      const access = new Map<string, { levels: Array<"view" | "use" | "edit">; manage: boolean }>([
+        ["owner-admin", { levels: ["view", "use", "edit"], manage: true }],
+      ]);
+      const consumed: string[] = [];
+      const file = await teamOwnedFile(
+        access,
+        [
+          { kind: "team", teamId: "team-a" },
+          { kind: "team", teamId: "team-b" },
+        ],
+        (operationId) => consumed.push(operationId)
+      );
+      const archived = await service.archive(
+        BUSINESS,
+        file.id,
+        "owner-admin",
+        file.revision,
+        undefined,
+        "archive-operation"
+      );
+
+      await expect(
+        service.delete(BUSINESS, file.id, "owner-admin", archived.revision, "delete-operation")
+      ).resolves.toMatchObject({ id: file.id });
+      expect(consumed).toEqual(["archive-operation", "delete-operation"]);
+    });
   });
 
   // The order is the point: a declared length over the cap must cost a header, not a write.
@@ -445,22 +1086,12 @@ describe("FileService.upload — image bounding", () => {
     expect(file.mediaType).toBe("image/png");
   });
 
-  it("refuses an oversized image at upload, when the person is present to be told", async () => {
+  it("stores an oversized image when the operator configured no image policy", async () => {
     const service = serviceWith();
 
-    await expect(put(service, await realPng(1_600, 8))).rejects.toMatchObject({
-      reason: "image_too_large",
+    await expect(put(service, await realPng(1_600, 8))).resolves.toMatchObject({
+      mediaType: "image/png",
     });
-  });
-
-  it("leaves no row behind for a refused image", async () => {
-    await expect(put(serviceWith(), await realPng(1_600, 8))).rejects.toThrow(FileError);
-
-    expect(repo.rows).toHaveLength(0);
-  });
-
-  it("names the actual size in the refusal, so the person knows what to change", async () => {
-    await expect(put(serviceWith(), await realPng(1_600, 8))).rejects.toThrow(/1600×8/);
   });
 
   it("downscales instead of refusing when the operator turned it on", async () => {
@@ -503,6 +1134,13 @@ describe("FileService.upload — image bounding", () => {
     });
   });
 
+  it("names the actual size when an operator-configured limit refuses an image", async () => {
+    const service = serviceWith(() => ({ maxImageDimension: 100 }));
+
+    await expect(put(service, await realPng(320, 200))).rejects.toThrow(/320×200/);
+    expect(repo.rows).toHaveLength(0);
+  });
+
   it("does not bound a PDF, whose cost the byte cap already governs", async () => {
     const pdf = new Uint8Array(64);
     pdf.set([0x25, 0x50, 0x44, 0x46, 0x2d], 0);
@@ -523,7 +1161,7 @@ describe("FileService.upload — image bounding", () => {
   it("reads a JPEG's dimensions from behind its metadata, not just its first bytes", async () => {
     const image = new Jimp({ width: 1_600, height: 8, color: 0x336699ff });
     const jpeg = new Uint8Array(await image.getBuffer("image/jpeg"));
-    const service = serviceWith();
+    const service = serviceWith(() => ({ maxImageDimension: 100 }));
 
     await expect(
       service.upload({
@@ -666,6 +1304,27 @@ describe("sharing a File", () => {
     expect(page.files.map((f) => f.id)).not.toContain(mine.id);
   });
 
+  it("lists archived Files only for their owner", async () => {
+    const mine = await uploaded();
+    const theirs = await service.upload({
+      businessId: BUSINESS,
+      ownerPrincipalId: STRANGER,
+      filename: "theirs.png",
+      claimedMediaType: "image/png",
+      declaredBytes: PNG_BYTES.byteLength,
+      body: (async function* () {
+        yield PNG_BYTES;
+      })(),
+    });
+    await service.archive(BUSINESS, mine.id, OWNER, mine.revision);
+    await service.archive(BUSINESS, theirs.id, STRANGER, theirs.revision);
+
+    const page = await service.listArchivedPage(BUSINESS, OWNER, 10);
+
+    expect(page.files.map((file) => file.id)).toEqual([mine.id]);
+    expect(page.shareCounts).toEqual(new Map());
+  });
+
   it("treats sharing twice as one share, so a revoke is not half a revoke", async () => {
     const file = await uploaded();
 
@@ -760,20 +1419,32 @@ describe("deleting a File", () => {
     });
   }
 
-  it("removes the row and the bytes together", async () => {
+  async function archived(file: FileRecord) {
+    return await service.archive(BUSINESS, file.id, file.ownerPrincipalId, file.revision);
+  }
+
+  it("requires archive before permanent deletion", async () => {
     const file = await uploaded();
+
+    await expect(service.delete(BUSINESS, file.id, OWNER, file.revision)).rejects.toMatchObject({
+      reason: "invalid_state",
+    });
+  });
+
+  it("removes the row and schedules every version blob for cleanup", async () => {
+    const file = await archived(await uploaded());
     expect((await blobs.head(file.blob)) !== null).toBe(true);
 
-    await service.delete(BUSINESS, file.id, OWNER);
+    await service.delete(BUSINESS, file.id, OWNER, file.revision);
 
     expect(await repo.get(BUSINESS, file.id)).toBeNull();
     expect((await blobs.head(file.blob)) !== null).toBe(false);
   });
 
   it("hands back what was destroyed, so the deletion can be audited", async () => {
-    const file = await uploaded(OWNER, "invoice.png");
+    const file = await archived(await uploaded(OWNER, "invoice.png"));
 
-    const destroyed = await service.delete(BUSINESS, file.id, OWNER);
+    const destroyed = await service.delete(BUSINESS, file.id, OWNER, file.revision);
 
     expect(destroyed.filename).toBe("invoice.png");
     expect(destroyed.sizeBytes).toBe(PNG_BYTES.byteLength);
@@ -781,9 +1452,9 @@ describe("deleting a File", () => {
   });
 
   it("refuses a stranger, and leaves the File intact", async () => {
-    const file = await uploaded();
+    const file = await archived(await uploaded());
 
-    await expect(service.delete(BUSINESS, file.id, STRANGER)).rejects.toMatchObject({
+    await expect(service.delete(BUSINESS, file.id, STRANGER, file.revision)).rejects.toMatchObject({
       reason: "not_found",
     });
     expect(await repo.get(BUSINESS, file.id)).not.toBeNull();
@@ -793,18 +1464,20 @@ describe("deleting a File", () => {
     const file = await uploaded();
     await service.share(BUSINESS, file.id, OWNER, { kind: "user", id: STRANGER });
     expect((await service.read(BUSINESS, file.id, STRANGER)).id).toBe(file.id);
+    const archivedFile = await archived(file);
 
-    await expect(service.delete(BUSINESS, file.id, STRANGER)).rejects.toMatchObject({
-      reason: "not_found",
-    });
+    await expect(
+      service.delete(BUSINESS, file.id, STRANGER, archivedFile.revision)
+    ).rejects.toMatchObject({ reason: "not_found" });
     expect((await blobs.head(file.blob)) !== null).toBe(true);
   });
 
   it("takes every share with it, so a recipient loses access immediately", async () => {
     const file = await uploaded();
     await service.share(BUSINESS, file.id, OWNER, { kind: "user", id: STRANGER });
+    const archivedFile = await archived(file);
 
-    await service.delete(BUSINESS, file.id, OWNER);
+    await service.delete(BUSINESS, file.id, OWNER, archivedFile.revision);
 
     await expect(service.read(BUSINESS, file.id, STRANGER)).rejects.toMatchObject({
       reason: "not_found",
@@ -813,27 +1486,27 @@ describe("deleting a File", () => {
   });
 
   it("keeps the bytes of a byte-identical File someone else still owns", async () => {
-    const mine = await uploaded(OWNER);
+    const mine = await archived(await uploaded(OWNER));
     const theirs = await uploaded(STRANGER);
     expect(theirs.blob.hash).toBe(mine.blob.hash);
 
-    await service.delete(BUSINESS, mine.id, OWNER);
+    await service.delete(BUSINESS, mine.id, OWNER, mine.revision);
 
     expect((await blobs.head(theirs.blob)) !== null).toBe(true);
     expect((await service.read(BUSINESS, theirs.id, STRANGER)).id).toBe(theirs.id);
   });
 
   it("is idempotent enough to refuse a second attempt rather than delete twice", async () => {
-    const file = await uploaded();
-    await service.delete(BUSINESS, file.id, OWNER);
+    const file = await archived(await uploaded());
+    await service.delete(BUSINESS, file.id, OWNER, file.revision);
 
-    await expect(service.delete(BUSINESS, file.id, OWNER)).rejects.toMatchObject({
+    await expect(service.delete(BUSINESS, file.id, OWNER, file.revision)).rejects.toMatchObject({
       reason: "not_found",
     });
   });
 
-  it("raises when the bytes cannot be erased, rather than reporting a silent success", async () => {
-    const file = await uploaded();
+  it("keeps durable cleanup work when the blob store is temporarily unavailable", async () => {
+    const file = await archived(await uploaded());
     const failing = new FileService({
       repo,
       blobs: {
@@ -847,7 +1520,181 @@ describe("deleting a File", () => {
       newId: () => randomUUID(),
     });
 
-    await expect(failing.delete(BUSINESS, file.id, OWNER)).rejects.toThrow("bucket said no");
+    await expect(failing.delete(BUSINESS, file.id, OWNER, file.revision)).resolves.toMatchObject({
+      id: file.id,
+    });
+    expect(repo.cleanup).toEqual([file.blob]);
+    expect(await blobs.head(file.blob)).not.toBeNull();
+  });
+});
+
+describe("File lifecycle", () => {
+  let root: string;
+  let blobs: FileSystemBlobPort;
+  let repo: MemoryFileRepo;
+  let service: FileService;
+
+  beforeEach(async () => {
+    root = await mkdtemp(join(tmpdir(), "tulip-files-lifecycle-"));
+    blobs = new FileSystemBlobPort(root);
+    repo = new MemoryFileRepo();
+    service = new FileService({ repo, blobs, newId: () => randomUUID() });
+  });
+
+  afterEach(async () => {
+    await rm(root, PURGE);
+  });
+
+  async function uploadText(content = "one") {
+    const bytes = new TextEncoder().encode(content);
+    return await service.upload({
+      businessId: BUSINESS,
+      ownerPrincipalId: OWNER,
+      filename: "notes.txt",
+      claimedMediaType: "text/plain",
+      declaredBytes: bytes.byteLength,
+      body: once(bytes),
+    });
+  }
+
+  it("replaces content with an immutable same-format version", async () => {
+    const original = await uploadText();
+    const bytes = new TextEncoder().encode("two");
+
+    const replaced = await service.replace({
+      businessId: BUSINESS,
+      ownerPrincipalId: OWNER,
+      fileId: original.id,
+      expectedRevision: original.revision,
+      claimedMediaType: "text/plain",
+      declaredBytes: bytes.byteLength,
+      body: once(bytes),
+    });
+
+    expect(replaced.revision).toBe(2);
+    expect(repo.versions.map((version) => version.reason)).toEqual(["created", "replaced"]);
+    expect(repo.versions[0]?.blob.hash).not.toBe(repo.versions[1]?.blob.hash);
+  });
+
+  it("refuses a stale replacement before consuming its body", async () => {
+    const original = await uploadText();
+    let consumed = false;
+    const body = (async function* () {
+      consumed = true;
+      yield new TextEncoder().encode("two");
+    })();
+
+    await expect(
+      service.replace({
+        businessId: BUSINESS,
+        ownerPrincipalId: OWNER,
+        fileId: original.id,
+        expectedRevision: original.revision + 1,
+        claimedMediaType: "text/plain",
+        declaredBytes: 3,
+        body,
+      })
+    ).rejects.toMatchObject({ reason: "conflict" });
+    expect(consumed).toBe(false);
+  });
+
+  it("refuses a replacement whose verified format differs", async () => {
+    const original = await uploadText();
+
+    await expect(
+      service.replace({
+        businessId: BUSINESS,
+        ownerPrincipalId: OWNER,
+        fileId: original.id,
+        expectedRevision: original.revision,
+        claimedMediaType: "image/png",
+        declaredBytes: PNG.byteLength,
+        body: once(PNG),
+      })
+    ).rejects.toMatchObject({ reason: "format_mismatch" });
+    expect(repo.versions).toHaveLength(1);
+  });
+
+  it("restores old content as a new version without writing another blob", async () => {
+    let puts = 0;
+    const counting = new FileService({
+      repo,
+      blobs: {
+        put: async (body, type) => {
+          puts += 1;
+          return await blobs.put(body, type);
+        },
+        get: (ref, range) => blobs.get(ref, range),
+        head: (ref) => blobs.head(ref),
+        delete: (ref) => blobs.delete(ref),
+      },
+      newId: () => randomUUID(),
+    });
+    const originalBytes = new TextEncoder().encode("one");
+    const original = await counting.upload({
+      businessId: BUSINESS,
+      ownerPrincipalId: OWNER,
+      filename: "notes.txt",
+      claimedMediaType: "text/plain",
+      declaredBytes: originalBytes.byteLength,
+      body: once(originalBytes),
+    });
+    const replacementBytes = new TextEncoder().encode("two");
+    const replaced = await counting.replace({
+      businessId: BUSINESS,
+      ownerPrincipalId: OWNER,
+      fileId: original.id,
+      expectedRevision: original.revision,
+      claimedMediaType: "text/plain",
+      declaredBytes: replacementBytes.byteLength,
+      body: once(replacementBytes),
+    });
+
+    const restored = await counting.restoreVersion({
+      businessId: BUSINESS,
+      ownerPrincipalId: OWNER,
+      fileId: original.id,
+      versionId: original.currentVersionId,
+      expectedRevision: replaced.revision,
+    });
+
+    expect(puts).toBe(2);
+    expect(restored.blob).toEqual(original.blob);
+    expect(repo.versions.at(-1)).toMatchObject({
+      reason: "restored",
+      restoredFromVersionId: original.currentVersionId,
+    });
+  });
+
+  it("hides archived Files from discovery and new attachments but keeps direct reads", async () => {
+    const file = await uploadText();
+    const archived = await service.archive(BUSINESS, file.id, OWNER, file.revision);
+
+    await expect(service.read(BUSINESS, file.id, OWNER)).resolves.toMatchObject({ id: file.id });
+    expect(await service.list(BUSINESS, OWNER, 10)).toEqual([]);
+    expect(await service.search(BUSINESS, OWNER, "notes", 10)).toEqual([]);
+    expect((await service.presentFor(BUSINESS, OWNER, [file.id])).has(file.id)).toBe(true);
+    await expect(service.readForAttachment(BUSINESS, file.id, OWNER)).rejects.toMatchObject({
+      reason: "not_found",
+    });
+    await expect(
+      service.share(BUSINESS, file.id, OWNER, { kind: "user", id: STRANGER })
+    ).rejects.toMatchObject({ reason: "invalid_state" });
+    await expect(
+      service.replace({
+        businessId: BUSINESS,
+        ownerPrincipalId: OWNER,
+        fileId: file.id,
+        expectedRevision: archived.revision,
+        claimedMediaType: "text/plain",
+        declaredBytes: 3,
+        body: once(new TextEncoder().encode("two")),
+      })
+    ).rejects.toMatchObject({ reason: "invalid_state" });
+
+    const restored = await service.restoreArchive(BUSINESS, file.id, OWNER, archived.revision);
+    expect(restored.archivedAt).toBeNull();
+    expect(await service.list(BUSINESS, OWNER, 10)).toHaveLength(1);
   });
 });
 
@@ -890,7 +1737,8 @@ describe("FileService.presentFor", () => {
   it("reports the caller's own Files as present and a destroyed one as absent", async () => {
     const kept = await uploaded();
     const gone = await uploaded();
-    await service.delete(BUSINESS, gone.id, OWNER);
+    const archived = await service.archive(BUSINESS, gone.id, OWNER, gone.revision);
+    await service.delete(BUSINESS, gone.id, OWNER, archived.revision);
 
     const present = await service.presentFor(BUSINESS, OWNER, [kept.id, gone.id]);
 
@@ -970,6 +1818,89 @@ describe("FileService.generate", () => {
       ...overrides,
     });
 
+  const recordingOwnership = (records: Map<string, FileAssetOwnership>): FileOwnershipPort => ({
+    async createPersonal(businessId, fileId, principalId) {
+      records.set(fileId, {
+        businessId,
+        assetType: "file",
+        assetId: fileId,
+        owners: [{ kind: "principal", principalId, principalKind: "user" }],
+        shares: [],
+        revision: 1,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      });
+    },
+    async get(_businessId, fileId) {
+      return records.get(fileId);
+    },
+    async accessFor(ownership, principalId) {
+      const owns = ownership.owners.some(
+        (owner) => owner.kind === "principal" && owner.principalId === principalId
+      );
+      return owns
+        ? { levels: ["view", "use", "edit"], canManageOwnership: true }
+        : { levels: [], canManageOwnership: false };
+    },
+    async consumeDestructiveApproval() {},
+  });
+
+  it("does not hand a generated File to everyone in the business", async () => {
+    // Business ownership is represented as the "Everyone" Team, which every active user joins by
+    // trigger, so the record a generated File acquires must name the one person who asked for it.
+    // A Team owner here would override the audience `generatedAudience` computed and hand a
+    // Routine's output to the whole company.
+    const records = new Map<string, FileAssetOwnership>();
+    service = new FileService({
+      repo,
+      blobs: new FileSystemBlobPort(root),
+      newId: () => randomUUID(),
+      ownership: recordingOwnership(records),
+    });
+
+    const file = await generate();
+
+    expect(records.get(file.id)?.owners).toEqual([
+      { kind: "principal", principalId: OWNER, principalKind: "user" },
+    ]);
+    await expect(service.read(BUSINESS, file.id, OWNER)).resolves.toMatchObject({ id: file.id });
+    await expect(service.read(BUSINESS, file.id, STRANGER)).rejects.toMatchObject({
+      reason: "not_found",
+    });
+  });
+
+  it("lets the person who asked for it manage it", async () => {
+    // Nothing else can. A File whose owner field says `business` names no person, so with no
+    // record the document it produced could never be shared, archived, deleted, or indexed.
+    const records = new Map<string, FileAssetOwnership>();
+    service = new FileService({
+      repo,
+      blobs: new FileSystemBlobPort(root),
+      newId: () => randomUUID(),
+      ownership: recordingOwnership(records),
+    });
+
+    const file = await generate();
+
+    await expect(service.canManage(BUSINESS, file.id, OWNER)).resolves.toBe(true);
+    await expect(service.canManage(BUSINESS, file.id, STRANGER)).resolves.toBe(false);
+  });
+
+  it("leaves an unattended Run's output to the business, so it outlives the scheduler", async () => {
+    const records = new Map<string, FileAssetOwnership>();
+    service = new FileService({
+      repo,
+      blobs: new FileSystemBlobPort(root),
+      newId: () => randomUUID(),
+      ownership: recordingOwnership(records),
+    });
+
+    const file = await generate({ readableBy: undefined, authoredByRoutineId: "routine-nightly" });
+
+    expect(file.ownerPrincipalId).toBe(BUSINESS_PRINCIPAL_ID);
+    expect(records.has(file.id)).toBe(false);
+  });
+
   it("writes a real document and marks it machine-made", async () => {
     const file = await generate();
     expect(file.origin).toBe("generated");
@@ -982,12 +1913,13 @@ describe("FileService.generate", () => {
     expect(total).toBe(file.sizeBytes);
   });
 
-  it("belongs to the business, not to whoever asked for it", async () => {
-    // This is what makes a Routine's monthly report survive the offboarding of the person who
-    // scheduled it. Owning it as that person would orphan the Run's output with their account.
-    const file = await generate();
-    expect(file.ownerPrincipalId).toBe(BUSINESS_PRINCIPAL_ID);
-    expect(file.ownerPrincipalId).not.toBe(OWNER);
+  it("belongs to whoever asked for it, and to the business when nobody did", async () => {
+    // Somebody has to be able to share, archive and index a document, and `business` names no
+    // person. An unattended Run has no requester, so its output stays the business's and survives
+    // the offboarding of whoever scheduled it.
+    expect((await generate()).ownerPrincipalId).toBe(OWNER);
+    const unattended = await generate({ readableBy: undefined });
+    expect(unattended.ownerPrincipalId).toBe(BUSINESS_PRINCIPAL_ID);
   });
 
   it("lets the person who asked read it, and nobody else", async () => {
@@ -1009,6 +1941,28 @@ describe("FileService.generate", () => {
   it("records the Run that authored it, so a generated File can be traced back", async () => {
     const file = await generate({ sourceRunId: "run_7" });
     expect(file.sourceRunId).toBe("run_7");
+  });
+
+  it("returns the same File when the same Tool occurrence is retried", async () => {
+    const first = await generate({ sourceRunId: "run_7", sourceToolCallId: "call_7" });
+    const retried = await generate({ sourceRunId: "run_7", sourceToolCallId: "call_7" });
+    expect(retried.id).toBe(first.id);
+    expect(repo.rows.filter((row) => row.sourceToolCallId === "call_7")).toHaveLength(1);
+  });
+
+  it("records Routine creator provenance for an automatically saved output", async () => {
+    const file = await generate({
+      sourceRunId: "run_8",
+      sourceToolCallId: "call_8",
+      authoredByAgentId: "agent-finance",
+      authoredByRoutineId: "routine-month-end",
+    });
+    const version = repo.versions.find((candidate) => candidate.fileId === file.id);
+    expect(version).toMatchObject({
+      actorKind: "routine",
+      actorId: "routine-month-end",
+      sourceRunId: "run_8",
+    });
   });
 
   it("leaves the Run empty when the Agent was not running one", async () => {
@@ -1067,7 +2021,8 @@ describe("FileService.generate", () => {
           .filter((share) => share.fileId === file.id)
           .map((share) => `${share.kind}:${share.id}`)
           .sort()
-      ).toEqual(["role:hr-team", `user:${OWNER}`]);
+        // The requester owns it outright, so the only share worth writing is the team's.
+      ).toEqual(["role:hr-team"]);
     });
 
     it("lets the rest of that team open it, and still refuses everybody else", async () => {
@@ -1081,6 +2036,125 @@ describe("FileService.generate", () => {
       await expect(service.read(BUSINESS, file.id, OWNER)).resolves.toMatchObject({ id: file.id });
       await expect(service.read(BUSINESS, file.id, STRANGER)).rejects.toMatchObject({
         reason: "not_found",
+      });
+    });
+
+    describe("FileService generated drafts", () => {
+      let root: string;
+      let repo: MemoryFileRepo;
+      let service: FileService;
+
+      beforeEach(async () => {
+        root = await mkdtemp(join(tmpdir(), "tulip-file-drafts-"));
+        repo = new MemoryFileRepo();
+        service = new FileService({
+          repo,
+          blobs: new FileSystemBlobPort(root),
+          newId: () => randomUUID(),
+          rolesOf: async (_businessId, principalId) =>
+            principalId === "agent-hr" ? ["hr-team"] : [],
+        });
+      });
+
+      afterEach(async () => {
+        await rm(root, PURGE);
+      });
+
+      const draft = () =>
+        service.generateDraft({
+          businessId: BUSINESS,
+          creatorPrincipalId: OWNER,
+          filename: "headcount",
+          format: "json",
+          content: '{"count":12}',
+          authoredByAgentId: "agent-hr",
+          sourceRunId: "run-draft",
+          sourceToolCallId: "call-draft",
+        });
+
+      it("keeps a Chat output outside the File library until Save File", async () => {
+        const created = await draft();
+        expect(repo.rows).toHaveLength(0);
+        expect(created.filename).toBe("headcount.json");
+        expect(await service.draftContent(BUSINESS, created.id, OWNER)).toMatchObject({
+          draft: { id: created.id },
+        });
+        await expect(service.draftContent(BUSINESS, created.id, STRANGER)).rejects.toMatchObject({
+          reason: "not_found",
+        });
+      });
+
+      it("deduplicates a retried Tool occurrence", async () => {
+        const first = await draft();
+        const retried = await draft();
+        expect(retried.id).toBe(first.id);
+        expect(repo.drafts).toHaveLength(1);
+      });
+
+      it("gives the saved draft to the person who saved it", async () => {
+        // The saver is also given personal ownership, so a row owned by the business contradicts
+        // it: the File would sit under "Shared with me", report Business as its owner, and hide
+        // sharing, replacement, versions and deletion from the one person who owns it.
+        const created = await draft();
+        const saved = await service.saveDraft(BUSINESS, created.id, OWNER);
+        expect(saved.ownerPrincipalId).toBe(OWNER);
+      });
+
+      it("saves once and preserves the requester and Agent Role audience", async () => {
+        const created = await draft();
+        const saved = await service.saveDraft(BUSINESS, created.id, OWNER);
+        const retried = await service.saveDraft(BUSINESS, created.id, OWNER);
+        expect(retried.id).toBe(saved.id);
+        expect(repo.rows).toHaveLength(1);
+        expect(saved.sourceRunId).toBe("run-draft");
+        expect(saved.sourceToolCallId).toBe("call-draft");
+        expect(
+          repo.shares
+            .filter((share) => share.fileId === saved.id)
+            .map((share) => `${share.kind}:${share.id}`)
+            .sort()
+          // The requester owns it outright, so the only share worth writing is the team's.
+        ).toEqual(["role:hr-team"]);
+      });
+
+      it("finishes a save that failed after the row but before its ownership", async () => {
+        // The draft now names a File, so a naive retry returns it and never replays what the first
+        // attempt did not reach — leaving the document owned by nobody for good.
+        const records = new Map<string, FileAssetOwnership>();
+        let failures = 1;
+        service = new FileService({
+          repo,
+          blobs: new FileSystemBlobPort(root),
+          newId: () => randomUUID(),
+          rolesOf: async (_businessId, principalId) =>
+            principalId === "agent-hr" ? ["hr-team"] : [],
+          ownership: {
+            ...recordingOwnership(records),
+            async createPersonal(businessId, fileId, principalId) {
+              if (failures-- > 0) throw new Error("ownership store unavailable");
+              await recordingOwnership(records).createPersonal(businessId, fileId, principalId);
+            },
+          },
+        });
+        const created = await draft();
+        await expect(service.saveDraft(BUSINESS, created.id, OWNER)).rejects.toThrow();
+
+        const saved = await service.saveDraft(BUSINESS, created.id, OWNER);
+
+        expect(records.get(saved.id)?.owners).toEqual([
+          { kind: "principal", principalId: OWNER, principalKind: "user" },
+        ]);
+        expect(
+          repo.shares.filter((share) => share.fileId === saved.id).map((share) => share.id)
+        ).toEqual(["hr-team"]);
+      });
+
+      it("expires an unsaved draft onto durable blob cleanup", async () => {
+        const created = await draft();
+        repo.drafts[0] = { ...created, expiresAt: new Date(0) };
+        expect(await service.cleanupExpiredDrafts()).toBe(1);
+        expect(repo.drafts).toHaveLength(0);
+        expect(repo.cleanup).toEqual([created.blob]);
       });
     });
 

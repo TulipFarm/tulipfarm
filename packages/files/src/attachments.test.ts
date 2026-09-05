@@ -5,9 +5,9 @@ import { FileError, type FileService } from "./service";
 
 function fileService(readable: Record<string, Partial<FileRecord>>): FileService {
   return {
-    read: async (_businessId: string, id: string) => {
+    readForAttachment: async (_businessId: string, id: string) => {
       const found = readable[id];
-      if (!found) throw new FileError("not_found", "no such file");
+      if (!found || found.archivedAt) throw new FileError("not_found", "no such file");
       return { id, filename: "a.png", mediaType: "image/png", ...found } as FileRecord;
     },
   } as unknown as FileService;
@@ -33,6 +33,16 @@ describe("resolveAttachments", () => {
     expect(isAttachmentRefusal(result) && result.status).toBe(404);
   });
 
+  it("refuses an archived File as a new attachment", async () => {
+    const result = await resolveAttachments(
+      fileService({ f1: { archivedAt: new Date() } }),
+      "b",
+      "p",
+      ["f1"]
+    );
+    expect(isAttachmentRefusal(result) && result.status).toBe(404);
+  });
+
   it("refuses rather than silently truncating past the per-message limit", async () => {
     const ids = Array.from({ length: 11 }, (_, index) => `f${index}`);
     const result = await resolveAttachments(fileService({}), "b", "p", ids);
@@ -46,7 +56,7 @@ describe("resolveAttachments", () => {
 
   it("propagates a non-FileError, because that is a fault and not a refusal", async () => {
     const broken = {
-      read: async () => {
+      readForAttachment: async () => {
         throw new Error("database is down");
       },
     } as unknown as FileService;

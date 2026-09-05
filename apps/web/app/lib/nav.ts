@@ -7,6 +7,7 @@ import {
   Building2,
   Cpu,
   DollarSign,
+  FileText,
   Flower2,
   Gauge,
   History,
@@ -34,6 +35,8 @@ export type NavItem = {
   badge?: boolean;
   devOnly?: boolean;
   /** Reachable regardless of `visiblePaths`. Chat is the product's floor, never a grant. */ always?: boolean;
+  /** Available to every signed-in person because its API gate requires only authentication. */
+  authenticated?: boolean;
   /**
    * The one line the top bar cannot say. Rendered by the section shell instead of a second page
    * title, so a page is named once.
@@ -79,6 +82,13 @@ export const SIDEBAR_GROUPS: NavGroup[] = [
         description:
           "One timeline of everything that happened here: Runs, Records, Chats, and Jobs.",
       },
+      {
+        to: "/teams",
+        label: "Teams",
+        icon: Users,
+        authenticated: true,
+        description: "Browse the Teams and people that make up this business.",
+      },
     ],
   },
   {
@@ -93,6 +103,7 @@ export const SIDEBAR_GROUPS: NavGroup[] = [
       { to: "/agents", label: "Agents", icon: Bot },
       { to: "/skills", label: "Skills", icon: Puzzle },
       { to: "/routines", label: "Routines", icon: Workflow },
+      { to: "/files", label: "Files", icon: FileText },
       {
         to: "/knowledge",
         label: "Knowledge",
@@ -188,10 +199,9 @@ export const SETTINGS_GROUPS: NavGroup[] = [
       },
       {
         to: "/business/access",
-        label: "People & access",
+        label: "People",
         icon: Users,
-        description:
-          "Invite people, turn accounts off, and decide what each person is allowed to do.",
+        description: "Invite people, turn accounts off, and review each person's Team memberships.",
       },
       {
         to: "/business/about",
@@ -233,7 +243,7 @@ export const SETTINGS_GROUPS: NavGroup[] = [
 
 function isVisible(item: NavItem, { isDev, visiblePaths }: NavigationVisibility): boolean {
   if (item.devOnly && !isDev) return false;
-  if (item.always) return true;
+  if (item.always || item.authenticated) return true;
   return visiblePaths === undefined || visiblePaths.includes(item.to);
 }
 
@@ -251,6 +261,9 @@ export function visibleSettingsGroups(visibility: NavigationVisibility): NavGrou
 }
 
 export function isSettingsPath(pathname: string): boolean {
+  if (pathname === "/teams" || pathname.startsWith("/teams/")) {
+    return false;
+  }
   return (
     pathname === "/settings" ||
     SETTINGS_GROUPS.some((group) =>
@@ -284,8 +297,9 @@ const PAGE_META: Array<{ prefix: string; label: string; icon: Icon }> = [
   { prefix: "/business/secrets", label: "Secrets", icon: KeyRound },
   { prefix: "/business/soul", label: "Soul", icon: Sparkles },
   { prefix: "/business/guardrails", label: "Guardrails", icon: ShieldCheck },
-  { prefix: "/business/people", label: "People & access", icon: Users },
-  { prefix: "/business/access", label: "People & access", icon: Users },
+  { prefix: "/teams", label: "Teams", icon: Users },
+  { prefix: "/business/people", label: "People", icon: Users },
+  { prefix: "/business/access", label: "People", icon: Users },
   { prefix: "/business/about", label: "About", icon: Info },
   { prefix: "/settings/profile", label: "Profile", icon: UserRound },
   { prefix: "/settings/appearance", label: "Appearance", icon: Palette },
@@ -297,6 +311,7 @@ const PAGE_META: Array<{ prefix: string; label: string; icon: Icon }> = [
   { prefix: "/routines", label: "Routines", icon: Workflow },
   { prefix: "/runs", label: "Runs", icon: Activity },
   { prefix: "/inbox", label: "Inbox", icon: Inbox },
+  { prefix: "/files", label: "Files", icon: FileText },
   { prefix: "/knowledge", label: "Knowledge", icon: BookOpen },
   { prefix: "/integrations", label: "Integrations", icon: Plug },
   { prefix: "/operations", label: "Operations", icon: ShieldAlert },

@@ -19,7 +19,7 @@ function request() {
   return { principal } as unknown as FastifyRequest;
 }
 
-function runtime() {
+function runtime(withOwnershipApproval = false) {
   const signal = vi.fn(async () => "resumed" as const);
   const enqueueWake = vi.fn(async () => undefined);
   const activity = {
@@ -108,6 +108,34 @@ function runtime() {
     activity,
     approvals,
     toolApprovals: { signal },
+    ...(withOwnershipApproval
+      ? {
+          ownershipApprovals: {
+            listApprovals: vi.fn(async () => [
+              {
+                approvalId: "ownership-1",
+                operationId: "ownership-1",
+                assetType: "agent" as const,
+                assetId: "support",
+                action: "delete" as const,
+                risk: "high" as const,
+                preview: "delete agent support",
+                riskSummary: "Changes shared asset ownership or lifecycle",
+                status: "pending" as const,
+                requiredTeamIds: ["team-1"],
+                decisions: 0,
+                requiredDecisions: 1,
+                readyToComplete: false,
+                representedTeamId: "team-1",
+                canDecide: true,
+                expiresAt: "2026-09-06T10:00:00.000Z",
+                createdAt: "2026-09-05T10:00:00.000Z",
+              },
+            ]),
+            decide: vi.fn(),
+          },
+        }
+      : {}),
     runs,
     healthProbes: [
       { component: "postgres", check: async () => ({ status: "ok" as const }) },
@@ -120,6 +148,37 @@ function runtime() {
     ],
     enqueueWake,
     guardrailsConfig: () => ({ input: { enabled: true } }),
+    teamMigrationReport: vi.fn(async () => ({
+      items: [
+        {
+          legacyGroupId: "Support Ops",
+          teamId: "team-1",
+          teamSlug: "support-ops",
+          displayName: "Support Ops",
+          slugConflict: false,
+          siblingNameConflict: false,
+          migratedAt: "2026-09-05T10:00:00.000Z",
+        },
+        {
+          legacyGroupId: "Support/Ops",
+          teamId: "team-2",
+          teamSlug: "support-ops-a1b2c3d4",
+          displayName: "Support/Ops",
+          slugConflict: true,
+          siblingNameConflict: false,
+          migratedAt: "2026-09-05T10:00:00.000Z",
+        },
+        {
+          legacyGroupId: "support ops",
+          teamId: "team-3",
+          teamSlug: "support-ops-2",
+          displayName: "Support Ops [a1b2c3d4]",
+          slugConflict: false,
+          siblingNameConflict: true,
+          migratedAt: "2026-09-05T10:00:00.000Z",
+        },
+      ],
+    })),
   });
   return { api, signal, enqueueWake, runs };
 }
@@ -141,6 +200,19 @@ describe("runtime operational API", () => {
     const { api } = runtime();
     const member = { ...principal, role: "member" as const };
     expect(await api.authorize({ principal: member } as unknown as FastifyRequest)).toBeNull();
+  });
+
+  it("omits Team migrations without slug or sibling-name conflicts", async () => {
+    const { api } = runtime();
+    const grant = await api.authorize(request());
+    if (!grant) throw new Error("expected an admin grant");
+
+    await expect(api.getTeamMigrationReport(grant)).resolves.toEqual({
+      items: [
+        expect.objectContaining({ legacyGroupId: "Support/Ops", slugConflict: true }),
+        expect.objectContaining({ legacyGroupId: "support ops", siblingNameConflict: true }),
+      ],
+    });
   });
 
   it("reads Runs and the deployment role catalog from live authorities", async () => {
@@ -231,6 +303,7 @@ describe("runtime operational API", () => {
       decisions: 1,
       requiredDecisions: 1,
     });
+
     // The deciding administrator is named to the kernel, which checks it again under the wait's
     // lock — the operational API never decides on someone else's behalf.
     expect(signal).toHaveBeenCalledWith({
@@ -238,6 +311,23 @@ describe("runtime operational API", () => {
       approvalId: "approval-tool",
       decision: "approved",
       principal: "user:user-1",
+    });
+  });
+
+  it("includes ownership Approvals in the company inbox", async () => {
+    const { api } = runtime(true);
+    const grant = await api.authorize(request());
+    if (!grant) throw new Error("expected an admin grant");
+
+    await expect(api.getInbox(grant)).resolves.toEqual({
+      items: expect.arrayContaining([
+        expect.objectContaining({
+          id: "ownership-1",
+          target: "agent:support",
+          representedTeamId: "team-1",
+          canDecide: true,
+        }),
+      ]),
     });
   });
 });

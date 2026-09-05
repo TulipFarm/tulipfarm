@@ -71,6 +71,7 @@ export interface RegistryToolDispatcherOptions {
   /** Required whenever `gate` is set. */
   readonly authorityLayers?: {
     resolvePrincipalLayer(name: string, principal: AuthorityPrincipal): Promise<AuthorityLayer>;
+    resolveAgentLayer?(businessId: string, agentId: string): Promise<AuthorityLayer>;
   };
   readonly credentials?: CredentialResolver;
   /** Authority layer L5 (D7); absence preserves pre-D7 bot reach. */
@@ -135,7 +136,8 @@ export class RegistryToolDispatcher implements TurnToolDispatcher {
   /** Missing Tool authorization contracts deny rather than pass. */
   private async authorize(
     authority: TurnAuthority,
-    agentId: string,
+    agentName: string,
+    agentPrincipalId: string | undefined,
     tool: ParkableToolDef,
     available: readonly ParkableToolDef[],
     call: HostedToolCall,
@@ -162,19 +164,24 @@ export class RegistryToolDispatcher implements TurnToolDispatcher {
       };
     }
 
-    const caller = await authorityLayers.resolvePrincipalLayer(kind, {
-      id: authority.subject.id,
-      businessId: authority.businessId,
-      kind,
-    });
+    const [caller, agentPrincipal] = await Promise.all([
+      authorityLayers.resolvePrincipalLayer(kind, {
+        id: authority.subject.id,
+        businessId: authority.businessId,
+        kind,
+      }),
+      agentPrincipalId === undefined
+        ? undefined
+        : authorityLayers.resolveAgentLayer?.(authority.businessId, agentPrincipalId),
+    ]);
     const outcome = gate.authorize({
       definition: tool.definition,
       arguments: call.arguments,
       businessId: authority.businessId,
       runId: authority.runId,
       stateId: call.callId,
-      authorityLayers: [caller],
-      agent: { name: agentId, available },
+      authorityLayers: agentPrincipal === undefined ? [caller] : [caller, agentPrincipal],
+      agent: { name: agentName, available },
       ...(call.permissionCeiling === undefined
         ? {}
         : { permissionCeiling: call.permissionCeiling }),
@@ -378,6 +385,7 @@ export class RegistryToolDispatcher implements TurnToolDispatcher {
     const verdict = await this.authorize(
       authority,
       agent.name,
+      request?.agentId ?? authority.agent?.name,
       definition,
       availableTools,
       call,

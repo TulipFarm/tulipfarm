@@ -66,7 +66,47 @@ export function sniffMediaType(bytes: Uint8Array): string | null {
   return null;
 }
 
-const TEXT_TYPES = new Set(["text/plain", "text/markdown", "text/csv"]);
+const TEXT_TYPES = new Set([
+  "application/json",
+  "application/xml",
+  "application/yaml",
+  "text/plain",
+  "text/markdown",
+  "text/csv",
+]);
+
+const OOXML_ENTRY_BY_MEDIA_TYPE = new Map<string, string>([
+  ["application/vnd.openxmlformats-officedocument.wordprocessingml.document", "word/"],
+  ["application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", "xl/"],
+  ["application/vnd.openxmlformats-officedocument.presentationml.presentation", "ppt/"],
+]);
+
+function isZip(bytes: Uint8Array): boolean {
+  return bytes.length >= 4 && bytes[0] === 0x50 && bytes[1] === 0x4b && bytes[2] === 0x03;
+}
+
+function zipContainsEntry(bytes: Uint8Array, prefix: string): boolean {
+  if (!isZip(bytes)) return false;
+  const decoder = new TextDecoder("utf-8", { fatal: true });
+  for (let offset = 0; offset + 30 <= bytes.length; offset += 1) {
+    if (
+      bytes[offset] !== 0x50 ||
+      bytes[offset + 1] !== 0x4b ||
+      bytes[offset + 2] !== 0x03 ||
+      bytes[offset + 3] !== 0x04
+    ) {
+      continue;
+    }
+    const nameLength = (bytes[offset + 27] ?? 0) * 256 + (bytes[offset + 26] ?? 0);
+    const nameStart = offset + 30;
+    const nameEnd = nameStart + nameLength;
+    if (nameEnd > bytes.length) continue;
+    try {
+      if (decoder.decode(bytes.subarray(nameStart, nameEnd)).startsWith(prefix)) return true;
+    } catch {}
+  }
+  return false;
+}
 
 /**
  * Resolves the type to store and serve, given what the bytes say and what the client claimed.
@@ -79,6 +119,8 @@ const TEXT_TYPES = new Set(["text/plain", "text/markdown", "text/csv"]);
 export function resolveMediaType(bytes: Uint8Array, claimed: string): string | null {
   const sniffed = sniffMediaType(bytes);
   if (sniffed !== null) return sniffed;
+  const officeEntry = OOXML_ENTRY_BY_MEDIA_TYPE.get(claimed);
+  if (officeEntry && zipContainsEntry(bytes, officeEntry)) return claimed;
   if (TEXT_TYPES.has(claimed) && looksLikeText(bytes)) return claimed;
   return null;
 }

@@ -1,8 +1,8 @@
-import { apiCommand, apiGet } from "./api";
+import { ApiError, apiCommand, apiGet } from "./api";
 
 export type InboxItemModel = {
   id: string;
-  kind: "approval" | "human_task" | "form" | "access_request";
+  kind: "approval" | "notification" | "human_task" | "form" | "access_request";
   title: string;
   status: string;
   risk: "low" | "medium" | "high";
@@ -16,10 +16,34 @@ export type InboxItemModel = {
   requiredDecisions: number;
   canDecide: boolean;
   denialReason?: string;
+  representedTeamId?: string;
+  createdAt?: string;
 };
 
 export async function getInbox(): Promise<InboxItemModel[]> {
-  return (await apiGet<{ items: InboxItemModel[] }>("/api/v1/inbox")).items;
+  const [work, notifications] = await Promise.all([
+    apiGet<{ items: InboxItemModel[] }>("/api/v1/inbox").catch((error: unknown) => {
+      if (error instanceof ApiError && error.status === 403) return { items: [] };
+      throw error;
+    }),
+    apiGet<{
+      items: Array<{ id: string; kind: string; title: string; createdAt: string }>;
+    }>("/api/v1/team-notifications"),
+  ]);
+  return [
+    ...work.items,
+    ...notifications.items.map((item) => ({
+      id: item.id,
+      kind: "notification" as const,
+      title: item.title,
+      status: "new",
+      risk: "low" as const,
+      decisions: 0,
+      requiredDecisions: 0,
+      canDecide: false,
+      createdAt: item.createdAt,
+    })),
+  ];
 }
 
 export function decideApproval(
@@ -34,7 +58,11 @@ export function decideApproval(
 }> {
   return apiCommand(
     `/api/v1/approvals/${encodeURIComponent(item.id)}/decisions`,
-    { decision, comment },
+    {
+      decision,
+      comment,
+      ...(item.representedTeamId ? { representedTeamId: item.representedTeamId } : {}),
+    },
     `${item.id}-${decision}-${item.decisions}`
   );
 }

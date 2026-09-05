@@ -182,6 +182,44 @@ export const AdminOperationsResponsesSchema = {
   403: AdminErrorSchema,
 } as const;
 
+export const AdminTeamMigrationReportResponseSchema = {
+  type: "object",
+  additionalProperties: false,
+  required: ["items"],
+  properties: {
+    items: {
+      type: "array",
+      items: {
+        type: "object",
+        additionalProperties: false,
+        required: [
+          "legacyGroupId",
+          "teamId",
+          "teamSlug",
+          "displayName",
+          "slugConflict",
+          "siblingNameConflict",
+          "migratedAt",
+        ],
+        properties: {
+          legacyGroupId: { type: "string" },
+          teamId: { type: "string" },
+          teamSlug: { type: "string" },
+          displayName: { type: "string" },
+          slugConflict: { type: "boolean" },
+          siblingNameConflict: { type: "boolean" },
+          migratedAt: { type: "string" },
+        },
+      },
+    },
+  },
+} as const;
+
+export const AdminTeamMigrationReportResponsesSchema = {
+  200: AdminTeamMigrationReportResponseSchema,
+  403: AdminErrorSchema,
+} as const;
+
 export const AdminGuardrailsResponseSchema = {
   type: "object",
   required: ["revision", "items"],
@@ -294,6 +332,7 @@ export const AdminApprovalDecisionBodySchema = {
   properties: {
     decision: { type: "string", enum: ["approved", "denied"] },
     comment: { type: "string", maxLength: 1000 },
+    representedTeamId: { type: "string", format: "uuid" },
   },
 } as const;
 

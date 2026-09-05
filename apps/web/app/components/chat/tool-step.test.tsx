@@ -43,6 +43,7 @@ function renderStep(part: ToolPart, options?: { pending?: boolean }) {
           pending={options?.pending === true}
           foldable={false}
           onApprove={vi.fn()}
+          onReviseDraft={vi.fn()}
         />
       ),
     },
@@ -74,6 +75,46 @@ describe("A Tool step on the trace", () => {
     // A completed call is reported by `status`, not by whether a verbatim result was streamed —
     // on a live stream the verbatim result never arrives.
     expect(container.querySelector(".tf-trace-row svg.text-run-ok")).not.toBeNull();
+  });
+
+  it("keeps a generated Chat draft open with Save File and download actions", () => {
+    renderStep(
+      toolPart({
+        toolName: "file_create",
+        result: {
+          status: "draft",
+          draftId: "draft-1",
+          filename: "quarterly-summary.pdf",
+          mediaType: "application/pdf",
+          sizeBytes: 2048,
+          expiresAt: "2099-09-06T10:00:00.000Z",
+        },
+      })
+    );
+
+    expect(screen.getByText("quarterly-summary.pdf")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Download" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Save File" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Revise" })).toBeInTheDocument();
+  });
+
+  it("offers an inert preview for structured-text drafts", () => {
+    renderStep(
+      toolPart({
+        toolName: "file_create",
+        result: {
+          status: "draft",
+          draftId: "draft-json",
+          filename: "summary.json",
+          mediaType: "application/json",
+          sizeBytes: 40,
+          expiresAt: "2099-09-06T10:00:00.000Z",
+        },
+      })
+    );
+
+    expect(screen.getByRole("button", { name: "Preview" })).toBeInTheDocument();
+    expect(screen.getByText(/tell the Agent what to change/i)).toBeInTheDocument();
   });
 
   it("separates Input from Output and names every withheld field", async () => {

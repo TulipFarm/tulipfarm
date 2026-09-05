@@ -225,7 +225,7 @@ const createKnowledgePage = defineApiTool<KnowledgeToolContext>({
     if (!validateCreatePage(args)) return err("validation_error", firstError(validateCreatePage));
     const a = args as { title: string; content: string; domain?: string; tags?: string[] };
     try {
-      const page = await ctx.service.createPage(a);
+      const page = await ctx.service.createPage({ ...a, ownerPrincipalId: ctx.userId });
       // The writer verifies through the reader's own paths before reporting success. A Page that
       // is unplaced or ungranted is one an Agent will later cite and be refused, so an unusable
       // Page is a failed write here rather than a success the next turn discovers.
@@ -291,7 +291,7 @@ const createSpace = defineApiTool<KnowledgeToolContext>({
     if (!validateCreateSpace(args)) return err("validation_error", firstError(validateCreateSpace));
     const a = args as { name: string; description?: string };
     try {
-      const res = await ctx.service.createSpace(a);
+      const res = await ctx.service.createSpace({ ...a, ownerPrincipalId: ctx.userId });
       if (!res.ok) {
         return err(
           res.reason === "okf_unavailable" ? "internal_error" : "validation_error",
@@ -366,9 +366,20 @@ const writePage = defineApiTool<KnowledgeToolContext>({
         return err("not_found", "space_not_found");
       };
       if (!ctx.pageGate) return refuse("space");
-      if (!(await ctx.pageGate.canReadSpace(ctx.userId, a.spaceId))) return refuse("space");
+      if (
+        !(await (ctx.pageGate.canEdit?.(ctx.userId, "space", a.spaceId) ??
+          ctx.pageGate.canReadSpace(ctx.userId, a.spaceId)))
+      ) {
+        return refuse("space");
+      }
       const existing = await ctx.service.getPageByPath(a.spaceId, a.path);
-      if (existing && !(await mayReadPage(ctx, existing._id))) return refuse("page");
+      if (
+        existing &&
+        !(await (ctx.pageGate.canEdit?.(ctx.userId, "page", existing._id) ??
+          mayReadPage(ctx, existing._id)))
+      ) {
+        return refuse("page");
+      }
       // An Agent-written Page is weighed differently by a reader, so the write records which.
       const res = await ctx.service.writePage({
         ...a,

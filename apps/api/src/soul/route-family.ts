@@ -59,7 +59,7 @@ export function registerSoulRouteFamily(
         opts.rateLimiter,
         opts.auditService
       );
-      registerAgentRoutes(app, opts.soulLoader, requireAuth);
+      registerAgentRoutes(app, opts.soulLoader, requireAuth, opts.teamAssets);
       if (opts.toolRegistry && opts.reconcileSoulRoles && opts.soulWriter) {
         const toolRegistry = opts.toolRegistry;
         const reconcileRoles = opts.reconcileSoulRoles;
@@ -176,7 +176,8 @@ export function registerSoulRouteFamily(
           opts.bundledSkills,
           opts.disabledBundledSkills,
           opts.auditService,
-          opts.skillMarketplace
+          opts.skillMarketplace,
+          opts.teamAssets
         );
         if (opts.secretsService) {
           registerLlmConfigRoutes(

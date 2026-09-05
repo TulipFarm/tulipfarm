@@ -17,6 +17,7 @@ const EMPTY: Record<MentionKind, MentionItem[]> = {
   skill: [],
   resource: [],
   knowledge: [],
+  file: [],
 };
 
 export function useMentionData(): GetItems {
@@ -44,6 +45,7 @@ export function useMentionData(): GetItems {
           skill: skills.map((s) => ({ id: s.name, label: s.name, description: s.description })),
           resource: types.map((t) => ({ id: t.name, label: t.name, description: "resource type" })),
           knowledge: [],
+          file: [],
         };
       } catch {}
     })();

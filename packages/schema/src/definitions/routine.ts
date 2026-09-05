@@ -1,5 +1,6 @@
 import { type Static, type TSchema, Type } from "@sinclair/typebox";
 import { SchemaRegistry, type ValidatedSchemaDocument } from "../registry";
+import { TeamBusinessAssetOwnershipSchema } from "../teams";
 import {
   DEFINITION_API_VERSION,
   definitionMetadataSchema,
@@ -302,6 +303,7 @@ export const RoutineDefinitionSchema = Type.Object(
     spec: Type.Object(
       {
         owner: nonEmptyString,
+        ownership: Type.Optional(TeamBusinessAssetOwnershipSchema),
         maintainers: Type.Optional(refListSchema),
         input: Type.Optional(jsonSchemaObject),
         output: Type.Optional(jsonSchemaObject),

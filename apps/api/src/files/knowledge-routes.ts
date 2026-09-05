@@ -68,7 +68,7 @@ export function registerFileKnowledgeRoutes(
         }
         // Recorded before anything is enqueued, so the worker has a durable opt-in to re-read.
         await deps.files.requestKnowledge(DEPLOYMENT_BUSINESS_ID, id, principal.id);
-        await knowledge.requestIndex(id, principal.id);
+        await knowledge.requestIndex(id, file.currentVersionId, principal.id);
         reply.code(202).send();
       } catch (error) {
         reject(reply, error);

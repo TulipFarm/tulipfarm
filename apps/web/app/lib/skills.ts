@@ -1,3 +1,4 @@
+import type { TeamBusinessAssetOwnership } from "@tulipfarm/schema";
 import { apiDelete, apiGet, apiWrite, CATALOG_TTL_MS, shareInFlight } from "./api";
 
 /* Skill installs publish executable commands only after server-side package/runtime gates pass. */
@@ -30,6 +31,7 @@ export type SkillSummary = {
   allowedCommands?: string[];
   /** Secret names the Skill needs leased to it. */
   requiredSecrets?: string[];
+  ownership?: TeamBusinessAssetOwnership;
 };
 
 export type SkillPackageFile = { path: string; size: number };

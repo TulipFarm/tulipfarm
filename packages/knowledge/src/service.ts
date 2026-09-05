@@ -5,6 +5,7 @@ import type { KnowledgeAclRepo, PageVisibilityScope, PageVisibilitySource } from
 import { createAuthoredPage } from "./authored-page";
 import type { KnowledgeChunkRepo } from "./chunks-repo";
 import type { KnowledgeLinksRepo } from "./links-repo";
+import type { KnowledgeOwnershipWriter } from "./ownership";
 import {
   movePage,
   type PageMoveDestination,
@@ -102,6 +103,7 @@ export interface CreatePageInput {
   domain?: string | null;
   tags?: string[];
   alwaysLoadForAgents?: boolean;
+  ownerPrincipalId?: string;
 }
 
 export interface UpdatePageInput {
@@ -144,6 +146,8 @@ export interface KnowledgeServiceDeps {
    * that serves the product.
    */
   readership?: ReadershipResolver;
+  /** Shared Team ownership persistence for newly created business Knowledge. */
+  ownership?: KnowledgeOwnershipWriter;
 }
 
 /** Shared Knowledge core; V1 `plainText` is trimmed markdown. */

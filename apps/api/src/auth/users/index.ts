@@ -56,6 +56,11 @@ export function normalizeEmail(email: string): string {
 export interface UserRepo {
   findByEmail(email: string): Promise<UserDoc | null>;
   findById(id: string): Promise<UserDoc | null>;
+  /**
+   * Many users at once. Optional so a fake need not grow a method it has no caller for; a caller
+   * that finds it absent must fall back to `findById` per id rather than assume the batch exists.
+   */
+  findByIds?(ids: readonly string[]): Promise<UserDoc[]>;
   count(): Promise<number>;
   insert(user: UserDoc): Promise<void>;
 }
@@ -138,6 +143,14 @@ export class PgUserRepo implements UserRepo {
   async findById(id: string): Promise<UserDoc | null> {
     const { rows } = await this.q.query("SELECT * FROM users WHERE id = $1", [id]);
     return rows.length > 0 ? rowToUser(rows[0]) : null;
+  }
+
+  async findByIds(ids: readonly string[]): Promise<UserDoc[]> {
+    if (ids.length === 0) return [];
+    const { rows } = await this.q.query("SELECT * FROM users WHERE id = ANY($1::uuid[])", [
+      [...ids],
+    ]);
+    return rows.map(rowToUser);
   }
 
   async count(): Promise<number> {

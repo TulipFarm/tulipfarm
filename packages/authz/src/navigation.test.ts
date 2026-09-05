@@ -12,6 +12,7 @@ test("navigation capabilities omit every path whose authority is denied", async 
     expect.not.arrayContaining(["/inbox", "/business/soul", "/business/models"])
   );
   expect(capabilities.visiblePaths).toContain("/business/activities");
+  expect(capabilities.visiblePaths).toContain("/files");
 });
 
 test("navigation capabilities evaluate each repeated authorization once", async () => {

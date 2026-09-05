@@ -13,6 +13,7 @@ let doc: PMNode;
 const clearContent = vi.fn();
 const setContent = vi.fn();
 const selectTextblockEnd = vi.fn();
+const insertContent = vi.fn();
 const viewFocus = vi.fn();
 
 const fakeEditor = {
@@ -20,7 +21,7 @@ const fakeEditor = {
   getJSON: () => doc,
   isActive: () => false,
   getAttributes: () => ({}),
-  commands: { clearContent, setContent, selectTextblockEnd },
+  commands: { clearContent, setContent, selectTextblockEnd, insertContent },
   view: { focus: viewFocus },
   chain: () => ({ focus: () => ({ run: () => true }) }),
 };
@@ -77,6 +78,7 @@ beforeEach(() => {
   clearContent.mockClear();
   setContent.mockClear();
   selectTextblockEnd.mockClear();
+  insertContent.mockClear();
   viewFocus.mockClear();
   cancelUpload.mockClear();
   uploadFile.mockReset();
@@ -186,6 +188,53 @@ test("send serializes mentions into agentId + skills + resources", async () => {
     knowledgePages: [],
     files: [],
   });
+});
+
+test("send attaches a stored File selected with +File", async () => {
+  const user = userEvent.setup();
+  const onSend = vi.fn();
+  doc = {
+    type: "doc",
+    content: [
+      {
+        type: "paragraph",
+        content: [
+          {
+            type: "mentionFile",
+            attrs: {
+              id: "file-1",
+              label: "pricing.json",
+              mediaType: "application/json",
+              sizeBytes: 120,
+            },
+          },
+          { type: "text", text: " summarize this" },
+        ],
+      },
+    ],
+  };
+  render(<ComposerEditor onSend={onSend} />);
+
+  await user.click(screen.getByRole("button", { name: "Send prompt" }));
+
+  expect(onSend).toHaveBeenCalledWith("+pricing.json summarize this", {
+    model: "auto",
+    agentId: undefined,
+    skills: [],
+    resources: [],
+    knowledgePages: [],
+    files: [{ fileId: "file-1", mediaType: "application/json", name: "pricing.json" }],
+  });
+});
+
+test("the context toolbar offers the +File trigger", async () => {
+  const user = userEvent.setup();
+  render(<ComposerEditor onSend={vi.fn()} />);
+
+  await user.click(screen.getByRole("button", { name: "Add File (+)" }));
+
+  expect(insertContent).toHaveBeenCalledWith("+");
+  expect(viewFocus).toHaveBeenCalled();
 });
 
 test("the composer offers an attach control that accepts only supported types", () => {

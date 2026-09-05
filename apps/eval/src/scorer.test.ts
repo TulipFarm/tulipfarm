@@ -528,7 +528,7 @@ describe("what the active Soul publication serves", () => {
 
 describe("who may read a File the Turn generated", () => {
   const withFiles = (
-    generatedFiles: { filename: string; readableBy: string[] }[]
+    generatedFiles: { filename: string; readableBy: string[]; status?: "draft" | "saved" }[]
   ): Observation => ({
     ...base,
     persisted: {
@@ -584,6 +584,11 @@ describe("who may read a File the Turn generated", () => {
     const r = only({ kind: "generated_file_readable_by", grantee: "role:hr-team" }, withFiles([]));
     expect(r.passed).toBe(false);
     expect(r.detail).toContain("no File");
+  });
+
+  it("recognizes a Chat draft without treating it as a saved File audience", () => {
+    const obs = withFiles([{ filename: "a.pdf", readableBy: [], status: "draft" }]);
+    expect(only({ kind: "generated_file_draft_created" }, obs).passed).toBe(true);
   });
 
   it("is held out as unexercised when the model never called the Tool", () => {

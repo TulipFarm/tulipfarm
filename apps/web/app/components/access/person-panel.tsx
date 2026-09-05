@@ -182,7 +182,7 @@ export function PersonDetail({
                   {person.teams.map((team) => teamTitle(team.id)).join(", ")}
                 </span>
                 <Button variant="link" size="sm" asChild>
-                  <Link to="/business/access/teams">Manage teams</Link>
+                  <Link to="/teams">Manage teams</Link>
                 </Button>
               </div>
               <p className="mt-0.5 text-xs text-muted-foreground">
@@ -203,6 +203,11 @@ export function PersonDetail({
                     className="flex flex-wrap items-start gap-3 rounded-md border border-border px-3 py-2"
                   >
                     <div className="min-w-0 flex-1">
+                      <div className="mb-1 flex flex-wrap items-center gap-2">
+                        <Badge variant="primary">Direct exception</Badge>
+                        <ExpiryNote expiresAt={held.expiresAt} />
+                        {!held.expiresAt ? <Badge variant="neutral">No expiry</Badge> : null}
+                      </div>
                       {summary ? (
                         <RoleCard summary={summarizeRole(summary)} />
                       ) : (
@@ -216,7 +221,6 @@ export function PersonDetail({
                         </p>
                       ) : null}
                     </div>
-                    <ExpiryNote expiresAt={held.expiresAt} />
                     {last ? null : (
                       <>
                         {confirming === key ? (

@@ -22,6 +22,7 @@ const FILE: LibraryFile = {
   sizeBytes: 4096,
   createdAt: "2026-01-02T03:04:05.000Z",
   owner: "user_1",
+  folderId: null,
   origin: "uploaded",
   sourceChatId: null,
   sourceRunId: null,

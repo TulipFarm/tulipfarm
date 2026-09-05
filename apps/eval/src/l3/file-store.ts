@@ -1,17 +1,17 @@
 /**
- * The L3 tier's real File store, so a Case can assert who may read what an Agent wrote.
+ * The L3 tier's real File store, so a Case can assert the lifecycle of what an Agent generated.
  *
  * Every other Tool in this framework is scripted, and for nearly all of them that is right: a Case
  * cares what the model *asked* a Tool to do, not what the Tool then did. `file_create` is the
- * exception, because the property worth measuring is not in the call at all. The audience of a
- * generated File — the caller, plus every Role the authoring Agent holds — is decided inside
- * `FileService.generate` from an identity the model never sees and cannot influence. A scripted
- * result would hand back a `fileId` and prove nothing about who can open it.
+ * exception, because the property worth measuring is not in the call at all. A Chat call becomes
+ * an expiring draft while a Routine call becomes a persistent File, based on server-only context
+ * the model never sees and cannot influence. A scripted result would hand back whichever lifecycle
+ * the Case author wrote and prove nothing about what the product actually did.
  *
  * So `file_create` runs for real here: the product's own Tool handler, over the product's own
- * `FileService`, against the real `files` and `file_shares` tables, with `rolesOf` wired to the
- * production `collectHeldRoleIds` rather than to a fixture map. The only substitution is the blob
- * port, which is in memory because the bytes are not what is being measured.
+ * `FileService`, against the real draft/File tables, with `rolesOf` wired to the production
+ * `collectHeldRoleIds` rather than to a fixture map. The only substitution is the blob port, which
+ * is in memory because the bytes are not what is being measured.
  *
  * It is also why {@link seedAgentRoles} writes `role_assignments` rather than reading the Agent's
  * Soul `roles:` list. That list is advisory metadata — `reconcileSoulRoles` projects Role
@@ -28,7 +28,13 @@ import {
   fileCreateTool,
   PgFileRepo,
 } from "@tulipfarm/files";
-import { type BlobPort, collectBlobBytes, PgGroupRepo, PgRoleRepo } from "@tulipfarm/storage";
+import {
+  type BlobPort,
+  collectBlobBytes,
+  PgPrincipalRepo,
+  PgRoleRepo,
+  PgTeamRepo,
+} from "@tulipfarm/storage";
 import { collectHeldRoleIds } from "@tulipfarm/tool-host";
 import type { EvalDatabase } from "./database.ts";
 
@@ -41,6 +47,7 @@ export interface GeneratedFile {
   readonly filename: string;
   /** Every grantee that may read it, as `kind:id` — the spelling a Case's Expectation uses. */
   readonly readableBy: readonly string[];
+  readonly status: "draft" | "saved";
 }
 
 export interface EvalFileStore {
@@ -57,9 +64,8 @@ export function granteeLabel(grantee: Pick<FileGrantee, "kind" | "id">): string 
 /**
  * Content-addressed bytes held in memory.
  *
- * Only `put` is ever reached: `generate` writes, and no Expectation reads a generated File back.
- * The other three throw rather than return something plausible, so a future Case that does need
- * the bytes fails here instead of quietly measuring an empty document.
+ * Generation also checks `head` while holding the blob-reference lock, so that operation reports
+ * the bytes just stored. Reads and deletes still fail loudly because no Eval Case uses them.
  */
 function memoryBlobs(): BlobPort {
   const objects = new Map<string, Uint8Array>();
@@ -74,7 +80,10 @@ function memoryBlobs(): BlobPort {
       return { key: `eval/${hash}`, hash };
     },
     get: unsupported("get"),
-    head: unsupported("head"),
+    head: async (ref) => {
+      const bytes = objects.get(ref.hash);
+      return bytes === undefined ? null : { size: bytes.byteLength };
+    },
     delete: unsupported("delete"),
   };
 }
@@ -129,11 +138,10 @@ export interface EvalFileStoreOptions {
 }
 
 /**
- * Dispatches `file_create` through the product's own handler and records the audience it produced.
+ * Dispatches `file_create` through the product's own handler and records the lifecycle it produced.
  *
- * The share rows are read back rather than predicted. Predicting them here would be a second
- * implementation of the very rule under test, and the two would be free to agree while both being
- * wrong.
+ * For an automatically saved output, share rows are read back rather than predicted. A Chat draft
+ * deliberately has no File audience yet.
  */
 export function evalFileStore(options: EvalFileStoreOptions): EvalFileStore {
   const { database, businessId, principalId, agentId } = options;
@@ -145,8 +153,9 @@ export function evalFileStore(options: EvalFileStoreOptions): EvalFileStore {
     rolesOf: (business, principal) =>
       collectHeldRoleIds(
         {
+          principals: new PgPrincipalRepo(database.transactions),
           roles: new PgRoleRepo(database.transactions),
-          groups: new PgGroupRepo(database.transactions),
+          teams: new PgTeamRepo(database.transactions),
         },
         business,
         principal,
@@ -164,17 +173,32 @@ export function evalFileStore(options: EvalFileStoreOptions): EvalFileStore {
           principalId,
           agentId,
           runId: options.runId(),
+          toolCallId: request.callId,
           service,
         });
         if (!result.success) {
           return { status: "failed", callId: request.callId, reason: result.error.message };
         }
-        const data = result.data as { fileId: string; filename: string };
-        const shares = await repo.listShares(businessId, data.fileId);
+        const data = result.data as {
+          status: "draft" | "saved";
+          draftId?: string;
+          fileId?: string;
+          filename: string;
+        };
+        const fileId = data.fileId ?? data.draftId;
+        if (fileId === undefined) {
+          return {
+            status: "failed",
+            callId: request.callId,
+            reason: "file_create returned no output id",
+          };
+        }
+        const shares = data.status === "saved" ? await repo.listShares(businessId, fileId) : [];
         generated.push({
-          fileId: data.fileId,
+          fileId,
           filename: data.filename,
           readableBy: shares.map(granteeLabel),
+          status: data.status,
         });
         return { status: "succeeded", callId: request.callId, output: data };
       },

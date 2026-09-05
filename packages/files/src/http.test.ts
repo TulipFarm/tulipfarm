@@ -16,8 +16,14 @@ function file(overrides: Partial<FileRecord> = {}): FileRecord {
     origin: "uploaded",
     sourceConversationId: null,
     sourceRunId: null,
+    currentVersionId: "file_1",
+    revision: 1,
+    modifiedAt: new Date("2025-01-02T03:04:05.000Z"),
+    archivedAt: null,
     createdAt: new Date("2025-01-02T03:04:05.000Z"),
     ...overrides,
+    sourceToolCallId: overrides.sourceToolCallId ?? null,
+    folderId: overrides.folderId ?? null,
   };
 }
 
@@ -27,6 +33,8 @@ describe("serializeFile", () => {
 
     expect(wire.owner).toBe("agent_7");
     expect(wire.origin).toBe("generated");
+    expect(wire.currentVersionId).toBe("file_1");
+    expect(wire.folderId).toBeNull();
   });
 
   it("renames the Conversation to a Chat on the way out", () => {

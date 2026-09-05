@@ -58,6 +58,14 @@ function approved(principalId: string) {
   };
 }
 
+function teamApproved(principalId: string, role: string) {
+  return {
+    ...approved(principalId),
+    approverRoles: [role],
+    satisfiedApproverRole: role,
+  };
+}
+
 function denialReason(fn: () => void): string {
   try {
     fn();
@@ -205,6 +213,37 @@ describe("assertApprovalUsable", () => {
         NOW
       )
     ).not.toThrow();
+  });
+
+  it("requires one distinct decision for every named approver role", () => {
+    const ownership = record({
+      allowedApproverRoles: ["team:a:admin", "team:b:admin", "team:new:admin"],
+      requiredApproverRoles: ["team:a:admin", "team:b:admin", "team:new:admin"],
+      decisions: [teamApproved("admin-a", "team:a:admin"), teamApproved("admin-b", "team:b:admin")],
+    });
+
+    expect(denialReason(() => assertApprovalUsable(ownership, BINDING, NOW))).toBe(
+      "insufficient_approvals"
+    );
+    expect(() =>
+      assertApprovalUsable(
+        {
+          ...ownership,
+          decisions: [...ownership.decisions, teamApproved("admin-new", "team:new:admin")],
+        },
+        BINDING,
+        NOW
+      )
+    ).not.toThrow();
+  });
+
+  it("uses unanimous named constituencies instead of the generic high-risk quorum", () => {
+    const ownerApproval = record({
+      allowedApproverRoles: ["team:sole-owner:admin"],
+      requiredApproverRoles: ["team:sole-owner:admin"],
+      decisions: [teamApproved("owner-admin", "team:sole-owner:admin")],
+    });
+    expect(() => assertApprovalUsable(ownerApproval, BINDING, NOW)).not.toThrow();
   });
 
   it("denies when no decision was recorded at all", () => {

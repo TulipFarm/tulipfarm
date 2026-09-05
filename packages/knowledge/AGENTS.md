@@ -12,6 +12,7 @@ propagation. This is the sole accountable owner for source ACL enforcement.
 | Path | Owns |
 | --- | --- |
 | `src/source.ts`, `src/acl.ts`, `src/subject.ts` | Source records/store, the `decideKnowledgeAccess` gate, and the Page/Source subject projections. |
+| `src/ownership.ts` | Projects shared Team ownership and shares into the existing Knowledge ACL. |
 | `src/indexing.ts`, `src/retrieve.ts` | Authorized indexing and authorize -> rank -> re-check. |
 | `src/graph-expand.ts` | Bounded hop walk over `knowledge_links` and the banded hop-decay score. |
 | `src/graphrag/` | GraphRAG: LLM extraction, deterministic clustering, community summaries, local/global search, graph repo and invalidation. |

@@ -1,6 +1,6 @@
 ---
 title: Decide who can do what
-description: Manage people, teams, and access levels in TulipFarm. Invite someone, group people into teams, and check exactly why an action is allowed or denied.
+description: Manage people, teams, and access levels in TulipFarm. Invite someone, put people into teams, and check why an action is allowed or denied.
 ---
 
 Access in TulipFarm answers one question: when someone (or something) tries to do a thing, is
@@ -11,8 +11,7 @@ Three ideas do all the work.
 - **People and apps** are the things that act. A person signing in is one. So is an agent, a
   routine, an integration, or an API token.
 - **Levels** say what an actor may do. Every actor holds one or more.
-- **Teams** are groups of people that hold a level together, so you set it once instead of per
-  person.
+- **Teams** hold people and shared access together, so you set access once instead of per person.
 
 Everything below is on **Operate → Business → People & access**, which admin accounts can reach.
 
@@ -76,8 +75,17 @@ in it changes with it.
   </Step>
 </Steps>
 
-A team holds people and levels. Teams do not go inside other teams. A team can be given an expiry,
-which is useful for contractors and for temporary access during an incident.
+A team can sit under one parent team, and access from the parent flows down. A team membership can
+be given an expiry, which is useful for contractors and for temporary access during an incident.
+
+## Deprecated API names
+
+Older automation may still call the old `group` API names for one release after the Team API
+launches. Those calls update the Team model and return a deprecation notice with the Team endpoint
+to use instead.
+
+New automation should use Team routes only. Remove the old names before the next release, when the
+compatibility aliases are removed.
 
 ## Give an agent a team
 

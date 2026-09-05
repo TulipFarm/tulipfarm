@@ -9,6 +9,7 @@ const KIND_LABEL: Record<MentionEntry["kind"], string> = {
   skill: "Skill",
   resource: "Resource type",
   knowledge: "Knowledge",
+  file: "File",
 };
 
 function MentionChip({ entry, children }: { entry?: MentionEntry; children: ReactNode }) {

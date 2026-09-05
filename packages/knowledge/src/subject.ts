@@ -7,6 +7,7 @@
  * second authorization vocabulary.
  */
 
+import type { TeamAssetAccessLevel } from "@tulipfarm/schema";
 import type {
   KnowledgeAccessControl,
   KnowledgeAclSnapshot,
@@ -106,6 +107,32 @@ export function pageSubject(
   };
 }
 
+export function spaceSubject(
+  input: {
+    readonly spaceId: string;
+    readonly businessId: string;
+    readonly aclRevision: string;
+  },
+  entries: readonly KnowledgeAclEntry[],
+  now: Date
+): KnowledgeSubject {
+  return {
+    ...pageSubject(
+      {
+        pageId: input.spaceId,
+        spaceId: input.spaceId,
+        businessId: input.businessId,
+        revision: input.aclRevision,
+        aclRevision: input.aclRevision,
+        status: "active",
+      },
+      entries,
+      now
+    ),
+    subjectKind: "space",
+  };
+}
+
 /** A captured snapshot principal is a grant; `extra` carries stored grants and denies. */
 export function sourceSubject(
   source: KnowledgeSourceRecord,
@@ -142,6 +169,34 @@ export function sourceSubject(
 export interface KnowledgeSubjectStore {
   listAuthored(businessId: string): Promise<readonly KnowledgeSubject[]>;
   getAuthored(businessId: string, subjectId: string): Promise<KnowledgeSubject | undefined>;
+}
+
+export interface KnowledgeOwnershipPort {
+  entriesFor(
+    businessId: string,
+    subjects: readonly {
+      readonly kind: Extract<KnowledgeSubjectKind, "page" | "space" | "source">;
+      readonly id: string;
+    }[]
+  ): Promise<ReadonlyMap<string, readonly KnowledgeAclEntry[]>>;
+  accessFor?(
+    businessId: string,
+    kind: Extract<KnowledgeSubjectKind, "page" | "space" | "source">,
+    id: string,
+    principalId: string
+  ): Promise<
+    | {
+        readonly levels: readonly TeamAssetAccessLevel[];
+        readonly canManageOwnership: boolean;
+      }
+    | undefined
+  >;
+  consumeDestructiveApproval?(
+    businessId: string,
+    kind: Extract<KnowledgeSubjectKind, "page" | "space" | "source">,
+    id: string,
+    operationId: string | undefined
+  ): Promise<void>;
 }
 
 /**

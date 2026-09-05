@@ -283,6 +283,24 @@ test("treats a chosen date as the end of that day", async () => {
   );
 });
 
+test("labels direct person exceptions and shows whether they expire", () => {
+  renderPage(
+    loaderData({
+      selectedId: PRIYA_ID,
+      assignments: [
+        { roleId: "member", assignees: [{ principalId: PRIYA_ID, expiresAt: null }] },
+        {
+          roleId: "support-operators",
+          assignees: [{ principalId: PRIYA_ID, expiresAt: "2027-03-05T23:59:59.000Z" }],
+        },
+      ],
+    })
+  );
+
+  expect(screen.getByText("Direct exception")).toBeInTheDocument();
+  expect(screen.getAllByText(/^Until /).some((element) => element.tagName === "SPAN")).toBe(true);
+});
+
 test("takes access away only after a confirmation step", async () => {
   const user = userEvent.setup();
   renderPage(

@@ -9,6 +9,7 @@ import { buildApp } from "./app";
 import type { TokenDoc, TokenRepo } from "./auth/api-tokens";
 import { MemorySessionStore } from "./auth/session-store";
 import type { UserDoc, UserRepo } from "./auth/users";
+import type { TeamAssetService } from "./team-assets/service";
 
 class FakeUserRepo implements UserRepo {
   async findByEmail(): Promise<UserDoc | null> {
@@ -82,6 +83,7 @@ function buildTestApp() {
     secretsService,
     gitSync: makeFakeGitSync(),
     soulWriter: makeSoulWriterDouble().writer,
+    teamAssets: {} as TeamAssetService,
   });
 }
 
@@ -119,6 +121,10 @@ describe("OpenAPI spec", () => {
     expect(paths).toContain("/api/v1/secrets/status");
     expect(paths).toContain("/api/v1/secrets/{key}");
     expect(paths).toContain("/api/v1/soul/push");
+    expect(paths).toContain("/api/v1/teams/{teamId}/assets");
+    expect(paths).toContain(
+      "/api/v1/team-assets/{assetType}/{assetId}/operations/{operationId}/emergency-override"
+    );
   });
 
   it("GET /docs/ returns Scalar UI HTML", async () => {

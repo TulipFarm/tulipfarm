@@ -18,6 +18,28 @@ export {
   assertApproverEligible,
   requiredApproverCount,
 } from "./approval/decision";
+export type {
+  AssetAccessProjection,
+  AssetMembershipPort,
+  AssetOwnershipAccessDeps,
+  AssetOwnershipOperation,
+  AssetOwnershipOperationAction,
+  AssetOwnershipRecord,
+  AssetOwnershipRepoPort,
+  AssetOwnershipServiceDeps,
+  AssetTeamShare,
+  OwnershipApprovalPort,
+  OwnershipApprovalRecord,
+  OwnershipFact,
+  OwnershipFactPort,
+  ProposeOwnershipOperationInput,
+} from "./asset-ownership";
+export {
+  AssetOwnershipAccessService,
+  AssetOwnershipError,
+  AssetOwnershipService,
+  projectAssetAccess,
+} from "./asset-ownership";
 export type { DelegatedAuthority } from "./delegated-authority";
 export {
   DELEGATED_DATA_ACTION,
@@ -103,10 +125,16 @@ export {
 } from "./recertification";
 export type { PlatformResource } from "./resources";
 export { MODEL_INVOKE_ACTION, MODEL_RESOURCE, PLATFORM_RESOURCES } from "./resources";
-export type { Role, RoleAssignableTo, RoleAssignmentDenialReason } from "./roles";
+export type {
+  Role,
+  RoleAssignableTo,
+  RoleAssignmentDenialReason,
+  RoleAssignmentTarget,
+} from "./roles";
 export {
   assertRoleAssignable,
   assertRoleGraphAcyclic,
+  collectRoleGrantEntries,
   collectRoleGrants,
   RoleAssignmentError,
   RoleCycleError,
@@ -115,3 +143,52 @@ export {
 export { compileRoutineAuthority } from "./routine-authority";
 export type { RoleSurface } from "./surface-catalog";
 export { restrictedSurfaceCarveOut, surfaceGrants } from "./surface-catalog";
+export type {
+  AuthorityEvidence,
+  AuthorityEvidenceKind,
+  TeamAuthorityAssignment,
+  TeamAuthorityAssignmentErrorReason,
+  TeamAuthorityAssignmentPort,
+  TeamAuthorityPort,
+  TeamAuthorityResolution,
+  TeamAuthorityRolePort,
+  TeamDelegationDecision,
+  TeamDelegationPolicy,
+  TeamDelegationPolicyPort,
+  TeamDirectGrant,
+  TeamRoleAssignment,
+} from "./team-authority";
+export {
+  decideTeamDelegation,
+  resolveTeamAuthority,
+  TeamAuthorityAssignmentError,
+  TeamAuthorityAssignmentService,
+} from "./team-authority";
+export type {
+  TeamMoveAssetImpactPort,
+  TeamMoveAssetLink,
+  TeamMoveImpact,
+  TeamMoveSnapshot,
+} from "./team-move";
+export { analyzeTeamMove } from "./team-move";
+export type {
+  AddTeamMemberInput,
+  CreateTeamInput,
+  ResolvedTeamMember,
+  TeamActorCapabilities,
+  TeamFact,
+  TeamFactAction,
+  TeamFactPort,
+  TeamLeaveRequestRecord,
+  TeamLeaveRequestStatus,
+  TeamLifecycleGuard,
+  TeamMembershipRecord,
+  TeamPrincipalPort,
+  TeamRecord,
+  TeamRepoPort,
+  TeamServiceDeps,
+  TeamServiceErrorReason,
+  UpdateTeamIdentityInput,
+  UpdateTeamMembershipInput,
+} from "./teams";
+export { TeamService, TeamServiceError } from "./teams";

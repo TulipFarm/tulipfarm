@@ -532,6 +532,359 @@ describe("runPgMigrations", () => {
     });
   });
 
+  describe("migration 86", () => {
+    it("backfills immutable version one and creates durable blob cleanup storage", async () => {
+      const fileId = "00000000-0000-4000-8000-000000000085";
+      await db.query(`CREATE TABLE files (
+        id                     uuid PRIMARY KEY,
+        business_id            text NOT NULL,
+        owner_principal_id     text NOT NULL,
+        filename               text NOT NULL,
+        media_type             text NOT NULL,
+        claimed_media_type     text NOT NULL,
+        size_bytes             bigint NOT NULL,
+        blob_key               text NOT NULL,
+        blob_hash              text NOT NULL,
+        origin                 text NOT NULL DEFAULT 'uploaded',
+        source_conversation_id uuid,
+        source_run_id          uuid,
+        knowledge_requested_at timestamptz,
+        created_at             timestamptz(3) NOT NULL DEFAULT now()
+      )`);
+      await db.query(
+        `INSERT INTO files
+          (id, business_id, owner_principal_id, filename, media_type, claimed_media_type,
+           size_bytes, blob_key, blob_hash)
+         VALUES ($1, 'business', 'owner', 'notes.txt', 'text/plain', 'text/plain',
+           3, 'blob-key', 'blob-hash')`,
+        [fileId]
+      );
+      await db.query(`CREATE TABLE schema_version (
+        id boolean PRIMARY KEY DEFAULT true,
+        version integer NOT NULL,
+        CONSTRAINT schema_version_single_row CHECK (id)
+      )`);
+      await db.query("INSERT INTO schema_version (id, version) VALUES (true, 85)");
+
+      await runPgMigrations(db, undefined, NOOP_LOG);
+
+      const versions = await db.query<{
+        id: string;
+        file_id: string;
+        version_number: number;
+        reason: string;
+      }>("SELECT id, file_id, version_number, reason FROM file_versions");
+      expect(versions.rows).toEqual([
+        { id: fileId, file_id: fileId, version_number: 1, reason: "created" },
+      ]);
+      const files = await db.query<{ current_version_id: string; revision: number }>(
+        "SELECT current_version_id, revision FROM files"
+      );
+      expect(files.rows).toEqual([{ current_version_id: fileId, revision: 1 }]);
+      await expect(
+        db.query(
+          "INSERT INTO file_blob_cleanup (blob_key, blob_hash) VALUES ('blob-key', 'blob-hash')"
+        )
+      ).resolves.toBeDefined();
+    });
+
+    describe("migration 87", () => {
+      it("adds expiring generation drafts and Tool-call idempotency", async () => {
+        await runPgMigrations(db, undefined, NOOP_LOG);
+
+        const columns = await db.query<{ column_name: string }>(`SELECT column_name
+          FROM information_schema.columns
+          WHERE table_name = 'file_generation_drafts'
+          ORDER BY column_name`);
+        expect(columns.rows.map((row) => row.column_name)).toContain("expires_at");
+        expect(columns.rows.map((row) => row.column_name)).toContain("source_tool_call_id");
+
+        const files = await db.query<{ column_name: string }>(`SELECT column_name
+          FROM information_schema.columns
+          WHERE table_name = 'files' AND column_name = 'source_tool_call_id'`);
+        expect(files.rows).toHaveLength(1);
+      });
+    });
+
+    describe("migration 88", () => {
+      it("adds nested File folders and optional File placement", async () => {
+        await runPgMigrations(db, undefined, NOOP_LOG);
+
+        const folders = await db.query<{ table_name: string }>(`SELECT table_name
+            FROM information_schema.tables WHERE table_name = 'file_folders'`);
+        const files = await db.query<{ column_name: string }>(`SELECT column_name
+            FROM information_schema.columns
+            WHERE table_name = 'files' AND column_name = 'folder_id'`);
+
+        expect(folders.rows).toHaveLength(1);
+        expect(files.rows).toHaveLength(1);
+      });
+    });
+  });
+
+  describe("migration 89", () => {
+    it("migrates legacy groups without changing effective Role access", async () => {
+      await db.query(`CREATE TABLE principals (
+        business_id text NOT NULL,
+        id text NOT NULL,
+        kind text NOT NULL,
+        status text NOT NULL,
+        expires_at timestamptz,
+        created_at timestamptz NOT NULL DEFAULT now(),
+        updated_at timestamptz NOT NULL DEFAULT now(),
+        PRIMARY KEY (business_id, id)
+      )`);
+      await db.query(`CREATE TABLE roles (
+        business_id text NOT NULL,
+        id text NOT NULL,
+        assignable_to text[] NOT NULL,
+        expires_at timestamptz,
+        created_at timestamptz NOT NULL DEFAULT now(),
+        updated_at timestamptz NOT NULL DEFAULT now(),
+        PRIMARY KEY (business_id, id)
+      )`);
+      await db.query(`CREATE TABLE role_assignments (
+        business_id text NOT NULL,
+        principal_id text NOT NULL,
+        role_id text NOT NULL,
+        expires_at timestamptz,
+        assigned_at timestamptz NOT NULL DEFAULT now(),
+        PRIMARY KEY (business_id, principal_id, role_id),
+        FOREIGN KEY (business_id, principal_id) REFERENCES principals(business_id, id),
+        FOREIGN KEY (business_id, role_id) REFERENCES roles(business_id, id)
+      )`);
+      await db.query(`CREATE TABLE principal_groups (
+        business_id text NOT NULL,
+        id text NOT NULL,
+        expires_at timestamptz,
+        created_at timestamptz NOT NULL DEFAULT now(),
+        updated_at timestamptz NOT NULL DEFAULT now(),
+        PRIMARY KEY (business_id, id)
+      )`);
+      await db.query(`CREATE TABLE principal_group_members (
+        business_id text NOT NULL,
+        group_id text NOT NULL,
+        principal_id text NOT NULL,
+        expires_at timestamptz,
+        assigned_at timestamptz NOT NULL DEFAULT now(),
+        PRIMARY KEY (business_id, group_id, principal_id)
+      )`);
+      await db.query(`CREATE TABLE group_role_assignments (
+        business_id text NOT NULL,
+        group_id text NOT NULL,
+        role_id text NOT NULL,
+        expires_at timestamptz,
+        assigned_at timestamptz NOT NULL DEFAULT now(),
+        PRIMARY KEY (business_id, group_id, role_id)
+      )`);
+      await db.query(
+        `INSERT INTO principals (business_id, id, kind, status)
+         VALUES ('business', 'person-1', 'user', 'active'),
+                ('business', 'service-1', 'service', 'active')`
+      );
+      await db.query(
+        `INSERT INTO roles (business_id, id, assignable_to)
+         VALUES ('business', 'reader', ARRAY['user']),
+                ('business', 'owner', ARRAY['user'])`
+      );
+      await db.query(
+        `INSERT INTO principal_groups (business_id, id)
+         VALUES ('business', 'customer-success'), ('business', 'owners')`
+      );
+      await db.query(
+        `INSERT INTO principal_group_members
+           (business_id, group_id, principal_id, expires_at)
+         VALUES ('business', 'customer-success', 'person-1', '2027-01-01T00:00:00Z'),
+                ('business', 'customer-success', 'service-1', NULL),
+                ('business', 'owners', 'person-1', NULL)`
+      );
+      await db.query(
+        `INSERT INTO group_role_assignments (business_id, group_id, role_id, expires_at)
+         VALUES ('business', 'customer-success', 'reader', '2027-02-01'),
+                ('business', 'owners', 'owner', NULL)`
+      );
+      await db.query(`CREATE TABLE schema_version (
+        id boolean PRIMARY KEY DEFAULT true,
+        version integer NOT NULL,
+        CONSTRAINT schema_version_single_row CHECK (id)
+      )`);
+      await db.query("INSERT INTO schema_version (id, version) VALUES (true, 88)");
+
+      const before = await db.query<{ role_id: string }>(
+        `SELECT DISTINCT held.role_id
+           FROM principal_group_members membership
+           JOIN group_role_assignments held
+             ON held.business_id = membership.business_id
+            AND held.group_id = membership.group_id
+          WHERE membership.business_id = 'business'
+            AND membership.principal_id = 'person-1'
+          ORDER BY held.role_id`
+      );
+
+      await runPgMigrations(db, undefined, NOOP_LOG);
+
+      const after = await db.query<{ role_id: string }>(
+        `SELECT role_id FROM role_assignments
+          WHERE business_id = 'business' AND principal_id = 'person-1'
+         UNION
+         SELECT assignment.role_id
+           FROM team_memberships membership
+           JOIN teams team ON team.id = membership.team_id
+           JOIN team_role_assignments assignment ON assignment.team_id = team.id
+          WHERE team.business_id = 'business' AND membership.principal_id = 'person-1'
+          ORDER BY role_id`
+      );
+      expect(after.rows).toEqual(before.rows);
+
+      const migrated = await db.query<{
+        slug: string;
+        parent_slug: string;
+        group_id: string;
+        member_count: number;
+      }>(
+        `SELECT team.slug, parent.slug AS parent_slug, mapping.group_id,
+                count(membership.principal_id)::int AS member_count
+           FROM teams team
+           JOIN teams parent ON parent.id = team.parent_team_id
+           JOIN legacy_group_team_mappings mapping ON mapping.team_id = team.id
+           LEFT JOIN team_memberships membership ON membership.team_id = team.id
+          GROUP BY team.slug, parent.slug, mapping.group_id`
+      );
+      expect(migrated.rows).toEqual([
+        {
+          slug: "customer-success",
+          parent_slug: "everyone",
+          group_id: "customer-success",
+          member_count: 2,
+        },
+      ]);
+      const owners = await db.query(
+        "SELECT 1 FROM teams WHERE business_id = 'business' AND slug = 'owners'"
+      );
+      expect(owners.rows).toHaveLength(0);
+      const migratedRole = await db.query<{ assignable_to: string[] }>(
+        "SELECT assignable_to FROM roles WHERE business_id = 'business' AND id = 'reader'"
+      );
+      expect(migratedRole.rows[0]?.assignable_to).toEqual(["user", "team"]);
+      const expiry = await db.query<{ expires_at: Date }>(
+        `SELECT expires_at FROM team_memberships membership
+         JOIN legacy_group_team_mappings mapping ON mapping.team_id = membership.team_id
+         WHERE mapping.group_id = 'customer-success' AND membership.principal_id = 'person-1'`
+      );
+      expect(expiry.rows[0]?.expires_at.toISOString()).toBe("2027-01-01T00:00:00.000Z");
+    });
+
+    it("records slug and sibling-name conflicts for the admin migration report", async () => {
+      await db.query(`CREATE TABLE principals (
+        business_id text NOT NULL,
+        id text NOT NULL,
+        kind text NOT NULL,
+        status text NOT NULL,
+        expires_at timestamptz,
+        PRIMARY KEY (business_id, id)
+      )`);
+      await db.query(`CREATE TABLE roles (
+        business_id text NOT NULL,
+        id text NOT NULL,
+        assignable_to text[] NOT NULL,
+        expires_at timestamptz,
+        created_at timestamptz NOT NULL DEFAULT now(),
+        updated_at timestamptz NOT NULL DEFAULT now(),
+        PRIMARY KEY (business_id, id)
+      )`);
+      await db.query(`CREATE TABLE role_assignments (
+        business_id text NOT NULL,
+        principal_id text NOT NULL,
+        role_id text NOT NULL,
+        expires_at timestamptz,
+        assigned_at timestamptz NOT NULL DEFAULT now(),
+        PRIMARY KEY (business_id, principal_id, role_id)
+      )`);
+      await db.query(`CREATE TABLE principal_groups (
+        business_id text NOT NULL,
+        id text NOT NULL,
+        expires_at timestamptz,
+        created_at timestamptz NOT NULL DEFAULT now(),
+        updated_at timestamptz NOT NULL DEFAULT now(),
+        PRIMARY KEY (business_id, id)
+      )`);
+      await db.query(`CREATE TABLE principal_group_members (
+        business_id text NOT NULL,
+        group_id text NOT NULL,
+        principal_id text NOT NULL,
+        expires_at timestamptz,
+        assigned_at timestamptz NOT NULL DEFAULT now(),
+        PRIMARY KEY (business_id, group_id, principal_id)
+      )`);
+      await db.query(`CREATE TABLE group_role_assignments (
+        business_id text NOT NULL,
+        group_id text NOT NULL,
+        role_id text NOT NULL,
+        expires_at timestamptz,
+        assigned_at timestamptz NOT NULL DEFAULT now(),
+        PRIMARY KEY (business_id, group_id, role_id)
+      )`);
+      await db.query(
+        `INSERT INTO principal_groups (business_id, id)
+         VALUES
+           ('business', 'Customer Success'),
+           ('business', 'customer-success'),
+           ('business', 'Ops'),
+           ('business', 'ops')`
+      );
+      await db.query(`CREATE TABLE schema_version (
+        id boolean PRIMARY KEY DEFAULT true,
+        version integer NOT NULL,
+        CONSTRAINT schema_version_single_row CHECK (id)
+      )`);
+      await db.query("INSERT INTO schema_version (id, version) VALUES (true, 88)");
+
+      await runPgMigrations(db, undefined, NOOP_LOG);
+
+      const report = await db.query<{
+        legacy_group_id: string;
+        team_slug: string;
+        display_name: string;
+        slug_conflict: boolean;
+        sibling_name_conflict: boolean;
+      }>(
+        `SELECT legacy_group_id, team_slug, display_name, slug_conflict, sibling_name_conflict
+           FROM team_migration_report
+          ORDER BY legacy_group_id`
+      );
+      expect(report.rows).toEqual([
+        {
+          legacy_group_id: "Customer Success",
+          team_slug: "customer-success",
+          display_name: "Customer Success",
+          slug_conflict: true,
+          sibling_name_conflict: false,
+        },
+        {
+          legacy_group_id: "Ops",
+          team_slug: "ops",
+          display_name: "Ops",
+          slug_conflict: true,
+          sibling_name_conflict: false,
+        },
+        {
+          legacy_group_id: "customer-success",
+          team_slug: "customer-success-d38e7425",
+          display_name: "customer-success",
+          slug_conflict: true,
+          sibling_name_conflict: false,
+        },
+        {
+          legacy_group_id: "ops",
+          team_slug: "ops-e8478978",
+          display_name: "ops [e8478978]",
+          slug_conflict: true,
+          sibling_name_conflict: true,
+        },
+      ]);
+    });
+  });
+
   describe("migration 32", () => {
     // Fixtures stand in for every baseline table later migrations touch.
     const seedUsers = () => db.query("CREATE TABLE users (id uuid PRIMARY KEY)");
@@ -805,6 +1158,169 @@ describe("runPgMigrations concurrency and atomicity", () => {
           WHERE table_name = 'user_memory' AND column_name = 'document'`
       );
       expect(rows[0]?.data_type).toBe("text");
+    });
+  });
+
+  describe("migration 91", () => {
+    it("backfills business-wide and private assets without widening private content", async () => {
+      await runPgMigrations(db, undefined, NOOP_LOG);
+      const privateOwner = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+      const fileId = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+      const privatePage = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
+      const publicPage = "dddddddd-dddd-4ddd-8ddd-dddddddddddd";
+      const privateSource = "source-private";
+      const hrTeamId = "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee";
+
+      await db.query("BEGIN");
+      await db.query(
+        `INSERT INTO files
+           (id, business_id, owner_principal_id, filename, media_type, claimed_media_type,
+            size_bytes, blob_key, blob_hash, origin, current_version_id, modified_at, created_at)
+         VALUES ($1, $2, 'business', 'private.txt', 'text/plain', 'text/plain',
+                 1, 'file-key', 'file-hash', 'generated', $1, now(), now())`,
+        [fileId, DEPLOYMENT_BUSINESS_ID]
+      );
+      await db.query(
+        `INSERT INTO file_versions
+           (id, business_id, file_id, version_number, media_type, claimed_media_type, size_bytes,
+            blob_key, blob_hash, actor_kind, actor_id, reason, created_at)
+         VALUES ($1, $2, $1, 1, 'text/plain', 'text/plain', 1, 'file-key', 'file-hash',
+                 'system', 'business', 'created', now())`,
+        [fileId, DEPLOYMENT_BUSINESS_ID]
+      );
+      await db.query("COMMIT");
+      await db.query(
+        `INSERT INTO file_shares (business_id, file_id, grantee_kind, grantee_id, granted_by)
+         VALUES ($1, $2, 'user', $3, 'business'),
+                ($1, $2, 'role', 'role-hr', 'business'),
+                ($1, $2, 'role', 'role-everyone', 'business')`,
+        [DEPLOYMENT_BUSINESS_ID, fileId, privateOwner]
+      );
+      // A Team holds the Role the File was shared to. The share grants read; the Team must not
+      // come out of the migration owning the File.
+      const everyone = await db.query<{ id: string }>(
+        `SELECT id FROM teams WHERE business_id = $1 AND slug = 'everyone'`,
+        [DEPLOYMENT_BUSINESS_ID]
+      );
+      await db.query(
+        `INSERT INTO teams (business_id, id, slug, display_name, status, parent_team_id)
+         VALUES ($1, $2, 'hr', 'HR', 'active', $3)
+         ON CONFLICT DO NOTHING`,
+        [DEPLOYMENT_BUSINESS_ID, hrTeamId, everyone.rows[0]?.id]
+      );
+      await db.query(
+        `INSERT INTO roles (business_id, id, assignable_to)
+         VALUES ($1, 'role-hr', ARRAY['user', 'team'])
+         ON CONFLICT DO NOTHING`,
+        [DEPLOYMENT_BUSINESS_ID]
+      );
+      await db.query(
+        `INSERT INTO team_role_assignments (team_id, role_business_id, role_id, assigned_at)
+         VALUES ($1, $2, 'role-hr', now())
+         ON CONFLICT DO NOTHING`,
+        [hrTeamId, DEPLOYMENT_BUSINESS_ID]
+      );
+      await db.query(
+        `INSERT INTO knowledge_pages
+           (id, title, content, plain_text, source, source_id, tags, author_kind, author_id,
+            created_at, updated_at)
+         VALUES
+           ($1, 'Private', 'private', 'private', 'authored', 'private', '{}', 'user', $3,
+            now(), now()),
+           ($2, 'Public', 'public', 'public', 'authored', 'public', '{}', NULL, NULL, now(), now())`,
+        [privatePage, publicPage, privateOwner]
+      );
+      await db.query(
+        `INSERT INTO knowledge_acl_entries
+           (business_id, subject_kind, subject_id, principal_kind, principal_id, effect, capability)
+         VALUES
+           ($1, 'page', $2, 'user', $3, 'grant', 'read'),
+           ($1, 'page', $4, 'role', 'role-everyone', 'grant', 'read')`,
+        [DEPLOYMENT_BUSINESS_ID, privatePage, privateOwner, publicPage]
+      );
+      await db.query(
+        `INSERT INTO knowledge_source_records
+           (source_id, business_id, integration_id, provider, external_id, external_tenant_id,
+            owner_external_id, revision, status, verification, access_control_mode,
+            access_control_max_age_seconds, acl_principals, provenance_captured_at,
+            provenance_content_hash, last_synced_at, created_at, updated_at)
+         VALUES
+           ($1, $2, 'integration-1', 'slack', 'external-1', 'tenant-1', 'owner-1', '1',
+            'active', 'verified', 'snapshot', 3600, $3::jsonb, now(), 'hash', now(), now(), now())`,
+        [
+          privateSource,
+          DEPLOYMENT_BUSINESS_ID,
+          JSON.stringify([{ kind: "user", id: privateOwner }]),
+        ]
+      );
+      await db.query("DELETE FROM asset_ownership WHERE asset_type IN ('file', 'knowledge')");
+      await db.query("UPDATE schema_version SET version = 90 WHERE id = true");
+      await db.query("DELETE FROM schema_migrations WHERE version >= 91");
+
+      await runPgMigrations(db, undefined, NOOP_LOG);
+      await db.query("UPDATE schema_version SET version = 90 WHERE id = true");
+      await db.query("DELETE FROM schema_migrations WHERE version >= 91");
+      await expect(runPgMigrations(db, undefined, NOOP_LOG)).resolves.toBeUndefined();
+
+      const owners = await db.query<{
+        asset_id: string;
+        owner_kind: string;
+        team_slug: string | null;
+        principal_id: string | null;
+      }>(
+        `SELECT owner.asset_id, owner.owner_kind, team.slug AS team_slug, owner.principal_id
+           FROM asset_owners owner
+           LEFT JOIN teams team ON team.id = owner.team_id
+          WHERE owner.asset_type IN ('file', 'knowledge')
+            AND owner.asset_id = ANY($1::text[])
+          ORDER BY owner.asset_id`,
+        [[fileId, `page:${privatePage}`, `page:${publicPage}`, `source:${privateSource}`]]
+      );
+      // Every grant the File has is a share — to a person, and to Roles a Team holds — so it must
+      // gain no owner at all: naming any recipient would hand a reader the power to re-share,
+      // archive and permanently delete it.
+      expect(owners.rows).toEqual([
+        {
+          asset_id: `page:${privatePage}`,
+          owner_kind: "principal",
+          team_slug: null,
+          principal_id: privateOwner,
+        },
+        {
+          asset_id: `page:${publicPage}`,
+          owner_kind: "team",
+          team_slug: "everyone",
+          principal_id: null,
+        },
+        {
+          asset_id: `source:${privateSource}`,
+          owner_kind: "principal",
+          team_slug: null,
+          principal_id: privateOwner,
+        },
+      ]);
+    });
+  });
+
+  describe("migration 95", () => {
+    it("adds empty labels to existing Teams", async () => {
+      await db.query(`CREATE TABLE teams (
+        business_id text NOT NULL,
+        id text NOT NULL,
+        PRIMARY KEY (business_id, id)
+      )`);
+      await db.query("INSERT INTO teams (business_id, id) VALUES ('business', 'platform')");
+      await db.query(`CREATE TABLE schema_version (
+        id boolean PRIMARY KEY DEFAULT true,
+        version integer NOT NULL,
+        CONSTRAINT schema_version_single_row CHECK (id)
+      )`);
+      await db.query("INSERT INTO schema_version (id, version) VALUES (true, 94)");
+
+      await runPgMigrations(db, undefined, NOOP_LOG);
+
+      const teams = await db.query<{ labels: string[] }>("SELECT labels FROM teams");
+      expect(teams.rows).toEqual([{ labels: [] }]);
     });
   });
 

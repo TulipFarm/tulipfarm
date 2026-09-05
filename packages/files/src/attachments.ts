@@ -40,7 +40,7 @@ export async function resolveAttachments(
   const parts: MessageFilePart[] = [];
   for (const fileId of fileIds) {
     try {
-      const file = await files.read(businessId, fileId, principalId);
+      const file = await files.readForAttachment(businessId, fileId, principalId);
       parts.push({
         type: "file",
         fileId: file.id,

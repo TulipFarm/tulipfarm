@@ -8,17 +8,22 @@ function renderAt(pathname: string) {
   return render(<Stub initialEntries={[pathname]} />);
 }
 
-test.each(["/business/access/agents", "/business/access/teams", "/business/access/check"])(
+test.each(["/business/access/agents", "/business/access/check"])(
   "%s names the page it is a tab of",
   (pathname) => {
     renderAt(pathname);
     const headings = screen.getAllByRole("heading", { level: 1 });
     expect(headings).toHaveLength(1);
-    expect(headings[0].textContent).toBe("People & access");
+    expect(headings[0].textContent).toBe("People");
   }
 );
 
 test("leaves the h1 to the section shell on the tabs' own page", () => {
   renderAt("/business/access");
+  expect(screen.queryByRole("heading", { level: 1 })).toBeNull();
+});
+
+test("leaves the h1 to the Teams section shell", () => {
+  renderAt("/business/access/teams");
   expect(screen.queryByRole("heading", { level: 1 })).toBeNull();
 });

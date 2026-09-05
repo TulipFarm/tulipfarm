@@ -49,6 +49,24 @@ export const delegateToAgentTool = defineParkableApiTool<PlatformToolContext>({
     };
     const agent = ctx.soulLoader?.agents.get(agentId);
     if (!agent) return err("not_found", `Agent "${agentId}" not found in soul.`);
+    if (ctx.teamAssets) {
+      const principal = ctx.requestContext?.subject;
+      if (!principal) return err("write_denied", "Agent use access is required");
+      try {
+        await ctx.teamAssets.require(
+          "agent",
+          agentId,
+          { id: principal.id, kind: principal.kind },
+          "use",
+          typeof agent.frontmatter.ownership === "object" && agent.frontmatter.ownership !== null
+            ? (agent.frontmatter
+                .ownership as import("@tulipfarm/schema").TeamBusinessAssetOwnership)
+            : undefined
+        );
+      } catch {
+        return err("write_denied", "Agent use access is required");
+      }
+    }
     const parentRunId = ctx.requestContext?.runId ?? ctx.routineContext?.runId;
     if (!ctx.delegateToAgent || parentRunId === undefined) {
       return err("unavailable", "Delegation is not available outside a durable Run.");

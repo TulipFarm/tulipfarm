@@ -239,6 +239,24 @@ describe("serializeDoc — mentions", () => {
     expect(serializeDoc(doc).text).toBe("@GeneralAssistant create a #tickets with /copywriting");
   });
 
+  it("collects and de-duplicates File mentions with their attachment metadata", () => {
+    const fileMention: PMNode = {
+      type: "mentionFile",
+      attrs: {
+        id: "file-1",
+        label: "pricing.json",
+        mediaType: "application/json",
+        sizeBytes: 120,
+      },
+    };
+    const out = serializeDoc(para(fileMention, text(" compare "), fileMention));
+
+    expect(out.text).toBe("+pricing.json compare +pricing.json");
+    expect(out.files).toEqual([
+      { fileId: "file-1", mediaType: "application/json", name: "pricing.json" },
+    ]);
+  });
+
   it("sets agentId from the first @agent mention only", () => {
     const doc = para(
       mention("mentionAgent", "Triage"),

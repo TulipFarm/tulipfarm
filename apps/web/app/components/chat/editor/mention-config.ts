@@ -1,6 +1,6 @@
 /** Shared trigger config keeps node names, trigger chars, and serialized prefixes aligned. */
 
-export type MentionKind = "agent" | "skill" | "resource" | "knowledge";
+export type MentionKind = "agent" | "skill" | "resource" | "knowledge" | "file";
 
 export interface MentionKindConfig {
   kind: MentionKind;
@@ -33,6 +33,13 @@ export const MENTION_KINDS: readonly MentionKindConfig[] = [
     nodeName: "mentionKnowledge",
     emptyLabel: "No matching Knowledge.",
     loadingLabel: "Searching Knowledge…",
+  },
+  {
+    kind: "file",
+    char: "+",
+    nodeName: "mentionFile",
+    emptyLabel: "No matching Files.",
+    loadingLabel: "Searching Files…",
   },
 ];
 

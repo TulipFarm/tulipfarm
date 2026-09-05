@@ -1,6 +1,7 @@
 import { stringify } from "yaml";
 import { ajv } from "./ajv";
 import { SKILL_FORBIDDEN_GRANT_KEYS } from "./definitions/skill";
+import { TeamBusinessAssetOwnershipSchema } from "./teams";
 
 const MAX_SKILL_CONTENT_CHARS = 100_000;
 
@@ -45,6 +46,7 @@ export const SkillFrontmatterSchema = {
       uniqueItems: true,
       items: { type: "string", minLength: 1, maxLength: 256 },
     },
+    ownership: TeamBusinessAssetOwnershipSchema,
     _pendingAudit: { type: "boolean" },
   },
 } as const;
@@ -59,6 +61,7 @@ export interface SkillFrontmatter {
   requiredSecrets?: string[];
   allowedDomains?: string[];
   allowedCommands?: string[];
+  ownership?: import("./teams").TeamBusinessAssetOwnership;
   _pendingAudit?: boolean;
   [key: string]: unknown;
 }

@@ -38,7 +38,13 @@ export function InboxItem({
         <Row label="Destination" value={item.destination} />
         <Row label="Fields" value={item.fields?.join(", ")} />
         <Row label="Expires" value={item.expiresAt} />
-        <Row label="Four-eyes" value={`${item.decisions} / ${item.requiredDecisions} decisions`} />
+        {isApproval ? (
+          <Row
+            label="Four-eyes"
+            value={`${item.decisions} / ${item.requiredDecisions} decisions`}
+          />
+        ) : null}
+        <Row label="Time" value={item.createdAt} />
       </dl>
       {isApproval ? (
         <footer className="flex items-center gap-2 border-t border-border px-3 py-2">

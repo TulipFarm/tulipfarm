@@ -3,7 +3,7 @@ import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, expect, test, vi } from "vitest";
 import { AppShell, AppSidebar, iconForPath, titleForPath } from "~/components/app-sidebar";
-import { BookOpen, Inbox, MessageSquare } from "~/components/icons";
+import { BookOpen, FileText, Inbox, MessageSquare } from "~/components/icons";
 import * as approvalsContext from "~/lib/approvals-context";
 import * as conversationsContext from "~/lib/conversations-context";
 import * as sidebarCounts from "~/lib/sidebar-counts";
@@ -82,12 +82,14 @@ beforeEach(() => {
 
 test("maps deep routes to stable top-bar titles", () => {
   expect(titleForPath("/resources/tickets")).toBe("Resources");
+  expect(titleForPath("/files")).toBe("Files");
   expect(titleForPath("/operations")).toBe("Operations");
   expect(titleForPath("/settings/instructions")).toBe("Custom instructions");
 });
 
 test("gives every page its own top-bar icon instead of the Chat glyph", () => {
   expect(iconForPath("/inbox")).toBe(Inbox);
+  expect(iconForPath("/files")).toBe(FileText);
   expect(iconForPath("/knowledge/spaces/ops")).toBe(BookOpen);
   expect(iconForPath("/chat/c1")).toBe(MessageSquare);
 });
@@ -103,7 +105,16 @@ test("renders every destination in one flat list, with no rail or second panel",
   for (const heading of ["Work", "Build"]) {
     expect(within(nav).getByRole("heading", { level: 2, name: heading })).toBeInTheDocument();
   }
-  for (const label of ["Chats", "Inbox", "Activity", "Resources", "Agents", "Knowledge"]) {
+  for (const label of [
+    "Chats",
+    "Inbox",
+    "Activity",
+    "Teams",
+    "Resources",
+    "Agents",
+    "Files",
+    "Knowledge",
+  ]) {
     expect(within(nav).getByRole("link", { name: new RegExp(label, "i") })).toBeInTheDocument();
   }
   const utilities = screen.getByRole("navigation", { name: "Utilities" });
@@ -191,6 +202,7 @@ test("hides denied destinations and the groups they empty", () => {
   const nav = screen.getByRole("navigation", { name: "Main" });
 
   expect(within(nav).getByRole("link", { name: "Activity" })).toBeInTheDocument();
+  expect(within(nav).getByRole("link", { name: "Teams" })).toBeInTheDocument();
   expect(within(nav).getByRole("link", { name: "Resources" })).toBeInTheDocument();
   for (const label of ["Inbox", "Farm", "Knowledge"]) {
     expect(within(nav).queryByRole("link", { name: label })).not.toBeInTheDocument();
@@ -232,13 +244,11 @@ test("filters Settings destinations without leaving the current page", async () 
   expect(within(nav).queryByRole("link", { name: "Profile" })).not.toBeInTheDocument();
 });
 
-test("keeps a nested Settings page attached to its parent destination", () => {
-  render(<SidebarStub initialEntries={["/business/access/teams"]} />);
+test("keeps Teams in the main sidebar instead of Settings navigation", () => {
+  render(<SidebarStub initialEntries={["/teams"]} />);
 
-  expect(screen.getByRole("link", { name: "People & access" })).toHaveAttribute(
-    "aria-current",
-    "page"
-  );
+  expect(screen.getByRole("navigation", { name: "Main" })).toBeInTheDocument();
+  expect(screen.getByRole("link", { name: "Teams" })).toHaveAttribute("aria-current", "page");
 });
 
 test("renders recent chats and highlights the active one", () => {

@@ -20,6 +20,21 @@ describe("skillDocumentFromMarkdown", () => {
     });
   });
 
+  it("projects Team ownership as metadata, not a Tool grant", () => {
+    const document = skillDocumentFromMarkdown(
+      "packing",
+      markdown(
+        "name: packing\ndescription: Pack orders\nownership:\n  owners:\n    - teamId: 123e4567-e89b-42d3-a456-426614174000\n"
+      ),
+      "skills/packing/SKILL.md"
+    );
+
+    expect(document?.spec).toMatchObject({
+      ownership: { owners: [{ teamId: "123e4567-e89b-42d3-a456-426614174000" }] },
+    });
+    expect(document?.spec).not.toHaveProperty("requiredToolAbilities");
+  });
+
   it("carries commands through so a Skill can contribute a sandbox Tool", () => {
     const document = skillDocumentFromMarkdown(
       "reporting",

@@ -90,9 +90,10 @@ export function registerSpaceRoutes({
       },
     }),
     async (req, reply) => {
-      const res = await service.createSpace(
-        req.body as { name: string; description?: string | null }
-      );
+      const res = await service.createSpace({
+        ...(req.body as { name: string; description?: string | null }),
+        ...(req.user?._id === undefined ? {} : { ownerPrincipalId: req.user._id }),
+      });
       if (!res.ok) {
         return reply.code(res.reason === "name_taken" ? 409 : 400).send({ error: res.reason });
       }
@@ -138,7 +139,10 @@ export function registerSpaceRoutes({
     async (req, reply) => {
       const { id } = req.params as { id: string };
       // 404 rather than 403: a 403 confirms the Space exists to someone who may not know it does.
-      if (!(await gate.canReadSpace(req.user?._id, id)))
+      if (
+        !(await (gate.canEdit?.(req.user?._id, "space", id) ??
+          gate.canReadSpace(req.user?._id, id)))
+      )
         return reply.code(404).send({ error: "not found" });
       const s = await service.getSpace(id);
       if (!s) return reply.code(404).send({ error: "not found" });
@@ -182,12 +186,34 @@ export function registerSpaceRoutes({
     route({
       description: "Delete an OKF space (cascades its pages, links, overrides).",
       params: EntityIdParamsSchema,
-      response: { 204: NoContentSchema, 404: ErrorSchema, 401: ErrorSchema },
+      querystring: {
+        type: "object",
+        properties: { ownershipOperationId: { type: "string", format: "uuid" } },
+        additionalProperties: false,
+      },
+      response: {
+        204: NoContentSchema,
+        404: ErrorSchema,
+        409: ErrorSchema,
+        401: ErrorSchema,
+      },
     }),
     async (req, reply) => {
       const { id } = req.params as { id: string };
-      if (!(await gate.canReadSpace(req.user?._id, id)))
+      if (
+        !(await (gate.canEdit?.(req.user?._id, "space", id) ??
+          gate.canReadSpace(req.user?._id, id)))
+      )
         return reply.code(404).send({ error: "not found" });
+      try {
+        await gate.assertDeleteApproved?.(
+          "space",
+          id,
+          (req.query as { ownershipOperationId?: string }).ownershipOperationId
+        );
+      } catch {
+        return reply.code(409).send({ error: "joint owner Approval is required" });
+      }
       return (await service.deleteSpace(id))
         ? reply.code(204).send()
         : reply.code(404).send({ error: "not found" });
@@ -244,13 +270,20 @@ export function registerSpaceRoutes({
       // same check here the Space stays addressable: authoring at a free path succeeds while a path
       // held by a hidden Page 404s, which tells an outsider which paths are occupied — and lets
       // them plant Pages that the Space's own members would read back as knowledge.
-      if (!(await gate.canReadSpace(req.user?._id, spaceId)))
+      if (
+        !(await (gate.canEdit?.(req.user?._id, "space", spaceId) ??
+          gate.canReadSpace(req.user?._id, spaceId)))
+      )
         return refuseWrite(req, reply, "knowledge.page.author", "space");
       // writePage upserts by path, so a taken path is an update in disguise. Answering 404 keeps a
       // restricted Page from being overwritten and re-attributed by someone who cannot read it,
       // and matches what a caller who probed the path directly would already have been told.
       const existing = await service.getPageByPath(spaceId, b.path);
-      if (existing && !(await gate.canRead(req.user?._id, existing._id)))
+      if (
+        existing &&
+        !(await (gate.canEdit?.(req.user?._id, "page", existing._id) ??
+          gate.canRead(req.user?._id, existing._id)))
+      )
         return refuseWrite(req, reply, "knowledge.page.author", "page");
       const res = await service.writePage({
         spaceId,

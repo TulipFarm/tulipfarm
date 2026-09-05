@@ -1,5 +1,6 @@
 import Fastify from "fastify";
 import { describe, expect, it, vi } from "vitest";
+import type { RequestPrincipal } from "../identity/principal";
 import type { RateLimiter } from "../rate-limit";
 import {
   type OperationalApiDeps,
@@ -23,6 +24,17 @@ const run = {
   guardrailDecisions: [],
   lineage: [],
   costs: { amountUsd: 0.12, modelTokens: 900 },
+};
+
+const adminPrincipal: RequestPrincipal = {
+  id: "user-1",
+  kind: "user",
+  businessId: "business-1",
+  credential: "session",
+  authMethods: ["password"],
+  authenticatedAt: new Date("2026-09-05T00:00:00.000Z"),
+  userId: "user-1",
+  role: "admin",
 };
 
 function deps(overrides: Partial<OperationalApiDeps> = {}): OperationalApiDeps {
@@ -68,6 +80,19 @@ function deps(overrides: Partial<OperationalApiDeps> = {}): OperationalApiDeps {
       activity: [],
       recovery: { supportBundleAvailable: true, lastBackupAt: null },
     }),
+    getTeamMigrationReport: async () => ({
+      items: [
+        {
+          legacyGroupId: "Customer Success",
+          teamId: "team-1",
+          teamSlug: "customer-success",
+          displayName: "Customer Success",
+          slugConflict: true,
+          siblingNameConflict: false,
+          migratedAt: "2026-09-05T00:00:00.000Z",
+        },
+      ],
+    }),
     getGuardrails: async () => ({ revision: "guardrail-7", items: [] }),
     proposeGuardrailChangeset: async () => ({
       changesetId: "changeset-1",
@@ -98,9 +123,20 @@ function deps(overrides: Partial<OperationalApiDeps> = {}): OperationalApiDeps {
   };
 }
 
-async function harness(overrides: Partial<OperationalApiDeps> = {}, rateLimiter?: RateLimiter) {
+async function harness(
+  overrides: Partial<OperationalApiDeps> = {},
+  rateLimiter?: RateLimiter,
+  authenticatedPrincipal: RequestPrincipal = adminPrincipal
+) {
   const app = Fastify();
-  registerOperationalRoutes(app, deps(overrides), async () => undefined, rateLimiter);
+  registerOperationalRoutes(
+    app,
+    deps(overrides),
+    async (request) => {
+      request.principal = authenticatedPrincipal;
+    },
+    rateLimiter
+  );
   await app.ready();
   return app;
 }
@@ -196,6 +232,56 @@ describe("operational API", () => {
       },
     });
     expect(JSON.stringify(response.json())).not.toContain("business-1");
+    await app.close();
+  });
+
+  it("shows the admin-visible Team migration report", async () => {
+    const app = await harness();
+    const response = await app.inject({
+      method: "GET",
+      url: "/api/v1/admin/team-migration-report",
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual({
+      items: [
+        {
+          legacyGroupId: "Customer Success",
+          teamId: "team-1",
+          teamSlug: "customer-success",
+          displayName: "Customer Success",
+          slugConflict: true,
+          siblingNameConflict: false,
+          migratedAt: "2026-09-05T00:00:00.000Z",
+        },
+      ],
+    });
+    await app.close();
+  });
+
+  it("denies the Team migration report to a member with delegated operations.read", async () => {
+    const getTeamMigrationReport = vi.fn(deps().getTeamMigrationReport);
+    const app = await harness(
+      {
+        authorize: async () => ({
+          businessId: "business-1",
+          principalId: "user-2",
+          permissions: ["operations:read"],
+        }),
+        getTeamMigrationReport,
+      },
+      undefined,
+      { ...adminPrincipal, id: "user-2", userId: "user-2", role: "member" }
+    );
+
+    const response = await app.inject({
+      method: "GET",
+      url: "/api/v1/admin/team-migration-report",
+    });
+
+    expect(response.statusCode).toBe(403);
+    expect(response.json()).toMatchObject({ error: { code: "forbidden" } });
+    expect(getTeamMigrationReport).not.toHaveBeenCalled();
     await app.close();
   });
 

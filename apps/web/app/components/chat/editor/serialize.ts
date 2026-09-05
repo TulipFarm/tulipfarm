@@ -14,7 +14,8 @@
  */
 
 import type { Autonomy } from "~/lib/agents";
-import { type MentionKind, NODE_TO_KIND } from "./mention-config";
+import type { AttachedFile } from "~/lib/chat/types";
+import { NODE_TO_KIND } from "./mention-config";
 
 /** The slice of a ProseMirror JSON node the serializer reads. */
 export interface PMNode {
@@ -31,6 +32,7 @@ export interface SerializedMessage {
   skills: string[];
   resources: string[];
   knowledge: string[];
+  files: AttachedFile[];
 }
 
 export interface MentionItem {
@@ -40,6 +42,8 @@ export interface MentionItem {
   domain?: string;
   autonomy?: Autonomy;
   model?: string;
+  mediaType?: string;
+  sizeBytes?: number;
 }
 
 /** Only http(s)/mailto links survive serialization; unsafe schemes become plain text. */
@@ -66,7 +70,13 @@ function applyMarks(text: string, marks: PMNode["marks"]): string {
   return out;
 }
 
-type Collected = Record<MentionKind, string[]>;
+type Collected = {
+  agent: string[];
+  skill: string[];
+  resource: string[];
+  knowledge: string[];
+  file: AttachedFile[];
+};
 
 /** Nodes the inline pass renders directly; anything else is a block and must be recursed into. */
 function isInline(node: PMNode): boolean {
@@ -81,7 +91,28 @@ function serializeInline(nodes: PMNode[] | undefined, collected: Collected): str
     if (kindConfig) {
       const id = typeof node.attrs?.id === "string" ? node.attrs.id : "";
       const label = typeof node.attrs?.label === "string" ? node.attrs.label : id;
-      if (id) collected[kindConfig.kind].push(id);
+      if (id && kindConfig.kind === "file") {
+        const mediaType =
+          typeof node.attrs?.mediaType === "string"
+            ? node.attrs.mediaType
+            : "application/octet-stream";
+        collected.file.push({ fileId: id, mediaType, name: label });
+      } else if (id) {
+        switch (kindConfig.kind) {
+          case "agent":
+            collected.agent.push(id);
+            break;
+          case "skill":
+            collected.skill.push(id);
+            break;
+          case "resource":
+            collected.resource.push(id);
+            break;
+          case "knowledge":
+            collected.knowledge.push(id);
+            break;
+        }
+      }
       out += `${kindConfig.char}${label}`;
       continue;
     }
@@ -163,6 +194,7 @@ export function serializeDoc(doc: PMNode): SerializedMessage {
     skill: [],
     resource: [],
     knowledge: [],
+    file: [],
   };
   const text = serializeBlocks(doc.content, collected).join("\n\n").trim();
   return {
@@ -171,6 +203,7 @@ export function serializeDoc(doc: PMNode): SerializedMessage {
     skills: Array.from(new Set(collected.skill)),
     resources: Array.from(new Set(collected.resource)),
     knowledge: Array.from(new Set(collected.knowledge)),
+    files: Array.from(new Map(collected.file.map((file) => [file.fileId, file])).values()),
   };
 }
 

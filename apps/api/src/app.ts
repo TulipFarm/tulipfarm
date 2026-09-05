@@ -8,6 +8,7 @@ import fastifyStatic from "@fastify/static";
 import swagger from "@fastify/swagger";
 import scalar from "@scalar/fastify-api-reference";
 import { DEPLOYMENT_BUSINESS_ID } from "@tulipfarm/constants";
+import { BUSINESS_PRINCIPAL_ID } from "@tulipfarm/files";
 import { acceptedInputModalities, type LlmConfig } from "@tulipfarm/schema";
 import { SURFACE_SANDBOX_CSP, SURFACE_SANDBOX_PATH } from "@tulipfarm/surface";
 import Fastify, { type FastifyReply, type FastifyRequest } from "fastify";
@@ -22,6 +23,7 @@ import { makeRequireAuth } from "./auth/middleware";
 import { registerAuthRoutes } from "./auth/routes";
 import { makeAuthorizationCheck, makeRequireAuthorization } from "./authz/route-gate";
 import { registerAuthzRoutes } from "./authz/routes";
+import { registerTeamRoutes } from "./authz/team-routes";
 import { registerConversationRoutes } from "./chat/conversation-routes";
 import { registerChatRoutes } from "./chat/routes";
 import { registerCuratorReviewRoutes } from "./curator/review-routes";
@@ -58,6 +60,7 @@ import { MemorySurfaceArtifactStore } from "./surfaces/artifact-store";
 import { registerSurfaceRoutes } from "./surfaces/routes";
 import { registerSystemRoutes } from "./system/routes";
 import { registerTaskRoutes } from "./tasks/routes";
+import { registerTeamAssetRoutes } from "./team-assets/routes";
 import { buildToolRegistry } from "./tools/setup";
 import { registerTriggerRoutes } from "./triggers/routes";
 
@@ -162,21 +165,17 @@ export async function buildApp(opts: AppOptions = {}) {
   await app.register(cookie);
 
   /*
-   * Dynamic response compression. Static assets do NOT rely on this — the web build ships
-   * precompressed `.br`/`.gz` siblings that `@fastify/static` serves directly (see the SPA
-   * registration below) — so this only covers JSON payloads.
+   * Scoped to known CDN origins — never wildcard — so an XSS in Scalar cannot load arbitrary
+   * external scripts (SEC-AUDIT H-1).
    *
-   * gzip/deflate only, deliberately: brotli's encode cost is paid per request on hardware that may
-   * be a Raspberry Pi, and for JSON of this size it buys little over gzip. The responses where
-   * brotli genuinely pays are the immutable build assets, which are compressed at build time.
-   *
-   * Both SSE endpoints (chat and run events) call `reply.hijack()`, which detaches the reply from
-   * the framework's `onSend` chain, so this plugin can never buffer a live stream.
+   * Registered *before* the compression plugin, and that order is load-bearing. `onSend` hooks run
+   * in registration order, so a hook added after `@fastify/compress` receives the compressed
+   * *stream* as its payload and holds it across this function's `await` boundary. The stream is
+   * already flowing by then, so its data is emitted with nothing attached to consume it — the
+   * response goes out as `content-encoding: gzip` with `content-length: 0`, and the server logs
+   * "stream closed prematurely". Running first means this only ever sees the uncompressed payload,
+   * and compression's stream is handed straight to the transport.
    */
-  await app.register(compress, { global: true, encodings: ["gzip", "deflate"] });
-
-  // Scoped to known CDN origins — never wildcard — so an XSS in Scalar cannot
-  // load arbitrary external scripts (SEC-AUDIT H-1).
   app.addHook("onSend", async (req, reply) => {
     if (req.url.startsWith("/docs")) {
       reply.header(
@@ -200,6 +199,20 @@ export async function buildApp(opts: AppOptions = {}) {
       reply.header("content-security-policy", spaCspHeader);
     }
   });
+
+  /*
+   * Dynamic response compression. Static assets do NOT rely on this — the web build ships
+   * precompressed `.br`/`.gz` siblings that `@fastify/static` serves directly (see the SPA
+   * registration below) — so this only covers JSON payloads.
+   *
+   * gzip/deflate only, deliberately: brotli's encode cost is paid per request on hardware that may
+   * be a Raspberry Pi, and for JSON of this size it buys little over gzip. The responses where
+   * brotli genuinely pays are the immutable build assets, which are compressed at build time.
+   *
+   * Both SSE endpoints (chat and run events) call `reply.hijack()`, which detaches the reply from
+   * the framework's `onSend` chain, so this plugin can never buffer a live stream.
+   */
+  await app.register(compress, { global: true, encodings: ["gzip", "deflate"] });
 
   // CSRF is session-bound when a session store is available (a double-submit pair alone is not
   // sufficient); the stateless hook remains for deployments assembled without session auth.
@@ -363,7 +376,7 @@ export async function buildApp(opts: AppOptions = {}) {
       registerRoutineAuthoringRoutes(app, opts.routineAuthoring, requireAuth);
     }
     if (opts.routineCatalog) {
-      registerRoutineCatalogRoutes(app, opts.routineCatalog, requireAuth);
+      registerRoutineCatalogRoutes(app, opts.routineCatalog, requireAuth, opts.teamAssets);
     }
     if (opts.routineDetail) {
       registerRoutineDetailRoutes(app, opts.routineDetail, requireAuth, requireAuthorization);
@@ -405,8 +418,15 @@ export async function buildApp(opts: AppOptions = {}) {
         opts.authzAdmin,
         requireAuth,
         requireAuthorization,
-        opts.rateLimiter
+        opts.rateLimiter,
+        opts.teamApi === undefined
       );
+    }
+    if (opts.teamApi) {
+      registerTeamRoutes(app, opts.teamApi, requireAuth, requireAuthorization, opts.rateLimiter);
+    }
+    if (opts.teamAssets) {
+      registerTeamAssetRoutes(app, opts.teamAssets, requireAuth, requireAuthorization);
     }
     if (opts.killSwitches) {
       registerKillSwitchRoutes(
@@ -437,6 +457,24 @@ export async function buildApp(opts: AppOptions = {}) {
           files: opts.fileService,
           ...(opts.auditService === undefined ? {} : { audit: opts.auditService }),
           ...(opts.fileKnowledge === undefined ? {} : { knowledge: opts.fileKnowledge }),
+          principalNames: async (principalIds) => {
+            const names = new Map<string, string | null>();
+            const users = principalIds.filter((id) => id !== BUSINESS_PRINCIPAL_ID);
+            if (principalIds.length !== users.length) names.set(BUSINESS_PRINCIPAL_ID, "Business");
+            const repo = opts.userRepo;
+            if (repo === undefined) {
+              for (const id of users) names.set(id, null);
+              return names;
+            }
+            const found = repo.findByIds
+              ? await repo.findByIds(users)
+              : (await Promise.all(users.map((id) => repo.findById(id)))).filter(
+                  (user) => user !== null
+                );
+            for (const id of users) names.set(id, null);
+            for (const user of found) names.set(user._id, user.name ?? user.email ?? null);
+            return names;
+          },
           acceptedInputModalities: () =>
             acceptedInputModalities((opts.soulLoader?.llmConfig as LlmConfig | undefined) ?? {}),
         },

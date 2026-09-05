@@ -1,4 +1,4 @@
-import { lazy, type ReactNode, Suspense, useEffect } from "react";
+import { lazy, type ReactNode, Suspense, useEffect, useState } from "react";
 import { AgentGlyph } from "~/components/agent-glyph";
 import { ConnectionStatus } from "~/components/shell/states";
 import { Link } from "~/components/ui/link";
@@ -154,6 +154,7 @@ export function ChatPanel({
     onConversationChange,
   });
   const busy = status === "submitted" || status === "streaming";
+  const [revisionDraft, setRevisionDraft] = useState<{ key: string; text: string } | null>(null);
   // Fetch the transcript's chunk as soon as the panel exists rather than when the first turn needs
   // it — off the critical path, but resident well before anyone has finished typing.
   useEffect(() => {
@@ -181,6 +182,7 @@ export function ChatPanel({
     errorDetails?.reason === "model_error";
   const composer = (
     <Composer
+      key={revisionDraft?.key ?? "composer"}
       placement={hasMessages ? "docked" : "centered"}
       busy={busy}
       defaultModel={defaultModel}
@@ -198,7 +200,7 @@ export function ChatPanel({
           : undefined
       }
       suggestions={hasMessages ? [] : suggestions}
-      initialDraft={initialDraft}
+      initialDraft={revisionDraft?.text ?? initialDraft}
       attachFileId={attachFileId}
       onSend={(text, opts) => send(text, { ...opts, agentId: opts.agentId ?? agentId })}
     />
@@ -238,6 +240,12 @@ export function ChatPanel({
             onTryHarder={tryHarder}
             onFeedback={sendFeedback}
             onSurfaceInteraction={sendSurfaceInteraction}
+            onReviseDraft={(draft) =>
+              setRevisionDraft({
+                key: draft.draftId,
+                text: `Please revise ${draft.filename}: `,
+              })
+            }
           />
         </Suspense>
       ) : (

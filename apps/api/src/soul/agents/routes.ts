@@ -1,7 +1,9 @@
+import type { TeamBusinessAssetOwnership } from "@tulipfarm/schema";
 import type { SoulAgent, SoulLoader } from "@tulipfarm/soul";
 import { getAgent, listAgents } from "@tulipfarm/soul";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { ErrorSchema } from "../../auth/schemas";
+import type { TeamAssetService } from "../../team-assets/service";
 
 type PreHandler = (req: FastifyRequest, reply: FastifyReply) => Promise<void>;
 
@@ -109,6 +111,7 @@ function toSummary(agent: SoulAgent) {
     model: asString(f.model),
     autonomy: asAutonomy(f.autonomy),
     capabilityRestrictions: toCapabilityRestrictions(f),
+    ownership: asRecord(f.ownership),
   };
 }
 
@@ -197,12 +200,19 @@ const SummaryProps = {
   model: { type: "string" },
   autonomy: { type: "string", enum: AUTONOMY_VALUES },
   capabilityRestrictions: CapabilityRestrictionsSchema,
+  ownership: { type: "object", additionalProperties: true },
 } as const;
+
+function ownership(agent: SoulAgent): TeamBusinessAssetOwnership | undefined {
+  const value = asRecord(agent.frontmatter.ownership);
+  return value as TeamBusinessAssetOwnership | undefined;
+}
 
 export function registerAgentRoutes(
   app: FastifyInstance,
   soulLoader: SoulLoader,
-  requireAuth: PreHandler
+  requireAuth: PreHandler,
+  teamAssets?: TeamAssetService
 ): void {
   app.get(
     "/api/v1/agents",
@@ -227,8 +237,27 @@ export function registerAgentRoutes(
         },
       },
     },
-    async () => {
-      const agents = listAgents(soulLoader).map(toSummary);
+    async (request) => {
+      const listed = listAgents(soulLoader);
+      const visible =
+        teamAssets === undefined || request.principal === undefined
+          ? listed
+          : (
+              await Promise.all(
+                listed.map(async (agent) => ({
+                  agent,
+                  access: await teamAssets.access(
+                    "agent",
+                    agent.name,
+                    request.principal as NonNullable<typeof request.principal>,
+                    ownership(agent)
+                  ),
+                }))
+              )
+            )
+              .filter(({ access }) => access.levels.includes("view"))
+              .map(({ agent }) => agent);
+      const agents = visible.map(toSummary);
       return { agents };
     }
   );
@@ -267,6 +296,13 @@ export function registerAgentRoutes(
       const { name } = req.params as { name: string };
       const agent = getAgent(soulLoader, name);
       if (!agent) return reply.code(404).send({ error: `agent not found: ${name}` });
+      if (teamAssets && req.principal) {
+        try {
+          await teamAssets.require("agent", name, req.principal, "view", ownership(agent));
+        } catch {
+          return reply.code(404).send({ error: `agent not found: ${name}` });
+        }
+      }
       return toDetail(agent);
     }
   );

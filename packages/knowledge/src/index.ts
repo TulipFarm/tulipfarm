@@ -201,6 +201,11 @@ export {
 } from "./okf/parse";
 export { directChildren, type IndexEntry, renderIndex } from "./okf/synthesize";
 export type { CrossPageLink, OkfPage, OkfTfFields } from "./okf/types";
+export {
+  KnowledgeOwnershipProjector,
+  type KnowledgeOwnershipWriter,
+  knowledgeAssetId,
+} from "./ownership";
 export { type PageReadAuthorizer, PageReadGate, type ReadablePages } from "./page-access";
 export {
   type MoveEffect,
@@ -312,6 +317,7 @@ export type {
   KnowledgeAclCapability,
   KnowledgeAclEffect,
   KnowledgeAclEntry,
+  KnowledgeOwnershipPort,
   KnowledgeSubject,
   KnowledgeSubjectKind,
   KnowledgeSubjectStore,
@@ -324,6 +330,7 @@ export {
   InMemoryKnowledgeSubjectStore,
   pageSubject,
   sourceSubject,
+  spaceSubject,
 } from "./subject";
 export { CITE_SOURCES_TOOL, KNOWLEDGE_TOOLS, type KnowledgeToolContext } from "./tools";
 export type {

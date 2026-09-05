@@ -22,6 +22,8 @@ import { FileError, type FileService } from "./service";
 export interface FileToolContext {
   readonly businessId: string;
   readonly principalId: string;
+  /** The Run subject kind; only a real user can be a direct File share recipient. */
+  readonly principalKind?: string;
   /**
    * The Agent making this call, used only to widen who may read a File it *writes*.
    *
@@ -34,9 +36,13 @@ export interface FileToolContext {
   readonly agentId?: string;
   /** The Run this call belongs to; recorded on any File it creates. */
   readonly runId?: string;
+  /** The Routine this call belongs to. Absent means an interactive Chat or another Run source. */
+  readonly routineId?: string;
+  /** Stable within the Run, so a retried dispatch cannot create a second draft or File. */
+  readonly toolCallId?: string;
   readonly service: Pick<
     FileService,
-    "read" | "content" | "list" | "listSharedWithMe" | "generate"
+    "read" | "content" | "list" | "listSharedWithMe" | "generate" | "generateDraft"
   >;
 }
 
@@ -92,19 +98,26 @@ const CREATE_SCHEMA: Record<string, unknown> = {
       type: "string",
       enum: [...RENDER_FORMATS],
       description:
-        "'pdf' renders your Markdown into a paginated document. 'markdown', 'text' and 'csv' store what you wrote, unchanged.",
+        "'pdf', 'docx' and 'pptx' render Markdown — a paginated document, a Word document, or a " +
+        "deck split into one slide per '#' or '##' heading. 'xlsx' takes CSV and builds a " +
+        "spreadsheet with a frozen header row. 'json', 'xml' and 'yaml' are validated locally " +
+        "with no external entities, includes or custom tags. 'markdown', 'text' and 'csv' store " +
+        "what you wrote unchanged.",
     },
     content: {
       type: "string",
       minLength: 1,
       maxLength: MAX_RENDER_INPUT_CHARS,
       description:
-        "The document body. Markdown when format is 'pdf' — headings, lists, tables, code and emphasis all render.",
+        "The document body. Markdown when format is 'pdf', 'docx' or 'pptx'. CSV when format is " +
+        "'xlsx'. JSON, XML and YAML must be valid.",
     },
     title: {
       type: "string",
       maxLength: 200,
-      description: "Document title, used as the PDF's metadata title and its opening heading.",
+      description:
+        "Document title. Becomes the opening heading, the worksheet name for 'xlsx', and the " +
+        "opening slide's title for 'pptx'.",
     },
   },
 };
@@ -272,11 +285,14 @@ export const fileReadTool = defineApiTool<FileToolContext>({
 export const fileCreateTool = defineApiTool<FileToolContext>({
   name: "file_create",
   description:
-    "Write a document the person can open, download and forward, not another chat message. " +
-    "Use this whenever you are asked for a report, a summary, an export or 'a PDF'. Write the " +
-    "body as Markdown and pick 'pdf' to have it rendered; pick 'markdown', 'text' or 'csv' to " +
-    "store exactly what you wrote. The File lands in the person's library and you get its id " +
-    "back — say what you made and what is in it, do not repeat the whole document in your reply.",
+    "Generate a document the person can open, download and forward, not another chat message. " +
+    "Use this whenever you are asked for a report, a summary, an export, a deck or a spreadsheet. " +
+    "Write the body as Markdown for 'pdf', 'docx' and 'pptx', or as CSV for 'xlsx'. Chat calls " +
+    "return an expiring draft: " +
+    "tell the person to review and choose Save File, or ask you to revise it. Never say a Chat " +
+    "draft is already saved. Routine calls save automatically. JSON, XML and YAML are locally " +
+    "validated; do not use external entities, includes or custom tags. Say what you made and what " +
+    "is in it, and do not repeat the whole document in your reply.",
   tier: "platform",
   mutating: true,
   inputSchema: CREATE_SCHEMA,
@@ -294,17 +310,58 @@ export const fileCreateTool = defineApiTool<FileToolContext>({
       title?: string;
     };
 
-    let file: FileRecord;
+    if (ctx.runId === undefined || ctx.toolCallId === undefined) {
+      return err("internal_error", "file generation requires a Run and Tool call identity");
+    }
+
     try {
-      file = await ctx.service.generate({
+      if (ctx.routineId === undefined) {
+        const draft = await ctx.service.generateDraft({
+          businessId: ctx.businessId,
+          creatorPrincipalId: ctx.principalId,
+          filename,
+          format,
+          content,
+          ...(title === undefined ? {} : { title }),
+          ...(ctx.agentId === undefined ? {} : { authoredByAgentId: ctx.agentId }),
+          sourceRunId: ctx.runId,
+          sourceToolCallId: ctx.toolCallId,
+        });
+        return ok({
+          status: "draft",
+          draftId: draft.id,
+          filename: draft.filename,
+          mediaType: draft.mediaType,
+          sizeBytes: draft.sizeBytes,
+          expiresAt: draft.expiresAt.toISOString(),
+          downloadUrl: `/api/v1/file-drafts/${draft.id}/content`,
+          saveUrl: `/api/v1/file-drafts/${draft.id}/save`,
+        });
+      }
+
+      const file = await ctx.service.generate({
         businessId: ctx.businessId,
         filename,
         format,
         content,
         ...(title === undefined ? {} : { title }),
-        readableBy: { kind: "user", id: ctx.principalId },
+        ...(ctx.principalKind === undefined || ctx.principalKind === "user"
+          ? { readableBy: { kind: "user" as const, id: ctx.principalId } }
+          : {}),
         ...(ctx.agentId === undefined ? {} : { authoredByAgentId: ctx.agentId }),
-        ...(ctx.runId === undefined ? {} : { sourceRunId: ctx.runId }),
+        subjectPrincipalId: ctx.principalId,
+        authoredByRoutineId: ctx.routineId,
+        sourceRunId: ctx.runId,
+        sourceToolCallId: ctx.toolCallId,
+      });
+      return ok({
+        status: "saved",
+        fileId: file.id,
+        filename: file.filename,
+        mediaType: file.mediaType,
+        sizeBytes: file.sizeBytes,
+        origin: file.origin,
+        createdAt: file.createdAt.toISOString(),
       });
     } catch (error) {
       // A refused render is the Agent's to fix — it wrote something too long or too deep — so it
@@ -313,15 +370,6 @@ export const fileCreateTool = defineApiTool<FileToolContext>({
       if (error instanceof FileError) return err("oversize_value", error.message);
       throw error;
     }
-
-    return ok({
-      fileId: file.id,
-      filename: file.filename,
-      mediaType: file.mediaType,
-      sizeBytes: file.sizeBytes,
-      origin: file.origin,
-      createdAt: file.createdAt.toISOString(),
-    });
   },
 });
 
@@ -330,8 +378,8 @@ export const fileCreateTool = defineApiTool<FileToolContext>({
  *
  * List, read and create. Sharing and deletion are absent by construction rather than by
  * permission: both change who can reach a File that already exists, and that decision stays with
- * the person who owns it. Creating is different — it makes a File nobody had a claim on yet, and
- * the only person given a claim is the caller. A ratchet in
+ * the person who owns it. Creating is different — Chat makes a caller-bound draft, while Routine
+ * output becomes a business-owned File with its server-derived audience. A ratchet in
  * `apps/api/src/tools/contract-coverage.test.ts` keeps it that way.
  */
 export const FILE_TOOLS: ApiToolDefinition<FileToolContext>[] = [

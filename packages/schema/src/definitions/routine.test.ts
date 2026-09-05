@@ -19,6 +19,10 @@ function routine(states: Array<Record<string, unknown>>): Record<string, unknown
     metadata,
     spec: {
       owner: "team-platform",
+      ownership: {
+        owners: [{ teamId: "123e4567-e89b-42d3-a456-426614174000" }],
+        shares: [{ teamId: "123e4567-e89b-42d3-a456-426614174001", access: "edit" }],
+      },
       input: { type: "object", additionalProperties: false },
       output: { type: "object", additionalProperties: false },
       start: states[0]?.name,

@@ -1,9 +1,12 @@
 import { DEPLOYMENT_BUSINESS_ID } from "@tulipfarm/constants";
 import {
+  FILE_DRAFT_STATEMENTS,
+  FILE_FOLDER_STATEMENTS,
   FILE_KNOWLEDGE_STATEMENTS,
   FILE_ORIGIN_STATEMENTS,
   FILE_SHARE_STATEMENTS,
   FILE_STORAGE_STATEMENTS,
+  FILE_VERSION_STATEMENTS,
 } from "@tulipfarm/files";
 import { MEMORY_DOCUMENT_STORAGE_STATEMENTS } from "@tulipfarm/memory";
 import { INVOCATION_STORAGE_STATEMENTS } from "@tulipfarm/run-kernel";
@@ -11,6 +14,9 @@ import { MEMORY_SECTION_HEADINGS, MEMORY_SECTION_KEYS } from "@tulipfarm/schema"
 import { SOUL_BUNDLE_STORAGE_STATEMENTS } from "@tulipfarm/soul";
 import {
   ARTIFACT_STORAGE_STATEMENTS,
+  ASSET_OWNERSHIP_ACTIVE_TEAM_GUARD_STATEMENTS,
+  ASSET_OWNERSHIP_APPROVAL_STORAGE_STATEMENTS,
+  ASSET_OWNERSHIP_STORAGE_STATEMENTS,
   AUTHORIZATION_STORAGE_STATEMENTS,
   BUDGET_STORAGE_STATEMENTS,
   CHANNEL_DELIVERY_STORAGE_STATEMENTS,
@@ -42,6 +48,8 @@ import {
   STATE_CONTENTION_STORAGE_STATEMENTS,
   STATE_RETRY_STORAGE_STATEMENTS,
   TASK_STORAGE_STATEMENTS,
+  TEAM_NOTIFICATION_STORAGE_STATEMENTS,
+  TEAM_STORAGE_STATEMENTS,
   WAIT_STORAGE_STATEMENTS,
 } from "@tulipfarm/storage";
 import { EFFECT_STORAGE_STATEMENTS } from "@tulipfarm/tool-broker";
@@ -978,6 +986,555 @@ function applyStatements(...groups: readonly (readonly string[])[]): PgMigration
       }
     }
   };
+}
+
+async function ensureTeamMigrationReport(q: Queryable): Promise<void> {
+  await q.query(`
+    CREATE TABLE IF NOT EXISTS team_migration_report (
+      business_id           text NOT NULL,
+      legacy_group_id       text NOT NULL,
+      team_id               uuid NOT NULL,
+      team_slug             text NOT NULL,
+      display_name          text NOT NULL,
+      slug_conflict         boolean NOT NULL,
+      sibling_name_conflict boolean NOT NULL,
+      migrated_at           timestamptz(3) NOT NULL DEFAULT now(),
+      PRIMARY KEY (business_id, legacy_group_id)
+    )
+  `);
+}
+
+async function migrateFilesAndKnowledgeToTeamOwnership(q: Queryable): Promise<void> {
+  await applyStatements(ASSET_OWNERSHIP_STORAGE_STATEMENTS)(q);
+
+  const hasFiles = await hasTableColumns(q, "files", ["business_id", "id", "owner_principal_id"]);
+  const hasFileShares = await hasTableColumns(q, "file_shares", [
+    "business_id",
+    "file_id",
+    "grantee_kind",
+    "grantee_id",
+    "created_at",
+  ]);
+  const hasTeams = await hasTableColumns(q, "teams", ["business_id", "id", "slug", "status"]);
+  const hasLegacyGroupMappings = await hasTableColumns(q, "legacy_group_team_mappings", [
+    "business_id",
+    "group_id",
+    "team_id",
+  ]);
+  const hasKnowledgePages = await hasTableColumns(q, "knowledge_pages", [
+    "business_id",
+    "id",
+    "author_kind",
+    "author_id",
+  ]);
+  const hasKnowledgeSpaces = await hasTableColumns(q, "knowledge_spaces", ["business_id", "id"]);
+  const hasKnowledgeAclEntries = await hasTableColumns(q, "knowledge_acl_entries", [
+    "business_id",
+    "subject_kind",
+    "subject_id",
+    "principal_kind",
+    "principal_id",
+    "effect",
+  ]);
+  const hasKnowledgeSourceRecords = await hasTableColumns(q, "knowledge_source_records", [
+    "business_id",
+    "source_id",
+    "acl_principals",
+  ]);
+
+  if (hasFiles) {
+    await q.query(`
+    INSERT INTO asset_ownership (business_id, asset_type, asset_id)
+    SELECT file.business_id, 'file', file.id::text
+      FROM files file
+     WHERE file.owner_principal_id <> 'business'
+    ON CONFLICT DO NOTHING
+  `);
+    if (hasFileShares) {
+      await q.query(`
+    INSERT INTO asset_ownership (business_id, asset_type, asset_id)
+    SELECT file.business_id, 'file', file.id::text
+      FROM files file
+     WHERE EXISTS (
+       SELECT 1 FROM file_shares share
+        WHERE share.business_id = file.business_id AND share.file_id = file.id
+     )
+    ON CONFLICT DO NOTHING
+  `);
+    }
+  }
+  if (hasKnowledgeSpaces) {
+    await q.query(`
+    INSERT INTO asset_ownership (business_id, asset_type, asset_id)
+    SELECT space.business_id, 'knowledge', 'space:' || space.id::text
+      FROM knowledge_spaces space
+    ON CONFLICT DO NOTHING
+  `);
+  }
+  if (hasKnowledgePages) {
+    await q.query(`
+    INSERT INTO asset_ownership (business_id, asset_type, asset_id)
+    SELECT page.business_id, 'knowledge', 'page:' || page.id::text
+      FROM knowledge_pages page
+    ON CONFLICT DO NOTHING
+  `);
+  }
+  if (hasKnowledgeSourceRecords) {
+    await q.query(`
+    INSERT INTO asset_ownership (business_id, asset_type, asset_id)
+    SELECT source.business_id, 'knowledge', 'source:' || source.source_id
+      FROM knowledge_source_records source
+    ON CONFLICT DO NOTHING
+  `);
+  }
+  if (hasKnowledgeAclEntries) {
+    await q.query(`
+    INSERT INTO asset_ownership (business_id, asset_type, asset_id)
+    SELECT DISTINCT entry.business_id, 'knowledge',
+           entry.subject_kind || ':' || lower(entry.subject_id)
+      FROM knowledge_acl_entries entry
+     WHERE entry.subject_kind IN ('space', 'page') AND entry.effect = 'grant'
+    ON CONFLICT DO NOTHING
+  `);
+  }
+
+  if (hasFiles) {
+    await q.query(`
+    INSERT INTO asset_owners
+      (business_id, asset_type, asset_id, owner_kind, principal_id, principal_kind)
+    SELECT file.business_id, 'file', file.id::text, 'principal', file.owner_principal_id, 'user'
+      FROM files file
+     WHERE file.owner_principal_id <> 'business'
+    ON CONFLICT DO NOTHING
+  `);
+  }
+  if (hasKnowledgePages) {
+    await q.query(`
+    INSERT INTO asset_owners
+      (business_id, asset_type, asset_id, owner_kind, principal_id, principal_kind)
+    SELECT page.business_id, 'knowledge', 'page:' || page.id::text,
+           'principal', page.author_id, 'user'
+      FROM knowledge_pages page
+     WHERE page.author_kind = 'user' AND page.author_id IS NOT NULL
+    ON CONFLICT DO NOTHING
+  `);
+  }
+  // A business-owned File reached only by shares — to a person, or to a Role a Team happens to
+  // hold — is deliberately left without an ownership projection. Naming any recipient as owner
+  // would promote a read-only reader to someone who may re-share, archive and permanently delete
+  // it, and which recipient won that power would come down to share creation order. Without a row,
+  // `read` keeps falling through to the shares, which is exactly the access those users had.
+  if (hasKnowledgeSourceRecords && hasTeams && hasLegacyGroupMappings) {
+    await q.query(`
+    INSERT INTO asset_owners
+      (business_id, asset_type, asset_id, owner_kind, team_id)
+    SELECT DISTINCT source.business_id, 'knowledge', 'source:' || source.source_id, 'team',
+           COALESCE(team.id, mapping.team_id)
+      FROM knowledge_source_records source
+      CROSS JOIN LATERAL jsonb_array_elements(COALESCE(source.acl_principals, '[]'::jsonb)) ref
+      LEFT JOIN teams team
+        ON team.business_id = source.business_id
+       AND ref->>'kind' = 'team' AND team.id::text = ref->>'id'
+      LEFT JOIN legacy_group_team_mappings mapping
+        ON mapping.business_id = source.business_id
+       AND ref->>'kind' = 'group' AND mapping.group_id = ref->>'id'
+     WHERE COALESCE(team.id, mapping.team_id) IS NOT NULL
+    ON CONFLICT DO NOTHING
+  `);
+  }
+  if (hasKnowledgeSourceRecords && hasTeams) {
+    await q.query(`
+    INSERT INTO asset_owners
+      (business_id, asset_type, asset_id, owner_kind, team_id)
+    SELECT DISTINCT source.business_id, 'knowledge', 'source:' || source.source_id, 'team',
+           everyone.id
+      FROM knowledge_source_records source
+      CROSS JOIN LATERAL jsonb_array_elements(COALESCE(source.acl_principals, '[]'::jsonb)) ref
+      JOIN teams everyone
+        ON everyone.business_id = source.business_id AND everyone.slug = 'everyone'
+     WHERE ref->>'kind' = 'role' AND ref->>'id' = 'role-everyone'
+    ON CONFLICT DO NOTHING
+  `);
+  }
+  if (hasKnowledgeSourceRecords) {
+    await q.query(`
+    INSERT INTO asset_owners
+      (business_id, asset_type, asset_id, owner_kind, principal_id, principal_kind)
+    SELECT DISTINCT ON (source.business_id, source.source_id)
+           source.business_id, 'knowledge', 'source:' || source.source_id,
+           'principal', ref->>'id', 'user'
+      FROM knowledge_source_records source
+      CROSS JOIN LATERAL jsonb_array_elements(COALESCE(source.acl_principals, '[]'::jsonb)) ref
+     WHERE ref->>'kind' = 'user'
+       AND NOT EXISTS (
+         SELECT 1 FROM asset_owners owner
+          WHERE owner.business_id = source.business_id AND owner.asset_type = 'knowledge'
+            AND owner.asset_id = 'source:' || source.source_id
+       )
+     ORDER BY source.business_id, source.source_id, ref->>'id'
+    ON CONFLICT DO NOTHING
+  `);
+  }
+  if (hasFiles) {
+    await q.query(`
+    DELETE FROM asset_ownership ownership
+     WHERE ownership.asset_type = 'file'
+       AND NOT EXISTS (
+         SELECT 1 FROM asset_owners owner
+          WHERE owner.business_id = ownership.business_id
+            AND owner.asset_type = ownership.asset_type
+            AND owner.asset_id = ownership.asset_id
+       )
+  `);
+  }
+
+  if (hasKnowledgeSpaces && hasKnowledgeAclEntries && hasTeams) {
+    await q.query(`
+    INSERT INTO asset_owners
+      (business_id, asset_type, asset_id, owner_kind, team_id)
+    SELECT space.business_id, 'knowledge', 'space:' || space.id::text, 'team', everyone.id
+      FROM knowledge_spaces space
+      JOIN teams everyone
+        ON everyone.business_id = space.business_id AND everyone.slug = 'everyone'
+     WHERE NOT EXISTS (
+       SELECT 1 FROM knowledge_acl_entries entry
+        WHERE entry.business_id = space.business_id AND entry.subject_kind = 'space'
+          AND lower(entry.subject_id) = lower(space.id::text) AND entry.effect = 'grant'
+     )
+    UNION
+    SELECT entry.business_id, 'knowledge', entry.subject_kind || ':' || lower(entry.subject_id),
+           'team', everyone.id
+      FROM knowledge_acl_entries entry
+      JOIN teams everyone
+        ON everyone.business_id = entry.business_id AND everyone.slug = 'everyone'
+     WHERE entry.subject_kind IN ('space', 'page') AND entry.effect = 'grant'
+       AND entry.principal_kind = 'role' AND entry.principal_id = 'role-everyone'
+       AND NOT EXISTS (
+         SELECT 1 FROM asset_owners owner
+          WHERE owner.business_id = entry.business_id AND owner.asset_type = 'knowledge'
+            AND owner.asset_id = entry.subject_kind || ':' || lower(entry.subject_id)
+       )
+    ON CONFLICT DO NOTHING
+  `);
+  }
+  if (hasKnowledgeAclEntries && hasLegacyGroupMappings) {
+    await q.query(`
+    INSERT INTO asset_owners
+      (business_id, asset_type, asset_id, owner_kind, team_id)
+    SELECT DISTINCT entry.business_id, 'knowledge',
+           entry.subject_kind || ':' || lower(entry.subject_id), 'team', mapping.team_id
+      FROM knowledge_acl_entries entry
+      JOIN legacy_group_team_mappings mapping
+        ON mapping.business_id = entry.business_id AND mapping.group_id = entry.principal_id
+     WHERE entry.subject_kind IN ('space', 'page') AND entry.effect = 'grant'
+       AND entry.principal_kind = 'group'
+    ON CONFLICT DO NOTHING
+  `);
+  }
+  if (hasKnowledgeAclEntries) {
+    await q.query(`
+    INSERT INTO asset_owners
+      (business_id, asset_type, asset_id, owner_kind, principal_id, principal_kind)
+    SELECT DISTINCT ON (entry.business_id, entry.subject_kind, lower(entry.subject_id))
+           entry.business_id, 'knowledge', entry.subject_kind || ':' || lower(entry.subject_id),
+           'principal', entry.principal_id, 'user'
+      FROM knowledge_acl_entries entry
+     WHERE entry.subject_kind IN ('space', 'page') AND entry.effect = 'grant'
+       AND entry.principal_kind = 'user'
+       AND NOT EXISTS (
+         SELECT 1 FROM asset_owners owner
+          WHERE owner.business_id = entry.business_id AND owner.asset_type = 'knowledge'
+            AND owner.asset_id = entry.subject_kind || ':' || lower(entry.subject_id)
+       )
+     ORDER BY entry.business_id, entry.subject_kind, lower(entry.subject_id), entry.principal_id
+    ON CONFLICT DO NOTHING
+  `);
+  }
+  if (hasKnowledgeSpaces || hasKnowledgePages || hasKnowledgeSourceRecords) {
+    await q.query(`
+      DELETE FROM asset_ownership ownership
+       WHERE ownership.asset_type = 'knowledge'
+         AND NOT EXISTS (
+           SELECT 1 FROM asset_owners owner
+            WHERE owner.business_id = ownership.business_id
+              AND owner.asset_type = ownership.asset_type
+              AND owner.asset_id = ownership.asset_id
+         )
+    `);
+  }
+}
+
+async function migrateAuthorizationGroupsToTeams(q: Queryable): Promise<void> {
+  if (
+    !(await hasTableColumns(q, "principals", ["business_id", "id", "kind", "status"])) ||
+    !(await hasTableColumns(q, "roles", ["business_id", "id"])) ||
+    !(await hasTableColumns(q, "principal_groups", ["business_id", "id"]))
+  ) {
+    return;
+  }
+
+  await applyStatements(TEAM_STORAGE_STATEMENTS)(q);
+  await ensureTeamMigrationReport(q);
+
+  await q.query(`
+          INSERT INTO teams (business_id, slug, display_name, protected)
+          SELECT business_id, 'everyone', 'Everyone', true
+            FROM (
+              SELECT business_id FROM principals
+              UNION
+              SELECT business_id FROM roles
+              UNION
+              SELECT business_id FROM principal_groups
+            ) businesses
+          ON CONFLICT (business_id, slug) DO NOTHING
+        `);
+
+  await q.query(`
+          WITH legacy AS (
+            SELECT groups.*,
+                   regexp_replace(
+                     regexp_replace(lower(trim(groups.id)), '[^a-z0-9]+', '-', 'g'),
+                     '(^-+|-+$)', '', 'g'
+                   ) AS normalized,
+                   row_number() OVER (
+                     PARTITION BY groups.business_id, lower(groups.id)
+                     ORDER BY groups.id
+                   ) AS display_ordinal
+              FROM principal_groups groups
+             WHERE groups.id <> 'owners'
+          ), candidates AS (
+            SELECT legacy.*,
+                   CASE
+                     WHEN normalized = '' THEN 'team-' || substr(md5(id), 1, 12)
+                     WHEN normalized !~ '^[a-z]' THEN 'team-' || normalized
+                     ELSE normalized
+                   END AS base_slug
+              FROM legacy
+          ), prepared AS (
+            SELECT candidates.*,
+                   CASE
+                     WHEN row_number() OVER (
+                       PARTITION BY business_id, base_slug ORDER BY id
+                     ) = 1 AND base_slug <> 'everyone'
+                       THEN base_slug
+                     ELSE base_slug || '-' || substr(md5(id), 1, 8)
+                   END AS team_slug,
+                   CASE
+                     WHEN display_ordinal = 1 THEN id
+                     ELSE id || ' [' || substr(md5(id), 1, 8) || ']'
+                   END AS team_display_name
+              FROM candidates
+          )
+          INSERT INTO teams (
+            business_id, slug, display_name, parent_team_id, created_at, updated_at
+          )
+          SELECT prepared.business_id, prepared.team_slug, prepared.team_display_name, everyone.id,
+                 prepared.created_at, prepared.updated_at
+            FROM prepared
+            JOIN teams everyone
+              ON everyone.business_id = prepared.business_id AND everyone.slug = 'everyone'
+          ON CONFLICT (business_id, slug) DO NOTHING
+        `);
+
+  await q.query(`
+    WITH legacy AS (
+      SELECT groups.*,
+             regexp_replace(
+               regexp_replace(lower(trim(groups.id)), '[^a-z0-9]+', '-', 'g'),
+               '(^-+|-+$)', '', 'g'
+             ) AS normalized
+        FROM principal_groups groups
+       WHERE groups.id <> 'owners'
+    ), candidates AS (
+      SELECT legacy.*,
+             CASE
+               WHEN normalized = '' THEN 'team-' || substr(md5(id), 1, 12)
+               WHEN normalized !~ '^[a-z]' THEN 'team-' || normalized
+               ELSE normalized
+             END AS base_slug
+        FROM legacy
+    ), prepared AS (
+      SELECT candidates.*,
+             CASE
+               WHEN row_number() OVER (
+                 PARTITION BY business_id, base_slug ORDER BY id
+               ) = 1 AND base_slug <> 'everyone'
+                 THEN base_slug
+               ELSE base_slug || '-' || substr(md5(id), 1, 8)
+             END AS team_slug
+        FROM candidates
+    )
+    INSERT INTO legacy_group_team_mappings (business_id, group_id, team_id)
+    SELECT prepared.business_id, prepared.id, team.id
+      FROM prepared
+      JOIN teams team
+        ON team.business_id = prepared.business_id AND team.slug = prepared.team_slug
+    ON CONFLICT (business_id, group_id) DO NOTHING
+  `);
+
+  await q.query(`
+    WITH legacy AS (
+      SELECT groups.*,
+             regexp_replace(
+               regexp_replace(lower(trim(groups.id)), '[^a-z0-9]+', '-', 'g'),
+               '(^-+|-+$)', '', 'g'
+             ) AS normalized,
+             row_number() OVER (
+               PARTITION BY groups.business_id, lower(groups.id)
+               ORDER BY groups.id
+             ) AS display_ordinal
+        FROM principal_groups groups
+       WHERE groups.id <> 'owners'
+    ), candidates AS (
+      SELECT legacy.*,
+             CASE
+               WHEN normalized = '' THEN 'team-' || substr(md5(id), 1, 12)
+               WHEN normalized !~ '^[a-z]' THEN 'team-' || normalized
+               ELSE normalized
+             END AS base_slug
+        FROM legacy
+    ), prepared AS (
+      SELECT candidates.*,
+             CASE
+               WHEN row_number() OVER (
+                 PARTITION BY business_id, base_slug ORDER BY id
+               ) = 1 AND base_slug <> 'everyone'
+                 THEN base_slug
+               ELSE base_slug || '-' || substr(md5(id), 1, 8)
+             END AS team_slug,
+             CASE
+               WHEN display_ordinal = 1 THEN id
+               ELSE id || ' [' || substr(md5(id), 1, 8) || ']'
+             END AS team_display_name,
+             (count(*) OVER (PARTITION BY business_id, base_slug) > 1 OR base_slug = 'everyone')
+               AS slug_conflict,
+             display_ordinal > 1 AS sibling_name_conflict
+        FROM candidates
+    )
+    INSERT INTO team_migration_report (
+      business_id, legacy_group_id, team_id, team_slug, display_name, slug_conflict,
+      sibling_name_conflict
+    )
+    SELECT prepared.business_id, prepared.id, team.id, prepared.team_slug,
+           prepared.team_display_name, prepared.slug_conflict, prepared.sibling_name_conflict
+      FROM prepared
+      JOIN teams team
+        ON team.business_id = prepared.business_id AND team.slug = prepared.team_slug
+    ON CONFLICT (business_id, legacy_group_id) DO UPDATE SET
+      team_id = EXCLUDED.team_id,
+      team_slug = EXCLUDED.team_slug,
+      display_name = EXCLUDED.display_name,
+      slug_conflict = EXCLUDED.slug_conflict,
+      sibling_name_conflict = EXCLUDED.sibling_name_conflict
+  `);
+
+  await q.query(`
+          INSERT INTO team_memberships (
+            team_id, principal_id, principal_kind, level, expires_at, created_at, updated_at
+          )
+          SELECT mapping.team_id, membership.principal_id, principal.kind, 'member',
+                 NULLIF(
+                   LEAST(
+                     COALESCE(membership.expires_at, 'infinity'::timestamptz),
+                     COALESCE(groups.expires_at, 'infinity'::timestamptz)
+                   ),
+                   'infinity'::timestamptz
+                 ),
+                 membership.assigned_at, membership.assigned_at
+            FROM principal_group_members membership
+            JOIN principal_groups groups
+              ON groups.business_id = membership.business_id AND groups.id = membership.group_id
+            JOIN legacy_group_team_mappings mapping
+              ON mapping.business_id = membership.business_id AND mapping.group_id = membership.group_id
+            JOIN principals principal
+              ON principal.business_id = membership.business_id
+             AND principal.id = membership.principal_id
+           WHERE principal.kind IN ('user', 'agent', 'service')
+          ON CONFLICT (team_id, principal_id) DO UPDATE SET
+            expires_at = EXCLUDED.expires_at,
+            updated_at = EXCLUDED.updated_at
+        `);
+
+  await q.query(`
+          UPDATE roles role
+             SET assignable_to = array_append(role.assignable_to, 'team'),
+                 updated_at = now()
+           WHERE NOT ('team' = ANY(role.assignable_to))
+             AND EXISTS (
+               SELECT 1
+                 FROM group_role_assignments assignment
+                WHERE assignment.business_id = role.business_id
+                  AND assignment.role_id = role.id
+                  AND assignment.group_id <> 'owners'
+             )
+        `);
+
+  await q.query(`
+          INSERT INTO team_role_assignments (
+            team_id, role_business_id, role_id, expires_at, assigned_at
+          )
+          SELECT mapping.team_id, assignment.business_id, assignment.role_id,
+                 NULLIF(
+                   LEAST(
+                     COALESCE(assignment.expires_at, 'infinity'::timestamptz),
+                     COALESCE(groups.expires_at, 'infinity'::timestamptz)
+                   ),
+                   'infinity'::timestamptz
+                 ),
+                 assignment.assigned_at
+            FROM group_role_assignments assignment
+            JOIN principal_groups groups
+              ON groups.business_id = assignment.business_id AND groups.id = assignment.group_id
+            JOIN legacy_group_team_mappings mapping
+              ON mapping.business_id = assignment.business_id AND mapping.group_id = assignment.group_id
+          ON CONFLICT (team_id, role_id) DO UPDATE SET
+            expires_at = EXCLUDED.expires_at,
+            assigned_at = EXCLUDED.assigned_at
+        `);
+
+  await q.query(`
+          INSERT INTO role_assignments (business_id, principal_id, role_id, expires_at, assigned_at)
+          SELECT membership.business_id, membership.principal_id, held.role_id,
+                 NULLIF(
+                   LEAST(
+                     COALESCE(membership.expires_at, 'infinity'::timestamptz),
+                     COALESCE(held.expires_at, 'infinity'::timestamptz),
+                     COALESCE(groups.expires_at, 'infinity'::timestamptz)
+                   ),
+                   'infinity'::timestamptz
+                 ),
+                 GREATEST(membership.assigned_at, held.assigned_at)
+            FROM principal_group_members membership
+            JOIN principal_groups groups
+              ON groups.business_id = membership.business_id AND groups.id = membership.group_id
+            JOIN group_role_assignments held
+              ON held.business_id = membership.business_id AND held.group_id = membership.group_id
+            JOIN principals principal
+              ON principal.business_id = membership.business_id
+             AND principal.id = membership.principal_id
+           WHERE membership.group_id = 'owners'
+              OR principal.kind NOT IN ('user', 'agent', 'service')
+          ON CONFLICT (business_id, principal_id, role_id) DO UPDATE SET
+            expires_at = CASE
+              WHEN role_assignments.expires_at IS NULL OR EXCLUDED.expires_at IS NULL THEN NULL
+              ELSE GREATEST(role_assignments.expires_at, EXCLUDED.expires_at)
+            END
+        `);
+
+  await q.query(`
+          INSERT INTO team_memberships (team_id, principal_id, principal_kind, level)
+          SELECT everyone.id, principal.id, 'user', 'member'
+            FROM principals principal
+            JOIN teams everyone
+              ON everyone.business_id = principal.business_id AND everyone.slug = 'everyone'
+           WHERE principal.kind = 'user' AND principal.status = 'active'
+          ON CONFLICT (team_id, principal_id) DO UPDATE SET
+            principal_kind = 'user',
+            level = 'member',
+            expires_at = NULL,
+            revision = team_memberships.revision + 1,
+            updated_at = now()
+        `);
 }
 
 /**
@@ -2284,6 +2841,82 @@ export const PG_MIGRATIONS: PgMigration[] = [
     up: async (q) => {
       await q.query("ALTER TABLE IF EXISTS obs_event ADD COLUMN IF NOT EXISTS subject_kind text");
       await q.query("ALTER TABLE IF EXISTS obs_event ADD COLUMN IF NOT EXISTS subject_id text");
+    },
+  },
+  {
+    version: 86,
+    description: "files: immutable content versions and stable lifecycle metadata",
+    up: applyStatements(FILE_VERSION_STATEMENTS),
+  },
+  {
+    version: 87,
+    description: "file_generation_drafts: expiring Chat outputs and idempotent generation",
+    up: applyStatements(FILE_DRAFT_STATEMENTS),
+  },
+  {
+    version: 88,
+    description: "file_folders: nested organization and optional File placement",
+    up: applyStatements(FILE_FOLDER_STATEMENTS),
+  },
+  {
+    version: 89,
+    description: "teams: first-class hierarchy, membership, authority, and legacy mappings",
+    up: migrateAuthorizationGroupsToTeams,
+  },
+  {
+    version: 90,
+    description: "asset ownership: Team owners, shares, and Approval operations",
+    up: applyStatements(
+      ASSET_OWNERSHIP_STORAGE_STATEMENTS,
+      ASSET_OWNERSHIP_APPROVAL_STORAGE_STATEMENTS
+    ),
+  },
+  {
+    version: 91,
+    description: "files and Knowledge: Team ownership and audience-preserving backfill",
+    up: migrateFilesAndKnowledgeToTeamOwnership,
+  },
+  {
+    version: 92,
+    description: "teams: expiring one-use move previews and authority revision binding",
+    up: async (q) => {
+      if (
+        !(await hasTableColumns(q, "principals", ["business_id", "id", "kind", "status"])) ||
+        !(await hasTableColumns(q, "roles", ["business_id", "id"]))
+      ) {
+        return;
+      }
+      await applyStatements(TEAM_STORAGE_STATEMENTS)(q);
+    },
+  },
+  {
+    version: 93,
+    description: "teams: recipient-scoped in-product notifications",
+    up: applyStatements(TEAM_NOTIFICATION_STORAGE_STATEMENTS),
+  },
+  {
+    version: 94,
+    description: "teams: atomic asset lifecycle references",
+    up: async (q) => {
+      if (
+        !(await hasTableColumns(q, "teams", ["business_id", "id", "status"])) ||
+        !(await hasTableColumns(q, "asset_owners", ["business_id", "owner_kind", "team_id"])) ||
+        !(await hasTableColumns(q, "asset_team_shares", ["business_id", "team_id"])) ||
+        !(await hasTableColumns(q, "asset_ownership_operations", ["business_id", "team_id"]))
+      ) {
+        return;
+      }
+      await applyStatements(ASSET_OWNERSHIP_ACTIVE_TEAM_GUARD_STATEMENTS)(q);
+    },
+  },
+  {
+    version: 95,
+    description: "teams: searchable directory labels",
+    up: async (q) => {
+      if (!(await hasTableColumns(q, "teams", ["business_id", "id"]))) return;
+      await q.query(
+        "ALTER TABLE teams ADD COLUMN IF NOT EXISTS labels text[] NOT NULL DEFAULT '{}'"
+      );
     },
   },
 ];

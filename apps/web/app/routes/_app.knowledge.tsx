@@ -1,5 +1,5 @@
 import { type MetaFunction, Outlet, useParams } from "@remix-run/react";
-import { Paperclip, Plus } from "~/components/icons";
+import { Plus } from "~/components/icons";
 import { CommandPalette } from "~/components/knowledge/command-palette";
 import { KnowledgeTree } from "~/components/knowledge/space-tree";
 import { Link } from "~/components/ui/link";
@@ -23,15 +23,6 @@ export default function KnowledgeLayout() {
           <h2 className="min-w-0 flex-1 truncate text-xs font-medium text-muted-foreground">
             Spaces
           </h2>
-          <Tooltip content="Files">
-            <Link
-              to="/knowledge/files"
-              aria-label="Files"
-              className="flex size-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-            >
-              <Paperclip className="size-4" aria-hidden />
-            </Link>
-          </Tooltip>
           <Tooltip content="New space">
             <Link
               to="/knowledge/spaces/new"

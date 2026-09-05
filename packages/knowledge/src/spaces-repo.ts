@@ -23,6 +23,7 @@ export interface SpacePatch {
 export interface KnowledgeSpaceRepo {
   insert(s: KnowledgeSpace): Promise<void>;
   getById(id: string): Promise<KnowledgeSpace | null>;
+  getManyById(ids: readonly string[]): Promise<KnowledgeSpace[]>;
   getByName(name: string): Promise<KnowledgeSpace | null>;
   list(opts: {
     limit: number;
@@ -64,6 +65,19 @@ export class PgKnowledgeSpaceRepo implements KnowledgeSpaceRepo {
       [id]
     );
     return rows[0] ? rowToSpace(rows[0]) : null;
+  }
+
+  async getManyById(ids: readonly string[]): Promise<KnowledgeSpace[]> {
+    if (ids.length === 0) return [];
+    const { rows } = await this.q.query(
+      `SELECT ${SPACE_COLS} FROM knowledge_spaces WHERE id::text = ANY($1::text[])`,
+      [[...ids]]
+    );
+    const byId = new Map(rows.map((row) => [String(row.id), rowToSpace(row)]));
+    return ids.flatMap((id) => {
+      const space = byId.get(id);
+      return space === undefined ? [] : [space];
+    });
   }
 
   async getByName(name: string): Promise<KnowledgeSpace | null> {

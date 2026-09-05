@@ -1,5 +1,6 @@
 import { forwardRef, useEffect, useImperativeHandle, useState } from "react";
 import { AgentGlyph } from "~/components/agent-glyph";
+import { FileTypeIcon } from "~/components/files/file-type-icon";
 import { KIND_TO_CONFIG, type MentionKind } from "./mention-config";
 import type { MentionItem } from "./serialize";
 
@@ -13,7 +14,7 @@ export const MentionList = forwardRef<
   MentionListRef,
   {
     items: MentionItem[];
-    command: (item: { id: string; label: string }) => void;
+    command: (item: MentionItem) => void;
     /** Trigger kind — picks the empty/loading wording, and agent rows render a glyph avatar. */
     kind: MentionKind;
     /** A search is pending; rendered only for a trigger that declares a `loadingLabel`. */
@@ -40,7 +41,7 @@ export const MentionList = forwardRef<
         }
         if (event.key === "Enter" || event.key === "Tab") {
           const item = items[selected];
-          if (item) command({ id: item.id, label: item.label });
+          if (item) command(item);
           return true;
         }
         return false;
@@ -72,7 +73,7 @@ export const MentionList = forwardRef<
           // Mousedown (not click) so the pick lands before the editor blur cancels the suggestion.
           onMouseDown={(e) => {
             e.preventDefault();
-            command({ id: item.id, label: item.label });
+            command(item);
           }}
           className={`flex w-full items-start gap-2 rounded-sm px-2 py-1.5 text-left transition-colors ${
             i === selected ? "bg-secondary" : "hover:bg-secondary"
@@ -87,6 +88,13 @@ export const MentionList = forwardRef<
               decorative
               className="mt-0.5 shrink-0"
             />
+          ) : kind === "file" ? (
+            <span className="mt-0.5 flex size-6 shrink-0 items-center justify-center rounded bg-muted">
+              <FileTypeIcon
+                mediaType={item.mediaType ?? "application/octet-stream"}
+                filename={item.label}
+              />
+            </span>
           ) : null}
           <span className="flex min-w-0 flex-col items-start gap-0.5">
             <span className="font-medium text-foreground">{item.label}</span>

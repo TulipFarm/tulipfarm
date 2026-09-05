@@ -690,10 +690,41 @@ describe("delegateToAgentTool", () => {
       task: "Summarise report",
       context: { reportId: "r1" },
     });
+
     expect(res).toEqual({
       success: true,
       data: { ...delegationOutcome, task: "Summarise report" },
     });
+  });
+
+  it("checks Agent ownership for Use without adding authority to the child Run", async () => {
+    const delegate = vi.fn(async () => delegationOutcome);
+    const requireAccess = vi.fn(async () => ({ levels: ["view", "use"] }));
+    const ctx = makeCtx({}, { worker: makeAgent("worker", "Worker") });
+    ctx.delegateToAgent = delegate;
+    ctx.teamAssets = {
+      require: requireAccess,
+    } as unknown as NonNullable<PlatformToolContext["teamAssets"]>;
+    ctx.requestContext = {
+      userId: "u1",
+      subject: { kind: "user", id: "u1" },
+      runId: "parent-run",
+      stateKey: "invoke",
+      toolCallId: "call-1",
+    };
+
+    await delegateToAgentTool.handler({ agentId: "worker", task: "Do it" }, ctx);
+
+    expect(requireAccess).toHaveBeenCalledWith(
+      "agent",
+      "worker",
+      { id: "u1", kind: "user" },
+      "use",
+      undefined
+    );
+    expect(delegate).toHaveBeenCalledWith(
+      expect.not.objectContaining({ ownerTeamIds: expect.anything() })
+    );
   });
 
   it("refuses rather than returning a receipt when no Run is in scope", async () => {
