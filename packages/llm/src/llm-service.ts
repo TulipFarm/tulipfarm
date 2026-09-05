@@ -219,6 +219,17 @@ export class LlmService {
   }
 
   /**
+   * The admission-control key for one link of a chain.
+   *
+   * Keyed by deployment, not by provider: a chain's primary and its fallback usually sit behind the
+   * same provider, and keying on the provider alone let one throttled deployment shed the very
+   * fallback that exists to absorb it.
+   */
+  private linkGateKey(id: string, model: LanguageModelV4): string {
+    return `${this.entryByModelId.get(id)?.provider ?? model.provider}:${model.modelId}`;
+  }
+
+  /**
    * Builds a model that executes the whole selected chain, not only its first id.
    *
    * `responder` is filled in with whichever link actually served, so the caller can price the
@@ -257,7 +268,7 @@ export class LlmService {
       logger,
       responder,
       gate,
-      built.map((link) => this.entryByModelId.get(link.id)?.provider ?? link.model.provider),
+      built.map((link) => this.linkGateKey(link.id, link.model)),
       attempted
     );
   }
@@ -327,7 +338,7 @@ export class LlmService {
       logger,
       responder,
       gate,
-      built.map((link) => this.entryByModelId.get(link.id)?.provider ?? link.model.provider),
+      built.map((link) => this.linkGateKey(link.id, link.model)),
       attempted
     );
   }

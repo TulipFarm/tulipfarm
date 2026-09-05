@@ -472,6 +472,25 @@ describe("FallbackModel lease settlement after commit", () => {
     });
   }
 
+  it("gates each link by deployment, so two models of one provider do not share a key", async () => {
+    const keys: string[] = [];
+    const gate: FallbackCallGate = {
+      async acquire(key: string) {
+        keys.push(key);
+        return { succeeded() {}, failed() {}, release() {} };
+      },
+    };
+    // Defaulted, not passed: a chain's primary and its fallback usually sit behind the same
+    // provider, so keying admission on the provider alone let one throttled deployment shed the
+    // very link that exists to absorb it.
+    const primary = { ...makeModel(), modelId: "sonnet" } as LanguageModelV4;
+    const fallback = new FallbackModel([primary, openStreamModel()], undefined, undefined, gate);
+
+    await fallback.doStream(opts).catch(() => undefined);
+
+    expect(keys[0]).toBe("test:sonnet");
+  });
+
   it("settles the lease exactly once when a committed stream is cancelled", async () => {
     const { gate, outcomes, releases } = recordingGate();
     const fallback = new FallbackModel([openStreamModel()], undefined, undefined, gate, [
