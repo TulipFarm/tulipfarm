@@ -225,6 +225,8 @@ export async function readError(res: Response): Promise<ApiError> {
   try {
     const body = (await res.json()) as {
       error?: unknown;
+      message?: unknown;
+      code?: unknown;
       path?: unknown;
     };
     if (typeof body.error === "string") message = body.error;
@@ -235,6 +237,18 @@ export async function readError(res: Response): Promise<ApiError> {
       typeof body.error.message === "string"
     ) {
       message = body.error.message;
+    }
+    // Fastify's own schema-validation failures (code "FST_ERR_*") put the generic HTTP reason
+    // phrase ("Bad Request") in `error` and the actual detail in `message`; this app's own routes
+    // never set `code`, so its presence is what distinguishes the two shapes — `res.statusText` is
+    // frequently empty in fetch responses and can't be used for that check.
+    if (
+      typeof body.code === "string" &&
+      body.code.startsWith("FST_") &&
+      typeof body.message === "string" &&
+      body.message.length > 0
+    ) {
+      message = body.message;
     }
     if (typeof body.path === "string" && body.path.length > 0) path = body.path;
   } catch {

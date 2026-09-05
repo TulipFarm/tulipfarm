@@ -158,12 +158,14 @@ describe("observability routes", () => {
     });
     expect(res.statusCode).toBe(200);
     const body = res.json() as {
-      totals: { costUsd: number; turns: number };
+      totals: { cost: number; turns: number };
       byModel: { model: string; calls: number }[];
+      byMember: { memberId: string; member: string; cost: number }[];
     };
-    expect(body.totals.costUsd).toBeCloseTo(0.06, 6);
+    expect(body.totals.cost).toBeCloseTo(0.06, 6);
     expect(body.totals.turns).toBe(1);
     expect(body.byModel[0].model).toBe("claude-opus-4-8");
+    expect(body.byMember).toEqual([{ memberId: "system", member: "System", cost: 0.06 }]);
   });
 
   it("serializes recent turns + a conversation trace for an admin", async () => {

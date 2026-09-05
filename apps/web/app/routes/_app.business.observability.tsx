@@ -1,7 +1,6 @@
 import { useLoaderData, useRouteError } from "@remix-run/react";
 import { useRef, useState } from "react";
 import { FormStatus } from "~/components/form-status";
-import { ChartCanvas } from "~/components/observability/chart-canvas";
 import { LogsPanel } from "~/components/observability/logs-panel";
 import { ResourcesPanel } from "~/components/observability/resources-panel";
 import { ErrorState } from "~/components/states";
@@ -10,8 +9,8 @@ import { Sheet } from "~/components/ui/sheet";
 import { ApiError } from "~/lib/api";
 import { getLogs, type LogPage } from "~/lib/logs";
 import {
+  formatCost,
   formatTokens,
-  formatUsd,
   getObservabilityConfig,
   getObservabilitySummary,
   getRecentTurns,
@@ -24,6 +23,7 @@ import {
   type TraceEvent,
 } from "~/lib/observability";
 import { EMPTY_RESOURCE_USAGE, getResources, type ResourceUsage } from "~/lib/resources";
+import { getBusinessProfile } from "~/lib/settings";
 import { cn } from "~/lib/utils";
 
 const RANGES: { key: SummaryRange; label: string }[] = [
@@ -32,30 +32,33 @@ const RANGES: { key: SummaryRange; label: string }[] = [
   { key: "30d", label: "30d" },
 ];
 
-/** Bucket label: hour-of-day for 24h, month/day otherwise. */
-function bucketLabel(iso: string, range: SummaryRange): string {
-  const d = new Date(iso);
-  return range === "24h"
-    ? d.toLocaleTimeString(undefined, { hour: "2-digit" })
-    : d.toLocaleDateString(undefined, { month: "short", day: "numeric" });
-}
-
 export async function clientLoader() {
-  const [initial, config, recent, logs, resources] = await Promise.all([
+  const [initial, config, recent, logs, resources, profile] = await Promise.all([
     getObservabilitySummary("7d"),
     getObservabilityConfig(),
     getRecentTurns(25),
     // Tolerated rather than awaited strictly: the log spine is the newest surface here, and a
-    // failure to read it must not blank the cost dashboard the page primarily exists to show.
+    // failure to read it must not blank the reliability dashboard the page primarily exists to show.
     getLogs({ limit: 50 }).catch((): LogPage => ({ items: [], nextCursor: null })),
-    // Same tolerance, same reason: resource samples are supplementary to the cost view.
+    // Same tolerance, same reason: resource samples are supplementary to the reliability view.
     getResources("1h").catch((): ResourceUsage => EMPTY_RESOURCE_USAGE),
+    getBusinessProfile(),
   ]);
-  return { initial, config, recent, logs, resources };
+  return {
+    initial,
+    config,
+    recent,
+    logs,
+    resources,
+    businessCurrency: profile.businessCurrency,
+    businessCurrencyRate: profile.businessCurrencyRate,
+  };
 }
 
 export default function SettingsObservability() {
-  const { initial, config, recent, logs, resources } = useLoaderData<typeof clientLoader>();
+  const { initial, config, recent, logs, resources, businessCurrency, businessCurrencyRate } =
+    useLoaderData<typeof clientLoader>();
+  const toDisplay = (usd: number) => usd * businessCurrencyRate;
   const [summary, setSummary] = useState<ObsSummary>(initial);
   const [range, setRange] = useState<SummaryRange>("7d");
   const [loading, setLoading] = useState(false);
@@ -74,8 +77,7 @@ export default function SettingsObservability() {
     }
   }
 
-  const { totals, series, byAgent, byModel, reliability } = summary;
-  const maxAgentCost = Math.max(1e-9, ...byAgent.map((a) => a.costUsd));
+  const { totals, reliability } = summary;
 
   return (
     <div className={cn("flex flex-col gap-6", loading && "opacity-60 transition-opacity")}>
@@ -87,7 +89,7 @@ export default function SettingsObservability() {
               type="button"
               onClick={() => applyRange(r.key)}
               className={cn(
-                "cursor-pointer rounded-sm border px-2.5 py-1 text-xs transition-colors",
+                "cursor-pointer rounded-sm border px-2.5 py-1 text-xs transition-colors outline-none focus-visible:ring-2 focus-visible:ring-ring/60 focus-visible:ring-offset-2 focus-visible:ring-offset-background",
                 r.key === range
                   ? "border-primary text-foreground"
                   : "border-border text-muted-foreground hover:text-foreground"
@@ -100,8 +102,7 @@ export default function SettingsObservability() {
       </div>
 
       {/* Headline metric cards */}
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-        <MetricCard label="Spend" value={formatUsd(totals.costUsd)} />
+      <div className="grid grid-cols-3 gap-3">
         <MetricCard label="Tokens" value={formatTokens(totals.tokens)} />
         <MetricCard label="Turns" value={String(totals.turns)} />
         <MetricCard
@@ -136,97 +137,26 @@ export default function SettingsObservability() {
         </div>
       </Panel>
 
-      {/* Spend over time */}
-      <Panel title="Spend over time">
-        {series.length === 0 ? (
-          <EmptyHint />
-        ) : (
-          <ChartCanvas
-            kind="line"
-            ariaLabel="Spend over time"
-            formatValue={formatUsd}
-            data={{
-              labels: series.map((p) => bucketLabel(p.bucket, range)),
-              values: series.map((p) => p.costUsd),
-            }}
-          />
-        )}
-      </Panel>
-
-      {/* Spend by agent */}
-      <Panel title="Spend by agent">
-        {byAgent.length === 0 ? (
-          <EmptyHint />
-        ) : (
-          <ul className="flex flex-col gap-2">
-            {byAgent.map((a) => (
-              <li key={a.agentId} className="flex items-center gap-3">
-                <span className="w-40 shrink-0 truncate text-sm text-foreground" title={a.agentId}>
-                  {a.agentId}
-                </span>
-                <span className="h-2 flex-1 overflow-hidden rounded-sm bg-muted/40">
-                  <span
-                    className="block h-full bg-primary"
-                    style={{ width: `${Math.max(2, (a.costUsd / maxAgentCost) * 100)}%` }}
-                  />
-                </span>
-                <span className="w-20 shrink-0 text-right text-sm tabular-nums text-muted-foreground">
-                  {formatUsd(a.costUsd)}
-                </span>
-              </li>
-            ))}
-          </ul>
-        )}
-      </Panel>
-
-      {/* By model */}
-      <Panel title="By model">
-        {byModel.length === 0 ? (
-          <EmptyHint />
-        ) : (
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-border border-b text-left text-xs text-muted-foreground">
-                <th className="py-1.5 font-normal">Model</th>
-                <th className="py-1.5 text-right font-normal">Calls</th>
-                <th className="py-1.5 text-right font-normal">Cost</th>
-              </tr>
-            </thead>
-            <tbody>
-              {byModel.map((m) => (
-                <tr key={m.model} className="border-border/60 border-b">
-                  <td className="py-1.5 text-foreground">{m.model}</td>
-                  <td className="py-1.5 text-right tabular-nums text-muted-foreground">
-                    {m.calls}
-                  </td>
-                  <td className="py-1.5 text-right tabular-nums text-muted-foreground">
-                    {m.unpriced ? (
-                      <span title="No price found for this model. Add a pricing override in observability.config.yaml">
-                        unpriced
-                      </span>
-                    ) : (
-                      formatUsd(m.costUsd)
-                    )}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
-      </Panel>
-
       <ResourcesPanel initial={resources} />
 
       <LogsPanel initial={logs} />
 
-      <RecentTurnsPanel recent={recent} />
+      <RecentTurnsPanel recent={recent} businessCurrency={businessCurrency} toDisplay={toDisplay} />
 
       <GrafanaExportPanel config={config} />
     </div>
   );
 }
 
-function RecentTurnsPanel({ recent }: { recent: RecentTurn[] }) {
+function RecentTurnsPanel({
+  recent,
+  businessCurrency,
+  toDisplay,
+}: {
+  recent: RecentTurn[];
+  businessCurrency: string;
+  toDisplay: (usd: number) => number;
+}) {
   const [open, setOpen] = useState<RecentTurn | null>(null);
   const [trace, setTrace] = useState<TraceEvent[] | null>(null);
   const [loading, setLoading] = useState(false);
@@ -303,7 +233,12 @@ function RecentTurnsPanel({ recent }: { recent: RecentTurn[] }) {
         ) : trace && trace.length > 0 ? (
           <ol className="flex flex-col gap-2">
             {trace.map((e, i) => (
-              <TraceRow key={`${e.type}-${e.ts}-${i}`} e={e} />
+              <TraceRow
+                key={`${e.type}-${e.ts}-${i}`}
+                e={e}
+                businessCurrency={businessCurrency}
+                toDisplay={toDisplay}
+              />
             ))}
           </ol>
         ) : (
@@ -314,7 +249,15 @@ function RecentTurnsPanel({ recent }: { recent: RecentTurn[] }) {
   );
 }
 
-function TraceRow({ e }: { e: TraceEvent }) {
+function TraceRow({
+  e,
+  businessCurrency,
+  toDisplay,
+}: {
+  e: TraceEvent;
+  businessCurrency: string;
+  toDisplay: (usd: number) => number;
+}) {
   const isError = e.status === "error";
   const label =
     e.type === "llm_call"
@@ -347,7 +290,9 @@ function TraceRow({ e }: { e: TraceEvent }) {
               {e.tokensIn}↑ / {e.tokensOut ?? 0}↓ tok
             </span>
           ) : null}
-          {e.costUsd != null ? <span>{formatUsd(e.costUsd)}</span> : null}
+          {e.costUsd != null ? (
+            <span>{formatCost(toDisplay(e.costUsd), businessCurrency)}</span>
+          ) : null}
           {e.durationMs != null ? <span>{e.durationMs} ms</span> : null}
         </span>
       </span>
@@ -388,7 +333,7 @@ function GrafanaExportPanel({ config }: { config: ObsConfigStatus }) {
           <ConfigRow label="Content capture" value={config.captureContent ? "On" : "Off"} />
           <ConfigRow
             label="Spend alert"
-            value={config.spendAlertUsd != null ? formatUsd(config.spendAlertUsd) : "unset"}
+            value={config.spendAlertUsd != null ? formatCost(config.spendAlertUsd, "USD") : "unset"}
           />
         </dl>
       </div>

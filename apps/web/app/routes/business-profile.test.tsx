@@ -37,6 +37,8 @@ const PROFILE = {
   name: "Fernwood Roasters",
   description: "Speciality coffee wholesale.",
   website: "https://fernwood.coffee",
+  businessCurrency: "USD",
+  businessCurrencyRate: 1,
 };
 
 function renderPage(profile = PROFILE) {
@@ -59,7 +61,7 @@ test("saves only after an edit, and trims what it sends", async () => {
   const save = screen.getByRole("button", { name: /^save$/i });
   expect(save).toBeDisabled();
 
-  const name = screen.getByLabelText("Name");
+  const name = screen.getByLabelText(/^Name/);
   await userEvent.clear(name);
   await userEvent.type(name, "  Fernwood Coffee Co  ");
   await userEvent.click(save);
@@ -69,6 +71,8 @@ test("saves only after an edit, and trims what it sends", async () => {
       name: "Fernwood Coffee Co",
       description: "Speciality coffee wholesale.",
       website: "https://fernwood.coffee",
+      businessCurrency: "USD",
+      businessCurrencyRate: 1,
     })
   );
 });
@@ -78,7 +82,7 @@ test("a non-admin reads the profile but cannot edit it", () => {
   renderPage();
 
   expect(screen.getByText("Fernwood Roasters")).toBeInTheDocument();
-  expect(screen.queryByLabelText("Name")).not.toBeInTheDocument();
+  expect(screen.queryByLabelText(/^Name/)).not.toBeInTheDocument();
   expect(screen.queryByRole("button", { name: /^save$/i })).not.toBeInTheDocument();
 });
 
@@ -86,7 +90,7 @@ test("a rejected save reports the API's reason", async () => {
   vi.mocked(settings.putBusinessProfile).mockRejectedValueOnce(new ApiError(403, "forbidden"));
   renderPage();
 
-  await userEvent.type(screen.getByLabelText("Name"), "!");
+  await userEvent.type(screen.getByLabelText(/^Name/), "!");
   await userEvent.click(screen.getByRole("button", { name: /^save$/i }));
 
   expect(await screen.findByRole("alert")).toHaveTextContent(/only an admin/i);

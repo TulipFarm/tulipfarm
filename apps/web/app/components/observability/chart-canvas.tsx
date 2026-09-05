@@ -58,12 +58,15 @@ export function buildChartConfig({
   datasets,
   formatValue,
   colors,
+  stacked,
 }: {
   kind: "line" | "bar";
   labels: string[];
   datasets: { label: string; values: (number | null)[] }[];
   formatValue?: (n: number) => string;
   colors: ChartColors;
+  /** Bar-only: stack datasets into one column per bucket instead of drawing them side by side. */
+  stacked?: boolean;
 }): ChartConfiguration {
   const fmt = formatValue ?? ((n: number) => String(n));
   const multi = datasets.length > 1;
@@ -131,8 +134,13 @@ export function buildChartConfig({
         },
       },
       scales: {
-        x: { grid: { display: false }, ticks: { color: colors.muted, font: { size: 10 } } },
+        x: {
+          stacked: stacked === true,
+          grid: { display: false },
+          ticks: { color: colors.muted, font: { size: 10 } },
+        },
         y: {
+          stacked: stacked === true,
           grid: { color: colors.border },
           ticks: { color: colors.muted, font: { size: 10 }, callback: (v) => fmt(Number(v)) },
           beginAtZero: true,
@@ -148,11 +156,14 @@ export function ChartCanvas({
   data,
   formatValue,
   ariaLabel,
+  stacked,
 }: {
   kind: "line" | "bar";
   data: Series | MultiSeries;
   formatValue?: (n: number) => string;
   ariaLabel: string;
+  /** Bar-only: stack datasets into one column per bucket instead of drawing them side by side. */
+  stacked?: boolean;
 }) {
   const ref = useRef<HTMLCanvasElement | null>(null);
   const datasets = isMulti(data)
@@ -174,6 +185,7 @@ export function ChartCanvas({
       labels: data.labels,
       datasets,
       formatValue,
+      stacked,
       colors: {
         primary: themeColor("--primary", "oklch(0.55 0.21 18)"),
         muted: themeColor("--muted-foreground", "#888"),
@@ -183,11 +195,36 @@ export function ChartCanvas({
     });
     const chart = new Chart(canvas, config);
     return () => chart.destroy();
-  }, [kind, sig, formatValue]);
+  }, [kind, sig, formatValue, stacked]);
+
+  const fmt = formatValue ?? ((n: number) => String(n));
 
   return (
     <div className="h-56 w-full">
       <canvas ref={ref} aria-label={ariaLabel} role="img" />
+      <table className="sr-only">
+        <caption>{ariaLabel}</caption>
+        <thead>
+          <tr>
+            <th>Bucket</th>
+            {datasets.map((d) => (
+              <th key={d.label || "value"}>{d.label || ariaLabel}</th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {data.labels.map((label, i) => (
+            <tr key={label}>
+              <td>{label}</td>
+              {datasets.map((d) => (
+                <td key={d.label || "value"}>
+                  {d.values[i] == null ? "—" : fmt(d.values[i] as number)}
+                </td>
+              ))}
+            </tr>
+          ))}
+        </tbody>
+      </table>
     </div>
   );
 }

@@ -237,6 +237,8 @@ export type BusinessProfile = {
   name: string;
   description: string;
   website: string;
+  businessCurrency: string;
+  businessCurrencyRate: number;
 };
 
 export async function getBusinessProfile(): Promise<BusinessProfile> {

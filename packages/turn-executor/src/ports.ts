@@ -51,6 +51,8 @@ export interface LlmCallRecord {
   readonly status: "ok" | "error";
   readonly runId?: string;
   readonly turnId?: string;
+  /** Whom the call acted as, kind included, so spend can be grouped by member. */
+  readonly principal?: { readonly kind: string; readonly id: string };
 }
 
 /** One finished turn, for the reliability and volume half of the dashboard. */
@@ -61,6 +63,8 @@ export interface TurnRecord {
   readonly status: "ok" | "error";
   readonly runId?: string;
   readonly turnId?: string;
+  /** Whom the turn acted as, kind included, so spend can be grouped by member. */
+  readonly principal?: { readonly kind: string; readonly id: string };
 }
 
 /**

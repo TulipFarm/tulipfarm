@@ -373,6 +373,11 @@ export const Webhook = localIcon(
   </>
 );
 
+export const DollarSign = localIcon(
+  "DollarSign",
+  <path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6" />
+);
+
 export const Wrench = localIcon(
   "Wrench",
   <path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.11-3.1c.32-.33.86-.23.98.21a6 6 0 0 1-8.26 7.06l-7.91 7.91a1 1 0 0 1-3-3l7.91-7.91a6 6 0 0 1 7.06-8.26c.43.12.54.66.22.98Z" />

@@ -90,13 +90,13 @@ const ConfigStatusSchema = {
 
 const SummarySchema = {
   type: "object",
-  required: ["totals", "series", "byAgent", "byModel", "reliability"],
+  required: ["totals", "series", "byAgent", "byMember", "byModel", "modelSeries", "reliability"],
   properties: {
     totals: {
       type: "object",
-      required: ["costUsd", "tokens", "turns", "unpricedCalls"],
+      required: ["cost", "tokens", "turns", "unpricedCalls"],
       properties: {
-        costUsd: { type: "number" },
+        cost: { type: "number" },
         tokens: { type: "number" },
         turns: { type: "number" },
         unpricedCalls: { type: "number" },
@@ -106,10 +106,10 @@ const SummarySchema = {
       type: "array",
       items: {
         type: "object",
-        required: ["bucket", "costUsd", "tokens"],
+        required: ["bucket", "cost", "tokens"],
         properties: {
           bucket: { type: "string" },
-          costUsd: { type: "number" },
+          cost: { type: "number" },
           tokens: { type: "number" },
         },
       },
@@ -118,20 +118,44 @@ const SummarySchema = {
       type: "array",
       items: {
         type: "object",
-        required: ["agentId", "costUsd"],
-        properties: { agentId: { type: "string" }, costUsd: { type: "number" } },
+        required: ["agentId", "cost"],
+        properties: { agentId: { type: "string" }, cost: { type: "number" } },
+      },
+    },
+    byMember: {
+      type: "array",
+      items: {
+        type: "object",
+        required: ["memberId", "member", "cost"],
+        properties: {
+          memberId: { type: "string" },
+          member: { type: "string" },
+          cost: { type: "number" },
+        },
       },
     },
     byModel: {
       type: "array",
       items: {
         type: "object",
-        required: ["model", "costUsd", "calls", "unpriced"],
+        required: ["model", "cost", "calls", "unpriced"],
         properties: {
           model: { type: "string" },
-          costUsd: { type: "number" },
+          cost: { type: "number" },
           calls: { type: "number" },
           unpriced: { type: "boolean" },
+        },
+      },
+    },
+    modelSeries: {
+      type: "array",
+      items: {
+        type: "object",
+        required: ["bucket", "model", "cost"],
+        properties: {
+          bucket: { type: "string" },
+          model: { type: "string" },
+          cost: { type: "number" },
         },
       },
     },

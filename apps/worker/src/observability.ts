@@ -48,6 +48,8 @@ export class PgSpendSink implements SpendSink {
       costUsd: usage?.costBasis === "priced" ? usage.costUsd : undefined,
       durationMs: record.durationMs,
       status: record.status,
+      subjectKind: record.principal?.kind,
+      subjectId: record.principal?.id,
       attributes: compact({
         cacheRead: usage?.cacheReadTokens,
         cacheWrite: usage?.cacheWriteTokens,
@@ -66,6 +68,8 @@ export class PgSpendSink implements SpendSink {
       conversationId: record.conversationId,
       durationMs: record.durationMs,
       status: record.status,
+      subjectKind: record.principal?.kind,
+      subjectId: record.principal?.id,
       attributes: compact({ runId: record.runId, turnId: record.turnId }),
     });
   }
@@ -82,6 +86,8 @@ export class PgSpendSink implements SpendSink {
     costUsd?: number;
     durationMs?: number;
     status: string;
+    subjectKind?: string;
+    subjectId?: string;
     attributes: Record<string, unknown>;
   }): void {
     const now = new Date();
@@ -89,8 +95,9 @@ export class PgSpendSink implements SpendSink {
       .query(
         `INSERT INTO obs_event
            (id, ts, type, agent_id, conversation_id, model, provider, tier,
-            tokens_in, tokens_out, cost_usd, duration_ms, status, tool_name, attributes, created_at)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, NULL, $14::jsonb, $15)`,
+            tokens_in, tokens_out, cost_usd, duration_ms, status, tool_name, subject_kind,
+            subject_id, attributes, created_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, NULL, $14, $15, $16::jsonb, $17)`,
         [
           randomUUID(),
           now,
@@ -105,6 +112,8 @@ export class PgSpendSink implements SpendSink {
           row.costUsd ?? null,
           row.durationMs ?? null,
           row.status,
+          row.subjectKind ?? null,
+          row.subjectId ?? null,
           JSON.stringify(row.attributes),
           now,
         ]

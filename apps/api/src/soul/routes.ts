@@ -1,4 +1,5 @@
 import { DEPLOYMENT_BUSINESS_ID } from "@tulipfarm/constants";
+import { CURRENCY_CODES, isCurrencyCode } from "@tulipfarm/schema";
 import type { SecretsService } from "@tulipfarm/secrets";
 import type { GitSyncService, SoulWriter } from "@tulipfarm/soul";
 import {
@@ -30,8 +31,10 @@ const BusinessProfileSchema = {
     name: { type: "string" },
     description: { type: "string" },
     website: { type: "string" },
+    businessCurrency: { type: "string" },
+    businessCurrencyRate: { type: "number" },
   },
-  required: ["name", "description", "website"],
+  required: ["name", "description", "website", "businessCurrency", "businessCurrencyRate"],
 } as const;
 
 export function registerSoulRoutes(
@@ -224,6 +227,10 @@ export function registerSoulRoutes(
         description:
           typeof config.businessDescription === "string" ? config.businessDescription : "",
         website: typeof config.businessWebsite === "string" ? config.businessWebsite : "",
+        businessCurrency:
+          typeof config.businessCurrency === "string" ? config.businessCurrency : "USD",
+        businessCurrencyRate:
+          typeof config.businessCurrencyRate === "number" ? config.businessCurrencyRate : 1,
       });
     }
   );
@@ -253,6 +260,8 @@ export function registerSoulRoutes(
             name: { type: "string", minLength: 1, maxLength: 200 },
             description: { type: "string", maxLength: 2000 },
             website: { type: "string", maxLength: 500 },
+            businessCurrency: { type: "string", enum: [...CURRENCY_CODES] },
+            businessCurrencyRate: { type: "number", exclusiveMinimum: 0 },
           },
         },
         response: {
@@ -268,16 +277,34 @@ export function registerSoulRoutes(
       },
     },
     async (req, reply) => {
-      const body = req.body as { name: string; description?: string; website?: string };
+      const body = req.body as {
+        name: string;
+        description?: string;
+        website?: string;
+        businessCurrency?: string;
+        businessCurrencyRate?: number;
+      };
       const name = body.name.trim();
       if (!name) return reply.code(400).send({ error: "name is required" });
       const description = body.description?.trim() ?? "";
       const website = body.website?.trim() ?? "";
+      if (body.businessCurrency !== undefined && !isCurrencyCode(body.businessCurrency)) {
+        return reply.code(400).send({ error: "businessCurrency is not a valid ISO 4217 code" });
+      }
+      const businessCurrency = body.businessCurrency ?? "USD";
+      const businessCurrencyRate =
+        businessCurrency === "USD"
+          ? 1
+          : typeof body.businessCurrencyRate === "number" && body.businessCurrencyRate > 0
+            ? body.businessCurrencyRate
+            : 1;
 
       const next = mergeSoulConfig(soulWriter.read("Settings"), {
         businessName: name,
         businessDescription: description,
         businessWebsite: website,
+        businessCurrency,
+        businessCurrencyRate,
       });
       try {
         await soulWriter.apply({
@@ -302,7 +329,7 @@ export function registerSoulRoutes(
         hasDescription: description.length > 0,
         hasWebsite: website.length > 0,
       });
-      return reply.send({ name, description, website });
+      return reply.send({ name, description, website, businessCurrency, businessCurrencyRate });
     }
   );
 

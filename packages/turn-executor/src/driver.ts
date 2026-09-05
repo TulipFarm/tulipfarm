@@ -124,6 +124,7 @@ interface TurnSpendScope {
   readonly startedAt: number;
   readonly agentId: string;
   readonly conversationId: string;
+  readonly principal?: { readonly kind: string; readonly id: string };
 }
 
 export class TurnDriver {
@@ -142,6 +143,7 @@ export class TurnDriver {
       startedAt,
       agentId: context.agentId,
       conversationId: request.conversationId,
+      principal: context.principal,
     };
 
     // Verify guard policy digest before the first event; no misnamed guards may run.
@@ -397,6 +399,7 @@ export class TurnDriver {
       durationMs: Math.max(0, Date.now() - spend.startedAt),
       agentId: spend.agentId,
       conversationId: spend.conversationId,
+      principal: spend.principal,
     });
   }
 }

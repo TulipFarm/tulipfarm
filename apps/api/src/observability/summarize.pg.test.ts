@@ -82,7 +82,7 @@ describe("ObservabilityService.summary", () => {
     await service.record({ type: "tool_call", ts: now, toolName: "search", status: "ok" });
 
     const s = await service.summary("7d");
-    expect(s.totals.costUsd).toBeCloseTo(0.08, 6);
+    expect(s.totals.cost).toBeCloseTo(0.08, 6);
     expect(s.totals.tokens).toBe(1500 + 3000 + 200 + 10); // llm_call tokens only (+10 fallback step)
     expect(s.totals.turns).toBe(1);
     expect(s.totals.unpricedCalls).toBe(1);
@@ -95,12 +95,12 @@ describe("ObservabilityService.summary", () => {
     expect(s.reliability.p95DurationMs).toBeGreaterThan(0);
 
     // byAgent ordered by cost desc
-    expect(s.byAgent[0]).toEqual({ agentId: "support-agent", costUsd: expect.closeTo(0.08, 6) });
+    expect(s.byAgent[0]).toEqual({ agentId: "support-agent", cost: expect.closeTo(0.08, 6) });
     // byModel includes calls count
     const opus = s.byModel.find((m) => m.model === "claude-opus-4-8");
     expect(opus).toEqual({
       model: "claude-opus-4-8",
-      costUsd: expect.closeTo(0.06, 6),
+      cost: expect.closeTo(0.06, 6),
       calls: 1,
       unpriced: false,
     });
@@ -118,8 +118,62 @@ describe("ObservabilityService.summary", () => {
       status: "ok",
     });
     const within = await service.summary("7d"); // 10d-old row excluded
-    expect(within.totals.costUsd).toBe(0);
+    expect(within.totals.cost).toBe(0);
     const wide = await service.summary("30d"); // included
-    expect(wide.totals.costUsd).toBe(5);
+    expect(wide.totals.cost).toBe(5);
+  });
+
+  it("groups spend by member, folding every non-user principal into one System row", async () => {
+    const now = new Date();
+    await db.query(
+      "INSERT INTO users (id, email, password_hash, role, created_at) VALUES ($1, $2, 'h', 'member', now())",
+      ["11111111-1111-1111-1111-111111111111", "muskan@example.com"]
+    );
+    await db.query(
+      "INSERT INTO users (id, email, password_hash, role, created_at) VALUES ($1, $2, 'h', 'member', now())",
+      ["22222222-2222-2222-2222-222222222222", "second@example.com"]
+    );
+
+    await service.record({
+      type: "llm_call",
+      ts: now,
+      costUsd: 0.05,
+      status: "ok",
+      subjectKind: "user",
+      subjectId: "11111111-1111-1111-1111-111111111111",
+    });
+    await service.record({
+      type: "llm_call",
+      ts: now,
+      costUsd: 0.02,
+      status: "ok",
+      subjectKind: "user",
+      subjectId: "22222222-2222-2222-2222-222222222222",
+    });
+    // A service/role principal and an unattributed row both fold into "System".
+    await service.record({
+      type: "llm_call",
+      ts: now,
+      costUsd: 0.01,
+      status: "ok",
+      subjectKind: "service",
+      subjectId: "curator-sweep",
+    });
+    await service.record({ type: "llm_call", ts: now, costUsd: 0.03, status: "ok" });
+
+    const s = await service.summary("7d");
+    expect(s.byMember).toEqual([
+      {
+        memberId: "11111111-1111-1111-1111-111111111111",
+        member: "muskan@example.com",
+        cost: 0.05,
+      },
+      { memberId: "system", member: "System", cost: expect.closeTo(0.04, 6) },
+      {
+        memberId: "22222222-2222-2222-2222-222222222222",
+        member: "second@example.com",
+        cost: 0.02,
+      },
+    ]);
   });
 });
