@@ -301,4 +301,21 @@ describe("authored Page read gate", () => {
     expect(await gate.canRead(alice, page)).toBe(true);
     expect(await gate.canRead(bob, page)).toBe(false);
   });
+
+  it("keeps a blanket-granted Page readable when it also has a personal owner", async () => {
+    const page = await blanketPage("handbook");
+    await ownership.create({
+      businessId: BUSINESS,
+      assetType: "knowledge",
+      assetId: `page:${page}`,
+      owners: [{ kind: "principal", principalId: alice, principalKind: "user" }],
+      shares: [],
+      revision: 1,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    });
+
+    expect(await gate.canRead(alice, page)).toBe(true);
+    expect(await gate.canRead(bob, page)).toBe(true);
+  });
 });

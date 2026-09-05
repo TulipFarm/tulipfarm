@@ -78,7 +78,7 @@ function grantsOf(entries: readonly KnowledgeAclEntry[]): readonly KnowledgePrin
 function isRestriction(entries: readonly KnowledgeAclEntry[]): boolean {
   const grants = entries.filter((e) => e.effect === "grant");
   if (grants.length === 0) return false;
-  return !(grants.length === 1 && principalKey(grants[0].principal) === BLANKET_KEY);
+  return !grants.some((entry) => principalKey(entry.principal) === BLANKET_KEY);
 }
 
 /** `space_id` + path → Page id, so an ancestor chain resolves without a query per level. */
@@ -142,7 +142,7 @@ function effectiveEntries(
     // Checked before the baseline is taken, not after: an *open* ancestor reaching this first would
     // otherwise become the list every descendant is intersected against, and `{everyone}` ∩
     // `{alice}` is empty — locking out the very Principal a restriction names.
-    if (grants.size === 1 && grants.has(BLANKET_KEY)) {
+    if (grants.has(BLANKET_KEY)) {
       blanket ??= grants.get(BLANKET_KEY);
       continue;
     }
