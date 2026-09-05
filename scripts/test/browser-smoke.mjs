@@ -203,6 +203,15 @@ async function runAclDenialSpine() {
   await authorPage(openPath, openTitle, `${openTitle} is readable by the whole business.`);
   const pageUrl = await authorPage(restrictedPath, secret, `${secret} details.`);
 
+  // A newly created Space is personally owned. Share the Space with the colleague first so the
+  // control read below proves the later Page-level restriction, not the Space ownership boundary.
+  await page.goto(`/knowledge/spaces/${encodeURIComponent(spaceId)}/edit`);
+  await page.getByRole("button", { name: "Choose who can read it" }).click();
+  await seen(page.getByTestId("replace-note"), "space share dialog opened");
+  await page.getByRole("checkbox", { name: COLLEAGUE_EMAIL, exact: true }).check();
+  await page.getByRole("button", { name: /^Restrict/ }).click();
+  await seen(page.getByTestId("replace-note"), "space share dialog closed", "hidden");
+
   let colleague = null;
   try {
     // Control: the colleague can read it before restriction, so every absence below is known to be
