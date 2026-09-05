@@ -22,10 +22,14 @@ renderer interfaces, and declarative Soul component validation.
 | `src/forms.ts` | Form component contracts. |
 | `src/registry.ts` | Component registry helpers. |
 | `src/schema.ts` | Shared schema helpers. |
-| `src/soul.ts` | Declarative Soul component validation. |
+| `src/soul.ts` | Declarative Soul component validation; Code-view gates and presentation resolution. |
+| `src/sandbox.ts` | The host-to-frame contract for Code views: path, `sandbox` grant, CSP, messages. |
 
 ## Rules
 
 - Runtime-neutral only: no React, browser APIs, or provider SDK imports.
 - Persisted content is semantic data only: never HTML, CSS, JavaScript, executable templates, or
-  provider payloads.
+  provider payloads. The single exception is a **Code view** — Agent-authored JSX a component may
+  carry under `code:`, compiled at authoring time and executed only in the opaque-origin sandbox
+  frame (`src/sandbox.ts`, ADR-031). It never composes into another component and never resolves
+  into a view tree.

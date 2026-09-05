@@ -184,6 +184,36 @@ describe("RegistryToolDispatcher", () => {
     expect(execute).not.toHaveBeenCalled();
   });
 
+  it("names the sibling a required argument was nested inside", async () => {
+    const execute = vi.fn(async () => ok({}));
+    const { dispatcher } = makeDispatcher([
+      toolDef({
+        name: "publish",
+        inputSchema: {
+          type: "object",
+          required: ["propsSchema", "examples"],
+          additionalProperties: false,
+          properties: { propsSchema: { type: "object" }, examples: { type: "array" } },
+        },
+        execute,
+      }),
+    ]);
+
+    const result = await dispatcher.dispatch(AUTHORITY, {
+      callId: "nested",
+      name: "publish",
+      // The shape that keeps happening: a schema-shaped argument absorbs the field beside it,
+      // because `examples` is a JSON Schema keyword as well as a top-level argument.
+      arguments: { propsSchema: { type: "object", examples: [{ symbol: "MSFT" }] } },
+    });
+
+    expect(result).toMatchObject({ status: "invalid_arguments" });
+    expect((result as { reason: string }).reason).toContain(
+      '"examples" is nested inside "propsSchema"'
+    );
+    expect(execute).not.toHaveBeenCalled();
+  });
+
   it("carries a missing-Credential setup link to the Run event path", async () => {
     const { dispatcher } = makeDispatcher([
       toolDef({

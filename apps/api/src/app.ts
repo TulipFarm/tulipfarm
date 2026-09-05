@@ -9,6 +9,7 @@ import swagger from "@fastify/swagger";
 import scalar from "@scalar/fastify-api-reference";
 import { DEPLOYMENT_BUSINESS_ID } from "@tulipfarm/constants";
 import { acceptedInputModalities, type LlmConfig } from "@tulipfarm/schema";
+import { SURFACE_SANDBOX_CSP, SURFACE_SANDBOX_PATH } from "@tulipfarm/surface";
 import Fastify, { type FastifyReply, type FastifyRequest } from "fastify";
 import { registerActivityRoutes } from "./activity/routes";
 import { postgresProbe, probeHealth } from "./admin/health";
@@ -190,6 +191,10 @@ export async function buildApp(opts: AppOptions = {}) {
           "frame-ancestors 'none'",
         ].join("; ")
       );
+    } else if (serveSpa && req.url.startsWith(SURFACE_SANDBOX_PATH)) {
+      // The SPA policy carries `frame-ancestors 'none'`, which would refuse this document the
+      // moment the SPA embeds it — in the single image only, since the dev server sets no CSP.
+      reply.header("content-security-policy", SURFACE_SANDBOX_CSP);
     } else if (serveSpa && !isAppApiPath(req.url)) {
       if (!spaCspHeader) throw new Error("SPA CSP header is unavailable while serving WEB_DIST");
       reply.header("content-security-policy", spaCspHeader);

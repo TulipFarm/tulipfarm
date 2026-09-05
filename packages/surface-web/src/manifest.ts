@@ -34,6 +34,7 @@ export const surfaceWebManifest: SurfaceRendererManifest = Object.freeze({
     "forms",
     "charts",
     "force-graphs",
+    "code-views",
     "optimistic-update",
   ],
 } as const);

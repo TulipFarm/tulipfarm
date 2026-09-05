@@ -25,6 +25,10 @@ import type {
   SurfaceTarget,
 } from "./contracts";
 import type { FormSubmissionResult, GovernedForm, SubmitFormInput } from "./forms";
+
+// Plain constants and message types, no TypeBox — safe for this entry point.
+export * from "./sandbox";
+
 import type { ResolvedSurfaceViewNode } from "./soul";
 
 export type {
@@ -50,7 +54,13 @@ export type {
 const SURFACE_ACTION_KEY_SET = new Set<string>(SURFACE_ACTION_KEYS);
 const SURFACE_ACTION_EVENT_REGEX = new RegExp(SURFACE_ACTION_EVENT_PATTERN);
 
-function isSurfaceAction(value: unknown): value is SurfaceAction {
+/**
+ * Whether an untrusted value is a well-formed Surface action.
+ *
+ * Exported because the sandbox host reads actions posted by authored code, which is exactly the
+ * caller that must never be trusted to send the right shape.
+ */
+export function isSurfaceAction(value: unknown): value is SurfaceAction {
   if (!isRecord(value)) return false;
   if (!Object.keys(value).every((key) => SURFACE_ACTION_KEY_SET.has(key))) return false;
   if (

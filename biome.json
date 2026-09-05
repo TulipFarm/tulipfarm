@@ -17,6 +17,7 @@
       "!**/.agents",
       "!**/.claude",
       "!apps/eval/scorecards",
+      "!apps/web/public/surface-sandbox",
       "!brand"
     ]
   },

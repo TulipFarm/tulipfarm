@@ -296,6 +296,7 @@ export function chatReducer(state: ChatState, event: ChatEvent): ChatState {
             artifact,
             actionHandles: event.data.actionHandles,
             resolvedView: event.data.resolvedView,
+            codeView: event.data.codeView,
           })),
         };
       }
@@ -307,6 +308,7 @@ export function chatReducer(state: ChatState, event: ChatEvent): ChatState {
         artifact,
         actionHandles: event.data.actionHandles,
         resolvedView: event.data.resolvedView,
+        codeView: event.data.codeView,
       };
       return {
         ...state,

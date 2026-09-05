@@ -5,7 +5,7 @@ import type { SoulLoader } from "@tulipfarm/soul";
 import { DOMAIN_EVENTS } from "@tulipfarm/storage";
 import {
   type PresentationContext,
-  resolveSoulSurfaceView,
+  resolveSoulSurfacePresentation,
   SurfaceInteractionSchema,
   type SurfaceTarget,
   targetKey,
@@ -130,16 +130,15 @@ export function registerSurfaceRoutes(
       return {
         artifact,
         actionHandles: await actions.listForArtifact(artifact.id, artifact.revision, userId),
-        resolvedView:
-          component && component.version === artifact.component.version
-            ? resolveSoulSurfaceView(
-                component,
-                artifact.target,
-                artifact.props,
-                [...(soulLoader?.surfaceComponents.values() ?? [])],
-                surfaceRendererRegistry
-              )
-            : undefined,
+        ...(component && component.version === artifact.component.version
+          ? resolveSoulSurfacePresentation(
+              component,
+              artifact.target,
+              artifact.props,
+              [...(soulLoader?.surfaceComponents.values() ?? [])],
+              surfaceRendererRegistry
+            )
+          : {}),
       };
     }
   );

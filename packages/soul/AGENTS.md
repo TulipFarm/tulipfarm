@@ -12,7 +12,7 @@ Loader, compiler, publisher, and git-sync engine for Soul artifacts. Root `soul/
 | `src/repo-dir.ts` | Locates the checkout for the dev-only bundled Skill/integration fallbacks. |
 | `src/soul-loader.ts`, `src/tree-reader.ts`, `src/soul-path.ts` | Disk and tree reads. |
 | `src/{agent,skill,model-profile}-documents.ts` | Canonical definitions projected on read from the authored file. |
-| `src/compiler.ts`, `src/bundle.ts`, `src/bundle-retention.ts`, `src/published-loader.ts` | Runtime bundles. |
+| `src/compiler.ts`, `src/bundle.ts`, `src/bundle-retention.ts`, `src/published-loader.ts` | Runtime bundles; `published-loader.ts` also reads Surface `code/` companions and re-checks their recorded hash. |
 | `src/signatures.ts`, `src/publication.ts`, `src/publisher.ts` | Publish flow. |
 | `src/routine-catalog.ts`, `src/routines/` | Routines browse model; Routine reference validation. |
 | `src/git-*`, `src/pinned-definition.ts`, `src/definition-reader.ts` | Git and pinned reads. |

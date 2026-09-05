@@ -345,7 +345,7 @@ export class RegistryToolDispatcher implements TurnToolDispatcher {
 
     const validate = ajv.compile(definition.inputSchema);
     if (!validate(call.arguments)) {
-      return { status: "invalid_arguments", reason: argumentErrors(validate) };
+      return { status: "invalid_arguments", reason: argumentErrors(validate, call.arguments) };
     }
 
     if (definition.definition !== undefined) {
@@ -565,11 +565,53 @@ function replayedEffect(toolName: string, state: string): HostedToolResult {
   }
 }
 
-function argumentErrors(validate: ReturnType<typeof ajv.compile>): string {
+/** Resolve a JSON Pointer against the call arguments, or `undefined` where it does not lead. */
+function atPointer(root: unknown, pointer: string): unknown {
+  if (pointer === "") return root;
+  let current: unknown = root;
+  for (const segment of pointer.slice(1).split("/")) {
+    if (current === null || typeof current !== "object") return undefined;
+    current = (current as Record<string, unknown>)[segment.replace(/~1/g, "/").replace(/~0/g, "~")];
+  }
+  return current;
+}
+
+/**
+ * The sibling that swallowed a required property, when one did.
+ *
+ * A field nested one level inside a neighbour is the common shape of an invalid Tool call — a
+ * schema-shaped argument absorbs fields that belong beside it, because their names are also
+ * keywords of the schema being written. Ajv can only report the level where the field is absent,
+ * which is never the level that needs the edit, so the caller re-guesses instead of moving it.
+ */
+function swallowedBy(container: unknown, key: string): string | undefined {
+  if (container === null || typeof container !== "object" || Array.isArray(container)) {
+    return undefined;
+  }
+  for (const [name, value] of Object.entries(container)) {
+    if (value !== null && typeof value === "object" && !Array.isArray(value) && key in value) {
+      return name;
+    }
+  }
+  return undefined;
+}
+
+function argumentErrors(validate: ReturnType<typeof ajv.compile>, args: unknown): string {
   const messages = new Set(
-    (validate.errors ?? []).map((error) =>
-      `${error.instancePath || "(root)"} ${error.message ?? "is invalid"}`.trim()
-    )
+    (validate.errors ?? []).map((error) => {
+      const stated = `${error.instancePath || "(root)"} ${error.message ?? "is invalid"}`.trim();
+      const missing =
+        error.keyword === "required"
+          ? (error.params as { missingProperty?: string }).missingProperty
+          : undefined;
+      const holder =
+        missing === undefined
+          ? undefined
+          : swallowedBy(atPointer(args, error.instancePath), missing);
+      return holder === undefined
+        ? stated
+        : `${stated} — "${missing}" is nested inside "${holder}"; move it out to ${error.instancePath || "(root)"}`;
+    })
   );
   return [...messages].slice(0, 8).join("; ") || "invalid arguments";
 }

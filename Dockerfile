@@ -5,7 +5,8 @@
 # Slim runtime: the API + workspace TS packages are esbuild-bundled into one
 # server.cjs (no tsx, no source), and only the prod dependency closure (via
 # pnpm deploy) ships — the dev toolchain (vite/remix/turbo/typescript/biome/
-# vitest/esbuild) is left in the build stage.
+# vitest) is left in the build stage. esbuild is the exception: the API compiles
+# agent-authored Surface code views with it at run time, so it ships too.
 
 FROM node:26.5.0-slim AS builder
 WORKDIR /app
@@ -45,7 +46,7 @@ RUN TF_VERSION=$(node -p "require('./package.json').version") \
   --define:__TULIPFARM_VERSION__="\"$TF_VERSION\"" \
   --external:isolated-vm --external:@node-rs/argon2 --external:pg --external:pg-boss \
   --external:@scalar/fastify-api-reference --external:@anthropic-ai/claude-agent-sdk \
-  --external:@openai/codex \
+  --external:@openai/codex --external:esbuild \
   && pnpm --filter @tulipfarm/api exec esbuild src/hooks/hook-worker.ts \
   --bundle --platform=node --target=node26 --format=cjs --outfile=dist/hook-worker.cjs \
   --external:isolated-vm --external:pg
@@ -83,6 +84,13 @@ RUN set -eu; \
 # runtime from the running entrypoint, so it must resolve from /deploy; the launcher then execs a
 # statically linked musl binary out of an optional per-platform package, which --prod can likewise
 # drop. The vendor triple is globbed rather than named so an arch rename fails loudly here.
+# esbuild compiles agent-authored Surface code views at authoring time, so it is a runtime
+# dependency, not part of the pruned dev toolchain. It resolves its own per-platform binary
+# (@esbuild/linux-{x64,arm64}) out of node_modules — an optional dep, the same class --prod can
+# drop — so assert both, for the same reason as the two Providers above.
+RUN cd /deploy && node -e "require.resolve('esbuild')"
+RUN test -x /deploy/node_modules/esbuild/bin/esbuild
+
 RUN cd /deploy && node -e "require.resolve('@openai/codex/package.json')"
 RUN set -eu; \
   bin=$(ls /deploy/node_modules/.pnpm/@openai+codex@*/node_modules/@openai/codex/vendor/*-unknown-linux-musl/bin/codex 2>/dev/null | head -n1); \

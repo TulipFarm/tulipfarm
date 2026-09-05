@@ -7,5 +7,5 @@
       "~/*": ["./app/*"]
     }
   },
-  "include": ["app", "scripts", "vite.config.ts", "vitest.setup.ts"]
+  "include": ["app", "scripts", "surface-sandbox", "vite.config.ts", "vitest.setup.ts"]
 }

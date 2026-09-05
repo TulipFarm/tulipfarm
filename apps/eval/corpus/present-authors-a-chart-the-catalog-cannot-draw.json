@@ -1,0 +1,176 @@
+{
+  "id": "present-authors-a-chart-the-catalog-cannot-draw",
+  "tier": "l2",
+  "agent": "support",
+  "input": [
+    {
+      "role": "user",
+      "content": "Show me an area chart of this week's temperatures: Mon 18, Tue 21, Wed 19, Thu 24, Fri 23."
+    }
+  ],
+  "tools": [
+    {
+      "name": "surface_component_list",
+      "description": "List the business Surface components already published to the soul repo.",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {}
+      }
+    },
+    {
+      "name": "surface_component_create",
+      "description": "Create a validated business Surface component under surface-components/<slug> and publish it atomically to the soul repo. Use this when present's shipped catalog has no component, or no matching enum value on an existing component (e.g. a chart kind), for what the user asked. When no composition of shipped primitives can draw it — an area chart, a spreadsheet grid, any shape the catalog never anticipated — pass code.web.source instead: authored JSX that draws exactly what was asked for. Never fall back to the nearest shipped component.",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["slug", "version", "propsSchema"],
+        "properties": {
+          "slug": { "type": "string" },
+          "version": { "type": "string" },
+          "description": { "type": "string" },
+          "propsSchema": { "type": "object" },
+          "code": {
+            "type": "object",
+            "properties": {
+              "web": {
+                "type": "object",
+                "required": ["source"],
+                "properties": { "source": { "type": "string" } }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "present",
+      "description": "Create one non-blocking informational TSP Artifact.",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["component"],
+        "properties": {
+          "component": {
+            "type": "object",
+            "description": "A discriminated Surface component. Keep name and version separate and put all display data inside props.",
+            "required": ["name", "version", "props"],
+            "properties": {
+              "name": { "type": "string" },
+              "version": { "type": "string" },
+              "props": {
+                "type": "object",
+                "properties": {
+                  "kind": {
+                    "type": "string",
+                    "enum": ["bar", "line"],
+                    "description": "Closed set: bar or line, and nothing else. This component cannot draw an area, stacked, scatter, pie, donut, candlestick or any other shape. For any of those, do not pick the nearest value here — call surface_component_create and author the chart that was actually asked for."
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  ],
+  "toolResults": [
+    {
+      "name": "surface_component_list",
+      "output": { "components": [] }
+    },
+    {
+      "name": "surface_component_create",
+      "output": { "name": "business.temperature-area-chart", "version": "1.0" }
+    },
+    {
+      "name": "present",
+      "output": {
+        "artifact": {
+          "id": "artifact-1",
+          "component": { "name": "business.temperature-area-chart", "version": "1.0" }
+        }
+      }
+    }
+  ],
+  "script": [
+    {
+      "kind": "tool_calls",
+      "calls": [
+        {
+          "callId": "list-1",
+          "name": "surface_component_list",
+          "arguments": {}
+        }
+      ]
+    },
+    {
+      "kind": "tool_calls",
+      "calls": [
+        {
+          "callId": "create-1",
+          "name": "surface_component_create",
+          "arguments": {
+            "slug": "temperature-area-chart",
+            "version": "1.0",
+            "description": "A filled area chart of daily temperatures.",
+            "propsSchema": {
+              "type": "object",
+              "required": ["points"],
+              "properties": { "points": { "type": "array", "items": { "type": "object" } } }
+            },
+            "code": {
+              "web": {
+                "source": "function render(props) {\n  return React.createElement(\"svg\", null);\n}\n"
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "kind": "tool_calls",
+      "calls": [
+        {
+          "callId": "present-1",
+          "name": "present",
+          "arguments": {
+            "component": {
+              "name": "business.temperature-area-chart",
+              "version": "1.0",
+              "props": {
+                "points": [
+                  { "label": "Mon", "value": 18 },
+                  { "label": "Tue", "value": 21 },
+                  { "label": "Wed", "value": 19 },
+                  { "label": "Thu", "value": 24 },
+                  { "label": "Fri", "value": 23 }
+                ]
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "kind": "text",
+      "text": "Here is the area chart."
+    }
+  ],
+  "expect": [
+    {
+      "kind": "tool_called",
+      "name": "surface_component_create"
+    },
+    {
+      "kind": "tool_argument_equals",
+      "name": "present",
+      "path": "component.name",
+      "value": "business.temperature-area-chart"
+    },
+    {
+      "kind": "loop_status",
+      "status": "completed"
+    }
+  ]
+}

@@ -17,6 +17,8 @@ describe("CSP header generation", () => {
       expect(header).toContain(hash);
     }
     expect(header).not.toMatch(/script-src[^;]*'unsafe-inline'/);
+    // The Surface code-view frame is same-origin; without this the sandbox would never load.
+    expect(header).toContain("frame-src 'self'");
   });
 
   it("fails when the final HTML has no inline scripts", () => {
