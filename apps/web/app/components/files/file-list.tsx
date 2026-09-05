@@ -1,247 +1,399 @@
 import { isExtractableMediaType } from "@tulipfarm/files/limits";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import {
   BookOpen,
-  Bot,
   Download,
-  FileText,
-  ImageIcon,
-  MessageSquare,
+  FileX2,
+  FolderInput,
+  MoreHorizontal,
   Paperclip,
-  Play,
+  RotateCcw,
   Share2,
   Trash2,
-  Upload,
 } from "~/components/icons";
+import { Avatar } from "~/components/ui/avatar";
 import { Badge } from "~/components/ui/badge";
 import { Button } from "~/components/ui/button";
-import { Link } from "~/components/ui/link";
+import { Tooltip } from "~/components/ui/tooltip";
 import { fetchFileObjectUrl, formatFileSize, type LibraryFile } from "~/lib/files";
-import { isPreviewable } from "./file-preview";
+import { FileTypeIcon } from "./file-type-icon";
 
-/**
- * One shape rather than a grid/table toggle.
- *
- * The library holds screenshots and documents together, and only a row can carry size, origin and
- * source Chat. A grid would show the images well and reduce every PDF to an identical rectangle,
- * so the row wins and carries a thumbnail where one is meaningful.
- */
+export interface FileListActions {
+  readonly onPreview?: (file: LibraryFile) => void;
+  readonly onAttach?: (file: LibraryFile) => void;
+  readonly onShare?: (file: LibraryFile) => void;
+  readonly onKnowledge?: (file: LibraryFile) => void;
+  readonly onArchive?: (file: LibraryFile) => void;
+  readonly onMove?: (file: LibraryFile) => void;
+  readonly onRestore?: (file: LibraryFile) => void;
+  readonly onDelete?: (file: LibraryFile) => void;
+}
+
+/** The dense, semantic Files library table. */
 export function FileList({
   files,
   viewerId,
-  onPreview,
-  onAttach,
-  onShare,
-  onKnowledge,
-  onDelete,
+  ...actions
 }: {
-  files: readonly LibraryFile[];
-  viewerId: string;
-  onPreview: (file: LibraryFile) => void;
-  onAttach?: (file: LibraryFile) => void;
-  onShare?: (file: LibraryFile) => void;
-  onKnowledge?: (file: LibraryFile) => void;
-  onDelete?: (file: LibraryFile) => void;
-}) {
+  readonly files: readonly LibraryFile[];
+  readonly viewerId: string;
+} & FileListActions) {
   return (
-    <ul className="flex flex-col divide-y divide-border rounded-sm border border-border">
-      {files.map((file) => (
-        <li key={file.id}>
-          <FileRow
-            file={file}
-            viewerId={viewerId}
-            onPreview={onPreview}
-            onAttach={onAttach}
-            onShare={onShare}
-            onKnowledge={onKnowledge}
-            onDelete={onDelete}
-          />
-        </li>
-      ))}
-    </ul>
+    <div className="overflow-x-auto rounded-lg border border-border bg-card">
+      <table className="w-full min-w-[46rem] border-separate border-spacing-0 text-sm">
+        <thead>
+          <tr>
+            <th
+              scope="col"
+              className="border-b border-border bg-muted/70 px-3 py-1.5 text-start text-xs font-medium text-muted-foreground"
+            >
+              Name
+            </th>
+            <th
+              scope="col"
+              className="border-b border-border bg-muted/70 px-3 py-1.5 text-start text-xs font-medium text-muted-foreground"
+            >
+              Owner
+            </th>
+            <th
+              scope="col"
+              className="border-b border-border bg-muted/70 px-3 py-1.5 text-start text-xs font-medium text-muted-foreground"
+            >
+              Access
+            </th>
+            <th
+              scope="col"
+              className="border-b border-border bg-muted/70 px-3 py-1.5 text-start text-xs font-medium text-muted-foreground"
+            >
+              Modified
+            </th>
+            <th
+              scope="col"
+              className="border-b border-border bg-muted/70 px-3 py-1.5 text-end text-xs font-medium text-muted-foreground"
+            >
+              Size
+            </th>
+            <th
+              scope="col"
+              className="w-20 border-b border-border bg-muted/70 px-3 py-1.5 text-end text-xs font-medium text-muted-foreground"
+            >
+              <span className="sr-only">Actions</span>
+            </th>
+          </tr>
+        </thead>
+        <tbody className="[&>tr:last-child>td]:border-b-0 [&>tr>td]:border-b [&>tr>td]:border-border">
+          {files.map((file) => (
+            <FileRow key={file.id} file={file} viewerId={viewerId} {...actions} />
+          ))}
+        </tbody>
+      </table>
+    </div>
   );
 }
 
 function FileRow({
   file,
   viewerId,
-  onPreview,
+  ...actions
+}: {
+  readonly file: LibraryFile;
+  readonly viewerId: string;
+} & FileListActions) {
+  const owned = file.owner === viewerId;
+  const ownerName = file.ownerName ?? (owned ? "You" : file.owner);
+  const accessLabel = owned
+    ? file.sharedWithCount
+      ? `Shared with ${file.sharedWithCount}`
+      : "Private"
+    : "Shared with you";
+  const preview = () => actions.onPreview?.(file);
+  const previewCell =
+    "block w-full rounded-sm text-start outline-none focus-visible:ring-2 focus-visible:ring-ring";
+
+  return (
+    <tr className="group transition-colors hover:bg-muted/60">
+      <td className="max-w-[28rem] px-3 py-2">
+        <button
+          type="button"
+          aria-label={`Preview ${file.filename}`}
+          onClick={preview}
+          className={`${previewCell} min-w-0`}
+        >
+          <span className="flex min-w-0 items-center gap-2">
+            <span className="flex size-7 shrink-0 items-center justify-center rounded-md bg-muted">
+              <FileTypeIcon mediaType={file.mediaType} filename={file.filename} />
+            </span>
+            <span className="truncate font-medium text-foreground underline-offset-4 group-hover:underline">
+              {file.filename}
+            </span>
+            {file.inKnowledge ? (
+              <span
+                title="In Knowledge"
+                className="inline-flex shrink-0 items-center text-status-info"
+              >
+                <BookOpen className="size-3.5" aria-hidden />
+                <span className="sr-only">In Knowledge</span>
+              </span>
+            ) : null}
+          </span>
+        </button>
+      </td>
+      <td className="max-w-48 px-3 py-2 text-xs text-muted-foreground">
+        <Tooltip content={ownerName}>
+          <button
+            type="button"
+            aria-label={`Owner: ${ownerName}`}
+            onClick={preview}
+            className="rounded-full outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          >
+            <Avatar identity={ownerName} />
+          </button>
+        </Tooltip>
+      </td>
+      <td className="whitespace-nowrap px-3 py-2">
+        <button type="button" onClick={preview} className={previewCell}>
+          <Badge
+            variant={owned && !file.sharedWithCount ? "neutral" : "info"}
+            className={
+              owned && !file.sharedWithCount
+                ? "border-border bg-secondary text-secondary-foreground"
+                : "border-status-info/30"
+            }
+          >
+            {accessLabel}
+          </Badge>
+        </button>
+      </td>
+      <td className="whitespace-nowrap px-3 py-2 text-xs text-muted-foreground">
+        <button type="button" onClick={preview} className={previewCell}>
+          <time
+            dateTime={file.modifiedAt ?? file.createdAt}
+            title={new Date(file.modifiedAt ?? file.createdAt).toLocaleString()}
+          >
+            {formatDate(file.modifiedAt ?? file.createdAt)}
+          </time>
+        </button>
+      </td>
+      <td className="whitespace-nowrap px-3 py-2 text-end text-xs tabular-nums text-muted-foreground">
+        <button type="button" onClick={preview} className={`${previewCell} text-end`}>
+          {formatFileSize(file.sizeBytes)}
+        </button>
+      </td>
+      <td className="px-3 py-1.5">
+        <FileActionsMenu file={file} owned={owned} {...actions} />
+      </td>
+    </tr>
+  );
+}
+
+function FileActionsMenu({
+  file,
+  owned,
   onAttach,
   onShare,
   onKnowledge,
+  onArchive,
+  onMove,
+  onRestore,
   onDelete,
 }: {
-  file: LibraryFile;
-  viewerId: string;
-  onPreview: (file: LibraryFile) => void;
-  onAttach?: (file: LibraryFile) => void;
-  onShare?: (file: LibraryFile) => void;
-  onKnowledge?: (file: LibraryFile) => void;
-  onDelete?: (file: LibraryFile) => void;
-}) {
-  // Only an owner may share or delete, and the server enforces that. Showing either control to a
-  // recipient would offer a power the product does not grant, which is worse than not offering it.
-  const owned = file.owner === viewerId;
-  const isImage = file.mediaType.startsWith("image/");
-  // Offered only where it could work. The request refuses a type with no text with 415, and an
-  // image — the commonest upload here — is exactly that, so showing the control would mostly be
-  // showing an error waiting to happen.
+  readonly file: LibraryFile;
+  readonly owned: boolean;
+} & FileListActions) {
+  const archived = file.archivedAt != null;
   const indexable = isExtractableMediaType(file.mediaType);
-  const Icon = isImage ? ImageIcon : FileText;
-  const previewable = isPreviewable(file.mediaType);
+  const [open, setOpen] = useState(false);
+  const [rect, setRect] = useState<DOMRect | null>(null);
+  const [downloadFailed, setDownloadFailed] = useState(false);
+  const triggerRef = useRef<HTMLButtonElement | null>(null);
+  const menuRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const closeOutside = (event: MouseEvent) => {
+      const target = event.target as Node;
+      if (!triggerRef.current?.contains(target) && !menuRef.current?.contains(target)) {
+        setOpen(false);
+      }
+    };
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setOpen(false);
+    };
+    const close = () => setOpen(false);
+    document.addEventListener("mousedown", closeOutside);
+    document.addEventListener("keydown", closeOnEscape);
+    window.addEventListener("scroll", close, true);
+    window.addEventListener("resize", close);
+    return () => {
+      document.removeEventListener("mousedown", closeOutside);
+      document.removeEventListener("keydown", closeOnEscape);
+      window.removeEventListener("scroll", close, true);
+      window.removeEventListener("resize", close);
+    };
+  }, [open]);
+
+  function toggle() {
+    if (!open && triggerRef.current) setRect(triggerRef.current.getBoundingClientRect());
+    setOpen((current) => !current);
+  }
+
+  function choose(action: (file: LibraryFile) => void) {
+    return () => {
+      setOpen(false);
+      action(file);
+    };
+  }
+
+  async function download() {
+    setOpen(false);
+    setDownloadFailed(false);
+    try {
+      await downloadFile(file);
+    } catch {
+      setDownloadFailed(true);
+    }
+  }
+
+  const itemClass =
+    "flex w-full items-center gap-2 rounded-sm px-2.5 py-2 text-left text-sm text-foreground transition-colors hover:bg-secondary";
 
   return (
-    <div className="flex flex-col gap-2 px-3 py-3 sm:flex-row sm:items-center sm:gap-3">
-      <Icon className="size-4 shrink-0 text-muted-foreground" aria-hidden />
-      <div className="flex min-w-0 flex-1 flex-col gap-1">
-        <div className="flex min-w-0 flex-wrap items-center gap-2">
-          {previewable ? (
-            <button
-              type="button"
-              onClick={() => onPreview(file)}
-              className="min-h-6 min-w-0 max-w-full cursor-pointer truncate rounded-sm px-1 text-left text-sm font-medium text-foreground transition-colors hover:text-primary"
+    <div className="flex justify-end">
+      {downloadFailed ? (
+        <span role="alert" className="sr-only">
+          Download failed
+        </span>
+      ) : null}
+      <Button
+        ref={triggerRef}
+        type="button"
+        variant="ghost"
+        size="icon"
+        aria-haspopup="menu"
+        aria-expanded={open}
+        aria-label={`Actions for ${file.filename}`}
+        onClick={toggle}
+      >
+        <MoreHorizontal className="size-4" aria-hidden />
+      </Button>
+      {open && rect
+        ? createPortal(
+            <div
+              ref={menuRef}
+              role="menu"
+              aria-label={`Actions for ${file.filename}`}
+              className="fixed z-50 w-56 rounded-md border border-border bg-card p-1 shadow-lg"
+              style={{ top: rect.bottom + 4, right: window.innerWidth - rect.right }}
             >
-              {file.filename}
-            </button>
-          ) : (
-            <span className="min-w-0 max-w-full truncate text-sm font-medium text-foreground">
-              {file.filename}
-            </span>
-          )}
-          <OriginBadge origin={file.origin} />
-          {file.sharedWithCount ? (
-            <Badge variant="info">
-              <Share2 className="size-3" aria-hidden />
-              {file.sharedWithCount === 1 ? "Shared with 1" : `Shared with ${file.sharedWithCount}`}
-            </Badge>
-          ) : null}
-          {file.inKnowledge ? (
-            <Badge variant="info">
-              <BookOpen className="size-3" aria-hidden />
-              In knowledge
-            </Badge>
-          ) : null}
-        </div>
-        <p className="flex flex-wrap items-center gap-x-2 gap-y-1 font-mono text-xs text-muted-foreground">
-          <span>{file.mediaType}</span>
-          <span aria-hidden>·</span>
-          <span>{formatFileSize(file.sizeBytes)}</span>
-          <span aria-hidden>·</span>
-          <span>{owned ? "you" : file.owner}</span>
-          <span aria-hidden>·</span>
-          <time dateTime={file.createdAt}>{formatDate(file.createdAt)}</time>
-          {file.sourceChatId ? (
-            <>
-              <span aria-hidden>·</span>
-              <Link
-                to={`/chat/${encodeURIComponent(file.sourceChatId)}`}
-                className="inline-flex items-center gap-1 text-primary underline underline-offset-2"
-              >
-                <MessageSquare className="size-3" aria-hidden />
-                from a chat
-              </Link>
-            </>
-          ) : null}
-          {file.sourceRunId ? (
-            <>
-              <span aria-hidden>·</span>
-              <Link
-                to={`/runs/${encodeURIComponent(file.sourceRunId)}`}
-                className="inline-flex items-center gap-1 text-primary underline underline-offset-2"
-              >
-                <Play className="size-3" aria-hidden />
-                from a run
-              </Link>
-            </>
-          ) : null}
-        </p>
-      </div>
-      <div className="flex shrink-0 items-center gap-1">
-        {onShare && owned ? (
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={() => onShare(file)}
-            aria-label={`Share ${file.filename}`}
-          >
-            <Share2 className="size-3.5" aria-hidden />
-            Share
-          </Button>
-        ) : null}
-        {onAttach ? (
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => onAttach(file)}
-            aria-label={`Attach ${file.filename} to a new chat`}
-          >
-            <Paperclip className="size-3.5" aria-hidden />
-            Attach
-          </Button>
-        ) : null}
-        {onKnowledge && owned && indexable ? (
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={() => onKnowledge(file)}
-            aria-label={
-              file.inKnowledge
-                ? `Remove ${file.filename} from knowledge`
-                : `Add ${file.filename} to knowledge`
-            }
-          >
-            <BookOpen className="size-3.5" aria-hidden />
-            {file.inKnowledge ? "Remove from knowledge" : "Add to knowledge"}
-          </Button>
-        ) : null}
-        <DownloadButton file={file} />
-        {onDelete && owned ? (
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={() => onDelete(file)}
-            aria-label={`Delete ${file.filename}`}
-            className="text-destructive hover:text-destructive"
-          >
-            <Trash2 className="size-3.5" aria-hidden />
-            Delete
-          </Button>
-        ) : null}
-      </div>
+              {onAttach && !archived ? (
+                <button
+                  type="button"
+                  role="menuitem"
+                  className={itemClass}
+                  onClick={choose(onAttach)}
+                >
+                  <Paperclip className="size-4" aria-hidden />
+                  Attach to chat
+                </button>
+              ) : null}
+              {onShare && owned && !archived ? (
+                <button
+                  type="button"
+                  role="menuitem"
+                  className={itemClass}
+                  onClick={choose(onShare)}
+                >
+                  <Share2 className="size-4" aria-hidden />
+                  Share
+                </button>
+              ) : null}
+              {onKnowledge && owned && indexable && !archived ? (
+                <button
+                  type="button"
+                  role="menuitem"
+                  className={itemClass}
+                  onClick={choose(onKnowledge)}
+                >
+                  <BookOpen className="size-4" aria-hidden />
+                  {file.inKnowledge ? "Remove from Knowledge" : "Add to Knowledge"}
+                </button>
+              ) : null}
+              <button type="button" role="menuitem" className={itemClass} onClick={download}>
+                <Download className="size-4" aria-hidden />
+                Download
+              </button>
+              {onMove && owned && !archived ? (
+                <button
+                  type="button"
+                  role="menuitem"
+                  className={itemClass}
+                  onClick={choose(onMove)}
+                >
+                  <FolderInput className="size-4" aria-hidden />
+                  Move
+                </button>
+              ) : null}
+              {onArchive && owned && !archived ? (
+                <button
+                  type="button"
+                  role="menuitem"
+                  className={itemClass}
+                  onClick={choose(onArchive)}
+                >
+                  <FileX2 className="size-4" aria-hidden />
+                  Archive
+                </button>
+              ) : null}
+              {onRestore && owned && archived ? (
+                <button
+                  type="button"
+                  role="menuitem"
+                  className={itemClass}
+                  onClick={choose(onRestore)}
+                >
+                  <RotateCcw className="size-4" aria-hidden />
+                  Restore
+                </button>
+              ) : null}
+              {onDelete && owned && archived ? (
+                <button
+                  type="button"
+                  role="menuitem"
+                  className={`${itemClass} text-destructive hover:bg-destructive/10`}
+                  onClick={choose(onDelete)}
+                >
+                  <Trash2 className="size-4" aria-hidden />
+                  Delete permanently
+                </button>
+              ) : null}
+            </div>,
+            document.body
+          )
+        : null}
     </div>
   );
 }
 
-/**
- * Who made this File.
- *
- * An icon and a word, not a tint: whether an Agent wrote a document is exactly the kind of fact a
- * person must not have to distinguish two shades of grey to read.
- */
-function OriginBadge({ origin }: { origin: LibraryFile["origin"] }) {
-  if (origin === "generated") {
-    return (
-      <Badge variant="info">
-        <Bot className="size-3" aria-hidden />
-        Agent-generated
-      </Badge>
-    );
-  }
-  return (
-    <Badge variant="neutral">
-      <Upload className="size-3" aria-hidden />
-      Uploaded
-    </Badge>
-  );
+async function downloadFile(file: Pick<LibraryFile, "id" | "filename">): Promise<void> {
+  const url = await fetchFileObjectUrl(file.id);
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = file.filename;
+  anchor.click();
+  URL.revokeObjectURL(url);
 }
 
-/**
- * The bytes, fetched on click.
- *
- * A plain `href` would not carry the session across origins and cannot carry a bearer token, so
- * the click authenticates the request and hands the browser a blob.
- */
-function DownloadButton({ file }: { file: LibraryFile }) {
+/** Authenticated download: a normal link cannot carry the optional bearer token. */
+export function DownloadButton({
+  file,
+  fetchUrl,
+  label = false,
+}: {
+  readonly file: Pick<LibraryFile, "id" | "filename">;
+  readonly fetchUrl?: () => Promise<string>;
+  readonly label?: boolean;
+}) {
   const [busy, setBusy] = useState(false);
   const [failed, setFailed] = useState(false);
 
@@ -249,15 +401,17 @@ function DownloadButton({ file }: { file: LibraryFile }) {
     setBusy(true);
     setFailed(false);
     try {
-      const url = await fetchFileObjectUrl(file.id);
-      const anchor = document.createElement("a");
-      anchor.href = url;
-      anchor.download = file.filename;
-      anchor.click();
-      URL.revokeObjectURL(url);
+      if (fetchUrl) {
+        const url = await fetchUrl();
+        const anchor = document.createElement("a");
+        anchor.href = url;
+        anchor.download = file.filename;
+        anchor.click();
+        URL.revokeObjectURL(url);
+      } else {
+        await downloadFile(file);
+      }
     } catch {
-      // A File that has since been deleted, or a session that has expired, both land here. Saying
-      // nothing would look exactly like a download the browser handled quietly.
       setFailed(true);
     } finally {
       setBusy(false);
@@ -267,19 +421,20 @@ function DownloadButton({ file }: { file: LibraryFile }) {
   return (
     <>
       {failed ? (
-        <span role="alert" className="text-xs text-destructive">
+        <span role="alert" className="sr-only">
           Download failed
         </span>
       ) : null}
       <Button
+        type="button"
         variant="ghost"
-        size="sm"
+        size="icon"
         disabled={busy}
         onClick={download}
-        aria-label={`Download ${file.filename}`}
+        aria-label={`${failed ? "Download failed. Retry downloading" : "Download"} ${file.filename}`}
       >
         <Download className="size-3.5" aria-hidden />
-        {busy ? "…" : "Download"}
+        {label ? (busy ? "Downloading…" : "Download") : null}
       </Button>
     </>
   );
@@ -287,6 +442,6 @@ function DownloadButton({ file }: { file: LibraryFile }) {
 
 function formatDate(iso: string): string {
   const at = new Date(iso);
-  if (Number.isNaN(at.getTime())) return "";
+  if (Number.isNaN(at.getTime())) return "—";
   return at.toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" });
 }

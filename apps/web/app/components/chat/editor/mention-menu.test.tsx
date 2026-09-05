@@ -3,6 +3,7 @@ import { type Editor, EditorContent, useEditor } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
 import { useEffect } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import type { LibraryFile } from "~/lib/files";
 import type { SearchResponse } from "~/lib/knowledge-api";
 import { buildMentionExtensions } from "./mentions";
 import type { MentionItem } from "./serialize";
@@ -10,6 +11,8 @@ import type { GetItems } from "./use-mention-data";
 
 const searchKnowledge = vi.hoisted(() => vi.fn());
 vi.mock("~/lib/knowledge-api", () => ({ searchKnowledge }));
+const searchFiles = vi.hoisted(() => vi.fn());
+vi.mock("~/lib/files", () => ({ searchFiles }));
 
 const AGENTS: MentionItem[] = [{ id: "atlas", label: "Atlas", description: "Ops agent" }];
 const withAgents: GetItems = (kind) => (kind === "agent" ? AGENTS : []);
@@ -47,6 +50,8 @@ function hit(pageId: string, title: string, content: string): SearchResponse["re
 beforeEach(() => {
   searchKnowledge.mockReset();
   searchKnowledge.mockResolvedValue({ results: [], warnings: [] } satisfies SearchResponse);
+  searchFiles.mockReset();
+  searchFiles.mockResolvedValue([]);
 });
 
 describe("Knowledge (~) mention menu", () => {
@@ -92,6 +97,26 @@ describe("Knowledge (~) mention menu", () => {
   });
 });
 
+describe("File (+) mention menu", () => {
+  it("renders readable filename matches", async () => {
+    searchFiles.mockResolvedValue([
+      {
+        id: "file-1",
+        filename: "pricing.json",
+        mediaType: "application/json",
+        sizeBytes: 120,
+      } satisfies Partial<LibraryFile>,
+    ]);
+
+    const editor = await mountEditor();
+    await type(editor, "+");
+    await type(editor, "pricing");
+
+    expect(await screen.findByRole("button", { name: /pricing.json/i })).toBeInTheDocument();
+    expect(searchFiles).toHaveBeenCalledWith("pricing", 8);
+  });
+});
+
 // chat.md S4 step 6: every trigger shows an empty state when there are no matches. A fresh instance
 // has no Skills and no Resource types, so `/` and `#` hit this on the operator's first session.
 describe("every mention trigger shows an empty state", () => {
@@ -100,6 +125,7 @@ describe("every mention trigger shows an empty state", () => {
     ["/", "No matching Skills."],
     ["#", "No matching Resource types."],
     ["~", "No matching Knowledge."],
+    ["+", "No matching Files."],
   ])("%s renders its own empty state over an empty catalog", async (char, label) => {
     const editor = await mountEditor(withNothing);
     await type(editor, char);

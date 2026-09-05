@@ -195,15 +195,16 @@ export function registerKnowledgeRoutes(
       response: { 201: PageResponseSchema, 400: ErrorSchema, 401: ErrorSchema },
     }),
     async (req, reply) => {
-      const page = await service.createPage(
-        req.body as {
+      const page = await service.createPage({
+        ...(req.body as {
           title: string;
           content: string;
           domain?: string | null;
           tags?: string[];
           alwaysLoadForAgents?: boolean;
-        }
-      );
+        }),
+        ...(req.user?._id === undefined ? {} : { ownerPrincipalId: req.user._id }),
+      });
       await activity?.record({
         category: "knowledge",
         action: "page.created",
@@ -325,7 +326,7 @@ export function registerKnowledgeRoutes(
       if (ifMatch === null) return reply.code(400).send({ error: "If-Match header required" });
       // Before the version check, not after: 409-against-404 would confirm the Page exists, and
       // an empty body is a legal no-op update whose 200 carries the whole Page back.
-      if (!(await gate.canRead(req.user?._id, id)))
+      if (!(await (gate.canEdit?.(req.user?._id, "page", id) ?? gate.canRead(req.user?._id, id))))
         return refuseWrite(req, reply, "knowledge.page.update", "page");
       if (await refusedAsFileManaged(service, id, reply)) return reply;
       const outcome = await service.updatePage(id, req.body as Record<string, unknown>, ifMatch);
@@ -344,6 +345,11 @@ export function registerKnowledgeRoutes(
         "Soft-delete a knowledge page. A page that indexes a File is managed on the File and " +
         "answers 409.",
       params: EntityIdParamsSchema,
+      querystring: {
+        type: "object",
+        properties: { ownershipOperationId: { type: "string", format: "uuid" } },
+        additionalProperties: false,
+      },
       response: {
         204: NoContentSchema,
         404: ErrorSchema,
@@ -353,8 +359,14 @@ export function registerKnowledgeRoutes(
     }),
     async (req, reply) => {
       const { id } = req.params as { id: string };
-      if (!(await gate.canRead(req.user?._id, id)))
+      if (!(await (gate.canEdit?.(req.user?._id, "page", id) ?? gate.canRead(req.user?._id, id))))
         return refuseWrite(req, reply, "knowledge.page.delete", "page");
+      const { ownershipOperationId } = req.query as { ownershipOperationId?: string };
+      try {
+        await gate.assertDeleteApproved?.("page", id, ownershipOperationId);
+      } catch {
+        return reply.code(409).send({ error: "joint owner Approval is required" });
+      }
       if (await refusedAsFileManaged(service, id, reply)) return reply;
       return (await service.deletePage(id))
         ? reply.code(204).send()
@@ -377,7 +389,7 @@ export function registerKnowledgeRoutes(
     async (req, reply) => {
       const { id } = req.params as { id: string };
       const b = req.body as { content: string; reason?: string | null };
-      if (!(await gate.canRead(req.user?._id, id)))
+      if (!(await (gate.canEdit?.(req.user?._id, "page", id) ?? gate.canRead(req.user?._id, id))))
         return refuseWrite(req, reply, "knowledge.page.revise", "page");
       if (await refusedAsFileManaged(service, id, reply)) return reply;
       const n = await service.createRevision(id, b.content, b.content.trim(), b.reason ?? null);
@@ -396,7 +408,7 @@ export function registerKnowledgeRoutes(
     async (req, reply) => {
       const { id } = req.params as { id: string };
       // History is the Page. Denial and absence share one 404 so neither confirms the other.
-      if (!(await gate.canRead(req.user?._id, id)))
+      if (!(await (gate.canEdit?.(req.user?._id, "page", id) ?? gate.canRead(req.user?._id, id))))
         return reply.code(404).send({ error: "not found" });
       const revs = await service.listRevisions(id);
       return reply.send({ items: revs.map(toApiRevision) });

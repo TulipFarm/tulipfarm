@@ -81,6 +81,18 @@ export interface OperationsReadModel {
   };
 }
 
+export interface TeamMigrationReportReadModel {
+  readonly items: readonly {
+    readonly legacyGroupId: string;
+    readonly teamId: string;
+    readonly teamSlug: string;
+    readonly displayName: string;
+    readonly slugConflict: boolean;
+    readonly siblingNameConflict: boolean;
+    readonly migratedAt: string;
+  }[];
+}
+
 export interface GuardrailsReadModel {
   readonly revision: string;
   readonly items: readonly Record<string, unknown>[];
@@ -106,7 +118,7 @@ export interface AgentChangesetInput {
 
 export interface InboxItemReadModel {
   readonly id: string;
-  readonly kind: "approval" | "human_task" | "form" | "access_request";
+  readonly kind: "approval" | "notification" | "human_task" | "form" | "access_request";
   readonly title: string;
   readonly status: string;
   readonly risk: "low" | "medium" | "high";
@@ -120,12 +132,16 @@ export interface InboxItemReadModel {
   readonly requiredDecisions: number;
   readonly canDecide: boolean;
   readonly denialReason?: string;
+  readonly assetType?: string;
+  readonly assetId?: string;
+  readonly representedTeamId?: string;
 }
 
 export interface ApprovalDecisionInput {
   readonly approvalId: string;
   readonly decision: "approved" | "denied";
   readonly comment?: string;
+  readonly representedTeamId?: string;
   readonly idempotencyKey: string;
 }
 
@@ -160,6 +176,7 @@ export interface OperationalApiDeps {
     input: RunCommandInput
   ): Promise<{ commandId: string; runId: string; status: "accepted" | "duplicate" }>;
   getOperations(grant: OperationalGrant): Promise<OperationsReadModel>;
+  getTeamMigrationReport(grant: OperationalGrant): Promise<TeamMigrationReportReadModel>;
   getGuardrails(grant: OperationalGrant): Promise<GuardrailsReadModel>;
   proposeGuardrailChangeset(
     grant: OperationalGrant,

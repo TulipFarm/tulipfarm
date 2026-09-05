@@ -32,15 +32,14 @@ import {
 import { roleNamer, summarizeRole } from "~/lib/access-language";
 import { ApiError } from "~/lib/api";
 import {
-  type AuthzGroupDetail,
   type AuthzRole,
   type EffectiveGrants,
   getEffectiveGrants,
   listCapabilities,
-  listGroups,
   listRoleAssignees,
   listRoles,
 } from "~/lib/authz";
+import { getTeamAuthority, listTeams } from "~/lib/teams";
 import { createUser, type Invite, listUsers, type UserStatus } from "~/lib/users";
 
 export const meta: MetaFunction = () => [{ title: "People · Access · tulipfarm" }];
@@ -55,10 +54,10 @@ export type SelectedAccess =
 export async function clientLoader({ request }: ClientLoaderFunctionArgs) {
   const selectedId = new URL(request.url).searchParams.get("person")?.trim() ?? "";
 
-  const [users, { roles }, { groups: teams }, catalog] = await Promise.all([
+  const [users, { roles }, teams, catalog] = await Promise.all([
     listUsers(),
     listRoles(),
-    listGroups(),
+    loadTeamAccess(),
     // The catalog is what makes "create a level" possible at all. It is admin-only, and this page
     // already is, but a deployment without the authoring routes wired still renders — the builder
     // simply is not offered, rather than the whole page failing.
@@ -87,6 +86,11 @@ async function loadSelected(principalId: string): Promise<SelectedAccess | null>
 }
 
 type LoaderData = Awaited<ReturnType<typeof clientLoader>>;
+type TeamAccessSummary = {
+  id: string;
+  members: Array<{ principalId: string }>;
+  roles: Array<{ roleId: string }>;
+};
 
 /** Everything one row needs, assembled once rather than re-derived per render. */
 export type PersonAccess = {
@@ -304,7 +308,21 @@ function buildPeople(data: LoaderData, directory: Directory): PersonAccess[] {
   }));
 }
 
-function teamsFor(teams: AuthzGroupDetail[], principalId: string) {
+async function loadTeamAccess(): Promise<TeamAccessSummary[]> {
+  const { teams } = await listTeams();
+  return Promise.all(
+    teams.map(async (team) => {
+      const authority = await getTeamAuthority(team.id);
+      return {
+        id: team.slug,
+        members: team.members,
+        roles: [...authority.directRoles, ...authority.inheritedRoles],
+      };
+    })
+  );
+}
+
+function teamsFor(teams: TeamAccessSummary[], principalId: string) {
   return teams
     .filter((team) => team.members.some((member) => member.principalId === principalId))
     .map((team) => ({ id: team.id, roleIds: team.roles.map((role) => role.roleId) }));

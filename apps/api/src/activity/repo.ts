@@ -21,6 +21,8 @@ export interface ActivityRow {
 
 export interface ActivityListOpts {
   category?: string;
+  action?: string;
+  targetId?: string;
   limit: number;
   after?: { createdAt: Date; _id: string };
 }
@@ -78,6 +80,14 @@ export class PgActivityRepo implements ActivityRepo {
     if (opts.category) {
       params.push(opts.category);
       conds.push(`category = $${params.length}`);
+    }
+    if (opts.action) {
+      params.push(opts.action);
+      conds.push(`action = $${params.length}`);
+    }
+    if (opts.targetId) {
+      params.push(opts.targetId);
+      conds.push(`target_id = $${params.length}`);
     }
     if (opts.after) {
       // Expanded keyset comparison keeps pg and PGlite param inference aligned.

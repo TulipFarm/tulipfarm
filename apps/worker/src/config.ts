@@ -4,11 +4,10 @@ import { DEPLOYMENT_BUSINESS_ID } from "@tulipfarm/constants";
 /**
  * Refuse to boot below the schema floor the worker's work requires.
  *
- * 81, not 63: the Routine executor now persists State output (80) and writes child links for
- * `child_routine` and `emit` States, whose `authority_binding` column only reaches an existing
- * install through 81. A worker below either would settle a State it cannot record the result of.
+ * 86, not 81: the hosted `file_create` Tool now writes Chat drafts and generation idempotency
+ * fields added by migration 86. A worker below that floor could claim a Run and fail mid-Tool.
  */
-export const REQUIRED_SCHEMA_VERSION = 81;
+export const REQUIRED_SCHEMA_VERSION = 90;
 
 export interface WorkerConfig {
   readonly databaseUrl: string;

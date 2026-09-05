@@ -19,6 +19,7 @@ const SKILL_PUBLIC_FRONTMATTER_SCHEMA = {
     version: SkillFrontmatterSchema.properties.version,
     author: SkillFrontmatterSchema.properties.author,
     license: SkillFrontmatterSchema.properties.license,
+    ownership: SkillFrontmatterSchema.properties.ownership,
   },
 } as const;
 
@@ -101,6 +102,10 @@ export const SKILL_DELETE_SCHEMA = {
   additionalProperties: false,
   properties: {
     name: { type: "string", minLength: 1, description: "Skill name to delete." },
+    ownershipOperationId: {
+      type: "string",
+      description: "Unanimous Team-owner Approval operation authorizing this deletion.",
+    },
   },
 } as const;
 

@@ -4,6 +4,7 @@ import { type MetaFunction, useLoaderData, useRevalidator, useRouteError } from 
 import { type ChangeEvent, type FormEvent, useMemo, useState } from "react";
 import { TechnicalDetails } from "~/components/access/access-bits";
 import { Code, PlainAnswer, ResultPanel } from "~/components/access/check-result";
+import { TeamAccessEvidence } from "~/components/access/team-access-evidence";
 import { AccessTabs } from "~/components/access-tabs";
 import { FormStatus } from "~/components/form-status";
 import { Button } from "~/components/ui/button";
@@ -22,6 +23,7 @@ import {
   explain,
   getEffectiveGrants,
 } from "~/lib/authz";
+import { explainTeamAccess, listTeams, type TeamDirectoryEntry } from "~/lib/teams";
 import { listUsers, type UserSummary } from "~/lib/users";
 
 export const meta: MetaFunction = () => [{ title: "Check access · Business · tulipfarm" }];
@@ -37,12 +39,13 @@ const INITIAL_FORM = {
   dataClass: "",
   destination: "",
   conditions: "",
+  teamId: "",
 };
 
 type CheckForm = typeof INITIAL_FORM;
 type OptionalTextKey = Exclude<
   keyof CheckForm,
-  "principalId" | "action" | "resourceType" | "conditions"
+  "principalId" | "action" | "resourceType" | "conditions" | "teamId"
 >;
 
 const OPTIONAL_TEXT_KEYS: OptionalTextKey[] = [
@@ -56,20 +59,24 @@ const OPTIONAL_TEXT_KEYS: OptionalTextKey[] = [
 
 /** Missing people/types data must not block exact-string checks in More precise. */
 export async function clientLoader() {
-  const [users, resourceTypes] = await Promise.all([
+  const [users, resourceTypes, teams] = await Promise.all([
     listUsers().catch((): UserSummary[] => []),
     listResourceTypes().catch((): ResourceTypeSummary[] => []),
+    listTeams().catch((): { teams: TeamDirectoryEntry[] } => ({ teams: [] })),
   ]);
-  return { users, recordTypes: resourceTypes.map((type) => type.name).sort() };
+  return { users, recordTypes: resourceTypes.map((type) => type.name).sort(), teams: teams.teams };
 }
 
 export default function BusinessAccessCheck() {
-  const { users, recordTypes } = useLoaderData<typeof clientLoader>();
+  const { users, recordTypes, teams } = useLoaderData<typeof clientLoader>();
   const revalidator = useRevalidator();
   const [form, setForm] = useState<CheckForm>(INITIAL_FORM);
   const [verb, setVerb] = useState("read");
   const [thing, setThing] = useState("");
   const [result, setResult] = useState<ExplainResult | null>(null);
+  const [teamExplanation, setTeamExplanation] = useState<Awaited<
+    ReturnType<typeof explainTeamAccess>
+  > | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [grants, setGrants] = useState<EffectiveGrants | null>(null);
@@ -110,6 +117,7 @@ export default function BusinessAccessCheck() {
     setError(null);
     setGrants(null);
     setGrantsError(null);
+    setTeamExplanation(null);
 
     let query: ExplainQuery;
     try {
@@ -125,10 +133,23 @@ export default function BusinessAccessCheck() {
 
     setBusy(true);
     try {
-      setResult(await explain(query));
+      const [decision, evidence] = await Promise.all([
+        explain(query),
+        form.teamId
+          ? explainTeamAccess(form.teamId, {
+              principalId: query.principalId,
+              action: query.action,
+              resourceType: query.resourceType,
+              ...(query.agentId ? { agentId: query.agentId } : {}),
+            })
+          : Promise.resolve(null),
+      ]);
+      setResult(decision);
+      setTeamExplanation(evidence);
       revalidator.revalidate();
     } catch (err) {
       setResult(null);
+      setTeamExplanation(null);
       setError(explainErrorMessage(err));
     } finally {
       setBusy(false);
@@ -199,6 +220,22 @@ export default function BusinessAccessCheck() {
               </Select>
             </Field>
           </div>
+
+          {teams.length > 0 ? (
+            <Field
+              label="Team context (optional)"
+              help="Choose a Team to include membership, ancestry, Role, grant, and deny evidence."
+            >
+              <Select value={form.teamId} onChange={updateField("teamId")}>
+                <option value="">No Team evidence</option>
+                {teams.map((team) => (
+                  <option key={team.id} value={team.id}>
+                    {team.displayName}
+                  </option>
+                ))}
+              </Select>
+            </Field>
+          ) : null}
 
           {ready ? (
             <p className="text-xs text-muted-foreground">
@@ -307,6 +344,9 @@ export default function BusinessAccessCheck() {
             grantsError={grantsError}
             onLoadEffectiveGrants={loadEffectiveGrants}
           />
+          {teamExplanation ? (
+            <TeamAccessEvidence explanation={teamExplanation} teams={teams} />
+          ) : null}
         </>
       ) : null}
     </div>

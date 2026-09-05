@@ -33,6 +33,10 @@ const full = {
   metadata,
   spec: {
     instructions: { path: "SKILL.md" },
+    ownership: {
+      owners: [{ teamId: "123e4567-e89b-42d3-a456-426614174000" }],
+      shares: [{ teamId: "123e4567-e89b-42d3-a456-426614174001", access: "view" }],
+    },
     references: ["docs/triage.md"],
     templates: ["reply.hbs"],
     examples: ["example-1.md"],

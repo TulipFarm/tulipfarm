@@ -7,21 +7,50 @@
  */
 
 import { isInlineRenderable } from "./limits";
-import { FILE_GRANTEE_KINDS, FILE_ORIGINS, type FileRecord, type FileShare } from "./repo";
+import {
+  FILE_GRANTEE_KINDS,
+  FILE_ORIGINS,
+  FILE_VERSION_ACTOR_KINDS,
+  FILE_VERSION_REASONS,
+  type FileDraftRecord,
+  type FileFolderRecord,
+  type FileRecord,
+  type FileShare,
+  type FileVersionRecord,
+} from "./repo";
 import { FileError } from "./service";
 
 /** The wire shape, shared by the route schemas and the serializer so they cannot drift. */
 export const FILE_WIRE_SCHEMA = {
   type: "object",
-  required: ["id", "filename", "mediaType", "sizeBytes", "createdAt", "owner", "origin"],
+  required: [
+    "id",
+    "filename",
+    "mediaType",
+    "sizeBytes",
+    "createdAt",
+    "modifiedAt",
+    "revision",
+    "currentVersionId",
+    "owner",
+    "ownerName",
+    "origin",
+    "folderId",
+  ],
   properties: {
     id: { type: "string" },
     filename: { type: "string" },
     mediaType: { type: "string" },
     sizeBytes: { type: "integer" },
     createdAt: { type: "string" },
+    modifiedAt: { type: "string" },
+    revision: { type: "integer" },
+    currentVersionId: { type: "string" },
+    archivedAt: { type: "string", nullable: true },
     /** The owning Principal's id. A display name needs a lookup the File itself cannot do. */
     owner: { type: "string" },
+    ownerName: { type: "string", nullable: true },
+    folderId: { type: "string", nullable: true },
     origin: { type: "string", enum: [...FILE_ORIGINS] },
     // `chatId` on the wire, `source_conversation_id` in the table: Chat is the external word for
     // the same thing, and the boundary between them is exactly here.
@@ -35,6 +64,34 @@ export const FILE_WIRE_SCHEMA = {
      */
     sharedWithCount: { type: "integer", nullable: true },
     inKnowledge: { type: "boolean", nullable: true },
+    /**
+     * Whether the caller may share, replace, archive or delete this File.
+     *
+     * Answered by the server because ownership is no longer a string the client can compare
+     * against: a File can be owned by a Team, and its `owner` field then names nobody who holds
+     * that power. Null where the answer was not computed.
+     */
+    canManage: { type: "boolean", nullable: true },
+  },
+} as const;
+
+export const FILE_FOLDER_WIRE_SCHEMA = {
+  type: "object",
+  required: ["id", "name", "parentId", "createdAt", "modifiedAt"],
+  properties: {
+    id: { type: "string" },
+    name: { type: "string" },
+    parentId: { type: "string", nullable: true },
+    createdAt: { type: "string" },
+    modifiedAt: { type: "string" },
+  },
+} as const;
+
+export const FILE_FOLDERS_SCHEMA = {
+  type: "object",
+  required: ["folders"],
+  properties: {
+    folders: { type: "array", items: FILE_FOLDER_WIRE_SCHEMA },
   },
 } as const;
 
@@ -57,19 +114,121 @@ export const FILE_PAGE_SCHEMA = {
   },
 } as const;
 
-export function serializeFile(file: FileRecord, sharedWithCount?: number, inKnowledge?: boolean) {
+export const FILE_SEARCH_QUERY_SCHEMA = {
+  type: "object",
+  required: ["q"],
+  properties: {
+    q: { type: "string", minLength: 1, maxLength: 200 },
+    limit: { type: "integer", minimum: 1, maximum: 20, default: 10 },
+  },
+  additionalProperties: false,
+} as const;
+
+export const FILE_SEARCH_SCHEMA = {
+  type: "object",
+  required: ["files"],
+  properties: {
+    files: { type: "array", items: FILE_WIRE_SCHEMA },
+  },
+} as const;
+
+export const FILE_EXPECTED_REVISION_SCHEMA = {
+  type: "object",
+  required: ["expectedRevision"],
+  properties: {
+    expectedRevision: { type: "integer", minimum: 1 },
+    ownershipOperationId: { type: "string", format: "uuid" },
+  },
+  additionalProperties: false,
+} as const;
+
+export const FILE_VERSION_WIRE_SCHEMA = {
+  type: "object",
+  required: [
+    "id",
+    "versionNumber",
+    "mediaType",
+    "sizeBytes",
+    "actorKind",
+    "actorId",
+    "reason",
+    "createdAt",
+  ],
+  properties: {
+    id: { type: "string" },
+    versionNumber: { type: "integer" },
+    mediaType: { type: "string" },
+    sizeBytes: { type: "integer" },
+    actorKind: { type: "string", enum: [...FILE_VERSION_ACTOR_KINDS] },
+    actorId: { type: "string" },
+    reason: { type: "string", enum: [...FILE_VERSION_REASONS] },
+    sourceChatId: { type: "string", nullable: true },
+    sourceRunId: { type: "string", nullable: true },
+    restoredFromVersionId: { type: "string", nullable: true },
+    createdAt: { type: "string" },
+  },
+} as const;
+
+export const FILE_VERSIONS_SCHEMA = {
+  type: "object",
+  required: ["versions"],
+  properties: {
+    versions: { type: "array", items: FILE_VERSION_WIRE_SCHEMA },
+  },
+} as const;
+
+export function serializeFileVersion(version: FileVersionRecord) {
+  return {
+    id: version.id,
+    versionNumber: version.versionNumber,
+    mediaType: version.mediaType,
+    sizeBytes: version.sizeBytes,
+    actorKind: version.actorKind,
+    actorId: version.actorId,
+    reason: version.reason,
+    sourceChatId: version.sourceConversationId,
+    sourceRunId: version.sourceRunId,
+    restoredFromVersionId: version.restoredFromVersionId,
+    createdAt: version.createdAt.toISOString(),
+  };
+}
+
+export function serializeFile(
+  file: FileRecord,
+  sharedWithCount?: number,
+  inKnowledge?: boolean,
+  ownerName?: string | null,
+  canManage?: boolean
+) {
   return {
     id: file.id,
     filename: file.filename,
     mediaType: file.mediaType,
     sizeBytes: file.sizeBytes,
     createdAt: file.createdAt.toISOString(),
+    modifiedAt: file.modifiedAt.toISOString(),
+    revision: file.revision,
+    currentVersionId: file.currentVersionId,
+    archivedAt: file.archivedAt?.toISOString() ?? null,
     owner: file.ownerPrincipalId,
+    ownerName: ownerName ?? null,
+    folderId: file.folderId,
     origin: file.origin,
     sourceChatId: file.sourceConversationId,
     sourceRunId: file.sourceRunId,
     sharedWithCount: sharedWithCount ?? null,
     inKnowledge: inKnowledge ?? null,
+    canManage: canManage ?? null,
+  };
+}
+
+export function serializeFileFolder(folder: FileFolderRecord) {
+  return {
+    id: folder.id,
+    name: folder.name,
+    parentId: folder.parentId,
+    createdAt: folder.createdAt.toISOString(),
+    modifiedAt: folder.modifiedAt.toISOString(),
   };
 }
 
@@ -86,13 +245,15 @@ export function serializeFilePage(page: {
   nextCursor: string | null;
   shareCounts?: Map<string, number>;
   knowledgeIds?: ReadonlySet<string>;
+  ownerNames?: ReadonlyMap<string, string | null>;
 }) {
   return {
     files: page.files.map((file) =>
       serializeFile(
         file,
         page.shareCounts ? (page.shareCounts.get(file.id) ?? 0) : undefined,
-        page.knowledgeIds ? page.knowledgeIds.has(file.id) : undefined
+        page.knowledgeIds ? page.knowledgeIds.has(file.id) : undefined,
+        page.ownerNames?.get(file.ownerPrincipalId)
       )
     ),
     nextCursor: page.nextCursor,
@@ -139,18 +300,22 @@ export function serializeShare(share: FileShare) {
   };
 }
 
-export const FILE_ERROR_STATUS: Record<FileError["reason"], 400 | 404 | 413 | 415> = {
+export const FILE_ERROR_STATUS: Record<FileError["reason"], 400 | 404 | 409 | 413 | 415> = {
   too_large: 413,
   empty: 400,
   disallowed_type: 415,
+  format_mismatch: 415,
   // An image over the pixel limit is a payload the instance refuses to carry, same as one over
   // the byte limit — the person's remedy is to make it smaller either way.
   image_too_large: 413,
   not_found: 404,
   invalid_share: 400,
+  invalid_folder: 400,
+  conflict: 409,
+  invalid_state: 409,
 };
 
-export function fileErrorStatus(error: unknown): 400 | 404 | 413 | 415 | null {
+export function fileErrorStatus(error: unknown): 400 | 404 | 409 | 413 | 415 | null {
   return error instanceof FileError ? FILE_ERROR_STATUS[error.reason] : null;
 }
 
@@ -161,7 +326,7 @@ export function fileErrorStatus(error: unknown): 400 | 404 | 413 | 415 | null {
  * RFC 5987, with the ASCII form kept as a fallback. The value is already normalised on upload, so
  * this is encoding, not sanitisation.
  */
-export function contentDisposition(file: FileRecord): string {
+export function contentDisposition(file: Pick<FileRecord, "filename" | "mediaType">): string {
   const disposition = isInlineRenderable(file.mediaType) ? "inline" : "attachment";
   const ascii = file.filename.replace(/[^\x20-\x7e]/g, "_");
   return `${disposition}; filename="${ascii}"; filename*=UTF-8''${encodeURIComponent(file.filename)}`;
@@ -173,6 +338,16 @@ export function contentDisposition(file: FileRecord): string {
  * claims.
  */
 export function downloadHeaders(file: FileRecord): Record<string, string> {
+  return contentHeaders(file);
+}
+
+export function draftDownloadHeaders(draft: FileDraftRecord): Record<string, string> {
+  return contentHeaders(draft);
+}
+
+function contentHeaders(
+  file: Pick<FileRecord, "filename" | "mediaType" | "sizeBytes">
+): Record<string, string> {
   return {
     "content-type": file.mediaType,
     "content-length": String(file.sizeBytes),

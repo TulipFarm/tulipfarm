@@ -1,4 +1,4 @@
-import { isAllowedMediaType, MAX_FILE_BYTES, MAX_FILES_PER_MESSAGE } from "@tulipfarm/files/limits";
+import { MAX_FILE_BYTES, MAX_FILES_PER_MESSAGE, uploadMediaType } from "@tulipfarm/files/limits";
 import { modalityForMediaType } from "@tulipfarm/schema/message-content";
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
@@ -53,13 +53,16 @@ export function describeRejection(
   if (file.size > MAX_FILE_BYTES) {
     return `${file.name} is larger than ${Math.floor(MAX_FILE_BYTES / (1024 * 1024))} MB.`;
   }
-  // An empty `type` means the browser did not recognise the format, so let the server's sniffer
-  // decide rather than refusing something it might well accept.
-  if (file.type !== "" && !isAllowedMediaType(file.type)) {
+  // An empty `type` means the browser did not recognise the format. When the filename does not
+  // name it either, there is nothing to judge, so defer to the server's byte sniffer rather than
+  // refusing something it might well accept.
+  const mediaType = uploadMediaType(file.type, file.name);
+  if (mediaType === null) {
+    if (file.type === "") return null;
     return `${file.name} is not a supported file type.`;
   }
-  if (file.type !== "" && accepted !== undefined) {
-    const modality = modalityForMediaType(file.type);
+  if (accepted !== undefined) {
+    const modality = modalityForMediaType(mediaType);
     if (modality !== "text" && !accepted.includes(modality)) {
       const plural = `${modality}s`;
       const instead = INSTEAD[modality] ?? "include the content in your message";

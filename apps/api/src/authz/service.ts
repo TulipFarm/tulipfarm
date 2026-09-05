@@ -4,6 +4,7 @@ import {
   type AccessRequest,
   assertRoleAssignable,
   decideEffectivePermission,
+  evaluateGrants,
 } from "@tulipfarm/authz";
 import type {
   GroupRecord,
@@ -24,6 +25,7 @@ import { RESERVED_ROLE_IDS } from "../identity/role-reconcile";
 import {
   type AssigneeView,
   type AssignInput,
+  type AuthorityEvidenceView,
   type AuthzActor,
   type EffectiveGrantsView,
   type ExplainInput,
@@ -48,6 +50,7 @@ import {
 export type {
   AssigneeView,
   AssignInput,
+  AuthorityEvidenceView,
   AuthzActor,
   EffectiveGrantsView,
   ExplainInput,
@@ -310,6 +313,20 @@ export class AuthzAdminService {
       ...(input.conditions === undefined ? {} : { conditions: input.conditions }),
     };
     const decision = decideEffectivePermission(layers, request, now);
+    const evidence: AuthorityEvidenceView[] = diagnosed.flatMap((entry) =>
+      (entry.evidence ?? []).map(({ expiresAt, ...item }) => ({
+        ...item,
+        ...(expiresAt ? { expiresAt: expiresAt.toISOString() } : {}),
+      }))
+    );
+    for (const layer of layers) {
+      const outcome = evaluateGrants(layer.grants, request, now);
+      evidence.push({
+        kind: "authority_layer",
+        effect: outcome === "allow" ? "allow" : "deny",
+        authorityLayer: layer.name,
+      });
+    }
     const evaluatedLayers = layers.map((layer) => layer.name);
     const unevaluatedLayers = [
       ...(input.agentId === undefined ? ["agent"] : []),
@@ -326,6 +343,7 @@ export class AuthzAdminService {
       partial: unevaluatedLayers.length > 0,
       ...(Object.keys(layerEmptyReasons).length === 0 ? {} : { layerEmptyReasons }),
       ...(unresolvedRoleIds.length === 0 ? {} : { unresolvedRoleIds }),
+      evidence,
     };
   }
 

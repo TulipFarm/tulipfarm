@@ -28,6 +28,7 @@ const SkillSummaryPropertiesSchema = {
   category: { type: "string" },
   author: { type: "string" },
   updatedAt: { type: "string", format: "date-time" },
+  ownership: { type: "object", additionalProperties: true },
   ...SkillCapabilityPropertiesSchema,
 } as const;
 

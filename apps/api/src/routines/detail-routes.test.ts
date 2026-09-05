@@ -164,6 +164,63 @@ describe("Routine detail routes", () => {
     expect(response.statusCode).toBe(422);
   });
 
+  it("requires Routine Use access without changing the Run caller authority", async () => {
+    await app.close();
+    app = Fastify();
+    app.addHook("onRequest", async (request) => {
+      (request as { user?: unknown }).user = { _id: "user-1" };
+      request.principal = {
+        id: "user-1",
+        kind: "user",
+        businessId: "business-1",
+        credential: "session",
+        authMethods: [],
+        authenticatedAt: new Date(),
+      };
+    });
+    const require = vi.fn().mockRejectedValueOnce(new Error("use denied")).mockResolvedValue({});
+    registerRoutineDetailRoutes(
+      app,
+      {
+        catalog,
+        runs,
+        trigger,
+        teamAssets: { require } as unknown as NonNullable<RoutineDetailDeps["teamAssets"]>,
+      },
+      async () => undefined,
+      () => async () => undefined
+    );
+    await app.ready();
+
+    const denied = await app.inject({
+      method: "POST",
+      url: "/api/v1/routines/daily-wait/runs",
+      payload: {},
+    });
+    expect(denied.statusCode).toBe(403);
+    expect(trigger).not.toHaveBeenCalled();
+
+    const allowed = await app.inject({
+      method: "POST",
+      url: "/api/v1/routines/daily-wait/runs",
+      payload: {},
+    });
+    expect(allowed.statusCode).toBe(202);
+    expect(require).toHaveBeenLastCalledWith(
+      "routine",
+      "routine-1",
+      expect.objectContaining({ id: "user-1" }),
+      "use",
+      undefined
+    );
+    expect(trigger).toHaveBeenCalledWith(
+      "daily-wait",
+      undefined,
+      { kind: "user", id: "user-1" },
+      undefined
+    );
+  });
+
   it("rehearses the published Routine and proves nothing was dispatched", async () => {
     const response = await app.inject({
       method: "POST",

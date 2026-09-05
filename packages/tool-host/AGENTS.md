@@ -23,6 +23,7 @@ Individual Tool families (`packages/kv`, `apps/api/src/tools/**`), the model-fac
 | `src/dispatcher.ts` | `RegistryToolDispatcher`: authorize → credential → entitlement → approve → execute |
 | `src/timeout.ts`, `src/execution.ts` | Deadline and abort delivery; the attempt loop and effect settlement |
 | `src/gate.ts` | `LiveToolGate`, autonomy mapping, agent authority layer, DLP rules |
+| `src/authority-layers.ts` | Live direct and inherited Team authority; opt-in legacy fallback. |
 | `src/eligibility.ts` | `localDispatchRefusal` — which Tools a non-control-plane process may run |
 | `src/capability-restrictions.ts` | An Agent's authored restrictions, decided at offer and at dispatch |
 | `src/catalog.ts` | `ToolCatalog` port, `InMemoryToolCatalog`, per-agent visibility |

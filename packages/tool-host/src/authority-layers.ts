@@ -1,33 +1,36 @@
 import {
   type AccessGrant,
+  type AuthorityEvidence,
   type AuthorityLayer,
   assertPrincipalAuthenticatable,
   assertRoleAssignable,
-  collectRoleGrants,
+  collectRoleGrantEntries,
   type Principal,
   type Role,
+  resolveTeamAuthority,
 } from "@tulipfarm/authz";
 import type { TransactionPort } from "@tulipfarm/storage";
 import {
   type GrantRecord,
   type GroupRepo,
-  PgGroupRepo,
   PgPrincipalRepo,
   PgRoleRepo,
+  PgTeamRepo,
   type PrincipalRecord,
   type PrincipalRepo,
   type RoleRecord,
   type RoleRepo,
+  type TeamRepo,
 } from "@tulipfarm/storage";
 import type { AuthorityPrincipal } from "./principal";
 
 export interface AuthorityLayerResolverOptions {
   readonly principals: PrincipalRepo;
   readonly roles: RoleRepo;
-  /**
-   * Optional group expansion fails closed: without a group repo, group-held Roles grant nothing.
-   */
+  /** Pre-Team compatibility only; ignored whenever the Team repo is present. */
   readonly groups?: GroupRepo;
+  /** Optional Team expansion fails closed: without it, Team-held authority grants nothing. */
+  readonly teams?: TeamRepo;
   now?(): Date;
 }
 
@@ -39,7 +42,7 @@ export function authorityLayerRepos(
   return {
     principals: new PgPrincipalRepo(transactions),
     roles: new PgRoleRepo(transactions),
-    groups: new PgGroupRepo(transactions),
+    teams: new PgTeamRepo(transactions),
     ...options,
   };
 }
@@ -102,6 +105,7 @@ export interface DiagnosedAuthorityLayer {
   readonly layer: AuthorityLayer;
   readonly emptyReason?: LayerEmptyReason;
   readonly unresolvedRoleIds?: readonly string[];
+  readonly evidence?: readonly AuthorityEvidence[];
 }
 
 function emptyLayer(name: string): AuthorityLayer {
@@ -112,20 +116,26 @@ function emptyDiagnosis(name: string, reason: LayerEmptyReason): DiagnosedAuthor
   return { layer: emptyLayer(name), emptyReason: reason };
 }
 
+function uniqueGrants(grants: readonly AccessGrant[]): AccessGrant[] {
+  const unique = new Map<string, AccessGrant>();
+  for (const grant of grants) unique.set(JSON.stringify(grant), grant);
+  return [...unique.values()];
+}
+
 export function agentAuthorityPrincipal(businessId: string, agentId: string): AuthorityPrincipal {
   return { id: agentId, businessId, kind: "agent" };
 }
 
 /**
- * Every Role a Principal holds right now: direct assignments plus Roles held through a group,
- * with anything expired left out.
+ * Every Role a Principal holds right now: direct assignments plus Roles held through a Team,
+ * with anything expired left out. Supplying a Team repo cuts compatibility-group reads off.
  *
  * Exported because a second caller needs the same answer — File sharing resolves a Role share
  * against the reader's live Roles — and two implementations of "which Roles does this person hold"
  * is exactly how a File stays readable to someone a Role no longer contains.
  */
 export async function collectHeldRoleIds(
-  repos: Pick<AuthorityLayerResolverOptions, "roles" | "groups">,
+  repos: Pick<AuthorityLayerResolverOptions, "principals" | "roles" | "groups" | "teams">,
   businessId: string,
   principalId: string,
   now: Date
@@ -133,6 +143,24 @@ export async function collectHeldRoleIds(
   const roleIds = new Set<string>();
   const directAssignments = await repos.roles.listAssignments(businessId, principalId, now);
   for (const assignment of directAssignments) roleIds.add(assignment.roleId);
+
+  if (repos.teams !== undefined) {
+    const principal = await repos.principals.get(businessId, principalId);
+    if (principal === undefined) return [...roleIds];
+    const roles = (await repos.roles.listRoles(businessId)).map(roleFromRecord);
+    const resolved = await resolveTeamAuthority(
+      repos.teams,
+      new Map(roles.map((role) => [role.id, role])),
+      principal,
+      now
+    );
+    for (const evidence of resolved.evidence) {
+      if (evidence.kind === "role" && evidence.roleId !== undefined) {
+        roleIds.add(evidence.roleId);
+      }
+    }
+    return [...roleIds];
+  }
 
   const groupRepo = repos.groups;
   if (groupRepo !== undefined) {
@@ -190,13 +218,47 @@ export class LiveAuthorityLayerResolver {
     }
 
     let assignedRoleIds: string[];
+    let directAssignments: Awaited<ReturnType<RoleRepo["listAllAssignments"]>>;
+    let teamAuthority: Awaited<ReturnType<typeof resolveTeamAuthority>> | undefined;
     try {
-      assignedRoleIds = await this.collectAssignedRoleIds(principal, now);
+      [assignedRoleIds, directAssignments] = await Promise.all([
+        this.collectAssignedRoleIds(principal, now),
+        this.options.roles.listAllAssignments(principal.businessId, principal.id),
+      ]);
+      if (this.options.teams !== undefined) {
+        const roles = (await this.options.roles.listRoles(principal.businessId)).map(
+          roleFromRecord
+        );
+        teamAuthority = await resolveTeamAuthority(
+          this.options.teams,
+          new Map(roles.map((role) => [role.id, role])),
+          principal,
+          now
+        );
+      }
     } catch {
-      // A group repo read that throws must never widen a layer — fail closed.
+      // A membership or assignment read that throws must never widen a layer — fail closed.
       return emptyDiagnosis(name, "assignment-read-failed");
     }
-    if (assignedRoleIds.length === 0) return emptyDiagnosis(name, "no-roles-assigned");
+    if (
+      assignedRoleIds.length === 0 &&
+      (teamAuthority?.grants.length ?? 0) === 0 &&
+      (teamAuthority?.unresolvedRoleIds.length ?? 0) === 0 &&
+      (teamAuthority?.unassignableRoleIds.length ?? 0) === 0
+    ) {
+      const diagnosis = emptyDiagnosis(name, "no-roles-assigned");
+      const expiryEvidence: AuthorityEvidence[] = directAssignments
+        .filter((assignment) => assignment.expiresAt && assignment.expiresAt <= now)
+        .map((assignment) => ({
+          kind: "expiry",
+          effect: "informational",
+          sourcePrincipalId: principal.id,
+          roleId: assignment.roleId,
+          expiresAt: assignment.expiresAt,
+        }));
+      const evidence = [...expiryEvidence, ...(teamAuthority?.evidence ?? [])];
+      return evidence.length ? { ...diagnosis, evidence } : diagnosis;
+    }
 
     const roles = (await this.options.roles.listRoles(principal.businessId)).map(roleFromRecord);
     const rolesById = new Map(roles.map((role) => [role.id, role]));
@@ -223,10 +285,72 @@ export class LiveAuthorityLayerResolver {
     }
 
     try {
-      const grants = collectRoleGrants(assignedRoleIds, rolesById, now);
+      const directEntries = collectRoleGrantEntries(assignedRoleIds, rolesById, now);
+      const directAssignmentsByRole = new Map(
+        directAssignments
+          .filter((assignment) => !assignment.expiresAt || assignment.expiresAt > now)
+          .map((assignment) => [assignment.roleId, assignment])
+      );
+      const evidence: AuthorityEvidence[] = [
+        ...directEntries.flatMap((entry) => {
+          const assignment = directAssignmentsByRole.get(entry.roleId);
+          if (!assignment) return [];
+          return [
+            {
+              kind: "role" as const,
+              effect: "informational" as const,
+              sourcePrincipalId: principal.id,
+              roleId: entry.roleId,
+              ...(assignment.expiresAt ? { expiresAt: assignment.expiresAt } : {}),
+            },
+            {
+              kind: entry.grant.effect === "deny" ? ("explicit_deny" as const) : ("grant" as const),
+              effect: entry.grant.effect,
+              sourcePrincipalId: principal.id,
+              roleId: entry.roleId,
+              grantId: `${entry.roleId}:${entry.grantIndex}`,
+              ...(entry.grant.expiresAt ? { expiresAt: entry.grant.expiresAt } : {}),
+            },
+          ];
+        }),
+        ...directAssignments
+          .filter((assignment) => assignment.expiresAt && assignment.expiresAt <= now)
+          .map(
+            (assignment): AuthorityEvidence => ({
+              kind: "expiry",
+              effect: "informational",
+              sourcePrincipalId: principal.id,
+              roleId: assignment.roleId,
+              expiresAt: assignment.expiresAt,
+            })
+          ),
+        ...(teamAuthority?.evidence ?? []),
+      ];
+      const grants = uniqueGrants([
+        ...directEntries.map((entry) => entry.grant),
+        ...(teamAuthority?.grants ?? []),
+      ]);
+      const unresolvedRoleIds = teamAuthority?.unresolvedRoleIds ?? [];
+      if (unresolvedRoleIds.length > 0) {
+        return {
+          layer: emptyLayer(name),
+          emptyReason: "unknown-role",
+          unresolvedRoleIds,
+          evidence,
+        };
+      }
+      const unassignableRoleIds = teamAuthority?.unassignableRoleIds ?? [];
+      if (unassignableRoleIds.length > 0) {
+        return {
+          layer: emptyLayer(name),
+          emptyReason: "role-not-assignable",
+          unresolvedRoleIds: unassignableRoleIds,
+          evidence,
+        };
+      }
       return grants.length === 0
-        ? emptyDiagnosis(name, "roles-grant-nothing")
-        : { layer: { name, grants } };
+        ? { ...emptyDiagnosis(name, "roles-grant-nothing"), evidence }
+        : { layer: { name, grants }, evidence };
     } catch {
       return emptyDiagnosis(name, "grant-collection-failed");
     }
@@ -240,6 +364,14 @@ export class LiveAuthorityLayerResolver {
     principal: AuthorityPrincipal,
     now: Date
   ): Promise<string[]> {
+    if (this.options.teams !== undefined) {
+      const assignments = await this.options.roles.listAssignments(
+        principal.businessId,
+        principal.id,
+        now
+      );
+      return assignments.map((assignment) => assignment.roleId);
+    }
     return await collectHeldRoleIds(this.options, principal.businessId, principal.id, now);
   }
 

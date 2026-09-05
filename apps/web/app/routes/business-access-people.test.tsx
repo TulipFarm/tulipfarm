@@ -3,9 +3,17 @@ import { createRemixStub } from "@remix-run/testing";
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
-import { assignRole, revokeRole } from "~/lib/authz";
-import { createUser, reissueInvite, setUserStatus } from "~/lib/users";
-import AccessPeople from "./_app.business.access._index";
+import {
+  type AuthzRole,
+  assignRole,
+  listCapabilities,
+  listRoleAssignees,
+  listRoles,
+  revokeRole,
+} from "~/lib/authz";
+import { getTeamAuthority, listTeams } from "~/lib/teams";
+import { createUser, listUsers, reissueInvite, setUserStatus } from "~/lib/users";
+import AccessPeople, { clientLoader } from "./_app.business.access._index";
 
 vi.mock("@remix-run/react", async () => {
   const actual = await vi.importActual<typeof import("@remix-run/react")>("@remix-run/react");
@@ -23,9 +31,15 @@ vi.mock("~/lib/authz", async () => ({
   revokeRole: vi.fn().mockResolvedValue(undefined),
   getEffectiveGrants: vi.fn(),
   getGroup: vi.fn(),
-  listGroups: vi.fn(),
+  listCapabilities: vi.fn(),
   listRoleAssignees: vi.fn(),
   listRoles: vi.fn(),
+}));
+
+vi.mock("~/lib/teams", async () => ({
+  ...(await vi.importActual<typeof import("~/lib/teams")>("~/lib/teams")),
+  getTeamAuthority: vi.fn(),
+  listTeams: vi.fn(),
 }));
 
 vi.mock("~/lib/users", async () => ({
@@ -53,10 +67,12 @@ vi.mock("~/lib/use-session-user", () => ({
 const PRIYA_ID = "0b925e15-881b-4f76-ac0d-f5d6e4f41b40";
 const RAHUL_ID = "6c1f0a2e-1111-4222-8333-944455556666";
 
-const ROLES = [
+const ROLES: AuthzRole[] = [
   {
     id: "admin",
     source: "builtin",
+    displayName: null,
+    slug: null,
     assignableTo: ["user"],
     parentRoleIds: [],
     expiresAt: null,
@@ -72,6 +88,8 @@ const ROLES = [
   {
     id: "member",
     source: "builtin",
+    displayName: null,
+    slug: null,
     assignableTo: ["user"],
     parentRoleIds: [],
     expiresAt: null,
@@ -80,6 +98,8 @@ const ROLES = [
   {
     id: "owner",
     source: "builtin",
+    displayName: null,
+    slug: null,
     assignableTo: ["user"],
     parentRoleIds: [],
     expiresAt: null,
@@ -95,6 +115,8 @@ const ROLES = [
   {
     id: "bot-tools",
     source: "authored",
+    displayName: null,
+    slug: null,
     assignableTo: ["agent"],
     parentRoleIds: [],
     expiresAt: null,
@@ -110,6 +132,8 @@ const ROLES = [
   {
     id: "support-operators",
     source: "authored",
+    displayName: null,
+    slug: null,
     assignableTo: ["user"],
     parentRoleIds: [],
     expiresAt: null,
@@ -171,6 +195,66 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.clearAllMocks();
+});
+
+test("loads Team memberships and authority from the Team API", async () => {
+  vi.mocked(listUsers).mockResolvedValue([]);
+  vi.mocked(listRoles).mockResolvedValue({ roles: ROLES });
+  vi.mocked(listRoleAssignees).mockResolvedValue({ assignees: [] });
+  vi.mocked(listCapabilities).mockResolvedValue({ areas: [], unavailable: [] });
+  vi.mocked(listTeams).mockResolvedValue({
+    teams: [
+      {
+        id: "00000000-0000-4000-8000-000000000001",
+        businessId: "business-1",
+        slug: "front-of-house",
+        displayName: "Front of house",
+        description: null,
+        parentTeamId: null,
+        labels: [],
+        status: "active",
+        revision: 1,
+        createdAt: "2026-09-05T12:00:00.000Z",
+        updatedAt: "2026-09-05T12:00:00.000Z",
+        archivedAt: null,
+        members: [{ principalId: PRIYA_ID, name: "Priya Sharma", level: "member" }],
+      },
+    ],
+  });
+  vi.mocked(getTeamAuthority).mockResolvedValue({
+    directRoles: [
+      {
+        source: "direct",
+        sourceTeamId: "00000000-0000-4000-8000-000000000001",
+        pathTeamIds: ["00000000-0000-4000-8000-000000000001"],
+        roleId: "support-operators",
+        expiresAt: null,
+        assignedAt: "2026-09-05T12:00:00.000Z",
+      },
+    ],
+    inheritedRoles: [],
+    directGrants: [],
+    inheritedGrants: [],
+  });
+
+  await expect(
+    clientLoader({
+      request: new Request("http://localhost/business/access"),
+      params: {},
+      context: undefined,
+      serverLoader: vi.fn(),
+    })
+  ).resolves.toEqual(
+    expect.objectContaining({
+      teams: [
+        {
+          id: "front-of-house",
+          members: [{ principalId: PRIYA_ID, name: "Priya Sharma", level: "member" }],
+          roles: [expect.objectContaining({ roleId: "support-operators" })],
+        },
+      ],
+    })
+  );
 });
 
 test("lists people by name and email, never by principal id", () => {
@@ -281,6 +365,24 @@ test("treats a chosen date as the end of that day", async () => {
   expect(new Date(String(expiry)).toISOString()).toBe(
     new Date("2027-03-05T23:59:59").toISOString()
   );
+});
+
+test("labels direct person exceptions and shows whether they expire", () => {
+  renderPage(
+    loaderData({
+      selectedId: PRIYA_ID,
+      assignments: [
+        { roleId: "member", assignees: [{ principalId: PRIYA_ID, expiresAt: null }] },
+        {
+          roleId: "support-operators",
+          assignees: [{ principalId: PRIYA_ID, expiresAt: "2027-03-05T23:59:59.000Z" }],
+        },
+      ],
+    })
+  );
+
+  expect(screen.getByText("Direct exception")).toBeInTheDocument();
+  expect(screen.getAllByText(/^Until /).some((element) => element.tagName === "SPAN")).toBe(true);
 });
 
 test("takes access away only after a confirmation step", async () => {

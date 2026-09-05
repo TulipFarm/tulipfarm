@@ -78,7 +78,8 @@ export function registerAuthzRoutes(
   service: AuthzAdminService,
   requireAuth: PreHandler,
   requireAuthorization: RequireAuthorization,
-  rateLimiter?: RateLimiter
+  rateLimiter?: RateLimiter,
+  includeLegacyGroupRoutes = true
 ): void {
   const rateLimitHook = rateLimiter
     ? makeRateLimitHook(
@@ -143,54 +144,56 @@ export function registerAuthzRoutes(
     }
   );
 
-  app.get(
-    "/api/v1/authz/groups",
-    {
-      preHandler: gate(authz("authz.group.read")),
-      schema: {
-        description:
-          "List every principal group, each with its unexpired members and the Roles it holds.",
-        tags: ["authz"],
-        security: AUTHZ_SECURITY,
-        response: {
-          200: GroupListResponseSchema,
-          401: ErrorSchema,
-          403: ErrorSchema,
-          429: ErrorSchema,
+  if (includeLegacyGroupRoutes)
+    app.get(
+      "/api/v1/authz/groups",
+      {
+        preHandler: gate(authz("authz.group.read")),
+        schema: {
+          description:
+            "List every principal group, each with its unexpired members and the Roles it holds.",
+          tags: ["authz"],
+          security: AUTHZ_SECURITY,
+          response: {
+            200: GroupListResponseSchema,
+            401: ErrorSchema,
+            403: ErrorSchema,
+            429: ErrorSchema,
+          },
         },
       },
-    },
-    async () => ({ groups: await service.listGroupDetails() })
-  );
+      async () => ({ groups: await service.listGroupDetails() })
+    );
 
-  app.get(
-    "/api/v1/authz/groups/:groupId",
-    {
-      preHandler: gate(authz("authz.group.read")),
-      schema: {
-        description: "Get a group with its unexpired members and the Roles it holds.",
-        tags: ["authz"],
-        security: AUTHZ_SECURITY,
-        params: GroupIdParamsSchema,
-        response: {
-          200: GroupDetailSchema,
-          400: ErrorSchema,
-          401: ErrorSchema,
-          403: ErrorSchema,
-          404: ErrorSchema,
-          429: ErrorSchema,
+  if (includeLegacyGroupRoutes)
+    app.get(
+      "/api/v1/authz/groups/:groupId",
+      {
+        preHandler: gate(authz("authz.group.read")),
+        schema: {
+          description: "Get a group with its unexpired members and the Roles it holds.",
+          tags: ["authz"],
+          security: AUTHZ_SECURITY,
+          params: GroupIdParamsSchema,
+          response: {
+            200: GroupDetailSchema,
+            400: ErrorSchema,
+            401: ErrorSchema,
+            403: ErrorSchema,
+            404: ErrorSchema,
+            429: ErrorSchema,
+          },
         },
       },
-    },
-    async (req, reply) => {
-      const { groupId } = req.params as { groupId: string };
-      const group = await service.getGroup(groupId);
-      if (group === null) {
-        return reply.code(404).send({ error: `group ${groupId} does not exist` });
+      async (req, reply) => {
+        const { groupId } = req.params as { groupId: string };
+        const group = await service.getGroup(groupId);
+        if (group === null) {
+          return reply.code(404).send({ error: `group ${groupId} does not exist` });
+        }
+        return group;
       }
-      return group;
-    }
-  );
+    );
 
   app.get(
     "/api/v1/authz/principals/:principalId/grants",
@@ -408,176 +411,182 @@ export function registerAuthzRoutes(
     }
   );
 
-  app.post(
-    "/api/v1/authz/groups",
-    {
-      preHandler: gate(authz("authz.group.write")),
-      schema: {
-        description: "Create (or upsert) a principal group, optionally with an expiry.",
-        tags: ["authz"],
-        security: AUTHZ_SECURITY,
-        body: GroupCreateBodySchema,
-        response: {
-          200: GroupViewSchema,
-          201: GroupViewSchema,
-          400: ErrorSchema,
-          401: ErrorSchema,
-          403: ErrorSchema,
-          429: ErrorSchema,
+  if (includeLegacyGroupRoutes)
+    app.post(
+      "/api/v1/authz/groups",
+      {
+        preHandler: gate(authz("authz.group.write")),
+        schema: {
+          description: "Create (or upsert) a principal group, optionally with an expiry.",
+          tags: ["authz"],
+          security: AUTHZ_SECURITY,
+          body: GroupCreateBodySchema,
+          response: {
+            200: GroupViewSchema,
+            201: GroupViewSchema,
+            400: ErrorSchema,
+            401: ErrorSchema,
+            403: ErrorSchema,
+            429: ErrorSchema,
+          },
         },
       },
-    },
-    async (req, reply) => {
-      const { id, expiresAt } = req.body as { id: string; expiresAt?: string };
-      const { created } = await service.createGroup(id, expiresAt, actorFrom(req));
-      // 201 only for a genuine create. A re-statement of an existing group answers 200 so the
-      // caller can tell it overwrote something — including, when `expiresAt` is omitted, an expiry.
-      return reply.code(created ? 201 : 200).send({ id, expiresAt: expiresAt ?? null });
-    }
-  );
+      async (req, reply) => {
+        const { id, expiresAt } = req.body as { id: string; expiresAt?: string };
+        const { created } = await service.createGroup(id, expiresAt, actorFrom(req));
+        // 201 only for a genuine create. A re-statement of an existing group answers 200 so the
+        // caller can tell it overwrote something — including, when `expiresAt` is omitted, an expiry.
+        return reply.code(created ? 201 : 200).send({ id, expiresAt: expiresAt ?? null });
+      }
+    );
 
-  app.delete(
-    "/api/v1/authz/groups/:groupId",
-    {
-      preHandler: gate(authz("authz.group.write")),
-      schema: {
-        description:
-          "Delete a group. Its memberships and group-held Roles cascade; the principals and Roles " +
-          "themselves are untouched.",
-        tags: ["authz"],
-        security: AUTHZ_SECURITY,
-        params: GroupIdParamsSchema,
-        response: {
-          200: OkSchema,
-          400: ErrorSchema,
-          401: ErrorSchema,
-          403: ErrorSchema,
-          404: ErrorSchema,
-          409: ErrorSchema,
-          429: ErrorSchema,
+  if (includeLegacyGroupRoutes)
+    app.delete(
+      "/api/v1/authz/groups/:groupId",
+      {
+        preHandler: gate(authz("authz.group.write")),
+        schema: {
+          description:
+            "Delete a group. Its memberships and group-held Roles cascade; the principals and Roles " +
+            "themselves are untouched.",
+          tags: ["authz"],
+          security: AUTHZ_SECURITY,
+          params: GroupIdParamsSchema,
+          response: {
+            200: OkSchema,
+            400: ErrorSchema,
+            401: ErrorSchema,
+            403: ErrorSchema,
+            404: ErrorSchema,
+            409: ErrorSchema,
+            429: ErrorSchema,
+          },
         },
       },
-    },
-    async (req, reply) => {
-      const { groupId } = req.params as { groupId: string };
-      return sendMutation(reply, await service.deleteGroup(groupId, actorFrom(req)));
-    }
-  );
+      async (req, reply) => {
+        const { groupId } = req.params as { groupId: string };
+        return sendMutation(reply, await service.deleteGroup(groupId, actorFrom(req)));
+      }
+    );
 
-  app.post(
-    "/api/v1/authz/groups/:groupId/members",
-    {
-      preHandler: gate(authz("authz.group.member.write")),
-      schema: {
-        description: "Add a principal to a group, optionally with an expiry.",
-        tags: ["authz"],
-        security: AUTHZ_SECURITY,
-        params: GroupIdParamsSchema,
-        body: GroupMemberBodySchema,
-        response: {
-          200: OkSchema,
-          400: ErrorSchema,
-          401: ErrorSchema,
-          403: ErrorSchema,
-          404: ErrorSchema,
-          429: ErrorSchema,
+  if (includeLegacyGroupRoutes)
+    app.post(
+      "/api/v1/authz/groups/:groupId/members",
+      {
+        preHandler: gate(authz("authz.group.member.write")),
+        schema: {
+          description: "Add a principal to a group, optionally with an expiry.",
+          tags: ["authz"],
+          security: AUTHZ_SECURITY,
+          params: GroupIdParamsSchema,
+          body: GroupMemberBodySchema,
+          response: {
+            200: OkSchema,
+            400: ErrorSchema,
+            401: ErrorSchema,
+            403: ErrorSchema,
+            404: ErrorSchema,
+            429: ErrorSchema,
+          },
         },
       },
-    },
-    async (req, reply) => {
-      const { groupId } = req.params as { groupId: string };
-      const { principalId, expiresAt } = req.body as { principalId: string; expiresAt?: string };
-      const result = await service.addGroupMember(
-        { groupId, principalId, ...(expiresAt === undefined ? {} : { expiresAt }) },
-        actorFrom(req)
-      );
-      return sendMutation(reply, result);
-    }
-  );
+      async (req, reply) => {
+        const { groupId } = req.params as { groupId: string };
+        const { principalId, expiresAt } = req.body as { principalId: string; expiresAt?: string };
+        const result = await service.addGroupMember(
+          { groupId, principalId, ...(expiresAt === undefined ? {} : { expiresAt }) },
+          actorFrom(req)
+        );
+        return sendMutation(reply, result);
+      }
+    );
 
-  app.delete(
-    "/api/v1/authz/groups/:groupId/members/:principalId",
-    {
-      preHandler: gate(authz("authz.group.member.write")),
-      schema: {
-        description: "Remove a principal from a group. A no-op membership still returns 200.",
-        tags: ["authz"],
-        security: AUTHZ_SECURITY,
-        params: GroupIdAndPrincipalIdParamsSchema,
-        response: {
-          200: OkSchema,
-          400: ErrorSchema,
-          401: ErrorSchema,
-          403: ErrorSchema,
-          404: ErrorSchema,
-          409: ErrorSchema,
-          429: ErrorSchema,
+  if (includeLegacyGroupRoutes)
+    app.delete(
+      "/api/v1/authz/groups/:groupId/members/:principalId",
+      {
+        preHandler: gate(authz("authz.group.member.write")),
+        schema: {
+          description: "Remove a principal from a group. A no-op membership still returns 200.",
+          tags: ["authz"],
+          security: AUTHZ_SECURITY,
+          params: GroupIdAndPrincipalIdParamsSchema,
+          response: {
+            200: OkSchema,
+            400: ErrorSchema,
+            401: ErrorSchema,
+            403: ErrorSchema,
+            404: ErrorSchema,
+            409: ErrorSchema,
+            429: ErrorSchema,
+          },
         },
       },
-    },
-    async (req, reply) => {
-      const { groupId, principalId } = req.params as { groupId: string; principalId: string };
-      return sendMutation(
-        reply,
-        await service.removeGroupMember(groupId, principalId, actorFrom(req))
-      );
-    }
-  );
+      async (req, reply) => {
+        const { groupId, principalId } = req.params as { groupId: string; principalId: string };
+        return sendMutation(
+          reply,
+          await service.removeGroupMember(groupId, principalId, actorFrom(req))
+        );
+      }
+    );
 
-  app.post(
-    "/api/v1/authz/groups/:groupId/roles",
-    {
-      preHandler: gate(authz("authz.group.role.write")),
-      schema: {
-        description: "Grant a Role to a group; its members inherit it. Optional expiry.",
-        tags: ["authz"],
-        security: AUTHZ_SECURITY,
-        params: GroupIdParamsSchema,
-        body: GroupRoleBodySchema,
-        response: {
-          200: OkSchema,
-          400: ErrorSchema,
-          401: ErrorSchema,
-          403: ErrorSchema,
-          404: ErrorSchema,
-          429: ErrorSchema,
+  if (includeLegacyGroupRoutes)
+    app.post(
+      "/api/v1/authz/groups/:groupId/roles",
+      {
+        preHandler: gate(authz("authz.group.role.write")),
+        schema: {
+          description: "Grant a Role to a group; its members inherit it. Optional expiry.",
+          tags: ["authz"],
+          security: AUTHZ_SECURITY,
+          params: GroupIdParamsSchema,
+          body: GroupRoleBodySchema,
+          response: {
+            200: OkSchema,
+            400: ErrorSchema,
+            401: ErrorSchema,
+            403: ErrorSchema,
+            404: ErrorSchema,
+            429: ErrorSchema,
+          },
         },
       },
-    },
-    async (req, reply) => {
-      const { groupId } = req.params as { groupId: string };
-      const { roleId, expiresAt } = req.body as { roleId: string; expiresAt?: string };
-      const result = await service.assignGroupRole(
-        { groupId, roleId, ...(expiresAt === undefined ? {} : { expiresAt }) },
-        actorFrom(req)
-      );
-      return sendMutation(reply, result);
-    }
-  );
+      async (req, reply) => {
+        const { groupId } = req.params as { groupId: string };
+        const { roleId, expiresAt } = req.body as { roleId: string; expiresAt?: string };
+        const result = await service.assignGroupRole(
+          { groupId, roleId, ...(expiresAt === undefined ? {} : { expiresAt }) },
+          actorFrom(req)
+        );
+        return sendMutation(reply, result);
+      }
+    );
 
-  app.delete(
-    "/api/v1/authz/groups/:groupId/roles/:roleId",
-    {
-      preHandler: gate(authz("authz.group.role.write")),
-      schema: {
-        description: "Revoke a Role from a group. A no-op holding still returns 200.",
-        tags: ["authz"],
-        security: AUTHZ_SECURITY,
-        params: GroupIdAndRoleIdParamsSchema,
-        response: {
-          200: OkSchema,
-          400: ErrorSchema,
-          401: ErrorSchema,
-          403: ErrorSchema,
-          404: ErrorSchema,
-          409: ErrorSchema,
-          429: ErrorSchema,
+  if (includeLegacyGroupRoutes)
+    app.delete(
+      "/api/v1/authz/groups/:groupId/roles/:roleId",
+      {
+        preHandler: gate(authz("authz.group.role.write")),
+        schema: {
+          description: "Revoke a Role from a group. A no-op holding still returns 200.",
+          tags: ["authz"],
+          security: AUTHZ_SECURITY,
+          params: GroupIdAndRoleIdParamsSchema,
+          response: {
+            200: OkSchema,
+            400: ErrorSchema,
+            401: ErrorSchema,
+            403: ErrorSchema,
+            404: ErrorSchema,
+            409: ErrorSchema,
+            429: ErrorSchema,
+          },
         },
       },
-    },
-    async (req, reply) => {
-      const { groupId, roleId } = req.params as { groupId: string; roleId: string };
-      return sendMutation(reply, await service.revokeGroupRole(groupId, roleId, actorFrom(req)));
-    }
-  );
+      async (req, reply) => {
+        const { groupId, roleId } = req.params as { groupId: string; roleId: string };
+        return sendMutation(reply, await service.revokeGroupRole(groupId, roleId, actorFrom(req)));
+      }
+    );
 }

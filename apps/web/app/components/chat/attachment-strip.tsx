@@ -1,3 +1,4 @@
+import { FileTypeIcon } from "~/components/files/file-type-icon";
 import { X } from "~/components/icons";
 import type { Attachment } from "./use-attachments";
 
@@ -33,6 +34,11 @@ export function AttachmentStrip({
           }`}
           key={attachment.localId}
         >
+          <FileTypeIcon
+            mediaType={attachment.mediaType}
+            filename={attachment.name}
+            className="size-4"
+          />
           <span className="max-w-[12rem] truncate font-medium">{attachment.name}</span>
           <span className="text-muted-foreground">
             {attachment.status === "uploading"

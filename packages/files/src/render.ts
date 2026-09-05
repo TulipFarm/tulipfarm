@@ -23,12 +23,33 @@
  * never in the control plane. See `apps/worker/src/tools/local-host.ts`.
  */
 
+import { parseYamlDocument } from "@tulipfarm/schema";
 import { marked, type Token, type Tokens } from "marked";
 import type PDFDocument from "pdfkit";
+import { renderDocx, renderPptx, renderXlsx } from "./office";
+import { OOXML_MEDIA_TYPES } from "./ooxml";
 
 /** What an Agent may ask for. Every one of these is an allowed media type on the way back in. */
-export const RENDER_FORMATS = ["pdf", "markdown", "text", "csv"] as const;
+export const RENDER_FORMATS = [
+  "pdf",
+  "docx",
+  "xlsx",
+  "pptx",
+  "markdown",
+  "text",
+  "csv",
+  "json",
+  "xml",
+  "yaml",
+] as const;
 export type RenderFormat = (typeof RENDER_FORMATS)[number];
+
+/** The Office formats, which are OOXML packages rather than a single serialized body. */
+const OFFICE: Record<string, { mediaType: string; extension: string }> = {
+  docx: { mediaType: OOXML_MEDIA_TYPES.docx, extension: ".docx" },
+  xlsx: { mediaType: OOXML_MEDIA_TYPES.xlsx, extension: ".xlsx" },
+  pptx: { mediaType: OOXML_MEDIA_TYPES.pptx, extension: ".pptx" },
+};
 
 /**
  * Ceiling on what may be handed to the renderer.
@@ -50,6 +71,7 @@ export const RENDER_TIMEOUT_MS = 10_000;
 export type RenderRejection =
   | "input_too_large"
   | "empty"
+  | "invalid_content"
   | "output_too_large"
   | "too_many_pages"
   | "timed_out";
@@ -66,7 +88,7 @@ export class RenderError extends Error {
 
 export interface RenderRequest {
   readonly format: RenderFormat;
-  /** Markdown for `pdf`; taken verbatim for every other format. */
+  /** Markdown for `pdf`; structured formats are validated, and plain formats stay verbatim. */
   readonly content: string;
   /** Becomes the document's title metadata and its opening heading. */
   readonly title?: string;
@@ -79,15 +101,21 @@ export interface Rendered {
   readonly extension: string;
 }
 
+type PassthroughFormat = "markdown" | "text" | "csv" | "json" | "xml" | "yaml";
+
 const PASSTHROUGH: Record<string, { mediaType: string; extension: string }> = {
   markdown: { mediaType: "text/markdown", extension: ".md" },
   text: { mediaType: "text/plain", extension: ".txt" },
   csv: { mediaType: "text/csv", extension: ".csv" },
+  json: { mediaType: "application/json", extension: ".json" },
+  xml: { mediaType: "application/xml", extension: ".xml" },
+  yaml: { mediaType: "application/yaml", extension: ".yaml" },
 };
 
 /** The suffix a format lands as, so a caller can name the File before spending the render. */
 export function extensionForFormat(format: RenderFormat): string {
-  return format === "pdf" ? ".pdf" : PASSTHROUGH[format].extension;
+  if (format === "pdf") return ".pdf";
+  return (OFFICE[format] ?? PASSTHROUGH[format]).extension;
 }
 
 export async function renderDocument(request: RenderRequest): Promise<Rendered> {
@@ -100,9 +128,12 @@ export async function renderDocument(request: RenderRequest): Promise<Rendered> 
   }
   if (content.trim() === "") throw new RenderError("empty", "content carried nothing to render");
 
+  if (request.format in OFFICE) return renderOffice(request);
+
   if (request.format !== "pdf") {
+    const serialized = serializeStructuredText(request.format as PassthroughFormat, content);
     const shape = PASSTHROUGH[request.format];
-    const bytes = new TextEncoder().encode(content);
+    const bytes = new TextEncoder().encode(serialized);
     if (bytes.byteLength > MAX_RENDER_OUTPUT_BYTES) {
       throw new RenderError("output_too_large", "content exceeds the output size limit");
     }
@@ -114,6 +145,224 @@ export async function renderDocument(request: RenderRequest): Promise<Rendered> 
     mediaType: "application/pdf",
     extension: ".pdf",
   };
+}
+
+/**
+ * Builds an OOXML package.
+ *
+ * Output is bounded the same way the text formats are — after the fact rather than mid-stream,
+ * because a zip is only measurable once it is closed. The input ceiling upstream is what actually
+ * keeps that from being a memory problem; deflate never expands 200k characters past the ceiling.
+ */
+function renderOffice(request: RenderRequest): Rendered {
+  const shape = OFFICE[request.format];
+  let bytes: Uint8Array;
+  try {
+    if (request.format === "xlsx") bytes = renderXlsx(request.content, request.title);
+    else if (request.format === "pptx") bytes = renderPptx(request.content, request.title);
+    else bytes = renderDocx(request.content, request.title);
+  } catch (error) {
+    if (error instanceof RenderError) throw error;
+    throw new RenderError("invalid_content", `${request.format} content could not be rendered`);
+  }
+  if (bytes.byteLength > MAX_RENDER_OUTPUT_BYTES) {
+    throw new RenderError("output_too_large", "content exceeds the output size limit");
+  }
+  return { bytes, mediaType: shape.mediaType, extension: shape.extension };
+}
+
+function serializeStructuredText(format: PassthroughFormat, content: string): string {
+  try {
+    if (format === "json") return `${JSON.stringify(JSON.parse(content), null, 2)}\n`;
+    if (format === "yaml") {
+      if (/(?:^|[\s[{,:-])(?:![^\s]|[&*][A-Za-z0-9_-]+)|(?:^|\n)\s*<<\s*:/m.test(content)) {
+        throw new RenderError(
+          "invalid_content",
+          "yaml tags, anchors, aliases, and merge keys are not supported"
+        );
+      }
+      return `${serializeYaml(parseYamlDocument(content))}\n`;
+    }
+    if (format === "xml") validateXml(content);
+    return content;
+  } catch (error) {
+    if (error instanceof RenderError) throw error;
+    throw new RenderError("invalid_content", `${format} content is not valid`);
+  }
+}
+
+function yamlScalar(value: string | number | boolean | null): string {
+  if (value === null) return "null";
+  if (typeof value === "string") return JSON.stringify(value);
+  if (typeof value === "number" && !Number.isFinite(value)) {
+    throw new RenderError("invalid_content", "yaml content contains a non-finite number");
+  }
+  return String(value);
+}
+
+function serializeYaml(value: unknown, depth = 0): string {
+  if (
+    value === null ||
+    typeof value === "string" ||
+    typeof value === "number" ||
+    typeof value === "boolean"
+  ) {
+    return yamlScalar(value);
+  }
+  const indent = "  ".repeat(depth);
+  if (Array.isArray(value)) {
+    if (value.length === 0) return "[]";
+    return value
+      .map((item) => {
+        const rendered = serializeYaml(item, depth + 1);
+        return rendered.includes("\n")
+          ? `${indent}-\n${rendered}`
+          : `${indent}- ${rendered.trimStart()}`;
+      })
+      .join("\n");
+  }
+  if (typeof value === "object") {
+    const entries = Object.entries(value as Record<string, unknown>).sort(([a], [b]) =>
+      a.localeCompare(b)
+    );
+    if (entries.length === 0) return "{}";
+    return entries
+      .map(([key, item]) => {
+        const rendered = serializeYaml(item, depth + 1);
+        const prefix = `${indent}${JSON.stringify(key)}:`;
+        return rendered.includes("\n")
+          ? `${prefix}\n${rendered}`
+          : `${prefix} ${rendered.trimStart()}`;
+      })
+      .join("\n");
+  }
+  throw new RenderError("invalid_content", "yaml content contains an unsupported value");
+}
+
+const XML_NAME = /^[A-Za-z_][A-Za-z0-9_.:-]*/;
+const XML_ENTITY = /&(?:amp|lt|gt|apos|quot|#\d+|#x[0-9a-fA-F]+);/g;
+
+function validateXmlEntities(value: string): void {
+  if (value.replace(XML_ENTITY, "").includes("&")) {
+    throw new RenderError("invalid_content", "xml content contains an unsupported entity");
+  }
+}
+
+function xmlTagEnd(source: string, start: number): number {
+  let quote: "'" | '"' | undefined;
+  for (let index = start; index < source.length; index += 1) {
+    const char = source[index];
+    if (quote !== undefined) {
+      if (char === quote) quote = undefined;
+      continue;
+    }
+    if (char === "'" || char === '"') quote = char;
+    else if (char === ">") return index;
+  }
+  return -1;
+}
+
+function validateXmlTag(raw: string): { name: string; selfClosing: boolean } {
+  const trimmed = raw.trim();
+  const selfClosing = trimmed.endsWith("/");
+  const body = selfClosing ? trimmed.slice(0, -1).trimEnd() : trimmed;
+  const name = body.match(XML_NAME)?.[0];
+  if (name === undefined) throw new RenderError("invalid_content", "xml tag name is invalid");
+  if (/(?:^|:)include$/i.test(name)) {
+    throw new RenderError("invalid_content", "xml include elements are not supported");
+  }
+
+  let rest = body.slice(name.length);
+  const names = new Set<string>();
+  while (rest.trim().length > 0) {
+    const match = rest.match(/^\s+([A-Za-z_][A-Za-z0-9_.:-]*)\s*=\s*("([^"]*)"|'([^']*)')/);
+    if (match === null) throw new RenderError("invalid_content", "xml attributes are invalid");
+    const attribute = match[1];
+    if (names.has(attribute)) {
+      throw new RenderError("invalid_content", `xml attribute ${attribute} is duplicated`);
+    }
+    names.add(attribute);
+    const value = match[3] ?? match[4] ?? "";
+    if (value.includes("<")) {
+      throw new RenderError("invalid_content", "xml attributes cannot contain '<'");
+    }
+    validateXmlEntities(value);
+    rest = rest.slice(match[0].length);
+  }
+  return { name, selfClosing };
+}
+
+function validateXml(source: string): void {
+  if (/<!DOCTYPE|<!ENTITY|<\?xml-stylesheet/i.test(source)) {
+    throw new RenderError(
+      "invalid_content",
+      "xml declarations with external behavior are not supported"
+    );
+  }
+
+  const stack: string[] = [];
+  let roots = 0;
+  let cursor = 0;
+  while (cursor < source.length) {
+    const open = source.indexOf("<", cursor);
+    const text = open === -1 ? source.slice(cursor) : source.slice(cursor, open);
+    if (text.includes("]]>")) {
+      throw new RenderError("invalid_content", "xml text contains an invalid CDATA terminator");
+    }
+    validateXmlEntities(text);
+    if (stack.length === 0 && text.trim().length > 0) {
+      throw new RenderError("invalid_content", "xml content must have one root element");
+    }
+    if (open === -1) break;
+
+    if (source.startsWith("<!--", open)) {
+      const close = source.indexOf("-->", open + 4);
+      if (close === -1 || source.slice(open + 4, close).includes("--")) {
+        throw new RenderError("invalid_content", "xml comment is invalid");
+      }
+      cursor = close + 3;
+      continue;
+    }
+    if (source.startsWith("<![CDATA[", open)) {
+      if (stack.length === 0) {
+        throw new RenderError("invalid_content", "xml CDATA must be inside the root element");
+      }
+      const close = source.indexOf("]]>", open + 9);
+      if (close === -1) throw new RenderError("invalid_content", "xml CDATA is not closed");
+      cursor = close + 3;
+      continue;
+    }
+    if (source.startsWith("<?xml", open) && source.slice(0, open).trim().length === 0) {
+      const close = source.indexOf("?>", open + 5);
+      if (close === -1) throw new RenderError("invalid_content", "xml declaration is not closed");
+      cursor = close + 2;
+      continue;
+    }
+    if (source.startsWith("<!", open) || source.startsWith("<?", open)) {
+      throw new RenderError("invalid_content", "xml directives are not supported");
+    }
+
+    const close = xmlTagEnd(source, open + 1);
+    if (close === -1) throw new RenderError("invalid_content", "xml tag is not closed");
+    const raw = source.slice(open + 1, close);
+    if (raw.startsWith("/")) {
+      const name = raw.slice(1).trim();
+      if (!XML_NAME.test(name) || XML_NAME.exec(name)?.[0] !== name) {
+        throw new RenderError("invalid_content", "xml closing tag is invalid");
+      }
+      if (stack.pop() !== name) {
+        throw new RenderError("invalid_content", `xml closing tag ${name} does not match`);
+      }
+    } else {
+      if (stack.length === 0) roots += 1;
+      const tag = validateXmlTag(raw);
+      if (!tag.selfClosing) stack.push(tag.name);
+    }
+    cursor = close + 1;
+  }
+  if (roots !== 1 || stack.length > 0) {
+    throw new RenderError("invalid_content", "xml content must have one closed root element");
+  }
 }
 
 const MARGIN = 54;

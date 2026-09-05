@@ -12,12 +12,15 @@ export function Modal({
   title,
   children,
   className,
+  bodyClassName,
 }: {
   open: boolean;
   onClose: () => void;
   title: string;
   children: React.ReactNode;
   className?: string;
+  /** Overrides the body's padding and flow, for a modal whose content fills its own height. */
+  bodyClassName?: string;
 }) {
   const ref = useRef<HTMLDialogElement>(null);
   const titleId = useId();
@@ -73,12 +76,12 @@ export function Modal({
       aria-labelledby={titleId}
       onClick={onBackdropClick}
       className={cn(
-        "m-auto w-full max-w-sm rounded-lg border border-border bg-popover p-0 text-foreground shadow-lg",
+        "m-auto flex w-full max-w-sm flex-col overflow-hidden rounded-lg border border-border bg-popover p-0 text-foreground shadow-lg",
         "[&::backdrop]:bg-foreground/30",
         className
       )}
     >
-      <div className="flex items-center justify-between border-b border-border px-4 py-3">
+      <div className="flex shrink-0 items-center justify-between border-b border-border px-4 py-3">
         <h2 id={titleId} className="text-sm font-medium text-foreground">
           {title}
         </h2>
@@ -91,7 +94,7 @@ export function Modal({
           <X className="size-4" />
         </button>
       </div>
-      <div className="px-4 py-4 text-sm">{children}</div>
+      <div className={cn("px-4 py-4 text-sm", bodyClassName)}>{children}</div>
     </dialog>
   );
 }
@@ -103,6 +106,7 @@ export function ConfirmModal({
   title,
   description,
   confirmLabel = "Delete",
+  busyLabel = "Deleting…",
   busy = false,
   error = null,
 }: {
@@ -112,6 +116,7 @@ export function ConfirmModal({
   title: string;
   description: string;
   confirmLabel?: string;
+  busyLabel?: string;
   busy?: boolean;
   /** A failed confirm belongs inside the dialog — `showModal` makes the rest of the page inert. */
   error?: string | null;
@@ -143,7 +148,7 @@ export function ConfirmModal({
           onClick={onConfirm}
           disabled={busy}
         >
-          {busy ? "Deleting…" : confirmLabel}
+          {busy ? busyLabel : confirmLabel}
         </Button>
       </div>
     </Modal>

@@ -140,7 +140,11 @@ export function buildToolRegistry(services: {
 
   if (services.agentTools) {
     const ctx = services.agentTools;
-    registerFamily(AGENT_TOOLS, ({ agentId }) => ({ ...ctx, agentId }));
+    registerFamily(AGENT_TOOLS, (requestContext) => ({
+      ...ctx,
+      requestContext,
+      agentId: requestContext.agentId,
+    }));
   }
 
   if (services.skillTools) {

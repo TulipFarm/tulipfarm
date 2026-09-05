@@ -19,6 +19,16 @@ function svg(): Uint8Array {
   return new TextEncoder().encode('<svg xmlns="http://www.w3.org/2000/svg"><script/></svg>');
 }
 
+function zipWithEntry(name: string): Uint8Array {
+  const encoded = new TextEncoder().encode(name);
+  const bytes = new Uint8Array(30 + encoded.length);
+  bytes.set([0x50, 0x4b, 0x03, 0x04]);
+  bytes[26] = encoded.length & 0xff;
+  bytes[27] = encoded.length >> 8;
+  bytes.set(encoded, 30);
+  return bytes;
+}
+
 describe("sniffMediaType", () => {
   it.each([
     ["png", PNG, "image/png"],
@@ -62,6 +72,29 @@ describe("resolveMediaType", () => {
   it("accepts multi-byte UTF-8 text cut off mid-codepoint by the sniff window", () => {
     const long = new TextEncoder().encode("é".repeat(400));
     expect(resolveMediaType(long, "text/markdown")).toBe("text/markdown");
+  });
+
+  it.each(["application/json", "application/xml", "application/yaml"])(
+    "accepts safe structured text claimed as %s",
+    (mediaType) => {
+      expect(resolveMediaType(new TextEncoder().encode('{"ok":true}'), mediaType)).toBe(mediaType);
+      expect(isAllowedMediaType(mediaType)).toBe(true);
+    }
+  );
+
+  it.each([
+    [
+      "word/document.xml",
+      "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    ],
+    ["xl/workbook.xml", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"],
+    [
+      "ppt/presentation.xml",
+      "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+    ],
+  ])("accepts an Office document whose ZIP entries match %s", (entry, mediaType) => {
+    expect(resolveMediaType(zipWithEntry(entry), mediaType)).toBe(mediaType);
+    expect(isAllowedMediaType(mediaType)).toBe(true);
   });
 
   // SVG reaches this branch as text, so refusal has to come from the allowlist, not the sniffer.

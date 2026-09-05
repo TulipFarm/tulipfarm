@@ -97,6 +97,25 @@ export class PgKnowledgeSourceStore implements MutableKnowledgeSourceStore {
     return rows.length > 0 ? rowToRecord(rows[0] as unknown as KnowledgeSourceRow) : undefined;
   }
 
+  async getMany(
+    businessId: string,
+    sourceIds: readonly string[]
+  ): Promise<readonly KnowledgeSourceRecord[]> {
+    if (sourceIds.length === 0) return [];
+    const { rows } = await this.q.query(
+      `SELECT * FROM knowledge_source_records
+       WHERE business_id = $1 AND source_id = ANY($2::text[])`,
+      [businessId, [...sourceIds]]
+    );
+    const byId = new Map(
+      (rows as unknown as KnowledgeSourceRow[]).map((row) => [row.source_id, rowToRecord(row)])
+    );
+    return sourceIds.flatMap((id) => {
+      const source = byId.get(id);
+      return source === undefined ? [] : [source];
+    });
+  }
+
   async put(record: KnowledgeSourceRecord): Promise<void> {
     const acl = record.accessControl.mode === "snapshot" ? record.acl : undefined;
     await this.q.query(

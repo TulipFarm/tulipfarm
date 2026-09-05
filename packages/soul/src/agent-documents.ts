@@ -87,6 +87,7 @@ export function agentDocumentFromLegacy(
   const fields = isRecord(frontmatter) ? frontmatter : {};
   const autonomy = typeof fields.autonomy === "string" ? fields.autonomy : undefined;
   const label = typeof fields.label === "string" ? fields.label : undefined;
+  const ownership = isRecord(fields.ownership) ? fields.ownership : undefined;
   const personality = body.trim();
 
   const document = {
@@ -102,6 +103,7 @@ export function agentDocumentFromLegacy(
     },
     spec: {
       owner: SYNTHESIZED_OWNER,
+      ...(ownership === undefined ? {} : { ownership }),
       instructions: { path: legacyPath },
       ...(personality.length === 0 ? {} : { personality: personality.slice(0, PERSONALITY_MAX) }),
       modelProfile,

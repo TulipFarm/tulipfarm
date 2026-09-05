@@ -1,6 +1,6 @@
 /** The read models the authz admin surface returns, and the result vocabulary its mutations answer with. */
 
-import type { AccessGrant, AuthzDecisionReason } from "@tulipfarm/authz";
+import type { AccessGrant, AuthorityEvidenceKind, AuthzDecisionReason } from "@tulipfarm/authz";
 import type { PrincipalKind, PrincipalRecord } from "@tulipfarm/storage";
 import type { LayerEmptyReason } from "../identity/authority-layers";
 
@@ -50,6 +50,18 @@ export interface EffectiveGrantsView {
 
 export type ExplainNotFound = { readonly notFound: "principal" | "agent" };
 
+export interface AuthorityEvidenceView {
+  readonly kind: AuthorityEvidenceKind;
+  readonly effect: "allow" | "deny" | "informational";
+  readonly sourceTeamId?: string;
+  readonly sourcePrincipalId?: string;
+  readonly roleId?: string;
+  readonly grantId?: string;
+  readonly authorityLayer?: string;
+  readonly pathTeamIds?: readonly string[];
+  readonly expiresAt?: string;
+}
+
 export interface ExplainInput {
   readonly principalId: string;
   readonly action: string;
@@ -77,6 +89,7 @@ export interface ExplainView {
   readonly unevaluatedLayers: readonly string[];
   readonly layerEmptyReasons?: Readonly<Record<string, LayerEmptyReason>>;
   readonly unresolvedRoleIds?: readonly string[];
+  readonly evidence: readonly AuthorityEvidenceView[];
   /** True when `allowed` means only "no evaluated layer denied". */
   readonly partial: boolean;
 }

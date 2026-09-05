@@ -1,5 +1,7 @@
 import { createRemixStub } from "@remix-run/testing";
 import { render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import type { ComponentProps } from "react";
 import { describe, expect, it, vi } from "vitest";
 import type { LibraryFile } from "~/lib/files";
 import { FileList } from "./file-list";
@@ -16,33 +18,31 @@ function libraryFile(overrides: Partial<LibraryFile> = {}): LibraryFile {
     mediaType: "application/pdf",
     sizeBytes: 2048,
     createdAt: "2026-01-02T03:04:05.000Z",
+    modifiedAt: "2026-02-03T04:05:06.000Z",
+    revision: 2,
+    currentVersionId: "version_2",
+    archivedAt: null,
     owner: "user_1",
+    ownerName: "Muskan Vijayvargiya",
+    folderId: null,
     origin: "uploaded",
     sourceChatId: null,
     sourceRunId: null,
-    sharedWithCount: null,
+    sharedWithCount: 0,
+    inKnowledge: false,
     ...overrides,
   };
 }
 
 function renderList(
   files: readonly LibraryFile[],
-  onAttach?: (f: LibraryFile) => void,
-  onShare?: (f: LibraryFile) => void,
-  onDelete?: (f: LibraryFile) => void
+  actions: Partial<ComponentProps<typeof FileList>> = {}
 ) {
   const Stub = createRemixStub([
     {
       path: "/",
       Component: () => (
-        <FileList
-          files={files}
-          viewerId="user_1"
-          onPreview={() => {}}
-          {...(onAttach ? { onAttach } : {})}
-          {...(onShare ? { onShare } : {})}
-          {...(onDelete ? { onDelete } : {})}
-        />
+        <FileList files={files} viewerId="user_1" onPreview={() => {}} {...actions} />
       ),
     },
   ]);
@@ -50,124 +50,112 @@ function renderList(
 }
 
 describe("FileList", () => {
-  it("says on the row how many people a File is shared with, and stays silent when none", () => {
+  it("renders the required dense semantic table columns", () => {
+    renderList([libraryFile()]);
+
+    expect(screen.getByRole("table")).toBeInTheDocument();
+    for (const name of ["Name", "Owner", "Access", "Modified", "Size"]) {
+      expect(screen.getByRole("columnheader", { name })).toBeInTheDocument();
+    }
+  });
+
+  it("opens preview from the filename or row without an eye action", async () => {
+    const user = userEvent.setup();
+    const onPreview = vi.fn();
+    renderList([libraryFile()], { onPreview });
+
+    await user.click(screen.getByRole("button", { name: "Preview report.pdf" }));
+    expect(onPreview).toHaveBeenCalledTimes(1);
+
+    await user.click(screen.getByRole("button", { name: "Owner: Muskan Vijayvargiya" }));
+    expect(onPreview).toHaveBeenCalledTimes(2);
+    expect(
+      screen.queryByRole("button", { name: "Preview report.pdf", hidden: false })
+    ).toBeTruthy();
+  });
+
+  it("shows owners as avatars with popup labels and access as badges", async () => {
+    const user = userEvent.setup();
     renderList([
-      libraryFile({ id: "shared", filename: "shared.pdf", sharedWithCount: 3 }),
-      libraryFile({ id: "one", filename: "one.pdf", sharedWithCount: 1 }),
-      libraryFile({ id: "private", filename: "private.pdf", sharedWithCount: 0 }),
+      libraryFile({
+        id: "private",
+        filename: "private.pdf",
+        ownerName: "admin@tulipfarm.dev",
+      }),
+      libraryFile({
+        id: "shared",
+        filename: "shared.pdf",
+        ownerName: "admin@tulipfarm.dev",
+        sharedWithCount: 3,
+      }),
+      libraryFile({
+        id: "theirs",
+        filename: "theirs.pdf",
+        owner: "user_2",
+        ownerName: "Other Person",
+      }),
     ]);
 
-    expect(screen.getByText("Shared with 3")).toBeTruthy();
-    expect(screen.getByText("Shared with 1")).toBeTruthy();
-    expect(screen.queryByText("Shared with 0")).toBeNull();
+    expect(screen.queryByText("admin@tulipfarm.dev")).toBeNull();
+    const owner = screen.getAllByRole("button", { name: "Owner: admin@tulipfarm.dev" })[0];
+    if (!owner) throw new Error("Expected an owner avatar");
+    await user.hover(owner);
+    expect(await screen.findByRole("tooltip")).toHaveTextContent("admin@tulipfarm.dev");
+    for (const label of ["Private", "Shared with 3", "Shared with you"]) {
+      expect(screen.getByText(label)).toHaveClass("rounded-full", "border");
+    }
   });
 
-  it("offers Share on a File the viewer owns and withholds it on one shared with them", () => {
-    renderList(
-      [
-        libraryFile({ id: "mine", filename: "mine.pdf", owner: "user_1" }),
-        libraryFile({ id: "theirs", filename: "theirs.pdf", owner: "user_2" }),
-      ],
-      undefined,
-      () => {}
-    );
-
-    expect(screen.getByRole("button", { name: "Share mine.pdf" })).toBeTruthy();
-    expect(screen.queryByRole("button", { name: "Share theirs.pdf" })).toBeNull();
-  });
-
-  it("tells an agent-generated File apart from an uploaded one in words, not only colour", () => {
-    renderList([
-      libraryFile({ id: "a", filename: "made.pdf", origin: "generated" }),
-      libraryFile({ id: "b", filename: "sent.pdf", origin: "uploaded" }),
-    ]);
-
-    expect(screen.getByText("Agent-generated")).toBeTruthy();
-    expect(screen.getByText("Uploaded")).toBeTruthy();
-  });
-
-  it("names the viewer as themselves rather than showing their own id back to them", () => {
-    renderList([libraryFile({ owner: "user_1" })]);
-    expect(screen.getByText("you")).toBeTruthy();
-  });
-
-  it("links to the Chat a File came from, and shows no link when it has none", () => {
-    renderList([libraryFile({ id: "a", sourceChatId: "conv_9" })]);
-    expect(screen.getByRole("link", { name: /from a chat/i }).getAttribute("href")).toBe(
-      "/chat/conv_9"
-    );
-
-    renderList([libraryFile({ id: "b", sourceChatId: null })]);
-    expect(screen.queryAllByRole("link", { name: /from a chat/i })).toHaveLength(1);
-  });
-
-  it("links a generated File to the Run that made it, and an upload to nothing", () => {
-    renderList([libraryFile({ id: "a", origin: "generated", sourceRunId: "run_9" })]);
-    expect(screen.getByRole("link", { name: /from a run/i }).getAttribute("href")).toBe(
-      "/runs/run_9"
-    );
-
-    renderList([libraryFile({ id: "b", sourceRunId: null })]);
-    expect(screen.queryAllByRole("link", { name: /from a run/i })).toHaveLength(1);
-  });
-
-  it("offers a preview for a PDF and a plain name for a type it cannot show", () => {
-    renderList([libraryFile({ id: "a", filename: "report.pdf", mediaType: "application/pdf" })]);
-    expect(screen.getByRole("button", { name: "report.pdf" })).toBeTruthy();
-
-    renderList([libraryFile({ id: "b", filename: "notes.txt", mediaType: "text/plain" })]);
-    expect(screen.queryByRole("button", { name: "notes.txt" })).toBeNull();
-  });
-
-  it("hands a File back to the caller to attach, rather than uploading it again", () => {
+  it("groups secondary actions into one accessible menu", async () => {
+    const user = userEvent.setup();
     const onAttach = vi.fn();
-    renderList([libraryFile({ filename: "report.pdf" })], onAttach);
+    const onShare = vi.fn();
+    const onArchive = vi.fn();
+    renderList([libraryFile()], { onAttach, onShare, onArchive });
 
-    screen.getByRole("button", { name: "Attach report.pdf to a new chat" }).click();
+    expect(screen.queryByRole("button", { name: "Share report.pdf" })).toBeNull();
+    await user.click(screen.getByRole("button", { name: "Actions for report.pdf" }));
+    expect(screen.getByRole("menuitem", { name: "Share" })).toBeInTheDocument();
+    await user.click(screen.getByRole("menuitem", { name: "Archive" }));
 
-    expect(onAttach).toHaveBeenCalledWith(expect.objectContaining({ id: "file_1" }));
+    expect(onArchive).toHaveBeenCalledWith(expect.objectContaining({ id: "file_1" }));
   });
 
-  it("shows a size a person can read", () => {
-    renderList([libraryFile({ sizeBytes: 2048 })]);
-    expect(screen.getByText(/2\.0 KB/)).toBeTruthy();
+  it("offers permanent delete only for an archived File the viewer owns", async () => {
+    const user = userEvent.setup();
+    const onDelete = vi.fn();
+    renderList([libraryFile({ archivedAt: "2026-03-01T00:00:00.000Z" })], { onDelete });
+
+    await user.click(screen.getByRole("button", { name: "Actions for report.pdf" }));
+    await user.click(screen.getByRole("menuitem", { name: "Delete permanently" }));
+
+    expect(onDelete).toHaveBeenCalledWith(expect.objectContaining({ id: "file_1" }));
+  });
+
+  it("does not offer owner actions on a File shared with the viewer", async () => {
+    const user = userEvent.setup();
+    renderList([libraryFile({ owner: "user_2" })], {
+      onShare: vi.fn(),
+      onArchive: vi.fn(),
+      onDelete: vi.fn(),
+    });
+
+    await user.click(screen.getByRole("button", { name: "Actions for report.pdf" }));
+    expect(screen.queryByRole("menuitem", { name: "Share" })).toBeNull();
+    expect(screen.queryByRole("menuitem", { name: "Archive" })).toBeNull();
+    expect(screen.queryByRole("menuitem", { name: "Delete permanently" })).toBeNull();
   });
 });
 
 describe("a download that fails", () => {
-  it("says so, rather than looking like a download the browser handled quietly", async () => {
+  it("announces the failure", async () => {
     const files = await import("~/lib/files");
     vi.mocked(files.fetchFileObjectUrl).mockRejectedValueOnce(new Error("gone"));
-    renderList([libraryFile({ filename: "report.pdf" })]);
+    renderList([libraryFile()]);
 
-    screen.getByRole("button", { name: "Download report.pdf" }).click();
+    await userEvent.click(screen.getByRole("button", { name: "Actions for report.pdf" }));
+    await userEvent.click(screen.getByRole("menuitem", { name: "Download" }));
 
-    expect(await screen.findByRole("alert")).toHaveProperty("textContent", "Download failed");
-  });
-});
-
-describe("deleting from the library", () => {
-  it("offers Delete on a File you own and never on one shared with you", () => {
-    renderList(
-      [
-        libraryFile({ id: "mine", filename: "mine.pdf", owner: "user_1" }),
-        libraryFile({ id: "theirs", filename: "theirs.pdf", owner: "user_2" }),
-      ],
-      undefined,
-      undefined,
-      () => {}
-    );
-
-    expect(screen.getByRole("button", { name: "Delete mine.pdf" })).toBeTruthy();
-    expect(screen.queryByRole("button", { name: "Delete theirs.pdf" })).toBeNull();
-  });
-
-  it("asks the caller to confirm rather than destroying on the click itself", () => {
-    const onDelete = vi.fn();
-    renderList([libraryFile({ filename: "report.pdf" })], undefined, undefined, onDelete);
-
-    screen.getByRole("button", { name: "Delete report.pdf" }).click();
-
-    expect(onDelete).toHaveBeenCalledWith(expect.objectContaining({ id: "file_1" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("Download failed");
   });
 });

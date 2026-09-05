@@ -13,6 +13,24 @@ export type GuardrailsModel = {
   items: GuardrailItem[];
 };
 
+export type TeamMigrationReportItem = {
+  legacyGroupId: string;
+  teamId: string;
+  teamSlug: string;
+  displayName: string;
+  slugConflict: boolean;
+  siblingNameConflict: boolean;
+  migratedAt: string;
+};
+
+export type TeamMigrationReport = {
+  items: TeamMigrationReportItem[];
+};
+
+export function getTeamMigrationReport(): Promise<TeamMigrationReport> {
+  return apiGet<TeamMigrationReport>("/api/v1/admin/team-migration-report");
+}
+
 export function getGuardrails(): Promise<GuardrailsModel> {
   return apiGet<GuardrailsModel>("/api/v1/guardrails");
 }

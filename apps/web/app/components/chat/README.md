@@ -106,6 +106,7 @@ A rename issued from the top bar can race the async titler, so `buildAndStoreTit
 |---|---|
 | `parts.tsx` Response (text) | `text` (live) |
 | `tool-inspector.tsx` + `json-view.tsx` + `approval-card.tsx` | `tool-call`/`tool-result` + `approval-request`/`approval-resolved` (live) |
+| `file-draft-card.tsx` | A successful Chat `file_create` result; authenticated Download, explicit Save File, and a Revise handoff back to the composer |
 | `tool-trace.tsx` `<ToolTrace>` via `timeline-groups.ts` | groups consecutive Tool rows into one `tool-run` node and draws it — live and sealed alike; emits no events of its own |
 | `parts.tsx` sources | `sources` (live) and restored conversations via `lib/chat/hydrate.ts` |
 | `parts.tsx` reasoning / plan / task / agent-handoff / surface (`<SurfaceFrame>`) | **contract-only** — typed + rendered now, light up when the backend emits. No participant-audience event in `RUN_EVENT_TYPES` produces them today; `/design-guide` tags these specimens `contract-only` so they are not mistaken for shipped behaviour. |
@@ -119,9 +120,10 @@ a present-tense header while the work is live, a `Ran N tools` header once it is
 a bordered record that said the same things inside a box, which made every reply that touched a
 Tool open with a slab of chrome above the answer the reader actually asked for.
 
-There is no bordered record left, in any state. An **approval** is the one thing the trace does
-not hide: `ApprovalCard` renders as a sibling *between* the steps, always visible, and its run is
-never `foldable`. A question the reader has to click to find is a question they will miss.
+There is no generic bordered Tool record left. An **approval** is one thing the trace does not
+hide: `ApprovalCard` renders as a sibling *between* the steps, always visible, and its run is never
+`foldable`. A generated File draft is the other: `FileDraftCard` keeps Download, Save File, and
+Revise visible because the Tool has not completed the user's requested lifecycle until they choose.
 
 It is a step on the rail, not a card — no border, no fill. In a surface where nothing else is
 filled, the primary `Approve` button is the loudest thing on screen without any help. Once the

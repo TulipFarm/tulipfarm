@@ -48,6 +48,7 @@ export interface PersistedState {
   readonly generatedFiles: readonly {
     readonly filename: string;
     readonly readableBy: readonly string[];
+    readonly status?: "draft" | "saved";
   }[];
   readonly curatorTasks?: readonly { readonly title: string }[];
   /** Real Tool dispatches that were denied, with the reason the dispatcher gave back. */
@@ -272,6 +273,7 @@ function evaluate(a: Expectation, obs: Observation): { passed: boolean; detail: 
           detail: `${a.grantee} ${want ? "may" : "may not"} read every File the Turn generated`,
         };
       }
+
       return {
         passed: false,
         detail: `${a.grantee} ${want ? "may not" : "may"} read ${wrong
@@ -283,6 +285,15 @@ function evaluate(a: Expectation, obs: Observation): { passed: boolean; detail: 
           )
           .join("; ")}`,
       };
+    }
+
+    case "generated_file_draft_created": {
+      const persisted = obs.persisted;
+      if (persisted === undefined) return notPersisted(a.kind);
+      const drafts = persisted.generatedFiles.filter((file) => file.status === "draft");
+      return drafts.length > 0
+        ? { passed: true, detail: `${drafts.length} generated draft(s) were created` }
+        : { passed: false, detail: "the Chat created no generated File draft" };
     }
 
     case "curator_task_visible": {
@@ -580,6 +591,7 @@ const SEAM_TOOL: Readonly<Record<string, string>> = {
   // Same shape: there is no audience to read until the model has actually written a document.
   generated_file_readable_by: "file_create",
   generated_file_not_readable_by: "file_create",
+  generated_file_draft_created: "file_create",
 };
 
 /**

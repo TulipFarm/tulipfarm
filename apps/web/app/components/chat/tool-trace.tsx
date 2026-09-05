@@ -2,6 +2,7 @@ import { Fragment, useState } from "react";
 import { LOADER_LABELS, pick } from "~/components/ui/loading-state";
 import { Trace, TraceStep } from "~/components/ui/trace";
 import type { TimelinePart } from "~/lib/chat/types";
+import { type FileDraftResult, fileDraftOf } from "./file-draft-card";
 import { concurrentRuns, largestConcurrentRun } from "./timeline-groups";
 import { ToolStepRow } from "./tool-step";
 import { describeToolCallActive, summarizeToolCall } from "./tool-summary";
@@ -29,11 +30,13 @@ export function ToolTrace({
   pending,
   foldable,
   onApprove,
+  onReviseDraft,
 }: {
   parts: readonly ToolPart[];
   pending: boolean;
   foldable: boolean;
   onApprove: (approvalId: string, decision: "approve" | "deny") => void;
+  onReviseDraft?: (draft: FileDraftResult) => void;
 }) {
   const [betweenCallsLabel] = useState(() => pick(LOADER_LABELS));
   const settled = parts.filter((part) => part.status === "done").length;
@@ -64,7 +67,7 @@ export function ToolTrace({
       working={pending || running !== undefined}
       // Folding is about attention, not evidence. A run below three steps saves nothing by
       // collapsing, and a run still holding an approval is an ask the reader must be able to see.
-      keepOpen={!foldable}
+      keepOpen={!foldable || parts.some((part) => fileDraftOf(part) !== undefined)}
       // The header already names the call in flight, and each row carries its own duration; a
       // second timer beside it would be the same clock twice.
       showElapsed={false}
@@ -81,7 +84,7 @@ export function ToolTrace({
             {startsBatch === undefined ? null : (
               <p className="pt-1 text-xs text-muted-foreground">{`${startsBatch} at the same time`}</p>
             )}
-            <ToolStepRow part={part} onApprove={onApprove} />
+            <ToolStepRow part={part} onApprove={onApprove} onReviseDraft={onReviseDraft} />
           </Fragment>
         );
       })}

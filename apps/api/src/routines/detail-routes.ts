@@ -5,6 +5,7 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { ErrorSchema } from "../auth/schemas";
 import type { UserDoc } from "../auth/users";
 import type { RequireAuthorization, RouteAuthorization } from "../authz/route-gate";
+import type { TeamAssetService } from "../team-assets/service";
 import { routineSchema, security } from "./catalog-routes";
 
 type PreHandler = (request: FastifyRequest, reply: FastifyReply) => Promise<unknown>;
@@ -41,6 +42,7 @@ export interface RoutineDetailDeps {
     caller: { readonly kind: string; readonly id: string },
     idempotencyKey?: string
   ) => Promise<{ readonly runId: string }>;
+  readonly teamAssets?: TeamAssetService;
 }
 
 const READ: RouteAuthorization = {
@@ -213,6 +215,19 @@ export function registerRoutineDetailRoutes(
       const { slug } = request.params as { slug: string };
       const detail = await load(slug);
       if (!detail) return reply.status(404).send(NOT_FOUND);
+      if (deps.teamAssets && request.principal) {
+        try {
+          await deps.teamAssets.require(
+            "routine",
+            detail.id,
+            request.principal,
+            "view",
+            detail.summary.ownership ?? undefined
+          );
+        } catch {
+          return reply.status(404).send(NOT_FOUND);
+        }
+      }
       return {
         id: detail.id,
         slug: detail.slug,
@@ -257,6 +272,19 @@ export function registerRoutineDetailRoutes(
       const { limit } = request.query as { limit?: number };
       const detail = await load(slug);
       if (!detail) return reply.status(404).send(NOT_FOUND);
+      if (deps.teamAssets && request.principal) {
+        try {
+          await deps.teamAssets.require(
+            "routine",
+            detail.id,
+            request.principal,
+            "view",
+            detail.summary.ownership ?? undefined
+          );
+        } catch {
+          return reply.status(404).send(NOT_FOUND);
+        }
+      }
       return {
         items: await deps.runs.listByRoutine({
           routineId: detail.id,
@@ -305,6 +333,19 @@ export function registerRoutineDetailRoutes(
       const { slug } = request.params as { slug: string };
       const detail = await load(slug);
       if (!detail) return reply.status(404).send(NOT_FOUND);
+      if (deps.teamAssets && request.principal) {
+        try {
+          await deps.teamAssets.require(
+            "routine",
+            detail.id,
+            request.principal,
+            "use",
+            detail.summary.ownership ?? undefined
+          );
+        } catch {
+          return reply.status(403).send({ error: "Routine use access is required." });
+        }
+      }
       const body = (request.body ?? {}) as { inputs?: Record<string, unknown> };
       const key = (request.headers["idempotency-key"] as string | undefined) ?? undefined;
       try {
@@ -354,6 +395,19 @@ export function registerRoutineDetailRoutes(
       const { slug } = request.params as { slug: string };
       const detail = await load(slug);
       if (!detail) return reply.status(404).send(NOT_FOUND);
+      if (deps.teamAssets && request.principal) {
+        try {
+          await deps.teamAssets.require(
+            "routine",
+            detail.id,
+            request.principal,
+            "use",
+            detail.summary.ownership ?? undefined
+          );
+        } catch {
+          return reply.status(403).send({ error: "Routine use access is required." });
+        }
+      }
       const { inputs, outputs } = (request.body ?? {}) as {
         inputs?: Record<string, unknown>;
         outputs?: Record<string, Record<string, unknown>>;

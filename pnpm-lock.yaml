@@ -1048,6 +1048,9 @@ importers:
       '@tulipfarm/tool-host':
         specifier: workspace:*
         version: link:../tool-host
+      fflate:
+        specifier: ^0.8.3
+        version: 0.8.3
       jimp:
         specifier: ^1.6.1
         version: 1.6.1

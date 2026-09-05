@@ -1,9 +1,14 @@
 /** Roles compose cycle-free, stay within business/kind boundaries, and resolve fail-closed. */
 
+import type { RoleAssignmentTargetKind } from "@tulipfarm/schema";
 import type { AccessGrant } from "./grants";
-import type { Principal, PrincipalKind } from "./principals";
 
-export type RoleAssignableTo = readonly PrincipalKind[];
+export type RoleAssignableTo = readonly RoleAssignmentTargetKind[];
+
+export interface RoleAssignmentTarget {
+  readonly kind: RoleAssignmentTargetKind;
+  readonly businessId: string;
+}
 
 export interface Role {
   readonly id: string;
@@ -14,6 +19,12 @@ export interface Role {
   readonly grants: readonly AccessGrant[];
   /** The role stops granting anything at this instant; absent means no expiry. */
   readonly expiresAt?: Date;
+}
+
+export interface RoleGrantEntry {
+  readonly roleId: string;
+  readonly grantIndex: number;
+  readonly grant: AccessGrant;
 }
 
 export class RoleCycleError extends Error {
@@ -66,24 +77,24 @@ export function assertRoleGraphAcyclic(roles: readonly Role[]): void {
  */
 export function assertRoleAssignable(
   role: Role,
-  principal: Pick<Principal, "kind" | "businessId">,
+  target: RoleAssignmentTarget,
   now: Date = new Date()
 ): void {
-  if (role.businessId !== principal.businessId) {
+  if (role.businessId !== target.businessId) {
     throw new RoleAssignmentError(
       "business_mismatch",
-      `role ${role.id} belongs to a different business than the principal`
+      `role ${role.id} belongs to a different business than the assignment target`
     );
   }
   if (role.expiresAt && role.expiresAt <= now) {
     throw new RoleAssignmentError("expired", `role ${role.id} has expired`);
   }
-  if (!role.assignableTo.includes(principal.kind)) {
+  if (!role.assignableTo.includes(target.kind)) {
     throw new RoleAssignmentError(
       "kind_mismatch",
       `role ${role.id} (${role.assignableTo.join(", ")}) is not assignable to a ${
-        principal.kind
-      } principal`
+        target.kind
+      } target`
     );
   }
 }
@@ -94,7 +105,16 @@ export function collectRoleGrants(
   rolesById: ReadonlyMap<string, Role>,
   now: Date = new Date()
 ): AccessGrant[] {
-  const grants: AccessGrant[] = [];
+  return collectRoleGrantEntries(roleIds, rolesById, now).map((entry) => entry.grant);
+}
+
+/** Flattens Role grants while retaining the authored Role and grant index for explanations. */
+export function collectRoleGrantEntries(
+  roleIds: readonly string[],
+  rolesById: ReadonlyMap<string, Role>,
+  now: Date = new Date()
+): RoleGrantEntry[] {
+  const entries: RoleGrantEntry[] = [];
   const done = new Set<string>();
   let businessId: string | undefined;
   const visit = (id: string, path: readonly string[]): void => {
@@ -113,9 +133,13 @@ export function collectRoleGrants(
       );
     }
     if (role.expiresAt && role.expiresAt <= now) return;
-    grants.push(...role.grants);
+    for (const [grantIndex, grant] of role.grants.entries()) {
+      if (!grant.expiresAt || grant.expiresAt > now) {
+        entries.push({ roleId: role.id, grantIndex, grant });
+      }
+    }
     for (const parentId of role.parentRoleIds) visit(parentId, [...path, id]);
   };
   for (const id of roleIds) visit(id, []);
-  return grants;
+  return entries;
 }

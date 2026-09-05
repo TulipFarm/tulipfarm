@@ -1,7 +1,12 @@
 import { delegationCatalogOf, withDelegatedAuthority } from "@tulipfarm/agent-runtime";
 import { DEPLOYMENT_BUSINESS_ID } from "@tulipfarm/constants";
 import { FILE_TOOLS, type FileToolContext } from "@tulipfarm/files";
-import { KNOWLEDGE_TOOLS, type KnowledgeToolContext, PageReadGate } from "@tulipfarm/knowledge";
+import {
+  KNOWLEDGE_TOOLS,
+  KnowledgeOwnershipProjector,
+  type KnowledgeToolContext,
+  PageReadGate,
+} from "@tulipfarm/knowledge";
 import { KV_TOOLS, KvService, type KvToolContext, PgKvRepo } from "@tulipfarm/kv";
 import {
   MEMORY_DOCUMENT_TOOLS,
@@ -13,6 +18,7 @@ import type { ArtifactService, DurableWaitManager } from "@tulipfarm/run-kernel"
 import {
   type BlobPort,
   ChildLinkAncestryStore,
+  PgAssetOwnershipRepo,
   type Queryable,
   type TransactionPort,
 } from "@tulipfarm/storage";
@@ -117,13 +123,18 @@ function hostedFamilies(options: LocalToolHostOptions): readonly HostedFamily<ne
 
   const knowledge = buildWorkerKnowledgeService({
     db: options.db,
+    transactions: options.transactions,
     embeddings,
     ...(options.enqueueIndexJob === undefined ? {} : { enqueueIndex: options.enqueueIndexJob }),
   });
 
   // The same gate the API's routes use. Without it every exact-lookup Tool refuses, so a Routine
   // could not read even an unrestricted Page.
-  const pageGate = new PageReadGate(options.db);
+  const pageGate = new PageReadGate(
+    options.db,
+    DEPLOYMENT_BUSINESS_ID,
+    new KnowledgeOwnershipProjector(new PgAssetOwnershipRepo(options.transactions))
+  );
 
   const files = buildWorkerFileService(options);
   const fileFamily: HostedFamily<FileToolContext> = {
@@ -134,9 +145,12 @@ function hostedFamilies(options: LocalToolHostOptions): readonly HostedFamily<ne
     context: (ctx) => ({
       businessId: DEPLOYMENT_BUSINESS_ID,
       principalId: ctx.userId,
+      ...(ctx.subject === undefined ? {} : { principalKind: ctx.subject.kind }),
       ...(ctx.agentId === undefined ? {} : { agentId: ctx.agentId }),
       // Recorded on a File this Run authors; it never widens what the Run may read.
       ...(ctx.runId === undefined ? {} : { runId: ctx.runId }),
+      ...(ctx.routineContext === undefined ? {} : { routineId: ctx.routineContext.routineId }),
+      ...(ctx.toolCallId === undefined ? {} : { toolCallId: ctx.toolCallId }),
       service: files,
     }),
   };

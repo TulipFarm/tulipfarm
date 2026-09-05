@@ -1,3 +1,4 @@
+import type { TeamBusinessAssetOwnership } from "@tulipfarm/schema";
 import { isRecord } from "@tulipfarm/schema";
 import type { RuntimeBundle } from "./bundle";
 import { bundleTriggerDefinitions } from "./bundle-triggers";
@@ -44,6 +45,7 @@ const EFFECT_BY_STATE_TYPE: Readonly<Record<string, RoutineEffectKind>> = {
 export interface RoutineCatalogSummary {
   /** The Soul principal accountable for this Routine. */
   owner: string | null;
+  ownership?: TeamBusinessAssetOwnership;
   stateCount: number;
   /** Unique canonical State `type` values, sorted, so a reader can see the shape of the flow. */
   stateTypes: string[];
@@ -84,6 +86,7 @@ export interface RoutineCatalogDetail extends RoutineCatalogItem {
 
 export interface RoutineCatalog {
   list(): Promise<RoutineCatalogItem[]>;
+  listByIds?(ids: readonly string[]): Promise<RoutineCatalogItem[]>;
   /** `undefined` when no bundle is active, or the bundle publishes no such Routine. */
   get(slug: string): Promise<RoutineCatalogDetail | undefined>;
 }
@@ -197,6 +200,9 @@ function routineSummary(document: Record<string, unknown>): RoutineCatalogSummar
 
   return {
     owner: typeof spec.owner === "string" ? spec.owner : null,
+    ...(isRecord(spec.ownership)
+      ? { ownership: spec.ownership as unknown as TeamBusinessAssetOwnership }
+      : {}),
     stateCount: states.length,
     stateTypes: [...stateTypes].sort(),
     effects: [...effects].sort(),
@@ -237,6 +243,12 @@ export class ActiveRoutineCatalog implements RoutineCatalog {
       .filter((definition) => definition.kind === "Routine" && isPublished(definition))
       .map((definition) => catalogItem(definition, triggersByRoutine.get(definition.slug) ?? []))
       .sort((a, b) => a.slug.localeCompare(b.slug));
+  }
+
+  async listByIds(ids: readonly string[]): Promise<RoutineCatalogItem[]> {
+    if (ids.length === 0) return [];
+    const wanted = new Set(ids);
+    return (await this.list()).filter((routine) => wanted.has(routine.id));
   }
 
   async get(slug: string): Promise<RoutineCatalogDetail | undefined> {

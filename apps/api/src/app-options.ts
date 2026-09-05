@@ -40,6 +40,7 @@ import type { SessionStore } from "./auth/session-store";
 import type { PasswordWriteRepo, ProfileWriteRepo, UserAdminRepo, UserRepo } from "./auth/users";
 import type { AuthorizationGateOptions, RouteAuthorizer } from "./authz/route-gate";
 import type { AuthzAdminService } from "./authz/service";
+import type { TeamApiService } from "./authz/team-service";
 import type { ToolRegistry } from "./broker/tool-adapter";
 import type { ConversationRepo } from "./chat/conversations";
 import type { MessageRepo } from "./chat/messages";
@@ -80,6 +81,7 @@ import type { IntegrationRegistryReader, SubjectAuthorityLayers } from "./soul/r
 import type { SurfaceActionStore } from "./surfaces/action-store";
 import type { SurfaceArtifactStore } from "./surfaces/artifact-store";
 import type { SystemRoutesDeps } from "./system/routes";
+import type { TeamAssetService } from "./team-assets/service";
 import type { TriggerInvokeDeps } from "./triggers/routes";
 
 export interface AppOptions {
@@ -246,6 +248,10 @@ export interface AppOptions {
   operationalApi?: OperationalApiDeps;
   /** Stage 3 admin authorization surface — read/assign/group/explain over durable authority. */
   authzAdmin?: AuthzAdminService;
+  /** First-class Team administration and one-release group compatibility surface. */
+  teamApi?: TeamApiService;
+  /** Team asset catalog, ownership, sharing, and Approval orchestration. */
+  teamAssets?: TeamAssetService;
   /** Operator emergency stops over mutating Tool effects. */
   killSwitches?: KillSwitchService;
   /** Persist-first authority shared by Chat and every Trigger ingress. */

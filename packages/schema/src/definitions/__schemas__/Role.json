@@ -258,7 +258,8 @@
               "routine",
               "integration_adapter",
               "api",
-              "service"
+              "service",
+              "team"
             ],
             "type": "string"
           },

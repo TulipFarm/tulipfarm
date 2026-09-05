@@ -3,6 +3,7 @@ import { SurfaceArtifact } from "~/components/surface-artifact";
 import { Link } from "~/components/ui/link";
 import { Trace, TraceNote, TraceSource } from "~/components/ui/trace";
 import type { SourceRef, TimelinePart } from "~/lib/chat/types";
+import type { FileDraftResult } from "./file-draft-card";
 import { Response } from "./response";
 import { isHiddenToolPart } from "./tool-summary";
 import { ToolTrace } from "./tool-trace";
@@ -75,6 +76,7 @@ export function MessagePartView({
   citations,
   onApprove,
   onSurfaceInteraction,
+  onReviseDraft,
 }: {
   part: TimelinePart;
   streaming?: boolean;
@@ -85,6 +87,7 @@ export function MessagePartView({
     handle: string,
     input: Readonly<Record<string, unknown>>
   ) => void | Promise<void>;
+  onReviseDraft?: (draft: FileDraftResult) => void;
 }) {
   switch (part.kind) {
     case "text":
@@ -103,6 +106,7 @@ export function MessagePartView({
           pending={streaming === true && part.status === "running"}
           foldable={false}
           onApprove={onApprove}
+          onReviseDraft={onReviseDraft}
         />
       );
     case "sources":

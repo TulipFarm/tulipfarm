@@ -16,6 +16,32 @@ describe("MentionList", () => {
     expect(screen.getByText("No matching Knowledge.")).toBeInTheDocument();
   });
 
+  it("keeps File metadata when selecting a result", () => {
+    const command = vi.fn();
+    render(
+      <MentionList
+        command={command}
+        items={[
+          {
+            id: "file-1",
+            label: "pricing.json",
+            mediaType: "application/json",
+            sizeBytes: 120,
+          },
+        ]}
+        kind="file"
+      />
+    );
+
+    fireEvent.mouseDown(screen.getByRole("button", { name: /pricing.json/i }));
+    expect(command).toHaveBeenCalledWith({
+      id: "file-1",
+      label: "pricing.json",
+      mediaType: "application/json",
+      sizeBytes: 120,
+    });
+  });
+
   // The suggestion plugin awaits `items` even when it resolves synchronously, so it reports
   // `loading` for every trigger. Only Knowledge actually queries a server; the rest must not
   // borrow its wording for the microtask before their static list arrives.
@@ -46,8 +72,16 @@ describe("MentionList", () => {
     });
     ref.current?.onKeyDown({ event: new KeyboardEvent("keydown", { key: "Enter" }) });
 
-    expect(command).toHaveBeenCalledWith({ id: "page-2", label: "Support policy" });
+    expect(command).toHaveBeenCalledWith({
+      id: "page-2",
+      label: "Support policy",
+      description: "Response guidelines",
+    });
     fireEvent.mouseDown(screen.getByRole("button", { name: /Operating profile/i }));
-    expect(command).toHaveBeenCalledWith({ id: "page-1", label: "Operating profile" });
+    expect(command).toHaveBeenCalledWith({
+      id: "page-1",
+      label: "Operating profile",
+      description: "Autonomy choices",
+    });
   });
 });

@@ -6,12 +6,19 @@ import {
   delegationCatalogOf,
   GuardrailsService,
 } from "@tulipfarm/agent-runtime";
+import {
+  AssetOwnershipAccessService,
+  AssetOwnershipService,
+  type TeamFact,
+  TeamService,
+} from "@tulipfarm/authz";
 import { DEPLOYMENT_BUSINESS_ID } from "@tulipfarm/constants";
 import { FileService, PgFileRepo } from "@tulipfarm/files";
 import { FetchEgressHttp, GuardedEgressHttp, PublicOriginsService } from "@tulipfarm/integrations";
 import {
   buildDefaultRegistry,
   enqueueIndex,
+  KnowledgeOwnershipProjector,
   KnowledgeService,
   makeIndexQueueStats,
   PageRetrievalService,
@@ -86,11 +93,15 @@ import {
   ensureEmbeddingIndexes,
   IntegrationStore,
   KillSwitchRepo,
+  PgApprovalGrantRepo,
+  PgAssetOwnershipRepo,
   PgGroupRepo,
   PgIntegrationAuthRequestRepo,
   PgPrincipalRepo,
   PgRoleRepo,
   PgSoulPublicationStore,
+  PgTeamNotificationRepo,
+  PgTeamRepo,
   PublicOriginStore,
   RunEventStore,
   RunStore,
@@ -135,6 +146,8 @@ import {
   makeRequireAuthorization,
 } from "./authz/route-gate";
 import { AuthzAdminService } from "./authz/service";
+import { TeamNotificationService } from "./authz/team-notifications";
+import { TeamApiService } from "./authz/team-service";
 import { PgConversationRepo } from "./chat/conversations";
 import { PgMessageRepo } from "./chat/messages";
 import { allowedToolNamesFor, toolAgentFor } from "./chat/turn-helpers";
@@ -152,7 +165,9 @@ import {
 } from "./db";
 import { logEnvironmentStatus, validateEnvironment } from "./env";
 import { FeedbackRepo } from "./feedback/repo";
+import { startFileBlobCleanup } from "./files/blob-cleanup";
 import { buildFileKnowledgeBridge } from "./files/knowledge-bridge";
+import { buildFileOwnershipPort } from "./files/team-ownership";
 import { registerGuardrailsReload } from "./guardrails/reload";
 import { createHookExecutor } from "./hooks/executor";
 import { PgRawPayloadVault } from "./hooks/raw-payload-vault";
@@ -270,6 +285,9 @@ import { registerSoulSync } from "./soul-sync";
 import { PgSurfaceActionStore } from "./surfaces/action-store";
 import { PgSurfaceArtifactStore } from "./surfaces/artifact-store";
 import { apiSurfacePresentation, surfaceRendererRegistry } from "./surfaces/renderer-registry";
+import { TeamAssetCatalogProvider } from "./team-assets/catalog-provider";
+import { TeamAssetService } from "./team-assets/service";
+import { TeamAssetLifecycle } from "./team-assets/team-lifecycle";
 import { DeclarativeToolSync } from "./tools/declarative/sync";
 import { buildGitHubTooling } from "./tools/github/compose";
 import { buildGitHubTools } from "./tools/github/tools";
@@ -614,16 +632,21 @@ async function boot() {
     // Sharing a File with a Role resolves that Role live on every read, through the one shared
     // implementation the Tool gate uses. A second answer to "which Roles does this person hold"
     // is how a File stays readable to someone a Role no longer contains.
+    const teamRepo = new PgTeamRepo(transactionPort(pool));
+    const principalRepo = new PgPrincipalRepo(transactionPort(pool));
     const fileAuthorityRepos = {
+      principals: principalRepo,
       roles: new PgRoleRepo(transactionPort(pool)),
-      groups: new PgGroupRepo(transactionPort(pool)),
+      teams: teamRepo,
     };
+    const fileRepo = new PgFileRepo(pool);
     const fileService = new FileService({
-      repo: new PgFileRepo(pool),
+      repo: fileRepo,
       rolesOf: (businessId, principalId) =>
         collectHeldRoleIds(fileAuthorityRepos, businessId, principalId, new Date()),
       blobs,
       newId: () => randomUUID(),
+      ownership: buildFileOwnershipPort(transactionPort(pool), teamRepo, principalRepo),
       // Read per upload from the Soul, so an operator turning downscaling on takes effect on the
       // next upload rather than on the next restart.
       imagePolicy: async () => (await readSoulConfig(soulPath)).files ?? {},
@@ -650,10 +673,48 @@ async function boot() {
     const routeAuthorizer = new LiveRouteAuthorizer(authorityLayerResolver);
     const gateOptions = deploymentGateOptions(() => app.log);
     const operationalCheck = makeAuthorizationCheck(routeAuthorizer, gateOptions);
+    const roleRepo = new PgRoleRepo(transactionPort(pool));
+    const teamNotifications = new TeamNotificationService(
+      new PgTeamNotificationRepo(pool),
+      teamRepo
+    );
+    const assetOwnershipRepo = new PgAssetOwnershipRepo(transactionPort(pool));
+    const ownershipApprovals = new PgApprovalGrantRepo(transactionPort(pool));
+    const teamAssetLifecycle = new TeamAssetLifecycle({
+      ownership: assetOwnershipRepo,
+    });
+    const teamFacts = {
+      emit: async (fact: TeamFact) => {
+        const metadata = {
+          target: fact.subjectPrincipalId
+            ? `principal:${fact.subjectPrincipalId}`
+            : `team:${fact.teamId}`,
+          ...(fact.subjectPrincipalId ? { subjectPrincipalId: fact.subjectPrincipalId } : {}),
+          ...(fact.hierarchyChange ? { hierarchyChange: fact.hierarchyChange } : {}),
+        };
+        await activityService.record({
+          category: "team",
+          action: fact.action,
+          actorId: fact.actorPrincipalId,
+          targetType: "team",
+          targetId: fact.teamId,
+          summary: fact.action.replaceAll(".", " ").replaceAll("_", " "),
+          status: "ok",
+          metadata,
+        });
+        await auditService.recordOrWarn({
+          actorId: fact.actorPrincipalId,
+          action: fact.action,
+          target: `team:${fact.teamId}`,
+          decision: "allow",
+          safeMetadata: metadata,
+        });
+      },
+    };
     const authzAdmin = new AuthzAdminService({
-      roles: new PgRoleRepo(transactionPort(pool)),
+      roles: roleRepo,
       groups: new PgGroupRepo(transactionPort(pool)),
-      principals: new PgPrincipalRepo(transactionPort(pool)),
+      principals: principalRepo,
       resolver: authorityLayerResolver,
       businessId: DEPLOYMENT_BUSINESS_ID,
       audit: auditService,
@@ -673,6 +734,32 @@ async function boot() {
           )
         ),
     });
+    const teamApi = new TeamApiService({
+      teams: teamRepo,
+      principals: principalRepo,
+      roles: roleRepo,
+      explanations: authzAdmin,
+      activity: activityService,
+      audit: auditService,
+      notifications: teamNotifications,
+      users: userRepo,
+      moveAssets: teamAssetLifecycle,
+    });
+    const teamDomain = new TeamService({
+      teams: teamRepo,
+      principals: principalRepo,
+      facts: teamFacts,
+    });
+    const knowledgeOwnershipAccess = new AssetOwnershipAccessService({
+      ownership: assetOwnershipRepo,
+      approvals: ownershipApprovals,
+      memberships: teamDomain,
+      everyoneTeamId: async (businessId) => (await teamRepo.ensureEveryone(businessId)).id,
+    });
+    const knowledgeOwnership = new KnowledgeOwnershipProjector(
+      assetOwnershipRepo,
+      knowledgeOwnershipAccess
+    );
     // The ledger's reader. Without it `audit_events` is write-only and the evidence is
     // unreachable outside `psql` — see `audit/routes.ts`.
     const auditReadService = new AuditReadService(auditRepo);
@@ -694,11 +781,13 @@ async function boot() {
     // question "not found" while the page sits indexed and readable.
     const knowledgeRetrieval = new PageRetrievalService(pool);
 
+    const knowledgePageRepo = new PgKnowledgePageRepo(pool);
+    const knowledgeSpaceRepo = new PgKnowledgeSpaceRepo(pool);
     const knowledgeService = new KnowledgeService({
-      pages: new PgKnowledgePageRepo(pool),
+      pages: knowledgePageRepo,
       chunks: new PgKnowledgeChunkRepo(pool),
       revisions: new PgKnowledgeRevisionRepo(pool),
-      spaces: new PgKnowledgeSpaceRepo(pool),
+      spaces: knowledgeSpaceRepo,
       links: new PgKnowledgeLinksRepo(pool),
       overrides: new PgKnowledgeSpaceOverrideRepo(pool),
       embeddings: embeddingService,
@@ -707,12 +796,14 @@ async function boot() {
       // Without this the Page-ACL surfaces degrade silently rather than fail: `visibility` 404s,
       // every listing badge reads "business", and a move reports no readership change — so the
       // product offers no way to restrict a Page at all.
-      readership: new PgKnowledgeSubjectStore(pool),
+      readership: new PgKnowledgeSubjectStore(pool, () => new Date(), knowledgeOwnership),
+      ownership: knowledgeOwnership,
       enqueueIndex: (pageId) => enqueueIndex(boss, { kind: "page", pageId }).then(() => undefined),
       indexQueueStats: makeIndexQueueStats(boss, pool),
       sourceRetrieval: {
         sources: knowledgeSourceStore,
         index: knowledgeIndexStore,
+        ownership: knowledgeOwnership,
         live: new CompositeLiveSourceAuthorization([
           new SlackTenantLiveAuthorization(integrationStore, secretsService, externalIdentityRepo),
         ]),
@@ -721,6 +812,86 @@ async function boot() {
     });
 
     const approvalsRepo = new ApprovalsRepo(pool);
+    const fileKnowledgeBridge = buildFileKnowledgeBridge(pool, boss, DEPLOYMENT_BUSINESS_ID);
+    const teamAssets = new TeamAssetService({
+      ownershipRepo: assetOwnershipRepo,
+      teams: teamRepo,
+      fileKnowledge: {
+        // A Team share or owner change moves who may read the File, and the Page's ACL is written
+        // from exactly those rows. A narrowing change that cannot be propagated removes the Page
+        // instead: no retrieval is always a subset of what the change intended.
+        sync: async (fileId, widening) => {
+          if (!(await fileKnowledgeBridge.isIndexed(fileId))) return;
+          try {
+            // Asked without an owner on purpose: the change just committed may be the one that
+            // took the acting Principal's rights away, and the Page still has to follow it.
+            const readers = await fileService.currentReaders(DEPLOYMENT_BUSINESS_ID, fileId);
+            await fileKnowledgeBridge.syncReaders(fileId, readers);
+          } catch (error) {
+            if (!widening) await fileKnowledgeBridge.remove(fileId);
+            throw error;
+          }
+        },
+      },
+      approvals: ownershipApprovals,
+      catalogMemberships: teamDomain,
+      catalogMetadata: new TeamAssetCatalogProvider({
+        businessId: DEPLOYMENT_BUSINESS_ID,
+        soul: soulLoader,
+        bundledSkills,
+        disabledBundledSkills,
+        routines: routineCatalog,
+        files: fileRepo,
+        pages: knowledgePageRepo,
+        spaces: knowledgeSpaceRepo,
+        sources: knowledgeSourceStore,
+      }),
+      ownership: new AssetOwnershipService({
+        ownership: assetOwnershipRepo,
+        approvals: ownershipApprovals,
+        memberships: {
+          resolveMembers: (businessId, teamId) => teamDomain.resolveMembers(businessId, teamId),
+          resolvePrincipalForTeams: (businessId, teamIds, principalId) =>
+            teamDomain.resolvePrincipalForTeams(businessId, teamIds, principalId),
+        },
+        facts: {
+          emit: async (fact) => {
+            await auditService.recordOrWarn({
+              actorId: fact.actorPrincipalId,
+              action: fact.action,
+              target: `${fact.assetType}:${fact.assetId}`,
+              reasonCodes: fact.reason ? [fact.reason] : [],
+              safeMetadata: {
+                ...(fact.operation ? { operation: fact.operation } : {}),
+                ...(fact.reason ? { reason: fact.reason } : {}),
+                ...(fact.highVisibility ? { highVisibility: true } : {}),
+                ...(fact.teamIds ? { teamIds: fact.teamIds } : {}),
+                ...(fact.outcome ? { outcome: fact.outcome } : {}),
+              },
+            });
+            await Promise.all(
+              (fact.teamIds ?? []).map((teamId) =>
+                activityService.record({
+                  category: "team",
+                  action: fact.action,
+                  actorId: fact.actorPrincipalId === "system" ? null : fact.actorPrincipalId,
+                  targetType: "team",
+                  targetId: teamId,
+                  summary: fact.action.replaceAll(".", " ").replaceAll("_", " "),
+                  status: fact.outcome === "denied" ? "error" : "ok",
+                  metadata: {
+                    target: `${fact.assetType}:${fact.assetId}`,
+                    ...(fact.reason ? { reason: fact.reason } : {}),
+                    ...(fact.highVisibility ? { emergency: true } : {}),
+                    ...(fact.outcome ? { outcome: fact.outcome } : {}),
+                  },
+                })
+              )
+            );
+          },
+        },
+      }),
+    });
     // registered here rather than in the Worker because its one-use resume token must never leave
     const runResume = new RunResumeGateway(runStore);
     const runWaits = new DurableWaitManager(new WaitStore(runTransactions), runResume);
@@ -834,7 +1005,7 @@ async function boot() {
       process.env.NODE_ENV === "production" || process.env.SANDBOX_RUNTIME_IMAGE === undefined
         ? {}
         : { runtimeImage: process.env.SANDBOX_RUNTIME_IMAGE };
-    const knowledgePageGate = new PageReadGate(pool);
+    const knowledgePageGate = new PageReadGate(pool, DEPLOYMENT_BUSINESS_ID, knowledgeOwnership);
     // Refusing a taken path is the one bit the gate cannot hide, so every refused write is recorded.
     const knowledgeDenialSink = makeKnowledgeDenialSink(auditService);
     const knowledgeAuthorLabeller = new AuthorLabeller(pool);
@@ -877,8 +1048,8 @@ async function boot() {
         events: domainEventEmitter,
       },
       resourceTypes: { gitSync, soulWriter, soulLoader, reconcile: reconcileResources },
-      agentTools: { gitSync, soulWriter, soulLoader },
-      skillTools: { ...skillTools, hiddenSkillNames },
+      agentTools: { gitSync, soulWriter, soulLoader, teamAssets },
+      skillTools: { ...skillTools, hiddenSkillNames, teamAssets },
       github: githubTools,
       slack: slackTools,
       google: googleTools,
@@ -905,6 +1076,7 @@ async function boot() {
           ...sandboxRuntimeImage,
         }),
         routineCatalog,
+        teamAssets,
         delegateToAgent: agentDelegation.delegate,
         spawnSubagent: subagentSpawning.spawn,
         onRoutinesChanged: async () => {
@@ -1165,7 +1337,7 @@ async function boot() {
       kvService,
       taskStore: taskRepo,
       fileService,
-      fileKnowledge: buildFileKnowledgeBridge(pool, boss, DEPLOYMENT_BUSINESS_ID),
+      fileKnowledge: fileKnowledgeBridge,
       ...buildCurator({
         pool,
         documents: memoryDocuments,
@@ -1188,6 +1360,8 @@ async function boot() {
       auditService,
       auditReadService,
       authzAdmin,
+      teamApi,
+      teamAssets,
       killSwitches,
       observabilityService,
       observabilityConfig: obsConfig,
@@ -1200,6 +1374,7 @@ async function boot() {
       routineCatalog,
       routineDetail: {
         catalog: routineCatalog,
+        teamAssets,
         runs: {
           listByRoutine: async ({ routineId, routineSlug, limit }) => {
             const page = await runStore.list({
@@ -1263,6 +1438,7 @@ async function boot() {
         authorizationCheck: operationalCheck,
         activity: activityService,
         approvals: approvalsRepo,
+        ownershipApprovals: teamAssets,
         toolApprovals,
         runs: createRunReader(runStore, budgetStore, obsRepo),
         healthProbes: [
@@ -1281,6 +1457,40 @@ async function boot() {
           );
         },
         guardrailsConfig: () => soulLoader.guardrailsConfig,
+        teamMigrationReport: async (businessId) => {
+          const present = await pool.query<{ exists: boolean }>(
+            "SELECT to_regclass('public.team_migration_report') IS NOT NULL AS exists"
+          );
+          if (!present.rows[0]?.exists) return { items: [] };
+          const report = await pool.query<{
+            legacy_group_id: string;
+            team_id: string;
+            team_slug: string;
+            display_name: string;
+            slug_conflict: boolean;
+            sibling_name_conflict: boolean;
+            migrated_at: Date;
+          }>(
+            `SELECT legacy_group_id, team_id::text, team_slug, display_name, slug_conflict,
+                    sibling_name_conflict, migrated_at
+               FROM team_migration_report
+              WHERE business_id = $1
+                AND (slug_conflict OR sibling_name_conflict)
+              ORDER BY migrated_at, legacy_group_id`,
+            [businessId]
+          );
+          return {
+            items: report.rows.map((row) => ({
+              legacyGroupId: row.legacy_group_id,
+              teamId: row.team_id,
+              teamSlug: row.team_slug,
+              displayName: row.display_name,
+              slugConflict: row.slug_conflict,
+              siblingNameConflict: row.sibling_name_conflict,
+              migratedAt: row.migrated_at.toISOString(),
+            })),
+          };
+        },
       }),
       ingress: {
         soulLoader,
@@ -1423,6 +1633,7 @@ async function boot() {
       app.log,
       eventTriggers
     );
+    const stopFileBlobCleanup = await startFileBlobCleanup(fileService, app.log);
     // the token resolves — the default path loads nothing extra.
     let metricsSink: OtlpMetricsExporter | undefined;
     let tracesSink: OtlpTracesExporter | undefined;
@@ -1519,6 +1730,7 @@ async function boot() {
       try {
         if (soulSyncInterval) clearInterval(soulSyncInterval);
         stopDelivery();
+        stopFileBlobCleanup();
         clearInterval(soulPublicationDrainInterval);
         await app.close();
         await boss.stop({ graceful: false });

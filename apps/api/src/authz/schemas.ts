@@ -155,6 +155,7 @@ export const ExplainSchema = {
     "reason",
     "evaluatedLayers",
     "unevaluatedLayers",
+    "evidence",
     "partial",
   ],
   properties: {
@@ -188,6 +189,37 @@ export const ExplainSchema = {
       },
     },
     unresolvedRoleIds: { type: "array", items: { type: "string" } },
+    evidence: {
+      type: "array",
+      items: {
+        type: "object",
+        additionalProperties: false,
+        required: ["kind", "effect"],
+        properties: {
+          kind: {
+            type: "string",
+            enum: [
+              "direct_membership",
+              "inherited_membership",
+              "team_ancestry",
+              "role",
+              "grant",
+              "explicit_deny",
+              "expiry",
+              "authority_layer",
+            ],
+          },
+          effect: { type: "string", enum: ["allow", "deny", "informational"] },
+          sourceTeamId: { type: "string" },
+          sourcePrincipalId: { type: "string" },
+          roleId: { type: "string" },
+          grantId: { type: "string" },
+          authorityLayer: { type: "string" },
+          pathTeamIds: { type: "array", items: { type: "string" } },
+          expiresAt: { type: "string", format: "date-time" },
+        },
+      },
+    },
     partial: { type: "boolean" },
   },
 } as const;

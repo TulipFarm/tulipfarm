@@ -1,5 +1,5 @@
 import { type Static, Type } from "@sinclair/typebox";
-import { PRINCIPAL_KINDS, type PrincipalKind } from "../principals";
+import { ROLE_ASSIGNMENT_TARGET_KINDS, type RoleAssignmentTargetKind } from "../teams";
 import {
   DEFINITION_API_VERSION,
   type DefinitionMetadata,
@@ -23,9 +23,9 @@ const dateTimePattern =
   "^\\d{4}-(?:0[1-9]|1[0-2])-(?:0[1-9]|[12]\\d|3[01])T(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d{1,9})?Z$";
 
 const MetadataSchema = Type.Unsafe<DefinitionMetadata>(definitionMetadataSchema);
-const PrincipalKindSchema = Type.Unsafe<PrincipalKind>({
+const RoleAssignmentTargetKindSchema = Type.Unsafe<RoleAssignmentTargetKind>({
   type: "string",
-  enum: [...PRINCIPAL_KINDS],
+  enum: [...ROLE_ASSIGNMENT_TARGET_KINDS],
 });
 
 const GrantConditionSchema = Type.Object(
@@ -104,7 +104,7 @@ export const RoleSchema = Type.Object(
     metadata: MetadataSchema,
     spec: Type.Object(
       {
-        principalTypes: Type.Array(PrincipalKindSchema, {
+        principalTypes: Type.Array(RoleAssignmentTargetKindSchema, {
           minItems: 1,
           uniqueItems: true,
         }),

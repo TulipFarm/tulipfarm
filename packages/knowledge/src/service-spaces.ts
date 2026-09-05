@@ -41,6 +41,7 @@ function snippet(text: string, max = 140): string | null {
 export interface CreateSpaceInput {
   name: string;
   description?: string | null;
+  ownerPrincipalId?: string;
 }
 
 export type CreateSpaceResult =
@@ -137,6 +138,16 @@ export async function createSpace(
     updatedAt: now,
   };
   await space.spaces.insert(created);
+  if (input.ownerPrincipalId === undefined) {
+    await deps.ownership?.ensureBusiness(DEPLOYMENT_BUSINESS_ID, "space", created._id);
+  } else {
+    await deps.ownership?.ensurePersonal(
+      DEPLOYMENT_BUSINESS_ID,
+      "space",
+      created._id,
+      input.ownerPrincipalId
+    );
+  }
   return { ok: true, space: created };
 }
 
@@ -309,6 +320,11 @@ export async function writePage(
     updatedAt: parsed.timestamp ? new Date(parsed.timestamp) : now,
   };
   const { _id } = await deps.pages.upsertBySource(draft);
+  if (input.author?.kind === "user") {
+    await deps.ownership?.ensurePersonal(DEPLOYMENT_BUSINESS_ID, "page", _id, input.author.id);
+  } else {
+    await deps.ownership?.ensureBusiness(DEPLOYMENT_BUSINESS_ID, "page", _id);
+  }
 
   // Only on create. Restriction is an allowlist that *replaces* this grant, so re-adding it on
   // every save would silently republish a restricted Page on the author's next edit.

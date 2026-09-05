@@ -10,6 +10,7 @@ import type { ActivityService } from "../activity/service";
 import type { AuthorizationCheck, RouteAuthorization } from "../authz/route-gate";
 import { makeAuthorizationCheck } from "../authz/route-gate";
 import { describeDeploymentRoles } from "../identity/roles";
+import type { TeamAssetService } from "../team-assets/service";
 import { type HealthProbe, probeHealth } from "./health";
 import type {
   ApprovalDecisionInput,
@@ -17,6 +18,7 @@ import type {
   OperationalApiDeps,
   OperationalGrant,
   OperationalPermission,
+  TeamMigrationReportReadModel,
 } from "./routes";
 import { OperationalNotImplementedError } from "./routes";
 import type { RunReader } from "./run-reader";
@@ -24,6 +26,7 @@ import type { RunReader } from "./run-reader";
 type RuntimeOperationalDeps = {
   activity: Pick<ActivityService, "list">;
   approvals: Pick<ApprovalsRepo, "findById" | "listPending" | "settle">;
+  ownershipApprovals?: Pick<TeamAssetService, "listApprovals" | "decide">;
   /** Settles a Tool approval and resumes its parked Run; absent leaves only routine approvals. */
   toolApprovals?: Pick<ToolApprovalService, "signal">;
   runs: RunReader;
@@ -35,6 +38,7 @@ type RuntimeOperationalDeps = {
     decision: "approved" | "denied";
   }): Promise<void>;
   guardrailsConfig(): unknown;
+  teamMigrationReport?(businessId: string): Promise<TeamMigrationReportReadModel>;
   /** Decides operator authority; absent falls back to deployment admin. */
   authorizationCheck?: AuthorizationCheck;
 };
@@ -140,13 +144,36 @@ function routineApproval(
   };
 }
 
+function ownershipApproval(
+  item: Awaited<ReturnType<TeamAssetService["listApprovals"]>>[number]
+): InboxItemReadModel {
+  return {
+    id: item.approvalId,
+    kind: "approval",
+    title: item.preview,
+    status: item.status,
+    risk: item.risk,
+    target: `${item.assetType}:${item.assetId}`,
+    expiresAt: item.expiresAt,
+    decisions: item.decisions,
+    requiredDecisions: item.requiredDecisions,
+    canDecide: item.canDecide,
+    ...(item.canDecide
+      ? {}
+      : { denialReason: "Only an admin of the exact required Team can decide." }),
+    assetType: item.assetType,
+    assetId: item.assetId,
+    ...(item.representedTeamId ? { representedTeamId: item.representedTeamId } : {}),
+  };
+}
+
 export function createRuntimeOperationalApi(deps: RuntimeOperationalDeps): OperationalApiDeps {
   const check = deps.authorizationCheck ?? makeAuthorizationCheck();
   const decisions = new Map<
     string,
     {
       approvalId: string;
-      status: "approved" | "denied";
+      status: "pending" | "approved" | "denied";
       decisions: number;
       requiredDecisions: number;
     }
@@ -204,6 +231,13 @@ export function createRuntimeOperationalApi(deps: RuntimeOperationalDeps): Opera
       };
     },
 
+    async getTeamMigrationReport(grant) {
+      const report = await (deps.teamMigrationReport?.(grant.businessId) ?? { items: [] });
+      return {
+        items: report.items.filter((item) => item.slugConflict || item.siblingNameConflict),
+      };
+    },
+
     async getGuardrails() {
       const config = deps.guardrailsConfig();
       const items =
@@ -227,19 +261,46 @@ export function createRuntimeOperationalApi(deps: RuntimeOperationalDeps): Opera
       );
     },
 
-    async getInbox() {
-      const [toolCalls, routineRows] = await Promise.all([
+    async getInbox(grant) {
+      const [toolCalls, routineRows, ownershipRows] = await Promise.all([
         listPendingToolApprovals(deps.approvals),
         deps.approvals.listPending("routine_state"),
+        deps.ownershipApprovals?.listApprovals({
+          id: grant.principalId,
+          kind: "user",
+          companyAdmin: true,
+        }) ?? [],
       ]);
       return {
-        items: [...toolCalls.map(toolApproval), ...routineRows.map(routineApproval)],
+        items: [
+          ...toolCalls.map(toolApproval),
+          ...routineRows.map(routineApproval),
+          ...ownershipRows.map(ownershipApproval),
+        ],
       };
     },
 
     async decideApproval(grant: OperationalGrant, input: ApprovalDecisionInput) {
       const cached = decisions.get(input.idempotencyKey);
       if (cached) return cached;
+
+      if (deps.ownershipApprovals && input.representedTeamId) {
+        const approval = await deps.ownershipApprovals.decide(
+          input.approvalId,
+          input.representedTeamId,
+          input.decision,
+          { id: grant.principalId, kind: "user", companyAdmin: true }
+        );
+        const denied = approval.decisions.some((decision) => decision.outcome === "denied");
+        const result = {
+          approvalId: input.approvalId,
+          status: denied ? ("denied" as const) : ("pending" as const),
+          decisions: approval.decisions.length,
+          requiredDecisions: approval.requiredApproverRoles.length,
+        };
+        decisions.set(input.idempotencyKey, result);
+        return result;
+      }
 
       // Tool approvals resume through their wait; `not_found` falls back to routine approvals.
       const signalled = await deps.toolApprovals?.signal({

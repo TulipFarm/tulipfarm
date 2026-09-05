@@ -10,7 +10,7 @@
  * `@tulipfarm/knowledge` may not import each other, and only an app sees both.
  */
 
-import type { FileGrantee } from "@tulipfarm/files";
+import type { FileReader } from "@tulipfarm/files";
 import type { KnowledgeAclRepo, KnowledgeChunkRepo, KnowledgePageRepo } from "@tulipfarm/knowledge";
 import {
   PgKnowledgeAclRepo,
@@ -70,13 +70,17 @@ export class FileKnowledgeBridge {
    * PDF parse would put the cost of the thing this design moved out of the API back into it.
    * `singletonKey` is the File's id, so double-clicking enqueues one job.
    */
-  async requestIndex(fileId: string, ownerPrincipalId: string): Promise<boolean> {
+  async requestIndex(
+    fileId: string,
+    versionId: string,
+    ownerPrincipalId: string
+  ): Promise<boolean> {
     const enqueue = this.deps.enqueue;
     if (enqueue === undefined) return false;
     await enqueue.send(
       FILE_INDEX_QUEUE,
-      { fileId, businessId: this.deps.businessId, ownerPrincipalId },
-      { singletonKey: `file:${fileId}`, retryLimit: 3, retryBackoff: true }
+      { fileId, versionId, businessId: this.deps.businessId, ownerPrincipalId },
+      { singletonKey: `file:${fileId}:${versionId}`, retryLimit: 3, retryBackoff: true }
     );
     return true;
   }
@@ -116,7 +120,7 @@ export class FileKnowledgeBridge {
    *
    * A no-op when the File is not indexed: there is nothing whose readership could be wrong.
    */
-  async syncReaders(fileId: string, readers: readonly FileGrantee[]): Promise<boolean> {
+  async syncReaders(fileId: string, readers: readonly FileReader[]): Promise<boolean> {
     if (readers.length === 0) return false;
     const page = await this.deps.pages.getBySource(FILE_KNOWLEDGE_SOURCE, fileId);
     if (page === null || !page.active) return false;

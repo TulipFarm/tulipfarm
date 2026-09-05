@@ -23,6 +23,7 @@ import {
 } from "./retrieval-config";
 import type { KnowledgePrincipalRef, KnowledgeSourceStore } from "./source";
 import {
+  type KnowledgeOwnershipPort,
   type KnowledgeSubject,
   type KnowledgeSubjectStore,
   type PrincipalResolverPort,
@@ -88,6 +89,7 @@ export interface RetrievalDeps {
   readonly index: KnowledgeIndexPort;
   /** Authored Pages, consulted only when `access.authoredPagesInRetrieval` is on. */
   readonly subjects?: KnowledgeSubjectStore;
+  readonly ownership?: KnowledgeOwnershipPort;
   /** Expands the actor's principals once per query so group grants resolve at query time. */
   readonly principalResolver?: PrincipalResolverPort;
   readonly access?: KnowledgeAccessConfig;
@@ -165,7 +167,14 @@ async function subjectsToAuthorize(
   deps: RetrievalDeps,
   businessId: string
 ): Promise<readonly KnowledgeSubject[]> {
-  const sources = (await deps.sources.list(businessId)).map((source) => sourceSubject(source));
+  const sourceRecords = await deps.sources.list(businessId);
+  const ownership = await deps.ownership?.entriesFor(
+    businessId,
+    sourceRecords.map((source) => ({ kind: "source", id: source.sourceId }))
+  );
+  const sources = sourceRecords.map((source) =>
+    sourceSubject(source, ownership?.get(`source:${source.sourceId}`) ?? [])
+  );
   const access = deps.access ?? DEFAULT_KNOWLEDGE_ACCESS;
   if (!access.authoredPagesInRetrieval || deps.subjects === undefined) return sources;
   return [...sources, ...(await deps.subjects.listAuthored(businessId))];
@@ -248,7 +257,11 @@ async function reloadSubject(
     return deps.subjects?.getAuthored(businessId, version.sourceId);
   }
   const source = await deps.sources.get(businessId, version.sourceId);
-  return source === undefined ? undefined : sourceSubject(source);
+  if (source === undefined) return undefined;
+  const ownership = await deps.ownership?.entriesFor(businessId, [
+    { kind: "source", id: source.sourceId },
+  ]);
+  return sourceSubject(source, ownership?.get(`source:${source.sourceId}`) ?? []);
 }
 
 /**
