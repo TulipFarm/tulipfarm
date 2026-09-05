@@ -139,10 +139,7 @@ export function registerSpaceRoutes({
     async (req, reply) => {
       const { id } = req.params as { id: string };
       // 404 rather than 403: a 403 confirms the Space exists to someone who may not know it does.
-      if (
-        !(await (gate.canEdit?.(req.user?._id, "space", id) ??
-          gate.canReadSpace(req.user?._id, id)))
-      )
+      if (!(await gate.canReadSpace(req.user?._id, id)))
         return reply.code(404).send({ error: "not found" });
       const s = await service.getSpace(id);
       if (!s) return reply.code(404).send({ error: "not found" });
