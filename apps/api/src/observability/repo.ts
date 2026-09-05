@@ -1,3 +1,4 @@
+import { DEFAULT_ASSISTANT, DEFAULT_ASSISTANT_NAME } from "@tulipfarm/soul";
 import type { Queryable } from "../db";
 
 export type ObsEventType = "llm_call" | "tool_call" | "turn" | "job";
@@ -20,16 +21,22 @@ export interface ObsEventRow {
   durationMs: number | null;
   status: string | null;
   toolName: string | null;
+  subjectKind: string | null;
+  subjectId: string | null;
   attributes: Record<string, unknown>;
   createdAt: Date;
 }
 
 /** Dashboard totals; cost/token numbers count `llm_call` rows only. */
 export interface ObsSummary {
-  totals: { costUsd: number; tokens: number; turns: number; unpricedCalls: number };
-  series: Array<{ bucket: string; costUsd: number; tokens: number }>;
-  byAgent: Array<{ agentId: string; costUsd: number }>;
-  byModel: Array<{ model: string; costUsd: number; calls: number; unpriced: boolean }>;
+  totals: { cost: number; tokens: number; turns: number; unpricedCalls: number };
+  series: Array<{ bucket: string; cost: number; tokens: number }>;
+  byAgent: Array<{ agentId: string; cost: number }>;
+  /** Cost per human member; every non-user (service/role/integration) principal folds into "System". */
+  byMember: Array<{ memberId: string; member: string; cost: number }>;
+  byModel: Array<{ model: string; cost: number; calls: number; unpriced: boolean }>;
+  /** Cost per model per time bucket, for the spend-by-model trend chart. */
+  modelSeries: Array<{ bucket: string; model: string; cost: number }>;
   /** Reliability counts and p95 step latency over the window. */
   reliability: {
     turns: number;
@@ -101,6 +108,17 @@ const num = (v: unknown): number => Number(v ?? 0);
 const numOrNull = (v: unknown): number | null => (v == null ? null : Number(v));
 const iso = (v: unknown): string => (v instanceof Date ? v.toISOString() : String(v));
 
+/**
+ * Friendly label for a spend-by-agent row. The code-defined default assistant is stored under its
+ * internal identity (`DEFAULT_ASSISTANT_NAME`), which must never leak to the dashboard; a call
+ * with no agent attribution (a built-in/system task) reads as "System" rather than "(unknown)".
+ */
+function agentLabel(agentId: string | null): string {
+  if (agentId == null) return "System";
+  if (agentId === DEFAULT_ASSISTANT_NAME) return DEFAULT_ASSISTANT.frontmatter.label as string;
+  return agentId;
+}
+
 export class PgObsRepo implements ObsRepo {
   constructor(private readonly q: Queryable) {}
 
@@ -108,8 +126,9 @@ export class PgObsRepo implements ObsRepo {
     await this.q.query(
       `INSERT INTO obs_event
          (id, ts, type, agent_id, conversation_id, model, provider, tier,
-          tokens_in, tokens_out, cost_usd, duration_ms, status, tool_name, attributes, created_at)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15::jsonb, $16)`,
+          tokens_in, tokens_out, cost_usd, duration_ms, status, tool_name, subject_kind,
+          subject_id, attributes, created_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17::jsonb, $18)`,
       [
         row._id,
         row.ts,
@@ -125,6 +144,8 @@ export class PgObsRepo implements ObsRepo {
         row.durationMs,
         row.status,
         row.toolName,
+        row.subjectKind,
+        row.subjectId,
         JSON.stringify(row.attributes),
         row.createdAt,
       ]
@@ -164,9 +185,24 @@ export class PgObsRepo implements ObsRepo {
       [since, bucket]
     );
     const byAgentQ = this.q.query(
-      `SELECT COALESCE(agent_id, '(unknown)') AS agent, COALESCE(SUM(cost_usd), 0) AS cost
+      `SELECT agent_id AS agent, COALESCE(SUM(cost_usd), 0) AS cost
        FROM obs_event WHERE type = 'llm_call' AND ts >= $1
        GROUP BY 1 ORDER BY cost DESC, agent ASC LIMIT 20`,
+      [since]
+    );
+    // Non-`user` principals (service/role/integration) fold into one NULL group so several
+    // distinct system subjects still collapse to a single "System" row.
+    const byMemberQ = this.q.query(
+      `SELECT
+         CASE WHEN e.subject_kind = 'user' THEN e.subject_id END AS subject,
+         CASE WHEN e.subject_kind = 'user' THEN u.email::text END AS label,
+         COALESCE(SUM(e.cost_usd), 0) AS cost
+       FROM obs_event e
+       LEFT JOIN users u ON e.subject_kind = 'user' AND u.id::text = e.subject_id
+       WHERE e.type = 'llm_call' AND e.ts >= $1
+       GROUP BY 1, 2
+       ORDER BY cost DESC, label ASC NULLS LAST
+       LIMIT 20`,
       [since]
     );
     const byModelQ = this.q.query(
@@ -175,6 +211,13 @@ export class PgObsRepo implements ObsRepo {
        FROM obs_event WHERE type = 'llm_call' AND ts >= $1
        GROUP BY 1 ORDER BY cost DESC, calls DESC, model ASC LIMIT 20`,
       [since]
+    );
+    const modelSeriesQ = this.q.query(
+      `SELECT date_trunc($2, ts) AS bucket, COALESCE(model, '(unknown)') AS model,
+              COALESCE(SUM(cost_usd), 0) AS cost
+       FROM obs_event WHERE type = 'llm_call' AND ts >= $1
+       GROUP BY 1, 2 ORDER BY 1, cost DESC`,
+      [since, bucket]
     );
     const reliabilityQ = this.q.query(
       `SELECT
@@ -194,19 +237,22 @@ export class PgObsRepo implements ObsRepo {
       [since]
     );
 
-    const [totals, series, byAgent, byModel, reliability] = await Promise.all([
-      totalsQ,
-      seriesQ,
-      byAgentQ,
-      byModelQ,
-      reliabilityQ,
-    ]);
+    const [totals, series, byAgent, byMember, byModel, modelSeries, reliability] =
+      await Promise.all([
+        totalsQ,
+        seriesQ,
+        byAgentQ,
+        byMemberQ,
+        byModelQ,
+        modelSeriesQ,
+        reliabilityQ,
+      ]);
     const rel = reliability.rows[0] as Record<string, unknown>;
 
     const t = totals.rows[0] as Record<string, unknown>;
     return {
       totals: {
-        costUsd: num(t.cost),
+        cost: num(t.cost),
         tokens: num(t.tokens),
         turns: num(t.turns),
         unpricedCalls: num(t.unpriced),
@@ -216,21 +262,36 @@ export class PgObsRepo implements ObsRepo {
         const b = row.bucket;
         return {
           bucket: b instanceof Date ? b.toISOString() : String(b),
-          costUsd: num(row.cost),
+          cost: num(row.cost),
           tokens: num(row.tokens),
         };
       }),
       byAgent: byAgent.rows.map((r) => {
         const row = r as Record<string, unknown>;
-        return { agentId: String(row.agent), costUsd: num(row.cost) };
+        return { agentId: agentLabel(row.agent as string | null), cost: num(row.cost) };
+      }),
+      byMember: byMember.rows.map((r) => {
+        const row = r as Record<string, unknown>;
+        const subject = row.subject as string | null;
+        const label = row.label as string | null;
+        return { memberId: subject ?? "system", member: label ?? "System", cost: num(row.cost) };
       }),
       byModel: byModel.rows.map((r) => {
         const row = r as Record<string, unknown>;
         return {
           model: String(row.model),
-          costUsd: num(row.cost),
+          cost: num(row.cost),
           calls: num(row.calls),
           unpriced: row.unpriced === true,
+        };
+      }),
+      modelSeries: modelSeries.rows.map((r) => {
+        const row = r as Record<string, unknown>;
+        const b = row.bucket;
+        return {
+          bucket: b instanceof Date ? b.toISOString() : String(b),
+          model: String(row.model),
+          cost: num(row.cost),
         };
       }),
       reliability: {

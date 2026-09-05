@@ -8,10 +8,12 @@ import { apiGet } from "./api";
 export type SummaryRange = "24h" | "7d" | "30d";
 
 export type ObsSummary = {
-  totals: { costUsd: number; tokens: number; turns: number; unpricedCalls: number };
-  series: Array<{ bucket: string; costUsd: number; tokens: number }>;
-  byAgent: Array<{ agentId: string; costUsd: number }>;
-  byModel: Array<{ model: string; costUsd: number; calls: number; unpriced: boolean }>;
+  totals: { cost: number; tokens: number; turns: number; unpricedCalls: number };
+  series: Array<{ bucket: string; cost: number; tokens: number }>;
+  byAgent: Array<{ agentId: string; cost: number }>;
+  byMember: Array<{ memberId: string; member: string; cost: number }>;
+  byModel: Array<{ model: string; cost: number; calls: number; unpriced: boolean }>;
+  modelSeries: Array<{ bucket: string; model: string; cost: number }>;
   reliability: {
     turns: number;
     turnErrors: number;
@@ -81,16 +83,23 @@ export function rate(numerator: number, denominator: number): string {
   return `${((numerator / denominator) * 100).toFixed(1)}%`;
 }
 
-const USD = new Intl.NumberFormat(undefined, {
-  style: "currency",
-  currency: "USD",
-  maximumFractionDigits: 2,
-});
-
-/** Money for headline cards: cents precision, but sub-cent spend shows more digits so it isn't $0.00. */
-export function formatUsd(n: number): string {
-  if (n > 0 && n < 0.01) return `$${n.toFixed(4)}`;
-  return USD.format(n);
+/** Money for headline cards: cents precision, but sub-cent spend shows more digits so it isn't
+ *  $0.00. `currencyCode` is the business's chosen display currency (default USD) — `Intl.NumberFormat`
+ *  natively formats any valid ISO 4217 code, so no lookup table is needed here. */
+export function formatCost(n: number, currencyCode = "USD"): string {
+  if (n > 0 && n < 0.01) {
+    return new Intl.NumberFormat(undefined, {
+      style: "currency",
+      currency: currencyCode,
+      minimumFractionDigits: 4,
+      maximumFractionDigits: 4,
+    }).format(n);
+  }
+  return new Intl.NumberFormat(undefined, {
+    style: "currency",
+    currency: currencyCode,
+    maximumFractionDigits: 2,
+  }).format(n);
 }
 
 /** Compact token counts: 1.2M / 4.5k / 320. */

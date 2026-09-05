@@ -39,6 +39,8 @@ export interface RecordObsInput {
   durationMs?: number | null;
   status?: string | null;
   toolName?: string | null;
+  subjectKind?: string | null;
+  subjectId?: string | null;
   attributes?: Record<string, unknown>;
 }
 
@@ -64,6 +66,8 @@ export class ObservabilityService {
         durationMs: input.durationMs ?? null,
         status: input.status ?? null,
         toolName: input.toolName ?? null,
+        subjectKind: input.subjectKind ?? null,
+        subjectId: input.subjectId ?? null,
         attributes: input.attributes ?? {},
         createdAt: now,
       };

@@ -1,7 +1,15 @@
+/**
+ * `message`/`code` are optional because most handlers never set them, but they must stay
+ * declared: Fastify serializes its own schema-validation errors (which always carry both) through
+ * this same response schema, and an undeclared field is silently dropped — leaving the client
+ * with the generic HTTP reason phrase in `error` and no way to see the real failure.
+ */
 export const ErrorSchema = {
   type: "object",
   properties: {
     error: { type: "string" },
+    message: { type: "string" },
+    code: { type: "string" },
   },
   required: ["error"],
 } as const;

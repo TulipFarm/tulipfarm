@@ -6,6 +6,7 @@ import {
   Brain,
   Building2,
   Cpu,
+  DollarSign,
   Flower2,
   Gauge,
   History,
@@ -211,10 +212,16 @@ export const SETTINGS_GROUPS: NavGroup[] = [
           "Instance health, open incidents, and the kill switches that stop every agent.",
       },
       {
+        to: "/business/cost",
+        label: "Cost",
+        icon: DollarSign,
+        description: "What your agents are spending, broken down by agent and by model.",
+      },
+      {
         to: "/business/observability",
         label: "Observability",
         icon: Gauge,
-        description: "What your agents are spending and doing: cost, tokens, and reliability.",
+        description: "What your agents are doing: tokens, turns, and reliability.",
       },
     ],
   },
@@ -270,6 +277,7 @@ export function visibleFarmItem(visibility: NavigationVisibility): NavItem | und
 const PAGE_META: Array<{ prefix: string; label: string; icon: Icon }> = [
   { prefix: "/farm", label: "Farm", icon: Flower2 },
   { prefix: "/business/activities", label: "Activity", icon: History },
+  { prefix: "/business/cost", label: "Cost", icon: DollarSign },
   { prefix: "/business/observability", label: "Observability", icon: Gauge },
   { prefix: "/business/profile", label: "Business profile", icon: Building2 },
   { prefix: "/business/models", label: "Models", icon: Cpu },

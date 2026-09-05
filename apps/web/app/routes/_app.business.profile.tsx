@@ -1,8 +1,10 @@
 import { useLoaderData, useRevalidator, useRouteError } from "@remix-run/react";
-import { useState } from "react";
+import { CURRENCIES } from "@tulipfarm/schema/currencies";
+import { useEffect, useId, useState } from "react";
 import { FormStatus } from "~/components/form-status";
 import { ErrorState } from "~/components/states";
 import { Button } from "~/components/ui/button";
+import { Combobox } from "~/components/ui/combobox";
 import { Field, ReadonlyField } from "~/components/ui/field";
 import { Input } from "~/components/ui/input";
 import { Panel } from "~/components/ui/panel";
@@ -10,6 +12,14 @@ import { Textarea } from "~/components/ui/textarea";
 import { ApiError } from "~/lib/api";
 import { type BusinessProfile, getBusinessProfile, putBusinessProfile } from "~/lib/settings";
 import { useIsAdmin } from "~/lib/use-session-user";
+
+/** "USD — US Dollar", falling back to the bare code for one the list somehow doesn't carry. */
+function currencyLabel(code: string): string {
+  const entry = CURRENCIES.find((c) => c.code === code);
+  return entry ? `${entry.code} — ${entry.name}` : code;
+}
+
+const CURRENCY_OPTIONS = CURRENCIES.map((c) => currencyLabel(c.code));
 
 /** A raw "forbidden" from the API is not a sentence anyone can act on. */
 function messageOf(err: unknown): string {
@@ -38,14 +48,35 @@ export default function BusinessProfilePage() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [done, setDone] = useState(false);
+  // The Combobox's `value` is the literal input text; it must be its own state so a keystroke
+  // isn't reverted next render, and re-synced whenever the committed currency changes elsewhere
+  // (a fresh load, or Cancel resetting the whole draft).
+  const [currencyQuery, setCurrencyQuery] = useState(() => currencyLabel(draft.businessCurrency));
+  useEffect(() => {
+    setCurrencyQuery(currencyLabel(draft.businessCurrency));
+  }, [draft.businessCurrency]);
+  const currencyFieldId = useId();
 
   const dirty =
     draft.name !== profile.name ||
     draft.description !== profile.description ||
-    draft.website !== profile.website;
+    draft.website !== profile.website ||
+    draft.businessCurrency !== profile.businessCurrency ||
+    draft.businessCurrencyRate !== profile.businessCurrencyRate;
+
+  const nameMissing = draft.name.trim().length === 0;
 
   function set<K extends keyof BusinessProfile>(key: K, value: BusinessProfile[K]) {
     setDraft((prev) => ({ ...prev, [key]: value }));
+    setDone(false);
+  }
+
+  function setCurrency(code: string) {
+    setDraft((prev) => ({
+      ...prev,
+      businessCurrency: code,
+      businessCurrencyRate: code === "USD" ? 1 : prev.businessCurrencyRate,
+    }));
     setDone(false);
   }
 
@@ -58,6 +89,8 @@ export default function BusinessProfilePage() {
         name: draft.name.trim(),
         description: draft.description.trim(),
         website: draft.website.trim(),
+        businessCurrency: draft.businessCurrency,
+        businessCurrencyRate: draft.businessCurrency === "USD" ? 1 : draft.businessCurrencyRate,
       });
       setDone(true);
       revalidator.revalidate();
@@ -77,6 +110,11 @@ export default function BusinessProfilePage() {
         <dl className="grid gap-4 sm:grid-cols-2">
           <ReadonlyField label="Name">{profile.name || "-"}</ReadonlyField>
           <ReadonlyField label="Website">{profile.website || "-"}</ReadonlyField>
+          <ReadonlyField label="Currency">
+            {profile.businessCurrency === "USD"
+              ? "USD"
+              : `${profile.businessCurrency} (1 USD = ${profile.businessCurrencyRate} ${profile.businessCurrency})`}
+          </ReadonlyField>
           <ReadonlyField label="What it does" className="sm:col-span-2">
             {profile.description || "-"}
           </ReadonlyField>
@@ -100,7 +138,7 @@ export default function BusinessProfilePage() {
                 Cancel
               </Button>
             ) : null}
-            <Button size="sm" onClick={() => void save()} disabled={busy || !dirty}>
+            <Button size="sm" onClick={() => void save()} disabled={busy || !dirty || nameMissing}>
               {busy ? "Saving…" : "Save"}
             </Button>
           </div>
@@ -111,7 +149,12 @@ export default function BusinessProfilePage() {
         {error ? <FormStatus tone="error">{error}</FormStatus> : null}
         {done && !dirty ? <FormStatus tone="success">Business profile updated.</FormStatus> : null}
 
-        <Field label="Name" help="What your business is called.">
+        <Field
+          label="Name"
+          help="What your business is called."
+          error={nameMissing ? "Name can't be empty." : undefined}
+          required
+        >
           <Input
             value={draft.name}
             onChange={(e) => set("name", e.target.value)}
@@ -138,6 +181,39 @@ export default function BusinessProfilePage() {
             onChange={(e) => set("website", e.target.value)}
             placeholder="https://example.com"
           />
+        </Field>
+
+        <Field
+          label="Currency"
+          htmlFor={currencyFieldId}
+          help="Cost figures on the Cost page display in this currency."
+        >
+          <div className="flex items-center gap-2">
+            <Combobox
+              id={currencyFieldId}
+              value={currencyQuery}
+              options={CURRENCY_OPTIONS}
+              onValueChange={setCurrencyQuery}
+              onCommit={(next) => {
+                const match = CURRENCIES.find((c) => currencyLabel(c.code) === next);
+                if (match) setCurrency(match.code);
+                else setCurrencyQuery(currencyLabel(draft.businessCurrency));
+              }}
+              placeholder="Search currency…"
+              emptyLabel="No matching currency."
+              className="w-64"
+            />
+            <span className="shrink-0 text-xs text-muted-foreground">1 USD =</span>
+            <Input
+              type="number"
+              min={0}
+              step="any"
+              value={draft.businessCurrency === "USD" ? 1 : draft.businessCurrencyRate}
+              disabled={draft.businessCurrency === "USD"}
+              onChange={(e) => set("businessCurrencyRate", Number(e.target.value))}
+              className="w-28"
+            />
+          </div>
         </Field>
       </div>
     </Panel>

@@ -26,7 +26,7 @@ data loading, schema-driven resource UI, and browser rendering of Surface Artifa
 | `app/components/resources/` | Stat strip, catalog table, schema summary for `/resources`. |
 | `app/components/routines/` | Catalog, row, canvas, run/dry-run, effects and bounds panels for `/routines`. |
 | `app/components/integrations/` | Brand-tile card grid, vendored colour logos, the `···` menu, and the `?view=` preview sheet for `/integrations`. The one sanctioned card grid — see DESIGN.md "The integrations catalog". |
-| `app/components/ui/` | Vendored shadcn primitives for this app only, plus `combobox.tsx` — hand-rolled, because `cmdk` forces its own input `id` and breaks `<label htmlFor>`. |
+| `app/components/ui/` | Vendored shadcn primitives for this app only, plus `combobox.tsx` — hand-rolled, because `cmdk` forces its own input `id` and breaks `<label htmlFor>`. `select.tsx` is a thin native `<select>` wrapper; deprecated (see Rules), kept only until its 16 existing callers migrate. |
 | `app/lib/api.ts` | API client with cookies, CSRF header, optional bearer token, `ApiError`. |
 | `app/lib/schema.ts` | JSON-Schema field detection, list/detail/form metadata, value rendering, shared formatters. |
 | `app/lib/resource-catalog.ts` | Joins types with record totals; derives the two-way link graph. |
@@ -77,6 +77,12 @@ data loading, schema-driven resource UI, and browser rendering of Surface Artifa
   `sidebar-command.tsx` searches destinations and open chats only;
   a row shows `+` only where `NavItem.create` names a real create route, and the link sits outside
   the `NavLink` so the row's accessible name stays the destination's.
+- Never use `ui/select.tsx` (a native `<select>`) for new dropdowns, even a short fixed list —
+  it renders the OS's own unstyled popover, off-brand and un-themeable. Use `ui/combobox.tsx`'s
+  `Combobox` instead, as `model-chains/model-sheet.tsx` does; for a closed enum (not free text
+  like a model id), give it a `"code — label"` option list and validate `onCommit` against it,
+  reverting unmatched input, the way `_app.business.profile.tsx`'s currency picker does. Existing
+  `ui/select.tsx` callers are a migration backlog, not a precedent to copy.
 - Resource list/detail/create/edit are zero-code from JSON Schema; a new field kind means
   `resolveKind`, `resource-form.tsx`, and `renderValue`. A count the caller may not read is `null`
   and renders `—`, never `0`. See DESIGN.md §9, *Data grids*. Never call secure-context-only browser

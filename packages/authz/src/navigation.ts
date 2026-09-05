@@ -50,6 +50,12 @@ export const NAVIGATION_REQUIREMENTS: readonly NavigationRequirement[] = [
   { path: "/business/activities", authorizations: [AUTHENTICATED_NAVIGATION] },
   { path: "/operations", authorizations: [OPERATIONS_READ] },
   {
+    path: "/business/cost",
+    authorizations: [
+      { action: "observability.read", resourceType: "observability", fallback: "admin" },
+    ],
+  },
+  {
     path: "/business/observability",
     authorizations: [
       { action: "observability.read", resourceType: "observability", fallback: "admin" },

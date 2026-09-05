@@ -646,6 +646,8 @@ describe("soul routes", () => {
         name: "Fernwood Roasters",
         description: "Speciality coffee wholesale.",
         website: "https://fernwood.coffee",
+        businessCurrency: "USD",
+        businessCurrencyRate: 1,
       });
     });
 
@@ -655,7 +657,13 @@ describe("soul routes", () => {
         url: "/api/v1/business",
         cookies: { [SESSION_COOKIE]: sid },
       });
-      expect(res.json()).toEqual({ name: "", description: "", website: "" });
+      expect(res.json()).toEqual({
+        name: "",
+        description: "",
+        website: "",
+        businessCurrency: "USD",
+        businessCurrencyRate: 1,
+      });
     });
 
     it("writes the soul.yaml keys and re-emits soul.synced", async () => {
@@ -671,6 +679,8 @@ describe("soul routes", () => {
         name: "Fernwood Roasters",
         description: "Coffee.",
         website: "",
+        businessCurrency: "USD",
+        businessCurrencyRate: 1,
       });
       expect(soul.applied.at(-1)?.changes[0]).toEqual({
         op: "put",

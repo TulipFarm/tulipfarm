@@ -1,5 +1,6 @@
 import { type Static, Type } from "@sinclair/typebox";
 import { ajv } from "./ajv";
+import { CURRENCY_CODES } from "./currencies";
 import { TulipFarmValidationError } from "./error";
 import { LlmConfigSchema, validateLlmConfig } from "./llm";
 
@@ -30,6 +31,10 @@ export const SoulConfigSchema = Type.Object(
     businessWebsite: Type.Optional(Type.String()),
     setupComplete: Type.Optional(Type.Boolean()),
     gitRemoteUrl: Type.Optional(Type.String()),
+    businessCurrency: Type.Optional(
+      Type.Unsafe<string>({ type: "string", enum: [...CURRENCY_CODES] })
+    ),
+    businessCurrencyRate: Type.Optional(Type.Number({ minimum: 0, exclusiveMinimum: 0 })),
     llm: Type.Optional(LlmConfigSchema),
     files: Type.Optional(FilesConfigSchema),
   },

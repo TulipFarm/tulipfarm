@@ -2278,4 +2278,12 @@ export const PG_MIGRATIONS: PgMigration[] = [
       await q.query("ALTER TABLE turn_completions ADD COLUMN IF NOT EXISTS model_failure jsonb");
     },
   },
+  {
+    version: 85,
+    description: "obs_event: carries the acting principal (kind/id), so spend can group by member",
+    up: async (q) => {
+      await q.query("ALTER TABLE obs_event ADD COLUMN IF NOT EXISTS subject_kind text");
+      await q.query("ALTER TABLE obs_event ADD COLUMN IF NOT EXISTS subject_id text");
+    },
+  },
 ];

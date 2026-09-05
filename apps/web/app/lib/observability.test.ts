@@ -1,15 +1,18 @@
 import { describe, expect, it } from "vitest";
-import { formatTokens, formatUsd } from "./observability";
+import { formatCost, formatTokens } from "./observability";
 
-describe("formatUsd", () => {
+describe("formatCost", () => {
   it("formats normal amounts to cents", () => {
-    expect(formatUsd(42.18)).toBe("$42.18");
+    expect(formatCost(42.18)).toBe("$42.18");
   });
   it("shows extra precision for sub-cent spend so it isn't $0.00", () => {
-    expect(formatUsd(0.0004)).toBe("$0.0004");
+    expect(formatCost(0.0004)).toBe("$0.0004");
   });
   it("formats zero", () => {
-    expect(formatUsd(0)).toBe("$0.00");
+    expect(formatCost(0)).toBe("$0.00");
+  });
+  it("formats a non-USD currency code", () => {
+    expect(formatCost(42.18, "INR")).toBe("₹42.18");
   });
 });
 

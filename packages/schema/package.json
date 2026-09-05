@@ -9,6 +9,7 @@
     "./canonicalize": "./src/canonicalize.ts",
     "./chat": "./src/chat.ts",
     "./chat-limits": "./src/chat-limits.ts",
+    "./currencies": "./src/currencies.ts",
     "./guards": "./src/guards.ts",
     "./message-content": "./src/message-content.ts",
     "./model-catalog": "./src/model-catalog.ts"

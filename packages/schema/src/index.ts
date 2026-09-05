@@ -48,6 +48,8 @@ export {
   ConversationDetailSchema,
   ConversationTurnSchema,
 } from "./chat";
+export type { CurrencyOption } from "./currencies";
+export { CURRENCIES, CURRENCY_CODES, isCurrencyCode } from "./currencies";
 export type { ModelProfileDenialReason } from "./definitions";
 export * from "./definitions";
 export * as definitions from "./definitions";

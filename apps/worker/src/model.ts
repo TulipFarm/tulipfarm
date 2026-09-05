@@ -394,6 +394,7 @@ export class LlmModelPort implements ModelPort, ModelCallReceiptSource {
         ? {}
         : { model: routedModelId(resolution.routing) }),
       ...(resolution.provider === undefined ? {} : { provider: resolution.provider }),
+      ...(request.principal === undefined ? {} : { principal: request.principal }),
     });
   }
 

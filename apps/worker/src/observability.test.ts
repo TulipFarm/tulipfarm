@@ -27,7 +27,9 @@ const COLUMN = {
   costUsd: 10,
   durationMs: 11,
   status: 12,
-  attributes: 13,
+  subjectKind: 13,
+  subjectId: 14,
+  attributes: 15,
 } as const;
 
 const flush = () => new Promise((resolve) => setImmediate(resolve));
@@ -124,6 +126,29 @@ describe("PgSpendSink", () => {
       cacheWrite: 10,
       reasoning: 30,
     });
+  });
+
+  it("records the acting principal so spend can be grouped by member", async () => {
+    const { queries, q } = db();
+
+    new PgSpendSink(q).recordLlmCall({
+      status: "ok",
+      principal: { kind: "user", id: "user-1" },
+    });
+    await flush();
+
+    expect(queries[0]?.params[COLUMN.subjectKind]).toBe("user");
+    expect(queries[0]?.params[COLUMN.subjectId]).toBe("user-1");
+  });
+
+  it("records no principal as null, not an empty string", async () => {
+    const { queries, q } = db();
+
+    new PgSpendSink(q).recordTurn({ status: "ok" });
+    await flush();
+
+    expect(queries[0]?.params[COLUMN.subjectKind]).toBeNull();
+    expect(queries[0]?.params[COLUMN.subjectId]).toBeNull();
   });
 
   it("records a finished turn so the dashboard can count turns at all", async () => {
