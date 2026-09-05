@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.18.10](https://github.com/TulipFarm/tulipfarm/compare/v0.18.9...v0.18.10) (2026-09-05)
+
+### Features
+
+* **surface:** let an agent author a Surface view in sandboxed code ([#689](https://github.com/TulipFarm/tulipfarm/issues/689)) ([92afe4f](https://github.com/TulipFarm/tulipfarm/commit/92afe4f8aa3d8370d703e60a58697071403707ec)), references [#685](https://github.com/TulipFarm/tulipfarm/issues/685)
+* **web:** add per-member cost breakdown and business currency display ([#690](https://github.com/TulipFarm/tulipfarm/issues/690)) ([c116ad9](https://github.com/TulipFarm/tulipfarm/commit/c116ad9eaabffa0927d2e0ed47b1df1a60690426))
+* **web:** redesign integrations and skills ([#688](https://github.com/TulipFarm/tulipfarm/issues/688)) ([ccd6345](https://github.com/TulipFarm/tulipfarm/commit/ccd63453ed1af2a06a422c6e4864c6b2c8d8648b))
+
 ## [0.18.9](https://github.com/TulipFarm/tulipfarm/compare/v0.18.8...v0.18.9) (2026-09-04)
 
 ### Features
