@@ -23,7 +23,7 @@ test("leaves the h1 to the section shell on the tabs' own page", () => {
   expect(screen.queryByRole("heading", { level: 1 })).toBeNull();
 });
 
-test("leaves the h1 to the Teams section shell", () => {
+test("names the legacy Teams path until its redirect runs", () => {
   renderAt("/business/access/teams");
-  expect(screen.queryByRole("heading", { level: 1 })).toBeNull();
+  expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent("People");
 });

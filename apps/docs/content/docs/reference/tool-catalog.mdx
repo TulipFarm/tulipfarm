@@ -28,6 +28,7 @@ Reading and changing the records your resource types describe.
 | --- | --- | --- |
 | `record_create` | Yes | Create a new record of the given resource type. |
 | `record_delete` | Yes | Soft-delete a record. |
+| `record_find_similar` | No | Find records of a resource type whose given field is textually similar to the given text (fuzzy match, not exact). |
 | `record_get` | No | Get a single record by id. |
 | `record_list` | No | List records of a resource type. |
 | `record_search` | No | Search records of a resource type by field values (JSONB containment match). |
@@ -112,7 +113,7 @@ Documents an agent can read, or produce for you to open, download and forward.
 
 | Tool | Changes things | What it does |
 | --- | --- | --- |
-| `file_create` | Yes | Write a document the person can open, download and forward, not another chat message. |
+| `file_create` | Yes | Generate a document the person can open, download and forward, not another chat message. |
 | `file_list` | No | List the Files you are allowed to see, the ones the person owns and the ones shared with them. |
 | `file_read` | No | Read one File by id. |
 
