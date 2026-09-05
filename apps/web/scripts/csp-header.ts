@@ -20,7 +20,11 @@ export function cspHeaderForHtml(html: string): string {
   const scriptSrc = ["'self'", "'unsafe-eval'", ...hashes].join(" ");
   return (
     `default-src 'self'; script-src ${scriptSrc}; style-src 'self' 'unsafe-inline'; ` +
-    "img-src 'self' data:; font-src 'self' data:; connect-src 'self'; frame-ancestors 'none'"
+    "img-src 'self' data:; font-src 'self' data:; connect-src 'self'; " +
+    // Stated rather than inherited from default-src: the sandbox frame that runs authored code is
+    // served from this origin, and a reader deleting a `default-src` fallback should not silently
+    // take the frame with it.
+    "frame-src 'self'; frame-ancestors 'none'"
   );
 }
 

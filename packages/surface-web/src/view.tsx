@@ -286,7 +286,12 @@ function CompositionNode({
     props: view.props,
   };
   return (
-    <div data-surface-node={path}>
+    <div
+      data-surface-node={path}
+      data-tulip-tone={view.style?.tone}
+      data-tulip-radius={view.style?.radius}
+      data-tulip-size={view.style?.size}
+    >
       <SurfaceView
         artifact={projected}
         onInteraction={onInteraction}

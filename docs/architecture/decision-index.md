@@ -13,6 +13,7 @@ Detailed contracts:
 - [Building an Integration](building-an-integration.md)
 - [Governed network Tools](governed-network-tools.md)
 - [Deployment manifest](deployment-manifest.md)
+- [Sandboxed Surface code views](adr-031-sandboxed-surface-code.md)
 
 ## Accepted decisions
 
@@ -42,6 +43,7 @@ Detailed contracts:
 | ADR-028 | The Curator is one durable Run per user or business that proposes every model-derived effect; deterministic maintenance stays deterministic | Model reasoning cannot execute outside `packages/run-kernel` (ADR-004); one loop replaces four half-built mechanisms for memory, Knowledge, Tasks, and suggestions | `packages/curator`, `apps/worker` |
 | ADR-029 | Curator output names only a closed `kind` and a Run-scoped subject; the server templates every user-visible string, URL, and dedupe key | A Proposal pill inserts its prompt straight into Chat, so model-authored text there is a direct injection path into the user's next turn | `packages/curator`, `apps/api` |
 | ADR-030 | Generic web and API access runs as governed first-party Tools with pure call-level read/write classification | One structured path keeps SSRF controls, exact destination and Secret authority, Approval, and effect recovery intact while allowing REST and GraphQL calls whose risk varies by operation | `packages/tool-host`, `packages/integrations`, `apps/api` |
+| ADR-031 | A Surface component may carry Agent-authored code, executed in an opaque-origin `sandbox="allow-scripts"` frame with `connect-src 'none'` | The shipped catalog cannot anticipate every visual a user asks for, and an Agent that can only re-compose it substitutes and narrates; the boundary is the missing origin and the missing network, never source inspection | `packages/surface`, `packages/surface-web`, `apps/web` |
 
 ## Superseded decisions
 
@@ -75,7 +77,8 @@ These spellings supersede earlier conflicting names without changing behavior.
 | Exactly-once external effects | Cannot be guaranteed across arbitrary providers and ambiguous network outcomes |
 | Static Tool sets or missing allowlists as authorization | Tool discovery/exposure never substitutes for policy; missing context denies |
 | Retrieve knowledge then redact | Candidate and metadata leakage already occurred before redaction |
-| Dynamic in-process third-party extensions | Grants trusted memory/code/credential access and bypasses isolation review |
+| Dynamic in-process third-party extensions | Grants trusted memory/code/credential access and bypasses isolation review — unrelated to ADR-031, whose authored view code runs only in the reader's browser with no origin, network or credential |
+| A closed set of declarative drawing primitives instead of authored code | Every new visual still needs the primitive set to have anticipated it, and local editing state cannot be expressed at all (ADR-031) |
 | Direct Soul file/Git mutation | Bypasses schema, semantic checks, policy, approval, publication, and audit |
 | Approval by heuristic or expired/mismatched decision | Approval must bind one exact normalized intent and current policy evidence |
 | Local/SSH/container shell as production isolation | Workspace abstraction is useful but is not a strong security boundary |

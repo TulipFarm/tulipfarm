@@ -4,7 +4,7 @@ import { isRecord } from "@tulipfarm/schema";
 import {
   createSurfaceArtifact,
   type PresentationContext,
-  resolveSoulSurfaceView,
+  resolveSoulSurfacePresentation,
   type SurfaceArtifact,
   type SurfaceComponentDefinition,
   SurfaceValidationError,
@@ -50,14 +50,15 @@ async function createActionHandles(
   return Object.fromEntries(entries);
 }
 
-function resolvedView(artifact: SurfaceArtifact, ctx: Parameters<ToolDef["execute"]>[1]) {
-  if (!artifact.component.name.startsWith("business.")) return undefined;
+/** How this artifact renders: a resolved tree, a sandboxed module, or neither for a shipped one. */
+function presentation(artifact: SurfaceArtifact, ctx: Parameters<ToolDef["execute"]>[1]) {
+  if (!artifact.component.name.startsWith("business.")) return {};
   const component = ctx.surfaceComponents?.find(
     (candidate) =>
       candidate.name === artifact.component.name && candidate.version === artifact.component.version
   );
   if (!component) throw new Error("Published Surface component is unavailable.");
-  return resolveSoulSurfaceView(
+  return resolveSoulSurfacePresentation(
     component,
     artifact.target,
     artifact.props,
@@ -277,7 +278,9 @@ Prefer a presentation over plain prose whenever the answer contains structured R
 
 Which component: Alert for an outage, degradation, urgent warning or important success; Status for one compact state; Metric for one or more KPIs; Timeline for ordered events; Comparison for an option-by-criteria decision matrix; Breakdown for a proportional split; Gauge for bounded progress; RecordTable for repeated Records sharing fields.
 
-Do not use this Tool for Choices, Forms, or any response that must wait for the user — call request_input instead. Only the components in this Tool's schema exist; the schema is narrowed to what this Turn's channel can actually render. Pass name, version and props as separate fields, never a combined "RecordTable@1.0", and put every component-specific field inside props.`,
+Do not use this Tool for Choices, Forms, or any response that must wait for the user — call request_input instead. Only the components in this Tool's schema exist; the schema is narrowed to what this Turn's channel can actually render. Pass name, version and props as separate fields, never a combined "RecordTable@1.0", and put every component-specific field inside props.
+
+If what the user asked for has no matching component, or an enum field (e.g. a chart kind) has no matching value for it, never render the nearest existing option as if it were what was asked for — not even with a caveat in the prose. Call surface_component_create to compose a new business.<slug> component from these primitives that actually matches, then present that. Composing a business component is routine, not a sensitive action: do it directly, do not ask the user for permission first or stop to offer it as a choice. When no combination of shipped primitives can express it, surface_component_create also accepts a web code view: authored JSX that draws exactly what was asked for. There is no visual this system cannot render, so never tell the user a presentation is unsupported.`,
   inputSchema: PRESENT_SCHEMA,
   inputSchemaFor: (ctx) => ({
     ...PRESENT_SCHEMA,
@@ -337,7 +340,7 @@ Do not use this Tool for Choices, Forms, or any response that must wait for the 
         render: "ok",
         validationPaths: [],
       });
-      return ok({ artifact, actionHandles, resolvedView: resolvedView(artifact, ctx) });
+      return ok({ artifact, actionHandles, ...presentation(artifact, ctx) });
     } catch (error) {
       if (error instanceof SurfaceValidationError) {
         return err("surface_invalid", error.message);
@@ -407,7 +410,7 @@ const updatePresentationToolDefinition = defineApiTool<RequestContext>({
         Type.Record(Type.String(), Type.Unknown()),
         ctx
       );
-      return ok({ artifact, actionHandles, resolvedView: resolvedView(artifact, ctx) });
+      return ok({ artifact, actionHandles, ...presentation(artifact, ctx) });
     } catch (error) {
       return err(
         "surface_invalid",

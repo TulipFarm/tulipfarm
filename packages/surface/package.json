@@ -7,6 +7,7 @@
     ".": "./src/index.ts",
     "./catalog": "./src/catalog.ts",
     "./client": "./src/client.ts",
+    "./sandbox": "./src/sandbox.ts",
     "./soul": "./src/soul.ts"
   },
   "scripts": {

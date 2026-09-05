@@ -15,6 +15,7 @@ import {
 } from "@tulipfarm/schema";
 import {
   type SoulSurfaceComponent,
+  type SurfaceCodeView,
   type SurfaceComponentSupport,
   validateSoulSurfaceCatalog,
   validateSoulSurfaceComponent,
@@ -39,6 +40,24 @@ import type {
 export { parseFrontmatter };
 
 const definitionRegistry = new SchemaRegistry(DEFINITION_REGISTRATIONS);
+
+/** Where a Surface component's `code:` block points, relative to the component directory. */
+interface SurfaceCodeManifest {
+  readonly source: string;
+  readonly module: string;
+  readonly sourceSha256: string;
+}
+
+async function readdirOrEmpty(dir: string): Promise<string[]> {
+  try {
+    return await readdir(dir);
+  } catch (err) {
+    const isNotFound =
+      err instanceof Error && "code" in err && (err as NodeJS.ErrnoException).code === "ENOENT";
+    if (isNotFound) return [];
+    throw err;
+  }
+}
 
 async function subdirs(dir: string): Promise<string[]> {
   try {
@@ -322,6 +341,29 @@ export class SoulLoader {
     return map;
   }
 
+  /**
+   * Reads the authored source and compiled module a component's `code:` manifest points at.
+   *
+   * The hash is verified because the compiled module is what executes: a tree edited outside the
+   * product could otherwise ship a module its readable source does not correspond to.
+   */
+  private async loadSurfaceCode(
+    dir: string,
+    manifest: Record<string, SurfaceCodeManifest>
+  ): Promise<Record<string, SurfaceCodeView>> {
+    const code: Record<string, SurfaceCodeView> = {};
+    for (const [channel, entry] of Object.entries(manifest)) {
+      const source = await readContainedFile(this.soulPath, join(dir, entry.source));
+      const compiled = await readContainedFile(this.soulPath, join(dir, entry.module));
+      const digest = createHash("sha256").update(source).digest("hex");
+      if (digest !== entry.sourceSha256) {
+        throw new Error(`code/${channel}: authored source does not match its recorded hash`);
+      }
+      code[channel] = { source, compiled, sourceSha256: digest };
+    }
+    return code;
+  }
+
   private async loadSurfaceComponents(): Promise<Map<string, SoulSurfaceComponent>> {
     const map = new Map<string, SoulSurfaceComponent>();
     const slugs = await subdirs(join(this.soulPath, "surface-components"));
@@ -330,17 +372,22 @@ export class SoulLoader {
       try {
         const definition = (parseYaml(
           await readContainedFile(this.soulPath, join(dir, "component.yaml"))
-        ) ?? {}) as Omit<SoulSurfaceComponent, "slug" | "views">;
+        ) ?? {}) as Omit<SoulSurfaceComponent, "slug" | "views" | "code"> & {
+          code?: Record<string, SurfaceCodeManifest>;
+        };
         const views: Record<string, unknown> = {};
-        for (const file of await readdir(join(dir, "views"))) {
+        // A code-backed component carries no `views/` directory at all.
+        for (const file of await readdirOrEmpty(join(dir, "views"))) {
           if (!file.endsWith(".yaml")) continue;
           views[file.slice(0, -5)] =
             parseYaml(await readContainedFile(this.soulPath, join(dir, "views", file))) ?? {};
         }
+        const { code: codeManifest, ...semantics } = definition;
         const component = {
-          ...definition,
+          ...semantics,
           slug,
           views,
+          ...(codeManifest ? { code: await this.loadSurfaceCode(dir, codeManifest) } : {}),
         } as SoulSurfaceComponent;
         validateSoulSurfaceComponent(component, this.surfaceSupport);
         map.set(component.name, component);

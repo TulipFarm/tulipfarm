@@ -245,7 +245,15 @@ export const DATA_DISPLAY_COMPONENTS = [
     version: "1.0",
     description: "A categorical or time-series chart.",
     propsSchema: Type.Object({
-      kind: Type.Union([Type.Literal("bar"), Type.Literal("line")]),
+      // Spelled out because the closed enum is the thing a model gets wrong: asked for an area
+      // chart it picked "line", invented a `fill` prop nothing reads, and called it an area chart.
+      kind: Type.Union([Type.Literal("bar"), Type.Literal("line")], {
+        description:
+          "Closed set: bar or line, and nothing else. This component cannot draw an area, " +
+          "stacked, scatter, pie, donut, candlestick or any other shape. For any of those, do " +
+          "not pick the nearest value here — call surface_component_create and author the chart " +
+          "that was actually asked for.",
+      }),
       labels: Type.Array(Type.String({ maxLength: 200 }), { minItems: 2, maxItems: 200 }),
       series: Type.Array(
         Type.Object({

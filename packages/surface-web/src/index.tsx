@@ -5,6 +5,7 @@ import type { ReactElement } from "react";
 import { surfaceWebManifest } from "./manifest";
 import { SurfaceView } from "./view";
 
+export { SurfaceCodeView, type SurfaceCodeViewProps } from "./code-view";
 export type { SurfaceCompositionProps, SurfaceWebProps } from "./primitives";
 export { SurfaceCompositionView, SurfaceView } from "./view";
 

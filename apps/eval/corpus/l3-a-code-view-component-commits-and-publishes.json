@@ -1,0 +1,117 @@
+{
+  "id": "l3-a-code-view-component-commits-and-publishes",
+  "tier": "l3",
+  "agent": "support",
+  "input": [
+    {
+      "role": "user",
+      "content": "Build me a small expense sheet to show in chat. The shipped chart and table components cannot draw it, so write it as a web code view. Call the soul_write tool now with kind \"SurfaceComponent\" and slug \"expense-sheet\": first component.yaml with definitionMode \"canonical\", then the companion code/web.source.jsx, then the companion code/web.js. Do not ask me to confirm first."
+    }
+  ],
+  "tools": [
+    {
+      "name": "soul_write",
+      "description": "Commit a Soul artifact to the configuration repository. `kind` is a capitalised singular such as \"SurfaceComponent\". `slug` is the artifact's directory name. A SurfaceComponent's definition is its `component.yaml`: omit `companion` and pass `definitionMode` \"canonical\" to write it. `companion` names a file beside the definition, such as \"code/web.source.jsx\" (the authored JSX) or \"code/web.js\" (the compiled module its `code:` block points at).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "type": "string"
+          },
+          "slug": {
+            "type": "string"
+          },
+          "companion": {
+            "type": "string"
+          },
+          "content": {
+            "type": "string"
+          },
+          "definitionMode": {
+            "type": "string"
+          }
+        },
+        "required": ["kind", "slug", "content"]
+      }
+    }
+  ],
+  "script": [
+    {
+      "kind": "tool_calls",
+      "calls": [
+        {
+          "callId": "c1",
+          "name": "soul_write",
+          "arguments": {
+            "kind": "SurfaceComponent",
+            "slug": "expense-sheet",
+            "content": "name: business.expense-sheet\nversion: \"1.0\"\ndescription: A small expense sheet drawn by authored code.\npropsSchema:\n  type: object\n  required:\n    - rows\n  properties:\n    rows:\n      type: array\n      items:\n        type: object\nevents: []\nexamples:\n  - rows:\n      - label: Bulbs\n        amount: 40\ntargets:\n  - channel: web\n    surface: chat\ncode:\n  web:\n    source: code/web.source.jsx\n    module: code/web.js\n    sourceSha256: d9c2990bf173ba9f13ad682e9f9dae19b0d1e7b9efd325c39f11babfaa55c91f\nmetadata:\n  protocol: tsp\n  protocolVersion: \"1.0\"\n",
+            "definitionMode": "canonical"
+          }
+        },
+        {
+          "callId": "c2",
+          "name": "soul_write",
+          "arguments": {
+            "kind": "SurfaceComponent",
+            "slug": "expense-sheet",
+            "companion": "code/web.source.jsx",
+            "content": "function render(props, tulip) {\n  return React.createElement(\n    \"table\",\n    null,\n    props.rows.map(function (row, index) {\n      return React.createElement(\n        \"tr\",\n        { key: index },\n        React.createElement(\"td\", null, row.label),\n        React.createElement(\"td\", null, row.amount)\n      );\n    })\n  );\n}\n"
+          }
+        },
+        {
+          "callId": "c3",
+          "name": "soul_write",
+          "arguments": {
+            "kind": "SurfaceComponent",
+            "slug": "expense-sheet",
+            "companion": "code/web.js",
+            "content": "function render(props, tulip) {\n  return React.createElement(\n    \"table\",\n    null,\n    props.rows.map(function (row, index) {\n      return React.createElement(\n        \"tr\",\n        { key: index },\n        React.createElement(\"td\", null, row.label),\n        React.createElement(\"td\", null, row.amount)\n      );\n    })\n  );\n}\n"
+          }
+        }
+      ]
+    },
+    {
+      "kind": "text",
+      "text": "I built the expense-sheet component as a web code view."
+    }
+  ],
+  "journey": [
+    {
+      "input": [
+        {
+          "role": "user",
+          "content": "Which presentation components can you see now? Name every one."
+        }
+      ],
+      "script": [
+        {
+          "kind": "text",
+          "text": "The shipped ones, plus expense-sheet."
+        }
+      ]
+    }
+  ],
+  "expect": [
+    {
+      "kind": "soul_committed",
+      "path": "surface-components/expense-sheet/component.yaml"
+    },
+    {
+      "kind": "soul_committed",
+      "path": "surface-components/expense-sheet/code/web.source.jsx"
+    },
+    {
+      "kind": "soul_committed",
+      "path": "surface-components/expense-sheet/code/web.js"
+    },
+    {
+      "kind": "run_status",
+      "status": "succeeded"
+    },
+    {
+      "kind": "output_contains",
+      "text": "expense-sheet"
+    }
+  ]
+}

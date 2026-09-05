@@ -185,7 +185,12 @@ const ARTIFACT_LAYOUT_ENTRIES = [
     definitionFile: "component.yaml",
     definitionModes: ["delegated"],
     legacyDefinitionFiles: [],
-    companions: [{ match: "views/", modes: ["delegated"] }],
+    // `views/` stays YAML-only: binding a second mode to that prefix would let a typo'd declarative
+    // view fall through to "executable, admitted unparsed" instead of failing.
+    companions: [
+      { match: "views/", modes: ["delegated"] },
+      { match: "code/", modes: ["executable"] },
+    ],
   },
   {
     kind: "ToolContract",

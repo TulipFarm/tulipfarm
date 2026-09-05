@@ -141,6 +141,7 @@ export function MessagePartView({
           revision={part.revision}
           actionHandles={part.actionHandles}
           resolvedView={part.resolvedView}
+          codeView={part.codeView}
           onInteraction={onSurfaceInteraction}
         />
       );

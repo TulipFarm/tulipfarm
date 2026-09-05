@@ -151,7 +151,9 @@ export class FallbackModel implements LanguageModelV4 {
     /** Records which link served, so cost is attributed to the model that answered. */
     private readonly responder?: ModelResponderRef,
     private readonly gate?: FallbackCallGate,
-    private readonly providerKeys: readonly string[] = models.map((model) => model.provider),
+    private readonly providerKeys: readonly string[] = models.map(
+      (model) => `${model.provider}:${model.modelId}`
+    ),
     private readonly attempted?: ModelAttemptRef
   ) {
     const primary = models[0];

@@ -26,8 +26,9 @@ export const EFFORT_CLASSIFIER: BuiltInAgentSpec = {
   purpose: "Label how much model capability one request needs: fast, balanced, or thorough.",
   // A concrete rung, so the router does not route itself.
   rung: "fast",
-  // Allows a label plus tiny formatting noise, but cuts off explanations.
-  maxOutputTokens: 8,
+  // Allows a label plus tiny formatting noise, but cuts off explanations. Not lower: the Azure
+  // Responses API rejects `max_output_tokens` below 16, and that 400 sheds the whole provider.
+  maxOutputTokens: 16,
   // Bounded so a stalled provider costs a few seconds, not the turn.
   timeoutMs: 5_000,
 };

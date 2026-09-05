@@ -6,6 +6,7 @@
  */
 
 import type { EffortPreset, EffortRung, RunEventToolPreview } from "@tulipfarm/schema";
+import type { SurfaceCodeViewPayload } from "@tulipfarm/surface/client";
 
 export type ChatEventType =
   | "text"
@@ -116,6 +117,7 @@ export type ChatEvent =
         artifact?: SurfaceArtifact;
         actionHandles?: Readonly<Record<string, string>>;
         resolvedView?: ResolvedSurfaceViewNode;
+        codeView?: SurfaceCodeViewPayload;
       };
     }
   | { type: "client-action"; data: { action: string; to?: string; reason?: string | null } }
@@ -214,6 +216,7 @@ export type TimelinePart =
       artifact?: SurfaceArtifact;
       actionHandles?: Readonly<Record<string, string>>;
       resolvedView?: ResolvedSurfaceViewNode;
+      codeView?: SurfaceCodeViewPayload;
     }
   | { kind: "surface-unavailable"; message: "Legacy presentation unavailable" }
   | {
