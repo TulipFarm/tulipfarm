@@ -31,6 +31,13 @@ folded into `ModelUsage`.
   one it does not — that absence is how a File stays confined to its own Turn. Never inline bytes
   into `MessageContent`, which is persisted. `splitPrompt` reports what it emitted as `attached`;
   read that rather than re-deriving it.
+- **A provider only takes an image or a PDF as binary.** Every other media type — CSV, JSON, and
+  the OOXML packages — is refused as a `file` part, which surfaces to the person as a bare
+  `model_error`. So `filePartFor` routes on what the provider will accept, not on the File's
+  modality: a document with extracted `text` is sent as a text part instead. PDF keeps the binary
+  path deliberately, because providers read one better than its flattened text layer. Never
+  decode bytes here to get that text — `packages/files/src/extract.ts` owns what a File says, and
+  it arrives already extracted on `ResolvedAttachment.text`.
 - **Image tokens are already inside `inputTokens`.** No provider breaks them out and the SDK
   exposes no field for them, so there is nothing to add — and adding an estimate would charge the
   same tokens twice.

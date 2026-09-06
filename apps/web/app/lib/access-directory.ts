@@ -12,6 +12,8 @@ export type Party = {
   /** Up to two letters for the avatar. */
   initials: string;
   isPerson: boolean;
+  /** A Team wears a square mark, everyone else a round one. See `components/ui/avatar.tsx`. */
+  isTeam?: boolean;
   status?: UserStatus;
 };
 
@@ -47,6 +49,7 @@ export function lookupParty(directory: Directory, principalId: string): Party {
       detail: `${humanize(prefix)}, not a person`,
       initials: initialsFor(tail),
       isPerson: false,
+      isTeam: prefix === "team",
     };
   }
 

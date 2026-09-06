@@ -54,6 +54,47 @@ describe("extractText", () => {
     expect((result as { text: string }).text).toContain("Report");
   });
 
+  it("leaves the caller's bytes intact, so a screened PDF can still be sent to a model", async () => {
+    // pdf.js takes ownership of the array it is handed and detaches its buffer. Screening a PDF
+    // for the guards therefore used to empty the very bytes the Turn then attached, and the model
+    // rejected the request as "empty base64-encoded bytes".
+    const bytes = await pdfOf("Retrieval augmented generation is the subject.", "Report");
+    const before = bytes.byteLength;
+
+    await extractText("application/pdf", bytes);
+
+    expect(bytes.byteLength).toBe(before);
+  });
+
+  it("reads the Office formats it accepts as uploads, so an Agent can be asked about one", async () => {
+    // These three are on the upload allowlist, and no model takes them as a binary file part, so
+    // text is the only way their contents can reach one at all.
+    const xlsx = await renderDocument({
+      format: "xlsx",
+      content: "| Region | Revenue |\n| --- | --- |\n| Pune | 4200 |",
+      title: "Q3",
+    });
+    const docx = await renderDocument({ format: "docx", content: "# Plan\n\nShip the thing." });
+
+    const sheet = await extractText(xlsx.mediaType, xlsx.bytes);
+    const document = await extractText(docx.mediaType, docx.bytes);
+
+    expect(sheet).toMatchObject({ kind: "text" });
+    expect((sheet as { text: string }).text).toContain("Pune");
+    expect((sheet as { text: string }).text).toContain("4200");
+    expect(document).toMatchObject({ kind: "text" });
+    expect((document as { text: string }).text).toContain("Ship the thing");
+  });
+
+  it("refuses an Office package that will not open, rather than throwing", async () => {
+    const result = await extractText(
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      utf8("definitely not a zip")
+    );
+
+    expect(result).toEqual({ kind: "refused", reason: "unreadable" });
+  });
+
   it("collapses the incidental whitespace a text layer arrives with", async () => {
     const bytes = await pdfOf("One two three four five six seven eight nine ten.");
 
@@ -108,6 +149,9 @@ describe("isExtractableMediaType", () => {
     expect(isExtractableMediaType("text/markdown")).toBe(true);
     expect(isExtractableMediaType("text/csv")).toBe(true);
     expect(isExtractableMediaType("application/pdf")).toBe(true);
+    expect(
+      isExtractableMediaType("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+    ).toBe(true);
     expect(isExtractableMediaType("image/png")).toBe(false);
     expect(isExtractableMediaType("application/zip")).toBe(false);
   });

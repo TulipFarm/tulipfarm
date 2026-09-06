@@ -403,6 +403,27 @@ export function listOwnershipApprovals(
   return apiGet(`/api/v1/team-assets/approvals?${query}`);
 }
 
+/**
+ * One asset's Team ownership, and what the signed-in person may do with it.
+ *
+ * Read before rendering any Team-sharing control: `revision` is the compare-and-swap token every
+ * share replacement carries, so a control that edits shares without having read this first can
+ * only ever guess it.
+ */
+export function getTeamAssetAccess(
+  assetType: TeamAssetType,
+  assetId: string
+): Promise<{
+  ownership: TeamAssetOwnership;
+  access: {
+    levels: TeamAssetAccessLevel[];
+    canManageOwnership: boolean;
+    evidence: unknown[];
+  };
+}> {
+  return apiGet(`/api/v1/team-assets/${assetType}/${encodeURIComponent(assetId)}/access`);
+}
+
 export function updateTeamAssetShares(
   assetType: TeamAssetType,
   assetId: string,

@@ -584,9 +584,12 @@ describe("TurnDriver — attached Files", () => {
 
     await driver.run(request());
 
-    expect(seen[0]?.attachments).toEqual([{ ...PDF, data: new Uint8Array([1, 2, 3]) }]);
-    // Screened text is for the guards; the model is sent bytes, never the same words twice.
-    expect(seen[0]?.attachments?.[0]).not.toHaveProperty("text");
+    // The extracted text rides along with the bytes. The adapter picks one of the two per media
+    // type — never both — so this is not the model reading the same words twice; it is the only
+    // form a spreadsheet or a CSV can reach a model in at all.
+    expect(seen[0]?.attachments).toEqual([
+      { ...PDF, data: new Uint8Array([1, 2, 3]), text: "Q3 revenue was flat against forecast." },
+    ]);
   });
 
   it("extracts as the type the Context authorized, not as the bytes claim to be", async () => {

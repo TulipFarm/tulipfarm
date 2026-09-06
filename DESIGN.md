@@ -733,6 +733,19 @@ rather than opening an eighth palette — an avatar and an agent glyph both answ
 this?" and nothing more. It is `aria-hidden`, because the name it decorates is always rendered
 beside it.
 
+**Shape says whether a party is a who or a group, and it is the only thing that says it.** A
+**circle is somebody** — a person or an Agent, from `Avatar`. A **square is a Team**, from
+`TeamAvatar`. A reader scanning a list of holders must be able to tell "a group can reach this"
+from "a colleague can reach this" before reading a character, so a Team is never a circle, an
+icon-in-a-circle, or a bare "Team" badge, and a person or Agent is never squared off. A Team's
+mark is keyed on its **slug**, so one Team wears one mark in the directory, on a file row and in a
+share list. That key runs through a character sum rather than the FNV-1a above, and must stay
+that way: every existing Team already wears the colour it returns, so changing the hash repaints
+the whole business at once — and on the seeded `engineering` / `everyone` pair, FNV-1a collides.
+Neither shape is available to a Role — a Role is a rule, not a party — nor to a
+principal id that failed to resolve; both keep an outlined glyph, because a gradient mark asserts
+somebody is behind it and neither has earned that.
+
 **A titled `Panel` is a landmark, and that is the shared component's job.** A `<section>` is only
 exposed as a region once it has an accessible name, so `Panel` wires `aria-labelledby` from its own
 heading via `useId()`. Without it every panel on every page is an anonymous `div` to a screen reader

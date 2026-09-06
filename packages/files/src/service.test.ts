@@ -36,6 +36,44 @@ const STRANGER = "principal-b";
 
 const PNG = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 2, 3, 4]);
 
+/**
+ * The three listing answers, derived from whatever records and read gate a fake already has.
+ *
+ * A fake that answered these independently could disagree with its own `accessFor`, which is the
+ * exact class of bug these listings exist to close — so they are derived, never restated.
+ */
+function listingAnswers(
+  records: Map<string, FileAssetOwnership>,
+  accessFor: FileOwnershipPort["accessFor"]
+): Pick<FileOwnershipPort, "teamReadableFileIds" | "teamGrantCounts" | "unreadableAmong"> {
+  return {
+    async teamReadableFileIds() {
+      return [];
+    },
+    async teamGrantCounts(_businessId, fileIds) {
+      const counts = new Map<string, number>();
+      for (const fileId of fileIds) {
+        const record = records.get(fileId);
+        if (record === undefined) continue;
+        const teams = new Set(record.shares.map((share) => share.teamId));
+        for (const owner of record.owners) if (owner.kind === "team") teams.add(owner.teamId);
+        if (teams.size > 0) counts.set(fileId, teams.size);
+      }
+      return counts;
+    },
+    async unreadableAmong(_businessId, principalId, principalKind, fileIds) {
+      const denied = new Set<string>();
+      for (const fileId of fileIds) {
+        const record = records.get(fileId);
+        if (record === undefined) continue;
+        const projection = await accessFor(record, principalId, principalKind);
+        if (!projection.levels.includes("view")) denied.add(fileId);
+      }
+      return denied;
+    },
+  };
+}
+
 /** An in-memory repo, so these tests are about the pipeline rather than about SQL. */
 class MemoryFileRepo implements FileRepo {
   readonly rows: FileRecord[] = [];
@@ -668,7 +706,15 @@ describe("FileService.upload", () => {
       onConsume?: (operationId: string) => void
     ): FileOwnershipPort {
       const records = new Map<string, FileAssetOwnership>();
+      const accessFor: FileOwnershipPort["accessFor"] = async (_ownership, principalId) => {
+        const projected = access.get(principalId);
+        return {
+          levels: projected?.levels ?? [],
+          canManageOwnership: projected?.manage ?? false,
+        };
+      };
       return {
+        ...listingAnswers(records, accessFor),
         async createPersonal(businessId, fileId, principalId) {
           records.set(fileId, {
             businessId,
@@ -684,13 +730,7 @@ describe("FileService.upload", () => {
         async get(_businessId, fileId) {
           return records.get(fileId);
         },
-        async accessFor(_ownership, principalId) {
-          const projected = access.get(principalId);
-          return {
-            levels: projected?.levels ?? [],
-            canManageOwnership: projected?.manage ?? false,
-          };
-        },
+        accessFor,
         async consumeDestructiveApproval(ownership, action, operationId) {
           const joint = ownership.owners.filter((owner) => owner.kind === "team").length > 1;
           if (joint && operationId !== `${action}-operation`) {
@@ -1818,7 +1858,17 @@ describe("FileService.generate", () => {
       ...overrides,
     });
 
+  const recordingAccess: FileOwnershipPort["accessFor"] = async (ownership, principalId) => {
+    const owns = ownership.owners.some(
+      (owner) => owner.kind === "principal" && owner.principalId === principalId
+    );
+    return owns
+      ? { levels: ["view", "use", "edit"], canManageOwnership: true }
+      : { levels: [], canManageOwnership: false };
+  };
+
   const recordingOwnership = (records: Map<string, FileAssetOwnership>): FileOwnershipPort => ({
+    ...listingAnswers(records, recordingAccess),
     async createPersonal(businessId, fileId, principalId) {
       records.set(fileId, {
         businessId,
@@ -1834,14 +1884,7 @@ describe("FileService.generate", () => {
     async get(_businessId, fileId) {
       return records.get(fileId);
     },
-    async accessFor(ownership, principalId) {
-      const owns = ownership.owners.some(
-        (owner) => owner.kind === "principal" && owner.principalId === principalId
-      );
-      return owns
-        ? { levels: ["view", "use", "edit"], canManageOwnership: true }
-        : { levels: [], canManageOwnership: false };
-    },
+    accessFor: recordingAccess,
     async consumeDestructiveApproval() {},
   });
 

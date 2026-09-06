@@ -183,7 +183,7 @@ describe("Files library", () => {
     await user.keyboard("{ArrowRight}");
     expect(screen.getByRole("tab", { name: "My Files" })).toHaveFocus();
     await user.keyboard("{End}");
-    expect(screen.getByRole("tab", { name: "Archived" })).toHaveFocus();
+    expect(screen.getByRole("tab", { name: "Trash" })).toHaveFocus();
     await user.keyboard("{Home}");
     expect(all).toHaveFocus();
   });
@@ -202,7 +202,7 @@ describe("Files library", () => {
     expect(screen.queryByText("mine.pdf")).toBeNull();
   });
 
-  it("filters the loaded Archived page by filename without server search", async () => {
+  it("filters the loaded Trash page by filename without server search", async () => {
     const user = userEvent.setup();
     renderRoute({
       archived: [
@@ -211,7 +211,7 @@ describe("Files library", () => {
       ],
     });
 
-    await user.click(await screen.findByRole("tab", { name: "Archived" }));
+    await user.click(await screen.findByRole("tab", { name: "Trash" }));
     await user.type(screen.getByRole("searchbox", { name: "Search filenames" }), "receipt");
 
     expect(screen.getByText("receipt.pdf")).toBeInTheDocument();
@@ -219,21 +219,21 @@ describe("Files library", () => {
     expect(searchFiles).not.toHaveBeenCalled();
   });
 
-  it("archives an active File instead of offering permanent delete", async () => {
+  it("moves an active File to the trash instead of offering permanent delete", async () => {
     const user = userEvent.setup();
     renderRoute({ mine: [file("mine", "mine.pdf")] });
 
     await user.click(await screen.findByRole("button", { name: "Actions for mine.pdf" }));
     expect(screen.queryByRole("menuitem", { name: "Delete permanently" })).toBeNull();
-    await user.click(screen.getByRole("menuitem", { name: "Archive" }));
+    await user.click(screen.getByRole("menuitem", { name: "Move to trash" }));
     expect(screen.getByText(/leaves active lists/i)).toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "Archive" }));
+    await user.click(screen.getByRole("button", { name: "Move to trash" }));
 
     await waitFor(() => expect(archiveFile).toHaveBeenCalledWith("mine", 1));
     expect(screen.queryByText("mine.pdf")).toBeNull();
   });
 
-  it("permanently deletes only from Archived with the current revision", async () => {
+  it("permanently deletes only from Trash with the current revision", async () => {
     const user = userEvent.setup();
     renderRoute({
       archived: [
@@ -244,7 +244,7 @@ describe("Files library", () => {
       ],
     });
 
-    await user.click(await screen.findByRole("tab", { name: "Archived" }));
+    await user.click(await screen.findByRole("tab", { name: "Trash" }));
     await user.click(screen.getByRole("button", { name: "Actions for archived.pdf" }));
     await user.click(screen.getByRole("menuitem", { name: "Delete permanently" }));
     await user.click(screen.getByRole("button", { name: "Delete permanently" }));

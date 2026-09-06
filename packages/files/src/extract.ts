@@ -14,6 +14,7 @@
  */
 
 import { isImageMediaType, isTextualMediaType } from "./limits";
+import { isOfficePreviewable, type PreviewBlock, previewOffice } from "./office-preview";
 
 /**
  * Why a File yielded no text.
@@ -33,9 +34,9 @@ export type ExtractionRefusal =
    * capability is not lost — it is served by the path that cannot be wrong about what it read.
    */
   | "image_not_extractable"
-  /** A PDF that parsed, but carries no text layer — a scan, or pages of pure artwork. */
+  /** A PDF with no text layer — a scan, or pages of pure artwork — or an empty Office document. */
   | "no_text_layer"
-  /** A PDF that would not parse. Corrupt, encrypted, or not really a PDF. */
+  /** A PDF or Office package that would not parse. Corrupt, encrypted, or not really one. */
   | "unreadable";
 
 export interface ExtractedText {
@@ -88,7 +89,39 @@ export async function extractText(
   if (mediaType === "application/pdf") {
     return await extractPdf(bytes, maxChars);
   }
+  if (isOfficePreviewable(mediaType)) {
+    return extractOffice(bytes, mediaType, maxChars);
+  }
   return { kind: "refused", reason: "unsupported_media_type" };
+}
+
+/**
+ * Office text, read with the same parser the viewer uses.
+ *
+ * Reusing `previewOffice` keeps one definition of what a `.docx` says, and inherits its zip-bomb
+ * bounds. Layout is dropped on purpose: a model is being told what the document says, and a table
+ * flattened to tab-separated cells reads as a table to one without inventing a rendering.
+ */
+function extractOffice(bytes: Uint8Array, mediaType: string, maxChars: number): ExtractionResult {
+  let blocks: readonly PreviewBlock[];
+  try {
+    blocks = previewOffice(bytes, mediaType);
+  } catch {
+    return { kind: "refused", reason: "unreadable" };
+  }
+
+  const normalized = normalizeWhitespace(blocks.map(officeBlockText).join("\n"));
+  if (normalized.length === 0) return { kind: "refused", reason: "no_text_layer" };
+  return capped(normalized, maxChars);
+}
+
+function officeBlockText(block: PreviewBlock): string {
+  if (block.kind === "table") return block.rows.map((row) => row.join("\t")).join("\n");
+  if (block.kind === "sheet") {
+    return [block.name, ...block.rows.map((row) => row.join("\t"))].join("\n");
+  }
+  if (block.kind === "slide") return [block.title, ...block.bullets].join("\n");
+  return block.text;
 }
 
 /** Whether `extractText` could return text for a type, without reading any bytes to find out. */
@@ -100,7 +133,9 @@ async function extractPdf(bytes: Uint8Array, maxChars: number): Promise<Extracti
     // Silent: a malformed File is an expected outcome here, and pdf.js otherwise writes its
     // recovery warnings to stderr, where they read as faults in the Worker rather than as facts
     // about someone's upload.
-    const document = await getDocumentProxy(bytes, { verbosity: 0 });
+    // A copy, because pdf.js takes ownership of the array it is given and detaches its buffer.
+    // The caller still needs these bytes: the same PDF is screened here and then sent to a model.
+    const document = await getDocumentProxy(new Uint8Array(bytes), { verbosity: 0 });
     const extracted = await extractPdfText(document, { mergePages: true });
     text = Array.isArray(extracted.text) ? extracted.text.join("\n") : extracted.text;
   } catch {

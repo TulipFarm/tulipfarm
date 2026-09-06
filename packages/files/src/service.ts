@@ -167,6 +167,41 @@ export interface FileOwnershipPort {
     action: "archive" | "delete",
     operationId: string | undefined
   ): Promise<void>;
+  /**
+   * Every File this Principal reaches through a Team right now — owned by a Team they belong to,
+   * or shared with one.
+   *
+   * The listing counterpart of `accessFor`. `files.owner_principal_id` and `file_shares` are the
+   * whole of what the tables know, and neither knows about Teams, so without this a File a Team
+   * owns is one its members can open by link and can never find: absent from "Shared with me",
+   * unfindable by search, and reported missing behind a Chat attachment.
+   */
+  teamReadableFileIds(
+    businessId: string,
+    principalId: string,
+    principalKind: string
+  ): Promise<readonly string[]>;
+  /**
+   * How many Team grants each File carries — its owning Teams plus the Teams it is shared with.
+   *
+   * Added to the `file_shares` count, because a File handed to a whole Team and rendered "Private"
+   * invites its owner to share it again with the people who already had it.
+   */
+  teamGrantCounts(businessId: string, fileIds: readonly string[]): Promise<Map<string, number>>;
+  /**
+   * Of `fileIds`, the ones whose ownership no longer lets this Principal view them.
+   *
+   * `files.owner_principal_id` is a stable provenance field, not a live permission: transferring a
+   * File to a Team the uploader is not in leaves that column naming them. Without this the File
+   * stays in their library and answers 404 when opened, which reads as a broken list rather than
+   * as a transfer that worked.
+   */
+  unreadableAmong(
+    businessId: string,
+    principalId: string,
+    principalKind: string,
+    fileIds: readonly string[]
+  ): Promise<ReadonlySet<string>>;
 }
 
 export interface FileServiceDeps {
@@ -715,6 +750,39 @@ export class FileService {
   }
 
   /**
+   * The Files this reader reaches through a Team, asked fresh on every listing.
+   *
+   * Empty without a `FileOwnershipPort`, which is the same answer this package gave before Teams
+   * existed — never "all Files", so a deployment that has not wired ownership cannot accidentally
+   * widen a listing.
+   */
+  private async teamReadable(businessId: string, principalId: string): Promise<readonly string[]> {
+    return (await this.deps.ownership?.teamReadableFileIds(businessId, principalId, "user")) ?? [];
+  }
+
+  /**
+   * The `file_shares` count for each File, plus the Teams that own or hold it.
+   *
+   * One answer rather than two, because the library paints a single "shared with N" and a count
+   * that omitted Teams would under-report exactly the Files that are most widely readable.
+   */
+  private async grantCounts(
+    businessId: string,
+    fileIds: readonly string[]
+  ): Promise<Map<string, number>> {
+    if (fileIds.length === 0) return new Map();
+    const [shares, teams] = await Promise.all([
+      this.deps.repo.countShares(businessId, fileIds),
+      this.deps.ownership?.teamGrantCounts(businessId, fileIds) ?? new Map<string, number>(),
+    ]);
+    const merged = new Map(shares);
+    for (const [fileId, count] of teams) {
+      if (count > 0) merged.set(fileId, (merged.get(fileId) ?? 0) + count);
+    }
+    return merged;
+  }
+
+  /**
    * Reads a File's metadata, refusing a Principal who neither owns it nor has been shared it.
    *
    * The ACL is consulted freshly on every request rather than cached, which is why this feature
@@ -872,13 +940,17 @@ export class FileService {
     limit: number,
     after?: FileCursor
   ): Promise<{ files: FileRecord[]; nextCursor: string | null }> {
-    const grantees = await this.granteesFor(businessId, principalId);
+    const [grantees, teamReadable] = await Promise.all([
+      this.granteesFor(businessId, principalId),
+      this.teamReadable(businessId, principalId),
+    ]);
     const page = await this.deps.repo.listSharedWith(
       businessId,
       principalId,
       grantees,
       limit + 1,
-      after
+      after,
+      teamReadable
     );
     const files = page.slice(0, limit);
     const last = files.at(-1);
@@ -893,7 +965,18 @@ export class FileService {
     const ownedIds = files
       .filter((file) => file.ownerPrincipalId === principalId)
       .map((file) => file.id);
-    return await this.deps.repo.countShares(businessId, ownedIds);
+    return await this.grantCounts(businessId, ownedIds);
+  }
+
+  /**
+   * How many grants one File carries — its `file_shares` rows plus the Teams that own or hold it.
+   *
+   * Asked by a caller that has already established the reader may manage the File, which is why it
+   * takes no Principal: `shareCountsFor` keys off `ownerPrincipalId`, and a Team-owned File names
+   * nobody there, so a manager would otherwise be told a File with an audience has none.
+   */
+  async grantCount(businessId: string, id: string): Promise<number> {
+    return (await this.grantCounts(businessId, [id])).get(id) ?? 0;
   }
 
   /**
@@ -1149,8 +1232,13 @@ export class FileService {
     ids: readonly string[]
   ): Promise<ReadonlySet<string>> {
     if (ids.length === 0) return new Set();
-    const grantees = await this.granteesFor(businessId, principalId);
-    return new Set(await this.deps.repo.readableIds(businessId, principalId, grantees, ids));
+    const [grantees, teamReadable] = await Promise.all([
+      this.granteesFor(businessId, principalId),
+      this.teamReadable(businessId, principalId),
+    ]);
+    return new Set(
+      await this.deps.repo.readableIds(businessId, principalId, grantees, ids, teamReadable)
+    );
   }
 
   async search(
@@ -1161,13 +1249,17 @@ export class FileService {
   ): Promise<FileRecord[]> {
     const normalizedQuery = query.trim();
     if (normalizedQuery.length === 0) return [];
-    const grantees = await this.granteesFor(businessId, principalId);
+    const [grantees, teamReadable] = await Promise.all([
+      this.granteesFor(businessId, principalId),
+      this.teamReadable(businessId, principalId),
+    ]);
     return await this.deps.repo.searchReadable(
       businessId,
       principalId,
       grantees,
       normalizedQuery,
-      limit
+      limit,
+      teamReadable
     );
   }
 
@@ -1202,16 +1294,7 @@ export class FileService {
     after?: FileCursor
   ): Promise<{ files: FileRecord[]; nextCursor: string | null; shareCounts: Map<string, number> }> {
     const page = await this.list(businessId, principalId, limit + 1, after);
-    const files = page.slice(0, limit);
-    const last = files.at(-1);
-    return {
-      files,
-      nextCursor: page.length > limit && last ? encodeFileCursor(last) : null,
-      shareCounts: await this.deps.repo.countShares(
-        businessId,
-        files.map((file) => file.id)
-      ),
-    };
+    return await this.ownedPage(businessId, principalId, page, limit);
   }
 
   /** One page of the caller's archived Files. Recipients do not discover archived Files here. */
@@ -1227,12 +1310,36 @@ export class FileService {
       limit + 1,
       after
     );
-    const files = page.slice(0, limit);
-    const last = files.at(-1);
+    return await this.ownedPage(businessId, principalId, page, limit);
+  }
+
+  /**
+   * Trims an over-read owner page to `limit`, drops what ownership denies, and counts its grants.
+   *
+   * The cursor is taken from the page *before* the ownership filter, so a row the caller may no
+   * longer view still advances paging. Filtering first would make the next page resume from an
+   * older File and silently repeat everything in between.
+   */
+  private async ownedPage(
+    businessId: string,
+    principalId: string,
+    page: readonly FileRecord[],
+    limit: number
+  ): Promise<{ files: FileRecord[]; nextCursor: string | null; shareCounts: Map<string, number> }> {
+    const window = page.slice(0, limit);
+    const last = window.at(-1);
+    const nextCursor = page.length > limit && last ? encodeFileCursor(last) : null;
+    const denied = await this.deps.ownership?.unreadableAmong(
+      businessId,
+      principalId,
+      "user",
+      window.map((file) => file.id)
+    );
+    const files = denied === undefined ? window : window.filter((file) => !denied.has(file.id));
     return {
       files,
-      nextCursor: page.length > limit && last ? encodeFileCursor(last) : null,
-      shareCounts: await this.deps.repo.countShares(
+      nextCursor,
+      shareCounts: await this.grantCounts(
         businessId,
         files.map((file) => file.id)
       ),

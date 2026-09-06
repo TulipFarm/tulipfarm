@@ -1,5 +1,6 @@
 import { isInlineRenderable } from "@tulipfarm/files/limits";
 import { useEffect, useState } from "react";
+import { Download } from "~/components/icons";
 import { Modal } from "~/components/ui/modal";
 import { fetchFileObjectUrl } from "~/lib/files";
 import { cn } from "~/lib/utils";
@@ -81,8 +82,54 @@ export function FilePreview({
       className="h-[92vh] w-[96vw] max-w-[96rem]"
       bodyClassName="flex min-h-0 flex-1 flex-col p-0"
     >
+      <div className="flex justify-end border-b border-border px-3 py-2">
+        <DownloadButton fileId={file.id} filename={file.filename} />
+      </div>
       <PreviewBody file={file} url={url} failed={failed} className="min-h-0 flex-1" />
     </Modal>
+  );
+}
+
+/**
+ * Taking the File away with you, from inside the reader.
+ *
+ * The reader is what opening an attachment does now, so this is the only place left that offers
+ * the bytes — and some formats are worth having on disk however well they render here.
+ */
+export function DownloadButton({
+  fileId,
+  filename,
+}: {
+  readonly fileId: string;
+  readonly filename: string;
+}) {
+  const [busy, setBusy] = useState(false);
+
+  async function download() {
+    setBusy(true);
+    try {
+      const url = await fetchFileObjectUrl(fileId);
+      const anchor = document.createElement("a");
+      anchor.href = url;
+      anchor.download = filename;
+      anchor.click();
+      // Revoked on the next tick: revoking synchronously races the browser's read of the URL.
+      setTimeout(() => URL.revokeObjectURL(url), 0);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <button
+      className="inline-flex items-center gap-1.5 rounded-md border border-border px-2.5 py-1.5 text-xs text-foreground hover:bg-secondary disabled:opacity-60"
+      disabled={busy}
+      onClick={download}
+      type="button"
+    >
+      <Download aria-hidden className="size-3.5" />
+      Download
+    </button>
   );
 }
 

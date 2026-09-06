@@ -8,6 +8,7 @@ import {
 import { useMemo, useState } from "react";
 import { FormStatus } from "~/components/form-status";
 import { Search, Users } from "~/components/icons";
+import { TeamAvatar } from "~/components/ui/avatar";
 import { Badge } from "~/components/ui/badge";
 import { Button } from "~/components/ui/button";
 import { Field } from "~/components/ui/field";
@@ -23,19 +24,6 @@ import { cn } from "~/lib/utils";
 export const meta: MetaFunction = () => [{ title: "Teams · tulipfarm" }];
 
 type TeamSort = "name-asc" | "name-desc" | "members-desc" | "members-asc";
-
-const TEAM_AVATAR_BACKGROUNDS = [
-  "radial-gradient(circle at 25% 20%, #f9a8d4 0%, transparent 42%), linear-gradient(135deg, #fef3c7 10%, #c084fc 58%, #6366f1 100%)",
-  "radial-gradient(circle at 75% 20%, #fdba74 0%, transparent 45%), linear-gradient(145deg, #f472b6 5%, #e11d8a 48%, #7c3aed 100%)",
-  "radial-gradient(circle at 72% 22%, #f0abfc 0%, transparent 36%), linear-gradient(145deg, #60a5fa 0%, #a78bfa 48%, #ec4899 100%)",
-  "radial-gradient(circle at 60% 52%, #fb923c 0%, #f97316 20%, transparent 48%), linear-gradient(145deg, #dbeafe 0%, #93c5fd 100%)",
-  "radial-gradient(circle at 76% 28%, #fef08a 0%, transparent 34%), linear-gradient(145deg, #fb923c 0%, #f43f5e 48%, #c026d3 100%)",
-  "linear-gradient(145deg, #ef4444 0%, #f97316 30%, #f8fafc 56%, #38bdf8 74%, #be123c 100%)",
-  "linear-gradient(145deg, #7e22ce 0%, #c026d3 42%, #facc15 68%, #fde68a 100%)",
-  "linear-gradient(145deg, #fde68a 0%, #fef3c7 40%, #fb7185 42%, #be185d 100%)",
-  "radial-gradient(circle at 76% 20%, #fef08a 0%, #86efac 30%, transparent 52%), linear-gradient(145deg, #0f172a 0%, #2563eb 42%, #10b981 100%)",
-  "linear-gradient(145deg, #fecdd3 0%, #fda4af 38%, #fb7185 58%, #fdba74 100%)",
-] as const;
 
 export async function clientLoader({ request }: ClientLoaderFunctionArgs) {
   if (new URL(request.url).pathname !== "/teams") throw redirect("/teams");
@@ -193,7 +181,7 @@ function TeamList({
             className="group grid gap-3 px-4 py-4 transition-colors duration-150 hover:bg-accent/50 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center"
           >
             <div className="flex min-w-0 items-start gap-3">
-              <TeamAvatar slug={team.slug} />
+              <TeamAvatar identity={team.slug} className="size-10" />
               <div className="min-w-0">
                 <div className="flex flex-wrap items-center gap-2">
                   <span className="font-medium text-foreground group-hover:underline">
@@ -298,21 +286,6 @@ function compareTeams(a: TeamDirectoryEntry, b: TeamDirectoryEntry, sort: TeamSo
   if (sort === "members-desc") return b.members.length - a.members.length || byName;
   if (sort === "members-asc") return a.members.length - b.members.length || byName;
   return byName;
-}
-
-function TeamAvatar({ slug }: { slug: string }) {
-  const index = [...slug].reduce((total, character) => total + character.charCodeAt(0), 0);
-  return (
-    <span
-      aria-hidden
-      className="size-10 shrink-0 rounded-xl outline outline-1 -outline-offset-1 outline-black/10 dark:outline-white/10"
-      style={{
-        backgroundImage:
-          TEAM_AVATAR_BACKGROUNDS[index % TEAM_AVATAR_BACKGROUNDS.length] ??
-          TEAM_AVATAR_BACKGROUNDS[0],
-      }}
-    />
-  );
 }
 
 function errorMessage(error: unknown): string {

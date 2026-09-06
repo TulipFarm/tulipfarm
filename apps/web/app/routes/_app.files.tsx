@@ -51,7 +51,7 @@ const TABS = [
   { id: "all", label: "All Files" },
   { id: "mine", label: "My Files" },
   { id: "shared", label: "Shared with me" },
-  { id: "archived", label: "Archived" },
+  { id: "archived", label: "Trash" },
 ] as const;
 
 type TabId = (typeof TABS)[number]["id"];
@@ -320,7 +320,7 @@ export default function FilesIndex() {
       setSearchResults((current) => current?.filter((file) => file.id !== archiving.id) ?? null);
       setArchiving(null);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "That file could not be archived.");
+      setError(err instanceof Error ? err.message : "That file could not be moved to the trash.");
     } finally {
       setMutating(false);
     }
@@ -604,9 +604,9 @@ export default function FilesIndex() {
         open={archiving !== null}
         onClose={() => setArchiving(null)}
         onConfirm={() => void confirmArchive()}
-        title={`Archive ${archiving?.filename ?? "this file"}?`}
+        title={`Move ${archiving?.filename ?? "this file"} to the trash?`}
         description="It leaves active lists and new Chat attachments. Existing readers can still open it. You can restore it later."
-        confirmLabel="Archive"
+        confirmLabel="Move to trash"
         busy={mutating}
       />
       <ConfirmModal

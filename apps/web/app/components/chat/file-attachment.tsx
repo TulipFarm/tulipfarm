@@ -1,5 +1,6 @@
 import { isInlineRenderable } from "@tulipfarm/files/limits";
 import { useEffect, useState } from "react";
+import { FilePreview, isPreviewable } from "~/components/files/file-preview";
 import { FileTypeIcon } from "~/components/files/file-type-icon";
 import { FileX2 } from "~/components/icons";
 import { fetchFileObjectUrl } from "~/lib/files";
@@ -56,7 +57,13 @@ export function FileAttachment({
   const isImage = isInlineRenderable(mediaType);
   const url = useImageObjectUrl(fileId, isImage);
 
-  if (!isImage) return <DownloadChip fileId={fileId} mediaType={mediaType} name={name} />;
+  if (!isImage) {
+    return isPreviewable(mediaType) ? (
+      <DocumentChip fileId={fileId} mediaType={mediaType} name={name} />
+    ) : (
+      <DownloadChip fileId={fileId} mediaType={mediaType} name={name} />
+    );
+  }
   if (url === null) return <PendingChip mediaType={mediaType} name={name} />;
 
   if (expanded) {
@@ -128,8 +135,49 @@ export function RemovedAttachment({ name }: { name: string }) {
 }
 
 /**
- * A non-image attachment. The bytes are fetched on click rather than on render: a transcript of
- * PDFs should not download every one of them just to render their names.
+ * A non-image attachment.
+ *
+ * Opens the same reader the Files library uses rather than downloading: every format this product
+ * accepts renders in the tab, and pushing bytes to the downloads folder to answer "what does this
+ * say" is a detour. The download lives inside the reader, for when the file is wanted on disk.
+ *
+ * The bytes are fetched on open rather than on render — a transcript of PDFs must not download
+ * every one of them just to draw their names.
+ */
+function DocumentChip({
+  fileId,
+  mediaType,
+  name,
+}: {
+  fileId: string;
+  mediaType: string;
+  name: string;
+}) {
+  const [open, setOpen] = useState(false);
+
+  return (
+    <>
+      <button
+        aria-label={`Open ${name}`}
+        className={`${CHIP} hover:bg-secondary`}
+        onClick={() => setOpen(true)}
+        type="button"
+      >
+        <FileTypeIcon mediaType={mediaType} filename={name} className="size-3.5" />
+        <span className="max-w-[16rem] truncate">{name}</span>
+      </button>
+      {open ? (
+        <FilePreview
+          file={{ id: fileId, filename: name, mediaType }}
+          onClose={() => setOpen(false)}
+        />
+      ) : null}
+    </>
+  );
+}
+
+/**
+ * An attachment in a format the reader cannot draw, so the bytes are all there is to offer.
  */
 function DownloadChip({
   fileId,

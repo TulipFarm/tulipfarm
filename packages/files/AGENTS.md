@@ -19,6 +19,7 @@ an **Artifact** is a different entity, in `packages/storage`.
 | `src/sniff.ts` · `src/filename.ts` | Magic-byte `resolveMediaType`; safe-to-store filenames |
 | `src/dimensions.ts` · `src/bound.ts` | Header-only pixel size; `boundImage` refuse-or-downscale |
 | `src/extract.ts` | The one answer to "what is the text of this File". Lazy-loads the PDF parser. |
+| `src/office-preview.ts` · `src/delimited-preview.ts` | Reading OOXML and separated-value files back into `PreviewBlock`s for the viewer |
 | `src/render.ts` | Markdown → PDF, safe structured-text validation/serialization, pass-through formats, and render bounds |
 | `src/turn-attachments.ts` | Which Files a Turn may send, and the two-gate read of their bytes |
 | `src/tools.ts` | `file_list` / `file_read` / `file_create` — the whole Agent-facing surface |
@@ -29,9 +30,26 @@ an **Artifact** is a different entity, in `packages/storage`.
 
 ## Rules
 
+- **Extraction must not consume its caller's bytes.** The same `Uint8Array` is screened here and
+  then attached to a model request, and pdf.js takes ownership of any array it is handed, leaving
+  the caller a detached, zero-length buffer. `extractPdf` copies before parsing for exactly this
+  reason. Any future parser added to `extract.ts` gets the same treatment.
+
 - `extract.ts` is the only place that decides what a File's text is. `file_read` and Knowledge
   indexing both go through it, because a passage shown in chat that search cannot find looks like
-  a bug from neither side. Images are refused there on purpose, not by omission.
+  a bug from neither side. Images are refused there on purpose, not by omission. A Chat attachment
+  is a third caller: for every type a provider will not take as a binary part, the text this
+  returns *is* how the File reaches the model, so anything on the upload allowlist that yields no
+  text here cannot be asked about at all.
+
+- **Office text is read with the viewer's parser.** `extractOffice` calls `previewOffice`, so a
+  `.docx` says the same thing to a model as it shows a person, and it inherits that module's
+  zip-bomb bounds. Keep `isExtractableMediaType` in step with what `extract.ts` actually handles —
+  the browser reads it to decide whether to offer "add to knowledge".
+
+- **A CSV is a grid, not text.** `delimited-preview.ts` parses separated values into the same
+  `PreviewBlock` table `.xlsx` produces, so both render through one path. Showing a CSV as raw text
+  is a regression, not a simplification.
 
 - **Uploading never indexes.** Putting a File into Knowledge is a separate, owner-only act, because
   attaching a document to one Chat and publishing it to every Agent's retrieval are different
@@ -86,6 +104,12 @@ an **Artifact** is a different entity, in `packages/storage`.
   whose one implementation is `collectHeldRoleIds`; absent means no Role sharing, never all Roles.
   Team ownership is projected through the optional `FileOwnershipPort` into this same gate; exact
   owner-Team admins reach the existing edit/owner paths, and membership is resolved live.
+  Listings, search and share counts carry that same Team answer, but ask it the other way round —
+  which Files a Principal's Teams reach, and which of a page's Files they do not — because there is
+  no index from a Principal to its Teams. Those three answers are `FileOwnershipPort`'s
+  `teamReadableFileIds`, `teamGrantCounts` and `unreadableAmong`, all decided in
+  `AssetOwnershipAccessService` (`packages/authz`) so this package never grows a second Team
+  evaluator that could disagree with the gate.
 - **Only an owner may share or delete, and no Tool may do either** (`readAsOwner`, plus
   `apps/api/src/tools/contract-coverage.test.ts`). An Agent reads attachments from untrusted
   sources, so either Tool is one a crafted PDF can aim. `sharedWithCount` is absent, never `0`, for

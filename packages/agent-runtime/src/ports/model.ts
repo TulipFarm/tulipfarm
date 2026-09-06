@@ -21,6 +21,15 @@ export interface ResolvedAttachment {
   readonly mediaType: string;
   readonly name: string;
   readonly data: Uint8Array;
+  /**
+   * The File's text, when something upstream could extract it.
+   *
+   * Carried rather than re-derived because `packages/files` owns the single definition of what a
+   * File says, and because the extraction has already happened for guardrail screening. It is what
+   * lets a spreadsheet or a CSV reach a model at all: providers accept images and PDFs as binary
+   * parts and refuse every other media type outright.
+   */
+  readonly text?: string;
 }
 
 export interface ModelInvocationRequest {

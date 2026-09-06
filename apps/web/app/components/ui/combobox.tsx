@@ -61,12 +61,15 @@ export function Combobox({
 }) {
   const [open, setOpen] = useState(false);
   const [active, setActive] = useState(0);
+  // A committed value is an answer, not a query. Filtering by it strands the reader on their own
+  // choice — "View" hides Use and Edit — so the list only narrows once they actually type.
+  const [typing, setTyping] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
   const generatedId = useId();
   const listId = `${id ?? generatedId}-listbox`;
 
-  const query = value.trim();
+  const query = typing ? value.trim() : "";
   const matches = (
     query === ""
       ? options.slice()
@@ -88,6 +91,7 @@ export function Combobox({
   function commit(next: string) {
     onValueChange(next);
     setOpen(false);
+    setTyping(false);
     onCommit?.(next);
   }
 
@@ -110,14 +114,23 @@ export function Combobox({
         onChange={(e) => {
           onValueChange(e.target.value);
           setActive(0);
+          setTyping(true);
           setOpen(true);
         }}
-        onFocus={() => setOpen(true)}
+        // Selecting the committed text makes the first keystroke replace it. Without this,
+        // typing appends to the answer ("View" + "u") and matches nothing.
+        onFocus={(e) => {
+          setOpen(true);
+          setTyping(false);
+          setActive(0);
+          e.target.select();
+        }}
         onBlur={(e) => {
           // Only a move out of the whole widget closes it. Focus crossing into the list is still
           // inside, and closing there would cancel the click that caused it.
           if (rootRef.current?.contains(e.relatedTarget as Node | null)) return;
           setOpen(false);
+          setTyping(false);
           if (value.trim()) onCommit?.(value);
         }}
         onKeyDown={(e) => {
@@ -136,6 +149,7 @@ export function Combobox({
             e.preventDefault();
             e.stopPropagation();
             setOpen(false);
+            setTyping(false);
           }
         }}
         className={cn(

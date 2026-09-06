@@ -127,7 +127,7 @@ describe("File detail", () => {
     const user = userEvent.setup();
     renderRoute(file({ revision: 4, archivedAt: "2026-03-01T00:00:00.000Z" }));
 
-    await screen.findByText("Archived");
+    await screen.findByText("In trash");
     expect(screen.queryByRole("button", { name: "Share" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Replace content" })).toBeNull();
     await user.click(screen.getByRole("button", { name: "Delete permanently" }));

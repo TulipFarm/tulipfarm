@@ -55,9 +55,28 @@ export function Modal({
     return () => d.removeEventListener("close", onClose);
   }, [onClose]);
 
+  // Chrome fires a bubbling `cancel` on <input type="file"> when the picker is dismissed, and a
+  // <dialog> ancestor reads that as its own Escape gesture and closes — taking the upload dialog
+  // down the moment the OS picker opens. https://issues.chromium.org/issues/41491454
+  useEffect(() => {
+    const d = ref.current;
+    if (!d) return;
+    const swallowDescendantCancel = (event: Event) => {
+      if (event.target === d) return;
+      event.preventDefault();
+      event.stopPropagation();
+    };
+    d.addEventListener("cancel", swallowDescendantCancel);
+    return () => d.removeEventListener("cancel", swallowDescendantCancel);
+  }, []);
+
   // Close when the user clicks the ::backdrop (click lands on <dialog> itself,
   // outside its layout rect).
   function onBackdropClick(e: React.MouseEvent<HTMLDialogElement>) {
+    // A click on a child never reaches the backdrop, whatever its coordinates say. Opening the
+    // file picker calls .click() on a hidden input, and a programmatic click reports (0, 0) —
+    // which the rect test below would read as a backdrop hit and close the dialog mid-upload.
+    if (e.target !== e.currentTarget) return;
     const rect = e.currentTarget.getBoundingClientRect();
     const outside =
       e.clientX < rect.left ||
@@ -76,7 +95,7 @@ export function Modal({
       aria-labelledby={titleId}
       onClick={onBackdropClick}
       className={cn(
-        "m-auto flex w-full max-w-sm flex-col overflow-hidden rounded-lg border border-border bg-popover p-0 text-foreground shadow-lg",
+        "m-auto flex max-h-[85dvh] w-full max-w-sm flex-col overflow-hidden rounded-lg border border-border bg-popover p-0 text-foreground shadow-lg",
         "[&::backdrop]:bg-foreground/30",
         className
       )}
@@ -94,7 +113,9 @@ export function Modal({
           <X className="size-4" />
         </button>
       </div>
-      <div className={cn("px-4 py-4 text-sm", bodyClassName)}>{children}</div>
+      <div className={cn("min-h-0 overflow-y-auto px-4 py-4 text-sm", bodyClassName)}>
+        {children}
+      </div>
     </dialog>
   );
 }

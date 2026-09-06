@@ -54,6 +54,14 @@ export interface AssetOwnershipRepoPort {
     assetType: TeamAssetType,
     assetId: string
   ): Promise<AssetOwnershipRecord | undefined>;
+  /** Batched {@link get}. Absent means a caller must fall back to asking one asset at a time. */
+  getMany?(
+    businessId: string,
+    assetType: TeamAssetType,
+    assetIds: readonly string[]
+  ): Promise<AssetOwnershipRecord[]>;
+  /** Every record any of `teamIds` owns or holds a share in. Absent means no Team-reach listing. */
+  listByTeam?(businessId: string, teamIds: readonly string[]): Promise<AssetOwnershipRecord[]>;
   put(record: AssetOwnershipRecord, expectedRevision: number): Promise<void>;
   delete(businessId: string, assetType: TeamAssetType, assetId: string): Promise<void>;
   createOperation(operation: AssetOwnershipOperation): Promise<void>;
@@ -198,6 +206,15 @@ export interface AssetOwnershipAccessDeps {
   readonly approvals?: Pick<OwnershipApprovalPort, "get">;
   readonly memberships: AssetMembershipPort;
   readonly everyoneTeamId: (businessId: string) => Promise<string>;
+  /**
+   * Every active Team in the business, for the listing direction of the access question.
+   *
+   * `accessFor` starts from an asset and asks whether one Principal is in its Teams. A listing
+   * needs the inverse — which Teams hold this Principal — and there is no index from a Principal
+   * to the Teams that transitively contain them. Absent means no Team-reach listing, never all
+   * Teams.
+   */
+  readonly activeTeamIds?: (businessId: string) => Promise<readonly string[]>;
   readonly now?: () => Date;
 }
 
@@ -256,6 +273,124 @@ export class AssetOwnershipAccessService {
     principal: { readonly principalId: string; readonly principalKind: string }
   ): Promise<AssetAccessProjection> {
     return await projectAssetAccess(record, principal, this.deps.memberships, this.now());
+  }
+
+  /**
+   * The active Teams that currently contain this Principal, however deep the tree.
+   *
+   * Resolved through the same `resolvePrincipalForTeams` that `projectAssetAccess` consults, so a
+   * listing built on this can never disagree with the gate that opens one asset.
+   */
+  async containingTeamIds(businessId: string, principalId: string): Promise<readonly string[]> {
+    const teamIds = (await this.deps.activeTeamIds?.(businessId)) ?? [];
+    if (teamIds.length === 0) return [];
+    const resolved = await this.deps.memberships.resolvePrincipalForTeams?.(
+      businessId,
+      teamIds,
+      principalId
+    );
+    if (resolved === undefined) {
+      const members = await Promise.all(
+        teamIds.map(async (teamId) => ({
+          teamId,
+          held: (await this.deps.memberships.resolveMembers(businessId, teamId)).some(
+            (member) => member.principalId === principalId
+          ),
+        }))
+      );
+      return members.filter((entry) => entry.held).map((entry) => entry.teamId);
+    }
+    return teamIds.filter((teamId) => (resolved.get(teamId)?.length ?? 0) > 0);
+  }
+
+  /**
+   * The assets of `assetType` this Principal reaches through a Team — owned by one they belong to,
+   * or shared with one.
+   *
+   * A domain's own listing keys off its own owner column, which knows nothing about Teams. Without
+   * this, an asset a Team owns is one its members can open by link and can never find.
+   */
+  async teamReachableAssetIds(
+    businessId: string,
+    assetType: TeamAssetType,
+    principal: { readonly principalId: string; readonly principalKind: string }
+  ): Promise<readonly string[]> {
+    if (principal.principalKind !== "user" || this.deps.ownership.listByTeam === undefined) {
+      return [];
+    }
+    const teamIds = await this.containingTeamIds(businessId, principal.principalId);
+    if (teamIds.length === 0) return [];
+    const records = await this.deps.ownership.listByTeam(businessId, teamIds);
+    return records.filter((record) => record.assetType === assetType).map((r) => r.assetId);
+  }
+
+  /**
+   * How many distinct Teams hold each asset — its owning Teams plus the Teams it is shared with.
+   *
+   * A domain adds this to its own share count, because an asset given to a whole Team and rendered
+   * "Private" invites its owner to share it again with the people who already had it.
+   */
+  async teamGrantCounts(
+    businessId: string,
+    assetType: TeamAssetType,
+    assetIds: readonly string[]
+  ): Promise<Map<string, number>> {
+    const counts = new Map<string, number>();
+    for (const record of await this.getMany(businessId, assetType, assetIds)) {
+      const teams = new Set(record.shares.map((share) => share.teamId));
+      for (const owner of record.owners) if (owner.kind === "team") teams.add(owner.teamId);
+      if (teams.size > 0) counts.set(record.assetId, teams.size);
+    }
+    return counts;
+  }
+
+  /**
+   * Of `assetIds`, the ones whose ownership no longer lets this Principal view them.
+   *
+   * A domain's owner column is stable provenance, not a live permission: transferring an asset to
+   * a Team the uploader is not in leaves that column naming them. Without this the asset stays in
+   * their library and answers 404 when opened, which reads as a broken list rather than a transfer
+   * that worked.
+   */
+  async unviewableAmong(
+    businessId: string,
+    assetType: TeamAssetType,
+    principal: { readonly principalId: string; readonly principalKind: string },
+    assetIds: readonly string[]
+  ): Promise<ReadonlySet<string>> {
+    const denied = new Set<string>();
+    for (const record of await this.getMany(businessId, assetType, assetIds)) {
+      // A personal owner match is the overwhelmingly common case and is decided without touching
+      // memberships, which keeps a page of personal assets at one query rather than a membership
+      // resolution per row.
+      if (
+        principal.principalKind === "user" &&
+        record.owners.some(
+          (owner) => owner.kind === "principal" && owner.principalId === principal.principalId
+        )
+      ) {
+        continue;
+      }
+      const projection = await this.accessFor(record, principal);
+      if (!projection.levels.includes("view")) denied.add(record.assetId);
+    }
+    return denied;
+  }
+
+  private async getMany(
+    businessId: string,
+    assetType: TeamAssetType,
+    assetIds: readonly string[]
+  ): Promise<readonly AssetOwnershipRecord[]> {
+    const wanted = [...new Set(assetIds)];
+    if (wanted.length === 0) return [];
+    if (this.deps.ownership.getMany !== undefined) {
+      return await this.deps.ownership.getMany(businessId, assetType, wanted);
+    }
+    const records = await Promise.all(
+      wanted.map((assetId) => this.deps.ownership.get(businessId, assetType, assetId))
+    );
+    return records.filter((record): record is AssetOwnershipRecord => record !== undefined);
   }
 
   async consumeDestructiveApproval(
@@ -347,6 +482,15 @@ function teamOwnerIds(record: AssetOwnershipRecord): readonly string[] {
   return record.owners
     .filter((owner): owner is Extract<TeamAssetOwner, { kind: "team" }> => owner.kind === "team")
     .map((owner) => owner.teamId);
+}
+
+/**
+ * The owner set an `add_owner` leaves behind: a Team joins Team owners, but *replaces* a personal
+ * one, because a person and a Team owning the same asset is a state nothing can undo.
+ */
+function ownersAfter(record: AssetOwnershipRecord, teamId: string): TeamAssetOwner[] {
+  const kept = record.owners.filter((owner) => owner.kind === "team");
+  return [...kept, { kind: "team", teamId }];
 }
 
 function validateOwnership(assetType: TeamAssetType, owners: readonly TeamAssetOwner[]): void {
@@ -689,14 +833,16 @@ export class AssetOwnershipService {
       );
     }
     // Refused here rather than at completion, so a person cannot spend an Approval on an ownership
-    // this service would never have created. Adding a Team to a personally owned File is not a
-    // transfer: it would leave the File owned by a person *and* a Team at once, which every other
-    // entry point rejects.
+    // this service would never have created.
+    /*
+     * A File is born owned by whoever uploaded it, so an `add_owner` that only ever appended would
+     * leave no route from a personal File to a Team at all. Appending stays refused — a person and
+     * a Team owning one asset at once has no way back — so a personal owner is *replaced*, which
+     * is what "make this Team the owner" means to the person asking for it. `ownersAfter` is the
+     * single place that decision lives, so the proposal and the completion cannot disagree.
+     */
     if (input.action === "add_owner" && input.teamId) {
-      validateOwnership(record.assetType, [
-        ...record.owners,
-        { kind: "team", teamId: input.teamId },
-      ]);
+      validateOwnership(record.assetType, ownersAfter(record, input.teamId));
     }
 
     const operationId = this.newId();
@@ -806,7 +952,7 @@ export class AssetOwnershipService {
     if (operation.action === "add_owner" && operation.teamId) {
       updated = {
         ...record,
-        owners: [...record.owners, { kind: "team", teamId: operation.teamId }],
+        owners: ownersAfter(record, operation.teamId),
         revision: record.revision + 1,
         updatedAt: this.now(),
       };
@@ -963,5 +1109,10 @@ function translateApprovalError(error: unknown): AssetOwnershipError {
               : code === "not_found"
                 ? "not_found"
                 : "forbidden";
-  return new AssetOwnershipError(reason, "Ownership Approval was rejected");
+  return new AssetOwnershipError(
+    reason,
+    // The store's own text names the actual cause — four-eyes, expiry, a race. Collapsing it into
+    // one generic sentence leaves the person clicking Approve with no way to tell those apart.
+    error instanceof Error && error.message ? error.message : "Ownership Approval was rejected"
+  );
 }

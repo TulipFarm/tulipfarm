@@ -41,6 +41,16 @@ data loading, schema-driven resource UI, and browser rendering of Surface Artifa
 
 ## Rules
 
+- **Never start a request from inside a state updater.** React may invoke an updater more than
+  once for a single change, so `setState(prev => { post(...); ... })` fires the request twice — the
+  chat composer stored every upload as two Files this way. Compute the next state purely, then do
+  the work after `setState`. Read the current value from a ref when the decision needs it.
+
+- **Documents render in the tab, never through a hosted viewer.** `files/office-embed.tsx` draws
+  `.docx`/`.pptx` at full fidelity (lazily imported, falling back to `office-preview`'s outline).
+  A hosted viewer — `gview`, Office Online — cannot reach a self-hosted instance, needs the File
+  publicly downloadable, and ships private documents off the box. See that file's TSDoc.
+
 - Remix runs in SPA mode (`remix({ ssr: false })`): no server `loader`/`action`, use
   `clientLoader` and `useLoaderData<typeof clientLoader>()`, and navigate with `<Link>`/`<NavLink>`
   from `~/components/ui/link`, never `@remix-run/react` — it prefetches on intent, and a
@@ -77,6 +87,11 @@ data loading, schema-driven resource UI, and browser rendering of Surface Artifa
   `sidebar-command.tsx` searches destinations and open chats only;
   a row shows `+` only where `NavItem.create` names a real create route, and the link sits outside
   the `NavLink` so the row's accessible name stays the destination's.
+- **Shape is the party rule.** A circle is somebody (person or Agent, `ui/avatar.tsx`'s `Avatar`);
+  a square is a Team (`TeamAvatar`, keyed on the slug). Never a Team in a circle or a bare "Team"
+  badge; never a squared-off person. `PartyAvatar` in `components/access/access-bits.tsx` applies
+  this from a `Party` — extend it rather than branching on a principal prefix at a call site.
+  DESIGN.md §9, *Component hierarchy*.
 - Never use `ui/select.tsx` (a native `<select>`) for new dropdowns, even a short fixed list —
   it renders the OS's own unstyled popover, off-brand and un-themeable. Use `ui/combobox.tsx`'s
   `Combobox` instead, as `model-chains/model-sheet.tsx` does; for a closed enum (not free text

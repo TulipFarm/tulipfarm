@@ -1,8 +1,10 @@
+import { isDelimitedPreviewable, previewDelimited } from "@tulipfarm/files/delimited-preview";
 import type { PreviewBlock } from "@tulipfarm/files/office-preview";
 import { isOfficePreviewable, previewOffice } from "@tulipfarm/files/office-preview";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { fetchFileBytes } from "~/lib/files";
 import { cn } from "~/lib/utils";
+import { isRichEmbeddable, OfficeEmbed } from "./office-embed";
 
 /** The text formats a viewer shows as text rather than handing to a download. */
 const TEXT_TYPES = new Set([
@@ -27,6 +29,7 @@ type Loaded =
   | { readonly kind: "loading" }
   | { readonly kind: "failed"; readonly reason: string }
   | { readonly kind: "text"; readonly text: string }
+  | { readonly kind: "rich"; readonly bytes: Uint8Array }
   | { readonly kind: "blocks"; readonly blocks: readonly PreviewBlock[] };
 
 /**
@@ -51,7 +54,18 @@ function useDocument(file: { id: string; mediaType: string } | null): Loaded {
       .then(({ bytes, text }) => {
         if (controller.signal.aborted) return;
         if (isOfficePreviewable(mediaType)) {
+          // A Word or PowerPoint file is drawn as itself when a renderer exists for it; the outline
+          // below is what it falls back to, so the bytes are kept rather than parsed twice.
+          if (isRichEmbeddable(mediaType)) {
+            setState({ kind: "rich", bytes });
+            return;
+          }
           setState({ kind: "blocks", blocks: previewOffice(bytes, mediaType) });
+          return;
+        }
+        // A CSV is a spreadsheet stored as text: it reads as a grid, not as comma-separated lines.
+        if (isDelimitedPreviewable(mediaType)) {
+          setState({ kind: "blocks", blocks: previewDelimited(text(), mediaType) });
           return;
         }
         setState({ kind: "text", text: text() });
@@ -83,6 +97,13 @@ export function DocumentView({
   readonly className?: string;
 }) {
   const state = useDocument(file);
+  // Reset per File, so a document the renderer refused does not condemn the next one to the outline.
+  const [refusedRichRender, setRefusedRichRender] = useState(false);
+  const previousFileId = useRef(file.id);
+  if (previousFileId.current !== file.id) {
+    previousFileId.current = file.id;
+    setRefusedRichRender(false);
+  }
 
   if (state.kind === "loading") {
     return <Centered className={className}>Loading…</Centered>;
@@ -92,29 +113,103 @@ export function DocumentView({
   }
   if (state.kind === "text") {
     return (
-      <pre
-        className={cn(
-          "overflow-auto whitespace-pre-wrap break-words px-6 py-5 font-mono text-[13px] leading-relaxed text-foreground",
-          className
-        )}
-      >
-        {state.text}
-      </pre>
+      <div className={cn("overflow-auto bg-muted/30 px-6 py-6", className)}>
+        <pre className="mx-auto max-w-3xl whitespace-pre-wrap break-words rounded-lg border border-border bg-background px-8 py-7 font-mono text-[13px] leading-relaxed text-foreground shadow-sm">
+          {state.text}
+        </pre>
+      </div>
     );
   }
-  if (state.blocks.length === 0) {
+  if (state.kind === "rich" && !refusedRichRender) {
+    return (
+      <OfficeEmbed
+        bytes={state.bytes}
+        mediaType={file.mediaType}
+        onUnsupported={() => setRefusedRichRender(true)}
+        className={className}
+      />
+    );
+  }
+  const blocks = state.kind === "rich" ? outlineOf(state.bytes, file.mediaType) : state.blocks;
+  if (blocks.length === 0) {
     return <Centered className={className}>This document has no readable content.</Centered>;
+  }
+  // A grid needs the width more than it needs a comfortable measure, so a document made only of
+  // grids is not squeezed into a reading column it will just scroll sideways inside.
+  const allGrids = blocks.every((b) => b.kind === "table" || b.kind === "sheet");
+  // A deck reads as a deck only if its cards are ordered, so each slide carries its position.
+  const slideNumbers = new Map<PreviewBlock, number>();
+  for (const block of blocks) {
+    if (block.kind === "slide") slideNumbers.set(block, slideNumbers.size + 1);
   }
   return (
     <div className={cn("overflow-auto bg-muted/30 px-6 py-6", className)}>
-      <div className="mx-auto max-w-3xl space-y-4">
-        {state.blocks.map((block, index) => (
-          // Blocks are positional and have no identity of their own, so the index is the key.
-          <Block key={index} block={block} />
-        ))}
+      <div className={cn("mx-auto space-y-4", allGrids ? "max-w-full" : "max-w-3xl")}>
+        {groupIntoPages(blocks).map((group, index) =>
+          // Groups are positional and have no identity of their own, so the index is the key.
+          group.kind === "standalone" ? (
+            <Block key={index} block={group.block} slideNumber={slideNumbers.get(group.block)} />
+          ) : (
+            <div
+              key={index}
+              className="rounded-lg border border-border bg-background px-8 py-7 shadow-sm"
+            >
+              <div className="space-y-4">
+                {group.blocks.map((block, blockIndex) => (
+                  <Block key={blockIndex} block={block} />
+                ))}
+              </div>
+            </div>
+          )
+        )}
       </div>
     </div>
   );
+}
+
+type PageGroup =
+  | { readonly kind: "page"; readonly blocks: readonly PreviewBlock[] }
+  | { readonly kind: "standalone"; readonly block: PreviewBlock };
+
+/**
+ * Puts prose onto a page and leaves grids and slides to stand on their own.
+ *
+ * Without this every paragraph floats as its own element and a text document reads as a list of
+ * fragments rather than as a page. Slides and sheets already carry their own frame, so wrapping
+ * them again would just nest one card inside another.
+ */
+function groupIntoPages(blocks: readonly PreviewBlock[]): readonly PageGroup[] {
+  const groups: PageGroup[] = [];
+  let page: PreviewBlock[] = [];
+  const flush = () => {
+    if (page.length > 0) groups.push({ kind: "page", blocks: page });
+    page = [];
+  };
+  for (const block of blocks) {
+    if (block.kind === "slide" || block.kind === "sheet" || block.kind === "table") {
+      flush();
+      groups.push({ kind: "standalone", block });
+      continue;
+    }
+    page.push(block);
+  }
+  flush();
+  return groups;
+}
+
+/**
+ * The outline a document falls back to, or nothing when it cannot be parsed either.
+ *
+ * This runs during render, on the path taken after a full-fidelity renderer has already refused the
+ * file, so a parse failure here would take the whole viewer down with it over a File the reader can
+ * still perfectly well download.
+ */
+function outlineOf(bytes: Uint8Array, mediaType: string): readonly PreviewBlock[] {
+  try {
+    return previewOffice(bytes, mediaType);
+  } catch {
+    return [];
+  }
 }
 
 function Centered({
@@ -133,7 +228,13 @@ function Centered({
 
 const HEADING_SIZES = ["text-2xl", "text-xl", "text-lg", "text-base", "text-sm", "text-sm"];
 
-function Block({ block }: { readonly block: PreviewBlock }) {
+function Block({
+  block,
+  slideNumber,
+}: {
+  readonly block: PreviewBlock;
+  readonly slideNumber?: number;
+}) {
   switch (block.kind) {
     case "heading":
       return (
@@ -171,6 +272,11 @@ function Block({ block }: { readonly block: PreviewBlock }) {
     case "slide":
       return (
         <div className="rounded-lg border border-border bg-background px-5 py-4 shadow-sm">
+          {slideNumber !== undefined && (
+            <p className="mb-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+              Slide {slideNumber}
+            </p>
+          )}
           <p className="text-lg font-semibold text-foreground">{block.title}</p>
           {block.bullets.length > 0 && (
             <ul className="mt-3 space-y-1.5">

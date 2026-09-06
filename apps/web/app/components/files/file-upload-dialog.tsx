@@ -289,6 +289,11 @@ export function FileUploadDialog({
               multiple
               accept={FILE_PICKER_ACCEPT}
               className="sr-only"
+              // The drop zone below is the labelled control assistive tech should meet; this input
+              // only exists to open the picker, so it stays out of the tab order and the a11y tree.
+              tabIndex={-1}
+              aria-hidden
+              data-testid="file-picker-input"
               onChange={(event) => {
                 const files = Array.from(event.currentTarget.files ?? []);
                 if (files.length > 0) choose(files);

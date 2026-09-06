@@ -894,3 +894,28 @@
     scroll-behavior: auto !important;
   }
 }
+
+/* Office documents rendered by `office-embed.tsx`.
+   The presentation renderer wraps its slides in a fixed-height scroller of its own. Left alone
+   that puts a scrollbar inside a scrollbar, so the deck is unrolled and the surrounding viewer
+   does the scrolling, the same as every other document. */
+.office-embed .pptx-preview-wrapper {
+  height: auto !important;
+  overflow: visible !important;
+}
+.office-embed .pptx-preview-slide-wrapper {
+  margin: 0 auto 1rem;
+  border-radius: 0.5rem;
+  overflow: hidden;
+  box-shadow: 0 1px 3px rgb(0 0 0 / 0.3);
+}
+/* The Word renderer emits its own page sizing; centre the pages and give them a page-like edge. */
+.office-embed .docx-wrapper {
+  background: transparent !important;
+  padding: 1.5rem 0 !important;
+}
+.office-embed .docx-wrapper > section.docx {
+  margin-bottom: 1rem !important;
+  border-radius: 0.5rem;
+  box-shadow: 0 1px 3px rgb(0 0 0 / 0.3);
+}

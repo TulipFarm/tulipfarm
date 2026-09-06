@@ -197,13 +197,26 @@ function userParts(
   if (text.length > 0) parts.push({ type: "text", text });
   for (const file of files) {
     attached.push(file.fileId);
-    parts.push(
-      modalityForMediaType(file.mediaType) === "image"
-        ? { type: "image", image: file.data, mediaType: file.mediaType }
-        : { type: "file", data: file.data, mediaType: file.mediaType, filename: file.name }
-    );
+    parts.push(filePartFor(file));
   }
   return parts;
+}
+
+/**
+ * The provider block one attached File becomes.
+ *
+ * Routed by what a provider can actually read, not by the File's modality. Images and PDFs are
+ * accepted as binary; every other media type is refused as a file part, so a document that has
+ * text is sent as text and only a document with none is left to try its luck as a file.
+ */
+function filePartFor(file: ResolvedAttachment): TextPart | ImagePart | FilePart {
+  if (modalityForMediaType(file.mediaType) === "image") {
+    return { type: "image", image: file.data, mediaType: file.mediaType };
+  }
+  if (file.mediaType !== "application/pdf" && file.text !== undefined && file.text.length > 0) {
+    return { type: "text", text: `${file.name}:\n\n${file.text}` };
+  }
+  return { type: "file", data: file.data, mediaType: file.mediaType, filename: file.name };
 }
 
 /** Recognizes loop-encoded Tool calls; other assistant text passes through. */

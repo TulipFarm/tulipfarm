@@ -21,11 +21,16 @@ export function buildFileOwnershipPort(
     },
     facts: { async emit() {} },
   });
+  const ownershipRepo = new PgAssetOwnershipRepo(transactions);
   const access = new AssetOwnershipAccessService({
-    ownership: new PgAssetOwnershipRepo(transactions),
+    ownership: ownershipRepo,
     approvals: new PgApprovalGrantRepo(transactions),
     memberships,
     everyoneTeamId: async (businessId) => (await teams.ensureEveryone(businessId)).id,
+    activeTeamIds: async (businessId) =>
+      (await teams.listTeams(businessId))
+        .filter((team) => team.status === "active")
+        .map((team) => team.id),
   });
 
   return {
@@ -48,5 +53,10 @@ export function buildFileOwnershipPort(
         throw error;
       }
     },
+    teamReadableFileIds: (businessId, principalId, principalKind) =>
+      access.teamReachableAssetIds(businessId, "file", { principalId, principalKind }),
+    teamGrantCounts: (businessId, fileIds) => access.teamGrantCounts(businessId, "file", fileIds),
+    unreadableAmong: (businessId, principalId, principalKind, fileIds) =>
+      access.unviewableAmong(businessId, "file", { principalId, principalKind }, fileIds),
   };
 }

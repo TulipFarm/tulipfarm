@@ -1,3 +1,4 @@
+import { AssetOwnershipError } from "@tulipfarm/authz";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { isDeploymentAdmin } from "../authz/route-gate";
 import { makeRateLimitHook, type RateLimiter } from "../rate-limit";
@@ -40,6 +41,36 @@ const security: { [securityLabel: string]: readonly string[] }[] = [
   { bearerToken: [] },
 ];
 const missingKeyMessage = "An Idempotency-Key header is required.";
+
+/**
+ * An ownership refusal is a decision, not a fault. Left unhandled it reaches Fastify as a 500 with
+ * no message, so a four-eyes rule reads to the person clicking Approve as a broken button; the
+ * response schema has always declared these statuses for exactly this reason.
+ */
+const OWNERSHIP_REFUSAL_STATUS: Record<string, 400 | 403 | 404 | 409> = {
+  forbidden: 403,
+  not_found: 404,
+  already_completed: 409,
+  stale: 409,
+  duplicate_decision: 409,
+  pending_approval: 409,
+  expired: 409,
+  invalid_ownership: 400,
+};
+
+async function decideOrFail<T>(
+  reply: FastifyReply,
+  request: FastifyRequest,
+  run: () => Promise<T>
+) {
+  try {
+    return await run();
+  } catch (error) {
+    if (!(error instanceof AssetOwnershipError)) throw error;
+    const status = OWNERSHIP_REFUSAL_STATUS[error.reason] ?? 409;
+    return fail(reply, request, status, error.reason, error.message);
+  }
+}
 
 function fail(
   reply: FastifyReply,
@@ -394,13 +425,15 @@ export function registerOperationalRoutes(
         comment?: string;
         representedTeamId?: string;
       };
-      return deps.decideApproval(grant, {
-        approvalId: id,
-        decision: body.decision,
-        comment: body.comment,
-        representedTeamId: body.representedTeamId,
-        idempotencyKey: key,
-      });
+      return await decideOrFail(reply, request, () =>
+        deps.decideApproval(grant, {
+          approvalId: id,
+          decision: body.decision,
+          comment: body.comment,
+          representedTeamId: body.representedTeamId,
+          idempotencyKey: key,
+        })
+      );
     }
   );
 

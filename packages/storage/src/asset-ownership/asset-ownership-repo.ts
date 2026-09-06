@@ -85,6 +85,18 @@ export interface AssetOwnershipRepo {
     assetType: TeamAssetType,
     assetId: string
   ): Promise<AssetOwnershipRecord | undefined>;
+  /**
+   * The ownership records for `assetIds`, omitting any that has none.
+   *
+   * A page of assets asks the same question once rather than once per row: a listing that has to
+   * know who owns each of its rows would otherwise cost a query per row, which is how an
+   * ownership-aware list becomes slower than the list it replaced.
+   */
+  getMany(
+    businessId: string,
+    assetType: TeamAssetType,
+    assetIds: readonly string[]
+  ): Promise<AssetOwnershipRecord[]>;
   listByTeam(businessId: string, teamIds: readonly string[]): Promise<AssetOwnershipRecord[]>;
   listByTeamsPage(
     businessId: string,
@@ -224,6 +236,23 @@ export class InMemoryAssetOwnershipRepo implements AssetOwnershipRepo {
   ): Promise<AssetOwnershipRecord | undefined> {
     const record = this.ownership.get(this.ownershipKey(businessId, assetType, assetId));
     return record === undefined ? undefined : freezeOwnership(record);
+  }
+
+  async getMany(
+    businessId: string,
+    assetType: TeamAssetType,
+    assetIds: readonly string[]
+  ): Promise<AssetOwnershipRecord[]> {
+    const wanted = new Set(assetIds);
+    return [...this.ownership.values()]
+      .filter(
+        (record) =>
+          record.businessId === businessId &&
+          record.assetType === assetType &&
+          wanted.has(record.assetId)
+      )
+      .sort((left, right) => left.assetId.localeCompare(right.assetId))
+      .map(freezeOwnership);
   }
 
   async listByTeam(
@@ -773,6 +802,22 @@ export class PgAssetOwnershipRepo implements AssetOwnershipRepo {
             WHERE business_id = $1 AND asset_type = $2 AND asset_id = $3`,
         [businessId, assetType, assetId]
       );
+    });
+  }
+
+  async getMany(
+    businessId: string,
+    assetType: TeamAssetType,
+    assetIds: readonly string[]
+  ): Promise<AssetOwnershipRecord[]> {
+    if (assetIds.length === 0) return [];
+    return await this.transactions.withTransaction(async (tx) => {
+      const records = await this.getManyInTransaction(
+        tx,
+        businessId,
+        [...new Set(assetIds)].map((assetId) => ({ asset_type: assetType, asset_id: assetId }))
+      );
+      return records.sort((left, right) => left.assetId.localeCompare(right.assetId));
     });
   }
 

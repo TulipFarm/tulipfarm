@@ -1130,9 +1130,7 @@ export function registerFileRoutes(
         // share count, so a reader is told nothing rather than told `false`.
         const owned = await deps.files.canManage(DEPLOYMENT_BUSINESS_ID, id, principal.id);
         const shareCount = owned
-          ? ((await deps.files.shareCountsFor(DEPLOYMENT_BUSINESS_ID, principal.id, [file])).get(
-              file.id
-            ) ?? 0)
+          ? await deps.files.grantCount(DEPLOYMENT_BUSINESS_ID, id)
           : undefined;
         const inKnowledge =
           deps.knowledge && owned ? await deps.knowledge.isIndexed(id) : undefined;

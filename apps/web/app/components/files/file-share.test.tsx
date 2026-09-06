@@ -8,12 +8,29 @@ const fetchFileShares = vi.fn<() => Promise<readonly FileShare[]>>();
 const shareFile = vi.fn<() => Promise<void>>();
 const unshareFile = vi.fn<() => Promise<void>>();
 
+const listUsers = vi.fn<() => Promise<unknown[]>>();
+const listRoles = vi.fn<() => Promise<{ roles: unknown[] }>>();
+
+vi.mock("~/lib/users", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("~/lib/users")>()),
+  listUsers: () => listUsers(),
+}));
+
+vi.mock("~/lib/authz", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("~/lib/authz")>()),
+  listRoles: () => listRoles(),
+}));
+
 vi.mock("~/lib/files", async (importOriginal) => ({
   ...(await importOriginal<typeof import("~/lib/files")>()),
   fetchFileShares: (...args: unknown[]) => fetchFileShares(...(args as [])),
   shareFile: (...args: unknown[]) => shareFile(...(args as [])),
   unshareFile: (...args: unknown[]) => unshareFile(...(args as [])),
 }));
+
+// The Team section owns its own API calls and its own test file; stubbing it keeps a failure here
+// pointing at the person/role grants this file is about.
+vi.mock("./file-team-share", () => ({ FileTeamShare: () => null }));
 
 const FILE: LibraryFile = {
   id: "file_1",
@@ -33,6 +50,18 @@ describe("ShareDialog", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     fetchFileShares.mockResolvedValue([]);
+    listUsers.mockResolvedValue([
+      {
+        id: "user_2",
+        email: "muskan@example.com",
+        name: "Muskan Vijayvargiya",
+        role: "member",
+        status: "active",
+      },
+    ]);
+    listRoles.mockResolvedValue({
+      roles: [{ id: "support", source: "builtin", displayName: "Support", artifactPath: null }],
+    });
     shareFile.mockResolvedValue(undefined);
     unshareFile.mockResolvedValue(undefined);
   });
@@ -50,13 +79,12 @@ describe("ShareDialog", () => {
     fetchFileShares.mockResolvedValue([
       { kind: "user", id: "user_2", sharedBy: "user_1", sharedAt: "2026-01-02T03:05:00.000Z" },
     ]);
-    await user.type(screen.getByLabelText("Their principal id"), "user_2");
+    await user.type(screen.getByLabelText("Person"), "user_2");
     await user.click(screen.getByRole("button", { name: "Share" }));
 
     expect(shareFile).toHaveBeenCalledWith("file_1", { kind: "user", id: "user_2" });
-    expect(await screen.findByText("user_2")).toBeInTheDocument();
     // The field clears, so a second share cannot be sent by a stray Enter on a stale value.
-    await waitFor(() => expect(screen.getByLabelText("Their principal id")).toHaveValue(""));
+    await waitFor(() => expect(screen.getByLabelText("Person")).toHaveValue(""));
   });
 
   it("asks for a Role id, and sends one, when sharing with a Role", async () => {
@@ -64,11 +92,33 @@ describe("ShareDialog", () => {
     render(<ShareDialog file={FILE} onClose={() => {}} />);
     await screen.findByText("Only you can read this file.");
 
-    await user.selectOptions(screen.getByLabelText("Share with"), "role");
-    await user.type(screen.getByLabelText("Role id"), "support");
+    await user.click(screen.getByRole("button", { name: "Everyone with a role" }));
+    await user.type(screen.getByLabelText("Role"), "support");
     await user.click(screen.getByRole("button", { name: "Share" }));
 
     expect(shareFile).toHaveBeenCalledWith("file_1", { kind: "role", id: "support" });
+  });
+
+  it("resolves a person picked by name to their principal id", async () => {
+    const user = userEvent.setup();
+    render(<ShareDialog file={FILE} onClose={() => {}} />);
+    await screen.findByText("Only you can read this file.");
+
+    await user.type(screen.getByLabelText("Person"), "Muskan");
+    await user.click(await screen.findByRole("option", { name: /Muskan Vijayvargiya/ }));
+    await user.click(screen.getByRole("button", { name: "Share" }));
+
+    expect(shareFile).toHaveBeenCalledWith("file_1", { kind: "user", id: "user_2" });
+  });
+
+  it("names a person on their grant rather than showing a raw id", async () => {
+    fetchFileShares.mockResolvedValue([
+      { kind: "user", id: "user_2", sharedBy: "user_1", sharedAt: "2026-01-02T03:05:00.000Z" },
+    ]);
+    render(<ShareDialog file={FILE} onClose={() => {}} />);
+
+    expect(await screen.findByText("Muskan Vijayvargiya")).toBeInTheDocument();
+    expect(screen.getByText("muskan@example.com")).toBeInTheDocument();
   });
 
   it("revokes a share and stops offering it", async () => {
@@ -100,7 +150,7 @@ describe("ShareDialog", () => {
     render(<ShareDialog file={FILE} onClose={() => {}} />);
     await screen.findByText("Only you can read this file.");
 
-    await user.type(screen.getByLabelText("Their principal id"), "user_2");
+    await user.type(screen.getByLabelText("Person"), "user_2");
     await user.click(screen.getByRole("button", { name: "Share" }));
 
     expect(await screen.findByRole("alert")).toHaveTextContent("That file could not be shared.");
