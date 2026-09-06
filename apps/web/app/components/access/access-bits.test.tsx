@@ -1,7 +1,8 @@
 import { render, screen, within } from "@testing-library/react";
-import { expect, test } from "vitest";
+import { describe, expect, it, test } from "vitest";
+import { lookupParty } from "~/lib/access-directory";
 import type { AuthzGrant } from "~/lib/authz";
-import { CapabilityList, RoleCard } from "./access-bits";
+import { CapabilityList, PartyAvatar, RoleCard } from "./access-bits";
 
 function grant(overrides: Partial<AuthzGrant> = {}): AuthzGrant {
   const effect = overrides.effect ?? "allow";
@@ -141,4 +142,23 @@ test("does not contradict a Role's blurb with the areas its allows touch", () =>
     screen.getByText("Day-to-day work. Cannot manage people or settings.")
   ).toBeInTheDocument();
   expect(screen.queryByText(/^Covers /)).not.toBeInTheDocument();
+});
+
+/*
+ * Shape is the product's one carrier for "is this a group or an individual", so it is asserted
+ * here as well as in `ui/avatar.test.tsx`: this is the component that decides which shape a
+ * principal id gets, and getting it wrong makes a Team look like a colleague.
+ */
+describe("PartyAvatar shape", () => {
+  it("draws a Team principal as a square", () => {
+    render(<PartyAvatar party={lookupParty(new Map(), "team:eng")} data-testid="mark" />);
+    const mark = screen.getByTestId("mark");
+    expect(mark.className).toContain("rounded-xl");
+    expect(mark.className).not.toContain("rounded-full");
+  });
+
+  it("draws an Agent principal as a circle, same as a person", () => {
+    render(<PartyAvatar party={lookupParty(new Map(), "agent:support")} data-testid="mark" />);
+    expect(screen.getByTestId("mark").className).toContain("rounded-full");
+  });
 });

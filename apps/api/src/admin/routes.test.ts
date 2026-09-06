@@ -1,3 +1,4 @@
+import { AssetOwnershipError } from "@tulipfarm/authz";
 import Fastify from "fastify";
 import { describe, expect, it, vi } from "vitest";
 import type { RequestPrincipal } from "../identity/principal";
@@ -470,6 +471,35 @@ describe("operational API", () => {
       }
     );
     expect(response.json()).toMatchObject({ status: "pending", requiredDecisions: 2 });
+    await app.close();
+  });
+
+  /*
+   * Four-eyes refusals reach this route as `AssetOwnershipError`, and an unhandled one is a 500:
+   * the browser sees a server fault with no message, so the Approve button reads as broken rather
+   * than as refused. The response schema has always declared 403/404/409 for exactly this.
+   */
+  it.each([
+    ["forbidden", 403],
+    ["not_found", 404],
+    ["already_completed", 409],
+  ])("answers a %s ownership refusal with %i and its message", async (reason, status) => {
+    const decideApproval = vi.fn(async () => {
+      throw new AssetOwnershipError(
+        reason as ConstructorParameters<typeof AssetOwnershipError>[0],
+        "The proposer cannot approve this operation"
+      );
+    });
+    const app = await harness({ decideApproval });
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/v1/approvals/approval-1/decisions",
+      headers: { "idempotency-key": "approval-1-user-1-approve" },
+      payload: { decision: "approved" },
+    });
+
+    expect(response.statusCode).toBe(status);
+    expect(response.json().error.message).toBe("The proposer cannot approve this operation");
     await app.close();
   });
 });

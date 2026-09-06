@@ -203,7 +203,9 @@ export class TurnDriver {
       );
     }
 
-    const attachments = resolved.map((each) => each.file);
+    const attachments = resolved.map((each) =>
+      each.text === undefined ? each.file : { ...each.file, text: each.text }
+    );
 
     const input: AgentLoopInput = {
       businessId: request.businessId,
@@ -268,9 +270,10 @@ export class TurnDriver {
    * would let a revoked File break a Turn that has other content to work with, and the Agent
    * still has the person's text.
    *
-   * The File and its screenable text are kept apart because they travel to different places: the
-   * File goes to the model, the text goes only to the guards. Folding the text into
-   * `ResolvedAttachment` would send the model the same words twice.
+   * The File and its screenable text are kept apart here because only some of each pair travels:
+   * the guards read every text, whereas the adapter sends a File either as bytes or as its text,
+   * per media type. Pairing them keeps that choice where it belongs — with the adapter that knows
+   * what the provider will accept — rather than deciding it before either is needed.
    */
   private async resolveAttachments(
     runId: string,

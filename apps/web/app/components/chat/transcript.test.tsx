@@ -679,7 +679,7 @@ describe("an attachment the reader can no longer open", () => {
       />
     );
 
-    expect(screen.getByRole("button", { name: "Download here.pdf" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Open here.pdf" })).toBeInTheDocument();
     expect(screen.getByText("gone.pdf")).toBeInTheDocument();
   });
 });

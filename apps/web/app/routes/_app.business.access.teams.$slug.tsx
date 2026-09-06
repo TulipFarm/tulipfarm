@@ -12,6 +12,7 @@ import { type TeamAssetSection, TeamAssetsPanel } from "~/components/team-assets
 import { TeamLeaveAction, TeamMembers } from "~/components/team-members";
 import { TeamActivity, TeamOverview } from "~/components/team-overview";
 import { TeamSettings } from "~/components/team-settings";
+import { TeamAvatar } from "~/components/ui/avatar";
 import { Badge } from "~/components/ui/badge";
 import { Link } from "~/components/ui/link";
 import { listAgents } from "~/lib/agents";
@@ -139,7 +140,8 @@ export default function TeamDetailRoute() {
         <Link to="/teams" className="text-sm text-muted-foreground hover:text-foreground">
           ← Teams
         </Link>
-        <div className="mt-2 flex flex-wrap items-center gap-2">
+        <div className="mt-2 flex flex-wrap items-center gap-3">
+          <TeamAvatar identity={data.team.slug} className="size-10" />
           <h2 className="text-lg font-semibold text-foreground">{data.team.displayName}</h2>
           {data.team.status === "archived" ? <Badge variant="neutral">Archived</Badge> : null}
           {(data.team.labels ?? []).map((label) => (

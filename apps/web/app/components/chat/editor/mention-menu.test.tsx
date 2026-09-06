@@ -113,7 +113,47 @@ describe("File (+) mention menu", () => {
     await type(editor, "pricing");
 
     expect(await screen.findByRole("button", { name: /pricing.json/i })).toBeInTheDocument();
-    expect(searchFiles).toHaveBeenCalledWith("pricing", 8);
+    expect(searchFiles).toHaveBeenCalledWith("pricing", 9, expect.any(AbortSignal));
+  });
+
+  it("says there are more matches rather than silently showing the first eight", async () => {
+    searchFiles.mockResolvedValue(
+      Array.from({ length: 9 }, (_, i) => ({
+        id: `file-${i}`,
+        filename: `invoice-${i}.pdf`,
+        mediaType: "application/pdf",
+        sizeBytes: 120,
+      }))
+    );
+
+    const editor = await mountEditor();
+    await type(editor, "+");
+    await type(editor, "invoice");
+
+    expect(await screen.findByText("More matches. Keep typing to narrow.")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /invoice-8\.pdf/i })).not.toBeInTheDocument();
+  });
+
+  it("keeps quiet when every match already fits", async () => {
+    searchFiles.mockResolvedValue([
+      { id: "file-1", filename: "pricing.json", mediaType: "application/json", sizeBytes: 120 },
+    ]);
+
+    const editor = await mountEditor();
+    await type(editor, "+");
+    await type(editor, "pricing");
+
+    await screen.findByRole("button", { name: /pricing.json/i });
+    expect(screen.queryByText("More matches. Keep typing to narrow.")).not.toBeInTheDocument();
+  });
+
+  it("hands the search an abort signal, so a superseded keystroke does not keep the wire busy", async () => {
+    const editor = await mountEditor();
+    await type(editor, "+");
+    await type(editor, "invoice");
+
+    const signal = searchFiles.mock.calls.at(-1)?.[2];
+    expect(signal).toBeInstanceOf(AbortSignal);
   });
 });
 

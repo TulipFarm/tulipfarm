@@ -51,8 +51,27 @@ export function Sheet({
     return () => d.removeEventListener("close", onClose);
   }, [onClose]);
 
+  // Chrome fires a bubbling `cancel` on <input type="file"> when the picker is dismissed, and a
+  // <dialog> ancestor reads that as its own Escape gesture and closes.
+  // https://issues.chromium.org/issues/41491454
+  useEffect(() => {
+    const d = ref.current;
+    if (!d) return;
+    const swallowDescendantCancel = (event: Event) => {
+      if (event.target === d) return;
+      event.preventDefault();
+      event.stopPropagation();
+    };
+    d.addEventListener("cancel", swallowDescendantCancel);
+    return () => d.removeEventListener("cancel", swallowDescendantCancel);
+  }, []);
+
   // Close when the click lands on the ::backdrop (outside the panel's layout rect).
   function onBackdropClick(e: React.MouseEvent<HTMLDialogElement>) {
+    // A click on a child never reaches the backdrop, whatever its coordinates say — a
+    // programmatic .click() (the file picker's, say) reports (0, 0), which the rect test reads
+    // as a backdrop hit.
+    if (e.target !== e.currentTarget) return;
     const rect = e.currentTarget.getBoundingClientRect();
     const outside =
       e.clientX < rect.left ||

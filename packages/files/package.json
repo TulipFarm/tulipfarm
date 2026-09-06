@@ -6,7 +6,8 @@
   "exports": {
     ".": "./src/index.ts",
     "./limits": "./src/limits.ts",
-    "./office-preview": "./src/office-preview.ts"
+    "./office-preview": "./src/office-preview.ts",
+    "./delimited-preview": "./src/delimited-preview.ts"
   },
   "scripts": {
     "lint": "biome check --no-errors-on-unmatched .",

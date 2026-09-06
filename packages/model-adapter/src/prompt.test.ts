@@ -70,6 +70,53 @@ describe("splitPrompt — attached files", () => {
     ]);
   });
 
+  it("sends a spreadsheet as its extracted text, because no provider takes one as a file", () => {
+    // A CSV or an .xlsx offered as a binary file part comes back as
+    // `'file part media type text/csv' functionality not supported`, which reaches the person as a
+    // bare model error. The text was already extracted upstream; sending it is what makes the
+    // attachment work at all.
+    const csv: ResolvedAttachment = {
+      fileId: "file-4",
+      mediaType: "text/csv",
+      name: "orders.csv",
+      data: new Uint8Array([7, 8, 9]),
+      text: "region,revenue\nPune,4200",
+    };
+
+    const { messages } = splitPrompt([{ role: "user", content: [filePart(csv)] }], [csv]);
+
+    expect(messages[0]?.content).toEqual([
+      { type: "text", text: "orders.csv:\n\nregion,revenue\nPune,4200" },
+    ]);
+  });
+
+  it("still sends a PDF as a file part even though its text was extracted", () => {
+    // A PDF is the one document type providers read natively, and they read it better than a flat
+    // text layer does — tables and column order survive.
+    const withText: ResolvedAttachment = { ...pdf, text: "Invoice 12" };
+
+    const { messages } = splitPrompt([{ role: "user", content: [filePart(withText)] }], [withText]);
+
+    expect(messages[0]?.content).toEqual([
+      { type: "file", data: pdf.data, mediaType: "application/pdf", filename: "invoice.pdf" },
+    ]);
+  });
+
+  it("falls back to a file part when a document yielded no text", () => {
+    const scan: ResolvedAttachment = {
+      fileId: "file-5",
+      mediaType: "text/csv",
+      name: "empty.csv",
+      data: new Uint8Array([1]),
+    };
+
+    const { messages } = splitPrompt([{ role: "user", content: [filePart(scan)] }], [scan]);
+
+    expect(messages[0]?.content).toEqual([
+      { type: "file", data: scan.data, mediaType: "text/csv", filename: "empty.csv" },
+    ]);
+  });
+
   it("carries several images from one message, in the order they were attached", () => {
     const second: ResolvedAttachment = { ...png, fileId: "file-3", name: "second.png" };
     const { messages } = splitPrompt(

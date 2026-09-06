@@ -161,7 +161,7 @@ export default function FileDetailRoute() {
       description={
         <span className="flex flex-wrap items-center gap-2">
           <span>{file.mediaType}</span>
-          {archived ? <Badge variant="neutral">Archived</Badge> : null}
+          {archived ? <Badge variant="neutral">In trash</Badge> : null}
           {file.inKnowledge ? <Badge variant="info">In Knowledge</Badge> : null}
         </span>
       }
@@ -289,7 +289,7 @@ export default function FileDetailRoute() {
                       onClick={() => setConfirmingArchive(true)}
                     >
                       <FileX2 aria-hidden />
-                      Archive
+                      Move to trash
                     </Button>
                   </>
                 ) : (
@@ -323,7 +323,7 @@ export default function FileDetailRoute() {
                 </p>
               ) : (
                 <p className="mt-3 text-xs text-muted-foreground">
-                  Archived files are read-only until restored.
+                  Files in the trash are read-only until you restore them.
                 </p>
               )}
             </Panel>
@@ -409,9 +409,9 @@ export default function FileDetailRoute() {
         open={confirmingArchive}
         onClose={() => setConfirmingArchive(false)}
         onConfirm={() => void changeArchiveState()}
-        title={`Archive ${file.filename}?`}
+        title={`Move ${file.filename} to the trash?`}
         description="It leaves active lists and new Chat attachments. Existing readers can still open it. You can restore it later."
-        confirmLabel="Archive"
+        confirmLabel="Move to trash"
         busy={busy}
       />
       <ConfirmModal

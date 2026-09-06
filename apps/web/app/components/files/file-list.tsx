@@ -341,8 +341,8 @@ function FileActionsMenu({
                   className={itemClass}
                   onClick={choose(onArchive)}
                 >
-                  <FileX2 className="size-4" aria-hidden />
-                  Archive
+                  <Trash2 className="size-4" aria-hidden />
+                  Move to trash
                 </button>
               ) : null}
               {onRestore && owned && archived ? (

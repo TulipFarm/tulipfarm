@@ -19,8 +19,10 @@ export const MentionList = forwardRef<
     kind: MentionKind;
     /** A search is pending; rendered only for a trigger that declares a `loadingLabel`. */
     loading?: boolean;
+    /** The server had more matches than the menu shows, so narrowing the query is worth suggesting. */
+    truncated?: boolean;
   }
->(({ items, command, kind, loading = false }, ref) => {
+>(({ items, command, kind, loading = false, truncated = false }, ref) => {
   const [selected, setSelected] = useState(0);
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: a fresh query yields a fresh list — reset the highlight to the top.
@@ -104,6 +106,11 @@ export const MentionList = forwardRef<
           </span>
         </button>
       ))}
+      {truncated ? (
+        <p className="px-2 py-1.5 text-muted-foreground text-xs">
+          More matches. Keep typing to narrow.
+        </p>
+      ) : null}
     </div>
   );
 });

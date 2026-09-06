@@ -116,7 +116,7 @@ describe("FileList", () => {
     expect(screen.queryByRole("button", { name: "Share report.pdf" })).toBeNull();
     await user.click(screen.getByRole("button", { name: "Actions for report.pdf" }));
     expect(screen.getByRole("menuitem", { name: "Share" })).toBeInTheDocument();
-    await user.click(screen.getByRole("menuitem", { name: "Archive" }));
+    await user.click(screen.getByRole("menuitem", { name: "Move to trash" }));
 
     expect(onArchive).toHaveBeenCalledWith(expect.objectContaining({ id: "file_1" }));
   });
@@ -142,7 +142,7 @@ describe("FileList", () => {
 
     await user.click(screen.getByRole("button", { name: "Actions for report.pdf" }));
     expect(screen.queryByRole("menuitem", { name: "Share" })).toBeNull();
-    expect(screen.queryByRole("menuitem", { name: "Archive" })).toBeNull();
+    expect(screen.queryByRole("menuitem", { name: "Move to trash" })).toBeNull();
     expect(screen.queryByRole("menuitem", { name: "Delete permanently" })).toBeNull();
   });
 });

@@ -86,6 +86,8 @@ class FakeTokenRepo implements TokenRepo {
 class FakeFileOwnership implements FileOwnershipPort {
   readonly records = new Map<string, FileAssetOwnership>();
   readonly teamAccess = new Map<string, Set<string>>();
+  /** Principals who administer a Team, and so may manage what its Files are shared with. */
+  readonly teamAdmins = new Map<string, Set<string>>();
 
   async createPersonal(businessId: string, fileId: string, principalId: string) {
     this.records.set(fileId, {
@@ -111,17 +113,61 @@ class FakeFileOwnership implements FileOwnershipPort {
     const team = ownership.owners.some(
       (owner) => owner.kind === "team" && this.teamAccess.get(owner.teamId)?.has(principalId)
     );
-    return {
-      levels: personal
-        ? (["view", "use", "edit"] as const)
-        : team
-          ? (["view", "use"] as const)
-          : [],
-      canManageOwnership: personal,
-    };
+    const shared = ownership.shares.some((share) =>
+      this.teamAccess.get(share.teamId)?.has(principalId)
+    );
+    const levels: Array<"view" | "use" | "edit"> = personal
+      ? ["view", "use", "edit"]
+      : team || shared
+        ? ["view", "use"]
+        : [];
+    const teamAdmin = ownership.owners.some(
+      (owner) => owner.kind === "team" && this.teamAdmins.get(owner.teamId)?.has(principalId)
+    );
+    return { levels, canManageOwnership: personal || teamAdmin };
   }
 
   async consumeDestructiveApproval() {}
+
+  async teamReadableFileIds(_businessId: string, principalId: string, principalKind: string) {
+    if (principalKind !== "user") return [];
+    return [...this.records.values()]
+      .filter(
+        (record) =>
+          record.owners.some(
+            (owner) => owner.kind === "team" && this.teamAccess.get(owner.teamId)?.has(principalId)
+          ) || record.shares.some((share) => this.teamAccess.get(share.teamId)?.has(principalId))
+      )
+      .map((record) => record.assetId);
+  }
+
+  async teamGrantCounts(_businessId: string, fileIds: readonly string[]) {
+    const counts = new Map<string, number>();
+    for (const fileId of fileIds) {
+      const record = this.records.get(fileId);
+      if (record === undefined) continue;
+      const teams = new Set(record.shares.map((share) => share.teamId));
+      for (const owner of record.owners) if (owner.kind === "team") teams.add(owner.teamId);
+      if (teams.size > 0) counts.set(fileId, teams.size);
+    }
+    return counts;
+  }
+
+  async unreadableAmong(
+    _businessId: string,
+    principalId: string,
+    _principalKind: string,
+    fileIds: readonly string[]
+  ) {
+    const denied = new Set<string>();
+    for (const fileId of fileIds) {
+      const record = this.records.get(fileId);
+      if (record === undefined) continue;
+      const { levels } = await this.accessFor(record, principalId);
+      if (!levels.includes("view")) denied.add(fileId);
+    }
+    return denied;
+  }
 }
 
 interface Harness {
@@ -877,6 +923,124 @@ describe("file routes", () => {
         ...auth(h.strangerSid),
       });
       expect(revoked.statusCode).toBe(404);
+    });
+
+    it("puts a Team-owned File in its members' Shared with me, not just behind a link", async () => {
+      const id = await ownedFile();
+      h.ownership.records.set(id, {
+        businessId: DEPLOYMENT_BUSINESS_ID,
+        assetType: "file",
+        assetId: id,
+        owners: [{ kind: "team", teamId: "team-support" }],
+        shares: [],
+        revision: 1,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      });
+      h.ownership.teamAccess.set("team-support", new Set([h.strangerId]));
+
+      const shared = await h.app.inject({
+        method: "GET",
+        url: "/api/v1/files/shared-with-me",
+        ...auth(h.strangerSid),
+      });
+      expect(shared.statusCode).toBe(200);
+      expect(JSON.parse(shared.body).files.map((item: { id: string }) => item.id)).toContain(id);
+    });
+
+    it("finds a Team-shared File by name for a member who owns nothing", async () => {
+      const id = await ownedFile();
+      h.ownership.records.set(id, {
+        businessId: DEPLOYMENT_BUSINESS_ID,
+        assetType: "file",
+        assetId: id,
+        owners: [{ kind: "principal", principalId: h.ownerId, principalKind: "user" }],
+        shares: [{ teamId: "team-support", access: "view" }],
+        revision: 1,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      });
+      h.ownership.teamAccess.set("team-support", new Set([h.strangerId]));
+
+      const found = await h.app.inject({
+        method: "GET",
+        url: "/api/v1/files/search?q=shot",
+        ...auth(h.strangerSid),
+      });
+      expect(found.statusCode).toBe(200);
+      expect(JSON.parse(found.body).files.map((item: { id: string }) => item.id)).toContain(id);
+    });
+
+    it("counts the Teams holding a File, so a Team-owned one is never shown as Private", async () => {
+      const id = await ownedFile();
+      h.ownership.records.set(id, {
+        businessId: DEPLOYMENT_BUSINESS_ID,
+        assetType: "file",
+        assetId: id,
+        owners: [{ kind: "principal", principalId: h.ownerId, principalKind: "user" }],
+        shares: [{ teamId: "team-support", access: "view" }],
+        revision: 1,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      });
+
+      const listed = await h.app.inject({
+        method: "GET",
+        url: "/api/v1/files",
+        ...auth(h.ownerSid),
+      });
+      expect(listed.statusCode).toBe(200);
+      const row = JSON.parse(listed.body).files.find((item: { id: string }) => item.id === id);
+      expect(row.sharedWithCount).toBe(1);
+    });
+
+    it("drops a File from its uploader's library once ownership moved to a Team without them", async () => {
+      const id = await ownedFile();
+      h.ownership.records.set(id, {
+        businessId: DEPLOYMENT_BUSINESS_ID,
+        assetType: "file",
+        assetId: id,
+        owners: [{ kind: "team", teamId: "team-support" }],
+        shares: [],
+        revision: 1,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      });
+      h.ownership.teamAccess.set("team-support", new Set([h.strangerId]));
+
+      const listed = await h.app.inject({
+        method: "GET",
+        url: "/api/v1/files",
+        ...auth(h.ownerSid),
+      });
+      expect(listed.statusCode).toBe(200);
+      expect(JSON.parse(listed.body).files.map((item: { id: string }) => item.id)).not.toContain(
+        id
+      );
+    });
+
+    it("tells a Team admin how wide a Team-owned File reaches, not that it is private", async () => {
+      const id = await ownedFile();
+      h.ownership.records.set(id, {
+        businessId: DEPLOYMENT_BUSINESS_ID,
+        assetType: "file",
+        assetId: id,
+        owners: [{ kind: "team", teamId: "team-support" }],
+        shares: [{ teamId: "team-billing", access: "view" }],
+        revision: 1,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      });
+      h.ownership.teamAccess.set("team-support", new Set([h.strangerId]));
+      h.ownership.teamAdmins.set("team-support", new Set([h.strangerId]));
+
+      const detail = await h.app.inject({
+        method: "GET",
+        url: `/api/v1/files/${id}`,
+        ...auth(h.strangerSid),
+      });
+      expect(detail.statusCode).toBe(200);
+      expect(JSON.parse(detail.body).sharedWithCount).toBe(2);
     });
 
     it("stops the stranger reading the bytes the moment the share is revoked", async () => {

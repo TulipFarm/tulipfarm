@@ -297,12 +297,17 @@ export interface FileRepo {
    * dozen Files, and asking per attachment would make rendering an old Chat cost a query per
    * image — so this exists to keep "is this File still there for me" affordable enough that every
    * render can ask it rather than assuming.
+   *
+   * `teamReadableIds` carries the Team half of that answer, already decided elsewhere: this table
+   * knows nothing about Teams, so a File a Team owns would otherwise be one its members can open
+   * by link and never see rendered in a transcript.
    */
   readableIds(
     businessId: string,
     principalId: string,
     grantees: readonly FileGrantee[],
-    ids: readonly string[]
+    ids: readonly string[],
+    teamReadableIds?: readonly string[]
   ): Promise<readonly string[]>;
   /**
    * Whether any File anywhere still points at these bytes.
@@ -329,13 +334,17 @@ export interface FileRepo {
   /**
    * The Files shared with any of `grantees`, newest first. Excludes Files the caller owns, which
    * `listByOwner` already returns.
+   *
+   * `teamReadableIds` widens the same page with the Files a Team reaches, so "Shared with me" is
+   * the one place a member looks for anything they did not upload themselves.
    */
   listSharedWith(
     businessId: string,
     ownerPrincipalId: string,
     grantees: readonly FileGrantee[],
     limit: number,
-    after?: FileCursor
+    after?: FileCursor,
+    teamReadableIds?: readonly string[]
   ): Promise<FileRecord[]>;
   /** Readable Files whose filename contains `query`, newest first. */
   searchReadable(
@@ -343,7 +352,8 @@ export interface FileRepo {
     principalId: string,
     grantees: readonly FileGrantee[],
     query: string,
-    limit: number
+    limit: number,
+    teamReadableIds?: readonly string[]
   ): Promise<FileRecord[]>;
   getVersion(
     businessId: string,
@@ -1320,7 +1330,8 @@ export class PgFileRepo implements FileRepo {
     businessId: string,
     principalId: string,
     grantees: readonly FileGrantee[],
-    ids: readonly string[]
+    ids: readonly string[],
+    teamReadableIds: readonly string[] = []
   ): Promise<readonly string[]> {
     // A Message part's file id is free text on the wire, and `files.id` is a uuid: handing
     // Postgres a malformed one raises rather than returning no rows, which would turn one corrupt
@@ -1334,6 +1345,7 @@ export class PgFileRepo implements FileRepo {
          AND f.id = ANY($2::uuid[])
          AND (
            f.owner_principal_id = $3
+           OR f.id = ANY($6::uuid[])
            OR EXISTS (
              SELECT 1 FROM file_shares s
              WHERE s.file_id = f.id
@@ -1342,7 +1354,14 @@ export class PgFileRepo implements FileRepo {
                )
            )
          )`,
-      [businessId, candidates, principalId, grantees.map((g) => g.kind), grantees.map((g) => g.id)]
+      [
+        businessId,
+        candidates,
+        principalId,
+        grantees.map((g) => g.kind),
+        grantees.map((g) => g.id),
+        teamReadableIds.filter((id) => UUID.test(id)),
+      ]
     );
     return (result.rows as Array<Record<string, unknown>>).map((row) => String(row.id));
   }
@@ -1414,9 +1433,11 @@ export class PgFileRepo implements FileRepo {
     ownerPrincipalId: string,
     grantees: readonly FileGrantee[],
     limit: number,
-    after?: FileCursor
+    after?: FileCursor,
+    teamReadableIds: readonly string[] = []
   ): Promise<FileRecord[]> {
-    if (grantees.length === 0) return [];
+    const teamIds = teamReadableIds.filter((id) => UUID.test(id));
+    if (grantees.length === 0 && teamIds.length === 0) return [];
     // The grantee set is variable-length, so it goes in as two parallel arrays rather than a
     // generated `IN` list — a query whose text depends on how many Roles the reader holds would
     // defeat the statement cache and invite an injection every time someone edits it.
@@ -1428,12 +1449,15 @@ export class PgFileRepo implements FileRepo {
        WHERE f.business_id = $1
          AND f.owner_principal_id <> $2
          AND f.archived_at IS NULL
-         AND EXISTS (
-           SELECT 1 FROM file_shares s
-           WHERE s.file_id = f.id
-             AND (s.grantee_kind, s.grantee_id) IN (
-               SELECT * FROM unnest($4::text[], $5::text[])
-             )
+         AND (
+           f.id = ANY($8::uuid[])
+           OR EXISTS (
+             SELECT 1 FROM file_shares s
+             WHERE s.file_id = f.id
+               AND (s.grantee_kind, s.grantee_id) IN (
+                 SELECT * FROM unnest($4::text[], $5::text[])
+               )
+           )
          )
          AND ($6::timestamptz IS NULL OR (f.created_at, f.id) < ($6::timestamptz, $7::uuid))
        ORDER BY f.created_at DESC, f.id DESC
@@ -1446,6 +1470,7 @@ export class PgFileRepo implements FileRepo {
         grantees.map((g) => g.id),
         after?.createdAt ?? null,
         after?.id ?? null,
+        teamIds,
       ]
     );
     return (result.rows as Array<Record<string, unknown>>).map(toRecord);
@@ -1456,7 +1481,8 @@ export class PgFileRepo implements FileRepo {
     principalId: string,
     grantees: readonly FileGrantee[],
     query: string,
-    limit: number
+    limit: number,
+    teamReadableIds: readonly string[] = []
   ): Promise<FileRecord[]> {
     const result = await this.db.query(
       `SELECT f.* FROM files f
@@ -1465,6 +1491,7 @@ export class PgFileRepo implements FileRepo {
          AND lower(f.filename) LIKE '%' || lower($4) || '%'
          AND (
            f.owner_principal_id = $2
+           OR f.id = ANY($7::uuid[])
            OR EXISTS (
              SELECT 1 FROM file_shares s
              WHERE s.file_id = f.id
@@ -1482,6 +1509,7 @@ export class PgFileRepo implements FileRepo {
         query,
         grantees.map((grantee) => grantee.kind),
         grantees.map((grantee) => grantee.id),
+        teamReadableIds.filter((id) => UUID.test(id)),
       ]
     );
     return (result.rows as Array<Record<string, unknown>>).map(toRecord);

@@ -75,6 +75,14 @@ export function describeRejection(
 export function useAttachments() {
   const [attachments, setAttachments] = useState<Attachment[]>([]);
   const cancels = useRef(new Map<string, () => void>());
+  /**
+   * The staged Files as of the last commit, readable without going through an updater.
+   *
+   * `add` needs the current count to apply the per-message cap, and it must not read it inside
+   * `setAttachments`: an updater may run more than once per change, and starting an upload from
+   * one stores the document twice.
+   */
+  const attachmentsRef = useRef<readonly Attachment[]>([]);
   // Undefined until known, and left undefined if the fetch fails: see `describeRejection`.
   const [accepted, setAccepted] = useState<readonly string[] | undefined>(undefined);
 
@@ -86,6 +94,10 @@ export function useAttachments() {
     return () => controller.abort();
   }, []);
 
+  useEffect(() => {
+    attachmentsRef.current = attachments;
+  }, [attachments]);
+
   const update = useCallback((localId: string, patch: Partial<Attachment>) => {
     setAttachments((current) =>
       current.map((item) => (item.localId === localId ? { ...item, ...patch } : item))
@@ -94,54 +106,64 @@ export function useAttachments() {
 
   const add = useCallback(
     (files: readonly File[]) => {
-      setAttachments((current) => {
-        const next = [...current];
-        for (const file of files) {
-          const localId = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
-          const rejection = describeRejection(file, next.length, accepted);
-          if (rejection !== null) {
-            next.push({
-              localId,
-              name: file.name,
-              mediaType: file.type,
-              sizeBytes: file.size,
-              status: "error",
-              progress: 0,
-              error: rejection,
-            });
-            continue;
-          }
-          next.push({
+      // Built before the state update, never inside it. React may invoke an updater more than once
+      // for a single change, so an updater that starts an upload stores the same document twice.
+      const existing = attachmentsRef.current;
+      const staged: Attachment[] = [];
+      const starting: { readonly localId: string; readonly file: File }[] = [];
+
+      for (const file of files) {
+        const localId = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+        const rejection = describeRejection(file, existing.length + staged.length, accepted);
+        if (rejection !== null) {
+          staged.push({
             localId,
             name: file.name,
             mediaType: file.type,
             sizeBytes: file.size,
-            status: "uploading",
+            status: "error",
             progress: 0,
+            error: rejection,
           });
-          const handle = uploadFile(file, (fraction) => update(localId, { progress: fraction }));
-          cancels.current.set(localId, handle.cancel);
-          handle.done
-            .then((uploaded) => {
-              update(localId, {
-                status: "ready",
-                progress: 1,
-                fileId: uploaded.id,
-                mediaType: uploaded.mediaType,
-              });
-            })
-            .catch((error: unknown) => {
-              // A cancel already removed the chip; reporting an error for it would resurrect one.
-              if (error instanceof UploadCancelled) return;
-              update(localId, {
-                status: "error",
-                error: error instanceof Error ? error.message : "The upload failed.",
-              });
-            })
-            .finally(() => cancels.current.delete(localId));
+          continue;
         }
-        return next;
-      });
+        staged.push({
+          localId,
+          name: file.name,
+          mediaType: file.type,
+          sizeBytes: file.size,
+          status: "uploading",
+          progress: 0,
+        });
+        starting.push({ localId, file });
+      }
+
+      if (staged.length === 0) return;
+      attachmentsRef.current = [...existing, ...staged];
+      setAttachments((current) => [...current, ...staged]);
+
+      for (const { localId, file } of starting) {
+        const handle = uploadFile(file, (fraction) => update(localId, { progress: fraction }));
+        cancels.current.set(localId, handle.cancel);
+        handle.done
+          .then((uploaded) => {
+            update(localId, {
+              status: "ready",
+              progress: 1,
+              fileId: uploaded.id,
+              mediaType: uploaded.mediaType,
+            });
+          })
+          .catch((error: unknown) => {
+            // A cancel already removed the chip; reporting an error for it would resurrect one.
+            if (error instanceof UploadCancelled) return;
+            update(localId, {
+              status: "error",
+              error: error instanceof Error ? error.message : "The upload failed.",
+            });
+          })
+          .finally(() => cancels.current.delete(localId));
+      }
     },
     [update, accepted]
   );

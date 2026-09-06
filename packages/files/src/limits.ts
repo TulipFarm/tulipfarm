@@ -145,8 +145,17 @@ export function isTextualMediaType(mediaType: string): boolean {
  * library must not offer "add to knowledge" for a type the request would only refuse, and the two
  * answers have to come from one rule or they will drift.
  */
+const OFFICE = new Set<string>(OFFICE_MEDIA_TYPE_BY_EXTENSION.values());
+
+/** Whether a type is one of the three OOXML packages this application reads and writes. */
+export function isOfficeMediaType(mediaType: string): boolean {
+  return OFFICE.has(mediaType);
+}
+
 export function isExtractableMediaType(mediaType: string): boolean {
-  return isTextualMediaType(mediaType) || mediaType === "application/pdf";
+  return (
+    isTextualMediaType(mediaType) || mediaType === "application/pdf" || isOfficeMediaType(mediaType)
+  );
 }
 
 export const BUSINESS_PRINCIPAL_ID = "business";

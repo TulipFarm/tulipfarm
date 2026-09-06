@@ -5,15 +5,27 @@
 
 import type * as React from "react";
 import { ChevronDown, ShieldCheck, ShieldOff, ShieldQuestion, User } from "~/components/icons";
-import { Avatar } from "~/components/ui/avatar";
+import { Avatar, TeamAvatar } from "~/components/ui/avatar";
 import { Badge } from "~/components/ui/badge";
 import type { Party } from "~/lib/access-directory";
 import { describeGrant, type RoleSummary } from "~/lib/access-language";
 import type { AuthzGrant } from "~/lib/authz";
 import { cn } from "~/lib/utils";
 
-export function PartyAvatar({ party, className }: { party: Party; className?: string }) {
-  if (!party.isPerson) {
+export function PartyAvatar({
+  party,
+  className,
+  ...props
+}: Omit<React.ComponentProps<"span">, "children"> & { party: Party; className?: string }) {
+  if (party.isTeam) {
+    return <TeamAvatar identity={party.principalId} className={className} {...props} />;
+  }
+
+  /*
+   * Anything left that we cannot name is drawn as an outlined glyph rather than a gradient: a
+   * gradient mark asserts "this is somebody", and an id we failed to resolve has not earned that.
+   */
+  if (!party.isPerson && !party.principalId.includes(":")) {
     return (
       <span
         aria-hidden
@@ -21,13 +33,14 @@ export function PartyAvatar({ party, className }: { party: Party; className?: st
           "flex size-8 shrink-0 items-center justify-center rounded-full border border-border bg-muted text-muted-foreground",
           className
         )}
+        {...props}
       >
         <User className="size-4" />
       </span>
     );
   }
 
-  return <Avatar identity={party.name || party.initials} className={className} />;
+  return <Avatar identity={party.name || party.initials} className={className} {...props} />;
 }
 
 export function PartyLine({ party }: { party: Party }) {

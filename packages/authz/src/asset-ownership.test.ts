@@ -487,10 +487,11 @@ describe("AssetOwnershipService", () => {
     ).rejects.toMatchObject({ reason: "invalid_ownership" });
   });
 
-  it("refuses to add a Team owner to a personally owned File", async () => {
-    // `create` rejects an owner set holding both a person and a Team, so `add_owner` must not be a
-    // way in through the side door: it would leave the File owned by a person and a Team at once,
-    // and there is no operation that can put it back.
+  it("hands a personally owned File over to the Team rather than co-owning it", async () => {
+    // A File is born owned by whoever uploaded it, so if `add_owner` only ever appended, no File
+    // could reach a Team and the product's "a Team can own this" promise would be unreachable.
+    // Appending is still refused — an owner set holding a person *and* a Team has no way back —
+    // so the personal owner is replaced, which is what "Make owner" means to the person clicking.
     const { instance } = service();
     const owned = await instance.create({
       businessId: "business-1",
@@ -500,24 +501,90 @@ describe("AssetOwnershipService", () => {
       shares: [],
     });
 
+    const operation = await instance.propose({
+      businessId: "business-1",
+      assetType: "file",
+      assetId: "file-personal",
+      action: "add_owner",
+      teamId: "team-new",
+      expectedRevision: owned.revision,
+      proposerPrincipalId: "person-1",
+      actor: {
+        principalId: "person-1",
+        principalKind: "user",
+        companyAdmin: false,
+        administeredTeamIds: [],
+      },
+      expiresAt: EXPIRES_AT,
+    });
+
+    await instance.decide({
+      businessId: "business-1",
+      operationId: operation.id,
+      actor: {
+        principalId: "team-new-admin",
+        principalKind: "user",
+        companyAdmin: false,
+        administeredTeamIds: ["team-new"],
+      },
+      representedTeamId: "team-new",
+      outcome: "approved",
+    });
+    const after = await instance.complete("business-1", operation.id);
+
+    expect(after.owners).toEqual([{ kind: "team", teamId: "team-new" }]);
+  });
+
+  it("keeps the store's reason when an Approval decision is refused", async () => {
+    // The refusal text is the only thing the person clicking Approve ever sees, so collapsing
+    // every cause into one sentence turned a four-eyes rule into an unexplained dead button.
+    const { instance, approvals } = service();
+    const owned = await instance.create({
+      businessId: "business-1",
+      assetType: "file",
+      assetId: "file-refusal",
+      owners: [{ kind: "principal", principalId: "person-1", principalKind: "user" }],
+      shares: [],
+    });
+    const operation = await instance.propose({
+      businessId: "business-1",
+      assetType: "file",
+      assetId: "file-refusal",
+      action: "add_owner",
+      teamId: "team-new",
+      expectedRevision: owned.revision,
+      proposerPrincipalId: "person-1",
+      actor: {
+        principalId: "person-1",
+        principalKind: "user",
+        companyAdmin: false,
+        administeredTeamIds: [],
+      },
+      expiresAt: EXPIRES_AT,
+    });
+    approvals.appendDecision = async () => {
+      throw Object.assign(new Error("The proposer cannot approve this operation"), {
+        code: "self_approval",
+      });
+    };
+
     await expect(
-      instance.propose({
+      instance.decide({
         businessId: "business-1",
-        assetType: "file",
-        assetId: "file-personal",
-        action: "add_owner",
-        teamId: "team-new",
-        expectedRevision: owned.revision,
-        proposerPrincipalId: "person-1",
+        operationId: operation.id,
         actor: {
-          principalId: "person-1",
+          principalId: "team-new-admin",
           principalKind: "user",
           companyAdmin: false,
-          administeredTeamIds: [],
+          administeredTeamIds: ["team-new"],
         },
-        expiresAt: EXPIRES_AT,
+        representedTeamId: "team-new",
+        outcome: "approved",
       })
-    ).rejects.toMatchObject({ reason: "invalid_ownership" });
+    ).rejects.toMatchObject({
+      reason: "forbidden",
+      message: "The proposer cannot approve this operation",
+    });
   });
 
   it("requires every current owner and the new owner to approve a co-owner proposal", async () => {
