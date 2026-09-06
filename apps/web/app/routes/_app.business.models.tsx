@@ -2,10 +2,12 @@ import { useLoaderData, useRevalidator, useRouteError } from "@remix-run/react";
 import { useState } from "react";
 import { FormStatus } from "~/components/form-status";
 import { ModelChains } from "~/components/model-chains";
+import { ProviderCredentials } from "~/components/model-chains/provider-credentials";
 import { ErrorState } from "~/components/states";
 import { ApiError } from "~/lib/api";
 import {
   getLlmConfig,
+  getProviderConfig,
   type LlmConfig,
   listProviders,
   listSecrets,
@@ -14,12 +16,13 @@ import {
 import { useIsAdmin } from "~/lib/use-session-user";
 
 export async function clientLoader() {
-  const [config, secrets, providers] = await Promise.all([
+  const [config, secrets, providers, providerConfig] = await Promise.all([
     getLlmConfig(),
     listSecrets(),
     listProviders(),
+    getProviderConfig(),
   ]);
-  return { config, providers, secretKeys: secrets.map((s) => s.key) };
+  return { config, providers, secretKeys: secrets.map((s) => s.key), providerConfig };
 }
 
 function errorMessage(err: unknown): string {
@@ -31,7 +34,7 @@ function errorMessage(err: unknown): string {
 }
 
 export default function BusinessModels() {
-  const { config, providers, secretKeys } = useLoaderData<typeof clientLoader>();
+  const { config, providers, secretKeys, providerConfig } = useLoaderData<typeof clientLoader>();
   const isAdmin = useIsAdmin();
   const revalidator = useRevalidator();
   const [submitting, setSubmitting] = useState(false);
@@ -61,6 +64,13 @@ export default function BusinessModels() {
         </FormStatus>
       ) : null}
       {saved ? <FormStatus tone="success">Saved. The LLM service reloaded.</FormStatus> : null}
+      <ProviderCredentials
+        providers={providers}
+        secretKeys={secretKeys}
+        config={providerConfig}
+        isAdmin={isAdmin}
+        onSaved={() => revalidator.revalidate()}
+      />
       <ModelChains
         initial={config}
         providers={providers}

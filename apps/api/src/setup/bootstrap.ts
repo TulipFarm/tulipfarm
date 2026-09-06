@@ -42,6 +42,7 @@ async function seedLlmConfig(deps: BootstrapDeps, provider: "anthropic" | "opena
       complex: { providers: [entry] },
     },
     presets: { default: "balanced" },
+    mode: "basic",
   });
   deps.log?.info(`Seeded LLM config: ${provider}/${entry.model} on all tiers`);
 }

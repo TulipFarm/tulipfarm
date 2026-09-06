@@ -42,6 +42,10 @@ export const SessionUserSchema = {
       properties: { visiblePaths: { type: "array", items: { type: "string" } } },
       required: ["visiblePaths"],
     },
+    // Which settings tab the model config was last saved from — absent when the session route
+    // has no soulLoader wired (e.g. some test builds). Lets chat hide effort controls in Basic
+    // without an admin-gated round trip to /llm-config.
+    llmMode: { type: "string", enum: ["basic", "advanced"] },
   },
   required: [...PublicUserSchema.required, "isAdmin", "navigation"],
 } as const;

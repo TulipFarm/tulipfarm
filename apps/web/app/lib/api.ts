@@ -278,6 +278,9 @@ export type SessionUser = {
   navigation: {
     visiblePaths: string[];
   };
+  /** Which settings tab the model config was last saved from — hides effort controls in chat
+   * when `"basic"`. Absent when the session route has no soul to read. */
+  llmMode?: "basic" | "advanced";
 };
 
 // Establish a session: POST credentials to the API, which sets the httpOnly session cookie + the

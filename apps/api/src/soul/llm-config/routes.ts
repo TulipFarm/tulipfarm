@@ -80,6 +80,7 @@ async function getCatalog(force = false): Promise<LiteLlmCatalog | null> {
 // erroring. Not schema-valid for PUT; the user fills tiers in and saves.
 const EMPTY_LLM_CONFIG = {
   tiers: { quick: { providers: [] }, standard: { providers: [] }, complex: { providers: [] } },
+  mode: "basic",
 } as const;
 
 const TIER_KEYS = ["quick", "standard", "complex"] as const;
@@ -162,6 +163,7 @@ const LlmConfigRouteSchema = {
         providers: { type: "array", items: EmbeddingEntryRouteSchema },
       },
     },
+    mode: { type: "string", enum: ["basic", "advanced"] },
   },
 } as const;
 

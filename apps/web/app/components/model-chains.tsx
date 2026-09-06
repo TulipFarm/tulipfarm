@@ -1,22 +1,22 @@
+import { llmConfigMode } from "@tulipfarm/schema/llm";
 import { useMemo, useState } from "react";
 import { FormStatus } from "~/components/form-status";
 import { AdvancedPanel } from "~/components/model-chains/advanced-panel";
 import {
   EFFORTS,
+  type EffortKey,
   type EmbeddingRow,
   isEntryReady,
-  PRESET_KEYS,
-  type PresetKey,
-  profileIdFor,
   providerLabel,
   type Row,
   type WireTier,
 } from "~/components/model-chains/chain-data";
 import { NoProvidersPanel, PrimaryRow } from "~/components/model-chains/chain-row";
-import { ChatModelsTable } from "~/components/model-chains/chat-models-table";
 import { ModelSheet } from "~/components/model-chains/model-sheet";
 import { Button } from "~/components/ui/button";
+import { ConfirmModal } from "~/components/ui/modal";
 import { Panel } from "~/components/ui/panel";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "~/components/ui/tabs";
 import {
   type EmbeddingEntry,
   isProviderConfigured,
@@ -25,15 +25,23 @@ import {
   type ProviderEntry,
 } from "~/lib/settings";
 
-const DEFAULT_PRESETS: Record<PresetKey, string> = {
-  default: "balanced",
+/**
+ * Each effort routes to its own first-choice model — the routing itself is never user-editable,
+ * so this is written on every save rather than carried as form state. `default` is the one preset
+ * choice a person makes; it is tracked separately (see `defaultEffort`) rather than fixed here.
+ */
+const PRESET_ROUTES = {
   fast: "fast",
   balanced: "balanced",
   thorough: "thorough",
-};
+} as const;
+
+function initialDefaultEffort(config: LlmConfig): EffortKey {
+  const preset = config.presets?.default;
+  return EFFORTS.some((effort) => effort.preset === preset) ? (preset as EffortKey) : "balanced";
+}
 
 type Chains = Record<WireTier, Row[]>;
-type Presets = Record<PresetKey, string>;
 type SheetTarget = { kind: "chain"; tier: WireTier } | { kind: "embedding" };
 
 let nextUid = 0;
@@ -51,15 +59,6 @@ function cloneChains(config: LlmConfig): Chains {
     quick: toRows(config.tiers?.quick.providers),
     standard: toRows(config.tiers?.standard.providers),
     complex: toRows(config.tiers?.complex.providers),
-  };
-}
-
-function clonePresets(config: LlmConfig): Presets {
-  return {
-    default: config.presets?.default ?? DEFAULT_PRESETS.default,
-    fast: config.presets?.fast ?? DEFAULT_PRESETS.fast,
-    balanced: config.presets?.balanced ?? DEFAULT_PRESETS.balanced,
-    thorough: config.presets?.thorough ?? DEFAULT_PRESETS.thorough,
   };
 }
 
@@ -89,14 +88,7 @@ function toEntry(row: Row | EmbeddingRow): ProviderEntry {
 }
 
 /** The named slots a save can change, in the order a person reads them off the page. */
-const SLOT_KEYS = [
-  "Fast",
-  "Balanced",
-  "Thorough",
-  "Embedding",
-  "Default effort",
-  "Routing",
-] as const;
+const SLOT_KEYS = ["Fast", "Balanced", "Thorough", "Embedding", "Default"] as const;
 
 type Slot = (typeof SLOT_KEYS)[number];
 
@@ -107,14 +99,12 @@ type Slot = (typeof SLOT_KEYS)[number];
  * you touched. Diffing per slot lets it name them instead.
  */
 function slots(config: LlmConfig): Record<Slot, string> {
-  const presets = config.presets;
   return {
     Fast: JSON.stringify(config.tiers?.quick ?? null),
     Balanced: JSON.stringify(config.tiers?.standard ?? null),
     Thorough: JSON.stringify(config.tiers?.complex ?? null),
     Embedding: JSON.stringify(config.embeddings ?? null),
-    "Default effort": JSON.stringify(presets?.default ?? null),
-    Routing: JSON.stringify([presets?.fast, presets?.balanced, presets?.thorough]),
+    Default: JSON.stringify(config.presets?.default ?? null),
   };
 }
 
@@ -137,7 +127,21 @@ export function ModelChains({
   const [embeddings, setEmbeddings] = useState<EmbeddingRow[]>(() =>
     toEmbeddingRows(initial.embeddings?.providers)
   );
-  const [presets, setPresets] = useState<Presets>(() => clonePresets(initial));
+  // The tab is a view over one shared unsaved draft, not a route: switching writes nothing, and
+  // `mode` only flips to match on the save that follows. Opens on whichever tab the config was
+  // last saved from (or infers one for a config with no `mode` — see `llmConfigMode`).
+  const [tab, setTab] = useState<"basic" | "advanced">(() => llmConfigMode(initial));
+  // Which effort Auto resolves to. Basic always writes "balanced" regardless of this state; only
+  // Advanced lets the operator choose, mirroring the radio the pre-tabs table used to carry.
+  const [defaultEffort, setDefaultEffort] = useState<EffortKey>(() =>
+    initialDefaultEffort(initial)
+  );
+  // Saving Basic over a config that still has per-effort differences or standbys would silently
+  // drop them, so that save is held here until the operator confirms.
+  const [pendingBasicSave, setPendingBasicSave] = useState<{
+    chains: Chains;
+    embeddings: EmbeddingRow[];
+  } | null>(null);
   // Both adding and editing buffer the row here until the sheet is completed. Letting a sheet write
   // into the chain as it is typed is what left a dismissed sheet with a "no model set" entry
   // behind, ready to be saved.
@@ -148,37 +152,17 @@ export function ModelChains({
     focus?: "pricing";
   } | null>(null);
   const [localError, setLocalError] = useState<string | null>(null);
+  // Removing a standby chain entry or embedding is destructive with no undo, so it is held here
+  // until the operator confirms — mirrors `pendingBasicSave`'s gate on the Basic flatten-save.
+  const [pendingRemove, setPendingRemove] = useState<
+    { kind: "chain"; tier: WireTier; row: Row } | { kind: "embedding"; row: EmbeddingRow } | null
+  >(null);
 
   const configured = useMemo(
     () => providers.filter((p) => isProviderConfigured(p, secretKeys)),
     [providers, secretKeys]
   );
   const hasChains = initial.tiers !== undefined;
-  const profiles = useMemo(() => {
-    const ids: { id: string; label: string }[] = [];
-    for (const effort of EFFORTS) {
-      chains[effort.wire].forEach((row, index) => {
-        if (!row.model.trim()) return;
-        const id = profileIdFor(effort.preset, index);
-        ids.push({
-          id,
-          label: `${id} · ${providerLabel(providers, row.provider)} / ${row.model || "unset"}`,
-        });
-      });
-    }
-    const known = new Set(ids.map((o) => o.id));
-    for (const target of Object.values(presets)) {
-      if (target.trim() && !known.has(target)) {
-        known.add(target);
-        ids.push({ id: target, label: `${target} · not declared above` });
-      }
-    }
-    return ids;
-  }, [chains, presets, providers]);
-
-  // Which effort Auto currently lands on. Undefined when the default has been pointed at a
-  // standby or a profile this page did not name, which only Advanced can express.
-  const defaultEffort = EFFORTS.find((e) => presets[e.preset] === presets.default)?.preset;
 
   function openSheet(
     target: SheetTarget,
@@ -223,28 +207,20 @@ export function ModelChains({
     return next;
   }
 
-  function validate(): string | null {
+  function validate(rows: Chains, embeddingRows: EmbeddingRow[]): string | null {
     if (hasChains) {
       for (const effort of EFFORTS) {
-        const rows = chains[effort.wire];
-        if (rows.length === 0) return `${effort.label} needs at least one model.`;
-        for (const row of rows) {
+        const effortRows = rows[effort.wire];
+        if (effortRows.length === 0) return `${effort.label} needs at least one model.`;
+        for (const row of effortRows) {
           const problem = entryProblem(row, effort.label);
           if (problem) return problem;
         }
       }
     }
-    for (const row of embeddings) {
+    for (const row of embeddingRows) {
       const problem = entryProblem(row, "The embedding model");
       if (problem) return problem;
-    }
-    const known = new Set(profiles.map((p) => p.id));
-    for (const key of PRESET_KEYS) {
-      const target = presets[key].trim();
-      if (!target) return `The ${key} preset needs a target.`;
-      if (hasChains && !known.has(target)) {
-        return `The ${key} preset points at "${target}", which is not in any chain.`;
-      }
     }
     return null;
   }
@@ -265,7 +241,8 @@ export function ModelChains({
   function buildConfig(
     nextChains: Chains,
     nextEmbeddings: EmbeddingRow[],
-    nextPresets: Presets
+    nextMode: "basic" | "advanced",
+    nextDefault: EffortKey
   ): LlmConfig {
     return {
       ...(initial.connections ? { connections: initial.connections } : {}),
@@ -278,40 +255,88 @@ export function ModelChains({
             },
           }
         : {}),
-      presets: {
-        default: nextPresets.default.trim(),
-        fast: nextPresets.fast.trim(),
-        balanced: nextPresets.balanced.trim(),
-        thorough: nextPresets.thorough.trim(),
-      },
+      presets: { default: nextDefault, ...PRESET_ROUTES },
       ...(nextEmbeddings.length > 0
         ? { embeddings: { providers: nextEmbeddings.map(toEntry) as EmbeddingEntry[] } }
         : {}),
+      mode: nextMode,
+    };
+  }
+
+  /** Basic writes one model onto every tier and clears standbys — the chain state a save from
+   *  Advanced left behind is not carried through, even if the operator never reopened it. */
+  function flattenToBasic(rows: Chains): Chains {
+    const primary = rows.quick[0] ?? rows.standard[0] ?? rows.complex[0];
+    if (!primary) return { quick: [], standard: [], complex: [] };
+    return {
+      quick: [primary],
+      standard: [{ ...primary, uid: nextUid++ }],
+      complex: [{ ...primary, uid: nextUid++ }],
     };
   }
 
   function save() {
-    const problem = validate();
+    if (tab === "basic") {
+      const flatChains = flattenToBasic(chains);
+      const flatEmbeddings = embeddings.length > 1 ? [embeddings[0]] : embeddings;
+      const problem = validate(flatChains, flatEmbeddings);
+      setLocalError(problem);
+      if (problem) return;
+      if (hasAdvanced) {
+        setPendingBasicSave({ chains: flatChains, embeddings: flatEmbeddings });
+        return;
+      }
+      void onSubmit(buildConfig(flatChains, flatEmbeddings, "basic", "balanced"));
+      return;
+    }
+    const problem = validate(chains, embeddings);
     setLocalError(problem);
     if (problem) return;
-    void onSubmit(buildConfig(chains, embeddings, presets));
+    void onSubmit(buildConfig(chains, embeddings, "advanced", defaultEffort));
+  }
+
+  function confirmBasicSave() {
+    if (!pendingBasicSave) return;
+    const { chains: flatChains, embeddings: flatEmbeddings } = pendingBasicSave;
+    setPendingBasicSave(null);
+    void onSubmit(buildConfig(flatChains, flatEmbeddings, "basic", "balanced"));
+  }
+
+  function confirmRemove() {
+    if (!pendingRemove) return;
+    if (pendingRemove.kind === "chain") {
+      const { tier, row } = pendingRemove;
+      mutateChain(tier, (rows) => rows.filter((r) => r.uid !== row.uid));
+    } else {
+      const { row } = pendingRemove;
+      mutateEmbeddings((rows) => rows.filter((r) => r.uid !== row.uid));
+    }
+    setPendingRemove(null);
   }
 
   function discard() {
     setChains(cloneChains(initial));
     setEmbeddings(toEmbeddingRows(initial.embeddings?.providers));
-    setPresets(clonePresets(initial));
+    setTab(llmConfigMode(initial));
+    setDefaultEffort(initialDefaultEffort(initial));
     setLocalError(null);
   }
 
   const embeddingPrimary = embeddings[0];
   const error = formError ?? localError;
   // Nothing meaningful should sit behind a closed disclosure. If this workspace has already
-  // configured a standby or a non-default routing target, that state is not "advanced" to them.
+  // configured a standby or a per-effort model difference, that state is not "advanced" to them.
+  // Mirrors `llmConfigMode`'s `tiersDiffer` check — without it, a config with one model per tier
+  // and no standbys (the most common advanced shape) read as "not advanced" and let a Basic save
+  // flatten it with no confirmation.
+  const [firstTier, ...restTiers] = EFFORTS.map((effort) => chains[effort.wire][0]);
+  const tiersDiffer = restTiers.some(
+    (entry) => entry?.provider !== firstTier?.provider || entry?.model !== firstTier?.model
+  );
   const hasAdvanced =
+    tiersDiffer ||
     EFFORTS.some((effort) => chains[effort.wire].length > 1) ||
-    embeddings.length > 1 ||
-    EFFORTS.some((effort) => presets[effort.preset] !== profileIdFor(effort.preset, 0));
+    embeddings.length > 1;
   // Both sides go through the serializer the save uses. Diffing edits against raw `initial`
   // instead would report a page as dirty purely because it was normalized on the way in, which is
   // how a save bar ends up permanently lit and therefore permanently ignored.
@@ -323,10 +348,13 @@ export function ModelChains({
     buildConfig(
       cloneChains(initial),
       toEmbeddingRows(initial.embeddings?.providers),
-      clonePresets(initial)
+      llmConfigMode(initial),
+      initialDefaultEffort(initial)
     )
   );
-  const current = slots(buildConfig(chains, embeddings, presets));
+  const current = slots(
+    buildConfig(chains, embeddings, tab, tab === "basic" ? "balanced" : defaultEffort)
+  );
   const changed = SLOT_KEYS.filter((key) => current[key] !== baseline[key]);
   const dirty = changed.length > 0;
 
@@ -334,134 +362,113 @@ export function ModelChains({
     <div className="space-y-6">
       {configured.length === 0 ? <NoProvidersPanel /> : null}
 
-      <Panel
-        title="Chat models"
-        description="What answers a turn. A person picks how much effort a task deserves; these decide what that costs and how long it takes."
-        flush
-        footer={
-          <p className="text-xs text-muted-foreground">
-            {defaultEffort
-              ? "The default runs whenever nobody picks an effort, so it sets what most turns cost."
-              : `The default points at "${presets.default}", which is not one of these three. Change it under Advanced.`}
-          </p>
-        }
-      >
-        {hasChains ? (
-          <ChatModelsTable
+      <Tabs value={tab} onValueChange={(value) => setTab(value as "basic" | "advanced")}>
+        <TabsList>
+          <TabsTrigger value="basic">Basic</TabsTrigger>
+          <TabsTrigger value="advanced">Advanced</TabsTrigger>
+        </TabsList>
+
+        <TabsContent value="basic" className="space-y-4">
+          <Panel
+            title="Chat model"
+            description="One model for every effort. Switch to Advanced to give each its own model."
+            flush
+          >
+            {hasChains ? (
+              <ul>
+                <PrimaryRow
+                  name="Chat model"
+                  description="Answers every turn."
+                  row={chains.quick[0]}
+                  providers={providers}
+                  secretKeys={secretKeys}
+                  emptySpec="Pricing not looked up yet."
+                  compact
+                  onChange={() =>
+                    openSheet(
+                      { kind: "chain", tier: "quick" },
+                      chains.quick[0] ?? blankRow(),
+                      chains.quick[0] ? "edit" : "add"
+                    )
+                  }
+                />
+              </ul>
+            ) : (
+              <p className="px-4 py-6 text-sm text-muted-foreground">
+                This workspace maps effort presets straight to profiles without declaring chains
+                here, so there is nothing to choose on this page. Ask in chat to set them up.
+              </p>
+            )}
+          </Panel>
+
+          <Panel
+            title="Embedding model"
+            description="Powers Knowledge search. Switch to Advanced to add standbys."
+            flush
+          >
+            <ul>
+              <PrimaryRow
+                name="Embedding model"
+                description="Used by Knowledge indexing and every retrieval query."
+                row={embeddingPrimary}
+                providers={providers}
+                secretKeys={secretKeys}
+                emptySpec="Pricing not looked up yet."
+                compact
+                onChange={() =>
+                  openSheet(
+                    { kind: "embedding" },
+                    embeddingPrimary ?? blankRow(),
+                    embeddingPrimary ? "edit" : "add"
+                  )
+                }
+              />
+            </ul>
+          </Panel>
+        </TabsContent>
+
+        <TabsContent value="advanced" className="space-y-4">
+          <AdvancedPanel
+            hasChains={hasChains}
             chains={chains}
+            embeddings={embeddings}
             providers={providers}
             secretKeys={secretKeys}
             defaultEffort={defaultEffort}
-            onDefaultChange={(effort) => {
-              setPresets((prev) => ({ ...prev, default: prev[effort] }));
-              setLocalError(null);
-            }}
-            onChange={(tier, focus) =>
+            onSetDefaultEffort={setDefaultEffort}
+            onOpenPrimary={(tier) =>
               openSheet(
                 { kind: "chain", tier },
                 chains[tier][0] ?? blankRow(),
-                chains[tier][0] ? "edit" : "add",
-                focus
+                chains[tier][0] ? "edit" : "add"
               )
             }
-          />
-        ) : (
-          <p className="px-4 py-6 text-sm text-muted-foreground">
-            This workspace maps effort presets straight to profiles without declaring chains here,
-            so there is nothing to choose on this page. Ask in chat to set them up.
-          </p>
-        )}
-      </Panel>
-
-      <Panel
-        title="Embedding model"
-        description="Turns Knowledge into vectors so search can match meaning, not just wording."
-        flush
-      >
-        {/* Not a neutral empty state: with no embedding model, Knowledge search is degraded right
-            now, and nothing else on the instance says so. */}
-        {embeddingPrimary ? null : (
-          <div className="mx-4 mt-4 rounded-md border border-status-warning/40 bg-status-warning/10 px-3 py-2">
-            <p className="text-sm text-foreground">
-              Knowledge search is running on keyword matching.
-            </p>
-            <p className="mt-0.5 text-xs text-muted-foreground">
-              Until an embedding model is set, retrieval cannot match meaning — only wording an
-              agent happens to repeat exactly.
-            </p>
-          </div>
-        )}
-        <ul>
-          <PrimaryRow
-            name="Embedding"
-            description="Used by Knowledge indexing and every retrieval query."
-            row={embeddingPrimary}
-            providers={providers}
-            secretKeys={secretKeys}
-            emptySpec="Pricing not looked up yet."
-            meta={
-              embeddingPrimary ? (
-                <>
-                  {embeddingPrimary.dimension ? (
-                    <p className="mt-2 text-xs text-muted-foreground">
-                      <span>Vector width </span>
-                      <span className="tabular-nums text-foreground">
-                        {embeddingPrimary.dimension}
-                      </span>
-                    </p>
-                  ) : null}
-                  <p className="mt-2 max-w-prose text-xs text-status-warning">
-                    Changing this model or its width leaves existing vectors unmatchable. Re-index
-                    Knowledge after saving.
-                  </p>
-                </>
-              ) : null
+            onAddChainRow={(tier) => openSheet({ kind: "chain", tier }, blankRow(), "add")}
+            onEditChainRow={(tier, row) => openSheet({ kind: "chain", tier }, row, "edit")}
+            onMoveChainRow={(tier, index, delta) =>
+              mutateChain(tier, (rows) => move(rows, index, delta))
             }
-            onChange={() =>
+            onRemoveChainRow={(tier, row) => setPendingRemove({ kind: "chain", tier, row })}
+            onOpenPrimaryEmbedding={() =>
               openSheet(
                 { kind: "embedding" },
                 embeddingPrimary ?? blankRow(),
                 embeddingPrimary ? "edit" : "add"
               )
             }
+            onAddEmbedding={() => openSheet({ kind: "embedding" }, blankRow(), "add")}
+            onEditEmbedding={(row) => openSheet({ kind: "embedding" }, row, "edit")}
+            onMoveEmbedding={(index, delta) => mutateEmbeddings((rows) => move(rows, index, delta))}
+            onRemoveEmbedding={(row) => setPendingRemove({ kind: "embedding", row })}
           />
-        </ul>
-      </Panel>
+        </TabsContent>
+      </Tabs>
 
       {/* A full panel whose only content is "no" claims a third of the page to say nothing. */}
       <p className="px-1 text-xs text-muted-foreground">
         <span className="font-medium text-foreground">Image generation</span> is not supported yet.
         Agents read images where the chat model accepts them, but cannot generate any.
       </p>
-
-      <AdvancedPanel
-        defaultOpen={hasAdvanced}
-        hasChains={hasChains}
-        chains={chains}
-        embeddings={embeddings}
-        presets={presets}
-        profiles={profiles}
-        providers={providers}
-        secretKeys={secretKeys}
-        onAddChainRow={(tier) => openSheet({ kind: "chain", tier }, blankRow(), "add")}
-        onEditChainRow={(tier, row) => openSheet({ kind: "chain", tier }, row, "edit")}
-        onMoveChainRow={(tier, index, delta) =>
-          mutateChain(tier, (rows) => move(rows, index, delta))
-        }
-        onRemoveChainRow={(tier, row) =>
-          mutateChain(tier, (rows) => rows.filter((r) => r.uid !== row.uid))
-        }
-        onAddEmbedding={() => openSheet({ kind: "embedding" }, blankRow(), "add")}
-        onEditEmbedding={(row) => openSheet({ kind: "embedding" }, row, "edit")}
-        onMoveEmbedding={(index, delta) => mutateEmbeddings((rows) => move(rows, index, delta))}
-        onRemoveEmbedding={(row) =>
-          mutateEmbeddings((rows) => rows.filter((r) => r.uid !== row.uid))
-        }
-        onPresetChange={(key, value) => {
-          setPresets((prev) => ({ ...prev, [key]: value }));
-          setLocalError(null);
-        }}
-      />
 
       {error ? <FormStatus tone="error">{error}</FormStatus> : null}
 
@@ -523,6 +530,24 @@ export function ModelChains({
         onChange={(patch) =>
           setSheet((prev) => (prev ? { ...prev, row: { ...prev.row, ...patch } } : prev))
         }
+      />
+
+      <ConfirmModal
+        open={pendingBasicSave !== null}
+        onClose={() => setPendingBasicSave(null)}
+        onConfirm={confirmBasicSave}
+        title="Switch to one model?"
+        description="Basic runs a single model for every effort. Saving will drop the per-effort models and standby chains this workspace has configured today."
+        confirmLabel="Switch to Basic"
+      />
+
+      <ConfirmModal
+        open={pendingRemove !== null}
+        onClose={() => setPendingRemove(null)}
+        onConfirm={confirmRemove}
+        title="Remove this standby?"
+        description={`Remove "${pendingRemove?.row.model || "this entry"}"? Turns fall through to the next standby in the chain immediately. This cannot be undone.`}
+        confirmLabel="Remove standby"
       />
     </div>
   );

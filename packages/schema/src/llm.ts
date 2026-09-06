@@ -159,6 +159,12 @@ export const LlmConfigSchema = Type.Object({
     })
   ),
   embeddings: Type.Optional(EmbeddingsConfigSchema),
+  /**
+   * Which settings tab this config was last saved from. A UI hint only — Basic still writes the
+   * same model onto all three tiers, so `tiers` never changes shape because of this field. Absent
+   * on legacy config; see {@link llmConfigMode} for the read-time default.
+   */
+  mode: Type.Optional(Type.Union([Type.Literal("basic"), Type.Literal("advanced")])),
 });
 
 export type ModelSpec = Static<typeof ModelSpecSchema>;
@@ -206,6 +212,30 @@ export function validateLlmConfig(data: unknown): LlmConfig {
     throw new LlmConfigValidationError("config must declare provider chains in tiers");
   }
   return config;
+}
+
+/**
+ * Which settings tab a config should open on. An explicit {@link LlmConfig.mode} always wins.
+ * Absent (legacy config, or one written by a non-UI path that predates this field) defaults to
+ * `basic`, unless the config is already provably advanced — three different tiers, any standby
+ * entry, or more than one embedding provider — in which case opening it as Basic would flatten it
+ * on the first save. This is a read-time default only: nothing here writes `mode` back.
+ */
+export function llmConfigMode(config: LlmConfig): "basic" | "advanced" {
+  if (config.mode !== undefined) return config.mode;
+
+  const tiers = config.tiers;
+  if (tiers === undefined) return "basic";
+
+  const { quick, standard, complex } = tiers;
+  const hasStandby = [quick, standard, complex].some((tier) => tier.providers.length > 1);
+  const [first, ...rest] = [quick, standard, complex].map((tier) => tier.providers[0]);
+  const tiersDiffer = rest.some(
+    (entry) => entry?.provider !== first?.provider || entry?.model !== first?.model
+  );
+  const hasMultipleEmbeddings = (config.embeddings?.providers.length ?? 0) > 1;
+
+  return hasStandby || tiersDiffer || hasMultipleEmbeddings ? "advanced" : "basic";
 }
 
 /** A chain entry that was dropped because it named no provider or no model. */

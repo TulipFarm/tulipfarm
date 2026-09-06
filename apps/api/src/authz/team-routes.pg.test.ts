@@ -941,7 +941,7 @@ describe("Team API", () => {
         action: "add_owner",
         teamId: coOwner.id,
         revision: ownership.revision,
-        expiresAt: "2026-09-06T00:00:00.000Z",
+        expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
       },
     });
     expect(proposed.statusCode, proposed.body).toBe(200);

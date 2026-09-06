@@ -1,3 +1,4 @@
+import type { SoulLoader } from "@tulipfarm/soul";
 import type { FastifyInstance } from "fastify";
 import type { AuthorizationCheck, RequireAuthorization } from "../../authz/route-gate";
 import { makeAuthorizationCheck, makeRequireAuthorization } from "../../authz/route-gate";
@@ -31,6 +32,9 @@ interface AuthRouteOptions {
   /** Kicks the Curator sweep outside its five-minute cron after an invite is issued, so
    * "Invite your team" clears within seconds instead of waiting for the next scheduled tick. */
   triggerCuratorSweep?: () => Promise<void>;
+  /** Lets the session route report `llmMode` — the settings tab a chat page should render around —
+   * without a separate admin-gated round trip. */
+  soulLoader?: SoulLoader;
 }
 
 const AUTH_LIMIT = 100;
@@ -76,6 +80,7 @@ export function registerAuthRoutes(
     profileWriteRepo: options.profileWriteRepo,
     inviteRepo: options.inviteRepo,
     ...(options.authorizationCheck && { authorizationCheck: options.authorizationCheck }),
+    ...(options.soulLoader && { soulLoader: options.soulLoader }),
   });
   registerTokenRoutes(
     app,

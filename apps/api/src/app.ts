@@ -302,6 +302,7 @@ export async function buildApp(opts: AppOptions = {}) {
       requireAuthorization,
       authorizationCheck,
       ...(opts.triggerCuratorSweep && { triggerCuratorSweep: opts.triggerCuratorSweep }),
+      ...(opts.soulLoader && { soulLoader: opts.soulLoader }),
     });
     const requireAuth = makeRequireAuth({
       store: opts.sessionStore,

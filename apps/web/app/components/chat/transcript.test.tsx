@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { Transcript } from "~/components/chat/transcript";
 import { appendUserMessage, chatReducer, initialChatState } from "~/lib/chat/reducer";
 import type { ChatEvent, ChatState, ChatTurnOptions } from "~/lib/chat/types";
+import { LlmModeProvider } from "~/lib/llm-mode-context";
 
 vi.mock("~/lib/use-session-user", async () => {
   const actual =
@@ -26,7 +27,11 @@ function fold(events: ChatEvent[], user?: string, options?: ChatTurnOptions): Ch
 
 function renderTranscript(state: ChatState) {
   const onApprove = vi.fn();
-  render(<Transcript messages={state.messages} status={state.status} onApprove={onApprove} />);
+  render(
+    <LlmModeProvider mode="advanced">
+      <Transcript messages={state.messages} status={state.status} onApprove={onApprove} />
+    </LlmModeProvider>
+  );
   return { onApprove };
 }
 
@@ -451,12 +456,14 @@ describe("Transcript message actions", () => {
     const assistantId = state.messages.find((message) => message.role === "assistant")?.id;
 
     render(
-      <Transcript
-        messages={state.messages}
-        status={state.status}
-        onApprove={vi.fn()}
-        onTryHarder={onTryHarder}
-      />
+      <LlmModeProvider mode="advanced">
+        <Transcript
+          messages={state.messages}
+          status={state.status}
+          onApprove={vi.fn()}
+          onTryHarder={onTryHarder}
+        />
+      </LlmModeProvider>
     );
 
     await user.click(screen.getByRole("button", { name: "Try harder with Thorough effort" }));

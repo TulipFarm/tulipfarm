@@ -3,6 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { beforeEach, expect, test, vi } from "vitest";
 import { ComposerEditor } from "~/components/chat/composer-editor";
 import type { PMNode } from "~/components/chat/editor/serialize";
+import { LlmModeProvider } from "~/lib/llm-mode-context";
 
 // ProseMirror's contenteditable can't be driven under jsdom, so the editor is mocked: `useEditor`
 // returns a fake whose `getJSON()` is the controllable `doc`, and `useEditorState` runs the real
@@ -107,7 +108,11 @@ test("the Link mark does not extend when typing at its edge", () => {
 test("Model Selector sets the per-message effort preset override on send", async () => {
   const user = userEvent.setup();
   const onSend = vi.fn();
-  render(<ComposerEditor onSend={onSend} />);
+  render(
+    <LlmModeProvider mode="advanced">
+      <ComposerEditor onSend={onSend} />
+    </LlmModeProvider>
+  );
 
   await user.click(screen.getByRole("button", { name: /^Effort preset:/ }));
   await user.click(screen.getByRole("menuitemradio", { name: /Thorough/ }));

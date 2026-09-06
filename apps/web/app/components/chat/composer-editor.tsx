@@ -25,6 +25,7 @@ import { Tooltip } from "~/components/ui/tooltip";
 import type { Autonomy } from "~/lib/agents";
 import type { AttachedFile, ChatModelSelector } from "~/lib/chat/types";
 import { fetchFile } from "~/lib/files";
+import { useLlmMode } from "~/lib/llm-mode-context";
 import type { Suggestion } from "~/lib/onboarding";
 import { AttachmentStrip } from "./attachment-strip";
 import { buildMentionExtensions, MENTION_PLUGIN_KEYS } from "./editor/mentions";
@@ -94,6 +95,7 @@ export function ComposerEditor({
   attachFileId,
 }: ComposerProps) {
   const [model, setModel] = useState<ChatModelSelector>(defaultModel);
+  const llmMode = useLlmMode();
   const getItems = useMentionData();
   const mentionExtensions = useMemo(() => buildMentionExtensions(getItems), [getItems]);
   // editorProps is frozen at creation, so route Enter through a ref that always holds the latest
@@ -293,7 +295,9 @@ export function ComposerEditor({
         }
       >
         <div className="mb-1.5 flex min-h-8 items-center gap-2 px-1 text-xs text-muted-foreground">
-          <ModelSelector value={model} onChange={setModel} disabled={busy} />
+          {llmMode === "advanced" && (
+            <ModelSelector value={model} onChange={setModel} disabled={busy} />
+          )}
           {activeAgent ? (
             <>
               <span aria-hidden className="h-4 w-px bg-border" />

@@ -46,6 +46,9 @@ export function makeLlmCascadeOnSecretSet(
 
     const nextConfig: LlmConfig = {
       ...currentConfig,
+      // Three different models per tier, not one — Basic would misrepresent it and flatten two
+      // tiers on the operator's first save from that tab.
+      mode: "advanced",
       tiers: {
         quick: {
           providers: [
