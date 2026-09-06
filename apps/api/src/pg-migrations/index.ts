@@ -22,6 +22,7 @@ import {
   CHANNEL_DELIVERY_STORAGE_STATEMENTS,
   CHANNEL_INBOUND_STORAGE_STATEMENTS,
   CHANNEL_MENTIONED_THREAD_STORAGE_STATEMENTS,
+  CHANNEL_RUN_DELIVERY_ACKNOWLEDGE_STATEMENTS,
   CHANNEL_RUN_DELIVERY_APPROVAL_COLUMNS_STATEMENTS,
   CHANNEL_RUN_DELIVERY_STORAGE_STATEMENTS,
   CHILD_STORAGE_STATEMENTS,
@@ -2917,6 +2918,16 @@ export const PG_MIGRATIONS: PgMigration[] = [
       await q.query(
         "ALTER TABLE teams ADD COLUMN IF NOT EXISTS labels text[] NOT NULL DEFAULT '{}'"
       );
+    },
+  },
+  {
+    version: 96,
+    description: "channel_run_deliveries: emoji acknowledgement and superseded deliveries",
+    up: async (q) => {
+      if (!(await hasTableColumns(q, "channel_run_deliveries", ["business_id", "run_id"]))) {
+        return;
+      }
+      await applyStatements(CHANNEL_RUN_DELIVERY_ACKNOWLEDGE_STATEMENTS)(q);
     },
   },
 ];

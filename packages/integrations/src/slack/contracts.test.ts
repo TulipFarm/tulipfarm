@@ -11,8 +11,18 @@ import {
 const byId = new Map(SLACK_TOOL_CONTRACTS.map((c) => [c.spec.toolId, c]));
 
 describe("SLACK_TOOL_CONTRACTS", () => {
-  it("publishes channel discovery and send Tools", () => {
-    expect([...byId.keys()]).toEqual([SLACK_TOOL_IDS.listChannels, SLACK_TOOL_IDS.sendMessage]);
+  it("publishes channel discovery, send, and acknowledge Tools", () => {
+    expect([...byId.keys()]).toEqual([
+      SLACK_TOOL_IDS.listChannels,
+      SLACK_TOOL_IDS.sendMessage,
+      SLACK_TOOL_IDS.acknowledge,
+    ]);
+  });
+
+  it("keeps acknowledge provider-idempotent, since a mutating Tool may not opt out", () => {
+    const acknowledge = byId.get(SLACK_TOOL_IDS.acknowledge);
+    expect(acknowledge?.spec.mutating).toBe(true);
+    expect(acknowledge?.spec.idempotency.strategy).toBe("provider");
   });
 
   it("loads into the Tool catalog as a published contract", () => {

@@ -29,6 +29,12 @@ export interface ChannelInboundEvent {
     externalAppId: string;
     channelId: string;
     threadId?: string;
+    /**
+     * The provider id of this very message, as opposed to `threadId`, which is the thread root.
+     * The two are equal only for a top-level message; anything that must act on the message the
+     * user actually sent — a reaction, most obviously — has to use this.
+     */
+    sourceMessageTs?: string;
     text: string;
     media: ChannelMediaReference[];
   };

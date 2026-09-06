@@ -31,6 +31,7 @@ export type {
   PersistedChannelRunDeliveryRecord,
 } from "./channel-run-delivery-store";
 export {
+  CHANNEL_RUN_DELIVERY_ACKNOWLEDGE_STATEMENTS,
   CHANNEL_RUN_DELIVERY_APPROVAL_COLUMNS_STATEMENTS,
   CHANNEL_RUN_DELIVERY_STORAGE_STATEMENTS,
   ChannelRunDeliveryStore,

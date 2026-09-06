@@ -74,6 +74,11 @@ export const ChannelRunCreateBodySchema = {
         externalAppId: { type: "string" },
         channelId: { type: "string" },
         threadId: { type: "string" },
+        sourceMessageTs: {
+          type: "string",
+          description:
+            "The provider id of the message that started this Run (Slack's `event.ts`). Distinct from `threadId`, which is the thread root — a reaction keyed off `threadId` lands on the wrong message for every in-thread reply.",
+        },
         text: { type: "string" },
       },
     },

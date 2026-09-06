@@ -49,6 +49,8 @@ auth:
             - users:read
             - users:read.email
             - assistant:write
+            - reactions:write
+            - emoji:read
       settings:
         event_subscriptions:
           bot_events:
@@ -129,4 +131,6 @@ auth:
       - users:read
       - users:read.email
       - assistant:write
+      - reactions:write
+      - emoji:read
 setup_guide_path: setup-guide.md

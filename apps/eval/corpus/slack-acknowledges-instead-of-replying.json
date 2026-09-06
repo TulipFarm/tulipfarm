@@ -1,0 +1,44 @@
+{
+  "id": "slack-acknowledges-instead-of-replying",
+  "tier": "l2",
+  "agent": "support",
+  "input": [
+    {
+      "role": "user",
+      "content": "thanks!"
+    }
+  ],
+  "platformTools": ["slack_acknowledge", "send_slack_message"],
+  "toolResults": [
+    {
+      "name": "slack_acknowledge",
+      "output": { "ok": true, "emoji": "thumbsup" }
+    }
+  ],
+  "script": [
+    {
+      "kind": "tool_calls",
+      "calls": [
+        {
+          "callId": "ack",
+          "name": "slack_acknowledge",
+          "arguments": { "emoji": "thumbsup" }
+        }
+      ]
+    },
+    { "kind": "text", "text": "Acknowledged with a reaction." }
+  ],
+  "expect": [
+    { "kind": "tool_called", "name": "slack_acknowledge" },
+    {
+      "kind": "tool_argument_equals",
+      "name": "slack_acknowledge",
+      "path": "emoji",
+      "value": "thumbsup"
+    },
+    { "kind": "tool_not_called", "name": "send_slack_message" },
+    { "kind": "tool_call_count", "count": 1 },
+    { "kind": "guardrail_allowed", "stage": "tool_call" },
+    { "kind": "loop_status", "status": "completed" }
+  ]
+}

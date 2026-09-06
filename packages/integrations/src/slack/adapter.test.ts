@@ -148,6 +148,7 @@ describe("SlackChannelAdapter", () => {
       externalAppId: "A-PRIMARY",
       channelId: "C-OPS",
       threadId: "1784999999.000001",
+      sourceMessageTs: "1785000000.000100",
       text: "status?",
       media: [
         {

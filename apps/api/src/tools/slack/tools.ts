@@ -54,6 +54,15 @@ function derivedId(...parts: readonly string[]): string {
 function mapDispatchError(error: ToolDispatchError): ToolCallResult {
   if (error.code === "invalid_output")
     return err("internal_error", "Slack returned an unexpected response shape");
+  if (error.detail?.startsWith("emoji_not_found") === true) {
+    const candidates = error.detail.slice("emoji_not_found".length).replace(/^:/, "");
+    return err(
+      "validation_error",
+      candidates.length === 0
+        ? "No emoji by that name in this workspace."
+        : `No emoji by that name in this workspace. Closest: ${candidates.split(",").join(", ")}.`
+    );
+  }
   if (error.detail === "channel_not_found") {
     return err("not_found", "No Slack channel by that name — check the bot has joined it.");
   }
@@ -146,8 +155,12 @@ function buildToolDef(
     authorization: {
       action: contract.action,
       resources: [SLACK_RESOURCE],
+      // `acknowledge` takes no channel: its target is the message that started the Run, which
+      // the adapter reads from the delivery row. There is no argument to scope the grant by.
       targets:
-        toolId === SLACK_TOOL_IDS.listChannels ? allSlackChannelsTarget : slackChannelTargets,
+        toolId === SLACK_TOOL_IDS.listChannels || toolId === SLACK_TOOL_IDS.acknowledge
+          ? allSlackChannelsTarget
+          : slackChannelTargets,
       dataClasses: contract.dataClasses,
       allowedDestinations: contract.allowedDestinations,
     },

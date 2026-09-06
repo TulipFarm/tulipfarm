@@ -105,4 +105,76 @@ describe("ChannelRunDeliveryStore", () => {
       store.setApprovalPosted(BUSINESS_ID, "run-missing", "approval-1", "1720000000.000300")
     ).rejects.toThrow("channel_run_delivery_not_found");
   });
+
+  it("round-trips the source message ts a reaction has to target", async () => {
+    const created = await store.create({ ...delivery, sourceMessageTs: "1720000000.000900" });
+    expect(created.sourceMessageTs).toBe("1720000000.000900");
+    expect((await store.find(BUSINESS_ID, "run-1"))?.sourceMessageTs).toBe("1720000000.000900");
+  });
+
+  it("returns the newest pending row for a thread and can exclude the asking Run", async () => {
+    now = "2026-07-26T10:00:00.000Z";
+    await store.create(delivery);
+    now = "2026-07-26T10:00:01.000Z";
+    await store.create({ ...delivery, runId: "run-2" });
+
+    const query = {
+      businessId: BUSINESS_ID,
+      provider: "slack",
+      destination: "C-OPS",
+      threadId: "1720000000.000100",
+    };
+    expect((await store.findInFlightForThread(query))?.runId).toBe("run-2");
+    expect((await store.findInFlightForThread({ ...query, excludeRunId: "run-2" }))?.runId).toBe(
+      "run-1"
+    );
+  });
+
+  it("ignores rows that already left pending when looking for an in-flight Run", async () => {
+    await store.create(delivery);
+    await store.markStatus(BUSINESS_ID, "run-1", "done");
+
+    expect(
+      await store.findInFlightForThread({
+        businessId: BUSINESS_ID,
+        provider: "slack",
+        destination: "C-OPS",
+        threadId: "1720000000.000100",
+      })
+    ).toBeNull();
+  });
+
+  it("lets exactly one claimant move a row out of pending", async () => {
+    await store.create(delivery);
+
+    const first = await store.claim(BUSINESS_ID, "run-1");
+    expect(first?.status).toBe("delivering");
+    expect(await store.claim(BUSINESS_ID, "run-1")).toBeNull();
+  });
+
+  it("refuses to supersede a row a deliverer already claimed", async () => {
+    await store.create(delivery);
+    await store.claim(BUSINESS_ID, "run-1");
+
+    expect(await store.markSuperseded(BUSINESS_ID, "run-1")).toBe(false);
+  });
+
+  it("supersedes a still-pending row", async () => {
+    await store.create(delivery);
+
+    expect(await store.markSuperseded(BUSINESS_ID, "run-1")).toBe(true);
+    expect((await store.find(BUSINESS_ID, "run-1"))?.status).toBe("superseded");
+    expect(await store.claim(BUSINESS_ID, "run-1")).toBeNull();
+  });
+
+  it("records the emoji an Agent acknowledged with", async () => {
+    await store.create(delivery);
+
+    const updated = await store.markAcknowledged(BUSINESS_ID, "run-1", "thumbsup");
+    expect(updated.acknowledgedEmoji).toBe("thumbsup");
+
+    await expect(store.markAcknowledged(BUSINESS_ID, "run-missing", "thumbsup")).rejects.toThrow(
+      "channel_run_delivery_not_found"
+    );
+  });
 });

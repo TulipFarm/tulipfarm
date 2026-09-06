@@ -11,6 +11,7 @@ import type { ToolApprovalService } from "@tulipfarm/tool-host";
 import type { FastifyBaseLogger, FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { ErrorSchema } from "../auth/schemas";
 import type { ConversationRepo } from "../chat/conversations";
+import type { ChatRunCanceller } from "../chat/routes";
 import { durableTurnSubmitter } from "../chat/turn-submit";
 import type { ChatTurnPrincipal } from "../conversations/chat-turns";
 import type { ConversationStore } from "../conversations/service";
@@ -46,6 +47,11 @@ export interface ChannelInternalRouteDeps {
   readonly secrets?: ChannelCredentialSecretStore;
   /** Resolves an Agent label for `.../reply`'s `agentDisplayName`. */
   readonly soulLoader?: SoulLoader;
+  /**
+   * Stops the Run a newer message in the same thread has taken over. Omitted leaves every message
+   * answered separately — the pre-supersede behaviour — rather than failing the mint.
+   */
+  readonly cancelRun?: ChatRunCanceller;
   readonly newId?: () => string;
   /** Bind links must point at the web origin, not the API host. */
   readonly bindLinkUrl: (token: string) => string;
@@ -55,6 +61,8 @@ interface ChannelMessageBody {
   externalAppId: string;
   channelId: string;
   threadId?: string;
+  /** The provider message this Run answers, which is what a reaction must be applied to. */
+  sourceMessageTs?: string;
   text: string;
 }
 
@@ -129,6 +137,56 @@ export async function slackBlocksForReply(
       "slack surface render failed; replying with text and no action controls"
     );
     return { outcome: "render_failed" };
+  }
+}
+
+/**
+ * Retires the Run still answering an earlier message in this same thread, so two messages sent
+ * back-to-back produce one reply instead of two.
+ *
+ * This is safe to do without merging any text: `startTurn` writes the user Message durably before
+ * dispatch (`../chat/turn-submit.ts`), so cancelling the earlier Run leaves its message in the
+ * Conversation. The newer Turn therefore already sees it as history and answers both.
+ *
+ * Best-effort throughout. Nothing here may prevent the new Turn from being minted — the failure
+ * mode of doing nothing is the old double reply, which is strictly better than not answering.
+ */
+async function supersedeInFlightThreadRun(
+  deps: ChannelInternalRouteDeps,
+  input: {
+    businessId: string;
+    provider: string;
+    destination: string;
+    threadId: string;
+    excludeRunId?: string;
+  },
+  log: FastifyBaseLogger
+): Promise<void> {
+  if (deps.cancelRun === undefined) return;
+  try {
+    const inFlight = await deps.runDeliveries.findInFlightForThread(input);
+    if (inFlight === null) return;
+
+    // A Run parked on an approval has already posted Approve/Deny buttons into the thread.
+    // Cancelling it would strand that prompt on a decision nobody can act on, so this one case
+    // keeps both replies. Two answers beat a dead control.
+    const pendingApproval = await deps.toolApprovals
+      .pendingForRun(inFlight.runId)
+      .catch(() => null);
+    if (pendingApproval !== null) return;
+
+    // Retire the delivery first: it is the authority on whether the reply gets posted, and it is
+    // conditional on `pending`, so a poller that already claimed the row wins and we leave the
+    // Run alone. Cancelling a Run whose reply is already going out would waste the answer.
+    if (!(await deps.runDeliveries.markSuperseded(input.businessId, inFlight.runId))) return;
+
+    await deps.cancelRun.cancel({
+      businessId: input.businessId,
+      runId: inFlight.runId,
+      reason: "superseded by a newer message in the same thread",
+    });
+  } catch (err) {
+    log.warn({ err, ...input }, "channel run supersede failed; answering both messages");
   }
 }
 
@@ -356,6 +414,24 @@ export function registerChannelInternalRoutes(
         idempotencyKey: body.eventId,
         log: req.log as FastifyBaseLogger,
       });
+
+      // Resolve a redelivery of an event we already answered *before* superseding anything: a
+      // replay must never cancel the Run it is a replay of.
+      const replayed = await submitter.findSubmitted?.();
+      if (replayed) return reply.send({ runId: replayed.runId, outcome: "duplicate" });
+
+      // Then stop the earlier Run, before this one starts, so the two never execute side by side.
+      await supersedeInFlightThreadRun(
+        deps,
+        {
+          businessId,
+          provider: body.provider,
+          destination: body.message.channelId,
+          threadId: body.message.threadId ?? body.message.channelId,
+        },
+        req.log as FastifyBaseLogger
+      );
+
       const submission = await submitter.submit({
         conversationId: mapping.conversationId,
         content: body.message.text,
@@ -378,6 +454,9 @@ export function registerChannelInternalRoutes(
         provider: body.provider,
         destination: body.message.channelId,
         ...(body.message.threadId === undefined ? {} : { threadId: body.message.threadId }),
+        ...(body.message.sourceMessageTs === undefined
+          ? {}
+          : { sourceMessageTs: body.message.sourceMessageTs }),
         agentId: body.agentId,
         principalId: body.principal.id,
         idempotencyKey: body.eventId,
