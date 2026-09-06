@@ -43,6 +43,7 @@ import {
   RUN_EVENT_NOTIFY_STATEMENTS,
   RUN_EVENT_STORAGE_STATEMENTS,
   RUN_STORAGE_STATEMENTS,
+  SOUL_DOCTOR_STORAGE_STATEMENTS,
   SOUL_PUBLICATION_STORAGE_STATEMENTS,
   SOUL_REPOSITORY_STORAGE_STATEMENTS,
   STATE_CONCURRENCY_STORAGE_STATEMENTS,
@@ -2929,5 +2930,10 @@ export const PG_MIGRATIONS: PgMigration[] = [
       }
       await applyStatements(CHANNEL_RUN_DELIVERY_ACKNOWLEDGE_STATEMENTS)(q);
     },
+  },
+  {
+    version: 97,
+    description: "soul doctor: the findings ledger a periodic sweep dedupes against",
+    up: applyStatements(SOUL_DOCTOR_STORAGE_STATEMENTS),
   },
 ];

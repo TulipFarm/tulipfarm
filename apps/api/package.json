@@ -44,6 +44,7 @@
     "@tulipfarm/secrets": "workspace:*",
     "@tulipfarm/skill-sandbox": "workspace:*",
     "@tulipfarm/soul": "workspace:*",
+    "@tulipfarm/soul-doctor": "workspace:*",
     "@tulipfarm/storage": "workspace:*",
     "@tulipfarm/surface": "workspace:*",
     "@tulipfarm/surface-github": "workspace:*",

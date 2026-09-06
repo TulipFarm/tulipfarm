@@ -116,6 +116,10 @@ export type Expectation =
   | { readonly kind: "generated_file_draft_created" }
   /** L3 only. A validated Curator Proposal reached its participant as a Task. */
   | { readonly kind: "curator_task_visible"; readonly title: string }
+  /** L3 only. The Soul Doctor repaired the named artifact and the repair reached the bundle. */
+  | { readonly kind: "doctor_repaired"; readonly subject: string }
+  /** L3 only. The Doctor refused to publish and put the named artifact in front of a person. */
+  | { readonly kind: "doctor_escalated"; readonly subject: string }
   /**
    * L3 only. The named Tool's real dispatch was denied, and the reason it gave back contains this
    * text.
@@ -138,6 +142,8 @@ const PERSISTED_KINDS: ReadonlySet<string> = new Set([
   "generated_file_not_readable_by",
   "generated_file_draft_created",
   "curator_task_visible",
+  "doctor_repaired",
+  "doctor_escalated",
   "tool_denial_contains",
 ]);
 
@@ -304,6 +310,15 @@ export interface EvalCase {
   readonly input: readonly ModelMessage[];
   /** A deterministic Curator response applied after the L3 Chat Turn settles. */
   readonly curator?: { readonly output: unknown };
+  /** A deterministic Soul Doctor sweep, run over the Soul the L3 Turn left behind. */
+  readonly doctor?: {
+    readonly repair?: {
+      /** Slug the scripted repair answers for; a finding about any other artifact is escalated. */
+      readonly slug: string;
+      readonly content: string;
+      readonly summary: string;
+    };
+  };
   /**
    * The Files resolved for *this* Turn, as the Context assembler would resolve them.
    *

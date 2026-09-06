@@ -26,6 +26,7 @@
     "@tulipfarm/schema": "workspace:*",
     "@tulipfarm/secrets": "workspace:*",
     "@tulipfarm/soul": "workspace:*",
+    "@tulipfarm/soul-doctor": "workspace:*",
     "@tulipfarm/storage": "workspace:*",
     "@tulipfarm/tool-host": "workspace:*",
     "@tulipfarm/turn-executor": "workspace:*",

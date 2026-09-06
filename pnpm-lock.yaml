@@ -209,6 +209,9 @@ importers:
       '@tulipfarm/soul':
         specifier: workspace:*
         version: link:../../packages/soul
+      '@tulipfarm/soul-doctor':
+        specifier: workspace:*
+        version: link:../../packages/soul-doctor
       '@tulipfarm/storage':
         specifier: workspace:*
         version: link:../../packages/storage
@@ -397,6 +400,9 @@ importers:
       '@tulipfarm/soul':
         specifier: workspace:*
         version: link:../../packages/soul
+      '@tulipfarm/soul-doctor':
+        specifier: workspace:*
+        version: link:../../packages/soul-doctor
       '@tulipfarm/storage':
         specifier: workspace:*
         version: link:../../packages/storage
@@ -1521,6 +1527,28 @@ importers:
       '@electric-sql/pglite':
         specifier: ^0.5.7
         version: 0.5.7
+      '@tulipfarm/tsconfig':
+        specifier: workspace:*
+        version: link:../tsconfig
+      '@types/node':
+        specifier: ^26.2.0
+        version: 26.2.0
+      typescript:
+        specifier: ^7.0.2
+        version: 7.0.2
+      vitest:
+        specifier: ^5.0.0
+        version: 5.0.0(@opentelemetry/api@1.9.1)(@types/node@26.2.0)(@vitest/coverage-v8@5.0.0)(jsdom@30.0.1(@noble/hashes@2.3.0))(vite@8.2.2(@types/node@26.2.0)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.12)(yaml@2.9.0))
+
+  packages/soul-doctor:
+    dependencies:
+      '@tulipfarm/run-kernel':
+        specifier: workspace:*
+        version: link:../run-kernel
+      '@tulipfarm/schema':
+        specifier: workspace:*
+        version: link:../schema
+    devDependencies:
       '@tulipfarm/tsconfig':
         specifier: workspace:*
         version: link:../tsconfig
@@ -15038,7 +15066,7 @@ snapshots:
 
   magic-string@0.30.21:
     dependencies:
-      '@jridgewell/sourcemap-codec': 1.5.5
+      '@jridgewell/sourcemap-codec': 1.6.0
 
   magic-string@1.2.2:
     dependencies:

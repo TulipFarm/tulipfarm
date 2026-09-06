@@ -37,6 +37,7 @@ import type { ModelBinding } from "../runner.ts";
 import { addSpend, mergeSpend, NO_SPEND, type Spend } from "../spend.ts";
 import { evalTurnContext } from "./context.ts";
 import { type EvalDatabase, openEvalDatabase } from "./database.ts";
+import { type DoctorEvent, runDoctor } from "./doctor.ts";
 import {
   type EvalFileStore,
   evalFileStore,
@@ -99,6 +100,8 @@ export interface PersistedTurn {
   readonly generatedFiles: readonly GeneratedFile[];
   /** Tasks the Curator delivered after this Turn completed. */
   readonly curatorTasks?: readonly { readonly title: string }[];
+  /** What the Soul Doctor's sweep did to the Soul this Turn left behind. */
+  readonly doctorEvents?: readonly DoctorEvent[];
   /** Real Tool dispatches this Turn's writer denied, with the exact reason it gave back. */
   readonly toolDenials: readonly { readonly name: string; readonly reason: string }[];
   /** The prompt the real Context assembler produced, so `prompt_contains` works at L3 too. */
@@ -189,6 +192,7 @@ async function readBack(
     publishedArtifacts: readonly string[];
     generatedFiles: readonly GeneratedFile[];
     curatorTasks: readonly { readonly title: string }[];
+    doctorEvents: readonly DoctorEvent[];
     toolDenials: readonly { readonly name: string; readonly reason: string }[];
     systemPrompt: string;
     spend: Spend;
@@ -225,6 +229,7 @@ async function readBack(
     publishedArtifacts: observed.publishedArtifacts,
     generatedFiles: observed.generatedFiles,
     curatorTasks: observed.curatorTasks,
+    doctorEvents: observed.doctorEvents,
     toolDenials: observed.toolDenials,
     systemPrompt: observed.systemPrompt,
   };
@@ -349,6 +354,11 @@ async function runOneTurn(
         : { errorEvidenceRef: outcome.errorEvidenceRef }),
     });
 
+    const doctorEvents =
+      options.evalCase.doctor === undefined
+        ? []
+        : await runDoctor({ soul, writes: soulWrites, fixture: options.evalCase.doctor });
+
     const curatorTasks = await deliverCurator({
       database,
       soul,
@@ -362,6 +372,7 @@ async function runOneTurn(
       publishedArtifacts: await soulWrites.published(),
       generatedFiles: files.generated.slice(generatedBefore),
       curatorTasks,
+      doctorEvents,
       toolDenials: soulWrites.denials
         .slice(deniedBefore)
         .map((reason) => ({ name: SOUL_WRITE_TOOL, reason })),
