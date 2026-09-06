@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.18.11](https://github.com/TulipFarm/tulipfarm/compare/v0.18.10...v0.18.11) (2026-09-06)
+
+### Features
+
+* **files:** add documents with sharing, embeds and chat attachments ([#698](https://github.com/TulipFarm/tulipfarm/issues/698)) ([252599c](https://github.com/TulipFarm/tulipfarm/commit/252599cfe2601867f64db512cfb7552d0508d9e1))
+* **skills:** give Resource Forge archetypes and a schema spec ([#695](https://github.com/TulipFarm/tulipfarm/issues/695)) ([944836b](https://github.com/TulipFarm/tulipfarm/commit/944836bdc2cf1b998c5ca295dcb39d997a95bf6a))
+* **slack:** react to acknowledge and supersede an in-flight reply ([#694](https://github.com/TulipFarm/tulipfarm/issues/694)) ([4419f4f](https://github.com/TulipFarm/tulipfarm/commit/4419f4fb48fbe53c8bc3ed6b7381facdebcadf90))
+* **soul:** add the Soul Doctor reconciliation sweep ([#697](https://github.com/TulipFarm/tulipfarm/issues/697)) ([df6f146](https://github.com/TulipFarm/tulipfarm/commit/df6f14675aee798907ac0a312a94ad7d872866f7))
+* **teams:** add team management and asset ownership ([#692](https://github.com/TulipFarm/tulipfarm/issues/692)) ([93ebf68](https://github.com/TulipFarm/tulipfarm/commit/93ebf681ee1c73ddf3ae6e067a8f97eb30c8e15b))
+* **web:** split model settings into Basic and Advanced tabs ([#693](https://github.com/TulipFarm/tulipfarm/issues/693)) ([e058425](https://github.com/TulipFarm/tulipfarm/commit/e0584252c8bd7a117a13cb6bbc4c8f9f0696682e))
+
+### Bug Fixes
+
+* **routines:** make a triggered Run's outcome readable to an Agent ([#696](https://github.com/TulipFarm/tulipfarm/issues/696)) ([22a3cd8](https://github.com/TulipFarm/tulipfarm/commit/22a3cd8c3aa6bb18548005f825ea0d2bbe54055a))
+
 ## [0.18.10](https://github.com/TulipFarm/tulipfarm/compare/v0.18.9...v0.18.10) (2026-09-05)
 
 ### Features
