@@ -1408,6 +1408,7 @@ async function boot() {
         }),
         runDeliveries: channelRunDeliveries,
         toolApprovals,
+        cancelRun: runCancel,
         surfaceStore: surfaceArtifactStore,
         surfaceActionStore,
         secrets: secretsService,

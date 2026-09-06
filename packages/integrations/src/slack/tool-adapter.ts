@@ -8,6 +8,7 @@ import {
   PaginationBoundError,
 } from "../http";
 import { SLACK_TOOL_IDS } from "./contracts";
+import { normalizeEmojiName, SlackEmojiDirectory, type SlackEmojiDirectoryPort } from "./emoji";
 import { encodeMentionsInText, encodeRawIdsInText, type SlackUserLookupPort } from "./mentions";
 
 /**
@@ -20,7 +21,10 @@ export interface SlackToolAdapterDeps {
    * When the Run that's calling this Tool was itself started from a Slack thread, replies to the
    * same channel default to that thread instead of posting a new root message.
    */
-  readonly channelRunDelivery?: Pick<ChannelRunDeliveryStore, "find">;
+  readonly channelRunDelivery?: Pick<ChannelRunDeliveryStore, "find"> & {
+    /** Widened return: the adapter needs the write to have happened, not the row it produced. */
+    markAcknowledged(businessId: string, runId: string, emoji: string): Promise<unknown>;
+  };
 }
 
 interface SlackApiChannel {
@@ -66,6 +70,14 @@ function args(intent: ToolAdapterRequest["intent"]): { channel: string; text: st
   return { channel, text };
 }
 
+function acknowledgeArgs(intent: ToolAdapterRequest["intent"]): { emoji: string } {
+  const emoji = (intent.arguments as Record<string, unknown>).emoji;
+  if (typeof emoji !== "string" || emoji.length === 0) {
+    throw new AdapterDispatchError("before_dispatch", "invalid_arguments", false);
+  }
+  return { emoji };
+}
+
 function asRecord(body: unknown): Record<string, unknown> {
   return body !== null && typeof body === "object" && !Array.isArray(body)
     ? (body as Record<string, unknown>)
@@ -75,12 +87,15 @@ function asRecord(body: unknown): Record<string, unknown> {
 export class SlackToolAdapter implements ToolAdapter {
   readonly kind = "integration" as const;
 
+  private readonly emojiDirectories = new Map<string, SlackEmojiDirectory>();
+
   constructor(private readonly deps: SlackToolAdapterDeps) {}
 
   async dispatch(request: ToolAdapterRequest, credential?: string): Promise<unknown> {
     if (
       request.intent.toolId !== SLACK_TOOL_IDS.listChannels &&
-      request.intent.toolId !== SLACK_TOOL_IDS.sendMessage
+      request.intent.toolId !== SLACK_TOOL_IDS.sendMessage &&
+      request.intent.toolId !== SLACK_TOOL_IDS.acknowledge
     ) {
       throw new AdapterDispatchError("before_dispatch", "unsupported_tool", false);
     }
@@ -89,6 +104,9 @@ export class SlackToolAdapter implements ToolAdapter {
     }
     if (request.intent.toolId === SLACK_TOOL_IDS.listChannels) {
       return { channels: await this.listChannels(credential) };
+    }
+    if (request.intent.toolId === SLACK_TOOL_IDS.acknowledge) {
+      return this.acknowledge(request, credential);
     }
 
     const { channel, text } = args(request.intent);
@@ -129,6 +147,97 @@ export class SlackToolAdapter implements ToolAdapter {
       throw new AdapterDispatchError("after_dispatch", "invalid_response", false);
     }
     return { channelId, ts, threadId: ts };
+  }
+
+  /**
+   * Reacts to the very message this Run was started from, in place of a reply.
+   *
+   * The target is not an argument: an Agent that could name any message could react anywhere in
+   * the workspace, so the message is read from the delivery row that started the Run. A Run with
+   * no such row has nothing to react to and fails rather than guessing.
+   */
+  private async acknowledge(request: ToolAdapterRequest, credential: string): Promise<unknown> {
+    const store = this.deps.channelRunDelivery;
+    if (store === undefined) {
+      throw new AdapterDispatchError("before_dispatch", "acknowledge_unavailable", false);
+    }
+    const { emoji } = acknowledgeArgs(request.intent);
+    const delivery = await store
+      .find(request.intent.businessId, request.intent.runId)
+      .catch(() => null);
+    if (delivery === null || delivery.provider !== "slack") {
+      throw new AdapterDispatchError("before_dispatch", "acknowledge_target_unknown", false);
+    }
+    const timestamp = delivery.sourceMessageTs;
+    if (timestamp === undefined) {
+      throw new AdapterDispatchError("before_dispatch", "acknowledge_target_unknown", false);
+    }
+
+    const resolution = await this.emojiDirectory(credential).resolve(emoji);
+    // An unresolved name is still sent: the directory can be stale or unreadable, and Slack is the
+    // real authority on what it will accept. Its `invalid_name` carries the candidates back.
+    const name = resolution.outcome === "resolved" ? resolution.name : normalizeEmojiName(emoji);
+
+    const response = await this.deps.http.send(
+      {
+        method: "POST",
+        path: "/reactions.add",
+        body: { channel: delivery.destination, timestamp, name },
+      },
+      credential
+    );
+    const body = asRecord(response.body);
+    const failure = classifyHttpFailure(response, true);
+    const error = typeof body.error === "string" ? body.error : undefined;
+    // Slack refuses a repeat rather than duplicating it, which is exactly the convergence a
+    // provider-idempotent retry needs.
+    if (body.ok !== true && error !== "already_reacted") {
+      if (error === "invalid_name" || error === "no_reaction") {
+        const candidates =
+          resolution.outcome === "unknown" && resolution.candidates.length > 0
+            ? `:${resolution.candidates.join(",")}`
+            : "";
+        throw new AdapterDispatchError("before_dispatch", `emoji_not_found${candidates}`, false);
+      }
+      const code = error ?? failure?.code ?? "provider_error";
+      throw new AdapterDispatchError(
+        failure?.phase ?? "before_dispatch",
+        code,
+        error === undefined ? (failure?.retryable ?? false) : false
+      );
+    }
+
+    await store.markAcknowledged(request.intent.businessId, request.intent.runId, name);
+    return { ok: true, emoji: name };
+  }
+
+  /**
+   * One directory per credential: the cache is worth nothing if a new instance is built per call,
+   * and two workspaces must never share one.
+   */
+  private emojiDirectory(credential: string): SlackEmojiDirectory {
+    const existing = this.emojiDirectories.get(credential);
+    if (existing !== undefined) return existing;
+    const port: SlackEmojiDirectoryPort = {
+      load: async () => {
+        const response = await this.deps.http.send(
+          { method: "GET", path: "/emoji.list" },
+          credential
+        );
+        const body = asRecord(response.body);
+        if (body.ok !== true)
+          throw new AdapterDispatchError("before_dispatch", "emoji_list_failed", false);
+        const emoji = asRecord(body.emoji);
+        const names: Record<string, string> = {};
+        for (const [key, value] of Object.entries(emoji)) {
+          if (typeof value === "string") names[key] = value;
+        }
+        return names;
+      },
+    };
+    const directory = new SlackEmojiDirectory(port);
+    this.emojiDirectories.set(credential, directory);
+    return directory;
   }
 
   /**

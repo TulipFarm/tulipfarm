@@ -244,6 +244,7 @@ describe("SlackToolAdapter thread replies", () => {
             updatedAt: "2026-01-01T00:00:00.000Z",
           };
         },
+        async markAcknowledged() {},
       },
     });
 
@@ -274,6 +275,7 @@ describe("SlackToolAdapter thread replies", () => {
             updatedAt: "2026-01-01T00:00:00.000Z",
           };
         },
+        async markAcknowledged() {},
       },
     });
 
@@ -290,11 +292,172 @@ describe("SlackToolAdapter thread replies", () => {
         async find() {
           return null;
         },
+        async markAcknowledged() {},
       },
     });
 
     await adapter.dispatch(sendRequest("C0123456789", "here you go"), CREDENTIAL);
 
     expect(threadTs(http.calls)).toBeUndefined();
+  });
+});
+
+function acknowledgeRequest(emoji: string): ToolAdapterRequest {
+  const intent: ToolIntent = {
+    intentId: "55555555-5555-4555-8555-555555555555",
+    businessId: "biz-1",
+    runId: "run-1",
+    stateId: "state-ack",
+    toolId: SLACK_TOOL_IDS.acknowledge,
+    toolVersion: "1.0.0",
+    action: SLACK_TOOL_IDS.acknowledge,
+    targetRefs: [],
+    arguments: { emoji },
+    credentialRef: "slack-bot-token",
+    idempotencyKey: "66666666-6666-4666-8666-666666666666",
+  };
+  return { intent, idempotencyKey: intent.idempotencyKey, attempt: 1 };
+}
+
+function acknowledgeDeps(options: {
+  readonly sourceMessageTs?: string;
+  readonly delivery?: "missing";
+  readonly reactionBody?: Record<string, unknown>;
+  readonly emojiOk?: boolean;
+}) {
+  const calls: IntegrationHttpRequest[] = [];
+  const acknowledged: { businessId: string; runId: string; emoji: string }[] = [];
+  const http = {
+    calls,
+    async send(request: IntegrationHttpRequest): Promise<IntegrationHttpResponse> {
+      calls.push(request);
+      if (request.path === "/emoji.list") {
+        return options.emojiOk === false
+          ? { status: 200, headers: {}, body: { ok: false, error: "missing_scope" } }
+          : {
+              status: 200,
+              headers: {},
+              body: { ok: true, emoji: { thumbsup: "a.png", "party-parrot": "b.gif" } },
+            };
+      }
+      if (request.path === "/reactions.add") {
+        return {
+          status: 200,
+          headers: {},
+          body: options.reactionBody ?? { ok: true },
+        };
+      }
+      throw new Error(`unexpected path: ${request.path}`);
+    },
+  };
+  const adapter = new SlackToolAdapter({
+    http,
+    channelRunDelivery: {
+      async find() {
+        if (options.delivery === "missing") return null;
+        return {
+          businessId: "biz-1",
+          runId: "run-1",
+          integrationId: "int-1",
+          routeId: "route-1",
+          provider: "slack",
+          destination: "C0123456789",
+          threadId: "1700000000.000001",
+          ...(options.sourceMessageTs === undefined
+            ? {}
+            : { sourceMessageTs: options.sourceMessageTs }),
+          agentId: "agent-1",
+          principalId: "principal-1",
+          idempotencyKey: "idem-1",
+          status: "pending" as const,
+          createdAt: "2026-01-01T00:00:00.000Z",
+          updatedAt: "2026-01-01T00:00:00.000Z",
+        };
+      },
+      async markAcknowledged(businessId: string, runId: string, emoji: string) {
+        acknowledged.push({ businessId, runId, emoji });
+      },
+    },
+  });
+  return { adapter, calls, acknowledged };
+}
+
+describe("SlackToolAdapter acknowledge", () => {
+  it("reacts to the message the Run started from, not the thread root", async () => {
+    const { adapter, calls, acknowledged } = acknowledgeDeps({
+      sourceMessageTs: "1700000000.000009",
+    });
+
+    const output = await adapter.dispatch(acknowledgeRequest("thumbsup"), CREDENTIAL);
+
+    const reaction = calls.find((call) => call.path === "/reactions.add");
+    expect(reaction?.body).toEqual({
+      channel: "C0123456789",
+      timestamp: "1700000000.000009",
+      name: "thumbsup",
+    });
+    expect(output).toEqual({ ok: true, emoji: "thumbsup" });
+    expect(acknowledged).toEqual([{ businessId: "biz-1", runId: "run-1", emoji: "thumbsup" }]);
+  });
+
+  it("corrects an approximate name against the workspace directory", async () => {
+    const { adapter, calls } = acknowledgeDeps({ sourceMessageTs: "1700000000.000009" });
+
+    await adapter.dispatch(acknowledgeRequest("thumbs_up"), CREDENTIAL);
+
+    const reaction = calls.find((call) => call.path === "/reactions.add");
+    expect((reaction?.body as Record<string, unknown> | undefined)?.name).toBe("thumbsup");
+  });
+
+  it("treats already_reacted as success so a retry converges", async () => {
+    const { adapter, acknowledged } = acknowledgeDeps({
+      sourceMessageTs: "1700000000.000009",
+      reactionBody: { ok: false, error: "already_reacted" },
+    });
+
+    await expect(adapter.dispatch(acknowledgeRequest("thumbsup"), CREDENTIAL)).resolves.toEqual({
+      ok: true,
+      emoji: "thumbsup",
+    });
+    expect(acknowledged).toHaveLength(1);
+  });
+
+  it("reports invalid_name as a non-retryable emoji_not_found", async () => {
+    const { adapter } = acknowledgeDeps({
+      sourceMessageTs: "1700000000.000009",
+      reactionBody: { ok: false, error: "invalid_name" },
+    });
+
+    await expect(adapter.dispatch(acknowledgeRequest("parrrot"), CREDENTIAL)).rejects.toMatchObject(
+      { name: "AdapterDispatchError", retryable: false }
+    );
+  });
+
+  it("still sends the raw name when the emoji directory is unreadable", async () => {
+    const { adapter, calls } = acknowledgeDeps({
+      sourceMessageTs: "1700000000.000009",
+      emojiOk: false,
+    });
+
+    await adapter.dispatch(acknowledgeRequest(":Tada:"), CREDENTIAL);
+
+    const reaction = calls.find((call) => call.path === "/reactions.add");
+    expect((reaction?.body as Record<string, unknown> | undefined)?.name).toBe("tada");
+  });
+
+  it("fails rather than guessing when the Run has no recorded delivery", async () => {
+    const { adapter } = acknowledgeDeps({ delivery: "missing" });
+
+    await expect(adapter.dispatch(acknowledgeRequest("thumbsup"), CREDENTIAL)).rejects.toThrow(
+      AdapterDispatchError
+    );
+  });
+
+  it("fails when the delivery predates source message capture", async () => {
+    const { adapter } = acknowledgeDeps({});
+
+    await expect(adapter.dispatch(acknowledgeRequest("thumbsup"), CREDENTIAL)).rejects.toThrow(
+      AdapterDispatchError
+    );
   });
 });

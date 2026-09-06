@@ -139,6 +139,7 @@ function normalizeSlackEvent(
       externalAppId: requiredString(envelope.api_app_id),
       channelId: requiredString(event.channel),
       threadId: optionalString(event.thread_ts) ?? messageId,
+      sourceMessageTs: messageId,
       text: typeof event.text === "string" ? event.text : "",
       media: normalizeFiles(event.files),
     },

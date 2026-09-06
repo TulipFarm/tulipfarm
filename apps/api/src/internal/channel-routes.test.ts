@@ -77,6 +77,7 @@ describe("/api/v1/internal/channels", () => {
   let sessionCookie: string;
   let apiClientRepo: MemoryApiClientRepo;
   let runDeliveries: ChannelRunDeliveryStore;
+  let cancelled: { businessId: string; runId: string; reason: string }[];
   let surfaceStore: MemorySurfaceArtifactStore;
   let surfaceActionStore: MemorySurfaceActionStore;
 
@@ -123,6 +124,7 @@ describe("/api/v1/internal/channels", () => {
       waits: new DurableWaitManager(new WaitStore(transactions), new RunResumeGateway(runs)),
     });
     runDeliveries = new ChannelRunDeliveryStore(transactions, () => new Date().toISOString());
+    cancelled = [];
     surfaceStore = new MemorySurfaceArtifactStore();
     surfaceActionStore = new MemorySurfaceActionStore();
 
@@ -150,6 +152,12 @@ describe("/api/v1/internal/channels", () => {
         }),
         runDeliveries,
         toolApprovals,
+        cancelRun: {
+          cancel: async (input) => {
+            cancelled.push(input);
+            return true;
+          },
+        },
         surfaceStore,
         surfaceActionStore,
         bindLinkUrl: (token) => `http://localhost:4000/link-channel?token=${token}`,
@@ -378,6 +386,110 @@ describe("/api/v1/internal/channels", () => {
       expect(second.statusCode).toBe(200);
       expect(second.json()).toEqual({ runId: first.json().runId, outcome: "duplicate" });
       expect(store.turns).toHaveLength(1);
+    });
+
+    it("supersedes the Run still in flight when a second message lands in the same thread", async () => {
+      const first = await app.inject({
+        method: "POST",
+        url: "/api/v1/internal/channels/runs",
+        headers: asWorker(),
+        payload: runBody(),
+      });
+      const firstRunId = first.json().runId;
+
+      await app.inject({
+        method: "POST",
+        url: "/api/v1/internal/channels/runs",
+        headers: asWorker(),
+        payload: { ...runBody(), message: { ...runBody().message, text: "and the weather?" } },
+      });
+
+      expect(cancelled).toEqual([
+        {
+          businessId: DEPLOYMENT_BUSINESS_ID,
+          runId: firstRunId,
+          reason: "superseded by a newer message in the same thread",
+        },
+      ]);
+      expect((await runDeliveries.find(DEPLOYMENT_BUSINESS_ID, firstRunId))?.status).toBe(
+        "superseded"
+      );
+      // Both messages are on one Conversation, so the surviving Run still sees the first text.
+      expect(store.turns).toHaveLength(2);
+    });
+
+    it("does not supersede across threads", async () => {
+      await app.inject({
+        method: "POST",
+        url: "/api/v1/internal/channels/runs",
+        headers: asWorker(),
+        payload: runBody(),
+      });
+      await app.inject({
+        method: "POST",
+        url: "/api/v1/internal/channels/runs",
+        headers: asWorker(),
+        payload: {
+          ...runBody(),
+          message: { ...runBody().message, threadId: "1720000000.000200", text: "elsewhere" },
+        },
+      });
+
+      expect(cancelled).toEqual([]);
+    });
+
+    it("leaves a Run parked on an approval alone, so its buttons are not stranded", async () => {
+      const first = await app.inject({
+        method: "POST",
+        url: "/api/v1/internal/channels/runs",
+        headers: asWorker(),
+        payload: runBody(),
+      });
+      const decision = await toolApprovals.decide({
+        businessId: DEPLOYMENT_BUSINESS_ID,
+        runId: first.json().runId,
+        toolCallId: "call-1",
+        toolName: "record_delete",
+        args: { id: "record-1" },
+        requesterPrincipalId: "user:requester-1",
+        demand: {
+          demandedBy: "guardrail_rule",
+          guardrailRevision: "gr-1",
+          reason: "approval_required",
+          ruleId: "rule-1",
+        },
+      });
+      if (decision.status !== "pending") throw new Error("expected a pending approval");
+
+      await app.inject({
+        method: "POST",
+        url: "/api/v1/internal/channels/runs",
+        headers: asWorker(),
+        payload: { ...runBody(), message: { ...runBody().message, text: "second" } },
+      });
+
+      expect(cancelled).toEqual([]);
+      expect((await runDeliveries.find(DEPLOYMENT_BUSINESS_ID, first.json().runId))?.status).toBe(
+        "pending"
+      );
+    });
+
+    it("never cancels the Run a redelivered event is a replay of", async () => {
+      const body = runBody();
+      await app.inject({
+        method: "POST",
+        url: "/api/v1/internal/channels/runs",
+        headers: asWorker(),
+        payload: body,
+      });
+      await app.inject({
+        method: "POST",
+        url: "/api/v1/internal/channels/runs",
+        headers: asWorker(),
+        payload: body,
+      });
+
+      expect(cancelled).toEqual([]);
     });
 
     it("maps the same external thread to the same Conversation across messages", async () => {

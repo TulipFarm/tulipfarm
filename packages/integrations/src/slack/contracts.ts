@@ -11,6 +11,7 @@ export const SLACK_ADAPTER_REF = "integration:slack";
 export const SLACK_TOOL_IDS = {
   listChannels: "slack.channel.list",
   sendMessage: "slack.message.send",
+  acknowledge: "slack.message.acknowledge",
 } as const;
 
 export type SlackToolId = (typeof SLACK_TOOL_IDS)[keyof typeof SLACK_TOOL_IDS];
@@ -22,6 +23,7 @@ export const SLACK_RECONCILIATION_OPERATIONS = {
 
 const LIST_CHANNELS_TOOL_VERSION = "1.0.0";
 const SEND_MESSAGE_TOOL_VERSION = "1.0.0";
+const ACKNOWLEDGE_TOOL_VERSION = "1.0.0";
 const SLACK_DESTINATION = "slack";
 const MESSAGE_DATA_CLASSES = ["source_content"];
 const CHANNEL_DIRECTORY_DATA_CLASSES = ["directory"];
@@ -78,6 +80,33 @@ const sendMessageOutputSchema = {
     channelId: { type: "string" },
     ts: { type: "string" },
     threadId: { type: "string" },
+  },
+} as const;
+
+const acknowledgeInputSchema = {
+  type: "object",
+  additionalProperties: false,
+  required: ["emoji"],
+  properties: {
+    emoji: {
+      type: "string",
+      minLength: 1,
+      maxLength: 100,
+      description:
+        "Emoji short name without colons, e.g. 'thumbsup', 'eyes', 'white_check_mark'. Custom " +
+        "workspace emoji work too. An approximate name is matched against the workspace's own " +
+        "emoji, so a near miss still lands.",
+    },
+  },
+} as const;
+
+const acknowledgeOutputSchema = {
+  type: "object",
+  additionalProperties: false,
+  required: ["ok", "emoji"],
+  properties: {
+    ok: { type: "boolean" },
+    emoji: { type: "string", description: "The emoji name actually applied, after matching." },
   },
 } as const;
 
@@ -147,7 +176,34 @@ const listChannels = publish(
   "slack-channel-list"
 );
 
-export const SLACK_TOOL_CONTRACTS: readonly ToolContractDefinition[] = [listChannels, sendMessage];
+const acknowledge = publish(
+  {
+    toolId: SLACK_TOOL_IDS.acknowledge,
+    toolVersion: ACKNOWLEDGE_TOOL_VERSION,
+    action: SLACK_TOOL_IDS.acknowledge,
+    inputSchema: acknowledgeInputSchema,
+    outputSchema: acknowledgeOutputSchema,
+    riskClass: "low",
+    mutating: true,
+    dataClasses: MESSAGE_DATA_CLASSES,
+    allowedDestinations: [SLACK_DESTINATION],
+    // Slack itself rejects a repeat with `already_reacted`, which the adapter treats as success,
+    // so a retry converges without a reconciliation lookup of our own.
+    idempotency: { strategy: "provider" },
+    timeout: { wallClockMs: 15_000 },
+    retry: { maxAttempts: 3, safeToRetry: true },
+    dryRun: false,
+    adapter: { kind: "integration", ref: SLACK_ADAPTER_REF },
+  },
+  "aaaaaaaa-0004-4000-8000-000000000003",
+  "slack-message-acknowledge"
+);
+
+export const SLACK_TOOL_CONTRACTS: readonly ToolContractDefinition[] = [
+  listChannels,
+  sendMessage,
+  acknowledge,
+];
 
 export const SLACK_TOOL_DECLARATIONS = [
   {
@@ -172,5 +228,16 @@ export const SLACK_TOOL_DECLARATIONS = [
       "into a real, clickable, notifying Slack mention before sending. Writing the name with no " +
       "'@' sends it as plain text and does not notify or tag anyone.",
     inputSchema: sendMessageInputSchema,
+  },
+  {
+    toolId: SLACK_TOOL_IDS.acknowledge,
+    toolVersion: ACKNOWLEDGE_TOOL_VERSION,
+    name: "slack_acknowledge",
+    description:
+      "React to the message you are answering with a single emoji instead of replying. Use this " +
+      "when a reply would add nothing — an acknowledgement, a thank-you, a 'got it', or a message " +
+      "that only confirms something you already did. Calling this ends your turn: do not also " +
+      "write a reply.",
+    inputSchema: acknowledgeInputSchema,
   },
 ] as const;

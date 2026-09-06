@@ -323,6 +323,9 @@ export type {
   SlackChannelKind,
   SlackDeliveryAdapterDeps,
   SlackDeliveryRequest,
+  SlackEmojiCacheOptions,
+  SlackEmojiDirectoryPort,
+  SlackEmojiResolution,
   SlackEventEnvelope,
   SlackFile,
   SlackKnowledgeApiPort,
@@ -344,6 +347,9 @@ export type {
 export {
   encodeMentionsInText,
   InMemorySlackKnowledgeCheckpointStore,
+  indexEmojiDirectory,
+  normalizeEmojiName,
+  resolveEmojiName,
   resolveMentionsInText,
   SLACK_ADAPTER_REF,
   SLACK_KNOWLEDGE_ACL_MAX_AGE_SECONDS,
@@ -356,6 +362,7 @@ export {
   SlackChannelAdapter,
   SlackDeliveryAdapter,
   SlackDeliveryError,
+  SlackEmojiDirectory,
   SlackToolAdapter,
   syncSlackKnowledge,
 } from "./slack";

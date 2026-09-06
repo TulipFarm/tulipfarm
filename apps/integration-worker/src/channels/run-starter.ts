@@ -38,6 +38,9 @@ export function httpChannelRunStarter(
             externalAppId: input.message.externalAppId,
             channelId: input.message.channelId,
             ...(input.message.threadId === undefined ? {} : { threadId: input.message.threadId }),
+            ...(input.message.sourceMessageTs === undefined
+              ? {}
+              : { sourceMessageTs: input.message.sourceMessageTs }),
             text: input.message.text,
           },
         }

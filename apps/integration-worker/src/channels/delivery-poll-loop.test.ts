@@ -30,6 +30,16 @@ function row(
   };
 }
 
+/**
+ * The real claim echoes the row it moved out of `pending`, so a fake that rebuilds a bare row
+ * would silently drop the thread the reply belongs in.
+ */
+function claimStub() {
+  return vi.fn(async (_businessId: string, runId: string) =>
+    row({ runId, threadId: "1785000000.0001", status: "delivering" })
+  );
+}
+
 function persistedRun(overrides: Partial<PersistedRun> = {}): PersistedRun {
   return {
     id: "run-1",
@@ -68,6 +78,7 @@ describe("startDeliveryPollLoop", () => {
     const listPending = vi.fn().mockResolvedValue([row({ threadId: "1785000000.0001" })]);
     const runDeliveries = {
       listPending,
+      claim: claimStub(),
       markStatus: vi.fn(),
     } as unknown as ChannelRunDeliveryStore;
     const runs = {
@@ -96,6 +107,7 @@ describe("startDeliveryPollLoop", () => {
   it("delivers the reply and marks done when the Run succeeds", async () => {
     const runDeliveries = {
       listPending: vi.fn().mockResolvedValue([row({ threadId: "1785000000.0001" })]),
+      claim: claimStub(),
       markStatus: vi.fn().mockResolvedValue(undefined),
     } as unknown as ChannelRunDeliveryStore;
     const runs = {
@@ -131,6 +143,7 @@ describe("startDeliveryPollLoop", () => {
   it("prefers reply.agentDisplayName over the raw agentId when the reply endpoint returns it", async () => {
     const runDeliveries = {
       listPending: vi.fn().mockResolvedValue([row({ threadId: "1785000000.0001" })]),
+      claim: claimStub(),
       markStatus: vi.fn().mockResolvedValue(undefined),
     } as unknown as ChannelRunDeliveryStore;
     const runs = {
@@ -165,6 +178,7 @@ describe("startDeliveryPollLoop", () => {
   it("passes reply.blocks through to delivery when the reply endpoint returns them", async () => {
     const runDeliveries = {
       listPending: vi.fn().mockResolvedValue([row({ threadId: "1785000000.0001" })]),
+      claim: claimStub(),
       markStatus: vi.fn().mockResolvedValue(undefined),
     } as unknown as ChannelRunDeliveryStore;
     const runs = {
@@ -195,6 +209,7 @@ describe("startDeliveryPollLoop", () => {
   it("omits blocks from delivery when the reply endpoint doesn't return them", async () => {
     const runDeliveries = {
       listPending: vi.fn().mockResolvedValue([row({ threadId: "1785000000.0001" })]),
+      claim: claimStub(),
       markStatus: vi.fn().mockResolvedValue(undefined),
     } as unknown as ChannelRunDeliveryStore;
     const runs = {
@@ -225,6 +240,7 @@ describe("startDeliveryPollLoop", () => {
   it("marks failed and posts a failure message when the Run fails", async () => {
     const runDeliveries = {
       listPending: vi.fn().mockResolvedValue([row({ threadId: "1785000000.0001" })]),
+      claim: claimStub(),
       markStatus: vi.fn().mockResolvedValue(undefined),
     } as unknown as ChannelRunDeliveryStore;
     const runs = {
@@ -267,6 +283,7 @@ describe("startDeliveryPollLoop", () => {
   it("uses the reason-specific failure copy recovered from the reply route", async () => {
     const runDeliveries = {
       listPending: vi.fn().mockResolvedValue([row({ threadId: "1785000000.0001" })]),
+      claim: claimStub(),
       markStatus: vi.fn().mockResolvedValue(undefined),
     } as unknown as ChannelRunDeliveryStore;
     const runs = {
@@ -300,6 +317,7 @@ describe("startDeliveryPollLoop", () => {
   it("falls back to the generic failure message when recovering the reason errors", async () => {
     const runDeliveries = {
       listPending: vi.fn().mockResolvedValue([row({ threadId: "1785000000.0001" })]),
+      claim: claimStub(),
       markStatus: vi.fn().mockResolvedValue(undefined),
     } as unknown as ChannelRunDeliveryStore;
     const runs = {
@@ -331,10 +349,80 @@ describe("startDeliveryPollLoop", () => {
     expect(runDeliveries.markStatus).toHaveBeenCalledWith("business-1", "run-1", "failed");
   });
 
+  it("posts nothing when the Agent already answered by reacting", async () => {
+    const markStatus = vi.fn().mockResolvedValue(undefined);
+    const runDeliveries = {
+      listPending: vi
+        .fn()
+        .mockResolvedValue([row({ threadId: "1785000000.0001", acknowledgedEmoji: "thumbsup" })]),
+      claim: vi.fn(async (_businessId: string, runId: string) =>
+        row({
+          runId,
+          threadId: "1785000000.0001",
+          status: "delivering",
+          acknowledgedEmoji: "thumbsup",
+        })
+      ),
+      markStatus,
+    } as unknown as ChannelRunDeliveryStore;
+    const runs = {
+      find: vi.fn().mockResolvedValue(persistedRun({ status: "succeeded" })),
+    } as unknown as RunStore;
+    const deliver = vi.fn().mockResolvedValue(undefined);
+    const delivery = { setStatus: vi.fn(), deliver } as unknown as SlackDeliveryAdapter;
+    const internalApi = {
+      require: vi.fn().mockResolvedValue({ status: "succeeded", text: "Acknowledged." }),
+    } as unknown as InternalApiClient;
+
+    await runOneTick({
+      businessId: "business-1",
+      runDeliveries,
+      runs,
+      internalApi,
+      delivery,
+      credential: "xoxb-leased",
+      log: { warn: vi.fn() },
+    });
+
+    expect(deliver).not.toHaveBeenCalled();
+    expect(markStatus).toHaveBeenCalledWith("business-1", "run-1", "done");
+  });
+
+  it("posts nothing when a supersede took the row before the claim landed", async () => {
+    const markStatus = vi.fn().mockResolvedValue(undefined);
+    const runDeliveries = {
+      listPending: vi.fn().mockResolvedValue([row({ threadId: "1785000000.0001" })]),
+      claim: vi.fn().mockResolvedValue(null),
+      markStatus,
+    } as unknown as ChannelRunDeliveryStore;
+    const runs = {
+      find: vi.fn().mockResolvedValue(persistedRun({ status: "succeeded" })),
+    } as unknown as RunStore;
+    const deliver = vi.fn().mockResolvedValue(undefined);
+    const delivery = { setStatus: vi.fn(), deliver } as unknown as SlackDeliveryAdapter;
+    const internalApi = {
+      require: vi.fn().mockResolvedValue({ status: "succeeded", text: "The answer is 42." }),
+    } as unknown as InternalApiClient;
+
+    await runOneTick({
+      businessId: "business-1",
+      runDeliveries,
+      runs,
+      internalApi,
+      delivery,
+      credential: "xoxb-leased",
+      log: { warn: vi.fn() },
+    });
+
+    expect(deliver).not.toHaveBeenCalled();
+    expect(markStatus).not.toHaveBeenCalled();
+  });
+
   it("swallows a single row's failure so other pending rows still get polled", async () => {
     const rows = [row({ runId: "run-1" }), row({ runId: "run-2", threadId: "ts-2" })];
     const runDeliveries = {
       listPending: vi.fn().mockResolvedValue(rows),
+      claim: claimStub(),
       markStatus: vi.fn().mockResolvedValue(undefined),
     } as unknown as ChannelRunDeliveryStore;
     const find = vi.fn().mockImplementation((_businessId: string, runId: string) => {
@@ -367,6 +455,7 @@ describe("startDeliveryPollLoop", () => {
   it("posts the approval prompt for a still-running Run when an http port is supplied", async () => {
     const runDeliveries = {
       listPending: vi.fn().mockResolvedValue([row({ threadId: "1785000000.0001" })]),
+      claim: claimStub(),
       markStatus: vi.fn(),
       setApprovalPosted: vi.fn().mockResolvedValue(undefined),
     } as unknown as ChannelRunDeliveryStore;

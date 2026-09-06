@@ -145,6 +145,14 @@ async function deliverReply(
     await markFailed(row, deps, reply.reason);
     return;
   }
+  // The Agent already answered by reacting to the message, so there is nothing to post. The
+  // recorded text is discarded rather than checked for emptiness: a Turn that produces no text at
+  // all fails as `empty_model_output` (`packages/turn-executor/src/driver.ts:420`), so an
+  // acknowledging Agent must still say something, and that something is not for the user.
+  if (row.acknowledgedEmoji !== undefined) {
+    await deps.runDeliveries.markStatus(deps.businessId, row.runId, "done");
+    return;
+  }
   const agentDisplayName =
     reply.agentDisplayName ?? deps.agentDisplayName?.(row.agentId) ?? row.agentId;
   try {
@@ -202,6 +210,7 @@ async function handleRow(
     const reply = await deps.internalApi
       .find<ReplyResponse>("GET", `/api/v1/internal/channels/runs/${row.runId}/reply`, [404])
       .catch(() => undefined);
+    if ((await deps.runDeliveries.claim(deps.businessId, row.runId)) === null) return;
     await markFailed(row, deps, reply?.reason);
     return;
   }
@@ -214,7 +223,13 @@ async function handleRow(
     await rotateStatus(row, deps);
     return;
   }
-  await deliverReply(row, reply, deps);
+  // Claim before posting: a newer message in the same thread may be superseding this Run right
+  // now, and only one of the two conditional writes on `pending` can win. Losing means the reply
+  // is deliberately dropped. The claimed row is used from here on because it is re-read inside the
+  // same statement — `row` came from a `listPending` that predates any acknowledgement.
+  const claimed = await deps.runDeliveries.claim(deps.businessId, row.runId);
+  if (claimed === null) return;
+  await deliverReply(claimed, reply, deps);
 }
 
 async function pollOnce(deps: DeliveryPollLoopDeps): Promise<void> {
