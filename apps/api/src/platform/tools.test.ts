@@ -1020,6 +1020,8 @@ describe("PLATFORM_TOOLS registry", () => {
       "routine_forge",
       "routine_picker",
       "routine_get",
+      "routine_run_get",
+      "routine_run_list",
       "routine_delete",
       "guardrail_forge",
       "soul_repo_push",

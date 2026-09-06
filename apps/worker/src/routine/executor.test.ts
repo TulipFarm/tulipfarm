@@ -365,7 +365,7 @@ describe("createRoutineExecutor", () => {
     expect(harness.states.has("Missed")).toBe(false);
   });
 
-  it("parks a compute State whose mapping cannot resolve, without settling it", async () => {
+  it("fails a compute State whose mapping cannot resolve, without settling it", async () => {
     const harness = new StateHarness([state("Start")]);
     const execute = executor(
       definition([
@@ -379,12 +379,42 @@ describe("createRoutineExecutor", () => {
       harness
     );
 
-    await expect(execute(run())).resolves.toEqual({ status: "needs_reconciliation" });
+    await expect(execute(run())).resolves.toEqual({
+      status: "failed",
+      errorEvidenceRef: "routine:input_not_evaluable:Start",
+    });
     expect(harness.states.get("Start")).toMatchObject({
-      status: "needs_reconciliation",
-      errorEvidenceRef: "routine:input_not_evaluable",
+      status: "failed",
+      errorEvidenceRef: "routine:input_not_evaluable:Start",
     });
     expect(harness.transitions).not.toContain("Start:running->succeeded");
+  });
+
+  it("fails the Run naming the successor whose mapping cannot resolve", async () => {
+    const harness = new StateHarness([state("Start")]);
+    const execute = executor(
+      definition([
+        { type: "compute", name: "Start", input: { ok: true }, transition: "Next" },
+        {
+          type: "compute",
+          name: "Next",
+          input: { derived: "${ states.Start.output.absent }" },
+          end: true,
+        },
+      ] as unknown as routine.RoutineState[]),
+      harness
+    );
+
+    // The successor's input is resolved while its predecessor is still settling, so the failure
+    // arrives on the `Start` row and would otherwise be reported against the wrong State.
+    await expect(execute(run())).resolves.toEqual({
+      status: "failed",
+      errorEvidenceRef: "routine:input_not_evaluable:Next",
+    });
+    expect(harness.states.get("Start")).toMatchObject({
+      status: "failed",
+      errorEvidenceRef: "routine:input_not_evaluable:Next",
+    });
   });
 });
 
@@ -2041,7 +2071,7 @@ describe("createRoutineExecutor — emit States", () => {
     expect(harness.states.get("Start")?.errorEvidenceRef).toBe("routine:unsupported_state");
   });
 
-  it("parks rather than announcing when the payload cannot be resolved", async () => {
+  it("fails rather than announcing when the payload cannot be resolved", async () => {
     const harness = new StateHarness([state("Start")]);
     const emissions = new EmitHarness();
 
@@ -2051,7 +2081,10 @@ describe("createRoutineExecutor — emit States", () => {
         harness,
         emissions.port
       )(run())
-    ).resolves.toEqual({ status: "needs_reconciliation" });
+    ).resolves.toEqual({
+      status: "failed",
+      errorEvidenceRef: "routine:input_not_evaluable:Start",
+    });
     expect(emissions.announced).toHaveLength(0);
   });
 });
