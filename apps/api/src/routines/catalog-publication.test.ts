@@ -45,7 +45,14 @@ const ROUTINE = {
   spec: {
     owner: "operations",
     start: "Decide",
-    states: [{ name: "Decide", type: "branch", conditions: [{ condition: "true", end: true }] }],
+    states: [
+      {
+        name: "Decide",
+        type: "branch",
+        conditions: [{ condition: "true", end: true }],
+        default: { end: true },
+      },
+    ],
     triggers: [
       {
         name: "daily-report-manual",

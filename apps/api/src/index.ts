@@ -281,6 +281,8 @@ import { bundleRetentionMs, registerSoulBundlePruneSchedule } from "./soul/bundl
 import { createGitHubSoulCredentialProvider } from "./soul/github-repo-credential";
 import { registerSoulPublicationRoutes } from "./soul/publication-routes";
 import { composeSkillTools } from "./soul/skills/compose";
+import { buildSoulDoctor } from "./soul-doctor/compose";
+import { kickSoulDoctor, registerSoulDoctorSchedule } from "./soul-doctor/schedule";
 import { registerSoulSync } from "./soul-sync";
 import { PgSurfaceActionStore } from "./surfaces/action-store";
 import { PgSurfaceArtifactStore } from "./surfaces/artifact-store";
@@ -442,6 +444,16 @@ async function boot() {
     );
     let gitSync: GitSyncService;
     const soulTreeReader = new GitSoulTreeReader(soulPath);
+    const activeSoulCommitSha = async (businessId: string): Promise<string | undefined> => {
+      try {
+        return (await soulPublications.activeBundle(businessId, soulBundleVerifier))?.commitSha;
+      } catch (err) {
+        console.error(
+          `Soul: could not read active bundle for reconcile (${err instanceof Error ? err.message : String(err)}) — treating as unpublished`
+        );
+        return undefined;
+      }
+    };
     const soulPublisher = new SoulPublisher({
       treeReader: soulTreeReader,
       compiler: compileExecutionBundle,
@@ -453,16 +465,7 @@ async function boot() {
         headSha: () => gitSync.headSha(),
         hasCommit: (sha) => gitSync.hasCommit(sha),
       },
-      activeCommitSha: async (businessId) => {
-        try {
-          return (await soulPublications.activeBundle(businessId, soulBundleVerifier))?.commitSha;
-        } catch (err) {
-          console.error(
-            `Soul: could not read active bundle for reconcile (${err instanceof Error ? err.message : String(err)}) — treating as unpublished`
-          );
-          return undefined;
-        }
-      },
+      activeCommitSha: activeSoulCommitSha,
     });
     gitSync = new GitSyncService(soulPath, gitRemoteUrl, gitCredentialProvider, console, {
       committedTreePublisher: soulPublisher,
@@ -1598,14 +1601,33 @@ async function boot() {
       log: app.log,
     });
 
+    const soulDoctor = buildSoulDoctor({
+      pool,
+      businessId: DEPLOYMENT_BUSINESS_ID,
+      soul: soulLoader,
+      writer: soulWriter,
+      actor: SOUL_SYNC_COMMIT_ACTOR,
+      tasks: taskRepo,
+      activity: activityService,
+      llm: llmService,
+      headSha: () => gitSync.headSha(),
+      activeCommitSha: activeSoulCommitSha,
+      log: app.log,
+    });
     const soulSyncInterval = registerSoulSync(gitSync, gitRemoteUrl, {
       activity: activityService,
       soulLoader,
       log: app.log,
-      reconcile: () => soulPublisher.reconcile(DEPLOYMENT_BUSINESS_ID, SOUL_SYNC_COMMIT_ACTOR),
+      // The sweep follows publication rather than replacing it: a push that cannot publish leaves
+      // the Runtime on the old bundle, and `bundle_stale` is the finding that says so.
+      reconcile: async () => {
+        await soulPublisher.reconcile(DEPLOYMENT_BUSINESS_ID, SOUL_SYNC_COMMIT_ACTOR);
+        await kickSoulDoctor(soulDoctor, app.log, "soul sync");
+      },
     });
     await registerScheduleDispatch(boss, scheduleDispatcher, { log: app.log });
     await registerCuratorSweepSchedule(boss);
+    await registerSoulDoctorSchedule(boss, soulDoctor, { log: app.log });
     await registerObsPruneSchedule(boss, obsConfig.retentionDays * 24 * 60 * 60 * 1000);
     // Every Soul commit publishes a bundle, so this table grows for the life of the deployment.
     await registerSoulBundlePruneSchedule(boss, bundleRetentionMs(process.env));

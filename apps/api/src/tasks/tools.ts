@@ -1,5 +1,6 @@
 import { CURATOR_DEDUPE_PREFIX, isCuratorDedupeKey } from "@tulipfarm/curator";
 import { ajv } from "@tulipfarm/schema";
+import { DOCTOR_DEDUPE_PREFIX, isDoctorDedupeKey } from "@tulipfarm/soul-doctor";
 import {
   type TaskAction,
   type TaskAssigneeKind,
@@ -148,6 +149,14 @@ export const taskCreateTool = defineApiTool<TaskToolContext>({
         `dedupe keys beginning "${CURATOR_DEDUPE_PREFIX}" are reserved`
       );
     }
+    // Same reason, for the Doctor: an escalation an operator dismissed must stay dismissed, and
+    // the key of a defect nobody has found yet must not be claimable in advance.
+    if (isDoctorDedupeKey(input.dedupeKey)) {
+      return err(
+        "validation_error",
+        `dedupe keys beginning "${DOCTOR_DEDUPE_PREFIX}" are reserved`
+      );
+    }
     try {
       const task = await ctx.tasks.upsertOpen(
         {
@@ -194,6 +203,12 @@ export const taskCloseTool = defineApiTool<TaskToolContext>({
       return err(
         "validation_error",
         `dedupe keys beginning "${CURATOR_DEDUPE_PREFIX}" are reserved`
+      );
+    }
+    if (isDoctorDedupeKey((args as CloseTaskArgs).dedupeKey)) {
+      return err(
+        "validation_error",
+        `dedupe keys beginning "${DOCTOR_DEDUPE_PREFIX}" are reserved`
       );
     }
     const input = args as CloseTaskArgs;

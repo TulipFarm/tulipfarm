@@ -1,0 +1,81 @@
+{
+  "id": "l3-the-doctor-repairs-a-broken-published-routine",
+  "tier": "l3",
+  "agent": "support",
+  "input": [
+    {
+      "role": "user",
+      "content": "Create the published quote-report Routine now. Call soul_write once with definitionMode canonical. Do not ask me to confirm."
+    }
+  ],
+  "tools": [
+    {
+      "name": "soul_write",
+      "description": "Commit one Soul definition. Set definitionMode to canonical for canonical YAML.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "type": "string"
+          },
+          "slug": {
+            "type": "string"
+          },
+          "content": {
+            "type": "string"
+          },
+          "definitionMode": {
+            "type": "string"
+          }
+        },
+        "required": ["kind", "slug", "content", "definitionMode"]
+      }
+    }
+  ],
+  "script": [
+    {
+      "kind": "tool_calls",
+      "calls": [
+        {
+          "callId": "routine",
+          "name": "soul_write",
+          "arguments": {
+            "kind": "Routine",
+            "slug": "quote-report",
+            "definitionMode": "canonical",
+            "content": "apiVersion: tulipfarm.ai/v1\nkind: Routine\nmetadata:\n  id: 22222222-2222-4222-8222-222222222222\n  slug: quote-report\n  schemaVersion: 1\n  authoredVersion: 1\n  lifecycle: published\nspec:\n  owner: operations\n  start: Total\n  states:\n    - name: Total\n      type: compute\n      input:\n        total: 1\n      output:\n        type: object\n        additionalProperties: false\n        properties:\n          total:\n            type: number\n      transition: Report\n    - name: Report\n      type: compute\n      input:\n        value: ${states.Total.output.subtotal}\n      end: true\n"
+          }
+        }
+      ]
+    },
+    {
+      "kind": "text",
+      "text": "I created quote-report."
+    }
+  ],
+  "doctor": {
+    "repair": {
+      "slug": "quote-report",
+      "content": "apiVersion: tulipfarm.ai/v1\nkind: Routine\nmetadata:\n  id: 22222222-2222-4222-8222-222222222222\n  slug: quote-report\n  schemaVersion: 1\n  authoredVersion: 1\n  lifecycle: published\nspec:\n  owner: operations\n  start: Total\n  states:\n    - name: Total\n      type: compute\n      input:\n        total: 1\n      output:\n        type: object\n        additionalProperties: false\n        properties:\n          total:\n            type: number\n      transition: Report\n    - name: Report\n      type: compute\n      input:\n        value: ${states.Total.output.total}\n      end: true\n",
+      "summary": "read the field the earlier State publishes"
+    }
+  },
+  "expect": [
+    {
+      "kind": "soul_committed",
+      "path": "routines/quote-report/routine.yaml"
+    },
+    {
+      "kind": "doctor_repaired",
+      "subject": "quote-report"
+    },
+    {
+      "kind": "soul_published",
+      "artifact": "Routine:quote-report"
+    },
+    {
+      "kind": "run_status",
+      "status": "succeeded"
+    }
+  ]
+}

@@ -1,4 +1,5 @@
 import { definitions, SchemaValidationError } from "@tulipfarm/schema";
+import { lintRoutine } from "@tulipfarm/soul-doctor";
 
 export interface RoutineForgeValidationInput {
   readonly name: string;
@@ -46,6 +47,21 @@ function consistencyIssues(
   return issues;
 }
 
+/**
+ * The Soul Doctor's own lint, run before the write instead of after it.
+ *
+ * The schema proves the document is well-formed; it does not prove the Routine can run. A dangling
+ * transition, an `action` State naming no Tool, or a mapping reading a field an earlier State never
+ * publishes all validate cleanly and then park every Run they ever start. Rejecting them here is
+ * what keeps the product path from authoring the exact class of defect the Doctor exists to repair.
+ */
+function lintIssues(routine: definitions.routine.RoutineDefinition | undefined): string[] {
+  if (routine === undefined) return [];
+  return lintRoutine({ slug: routine.metadata.slug, digest: "authored", definition: routine })
+    .filter((found) => found.severity === "broken")
+    .map((found) => `Routine definition ${found.at}: ${found.detail}`);
+}
+
 export function validateRoutineForgeDefinitions(
   input: RoutineForgeValidationInput
 ): RoutineForgeValidationResult {
@@ -58,6 +74,7 @@ export function validateRoutineForgeDefinitions(
     issues.push(...schemaIssues("Routine definition", error));
   }
   issues.push(...consistencyIssues(input.name, routine));
+  issues.push(...lintIssues(routine));
 
   if (issues.length > 0) {
     return {

@@ -51,6 +51,7 @@ export interface PersistedState {
     readonly status?: "draft" | "saved";
   }[];
   readonly curatorTasks?: readonly { readonly title: string }[];
+  readonly doctorEvents?: readonly { readonly kind: string; readonly subject: string }[];
   /** Real Tool dispatches that were denied, with the reason the dispatcher gave back. */
   readonly toolDenials?: readonly { readonly name: string; readonly reason: string }[];
 }
@@ -302,6 +303,23 @@ function evaluate(a: Expectation, obs: Observation): { passed: boolean; detail: 
       return (persisted.curatorTasks ?? []).some((task) => task.title === a.title)
         ? { passed: true, detail: `Curator delivered Task "${a.title}"` }
         : { passed: false, detail: `no Curator Task titled "${a.title}"` };
+    }
+
+    case "doctor_repaired":
+    case "doctor_escalated": {
+      const persisted = obs.persisted;
+      if (persisted === undefined) return notPersisted(a.kind);
+      const want = a.kind === "doctor_repaired" ? "repaired" : "escalated";
+      const events = persisted.doctorEvents ?? [];
+      return events.some((event) => event.kind === want && event.subject === a.subject)
+        ? { passed: true, detail: `the Doctor ${want} "${a.subject}"` }
+        : {
+            passed: false,
+            detail:
+              events.length === 0
+                ? `the Doctor ${want} nothing`
+                : `the Doctor ${want} ${events.map((e) => `${e.kind} ${e.subject}`).join(", ")}`,
+          };
     }
 
     case "tool_denial_contains": {

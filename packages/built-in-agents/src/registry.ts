@@ -3,6 +3,7 @@ import { CHAT_TITLE } from "./agents/chat-title";
 import { EFFORT_CLASSIFIER } from "./agents/effort-classifier";
 import { ONBOARDING_PERSONALIZER } from "./agents/onboarding-personalizer";
 import { SKILL_AUDIT } from "./agents/skill-audit";
+import { SOUL_REPAIR } from "./agents/soul-repair";
 import { TOOL_RESULT_DISTILLER } from "./agents/tool-result-distiller";
 
 /**
@@ -25,4 +26,5 @@ export const BUILT_IN_AGENTS: readonly BuiltInAgentSpec[] = [
   CHAT_TITLE,
   SKILL_AUDIT,
   ONBOARDING_PERSONALIZER,
+  SOUL_REPAIR,
 ];

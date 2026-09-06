@@ -103,6 +103,13 @@ export {
 } from "./state-contention-store";
 export type { StateRetryAttempts } from "./state-retry-store";
 export { RunStateRetryStore, STATE_RETRY_STORAGE_STATEMENTS } from "./state-retry-store";
+export type { UnhealthyRunRow } from "./unhealthy-runs";
+export {
+  closeSupersededRuns,
+  DEFAULT_STALL_AFTER_MS,
+  DOCTOR_SUPERSEDED_REF,
+  listUnhealthyRuns,
+} from "./unhealthy-runs";
 export type {
   CreateWaitInput,
   DueWaitDecision,

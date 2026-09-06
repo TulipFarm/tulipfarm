@@ -84,6 +84,7 @@ sibling `AGENTS.md`.
 | [`packages/schema`](packages/schema/AGENTS.md) | Any config shape, TypeBox schema, validator, Run event type |
 | [`packages/deploy-render`](packages/deploy-render/AGENTS.md) | Rendering deployment guidance from `deploy/` — targets, generated pages, prompt, guided flow |
 | [`packages/soul`](packages/soul/AGENTS.md) | Soul artifact loading, git sync |
+| [`packages/soul-doctor`](packages/soul-doctor/AGENTS.md) | Soul defect detection, the repair gate, the reconciliation sweep |
 | [`packages/storage`](packages/storage/AGENTS.md) | PostgreSQL repositories, outbox/inbox, blob/vector/cache ports |
 | [`packages/resources`](packages/resources/AGENTS.md) | Record write policy, validation, hooks, idempotency, and side-effect orchestration |
 | [`packages/authz`](packages/authz/AGENTS.md) | Principals, roles, grants, authority intersection |

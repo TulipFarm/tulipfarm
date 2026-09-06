@@ -17,6 +17,7 @@ describe("BUILT_IN_AGENTS", () => {
       "effort_classifier",
       "onboarding_personalizer",
       "skill_audit",
+      "soul_repair",
       "tool_result_distiller",
     ]);
   });

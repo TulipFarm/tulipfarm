@@ -273,6 +273,7 @@ async function runL3Trial(
         publishedArtifacts: turn.publishedArtifacts,
         generatedFiles: turn.generatedFiles,
         curatorTasks: turn.curatorTasks,
+        doctorEvents: turn.doctorEvents,
         toolDenials: turn.toolDenials,
       },
     });

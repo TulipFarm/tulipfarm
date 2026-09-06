@@ -36,6 +36,15 @@ export {
   type SkillAuditScan,
 } from "./agents/skill-audit";
 export {
+  proposeSoulRepair,
+  SOUL_REPAIR,
+  SOUL_REPAIR_PROPOSAL_SCHEMA,
+  SOUL_REPAIR_SYSTEM_PROMPT,
+  type SoulRepairProposal,
+  type SoulRepairRequest,
+  soulRepairPrompt,
+} from "./agents/soul-repair";
+export {
   createToolResultDistiller,
   type DistillerAttribution,
   type DistillerCallRecord,

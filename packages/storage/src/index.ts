@@ -14,5 +14,6 @@ export * from "./pg/vector-search";
 export * from "./ports";
 export * from "./runs";
 export * from "./soul";
+export * from "./soul-doctor";
 export * from "./system/public-origin-store";
 export * from "./tasks";

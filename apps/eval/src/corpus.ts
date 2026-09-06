@@ -155,6 +155,23 @@ function validate(raw: unknown, file: string): EvalCase {
       c.curator !== null &&
       "output" in c.curator, `${file}: "curator" must contain an "output" fixture`);
   }
+  if (c.doctor !== undefined) {
+    require(c.tier ===
+      "l3", `${file}: "doctor" needs tier "l3"; this Case is tier ${JSON.stringify(c.tier)}`);
+    require(typeof c.doctor === "object" &&
+      c.doctor !== null, `${file}: "doctor" must be an object`);
+    const repair = (c.doctor as { repair?: unknown }).repair;
+    if (repair !== undefined) {
+      require(typeof repair === "object" &&
+        repair !== null, `${file}: "doctor.repair" must be an object`);
+      const fields = repair as Record<string, unknown>;
+      for (const key of ["slug", "content", "summary"]) {
+        require(typeof fields[key] === "string" &&
+          (fields[key] as string).length >
+            0, `${file}: "doctor.repair.${key}" must be a non-empty string`);
+      }
+    }
+  }
   // Every field a Case could once set here is retired: the assembler takes only the Agent's own
   // personality, which the Eval Soul owns. The key stays accepted so the retired-field errors below
   // still teach, but a Case that omits it is now the normal shape.
