@@ -77,6 +77,7 @@ const EXPECTATION_FIELDS: Record<string, readonly [string, FieldType][]> = {
   soul_published: [["artifact", "string"]],
   generated_file_readable_by: [["grantee", "string"]],
   generated_file_not_readable_by: [["grantee", "string"]],
+  generated_file_draft_created: [],
   curator_task_visible: [["title", "string"]],
   tool_denial_contains: [
     ["name", "string"],

@@ -8,6 +8,7 @@ import type { Queryable } from "@tulipfarm/storage";
 import { decideKnowledgeAccess } from "./acl";
 import { PgKnowledgeSubjectStore, PgPrincipalResolver } from "./acl-repo";
 import { canonicalKnowledgeId, isKnowledgeId } from "./ids";
+import type { KnowledgeOwnershipPort } from "./subject";
 
 /** What a caller may render, plus how much was withheld — never which Pages. */
 export interface ReadablePages {
@@ -38,18 +39,53 @@ export interface PageReadAuthorizer {
     userId: string | undefined,
     spaceIds: readonly string[]
   ): Promise<readonly string[]>;
+  canEdit?(userId: string | undefined, subjectKind: "page" | "space", id: string): Promise<boolean>;
+  assertDeleteApproved?(
+    subjectKind: "page" | "space",
+    id: string,
+    operationId: string | undefined
+  ): Promise<void>;
 }
 
 export class PageReadGate implements PageReadAuthorizer {
   private readonly subjects: PgKnowledgeSubjectStore;
   private readonly resolver: PgPrincipalResolver;
+  private readonly ownership?: KnowledgeOwnershipPort;
 
   constructor(
-    private readonly q: Queryable,
-    private readonly businessId: string = DEPLOYMENT_BUSINESS_ID
+    q: Queryable,
+    private readonly businessId: string = DEPLOYMENT_BUSINESS_ID,
+    ownership?: KnowledgeOwnershipPort
   ) {
-    this.subjects = new PgKnowledgeSubjectStore(q);
+    this.ownership = ownership;
+    this.subjects = new PgKnowledgeSubjectStore(q, () => new Date(), ownership);
     this.resolver = new PgPrincipalResolver(q);
+  }
+
+  async canEdit(
+    userId: string | undefined,
+    subjectKind: "page" | "space",
+    id: string
+  ): Promise<boolean> {
+    if (userId === undefined) return false;
+    const access = await this.ownership?.accessFor?.(this.businessId, subjectKind, id, userId);
+    if (access !== undefined) return access.levels.includes("edit");
+    return subjectKind === "page"
+      ? await this.canRead(userId, id)
+      : await this.canReadSpace(userId, id);
+  }
+
+  async assertDeleteApproved(
+    subjectKind: "page" | "space",
+    id: string,
+    operationId: string | undefined
+  ): Promise<void> {
+    await this.ownership?.consumeDestructiveApproval?.(
+      this.businessId,
+      subjectKind,
+      id,
+      operationId
+    );
   }
 
   async canReadSpace(userId: string | undefined, spaceId: string): Promise<boolean> {
@@ -72,34 +108,23 @@ export class PageReadGate implements PageReadAuthorizer {
     const candidates = spaceIds.filter(isKnowledgeId).map(canonicalKnowledgeId);
     if (candidates.length === 0) return [];
 
-    const { rows } = await this.q.query(
-      `SELECT lower(subject_id) AS subject_id, principal_kind, principal_id
-         FROM knowledge_acl_entries
-        WHERE business_id = $1 AND subject_kind = 'space' AND lower(subject_id) = ANY($2::text[])
-          AND effect = 'grant' AND capability = 'read'`,
-      [this.businessId, [...candidates]]
-    );
-    // No rows for a Space means unrestricted, so it must not be confused with "restricted to nobody".
-    const restricted = new Map<string, Set<string>>();
-    for (const r of rows) {
-      const id = r.subject_id as string;
-      const held = restricted.get(id) ?? new Set<string>();
-      held.add(`${r.principal_kind}\u0000${r.principal_id}`);
-      restricted.set(id, held);
-    }
-    if (restricted.size === 0) return [...candidates];
-
     const principals = await this.resolver.resolve({
       businessId: this.businessId,
       principals: [{ kind: "user", id: userId }],
     });
-    const mine = new Set(principals.map((p) => `${p.kind}\u0000${p.id}`));
-    return candidates.filter((id) => {
-      const grants = restricted.get(id);
-      if (grants === undefined) return true;
-      for (const g of grants) if (mine.has(g)) return true;
-      return false;
-    });
+    const subjects = await this.subjects.getManySpaces(this.businessId, candidates);
+    const allowed: string[] = [];
+    const now = new Date();
+    for (const subject of subjects) {
+      const decision = await decideKnowledgeAccess(
+        subject,
+        { businessId: this.businessId, principals },
+        {},
+        now
+      );
+      if (decision.allowed) allowed.push(subject.subjectId);
+    }
+    return allowed;
   }
 
   async canRead(userId: string | undefined, pageId: string): Promise<boolean> {

@@ -2,6 +2,7 @@ import { type Static, Type } from "@sinclair/typebox";
 import { ajv } from "./ajv";
 import { modelPolicySchema } from "./definitions/common";
 import { TulipFarmValidationError } from "./error";
+import { TeamBusinessAssetOwnershipSchema } from "./teams";
 
 /** AGENT.md frontmatter schema: write-time only, strict, and name comes from directory. */
 
@@ -84,6 +85,7 @@ export const AgentFrontmatterSchema = Type.Object(
     ),
     modelPolicy: Type.Optional(modelPolicySchema),
     capabilityRestrictions: Type.Optional(AgentCapabilityRestrictionsSchema),
+    ownership: Type.Optional(TeamBusinessAssetOwnershipSchema),
     placeholder: Type.Optional(Type.Array(Type.String())),
     suggestions: Type.Optional(Type.Array(Type.String())),
   },

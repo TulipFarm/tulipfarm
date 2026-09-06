@@ -37,6 +37,7 @@ const SKILL_FRONTMATTER_ALLOWLIST = [
   "requiredSecrets",
   "allowedDomains",
   "trustTier",
+  "ownership",
 ] as const;
 
 /**

@@ -11,7 +11,12 @@
 import { describe, expect, it } from "vitest";
 import { FILE_SPACE_NAME, type FileIndexDeps, handleFileIndexJob } from "./file-index";
 
-const JOB = { fileId: "file-1", businessId: "biz", ownerPrincipalId: "owner" };
+const JOB = {
+  fileId: "file-1",
+  versionId: "version-1",
+  businessId: "biz",
+  ownerPrincipalId: "owner",
+};
 
 function bytes(text: string): AsyncIterable<Uint8Array> {
   return (async function* () {
@@ -51,6 +56,7 @@ function deps(
             id: JOB.fileId,
             filename: "handbook.txt",
             mediaType: overrides.mediaType ?? "text/plain",
+            currentVersionId: JOB.versionId,
             knowledgeRequestedAt: overrides.requested === false ? null : new Date(),
           } as never;
         },
@@ -132,9 +138,13 @@ describe("indexing a File", () => {
   });
 
   it("indexes nothing when a supported File turns out to hold no text", async () => {
-    const { deps: d, ingested } = deps({ text: "   \n  " });
-    expect(await handleFileIndexJob(JOB, d)).toEqual({ kind: "skipped", reason: "no_text" });
+    const { deps: d, ingested, deleted } = deps({ text: "   \n  " });
+    expect(await handleFileIndexJob(JOB, d, "page-old")).toEqual({
+      kind: "skipped",
+      reason: "no_text",
+    });
     expect(ingested).toHaveLength(0);
+    expect(deleted).toEqual(["page-old"]);
   });
 });
 
@@ -203,6 +213,52 @@ describe("where an indexed File lands", () => {
       },
     };
     expect(await handleFileIndexJob(JOB, racing)).toEqual({ kind: "skipped", reason: "gone" });
+    expect(deleted).toEqual(["page-1"]);
+  });
+
+  it("withdraws the page when the File disappears between the write and the recheck", async () => {
+    // The post-ingest read is an authorization read, so a File destroyed at exactly this moment
+    // makes it throw. Left to propagate, the job fails with the Page already written, and every
+    // retry stops at the read above it — so the destroyed File stays retrievable forever.
+    const { deps: d, deleted } = deps();
+    let reads = 0;
+    const racing: FileIndexDeps = {
+      ...d,
+      files: {
+        ...d.files,
+        read: async (...args: Parameters<FileIndexDeps["files"]["read"]>) => {
+          if (reads++ > 0) throw new Error("not_found");
+          return d.files.read(...args);
+        },
+      },
+    };
+    expect(await handleFileIndexJob(JOB, racing)).toEqual({ kind: "skipped", reason: "gone" });
+    expect(deleted).toEqual(["page-1"]);
+  });
+
+  it("withdraws the page when the File vanishes during the pass that re-reads a new version", async () => {
+    // A version landing mid-job sends this job round again, carrying the Page it already wrote. If
+    // that second pass finds the File gone and simply returns, the Page it was handed is never
+    // removed and the first version's text stays searchable for a File nobody can open.
+    const { deps: d, deleted } = deps();
+    let reads = 0;
+    const racing: FileIndexDeps = {
+      ...d,
+      files: {
+        ...d.files,
+        read: async (...args: Parameters<FileIndexDeps["files"]["read"]>) => {
+          reads += 1;
+          // 1: the opening read. 2: the post-ingest recheck, which reports a newer version and so
+          // sends the job round again. 3: the recursion's opening read, by which point it is gone.
+          if (reads >= 3) throw new Error("not_found");
+          const file = await d.files.read(...args);
+          return reads === 2 ? ({ ...file, currentVersionId: "version-2" } as never) : file;
+        },
+      },
+    };
+
+    expect(await handleFileIndexJob(JOB, racing)).toEqual({ kind: "skipped", reason: "gone" });
+
     expect(deleted).toEqual(["page-1"]);
   });
 

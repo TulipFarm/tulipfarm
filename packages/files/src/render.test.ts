@@ -153,6 +153,45 @@ describe("renderDocument", () => {
     }
   });
 
+  it("validates and normalizes JSON", async () => {
+    const out = await renderDocument({ format: "json", content: '{"name":"Muskan","count":2}' });
+    expect(out.mediaType).toBe("application/json");
+    expect(new TextDecoder().decode(out.bytes)).toBe('{\n  "name": "Muskan",\n  "count": 2\n}\n');
+    await expect(renderDocument({ format: "json", content: "{bad" })).rejects.toMatchObject({
+      reason: "invalid_content",
+    });
+  });
+
+  it("accepts inert XML and refuses entities, directives, includes, and broken nesting", async () => {
+    await expect(
+      renderDocument({ format: "xml", content: "<report><count>2</count></report>" })
+    ).resolves.toMatchObject({ mediaType: "application/xml" });
+    for (const content of [
+      '<!DOCTYPE report SYSTEM "https://example.com/report.dtd"><report/>',
+      '<!ENTITY secret SYSTEM "file:///etc/passwd"><report>&secret;</report>',
+      '<report><xi:include href="https://example.com/x"/></report>',
+      "<report><count></report>",
+    ]) {
+      await expect(renderDocument({ format: "xml", content })).rejects.toMatchObject({
+        reason: "invalid_content",
+      });
+    }
+  });
+
+  it("parses YAML locally and serializes only ordinary data", async () => {
+    const out = await renderDocument({
+      format: "yaml",
+      content: "name: Muskan\nitems:\n  - one\n  - two\n",
+    });
+    expect(out.mediaType).toBe("application/yaml");
+    expect(new TextDecoder().decode(out.bytes)).toBe(
+      '"items":\n  - "one"\n  - "two"\n"name": "Muskan"\n'
+    );
+    await expect(
+      renderDocument({ format: "yaml", content: "value: !include secret.yaml" })
+    ).rejects.toMatchObject({ reason: "invalid_content" });
+  });
+
   it("refuses input past the cap before rendering anything", async () => {
     await expect(
       renderDocument({ format: "pdf", content: "x".repeat(MAX_RENDER_INPUT_CHARS + 1) })

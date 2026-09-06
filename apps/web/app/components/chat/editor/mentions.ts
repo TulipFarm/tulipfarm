@@ -4,6 +4,7 @@ import Mention from "@tiptap/extension-mention";
 import { PluginKey } from "@tiptap/pm/state";
 import { ReactRenderer } from "@tiptap/react";
 import type { SuggestionKeyDownProps, SuggestionProps } from "@tiptap/suggestion";
+import { searchFiles } from "~/lib/files";
 import { searchKnowledge } from "~/lib/knowledge-api";
 import { MENTION_KINDS, type MentionKind } from "./mention-config";
 import { MentionList, type MentionListRef } from "./mention-list";
@@ -26,6 +27,22 @@ async function searchKnowledgeItems(query: string): Promise<MentionItem[]> {
       items.push({ id: r.pageId, label: r.title, description: r.content.slice(0, 80) });
     }
     return items;
+  } catch {
+    return [];
+  }
+}
+
+async function searchFileItems(query: string): Promise<MentionItem[]> {
+  if (query.trim() === "") return [];
+  try {
+    const files = await searchFiles(query, 8);
+    return files.map((file) => ({
+      id: file.id,
+      label: file.filename,
+      description: file.mediaType,
+      mediaType: file.mediaType,
+      sizeBytes: file.sizeBytes,
+    }));
   } catch {
     return [];
   }
@@ -84,7 +101,16 @@ function suggestionRender(kind: MentionKind) {
 /** `getItems` reads live data, so once-created extensions reflect post-mount loads. */
 export function buildMentionExtensions(getItems: GetItems) {
   return MENTION_KINDS.map((cfg, i) =>
-    Mention.extend({ name: cfg.nodeName }).configure({
+    Mention.extend({
+      name: cfg.nodeName,
+      addAttributes() {
+        return {
+          ...this.parent?.(),
+          mediaType: { default: null },
+          sizeBytes: { default: null },
+        };
+      },
+    }).configure({
       HTMLAttributes: { class: `tf-mention tf-mention-${cfg.kind}` },
       suggestion: {
         char: cfg.char,
@@ -92,7 +118,9 @@ export function buildMentionExtensions(getItems: GetItems) {
         items:
           cfg.kind === "knowledge"
             ? ({ query }: { query: string }) => searchKnowledgeItems(query)
-            : ({ query }: { query: string }) => filterItems(query, getItems(cfg.kind)),
+            : cfg.kind === "file"
+              ? ({ query }: { query: string }) => searchFileItems(query)
+              : ({ query }: { query: string }) => filterItems(query, getItems(cfg.kind)),
         render: () => suggestionRender(cfg.kind),
       },
     })

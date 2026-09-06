@@ -48,6 +48,7 @@ import {
 } from "@tulipfarm/tool-host";
 import { stringify as stringifyYaml } from "yaml";
 import { SYSTEM_SOUL_COMMIT_ACTOR } from "../runtime/soul-writer";
+import type { TeamAssetService } from "../team-assets/service";
 import { declaredStringList } from "../tools/network/compose";
 import { mapSoulWriteError, soulCommitError } from "../tools/soul-faults";
 import { delegateToAgentTool } from "./delegate-tool";
@@ -126,6 +127,12 @@ export interface PlatformToolContext {
   platformAgentNames?: ReadonlySet<string>;
   requestContext?: RequestContext;
   events?: EventEmitter;
+  teamAssets?: TeamAssetService;
+}
+
+function assetPrincipal(ctx: PlatformToolContext) {
+  const id = ctx.requestContext?.userId;
+  return id === undefined ? undefined : { id, kind: ctx.requestContext?.subject?.kind ?? "user" };
 }
 
 /**
@@ -374,6 +381,24 @@ export const skillTool = defineApiTool<PlatformToolContext>({
       hidden
     );
     if (!skill) return err("not_found", `Skill "${name}" not found.`);
+    const principal = assetPrincipal(ctx);
+    if (ctx.teamAssets) {
+      if (!principal) return err("write_denied", "Skill access is required");
+      try {
+        await ctx.teamAssets.require(
+          "skill",
+          name,
+          principal,
+          mode === "inspect" ? "view" : "use",
+          typeof skill.frontmatter.ownership === "object" && skill.frontmatter.ownership !== null
+            ? (skill.frontmatter
+                .ownership as import("@tulipfarm/schema").TeamBusinessAssetOwnership)
+            : undefined
+        );
+      } catch {
+        return err("write_denied", "Skill access is required");
+      }
+    }
 
     if (isRunMode(mode)) {
       if (command === undefined)
@@ -495,6 +520,21 @@ export const triggerRoutineTool = defineApiTool<PlatformToolContext>({
     if (!caller) {
       return err("internal_error", "Cannot trigger a routine without a calling principal.");
     }
+    if (ctx.teamAssets) {
+      const detail = await ctx.routineCatalog?.get(name);
+      if (!detail) return err("not_found", `Routine "${name}" not found.`);
+      try {
+        await ctx.teamAssets.require(
+          "routine",
+          detail.id,
+          { id: caller.id, kind: caller.kind },
+          "use",
+          detail.summary.ownership
+        );
+      } catch {
+        return err("write_denied", "Routine use access is required");
+      }
+    }
     try {
       const { runId } = await ctx.triggerRoutine(name, inputs, caller);
       return ok({ routineId: name, status: "triggered", runId, inputs: inputs ?? null });
@@ -595,6 +635,38 @@ export const routineForgeTool = defineApiTool<PlatformToolContext>({
     const validation = validateRoutineForgeDefinitions({ name, definition });
     if (!validation.ok) return err("validation_error", validation.message);
     const { routine, triggers: triggerDefinitions } = validation;
+    if (ctx.teamAssets && routine.spec.ownership === undefined) {
+      return err("validation_error", "Routine ownership must name at least one owning Team");
+    }
+    const existing = ctx.soulLoader?.routines?.get(name);
+    const principal = assetPrincipal(ctx);
+    if (existing && ctx.teamAssets && !principal) {
+      return err("write_denied", "Routine edit access is required");
+    }
+    if (existing && ctx.teamAssets && principal) {
+      const existingDefinition = existing.config as Record<string, unknown>;
+      const existingMetadata =
+        typeof existingDefinition.metadata === "object" && existingDefinition.metadata !== null
+          ? (existingDefinition.metadata as Record<string, unknown>)
+          : {};
+      const existingSpec =
+        typeof existingDefinition.spec === "object" && existingDefinition.spec !== null
+          ? (existingDefinition.spec as Record<string, unknown>)
+          : {};
+      try {
+        await ctx.teamAssets.require(
+          "routine",
+          typeof existingMetadata.id === "string" ? existingMetadata.id : name,
+          principal,
+          "edit",
+          typeof existingSpec.ownership === "object" && existingSpec.ownership !== null
+            ? (existingSpec.ownership as import("@tulipfarm/schema").TeamBusinessAssetOwnership)
+            : undefined
+        );
+      } catch {
+        return err("write_denied", "Routine edit access is required");
+      }
+    }
     const unresolved = unresolvedRoutineResourceTypes(routine.spec, ctx.soulLoader?.resources);
     if (unresolved !== undefined) return err(unresolved.code, unresolved.message);
     const unreachable = unresolvedRoutineDefinitions(routine.spec, {
@@ -636,6 +708,9 @@ export const routineForgeTool = defineApiTool<PlatformToolContext>({
         "internal_error",
         `Routine ${name} was committed to the Soul but its runtime bundle publication failed, so it is not published and will not appear in Routines.`
       );
+    }
+    if (ctx.teamAssets) {
+      await ctx.teamAssets.ensure("routine", routine.metadata.id, routine.spec.ownership);
     }
 
     // The gateway reloads the catalog but does not reschedule cron triggers.
@@ -792,6 +867,10 @@ const ROUTINE_DELETE_SCHEMA: Record<string, unknown> = {
   required: ["name"],
   properties: {
     name: { type: "string", minLength: 1, description: "Routine name to delete." },
+    ownershipOperationId: {
+      type: "string",
+      description: "Unanimous Team-owner Approval operation authorizing this deletion.",
+    },
   },
 };
 const validateRoutineDelete = ajv.compile(ROUTINE_DELETE_SCHEMA);
@@ -816,9 +895,32 @@ export const routineDeleteTool = defineApiTool<PlatformToolContext>({
   handler: async (args, ctx) => {
     if (!validateRoutineDelete(args))
       return err("validation_error", firstError(validateRoutineDelete.errors));
-    const { name } = args as { name: string };
+    const { name, ownershipOperationId } = args as {
+      name: string;
+      ownershipOperationId?: string;
+    };
 
-    if (!ctx.soulLoader?.routines?.has(name)) return err("not_found", `routine not found: ${name}`);
+    const existing = ctx.soulLoader?.routines?.get(name);
+    if (!existing) return err("not_found", `routine not found: ${name}`);
+    if (ctx.teamAssets) {
+      const metadata =
+        typeof existing.config.metadata === "object" && existing.config.metadata !== null
+          ? (existing.config.metadata as Record<string, unknown>)
+          : {};
+      if (!ownershipOperationId) {
+        return err("write_denied", "Routine deletion requires unanimous owner Approval");
+      }
+      try {
+        await ctx.teamAssets.consumeLifecycleApproval(
+          "routine",
+          typeof metadata.id === "string" ? metadata.id : name,
+          "delete",
+          ownershipOperationId
+        );
+      } catch {
+        return err("write_denied", "Routine deletion requires unanimous owner Approval");
+      }
+    }
 
     let triggerSlugs: string[] = [];
     if (ctx.routineCatalog) {
@@ -851,6 +953,14 @@ export const routineDeleteTool = defineApiTool<PlatformToolContext>({
       return err("internal_error", e instanceof Error ? e.message : String(e));
     }
 
+    await ctx.teamAssets?.remove(
+      "routine",
+      typeof existing.config.metadata === "object" &&
+        existing.config.metadata !== null &&
+        typeof (existing.config.metadata as Record<string, unknown>).id === "string"
+        ? ((existing.config.metadata as Record<string, unknown>).id as string)
+        : name
+    );
     return ok({ name, deleted: true, triggersDeleted: triggerSlugs });
   },
 });

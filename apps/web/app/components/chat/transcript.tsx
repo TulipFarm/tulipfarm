@@ -8,6 +8,7 @@ import { copyText } from "~/lib/clipboard";
 import { useLlmMode } from "~/lib/llm-mode-context";
 import { markdownLinksToPlainText } from "~/lib/markdown-to-text";
 import { FileAttachment, RemovedAttachment } from "./file-attachment";
+import type { FileDraftResult } from "./file-draft-card";
 import { MessagePartView } from "./parts";
 import { PlanTrace } from "./plan-trace";
 import { groupTimelineParts } from "./timeline-groups";
@@ -306,6 +307,7 @@ function MessageRow({
   onTryHarder,
   onFeedback,
   onSurfaceInteraction,
+  onReviseDraft,
 }: {
   message: ChatMessage;
   status: ChatStatus;
@@ -319,6 +321,7 @@ function MessageRow({
     handle: string,
     input: Readonly<Record<string, unknown>>
   ) => void | Promise<void>;
+  onReviseDraft?: (draft: FileDraftResult) => void;
 }) {
   // Cited-source links for this message, gathered from its `sources` part(s), so inline `[n]` markers
   // in the text become clickable. Memoized on `parts` so the markdown isn't re-parsed each render.
@@ -373,6 +376,7 @@ function MessageRow({
               foldable={node.foldable}
               pending={streaming && nodeIndex === nodes.length - 1}
               onApprove={onApprove}
+              onReviseDraft={onReviseDraft}
             />
           );
         }
@@ -384,6 +388,7 @@ function MessageRow({
             citations={citations}
             onApprove={onApprove}
             onSurfaceInteraction={onSurfaceInteraction}
+            onReviseDraft={onReviseDraft}
           />
         );
       })}
@@ -429,6 +434,7 @@ export function Transcript({
   onTryHarder,
   onFeedback,
   onSurfaceInteraction,
+  onReviseDraft,
 }: {
   messages: ChatMessage[];
   status: ChatStatus;
@@ -441,6 +447,7 @@ export function Transcript({
     handle: string,
     input: Readonly<Record<string, unknown>>
   ) => void | Promise<void>;
+  onReviseDraft?: (draft: FileDraftResult) => void;
 }) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const stick = useRef(true);
@@ -479,6 +486,7 @@ export function Transcript({
             onTryHarder={onTryHarder}
             onFeedback={onFeedback}
             onSurfaceInteraction={onSurfaceInteraction}
+            onReviseDraft={onReviseDraft}
           />
         ))}
         {status === "submitted" ? <Loader /> : null}

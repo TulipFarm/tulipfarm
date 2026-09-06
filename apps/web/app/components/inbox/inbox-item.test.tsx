@@ -42,4 +42,27 @@ describe("InboxItem", () => {
     await user.click(screen.getByRole("button", { name: "Approve" }));
     expect(onDecision).not.toHaveBeenCalled();
   });
+
+  it("renders recipient-safe Team notifications without Approval actions", () => {
+    render(
+      <InboxItem
+        item={{
+          id: "notification-1",
+          kind: "notification",
+          title: "Your Team membership was removed",
+          status: "new",
+          risk: "low",
+          decisions: 0,
+          requiredDecisions: 0,
+          canDecide: false,
+          createdAt: "2026-09-05T10:00:00.000Z",
+        }}
+        onDecision={vi.fn()}
+      />
+    );
+
+    expect(screen.getByText("Your Team membership was removed")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Approve" })).not.toBeInTheDocument();
+    expect(screen.queryByText(/decisions/)).not.toBeInTheDocument();
+  });
 });

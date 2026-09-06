@@ -46,6 +46,7 @@ Never let these bleed: UI/URL never say "conversation"; domain/DB never say "cha
 | Atomic message unit | **Message** | `Message` | — | — | roles: system\|user\|**assistant**\|tool |
 | Auth/login session (cookie) | **Session** | `Session` | `/api/v1/auth/...` | — | AUTH ONLY — never the chat thread |
 | Configured AI persona/worker | **Agent** | `Agent` | `/agents`, `/api/v1/agents` | "Agents" | the *who* — addressable, owns the Conversation across Turns, and the **only** one of Agent/Skill that holds authority (`capabilityRestrictions` is server-enforced). Normal chat is the default harness; Agents are user-created. ⛔ never describe an Agent as "a skill" or author one per task — one Agent uses many Skills |
+| A business organizational and inherited-authority unit | **Team** | `Team` | `/teams`, `/api/v1/teams` | "Teams" | DB: `teams`; audit actions use `team.*`. A Team has a permanent UUID and slug, one optional parent, direct memberships, Roles, grants, and asset ownership. `group` is permitted only at the deprecated one-release API compatibility boundary and in migration metadata; ⛔ new product, REST, domain, storage, audit, or docs usage |
 | The resource feature | **Resources** | — | `/resources` | "Resources" | umbrella |
 | A user-defined schema (Ticket, Customer) | **Resource type** | `ResourceType` | `/resources/:type` | "Resource type" | has a JSON **schema** |
 | The JSON Schema artifact of a type | **Schema** | `schema` | `/resources/:type/schema` | "Schema" | |

@@ -1,4 +1,5 @@
 import { type Static, Type } from "@sinclair/typebox";
+import { TeamBusinessAssetOwnershipSchema } from "../teams";
 import {
   DEFINITION_TRUST_TIERS,
   type DefinitionTrustTier,
@@ -116,6 +117,7 @@ export const SKILL_FORBIDDEN_GRANT_KEYS = [
 const skillSpecSchema = Type.Object(
   {
     instructions: instructionsReferenceSchema,
+    ownership: Type.Optional(TeamBusinessAssetOwnershipSchema),
     references: Type.Optional(refListSchema),
     templates: Type.Optional(refListSchema),
     examples: Type.Optional(refListSchema),

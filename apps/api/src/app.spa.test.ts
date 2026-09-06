@@ -1,7 +1,7 @@
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { brotliCompressSync } from "node:zlib";
+import { brotliCompressSync, gunzipSync } from "node:zlib";
 import type { FastifyInstance } from "fastify";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import { buildApp } from "./app";
@@ -114,6 +114,29 @@ describe("SPA static serving (WEB_DIST set)", () => {
     });
     expect(res.statusCode).toBe(200);
     expect(res.headers["content-encoding"]).toBe("gzip");
+  });
+
+  /*
+   * The header alone proves nothing: a route whose handler resolves `undefined` after calling
+   * `reply.send()` ships `content-encoding: gzip` with an empty body, which every browser reports
+   * as "Unexpected end of JSON input" while curl (which does not ask for gzip by default) looks
+   * fine. Decompressing and comparing against the uncompressed response is the only assertion that
+   * catches it.
+   */
+  it("a compressed response carries the same body as the uncompressed one", async () => {
+    const plain = await app.inject({
+      method: "GET",
+      url: "/api/v1/openapi.json",
+      headers: { "accept-encoding": "identity" },
+    });
+    const gzipped = await app.inject({
+      method: "GET",
+      url: "/api/v1/openapi.json",
+      headers: { "accept-encoding": "gzip" },
+    });
+    expect(gzipped.headers["content-encoding"]).toBe("gzip");
+    expect(gzipped.rawPayload.length).toBeGreaterThan(0);
+    expect(gunzipSync(gzipped.rawPayload).toString("utf8")).toBe(plain.body);
   });
 
   it("the SPA document gets a self-allowing CSP (not helmet's default-src 'none')", async () => {

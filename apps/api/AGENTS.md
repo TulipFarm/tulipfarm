@@ -31,7 +31,8 @@ PostgreSQL persistence composition, auth, Soul Git writes, and Worker callback p
 | `src/guardrails/` | Guardrail config loading and `soul.synced` reload wiring only. |
 | `src/knowledge/`, `src/knowledge-sources/` | Knowledge routes/Tools and ingestion API; repositories and OKF live in `@tulipfarm/knowledge`. |
 | `src/memory/`, `src/kv/`, `src/secrets/` | Memory Document composition, its read-only route and erasure; scoped KV; secret storage routes. |
-| `src/authz/` | `route-gate.ts` — the sole HTTP path to `decideEffectivePermission`; self-governed routes. |
+| `src/authz/` | `route-gate.ts` — the sole HTTP path to `decideEffectivePermission`; self-governed and Team administration routes. |
+| `src/team-assets/` | Team asset catalog, ownership access projection, and Approval orchestration for all five owned asset types. |
 | `src/approvals/`, `src/broker/` | Approval routes and Tool effect dispatch composition. |
 | `src/tasks/` | Task routes, ranking. System-created human work items — no user-facing create route. |
 | `src/kill-switches/` | Operator-armed emergency stop over mutating effects; admin-gated routes. |

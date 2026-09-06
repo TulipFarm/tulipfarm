@@ -1,5 +1,5 @@
 {
-  "id": "l3-a-generated-file-reaches-the-agents-team",
+  "id": "l3-a-chat-generated-file-is-a-draft",
   "tier": "l3",
   "agent": "support",
   "agentRoles": ["support-desk"],
@@ -28,14 +28,12 @@
     },
     {
       "kind": "text",
-      "text": "I have written it up as delivery-delays.pdf — it covers the two hundred and forty late orders and the Rotterdam depot."
+      "text": "I made delivery-delays.pdf as a draft. It covers the two hundred and forty late orders and the Rotterdam depot. Choose Save File to keep it, or tell me what to revise."
     }
   ],
   "expect": [
     { "kind": "tool_called", "name": "file_create" },
-    { "kind": "generated_file_readable_by", "grantee": "user:eval" },
-    { "kind": "generated_file_readable_by", "grantee": "role:support-desk" },
-    { "kind": "generated_file_not_readable_by", "grantee": "role:finance-desk" },
+    { "kind": "generated_file_draft_created" },
     { "kind": "run_status", "status": "succeeded" },
     { "kind": "turn_status", "status": "succeeded" }
   ]

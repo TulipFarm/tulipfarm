@@ -1092,6 +1092,33 @@ describe("authorization gate", () => {
     expect(resolved).toEqual(["integration_adapter"]);
   });
 
+  it("intersects the delegating principal, Agent principal, and Agent restriction layers", async () => {
+    const execute = vi.fn(async () => ok({}));
+    const registry = new InMemoryToolCatalog();
+    registry.register(gatedTool(execute));
+    const dispatcher = new RegistryToolDispatcher({
+      registry,
+      artifacts: fakeArtifacts({
+        autonomy: "full",
+        agentId: "agent-1",
+      }) as unknown as ArtifactService,
+      gate: new LiveToolGate(),
+      authorityLayers: {
+        resolvePrincipalLayer: async (name) => ({ name, grants: ALLOW }),
+        resolveAgentLayer: async () => ({ name: "agent", grants: [] }),
+      },
+    });
+
+    const result = await dispatcher.dispatch(AUTHORITY, {
+      callId: "c1",
+      name: "echo",
+      arguments: { text: "hi" },
+    });
+
+    expect(result).toMatchObject({ status: "denied" });
+    expect(execute).not.toHaveBeenCalled();
+  });
+
   it("refuses a subject kind the authority model does not know", async () => {
     const execute = vi.fn(async () => ok({}));
     const dispatcher = gatedDispatcher(gatedTool(execute), ALLOW);

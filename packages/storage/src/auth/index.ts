@@ -37,3 +37,24 @@ export type {
 export { AUTHORIZATION_STORAGE_STATEMENTS, InMemoryRoleRepo, PgRoleRepo } from "./role-repo";
 export type { SessionRecord, SessionRepo } from "./session-repo";
 export { InMemorySessionRepo } from "./session-repo";
+export type {
+  ConfirmTeamMoveInput,
+  RecoverTeamAdminInput,
+  TeamDelegationPolicyRecord,
+  TeamGrantRecord,
+  TeamLeaveRequestRecord,
+  TeamLeaveRequestStatus,
+  TeamMembershipRecord,
+  TeamMovePreviewRecord,
+  TeamRecord,
+  TeamRepo,
+  TeamRoleAssignmentRecord,
+} from "./team-repo";
+export {
+  EVERYONE_TEAM_SLUG,
+  InMemoryTeamRepo,
+  MAX_TEAM_DEPTH,
+  PgTeamRepo,
+  TEAM_STORAGE_STATEMENTS,
+  TeamDelegationPolicyRevisionConflictError,
+} from "./team-repo";

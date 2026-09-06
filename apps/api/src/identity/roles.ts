@@ -132,6 +132,24 @@ export const ADMIN_ONLY_SURFACES: readonly {
     ],
     enforcedIn: "authz/routes.ts; soul/roles/routes.ts",
   },
+  {
+    type: "team",
+    actions: [
+      "team.create",
+      "team.hierarchy.manage",
+      "team.delegation.manage",
+      "team.archive",
+      "team.delete",
+      "team.emergency_override",
+      "team.moved",
+    ],
+    enforcedIn: "authz/team-routes.ts",
+  },
+  {
+    type: "team_asset",
+    actions: ["team_asset.operation.emergency_override"],
+    enforcedIn: "team-assets/routes.ts",
+  },
 ];
 
 /**
@@ -229,6 +247,24 @@ export const MEMBER_ALLOWED_SURFACES: readonly {
     enforcedIn: "soul/skills/tools.ts; platform/tools.ts",
   },
   { type: "surface", actions: ["*"], enforcedIn: "surfaces/routes.ts" },
+  {
+    type: "team",
+    actions: ["team.directory.read", "team.read"],
+    enforcedIn: "authz/team-routes.ts",
+  },
+  {
+    type: "team_asset",
+    actions: [
+      "team_asset.access.read",
+      "team_asset.catalog.read",
+      "team_asset.approval.read",
+      "team_asset.share.manage",
+      "team_asset.operation.propose",
+      "team_asset.operation.decide",
+      "team_asset.operation.complete",
+    ],
+    enforcedIn: "team-assets/routes.ts",
+  },
   { type: "platform.surface", actions: ["*"], enforcedIn: "surfaces/tools.ts" },
   /** Delegation routes work to an Agent; it does not edit the Agent definition. */
   { type: "platform.agent", actions: ["*"], enforcedIn: "platform/tools.ts" },

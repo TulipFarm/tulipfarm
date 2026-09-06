@@ -62,7 +62,11 @@ export function startMaintenanceConsumers(o: MaintenanceConsumerOptions): Promis
     // in chat can never disagree about who may see it.
     fileIndex: {
       files: buildWorkerFileService({ db: o.pool, transactions: o.transactions, blobs: o.blobs }),
-      knowledge: buildWorkerKnowledgeService({ db: o.pool, embeddings: o.embeddings }),
+      knowledge: buildWorkerKnowledgeService({
+        db: o.pool,
+        transactions: o.transactions,
+        embeddings: o.embeddings,
+      }),
     },
   });
 }

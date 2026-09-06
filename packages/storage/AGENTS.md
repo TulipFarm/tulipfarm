@@ -21,10 +21,11 @@ publication, approvals, integrations, events, and blob/vector/cache/queue ports.
 | `src/soul/` | Soul publication records, projection, outbox, activation history. |
 | `src/artifacts/` | Append-only Artifacts, State Output Bindings, lineage. |
 | `src/runs/` | Runs, States, Attempts, waits/signals, budgets, concurrency, children, events. |
-| `src/auth/` | Principals, roles, sessions, guests, JIT users, recertification, identities. |
+| `src/auth/` | Principals, Teams, roles, sessions, guests, JIT users, recertification, identities. |
 | `src/integrations/` | Integration install/state and channel inbound/delivery stores. |
 | `src/conversations/` | Conversation Turn read models used to restore Chat state. |
-| `src/approvals/`, `src/events/` | Approval persistence and generic event store. |
+| `src/approvals/`, `src/events/`, `src/notifications/` | Approval persistence, generic events, and recipient-scoped Team notifications. |
+| `src/asset-ownership/` | Shared asset ownership records, Team shares, and ownership operations. |
 | `src/kill-switches/` | Durable mutation kill switches backing the effect-plane emergency stop. |
 | `src/curator/` | Curator jobs, pinned input manifests and context pins, effect ledger, per-user work queue, daily spend admission, the claim-and-reserve mint transaction, stale-job reconciliation, and the read-only shadow review queries (`review.ts`, which writes nothing by design). |
 | `src/system/` | Deployment-local public origin settings that must not travel with Soul. |
@@ -47,6 +48,8 @@ publication, approvals, integrations, events, and blob/vector/cache/queue ports.
 - `bundled-bucket.ts` is the one place that knows a bucket vendor, and the driver must never learn
   it: the server it provisions has no shell, so a host writes its secrets before it can boot.
 - Domain packages use repository/transaction ports; they never read another owner's tables directly.
+- Team lifecycle and Team-linked asset writes share the locked `teams` row; keep checks and the
+  lifecycle mutation in one transaction.
 - If a storage rule repeats schema/Soul contracts, derive or reference the owner instead of copying.
 - `actor_principal_id` is required for every Soul publication; no anonymous publish paths except
   migrations that carry old local rows forward.

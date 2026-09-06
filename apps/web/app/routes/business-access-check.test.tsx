@@ -5,6 +5,7 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, expect, test, vi } from "vitest";
 import { ApiError } from "~/lib/api";
 import { type ExplainResult, explain, getEffectiveGrants } from "~/lib/authz";
+import { explainTeamAccess } from "~/lib/teams";
 import BusinessAccessCheck from "./_app.business.access.check";
 
 vi.mock("@remix-run/react", async () => {
@@ -22,6 +23,11 @@ vi.mock("~/lib/authz", async () => ({
   ...(await vi.importActual<typeof import("~/lib/authz")>("~/lib/authz")),
   explain: vi.fn(),
   getEffectiveGrants: vi.fn(),
+}));
+
+vi.mock("~/lib/teams", async () => ({
+  ...(await vi.importActual<typeof import("~/lib/teams")>("~/lib/teams")),
+  explainTeamAccess: vi.fn(),
 }));
 
 const USERS = [
@@ -50,7 +56,11 @@ function makeResult(overrides: Partial<ExplainResult>): ExplainResult {
 }
 
 function renderPage() {
-  vi.mocked(remix.useLoaderData).mockReturnValue({ users: USERS, recordTypes: RECORD_TYPES });
+  vi.mocked(remix.useLoaderData).mockReturnValue({
+    users: USERS,
+    recordTypes: RECORD_TYPES,
+    teams: [],
+  });
   vi.mocked(getEffectiveGrants).mockResolvedValue({
     principalId: "user_123",
     kind: "user",
@@ -305,7 +315,7 @@ test("only offers verbs the chosen thing actually has an action for", async () =
 });
 
 test("sends the action the gate really evaluates, not one composed from the verb", async () => {
-  vi.mocked(explain).mockResolvedValueOnce(makeResult({ allowed: true, reason: undefined }));
+  vi.mocked(explain).mockResolvedValueOnce(makeResult({ allowed: true, reason: "allowed" }));
   const user = userEvent.setup();
   renderPage();
 
@@ -319,4 +329,96 @@ test("sends the action the gate really evaluates, not one composed from the verb
       expect.objectContaining({ action: "integration.connect", resourceType: "integration" })
     )
   );
+});
+
+test("shows Team membership, ancestry, Role, grant, and deny evidence", async () => {
+  vi.mocked(explain).mockResolvedValueOnce(
+    makeResult({ allowed: false, reason: "explicit_deny", deniedLayer: "caller" })
+  );
+  vi.mocked(explainTeamAccess).mockResolvedValueOnce({
+    allowed: false,
+    reason: "explicit_deny",
+    action: "record.read",
+    resource: "record.customer",
+    evidence: [
+      {
+        kind: "inherited_membership",
+        effect: "informational",
+        sourceTeamId: "10000000-0000-4000-8000-000000000002",
+        pathTeamIds: [
+          "10000000-0000-4000-8000-000000000002",
+          "10000000-0000-4000-8000-000000000001",
+        ],
+      },
+      {
+        kind: "role",
+        effect: "allow",
+        sourceTeamId: "10000000-0000-4000-8000-000000000001",
+        roleId: "customer-reader",
+      },
+      {
+        kind: "explicit_deny",
+        effect: "deny",
+        sourceTeamId: "10000000-0000-4000-8000-000000000001",
+        grantId: "deny-sensitive",
+      },
+    ],
+  });
+  vi.mocked(remix.useLoaderData).mockReturnValue({
+    users: USERS,
+    recordTypes: RECORD_TYPES,
+    teams: [
+      {
+        id: "10000000-0000-4000-8000-000000000001",
+        businessId: "business",
+        slug: "everyone",
+        displayName: "Everyone",
+        description: null,
+        status: "active",
+        parentTeamId: null,
+        revision: 1,
+        createdAt: "2026-09-05T00:00:00.000Z",
+        updatedAt: "2026-09-05T00:00:00.000Z",
+        archivedAt: null,
+        members: [],
+      },
+      {
+        id: "10000000-0000-4000-8000-000000000002",
+        businessId: "business",
+        slug: "support",
+        displayName: "Support",
+        description: null,
+        status: "active",
+        parentTeamId: "10000000-0000-4000-8000-000000000001",
+        revision: 1,
+        createdAt: "2026-09-05T00:00:00.000Z",
+        updatedAt: "2026-09-05T00:00:00.000Z",
+        archivedAt: null,
+        members: [],
+      },
+    ],
+  });
+  vi.mocked(getEffectiveGrants).mockResolvedValue({
+    principalId: "user_123",
+    kind: "user",
+    grants: [],
+  });
+  const user = userEvent.setup();
+  const Stub = createRemixStub([{ path: "/", Component: BusinessAccessCheck }]);
+  render(<Stub initialEntries={["/"]} />);
+
+  await fillRequiredFields(user);
+  await user.selectOptions(
+    screen.getByLabelText("Team context (optional)"),
+    "10000000-0000-4000-8000-000000000002"
+  );
+  await user.click(screen.getByRole("button", { name: "Check" }));
+
+  const why = await screen.findByRole("region", { name: "Why this access?" });
+  expect(within(why).getByText("Inherited membership")).toBeInTheDocument();
+  expect(within(why).getAllByText("Support").length).toBeGreaterThan(0);
+  expect(within(why).getAllByText("Everyone").length).toBeGreaterThan(0);
+  expect(within(why).getByText("customer-reader")).toBeInTheDocument();
+  expect(within(why).getByText("Grant deny-sensitive")).toBeInTheDocument();
+  expect(within(why).getByText("Deny source")).toBeInTheDocument();
 });

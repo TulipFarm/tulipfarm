@@ -159,10 +159,10 @@ describe("blanket Principal resolution", () => {
       businessId: BUSINESS,
       principals: ids.map((id) => ({ kind: "user", id })),
     });
-    expect(queries).toBeLessThanOrEqual(3);
+    expect(queries).toBeLessThanOrEqual(4);
   });
 
-  it("asks the database nothing when no user Principal is present", async () => {
+  it("asks only Team membership when no user Principal is present", async () => {
     let queries = 0;
     const counted = new PgPrincipalResolver({
       query: async <Row = Record<string, unknown>>(text: string, params?: readonly unknown[]) => {
@@ -171,7 +171,7 @@ describe("blanket Principal resolution", () => {
       },
     });
     await counted.resolve({ businessId: BUSINESS, principals: [{ kind: "agent", id: "a" }] });
-    expect(queries).toBe(0);
+    expect(queries).toBe(1);
   });
 });
 

@@ -1,4 +1,5 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
+import { isDeploymentAdmin } from "../authz/route-gate";
 import { makeRateLimitHook, type RateLimiter } from "../rate-limit";
 import * as AdminSchemas from "./schemas";
 import type {
@@ -25,6 +26,7 @@ export type {
   RunCommandInput,
   RunReadModel,
   RunStateReadModel,
+  TeamMigrationReportReadModel,
 } from "./types";
 
 type PreHandler = (req: FastifyRequest, reply: FastifyReply) => Promise<void>;
@@ -239,6 +241,29 @@ export function registerOperationalRoutes(
   );
 
   app.get(
+    "/api/v1/admin/team-migration-report",
+    {
+      preHandler: limitedAuth,
+      schema: {
+        description:
+          "Read the admin-visible Team migration report for legacy slug and sibling-name " +
+          "conflicts resolved during the one-release group compatibility migration.",
+        tags: ["admin", "teams"],
+        security,
+        response: AdminSchemas.AdminTeamMigrationReportResponsesSchema,
+      },
+    },
+    async (request, reply) => {
+      if (!request.principal || !isDeploymentAdmin(request.principal)) {
+        return fail(reply, request, 403, "forbidden", "Company administrator access is required.");
+      }
+      const grant = await requireGrant(request, reply, deps, "operations:read");
+      if (!grant) return;
+      return deps.getTeamMigrationReport(grant);
+    }
+  );
+
+  app.get(
     "/api/v1/guardrails",
     {
       preHandler: limitedAuth,
@@ -367,11 +392,13 @@ export function registerOperationalRoutes(
       const body = request.body as {
         decision: "approved" | "denied";
         comment?: string;
+        representedTeamId?: string;
       };
       return deps.decideApproval(grant, {
         approvalId: id,
         decision: body.decision,
         comment: body.comment,
+        representedTeamId: body.representedTeamId,
         idempotencyKey: key,
       });
     }

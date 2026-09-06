@@ -45,6 +45,10 @@ function decision(approverPrincipalId: string, outcome: "approved" | "denied" = 
   };
 }
 
+function teamRoleResolver(assignments: Record<string, readonly string[]>) {
+  return async (_businessId: string, principalId: string) => assignments[principalId] ?? [];
+}
+
 async function storeErrorCode(fn: () => Promise<unknown>): Promise<string> {
   try {
     await fn();
@@ -64,6 +68,32 @@ async function seededRepo(): Promise<InMemoryApprovalRepo> {
 }
 
 describe("InMemoryApprovalRepo persistence", () => {
+  it("loads only open candidate Approvals for the requested Teams", async () => {
+    const repo = new InMemoryApprovalRepo();
+    for (const [approvalId, requiredApproverRoles, expiresAt] of [
+      ["ap-open-a", ["team:a:admin"], EXPIRES_AT],
+      ["ap-open-b", ["team:b:admin"], EXPIRES_AT],
+      ["ap-expired", ["team:a:admin"], CREATED_AT],
+    ] as const) {
+      await repo.create(grant({ approvalId, requiredApproverRoles, expiresAt }));
+    }
+    await repo.create(grant({ approvalId: "ap-denied", requiredApproverRoles: ["team:a:admin"] }));
+    await repo.create(grant({ approvalId: "ap-revoked", requiredApproverRoles: ["team:a:admin"] }));
+    await repo.appendDecision("biz-1", "ap-denied", decision("user-approver", "denied"));
+    await repo.revoke("biz-1", "ap-revoked", CREATED_AT);
+
+    const records = await repo.getOpenMany(
+      "biz-1",
+      ["ap-open-b", "ap-expired", "ap-open-a", "ap-denied", "ap-revoked", "missing"],
+      {
+        at: new Date(CREATED_AT.getTime() + 1),
+        requiredTeamIds: ["a"],
+      }
+    );
+
+    expect(records.map((record) => record.approvalId)).toEqual(["ap-open-a"]);
+  });
+
   it("persists the exact binding, approver constraints, expiry, and preview", async () => {
     const repo = new InMemoryApprovalRepo();
     const created = await repo.create(grant());
@@ -109,6 +139,99 @@ describe("InMemoryApprovalRepo persistence", () => {
     expect(
       await storeErrorCode(() => repo.appendDecision("biz-1", "ap-1", decision("user-approver-1")))
     ).toBe("duplicate_approver");
+  });
+
+  it("requires every named approver role before consumption", async () => {
+    const repo = new InMemoryApprovalRepo(
+      [],
+      teamRoleResolver({
+        "admin-a": ["team:a:admin"],
+        "admin-b": ["team:b:admin"],
+        "admin-new": ["team:new:admin"],
+      })
+    );
+    await repo.create(
+      grant({
+        requiredApproverRoles: ["team:a:admin", "team:b:admin", "team:new:admin"],
+        allowedApproverRoles: ["team:a:admin", "team:b:admin", "team:new:admin"],
+      })
+    );
+    for (const [principalId, role] of [
+      ["admin-a", "team:a:admin"],
+      ["admin-b", "team:b:admin"],
+    ] as const) {
+      await repo.appendDecision("biz-1", "ap-1", {
+        approverPrincipalId: principalId,
+        approverRoles: [role],
+        satisfiedApproverRole: role,
+        outcome: "approved",
+        decidedAt: CREATED_AT,
+      });
+    }
+    expect(await storeErrorCode(() => repo.consume("biz-1", "ap-1", BINDING, CREATED_AT))).toBe(
+      "insufficient_approvals"
+    );
+    await repo.appendDecision("biz-1", "ap-1", {
+      approverPrincipalId: "admin-new",
+      approverRoles: ["team:new:admin"],
+      satisfiedApproverRole: "team:new:admin",
+      outcome: "approved",
+      decidedAt: CREATED_AT,
+    });
+    await expect(repo.consume("biz-1", "ap-1", BINDING, CREATED_AT)).resolves.toMatchObject({
+      consumedAt: CREATED_AT,
+    });
+  });
+
+  it("accepts one named owner constituency without generic high-risk four-eyes", async () => {
+    const repo = new InMemoryApprovalRepo(
+      [],
+      teamRoleResolver({ "owner-admin": ["team:sole-owner:admin"] })
+    );
+    await repo.create(
+      grant({
+        requiredApproverRoles: ["team:sole-owner:admin"],
+        allowedApproverRoles: ["team:sole-owner:admin"],
+      })
+    );
+    await repo.appendDecision("biz-1", "ap-1", {
+      approverPrincipalId: "owner-admin",
+      approverRoles: ["team:sole-owner:admin"],
+      satisfiedApproverRole: "team:sole-owner:admin",
+      outcome: "approved",
+      decidedAt: CREATED_AT,
+    });
+    await expect(repo.consume("biz-1", "ap-1", BINDING, CREATED_AT)).resolves.toMatchObject({
+      consumedAt: CREATED_AT,
+    });
+  });
+
+  it("revokes a stored Team-admin decision when that authority is no longer live", async () => {
+    const assignments: Record<string, readonly string[]> = {
+      "owner-admin": ["team:sole-owner:admin"],
+    };
+    const repo = new InMemoryApprovalRepo([], teamRoleResolver(assignments));
+    await repo.create(
+      grant({
+        requiredApproverRoles: ["team:sole-owner:admin"],
+        allowedApproverRoles: ["team:sole-owner:admin"],
+      })
+    );
+    await repo.appendDecision("biz-1", "ap-1", {
+      approverPrincipalId: "owner-admin",
+      approverRoles: ["team:sole-owner:admin"],
+      satisfiedApproverRole: "team:sole-owner:admin",
+      outcome: "approved",
+      decidedAt: CREATED_AT,
+    });
+    assignments["owner-admin"] = [];
+
+    await expect(repo.consume("biz-1", "ap-1", BINDING, CREATED_AT)).rejects.toMatchObject({
+      code: "insufficient_approvals",
+    });
+    await expect(repo.get("biz-1", "ap-1")).resolves.toMatchObject({
+      consumedAt: undefined,
+    });
   });
 
   it("does not let a caller mutate stored state through a returned record", async () => {

@@ -88,4 +88,13 @@ describe("PgKnowledgeSourceStore", () => {
     expect(list).toHaveLength(1);
     expect(list[0]?.sourceId).toBe("slack:T1:C1");
   });
+
+  it("loads a bounded source set in caller order", async () => {
+    await store.put(record());
+    await store.put(record({ sourceId: "slack:T1:C2", externalId: "C2" }));
+
+    const found = await store.getMany(BUSINESS, ["slack:T1:C2", "missing", "slack:T1:C1"]);
+
+    expect(found.map((source) => source.sourceId)).toEqual(["slack:T1:C2", "slack:T1:C1"]);
+  });
 });

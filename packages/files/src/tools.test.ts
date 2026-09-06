@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { BUSINESS_PRINCIPAL_ID, MAX_FILE_READ_CHARS } from "./limits";
 import { MAX_RENDER_INPUT_CHARS, RenderError } from "./render";
 import type { FileRecord } from "./repo";
-import { FileError, type GenerateRequest } from "./service";
+import { FileError, type GenerateDraftRequest, type GenerateRequest } from "./service";
 import {
   FILE_TOOLS,
   type FileToolContext,
@@ -29,6 +29,7 @@ function record(overrides: Partial<FileRecord> = {}): FileRecord {
     firstConversationId: null,
     createdAt: new Date("2025-01-01T00:00:00.000Z"),
     ...overrides,
+    sourceToolCallId: overrides.sourceToolCallId ?? null,
   } as FileRecord;
 }
 
@@ -61,6 +62,7 @@ function library(files: readonly FileRecord[], bodies: Record<string, string> = 
       nextCursor: null,
     }),
     generated: [] as GenerateRequest[],
+    drafted: [] as GenerateDraftRequest[],
     generate: async function (this: { generated: GenerateRequest[] }, request: GenerateRequest) {
       this.generated.push(request);
       return record({
@@ -71,19 +73,44 @@ function library(files: readonly FileRecord[], bodies: Record<string, string> = 
         origin: "generated",
       });
     },
+    generateDraft: async function (
+      this: { drafted: GenerateDraftRequest[] },
+      request: GenerateDraftRequest
+    ) {
+      this.drafted.push(request);
+      return {
+        id: "dddddddd-1111-4111-8111-111111111111",
+        businessId: request.businessId,
+        creatorPrincipalId: request.creatorPrincipalId,
+        filename: `${request.filename}.pdf`,
+        mediaType: "application/pdf",
+        sizeBytes: 123,
+        blob: { key: "draft", hash: "draft" },
+        authoredByAgentId: request.authoredByAgentId ?? null,
+        sourceRunId: request.sourceRunId,
+        sourceToolCallId: request.sourceToolCallId,
+        savedFileId: null,
+        createdAt: new Date("2025-01-01T00:00:00.000Z"),
+        expiresAt: new Date("2025-01-02T00:00:00.000Z"),
+      };
+    },
   };
 }
 
 function context(
   service: FileToolContext["service"],
   principalId = ME,
-  agentId?: string
+  agentId?: string,
+  routineId?: string
 ): FileToolContext {
   return {
     businessId: BUSINESS,
     principalId,
+    runId: "run-1",
+    toolCallId: "call-1",
     service,
     ...(agentId === undefined ? {} : { agentId }),
+    ...(routineId === undefined ? {} : { routineId }),
   };
 }
 
@@ -269,33 +296,39 @@ describe("file_read", () => {
 describe("file_create", () => {
   const args = { filename: "q3-summary", format: "pdf", content: "# Q3\n\nRevenue up." };
 
-  it("hands the document to the service and reports the File it made", async () => {
+  it("creates an expiring draft in Chat instead of saving a File", async () => {
     const service = library([]);
     const result = await fileCreateTool.handler(args, context(service));
-    expect(service.generated).toEqual([
+    expect(service.drafted).toEqual([
       expect.objectContaining({
         businessId: BUSINESS,
+        creatorPrincipalId: ME,
         filename: "q3-summary",
         format: "pdf",
         content: "# Q3\n\nRevenue up.",
+        sourceRunId: "run-1",
+        sourceToolCallId: "call-1",
       }),
     ]);
-    expect(data(result)).toEqual(
-      expect.objectContaining({ mediaType: "application/pdf", origin: "generated" })
-    );
+    expect(data(result)).toMatchObject({
+      status: "draft",
+      draftId: "dddddddd-1111-4111-8111-111111111111",
+      mediaType: "application/pdf",
+    });
+    expect(service.generated).toHaveLength(0);
   });
 
-  it("gives the caller read access to what it made, and nobody else", async () => {
+  it("binds the Chat draft to the caller", async () => {
     const service = library([]);
     await fileCreateTool.handler(args, context(service, OTHER));
-    expect(service.generated[0].readableBy).toEqual({ kind: "user", id: OTHER });
+    expect(service.drafted[0].creatorPrincipalId).toBe(OTHER);
   });
 
-  it("names the Agent that wrote it, so that Agent's team can read it too", async () => {
+  it("names the Agent that wrote the Chat draft", async () => {
     const service = library([]);
     await fileCreateTool.handler(args, context(service, OTHER, "agent-hr"));
-    expect(service.generated[0]).toMatchObject({
-      readableBy: { kind: "user", id: OTHER },
+    expect(service.drafted[0]).toMatchObject({
+      creatorPrincipalId: OTHER,
       authoredByAgentId: "agent-hr",
     });
   });
@@ -303,7 +336,35 @@ describe("file_create", () => {
   it("names no Agent when the call is not running as one", async () => {
     const service = library([]);
     await fileCreateTool.handler(args, context(service));
-    expect(service.generated[0].authoredByAgentId).toBeUndefined();
+    expect(service.drafted[0].authoredByAgentId).toBeUndefined();
+  });
+
+  it("auto-saves Routine output for its direct audience", async () => {
+    const service = library([]);
+    const result = await fileCreateTool.handler(
+      args,
+      context(service, OTHER, "agent-hr", "routine-weekly")
+    );
+    expect(service.generated[0]).toMatchObject({
+      readableBy: { kind: "user", id: OTHER },
+      authoredByAgentId: "agent-hr",
+      authoredByRoutineId: "routine-weekly",
+      sourceRunId: "run-1",
+      sourceToolCallId: "call-1",
+    });
+    expect(data(result).status).toBe("saved");
+  });
+
+  it("names the Run subject so an unattended Routine's output reaches its Roles", async () => {
+    const service = library([]);
+    await fileCreateTool.handler(args, {
+      ...context(service, "routine-principal", "agent-hr", "routine-weekly"),
+      principalKind: "routine",
+    });
+    // No requester to share with, so the subject's Roles are the only thing standing between the
+    // report and a File nobody in the deployment can open.
+    expect(service.generated[0].readableBy).toBeUndefined();
+    expect(service.generated[0].subjectPrincipalId).toBe("routine-principal");
   });
 
   it("does not let the Agent name its own audience", async () => {
@@ -313,20 +374,51 @@ describe("file_create", () => {
       context(service, ME, "agent-hr")
     );
     // `additionalProperties: false` refuses the call rather than letting the model pick a team.
-    expect(service.generated).toHaveLength(0);
+    expect(service.drafted).toHaveLength(0);
   });
 
   it("does not let the Agent choose an owner", async () => {
     const service = library([]);
     await fileCreateTool.handler({ ...args, ownerPrincipalId: "someone-else" }, context(service));
     // `additionalProperties: false` refuses it outright rather than quietly dropping it.
-    expect(service.generated).toHaveLength(0);
+    expect(service.drafted).toHaveLength(0);
   });
 
   it("refuses a format it cannot render", async () => {
     const service = library([]);
-    const result = await fileCreateTool.handler({ ...args, format: "docx" }, context(service));
+    const result = await fileCreateTool.handler({ ...args, format: "psd" }, context(service));
     expect(result.success).toBe(false);
+    expect(service.drafted).toHaveLength(0);
+  });
+
+  it("renders each Office format the schema advertises", async () => {
+    for (const [format, content] of [
+      ["docx", "# Report\n\nBody"],
+      ["xlsx", "id,name\n1,Muskan"],
+      ["pptx", "# Slide\n\n- point"],
+    ] as const) {
+      const service = library([]);
+      const result = await fileCreateTool.handler({ ...args, format, content }, context(service));
+      expect(result.success, format).toBe(true);
+      expect(service.drafted, format).toHaveLength(1);
+    }
+  });
+
+  it("refuses generation without stable Run and Tool call identity", async () => {
+    const service = library([]);
+    const result = await fileCreateTool.handler(args, {
+      businessId: BUSINESS,
+      principalId: ME,
+      service,
+    });
+    expect(result).toEqual({
+      success: false,
+      error: {
+        code: "internal_error",
+        message: "file generation requires a Run and Tool call identity",
+      },
+    });
+    expect(service.drafted).toHaveLength(0);
     expect(service.generated).toHaveLength(0);
   });
 
@@ -337,13 +429,13 @@ describe("file_create", () => {
       context(service)
     );
     expect(result.success).toBe(false);
-    expect(service.generated).toHaveLength(0);
+    expect(service.drafted).toHaveLength(0);
   });
 
   it("reports a refused render as the Agent's to fix, not as an internal failure", async () => {
     const service = {
       ...library([]),
-      generate: async () => {
+      generateDraft: async () => {
         throw new RenderError("too_many_pages", "render exceeded 200 pages");
       },
     };

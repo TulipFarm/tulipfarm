@@ -451,7 +451,7 @@ const generating = (over: Partial<EvalCase> = {}): EvalCase => ({
   ...over,
 });
 
-describe("a Turn that generates a File", () => {
+describe("a Turn that generates a File draft", () => {
   it(
     "runs the shipped Tool for real, so the audience is read rather than scripted",
     async () => {
@@ -466,27 +466,13 @@ describe("a Turn that generates a File", () => {
       expect(turn.toolCalls.map((c) => c.name)).toContain(FILE_CREATE_TOOL);
       expect(turn.generatedFiles).toHaveLength(1);
       expect(turn.generatedFiles[0]?.filename).toBe("delays.pdf");
+      expect(turn.generatedFiles[0]?.status).toBe("draft");
     },
     TIMEOUT
   );
 
   it(
-    "shares what an Agent holding no Role wrote with the requester alone",
-    async () => {
-      soul ??= await loadEvalSoul();
-      const turn = await runPersistedTurn({
-        evalCase: generating(),
-        soul,
-        binding: scriptedBinding(),
-      });
-
-      expect(turn.generatedFiles[0]?.readableBy).toEqual(["user:eval"]);
-    },
-    TIMEOUT
-  );
-
-  it(
-    "widens the audience to every Role the authoring Agent's Principal holds",
+    "keeps the draft outside the persistent File audience until the person saves it",
     async () => {
       soul ??= await loadEvalSoul();
       const turn = await runPersistedTurn({
@@ -495,40 +481,8 @@ describe("a Turn that generates a File", () => {
         binding: scriptedBinding(),
       });
 
-      const readable = [...(turn.generatedFiles[0]?.readableBy ?? [])].sort();
-      expect(readable).toEqual(["role:hr-team", "role:ops-desk", "user:eval"]);
-    },
-    TIMEOUT
-  );
-
-  it(
-    "keeps the requester's own share, so joining a team never costs them the document",
-    async () => {
-      soul ??= await loadEvalSoul();
-      const turn = await runPersistedTurn({
-        evalCase: generating({ agentRoles: ["hr-team"] }),
-        soul,
-        binding: scriptedBinding(),
-      });
-
-      expect(turn.generatedFiles[0]?.readableBy).toContain("user:eval");
-    },
-    TIMEOUT
-  );
-
-  it(
-    "grants no Role the Agent was never assigned",
-    async () => {
-      // The bound on the widening. Without it the Case above would pass just as well against an
-      // audience that shared every generated File with every Role in the business.
-      soul ??= await loadEvalSoul();
-      const turn = await runPersistedTurn({
-        evalCase: generating({ agentRoles: ["hr-team"] }),
-        soul,
-        binding: scriptedBinding(),
-      });
-
-      expect(turn.generatedFiles[0]?.readableBy).not.toContain("role:ops-desk");
+      expect(turn.generatedFiles[0]?.readableBy).toEqual([]);
+      expect(turn.generatedFiles[0]?.status).toBe("draft");
     },
     TIMEOUT
   );

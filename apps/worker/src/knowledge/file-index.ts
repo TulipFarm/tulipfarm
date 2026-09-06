@@ -8,7 +8,7 @@
  * embeddings it needs, and a staging hop would only mean the text crossed a boundary twice.
  */
 
-import type { FileGrantee } from "@tulipfarm/files";
+import type { FileReader } from "@tulipfarm/files";
 import { extractText, type FileService, isExtractableMediaType } from "@tulipfarm/files";
 import type { KnowledgeService } from "@tulipfarm/knowledge";
 
@@ -24,6 +24,7 @@ export const FILE_INDEX_QUEUE = "file-index";
  */
 export interface FileIndexJob {
   readonly fileId: string;
+  readonly versionId: string;
   readonly businessId: string;
   /** The File's owner, and the only Principal permitted to have asked for this. */
   readonly ownerPrincipalId: string;
@@ -94,39 +95,53 @@ async function collect(body: AsyncIterable<Uint8Array>): Promise<Uint8Array> {
 /** The job body, exported so it can be tested without pg-boss. */
 export async function handleFileIndexJob(
   job: FileIndexJob,
-  deps: FileIndexDeps
+  deps: FileIndexDeps,
+  existingPageId?: string
 ): Promise<FileIndexOutcome> {
+  // Every exit below has to take the Page a previous pass wrote with it. This function calls
+  // itself when the File changed underneath the first pass, handing the recursion the Page it had
+  // already published — and a recursion that returns without removing it leaves the old text
+  // searchable for a File that is now gone, withdrawn, or unreadable.
+  const stop = async (
+    reason: Extract<FileIndexOutcome, { kind: "skipped" }>["reason"]
+  ): Promise<FileIndexOutcome> => {
+    if (existingPageId !== undefined) await withdraw(deps, existingPageId);
+    return { kind: "skipped", reason };
+  };
+
   let file: Awaited<ReturnType<FileService["read"]>>;
   try {
     file = await deps.files.read(job.businessId, job.fileId, job.ownerPrincipalId);
   } catch {
     // Destroyed, or no longer this Principal's to index, between enqueue and now. Both are
     // ordinary races and neither is worth a retry: the File this job named is not indexable.
-    return { kind: "skipped", reason: "gone" };
+    return await stop("gone");
   }
 
   // The owner may have changed their mind while this job sat on the queue. Checked before any
   // work, and again after the write, because only the second check can catch a withdrawal that
   // lands while the bytes are being parsed.
-  if (file.knowledgeRequestedAt === null) return { kind: "skipped", reason: "withdrawn" };
+  if (file.knowledgeRequestedAt === null) return await stop("withdrawn");
+  const currentJob =
+    file.currentVersionId === job.versionId ? job : { ...job, versionId: file.currentVersionId };
 
   // Asked before the bytes are fetched. An image is refused by `extractText` anyway, and reading a
   // 25 MiB object only to be told so is a cost with no answer attached.
   if (!isExtractableMediaType(file.mediaType)) {
-    return { kind: "skipped", reason: "unsupported_media_type" };
+    return await stop("unsupported_media_type");
   }
 
   const { body } = await deps.files.content(job.businessId, job.fileId, job.ownerPrincipalId);
   const extracted = await extractText(file.mediaType, await collect(body));
   if (extracted.kind === "refused" || extracted.text.trim().length === 0) {
-    return { kind: "skipped", reason: "no_text" };
+    return await stop("no_text");
   }
 
   // Read after extraction, so the readership written below is the newest one this job can see.
   const readers = await deps.files.readers(job.businessId, job.fileId, job.ownerPrincipalId);
 
   const spaceId = await fileSpaceId(deps.knowledge);
-  if (spaceId === null) return { kind: "skipped", reason: "no_space" };
+  if (spaceId === null) return await stop("no_space");
 
   const page = await deps.knowledge.ingestSource({
     source: "file",
@@ -141,13 +156,35 @@ export async function handleFileIndexJob(
     // which would publish a private upload to everybody the moment it was indexed.
     readers,
   });
-  if (page === null) return { kind: "skipped", reason: "gone" };
+  if (page === null) return await stop("gone");
 
   // Everything above raced with the owner. Between the reads and this write the File may have been
   // destroyed, withdrawn from Knowledge, or had a share revoked — and until the Page existed, none
   // of those could act on it, because they all resolve through the Page. So the same questions are
   // asked once more now that there is something to act on, and the answer is applied here.
-  const settled = await settle(deps, job, page._id, readers);
+  let latest: Awaited<ReturnType<FileService["read"]>>;
+  try {
+    latest = await deps.files.read(
+      currentJob.businessId,
+      currentJob.fileId,
+      currentJob.ownerPrincipalId
+    );
+  } catch {
+    // This read is itself an authorization check, so a File destroyed at exactly this moment makes
+    // it throw. Letting that propagate would fail the job with the Page already written, and every
+    // retry stops at the read above this one — leaving the destroyed File retrievable forever.
+    await withdraw(deps, page._id);
+    return { kind: "skipped", reason: "gone" };
+  }
+  if (latest.currentVersionId !== currentJob.versionId) {
+    return await handleFileIndexJob(
+      { ...currentJob, versionId: latest.currentVersionId },
+      deps,
+      page._id
+    );
+  }
+
+  const settled = await settle(deps, currentJob, page._id, readers);
   if (settled !== null) return settled;
   return { kind: "indexed", pageId: page._id, truncated: extracted.truncated };
 }
@@ -164,9 +201,9 @@ async function settle(
   deps: FileIndexDeps,
   job: FileIndexJob,
   pageId: string,
-  written: readonly FileGrantee[]
+  written: readonly FileReader[]
 ): Promise<FileIndexOutcome | null> {
-  let current: readonly FileGrantee[];
+  let current: readonly FileReader[];
   try {
     if (!(await deps.files.knowledgeRequested(job.businessId, job.fileId))) {
       await withdraw(deps, pageId);
@@ -188,9 +225,9 @@ async function withdraw(deps: FileIndexDeps, pageId: string): Promise<void> {
   await deps.knowledge.deletePage(pageId);
 }
 
-function sameReaders(a: readonly FileGrantee[], b: readonly FileGrantee[]): boolean {
+function sameReaders(a: readonly FileReader[], b: readonly FileReader[]): boolean {
   if (a.length !== b.length) return false;
-  const key = (g: FileGrantee) => `${g.kind}\u0000${g.id}`;
+  const key = (g: FileReader) => `${g.kind}\u0000${g.id}`;
   const left = new Set(a.map(key));
   return b.every((g) => left.has(key(g)));
 }

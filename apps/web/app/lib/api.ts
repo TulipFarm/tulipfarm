@@ -108,10 +108,10 @@ export async function apiGet<T>(path: string): Promise<T> {
   return (await res.json()) as T;
 }
 
-// Write client (POST/PUT). Mirrors apiGet's cookie-first auth, adds a JSON body, the optional
+// JSON write client. Mirrors apiGet's cookie-first auth, adds a body, the optional
 // `If-Match` concurrency header, and the CSRF echo header (no-op when authed by Bearer token).
 export async function apiWrite<T>(
-  method: "POST" | "PUT" | "PATCH",
+  method: "POST" | "PUT" | "PATCH" | "DELETE",
   path: string,
   body: unknown,
   ifMatch?: number

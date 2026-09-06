@@ -48,6 +48,7 @@ import {
 } from "@tulipfarm/tool-host";
 import { firstError } from "../../platform/tool-args";
 import { SYSTEM_SOUL_COMMIT_ACTOR } from "../../runtime/soul-writer";
+import type { TeamAssetService } from "../../team-assets/service";
 import { soulCommitError } from "../../tools/soul-faults";
 import type { SkillDraft } from "./drafts";
 import { putSkillDraft, skillBodyDigest, takeSkillDraft } from "./drafts";
@@ -65,12 +66,25 @@ export interface SkillToolContext extends MarketplaceSkillToolContext {
    */
   hiddenSkillNames?: () => Promise<ReadonlySet<string>>;
   readonly soulWriter: SoulWriter;
+  teamAssets?: TeamAssetService;
 }
 
 const SOUL_SKILL_TARGET = "soul.skill";
 
 function reason(e: unknown): string {
   return e instanceof Error ? e.message : String(e);
+}
+
+function ownershipOf(frontmatter: Record<string, unknown>) {
+  const ownership = frontmatter.ownership;
+  return typeof ownership === "object" && ownership !== null
+    ? (ownership as import("@tulipfarm/schema").TeamBusinessAssetOwnership)
+    : undefined;
+}
+
+function assetPrincipal(ctx: SkillToolContext) {
+  const id = ctx.requestContext?.userId;
+  return id === undefined ? undefined : { id, kind: ctx.requestContext?.subject?.kind ?? "user" };
 }
 
 /**
@@ -212,6 +226,9 @@ const skillCreate = defineApiTool<SkillToolContext>({
         }
         return err("internal_error", reason(e));
       }
+      if (ctx.teamAssets) {
+        await ctx.teamAssets.ensure("skill", name, ownershipOf(draft.frontmatter));
+      }
       return ok({
         status: "created",
         name,
@@ -222,6 +239,9 @@ const skillCreate = defineApiTool<SkillToolContext>({
 
     if (body === undefined || frontmatter === undefined) {
       return err("validation_error", "body and frontmatter are required when confirm is not set");
+    }
+    if (ctx.teamAssets && ownershipOf(frontmatter) === undefined) {
+      return err("validation_error", "Skill ownership must name at least one owning Team");
     }
 
     // A Skill is versioned from birth so the lock records something meaningful for every entry.
@@ -366,6 +386,21 @@ const skillUpdate = defineApiTool<SkillToolContext>({
     const bundledSkill = ctx.bundledSkills.get(name);
     const existing = soulSkill ?? bundledSkill;
     if (!existing) return err("not_found", `skill not found: ${name}`);
+    const principal = assetPrincipal(ctx);
+    if (ctx.teamAssets && !principal) return err("write_denied", "Skill edit access is required");
+    if (ctx.teamAssets && principal) {
+      try {
+        await ctx.teamAssets.require(
+          "skill",
+          name,
+          principal,
+          "edit",
+          ownershipOf(existing.frontmatter)
+        );
+      } catch {
+        return err("write_denied", "Skill edit access is required");
+      }
+    }
 
     const existingFm = publicFrontmatter(existing.frontmatter);
     let newBody = body ?? existing.body;
@@ -639,13 +674,33 @@ const skillList = defineApiTool<SkillToolContext>({
         ? ctx.disabledBundledSkills
         : new Set([...ctx.disabledBundledSkills, ...live]);
     const lock = await readSkillsLock(ctx.gitSync.path);
-    const skills = Array.from(mergedSkills(ctx.soulLoader, ctx.bundledSkills, hidden).values()).map(
-      ({ name, frontmatter }) => ({
-        name,
-        frontmatter,
-        provenance: lockProvenance(lock, name, ctx.soulLoader.skills.has(name)),
-      })
-    );
+    const listed = Array.from(mergedSkills(ctx.soulLoader, ctx.bundledSkills, hidden).values());
+    const principal = assetPrincipal(ctx);
+    const visible =
+      ctx.teamAssets === undefined
+        ? listed
+        : principal === undefined
+          ? []
+          : (
+              await Promise.all(
+                listed.map(async (skill) => ({
+                  skill,
+                  access: await ctx.teamAssets?.access(
+                    "skill",
+                    skill.name,
+                    principal,
+                    ownershipOf(skill.frontmatter)
+                  ),
+                }))
+              )
+            )
+              .filter(({ access }) => access?.levels.includes("view"))
+              .map(({ skill }) => skill);
+    const skills = visible.map(({ name, frontmatter }) => ({
+      name,
+      frontmatter,
+      provenance: lockProvenance(lock, name, ctx.soulLoader.skills.has(name)),
+    }));
     return ok({ skills });
   },
 });
@@ -670,12 +725,30 @@ const skillDelete = defineApiTool<SkillToolContext>({
   requiresApproval: false,
   handler: async (args, ctx) => {
     if (!validateDelete(args)) return err("validation_error", firstError(validateDelete.errors));
-    const { name } = args as { name: string };
+    const { name, ownershipOperationId } = args as {
+      name: string;
+      ownershipOperationId?: string;
+    };
 
     const soulSkill = ctx.soulLoader.skills.get(name);
     const bundledSkill = ctx.bundledSkills.get(name);
     if (!soulSkill && (!bundledSkill || ctx.disabledBundledSkills.has(name))) {
       return err("not_found", `skill not found: ${name}`);
+    }
+    if (ctx.teamAssets) {
+      if (!ownershipOperationId) {
+        return err("write_denied", "Skill deletion requires unanimous owner Approval");
+      }
+      try {
+        await ctx.teamAssets.consumeLifecycleApproval(
+          "skill",
+          name,
+          "delete",
+          ownershipOperationId
+        );
+      } catch {
+        return err("write_denied", "Skill deletion requires unanimous owner Approval");
+      }
     }
 
     // Removing a Soul-authored Skill is a whole-artifact delete through the gateway. Disabling a
@@ -696,6 +769,7 @@ const skillDelete = defineApiTool<SkillToolContext>({
         }
         return err("internal_error", reason(e));
       }
+      await ctx.teamAssets?.remove("skill", name);
       return ok({ name, deleted: true });
     }
 
@@ -728,6 +802,7 @@ const skillDelete = defineApiTool<SkillToolContext>({
       return err("internal_error", reason(e));
     }
 
+    await ctx.teamAssets?.remove("skill", name);
     return ok({ name, deleted: true });
   },
 });

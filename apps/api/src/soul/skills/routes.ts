@@ -4,7 +4,11 @@ import { DEPLOYMENT_BUSINESS_ID } from "@tulipfarm/constants";
 import { gitSourceHttpError, withGitSourceClone } from "@tulipfarm/integrations";
 import type { LlmService } from "@tulipfarm/llm";
 import { SandboxRuntimeProfileRegistry, shellTsPythonV1 } from "@tulipfarm/sandbox";
-import { LlmNotConfiguredError, type SkillDefinition } from "@tulipfarm/schema";
+import {
+  LlmNotConfiguredError,
+  type SkillDefinition,
+  type TeamBusinessAssetOwnership,
+} from "@tulipfarm/schema";
 import {
   type BundledSkill,
   collectSkillFiles,
@@ -37,6 +41,7 @@ import type { ActivityService } from "../../activity/service";
 import type { AuditService } from "../../audit/service";
 import { makeSoulAuditWriter, redactRemoteUrl } from "../../audit/soul-write";
 import { ErrorSchema } from "../../auth/schemas";
+import type { TeamAssetService } from "../../team-assets/service";
 import { commitActorFromRequest } from "../commit-actor";
 import {
   SkillAuditBodySchema,
@@ -82,6 +87,7 @@ type SkillSummary = {
   allowedDomains?: string[];
   allowedCommands?: string[];
   requiredSecrets?: string[];
+  ownership?: TeamBusinessAssetOwnership;
 };
 const NAME_RE = /^[a-z0-9][a-z0-9._-]{0,63}$/;
 function asString(value: unknown): string | undefined {
@@ -280,6 +286,10 @@ function toSkillSummary(
     allowedDomains: asStringList(frontmatter.allowedDomains),
     allowedCommands: asStringList(frontmatter.allowedCommands),
     requiredSecrets: asStringList(frontmatter.requiredSecrets),
+    ownership:
+      typeof frontmatter.ownership === "object" && frontmatter.ownership !== null
+        ? (frontmatter.ownership as TeamBusinessAssetOwnership)
+        : undefined,
   };
 }
 // The operator sees that the catalog is unreachable, never git's stderr or a server temp path.
@@ -314,7 +324,8 @@ export function registerSkillRoutes(
     llmService,
     bundledSkills,
     disabledBundledSkills,
-  })
+  }),
+  teamAssets?: TeamAssetService
 ): void {
   const auditWrite = makeSoulAuditWriter(audit);
   app.get(
@@ -328,16 +339,37 @@ export function registerSkillRoutes(
         response: { 200: SkillListResponseSchema, 401: ErrorSchema },
       },
     },
-    async () => {
+    async (request) => {
       const lock = await readSkillsLock(gitSync.path);
       const merged = Array.from(
         mergedSkills(soulLoader, bundledSkills, disabledBundledSkills).values()
       );
-      const paths = merged
+      const visible =
+        teamAssets === undefined || request.principal === undefined
+          ? merged
+          : (
+              await Promise.all(
+                merged.map(async (skill) => ({
+                  skill,
+                  access: await teamAssets.access(
+                    "skill",
+                    skill.name,
+                    request.principal as NonNullable<typeof request.principal>,
+                    typeof skill.frontmatter.ownership === "object" &&
+                      skill.frontmatter.ownership !== null
+                      ? (skill.frontmatter.ownership as TeamBusinessAssetOwnership)
+                      : undefined
+                  ),
+                }))
+              )
+            )
+              .filter(({ access }) => access.levels.includes("view"))
+              .map(({ skill }) => skill);
+      const paths = visible
         .filter((skill) => soulLoader.skills.has(skill.name))
         .map((skill) => `skills/${skill.name}/SKILL.md`);
       const updatedAt = await gitSync.lastCommitDates(paths);
-      const skills = merged.map((skill) => {
+      const skills = visible.map((skill) => {
         const inSoul = soulLoader.skills.has(skill.name);
         return toSkillSummary(
           skill,
@@ -408,6 +440,21 @@ export function registerSkillRoutes(
       const { name } = req.params as { name: string };
       const skill = resolveSkill(name, soulLoader, bundledSkills, disabledBundledSkills);
       if (!skill) return reply.code(404).send({ error: `skill not found: ${name}` });
+      if (teamAssets && req.principal) {
+        try {
+          await teamAssets.require(
+            "skill",
+            name,
+            req.principal,
+            "view",
+            typeof skill.frontmatter.ownership === "object" && skill.frontmatter.ownership !== null
+              ? (skill.frontmatter.ownership as TeamBusinessAssetOwnership)
+              : undefined
+          );
+        } catch {
+          return reply.code(404).send({ error: `skill not found: ${name}` });
+        }
+      }
       const lock = await readSkillsLock(gitSync.path);
       const bundled = bundledSkills.get(name);
       const directory = soulLoader.skills.has(name)
@@ -441,6 +488,21 @@ export function registerSkillRoutes(
       if (!NAME_RE.test(name)) return reply.code(404).send({ error: `skill not found: ${name}` });
       const skill = resolveSkill(name, soulLoader, bundledSkills, disabledBundledSkills);
       if (!skill) return reply.code(404).send({ error: `skill not found: ${name}` });
+      if (teamAssets && req.principal) {
+        try {
+          await teamAssets.require(
+            "skill",
+            name,
+            req.principal,
+            "view",
+            typeof skill.frontmatter.ownership === "object" && skill.frontmatter.ownership !== null
+              ? (skill.frontmatter.ownership as TeamBusinessAssetOwnership)
+              : undefined
+          );
+        } catch {
+          return reply.code(404).send({ error: `skill not found: ${name}` });
+        }
+      }
       const directory = soulLoader.skills.has(name)
         ? join(gitSync.path, "skills", name)
         : bundledSkills.get(name)?.directory;
@@ -460,10 +522,16 @@ export function registerSkillRoutes(
         tags: ["skills"],
         security: [{ sessionCookie: [] }, { bearerToken: [] }],
         params: SkillNameParamsSchema,
+        querystring: {
+          type: "object",
+          additionalProperties: false,
+          properties: { ownershipOperationId: { type: "string", format: "uuid" } },
+        },
         response: {
           204: SkillDeleteResponseSchema,
           400: ErrorSchema,
           401: ErrorSchema,
+          403: ErrorSchema,
           404: ErrorSchema,
           409: ErrorSchema,
           422: ErrorSchema,
@@ -473,11 +541,22 @@ export function registerSkillRoutes(
     },
     async (req, reply) => {
       const { name } = req.params as { name: string };
+      const { ownershipOperationId } = req.query as { ownershipOperationId?: string };
       if (
         !NAME_RE.test(name) ||
         !resolveSkill(name, soulLoader, bundledSkills, disabledBundledSkills)
       )
         return reply.code(404).send({ error: `skill not found: ${name}` });
+      if (teamAssets) {
+        if (!ownershipOperationId) {
+          return reply.code(403).send({ error: "Skill deletion requires owner Approval." });
+        }
+        try {
+          await teamAssets.consumeLifecycleApproval("skill", name, "delete", ownershipOperationId);
+        } catch {
+          return reply.code(403).send({ error: "Skill deletion requires owner Approval." });
+        }
+      }
       try {
         await mutateSkillsLock(soulWriter, gitSync.path, (lock) => {
           delete lock.skills[name];
@@ -510,6 +589,7 @@ export function registerSkillRoutes(
         );
       }
       await soulLoader.reload();
+      await teamAssets?.remove("skill", name);
       await auditWrite(req, "skill.remove", `skill:${name}`, { bundled: bundledSkills.has(name) });
       return reply.code(204).send();
     }

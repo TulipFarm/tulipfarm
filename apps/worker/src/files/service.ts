@@ -2,12 +2,14 @@ import { randomUUID } from "node:crypto";
 import { FileService, PgFileRepo } from "@tulipfarm/files";
 import {
   type BlobPort,
-  PgGroupRepo,
+  PgPrincipalRepo,
   PgRoleRepo,
+  PgTeamRepo,
   type Queryable,
   type TransactionPort,
 } from "@tulipfarm/storage";
 import { collectHeldRoleIds } from "@tulipfarm/tool-host";
+import { buildFileOwnershipPort } from "./team-ownership";
 
 export interface WorkerFileServiceOptions {
   readonly db: Queryable;
@@ -30,11 +32,13 @@ export function buildWorkerFileService(options: WorkerFileServiceOptions): FileS
     repo: new PgFileRepo(options.db),
     blobs: options.blobs,
     newId: options.newId ?? randomUUID,
+    ownership: buildFileOwnershipPort(options.transactions),
     rolesOf: (businessId, principalId) =>
       collectHeldRoleIds(
         {
+          principals: new PgPrincipalRepo(options.transactions),
           roles: new PgRoleRepo(options.transactions),
-          groups: new PgGroupRepo(options.transactions),
+          teams: new PgTeamRepo(options.transactions),
         },
         businessId,
         principalId,

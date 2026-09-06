@@ -76,6 +76,9 @@ reconciliation, turn execution, delivery classification, projections, and outbox
 - The File family is hosted here so `file_create` renders model-authored content outside the
   process serving people's requests. Omitting `imagePolicy` is unreachable, not degraded: the
   context `Pick` cannot reach `upload`, its only reader.
+- `file_create` receives `routineContext.routineId` and the host `toolCallId`. The first is the
+  server-only distinction between a Chat draft and a Routine auto-save; the second is the
+  idempotency key. Never infer either from Tool arguments.
 - Authority for a co-located Tool is still read from the API per Run, never derived here, and is
   cached for one dispatch attempt only; `main.ts` evicts it when the attempt settles.
 - A State's `concurrencyKey` is held by a durable expiry-bounded lease; a contender queues on a

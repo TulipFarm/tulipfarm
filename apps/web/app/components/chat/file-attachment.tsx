@@ -1,6 +1,7 @@
 import { isInlineRenderable } from "@tulipfarm/files/limits";
 import { useEffect, useState } from "react";
-import { FileX2, Paperclip } from "~/components/icons";
+import { FileTypeIcon } from "~/components/files/file-type-icon";
+import { FileX2 } from "~/components/icons";
 import { fetchFileObjectUrl } from "~/lib/files";
 
 /**
@@ -55,8 +56,8 @@ export function FileAttachment({
   const isImage = isInlineRenderable(mediaType);
   const url = useImageObjectUrl(fileId, isImage);
 
-  if (!isImage) return <DownloadChip fileId={fileId} name={name} />;
-  if (url === null) return <PendingChip name={name} />;
+  if (!isImage) return <DownloadChip fileId={fileId} mediaType={mediaType} name={name} />;
+  if (url === null) return <PendingChip mediaType={mediaType} name={name} />;
 
   if (expanded) {
     return (
@@ -96,10 +97,10 @@ export function FileAttachment({
 const CHIP =
   "inline-flex items-center gap-2 rounded-lg border border-border bg-background px-2.5 py-1.5 text-xs text-foreground";
 
-function PendingChip({ name }: { name: string }) {
+function PendingChip({ mediaType, name }: { mediaType: string; name: string }) {
   return (
     <span className={CHIP}>
-      <Paperclip aria-hidden="true" className="size-3.5 shrink-0" />
+      <FileTypeIcon mediaType={mediaType} filename={name} className="size-3.5" />
       <span className="max-w-[16rem] truncate">{name}</span>
     </span>
   );
@@ -130,7 +131,15 @@ export function RemovedAttachment({ name }: { name: string }) {
  * A non-image attachment. The bytes are fetched on click rather than on render: a transcript of
  * PDFs should not download every one of them just to render their names.
  */
-function DownloadChip({ fileId, name }: { fileId: string; name: string }) {
+function DownloadChip({
+  fileId,
+  mediaType,
+  name,
+}: {
+  fileId: string;
+  mediaType: string;
+  name: string;
+}) {
   const [busy, setBusy] = useState(false);
 
   async function download() {
@@ -156,7 +165,7 @@ function DownloadChip({ fileId, name }: { fileId: string; name: string }) {
       onClick={download}
       type="button"
     >
-      <Paperclip aria-hidden="true" className="size-3.5 shrink-0" />
+      <FileTypeIcon mediaType={mediaType} filename={name} className="size-3.5" />
       <span className="max-w-[16rem] truncate">{name}</span>
     </button>
   );

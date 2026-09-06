@@ -112,6 +112,8 @@ export type Expectation =
   | { readonly kind: "generated_file_readable_by"; readonly grantee: string }
   /** L3 only. The counterpart: the audience widened this far and no further. */
   | { readonly kind: "generated_file_not_readable_by"; readonly grantee: string }
+  /** L3 only. A Chat generation produced an expiring draft rather than a persistent File. */
+  | { readonly kind: "generated_file_draft_created" }
   /** L3 only. A validated Curator Proposal reached its participant as a Task. */
   | { readonly kind: "curator_task_visible"; readonly title: string }
   /**
@@ -134,6 +136,7 @@ const PERSISTED_KINDS: ReadonlySet<string> = new Set([
   "soul_published",
   "generated_file_readable_by",
   "generated_file_not_readable_by",
+  "generated_file_draft_created",
   "curator_task_visible",
   "tool_denial_contains",
 ]);

@@ -1,9 +1,9 @@
 /** Role persistence is business-scoped; storage enforces assignment expiry for all callers. */
 
-import type { PrincipalKind } from "@tulipfarm/schema";
+import type { RoleAssignmentTargetKind } from "@tulipfarm/schema";
 import type { TransactionPort } from "../ports";
 
-export type RoleAssignableTo = readonly PrincipalKind[];
+export type RoleAssignableTo = readonly RoleAssignmentTargetKind[];
 
 export type GrantEffect = "allow" | "deny";
 
@@ -51,6 +51,7 @@ export interface RoleRepo {
     principalId: string,
     now: Date
   ): Promise<RoleAssignmentRecord[]>;
+  listAllAssignments(businessId: string, principalId: string): Promise<RoleAssignmentRecord[]>;
   /**
    * The principal-independent inverse of {@link listAssignments}: every principal a Role is
    * assigned to. Unexpired only.
@@ -221,6 +222,15 @@ export class InMemoryRoleRepo implements RoleRepo {
     );
   }
 
+  async listAllAssignments(
+    businessId: string,
+    principalId: string
+  ): Promise<RoleAssignmentRecord[]> {
+    return this.assignments.filter(
+      (assignment) => assignment.businessId === businessId && assignment.principalId === principalId
+    );
+  }
+
   async listAssignees(
     businessId: string,
     roleId: string,
@@ -238,7 +248,7 @@ export class InMemoryRoleRepo implements RoleRepo {
 interface RoleRow {
   id: string;
   business_id: string;
-  assignable_to: PrincipalKind[];
+  assignable_to: RoleAssignmentTargetKind[];
   expires_at: Date | null;
 }
 
@@ -485,6 +495,22 @@ export class PgRoleRepo implements RoleRepo {
             AND (expires_at IS NULL OR expires_at > $3)
           ORDER BY role_id`,
         [businessId, principalId, now]
+      );
+      return result.rows.map(assignmentFromRow);
+    });
+  }
+
+  async listAllAssignments(
+    businessId: string,
+    principalId: string
+  ): Promise<RoleAssignmentRecord[]> {
+    return this.transactions.withTransaction(async (transaction) => {
+      const result = await transaction.query<AssignmentRow>(
+        `SELECT business_id, principal_id, role_id, expires_at
+           FROM role_assignments
+          WHERE business_id = $1 AND principal_id = $2
+          ORDER BY role_id`,
+        [businessId, principalId]
       );
       return result.rows.map(assignmentFromRow);
     });

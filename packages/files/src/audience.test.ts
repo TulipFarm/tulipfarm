@@ -73,3 +73,38 @@ describe("who may read a File an Agent just wrote", () => {
     expect(audience).toEqual([{ kind: "user", id: "asker" }]);
   });
 });
+
+describe("an unattended Run's audience", () => {
+  it("falls back to the subject's own Roles when no human asked and the Agent holds none", async () => {
+    // A scheduled Routine has no requester to share with, so without this the report is owned by
+    // the business, shared with nobody, and unreachable by every human in the deployment.
+    const audience = await generatedAudience(
+      { businessId: BUSINESS, subjectPrincipalId: "routine-principal", authoredByAgentId: "hr" },
+      async (_business, principal) => (principal === "routine-principal" ? ["eng-team"] : [])
+    );
+    expect(audience).toEqual([{ kind: "role", id: "eng-team" }]);
+  });
+
+  it("still names the Agent's Roles when both the Agent and the subject hold some", async () => {
+    const audience = await generatedAudience(
+      { businessId: BUSINESS, subjectPrincipalId: "routine-principal", authoredByAgentId: "hr" },
+      async (_business, principal) => (principal === "hr" ? ["hr-team"] : ["eng-team"])
+    );
+    expect(audience).toEqual([
+      { kind: "role", id: "hr-team" },
+      { kind: "role", id: "eng-team" },
+    ]);
+  });
+
+  it("ignores the subject's Roles when a person asked, so an interactive Run is unchanged", async () => {
+    const audience = await generatedAudience(
+      {
+        businessId: BUSINESS,
+        readableBy: { kind: "user", id: "asker" },
+        subjectPrincipalId: "asker",
+      },
+      async () => ["everyone"]
+    );
+    expect(audience).toEqual([{ kind: "user", id: "asker" }]);
+  });
+});

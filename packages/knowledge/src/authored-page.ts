@@ -11,6 +11,7 @@
  */
 
 import { randomUUID } from "node:crypto";
+import { DEPLOYMENT_BUSINESS_ID } from "@tulipfarm/constants";
 import type { KnowledgeServiceDeps } from "./service";
 import { afterWrite } from "./service-indexing";
 import { createSpace, grantBlanketRead } from "./service-spaces";
@@ -26,6 +27,7 @@ interface AuthoredPageInput {
   domain?: string | null;
   tags?: string[];
   alwaysLoadForAgents?: boolean;
+  ownerPrincipalId?: string;
 }
 
 /**
@@ -105,6 +107,16 @@ export async function createAuthoredPage(
     updatedAt: now,
   };
   await deps.pages.insert(page);
+  if (input.ownerPrincipalId === undefined) {
+    await deps.ownership?.ensureBusiness(DEPLOYMENT_BUSINESS_ID, "page", id);
+  } else {
+    await deps.ownership?.ensurePersonal(
+      DEPLOYMENT_BUSINESS_ID,
+      "page",
+      id,
+      input.ownerPrincipalId
+    );
+  }
   // Before the index, never after: a Page indexed while it still carries no grant is a Page the
   // gate denies to everyone, its author included.
   await grantBlanketRead(deps, id);

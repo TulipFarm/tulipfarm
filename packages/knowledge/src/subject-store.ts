@@ -13,10 +13,12 @@ import type { KnowledgePrincipalRef, KnowledgeSourceStatus } from "./source";
 import {
   BLANKET_READ_PRINCIPAL,
   type KnowledgeAclEntry,
+  type KnowledgeOwnershipPort,
   type KnowledgeSubject,
   type KnowledgeSubjectStore,
   type PrincipalResolverPort,
   pageSubject,
+  spaceSubject,
 } from "./subject";
 
 /**
@@ -76,7 +78,7 @@ function grantsOf(entries: readonly KnowledgeAclEntry[]): readonly KnowledgePrin
 function isRestriction(entries: readonly KnowledgeAclEntry[]): boolean {
   const grants = entries.filter((e) => e.effect === "grant");
   if (grants.length === 0) return false;
-  return !(grants.length === 1 && principalKey(grants[0].principal) === BLANKET_KEY);
+  return !grants.some((entry) => principalKey(entry.principal) === BLANKET_KEY);
 }
 
 /** `space_id` + path → Page id, so an ancestor chain resolves without a query per level. */
@@ -140,7 +142,7 @@ function effectiveEntries(
     // Checked before the baseline is taken, not after: an *open* ancestor reaching this first would
     // otherwise become the list every descendant is intersected against, and `{everyone}` ∩
     // `{alice}` is empty — locking out the very Principal a restriction names.
-    if (grants.size === 1 && grants.has(BLANKET_KEY)) {
+    if (grants.has(BLANKET_KEY)) {
       blanket ??= grants.get(BLANKET_KEY);
       continue;
     }
@@ -171,7 +173,8 @@ function effectiveEntries(
 export class PgKnowledgeSubjectStore implements KnowledgeSubjectStore {
   constructor(
     private readonly q: Queryable,
-    private readonly now: () => Date = () => new Date()
+    private readonly now: () => Date = () => new Date(),
+    private readonly ownership?: KnowledgeOwnershipPort
   ) {}
 
   async listAuthored(businessId: string): Promise<readonly KnowledgeSubject[]> {
@@ -194,6 +197,49 @@ export class PgKnowledgeSubjectStore implements KnowledgeSubjectStore {
   async getAuthored(businessId: string, subjectId: string): Promise<KnowledgeSubject | undefined> {
     const [subject] = await this.getManyAuthored(businessId, [subjectId]);
     return subject;
+  }
+
+  async getManySpaces(
+    businessId: string,
+    spaceIds: readonly string[]
+  ): Promise<readonly KnowledgeSubject[]> {
+    if (spaceIds.length === 0) return [];
+    const { rows } = await this.q.query(
+      `SELECT id, business_id, acl_revision
+         FROM knowledge_spaces
+        WHERE business_id = $1 AND id::text = ANY($2::text[])`,
+      [businessId, [...spaceIds]]
+    );
+    const entries = await this.entriesFor(
+      businessId,
+      [],
+      rows.map((row) => row.id as string)
+    );
+    const byId = new Map(rows.map((row) => [row.id as string, row]));
+    return spaceIds.flatMap((id) => {
+      const row = byId.get(id);
+      return row === undefined
+        ? []
+        : [
+            spaceSubject(
+              {
+                spaceId: id,
+                businessId: row.business_id as string,
+                aclRevision: row.acl_revision as string,
+              },
+              entries.get(`space:${id}`) ?? [
+                {
+                  subjectKind: "space",
+                  subjectId: id,
+                  principal: BLANKET_READ_PRINCIPAL,
+                  effect: "grant",
+                  capability: "read",
+                },
+              ],
+              this.now()
+            ),
+          ];
+    });
   }
 
   /**
@@ -456,6 +502,16 @@ export class PgKnowledgeSubjectStore implements KnowledgeSubjectStore {
       if (bucket === undefined) byKey.set(key, [rowToEntry(row)]);
       else bucket.push(rowToEntry(row));
     }
+    const subjects = [
+      ...pageIds.map((id) => ({ kind: "page" as const, id: canonicalKnowledgeId(id) })),
+      ...spaces.map((id) => ({ kind: "space" as const, id })),
+    ];
+    const ownershipEntries = await this.ownership?.entriesFor(businessId, subjects);
+    for (const [key, projected] of ownershipEntries ?? []) {
+      const bucket = byKey.get(key) ?? [];
+      bucket.push(...projected);
+      byKey.set(key, bucket);
+    }
     return byKey;
   }
 
@@ -513,13 +569,18 @@ export class PgPrincipalResolver implements PrincipalResolverPort {
     readonly businessId: string;
     readonly principals: readonly KnowledgePrincipalRef[];
   }): Promise<readonly KnowledgePrincipalRef[]> {
-    const candidates = input.principals.filter((p) => p.kind === "user").map((p) => p.id);
+    const candidates = input.principals
+      .filter((principal) => ["user", "agent", "service"].includes(principal.kind))
+      .map((principal) => principal.id);
+    const userCandidates = input.principals
+      .filter((principal) => principal.kind === "user")
+      .map((principal) => principal.id);
     if (candidates.length === 0) return input.principals;
 
     // A Routine is the Business acting on its own behalf, so it reads what the Business can read.
     // It gains the blanket Role and nothing else: no Team, no Role, so a Page whose blanket grant
     // has been replaced by an allowlist stays closed to it.
-    if (candidates.includes(ROUTINE_SERVICE_PRINCIPAL_ID)) {
+    if (userCandidates.includes(ROUTINE_SERVICE_PRINCIPAL_ID)) {
       const withBlanket = new Map<string, KnowledgePrincipalRef>();
       for (const p of input.principals) withBlanket.set(`${p.kind}\u0000${p.id}`, p);
       withBlanket.set(`${this.blanket.kind}\u0000${this.blanket.id}`, this.blanket);
@@ -528,25 +589,61 @@ export class PgPrincipalResolver implements PrincipalResolverPort {
 
     // Compared as text: a non-uuid id such as `service:routine-executor` must simply fail to match
     // rather than raise and take the whole request down with it.
-    const { rows } = await this.q.query(
-      "SELECT id::text AS id FROM users WHERE id::text = ANY($1::text[])",
-      [candidates]
-    );
-    const members = rows.map((r) => r.id as string);
-    if (members.length === 0) return input.principals;
+    const members =
+      userCandidates.length === 0
+        ? []
+        : (
+            await this.q.query(
+              "SELECT id::text AS id FROM users WHERE id::text = ANY($1::text[])",
+              [userCandidates]
+            )
+          ).rows.map((r) => r.id as string);
 
     const out = new Map<string, KnowledgePrincipalRef>();
     for (const p of input.principals) out.set(`${p.kind}\u0000${p.id}`, p);
     const add = (ref: KnowledgePrincipalRef) => out.set(`${ref.kind}\u0000${ref.id}`, ref);
 
-    add(this.blanket);
-    for (const ref of await this.groupsOf(input.businessId, members)) add(ref);
-    for (const ref of await this.rolesOf(input.businessId, members)) add(ref);
+    if (members.length > 0) {
+      add(this.blanket);
+      for (const ref of await this.legacyGroupsOf(input.businessId, members)) add(ref);
+      for (const ref of await this.rolesOf(input.businessId, members)) add(ref);
+    }
+    for (const ref of await this.teamsOf(input.businessId, candidates)) add(ref);
     return [...out.values()];
   }
 
   /** Teams. An expired membership, or membership of an expired Team, expands to nothing. */
-  private async groupsOf(
+  private async teamsOf(
+    businessId: string,
+    members: readonly string[]
+  ): Promise<readonly KnowledgePrincipalRef[]> {
+    const { rows } = await this.q.query(
+      `WITH RECURSIVE held(team_id, parent_team_id) AS (
+         SELECT team.id, team.parent_team_id
+           FROM team_memberships membership
+           JOIN teams team ON team.id = membership.team_id
+           JOIN principals principal
+             ON principal.business_id = team.business_id
+            AND principal.id = membership.principal_id
+          WHERE team.business_id = $1
+            AND membership.principal_id = ANY($2::text[])
+            AND (membership.expires_at IS NULL OR membership.expires_at > now())
+            AND team.status = 'active'
+            AND principal.status = 'active'
+            AND (principal.expires_at IS NULL OR principal.expires_at > now())
+         UNION
+         SELECT parent.id, parent.parent_team_id
+           FROM teams parent
+           JOIN held child ON child.parent_team_id = parent.id
+          WHERE parent.business_id = $1 AND parent.status = 'active'
+       )
+       SELECT DISTINCT team_id::text AS id FROM held`,
+      [businessId, members]
+    );
+    return rows.map((row) => ({ kind: "team", id: row.id as string }));
+  }
+
+  private async legacyGroupsOf(
     businessId: string,
     members: readonly string[]
   ): Promise<readonly KnowledgePrincipalRef[]> {

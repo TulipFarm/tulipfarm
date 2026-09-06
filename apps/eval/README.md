@@ -236,42 +236,17 @@ L2 Case, and a `guardrail_*` Expectation on an L3 Case. Both would otherwise pas
 nothing. L3 does run the real guards — the executor calls them — but it does not collect their
 decisions, so guardrail Cases belong at L2 where they are measured.
 
-### Who may read a File the Agent wrote
+### Generated File lifecycle
 
-An Agent that generates a document shares it with the person who asked, plus every Role the
-Agent's own Principal holds — so an HR Agent's report opens for the HR desk rather than for
-whoever happened to trigger the Run.
+`file_create` joins `soul_write` as a Tool L3 **runs for real**, because Chat versus Routine
+lifecycle is decided from server context the model cannot see or influence. A Chat call writes an
+expiring draft; a Routine call saves a File and applies its audience. Scripting either result would
+only assert the Case author's copy of that rule.
 
-That property is invisible to every Expectation the harness already had. The audience is decided
-from `ctx.agentId`, an identity **the model never sees and cannot influence**: the `file_create`
-schema has no field for an audience, so no `tool_argument_equals` can reach it, and the scripted
-dispatcher fakes the Tool, so no share row exists to read. Scripting the answer would have been
-worse than measuring nothing — it would assert the harness's own copy of the rule.
-
-So `file_create` joins `soul_write` as a Tool L3 **runs for real**, against real `files`,
-`file_shares` and `role_assignments` tables, using the production `FileService` and the production
-`collectHeldRoleIds`. `src/l3/file-store.ts` then reads the shares back through `repo.listShares`
-rather than predicting them — predicting would be a second implementation of the rule under test.
-
-Two decisions in that file are load-bearing:
-
-**The Agent's Roles come from the Case's `agentRoles`, not the soul.** An Agent's `spec.roles`
-exists, but it is advisory: `reconcileSoulRoles` projects Role *definitions* and writes no
-`role_assignments`. A fixture seeded from it would measure a mapping the product does not have, and
-would go on passing after live authority stopped reaching Files at all. `agentRoles` writes real
-assignment rows, and `loadCorpus` refuses it outside tier `l3` — where there is no database to
-write them to, the Case would fail for a reason nothing in it explains.
-
-**A Case must bound the widening, not just observe it.** `generated_file_readable_by` on its own
-passes exactly as well against an implementation that shares every generated File with every Role
-in the business. `l3-a-generated-file-reaches-the-agents-team` therefore also asserts
-`generated_file_not_readable_by` for a Role the Agent does not hold. `loadCorpus` refuses a grantee
-that is not spelled `user:<id>` or `role:<id>`, because a typo makes the negative form pass forever
-against a spelling no share can ever hold.
-
-There is deliberately no Case for an Agent holding no Role. It would be green before the feature
-and green after, which proves nothing and costs seat quota on every Sweep; the 173 unit tests in
-`packages/files` cover it.
+`generated_file_draft_created` proves the Chat path stayed outside the persistent Files library.
+Saved-File audience expectations remain available for future Routine L3 coverage:
+`generated_file_readable_by` and `generated_file_not_readable_by`. Their Role assignments come
+from a Case's `agentRoles`, not the soul's advisory `roles:` list.
 
 ### Journeys
 

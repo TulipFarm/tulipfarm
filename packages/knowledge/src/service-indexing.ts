@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { DEPLOYMENT_BUSINESS_ID } from "@tulipfarm/constants";
 import { indexPage as indexPageImpl, reindexAll as reindexAllImpl } from "./index-service";
 import { type RestrictionSubject, setPageRestriction } from "./page-restriction";
 import type { KnowledgeServiceDeps } from "./service";
@@ -64,6 +65,9 @@ export async function ingestSource(
     updatedAt: now,
   };
   const { _id } = await deps.pages.upsertBySource(draft);
+  if (input.readers === undefined) {
+    await deps.ownership?.ensureBusiness(DEPLOYMENT_BUSINESS_ID, "page", _id);
+  }
   // Readership is written before the content is chunked, never after. Reversed, there is a window
   // in which the Page is indexed and still carries its default Business-wide grant, and a question
   // asked inside that window is answered from a File the asker may not read.

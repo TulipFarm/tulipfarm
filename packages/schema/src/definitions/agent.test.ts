@@ -22,6 +22,10 @@ const full = {
   metadata: { ...metadata, displayName: "General Assistant", publishedDigest: "a".repeat(64) },
   spec: {
     owner: "user_01",
+    ownership: {
+      owners: [{ teamId: "123e4567-e89b-42d3-a456-426614174000" }],
+      shares: [{ teamId: "123e4567-e89b-42d3-a456-426614174001", access: "use" }],
+    },
     maintainers: ["user_02"],
     instructions: { path: "instructions.md" },
     personality: "Helpful and precise.",

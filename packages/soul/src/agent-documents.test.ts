@@ -36,6 +36,17 @@ describe("agentDocumentFromLegacy", () => {
     expect(specOf(content).modelPolicy).toEqual({ dataRetention: "none" });
   });
 
+  it("projects Team ownership without changing the Agent's runtime restrictions", () => {
+    const content =
+      "---\nownership:\n  owners:\n    - teamId: 123e4567-e89b-42d3-a456-426614174000\ncapabilityRestrictions:\n  tools:\n    allow:\n      - record_list\n---\nbody\n";
+
+    expect(specOf(content)).toMatchObject({
+      ownership: { owners: [{ teamId: "123e4567-e89b-42d3-a456-426614174000" }] },
+    });
+    expect(specOf(content)).not.toHaveProperty("roles");
+    expect(specOf(content)).not.toHaveProperty("permissionCeiling");
+  });
+
   it("omits personality rather than claiming an empty persona", () => {
     expect(specOf("---\nlabel: Joke Bot\n---\n\n")).not.toHaveProperty("personality");
   });

@@ -34,6 +34,7 @@ Full glossary with banned synonyms: [`metadata/terminologies.md`](metadata/termi
   (table, repo, domain). Never let them bleed. A Conversation holds **Turns**, which hold
   **Messages**.
 - **Agent** — a configured persona with its own instructions, tools and bounded authority.
+- **Team** — a business organizational unit with members, inherited authority, and asset ownership.
 - **Resource type** — a user-defined schema (Ticket, Customer); one instance is a **Record**.
   Never call an instance a "resource".
 - **Routine** — a scheduled or triggered automation, built from **States**. One execution is a

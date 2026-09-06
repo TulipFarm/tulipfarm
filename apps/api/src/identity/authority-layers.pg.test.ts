@@ -5,6 +5,8 @@ import {
   PgGroupRepo,
   PgPrincipalRepo,
   PgRoleRepo,
+  PgTeamRepo,
+  TEAM_STORAGE_STATEMENTS,
 } from "@tulipfarm/storage";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { transactionPort } from "../db";
@@ -33,6 +35,7 @@ describe("ApiAuthorityLayerResolver", () => {
   let principals: PgPrincipalRepo;
   let roles: PgRoleRepo;
   let groups: PgGroupRepo;
+  let teams: PgTeamRepo;
   let resolver: ApiAuthorityLayerResolver;
 
   beforeEach(async () => {
@@ -40,10 +43,14 @@ describe("ApiAuthorityLayerResolver", () => {
     for (const statement of AUTHORIZATION_STORAGE_STATEMENTS) {
       await db.exec(statement);
     }
+    for (const statement of TEAM_STORAGE_STATEMENTS) {
+      await db.exec(statement);
+    }
     const transactions = transactionPort(db);
     principals = new PgPrincipalRepo(transactions);
     roles = new PgRoleRepo(transactions);
     groups = new PgGroupRepo(transactions);
+    teams = new PgTeamRepo(transactions);
     resolver = new ApiAuthorityLayerResolver({ principals, roles, groups, now: () => NOW });
   });
 
@@ -234,6 +241,38 @@ describe("ApiAuthorityLayerResolver", () => {
         requestPrincipal({ id: "service-1", kind: "user", userId: "service-1" })
       )
     ).resolves.toEqual({ name: "user", grants: [] });
+  });
+
+  it("retains direct Principal assignment expiry as explanation evidence", async () => {
+    await principals.put({
+      businessId: BUSINESS_ID,
+      id: "user-1",
+      kind: "user",
+      status: "active",
+    });
+    await roles.putRole({
+      businessId: BUSINESS_ID,
+      id: "temporary",
+      assignableTo: ["user"],
+      parentRoleIds: [],
+      grants: [{ action: "record.read", resourceType: "ticket", effect: "allow" }],
+    });
+    await roles.assign({
+      businessId: BUSINESS_ID,
+      principalId: "user-1",
+      roleId: "temporary",
+      expiresAt: NOW,
+    });
+
+    const diagnosed = await resolver.diagnosePrincipalLayer("user", requestPrincipal());
+    expect(diagnosed.layer.grants).toEqual([]);
+    expect(diagnosed.evidence).toContainEqual({
+      kind: "expiry",
+      effect: "informational",
+      sourcePrincipalId: "user-1",
+      roleId: "temporary",
+      expiresAt: NOW,
+    });
   });
 
   async function seedUserAndGroupRole(
@@ -432,5 +471,278 @@ describe("ApiAuthorityLayerResolver", () => {
       name: "user",
       grants: [],
     });
+  });
+
+  async function createTeam(
+    id: string,
+    slug: string,
+    parentTeamId: string,
+    displayName = slug
+  ): Promise<void> {
+    await teams.putTeam({
+      id,
+      businessId: BUSINESS_ID,
+      slug,
+      displayName,
+      parentTeamId,
+      status: "active",
+      protected: false,
+      revision: 1,
+      createdAt: NOW,
+      updatedAt: NOW,
+    });
+  }
+
+  async function addTeamMember(
+    teamId: string,
+    principalId: string,
+    principalKind: "user" | "agent" = "user",
+    expiresAt?: Date
+  ): Promise<void> {
+    await teams.putMembership({
+      teamId,
+      principalId,
+      principalKind,
+      level: "member",
+      ...(expiresAt ? { expiresAt } : {}),
+      revision: 1,
+      createdAt: NOW,
+      updatedAt: NOW,
+    });
+  }
+
+  async function resolvedRecordReadGrants() {
+    return (await resolver.resolveCallerLayer(requestPrincipal())).grants.filter(
+      (grant) => grant.action === "record.read" && grant.resourceType === "ticket"
+    );
+  }
+
+  function enableTeamAuthority() {
+    resolver = new ApiAuthorityLayerResolver({ principals, roles, groups, teams, now: () => NOW });
+  }
+
+  it("resolves parent authority downward, never child authority upward, with source evidence", async () => {
+    enableTeamAuthority();
+    await principals.put({
+      businessId: BUSINESS_ID,
+      id: "user-1",
+      kind: "user",
+      status: "active",
+    });
+    const everyone = await teams.ensureEveryone(BUSINESS_ID);
+    const parentId = "00000000-0000-4000-8000-000000000101";
+    const childId = "00000000-0000-4000-8000-000000000102";
+    await createTeam(parentId, "engineering", everyone.id);
+    await createTeam(childId, "platform", parentId);
+    await roles.putRole({
+      businessId: BUSINESS_ID,
+      id: "team-reader",
+      assignableTo: ["team"],
+      parentRoleIds: [],
+      grants: [{ action: "record.read", resourceType: "ticket", effect: "allow" }],
+    });
+    await teams.assignRole({ teamId: parentId, roleId: "team-reader", assignedAt: NOW });
+    await addTeamMember(childId, "user-1");
+
+    const diagnosed = await resolver.diagnosePrincipalLayer("user", requestPrincipal());
+    expect(diagnosed.layer.grants).toContainEqual(
+      expect.objectContaining({ action: "record.read", effect: "allow" })
+    );
+    expect(diagnosed.evidence).toContainEqual(
+      expect.objectContaining({
+        kind: "inherited_membership",
+        sourceTeamId: parentId,
+        pathTeamIds: [childId, parentId],
+      })
+    );
+
+    await teams.removeMembership(childId, "user-1");
+    await addTeamMember(parentId, "user-1");
+    await teams.revokeRole(parentId, "team-reader");
+    await teams.assignRole({ teamId: childId, roleId: "team-reader", assignedAt: NOW });
+    await expect(resolvedRecordReadGrants()).resolves.toEqual([]);
+  });
+
+  it("combines multiple Teams and lets a Team deny beat every allow", async () => {
+    enableTeamAuthority();
+    await principals.put({
+      businessId: BUSINESS_ID,
+      id: "user-1",
+      kind: "user",
+      status: "active",
+    });
+    const everyone = await teams.ensureEveryone(BUSINESS_ID);
+    const engineeringId = "00000000-0000-4000-8000-000000000111";
+    const securityId = "00000000-0000-4000-8000-000000000112";
+    await createTeam(engineeringId, "engineering", everyone.id);
+    await createTeam(securityId, "security", everyone.id);
+    await addTeamMember(engineeringId, "user-1");
+    await addTeamMember(securityId, "user-1");
+    await teams.putGrant({
+      id: "00000000-0000-4000-8000-000000000211",
+      teamId: engineeringId,
+      action: "record.read",
+      resourceType: "ticket",
+      effect: "allow",
+      createdAt: NOW,
+      updatedAt: NOW,
+    });
+    await teams.putGrant({
+      id: "00000000-0000-4000-8000-000000000212",
+      teamId: securityId,
+      action: "record.read",
+      resourceType: "ticket",
+      effect: "deny",
+      createdAt: NOW,
+      updatedAt: NOW,
+    });
+
+    const layer = await resolver.resolveCallerLayer(requestPrincipal());
+    expect(
+      decideEffectivePermission([layer], { action: "record.read", resourceType: "ticket" }, NOW)
+    ).toEqual({ allowed: false, reason: "explicit_deny", deniedLayer: "user" });
+  });
+
+  it("applies expiry, move, archive, and revocation on the next resolution", async () => {
+    enableTeamAuthority();
+    await principals.put({
+      businessId: BUSINESS_ID,
+      id: "user-1",
+      kind: "user",
+      status: "active",
+    });
+    const everyone = await teams.ensureEveryone(BUSINESS_ID);
+    const sourceId = "00000000-0000-4000-8000-000000000121";
+    const otherId = "00000000-0000-4000-8000-000000000122";
+    const childId = "00000000-0000-4000-8000-000000000123";
+    await createTeam(sourceId, "source", everyone.id);
+    await createTeam(otherId, "other", everyone.id);
+    await createTeam(childId, "child", sourceId);
+    await addTeamMember(childId, "user-1");
+    await teams.putGrant({
+      id: "00000000-0000-4000-8000-000000000221",
+      teamId: sourceId,
+      action: "record.read",
+      resourceType: "ticket",
+      effect: "allow",
+      createdAt: NOW,
+      updatedAt: NOW,
+    });
+    await expect(resolvedRecordReadGrants()).resolves.toHaveLength(1);
+
+    const child = await teams.getTeam(BUSINESS_ID, childId);
+    if (!child) throw new Error("missing child");
+    await teams.putTeam({
+      ...child,
+      parentTeamId: otherId,
+      revision: 2,
+      updatedAt: new Date(NOW.getTime() + 1),
+    });
+    await expect(resolvedRecordReadGrants()).resolves.toEqual([]);
+
+    await teams.putGrant({
+      id: "00000000-0000-4000-8000-000000000222",
+      teamId: childId,
+      action: "record.read",
+      resourceType: "ticket",
+      effect: "allow",
+      createdAt: NOW,
+      updatedAt: NOW,
+    });
+    await expect(resolvedRecordReadGrants()).resolves.toHaveLength(1);
+    await teams.deleteGrant(childId, "00000000-0000-4000-8000-000000000222");
+    await expect(resolvedRecordReadGrants()).resolves.toEqual([]);
+
+    const movedChild = await teams.getTeam(BUSINESS_ID, childId);
+    if (!movedChild) throw new Error("missing moved child");
+    await teams.putTeam({
+      ...movedChild,
+      status: "archived",
+      archivedAt: NOW,
+      revision: movedChild.revision + 1,
+      updatedAt: new Date(NOW.getTime() + 2),
+    });
+    await expect(resolvedRecordReadGrants()).resolves.toEqual([]);
+
+    const expiringId = "00000000-0000-4000-8000-000000000124";
+    await createTeam(expiringId, "expiring", everyone.id);
+    await addTeamMember(expiringId, "user-1", "user", NOW);
+    await teams.putGrant({
+      id: "00000000-0000-4000-8000-000000000223",
+      teamId: expiringId,
+      action: "record.read",
+      resourceType: "ticket",
+      effect: "allow",
+      createdAt: NOW,
+      updatedAt: NOW,
+    });
+    const expired = await resolver.diagnosePrincipalLayer("user", requestPrincipal());
+    expect(
+      expired.layer.grants.filter(
+        (grant) => grant.action === "record.read" && grant.resourceType === "ticket"
+      )
+    ).toEqual([]);
+    expect(expired.evidence).toContainEqual(
+      expect.objectContaining({ kind: "expiry", sourceTeamId: expiringId })
+    );
+  });
+
+  it("requires Team-targeted Roles and intersects Agent Team authority with the caller", async () => {
+    enableTeamAuthority();
+    await principals.put({
+      businessId: BUSINESS_ID,
+      id: "user-1",
+      kind: "user",
+      status: "active",
+    });
+    await principals.put({
+      businessId: BUSINESS_ID,
+      id: "agent-1",
+      kind: "agent",
+      status: "active",
+    });
+    const everyone = await teams.ensureEveryone(BUSINESS_ID);
+    const callersId = "00000000-0000-4000-8000-000000000131";
+    const agentsId = "00000000-0000-4000-8000-000000000132";
+    await createTeam(callersId, "callers", everyone.id);
+    await createTeam(agentsId, "agents", everyone.id);
+    await addTeamMember(callersId, "user-1");
+    await addTeamMember(agentsId, "agent-1", "agent");
+    await roles.putRole({
+      businessId: BUSINESS_ID,
+      id: "wrong-target",
+      assignableTo: ["user"],
+      parentRoleIds: [],
+      grants: [{ action: "record.read", resourceType: "ticket", effect: "allow" }],
+    });
+    await expect(
+      teams.assignRole({ teamId: callersId, roleId: "wrong-target", assignedAt: NOW })
+    ).rejects.toThrow(/not assignable to Teams/i);
+    await teams.putGrant({
+      id: "00000000-0000-4000-8000-000000000231",
+      teamId: callersId,
+      action: "*",
+      resourceType: "*",
+      effect: "allow",
+      createdAt: NOW,
+      updatedAt: NOW,
+    });
+    await teams.putGrant({
+      id: "00000000-0000-4000-8000-000000000232",
+      teamId: agentsId,
+      action: "record.read",
+      resourceType: "ticket",
+      effect: "allow",
+      createdAt: NOW,
+      updatedAt: NOW,
+    });
+    const layers = await resolver.resolveCallerAndAgentLayers(requestPrincipal(), "agent-1");
+    expect(
+      decideEffectivePermission(layers, { action: "record.read", resourceType: "ticket" }, NOW)
+        .allowed
+    ).toBe(true);
+    expect(
+      decideEffectivePermission(layers, { action: "record.write", resourceType: "ticket" }, NOW)
+    ).toEqual({ allowed: false, reason: "no_matching_allow", deniedLayer: "agent" });
   });
 });

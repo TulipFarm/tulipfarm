@@ -36,7 +36,7 @@ Only its own Cases need updating when their observable behaviour moves.
 | `src/guardrails.ts` | Runs the Eval Soul's `guardrails.yaml` through the production `TurnGuardrails`; collects refusals off the real Run events. |
 | `src/l3/` | The persisted tier: one Turn through the real Chat executor on in-process PGlite. `tier.ts` is the entry point. |
 | `src/l3/soul-write.ts` | The `soul_write` Tool, over the real writer *and* the real publisher, so a Case can tell a commit from a publication. |
-| `src/l3/file-store.ts` | The one place `file_create` runs for real, so a Case can read who a generated File was actually shared with. |
+| `src/l3/file-store.ts` | The one place `file_create` runs for real, so a Case can observe Chat draft versus saved File lifecycle and audience. |
 | `src/verdict.ts` | `caseVerdict`, `scoreable` — one Case collapsed into one word. Shared so the grid and a Baseline delta can never disagree. |
 | `src/baseline.ts` | `compareToBaseline` — pure. Refuses a delta across two Corpora or two models. |
 | `src/artifact.ts` | `ScorecardArtifact` read/write, `harnessVersion`, `baselinePath`. The durable form. |
@@ -75,7 +75,7 @@ before changing how a Case is scored, run or compared.** These are the ones that
 - **`soul_write` and `file_create` are the only Tools L3 runs for real,** routed by name in
   `routeTools`. Each writes something — a commit, a set of shares — that no scripted result could
   stand in for, so scripting one is impossible rather than discouraged.
-- **A generated File's audience comes from `agentRoles`, never the soul's `roles:`,** which is
+- **A saved generated File's audience comes from `agentRoles`, never the soul's `roles:`,** which is
   advisory and writes no `role_assignments`. Pair `generated_file_readable_by` with a
   `generated_file_not_readable_by` for a Role the Agent lacks, or the Case passes just as well
   against an audience that shares every File with everyone.

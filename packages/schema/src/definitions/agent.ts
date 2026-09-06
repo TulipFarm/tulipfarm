@@ -1,4 +1,5 @@
 import { type Static, Type } from "@sinclair/typebox";
+import { TeamBusinessAssetOwnershipSchema } from "../teams";
 import {
   AGENT_AUTONOMY_CEILINGS,
   type AgentAutonomyCeiling,
@@ -33,6 +34,7 @@ const agentLimitsSchema = Type.Object(
 const agentSpecSchema = Type.Object(
   {
     owner: Type.String({ minLength: 1, maxLength: 256 }),
+    ownership: Type.Optional(TeamBusinessAssetOwnershipSchema),
     maintainers: Type.Optional(refListSchema),
     instructions: instructionsReferenceSchema,
     personality: Type.Optional(Type.String({ maxLength: 8192 })),

@@ -220,6 +220,59 @@
           "minLength": 1,
           "type": "string"
         },
+        "ownership": {
+          "additionalProperties": false,
+          "properties": {
+            "owners": {
+              "items": {
+                "additionalProperties": false,
+                "properties": {
+                  "teamId": {
+                    "description": "Permanent Team UUID.",
+                    "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "teamId"
+                ],
+                "type": "object"
+              },
+              "minItems": 1,
+              "type": "array"
+            },
+            "shares": {
+              "items": {
+                "additionalProperties": false,
+                "properties": {
+                  "access": {
+                    "enum": [
+                      "view",
+                      "use",
+                      "edit"
+                    ],
+                    "type": "string"
+                  },
+                  "teamId": {
+                    "description": "Permanent Team UUID.",
+                    "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "teamId",
+                  "access"
+                ],
+                "type": "object"
+              },
+              "type": "array"
+            }
+          },
+          "required": [
+            "owners"
+          ],
+          "type": "object"
+        },
         "permissionCeiling": {
           "additionalProperties": false,
           "properties": {

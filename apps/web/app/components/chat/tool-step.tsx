@@ -4,6 +4,7 @@ import { TraceStep } from "~/components/ui/trace";
 import type { TimelinePart } from "~/lib/chat/types";
 import { useIsAdmin } from "~/lib/use-session-user";
 import { ApprovalCard } from "./approval-card";
+import { FileDraftCard, type FileDraftResult, fileDraftOf } from "./file-draft-card";
 import { SubagentPanel, traceOf } from "./subagent-panel";
 import { ToolInspector, toolHasDetails } from "./tool-inspector";
 import {
@@ -33,15 +34,18 @@ export function ToolStepRow({
   label,
   className,
   onApprove,
+  onReviseDraft,
 }: {
   part: ToolPart;
   label?: string;
   className?: string;
   onApprove?: (approvalId: string, decision: "approve" | "deny") => void;
+  onReviseDraft?: (draft: FileDraftResult) => void;
 }) {
   const ran = summarizeToolCall(part);
   const status = part.status === "running" ? "running" : outcomeOf(part);
   const approval = part.approval;
+  const fileDraft = fileDraftOf(part);
   const isAdmin = useIsAdmin();
   return (
     <>
@@ -77,6 +81,9 @@ export function ToolStepRow({
             onDecide={(decision) => onApprove(approval.approvalId, decision)}
           />
         </div>
+      )}
+      {fileDraft === undefined ? null : (
+        <FileDraftCard draft={fileDraft} onRevise={onReviseDraft} />
       )}
     </>
   );

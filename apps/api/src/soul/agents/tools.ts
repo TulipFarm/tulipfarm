@@ -21,6 +21,7 @@ import {
 import { firstError } from "../../platform/tool-args";
 import { SYSTEM_SOUL_COMMIT_ACTOR } from "../../runtime/soul-writer";
 import { readSoulConfig } from "../../setup/soul-config";
+import type { TeamAssetService } from "../../team-assets/service";
 import { soulCommitError } from "../../tools/soul-faults";
 
 const NAME_RE = /^[a-z][a-z0-9-]*$/;
@@ -33,6 +34,19 @@ export interface AgentToolContext {
   requestContext?: RequestContext;
   /** Which Agent is executing this Turn. Absent outside an Agent Turn. */
   agentId?: string;
+  teamAssets?: TeamAssetService;
+}
+
+function ownershipOf(frontmatter: Record<string, unknown>) {
+  const ownership = frontmatter.ownership;
+  return typeof ownership === "object" && ownership !== null
+    ? (ownership as import("@tulipfarm/schema").TeamBusinessAssetOwnership)
+    : undefined;
+}
+
+function assetPrincipal(ctx: AgentToolContext) {
+  const id = ctx.requestContext?.userId;
+  return id === undefined ? undefined : { id, kind: ctx.requestContext?.subject?.kind ?? "user" };
 }
 
 function reason(e: unknown): string {
@@ -176,16 +190,37 @@ const agentCreate = defineApiTool<AgentToolContext>({
 
     const fmError = frontmatterError(frontmatter);
     if (fmError) return fmError;
+    if (ctx.teamAssets && ownershipOf(frontmatter) === undefined) {
+      return err("validation_error", "Agent ownership must name at least one owning Team");
+    }
 
     const plan = resolveAgentName(ctx.soulLoader.agents, name, frontmatter, onExisting);
     if (plan.outcome === "refuse") return err("validation_error", plan.message);
     if (plan.outcome === "keep") return ok({ created: false, changed: false, ...plan.agent });
+    const principal = assetPrincipal(ctx);
+    if (plan.outcome === "replace" && ctx.teamAssets) {
+      if (!principal) return err("write_denied", "Agent edit access is required");
+      try {
+        await ctx.teamAssets.require(
+          "agent",
+          plan.agent.name,
+          principal,
+          "edit",
+          ownershipOf(plan.agent.frontmatter)
+        );
+      } catch {
+        return err("write_denied", "Agent edit access is required");
+      }
+    }
 
     const created = plan.outcome === "create";
     const target = created ? name : plan.agent.name;
     const failure = await putAgent(ctx, created ? "add" : "update", target, frontmatter, body, () =>
       err("validation_error", "agent already exists")
     );
+    if (!failure && created && ctx.teamAssets) {
+      await ctx.teamAssets.ensure("agent", target, ownershipOf(frontmatter));
+    }
     return failure ?? ok({ name: target, created, changed: true, frontmatter, body });
   },
 });
@@ -237,6 +272,21 @@ const agentUpdate = defineApiTool<AgentToolContext>({
 
     const existing = ctx.soulLoader.agents.get(name);
     if (!existing) return err("not_found", `agent not found: ${name}`);
+    const principal = assetPrincipal(ctx);
+    if (ctx.teamAssets && !principal) return err("write_denied", "Agent edit access is required");
+    if (ctx.teamAssets && principal) {
+      try {
+        await ctx.teamAssets.require(
+          "agent",
+          name,
+          principal,
+          "edit",
+          ownershipOf(existing.frontmatter)
+        );
+      } catch {
+        return err("write_denied", "Agent edit access is required");
+      }
+    }
 
     if (frontmatter !== undefined) {
       const fmError = frontmatterError(frontmatter);
@@ -284,6 +334,21 @@ const agentGet = defineApiTool<AgentToolContext>({
     const { name } = args as { name: string };
     const agent = ctx.soulLoader.agents.get(name);
     if (!agent) return err("not_found", `agent not found: ${name}`);
+    const principal = assetPrincipal(ctx);
+    if (ctx.teamAssets) {
+      if (!principal) return err("not_found", `agent not found: ${name}`);
+      try {
+        await ctx.teamAssets.require(
+          "agent",
+          name,
+          principal,
+          "view",
+          ownershipOf(agent.frontmatter)
+        );
+      } catch {
+        return err("not_found", `agent not found: ${name}`);
+      }
+    }
     return ok({ name: agent.name, frontmatter: agent.frontmatter, body: agent.body });
   },
 });
@@ -312,10 +377,29 @@ const agentList = defineApiTool<AgentToolContext>({
   requiresApproval: false,
   handler: async (args, ctx) => {
     if (!validateList(args)) return err("validation_error", firstError(validateList.errors));
-    const agents = Array.from(ctx.soulLoader.agents.values()).map(({ name, frontmatter }) => ({
-      name,
-      frontmatter,
-    }));
+    const listed = Array.from(ctx.soulLoader.agents.values());
+    const principal = assetPrincipal(ctx);
+    const visible =
+      ctx.teamAssets === undefined
+        ? listed
+        : principal === undefined
+          ? []
+          : (
+              await Promise.all(
+                listed.map(async (agent) => ({
+                  agent,
+                  access: await ctx.teamAssets?.access(
+                    "agent",
+                    agent.name,
+                    principal,
+                    ownershipOf(agent.frontmatter)
+                  ),
+                }))
+              )
+            )
+              .filter(({ access }) => access?.levels.includes("view"))
+              .map(({ agent }) => agent);
+    const agents = visible.map(({ name, frontmatter }) => ({ name, frontmatter }));
     return ok({ agents });
   },
 });
@@ -328,6 +412,10 @@ const DELETE_SCHEMA = {
   additionalProperties: false,
   properties: {
     name: { type: "string", minLength: 1, description: "Agent name to delete." },
+    ownershipOperationId: {
+      type: "string",
+      description: "Completed unanimous owner Approval operation for this deletion.",
+    },
   },
 } as const;
 
@@ -349,9 +437,27 @@ const agentDelete = defineApiTool<AgentToolContext>({
   requiresApproval: false,
   handler: async (args, ctx) => {
     if (!validateDelete(args)) return err("validation_error", firstError(validateDelete.errors));
-    const { name } = args as { name: string };
+    const { name, ownershipOperationId } = args as {
+      name: string;
+      ownershipOperationId?: string;
+    };
 
     if (!ctx.soulLoader.agents.has(name)) return err("not_found", `agent not found: ${name}`);
+    if (ctx.teamAssets) {
+      if (!ownershipOperationId) {
+        return err("write_denied", "Agent deletion requires unanimous owner Approval");
+      }
+      try {
+        await ctx.teamAssets.consumeLifecycleApproval(
+          "agent",
+          name,
+          "delete",
+          ownershipOperationId
+        );
+      } catch {
+        return err("write_denied", "Agent deletion requires unanimous owner Approval");
+      }
+    }
 
     try {
       await ctx.soulWriter.apply({
@@ -368,6 +474,7 @@ const agentDelete = defineApiTool<AgentToolContext>({
       return err("internal_error", reason(e));
     }
 
+    await ctx.teamAssets?.remove("agent", name);
     return ok({ name, deleted: true });
   },
 });

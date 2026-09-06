@@ -33,8 +33,8 @@ test("a nav item's declared label is the one the top bar shows", () => {
 });
 
 test("a child route keeps its parent page's identity", () => {
-  expect(titleForPath("/business/access/teams")).toBe("People & access");
-  expect(titleForPath("/business/access/check")).toBe("People & access");
+  expect(titleForPath("/teams")).toBe("Teams");
+  expect(titleForPath("/business/access/check")).toBe("People");
 });
 
 test("identifies every route that swaps the app sidebar into Settings mode", () => {
@@ -42,7 +42,7 @@ test("identifies every route that swaps the app sidebar into Settings mode", () 
     "/settings",
     "/settings/profile",
     "/business/models",
-    "/business/access/teams",
+    "/business/access/check",
     "/integrations/github",
     "/operations",
     "/design-guide",
@@ -52,6 +52,7 @@ test("identifies every route that swaps the app sidebar into Settings mode", () 
   for (const path of ["/", "/resources", "/business/activities", "/farm"]) {
     expect(isSettingsPath(path)).toBe(false);
   }
+  expect(isSettingsPath("/teams")).toBe(false);
 });
 
 /* `/business/people` redirects in-shell, so its transient label must stay explicit. */
@@ -66,6 +67,7 @@ test("hides every denied destination and collapses its empty groups", () => {
       items: [
         expect.objectContaining({ label: "Chats" }),
         expect.objectContaining({ label: "Activity" }),
+        expect.objectContaining({ label: "Teams" }),
       ],
     }),
   ]);
@@ -75,7 +77,10 @@ test("hides every denied destination and collapses its empty groups", () => {
 test("keeps Chat reachable for an account granted nothing", () => {
   const groups = visibleSidebarGroups({ isDev: false, visiblePaths: [] });
 
-  expect(groups.flatMap((group) => group.items).map((item) => item.to)).toEqual(["/chats"]);
+  expect(groups.flatMap((group) => group.items).map((item) => item.to)).toEqual([
+    "/chats",
+    "/teams",
+  ]);
 });
 
 /*
@@ -123,7 +128,7 @@ test("shows the design guide only to a developer", () => {
 
 /* A shorter path must not swallow a longer sibling that shares its prefix. */
 test("resolves a path to the most specific nav item that owns it", () => {
-  expect(sectionForPath("/business/access/teams")?.label).toBe("People & access");
+  expect(sectionForPath("/teams")?.label).toBe("Teams");
   expect(sectionForPath("/settings/profile")?.label).toBe("Profile");
   expect(sectionForPath("/knowledge/spaces/ops")?.label).toBe("Knowledge");
   expect(sectionForPath("/chat/c1")).toBeUndefined();

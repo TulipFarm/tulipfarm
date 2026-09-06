@@ -36,9 +36,15 @@ export const ALLOWED_MEDIA_TYPES = [
   "image/gif",
   "image/webp",
   "application/pdf",
+  "application/json",
+  "application/xml",
+  "application/yaml",
   "text/plain",
   "text/markdown",
   "text/csv",
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  "application/vnd.openxmlformats-officedocument.presentationml.presentation",
 ] as const;
 
 export type AllowedMediaType = (typeof ALLOWED_MEDIA_TYPES)[number];
@@ -47,6 +53,24 @@ const ALLOWED = new Set<string>(ALLOWED_MEDIA_TYPES);
 
 export function isAllowedMediaType(mediaType: string): mediaType is AllowedMediaType {
   return ALLOWED.has(mediaType);
+}
+
+const OFFICE_MEDIA_TYPE_BY_EXTENSION = new Map<string, AllowedMediaType>([
+  ["docx", "application/vnd.openxmlformats-officedocument.wordprocessingml.document"],
+  ["xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"],
+  ["pptx", "application/vnd.openxmlformats-officedocument.presentationml.presentation"],
+]);
+
+/**
+ * The allowed upload claim for a browser File.
+ *
+ * Some browsers report OOXML Files as `application/zip` or no type at all. Their extension is
+ * only used to make the claim; the server still verifies the ZIP entries before storing it.
+ */
+export function uploadMediaType(mediaType: string, filename: string): AllowedMediaType | null {
+  if (isAllowedMediaType(mediaType)) return mediaType;
+  const extension = filename.toLowerCase().split(".").pop() ?? "";
+  return OFFICE_MEDIA_TYPE_BY_EXTENSION.get(extension) ?? null;
 }
 
 /**
@@ -81,7 +105,14 @@ export function isImageMediaType(mediaType: string): boolean {
  * split from the type rather than from the caller is what stops an image being described as
  * mojibake.
  */
-export const TEXTUAL_MEDIA_TYPES = ["text/plain", "text/markdown", "text/csv"] as const;
+export const TEXTUAL_MEDIA_TYPES = [
+  "application/json",
+  "application/xml",
+  "application/yaml",
+  "text/plain",
+  "text/markdown",
+  "text/csv",
+] as const;
 
 const TEXTUAL = new Set<string>(TEXTUAL_MEDIA_TYPES);
 

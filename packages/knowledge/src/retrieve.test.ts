@@ -204,6 +204,61 @@ describe("retrieve", () => {
     expect(result.exclusions).toEqual([{ reason: "source_unverifiable", count: 1 }]);
   });
 
+  it("projects Team-owned supported sources into the same live ACL decision", async () => {
+    const sources = new InMemoryKnowledgeSourceStore([source("team-handbook", [])]);
+    const index = new InMemoryKnowledgeIndex([
+      {
+        businessId: "biz-1",
+        sourceId: "team-handbook",
+        chunkId: "team-handbook#0",
+        revision: "r1",
+        classification: ["internal"],
+        digest: "d".repeat(64),
+        text: "support rotation",
+      },
+    ]);
+    let member = true;
+    const deps = {
+      sources,
+      index,
+      now,
+      principalResolver: {
+        async resolve() {
+          return member
+            ? [
+                { kind: "user", id: "user-1" },
+                { kind: "team", id: "team-support" },
+              ]
+            : [{ kind: "user", id: "user-1" }];
+        },
+      },
+      ownership: {
+        async entriesFor() {
+          return new Map([
+            [
+              "source:team-handbook",
+              [
+                {
+                  subjectKind: "source" as const,
+                  subjectId: "team-handbook",
+                  principal: { kind: "team", id: "team-support" },
+                  effect: "grant" as const,
+                  capability: "read" as const,
+                },
+              ],
+            ],
+          ]);
+        },
+      },
+    };
+
+    expect((await retrieve(deps, { ...request, query: "rotation" })).candidates).toHaveLength(1);
+    member = false;
+    const revoked = await retrieve(deps, { ...request, query: "rotation" });
+    expect(revoked.candidates).toEqual([]);
+    expect(JSON.stringify(revoked)).not.toContain("team-handbook");
+  });
+
   describe("cache key", () => {
     it("changes with the principal", () => {
       const other = {

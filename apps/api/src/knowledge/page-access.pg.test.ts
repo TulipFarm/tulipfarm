@@ -10,7 +10,14 @@
 
 import { randomUUID } from "node:crypto";
 import type { PGlite } from "@electric-sql/pglite";
-import { PgKnowledgeAclRepo } from "@tulipfarm/knowledge";
+import { AssetOwnershipAccessService, TeamService } from "@tulipfarm/authz";
+import { KnowledgeOwnershipProjector, PgKnowledgeAclRepo } from "@tulipfarm/knowledge";
+import {
+  PgAssetOwnershipRepo,
+  PgPrincipalRepo,
+  PgTeamRepo,
+  type TransactionPort,
+} from "@tulipfarm/storage";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { makeMigratedPglite } from "../test/pglite";
 import { PageReadGate } from "./page-access";
@@ -23,6 +30,7 @@ describe("authored Page read gate", () => {
   let db: PGlite;
   let acl: PgKnowledgeAclRepo;
   let gate: PageReadGate;
+  let ownership: PgAssetOwnershipRepo;
   let alice: string;
   let bob: string;
 
@@ -76,10 +84,33 @@ describe("authored Page read gate", () => {
   beforeEach(async () => {
     db = await makeMigratedPglite();
     acl = new PgKnowledgeAclRepo(db);
-    gate = new PageReadGate({
+    const queryable = {
       query: async <Row = Record<string, unknown>>(text: string, params?: readonly unknown[]) =>
         db.query<Row>(text, params === undefined ? undefined : [...params]),
+    };
+    const transactions: TransactionPort = {
+      withTransaction: async (task) => task(queryable),
+    };
+    ownership = new PgAssetOwnershipRepo(transactions);
+    const teams = new PgTeamRepo(transactions);
+    const access = new AssetOwnershipAccessService({
+      ownership,
+      memberships: new TeamService({
+        teams,
+        principals: new PgPrincipalRepo(transactions),
+        lifecycleGuard: {
+          async assertArchiveReady() {},
+          async assertDeleteReady() {},
+        },
+        facts: { async emit() {} },
+      }),
+      everyoneTeamId: async (businessId) => (await teams.ensureEveryone(businessId)).id,
     });
+    gate = new PageReadGate(
+      queryable,
+      BUSINESS,
+      new KnowledgeOwnershipProjector(ownership, access)
+    );
     await db.query(
       `INSERT INTO knowledge_spaces (id, name, created_at, updated_at)
        VALUES ($1, 'ops', now(), now()) ON CONFLICT DO NOTHING`,
@@ -180,12 +211,111 @@ describe("authored Page read gate", () => {
       await blanketPage("d"),
     ];
     await counted.readablePageIds(alice, ids);
-    expect(queries).toBeLessThanOrEqual(5);
+    expect(queries).toBeLessThanOrEqual(6);
   });
 
   it("returns an empty listing rather than failing when nothing is readable", async () => {
     const secret = await blanketPage("salaries");
     await restrictTo(secret, alice);
     expect(await gate.readablePageIds(bob, [secret])).toEqual({ allowed: [], excluded: 1 });
+  });
+
+  it("projects Team ownership through the ACL decision and revokes it on the next read", async () => {
+    const page = randomUUID();
+    const team = randomUUID();
+    const child = randomUUID();
+    const everyone = (
+      await db.query<{ id: string }>(
+        "SELECT id::text AS id FROM teams WHERE business_id = $1 AND slug = 'everyone'",
+        [BUSINESS]
+      )
+    ).rows[0]?.id;
+    expect(everyone).toBeDefined();
+    await db.query(
+      `INSERT INTO teams (id, business_id, slug, display_name, parent_team_id)
+       VALUES ($1, $2, 'support', 'Support', $3)`,
+      [team, BUSINESS, everyone]
+    );
+    await db.query(
+      `INSERT INTO teams (id, business_id, slug, display_name, parent_team_id)
+       VALUES ($1, $2, 'support-emea', 'Support EMEA', $3)`,
+      [child, BUSINESS, team]
+    );
+    await db.query(
+      `INSERT INTO team_memberships (team_id, principal_id, principal_kind, level)
+       VALUES ($1, $2, 'user', 'member')`,
+      [child, bob]
+    );
+    await db.query(
+      `INSERT INTO team_memberships (team_id, principal_id, principal_kind, level)
+       VALUES ($1, $2, 'user', 'admin')`,
+      [team, alice]
+    );
+    await db.query(
+      `INSERT INTO knowledge_pages
+         (id, title, content, plain_text, source, source_id, tags, created_at, updated_at, space_id, path)
+       VALUES ($1, 'team-only', 'c', 'c', 'authored', 'team-only', '{}', now(), now(), $2, 'team-only')`,
+      [page, SPACE]
+    );
+    await ownership.create({
+      businessId: BUSINESS,
+      assetType: "knowledge",
+      assetId: `page:${page}`,
+      owners: [{ kind: "team", teamId: team }],
+      shares: [],
+      revision: 1,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    });
+
+    expect(await gate.canRead(bob, page)).toBe(true);
+    expect(await gate.canRead(alice, page)).toBe(true);
+    expect(await gate.canEdit?.(alice, "page", page)).toBe(true);
+    expect(await gate.canEdit?.(bob, "page", page)).toBe(false);
+    await db.query("DELETE FROM team_memberships WHERE team_id = $1 AND principal_id = $2", [
+      child,
+      bob,
+    ]);
+    expect(await gate.canRead(bob, page)).toBe(false);
+  });
+
+  it("keeps personally owned Knowledge private", async () => {
+    const page = randomUUID();
+    await db.query(
+      `INSERT INTO knowledge_pages
+         (id, title, content, plain_text, source, source_id, tags, created_at, updated_at, space_id, path)
+       VALUES ($1, 'private', 'c', 'c', 'authored', 'private', '{}', now(), now(), $2, 'private')`,
+      [page, SPACE]
+    );
+    await ownership.create({
+      businessId: BUSINESS,
+      assetType: "knowledge",
+      assetId: `page:${page}`,
+      owners: [{ kind: "principal", principalId: alice, principalKind: "user" }],
+      shares: [],
+      revision: 1,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    });
+
+    expect(await gate.canRead(alice, page)).toBe(true);
+    expect(await gate.canRead(bob, page)).toBe(false);
+  });
+
+  it("keeps a blanket-granted Page readable when it also has a personal owner", async () => {
+    const page = await blanketPage("handbook");
+    await ownership.create({
+      businessId: BUSINESS,
+      assetType: "knowledge",
+      assetId: `page:${page}`,
+      owners: [{ kind: "principal", principalId: alice, principalKind: "user" }],
+      shares: [],
+      revision: 1,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    });
+
+    expect(await gate.canRead(alice, page)).toBe(true);
+    expect(await gate.canRead(bob, page)).toBe(true);
   });
 });

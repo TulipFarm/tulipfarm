@@ -18,7 +18,6 @@ import type { PGlite } from "@electric-sql/pglite";
 import { DEPLOYMENT_BUSINESS_ID } from "@tulipfarm/constants";
 import { FileService, PgFileRepo } from "@tulipfarm/files";
 import {
-  type EmbeddingPort,
   KnowledgeService,
   PageRetrievalService,
   PgKnowledgeAclRepo,
@@ -264,7 +263,7 @@ describe("files in knowledge", () => {
   });
 
   it("does not index a File merely because it was uploaded", async () => {
-    const id = await upload();
+    await upload();
     expect(h.sent).toHaveLength(0);
     const res = await h.app.inject({
       method: "GET",
@@ -403,7 +402,7 @@ describe("files in knowledge", () => {
     expect(results.map((hit) => hit.pageId)).toContain(pageId);
   });
 
-  it("takes the chunks with the File, so retrieval cannot quote what was deleted", async () => {
+  it("takes the chunks out when the File is archived, so retrieval cannot quote it", async () => {
     const id = await upload();
     const pageId = await indexAs(id);
     const before = await h.chunks.listByPageForDiff(pageId);
@@ -411,21 +410,54 @@ describe("files in knowledge", () => {
 
     const { headers, cookies } = auth(h.ownerSid);
     const res = await h.app.inject({
-      method: "DELETE",
-      url: `/api/v1/files/${id}`,
+      method: "POST",
+      url: `/api/v1/files/${id}/archive`,
       cookies,
       headers,
+      payload: { expectedRevision: 1 },
     });
-    expect(res.statusCode).toBe(204);
+    expect(res.statusCode).toBe(200);
     expect(await h.chunks.listByPageForDiff(pageId)).toHaveLength(0);
     expect(await h.pages.getBySource("file", id)).toBeNull();
   });
 
-  it("un-indexes before destroying, so a half-done delete cannot strand a quotable Page", async () => {
-    // The File delete fails *after* the Page removal. The safe residue is a File that still exists
-    // and is merely no longer indexed — never a Page whose File is gone, which nothing could clean
-    // up because a second DELETE answers 404.
-    const broken = await harness();
+  it("remembers Knowledge opt-in and re-enqueues after archive restore", async () => {
+    const id = await uploadText();
+    const owner = auth(h.ownerSid);
+    await h.app.inject({
+      method: "POST",
+      url: `/api/v1/files/${id}/knowledge`,
+      ...owner,
+    });
+    await indexAs(id);
+
+    await h.app.inject({
+      method: "POST",
+      url: `/api/v1/files/${id}/archive`,
+      ...owner,
+      payload: { expectedRevision: 1 },
+    });
+    const restored = await h.app.inject({
+      method: "POST",
+      url: `/api/v1/files/${id}/restore`,
+      ...owner,
+      payload: { expectedRevision: 2 },
+    });
+
+    expect(restored.statusCode).toBe(200);
+    expect(h.sent.filter((job) => job.name === FILE_INDEX_QUEUE)).toHaveLength(2);
+  });
+
+  it("does not archive when Knowledge removal fails", async () => {
+    const broken = await harness((bridge) => {
+      const failing = Object.create(bridge) as FileKnowledgeBridge;
+      Object.defineProperty(failing, "remove", {
+        value: async () => {
+          throw new Error("knowledge unavailable");
+        },
+      });
+      return failing;
+    });
     const id = await (async () => {
       const { headers, cookies } = auth(broken.ownerSid);
       const res = await broken.app.inject({
@@ -450,18 +482,19 @@ describe("files in knowledge", () => {
     });
     if (page === null) throw new Error("no page");
 
-    broken.files.delete = async () => {
-      throw new Error("blob store unreachable");
-    };
     const { headers, cookies } = auth(broken.ownerSid);
     const res = await broken.app.inject({
-      method: "DELETE",
-      url: `/api/v1/files/${id}`,
+      method: "POST",
+      url: `/api/v1/files/${id}/archive`,
       cookies,
       headers,
+      payload: { expectedRevision: 1 },
     });
     expect(res.statusCode).toBe(500);
-    expect(await broken.chunks.listByPageForDiff(page._id)).toHaveLength(0);
+    expect(
+      (await broken.files.read(DEPLOYMENT_BUSINESS_ID, id, broken.ownerId)).archivedAt
+    ).toBeNull();
+    expect(await broken.chunks.listByPageForDiff(page._id)).not.toHaveLength(0);
     await broken.app.close();
     await broken.db.close();
   });

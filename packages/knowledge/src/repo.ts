@@ -77,6 +77,7 @@ export interface KnowledgePageRepo {
   /** Idempotent for resource/conversation sources; returns the canonical id + version. */
   upsertBySource(page: KnowledgePage): Promise<{ _id: string; version: number }>;
   getById(id: string): Promise<KnowledgePage | null>;
+  getManyById(ids: readonly string[]): Promise<KnowledgePage[]>;
   /**
    * The Page a given source produced, active or not.
    *
@@ -176,6 +177,19 @@ export class PgKnowledgePageRepo implements KnowledgePageRepo {
       id,
     ]);
     return rows[0] ? rowToPage(rows[0]) : null;
+  }
+
+  async getManyById(ids: readonly string[]): Promise<KnowledgePage[]> {
+    if (ids.length === 0) return [];
+    const { rows } = await this.q.query(
+      `SELECT ${PAGE_COLS} FROM knowledge_pages WHERE id::text = ANY($1::text[])`,
+      [[...ids]]
+    );
+    const byId = new Map(rows.map((row) => [String(row.id), rowToPage(row)]));
+    return ids.flatMap((id) => {
+      const page = byId.get(id);
+      return page === undefined ? [] : [page];
+    });
   }
 
   async getBySource(source: KnowledgeSource, sourceId: string): Promise<KnowledgePage | null> {

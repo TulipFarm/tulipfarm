@@ -192,6 +192,26 @@ describe("resolveSkills", () => {
     expect(resolution).not.toHaveProperty("grants");
   });
 
+  it("does not treat Skill Team ownership as runtime authority", () => {
+    const ownedSkill = {
+      ...skill({ requiredToolAbilities: ["github.issue.read"] }),
+      ownership: {
+        owners: [{ teamId: "123e4567-e89b-42d3-a456-426614174000" }],
+      },
+    };
+    const resolution = resolveSkills({
+      ...base,
+      grantedToolAbilities: ["github.issue.read"],
+      selections: [{ skillId: "triage", version: "1.0.0" }],
+      catalog: catalog(ownedSkill),
+    });
+
+    if (resolution.outcome !== "resolved") throw new Error(resolution.reason);
+    expect(resolution.abilities).toEqual(["github.issue.read"]);
+    expect(resolution).not.toHaveProperty("ownership");
+    expect(resolution).not.toHaveProperty("grants");
+  });
+
   it("denies when resolved Skills exceed the Context budget", () => {
     expect(
       resolveSkills({

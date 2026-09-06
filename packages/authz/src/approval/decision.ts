@@ -32,6 +32,8 @@ export class ApprovalDeniedError extends Error {
 export interface ApprovalDecisionRecord {
   readonly approverPrincipalId: string;
   readonly approverRoles: readonly string[];
+  /** The one required role this decision represents when Approval requires named constituencies. */
+  readonly satisfiedApproverRole?: string;
   readonly outcome: ApprovalOutcome;
   readonly decidedAt: Date;
 }
@@ -43,6 +45,8 @@ export interface ApprovalRecord {
   readonly risk: ApprovalRiskLevel;
   /** Roles that may decide this Approval; an approver needs at least one of them. */
   readonly allowedApproverRoles: readonly string[];
+  /** Every listed role must be represented by a distinct qualified approval decision. */
+  readonly requiredApproverRoles?: readonly string[];
   /** Principal that proposed the action — separation of duties bars it from approving. */
   readonly proposerPrincipalId: string;
   /** Principal that will perform the action, when it differs from the proposer. */
@@ -137,17 +141,33 @@ export function assertApprovalUsable(
     throw new ApprovalDeniedError("denied", `Approval ${record.approvalId} was denied`);
   }
   const prohibited = prohibitedApprovers(record);
-  const approvers = new Set(
-    record.decisions
-      .filter(
-        (entry) =>
-          entry.outcome === "approved" &&
-          !prohibited.includes(entry.approverPrincipalId) &&
-          entry.approverRoles.some((role) => record.allowedApproverRoles.includes(role))
-      )
-      .map((entry) => entry.approverPrincipalId)
+  const qualifiedDecisions = record.decisions.filter(
+    (entry) =>
+      entry.outcome === "approved" &&
+      !prohibited.includes(entry.approverPrincipalId) &&
+      entry.approverRoles.some((role) => record.allowedApproverRoles.includes(role))
   );
-  if (approvers.size < requiredApproverCount(record.risk)) {
+  if (
+    record.requiredApproverRoles?.some(
+      (requiredRole) =>
+        !qualifiedDecisions.some(
+          (entry) =>
+            entry.satisfiedApproverRole === requiredRole &&
+            entry.approverRoles.includes(requiredRole)
+        )
+    )
+  ) {
+    throw new ApprovalDeniedError(
+      "insufficient_approvals",
+      `Approval ${record.approvalId} lacks a decision from every required approver role`
+    );
+  }
+  const approvers = new Set(qualifiedDecisions.map((entry) => entry.approverPrincipalId));
+  const required =
+    record.requiredApproverRoles && record.requiredApproverRoles.length > 0
+      ? record.requiredApproverRoles.length
+      : requiredApproverCount(record.risk);
+  if (approvers.size < required) {
     throw new ApprovalDeniedError(
       "insufficient_approvals",
       `Approval ${record.approvalId} lacks the required number of qualified approvers`

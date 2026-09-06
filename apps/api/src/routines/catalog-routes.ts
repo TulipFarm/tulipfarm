@@ -1,5 +1,6 @@
 import type { RoutineCatalog } from "@tulipfarm/soul";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
+import type { TeamAssetService } from "../team-assets/service";
 
 type PreHandler = (request: FastifyRequest, reply: FastifyReply) => Promise<unknown>;
 
@@ -39,6 +40,7 @@ const summarySchema = {
   ],
   properties: {
     owner: { type: ["string", "null"] },
+    ownership: { type: "object", additionalProperties: true },
     stateCount: { type: "integer", minimum: 0 },
     stateTypes: { type: "array", items: { type: "string" } },
     effects: { type: "array", items: { type: "string" } },
@@ -66,7 +68,8 @@ export const routineSchema = {
 export function registerRoutineCatalogRoutes(
   app: FastifyInstance,
   catalog: RoutineCatalog,
-  requireAuth: PreHandler
+  requireAuth: PreHandler,
+  teamAssets?: TeamAssetService
 ): void {
   app.get(
     "/api/v1/routines",
@@ -87,9 +90,26 @@ export function registerRoutineCatalogRoutes(
         },
       },
     },
-    async (_request, reply) => {
+    async (request, reply) => {
       try {
-        return { items: await catalog.list() };
+        const items = await catalog.list();
+        if (!teamAssets || !request.principal) return { items };
+        const visible = await Promise.all(
+          items.map(async (item) => ({
+            item,
+            access: await teamAssets.access(
+              "routine",
+              item.id,
+              request.principal as NonNullable<typeof request.principal>,
+              item.summary.ownership ?? undefined
+            ),
+          }))
+        );
+        return {
+          items: visible
+            .filter(({ access }) => access.levels.includes("view"))
+            .map(({ item }) => item),
+        };
       } catch (error) {
         app.log.error({ err: error }, "Routine catalogue could not read the active bundle");
         return reply.status(503).send({ error: "Active Routine catalogue is unavailable." });

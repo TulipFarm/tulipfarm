@@ -1,6 +1,11 @@
 import { DEPLOYMENT_BUSINESS_ID } from "@tulipfarm/constants";
 import type { PaginatedResult } from "@tulipfarm/storage";
-import { InMemoryGroupRepo, InMemoryPrincipalRepo, InMemoryRoleRepo } from "@tulipfarm/storage";
+import {
+  InMemoryGroupRepo,
+  InMemoryPrincipalRepo,
+  InMemoryRoleRepo,
+  InMemoryTeamRepo,
+} from "@tulipfarm/storage";
 import type { FastifyInstance } from "fastify";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { buildApp } from "../app";
@@ -71,6 +76,7 @@ describe("authz admin routes", () => {
   let memberSid: string;
   let roles: InMemoryRoleRepo;
   let groups: InMemoryGroupRepo;
+  let teams: InMemoryTeamRepo;
   let principals: InMemoryPrincipalRepo;
   let audits: AuditRecordInput[];
 
@@ -85,6 +91,7 @@ describe("authz admin routes", () => {
 
     roles = new InMemoryRoleRepo();
     groups = new InMemoryGroupRepo();
+    teams = new InMemoryTeamRepo();
     principals = new InMemoryPrincipalRepo();
     audits = [];
 
@@ -109,14 +116,49 @@ describe("authz admin routes", () => {
       parentRoleIds: [],
       grants: [],
     });
+    await roles.putRole({
+      id: "team-support",
+      businessId: BUSINESS,
+      assignableTo: ["team"],
+      parentRoleIds: [],
+      grants: [{ action: "record.read", resourceType: "ticket", effect: "allow" }],
+    });
 
     await principals.put({ id: "p-user", businessId: BUSINESS, kind: "user", status: "active" });
     await principals.put({ id: "p-two", businessId: BUSINESS, kind: "user", status: "active" });
     // Durable Agent with no roles must differ from a missing principal.
     await principals.put({ id: "a-bare", businessId: BUSINESS, kind: "agent", status: "active" });
     await roles.assign({ businessId: BUSINESS, principalId: "p-user", roleId: "support" });
+    const everyone = await teams.ensureEveryone(BUSINESS);
+    const supportTeamId = "00000000-0000-4000-8000-000000000301";
+    await teams.putTeam({
+      id: supportTeamId,
+      businessId: BUSINESS,
+      slug: "support",
+      displayName: "Support",
+      parentTeamId: everyone.id,
+      status: "active",
+      protected: false,
+      revision: 1,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    });
+    await teams.putMembership({
+      teamId: supportTeamId,
+      principalId: "p-user",
+      principalKind: "user",
+      level: "member",
+      revision: 1,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    });
+    await teams.assignRole({
+      teamId: supportTeamId,
+      roleId: "team-support",
+      assignedAt: new Date(),
+    });
 
-    const resolver = new LiveAuthorityLayerResolver({ principals, roles, groups });
+    const resolver = new LiveAuthorityLayerResolver({ principals, roles, groups, teams });
     const service = new AuthzAdminService({
       roles,
       groups,
@@ -224,7 +266,28 @@ describe("authz admin routes", () => {
         explain({ principalId: "p-user", action: "record.read", resourceType: "ticket" })
       );
       expect(res.statusCode).toBe(200);
-      expect(res.json()).toMatchObject({ allowed: true, reason: "allowed", kind: "user" });
+      expect(res.json()).toMatchObject({
+        allowed: true,
+        reason: "allowed",
+        kind: "user",
+        evidence: expect.arrayContaining([
+          expect.objectContaining({ kind: "role", sourcePrincipalId: "p-user" }),
+          expect.objectContaining({
+            kind: "direct_membership",
+            sourceTeamId: "00000000-0000-4000-8000-000000000301",
+          }),
+          expect.objectContaining({
+            kind: "role",
+            sourceTeamId: "00000000-0000-4000-8000-000000000301",
+            roleId: "team-support",
+          }),
+          expect.objectContaining({
+            kind: "authority_layer",
+            authorityLayer: "user",
+            effect: "allow",
+          }),
+        ]),
+      });
     });
 
     it("denies an uncovered request and names the denying layer", async () => {
@@ -269,6 +332,13 @@ describe("authz admin routes", () => {
       // An empty Agent layer narrows the caller layer, proving one-layer answers are unsafe.
       expect(body.allowed).toBe(false);
       expect(body.deniedLayer).toBe("agent");
+      expect(body.evidence).toContainEqual(
+        expect.objectContaining({
+          kind: "authority_layer",
+          authorityLayer: "agent",
+          effect: "deny",
+        })
+      );
     });
 
     it("names why an evaluated layer is empty instead of passing a data fault off as policy", async () => {
@@ -438,7 +508,7 @@ describe("authz admin routes", () => {
       );
       expect(detail.json().roles.map((r: { roleId: string }) => r.roleId)).toContain("support");
 
-      // Assert against `p-two`, which has no direct assignment, to prove group inheritance.
+      // Compatibility-group rows no longer grant authority after the Team cutover.
       await app.inject({
         method: "POST",
         url: "/api/v1/authz/groups/ops/members",
@@ -451,9 +521,7 @@ describe("authz admin routes", () => {
         url: "/api/v1/authz/principals/p-two/grants",
         cookies: { [SESSION_COOKIE]: adminSid },
       });
-      expect(grants.json().grants).toContainEqual(
-        expect.objectContaining({ action: "record.read", resourceType: "ticket" })
-      );
+      expect(grants.json().grants).toEqual([]);
 
       const deleted = await app.inject({
         method: "DELETE",

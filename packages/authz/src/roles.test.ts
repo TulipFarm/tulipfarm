@@ -78,6 +78,11 @@ describe("assertRoleAssignable", () => {
     ).not.toThrow();
   });
 
+  it("allows a Team-targeted role for a Team", () => {
+    const team = { kind: "team", businessId: "business-1" } as const;
+    expect(() => assertRoleAssignable(role({ assignableTo: ["team"] }), team, NOW)).not.toThrow();
+  });
+
   it("denies a user role for an Agent and vice versa", () => {
     expect(() => assertRoleAssignable(role(), agent, NOW)).toThrow(RoleAssignmentError);
     expect(() => assertRoleAssignable(role({ assignableTo: ["agent"] }), user, NOW)).toThrow(

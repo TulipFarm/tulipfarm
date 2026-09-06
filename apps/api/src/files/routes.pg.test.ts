@@ -10,15 +10,22 @@ import { createHash, randomUUID } from "node:crypto";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { gunzipSync } from "node:zlib";
 import { PGlite } from "@electric-sql/pglite";
 import { citext } from "@electric-sql/pglite/contrib/citext";
 import { pg_trgm } from "@electric-sql/pglite/contrib/pg_trgm";
 import { vector } from "@electric-sql/pglite-pgvector";
+import { DEPLOYMENT_BUSINESS_ID } from "@tulipfarm/constants";
 import {
+  FILE_DRAFT_STATEMENTS,
+  FILE_FOLDER_STATEMENTS,
   FILE_KNOWLEDGE_STATEMENTS,
   FILE_ORIGIN_STATEMENTS,
   FILE_SHARE_STATEMENTS,
   FILE_STORAGE_STATEMENTS,
+  FILE_VERSION_STATEMENTS,
+  type FileAssetOwnership,
+  type FileOwnershipPort,
   FileService,
   MAX_FILE_BYTES,
   PgFileRepo,
@@ -57,6 +64,7 @@ class FakeTokenRepo implements TokenRepo {
   async findByHash() {
     return null;
   }
+
   async findByUserId() {
     return [];
   }
@@ -75,12 +83,55 @@ class FakeTokenRepo implements TokenRepo {
   }
 }
 
+class FakeFileOwnership implements FileOwnershipPort {
+  readonly records = new Map<string, FileAssetOwnership>();
+  readonly teamAccess = new Map<string, Set<string>>();
+
+  async createPersonal(businessId: string, fileId: string, principalId: string) {
+    this.records.set(fileId, {
+      businessId,
+      assetType: "file",
+      assetId: fileId,
+      owners: [{ kind: "principal", principalId, principalKind: "user" }],
+      shares: [],
+      revision: 1,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    });
+  }
+
+  async get(_businessId: string, fileId: string) {
+    return this.records.get(fileId);
+  }
+
+  async accessFor(ownership: FileAssetOwnership, principalId: string) {
+    const personal = ownership.owners.some(
+      (owner) => owner.kind === "principal" && owner.principalId === principalId
+    );
+    const team = ownership.owners.some(
+      (owner) => owner.kind === "team" && this.teamAccess.get(owner.teamId)?.has(principalId)
+    );
+    return {
+      levels: personal
+        ? (["view", "use", "edit"] as const)
+        : team
+          ? (["view", "use"] as const)
+          : [],
+      canManageOwnership: personal,
+    };
+  }
+
+  async consumeDestructiveApproval() {}
+}
+
 interface Harness {
   app: FastifyInstance;
   database: PGlite;
   blobRoot: string;
   blobs: FileSystemBlobPort;
+  files: FileService;
   roles: Map<string, string[]>;
+  ownership: FakeFileOwnership;
   ownerSid: string;
   ownerId: string;
   strangerSid: string;
@@ -94,11 +145,15 @@ async function appWith(): Promise<Harness> {
     ...FILE_ORIGIN_STATEMENTS,
     ...FILE_SHARE_STATEMENTS,
     ...FILE_KNOWLEDGE_STATEMENTS,
+    ...FILE_VERSION_STATEMENTS,
+    ...FILE_DRAFT_STATEMENTS,
+    ...FILE_FOLDER_STATEMENTS,
   ]) {
     await database.exec(sql);
   }
 
   const roles = new Map<string, string[]>();
+  const ownership = new FakeFileOwnership();
   const blobRoot = await mkdtemp(join(tmpdir(), "tulip-files-routes-"));
   const blobs = new FileSystemBlobPort(blobRoot);
   const sessionStore = new MemorySessionStore();
@@ -106,16 +161,18 @@ async function appWith(): Promise<Harness> {
   const owner = await createUser(userRepo, "owner@example.com", "pass", "member");
   const stranger = await createUser(userRepo, "stranger@example.com", "pass", "member");
 
+  const files = new FileService({
+    repo: new PgFileRepo(database as never),
+    blobs,
+    newId: () => randomUUID(),
+    rolesOf: async (_businessId, principalId) => roles.get(principalId) ?? [],
+    ownership,
+  });
   const app = await buildApp({
     sessionStore,
     userRepo,
     tokenRepo: new FakeTokenRepo(),
-    fileService: new FileService({
-      repo: new PgFileRepo(database as never),
-      blobs,
-      newId: () => randomUUID(),
-      rolesOf: async (_businessId, principalId) => roles.get(principalId) ?? [],
-    }),
+    fileService: files,
   });
 
   return {
@@ -123,7 +180,9 @@ async function appWith(): Promise<Harness> {
     database,
     blobRoot,
     blobs,
+    files,
     roles,
+    ownership,
     ownerSid: await sessionStore.create(owner._id),
     ownerId: owner._id,
     strangerSid: await sessionStore.create(stranger._id),
@@ -142,12 +201,19 @@ function upload(
   h: Harness,
   sid: string,
   body: Buffer,
-  options: { filename?: string; contentType?: string; declaredBytes?: number } = {}
+  options: {
+    filename?: string;
+    contentType?: string;
+    declaredBytes?: number;
+    folderId?: string;
+  } = {}
 ) {
   const { headers, cookies } = auth(sid);
+  const query = new URLSearchParams({ filename: options.filename ?? "shot.png" });
+  if (options.folderId) query.set("folderId", options.folderId);
   return h.app.inject({
     method: "POST",
-    url: `/api/v1/files?filename=${encodeURIComponent(options.filename ?? "shot.png")}`,
+    url: `/api/v1/files?${query}`,
     cookies,
     headers: {
       ...headers,
@@ -171,6 +237,39 @@ describe("file routes", () => {
     await rm(h.blobRoot, { recursive: true, force: true });
   });
 
+  /*
+   * A listing long enough to cross the compression threshold. The handler used to call
+   * `reply.send()` and resolve `undefined`, which left Fastify unsure whether the reply had been
+   * handled; once compression turned the payload into a stream that ambiguity truncated the
+   * response to `content-length: 0`. Every browser sends `accept-encoding: gzip`, so the Files page
+   * failed to load while `curl` — which does not — looked healthy.
+   */
+  it("sends a complete body when the listing is large enough to be compressed", async () => {
+    for (let i = 0; i < 12; i += 1) {
+      const created = await upload(h, h.ownerSid, PNG, { filename: `shot-${i}.png` });
+      expect(created.statusCode).toBe(201);
+    }
+    const { headers, cookies } = auth(h.ownerSid);
+    const plain = await h.app.inject({
+      method: "GET",
+      url: "/api/v1/files?limit=50",
+      cookies,
+      headers: { ...headers, "accept-encoding": "identity" },
+    });
+    const gzipped = await h.app.inject({
+      method: "GET",
+      url: "/api/v1/files?limit=50",
+      cookies,
+      headers: { ...headers, "accept-encoding": "gzip" },
+    });
+
+    expect(plain.statusCode).toBe(200);
+    expect(gzipped.statusCode).toBe(200);
+    expect(gzipped.headers["content-encoding"]).toBe("gzip");
+    expect(gzipped.rawPayload.length).toBeGreaterThan(0);
+    expect(gunzipSync(gzipped.rawPayload).toString("utf8")).toBe(plain.body);
+  });
+
   it("accepts an image and answers with the sniffed type", async () => {
     const response = await upload(h, h.ownerSid, PNG, { contentType: "application/octet-stream" });
     expect(response.statusCode).toBe(201);
@@ -179,6 +278,285 @@ describe("file routes", () => {
       mediaType: "image/png",
       sizeBytes: PNG.byteLength,
     });
+  });
+
+  it("creates nested folders, uploads into one, and moves a File", async () => {
+    const parent = await h.app.inject({
+      method: "POST",
+      url: "/api/v1/file-folders",
+      ...auth(h.ownerSid),
+      payload: { name: "Engineering", parentId: null },
+    });
+    expect(parent.statusCode).toBe(201);
+
+    const child = await h.app.inject({
+      method: "POST",
+      url: "/api/v1/file-folders",
+      ...auth(h.ownerSid),
+      payload: { name: "Reports", parentId: parent.json().id },
+    });
+    expect(child.statusCode).toBe(201);
+
+    const uploaded = await upload(h, h.ownerSid, PNG, { folderId: child.json().id });
+    expect(uploaded.json()).toMatchObject({ folderId: child.json().id });
+    const moved = await h.app.inject({
+      method: "POST",
+      url: `/api/v1/files/${uploaded.json().id}/move`,
+      ...auth(h.ownerSid),
+      payload: { folderId: parent.json().id, expectedRevision: 1 },
+    });
+
+    expect(moved.statusCode).toBe(200);
+    expect(moved.json()).toMatchObject({ folderId: parent.json().id, revision: 2 });
+
+    const folders = await h.app.inject({
+      method: "GET",
+      url: "/api/v1/file-folders",
+      ...auth(h.ownerSid),
+    });
+    expect(folders.statusCode).toBe(200);
+    expect(folders.json().folders).toEqual([
+      expect.objectContaining({ name: "Engineering", parentId: null }),
+      expect.objectContaining({ name: "Reports", parentId: parent.json().id }),
+    ]);
+
+    const strangerFolder = await h.app.inject({
+      method: "POST",
+      url: "/api/v1/file-folders",
+      ...auth(h.strangerSid),
+      payload: { name: "Private", parentId: null },
+    });
+    const refused = await h.app.inject({
+      method: "POST",
+      url: `/api/v1/files/${uploaded.json().id}/move`,
+      ...auth(h.ownerSid),
+      payload: { folderId: strangerFolder.json().id, expectedRevision: 2 },
+    });
+    expect(refused.statusCode).toBe(404);
+  });
+
+  it("renames a folder, and refuses a name a sibling already holds", async () => {
+    const folder = await h.app.inject({
+      method: "POST",
+      url: "/api/v1/file-folders",
+      ...auth(h.ownerSid),
+      payload: { name: "Enginering", parentId: null },
+    });
+    const sibling = await h.app.inject({
+      method: "POST",
+      url: "/api/v1/file-folders",
+      ...auth(h.ownerSid),
+      payload: { name: "Design", parentId: null },
+    });
+
+    const renamed = await h.app.inject({
+      method: "PATCH",
+      url: `/api/v1/file-folders/${folder.json().id}`,
+      ...auth(h.ownerSid),
+      payload: { name: "Engineering" },
+    });
+    expect(renamed.statusCode).toBe(200);
+    expect(renamed.json()).toMatchObject({ name: "Engineering" });
+
+    const clash = await h.app.inject({
+      method: "PATCH",
+      url: `/api/v1/file-folders/${sibling.json().id}`,
+      ...auth(h.ownerSid),
+      payload: { name: "engineering" },
+    });
+    expect(clash.statusCode).toBe(400);
+
+    const stranger = await h.app.inject({
+      method: "PATCH",
+      url: `/api/v1/file-folders/${folder.json().id}`,
+      ...auth(h.strangerSid),
+      payload: { name: "Mine now" },
+    });
+    expect(stranger.statusCode).toBe(404);
+  });
+
+  it("deletes an empty folder but refuses one that still holds anything", async () => {
+    const parent = await h.app.inject({
+      method: "POST",
+      url: "/api/v1/file-folders",
+      ...auth(h.ownerSid),
+      payload: { name: "Parent", parentId: null },
+    });
+    const child = await h.app.inject({
+      method: "POST",
+      url: "/api/v1/file-folders",
+      ...auth(h.ownerSid),
+      payload: { name: "Child", parentId: parent.json().id },
+    });
+
+    // A parent holding a nested folder must not vanish and strand it.
+    const heldByChild = await h.app.inject({
+      method: "DELETE",
+      url: `/api/v1/file-folders/${parent.json().id}`,
+      ...auth(h.ownerSid),
+    });
+    expect(heldByChild.statusCode).toBe(400);
+
+    const uploaded = await upload(h, h.ownerSid, PNG, { folderId: child.json().id });
+    const heldByFile = await h.app.inject({
+      method: "DELETE",
+      url: `/api/v1/file-folders/${child.json().id}`,
+      ...auth(h.ownerSid),
+    });
+    expect(heldByFile.statusCode).toBe(400);
+
+    await h.app.inject({
+      method: "POST",
+      url: `/api/v1/files/${uploaded.json().id}/move`,
+      ...auth(h.ownerSid),
+      payload: { folderId: null, expectedRevision: 1 },
+    });
+    const emptied = await h.app.inject({
+      method: "DELETE",
+      url: `/api/v1/file-folders/${child.json().id}`,
+      ...auth(h.ownerSid),
+    });
+    expect(emptied.statusCode).toBe(204);
+
+    const remaining = await h.app.inject({
+      method: "GET",
+      url: "/api/v1/file-folders",
+      ...auth(h.ownerSid),
+    });
+    expect(remaining.json().folders).toEqual([expect.objectContaining({ name: "Parent" })]);
+  });
+
+  it("creates immutable version one and points the stable File at it", async () => {
+    const response = await upload(h, h.ownerSid, PNG);
+    const id = response.json().id as string;
+    const versions = await h.database.query(
+      `SELECT version_number, reason, blob_hash FROM file_versions
+         WHERE file_id = $1`,
+      [id]
+    );
+    const files = await h.database.query(
+      "SELECT current_version_id, revision, modified_at, archived_at FROM files WHERE id = $1",
+      [id]
+    );
+    const file = files.rows[0] as {
+      current_version_id: string;
+      revision: number;
+      modified_at: Date;
+      archived_at: Date | null;
+    };
+
+    expect(versions.rows).toEqual([
+      expect.objectContaining({ version_number: 1, reason: "created" }),
+    ]);
+    expect(file).toMatchObject({
+      current_version_id: id,
+      revision: 1,
+      archived_at: null,
+    });
+    expect(file.modified_at).toBeTruthy();
+  });
+
+  async function draft() {
+    return await h.files.generateDraft({
+      businessId: DEPLOYMENT_BUSINESS_ID,
+      creatorPrincipalId: h.ownerId,
+      filename: "quarterly-summary",
+      format: "json",
+      content: '{"revenue":4600000}',
+      authoredByAgentId: "finance-agent",
+      sourceRunId: "00000000-0000-4000-8000-000000000086",
+      sourceToolCallId: "call-file-create",
+    });
+  }
+
+  it("lets only the creating person download a generated Chat draft", async () => {
+    const created = await draft();
+    const owned = await h.app.inject({
+      method: "GET",
+      url: `/api/v1/file-drafts/${created.id}/content`,
+      ...auth(h.ownerSid),
+    });
+    const refused = await h.app.inject({
+      method: "GET",
+      url: `/api/v1/file-drafts/${created.id}/content`,
+      ...auth(h.strangerSid),
+    });
+
+    expect(owned.statusCode).toBe(200);
+    expect(owned.headers["content-type"]).toContain("application/json");
+    expect(owned.body).toContain('"revenue": 4600000');
+    expect(refused.statusCode).toBe(404);
+  });
+
+  it("saves a generated Chat draft once even when the browser retries", async () => {
+    const created = await draft();
+    const save = () =>
+      h.app.inject({
+        method: "POST",
+        url: `/api/v1/file-drafts/${created.id}/save`,
+        payload: {},
+        ...auth(h.ownerSid),
+      });
+
+    const first = await save();
+    const retried = await save();
+    expect(first.statusCode).toBe(200);
+    expect(retried.statusCode).toBe(200);
+    expect(retried.json().id).toBe(first.json().id);
+    expect(
+      (
+        await h.database.query(
+          "SELECT source_run_id, source_tool_call_id FROM files WHERE id = $1",
+          [first.json().id]
+        )
+      ).rows
+    ).toEqual([
+      {
+        source_run_id: "00000000-0000-4000-8000-000000000086",
+        source_tool_call_id: "call-file-create",
+      },
+    ]);
+  });
+
+  it("moves an expired unsaved draft onto durable blob cleanup", async () => {
+    const created = await draft();
+    await h.database.query(
+      "UPDATE file_generation_drafts SET expires_at = now() - interval '1 second' WHERE id = $1",
+      [created.id]
+    );
+
+    expect(await h.files.cleanupExpiredDrafts()).toBe(1);
+    const drafts = await h.database.query("SELECT id FROM file_generation_drafts WHERE id = $1", [
+      created.id,
+    ]);
+    const cleanup = await h.database.query(
+      "SELECT blob_hash FROM file_blob_cleanup WHERE blob_hash = $1",
+      [created.blob.hash]
+    );
+    expect(drafts.rows).toHaveLength(0);
+    expect(cleanup.rows).toHaveLength(1);
+  });
+
+  it("lets only the owner inspect immutable File versions", async () => {
+    const response = await upload(h, h.ownerSid, PNG);
+    const id = response.json().id as string;
+
+    const owned = await h.app.inject({
+      method: "GET",
+      url: `/api/v1/files/${id}/versions`,
+      ...auth(h.ownerSid),
+    });
+    const refused = await h.app.inject({
+      method: "GET",
+      url: `/api/v1/files/${id}/versions`,
+      ...auth(h.strangerSid),
+    });
+
+    expect(owned.statusCode).toBe(200);
+    expect(owned.json().versions).toEqual([
+      expect.objectContaining({ id, versionNumber: 1, reason: "created" }),
+    ]);
+    expect(refused.statusCode).toBe(404);
   });
 
   it("refuses an anonymous upload", async () => {
@@ -299,6 +677,32 @@ describe("file routes", () => {
     expect(theirs.json().files).toHaveLength(0);
   });
 
+  it("searches filenames across owned and shared Files without exposing inaccessible Files", async () => {
+    const owned = await upload(h, h.ownerSid, PNG, { filename: "pricing-owned.png" });
+    const shared = await upload(h, h.strangerSid, PNG, { filename: "pricing-shared.png" });
+    await upload(h, h.strangerSid, PNG, { filename: "pricing-private.png" });
+    const { headers, cookies } = auth(h.strangerSid);
+    await h.app.inject({
+      method: "POST",
+      url: `/api/v1/files/${shared.json().id}/shares`,
+      cookies,
+      headers: { ...headers, "content-type": "application/json" },
+      payload: { kind: "user", id: h.ownerId },
+    });
+
+    const response = await h.app.inject({
+      method: "GET",
+      url: "/api/v1/files/search?q=PRICING",
+      ...auth(h.ownerSid),
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json().files.map((file: { id: string }) => file.id)).toEqual(
+      expect.arrayContaining([owned.json().id, shared.json().id])
+    );
+    expect(response.json().files).toHaveLength(2);
+  });
+
   it("says who owns a File and where it came from, so the library can label it", async () => {
     await upload(h, h.ownerSid, PNG);
     const response = await h.app.inject({
@@ -307,7 +711,11 @@ describe("file routes", () => {
       ...auth(h.ownerSid),
     });
 
-    expect(response.json().files[0]).toMatchObject({ owner: h.ownerId, origin: "uploaded" });
+    expect(response.json().files[0]).toMatchObject({
+      owner: h.ownerId,
+      ownerName: "owner@example.com",
+      origin: "uploaded",
+    });
     expect(response.json().files[0].sourceChatId).toBeNull();
   });
 
@@ -353,7 +761,15 @@ describe("file routes", () => {
     expect(Object.keys(paths)).toEqual(
       expect.arrayContaining([
         "/api/v1/files",
+        "/api/v1/file-folders",
+        "/api/v1/files/search",
         "/api/v1/files/{id}",
+        "/api/v1/files/{id}/versions",
+        "/api/v1/files/{id}/versions/{versionId}/content",
+        "/api/v1/files/{id}/versions/{versionId}/restore",
+        "/api/v1/files/{id}/archive",
+        "/api/v1/files/{id}/restore",
+        "/api/v1/files/{id}/move",
         "/api/v1/files/{id}/content",
         "/api/v1/files/accepted-modalities",
       ])
@@ -362,6 +778,9 @@ describe("file routes", () => {
     // schema for, and `arrayContaining` on the path alone would not notice it missing a verb.
     expect(Object.keys(paths["/api/v1/files/{id}"])).toEqual(
       expect.arrayContaining(["get", "delete"])
+    );
+    expect(Object.keys(paths["/api/v1/files/{id}/content"])).toEqual(
+      expect.arrayContaining(["get", "put"])
     );
     expect(Object.keys(paths["/api/v1/files"].post as object)).toContain("responses");
     const post = paths["/api/v1/files"].post as { responses: Record<string, unknown> };
@@ -428,6 +847,36 @@ describe("file routes", () => {
       });
       expect(after.statusCode).toBe(200);
       expect(JSON.parse(after.body).id).toBe(id);
+    });
+
+    it("reads Team-owned Files through the same gate and revokes on the next request", async () => {
+      const id = await ownedFile();
+      h.ownership.records.set(id, {
+        businessId: DEPLOYMENT_BUSINESS_ID,
+        assetType: "file",
+        assetId: id,
+        owners: [{ kind: "team", teamId: "team-support" }],
+        shares: [],
+        revision: 1,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      });
+      h.ownership.teamAccess.set("team-support", new Set([h.strangerId]));
+
+      const allowed = await h.app.inject({
+        method: "GET",
+        url: `/api/v1/files/${id}`,
+        ...auth(h.strangerSid),
+      });
+      expect(allowed.statusCode).toBe(200);
+
+      h.ownership.teamAccess.get("team-support")?.delete(h.strangerId);
+      const revoked = await h.app.inject({
+        method: "GET",
+        url: `/api/v1/files/${id}`,
+        ...auth(h.strangerSid),
+      });
+      expect(revoked.statusCode).toBe(404);
     });
 
     it("stops the stranger reading the bytes the moment the share is revoked", async () => {
@@ -587,34 +1036,169 @@ describe("file routes", () => {
       expect(ids).not.toContain(mine);
     });
   });
-  describe("deleting", () => {
-    async function ownedFile(filename = "shot.png"): Promise<string> {
-      return JSON.parse((await upload(h, h.ownerSid, PNG, { filename })).body).id as string;
-    }
-
-    async function destroy(sid: string, id: string) {
+  describe("version lifecycle", () => {
+    async function replace(
+      sid: string,
+      id: string,
+      expectedRevision: number,
+      body: Buffer,
+      contentType: string
+    ) {
       const { headers, cookies } = auth(sid);
-      return await h.app.inject({ method: "DELETE", url: `/api/v1/files/${id}`, cookies, headers });
+      return await h.app.inject({
+        method: "PUT",
+        url: `/api/v1/files/${id}/content?expectedRevision=${expectedRevision}`,
+        cookies,
+        headers: {
+          ...headers,
+          "content-type": contentType,
+          "content-length": String(body.byteLength),
+        },
+        payload: body,
+      });
     }
 
-    it("removes the row and the bytes, and a second attempt reads as never having existed", async () => {
-      const id = await ownedFile();
-      const hash = createHash("sha256").update(PNG).digest("hex");
-
-      expect((await destroy(h.ownerSid, id)).statusCode).toBe(204);
-
-      expect(await h.blobs.head({ key: hash, hash })).toBeNull();
-      const after = await h.app.inject({
-        method: "GET",
-        url: `/api/v1/files/${id}`,
-        ...auth(h.ownerSid),
+    it("atomically replaces same-format content and keeps legacy columns synchronized", async () => {
+      const originalBytes = Buffer.from("one");
+      const original = await upload(h, h.ownerSid, originalBytes, {
+        filename: "notes.txt",
+        contentType: "text/plain",
       });
-      expect(after.statusCode).toBe(404);
-      expect((await destroy(h.ownerSid, id)).statusCode).toBe(404);
+      const id = original.json().id as string;
+      const replacementBytes = Buffer.from("two");
+
+      const response = await replace(h.ownerSid, id, 1, replacementBytes, "text/plain");
+
+      expect(response.statusCode).toBe(200);
+      expect(response.json()).toMatchObject({ id, revision: 2, sizeBytes: 3 });
+      const versions = await h.database.query<{
+        version_number: number;
+        reason: string;
+        blob_hash: string;
+      }>(
+        `SELECT version_number, reason, blob_hash FROM file_versions
+         WHERE file_id = $1 ORDER BY version_number`,
+        [id]
+      );
+      const file = await h.database.query<{
+        current_version_id: string;
+        media_type: string;
+        size_bytes: number;
+        blob_hash: string;
+      }>(
+        `SELECT current_version_id, media_type, size_bytes, blob_hash
+         FROM files WHERE id = $1`,
+        [id]
+      );
+      expect(versions.rows.map((version) => version.reason)).toEqual(["created", "replaced"]);
+      expect(file.rows[0]).toMatchObject({
+        current_version_id: expect.not.stringMatching(id),
+        media_type: "text/plain",
+        size_bytes: 3,
+        blob_hash: versions.rows[1]?.blob_hash,
+      });
     });
 
-    it("refuses a stranger, and refuses a recipient the File was shared with", async () => {
-      const id = await ownedFile();
+    it("rejects stale and cross-format replacements without appending history", async () => {
+      const original = await upload(h, h.ownerSid, Buffer.from("one"), {
+        filename: "notes.txt",
+        contentType: "text/plain",
+      });
+      const id = original.json().id as string;
+
+      expect((await replace(h.ownerSid, id, 2, Buffer.from("two"), "text/plain")).statusCode).toBe(
+        409
+      );
+      expect((await replace(h.ownerSid, id, 1, PNG, "image/png")).statusCode).toBe(415);
+
+      const versions = await h.database.query("SELECT id FROM file_versions WHERE file_id = $1", [
+        id,
+      ]);
+      expect(versions.rows).toHaveLength(1);
+    });
+
+    it("restores an old version as a new latest version without copying bytes", async () => {
+      const original = await upload(h, h.ownerSid, Buffer.from("one"), {
+        filename: "notes.txt",
+        contentType: "text/plain",
+      });
+      const id = original.json().id as string;
+      const firstVersionId = id;
+      expect((await replace(h.ownerSid, id, 1, Buffer.from("two"), "text/plain")).statusCode).toBe(
+        200
+      );
+
+      const restored = await h.app.inject({
+        method: "POST",
+        url: `/api/v1/files/${id}/versions/${firstVersionId}/restore`,
+        ...auth(h.ownerSid),
+        payload: { expectedRevision: 2 },
+      });
+
+      expect(restored.statusCode).toBe(200);
+      expect(restored.json().revision).toBe(3);
+      const versions = await h.database.query<{
+        version_number: number;
+        reason: string;
+        blob_hash: string;
+        restored_from_version_id: string | null;
+      }>(
+        `SELECT version_number, reason, blob_hash, restored_from_version_id
+         FROM file_versions WHERE file_id = $1 ORDER BY version_number`,
+        [id]
+      );
+      expect(versions.rows[2]).toMatchObject({
+        version_number: 3,
+        reason: "restored",
+        blob_hash: versions.rows[0]?.blob_hash,
+        restored_from_version_id: firstVersionId,
+      });
+      const content = await h.app.inject({
+        method: "GET",
+        url: `/api/v1/files/${id}/content`,
+        ...auth(h.ownerSid),
+      });
+      expect(content.rawPayload.equals(Buffer.from("one"))).toBe(true);
+    });
+
+    it("lets only the owner download historical version bytes", async () => {
+      const original = await upload(h, h.ownerSid, Buffer.from("one"), {
+        filename: "notes.txt",
+        contentType: "text/plain",
+      });
+      const id = original.json().id as string;
+      await replace(h.ownerSid, id, 1, Buffer.from("two"), "text/plain");
+
+      const owned = await h.app.inject({
+        method: "GET",
+        url: `/api/v1/files/${id}/versions/${id}/content`,
+        ...auth(h.ownerSid),
+      });
+      const refused = await h.app.inject({
+        method: "GET",
+        url: `/api/v1/files/${id}/versions/${id}/content`,
+        ...auth(h.strangerSid),
+      });
+
+      expect(owned.statusCode).toBe(200);
+      expect(owned.rawPayload.equals(Buffer.from("one"))).toBe(true);
+      expect(refused.statusCode).toBe(404);
+    });
+  });
+
+  describe("archive lifecycle", () => {
+    async function archive(sid: string, id: string, expectedRevision: number) {
+      return await h.app.inject({
+        method: "POST",
+        url: `/api/v1/files/${id}/archive`,
+        ...auth(sid),
+        payload: { expectedRevision },
+      });
+    }
+
+    it("hides an archived File from discovery while current readers can still open it", async () => {
+      const created = await upload(h, h.ownerSid, PNG, { filename: "archived.png" });
+      const id = created.json().id as string;
       const { headers, cookies } = auth(h.ownerSid);
       await h.app.inject({
         method: "POST",
@@ -624,7 +1208,139 @@ describe("file routes", () => {
         payload: { kind: "user", id: h.strangerId },
       });
 
-      expect((await destroy(h.strangerSid, id)).statusCode).toBe(404);
+      const archived = await archive(h.ownerSid, id, 1);
+
+      expect(archived.statusCode).toBe(200);
+      expect(archived.json()).toMatchObject({ revision: 2, archivedAt: expect.any(String) });
+      const listed = await h.app.inject({
+        method: "GET",
+        url: "/api/v1/files",
+        ...auth(h.ownerSid),
+      });
+      const searched = await h.app.inject({
+        method: "GET",
+        url: "/api/v1/files/search?q=archived",
+        ...auth(h.ownerSid),
+      });
+      expect(listed.json().files).toEqual([]);
+      expect(searched.json().files).toEqual([]);
+      expect(
+        (
+          await h.app.inject({
+            method: "GET",
+            url: `/api/v1/files/${id}/content`,
+            ...auth(h.strangerSid),
+          })
+        ).statusCode
+      ).toBe(200);
+    });
+
+    it("restores an archived File and rejects stale lifecycle writes", async () => {
+      const created = await upload(h, h.ownerSid, PNG);
+      const id = created.json().id as string;
+      expect((await archive(h.ownerSid, id, 2)).statusCode).toBe(409);
+      expect((await archive(h.ownerSid, id, 1)).statusCode).toBe(200);
+
+      const restored = await h.app.inject({
+        method: "POST",
+        url: `/api/v1/files/${id}/restore`,
+        ...auth(h.ownerSid),
+        payload: { expectedRevision: 2 },
+      });
+
+      expect(restored.statusCode).toBe(200);
+      expect(restored.json()).toMatchObject({ revision: 3, archivedAt: null });
+      const listed = await h.app.inject({
+        method: "GET",
+        url: "/api/v1/files",
+        ...auth(h.ownerSid),
+      });
+      expect(listed.json().files).toHaveLength(1);
+    });
+
+    it("lists only the caller's own archived Files", async () => {
+      const mine = await upload(h, h.ownerSid, PNG, { filename: "mine.png" });
+      const theirs = await upload(h, h.strangerSid, PNG, { filename: "theirs.png" });
+      await archive(h.ownerSid, mine.json().id, mine.json().revision);
+      await archive(h.strangerSid, theirs.json().id, theirs.json().revision);
+
+      const response = await h.app.inject({
+        method: "GET",
+        url: "/api/v1/files/archived",
+        ...auth(h.ownerSid),
+      });
+
+      expect(response.statusCode).toBe(200);
+      expect(response.json().files).toEqual([
+        expect.objectContaining({
+          id: mine.json().id,
+          filename: "mine.png",
+          archivedAt: expect.any(String),
+        }),
+      ]);
+    });
+  });
+
+  describe("deleting", () => {
+    async function ownedFile(filename = "shot.png"): Promise<{ id: string; revision: number }> {
+      return JSON.parse((await upload(h, h.ownerSid, PNG, { filename })).body) as {
+        id: string;
+        revision: number;
+      };
+    }
+
+    async function archive(id: string, expectedRevision: number) {
+      return await h.app.inject({
+        method: "POST",
+        url: `/api/v1/files/${id}/archive`,
+        ...auth(h.ownerSid),
+        payload: { expectedRevision },
+      });
+    }
+
+    async function destroy(sid: string, id: string, expectedRevision: number) {
+      const { headers, cookies } = auth(sid);
+      return await h.app.inject({
+        method: "DELETE",
+        url: `/api/v1/files/${id}?expectedRevision=${expectedRevision}`,
+        cookies,
+        headers,
+      });
+    }
+
+    it("requires archive, then removes the row and bytes durably", async () => {
+      const file = await ownedFile();
+      const id = file.id;
+      const hash = createHash("sha256").update(PNG).digest("hex");
+
+      expect((await destroy(h.ownerSid, id, file.revision)).statusCode).toBe(409);
+      const archived = await archive(id, file.revision);
+      expect((await destroy(h.ownerSid, id, archived.json().revision)).statusCode).toBe(204);
+
+      expect(await h.blobs.head({ key: hash, hash })).toBeNull();
+      const after = await h.app.inject({
+        method: "GET",
+        url: `/api/v1/files/${id}`,
+        ...auth(h.ownerSid),
+      });
+      expect(after.statusCode).toBe(404);
+      expect((await destroy(h.ownerSid, id, archived.json().revision)).statusCode).toBe(404);
+    });
+
+    it("refuses a stranger, and refuses a recipient the File was shared with", async () => {
+      const file = await ownedFile();
+      const id = file.id;
+      const { headers, cookies } = auth(h.ownerSid);
+      await h.app.inject({
+        method: "POST",
+        url: `/api/v1/files/${id}/shares`,
+        cookies,
+        headers: { ...headers, "content-type": "application/json" },
+        payload: { kind: "user", id: h.strangerId },
+      });
+      const archived = await archive(id, file.revision);
+
+      expect((await destroy(h.strangerSid, id, archived.json().revision)).statusCode).toBe(404);
 
       const still = await h.app.inject({
         method: "GET",
@@ -635,7 +1351,8 @@ describe("file routes", () => {
     });
 
     it("takes the share rows with it, so no grant outlives the File", async () => {
-      const id = await ownedFile();
+      const file = await ownedFile();
+      const id = file.id;
       const { headers, cookies } = auth(h.ownerSid);
       await h.app.inject({
         method: "POST",
@@ -645,15 +1362,19 @@ describe("file routes", () => {
         payload: { kind: "user", id: h.strangerId },
       });
 
-      await destroy(h.ownerSid, id);
+      const archived = await archive(id, file.revision);
+      await destroy(h.ownerSid, id, archived.json().revision);
 
       const rows = await h.database.query("SELECT 1 FROM file_shares WHERE file_id = $1", [id]);
       expect(rows.rows).toHaveLength(0);
     });
 
     it("refuses an anonymous delete", async () => {
-      const id = await ownedFile();
-      const response = await h.app.inject({ method: "DELETE", url: `/api/v1/files/${id}` });
+      const { id } = await ownedFile();
+      const response = await h.app.inject({
+        method: "DELETE",
+        url: `/api/v1/files/${id}?expectedRevision=1`,
+      });
       expect(response.statusCode).toBe(401);
     });
 
@@ -663,7 +1384,8 @@ describe("file routes", () => {
       const mine = await ownedFile();
       const theirs = JSON.parse((await upload(h, h.strangerSid, PNG)).body).id as string;
 
-      expect((await destroy(h.ownerSid, mine)).statusCode).toBe(204);
+      const archived = await archive(mine.id, mine.revision);
+      expect((await destroy(h.ownerSid, mine.id, archived.json().revision)).statusCode).toBe(204);
 
       const response = await h.app.inject({
         method: "GET",
@@ -678,9 +1400,10 @@ describe("file routes", () => {
       const kept = await ownedFile("kept.png");
       const gone = JSON.parse(
         (await upload(h, h.ownerSid, Buffer.from([...PNG, 9]), { filename: "gone.png" })).body
-      ).id as string;
+      ) as { id: string; revision: number };
 
-      await destroy(h.ownerSid, gone);
+      const archived = await archive(gone.id, gone.revision);
+      await destroy(h.ownerSid, gone.id, archived.json().revision);
 
       const page = await h.app.inject({
         method: "GET",
@@ -688,8 +1411,62 @@ describe("file routes", () => {
         ...auth(h.ownerSid),
       });
       const ids = page.json().files.map((file: { id: string }) => file.id);
-      expect(ids).toContain(kept);
-      expect(ids).not.toContain(gone);
+      expect(ids).toContain(kept.id);
+      expect(ids).not.toContain(gone.id);
+    });
+
+    it("cleans every unreferenced historical blob after permanent deletion", async () => {
+      const created = await upload(h, h.ownerSid, Buffer.from("one"), {
+        filename: "notes.txt",
+        contentType: "text/plain",
+      });
+      const id = created.json().id as string;
+      const { headers, cookies } = auth(h.ownerSid);
+      await h.app.inject({
+        method: "PUT",
+        url: `/api/v1/files/${id}/content?expectedRevision=1`,
+        cookies,
+        headers: {
+          ...headers,
+          "content-type": "text/plain",
+          "content-length": "3",
+        },
+        payload: Buffer.from("two"),
+      });
+      const versions = await h.database.query<{ blob_key: string; blob_hash: string }>(
+        "SELECT blob_key, blob_hash FROM file_versions WHERE file_id = $1 ORDER BY version_number",
+        [id]
+      );
+      const archived = await archive(id, 2);
+
+      expect((await destroy(h.ownerSid, id, archived.json().revision)).statusCode).toBe(204);
+      for (const version of versions.rows) {
+        expect(await h.blobs.head({ key: version.blob_key, hash: version.blob_hash })).toBeNull();
+      }
+      const pending = await h.database.query("SELECT 1 FROM file_blob_cleanup");
+      expect(pending.rows).toHaveLength(0);
+    });
+
+    it("retains failed cleanup work and succeeds on a later retry", async () => {
+      const created = await ownedFile();
+      const archived = await archive(created.id, created.revision);
+      const realDelete = h.blobs.delete.bind(h.blobs);
+      h.blobs.delete = async () => {
+        throw new Error("storage unavailable");
+      };
+
+      expect((await destroy(h.ownerSid, created.id, archived.json().revision)).statusCode).toBe(
+        204
+      );
+      expect(
+        (await h.database.query("SELECT attempts, last_error FROM file_blob_cleanup")).rows
+      ).toEqual([expect.objectContaining({ attempts: 1, last_error: "storage unavailable" })]);
+
+      h.blobs.delete = realDelete;
+      await h.database.query("UPDATE file_blob_cleanup SET next_attempt_at = now()");
+      await h.files.cleanupBlobs("test-retry");
+
+      expect((await h.database.query("SELECT 1 FROM file_blob_cleanup")).rows).toHaveLength(0);
     });
   });
 });

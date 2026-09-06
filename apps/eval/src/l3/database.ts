@@ -13,10 +13,12 @@
 
 import { PGlite } from "@electric-sql/pglite";
 import {
+  FILE_DRAFT_STATEMENTS,
   FILE_KNOWLEDGE_STATEMENTS,
   FILE_ORIGIN_STATEMENTS,
   FILE_SHARE_STATEMENTS,
   FILE_STORAGE_STATEMENTS,
+  FILE_VERSION_STATEMENTS,
 } from "@tulipfarm/files";
 import {
   AUTHORIZATION_STORAGE_STATEMENTS,
@@ -116,6 +118,8 @@ async function migratedSnapshot(): Promise<Blob | File> {
       ...FILE_ORIGIN_STATEMENTS,
       ...FILE_KNOWLEDGE_STATEMENTS,
       ...FILE_SHARE_STATEMENTS,
+      ...FILE_VERSION_STATEMENTS,
+      ...FILE_DRAFT_STATEMENTS,
     ]) {
       await database.exec(statement);
     }

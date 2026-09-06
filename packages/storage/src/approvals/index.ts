@@ -4,7 +4,14 @@ export type {
   ApprovalGrantRecord,
   ApprovalRepo,
   ApprovalRiskLevel,
+  ApprovalRoleResolver,
   ApprovalStoreErrorCode,
   NewApprovalGrant,
+  OpenApprovalQuery,
 } from "./approval-repo";
-export { ApprovalStoreError, InMemoryApprovalRepo } from "./approval-repo";
+export {
+  ApprovalStoreError,
+  ASSET_OWNERSHIP_APPROVAL_STORAGE_STATEMENTS,
+  InMemoryApprovalRepo,
+  PgApprovalGrantRepo,
+} from "./approval-repo";
