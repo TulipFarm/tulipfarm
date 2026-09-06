@@ -160,6 +160,7 @@ export {
   LlmConfigValidationError,
   LlmCredentialError,
   LlmNotConfiguredError,
+  llmConfigMode,
   ModelSpecSchema,
   UnknownModelError,
   validateLlmConfig,

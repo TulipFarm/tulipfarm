@@ -14,6 +14,7 @@ import { ApiError, getSession } from "~/lib/api";
 import { ApprovalsProvider } from "~/lib/approvals-context";
 import { CompanionProvider } from "~/lib/companion-context";
 import { ConversationsProvider } from "~/lib/conversations-context";
+import { LlmModeProvider } from "~/lib/llm-mode-context";
 import { PageChromeProvider } from "~/lib/page-chrome-context";
 import { getSetupStatus } from "~/lib/setup";
 
@@ -54,26 +55,28 @@ export async function clientLoader({ request }: ClientLoaderFunctionArgs) {
 export default function AppLayout() {
   const { user } = useLoaderData<typeof clientLoader>();
   return (
-    <ApprovalsProvider>
-      <ConversationsProvider>
-        <CompanionProvider>
-          <PageChromeProvider>
-            <GlobalPending />
-            <AppShell user={user}>
-              <a
-                href="#main-content"
-                className="fixed left-2 top-2 z-[100] -translate-y-16 bg-background px-3 py-2 text-sm focus:translate-y-0"
-              >
-                Skip to main content
-              </a>
-              <Outlet />
-              <GlobalConnectionStatus />
-              <OnboardingCompanion />
-            </AppShell>
-          </PageChromeProvider>
-        </CompanionProvider>
-      </ConversationsProvider>
-    </ApprovalsProvider>
+    <LlmModeProvider mode={user.llmMode}>
+      <ApprovalsProvider>
+        <ConversationsProvider>
+          <CompanionProvider>
+            <PageChromeProvider>
+              <GlobalPending />
+              <AppShell user={user}>
+                <a
+                  href="#main-content"
+                  className="fixed left-2 top-2 z-[100] -translate-y-16 bg-background px-3 py-2 text-sm focus:translate-y-0"
+                >
+                  Skip to main content
+                </a>
+                <Outlet />
+                <GlobalConnectionStatus />
+                <OnboardingCompanion />
+              </AppShell>
+            </PageChromeProvider>
+          </CompanionProvider>
+        </ConversationsProvider>
+      </ApprovalsProvider>
+    </LlmModeProvider>
   );
 }
 

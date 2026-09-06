@@ -80,6 +80,7 @@ export function PrimaryRow({
   emptySpec,
   meta,
   onChange,
+  compact,
 }: {
   name: string;
   description: string;
@@ -89,6 +90,8 @@ export function PrimaryRow({
   emptySpec: string;
   meta?: ReactNode;
   onChange: () => void;
+  /** Basic mode: name, provider, and a Change button — no pricing, no capability pills. */
+  compact?: boolean;
 }) {
   const ready = isEntryReady(providers, secretKeys, row?.provider);
 
@@ -109,8 +112,12 @@ export function PrimaryRow({
             <p className="mt-0.5 text-xs text-muted-foreground">
               {providerLabel(providers, row.provider)}
             </p>
-            <SpecFacts spec={row.spec} empty={emptySpec} />
-            {meta}
+            {compact ? null : (
+              <>
+                <SpecFacts spec={row.spec} empty={emptySpec} />
+                {meta}
+              </>
+            )}
           </>
         ) : (
           <p className="text-sm text-muted-foreground">Not set.</p>

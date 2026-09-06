@@ -157,6 +157,8 @@ export type LlmConfig = {
   tiers?: { quick: TierConfig; standard: TierConfig; complex: TierConfig };
   presets?: EffortPresetMappings;
   embeddings?: { providers: EmbeddingEntry[] };
+  /** Which settings tab this config was last saved from. A UI hint only. */
+  mode?: "basic" | "advanced";
 };
 
 export async function getLlmConfig(): Promise<LlmConfig> {

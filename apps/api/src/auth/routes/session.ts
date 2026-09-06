@@ -1,4 +1,6 @@
 import { withSessionNav } from "@tulipfarm/authz";
+import { type LlmConfig, llmConfigMode } from "@tulipfarm/schema";
+import type { SoulLoader } from "@tulipfarm/soul";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import type { AuthorizationCheck } from "../../authz/route-gate";
 import { makeAuthorizationCheck } from "../../authz/route-gate";
@@ -63,6 +65,9 @@ export interface SessionRouteDeps {
   inviteRepo?: UserInviteRepo;
   /** Decides session authority. Defaults to the no-authorizer gate, which answers from the account role. */
   authorizationCheck?: AuthorizationCheck;
+  /** Lets `GET /auth/session` report `llmMode`, so chat can hide effort controls in Basic mode
+   * without an admin-gated round trip to `/llm-config`. Absent in tests that don't wire soul. */
+  soulLoader?: SoulLoader;
 }
 
 export function registerSessionRoutes(app: FastifyInstance, deps: SessionRouteDeps): void {
@@ -77,6 +82,7 @@ export function registerSessionRoutes(app: FastifyInstance, deps: SessionRouteDe
     profileWriteRepo,
     inviteRepo,
     authorizationCheck = makeAuthorizationCheck(),
+    soulLoader,
   } = deps;
 
   /**
@@ -85,7 +91,14 @@ export function registerSessionRoutes(app: FastifyInstance, deps: SessionRouteDe
    * own session is how the app boots, and every admin surface is gated again on its own request.
    */
   async function sessionUser(user: UserDoc) {
-    return withSessionNav(toPublicUser(user), userPrincipal(user, "session"), authorizationCheck);
+    const base = await withSessionNav(
+      toPublicUser(user),
+      userPrincipal(user, "session"),
+      authorizationCheck
+    );
+    if (!soulLoader) return base;
+    const llmMode = llmConfigMode((soulLoader.llmConfig as LlmConfig | undefined) ?? {});
+    return { ...base, llmMode };
   }
   const loginPreHandlers = [rateLimitHook, loginRateLimitHook].filter(
     (hook): hook is PreHandler => hook !== undefined

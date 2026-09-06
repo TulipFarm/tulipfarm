@@ -5,6 +5,7 @@ import { LoadingState } from "~/components/ui/loading-state";
 import { nextEffortPreset } from "~/lib/chat/effort-escalation";
 import type { ChatMessage, ChatStatus, ModelReceipt, TimelinePart } from "~/lib/chat/types";
 import { copyText } from "~/lib/clipboard";
+import { useLlmMode } from "~/lib/llm-mode-context";
 import { markdownLinksToPlainText } from "~/lib/markdown-to-text";
 import { FileAttachment, RemovedAttachment } from "./file-attachment";
 import { MessagePartView } from "./parts";
@@ -77,11 +78,15 @@ function AssistantMetaRow({
   tryHarderTarget?: NonNullable<ModelReceipt["effortPreset"]>;
   onTryHarder?: () => void;
 }) {
-  if (!receipt && !tryHarderTarget) return null;
+  const llmMode = useLlmMode();
+  // In Basic, every effort tier is the same model — "try harder" would re-run the identical
+  // request, so the escalation offer is meaningless there.
+  const canTryHarder = llmMode === "advanced";
+  if (!receipt && !(canTryHarder && tryHarderTarget)) return null;
   return (
     <div className="flex flex-wrap items-center gap-x-2 gap-y-1.5">
       {receipt ? <ModelReceiptView receipt={receipt} /> : null}
-      {tryHarderTarget && onTryHarder ? (
+      {canTryHarder && tryHarderTarget && onTryHarder ? (
         <button
           type="button"
           onClick={onTryHarder}
