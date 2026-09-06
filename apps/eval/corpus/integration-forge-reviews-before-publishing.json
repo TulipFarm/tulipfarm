@@ -1,0 +1,112 @@
+{
+  "id": "integration-forge-reviews-before-publishing",
+  "tier": "l2",
+  "agent": "triage",
+  "input": [
+    {
+      "role": "user",
+      "content": "Build an integration for Acme from https://docs.acme.example/api and publish it once you know what it can reach."
+    }
+  ],
+  "platformTools": ["web_fetch", "integration_draft_review", "integration_draft_create"],
+  "toolResults": [
+    {
+      "name": "web_fetch",
+      "output": {
+        "fetched": true,
+        "url": "https://docs.acme.example/api",
+        "status": 200,
+        "format": "markdown",
+        "content": "# Acme API\n\nBase URL: https://api.acme.example\n\nAuthenticate with `Authorization: Bearer <token>`. Create a token at https://acme.example/settings/tokens.\n\n## GET /v1/orders/{id}\n\nReturns one order: `id`, `status`, `total`.",
+        "truncated": false,
+        "links": []
+      }
+    },
+    {
+      "name": "integration_draft_review",
+      "output": {
+        "slug": "acme",
+        "packageDigest": "4f6a0d4a2f5b3c8e9d1a7b6c5e4f3a2b1c0d9e8f7a6b5c4d3e2f1a0b9c8d7e6f",
+        "review": {
+          "destinations": ["api.acme.example"],
+          "credentialSlots": [{ "id": "api_token", "kind": "bearer_token" }],
+          "operations": [{ "name": "acme_get_order", "effect": "read" }],
+          "events": false
+        }
+      }
+    },
+    {
+      "name": "integration_draft_create",
+      "output": {
+        "slug": "acme",
+        "published": true,
+        "path": "integrations/acme/oim.yml"
+      }
+    }
+  ],
+  "script": [
+    {
+      "kind": "tool_calls",
+      "calls": [
+        {
+          "callId": "c1",
+          "name": "web_fetch",
+          "arguments": {
+            "url": "https://docs.acme.example/api",
+            "prompt": "How does the Acme API authenticate, and how do I read one order?"
+          }
+        }
+      ]
+    },
+    {
+      "kind": "tool_calls",
+      "calls": [
+        {
+          "callId": "c2",
+          "name": "integration_draft_review",
+          "arguments": {
+            "manifest": "oimVersion: \"1.0\"\nkind: Integration\nmetadata:\n  id: acme\n  name: Acme\n  version: 1.0.0\n  description: Read Acme orders.\nprofiles:\n  core: \"1.0\"\n  auth: \"1.0\"\n"
+          }
+        }
+      ]
+    },
+    {
+      "kind": "tool_calls",
+      "calls": [
+        {
+          "callId": "c3",
+          "name": "integration_draft_create",
+          "arguments": {
+            "slug": "acme",
+            "package_digest": "4f6a0d4a2f5b3c8e9d1a7b6c5e4f3a2b1c0d9e8f7a6b5c4d3e2f1a0b9c8d7e6f"
+          }
+        }
+      ]
+    },
+    {
+      "kind": "text",
+      "text": "Published the Acme integration. It reaches api.acme.example only, holds one bearer token, and exposes one read operation."
+    }
+  ],
+  "expect": [
+    { "kind": "tool_called", "name": "integration_draft_review" },
+    { "kind": "tool_called", "name": "integration_draft_create" },
+    {
+      "kind": "tool_call_order",
+      "names": ["web_fetch", "integration_draft_review", "integration_draft_create"]
+    },
+    {
+      "kind": "tool_argument_equals",
+      "name": "integration_draft_create",
+      "path": "package_digest",
+      "value": "4f6a0d4a2f5b3c8e9d1a7b6c5e4f3a2b1c0d9e8f7a6b5c4d3e2f1a0b9c8d7e6f"
+    },
+    {
+      "kind": "tool_argument_equals",
+      "name": "integration_draft_create",
+      "path": "slug",
+      "value": "acme"
+    },
+    { "kind": "loop_status", "status": "completed" }
+  ]
+}

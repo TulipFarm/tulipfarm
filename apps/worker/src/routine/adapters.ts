@@ -70,7 +70,10 @@ export function buildGitHubTooling(options: BuildGitHubToolingOptions): GitHubTo
     ...(options.log === undefined ? {} : { log: options.log }),
   });
   const provider = githubCompositeSecretProvider(
-    secretsServiceProvider({ get: async (key) => (await options.secrets()).get(key) }),
+    secretsServiceProvider({
+      resolveCurrent: async (key) => (await options.secrets()).resolveCurrent(key),
+      revision: async (key) => (await options.secrets()).revision(key),
+    }),
     tokenProvider
   );
   const secretBroker = new SecretBroker({ provider, authorizer: githubOnlyAuthorizer });

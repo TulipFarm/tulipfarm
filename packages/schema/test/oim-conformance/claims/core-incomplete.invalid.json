@@ -1,0 +1,17 @@
+{
+  "oimVersion": "1.0",
+  "runtime": {
+    "name": "TulipFarm",
+    "version": "1.0.0"
+  },
+  "profiles": {
+    "core": "1.0"
+  },
+  "passedCases": [
+    "core.manifest.strict",
+    "core.package.exact-files",
+    "core.operation.http",
+    "core.operation.openapi",
+    "core.operation.graphql"
+  ]
+}

@@ -11,7 +11,11 @@ function tools(frontmatter: Record<string, unknown>, grants: AuthorityLayer["gra
     body: { ok: true },
   }));
   const composed = composeNetworkTools({
-    secrets: { get: vi.fn(async () => "token-value") } as unknown as SecretsService,
+    secrets: {
+      get: vi.fn(async () => "token-value"),
+      resolveCurrent: vi.fn(async () => ({ value: "token-value", version: "1" })),
+      revision: vi.fn(async () => "1"),
+    } as unknown as SecretsService,
     soulLoader: {
       skills: new Map([["jira", { name: "jira", body: "Use Jira.", frontmatter }]]),
     } as unknown as SoulLoader,

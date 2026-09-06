@@ -9,8 +9,31 @@ export interface ApprovalIntent {
   readonly action: string;
   readonly targetRefs: readonly { readonly type: string; readonly id: string }[];
   readonly arguments: unknown;
+  readonly filePrincipalId?: string;
   readonly destination?: string;
   readonly credentialRef?: string;
+  readonly secondaryCredentialRef?: string;
+  /**
+   * The Connection the intent was resolved against.
+   *
+   * Part of the digest so an Approval granted for one account cannot be replayed against another.
+   * Must stay identical to `intentDigest` in `@tulipfarm/tool-broker`: the two are computed
+   * independently, and a divergence makes every Approval fail to bind.
+   */
+  readonly connection?: {
+    readonly connectionId: string;
+    readonly integrationId: string;
+    readonly credentialSlot: string;
+    readonly principalKind?: string;
+    readonly principalId?: string;
+  };
+  readonly secondaryConnection?: {
+    readonly connectionId: string;
+    readonly integrationId: string;
+    readonly credentialSlot: string;
+    readonly principalKind?: string;
+    readonly principalId?: string;
+  };
 }
 
 export interface ApprovalBindingInput {
@@ -37,8 +60,12 @@ export function computeApprovalBinding(input: ApprovalBindingInput): ApprovalBin
       action: intent.action,
       targetRefs: intent.targetRefs.map((ref) => ({ type: ref.type, id: ref.id })),
       arguments: intent.arguments,
+      filePrincipalId: intent.filePrincipalId ?? null,
       destination: intent.destination ?? null,
       credentialRef: intent.credentialRef ?? null,
+      connection: intent.connection ?? null,
+      secondaryCredentialRef: intent.secondaryCredentialRef ?? null,
+      secondaryConnection: intent.secondaryConnection ?? null,
     }),
     evidenceDigest: canonicalHash([...input.evidenceHashes].sort()),
     guardrailRevision: input.guardrailRevision,

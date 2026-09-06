@@ -1,0 +1,94 @@
+{
+  "id": "integration-publish-without-review-is-refused",
+  "tier": "l2",
+  "agent": "triage",
+  "input": [
+    {
+      "role": "user",
+      "content": "Publish the Acme integration under the slug acme."
+    }
+  ],
+  "platformTools": ["integration_draft_review", "integration_draft_create"],
+  "toolResults": [
+    {
+      "name": "integration_draft_create",
+      "error": "No reviewed package carries that digest. Call integration_draft_review first, then pass the digest it reports."
+    },
+    {
+      "name": "integration_draft_review",
+      "output": {
+        "slug": "acme",
+        "packageDigest": "4f6a0d4a2f5b3c8e9d1a7b6c5e4f3a2b1c0d9e8f7a6b5c4d3e2f1a0b9c8d7e6f",
+        "review": {
+          "destinations": ["api.acme.example"],
+          "credentialSlots": [
+            {
+              "id": "api_token",
+              "kind": "bearer_token"
+            }
+          ],
+          "operations": [
+            {
+              "name": "acme_get_order",
+              "effect": "read"
+            }
+          ],
+          "events": false
+        }
+      }
+    }
+  ],
+  "script": [
+    {
+      "kind": "tool_calls",
+      "calls": [
+        {
+          "callId": "c1",
+          "name": "integration_draft_create",
+          "arguments": {
+            "slug": "acme",
+            "package_digest": "0000000000000000000000000000000000000000000000000000000000000000"
+          }
+        }
+      ]
+    },
+    {
+      "kind": "tool_calls",
+      "calls": [
+        {
+          "callId": "c2",
+          "name": "integration_draft_review",
+          "arguments": {
+            "manifest": "oimVersion: \"1.0\"\nkind: Integration\nmetadata:\n  id: acme\n  name: Acme\n  version: 1.0.0\n  description: Read Acme orders.\nprofiles:\n  core: \"1.0\"\n  auth: \"1.0\"\n"
+          }
+        }
+      ]
+    },
+    {
+      "kind": "text",
+      "text": "That first attempt was refused because the package had not been reviewed. The review reports it reaches api.acme.example only, with one bearer token and one read operation \u2014 say the word and I will publish it."
+    }
+  ],
+  "expect": [
+    {
+      "kind": "tool_called",
+      "name": "integration_draft_create"
+    },
+    {
+      "kind": "tool_call_order",
+      "names": ["integration_draft_create", "integration_draft_review"]
+    },
+    {
+      "kind": "tool_call_count",
+      "count": 2
+    },
+    {
+      "kind": "output_contains",
+      "text": "api.acme.example"
+    },
+    {
+      "kind": "loop_status",
+      "status": "completed"
+    }
+  ]
+}

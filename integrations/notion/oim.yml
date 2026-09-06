@@ -1,0 +1,188 @@
+oimVersion: "1.0"
+kind: Integration
+
+metadata:
+  id: notion
+  name: Notion
+  version: 1.0.0
+  description: Search, read, and append to Notion pages and databases shared with an integration.
+  license: Apache-2.0
+  maintainers:
+    - name: TulipFarm
+      url: https://tulipfarm.dev
+
+profiles:
+  core: "1.1"
+  auth: "1.0"
+
+auth:
+  allowedOriginHosts:
+    - api.notion.com
+  credentialSlots:
+    - id: integration_token
+      label: Notion internal integration secret
+      kind: bearer_token
+      required: true
+  steps:
+    - id: token
+      type: fields
+      title: Create an internal integration
+      description: >-
+        Open https://www.notion.so/profile/integrations, create an internal integration, and copy
+        its secret. Then open each page or database you want reachable and share it with that
+        integration — Notion returns nothing that has not been shared explicitly.
+      fields:
+        - id: integration_token
+          label: Internal integration secret
+          input: password
+          required: true
+          target:
+            type: credential
+            slot: integration_token
+  healthCheckOperationId: list-users
+
+operations:
+  - id: search
+    name: notion_search
+    description: Search pages and databases shared with this integration.
+    effect: read
+    identityMode: shared_only
+    credentialSlot: integration_token
+    credentialInjection:
+      in: header
+      name: Authorization
+      format: "Bearer {token}"
+    source:
+      type: http
+      method: POST
+      baseUrl: https://api.notion.com
+      path: /v1/search
+      parameters:
+        # Notion refuses a request without this header, and the value pins the response shape the
+        # response schema below describes. It is pinned rather than an argument for that reason:
+        # an Agent that chose a different version would get a body this manifest does not describe.
+        - name: Notion-Version
+          in: header
+          value: "2022-06-28"
+          schema: { type: string }
+    requestSchema:
+      type: object
+      properties:
+        query:
+          type: string
+          description: Text to match against page and database titles.
+        page_size:
+          type: integer
+          minimum: 1
+          maximum: 100
+      additionalProperties: false
+    # Notion pages by a cursor in the request *body*, not a query parameter.
+    pagination:
+      type: body_cursor
+      requestPointer: /start_cursor
+      responsePath: /next_cursor
+      itemsPath: /results
+    response:
+      maxBytes: 524288
+      schema:
+        type: object
+        properties:
+          results:
+            type: array
+            items:
+              type: object
+              properties:
+                id: { type: string }
+                object: { type: string }
+                url: { type: string }
+                last_edited_time: { type: string }
+          next_cursor: { type: ["string", "null"] }
+          has_more: { type: boolean }
+    rateLimit:
+      requests: 180
+      perSeconds: 60
+      scope: connection
+
+  - id: get-page
+    name: notion_get_page
+    description: Read one page's properties by id.
+    effect: read
+    identityMode: shared_only
+    credentialSlot: integration_token
+    credentialInjection:
+      in: header
+      name: Authorization
+      format: "Bearer {token}"
+    source:
+      type: http
+      method: GET
+      baseUrl: https://api.notion.com
+      path: /v1/pages/{page_id}
+      parameters:
+        - name: page_id
+          in: path
+          required: true
+          schema: { type: string }
+        - name: Notion-Version
+          in: header
+          value: "2022-06-28"
+          schema: { type: string }
+    response:
+      maxBytes: 262144
+      schema:
+        type: object
+        properties:
+          id: { type: string }
+          url: { type: string }
+          created_time: { type: string }
+          last_edited_time: { type: string }
+          properties: { type: object }
+    rateLimit:
+      requests: 180
+      perSeconds: 60
+      scope: connection
+
+  - id: list-users
+    name: notion_list_users
+    description: List workspace members visible to this integration.
+    effect: read
+    identityMode: shared_only
+    credentialSlot: integration_token
+    credentialInjection:
+      in: header
+      name: Authorization
+      format: "Bearer {token}"
+    source:
+      type: http
+      method: GET
+      baseUrl: https://api.notion.com
+      path: /v1/users
+      parameters:
+        - name: page_size
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+        - name: Notion-Version
+          in: header
+          value: "2022-06-28"
+          schema: { type: string }
+    response:
+      maxBytes: 131072
+      schema:
+        type: object
+        properties:
+          results:
+            type: array
+            items:
+              type: object
+              properties:
+                id: { type: string }
+                name: { type: string }
+                type: { type: string }
+          has_more: { type: boolean }
+    rateLimit:
+      requests: 180
+      perSeconds: 60
+      scope: connection

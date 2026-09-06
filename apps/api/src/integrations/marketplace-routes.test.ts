@@ -3,6 +3,7 @@ import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
+import { type OimManifest, oimFileDigest } from "@tulipfarm/schema";
 import type {
   BundledIntegration,
   GitSyncService,
@@ -137,6 +138,7 @@ async function headOf(dir: string): Promise<string> {
 describe("integration marketplace routes", () => {
   let app: FastifyInstance;
   let sid: string;
+  let memberSid: string;
   let soul: ReturnType<typeof makeSoulWriterDouble>;
   let registryDir: string;
   let soulIntegrations: Map<string, SoulIntegration>;
@@ -154,6 +156,8 @@ describe("integration marketplace routes", () => {
     // Deployment-wide connection deletion requires the operator gate.
     const user = await createUser(userRepo, "user@example.com", "pass", "admin");
     sid = await store.create(user._id);
+    const member = await createUser(userRepo, "member@example.com", "pass", "member");
+    memberSid = await store.create(member._id);
 
     soul = makeSoulWriterDouble();
 
@@ -234,6 +238,7 @@ describe("integration marketplace routes", () => {
   });
 
   const auth = () => ({ [SESSION_COOKIE]: sid, [CSRF_COOKIE]: TEST_CSRF });
+  const memberAuth = () => ({ [SESSION_COOKIE]: memberSid, [CSRF_COOKIE]: TEST_CSRF });
   const headers = { [CSRF_HEADER]: TEST_CSRF };
 
   async function makeTemp(
@@ -300,6 +305,73 @@ describe("integration marketplace routes", () => {
         source: "acme/tulipfarm-linear",
         installed: false,
         status: "disconnected",
+      });
+    });
+  });
+
+  describe("POST /api/v1/integrations/:name/fixtures", () => {
+    it("runs an installed OIM package's fixtures through the authenticated API", async () => {
+      const fixture = `version: 1
+cases:
+  - name: gets-weather
+    operationId: get-weather
+    request: { city: London }
+    response:
+      status: 200
+      body: { temperature: 18 }
+    expect:
+      request:
+        method: GET
+        url: https://api.weather.example/weather?city=London
+      result: { temperature: 18 }
+`;
+      const manifest: OimManifest = {
+        oimVersion: "1.0",
+        kind: "Integration",
+        metadata: {
+          id: "weather",
+          name: "Weather",
+          version: "1.0.0",
+          description: "Weather.",
+          license: "Apache-2.0",
+        },
+        profiles: { core: "1.0" },
+        files: [{ path: "fixtures.yml", role: "fixture", sha256: oimFileDigest(fixture) }],
+        operations: [
+          {
+            id: "get-weather",
+            name: "get_weather",
+            description: "Get weather.",
+            effect: "read",
+            identityMode: "shared_only",
+            source: {
+              type: "http",
+              method: "GET",
+              baseUrl: "https://api.weather.example",
+              path: "/weather",
+              parameters: [{ name: "city", in: "query", schema: { type: "string" } }],
+            },
+            response: { maxBytes: 1024, schema: { type: "object" } },
+          },
+        ],
+      } as OimManifest;
+      soulIntegrations.set("weather", {
+        slug: "weather",
+        sourceIntegration: "weather",
+        oimManifest: manifest,
+        oimFixtures: { "fixtures.yml": fixture },
+      });
+
+      const res = await app.inject({
+        method: "POST",
+        url: "/api/v1/integrations/weather/fixtures",
+        cookies: auth(),
+        headers,
+      });
+
+      expect(res.statusCode).toBe(200);
+      expect(res.json()).toEqual({
+        fixtures: [{ name: "gets-weather", fixture: "fixtures.yml", passed: true }],
       });
     });
   });
@@ -371,6 +443,7 @@ describe("integration marketplace routes", () => {
           installed: false,
           installable: true,
           issues: [],
+          definition: "legacy",
         },
       ]);
       expect(soul.applied).toHaveLength(0);
@@ -406,6 +479,22 @@ describe("integration marketplace routes", () => {
       });
       expect(res.statusCode).toBe(400);
       expect(res.json().error).toContain("no manifest.yml");
+    });
+  });
+
+  describe("integration package mutations", () => {
+    it("requires integration management authority to install a package", async () => {
+      const repo = await makeTemp({ linear: declarativeManifest("linear") });
+
+      const res = await app.inject({
+        method: "POST",
+        url: "/api/v1/integrations/install",
+        cookies: memberAuth(),
+        headers,
+        payload: { source: `file://${repo}` },
+      });
+
+      expect(res.statusCode).toBe(403);
     });
   });
 

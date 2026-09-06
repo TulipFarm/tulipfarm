@@ -27,9 +27,9 @@ PostgreSQL persistence composition, auth, Soul Git writes, and Worker callback p
 | `src/tools/` | ToolRegistry, batch execution, truncation, declarative egress sync. |
 | `src/platform/` | Platform Tools that need the API's own services. `delegate-tool.ts` hands work to a Soul Agent (which gets a Conversation); `spawn-tool.ts` + `subagent-{run,answers}.ts` spawn an ad-hoc helper the caller defines inline, which gets none. Both park the calling Turn on a child-Run wait. |
 | `src/resources/`, `src/soul/` | Resource CRUD and Soul HTTP routes/Tools; domain logic lives in `@tulipfarm/soul`. |
-| `src/integrations/` | Manifest catalog, connect auth, install, post-connect hooks. |
+| `src/integrations/` | Manifest catalog, connect auth, install, offline OIM fixtures, webhook and polling ingress, OIM Knowledge Tools. |
 | `src/guardrails/` | Guardrail config loading and `soul.synced` reload wiring only. |
-| `src/knowledge/`, `src/knowledge-sources/` | Knowledge routes/Tools and ingestion API; repositories and OKF live in `@tulipfarm/knowledge`. |
+| `src/knowledge/`, `src/knowledge-sources/` | Knowledge routes/Tools and ingestion API; repositories and OKF live in `@tulipfarm/knowledge`. Slack and OIM sync checkpoint stores. |
 | `src/memory/`, `src/kv/`, `src/secrets/` | Memory Document composition, its read-only route and erasure; scoped KV; secret storage routes. |
 | `src/authz/` | `route-gate.ts` — the sole HTTP path to `decideEffectivePermission`; self-governed and Team administration routes. |
 | `src/team-assets/` | Team asset catalog, ownership access projection, and Approval orchestration for all five owned asset types. |
@@ -82,6 +82,11 @@ PostgreSQL persistence composition, auth, Soul Git writes, and Worker callback p
   human. Never let the confirming call re-read a body — an Agent would then have benign text audited
   and different text written under the approval the report earned. `skill_create`, `skill_update`
   and `skill_install` all share this shape.
+- **Authoring an OIM Integration is two calls, for the same reason.** `integration_draft_review`
+  validates the manifest, reports the capability review and parks the exact bytes under their
+  package digest (`soul/integrations/drafts.ts`); `integration_draft_create` spends that digest and
+  writes. Naming the digest is the approval, so a package can only land in the form that was
+  reviewed. The forge Skill that drives it is `skills/forge/integration-forge/`.
 - Third-party provider Tools come from Integration manifest `egress`, not handwritten TypeScript;
   `tools/github/` and `tools/slack/` are exceptions.
 - Every `EffectDispatcher` built here is given the `MutationKillSwitchGuard` from `src/index.ts`.

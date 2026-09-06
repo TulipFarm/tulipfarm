@@ -4,7 +4,11 @@ import {
   GITHUB_TOOL_DECLARATIONS,
   SLACK_TOOL_DECLARATIONS,
 } from "@tulipfarm/integrations";
-import { NETWORK_TOOL_DECLARATIONS, SKILL_MARKETPLACE_TOOL_DECLARATIONS } from "@tulipfarm/schema";
+import {
+  INTEGRATION_AUTHORING_TOOL_DECLARATIONS,
+  NETWORK_TOOL_DECLARATIONS,
+  SKILL_MARKETPLACE_TOOL_DECLARATIONS,
+} from "@tulipfarm/schema";
 import { SKILL_TOOL_DECLARATION } from "@tulipfarm/soul";
 import { describe, expect, it } from "vitest";
 import { platformToolNames, resolvePlatformTool } from "./platform-tools.ts";
@@ -19,6 +23,7 @@ describe("platform Tools a Case may name", () => {
       ...GITHUB_TOOL_DECLARATIONS,
       ...SLACK_TOOL_DECLARATIONS,
       ...NETWORK_TOOL_DECLARATIONS,
+      ...INTEGRATION_AUTHORING_TOOL_DECLARATIONS,
     ];
 
     expect(platformToolNames()).toEqual(shippedDeclarations.map((tool) => tool.name).sort());

@@ -160,19 +160,25 @@ function parseClaims(page: Page): Claim[] {
 
 const claims = pages.flatMap(parseClaims);
 
-function directorySlugs(relativePath: string, marker: string): string[] {
+function directorySlugs(relativePath: string, ...markers: string[]): string[] {
   const base = join(ROOT, relativePath);
   if (!existsSync(base)) return [];
   return readdirSync(base, { withFileTypes: true })
-    .filter((entry) => entry.isDirectory() && existsSync(join(base, entry.name, marker)))
+    .filter(
+      (entry) =>
+        entry.isDirectory() && markers.some((marker) => existsSync(join(base, entry.name, marker)))
+    )
     .map((entry) => entry.name)
     .sort();
 }
 
 /** Each verifier returns the current truth, so a failure message can name the fix. */
 const verifiers: Record<string, () => string> = {
-  "integration-slugs": () => directorySlugs("integrations", "manifest.yml").join(","),
-  "integration-count": () => String(directorySlugs("integrations", "manifest.yml").length),
+  // A shipped Integration declares itself in either format, so counting only one silently drops
+  // every OIM package from a claim whose whole job is to say what ships.
+  "integration-slugs": () => directorySlugs("integrations", "manifest.yml", "oim.yml").join(","),
+  "integration-count": () =>
+    String(directorySlugs("integrations", "manifest.yml", "oim.yml").length),
   "deploy-target-slugs": () => directorySlugs("deploy/targets", "manifest.yml").join(","),
   "deploy-target-count": () => String(directorySlugs("deploy/targets", "manifest.yml").length),
 };

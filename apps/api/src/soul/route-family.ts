@@ -7,6 +7,8 @@ import type { AuthorizationCheck, RequireAuthorization } from "../authz/route-ga
 import { registerIntegrationAuthRoutes } from "../integrations/auth-routes";
 import { ensureGitHubInstallation } from "../integrations/github-install";
 import { registerIntegrationMarketplaceRoutes } from "../integrations/marketplace-routes";
+import { registerOimConnectionRoutes } from "../integrations/oim-connection-routes";
+import { registerOimFixtureRoutes } from "../integrations/oim-fixture-routes";
 import { registerIntegrationRoutes } from "../integrations/routes";
 import {
   ensureDefaultSlackRoute,
@@ -127,15 +129,50 @@ export function registerSoulRouteFamily(
             : undefined,
           opts.declarativeTools,
           opts.auditService,
-          opts.integrationAuth?.tokens
+          opts.integrationAuth?.tokens,
+          opts.bundledOimPackages ?? new Map()
         );
         registerIntegrationMarketplaceRoutes(
           app,
           opts.soulLoader,
           opts.soulWriter,
           opts.bundledIntegrations ?? new Map(),
-          requireAuth
+          requireAuth,
+          requireAuthorization
         );
+        registerOimFixtureRoutes(app, opts.soulLoader, requireAuth);
+        // In the Soul family because connecting an OIM package materializes it into the Soul
+        // first: its `oim.yml` and content-addressed companions are what the Tool compiler reads.
+        if (opts.connectionStore && opts.secretsService) {
+          registerOimConnectionRoutes(app, {
+            soulLoader: opts.soulLoader,
+            soulWriter: opts.soulWriter,
+            connections: opts.connectionStore,
+            secrets: opts.secretsService,
+            requireAuth,
+            authorizationCheck,
+            ...(opts.declarativeTools === undefined
+              ? {}
+              : { declarativeTools: opts.declarativeTools }),
+            ...(opts.auditService === undefined
+              ? {}
+              : { audit: makeSoulAuditWriter(opts.auditService) }),
+            ...(opts.integrationAuth === undefined
+              ? {}
+              : {
+                  authRequests: opts.integrationAuth.repo,
+                  endpoints: publicOrigins
+                    ? () => publicOrigins.authEndpoints()
+                    : () => Promise.resolve(resolveAuthEndpoints()),
+                  ...(opts.integrationAuth.fetchImpl === undefined
+                    ? {}
+                    : { fetchImpl: opts.integrationAuth.fetchImpl }),
+                }),
+            ...(opts.oimWebhookLifecycle === undefined
+              ? {}
+              : { webhookLifecycle: opts.oimWebhookLifecycle }),
+          });
+        }
         if (slackBindDeps) {
           registerSlackBindRoute(app, slackBindDeps);
         }

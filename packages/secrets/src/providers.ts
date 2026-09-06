@@ -1,5 +1,6 @@
 /** Secret providers must return current plaintext at call time, or `null` after revoke/delete. */
 
+import { secretStorageKey } from "./connection-secrets";
 import type { SecretsService } from "./encrypted-store";
 import { SecretUnavailableError } from "./encrypted-store";
 
@@ -12,6 +13,8 @@ export interface ResolvedSecret {
 export interface SecretProvider {
   /** Current plaintext for `secretRef`, or `null` when it is revoked, deleted, or unknown. */
   resolveCurrent(secretRef: string): Promise<ResolvedSecret | null>;
+  /** Durable revision without plaintext. Required for Connection leases. */
+  currentVersion?(secretRef: string): Promise<string | null>;
 }
 
 export interface InMemorySecretProvider extends SecretProvider {
@@ -39,6 +42,10 @@ export function inMemorySecretProvider(
       }
       return { value, version: String(versions.get(secretRef) ?? 1) };
     },
+    async currentVersion(secretRef) {
+      const version = versions.get(secretRef);
+      return version === undefined ? null : String(version);
+    },
     set(secretRef, value) {
       values.set(secretRef, value);
       versions.set(secretRef, (versions.get(secretRef) ?? 0) + 1);
@@ -50,18 +57,25 @@ export function inMemorySecretProvider(
   };
 }
 
-/** Fresh only with same-instance rotation/revocation; out-of-band changes must invalidate cache. */
-export function secretsServiceProvider(service: Pick<SecretsService, "get">): SecretProvider {
+/** Reads Connection credentials fresh so a remote rotation invalidates existing leases. */
+export function secretsServiceProvider(
+  service: Pick<SecretsService, "resolveCurrent" | "revision">
+): SecretProvider {
   return {
     async resolveCurrent(secretRef) {
       try {
-        return { value: await service.get(secretRef) };
+        const key = secretRef.startsWith("secret://") ? secretStorageKey(secretRef) : secretRef;
+        return await service.resolveCurrent(key);
       } catch (error) {
         if (error instanceof SecretUnavailableError) {
           return null;
         }
         throw error;
       }
+    },
+    async currentVersion(secretRef) {
+      const key = secretRef.startsWith("secret://") ? secretStorageKey(secretRef) : secretRef;
+      return await service.revision(key);
     },
   };
 }

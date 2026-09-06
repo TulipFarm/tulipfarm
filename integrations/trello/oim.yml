@@ -1,0 +1,93 @@
+oimVersion: "1.0"
+kind: Integration
+
+metadata:
+  id: trello
+  name: Trello
+  version: 1.0.0
+  description: Read Trello boards, lists, and cards with an API key and token.
+  license: Apache-2.0
+  maintainers:
+    - name: TulipFarm
+      url: https://tulipfarm.dev
+
+profiles:
+  core: "1.1"
+  auth: "1.0"
+
+auth:
+  credentialSlots:
+    - id: api_key
+      label: Trello API key
+      kind: api_key
+      required: true
+    - id: token
+      label: Trello token
+      kind: bearer_token
+      required: true
+  steps:
+    - id: credentials
+      type: fields
+      title: Create a Trello API key and token
+      description: >-
+        Create an API key in Trello, then generate a token for that key. Paste both values here.
+      fields:
+        - id: api_key
+          label: API key
+          input: password
+          required: true
+          target:
+            type: credential
+            slot: api_key
+        - id: token
+          label: Token
+          input: password
+          required: true
+          target:
+            type: credential
+            slot: token
+  healthCheckOperationId: get-member
+
+operations:
+  - id: get-member
+    name: trello_get_member
+    description: Confirm the Trello credentials and read the connected member.
+    effect: read
+    identityMode: shared_only
+    credentialSlot: api_key
+    credentialInjection:
+      in: query
+      name: key
+      format: "{token}"
+    secondaryCredential:
+      slot: token
+      injection:
+        in: query
+        name: token
+        format: "{token}"
+    source:
+      type: http
+      method: GET
+      baseUrl: https://api.trello.com
+      path: /1/members/me
+      parameters:
+        - name: fields
+          in: query
+          value: fullName,username
+          schema: { type: string }
+    response:
+      maxBytes: 65536
+      schema:
+        type: object
+        properties:
+          id: { type: string }
+          fullName: { type: string }
+          username: { type: string }
+      projection:
+        - /id
+        - /fullName
+        - /username
+    rateLimit:
+      requests: 100
+      perSeconds: 10
+      scope: connection

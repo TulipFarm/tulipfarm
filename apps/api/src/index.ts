@@ -15,7 +15,13 @@ import {
 } from "@tulipfarm/authz";
 import { DEPLOYMENT_BUSINESS_ID } from "@tulipfarm/constants";
 import { FileService, PgFileRepo } from "@tulipfarm/files";
-import { FetchEgressHttp, GuardedEgressHttp, PublicOriginsService } from "@tulipfarm/integrations";
+import {
+  ConnectionResolver,
+  FetchEgressHttp,
+  GuardedEgressHttp,
+  OimOperationConnectionResolver,
+  PublicOriginsService,
+} from "@tulipfarm/integrations";
 import {
   buildDefaultRegistry,
   enqueueIndex,
@@ -56,7 +62,9 @@ import {
   loadOrProvisionActiveDek,
   PgDekRepo,
   PgSecretRepo,
+  SecretBroker,
   SecretsService,
+  secretsServiceProvider,
 } from "@tulipfarm/secrets";
 import { SkillBashRunner, SkillCommandRunner } from "@tulipfarm/skill-sandbox";
 import type { AuthOAuth2Step } from "@tulipfarm/soul";
@@ -70,6 +78,7 @@ import {
   getDefaultAssistant,
   listAgents,
   loadBundledIntegrations,
+  loadBundledOimPackages,
   loadBundledSkills,
   loadDisabledBundledSkills,
   loadIntegrationRegistry,
@@ -90,6 +99,7 @@ import {
   ChannelRunDeliveryStore,
   ChildLinkAncestryStore,
   ChildLinkStore,
+  ConnectionStore,
   createBlobPort,
   EventStore,
   ensureBundledBucket,
@@ -107,12 +117,14 @@ import {
   PgTeamRepo,
   ProviderFileUploadStore,
   ProviderObjectOwnershipStore,
+  PollingIngressStore,
   PublicOriginStore,
   RunEventStore,
   RunStore,
   SoulRepositoryStore,
   TaskRepo,
   WaitStore,
+  WebhookInboxStore,
   writeBucketSecrets,
 } from "@tulipfarm/storage";
 import { PgEffectStore } from "@tulipfarm/tool-broker";
@@ -181,6 +193,10 @@ import { PgApiClientRepo } from "./identity/api-clients";
 import { buildApiAuthorityLayerResolver } from "./identity/authority-layers";
 import { channelBindKeyResolver } from "./identity/channel-link";
 import { PgExternalIdentityRepo, PgExternalIdentityUnlinker } from "./identity/external-links";
+import {
+  ExternalLinkKnowledgeIdentityMap,
+  providerIdentityLinkPort,
+} from "./identity/knowledge-identity-map";
 import { reconcileSoulRoles, registerSoulRoleReconcile } from "./identity/role-reconcile";
 import { syncDeploymentRoles } from "./identity/roles";
 import { IngressIdentityResolver } from "./ingress/identity";
@@ -189,8 +205,15 @@ import {
   IntegrationConversationsRepo,
   IntegrationEventsRepo,
 } from "./ingress/repo";
+import { connectionUseAuthorizer } from "./integrations/connection-authorizer";
 import { resolveSecretRef } from "./integrations/connection-env";
+import { deliveryCipher } from "./integrations/delivery-cipher";
+import { oimIngressResolver, oimWebhookBinding } from "./integrations/oim-ingress-binding";
+import { registerOimOAuthRefreshSchedule } from "./integrations/oim-oauth-refresh-schedule";
+import { startOimPollingWorker } from "./integrations/oim-polling-worker";
+import { OimWebhookLifecycle } from "./integrations/oim-webhook-lifecycle";
 import { PgPrincipalProviderTokenRepo } from "./integrations/principal-tokens";
+import { startWebhookInboxWorker } from "./integrations/webhook-inbox-worker";
 import { InternalChildRoutineHost } from "./internal/child-routine-host";
 import { IngressDeliveryHost } from "./internal/delivery-host";
 import { InternalEmitHost } from "./internal/emit-host";
@@ -216,6 +239,8 @@ import {
   CompositeLiveSourceAuthorization,
   SlackTenantLiveAuthorization,
 } from "./knowledge-sources/live-authorization";
+import { PgOimKnowledgeCheckpointStore } from "./knowledge-sources/oim-checkpoint-store";
+import { registerSlackKnowledgeSync } from "./knowledge-sources/slack-sync-schedule";
 import { PgKnowledgeSourceStore } from "./knowledge-sources/source-store";
 import { registerLlmReload } from "./llm-reload";
 import { buildMemoryServices } from "./memory/composition";
@@ -296,6 +321,7 @@ import { apiSurfacePresentation, surfaceRendererRegistry } from "./surfaces/rend
 import { TeamAssetCatalogProvider } from "./team-assets/catalog-provider";
 import { TeamAssetService } from "./team-assets/service";
 import { TeamAssetLifecycle } from "./team-assets/team-lifecycle";
+import { oimFiles } from "./tools/declarative/oim-files";
 import { DeclarativeToolSync } from "./tools/declarative/sync";
 import { buildGitHubTooling } from "./tools/github/compose";
 import { buildGitHubTools } from "./tools/github/tools";
@@ -552,6 +578,7 @@ async function boot() {
       );
     }
     const bundledIntegrations = await loadBundledIntegrations(console);
+    const bundledOimPackages = await loadBundledOimPackages(console);
 
     // Per-type resource tables can't be created lazily (no `db.collection(type)`):
     await reconcileResourceTables(pool, soulLoader, console);
@@ -1071,10 +1098,18 @@ async function boot() {
       bundledSkills,
       disabledBundledSkills
     );
+    // One store behind both credentialed paths: an OIM operation and an ad-hoc `api_request` must
+    // agree on which Connections exist, or a person would confirm a Credential in one place and
+    // find the other still asking for it.
+    const connectionStore = new ConnectionStore(transactionPort(pool));
+    const webhookInbox = new WebhookInboxStore(transactionPort(pool));
+    const pollingIngress = new PollingIngressStore(transactionPort(pool));
+    const oimDeliveryCipher = deliveryCipher(() => ({ current: activeDek.key }));
     const networkTools = composeNetworkTools({
       secrets: secretsService,
       soulLoader,
       authorityLayers: authorityLayerResolver,
+      connections: connectionStore,
     });
     // The GitHub Skill documents Tools that are excluded whenever the integration is uninstalled.
     // Hiding it on the same live check keeps `skill_list`/`skill` from advertising a workflow
@@ -1102,11 +1137,22 @@ async function boot() {
       resourceTypes: { gitSync, soulWriter, soulLoader, reconcile: reconcileResources },
       agentTools: { gitSync, soulWriter, soulLoader, teamAssets },
       skillTools: { ...skillTools, hiddenSkillNames, teamAssets },
+      integrationAuthoring: { gitSync, soulWriter },
       github: githubTools,
       slack: slackTools,
       google: googleTools,
       network: networkTools,
       tasks: { businessId: DEPLOYMENT_BUSINESS_ID, tasks: taskRepo },
+      integrationKnowledge: {
+        businessId: DEPLOYMENT_BUSINESS_ID,
+        integrations: () => soulLoader.integrations.values(),
+        checkpoints: new PgOimKnowledgeCheckpointStore(pool),
+        sink: new PgKnowledgeEmissionSink(knowledgeSourceStore, knowledgeIndexStore),
+        links: providerIdentityLinkPort(new ExternalLinkKnowledgeIdentityMap(externalIdentityRepo)),
+        // Verified-email matching stays off until an operator names a domain: an address a
+        // provider calls verified is still an address a stranger's account may hold.
+        policy: { verifiedEmailDomains: [] },
+      },
       platform: {
         events: domainEventEmitter,
         soulLoader,
@@ -1146,16 +1192,54 @@ async function boot() {
     });
 
     // who connects a provider expects its Tools without an API restart.
+    // OIM operations name a credential *slot*, not a Credential: which Connection fills it is a
+    // live decision per call, because one installed Integration may hold several — the
+    // organization's bot account and a person's own — and the operation's identity mode decides
+    // which of them this caller may spend.
+    const oimConnections = new OimOperationConnectionResolver(
+      new ConnectionResolver(
+        connectionStore,
+        connectionUseAuthorizer({
+          businessId: DEPLOYMENT_BUSINESS_ID,
+          resolvePrincipalLayer: (name, principal) =>
+            authorityLayerResolver.resolvePrincipalLayer(name, principal),
+          hasTeamMembership: async (principalId, teamId) => {
+            const resolved = await teamDomain.resolvePrincipalForTeams(
+              DEPLOYMENT_BUSINESS_ID,
+              [teamId],
+              principalId
+            );
+            return (resolved.get(teamId)?.length ?? 0) > 0;
+          },
+        })
+      )
+    );
+
     const declarativeTools = new DeclarativeToolSync({
       registry: toolRegistry,
+      connections: oimConnections,
       integrations: () => soulLoader.integrations.values(),
       businessId: DEPLOYMENT_BUSINESS_ID,
       effects: slackEffects,
       secrets: async () => secretsService,
+      files: oimFiles(fileService),
       // Manifests are authored from chat, so the destination is untrusted right up to the socket.
       http: new GuardedEgressHttp(new FetchEgressHttp()),
       mutationGuard,
       logger: () => app.log,
+    });
+    const oimWebhookLifecycle = new OimWebhookLifecycle({
+      connections: connectionStore,
+      secrets: secretsService,
+      http: new GuardedEgressHttp(new FetchEgressHttp()),
+      manifestFor: (integrationId) =>
+        [...soulLoader.integrations.entries()]
+          .map(([slug, integration]) =>
+            integration.oimManifest === undefined
+              ? undefined
+              : { slug, manifest: integration.oimManifest }
+          )
+          .find((installed) => installed?.manifest.metadata.id === integrationId),
     });
 
     // with, so a worker credential is a key to a Run rather than a principal of its own.
@@ -1347,6 +1431,7 @@ async function boot() {
       bundledSkills,
       disabledBundledSkills,
       bundledIntegrations,
+      bundledOimPackages,
       slackBind: { integrations: channelIntegrations, businessId: DEPLOYMENT_BUSINESS_ID },
       githubInstall: {
         integrations: channelIntegrations,
@@ -1391,6 +1476,19 @@ async function boot() {
       integrationRegistry: { load: () => loadIntegrationRegistry(app.log) },
       kvService,
       taskStore: taskRepo,
+      connectionStore,
+      oimWebhookLifecycle,
+      systemRoutes: {
+        onPublicOriginsChanged: (apiOrigin) => oimWebhookLifecycle.reconcile(apiOrigin),
+      },
+      webhookInbox,
+      oimIngress: {
+        resolve: oimIngressResolver(soulLoader, DEPLOYMENT_BUSINESS_ID),
+        binding: oimWebhookBinding(connectionStore),
+        readSecret: (ref) => resolveSecretRef(ref, secretsService),
+        encryptPayload: (raw) => oimDeliveryCipher.encrypt(raw),
+        inbox: webhookInbox,
+      },
       fileService,
       fileKnowledge: fileKnowledgeBridge,
       ...buildCurator({
@@ -1715,6 +1813,12 @@ async function boot() {
     await registerCuratorSweepSchedule(boss);
     await registerSoulDoctorSchedule(boss, soulDoctor, { log: app.log });
     await registerObsPruneSchedule(boss, obsConfig.retentionDays * 24 * 60 * 60 * 1000);
+    await registerOimOAuthRefreshSchedule(boss, {
+      businessId: DEPLOYMENT_BUSINESS_ID,
+      connections: connectionStore,
+      secrets: secretsService,
+      soulLoader,
+    });
     // Every Soul commit publishes a bundle, so this table grows for the life of the deployment.
     await registerSoulBundlePruneSchedule(boss, bundleRetentionMs(process.env));
     await registerSpendAlertSchedule(boss, obsConfig.spendAlertUsd);
@@ -1803,6 +1907,42 @@ async function boot() {
         });
     }, 5_000);
     soulPublicationDrainInterval.unref?.();
+    const webhookInboxWorker = startWebhookInboxWorker({
+      inbox: webhookInbox,
+      soulLoader,
+      decryptPayload: (encrypted) => oimDeliveryCipher.decrypt(encrypted),
+      dispatch: async (event) => {
+        await eventTriggers.dispatchIntegrationEvent({
+          integration: event.integrationId,
+          protocol: "oim",
+          event: event.type,
+          eventId: event.deliveryId,
+          payload: (event.payload ?? {}) as Record<string, unknown>,
+        });
+      },
+      newEventId: randomUUID,
+      log: app.log,
+    });
+    const oimPollingWorker = startOimPollingWorker({
+      connections: connectionStore,
+      state: pollingIngress,
+      secrets: new SecretBroker({
+        provider: secretsServiceProvider(secretsService),
+        authorizer: { authorize: () => ({ allowed: true }) },
+      }),
+      http: new GuardedEgressHttp(new FetchEgressHttp()),
+      soulLoader,
+      dispatch: async (event) => {
+        await eventTriggers.dispatchIntegrationEvent({
+          integration: event.integrationId,
+          protocol: "oim",
+          event: event.type,
+          eventId: event.deliveryId,
+          payload: (event.payload ?? {}) as Record<string, unknown>,
+        });
+      },
+      log: app.log,
+    });
     await registerConnectorSync(boss, {
       registry: buildDefaultRegistry(),
       state: new PgConnectorStateRepo(pool),
@@ -1832,6 +1972,8 @@ async function boot() {
         stopDelivery();
         stopFileBlobCleanup();
         clearInterval(soulPublicationDrainInterval);
+        webhookInboxWorker.stop();
+        oimPollingWorker.stop();
         await app.close();
         await boss.stop({ graceful: false });
         await metricsSink?.flush();

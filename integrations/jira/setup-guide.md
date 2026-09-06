@@ -1,42 +1,70 @@
-# Connect Jira Cloud
+# Connect Jira
 
-This integration connects one Jira Cloud site to TulipFarm. Its agents can search and read issues,
-then create, update, prioritize, estimate, or move issues only after the required approval.
+This Integration connects one Jira Cloud site. Agents can search and read issues without asking,
+and every create, update or transition goes through approval.
 
-## 1. Create an Atlassian OAuth integration
+## Get a token
 
-1. Open the [Atlassian developer console](https://developer.atlassian.com/console/myapps/) and
-   create an **OAuth 2.0 integration** for this TulipFarm deployment.
-2. Under **Permissions**, add Jira API read and write scopes. The token needs read access to search
-   issues and their history, and write access to create, edit, and transition issues.
-3. Authorize the integration for the Jira Cloud site you want TulipFarm to use, then copy a current
-   OAuth access token.
+1. Sign in as the account whose Jira access this Connection should carry. That account's
+   permissions become the ceiling for everything TulipFarm can do — a Connection cannot read a
+   project the account cannot open, or edit an issue the account cannot edit.
+2. Open <https://id.atlassian.com/manage-profile/security/api-tokens> and create a token named for
+   TulipFarm, so it can be revoked on its own.
+3. Note the account's email address. Jira Cloud authenticates with the email and the token
+   together.
 
-## 2. Find the Cloud ID
+## Connect it
 
-While signed in to Jira, open:
+Open **Integrations → Jira → Connect**. You are asked for two things:
 
-```
-https://<your-site>.atlassian.net/_edge/tenant_info
-```
+| Field | Example | Stored as |
+| --- | --- | --- |
+| Site host | `acme.atlassian.net` | Configuration, visible to agents |
+| Email and API token | `muskan.vijayvargiya@acme.com:the-token` | Secret |
 
-Copy the `cloudId` value. TulipFarm uses it with Atlassian's fixed API gateway, so the connection
-cannot be redirected to another host.
+Paste the email and the token as one value with a colon between them. TulipFarm encodes the pair
+into the Basic credential Jira expects, so you never run base64 by hand, and agents never see
+either half.
 
-## 3. Connect in TulipFarm
+Only hosts under `atlassian.net` are accepted. The Integration declares that bound in its manifest
+and it is checked again when the Tools compile, so a Connection cannot point Jira's Tools at an
+unrelated server.
 
-Open **Integrations → Jira** and paste the Cloud ID and OAuth access token. TulipFarm seals the
-token in its Secrets store. The Cloud ID is not secret; it only selects your Jira Cloud site.
+For a team-wide Connection the token should belong to a service account with deliberately chosen
+project access. For work under your own name — issues you file, transitions you make — connect a
+personal Connection instead. Every operation accepts either.
 
 ## What agents can do
 
-- Search issues with JQL and read their fields or changelog for estimates and cycle-time reports.
-- Create issues and update fields such as priority or estimates.
-- List valid workflow transitions before moving an issue.
+| Tool | Effect | What it does |
+| --- | --- | --- |
+| `jira_current_user` | read | Confirms which account the Connection authenticates as |
+| `jira_search_issues` | read | Runs a JQL search |
+| `jira_get_issue` | read | Reads one issue, optionally with its changelog |
+| `jira_list_priorities` | read | Lists the priorities this site defines |
+| `jira_list_transitions` | read | Lists the transitions available for one issue |
+| `jira_create_issue` | create | Files a new issue |
+| `jira_update_issue` | update | Edits fields, including priority and estimates |
+| `jira_transition_issue` | update | Moves an issue using a transition id |
 
-Searches and reads run without approval. Every create, update, or transition asks for approval.
+Transition ids differ per project, so an agent is expected to call `jira_list_transitions` before
+`jira_transition_issue` rather than assume one.
+
+## Paging a search
+
+`jira_search_issues` returns a `nextPageToken` when more issues match. Pass it back in the next
+call to read the following page. Jira carries that token in the request body rather than in a query
+parameter, so the host cannot page this operation for the agent the way it does for Jira's `GET`
+listings — the agent asks for the next page itself.
 
 ## Scope
 
-This is a Jira Cloud integration. Jira Server and Data Center use a site-specific API host, which
-TulipFarm intentionally does not accept for credentialed egress.
+Jira Cloud only. Jira Server and Data Center are on customer-controlled domains, which this
+package's origin allowlist deliberately does not cover; a self-managed site needs a forked package
+naming its own host.
+
+## Rotating the token
+
+Create the new token first, then update the Connection. Leases against the old token are revoked
+when the Secret changes, so an in-flight run fails rather than continuing on a credential you meant
+to retire. Revoke the old token in Atlassian afterwards.

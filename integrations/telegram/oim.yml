@@ -1,0 +1,183 @@
+oimVersion: "1.0"
+kind: Integration
+
+metadata:
+  id: telegram
+  name: Telegram
+  version: 1.0.0
+  description: >-
+    Send and read messages through a Telegram bot, using the token BotFather issues.
+  license: Apache-2.0
+  maintainers:
+    - name: TulipFarm
+      url: https://tulipfarm.dev
+
+profiles:
+  core: "1.1"
+  auth: "1.0"
+
+auth:
+  allowedOriginHosts:
+    - api.telegram.org
+  credentialSlots:
+    - id: bot_token
+      label: Telegram bot token
+      kind: api_key
+      required: true
+  steps:
+    - id: token
+      type: fields
+      title: Create a bot and paste its token
+      description: >-
+        Message @BotFather in Telegram, send /newbot, and copy the token it replies with. Agents
+        never see it; it is stored as a Secret and placed in the request URL at call time.
+      fields:
+        - id: bot_token
+          label: Bot token
+          input: password
+          required: true
+          target:
+            type: credential
+            slot: bot_token
+  healthCheckOperationId: get-me
+
+operations:
+  - id: get-me
+    name: telegram_get_me
+    description: Identify the bot this connection authenticates as.
+    effect: read
+    identityMode: shared_only
+    credentialSlot: bot_token
+    # Telegram puts the credential in the path, not a header: every endpoint is /bot{token}/method.
+    credentialInjection:
+      in: path
+      format: "bot{token}"
+    source:
+      type: http
+      method: GET
+      baseUrl: https://api.telegram.org
+      path: /{credential}/getMe
+    response:
+      maxBytes: 16384
+      schema:
+        type: object
+        properties:
+          ok: { type: boolean }
+          result:
+            type: object
+            properties:
+              id: { type: number }
+              username: { type: string }
+              first_name: { type: string }
+      projection:
+        - /ok
+        - /result/id
+        - /result/username
+        - /result/first_name
+    rateLimit:
+      requests: 30
+      perSeconds: 60
+      scope: connection
+
+  - id: send-message
+    name: telegram_send_message
+    description: Send a text message to a chat the bot is a member of.
+    effect: send
+    identityMode: shared_only
+    credentialSlot: bot_token
+    credentialInjection:
+      in: path
+      format: "bot{token}"
+    source:
+      type: http
+      method: POST
+      baseUrl: https://api.telegram.org
+      path: /{credential}/sendMessage
+    requestSchema:
+      type: object
+      properties:
+        chat_id:
+          type: string
+          description: Numeric chat id, or an @channelusername.
+        text:
+          type: string
+          maxLength: 4096
+        parse_mode:
+          type: string
+          enum: [MarkdownV2, HTML]
+      required: [chat_id, text]
+      additionalProperties: false
+    response:
+      maxBytes: 32768
+      schema:
+        type: object
+        properties:
+          ok: { type: boolean }
+          result:
+            type: object
+            properties:
+              message_id: { type: number }
+              date: { type: number }
+      projection:
+        - /ok
+        - /result/message_id
+        - /result/date
+    rateLimit:
+      requests: 30
+      perSeconds: 60
+      scope: connection
+
+  - id: get-updates
+    name: telegram_get_updates
+    description: Read messages sent to the bot since the last update it acknowledged.
+    effect: sensitive_read
+    identityMode: shared_only
+    credentialSlot: bot_token
+    credentialInjection:
+      in: path
+      format: "bot{token}"
+    source:
+      type: http
+      method: GET
+      baseUrl: https://api.telegram.org
+      path: /{credential}/getUpdates
+      parameters:
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+        # Pinned: long polling holds the socket open for its whole duration, which a bounded Tool
+        # call cannot honour. An Agent able to raise it would time the call out, not wait longer.
+        - name: timeout
+          in: query
+          value: "0"
+          schema: { type: integer }
+    response:
+      maxBytes: 262144
+      schema:
+        type: object
+        properties:
+          ok: { type: boolean }
+          result:
+            type: array
+            items:
+              type: object
+              properties:
+                update_id: { type: number }
+                message:
+                  type: object
+                  properties:
+                    message_id: { type: number }
+                    text: { type: string }
+                    date: { type: number }
+                    chat:
+                      type: object
+                      properties:
+                        id: { type: number }
+                        title: { type: string }
+    rateLimit:
+      requests: 30
+      perSeconds: 60
+      scope: connection

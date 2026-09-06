@@ -36,6 +36,12 @@ export {
   CHANNEL_RUN_DELIVERY_STORAGE_STATEMENTS,
   ChannelRunDeliveryStore,
 } from "./channel-run-delivery-store";
+export type { PersistedConnection } from "./connection-store";
+export {
+  CONNECTION_STORAGE_STATEMENTS,
+  ConnectionIdentityConflictError,
+  ConnectionStore,
+} from "./connection-store";
 export type {
   ChannelSurfaceInstanceKey,
   ChannelSurfaceInstanceStatus,
@@ -82,8 +88,24 @@ export {
   PROVIDER_OBJECT_OWNERSHIP_STORAGE_STATEMENTS,
   ProviderObjectOwnershipStore,
 } from "./provider-object-ownership-store";
+export type { PollingIngressLease } from "./polling-ingress-store";
+export {
+  POLLING_INGRESS_STORAGE_STATEMENTS,
+  PollingIngressStore,
+} from "./polling-ingress-store";
 export type { PersistedSoulRepository } from "./soul-repository-store";
 export {
   SOUL_REPOSITORY_STORAGE_STATEMENTS,
   SoulRepositoryStore,
 } from "./soul-repository-store";
+export type {
+  PersistedWebhookDelivery,
+  RecordedDelivery,
+  WebhookDeliveryInput,
+  WebhookDeliveryState,
+} from "./webhook-inbox-store";
+export {
+  RawPayloadDiscardedError,
+  WEBHOOK_INBOX_STORAGE_STATEMENTS,
+  WebhookInboxStore,
+} from "./webhook-inbox-store";

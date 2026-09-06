@@ -1,0 +1,35 @@
+version: 1
+cases:
+  - name: gets-current-weather
+    operationId: current-weather
+    request:
+      q: London
+      units: metric
+    response:
+      status: 200
+      body:
+        name: London
+        weather:
+          - main: Clouds
+            description: overcast clouds
+        main:
+          temp: 18
+          feels_like: 17
+          humidity: 74
+        wind:
+          speed: 3.2
+    expect:
+      request:
+        method: GET
+        url: https://api.openweathermap.org/data/2.5/weather?q=London&units=metric&appid=oim-fixture-credential
+      result:
+        name: London
+        weather:
+          - main: Clouds
+            description: overcast clouds
+        main:
+          temp: 18
+          feels_like: 17
+          humidity: 74
+        wind:
+          speed: 3.2

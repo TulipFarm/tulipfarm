@@ -28,6 +28,7 @@ import {
   CHANNEL_SURFACE_STORAGE_STATEMENTS,
   CHILD_STORAGE_STATEMENTS,
   CONCURRENCY_STORAGE_STATEMENTS,
+  CONNECTION_STORAGE_STATEMENTS,
   CURATOR_ADMISSION_STATEMENTS,
   CURATOR_STORAGE_STATEMENTS,
   CURATOR_WORK_STORAGE_STATEMENTS,
@@ -38,6 +39,7 @@ import {
   INTEGRATION_STORAGE_STATEMENTS,
   KILL_SWITCH_STORAGE_STATEMENTS,
   LOOP_CHECKPOINT_STORAGE_STATEMENTS,
+  POLLING_INGRESS_STORAGE_STATEMENTS,
   PROVIDER_FILE_UPLOAD_STORAGE_STATEMENTS,
   PROVIDER_OBJECT_OWNERSHIP_STORAGE_STATEMENTS,
   PUBLIC_ORIGIN_STORAGE_STATEMENTS,
@@ -56,6 +58,7 @@ import {
   TEAM_NOTIFICATION_STORAGE_STATEMENTS,
   TEAM_STORAGE_STATEMENTS,
   WAIT_STORAGE_STATEMENTS,
+  WEBHOOK_INBOX_STORAGE_STATEMENTS,
 } from "@tulipfarm/storage";
 import {
   EFFECT_OUTPUT_STORAGE_STATEMENTS,
@@ -3195,6 +3198,91 @@ export const PG_MIGRATIONS: PgMigration[] = [
         "SELECT to_regclass('effect_records') IS NOT NULL AS present"
       );
       if (present.rows[0]?.present) await applyStatements(EFFECT_OUTPUT_STORAGE_STATEMENTS)(q);
+    },
+  },
+  {
+    version: 107,
+    description: "Connections: scoped Integration credential bindings and safe configuration",
+    up: applyStatements(CONNECTION_STORAGE_STATEMENTS),
+  },
+  {
+    version: 108,
+    description: "Webhook inbox: durable OIM deliveries with transactional deduplication",
+    up: applyStatements(WEBHOOK_INBOX_STORAGE_STATEMENTS),
+  },
+  {
+    version: 109,
+    description: "OIM Knowledge: per-scope sync checkpoints",
+    up: applyStatements(OIM_KNOWLEDGE_CHECKPOINT_STATEMENTS),
+  },
+  {
+    version: 110,
+    description: "integration_auth_requests: the Connection an OIM authorization belongs to",
+    up: applyStatements([
+      "ALTER TABLE IF EXISTS integration_auth_requests ADD COLUMN IF NOT EXISTS connection_id text",
+    ]),
+  },
+  {
+    version: 111,
+    description: "Connections: provider webhook registration state and subscription identity",
+    up: applyStatements([
+      "ALTER TABLE connections ADD COLUMN IF NOT EXISTS webhook_registration jsonb",
+      "ALTER TABLE connections DROP CONSTRAINT IF EXISTS connections_webhook_registration_check",
+      `ALTER TABLE connections ADD CONSTRAINT connections_webhook_registration_check
+         CHECK (webhook_registration IS NULL OR jsonb_typeof(webhook_registration) = 'object')`,
+    ]),
+  },
+  {
+    version: 112,
+    description: "OIM polling ingress: durable per-Connection cursor and fenced poll lease",
+    up: applyStatements(POLLING_INGRESS_STORAGE_STATEMENTS),
+  },
+  {
+    version: 113,
+    description: "Connections: Team-scoped Integration credential ownership",
+    up: async (q) => {
+      await q.query("ALTER TABLE connections ADD COLUMN IF NOT EXISTS owner_team_id text");
+      const constraints = await q.query<{ conname: string }>(`
+        SELECT conname
+          FROM pg_constraint
+         WHERE conrelid = 'connections'::regclass
+           AND contype = 'c'
+           AND pg_get_constraintdef(oid) ILIKE '%owner_scope%'
+      `);
+      for (const { conname } of constraints.rows) {
+        await q.query(`ALTER TABLE connections DROP CONSTRAINT IF EXISTS "${conname}"`);
+      }
+      await q.query(`
+        ALTER TABLE connections
+          ADD CONSTRAINT connections_owner_scope_check
+          CHECK (owner_scope IN ('personal', 'organization', 'team'))
+      `);
+      await q.query(`
+        ALTER TABLE connections
+          ADD CONSTRAINT connections_owner_identity_check
+          CHECK (
+            (owner_scope = 'personal' AND owner_principal_id IS NOT NULL AND owner_team_id IS NULL)
+            OR (owner_scope = 'organization' AND owner_principal_id IS NULL AND owner_team_id IS NULL)
+            OR (owner_scope = 'team' AND owner_principal_id IS NULL AND owner_team_id IS NOT NULL)
+          )
+      `);
+      await q.query("DROP INDEX IF EXISTS connections_active_default_idx");
+      await q.query("DROP INDEX IF EXISTS connections_owner_lookup_idx");
+      await q.query(`
+        CREATE UNIQUE INDEX connections_active_default_idx
+          ON connections (
+            business_id, integration_id, integration_major_version, owner_scope,
+            COALESCE(owner_principal_id, ''), COALESCE(owner_team_id, '')
+          )
+          WHERE is_default = true AND status = 'active'
+      `);
+      await q.query(`
+        CREATE INDEX connections_owner_lookup_idx
+          ON connections (
+            business_id, integration_id, integration_major_version, owner_scope,
+            owner_principal_id, owner_team_id, status
+          )
+      `);
     },
   },
 ];

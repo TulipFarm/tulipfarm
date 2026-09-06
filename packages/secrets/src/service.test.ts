@@ -7,6 +7,7 @@ import type { SecretDoc, SecretEnvelopeFields, SecretRepo } from "./repo";
 
 class FakeRepo implements SecretRepo {
   readonly docs = new Map<string, SecretDoc>();
+  batchWrites = 0;
   findCalls = 0;
   throwOnFind = false;
   throwOnRevision = false;
@@ -46,6 +47,13 @@ class FakeRepo implements SecretRepo {
       createdAt: existing?.createdAt ?? now,
       updatedAt: now,
     });
+  }
+
+  async upsertMany(
+    entries: readonly { readonly key: string; readonly fields: SecretEnvelopeFields }[]
+  ): Promise<void> {
+    this.batchWrites += 1;
+    await Promise.all(entries.map(({ key, fields }) => this.upsert(key, fields)));
   }
 
   async delete(key: string): Promise<void> {
@@ -107,6 +115,17 @@ describe("SecretsService", () => {
     for (const value of Object.values(doc)) {
       expect(value).not.toBe("super-secret");
     }
+  });
+
+  it("rotates related Secret values through one batch write", async () => {
+    const repo = new FakeRepo();
+    const svc = new SecretsService(repo, makeDek());
+
+    await svc.setMany({ "oauth.access": "new-access", "oauth.refresh": "new-refresh" });
+
+    expect(repo.batchWrites).toBe(1);
+    await expect(svc.get("oauth.access")).resolves.toBe("new-access");
+    await expect(svc.get("oauth.refresh")).resolves.toBe("new-refresh");
   });
 
   it("serves a fresh cache hit without re-querying the repo", async () => {

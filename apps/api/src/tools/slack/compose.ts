@@ -62,7 +62,10 @@ export function buildSlackTooling(options: BuildSlackToolingOptions): SlackTooli
   const http = options.http ?? new SlackWebApiHttp();
   const tokenProvider = new SlackBotTokenProvider({ secrets: options.secrets });
   const provider = slackCompositeSecretProvider(
-    secretsServiceProvider({ get: async (key) => (await options.secrets()).get(key) }),
+    secretsServiceProvider({
+      resolveCurrent: async (key) => (await options.secrets()).resolveCurrent(key),
+      revision: async (key) => (await options.secrets()).revision(key),
+    }),
     tokenProvider
   );
   const adapter = new SlackToolAdapter({

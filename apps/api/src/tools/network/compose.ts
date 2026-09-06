@@ -16,6 +16,7 @@ import type { SoulLoader } from "@tulipfarm/soul";
 import { type CachePort, MemoryCache } from "@tulipfarm/storage";
 import { type ToolDef, toToolDef } from "@tulipfarm/tool-host";
 import type { AuthorityPrincipal } from "../../identity/authority-layers";
+import { type ConnectionReader, matchAdhocConnection } from "../../integrations/adhoc-connections";
 import { createNetworkBudget } from "./budget";
 import { NETWORK_TOOLS } from "./tools";
 
@@ -27,6 +28,13 @@ export interface NetworkToolingDeps {
   };
   readonly http?: EgressHttpPort;
   readonly cache?: CachePort;
+  /**
+   * Where an already-confirmed Credential for a destination is found.
+   *
+   * Absent in a host with no Connection store, in which case every credentialed ad-hoc call must be
+   * named by the model — the previous behaviour.
+   */
+  readonly connections?: ConnectionReader;
 }
 
 /** Read a frontmatter list defensively; authored YAML is untyped until it is checked. */
@@ -45,6 +53,8 @@ function skillAllows(scope: SecretScope, soulLoader: SoulLoader): boolean {
     domains.includes(normalizedPublicUrl(scope.destination).host)
   );
 }
+
+const CONNECTION_PURPOSE = "governed_api_request_connection";
 
 export function composeNetworkTools(deps: NetworkToolingDeps): readonly ToolDef[] {
   const http = deps.http ?? new GuardedEgressHttp(new FetchEgressHttp());
@@ -84,6 +94,25 @@ export function composeNetworkTools(deps: NetworkToolingDeps): readonly ToolDef[
     },
   });
 
+  // A second broker for Connection-backed Credentials. The deployment broker's authorizer asks
+  // whether the *Skill* declared this Secret, which a Connection created from a person's own
+  // confirmation never will — and widening that authorizer instead would have let a Skill reach
+  // any Connection it could name. Authorization here is the Connection's own: the match already
+  // proved the caller owns it, so this only re-checks that the Credential is being spent against
+  // the destination it was confirmed for.
+  const connectionBroker = new SecretBroker({
+    provider: secretsServiceProvider(deps.secrets),
+    authorizer: {
+      async authorize(scope) {
+        return scope.destination !== undefined && scope.purpose === CONNECTION_PURPOSE
+          ? { allowed: true, maxTtlMs: 60_000, maxUses: 1 }
+          : { allowed: false, reason: "not_authorized" };
+      },
+    },
+  });
+
+  const connections = deps.connections;
+
   return NETWORK_TOOLS.map((definition) =>
     toToolDef(definition, (context) => ({
       userId: context.userId,
@@ -113,6 +142,52 @@ export function composeNetworkTools(deps: NetworkToolingDeps): readonly ToolDef[
           throw new Error("The active Skill does not declare this destination");
         }
       },
+      ...(connections === undefined
+        ? {}
+        : {
+            matchConnection: async (destination: string) => {
+              if (context.userId.length === 0) return { kind: "none" as const };
+              const match = await matchAdhocConnection(
+                { connections },
+                {
+                  businessId: DEPLOYMENT_BUSINESS_ID,
+                  origin: destination,
+                  principalId: context.userId,
+                }
+              );
+              if (match.kind !== "match") return match;
+              return {
+                kind: "match" as const,
+                credentialRef: match.credentialRef,
+                rule: match.rule,
+                label: match.connection.label,
+              };
+            },
+            useConnection: async <T>(
+              input: {
+                readonly userId: string;
+                readonly runId: string;
+                readonly credentialRef: string;
+                readonly destination: string;
+              },
+              callback: (secret: string) => Promise<T>
+            ): Promise<T> => {
+              if (input.runId.length === 0) {
+                throw new Error("Credential use requires a durable Run");
+              }
+              const scope: SecretScope = {
+                secretRef: input.credentialRef,
+                toolId: "api_request",
+                runId: input.runId,
+                purpose: CONNECTION_PURPOSE,
+                principalKind: "user",
+                principalId: input.userId,
+                destination: input.destination,
+              };
+              const lease = await connectionBroker.lease({ scope, maxUses: 1 });
+              return lease.use(callback, scope);
+            },
+          }),
       useCredential: async (input, callback) => {
         if (input.runId.length === 0) throw new Error("Credential use requires a durable Run");
         const scope: SecretScope = {

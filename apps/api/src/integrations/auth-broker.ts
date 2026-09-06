@@ -61,6 +61,8 @@ export interface StartAuthStepInput {
   principal?: { readonly kind: string; readonly id: string };
   /** Target org login for an `app_manifest` step; ignored by steps with no `create_url_for_org`. */
   org?: string;
+  /** The OIM Connection this authorization belongs to; absent for a legacy connection.yaml flow. */
+  connectionId?: string;
 }
 
 function stepAt(manifest: IntegrationManifest, index: number): AuthStep {
@@ -86,6 +88,7 @@ async function issueState(input: StartAuthStepInput, codeVerifier: string | null
     ),
     consumedAt: null,
     principal: input.principal ?? null,
+    connectionId: input.connectionId ?? null,
   });
   return state;
 }
@@ -266,8 +269,12 @@ export async function startAuthStep(input: StartAuthStepInput): Promise<AuthStar
 
 export interface CompleteAuthStepInput {
   query: Record<string, string>;
-  loadManifest: (slug: string) => IntegrationManifest | undefined;
-  loadEnv: (slug: string) => Promise<Record<string, string>>;
+  /**
+   * `connectionId` is passed through so an OIM flow can resolve the derived manifest and the client
+   * credentials of the exact Connection being authorized, rather than a slug's shared connection.yaml.
+   */
+  loadManifest: (slug: string, connectionId?: string | null) => IntegrationManifest | undefined;
+  loadEnv: (slug: string, connectionId?: string | null) => Promise<Record<string, string>>;
   endpoints: AuthEndpoints;
   repo: IntegrationAuthRequestRepo;
   fetchImpl?: typeof globalThis.fetch;
@@ -282,6 +289,8 @@ export interface AuthStepOutcome {
   env: Record<string, string>;
   principal?: { readonly kind: string; readonly id: string };
   oauth2Step?: AuthOAuth2Step;
+  /** Set when this authorization targeted an OIM Connection rather than a legacy integration. */
+  connectionId?: string;
 }
 
 async function postForm(
@@ -358,7 +367,7 @@ export async function completeAuthStep(input: CompleteAuthStepInput): Promise<Au
     throw new AuthBrokerError("invalid_state", "state is unknown, expired, or already used");
   }
 
-  const manifest = input.loadManifest(request.integrationSlug);
+  const manifest = input.loadManifest(request.integrationSlug, request.connectionId);
   if (!manifest) {
     throw new AuthBrokerError("unknown_step", `integration not found: ${request.integrationSlug}`);
   }
@@ -369,6 +378,7 @@ export async function completeAuthStep(input: CompleteAuthStepInput): Promise<Au
     stepIndex: request.stepIndex,
     webUrl: request.webUrl ?? input.endpoints.webUrl,
     ...(request.principal === null ? {} : { principal: request.principal }),
+    ...(request.connectionId ? { connectionId: request.connectionId } : {}),
   };
 
   try {
@@ -436,7 +446,7 @@ async function completeStep(ctx: {
     case "oauth2": {
       const code = input.query.code;
       if (!code) throw new AuthBrokerError("exchange_failed", "callback carried no code");
-      const env = await input.loadEnv(request.integrationSlug);
+      const env = await input.loadEnv(request.integrationSlug, request.connectionId);
       const clientId = env[step.client_id_env];
       const clientSecret = env[step.client_secret_env];
       if (!clientId || !clientSecret) {

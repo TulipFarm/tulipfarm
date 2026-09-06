@@ -18,6 +18,8 @@ const EFFECT_ID = "22222222-2222-4222-8222-222222222222";
 const SECRET_REF = "secret://github";
 const OLD_SECRET = "github-old-secret";
 const ROTATED_SECRET = "github-rotated-secret";
+const SECOND_SECRET_REF = "secret://github-secondary";
+const SECOND_SECRET = "github-secondary-secret";
 
 const definition = makeContract({
   mutating: true,
@@ -96,6 +98,102 @@ describe("CredentialDispatcher", () => {
     expect(JSON.stringify(await store.listAttempts(BUSINESS_ID, EFFECT_ID))).not.toContain(
       ROTATED_SECRET
     );
+  });
+
+  it("leases a credential through its exact Connection scope", async () => {
+    const base = reservation();
+    const connectionEffect: ReserveEffectInput = {
+      ...base,
+      intent: {
+        ...base.intent,
+        destination: "https://api.example.com",
+        connection: {
+          connectionId: "connection-1",
+          integrationId: "weather",
+          credentialSlot: "api_key",
+          principalKind: "user",
+          principalId: "user-1",
+        },
+      },
+    };
+    store = new MemoryEffectStore();
+    await new EffectLedger(store).reserve(connectionEffect);
+    const authorize = vi.fn(async () => ({ allowed: true as const, maxUses: 1 }));
+    credentialDispatcher = new CredentialDispatcher({
+      secrets: new SecretBroker({ provider, authorizer: { authorize } }),
+      reauthorize,
+    });
+    const adapter: ToolAdapter = {
+      kind: "integration",
+      dispatch: vi.fn(async (_request, credential) => {
+        expect(credential).toBe(OLD_SECRET);
+        return { providerId: "external-42" };
+      }),
+    };
+
+    await expect(dispatcher(adapter).dispatch(BUSINESS_ID, EFFECT_ID)).resolves.toEqual({
+      providerId: "external-42",
+    });
+    expect(authorize).toHaveBeenCalledWith({
+      secretRef: SECRET_REF,
+      connectionId: "connection-1",
+      credentialSlot: "api_key",
+      integrationId: "weather",
+      toolId: definition.spec.toolId,
+      targetId: "issue-42",
+      runId: "11111111-1111-4111-8111-111111111111",
+      stateId: "label",
+      purpose: definition.spec.action,
+      principalKind: "user",
+      principalId: "user-1",
+      destination: "https://api.example.com",
+    });
+  });
+
+  it("leases two distinct Connection slots together and gives new adapters the slot map", async () => {
+    const base = reservation();
+    const connectionEffect: ReserveEffectInput = {
+      ...base,
+      intent: {
+        ...base.intent,
+        destination: "https://api.trello.com",
+        connection: {
+          connectionId: "connection-1",
+          integrationId: "trello",
+          credentialSlot: "api_key",
+        },
+        secondaryCredentialRef: SECOND_SECRET_REF,
+        secondaryConnection: {
+          connectionId: "connection-1",
+          integrationId: "trello",
+          credentialSlot: "token",
+        },
+      },
+    };
+    store = new MemoryEffectStore();
+    await new EffectLedger(store).reserve(connectionEffect);
+    credentialDispatcher = new CredentialDispatcher({
+      secrets: new SecretBroker({
+        provider: inMemorySecretProvider({
+          [SECRET_REF]: OLD_SECRET,
+          [SECOND_SECRET_REF]: SECOND_SECRET,
+        }),
+        authorizer: { authorize: async () => ({ allowed: true, maxUses: 1 }) },
+      }),
+      reauthorize,
+    });
+    const adapter: ToolAdapter = {
+      kind: "integration",
+      dispatch: vi.fn(async (_request, credential, credentials) => {
+        expect(credential).toBe(OLD_SECRET);
+        expect(credentials).toEqual({ api_key: OLD_SECRET, token: SECOND_SECRET });
+        return { providerId: "external-42" };
+      }),
+    };
+
+    await expect(dispatcher(adapter).dispatch(BUSINESS_ID, EFFECT_ID)).resolves.toEqual({
+      providerId: "external-42",
+    });
   });
 
   it("reauthorizes and leases fresh on every retry attempt", async () => {

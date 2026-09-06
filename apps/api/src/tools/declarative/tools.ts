@@ -2,18 +2,28 @@ import { createHash } from "node:crypto";
 import {
   type CompiledEgressTool,
   type CompiledGraphqlTool,
+  type CompiledOimGraphqlTool,
+  type CompiledOimHttpTool,
   compileGraphqlEgress,
+  compileOimGraphqlOperations,
+  compileOimHttpOperations,
   compileOpenApiEgress,
   type EgressHttpPort,
   GraphqlToolAdapter,
+  type OimFilePort,
+  OimHttpToolAdapter,
+  type OimOperationConnection,
+  type OimOperationConnectionResolver,
   OpenApiToolAdapter,
 } from "@tulipfarm/integrations";
 import type { MutationGuard } from "@tulipfarm/observability";
+import type { OimManifest } from "@tulipfarm/schema";
 import {
   type SecretAuthorizer,
   SecretBroker,
   type SecretProvider,
   type SecretsService,
+  secretsServiceProvider,
 } from "@tulipfarm/secrets";
 import type { Logger, SoulIntegration } from "@tulipfarm/soul";
 import { isPersonalCredentialStep, resolveAuthSteps } from "@tulipfarm/soul";
@@ -26,6 +36,7 @@ import {
   normalizeToolIntent,
   type ToolAdapter,
   ToolCatalog,
+  type ToolConnectionBinding,
   type ToolCredentialMode,
   ToolDispatchError,
   type ToolTargetRef,
@@ -47,6 +58,11 @@ import { principalSecretKey } from "../../integrations/principal-tokens";
 /** Tool names are namespaced by slug so two integrations may both publish `search`. */
 export function declarativeToolName(slug: string, toolName: string): string {
   return `${definitionSlug(slug)}_${toolName}`;
+}
+
+/** The secret ref an OIM credential slot leases through. Slots are namespaced away from `egress`. */
+export function oimSecretRef(slug: string, slot: string): string {
+  return `secret://integrations/${slug}/oim/${slot}`;
 }
 
 /** The secret ref a compiled tool's credential lease resolves through. */
@@ -149,6 +165,14 @@ function integrationResource(slug: string): string {
 
 /** Resolve auth steps before credential mode so legacy `oauth` keeps personal credentials. */
 function credentialModeFor(integration: SoulIntegration): ToolCredentialMode {
+  const { oimManifest } = integration;
+  if (oimManifest !== undefined) {
+    // A manifest whose operations can act as the caller must prefer the caller's own Connection;
+    // `shared_only` throughout means there is no personal identity to prefer.
+    return oimManifest.operations.some((operation) => operation.identityMode !== "shared_only")
+      ? "user_preferred"
+      : "service";
+  }
   if (integration.manifest === undefined) return "service";
   const personal = resolveAuthSteps(integration.manifest).some(isPersonalCredentialStep);
   return personal ? "user_preferred" : "service";
@@ -230,7 +254,11 @@ function appendTarget(
   targets.push({ type, id });
 }
 
-type CompiledDeclarativeTool = CompiledEgressTool | CompiledGraphqlTool;
+type CompiledDeclarativeTool =
+  | CompiledEgressTool
+  | CompiledGraphqlTool
+  | CompiledOimHttpTool
+  | CompiledOimGraphqlTool;
 
 function declarativeTargets(
   compiled: CompiledDeclarativeTool,
@@ -295,10 +323,18 @@ export interface DeclarativeToolingDeps {
   /** Injected so tests never reach the network. */
   readonly http: EgressHttpPort;
   readonly mutationGuard?: MutationGuard;
+  /**
+   * Resolves which Connection an OIM operation acts through. Absent in deployments and tests that
+   * publish no OIM manifest, in which case OIM Tools fall back to the single deployment-wide
+   * Credential — the same path the older manifest families use.
+   */
+  readonly connections?: OimOperationConnectionResolver;
+  readonly files?: OimFilePort;
 }
 
 interface CompiledIntegration {
   readonly slug: string;
+  readonly oimManifest?: OimManifest;
   readonly tools: readonly CompiledDeclarativeTool[];
   readonly credentialMode: ToolCredentialMode;
   /** Absent for a genuinely public API that declares no credential. */
@@ -310,9 +346,58 @@ interface CompiledIntegration {
   };
 }
 
+function compileOimIntegration(
+  integration: SoulIntegration,
+  credentialMode: ToolCredentialMode
+): CompiledIntegration {
+  const { oimManifest, slug } = integration;
+  if (oimManifest === undefined) return { slug, tools: [], credentialMode };
+  // Non-secret Connection env resolves a templated base URL host — a customer's own Atlassian
+  // site or GitLab instance. Secret refs are excluded: a compiled binding is logged and inspected.
+  const configuration = Object.fromEntries(
+    Object.entries(integration.connection?.env ?? {}).filter(([, value]) => !isSecretRef(value))
+  );
+  const tools = [
+    ...compileOimHttpOperations(oimManifest, configuration),
+    ...compileOimGraphqlOperations(
+      oimManifest,
+      new Map(Object.entries(integration.oimDocuments ?? {}))
+    ),
+  ];
+
+  // Every operation's primary credential must name the same slot. A declared secondary credential
+  // is resolved from that same Connection at call time, where both scoped leases are available.
+  const slots = new Set(
+    oimManifest.operations
+      .map((operation) => operation.credentialSlot)
+      .filter((slot): slot is string => slot !== undefined)
+  );
+  if (slots.size > 1) {
+    throw new Error(
+      `declares ${slots.size} credential slots (${[...slots].sort().join(", ")}); only one is supported`
+    );
+  }
+  const [slot] = [...slots];
+  if (slot === undefined) return { slug, oimManifest, tools, credentialMode };
+  return {
+    slug,
+    oimManifest,
+    tools,
+    credentialMode,
+    credential: {
+      ref: oimSecretRef(slug, slot),
+      storageKey: integrationSecretKey(slug, slot),
+      tokenEnv: slot,
+    },
+  };
+}
+
 function compileIntegration(integration: SoulIntegration): CompiledIntegration {
   const { manifest, slug } = integration;
   const credentialMode = credentialModeFor(integration);
+  if (integration.oimManifest !== undefined) {
+    return compileOimIntegration(integration, credentialMode);
+  }
   // Callers filter out manifest-less (bundled) integrations before reaching here.
   if (
     manifest === undefined ||
@@ -348,6 +433,117 @@ function compileIntegration(integration: SoulIntegration): CompiledIntegration {
       tokenEnv,
     },
   };
+}
+
+/**
+ * The authority an OIM operation acts with, or the answer to give the caller instead of dispatching.
+ *
+ * Connection resolution happens before the effect is reserved. Reserving first would record an
+ * intent whose credential was never resolved, and the outcomes below are ordinary answers a person
+ * or an Agent has to act on — pick a Connection, connect one, re-authorize a stale one — rather
+ * than failures of the call.
+ */
+type OimCallAuthority =
+  | { readonly kind: "proceed" }
+  | {
+      readonly kind: "connection";
+      readonly credentialRef: `secret://${string}`;
+      readonly connection: ToolConnectionBinding;
+      readonly destination: string;
+      readonly secondaryCredentialRef?: `secret://${string}`;
+      readonly secondaryConnection?: ToolConnectionBinding;
+    }
+  | { readonly kind: "answer"; readonly result: ToolCallResult };
+
+async function resolveOimAuthority(
+  compiled: CompiledDeclarativeTool,
+  integration: CompiledIntegration,
+  deps: DeclarativeToolingDeps,
+  ctx: RequestContext
+): Promise<OimCallAuthority> {
+  const { connections } = deps;
+  const { oimManifest } = integration;
+  if (connections === undefined || oimManifest === undefined || !("operation" in compiled)) {
+    return { kind: "proceed" };
+  }
+  const principal = ctx.subject ?? { kind: "user", id: ctx.userId };
+  const resolution = await connections.resolve({
+    businessId: deps.businessId,
+    manifest: oimManifest,
+    operation: compiled.operation,
+    principal,
+    // A user acting for themselves may reach their own personal Connection. Any other principal
+    // gets only what it was granted, so it is never offered one it merely happens to know of.
+    ...(principal.kind === "user" ? { personalOwnerId: principal.id } : {}),
+  });
+  if (resolution.kind === "public") return { kind: "proceed" };
+  if (resolution.kind === "ready") {
+    return {
+      kind: "connection",
+      credentialRef: resolution.credentialRef,
+      connection: resolution.binding,
+      destination: new URL(
+        "baseUrl" in compiled.binding ? compiled.binding.baseUrl : compiled.binding.url
+      ).origin,
+      ...(resolution.secondaryCredentialRef === undefined ||
+      resolution.secondaryBinding === undefined
+        ? {}
+        : {
+            secondaryCredentialRef: resolution.secondaryCredentialRef,
+            secondaryConnection: resolution.secondaryBinding,
+          }),
+    };
+  }
+  return { kind: "answer", result: ok(oimConnectionAnswer(resolution, integration.slug)) };
+}
+
+/** Turns an unresolved Connection into something the caller can act on, naming no credential. */
+function oimConnectionAnswer(
+  resolution: Exclude<OimOperationConnection, { readonly kind: "public" | "ready" }>,
+  slug: string
+): Record<string, unknown> {
+  const setupUrl = `/business/integrations/${encodeURIComponent(slug)}/connections`;
+  switch (resolution.kind) {
+    case "connection_required":
+    case "connection_ambiguous":
+      return {
+        kind: resolution.kind,
+        requiredAction: resolution.candidates.length === 0 ? "connect" : "select_connection",
+        // Only the Agent-visible configuration the resolver already filtered to. A candidate list
+        // is shown to choose from, so it must not become a way to read a Connection's private
+        // settings.
+        candidates: resolution.candidates,
+        setupUrl,
+        detail:
+          resolution.candidates.length === 0
+            ? `no Connection for "${slug}" is available to you; one must be connected first`
+            : `more than one Connection for "${slug}" could apply; a person must choose which one this acts through`,
+      };
+    case "connection_unhealthy":
+      return {
+        kind: resolution.kind,
+        requiredAction: "reconnect",
+        connectionId: resolution.connectionId,
+        status: resolution.status,
+        setupUrl,
+        detail: `this Connection is ${resolution.status} and must be reconnected before it can be used`,
+      };
+    case "credential_required":
+      return {
+        kind: resolution.kind,
+        connectionId: resolution.connectionId,
+        credentialSlot: resolution.credentialSlot,
+        setupUrl,
+        detail: `this Connection has no Credential for "${resolution.credentialSlot}"`,
+      };
+    default:
+      return {
+        kind: resolution.kind,
+        reason: resolution.reason,
+        setupUrl,
+        detail: `this Connection cannot be used here (${resolution.reason})`,
+      };
+  }
 }
 
 function buildToolDef(
@@ -387,6 +583,9 @@ function buildToolDef(
       const stateId = `invoke:${callId}`;
       const toolId = compiled.toolId;
 
+      const authority = await resolveOimAuthority(compiled, integration, deps, ctx);
+      if (authority.kind === "answer") return authority.result;
+
       const intent = normalizeToolIntent({
         intentId: derivedId("egress-intent", runId, stateId, toolId),
         businessId: deps.businessId,
@@ -400,16 +599,38 @@ function buildToolDef(
         // and the authorization decision describe different targets.
         targetRefs: definition.targetsFor(args, ctx),
         arguments: args,
+        ...("operation" in compiled &&
+        compiled.operation.source.type === "http" &&
+        (compiled.operation.source.contentType === "multipart" ||
+          compiled.operation.response.mode === "binary")
+          ? { filePrincipalId: ctx.userId }
+          : {}),
         // Acting as a person means leasing *their* credential, not the deployment's. The ref is
         // part of the intent, so the recorded effect states plainly whose authority was spent.
-        ...(credential === undefined
-          ? {}
-          : {
-              credentialRef:
-                ctx.credentialPrincipal === undefined
-                  ? credential.ref
-                  : principalEgressSecretRef(slug, credential.tokenEnv, ctx.credentialPrincipal),
-            }),
+        // A resolved Connection supersedes the deployment-wide Credential: it names the exact
+        // Connection, slot and principal the effect was authorized against, so an Approval binds
+        // to that rather than to "whatever this integration's one Credential is today".
+        ...(authority.kind === "connection"
+          ? {
+              credentialRef: authority.credentialRef,
+              connection: authority.connection,
+              destination: authority.destination,
+              ...(authority.secondaryCredentialRef === undefined ||
+              authority.secondaryConnection === undefined
+                ? {}
+                : {
+                    secondaryCredentialRef: authority.secondaryCredentialRef,
+                    secondaryConnection: authority.secondaryConnection,
+                  }),
+            }
+          : credential === undefined
+            ? {}
+            : {
+                credentialRef:
+                  ctx.credentialPrincipal === undefined
+                    ? credential.ref
+                    : principalEgressSecretRef(slug, credential.tokenEnv, ctx.credentialPrincipal),
+              }),
         idempotencyKey: derivedId("egress-idempotency", runId, stateId, toolId),
       });
 
@@ -457,9 +678,79 @@ function adapterFor(
     case "graphql":
       if (!("document" in tool.binding)) return undefined;
       return new GraphqlToolAdapter({ binding: tool.binding, http: deps.http });
+    case "native":
+      if (!("operation" in tool) || !("pathTemplate" in tool.binding)) return undefined;
+      return new OimHttpToolAdapter({
+        binding: tool.binding,
+        http: deps.http,
+        toolId: tool.toolId,
+        ...(tool.projection === undefined ? {} : { projection: tool.projection }),
+        ...(deps.files === undefined ? {} : { files: deps.files }),
+        ...("pagination" in tool && tool.pagination !== undefined
+          ? { pagination: tool.pagination }
+          : {}),
+      });
     default:
       return undefined;
   }
+}
+
+/**
+ * Serves this integration's own Credential and, separately, whichever Connection Secret a call
+ * resolved.
+ *
+ * The two are kept apart rather than merged into one lookup: the integration's ref is fixed at
+ * compile time and can be checked against, while a Connection ref is chosen per call. Routing an
+ * unrecognised ref to the Connection reader — instead of falling back to the integration's own
+ * Credential — is what stops a denied Connection quietly borrowing the deployment's key.
+ */
+function declarativeSecretProvider(
+  integration: CompiledIntegration,
+  deps: DeclarativeToolingDeps,
+  ownsRef: (secretRef: string) => boolean
+): SecretProvider {
+  const { credential } = integration;
+  const own =
+    credential === undefined
+      ? undefined
+      : new EgressSecretProvider(
+          credential.ref,
+          credential.storageKey,
+          deps.secrets,
+          integration.slug,
+          credential.tokenEnv
+        );
+  const connections =
+    deps.connections === undefined
+      ? undefined
+      : secretsServiceProvider({
+          resolveCurrent: async (key) => (await deps.secrets()).resolveCurrent(key),
+          revision: async (key) => (await deps.secrets()).revision(key),
+        });
+  // A Connection ref that is not a valid opaque id denies the lease rather than raising: the
+  // Connection store is the only writer of these, so a malformed one is corruption, and reporting
+  // it as an internal error would tell the caller the Tool is broken instead of the Connection.
+  const failClosed = async <T>(
+    read: () => Promise<T | null | undefined> | undefined
+  ): Promise<T | null> => {
+    try {
+      return (await read()) ?? null;
+    } catch {
+      return null;
+    }
+  };
+  return {
+    async resolveCurrent(secretRef) {
+      if (ownsRef(secretRef)) return (await own?.resolveCurrent(secretRef)) ?? null;
+      return failClosed(() => connections?.resolveCurrent(secretRef));
+    },
+    async currentVersion(secretRef) {
+      // The integration's own Credential carries no durable revision, so a Connection lease — which
+      // requires one — can never be satisfied by it.
+      if (ownsRef(secretRef)) return null;
+      return failClosed(() => connections?.currentVersion?.(secretRef));
+    },
+  };
 }
 
 function dispatcherFor(
@@ -478,35 +769,70 @@ function dispatcherFor(
   }
 
   const { credential } = integration;
+  const integrationId = integration.oimManifest?.metadata.id;
+  const ownsRef = (secretRef: string): boolean =>
+    credential !== undefined &&
+    (secretRef === credential.ref || principalOfRef(credential.ref, secretRef) !== null);
   // Default-deny, scoped to this integration's own ref: a careless or hostile manifest can never
-  // lease another integration's credential, let alone an unrelated platform secret.
+  // lease another integration's credential, let alone an unrelated platform secret. A Connection
+  // ref is admitted on different evidence — the scope must name the Connection this integration's
+  // own resolver selected — because the ref is chosen per call and is not knowable from here.
   const authorizer: SecretAuthorizer = {
     authorize(scope) {
-      if (
-        credential === undefined ||
-        (scope.secretRef !== credential.ref &&
-          principalOfRef(credential.ref, scope.secretRef) === null)
-      ) {
-        return { allowed: false, reason: "not_authorized" };
+      if (ownsRef(scope.secretRef)) {
+        return { allowed: true, maxTtlMs: 5 * 60 * 1000, maxUses: 1 };
       }
-      return { allowed: true, maxTtlMs: 5 * 60 * 1000, maxUses: 1 };
+      const connectionScope = scope as { connectionId?: string; integrationId?: string };
+      if (
+        integrationId !== undefined &&
+        connectionScope.connectionId !== undefined &&
+        connectionScope.integrationId === integrationId
+      ) {
+        return { allowed: true, maxTtlMs: 5 * 60 * 1000, maxUses: 1 };
+      }
+      return { allowed: false, reason: "not_authorized" };
     },
   };
   const credentials = new CredentialDispatcher({
     secrets: new SecretBroker({
-      provider:
-        credential === undefined
-          ? { resolveCurrent: async () => null }
-          : new EgressSecretProvider(
-              credential.ref,
-              credential.storageKey,
-              deps.secrets,
-              integration.slug,
-              credential.tokenEnv
-            ),
+      provider: declarativeSecretProvider(integration, deps, ownsRef),
       authorizer,
     }),
-    reauthorize: () => true,
+    reauthorize: async (effect) => {
+      const connection = effect.intent.connection;
+      const credentialRef = effect.intent.credentialRef;
+      if (
+        connection === undefined ||
+        credentialRef === undefined ||
+        integration.oimManifest === undefined ||
+        deps.connections === undefined
+      ) {
+        return connection === undefined;
+      }
+      if (
+        !(await deps.connections.reauthorize(
+          effect.businessId,
+          integration.oimManifest,
+          connection,
+          credentialRef as `secret://${string}`
+        ))
+      ) {
+        return false;
+      }
+      const secondaryConnection = effect.intent.secondaryConnection;
+      const secondaryCredentialRef = effect.intent.secondaryCredentialRef;
+      return (
+        (secondaryConnection === undefined && secondaryCredentialRef === undefined) ||
+        (secondaryConnection !== undefined &&
+          secondaryCredentialRef !== undefined &&
+          (await deps.connections.reauthorize(
+            effect.businessId,
+            integration.oimManifest,
+            secondaryConnection,
+            secondaryCredentialRef as `secret://${string}`
+          )))
+      );
+    },
   });
 
   return new EffectDispatcher({
@@ -540,9 +866,9 @@ export function buildDeclarativeTools(
   const toolOwners = new Map<string, string>();
 
   for (const integration of integrations) {
-    // No manifest means a bundled, code-owned integration (Soul holds only connection state);
-    // its Tools are handwritten, not declarative.
-    if (integration.manifest === undefined) continue;
+    // No manifest of either kind means a bundled, code-owned integration (Soul holds only
+    // connection state); its Tools are handwritten, not declarative.
+    if (integration.manifest === undefined && integration.oimManifest === undefined) continue;
     try {
       const compiled = compileIntegration(integration);
       if (compiled.tools.length === 0) continue;

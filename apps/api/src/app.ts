@@ -18,6 +18,7 @@ import { registerOperationalRoutes } from "./admin/routes";
 import type { AppOptions } from "./app-options";
 import { registerApprovalRoutes } from "./approvals/routes";
 import { registerAuditRoutes } from "./audit/routes";
+import { makeSoulAuditWriter } from "./audit/soul-write";
 import { csrfHook, makeCsrfHook } from "./auth/csrf";
 import { makeRequireAuth } from "./auth/middleware";
 import { registerAuthRoutes } from "./auth/routes";
@@ -32,7 +33,10 @@ import { registerFileRoutes } from "./files/routes";
 import { registerFormRoutes } from "./forms/routes";
 import { registerHookIngressRoutes } from "./hooks/routes";
 import { registerIngressRoutes } from "./ingress/routes";
+import { registerAdhocConnectionRoutes } from "./integrations/adhoc-routes";
+import { registerDeliveryRoutes } from "./integrations/delivery-routes";
 import { registerGitHubInstallRoutes } from "./integrations/github-install-routes";
+import { registerOimIngressRoutes } from "./integrations/oim-ingress-routes";
 import { registerInternalRouteFamily } from "./internal/route-family";
 import { registerKillSwitchRoutes } from "./kill-switches/routes";
 import { registerKnowledgeRoutes } from "./knowledge/routes";
@@ -451,6 +455,32 @@ export async function buildApp(opts: AppOptions = {}) {
       );
     }
     registerSoulRouteFamily(app, opts, requireAuth, requireAuthorization, authorizationCheck);
+    // Not in the Soul family: a Connection is deployment state in Postgres, not Soul config, and
+    // gating it on a writable Soul would leave a read-only deployment unable to store a Credential.
+    if (opts.connectionStore && opts.secretsService) {
+      registerAdhocConnectionRoutes(app, {
+        connections: opts.connectionStore,
+        secrets: opts.secretsService,
+        requireAuth,
+        authorizationCheck,
+        ...(opts.auditService === undefined
+          ? {}
+          : { audit: makeSoulAuditWriter(opts.auditService) }),
+      });
+    }
+    if (opts.oimIngress) {
+      await registerOimIngressRoutes(app, opts.oimIngress);
+    }
+    if (opts.webhookInbox) {
+      registerDeliveryRoutes(app, {
+        inbox: opts.webhookInbox,
+        requireAuth,
+        authorizationCheck,
+        ...(opts.auditService === undefined
+          ? {}
+          : { audit: makeSoulAuditWriter(opts.auditService) }),
+      });
+    }
     if (opts.fileService) {
       registerFileRoutes(
         app,

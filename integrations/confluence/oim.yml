@@ -1,0 +1,424 @@
+oimVersion: "1.0"
+kind: Integration
+
+metadata:
+  id: confluence
+  name: Confluence
+  version: 1.0.0
+  description: >-
+    Read Confluence Cloud spaces and pages, and index them into Knowledge with the page
+    restrictions the source enforces.
+  license: Apache-2.0
+  maintainers:
+    - name: TulipFarm
+      url: https://tulipfarm.dev
+
+profiles:
+  core: "1.0"
+  auth: "1.0"
+  knowledge: "1.0"
+
+auth:
+  # The site is the installation's own Atlassian tenant, so the base URL is templated rather than
+  # fixed. allowedOriginHosts keeps that from becoming a way to point the Tools anywhere.
+  allowedOriginHosts:
+    - "*.atlassian.net"
+  credentialSlots:
+    - id: api_credential
+      label: Atlassian email and API token
+      kind: api_key
+      required: true
+  configurationFields:
+    - id: site
+      label: Confluence site
+      type: url
+      required: true
+      agentVisible: true
+  steps:
+    - id: site
+      type: fields
+      title: Name your Confluence site
+      description: >-
+        Paste the host of your Atlassian site, for example acme.atlassian.net. Only Atlassian Cloud
+        sites are accepted; a host outside atlassian.net is refused when the Integration compiles.
+      fields:
+        - id: site
+          label: Site host
+          input: url
+          required: true
+          target:
+            type: configuration
+            field: site
+    - id: token
+      type: fields
+      title: Create an API token
+      description: >-
+        Create a token at https://id.atlassian.com/manage-profile/security/api-tokens using the
+        account whose access this Connection should carry. Confluence authenticates with the
+        account email and the token together, so paste them as one value separated by a colon —
+        for example muskan.vijayvargiya@acme.com:the-token. TulipFarm encodes the pair itself; you
+        never run base64 by hand, and Agents never see either half.
+      fields:
+        - id: api_credential
+          label: Email and API token
+          input: password
+          required: true
+          target:
+            type: credential
+            slot: api_credential
+  healthCheckOperationId: list-spaces
+
+operations:
+  - id: list-spaces
+    name: confluence_list_spaces
+    description: List the spaces this Connection can read.
+    effect: read
+    identityMode: shared_or_personal
+    credentialSlot: api_credential
+    credentialInjection:
+      in: header
+      name: Authorization
+      format: "Basic {token}"
+      encoding: basic
+    source:
+      type: http
+      method: GET
+      baseUrl: https://{site}
+      path: /wiki/api/v2/spaces
+      parameters:
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 250
+    pagination:
+      type: cursor
+      requestParameter: cursor
+      responsePath: /_links/next
+    response:
+      maxBytes: 262144
+      schema:
+        type: object
+        properties:
+          results:
+            type: array
+            items:
+              type: object
+              properties:
+                id: { type: string }
+                key: { type: string }
+                name: { type: string }
+      projection:
+        - /results
+    rateLimit:
+      requests: 100
+      perSeconds: 60
+      scope: connection
+
+  - id: list-pages
+    name: confluence_list_pages
+    description: List pages in one space, with their current revision.
+    effect: read
+    identityMode: shared_or_personal
+    credentialSlot: api_credential
+    credentialInjection:
+      in: header
+      name: Authorization
+      format: "Basic {token}"
+      encoding: basic
+    source:
+      type: http
+      method: GET
+      baseUrl: https://{site}
+      path: /wiki/api/v2/pages
+      parameters:
+        - name: space-id
+          in: query
+          schema: { type: string }
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 250
+    pagination:
+      type: cursor
+      requestParameter: cursor
+      responsePath: /_links/next
+    response:
+      maxBytes: 1048576
+      schema:
+        type: object
+        properties:
+          results:
+            type: array
+            items:
+              type: object
+              properties:
+                id: { type: string }
+                title: { type: string }
+                status: { type: string }
+                version:
+                  type: object
+                  properties:
+                    number: { type: integer }
+                    createdAt: { type: string }
+                _links:
+                  type: object
+                  properties:
+                    webui: { type: string }
+      projection:
+        - /results
+    rateLimit:
+      requests: 100
+      perSeconds: 60
+      scope: connection
+
+  - id: get-page
+    name: confluence_get_page
+    description: Read one page including its storage-format body.
+    effect: read
+    identityMode: shared_or_personal
+    credentialSlot: api_credential
+    credentialInjection:
+      in: header
+      name: Authorization
+      format: "Basic {token}"
+      encoding: basic
+    source:
+      type: http
+      method: GET
+      baseUrl: https://{site}
+      path: /wiki/api/v2/pages/{id}
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+        - name: body-format
+          in: query
+          schema:
+            type: string
+            enum: [storage, atlas_doc_format]
+    response:
+      maxBytes: 1048576
+      schema:
+        type: object
+        properties:
+          id: { type: string }
+          title: { type: string }
+          status: { type: string }
+          body:
+            type: object
+            properties:
+              storage:
+                type: object
+                properties:
+                  value: { type: string }
+          version:
+            type: object
+            properties:
+              number: { type: integer }
+    rateLimit:
+      requests: 100
+      perSeconds: 60
+      scope: connection
+
+  - id: get-restrictions
+    name: confluence_get_restrictions
+    description: Read the view restrictions on one page, used to preserve source permissions.
+    effect: read
+    identityMode: shared_only
+    credentialSlot: api_credential
+    credentialInjection:
+      in: header
+      name: Authorization
+      format: "Basic {token}"
+      encoding: basic
+    source:
+      type: http
+      method: GET
+      baseUrl: https://{site}
+      path: /wiki/rest/api/content/{id}/restriction/byOperation/read
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+    response:
+      maxBytes: 262144
+      schema:
+        type: object
+        properties:
+          user:
+            type: object
+            properties:
+              results:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    accountId: { type: string }
+                    type: { type: string }
+          group:
+            type: object
+            properties:
+              results:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    id: { type: string }
+                    type: { type: string }
+    rateLimit:
+      requests: 100
+      perSeconds: 60
+      scope: connection
+
+  - id: get-user
+    name: confluence_get_user
+    description: Resolve one Atlassian account, so a restriction can be linked to a TulipFarm user.
+    effect: read
+    identityMode: shared_only
+    credentialSlot: api_credential
+    credentialInjection:
+      in: header
+      name: Authorization
+      format: "Basic {token}"
+      encoding: basic
+    source:
+      type: http
+      method: GET
+      baseUrl: https://{site}
+      path: /wiki/rest/api/user
+      parameters:
+        - name: accountId
+          in: query
+          required: true
+          schema: { type: string }
+    response:
+      maxBytes: 32768
+      schema:
+        type: object
+        properties:
+          accountId: { type: string }
+          email: { type: string }
+          publicName: { type: string }
+      projection:
+        - /accountId
+        - /email
+        - /publicName
+    rateLimit:
+      requests: 100
+      perSeconds: 60
+      scope: connection
+
+  - id: get-group-members
+    name: confluence_get_group_members
+    description: List the members of one Confluence group, for group-granted page access.
+    effect: read
+    identityMode: shared_only
+    credentialSlot: api_credential
+    credentialInjection:
+      in: header
+      name: Authorization
+      format: "Basic {token}"
+      encoding: basic
+    source:
+      type: http
+      method: GET
+      baseUrl: https://{site}
+      path: /wiki/rest/api/group/{groupId}/membersByGroupId
+      parameters:
+        - name: groupId
+          in: path
+          required: true
+          schema: { type: string }
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 200
+    response:
+      maxBytes: 262144
+      schema:
+        type: object
+        properties:
+          groupId: { type: string }
+          results:
+            type: array
+            items:
+              type: object
+              properties:
+                accountId: { type: string }
+                publicName: { type: string }
+    rateLimit:
+      requests: 100
+      perSeconds: 60
+      scope: connection
+
+knowledge:
+  sourceKinds:
+    - id: space
+      label: Space
+      discoverOperationId: list-spaces
+      discoverItemsPointer: /results
+      discoverMapping:
+        id: /id
+        label: /name
+  list:
+    operationId: list-pages
+    scopeParameter: space-id
+    itemsPointer: /results
+    mapping:
+      itemId: /id
+      revision: /version/number
+      title: /title
+      sourceUrl: /_links/webui
+      updatedAt: /version/createdAt
+    cursor:
+      kind: operation_pagination
+  content:
+    operationId: get-page
+    itemParameter: id
+    mapping:
+      content: /body/storage/value
+      revision: /version/number
+      title: /title
+  # Per item rather than per space: Confluence restrictions are set on the page, so a space-level
+  # answer would index a restricted page as if the whole space could read it.
+  acl:
+    mode: item
+    operationId: get-restrictions
+    itemParameter: id
+    entriesPointer: /user/results
+    entry:
+      kindPointer: /type
+      kindValues:
+        user: [known]
+        group: [group]
+        public: [anonymous]
+      providerUserId: /accountId
+      providerGroupId: /id
+  # Accounts link by Atlassian account id alone. Confluence never reports whether an address is
+  # verified, and an unverified address is a claim rather than an identity, so matching on one
+  # would let a Confluence user claim a TulipFarm user's Knowledge access.
+  identity:
+    user:
+      operationId: get-user
+      idParameter: accountId
+      mapping:
+        providerId: /accountId
+    group:
+      operationId: get-group-members
+      idParameter: groupId
+      membersPointer: /results
+      mapping:
+        providerId: /groupId
+        memberUserId: /accountId
+  # Confluence does not report a page as deleted once it is gone, so a missing item on a full list
+  # is the only honest signal; a flag would leave withdrawn pages searchable forever.
+  deletion:
+    kind: absent_from_full_list

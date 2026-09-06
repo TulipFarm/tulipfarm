@@ -15,6 +15,7 @@ Credential leases for tool/runtime use.
 | `src/crypto.ts`, `src/keys.ts`, `src/key-manager.ts` | Envelope encryption, DEK/KEK lifecycle. |
 | `src/backfill.ts` | Legacy Secret migration to DEK-backed envelopes. |
 | `src/broker.ts`, `src/lease.ts`, `src/providers.ts` | Scoped leases and current-value providers. |
+| `src/connection-secrets.ts` | Connection Secret rotation, revocation, and opaque reference mapping. |
 | `src/redaction.ts`, `src/key-guard.ts` | Redaction and Secret key validation. |
 | `src/registry.ts`, `src/integration-registry.ts` | Provider/integration Secret metadata. |
 | `src/ports/` | Provider-neutral KMS port; no SDK types cross it. |
@@ -35,8 +36,8 @@ Credential leases for tool/runtime use.
 - Never log a DEK, recovery KEK, or decrypted value; surface failures as typed errors.
 - `SecretBroker` is default-deny, clamps TTL/uses, resolves values fresh on use, emits metadata
   only, and revokes by Secret, lease, or all.
-- A network lease scope binds the caller, destination, Run, and active Skill as well as the exact
-  Secret reference; scope equality is exact across every field.
+- A network lease scope binds the caller, Connection, credential slot, destination, Run, and active
+  Skill as well as the exact Secret reference; scope equality is exact across every field.
 - `SecretLease` is not serializable; plaintext may exist only inside `lease.use(cb)`. Returning it
   throws `SecretLeakError`; callback errors are re-thrown redacted.
 

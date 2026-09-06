@@ -1,4 +1,4 @@
-import { readdirSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { parse } from "yaml";
@@ -9,9 +9,12 @@ const INTEGRATIONS_DIR = join(import.meta.dirname, "../../../integrations");
 
 // Enumerated, never hardcoded: a hardcoded list lets a newly added integration pass by simply
 // never being tested, which is the failure this suite exists to prevent.
+// An OIM package declares itself in `oim.yml` and is validated by the OIM suite instead, so the
+// filter is on what a directory declares rather than on a list a new integration could dodge.
 const FIXTURES = readdirSync(INTEGRATIONS_DIR, { withFileTypes: true })
   .filter((entry) => entry.isDirectory())
   .map((entry) => entry.name)
+  .filter((slug) => existsSync(join(INTEGRATIONS_DIR, slug, "manifest.yml")))
   .sort();
 
 function fixtureManifest(slug: string): unknown {

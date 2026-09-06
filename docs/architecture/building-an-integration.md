@@ -2,6 +2,10 @@
 
 How to add a provider — Discord, Teams, Linear, Zendesk, Stripe — without writing TypeScript.
 
+> This page documents the Integration contract the runtime executes today. The portable successor
+> is the [Open Integration Manifest](open-integration-manifest.md). Its Core schema and conformance
+> contract are implemented; runtime profile adoption and migration are incremental.
+
 An integration is a directory containing a `manifest.yml`, optional API declarations, and an
 optional `setup-guide.md`. That directory can ship in this repo (`integrations/<slug>/`) or live in
 any git repo an operator installs by URL. There is no third path: **installing an integration

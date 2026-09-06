@@ -1,0 +1,439 @@
+oimVersion: "1.0"
+kind: Integration
+
+metadata:
+  id: jira
+  name: Jira
+  version: 1.0.0
+  description: >-
+    Search, read, create, update and transition Jira Cloud issues with an Atlassian API token
+    scoped to one site.
+  license: Apache-2.0
+  maintainers:
+    - name: TulipFarm
+      url: https://tulipfarm.dev
+
+profiles:
+  core: "1.0"
+  auth: "1.0"
+
+auth:
+  # The site is the installation's own Atlassian tenant, so the base URL is templated rather than
+  # fixed, and the allowlist keeps that template from becoming a way to point the Tools anywhere.
+  # Jira Server and Data Center live on their own domains and are deliberately out of scope.
+  allowedOriginHosts:
+    - "*.atlassian.net"
+  credentialSlots:
+    - id: api_credential
+      label: Atlassian email and API token
+      kind: api_key
+      required: true
+  configurationFields:
+    - id: jira_site
+      label: Jira site
+      type: url
+      required: true
+      agentVisible: true
+  steps:
+    - id: site
+      type: fields
+      title: Name your Jira site
+      description: >-
+        Paste the host you sign in to, for example acme.atlassian.net. Only Atlassian Cloud sites
+        are accepted; any other host is refused when the Integration compiles.
+      fields:
+        - id: jira_site
+          label: Site host
+          input: url
+          required: true
+          target:
+            type: configuration
+            field: jira_site
+    - id: token
+      type: fields
+      title: Create an API token
+      description: >-
+        Create a token at https://id.atlassian.com/manage-profile/security/api-tokens using the
+        account whose Jira access this Connection should carry. Jira Cloud authenticates with the
+        account email and the token together, so paste them as one value separated by a colon —
+        for example muskan.vijayvargiya@acme.com:the-token. TulipFarm encodes the pair itself; you
+        never run base64 by hand, and Agents never see either half.
+      fields:
+        - id: api_credential
+          label: Email and API token
+          description: your.email@example.com:api-token
+          input: password
+          required: true
+          target:
+            type: credential
+            slot: api_credential
+  healthCheckOperationId: current-user
+
+operations:
+  - id: current-user
+    name: jira_current_user
+    description: The Jira account this Connection authenticates as. Use it to confirm the token works.
+    effect: read
+    identityMode: shared_or_personal
+    credentialSlot: api_credential
+    credentialInjection:
+      in: header
+      name: Authorization
+      format: "Basic {token}"
+      encoding: basic
+    source:
+      type: http
+      method: GET
+      baseUrl: https://{jira_site}
+      path: /rest/api/3/myself
+    response:
+      maxBytes: 32768
+      schema:
+        type: object
+        properties:
+          accountId: { type: string }
+          displayName: { type: string }
+          emailAddress: { type: string }
+          active: { type: boolean }
+      projection:
+        - /accountId
+        - /displayName
+        - /emailAddress
+        - /active
+    rateLimit:
+      requests: 60
+      perSeconds: 60
+      scope: connection
+
+  - id: search-issues
+    name: jira_search_issues
+    description: >-
+      Search issues with JQL. Read this before estimating or reporting so the answer rests on the
+      matching issues and their fields rather than on a guess.
+    # Jira models JQL search as a POST because the query goes in the body, but it only reads.
+    effect: read
+    identityMode: shared_or_personal
+    credentialSlot: api_credential
+    credentialInjection:
+      in: header
+      name: Authorization
+      format: "Basic {token}"
+      encoding: basic
+    source:
+      type: http
+      method: POST
+      baseUrl: https://{jira_site}
+      path: /rest/api/3/search/jql
+    requestSchema:
+      type: object
+      properties:
+        jql:
+          type: string
+          minLength: 1
+          maxLength: 10000
+          description: A JQL query, for example project = ENG AND status != Done.
+        maxResults:
+          type: integer
+          minimum: 1
+          maximum: 100
+        nextPageToken:
+          type: string
+          maxLength: 4096
+          description: The nextPageToken from a previous response, to read the following page.
+        fields:
+          type: array
+          maxItems: 50
+          items: { type: string }
+        expand:
+          type: string
+          description: Use changelog to retrieve status-change history.
+      required: [jql]
+      additionalProperties: false
+    response:
+      maxBytes: 524288
+      schema:
+        type: object
+        properties:
+          nextPageToken: { type: string }
+          issues:
+            type: array
+            items:
+              type: object
+              properties:
+                id: { type: string }
+                key: { type: string }
+                fields: { type: object }
+    rateLimit:
+      requests: 60
+      perSeconds: 60
+      scope: connection
+
+  - id: get-issue
+    name: jira_get_issue
+    description: >-
+      Read one issue by key or id. Ask for expand=changelog when the question is about estimates,
+      status history, cycle time or lead time.
+    effect: read
+    identityMode: shared_or_personal
+    credentialSlot: api_credential
+    credentialInjection:
+      in: header
+      name: Authorization
+      format: "Basic {token}"
+      encoding: basic
+    source:
+      type: http
+      method: GET
+      baseUrl: https://{jira_site}
+      path: /rest/api/3/issue/{issueIdOrKey}
+      parameters:
+        - name: issueIdOrKey
+          in: path
+          schema:
+            type: string
+            minLength: 1
+            description: The issue key such as ENG-421, or its numeric id.
+        - name: fields
+          in: query
+          schema:
+            type: string
+            description: Comma-separated field names.
+        - name: expand
+          in: query
+          schema:
+            type: string
+            description: Use changelog to retrieve status-change history.
+    response:
+      maxBytes: 262144
+      schema:
+        type: object
+        properties:
+          id: { type: string }
+          key: { type: string }
+          fields: { type: object }
+          changelog: { type: object }
+    rateLimit:
+      requests: 60
+      perSeconds: 60
+      scope: connection
+
+  - id: list-priorities
+    name: jira_list_priorities
+    description: >-
+      List the priorities this Connection can set. Read it before changing a priority when the
+      exact priority id is not already known.
+    effect: read
+    identityMode: shared_or_personal
+    credentialSlot: api_credential
+    credentialInjection:
+      in: header
+      name: Authorization
+      format: "Basic {token}"
+      encoding: basic
+    source:
+      type: http
+      method: GET
+      baseUrl: https://{jira_site}
+      path: /rest/api/3/priority
+    response:
+      maxBytes: 65536
+      schema:
+        type: array
+        items:
+          type: object
+          properties:
+            id: { type: string }
+            name: { type: string }
+            description: { type: string }
+    rateLimit:
+      requests: 30
+      perSeconds: 60
+      scope: connection
+
+  - id: list-transitions
+    name: jira_list_transitions
+    description: >-
+      List the workflow transitions available for one issue. Read it before moving an issue,
+      because every Jira project can use different transition ids.
+    effect: read
+    identityMode: shared_or_personal
+    credentialSlot: api_credential
+    credentialInjection:
+      in: header
+      name: Authorization
+      format: "Basic {token}"
+      encoding: basic
+    source:
+      type: http
+      method: GET
+      baseUrl: https://{jira_site}
+      path: /rest/api/3/issue/{issueIdOrKey}/transitions
+      parameters:
+        - name: issueIdOrKey
+          in: path
+          schema:
+            type: string
+            minLength: 1
+    response:
+      maxBytes: 65536
+      schema:
+        type: object
+        properties:
+          transitions:
+            type: array
+            items:
+              type: object
+              properties:
+                id: { type: string }
+                name: { type: string }
+                to:
+                  type: object
+                  properties:
+                    id: { type: string }
+                    name: { type: string }
+    rateLimit:
+      requests: 60
+      perSeconds: 60
+      scope: connection
+
+  - id: create-issue
+    name: jira_create_issue
+    description: >-
+      Create one issue. Set the project, issue type and summary under fields; read an existing
+      issue first when a field id or an allowed value is not already known.
+    effect: create
+    identityMode: shared_or_personal
+    credentialSlot: api_credential
+    credentialInjection:
+      in: header
+      name: Authorization
+      format: "Basic {token}"
+      encoding: basic
+    source:
+      type: http
+      method: POST
+      baseUrl: https://{jira_site}
+      path: /rest/api/3/issue
+    requestSchema:
+      type: object
+      properties:
+        fields:
+          type: object
+          additionalProperties: true
+          description: Jira field ids and values, for example project, issuetype and summary.
+        update:
+          type: object
+          additionalProperties: true
+      required: [fields]
+      additionalProperties: false
+    response:
+      maxBytes: 32768
+      schema:
+        type: object
+        properties:
+          id: { type: string }
+          key: { type: string }
+          self: { type: string }
+      projection:
+        - /id
+        - /key
+        - /self
+    rateLimit:
+      requests: 30
+      perSeconds: 60
+      scope: connection
+
+  - id: update-issue
+    name: jira_update_issue
+    description: >-
+      Update fields on one issue, including its priority or an estimate. Read the issue first when
+      the field id or the allowed value is not already known.
+    effect: update
+    identityMode: shared_or_personal
+    credentialSlot: api_credential
+    credentialInjection:
+      in: header
+      name: Authorization
+      format: "Basic {token}"
+      encoding: basic
+    source:
+      type: http
+      method: PUT
+      baseUrl: https://{jira_site}
+      path: /rest/api/3/issue/{issueIdOrKey}
+      parameters:
+        - name: issueIdOrKey
+          in: path
+          schema:
+            type: string
+            minLength: 1
+    requestSchema:
+      type: object
+      properties:
+        fields:
+          type: object
+          additionalProperties: true
+        update:
+          type: object
+          additionalProperties: true
+      additionalProperties: false
+    response:
+      maxBytes: 32768
+      schema:
+        type: object
+        properties:
+          id: { type: string }
+          key: { type: string }
+    rateLimit:
+      requests: 30
+      perSeconds: 60
+      scope: connection
+
+  - id: transition-issue
+    name: jira_transition_issue
+    description: >-
+      Move one issue using a transition id returned by jira_list_transitions. This changes the
+      issue's state in Jira.
+    effect: update
+    identityMode: shared_or_personal
+    credentialSlot: api_credential
+    credentialInjection:
+      in: header
+      name: Authorization
+      format: "Basic {token}"
+      encoding: basic
+    source:
+      type: http
+      method: POST
+      baseUrl: https://{jira_site}
+      path: /rest/api/3/issue/{issueIdOrKey}/transitions
+      parameters:
+        - name: issueIdOrKey
+          in: path
+          schema:
+            type: string
+            minLength: 1
+    requestSchema:
+      type: object
+      properties:
+        transition:
+          type: object
+          properties:
+            id: { type: string, minLength: 1 }
+          required: [id]
+          additionalProperties: false
+        fields:
+          type: object
+          additionalProperties: true
+      required: [transition]
+      additionalProperties: false
+    response:
+      maxBytes: 32768
+      schema:
+        type: object
+        properties:
+          id: { type: string }
+    rateLimit:
+      requests: 30
+      perSeconds: 60
+      scope: connection

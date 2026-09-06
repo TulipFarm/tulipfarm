@@ -69,6 +69,18 @@ describe("providerSupportsPersonalCredential", () => {
     ).toBe(false);
   });
 
+  it("reads identityMode for an OIM package, which carries no legacy auth steps at all", () => {
+    const oim = (identityMode: string) =>
+      ({
+        slug: "notion",
+        oimManifest: { operations: [{ id: "search", identityMode }] },
+      }) as unknown as SoulIntegration;
+
+    expect(providerSupportsPersonalCredential(oim("shared_only"))).toBe(false);
+    expect(providerSupportsPersonalCredential(oim("personal_required"))).toBe(true);
+    expect(providerSupportsPersonalCredential(oim("shared_or_personal"))).toBe(true);
+  });
+
   /** Legacy manifests may declare only deprecated `oauth`; classification must not throw. */
   it("reads through resolveAuthSteps rather than manifest.auth, so a legacy block is not misread", () => {
     const legacy = {

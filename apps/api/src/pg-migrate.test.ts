@@ -109,6 +109,89 @@ describe("the migration ledger is append-only", () => {
   });
 });
 
+describe("migration 101", () => {
+  it("does not require the auth request table in a partial fixture", async () => {
+    const db = await makePglite();
+    try {
+      const migration = PG_MIGRATIONS.find((candidate) => candidate.version === 101);
+      if (migration === undefined) throw new Error("migration 101 is missing");
+
+      await expect(migration.up(db)).resolves.toBeUndefined();
+    } finally {
+      await db.close();
+    }
+  });
+});
+
+describe("migration 104", () => {
+  let db: PGlite;
+
+  beforeEach(async () => {
+    db = await makePglite();
+    await db.query(`
+      CREATE TABLE connections (
+        business_id text NOT NULL,
+        id text NOT NULL,
+        integration_id text NOT NULL,
+        integration_major_version integer NOT NULL,
+        owner_scope text NOT NULL CONSTRAINT legacy_connection_scope_check
+          CHECK (owner_scope IN ('personal', 'organization')),
+        owner_principal_id text,
+        status text NOT NULL DEFAULT 'active',
+        is_default boolean NOT NULL DEFAULT false,
+        CONSTRAINT legacy_connection_owner_check CHECK (
+          (owner_scope = 'personal' AND owner_principal_id IS NOT NULL)
+          OR (owner_scope = 'organization' AND owner_principal_id IS NULL)
+        ),
+        PRIMARY KEY (business_id, id)
+      )
+    `);
+    await db.query(`
+      CREATE UNIQUE INDEX connections_active_default_idx
+        ON connections (business_id, integration_id, integration_major_version, owner_scope,
+          COALESCE(owner_principal_id, ''))
+    `);
+    await db.query(`
+      CREATE INDEX connections_owner_lookup_idx
+        ON connections (business_id, integration_id, integration_major_version, owner_scope,
+          owner_principal_id)
+    `);
+    await db.query(`
+      CREATE TABLE schema_version (
+        id boolean PRIMARY KEY DEFAULT true,
+        version integer NOT NULL,
+        CONSTRAINT schema_version_single_row CHECK (id)
+      )
+    `);
+    await db.query("INSERT INTO schema_version (id, version) VALUES (true, 103)");
+  });
+
+  afterEach(async () => {
+    await db.close();
+  });
+
+  it("replaces legacy owner checks and indexes before accepting a Team owner", async () => {
+    await runPgMigrations(db, undefined, () => {});
+
+    await expect(
+      db.query(`
+        INSERT INTO connections (
+          business_id, id, integration_id, integration_major_version,
+          owner_scope, owner_principal_id, owner_team_id
+        ) VALUES ('biz', 'connection', 'acme', 1, 'team', NULL, '00000000-0000-4000-8000-000000000004')
+      `)
+    ).resolves.toBeDefined();
+    await expect(
+      db.query(`
+        INSERT INTO connections (
+          business_id, id, integration_id, integration_major_version,
+          owner_scope, owner_principal_id, owner_team_id
+        ) VALUES ('biz', 'invalid', 'acme', 1, 'team', 'person', '00000000-0000-4000-8000-000000000004')
+      `)
+    ).rejects.toThrow();
+  });
+});
+
 describe("runPgMigrations", () => {
   let db: PGlite;
 

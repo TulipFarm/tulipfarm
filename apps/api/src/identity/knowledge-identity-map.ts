@@ -1,5 +1,9 @@
 import { DEPLOYMENT_BUSINESS_ID } from "@tulipfarm/constants";
-import type { EmittedPrincipalRef, KnowledgeIdentityMapPort } from "@tulipfarm/integrations";
+import type {
+  EmittedPrincipalRef,
+  KnowledgeIdentityMapPort,
+  ProviderIdentityLinkPort,
+} from "@tulipfarm/integrations";
 import { type ExternalIdentityRepo, isProvenLink } from "./external-links";
 
 export { PROVEN_LINK_VERIFICATION } from "./external-links";
@@ -27,4 +31,25 @@ export class ExternalLinkKnowledgeIdentityMap implements KnowledgeIdentityMapPor
 
     return [{ kind: "user", id: doc.userId }];
   }
+}
+
+/**
+ * Narrows the Slack-era identity map to the single-principal port OIM Knowledge asks for.
+ *
+ * The map may answer with several principals for one provider account; a Knowledge ACL entry names
+ * one subject, so the first proven link is the answer and an unlinked account is `undefined` —
+ * which drops the grant. Dropping a grant narrows access, so guessing here would be the only
+ * dangerous option.
+ */
+export function providerIdentityLinkPort(map: KnowledgeIdentityMapPort): ProviderIdentityLinkPort {
+  return {
+    async linkedPrincipal({ businessId, provider, providerId }) {
+      const principals = await map.resolve({
+        businessId,
+        provider,
+        externalSubject: providerId,
+      });
+      return principals?.[0];
+    },
+  };
 }

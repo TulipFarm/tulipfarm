@@ -15,6 +15,7 @@ import type { MemoryDocumentRepo } from "@tulipfarm/memory";
 import type { BatchingLogSink } from "@tulipfarm/observability";
 import type { DurableInvocationGateway } from "@tulipfarm/run-kernel";
 import type { HookExecutor } from "@tulipfarm/sandbox";
+import type { OimManifest } from "@tulipfarm/schema";
 import type { SecretsService } from "@tulipfarm/secrets";
 import type {
   BundledIntegration,
@@ -25,7 +26,12 @@ import type {
   SoulLoader,
   SoulWriter,
 } from "@tulipfarm/soul";
-import type { IntegrationStore, TaskStore } from "@tulipfarm/storage";
+import type {
+  ConnectionStore,
+  IntegrationStore,
+  TaskStore,
+  WebhookInboxStore,
+} from "@tulipfarm/storage";
 import type { ApprovalsRepo, ToolApprovalService } from "@tulipfarm/tool-host";
 import type { FastifyBaseLogger } from "fastify";
 import type { ActivityService } from "./activity/service";
@@ -56,6 +62,8 @@ import type { IdentityRouteDeps } from "./identity/routes";
 import type { IngressRoutesDeps } from "./ingress/routes";
 import type { IntegrationAuthRequestRepo } from "./integrations/auth-broker";
 import type { GitHubInstallDeps } from "./integrations/github-install-routes";
+import type { OimIngressRouteDeps } from "./integrations/oim-ingress-routes";
+import type { OimWebhookLifecycle } from "./integrations/oim-webhook-lifecycle";
 import type { PrincipalProviderTokenRepo } from "./integrations/principal-tokens";
 import type { SlackBindDeps } from "./integrations/slack-binding";
 import type { ChannelInternalRouteDeps } from "./internal/channel-routes";
@@ -119,6 +127,8 @@ export interface AppOptions {
   /** Shared marketplace scan/audit/install flow for REST routes and Chat Tools. */
   skillMarketplace?: SkillMarketplaceFlow;
   bundledIntegrations?: ReadonlyMap<string, BundledIntegration>;
+  /** OIM packages shipped in the image, catalogued before they are copied into the Soul. */
+  bundledOimPackages?: ReadonlyMap<string, OimManifest>;
   slackBind?: {
     integrations: IntegrationStore;
     businessId: string;
@@ -188,6 +198,18 @@ export interface AppOptions {
   runEvents?: RunEventRouteDeps;
   runReplay?: RunReplayDeps;
   taskStore?: TaskStore;
+  /**
+   * Where an ad-hoc Credential a person confirmed is stored. Absent leaves the confirmation routes
+   * unregistered, which is correct for a test with no database: an unwired store would accept a
+   * Credential and lose it.
+   */
+  connectionStore?: ConnectionStore;
+  /** The durable webhook inbox, when this deployment stores Integration deliveries. */
+  webhookInbox?: WebhookInboxStore;
+  /** Everything the OIM webhook receiver needs, composed where the keys and stores live. */
+  oimIngress?: OimIngressRouteDeps;
+  /** Provider webhook registration, composed with the durable Connection store in `index.ts`. */
+  oimWebhookLifecycle?: OimWebhookLifecycle;
   /** Composed in `index.ts`, where the blob substrate lives. Absent in tests that never upload. */
   fileService?: FileService;
   /**

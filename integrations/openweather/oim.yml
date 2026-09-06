@@ -1,0 +1,227 @@
+oimVersion: "1.0"
+kind: Integration
+
+metadata:
+  id: openweather
+  name: OpenWeather
+  version: 1.0.0
+  description: Current conditions and forecasts from OpenWeather, using one organization API key.
+  license: Apache-2.0
+  maintainers:
+    - name: TulipFarm
+      url: https://tulipfarm.dev
+
+profiles:
+  core: "1.0"
+  auth: "1.0"
+
+files:
+  - path: fixtures.yml
+    role: fixture
+    sha256: 227dbdcfd1a23ca7364408936222e8429d16513009876cbc6d80d34c3dd11044
+
+auth:
+  credentialSlots:
+    - id: api_key
+      label: OpenWeather API key
+      kind: api_key
+      required: true
+  steps:
+    - id: key
+      type: fields
+      title: Enter your OpenWeather API key
+      description: >-
+        Create a key at https://home.openweathermap.org/api_keys. One key serves the whole
+        organization; agents never see it.
+      fields:
+        - id: api_key
+          label: API key
+          input: password
+          required: true
+          target:
+            type: credential
+            slot: api_key
+  healthCheckOperationId: current-weather
+
+operations:
+  - id: current-weather
+    name: openweather_current
+    description: Current conditions for a place, by name or by coordinates.
+    effect: read
+    identityMode: shared_only
+    credentialSlot: api_key
+    credentialInjection:
+      in: query
+      name: appid
+      format: "{token}"
+    source:
+      type: http
+      method: GET
+      baseUrl: https://api.openweathermap.org
+      path: /data/2.5/weather
+      parameters:
+        - name: q
+          in: query
+          schema:
+            type: string
+            description: Place name, optionally "city,country".
+        - name: lat
+          in: query
+          schema: { type: number }
+        - name: lon
+          in: query
+          schema: { type: number }
+        - name: units
+          in: query
+          schema:
+            type: string
+            enum: [standard, metric, imperial]
+    response:
+      maxBytes: 65536
+      schema:
+        type: object
+        properties:
+          name: { type: string }
+          weather:
+            type: array
+            items:
+              type: object
+              properties:
+                main: { type: string }
+                description: { type: string }
+          main:
+            type: object
+            properties:
+              temp: { type: number }
+              feels_like: { type: number }
+              humidity: { type: number }
+          wind:
+            type: object
+            properties:
+              speed: { type: number }
+      # Everything else the endpoint returns — station ids, internal flags, precise coordinates —
+      # is dropped before an Agent sees it, so a widened upstream response cannot widen the Tool.
+      projection:
+        - /name
+        - /weather/0/main
+        - /weather/0/description
+        - /main/temp
+        - /main/feels_like
+        - /main/humidity
+        - /wind/speed
+    rateLimit:
+      requests: 60
+      perSeconds: 60
+      scope: connection
+
+  - id: forecast
+    name: openweather_forecast
+    description: Five-day forecast in three-hour steps, for a place or coordinates.
+    effect: read
+    identityMode: shared_only
+    credentialSlot: api_key
+    credentialInjection:
+      in: query
+      name: appid
+      format: "{token}"
+    source:
+      type: http
+      method: GET
+      baseUrl: https://api.openweathermap.org
+      path: /data/2.5/forecast
+      parameters:
+        - name: q
+          in: query
+          schema: { type: string }
+        - name: lat
+          in: query
+          schema: { type: number }
+        - name: lon
+          in: query
+          schema: { type: number }
+        - name: units
+          in: query
+          schema:
+            type: string
+            enum: [standard, metric, imperial]
+        - name: cnt
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 40
+    response:
+      maxBytes: 262144
+      schema:
+        type: object
+        properties:
+          city:
+            type: object
+            properties:
+              name: { type: string }
+          list:
+            type: array
+            items:
+              type: object
+              properties:
+                dt_txt: { type: string }
+                main:
+                  type: object
+                  properties:
+                    temp: { type: number }
+                weather:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      description: { type: string }
+      projection:
+        - /city/name
+        - /list
+    rateLimit:
+      requests: 60
+      perSeconds: 60
+      scope: connection
+
+  - id: geocode
+    name: openweather_geocode
+    description: Resolve a place name to coordinates, for callers that need an exact location.
+    effect: read
+    identityMode: shared_only
+    credentialSlot: api_key
+    credentialInjection:
+      in: query
+      name: appid
+      format: "{token}"
+    source:
+      type: http
+      method: GET
+      baseUrl: https://api.openweathermap.org
+      path: /geo/1.0/direct
+      parameters:
+        - name: q
+          in: query
+          required: true
+          schema: { type: string }
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 5
+    response:
+      maxBytes: 32768
+      schema:
+        type: array
+        items:
+          type: object
+          properties:
+            name: { type: string }
+            lat: { type: number }
+            lon: { type: number }
+            country: { type: string }
+            state: { type: string }
+    rateLimit:
+      requests: 60
+      perSeconds: 60
+      scope: connection

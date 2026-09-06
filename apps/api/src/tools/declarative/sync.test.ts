@@ -1,4 +1,5 @@
 import type { EgressHttpPort, IntegrationHttpResponse } from "@tulipfarm/integrations";
+import type { OimManifest } from "@tulipfarm/schema";
 import type { SecretsService } from "@tulipfarm/secrets";
 import type { IntegrationManifest, Logger, SoulIntegration } from "@tulipfarm/soul";
 import { MemoryEffectStore } from "@tulipfarm/tool-broker";
@@ -72,6 +73,39 @@ function integration(
   } as SoulIntegration;
 }
 
+function oimIntegration(): SoulIntegration {
+  const oimManifest: OimManifest = {
+    oimVersion: "1.0",
+    kind: "Integration",
+    metadata: {
+      id: "twilio",
+      name: "Twilio",
+      version: "1.0.0",
+      description: "Read messages.",
+      license: "Apache-2.0",
+    },
+    profiles: { core: "1.0" },
+    operations: [
+      {
+        id: "get-message",
+        name: "get_message",
+        description: "Read one message.",
+        effect: "read",
+        identityMode: "shared_only",
+        source: {
+          type: "http",
+          method: "GET",
+          baseUrl: "https://api.twilio.test",
+          path: "/v1/messages/{message_id}",
+          parameters: [{ name: "message_id", in: "path", schema: { type: "string" } }],
+        },
+        response: { schema: { type: "object" }, maxBytes: 16_384 },
+      },
+    ],
+  } as OimManifest;
+  return { slug: "twilio", sourceIntegration: "twilio", oimManifest };
+}
+
 const noopHttp: EgressHttpPort = {
   async send(): Promise<IntegrationHttpResponse> {
     return { status: 200, headers: {}, body: {} };
@@ -108,6 +142,13 @@ describe("DeclarativeToolSync", () => {
     installed = [integration("acme", true)];
     expect(sync.sync()).toBe(2);
     expect(names().sort()).toEqual(["acme_read_page", "acme_search_docs"]);
+  });
+
+  it("registers OIM operations before a Connection exists", () => {
+    installed = [oimIntegration()];
+
+    expect(sync.sync()).toBe(1);
+    expect(names()).toEqual(["twilio_get_message"]);
   });
 
   it("unregisters the Tools when the integration disconnects", () => {

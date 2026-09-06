@@ -4,6 +4,7 @@ import type { FastifyInstance } from "fastify";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { buildApp } from "../app";
 import type { TokenDoc, TokenRepo } from "../auth/api-tokens";
+import { CSRF_COOKIE, CSRF_HEADER } from "../auth/csrf";
 import { SESSION_COOKIE } from "../auth/routes";
 import { MemorySessionStore } from "../auth/session-store";
 import { createUser, type UserDoc, type UserRepo } from "../auth/users";
@@ -155,5 +156,40 @@ describe("GET /api/v1/system/public-origins", () => {
       source: "database",
     });
     await app.close();
+  });
+
+  it("reconciles provider webhooks after the public API origin changes", async () => {
+    const store = new MemorySessionStore();
+    const userRepo = new FakeUserRepo();
+    const user = await createUser(userRepo, "admin@example.com", "pass", "admin");
+    const sid = await store.create(user._id);
+    const reconcile = vi.fn(async () => {});
+    const publicOrigins = new PublicOriginsService(
+      {
+        get: async () => null,
+        put: async () => {},
+        delete: async () => {},
+      },
+      "default"
+    );
+    const app = await buildApp({
+      sessionStore: store,
+      userRepo,
+      tokenRepo: new FakeTokenRepo(),
+      publicOrigins,
+      systemRoutes: { onPublicOriginsChanged: reconcile },
+    });
+
+    const response = await app.inject({
+      method: "PUT",
+      url: "/api/v1/system/public-origins",
+      cookies: { [SESSION_COOKIE]: sid, [CSRF_COOKIE]: "a".repeat(64) },
+      headers: { [CSRF_HEADER]: "a".repeat(64) },
+      payload: { webOrigin: "https://web.example.test", apiOrigin: "https://api.example.test" },
+    });
+    await app.close();
+
+    expect(response.statusCode).toBe(200);
+    expect(reconcile).toHaveBeenCalledWith("https://api.example.test");
   });
 });

@@ -3,7 +3,7 @@ id: journey-jira-pm
 area: Journeys
 suites: [journeys]
 routes: ["/", "/chat", "/integrations", "/agents/:name", "/routines"]
-preconditions: signed-in session; Jira Cloud OAuth credentials available for the full connection
+preconditions: signed-in session; a Jira site address and Atlassian API token available for the full connection
   check, or no credentials for the catalog-only check
 blast_radius: creates a qa-journeys-* Agent (left in place), no destructive actions
 est_minutes: 20
@@ -20,8 +20,8 @@ task priority, and generates cycle-time/lead-time reports — "auto product mana
 | # | Action | Expected |
 | --- | --- | --- |
 | 1 | `navigate /integrations` | Catalog renders within 5s |
-| 2 | `expect` the Jira integration listed | Jira is visible with a productivity category and a description covering search, issue creation, estimation, priority, and workflow transitions |
-| 3 | `click` the Jira row | The integration detail page renders its Cloud ID and OAuth access-token connect steps |
+| 2 | `expect` the Jira integration listed | Jira is visible with a productivity category and a description covering search, issue creation, updates, and workflow transitions |
+| 3 | `click` the Jira row | The integration detail page renders its site-address and API-token connect steps |
 | 4 | With test credentials, complete the connect flow | The connection succeeds and declares its Jira Tools; skip this step when credentials are unavailable |
 | 5 | `capture` screenshot | — |
 

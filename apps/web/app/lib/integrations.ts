@@ -86,6 +86,22 @@ export type IntegrationDetail = IntegrationSummary & {
   };
   /** The manifest's declared auth flow, resolved and ordered. Drives the whole connect UI. */
   auth: AuthStepSummary[];
+  /**
+   * Present only for an Open Integration Manifest package.
+   *
+   * Its credential is a Connection row, not sealed env, so its setup lives on its own screen —
+   * `auth` here describes that form rather than a flow this page can run.
+   */
+  oim?: {
+    integrationId: string;
+    majorVersion: number;
+    operationCount: number;
+    unsupportedStepTypes: string[];
+    /** True when saving the form is only half the flow; the person must then consent at the provider. */
+    requiresAuthorization: boolean;
+    connectSupported: boolean;
+    healthCheckOperationId?: string;
+  };
   connected: boolean;
   /** Whether the signed-in user has a live personal credential for this provider. */
   personalConnected?: boolean;
@@ -214,6 +230,93 @@ export async function updateIntegration(
 
 export async function deleteIntegration(name: string): Promise<void> {
   return apiDelete(`/api/v1/integrations/${encodeURIComponent(name)}`);
+}
+
+/* An OIM package's Connections: a credential row in the runtime, not sealed env in the soul. */
+
+export type OimConnectField = {
+  id: string;
+  label: string;
+  description?: string;
+  input: "text" | "password" | "url";
+  required: boolean;
+  /** Written to a Secret and never read back, so the form must not try to pre-fill it. */
+  secret: boolean;
+};
+
+export type OimConnectStep = {
+  id: string;
+  title: string;
+  description?: string;
+  fields: OimConnectField[];
+};
+
+export type OimConnectForm = {
+  integrationId: string;
+  majorVersion: number;
+  steps: OimConnectStep[];
+  /** Sign-in step types this deployment cannot run yet; the form alone would look complete. */
+  unsupportedStepTypes: string[];
+  /** True when saving the form is only half the flow; the person must then consent at the provider. */
+  requiresAuthorization: boolean;
+};
+
+export type OimConnectionSummary = {
+  id: string;
+  label: string;
+  scope: "organization" | "personal" | "team";
+  teamId?: string;
+  status: "active" | "revoked";
+  isDefault: boolean;
+  health: string;
+  expiresAt: string | null;
+  /** Only the fields the package marked agent-visible. */
+  configuration: Record<string, string | number | boolean>;
+};
+
+export async function getOimConnections(
+  name: string
+): Promise<{ form: OimConnectForm; connections: OimConnectionSummary[] }> {
+  return apiGet(`/api/v1/integrations/${encodeURIComponent(name)}/connections`);
+}
+
+export async function createOimConnection(
+  name: string,
+  body: {
+    label: string;
+    scope: "personal" | "organization" | "team";
+    teamId?: string;
+    values: Record<string, string>;
+  }
+): Promise<{ connectionId: string; scope: string; teamId?: string }> {
+  return apiWrite("POST", `/api/v1/integrations/${encodeURIComponent(name)}/connections`, body);
+}
+
+export async function revokeOimConnection(name: string, id: string): Promise<void> {
+  return apiDelete(
+    `/api/v1/integrations/${encodeURIComponent(name)}/connections/${encodeURIComponent(id)}`
+  );
+}
+
+/** Calls the operation the package nominated as its health check and returns the recorded result. */
+export async function testOimConnection(
+  name: string,
+  id: string
+): Promise<{ status: string; checkedAt: string }> {
+  return apiWrite(
+    "POST",
+    `/api/v1/integrations/${encodeURIComponent(name)}/connections/${encodeURIComponent(id)}/test`,
+    {}
+  );
+}
+
+/** Starts the provider consent flow and returns where the browser must go next. */
+export async function authorizeOimConnection(name: string, id: string): Promise<{ url: string }> {
+  return apiWrite(
+    "POST",
+    `/api/v1/integrations/${encodeURIComponent(name)}/connections/${encodeURIComponent(id)}/authorize`,
+    {}
+  );
 }
 
 export type SlackRoute = {

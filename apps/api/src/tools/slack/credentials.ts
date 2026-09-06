@@ -34,5 +34,9 @@ export function slackCompositeSecretProvider(
       if (secretRef === SLACK_BOT_TOKEN_SECRET_REF) return slack.resolveCurrent(secretRef);
       return base.resolveCurrent(secretRef);
     },
+    async currentVersion(secretRef) {
+      const provider = secretRef === SLACK_BOT_TOKEN_SECRET_REF ? slack : base;
+      return provider.currentVersion?.(secretRef) ?? null;
+    },
   };
 }

@@ -471,7 +471,26 @@ export default function IntegrationDetailPage() {
                 </button>
               )}
             </div>
-            {authSteps.length === 0 ? (
+            {integration.oim ? (
+              // An OIM package's credential is a Connection, not sealed env, so this page never
+              // runs its setup — it hands over to the screen an Agent's own answer already cites,
+              // so both routes into connecting land in exactly one place.
+              <div className="flex flex-col gap-2">
+                <p className="max-w-prose text-xs text-muted-foreground">
+                  {integration.oim.connectSupported
+                    ? "This integration keeps its credential as a connection, so it can be shared with the business or kept to one person."
+                    : `This integration signs in with ${integration.oim.unsupportedStepTypes.join(", ")}, which this deployment cannot run yet.`}
+                </p>
+                {integration.oim.connectSupported ? (
+                  <Link
+                    to={`/business/integrations/${encodeURIComponent(integration.name)}/connections`}
+                    className="text-xs text-primary underline underline-offset-2 hover:opacity-80"
+                  >
+                    Manage connections →
+                  </Link>
+                ) : null}
+              </div>
+            ) : authSteps.length === 0 ? (
               <p className="text-xs text-muted-foreground">
                 This integration declares no credentials. Nothing to set up.
               </p>

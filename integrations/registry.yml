@@ -11,6 +11,8 @@
 # `availability: coming_soon` means the manifest is in the image but the connect flow is not
 # something an operator should be handed yet. The catalog lists the entry so the roadmap is
 # visible, and refuses to open it, rather than offering a setup that ends in a dead end.
+# An OIM package is ready as soon as every step its `auth` declares is one the runtime can run;
+# a package that still declares an `oauth2` step keeps the flag until that lands.
 #
 # Third-party integrations must be purely declarative. A manifest that runs code — `ts-code`
 # egress, a stdio MCP server, or an `ingress.handler` — is rejected at install
@@ -42,20 +44,81 @@ integrations:
     description: Read and write repositories, issues, and pull requests.
 
   - name: jira
-    availability: coming_soon
     title: Jira
     icon: jira
     category: productivity
     homepage: https://www.atlassian.com/software/jira
-    description: Search, create, estimate, prioritize, and transition Jira Cloud issues.
+    description: Search, read, create, update, and transition Jira Cloud issues.
 
   - name: linear
-    availability: coming_soon
     title: Linear
     icon: linear
     category: productivity
     homepage: https://linear.app
     description: Read, create, update, and comment on issues with approval for changes.
+
+  - name: telegram
+    title: Telegram
+    icon: telegram
+    color: "26A5E4"
+    category: chat
+    homepage: https://telegram.org
+    description: Send and read messages through a Telegram bot.
+
+  - name: notion
+    title: Notion
+    icon: notion
+    category: productivity
+    homepage: https://www.notion.so
+    description: Search, read, and page through Notion content shared with an integration.
+
+  - name: hubspot
+    title: HubSpot
+    icon: hubspot
+    color: "FF7A59"
+    category: productivity
+    homepage: https://www.hubspot.com
+    description: Read and create HubSpot CRM contacts and companies through your own connected app.
+
+  - name: twilio
+    title: Twilio
+    icon: twilio
+    color: "F22F46"
+    category: communication
+    homepage: https://www.twilio.com
+    description: Send SMS and WhatsApp messages, and read message history.
+
+  - name: trello
+    title: Trello
+    icon: trello
+    color: "0C66E4"
+    category: productivity
+    homepage: https://trello.com
+    description: Confirm a Trello API key and token, then read the connected member.
+
+  - name: gitlab
+    title: GitLab
+    icon: gitlab
+    category: engineering
+    homepage: https://gitlab.com
+    description: Read and write issues, merge requests, and notes, and receive project webhooks as
+      events.
+
+  - name: confluence
+    title: Confluence
+    icon: confluence
+    category: productivity
+    homepage: https://www.atlassian.com/software/confluence
+    description: Read spaces and pages, and index them into Knowledge with the page restrictions
+      Confluence enforces.
+
+  - name: openweather
+    title: OpenWeather
+    icon: openweathermap
+    category: data
+    homepage: https://openweathermap.org
+    description: Read current conditions and forecasts for a location.
+
   - name: google
     availability: coming_soon
     title: Google Workspace
