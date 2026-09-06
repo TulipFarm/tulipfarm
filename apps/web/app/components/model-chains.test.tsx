@@ -41,6 +41,21 @@ const PROVIDERS: LlmProviderInfo[] = [
 
 const ALL_SECRETS = ["anthropic-api-key", "openai-api-key"];
 
+// Same model on every tier, so `llmConfigMode` resolves to "basic" and a save from the Basic tab
+// commits directly instead of raising the flatten-confirm dialog — used by tests whose intent is
+// the embedding row itself, not that confirmation flow (covered separately).
+const basicModeInitial: LlmConfig = {
+  presets: { default: "balanced" },
+  tiers: {
+    quick: { providers: [{ provider: "anthropic", model: "claude-haiku-4-5" }] },
+    standard: { providers: [{ provider: "anthropic", model: "claude-haiku-4-5" }] },
+    complex: { providers: [{ provider: "anthropic", model: "claude-haiku-4-5" }] },
+  },
+  embeddings: { providers: [{ provider: "openai", model: "text-embedding-3-small" }] },
+};
+
+// Tiers differ (haiku/sonnet/opus), so `llmConfigMode` resolves this to "advanced" and every
+// render below opens on the Advanced tab by default — see `packages/schema/src/llm.ts`.
 const initial: LlmConfig = {
   presets: { default: "balanced" },
   tiers: {
@@ -64,7 +79,7 @@ function withTiers(quick: LlmConfig["tiers"] extends undefined ? never : { provi
 
 function renderChains(overrides: Partial<Parameters<typeof ModelChains>[0]> = {}) {
   const onSubmit = vi.fn();
-  render(
+  const { unmount } = render(
     <ModelChains
       initial={initial}
       providers={PROVIDERS}
@@ -75,16 +90,25 @@ function renderChains(overrides: Partial<Parameters<typeof ModelChains>[0]> = {}
       {...overrides}
     />
   );
-  return onSubmit;
+  return Object.assign(onSubmit, { unmount });
 }
 
-/** The at-a-glance row for one effort, in the Chat models panel. */
-function effortRow(label: string): HTMLElement {
-  const action = screen.getByRole("button", {
-    name: new RegExp(`(Change the|Choose a) ${label} model`),
-  });
-  return action.closest("tr") as HTMLElement;
+async function switchToTab(name: "Basic" | "Advanced") {
+  await userEvent.click(screen.getByRole("tab", { name }));
 }
+
+/**
+ * The whole per-effort card in Advanced (a `<section>`), found by its `<h4>` heading. `EffortCard`
+ * gives its `PrimaryRow` a hardcoded `name="Model"` rather than the effort's label, so a button
+ * inside can only be told apart by which card it lives in — every query that needs "the Fast
+ * button" or "the Fast standby list" goes through this card, never a global name lookup.
+ */
+function effortRow(label: string): HTMLElement {
+  return screen.getByText(label, { selector: "h4" }).closest("section") as HTMLElement;
+}
+
+/** The standby chain for one effort lives in the same card as its primary row. */
+const standbyList = effortRow;
 
 /** Choose a suggestion from the Model combobox by name, the way a person would. */
 async function pickModel(name: string) {
@@ -94,18 +118,13 @@ async function pickModel(name: string) {
   await userEvent.click(await screen.findByRole("option", { name }));
 }
 
-/** The ordered standby list for one effort, inside Advanced. */
-function standbyList(label: string): HTMLElement {
-  return screen.getByRole("region", { name: label });
-}
-
 async function save() {
   const button = screen.getByRole("button", { name: /save changes/i });
   expect(button).toBeEnabled();
   await userEvent.click(button);
 }
 
-/** Make one harmless, saveable edit so the save bar is armed. */
+/** Make one harmless, saveable edit so the save bar is armed. Only exists on the Advanced tab. */
 async function touch() {
   await userEvent.click(screen.getByRole("radio", { name: "Make Thorough the default effort" }));
 }
@@ -132,14 +151,33 @@ test("names efforts by preset and never by the retired wire names", () => {
   renderChains();
 
   for (const label of ["Fast", "Balanced", "Thorough"]) {
-    expect(within(effortRow(label)).getByText(label)).toBeInTheDocument();
+    expect(effortRow(label)).toBeInTheDocument();
   }
   for (const retired of ["quick", "standard", "complex"]) {
     expect(screen.queryByText(new RegExp(`\\b${retired}\\b`, "i"))).not.toBeInTheDocument();
   }
 });
 
-test("shows one model per effort, with fallbacks counted rather than listed", () => {
+test("a config with one model per tier and no standbys opens on Basic; one that differs opens on Advanced", () => {
+  const basicConfig: LlmConfig = {
+    presets: { default: "balanced" },
+    tiers: {
+      quick: { providers: [{ provider: "anthropic", model: "claude-haiku-4-5" }] },
+      standard: { providers: [{ provider: "anthropic", model: "claude-haiku-4-5" }] },
+      complex: { providers: [{ provider: "anthropic", model: "claude-haiku-4-5" }] },
+    },
+    embeddings: { providers: [{ provider: "openai", model: "text-embedding-3-small" }] },
+  };
+  const onSubmit = renderChains({ initial: basicConfig });
+  expect(screen.getByRole("region", { name: "Chat model" })).toBeInTheDocument();
+  expect(screen.queryByText("Fast", { selector: "h4" })).not.toBeInTheDocument();
+  onSubmit.unmount();
+
+  renderChains();
+  expect(screen.getByText("Fast", { selector: "h4" })).toBeInTheDocument();
+});
+
+test("shows one model per effort, with the standby chain shown alongside it", () => {
   renderChains({
     initial: withTiers({
       providers: [
@@ -151,8 +189,8 @@ test("shows one model per effort, with fallbacks counted rather than listed", ()
 
   const fast = effortRow("Fast");
   expect(fast).toHaveTextContent("claude-haiku-4-5");
-  expect(fast).not.toHaveTextContent("gpt-4o-mini");
-  expect(fast).toHaveTextContent("1 standby");
+  expect(fast).toHaveTextContent("gpt-4o-mini");
+  expect(within(fast).getAllByRole("listitem")).toHaveLength(2);
 });
 
 test("names the pricing and context facts it puts on screen", () => {
@@ -173,17 +211,11 @@ test("names the pricing and context facts it puts on screen", () => {
     }),
   });
 
-  // Cost is what the three rows are compared on, so it gets the columns. Context is dropped as a
-  // column because it is usually identical across efforts, and a column of one repeated value
-  // costs width without ever answering a question.
-  expect(screen.queryByRole("columnheader", { name: "Context" })).not.toBeInTheDocument();
-  expect(screen.getByRole("columnheader", { name: "Input / 1M" })).toBeInTheDocument();
-  expect(screen.getByRole("columnheader", { name: "Output / 1M" })).toBeInTheDocument();
-
   const fast = effortRow("Fast");
-  expect(fast).toHaveTextContent("1M context");
-  expect(within(fast).getByText("$0.25")).toBeInTheDocument();
-  expect(within(fast).getByText("$2.00")).toBeInTheDocument();
+  expect(within(fast).getByText("1M tokens")).toBeInTheDocument();
+  expect(within(fast).getByText("$0.25/Mtok")).toBeInTheDocument();
+  expect(within(fast).getByText("$2.00/Mtok")).toBeInTheDocument();
+  expect(within(fast).getByText("Tools")).toBeInTheDocument();
 });
 
 test("offers a way in when a cost is unknown, rather than a blank that reads as free", async () => {
@@ -196,8 +228,9 @@ test("offers a way in when a cost is unknown, rather than a blank that reads as 
   });
 
   const fast = effortRow("Fast");
-  expect(within(fast).queryByText(/^\$/)).not.toBeInTheDocument();
-  await userEvent.click(within(fast).getByRole("button", { name: "Set the Fast input price" }));
+  expect(within(fast).queryByText(/\$/)).not.toBeInTheDocument();
+  await userEvent.click(within(fast).getByRole("button", { name: "Change the Model model" }));
+  await userEvent.click(await screen.findByRole("button", { name: /enter these by hand/i }));
   expect(await screen.findByLabelText("Input $ / 1M tokens")).toBeInTheDocument();
 });
 
@@ -211,6 +244,7 @@ test("preserves the retired wire tier names when serializing", async () => {
   expect(Object.keys(submitted.tiers ?? {})).toEqual(["quick", "standard", "complex"]);
   expect(submitted.tiers?.quick.providers[0]?.model).toBe("claude-haiku-4-5");
   expect(submitted.embeddings).toEqual(initial.embeddings);
+  expect(submitted.mode).toBe("advanced");
 });
 
 test("carries across entry fields this form cannot edit", async () => {
@@ -275,14 +309,16 @@ test("points at Secrets when nothing is configured at all", () => {
   );
 });
 
-test("changing an effort's model writes it back without opening Advanced", async () => {
+test("changing an effort's model writes it back", async () => {
   vi.mocked(getModelOptions).mockResolvedValue({
     models: ["claude-haiku-4-5", "claude-sonnet-4-6"],
     source: "catalog",
   });
   const onSubmit = renderChains();
 
-  await userEvent.click(screen.getByRole("button", { name: "Change the Fast model" }));
+  await userEvent.click(
+    within(effortRow("Fast")).getByRole("button", { name: "Change the Model model" })
+  );
   await pickModel("claude-sonnet-4-6");
   await userEvent.click(screen.getByRole("button", { name: /^done$/i }));
   await save();
@@ -299,7 +335,9 @@ test("the Model field narrows a long catalogue instead of making you scroll it",
   });
   renderChains();
 
-  await userEvent.click(screen.getByRole("button", { name: "Change the Fast model" }));
+  await userEvent.click(
+    within(effortRow("Fast")).getByRole("button", { name: "Change the Model model" })
+  );
   const model = await screen.findByRole("combobox", { name: "Model" });
   await userEvent.clear(model);
   await userEvent.type(model, "sonnet");
@@ -316,7 +354,9 @@ test("an ID the catalogue has never heard of is still accepted as typed", async 
   });
   const onSubmit = renderChains();
 
-  await userEvent.click(screen.getByRole("button", { name: "Change the Fast model" }));
+  await userEvent.click(
+    within(effortRow("Fast")).getByRole("button", { name: "Change the Model model" })
+  );
   const model = await screen.findByRole("combobox", { name: "Model" });
   await userEvent.clear(model);
   // A private Azure deployment is never in the catalogue; the field must not force a listed value.
@@ -343,7 +383,9 @@ test("lets an operator pin one catalogue candidate for an ambiguous model", asyn
     });
   const onSubmit = renderChains();
 
-  await userEvent.click(screen.getByRole("button", { name: "Change the Fast model" }));
+  await userEvent.click(
+    within(effortRow("Fast")).getByRole("button", { name: "Change the Model model" })
+  );
   const model = await screen.findByLabelText("Model");
   await userEvent.clear(model);
   await userEvent.type(model, "kimi-k2.5");
@@ -362,12 +404,15 @@ test("lets an operator pin one catalogue candidate for an ambiguous model", asyn
 test("accepts a manual context window when the catalogue has no match", async () => {
   const onSubmit = renderChains();
 
-  await userEvent.click(screen.getByRole("button", { name: "Change the Fast model" }));
+  await userEvent.click(
+    within(effortRow("Fast")).getByRole("button", { name: "Change the Model model" })
+  );
   const model = await screen.findByLabelText("Model");
   await userEvent.clear(model);
   await userEvent.type(model, "private-model");
   await userEvent.tab();
 
+  // A catalogue miss ("unmatched") shows the manual fields directly, with no extra click needed.
   await userEvent.type(await screen.findByLabelText("Context window"), "131072");
   await userEvent.click(screen.getByRole("button", { name: /^done$/i }));
   await save();
@@ -386,7 +431,10 @@ test("a hand-entered price is stored per token and leaves the context window alo
     }),
   });
 
-  await userEvent.click(screen.getByRole("button", { name: "Set the Fast input price" }));
+  await userEvent.click(
+    within(effortRow("Fast")).getByRole("button", { name: "Change the Model model" })
+  );
+  await userEvent.click(await screen.findByRole("button", { name: /enter these by hand/i }));
   await userEvent.type(await screen.findByLabelText("Input $ / 1M tokens"), "0.25");
   await userEvent.type(screen.getByLabelText("Output $ / 1M tokens"), "2");
   await userEvent.click(screen.getByRole("button", { name: /^done$/i }));
@@ -401,7 +449,7 @@ test("a hand-entered price is stored per token and leaves the context window alo
   });
 });
 
-test("adding a standby creates a numbered profile the routing overrides can target", async () => {
+test("adding a standby creates a numbered profile", async () => {
   const onSubmit = renderChains();
 
   await userEvent.click(within(standbyList("Fast")).getByRole("button", { name: /add standby/i }));
@@ -411,13 +459,8 @@ test("adding a standby creates a numbered profile the routing overrides can targ
   await userEvent.click(screen.getByRole("button", { name: /^done$/i }));
 
   await waitFor(() => {
-    expect(screen.getAllByText(/fast-fallback-1/).length).toBeGreaterThan(0);
+    expect(within(standbyList("Fast")).getAllByText(/fast-fallback-1/).length).toBeGreaterThan(0);
   });
-  expect(
-    within(screen.getByLabelText("Fast", { selector: "select" })).getByRole("option", {
-      name: /fast-fallback-1/,
-    })
-  ).toBeInTheDocument();
 
   await save();
   const submitted = onSubmit.mock.calls[0][0] as LlmConfig;
@@ -428,27 +471,19 @@ test("adding a standby creates a numbered profile the routing overrides can targ
   });
 });
 
-test("an empty standby model stays in the sheet and is not offered to routing", async () => {
+test("an empty standby model stays in the sheet and is not committed to the chain", async () => {
   renderChains();
 
   await userEvent.click(within(standbyList("Fast")).getByRole("button", { name: /add standby/i }));
   await userEvent.click(screen.getByRole("button", { name: /^done$/i }));
 
   expect(screen.getByText("Enter a model.")).toBeInTheDocument();
-  expect(
-    within(screen.getByLabelText("Fast", { selector: "select" })).queryByRole("option", {
-      name: /fast-fallback-1/,
-    })
-  ).not.toBeInTheDocument();
+  expect(within(standbyList("Fast")).queryByText(/fast-fallback-1/)).not.toBeInTheDocument();
 
   await userEvent.type(screen.getByLabelText("Model"), "gpt-4o-mini");
   await userEvent.click(screen.getByRole("button", { name: /^done$/i }));
 
-  expect(
-    within(screen.getByLabelText("Fast", { selector: "select" })).getByRole("option", {
-      name: /fast-fallback-1/,
-    })
-  ).toBeInTheDocument();
+  expect(within(standbyList("Fast")).getByText(/fast-fallback-1/)).toBeInTheDocument();
 });
 
 test("an incomplete standby never enters the chain, even before Done is pressed", async () => {
@@ -493,7 +528,9 @@ test("a whitespace-only standby model is refused like an empty one", async () =>
 test("abandoning an edit that emptied the model leaves the entry intact", async () => {
   renderChains();
 
-  await userEvent.click(screen.getByRole("button", { name: "Change the Fast model" }));
+  await userEvent.click(
+    within(effortRow("Fast")).getByRole("button", { name: "Change the Model model" })
+  );
   await userEvent.clear(await screen.findByLabelText("Model"));
   await userEvent.click(screen.getByRole("button", { name: /^done$/i }));
   expect(screen.getByText("Enter a model.")).toBeInTheDocument();
@@ -503,7 +540,9 @@ test("abandoning an edit that emptied the model leaves the entry intact", async 
   expect(effortRow("Fast")).toHaveTextContent("claude-haiku-4-5");
 
   // Re-opening the row must not carry the refusal that the discarded edit raised.
-  await userEvent.click(screen.getByRole("button", { name: "Change the Fast model" }));
+  await userEvent.click(
+    within(effortRow("Fast")).getByRole("button", { name: "Change the Model model" })
+  );
   expect(await screen.findByLabelText("Model")).toHaveValue("claude-haiku-4-5");
   expect(screen.queryByText("Enter a model.")).not.toBeInTheDocument();
   await userEvent.click(screen.getByRole("button", { name: /^close$/i }));
@@ -511,27 +550,7 @@ test("abandoning an edit that emptied the model leaves the entry intact", async 
   expectNoUnsavedChanges();
 });
 
-test("a chain already holding a blank entry never offers it as a routing target", async () => {
-  renderChains({
-    initial: withTiers({
-      providers: [
-        { provider: "anthropic", model: "claude-haiku-4-5" },
-        { provider: "openai", model: "" },
-        { provider: "openai", model: "gpt-4o-mini" },
-      ],
-    }),
-  });
-
-  const options = within(screen.getByLabelText("Fast", { selector: "select" }))
-    .getAllByRole("option")
-    .map((o) => o.textContent ?? "")
-    .join("|");
-  expect(options).not.toMatch(/unset/);
-  expect(options).not.toMatch(/fast-fallback-1\b/);
-  expect(options).toMatch(/fast-fallback-2/);
-});
-
-test("the default effort is chosen on the row it applies to, not in a separate control", async () => {
+test("the default effort is chosen on the card it applies to, not in a separate control", async () => {
   const onSubmit = renderChains();
 
   // It decides what nearly every turn costs, so it belongs beside the cost it selects.
@@ -545,22 +564,22 @@ test("the default effort is chosen on the row it applies to, not in a separate c
 });
 
 test("names which slots are unsaved rather than only that something is", async () => {
-  // Editing in the sheet updates the table but saves nothing, so a bar that says only "unsaved
-  // changes" leaves you re-auditing the page to find what you touched.
+  // Editing in a card updates it but saves nothing, so a bar that says only "unsaved changes"
+  // leaves you re-auditing the page to find what you touched.
   renderChains();
   expectNoUnsavedChanges();
 
-  await userEvent.click(screen.getByRole("radio", { name: "Make Thorough the default effort" }));
+  await touch();
 
   expect(screen.getByText(/not saved yet/i)).toBeInTheDocument();
-  expect(screen.getByText("Default effort")).toBeInTheDocument();
+  expect(screen.getByText("Default")).toBeInTheDocument();
   expect(screen.getByRole("button", { name: /save changes/i })).toBeEnabled();
 });
 
 test("Discard puts back the config as loaded", async () => {
   const onSubmit = renderChains();
 
-  await userEvent.click(screen.getByRole("radio", { name: "Make Thorough the default effort" }));
+  await touch();
   await userEvent.click(screen.getByRole("button", { name: /discard/i }));
 
   expect(within(effortRow("Balanced")).getByRole("radio")).toBeChecked();
@@ -568,7 +587,10 @@ test("Discard puts back the config as loaded", async () => {
   expect(onSubmit).not.toHaveBeenCalled();
 });
 
-test("a default pointed at a standby is shown as custom rather than silently retargeted", () => {
+test("a default pointing at a retired standby id is silently resolved to Balanced", () => {
+  // The preset radios only ever name Fast/Balanced/Thorough; a `presets.default` that names
+  // anything else (e.g. a standby profile id from a config authored outside this form) has no
+  // radio to land on, so it is coerced back to the safe default rather than left unrepresentable.
   renderChains({
     initial: {
       ...withTiers({
@@ -581,14 +603,33 @@ test("a default pointed at a standby is shown as custom rather than silently ret
     },
   });
 
-  for (const label of ["Fast", "Balanced", "Thorough"]) {
-    expect(within(effortRow(label)).getByRole("radio")).not.toBeChecked();
-  }
-  expect(screen.getByText(/points at "fast-fallback-1"/)).toBeInTheDocument();
-  // The real target stays reachable and selected where it can be expressed.
-  expect((screen.getByLabelText("Auto resolves to") as HTMLSelectElement).value).toBe(
-    "fast-fallback-1"
-  );
+  expect(within(effortRow("Balanced")).getByRole("radio")).toBeChecked();
+  expect(within(effortRow("Fast")).getByRole("radio")).not.toBeChecked();
+  expect(within(effortRow("Thorough")).getByRole("radio")).not.toBeChecked();
+});
+
+test("switching to Basic and saving over per-effort differences asks for confirmation first", async () => {
+  const onSubmit = renderChains();
+
+  await switchToTab("Basic");
+  await userEvent.click(screen.getByRole("button", { name: "Change the Chat model model" }));
+  const model = await screen.findByLabelText("Model");
+  await userEvent.clear(model);
+  await userEvent.type(model, "claude-opus-5");
+  await userEvent.click(screen.getByRole("button", { name: /^done$/i }));
+  await save();
+
+  const dialog = await screen.findByRole("dialog");
+  expect(
+    within(dialog).getByText(/drop the per-effort models and standby chains/i)
+  ).toBeInTheDocument();
+  await userEvent.click(within(dialog).getByRole("button", { name: "Switch to Basic" }));
+
+  const submitted = onSubmit.mock.calls[0][0] as LlmConfig;
+  expect(submitted.mode).toBe("basic");
+  expect(submitted.tiers?.quick.providers[0]?.model).toBe("claude-opus-5");
+  expect(submitted.tiers?.standard.providers[0]?.model).toBe("claude-opus-5");
+  expect(submitted.tiers?.complex.providers[0]?.model).toBe("claude-opus-5");
 });
 
 test("shows the configured embedding model and what depends on it", () => {
@@ -608,7 +649,7 @@ test("shows the configured embedding model and what depends on it", () => {
     },
   });
 
-  const row = screen.getByRole("heading", { name: "Embedding", level: 3 }).closest("li");
+  const row = screen.getByRole("heading", { name: "Embedding", level: 4 }).closest("section");
   expect(row).toHaveTextContent("text-embedding-3-small");
   expect(row).toHaveTextContent("OpenAI");
   expect(row).toHaveTextContent("1536");
@@ -622,9 +663,10 @@ test("sets an embedding model and its vector width from the page", async () => {
     models: ["text-embedding-3-small", "text-embedding-3-large"],
     source: "catalog",
   });
-  const onSubmit = renderChains();
+  const onSubmit = renderChains({ initial: basicModeInitial });
 
-  await userEvent.click(screen.getByRole("button", { name: "Change the Embedding model" }));
+  await switchToTab("Basic");
+  await userEvent.click(screen.getByRole("button", { name: "Change the Embedding model model" }));
   await pickModel("text-embedding-3-large");
   const width = await screen.findByLabelText("Vector width");
   await userEvent.clear(width);
@@ -642,12 +684,13 @@ test("sets an embedding model and its vector width from the page", async () => {
 });
 
 test("offers an embedding model when none is configured", async () => {
-  const onSubmit = renderChains({ initial: { ...initial, embeddings: undefined } });
+  const onSubmit = renderChains({ initial: { ...basicModeInitial, embeddings: undefined } });
 
-  const row = screen.getByRole("heading", { name: "Embedding", level: 3 }).closest("li");
-  expect(row).toHaveTextContent("Not set.");
+  await switchToTab("Basic");
+  const row = screen.getByRole("region", { name: "Embedding model" });
+  expect(within(row).getByText("Not set.")).toBeInTheDocument();
 
-  await userEvent.click(screen.getByRole("button", { name: "Choose a Embedding model" }));
+  await userEvent.click(screen.getByRole("button", { name: "Choose a Embedding model model" }));
   await userEvent.selectOptions(await screen.findByLabelText("Provider"), "openai");
   await userEvent.type(await screen.findByLabelText("Model"), "text-embedding-3-small");
   await userEvent.click(screen.getByRole("button", { name: /^done$/i }));
@@ -688,7 +731,9 @@ test("a connection test quotes what the model actually replied", async () => {
   });
   renderChains();
 
-  await userEvent.click(screen.getByRole("button", { name: "Change the Fast model" }));
+  await userEvent.click(
+    within(effortRow("Fast")).getByRole("button", { name: "Change the Model model" })
+  );
   await userEvent.click(await screen.findByRole("button", { name: /test connection/i }));
 
   expect(await screen.findByText(/Replied .pong. in 412 ms/)).toBeInTheDocument();
@@ -706,7 +751,9 @@ test("a model that answers with something else is still a pass, but is quoted as
   });
   renderChains();
 
-  await userEvent.click(screen.getByRole("button", { name: "Change the Fast model" }));
+  await userEvent.click(
+    within(effortRow("Fast")).getByRole("button", { name: "Change the Model model" })
+  );
   await userEvent.click(await screen.findByRole("button", { name: /test connection/i }));
 
   expect(
@@ -721,7 +768,9 @@ test("a provider that answers but refuses reads differently from one that never 
   });
   renderChains();
 
-  await userEvent.click(screen.getByRole("button", { name: "Change the Fast model" }));
+  await userEvent.click(
+    within(effortRow("Fast")).getByRole("button", { name: "Change the Model model" })
+  );
   await userEvent.click(await screen.findByRole("button", { name: /test connection/i }));
 
   expect(await screen.findByText(/answered, but refused this call/i)).toBeInTheDocument();
@@ -736,7 +785,9 @@ test("a verdict is dropped once the model it was about is changed", async () => 
   vi.mocked(testLlmConnection).mockResolvedValue({ verdict: "reachable", reply: "pong" });
   renderChains();
 
-  await userEvent.click(screen.getByRole("button", { name: "Change the Fast model" }));
+  await userEvent.click(
+    within(effortRow("Fast")).getByRole("button", { name: "Change the Model model" })
+  );
   await userEvent.click(await screen.findByRole("button", { name: /test connection/i }));
   expect(await screen.findByText(/Replied/)).toBeInTheDocument();
 
@@ -756,6 +807,7 @@ test("testing an embedding model offers the width it measured", async () => {
     },
   });
 
+  await switchToTab("Basic");
   await userEvent.click(screen.getByRole("button", { name: /change the embedding model/i }));
   await userEvent.click(await screen.findByRole("button", { name: /test connection/i }));
 
@@ -777,7 +829,9 @@ test("a failure does not send the operator to the page they are already on", asy
   });
   renderChains();
 
-  await userEvent.click(screen.getByRole("button", { name: "Change the Fast model" }));
+  await userEvent.click(
+    within(effortRow("Fast")).getByRole("button", { name: "Change the Model model" })
+  );
   await userEvent.click(await screen.findByRole("button", { name: /test connection/i }));
 
   expect(await screen.findByText(/no model by the configured id/i)).toBeInTheDocument();

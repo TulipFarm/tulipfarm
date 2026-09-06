@@ -215,6 +215,7 @@ test("llm pane saves the structured config via putLlmConfig", async () => {
   await userEvent.click(screen.getByRole("button", { name: /save changes/i }));
   expect(settings.putLlmConfig).toHaveBeenCalledWith({
     ...llmConfig,
+    mode: "advanced",
     presets: {
       default: "thorough",
       fast: "fast",

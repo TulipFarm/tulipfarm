@@ -1,12 +1,14 @@
 import { createRemixStub } from "@remix-run/testing";
 import { render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
-import { getLlmConfig, listProviders, listSecrets } from "~/lib/settings";
+import { getLlmConfig, getProviderConfig, listProviders, listSecrets } from "~/lib/settings";
 import BusinessModels, { clientLoader } from "./_app.business.models";
 
 vi.mock("~/lib/settings", async (importOriginal) => ({
   ...(await importOriginal<typeof import("~/lib/settings")>()),
   getLlmConfig: vi.fn(),
+  getProviderConfig: vi.fn(),
   listProviders: vi.fn(),
   listSecrets: vi.fn(),
   putLlmConfig: vi.fn(),
@@ -68,6 +70,7 @@ beforeEach(() => {
       fields: [{ key: "ANTHROPIC_API_KEY", label: "API key", role: "api_key", kind: "secret" }],
     },
   ]);
+  vi.mocked(getProviderConfig).mockResolvedValue({});
 });
 
 afterEach(() => {
@@ -82,14 +85,18 @@ function renderPage() {
 }
 
 test("dresses every surface in theme-aware tokens under the light theme", async () => {
+  const user = userEvent.setup();
   const { container } = renderPage();
   // The model shows twice: once on the effort row, once in the Advanced standby list.
   expect((await screen.findAllByText("gpt-5")).length).toBeGreaterThan(0);
 
+  // Form controls only mount once a credential row is expanded, so open one to reach them.
+  await user.click(await screen.findByRole("button", { name: "Edit OpenAI credentials" }));
+
   expect(themeBlindStyling(container)).toEqual([]);
 
   // Absence alone would also pass on an unstyled page, so pin the surfaces that carry the theme:
-  // the Panel's card background and the form controls' page background.
+  // the Panel's card background and the Sheet form controls' page background.
   const tokens = classTokens(container);
   expect(tokens).toContain("bg-card");
   expect(tokens).toContain("bg-background");

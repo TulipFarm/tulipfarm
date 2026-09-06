@@ -1,6 +1,8 @@
+import { useId } from "react";
 import { Plus } from "~/components/icons";
 import {
   EFFORTS,
+  type EffortKey,
   type EmbeddingRow,
   profileIdFor,
   type Row,
@@ -17,6 +19,9 @@ function EffortCard({
   rows,
   providers,
   secretKeys,
+  isDefault,
+  defaultGroup,
+  onSetDefault,
   onOpenPrimary,
   onAddStandby,
   onEditStandby,
@@ -27,6 +32,9 @@ function EffortCard({
   rows: Row[];
   providers: LlmProviderInfo[];
   secretKeys: string[];
+  isDefault: boolean;
+  defaultGroup: string;
+  onSetDefault: () => void;
   onOpenPrimary: () => void;
   onAddStandby: () => void;
   onEditStandby: (row: Row) => void;
@@ -36,9 +44,19 @@ function EffortCard({
   const standbys = rows.slice(1);
   return (
     <section className="overflow-hidden rounded-md border border-border">
-      <div className="border-b border-border px-4 py-2.5">
-        <h4 className="text-sm font-medium text-foreground">{effort.label}</h4>
-        <p className="mt-0.5 text-xs text-muted-foreground">{effort.description}</p>
+      <div className="flex items-start gap-3 border-b border-border px-4 py-2.5">
+        <input
+          type="radio"
+          name={defaultGroup}
+          checked={isDefault}
+          onChange={onSetDefault}
+          aria-label={`Make ${effort.label} the default effort`}
+          className="mt-0.5 size-4 accent-primary"
+        />
+        <div>
+          <h4 className="text-sm font-medium text-foreground">{effort.label}</h4>
+          <p className="mt-0.5 text-xs text-muted-foreground">{effort.description}</p>
+        </div>
       </div>
       <ul>
         <PrimaryRow
@@ -174,6 +192,8 @@ export function AdvancedPanel({
   embeddings,
   providers,
   secretKeys,
+  defaultEffort,
+  onSetDefaultEffort,
   onOpenPrimary,
   onAddChainRow,
   onEditChainRow,
@@ -190,6 +210,8 @@ export function AdvancedPanel({
   embeddings: EmbeddingRow[];
   providers: LlmProviderInfo[];
   secretKeys: string[];
+  defaultEffort: EffortKey;
+  onSetDefaultEffort: (effort: EffortKey) => void;
   onOpenPrimary: (tier: WireTier) => void;
   onAddChainRow: (tier: WireTier) => void;
   onEditChainRow: (tier: WireTier, row: Row) => void;
@@ -201,6 +223,7 @@ export function AdvancedPanel({
   onMoveEmbedding: (index: number, delta: number) => void;
   onRemoveEmbedding: (row: EmbeddingRow) => void;
 }) {
+  const defaultGroup = useId();
   return (
     <div className="space-y-4">
       {hasChains ? (
@@ -211,6 +234,9 @@ export function AdvancedPanel({
             rows={chains[effort.wire]}
             providers={providers}
             secretKeys={secretKeys}
+            isDefault={defaultEffort === effort.preset}
+            defaultGroup={defaultGroup}
+            onSetDefault={() => onSetDefaultEffort(effort.preset)}
             onOpenPrimary={() => onOpenPrimary(effort.wire)}
             onAddStandby={() => onAddChainRow(effort.wire)}
             onEditStandby={(row) => onEditChainRow(effort.wire, row)}

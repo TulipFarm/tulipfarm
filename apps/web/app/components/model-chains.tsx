@@ -4,6 +4,7 @@ import { FormStatus } from "~/components/form-status";
 import { AdvancedPanel } from "~/components/model-chains/advanced-panel";
 import {
   EFFORTS,
+  type EffortKey,
   type EmbeddingRow,
   isEntryReady,
   providerLabel,
@@ -25,15 +26,20 @@ import {
 } from "~/lib/settings";
 
 /**
- * Auto resolves to Balanced, and each effort routes to its own first-choice model — nothing here
- * is ever user-editable, so this is written on every save rather than carried as form state.
+ * Each effort routes to its own first-choice model — the routing itself is never user-editable,
+ * so this is written on every save rather than carried as form state. `default` is the one preset
+ * choice a person makes; it is tracked separately (see `defaultEffort`) rather than fixed here.
  */
-const FIXED_PRESETS = {
-  default: "balanced",
+const PRESET_ROUTES = {
   fast: "fast",
   balanced: "balanced",
   thorough: "thorough",
-};
+} as const;
+
+function initialDefaultEffort(config: LlmConfig): EffortKey {
+  const preset = config.presets?.default;
+  return EFFORTS.some((effort) => effort.preset === preset) ? (preset as EffortKey) : "balanced";
+}
 
 type Chains = Record<WireTier, Row[]>;
 type SheetTarget = { kind: "chain"; tier: WireTier } | { kind: "embedding" };
@@ -82,7 +88,7 @@ function toEntry(row: Row | EmbeddingRow): ProviderEntry {
 }
 
 /** The named slots a save can change, in the order a person reads them off the page. */
-const SLOT_KEYS = ["Fast", "Balanced", "Thorough", "Embedding"] as const;
+const SLOT_KEYS = ["Fast", "Balanced", "Thorough", "Embedding", "Default"] as const;
 
 type Slot = (typeof SLOT_KEYS)[number];
 
@@ -98,6 +104,7 @@ function slots(config: LlmConfig): Record<Slot, string> {
     Balanced: JSON.stringify(config.tiers?.standard ?? null),
     Thorough: JSON.stringify(config.tiers?.complex ?? null),
     Embedding: JSON.stringify(config.embeddings ?? null),
+    Default: JSON.stringify(config.presets?.default ?? null),
   };
 }
 
@@ -124,6 +131,11 @@ export function ModelChains({
   // `mode` only flips to match on the save that follows. Opens on whichever tab the config was
   // last saved from (or infers one for a config with no `mode` — see `llmConfigMode`).
   const [tab, setTab] = useState<"basic" | "advanced">(() => llmConfigMode(initial));
+  // Which effort Auto resolves to. Basic always writes "balanced" regardless of this state; only
+  // Advanced lets the operator choose, mirroring the radio the pre-tabs table used to carry.
+  const [defaultEffort, setDefaultEffort] = useState<EffortKey>(() =>
+    initialDefaultEffort(initial)
+  );
   // Saving Basic over a config that still has per-effort differences or standbys would silently
   // drop them, so that save is held here until the operator confirms.
   const [pendingBasicSave, setPendingBasicSave] = useState<{
@@ -229,7 +241,8 @@ export function ModelChains({
   function buildConfig(
     nextChains: Chains,
     nextEmbeddings: EmbeddingRow[],
-    nextMode: "basic" | "advanced"
+    nextMode: "basic" | "advanced",
+    nextDefault: EffortKey
   ): LlmConfig {
     return {
       ...(initial.connections ? { connections: initial.connections } : {}),
@@ -242,7 +255,7 @@ export function ModelChains({
             },
           }
         : {}),
-      presets: { ...FIXED_PRESETS },
+      presets: { default: nextDefault, ...PRESET_ROUTES },
       ...(nextEmbeddings.length > 0
         ? { embeddings: { providers: nextEmbeddings.map(toEntry) as EmbeddingEntry[] } }
         : {}),
@@ -273,20 +286,20 @@ export function ModelChains({
         setPendingBasicSave({ chains: flatChains, embeddings: flatEmbeddings });
         return;
       }
-      void onSubmit(buildConfig(flatChains, flatEmbeddings, "basic"));
+      void onSubmit(buildConfig(flatChains, flatEmbeddings, "basic", "balanced"));
       return;
     }
     const problem = validate(chains, embeddings);
     setLocalError(problem);
     if (problem) return;
-    void onSubmit(buildConfig(chains, embeddings, "advanced"));
+    void onSubmit(buildConfig(chains, embeddings, "advanced", defaultEffort));
   }
 
   function confirmBasicSave() {
     if (!pendingBasicSave) return;
     const { chains: flatChains, embeddings: flatEmbeddings } = pendingBasicSave;
     setPendingBasicSave(null);
-    void onSubmit(buildConfig(flatChains, flatEmbeddings, "basic"));
+    void onSubmit(buildConfig(flatChains, flatEmbeddings, "basic", "balanced"));
   }
 
   function confirmRemove() {
@@ -305,6 +318,7 @@ export function ModelChains({
     setChains(cloneChains(initial));
     setEmbeddings(toEmbeddingRows(initial.embeddings?.providers));
     setTab(llmConfigMode(initial));
+    setDefaultEffort(initialDefaultEffort(initial));
     setLocalError(null);
   }
 
@@ -334,10 +348,13 @@ export function ModelChains({
     buildConfig(
       cloneChains(initial),
       toEmbeddingRows(initial.embeddings?.providers),
-      llmConfigMode(initial)
+      llmConfigMode(initial),
+      initialDefaultEffort(initial)
     )
   );
-  const current = slots(buildConfig(chains, embeddings, tab));
+  const current = slots(
+    buildConfig(chains, embeddings, tab, tab === "basic" ? "balanced" : defaultEffort)
+  );
   const changed = SLOT_KEYS.filter((key) => current[key] !== baseline[key]);
   const dirty = changed.length > 0;
 
@@ -417,6 +434,8 @@ export function ModelChains({
             embeddings={embeddings}
             providers={providers}
             secretKeys={secretKeys}
+            defaultEffort={defaultEffort}
+            onSetDefaultEffort={setDefaultEffort}
             onOpenPrimary={(tier) =>
               openSheet(
                 { kind: "chain", tier },
