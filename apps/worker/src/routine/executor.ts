@@ -349,6 +349,18 @@ class RoutineExecution {
         if (!isRefusal(error) && !(error instanceof RoutineInputResolutionError)) throw error;
         // Settled States cannot be parked; claimed States record the refusal on their own row.
         if (row.status === "succeeded") return "needs_reconciliation";
+        // An input mapping that does not evaluate is an authoring bug in the Routine, not a
+        // transient fault: the same Context will resolve the same way on every replay, so parking
+        // for reconciliation leaves a Run that can never finish and reads as still in flight. It
+        // fails, and the evidence names the State whose mapping broke — which is not always the
+        // State being settled, because a successor's input is resolved as its predecessor
+        // completes.
+        if (error instanceof RoutineInputResolutionError) {
+          const evidenceRef = `routine:${error.code}:${error.state}`;
+          await this.transition(key, "running", "failed", evidenceRef);
+          this.lastFailureEvidenceRef = evidenceRef;
+          return "failed";
+        }
         await this.park(key, `routine:${error.code}`);
         return "needs_reconciliation";
       }

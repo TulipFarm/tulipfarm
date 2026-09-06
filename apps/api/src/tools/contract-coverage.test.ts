@@ -145,6 +145,8 @@ const EXPECTED_FAMILY_TOOL_NAMES = [
       "routine_forge",
       "routine_get",
       "routine_picker",
+      "routine_run_get",
+      "routine_run_list",
       "skill",
       "soul_repo_push",
       "spawn_subagent",

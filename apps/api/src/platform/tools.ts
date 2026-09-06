@@ -47,6 +47,7 @@ import {
   type ToolCallResult,
 } from "@tulipfarm/tool-host";
 import { stringify as stringifyYaml } from "yaml";
+import type { RunReader } from "../admin/run-reader";
 import { SYSTEM_SOUL_COMMIT_ACTOR } from "../runtime/soul-writer";
 import type { TeamAssetService } from "../team-assets/service";
 import { declaredStringList } from "../tools/network/compose";
@@ -54,6 +55,7 @@ import { mapSoulWriteError, soulCommitError } from "../tools/soul-faults";
 import { delegateToAgentTool } from "./delegate-tool";
 import { guardrailForgeTool } from "./guardrail-tool";
 import { validateRoutineForgeDefinitions } from "./routine-forge-validation";
+import { routineRunGetTool, routineRunListTool } from "./routine-run-tools";
 import { spawnSubagentTool } from "./spawn-tool";
 import { firstError, SOUL_ROUTINE_TARGET, SOUL_SKILL_TARGET, soulTarget } from "./tool-args";
 import { err, ok } from "./tool-result";
@@ -108,6 +110,12 @@ export interface PlatformToolContext {
    * use rather than a restatement of what the write path was asked to do.
    */
   routineCatalog?: RoutineCatalog;
+  /**
+   * Reads Runs for `routine_run_get` and `routine_run_list`. `trigger_routine` hands back a run
+   * id, and without this an Agent holds an id it cannot resolve — so a Routine that stopped on its
+   * first State reads to the user exactly like one that worked.
+   */
+  runs?: RunReader;
   /**
    * Re-reads `guardrails.yaml` into the live {@link GuardrailsService}. Every Turn's Context
    * carries the in-process policy, not the published bundle, so without this a committed
@@ -1010,6 +1018,8 @@ export const PLATFORM_TOOLS: ParkableApiToolDefinition<PlatformToolContext>[] = 
   routineForgeTool,
   routinePickerTool,
   routineGetTool,
+  routineRunGetTool,
+  routineRunListTool,
   routineDeleteTool,
   guardrailForgeTool,
   soulRepoPushTool,

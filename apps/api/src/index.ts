@@ -621,6 +621,9 @@ async function boot() {
     const surfaceActionStore = new PgSurfaceActionStore(pool);
     const obsRepo = new PgObsRepo(pool);
     const observabilityService = new ObservabilityService(obsRepo);
+    // One reader for both the operational API and the `routine_run_*` Tools, so what an Agent
+    // reports about a Run and what the Run inspector shows can never disagree.
+    const runReader = createRunReader(runStore, budgetStore, obsRepo);
     // Built after observability so embedding spend lands in the same table as every other call.
     const embeddingService = new EmbeddingService({
       usage: createEmbeddingUsageSink(observabilityService, () => obsConfig.pricingOverrides),
@@ -1079,6 +1082,7 @@ async function boot() {
           ...sandboxRuntimeImage,
         }),
         routineCatalog,
+        runs: runReader,
         teamAssets,
         delegateToAgent: agentDelegation.delegate,
         spawnSubagent: subagentSpawning.spawn,
@@ -1444,7 +1448,7 @@ async function boot() {
         approvals: approvalsRepo,
         ownershipApprovals: teamAssets,
         toolApprovals,
-        runs: createRunReader(runStore, budgetStore, obsRepo),
+        runs: runReader,
         healthProbes: [
           postgresProbe(pool),
           queueProbe(boss),

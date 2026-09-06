@@ -21,7 +21,7 @@ interface ObsCostReader {
 export interface RunReader {
   list(
     businessId: string,
-    options: { cursor?: string; limit: number }
+    options: { cursor?: string; limit: number; routineId?: string }
   ): Promise<{ items: readonly RunReadModel[]; nextCursor: string | null }>;
   get(businessId: string, runId: string): Promise<RunReadModel | null>;
   /**
@@ -104,6 +104,7 @@ export function createRunReader(
         businessId,
         limit: options.limit,
         ...(options.cursor === undefined ? {} : { cursor: options.cursor }),
+        ...(options.routineId === undefined ? {} : { routineId: options.routineId }),
       });
       return {
         items: page.items.map((run) => runReadModel(run, [], [], NO_COSTS)),
