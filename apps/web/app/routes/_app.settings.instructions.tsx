@@ -14,7 +14,7 @@ import {
 import { cn } from "~/lib/utils";
 
 export async function clientLoader() {
-  return { instructions: await getCustomInstructions().catch(() => "") };
+  return { instructions: await getCustomInstructions() };
 }
 
 function errorMessage(err: unknown): string {
