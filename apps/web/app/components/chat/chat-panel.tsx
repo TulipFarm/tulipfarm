@@ -4,6 +4,7 @@ import { ConnectionStatus } from "~/components/shell/states";
 import { Link } from "~/components/ui/link";
 import type { ChatMessage, ChatModelSelector } from "~/lib/chat/types";
 import { useChatStream } from "~/lib/chat/use-chat-stream";
+import type { PendingChatDraft } from "~/lib/companion-context";
 import type { ConversationTurn } from "~/lib/conversations";
 import { errorAction } from "~/lib/error-actions";
 import type { Suggestion } from "~/lib/onboarding";
@@ -114,6 +115,7 @@ export function ChatPanel({
   initialTurn,
   onConversationChange,
   initialDraft,
+  pendingChatDraft,
   attachFileId,
 }: {
   agentId?: string;
@@ -127,8 +129,11 @@ export function ChatPanel({
   initialMessages?: ChatMessage[];
   initialTurn?: ConversationTurn | null;
   onConversationChange?: (conversationId: string | undefined) => void;
-  /** A prompt to draft into the composer once, seeded by the onboarding Companion. */
+  /** A prompt to draft into the composer once, seeded by a `?draft=` link. */
   initialDraft?: string;
+  /** A prompt to draft into the composer, seeded by the onboarding Companion's "chat" action.
+      Keyed by a nonce so re-clicking the same card still redrafts it. */
+  pendingChatDraft?: PendingChatDraft | null;
   /** An already-stored File to stage on the composer, handed over by the Files library. */
   attachFileId?: string | null;
 }) {
@@ -155,6 +160,13 @@ export function ChatPanel({
   });
   const busy = status === "submitted" || status === "streaming";
   const [revisionDraft, setRevisionDraft] = useState<{ key: string; text: string } | null>(null);
+  // Composer only re-seeds its draft on remount (see composer.tsx), so a Companion "chat" action
+  // rides the same key-forced-remount mechanism as a revision draft, keyed on its nonce rather
+  // than its text — otherwise re-clicking the same Task card would be a no-op.
+  useEffect(() => {
+    if (!pendingChatDraft) return;
+    setRevisionDraft({ key: `companion-${pendingChatDraft.id}`, text: pendingChatDraft.prompt });
+  }, [pendingChatDraft]);
   // Fetch the transcript's chunk as soon as the panel exists rather than when the first turn needs
   // it — off the critical path, but resident well before anyone has finished typing.
   useEffect(() => {

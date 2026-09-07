@@ -1,7 +1,8 @@
-import { useNavigate } from "@remix-run/react";
+import { useLocation, useNavigate } from "@remix-run/react";
 import { useState } from "react";
 import { ArrowRight, Check, MessageCircle, X } from "~/components/icons";
 import { ApiError } from "~/lib/api";
+import { useCompanion } from "~/lib/companion-context";
 import { answerTask, completeTask, type Task, type TaskAction } from "~/lib/tasks";
 
 /** Inline form for an `answer`-action Task — answers land in the configured sink, no chat round-trip. */
@@ -76,6 +77,8 @@ function TaskRow({
   onClose: () => void;
 }) {
   const navigate = useNavigate();
+  const { pathname } = useLocation();
+  const { requestChatDraft } = useCompanion();
   const [busy, setBusy] = useState(false);
 
   async function acknowledge() {
@@ -118,7 +121,12 @@ function TaskRow({
                   if (action.kind === "link") {
                     navigate(action.href);
                   } else if (action.kind === "chat") {
-                    navigate(`/?draft=${encodeURIComponent(action.prompt)}`);
+                    // Prefill through shared state, not a `?draft=` URL: the Companion is mounted
+                    // globally and must also work from routes other than "/", and a raw
+                    // `history.replaceState` elsewhere desyncs the router if we round-trip through
+                    // the URL (see the loader's `draft` comment in _app._index.tsx).
+                    requestChatDraft(action.prompt);
+                    if (pathname !== "/") navigate("/");
                   }
                   onClose();
                 }}
