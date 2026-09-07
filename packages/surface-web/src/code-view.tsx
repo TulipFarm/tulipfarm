@@ -15,7 +15,7 @@ import {
   type SurfaceSandboxRenderMessage,
 } from "@tulipfarm/surface/client";
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { SurfaceWebProps } from "./primitives";
+import { interactionErrorMessage, type SurfaceWebProps } from "./primitives";
 
 export interface SurfaceCodeViewProps extends SurfaceWebProps {
   /** The compiled module produced at authoring time. Never authored source. */
@@ -35,6 +35,7 @@ export function SurfaceCodeView({
   const [height, setHeight] = useState(SURFACE_SANDBOX_MIN_HEIGHT);
   const [failed, setFailed] = useState(false);
   const [ready, setReady] = useState(false);
+  const [interactionError, setInteractionError] = useState<string>();
 
   const props = artifact.props as Readonly<Record<string, unknown>>;
 
@@ -75,10 +76,15 @@ export function SurfaceCodeView({
       const handle = actionHandleFor?.(emitted.action);
       if (!handle) return;
       const input = emitted.input;
-      void onInteraction?.(
-        handle,
-        (typeof input === "object" && input !== null ? input : {}) as Record<string, unknown>
-      );
+      setInteractionError(undefined);
+      void Promise.resolve()
+        .then(() =>
+          onInteraction?.(
+            handle,
+            (typeof input === "object" && input !== null ? input : {}) as Record<string, unknown>
+          )
+        )
+        .catch((error) => setInteractionError(interactionErrorMessage(error)));
     }
     window.addEventListener("message", onMessage);
     return () => window.removeEventListener("message", onMessage);
@@ -103,14 +109,17 @@ export function SurfaceCodeView({
   }
 
   return (
-    <iframe
-      data-surface-code-view
-      ref={frame}
-      sandbox={SURFACE_SANDBOX_ATTRIBUTE}
-      src={SURFACE_SANDBOX_FRAME_SRC}
-      title={artifact.component.name}
-      height={height}
-      style={{ width: "100%", height, border: "0", display: "block" }}
-    />
+    <>
+      <iframe
+        data-surface-code-view
+        ref={frame}
+        sandbox={SURFACE_SANDBOX_ATTRIBUTE}
+        src={SURFACE_SANDBOX_FRAME_SRC}
+        title={artifact.component.name}
+        height={height}
+        style={{ width: "100%", height, border: "0", display: "block" }}
+      />
+      {interactionError ? <p role="alert">{interactionError}</p> : null}
+    </>
   );
 }
