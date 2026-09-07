@@ -52,6 +52,19 @@ function formatLatency(ms: number): string {
   return `${(ms / 1000).toFixed(ms < 10_000 ? 1 : 0)} s`;
 }
 
+/**
+ * When a turn shape makes more than one model call (e.g. a tool proposal denied, then a second
+ * call answers), `modelCallLatencyMs` alone reports only the last call and understates the
+ * turn's real model time. Render the total plus the call count whenever there is more than one,
+ * so triage can see the breakdown rather than a bare, misleadingly small number.
+ */
+function modelTimeLabel(receipt: ModelReceipt): string {
+  const total = receipt.totalModelCallLatencyMs ?? receipt.modelCallLatencyMs;
+  const count = receipt.modelCallCount ?? 1;
+  if (count <= 1) return `model call ${formatLatency(total)}`;
+  return `${count} model calls · ${formatLatency(total)} total`;
+}
+
 function ModelReceiptView({ receipt }: { receipt: ModelReceipt }) {
   const asked = effortLabel(receipt.effortPreset);
   // `auto` is a request, not an outcome. Showing only "Auto" hides the choice the deployment made
@@ -65,7 +78,7 @@ function ModelReceiptView({ receipt }: { receipt: ModelReceipt }) {
         {receipt.modelId}
       </code>
       {effort ? <span>· {effort} effort</span> : null}
-      <span>· model call {formatLatency(receipt.modelCallLatencyMs)}</span>
+      <span>· {modelTimeLabel(receipt)}</span>
     </p>
   );
 }

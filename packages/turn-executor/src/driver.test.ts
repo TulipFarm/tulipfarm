@@ -305,6 +305,40 @@ describe("TurnDriver", () => {
     });
   });
 
+  it("threads the accumulated model latency and call count into the finished event", async () => {
+    // A turn shape that proposes tools, gets denials, then answers makes two model calls; the
+    // driver must not drop the cumulative fields the receipt carries alongside the last call's.
+    const { driver, events } = harness(
+      {
+        status: "completed",
+        output: "the answer",
+        ...counters,
+      },
+      {
+        receipt: {
+          modelId: "claude-sonnet-5",
+          modelCallLatencyMs: 21_000,
+          totalModelCallLatencyMs: 30_000,
+          modelCallCount: 2,
+        },
+      }
+    );
+
+    await driver.run(request());
+
+    expect(events.appended.at(-1)).toEqual({
+      eventType: "turn.finished",
+      payload: {
+        status: "succeeded",
+        messageId: "msg-1",
+        modelId: "claude-sonnet-5",
+        modelCallLatencyMs: 21_000,
+        totalModelCallLatencyMs: 30_000,
+        modelCallCount: 2,
+      },
+    });
+  });
+
   it("finishes without receipt fields when no model call was observed", async () => {
     const { driver, events } = harness({ status: "completed", output: "hi", ...counters });
 

@@ -357,6 +357,48 @@ describe("LlmModelPort", () => {
       modelId: "claude-sonnet-5",
       effortPreset: "balanced",
       modelCallLatencyMs: 42,
+      totalModelCallLatencyMs: 42,
+      modelCallCount: 1,
+    });
+  });
+
+  it("accumulates latency and count across every model call this port makes", async () => {
+    // A turn shape that proposes tools, gets denials, then answers makes two calls on the same
+    // port instance (one per Turn-attempt). `modelCallLatencyMs` alone would report only the
+    // second call's duration and hide the first entirely.
+    const ticks = [0, 100, 200, 250];
+    const mock = new MockLanguageModelV4({
+      doStream: async () => ({
+        stream: simulateReadableStream<StreamPart>({
+          chunks: [...textParts("t1", ["ok"]), FINISH],
+        }),
+      }),
+    });
+    const port = new LlmModelPort({
+      model: async (): Promise<LlmModelResolution> => ({
+        kind: "available",
+        price: TEST_PRICE,
+        model: mock as unknown as LanguageModel,
+        routing: {
+          outcome: "selected",
+          selector: "balanced",
+          resolution: "effort_preset",
+          profileId: "primary",
+          chain: [{ profileId: "primary", modelId: "claude-sonnet-5" }],
+          cacheAllowed: true,
+          rejectedFallbacks: [],
+        },
+      }),
+      now: () => ticks.shift() ?? 0,
+    });
+
+    await port.invoke(request({ requestId: "run-1:invoke:1", modelProfileId: "balanced" }));
+    await port.invoke(request({ requestId: "run-1:invoke:2", modelProfileId: "balanced" }));
+
+    expect(port.latestModelCallReceipt()).toMatchObject({
+      modelCallLatencyMs: 50,
+      totalModelCallLatencyMs: 150,
+      modelCallCount: 2,
     });
   });
 

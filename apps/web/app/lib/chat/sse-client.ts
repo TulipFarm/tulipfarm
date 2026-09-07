@@ -88,6 +88,8 @@ type RunEventData = {
   effortPreset?: ChatModelSelector;
   effortApplied?: EffortRung;
   modelCallLatencyMs?: number;
+  totalModelCallLatencyMs?: number;
+  modelCallCount?: number;
   artifactId?: string;
   revision?: number;
   rounds?: PlanRound[];
@@ -255,6 +257,12 @@ export function createRunEventMapper(): (frame: ParsedFrame) => ChatEvent[] {
                 ...(data.effortPreset === undefined ? {} : { effortPreset: data.effortPreset }),
                 ...(data.effortApplied === undefined ? {} : { effortApplied: data.effortApplied }),
                 modelCallLatencyMs: data.modelCallLatencyMs,
+                ...(data.totalModelCallLatencyMs === undefined
+                  ? {}
+                  : { totalModelCallLatencyMs: data.totalModelCallLatencyMs }),
+                ...(data.modelCallCount === undefined
+                  ? {}
+                  : { modelCallCount: data.modelCallCount }),
               }
             : undefined;
         if (data.status === "succeeded") {
