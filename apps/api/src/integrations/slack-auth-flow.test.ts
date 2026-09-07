@@ -284,6 +284,17 @@ describe("slack declarative auth flow", () => {
     ]);
   });
 
+  it("advertises user-configured Knowledge setup without automatic indexing", async () => {
+    expect(await detail()).toMatchObject({
+      knowledge: {
+        mode: "user_configured",
+        automatic_indexing: false,
+        source_tools: ["slack_channel_list", "slack_message_history"],
+        write_tools: ["create_knowledge_page"],
+      },
+    });
+  });
+
   it("produces every value Slack channel routing reads", async () => {
     await submitFields();
     await installToWorkspace();

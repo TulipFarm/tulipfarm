@@ -70,6 +70,18 @@ function mapDispatchError(error: ToolDispatchError): ToolCallResult {
   if (error.detail === "channel_not_joined") {
     return err("not_found", "The Slack app has not joined that conversation.");
   }
+  if (error.detail === "restricted_channel") {
+    return err(
+      "validation_error",
+      "Slack Knowledge setup can read public channels only. Private channels and DMs are refused."
+    );
+  }
+  if (error.detail === "missing_scope") {
+    return err(
+      "validation_error",
+      "Reconnect Slack and approve the channel history scopes before reading messages."
+    );
+  }
   if (error.detail === "file_unavailable") {
     return err("not_found", "The File is unavailable to the person who started this Run.");
   }

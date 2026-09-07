@@ -179,7 +179,6 @@ import { PgApiClientRepo } from "./identity/api-clients";
 import { buildApiAuthorityLayerResolver } from "./identity/authority-layers";
 import { channelBindKeyResolver } from "./identity/channel-link";
 import { PgExternalIdentityRepo, PgExternalIdentityUnlinker } from "./identity/external-links";
-import { ExternalLinkKnowledgeIdentityMap } from "./identity/knowledge-identity-map";
 import { reconcileSoulRoles, registerSoulRoleReconcile } from "./identity/role-reconcile";
 import { syncDeploymentRoles } from "./identity/roles";
 import { IngressIdentityResolver } from "./ingress/identity";
@@ -210,14 +209,11 @@ import { knowledgeDenialSink as makeKnowledgeDenialSink } from "./knowledge/deni
 import { PageReadGate } from "./knowledge/page-access";
 import { ReaderDirectory } from "./knowledge/reader-directory";
 import { SubjectDirectory } from "./knowledge/subject-directory";
-import { PgSlackKnowledgeCheckpointStore } from "./knowledge-sources/checkpoint-store";
-import { PgKnowledgeEmissionSink } from "./knowledge-sources/emission-sink";
 import { PgKnowledgeIndexStore } from "./knowledge-sources/index-store";
 import {
   CompositeLiveSourceAuthorization,
   SlackTenantLiveAuthorization,
 } from "./knowledge-sources/live-authorization";
-import { registerSlackKnowledgeSync } from "./knowledge-sources/slack-sync-schedule";
 import { PgKnowledgeSourceStore } from "./knowledge-sources/source-store";
 import { registerLlmReload } from "./llm-reload";
 import { buildMemoryServices } from "./memory/composition";
@@ -1802,15 +1798,6 @@ async function boot() {
       service: knowledgeService,
       activity: activityService,
     });
-    await registerSlackKnowledgeSync(boss, {
-      integrations: integrationStore,
-      secrets: secretsService,
-      checkpoints: new PgSlackKnowledgeCheckpointStore(pool),
-      sink: new PgKnowledgeEmissionSink(knowledgeSourceStore, knowledgeIndexStore),
-      identity: new ExternalLinkKnowledgeIdentityMap(externalIdentityRepo),
-      activity: activityService,
-    });
-
     app.listen({ port, host: "0.0.0.0" }, (err) => {
       if (err) {
         app.log.error(err);

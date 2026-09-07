@@ -63,11 +63,20 @@ export type IntegrationGrant = {
   description?: string;
 };
 
+export type IntegrationKnowledgeSetup = {
+  mode: "user_configured";
+  automatic_indexing: false;
+  source_tools: string[];
+  write_tools: string[];
+};
+
 export type IntegrationDetail = IntegrationSummary & {
   /** Authored summary of what agents can do once connected. Not enforced — see `grants`. */
   capabilities?: string[];
   /** The authority connecting hands over. Derived from declared OAuth scopes where possible. */
   grants: IntegrationGrant[];
+  /** Explicit setup contract for user-authored Knowledge ingestion. */
+  knowledge?: IntegrationKnowledgeSetup;
   manifest: {
     required_env?: RequiredEnvVar[];
     egress?: { type?: string; entry?: Record<string, unknown> };

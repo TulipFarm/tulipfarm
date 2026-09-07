@@ -72,5 +72,6 @@ propagation. This is the sole accountable owner for source ACL enforcement.
   model output. Extraction takes one chunk at a time for exactly that reason.
 - `@tulipfarm/llm` is not importable here, so both models arrive as ports
   (`GraphExtractionPort`, `GraphSummaryPort`, `GlobalAnswerPort`).- Nothing about a withheld source may reach candidates, citations, or audit payloads.
-- Slack syncs through the `knowledge_source_*` ports. Missing or stale captured ACL snapshots deny;
-  re-sync/deletion removes indexed chunks before content can reappear.
+- Connected-source content still denies on missing or stale ACL evidence. Slack is not
+  automatically indexed; user-configured Routines may write reviewed public-channel content as
+  Knowledge pages through the normal Tool and Page authorization paths.

@@ -288,6 +288,51 @@ describe("buildSlackTools", () => {
     ]);
   });
 
+  it("explains missing history scopes without indexing any messages", async () => {
+    const http = {
+      async send(request: IntegrationHttpRequest) {
+        if (request.path === "/conversations.info") {
+          return {
+            status: 200,
+            headers: {},
+            body: {
+              ok: true,
+              channel: {
+                id: "C1234567890",
+                name: "general",
+                is_member: true,
+                is_private: false,
+              },
+            },
+          };
+        }
+        if (request.path === "/conversations.history") {
+          return { status: 200, headers: {}, body: { ok: false, error: "missing_scope" } };
+        }
+        throw new Error(`unexpected request: ${request.path}`);
+      },
+    };
+    const tooling = buildSlackTooling({ secrets: fakeSecretsService(), http });
+    const tools = buildSlackTools(BUSINESS_ID, {
+      ...tooling,
+      effects: new MemoryEffectStore(),
+      threads: fakeThreads(),
+      mentionedThreads: fakeMentionedThreads(),
+    });
+    const tool = tools.find((candidate) => candidate.name === "slack_message_history");
+    if (tool === undefined) throw new Error("slack_message_history not registered");
+
+    const result = await tool.execute({ channel: "C1234567890" }, context());
+
+    expect(result).toEqual({
+      success: false,
+      error: {
+        code: "validation_error",
+        message: "Reconnect Slack and approve the channel history scopes before reading messages.",
+      },
+    });
+  });
+
   it("marks the sent thread as mentioned so a reply passes the ingress mention-gate", async () => {
     const tooling = buildSlackTooling({ secrets: fakeSecretsService(), http: fakeHttp("100.002") });
     const mentionedThreads = fakeMentionedThreads();

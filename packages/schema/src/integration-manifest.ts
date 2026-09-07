@@ -120,6 +120,22 @@ const IntegrationGrantSchema = Type.Object(
   { additionalProperties: true }
 );
 
+const IntegrationKnowledgeSetupSchema = Type.Object(
+  {
+    mode: Type.Literal("user_configured"),
+    automatic_indexing: Type.Literal(false),
+    source_tools: Type.Array(Type.String({ minLength: 1 }), {
+      minItems: 1,
+      uniqueItems: true,
+    }),
+    write_tools: Type.Array(Type.String({ minLength: 1 }), {
+      minItems: 1,
+      uniqueItems: true,
+    }),
+  },
+  { additionalProperties: false }
+);
+
 const AuthExchangeSchema = Type.Object(
   {
     url: Type.String({ minLength: 1 }),
@@ -355,6 +371,7 @@ export const LegacyIntegrationManifestSchema = Type.Object(
     icon: Type.Optional(Type.String()),
     capabilities: Type.Optional(Type.Array(Type.String())),
     grants: Type.Optional(Type.Array(IntegrationGrantSchema)),
+    knowledge: Type.Optional(IntegrationKnowledgeSetupSchema),
     egress: EgressSchema,
     ingress: Type.Optional(IngressSchema),
     auth: Type.Optional(Type.Array(AuthStepSchema)),

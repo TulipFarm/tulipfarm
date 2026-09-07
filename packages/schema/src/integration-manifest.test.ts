@@ -44,6 +44,36 @@ describe("validateLegacyIntegrationManifest", () => {
     ).toMatchObject({ name: "github", egress: { type: "mcp" } });
   });
 
+  it("accepts only explicit user-configured Knowledge setup", () => {
+    expect(
+      validateLegacyIntegrationManifest({
+        name: "slack",
+        egress: { type: "none" },
+        knowledge: {
+          mode: "user_configured",
+          automatic_indexing: false,
+          source_tools: ["slack_message_history"],
+          write_tools: ["create_knowledge_page"],
+        },
+      })
+    ).toMatchObject({
+      knowledge: { mode: "user_configured", automatic_indexing: false },
+    });
+
+    expect(() =>
+      validateLegacyIntegrationManifest({
+        name: "slack",
+        egress: { type: "none" },
+        knowledge: {
+          mode: "user_configured",
+          automatic_indexing: true,
+          source_tools: ["slack_message_history"],
+          write_tools: ["create_knowledge_page"],
+        },
+      })
+    ).toThrow(TulipFarmValidationError);
+  });
+
   it("rejects a manifest without the required egress type", () => {
     expect(() =>
       validateLegacyIntegrationManifest({

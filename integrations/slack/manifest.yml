@@ -9,6 +9,15 @@ capabilities:
   - Show a personalized TulipFarm Home tab
   - Post messages and replies into channels it has been added to
   - Read channel history to follow a conversation before replying
+  - Let users build their own Knowledge routine from selected public channels
+knowledge:
+  mode: user_configured
+  automatic_indexing: false
+  source_tools:
+    - slack_channel_list
+    - slack_message_history
+  write_tools:
+    - create_knowledge_page
 # No `grants`: the oauth2 step below declares the bot scopes, and those are resolved automatically.
 egress:
   type: none

@@ -15,6 +15,7 @@ describe("SLACK_TOOL_CONTRACTS", () => {
     expect([...byId.keys()]).toEqual([
       SLACK_TOOL_IDS.listChannels,
       SLACK_TOOL_IDS.getConversation,
+      SLACK_TOOL_IDS.listMessages,
       SLACK_TOOL_IDS.sendMessage,
       SLACK_TOOL_IDS.updateMessage,
       SLACK_TOOL_IDS.deleteMessage,
@@ -107,6 +108,24 @@ describe("SLACK_TOOL_CONTRACTS", () => {
         })),
       })
     ).toBe(false);
+  });
+
+  it("keeps message history read-only, bounded, and explicit about not indexing", () => {
+    const history = byId.get(SLACK_TOOL_IDS.listMessages);
+    if (history === undefined) expect.unreachable("history contract missing");
+    expect(history.spec.mutating).toBe(false);
+    expect(history.spec.dataClasses).toEqual(["source_content"]);
+    expect(history.spec.retry?.safeToRetry).toBe(true);
+
+    const declaration = SLACK_TOOL_DECLARATIONS.find(
+      ({ toolId }) => toolId === SLACK_TOOL_IDS.listMessages
+    );
+    expect(declaration?.description).toMatch(/never writes to Knowledge/i);
+
+    const validateInput = ajv.compile(history.spec.inputSchema);
+    expect(validateInput({ channel: "general", limit: 200 })).toBe(true);
+    expect(validateInput({ channel: "general", limit: 201 })).toBe(false);
+    expect(validateInput({ channel: "general", threadTs: "not-a-timestamp" })).toBe(false);
   });
 
   it("declares a chat.delete compensation with a reconciliation lookup", () => {
