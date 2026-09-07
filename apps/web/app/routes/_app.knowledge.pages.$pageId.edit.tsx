@@ -35,20 +35,23 @@ export default function PageEdit() {
   const spaceHome = `/knowledge/spaces/${encodeURIComponent(space.id)}`;
   const pagePath = pageHref(doc.id, path);
 
-  async function onSubmit(_path: string, content: string) {
+  async function onSubmit(_path: string, content: string, confirmSaved: () => boolean) {
     setSubmitting(true);
     setFormError(null);
     setFieldErrors({});
     try {
       // The path is fixed on edit (read-only field); re-post to the same path to replace content.
       await writePage(space.id, path, content);
+      const shouldNavigate = confirmSaved();
       window.dispatchEvent(new Event("okf:space-changed")); // refresh the persistent tree
-      navigate(pagePath);
+      if (shouldNavigate) navigate(pagePath);
+      else setSubmitting(false);
     } catch (err) {
       const mapped = pageFormErrors(err);
       setFormError(mapped.formError);
       setFieldErrors(mapped.fieldErrors);
       setSubmitting(false);
+      throw err;
     }
   }
 

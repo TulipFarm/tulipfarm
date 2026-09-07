@@ -53,14 +53,17 @@ export default function PageNew() {
 
   const detailPath = `/knowledge/spaces/${encodeURIComponent(space.id)}`;
 
-  async function onSubmit(path: string, content: string) {
+  async function onSubmit(path: string, content: string, confirmSaved: () => boolean) {
     setSubmitting(true);
     setFormError(null);
     setFieldErrors({});
     try {
       const result = await writePage(space.id, path, content);
+      const shouldNavigate = confirmSaved();
       window.dispatchEvent(new Event("okf:space-changed")); // refresh the tree
-      if ("override" in result) {
+      if (!shouldNavigate) {
+        setSubmitting(false);
+      } else if ("override" in result) {
         navigate(detailPath);
       } else {
         navigate(pageHref(result.id, path)); // canonical uuid URL of the new page
@@ -70,6 +73,7 @@ export default function PageNew() {
       setFormError(mapped.formError);
       setFieldErrors(mapped.fieldErrors);
       setSubmitting(false);
+      throw err;
     }
   }
 
