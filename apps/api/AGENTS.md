@@ -113,6 +113,8 @@ PostgreSQL persistence composition, auth, Soul Git writes, and Worker callback p
   Stopping a turn cancels its Run.
 - Routine invocations resolve only through `runtime/invocation-definitions.ts`; never fall back to
   the live Soul checkout, legacy registry, or `bundle.routineId`.
+- Schedule checkpoints follow embedded Trigger identity, never list position. Legacy checkpoints
+  transfer only when their saved deduplication key identifies one schedule.
 - Integration connect flows are manifest-declared. Adding an integration must not add a bespoke
   route; extend `packages/soul/src/types.ts` if auth step kinds are insufficient.
 - Integration callback origin comes from `PUBLIC_API_URL`, never request `Host`; `PUBLIC_URL` is the

@@ -64,12 +64,18 @@ export class ScheduleDispatcher {
 
     const existingRows = await stateStore.listForBusiness(businessId);
     const existingByKey = new Map(
-      existingRows.map((row) => [`${row.routineSlug}:${row.triggerIndex}`, row])
+      existingRows.map((row) => [`${row.routineSlug}:${row.triggerId}`, row])
     );
 
-    const liveTriggers: Array<{ routineSlug: string; triggerIndex: number }> = [];
+    const liveTriggers: Array<{ routineSlug: string; triggerId: string }> = [];
     const bundle = await activeBundle();
     const triggerIndexByRoutine = new Map<string, number>();
+    const scheduledTriggers: Array<{
+      trigger: definitions.trigger.TriggerDefinition;
+      spec: ReturnType<typeof scheduleSpecFromTrigger>;
+      triggerIndex: number;
+    }> = [];
+    const dedupKeyCounts = new Map<string, number>();
 
     for (const definition of bundleTriggerDefinitions(bundle)) {
       let trigger: definitions.trigger.TriggerDefinition;
@@ -89,8 +95,33 @@ export class ScheduleDispatcher {
         if (error instanceof ScheduleError && error.code === "not_a_schedule") continue;
         throw error;
       }
-      liveTriggers.push({ routineSlug: slug, triggerIndex });
-      const existing = existingByKey.get(`${slug}:${triggerIndex}`);
+      scheduledTriggers.push({ trigger, spec, triggerIndex });
+      const key = `${slug}:${spec.deduplicationKey}`;
+      dedupKeyCounts.set(key, (dedupKeyCounts.get(key) ?? 0) + 1);
+    }
+
+    for (const { trigger, spec, triggerIndex } of scheduledTriggers) {
+      const slug = trigger.spec.routineRef.name;
+      const triggerId = trigger.metadata.id;
+      liveTriggers.push({ routineSlug: slug, triggerId });
+      let existing = existingByKey.get(`${slug}:${triggerId}`);
+      if (existing === undefined) {
+        const legacy = existingRows.filter(
+          (row) =>
+            row.routineSlug === slug &&
+            row.triggerId.startsWith("legacy:") &&
+            row.dedupKey === spec.deduplicationKey
+        );
+        if (
+          legacy.length > 1 ||
+          (legacy.length === 1 && dedupKeyCounts.get(`${slug}:${spec.deduplicationKey}`) !== 1)
+        ) {
+          liveTriggers.push(...legacy);
+          log?.warn(`schedule dispatcher: ambiguous legacy history for ${slug}:${triggerId}`);
+          continue;
+        }
+        existing = legacy[0];
+      }
 
       // Runs pin `bundle.routineId`, not the slug, so counting this Routine's active Runs needs
       // the published Routine's identity. A Trigger naming a Routine this publication does not
@@ -166,6 +197,7 @@ export class ScheduleDispatcher {
 
       await stateStore.upsert(businessId, {
         routineSlug: slug,
+        triggerId,
         triggerIndex,
         dedupKey: spec.deduplicationKey,
         lastScheduledForMs,
