@@ -1,5 +1,9 @@
-import { describe, expect, it } from "vitest";
-import { formatCost, formatTokens } from "./observability";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { formatCost, formatTokens, updateObservabilityConfig } from "./observability";
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+});
 
 describe("formatCost", () => {
   it("formats normal amounts to cents", () => {
@@ -23,5 +27,42 @@ describe("formatTokens", () => {
   });
   it("leaves small counts as-is", () => {
     expect(formatTokens(320)).toBe("320");
+  });
+});
+
+describe("updateObservabilityConfig", () => {
+  it("uses the authenticated JSON write path with the stale Soul base", async () => {
+    const fetch = vi.fn(async () =>
+      Response.json({
+        commitSha: "next-sha",
+        published: true,
+        exporterActive: false,
+        restartRequired: true,
+      })
+    );
+    vi.stubGlobal("fetch", fetch);
+
+    await updateObservabilityConfig({
+      baseCommit: "base-sha",
+      enabled: true,
+      retentionDays: 30,
+      captureContent: false,
+      spendAlertUsd: null,
+      otlp: {
+        endpoint: "https://otlp.example.test/otlp",
+        instanceId: "123",
+        tokenRef: "secret://grafana-otlp-token",
+      },
+      pricingOverrides: {},
+    });
+
+    expect(fetch).toHaveBeenCalledWith(
+      "http://localhost:4010/api/v1/observability/config",
+      expect.objectContaining({
+        method: "PUT",
+        credentials: "include",
+        body: expect.stringContaining('"baseCommit":"base-sha"'),
+      })
+    );
   });
 });

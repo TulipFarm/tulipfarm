@@ -1,11 +1,14 @@
 import { randomUUID } from "node:crypto";
 import type { PGlite } from "@electric-sql/pglite";
 import { type LogEventRecord, PgResourceWriter } from "@tulipfarm/observability";
+import { makeSoulWriterDouble, SoulWriteError, type SoulWriterDouble } from "@tulipfarm/soul";
 import type { PaginatedResult } from "@tulipfarm/storage";
 import type { FastifyInstance } from "fastify";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { parse as parseYaml } from "yaml";
 import { buildApp } from "../app";
 import type { TokenDoc, TokenRepo } from "../auth/api-tokens";
+import { CSRF_COOKIE, CSRF_HEADER } from "../auth/csrf";
 import { SESSION_COOKIE } from "../auth/routes";
 import { MemorySessionStore } from "../auth/session-store";
 import { createUser, type UserDoc, type UserRepo } from "../auth/users";
@@ -55,11 +58,14 @@ class FakeTokenRepo implements TokenRepo {
 }
 
 describe("observability routes", () => {
+  const csrf = "a".repeat(64);
   let app: FastifyInstance;
   let db: PGlite;
   let service: ObservabilityService;
   let adminSid: string;
   let memberSid: string;
+  let soul: SoulWriterDouble;
+  let exporterActive: boolean;
 
   beforeEach(async () => {
     db = await makeMigratedPglite();
@@ -72,6 +78,23 @@ describe("observability routes", () => {
     adminSid = await store.create(admin._id);
     const member = await createUser(userRepo, "member@example.com", "pass", "member");
     memberSid = await store.create(member._id);
+    exporterActive = true;
+    soul = makeSoulWriterDouble("base-1");
+    soul.put(
+      "ObservabilityConfig",
+      undefined,
+      [
+        "enabled: true",
+        "retention_days: 30",
+        "capture_content: false",
+        "spend_alert_usd: 50",
+        "otlp:",
+        "  endpoint: https://otlp.grafana.net/otlp",
+        '  instance_id: "1"',
+        "  token: secret://grafana-otlp-token",
+        "pricing_overrides: {}",
+      ].join("\n")
+    );
 
     app = await buildApp({
       sessionStore: store,
@@ -85,9 +108,15 @@ describe("observability routes", () => {
         retentionDays: 30,
         captureContent: false,
         spendAlertUsd: 50,
-        otlp: { endpoint: "https://otlp.grafana.net/otlp", instanceId: "1", token: "secret-ref" },
+        otlp: {
+          endpoint: "https://otlp.grafana.net/otlp",
+          instanceId: "1",
+          token: "secret://grafana-otlp-token",
+        },
         pricingOverrides: {},
       },
+      observabilityExporterActive: () => exporterActive,
+      soulWriter: soul.writer,
     });
   });
 
@@ -125,9 +154,179 @@ describe("observability routes", () => {
       retentionDays: 30,
       captureContent: false,
       spendAlertUsd: 50,
+      baseCommit: "base-1",
+      exporterActive: true,
+      restartRequired: false,
     });
     // The token must never appear in the response.
-    expect(JSON.stringify(body)).not.toContain("secret-ref");
+    expect(JSON.stringify(body)).not.toContain("grafana-otlp-token");
+  });
+
+  it("does not report a saved exporter configuration as running", async () => {
+    exporterActive = false;
+    const res = await app.inject({
+      method: "GET",
+      url: "/api/v1/observability/config",
+      cookies: { [SESSION_COOKIE]: adminSid },
+    });
+
+    expect(res.json()).toMatchObject({
+      enabled: true,
+      otlpConfigured: true,
+      exporterActive: false,
+      restartRequired: false,
+    });
+  });
+
+  it("writes a validated config through the stale-safe Soul gateway", async () => {
+    const res = await app.inject({
+      method: "PUT",
+      url: "/api/v1/observability/config",
+      cookies: { [SESSION_COOKIE]: adminSid, [CSRF_COOKIE]: csrf },
+      headers: { [CSRF_HEADER]: csrf },
+      payload: {
+        baseCommit: "base-1",
+        enabled: true,
+        retentionDays: 45,
+        captureContent: false,
+        spendAlertUsd: 75,
+        otlp: {
+          endpoint: "https://otlp.example.test/otlp",
+          instanceId: "instance-2",
+          tokenRef: "env://GRAFANA_OTLP_TOKEN",
+        },
+        pricingOverrides: { "claude-opus-5": { in: 5, out: 25 } },
+      },
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toMatchObject({
+      commitSha: "sha-1",
+      published: true,
+      exporterActive: true,
+      restartRequired: true,
+    });
+    expect(soul.applied[0]).toMatchObject({
+      expectedBaseCommit: "base-1",
+      changes: [{ op: "put", target: { kind: "ObservabilityConfig" } }],
+    });
+    const change = soul.applied[0]?.changes[0];
+    if (change?.op !== "put") throw new Error("expected config write");
+    expect(parseYaml(change.content)).toMatchObject({
+      retention_days: 45,
+      otlp: { token: "env://GRAFANA_OTLP_TOKEN" },
+      pricing_overrides: { "claude-opus-5": { in: 5, out: 25 } },
+    });
+  });
+
+  it("preserves the saved token ref when a write omits it", async () => {
+    const res = await app.inject({
+      method: "PUT",
+      url: "/api/v1/observability/config",
+      cookies: { [SESSION_COOKIE]: adminSid, [CSRF_COOKIE]: csrf },
+      headers: { [CSRF_HEADER]: csrf },
+      payload: {
+        baseCommit: "base-1",
+        enabled: true,
+        retentionDays: 30,
+        captureContent: false,
+        spendAlertUsd: null,
+        otlp: {
+          endpoint: "https://otlp.example.test/otlp",
+          instanceId: "instance-2",
+        },
+        pricingOverrides: {},
+      },
+    });
+
+    expect(res.statusCode).toBe(200);
+    const change = soul.applied[0]?.changes[0];
+    if (change?.op !== "put") throw new Error("expected config write");
+    expect(parseYaml(change.content)).toMatchObject({
+      otlp: { token: "secret://grafana-otlp-token" },
+    });
+  });
+
+  it("rejects plaintext tokens and stale writes without changing the Soul", async () => {
+    const request = (tokenRef: string) =>
+      app.inject({
+        method: "PUT",
+        url: "/api/v1/observability/config",
+        cookies: { [SESSION_COOKIE]: adminSid, [CSRF_COOKIE]: csrf },
+        headers: { [CSRF_HEADER]: csrf },
+        payload: {
+          baseCommit: "base-1",
+          enabled: true,
+          retentionDays: 30,
+          captureContent: false,
+          spendAlertUsd: null,
+          otlp: {
+            endpoint: "https://otlp.example.test/otlp",
+            instanceId: "instance-2",
+            tokenRef,
+          },
+          pricingOverrides: {},
+        },
+      });
+
+    const plaintext = await request("glc_plaintext");
+    expect(plaintext.statusCode).toBe(422);
+    expect(plaintext.json()).toMatchObject({ path: "/otlp/tokenRef" });
+    expect(soul.applied).toHaveLength(0);
+
+    soul.failNextWith(new SoulWriteError("CONFLICT", "stale"));
+    const stale = await request("secret://grafana-next");
+    expect(stale.statusCode).toBe(409);
+  });
+
+  it("surfaces a durable commit whose publication failed", async () => {
+    const original = soul.writer.apply.bind(soul.writer);
+    soul.writer.apply = async (request) => ({
+      ...(await original(request)),
+      published: false,
+      publicationError: "bundle rejected",
+    });
+    const res = await app.inject({
+      method: "PUT",
+      url: "/api/v1/observability/config",
+      cookies: { [SESSION_COOKIE]: adminSid, [CSRF_COOKIE]: csrf },
+      headers: { [CSRF_HEADER]: csrf },
+      payload: {
+        baseCommit: "base-1",
+        enabled: false,
+        retentionDays: 30,
+        captureContent: false,
+        spendAlertUsd: null,
+        otlp: null,
+        pricingOverrides: {},
+      },
+    });
+
+    expect(res.statusCode).toBe(202);
+    expect(res.json()).toMatchObject({
+      published: false,
+      publicationError: "bundle rejected",
+      restartRequired: false,
+    });
+  });
+
+  it("gates config writes to admins", async () => {
+    const res = await app.inject({
+      method: "PUT",
+      url: "/api/v1/observability/config",
+      cookies: { [SESSION_COOKIE]: memberSid, [CSRF_COOKIE]: csrf },
+      headers: { [CSRF_HEADER]: csrf },
+      payload: {
+        baseCommit: "base-1",
+        enabled: false,
+        retentionDays: 30,
+        captureContent: false,
+        spendAlertUsd: null,
+        otlp: null,
+        pricingOverrides: {},
+      },
+    });
+    expect(res.statusCode).toBe(403);
   });
 
   it("gates the config endpoint to admins", async () => {
@@ -137,6 +336,22 @@ describe("observability routes", () => {
       cookies: { [SESSION_COOKIE]: memberSid },
     });
     expect(res.statusCode).toBe(403);
+  });
+
+  it("publishes the authenticated config read and write routes in OpenAPI", async () => {
+    const spec = (await app.inject({ method: "GET", url: "/api/v1/openapi.json" })).json() as {
+      paths: Record<
+        string,
+        Record<string, { security?: unknown; requestBody?: unknown; responses?: unknown }>
+      >;
+    };
+    const configPath = spec.paths["/api/v1/observability/config"];
+
+    expect(configPath?.get?.security).toEqual([{ sessionCookie: [] }, { bearerToken: [] }]);
+    expect(configPath?.put?.security).toEqual([{ sessionCookie: [] }, { bearerToken: [] }]);
+    expect(configPath?.put?.requestBody).toBeDefined();
+    expect(configPath?.put?.responses).toHaveProperty("409");
+    expect(configPath?.put?.responses).toHaveProperty("422");
   });
 
   it("returns an aggregated summary for an admin", async () => {

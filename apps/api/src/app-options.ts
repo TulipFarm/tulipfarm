@@ -226,6 +226,8 @@ export interface AppOptions {
   auditReadService?: AuditReadService;
   observabilityService?: ObservabilityService;
   observabilityConfig?: ObservabilityConfig;
+  /** Actual boot-time OTLP state; a saved config alone does not prove an exporter is running. */
+  observabilityExporterActive?: () => boolean;
   routineAuthoring?: CanonicalRoutineAuthoringService;
   routineCatalog?: RoutineCatalog;
   /** The Routine screen's read and trigger plane; absent leaves `/routines/:slug` unserved. */

@@ -1,4 +1,4 @@
-import { apiGet } from "./api";
+import { apiGet, apiWrite } from "./api";
 
 /*
  * Read-only client for the AI observability dashboard (GET /api/v1/observability/summary).
@@ -34,13 +34,46 @@ export type ObsConfigStatus = {
   enabled: boolean;
   otlpConfigured: boolean;
   endpoint: string | null;
+  instanceId: string | null;
   retentionDays: number;
   captureContent: boolean;
   spendAlertUsd: number | null;
+  pricingOverrides: Record<string, { in: number; out: number }>;
+  baseCommit: string | null;
+  exporterActive: boolean;
+  restartRequired: boolean;
 };
 
 export async function getObservabilityConfig(): Promise<ObsConfigStatus> {
   return apiGet<ObsConfigStatus>("/api/v1/observability/config");
+}
+
+export type ObservabilityConfigWrite = {
+  baseCommit: string;
+  enabled: boolean;
+  retentionDays: number;
+  captureContent: boolean;
+  spendAlertUsd: number | null;
+  otlp: {
+    endpoint: string;
+    instanceId: string;
+    tokenRef?: string;
+  } | null;
+  pricingOverrides: Record<string, { in: number; out: number }>;
+};
+
+export type ObservabilityConfigWriteResult = {
+  commitSha: string;
+  published: boolean;
+  publicationError?: string;
+  exporterActive: boolean;
+  restartRequired: boolean;
+};
+
+export async function updateObservabilityConfig(
+  config: ObservabilityConfigWrite
+): Promise<ObservabilityConfigWriteResult> {
+  return apiWrite<ObservabilityConfigWriteResult>("PUT", "/api/v1/observability/config", config);
 }
 
 export type RecentTurn = {

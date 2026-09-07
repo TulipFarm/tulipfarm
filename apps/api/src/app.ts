@@ -447,7 +447,9 @@ export async function buildApp(opts: AppOptions = {}) {
         requireAuthorization,
         opts.observabilityConfig,
         opts.logRepo,
-        opts.resourceRepo
+        opts.resourceRepo,
+        opts.soulWriter,
+        opts.observabilityExporterActive
       );
     }
     registerSoulRouteFamily(app, opts, requireAuth, requireAuthorization, authorizationCheck);

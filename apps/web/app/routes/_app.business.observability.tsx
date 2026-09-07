@@ -1,5 +1,5 @@
 import { useLoaderData, useRouteError } from "@remix-run/react";
-import { useRef, useState } from "react";
+import { type FormEvent, useRef, useState } from "react";
 import { FormStatus } from "~/components/form-status";
 import { LogsPanel } from "~/components/observability/logs-panel";
 import { ResourcesPanel } from "~/components/observability/resources-panel";
@@ -21,6 +21,7 @@ import {
   rate,
   type SummaryRange,
   type TraceEvent,
+  updateObservabilityConfig,
 } from "~/lib/observability";
 import { EMPTY_RESOURCE_USAGE, getResources, type ResourceUsage } from "~/lib/resources";
 import { getBusinessProfile } from "~/lib/settings";
@@ -301,52 +302,259 @@ function TraceRow({
 }
 
 function GrafanaExportPanel({ config }: { config: ObsConfigStatus }) {
-  const status = config.enabled && config.otlpConfigured ? "On" : "Off";
+  const [current, setCurrent] = useState(config);
+  const [enabled, setEnabled] = useState(config.enabled);
+  const [otlpConfigured, setOtlpConfigured] = useState(config.otlpConfigured);
+  const [endpoint, setEndpoint] = useState(config.endpoint ?? "");
+  const [instanceId, setInstanceId] = useState(config.instanceId ?? "");
+  const [tokenRef, setTokenRef] = useState("");
+  const [retentionDays, setRetentionDays] = useState(String(config.retentionDays));
+  const [captureContent, setCaptureContent] = useState(config.captureContent);
+  const [spendAlertUsd, setSpendAlertUsd] = useState(
+    config.spendAlertUsd === null ? "" : String(config.spendAlertUsd)
+  );
+  const [pricingOverrides, setPricingOverrides] = useState(
+    JSON.stringify(config.pricingOverrides, null, 2)
+  );
+  const [saving, setSaving] = useState(false);
+  const [result, setResult] = useState<{ tone: "success" | "error"; message: string } | null>(null);
+
+  async function save(event: FormEvent<HTMLFormElement>): Promise<void> {
+    event.preventDefault();
+    if (current.baseCommit === null) {
+      setResult({ tone: "error", message: "Config writing is not available." });
+      return;
+    }
+
+    let parsedOverrides: Record<string, { in: number; out: number }>;
+    try {
+      const parsed = JSON.parse(pricingOverrides) as unknown;
+      if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
+        throw new Error("Price overrides must be a JSON object.");
+      }
+      parsedOverrides = parsed as Record<string, { in: number; out: number }>;
+    } catch (error) {
+      setResult({
+        tone: "error",
+        message: error instanceof Error ? error.message : "Price overrides are invalid.",
+      });
+      return;
+    }
+
+    setSaving(true);
+    setResult(null);
+    try {
+      const saved = await updateObservabilityConfig({
+        baseCommit: current.baseCommit,
+        enabled,
+        retentionDays: Number(retentionDays),
+        captureContent,
+        spendAlertUsd: spendAlertUsd.trim() === "" ? null : Number(spendAlertUsd),
+        otlp: otlpConfigured
+          ? {
+              endpoint,
+              instanceId,
+              ...(tokenRef.trim() === "" ? {} : { tokenRef: tokenRef.trim() }),
+            }
+          : null,
+        pricingOverrides: parsedOverrides,
+      });
+      setCurrent((value) => ({
+        ...value,
+        enabled,
+        otlpConfigured,
+        endpoint: otlpConfigured ? endpoint : null,
+        instanceId: otlpConfigured ? instanceId : null,
+        retentionDays: Number(retentionDays),
+        captureContent,
+        spendAlertUsd: spendAlertUsd.trim() === "" ? null : Number(spendAlertUsd),
+        pricingOverrides: parsedOverrides,
+        baseCommit: saved.commitSha,
+        exporterActive: saved.exporterActive,
+        restartRequired: saved.restartRequired,
+      }));
+      setTokenRef("");
+      setResult(
+        saved.published
+          ? {
+              tone: "success",
+              message: saved.restartRequired
+                ? "Saved. Restart the API and Worker to apply exporter settings."
+                : "Saved. Running services already match this configuration.",
+            }
+          : {
+              tone: "error",
+              message: `Saved, but publication failed: ${saved.publicationError ?? "unknown error"}`,
+            }
+      );
+    } catch (error) {
+      setResult({
+        tone: "error",
+        message: error instanceof ApiError ? error.message : "Failed to save observability config.",
+      });
+    } finally {
+      setSaving(false);
+    }
+  }
+
   return (
     <Panel title="Grafana Cloud export">
-      <div className="flex flex-col gap-3 text-sm">
-        <div className="flex items-center gap-2">
-          <span
-            className={cn(
-              "inline-block size-2 rounded-full",
-              status === "On" ? "bg-primary" : "bg-muted-foreground"
-            )}
-            aria-hidden
-          />
-          <span className="text-foreground">
-            OTLP metrics export is <span className="font-bold">{status}</span>
-          </span>
-          {config.otlpConfigured && config.endpoint ? (
-            <span className="truncate text-xs text-muted-foreground">→ {config.endpoint}</span>
+      <form className="flex flex-col gap-4 text-sm" onSubmit={save}>
+        <fieldset disabled={saving} className="contents">
+          <div className="flex items-center gap-2">
+            <span
+              className={cn(
+                "inline-block size-2 rounded-full",
+                current.exporterActive ? "bg-primary" : "bg-muted-foreground"
+              )}
+              aria-hidden
+            />
+            <span className="text-foreground">
+              Exporter is{" "}
+              <span className="font-bold">
+                {current.exporterActive ? "running" : "not running"}
+              </span>
+            </span>
+          </div>
+          {current.restartRequired ? (
+            <FormStatus tone="error">
+              Saved settings differ from the running services. Restart the API and Worker to apply
+              them.
+            </FormStatus>
           ) : null}
-        </div>
-        <p className="text-base text-muted-foreground">
-          Push cost, token, error, fallback, and tool metrics to Grafana Cloud (Mimir) for richer
-          dashboards and alerting. Configure <code className="text-foreground">otlp</code> in{" "}
-          <code className="text-foreground">soul/observability.config.yaml</code> with your
-          endpoint, instance id, and token (a secret ref), then restart. Import the ready-made
-          dashboard and alert rules from{" "}
-          <code className="text-foreground">apps/api/src/observability/grafana/</code>.
-        </p>
-        <dl className="grid grid-cols-2 gap-x-6 gap-y-1 text-xs sm:grid-cols-3">
-          <ConfigRow label="Retention" value={`${config.retentionDays} days`} />
-          <ConfigRow label="Content capture" value={config.captureContent ? "On" : "Off"} />
-          <ConfigRow
-            label="Spend alert"
-            value={config.spendAlertUsd != null ? formatCost(config.spendAlertUsd, "USD") : "unset"}
-          />
-        </dl>
-      </div>
+          {result ? <FormStatus tone={result.tone}>{result.message}</FormStatus> : null}
+
+          <label className="flex items-center gap-2 text-foreground">
+            <input
+              type="checkbox"
+              checked={enabled}
+              onChange={(event) => setEnabled(event.currentTarget.checked)}
+            />
+            Enable OTLP export after restart
+          </label>
+          <label className="flex items-center gap-2 text-foreground">
+            <input
+              type="checkbox"
+              checked={otlpConfigured}
+              onChange={(event) => setOtlpConfigured(event.currentTarget.checked)}
+            />
+            Configure an OTLP destination
+          </label>
+
+          {otlpConfigured ? (
+            <div className="grid gap-3 sm:grid-cols-2">
+              <ConfigInput
+                label="OTLP endpoint"
+                value={endpoint}
+                onChange={setEndpoint}
+                placeholder="https://otlp.example.com/otlp"
+                type="url"
+              />
+              <ConfigInput label="Instance ID" value={instanceId} onChange={setInstanceId} />
+              <div className="sm:col-span-2">
+                <ConfigInput
+                  label="Token reference"
+                  value={tokenRef}
+                  onChange={setTokenRef}
+                  placeholder={
+                    current.otlpConfigured
+                      ? "Leave blank to keep the saved reference"
+                      : "secret://grafana-otlp-token"
+                  }
+                />
+                <p className="mt-1 text-xs text-muted-foreground">
+                  Use <code>secret://name</code> or <code>env://VARIABLE</code>. Plain tokens are
+                  rejected.
+                </p>
+              </div>
+            </div>
+          ) : null}
+
+          <div className="grid gap-3 sm:grid-cols-2">
+            <ConfigInput
+              label="Retention days"
+              value={retentionDays}
+              onChange={setRetentionDays}
+              type="number"
+              min="1"
+              max="3650"
+            />
+            <ConfigInput
+              label="24-hour spend alert (USD)"
+              value={spendAlertUsd}
+              onChange={setSpendAlertUsd}
+              type="number"
+              min="0"
+              step="0.01"
+              placeholder="No alert"
+            />
+          </div>
+
+          <label className="flex items-center gap-2 text-foreground">
+            <input
+              type="checkbox"
+              checked={captureContent}
+              onChange={(event) => setCaptureContent(event.currentTarget.checked)}
+            />
+            Capture prompt, completion, and Tool content
+          </label>
+          <p className="-mt-2 text-xs text-muted-foreground">
+            Keep this off unless your data policy allows business content in telemetry.
+          </p>
+
+          <label className="flex flex-col gap-1 text-foreground">
+            Model price overrides (USD per 1M tokens)
+            <textarea
+              value={pricingOverrides}
+              onChange={(event) => setPricingOverrides(event.currentTarget.value)}
+              rows={5}
+              spellCheck={false}
+              className="rounded-sm border border-border bg-background px-2.5 py-2 font-mono text-xs outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
+            />
+          </label>
+
+          <div>
+            <button
+              type="submit"
+              disabled={saving || current.baseCommit === null}
+              className="cursor-pointer rounded-sm bg-primary px-3 py-2 font-semibold text-primary-foreground disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {saving ? "Saving…" : "Save configuration"}
+            </button>
+          </div>
+        </fieldset>
+      </form>
     </Panel>
   );
 }
 
-function ConfigRow({ label, value }: { label: string; value: string }) {
+function ConfigInput({
+  label,
+  value,
+  onChange,
+  type = "text",
+  ...inputProps
+}: {
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+  type?: string;
+  placeholder?: string;
+  min?: string;
+  max?: string;
+  step?: string;
+}) {
   return (
-    <div className="flex justify-between gap-2 border-border/60 border-b py-1">
-      <dt className="text-muted-foreground">{label}</dt>
-      <dd className="tabular-nums text-foreground">{value}</dd>
-    </div>
+    <label className="flex flex-col gap-1 text-foreground">
+      {label}
+      <input
+        {...inputProps}
+        type={type}
+        value={value}
+        onChange={(event) => onChange(event.currentTarget.value)}
+        className="rounded-sm border border-border bg-background px-2.5 py-2 outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
+      />
+    </label>
   );
 }
 

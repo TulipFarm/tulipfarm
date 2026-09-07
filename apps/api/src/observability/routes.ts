@@ -1,3 +1,4 @@
+import { DEPLOYMENT_BUSINESS_ID } from "@tulipfarm/constants";
 import {
   isLogEventLevel,
   isLogService,
@@ -5,10 +6,20 @@ import {
   LOG_SERVICES,
   RESOURCE_SERVICES,
 } from "@tulipfarm/observability";
+import type { SoulWriter } from "@tulipfarm/soul";
+import { isSoulWriteError, soulWriteHttpError } from "@tulipfarm/soul";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
+import { parse as parseYaml } from "yaml";
 import { ErrorSchema } from "../auth/schemas";
 import type { RequireAuthorization } from "../authz/route-gate";
-import type { ObservabilityConfig } from "./config";
+import { commitActorFromRequest } from "../soul/commit-actor";
+import {
+  type ObservabilityConfig,
+  type ObservabilityConfigWrite,
+  parseObservabilityConfig,
+  validateObservabilityConfigWrite,
+  yamlForObservabilityConfig,
+} from "./config";
 import type { LogRepo } from "./log-repo";
 import {
   isResourceWindow,
@@ -77,7 +88,16 @@ const ResourcesSchema = {
 
 const ConfigStatusSchema = {
   type: "object",
-  required: ["enabled", "otlpConfigured", "retentionDays", "captureContent"],
+  required: [
+    "enabled",
+    "otlpConfigured",
+    "retentionDays",
+    "captureContent",
+    "pricingOverrides",
+    "baseCommit",
+    "exporterActive",
+    "restartRequired",
+  ],
   properties: {
     enabled: { type: "boolean" },
     otlpConfigured: { type: "boolean" },
@@ -85,6 +105,88 @@ const ConfigStatusSchema = {
     retentionDays: { type: "number" },
     captureContent: { type: "boolean" },
     spendAlertUsd: { type: "number", nullable: true },
+    instanceId: { type: "string", nullable: true },
+    pricingOverrides: {
+      type: "object",
+      additionalProperties: {
+        type: "object",
+        required: ["in", "out"],
+        additionalProperties: false,
+        properties: { in: { type: "number" }, out: { type: "number" } },
+      },
+    },
+    baseCommit: { type: "string", nullable: true },
+    exporterActive: { type: "boolean" },
+    restartRequired: { type: "boolean" },
+  },
+} as const;
+
+const ConfigWriteSchema = {
+  type: "object",
+  required: [
+    "baseCommit",
+    "enabled",
+    "retentionDays",
+    "captureContent",
+    "spendAlertUsd",
+    "otlp",
+    "pricingOverrides",
+  ],
+  additionalProperties: false,
+  properties: {
+    baseCommit: { type: "string", minLength: 1 },
+    enabled: { type: "boolean" },
+    retentionDays: { type: "integer", minimum: 1, maximum: 3650 },
+    captureContent: { type: "boolean" },
+    spendAlertUsd: { type: "number", minimum: 0, nullable: true },
+    otlp: {
+      anyOf: [
+        { type: "null" },
+        {
+          type: "object",
+          required: ["endpoint", "instanceId"],
+          additionalProperties: false,
+          properties: {
+            endpoint: { type: "string", minLength: 1, maxLength: 2048 },
+            instanceId: { type: "string", minLength: 1, maxLength: 256 },
+            tokenRef: { type: "string", minLength: 1, maxLength: 512 },
+          },
+        },
+      ],
+    },
+    pricingOverrides: {
+      type: "object",
+      additionalProperties: {
+        type: "object",
+        required: ["in", "out"],
+        additionalProperties: false,
+        properties: {
+          in: { type: "number", minimum: 0 },
+          out: { type: "number", minimum: 0 },
+        },
+      },
+    },
+  },
+} as const;
+
+const ConfigWriteResponseSchema = {
+  type: "object",
+  required: ["commitSha", "published", "exporterActive", "restartRequired"],
+  properties: {
+    commitSha: { type: "string" },
+    published: { type: "boolean" },
+    publicationError: { type: "string" },
+    exporterActive: { type: "boolean" },
+    restartRequired: { type: "boolean" },
+  },
+} as const;
+
+const ConfigValidationErrorSchema = {
+  type: "object",
+  required: ["error", "path"],
+  properties: {
+    error: { type: "string" },
+    path: { type: "string" },
   },
 } as const;
 
@@ -196,6 +298,21 @@ const OBSERVABILITY_READ = {
   fallback: "admin",
 } as const;
 
+const OBSERVABILITY_WRITE = {
+  action: "observability.write",
+  resourceType: "observability",
+  fallback: "admin",
+} as const;
+
+function comparable(config: ObservabilityConfig): string {
+  return JSON.stringify({
+    ...config,
+    pricingOverrides: Object.fromEntries(
+      Object.entries(config.pricingOverrides).sort(([left], [right]) => left.localeCompare(right))
+    ),
+  });
+}
+
 export function registerObservabilityRoutes(
   app: FastifyInstance,
   service: ObservabilityService,
@@ -203,8 +320,24 @@ export function registerObservabilityRoutes(
   requireAuthorization: RequireAuthorization,
   config?: ObservabilityConfig,
   logs?: LogRepo,
-  resources?: ResourceRepo
+  resources?: ResourceRepo,
+  soulWriter?: SoulWriter,
+  exporterActive: () => boolean = () => false
 ): void {
+  async function savedConfig(): Promise<{
+    config: ObservabilityConfig;
+    baseCommit: string | null;
+  }> {
+    if (soulWriter === undefined) {
+      return { config: config ?? parseObservabilityConfig(null), baseCommit: null };
+    }
+    const saved = await soulWriter.readWithBase("ObservabilityConfig");
+    return {
+      config: parseObservabilityConfig(saved.content === null ? null : parseYaml(saved.content)),
+      baseCommit: saved.baseCommit,
+    };
+  }
+
   // GET /api/v1/observability/config — Grafana-export status (admin). Never returns the OTLP token.
   app.get(
     "/api/v1/observability/config",
@@ -218,16 +351,96 @@ export function registerObservabilityRoutes(
       },
     },
     async (_req, reply) => {
+      const saved = await savedConfig();
       return reply.send({
-        enabled: config?.enabled ?? false,
-        otlpConfigured: config?.otlp != null,
-        endpoint: config?.otlp?.endpoint ?? null,
-        retentionDays: config?.retentionDays ?? 90,
-        captureContent: config?.captureContent ?? false,
-        spendAlertUsd: config?.spendAlertUsd ?? null,
+        enabled: saved.config.enabled,
+        otlpConfigured: saved.config.otlp != null,
+        endpoint: saved.config.otlp?.endpoint ?? null,
+        instanceId: saved.config.otlp?.instanceId ?? null,
+        retentionDays: saved.config.retentionDays,
+        captureContent: saved.config.captureContent,
+        spendAlertUsd: saved.config.spendAlertUsd,
+        pricingOverrides: saved.config.pricingOverrides,
+        baseCommit: saved.baseCommit,
+        exporterActive: exporterActive(),
+        restartRequired:
+          saved.baseCommit !== null &&
+          comparable(saved.config) !== comparable(config ?? parseObservabilityConfig(null)),
       });
     }
   );
+
+  if (soulWriter !== undefined) {
+    app.put(
+      "/api/v1/observability/config",
+      {
+        preHandler: [requireAuth, requireAuthorization(OBSERVABILITY_WRITE)],
+        schema: {
+          description:
+            "Validate and save the Observability Soul Config. Exporter changes require restart.",
+          tags: ["observability", "soul"],
+          security: [{ sessionCookie: [] }, { bearerToken: [] }],
+          body: ConfigWriteSchema,
+          response: {
+            200: ConfigWriteResponseSchema,
+            202: ConfigWriteResponseSchema,
+            400: ErrorSchema,
+            401: ErrorSchema,
+            403: ErrorSchema,
+            404: ErrorSchema,
+            409: ErrorSchema,
+            422: ConfigValidationErrorSchema,
+            500: ErrorSchema,
+          },
+        },
+      },
+      async (request, reply) => {
+        const body = request.body as ObservabilityConfigWrite & { baseCommit: string };
+        const current = await soulWriter.readWithBase("ObservabilityConfig");
+        const existing = parseObservabilityConfig(
+          current.content === null ? null : parseYaml(current.content)
+        );
+        const checked = validateObservabilityConfigWrite(body, existing.otlp?.token ?? null);
+        if (!checked.ok) {
+          return reply.code(422).send({ error: checked.error, path: checked.path });
+        }
+
+        try {
+          const write = await soulWriter.apply({
+            subject: "soul: update observability config",
+            source: "api",
+            actor: commitActorFromRequest(request),
+            businessId: DEPLOYMENT_BUSINESS_ID,
+            expectedBaseCommit: body.baseCommit,
+            changes: [
+              {
+                op: "put",
+                target: { kind: "ObservabilityConfig" },
+                content: yamlForObservabilityConfig(checked.config),
+              },
+            ],
+          });
+          return reply.code(write.published ? 200 : 202).send({
+            commitSha: write.commitSha,
+            published: write.published,
+            ...(write.publicationError === undefined
+              ? {}
+              : { publicationError: write.publicationError }),
+            exporterActive: exporterActive(),
+            restartRequired:
+              write.published &&
+              comparable(checked.config) !== comparable(config ?? parseObservabilityConfig(null)),
+          });
+        } catch (error) {
+          if (isSoulWriteError(error)) {
+            const mapped = soulWriteHttpError(error);
+            return reply.code(mapped.status).send(mapped.body);
+          }
+          throw error;
+        }
+      }
+    );
+  }
 
   // GET /api/v1/observability/recent — newest chat turns, drill-down entry points (admin).
   app.get(

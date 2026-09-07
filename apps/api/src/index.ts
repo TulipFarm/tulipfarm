@@ -214,7 +214,11 @@ import { registerSlackKnowledgeSync } from "./knowledge-sources/slack-sync-sched
 import { PgKnowledgeSourceStore } from "./knowledge-sources/source-store";
 import { registerLlmReload } from "./llm-reload";
 import { buildMemoryServices } from "./memory/composition";
-import { parseObservabilityConfig } from "./observability/config";
+import {
+  observabilityEnvKey,
+  observabilitySecretKey,
+  parseObservabilityConfig,
+} from "./observability/config";
 import { createEmbeddingUsageSink } from "./observability/embedding-usage";
 import { subscribeObservability } from "./observability/events";
 import { OtlpMetricsExporter } from "./observability/metrics";
@@ -781,6 +785,8 @@ async function boot() {
     // unreachable outside `psql` — see `audit/routes.ts`.
     const auditReadService = new AuditReadService(auditRepo);
     const obsConfig = parseObservabilityConfig(soulLoader.observabilityConfig);
+    let metricsSink: OtlpMetricsExporter | undefined;
+    let tracesSink: OtlpTracesExporter | undefined;
     const resourceRepoFactory = new PgResourceRepoFactory(pool);
     const counterStore = new PgCounterStore(pool);
     const reconcileResources = () => reconcileResourceTables(pool, soulLoader, console);
@@ -1383,6 +1389,7 @@ async function boot() {
       killSwitches,
       observabilityService,
       observabilityConfig: obsConfig,
+      observabilityExporterActive: () => metricsSink !== undefined && tracesSink !== undefined,
       invocations,
       conversationStore,
       runCancel,
@@ -1666,13 +1673,16 @@ async function boot() {
     );
     const stopFileBlobCleanup = await startFileBlobCleanup(fileService, app.log);
     // the token resolves — the default path loads nothing extra.
-    let metricsSink: OtlpMetricsExporter | undefined;
-    let tracesSink: OtlpTracesExporter | undefined;
     if (obsConfig.enabled && obsConfig.otlp) {
       const ref = obsConfig.otlp.token;
-      const token = ref.startsWith("env://")
-        ? process.env[ref.slice(6)]
-        : await secretsService.get(ref).catch(() => undefined);
+      const envKey = observabilityEnvKey(ref);
+      const secretKey = observabilitySecretKey(ref);
+      const token =
+        envKey !== undefined
+          ? process.env[envKey]
+          : secretKey === undefined
+            ? undefined
+            : await secretsService.get(secretKey).catch(() => undefined);
       if (token) {
         const target = {
           endpoint: obsConfig.otlp.endpoint,
