@@ -19,3 +19,4 @@ Deep domain module for Record write policy and mutation orchestration.
 - Depend on repository, catalog, clock, and hook ports; never import `apps/*`, Fastify, or sandbox.
 - Dynamic Record-table SQL remains in the API adapter after resource-type validation.
 - Side effects travel with the mutation port so persistence can enqueue them atomically.
+- A schema-generated human ID is create-only; replace and patch preserve the existing value.

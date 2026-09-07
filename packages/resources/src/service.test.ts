@@ -1,5 +1,5 @@
 import type { ResourceSideEffect } from "@tulipfarm/storage";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   createRecord,
   type ResourceDoc,
@@ -119,6 +119,77 @@ describe("Record write service", () => {
       err: { code: 422, body: { path: "/name", error: "name must not be empty" } },
     });
     expect(tickets.effects).toHaveLength(0);
+  });
+
+  it("keeps the generated default human ID stable on replace updates", async () => {
+    const tickets = new MemoryRepo();
+    tickets.records.set("ticket-1", {
+      _id: "ticket-1",
+      version: 1,
+      createdAt: new Date("2025-01-01T00:00:00.000Z"),
+      updatedAt: new Date("2025-01-01T00:00:00.000Z"),
+      id: "TICK-7",
+      title: "old",
+    });
+    const counter = vi.fn(async () => 8);
+
+    const result = await updateRecord(
+      {
+        type: "ticket",
+        resource: {
+          schema: {
+            type: "object",
+            "x-id-strategy": { prefix: "TICK-", sequence: true },
+            properties: {
+              id: { type: "string" },
+              title: { type: "string", "x-normalize": ["trim"] },
+            },
+          },
+        },
+        id: "ticket-1",
+        expectedVersion: 1,
+        data: { id: "TICK-999", title: "  new  " },
+        mode: "replace",
+      },
+      { ...ports({ ticket: tickets }), counter }
+    );
+
+    expect(result).toMatchObject({ ok: true, doc: { id: "TICK-7", title: "new" } });
+    expect(counter).not.toHaveBeenCalled();
+  });
+
+  it("keeps a generated custom-field human ID stable on patch updates", async () => {
+    const tickets = new MemoryRepo();
+    tickets.records.set("ticket-1", {
+      _id: "ticket-1",
+      version: 1,
+      createdAt: new Date("2025-01-01T00:00:00.000Z"),
+      updatedAt: new Date("2025-01-01T00:00:00.000Z"),
+      ref: "REF-12",
+      title: "old",
+    });
+    const counter = vi.fn(async () => 13);
+
+    const result = await updateRecord(
+      {
+        type: "ticket",
+        resource: {
+          schema: {
+            type: "object",
+            "x-id-strategy": { field: "ref", prefix: "REF-", sequence: true },
+            properties: { ref: { type: "string" }, title: { type: "string" } },
+          },
+        },
+        id: "ticket-1",
+        expectedVersion: 1,
+        data: { ref: "REF-999", title: "new" },
+        mode: "patch",
+      },
+      { ...ports({ ticket: tickets }), counter }
+    );
+
+    expect(result).toMatchObject({ ok: true, doc: { ref: "REF-12", title: "new" } });
+    expect(counter).not.toHaveBeenCalled();
   });
 
   it("refuses a link to a missing Record before any mutation is enqueued", async () => {
