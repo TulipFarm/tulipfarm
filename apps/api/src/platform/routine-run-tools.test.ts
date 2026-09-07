@@ -15,6 +15,7 @@ function runModel(overrides: Partial<RunReadModel> = {}): RunReadModel {
     routineVersion: "5",
     status: "failed",
     version: 3,
+    availableCommands: [],
     createdAt: "2026-09-05T15:16:22.160Z",
     startedAt: "2026-09-05T15:16:28.843Z",
     finishedAt: "2026-09-05T15:16:28.882Z",

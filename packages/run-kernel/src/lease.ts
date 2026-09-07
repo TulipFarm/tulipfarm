@@ -32,8 +32,6 @@ export interface RunLeaseStore {
     now: string,
     limit: number
   ): Promise<readonly PersistedRun[]>;
-  /** Requeues Runs parked by a crashed dispatch handler; bounded to once per Run by the store. */
-  requeueParkedRuns(businessId: string, limit: number): Promise<readonly PersistedRun[]>;
   claimNextQueued(
     businessId: string,
     owner: string,
@@ -134,17 +132,6 @@ export class RunLeaseManager {
 
   async reclaimExpired(input: ReclaimInput): Promise<readonly PersistedRun[]> {
     return this.store.reclaimExpiredRuns(input.businessId, input.now.toISOString(), input.limit);
-  }
-
-  /**
-   * Returns Runs a crashed handler parked at `needs_reconciliation` to `queued`. Nothing else
-   * moves a Run out of that status, so without this the Run is parked for good.
-   */
-  async requeueParked(input: {
-    businessId: string;
-    limit: number;
-  }): Promise<readonly PersistedRun[]> {
-    return this.store.requeueParkedRuns(input.businessId, input.limit);
   }
 
   async claimBatch(input: ClaimBatchInput): Promise<readonly PersistedRun[]> {

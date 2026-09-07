@@ -65,6 +65,8 @@ export interface CancellableRunStore {
 export interface CancelRunInput {
   readonly businessId: string;
   readonly runId: string;
+  /** Required by operator commands; omitted by Chat cancellation and child propagation. */
+  readonly expectedVersion?: number;
   readonly reason: string;
   readonly inFlightEffects: Readonly<Record<string, readonly string[]>>;
   readonly now: string;
@@ -142,6 +144,9 @@ export class RunCancellationManager {
     if (UNCANCELLABLE_RUN_STATUSES.includes(run.status)) {
       throw new CancellationError("run_not_cancellable", run.status);
     }
+    if (input.expectedVersion !== undefined && run.version !== input.expectedVersion) {
+      throw new CancellationError("cancellation_conflict", input.runId);
+    }
 
     const states = await this.runs.listStates(input.businessId, input.runId);
     const plan = planCancellation(states, input.inFlightEffects[input.runId] ?? []);
@@ -186,7 +191,13 @@ export class RunCancellationManager {
         detached.push(link.childRunId);
         continue;
       }
-      const childResult = await this.cancel({ ...input, runId: link.childRunId });
+      const childResult = await this.cancel({
+        businessId: input.businessId,
+        runId: link.childRunId,
+        reason: input.reason,
+        inFlightEffects: input.inFlightEffects,
+        now: input.now,
+      });
       cascaded.push(link.childRunId);
       childNeedsReconciliation ||= childResult.outcome === "needs_reconciliation";
     }

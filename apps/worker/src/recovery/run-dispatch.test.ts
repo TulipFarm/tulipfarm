@@ -1,6 +1,7 @@
-import { RunLeaseManager } from "@tulipfarm/run-kernel";
+import { RunLeaseManager, RunRecoveryManager } from "@tulipfarm/run-kernel";
 import {
   DISPATCH_HANDLER_ERROR_REF,
+  DISPATCH_LEASE_EXPIRED_REF,
   DISPATCH_REQUEUED_ONCE_REF,
   type PersistedRun,
   type PersistedRunStatus,
@@ -60,6 +61,7 @@ class DurableRunStore {
       leaseExpiresAt: string | null;
       startedAt?: string;
       finishedAt?: string;
+      errorEvidenceRef?: string | null;
     }
   ): Promise<boolean> {
     const current = this.runs.get(runId);
@@ -76,6 +78,9 @@ class DurableRunStore {
       version: current.version + 1,
       leaseOwner: transition.leaseOwner,
       leaseExpiresAt: transition.leaseExpiresAt,
+      ...(transition.errorEvidenceRef === undefined
+        ? {}
+        : { errorEvidenceRef: transition.errorEvidenceRef }),
     });
     this.commits.push({ from: current.status, to: transition.status });
     return true;
@@ -105,16 +110,18 @@ class DurableRunStore {
       if (reclaimed.length >= limit) break;
       const leased = current.status === "claimed" || current.status === "running";
       if (!leased || current.leaseExpiresAt === null || current.leaseExpiresAt > now) continue;
-      const requeued: PersistedRun = {
+      const expired: PersistedRun = {
         ...current,
-        status: "queued",
+        status: current.status === "running" ? "needs_reconciliation" : "queued",
         version: current.version + 1,
+        errorEvidenceRef:
+          current.status === "running" ? DISPATCH_LEASE_EXPIRED_REF : current.errorEvidenceRef,
         leaseOwner: null,
         leaseExpiresAt: null,
       };
-      this.runs.set(current.id, requeued);
-      this.commits.push({ from: current.status, to: "queued" });
-      reclaimed.push(requeued);
+      this.runs.set(current.id, expired);
+      this.commits.push({ from: current.status, to: expired.status });
+      reclaimed.push(expired);
     }
     return reclaimed;
   }
@@ -138,6 +145,47 @@ class DurableRunStore {
       requeuedRuns.push(requeued);
     }
     return requeuedRuns;
+  }
+
+  async listRecoveryCandidates(
+    _businessId: string,
+    limit: number
+  ): Promise<readonly PersistedRun[]> {
+    return [...this.runs.values()]
+      .filter(
+        (current) =>
+          current.status === "needs_reconciliation" &&
+          (current.errorEvidenceRef === DISPATCH_HANDLER_ERROR_REF ||
+            current.errorEvidenceRef === DISPATCH_LEASE_EXPIRED_REF)
+      )
+      .slice(0, limit);
+  }
+
+  async requeueParkedRun(
+    _businessId: string,
+    runId: string,
+    expectedVersion: number,
+    expectedEvidenceRef: string
+  ): Promise<PersistedRun | null> {
+    const current = this.runs.get(runId);
+    if (
+      current?.status !== "needs_reconciliation" ||
+      current.version !== expectedVersion ||
+      current.errorEvidenceRef !== expectedEvidenceRef
+    ) {
+      return null;
+    }
+    const requeued: PersistedRun = {
+      ...current,
+      status: "queued",
+      version: current.version + 1,
+      errorEvidenceRef: DISPATCH_REQUEUED_ONCE_REF,
+      leaseOwner: null,
+      leaseExpiresAt: null,
+    };
+    this.runs.set(runId, requeued);
+    this.commits.push({ from: current.status, to: "queued" });
+    return requeued;
   }
 
   async claimNextQueued(
@@ -175,10 +223,16 @@ function dispatcher(
   store: DurableRunStore,
   owner: string,
   handler: (dispatched: PersistedRun) => Promise<RunOutcome>,
-  now: () => Date = () => T0
+  now: () => Date = () => T0,
+  effects: readonly {
+    runId: string;
+    stateId: string;
+    state: string;
+  }[] = []
 ): RunDispatcher {
   return new RunDispatcher({
     leases: new RunLeaseManager(store),
+    recovery: new RunRecoveryManager(store, { list: async () => effects }),
     businessId: BUSINESS_ID,
     owner,
     handler,
@@ -233,7 +287,7 @@ describe("Run dispatch recovery", () => {
 
     expect(recovered).toEqual({
       reclaimed: 1,
-      requeuedParked: 0,
+      requeuedParked: 1,
       claimed: 1,
       dispatched: 1,
       waiting: 0,
@@ -243,6 +297,35 @@ describe("Run dispatch recovery", () => {
     expect(await store.find(BUSINESS_ID, RUN_ID)).toMatchObject({
       status: "succeeded",
       leaseOwner: null,
+    });
+  });
+
+  it("does not re-dispatch an expired Run when a provider outcome is unknown", async () => {
+    const store = new DurableRunStore();
+    store.seed({
+      status: "running",
+      version: 2,
+      leaseOwner: OWNER,
+      leaseExpiresAt: T0.toISOString(),
+    });
+
+    const handled: string[] = [];
+    const result = await dispatcher(
+      store,
+      SURVIVOR,
+      async (dispatched) => {
+        handled.push(dispatched.id);
+        return { status: "succeeded" };
+      },
+      () => AFTER_LEASE,
+      [{ runId: RUN_ID, stateId: "send", state: "dispatched" }]
+    ).dispatchBatch();
+
+    expect(result).toMatchObject({ reclaimed: 1, requeuedParked: 0, claimed: 0 });
+    expect(handled).toEqual([]);
+    expect(await store.find(BUSINESS_ID, RUN_ID)).toMatchObject({
+      status: "needs_reconciliation",
+      errorEvidenceRef: DISPATCH_LEASE_EXPIRED_REF,
     });
   });
 

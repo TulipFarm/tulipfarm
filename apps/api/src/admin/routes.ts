@@ -36,6 +36,18 @@ export class OperationalNotImplementedError extends Error {
   readonly name = "OperationalNotImplementedError";
 }
 
+export class OperationalCommandError extends Error {
+  readonly name = "OperationalCommandError";
+
+  constructor(
+    readonly status: 404 | 409,
+    readonly code: string,
+    message: string
+  ) {
+    super(message);
+  }
+}
+
 const security: { [securityLabel: string]: readonly string[] }[] = [
   { sessionCookie: [] },
   { bearerToken: [] },
@@ -117,9 +129,15 @@ async function attemptCommand<T>(
   try {
     return await command();
   } catch (error) {
-    if (!(error instanceof OperationalNotImplementedError)) throw error;
-    fail(reply, request, 501, "not_implemented", error.message);
-    return undefined;
+    if (error instanceof OperationalNotImplementedError) {
+      fail(reply, request, 501, "not_implemented", error.message);
+      return undefined;
+    }
+    if (error instanceof OperationalCommandError) {
+      fail(reply, request, error.status, error.code, error.message);
+      return undefined;
+    }
+    throw error;
   }
 }
 

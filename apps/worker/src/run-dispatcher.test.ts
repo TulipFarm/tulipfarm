@@ -423,6 +423,16 @@ describe("RunDispatcher", () => {
     store.requeueParkedResult = [persistedRun({ status: "queued", version: 2 })];
     const dispatcher = new RunDispatcher({
       leases: new RunLeaseManager(store),
+      recovery: {
+        sweep: async ({ businessId, limit }) => {
+          store.requeueParkedCalls.push({ businessId, limit });
+          return {
+            examined: 1,
+            requeued: store.requeueParkedResult.length,
+            needsReconciliation: 0,
+          };
+        },
+      },
       businessId: BUSINESS_ID,
       owner: "worker-1",
       now: () => new Date("2026-07-24T10:00:00.000Z"),

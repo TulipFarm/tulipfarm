@@ -39,6 +39,7 @@ export const AdminRunSchema = {
     "routineVersion",
     "status",
     "version",
+    "availableCommands",
     "createdAt",
     "startedAt",
     "finishedAt",
@@ -55,6 +56,10 @@ export const AdminRunSchema = {
     routineVersion: { type: "string" },
     status: { type: "string" },
     version: { type: "integer" },
+    availableCommands: {
+      type: "array",
+      items: { type: "string", enum: ["pause", "resume", "cancel", "retry", "reconcile"] },
+    },
     createdAt: { type: "string" },
     startedAt: { type: ["string", "null"] },
     finishedAt: { type: ["string", "null"] },

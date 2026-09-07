@@ -22,6 +22,7 @@ import type {
   TeamMigrationReportReadModel,
 } from "./routes";
 import { OperationalNotImplementedError } from "./routes";
+import type { RuntimeRunCommandService } from "./run-commands";
 import type { RunReader } from "./run-reader";
 
 type RuntimeOperationalDeps = {
@@ -33,6 +34,7 @@ type RuntimeOperationalDeps = {
   /** Settles a Routine State approval through its durable wait and one-use resume token. */
   routineApprovals?: Pick<RoutineApprovalService, "signal">;
   runs: RunReader;
+  runCommands?: Pick<RuntimeRunCommandService, "execute">;
   healthProbes: readonly HealthProbe[];
   guardrailsConfig(): unknown;
   teamMigrationReport?(businessId: string): Promise<TeamMigrationReportReadModel>;
@@ -201,11 +203,14 @@ export function createRuntimeOperationalApi(deps: RuntimeOperationalDeps): Opera
       return deps.runs.budgets(grant.businessId, runId);
     },
 
-    async commandRun() {
-      return notImplemented(
-        "Run control",
-        "no durable worker is running to act on the command (the Run authority lives in the worker)"
-      );
+    async commandRun(grant, input) {
+      if (!deps.runCommands) {
+        return notImplemented(
+          "Run control",
+          "the durable Run command managers are not composed in this deployment"
+        );
+      }
+      return deps.runCommands.execute(grant.businessId, input, grant.principalId);
     },
 
     async getOperations() {

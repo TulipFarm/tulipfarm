@@ -1,4 +1,4 @@
-import type { RunLeaseManager } from "@tulipfarm/run-kernel";
+import type { RunLeaseManager, RunRecoveryManager } from "@tulipfarm/run-kernel";
 import {
   DISPATCH_HANDLER_ERROR_REF,
   DISPATCH_REQUEUED_ONCE_REF,
@@ -10,6 +10,7 @@ export type { RunOutcome, RunOutcomeStatus } from "@tulipfarm/turn-executor";
 
 export interface RunDispatcherOptions {
   leases: RunLeaseManager;
+  recovery?: Pick<RunRecoveryManager, "sweep">;
   businessId: string;
   owner: string;
   handler: (run: PersistedRun) => Promise<RunOutcome>;
@@ -41,7 +42,7 @@ export interface RunDispatcherOptions {
 
 export interface DispatchRunsResult {
   reclaimed: number;
-  /** Runs a crashed handler had parked at `needs_reconciliation`, returned to the queue. */
+  /** Abandoned Runs whose durable effects proved replay-safe, returned to the queue. */
   requeuedParked: number;
   claimed: number;
   dispatched: number;
@@ -58,16 +59,14 @@ export class RunDispatcher {
     const limit = this.options.batchSize ?? 25;
     const leaseDurationMs = this.options.leaseDurationMs ?? 60_000;
 
-    // Before claiming, return Runs a crashed handler parked to the queue. They are indistinguishable
-    // from queued work once requeued, so this must happen ahead of the claim in the same batch.
-    const requeuedParked = await this.options.leases.requeueParked({
-      businessId: this.options.businessId,
-      limit,
-    });
-
     const reclaimed = await this.options.leases.reclaimExpired({
       businessId: this.options.businessId,
       now: this.options.now(),
+      limit,
+    });
+
+    const recovered = await this.options.recovery?.sweep({
+      businessId: this.options.businessId,
       limit,
     });
 
@@ -152,7 +151,7 @@ export class RunDispatcher {
 
     return {
       reclaimed: reclaimed.length,
-      requeuedParked: requeuedParked.length,
+      requeuedParked: recovered?.requeued ?? 0,
       claimed: claimed.length,
       dispatched,
       waiting,

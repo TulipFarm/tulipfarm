@@ -51,6 +51,7 @@ export {
 export { MemoryWaitStore } from "./memory-wait-store";
 export {
   DISPATCH_HANDLER_ERROR_REF,
+  DISPATCH_LEASE_EXPIRED_REF,
   DISPATCH_REQUEUED_ONCE_REF,
 } from "./run-lease-store";
 export type {

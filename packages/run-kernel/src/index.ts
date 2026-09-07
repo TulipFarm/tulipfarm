@@ -12,6 +12,7 @@ export * from "./lineage";
 export * from "./model";
 export * from "./outputs";
 export * from "./reconcile-state";
+export * from "./recover";
 export * from "./replay";
 export * from "./resume";
 export * from "./routine";
