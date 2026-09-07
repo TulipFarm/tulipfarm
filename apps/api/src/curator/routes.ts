@@ -2,6 +2,7 @@ import {
   type CuratorHost,
   type CuratorHostDenial,
   CuratorHostError,
+  type CuratorMemoryDelivery,
   type CuratorMinter,
   type CuratorRecovery,
   type CuratorTaskDelivery,
@@ -41,6 +42,7 @@ export interface CuratorRouteDeps {
   readonly minter: CuratorMinter;
   readonly recovery: CuratorRecovery;
   readonly delivery: CuratorTaskDelivery;
+  readonly memoryDelivery: CuratorMemoryDelivery;
   /** Metrics only, and never a subject id — see `CuratorObservedPayload`. Swallowed below, so a
    *  broken exporter can never refuse a settlement. */
   readonly observe?: (payload: CuratorObservedPayload) => void;
@@ -55,7 +57,7 @@ export function registerCuratorRoutes(
   requireAuth: PreHandler
 ): void {
   const { host, minter, recovery, observe, backlogAgeSeconds } = deps;
-  const { delivery } = deps;
+  const { delivery, memoryDelivery } = deps;
   /** Telemetry never fails the work it describes, but a broken subscriber is still a defect. */
   const report = (payload: CuratorObservedPayload): void => {
     try {
@@ -94,17 +96,25 @@ export function registerCuratorRoutes(
       preHandler,
       schema: {
         description:
-          "Claims validated Curator Proposal effects and delivers them as direct-user Tasks. " +
-          "All other Curator effects remain in the shadow ledger.",
+          "Claims validated Curator effects, delivers approved Proposals as direct-user Tasks, " +
+          "and applies stale-checked Memory patches.",
         tags: ["internal"],
         security: [{ sessionCookie: [] }, { bearerToken: [] }],
         response: {
           200: {
             type: "object",
-            required: ["delivered", "retryableFailed", "terminalRejected"],
+            required: [
+              "delivered",
+              "memoryApplied",
+              "memorySuperseded",
+              "retryableFailed",
+              "terminalRejected",
+            ],
             additionalProperties: false,
             properties: {
               delivered: { type: "integer" },
+              memoryApplied: { type: "integer" },
+              memorySuperseded: { type: "integer" },
               retryableFailed: { type: "integer" },
               terminalRejected: { type: "integer" },
             },
@@ -113,7 +123,18 @@ export function registerCuratorRoutes(
         },
       },
     },
-    async (_req, reply) => guard(reply, () => delivery.run(businessId))
+    async (_req, reply) =>
+      guard(reply, async () => {
+        const tasks = await delivery.run(businessId);
+        const memory = await memoryDelivery.run(businessId);
+        return {
+          delivered: tasks.delivered,
+          memoryApplied: memory.applied,
+          memorySuperseded: memory.superseded,
+          retryableFailed: tasks.retryableFailed + memory.retryableFailed,
+          terminalRejected: tasks.terminalRejected + memory.terminalRejected,
+        };
+      })
   );
 
   app.post(

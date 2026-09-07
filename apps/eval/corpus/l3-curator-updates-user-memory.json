@@ -1,0 +1,30 @@
+{
+  "id": "l3-curator-updates-user-memory",
+  "tier": "l3",
+  "agent": "support",
+  "input": [{ "role": "user", "content": "I work on the payments team." }],
+  "script": [{ "kind": "text", "text": "Thanks for letting me know." }],
+  "curator": {
+    "output": {
+      "memory": [
+        {
+          "section": "identity",
+          "add": ["Works on the payments team"],
+          "remove": [],
+          "citations": [
+            {
+              "turnId": "eval-curator-turn",
+              "quote": "I work on the payments team."
+            }
+          ]
+        }
+      ],
+      "proposals": [],
+      "knowledgePromotions": []
+    }
+  },
+  "expect": [
+    { "kind": "curator_memory_contains", "text": "Works on the payments team" },
+    { "kind": "run_status", "status": "succeeded" }
+  ]
+}

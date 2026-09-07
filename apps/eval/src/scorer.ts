@@ -51,6 +51,7 @@ export interface PersistedState {
     readonly status?: "draft" | "saved";
   }[];
   readonly curatorTasks?: readonly { readonly title: string }[];
+  readonly curatorMemory?: string;
   readonly doctorEvents?: readonly { readonly kind: string; readonly subject: string }[];
   /** Real Tool dispatches that were denied, with the reason the dispatcher gave back. */
   readonly toolDenials?: readonly { readonly name: string; readonly reason: string }[];
@@ -303,6 +304,14 @@ function evaluate(a: Expectation, obs: Observation): { passed: boolean; detail: 
       return (persisted.curatorTasks ?? []).some((task) => task.title === a.title)
         ? { passed: true, detail: `Curator delivered Task "${a.title}"` }
         : { passed: false, detail: `no Curator Task titled "${a.title}"` };
+    }
+
+    case "curator_memory_contains": {
+      const persisted = obs.persisted;
+      if (persisted === undefined) return notPersisted(a.kind);
+      return persisted.curatorMemory?.includes(a.text)
+        ? { passed: true, detail: `Curator Memory contains "${a.text}"` }
+        : { passed: false, detail: `persisted Curator Memory does not contain "${a.text}"` };
     }
 
     case "doctor_repaired":

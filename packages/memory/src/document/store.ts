@@ -199,36 +199,51 @@ export class MemoryDocumentRepo {
    * reaches this — `writer` cannot be `"tool"`, and the chat Tool only calls `applyDelta`.
    */
   async replaceSection(request: MemoryReplacementRequest): Promise<MemoryWriteOutcome> {
+    const result = await this.replaceSectionAndSettle(request, async () => undefined);
+    return result.write;
+  }
+
+  /**
+   * Couples a privileged section replacement to an external ledger transition. The settlement
+   * callback shares the Memory transaction, so either both changes commit or neither does.
+   */
+  async replaceSectionAndSettle<T>(
+    request: MemoryReplacementRequest,
+    settle: (tx: Queryable, write: MemoryWriteOutcome) => Promise<T>
+  ): Promise<{ write: MemoryWriteOutcome; settlement: T }> {
     return this.transactions.withTransaction(async (tx) => {
       const current = await this.lock(tx, request.businessId, request.userId, request.now);
       const currentContent = current.sections[request.section];
       const currentHash = hashMemorySection(currentContent);
+      let write: MemoryWriteOutcome;
       if (request.expectedSectionHash !== currentHash) {
-        return {
+        write = {
           outcome: "conflict" as const,
           record: current,
           section: request.section,
           currentContent,
           currentHash,
         };
+      } else {
+        const sections = replaceMemorySection(current.sections, request.section, request.content);
+        if (sections[request.section] === currentContent) {
+          write = { outcome: "unchanged" as const, record: current };
+        } else {
+          const record = await this.commit(tx, {
+            businessId: request.businessId,
+            userId: request.userId,
+            current,
+            sections,
+            section: request.section,
+            operation: "replace",
+            writer: request.writer,
+            ...(request.writerRunId === undefined ? {} : { writerRunId: request.writerRunId }),
+            now: request.now,
+          });
+          write = { outcome: "applied" as const, record };
+        }
       }
-
-      const sections = replaceMemorySection(current.sections, request.section, request.content);
-      if (sections[request.section] === currentContent) {
-        return { outcome: "unchanged" as const, record: current };
-      }
-      const record = await this.commit(tx, {
-        businessId: request.businessId,
-        userId: request.userId,
-        current,
-        sections,
-        section: request.section,
-        operation: "replace",
-        writer: request.writer,
-        ...(request.writerRunId === undefined ? {} : { writerRunId: request.writerRunId }),
-        now: request.now,
-      });
-      return { outcome: "applied" as const, record };
+      return { write, settlement: await settle(tx, write) };
     });
   }
 

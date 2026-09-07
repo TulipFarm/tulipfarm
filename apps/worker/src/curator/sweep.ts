@@ -56,7 +56,7 @@ export async function sweepCurator(options: CuratorSweepOptions): Promise<Curato
   try {
     await api.require("POST", CURATOR_DELIVERY_PATH);
   } catch (error) {
-    log?.error(`[curator] proposal delivery failed — ${message(error)}`);
+    log?.error(`[curator] effect delivery failed — ${message(error)}`);
   }
   try {
     const repair = await api.require<ReconcileOutcome>(

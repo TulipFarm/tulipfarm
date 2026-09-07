@@ -7,8 +7,8 @@ import { completeCuratorWork } from "./work";
 export type CuratorScope = "user" | "business";
 
 /**
- * Whether a job's effects may be applied. Set when the job is minted and never changed, so
- * enabling the loop can never reach back and apply output produced while it was in shadow.
+ * The default mode for a job's effects. The trusted host may select an explicit mode for supported
+ * effect kinds when settling, but every effect without such an apply path stays shadowed.
  */
 export type CuratorExecutionMode = "shadow" | "apply";
 
@@ -111,6 +111,18 @@ export interface CuratorProposalTaskEffect {
   readonly payload: unknown;
 }
 
+/** A validated-job Memory effect claimed with its user scope and Run provenance. */
+export interface CuratorMemoryPatchEffect {
+  readonly id: string;
+  readonly jobId: string;
+  readonly businessId: string;
+  readonly userId?: string;
+  readonly runId?: string;
+  readonly contextPin?: CuratorContextPin;
+  readonly turnIds: readonly string[];
+  readonly payload: unknown;
+}
+
 /** A dropped claim. Recorded, never inferred from an absence — "why" is the loop's own metric. */
 export interface CuratorRejectionRecord {
   readonly jobId: string;
@@ -163,6 +175,14 @@ export function toCuratorJob(row: CuratorJobRow): CuratorJobRecord {
     ...(row.output_digest === null ? {} : { outputDigest: row.output_digest }),
     createdAt: row.created_at,
   };
+}
+
+function curatorTurnIds(manifest: unknown): readonly string[] {
+  if (!manifest || typeof manifest !== "object" || Array.isArray(manifest)) return [];
+  const turnIds = (manifest as { turnIds?: unknown }).turnIds;
+  return Array.isArray(turnIds) && turnIds.every((turnId) => typeof turnId === "string")
+    ? turnIds
+    : [];
 }
 
 /**
@@ -337,10 +357,9 @@ export class CuratorRepo {
    * job that already settled is refused, because the alternative is silently overwriting the
    * ledger with a second answer to a question that was only asked once.
    *
-   * Effect ids are derived from the job, generation and ordinal rather than generated fresh, and
-   * the effect state is taken from the job's own execution mode, never from the caller: the mode
-   * is the whole protection against applying shadow output, so it cannot be a field a caller
-   * supplies.
+   * Effect ids are derived from the job, generation and ordinal rather than generated fresh. The
+   * trusted host may select an explicit per-effect mode; legacy callers inherit the job's immutable
+   * mode. Raw model output never supplies either field.
    */
   async settle(input: {
     readonly job: CuratorJobRecord;
@@ -527,6 +546,114 @@ export class CuratorRepo {
       `UPDATE curator_effect
           SET state = 'retryable_failed', updated_at = now()
         WHERE id = $1 AND state = 'applying'
+        RETURNING id`,
+      [effectId]
+    );
+    return rows.length > 0;
+  }
+
+  /**
+   * Claims only newly applyable Memory effects. Shadowed and other terminal rows are deliberately
+   * absent from the candidate states, so enabling delivery cannot revive historical output.
+   */
+  async claimMemoryPatches(input: {
+    readonly businessId: string;
+    readonly limit: number;
+    readonly staleBefore: Date;
+  }): Promise<CuratorMemoryPatchEffect[]> {
+    const { rows } = await withTransaction(this.db, (tx) =>
+      tx.query<{
+        id: string;
+        job_id: string;
+        business_id: string;
+        user_id: string | null;
+        run_id: string | null;
+        context_pin: CuratorContextPin | null;
+        manifest: unknown;
+        payload: unknown;
+      }>(
+        `WITH candidates AS (
+           SELECT e.id
+             FROM curator_effect AS e
+             JOIN curator_job AS j
+               ON j.id = e.job_id
+              AND j.business_id = e.business_id
+            WHERE e.business_id = $1
+              AND e.kind = 'memory_patch'
+              AND e.execution_mode = 'apply'
+              AND j.scope = 'user'
+              AND j.output_digest IS NOT NULL
+              AND j.state = 'succeeded'
+              AND (
+                e.state IN ('pending', 'retryable_failed')
+                OR (e.state = 'applying' AND e.updated_at < $2)
+              )
+            ORDER BY e.created_at, e.id
+            FOR UPDATE OF e SKIP LOCKED
+            LIMIT $3
+         )
+         UPDATE curator_effect AS e
+            SET state = 'applying', updated_at = now()
+           FROM candidates, curator_job AS j
+          WHERE e.id = candidates.id
+            AND j.id = e.job_id
+            AND j.business_id = e.business_id
+          RETURNING e.id, e.job_id, e.business_id, j.user_id, j.run_id, j.context_pin,
+                    j.manifest, e.payload`,
+        [input.businessId, input.staleBefore, Math.max(0, input.limit)]
+      )
+    );
+    return rows.map((row) => ({
+      id: row.id,
+      jobId: row.job_id,
+      businessId: row.business_id,
+      ...(row.user_id === null ? {} : { userId: row.user_id }),
+      ...(row.run_id === null ? {} : { runId: row.run_id }),
+      ...(row.context_pin === null ? {} : { contextPin: row.context_pin }),
+      turnIds: curatorTurnIds(row.manifest),
+      payload: row.payload,
+    }));
+  }
+
+  /**
+   * Settles a claimed Memory effect inside the caller's Memory transaction.
+   *
+   * Keeping this update on the supplied connection closes the crash window between changing the
+   * Memory Document and marking the effect terminal.
+   */
+  async settleMemoryPatch(
+    tx: Queryable,
+    effectId: string,
+    state: "succeeded" | "superseded" | "terminal_rejected"
+  ): Promise<boolean> {
+    const { rows } = await tx.query<{ id: string }>(
+      `UPDATE curator_effect
+          SET state = $2, updated_at = now()
+        WHERE id = $1 AND kind = 'memory_patch' AND state = 'applying'
+        RETURNING id`,
+      [effectId, state]
+    );
+    return rows.length > 0;
+  }
+
+  /** A transient Memory-store failure leaves durable retry evidence for the next sweep. */
+  async retryMemoryPatch(effectId: string): Promise<boolean> {
+    const { rows } = await this.db.query<{ id: string }>(
+      `UPDATE curator_effect
+          SET state = 'retryable_failed', updated_at = now()
+        WHERE id = $1 AND kind = 'memory_patch' AND state = 'applying'
+        RETURNING id`,
+      [effectId]
+    );
+    return rows.length > 0;
+  }
+
+  /** A malformed Memory payload is evidence, not work to retry forever. */
+  async rejectMemoryPatch(effectId: string): Promise<boolean> {
+    const { rows } = await this.db.query<{ id: string }>(
+      `UPDATE curator_effect
+          SET state = 'terminal_rejected', updated_at = now()
+        WHERE id = $1 AND kind = 'memory_patch' AND state = 'applying'
         RETURNING id`,
       [effectId]
     );

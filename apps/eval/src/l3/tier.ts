@@ -22,7 +22,8 @@ import {
   type ToolDispatchPort,
 } from "@tulipfarm/agent-runtime";
 import { soulDigest, soulSubjects, soulSummary } from "@tulipfarm/curator";
-import { CuratorHost, CuratorTaskDelivery } from "@tulipfarm/curator-host";
+import { CuratorHost, CuratorMemoryDelivery, CuratorTaskDelivery } from "@tulipfarm/curator-host";
+import { MemoryDocumentRepo } from "@tulipfarm/memory";
 import { INVOKE_STATE_KEY } from "@tulipfarm/run-kernel";
 import { CuratorRepo, type PersistedRun, TaskRepo } from "@tulipfarm/storage";
 import {
@@ -100,6 +101,7 @@ export interface PersistedTurn {
   readonly generatedFiles: readonly GeneratedFile[];
   /** Tasks the Curator delivered after this Turn completed. */
   readonly curatorTasks?: readonly { readonly title: string }[];
+  readonly curatorMemory?: string;
   /** What the Soul Doctor's sweep did to the Soul this Turn left behind. */
   readonly doctorEvents?: readonly DoctorEvent[];
   /** Real Tool dispatches this Turn's writer denied, with the exact reason it gave back. */
@@ -229,6 +231,10 @@ async function readBack(
     publishedArtifacts: observed.publishedArtifacts,
     generatedFiles: observed.generatedFiles,
     curatorTasks: observed.curatorTasks,
+    curatorMemory: await new MemoryDocumentRepo(database.transactions).render(
+      BUSINESS_ID,
+      PARTICIPANT_ID
+    ),
     doctorEvents: observed.doctorEvents,
     toolDenials: observed.toolDenials,
     systemPrompt: observed.systemPrompt,
@@ -392,23 +398,45 @@ async function deliverCurator(input: {
 
   const repo = new CuratorRepo(input.database.queryable);
   const tasks = new TaskRepo(input.database.transactions);
+  const documents = new MemoryDocumentRepo(input.database.transactions);
+  const runId = randomUUID();
   const job = await repo.insertJob(input.database.queryable, {
     businessId: BUSINESS_ID,
     scope: "user",
     userId: PARTICIPANT_ID,
+    runId,
     state: "running",
     executionMode: "shadow",
     manifestDigest: CURATOR_TURN_ID,
     manifest: { work: [], turnIds: [CURATOR_TURN_ID], candidateIds: [] },
   });
   if (!job) throw new Error("Eval Curator job did not mint");
+  await input.database.runs.start({
+    id: runId,
+    businessId: BUSINESS_ID,
+    source: "curator",
+    bundle: { digest: "sha256:eval", routineId: "curator", routineVersion: "reason" },
+    identity: {
+      initiator: { kind: "service", id: "curator" },
+      effectiveSubject: { kind: "user", id: PARTICIPANT_ID },
+      guardrailContextRef: `curator-job:${job.id}`,
+    },
+    createdAt: new Date().toISOString(),
+    states: [
+      {
+        key: INVOKE_STATE_KEY,
+        definitionRef: "published:curator:reason",
+        resolvedInput: { jobId: job.id },
+      },
+    ],
+  });
 
   const turns = input.input
     .filter((message) => message.role === "user")
     .map((message) => ({ turnId: CURATOR_TURN_ID, userText: contentText(message.content) }));
   const host = new CuratorHost({
     repo,
-    documents: { read: async () => null } as never,
+    documents,
     turns: { read: async () => turns },
     subjects: () => soulSubjects(input.soul.loader),
     openProposalKeys: async (businessId, userId) =>
@@ -421,6 +449,7 @@ async function deliverCurator(input: {
   if (typeof contextDigest !== "string") throw new Error("Eval Curator context has no digest");
   await host.submit(BUSINESS_ID, job.id, contextDigest, input.evalCase.curator.output);
   await new CuratorTaskDelivery({ repo, tasks, now: () => new Date() }).run(BUSINESS_ID);
+  await new CuratorMemoryDelivery({ repo, documents, now: () => new Date() }).run(BUSINESS_ID);
   return (await tasks.listForPrincipal(BUSINESS_ID, PARTICIPANT_ID, [], false)).map((task) => ({
     title: task.title,
   }));

@@ -7,8 +7,8 @@ package because none of it touches Fastify — `apps/api` keeps only routes and 
 
 ## Read on
 
-Minting a job, starting or recovering its Run, resolving pinned context, accepting model output, or
-delivering an approved Proposal as a Task.
+Minting a job, starting or recovering its Run, resolving pinned context, accepting model output,
+delivering an approved Proposal as a Task, or applying a validated Memory effect.
 
 ## Skip
 
@@ -22,6 +22,7 @@ Prompts, output schemas and citation rules (`packages/curator`), SQL and table s
 | `src/mint.ts` | `CuratorMinter` — provider preflight, claim-and-reserve via `CuratorMintStore`, `gateway.start()` under a per-job idempotency key, `recover()`, atomic `abandon()` |
 | `src/host.ts` | `CuratorHost` — context pinning and drift detection, then revalidation of submitted output and exactly-once settlement |
 | `src/delivery.ts` | `CuratorTaskDelivery` — claims applyable Proposal effects, upserts direct-user Tasks, and records retryable or terminal outcomes |
+| `src/memory-delivery.ts` | `CuratorMemoryDelivery` — claims only new applyable Memory effects, revalidates scope/source, and atomically stale-checks the section write with effect settlement |
 | `src/recovery.ts` | `CuratorRecovery` — replays a mint that crashed before the gateway, frees a target whose Run died |
 
 ## Rules
@@ -36,6 +37,8 @@ Prompts, output schemas and citation rules (`packages/curator`), SQL and table s
   moved, the job is retired (`context_drifted`); output validated against inputs it never saw
   proves nothing. Drift is judged **per section** at submit, so one moved section does not discard
   the rest of the answer.
+- Memory delivery derives user scope and Run provenance from the settled job, never the payload.
+  The section replacement and terminal effect transition share one database transaction.
 - Age alone never kills a job. Only a job with no Run, or one whose Run can no longer make
   progress — terminal, or parked in `needs_reconciliation`, which nothing requeues — is touched.
   Retiring one closes its Run too, so no Run outlives the work it describes.

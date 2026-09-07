@@ -116,6 +116,8 @@ export type Expectation =
   | { readonly kind: "generated_file_draft_created" }
   /** L3 only. A validated Curator Proposal reached its participant as a Task. */
   | { readonly kind: "curator_task_visible"; readonly title: string }
+  /** L3 only. Validated Curator output reached the participant's persisted Memory Document. */
+  | { readonly kind: "curator_memory_contains"; readonly text: string }
   /** L3 only. The Soul Doctor repaired the named artifact and the repair reached the bundle. */
   | { readonly kind: "doctor_repaired"; readonly subject: string }
   /** L3 only. The Doctor refused to publish and put the named artifact in front of a person. */
@@ -142,6 +144,7 @@ const PERSISTED_KINDS: ReadonlySet<string> = new Set([
   "generated_file_not_readable_by",
   "generated_file_draft_created",
   "curator_task_visible",
+  "curator_memory_contains",
   "doctor_repaired",
   "doctor_escalated",
   "tool_denial_contains",

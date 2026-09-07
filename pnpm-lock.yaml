@@ -385,6 +385,9 @@ importers:
       '@tulipfarm/llm':
         specifier: workspace:*
         version: link:../../packages/llm
+      '@tulipfarm/memory':
+        specifier: workspace:*
+        version: link:../../packages/memory
       '@tulipfarm/model-adapter':
         specifier: workspace:*
         version: link:../../packages/model-adapter

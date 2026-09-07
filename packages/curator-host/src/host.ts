@@ -65,6 +65,7 @@ interface Plan {
 }
 
 function executionMode(effect: CuratorEffect): "apply" | "shadow" {
+  if (effect.kind === "memory_patch") return "apply";
   return effect.kind === "proposal" && effect.deliver.includes("task") ? "apply" : "shadow";
 }
 

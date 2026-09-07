@@ -1,6 +1,7 @@
 import {
   type CuratorHost,
   CuratorHostError,
+  type CuratorMemoryDelivery,
   type CuratorMinter,
   type CuratorRecovery,
   type CuratorTaskDelivery,
@@ -56,12 +57,22 @@ class FakeDelivery {
   }
 }
 
+class FakeMemoryDelivery {
+  calls: string[] = [];
+
+  async run(businessId: string) {
+    this.calls.push(businessId);
+    return { applied: 2, superseded: 1, retryableFailed: 1, terminalRejected: 1 };
+  }
+}
+
 async function buildServer(
   host: FakeHost,
   principalKind: "service" | "user" | undefined,
   minter: FakeMinter = new FakeMinter(),
   extra: Partial<CuratorRouteDeps> = {},
-  delivery: FakeDelivery = new FakeDelivery()
+  delivery: FakeDelivery = new FakeDelivery(),
+  memoryDelivery: FakeMemoryDelivery = new FakeMemoryDelivery()
 ): Promise<FastifyInstance> {
   const app = Fastify();
   registerCuratorRoutes(
@@ -71,6 +82,7 @@ async function buildServer(
       minter: minter as unknown as CuratorMinter,
       recovery: { run: async () => ({ recovered: 1, abandoned: 0 }) } as unknown as CuratorRecovery,
       delivery: delivery as unknown as CuratorTaskDelivery,
+      memoryDelivery: memoryDelivery as unknown as CuratorMemoryDelivery,
       ...extra,
     },
     BUSINESS,
@@ -117,14 +129,22 @@ describe("curator internal routes", () => {
     expect(host.contextCalls).toEqual([]);
   });
 
-  it("delivers pending Proposal Tasks only for a service principal", async () => {
+  it("delivers pending Task and Memory effects only for a service principal", async () => {
     const delivery = new FakeDelivery();
-    app = await buildServer(host, "service", new FakeMinter(), {}, delivery);
+    const memoryDelivery = new FakeMemoryDelivery();
+    app = await buildServer(host, "service", new FakeMinter(), {}, delivery, memoryDelivery);
     const res = await app.inject({ method: "POST", url: "/api/v1/internal/curator/deliver" });
 
     expect(res.statusCode).toBe(200);
-    expect(res.json()).toEqual({ delivered: 1, retryableFailed: 0, terminalRejected: 0 });
+    expect(res.json()).toEqual({
+      delivered: 1,
+      memoryApplied: 2,
+      memorySuperseded: 1,
+      retryableFailed: 1,
+      terminalRejected: 1,
+    });
     expect(delivery.calls).toEqual([BUSINESS]);
+    expect(memoryDelivery.calls).toEqual([BUSINESS]);
   });
 
   it("maps an unknown job to 404", async () => {

@@ -67,3 +67,5 @@ publication, approvals, integrations, events, and blob/vector/cache/queue ports.
 - A Curator effect carries an immutable execution mode, and a `shadow` effect may never rest in
   `pending` (DB CHECK `curator_effect_shadow_is_terminal`). Enabling the Curator must not be able to
   apply output that was only ever reasoned about in shadow.
+- Curator Memory claims carry scope, pinned Turns, section hashes, and Run provenance from the
+  settled job. Their terminal transition may run on the Memory writer's transaction.

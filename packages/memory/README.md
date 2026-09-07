@@ -37,6 +37,8 @@ or provider SDKs.
   entry in both keeps it.
 - `replaceSection` requires the hash of the section the caller read, and a writer type excluding
   `"tool"`. A DB CHECK enforces the second, because the `writer` column is caller-supplied.
+- Curator uses `replaceSectionAndSettle` so its Memory revision and effect-ledger transition commit
+  or roll back together.
 - Every mutation writes a revision, so an erasure has to clear the history and not just the page.
 - An over-budget mutation is rejected whole; the previous document survives unchanged.
 - Telemetry labels/attributes are bounded enums/counts only. Never emit document text, section

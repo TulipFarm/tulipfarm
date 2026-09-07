@@ -12,6 +12,11 @@ export {
   type CuratorTurnReader,
 } from "./host";
 export {
+  CuratorMemoryDelivery,
+  type CuratorMemoryDeliveryDeps,
+  type CuratorMemoryDeliveryResult,
+} from "./memory-delivery";
+export {
   type CuratorMintDeps,
   CuratorMinter,
   type MintOutcome,

@@ -312,7 +312,7 @@ describe("CuratorHost", () => {
         knowledgePromotions: [],
       });
       expect(result.recorded).toBe(1);
-      expect(repo.effects[0]).toMatchObject({ kind: "memory_patch", executionMode: "shadow" });
+      expect(repo.effects[0]).toMatchObject({ kind: "memory_patch", executionMode: "apply" });
       expect(repo.settled).toHaveLength(1);
     });
 

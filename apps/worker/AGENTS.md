@@ -47,8 +47,9 @@ reconciliation, turn execution, delivery classification, projections, and outbox
 - The Curator executor holds no judgement: it never chooses inputs, validates output, or applies
   effects. The API re-derives all of that from the job's own manifest.
 - `curator-sweep` (*/5, bare pg-boss, scheduled by the API) is deterministic maintenance only: it
-  reconciles Tasks, then asks the API to mint one Run per user with a backlog. Its queue name is a
-  plain string shared with `apps/api/src/curator/sweep-schedule.ts` — rename both or neither.
+  asks the API to deliver validated effects and reconcile jobs, then mints one Run per user with a
+  backlog. Its queue name is a plain string shared with `apps/api/src/curator/sweep-schedule.ts` —
+  rename both or neither.
 - `file-index` runs here rather than in the API because indexing a File means running a PDF parser
   over a stranger's bytes, which does not belong in the process terminating HTTP requests. Its
   queue name is a plain string shared with `apps/api/src/files/knowledge-bridge.ts` — rename both

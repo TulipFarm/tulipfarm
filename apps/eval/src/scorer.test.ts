@@ -32,6 +32,32 @@ describe("prompt expectations", () => {
   });
 });
 
+describe("persisted Curator Memory", () => {
+  it.each([
+    { memory: undefined, passes: false },
+    { memory: "", passes: false },
+    { memory: "- Works on the payments team", passes: true },
+  ])("requires the actual Memory document: $memory", ({ memory, passes }) => {
+    const observation: Observation = {
+      ...base,
+      persisted: {
+        runStatus: "succeeded",
+        stateStatus: "succeeded",
+        turnStatus: "succeeded",
+        events: [],
+        soulCommits: [],
+        publishedArtifacts: [],
+        generatedFiles: [],
+        curatorMemory: memory,
+      },
+    };
+    expect(
+      only({ kind: "curator_memory_contains", text: "Works on the payments team" }, observation)
+        .passed
+    ).toBe(passes);
+  });
+});
+
 describe("tool expectations", () => {
   it("detects a Tool that was called and one that was not", () => {
     expect(only({ kind: "tool_called", name: "search" }).passed).toBe(true);

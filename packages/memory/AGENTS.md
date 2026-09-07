@@ -26,6 +26,8 @@ it.
   cannot destroy a concurrent writer's line, and no version or hash exists to get wrong.
   `replaceSection` overwrites, so it demands the current section hash and a writer type excluding
   `"tool"` — a DB CHECK enforces that again, because a caller-supplied `writer` is not evidence.
+  `replaceSectionAndSettle` lets another ledger transition share that transaction; a failed
+  settlement must roll the Memory replacement back.
 - `canonicalMemoryLine` is the one canonicalization rule — dedupe, removal matching, hashing and
   render all use it. A second lets a fact be "present" for an add and "absent" for a remove.
 - One fact per line, no heading at any level inside a section: removal matches whole entries, so a

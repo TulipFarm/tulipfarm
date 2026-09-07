@@ -154,6 +154,31 @@ describe("MemoryDocumentRepo (PostgreSQL)", () => {
       expect(result.outcome).toBe("applied");
     });
 
+    it("rolls back the replacement when its coupled settlement fails", async () => {
+      await delta("preferences", ["Prefers terse answers"]);
+      const read = await repo.read(BUSINESS, USER);
+
+      await expect(
+        repo.replaceSectionAndSettle(
+          {
+            businessId: BUSINESS,
+            userId: USER,
+            section: "preferences",
+            content: "Prefers detailed answers",
+            expectedSectionHash: hashMemorySection(read?.sections.preferences ?? ""),
+            writer: "curator",
+            writerRunId: "run-1",
+            now: NOW,
+          },
+          async () => {
+            throw new Error("effect settlement failed");
+          }
+        )
+      ).rejects.toThrow("effect settlement failed");
+
+      expect((await repo.read(BUSINESS, USER))?.sections.preferences).toBe("Prefers terse answers");
+    });
+
     // Enforced by the database, not by the caller passing an honest `writer`.
     it("refuses a whole-section overwrite attributed to the Tool", async () => {
       await expect(

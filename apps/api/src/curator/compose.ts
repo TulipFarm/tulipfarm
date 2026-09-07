@@ -2,6 +2,7 @@ import type { EventEmitter } from "node:events";
 import { isCuratorDedupeKey, soulDigest, soulSubjects, soulSummary } from "@tulipfarm/curator";
 import {
   CuratorHost,
+  CuratorMemoryDelivery,
   CuratorMinter,
   CuratorRecovery,
   CuratorTaskDelivery,
@@ -80,6 +81,7 @@ export function buildCurator(deps: CuratorDeps): Pick<AppOptions, "curator" | "c
         now: () => new Date(),
       }),
       delivery: new CuratorTaskDelivery({ repo, tasks, now: () => new Date() }),
+      memoryDelivery: new CuratorMemoryDelivery({ repo, documents, now: () => new Date() }),
       observe: events
         ? (payload) => void events.emit(DOMAIN_EVENTS.CURATOR_OBSERVED, payload)
         : undefined,
