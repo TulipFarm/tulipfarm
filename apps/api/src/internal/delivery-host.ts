@@ -436,7 +436,7 @@ export class IngressDeliveryHost {
     const agentId = conversation?.agentId;
     if (agentId === undefined) return {};
     const autonomy = asChatAutonomy(
-      resolveAgent(this.options.soulLoader, agentId).frontmatter.autonomy
+      resolveAgent(this.options.soulLoader, agentId)?.frontmatter.autonomy
     );
     return { agentId, ...(autonomy === undefined ? {} : { autonomy }) };
   }

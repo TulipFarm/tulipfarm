@@ -5,7 +5,7 @@ import type {
   SoulIntegration,
   SoulLoader,
 } from "@tulipfarm/soul";
-import { makeSoulWriterDouble } from "@tulipfarm/soul";
+import { agentIdOf, makeSoulWriterDouble } from "@tulipfarm/soul";
 import type { PaginatedResult } from "@tulipfarm/storage";
 import type { FastifyInstance } from "fastify";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -131,6 +131,8 @@ describe("integrations routes", () => {
   let reload: ReturnType<typeof vi.fn>;
   let soulIntegrations: Map<string, SoulIntegration>;
   let soulLoader: SoulLoader;
+  const AGENT_1_ID = agentIdOf("agent-1", {});
+  const AGENT_2_ID = agentIdOf("agent-2", {});
   let secretsService: FakeSecretsService;
   let bundledIntegrations: Map<string, BundledIntegration>;
   let integrationStore: FakeIntegrationStore;
@@ -167,8 +169,8 @@ describe("integrations routes", () => {
 
     soulIntegrations = new Map();
     const soulAgents = new Map([
-      ["agent-1", { name: "agent-1" }],
-      ["agent-2", { name: "agent-2" }],
+      ["agent-1", { id: AGENT_1_ID, name: "agent-1" }],
+      ["agent-2", { id: AGENT_2_ID, name: "agent-2" }],
     ]);
     soulLoader = {
       integrations: soulIntegrations,
@@ -693,8 +695,9 @@ describe("integrations routes", () => {
         externalTenantId: "T123",
         businessId: "biz-1",
       });
+      // The bind request names the Agent by its handle; the route stores its permanent id.
       expect(integrationStore.routes[0]).toMatchObject({
-        agentId: "agent-1",
+        agentId: AGENT_1_ID,
         businessId: "biz-1",
       });
     });
@@ -727,7 +730,7 @@ describe("integrations routes", () => {
       expect(integrationStore.apps).toHaveLength(1);
       expect(integrationStore.integrations).toHaveLength(1);
       expect(integrationStore.routes).toHaveLength(1);
-      expect(integrationStore.routes[0]).toMatchObject({ agentId: "agent-2" });
+      expect(integrationStore.routes[0]).toMatchObject({ agentId: AGENT_2_ID });
     });
   });
 });

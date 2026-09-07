@@ -1,4 +1,4 @@
-import { DEFAULT_ASSISTANT_NAME, type Logger, type SoulAgent } from "@tulipfarm/soul";
+import { DEFAULT_ASSISTANT_ID, type Logger, type SoulAgent } from "@tulipfarm/soul";
 import type { PrincipalRepo, RoleRepo } from "@tulipfarm/storage";
 import { AGENT_ROLE_ID } from "./roles";
 
@@ -7,7 +7,7 @@ export interface SoulAgents {
 }
 
 export interface AgentPrincipalRepos {
-  readonly principals: Pick<PrincipalRepo, "put">;
+  readonly principals: Pick<PrincipalRepo, "put" | "delete">;
   readonly roles: Pick<RoleRepo, "assign">;
 }
 
@@ -23,6 +23,9 @@ function msg(err: unknown): string {
  * every caller rather than denying something specific — so provisioning is not an enhancement to
  * an Agent, it is the difference between an Agent that works and one that cannot act at all.
  * Idempotent, so publication, the boot sweep and the post-sync sweep can all call it.
+ *
+ * `agentId` is the Agent's permanent id, never its name: a rename must not strand the Principal
+ * that carries the Agent's authority, nor mint a second one under the new name.
  */
 export async function ensureAgentPrincipal(
   repos: AgentPrincipalRepos,
@@ -34,11 +37,26 @@ export async function ensureAgentPrincipal(
 }
 
 /**
+ * Retire a deleted Agent's Principal, and with it — by the `role_assignments` cascade — its Role.
+ *
+ * Left behind, the pair is an authority with no Agent to exercise it. That is harmless only while
+ * every Agent holds the same Role and nothing routes a call to a deleted id, and it stops being
+ * harmless the moment Roles differ or an id is reachable again.
+ */
+export async function removeAgentPrincipal(
+  repos: AgentPrincipalRepos,
+  businessId: string,
+  agentId: string
+): Promise<void> {
+  await repos.principals.delete(businessId, agentId);
+}
+
+/**
  * Provision a Principal for every Agent a turn can route to.
  *
- * `DEFAULT_ASSISTANT_NAME` is included because normal chat runs on it and it is not a Soul
- * artifact, so no publication would ever create it. Failures are logged per Agent rather than
- * thrown: one unprovisionable Agent must not stop the rest from being repaired.
+ * `DEFAULT_ASSISTANT_ID` is included because normal chat runs on it and it is not a Soul artifact,
+ * so no publication would ever create it. Failures are logged per Agent rather than thrown: one
+ * unprovisionable Agent must not stop the rest from being repaired.
  */
 export async function reconcileAgentPrincipals(
   repos: AgentPrincipalRepos,
@@ -46,7 +64,8 @@ export async function reconcileAgentPrincipals(
   businessId: string,
   logger?: Pick<Logger, "warn">
 ): Promise<void> {
-  for (const agentId of [DEFAULT_ASSISTANT_NAME, ...soul.agents.keys()]) {
+  const ids = [DEFAULT_ASSISTANT_ID, ...[...soul.agents.values()].map((agent) => agent.id)];
+  for (const agentId of ids) {
     try {
       await ensureAgentPrincipal(repos, businessId, agentId);
     } catch (err) {

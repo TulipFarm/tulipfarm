@@ -5,12 +5,13 @@ import type {
   KnowledgeSpaceRepo,
 } from "@tulipfarm/knowledge";
 import type { TeamAssetType } from "@tulipfarm/schema";
-import type {
-  BundledSkill,
-  RoutineCatalog,
-  SoulAgent,
-  SoulLoader,
-  SoulSkill,
+import {
+  type BundledSkill,
+  type RoutineCatalog,
+  resolveAgentRef,
+  type SoulAgent,
+  type SoulLoader,
+  type SoulSkill,
 } from "@tulipfarm/soul";
 import type { PgKnowledgeSourceStore } from "../knowledge-sources/source-store";
 import {
@@ -54,7 +55,10 @@ function put(out: Map<string, TeamAssetCatalogMetadata>, metadata: TeamAssetCata
 function agentMetadata(agent: SoulAgent): TeamAssetCatalogMetadata {
   return {
     assetType: "agent",
-    id: agent.name,
+    // The ownership row keys on the Agent's permanent id, so the catalogue entry must too, or a
+    // renamed Agent's assets stop matching the rows that describe them. `href` keeps the name,
+    // which is what the product's URLs carry.
+    id: agent.id,
     label: text(agent.frontmatter.label) ?? agent.name,
     description: text(agent.frontmatter.description) ?? null,
     href: `/agents/${encodeURIComponent(agent.name)}`,
@@ -117,7 +121,7 @@ export class TeamAssetCatalogProvider implements TeamAssetCatalogMetadataProvide
     const out = new Map<string, TeamAssetCatalogMetadata>();
 
     for (const id of ids.get("agent") ?? []) {
-      const agent = this.deps.soul.agents.get(id);
+      const agent = resolveAgentRef(this.deps.soul.agents, id);
       if (agent) put(out, agentMetadata(agent));
     }
     for (const id of ids.get("skill") ?? []) {

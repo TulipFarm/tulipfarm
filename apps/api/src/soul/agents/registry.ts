@@ -5,6 +5,7 @@ import {
 } from "@tulipfarm/run-kernel";
 import type { AgentCapabilityRestrictions } from "@tulipfarm/schema";
 import {
+  getAgent,
   getDefaultAssistant,
   resolveAgent,
   routineDefinitionReferences,
@@ -31,6 +32,9 @@ export function hostedAgentResolver(soulLoader: SoulLoader | undefined): AgentRe
   return {
     resolve(agentId?: string): HostedAgent {
       const agent = resolveAgent(soulLoader, agentId);
+      // Refused, not substituted: an `agentId` the Soul does not have must never run on the
+      // default assistant's authority. The dispatcher denies the call on this marker.
+      if (agent === undefined) return { name: agentId ?? "", unresolvedRef: agentId ?? "" };
       const allowlist = getDefaultAssistant(agent.name)?.toolAllowlist;
       const autonomy = asChatAutonomy(agent.frontmatter.autonomy);
       const capabilityRestrictions = agent.frontmatter.capabilityRestrictions as
@@ -38,6 +42,7 @@ export function hostedAgentResolver(soulLoader: SoulLoader | undefined): AgentRe
         | undefined;
       return {
         name: agent.name,
+        principalId: agent.id,
         ...(allowlist === undefined ? {} : { toolAllowlist: allowlist }),
         ...(autonomy === undefined ? {} : { autonomy }),
         ...(capabilityRestrictions === undefined ? {} : { capabilityRestrictions }),
@@ -139,7 +144,7 @@ export function delegableToolNames(
   const restrictions =
     agentId === undefined
       ? undefined
-      : (soulLoader?.agents.get(agentId)?.frontmatter.capabilityRestrictions as
+      : (getAgent(soulLoader, agentId)?.frontmatter.capabilityRestrictions as
           | AgentCapabilityRestrictions
           | undefined);
   if (restrictions === undefined) return undefined;

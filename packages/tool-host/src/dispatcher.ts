@@ -51,16 +51,16 @@ import type { ParkableToolDef, RequestContext, ToolHostLogger } from "./types";
 const DEFAULT_AGENT: HostedAgent = { name: "assistant" };
 
 /**
- * The Principal whose authority layer bounds this call — the Agent that was actually resolved,
- * never the one the request asked for. An unrecognised `agentId` falls back to a real Agent while
- * the requested name stays unknown, so reading the request would authorize one identity under
- * another's name and resolve an empty layer for it.
+ * The Principal whose authority layer bounds this call — the resolved Agent's permanent id, never
+ * its name. The name is a handle a user may change; the Principal, its Role assignment and its
+ * ownership rows all key on the id, so authorizing by name would resolve an empty layer for every
+ * Agent that has ever been renamed.
  *
  * `DEFAULT_AGENT` is the stand-in for "this process composed no resolver", not an Agent anyone
- * configured, so it names no Principal and contributes no layer.
+ * configured, so it carries no id and contributes no layer.
  */
 function agentPrincipalIdOf(agent: HostedAgent): string | undefined {
-  return agent === DEFAULT_AGENT ? undefined : agent.name;
+  return agent.principalId;
 }
 
 /** Executes one Tool call: allowlist, schema, gate, and context all come from the recorded Run. */
@@ -315,6 +315,12 @@ export class RegistryToolDispatcher implements TurnToolDispatcher {
       request === undefined
         ? (authority.agent ?? DEFAULT_AGENT)
         : (this.options.agents?.resolve(request.agentId) ?? authority.agent ?? DEFAULT_AGENT);
+    // A named Agent that resolves to nothing is refused rather than run as somebody else. It
+    // reaches here as an Agent, not as absence, because absence means "no resolver was composed"
+    // and would leave the call on this process's own unrestricted default.
+    if (agent.unresolvedRef !== undefined) {
+      return { status: "denied", reason: `agent "${agent.unresolvedRef}" is not configured` };
+    }
     // The routed Agent's configured autonomy is an authority ceiling, so the turn runs at the more
     // restrictive of it and whatever this request asked for. Reading `request.autonomy` alone made
     // the ceiling shown on the Agent advisory: any caller that supplied a permissive per-turn value

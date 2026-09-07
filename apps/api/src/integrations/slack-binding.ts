@@ -1,6 +1,6 @@
 import type { SecretsService } from "@tulipfarm/secrets";
 import type { SoulLoader } from "@tulipfarm/soul";
-import { DEFAULT_ASSISTANT_NAME } from "@tulipfarm/soul";
+import { DEFAULT_ASSISTANT_ID, getAgent } from "@tulipfarm/soul";
 import type { IntegrationStore } from "@tulipfarm/storage";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { ErrorSchema } from "../auth/schemas";
@@ -142,7 +142,7 @@ export async function ensureDefaultSlackRoute(deps: SlackBindDeps): Promise<void
     id: routeId,
     businessId: deps.businessId,
     integrationId,
-    agentId: DEFAULT_ASSISTANT_NAME,
+    agentId: DEFAULT_ASSISTANT_ID,
     channelId: null,
     threadId: null,
     eventTypes: ["message"],
@@ -197,7 +197,10 @@ export function registerSlackBindRoute(app: FastifyInstance, deps: SlackBindDeps
     },
     async (req, reply) => {
       const { agentId, channelId } = req.body as { agentId: string; channelId?: string };
-      if (!deps.soulLoader.agents.get(agentId)) {
+      // The request carries the Agent's handle; the route stores its permanent id, so a later
+      // rename cannot detach the binding from the Agent it names.
+      const agent = getAgent(deps.soulLoader, agentId);
+      if (agent === undefined) {
         return reply.code(400).send({ error: `agent not found: ${agentId}` });
       }
 
@@ -230,7 +233,7 @@ export function registerSlackBindRoute(app: FastifyInstance, deps: SlackBindDeps
         id: routeId,
         businessId: deps.businessId,
         integrationId,
-        agentId,
+        agentId: agent.id,
         channelId: channelId ?? null,
         threadId: null,
         eventTypes: ["message"],

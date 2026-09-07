@@ -195,6 +195,9 @@ export class ChatTurnContextResolver implements TurnContextResolver {
     const authority: ChatTurnAuthority = { ...turnAuthority, turn };
     const request = await readChatRequest(this.options.artifacts, authority, this.now());
     const agent = resolveAgent(this.options.soulLoader, request.agentId);
+    // The Turn names an Agent this Soul does not have. Assembling the default assistant's Context
+    // for it would run the turn as somebody else, so the Turn fails instead.
+    if (agent === undefined) throw new TurnAuthorityError("agent_not_found");
     const platformAgent = getDefaultAssistant(agent.name);
     const toolAgent = toolAgentFor(platformAgent, agent);
     const presentationContext = await presentationContextForAuthority(
@@ -382,7 +385,7 @@ export class ChatTurnContextResolver implements TurnContextResolver {
    */
   private async authorizeModelSelector(
     authority: ChatTurnAuthority,
-    agent: ReturnType<typeof resolveAgent>,
+    agent: NonNullable<ReturnType<typeof resolveAgent>>,
     request: ChatRequestPayload
   ): Promise<string> {
     const selector = resolveModelSelector(request);

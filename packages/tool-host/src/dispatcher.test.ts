@@ -1105,7 +1105,7 @@ describe("authorization gate", () => {
         agentId: "agent-1",
       }) as unknown as ArtifactService,
       gate: new LiveToolGate(),
-      agents: { resolve: () => ({ name: "agent-1" }) },
+      agents: { resolve: () => ({ name: "agent-1", principalId: "agent-1-id" }) },
       authorityLayers: {
         resolvePrincipalLayer: async (name) => ({ name, grants: ALLOW }),
         resolveAgentLayer: async () => ({ name: "agent", grants: [] }),
@@ -1122,8 +1122,9 @@ describe("authorization gate", () => {
     expect(execute).not.toHaveBeenCalled();
   });
 
-  // An unknown `agentId` falls back to a real Agent, so reading the request would authorize the
-  // fallback's call under a name that names no Principal — an empty layer, and a blanket denial.
+  // Reading the requested `agentId` would authorize the resolved Agent's call under something that
+  // may name no Principal at all — an empty layer, and a blanket denial. The Principal id is also
+  // not the name: only the id keys the `principals` row a layer is built from.
   it("resolves the Agent layer for the Agent that was resolved, not the one requested", async () => {
     const resolved: (string | undefined)[] = [];
     const execute = vi.fn(async () => ok({}));
@@ -1133,7 +1134,7 @@ describe("authorization gate", () => {
       registry,
       artifacts: fakeArtifacts({ agentId: "ghost" }) as unknown as ArtifactService,
       gate: new LiveToolGate(),
-      agents: { resolve: () => ({ name: "fallback" }) },
+      agents: { resolve: () => ({ name: "fallback", principalId: "fallback-id" }) },
       authorityLayers: {
         resolvePrincipalLayer: async (name) => ({ name, grants: ALLOW }),
         resolveAgentLayer: async (_businessId, agentId): Promise<AuthorityLayer> => {
@@ -1150,7 +1151,34 @@ describe("authorization gate", () => {
     });
 
     expect(result).toMatchObject({ status: "succeeded" });
-    expect(resolved).toEqual(["fallback"]);
+    expect(resolved).toEqual(["fallback-id"]);
+  });
+
+  // Roles differ per Agent, so a reference that resolves to nothing must not borrow the default
+  // assistant's authority. The resolver reports it as an Agent, and the call is refused.
+  it("denies a call whose Agent reference resolved to nothing", async () => {
+    const execute = vi.fn(async () => ok({}));
+    const registry = new InMemoryToolCatalog();
+    registry.register(gatedTool(execute));
+    const dispatcher = new RegistryToolDispatcher({
+      registry,
+      artifacts: fakeArtifacts({ agentId: "ghost" }) as unknown as ArtifactService,
+      gate: new LiveToolGate(),
+      agents: { resolve: () => ({ name: "ghost", unresolvedRef: "ghost" }) },
+      authorityLayers: {
+        resolvePrincipalLayer: async (name) => ({ name, grants: ALLOW }),
+        resolveAgentLayer: async (): Promise<AuthorityLayer> => ({ name: "agent", grants: ALLOW }),
+      },
+    });
+
+    const result = await dispatcher.dispatch(AUTHORITY, {
+      callId: "c1",
+      name: "echo",
+      arguments: { text: "hi" },
+    });
+
+    expect(result).toMatchObject({ status: "denied" });
+    expect(execute).not.toHaveBeenCalled();
   });
 
   // The stand-in for "this process composed no resolver" is not an Agent anyone configured, so it

@@ -43,6 +43,8 @@ export interface AgentToolContext {
    * degraded Agent to be repaired by the next sweep, never a failed create the model should retry.
    */
   ensurePrincipal?: (agentId: string) => Promise<void>;
+  /** Retires a deleted Agent's Principal and its Role assignment. */
+  removePrincipal?: (agentId: string) => Promise<void>;
 }
 
 function ownershipOf(frontmatter: Record<string, unknown>) {
@@ -230,7 +232,7 @@ const agentCreate = defineApiTool<AgentToolContext>({
       try {
         await ctx.teamAssets.require(
           "agent",
-          plan.agent.name,
+          plan.agent.id,
           principal,
           "edit",
           ownershipOf(plan.agent.frontmatter)
@@ -255,8 +257,8 @@ const agentCreate = defineApiTool<AgentToolContext>({
       () => err("validation_error", "agent already exists")
     );
     if (!failure && created) {
-      if (ctx.teamAssets) await ctx.teamAssets.ensure("agent", target, ownershipOf(frontmatter));
-      await ctx.ensurePrincipal?.(target);
+      if (ctx.teamAssets) await ctx.teamAssets.ensure("agent", id, ownershipOf(frontmatter));
+      await ctx.ensurePrincipal?.(id);
     }
     return failure ?? ok({ name: target, created, changed: true, frontmatter, body });
   },
@@ -320,7 +322,7 @@ const agentUpdate = defineApiTool<AgentToolContext>({
       try {
         await ctx.teamAssets.require(
           "agent",
-          name,
+          existing.id,
           principal,
           "edit",
           ownershipOf(existing.frontmatter)
@@ -385,7 +387,7 @@ const agentGet = defineApiTool<AgentToolContext>({
       try {
         await ctx.teamAssets.require(
           "agent",
-          name,
+          agent.id,
           principal,
           "view",
           ownershipOf(agent.frontmatter)
@@ -435,7 +437,7 @@ const agentList = defineApiTool<AgentToolContext>({
                   agent,
                   access: await ctx.teamAssets?.access(
                     "agent",
-                    agent.name,
+                    agent.id,
                     principal,
                     ownershipOf(agent.frontmatter)
                   ),
@@ -487,7 +489,8 @@ const agentDelete = defineApiTool<AgentToolContext>({
       ownershipOperationId?: string;
     };
 
-    if (!ctx.soulLoader.agents.has(name)) return err("not_found", `agent not found: ${name}`);
+    const existing = ctx.soulLoader.agents.get(name);
+    if (!existing) return err("not_found", `agent not found: ${name}`);
     if (ctx.teamAssets) {
       if (!ownershipOperationId) {
         return err("write_denied", "Agent deletion requires unanimous owner Approval");
@@ -495,7 +498,7 @@ const agentDelete = defineApiTool<AgentToolContext>({
       try {
         await ctx.teamAssets.consumeLifecycleApproval(
           "agent",
-          name,
+          existing.id,
           "delete",
           ownershipOperationId
         );
@@ -519,7 +522,10 @@ const agentDelete = defineApiTool<AgentToolContext>({
       return err("internal_error", reason(e));
     }
 
-    await ctx.teamAssets?.remove("agent", name);
+    await ctx.teamAssets?.remove("agent", existing.id);
+    // Reaped with the Agent, not left behind: an orphaned Principal is an authority nothing owns,
+    // and the id would carry that authority into whatever is later created under it.
+    await ctx.removePrincipal?.(existing.id);
     return ok({ name, deleted: true });
   },
 });
