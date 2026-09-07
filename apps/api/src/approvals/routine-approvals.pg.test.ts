@@ -3,14 +3,19 @@ import { DEPLOYMENT_BUSINESS_ID } from "@tulipfarm/constants";
 import {
   ArtifactService,
   DurableInvocationGateway,
+  type DurableWaitError,
   DurableWaitManager,
   PgDurableInvocationStore,
   type RegisterWaitInput,
   RunResumeGateway,
   TypedOutputValidator,
 } from "@tulipfarm/run-kernel";
-import { INVOCATION_REQUEST_SCHEMAS, MANUAL_REQUEST_SCHEMA_REF } from "@tulipfarm/schema";
-import { ArtifactStore, RunStore, WaitStore } from "@tulipfarm/storage";
+import {
+  canonicalHash,
+  INVOCATION_REQUEST_SCHEMAS,
+  MANUAL_REQUEST_SCHEMA_REF,
+} from "@tulipfarm/schema";
+import { ArtifactStore, RunStore, type TransactionPort, WaitStore } from "@tulipfarm/storage";
 import { ApprovalsRepo } from "@tulipfarm/tool-host";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { ambientTransactionPort, type Queryable, transactionPort, withTransaction } from "../db";
@@ -50,6 +55,8 @@ describe("routine approvals as durable waits", () => {
   let host: InternalRoutineApprovalHost;
   let approvals: RoutineApprovalService;
   let invocations: DurableInvocationGateway;
+  let transactions: TransactionPort;
+  let waits: DurableWaitManager;
 
   beforeEach(async () => {
     db = await makeMigratedPglite();
@@ -73,7 +80,7 @@ describe("routine approvals as durable waits", () => {
       },
     });
 
-    const transactions = transactionPort(queryable);
+    transactions = transactionPort(queryable);
     runs = new RunStore(transactions);
     repo = new ApprovalsRepo(queryable);
     const resume = new RunResumeGateway(runs);
@@ -83,9 +90,9 @@ describe("routine approvals as durable waits", () => {
       withTransaction: (operation) => withTransaction(queryable, operation),
       resume,
     });
+    waits = new DurableWaitManager(new WaitStore(transactions), resume);
     approvals = new RoutineApprovalService({
-      repo,
-      waits: new DurableWaitManager(new WaitStore(transactions), resume),
+      transactions,
     });
   });
 
@@ -193,6 +200,236 @@ describe("routine approvals as durable waits", () => {
       approvalId,
       decision: "approved",
     });
+  });
+
+  it("rolls back the decision and wake together when their transaction fails", async () => {
+    const runId = await startRoutineRun();
+    const { approvalId, waitId } = await open(runId);
+    await park(runId);
+    const failing = new RoutineApprovalService({
+      transactions: {
+        withTransaction: (operation) =>
+          transactions.withTransaction(async (transaction) => {
+            await operation(transaction);
+            throw new Error("commit failed");
+          }),
+      },
+    });
+    const decision = {
+      businessId: DEPLOYMENT_BUSINESS_ID,
+      approvalId,
+      decision: "approved" as const,
+      principal: "user:user-1",
+      roles: [APPROVER_ROLE],
+    };
+
+    await expect(failing.signal(decision)).rejects.toThrow("commit failed");
+    expect(await repo.findById(approvalId)).toMatchObject({ status: "pending" });
+    expect(await runs.find(DEPLOYMENT_BUSINESS_ID, runId)).toMatchObject({ status: "waiting" });
+    expect(await waits.find(DEPLOYMENT_BUSINESS_ID, waitId)).toMatchObject({ status: "pending" });
+    await expect(waits.listSignals(DEPLOYMENT_BUSINESS_ID, waitId)).resolves.toEqual([]);
+    await expect(approvals.signal(decision)).resolves.toBe("resumed");
+    expect(await runs.find(DEPLOYMENT_BUSINESS_ID, runId)).toMatchObject({ status: "queued" });
+  });
+
+  it.each(["user:original-approver", undefined])(
+    "re-drives a legacy settled decision with persisted approver %s",
+    async (approver) => {
+      const runId = await startRoutineRun();
+      const { approvalId, waitId } = await open(runId);
+      await park(runId);
+      await repo.settlePending(approvalId, "approved", approver);
+
+      await expect(
+        approvals.signal({
+          businessId: DEPLOYMENT_BUSINESS_ID,
+          approvalId,
+          decision: "approved",
+          principal: "user:retrying-admin",
+          roles: [APPROVER_ROLE],
+        })
+      ).resolves.toBe("resumed");
+
+      expect(await runs.find(DEPLOYMENT_BUSINESS_ID, runId)).toMatchObject({ status: "queued" });
+      expect(await repo.findById(approvalId)).toMatchObject({
+        approverPrincipalId: approver ?? null,
+      });
+      await expect(waits.listSignals(DEPLOYMENT_BUSINESS_ID, waitId)).resolves.toEqual([
+        expect.objectContaining({
+          correlationKey: `approval:${approvalId}`,
+          principal: `role:${APPROVER_ROLE}`,
+          signalDigest: canonicalHash({
+            approvalId,
+            decision: "approved",
+            decidedBy: approver ?? null,
+          }),
+        }),
+      ]);
+    }
+  );
+
+  it("never signals a conflicting retry of a settled decision", async () => {
+    const runId = await startRoutineRun();
+    const { approvalId, waitId } = await open(runId);
+    await park(runId);
+    await repo.settlePending(approvalId, "approved", "user:original-approver");
+
+    await expect(
+      approvals.signal({
+        businessId: DEPLOYMENT_BUSINESS_ID,
+        approvalId,
+        decision: "denied",
+        principal: "user:retrying-admin",
+        roles: [APPROVER_ROLE],
+      })
+    ).resolves.toBe("already_settled");
+
+    expect(await runs.find(DEPLOYMENT_BUSINESS_ID, runId)).toMatchObject({ status: "waiting" });
+    await expect(waits.listSignals(DEPLOYMENT_BUSINESS_ID, waitId)).resolves.toEqual([]);
+  });
+
+  it("does not record or wake twice when the same decision is retried", async () => {
+    const runId = await startRoutineRun();
+    const { approvalId, waitId } = await open(runId);
+    await park(runId);
+    const decision = {
+      businessId: DEPLOYMENT_BUSINESS_ID,
+      approvalId,
+      decision: "approved" as const,
+      principal: "user:original-approver",
+      roles: [APPROVER_ROLE],
+    };
+
+    await expect(approvals.signal(decision)).resolves.toBe("resumed");
+    const afterFirst = await runs.find(DEPLOYMENT_BUSINESS_ID, runId);
+    await expect(approvals.signal({ ...decision, principal: "user:retrying-admin" })).resolves.toBe(
+      "resumed"
+    );
+
+    expect(await runs.find(DEPLOYMENT_BUSINESS_ID, runId)).toEqual(afterFirst);
+    await expect(waits.listSignals(DEPLOYMENT_BUSINESS_ID, waitId)).resolves.toHaveLength(1);
+  });
+
+  it.each(["user:original-approver", undefined])(
+    "requeues an already-signalled legacy approval with persisted approver %s",
+    async (approver) => {
+      const runId = await startRoutineRun();
+      const { approvalId, waitId } = await open(runId);
+      await repo.settlePending(approvalId, "approved", approver);
+      const row = await repo.findById(approvalId);
+      const payload = row?.payload as { resumeToken?: string };
+      if (payload.resumeToken === undefined) throw new Error("missing resume token");
+      const wait = await waits.find(DEPLOYMENT_BUSINESS_ID, waitId);
+      if (wait === null) throw new Error("missing wait");
+      await waits.signal({
+        id: "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+        businessId: DEPLOYMENT_BUSINESS_ID,
+        runId,
+        token: payload.resumeToken,
+        principal: `role:${APPROVER_ROLE}`,
+        schemaRef: wait.schemaRef,
+        correlationKey: `approval:${approvalId}`,
+        signalDigest: canonicalHash({
+          approvalId,
+          decision: "approved",
+          decidedBy: "user:original-approver",
+        }),
+        receivedAt: new Date().toISOString(),
+      });
+      await park(runId);
+
+      await expect(
+        approvals.signal({
+          businessId: DEPLOYMENT_BUSINESS_ID,
+          approvalId,
+          decision: "approved",
+          principal: "user:retrying-admin",
+          roles: [APPROVER_ROLE],
+        })
+      ).resolves.toBe("resumed");
+
+      expect(await runs.find(DEPLOYMENT_BUSINESS_ID, runId)).toMatchObject({ status: "queued" });
+      await expect(waits.listSignals(DEPLOYMENT_BUSINESS_ID, waitId)).resolves.toEqual([
+        expect.objectContaining({
+          signalDigest: canonicalHash({
+            approvalId,
+            decision: "approved",
+            decidedBy: "user:original-approver",
+          }),
+        }),
+      ]);
+    }
+  );
+
+  it("recovers an already-signalled wait without waking a newer unresolved wait", async () => {
+    const runId = await startRoutineRun();
+    const { approvalId, waitId } = await open(runId);
+    await repo.settlePending(approvalId, "approved", "user:original-approver");
+    const row = await repo.findById(approvalId);
+    const payload = row?.payload as { resumeToken?: string };
+    if (payload.resumeToken === undefined) throw new Error("missing resume token");
+    const wait = await waits.find(DEPLOYMENT_BUSINESS_ID, waitId);
+    if (wait === null) throw new Error("missing wait");
+    await waits.signal({
+      id: "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee",
+      businessId: DEPLOYMENT_BUSINESS_ID,
+      runId,
+      token: payload.resumeToken,
+      principal: `role:${APPROVER_ROLE}`,
+      schemaRef: wait.schemaRef,
+      correlationKey: `approval:${approvalId}`,
+      signalDigest: canonicalHash({
+        approvalId,
+        decision: "approved",
+        decidedBy: "user:original-approver",
+      }),
+      receivedAt: new Date().toISOString(),
+    });
+    await waits.register({
+      ...waitPlan({
+        id: "ffffffff-ffff-4fff-8fff-ffffffffffff",
+        stateKey: STATE_KEY,
+      }),
+      businessId: DEPLOYMENT_BUSINESS_ID,
+      runId,
+    });
+    await park(runId);
+
+    await expect(
+      approvals.signal({
+        businessId: DEPLOYMENT_BUSINESS_ID,
+        approvalId,
+        decision: "approved",
+        principal: "user:retrying-admin",
+        roles: [APPROVER_ROLE],
+      })
+    ).resolves.toBe("resumed");
+
+    expect(await runs.find(DEPLOYMENT_BUSINESS_ID, runId)).toMatchObject({ status: "waiting" });
+    await expect(waits.listSignals(DEPLOYMENT_BUSINESS_ID, waitId)).resolves.toHaveLength(1);
+  });
+
+  it("rolls back a decision when its wait has expired", async () => {
+    const runId = await startRoutineRun();
+    const now = new Date();
+    const { approvalId } = await open(runId, {
+      createdAt: new Date(now.getTime() - 120_000).toISOString(),
+      deadlineAt: new Date(now.getTime() - 60_000).toISOString(),
+    });
+    await park(runId);
+
+    await expect(
+      approvals.signal({
+        businessId: DEPLOYMENT_BUSINESS_ID,
+        approvalId,
+        decision: "approved",
+        principal: "user:user-1",
+        roles: [APPROVER_ROLE],
+      })
+    ).rejects.toMatchObject<Partial<DurableWaitError>>({ code: "wait_expired" });
+
+    expect(await repo.findById(approvalId)).toMatchObject({ status: "pending" });
+    expect(await runs.find(DEPLOYMENT_BUSINESS_ID, runId)).toMatchObject({ status: "waiting" });
   });
 
   it("refuses a decider holding none of the authored roles, leaving the Run parked", async () => {

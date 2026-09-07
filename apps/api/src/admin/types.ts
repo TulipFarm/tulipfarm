@@ -17,6 +17,7 @@ export type OperationalPermission =
 export interface OperationalGrant {
   readonly businessId: string;
   readonly principalId: string;
+  readonly roles?: readonly string[];
   readonly permissions: readonly OperationalPermission[];
 }
 

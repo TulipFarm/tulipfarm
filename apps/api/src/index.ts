@@ -127,7 +127,6 @@ import {
   soulPublicationProbe,
 } from "./admin/health";
 import { modelReachability } from "./admin/model-reachability";
-import { OperationalNotImplementedError } from "./admin/routes";
 import { createRunReader } from "./admin/run-reader";
 import { createRuntimeOperationalApi } from "./admin/runtime";
 import { buildApp } from "./app";
@@ -913,7 +912,7 @@ async function boot() {
     const runResume = new RunResumeGateway(runStore);
     const runWaits = new DurableWaitManager(new WaitStore(runTransactions), runResume);
     const toolApprovals = new ToolApprovalService({ repo: approvalsRepo, waits: runWaits });
-    const routineApprovals = new RoutineApprovalService({ repo: approvalsRepo, waits: runWaits });
+    const routineApprovals = new RoutineApprovalService({ transactions: runTransactions });
     const ingressDeliveries = new IngressDeliveriesRepo(pool);
     const integrationThreads = new IntegrationConversationsRepo(pool);
     const integrationEvents = new IntegrationEventsRepo(pool);
@@ -1459,6 +1458,7 @@ async function boot() {
         approvals: approvalsRepo,
         ownershipApprovals: teamAssets,
         toolApprovals,
+        routineApprovals,
         runs: runReader,
         healthProbes: [
           postgresProbe(pool),
@@ -1467,14 +1467,6 @@ async function boot() {
           soulPublicationProbe(pool),
           llmProbe(llmService, { reachability: modelReachability(llmService) }),
         ],
-        // strand the Run, so the attempt fails loudly instead. Tool-call Approvals — the ones
-        // this deployment actually produces — are resolved in-process and never reach here.
-        enqueueWake: async () => {
-          throw new OperationalNotImplementedError(
-            "Resuming a Routine-state Approval requires the Routine wake worker, which this " +
-              "deployment does not run."
-          );
-        },
         guardrailsConfig: () => soulLoader.guardrailsConfig,
         teamMigrationReport: async (businessId) => {
           const present = await pool.query<{ exists: boolean }>(

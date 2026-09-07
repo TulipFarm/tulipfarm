@@ -19,9 +19,14 @@ function request() {
   return { principal } as unknown as FastifyRequest;
 }
 
-function runtime(withOwnershipApproval = false) {
-  const signal = vi.fn(async () => "resumed" as const);
-  const enqueueWake = vi.fn(async () => undefined);
+function runtime(
+  withOwnershipApproval = false,
+  toolSignalResult: "resumed" | "not_found" | "already_settled" = "resumed",
+  routineSignalResult: "resumed" | "already_settled" = "resumed",
+  settledDecision?: "approved" | "denied"
+) {
+  const signal = vi.fn(async () => toolSignalResult);
+  const routineSignal = vi.fn(async () => routineSignalResult);
   const activity = {
     list: vi.fn(async () => ({
       items: [
@@ -69,8 +74,15 @@ function runtime(withOwnershipApproval = false) {
           ]
         : []
     ),
-    findById: vi.fn(async () => null),
-    settle: vi.fn(async () => undefined),
+    findById: vi.fn(async () =>
+      settledDecision === undefined
+        ? null
+        : ({
+            id: "approval-routine",
+            kind: "routine_state",
+            status: settledDecision,
+          } as never)
+    ),
   };
   const run = {
     id: "run-1",
@@ -108,6 +120,7 @@ function runtime(withOwnershipApproval = false) {
     activity,
     approvals,
     toolApprovals: { signal },
+    routineApprovals: { signal: routineSignal },
     ...(withOwnershipApproval
       ? {
           ownershipApprovals: {
@@ -146,7 +159,6 @@ function runtime(withOwnershipApproval = false) {
         },
       },
     ],
-    enqueueWake,
     guardrailsConfig: () => ({ input: { enabled: true } }),
     teamMigrationReport: vi.fn(async () => ({
       items: [
@@ -180,7 +192,7 @@ function runtime(withOwnershipApproval = false) {
       ],
     })),
   });
-  return { api, signal, enqueueWake, runs };
+  return { api, signal, routineSignal, runs };
 }
 
 describe("runtime operational API", () => {
@@ -287,7 +299,7 @@ describe("runtime operational API", () => {
   });
 
   it("settles a Tool Approval by signalling the wait its Run parked on", async () => {
-    const { api, signal } = runtime();
+    const { api, signal, routineSignal } = runtime();
     const grant = await api.authorize(request());
     if (!grant) throw new Error("expected an admin grant");
 
@@ -312,6 +324,60 @@ describe("runtime operational API", () => {
       decision: "approved",
       principal: "user:user-1",
     });
+    expect(routineSignal).not.toHaveBeenCalled();
+  });
+
+  it("settles a Routine Approval through its durable wait service", async () => {
+    const { api, signal, routineSignal } = runtime(false, "not_found");
+    const grant = await api.authorize(request());
+    if (!grant) throw new Error("expected an admin grant");
+
+    await expect(
+      api.decideApproval(grant, {
+        approvalId: "approval-routine",
+        decision: "approved",
+        idempotencyKey: "decision-routine-1",
+      })
+    ).resolves.toMatchObject({ approvalId: "approval-routine", status: "approved" });
+
+    expect(signal).toHaveBeenCalledOnce();
+    expect(routineSignal).toHaveBeenCalledWith({
+      businessId: "tulipfarm-local",
+      approvalId: "approval-routine",
+      decision: "approved",
+      principal: "user:user-1",
+      roles: ["admin"],
+    });
+  });
+
+  it("accepts the same Routine decision after an API restart without signalling twice", async () => {
+    const { api, routineSignal } = runtime(false, "not_found", "already_settled", "approved");
+    const grant = await api.authorize(request());
+    if (!grant) throw new Error("expected an admin grant");
+
+    await expect(
+      api.decideApproval(grant, {
+        approvalId: "approval-routine",
+        decision: "approved",
+        idempotencyKey: "decision-after-restart",
+      })
+    ).resolves.toMatchObject({ status: "approved" });
+    expect(routineSignal).toHaveBeenCalledOnce();
+  });
+
+  it("rejects a conflicting Routine decision after an API restart", async () => {
+    const { api, routineSignal } = runtime(false, "not_found", "already_settled", "denied");
+    const grant = await api.authorize(request());
+    if (!grant) throw new Error("expected an admin grant");
+
+    await expect(
+      api.decideApproval(grant, {
+        approvalId: "approval-routine",
+        decision: "approved",
+        idempotencyKey: "conflicting-decision-after-restart",
+      })
+    ).rejects.toThrow("Approval not found or already resolved.");
+    expect(routineSignal).toHaveBeenCalledOnce();
   });
 
   it("includes ownership Approvals in the company inbox", async () => {

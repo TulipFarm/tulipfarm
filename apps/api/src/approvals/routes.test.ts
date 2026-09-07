@@ -257,8 +257,7 @@ describe("approval routes — routine_state kind, decided by role", () => {
       tokenRepo: new FakeTokenRepo(),
       approvalsRepo: approvals,
       routineApprovals: new RoutineApprovalService({
-        repo: approvals,
-        waits: new DurableWaitManager(new WaitStore(transactions), new RunResumeGateway(runs)),
+        transactions,
       }),
       llmService: { getModel: vi.fn() } as never,
       conversationRepo: {} as never,
