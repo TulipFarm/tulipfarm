@@ -50,6 +50,19 @@ import type { ParkableToolDef, RequestContext, ToolHostLogger } from "./types";
  */
 const DEFAULT_AGENT: HostedAgent = { name: "assistant" };
 
+/**
+ * The Principal whose authority layer bounds this call — the Agent that was actually resolved,
+ * never the one the request asked for. An unrecognised `agentId` falls back to a real Agent while
+ * the requested name stays unknown, so reading the request would authorize one identity under
+ * another's name and resolve an empty layer for it.
+ *
+ * `DEFAULT_AGENT` is the stand-in for "this process composed no resolver", not an Agent anyone
+ * configured, so it names no Principal and contributes no layer.
+ */
+function agentPrincipalIdOf(agent: HostedAgent): string | undefined {
+  return agent === DEFAULT_AGENT ? undefined : agent.name;
+}
+
 /** Executes one Tool call: allowlist, schema, gate, and context all come from the recorded Run. */
 
 export interface RegistryToolDispatcherOptions {
@@ -385,7 +398,7 @@ export class RegistryToolDispatcher implements TurnToolDispatcher {
     const verdict = await this.authorize(
       authority,
       agent.name,
-      request?.agentId ?? authority.agent?.name,
+      agentPrincipalIdOf(agent),
       definition,
       availableTools,
       call,

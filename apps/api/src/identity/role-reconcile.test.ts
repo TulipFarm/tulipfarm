@@ -216,6 +216,7 @@ describe("registerSoulRoleReconcile", () => {
 
     const soul = {
       roles: new Map<string, SoulRole>(),
+      agents: new Map(),
       reload: async () => {
         const id = ++pass;
         trace.push(`start:${id}`);

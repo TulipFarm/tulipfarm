@@ -6,16 +6,27 @@ import {
   type SoulRole,
 } from "@tulipfarm/soul";
 import type { RoleRepo } from "@tulipfarm/storage";
+import {
+  type AgentPrincipalRepos,
+  reconcileAgentPrincipals,
+  type SoulAgents,
+} from "./agent-principals";
+import { AGENT_ROLE_ID } from "./roles";
 
 interface SoulRoles {
   roles: Map<string, SoulRole>;
 }
-interface ReloadableSoulRoles extends SoulRoles {
+interface ReloadableSoulRoles extends SoulRoles, SoulAgents {
   reload(): Promise<void>;
 }
 
 /** Bootstrap-owned Role ids must never be deleted or overwritten by Soul-authored Roles. */
-export const RESERVED_ROLE_IDS: ReadonlySet<string> = new Set(["owner", "admin", "member"]);
+export const RESERVED_ROLE_IDS: ReadonlySet<string> = new Set([
+  "owner",
+  "admin",
+  "member",
+  AGENT_ROLE_ID,
+]);
 
 function msg(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
@@ -74,14 +85,19 @@ export async function reconcileSoulRoles(
 }
 
 /**
- * On soul.synced, reload from disk and reconcile Roles; failures are logged so sync keeps running.
+ * On soul.synced, reload from disk and reconcile Roles, then the Agent Principals a sync may have
+ * introduced; failures are logged so sync keeps running.
+ *
+ * Both sweeps share this one handler because both read the loader that `soul.reload()` mutates —
+ * a second listener with a reload of its own would make each pass observe a half-settled Soul.
  */
 export function registerSoulRoleReconcile(
   gitSync: EventEmitter,
   soul: ReloadableSoulRoles,
   roles: RoleRepo,
   businessId: string,
-  logger: Logger
+  logger: Logger,
+  agentPrincipals?: AgentPrincipalRepos
 ): void {
   // Serialized, because `soul.reload()` mutates shared loader state that the reconcile then reads.
   // Two overlapping syncs can interleave into a resurrection: the newer one reaps a role that Soul
@@ -95,6 +111,9 @@ export function registerSoulRoleReconcile(
         await soul.reload();
         await reconcileSoulRoles(roles, soul, businessId, logger);
         logger.info("[roles] soul roles reconciled after soul.synced");
+        if (agentPrincipals) {
+          await reconcileAgentPrincipals(agentPrincipals, soul, businessId, logger);
+        }
       } catch (err) {
         logger.error(`[roles] reconcile after soul.synced failed — ${msg(err)}`);
       }

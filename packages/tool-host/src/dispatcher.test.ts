@@ -1105,6 +1105,7 @@ describe("authorization gate", () => {
         agentId: "agent-1",
       }) as unknown as ArtifactService,
       gate: new LiveToolGate(),
+      agents: { resolve: () => ({ name: "agent-1" }) },
       authorityLayers: {
         resolvePrincipalLayer: async (name) => ({ name, grants: ALLOW }),
         resolveAgentLayer: async () => ({ name: "agent", grants: [] }),
@@ -1119,6 +1120,67 @@ describe("authorization gate", () => {
 
     expect(result).toMatchObject({ status: "denied" });
     expect(execute).not.toHaveBeenCalled();
+  });
+
+  // An unknown `agentId` falls back to a real Agent, so reading the request would authorize the
+  // fallback's call under a name that names no Principal — an empty layer, and a blanket denial.
+  it("resolves the Agent layer for the Agent that was resolved, not the one requested", async () => {
+    const resolved: (string | undefined)[] = [];
+    const execute = vi.fn(async () => ok({}));
+    const registry = new InMemoryToolCatalog();
+    registry.register(gatedTool(execute));
+    const dispatcher = new RegistryToolDispatcher({
+      registry,
+      artifacts: fakeArtifacts({ agentId: "ghost" }) as unknown as ArtifactService,
+      gate: new LiveToolGate(),
+      agents: { resolve: () => ({ name: "fallback" }) },
+      authorityLayers: {
+        resolvePrincipalLayer: async (name) => ({ name, grants: ALLOW }),
+        resolveAgentLayer: async (_businessId, agentId): Promise<AuthorityLayer> => {
+          resolved.push(agentId);
+          return { name: "agent", grants: ALLOW };
+        },
+      },
+    });
+
+    const result = await dispatcher.dispatch(AUTHORITY, {
+      callId: "c1",
+      name: "echo",
+      arguments: { text: "hi" },
+    });
+
+    expect(result).toMatchObject({ status: "succeeded" });
+    expect(resolved).toEqual(["fallback"]);
+  });
+
+  // The stand-in for "this process composed no resolver" is not an Agent anyone configured, so it
+  // names no Principal; resolving a layer for it would deny every Tool in such a process.
+  it("resolves no Agent layer when the host composed no Agent at all", async () => {
+    const resolved: (string | undefined)[] = [];
+    const execute = vi.fn(async () => ok({}));
+    const registry = new InMemoryToolCatalog();
+    registry.register(gatedTool(execute));
+    const dispatcher = new RegistryToolDispatcher({
+      registry,
+      artifacts: fakeArtifacts() as unknown as ArtifactService,
+      gate: new LiveToolGate(),
+      authorityLayers: {
+        resolvePrincipalLayer: async (name) => ({ name, grants: ALLOW }),
+        resolveAgentLayer: async (_businessId, agentId): Promise<AuthorityLayer> => {
+          resolved.push(agentId);
+          return { name: "agent", grants: [] };
+        },
+      },
+    });
+
+    const result = await dispatcher.dispatch(AUTHORITY, {
+      callId: "c1",
+      name: "echo",
+      arguments: { text: "hi" },
+    });
+
+    expect(result).toMatchObject({ status: "succeeded" });
+    expect(resolved).toEqual([]);
   });
 
   it("refuses a subject kind the authority model does not know", async () => {

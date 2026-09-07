@@ -177,6 +177,7 @@ import { registerGuardrailsReload } from "./guardrails/reload";
 import { createHookExecutor } from "./hooks/executor";
 import { PgRawPayloadVault } from "./hooks/raw-payload-vault";
 import { webhookSecretPort } from "./hooks/secret-port";
+import { ensureAgentPrincipal, reconcileAgentPrincipals } from "./identity/agent-principals";
 import { PgApiClientRepo } from "./identity/api-clients";
 import { buildApiAuthorityLayerResolver } from "./identity/authority-layers";
 import { channelBindKeyResolver } from "./identity/channel-link";
@@ -570,6 +571,19 @@ async function boot() {
     // reaped). Reserved bootstrap ids are never touched. See identity/role-reconcile.ts.
     await reconcileSoulRoles(
       new PgRoleRepo(transactionPort(pool)),
+      soulLoader,
+      DEPLOYMENT_BUSINESS_ID,
+      console
+    );
+    // Must run before the first Tool call, not merely on publication: an Agent authored before
+    // this sweep existed has no Principal, and an Agent with no Principal contributes an empty
+    // authority layer, which denies every Tool for every caller.
+    const agentPrincipalRepos = {
+      principals: new PgPrincipalRepo(transactionPort(pool)),
+      roles: new PgRoleRepo(transactionPort(pool)),
+    };
+    await reconcileAgentPrincipals(
+      agentPrincipalRepos,
       soulLoader,
       DEPLOYMENT_BUSINESS_ID,
       console
@@ -1100,7 +1114,22 @@ async function boot() {
         events: domainEventEmitter,
       },
       resourceTypes: { gitSync, soulWriter, soulLoader, reconcile: reconcileResources },
-      agentTools: { gitSync, soulWriter, soulLoader, teamAssets },
+      agentTools: {
+        gitSync,
+        soulWriter,
+        soulLoader,
+        teamAssets,
+        ensurePrincipal: (agentId) =>
+          ensureAgentPrincipal(agentPrincipalRepos, DEPLOYMENT_BUSINESS_ID, agentId).catch(
+            (err) => {
+              app.log.error(
+                `[agents] could not provision principal for "${agentId}" — ${
+                  err instanceof Error ? err.message : String(err)
+                }`
+              );
+            }
+          ),
+      },
       skillTools: { ...skillTools, hiddenSkillNames, teamAssets },
       github: githubTools,
       slack: slackTools,
@@ -1679,7 +1708,8 @@ async function boot() {
       soulLoader,
       new PgRoleRepo(transactionPort(pool)),
       DEPLOYMENT_BUSINESS_ID,
-      app.log
+      app.log,
+      agentPrincipalRepos
     );
     logEnvironmentStatus(app.log);
     // Before the wizard, and independent of it: a deployment that never opens the wizard still
