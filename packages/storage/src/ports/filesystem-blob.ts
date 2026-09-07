@@ -1,5 +1,4 @@
 import { createHash, randomUUID } from "node:crypto";
-import type { FileHandle } from "node:fs/promises";
 import { link, mkdir, open, stat, unlink } from "node:fs/promises";
 import { join } from "node:path";
 import type { BlobBody, BlobMetadata, BlobPort, BlobRange, BlobRef } from "./blob";
@@ -55,10 +54,12 @@ export class FileSystemBlobPort implements BlobPort {
   async get(ref: BlobRef, range?: BlobRange): Promise<AsyncIterable<Uint8Array>> {
     const path = this.resolve(ref);
     assertValidRange(range);
-    // Opening before returning means an absent object rejects the call, rather than failing
-    // partway through a stream the caller has already started consuming.
-    const handle = await open(path, "r");
-    return readChunks(handle, range, range === undefined ? ref.hash : undefined);
+    // stat, not open, so an absent object rejects the call itself without holding a FileHandle
+    // open across the async boundary to first iteration — a caller that requests a stream and
+    // never consumes it (or abandons it mid-stream) must not leak an open fd. The FileHandle
+    // itself opens lazily, inside readChunks, only once iteration actually starts.
+    await stat(path);
+    return readChunks(path, range, range === undefined ? ref.hash : undefined);
   }
 
   async head(ref: BlobRef): Promise<BlobMetadata | null> {
@@ -125,11 +126,12 @@ async function* chunksOf(body: BlobBody): AsyncIterable<Uint8Array> {
 }
 
 async function* readChunks(
-  handle: FileHandle,
+  path: string,
   range: BlobRange | undefined,
   verifyAgainst: string | undefined
 ): AsyncIterable<Uint8Array> {
   const hasher = verifyAgainst === undefined ? undefined : createHash("sha256");
+  const handle = await open(path, "r");
   try {
     const stream = handle.createReadStream({
       autoClose: false,
