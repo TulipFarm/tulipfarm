@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.18.15](https://github.com/TulipFarm/tulipfarm/compare/v0.18.14...v0.18.15) (2026-09-07)
+
+### Bug Fixes
+
+* report total model time and fix stream-render glitches around finish ([#743](https://github.com/TulipFarm/tulipfarm/issues/743)) ([9e5beb7](https://github.com/TulipFarm/tulipfarm/commit/9e5beb74765cf8aeaad2c7aad208637d88855167)), closes [#728](https://github.com/TulipFarm/tulipfarm/issues/728), references [#727](https://github.com/TulipFarm/tulipfarm/issues/727)
+* **web:** anchor the sidebar collapse toggle in the sidebar in both states ([#739](https://github.com/TulipFarm/tulipfarm/issues/739)) ([8a9a560](https://github.com/TulipFarm/tulipfarm/commit/8a9a560c4f2738b7b08d100ee35286129a76a7d0))
+* **web:** report download failures and completion in the file preview ([#740](https://github.com/TulipFarm/tulipfarm/issues/740)) ([4cedbf1](https://github.com/TulipFarm/tulipfarm/commit/4cedbf1b9df834ad99ce5d61dc1beeaa7a9a7368))
+* **web:** seed the composer from Companion cards through state, not the URL ([#742](https://github.com/TulipFarm/tulipfarm/issues/742)) ([d389143](https://github.com/TulipFarm/tulipfarm/commit/d389143bf4fb4359e154f736094bf508790da5b5)), closes [#732](https://github.com/TulipFarm/tulipfarm/issues/732)
+
 ## [0.18.14](https://github.com/TulipFarm/tulipfarm/compare/v0.18.13...v0.18.14) (2026-09-07)
 
 ### Features
