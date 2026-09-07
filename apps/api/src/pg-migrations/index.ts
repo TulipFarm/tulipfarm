@@ -72,6 +72,17 @@ import type { Queryable } from "../db";
 import { resourceSideEffectMigration } from "../resources/outbox";
 import { WEBHOOK_INBOX_DISPATCH_MIGRATION_STATEMENTS } from "./webhook-inbox-dispatch";
 
+const OIM_KNOWLEDGE_CHECKPOINT_STATEMENTS = [
+  `CREATE TABLE IF NOT EXISTS oim_knowledge_checkpoints (
+    integration_id text NOT NULL,
+    scope_key      text NOT NULL,
+    cursor         text,
+    seen_item_ids  jsonb,
+    updated_at     timestamptz NOT NULL,
+    PRIMARY KEY (integration_id, scope_key)
+  )`,
+];
+
 export interface PgMigration {
   version: number;
   description: string;
@@ -3292,7 +3303,7 @@ export const PG_MIGRATIONS: PgMigration[] = [
     },
   },
   {
-    version: 105,
+    version: 114,
     description: "OIM Knowledge: exact source Connection attribution",
     up: applyStatements([
       "ALTER TABLE IF EXISTS knowledge_source_records ADD COLUMN IF NOT EXISTS source_locator jsonb",
@@ -3300,22 +3311,22 @@ export const PG_MIGRATIONS: PgMigration[] = [
     ]),
   },
   {
-    version: 106,
+    version: 115,
     description: "OIM webhook inbox: durable event dispatch and recovery",
     up: applyStatements(WEBHOOK_INBOX_DISPATCH_MIGRATION_STATEMENTS),
   },
   {
-    version: 107,
+    version: 116,
     description: "OIM operation quotas and provider cooldowns",
     up: applyStatements(OIM_RATE_LIMIT_STORAGE_STATEMENTS),
   },
   {
-    version: 108,
+    version: 117,
     description: "OIM release trust roots, revocations, and installed provenance",
     up: applyStatements(OIM_RELEASE_TRUST_STORAGE_STATEMENTS),
   },
   {
-    version: 109,
+    version: 118,
     description: "OIM signed release maintenance feed configuration",
     up: applyStatements(OIM_RELEASE_MAINTENANCE_STORAGE_STATEMENTS),
   },

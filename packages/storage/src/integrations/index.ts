@@ -36,6 +36,14 @@ export {
   CHANNEL_RUN_DELIVERY_STORAGE_STATEMENTS,
   ChannelRunDeliveryStore,
 } from "./channel-run-delivery-store";
+export type {
+  ChannelSurfaceInstanceKey,
+  PersistedChannelSurfacePublishJob,
+} from "./channel-surface-store";
+export {
+  CHANNEL_SURFACE_STORAGE_STATEMENTS,
+  ChannelSurfaceStore,
+} from "./channel-surface-store";
 export type { PersistedConnection } from "./connection-store";
 export {
   CONNECTION_STORAGE_STATEMENTS,
@@ -86,6 +94,16 @@ export {
   POLLING_INGRESS_STORAGE_STATEMENTS,
   PollingIngressStore,
 } from "./polling-ingress-store";
+export type { ProviderFileUploadRecord } from "./provider-file-upload-store";
+export {
+  PROVIDER_FILE_UPLOAD_STORAGE_STATEMENTS,
+  ProviderFileUploadStore,
+} from "./provider-file-upload-store";
+export type { ProviderObjectOwnershipRecord } from "./provider-object-ownership-store";
+export {
+  PROVIDER_OBJECT_OWNERSHIP_STORAGE_STATEMENTS,
+  ProviderObjectOwnershipStore,
+} from "./provider-object-ownership-store";
 export type { PersistedSoulRepository } from "./soul-repository-store";
 export {
   SOUL_REPOSITORY_STORAGE_STATEMENTS,

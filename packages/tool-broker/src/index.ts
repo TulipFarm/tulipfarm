@@ -79,6 +79,7 @@ export {
   AdapterDispatchError,
   CompensationError,
   compileToolOutputValidator,
+  EFFECT_OUTPUT_STORAGE_STATEMENTS,
   EFFECT_STORAGE_STATEMENTS,
   EffectCompensator,
   EffectDispatchDeferredError,
