@@ -119,6 +119,7 @@ export function buildSoulDoctor(deps: SoulDoctorDeps): { sweep(): Promise<SweepR
       return {
         path: `routines/${slug}/routine.yaml`,
         content: read.content,
+        baseCommit: read.baseCommit,
         facts: routineFacts(deps.soul.routines.get(slug)?.config ?? {}),
       };
     },
@@ -153,7 +154,11 @@ export function buildSoulDoctor(deps: SoulDoctorDeps): { sweep(): Promise<SweepR
       };
     },
 
-    async publish(finding: Finding, proposal: ProposedRepair): Promise<void> {
+    async publish(
+      finding: Finding,
+      proposal: ProposedRepair,
+      subject: RepairSubject
+    ): Promise<void> {
       const slug = routineSlug(finding);
       if (slug === null) throw new Error("soul doctor: a repair reached publish with no artifact");
       const result = await deps.writer.apply({
@@ -161,6 +166,7 @@ export function buildSoulDoctor(deps: SoulDoctorDeps): { sweep(): Promise<SweepR
         source: "api",
         actor: deps.actor,
         businessId,
+        expectedBaseCommit: subject.baseCommit,
         changes: [{ op: "put", target: { kind: "Routine", slug }, content: proposal.content }],
       });
       if (!result.published) {

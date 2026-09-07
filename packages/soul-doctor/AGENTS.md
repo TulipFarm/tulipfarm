@@ -34,6 +34,8 @@ be repaired automatically or must go to a person. Pure logic: no database, no mo
   key. Widening it needs a matching test, not a new branch.
 - Findings fingerprint on `{code, subject, digest, at}` so a republish retires the old one; Tasks
   dedupe on the subject alone so a republish does not open a second Task. Keep that asymmetry.
+- `RepairSubject` carries the Soul base commit read with its bytes; publication must use it as the
+  expected base so a model response cannot overwrite an interleaved user edit.
 - `doctor:` dedupe keys are refused from Agent-facing Tools (`apps/api/src/tasks/tools.ts`), so a
   Tool call cannot forge or resurrect the Doctor's own escalations.
 - Simulation is not the lint. `simulateRoutine` conflates a missing fixture with an unresolvable

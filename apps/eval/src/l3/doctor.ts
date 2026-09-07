@@ -9,9 +9,11 @@
  * never that a vendor wrote good YAML.
  */
 
+import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
+import { hermeticGitEnv } from "@tulipfarm/soul";
 import {
   type Finding,
   lintRoutineDocument,
@@ -68,9 +70,15 @@ export async function runDoctor(input: {
       if (finding.subject.kind !== "routine") return null;
       if (!soul.loader.routines.has(finding.subject.id)) return null;
       const path = `routines/${finding.subject.id}/routine.yaml`;
+      const baseCommit = execFileSync("git", ["rev-parse", "HEAD"], {
+        cwd: soul.path,
+        env: hermeticGitEnv(),
+        encoding: "utf8",
+      }).trim();
       return {
         path,
         content: await readFile(join(soul.path, path), "utf8"),
+        baseCommit,
         facts: [],
       };
     },
