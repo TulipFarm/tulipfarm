@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.18.13](https://github.com/TulipFarm/tulipfarm/compare/v0.18.12...v0.18.13) (2026-09-07)
+
+### Features
+
+* **agents:** mint a permanent id for every Agent ([#726](https://github.com/TulipFarm/tulipfarm/issues/726)) ([1b427cb](https://github.com/TulipFarm/tulipfarm/commit/1b427cb718a9f726ee0053ee0994ce862253361d))
+
+### Bug Fixes
+
+* **authz:** provision an Agent Principal for every Agent ([#725](https://github.com/TulipFarm/tulipfarm/issues/725)) ([bc068e8](https://github.com/TulipFarm/tulipfarm/commit/bc068e864e7e82445db6ce1d757e72775e714eb7)), references [#692](https://github.com/TulipFarm/tulipfarm/issues/692) [pre-#692](https://github.com/pre-/issues/692)
+
 ## [0.18.12](https://github.com/TulipFarm/tulipfarm/compare/v0.18.11...v0.18.12) (2026-09-07)
 
 ### Features
