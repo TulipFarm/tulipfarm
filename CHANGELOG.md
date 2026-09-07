@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.18.14](https://github.com/TulipFarm/tulipfarm/compare/v0.18.13...v0.18.14) (2026-09-07)
+
+### Features
+
+* **agents:** key every Agent record on its permanent id ([#737](https://github.com/TulipFarm/tulipfarm/issues/737)) ([0d69cac](https://github.com/TulipFarm/tulipfarm/commit/0d69cac42ae8adffb50e576142d59a71ffb9f666)), references [#726](https://github.com/TulipFarm/tulipfarm/issues/726)
+
 ## [0.18.13](https://github.com/TulipFarm/tulipfarm/compare/v0.18.12...v0.18.13) (2026-09-07)
 
 ### Features
