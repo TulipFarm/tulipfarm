@@ -162,6 +162,8 @@ export interface OpenApiOperationBinding {
   readonly multipart?: readonly OimMultipartPart[];
   /** OIM-only signal that a successful response is a File, not JSON. */
   readonly binaryResponse?: boolean;
+  /** OIM-declared header carrying delay-seconds or an HTTP-date after provider rejection. */
+  readonly retryAfterHeader?: string;
   /**
    * Absent when the manifest declares no credential — a genuinely public API. `base_url` carries
    * no header/format: the credential replaces `{token}` in `baseUrl` instead of riding a header.

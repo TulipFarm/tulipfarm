@@ -50,7 +50,8 @@ export interface ResolvedAclStep {
   readonly mode: "item" | "scope";
   readonly operation: OimOperation;
   /** The request parameter carrying the item id, or the scope, depending on `mode`. */
-  readonly parameter: string;
+  readonly parameter?: string;
+  readonly parameters?: Readonly<Record<string, string>>;
   readonly entriesPointer: string;
   readonly entry: OimKnowledgeAclEntry;
 }
@@ -59,6 +60,7 @@ export interface KnowledgeProfilePlan {
   readonly integrationId: string;
   readonly integrationVersion: string;
   readonly majorVersion: number;
+  readonly hooks: OimManifest["hooks"];
   readonly sourceKinds: readonly ResolvedSourceKind[];
   readonly list: {
     readonly operation: OimOperation;
@@ -70,7 +72,8 @@ export interface KnowledgeProfilePlan {
   };
   readonly content: {
     readonly operation: OimOperation;
-    readonly itemParameter: string;
+    readonly itemParameter?: string;
+    readonly parameters?: Readonly<Record<string, string>>;
     readonly mapping: OimKnowledge["content"]["mapping"];
     /** True when the provider treats this content as sensitive, which forbids a cached ACL. */
     readonly sensitive: boolean;
@@ -100,15 +103,21 @@ export interface KnowledgeProfilePlan {
         readonly kind: "operation";
         readonly operation: OimOperation;
         readonly scopeParameter?: string;
+        readonly parameters?: Readonly<Record<string, string>>;
         readonly itemsPointer: string;
         readonly itemIdPointer: string;
       }
     | { readonly kind: "none" };
   readonly liveAuthorization?: {
     readonly operation: OimOperation;
-    readonly itemParameter: string;
+    readonly itemParameter?: string;
+    readonly parameters?: Readonly<Record<string, string>>;
     readonly principalParameter?: string;
-    readonly allowedPointer: string;
+    readonly allowedPointer?: string;
+    readonly principalSet?: {
+      readonly entriesPointer: string;
+      readonly principalIdPointer: string;
+    };
   };
   readonly guideFile?: string;
 }
@@ -148,6 +157,7 @@ export function compileKnowledgeProfile(manifest: OimManifest): KnowledgeProfile
     integrationId: manifest.metadata.id,
     integrationVersion: manifest.metadata.version,
     majorVersion: Number(manifest.metadata.version.split(".")[0]),
+    hooks: manifest.hooks,
     sourceKinds: knowledge.sourceKinds.map((kind) => {
       if (kind.discoverOperationId === undefined) {
         return { id: kind.id, label: kind.label, description: kind.description };
@@ -175,6 +185,7 @@ export function compileKnowledgeProfile(manifest: OimManifest): KnowledgeProfile
     content: {
       operation: content,
       itemParameter: knowledge.content.itemParameter,
+      parameters: knowledge.content.parameters,
       mapping: knowledge.content.mapping,
       sensitive: content.effect === "sensitive_read",
     },
@@ -183,6 +194,7 @@ export function compileKnowledgeProfile(manifest: OimManifest): KnowledgeProfile
       operation: acl,
       parameter:
         knowledge.acl.mode === "item" ? knowledge.acl.itemParameter : knowledge.acl.scopeParameter,
+      parameters: knowledge.acl.mode === "item" ? knowledge.acl.parameters : undefined,
       entriesPointer: knowledge.acl.entriesPointer,
       entry: knowledge.acl.entry,
     },
@@ -210,8 +222,10 @@ export function compileKnowledgeProfile(manifest: OimManifest): KnowledgeProfile
       ? {
           operation: role("liveAuthorization", knowledge.liveAuthorization.operationId),
           itemParameter: knowledge.liveAuthorization.itemParameter,
+          parameters: knowledge.liveAuthorization.parameters,
           principalParameter: knowledge.liveAuthorization.principalParameter,
           allowedPointer: knowledge.liveAuthorization.allowedPointer,
+          principalSet: knowledge.liveAuthorization.principalSet,
         }
       : undefined,
     guideFile: knowledge.guideFile,
@@ -233,6 +247,7 @@ function compileDeletion(
         kind: "operation",
         operation: role("deletion", deletion.operationId ?? ""),
         scopeParameter: deletion.scopeParameter,
+        parameters: deletion.parameters,
         itemsPointer: deletion.itemsPointer ?? "/items",
         itemIdPointer: deletion.itemIdPointer ?? "/id",
       };

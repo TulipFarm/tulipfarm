@@ -55,6 +55,8 @@ export interface ConnectionResolutionRequest {
   readonly personalOwnerId?: string;
   /** Required for persistent automation. Omit only for live selection. */
   readonly connectionId?: string;
+  /** Persistent callers set this so a mutable default can never choose their account. */
+  readonly requireExplicitConnection?: boolean;
 }
 
 function supportsOwner(
@@ -122,6 +124,15 @@ export class ConnectionResolver {
     }
 
     const candidates = await this.authorizedCandidates(request);
+    if (request.requireExplicitConnection === true) {
+      const summaries = candidates.map(safeSummary);
+      return {
+        kind: "selection_required",
+        reason:
+          summaries.length === 0 ? "missing" : summaries.length === 1 ? "no_default" : "ambiguous",
+        candidates: summaries,
+      };
+    }
     const personal = candidates.filter((connection) => connection.owner.scope === "personal");
     const team = candidates.filter((connection) => connection.owner.scope === "team");
     const organization = candidates.filter(

@@ -1,8 +1,15 @@
 import { randomBytes, randomUUID } from "node:crypto";
 import type { OimAuth, OimConnection, OimManifest } from "@tulipfarm/schema";
 import { oimOriginAllowed, oimOriginPlaceholder } from "@tulipfarm/schema";
-import type { SecretsService } from "@tulipfarm/secrets";
+import type { ConnectionSecretManager, SecretsService } from "@tulipfarm/secrets";
+import { secretStorageKey } from "@tulipfarm/secrets";
 import type { ConnectionStore } from "@tulipfarm/storage";
+import {
+  type ConnectionOriginApprovalRepository,
+  ConnectionOriginPolicyError,
+  canonicalApprovedPublicOrigin,
+  oimConnectionOriginRequiresApproval,
+} from "./connection-origin-policy";
 
 /**
  * Connecting an installed OIM package.
@@ -21,6 +28,7 @@ export interface OimConnectField {
   readonly input: "text" | "password" | "url";
   readonly required: boolean;
   readonly secret: boolean;
+  readonly requiresOriginApproval?: boolean;
 }
 
 export interface OimConnectStep {
@@ -34,6 +42,12 @@ export interface OimConnectForm {
   readonly integrationId: string;
   readonly majorVersion: number;
   readonly steps: readonly OimConnectStep[];
+  readonly authorizationSteps: readonly {
+    readonly id: string;
+    readonly type: "oauth2" | "app_manifest" | "install";
+    readonly title: string;
+    readonly description?: string;
+  }[];
   /** Step types present in the manifest that this runtime cannot yet execute. */
   readonly unsupportedStepTypes: readonly string[];
   /**
@@ -88,35 +102,45 @@ export function oimConnectForm(manifest: OimManifest): OimConnectForm {
       input: field.input,
       required: field.required !== false,
       secret: field.target.type === "credential",
+      ...(field.target.type === "configuration" &&
+      oimConnectionOriginRequiresApproval(manifest, field.target.field)
+        ? { requiresOriginApproval: true }
+        : {}),
     })),
   }));
   const unsupportedStepTypes = [
     ...new Set(
-      (auth?.steps ?? [])
-        .filter(
-          (step) => step.type !== "fields" && step.type !== "oauth2" && step.type !== "webhook"
-        )
-        .map((s) => s.type)
+      (auth?.steps ?? []).filter((step) => !SUPPORTED_AUTH_STEPS.has(step.type)).map((s) => s.type)
     ),
   ];
+  const authorizationSteps = (auth?.steps ?? []).flatMap((step) =>
+    step.type === "oauth2" || step.type === "app_manifest" || step.type === "install"
+      ? [
+          {
+            id: step.id,
+            type: step.type,
+            title: step.title,
+            ...(step.description === undefined ? {} : { description: step.description }),
+          },
+        ]
+      : []
+  );
   return {
     integrationId: manifest.metadata.id,
     majorVersion: oimMajorVersion(manifest),
     steps,
+    authorizationSteps,
     unsupportedStepTypes,
-    requiresAuthorization: (auth?.steps ?? []).some((step) => step.type === "oauth2"),
+    requiresAuthorization: authorizationSteps.length > 0,
   };
 }
+
+const SUPPORTED_AUTH_STEPS = new Set(["fields", "oauth2", "app_manifest", "install", "webhook"]);
 
 /** True when every step the manifest declares is one this runtime can execute today. */
 export function oimConnectSupported(manifest: OimManifest): boolean {
   const steps = manifest.auth?.steps ?? [];
-  return (
-    steps.length > 0 &&
-    steps.every(
-      (step) => step.type === "fields" || step.type === "oauth2" || step.type === "webhook"
-    )
-  );
+  return steps.length > 0 && steps.every((step) => SUPPORTED_AUTH_STEPS.has(step.type));
 }
 
 interface ResolvedField {
@@ -133,12 +157,43 @@ interface ResolvedField {
 function originFields(manifest: OimManifest): ReadonlySet<string> {
   const fields = new Set<string>();
   for (const operation of manifest.operations) {
-    // Only an `http` source carries a templated `baseUrl`; the others pin an absolute URL.
-    if (operation.source.type !== "http") continue;
+    if (operation.source.type !== "http" && operation.source.type !== "openapi") continue;
+    if (operation.source.baseUrl === undefined) continue;
     const placeholder = oimOriginPlaceholder(operation.source.baseUrl);
     if (placeholder !== undefined) fields.add(placeholder);
   }
   return fields;
+}
+
+function originPolicyFields(manifest: OimManifest): readonly string[] {
+  return [...originFields(manifest)].filter((field) =>
+    oimConnectionOriginRequiresApproval(manifest, field)
+  );
+}
+
+/** Policy-bound configured origins that are outside the package's static reviewed allowlist. */
+export function oimConnectionOriginApprovalFields(
+  manifest: OimManifest,
+  connection: Pick<OimConnection, "configuration">
+): readonly string[] {
+  const allowedHosts = manifest.auth?.allowedOriginHosts ?? [];
+  return originPolicyFields(manifest).filter((field) => {
+    const configured = connection.configuration[field];
+    return typeof configured === "string" && !oimOriginAllowed(configured, allowedHosts);
+  });
+}
+
+/** Policy-bound origin fields whose normalized value would change on this Connection. */
+export function oimConnectionChangedOriginFields(
+  manifest: OimManifest,
+  connection: Pick<OimConnection, "configuration">,
+  configurationPatch: Readonly<Record<string, string | number | boolean>>
+): readonly string[] {
+  return originPolicyFields(manifest).filter(
+    (field) =>
+      configurationPatch[field] !== undefined &&
+      configurationPatch[field] !== connection.configuration[field]
+  );
 }
 
 const HOST_RE = /^[A-Za-z0-9](?:[A-Za-z0-9.-]*[A-Za-z0-9])?$/;
@@ -171,6 +226,35 @@ function resolveHost(field: ResolvedField["field"], value: string): string {
   }
   if (!HOST_RE.test(host)) throw new OimConnectError("invalid_value", field.id);
   return host;
+}
+
+function resolveConnectionOrigin(
+  manifest: OimManifest,
+  field: ResolvedField["field"],
+  value: string
+): { readonly host: string; readonly approvalRequired: boolean } {
+  const host = resolveHost(field, value);
+  if (oimOriginAllowed(host, manifest.auth?.allowedOriginHosts ?? [])) {
+    return { host, approvalRequired: false };
+  }
+  const configurationField = field.target.type === "configuration" ? field.target.field : undefined;
+  if (
+    configurationField === undefined ||
+    !oimConnectionOriginRequiresApproval(manifest, configurationField)
+  ) {
+    throw new OimConnectError("origin_not_allowed", host);
+  }
+  try {
+    return {
+      host: new URL(canonicalApprovedPublicOrigin(value)).host,
+      approvalRequired: true,
+    };
+  } catch (error) {
+    if (error instanceof ConnectionOriginPolicyError) {
+      throw new OimConnectError("origin_not_allowed", host);
+    }
+    throw error;
+  }
 }
 
 function coerceConfiguration(
@@ -216,7 +300,8 @@ export interface OimConnectionDeps {
 
 function resolveValues(
   manifest: OimManifest,
-  values: Readonly<Record<string, string>>
+  values: Readonly<Record<string, string>>,
+  requireAll = true
 ): readonly ResolvedField[] {
   const declared = new Map(
     fieldsSteps(manifest.auth).flatMap((step) => step.fields.map((f) => [f.id, f] as const))
@@ -226,6 +311,7 @@ function resolveValues(
   }
   const resolved: ResolvedField[] = [];
   for (const [id, field] of declared) {
+    if (!requireAll && values[id] === undefined) continue;
     const value = values[id]?.trim() ?? "";
     if (value.length === 0) {
       if (field.required !== false) throw new OimConnectError("missing_field", id);
@@ -234,6 +320,54 @@ function resolveValues(
     resolved.push({ field, value });
   }
   return resolved;
+}
+
+function targetIsBound(
+  connection: Pick<OimConnection, "configuration" | "secretBindings">,
+  target: FieldsStep["fields"][number]["target"]
+): boolean {
+  return target.type === "credential"
+    ? connection.secretBindings[target.slot] !== undefined
+    : connection.configuration[target.field] !== undefined;
+}
+
+/** Validates provider-returned configuration before it can affect a compiled destination. */
+export function normalizeOimConfigurationPatch(
+  manifest: OimManifest,
+  values: Readonly<Record<string, string>>
+): Record<string, string | number | boolean> {
+  const normalized: Record<string, string | number | boolean> = {};
+  const origins = originFields(manifest);
+  for (const [id, value] of Object.entries(values)) {
+    const declared = manifest.auth?.configurationFields?.find((field) => field.id === id);
+    if (declared === undefined) throw new OimConnectError("unknown_field", id);
+    const field = {
+      id,
+      label: declared.label,
+      input: declared.type === "url" ? ("url" as const) : ("text" as const),
+      target: { type: "configuration" as const, field: id },
+    };
+    if (origins.has(id)) {
+      const { host } = resolveConnectionOrigin(manifest, field, value);
+      normalized[id] = host;
+      continue;
+    }
+    if (declared.type === "url") assertUrlValue(field, value);
+    normalized[id] = coerceConfiguration(manifest, field, value);
+  }
+  return normalized;
+}
+
+/** Browser-mediated auth is pending until every output declared by those steps is bound. */
+export function oimConnectionAuthorizationPending(
+  manifest: OimManifest,
+  connection: Pick<OimConnection, "configuration" | "secretBindings">
+): boolean {
+  return (manifest.auth?.steps ?? []).some(
+    (step) =>
+      (step.type === "oauth2" || step.type === "app_manifest" || step.type === "install") &&
+      step.bindings.some((binding) => !targetIsBound(connection, binding.target))
+  );
 }
 
 /**
@@ -256,11 +390,11 @@ export async function createOimConnection(
   }
   const resolved = resolveValues(manifest, input.values);
   const origins = originFields(manifest);
-  const allowedHosts = manifest.auth?.allowedOriginHosts ?? [];
 
   const configuration: Record<string, string | number | boolean> = {};
   const agentVisible: string[] = [];
   const pending: { readonly slot: string; readonly value: string }[] = [];
+  let originApprovalRequired = false;
 
   for (const { field, value } of resolved) {
     if (field.target.type === "credential") {
@@ -271,10 +405,9 @@ export async function createOimConnection(
     // An origin field is stored as the bare host the template interpolates, never as the URL it
     // was pasted from, so the stored value is already the one the compiler will substitute.
     if (origins.has(configField)) {
-      const host = resolveHost(field, value);
-      if (!oimOriginAllowed(host, allowedHosts)) {
-        throw new OimConnectError("origin_not_allowed", host);
-      }
+      const origin = resolveConnectionOrigin(manifest, field, value);
+      const { host } = origin;
+      originApprovalRequired ||= origin.approvalRequired;
       configuration[configField] = host;
       if (manifest.auth?.configurationFields?.find((c) => c.id === configField)?.agentVisible) {
         agentVisible.push(configField);
@@ -293,7 +426,7 @@ export async function createOimConnection(
   // every OAuth package unconnectable, since no person can paste an access token they have not yet
   // been issued.
   for (const step of manifest.auth?.steps ?? []) {
-    if (step.type === "oauth2") {
+    if (step.type === "oauth2" || step.type === "app_manifest" || step.type === "install") {
       for (const binding of step.bindings) {
         if (binding.target.type === "credential") bound.add(binding.target.slot);
       }
@@ -321,18 +454,234 @@ export async function createOimConnection(
   }
 
   const connectionId = newId();
-  await deps.connections.put(input.businessId, {
+  const connection: OimConnection = {
     id: connectionId,
     integration: { id: manifest.metadata.id, majorVersion: oimMajorVersion(manifest) },
     label: input.label,
     owner: input.owner,
     status: "active",
-    isDefault: input.isDefault ?? true,
+    isDefault: input.isDefault ?? false,
     configuration,
     agentVisibleConfiguration: agentVisible,
     secretBindings,
     health: { status: "unknown", checkedAt: new Date().toISOString() },
     expiresAt: null,
+  };
+  await deps.connections.put(input.businessId, {
+    ...connection,
+    health: {
+      ...connection.health,
+      status:
+        originApprovalRequired || oimConnectionAuthorizationPending(manifest, connection)
+          ? "action_required"
+          : "unknown",
+    },
   });
+  return { connectionId };
+}
+
+export interface UpdateOimConnectionInput {
+  readonly businessId: string;
+  readonly manifest: OimManifest;
+  readonly connection: OimConnection;
+  readonly label?: string;
+  readonly values?: Readonly<Record<string, string>>;
+  readonly isDefault?: boolean;
+}
+
+export interface UpdateOimConnectionDeps extends OimConnectionDeps {
+  readonly connectionSecrets: Pick<ConnectionSecretManager, "rotate">;
+  readonly originApprovals?: Pick<ConnectionOriginApprovalRepository, "delete">;
+}
+
+interface PreparedConnectionUpdate {
+  readonly configuration: OimConnection["configuration"];
+  readonly agentVisibleConfiguration: readonly string[];
+  readonly credentialValues: ReadonlyMap<string, string>;
+  readonly changedOriginFields: readonly string[];
+  readonly originApprovalRequired: boolean;
+}
+
+function prepareOimConnectionUpdate(input: UpdateOimConnectionInput): PreparedConnectionUpdate {
+  const resolved = resolveValues(input.manifest, input.values ?? {}, false);
+  const origins = originFields(input.manifest);
+  const configuration = { ...input.connection.configuration };
+  const agentVisible = new Set(input.connection.agentVisibleConfiguration);
+  const credentialValues = new Map<string, string>();
+  const changedOriginFields = new Set<string>();
+  let originApprovalRequired = false;
+
+  for (const { field, value } of resolved) {
+    if (field.target.type === "credential") {
+      credentialValues.set(field.target.slot, value);
+      continue;
+    }
+
+    const configField = field.target.field;
+    if (origins.has(configField)) {
+      const origin = resolveConnectionOrigin(input.manifest, field, value);
+      if (
+        oimConnectionOriginRequiresApproval(input.manifest, configField) &&
+        configuration[configField] !== origin.host
+      ) {
+        changedOriginFields.add(configField);
+      }
+      originApprovalRequired ||= origin.approvalRequired;
+      configuration[configField] = origin.host;
+    } else {
+      if (field.input === "url") assertUrlValue(field, value);
+      configuration[configField] = coerceConfiguration(input.manifest, field, value);
+    }
+    const declared = input.manifest.auth?.configurationFields?.find(
+      (candidate) => candidate.id === configField
+    );
+    if (declared?.agentVisible === true) agentVisible.add(configField);
+  }
+
+  return {
+    configuration,
+    agentVisibleConfiguration: [...agentVisible],
+    credentialValues,
+    changedOriginFields: [...changedOriginFields],
+    originApprovalRequired,
+  };
+}
+
+/** Updates only submitted fields. Existing Secret references remain immutable across rotation. */
+export async function updateOimConnection(
+  deps: UpdateOimConnectionDeps,
+  input: UpdateOimConnectionInput
+): Promise<void> {
+  const prepared = prepareOimConnectionUpdate(input);
+  const secretBindings = { ...input.connection.secretBindings };
+  let credentialsChanged = false;
+
+  for (const field of prepared.changedOriginFields) {
+    await deps.originApprovals?.delete(input.businessId, input.connection.id, field);
+  }
+  if (prepared.changedOriginFields.length > 0) {
+    for (const [slot, secretRef] of Object.entries(secretBindings)) {
+      if (prepared.credentialValues.has(slot)) continue;
+      const plaintext = await deps.secrets.get(secretStorageKey(secretRef));
+      await deps.connectionSecrets.rotate(secretRef, plaintext);
+    }
+  }
+
+  for (const [slot, value] of prepared.credentialValues) {
+    const existingRef = secretBindings[slot];
+    if (existingRef !== undefined) {
+      await deps.connectionSecrets.rotate(existingRef, value);
+      credentialsChanged = true;
+      continue;
+    }
+    const newId = deps.newId ?? (() => randomUUID());
+    const key = `oim-${input.manifest.metadata.id}-${newId().replace(/-/g, "")}`;
+    await deps.secrets.set(key, value);
+    secretBindings[slot] = `secret://${key}`;
+    credentialsChanged = true;
+  }
+
+  await deps.connections.put(input.businessId, {
+    ...input.connection,
+    ...(input.label === undefined ? {} : { label: input.label.trim() }),
+    ...(input.isDefault === undefined ? {} : { isDefault: input.isDefault }),
+    configuration: prepared.configuration,
+    agentVisibleConfiguration: [...prepared.agentVisibleConfiguration],
+    secretBindings,
+    ...(prepared.originApprovalRequired
+      ? {
+          health: { status: "action_required", checkedAt: new Date().toISOString() },
+          ...(credentialsChanged ? { expiresAt: null } : {}),
+        }
+      : credentialsChanged || prepared.changedOriginFields.length > 0
+        ? {
+            health: { status: "unknown", checkedAt: new Date().toISOString() },
+            ...(credentialsChanged ? { expiresAt: null } : {}),
+          }
+        : {}),
+  });
+}
+
+export interface RebindOimConnectionInput extends UpdateOimConnectionInput {
+  readonly owner: OimConnection["owner"];
+}
+
+export interface RebindOimConnectionDeps extends Omit<OimConnectionDeps, "connections"> {
+  readonly connections: Pick<ConnectionStore, "put" | "markRevoked">;
+  readonly connectionSecrets: Pick<ConnectionSecretManager, "revokeConnection">;
+  readonly originApprovals?: Pick<ConnectionOriginApprovalRepository, "delete">;
+}
+
+/** Moves a Connection to a new owner by minting a new identity and new Secret references. */
+export async function rebindOimConnection(
+  deps: RebindOimConnectionDeps,
+  input: RebindOimConnectionInput
+): Promise<{ readonly connectionId: string }> {
+  const prepared = prepareOimConnectionUpdate(input);
+  const newId = deps.newId ?? (() => randomUUID());
+  const connectionId = newId();
+  const secretBindings: Record<string, string> = {};
+  const createdSecretKeys: string[] = [];
+
+  try {
+    for (const field of originPolicyFields(input.manifest)) {
+      await deps.originApprovals?.delete(input.businessId, input.connection.id, field);
+    }
+    for (const [slot, reference] of Object.entries(input.connection.secretBindings)) {
+      const value =
+        prepared.credentialValues.get(slot) ??
+        (await deps.secrets.get(secretStorageKey(reference)));
+      const key = `oim-${input.manifest.metadata.id}-${newId().replace(/-/g, "")}`;
+      await deps.secrets.set(key, value);
+      createdSecretKeys.push(key);
+      secretBindings[slot] = `secret://${key}`;
+    }
+    for (const [slot, value] of prepared.credentialValues) {
+      if (secretBindings[slot] !== undefined) continue;
+      const key = `oim-${input.manifest.metadata.id}-${newId().replace(/-/g, "")}`;
+      await deps.secrets.set(key, value);
+      createdSecretKeys.push(key);
+      secretBindings[slot] = `secret://${key}`;
+    }
+
+    await deps.connections.put(input.businessId, {
+      id: connectionId,
+      integration: input.connection.integration,
+      owner: input.owner,
+      label: input.label?.trim() ?? input.connection.label,
+      status: input.connection.status,
+      isDefault: input.isDefault ?? input.connection.isDefault,
+      configuration: prepared.configuration,
+      agentVisibleConfiguration: [...prepared.agentVisibleConfiguration],
+      secretBindings,
+      health:
+        oimConnectionOriginApprovalFields(input.manifest, {
+          configuration: prepared.configuration,
+        }).length > 0
+          ? { status: "action_required", checkedAt: new Date().toISOString() }
+          : prepared.credentialValues.size > 0
+            ? { status: "unknown", checkedAt: new Date().toISOString() }
+            : input.connection.health,
+      expiresAt: prepared.credentialValues.size > 0 ? null : input.connection.expiresAt,
+    });
+  } catch (error) {
+    for (const key of createdSecretKeys) await deps.secrets.delete(key);
+    throw error;
+  }
+
+  try {
+    await deps.connectionSecrets.revokeConnection(
+      input.connection.id,
+      input.connection.secretBindings,
+      async () => {
+        await deps.connections.markRevoked(input.businessId, input.connection.id);
+      }
+    );
+  } catch (error) {
+    await deps.connectionSecrets.revokeConnection(connectionId, secretBindings, async () => {
+      await deps.connections.markRevoked(input.businessId, connectionId);
+    });
+    throw error;
+  }
   return { connectionId };
 }

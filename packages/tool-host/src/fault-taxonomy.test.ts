@@ -29,8 +29,9 @@ describe("tool fault taxonomy", () => {
     expect(isInfrastructureFault("internal_error")).toBe(false);
   });
 
-  it("treats unavailable as infrastructure", () => {
+  it("treats unavailable outcomes as infrastructure", () => {
     expect(isInfrastructureFault("unavailable")).toBe(true);
+    expect(isInfrastructureFault("retry_wait_unavailable")).toBe(true);
   });
 
   it("keeps an abandoned call out of both retryable readings", () => {

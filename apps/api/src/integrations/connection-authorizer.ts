@@ -18,6 +18,8 @@ export interface ConnectionUseAuthorizerDeps {
   readonly businessId: string;
   resolvePrincipalLayer(name: string, principal: AuthorityPrincipal): Promise<AuthorityLayer>;
   hasTeamMembership(principalId: string, teamId: string): Promise<boolean>;
+  isUserActive?(principalId: string): Promise<boolean>;
+  isTeamActive?(teamId: string): Promise<boolean>;
 }
 
 /**
@@ -42,14 +44,36 @@ function authorityKind(kind: string): AuthorityPrincipal["kind"] | undefined {
     : undefined;
 }
 
+function integrationOwnerHostLayer(
+  principal: ConnectionPrincipal,
+  connection: PersistedConnection
+): AuthorityLayer | undefined {
+  if (
+    principal.kind !== "integration_adapter" ||
+    principal.id !== `integration:${connection.integration.id}`
+  ) {
+    return undefined;
+  }
+  return {
+    name: `integration-owner:${connection.integration.id}`,
+    grants: [
+      {
+        action: CONNECTION_USE_ACTION,
+        resourceType: CONNECTION_RESOURCE_TYPE,
+        recordSelector: connection.id,
+        effect: "allow",
+      },
+    ],
+  };
+}
+
 /**
  * Decides whether a principal may act through a Connection.
  *
- * Personal Connections answer from ownership alone and never reach the RBAC engine: the spec makes
- * them human-owner-only and undelegatable, so a grant that could open one to somebody else must not
- * exist to be misconfigured. Team Connections require live access to their exact owning Team;
- * organization Connections retain their explicit use grant. Both default-deny when their authority
- * layer cannot be read.
+ * Personal Connections require the owner's user principal. A delegated Run reaches this gate only
+ * after the host intersects its authority with that owner; an Agent id cannot impersonate them.
+ * An Integration adapter receives one host-owned grant for its own shared Connections. Other Team
+ * callers require live membership, while organization callers require a use grant.
  */
 export function connectionUseAuthorizer(
   deps: ConnectionUseAuthorizerDeps
@@ -59,8 +83,34 @@ export function connectionUseAuthorizer(
       principal: ConnectionPrincipal,
       connection: PersistedConnection
     ): Promise<boolean> {
+      if (connection.businessId !== deps.businessId) return false;
+      if (
+        principal.kind === "user" &&
+        deps.isUserActive !== undefined &&
+        !(await deps.isUserActive(principal.id))
+      ) {
+        return false;
+      }
       if (connection.owner.scope === "personal") {
         return principal.kind === "user" && principal.id === connection.owner.principalId;
+      }
+      const hostLayer = integrationOwnerHostLayer(principal, connection);
+      if (
+        hostLayer !== undefined &&
+        connection.owner.scope === "team" &&
+        (deps.isTeamActive === undefined || !(await deps.isTeamActive(connection.owner.teamId)))
+      ) {
+        return false;
+      }
+      if (
+        hostLayer !== undefined &&
+        decideEffectivePermission([hostLayer], {
+          action: CONNECTION_USE_ACTION,
+          resourceType: CONNECTION_RESOURCE_TYPE,
+          recordId: connection.id,
+        }).allowed
+      ) {
+        return true;
       }
       const kind = authorityKind(principal.kind);
       if (kind === undefined) return false;

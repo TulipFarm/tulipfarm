@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import type { OimEvents, OimEventType } from "@tulipfarm/schema";
+import { parseFormBody } from "./twilio-signature";
 import type { DeliveryRequest } from "./verify";
 
 /**
@@ -111,7 +112,7 @@ export function decideAcceptance(events: OimEvents, delivery: ParsedDelivery): A
 
 /** First declaration that matches wins, so ordering in the manifest is the author's tie-break. */
 export function selectEventType(
-  events: OimEvents,
+  events: { readonly eventTypes: readonly OimEventType[] },
   delivery: ParsedDelivery
 ): OimEventType | undefined {
   for (const candidate of events.eventTypes) {
@@ -178,7 +179,23 @@ export function safeHeadersFor(
   eventType: OimEventType | undefined,
   headers: Readonly<Record<string, string>>
 ): Readonly<Record<string, string>> {
-  const declared = eventType?.safeHeaders ?? [];
+  return safeHeadersFromNames(events, eventType?.safeHeaders ?? [], headers);
+}
+
+/** Safe-header union available before a classifier has selected an event type. */
+export function safeHeadersForClassifier(
+  events: OimEvents,
+  headers: Readonly<Record<string, string>>
+): Readonly<Record<string, string>> {
+  const declared = new Set(events.eventTypes.flatMap((eventType) => eventType.safeHeaders ?? []));
+  return safeHeadersFromNames(events, declared, headers);
+}
+
+function safeHeadersFromNames(
+  events: OimEvents,
+  declared: Iterable<string>,
+  headers: Readonly<Record<string, string>>
+): Readonly<Record<string, string>> {
   const withheld = new Set(
     [events.verification.signatureHeader, "authorization", "cookie", "proxy-authorization"]
       .filter((name): name is string => name !== undefined)
@@ -201,7 +218,11 @@ export function safeHeadersFor(
  * unparseable payload cannot be selected, deduplicated, or normalized, and storing it as a trusted
  * event would put a row in the inbox that can only ever dead-letter.
  */
-export function parseDeliveryBody(rawBody: Uint8Array): unknown | undefined {
+export function parseDeliveryBody(
+  rawBody: Uint8Array,
+  format: "json" | "form" = "json"
+): unknown | undefined {
+  if (format === "form") return parseFormBody(rawBody);
   try {
     const text = Buffer.from(rawBody).toString("utf8");
     if (text.trim().length === 0) return undefined;

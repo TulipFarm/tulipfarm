@@ -27,6 +27,10 @@ Only hosts under `atlassian.net` are accepted. The Integration declares that bou
 and it is checked again when the Tools compile, so a Connection cannot point Confluence's Tools at
 an unrelated server.
 
+This package uses Confluence Cloud REST v2 and Cloud account identifiers. It does not work with
+Confluence Data Center. Use the separate **Confluence Data Center** package for a public
+self-hosted site.
+
 For a shared Connection the token should belong to a service account with deliberately chosen
 space access. For your own reading, connect a personal Connection instead — `list-spaces`,
 `list-pages` and `get-page` accept either.

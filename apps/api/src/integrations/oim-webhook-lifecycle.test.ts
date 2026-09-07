@@ -209,7 +209,7 @@ describe("OIM webhook lifecycle", () => {
     await test.lifecycle.reconcile("https://api.two.test");
 
     expect(test.row.webhookRegistration?.ingressUrl).toBe(
-      "https://api.two.test/api/v1/hooks/oim/acme"
+      "https://api.two.test/api/v1/hooks/oim/acme?connectionId=connection-1"
     );
     expect(test.requests.filter((request) => request.method === "POST")).toHaveLength(2);
 
@@ -255,6 +255,27 @@ describe("OIM webhook lifecycle", () => {
     });
 
     await test.lifecycle.register(manifest(), teamConnection, "https://api.one.test");
+
+    expect(test.row.webhookRegistration?.ingressUrl).toBe(
+      "https://api.one.test/api/v1/hooks/oim/acme?connectionId=connection-1"
+    );
+    expect(test.requests[0]).toMatchObject({
+      method: "POST",
+      body: {
+        callback_url: "https://api.one.test/api/v1/hooks/oim/acme?connectionId=connection-1",
+      },
+    });
+  });
+
+  it("registers personal webhooks with a Connection-specific ingress URL", async () => {
+    const test = fixture();
+    const personalConnection = connection({
+      scope: "personal",
+      principalKind: "user",
+      principalId: "user-1",
+    });
+
+    await test.lifecycle.register(manifest(), personalConnection, "https://api.one.test");
 
     expect(test.row.webhookRegistration?.ingressUrl).toBe(
       "https://api.one.test/api/v1/hooks/oim/acme?connectionId=connection-1"

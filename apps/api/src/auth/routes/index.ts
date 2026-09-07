@@ -13,7 +13,7 @@ import type { SessionStore } from "../session-store";
 import type { PasswordWriteRepo, ProfileWriteRepo, UserAdminRepo, UserRepo } from "../users";
 import { registerSessionRoutes } from "./session";
 import { registerTokenRoutes } from "./tokens";
-import { registerAdminUserRoutes } from "./users";
+import { registerAdminUserRoutes, type UserDisabledHook } from "./users";
 
 export { SESSION_COOKIE } from "../middleware";
 
@@ -32,6 +32,8 @@ interface AuthRouteOptions {
   /** Kicks the Curator sweep outside its five-minute cron after an invite is issued, so
    * "Invite your team" clears within seconds instead of waiting for the next scheduled tick. */
   triggerCuratorSweep?: () => Promise<void>;
+  /** Completes retry-safe personal Connection and Routine cleanup after a user is disabled. */
+  onUserDisabled?: UserDisabledHook;
   /** Lets the session route report `llmMode` — the settings tab a chat page should render around —
    * without a separate admin-gated round trip. */
   soulLoader?: SoulLoader;
@@ -99,7 +101,8 @@ export function registerAuthRoutes(
       requireAuth,
       options.requireAuthorization ?? makeRequireAuthorization(),
       preHandler,
-      options.triggerCuratorSweep
+      options.triggerCuratorSweep,
+      options.onUserDisabled
     );
   }
   registerIdentityRoutes(

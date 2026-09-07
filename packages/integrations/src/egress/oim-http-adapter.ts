@@ -1,10 +1,11 @@
-import type { OimMultipartPart, OimPagination } from "@tulipfarm/schema";
+import type { OimManifest, OimMultipartPart, OimPagination } from "@tulipfarm/schema";
 import {
   AdapterDispatchError,
   type ToolAdapter,
   type ToolAdapterCredentials,
   type ToolAdapterRequest,
 } from "@tulipfarm/tool-broker";
+import { type OimHookPhaseRunner, runOimHookPhase } from "../oim-hooks";
 import type { OimFilePort } from "./oim-files";
 import {
   NEXT_PAGE_TOKEN_PROPERTY,
@@ -24,6 +25,8 @@ import type { OpenApiOperationBinding } from "./openapi-compile";
 
 export interface OimHttpToolAdapterDeps {
   readonly binding: OpenApiOperationBinding;
+  readonly manifest?: Pick<OimManifest, "hooks">;
+  readonly hookRunner?: OimHookPhaseRunner;
   readonly projection?: readonly string[];
   readonly pagination?: OimPagination;
   /** Stable Tool identity a continuation token is bound to. */
@@ -206,13 +209,27 @@ export class OimHttpToolAdapter implements ToolAdapter {
     // Redaction precedes projection so a manifest cannot name a credential field as a pointer,
     // and precedes validation so a response schema cannot legitimise one.
     const redacted = redactCredentialFields(raw.body);
+    let normalized: unknown = redacted;
+    if (this.deps.manifest !== undefined) {
+      try {
+        const hookResult = await runOimHookPhase({
+          manifest: this.deps.manifest,
+          kind: "response_normalize",
+          input: { payload: redacted, safeHeaders: {} },
+          ...(this.deps.hookRunner === undefined ? {} : { runner: this.deps.hookRunner }),
+        });
+        if (hookResult.executed) normalized = hookResult.value;
+      } catch {
+        throw new AdapterDispatchError("after_dispatch", "response_normalize_hook_failed", false);
+      }
+    }
 
-    let output: unknown = redacted;
+    let output: unknown = normalized;
     if (projection !== undefined) {
-      if (redacted === null || typeof redacted !== "object") {
+      if (normalized === null || typeof normalized !== "object") {
         throw new AdapterDispatchError("after_dispatch", "invalid_output", false);
       }
-      output = projectResponse(redacted, projection);
+      output = projectResponse(normalized, projection);
     }
 
     if (context === undefined) return output;

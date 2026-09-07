@@ -46,7 +46,10 @@ export type {
   OimOperationConnection,
   OimOperationConnectionRequest,
 } from "./connections/operation";
-export { OimOperationConnectionResolver } from "./connections/operation";
+export {
+  OIM_CONNECTION_ID_ARGUMENT,
+  OimOperationConnectionResolver,
+} from "./connections/operation";
 export type {
   ConnectionPrincipal,
   ConnectionReader,
@@ -65,6 +68,7 @@ export type {
   CompiledGraphqlTool,
   CompiledOimGraphqlTool,
   CompiledOimHttpTool,
+  CompiledOimOpenApiTool,
   CompileGraphqlEgressInput,
   CompileOpenApiEgressInput,
   EgressBinaryResponse,
@@ -85,11 +89,15 @@ export type {
   OimFilePort,
   OimFixtureResult,
   OimGraphqlCompileErrorCode,
+  OimGraphqlToolAdapterDeps,
   OimHttpCompileErrorCode,
   OimHttpToolAdapterDeps,
+  OimOpenApiCompileErrorCode,
   OimPaginationBounds,
   OimPaginationProgress,
   OimPaginationStyle,
+  OimRateLimitAdmissionPort,
+  OimRateLimitedToolAdapterDeps,
   OpenApiDispatchOptions,
   OpenApiEgress,
   OpenApiEgressAuth,
@@ -108,6 +116,7 @@ export {
   compileGraphqlEgress,
   compileOimGraphqlOperations,
   compileOimHttpOperations,
+  compileOimOpenApiOperations,
   compileOpenApiEgress,
   DEFAULT_OIM_PAGINATION_BOUNDS,
   decodePageToken,
@@ -128,19 +137,27 @@ export {
   NEXT_PAGE_TOKEN_PROPERTY,
   newProgress,
   nextPageToken,
+  OIM_MAX_RETRY_AFTER_MS,
   OimGraphqlCompileError,
+  OimGraphqlToolAdapter,
   OimHttpCompileError,
   OimHttpToolAdapter,
+  OimOpenApiCompileError,
   OimPaginationError,
+  OimRateLimitedToolAdapter,
   OpenApiToolAdapter,
+  oimRateLimitScope,
   PAGE_TOKEN_ARGUMENT,
   parseAuthChallenges,
   parseNextLink,
+  parseOimRetryAfterMs,
   pointerSegments,
   projectResponse,
   REDACTED_FIELD,
   recordPage,
   redactCredentialFields,
+  resolveOimBaseUrl,
+  resolveOimUrlTemplate,
   resumeFromToken,
   runOimFixtures,
 } from "./egress";
@@ -399,6 +416,12 @@ export {
   selectEventType,
   verifyDelivery,
 } from "./ingress";
+export type { PollingCursorAdvance } from "./ingress/polling";
+export {
+  advancePollingCursor,
+  PollingCursorError,
+  pollingCursorRequestValue,
+} from "./ingress/polling";
 export type {
   AclReadResult,
   AclUnverifiableReason,
@@ -443,11 +466,13 @@ export {
   createOimProviderAccountPort,
   DEFAULT_KNOWLEDGE_PAGES_PER_RUN,
   describeKnowledgeProfile,
+  isOimKnowledgeRetryRequiredError,
   knowledgeSourceId,
   mapAclEntries,
   mapContent,
   mapListItems,
   OimKnowledgeCompileError,
+  OimKnowledgeRetryRequiredError,
   resolveKnowledgePrincipals,
   syncOimKnowledge,
 } from "./knowledge";
@@ -462,6 +487,56 @@ export type {
   ResolvedChannelRoute,
 } from "./model";
 export { ChannelRouteDeniedError, resolveChannelRoute } from "./model";
+export type {
+  OimHookKind,
+  OimHookPhaseInputMap,
+  OimHookPhaseResult,
+  OimHookPhaseRunner,
+  RunOimHookPhaseInput,
+} from "./oim-hooks";
+export {
+  hasDeclaredOimHook,
+  OimHookPhaseError,
+  runOimHookPhase,
+} from "./oim-hooks";
+export type {
+  OimReleasePackage,
+  OimReleaseSigner,
+  OimRevocation,
+  OimRevocationList,
+  OimSignature,
+  SignedOimRelease,
+  SignedOimRevocationList,
+  TrustedOimPublicKey,
+} from "./releases/signatures";
+export {
+  createEd25519OimReleaseSigner,
+  OimEd25519Keyring,
+  signOimRelease,
+  signOimRevocationList,
+  validateTrustedOimPublicKey,
+} from "./releases/signatures";
+export type {
+  OimAutoPatchRequest,
+  OimCommunityPackageAuthorization,
+  OimHookExecutionGrant,
+  OimHookPackageAuthorization,
+  OimOfficialPackageAuthorization,
+  OimPackageAuthorization,
+  OimPackageAuthorizationInput,
+  OimReleaseTrustConfig,
+  OimReleaseTrustErrorCode,
+  OimReleaseTrustService,
+  OimRevocationStateStore,
+} from "./releases/trust-service";
+export {
+  assertOimHookExecutionGrant,
+  assertOimHooksAllowed,
+  assertOimPackageAuthorization,
+  createOimReleaseTrustService,
+  issueOimHookExecutionGrant,
+  OimReleaseTrustError,
+} from "./releases/trust-service";
 export type {
   SlackChannelAdapterDeps,
   SlackChannelKind,

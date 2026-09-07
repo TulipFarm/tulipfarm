@@ -1,13 +1,17 @@
 import type {
   KnowledgeChunkEmission,
   KnowledgeSourceEmission,
+  OimHookPhaseRunner,
   OimKnowledgeCheckpoint,
+  ProviderIdentityLinkPort,
+  VerifiedEmailPrincipalPort,
 } from "@tulipfarm/integrations";
 import { knowledgeManifestFixture } from "@tulipfarm/integrations/src/knowledge/oim-manifest.fixture";
+import type { OimHook } from "@tulipfarm/schema";
 import type { SoulIntegration } from "@tulipfarm/soul";
 import type { RequestContext } from "@tulipfarm/tool-host";
 import { toToolDef } from "@tulipfarm/tool-host";
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ToolRegistry } from "../broker/tool-adapter";
 import {
   INTEGRATION_KNOWLEDGE_TOOLS,
@@ -21,7 +25,6 @@ function integration(overrides: Partial<SoulIntegration> = {}): SoulIntegration 
     slug: SLUG,
     sourceIntegration: "wiki",
     oimManifest: knowledgeManifestFixture(),
-    connection: { enabled: true },
     ...overrides,
   } as SoulIntegration;
 }
@@ -29,7 +32,7 @@ function integration(overrides: Partial<SoulIntegration> = {}): SoulIntegration 
 /** A stand-in for a registered declarative Tool, so the port under test dispatches for real. */
 function providerTool(
   name: string,
-  respond: (args: Record<string, unknown>) => unknown
+  respond: (args: Record<string, unknown>, ctx: RequestContext) => unknown
 ): ReturnType<typeof toToolDef> {
   return {
     name,
@@ -37,9 +40,9 @@ function providerTool(
     mutating: false,
     description: name,
     inputSchema: { type: "object" },
-    execute: async (args) => ({
+    execute: async (args, ctx) => ({
       success: true,
-      data: respond((args ?? {}) as Record<string, unknown>),
+      data: respond((args ?? {}) as Record<string, unknown>, ctx),
     }),
   } as ReturnType<typeof toToolDef>;
 }
@@ -47,6 +50,9 @@ function providerTool(
 class MemoryCheckpoints {
   readonly saved: OimKnowledgeCheckpoint[] = [];
   private readonly rows = new Map<string, OimKnowledgeCheckpoint>();
+  seed(checkpoint: OimKnowledgeCheckpoint): void {
+    this.rows.set(`${checkpoint.integrationId}\u0000${checkpoint.scopeKey}`, checkpoint);
+  }
   async load(integrationId: string, scopeKey: string): Promise<OimKnowledgeCheckpoint | undefined> {
     return this.rows.get(`${integrationId}\u0000${scopeKey}`);
   }
@@ -76,6 +82,10 @@ describe("integration Knowledge Tools", () => {
   let checkpoints: MemoryCheckpoints;
   let sink: MemorySink;
   let integrations: SoulIntegration[];
+  let links: ProviderIdentityLinkPort;
+  let emails: VerifiedEmailPrincipalPort | undefined;
+  let verifiedEmailDomains: readonly string[];
+  let oimRuntimeHost: IntegrationKnowledgeToolContext["oimRuntimeHost"];
 
   function context(): IntegrationKnowledgeToolContext {
     return {
@@ -84,8 +94,10 @@ describe("integration Knowledge Tools", () => {
       registry,
       checkpoints,
       sink,
-      links: { linkedPrincipal: async () => ({ kind: "user", id: "u1" }) },
-      policy: { verifiedEmailDomains: [] },
+      links,
+      ...(emails === undefined ? {} : { emails }),
+      policy: { verifiedEmailDomains },
+      oimRuntimeHost,
       requestContext: ctxRequest,
       now: () => new Date("2026-01-01T00:00:00.000Z"),
     };
@@ -103,6 +115,13 @@ describe("integration Knowledge Tools", () => {
     checkpoints = new MemoryCheckpoints();
     sink = new MemorySink();
     integrations = [integration()];
+    links = { linkedPrincipal: async () => ({ kind: "user", id: "u1" }) };
+    emails = undefined;
+    verifiedEmailDomains = [];
+    oimRuntimeHost = {
+      authorizeIntegration: async () => {},
+      hookRunnerFor: async () => undefined,
+    };
   });
 
   describe("integration_knowledge_profile", () => {
@@ -125,10 +144,9 @@ describe("integration Knowledge Tools", () => {
       expect(result).toMatchObject({ success: false, error: { code: "not_found" } });
     });
 
-    it("refuses an Integration that is installed but not connected", async () => {
-      integrations = [integration({ connection: { enabled: false } } as Partial<SoulIntegration>)];
+    it("uses an installed OIM Integration without the legacy connection.enabled flag", async () => {
       const result = await run("integration_knowledge_profile", { integration: SLUG });
-      expect(result).toMatchObject({ success: false, error: { code: "not_found" } });
+      expect(result).toMatchObject({ success: true });
     });
 
     it("refuses an Integration that declares no knowledge profile", async () => {
@@ -161,6 +179,7 @@ describe("integration Knowledge Tools", () => {
       const result = await run("integration_knowledge_scopes", {
         integration: SLUG,
         source_kind: "space",
+        connection_id: "conn-1",
       });
       expect(result).toMatchObject({
         success: true,
@@ -177,6 +196,7 @@ describe("integration Knowledge Tools", () => {
       const result = await run("integration_knowledge_scopes", {
         integration: SLUG,
         source_kind: "mailbox",
+        connection_id: "conn-1",
       });
       expect(result).toMatchObject({ success: false, error: { code: "validation_error" } });
     });
@@ -185,6 +205,7 @@ describe("integration Knowledge Tools", () => {
       const result = await run("integration_knowledge_scopes", {
         integration: SLUG,
         source_kind: "space",
+        connection_id: "conn-1",
       });
       expect(result).toMatchObject({ success: false, error: { code: "unavailable" } });
     });
@@ -231,7 +252,183 @@ describe("integration Knowledge Tools", () => {
       expect(result).toMatchObject({ success: true });
       expect(sink.emissions.length).toBe(1);
       expect(sink.emissions[0]?.sourceId).toBe("wiki:conn-1/1");
+      expect(sink.emissions[0]).toMatchObject({
+        externalTenantId: "conn-1",
+        locator: {
+          integrationId: "wiki",
+          integrationMajorVersion: 2,
+          connectionId: "conn-1",
+          itemId: "1",
+          sourceUrl: "https://wiki.example/1",
+        },
+        provenance: { connectionId: "conn-1" },
+      });
       expect(checkpoints.saved.length).toBe(1);
+    });
+
+    it("reports refused provider retry without changing the Knowledge checkpoint", async () => {
+      const previous: OimKnowledgeCheckpoint = {
+        integrationId: "wiki",
+        scopeKey: "space:ENG",
+        cursor: "previous-page",
+        updatedAt: "2025-12-31T00:00:00.000Z",
+      };
+      checkpoints.seed(previous);
+      const calls: RequestContext[] = [];
+      registry.register({
+        name: "wiki_list_pages",
+        tier: "integration",
+        mutating: false,
+        description: "wiki_list_pages",
+        inputSchema: { type: "object" },
+        execute: async (_args, callCtx) => {
+          calls.push(callCtx);
+          return {
+            success: false,
+            error: {
+              code: "retry_wait_unavailable",
+              message: "provider requested a delayed retry",
+            },
+          };
+        },
+      });
+
+      const result = await run("integration_knowledge_sync", {
+        integration: SLUG,
+        source_kind: "space",
+        scopes: ["ENG"],
+        connection_id: "conn-1",
+      });
+
+      expect(result).toMatchObject({
+        success: true,
+        data: { failures: [{ code: "retry_required", scope: "ENG" }] },
+      });
+      expect(calls).toHaveLength(1);
+      expect(calls[0]?.retryWaitPolicy).toBe("refuse");
+      expect(checkpoints.saved).toHaveLength(0);
+      expect(await checkpoints.load("wiki", "space:ENG")).toEqual(previous);
+      expect(sink.emissions).toHaveLength(0);
+    });
+
+    it("routes Knowledge Hooks through the verified API bridge before mapping", async () => {
+      const manifest = knowledgeManifestFixture();
+      integrations = [
+        integration({
+          oimManifest: {
+            ...manifest,
+            profiles: { ...manifest.profiles, hooks: "1.0" },
+            hooks: [
+              { kind: "acl_map", file: "hooks/runtime.js", export: "mapAcl" },
+              { kind: "content_map", file: "hooks/runtime.js", export: "mapContent" },
+            ],
+          },
+        }),
+      ];
+      registerProvider();
+      const bridge = vi.fn(async (hook: OimHook, _value: unknown) =>
+        hook.kind === "acl_map"
+          ? { results: [{ type: "known", accountId: "acct-1" }] }
+          : {
+              id: "1",
+              title: "Runbook",
+              body: { storage: { value: "verified Hook content" } },
+              version: { number: 3 },
+            }
+      );
+      const hookRunnerFor = vi.fn(async () => ({ run: bridge }) as unknown as OimHookPhaseRunner);
+      oimRuntimeHost = {
+        authorizeIntegration: async () => {},
+        hookRunnerFor,
+      };
+
+      const result = await run("integration_knowledge_sync", {
+        integration: SLUG,
+        source_kind: "space",
+        scopes: ["ENG"],
+        connection_id: "conn-1",
+      });
+
+      expect(hookRunnerFor).toHaveBeenCalledWith({
+        businessId: "b1",
+        integrationId: "wiki",
+        integrationMajorVersion: 2,
+        manifest: integrations[0]?.oimManifest,
+      });
+      expect(bridge).toHaveBeenCalledTimes(2);
+      expect(bridge.mock.calls.map(([hook]) => hook.kind)).toEqual(["acl_map", "content_map"]);
+      expect(bridge.mock.calls[0]?.[1]).toMatchObject({
+        operationId: "get-restrictions",
+        itemId: "1",
+        scopeId: "ENG",
+      });
+      expect(bridge.mock.calls[1]?.[1]).toMatchObject({
+        operationId: "get-page",
+        itemId: "1",
+      });
+      expect(result).toMatchObject({ success: true, data: { indexed: 1, failures: [] } });
+      expect(sink.chunks[0]?.text).toBe("verified Hook content");
+    });
+
+    it("uses explicit Connection B for every provider call instead of default A", async () => {
+      const selected: (string | undefined)[] = [];
+      links = { linkedPrincipal: async () => undefined };
+      emails = { principalForEmail: async () => ({ kind: "user", id: "u1" }) };
+      verifiedEmailDomains = ["example.com"];
+      registry.register(
+        providerTool("wiki_list_pages", (args) => {
+          selected.push(typeof args.connection_id === "string" ? args.connection_id : "conn-a");
+          return {
+            results: [
+              {
+                id: "1",
+                archived: false,
+                version: { number: 3 },
+              },
+            ],
+          };
+        })
+      );
+      registry.register(
+        providerTool("wiki_get_restrictions", (args) => {
+          selected.push(typeof args.connection_id === "string" ? args.connection_id : "conn-a");
+          return { results: [{ type: "known", accountId: "acct-1" }] };
+        })
+      );
+      registry.register(
+        providerTool("wiki_get_user", (args) => {
+          selected.push(typeof args.connection_id === "string" ? args.connection_id : "conn-a");
+          return {
+            accountId: "acct-1",
+            email: "muskan@example.com",
+            emailVerified: true,
+          };
+        })
+      );
+      registry.register(
+        providerTool("wiki_get_page", (args) => {
+          selected.push(typeof args.connection_id === "string" ? args.connection_id : "conn-a");
+          return {
+            body: { storage: { value: "from connection B" } },
+            version: { number: 3 },
+          };
+        })
+      );
+
+      await run("integration_knowledge_sync", {
+        integration: SLUG,
+        source_kind: "space",
+        scopes: ["ENG"],
+        connection_id: "conn-b",
+      });
+
+      expect(selected).toEqual(["conn-b", "conn-b", "conn-b", "conn-b"]);
+      expect(sink.emissions[0]).toMatchObject({
+        sourceId: "wiki:conn-b/1",
+        externalTenantId: "conn-b",
+        locator: { connectionId: "conn-b" },
+        provenance: { connectionId: "conn-b" },
+      });
     });
 
     it("requires a Connection rather than choosing one", async () => {
@@ -251,6 +448,18 @@ describe("integration Knowledge Tools", () => {
         source_kind: "space",
         scopes: [],
         connection_id: "conn-1",
+      });
+      expect(result).toMatchObject({ success: false, error: { code: "validation_error" } });
+    });
+
+    it("rejects caller-supplied tenant attribution", async () => {
+      registerProvider();
+      const result = await run("integration_knowledge_sync", {
+        integration: SLUG,
+        source_kind: "space",
+        scopes: ["ENG"],
+        connection_id: "conn-1",
+        external_tenant_id: "wrong-tenant",
       });
       expect(result).toMatchObject({ success: false, error: { code: "validation_error" } });
     });

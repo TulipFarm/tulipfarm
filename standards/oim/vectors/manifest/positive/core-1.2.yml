@@ -1,0 +1,41 @@
+oimVersion: "1.0"
+kind: Integration
+metadata:
+  id: documents
+  name: Documents
+  version: 1.0.0
+  description: Upload documents.
+  license: Apache-2.0
+profiles:
+  core: "1.2"
+operations:
+  - id: upload-document
+    name: upload_document
+    description: Upload one document.
+    effect: create
+    identityMode: shared_only
+    source:
+      type: http
+      method: POST
+      baseUrl: https://api.example.test
+      path: /documents
+      contentType: multipart
+      multipart:
+        parts:
+          - name: title
+            kind: field
+            pointer: /title
+            maxBytes: 256
+          - name: document
+            kind: file
+            pointer: /fileId
+    requestSchema:
+      type: object
+      properties:
+        title: { type: string }
+        fileId: { type: string }
+      required: [title, fileId]
+      additionalProperties: false
+    response:
+      mode: binary
+      maxBytes: 1048576

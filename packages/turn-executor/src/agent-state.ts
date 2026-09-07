@@ -71,6 +71,13 @@ export type AgentStateResult =
       /** The Tool call being held, so a reader can show the child against that call. */
       readonly callId: string;
     }
+  | {
+      readonly status: "waiting";
+      readonly reason: "provider_retry_wait";
+      readonly waitId: string;
+      /** The Tool call replayed after the provider timer resolves. */
+      readonly callId: string;
+    }
   | { readonly status: "input_required"; readonly text: string }
   | { readonly status: "cancelled" }
   | { readonly status: "needs_reconciliation" };
@@ -110,6 +117,14 @@ export class AgentStateRunner {
           ...(outcome.modelFailure === undefined ? {} : { modelFailure: outcome.modelFailure }),
         };
 
+      case "needs_reconciliation":
+        try {
+          await this.move(request, "running", "needs_reconciliation", "indeterminate_tool_effect");
+        } catch (error) {
+          if (!(error instanceof StateTransitionConflictError)) throw error;
+        }
+        return { status: "needs_reconciliation" };
+
       case "awaiting_approval": {
         const { waitId } = await this.options.waits.register({
           businessId: request.businessId,
@@ -140,6 +155,15 @@ export class AgentStateRunner {
           reason: "child_running",
           waitId: outcome.waitId,
           childRunId: outcome.childRunId,
+          callId: outcome.callId,
+        };
+
+      case "awaiting_retry":
+        await this.move(request, "running", "waiting", "provider_retry_wait");
+        return {
+          status: "waiting",
+          reason: "provider_retry_wait",
+          waitId: outcome.waitId,
           callId: outcome.callId,
         };
 

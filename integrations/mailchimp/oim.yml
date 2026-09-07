@@ -1,0 +1,582 @@
+oimVersion: "1.0"
+kind: Integration
+
+metadata:
+  id: mailchimp
+  name: Mailchimp
+  version: 1.0.0
+  description: >-
+    Read Mailchimp audiences, members and campaigns, and create or update members and campaign
+    drafts through Marketing API 3.0.
+  license: Apache-2.0
+  maintainers:
+    - name: TulipFarm
+      url: https://tulipfarm.dev
+
+profiles:
+  core: "1.1"
+  auth: "1.0"
+
+files:
+  - path: setup-guide.md
+    role: guide
+    sha256: "b9a43138f876a9934dcee117ffb98e27bfe5005636cd25e069633641d8637390"
+  - path: fixtures.yml
+    role: fixture
+    sha256: "d31f32e89af0b95554d2ee21d459b601ef00b1bbc2a2d0e3a423ecbbdc0a84e1"
+
+auth:
+  allowedOriginHosts:
+    - "*.api.mailchimp.com"
+  credentialSlots:
+    - id: api_credential
+      label: Mailchimp Basic credential
+      kind: api_key
+      required: true
+  configurationFields:
+    - id: data_center
+      label: Mailchimp data-center API host
+      type: string
+      required: true
+      agentVisible: true
+  steps:
+    - id: data_center
+      type: fields
+      title: Enter the data-center API host
+      description: >-
+        Read the suffix from the API key, such as us21, and enter the full host
+        us21.api.mailchimp.com. Only Mailchimp API subdomains are accepted.
+      fields:
+        - id: data_center
+          label: Data-center API host
+          input: text
+          required: true
+          target:
+            type: configuration
+            field: data_center
+    - id: api_credential
+      type: fields
+      title: Enter the API key
+      description: >-
+        Create a Mailchimp API key and paste it after a non-empty username as
+        tulipfarm:YOUR-API-KEY. TulipFarm performs the Basic encoding.
+      fields:
+        - id: api_credential
+          label: Username and API key
+          description: tulipfarm:your-api-key
+          input: password
+          required: true
+          target:
+            type: credential
+            slot: api_credential
+  healthCheckOperationId: get-account
+
+operations:
+  - id: get-account
+    name: mailchimp_get_account
+    description: Identify the Mailchimp account and report its subscriber total.
+    effect: read
+    identityMode: shared_only
+    credentialSlot: api_credential
+    credentialInjection:
+      in: header
+      name: Authorization
+      format: "Basic {token}"
+      encoding: basic
+    source:
+      type: http
+      method: GET
+      baseUrl: https://{data_center}
+      path: /3.0/
+      parameters:
+        - name: fields
+          in: query
+          value: account_id,login_id,account_name,total_subscribers
+          schema: { type: string }
+    response:
+      maxBytes: 32768
+      schema:
+        type: object
+        properties:
+          account_id: { type: string }
+          login_id: { type: string }
+          account_name: { type: string }
+          total_subscribers: { type: integer }
+      projection:
+        - /account_id
+        - /login_id
+        - /account_name
+        - /total_subscribers
+
+  - id: list-audiences
+    name: mailchimp_list_audiences
+    description: List Mailchimp audiences with bounded aggregate membership statistics.
+    effect: read
+    identityMode: shared_only
+    credentialSlot: api_credential
+    credentialInjection:
+      in: header
+      name: Authorization
+      format: "Basic {token}"
+      encoding: basic
+    source:
+      type: http
+      method: GET
+      baseUrl: https://{data_center}
+      path: /3.0/lists
+      parameters:
+        - name: fields
+          in: query
+          value: lists.id,lists.name,lists.date_created,lists.stats.member_count,lists.stats.unsubscribe_count,total_items
+          schema: { type: string }
+        - name: count
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 1000
+        - name: offset
+          in: query
+          schema:
+            type: integer
+            minimum: 0
+        - name: before_date_created
+          in: query
+          schema: { type: string }
+        - name: since_date_created
+          in: query
+          schema: { type: string }
+    response:
+      maxBytes: 262144
+      schema:
+        type: object
+        properties:
+          lists:
+            type: array
+            items:
+              type: object
+              properties:
+                id: { type: string }
+                name: { type: string }
+                date_created: { type: string }
+                stats:
+                  type: object
+                  properties:
+                    member_count: { type: integer }
+                    unsubscribe_count: { type: integer }
+          total_items: { type: integer }
+      projection:
+        - /lists
+        - /total_items
+
+  - id: list-members
+    name: mailchimp_list_members
+    description: List members of one audience, including email, status, merge fields and tags.
+    effect: sensitive_read
+    identityMode: shared_only
+    credentialSlot: api_credential
+    credentialInjection:
+      in: header
+      name: Authorization
+      format: "Basic {token}"
+      encoding: basic
+    source:
+      type: http
+      method: GET
+      baseUrl: https://{data_center}
+      path: /3.0/lists/{list_id}/members
+      parameters:
+        - name: list_id
+          in: path
+          required: true
+          schema: { type: string, minLength: 1, maxLength: 128 }
+        - name: fields
+          in: query
+          value: members.id,members.email_address,members.status,members.merge_fields,members.tags,members.last_changed,total_items
+          schema: { type: string }
+        - name: count
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 1000
+        - name: offset
+          in: query
+          schema:
+            type: integer
+            minimum: 0
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [subscribed, unsubscribed, cleaned, pending, transactional, archived]
+        - name: since_last_changed
+          in: query
+          schema: { type: string }
+        - name: before_last_changed
+          in: query
+          schema: { type: string }
+    response:
+      maxBytes: 1048576
+      schema:
+        type: object
+        properties:
+          members:
+            type: array
+            items:
+              type: object
+              properties:
+                id: { type: string }
+                email_address: { type: string }
+                status: { type: string }
+                merge_fields: { type: object }
+                tags: { type: array }
+                last_changed: { type: string }
+          total_items: { type: integer }
+      projection:
+        - /members
+        - /total_items
+
+  - id: add-member
+    name: mailchimp_add_member
+    description: Add one member to an audience with an explicit subscription status.
+    effect: create
+    identityMode: shared_only
+    credentialSlot: api_credential
+    credentialInjection:
+      in: header
+      name: Authorization
+      format: "Basic {token}"
+      encoding: basic
+    source:
+      type: http
+      method: POST
+      baseUrl: https://{data_center}
+      path: /3.0/lists/{list_id}/members
+      parameters:
+        - name: list_id
+          in: path
+          required: true
+          schema: { type: string, minLength: 1, maxLength: 128 }
+        - name: skip_merge_validation
+          in: query
+          schema: { type: boolean }
+    requestSchema:
+      type: object
+      properties:
+        email_address:
+          type: string
+          minLength: 3
+          maxLength: 320
+        status:
+          type: string
+          enum: [subscribed, unsubscribed, cleaned, pending, transactional]
+        email_type:
+          type: string
+          enum: [html, text]
+        merge_fields:
+          type: object
+          additionalProperties: true
+        interests:
+          type: object
+          additionalProperties: { type: boolean }
+        language:
+          type: string
+          maxLength: 32
+        vip: { type: boolean }
+        tags:
+          type: array
+          maxItems: 100
+          items: { type: string, maxLength: 100 }
+      required: [email_address, status]
+      additionalProperties: false
+    response:
+      maxBytes: 262144
+      schema:
+        type: object
+        properties:
+          id: { type: string }
+          email_address: { type: string }
+          status: { type: string }
+          merge_fields: { type: object }
+          tags: { type: array }
+          last_changed: { type: string }
+      projection:
+        - /id
+        - /email_address
+        - /status
+        - /merge_fields
+        - /tags
+        - /last_changed
+
+  - id: update-member
+    name: mailchimp_update_member
+    description: Update one audience member identified by Mailchimp subscriber hash.
+    effect: update
+    identityMode: shared_only
+    credentialSlot: api_credential
+    credentialInjection:
+      in: header
+      name: Authorization
+      format: "Basic {token}"
+      encoding: basic
+    source:
+      type: http
+      method: PATCH
+      baseUrl: https://{data_center}
+      path: /3.0/lists/{list_id}/members/{subscriber_hash}
+      parameters:
+        - name: list_id
+          in: path
+          required: true
+          schema: { type: string, minLength: 1, maxLength: 128 }
+        - name: subscriber_hash
+          in: path
+          required: true
+          schema:
+            type: string
+            pattern: "^[a-f0-9]{32}$"
+        - name: skip_merge_validation
+          in: query
+          schema: { type: boolean }
+    requestSchema:
+      type: object
+      properties:
+        email_address: { type: string, minLength: 3, maxLength: 320 }
+        status:
+          type: string
+          enum: [subscribed, unsubscribed, cleaned, pending]
+        email_type: { type: string, enum: [html, text] }
+        merge_fields:
+          type: object
+          additionalProperties: true
+        interests:
+          type: object
+          additionalProperties: { type: boolean }
+        language: { type: string, maxLength: 32 }
+        vip: { type: boolean }
+      minProperties: 1
+      additionalProperties: false
+    response:
+      maxBytes: 262144
+      schema:
+        type: object
+        properties:
+          id: { type: string }
+          email_address: { type: string }
+          status: { type: string }
+          merge_fields: { type: object }
+          tags: { type: array }
+          last_changed: { type: string }
+      projection:
+        - /id
+        - /email_address
+        - /status
+        - /merge_fields
+        - /tags
+        - /last_changed
+
+  - id: list-campaigns
+    name: mailchimp_list_campaigns
+    description: List campaign drafts and sent campaigns with audience and sender metadata.
+    effect: read
+    identityMode: shared_only
+    credentialSlot: api_credential
+    credentialInjection:
+      in: header
+      name: Authorization
+      format: "Basic {token}"
+      encoding: basic
+    source:
+      type: http
+      method: GET
+      baseUrl: https://{data_center}
+      path: /3.0/campaigns
+      parameters:
+        - name: fields
+          in: query
+          value: campaigns.id,campaigns.type,campaigns.status,campaigns.settings.title,campaigns.settings.subject_line,campaigns.settings.from_name,campaigns.settings.reply_to,campaigns.recipients.list_id,campaigns.send_time,campaigns.archive_url,total_items
+          schema: { type: string }
+        - name: count
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 1000
+        - name: offset
+          in: query
+          schema:
+            type: integer
+            minimum: 0
+        - name: type
+          in: query
+          schema:
+            type: string
+            enum: [regular, plaintext, absplit, rss, variate]
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [save, paused, schedule, sending, sent]
+        - name: list_id
+          in: query
+          schema: { type: string }
+        - name: since_send_time
+          in: query
+          schema: { type: string }
+        - name: before_send_time
+          in: query
+          schema: { type: string }
+    response:
+      maxBytes: 1048576
+      schema:
+        type: object
+        properties:
+          campaigns:
+            type: array
+            items:
+              type: object
+              properties:
+                id: { type: string }
+                type: { type: string }
+                status: { type: string }
+                settings: { type: object }
+                recipients: { type: object }
+                send_time: { type: string }
+                archive_url: { type: string }
+          total_items: { type: integer }
+      projection:
+        - /campaigns
+        - /total_items
+
+  - id: create-campaign
+    name: mailchimp_create_campaign
+    description: Create a regular or plain-text campaign draft for one audience.
+    effect: create
+    identityMode: shared_only
+    credentialSlot: api_credential
+    credentialInjection:
+      in: header
+      name: Authorization
+      format: "Basic {token}"
+      encoding: basic
+    source:
+      type: http
+      method: POST
+      baseUrl: https://{data_center}
+      path: /3.0/campaigns
+    requestSchema:
+      type: object
+      properties:
+        type:
+          type: string
+          enum: [regular, plaintext]
+        recipients:
+          type: object
+          properties:
+            list_id: { type: string, minLength: 1, maxLength: 128 }
+            segment_opts:
+              type: object
+              additionalProperties: true
+          required: [list_id]
+          additionalProperties: false
+        settings:
+          type: object
+          properties:
+            subject_line: { type: string, minLength: 1, maxLength: 255 }
+            preview_text: { type: string, maxLength: 255 }
+            title: { type: string, minLength: 1, maxLength: 255 }
+            from_name: { type: string, minLength: 1, maxLength: 255 }
+            reply_to: { type: string, minLength: 3, maxLength: 320 }
+            use_conversation: { type: boolean }
+            to_name: { type: string, maxLength: 255 }
+            auto_footer: { type: boolean }
+            inline_css: { type: boolean }
+          required: [subject_line, title, from_name, reply_to]
+          additionalProperties: false
+      required: [type, recipients, settings]
+      additionalProperties: false
+    response:
+      maxBytes: 262144
+      schema:
+        type: object
+        properties:
+          id: { type: string }
+          type: { type: string }
+          status: { type: string }
+          recipients: { type: object }
+          settings: { type: object }
+          create_time: { type: string }
+      projection:
+        - /id
+        - /type
+        - /status
+        - /recipients
+        - /settings
+        - /create_time
+
+  - id: update-campaign
+    name: mailchimp_update_campaign
+    description: Update the audience or sender settings of an existing campaign draft.
+    effect: update
+    identityMode: shared_only
+    credentialSlot: api_credential
+    credentialInjection:
+      in: header
+      name: Authorization
+      format: "Basic {token}"
+      encoding: basic
+    source:
+      type: http
+      method: PATCH
+      baseUrl: https://{data_center}
+      path: /3.0/campaigns/{campaign_id}
+      parameters:
+        - name: campaign_id
+          in: path
+          required: true
+          schema: { type: string, minLength: 1, maxLength: 128 }
+    requestSchema:
+      type: object
+      properties:
+        recipients:
+          type: object
+          properties:
+            list_id: { type: string, minLength: 1, maxLength: 128 }
+            segment_opts:
+              type: object
+              additionalProperties: true
+          additionalProperties: false
+        settings:
+          type: object
+          properties:
+            subject_line: { type: string, minLength: 1, maxLength: 255 }
+            preview_text: { type: string, maxLength: 255 }
+            title: { type: string, minLength: 1, maxLength: 255 }
+            from_name: { type: string, minLength: 1, maxLength: 255 }
+            reply_to: { type: string, minLength: 3, maxLength: 320 }
+            use_conversation: { type: boolean }
+            to_name: { type: string, maxLength: 255 }
+            auto_footer: { type: boolean }
+            inline_css: { type: boolean }
+          additionalProperties: false
+      required: [settings]
+      additionalProperties: false
+    response:
+      maxBytes: 262144
+      schema:
+        type: object
+        properties:
+          id: { type: string }
+          type: { type: string }
+          status: { type: string }
+          recipients: { type: object }
+          settings: { type: object }
+          create_time: { type: string }
+      projection:
+        - /id
+        - /type
+        - /status
+        - /recipients
+        - /settings
+        - /create_time

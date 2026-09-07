@@ -1,5 +1,6 @@
 import { createHmac, createPublicKey, verify as cryptoVerify, timingSafeEqual } from "node:crypto";
 import type { OimVerification } from "@tulipfarm/schema";
+import { parseFormBody, twilioSigningInput } from "./twilio-signature";
 
 /**
  * The only code in the runtime that touches a webhook signing Secret.
@@ -15,8 +16,10 @@ export const DEFAULT_TOLERANCE_SECONDS = 300;
 
 export type VerificationFailure =
   | "missing_signature"
+  | "missing_callback_url"
   | "missing_timestamp"
   | "stale_timestamp"
+  | "malformed_payload"
   | "malformed_signature"
   | "malformed_key"
   | "unsupported_algorithm"
@@ -31,6 +34,8 @@ export interface DeliveryRequest {
   /** The exact bytes the provider sent. Re-serializing a parsed body breaks every signature. */
   readonly rawBody: Uint8Array;
   readonly headers: Readonly<Record<string, string | string[] | undefined>>;
+  /** The configured public callback URL. Never derive this from request or forwarding headers. */
+  readonly callbackUrl?: string;
 }
 
 /**
@@ -171,7 +176,10 @@ export function verifyDelivery(
     return verifyJwt(verification, request, secret, nowSeconds);
   }
 
-  const header = verification.signatureHeader;
+  const header =
+    verification.scheme === "twilio_hmac_sha1"
+      ? "X-Twilio-Signature"
+      : verification.signatureHeader;
   if (header === undefined) return { ok: false, reason: "missing_signature" };
   const presented = headerValue(request, header);
   if (presented === undefined) return { ok: false, reason: "missing_signature" };
@@ -188,6 +196,28 @@ export function verifyDelivery(
     verification.signaturePrefix
   );
   if (signature === undefined) return { ok: false, reason: "malformed_signature" };
+
+  if (verification.scheme === "twilio_hmac_sha1") {
+    if (signature.length !== 20) return { ok: false, reason: "malformed_signature" };
+    if (request.callbackUrl === undefined) {
+      return { ok: false, reason: "missing_callback_url" };
+    }
+    const contentType = headerValue(request, "content-type")
+      ?.split(";", 1)[0]
+      ?.trim()
+      .toLowerCase();
+    if (contentType !== "application/x-www-form-urlencoded") {
+      return { ok: false, reason: "malformed_payload" };
+    }
+    const body = parseFormBody(request.rawBody);
+    if (body === undefined) return { ok: false, reason: "malformed_payload" };
+    const expected = Uint8Array.from(
+      createHmac("sha1", secret)
+        .update(Buffer.from(twilioSigningInput(request.callbackUrl, body)))
+        .digest()
+    );
+    return constantTimeEquals(signature, expected) ? accept() : { ok: false, reason: "mismatch" };
+  }
 
   const signed = canonicalSigningInput(
     verification.signingInput ?? "{body}",

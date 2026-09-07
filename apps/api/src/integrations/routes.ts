@@ -1,4 +1,5 @@
 import { DEPLOYMENT_BUSINESS_ID } from "@tulipfarm/constants";
+import type { ConnectionUseAuthorizer } from "@tulipfarm/integrations";
 import type { OimManifest } from "@tulipfarm/schema";
 import type { SecretsService } from "@tulipfarm/secrets";
 import type { BundledIntegration } from "@tulipfarm/soul";
@@ -18,7 +19,7 @@ import {
   type SoulWriter,
   soulWriteHttpError,
 } from "@tulipfarm/soul";
-import type { IntegrationStore } from "@tulipfarm/storage";
+import type { ConnectionStore, IntegrationStore } from "@tulipfarm/storage";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { stringify as stringifyYaml } from "yaml";
 import type { AuditService } from "../audit/service";
@@ -31,7 +32,8 @@ import { deleteConnectionSecrets, ForeignSecretRefError } from "./connection-env
 import { mergeConnectionEnv } from "./connection-writer";
 import { isGitHubInstalled } from "./github-status";
 import { readIntegrationLock, serializeIntegrationLock } from "./install";
-import { oimConnectForm, oimConnectSupported } from "./oim-connect";
+import { oimCatalogStatus } from "./oim-catalog-status";
+import { oimConnectForm, oimConnectSupported, oimMajorVersion } from "./oim-connect";
 import type { PrincipalProviderTokenRepo } from "./principal-tokens";
 
 /**
@@ -126,9 +128,7 @@ export function mergeIntegrations(
       slug,
       ...(manifest === undefined ? {} : { manifest }),
       ...(soulEntry.oimManifest === undefined ? {} : { oimManifest: soulEntry.oimManifest }),
-      // An OIM package has no `connection.yaml`; its Connections live in the Connection store, and
-      // the connect routes report them. Installed is as much as the catalog can say here.
-      connected: soulEntry.oimManifest !== undefined || soulEntry.connection?.enabled === true,
+      connected: soulEntry.oimManifest === undefined && soulEntry.connection?.enabled === true,
       connectionEnv: soulEntry.connection?.env,
       setupGuide: bundledEntry?.setupGuide ?? soulEntry.setupGuide,
     });
@@ -339,7 +339,11 @@ export function registerIntegrationRoutes(
   audit?: AuditService,
   personalTokens?: PrincipalProviderTokenRepo,
   /** OIM packages shipped in the image, so the catalog lists them before they are installed. */
-  bundledOim: ReadonlyMap<string, OimManifest> = new Map()
+  bundledOim: ReadonlyMap<string, OimManifest> = new Map(),
+  oimConnections?: {
+    store: Pick<ConnectionStore, "listForIntegration">;
+    access: ConnectionUseAuthorizer;
+  }
 ): void {
   const auditWrite = makeSoulAuditWriter(audit);
   // Materialize a bundled-only integration into the soul repo so its connection state has a home.
@@ -397,6 +401,27 @@ export function registerIntegrationRoutes(
     return mergeIntegrations(soulLoader, bundled, bundledOim).get(slug);
   }
 
+  async function connectionStatus(entry: MergedIntegration, req: FastifyRequest) {
+    const manifest = entry.oimManifest;
+    if (manifest === undefined || oimConnections === undefined || req.principal === undefined) {
+      return { connected: entry.connected, personalConnected: false };
+    }
+    const connections = await oimConnections.store.listForIntegration(req.principal.businessId, {
+      id: manifest.metadata.id,
+      majorVersion: oimMajorVersion(manifest),
+    });
+    const status = await oimCatalogStatus(
+      connections,
+      (manifest.auth?.credentialSlots ?? [])
+        .filter((slot) => slot.required !== false)
+        .map((slot) => slot.id),
+      req.principal,
+      oimConnections.access
+    );
+    entry.connected = status.connected;
+    return status;
+  }
+
   app.get(
     "/api/v1/integrations",
     {
@@ -418,8 +443,11 @@ export function registerIntegrationRoutes(
         },
       },
     },
-    async () => {
+    async (req) => {
       const merged = mergeIntegrations(soulLoader, bundled, bundledOim);
+      for (const entry of merged.values()) {
+        await connectionStatus(entry, req);
+      }
       const githubEntry = merged.get("github");
       if (githubEntry && githubStatus) {
         githubEntry.connected = await isGitHubInstalled(githubStatus);
@@ -453,9 +481,11 @@ export function registerIntegrationRoutes(
       }
       const principal = req.principal;
       const personalConnected =
-        principal?.kind === "user" && personalTokens !== undefined
-          ? (await personalTokens.find(principal, name)) !== null
-          : false;
+        entry.oimManifest !== undefined
+          ? (await connectionStatus(entry, req)).personalConnected
+          : principal?.kind === "user" && personalTokens !== undefined
+            ? (await personalTokens.find(principal, name)) !== null
+            : false;
       return await toDetail(
         entry,
         (await loadIntegrationRegistry(app.log)).get(name),

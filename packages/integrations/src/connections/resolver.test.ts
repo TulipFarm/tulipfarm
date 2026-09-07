@@ -191,6 +191,20 @@ describe("ConnectionResolver", () => {
     });
   });
 
+  it("does not use a default when a persistent caller requires an exact Connection", async () => {
+    const organization = connection("org-default", { scope: "organization" }, { isDefault: true });
+
+    await expect(
+      resolver([organization]).resolve(
+        request({ personalOwnerId: undefined, requireExplicitConnection: true })
+      )
+    ).resolves.toMatchObject({
+      kind: "selection_required",
+      reason: "no_default",
+      candidates: [{ id: "org-default" }],
+    });
+  });
+
   it("never resolves another user's personal Connection by exact ID", async () => {
     const other = connection("other-personal", {
       scope: "personal",

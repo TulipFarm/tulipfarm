@@ -1,5 +1,9 @@
 # Connect Slack
 
+This page configures the existing **Slack channel connector**. It keeps the proven Socket Mode
+DM, mention, reply, and Knowledge paths. The separate `slack-oim` package is the portable OIM API
+and signed Events reference; it does not replace this connector yet.
+
 Before starting, open **Business → About** and confirm the **Public address** is the HTTPS address
 you use to open TulipFarm. The callback shown there must be reachable from your browser.
 TulipFarm deliberately uses one callback path for every Integration; the signed, one-use OAuth

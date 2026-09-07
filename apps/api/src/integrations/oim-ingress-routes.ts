@@ -16,6 +16,8 @@ export interface OimIngressRouteDeps extends Omit<ReceiveDeliveryDeps, "newDeliv
   readonly resolve: (
     slug: string
   ) => Promise<{ readonly businessId: string; readonly manifest: OimManifest } | null>;
+  /** Resolves the exact public callback URL registered with the provider from trusted config. */
+  readonly callbackUrl?: (slug: string, connectionId?: string) => string;
   readonly newDeliveryId?: () => string;
 }
 
@@ -35,6 +37,11 @@ export async function registerOimIngressRoutes(
   await app.register(async (scope) => {
     scope.addContentTypeParser("application/json", { parseAs: "buffer" }, (_req, body, done) =>
       done(null, body)
+    );
+    scope.addContentTypeParser(
+      "application/x-www-form-urlencoded",
+      { parseAs: "buffer" },
+      (_req, body, done) => done(null, body)
     );
 
     scope.post(
@@ -57,7 +64,9 @@ export async function registerOimIngressRoutes(
             properties: { connectionId: { type: "string", minLength: 1, maxLength: 256 } },
           },
           response: {
-            200: { type: "object", additionalProperties: true },
+            200: {
+              oneOf: [{ type: "object", additionalProperties: true }, { type: "string" }],
+            },
             401: ErrorSchema,
           },
         },
@@ -65,13 +74,17 @@ export async function registerOimIngressRoutes(
       async (req, reply) => {
         const { slug } = req.params as { slug: string };
         const { connectionId } = req.query as { connectionId?: string };
+        const acknowledge = () =>
+          slug === "twilio"
+            ? reply.code(200).type("application/xml").send("<Response></Response>")
+            : reply.code(200).send(ACKNOWLEDGED);
         const installed = await deps.resolve(slug);
         if (!installed) {
           req.log.warn(
             { integration: slug },
             "OIM delivery for an Integration that is not installed"
           );
-          return reply.code(200).send(ACKNOWLEDGED);
+          return acknowledge();
         }
 
         const result = await receiveDelivery(
@@ -81,6 +94,9 @@ export async function registerOimIngressRoutes(
             rawBody: req.body as Buffer,
             headers: req.headers,
             ...(connectionId === undefined ? {} : { connectionId }),
+            ...(deps.callbackUrl === undefined
+              ? {}
+              : { callbackUrl: deps.callbackUrl(slug, connectionId) }),
           },
           { ...deps, newDeliveryId: deps.newDeliveryId ?? (() => crypto.randomUUID()) }
         );
@@ -94,10 +110,10 @@ export async function registerOimIngressRoutes(
               { integration: slug, delivery: result.deliveryId, duplicate: result.duplicate },
               "OIM delivery accepted"
             );
-            return reply.code(200).send(ACKNOWLEDGED);
+            return acknowledge();
           case "discarded":
             req.log.debug({ integration: slug, reason: result.reason }, "OIM delivery discarded");
-            return reply.code(200).send(ACKNOWLEDGED);
+            return acknowledge();
           case "unverified":
             // The one case worth telling the caller about: a provider whose signing Secret has
             // been rotated needs to see a failure rather than a silent success.
@@ -111,7 +127,7 @@ export async function registerOimIngressRoutes(
               { integration: slug, reason: result.reason },
               "OIM delivery could not be received"
             );
-            return reply.code(200).send(ACKNOWLEDGED);
+            return acknowledge();
         }
       }
     );

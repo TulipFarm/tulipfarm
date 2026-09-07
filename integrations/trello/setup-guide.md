@@ -22,3 +22,8 @@ TulipFarm stores both as encrypted secrets. Each Trello call sends both values d
 | Tool | What it does |
 | --- | --- |
 | `trello_get_member` | Confirms the credentials and reads the connected Trello member. |
+| `trello_list_boards` | Lists boards the connected member can access. |
+| `trello_list_lists` | Lists the open or closed lists on one board. |
+| `trello_list_cards` | Lists cards in one list. |
+| `trello_create_card` | Creates a card in one list. |
+| `trello_update_card` | Updates a card or moves it to another list. |

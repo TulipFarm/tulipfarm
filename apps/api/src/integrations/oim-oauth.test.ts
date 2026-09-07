@@ -3,7 +3,10 @@ import { describe, expect, it } from "vitest";
 import { buildAuthorizeUrl } from "./auth-broker";
 import {
   OIM_OAUTH_STEP_INDEX,
+  oimAuthLegacyManifest,
+  oimConnectionPatchFromEnv,
   oimCredentialsFromEnv,
+  oimLegacyStepIndex,
   oimOAuthLegacyManifest,
   oimSlotEnv,
 } from "./oim-oauth";
@@ -89,11 +92,64 @@ describe("oimOAuthLegacyManifest", () => {
     expect(parsed.searchParams.get("scope")).toBe("read:things write:things");
   });
 
+  it("preserves declared provider parameters while keeping protocol parameters host-owned", () => {
+    const source = manifest();
+    const oauth = source.auth?.steps[0];
+    if (oauth?.type !== "oauth2") throw new Error("expected an oauth2 step");
+    oauth.authorizationParameters = {
+      access_type: "offline",
+      prompt: "consent",
+      client_id: "untrusted",
+      redirect_uri: "https://evil.test",
+      state: "untrusted",
+      scope: "untrusted",
+      code_challenge: "untrusted",
+      code_challenge_method: "plain",
+    };
+
+    const steps = [
+      oimOAuthLegacyManifest(source)?.auth?.[OIM_OAUTH_STEP_INDEX],
+      oimAuthLegacyManifest(source).auth?.[0],
+    ];
+
+    for (const step of steps) {
+      if (step?.kind !== "oauth2") throw new Error("expected an oauth2 step");
+      const parsed = new URL(
+        buildAuthorizeUrl(step, {
+          clientId: "cid",
+          state: "st",
+          redirectUri: "https://tf.test/cb",
+        })
+      );
+
+      expect(parsed.searchParams.get("access_type")).toBe("offline");
+      expect(parsed.searchParams.get("prompt")).toBe("consent");
+      expect(parsed.searchParams.get("client_id")).toBe("cid");
+      expect(parsed.searchParams.get("redirect_uri")).toBe("https://tf.test/cb");
+      expect(parsed.searchParams.get("state")).toBe("st");
+      expect(parsed.searchParams.get("scope")).toBe("read:things write:things");
+      expect(parsed.searchParams.has("code_challenge")).toBe(false);
+      expect(parsed.searchParams.has("code_challenge_method")).toBe(false);
+    }
+  });
+
   it("keeps every non-token binding, so a workspace id survives the exchange", () => {
     const step = oimOAuthLegacyManifest(manifest())?.auth?.[OIM_OAUTH_STEP_INDEX];
     if (step?.kind !== "oauth2") throw new Error("expected an oauth2 step");
     expect(step.map).toEqual({ "workspace.id": oimSlotEnv("workspace_id") });
     expect(step.refresh_token_env).toBe(oimSlotEnv("refresh_token"));
+  });
+
+  it("preserves the declared token endpoint client authentication method", () => {
+    const source = manifest();
+    const oauth = source.auth?.steps[0];
+    if (oauth?.type !== "oauth2") throw new Error("expected an oauth2 step");
+    oauth.tokenEndpointAuthMethod = "client_secret_basic";
+
+    const translated = oimAuthLegacyManifest(source).auth?.[0] as
+      | { kind: "oauth2"; token_endpoint_auth_method?: string }
+      | undefined;
+    expect(translated?.token_endpoint_auth_method).toBe("client_secret_basic");
   });
 
   it("marks the step personal only when the connect request was personal", () => {
@@ -128,5 +184,83 @@ describe("oimCredentialsFromEnv", () => {
   it("leaves the expiry null when the provider issues a token that does not lapse", () => {
     const result = oimCredentialsFromEnv(manifest(), { [oimSlotEnv("access_token")]: "at" });
     expect(result.expiresAt).toBeNull();
+  });
+});
+
+describe("oimAuthLegacyManifest", () => {
+  it("preserves multi-step app creation, installation, and OAuth order", () => {
+    const source = manifest();
+    const auth = source.auth;
+    if (auth === undefined) throw new Error("fixture has auth");
+    const flow = oimAuthLegacyManifest({
+      ...source,
+      auth: {
+        ...auth,
+        configurationFields: [
+          { id: "site", label: "Site", type: "string", required: true, agentVisible: true },
+        ],
+        steps: [
+          {
+            id: "app",
+            title: "Create app",
+            type: "app_manifest",
+            createUrl: "https://acme.test/apps/new",
+            manifest: { callback_url: "{callback_url}", state: "{state}" },
+            bindings: [
+              { sourcePath: "/client_id", target: { type: "credential", slot: "client_id" } },
+            ],
+          },
+          {
+            id: "install",
+            title: "Install app",
+            type: "install",
+            url: "https://acme.test/install?state={state}",
+            bindings: [{ sourcePath: "/site", target: { type: "configuration", field: "site" } }],
+          },
+          auth.steps[0],
+        ],
+      },
+    });
+
+    expect(flow.auth?.map((step) => step.kind)).toEqual(["app_manifest", "install", "oauth2"]);
+    expect(oimLegacyStepIndex(flow, "install")).toBe(1);
+  });
+
+  it("maps callback outputs into credential and configuration planes", () => {
+    const source = manifest();
+    const auth = source.auth;
+    if (auth === undefined) throw new Error("fixture has auth");
+    const withConfig = {
+      ...source,
+      auth: {
+        ...auth,
+        configurationFields: [
+          { id: "site", label: "Site", type: "string", required: true, agentVisible: true },
+        ],
+        steps: [
+          {
+            id: "install",
+            title: "Install",
+            type: "install",
+            url: "https://acme.test/install?state={state}",
+            bindings: [
+              { sourcePath: "/token", target: { type: "credential", slot: "access_token" } },
+              { sourcePath: "/site", target: { type: "configuration", field: "site" } },
+            ],
+          },
+        ],
+      },
+    } as OimManifest;
+
+    expect(
+      oimConnectionPatchFromEnv(withConfig, {
+        [oimSlotEnv("access_token")]: "token",
+        OIM_CONFIG_SITE: "tenant.acme.test",
+      })
+    ).toEqual({
+      slots: { access_token: "token" },
+      configuration: { site: "tenant.acme.test" },
+      expiresAt: null,
+    });
   });
 });

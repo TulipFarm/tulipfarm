@@ -327,6 +327,29 @@ describe("ActiveTriggerInvocationResolver", () => {
     ]);
   });
 
+  it("carries exact OIM major and Connection pins into the runtime Trigger", async () => {
+    const resolver = await activeTriggerResolver(
+      eventTrigger({
+        type: "integration_event",
+        provider: "gitlab",
+        matchEventType: "push",
+        protocol: "oim",
+        integrationMajorVersion: 2,
+        connectionId: "connection-1",
+      })
+    );
+
+    await expect(resolver.listEventTriggers()).resolves.toEqual([
+      expect.objectContaining({
+        type: "integration_event",
+        provider: "gitlab",
+        protocol: "oim",
+        integrationMajorVersion: 2,
+        connectionId: "connection-1",
+      }),
+    ]);
+  });
+
   // A webhook arrives on a slug-addressed route, so matching it by event type could only make the
   // destination ambiguous.
   it("omits non-event Trigger types from the event list", async () => {

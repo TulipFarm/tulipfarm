@@ -24,7 +24,9 @@ profiles:
   core: "1.2" # always; use the lowest version that supports the package's constructs
   auth: "1.0" # whenever there is an `auth:` block
   events: "1.0" # whenever there is an `events:` block
-  knowledge: "1.0" # whenever there is a `knowledge:` block
+  knowledge: "1.1" # whenever there is a `knowledge:` block
+
+# The review Tool inserts files: with exact SHA-256 values from its files argument.
 
 auth:
   credentialSlots:
@@ -103,9 +105,105 @@ operations:
 - **`credentialInjection.format` contains exactly one `{token}`.** Not `{{credential}}`, not two.
 - **Hostnames must be public.** `localhost`, a private range, or a bare IP is refused; a package
   that could reach inside the deployment's network is not a third-party Integration.
-- **No hooks, no companion files** from this forge. Both are refused before the review runs.
+- **Exact companions.** Every supplied file must be declared with the same path, role, and SHA-256;
+  missing, changed, duplicate, and undeclared files are refused. The review Tool can generate the
+  digest declarations when `oim.yml` omits `files:`.
+- **No hooks or executable files.** Unsigned authored packages may contain only OpenAPI, GraphQL,
+  Markdown guide, and fixture companions.
 - **Every operation needs a `response.schema`.** Add a `projection` unless an Agent genuinely needs
   the whole body.
+
+## Package companions
+
+Pass every companion to `integration_draft_review` with its path, role, and exact UTF-8 content.
+The setup guide is part of the package. Do not use a separate `setup_guide` argument; a side file
+outside `manifest.files` is not covered by the reviewed package digest.
+
+```json
+{
+  "manifest": "oimVersion: \"1.0\"\nkind: Integration\n...",
+  "files": [
+    {
+      "path": "setup-guide.md",
+      "role": "guide",
+      "content": "# Connect Acme\n\nCreate a token in Acme, then add it through Connections.\n"
+    }
+  ]
+}
+```
+
+### Offline fixtures
+
+Write redacted deterministic cases. A case supplies Tool arguments and a recorded provider
+response, then checks the exact outbound request and normalized result:
+
+```yaml
+version: 1
+cases:
+  - name: gets-current-status
+    operationId: status
+    configuration:
+      site: tenant.acme.com
+    request: {}
+    response:
+      status: 200
+      body: { status: { description: All systems operational } }
+    expect:
+      request:
+        method: GET
+        url: https://tenant.acme.com/api/v2/status.json
+      result: { status: { description: All systems operational } }
+```
+
+Fixtures run before a review is returned. They have no network, clock, filesystem, or real
+credential access. Use clearly fake values for headers and bodies; never copy live credentials or
+personal data from provider traffic. Add `configuration` only when compilation needs a declared
+`auth.configurationFields` value, such as a tenant host or account segment in a path. Values must
+be strings, numbers, or booleans, and every key must be declared in the manifest.
+
+For an expected provider refusal, replace `result` with the typed runtime error:
+
+```yaml
+expectedError:
+  phase: before_dispatch
+  code: provider_not_found
+  retryable: false
+```
+
+For a `2xx` response that violates the declared output schema—such as a non-empty provider error
+array constrained with `maxItems: 0`—expect `after_dispatch`, `invalid_output`, and `retryable:
+false`.
+
+For an operation whose response uses `mode: binary`, put deterministic fake UTF-8 bytes in
+`response.body`. The fixture runner sends them through the runtime File port. Expect
+`fileId: fixture-<case-name>-file` and the returned filename, media type, byte count, and
+`truncated` flag. Never embed a real downloaded file.
+
+### OpenAPI providers
+
+Use an `openapi` companion when the vendor publishes a useful OpenAPI 3.x contract. Trim it to the
+selected operations. Each manifest operation names one `operationId`:
+
+```yaml
+operations:
+  - id: ticket-get
+    name: acme_ticket_get
+    description: Get one ticket by id.
+    effect: read
+    identityMode: shared_only
+    source:
+      type: openapi
+      file: acme-openapi.yaml
+      operationId: getTicket
+      baseUrl: https://api.acme.com
+    response:
+      maxBytes: 65536
+      schema: { type: object }
+```
+
+Supply `acme-openapi.yaml` to the review Tool with role `openapi`. Keep unsigned packages
+declarative. An OpenAPI extension that names generated code, a plugin, or an install command does
+not authorize it to run.
 
 ## Per-customer hosts
 
@@ -170,6 +268,8 @@ Two rules bind these:
   write would otherwise pass an approval gate that only ever saw a read.
 - `requestSchema` must be a closed object (`additionalProperties: false`), so an Agent cannot add a
   variable the document was never written against.
+- Supply every fixed document to the review Tool with role `graphql`. Never expose a generic
+  query-string operation.
 
 Pagination is HTTP query-parameter based, so a GraphQL package leaves `pagination` unset and exposes
 the cursor as a variable instead.

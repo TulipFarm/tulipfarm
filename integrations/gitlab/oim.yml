@@ -6,8 +6,8 @@ metadata:
   name: GitLab
   version: 1.0.0
   description: >-
-    Read and write GitLab issues, merge requests and notes with a personal or group access token,
-    and receive project webhooks as typed events.
+    Read and write GitLab.com, Dedicated, or explicitly approved public self-managed GitLab issues,
+    merge requests and notes with an access token, and receive project webhooks as typed events.
   license: Apache-2.0
   maintainers:
     - name: TulipFarm
@@ -18,10 +18,14 @@ profiles:
   auth: "1.0"
   events: "1.0"
 
+files:
+  - path: fixtures.yml
+    role: fixture
+    sha256: "3fe4c0ab4812062d0d71f521c57971f4799601b285f7dda97fe5599364c5ef97"
+
 auth:
-  # GitLab.com and GitLab Dedicated both live under gitlab.com, so the host is templated and the
-  # allowlist keeps the template from becoming a way to point the Tools at an arbitrary origin.
-  # A self-managed instance on its own domain needs that domain added here, in a forked package.
+  # GitLab.com and GitLab Dedicated are statically allowed. A self-managed host is added only for
+  # one Connection after the runtime records an explicit exact-origin approval.
   allowedOriginHosts:
     - gitlab.com
     - "*.gitlab.com"
@@ -37,7 +41,7 @@ auth:
   configurationFields:
     - id: gitlab_host
       label: GitLab host
-      type: url
+      type: string
       required: true
       agentVisible: true
   steps:
@@ -45,12 +49,12 @@ auth:
       type: fields
       title: Name your GitLab host
       description: >-
-        Paste the host you sign in to, for example gitlab.com. Only gitlab.com and its subdomains
-        are accepted; any other host is refused when the Integration compiles.
+        Enter the bare host you sign in to, for example gitlab.com or gitlab.example.com. A host
+        outside gitlab.com must be public HTTPS and needs a separate exact-origin confirmation.
       fields:
         - id: gitlab_host
           label: GitLab host
-          input: url
+          input: text
           required: true
           target:
             type: configuration
@@ -572,3 +576,8 @@ events:
               path_with_namespace: { type: string }
         required: [object_kind, ref]
   rawRetentionDays: 7
+
+extensions:
+  x-tulipfarm-origin-policy:
+    mode: approved_public_exact
+    fields: [gitlab_host]

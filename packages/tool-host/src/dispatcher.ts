@@ -578,6 +578,8 @@ function replayedEffect(
       };
     case "failed":
       return { status: "failed", reason: `tool "${toolName}" already ran and failed` };
+    case "ambiguous":
+      return { status: "needs_reconciliation" };
     default:
       return {
         status: "failed",

@@ -16,7 +16,7 @@ export const OIM_PROFILE_VERSIONS = {
   core: "1.2",
   auth: "1.0",
   events: "1.0",
-  knowledge: "1.0",
+  knowledge: "1.1",
   hooks: "1.0",
 } as const;
 
@@ -29,6 +29,7 @@ export const OIM_PROFILE_VERSIONS = {
  * version number worth reading on a runtime that only implements `1.0`.
  */
 export const OIM_CORE_PROFILE_VERSIONS = ["1.0", "1.1", "1.2"] as const;
+const OIM_KNOWLEDGE_PROFILE_VERSIONS = ["1.0", "1.1"] as const;
 
 /** Constructs added in Core 1.1, named as they appear in a refusal message. */
 export const OIM_CORE_1_1_FEATURES = [
@@ -36,6 +37,8 @@ export const OIM_CORE_1_1_FEATURES = [
   "secondaryCredential",
   "source.contentType",
   "parameter.value",
+  "parameter.configurationField",
+  "source.url configuration placeholder",
   "path configuration placeholder",
   "pagination.type: body_cursor",
 ] as const;
@@ -86,6 +89,7 @@ export const OIM_CONNECTION_HEALTH_STATES = [
  */
 export const OIM_VERIFICATION_SCHEMES = [
   "shared_secret",
+  "twilio_hmac_sha1",
   "hmac_sha256",
   "hmac_sha512",
   "ed25519",
@@ -179,7 +183,7 @@ const ProfilesSchema = Type.Object(
     core: stringEnum(OIM_CORE_PROFILE_VERSIONS),
     auth: Type.Optional(stringEnum([OIM_PROFILE_VERSIONS.auth] as const)),
     events: Type.Optional(stringEnum([OIM_PROFILE_VERSIONS.events] as const)),
-    knowledge: Type.Optional(stringEnum([OIM_PROFILE_VERSIONS.knowledge] as const)),
+    knowledge: Type.Optional(stringEnum(OIM_KNOWLEDGE_PROFILE_VERSIONS)),
     hooks: Type.Optional(stringEnum([OIM_PROFILE_VERSIONS.hooks] as const)),
   },
   { additionalProperties: false }
@@ -238,21 +242,47 @@ const FixtureResponseSchema = Type.Object(
   { additionalProperties: false }
 );
 
+const FixtureExpectedErrorSchema = Type.Object(
+  {
+    phase: stringEnum(["before_dispatch", "after_dispatch"] as const),
+    code: Type.String({ pattern: "^[a-z][a-z0-9_]{1,127}$", maxLength: 128 }),
+    retryable: Type.Boolean(),
+    retryAfterMs: Type.Optional(Type.Integer({ minimum: 0 })),
+  },
+  { additionalProperties: false }
+);
+
 const FixtureCaseSchema = Type.Object(
   {
     name: Type.String({ pattern: "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$", maxLength: 96 }),
     operationId: Type.String({ pattern: OPERATION_ID_PATTERN, maxLength: 96 }),
+    configuration: Type.Optional(
+      Type.Record(
+        Type.String({ pattern: SLOT_PATTERN, maxLength: 64 }),
+        Type.Union([Type.String({ maxLength: 2_048 }), Type.Number(), Type.Boolean()]),
+        { additionalProperties: false }
+      )
+    ),
     request: Type.Record(Type.String({ minLength: 1 }), Type.Unknown(), {
       additionalProperties: false,
     }),
     response: FixtureResponseSchema,
-    expect: Type.Object(
-      {
-        request: FixtureRequestShapeSchema,
-        result: Type.Unknown(),
-      },
-      { additionalProperties: false }
-    ),
+    expect: Type.Union([
+      Type.Object(
+        {
+          request: FixtureRequestShapeSchema,
+          result: Type.Unknown(),
+        },
+        { additionalProperties: false }
+      ),
+      Type.Object(
+        {
+          request: FixtureRequestShapeSchema,
+          expectedError: FixtureExpectedErrorSchema,
+        },
+        { additionalProperties: false }
+      ),
+    ]),
   },
   { additionalProperties: false }
 );
@@ -261,8 +291,9 @@ const FixtureCaseSchema = Type.Object(
  * One offline suite carried by a companion with the OIM `fixture` role.
  *
  * The host sends `request` through the ordinary compiler and adapter into a recording transport,
- * returns `response`, then asserts the declared request shape and result. The format deliberately
- * has no credential, clock, network, process, or file capability.
+ * returns `response`, then asserts the declared request shape and result or typed error. The
+ * format deliberately has no credential, clock, network, process, or external filesystem
+ * capability.
  */
 export const OimFixtureSuiteSchema = Type.Object(
   {
@@ -294,6 +325,7 @@ const HttpParameterSchema = Type.Object(
      * spends tokens restating. Core 1.1.
      */
     value: Type.Optional(Type.String({ maxLength: 1_024 })),
+    configurationField: Type.Optional(Type.String({ pattern: SLOT_PATTERN, maxLength: 64 })),
   },
   { additionalProperties: false }
 );
@@ -363,7 +395,7 @@ const OpenApiSourceSchema = Type.Object(
 const GraphqlSourceSchema = Type.Object(
   {
     type: Type.Literal("graphql"),
-    url: Type.String({ pattern: HTTPS_URL_PATTERN }),
+    url: Type.String({ pattern: HTTPS_URL_TEMPLATE_PATTERN, maxLength: 2_048 }),
     operation: NonEmptyStringSchema,
     documentFile: Type.String({ pattern: FILE_PATH_PATTERN }),
   },
@@ -604,7 +636,21 @@ const AuthStepBase = {
   description: Type.Optional(Type.String({ minLength: 1, maxLength: 2_048 })),
 };
 
+const HOST_OWNED_AUTHORIZATION_PARAMETERS = new Set([
+  "response_type",
+  "client_id",
+  "redirect_uri",
+  "state",
+  "scope",
+  "code_challenge",
+  "code_challenge_method",
+]);
+
 const JsonPointerSchema = Type.String({ pattern: "^(?:/(?:[^/~]|~[01])*)+$", maxLength: 512 });
+const KnowledgeJsonPointerSchema = Type.String({
+  pattern: "^(?:$|/(?:[^/~]|~[01])*(?:/(?:[^/~]|~[01])*)*)$",
+  maxLength: 512,
+});
 
 const WebhookValueBindingSchema = Type.Union([
   Type.Object(
@@ -637,6 +683,20 @@ const AuthStepSchema = Type.Union([
       tokenUrl: Type.String({ pattern: HTTPS_URL_PATTERN }),
       scopes: Type.Array(NonEmptyStringSchema, { uniqueItems: true }),
       pkce: Type.Optional(Type.Boolean()),
+      tokenEndpointAuthMethod: Type.Optional(
+        Type.Union([
+          Type.Literal("none"),
+          Type.Literal("client_secret_post"),
+          Type.Literal("client_secret_basic"),
+        ])
+      ),
+      authorizationParameters: Type.Optional(
+        Type.Record(
+          Type.String({ pattern: "^[A-Za-z][A-Za-z0-9_.-]{0,127}$", maxLength: 128 }),
+          Type.String({ minLength: 1, maxLength: 2_048 }),
+          { additionalProperties: false }
+        )
+      ),
       clientId: CredentialTargetSchema,
       clientSecret: Type.Optional(CredentialTargetSchema),
       bindings: Type.Array(AuthBindingSchema, { minItems: 1 }),
@@ -824,22 +884,40 @@ const EventsSchema = Type.Object(
 /**
  * A pull-based ingress for providers that cannot deliver webhooks.
  *
- * The cursor is opaque to the runtime. It is only returned to the same declared operation after
- * the response that produced it has been made durable.
+ * The default cursor is opaque to the runtime. Batched integer event streams may instead advance
+ * to one past the largest declared item id. Either value is returned to the same operation only
+ * after the response that produced it has been made durable.
  */
+const PollingCursorSchema = Type.Union([
+  Type.Object(
+    {
+      responsePointer: JsonPointerSchema,
+      requestParameter: NonEmptyStringSchema,
+    },
+    { additionalProperties: false }
+  ),
+  Type.Object(
+    {
+      mode: Type.Literal("max_integer_plus_one"),
+      /** Selects the response array whose item ids advance the cursor. */
+      responsePointer: JsonPointerSchema,
+      /** Selects one non-negative safe integer id within each response item. */
+      itemPointer: JsonPointerSchema,
+      requestParameter: NonEmptyStringSchema,
+    },
+    { additionalProperties: false }
+  ),
+]);
+
 const PollingIngressSchema = Type.Object(
   {
     kind: Type.Literal("polling"),
     operationId: Type.String({ pattern: OPERATION_ID_PATTERN, maxLength: 96 }),
     /** A provider-safe floor. The scheduler never polls more often than this. */
     intervalSeconds: Type.Integer({ minimum: 60, maximum: 86_400 }),
-    cursor: Type.Object(
-      {
-        responsePointer: JsonPointerSchema,
-        requestParameter: NonEmptyStringSchema,
-      },
-      { additionalProperties: false }
-    ),
+    /** Typed events selected from each durably persisted response item. */
+    eventTypes: Type.Optional(Type.Array(EventTypeSchema, { minItems: 1 })),
+    cursor: PollingCursorSchema,
   },
   { additionalProperties: false }
 );
@@ -887,10 +965,10 @@ const KnowledgeSourceKindSchema = Type.Object(
     discoverOperationId: Type.Optional(
       Type.String({ pattern: OPERATION_ID_PATTERN, maxLength: 96 })
     ),
-    discoverItemsPointer: Type.Optional(JsonPointerSchema),
+    discoverItemsPointer: Type.Optional(KnowledgeJsonPointerSchema),
     discoverMapping: Type.Optional(
       Type.Object(
-        { id: JsonPointerSchema, label: JsonPointerSchema },
+        { id: KnowledgeJsonPointerSchema, label: KnowledgeJsonPointerSchema },
         { additionalProperties: false }
       )
     ),
@@ -901,17 +979,55 @@ const KnowledgeSourceKindSchema = Type.Object(
 const KnowledgeListMappingSchema = Type.Object(
   {
     /** Stable across revisions and renames; a mapping onto a mutable field breaks incremental sync. */
-    itemId: JsonPointerSchema,
-    revision: Type.Optional(JsonPointerSchema),
-    title: Type.Optional(JsonPointerSchema),
-    sourceUrl: Type.Optional(JsonPointerSchema),
-    updatedAt: Type.Optional(JsonPointerSchema),
-    contentType: Type.Optional(JsonPointerSchema),
+    itemId: Type.Optional(KnowledgeJsonPointerSchema),
+    itemFields: Type.Optional(
+      Type.Record(
+        Type.String({ pattern: SLOT_PATTERN, maxLength: 64 }),
+        Type.Union([
+          Type.Object({ source: Type.Literal("scope") }, { additionalProperties: false }),
+          Type.Object(
+            { source: Type.Literal("item"), pointer: KnowledgeJsonPointerSchema },
+            { additionalProperties: false }
+          ),
+        ]),
+        { additionalProperties: false }
+      )
+    ),
+    /** Ordered fields whose typed values form the stable, collision-safe item identity. */
+    itemIdentity: Type.Optional(
+      Type.Array(Type.String({ pattern: SLOT_PATTERN, maxLength: 64 }), {
+        minItems: 1,
+        uniqueItems: true,
+      })
+    ),
+    revision: Type.Optional(KnowledgeJsonPointerSchema),
+    title: Type.Optional(KnowledgeJsonPointerSchema),
+    sourceUrl: Type.Optional(KnowledgeJsonPointerSchema),
+    updatedAt: Type.Optional(KnowledgeJsonPointerSchema),
+    contentType: Type.Optional(KnowledgeJsonPointerSchema),
     /** Truthy here means the provider is reporting the item as removed. */
-    deleted: Type.Optional(JsonPointerSchema),
+    deleted: Type.Optional(KnowledgeJsonPointerSchema),
   },
   { additionalProperties: false }
 );
+
+const KnowledgeParameterBindingsSchema = Type.Record(
+  Type.String({ pattern: "^[A-Za-z_][A-Za-z0-9_.-]{0,127}$", maxLength: 128 }),
+  Type.String({ pattern: SLOT_PATTERN, maxLength: 64 }),
+  { additionalProperties: false }
+);
+
+const KnowledgeContentValueSchema = Type.Union([
+  KnowledgeJsonPointerSchema,
+  Type.Object(
+    {
+      itemsPointer: KnowledgeJsonPointerSchema,
+      itemPointer: KnowledgeJsonPointerSchema,
+      separator: Type.String({ maxLength: 64 }),
+    },
+    { additionalProperties: false }
+  ),
+]);
 
 const KnowledgeCursorSchema = Type.Object(
   {
@@ -929,7 +1045,7 @@ const KnowledgeListSchema = Type.Object(
     operationId: Type.String({ pattern: OPERATION_ID_PATTERN, maxLength: 96 }),
     /** The request parameter carrying the user's selected scope. */
     scopeParameter: Type.Optional(NonEmptyStringSchema),
-    itemsPointer: JsonPointerSchema,
+    itemsPointer: KnowledgeJsonPointerSchema,
     mapping: KnowledgeListMappingSchema,
     cursor: KnowledgeCursorSchema,
     /** Bounds one Run's walk so a large source cannot hold a Routine open indefinitely. */
@@ -942,15 +1058,17 @@ const KnowledgeContentSchema = Type.Object(
   {
     operationId: Type.String({ pattern: OPERATION_ID_PATTERN, maxLength: 96 }),
     /** The request parameter carrying the item id from the list step. */
-    itemParameter: NonEmptyStringSchema,
+    itemParameter: Type.Optional(NonEmptyStringSchema),
+    /** Operation parameter to named, host-projected item field. Knowledge 1.1. */
+    parameters: Type.Optional(KnowledgeParameterBindingsSchema),
     mapping: Type.Object(
       {
-        content: JsonPointerSchema,
-        contentType: Type.Optional(JsonPointerSchema),
-        revision: Type.Optional(JsonPointerSchema),
-        title: Type.Optional(JsonPointerSchema),
-        sourceUrl: Type.Optional(JsonPointerSchema),
-        updatedAt: Type.Optional(JsonPointerSchema),
+        content: KnowledgeContentValueSchema,
+        contentType: Type.Optional(KnowledgeJsonPointerSchema),
+        revision: Type.Optional(KnowledgeJsonPointerSchema),
+        title: Type.Optional(KnowledgeJsonPointerSchema),
+        sourceUrl: Type.Optional(KnowledgeJsonPointerSchema),
+        updatedAt: Type.Optional(KnowledgeJsonPointerSchema),
       },
       { additionalProperties: false }
     ),
@@ -966,7 +1084,7 @@ const KnowledgeContentSchema = Type.Object(
  */
 const KnowledgeAclEntrySchema = Type.Object(
   {
-    kindPointer: Type.Optional(JsonPointerSchema),
+    kindPointer: Type.Optional(KnowledgeJsonPointerSchema),
     /** Which provider values mean which principal kind. Absent kinds cannot appear. */
     kindValues: Type.Optional(
       Type.Object(
@@ -981,9 +1099,9 @@ const KnowledgeAclEntrySchema = Type.Object(
     ),
     /** Used when every entry is the same kind and the provider says nothing about it. */
     defaultKind: Type.Optional(stringEnum(OIM_KNOWLEDGE_PRINCIPAL_KINDS)),
-    providerUserId: Type.Optional(JsonPointerSchema),
-    providerGroupId: Type.Optional(JsonPointerSchema),
-    domain: Type.Optional(JsonPointerSchema),
+    providerUserId: Type.Optional(KnowledgeJsonPointerSchema),
+    providerGroupId: Type.Optional(KnowledgeJsonPointerSchema),
+    domain: Type.Optional(KnowledgeJsonPointerSchema),
   },
   { additionalProperties: false }
 );
@@ -993,8 +1111,9 @@ const KnowledgeAclSchema = Type.Union([
     {
       mode: Type.Literal("item"),
       operationId: Type.String({ pattern: OPERATION_ID_PATTERN, maxLength: 96 }),
-      itemParameter: NonEmptyStringSchema,
-      entriesPointer: JsonPointerSchema,
+      itemParameter: Type.Optional(NonEmptyStringSchema),
+      parameters: Type.Optional(KnowledgeParameterBindingsSchema),
+      entriesPointer: KnowledgeJsonPointerSchema,
       entry: KnowledgeAclEntrySchema,
     },
     { additionalProperties: false }
@@ -1004,7 +1123,7 @@ const KnowledgeAclSchema = Type.Union([
       mode: Type.Literal("scope"),
       operationId: Type.String({ pattern: OPERATION_ID_PATTERN, maxLength: 96 }),
       scopeParameter: NonEmptyStringSchema,
-      entriesPointer: JsonPointerSchema,
+      entriesPointer: KnowledgeJsonPointerSchema,
       entry: KnowledgeAclEntrySchema,
     },
     { additionalProperties: false }
@@ -1018,10 +1137,10 @@ const KnowledgeIdentityLookupSchema = Type.Object(
     mapping: Type.Object(
       {
         /** The provider's own stable handle; an email or a name is not one. */
-        providerId: JsonPointerSchema,
-        email: Type.Optional(JsonPointerSchema),
+        providerId: KnowledgeJsonPointerSchema,
+        email: Type.Optional(KnowledgeJsonPointerSchema),
         /** Only a provider that says an address is verified may have it used for matching. */
-        emailVerified: Type.Optional(JsonPointerSchema),
+        emailVerified: Type.Optional(KnowledgeJsonPointerSchema),
       },
       { additionalProperties: false }
     ),
@@ -1037,9 +1156,12 @@ const KnowledgeIdentitySchema = Type.Object(
         {
           operationId: Type.String({ pattern: OPERATION_ID_PATTERN, maxLength: 96 }),
           idParameter: NonEmptyStringSchema,
-          membersPointer: Type.Optional(JsonPointerSchema),
+          membersPointer: Type.Optional(KnowledgeJsonPointerSchema),
           mapping: Type.Object(
-            { providerId: JsonPointerSchema, memberUserId: Type.Optional(JsonPointerSchema) },
+            {
+              providerId: KnowledgeJsonPointerSchema,
+              memberUserId: Type.Optional(KnowledgeJsonPointerSchema),
+            },
             { additionalProperties: false }
           ),
         },
@@ -1055,8 +1177,9 @@ const KnowledgeDeletionSchema = Type.Object(
     kind: stringEnum(OIM_KNOWLEDGE_DELETION_KINDS),
     operationId: Type.Optional(Type.String({ pattern: OPERATION_ID_PATTERN, maxLength: 96 })),
     scopeParameter: Type.Optional(NonEmptyStringSchema),
-    itemsPointer: Type.Optional(JsonPointerSchema),
-    itemIdPointer: Type.Optional(JsonPointerSchema),
+    parameters: Type.Optional(KnowledgeParameterBindingsSchema),
+    itemsPointer: Type.Optional(KnowledgeJsonPointerSchema),
+    itemIdPointer: Type.Optional(KnowledgeJsonPointerSchema),
   },
   { additionalProperties: false }
 );
@@ -1087,9 +1210,19 @@ const KnowledgeSchema = Type.Object(
       Type.Object(
         {
           operationId: Type.String({ pattern: OPERATION_ID_PATTERN, maxLength: 96 }),
-          itemParameter: NonEmptyStringSchema,
+          itemParameter: Type.Optional(NonEmptyStringSchema),
+          parameters: Type.Optional(KnowledgeParameterBindingsSchema),
           principalParameter: Type.Optional(NonEmptyStringSchema),
-          allowedPointer: JsonPointerSchema,
+          allowedPointer: Type.Optional(KnowledgeJsonPointerSchema),
+          principalSet: Type.Optional(
+            Type.Object(
+              {
+                entriesPointer: KnowledgeJsonPointerSchema,
+                principalIdPointer: KnowledgeJsonPointerSchema,
+              },
+              { additionalProperties: false }
+            )
+          ),
         },
         { additionalProperties: false }
       )
@@ -1738,6 +1871,31 @@ export function oimManifestIssues(manifest: OimManifest): string[] {
           `auth: step ${step.id} references undeclared credential slot ${step.secretSlot}`
         );
       }
+      if (step.type === "oauth2") {
+        const tokenEndpointAuthMethod =
+          step.tokenEndpointAuthMethod ??
+          (step.clientSecret === undefined ? "none" : "client_secret_post");
+        if (tokenEndpointAuthMethod !== "none" && step.clientSecret === undefined) {
+          issues.push(
+            `auth: step ${step.id} tokenEndpointAuthMethod ${tokenEndpointAuthMethod} requires clientSecret`
+          );
+        }
+        if (tokenEndpointAuthMethod === "none" && step.clientSecret !== undefined) {
+          issues.push(
+            `auth: step ${step.id} tokenEndpointAuthMethod none cannot declare clientSecret`
+          );
+        }
+        if (tokenEndpointAuthMethod === "none" && step.pkce === false) {
+          issues.push(`auth: step ${step.id} public OAuth client requires PKCE`);
+        }
+        for (const parameter of Object.keys(step.authorizationParameters ?? {})) {
+          if (HOST_OWNED_AUTHORIZATION_PARAMETERS.has(parameter)) {
+            issues.push(
+              `auth: step ${step.id} authorizationParameters cannot set host-owned ${parameter}`
+            );
+          }
+        }
+      }
       for (const url of [
         ...(step.type === "oauth2" ? [step.authorizationUrl, step.tokenUrl] : []),
         ...(step.type === "app_manifest" ? [step.createUrl] : []),
@@ -1811,32 +1969,31 @@ export function oimManifestIssues(manifest: OimManifest): string[] {
     ) {
       issues.push(`operations: ${operation.id} credential injection is required for native HTTP`);
     }
-    if (operation.source.type === "http" || operation.source.type === "openapi") {
-      const { baseUrl } = operation.source;
-      const field = baseUrl === undefined ? undefined : oimOriginPlaceholder(baseUrl);
-      if (field !== undefined) {
-        const declared = (manifest.auth?.configurationFields ?? []).find(
-          (candidate) => candidate.id === field
+    const baseUrl =
+      operation.source.type === "graphql" ? operation.source.url : operation.source.baseUrl;
+    const originField = baseUrl === undefined ? undefined : oimOriginPlaceholder(baseUrl);
+    if (originField !== undefined) {
+      const declared = (manifest.auth?.configurationFields ?? []).find(
+        (candidate) => candidate.id === originField
+      );
+      if (declared === undefined) {
+        issues.push(
+          `operations: ${operation.id} base URL uses {${originField}}, which no configuration field declares`
         );
-        if (declared === undefined) {
-          issues.push(
-            `operations: ${operation.id} base URL uses {${field}}, which no configuration field declares`
-          );
-        } else if (declared.type !== "url" && declared.type !== "string") {
-          issues.push(
-            `operations: ${operation.id} base URL placeholder {${field}} must be a url or string field`
-          );
-        }
-        const allowed = manifest.auth?.allowedOriginHosts ?? [];
-        if (allowed.length === 0) {
-          issues.push(
-            `operations: ${operation.id} uses a templated base URL without auth.allowedOriginHosts`
-          );
-        }
-        for (const pattern of allowed) {
-          if (!publicHostname(pattern.replace(/^\*\./, ""))) {
-            issues.push(`auth: allowed origin host ${pattern} is not a public hostname`);
-          }
+      } else if (declared.type !== "url" && declared.type !== "string") {
+        issues.push(
+          `operations: ${operation.id} base URL placeholder {${originField}} must be a url or string field`
+        );
+      }
+      const allowed = manifest.auth?.allowedOriginHosts ?? [];
+      if (allowed.length === 0) {
+        issues.push(
+          `operations: ${operation.id} uses a templated base URL without auth.allowedOriginHosts`
+        );
+      }
+      for (const pattern of allowed) {
+        if (!publicHostname(pattern.replace(/^\*\./, ""))) {
+          issues.push(`auth: allowed origin host ${pattern} is not a public hostname`);
         }
       }
     }
@@ -1981,11 +2138,23 @@ export function oimManifestIssues(manifest: OimManifest): string[] {
     }
 
     if (operation.source.type === "graphql") {
-      const url = validHttpsUrl(operation.source.url);
-      if (!url) {
-        issues.push(`operations: ${operation.id} URL is not a valid HTTPS URL`);
-      } else if (!publicHostname(url.hostname)) {
-        issues.push(`operations: ${operation.id} URL must use a public HTTPS URL`);
+      if (/[{}]/.test(operation.source.url)) {
+        if (
+          !/^https:\/\/\{[a-z][a-z0-9_]{1,63}\}(?::[1-9][0-9]{0,4})?(?:\/[^{}]*)?$/.test(
+            operation.source.url
+          )
+        ) {
+          issues.push(
+            `operations: ${operation.id} GraphQL URL requires one complete host placeholder`
+          );
+        }
+      } else {
+        const url = validHttpsUrl(operation.source.url);
+        if (!url) {
+          issues.push(`operations: ${operation.id} URL is not a valid HTTPS URL`);
+        } else if (!publicHostname(url.hostname)) {
+          issues.push(`operations: ${operation.id} URL must use a public HTTPS URL`);
+        }
       }
       const file = files.get(operation.source.documentFile);
       if (!file) {
@@ -2086,11 +2255,16 @@ function formEncodableSchema(schema: unknown): boolean {
 function oimCoreExtensionIssues(manifest: OimManifest): string[] {
   const issues: string[] = [];
   const used = new Set<string>();
-  const configured = new Set((manifest.auth?.configurationFields ?? []).map((field) => field.id));
+  const configured = new Map(
+    (manifest.auth?.configurationFields ?? []).map((field) => [field.id, field])
+  );
 
   for (const operation of manifest.operations) {
     const { source, credentialInjection, secondaryCredential, pagination } = operation;
 
+    if (source.type === "graphql" && oimOriginPlaceholder(source.url) !== undefined) {
+      used.add("source.url configuration placeholder");
+    }
     if (secondaryCredential !== undefined) {
       used.add("secondaryCredential");
     }
@@ -2171,6 +2345,30 @@ function oimCoreExtensionIssues(manifest: OimManifest): string[] {
         issues.push(`operations: ${operation.id} multipart parts require multipart content type`);
       }
       for (const parameter of source.parameters ?? []) {
+        if (parameter.configurationField !== undefined) {
+          used.add("parameter.configurationField");
+          if (parameter.value !== undefined) {
+            issues.push(
+              `operations: ${operation.id} parameter ${parameter.name} cannot combine value and configurationField`
+            );
+          }
+          const field = configured.get(parameter.configurationField);
+          if (field === undefined) {
+            issues.push(
+              `operations: ${operation.id} parameter ${parameter.name} references undeclared configuration field ${parameter.configurationField}`
+            );
+          } else {
+            const type = field.type === "url" ? "string" : field.type;
+            if (
+              parameter.schema.type !== type &&
+              !(type === "integer" && parameter.schema.type === "number")
+            ) {
+              issues.push(
+                `operations: ${operation.id} parameter ${parameter.name} schema is incompatible with configuration field ${field.id}`
+              );
+            }
+          }
+        }
         if (parameter.value === undefined) continue;
         used.add("parameter.value");
         if (parameter.required !== undefined) {
@@ -2268,9 +2466,10 @@ function oimKnowledgeIssues(manifest: OimManifest): string[] {
   const knowledge = manifest.knowledge;
   if (!knowledge) return [];
   const issues: string[] = [];
+  const profileVersion = manifest.profiles.knowledge;
 
-  if (manifest.profiles.knowledge !== OIM_PROFILE_VERSIONS.knowledge) {
-    issues.push('profiles: knowledge "1.0" is required when knowledge is declared');
+  if (profileVersion === undefined || !OIM_KNOWLEDGE_PROFILE_VERSIONS.includes(profileVersion)) {
+    issues.push('profiles: knowledge "1.0" or "1.1" is required when knowledge is declared');
   }
 
   const operations = new Map(manifest.operations.map((operation) => [operation.id, operation]));
@@ -2296,6 +2495,29 @@ function oimKnowledgeIssues(manifest: OimManifest): string[] {
       issues.push(`knowledge: ${role} operation ${operation.id} declares no parameter ${name}`);
     }
   };
+  const requireFieldParameters = (
+    role: string,
+    operation: OimOperation | undefined,
+    parameters: Readonly<Record<string, string>> | undefined
+  ) => {
+    for (const [name, field] of Object.entries(parameters ?? {})) {
+      requireParameter(role, operation, name);
+      if (!Object.hasOwn(knowledge.list.mapping.itemFields ?? {}, field)) {
+        issues.push(`knowledge: ${role} parameter ${name} references unknown item field ${field}`);
+      }
+    }
+  };
+  const rejectDuplicateFieldParameter = (
+    role: string,
+    parameters: Readonly<Record<string, string>> | undefined,
+    reserved: readonly (string | undefined)[]
+  ) => {
+    for (const name of reserved) {
+      if (name !== undefined && Object.hasOwn(parameters ?? {}, name)) {
+        issues.push(`knowledge: ${role} parameters duplicate reserved parameter ${name}`);
+      }
+    }
+  };
 
   const kindIds = new Set<string>();
   for (const kind of knowledge.sourceKinds) {
@@ -2318,6 +2540,18 @@ function oimKnowledgeIssues(manifest: OimManifest): string[] {
   const list = roleOperation("list", knowledge.list.operationId);
   if (knowledge.list.scopeParameter !== undefined) {
     requireParameter("list", list, knowledge.list.scopeParameter);
+  }
+  const itemFields = knowledge.list.mapping.itemFields ?? {};
+  const itemIdentity = knowledge.list.mapping.itemIdentity;
+  if ((knowledge.list.mapping.itemId === undefined) === (itemIdentity === undefined)) {
+    issues.push("knowledge: list mapping requires exactly one of itemId or itemIdentity");
+  }
+  if (itemIdentity !== undefined) {
+    for (const field of itemIdentity) {
+      if (!Object.hasOwn(itemFields, field)) {
+        issues.push(`knowledge: list itemIdentity references unknown item field ${field}`);
+      }
+    }
   }
 
   const cursor = knowledge.list.cursor;
@@ -2348,15 +2582,42 @@ function oimKnowledgeIssues(manifest: OimManifest): string[] {
   }
 
   const content = roleOperation("content", knowledge.content.operationId);
-  requireParameter("content", content, knowledge.content.itemParameter);
+  if (knowledge.content.itemParameter !== undefined) {
+    requireParameter("content", content, knowledge.content.itemParameter);
+  }
+  requireFieldParameters("content", content, knowledge.content.parameters);
+  rejectDuplicateFieldParameter("content", knowledge.content.parameters, [
+    knowledge.content.itemParameter,
+  ]);
+  if (
+    knowledge.content.itemParameter === undefined &&
+    Object.keys(knowledge.content.parameters ?? {}).length === 0
+  ) {
+    issues.push("knowledge: content declares no item parameter bindings");
+  }
+  if (itemIdentity !== undefined && knowledge.content.itemParameter !== undefined) {
+    issues.push(
+      "knowledge: content itemParameter cannot address a composite identity; bind named fields with parameters"
+    );
+  }
 
   const acl = knowledge.acl;
   const aclOperation = roleOperation("acl", acl.operationId);
-  requireParameter(
-    "acl",
-    aclOperation,
-    acl.mode === "item" ? acl.itemParameter : acl.scopeParameter
-  );
+  if (acl.mode === "item") {
+    if (acl.itemParameter !== undefined) requireParameter("acl", aclOperation, acl.itemParameter);
+    requireFieldParameters("acl", aclOperation, acl.parameters);
+    rejectDuplicateFieldParameter("acl", acl.parameters, [acl.itemParameter]);
+    if (acl.itemParameter === undefined && Object.keys(acl.parameters ?? {}).length === 0) {
+      issues.push("knowledge: item acl declares no item parameter bindings");
+    }
+    if (itemIdentity !== undefined && acl.itemParameter !== undefined) {
+      issues.push(
+        "knowledge: item acl itemParameter cannot address a composite identity; bind named fields with parameters"
+      );
+    }
+  } else {
+    requireParameter("acl", aclOperation, acl.scopeParameter);
+  }
   const entry = acl.entry;
   if (
     entry.providerUserId === undefined &&
@@ -2424,6 +2685,13 @@ function oimKnowledgeIssues(manifest: OimManifest): string[] {
       if (deletion.scopeParameter !== undefined) {
         requireParameter("deletion", removed, deletion.scopeParameter);
       }
+      requireFieldParameters("deletion", removed, deletion.parameters);
+      rejectDuplicateFieldParameter("deletion", deletion.parameters, [deletion.scopeParameter]);
+      for (const [name, field] of Object.entries(deletion.parameters ?? {})) {
+        if (itemFields[field]?.source !== "scope") {
+          issues.push(`knowledge: deletion parameter ${name} requires scope item field ${field}`);
+        }
+      }
       if (deletion.itemIdPointer === undefined) {
         issues.push("knowledge: operation deletion requires itemIdPointer");
       }
@@ -2432,10 +2700,129 @@ function oimKnowledgeIssues(manifest: OimManifest): string[] {
   if (deletion.kind !== "operation" && deletion.operationId !== undefined) {
     issues.push(`knowledge: deletion ${deletion.kind} names an operation it never calls`);
   }
+  if (deletion.kind !== "operation" && deletion.parameters !== undefined) {
+    issues.push(
+      `knowledge: deletion ${deletion.kind} binds parameters for an operation it never calls`
+    );
+  }
 
   if (knowledge.liveAuthorization) {
     const live = roleOperation("liveAuthorization", knowledge.liveAuthorization.operationId);
-    requireParameter("liveAuthorization", live, knowledge.liveAuthorization.itemParameter);
+    if (knowledge.liveAuthorization.itemParameter !== undefined) {
+      requireParameter("liveAuthorization", live, knowledge.liveAuthorization.itemParameter);
+    }
+    requireFieldParameters("liveAuthorization", live, knowledge.liveAuthorization.parameters);
+    rejectDuplicateFieldParameter("liveAuthorization", knowledge.liveAuthorization.parameters, [
+      knowledge.liveAuthorization.itemParameter,
+      knowledge.liveAuthorization.principalParameter,
+    ]);
+    if (
+      (knowledge.liveAuthorization.allowedPointer === undefined) ===
+      (knowledge.liveAuthorization.principalSet === undefined)
+    ) {
+      issues.push(
+        "knowledge: liveAuthorization requires exactly one of allowedPointer or principalSet"
+      );
+    }
+    if (
+      knowledge.liveAuthorization.principalSet !== undefined &&
+      knowledge.liveAuthorization.principalParameter !== undefined
+    ) {
+      issues.push(
+        "knowledge: liveAuthorization principalSet compares the linked identity locally and cannot declare principalParameter"
+      );
+    }
+    if (
+      knowledge.liveAuthorization.itemParameter === undefined &&
+      Object.keys(knowledge.liveAuthorization.parameters ?? {}).length === 0
+    ) {
+      issues.push("knowledge: liveAuthorization declares no source context parameter");
+    }
+    if (itemIdentity !== undefined && knowledge.liveAuthorization.itemParameter !== undefined) {
+      issues.push(
+        "knowledge: liveAuthorization itemParameter cannot address a composite identity; bind named fields with parameters"
+      );
+    }
+  }
+
+  const knowledge11Features: string[] = [];
+  if (knowledge.list.mapping.itemFields !== undefined) {
+    knowledge11Features.push("list.mapping.itemFields");
+  }
+  if (knowledge.list.mapping.itemIdentity !== undefined) {
+    knowledge11Features.push("list.mapping.itemIdentity");
+  }
+  if (typeof knowledge.content.mapping.content !== "string") {
+    knowledge11Features.push("content.mapping.content scalar join");
+  }
+  if (knowledge.content.parameters !== undefined) {
+    knowledge11Features.push("content.parameters");
+  }
+  if (acl.mode === "item" && acl.parameters !== undefined) {
+    knowledge11Features.push("acl.parameters");
+  }
+  if (deletion.parameters !== undefined) {
+    knowledge11Features.push("deletion.parameters");
+  }
+  if (knowledge.liveAuthorization?.parameters !== undefined) {
+    knowledge11Features.push("liveAuthorization.parameters");
+  }
+  if (knowledge.liveAuthorization?.principalSet !== undefined) {
+    knowledge11Features.push("liveAuthorization.principalSet");
+  }
+
+  const pointers: (string | undefined)[] = [
+    ...knowledge.sourceKinds.flatMap((kind) => [
+      kind.discoverItemsPointer,
+      kind.discoverMapping?.id,
+      kind.discoverMapping?.label,
+    ]),
+    knowledge.list.itemsPointer,
+    knowledge.list.mapping.itemId,
+    ...Object.values(itemFields).map((field) =>
+      field.source === "item" ? field.pointer : undefined
+    ),
+    knowledge.list.mapping.revision,
+    knowledge.list.mapping.title,
+    knowledge.list.mapping.sourceUrl,
+    knowledge.list.mapping.updatedAt,
+    knowledge.list.mapping.contentType,
+    knowledge.list.mapping.deleted,
+    knowledge.list.cursor.pointer,
+    typeof knowledge.content.mapping.content === "string"
+      ? knowledge.content.mapping.content
+      : knowledge.content.mapping.content.itemsPointer,
+    typeof knowledge.content.mapping.content === "string"
+      ? undefined
+      : knowledge.content.mapping.content.itemPointer,
+    knowledge.content.mapping.contentType,
+    knowledge.content.mapping.revision,
+    knowledge.content.mapping.title,
+    knowledge.content.mapping.sourceUrl,
+    knowledge.content.mapping.updatedAt,
+    acl.entriesPointer,
+    acl.entry.kindPointer,
+    acl.entry.providerUserId,
+    acl.entry.providerGroupId,
+    acl.entry.domain,
+    knowledge.identity?.user?.mapping.providerId,
+    knowledge.identity?.user?.mapping.email,
+    knowledge.identity?.user?.mapping.emailVerified,
+    knowledge.identity?.group?.membersPointer,
+    knowledge.identity?.group?.mapping.providerId,
+    knowledge.identity?.group?.mapping.memberUserId,
+    deletion.itemsPointer,
+    deletion.itemIdPointer,
+    knowledge.liveAuthorization?.allowedPointer,
+    knowledge.liveAuthorization?.principalSet?.entriesPointer,
+    knowledge.liveAuthorization?.principalSet?.principalIdPointer,
+  ];
+  if (pointers.includes("")) knowledge11Features.push('RFC 6901 root pointer ""');
+
+  if (profileVersion === "1.0" && knowledge11Features.length > 0) {
+    issues.push(
+      `profiles: knowledge "1.1" is required for ${knowledge11Features.sort().join(", ")}`
+    );
   }
 
   if (knowledge.guideFile !== undefined) {
@@ -2453,7 +2840,56 @@ function oimKnowledgeIssues(manifest: OimManifest): string[] {
 }
 
 /** Which verification schemes read a signature header, and therefore require one. */
-const SIGNED_SCHEMES = new Set(["hmac_sha256", "hmac_sha512", "ed25519", "rsa_sha256", "jwt"]);
+const SIGNED_SCHEMES = new Set([
+  "twilio_hmac_sha1",
+  "hmac_sha256",
+  "hmac_sha512",
+  "ed25519",
+  "rsa_sha256",
+  "jwt",
+]);
+
+function oimEventTypeIssues(
+  manifest: OimManifest,
+  eventTypes: readonly OimEventType[],
+  path: "events" | "ingress",
+  signatureHeader?: string
+): string[] {
+  const issues: string[] = [];
+  const normalizers = new Set(
+    (manifest.hooks ?? [])
+      .filter((hook) => hook.kind === "response_normalize")
+      .map((hook) => hook.export)
+  );
+  const seen = new Set<string>();
+  for (const eventType of eventTypes) {
+    if (seen.has(eventType.type)) {
+      issues.push(`${path}: duplicate event type ${eventType.type}`);
+    }
+    seen.add(eventType.type);
+    if (eventType.selector.equals === undefined && eventType.selector.matches === undefined) {
+      issues.push(`${path}: ${eventType.type} selector needs equals or matches`);
+    }
+    if (eventType.selector.equals !== undefined && eventType.selector.matches !== undefined) {
+      issues.push(`${path}: ${eventType.type} selector cannot use both equals and matches`);
+    }
+    if (eventType.selector.matches !== undefined && !safeRegex(eventType.selector.matches)) {
+      issues.push(`${path}: ${eventType.type} selector pattern is not a safe regular expression`);
+    }
+    if (eventType.normalize !== undefined && !normalizers.has(eventType.normalize)) {
+      issues.push(
+        `${path}: ${eventType.type} normalizes with ${eventType.normalize}, which no response_normalize hook exports`
+      );
+    }
+    if (
+      signatureHeader !== undefined &&
+      eventType.safeHeaders?.some((name) => name.toLowerCase() === signatureHeader.toLowerCase())
+    ) {
+      issues.push(`${path}: ${eventType.type} may not expose the signature header to a hook`);
+    }
+  }
+  return issues;
+}
 
 /**
  * Coherence rules the JSON Schema cannot express.
@@ -2485,6 +2921,24 @@ function oimEventsIssues(manifest: OimManifest): string[] {
       issues.push("events: shared_secret does not sign a canonical input");
     }
   }
+  if (check.scheme === "twilio_hmac_sha1") {
+    if (check.signatureHeader?.toLowerCase() !== "x-twilio-signature") {
+      issues.push("events: twilio_hmac_sha1 requires X-Twilio-Signature");
+    }
+    if (check.signatureEncoding !== "base64") {
+      issues.push("events: twilio_hmac_sha1 requires base64 signatureEncoding");
+    }
+    if (
+      check.signaturePrefix !== undefined ||
+      check.signingInput !== undefined ||
+      check.timestampHeader !== undefined ||
+      check.toleranceSeconds !== undefined
+    ) {
+      issues.push(
+        "events: twilio_hmac_sha1 signs the configured callback URL and decoded form fields"
+      );
+    }
+  }
   if (check.signingInput?.includes("{timestamp}") && check.timestampHeader === undefined) {
     issues.push("events: signingInput names {timestamp} but no timestampHeader is declared");
   }
@@ -2514,41 +2968,7 @@ function oimEventsIssues(manifest: OimManifest): string[] {
     issues.push("events: echo_header requires header");
   }
 
-  const normalizers = new Set(
-    (manifest.hooks ?? [])
-      .filter((hook) => hook.kind === "response_normalize")
-      .map((hook) => hook.export)
-  );
-  const seen = new Set<string>();
-  for (const eventType of events.eventTypes) {
-    if (seen.has(eventType.type)) {
-      issues.push(`events: duplicate event type ${eventType.type}`);
-    }
-    seen.add(eventType.type);
-    if (eventType.selector.equals === undefined && eventType.selector.matches === undefined) {
-      issues.push(`events: ${eventType.type} selector needs equals or matches`);
-    }
-    if (eventType.selector.equals !== undefined && eventType.selector.matches !== undefined) {
-      issues.push(`events: ${eventType.type} selector cannot use both equals and matches`);
-    }
-    if (eventType.selector.matches !== undefined && !safeRegex(eventType.selector.matches)) {
-      issues.push(`events: ${eventType.type} selector pattern is not a safe regular expression`);
-    }
-    if (eventType.normalize !== undefined && !normalizers.has(eventType.normalize)) {
-      issues.push(
-        `events: ${eventType.type} normalizes with ${eventType.normalize}, which no response_normalize hook exports`
-      );
-    }
-    // Withholding the signature header from a hook is the whole reason `safeHeaders` exists.
-    if (
-      check.signatureHeader !== undefined &&
-      eventType.safeHeaders?.some(
-        (name) => name.toLowerCase() === check.signatureHeader?.toLowerCase()
-      )
-    ) {
-      issues.push(`events: ${eventType.type} may not expose the signature header to a hook`);
-    }
-  }
+  issues.push(...oimEventTypeIssues(manifest, events.eventTypes, "events", check.signatureHeader));
 
   return issues;
 }
@@ -2558,15 +2978,24 @@ function oimPollingIngressIssues(manifest: OimManifest): string[] {
   const ingress = manifest.ingress;
   if (ingress === undefined) return [];
   const issues: string[] = [];
-  if (manifest.profiles.events !== OIM_PROFILE_VERSIONS.events || manifest.events === undefined) {
-    issues.push('profiles: events "1.0" and events are required when polling ingress is declared');
+  if (manifest.profiles.events !== OIM_PROFILE_VERSIONS.events) {
+    issues.push('profiles: events "1.0" is required when polling ingress is declared');
+  }
+  if (ingress.eventTypes === undefined && manifest.events === undefined) {
+    issues.push("ingress: polling requires eventTypes");
+  }
+  if (ingress.eventTypes !== undefined) {
+    issues.push(...oimEventTypeIssues(manifest, ingress.eventTypes, "ingress"));
   }
   const operation = manifest.operations.find((candidate) => candidate.id === ingress.operationId);
   if (operation === undefined) {
     issues.push(`ingress: polling references undeclared operation ${ingress.operationId}`);
     return issues;
   }
-  if (operation.source.type !== "http" || operation.effect !== "read") {
+  if (
+    operation.source.type !== "http" ||
+    (operation.effect !== "read" && operation.effect !== "sensitive_read")
+  ) {
     issues.push(`ingress: polling operation ${operation.id} must be a read HTTP operation`);
   }
   if (operationAcceptsParameter(operation, ingress.cursor.requestParameter) === false) {
@@ -2731,8 +3160,19 @@ export function parseOimFixtureSuite(source: string): OimFixtureSuite {
     ];
     for (const candidate of candidates) {
       if (candidate.value === null || typeof candidate.value !== "object") continue;
-      for (const capability of ["credential", "credentials", "network", "clock", "now"]) {
-        if (Object.hasOwn(candidate.value, capability)) {
+      const objects = [
+        candidate.value,
+        "configuration" in candidate.value &&
+        candidate.value.configuration !== null &&
+        typeof candidate.value.configuration === "object" &&
+        !Array.isArray(candidate.value.configuration)
+          ? candidate.value.configuration
+          : undefined,
+      ];
+      for (const value of objects) {
+        if (value === undefined) continue;
+        for (const capability of ["credential", "credentials", "network", "clock", "now"]) {
+          if (!Object.hasOwn(value, capability)) continue;
           throw new TulipFarmValidationError(
             "integration",
             "",

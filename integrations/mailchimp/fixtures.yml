@@ -1,0 +1,99 @@
+version: 1
+cases:
+  - name: lists-audiences
+    operationId: list-audiences
+    configuration:
+      data_center: us21.api.mailchimp.com
+    request:
+      count: 2
+      offset: 0
+    response:
+      status: 200
+      body:
+        lists:
+          - id: audience-1
+            name: Tulip buyers
+            date_created: "2026-08-01T10:00:00Z"
+            stats:
+              member_count: 120
+              unsubscribe_count: 3
+        total_items: 1
+    expect:
+      request:
+        method: GET
+        url: https://us21.api.mailchimp.com/3.0/lists?count=2&offset=0&fields=lists.id%2Clists.name%2Clists.date_created%2Clists.stats.member_count%2Clists.stats.unsubscribe_count%2Ctotal_items
+      result:
+        lists:
+          - id: audience-1
+            name: Tulip buyers
+            date_created: "2026-08-01T10:00:00Z"
+            stats:
+              member_count: 120
+              unsubscribe_count: 3
+        total_items: 1
+
+  - name: adds-audience-member
+    operationId: add-member
+    configuration:
+      data_center: us21.api.mailchimp.com
+    request:
+      list_id: audience-1
+      body:
+        email_address: muskan@example.com
+        status: pending
+        merge_fields:
+          FNAME: Muskan
+        tags: [spring]
+    response:
+      status: 200
+      body:
+        id: 0123456789abcdef0123456789abcdef
+        email_address: muskan@example.com
+        status: pending
+        merge_fields:
+          FNAME: Muskan
+        tags:
+          - id: 1
+            name: spring
+        last_changed: "2026-09-01T10:00:00Z"
+    expect:
+      request:
+        method: POST
+        url: https://us21.api.mailchimp.com/3.0/lists/audience-1/members
+        body:
+          email_address: muskan@example.com
+          status: pending
+          merge_fields:
+            FNAME: Muskan
+          tags: [spring]
+      result:
+        id: 0123456789abcdef0123456789abcdef
+        email_address: muskan@example.com
+        status: pending
+        merge_fields:
+          FNAME: Muskan
+        tags:
+          - id: 1
+            name: spring
+        last_changed: "2026-09-01T10:00:00Z"
+
+  - name: rejects-invalid-credential
+    operationId: get-account
+    configuration:
+      data_center: us21.api.mailchimp.com
+    request: {}
+    response:
+      status: 401
+      body:
+        type: https://mailchimp.com/developer/marketing/docs/errors/
+        title: API Key Invalid
+        status: 401
+        detail: Your API key may be invalid.
+    expect:
+      request:
+        method: GET
+        url: https://us21.api.mailchimp.com/3.0/?fields=account_id%2Clogin_id%2Caccount_name%2Ctotal_subscribers
+      expectedError:
+        phase: before_dispatch
+        code: provider_unauthorized
+        retryable: false

@@ -165,6 +165,7 @@ interface ApiRequestInput {
   readonly body?: unknown;
   readonly graphql?: GraphqlInput;
   readonly credential?: CredentialInput;
+  readonly connection_id?: string;
 }
 
 /** How a matched Connection attaches its Credential. Mirrors the confirmed ad-hoc rule. */
@@ -176,17 +177,30 @@ export interface NetworkCredentialRule {
 
 export type NetworkConnectionMatch =
   | { readonly kind: "none" }
-  | { readonly kind: "ambiguous"; readonly count: number }
+  | {
+      readonly kind: "ambiguous";
+      readonly count: number;
+      readonly candidates: readonly NetworkConnectionCandidate[];
+    }
+  | { readonly kind: "denied" }
   | {
       readonly kind: "match";
+      readonly connectionId: string;
       readonly credentialRef: string;
       readonly rule: NetworkCredentialRule;
       readonly label: string;
     };
 
+export interface NetworkConnectionCandidate {
+  readonly connectionId: string;
+  readonly label: string;
+  readonly ownerScope: "personal" | "organization" | "team";
+}
+
 export interface NetworkToolContext {
   readonly userId: string;
   readonly runId: string;
+  readonly conversationId?: string;
   readonly activeSkillName?: string;
   readonly http: EgressHttpPort;
   readonly useCredential: <T>(
@@ -206,14 +220,18 @@ export interface NetworkToolContext {
    * provider a failed call and the person a challenge they already answered once. Absent in a test
    * or a host with no Connection store.
    */
-  readonly matchConnection?: (destination: string) => Promise<NetworkConnectionMatch>;
+  readonly matchConnection?: (
+    destination: string,
+    connectionId?: string
+  ) => Promise<NetworkConnectionMatch>;
   /** Leases a matched Connection's Credential for one call against one destination. */
   readonly useConnection?: <T>(
     input: {
-      readonly userId: string;
       readonly runId: string;
+      readonly connectionId: string;
       readonly credentialRef: string;
       readonly destination: string;
+      readonly rule: NetworkCredentialRule;
     },
     callback: (secret: string) => Promise<T>
   ) => Promise<T>;
@@ -273,7 +291,8 @@ function requestClassification(args: unknown) {
     riskClass: mutating ? ("high" as const) : ("low" as const),
     idempotency: mutating ? ("reconcile" as const) : ("none" as const),
     destination,
-    requiresApproval: mutating || input.credential !== undefined,
+    requiresApproval:
+      mutating || input.credential !== undefined || input.connection_id !== undefined,
   };
 }
 
@@ -339,6 +358,14 @@ function projectedResult(result: GovernedHttpResult): unknown {
   };
 }
 
+function connectionSetupUrl(path: string, origin: string, conversationId?: string): string {
+  const query = new URLSearchParams({ origin });
+  if (conversationId !== undefined) {
+    query.set("return_to", `/chat/${encodeURIComponent(conversationId)}`);
+  }
+  return `${path}?${query}`;
+}
+
 /**
  * A refusal the caller can act on, in place of the provider's own 401 page.
  *
@@ -352,7 +379,8 @@ function authenticationRequired(
   status: number,
   headers: Readonly<Record<string, string>>,
   hadCredential: boolean,
-  mutating: boolean
+  mutating: boolean,
+  conversationId?: string
 ): Record<string, unknown> | undefined {
   const origin = normalizedPublicUrl(url).origin;
   const analysis = detectAuthChallenge(status, headers, origin);
@@ -368,11 +396,32 @@ function authenticationRequired(
     // off the back of a refusal the model never had authorization for is how an unapproved write
     // lands, so resuming one has to go back through authorization as a new intent.
     resume: mutating ? "reauthorize" : "safe_retry",
-    setupUrl: `/business/connections/new?origin=${encodeURIComponent(origin)}`,
+    setupUrl: connectionSetupUrl("/business/connections/new", origin, conversationId),
     detail: hadCredential
       ? `${origin} rejected the Credential that was sent (${status}); it may be expired, revoked, or scoped to something else`
       : `${origin} requires authentication (${status}); a person must confirm the Credential and how it is attached before this can be retried`,
   };
+}
+
+function withoutCredentialQuery(url: string, name: string): string {
+  const redacted = new URL(url);
+  redacted.searchParams.delete(name);
+  return redacted.toString();
+}
+
+function redactQueryCredential(
+  result: GovernedHttpResult,
+  rule: NetworkCredentialRule | undefined
+): GovernedHttpResult {
+  if (rule?.location !== "query") return result;
+  switch (result.kind) {
+    case "response":
+      return { ...result, url: withoutCredentialQuery(result.url, rule.name) };
+    case "redirect_limit":
+      return { ...result, url: withoutCredentialQuery(result.url, rule.name) };
+    case "cross_origin_redirect":
+      return { ...result, to: withoutCredentialQuery(result.to, rule.name) };
+  }
 }
 
 async function performApiRequest(
@@ -418,15 +467,18 @@ async function performApiRequest(
             ? {}
             : { operationName: input.graphql.operationName }),
         };
-  const result = await sendGovernedRequest(context.http, {
-    url,
-    method: input.method,
-    headers,
-    carriesCredential,
-    assertDestination: context.assertSkillDestination,
-    ...(body === undefined ? {} : { body }),
-    ...(context.abortSignal === undefined ? {} : { signal: context.abortSignal }),
-  });
+  const result = redactQueryCredential(
+    await sendGovernedRequest(context.http, {
+      url,
+      method: input.method,
+      headers,
+      carriesCredential,
+      assertDestination: context.assertSkillDestination,
+      ...(body === undefined ? {} : { body }),
+      ...(context.abortSignal === undefined ? {} : { signal: context.abortSignal }),
+    }),
+    rule
+  );
   // A deadline or an abort says the answer never came back, not that the request never arrived.
   // Reporting that as a successful call would settle a mutating effect as confirmed, and the
   // model would be free to reissue a write the destination may already have performed.
@@ -443,7 +495,8 @@ async function performApiRequest(
       result.response.status,
       result.response.headers,
       carriesCredential,
-      mutating
+      mutating,
+      context.conversationId
     );
     // Replaces the provider's own refusal rather than annotating it: a 401 body is frequently a
     // login page, and rendering one into the transcript spends the context window on markup while
@@ -711,6 +764,9 @@ export const apiRequestTool = defineApiTool<NetworkToolContext>({
   handler: async (args, context) => {
     try {
       const input = asApiInput(args);
+      if (input.credential !== undefined && input.connection_id !== undefined) {
+        throw new Error('choose either "credential" or "connection_id", not both');
+      }
       const spend = context.spendBudget?.() ?? { allowed: true, spent: 0, limit: 0 };
       if (!spend.allowed) return ok(budgetExhausted(input.url, spend));
       const mutating = requestClassification(args).mutating;
@@ -718,22 +774,31 @@ export const apiRequestTool = defineApiTool<NetworkToolContext>({
         const reuse = await reusableConnection(input, context);
         switch (reuse.kind) {
           case "none":
+            if (input.connection_id !== undefined) {
+              throw new Error("The selected Connection is not available to this caller");
+            }
             return ok(await performApiRequest(input, context, undefined, mutating));
           case "ambiguous":
-            return ok(connectionAmbiguous(input.url, reuse.count));
+            return ok(connectionAmbiguous(input.url, reuse.candidates, context.conversationId));
+          case "denied":
+            throw new Error("The selected Connection is not available to this caller");
           case "match": {
+            if (input.connection_id !== undefined && reuse.connectionId !== input.connection_id) {
+              throw new Error("The selected Connection is not available to this caller");
+            }
             const origin = normalizedPublicUrl(input.url).origin;
             const useConnection = context.useConnection;
             if (useConnection === undefined) {
-              return ok(await performApiRequest(input, context, undefined, mutating));
+              throw new Error("Connection-backed Credential use is unavailable");
             }
             return ok(
               await useConnection(
                 {
-                  userId: context.userId,
                   runId: context.runId,
+                  connectionId: reuse.connectionId,
                   credentialRef: reuse.credentialRef,
                   destination: origin,
+                  rule: reuse.rule,
                 },
                 (secret) => performApiRequest(input, context, secret, mutating, reuse.rule)
               )
@@ -786,8 +851,13 @@ async function reusableConnection(
   input: ApiRequestInput,
   context: NetworkToolContext
 ): Promise<NetworkConnectionMatch> {
-  if (context.matchConnection === undefined || context.runId.length === 0) return { kind: "none" };
-  return context.matchConnection(normalizedPublicUrl(input.url).origin);
+  if (context.runId.length === 0) {
+    return input.connection_id === undefined ? { kind: "none" } : { kind: "denied" };
+  }
+  if (context.matchConnection === undefined) {
+    return input.connection_id === undefined ? { kind: "none" } : { kind: "denied" };
+  }
+  return context.matchConnection(normalizedPublicUrl(input.url).origin, input.connection_id);
 }
 
 /**
@@ -796,15 +866,24 @@ async function reusableConnection(
  * Choosing silently spends one principal's credential under another's name, and the resulting
  * audit trail names the wrong actor — so the call stops and a person names the one to use.
  */
-function connectionAmbiguous(url: string, count: number): Record<string, unknown> {
+function connectionAmbiguous(
+  url: string,
+  candidates: readonly NetworkConnectionCandidate[],
+  conversationId?: string
+): Record<string, unknown> {
   const origin = normalizedPublicUrl(url).origin;
   return {
     kind: "connection_ambiguous",
     origin,
-    count,
+    count: candidates.length,
     resume: "reauthorize",
-    setupUrl: `/business/connections?origin=${encodeURIComponent(origin)}`,
-    detail: `${count} Connections can reach ${origin}; a person must name which one this should use`,
+    candidates: candidates.map((candidate) => ({
+      connection_id: candidate.connectionId,
+      label: candidate.label,
+      owner_scope: candidate.ownerScope,
+    })),
+    setupUrl: connectionSetupUrl("/business/connections", origin, conversationId),
+    detail: `${candidates.length} Connections can reach ${origin}; a person must name which one this should use`,
   };
 }
 

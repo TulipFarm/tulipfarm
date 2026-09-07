@@ -24,7 +24,7 @@ prompt, a Tool argument, a Tool result, or the compiled Tool definition.
 | --- | --- |
 | `telegram_get_me` | Confirms which bot the connection authenticates as |
 | `telegram_send_message` | Sends a text message to a chat the bot belongs to |
-| `telegram_get_updates` | Reads recent messages sent to the bot |
+| `telegram_get_updates` | Reads pending updates, optionally from a supplied offset |
 
 `telegram_send_message` is a `send` effect, so it is subject to approval like any other outbound
 message.
@@ -33,6 +33,13 @@ message.
 
 Add the bot to the group, send it any message, then run `telegram_get_updates`. The `chat.id` in
 the result is what `telegram_send_message` needs. Group ids are negative — keep the minus sign.
+To confirm earlier updates, pass the largest `update_id` you handled plus one as `offset`.
+
+## Incoming updates
+
+TulipFarm polls `getUpdates` once per minute. Each returned update is stored durably before the
+saved offset advances to one more than the largest `update_id`. A retry therefore cannot skip an
+update. New messages emit `message.received`; other Telegram update types emit `update.received`.
 
 ## Rotating the token
 

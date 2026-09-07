@@ -50,6 +50,7 @@ export const API_REQUEST_TOOL_DECLARATION = {
     type: "object",
     additionalProperties: false,
     required: ["url", "method"],
+    allOf: [{ not: { required: ["credential", "connection_id"] } }],
     properties: {
       url: { type: "string", minLength: 1, maxLength: 2_000 },
       method: {
@@ -69,6 +70,13 @@ export const API_REQUEST_TOOL_DECLARATION = {
         },
       },
       credential: CREDENTIAL_SCHEMA,
+      connection_id: {
+        type: "string",
+        minLength: 1,
+        maxLength: 256,
+        description:
+          "The exact stored Connection to use. Choose an id returned by connection_ambiguous; never guess one.",
+      },
     },
   },
 } as const;

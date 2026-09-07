@@ -52,6 +52,13 @@ export type RoutineAgentOutcome =
   | { readonly kind: "failed"; readonly reason: string; readonly retryable: boolean }
   /** The loop held a Tool call for a human; this port cannot open that Approval. */
   | { readonly kind: "awaiting_approval"; readonly reason: string }
+  /** The Tool host already registered the provider retry timer; the executor only parks on it. */
+  | {
+      readonly kind: "waiting";
+      readonly reason: "provider_retry_wait";
+      readonly waitId: string;
+      readonly callId: string;
+    }
   /** The Run is being cancelled; the executor leaves the State to the cancellation manager. */
   | { readonly kind: "cancelled" }
   /** Nothing decided the question. The State parks for reconciliation rather than guessing. */
@@ -444,6 +451,9 @@ export class BundleRoutineAgentPort implements RoutineAgentPort {
         outcome.modelFailure
       );
     }
+    if (outcome.status === "needs_reconciliation") {
+      return { kind: "unavailable", reason: "indeterminate_tool_effect" };
+    }
     if (outcome.status === "awaiting_approval") {
       return { kind: "awaiting_approval", reason: "approval_required" };
     }
@@ -463,6 +473,14 @@ export class BundleRoutineAgentPort implements RoutineAgentPort {
         reason: "child_spawn_without_wait_support",
         retryable: false,
       });
+    }
+    if (outcome.status === "awaiting_retry") {
+      return {
+        kind: "waiting",
+        reason: "provider_retry_wait",
+        waitId: outcome.waitId,
+        callId: outcome.callId,
+      };
     }
 
     // Last zero-cost refusal point: no State is settled and no downstream effect has run.

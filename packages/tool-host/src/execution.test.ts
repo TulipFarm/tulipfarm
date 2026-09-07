@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { ChatEffectLedger } from "./effect-ledger";
 import { runToolAttempts } from "./execution";
 import type { ParkableToolDef, RequestContext, ToolDef } from "./types";
-import { ok, parked } from "./types";
+import { err, ok, parked } from "./types";
 
 const CONTEXT = {} as RequestContext;
 const CALL = { callId: "call-1", name: "slow", arguments: {} };
@@ -74,8 +74,29 @@ describe("execute deadline", () => {
   });
 });
 
+describe("indeterminate effects", () => {
+  it("requires reconciliation instead of reporting a definitive Tool failure", async () => {
+    const result = await runToolAttempts({
+      businessId: "business-1",
+      tool: {
+        name: "create_order",
+        tier: "integration",
+        mutating: true,
+        description: "creates an order",
+        inputSchema: { type: "object" },
+        execute: async () => err("indeterminate", "the provider response did not prove success"),
+      },
+      call: CALL,
+      context: CONTEXT,
+    });
+
+    expect(result).toEqual({ status: "needs_reconciliation" });
+  });
+});
+
 describe("a parked call", () => {
   const PARK = { kind: "child_run", childRunId: "child-1", waitId: "wait-1" } as const;
+  const RETRY_PARK = { kind: "retry_wait", waitId: "wait-retry-1" } as const;
 
   function parkingTool(attempts: { count: number }): ParkableToolDef {
     return {
@@ -119,6 +140,27 @@ describe("a parked call", () => {
       childRunId: "child-1",
       waitId: "wait-1",
     });
+  });
+
+  it("reports a pre-registered retry wait without treating it as a completed child effect", async () => {
+    const states: string[] = [];
+    const settled = await runToolAttempts({
+      businessId: "business-1",
+      tool: {
+        ...parkingTool({ count: 0 }),
+        execute: async () => parked(RETRY_PARK),
+      },
+      call: CALL,
+      context: CONTEXT,
+      ledger: recordingLedger(states),
+      reservation: { effectId: "effect-1", attempt: 1 },
+    });
+
+    expect(settled).toEqual({
+      status: "awaiting_retry",
+      waitId: "wait-retry-1",
+    });
+    expect(states).toEqual([]);
   });
 
   it("runs the Tool exactly once, because the spawn already happened", async () => {

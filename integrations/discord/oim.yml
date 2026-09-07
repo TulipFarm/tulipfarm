@@ -1,0 +1,329 @@
+oimVersion: "1.0"
+kind: Integration
+
+metadata:
+  id: discord
+  name: Discord
+  version: 1.0.0
+  description: Read and send Discord channel messages through an installed bot.
+  license: Apache-2.0
+  maintainers:
+    - name: TulipFarm
+      url: https://tulipfarm.dev
+
+profiles:
+  core: "1.0"
+  auth: "1.0"
+
+files:
+  - path: fixtures.yml
+    role: fixture
+    sha256: "c6ba0b79acdb5b5aa68ce283f2d8f850c7460cb5c8312ddafac82a623815b5b5"
+  - path: setup-guide.md
+    role: guide
+    sha256: "c2acb2f717bc8b350f2cf4956bfcde3990ccd1146615e57b1e414adc2801bdc2"
+
+auth:
+  allowedOriginHosts:
+    - discord.com
+  credentialSlots:
+    - id: bot_token
+      label: Discord bot token
+      kind: bearer_token
+      required: true
+  steps:
+    - id: bot
+      type: fields
+      title: Install a Discord bot
+      description: >-
+        Create an application and bot in the Discord Developer Portal, install it with the bot
+        OAuth2 scope, grant only the channel permissions it needs, then paste its bot token.
+        Normal user tokens and self-bots are not supported.
+      fields:
+        - id: bot_token
+          label: Bot token
+          input: password
+          required: true
+          target:
+            type: credential
+            slot: bot_token
+  healthCheckOperationId: current-user
+
+operations:
+  - id: current-user
+    name: discord_current_user
+    description: Identify the Discord bot authenticated by this Connection.
+    effect: read
+    identityMode: shared_only
+    credentialSlot: bot_token
+    credentialInjection:
+      in: header
+      name: Authorization
+      format: "Bot {token}"
+    source:
+      type: http
+      method: GET
+      baseUrl: https://discord.com
+      path: /api/v10/users/@me
+    response:
+      maxBytes: 32768
+      schema:
+        type: object
+        properties:
+          id: { type: string }
+          username: { type: string }
+          global_name: { type: ["string", "null"] }
+          avatar: { type: ["string", "null"] }
+          bot: { type: boolean }
+      projection:
+        - /id
+        - /username
+        - /global_name
+        - /avatar
+        - /bot
+
+  - id: list-guilds
+    name: discord_list_guilds
+    description: List servers containing this bot, with optional snowflake paging bounds.
+    effect: read
+    identityMode: shared_only
+    credentialSlot: bot_token
+    credentialInjection:
+      in: header
+      name: Authorization
+      format: "Bot {token}"
+    source:
+      type: http
+      method: GET
+      baseUrl: https://discord.com
+      path: /api/v10/users/@me/guilds
+      parameters:
+        - name: before
+          in: query
+          schema:
+            type: string
+            description: Return guilds before this guild snowflake. Do not combine with after.
+        - name: after
+          in: query
+          schema:
+            type: string
+            description: Return guilds after this guild snowflake. Do not combine with before.
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 200
+    response:
+      maxBytes: 262144
+      schema:
+        type: array
+        items:
+          type: object
+          properties:
+            id: { type: string }
+            name: { type: string }
+            icon: { type: ["string", "null"] }
+            owner: { type: boolean }
+            permissions: { type: string }
+
+  - id: list-channels
+    name: discord_list_channels
+    description: List non-thread channels visible to the bot in one Discord server.
+    effect: read
+    identityMode: shared_only
+    credentialSlot: bot_token
+    credentialInjection:
+      in: header
+      name: Authorization
+      format: "Bot {token}"
+    source:
+      type: http
+      method: GET
+      baseUrl: https://discord.com
+      path: /api/v10/guilds/{guild_id}/channels
+      parameters:
+        - name: guild_id
+          in: path
+          required: true
+          schema: { type: string, minLength: 1, maxLength: 32 }
+    response:
+      maxBytes: 524288
+      schema:
+        type: array
+        items:
+          type: object
+          properties:
+            id: { type: string }
+            guild_id: { type: string }
+            name: { type: string }
+            type: { type: integer }
+            position: { type: integer }
+            parent_id: { type: ["string", "null"] }
+
+  - id: list-messages
+    name: discord_list_messages
+    description: >-
+      Read one page of messages in a visible channel, newest first. Use at most one of before,
+      after, or around.
+    effect: sensitive_read
+    identityMode: shared_only
+    credentialSlot: bot_token
+    credentialInjection:
+      in: header
+      name: Authorization
+      format: "Bot {token}"
+    source:
+      type: http
+      method: GET
+      baseUrl: https://discord.com
+      path: /api/v10/channels/{channel_id}/messages
+      parameters:
+        - name: channel_id
+          in: path
+          required: true
+          schema: { type: string, minLength: 1, maxLength: 32 }
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 100 }
+        - name: before
+          in: query
+          schema: { type: string, minLength: 1, maxLength: 32 }
+        - name: after
+          in: query
+          schema: { type: string, minLength: 1, maxLength: 32 }
+        - name: around
+          in: query
+          schema: { type: string, minLength: 1, maxLength: 32 }
+    response:
+      maxBytes: 1048576
+      schema:
+        type: array
+        items:
+          type: object
+          properties:
+            id: { type: string }
+            channel_id: { type: string }
+            content: { type: string }
+            timestamp: { type: string }
+            edited_timestamp: { type: ["string", "null"] }
+            author:
+              type: object
+              properties:
+                id: { type: string }
+                username: { type: string }
+                global_name: { type: ["string", "null"] }
+                bot: { type: boolean }
+
+  - id: send-message
+    name: discord_send_message
+    description: Send one plain-text message to a channel where the bot can send messages.
+    effect: send
+    identityMode: shared_only
+    credentialSlot: bot_token
+    credentialInjection:
+      in: header
+      name: Authorization
+      format: "Bot {token}"
+    source:
+      type: http
+      method: POST
+      baseUrl: https://discord.com
+      path: /api/v10/channels/{channel_id}/messages
+      parameters:
+        - name: channel_id
+          in: path
+          required: true
+          schema: { type: string, minLength: 1, maxLength: 32 }
+    requestSchema:
+      type: object
+      properties:
+        content: { type: string, minLength: 1, maxLength: 2000 }
+        allowed_mentions:
+          type: object
+          properties:
+            parse:
+              type: array
+              maxItems: 3
+              uniqueItems: true
+              items:
+                type: string
+                enum: [roles, users, everyone]
+            replied_user: { type: boolean }
+          additionalProperties: false
+      required: [content]
+      additionalProperties: false
+    response:
+      maxBytes: 131072
+      schema:
+        type: object
+        properties:
+          id: { type: string }
+          channel_id: { type: string }
+          content: { type: string }
+          timestamp: { type: string }
+          author: { type: object }
+      projection:
+        - /id
+        - /channel_id
+        - /content
+        - /timestamp
+        - /author/id
+        - /author/username
+
+  - id: edit-message
+    name: discord_edit_message
+    description: Edit the content of a message authored by this bot.
+    effect: update
+    identityMode: shared_only
+    credentialSlot: bot_token
+    credentialInjection:
+      in: header
+      name: Authorization
+      format: "Bot {token}"
+    source:
+      type: http
+      method: PATCH
+      baseUrl: https://discord.com
+      path: /api/v10/channels/{channel_id}/messages/{message_id}
+      parameters:
+        - name: channel_id
+          in: path
+          required: true
+          schema: { type: string, minLength: 1, maxLength: 32 }
+        - name: message_id
+          in: path
+          required: true
+          schema: { type: string, minLength: 1, maxLength: 32 }
+    requestSchema:
+      type: object
+      properties:
+        content: { type: string, minLength: 1, maxLength: 2000 }
+        allowed_mentions:
+          type: object
+          properties:
+            parse:
+              type: array
+              maxItems: 3
+              uniqueItems: true
+              items:
+                type: string
+                enum: [roles, users, everyone]
+            replied_user: { type: boolean }
+          additionalProperties: false
+      required: [content]
+      additionalProperties: false
+    response:
+      maxBytes: 131072
+      schema:
+        type: object
+        properties:
+          id: { type: string }
+          channel_id: { type: string }
+          content: { type: string }
+          edited_timestamp: { type: ["string", "null"] }
+      projection:
+        - /id
+        - /channel_id
+        - /content
+        - /edited_timestamp

@@ -1,0 +1,94 @@
+version: 1
+cases:
+  - name: reads-updates-from-offset
+    operationId: get-updates
+    request:
+      offset: 101
+      limit: 2
+    response:
+      status: 200
+      body:
+        ok: true
+        result:
+          - update_id: 101
+            message:
+              message_id: 9
+              text: Launch ready?
+              date: 1788760800
+              chat:
+                id: -1001234567890
+                title: Launch room
+    expect:
+      request:
+        method: GET
+        url: https://api.telegram.org/botoim-fixture-credential/getUpdates?offset=101&limit=2&timeout=0
+      result:
+        ok: true
+        result:
+          - update_id: 101
+            message:
+              text: Launch ready?
+
+  - name: sends-message
+    operationId: send-message
+    request:
+      body:
+        chat_id: "-1001234567890"
+        text: The launch checklist is ready.
+    response:
+      status: 200
+      body:
+        ok: true
+        result:
+          message_id: 10
+          date: 1788760860
+    expect:
+      request:
+        method: POST
+        url: https://api.telegram.org/botoim-fixture-credential/sendMessage
+        body:
+          chat_id: "-1001234567890"
+          text: The launch checklist is ready.
+      result:
+        ok: true
+        result:
+          message_id: 10
+          date: 1788760860
+
+  - name: rejects-invalid-credential
+    operationId: get-updates
+    request:
+      limit: 1
+    response:
+      status: 401
+      body:
+        ok: false
+        error_code: 401
+        description: Unauthorized
+    expect:
+      request:
+        method: GET
+        url: https://api.telegram.org/botoim-fixture-credential/getUpdates?limit=1&timeout=0
+      expectedError:
+        phase: before_dispatch
+        code: provider_unauthorized
+        retryable: false
+
+  - name: rejects-failed-api-envelope
+    operationId: get-updates
+    request:
+      limit: 1
+    response:
+      status: 200
+      body:
+        ok: false
+        error_code: 401
+        description: Unauthorized
+    expect:
+      request:
+        method: GET
+        url: https://api.telegram.org/botoim-fixture-credential/getUpdates?limit=1&timeout=0
+      expectedError:
+        phase: after_dispatch
+        code: invalid_output
+        retryable: false

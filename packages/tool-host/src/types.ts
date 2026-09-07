@@ -20,6 +20,8 @@ export type ToolErrorCode =
    * the person reading the turn is told the platform is broken when it was merely busy.
    */
   | "unavailable"
+  /** A provider declared a retry delay, but this invocation forbids creating a durable Run wait. */
+  | "retry_wait_unavailable"
   /**
    * The call was abandoned — a deadline expired — without the work acknowledging its cancellation,
    * so whether the side effect landed is unknown. Neither `internal_error` nor `unavailable` can
@@ -48,6 +50,7 @@ export const TOOL_FAULT_CLASS: Readonly<
   credential_required: "business",
   internal_error: "business",
   unavailable: "infrastructure",
+  retry_wait_unavailable: "infrastructure",
   indeterminate: "indeterminate",
 };
 
@@ -65,11 +68,17 @@ export function isIndeterminateFault(code: ToolErrorCode): boolean {
  *
  * `kind` leaves room for future park reasons without reopening this contract.
  */
-export interface ToolPark {
-  readonly kind: "child_run";
-  readonly childRunId: string;
-  readonly waitId: string;
-}
+export type ToolPark =
+  | {
+      readonly kind: "child_run";
+      readonly childRunId: string;
+      readonly waitId: string;
+    }
+  | {
+      /** The Tool registered a durable timer and must be replayed after it resolves. */
+      readonly kind: "retry_wait";
+      readonly waitId: string;
+    };
 
 /**
  * A Tool call's verdict. Unchanged for the overwhelming majority of Tools, which cannot park.
@@ -132,6 +141,7 @@ export interface ToolHostLogger {
 }
 
 export type ChatAutonomy = "full" | "supervised" | "approval-required" | "manual";
+export type RetryWaitPolicy = "durable" | "refuse";
 export interface ClientContext {
   route?: string;
   title?: string;
@@ -164,6 +174,12 @@ export interface RequestContext {
   /** The hosted loop's call id for this invocation — used by Tools that need a stable per-call
    * occurrence key (e.g. integration-tier effect idempotency), not just the Run. */
   toolCallId?: string;
+  /**
+   * Whether provider-declared retry delays may create a durable Run wait. `refuse` returns
+   * `retry_wait_unavailable` instead, so nested calls cannot strand a wait their caller cannot
+   * resume. Absent is the normal durable behavior.
+   */
+  retryWaitPolicy?: RetryWaitPolicy;
   events?: EventEmitter;
   agentId?: string;
   /** Skill that was explicitly loaded before this call; never inferred from Tool arguments. */
@@ -190,6 +206,8 @@ export interface RequestContext {
  */
 export interface ToolDef<Result extends ParkableToolCallResult = ToolCallResult> {
   name: string;
+  /** Stable persisted identity; differs from the displayed name during compatible migrations. */
+  canonicalId?: string;
   tier: ToolTier;
   mutating: boolean;
   /**

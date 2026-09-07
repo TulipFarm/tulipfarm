@@ -130,7 +130,10 @@ export function registerSoulRouteFamily(
           opts.declarativeTools,
           opts.auditService,
           opts.integrationAuth?.tokens,
-          opts.bundledOimPackages ?? new Map()
+          opts.bundledOimPackages ?? new Map(),
+          opts.connectionStore && opts.oimConnectionAccess
+            ? { store: opts.connectionStore, access: opts.oimConnectionAccess }
+            : undefined
         );
         registerIntegrationMarketplaceRoutes(
           app,
@@ -138,7 +141,8 @@ export function registerSoulRouteFamily(
           opts.soulWriter,
           opts.bundledIntegrations ?? new Map(),
           requireAuth,
-          requireAuthorization
+          requireAuthorization,
+          opts.oimReleaseTrust
         );
         registerOimFixtureRoutes(app, opts.soulLoader, requireAuth);
         // In the Soul family because connecting an OIM package materializes it into the Soul
@@ -148,6 +152,12 @@ export function registerSoulRouteFamily(
             soulLoader: opts.soulLoader,
             soulWriter: opts.soulWriter,
             connections: opts.connectionStore,
+            ...(opts.oimConnectionAccess === undefined
+              ? {}
+              : { connectionAccess: opts.oimConnectionAccess }),
+            ...(opts.oimOriginApprovals === undefined
+              ? {}
+              : { originApprovals: opts.oimOriginApprovals }),
             secrets: opts.secretsService,
             requireAuth,
             authorizationCheck,

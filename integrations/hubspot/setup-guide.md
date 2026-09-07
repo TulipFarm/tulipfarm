@@ -14,9 +14,9 @@ by anyone else's misuse.
    https://YOUR-TULIPFARM-HOST/api/v1/integrations/oim/auth/callback
    ```
 
-4. Under **Scopes**, select `oauth`, `crm.objects.contacts.read`, `crm.objects.contacts.write` and
-   `crm.objects.companies.read`. HubSpot refuses the authorization if the app does not offer every
-   scope this package requests.
+4. Under **Scopes**, select `oauth`, `crm.objects.contacts.read`, `crm.objects.contacts.write`,
+   `crm.objects.companies.read` and `crm.objects.companies.write`. HubSpot refuses the
+   authorization if the app does not offer every scope this package requests.
 5. Copy the **Client ID** and **Client secret**.
 
 ## Connect it
@@ -37,9 +37,12 @@ Create the Connection as **Business** for a shared account every agent may act t
 
 | Tool | What it does |
 | --- | --- |
-| `hubspot_list_contacts` | Lists CRM contacts, newest first, paging through them |
+| `hubspot_list_contacts` | Lists CRM contacts, paging through them |
 | `hubspot_get_contact` | Reads one contact by id |
 | `hubspot_create_contact` | Creates a contact |
+| `hubspot_update_contact` | Updates property values on one contact |
+| `hubspot_get_company` | Reads one company by id |
+| `hubspot_create_company` | Creates a company |
 
 ## When it stops working
 

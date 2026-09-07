@@ -12,6 +12,7 @@ import {
 } from "../users";
 
 type PreHandler = (req: FastifyRequest, reply: FastifyReply) => Promise<void>;
+export type UserDisabledHook = (userId: string) => Promise<void>;
 
 /** What People & access requires of its caller; also what "is an admin" means to a session. */
 export const USER_MANAGE: RouteAuthorization = {
@@ -28,7 +29,8 @@ export function registerAdminUserRoutes(
   requireAuth: PreHandler,
   requireAuthorization: RequireAuthorization,
   rateLimitHook?: PreHandler,
-  triggerCuratorSweep?: () => Promise<void>
+  triggerCuratorSweep?: () => Promise<void>,
+  onUserDisabled?: UserDisabledHook
 ): void {
   const gate = requireAuthorization(USER_MANAGE);
   const adminOnly: PreHandler[] = rateLimitHook
@@ -242,6 +244,9 @@ export function registerAdminUserRoutes(
       // working account that cannot sign in.
       const resolved = status === "active" && target.passwordHash === null ? "invited" : status;
       await userAdminRepo.setStatus(id, resolved);
+      if (resolved === "disabled") {
+        await onUserDisabled?.(id);
+      }
       return reply.send({ user: toPublicUser({ ...target, status: resolved }) });
     }
   );

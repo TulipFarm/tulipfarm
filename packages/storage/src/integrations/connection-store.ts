@@ -299,6 +299,27 @@ export class ConnectionStore {
     });
   }
 
+  /**
+   * Lists all personal Connections for one user, including revoked rows, so user offboarding can
+   * safely retry lease revocation without touching organization or Team Connections.
+   */
+  async listPersonalForPrincipal(
+    businessId: string,
+    principalId: string
+  ): Promise<PersistedConnection[]> {
+    return this.transactions.withTransaction(async (transaction) => {
+      const { rows } = await transaction.query<ConnectionRow>(
+        `SELECT * FROM connections
+          WHERE business_id = $1
+            AND owner_scope = 'personal'
+            AND owner_principal_id = $2
+          ORDER BY created_at, id`,
+        [businessId, principalId]
+      );
+      return rows.map(connectionFromRow);
+    });
+  }
+
   /** Active Connections whose recorded OAuth expiry has entered a caller-supplied renewal window. */
   async listExpiring(businessId: string, expiresBefore: string): Promise<PersistedConnection[]> {
     return this.transactions.withTransaction(async (transaction) => {
@@ -348,7 +369,7 @@ export class ConnectionStore {
     });
   }
 
-  /** Persistence half of revocation; callers delete bound Secrets before marking this row. */
+  /** Persistence half of revocation; callers choose whether its bound Secrets must be retained. */
   async markRevoked(businessId: string, id: string): Promise<boolean> {
     return this.transactions.withTransaction(async (transaction) => {
       const { rows } = await transaction.query(

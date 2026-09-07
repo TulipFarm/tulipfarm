@@ -1,16 +1,21 @@
 import { createHash, randomUUID } from "node:crypto";
 import ivm from "isolated-vm";
+import { serializeJson } from "./json";
 import type {
   ExpressionRequest,
+  PureHookRequest,
   ResourceHookRequest,
   RoutineHookRequest,
   WorkerResponse,
 } from "./protocol";
+import { PURE_HOOK_LIMITS } from "./protocol";
 
 const HOOK_TIMEOUT_MS = 2000;
 /** Routine data-flow expressions get a much tighter budget (ROUT-V1-007). */
 const EXPRESSION_TIMEOUT_MS = 100;
 const MEMORY_LIMIT_MB = 128;
+const PURE_HOOK_TIMEOUT_MS = 100;
+const PURE_HOOK_MEMORY_LIMIT_MB = 16;
 
 /** Optional host read capability for resource hooks; absent means no reach outside the isolate. */
 /** Hook modules are parenthesized object expressions; trim trailing `;` before wrapping. */
@@ -98,6 +103,111 @@ export async function runExpression(req: ExpressionRequest): Promise<WorkerRespo
 `);
     const value = await script.run(context, { timeout: EXPRESSION_TIMEOUT_MS, copy: true });
     return { id, ok: true, value: value ?? null };
+  } catch (err) {
+    return failure(id, err);
+  } finally {
+    dispose(isolate);
+  }
+}
+
+const PURE_HOOK_GLOBALS = [
+  "Buffer",
+  "Date",
+  "Intl",
+  "SharedArrayBuffer",
+  "Atomics",
+  "Temporal",
+  "WebSocket",
+  "XMLHttpRequest",
+  "caches",
+  "crypto",
+  "fetch",
+  "indexedDB",
+  "localStorage",
+  "module",
+  "performance",
+  "process",
+  "queueMicrotask",
+  "require",
+  "sessionStorage",
+  "setImmediate",
+  "setInterval",
+  "setTimeout",
+] as const;
+
+async function removePureHookAmbientCapabilities(context: ivm.Context): Promise<void> {
+  const script = await context.evalClosure(
+    `
+for (const name of $0) {
+  Object.defineProperty(globalThis, name, {
+    configurable: false,
+    enumerable: false,
+    value: undefined,
+    writable: false,
+  });
+}
+Object.defineProperty(Math, "random", {
+  configurable: false,
+  enumerable: false,
+  value: undefined,
+  writable: false,
+});
+Object.freeze(Math);
+`,
+    [PURE_HOOK_GLOBALS],
+    {
+      arguments: { copy: true },
+      timeout: PURE_HOOK_TIMEOUT_MS,
+    }
+  );
+  script?.release?.();
+}
+
+/** Execute one reviewed ECMAScript module export with no ambient host capability. */
+export async function runPureHook(req: PureHookRequest): Promise<WorkerResponse> {
+  const { id, source, sourceSha256, exportName, inputJson } = req;
+  if (Buffer.byteLength(source, "utf8") > PURE_HOOK_LIMITS.sourceBytes) {
+    return failure(id, new Error(`hook source exceeds ${PURE_HOOK_LIMITS.sourceBytes} bytes`));
+  }
+  if (Buffer.byteLength(inputJson, "utf8") > PURE_HOOK_LIMITS.inputBytes) {
+    return failure(id, new Error(`hook input exceeds ${PURE_HOOK_LIMITS.inputBytes} bytes`));
+  }
+  const actualHash = createHash("sha256").update(source).digest("hex");
+  if (actualHash !== sourceSha256) return failure(id, new Error("hook hash mismatch"));
+
+  const isolate = new ivm.Isolate({ memoryLimit: PURE_HOOK_MEMORY_LIMIT_MB });
+  try {
+    const context = await isolate.createContext();
+    await removePureHookAmbientCapabilities(context);
+
+    const module = await isolate.compileModule(source);
+    if (module.dependencySpecifiers.length > 0) {
+      throw new Error("pure hook imports are not allowed");
+    }
+    await module.instantiate(context, () => {
+      throw new Error("pure hook imports are not allowed");
+    });
+    await module.evaluate({ timeout: PURE_HOOK_TIMEOUT_MS });
+
+    const hook = await module.namespace.get(exportName, { reference: true });
+    if (!(hook instanceof ivm.Reference) || hook.typeof !== "function") {
+      throw new Error(`hook module does not define function "${exportName}"`);
+    }
+    try {
+      const value = await hook.apply(undefined, [JSON.parse(inputJson)], {
+        arguments: { copy: true },
+        result: { copy: true },
+        timeout: PURE_HOOK_TIMEOUT_MS,
+      });
+      const outputJson = serializeJson(value);
+      if (outputJson === undefined) throw new Error("pure hook output must be a JSON value");
+      if (Buffer.byteLength(outputJson, "utf8") > PURE_HOOK_LIMITS.outputBytes) {
+        throw new Error(`hook output exceeds ${PURE_HOOK_LIMITS.outputBytes} bytes`);
+      }
+      return { id, ok: true, value: JSON.parse(outputJson) };
+    } finally {
+      hook.release();
+    }
   } catch (err) {
     return failure(id, err);
   } finally {

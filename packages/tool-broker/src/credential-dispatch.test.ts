@@ -4,6 +4,7 @@ import { ToolCatalog } from "./catalog";
 import { CredentialDispatcher } from "./credential-dispatch";
 import {
   AdapterDispatchError,
+  EffectDispatchDeferredError,
   EffectDispatcher,
   EffectLedger,
   type EffectRecord,
@@ -204,14 +205,24 @@ describe("CredentialDispatcher", () => {
         calls += 1;
         if (calls === 1) {
           provider.set(SECRET_REF, ROTATED_SECRET);
-          throw new AdapterDispatchError("before_dispatch", "transport_unavailable", true);
+          throw new AdapterDispatchError(
+            "before_dispatch",
+            "provider_rate_limited",
+            true,
+            undefined,
+            1_000
+          );
         }
         expect(credential).toBe(ROTATED_SECRET);
         return { providerId: "external-42" };
       }),
     };
 
-    await dispatcher(adapter).dispatch(BUSINESS_ID, EFFECT_ID);
+    const durable = dispatcher(adapter);
+    await expect(durable.dispatch(BUSINESS_ID, EFFECT_ID)).rejects.toBeInstanceOf(
+      EffectDispatchDeferredError
+    );
+    await durable.dispatch(BUSINESS_ID, EFFECT_ID);
 
     expect(reauthorize).toHaveBeenCalledTimes(2);
   });
@@ -251,7 +262,7 @@ describe("CredentialDispatcher", () => {
       catalog: ToolCatalog.load([definition]),
       adapters: new Map([["github", adapter]]),
       credentialDispatcher,
-      wait: async () => undefined,
+      parkRetry: async ({ attempt }) => ({ waitId: `wait-${attempt}` }),
       now: () => "2026-07-25T00:00:01.000Z",
     });
   }

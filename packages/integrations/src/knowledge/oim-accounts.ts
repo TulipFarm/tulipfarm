@@ -12,6 +12,7 @@
  */
 
 import { readPointer } from "../egress/oim-pagination";
+import { isOimKnowledgeRetryRequiredError } from "./oim-errors";
 import type { ProviderAccountPort } from "./oim-mapping";
 import type { KnowledgeProfilePlan } from "./oim-profile";
 import type { OimKnowledgeApiPort } from "./oim-sync";
@@ -35,7 +36,8 @@ export function createOimProviderAccountPort(
           operationId: user.operation.id,
           parameters: { [user.idParameter]: providerId },
         }));
-      } catch {
+      } catch (error) {
+        if (isOimKnowledgeRetryRequiredError(error)) throw error;
         return undefined;
       }
       const email =
@@ -63,7 +65,8 @@ export function createOimProviderAccountPort(
             parameters: { [group.idParameter]: groupId },
             ...(pageToken === undefined ? {} : { pageToken }),
           }));
-        } catch {
+        } catch (error) {
+          if (isOimKnowledgeRetryRequiredError(error)) throw error;
           // A page that fails mid-walk leaves a membership that is only partly known, which is
           // exactly the case `undefined` exists for: a partial list would silently drop members.
           return undefined;

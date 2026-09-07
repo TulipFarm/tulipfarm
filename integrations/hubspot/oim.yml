@@ -5,7 +5,7 @@ metadata:
   id: hubspot
   name: HubSpot
   version: 1.0.0
-  description: Read and create HubSpot CRM contacts and companies through a connected app.
+  description: Read, create, and update HubSpot CRM contacts and companies through a connected app.
   license: Apache-2.0
   maintainers:
     - name: TulipFarm
@@ -14,6 +14,11 @@ metadata:
 profiles:
   core: "1.1"
   auth: "1.0"
+
+files:
+  - path: fixtures.yml
+    role: fixture
+    sha256: "1f0dff9b0ab814a2ccb06050d52a2513846d768af1bff4a04df0d42c83a91737"
 
 auth:
   allowedOriginHosts:
@@ -72,6 +77,7 @@ auth:
         - crm.objects.contacts.read
         - crm.objects.contacts.write
         - crm.objects.companies.read
+        - crm.objects.companies.write
       clientId:
         type: credential
         slot: client_id
@@ -92,7 +98,7 @@ auth:
 operations:
   - id: list-contacts
     name: hubspot_list_contacts
-    description: List CRM contacts, most recently created first.
+    description: List CRM contacts.
     effect: read
     identityMode: shared_or_personal
     credentialSlot: access_token
@@ -134,7 +140,11 @@ operations:
                 createdAt: { type: string }
                 updatedAt: { type: string }
                 properties: { type: object }
+              required: [id, properties]
           paging: { type: object }
+        required: [results]
+      projection:
+        - /results
     rateLimit:
       requests: 100
       perSeconds: 10
@@ -172,6 +182,7 @@ operations:
           createdAt: { type: string }
           updatedAt: { type: string }
           properties: { type: object }
+        required: [id, properties]
     rateLimit:
       requests: 100
       perSeconds: 10
@@ -208,6 +219,125 @@ operations:
           id: { type: string }
           createdAt: { type: string }
           properties: { type: object }
+        required: [id, properties]
+    rateLimit:
+      requests: 100
+      perSeconds: 10
+      scope: connection
+
+  - id: update-contact
+    name: hubspot_update_contact
+    description: Update property values on one CRM contact.
+    effect: update
+    identityMode: shared_or_personal
+    credentialSlot: access_token
+    credentialInjection:
+      in: header
+      name: Authorization
+      format: "Bearer {token}"
+    source:
+      type: http
+      method: PATCH
+      baseUrl: https://api.hubapi.com
+      path: /crm/v3/objects/contacts/{contact_id}
+      parameters:
+        - name: contact_id
+          in: path
+          required: true
+          schema: { type: string }
+    requestSchema:
+      type: object
+      required: [properties]
+      properties:
+        properties:
+          type: object
+          description: Contact property values to change, such as firstname, lastname or phone.
+      additionalProperties: false
+    response:
+      maxBytes: 131072
+      schema:
+        type: object
+        properties:
+          id: { type: string }
+          createdAt: { type: string }
+          updatedAt: { type: string }
+          properties: { type: object }
+        required: [id, properties]
+    rateLimit:
+      requests: 100
+      perSeconds: 10
+      scope: connection
+
+  - id: get-company
+    name: hubspot_get_company
+    description: Read one CRM company by its HubSpot object id.
+    effect: read
+    identityMode: shared_or_personal
+    credentialSlot: access_token
+    credentialInjection:
+      in: header
+      name: Authorization
+      format: "Bearer {token}"
+    source:
+      type: http
+      method: GET
+      baseUrl: https://api.hubapi.com
+      path: /crm/v3/objects/companies/{company_id}
+      parameters:
+        - name: company_id
+          in: path
+          required: true
+          schema: { type: string }
+        - name: properties
+          in: query
+          schema: { type: string }
+    response:
+      maxBytes: 131072
+      schema:
+        type: object
+        properties:
+          id: { type: string }
+          createdAt: { type: string }
+          updatedAt: { type: string }
+          properties: { type: object }
+        required: [id, properties]
+    rateLimit:
+      requests: 100
+      perSeconds: 10
+      scope: connection
+
+  - id: create-company
+    name: hubspot_create_company
+    description: Create a CRM company with at least a name or domain property.
+    effect: create
+    identityMode: shared_or_personal
+    credentialSlot: access_token
+    credentialInjection:
+      in: header
+      name: Authorization
+      format: "Bearer {token}"
+    source:
+      type: http
+      method: POST
+      baseUrl: https://api.hubapi.com
+      path: /crm/v3/objects/companies
+    requestSchema:
+      type: object
+      required: [properties]
+      properties:
+        properties:
+          type: object
+          description: Company property values. Include at least name or domain.
+      additionalProperties: false
+    response:
+      maxBytes: 131072
+      schema:
+        type: object
+        properties:
+          id: { type: string }
+          createdAt: { type: string }
+          properties: { type: object }
+        required: [id, properties]
     rateLimit:
       requests: 100
       perSeconds: 10

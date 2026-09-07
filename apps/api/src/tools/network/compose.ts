@@ -1,12 +1,14 @@
 import { type AuthorityLayer, decideEffectivePermission } from "@tulipfarm/authz";
 import { DEPLOYMENT_BUSINESS_ID } from "@tulipfarm/constants";
 import {
+  type ConnectionUseAuthorizer,
   type EgressHttpPort,
   FetchEgressHttp,
   GuardedEgressHttp,
   normalizedPublicUrl,
 } from "@tulipfarm/integrations";
 import {
+  type ConnectionSecretScope,
   SecretBroker,
   type SecretScope,
   type SecretsService,
@@ -16,7 +18,12 @@ import type { SoulLoader } from "@tulipfarm/soul";
 import { type CachePort, MemoryCache } from "@tulipfarm/storage";
 import { type ToolDef, toToolDef } from "@tulipfarm/tool-host";
 import type { AuthorityPrincipal } from "../../identity/authority-layers";
-import { type ConnectionReader, matchAdhocConnection } from "../../integrations/adhoc-connections";
+import {
+  adhocIntegrationId,
+  type ConnectionReader,
+  matchAdhocConnection,
+} from "../../integrations/adhoc-connections";
+import type { TrackConnectionBroker } from "../../integrations/connection-lease-registry";
 import { createNetworkBudget } from "./budget";
 import { NETWORK_TOOLS } from "./tools";
 
@@ -35,6 +42,13 @@ export interface NetworkToolingDeps {
    * named by the model — the previous behaviour.
    */
   readonly connections?: ConnectionReader;
+  /**
+   * Live authority for shared Connections. Personal Connections remain owner-only without it;
+   * organization and Team Connections remain unavailable.
+   */
+  readonly connectionAccess?: ConnectionUseAuthorizer;
+  /** Registers each live Connection broker so account offboarding can revoke issued leases. */
+  readonly trackConnectionBroker?: TrackConnectionBroker;
 }
 
 /** Read a frontmatter list defensively; authored YAML is untyped until it is checked. */
@@ -94,29 +108,13 @@ export function composeNetworkTools(deps: NetworkToolingDeps): readonly ToolDef[
     },
   });
 
-  // A second broker for Connection-backed Credentials. The deployment broker's authorizer asks
-  // whether the *Skill* declared this Secret, which a Connection created from a person's own
-  // confirmation never will — and widening that authorizer instead would have let a Skill reach
-  // any Connection it could name. Authorization here is the Connection's own: the match already
-  // proved the caller owns it, so this only re-checks that the Credential is being spent against
-  // the destination it was confirmed for.
-  const connectionBroker = new SecretBroker({
-    provider: secretsServiceProvider(deps.secrets),
-    authorizer: {
-      async authorize(scope) {
-        return scope.destination !== undefined && scope.purpose === CONNECTION_PURPOSE
-          ? { allowed: true, maxTtlMs: 60_000, maxUses: 1 }
-          : { allowed: false, reason: "not_authorized" };
-      },
-    },
-  });
-
   const connections = deps.connections;
 
   return NETWORK_TOOLS.map((definition) =>
     toToolDef(definition, (context) => ({
       userId: context.userId,
       runId: context.runId ?? "",
+      ...(context.conversationId === undefined ? {} : { conversationId: context.conversationId }),
       ...(context.activeSkillName === undefined
         ? {}
         : { activeSkillName: context.activeSkillName }),
@@ -145,19 +143,41 @@ export function composeNetworkTools(deps: NetworkToolingDeps): readonly ToolDef[
       ...(connections === undefined
         ? {}
         : {
-            matchConnection: async (destination: string) => {
-              if (context.userId.length === 0) return { kind: "none" as const };
+            matchConnection: async (destination: string, connectionId?: string) => {
+              if (context.userId.length === 0) {
+                return connectionId === undefined
+                  ? { kind: "none" as const }
+                  : { kind: "denied" as const };
+              }
               const match = await matchAdhocConnection(
-                { connections },
+                {
+                  connections,
+                  ...(deps.connectionAccess === undefined
+                    ? {}
+                    : { connectionAccess: deps.connectionAccess }),
+                },
                 {
                   businessId: DEPLOYMENT_BUSINESS_ID,
                   origin: destination,
                   principalId: context.userId,
+                  ...(connectionId === undefined ? {} : { connectionId }),
                 }
               );
+              if (match.kind === "ambiguous") {
+                return {
+                  kind: "ambiguous" as const,
+                  count: match.count,
+                  candidates: match.candidates.map((candidate) => ({
+                    connectionId: candidate.id,
+                    label: candidate.label,
+                    ownerScope: candidate.ownerScope,
+                  })),
+                };
+              }
               if (match.kind !== "match") return match;
               return {
                 kind: "match" as const,
+                connectionId: match.connection.id,
                 credentialRef: match.credentialRef,
                 rule: match.rule,
                 label: match.connection.label,
@@ -165,27 +185,84 @@ export function composeNetworkTools(deps: NetworkToolingDeps): readonly ToolDef[
             },
             useConnection: async <T>(
               input: {
-                readonly userId: string;
                 readonly runId: string;
+                readonly connectionId: string;
                 readonly credentialRef: string;
                 readonly destination: string;
+                readonly rule: {
+                  readonly location: "header" | "query";
+                  readonly name: string;
+                  readonly valuePrefix: string;
+                };
               },
               callback: (secret: string) => Promise<T>
             ): Promise<T> => {
               if (input.runId.length === 0) {
                 throw new Error("Credential use requires a durable Run");
               }
-              const scope: SecretScope = {
-                secretRef: input.credentialRef,
+              const connectionBroker = new SecretBroker({
+                provider: secretsServiceProvider(deps.secrets),
+                authorizer: {
+                  async authorize(scope) {
+                    if (
+                      scope.connectionId !== input.connectionId ||
+                      scope.credentialSlot !== "credential" ||
+                      scope.integrationId !== adhocIntegrationId(input.destination) ||
+                      scope.destination === undefined ||
+                      scope.destination !== input.destination ||
+                      scope.purpose !== CONNECTION_PURPOSE ||
+                      scope.principalKind !== "user" ||
+                      scope.principalId !== context.userId ||
+                      scope.secretRef !== input.credentialRef
+                    ) {
+                      return { allowed: false, reason: "not_authorized" };
+                    }
+                    const current = await matchAdhocConnection(
+                      {
+                        connections,
+                        ...(deps.connectionAccess === undefined
+                          ? {}
+                          : { connectionAccess: deps.connectionAccess }),
+                      },
+                      {
+                        businessId: DEPLOYMENT_BUSINESS_ID,
+                        origin: input.destination,
+                        principalId: context.userId,
+                        connectionId: input.connectionId,
+                      }
+                    );
+                    const sameRule =
+                      current.kind === "match" &&
+                      current.rule.location === input.rule.location &&
+                      current.rule.name === input.rule.name &&
+                      current.rule.valuePrefix === input.rule.valuePrefix;
+                    return current.kind === "match" &&
+                      current.credentialRef === input.credentialRef &&
+                      sameRule
+                      ? { allowed: true, maxTtlMs: 60_000, maxUses: 1 }
+                      : { allowed: false, reason: "not_authorized" };
+                  },
+                },
+              });
+              const releaseBroker = deps.trackConnectionBroker?.(connectionBroker);
+              const scope: ConnectionSecretScope = {
+                secretRef: input.credentialRef as `secret://${string}`,
+                connectionId: input.connectionId,
+                credentialSlot: "credential",
+                integrationId: adhocIntegrationId(input.destination),
                 toolId: "api_request",
                 runId: input.runId,
                 purpose: CONNECTION_PURPOSE,
                 principalKind: "user",
-                principalId: input.userId,
+                principalId: context.userId,
                 destination: input.destination,
               };
-              const lease = await connectionBroker.lease({ scope, maxUses: 1 });
-              return lease.use(callback, scope);
+              try {
+                const lease = await connectionBroker.leaseConnection({ scope, maxUses: 1 });
+                return await lease.use(callback, scope);
+              } finally {
+                releaseBroker?.();
+              }
             },
           }),
       useCredential: async (input, callback) => {

@@ -1,7 +1,28 @@
+import { PGlite } from "@electric-sql/pglite";
+import { DEPLOYMENT_BUSINESS_ID } from "@tulipfarm/constants";
+import { drainInbox, type IntegrationEvent } from "@tulipfarm/integrations";
+import {
+  ArtifactService,
+  DurableInvocationGateway,
+  INVOCATION_STORAGE_STATEMENTS,
+  PgDurableInvocationStore,
+  type RegisteredTrigger,
+  TypedOutputValidator,
+} from "@tulipfarm/run-kernel";
 import type { OimManifest } from "@tulipfarm/schema";
+import { INVOCATION_REQUEST_SCHEMAS } from "@tulipfarm/schema";
 import type { SoulLoader } from "@tulipfarm/soul";
-import type { WebhookInboxStore } from "@tulipfarm/storage";
+import {
+  ARTIFACT_STORAGE_STATEMENTS,
+  ArtifactStore,
+  type PersistedWebhookDelivery,
+  RUN_STORAGE_STATEMENTS,
+  type WebhookInboxStore,
+} from "@tulipfarm/storage";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { ambientTransactionPort, type Queryable, transactionPort } from "../db";
+import { triggerRunStarter } from "../runtime/invocation-callers";
+import { EventTriggerGateway } from "../triggers/event-dispatch";
 import {
   DEFAULT_RAW_RETENTION_DAYS,
   startWebhookInboxWorker,
@@ -163,5 +184,123 @@ describe("startWebhookInboxWorker", () => {
 
     await vi.advanceTimersByTimeAsync(60_000);
     expect(claim).not.toHaveBeenCalled();
+  });
+});
+
+describe("webhook event-to-Run crash recovery", () => {
+  it("adopts the same durable Run when dispatch is retried after its completion write crashes", async () => {
+    const database = new PGlite();
+    try {
+      for (const statement of [
+        ...RUN_STORAGE_STATEMENTS,
+        ...ARTIFACT_STORAGE_STATEMENTS,
+        ...INVOCATION_STORAGE_STATEMENTS,
+      ]) {
+        await database.query(statement);
+      }
+      const validator = new TypedOutputValidator(INVOCATION_REQUEST_SCHEMAS);
+      let runSequence = 0;
+      const invocations = new DurableInvocationGateway({
+        store: new PgDurableInvocationStore(
+          transactionPort(database as unknown as Queryable),
+          (transaction) =>
+            new ArtifactService(new ArtifactStore(ambientTransactionPort(transaction)), validator)
+        ),
+        validator,
+        routineDefinitions: {
+          async resolve() {
+            return {
+              bundle: {
+                digest: "bundle-digest",
+                routineId: "forecast-routine",
+                routineVersion: "1",
+              },
+              startState: { key: "start", definitionRef: "published:routine:forecast-routine" },
+            };
+          },
+        },
+        nextId: () => `00000000-0000-4000-8000-${String(++runSequence).padStart(12, "0")}`,
+      });
+      const trigger: RegisteredTrigger = {
+        authoredVersion: 1,
+        lifecycle: "published",
+        triggerSlug: "on-forecast",
+        type: "integration_event",
+        protocol: "oim",
+        eventType: "forecast.updated",
+        eventVersion: 1,
+        provider: "weather",
+        integrationMajorVersion: 1,
+        connectionId: "connection-1",
+        routineRef: { name: "forecast-routine", version: "1" },
+        backgroundIdentity: { principalKind: "service", principalId: "routine-runner" },
+      };
+      const eventNow = vi
+        .fn()
+        .mockReturnValueOnce("2026-09-07T06:00:00.000Z")
+        .mockReturnValueOnce("2026-09-07T06:01:00.000Z");
+      const eventGateway = new EventTriggerGateway({
+        listTriggers: async () => [trigger],
+        startRun: triggerRunStarter(invocations),
+        nextEventId: () => "unused",
+        now: eventNow,
+        authorizeOimTrigger: async () => true,
+      });
+      const dispatchResults: unknown[] = [];
+      const dispatch = async (event: IntegrationEvent) => {
+        dispatchResults.push(await eventGateway.dispatchIntegrationEvent(event));
+      };
+      const normalizedDelivery: PersistedWebhookDelivery = {
+        businessId: DEPLOYMENT_BUSINESS_ID,
+        id: "delivery-1",
+        integrationId: "weather",
+        integrationMajorVersion: 1,
+        connectionId: "connection-1",
+        deduplicationKey: "provider-delivery-1",
+        bodySha256: "a".repeat(64),
+        safeHeaders: {},
+        encryptedBody: "ciphertext",
+        eventType: "forecast.updated",
+        verification: "hmac_sha256",
+        state: "normalized",
+        attempts: 1,
+        lastError: null,
+        normalizedPayload: { city: "Indore" },
+        replayOfId: null,
+        receivedAt: new Date(),
+        nextAttemptAt: new Date(),
+        leaseExpiresAt: new Date("2026-09-07T07:00:00.000Z"),
+        rawDeletedAt: null,
+      };
+      const inbox = {
+        claim: vi
+          .fn()
+          .mockResolvedValueOnce([normalizedDelivery])
+          .mockResolvedValueOnce([normalizedDelivery]),
+        markNormalized: vi.fn(async () => true),
+        markFailed: vi.fn(async () => "normalized" as const),
+        markDispatched: vi
+          .fn()
+          .mockRejectedValueOnce(new Error("completion write crashed"))
+          .mockResolvedValueOnce(true),
+        discardRawPayloadsBefore: vi.fn(async () => 0),
+      } as unknown as WebhookInboxStore;
+      const drainDeps = webhookInboxDrainDeps(deps({ inbox, dispatch }));
+
+      await expect(drainInbox(drainDeps)).rejects.toThrow("completion write crashed");
+      await expect(drainInbox(drainDeps)).resolves.toMatchObject({ dispatched: 1 });
+
+      expect(dispatchResults).toEqual([
+        expect.objectContaining({ kind: "started", outcome: "started" }),
+        expect.objectContaining({ kind: "started", outcome: "duplicate" }),
+      ]);
+      expect(eventNow).toHaveBeenCalledTimes(2);
+      const { rows } = await database.query<{ count: number }>(
+        "SELECT count(*)::int AS count FROM runs"
+      );
+      expect(rows[0]?.count).toBe(1);
+    } finally {
+      await database.close();
+    }
   });
 });

@@ -45,6 +45,7 @@ export function redactCredentialFields(value: unknown, depth = 0): unknown {
 
 /** Splits a JSON Pointer into its decoded reference tokens. */
 export function pointerSegments(pointer: string): string[] {
+  if (pointer === "") return [];
   return pointer
     .slice(1)
     .split("/")

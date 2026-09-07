@@ -4,20 +4,39 @@ import {
   type CompiledGraphqlTool,
   type CompiledOimGraphqlTool,
   type CompiledOimHttpTool,
+  type CompiledOimOpenApiTool,
   compileGraphqlEgress,
   compileOimGraphqlOperations,
   compileOimHttpOperations,
+  compileOimOpenApiOperations,
   compileOpenApiEgress,
   type EgressHttpPort,
   GraphqlToolAdapter,
+  OIM_CONNECTION_ID_ARGUMENT,
   type OimFilePort,
+  OimGraphqlToolAdapter,
+  type OimHookPhaseRunner,
+  OimHttpCompileError,
   OimHttpToolAdapter,
   type OimOperationConnection,
   type OimOperationConnectionResolver,
+  type OimRateLimitAdmissionPort,
+  OimRateLimitedToolAdapter,
   OpenApiToolAdapter,
+  resolveOimBaseUrl,
+  resolveOimUrlTemplate,
+  runOimHookPhase,
 } from "@tulipfarm/integrations";
 import type { MutationGuard } from "@tulipfarm/observability";
-import type { OimManifest } from "@tulipfarm/schema";
+import {
+  canonicalHash,
+  compileJsonSchema,
+  type OimConnection,
+  type OimHook,
+  type OimManifest,
+  type OimOperation,
+  oimOriginPlaceholder,
+} from "@tulipfarm/schema";
 import {
   type SecretAuthorizer,
   SecretBroker,
@@ -28,9 +47,10 @@ import {
 import type { Logger, SoulIntegration } from "@tulipfarm/soul";
 import { isPersonalCredentialStep, resolveAuthSteps } from "@tulipfarm/soul";
 import {
+  AdapterDispatchError,
   CredentialDispatcher,
   EffectDispatcher,
-  type EffectRecord,
+  type EffectRetryParker,
   type EffectStore,
   intentDigest,
   normalizeToolIntent,
@@ -51,6 +71,21 @@ import {
   toToolDef,
 } from "@tulipfarm/tool-host";
 import { integrationSecretKey, isSecretRef } from "../../integrations/connection-env";
+import type { TrackConnectionBroker } from "../../integrations/connection-lease-registry";
+import {
+  type ConnectionOriginApprovalRepository,
+  manifestForApprovedConnectionOrigin,
+  oimConnectionOriginRequiresApproval,
+} from "../../integrations/connection-origin-policy";
+import {
+  OimMajorLifecycleError,
+  oimMajorStorageSlug,
+  oimManifestMajor,
+  oimPinnedToolId,
+  requireOimConnectionForManifest,
+  resolveOimMajorArtifact,
+  resolveOimUnversionedAlias,
+} from "../../integrations/oim-major-versions";
 import { principalSecretKey } from "../../integrations/principal-tokens";
 
 /** Compiles manifest egress into governed chat Tools with the ledgered dispatch path. */
@@ -128,14 +163,12 @@ function mapDispatchError(error: ToolDispatchError, slug: string): ToolCallResul
   }
 }
 
-/** Rediscovered confirmed effects return the first immutable provider result. */
-function replayed(effect: EffectRecord): ToolCallResult {
-  if (effect.state === "confirmed") {
-    return effect.outputStored
-      ? ok(effect.output)
-      : err("internal_error", "confirmed_effect_output_unavailable");
+/** Rediscovered ledger effects cannot replay provider output; only settled state is stored. */
+function replayed(state: string): ToolCallResult {
+  if (state === "confirmed") {
+    return ok({ replayed: true, note: "This call already completed; not repeated." });
   }
-  return err("internal_error", `effect_${effect.state}`);
+  return err("internal_error", `effect_${state}`);
 }
 
 function declarationSlug(slug: string): string {
@@ -258,7 +291,8 @@ type CompiledDeclarativeTool =
   | CompiledEgressTool
   | CompiledGraphqlTool
   | CompiledOimHttpTool
-  | CompiledOimGraphqlTool;
+  | CompiledOimGraphqlTool
+  | CompiledOimOpenApiTool;
 
 function declarativeTargets(
   compiled: CompiledDeclarativeTool,
@@ -329,21 +363,44 @@ export interface DeclarativeToolingDeps {
    * Credential — the same path the older manifest families use.
    */
   readonly connections?: OimOperationConnectionResolver;
+  /** Reads exact operator-approved self-hosted origins from trusted persistence. */
+  readonly originApprovals?: ConnectionOriginApprovalRepository;
+  /** Tracks live brokers so Connection changes invalidate already-issued leases. */
+  readonly trackConnectionBroker?: TrackConnectionBroker;
   readonly files?: OimFilePort;
+  readonly rateLimits?: OimRateLimitAdmissionPort;
+  readonly parkRetry?: EffectRetryParker;
+  /** Verifies exact installed release provenance before an OIM operation can reserve an effect. */
+  readonly authorizeOimIntegration?: (integration: SoulIntegration) => Promise<void>;
+  /**
+   * Runs only Hooks already authorized by `executeVerifiedOimHook`.
+   *
+   * The composition root owns release provenance and the sandbox. Keeping both behind this port
+   * prevents declarative Tools from gaining a path to execute source directly.
+   */
+  readonly verifiedOimHooks?: {
+    run(integration: SoulIntegration, hook: OimHook, input: unknown): Promise<unknown>;
+  };
 }
 
 interface CompiledIntegration {
   readonly slug: string;
+  readonly sourceIntegration: SoulIntegration;
+  readonly toolAlias?: string;
   readonly oimManifest?: OimManifest;
+  readonly oimDocuments?: Readonly<Record<string, string>>;
+  readonly oimOpenApiDocuments?: Readonly<Record<string, unknown>>;
+  readonly hookRunner?: OimHookPhaseRunner;
+  readonly requestTargetsFor?: (arguments_: unknown) => readonly ToolTargetRef[];
   readonly tools: readonly CompiledDeclarativeTool[];
   readonly credentialMode: ToolCredentialMode;
-  /** Absent for a genuinely public API that declares no credential. */
-  readonly credential?: {
+  /** Every operation may name its own primary slot; legacy integrations contribute one entry. */
+  readonly credentials: readonly {
     readonly ref: string;
     readonly storageKey: string;
     /** Carried so a personal lease can derive its own storage key from the same env name. */
     readonly tokenEnv: string;
-  };
+  }[];
 }
 
 function compileOimIntegration(
@@ -351,44 +408,48 @@ function compileOimIntegration(
   credentialMode: ToolCredentialMode
 ): CompiledIntegration {
   const { oimManifest, slug } = integration;
-  if (oimManifest === undefined) return { slug, tools: [], credentialMode };
-  // Non-secret Connection env resolves a templated base URL host — a customer's own Atlassian
-  // site or GitLab instance. Secret refs are excluded: a compiled binding is logged and inspected.
-  const configuration = Object.fromEntries(
-    Object.entries(integration.connection?.env ?? {}).filter(([, value]) => !isSecretRef(value))
-  );
+  if (oimManifest === undefined) {
+    return { slug, sourceIntegration: integration, tools: [], credentialMode, credentials: [] };
+  }
   const tools = [
-    ...compileOimHttpOperations(oimManifest, configuration),
+    ...compileOimHttpOperations(oimManifest, {}, { deferConfiguration: true }),
+    ...compileOimOpenApiOperations(
+      oimManifest,
+      new Map(Object.entries(integration.oimOpenApiDocuments ?? {})),
+      {},
+      { deferConfiguration: true }
+    ),
     ...compileOimGraphqlOperations(
       oimManifest,
-      new Map(Object.entries(integration.oimDocuments ?? {}))
+      new Map(Object.entries(integration.oimDocuments ?? {})),
+      {},
+      { deferConfiguration: true }
     ),
   ];
-
-  // Every operation's primary credential must name the same slot. A declared secondary credential
-  // is resolved from that same Connection at call time, where both scoped leases are available.
+  for (const tool of tools) {
+    const pinnedToolId = oimPinnedToolId(oimManifest, tool.operation.id);
+    if (tool.toolId !== pinnedToolId || tool.contract.spec.toolId !== pinnedToolId) {
+      throw new Error(`OIM operation "${tool.operation.id}" has an unstable Tool identity`);
+    }
+  }
   const slots = new Set(
     oimManifest.operations
-      .map((operation) => operation.credentialSlot)
+      .flatMap((operation) => [operation.credentialSlot, operation.secondaryCredential?.slot])
       .filter((slot): slot is string => slot !== undefined)
   );
-  if (slots.size > 1) {
-    throw new Error(
-      `declares ${slots.size} credential slots (${[...slots].sort().join(", ")}); only one is supported`
-    );
-  }
-  const [slot] = [...slots];
-  if (slot === undefined) return { slug, oimManifest, tools, credentialMode };
   return {
     slug,
+    sourceIntegration: integration,
     oimManifest,
+    oimDocuments: integration.oimDocuments,
+    oimOpenApiDocuments: integration.oimOpenApiDocuments,
     tools,
     credentialMode,
-    credential: {
+    credentials: [...slots].map((slot) => ({
       ref: oimSecretRef(slug, slot),
       storageKey: integrationSecretKey(slug, slot),
       tokenEnv: slot,
-    },
+    })),
   };
 }
 
@@ -403,7 +464,7 @@ function compileIntegration(integration: SoulIntegration): CompiledIntegration {
     manifest === undefined ||
     (manifest.egress?.type !== "openapi" && manifest.egress?.type !== "graphql")
   ) {
-    return { slug, tools: [], credentialMode };
+    return { slug, sourceIntegration: integration, tools: [], credentialMode, credentials: [] };
   }
 
   // Connection env fills `{VAR}` placeholders in `base_url` — a per-install path segment such as
@@ -422,16 +483,21 @@ function compileIntegration(integration: SoulIntegration): CompiledIntegration {
         })
       : compileGraphqlEgress({ slug, egress: manifest.egress });
   const tokenEnv = manifest.egress.auth?.token_env;
-  if (tokenEnv === undefined) return { slug, tools, credentialMode };
+  if (tokenEnv === undefined) {
+    return { slug, sourceIntegration: integration, tools, credentialMode, credentials: [] };
+  }
   return {
     slug,
+    sourceIntegration: integration,
     tools,
     credentialMode,
-    credential: {
-      ref: egressSecretRef(slug, tokenEnv),
-      storageKey: integrationSecretKey(slug, tokenEnv),
-      tokenEnv,
-    },
+    credentials: [
+      {
+        ref: egressSecretRef(slug, tokenEnv),
+        storageKey: integrationSecretKey(slug, tokenEnv),
+        tokenEnv,
+      },
+    ],
   };
 }
 
@@ -446,26 +512,82 @@ function compileIntegration(integration: SoulIntegration): CompiledIntegration {
 type OimCallAuthority =
   | { readonly kind: "proceed" }
   | {
+      readonly kind: "configured";
+      readonly configuration: Readonly<Record<string, string | number | boolean>>;
+      readonly manifest: OimManifest;
+    }
+  | {
       readonly kind: "connection";
       readonly credentialRef: `secret://${string}`;
       readonly connection: ToolConnectionBinding;
-      readonly destination: string;
+      readonly configuration: Readonly<Record<string, string | number | boolean>>;
+      readonly manifest: OimManifest;
       readonly secondaryCredentialRef?: `secret://${string}`;
       readonly secondaryConnection?: ToolConnectionBinding;
     }
   | { readonly kind: "answer"; readonly result: ToolCallResult };
 
+function approvedOriginField(operation: OimOperation): string | undefined {
+  const source = operation.source;
+  if (source.type === "graphql") {
+    return oimOriginPlaceholder(source.url);
+  }
+  if ((source.type !== "http" && source.type !== "openapi") || source.baseUrl === undefined) {
+    return undefined;
+  }
+  return oimOriginPlaceholder(source.baseUrl);
+}
+
+async function manifestForOimConnection(
+  deps: DeclarativeToolingDeps,
+  manifest: OimManifest,
+  operation: OimOperation,
+  connection: OimConnection
+): Promise<OimManifest> {
+  const configurationField = approvedOriginField(operation);
+  if (
+    configurationField === undefined ||
+    !oimConnectionOriginRequiresApproval(manifest, configurationField)
+  ) {
+    return manifest;
+  }
+  try {
+    const source = operation.source;
+    if (source.type === "graphql") {
+      resolveOimUrlTemplate(manifest, operation, source.url, connection.configuration);
+    } else {
+      resolveOimBaseUrl(manifest, operation, connection.configuration);
+    }
+    return manifest;
+  } catch (error) {
+    if (!(error instanceof OimHttpCompileError) || error.code !== "origin_not_allowed") {
+      throw error;
+    }
+  }
+  const approval = await deps.originApprovals?.get(
+    deps.businessId,
+    connection.id,
+    configurationField
+  );
+  if (approval === undefined || approval === null) {
+    throw new Error("connection_origin_approval_missing");
+  }
+  return manifestForApprovedConnectionOrigin({ manifest, connection, approval });
+}
+
 async function resolveOimAuthority(
   compiled: CompiledDeclarativeTool,
   integration: CompiledIntegration,
   deps: DeclarativeToolingDeps,
-  ctx: RequestContext
+  ctx: RequestContext,
+  connectionId: string | undefined
 ): Promise<OimCallAuthority> {
   const { connections } = deps;
   const { oimManifest } = integration;
-  if (connections === undefined || oimManifest === undefined || !("operation" in compiled)) {
+  if (oimManifest === undefined || !("operation" in compiled)) {
     return { kind: "proceed" };
   }
+  if (connections === undefined) return { kind: "proceed" };
   const principal = ctx.subject ?? { kind: "user", id: ctx.userId };
   const resolution = await connections.resolve({
     businessId: deps.businessId,
@@ -475,31 +597,179 @@ async function resolveOimAuthority(
     // A user acting for themselves may reach their own personal Connection. Any other principal
     // gets only what it was granted, so it is never offered one it merely happens to know of.
     ...(principal.kind === "user" ? { personalOwnerId: principal.id } : {}),
+    ...(connectionId === undefined ? {} : { connectionId }),
+    ...(ctx.routineContext === undefined || connectionId !== undefined
+      ? {}
+      : { requireExplicitConnection: true }),
   });
   if (resolution.kind === "public") return { kind: "proceed" };
+  if (resolution.kind === "configured") {
+    try {
+      requireOimConnectionForManifest(resolution.connection, oimManifest);
+    } catch {
+      return {
+        kind: "answer",
+        result: ok(
+          oimConnectionAnswer(
+            { kind: "connection_denied", reason: "not_authorized" },
+            integration.slug
+          )
+        ),
+      };
+    }
+    try {
+      const manifest = await manifestForOimConnection(
+        deps,
+        oimManifest,
+        compiled.operation,
+        resolution.connection
+      );
+      return {
+        kind: "configured",
+        configuration: resolution.connection.configuration,
+        manifest,
+      };
+    } catch {
+      return {
+        kind: "answer",
+        result: ok(
+          oimConnectionAnswer(
+            {
+              kind: "connection_unhealthy",
+              connectionId: resolution.connection.id,
+              status: "action_required",
+            },
+            integration.slug
+          )
+        ),
+      };
+    }
+  }
   if (resolution.kind === "ready") {
-    return {
-      kind: "connection",
-      credentialRef: resolution.credentialRef,
-      connection: resolution.binding,
-      destination: new URL(
-        "baseUrl" in compiled.binding ? compiled.binding.baseUrl : compiled.binding.url
-      ).origin,
-      ...(resolution.secondaryCredentialRef === undefined ||
-      resolution.secondaryBinding === undefined
-        ? {}
-        : {
-            secondaryCredentialRef: resolution.secondaryCredentialRef,
-            secondaryConnection: resolution.secondaryBinding,
-          }),
-    };
+    try {
+      requireOimConnectionForManifest(resolution.connection, oimManifest);
+    } catch {
+      return {
+        kind: "answer",
+        result: ok(
+          oimConnectionAnswer(
+            { kind: "connection_denied", reason: "not_authorized" },
+            integration.slug
+          )
+        ),
+      };
+    }
+    try {
+      const manifest = await manifestForOimConnection(
+        deps,
+        oimManifest,
+        compiled.operation,
+        resolution.connection
+      );
+      return {
+        kind: "connection",
+        credentialRef: resolution.credentialRef,
+        connection: resolution.binding,
+        configuration: resolution.connection.configuration,
+        manifest,
+        ...(resolution.secondaryCredentialRef === undefined ||
+        resolution.secondaryBinding === undefined
+          ? {}
+          : {
+              secondaryCredentialRef: resolution.secondaryCredentialRef,
+              secondaryConnection: resolution.secondaryBinding,
+            }),
+      };
+    } catch {
+      return {
+        kind: "answer",
+        result: ok(
+          oimConnectionAnswer(
+            {
+              kind: "connection_unhealthy",
+              connectionId: resolution.connection.id,
+              status: "action_required",
+            },
+            integration.slug
+          )
+        ),
+      };
+    }
   }
   return { kind: "answer", result: ok(oimConnectionAnswer(resolution, integration.slug)) };
 }
 
+function withOimConnectionChoice(compiled: CompiledDeclarativeTool): Record<string, unknown> {
+  const schema = compiled.contract.spec.inputSchema;
+  if (!("operation" in compiled)) return schema;
+  const properties =
+    schema.properties !== null &&
+    typeof schema.properties === "object" &&
+    !Array.isArray(schema.properties)
+      ? (schema.properties as Record<string, unknown>)
+      : {};
+  return {
+    ...schema,
+    properties: {
+      ...properties,
+      [OIM_CONNECTION_ID_ARGUMENT]: {
+        type: "string",
+        minLength: 1,
+        maxLength: 256,
+        description: "Host-selected Connection id. Never sent to the provider.",
+      },
+    },
+  };
+}
+
+function splitOimArguments(
+  compiled: CompiledDeclarativeTool,
+  args: unknown
+): { readonly connectionId?: string; readonly providerArgs: unknown } {
+  if (!("operation" in compiled)) return { providerArgs: args };
+  const input = record(args);
+  if (input === undefined) return { providerArgs: args };
+  const { [OIM_CONNECTION_ID_ARGUMENT]: connectionId, ...providerArgs } = input;
+  return {
+    ...(typeof connectionId === "string" ? { connectionId } : {}),
+    providerArgs,
+  };
+}
+
+function compileOimToolForConfiguration(
+  compiled: CompiledDeclarativeTool,
+  integration: CompiledIntegration,
+  configuration: Readonly<Record<string, string | number | boolean>>,
+  approvedManifest?: OimManifest
+): CompiledDeclarativeTool {
+  const manifest = approvedManifest ?? integration.oimManifest;
+  if (manifest === undefined || !("operation" in compiled)) return compiled;
+  const one = { ...manifest, operations: [compiled.operation] };
+  switch (compiled.operation.source.type) {
+    case "http":
+      return compileOimHttpOperations(one, configuration)[0] ?? compiled;
+    case "openapi":
+      return (
+        compileOimOpenApiOperations(
+          one,
+          new Map(Object.entries(integration.oimOpenApiDocuments ?? {})),
+          configuration
+        )[0] ?? compiled
+      );
+    case "graphql":
+      return (
+        compileOimGraphqlOperations(
+          one,
+          new Map(Object.entries(integration.oimDocuments ?? {})),
+          configuration
+        )[0] ?? compiled
+      );
+  }
+}
+
 /** Turns an unresolved Connection into something the caller can act on, naming no credential. */
 function oimConnectionAnswer(
-  resolution: Exclude<OimOperationConnection, { readonly kind: "public" | "ready" }>,
+  resolution: Exclude<OimOperationConnection, { readonly kind: "public" | "configured" | "ready" }>,
   slug: string
 ): Record<string, unknown> {
   const setupUrl = `/business/integrations/${encodeURIComponent(slug)}/connections`;
@@ -546,14 +816,56 @@ function oimConnectionAnswer(
   }
 }
 
+type OimInputHookResult =
+  | { readonly kind: "arguments"; readonly arguments: unknown }
+  | { readonly kind: "answer"; readonly result: ToolCallResult };
+
+async function runOimInputValidation(
+  compiled: CompiledDeclarativeTool,
+  integration: CompiledIntegration,
+  args: unknown
+): Promise<OimInputHookResult> {
+  const manifest = integration.oimManifest;
+  if (manifest === undefined || !("operation" in compiled)) {
+    return { kind: "arguments", arguments: args };
+  }
+
+  try {
+    const validation = await runOimHookPhase({
+      manifest,
+      kind: "input_validate",
+      input: { operationId: compiled.operation.id, arguments: args },
+      ...(integration.hookRunner === undefined ? {} : { runner: integration.hookRunner }),
+    });
+    if (validation.executed) {
+      const result = record(validation.value);
+      if (result?.valid === false && typeof result.message === "string") {
+        return { kind: "answer", result: err("validation_error", result.message.slice(0, 512)) };
+      }
+      if (result?.valid !== true) {
+        return {
+          kind: "answer",
+          result: err("internal_error", "The input_validate Hook returned an invalid result."),
+        };
+      }
+    }
+
+    return { kind: "arguments", arguments: args };
+  } catch {
+    return {
+      kind: "answer",
+      result: err("internal_error", "The Integration Hook could not be executed safely."),
+    };
+  }
+}
+
 function buildToolDef(
   compiled: CompiledDeclarativeTool,
   integration: CompiledIntegration,
-  deps: DeclarativeToolingDeps,
-  dispatcher: EffectDispatcher
+  deps: DeclarativeToolingDeps
 ): ToolDef {
-  const { slug, credential, credentialMode } = integration;
-  const toolName = declarativeToolName(slug, compiled.name);
+  const { slug, credentialMode } = integration;
+  const toolName = declarativeToolName(integration.toolAlias ?? slug, compiled.name);
   const action = compiled.contract.spec.action;
 
   const definition = defineApiTool<RequestContext>({
@@ -561,7 +873,7 @@ function buildToolDef(
     tier: "integration",
     mutating: compiled.mutating,
     description: compiled.description,
-    inputSchema: compiled.contract.spec.inputSchema,
+    inputSchema: withOimConnectionChoice(compiled),
     outputSchema: compiled.contract.spec.outputSchema,
     authorization: {
       action,
@@ -583,26 +895,87 @@ function buildToolDef(
       const stateId = `invoke:${callId}`;
       const toolId = compiled.toolId;
 
-      const authority = await resolveOimAuthority(compiled, integration, deps, ctx);
+      if (integration.oimManifest !== undefined) {
+        try {
+          await deps.authorizeOimIntegration?.(integration.sourceIntegration);
+        } catch {
+          return err("internal_error", `${slug} is no longer approved for use.`);
+        }
+      }
+      const { connectionId, providerArgs } = splitOimArguments(compiled, args);
+      const authority = await resolveOimAuthority(compiled, integration, deps, ctx, connectionId);
       if (authority.kind === "answer") return authority.result;
+      let runtimeCompiled: CompiledDeclarativeTool;
+      const runtimeManifest =
+        authority.kind === "connection" || authority.kind === "configured"
+          ? authority.manifest
+          : integration.oimManifest;
+      try {
+        runtimeCompiled =
+          "operation" in compiled
+            ? compileOimToolForConfiguration(
+                compiled,
+                integration,
+                authority.kind === "connection" || authority.kind === "configured"
+                  ? authority.configuration
+                  : {},
+                runtimeManifest
+              )
+            : compiled;
+      } catch {
+        return err(
+          "internal_error",
+          `${slug} Connection configuration is missing or no longer permitted.`
+        );
+      }
+      // Keep the published manifest here so every retry must reload approval instead of treating
+      // the exact host appended for this attempt as part of the package's static allowlist.
+      const runtimeIntegration = {
+        ...integration,
+        tools: [runtimeCompiled],
+        requestTargetsFor: (arguments_: unknown) => definition.targetsFor(arguments_, ctx),
+      };
+      const inputValidation = await runOimInputValidation(
+        runtimeCompiled,
+        runtimeIntegration,
+        providerArgs
+      );
+      if (inputValidation.kind === "answer") return inputValidation.result;
+      const runtimeArguments = inputValidation.arguments;
+      const destination =
+        authority.kind === "connection" || authority.kind === "configured"
+          ? new URL(
+              "baseUrl" in runtimeCompiled.binding
+                ? runtimeCompiled.binding.baseUrl
+                : runtimeCompiled.binding.url
+            ).origin
+          : undefined;
+      const credential =
+        "operation" in runtimeCompiled
+          ? runtimeCompiled.operation.credentialSlot === undefined
+            ? undefined
+            : integration.credentials.find(
+                (candidate) => candidate.tokenEnv === runtimeCompiled.operation.credentialSlot
+              )
+          : integration.credentials[0];
 
       const intent = normalizeToolIntent({
         intentId: derivedId("egress-intent", runId, stateId, toolId),
         businessId: deps.businessId,
         runId,
         stateId,
-        toolId,
-        toolVersion: compiled.contract.spec.toolVersion,
+        toolId: runtimeCompiled.toolId,
+        toolVersion: runtimeCompiled.contract.spec.toolVersion,
         action,
         // The Tool's own declared derivation, not a second one written here: `targetsFor` is what
         // the gate reads, so building the intent from anything else would let the recorded effect
         // and the authorization decision describe different targets.
-        targetRefs: definition.targetsFor(args, ctx),
-        arguments: args,
-        ...("operation" in compiled &&
-        compiled.operation.source.type === "http" &&
-        (compiled.operation.source.contentType === "multipart" ||
-          compiled.operation.response.mode === "binary")
+        targetRefs: definition.targetsFor(runtimeArguments, ctx),
+        arguments: runtimeArguments,
+        ...("operation" in runtimeCompiled &&
+        (runtimeCompiled.operation.response.mode === "binary" ||
+          (runtimeCompiled.operation.source.type === "http" &&
+            runtimeCompiled.operation.source.contentType === "multipart"))
           ? { filePrincipalId: ctx.userId }
           : {}),
         // Acting as a person means leasing *their* credential, not the deployment's. The ref is
@@ -614,7 +987,7 @@ function buildToolDef(
           ? {
               credentialRef: authority.credentialRef,
               connection: authority.connection,
-              destination: authority.destination,
+              destination,
               ...(authority.secondaryCredentialRef === undefined ||
               authority.secondaryConnection === undefined
                 ? {}
@@ -624,18 +997,20 @@ function buildToolDef(
                   }),
             }
           : credential === undefined
-            ? {}
+            ? destination === undefined
+              ? {}
+              : { destination }
             : {
                 credentialRef:
                   ctx.credentialPrincipal === undefined
                     ? credential.ref
                     : principalEgressSecretRef(slug, credential.tokenEnv, ctx.credentialPrincipal),
               }),
-        idempotencyKey: derivedId("egress-idempotency", runId, stateId, toolId),
+        idempotencyKey: derivedId("egress-idempotency", runId, stateId, runtimeCompiled.toolId),
       });
 
       const reserved = await deps.effects.reserve({
-        effectId: derivedId("egress-effect", runId, stateId, toolId),
+        effectId: derivedId("egress-effect", runId, stateId, runtimeCompiled.toolId),
         businessId: deps.businessId,
         runId,
         stateId,
@@ -646,20 +1021,87 @@ function buildToolDef(
         guardrailRevision: ctx.guardrailRevision ?? "none",
         createdAt: new Date().toISOString(),
       });
-      if (reserved.outcome === "duplicate") return replayed(reserved.effect);
+      if (reserved.outcome === "duplicate" && reserved.effect.state !== "authorized") {
+        return replayed(reserved.effect.state);
+      }
 
+      const activeDispatcher = dispatcherFor(runtimeIntegration, deps);
       try {
         return ok(
-          await dispatcher.dispatch(deps.businessId, reserved.effect.effectId, ctx.abortSignal)
+          await activeDispatcher.dispatcher.dispatch(
+            deps.businessId,
+            reserved.effect.effectId,
+            ctx.abortSignal
+          )
         );
       } catch (error) {
         if (error instanceof ToolDispatchError) return mapDispatchError(error, slug);
         throw error;
+      } finally {
+        activeDispatcher.releaseBroker?.();
       }
     },
   });
 
-  return toToolDef(definition, (ctx) => ctx);
+  const toolDef = toToolDef(definition, (ctx) => ctx);
+  return integration.oimManifest === undefined
+    ? toolDef
+    : { ...toolDef, canonicalId: compiled.toolId };
+}
+
+class OimRequestShapingAdapter implements ToolAdapter {
+  readonly kind;
+  private readonly validateArguments: (value: unknown) => string | null;
+
+  constructor(
+    private readonly delegate: ToolAdapter,
+    private readonly manifest: OimManifest,
+    private readonly operationId: string,
+    inputSchema: Record<string, unknown>,
+    private readonly hookRunner: OimHookPhaseRunner | undefined,
+    private readonly targetsFor: ((arguments_: unknown) => readonly ToolTargetRef[]) | undefined
+  ) {
+    this.kind = delegate.kind;
+    this.validateArguments = compileJsonSchema(inputSchema);
+  }
+
+  async dispatch(
+    request: Parameters<ToolAdapter["dispatch"]>[0],
+    credential?: string,
+    credentials?: Parameters<ToolAdapter["dispatch"]>[2]
+  ): Promise<unknown> {
+    try {
+      const shaped = await runOimHookPhase({
+        manifest: this.manifest,
+        kind: "request_shape",
+        input: { operationId: this.operationId, arguments: request.intent.arguments },
+        ...(this.hookRunner === undefined ? {} : { runner: this.hookRunner }),
+      });
+      if (!shaped.executed) {
+        return this.delegate.dispatch(request, credential, credentials);
+      }
+      if (record(shaped.value) === undefined || this.validateArguments(shaped.value) !== null) {
+        throw new AdapterDispatchError("before_dispatch", "request_shape_hook_invalid", false);
+      }
+      if (
+        this.targetsFor === undefined ||
+        canonicalHash(this.targetsFor(shaped.value)) !== canonicalHash(request.intent.targetRefs)
+      ) {
+        throw new AdapterDispatchError("before_dispatch", "request_shape_target_mismatch", false);
+      }
+      return this.delegate.dispatch(
+        {
+          ...request,
+          intent: { ...request.intent, arguments: shaped.value },
+        },
+        credential,
+        credentials
+      );
+    } catch (error) {
+      if (error instanceof AdapterDispatchError) throw error;
+      throw new AdapterDispatchError("before_dispatch", "request_shape_hook_failed", false);
+    }
+  }
 }
 
 /**
@@ -669,20 +1111,38 @@ function buildToolDef(
  */
 function adapterFor(
   tool: CompiledDeclarativeTool,
-  deps: DeclarativeToolingDeps
+  deps: DeclarativeToolingDeps,
+  integration: CompiledIntegration
 ): ToolAdapter | undefined {
+  const manifest = integration.oimManifest;
+  let adapter: ToolAdapter | undefined;
   switch (tool.contract.spec.adapter.kind) {
     case "openapi":
       if (!("pathTemplate" in tool.binding)) return undefined;
-      return new OpenApiToolAdapter({ binding: tool.binding, http: deps.http });
+      adapter = new OpenApiToolAdapter({ binding: tool.binding, http: deps.http });
+      break;
     case "graphql":
       if (!("document" in tool.binding)) return undefined;
-      return new GraphqlToolAdapter({ binding: tool.binding, http: deps.http });
+      adapter =
+        "operation" in tool && manifest !== undefined
+          ? new OimGraphqlToolAdapter({
+              binding: tool.binding,
+              http: deps.http,
+              manifest,
+              ...(integration.hookRunner === undefined
+                ? {}
+                : { hookRunner: integration.hookRunner }),
+              ...(tool.projection === undefined ? {} : { projection: tool.projection }),
+            })
+          : new GraphqlToolAdapter({ binding: tool.binding, http: deps.http });
+      break;
     case "native":
       if (!("operation" in tool) || !("pathTemplate" in tool.binding)) return undefined;
-      return new OimHttpToolAdapter({
+      adapter = new OimHttpToolAdapter({
         binding: tool.binding,
         http: deps.http,
+        ...(manifest === undefined ? {} : { manifest }),
+        ...(integration.hookRunner === undefined ? {} : { hookRunner: integration.hookRunner }),
         toolId: tool.toolId,
         ...(tool.projection === undefined ? {} : { projection: tool.projection }),
         ...(deps.files === undefined ? {} : { files: deps.files }),
@@ -690,9 +1150,28 @@ function adapterFor(
           ? { pagination: tool.pagination }
           : {}),
       });
+      break;
     default:
       return undefined;
   }
+  if (!("operation" in tool) || manifest === undefined) return adapter;
+  const rateLimited =
+    deps.rateLimits === undefined
+      ? adapter
+      : new OimRateLimitedToolAdapter({
+          delegate: adapter,
+          manifest,
+          operation: tool.operation,
+          limits: deps.rateLimits,
+        });
+  return new OimRequestShapingAdapter(
+    rateLimited,
+    manifest,
+    tool.operation.id,
+    tool.contract.spec.inputSchema,
+    integration.hookRunner,
+    integration.requestTargetsFor
+  );
 }
 
 /**
@@ -709,17 +1188,16 @@ function declarativeSecretProvider(
   deps: DeclarativeToolingDeps,
   ownsRef: (secretRef: string) => boolean
 ): SecretProvider {
-  const { credential } = integration;
-  const own =
-    credential === undefined
-      ? undefined
-      : new EgressSecretProvider(
-          credential.ref,
-          credential.storageKey,
-          deps.secrets,
-          integration.slug,
-          credential.tokenEnv
-        );
+  const own = integration.credentials.map(
+    (credential) =>
+      new EgressSecretProvider(
+        credential.ref,
+        credential.storageKey,
+        deps.secrets,
+        integration.slug,
+        credential.tokenEnv
+      )
+  );
   const connections =
     deps.connections === undefined
       ? undefined
@@ -741,7 +1219,13 @@ function declarativeSecretProvider(
   };
   return {
     async resolveCurrent(secretRef) {
-      if (ownsRef(secretRef)) return (await own?.resolveCurrent(secretRef)) ?? null;
+      if (ownsRef(secretRef)) {
+        for (const provider of own) {
+          const resolved = await provider.resolveCurrent(secretRef);
+          if (resolved !== null) return resolved;
+        }
+        return null;
+      }
       return failClosed(() => connections?.resolveCurrent(secretRef));
     },
     async currentVersion(secretRef) {
@@ -756,11 +1240,11 @@ function declarativeSecretProvider(
 function dispatcherFor(
   integration: CompiledIntegration,
   deps: DeclarativeToolingDeps
-): EffectDispatcher {
+): { readonly dispatcher: EffectDispatcher; readonly releaseBroker?: () => void } {
   const catalog = ToolCatalog.load(integration.tools.map((tool) => tool.contract));
   const adapters = new Map<string, ToolAdapter>();
   for (const tool of integration.tools) {
-    const adapter = adapterFor(tool, deps);
+    const adapter = adapterFor(tool, deps, integration);
     // A kind with no implementation is left unregistered rather than handed the OpenAPI adapter:
     // the compiler emits the kind, so binding it to a backend it did not declare would let the
     // contract and the runtime disagree in silence. Dispatch then fails `adapter_not_found`,
@@ -768,11 +1252,12 @@ function dispatcherFor(
     if (adapter !== undefined) adapters.set(tool.adapterRef, adapter);
   }
 
-  const { credential } = integration;
   const integrationId = integration.oimManifest?.metadata.id;
   const ownsRef = (secretRef: string): boolean =>
-    credential !== undefined &&
-    (secretRef === credential.ref || principalOfRef(credential.ref, secretRef) !== null);
+    integration.credentials.some(
+      (credential) =>
+        secretRef === credential.ref || principalOfRef(credential.ref, secretRef) !== null
+    );
   // Default-deny, scoped to this integration's own ref: a careless or hostile manifest can never
   // lease another integration's credential, let alone an unrelated platform secret. A Connection
   // ref is admitted on different evidence — the scope must name the Connection this integration's
@@ -793,11 +1278,13 @@ function dispatcherFor(
       return { allowed: false, reason: "not_authorized" };
     },
   };
+  const secretBroker = new SecretBroker({
+    provider: declarativeSecretProvider(integration, deps, ownsRef),
+    authorizer,
+  });
+  const releaseBroker = deps.trackConnectionBroker?.(secretBroker);
   const credentials = new CredentialDispatcher({
-    secrets: new SecretBroker({
-      provider: declarativeSecretProvider(integration, deps, ownsRef),
-      authorizer,
-    }),
+    secrets: secretBroker,
     reauthorize: async (effect) => {
       const connection = effect.intent.connection;
       const credentialRef = effect.intent.credentialRef;
@@ -809,16 +1296,45 @@ function dispatcherFor(
       ) {
         return connection === undefined;
       }
-      if (
-        !(await deps.connections.reauthorize(
-          effect.businessId,
+      const runtimeTool = integration.tools.find(
+        (candidate) => candidate.toolId === effect.intent.toolId
+      );
+      if (runtimeTool === undefined || !("operation" in runtimeTool)) return false;
+      const currentConnection = await deps.connections.reauthorizeConnection(
+        effect.businessId,
+        integration.oimManifest,
+        runtimeTool.operation,
+        connection,
+        credentialRef as `secret://${string}`
+      );
+      if (currentConnection === null) return false;
+      let currentManifest: OimManifest;
+      try {
+        requireOimConnectionForManifest(currentConnection, integration.oimManifest);
+        currentManifest = await manifestForOimConnection(
+          deps,
           integration.oimManifest,
-          connection,
-          credentialRef as `secret://${string}`
-        ))
-      ) {
+          runtimeTool.operation,
+          currentConnection
+        );
+      } catch {
         return false;
       }
+      let currentTool: CompiledDeclarativeTool;
+      try {
+        currentTool = compileOimToolForConfiguration(
+          runtimeTool,
+          integration,
+          currentConnection.configuration,
+          currentManifest
+        );
+      } catch {
+        return false;
+      }
+      const currentDestination = new URL(
+        "baseUrl" in currentTool.binding ? currentTool.binding.baseUrl : currentTool.binding.url
+      ).origin;
+      if (currentDestination !== effect.intent.destination) return false;
       const secondaryConnection = effect.intent.secondaryConnection;
       const secondaryCredentialRef = effect.intent.secondaryCredentialRef;
       return (
@@ -835,18 +1351,22 @@ function dispatcherFor(
     },
   });
 
-  return new EffectDispatcher({
-    store: deps.effects,
-    catalog,
-    adapters,
-    credentialDispatcher: credentials,
-    ...(deps.mutationGuard === undefined
-      ? {}
-      : {
-          mutationGuard: deps.mutationGuard,
-          mutationIdentity: { integrationId: integration.slug },
-        }),
-  });
+  return {
+    dispatcher: new EffectDispatcher({
+      store: deps.effects,
+      catalog,
+      adapters,
+      credentialDispatcher: credentials,
+      ...(deps.parkRetry === undefined ? {} : { parkRetry: deps.parkRetry }),
+      ...(deps.mutationGuard === undefined
+        ? {}
+        : {
+            mutationGuard: deps.mutationGuard,
+            mutationIdentity: { integrationId: integration.slug },
+          }),
+    }),
+    ...(releaseBroker === undefined ? {} : { releaseBroker }),
+  };
 }
 
 export interface DeclarativeTooling {
@@ -870,11 +1390,47 @@ export function buildDeclarativeTools(
     // connection state); its Tools are handwritten, not declarative.
     if (integration.manifest === undefined && integration.oimManifest === undefined) continue;
     try {
-      const compiled = compileIntegration(integration);
+      let toolAlias: string | undefined;
+      if (integration.oimManifest !== undefined) {
+        const integrationId = integration.oimManifest.metadata.id;
+        const majorVersion = oimManifestMajor(integration.oimManifest);
+        const exactArtifact = resolveOimMajorArtifact(integrations, {
+          id: integrationId,
+          majorVersion,
+        });
+        if (exactArtifact?.slug !== integration.slug) {
+          throw new Error(
+            `OIM Integration "${integrationId}" did not resolve to its exact major artifact`
+          );
+        }
+        try {
+          const unversioned = resolveOimUnversionedAlias(integrations, integrationId);
+          if (unversioned?.slug !== integration.slug) {
+            throw new Error(
+              `OIM Integration alias "${integrationId}" did not resolve to its artifact`
+            );
+          }
+          toolAlias = integrationId;
+        } catch (error) {
+          if (!(error instanceof OimMajorLifecycleError) || error.code !== "ambiguous_alias") {
+            throw error;
+          }
+          toolAlias = oimMajorStorageSlug(integrationId, majorVersion);
+        }
+      }
+      const base = compileIntegration(integration);
+      const verifiedHooks = deps.verifiedOimHooks;
+      const hookRunner =
+        verifiedHooks === undefined
+          ? undefined
+          : {
+              run: (hook: OimHook, input: unknown) => verifiedHooks.run(integration, hook, input),
+            };
+      const withAlias = toolAlias === undefined ? base : { ...base, toolAlias };
+      const compiled = hookRunner === undefined ? withAlias : { ...withAlias, hookRunner };
       if (compiled.tools.length === 0) continue;
 
-      const dispatcher = dispatcherFor(compiled, deps);
-      const built = compiled.tools.map((tool) => buildToolDef(tool, compiled, deps, dispatcher));
+      const built = compiled.tools.map((tool) => buildToolDef(tool, compiled, deps));
       for (const tool of built) {
         const owner = toolOwners.get(tool.name);
         if (owner !== undefined && owner !== integration.slug) {

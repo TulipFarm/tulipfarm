@@ -8,7 +8,9 @@ import type { SecretsService } from "@tulipfarm/secrets";
 import type { Logger, SoulIntegration } from "@tulipfarm/soul";
 import type { EffectStore } from "@tulipfarm/tool-broker";
 import type { ToolRegistry } from "../../broker/tool-adapter";
-import { buildDeclarativeTools } from "./tools";
+import type { TrackConnectionBroker } from "../../integrations/connection-lease-registry";
+import type { ConnectionOriginApprovalRepository } from "../../integrations/connection-origin-policy";
+import { buildDeclarativeTools, type DeclarativeToolingDeps } from "./tools";
 
 /**
  * Registration cannot be a boot-time act for manifest integrations the way it is for the bundled
@@ -24,12 +26,18 @@ export interface DeclarativeToolSyncDeps {
   readonly businessId: string;
   readonly effects: EffectStore;
   readonly secrets: () => Promise<SecretsService>;
+  readonly trackConnectionBroker?: TrackConnectionBroker;
   readonly http: EgressHttpPort;
   readonly mutationGuard?: MutationGuard;
   /** Resolves which Connection an OIM operation acts through. */
   readonly connections?: OimOperationConnectionResolver;
+  readonly originApprovals?: ConnectionOriginApprovalRepository;
   /** File access for OIM multipart uploads and binary responses. */
   readonly files?: OimFilePort;
+  readonly rateLimits?: DeclarativeToolingDeps["rateLimits"];
+  readonly parkRetry?: DeclarativeToolingDeps["parkRetry"];
+  readonly verifiedOimHooks?: DeclarativeToolingDeps["verifiedOimHooks"];
+  readonly authorizeOimIntegration?: DeclarativeToolingDeps["authorizeOimIntegration"];
   /**
    * Resolved lazily: Fastify's logger does not exist until `buildApp`, and this syncer must be
    * constructed before it so `createApp` can receive it.
@@ -56,12 +64,26 @@ export class DeclarativeToolSync {
         businessId: this.deps.businessId,
         effects: this.deps.effects,
         secrets: this.deps.secrets,
+        ...(this.deps.trackConnectionBroker === undefined
+          ? {}
+          : { trackConnectionBroker: this.deps.trackConnectionBroker }),
         http: this.deps.http,
         ...(this.deps.mutationGuard === undefined
           ? {}
           : { mutationGuard: this.deps.mutationGuard }),
         ...(this.deps.connections === undefined ? {} : { connections: this.deps.connections }),
+        ...(this.deps.originApprovals === undefined
+          ? {}
+          : { originApprovals: this.deps.originApprovals }),
         ...(this.deps.files === undefined ? {} : { files: this.deps.files }),
+        ...(this.deps.rateLimits === undefined ? {} : { rateLimits: this.deps.rateLimits }),
+        ...(this.deps.parkRetry === undefined ? {} : { parkRetry: this.deps.parkRetry }),
+        ...(this.deps.verifiedOimHooks === undefined
+          ? {}
+          : { verifiedOimHooks: this.deps.verifiedOimHooks }),
+        ...(this.deps.authorizeOimIntegration === undefined
+          ? {}
+          : { authorizeOimIntegration: this.deps.authorizeOimIntegration }),
       },
       logger
     );

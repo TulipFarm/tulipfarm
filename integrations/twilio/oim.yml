@@ -5,7 +5,7 @@ metadata:
   id: twilio
   name: Twilio
   version: 1.0.0
-  description: Send SMS and read message history through a Twilio account.
+  description: Send SMS, read message history, and receive signed messaging webhooks.
   license: Apache-2.0
   maintainers:
     - name: TulipFarm
@@ -14,6 +14,12 @@ metadata:
 profiles:
   core: "1.1"
   auth: "1.0"
+  events: "1.0"
+
+files:
+  - path: fixtures.yml
+    role: fixture
+    sha256: "dea153f2cfc8314fa73c0407e4d6336fbe1e18e3999aa1cf3e8143f5a74a36b0"
 
 auth:
   allowedOriginHosts:
@@ -26,6 +32,10 @@ auth:
       label: Twilio API key SID and secret
       kind: api_key
       required: true
+    - id: webhook_auth_token
+      label: Twilio Account Auth Token
+      kind: webhook_secret
+      required: false
   configurationFields:
     - id: account_sid
       label: Account SID
@@ -61,6 +71,20 @@ auth:
           target:
             type: credential
             slot: api_credential
+    - id: webhook
+      type: fields
+      title: Verify messaging webhooks
+      description: >-
+        Optional. Copy the Account Auth Token from the Twilio Console to verify incoming-message
+        and message-status webhooks. This is distinct from the API key secret used by Tools.
+      fields:
+        - id: webhook_auth_token
+          label: Account Auth Token
+          input: password
+          required: false
+          target:
+            type: credential
+            slot: webhook_auth_token
   healthCheckOperationId: get-account
 
 operations:
@@ -89,6 +113,7 @@ operations:
           friendly_name: { type: string }
           status: { type: string }
           type: { type: string }
+        required: [sid, status]
       projection:
         - /sid
         - /friendly_name
@@ -101,7 +126,7 @@ operations:
 
   - id: send-message
     name: twilio_send_sms
-    description: Send an SMS or WhatsApp message from a number the account owns.
+    description: Send an SMS or WhatsApp message from an owned sender or Messaging Service.
     effect: send
     identityMode: shared_only
     credentialSlot: api_credential
@@ -127,11 +152,18 @@ operations:
           description: Destination in E.164 form, e.g. +14155552671.
         From:
           type: string
-          description: A number or messaging service the account owns, in E.164 form.
+          description: A number or channel address the account owns.
+        MessagingServiceSid:
+          type: string
+          pattern: "^MG[0-9A-Fa-f]{32}$"
+          description: A Messaging Service SID whose sender pool should choose the sender.
         Body:
           type: string
           maxLength: 1600
-      required: [To, From, Body]
+      required: [To, Body]
+      anyOf:
+        - required: [From]
+        - required: [MessagingServiceSid]
       additionalProperties: false
     response:
       maxBytes: 32768
@@ -143,6 +175,7 @@ operations:
           to: { type: string }
           from: { type: string }
           date_created: { type: string }
+        required: [sid, status, to]
       projection:
         - /sid
         - /status
@@ -183,6 +216,11 @@ operations:
             type: integer
             minimum: 1
             maximum: 100
+    pagination:
+      type: page
+      requestParameter: Page
+      start: 0
+      itemsPath: /messages
     response:
       maxBytes: 262144
       schema:
@@ -199,7 +237,67 @@ operations:
                 from: { type: string }
                 body: { type: string }
                 date_sent: { type: string }
+              required: [sid, status]
+          page: { type: integer }
+          page_size: { type: integer }
+          next_page_uri: { type: ["string", "null"] }
+        required: [messages, page, page_size]
+      projection:
+        - /messages
+        - /page
+        - /page_size
     rateLimit:
       requests: 60
       perSeconds: 60
       scope: connection
+
+events:
+  path: /twilio
+  verification:
+    scheme: twilio_hmac_sha1
+    secretSlot: webhook_auth_token
+    signatureHeader: X-Twilio-Signature
+    signatureEncoding: base64
+  acceptance:
+    requireBodyPointers:
+      - /AccountSid
+      - /MessageSid
+    requireKnownEventType: true
+  deduplication:
+    # Twilio supplies no delivery id, and status changes for one Message share its MessageSid.
+    kind: none
+  eventTypes:
+    - type: message.received
+      selector:
+        pointer: /SmsMessageSid
+        matches: "^SM[A-Za-z0-9]{32}$"
+      schema:
+        type: object
+        properties:
+          AccountSid: { type: string }
+          MessageSid: { type: string }
+          SmsSid: { type: string }
+          SmsMessageSid: { type: string }
+          MessagingServiceSid: { type: string }
+          From: { type: string }
+          To: { type: string }
+          Body: { type: string }
+          NumMedia: { type: string }
+          NumSegments: { type: string }
+        required: [AccountSid, MessageSid, SmsMessageSid, From, To, Body, NumMedia]
+    - type: message.status_changed
+      selector:
+        pointer: /MessageStatus
+        matches: "^(queued|sent|failed|delivered|undelivered|read|canceled)$"
+      schema:
+        type: object
+        properties:
+          AccountSid: { type: string }
+          MessageSid: { type: string }
+          MessageStatus: { type: string }
+          SmsSid: { type: string }
+          SmsStatus: { type: string }
+          ErrorCode: { type: string }
+          From: { type: string }
+          To: { type: string }
+        required: [AccountSid, MessageSid, MessageStatus]

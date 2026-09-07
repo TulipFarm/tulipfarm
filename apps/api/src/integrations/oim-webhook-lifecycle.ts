@@ -7,6 +7,7 @@ import {
 import type { OimConnection, OimManifest } from "@tulipfarm/schema";
 import type { SecretsService } from "@tulipfarm/secrets";
 import type { ConnectionStore, PersistedConnection } from "@tulipfarm/storage";
+import { oimIngressCallbackUrl } from "./oim-ingress-binding";
 
 type WebhookStep = Extract<NonNullable<OimManifest["auth"]>["steps"][number], { type: "webhook" }>;
 
@@ -14,13 +15,6 @@ export class OimWebhookLifecycleError extends Error {
   constructor(readonly code: "registration_failed" | "unregistration_failed") {
     super(code);
   }
-}
-
-function oimIngressUrl(apiUrl: string, slug: string, connection: PersistedConnection): string {
-  const url = `${apiUrl.replace(/\/+$/, "")}/api/v1/hooks/oim/${slug}`;
-  return connection.owner.scope === "team"
-    ? `${url}?connectionId=${encodeURIComponent(connection.id)}`
-    : url;
 }
 
 function pointerValue(value: unknown, pointer: string): unknown {
@@ -102,7 +96,7 @@ export class OimWebhookLifecycle {
       );
     if (step === undefined) return;
 
-    const ingressUrl = oimIngressUrl(apiUrl, slug, connection);
+    const ingressUrl = oimIngressCallbackUrl(apiUrl, slug, connection.id);
     if (connection.webhookRegistration?.ingressUrl === ingressUrl) return;
     const previous = connection.webhookRegistration;
     const initialSecretRef = connection.secretBindings[step.secretSlot];

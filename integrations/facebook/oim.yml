@@ -1,0 +1,229 @@
+oimVersion: "1.0"
+kind: Integration
+
+metadata:
+  id: facebook
+  name: Facebook Pages
+  version: 1.0.0
+  description: List managed Facebook Pages and read or create posts on one authorized Page.
+  license: Apache-2.0
+  maintainers:
+    - name: TulipFarm
+      url: https://tulipfarm.dev
+
+profiles:
+  core: "1.1"
+  auth: "1.0"
+
+files:
+  - path: fixtures.yml
+    role: fixture
+    sha256: "bcd1de7a2e685c3b6ff4643d60112dc77e84e7d073c5544f801f28db188b04b1"
+  - path: setup-guide.md
+    role: guide
+    sha256: "307956943c25b54c7167028a1eaf0242db4defcb02ee99955a074a9ea70c3807"
+
+auth:
+  allowedOriginHosts:
+    - graph.facebook.com
+  credentialSlots:
+    - id: user_access_token
+      label: Facebook User access token
+      kind: oauth2_access_token
+      required: true
+    - id: page_access_token
+      label: Facebook Page access token
+      kind: oauth2_access_token
+      required: true
+  steps:
+    - id: tokens
+      type: fields
+      title: Add Facebook Login and Page tokens
+      description: >-
+        Paste a User token with pages_show_list and a Page token for the Page whose posts this
+        Connection will read or create. The guide explains App Review, Tasks, and token exchange.
+      fields:
+        - id: user_access_token
+          label: User access token
+          input: password
+          required: true
+          target:
+            type: credential
+            slot: user_access_token
+        - id: page_access_token
+          label: Page access token
+          input: password
+          required: true
+          target:
+            type: credential
+            slot: page_access_token
+  healthCheckOperationId: list-pages
+
+operations:
+  - id: list-pages
+    name: facebook_list_pages
+    description: List Facebook Pages the user token can manage, without returning Page access tokens.
+    effect: read
+    identityMode: shared_only
+    credentialSlot: user_access_token
+    credentialInjection:
+      in: query
+      name: access_token
+      format: "{token}"
+    source:
+      type: http
+      method: GET
+      baseUrl: https://graph.facebook.com
+      path: /v25.0/me/accounts
+      parameters:
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+        - name: fields
+          in: query
+          value: id,name,category,category_list,tasks
+          schema: { type: string }
+    pagination:
+      type: cursor
+      requestParameter: after
+      responsePath: /paging/cursors/after
+      itemsPath: /data
+    response:
+      maxBytes: 524288
+      schema:
+        type: object
+        properties:
+          data:
+            type: array
+            items:
+              type: object
+              properties:
+                id: { type: string }
+                name: { type: string }
+                category: { type: string }
+                category_list: { type: array }
+                tasks:
+                  type: array
+                  items: { type: string }
+              required: [id, name]
+          paging:
+            type: object
+            properties:
+              cursors:
+                type: object
+                properties:
+                  before: { type: string }
+                  after: { type: string }
+        required: [data]
+      projection:
+        - /data
+
+  - id: list-page-posts
+    name: facebook_list_page_posts
+    description: List posts from one Facebook Page authorized by the Page token.
+    effect: sensitive_read
+    identityMode: shared_only
+    credentialSlot: page_access_token
+    credentialInjection:
+      in: query
+      name: access_token
+      format: "{token}"
+    source:
+      type: http
+      method: GET
+      baseUrl: https://graph.facebook.com
+      path: /v25.0/{page_id}/feed
+      parameters:
+        - name: page_id
+          in: path
+          required: true
+          schema:
+            type: string
+            pattern: "^[0-9]+$"
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+        - name: fields
+          in: query
+          value: id,message,created_time,permalink_url
+          schema: { type: string }
+    pagination:
+      type: cursor
+      requestParameter: after
+      responsePath: /paging/cursors/after
+      itemsPath: /data
+    response:
+      maxBytes: 1048576
+      schema:
+        type: object
+        properties:
+          data:
+            type: array
+            items:
+              type: object
+              properties:
+                id: { type: string }
+                message: { type: string }
+                created_time: { type: string }
+                permalink_url: { type: string }
+              required: [id]
+          paging:
+            type: object
+            properties:
+              cursors:
+                type: object
+                properties:
+                  before: { type: string }
+                  after: { type: string }
+        required: [data]
+      projection:
+        - /data
+
+  - id: create-page-post
+    name: facebook_create_page_post
+    description: Create one immediate text or link post on a Facebook Page authorized by the Page token.
+    effect: create
+    identityMode: shared_only
+    credentialSlot: page_access_token
+    credentialInjection:
+      in: query
+      name: access_token
+      format: "{token}"
+    source:
+      type: http
+      method: POST
+      baseUrl: https://graph.facebook.com
+      path: /v25.0/{page_id}/feed
+      parameters:
+        - name: page_id
+          in: path
+          required: true
+          schema:
+            type: string
+            pattern: "^[0-9]+$"
+    requestSchema:
+      type: object
+      properties:
+        message:
+          type: string
+          minLength: 1
+        link:
+          type: string
+          pattern: "^https://"
+      required: [message]
+      additionalProperties: false
+    response:
+      maxBytes: 32768
+      schema:
+        type: object
+        properties:
+          id: { type: string }
+        required: [id]
+      projection:
+        - /id

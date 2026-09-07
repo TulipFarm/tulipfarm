@@ -1,0 +1,376 @@
+oimVersion: "1.0"
+kind: Integration
+
+metadata:
+  id: asana
+  name: Asana
+  version: 1.0.0
+  description: Read, create, update and comment on Asana tasks with a personal access token.
+  license: Apache-2.0
+  maintainers:
+    - name: TulipFarm
+      url: https://tulipfarm.dev
+
+profiles:
+  core: "1.0"
+  auth: "1.0"
+
+files:
+  - path: fixtures.yml
+    role: fixture
+    sha256: "b56434a1d67630ba0deda54c61a41ff7ac5ebf871bd44207cd175714abb89e60"
+  - path: setup-guide.md
+    role: guide
+    sha256: "8e8b597c146738b5b40633e3fc0a027f4b32bd645d17c0bfc2c6cebad0f69554"
+
+auth:
+  allowedOriginHosts:
+    - app.asana.com
+  credentialSlots:
+    - id: access_token
+      label: Asana personal access token
+      kind: bearer_token
+      required: true
+  steps:
+    - id: token
+      type: fields
+      title: Create an Asana personal access token
+      description: >-
+        Create a PAT in the Asana developer console. It acts as its owner and reaches exactly the
+        workspaces, projects, and tasks that owner can access. Agents never see the token.
+      fields:
+        - id: access_token
+          label: Personal access token
+          input: password
+          required: true
+          target:
+            type: credential
+            slot: access_token
+  healthCheckOperationId: current-user
+
+operations:
+  - id: current-user
+    name: asana_current_user
+    description: Identify the Asana user authenticated by this Connection.
+    effect: read
+    identityMode: shared_or_personal
+    credentialSlot: access_token
+    credentialInjection:
+      in: header
+      name: Authorization
+      format: "Bearer {token}"
+    source:
+      type: http
+      method: GET
+      baseUrl: https://app.asana.com
+      path: /api/1.0/users/me
+    response:
+      maxBytes: 65536
+      schema:
+        type: object
+        properties:
+          data:
+            type: object
+            properties:
+              gid: { type: string }
+              name: { type: string }
+              email: { type: string }
+              resource_type: { type: string }
+              workspaces:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    gid: { type: string }
+                    name: { type: string }
+
+  - id: list-projects
+    name: asana_list_projects
+    description: List projects in one workspace, optionally filtered by archived state.
+    effect: read
+    identityMode: shared_or_personal
+    credentialSlot: access_token
+    credentialInjection:
+      in: header
+      name: Authorization
+      format: "Bearer {token}"
+    source:
+      type: http
+      method: GET
+      baseUrl: https://app.asana.com
+      path: /api/1.0/projects
+      parameters:
+        - name: workspace
+          in: query
+          required: true
+          schema: { type: string, minLength: 1, maxLength: 64 }
+        - name: archived
+          in: query
+          schema: { type: boolean }
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 100 }
+    pagination:
+      type: cursor
+      requestParameter: offset
+      responsePath: /next_page/offset
+      itemsPath: /data
+    response:
+      maxBytes: 262144
+      schema:
+        type: object
+        properties:
+          data:
+            type: array
+            items:
+              type: object
+              properties:
+                gid: { type: string }
+                name: { type: string }
+                resource_type: { type: string }
+          next_page:
+            type: ["object", "null"]
+            properties:
+              offset: { type: string }
+              path: { type: string }
+              uri: { type: string }
+
+  - id: list-tasks
+    name: asana_list_tasks
+    description: List compact tasks in one project.
+    effect: read
+    identityMode: shared_or_personal
+    credentialSlot: access_token
+    credentialInjection:
+      in: header
+      name: Authorization
+      format: "Bearer {token}"
+    source:
+      type: http
+      method: GET
+      baseUrl: https://app.asana.com
+      path: /api/1.0/projects/{project_gid}/tasks
+      parameters:
+        - name: project_gid
+          in: path
+          required: true
+          schema: { type: string, minLength: 1, maxLength: 64 }
+        - name: completed_since
+          in: query
+          schema:
+            type: string
+            description: ISO 8601 timestamp, or now for incomplete tasks.
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 100 }
+    pagination:
+      type: cursor
+      requestParameter: offset
+      responsePath: /next_page/offset
+      itemsPath: /data
+    response:
+      maxBytes: 524288
+      schema:
+        type: object
+        properties:
+          data:
+            type: array
+            items:
+              type: object
+              properties:
+                gid: { type: string }
+                name: { type: string }
+                resource_type: { type: string }
+          next_page:
+            type: ["object", "null"]
+            properties:
+              offset: { type: string }
+              path: { type: string }
+              uri: { type: string }
+
+  - id: get-task
+    name: asana_get_task
+    description: Read one Asana task by globally unique id.
+    effect: read
+    identityMode: shared_or_personal
+    credentialSlot: access_token
+    credentialInjection:
+      in: header
+      name: Authorization
+      format: "Bearer {token}"
+    source:
+      type: http
+      method: GET
+      baseUrl: https://app.asana.com
+      path: /api/1.0/tasks/{task_gid}
+      parameters:
+        - name: task_gid
+          in: path
+          required: true
+          schema: { type: string, minLength: 1, maxLength: 64 }
+        - name: opt_fields
+          in: query
+          schema:
+            type: string
+            description: Comma-separated optional fields to include.
+    response:
+      maxBytes: 262144
+      schema:
+        type: object
+        properties:
+          data:
+            type: object
+            properties:
+              gid: { type: string }
+              name: { type: string }
+              notes: { type: string }
+              completed: { type: boolean }
+              due_on: { type: ["string", "null"] }
+              assignee: { type: ["object", "null"] }
+              projects: { type: array }
+              memberships: { type: array }
+
+  - id: create-task
+    name: asana_create_task
+    description: Create one task in an Asana workspace, project, or parent task.
+    effect: create
+    identityMode: shared_or_personal
+    credentialSlot: access_token
+    credentialInjection:
+      in: header
+      name: Authorization
+      format: "Bearer {token}"
+    source:
+      type: http
+      method: POST
+      baseUrl: https://app.asana.com
+      path: /api/1.0/tasks
+    requestSchema:
+      type: object
+      properties:
+        data:
+          type: object
+          properties:
+            name: { type: string, minLength: 1, maxLength: 1000 }
+            notes: { type: string, maxLength: 100000 }
+            workspace: { type: string, minLength: 1, maxLength: 64 }
+            projects:
+              type: array
+              maxItems: 20
+              items: { type: string }
+            parent: { type: string, minLength: 1, maxLength: 64 }
+            assignee: { type: ["string", "null"] }
+            completed: { type: boolean }
+            due_on: { type: ["string", "null"] }
+          required: [name]
+          additionalProperties: false
+      required: [data]
+      additionalProperties: false
+    response:
+      maxBytes: 262144
+      schema:
+        type: object
+        properties:
+          data:
+            type: object
+            properties:
+              gid: { type: string }
+              name: { type: string }
+              notes: { type: string }
+              completed: { type: boolean }
+              due_on: { type: ["string", "null"] }
+              resource_type: { type: string }
+
+  - id: update-task
+    name: asana_update_task
+    description: Update only the supplied fields on one Asana task.
+    effect: update
+    identityMode: shared_or_personal
+    credentialSlot: access_token
+    credentialInjection:
+      in: header
+      name: Authorization
+      format: "Bearer {token}"
+    source:
+      type: http
+      method: PUT
+      baseUrl: https://app.asana.com
+      path: /api/1.0/tasks/{task_gid}
+      parameters:
+        - name: task_gid
+          in: path
+          required: true
+          schema: { type: string, minLength: 1, maxLength: 64 }
+    requestSchema:
+      type: object
+      properties:
+        data:
+          type: object
+          minProperties: 1
+          properties:
+            name: { type: string, minLength: 1, maxLength: 1000 }
+            notes: { type: string, maxLength: 100000 }
+            assignee: { type: ["string", "null"] }
+            completed: { type: boolean }
+            due_on: { type: ["string", "null"] }
+          additionalProperties: false
+      required: [data]
+      additionalProperties: false
+    response:
+      maxBytes: 262144
+      schema:
+        type: object
+        properties:
+          data:
+            type: object
+            properties:
+              gid: { type: string }
+              name: { type: string }
+              notes: { type: string }
+              completed: { type: boolean }
+              due_on: { type: ["string", "null"] }
+
+  - id: add-comment
+    name: asana_add_comment
+    description: Add a comment story to one Asana task as the authenticated user.
+    effect: create
+    identityMode: shared_or_personal
+    credentialSlot: access_token
+    credentialInjection:
+      in: header
+      name: Authorization
+      format: "Bearer {token}"
+    source:
+      type: http
+      method: POST
+      baseUrl: https://app.asana.com
+      path: /api/1.0/tasks/{task_gid}/stories
+      parameters:
+        - name: task_gid
+          in: path
+          required: true
+          schema: { type: string, minLength: 1, maxLength: 64 }
+    requestSchema:
+      type: object
+      properties:
+        data:
+          type: object
+          properties:
+            text: { type: string, minLength: 1, maxLength: 100000 }
+          required: [text]
+          additionalProperties: false
+      required: [data]
+      additionalProperties: false
+    response:
+      maxBytes: 131072
+      schema:
+        type: object
+        properties:
+          data:
+            type: object
+            properties:
+              gid: { type: string }
+              resource_type: { type: string }
+              resource_subtype: { type: string }
+              text: { type: string }
+              created_at: { type: string }

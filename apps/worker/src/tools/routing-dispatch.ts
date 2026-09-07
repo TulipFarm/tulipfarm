@@ -122,6 +122,10 @@ function withCallId(callId: string, result: HostedToolResult): ToolDispatchResul
         childRunId: result.childRunId,
         waitId: result.waitId,
       };
+    case "awaiting_retry":
+      return { status: "awaiting_retry", callId, waitId: result.waitId };
+    case "needs_reconciliation":
+      return { status: "needs_reconciliation", callId };
     case "denied":
       return { status: "denied", callId, reason: result.reason, connectUrl: result.connectUrl };
     default:

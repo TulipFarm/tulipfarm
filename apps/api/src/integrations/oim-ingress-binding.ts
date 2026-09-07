@@ -14,6 +14,18 @@ export interface InstalledOimIntegration {
   readonly manifest: OimManifest;
 }
 
+/** Builds the exact public callback URL registered with a provider from trusted API configuration. */
+export function oimIngressCallbackUrl(
+  publicApiUrl: string,
+  slug: string,
+  connectionId?: string
+): string {
+  const base = `${publicApiUrl.replace(/\/+$/, "")}/api/v1/hooks/oim/${encodeURIComponent(slug)}`;
+  return connectionId === undefined
+    ? base
+    : `${base}?connectionId=${encodeURIComponent(connectionId)}`;
+}
+
 /**
  * Resolves the Integration an inbound delivery names.
  *
@@ -27,7 +39,7 @@ export function oimIngressResolver(
   return async (slug) => {
     const integration = soulLoader.integrations.get(slug);
     const manifest = integration?.oimManifest;
-    if (!manifest?.events) return null;
+    if (!manifest?.events || manifest.ingress?.kind === "polling") return null;
     return { businessId, manifest };
   };
 }
@@ -35,9 +47,10 @@ export function oimIngressResolver(
 /**
  * Finds the Connection whose Secret signs deliveries for one Integration.
  *
- * An unqualified webhook URL may use only an organization Connection. A Team Connection has a
- * connection-specific URL, because choosing between Teams from provider traffic would be
- * ambiguous. Personal Connections never qualify: a webhook has no human principal.
+ * Generated webhook URLs name an exact Connection. An unqualified legacy URL may use only an
+ * unambiguous organization Connection; choosing between owners from provider traffic is forbidden.
+ * An explicit id may select any owner scope, and later Trigger authorization verifies the durable
+ * owner rather than deriving a principal from the provider payload.
  */
 export function oimWebhookBinding(
   connections: Pick<ConnectionStore, "findById" | "listForOwner">
@@ -55,7 +68,7 @@ export function oimWebhookBinding(
         ? await connections.listForOwner(request.businessId, integration, { scope: "organization" })
         : await connections
             .findById(request.businessId, request.connectionId)
-            .then((connection) => (connection?.owner.scope === "team" ? [connection] : []));
+            .then((connection) => (connection === null ? [] : [connection]));
     const usable = candidates.filter(
       (connection) =>
         connection.status === "active" &&

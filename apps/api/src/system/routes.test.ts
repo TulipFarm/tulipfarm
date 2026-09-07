@@ -48,7 +48,7 @@ class FakeTokenRepo implements TokenRepo {
   }
 }
 
-describe("GET /api/v1/system/update-check", () => {
+describe("system status routes", () => {
   let app: FastifyInstance;
   let sid: string;
   let fetchImpl: ReturnType<typeof vi.fn>;
@@ -118,6 +118,31 @@ describe("GET /api/v1/system/update-check", () => {
     await build("v0.5.0");
     const res = await app.inject({ method: "GET", url: "/api/v1/system/update-check" });
     expect(res.statusCode).toBe(401);
+  });
+
+  it("serves real OIM conformance through the protected app route", async () => {
+    await build(null);
+    const url = "/api/v1/system/oim-capabilities";
+    const anonymous = await app.inject({ method: "GET", url });
+    expect(anonymous.statusCode).toBe(401);
+
+    const response = await app.inject({
+      method: "GET",
+      url,
+      cookies: { [SESSION_COOKIE]: sid },
+    });
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({
+      capabilities: {
+        packageEntrypoint: "oim.yml",
+        runtime: { name: "TulipFarm" },
+        profiles: { core: expect.arrayContaining(["1.2"]) },
+        conformance: { passedCases: expect.any(Array) },
+      },
+      unverifiedProfiles: expect.any(Array),
+    });
+    expect(response.json().capabilities.conformance.passedCases.length).toBeGreaterThan(0);
+    expect(fetchImpl).not.toHaveBeenCalled();
   });
 });
 

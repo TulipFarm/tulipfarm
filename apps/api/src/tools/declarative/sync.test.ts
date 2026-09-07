@@ -1,9 +1,9 @@
 import type { EgressHttpPort, IntegrationHttpResponse } from "@tulipfarm/integrations";
 import type { OimManifest } from "@tulipfarm/schema";
-import type { SecretsService } from "@tulipfarm/secrets";
+import { SecretBroker, type SecretsService } from "@tulipfarm/secrets";
 import type { IntegrationManifest, Logger, SoulIntegration } from "@tulipfarm/soul";
 import { MemoryEffectStore } from "@tulipfarm/tool-broker";
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ToolRegistry } from "../../broker/tool-adapter";
 import { DeclarativeToolSync } from "./sync";
 
@@ -149,6 +149,32 @@ describe("DeclarativeToolSync", () => {
 
     expect(sync.sync()).toBe(1);
     expect(names()).toEqual(["twilio_get_message"]);
+  });
+
+  it("forwards each lazily created Secret broker to the lease tracker", async () => {
+    const releaseBroker = vi.fn();
+    const trackConnectionBroker = vi.fn(() => releaseBroker);
+    sync = new DeclarativeToolSync({
+      registry,
+      integrations: () => installed,
+      businessId: "biz",
+      effects: new MemoryEffectStore(),
+      secrets: async () => ({}) as SecretsService,
+      http: noopHttp,
+      trackConnectionBroker,
+    });
+    installed = [oimIntegration()];
+
+    expect(sync.sync()).toBe(1);
+    expect(trackConnectionBroker).not.toHaveBeenCalled();
+
+    await registry
+      .getAll()[0]
+      ?.execute({ message_id: "SM1" }, { userId: "user-1", runId: "run-1", toolCallId: "call-1" });
+
+    expect(trackConnectionBroker).toHaveBeenCalledOnce();
+    expect(trackConnectionBroker).toHaveBeenCalledWith(expect.any(SecretBroker));
+    expect(releaseBroker).toHaveBeenCalledOnce();
   });
 
   it("unregisters the Tools when the integration disconnects", () => {

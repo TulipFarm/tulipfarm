@@ -1,4 +1,8 @@
 export { createOimProviderAccountPort } from "./oim-accounts";
+export {
+  isOimKnowledgeRetryRequiredError,
+  OimKnowledgeRetryRequiredError,
+} from "./oim-errors";
 export type {
   AclReadResult,
   AclUnverifiableReason,

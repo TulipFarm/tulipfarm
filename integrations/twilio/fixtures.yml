@@ -1,0 +1,82 @@
+version: 1
+cases:
+  - name: lists-message-history
+    operationId: list-messages
+    configuration:
+      account_sid: AC00000000000000000000000000000000
+    request:
+      To: "+15558675310"
+      PageSize: 2
+    response:
+      status: 200
+      body:
+        page: 0
+        page_size: 2
+        next_page_uri: null
+        messages:
+          - sid: SM00000000000000000000000000000001
+            status: delivered
+            to: "+15558675310"
+            from: "+15557122661"
+            body: Launch ready
+            date_sent: Sun, 06 Sep 2026 20:30:00 +0000
+    expect:
+      request:
+        method: GET
+        url: https://api.twilio.com/2010-04-01/Accounts/AC00000000000000000000000000000000/Messages.json?To=%2B15558675310&PageSize=2
+      result:
+        page: 0
+        page_size: 2
+        messages:
+          - sid: SM00000000000000000000000000000001
+            status: delivered
+            body: Launch ready
+
+  - name: sends-message
+    operationId: send-message
+    configuration:
+      account_sid: AC00000000000000000000000000000000
+    request:
+      body:
+        To: "+15558675310"
+        From: "+15557122661"
+        Body: The launch checklist is ready.
+    response:
+      status: 201
+      body:
+        sid: SM00000000000000000000000000000002
+        status: queued
+        to: "+15558675310"
+        from: "+15557122661"
+        date_created: Sun, 06 Sep 2026 20:31:00 +0000
+    expect:
+      request:
+        method: POST
+        url: https://api.twilio.com/2010-04-01/Accounts/AC00000000000000000000000000000000/Messages.json
+        bodyText: To=%2B15558675310&From=%2B15557122661&Body=The+launch+checklist+is+ready.
+      result:
+        sid: SM00000000000000000000000000000002
+        status: queued
+        to: "+15558675310"
+        from: "+15557122661"
+
+  - name: rejects-invalid-credential
+    operationId: list-messages
+    configuration:
+      account_sid: AC00000000000000000000000000000000
+    request:
+      PageSize: 1
+    response:
+      status: 401
+      body:
+        code: 20003
+        message: Authentication Error
+        status: 401
+    expect:
+      request:
+        method: GET
+        url: https://api.twilio.com/2010-04-01/Accounts/AC00000000000000000000000000000000/Messages.json?PageSize=1
+      expectedError:
+        phase: before_dispatch
+        code: provider_unauthorized
+        retryable: false

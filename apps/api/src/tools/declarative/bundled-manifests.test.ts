@@ -145,16 +145,30 @@ describe("bundled OIM packages", () => {
 
   it("finds the OIM packages that ship in this repo", () => {
     expect(slugs).toEqual([
+      "asana",
+      "clickup",
       "confluence",
+      "confluence-data-center",
+      "discord",
+      "facebook",
       "gitlab",
+      "google-workspace",
       "hubspot",
+      "instagram",
       "jira",
       "linear",
+      "linkedin",
+      "mailchimp",
       "notion",
       "openweather",
+      "reddit",
+      "shopify",
+      "slack-oim",
       "telegram",
       "trello",
       "twilio",
+      "x",
+      "zendesk",
     ]);
   });
 

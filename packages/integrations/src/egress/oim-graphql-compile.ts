@@ -9,6 +9,12 @@ import {
 } from "@tulipfarm/schema";
 import { assertPublicEgressUrl, EgressDestinationError } from "./destination";
 import type { GraphqlOperationBinding } from "./graphql-compile";
+import {
+  type OimCompileOptions,
+  type OimConfiguration,
+  OimHttpCompileError,
+  resolveOimUrlTemplate,
+} from "./oim-http-compile";
 
 export type OimGraphqlCompileErrorCode =
   | "source_not_graphql"
@@ -24,6 +30,8 @@ export type OimGraphqlCompileErrorCode =
   | "variables_schema_invalid"
   /** A `query` declared as a write, or a `mutation` declared as a read. */
   | "effect_mismatch"
+  | "origin_unconfigured"
+  | "origin_not_allowed"
   | "response_mode_unsupported";
 
 /**
@@ -114,7 +122,9 @@ function destinationHost(url: string, operationId: string): string {
 export function compileOimGraphqlOperations(
   manifest: OimManifest,
   /** Declared companion contents, keyed by the path the manifest's `files` entry names. */
-  documents: ReadonlyMap<string, string> = new Map()
+  documents: ReadonlyMap<string, string> = new Map(),
+  configuration: OimConfiguration = {},
+  options: OimCompileOptions = {}
 ): CompiledOimGraphqlTool[] {
   return manifest.operations
     .filter((operation) => operation.source.type === "graphql")
@@ -147,9 +157,23 @@ export function compileOimGraphqlOperations(
       if ((kind === "mutation") !== mutating) {
         throw new OimGraphqlCompileError("effect_mismatch", operation.id);
       }
-      const host = destinationHost(source.url, operation.id);
+      let url: string;
+      try {
+        url = resolveOimUrlTemplate(manifest, operation, source.url, configuration, options);
+      } catch (error) {
+        if (
+          error instanceof OimHttpCompileError &&
+          (error.code === "destination_invalid" ||
+            error.code === "origin_unconfigured" ||
+            error.code === "origin_not_allowed")
+        ) {
+          throw new OimGraphqlCompileError(error.code, operation.id);
+        }
+        throw error;
+      }
+      const host = destinationHost(url, operation.id);
       const toolId = oimToolId(manifest, operation.id);
-      const adapterRef = `oim-graphql:${canonicalHash(toolId).slice(0, 32)}`;
+      const adapterRef = `oim-graphql:${canonicalHash({ toolId, operation, document }).slice(0, 32)}`;
       const spec: ToolContractSpec = {
         toolId,
         toolVersion: manifest.metadata.version,
@@ -163,7 +187,7 @@ export function compileOimGraphqlOperations(
         dataClasses: ["source_content"],
         dryRun: false,
         idempotency: { strategy: mutating ? "reconcile" : "none" },
-        retry: { maxAttempts: 1, safeToRetry: false },
+        retry: { maxAttempts: 3, safeToRetry: true },
         adapter: { kind: "graphql", ref: adapterRef },
       };
       return {
@@ -188,11 +212,14 @@ export function compileOimGraphqlOperations(
           spec,
         },
         binding: {
-          url: source.url,
+          url,
           operation: source.operation,
           document,
           mutating,
           headers: {},
+          ...(operation.rateLimit?.retryAfterHeader === undefined
+            ? {}
+            : { retryAfterHeader: operation.rateLimit.retryAfterHeader }),
           ...(operation.credentialInjection === undefined
             ? {}
             : {

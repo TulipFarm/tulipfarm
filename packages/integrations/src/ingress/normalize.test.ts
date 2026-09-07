@@ -1,6 +1,8 @@
-import type { OimEventType } from "@tulipfarm/schema";
+import type { OimEventType, OimHook, OimManifest } from "@tulipfarm/schema";
 import { describe, expect, it, vi } from "vitest";
+import type { OimHookPhaseRunner } from "../oim-hooks";
 import {
+  classifyWebhookDelivery,
   MAX_NORMALIZATION_ATTEMPTS,
   type NormalizationInput,
   normalizeDelivery,
@@ -28,9 +30,40 @@ const INPUT: NormalizationInput = {
   safeHeaders: { "x-delivery-id": "d-1" },
 };
 
+function manifest(hooks: readonly OimHook[] = []): OimManifest {
+  return {
+    oimVersion: "1.0",
+    metadata: {
+      id: "weather",
+      name: "Weather",
+      description: "Weather provider",
+      version: "1.0.0",
+    },
+    hooks,
+    events: {
+      verification: { scheme: "hmac-sha256", secretSlot: "webhook" },
+      eventTypes: [eventType()],
+    },
+  } as unknown as OimManifest;
+}
+
+function responseManifest(): OimManifest {
+  return manifest([
+    {
+      kind: "response_normalize",
+      file: "hooks/normalize.js",
+      export: "toForecast",
+    },
+  ]);
+}
+
+function runner(run: OimHookPhaseRunner["run"]): OimHookPhaseRunner {
+  return { run };
+}
+
 describe("normalizeDelivery", () => {
   it("passes a conforming payload straight through when no hook is declared", async () => {
-    const result = await normalizeDelivery(eventType(), INPUT);
+    const result = await normalizeDelivery(manifest(), eventType(), INPUT);
     expect(result).toEqual({
       kind: "normalized",
       event: { type: "forecast.updated", payload: { city: "Indore" } },
@@ -38,16 +71,28 @@ describe("normalizeDelivery", () => {
   });
 
   it("runs the declared hook and types its output", async () => {
-    const runHook = vi.fn(async () => ({ city: "Ujjain" }));
-    const result = await normalizeDelivery(eventType({ normalize: "toForecast" }), INPUT, runHook);
+    const runHook = vi.fn<OimHookPhaseRunner["run"]>(async () => ({ city: "Ujjain" }));
+    const result = await normalizeDelivery(
+      responseManifest(),
+      eventType({ normalize: "toForecast" }),
+      INPUT,
+      runner(runHook)
+    );
 
-    expect(runHook).toHaveBeenCalledWith("toForecast", INPUT);
+    expect(runHook).toHaveBeenCalledWith(responseManifest().hooks?.[0], INPUT);
     expect(result).toMatchObject({ kind: "normalized", event: { payload: { city: "Ujjain" } } });
   });
 
   it("gives a hook only the verified payload and the declared safe headers", async () => {
-    const runHook = vi.fn(async (_name: string, input: NormalizationInput) => input.payload);
-    await normalizeDelivery(eventType({ normalize: "toForecast" }), INPUT, runHook);
+    const runHook = vi.fn<OimHookPhaseRunner["run"]>(
+      async (_hook, input) => (input as NormalizationInput).payload
+    );
+    await normalizeDelivery(
+      responseManifest(),
+      eventType({ normalize: "toForecast" }),
+      INPUT,
+      runner(runHook)
+    );
 
     expect(Object.keys(runHook.mock.calls[0]?.[1] ?? {})).toEqual(["payload", "safeHeaders"]);
   });
@@ -55,30 +100,48 @@ describe("normalizeDelivery", () => {
   it("rejects output that does not match the contract the Integration published", async () => {
     // The hook is the untrusted part. A subscriber trusting its output unchecked would be
     // trusting the author rather than the schema they declared.
-    const runHook = vi.fn(async () => ({ town: "Indore" }));
-    const result = await normalizeDelivery(eventType({ normalize: "toForecast" }), INPUT, runHook);
+    const runHook = vi.fn<OimHookPhaseRunner["run"]>(async () => ({ town: "Indore" }));
+    const result = await normalizeDelivery(
+      responseManifest(),
+      eventType({ normalize: "toForecast" }),
+      INPUT,
+      runner(runHook)
+    );
 
     expect(result.kind).toBe("rejected");
     expect(result).toMatchObject({ reason: expect.stringContaining("forecast.updated") });
   });
 
   it("rejects a payload that does not match even without a hook", async () => {
-    const result = await normalizeDelivery(eventType(), { ...INPUT, payload: { town: "x" } });
+    const result = await normalizeDelivery(manifest(), eventType(), {
+      ...INPUT,
+      payload: { town: "x" },
+    });
     expect(result.kind).toBe("rejected");
   });
 
   it("retries a hook that threw, because that may not recur", async () => {
-    const runHook = vi.fn(async () => {
+    const runHook = vi.fn<OimHookPhaseRunner["run"]>(async () => {
       throw new Error("boom");
     });
-    const result = await normalizeDelivery(eventType({ normalize: "toForecast" }), INPUT, runHook);
+    const result = await normalizeDelivery(
+      responseManifest(),
+      eventType({ normalize: "toForecast" }),
+      INPUT,
+      runner(runHook)
+    );
 
     expect(result).toEqual({ kind: "failed", reason: "toForecast failed: boom" });
   });
 
   it("does not retry output that can never satisfy the contract", async () => {
-    const runHook = vi.fn(async () => undefined);
-    const result = await normalizeDelivery(eventType({ normalize: "toForecast" }), INPUT, runHook);
+    const runHook = vi.fn<OimHookPhaseRunner["run"]>(async () => undefined);
+    const result = await normalizeDelivery(
+      responseManifest(),
+      eventType({ normalize: "toForecast" }),
+      INPUT,
+      runner(runHook)
+    );
     expect(result).toEqual({
       kind: "rejected",
       reason: "forecast.updated normalized to nothing",
@@ -88,16 +151,28 @@ describe("normalizeDelivery", () => {
   it("rejects output that cannot be serialized", async () => {
     const cyclic: Record<string, unknown> = { city: "Indore" };
     cyclic.self = cyclic;
-    const runHook = vi.fn(async () => cyclic);
-    const result = await normalizeDelivery(eventType({ normalize: "toForecast" }), INPUT, runHook);
+    const runHook = vi.fn<OimHookPhaseRunner["run"]>(async () => cyclic);
+    const result = await normalizeDelivery(
+      responseManifest(),
+      eventType({ normalize: "toForecast" }),
+      INPUT,
+      runner(runHook)
+    );
 
     expect(result).toMatchObject({ kind: "rejected" });
     expect(result).toMatchObject({ reason: expect.stringContaining("non-serializable") });
   });
 
   it("rejects output large enough to be a denial of service", async () => {
-    const runHook = vi.fn(async () => ({ city: "x".repeat(300_000) }));
-    const result = await normalizeDelivery(eventType({ normalize: "toForecast" }), INPUT, runHook);
+    const runHook = vi.fn<OimHookPhaseRunner["run"]>(async () => ({
+      city: "x".repeat(300_000),
+    }));
+    const result = await normalizeDelivery(
+      responseManifest(),
+      eventType({ normalize: "toForecast" }),
+      INPUT,
+      runner(runHook)
+    );
     expect(result).toMatchObject({ kind: "rejected" });
     expect(result).toMatchObject({ reason: expect.stringContaining("bytes") });
   });
@@ -105,8 +180,55 @@ describe("normalizeDelivery", () => {
   it("fails rather than passing a payload through when the hook cannot be run", async () => {
     // Silently skipping a declared hook would emit an event shaped like the provider's payload
     // under a type that promises the Integration's own shape.
-    const result = await normalizeDelivery(eventType({ normalize: "toForecast" }), INPUT);
+    const result = await normalizeDelivery(
+      responseManifest(),
+      eventType({ normalize: "toForecast" }),
+      INPUT
+    );
     expect(result).toMatchObject({ kind: "failed" });
+  });
+});
+
+describe("classifyWebhookDelivery", () => {
+  const classifyManifest = manifest([
+    {
+      kind: "webhook_classify",
+      file: "hooks/classify.js",
+      export: "classify",
+    },
+  ]);
+
+  it("uses the declared classifier before event normalization", async () => {
+    const run = vi.fn<OimHookPhaseRunner["run"]>(async () => "forecast.updated");
+
+    await expect(
+      classifyWebhookDelivery(
+        classifyManifest,
+        { payload: { providerType: "forecast" }, safeHeaders: { "x-event": "forecast" } },
+        runner(run)
+      )
+    ).resolves.toEqual(eventType());
+    expect(run).toHaveBeenCalledWith(classifyManifest.hooks?.[0], {
+      payload: { providerType: "forecast" },
+      safeHeaders: { "x-event": "forecast" },
+    });
+  });
+
+  it("rejects an event type the manifest did not declare", async () => {
+    const run = vi.fn<OimHookPhaseRunner["run"]>(async () => "admin.created");
+
+    await expect(
+      classifyWebhookDelivery(classifyManifest, INPUT, runner(run))
+    ).rejects.toMatchObject({
+      retryable: false,
+      message: expect.stringContaining("admin.created"),
+    });
+  });
+
+  it("fails closed when the declared classifier has no trusted runner", async () => {
+    await expect(classifyWebhookDelivery(classifyManifest, INPUT)).rejects.toThrow(
+      "webhook_classify Hook is declared but no trusted runner is configured"
+    );
   });
 });
 

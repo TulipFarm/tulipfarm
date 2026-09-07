@@ -2,6 +2,7 @@ import { PGlite } from "@electric-sql/pglite";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { transactionPort } from "../pg/test-support";
 import {
+  type PersistedWebhookDelivery,
   RawPayloadDiscardedError,
   WEBHOOK_INBOX_STORAGE_STATEMENTS,
   type WebhookDeliveryInput,
@@ -23,6 +24,20 @@ function input(id: string, overrides: Partial<WebhookDeliveryInput> = {}): Webho
     eventType: "forecast.updated",
     verification: "hmac_sha256",
     ...overrides,
+  };
+}
+
+function fence(delivery: Pick<PersistedWebhookDelivery, "state" | "attempts" | "leaseExpiresAt">) {
+  if (
+    (delivery.state !== "accepted" && delivery.state !== "normalized") ||
+    delivery.leaseExpiresAt === null
+  ) {
+    throw new Error("delivery is not an active claim");
+  }
+  return {
+    expectedState: delivery.state,
+    expectedAttempts: delivery.attempts,
+    expectedLeaseExpiresAt: delivery.leaseExpiresAt,
   };
 }
 
@@ -126,24 +141,172 @@ describe("WebhookInboxStore", () => {
     expect((await store.claim(10, 30, later)).map((row) => row.id)).toEqual(["d-1"]);
   });
 
-  it("stops leasing a delivery once it is normalized", async () => {
+  it("leases a delivery for dispatch once it is normalized", async () => {
     await store.record(BUSINESS_ID, input("d-1"));
-    await store.claim(10, 30);
-    await store.markNormalized(BUSINESS_ID, "d-1", { city: "Indore" });
+    const [claimed] = await store.claim(10, 30);
+    if (claimed?.state !== "accepted") throw new Error("delivery was not claimed");
+    await store.markNormalized(
+      BUSINESS_ID,
+      "d-1",
+      "forecast.updated",
+      { city: "Indore" },
+      { ...fence(claimed), now: new Date() }
+    );
 
     const stored = await store.findById(BUSINESS_ID, "d-1");
     expect(stored?.state).toBe("normalized");
     expect(stored?.normalizedPayload).toEqual({ city: "Indore" });
+    expect(
+      (await store.claim(10, 30, new Date(Date.now() + 600_000))).map((row) => row.id)
+    ).toEqual(["d-1"]);
+  });
+
+  it("resets attempts when normalization creates a durable dispatch intent", async () => {
+    await store.record(BUSINESS_ID, input("d-1"));
+    const [normalizationClaim] = await store.claim(10, 30);
+    if (normalizationClaim?.state !== "accepted") {
+      throw new Error("delivery was not claimed");
+    }
+    await store.markNormalized(
+      BUSINESS_ID,
+      "d-1",
+      "forecast.updated",
+      { city: "Indore" },
+      { ...fence(normalizationClaim), now: new Date() }
+    );
+
+    const [claimed] = await store.claim(10, 30);
+    expect(claimed).toMatchObject({ state: "normalized", attempts: 1 });
+  });
+
+  it("re-leases a normalized event when a worker crashes after dispatch", async () => {
+    await store.record(BUSINESS_ID, input("d-1"));
+    const [normalizationClaim] = await store.claim(10, 30);
+    if (normalizationClaim?.state !== "accepted") {
+      throw new Error("delivery was not claimed");
+    }
+    await store.markNormalized(
+      BUSINESS_ID,
+      "d-1",
+      "forecast.updated",
+      { city: "Indore" },
+      { ...fence(normalizationClaim), now: new Date() }
+    );
+    await store.claim(10, 30);
+
+    const later = new Date(Date.now() + 60_000);
+    expect((await store.claim(10, 30, later)).map((row) => row.id)).toEqual(["d-1"]);
+  });
+
+  it("stops leasing an event after dispatch completes", async () => {
+    await store.record(BUSINESS_ID, input("d-1"));
+    const [normalizationClaim] = await store.claim(10, 30);
+    if (normalizationClaim?.state !== "accepted") {
+      throw new Error("delivery was not claimed");
+    }
+    await store.markNormalized(
+      BUSINESS_ID,
+      "d-1",
+      "forecast.updated",
+      { city: "Indore" },
+      { ...fence(normalizationClaim), now: new Date() }
+    );
+    const [dispatchClaim] = await store.claim(10, 30);
+    if (dispatchClaim?.state !== "normalized") {
+      throw new Error("event was not claimed");
+    }
+    await store.markDispatched(BUSINESS_ID, "d-1", fence(dispatchClaim));
+
+    expect((await store.findById(BUSINESS_ID, "d-1"))?.state).toBe("dispatched");
     expect(await store.claim(10, 30, new Date(Date.now() + 600_000))).toEqual([]);
+  });
+
+  it("does not let an expired claimant resurrect or dead-letter a dispatched event", async () => {
+    const firstNow = new Date(Date.now() + 1_000);
+    const secondNow = new Date(firstNow.getTime() + 60_000);
+    await store.record(BUSINESS_ID, input("d-1"));
+
+    const [firstClaim] = await store.claim(10, 30, firstNow);
+    if (firstClaim?.state !== "accepted") throw new Error("first claim failed");
+    const [secondClaim] = await store.claim(10, 30, secondNow);
+    if (secondClaim?.state !== "accepted") throw new Error("second claim failed");
+
+    expect(
+      await store.markNormalized(
+        BUSINESS_ID,
+        "d-1",
+        "forecast.updated",
+        { worker: "second" },
+        { ...fence(secondClaim), now: secondNow }
+      )
+    ).toBe(true);
+    const [dispatchClaim] = await store.claim(10, 30, secondNow);
+    if (dispatchClaim?.state !== "normalized") {
+      throw new Error("dispatch claim failed");
+    }
+    expect(await store.markDispatched(BUSINESS_ID, "d-1", fence(dispatchClaim))).toBe(true);
+
+    expect(
+      await store.markNormalized(
+        BUSINESS_ID,
+        "d-1",
+        "forecast.updated",
+        { worker: "first" },
+        { ...fence(firstClaim), now: firstNow }
+      )
+    ).toBe(false);
+    expect(
+      await store.markFailed(BUSINESS_ID, "d-1", "old worker failed", {
+        maxAttempts: 1,
+        backoffSeconds: 600,
+        now: firstNow,
+        ...fence(firstClaim),
+      })
+    ).toBeNull();
+
+    expect(await store.findById(BUSINESS_ID, "d-1")).toMatchObject({
+      state: "dispatched",
+      normalizedPayload: { worker: "second" },
+      lastError: null,
+    });
+  });
+
+  it("does not let an expired claimant replace its successor's lease or retry schedule", async () => {
+    const firstNow = new Date(Date.now() + 1_000);
+    const secondNow = new Date(firstNow.getTime() + 60_000);
+    await store.record(BUSINESS_ID, input("d-1"));
+
+    const [firstClaim] = await store.claim(10, 30, firstNow);
+    if (firstClaim?.state !== "accepted") throw new Error("first claim failed");
+    const [secondClaim] = await store.claim(10, 30, secondNow);
+    if (secondClaim?.state !== "accepted") throw new Error("second claim failed");
+
+    expect(
+      await store.markFailed(BUSINESS_ID, "d-1", "stale failure", {
+        maxAttempts: 1,
+        backoffSeconds: 600,
+        now: firstNow,
+        ...fence(firstClaim),
+      })
+    ).toBeNull();
+
+    expect(await store.findById(BUSINESS_ID, "d-1")).toMatchObject({
+      state: "accepted",
+      attempts: secondClaim.attempts,
+      leaseExpiresAt: secondClaim.leaseExpiresAt,
+      lastError: null,
+    });
   });
 
   it("returns a failed delivery to the queue until its attempts run out", async () => {
     await store.record(BUSINESS_ID, input("d-1"));
-    await store.claim(10, 30);
+    const [claimed] = await store.claim(10, 30);
+    if (claimed?.state !== "accepted") throw new Error("delivery was not claimed");
 
     const state = await store.markFailed(BUSINESS_ID, "d-1", "boom", {
       maxAttempts: 3,
       backoffSeconds: 0,
+      ...fence(claimed),
     });
     expect(state).toBe("accepted");
     expect((await store.findById(BUSINESS_ID, "d-1"))?.lastError).toBe("boom");
@@ -152,8 +315,13 @@ describe("WebhookInboxStore", () => {
 
   it("holds a failed delivery back until its backoff has passed", async () => {
     await store.record(BUSINESS_ID, input("d-1"));
-    await store.claim(10, 30);
-    await store.markFailed(BUSINESS_ID, "d-1", "boom", { maxAttempts: 3, backoffSeconds: 120 });
+    const [claimed] = await store.claim(10, 30);
+    if (claimed?.state !== "accepted") throw new Error("delivery was not claimed");
+    await store.markFailed(BUSINESS_ID, "d-1", "boom", {
+      maxAttempts: 3,
+      backoffSeconds: 120,
+      ...fence(claimed),
+    });
 
     expect(await store.claim(10, 30)).toEqual([]);
     expect((await store.claim(10, 30, new Date(Date.now() + 130_000))).map((r) => r.id)).toEqual([
@@ -161,14 +329,47 @@ describe("WebhookInboxStore", () => {
     ]);
   });
 
+  it("retries dispatch failure without repeating normalization", async () => {
+    await store.record(BUSINESS_ID, input("d-1"));
+    const [normalizationClaim] = await store.claim(10, 30);
+    if (normalizationClaim?.state !== "accepted") {
+      throw new Error("delivery was not claimed");
+    }
+    await store.markNormalized(
+      BUSINESS_ID,
+      "d-1",
+      "forecast.updated",
+      { city: "Indore" },
+      { ...fence(normalizationClaim), now: new Date() }
+    );
+    const [dispatchClaim] = await store.claim(10, 30);
+    if (dispatchClaim?.state !== "normalized") {
+      throw new Error("event was not claimed");
+    }
+
+    const state = await store.markFailed(BUSINESS_ID, "d-1", "Run store unavailable", {
+      maxAttempts: 3,
+      backoffSeconds: 0,
+      ...fence(dispatchClaim),
+    });
+
+    expect(state).toBe("normalized");
+    expect((await store.findById(BUSINESS_ID, "d-1"))?.normalizedPayload).toEqual({
+      city: "Indore",
+    });
+    expect((await store.claim(10, 30)).map((row) => row.id)).toEqual(["d-1"]);
+  });
+
   it("dead-letters a delivery that has used its attempts", async () => {
     // A payload the Integration cannot normalize will not start being normalizable; retrying it
     // forever only hides it from whoever has to fix it.
     await store.record(BUSINESS_ID, input("d-1"));
-    await store.claim(10, 30);
+    const [claimed] = await store.claim(10, 30);
+    if (claimed?.state !== "accepted") throw new Error("delivery was not claimed");
     const state = await store.markFailed(BUSINESS_ID, "d-1", "boom", {
       maxAttempts: 1,
       backoffSeconds: 0,
+      ...fence(claimed),
     });
 
     expect(state).toBe("dead_letter");
@@ -178,17 +379,25 @@ describe("WebhookInboxStore", () => {
 
   it("bounds the recorded failure so a provider cannot fill the table with one error", async () => {
     await store.record(BUSINESS_ID, input("d-1"));
+    const [claimed] = await store.claim(10, 30);
+    if (claimed?.state !== "accepted") throw new Error("delivery was not claimed");
     await store.markFailed(BUSINESS_ID, "d-1", "x".repeat(5000), {
       maxAttempts: 3,
       backoffSeconds: 0,
+      ...fence(claimed),
     });
     expect((await store.findById(BUSINESS_ID, "d-1"))?.lastError).toHaveLength(2000);
   });
 
   it("replays a delivery as a new row that names the original", async () => {
     await store.record(BUSINESS_ID, input("d-1"));
-    await store.claim(10, 30);
-    await store.markFailed(BUSINESS_ID, "d-1", "boom", { maxAttempts: 1, backoffSeconds: 0 });
+    const [claimed] = await store.claim(10, 30);
+    if (claimed?.state !== "accepted") throw new Error("delivery was not claimed");
+    await store.markFailed(BUSINESS_ID, "d-1", "boom", {
+      maxAttempts: 1,
+      backoffSeconds: 0,
+      ...fence(claimed),
+    });
 
     const replayed = await store.replay(BUSINESS_ID, "d-1", "d-1-replay");
 

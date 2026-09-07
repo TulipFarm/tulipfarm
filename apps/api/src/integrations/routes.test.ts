@@ -1,4 +1,8 @@
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { InMemoryAuditEventRepo } from "@tulipfarm/audit";
+import type { ConnectionUseAuthorizer } from "@tulipfarm/integrations";
+import { parseOimManifest } from "@tulipfarm/schema";
 import type {
   BundledIntegration,
   GitSyncService,
@@ -6,7 +10,7 @@ import type {
   SoulLoader,
 } from "@tulipfarm/soul";
 import { makeSoulWriterDouble } from "@tulipfarm/soul";
-import type { PaginatedResult } from "@tulipfarm/storage";
+import { ConnectionStore, type PaginatedResult } from "@tulipfarm/storage";
 import type { FastifyInstance } from "fastify";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { parse as parseYaml } from "yaml";
@@ -17,6 +21,7 @@ import { CSRF_COOKIE, CSRF_HEADER } from "../auth/csrf";
 import { SESSION_COOKIE } from "../auth/middleware";
 import { MemorySessionStore } from "../auth/session-store";
 import { createUser, type UserDoc, type UserRepo } from "../auth/users";
+import { adhocIntegrationId } from "./adhoc-connections";
 import type { SlackAuthTestResult } from "./slack-binding";
 
 const TEST_CSRF = "a".repeat(64);
@@ -135,6 +140,8 @@ describe("integrations routes", () => {
   let bundledIntegrations: Map<string, BundledIntegration>;
   let integrationStore: FakeIntegrationStore;
   let memberSid: string;
+  let listConnections: ReturnType<typeof vi.fn<ConnectionStore["listForIntegration"]>>;
+  let connectionAccess: ReturnType<typeof vi.fn<ConnectionUseAuthorizer["canUse"]>>;
 
   beforeEach(async () => {
     store = new MemorySessionStore();
@@ -227,6 +234,13 @@ describe("integrations routes", () => {
     ]);
 
     integrationStore = new FakeIntegrationStore();
+    const connectionStore = new ConnectionStore({
+      async withTransaction() {
+        throw new Error("unexpected database access");
+      },
+    });
+    listConnections = vi.spyOn(connectionStore, "listForIntegration").mockResolvedValue([]);
+    connectionAccess = vi.fn<ConnectionUseAuthorizer["canUse"]>(async () => true);
 
     auditRepo = new InMemoryAuditEventRepo();
     app = await buildApp({
@@ -239,6 +253,8 @@ describe("integrations routes", () => {
       soulLoader,
       secretsService: secretsService as never,
       bundledIntegrations,
+      connectionStore,
+      oimConnectionAccess: { canUse: connectionAccess },
       slackBind: {
         integrations: integrationStore as never,
         businessId: "biz-1",
@@ -264,7 +280,108 @@ describe("integrations routes", () => {
   const memberAuth = () => ({ [SESSION_COOKIE]: memberSid, [CSRF_COOKIE]: TEST_CSRF });
   const headers = { [CSRF_HEADER]: TEST_CSRF };
 
+  it("uses live shared Connection authority in the composed ad-hoc choice route", async () => {
+    const origin = "https://api.example.com";
+    listConnections.mockResolvedValue([
+      {
+        id: "shared-api-account",
+        businessId: "deployment",
+        integration: { id: adhocIntegrationId(origin), majorVersion: 1 },
+        label: "Company API",
+        owner: { scope: "organization" },
+        status: "active",
+        isDefault: true,
+        configuration: {
+          origin,
+          location: "header",
+          name: "x-api-key",
+          valuePrefix: "",
+        },
+        agentVisibleConfiguration: ["origin"],
+        secretBindings: { credential: "secret://company-api" },
+        health: { status: "healthy", checkedAt: null },
+        expiresAt: null,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      },
+    ]);
+    const request = {
+      method: "GET",
+      url: `/api/v1/connections/adhoc?origin=${encodeURIComponent(origin)}`,
+      cookies: memberAuth(),
+    } as const;
+
+    const allowed = await app.inject(request);
+    expect(allowed.statusCode).toBe(200);
+    expect(allowed.json()).toEqual({
+      origin,
+      state: "match",
+      connectionId: "shared-api-account",
+      label: "Company API",
+      ownerScope: "organization",
+    });
+    expect(connectionAccess).toHaveBeenCalled();
+
+    connectionAccess.mockResolvedValue(false);
+    const denied = await app.inject(request);
+    expect(denied.statusCode).toBe(200);
+    expect(denied.json()).toEqual({ origin, state: "none" });
+  });
+
   describe("GET /api/v1/integrations", () => {
+    it("uses authorized durable Connections, not package presence, for OIM status", async () => {
+      const manifest = parseOimManifest(
+        readFileSync(resolve(__dirname, "../../../../integrations/openweather/oim.yml"), "utf8")
+      );
+      soulIntegrations.set("openweather", {
+        slug: "openweather",
+        sourceIntegration: "openweather",
+        oimManifest: manifest,
+      });
+      const catalogStatus = async () => {
+        const res = await app.inject({
+          method: "GET",
+          url: "/api/v1/integrations",
+          cookies: auth(),
+          headers,
+        });
+        expect(res.statusCode).toBe(200);
+        return res
+          .json()
+          .integrations.find((entry: { name: string }) => entry.name === "openweather").status;
+      };
+      expect(await catalogStatus()).toBe("disconnected");
+      listConnections.mockResolvedValue([
+        {
+          id: "weather-account",
+          businessId: "deployment",
+          integration: { id: manifest.metadata.id, majorVersion: 1 },
+          label: "Company weather",
+          owner: { scope: "organization" },
+          status: "active",
+          isDefault: true,
+          configuration: {},
+          agentVisibleConfiguration: [],
+          secretBindings: { api_key: "secret://weather" },
+          health: { status: "healthy", checkedAt: null },
+          expiresAt: null,
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        },
+      ]);
+      expect(await catalogStatus()).toBe("connected");
+      connectionAccess.mockResolvedValue(false);
+      expect(await catalogStatus()).toBe("disconnected");
+      const detail = await app.inject({
+        method: "GET",
+        url: "/api/v1/integrations/openweather",
+        cookies: auth(),
+        headers,
+      });
+      expect(detail.statusCode).toBe(200);
+      expect(detail.json()).toMatchObject({ connected: false, personalConnected: false });
+    });
+
     it("returns 401 without auth", async () => {
       const res = await app.inject({ method: "GET", url: "/api/v1/integrations" });
       expect(res.statusCode).toBe(401);

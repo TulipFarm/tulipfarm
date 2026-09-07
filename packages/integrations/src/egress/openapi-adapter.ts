@@ -320,7 +320,11 @@ export class OpenApiToolAdapter implements ToolAdapter {
       );
     }
 
-    const failure = classifyHttpFailure(response, binding.mutating);
+    const failure = classifyHttpFailure(
+      response,
+      binding.mutating,
+      binding.retryAfterHeader ?? "Retry-After"
+    );
     if (failure !== null) {
       throw new AdapterDispatchError(
         failure.phase,

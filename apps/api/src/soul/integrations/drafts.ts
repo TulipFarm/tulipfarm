@@ -1,3 +1,5 @@
+import type { OimManifest } from "@tulipfarm/schema";
+
 /**
  * An OIM package that has been reviewed but not written.
  *
@@ -9,9 +11,15 @@
 export interface IntegrationDraft {
   /** `metadata.id` — the directory the package lands in. */
   readonly slug: string;
-  /** The normalized `oim.yml` bytes the review was computed over. */
+  readonly manifest: OimManifest;
+  /** The exact `oim.yml` bytes the review was computed over. */
   readonly manifestYaml: string;
-  readonly setupGuide?: string;
+  /** Every exact, digest-validated companion byte sequence the review covered. */
+  readonly files: readonly {
+    readonly path: string;
+    readonly role: string;
+    readonly content: string;
+  }[];
 }
 
 /**

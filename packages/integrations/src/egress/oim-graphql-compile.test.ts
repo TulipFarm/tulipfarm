@@ -76,7 +76,51 @@ describe("compileOimGraphqlOperations", () => {
     });
     expect(compiled?.contract.spec.adapter.kind).toBe("graphql");
     expect(compiled?.contract.spec.allowedDestinations).toEqual(["api.tasks.example"]);
+    expect(compiled?.contract.spec.retry).toEqual({ maxAttempts: 3, safeToRetry: true });
     expect(compiled?.contract.spec.inputSchema).toEqual(operation().requestSchema);
+  });
+
+  it("binds adapter identity to the pinned companion document", () => {
+    const [first] = compileOimGraphqlOperations(manifest(), documents);
+    const changed = new Map(documents);
+    changed.set("operations/list-teams.graphql", `${READ_DOCUMENT}\n`);
+    const [second] = compileOimGraphqlOperations(manifest(), changed);
+
+    expect(first?.adapterRef).not.toBe(second?.adapterRef);
+  });
+
+  it("resolves a templated endpoint from Connection configuration", () => {
+    const input = manifest();
+    input.auth = {
+      credentialSlots: [{ id: "api_key", label: "API key", kind: "api_key" }],
+      configurationFields: [{ id: "shop", label: "Shop host", type: "string" }],
+      allowedOriginHosts: ["*.myshopify.com"],
+      steps: [],
+    };
+    const operation = input.operations[0];
+    if (operation === undefined || operation.source.type !== "graphql") throw new Error("fixture");
+    operation.source.url = "https://{shop}/admin/api/2026-07/graphql.json";
+
+    const [registered] = compileOimGraphqlOperations(
+      input,
+      documents,
+      {},
+      {
+        deferConfiguration: true,
+      }
+    );
+    expect(() => compileOimGraphqlOperations(input, documents)).toThrow(
+      expect.objectContaining({ code: "origin_unconfigured" })
+    );
+    const [compiled] = compileOimGraphqlOperations(input, documents, {
+      shop: "muskan-store.myshopify.com",
+    });
+
+    expect(compiled?.binding.url).toBe(
+      "https://muskan-store.myshopify.com/admin/api/2026-07/graphql.json"
+    );
+    expect(compiled?.contract.spec.allowedDestinations).toEqual(["muskan-store.myshopify.com"]);
+    expect(compiled?.adapterRef).toBe(registered?.adapterRef);
   });
 
   it("compiles only graphql sources, leaving http ones to the http compiler", () => {
@@ -86,6 +130,21 @@ describe("compileOimGraphqlOperations", () => {
     } as OimOperation;
 
     expect(compileOimGraphqlOperations(manifest(operation(), http), documents)).toHaveLength(1);
+  });
+
+  it("binds the OIM-declared provider retry header", () => {
+    const declared = operation({
+      rateLimit: {
+        requests: 10,
+        perSeconds: 60,
+        scope: "connection",
+        retryAfterHeader: "X-Rate-Reset",
+      },
+    });
+
+    expect(
+      compileOimGraphqlOperations(manifest(declared), documents)[0]?.binding.retryAfterHeader
+    ).toBe("X-Rate-Reset");
   });
 
   it("marks a declared write mutating and raises its risk", () => {
@@ -191,6 +250,23 @@ describe("compileOimGraphqlOperations", () => {
     expect(() => compileOimGraphqlOperations(manifest(internal), documents)).toThrow(
       new OimGraphqlCompileError("destination_invalid", "list-teams")
     );
+  });
+
+  it("refuses a templated endpoint outside the declared host cage", () => {
+    const input = manifest();
+    input.auth = {
+      credentialSlots: [{ id: "api_key", label: "API key", kind: "api_key" }],
+      configurationFields: [{ id: "shop", label: "Shop host", type: "string" }],
+      allowedOriginHosts: ["*.myshopify.com"],
+      steps: [],
+    };
+    const operation = input.operations[0];
+    if (operation === undefined || operation.source.type !== "graphql") throw new Error("fixture");
+    operation.source.url = "https://{shop}/admin/api/2026-07/graphql.json";
+
+    expect(() =>
+      compileOimGraphqlOperations(input, documents, { shop: "attacker.example" })
+    ).toThrow(expect.objectContaining({ code: "origin_not_allowed" }));
   });
 });
 

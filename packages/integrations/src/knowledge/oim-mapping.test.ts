@@ -87,6 +87,75 @@ describe("mapListItems", () => {
     );
     expect(mapListItems(hostile, { results: [page()] })).toEqual([]);
   });
+
+  it("builds an ordered composite identity from named scope and item fields", () => {
+    const manifest = knowledgeManifestFixture({
+      list: {
+        ...knowledgeManifestFixture().knowledge?.list,
+        mapping: {
+          itemFields: {
+            channel: { source: "scope" },
+            timestamp: { source: "item", pointer: "/id" },
+          },
+          itemIdentity: ["channel", "timestamp"],
+        },
+      },
+    });
+    const composite = compileKnowledgeProfile({
+      ...manifest,
+      profiles: { ...manifest.profiles, knowledge: "1.1" },
+    });
+    const engineering = mapListItems(composite, { results: [page()] }, "ENG")[0];
+    const sales = mapListItems(composite, { results: [page()] }, "SALES")[0];
+    const knowledge = manifest.knowledge;
+    if (knowledge === undefined) throw new Error("expected Knowledge profile");
+    const list = knowledge.list;
+    const reversed = compileKnowledgeProfile({
+      ...manifest,
+      profiles: { ...manifest.profiles, knowledge: "1.1" },
+      knowledge: {
+        ...knowledge,
+        list: {
+          ...list,
+          mapping: {
+            ...list.mapping,
+            itemFields: {
+              channel: { source: "scope" },
+              timestamp: { source: "item", pointer: "/id" },
+            },
+            itemIdentity: ["timestamp", "channel"],
+          },
+        },
+      },
+    });
+
+    expect(engineering?.fields).toEqual({ channel: "ENG", timestamp: "42" });
+    expect(engineering?.itemId).not.toBe(sales?.itemId);
+    expect(engineering?.itemId).not.toBe(
+      mapListItems(reversed, { results: [page()] }, "ENG")[0]?.itemId
+    );
+  });
+
+  it("rejects a missing or non-scalar named item field", () => {
+    const manifest = knowledgeManifestFixture({
+      list: {
+        ...knowledgeManifestFixture().knowledge?.list,
+        mapping: {
+          itemFields: { value: { source: "item", pointer: "/value" } },
+          itemIdentity: ["value"],
+        },
+      },
+    });
+    const composite = compileKnowledgeProfile({
+      ...manifest,
+      profiles: { ...manifest.profiles, knowledge: "1.1" },
+    });
+
+    expect(() => mapListItems(composite, { results: [{}] }, "ENG")).toThrow("item_field_invalid");
+    expect(() => mapListItems(composite, { results: [{ value: {} }] }, "ENG")).toThrow(
+      "item_field_invalid"
+    );
+  });
 });
 
 describe("mapContent", () => {
@@ -110,6 +179,28 @@ describe("mapContent", () => {
   it("distinguishes an absent body from an empty one", () => {
     expect(mapContent(plan, {})).toBeUndefined();
     expect(mapContent(plan, { body: { storage: { value: "" } } })?.content).toBe("");
+  });
+
+  it("projects and joins scalar values from an array without provider code", () => {
+    const joined = compileKnowledgeProfile({
+      ...knowledgeManifestFixture({
+        content: {
+          ...knowledgeManifestFixture().knowledge?.content,
+          mapping: {
+            content: {
+              itemsPointer: "/messages",
+              itemPointer: "/text",
+              separator: "\n",
+            },
+          },
+        },
+      }),
+      profiles: { core: "1.0", knowledge: "1.1" },
+    });
+    expect(mapContent(joined, { messages: [{ text: "first" }, { text: "second" }] })?.content).toBe(
+      "first\nsecond"
+    );
+    expect(mapContent(joined, { messages: [{ text: "first" }, {}] })).toBeUndefined();
   });
 });
 
@@ -178,6 +269,28 @@ describe("mapAclEntries", () => {
     expect(mapAclEntries(flat, { results: [{ accountId: "u1" }] })).toEqual({
       status: "verified",
       entries: [{ kind: "user", id: "u1" }],
+    });
+  });
+
+  it("reads scalar ACL arrays through the root pointer", () => {
+    const scalar = compileKnowledgeProfile({
+      ...knowledgeManifestFixture({
+        acl: {
+          mode: "scope",
+          operationId: "get-restrictions",
+          scopeParameter: "id",
+          entriesPointer: "/members",
+          entry: { defaultKind: "user", providerUserId: "" },
+        },
+      }),
+      profiles: { core: "1.0", knowledge: "1.1" },
+    });
+    expect(mapAclEntries(scalar, { members: ["u1", "u2"] })).toEqual({
+      status: "verified",
+      entries: [
+        { kind: "user", id: "u1" },
+        { kind: "user", id: "u2" },
+      ],
     });
   });
 });

@@ -1,0 +1,582 @@
+oimVersion: "1.0"
+kind: Integration
+
+metadata:
+  id: slack-oim
+  name: Slack OIM API Reference
+  version: 1.0.0
+  description: >-
+    Portable Slack Web API, ACL-preserving Knowledge, and signed Events reference. The separate
+    legacy Slack connector remains the Socket Mode channel host.
+  license: Apache-2.0
+  maintainers:
+    - name: TulipFarm
+      url: https://tulipfarm.dev
+
+profiles:
+  core: "1.1"
+  auth: "1.0"
+  events: "1.0"
+  knowledge: "1.1"
+
+files:
+  - path: setup-guide.md
+    role: guide
+    sha256: 0493f942cc1d7bcb868297aa9551efab9fe47e765101534b826983b8431799d1
+  - path: fixtures.yml
+    role: fixture
+    sha256: 4ffc6fdbd4eea4b7c771f63436cf1d2c9556d14fee228d4cecd32a082e0acc3c
+
+auth:
+  allowedOriginHosts:
+    - slack.com
+  credentialSlots:
+    - id: client_id
+      label: Slack app client ID
+      kind: api_key
+      required: true
+    - id: client_secret
+      label: Slack app client secret
+      kind: client_secret
+      required: true
+    - id: bot_access_token
+      label: Slack bot access token
+      kind: oauth2_access_token
+      required: false
+    - id: signing_secret
+      label: Slack signing secret
+      kind: webhook_secret
+      required: false
+  configurationFields:
+    - id: app_id
+      label: Slack app ID
+      type: string
+      agentVisible: true
+    - id: team_id
+      label: Slack workspace ID
+      type: string
+      agentVisible: true
+  steps:
+    - id: app_credentials
+      type: fields
+      title: Add your Slack app credentials
+      description: >-
+        Create the app from the manifest in the setup guide. Copy its client ID and client secret.
+        Add the signing secret for HTTP Events.
+      fields:
+        - id: client_id
+          label: Client ID
+          input: text
+          required: true
+          target:
+            type: credential
+            slot: client_id
+        - id: client_secret
+          label: Client secret
+          input: password
+          required: true
+          target:
+            type: credential
+            slot: client_secret
+        - id: signing_secret
+          label: Signing secret
+          description: Required only for HTTP Events delivery.
+          input: password
+          required: false
+          target:
+            type: credential
+            slot: signing_secret
+    - id: install
+      type: oauth2
+      title: Install the Slack app
+      description: >-
+        Installs the organization bot. This package deliberately does not combine a personal OAuth
+        identity into the shared bot Connection.
+      authorizationUrl: https://slack.com/oauth/v2/authorize
+      tokenUrl: https://slack.com/api/oauth.v2.access
+      scopes:
+        - chat:write
+        - app_mentions:read
+        - channels:read
+        - channels:history
+        - groups:read
+        - groups:history
+        - im:read
+        - im:history
+        - mpim:read
+        - mpim:history
+        - users:read
+        - users:read.email
+        - assistant:write
+        - reactions:write
+        - emoji:read
+      pkce: false
+      clientId:
+        type: credential
+        slot: client_id
+      clientSecret:
+        type: credential
+        slot: client_secret
+      bindings:
+        - sourcePath: /access_token
+          target:
+            type: credential
+            slot: bot_access_token
+        - sourcePath: /app_id
+          target:
+            type: configuration
+            field: app_id
+        - sourcePath: /team/id
+          target:
+            type: configuration
+            field: team_id
+
+operations:
+  - id: bot-auth-test
+    name: slack_oim_bot_auth_test
+    description: Confirm the selected organization bot Connection and identify its workspace.
+    effect: read
+    identityMode: shared_only
+    credentialSlot: bot_access_token
+    credentialInjection: &bot_auth
+      in: header
+      name: Authorization
+      format: "Bearer {token}"
+    source:
+      type: http
+      method: GET
+      baseUrl: https://slack.com
+      path: /api/auth.test
+    response:
+      maxBytes: 32768
+      schema:
+        type: object
+        properties:
+          ok: { type: boolean }
+          url: { type: string }
+          team: { type: string }
+          user: { type: string }
+          team_id: { type: string }
+          user_id: { type: string }
+          bot_id: { type: string }
+      projection: [/ok, /url, /team, /user, /team_id, /user_id, /bot_id]
+    rateLimit:
+      requests: 100
+      perSeconds: 60
+      scope: connection
+      retryAfterHeader: Retry-After
+
+  - id: bot-list-conversations
+    name: slack_oim_bot_list_conversations
+    description: List channels and DMs visible to the selected organization bot Connection.
+    effect: read
+    identityMode: shared_only
+    credentialSlot: bot_access_token
+    credentialInjection: *bot_auth
+    source:
+      type: http
+      method: GET
+      baseUrl: https://slack.com
+      path: /api/conversations.list
+      parameters:
+        - name: types
+          in: query
+          schema: { type: string }
+          value: public_channel,private_channel,mpim,im
+        - name: exclude_archived
+          in: query
+          schema: { type: boolean }
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 200 }
+    pagination:
+      type: cursor
+      requestParameter: cursor
+      responsePath: /response_metadata/next_cursor
+      itemsPath: /channels
+    response:
+      maxBytes: 524288
+      schema:
+        type: object
+        properties:
+          ok: { type: boolean }
+          channels:
+            type: array
+            items:
+              type: object
+              properties:
+                id: { type: string }
+                name: { type: string }
+                is_private: { type: boolean }
+                is_im: { type: boolean }
+                is_mpim: { type: boolean }
+                is_archived: { type: boolean }
+                user: { type: string }
+          response_metadata:
+            type: object
+            properties:
+              next_cursor: { type: string }
+      projection: [/ok, /channels, /response_metadata]
+    rateLimit:
+      requests: 20
+      perSeconds: 60
+      scope: connection
+      retryAfterHeader: Retry-After
+
+  - id: bot-conversation-history
+    name: slack_oim_bot_conversation_history
+    description: >-
+      Read recent messages from a channel or DM visible to the organization bot. The conservative
+      page size and rate match Slack's limit for newly distributed non-Marketplace apps.
+    effect: sensitive_read
+    identityMode: shared_only
+    credentialSlot: bot_access_token
+    credentialInjection: *bot_auth
+    source:
+      type: http
+      method: GET
+      baseUrl: https://slack.com
+      path: /api/conversations.history
+      parameters:
+        - name: channel
+          in: query
+          required: true
+          schema: { type: string, minLength: 1, maxLength: 64 }
+        - name: oldest
+          in: query
+          schema: { type: string }
+        - name: latest
+          in: query
+          schema: { type: string }
+        - name: inclusive
+          in: query
+          schema: { type: boolean }
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 15 }
+    pagination:
+      type: cursor
+      requestParameter: cursor
+      responsePath: /response_metadata/next_cursor
+      itemsPath: /messages
+    response: &history_response
+      maxBytes: 524288
+      schema:
+        type: object
+        properties:
+          ok: { type: boolean }
+          messages:
+            type: array
+            items:
+              type: object
+              properties:
+                type: { type: string }
+                user: { type: string }
+                text: { type: string }
+                ts: { type: string }
+                thread_ts: { type: string }
+                edited:
+                  type: object
+                  properties:
+                    user: { type: string }
+                    ts: { type: string }
+          has_more: { type: boolean }
+          response_metadata:
+            type: object
+            properties:
+              next_cursor: { type: string }
+      projection: [/ok, /messages, /has_more, /response_metadata]
+    rateLimit: &history_rate
+      requests: 1
+      perSeconds: 60
+      scope: connection
+      retryAfterHeader: Retry-After
+
+  - id: bot-list-members
+    name: slack_oim_bot_list_members
+    description: List stable Slack user IDs that can read one conversation.
+    effect: sensitive_read
+    identityMode: shared_only
+    credentialSlot: bot_access_token
+    credentialInjection: *bot_auth
+    source:
+      type: http
+      method: GET
+      baseUrl: https://slack.com
+      path: /api/conversations.members
+      parameters:
+        - name: channel
+          in: query
+          required: true
+          schema: { type: string, minLength: 1, maxLength: 64 }
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 200 }
+    pagination:
+      type: cursor
+      requestParameter: cursor
+      responsePath: /response_metadata/next_cursor
+      itemsPath: /members
+    response:
+      maxBytes: 262144
+      schema:
+        type: object
+        properties:
+          ok: { type: boolean }
+          members:
+            type: array
+            items: { type: string }
+          response_metadata:
+            type: object
+            properties:
+              next_cursor: { type: string }
+      projection: [/ok, /members, /response_metadata]
+    rateLimit:
+      requests: 20
+      perSeconds: 60
+      scope: connection
+      retryAfterHeader: Retry-After
+
+  - id: bot-user-info
+    name: slack_oim_bot_user_info
+    description: Resolve one stable Slack user ID for ACL identity linking.
+    effect: sensitive_read
+    identityMode: shared_only
+    credentialSlot: bot_access_token
+    credentialInjection: *bot_auth
+    source:
+      type: http
+      method: GET
+      baseUrl: https://slack.com
+      path: /api/users.info
+      parameters:
+        - name: user
+          in: query
+          required: true
+          schema: { type: string, minLength: 1, maxLength: 64 }
+    response:
+      maxBytes: 131072
+      schema:
+        type: object
+        properties:
+          ok: { type: boolean }
+          user:
+            type: object
+            properties:
+              id: { type: string }
+              team_id: { type: string }
+              name: { type: string }
+              real_name: { type: string }
+              deleted: { type: boolean }
+              is_bot: { type: boolean }
+              profile:
+                type: object
+                properties:
+                  email: { type: string }
+      projection: [/ok, /user]
+    rateLimit:
+      requests: 50
+      perSeconds: 60
+      scope: connection
+      retryAfterHeader: Retry-After
+
+  - id: bot-read-message
+    name: slack_oim_bot_read_message
+    description: Read one exact message for portable Slack Knowledge content retrieval.
+    effect: sensitive_read
+    identityMode: shared_only
+    credentialSlot: bot_access_token
+    credentialInjection: *bot_auth
+    source:
+      type: http
+      method: GET
+      baseUrl: https://slack.com
+      path: /api/conversations.history
+      parameters:
+        - name: channel
+          in: query
+          required: true
+          schema: { type: string, minLength: 1, maxLength: 64 }
+        - name: latest
+          in: query
+          required: true
+          schema: { type: string, minLength: 1, maxLength: 32 }
+        - name: oldest
+          in: query
+          required: true
+          schema: { type: string, minLength: 1, maxLength: 32 }
+        - name: inclusive
+          in: query
+          schema: { type: boolean }
+          value: "true"
+        - name: limit
+          in: query
+          schema: { type: integer }
+          value: "1"
+    response: *history_response
+    rateLimit: *history_rate
+
+  - id: bot-send-message
+    name: slack_oim_bot_send_message
+    description: Send a message or thread reply as the organization bot.
+    effect: send
+    identityMode: shared_only
+    credentialSlot: bot_access_token
+    credentialInjection: *bot_auth
+    source:
+      type: http
+      method: POST
+      baseUrl: https://slack.com
+      path: /api/chat.postMessage
+      contentType: json
+    requestSchema:
+      type: object
+      additionalProperties: false
+      required: [channel, text]
+      properties:
+        channel: { type: string, minLength: 1, maxLength: 64 }
+        text: { type: string, minLength: 1, maxLength: 4000 }
+        thread_ts: { type: string }
+        reply_broadcast: { type: boolean }
+        unfurl_links: { type: boolean }
+        unfurl_media: { type: boolean }
+    response:
+      maxBytes: 262144
+      schema:
+        type: object
+        properties:
+          ok: { type: boolean }
+          channel: { type: string }
+          ts: { type: string }
+          message: { type: object }
+      projection: [/ok, /channel, /ts, /message]
+    rateLimit:
+      requests: 1
+      perSeconds: 1
+      scope: connection
+      retryAfterHeader: Retry-After
+
+knowledge:
+  sourceKinds:
+    - id: conversation
+      label: Conversation
+      discoverOperationId: bot-list-conversations
+      discoverItemsPointer: /channels
+      discoverMapping: { id: /id, label: /name }
+  list:
+    operationId: bot-conversation-history
+    scopeParameter: channel
+    itemsPointer: /messages
+    mapping:
+      itemFields:
+        channel: { source: scope }
+        timestamp: { source: item, pointer: /ts }
+      itemIdentity: [channel, timestamp]
+      revision: /edited/ts
+    cursor: { kind: operation_pagination }
+  content:
+    operationId: bot-read-message
+    parameters:
+      channel: channel
+      latest: timestamp
+      oldest: timestamp
+    mapping:
+      content:
+        itemsPointer: /messages
+        itemPointer: /text
+        separator: "\n"
+      revision: /messages/0/edited/ts
+  acl:
+    mode: scope
+    operationId: bot-list-members
+    scopeParameter: channel
+    entriesPointer: /members
+    entry: { defaultKind: user, providerUserId: "" }
+  identity:
+    user:
+      operationId: bot-user-info
+      idParameter: user
+      mapping: { providerId: /user/id }
+  deletion: { kind: absent_from_full_list }
+  liveAuthorization:
+    operationId: bot-list-members
+    parameters: { channel: channel }
+    principalSet:
+      entriesPointer: /members
+      principalIdPointer: ""
+
+events:
+  path: /slack
+  verification:
+    scheme: hmac_sha256
+    secretSlot: signing_secret
+    signatureHeader: X-Slack-Signature
+    signatureEncoding: hex
+    signaturePrefix: "v0="
+    signingInput: "v0:{timestamp}:{body}"
+    timestampHeader: X-Slack-Request-Timestamp
+    toleranceSeconds: 300
+  handshake:
+    kind: echo_body_pointer
+    bodyPointer: /challenge
+    responseField: challenge
+  acceptance:
+    requireBodyPointers: [/type]
+    requireKnownEventType: true
+  deduplication:
+    kind: body_pointer
+    bodyPointer: /event_id
+  eventTypes:
+    - type: slack.message
+      selector:
+        pointer: /event/type
+        equals: message
+      schema:
+        type: object
+        additionalProperties: true
+        required: [type, team_id, api_app_id, event, event_id, event_time]
+        properties:
+          type: { const: event_callback }
+          team_id: { type: string }
+          api_app_id: { type: string }
+          event_id: { type: string }
+          event_time: { type: integer }
+          event:
+            type: object
+            additionalProperties: true
+            required: [type, channel, ts]
+            properties:
+              type: { const: message }
+              channel: { type: string }
+              channel_type: { type: string }
+              user: { type: string }
+              text: { type: string }
+              ts: { type: string }
+              thread_ts: { type: string }
+              subtype: { type: string }
+    - type: slack.app_mention
+      selector:
+        pointer: /event/type
+        equals: app_mention
+      schema:
+        type: object
+        additionalProperties: true
+        required: [type, team_id, api_app_id, event, event_id, event_time]
+        properties:
+          type: { const: event_callback }
+          team_id: { type: string }
+          api_app_id: { type: string }
+          event_id: { type: string }
+          event_time: { type: integer }
+          event:
+            type: object
+            additionalProperties: true
+            required: [type, channel, user, text, ts]
+            properties:
+              type: { const: app_mention }
+              channel: { type: string }
+              user: { type: string }
+              text: { type: string }
+              ts: { type: string }
+              thread_ts: { type: string }
+  rawRetentionDays: 7

@@ -52,10 +52,9 @@ Transition ids differ per project, so an agent is expected to call `jira_list_tr
 
 ## Paging a search
 
-`jira_search_issues` returns a `nextPageToken` when more issues match. Pass it back in the next
-call to read the following page. Jira carries that token in the request body rather than in a query
-parameter, so the host cannot page this operation for the agent the way it does for Jira's `GET`
-listings — the agent asks for the next page itself.
+`jira_search_issues` returns an opaque `next_page_token` when more issues match. Pass it back as
+`page_token` to read the following page. TulipFarm writes Jira's own `nextPageToken` into the
+request body; agents do not parse or construct Jira cursors.
 
 ## Scope
 

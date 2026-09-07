@@ -3,7 +3,7 @@
 import type { EventEmitter } from "node:events";
 import type { GuardrailsService } from "@tulipfarm/agent-runtime";
 import type { FileService } from "@tulipfarm/files";
-import type { PublicOriginsService } from "@tulipfarm/integrations";
+import type { ConnectionUseAuthorizer, PublicOriginsService } from "@tulipfarm/integrations";
 import type {
   KnowledgeDenialSink,
   KnowledgeService,
@@ -61,15 +61,16 @@ import type { HookIngressDeps } from "./hooks/routes";
 import type { IdentityRouteDeps } from "./identity/routes";
 import type { IngressRoutesDeps } from "./ingress/routes";
 import type { IntegrationAuthRequestRepo } from "./integrations/auth-broker";
+import type { ConnectionOriginApprovalRepository } from "./integrations/connection-origin-policy";
 import type { GitHubInstallDeps } from "./integrations/github-install-routes";
 import type { OimIngressRouteDeps } from "./integrations/oim-ingress-routes";
+import type { OimReleaseTrustHost } from "./integrations/oim-release-compose";
 import type { OimWebhookLifecycle } from "./integrations/oim-webhook-lifecycle";
 import type { PrincipalProviderTokenRepo } from "./integrations/principal-tokens";
 import type { SlackBindDeps } from "./integrations/slack-binding";
 import type { ChannelInternalRouteDeps } from "./internal/channel-routes";
 import type { InternalTurnRouteDeps } from "./internal/routes";
-import type { SlackEventRouteDeps } from "./internal/slack-event-routes";
-import type { SlackHomeRouteDeps } from "./internal/slack-home-routes";
+import type { RoutineOwnerAuthorityHost } from "./internal/routine-owner-authority";
 import type { KillSwitchService } from "./kill-switches/service";
 import type { AuthorLabeller } from "./knowledge/author-label";
 import type { PageReadAuthorizer } from "./knowledge/page-access";
@@ -106,6 +107,7 @@ export interface AppOptions {
   sessionStore?: SessionStore;
   userRepo?: UserRepo;
   userAdminRepo?: UserAdminRepo;
+  onUserDisabled?: (userId: string) => Promise<void>;
   passwordWriteRepo?: PasswordWriteRepo;
   profileWriteRepo?: ProfileWriteRepo;
   userInviteRepo?: UserInviteRepo;
@@ -204,6 +206,9 @@ export interface AppOptions {
    * Credential and lose it.
    */
   connectionStore?: ConnectionStore;
+  oimConnectionAccess?: ConnectionUseAuthorizer;
+  oimOriginApprovals?: ConnectionOriginApprovalRepository;
+  oimReleaseTrust?: OimReleaseTrustHost;
   /** The durable webhook inbox, when this deployment stores Integration deliveries. */
   webhookInbox?: WebhookInboxStore;
   /** Everything the OIM webhook receiver needs, composed where the keys and stores live. */
@@ -264,8 +269,6 @@ export interface AppOptions {
    * exist until `buildApp` has run.
    */
   channels?(log: FastifyBaseLogger): ChannelInternalRouteDeps;
-  slackHome?(log: FastifyBaseLogger): SlackHomeRouteDeps;
-  slackEvents?(log: FastifyBaseLogger): SlackEventRouteDeps;
   ingress?: IngressRoutesDeps;
   hookIngress?: HookIngressDeps;
   systemRoutes?: SystemRoutesDeps;
@@ -293,6 +296,8 @@ export interface AppOptions {
    * principals only; PR 4 moves the implementations into the Worker and this surface goes away.
    */
   internalTurns?: InternalTurnRouteDeps;
+  /** Trusted live owner check for persisted Routine Runs, used only by the Worker callback. */
+  routineOwnerAuthority?: Pick<RoutineOwnerAuthorityHost, "checkRoutineOwner">;
   curator?: CuratorRouteDeps;
   /** The admin-facing shadow review surface. Separate from `curator` because that family is
    *  service-only, and one field for both audiences is how a gate gets applied to the wrong one. */

@@ -4,9 +4,12 @@ import type { ConnectionStore } from "@tulipfarm/storage";
 import { describe, expect, it } from "vitest";
 import {
   createOimConnection,
+  normalizeOimConfigurationPatch,
   OimConnectError,
   oimConnectForm,
+  oimConnectionAuthorizationPending,
   oimConnectSupported,
+  updateOimConnection,
 } from "./oim-connect";
 
 function manifest(overrides: Partial<OimManifest> = {}): OimManifest {
@@ -79,6 +82,17 @@ function manifest(overrides: Partial<OimManifest> = {}): OimManifest {
   } as OimManifest;
 }
 
+function approvedOriginManifest(): OimManifest {
+  return manifest({
+    extensions: {
+      "x-tulipfarm-origin-policy": {
+        mode: "approved_public_exact",
+        fields: ["site"],
+      },
+    },
+  });
+}
+
 function stubs() {
   const secrets = new Map<string, string>();
   const written: Parameters<ConnectionStore["put"]>[1][] = [];
@@ -119,6 +133,13 @@ describe("oimConnectForm", () => {
     ]);
   });
 
+  it("marks a policy-bound origin field as requiring explicit approval", () => {
+    expect(oimConnectForm(approvedOriginManifest()).steps[0]?.fields[1]).toMatchObject({
+      id: "site",
+      requiresOriginApproval: true,
+    });
+  });
+
   it("treats an oauth2 step as runnable but flags that consent still has to happen", () => {
     const oauth = manifest();
     const auth = oauth.auth;
@@ -145,6 +166,9 @@ describe("oimConnectForm", () => {
 
     expect(oimConnectForm(withOauth).unsupportedStepTypes).toEqual([]);
     expect(oimConnectForm(withOauth).requiresAuthorization).toBe(true);
+    expect(oimConnectForm(withOauth).authorizationSteps).toEqual([
+      { id: "signin", type: "oauth2", title: "Sign in" },
+    ]);
     expect(oimConnectSupported(withOauth)).toBe(true);
   });
 
@@ -180,7 +204,7 @@ describe("oimConnectForm", () => {
     expect(oimConnectSupported(withWebhook)).toBe(true);
   });
 
-  it("names step types it cannot run rather than presenting an empty form as complete", () => {
+  it("accepts provider app and install steps handled by the auth broker", () => {
     const base = manifest();
     const auth = base.auth;
     if (auth === undefined) throw new Error("fixture has auth");
@@ -200,8 +224,12 @@ describe("oimConnectForm", () => {
         ],
       },
     });
-    expect(oimConnectForm(withInstall).unsupportedStepTypes).toEqual(["install"]);
-    expect(oimConnectSupported(withInstall)).toBe(false);
+    expect(oimConnectForm(withInstall).unsupportedStepTypes).toEqual([]);
+    expect(oimConnectForm(withInstall).requiresAuthorization).toBe(true);
+    expect(oimConnectForm(withInstall).authorizationSteps).toEqual([
+      { id: "install", type: "install", title: "Install the app" },
+    ]);
+    expect(oimConnectSupported(withInstall)).toBe(true);
   });
 });
 
@@ -291,6 +319,20 @@ describe("createOimConnection", () => {
     expect(written).toHaveLength(0);
   });
 
+  it("stores a policy-declared public origin as action required without approving it", async () => {
+    const { deps, written } = stubs();
+    await createOimConnection(deps, {
+      ...base,
+      manifest: approvedOriginManifest(),
+      values: { token: "t0ken", site: "self-hosted.example.com" },
+    });
+
+    expect(written[0]).toMatchObject({
+      configuration: { site: "self-hosted.example.com" },
+      health: { status: "action_required" },
+    });
+  });
+
   it("refuses a missing required field before writing anything", async () => {
     const { deps, secrets } = stubs();
     await expect(
@@ -310,31 +352,198 @@ describe("createOimConnection", () => {
     ).rejects.toMatchObject({ code: "unknown_field", detail: "smuggled" });
   });
 
-  it("refuses a package whose sign-in flow this runtime cannot run", async () => {
-    const { deps } = stubs();
+  it("creates an OAuth-only Connection with no fields as pending and non-default", async () => {
+    const { deps, written } = stubs();
     const auth = manifest().auth;
     if (auth === undefined) throw new Error("fixture has auth");
-    await expect(
-      createOimConnection(deps, {
-        ...base,
-        manifest: manifest({
-          auth: {
-            ...auth,
-            steps: [
-              {
-                id: "install",
-                title: "Install the app",
-                type: "install",
-                url: "https://acme.test/install",
-                bindings: [
-                  { sourcePath: "/token", target: { type: "credential", slot: "api_token" } },
-                ],
-              },
+    const oauthOnly = manifest({
+      auth: {
+        ...auth,
+        configurationFields: [],
+        steps: [
+          {
+            id: "signin",
+            title: "Sign in",
+            type: "oauth2",
+            authorizationUrl: "https://acme.test/authorize",
+            tokenUrl: "https://acme.test/token",
+            scopes: ["read"],
+            clientId: { type: "credential", slot: "api_token" },
+            bindings: [
+              { sourcePath: "/access_token", target: { type: "credential", slot: "api_token" } },
             ],
           },
-        }),
-        values: {},
+        ],
+      },
+    });
+
+    await createOimConnection(deps, { ...base, manifest: oauthOnly, values: {} });
+
+    expect(oimConnectionAuthorizationPending(oauthOnly, written[0])).toBe(true);
+    expect(written[0]?.isDefault).toBe(false);
+    expect(written[0]?.health.status).toBe("action_required");
+  });
+});
+
+describe("updateOimConnection", () => {
+  it("renames, updates safe configuration, and rotates a credential in place", async () => {
+    const existing = {
+      id: "connection-1",
+      integration: { id: "acme", majorVersion: 2 },
+      label: "Old",
+      owner: { scope: "organization" as const },
+      status: "active" as const,
+      isDefault: false,
+      configuration: { site: "old.acme.test", page_size: 10 },
+      agentVisibleConfiguration: ["site"],
+      secretBindings: { api_token: "secret://immutable-id" },
+      health: { status: "healthy" as const, checkedAt: "2026-01-01T00:00:00.000Z" },
+      expiresAt: "2026-02-01T00:00:00.000Z",
+    };
+    const writes: unknown[] = [];
+    const rotations: Array<{ ref: string; value: string }> = [];
+
+    await updateOimConnection(
+      {
+        connections: {
+          put: async (_businessId, connection) => {
+            writes.push(connection);
+          },
+        },
+        secrets: { set: async () => {} } as unknown as SecretsService,
+        connectionSecrets: {
+          rotate: async (ref, value) => {
+            rotations.push({ ref, value });
+          },
+        },
+      },
+      {
+        businessId: "biz",
+        manifest: manifest(),
+        connection: existing,
+        label: "Primary",
+        values: { token: "new-token", site: "new.acme.test" },
+        isDefault: true,
+      }
+    );
+
+    expect(rotations).toEqual([{ ref: "secret://immutable-id", value: "new-token" }]);
+    expect(writes[0]).toMatchObject({
+      label: "Primary",
+      isDefault: true,
+      configuration: { site: "new.acme.test", page_size: 10 },
+      secretBindings: { api_token: "secret://immutable-id" },
+      health: { status: "unknown" },
+    });
+  });
+
+  it("validates every submitted field before rotating any credential", async () => {
+    const rotations: string[] = [];
+    await expect(
+      updateOimConnection(
+        {
+          connections: { put: async () => {} },
+          secrets: { set: async () => {} } as unknown as SecretsService,
+          connectionSecrets: {
+            rotate: async () => {
+              rotations.push("rotated");
+            },
+          },
+        },
+        {
+          businessId: "biz",
+          manifest: manifest(),
+          connection: {
+            id: "connection-1",
+            integration: { id: "acme", majorVersion: 2 },
+            label: "Old",
+            owner: { scope: "organization" },
+            status: "active",
+            isDefault: false,
+            configuration: { site: "old.acme.test" },
+            agentVisibleConfiguration: ["site"],
+            secretBindings: { api_token: "secret://immutable-id" },
+            health: { status: "healthy", checkedAt: null },
+            expiresAt: null,
+          },
+          values: { token: "new-token", site: "evil.test" },
+        }
+      )
+    ).rejects.toMatchObject({ code: "origin_not_allowed" });
+    expect(rotations).toEqual([]);
+  });
+
+  it("clears approval and invalidates leases when an approved origin changes", async () => {
+    const writes: Parameters<ConnectionStore["put"]>[1][] = [];
+    const deleted: string[] = [];
+    const rotations: Array<{ ref: string; value: string }> = [];
+    const existing = {
+      id: "connection-1",
+      integration: { id: "acme", majorVersion: 2 },
+      label: "Self-hosted",
+      owner: { scope: "organization" as const },
+      status: "active" as const,
+      isDefault: false,
+      configuration: { site: "old.example.com" },
+      agentVisibleConfiguration: ["site"],
+      secretBindings: { api_token: "secret://immutable-id" },
+      health: { status: "healthy" as const, checkedAt: "2026-01-01T00:00:00.000Z" },
+      expiresAt: "2026-02-01T00:00:00.000Z",
+    };
+
+    await updateOimConnection(
+      {
+        connections: {
+          put: async (_businessId, connection) => {
+            writes.push(connection);
+          },
+        },
+        secrets: {
+          get: async () => "existing-token",
+          set: async () => {},
+        } as unknown as SecretsService,
+        connectionSecrets: {
+          rotate: async (ref, value) => {
+            rotations.push({ ref, value });
+          },
+        },
+        originApprovals: {
+          delete: async (_businessId, _connectionId, field) => {
+            deleted.push(field);
+          },
+        },
+      },
+      {
+        businessId: "biz",
+        manifest: approvedOriginManifest(),
+        connection: existing,
+        values: { site: "new.example.com" },
+      }
+    );
+
+    expect(deleted).toEqual(["site"]);
+    expect(rotations).toEqual([{ ref: "secret://immutable-id", value: "existing-token" }]);
+    expect(writes[0]).toMatchObject({
+      configuration: { site: "new.example.com" },
+      secretBindings: { api_token: "secret://immutable-id" },
+      health: { status: "action_required" },
+      expiresAt: "2026-02-01T00:00:00.000Z",
+    });
+  });
+});
+
+describe("normalizeOimConfigurationPatch", () => {
+  it("refuses a provider-returned host outside the manifest allowlist", () => {
+    expect(() =>
+      normalizeOimConfigurationPatch(manifest(), { site: "internal.evil.test" })
+    ).toThrow(expect.objectContaining({ code: "origin_not_allowed" }));
+  });
+
+  it("normalizes a policy-bound public origin without treating it as approved", () => {
+    expect(
+      normalizeOimConfigurationPatch(approvedOriginManifest(), {
+        site: "https://Self-Hosted.Example.com",
       })
-    ).rejects.toMatchObject({ code: "unsupported_auth", detail: "install" });
+    ).toEqual({ site: "self-hosted.example.com" });
   });
 });

@@ -1,5 +1,6 @@
 import type { OimManifest } from "@tulipfarm/schema";
 import type { RecordedDelivery, WebhookDeliveryInput } from "@tulipfarm/storage";
+import { hasDeclaredOimHook } from "../oim-hooks";
 import {
   bodyDigest,
   decideAcceptance,
@@ -8,6 +9,7 @@ import {
   normalizeHeaders,
   parseDeliveryBody,
   safeHeadersFor,
+  safeHeadersForClassifier,
 } from "./delivery";
 import { verifyDelivery } from "./verify";
 
@@ -49,6 +51,8 @@ export interface ReceiveDeliveryRequest {
   readonly manifest: OimManifest;
   readonly rawBody: Buffer;
   readonly headers: Readonly<Record<string, string | string[] | undefined>>;
+  /** Trusted public URL registered with the provider; never reconstructed from request headers. */
+  readonly callbackUrl?: string;
   /** Present only for a Team Connection's connection-specific webhook URL. */
   readonly connectionId?: string;
 }
@@ -84,7 +88,10 @@ export async function receiveDelivery(
   if (!events) return { kind: "unavailable", reason: "no_events_declared" };
 
   const headers = normalizeHeaders(request.headers);
-  const body = parseDeliveryBody(request.rawBody);
+  const body = parseDeliveryBody(
+    request.rawBody,
+    events.verification.scheme === "twilio_hmac_sha1" ? "form" : "json"
+  );
   if (body === undefined) return { kind: "unverified", reason: "unparseable_payload" };
 
   const handshake = handshakeAnswer(events, { body, headers });
@@ -106,17 +113,22 @@ export async function receiveDelivery(
   const nowSeconds = Math.floor((deps.now?.() ?? new Date()).getTime() / 1000);
   const verification = verifyDelivery(
     events.verification,
-    { rawBody: request.rawBody, headers: request.headers },
+    {
+      rawBody: request.rawBody,
+      headers: request.headers,
+      ...(request.callbackUrl === undefined ? {} : { callbackUrl: request.callbackUrl }),
+    },
     secret,
     nowSeconds
   );
   if (!verification.ok) return { kind: "unverified", reason: verification.reason };
 
   const parsed = { body, headers };
-  const acceptance = decideAcceptance(events, parsed);
-  if (acceptance.kind === "discard") return { kind: "discarded", reason: acceptance.reason };
+  const hasClassifier = hasDeclaredOimHook(request.manifest, "webhook_classify");
+  const acceptance = hasClassifier ? undefined : decideAcceptance(events, parsed);
+  if (acceptance?.kind === "discard") return { kind: "discarded", reason: acceptance.reason };
 
-  const eventType = acceptance.kind === "accept" ? acceptance.eventType : undefined;
+  const eventType = acceptance?.kind === "accept" ? acceptance.eventType : undefined;
   const key = deduplicationKey(events, parsed, request.rawBody);
 
   const recorded = await deps.inbox.record(request.businessId, {
@@ -126,7 +138,11 @@ export async function receiveDelivery(
     connectionId: binding.connectionId,
     deduplicationKey: key.kind === "none" ? null : key.value,
     bodySha256: bodyDigest(request.rawBody),
-    safeHeaders: eventType ? safeHeadersFor(events, eventType, headers) : {},
+    safeHeaders: hasClassifier
+      ? safeHeadersForClassifier(events, headers)
+      : eventType
+        ? safeHeadersFor(events, eventType, headers)
+        : {},
     encryptedBody: await deps.encryptPayload(request.rawBody),
     eventType: eventType?.type ?? null,
     verification: events.verification.scheme,

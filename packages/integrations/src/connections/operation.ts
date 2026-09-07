@@ -1,4 +1,9 @@
-import type { OimManifest, OimOperation } from "@tulipfarm/schema";
+import {
+  type OimManifest,
+  type OimOperation,
+  oimOriginPlaceholder,
+  PATH_CREDENTIAL_PLACEHOLDER,
+} from "@tulipfarm/schema";
 import type { PersistedConnection } from "@tulipfarm/storage";
 import type { ToolConnectionBinding } from "@tulipfarm/tool-broker";
 import type {
@@ -8,6 +13,9 @@ import type {
   ConnectionSummary,
 } from "./resolver";
 
+/** Reserved Tool input consumed by the host and never forwarded to a provider. */
+export const OIM_CONNECTION_ID_ARGUMENT = "connection_id";
+
 export interface OimOperationConnectionRequest {
   readonly businessId: string;
   readonly manifest: OimManifest;
@@ -15,10 +23,12 @@ export interface OimOperationConnectionRequest {
   readonly principal: ConnectionPrincipal;
   readonly personalOwnerId?: string;
   readonly connectionId?: string;
+  readonly requireExplicitConnection?: boolean;
 }
 
 export type OimOperationConnection =
   | { readonly kind: "public" }
+  | { readonly kind: "configured"; readonly connection: PersistedConnection }
   | {
       readonly kind: "ready";
       readonly connection: PersistedConnection;
@@ -50,6 +60,44 @@ function secretReference(value: string | undefined): value is `secret://${string
   return value?.startsWith("secret://") === true && value.length > "secret://".length;
 }
 
+function requiresConfiguration(manifest: OimManifest, operation: OimOperation): boolean {
+  const fields = new Set((manifest.auth?.configurationFields ?? []).map((field) => field.id));
+  if (fields.size === 0) return false;
+  const source = operation.source;
+  if (
+    ((source.type === "http" || source.type === "openapi") &&
+      source.baseUrl !== undefined &&
+      oimOriginPlaceholder(source.baseUrl) !== undefined) ||
+    (source.type === "graphql" && oimOriginPlaceholder(source.url) !== undefined)
+  ) {
+    return true;
+  }
+  if (source.type !== "http") return false;
+  if (
+    (source.parameters ?? []).some((parameter) => {
+      const field = (parameter as typeof parameter & { readonly configurationField?: unknown })
+        .configurationField;
+      return typeof field === "string" && fields.has(field);
+    })
+  ) {
+    return true;
+  }
+  const argumentNames = new Set(
+    (source.parameters ?? [])
+      .filter((parameter) => parameter.value === undefined)
+      .map((parameter) => parameter.name)
+  );
+  return [...source.path.matchAll(/\{([^{}]+)\}/g)].some((match) => {
+    const name = match[1];
+    return (
+      name !== undefined &&
+      name !== PATH_CREDENTIAL_PLACEHOLDER &&
+      !argumentNames.has(name) &&
+      fields.has(name)
+    );
+  });
+}
+
 /**
  * Resolves the live Connection and returns only the authority needed to build a Tool intent.
  * Plaintext remains behind the Secret Broker.
@@ -62,7 +110,9 @@ export class OimOperationConnectionResolver {
 
   async resolve(request: OimOperationConnectionRequest): Promise<OimOperationConnection> {
     const slot = request.operation.credentialSlot;
-    if (slot === undefined) return { kind: "public" };
+    if (slot === undefined && !requiresConfiguration(request.manifest, request.operation)) {
+      return { kind: "public" };
+    }
 
     const majorVersion = Number(request.manifest.metadata.version.split(".", 1)[0]);
     const resolutionRequest: ConnectionResolutionRequest = {
@@ -74,6 +124,9 @@ export class OimOperationConnectionResolver {
         ? {}
         : { personalOwnerId: request.personalOwnerId }),
       ...(request.connectionId === undefined ? {} : { connectionId: request.connectionId }),
+      ...(request.requireExplicitConnection === undefined
+        ? {}
+        : { requireExplicitConnection: request.requireExplicitConnection }),
     };
     const resolution = await this.connections.resolve(resolutionRequest);
     if (resolution.kind === "selection_required") {
@@ -97,6 +150,7 @@ export class OimOperationConnectionResolver {
         status: connection.health.status,
       };
     }
+    if (slot === undefined) return { kind: "configured", connection };
     const credentialRef = connection.secretBindings[slot];
     if (!secretReference(credentialRef)) {
       return { kind: "credential_required", connectionId: connection.id, credentialSlot: slot };
@@ -155,5 +209,35 @@ export class OimOperationConnectionResolver {
       credentialRef,
       principal: { kind: binding.principalKind, id: binding.principalId },
     });
+  }
+
+  /**
+   * Re-resolves the exact bound Connection so dispatch can also re-check its current configuration.
+   */
+  async reauthorizeConnection(
+    businessId: string,
+    manifest: OimManifest,
+    operation: OimOperation,
+    binding: ToolConnectionBinding,
+    credentialRef: `secret://${string}`
+  ): Promise<PersistedConnection | null> {
+    if (
+      binding.integrationId !== manifest.metadata.id ||
+      binding.principalKind === undefined ||
+      binding.principalId === undefined
+    ) {
+      return null;
+    }
+    const resolved = await this.resolve({
+      businessId,
+      manifest,
+      operation,
+      principal: { kind: binding.principalKind, id: binding.principalId },
+      ...(binding.principalKind === "user" ? { personalOwnerId: binding.principalId } : {}),
+      connectionId: binding.connectionId,
+    });
+    return resolved.kind === "ready" && resolved.credentialRef === credentialRef
+      ? resolved.connection
+      : null;
   }
 }

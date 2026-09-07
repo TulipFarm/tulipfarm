@@ -26,10 +26,19 @@ Open **Integrations → GitLab → Connect**. You are asked for:
 | Access token | — | Secret |
 | Secret token | — | Secret, optional |
 
-Only `gitlab.com` and its subdomains are accepted. The manifest declares that bound, and it is
-checked again when the Tools compile, so a Connection cannot point GitLab's Tools at an unrelated
-server. A self-managed instance on its own domain needs that domain added to
-`auth.allowedOriginHosts` in a forked copy of the package.
+`gitlab.com` and its subdomains are built in. A self-managed host needs an explicit confirmation
+for that Connection's exact HTTPS origin. TulipFarm stores that confirmation separately from the
+form value and checks it again before each credential lease and provider dispatch. Changing the
+host invalidates the confirmation and outstanding leases.
+
+The host must resolve only to public addresses. Private, loopback, link-local and unresolved DNS
+answers are refused at dispatch even after confirmation. This does not support GitLab installations
+served below a relative path such as `https://example.com/gitlab`; the package targets the documented
+`https://host/api/v4` root on the standard HTTPS port.
+
+The package uses the documented GitLab REST API v4 endpoints and `PRIVATE-TOKEN` authentication
+available on GitLab.com, Dedicated and Self-Managed. Use a GitLab Self-Managed release that GitLab
+currently supports; this package does not claim compatibility with end-of-life releases.
 
 The token is never shown to an agent, never written to a Run event, and never returned by a Tool.
 

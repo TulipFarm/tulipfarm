@@ -53,6 +53,7 @@ describe("compileOimHttpOperations", () => {
       mutating: false,
       allowedDestinations: ["api.weather.example"],
       adapter: { kind: "native", ref: compiled?.adapterRef },
+      retry: { maxAttempts: 3, safeToRetry: true },
     });
     expect(compiled?.contract.spec.inputSchema).toEqual({
       type: "object",
@@ -98,6 +99,18 @@ describe("compileOimHttpOperations", () => {
     });
   });
 
+  it("binds the OIM-declared provider retry header", () => {
+    const input = manifest();
+    input.operations[0].rateLimit = {
+      requests: 10,
+      perSeconds: 60,
+      scope: "connection",
+      retryAfterHeader: "X-Rate-Reset",
+    };
+
+    expect(compileOimHttpOperations(input)[0]?.binding.retryAfterHeader).toBe("X-Rate-Reset");
+  });
+
   it("compiles declared credential injection and fails closed when it is missing", () => {
     const input = manifest();
     input.operations[0].credentialSlot = "api_key";
@@ -118,6 +131,137 @@ describe("compileOimHttpOperations", () => {
 
     expect(() => compileOimHttpOperations(input)).toThrow(
       new OimHttpCompileError("credential_injection_missing", "current-weather")
+    );
+  });
+
+  it("pins a declared Connection configuration field outside Agent input", () => {
+    const input = manifest();
+    input.auth = {
+      configurationFields: [
+        { id: "user_agent", label: "User-Agent", type: "string", required: true },
+      ],
+      credentialSlots: [],
+      steps: [],
+    };
+    const operation = input.operations[0];
+    if (operation === undefined || operation.source.type !== "http") throw new Error("fixture");
+    operation.source.parameters = [
+      ...(operation.source.parameters ?? []),
+      {
+        name: "User-Agent",
+        in: "header",
+        required: true,
+        schema: { type: "string", minLength: 10, maxLength: 256 },
+        configurationField: "user_agent",
+      } as never,
+    ];
+
+    const [registered] = compileOimHttpOperations(input, {}, { deferConfiguration: true });
+    const [compiled] = compileOimHttpOperations(input, {
+      user_agent: "web:tulipfarm:1.0 (by /u/muskan)",
+    });
+
+    expect(compiled?.contract.spec.inputSchema).not.toHaveProperty("properties.User-Agent");
+    expect(compiled?.binding.headers).toEqual({
+      "User-Agent": "web:tulipfarm:1.0 (by /u/muskan)",
+    });
+    expect(compiled?.adapterRef).toBe(registered?.adapterRef);
+  });
+
+  it("pins configured path and query parameters", () => {
+    const input = manifest();
+    input.auth = {
+      configurationFields: [
+        { id: "region", label: "Region", type: "string", required: true },
+        { id: "api_version", label: "API version", type: "integer", required: true },
+      ],
+      credentialSlots: [],
+      steps: [],
+    };
+    const operation = input.operations[0];
+    if (operation === undefined || operation.source.type !== "http") throw new Error("fixture");
+    operation.source.path = "/{region}/current/{location}";
+    operation.source.parameters = [
+      { name: "location", in: "path", schema: { type: "string" } },
+      {
+        name: "region",
+        in: "path",
+        schema: { type: "string" },
+        configurationField: "region",
+      } as never,
+      {
+        name: "version",
+        in: "query",
+        schema: { type: "integer" },
+        configurationField: "api_version",
+      } as never,
+    ];
+
+    const [compiled] = compileOimHttpOperations(input, {
+      region: "west",
+      api_version: 3,
+    });
+
+    expect(compiled?.binding.pathTemplate).toBe("/west/current/{location}");
+    expect(compiled?.binding.pinnedQuery).toEqual({ version: "3" });
+    expect(compiled?.binding.params).toEqual([{ name: "location", in: "path" }]);
+  });
+
+  it("refuses an absent or mistyped configured constant parameter", () => {
+    const input = manifest();
+    input.auth = {
+      configurationFields: [
+        { id: "user_agent", label: "User-Agent", type: "string", required: true },
+      ],
+      credentialSlots: [],
+      steps: [],
+    };
+    const operation = input.operations[0];
+    if (operation === undefined || operation.source.type !== "http") throw new Error("fixture");
+    operation.source.parameters = [
+      {
+        name: "User-Agent",
+        in: "header",
+        schema: { type: "string" },
+        configurationField: "user_agent",
+      } as never,
+    ];
+
+    expect(() => compileOimHttpOperations(input)).toThrow(
+      expect.objectContaining({ code: "parameter_configuration_unconfigured" })
+    );
+    expect(() => compileOimHttpOperations(input, { user_agent: true })).toThrow(
+      expect.objectContaining({ code: "parameter_configuration_invalid" })
+    );
+    expect(() =>
+      compileOimHttpOperations(input, { user_agent: "secret://reddit/user-agent" })
+    ).toThrow(expect.objectContaining({ code: "parameter_configuration_invalid" }));
+    expect(() =>
+      compileOimHttpOperations(input, { user_agent: "safe\r\nX-Injected: true" })
+    ).toThrow(expect.objectContaining({ code: "parameter_configuration_invalid" }));
+    operation.source.parameters = [
+      {
+        name: "User-Agent",
+        in: "header",
+        schema: { type: "string", minLength: 10 },
+        configurationField: "user_agent",
+      } as never,
+    ];
+    expect(() => compileOimHttpOperations(input, { user_agent: "short" })).toThrow(
+      expect.objectContaining({ code: "parameter_configuration_invalid" })
+    );
+
+    operation.source.parameters = [
+      {
+        name: "User-Agent",
+        in: "header",
+        schema: { type: "string" },
+        value: "fixed",
+        configurationField: "user_agent",
+      } as never,
+    ];
+    expect(() => compileOimHttpOperations(input, { user_agent: "configured" })).toThrow(
+      expect.objectContaining({ code: "parameter_configuration_invalid" })
     );
   });
 });
@@ -245,9 +389,13 @@ describe("templated origins", () => {
   }
 
   it("resolves the host from installation configuration", () => {
-    const [tool] = compileOimHttpOperations(templated(), { site: "acme.weather.example" });
+    const input = templated();
+    const [registered] = compileOimHttpOperations(input, {}, { deferConfiguration: true });
+    const [tool] = compileOimHttpOperations(input, { site: "acme.weather.example" });
+
     expect(tool.binding.baseUrl).toBe("https://acme.weather.example/v1");
     expect(tool.contract.spec.allowedDestinations).toEqual(["acme.weather.example"]);
+    expect(tool.adapterRef).toBe(registered.adapterRef);
   });
 
   it("accepts a full origin the operator pasted from a browser", () => {

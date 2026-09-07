@@ -1,0 +1,31 @@
+oimVersion: "1.0"
+kind: Integration
+metadata:
+  id: search
+  name: Search
+  version: 1.0.0
+  description: Search documents.
+  license: Apache-2.0
+profiles:
+  core: "1.1"
+operations:
+  - id: search
+    name: search_documents
+    description: Search documents.
+    effect: read
+    identityMode: shared_only
+    source:
+      type: http
+      method: POST
+      baseUrl: https://api.example.test
+      path: /search
+      contentType: form
+    requestSchema:
+      type: object
+      properties:
+        query: { type: string }
+      required: [query]
+      additionalProperties: false
+    response:
+      schema: { type: object }
+      maxBytes: 16384

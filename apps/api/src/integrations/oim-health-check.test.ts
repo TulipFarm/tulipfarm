@@ -135,6 +135,45 @@ describe("runHealthCheck", () => {
     expect(sent[0]?.url).toBe("https://tenant.acme.test/api/v1/me?token=token-456");
   });
 
+  it("runs a GraphQL health check through its fixed companion document", async () => {
+    const graphqlManifest = manifest();
+    const operation = graphqlManifest.operations[0];
+    if (operation === undefined) throw new Error("fixture");
+    const document = "query Viewer { viewer { id } }";
+    graphqlManifest.files = [
+      { path: "operations/viewer.graphql", role: "graphql", sha256: "0".repeat(64) },
+    ];
+    operation.source = {
+      type: "graphql",
+      url: "https://api.acme.test/graphql",
+      operation: "Viewer",
+      documentFile: "operations/viewer.graphql",
+    };
+    const sent: Array<{ body?: unknown; headers: Record<string, string> }> = [];
+
+    await expect(
+      runHealthCheck(graphqlManifest, connection(), {
+        secrets,
+        graphqlDocuments: { "operations/viewer.graphql": document },
+        http: {
+          async send(request) {
+            sent.push({ body: request.body, headers: { ...request.headers } });
+            return { status: 200, headers: {}, body: { data: { viewer: { id: "u_1" } } } };
+          },
+        },
+      })
+    ).resolves.toBe("healthy");
+
+    expect(sent).toHaveLength(1);
+    expect(sent[0]?.body).toEqual({
+      operationName: "Viewer",
+      query: document,
+      variables: {},
+    });
+    expect(sent[0]?.headers.accept).toBe("application/json");
+    expect(sent[0]?.headers.Authorization).toBeTruthy();
+  });
+
   it("reports action_required only when the provider refuses the credential", async () => {
     const status = await runHealthCheck(manifest(), connection(), {
       secrets,

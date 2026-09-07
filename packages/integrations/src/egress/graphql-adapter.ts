@@ -80,12 +80,26 @@ export class GraphqlToolAdapter implements ToolAdapter {
       );
     }
 
-    const failure = classifyHttpFailure(response, binding.mutating);
+    const failure = classifyHttpFailure(
+      response,
+      binding.mutating,
+      binding.retryAfterHeader ?? "Retry-After"
+    );
     if (failure !== null) {
-      throw new AdapterDispatchError(failure.phase, failure.code, failure.retryable);
+      throw new AdapterDispatchError(
+        failure.phase,
+        failure.code,
+        failure.retryable,
+        undefined,
+        failure.retryAfterMs
+      );
     }
     if (hasErrors(response.body)) {
-      throw new AdapterDispatchError("before_dispatch", "provider_rejected", false);
+      throw new AdapterDispatchError(
+        binding.mutating ? "after_dispatch" : "before_dispatch",
+        "provider_rejected",
+        false
+      );
     }
     return response.body;
   }

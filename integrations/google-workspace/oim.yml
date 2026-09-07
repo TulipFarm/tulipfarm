@@ -1,0 +1,1355 @@
+oimVersion: "1.0"
+kind: Integration
+
+metadata:
+  id: google-workspace
+  name: Google Workspace
+  version: 1.0.0
+  description: >-
+    Read and write Docs, Sheets, Slides, Drive files, Calendar events, and Gmail messages through
+    one Google user OAuth Connection.
+  license: Apache-2.0
+  maintainers:
+    - name: TulipFarm
+      url: https://tulipfarm.dev
+
+profiles:
+  core: "1.2"
+  auth: "1.0"
+
+files:
+  - path: setup-guide.md
+    role: guide
+    sha256: "cb24f110ae490c525dde7bb130015a055541078e5a286d24d085af8ed3a995d7"
+  - path: fixtures.yml
+    role: fixture
+    sha256: "de95c1df272e42515abecfd4bf68623600d0ce432864fdce00c1ed7e084e14ce"
+
+auth:
+  # Fixed operation origins are also compiled into each Tool contract. Drive and Calendar share
+  # Google's documented www.googleapis.com REST origin, so six services have five unique hosts.
+  allowedOriginHosts:
+    - docs.googleapis.com
+    - sheets.googleapis.com
+    - slides.googleapis.com
+    - www.googleapis.com
+    - gmail.googleapis.com
+  credentialSlots:
+    - id: client_id
+      label: Google OAuth client ID
+      kind: api_key
+      required: true
+    - id: client_secret
+      label: Google OAuth client secret
+      kind: client_secret
+      required: true
+    - id: access_token
+      label: Google OAuth access token
+      kind: oauth2_access_token
+      required: true
+    - id: refresh_token
+      label: Google OAuth refresh token
+      kind: oauth2_refresh_token
+      required: true
+  steps:
+    - id: oauth_client
+      type: fields
+      title: Add your Google OAuth client
+      description: >-
+        Create a Web application OAuth client in the Google Cloud project owned by this deployment.
+        Enable the six Workspace APIs and add the exact TulipFarm callback URL before copying these
+        values. The setup guide lists Google's review and test-user limits.
+      fields:
+        - id: client_id
+          label: OAuth client ID
+          description: The client ID from Google Cloud Console > Google Auth Platform > Clients.
+          input: text
+          required: true
+          target:
+            type: credential
+            slot: client_id
+        - id: client_secret
+          label: OAuth client secret
+          description: The secret issued with the Web application OAuth client.
+          input: password
+          required: true
+          target:
+            type: credential
+            slot: client_secret
+    - id: user_consent
+      type: oauth2
+      title: Connect a Google user
+      description: >-
+        Sign in as the Google user whose Workspace data this personal Connection should use.
+        Google shows every requested scope and asks for offline access so TulipFarm can refresh the
+        Connection after the user leaves.
+      authorizationUrl: https://accounts.google.com/o/oauth2/v2/auth
+      tokenUrl: https://oauth2.googleapis.com/token
+      authorizationParameters:
+        access_type: offline
+        prompt: consent
+        include_granted_scopes: "true"
+      scopes:
+        - https://www.googleapis.com/auth/documents
+        - https://www.googleapis.com/auth/spreadsheets
+        - https://www.googleapis.com/auth/presentations
+        - https://www.googleapis.com/auth/drive
+        - https://www.googleapis.com/auth/calendar.events
+        - https://www.googleapis.com/auth/gmail.readonly
+        - https://www.googleapis.com/auth/gmail.send
+      pkce: true
+      clientId:
+        type: credential
+        slot: client_id
+      clientSecret:
+        type: credential
+        slot: client_secret
+      bindings:
+        - sourcePath: /access_token
+          target:
+            type: credential
+            slot: access_token
+        - sourcePath: /refresh_token
+          target:
+            type: credential
+            slot: refresh_token
+
+operations:
+  - id: docs-get
+    name: google_workspace_docs_get
+    description: >-
+      Read one Google Doc, including its title, revision, tabs, and structural content. Read it
+      before editing so a batch update can use the current revision.
+    effect: sensitive_read
+    identityMode: personal_required
+    credentialSlot: access_token
+    credentialInjection:
+      in: header
+      name: Authorization
+      format: "Bearer {token}"
+    source:
+      type: http
+      method: GET
+      baseUrl: https://docs.googleapis.com
+      path: /v1/documents/{document_id}
+      parameters:
+        - name: document_id
+          in: path
+          required: true
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 256
+        - name: includeTabsContent
+          in: query
+          schema: { type: boolean }
+    response:
+      maxBytes: 10485760
+      schema:
+        type: object
+        properties:
+          documentId: { type: string }
+          title: { type: string }
+          revisionId: { type: string }
+          body:
+            type: object
+            properties:
+              content:
+                type: array
+                items: { type: object }
+          tabs:
+            type: array
+            items: { type: object }
+
+  - id: docs-create
+    name: google_workspace_docs_create
+    description: Create a blank Google Doc with a title. Use the returned document ID for edits.
+    effect: create
+    identityMode: personal_required
+    credentialSlot: access_token
+    credentialInjection:
+      in: header
+      name: Authorization
+      format: "Bearer {token}"
+    source:
+      type: http
+      method: POST
+      baseUrl: https://docs.googleapis.com
+      path: /v1/documents
+    requestSchema:
+      type: object
+      properties:
+        title:
+          type: string
+          minLength: 1
+          maxLength: 512
+      required: [title]
+      additionalProperties: false
+    response:
+      maxBytes: 1048576
+      schema:
+        type: object
+        properties:
+          documentId: { type: string }
+          title: { type: string }
+          revisionId: { type: string }
+
+  - id: docs-batch-update
+    name: google_workspace_docs_batch_update
+    description: >-
+      Apply one atomic Google Docs batchUpdate request. Read the document first and include a
+      writeControl revision when replacing or inserting content into a shared document.
+    effect: update
+    identityMode: personal_required
+    credentialSlot: access_token
+    credentialInjection:
+      in: header
+      name: Authorization
+      format: "Bearer {token}"
+    source:
+      type: http
+      method: POST
+      baseUrl: https://docs.googleapis.com
+      path: /v1/documents/{document_id}:batchUpdate
+      parameters:
+        - name: document_id
+          in: path
+          required: true
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 256
+    requestSchema:
+      type: object
+      properties:
+        requests:
+          type: array
+          minItems: 1
+          maxItems: 100
+          items:
+            type: object
+            minProperties: 1
+        writeControl:
+          type: object
+          properties:
+            requiredRevisionId: { type: string }
+            targetRevisionId: { type: string }
+          additionalProperties: false
+      required: [requests]
+      additionalProperties: false
+    response:
+      maxBytes: 2097152
+      schema:
+        type: object
+        properties:
+          documentId: { type: string }
+          replies:
+            type: array
+            items: { type: object }
+          writeControl: { type: object }
+
+  - id: sheets-get
+    name: google_workspace_sheets_get
+    description: >-
+      Read spreadsheet metadata and sheet properties. Use a field mask or a small range when the
+      spreadsheet is large; use the values operation for cell data.
+    effect: sensitive_read
+    identityMode: personal_required
+    credentialSlot: access_token
+    credentialInjection:
+      in: header
+      name: Authorization
+      format: "Bearer {token}"
+    source:
+      type: http
+      method: GET
+      baseUrl: https://sheets.googleapis.com
+      path: /v4/spreadsheets/{spreadsheet_id}
+      parameters:
+        - name: spreadsheet_id
+          in: path
+          required: true
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 256
+        - name: ranges
+          in: query
+          schema:
+            type: string
+            maxLength: 1024
+            description: One A1 range. Use sheets-get-values for direct cell reads.
+        - name: includeGridData
+          in: query
+          schema: { type: boolean }
+        - name: fields
+          in: query
+          schema:
+            type: string
+            maxLength: 2048
+    response:
+      maxBytes: 10485760
+      schema:
+        type: object
+        properties:
+          spreadsheetId: { type: string }
+          spreadsheetUrl: { type: string }
+          properties: { type: object }
+          sheets:
+            type: array
+            items: { type: object }
+          namedRanges:
+            type: array
+            items: { type: object }
+
+  - id: sheets-get-values
+    name: google_workspace_sheets_get_values
+    description: Read cell values from one A1 range in a Google Sheet.
+    effect: sensitive_read
+    identityMode: personal_required
+    credentialSlot: access_token
+    credentialInjection:
+      in: header
+      name: Authorization
+      format: "Bearer {token}"
+    source:
+      type: http
+      method: GET
+      baseUrl: https://sheets.googleapis.com
+      path: /v4/spreadsheets/{spreadsheet_id}/values/{range}
+      parameters:
+        - name: spreadsheet_id
+          in: path
+          required: true
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 256
+        - name: range
+          in: path
+          required: true
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 1024
+        - name: majorDimension
+          in: query
+          schema:
+            type: string
+            enum: [ROWS, COLUMNS]
+        - name: valueRenderOption
+          in: query
+          schema:
+            type: string
+            enum: [FORMATTED_VALUE, UNFORMATTED_VALUE, FORMULA]
+        - name: dateTimeRenderOption
+          in: query
+          schema:
+            type: string
+            enum: [SERIAL_NUMBER, FORMATTED_STRING]
+    response:
+      maxBytes: 10485760
+      schema:
+        type: object
+        properties:
+          range: { type: string }
+          majorDimension: { type: string }
+          values:
+            type: array
+            items:
+              type: array
+              items: {}
+
+  - id: sheets-create
+    name: google_workspace_sheets_create
+    description: Create a Google spreadsheet. Use the returned spreadsheet ID for value writes.
+    effect: create
+    identityMode: personal_required
+    credentialSlot: access_token
+    credentialInjection:
+      in: header
+      name: Authorization
+      format: "Bearer {token}"
+    source:
+      type: http
+      method: POST
+      baseUrl: https://sheets.googleapis.com
+      path: /v4/spreadsheets
+    requestSchema:
+      type: object
+      properties:
+        properties:
+          type: object
+          properties:
+            title:
+              type: string
+              minLength: 1
+              maxLength: 512
+            locale: { type: string }
+            timeZone: { type: string }
+          required: [title]
+          additionalProperties: false
+        sheets:
+          type: array
+          maxItems: 100
+          items: { type: object }
+      required: [properties]
+      additionalProperties: false
+    response:
+      maxBytes: 4194304
+      schema:
+        type: object
+        properties:
+          spreadsheetId: { type: string }
+          spreadsheetUrl: { type: string }
+          properties: { type: object }
+          sheets:
+            type: array
+            items: { type: object }
+
+  - id: sheets-update-values
+    name: google_workspace_sheets_update_values
+    description: >-
+      Replace values in one A1 range. USER_ENTERED interprets formulas and dates as if a user typed
+      them; RAW stores literal values.
+    effect: update
+    identityMode: personal_required
+    credentialSlot: access_token
+    credentialInjection:
+      in: header
+      name: Authorization
+      format: "Bearer {token}"
+    source:
+      type: http
+      method: PUT
+      baseUrl: https://sheets.googleapis.com
+      path: /v4/spreadsheets/{spreadsheet_id}/values/{range}
+      parameters:
+        - name: spreadsheet_id
+          in: path
+          required: true
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 256
+        - name: range
+          in: path
+          required: true
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 1024
+        - name: valueInputOption
+          in: query
+          required: true
+          schema:
+            type: string
+            enum: [RAW, USER_ENTERED]
+        - name: includeValuesInResponse
+          in: query
+          schema: { type: boolean }
+    requestSchema:
+      type: object
+      properties:
+        range: { type: string }
+        majorDimension:
+          type: string
+          enum: [ROWS, COLUMNS]
+        values:
+          type: array
+          minItems: 1
+          items:
+            type: array
+            items: {}
+      required: [values]
+      additionalProperties: false
+    response:
+      maxBytes: 4194304
+      schema:
+        type: object
+        properties:
+          spreadsheetId: { type: string }
+          updatedRange: { type: string }
+          updatedRows: { type: integer }
+          updatedColumns: { type: integer }
+          updatedCells: { type: integer }
+          updatedData: { type: object }
+
+  - id: slides-get
+    name: google_workspace_slides_get
+    description: Read one Google Slides presentation, including slide and page element structure.
+    effect: sensitive_read
+    identityMode: personal_required
+    credentialSlot: access_token
+    credentialInjection:
+      in: header
+      name: Authorization
+      format: "Bearer {token}"
+    source:
+      type: http
+      method: GET
+      baseUrl: https://slides.googleapis.com
+      path: /v1/presentations/{presentation_id}
+      parameters:
+        - name: presentation_id
+          in: path
+          required: true
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 256
+    response:
+      maxBytes: 10485760
+      schema:
+        type: object
+        properties:
+          presentationId: { type: string }
+          title: { type: string }
+          revisionId: { type: string }
+          slides:
+            type: array
+            items:
+              type: object
+              properties:
+                objectId: { type: string }
+                pageElements:
+                  type: array
+                  items: { type: object }
+
+  - id: slides-create
+    name: google_workspace_slides_create
+    description: Create a blank Google Slides presentation with a title.
+    effect: create
+    identityMode: personal_required
+    credentialSlot: access_token
+    credentialInjection:
+      in: header
+      name: Authorization
+      format: "Bearer {token}"
+    source:
+      type: http
+      method: POST
+      baseUrl: https://slides.googleapis.com
+      path: /v1/presentations
+    requestSchema:
+      type: object
+      properties:
+        title:
+          type: string
+          minLength: 1
+          maxLength: 512
+      required: [title]
+      additionalProperties: false
+    response:
+      maxBytes: 4194304
+      schema:
+        type: object
+        properties:
+          presentationId: { type: string }
+          title: { type: string }
+          revisionId: { type: string }
+          slides:
+            type: array
+            items: { type: object }
+
+  - id: slides-batch-update
+    name: google_workspace_slides_batch_update
+    description: >-
+      Apply one atomic Google Slides batchUpdate request. Read the presentation first and use its
+      object IDs and revision when changing existing elements.
+    effect: update
+    identityMode: personal_required
+    credentialSlot: access_token
+    credentialInjection:
+      in: header
+      name: Authorization
+      format: "Bearer {token}"
+    source:
+      type: http
+      method: POST
+      baseUrl: https://slides.googleapis.com
+      path: /v1/presentations/{presentation_id}:batchUpdate
+      parameters:
+        - name: presentation_id
+          in: path
+          required: true
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 256
+    requestSchema:
+      type: object
+      properties:
+        requests:
+          type: array
+          minItems: 1
+          maxItems: 100
+          items:
+            type: object
+            minProperties: 1
+        writeControl:
+          type: object
+          properties:
+            requiredRevisionId: { type: string }
+          additionalProperties: false
+      required: [requests]
+      additionalProperties: false
+    response:
+      maxBytes: 2097152
+      schema:
+        type: object
+        properties:
+          presentationId: { type: string }
+          replies:
+            type: array
+            items: { type: object }
+          writeControl: { type: object }
+
+  - id: drive-list-files
+    name: google_workspace_drive_list_files
+    description: >-
+      Search and list Drive files visible to the connected user. Use the returned IDs before
+      reading metadata, updating, or downloading a file.
+    effect: sensitive_read
+    identityMode: personal_required
+    credentialSlot: access_token
+    credentialInjection:
+      in: header
+      name: Authorization
+      format: "Bearer {token}"
+    source:
+      type: http
+      method: GET
+      baseUrl: https://www.googleapis.com
+      path: /drive/v3/files
+      parameters:
+        - name: q
+          in: query
+          schema:
+            type: string
+            maxLength: 4096
+        - name: pageSize
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 1000
+        - name: orderBy
+          in: query
+          schema:
+            type: string
+            maxLength: 512
+        - name: spaces
+          in: query
+          schema:
+            type: string
+            enum: [drive, appDataFolder, photos]
+        - name: fields
+          in: query
+          value: "nextPageToken,files(id,name,mimeType,modifiedTime,size,webViewLink,capabilities(canDownload))"
+          schema: { type: string }
+    pagination:
+      type: cursor
+      requestParameter: pageToken
+      responsePath: /nextPageToken
+      itemsPath: /files
+    response:
+      maxBytes: 4194304
+      schema:
+        type: object
+        properties:
+          nextPageToken: { type: string }
+          files:
+            type: array
+            items:
+              type: object
+              properties:
+                id: { type: string }
+                name: { type: string }
+                mimeType: { type: string }
+                modifiedTime: { type: string }
+                size: { type: string }
+                webViewLink: { type: string }
+                capabilities:
+                  type: object
+                  properties:
+                    canDownload: { type: boolean }
+
+  - id: drive-get-file
+    name: google_workspace_drive_get_file
+    description: Read metadata and download capability for one Drive file by ID.
+    effect: sensitive_read
+    identityMode: personal_required
+    credentialSlot: access_token
+    credentialInjection:
+      in: header
+      name: Authorization
+      format: "Bearer {token}"
+    source:
+      type: http
+      method: GET
+      baseUrl: https://www.googleapis.com
+      path: /drive/v3/files/{file_id}
+      parameters:
+        - name: file_id
+          in: path
+          required: true
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 256
+        - name: fields
+          in: query
+          value: "id,name,mimeType,description,createdTime,modifiedTime,size,parents,webViewLink,capabilities(canDownload,canEdit)"
+          schema: { type: string }
+    response:
+      maxBytes: 1048576
+      schema:
+        type: object
+        properties:
+          id: { type: string }
+          name: { type: string }
+          mimeType: { type: string }
+          description: { type: string }
+          createdTime: { type: string }
+          modifiedTime: { type: string }
+          size: { type: string }
+          parents:
+            type: array
+            items: { type: string }
+          webViewLink: { type: string }
+          capabilities: { type: object }
+
+  - id: drive-create-file
+    name: google_workspace_drive_create_file
+    description: >-
+      Create a metadata-only Drive file, such as a folder or an empty file. This operation does not
+      upload bytes; create Docs, Sheets, and Slides through their service operations.
+    effect: create
+    identityMode: personal_required
+    credentialSlot: access_token
+    credentialInjection:
+      in: header
+      name: Authorization
+      format: "Bearer {token}"
+    source:
+      type: http
+      method: POST
+      baseUrl: https://www.googleapis.com
+      path: /drive/v3/files
+      parameters:
+        - name: fields
+          in: query
+          value: "id,name,mimeType,description,parents,webViewLink"
+          schema: { type: string }
+    requestSchema:
+      type: object
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 1024
+        mimeType:
+          type: string
+          maxLength: 256
+        description:
+          type: string
+          maxLength: 32768
+        parents:
+          type: array
+          maxItems: 1
+          items:
+            type: string
+            minLength: 1
+            maxLength: 256
+      required: [name]
+      additionalProperties: false
+    response:
+      maxBytes: 1048576
+      schema:
+        type: object
+        properties:
+          id: { type: string }
+          name: { type: string }
+          mimeType: { type: string }
+          description: { type: string }
+          parents:
+            type: array
+            items: { type: string }
+          webViewLink: { type: string }
+
+  - id: drive-update-file
+    name: google_workspace_drive_update_file
+    description: >-
+      Update Drive metadata such as a file's name, description, starred state, or trashed state.
+      Read the file first so the edit targets the intended item.
+    effect: update
+    identityMode: personal_required
+    credentialSlot: access_token
+    credentialInjection:
+      in: header
+      name: Authorization
+      format: "Bearer {token}"
+    source:
+      type: http
+      method: PATCH
+      baseUrl: https://www.googleapis.com
+      path: /drive/v3/files/{file_id}
+      parameters:
+        - name: file_id
+          in: path
+          required: true
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 256
+        - name: fields
+          in: query
+          value: "id,name,mimeType,description,starred,trashed,modifiedTime,webViewLink"
+          schema: { type: string }
+    requestSchema:
+      type: object
+      minProperties: 1
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 1024
+        description:
+          type: string
+          maxLength: 32768
+        starred: { type: boolean }
+        trashed: { type: boolean }
+      additionalProperties: false
+    response:
+      maxBytes: 1048576
+      schema:
+        type: object
+        properties:
+          id: { type: string }
+          name: { type: string }
+          mimeType: { type: string }
+          description: { type: string }
+          starred: { type: boolean }
+          trashed: { type: boolean }
+          modifiedTime: { type: string }
+          webViewLink: { type: string }
+
+  - id: drive-download-file
+    name: google_workspace_drive_download_file
+    description: >-
+      Download one Drive blob file into a TulipFarm File. Check google_workspace_drive_get_file
+      first and continue only when capabilities.canDownload is true. Google Workspace-native files
+      need export instead.
+    effect: sensitive_read
+    identityMode: personal_required
+    credentialSlot: access_token
+    credentialInjection:
+      in: header
+      name: Authorization
+      format: "Bearer {token}"
+    source:
+      type: http
+      method: GET
+      baseUrl: https://www.googleapis.com
+      path: /drive/v3/files/{file_id}
+      parameters:
+        - name: file_id
+          in: path
+          required: true
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 256
+        - name: alt
+          in: query
+          value: media
+          schema: { type: string }
+    response:
+      mode: binary
+      maxBytes: 10485760
+
+  - id: calendar-list-events
+    name: google_workspace_calendar_list_events
+    description: >-
+      List events on one calendar. Use "primary" for the connected user's main calendar. Use
+      timeMin and timeMax for a bounded window.
+    effect: sensitive_read
+    identityMode: personal_required
+    credentialSlot: access_token
+    credentialInjection:
+      in: header
+      name: Authorization
+      format: "Bearer {token}"
+    source:
+      type: http
+      method: GET
+      baseUrl: https://www.googleapis.com
+      path: /calendar/v3/calendars/{calendar_id}/events
+      parameters:
+        - name: calendar_id
+          in: path
+          required: true
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 1024
+        - name: timeMin
+          in: query
+          schema:
+            type: string
+            format: date-time
+        - name: timeMax
+          in: query
+          schema:
+            type: string
+            format: date-time
+        - name: q
+          in: query
+          schema:
+            type: string
+            maxLength: 1024
+        - name: singleEvents
+          in: query
+          schema: { type: boolean }
+        - name: orderBy
+          in: query
+          schema:
+            type: string
+            enum: [startTime, updated]
+        - name: maxResults
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 2500
+        - name: showDeleted
+          in: query
+          schema: { type: boolean }
+    pagination:
+      type: cursor
+      requestParameter: pageToken
+      responsePath: /nextPageToken
+      itemsPath: /items
+    response:
+      maxBytes: 10485760
+      schema:
+        type: object
+        properties:
+          kind: { type: string }
+          summary: { type: string }
+          timeZone: { type: string }
+          nextPageToken: { type: string }
+          nextSyncToken: { type: string }
+          items:
+            type: array
+            items:
+              type: object
+              properties:
+                id: { type: string }
+                status: { type: string }
+                htmlLink: { type: string }
+                created: { type: string }
+                updated: { type: string }
+                summary: { type: string }
+                description: { type: string }
+                location: { type: string }
+                start: { type: object }
+                end: { type: object }
+                attendees:
+                  type: array
+                  items: { type: object }
+
+  - id: calendar-create-event
+    name: google_workspace_calendar_create_event
+    description: >-
+      Create one Calendar event. Supply start and end as dateTime values with a time zone, or as
+      all-day date values. Choose sendUpdates explicitly when attendees are present.
+    effect: create
+    identityMode: personal_required
+    credentialSlot: access_token
+    credentialInjection:
+      in: header
+      name: Authorization
+      format: "Bearer {token}"
+    source:
+      type: http
+      method: POST
+      baseUrl: https://www.googleapis.com
+      path: /calendar/v3/calendars/{calendar_id}/events
+      parameters:
+        - name: calendar_id
+          in: path
+          required: true
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 1024
+        - name: sendUpdates
+          in: query
+          schema:
+            type: string
+            enum: [all, externalOnly, none]
+        - name: conferenceDataVersion
+          in: query
+          schema:
+            type: integer
+            minimum: 0
+            maximum: 1
+    requestSchema:
+      type: object
+      properties:
+        summary:
+          type: string
+          maxLength: 1024
+        description:
+          type: string
+          maxLength: 32768
+        location:
+          type: string
+          maxLength: 1024
+        start:
+          type: object
+          minProperties: 1
+          properties:
+            date: { type: string, pattern: '^\d{4}-\d{2}-\d{2}$' }
+            dateTime: { type: string, format: date-time }
+            timeZone: { type: string }
+          additionalProperties: false
+        end:
+          type: object
+          minProperties: 1
+          properties:
+            date: { type: string, pattern: '^\d{4}-\d{2}-\d{2}$' }
+            dateTime: { type: string, format: date-time }
+            timeZone: { type: string }
+          additionalProperties: false
+        attendees:
+          type: array
+          maxItems: 200
+          items:
+            type: object
+            properties:
+              email:
+                type: string
+                minLength: 3
+                maxLength: 320
+              displayName: { type: string }
+              optional: { type: boolean }
+            required: [email]
+            additionalProperties: false
+        recurrence:
+          type: array
+          maxItems: 20
+          items: { type: string }
+        reminders: { type: object }
+        conferenceData: { type: object }
+      required: [start, end]
+      additionalProperties: false
+    response:
+      maxBytes: 4194304
+      schema:
+        type: object
+        properties:
+          id: { type: string }
+          status: { type: string }
+          htmlLink: { type: string }
+          created: { type: string }
+          updated: { type: string }
+          summary: { type: string }
+          description: { type: string }
+          location: { type: string }
+          start: { type: object }
+          end: { type: object }
+          attendees:
+            type: array
+            items: { type: object }
+
+  - id: calendar-update-event
+    name: google_workspace_calendar_update_event
+    description: >-
+      Patch selected fields on one Calendar event. Read the event first, then change only the
+      fields supplied here. Choose sendUpdates explicitly when changing attendee-visible details.
+    effect: update
+    identityMode: personal_required
+    credentialSlot: access_token
+    credentialInjection:
+      in: header
+      name: Authorization
+      format: "Bearer {token}"
+    source:
+      type: http
+      method: PATCH
+      baseUrl: https://www.googleapis.com
+      path: /calendar/v3/calendars/{calendar_id}/events/{event_id}
+      parameters:
+        - name: calendar_id
+          in: path
+          required: true
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 1024
+        - name: event_id
+          in: path
+          required: true
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 1024
+        - name: sendUpdates
+          in: query
+          schema:
+            type: string
+            enum: [all, externalOnly, none]
+        - name: conferenceDataVersion
+          in: query
+          schema:
+            type: integer
+            minimum: 0
+            maximum: 1
+    requestSchema:
+      type: object
+      minProperties: 1
+      properties:
+        summary:
+          type: string
+          maxLength: 1024
+        description:
+          type: string
+          maxLength: 32768
+        location:
+          type: string
+          maxLength: 1024
+        status:
+          type: string
+          enum: [confirmed, tentative, cancelled]
+        start:
+          type: object
+          minProperties: 1
+          properties:
+            date: { type: string, pattern: '^\d{4}-\d{2}-\d{2}$' }
+            dateTime: { type: string, format: date-time }
+            timeZone: { type: string }
+          additionalProperties: false
+        end:
+          type: object
+          minProperties: 1
+          properties:
+            date: { type: string, pattern: '^\d{4}-\d{2}-\d{2}$' }
+            dateTime: { type: string, format: date-time }
+            timeZone: { type: string }
+          additionalProperties: false
+        attendees:
+          type: array
+          maxItems: 200
+          items:
+            type: object
+            properties:
+              email:
+                type: string
+                minLength: 3
+                maxLength: 320
+              displayName: { type: string }
+              optional: { type: boolean }
+            required: [email]
+            additionalProperties: false
+        recurrence:
+          type: array
+          maxItems: 20
+          items: { type: string }
+        reminders: { type: object }
+        conferenceData: { type: object }
+      additionalProperties: false
+    response:
+      maxBytes: 4194304
+      schema:
+        type: object
+        properties:
+          id: { type: string }
+          status: { type: string }
+          htmlLink: { type: string }
+          updated: { type: string }
+          summary: { type: string }
+          description: { type: string }
+          location: { type: string }
+          start: { type: object }
+          end: { type: object }
+          attendees:
+            type: array
+            items: { type: object }
+
+  - id: gmail-list-messages
+    name: google_workspace_gmail_list_messages
+    description: >-
+      Search the connected user's Gmail mailbox. The result contains message and thread IDs; read a
+      selected message next for headers, snippet, and body structure.
+    effect: sensitive_read
+    identityMode: personal_required
+    credentialSlot: access_token
+    credentialInjection:
+      in: header
+      name: Authorization
+      format: "Bearer {token}"
+    source:
+      type: http
+      method: GET
+      baseUrl: https://gmail.googleapis.com
+      path: /gmail/v1/users/{user_id}/messages
+      parameters:
+        - name: user_id
+          in: path
+          value: me
+          schema: { type: string }
+        - name: q
+          in: query
+          schema:
+            type: string
+            maxLength: 4096
+        - name: labelIds
+          in: query
+          schema:
+            type: string
+            maxLength: 256
+            description: One Gmail label ID, such as INBOX or UNREAD.
+        - name: maxResults
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 500
+        - name: includeSpamTrash
+          in: query
+          schema: { type: boolean }
+    pagination:
+      type: cursor
+      requestParameter: pageToken
+      responsePath: /nextPageToken
+      itemsPath: /messages
+    response:
+      maxBytes: 2097152
+      schema:
+        type: object
+        properties:
+          messages:
+            type: array
+            items:
+              type: object
+              properties:
+                id: { type: string }
+                threadId: { type: string }
+          nextPageToken: { type: string }
+          resultSizeEstimate: { type: integer }
+
+  - id: gmail-get-message
+    name: google_workspace_gmail_get_message
+    description: >-
+      Read one Gmail message by ID. Use metadata for headers only, full for parsed MIME structure,
+      minimal for IDs and labels, or raw for the base64url RFC 2822 message.
+    effect: sensitive_read
+    identityMode: personal_required
+    credentialSlot: access_token
+    credentialInjection:
+      in: header
+      name: Authorization
+      format: "Bearer {token}"
+    source:
+      type: http
+      method: GET
+      baseUrl: https://gmail.googleapis.com
+      path: /gmail/v1/users/{user_id}/messages/{message_id}
+      parameters:
+        - name: user_id
+          in: path
+          value: me
+          schema: { type: string }
+        - name: message_id
+          in: path
+          required: true
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 256
+        - name: format
+          in: query
+          schema:
+            type: string
+            enum: [minimal, full, raw, metadata]
+    response:
+      maxBytes: 10485760
+      schema:
+        type: object
+        properties:
+          id: { type: string }
+          threadId: { type: string }
+          labelIds:
+            type: array
+            items: { type: string }
+          snippet: { type: string }
+          historyId: { type: string }
+          internalDate: { type: string }
+          raw: { type: string }
+          payload:
+            type: object
+            properties:
+              partId: { type: string }
+              mimeType: { type: string }
+              filename: { type: string }
+              headers:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    name: { type: string }
+                    value: { type: string }
+              body: { type: object }
+              parts:
+                type: array
+                items: { type: object }
+
+  - id: gmail-send-message
+    name: google_workspace_gmail_send_message
+    description: >-
+      Send one Gmail message for the connected user. Supply a complete RFC 2822 message encoded as
+      base64url in raw; optionally supply threadId to add it to an existing thread.
+    effect: send
+    identityMode: personal_required
+    credentialSlot: access_token
+    credentialInjection:
+      in: header
+      name: Authorization
+      format: "Bearer {token}"
+    source:
+      type: http
+      method: POST
+      baseUrl: https://gmail.googleapis.com
+      path: /gmail/v1/users/{user_id}/messages/send
+      parameters:
+        - name: user_id
+          in: path
+          value: me
+          schema: { type: string }
+    requestSchema:
+      type: object
+      properties:
+        raw:
+          type: string
+          minLength: 1
+          maxLength: 5000000
+          pattern: "^[A-Za-z0-9_-]+={0,2}$"
+          description: Complete RFC 2822 message encoded as base64url.
+        threadId:
+          type: string
+          maxLength: 256
+      required: [raw]
+      additionalProperties: false
+    response:
+      maxBytes: 1048576
+      schema:
+        type: object
+        properties:
+          id: { type: string }
+          threadId: { type: string }
+          labelIds:
+            type: array
+            items: { type: string }

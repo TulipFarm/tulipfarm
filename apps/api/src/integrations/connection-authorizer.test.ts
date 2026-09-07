@@ -7,10 +7,22 @@ const BUSINESS = "business-1";
 
 function connection(overrides: Partial<PersistedConnection> = {}): PersistedConnection {
   return {
+    businessId: BUSINESS,
     id: "connection-1",
+    integration: { id: "acme", majorVersion: 1 },
+    label: "Acme",
     owner: { scope: "organization" },
+    status: "active",
+    isDefault: true,
+    configuration: {},
+    agentVisibleConfiguration: [],
+    secretBindings: {},
+    health: { status: "healthy", checkedAt: null },
+    expiresAt: null,
+    createdAt: new Date(0),
+    updatedAt: new Date(0),
     ...overrides,
-  } as PersistedConnection;
+  };
 }
 
 function layer(grants: AuthorityLayer["grants"]): AuthorityLayer {
@@ -20,6 +32,39 @@ function layer(grants: AuthorityLayer["grants"]): AuthorityLayer {
 const ALLOW_USE: AuthorityLayer["grants"] = [
   { action: "connection.use", resourceType: "connection", effect: "allow" },
 ];
+
+describe("live Connection user status", () => {
+  it.each<PersistedConnection["owner"]>([
+    { scope: "personal", principalKind: "user", principalId: "user-1" },
+    { scope: "organization" },
+    { scope: "team", teamId: "00000000-0000-4000-8000-000000000004" },
+  ])("denies a disabled user even when ownership or grants still exist", async (owner) => {
+    const authorizer = connectionUseAuthorizer({
+      businessId: BUSINESS,
+      resolvePrincipalLayer: async () => layer(ALLOW_USE),
+      hasTeamMembership: async () => true,
+      isUserActive: async () => false,
+    });
+    await expect(
+      authorizer.canUse({ kind: "user", id: "user-1" }, connection({ owner }))
+    ).resolves.toBe(false);
+  });
+
+  it("rechecks user status rather than retaining a grant from an earlier attempt", async () => {
+    const isUserActive = vi.fn().mockResolvedValueOnce(true).mockResolvedValueOnce(false);
+    const authorizer = connectionUseAuthorizer({
+      businessId: BUSINESS,
+      resolvePrincipalLayer: async () => layer(ALLOW_USE),
+      hasTeamMembership: async () => true,
+      isUserActive,
+    });
+    const personal = connection({
+      owner: { scope: "personal", principalKind: "user", principalId: "user-1" },
+    });
+    await expect(authorizer.canUse({ kind: "user", id: "user-1" }, personal)).resolves.toBe(true);
+    await expect(authorizer.canUse({ kind: "user", id: "user-1" }, personal)).resolves.toBe(false);
+  });
+});
 
 describe("connectionUseAuthorizer for personal Connections", () => {
   const resolvePrincipalLayer = vi.fn(async () => layer(ALLOW_USE));
@@ -140,6 +185,87 @@ describe("connectionUseAuthorizer for organization Connections", () => {
       businessId: BUSINESS,
       kind: "agent",
     });
+  });
+});
+
+describe("connectionUseAuthorizer for Integration-owned polling", () => {
+  const authorizer = connectionUseAuthorizer({
+    businessId: BUSINESS,
+    resolvePrincipalLayer: async () => layer([]),
+    hasTeamMembership: async () => false,
+    isTeamActive: async () => true,
+  });
+  const sharedConnection = (owner: PersistedConnection["owner"]) =>
+    connection({
+      owner,
+      integration: { id: "acme", majorVersion: 1 },
+    });
+
+  it.each<PersistedConnection["owner"]>([
+    { scope: "organization" },
+    { scope: "team", teamId: "00000000-0000-4000-8000-000000000004" },
+  ])("grants the exact Integration adapter its own $scope Connection", async (owner) => {
+    await expect(
+      authorizer.canUse(
+        { kind: "integration_adapter", id: "integration:acme" },
+        sharedConnection(owner)
+      )
+    ).resolves.toBe(true);
+  });
+
+  it("does not grant another Integration adapter the Connection", async () => {
+    await expect(
+      authorizer.canUse(
+        { kind: "integration_adapter", id: "integration:other" },
+        sharedConnection({ scope: "organization" })
+      )
+    ).resolves.toBe(false);
+  });
+
+  it("rechecks the Team before granting an adapter access", async () => {
+    const isTeamActive = vi.fn().mockResolvedValueOnce(true).mockResolvedValueOnce(false);
+    const liveAuthorizer = connectionUseAuthorizer({
+      businessId: BUSINESS,
+      resolvePrincipalLayer: async () => layer(ALLOW_USE),
+      hasTeamMembership: async () => true,
+      isTeamActive,
+    });
+    const principal = { kind: "integration_adapter", id: "integration:acme" };
+    const team = sharedConnection({ scope: "team", teamId: "team-1" });
+    await expect(liveAuthorizer.canUse(principal, team)).resolves.toBe(true);
+    await expect(liveAuthorizer.canUse(principal, team)).resolves.toBe(false);
+    expect(isTeamActive).toHaveBeenNthCalledWith(2, "team-1");
+  });
+
+  it("refuses a Team adapter without a live Team reader", async () => {
+    const unconfigured = connectionUseAuthorizer({
+      businessId: BUSINESS,
+      resolvePrincipalLayer: async () => layer(ALLOW_USE),
+      hasTeamMembership: async () => true,
+    });
+    await expect(
+      unconfigured.canUse(
+        { kind: "integration_adapter", id: "integration:acme" },
+        sharedConnection({ scope: "team", teamId: "team-1" })
+      )
+    ).resolves.toBe(false);
+  });
+});
+
+describe("Connection deployment boundary", () => {
+  it.each([
+    { kind: "user", id: "user-1" },
+    { kind: "integration_adapter", id: "integration:acme" },
+  ])("refuses a foreign deployment for $kind", async (principal) => {
+    const authorizer = connectionUseAuthorizer({
+      businessId: BUSINESS,
+      resolvePrincipalLayer: async () => layer(ALLOW_USE),
+      hasTeamMembership: async () => true,
+      isTeamActive: async () => true,
+    });
+    await expect(
+      authorizer.canUse(principal, connection({ businessId: "another-business" }))
+    ).resolves.toBe(false);
   });
 });
 

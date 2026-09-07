@@ -1,4 +1,4 @@
-import { type OimConnection, validateOimManifest } from "@tulipfarm/schema";
+import { type OimConnection, type OimManifest, validateOimManifest } from "@tulipfarm/schema";
 import type { PersistedConnection } from "@tulipfarm/storage";
 import { describe, expect, it } from "vitest";
 import { OimOperationConnectionResolver } from "./operation";
@@ -102,6 +102,95 @@ function request() {
 }
 
 describe("OimOperationConnectionResolver", () => {
+  it("resolves a Connection for configuration-only tenant routing", async () => {
+    const configuredManifest = {
+      ...manifest,
+      auth: {
+        ...manifest.auth,
+        configurationFields: [{ id: "site", label: "Site", type: "string" as const }],
+        allowedOriginHosts: ["*.weather.example"],
+      },
+      operations: [
+        {
+          ...operation,
+          credentialSlot: undefined,
+          credentialInjection: undefined,
+          source: {
+            type: "http" as const,
+            method: "GET" as const,
+            baseUrl: "https://{site}",
+            path: "/current",
+          },
+        },
+      ],
+    } as OimManifest;
+    const configuredOperation = configuredManifest.operations[0];
+    if (configuredOperation === undefined) throw new Error("expected operation");
+
+    await expect(
+      resolver(connection({ configuration: { site: "acme.weather.example" } })).resolve({
+        businessId: "business-1",
+        manifest: configuredManifest,
+        operation: configuredOperation,
+        principal: { kind: "user", id: "user-1" },
+        personalOwnerId: "user-1",
+      })
+    ).resolves.toMatchObject({
+      kind: "configured",
+      connection: { id: "connection-1" },
+    });
+  });
+
+  it("requires configuration for host-owned HTTP parameters", async () => {
+    const configuredManifest = {
+      ...manifest,
+      auth: {
+        ...manifest.auth,
+        configurationFields: [
+          {
+            id: "user_agent",
+            label: "User-Agent",
+            type: "string" as const,
+            required: true,
+          },
+        ],
+      },
+      operations: [
+        {
+          ...operation,
+          credentialSlot: undefined,
+          credentialInjection: undefined,
+          source: {
+            ...operation.source,
+            parameters: [
+              {
+                name: "User-Agent",
+                in: "header" as const,
+                schema: { type: "string" as const },
+                configurationField: "user_agent",
+              },
+            ],
+          },
+        },
+      ],
+    } as unknown as OimManifest;
+    const configuredOperation = configuredManifest.operations[0];
+    if (configuredOperation === undefined) throw new Error("expected operation");
+
+    await expect(
+      resolver(connection({ configuration: { user_agent: "tulipfarm:test" } })).resolve({
+        businessId: "business-1",
+        manifest: configuredManifest,
+        operation: configuredOperation,
+        principal: { kind: "user", id: "user-1" },
+        personalOwnerId: "user-1",
+      })
+    ).resolves.toMatchObject({
+      kind: "configured",
+      connection: { id: "connection-1" },
+    });
+  });
+
   it("returns an exact Secret authority binding without plaintext", async () => {
     const result = await resolver(connection()).resolve(request());
 

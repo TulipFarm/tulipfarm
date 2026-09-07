@@ -1,5 +1,9 @@
 import { createHash, randomUUID } from "node:crypto";
-import type { AuthInjectionLocation } from "@tulipfarm/integrations";
+import type {
+  AuthInjectionLocation,
+  ConnectionPrincipal,
+  ConnectionUseAuthorizer,
+} from "@tulipfarm/integrations";
 import { isSessionHeader, normalizedPublicUrl } from "@tulipfarm/integrations";
 import type { OimConnection } from "@tulipfarm/schema";
 import type { SecretsService } from "@tulipfarm/secrets";
@@ -76,10 +80,10 @@ export interface CreateAdhocConnectionInput {
 }
 
 /** The read half of the store, so a lookup cannot reach the writer. */
-export type ConnectionReader = Pick<ConnectionStore, "listForOwner">;
+export type ConnectionReader = Pick<ConnectionStore, "findById" | "listForIntegration">;
 
 export interface AdhocConnectionDeps {
-  readonly connections: ConnectionReader & Pick<ConnectionStore, "put">;
+  readonly connections: Pick<ConnectionStore, "put">;
   readonly secrets: SecretsService;
   readonly newId?: () => string;
 }
@@ -147,13 +151,80 @@ export function ruleOf(connection: PersistedConnection): AdhocInjectionRule | un
 
 export type AdhocMatch =
   | { readonly kind: "none" }
-  | { readonly kind: "ambiguous"; readonly count: number }
+  | {
+      readonly kind: "ambiguous";
+      readonly count: number;
+      readonly candidates: readonly AdhocConnectionCandidate[];
+    }
+  | { readonly kind: "denied"; readonly reason: "not_found" | "not_authorized" | "unavailable" }
   | {
       readonly kind: "match";
       readonly connection: PersistedConnection;
       readonly rule: AdhocInjectionRule;
       readonly credentialRef: string;
     };
+
+export interface AdhocConnectionCandidate {
+  readonly id: string;
+  readonly label: string;
+  readonly ownerScope: OimConnection["owner"]["scope"];
+}
+
+function belongsToOrigin(connection: PersistedConnection, origin: string): boolean {
+  if (
+    connection.integration.id !== adhocIntegrationId(origin) ||
+    connection.integration.majorVersion !== ADHOC_MAJOR_VERSION
+  ) {
+    return false;
+  }
+  try {
+    return canonicalOrigin(String(connection.configuration.origin)) === origin;
+  } catch {
+    return false;
+  }
+}
+
+function usableBinding(
+  connection: PersistedConnection
+): { readonly rule: AdhocInjectionRule; readonly credentialRef: string } | undefined {
+  const rule = ruleOf(connection);
+  const credentialRef = connection.secretBindings[ADHOC_CREDENTIAL_SLOT];
+  if (
+    connection.status !== "active" ||
+    connection.health.status === "action_required" ||
+    (connection.expiresAt !== null && new Date(connection.expiresAt) <= new Date()) ||
+    rule === undefined ||
+    credentialRef === undefined
+  ) {
+    return undefined;
+  }
+  return { rule, credentialRef };
+}
+
+async function mayUseConnection(
+  principal: ConnectionPrincipal,
+  connection: PersistedConnection,
+  connectionAccess: ConnectionUseAuthorizer | undefined
+): Promise<boolean> {
+  if (connection.owner.scope === "personal") {
+    if (principal.kind !== "user" || principal.id !== connection.owner.principalId) return false;
+    if (connectionAccess === undefined) return true;
+  }
+  if (connectionAccess === undefined) return false;
+  try {
+    return await connectionAccess.canUse(principal, connection);
+  } catch {
+    return false;
+  }
+}
+
+function candidateOf(connection: PersistedConnection): AdhocConnectionCandidate {
+  return {
+    id: connection.id,
+    label: connection.label,
+    ownerScope: connection.owner.scope,
+  };
+}
 
 /**
  * Finds the caller's single authorized Connection for an exact origin.
@@ -162,11 +233,15 @@ export type AdhocMatch =
  * organization's silently spends one of them under the other's name, so it asks instead.
  */
 export async function matchAdhocConnection(
-  deps: { readonly connections: ConnectionReader },
+  deps: {
+    readonly connections: ConnectionReader;
+    readonly connectionAccess?: ConnectionUseAuthorizer;
+  },
   input: {
     readonly businessId: string;
     readonly origin: string;
     readonly principalId: string;
+    readonly connectionId?: string;
   }
 ): Promise<AdhocMatch> {
   let origin: string;
@@ -176,28 +251,42 @@ export async function matchAdhocConnection(
     return { kind: "none" };
   }
   const integration = { id: adhocIntegrationId(origin), majorVersion: ADHOC_MAJOR_VERSION };
-  const [personal, organization] = await Promise.all([
-    deps.connections.listForOwner(input.businessId, integration, {
-      scope: "personal",
-      principalKind: "user",
-      principalId: input.principalId,
-    }),
-    deps.connections.listForOwner(input.businessId, integration, { scope: "organization" }),
-  ]);
-  const usable = [...personal, ...organization].filter(
-    (connection) =>
-      connection.status === "active" &&
-      connection.health.status !== "action_required" &&
-      (connection.expiresAt === null || new Date(connection.expiresAt) > new Date()) &&
-      ruleOf(connection) !== undefined &&
-      typeof connection.secretBindings[ADHOC_CREDENTIAL_SLOT] === "string"
-  );
+  const principal = { kind: "user", id: input.principalId } as const;
+  if (input.connectionId !== undefined) {
+    const connection = await deps.connections.findById(input.businessId, input.connectionId);
+    if (connection === null || !belongsToOrigin(connection, origin)) {
+      return { kind: "denied", reason: "not_found" };
+    }
+    if (!(await mayUseConnection(principal, connection, deps.connectionAccess))) {
+      return { kind: "denied", reason: "not_authorized" };
+    }
+    const binding = usableBinding(connection);
+    if (binding === undefined) return { kind: "denied", reason: "unavailable" };
+    return { kind: "match", connection, ...binding };
+  }
+
+  const connections = await deps.connections.listForIntegration(input.businessId, integration);
+  const usable: {
+    readonly connection: PersistedConnection;
+    readonly rule: AdhocInjectionRule;
+    readonly credentialRef: string;
+  }[] = [];
+  for (const connection of connections) {
+    if (!belongsToOrigin(connection, origin)) continue;
+    const binding = usableBinding(connection);
+    if (binding === undefined) continue;
+    if (!(await mayUseConnection(principal, connection, deps.connectionAccess))) continue;
+    usable.push({ connection, ...binding });
+  }
   if (usable.length === 0) return { kind: "none" };
-  if (usable.length > 1) return { kind: "ambiguous", count: usable.length };
-  const [connection] = usable;
-  if (connection === undefined) return { kind: "none" };
-  const rule = ruleOf(connection);
-  const credentialRef = connection.secretBindings[ADHOC_CREDENTIAL_SLOT];
-  if (rule === undefined || credentialRef === undefined) return { kind: "none" };
-  return { kind: "match", connection, rule, credentialRef };
+  if (usable.length > 1) {
+    return {
+      kind: "ambiguous",
+      count: usable.length,
+      candidates: usable.map(({ connection }) => candidateOf(connection)),
+    };
+  }
+  const selected = usable[0];
+  if (selected === undefined) return { kind: "none" };
+  return { kind: "match", ...selected };
 }

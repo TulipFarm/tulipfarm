@@ -48,6 +48,11 @@ export const ADMIN_ONLY_SURFACES: readonly {
     ],
     enforcedIn: "integrations/routes.ts; integrations/marketplace-routes.ts",
   },
+  {
+    type: "deployment",
+    actions: ["deployment.oim_trust.manage"],
+    enforcedIn: "integrations/oim-release-routes.ts",
+  },
   /**
    * Publishing an authored OIM package is an operator decision: the manifest states the
    * destinations every Agent may then reach and the credential slots it may spend, so drafting one

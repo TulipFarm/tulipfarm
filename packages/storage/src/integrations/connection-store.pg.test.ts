@@ -115,6 +115,45 @@ describe("ConnectionStore", () => {
     ).toEqual([]);
   });
 
+  it("lists every personal Connection for one principal across Integrations and statuses", async () => {
+    await store.put(BUSINESS_ID, connection("active"));
+    await store.put(
+      BUSINESS_ID,
+      connection("revoked", {
+        integration: { id: "calendar", majorVersion: 2 },
+        status: "revoked",
+      })
+    );
+    await store.put(
+      BUSINESS_ID,
+      connection("other-person", {
+        owner: {
+          scope: "personal",
+          principalKind: "user",
+          principalId: "00000000-0000-4000-8000-000000000099",
+        },
+      })
+    );
+    await store.put(
+      BUSINESS_ID,
+      connection("organization", {
+        owner: { scope: "organization" },
+      })
+    );
+    await store.put(
+      BUSINESS_ID,
+      connection("team", {
+        owner: { scope: "team", teamId: "00000000-0000-4000-8000-000000000004" },
+      })
+    );
+
+    await expect(store.listPersonalForPrincipal(BUSINESS_ID, OWNER_ID)).resolves.toMatchObject([
+      { id: "active", status: "active" },
+      { id: "revoked", status: "revoked" },
+    ]);
+    await expect(store.listPersonalForPrincipal("business-2", OWNER_ID)).resolves.toEqual([]);
+  });
+
   it("isolates Team owners and keeps one default per exact Team", async () => {
     const firstTeam = { scope: "team" as const, teamId: "00000000-0000-4000-8000-000000000004" };
     const secondTeam = {

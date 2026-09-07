@@ -1,4 +1,4 @@
-import type { OimManifest, RoleDefinition } from "@tulipfarm/schema";
+import type { OimManifest, OimPackageContent, RoleDefinition } from "@tulipfarm/schema";
 
 export interface SoulAgent {
   name: string;
@@ -332,8 +332,12 @@ export interface SoulIntegration {
    * text of the call, so a Tool cannot be built without it.
    */
   oimDocuments?: Readonly<Record<string, string>>;
+  /** Parsed OpenAPI companions keyed by their declared package path. */
+  oimOpenApiDocuments?: Readonly<Record<string, unknown>>;
   /** Declared offline fixture contents, keyed by manifest path for authenticated on-demand runs. */
   oimFixtures?: Readonly<Record<string, string>>;
+  /** Exact declared companion bytes used to re-authorize and execute trusted OIM Hooks. */
+  oimPackageFiles?: Readonly<Record<string, OimPackageContent>>;
   connection?: IntegrationConnection;
   setupGuide?: string;
   /** `knowledge.guideFile`, read at load so an Agent never reaches into the soul repo for it. */

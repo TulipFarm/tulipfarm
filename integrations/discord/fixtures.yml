@@ -1,0 +1,129 @@
+version: 1
+cases:
+  - name: identifies-bot
+    operationId: current-user
+    request: {}
+    response:
+      status: 200
+      body:
+        id: "100000000000000001"
+        username: Tulip Bot
+        global_name: Tulip Bot
+        bot: true
+    expect:
+      request:
+        method: GET
+        url: https://discord.com/api/v10/users/@me
+        headers:
+          Authorization: Bot oim-fixture-credential
+      result:
+        id: "100000000000000001"
+        username: Tulip Bot
+        bot: true
+
+  - name: lists-message-page
+    operationId: list-messages
+    request:
+      channel_id: "200000000000000002"
+      limit: 2
+      before: "300000000000000003"
+    response:
+      status: 200
+      body:
+        - id: "300000000000000002"
+          channel_id: "200000000000000002"
+          content: Redacted status update
+          timestamp: "2026-09-07T06:00:00.000000+00:00"
+          author:
+            id: "100000000000000001"
+            username: Tulip Bot
+            bot: true
+    expect:
+      request:
+        method: GET
+        url: https://discord.com/api/v10/channels/200000000000000002/messages?limit=2&before=300000000000000003
+        headers:
+          Authorization: Bot oim-fixture-credential
+      result:
+        - id: "300000000000000002"
+          content: Redacted status update
+
+  - name: sends-message
+    operationId: send-message
+    request:
+      channel_id: "200000000000000002"
+      body:
+        content: Deployment is complete.
+        allowed_mentions:
+          parse: []
+    response:
+      status: 200
+      body:
+        id: "300000000000000004"
+        channel_id: "200000000000000002"
+        content: Deployment is complete.
+        timestamp: "2026-09-07T06:10:00.000000+00:00"
+    expect:
+      request:
+        method: POST
+        url: https://discord.com/api/v10/channels/200000000000000002/messages
+        headers:
+          Authorization: Bot oim-fixture-credential
+          content-type: application/json
+        body:
+          content: Deployment is complete.
+          allowed_mentions:
+            parse: []
+      result:
+        id: "300000000000000004"
+        content: Deployment is complete.
+
+  - name: edits-own-message
+    operationId: edit-message
+    request:
+      channel_id: "200000000000000002"
+      message_id: "300000000000000004"
+      body:
+        content: Deployment completed successfully.
+        allowed_mentions:
+          parse: []
+    response:
+      status: 200
+      body:
+        id: "300000000000000004"
+        channel_id: "200000000000000002"
+        content: Deployment completed successfully.
+        edited_timestamp: "2026-09-07T06:12:00.000000+00:00"
+    expect:
+      request:
+        method: PATCH
+        url: https://discord.com/api/v10/channels/200000000000000002/messages/300000000000000004
+        headers:
+          Authorization: Bot oim-fixture-credential
+          content-type: application/json
+        body:
+          content: Deployment completed successfully.
+          allowed_mentions:
+            parse: []
+      result:
+        id: "300000000000000004"
+        content: Deployment completed successfully.
+
+  - name: rejects-invalid-credential
+    operationId: current-user
+    request: {}
+    response:
+      status: 401
+      body:
+        message: "401: Unauthorized"
+        code: 0
+    expect:
+      request:
+        method: GET
+        url: https://discord.com/api/v10/users/@me
+        headers:
+          Authorization: Bot oim-fixture-credential
+      expectedError:
+        phase: before_dispatch
+        code: provider_unauthorized
+        retryable: false

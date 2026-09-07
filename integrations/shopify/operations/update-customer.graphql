@@ -1,0 +1,22 @@
+mutation ShopifyUpdateCustomer($input: CustomerInput!) {
+  customerUpdate(input: $input) {
+    customer {
+      id
+      displayName
+      firstName
+      lastName
+      defaultEmailAddress {
+        emailAddress
+      }
+      defaultPhoneNumber {
+        phoneNumber
+      }
+      tags
+      updatedAt
+    }
+    userErrors {
+      field
+      message
+    }
+  }
+}

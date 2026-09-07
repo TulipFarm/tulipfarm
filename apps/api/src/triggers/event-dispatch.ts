@@ -1,4 +1,5 @@
 import { DEPLOYMENT_BUSINESS_ID } from "@tulipfarm/constants";
+import type { IntegrationEvent } from "@tulipfarm/integrations";
 import {
   dispatchEventTrigger,
   type EventTriggerDispatch,
@@ -17,10 +18,19 @@ import type { IntegrationEventPayload, ResourceSideEffect } from "@tulipfarm/sto
  */
 
 export interface EventTriggerGatewayDeps {
-  listTriggers(): Promise<readonly RegisteredTrigger[]>;
+  listTriggers(businessId: string): Promise<readonly RegisteredTrigger[]>;
+  authorizeOimTrigger?(input: OimTriggerAuthorizationInput): Promise<boolean>;
   startRun(invocation: RunInvocation): Promise<{ runId: string; outcome: "started" | "duplicate" }>;
   nextEventId: () => string;
   now?: () => string;
+}
+
+export interface OimTriggerAuthorizationInput {
+  readonly businessId: string;
+  readonly integrationId: string;
+  readonly integrationMajorVersion: number;
+  readonly connectionId: string;
+  readonly trigger: RegisteredTrigger;
 }
 
 /** Events raised by this deployment about itself. Never a third party's provider name. */
@@ -35,23 +45,6 @@ const INTERNAL_VERIFICATION = { status: "verified" as const, method: "internal" 
 
 export const RESOURCE_EVENT_VERSION = 1;
 export const INTEGRATION_EVENT_VERSION = 1;
-
-export interface ClassifiedIntegrationEventPayload extends IntegrationEventPayload {
-  readonly occurredAt?: string;
-  readonly integrationId?: string;
-  readonly externalTenantId?: string;
-  readonly actor?: {
-    readonly kind: "user" | "guest";
-    readonly id: string;
-    readonly externalId: string;
-  };
-  readonly record?: { readonly type?: string; readonly id?: string };
-  readonly classification?: readonly string[];
-  readonly verification?: {
-    readonly status: "verified" | "unverified" | "failed";
-    readonly method?: string;
-  };
-}
 
 const RESOURCE_EVENT_TYPES = {
   create: "resource.created",
@@ -115,42 +108,58 @@ export class EventTriggerGateway {
   }
 
   /** Bind a classified Integration event to any matching Trigger. */
+  async dispatchIntegrationEvent(event: IntegrationEvent): Promise<EventTriggerDispatch>;
+  async dispatchIntegrationEvent(event: IntegrationEventPayload): Promise<EventTriggerDispatch>;
   async dispatchIntegrationEvent(
-    event: ClassifiedIntegrationEventPayload
+    event: IntegrationEvent | IntegrationEventPayload
   ): Promise<EventTriggerDispatch> {
     const at = this.timestamp();
+    if ("integrationId" in event) {
+      const envelope = eventSchema.validateEventEnvelope<Record<string, unknown>>({
+        eventId: event.deliveryId,
+        type: event.type,
+        version: INTEGRATION_EVENT_VERSION,
+        occurredAt: at,
+        receivedAt: at,
+        businessId: event.businessId,
+        source: { provider: event.integrationId, deliveryId: event.deliveryId },
+        principal: { kind: "service", internalId: "oim-ingress" },
+        record: {},
+        deduplicationKey: event.deliveryId,
+        classification: [],
+        data: {
+          integration: event.integrationId,
+          integrationId: event.integrationId,
+          integrationMajorVersion: event.integrationMajorVersion,
+          connectionId: event.connectionId,
+          protocol: "oim",
+          event: event.type,
+          payload: event.payload ?? {},
+        },
+        verification: INTERNAL_VERIFICATION,
+      });
+      return this.dispatch(envelope);
+    }
+
     const envelope = eventSchema.validateEventEnvelope<Record<string, unknown>>({
       eventId: event.eventId,
       type: event.event,
       version: INTEGRATION_EVENT_VERSION,
-      occurredAt: event.occurredAt ?? at,
+      occurredAt: at,
       receivedAt: at,
       businessId: DEPLOYMENT_BUSINESS_ID,
-      source: {
-        provider: event.integration,
-        ...(event.integrationId === undefined ? {} : { integrationId: event.integrationId }),
-        ...(event.externalTenantId === undefined
-          ? {}
-          : { externalTenantId: event.externalTenantId }),
-      },
-      principal:
-        event.actor === undefined
-          ? { kind: "service", internalId: `integration:${event.integration}` }
-          : {
-              kind: event.actor.kind,
-              internalId: event.actor.id,
-              externalId: event.actor.externalId,
-            },
-      record: event.record ?? {},
+      source: { provider: event.integration },
+      principal: { kind: "service", internalId: `integration:${event.integration}` },
+      record: {},
       deduplicationKey: event.eventId,
-      classification: [...(event.classification ?? [])],
+      classification: [],
       data: {
         integration: event.integration,
         protocol: event.protocol,
         event: event.event,
         payload: event.payload,
       },
-      verification: event.verification ?? INTERNAL_VERIFICATION,
+      verification: INTERNAL_VERIFICATION,
     });
     return this.dispatch(envelope);
   }
@@ -186,7 +195,29 @@ export class EventTriggerGateway {
     envelope: eventSchema.EventEnvelope<Record<string, unknown>>
   ): Promise<EventTriggerDispatch> {
     return dispatchEventTrigger(envelope, {
-      listTriggers: () => this.deps.listTriggers(),
+      listTriggers: (businessId) => this.deps.listTriggers(businessId),
+      authorizeTrigger: async (trigger) => {
+        if (envelope.data.protocol !== "oim") return true;
+        const integrationMajorVersion = envelope.data.integrationMajorVersion;
+        const connectionId = envelope.data.connectionId;
+        if (
+          typeof integrationMajorVersion !== "number" ||
+          !Number.isInteger(integrationMajorVersion) ||
+          integrationMajorVersion < 0 ||
+          typeof connectionId !== "string" ||
+          connectionId.length === 0 ||
+          this.deps.authorizeOimTrigger === undefined
+        ) {
+          return false;
+        }
+        return this.deps.authorizeOimTrigger({
+          businessId: envelope.businessId,
+          integrationId: envelope.source.provider,
+          integrationMajorVersion,
+          connectionId,
+          trigger,
+        });
+      },
       startRun: (invocation) => this.deps.startRun(invocation),
     });
   }

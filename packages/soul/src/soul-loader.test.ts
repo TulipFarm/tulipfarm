@@ -91,6 +91,75 @@ describe("SoulLoader", () => {
       expect(loaded?.manifest).toBeUndefined();
     });
 
+    it("keeps an OIM major's artifact slug separate from its stable manifest id", async () => {
+      await write(
+        join(TMP, "integrations", "twilio-v2", "oim.yml"),
+        OIM_MANIFEST.replace("version: 1.0.0", "version: 2.0.0")
+      );
+      const loader = new SoulLoader(TMP, makeLogger());
+
+      await loader.load();
+
+      expect([...loader.integrations.keys()]).toEqual(["twilio-v2"]);
+      expect(loader.integrations.get("twilio-v2")).toMatchObject({
+        slug: "twilio-v2",
+        sourceIntegration: "twilio",
+        oimManifest: { metadata: { id: "twilio", version: "2.0.0" } },
+      });
+      expect(loader.integrations.has("twilio")).toBe(false);
+    });
+
+    it("loads a declared OpenAPI companion as parsed data", async () => {
+      const manifest = `oimVersion: "1.0"
+kind: Integration
+metadata:
+  id: tasks
+  name: Tasks
+  version: 1.0.0
+  description: Read tasks.
+  license: Apache-2.0
+profiles:
+  core: "1.0"
+operations:
+  - id: get-task
+    name: get_task
+    description: Read one task.
+    effect: read
+    identityMode: shared_only
+    source:
+      type: openapi
+      file: openapi.yaml
+      operationId: getTask
+    response:
+      schema:
+        type: object
+      maxBytes: 16384
+files:
+  - path: openapi.yaml
+    role: openapi
+    sha256: "${"0".repeat(64)}"
+`;
+      await write(join(TMP, "integrations", "tasks", "oim.yml"), manifest);
+      await write(
+        join(TMP, "integrations", "tasks", "openapi.yaml"),
+        "openapi: 3.0.3\nservers:\n  - url: https://api.tasks.test\npaths: {}\n"
+      );
+      const loader = new SoulLoader(TMP, makeLogger());
+
+      await loader.load();
+
+      expect(loader.integrations.get("tasks")?.oimOpenApiDocuments).toEqual({
+        "openapi.yaml": {
+          openapi: "3.0.3",
+          servers: [{ url: "https://api.tasks.test" }],
+          paths: {},
+        },
+      });
+      expect(loader.integrations.get("tasks")?.oimPackageFiles).toEqual({
+        "openapi.yaml": "openapi: 3.0.3\nservers:\n  - url: https://api.tasks.test\npaths: {}\n",
+      });
+    });
+
     it("quarantines an integration that declares both oim.yml and manifest.yml", async () => {
       await write(join(TMP, "integrations", "both", "oim.yml"), OIM_MANIFEST);
       await write(

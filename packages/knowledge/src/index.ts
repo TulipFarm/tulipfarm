@@ -302,6 +302,7 @@ export type {
   KnowledgeSourceVerification,
   LiveAccessControl,
   MutableKnowledgeSourceStore,
+  OimKnowledgeSourceLocator,
   SnapshotAccessControl,
 } from "./source";
 export { InMemoryKnowledgeSourceStore } from "./source";

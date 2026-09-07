@@ -5,7 +5,7 @@ metadata:
   id: trello
   name: Trello
   version: 1.0.0
-  description: Read Trello boards, lists, and cards with an API key and token.
+  description: Read Trello boards, lists, and cards, and create or update cards.
   license: Apache-2.0
   maintainers:
     - name: TulipFarm
@@ -14,6 +14,11 @@ metadata:
 profiles:
   core: "1.1"
   auth: "1.0"
+
+files:
+  - path: fixtures.yml
+    role: fixture
+    sha256: "4ceaf1e54e44cea85815b9617565554796ca5af30daad93bc0d6576a6311c7e9"
 
 auth:
   credentialSlots:
@@ -83,10 +88,295 @@ operations:
           id: { type: string }
           fullName: { type: string }
           username: { type: string }
+        required: [id, fullName, username]
       projection:
         - /id
         - /fullName
         - /username
+    rateLimit:
+      requests: 100
+      perSeconds: 10
+      scope: connection
+
+  - id: list-boards
+    name: trello_list_boards
+    description: List boards the connected member can access.
+    effect: read
+    identityMode: shared_only
+    credentialSlot: api_key
+    credentialInjection:
+      in: query
+      name: key
+      format: "{token}"
+    secondaryCredential:
+      slot: token
+      injection:
+        in: query
+        name: token
+        format: "{token}"
+    source:
+      type: http
+      method: GET
+      baseUrl: https://api.trello.com
+      path: /1/members/me/boards
+      parameters:
+        - name: filter
+          in: query
+          schema:
+            type: string
+            enum: [all, closed, members, open, organization, public, starred]
+        - name: fields
+          in: query
+          value: id,name,desc,closed,url,dateLastActivity
+          schema: { type: string }
+    response:
+      maxBytes: 262144
+      schema:
+        type: array
+        items:
+          type: object
+          properties:
+            id: { type: string }
+            name: { type: string }
+            desc: { type: string }
+            closed: { type: boolean }
+            url: { type: string }
+            dateLastActivity: { type: string }
+          required: [id, name]
+    rateLimit:
+      requests: 100
+      perSeconds: 10
+      scope: connection
+
+  - id: list-lists
+    name: trello_list_lists
+    description: List the open or closed lists on one board.
+    effect: read
+    identityMode: shared_only
+    credentialSlot: api_key
+    credentialInjection:
+      in: query
+      name: key
+      format: "{token}"
+    secondaryCredential:
+      slot: token
+      injection:
+        in: query
+        name: token
+        format: "{token}"
+    source:
+      type: http
+      method: GET
+      baseUrl: https://api.trello.com
+      path: /1/boards/{board_id}/lists
+      parameters:
+        - name: board_id
+          in: path
+          required: true
+          schema: { type: string, minLength: 1 }
+        - name: filter
+          in: query
+          schema:
+            type: string
+            enum: [all, closed, none, open]
+        - name: fields
+          in: query
+          value: id,name,closed,idBoard,pos
+          schema: { type: string }
+    response:
+      maxBytes: 131072
+      schema:
+        type: array
+        items:
+          type: object
+          properties:
+            id: { type: string }
+            name: { type: string }
+            closed: { type: boolean }
+            idBoard: { type: string }
+            pos: { type: number }
+          required: [id, name, idBoard]
+    rateLimit:
+      requests: 100
+      perSeconds: 10
+      scope: connection
+
+  - id: list-cards
+    name: trello_list_cards
+    description: List cards in one Trello list.
+    effect: read
+    identityMode: shared_only
+    credentialSlot: api_key
+    credentialInjection:
+      in: query
+      name: key
+      format: "{token}"
+    secondaryCredential:
+      slot: token
+      injection:
+        in: query
+        name: token
+        format: "{token}"
+    source:
+      type: http
+      method: GET
+      baseUrl: https://api.trello.com
+      path: /1/lists/{list_id}/cards
+      parameters:
+        - name: list_id
+          in: path
+          required: true
+          schema: { type: string, minLength: 1 }
+    response:
+      maxBytes: 524288
+      schema:
+        type: array
+        items:
+          type: object
+          properties:
+            id: { type: string }
+            name: { type: string }
+            desc: { type: string }
+            closed: { type: boolean }
+            due: { type: ["string", "null"] }
+            dueComplete: { type: boolean }
+            idBoard: { type: string }
+            idList: { type: string }
+            url: { type: string }
+          required: [id, name, idBoard, idList]
+    rateLimit:
+      requests: 100
+      perSeconds: 10
+      scope: connection
+
+  - id: create-card
+    name: trello_create_card
+    description: Create one card in a Trello list.
+    effect: create
+    identityMode: shared_only
+    credentialSlot: api_key
+    credentialInjection:
+      in: query
+      name: key
+      format: "{token}"
+    secondaryCredential:
+      slot: token
+      injection:
+        in: query
+        name: token
+        format: "{token}"
+    source:
+      type: http
+      method: POST
+      baseUrl: https://api.trello.com
+      path: /1/cards
+      parameters:
+        - name: idList
+          in: query
+          required: true
+          schema: { type: string, minLength: 1 }
+        - name: name
+          in: query
+          required: true
+          schema: { type: string, minLength: 1 }
+        - name: desc
+          in: query
+          schema: { type: string }
+        - name: pos
+          in: query
+          schema:
+            type: string
+            enum: [top, bottom]
+        - name: due
+          in: query
+          schema: { type: string }
+        - name: dueComplete
+          in: query
+          schema: { type: boolean }
+    response:
+      maxBytes: 131072
+      schema:
+        type: object
+        properties:
+          id: { type: string }
+          name: { type: string }
+          desc: { type: string }
+          closed: { type: boolean }
+          due: { type: ["string", "null"] }
+          dueComplete: { type: boolean }
+          idBoard: { type: string }
+          idList: { type: string }
+          url: { type: string }
+        required: [id, name, idBoard, idList]
+    rateLimit:
+      requests: 100
+      perSeconds: 10
+      scope: connection
+
+  - id: update-card
+    name: trello_update_card
+    description: Update a card's basic fields or move it to another list.
+    effect: update
+    identityMode: shared_only
+    credentialSlot: api_key
+    credentialInjection:
+      in: query
+      name: key
+      format: "{token}"
+    secondaryCredential:
+      slot: token
+      injection:
+        in: query
+        name: token
+        format: "{token}"
+    source:
+      type: http
+      method: PUT
+      baseUrl: https://api.trello.com
+      path: /1/cards/{card_id}
+      parameters:
+        - name: card_id
+          in: path
+          required: true
+          schema: { type: string, minLength: 1 }
+        - name: name
+          in: query
+          schema: { type: string, minLength: 1 }
+        - name: desc
+          in: query
+          schema: { type: string }
+        - name: closed
+          in: query
+          schema: { type: boolean }
+        - name: idList
+          in: query
+          schema: { type: string, minLength: 1 }
+        - name: pos
+          in: query
+          schema:
+            type: string
+            enum: [top, bottom]
+        - name: due
+          in: query
+          schema: { type: string }
+        - name: dueComplete
+          in: query
+          schema: { type: boolean }
+    response:
+      maxBytes: 131072
+      schema:
+        type: object
+        properties:
+          id: { type: string }
+          name: { type: string }
+          desc: { type: string }
+          closed: { type: boolean }
+          due: { type: ["string", "null"] }
+          dueComplete: { type: boolean }
+          idBoard: { type: string }
+          idList: { type: string }
+          url: { type: string }
+        required: [id, name, idBoard, idList]
     rateLimit:
       requests: 100
       perSeconds: 10

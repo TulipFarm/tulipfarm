@@ -1,4 +1,5 @@
 import { renderDocument } from "@tulipfarm/files";
+import { compileJsonSchema } from "@tulipfarm/schema";
 import { SecretUnavailableError } from "@tulipfarm/secrets";
 import { MemoryCache } from "@tulipfarm/storage";
 import { definitionForToolCall } from "@tulipfarm/tool-broker";
@@ -67,6 +68,27 @@ describe("api_request classification", () => {
     });
     expect(call).toMatchObject({ mutating: false, requiresApproval: true });
   });
+
+  it("requires exact Approval when a Connection is selected", () => {
+    const call = definitionForToolCall(apiRequestTool, {
+      url: "https://api.example.com/me",
+      method: "GET",
+      connection_id: "connection-1",
+    });
+    expect(call).toMatchObject({ mutating: false, requiresApproval: true });
+  });
+
+  it("does not accept both a named Credential and a Connection selector", () => {
+    const validate = compileJsonSchema(apiRequestTool.inputSchema);
+    expect(
+      validate({
+        url: "https://api.example.com/me",
+        method: "GET",
+        connection_id: "connection-1",
+        credential: { secret: "EXAMPLE_TOKEN", header: "authorization" },
+      })
+    ).not.toBeNull();
+  });
 });
 
 describe("caller cancellation", () => {
@@ -92,6 +114,30 @@ describe("caller cancellation", () => {
 });
 
 describe("network Tool handlers", () => {
+  it("returns secure setup to the originating Chat without copying the provider URL", async () => {
+    const ctx = context({
+      conversationId: "chat/with?reserved#characters",
+      http: {
+        send: vi.fn(async () => ({
+          status: 401,
+          headers: { "www-authenticate": "Bearer" },
+          body: "Sign in",
+        })),
+      },
+    });
+    const result = await apiRequestTool.handler(
+      { url: "https://api.example.com/items?private=value", method: "GET" },
+      ctx
+    );
+    expect(result).toMatchObject({
+      success: true,
+      data: {
+        setupUrl:
+          "/business/connections/new?origin=https%3A%2F%2Fapi.example.com&return_to=%2Fchat%2Fchat%252Fwith%253Freserved%2523characters",
+      },
+    });
+  });
+
   it("leases a Credential only around the request and does not return it", async () => {
     const ctx = context();
     const result = await apiRequestTool.handler(
@@ -767,6 +813,7 @@ describe("api_request session cookies", () => {
 describe("api_request Connection reuse", () => {
   const HEADER_MATCH = {
     kind: "match" as const,
+    connectionId: "connection-1",
     credentialRef: "secret://adhoc-1",
     rule: { location: "header" as const, name: "authorization", valuePrefix: "Bearer " },
     label: "Example API",
@@ -833,7 +880,19 @@ describe("api_request Connection reuse", () => {
 
   it("asks rather than choosing when more than one Connection could serve the origin", async () => {
     const { ctx, send } = reuseContext({
-      matchConnection: vi.fn(async () => ({ kind: "ambiguous" as const, count: 2 })),
+      conversationId: "conversation-1",
+      matchConnection: vi.fn(async () => ({
+        kind: "ambiguous" as const,
+        count: 2,
+        candidates: [
+          { connectionId: "personal-1", label: "My account", ownerScope: "personal" as const },
+          {
+            connectionId: "organization-1",
+            label: "Company account",
+            ownerScope: "organization" as const,
+          },
+        ],
+      })),
     });
     const result = await apiRequestTool.handler(
       { url: "https://api.example.com/items", method: "GET" },
@@ -841,8 +900,58 @@ describe("api_request Connection reuse", () => {
     );
     expect(result).toMatchObject({
       success: true,
-      data: { kind: "connection_ambiguous", origin: "https://api.example.com", count: 2 },
+      data: {
+        kind: "connection_ambiguous",
+        origin: "https://api.example.com",
+        count: 2,
+        candidates: [
+          { connection_id: "personal-1", label: "My account", owner_scope: "personal" },
+          {
+            connection_id: "organization-1",
+            label: "Company account",
+            owner_scope: "organization",
+          },
+        ],
+        setupUrl:
+          "/business/connections?origin=https%3A%2F%2Fapi.example.com&return_to=%2Fchat%2Fconversation-1",
+      },
     });
+    expect(JSON.stringify(result)).not.toContain("secret://");
+    expect(JSON.stringify(result)).not.toContain("authorization");
+    expect(send).not.toHaveBeenCalled();
+  });
+
+  it("uses only the exact Connection selected by the call", async () => {
+    const { ctx, useConnection } = reuseContext();
+    await apiRequestTool.handler(
+      {
+        url: "https://api.example.com/items",
+        method: "GET",
+        connection_id: "connection-1",
+      },
+      ctx
+    );
+    expect(ctx.matchConnection).toHaveBeenCalledWith("https://api.example.com", "connection-1");
+    expect(useConnection).toHaveBeenCalledWith(
+      expect.objectContaining({ connectionId: "connection-1" }),
+      expect.any(Function)
+    );
+  });
+
+  it("does not fall back when the selected Connection is unavailable", async () => {
+    const { ctx, send, useConnection } = reuseContext({
+      matchConnection: vi.fn(async () => ({ kind: "denied" as const })),
+    });
+    const result = await apiRequestTool.handler(
+      {
+        url: "https://api.example.com/items",
+        method: "GET",
+        connection_id: "missing",
+      },
+      ctx
+    );
+    expect(result).toMatchObject({ success: false, error: { code: "write_denied" } });
+    expect(useConnection).not.toHaveBeenCalled();
     expect(send).not.toHaveBeenCalled();
   });
 
@@ -876,5 +985,23 @@ describe("api_request Connection reuse", () => {
     await apiRequestTool.handler({ url: "https://api.example.com/items", method: "GET" }, ctx);
     expect(matchConnection).not.toHaveBeenCalled();
     expect(send.mock.calls[0]?.[0]).toMatchObject({ headers: {} });
+  });
+
+  it("does not expose a query Credential in the Tool result URL", async () => {
+    const { ctx } = reuseContext({
+      matchConnection: vi.fn(async () => ({
+        ...HEADER_MATCH,
+        rule: { location: "query" as const, name: "api_key", valuePrefix: "" },
+      })),
+    });
+    const result = await apiRequestTool.handler(
+      { url: "https://api.example.com/items?q=1", method: "GET" },
+      ctx
+    );
+    expect(JSON.stringify(result)).not.toContain("tok-live");
+    expect(result).toMatchObject({
+      success: true,
+      data: { url: "https://api.example.com/items?q=1" },
+    });
   });
 });

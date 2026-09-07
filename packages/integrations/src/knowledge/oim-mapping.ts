@@ -11,19 +11,30 @@
  *   who cannot ask a question here anyway; dropping the entry narrows access, so it is safe.
  */
 
-import type { OimKnowledgePrincipalKind } from "@tulipfarm/schema";
+import { canonicalHash, type OimKnowledgePrincipalKind } from "@tulipfarm/schema";
 import { readPointer } from "../egress/oim-pagination";
 import type { KnowledgeProfilePlan } from "./oim-profile";
 import type { EmittedPrincipalRef } from "./source";
 
 export interface ListedItem {
   readonly itemId: string;
+  readonly fields?: Readonly<Record<string, KnowledgeItemFieldValue>>;
   readonly revision?: string;
   readonly title?: string;
   readonly sourceUrl?: string;
   readonly updatedAt?: string;
   readonly contentType?: string;
   readonly deleted: boolean;
+}
+
+export type KnowledgeItemFieldValue = string | number | boolean;
+
+export class OimKnowledgeMappingError extends Error {
+  readonly name = "OimKnowledgeMappingError";
+
+  constructor(readonly code: "item_field_invalid") {
+    super(code);
+  }
 }
 
 export interface MappedContent {
@@ -71,17 +82,50 @@ function deletedFlag(value: unknown): boolean {
   return false;
 }
 
+function scalar(value: unknown): KnowledgeItemFieldValue | undefined {
+  if (typeof value === "string" || typeof value === "boolean") return value;
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  return undefined;
+}
+
 /** Reads one page of the list operation. An item with no stable id is skipped, never guessed. */
-export function mapListItems(plan: KnowledgeProfilePlan, response: unknown): ListedItem[] {
+export function mapListItems(
+  plan: KnowledgeProfilePlan,
+  response: unknown,
+  scope?: string
+): ListedItem[] {
   const raw = readPointer(response, plan.list.itemsPointer);
   if (!Array.isArray(raw)) return [];
   const mapping = plan.list.mapping;
   const items: ListedItem[] = [];
   for (const candidate of raw) {
-    const itemId = text(readPointer(candidate, mapping.itemId));
+    const fields: Record<string, KnowledgeItemFieldValue> = {};
+    for (const [name, field] of Object.entries(mapping.itemFields ?? {})) {
+      const value = scalar(
+        field.source === "scope" ? scope : readPointer(candidate, field.pointer)
+      );
+      if (value === undefined) throw new OimKnowledgeMappingError("item_field_invalid");
+      fields[name] = value;
+    }
+    const identity =
+      mapping.itemIdentity === undefined
+        ? undefined
+        : mapping.itemIdentity.map((name) => {
+            if (!Object.hasOwn(fields, name)) {
+              throw new OimKnowledgeMappingError("item_field_invalid");
+            }
+            return [name, fields[name]] as const;
+          });
+    const itemId =
+      identity === undefined
+        ? mapping.itemId === undefined
+          ? undefined
+          : text(readPointer(candidate, mapping.itemId))
+        : canonicalHash({ identity });
     if (itemId === undefined) continue;
     items.push({
       itemId,
+      ...(mapping.itemFields === undefined ? {} : { fields }),
       revision: mapping.revision ? text(readPointer(candidate, mapping.revision)) : undefined,
       title: mapping.title ? text(readPointer(candidate, mapping.title)) : undefined,
       sourceUrl: mapping.sourceUrl ? text(readPointer(candidate, mapping.sourceUrl)) : undefined,
@@ -101,8 +145,8 @@ export function mapContent(
   response: unknown
 ): MappedContent | undefined {
   const mapping = plan.content.mapping;
-  const body = readPointer(response, mapping.content);
-  if (typeof body !== "string") return undefined;
+  const body = mapContentValue(response, mapping.content);
+  if (body === undefined) return undefined;
   return {
     content: body,
     contentType: mapping.contentType ? text(readPointer(response, mapping.contentType)) : undefined,
@@ -111,6 +155,26 @@ export function mapContent(
     sourceUrl: mapping.sourceUrl ? text(readPointer(response, mapping.sourceUrl)) : undefined,
     updatedAt: mapping.updatedAt ? text(readPointer(response, mapping.updatedAt)) : undefined,
   };
+}
+
+function mapContentValue(
+  response: unknown,
+  mapping: KnowledgeProfilePlan["content"]["mapping"]["content"]
+): string | undefined {
+  if (typeof mapping === "string") {
+    const value = readPointer(response, mapping);
+    return typeof value === "string" ? value : undefined;
+  }
+
+  const items = readPointer(response, mapping.itemsPointer);
+  if (!Array.isArray(items) || items.length === 0) return undefined;
+  const values: string[] = [];
+  for (const item of items) {
+    const value = readPointer(item, mapping.itemPointer);
+    if (typeof value !== "string") return undefined;
+    values.push(value);
+  }
+  return values.join(mapping.separator);
 }
 
 /**

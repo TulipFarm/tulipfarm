@@ -5,6 +5,7 @@ import type { AuditService } from "../audit/service";
 import { ErrorSchema } from "../auth/schemas";
 import type { UserDoc } from "../auth/users";
 import type { RequireAuthorization } from "../authz/route-gate";
+import { registerOimCapabilitiesRoute } from "./oim-capabilities";
 import { isNewerVersion, runningVersion } from "./version";
 
 type PreHandler = (req: FastifyRequest, reply: FastifyReply) => Promise<void>;
@@ -51,6 +52,7 @@ export function registerSystemRoutes(
   requireAuth: PreHandler,
   requireAuthorization: RequireAuthorization
 ): void {
+  registerOimCapabilitiesRoute(app, {}, requireAuth);
   app.get(
     "/api/v1/system/update-check",
     {

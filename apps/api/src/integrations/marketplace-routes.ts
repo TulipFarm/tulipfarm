@@ -9,8 +9,11 @@ import {
   IntegrationInstallError,
   inspectIntegrationSource,
   installIntegrationFromSource,
+  type OimInstallTrust,
+  reviewOimTrust,
   updateIntegrationFromSource,
 } from "./install";
+import { oimManifestMajor, resolveOimMajorArtifact } from "./oim-major-versions";
 
 /* Installing curated integrations uses the same clone/validate/write path as a pasted repo URL. */
 
@@ -126,14 +129,49 @@ const DiscoveredSchema = {
     version: { type: "string" },
     maintainer: { type: "string" },
     installed: { type: "boolean" },
+    installed_slug: { type: "string" },
+    major_version: { type: "integer" },
     installable: { type: "boolean" },
     issues: { type: "array", items: { type: "string" } },
     definition: { type: "string", enum: ["oim", "legacy"] },
     support: { type: "string", enum: ["official", "community"] },
+    hooks_allowed: { type: "boolean" },
+    auto_patch_eligible: { type: "boolean" },
+    verified_signer_key_id: { type: "string" },
+    revocation_sequence: { type: "integer", minimum: 0 },
     license: { type: "string" },
-    packageDigest: { type: "string" },
+    package_digest: { type: "string" },
     fixtures: CapabilityReviewSchema.properties.fixtures,
     review: CapabilityReviewSchema,
+  },
+} as const;
+
+const SignedReleaseSchema = {
+  type: "object",
+  required: ["envelopeVersion", "release", "signature"],
+  additionalProperties: false,
+  properties: {
+    envelopeVersion: { type: "integer", const: 1 },
+    release: {
+      type: "object",
+      required: ["integrationId", "version", "packageDigest"],
+      additionalProperties: false,
+      properties: {
+        integrationId: { type: "string", minLength: 1 },
+        version: { type: "string", minLength: 1 },
+        packageDigest: { type: "string", pattern: "^[0-9a-f]{64}$" },
+      },
+    },
+    signature: {
+      type: "object",
+      required: ["algorithm", "keyId", "value"],
+      additionalProperties: false,
+      properties: {
+        algorithm: { type: "string", const: "Ed25519" },
+        keyId: { type: "string", minLength: 1 },
+        value: { type: "string", minLength: 1 },
+      },
+    },
   },
 } as const;
 
@@ -143,7 +181,8 @@ export function registerIntegrationMarketplaceRoutes(
   soulWriter: SoulWriter,
   bundled: ReadonlyMap<string, BundledIntegration>,
   requireAuth: PreHandler,
-  requireAuthorization: RequireAuthorization
+  requireAuthorization: RequireAuthorization,
+  releaseTrust?: OimInstallTrust
 ): void {
   function bundledSlugs(): Set<string> {
     return new Set(bundled.keys());
@@ -155,21 +194,25 @@ export function registerIntegrationMarketplaceRoutes(
       preHandler: requireAuth,
       schema: {
         description:
-          "Clone a git repo (source accepts an optional #branch suffix) and report the integrations it offers, without installing.",
+          "Inspect a git repository or direct HTTPS oim.yml URL and report the integrations it offers, without installing.",
         tags: ["integrations"],
         security: [{ sessionCookie: [] }, { bearerToken: [] }],
         body: {
           type: "object",
           required: ["source"],
           additionalProperties: false,
-          properties: { source: { type: "string", minLength: 1 } },
+          properties: {
+            source: { type: "string", minLength: 1 },
+            signed_release: SignedReleaseSchema,
+          },
         },
         response: {
           200: {
             type: "object",
-            required: ["source", "ref", "integrations"],
+            required: ["source", "source_type", "ref", "integrations"],
             properties: {
               source: { type: "string" },
+              source_type: { type: "string", enum: ["github", "git", "https"] },
               ref: { type: "string" },
               integrations: { type: "array", items: DiscoveredSchema },
             },
@@ -181,51 +224,71 @@ export function registerIntegrationMarketplaceRoutes(
       },
     },
     async (req, reply) => {
-      const { source } = req.body as { source: string };
+      const { source, signed_release: signedRelease } = req.body as {
+        source: string;
+        signed_release?: unknown;
+      };
       try {
         const actorId = commitActorFromRequest(req).principalId;
-        const { ref, integrations } = await inspectIntegrationSource(source, actorId);
+        const inspection = await inspectIntegrationSource(source, actorId);
+        const { ref, integrations } = inspection;
         const bundledNames = bundledSlugs();
         return {
-          source,
+          source: inspection.source,
+          source_type: inspection.sourceType,
           ref,
-          integrations: integrations.map((entry) => {
-            const installed =
-              bundledNames.has(entry.name) || soulLoader.integrations.has(entry.name);
-            if (entry.oimManifest !== undefined) {
-              const review = describeOimCapabilities(entry.oimManifest);
+          integrations: await Promise.all(
+            integrations.map(async (entry) => {
+              if (entry.oimManifest !== undefined) {
+                const manifest = entry.oimManifest;
+                const artifact = resolveOimMajorArtifact(soulLoader.integrations.values(), {
+                  id: manifest.metadata.id,
+                  majorVersion: oimManifestMajor(manifest),
+                });
+                const review = describeOimCapabilities(manifest);
+                const trust = await reviewOimTrust(entry, signedRelease, releaseTrust);
+                return {
+                  name: entry.name,
+                  description: manifest.metadata.description,
+                  version: review.version,
+                  // The review carries the maintainer list; this stays a single string so a client
+                  // written against the legacy shape keeps working.
+                  maintainer: review.maintainers[0],
+                  installed: bundledNames.has(entry.name) || artifact !== undefined,
+                  ...(artifact === undefined ? {} : { installed_slug: artifact.slug }),
+                  major_version: oimManifestMajor(manifest),
+                  installable: trust.issues.length === 0,
+                  issues: trust.issues,
+                  definition: "oim",
+                  support: trust.support,
+                  hooks_allowed: trust.hooksAllowed,
+                  auto_patch_eligible: trust.autoPatchEligible,
+                  ...(trust.signerKeyId === undefined
+                    ? {}
+                    : { verified_signer_key_id: trust.signerKeyId }),
+                  ...(trust.revocationSequence === undefined
+                    ? {}
+                    : { revocation_sequence: trust.revocationSequence }),
+                  license: review.license,
+                  package_digest: entry.packageDigest,
+                  fixtures: entry.fixtureResults,
+                  review,
+                };
+              }
+              const installed =
+                bundledNames.has(entry.name) || soulLoader.integrations.has(entry.name);
               return {
                 name: entry.name,
-                description: entry.oimManifest.metadata.description,
-                version: review.version,
-                // The review carries the maintainer list; this stays a single string so a client
-                // written against the legacy shape keeps working.
-                maintainer: review.maintainers[0],
+                description: entry.manifest?.description,
+                version: entry.manifest?.version,
+                maintainer: entry.manifest?.maintainer,
                 installed,
                 installable: entry.issues.length === 0,
                 issues: entry.issues,
-                definition: "oim",
-                // Every installable OIM package is Community today: nothing signs a release yet,
-                // and labelling one "official" before a signature can prove it would be the
-                // support claim this field exists to keep honest.
-                support: "community",
-                license: review.license,
-                packageDigest: entry.packageDigest,
-                fixtures: entry.fixtureResults,
-                review,
+                definition: "legacy",
               };
-            }
-            return {
-              name: entry.name,
-              description: entry.manifest?.description,
-              version: entry.manifest?.version,
-              maintainer: entry.manifest?.maintainer,
-              installed,
-              installable: entry.issues.length === 0,
-              issues: entry.issues,
-              definition: "legacy",
-            };
-          }),
+            })
+          ),
         };
       } catch (error) {
         // Every failure here is a bad source: nothing can be missing or conflict until an install
@@ -251,7 +314,7 @@ export function registerIntegrationMarketplaceRoutes(
       ],
       schema: {
         description:
-          "Install a declarative integration from a git repo into the soul repo. `name` selects one when the repo offers several.",
+          "Install a declarative integration from Git or HTTPS. OIM installs require the exact ref and digest returned by inspection.",
         tags: ["integrations"],
         security: [{ sessionCookie: [] }, { bearerToken: [] }],
         body: {
@@ -261,6 +324,20 @@ export function registerIntegrationMarketplaceRoutes(
           properties: {
             source: { type: "string", minLength: 1 },
             name: { type: "string" },
+            ref: {
+              type: "string",
+              description: "Opaque source reference returned by the inspect endpoint.",
+            },
+            approve_digest: {
+              type: "string",
+              description: "Exact OIM package digest returned by the inspect endpoint.",
+            },
+            signed_release: SignedReleaseSchema,
+            auto_patch_opt_in: {
+              type: "boolean",
+              description:
+                "Official releases enable compatible patch updates by default; set false to opt out. Community releases cannot opt in.",
+            },
           },
         },
         response: {
@@ -271,6 +348,10 @@ export function registerIntegrationMarketplaceRoutes(
               name: { type: "string" },
               source: { type: "string" },
               ref: { type: "string" },
+              package_digest: { type: "string" },
+              integration_id: { type: "string" },
+              major_version: { type: "integer" },
+              support: { type: "string", enum: ["official", "community"] },
             },
           },
           400: ErrorSchema,
@@ -284,19 +365,43 @@ export function registerIntegrationMarketplaceRoutes(
       },
     },
     async (req, reply) => {
-      const { source, name } = req.body as { source: string; name?: string };
+      const {
+        source,
+        name,
+        ref,
+        approve_digest: approveDigest,
+        signed_release: signedRelease,
+        auto_patch_opt_in: autoPatchOptIn,
+      } = req.body as {
+        source: string;
+        name?: string;
+        ref?: string;
+        approve_digest?: string;
+        signed_release?: unknown;
+        auto_patch_opt_in?: boolean;
+      };
       const actor = commitActorFromRequest(req);
       try {
-        return await installIntegrationFromSource(
-          { source, name },
+        const result = await installIntegrationFromSource(
+          { source, name, ref, approveDigest, signedRelease, autoPatchOptIn },
           {
             soulLoader,
             soulWriter,
             bundledSlugs: bundledSlugs(),
             actor,
             actorId: actor.principalId,
+            releaseTrust,
           }
         );
+        return {
+          name: result.name,
+          source: result.source,
+          ref: result.ref,
+          ...(result.packageDigest === undefined ? {} : { package_digest: result.packageDigest }),
+          ...(result.integrationId === undefined ? {} : { integration_id: result.integrationId }),
+          ...(result.majorVersion === undefined ? {} : { major_version: result.majorVersion }),
+          ...(result.support === undefined ? {} : { support: result.support }),
+        };
       } catch (error) {
         if (error instanceof IntegrationInstallError) {
           return reply.code(error.status).send({ error: error.message });
@@ -322,7 +427,7 @@ export function registerIntegrationMarketplaceRoutes(
         }),
       ],
       schema: {
-        description: "Update an installed integration from its source repository.",
+        description: "Update an installed integration from its reviewed Git or HTTPS source.",
         tags: ["integrations"],
         security: [{ sessionCookie: [] }, { bearerToken: [] }],
         params: {
@@ -335,8 +440,21 @@ export function registerIntegrationMarketplaceRoutes(
           additionalProperties: false,
           properties: {
             source: { type: "string" },
+            ref: {
+              type: "string",
+              description: "Opaque source reference returned with the reviewed update.",
+            },
             /** Required when an OIM package's digest changed since it was approved. */
-            approve_digest: { type: "string" },
+            approve_digest: {
+              type: "string",
+              description: "Exact changed OIM package digest returned by inspection.",
+            },
+            signed_release: SignedReleaseSchema,
+            auto_patch_opt_in: {
+              type: "boolean",
+              description:
+                "Official releases preserve their patch preference; set false to opt out or true to opt back in. Community releases cannot opt in.",
+            },
           },
         },
         response: {
@@ -348,6 +466,9 @@ export function registerIntegrationMarketplaceRoutes(
               source: { type: "string" },
               ref: { type: "string" },
               package_digest: { type: "string" },
+              integration_id: { type: "string" },
+              major_version: { type: "integer" },
+              support: { type: "string", enum: ["official", "community"] },
             },
           },
           400: ErrorSchema,
@@ -362,20 +483,30 @@ export function registerIntegrationMarketplaceRoutes(
     },
     async (req, reply) => {
       const { name } = req.params as { name: string };
-      const { source, approve_digest: approveDigest } = (req.body ?? {}) as {
+      const {
+        source,
+        ref,
+        approve_digest: approveDigest,
+        signed_release: signedRelease,
+        auto_patch_opt_in: autoPatchOptIn,
+      } = (req.body ?? {}) as {
         source?: string;
+        ref?: string;
         approve_digest?: string;
+        signed_release?: unknown;
+        auto_patch_opt_in?: boolean;
       };
       const actor = commitActorFromRequest(req);
       try {
         const result = await updateIntegrationFromSource(
-          { source, name, approveDigest },
+          { source, name, ref, approveDigest, signedRelease, autoPatchOptIn },
           {
             soulLoader,
             soulWriter,
             bundledSlugs: bundledSlugs(),
             actor,
             actorId: actor.principalId,
+            releaseTrust,
           }
         );
         return {
@@ -383,6 +514,9 @@ export function registerIntegrationMarketplaceRoutes(
           source: result.source,
           ref: result.ref,
           ...(result.packageDigest === undefined ? {} : { package_digest: result.packageDigest }),
+          ...(result.integrationId === undefined ? {} : { integration_id: result.integrationId }),
+          ...(result.majorVersion === undefined ? {} : { major_version: result.majorVersion }),
+          ...(result.support === undefined ? {} : { support: result.support }),
         };
       } catch (error) {
         if (error instanceof IntegrationInstallError) {

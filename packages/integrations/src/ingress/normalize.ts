@@ -1,4 +1,5 @@
-import { compileJsonSchema, type OimEventType } from "@tulipfarm/schema";
+import { compileJsonSchema, type OimEventType, type OimManifest } from "@tulipfarm/schema";
+import { type OimHookPhaseRunner, runOimHookPhase } from "../oim-hooks";
 
 /** What a `response_normalize` hook is given. Nothing here can identify a credential. */
 export interface NormalizationInput {
@@ -12,10 +13,7 @@ export interface NormalizationInput {
  * The runner is injected so this module never decides where untrusted code executes; a caller that
  * has no sandbox can pass one that refuses.
  */
-export type NormalizeHookRunner = (
-  exportName: string,
-  input: NormalizationInput
-) => Promise<unknown>;
+export type NormalizeHookRunner = OimHookPhaseRunner;
 
 export type NormalizationResult =
   | { readonly kind: "normalized"; readonly event: NormalizedEvent }
@@ -33,6 +31,16 @@ export class NormalizationRejectedError extends Error {
   constructor(reason: string) {
     super(reason);
     this.name = "NormalizationRejectedError";
+  }
+}
+
+export class WebhookClassificationError extends Error {
+  constructor(
+    message: string,
+    readonly retryable: boolean
+  ) {
+    super(message);
+    this.name = "WebhookClassificationError";
   }
 }
 
@@ -58,21 +66,29 @@ function validatorFor(eventType: OimEventType): SchemaCheck {
  * rather than the contract they published.
  */
 export async function normalizeDelivery(
+  manifest: Pick<OimManifest, "hooks">,
   eventType: OimEventType,
   input: NormalizationInput,
-  runHook?: NormalizeHookRunner
+  runner?: OimHookPhaseRunner
 ): Promise<NormalizationResult> {
   let payload = input.payload;
 
   if (eventType.normalize !== undefined) {
-    if (!runHook) {
-      return {
-        kind: "failed",
-        reason: `no hook runner is available to execute ${eventType.normalize}`,
-      };
-    }
     try {
-      payload = await runHook(eventType.normalize, input);
+      const result = await runOimHookPhase({
+        manifest,
+        kind: "response_normalize",
+        exportName: eventType.normalize,
+        input,
+        ...(runner === undefined ? {} : { runner }),
+      });
+      if (!result.executed) {
+        return {
+          kind: "failed",
+          reason: `${eventType.normalize} is not declared`,
+        };
+      }
+      payload = result.value;
     } catch (error) {
       return {
         kind: "failed",
@@ -109,6 +125,38 @@ export async function normalizeDelivery(
   }
 
   return { kind: "normalized", event: { type: eventType.type, payload } };
+}
+
+export async function classifyWebhookDelivery(
+  manifest: Pick<OimManifest, "hooks" | "events">,
+  input: NormalizationInput,
+  runner?: OimHookPhaseRunner
+): Promise<OimEventType | null | undefined> {
+  const result = await runOimHookPhase({
+    manifest,
+    kind: "webhook_classify",
+    input,
+    ...(runner === undefined ? {} : { runner }),
+  });
+  if (!result.executed) return undefined;
+  if (result.value === null) return null;
+  if (typeof result.value !== "string") {
+    throw new WebhookClassificationError(
+      "webhook_classify Hook must return an event type string or null",
+      false
+    );
+  }
+
+  const eventType = manifest.events?.eventTypes.find(
+    (candidate) => candidate.type === result.value
+  );
+  if (eventType === undefined) {
+    throw new WebhookClassificationError(
+      `webhook_classify Hook returned undeclared event type "${result.value}"`,
+      false
+    );
+  }
+  return eventType;
 }
 
 function messageOf(error: unknown): string {

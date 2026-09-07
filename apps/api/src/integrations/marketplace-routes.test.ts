@@ -3,7 +3,8 @@ import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
-import { type OimManifest, oimFileDigest } from "@tulipfarm/schema";
+import { knowledgeManifestFixture } from "@tulipfarm/integrations/src/knowledge/oim-manifest.fixture";
+import { type OimManifest, oimFileDigest, oimPackageDigest } from "@tulipfarm/schema";
 import type {
   BundledIntegration,
   GitSyncService,
@@ -254,9 +255,22 @@ describe("integration marketplace routes", () => {
     // Every route must appear in the generated OpenAPI spec.
     it("publishes the install endpoints in the OpenAPI spec", async () => {
       const res = await app.inject({ method: "GET", url: "/api/v1/openapi.json" });
-      const paths = Object.keys(res.json().paths ?? {});
+      const document = res.json();
+      const paths = Object.keys(document.paths ?? {});
       expect(paths).toContain("/api/v1/integrations/inspect");
       expect(paths).toContain("/api/v1/integrations/install");
+      expect(
+        document.paths["/api/v1/integrations/inspect"].post.requestBody.content["application/json"]
+          .schema.properties
+      ).toHaveProperty("signed_release");
+      expect(
+        document.paths["/api/v1/integrations/install"].post.requestBody.content["application/json"]
+          .schema.properties
+      ).toMatchObject({
+        approve_digest: expect.any(Object),
+        signed_release: expect.any(Object),
+        auto_patch_opt_in: expect.any(Object),
+      });
     });
 
     it("merges curated metadata onto integrations present in the deployment", async () => {
@@ -377,6 +391,30 @@ cases:
   });
 
   describe("POST /api/v1/integrations/inspect", () => {
+    it("rejects signed release envelopes with undeclared fields", async () => {
+      const res = await app.inject({
+        method: "POST",
+        url: "/api/v1/integrations/inspect",
+        cookies: auth(),
+        headers,
+        payload: {
+          source: "owner/repo",
+          signed_release: {
+            envelopeVersion: 1,
+            release: {
+              integrationId: "wiki",
+              version: "2.1.0",
+              packageDigest: "a".repeat(64),
+              publicKey: "not allowed",
+            },
+            signature: { algorithm: "Ed25519", keyId: "release-key", value: "c2lnbmF0dXJl" },
+          },
+        },
+      });
+
+      expect(res.statusCode).toBe(400);
+    });
+
     it("rejects a source we will not hand to git clone", async () => {
       const res = await app.inject({
         method: "POST",
@@ -434,6 +472,7 @@ cases:
       });
       expect(res.statusCode).toBe(200);
       expect(res.json().ref).toBe(await headOf(repo));
+      expect(res.json().source_type).toBe("git");
       expect(res.json().integrations).toEqual([
         {
           name: "linear",
@@ -478,7 +517,7 @@ cases:
         payload: { source: `file://${repo}` },
       });
       expect(res.statusCode).toBe(400);
-      expect(res.json().error).toContain("no manifest.yml");
+      expect(res.json().error).toContain("no integration manifest");
     });
   });
 
@@ -499,6 +538,245 @@ cases:
   });
 
   describe("POST /api/v1/integrations/install", () => {
+    it("installs only the exact OIM commit and digest returned by review", async () => {
+      const manifest = knowledgeManifestFixture();
+      const repo = await makeTemp({}, { "oim.yml": stringifyYaml(manifest) });
+      const review = await app.inject({
+        method: "POST",
+        url: "/api/v1/integrations/inspect",
+        cookies: auth(),
+        headers,
+        payload: { source: `file://${repo}` },
+      });
+      const reviewed = review.json();
+      expect(reviewed.integrations[0]).toMatchObject({
+        definition: "oim",
+        support: "community",
+        hooks_allowed: false,
+        auto_patch_eligible: false,
+        license: "Apache-2.0",
+        major_version: 2,
+        package_digest: oimPackageDigest(manifest),
+        review: {
+          integrationId: "wiki",
+          packageDigest: oimPackageDigest(manifest),
+          destinations: ["wiki.example"],
+        },
+      });
+      const refused = await app.inject({
+        method: "POST",
+        url: "/api/v1/integrations/install",
+        cookies: auth(),
+        headers,
+        payload: { source: `file://${repo}`, name: "wiki" },
+      });
+      expect(refused.statusCode).toBe(409);
+
+      const installed = await app.inject({
+        method: "POST",
+        url: "/api/v1/integrations/install",
+        cookies: auth(),
+        headers,
+        payload: {
+          source: `file://${repo}`,
+          name: "wiki",
+          ref: reviewed.ref,
+          approve_digest: reviewed.integrations[0].package_digest,
+        },
+      });
+      expect(installed.statusCode).toBe(200);
+      expect(installed.json()).toMatchObject({
+        name: "wiki",
+        ref: reviewed.ref,
+        package_digest: reviewed.integrations[0].package_digest,
+      });
+
+      soulLoader.integrations.set("wiki", {
+        slug: "wiki",
+        sourceIntegration: "wiki",
+        oimManifest: manifest,
+      });
+      const next = {
+        ...manifest,
+        metadata: { ...manifest.metadata, version: "2.2.0" },
+      };
+      await writeFile(join(repo, "oim.yml"), stringifyYaml(next), "utf8");
+      await execFileP("git", ["add", "-A"], { cwd: repo });
+      await execFileP("git", ["commit", "-q", "-m", "update package"], { cwd: repo });
+      const updateReview = await app.inject({
+        method: "POST",
+        url: "/api/v1/integrations/inspect",
+        cookies: auth(),
+        headers,
+        payload: { source: `file://${repo}` },
+      });
+      const reviewedUpdate = updateReview.json();
+      const updated = await app.inject({
+        method: "POST",
+        url: "/api/v1/integrations/wiki/update",
+        cookies: auth(),
+        headers,
+        payload: {
+          source: `file://${repo}`,
+          ref: reviewedUpdate.ref,
+          approve_digest: reviewedUpdate.integrations[0].package_digest,
+        },
+      });
+      expect(updated.statusCode).toBe(200);
+      expect(updated.json().package_digest).toBe(oimPackageDigest(next));
+
+      const sameMajor = {
+        ...next,
+        metadata: { ...next.metadata, version: "2.3.0" },
+      };
+      soulLoader.integrations.set("wiki", {
+        slug: "wiki",
+        sourceIntegration: "wiki",
+        oimManifest: next,
+      });
+      await writeFile(join(repo, "oim.yml"), stringifyYaml(sameMajor), "utf8");
+      await execFileP("git", ["add", "-A"], { cwd: repo });
+      await execFileP("git", ["commit", "-q", "-m", "same major install"], { cwd: repo });
+      const sameMajorReview = await app.inject({
+        method: "POST",
+        url: "/api/v1/integrations/inspect",
+        cookies: auth(),
+        headers,
+        payload: { source: `file://${repo}` },
+      });
+      const reviewedSameMajor = sameMajorReview.json();
+      const installedSameMajor = await app.inject({
+        method: "POST",
+        url: "/api/v1/integrations/install",
+        cookies: auth(),
+        headers,
+        payload: {
+          source: `file://${repo}`,
+          ref: reviewedSameMajor.ref,
+          approve_digest: reviewedSameMajor.integrations[0].package_digest,
+        },
+      });
+      expect(installedSameMajor.statusCode).toBe(200);
+      expect(installedSameMajor.json()).toMatchObject({
+        name: "wiki",
+        integration_id: "wiki",
+        major_version: 2,
+        package_digest: oimPackageDigest(sameMajor),
+      });
+
+      soulLoader.integrations.set("wiki", {
+        slug: "wiki",
+        sourceIntegration: "wiki",
+        oimManifest: sameMajor,
+      });
+      const nextMajor = {
+        ...sameMajor,
+        metadata: { ...sameMajor.metadata, version: "3.0.0" },
+      };
+      await writeFile(join(repo, "oim.yml"), stringifyYaml(nextMajor), "utf8");
+      await execFileP("git", ["add", "-A"], { cwd: repo });
+      await execFileP("git", ["commit", "-q", "-m", "new major"], { cwd: repo });
+      const majorReview = await app.inject({
+        method: "POST",
+        url: "/api/v1/integrations/inspect",
+        cookies: auth(),
+        headers,
+        payload: { source: `file://${repo}` },
+      });
+      const reviewedMajor = majorReview.json();
+      expect(reviewedMajor.integrations[0]).toMatchObject({
+        installed: false,
+        major_version: 3,
+      });
+      const majorPayload = {
+        source: `file://${repo}`,
+        name: "wiki",
+        ref: reviewedMajor.ref,
+        approve_digest: reviewedMajor.integrations[0].package_digest,
+      };
+      const deniedMajor = await app.inject({
+        method: "POST",
+        url: "/api/v1/integrations/install",
+        cookies: memberAuth(),
+        headers,
+        payload: majorPayload,
+      });
+      expect(deniedMajor.statusCode).toBe(403);
+
+      const installedMajor = await app.inject({
+        method: "POST",
+        url: "/api/v1/integrations/install",
+        cookies: auth(),
+        headers,
+        payload: majorPayload,
+      });
+      expect(installedMajor.statusCode).toBe(200);
+      expect(installedMajor.json()).toMatchObject({
+        name: "wiki-v3",
+        integration_id: "wiki",
+        major_version: 3,
+        package_digest: oimPackageDigest(nextMajor),
+      });
+      soulLoader.integrations.set("wiki-v3", {
+        slug: "wiki-v3",
+        sourceIntegration: "wiki",
+        oimManifest: nextMajor,
+      });
+
+      const removedMajor = await app.inject({
+        method: "DELETE",
+        url: "/api/v1/integrations/wiki-v3",
+        cookies: auth(),
+        headers,
+      });
+      expect(removedMajor.statusCode).toBe(204);
+      expect(soul.writer.readCompanion("Integration", "wiki", "oim.yml")).not.toBeNull();
+      expect(soul.writer.readCompanion("Integration", "wiki-v3", "oim.yml")).toBeNull();
+      const remainingLock = JSON.parse(soul.writer.read("IntegrationsLock") ?? "{}");
+      expect(remainingLock.integrations.wiki).toBeDefined();
+      expect(remainingLock.integrations["wiki-v3"]).toBeUndefined();
+    });
+
+    it("refuses OIM bytes that changed after review", async () => {
+      const manifest = knowledgeManifestFixture();
+      const repo = await makeTemp({}, { "oim.yml": stringifyYaml(manifest) });
+      const review = await app.inject({
+        method: "POST",
+        url: "/api/v1/integrations/inspect",
+        cookies: auth(),
+        headers,
+        payload: { source: `file://${repo}` },
+      });
+      const reviewed = review.json();
+
+      await writeFile(
+        join(repo, "oim.yml"),
+        stringifyYaml({
+          ...manifest,
+          metadata: { ...manifest.metadata, version: "2.2.0" },
+        }),
+        "utf8"
+      );
+      await execFileP("git", ["add", "-A"], { cwd: repo });
+      await execFileP("git", ["commit", "-q", "-m", "change package"], { cwd: repo });
+
+      const res = await app.inject({
+        method: "POST",
+        url: "/api/v1/integrations/install",
+        cookies: auth(),
+        headers,
+        payload: {
+          source: `file://${repo}`,
+          name: "wiki",
+          ref: reviewed.ref,
+          approve_digest: reviewed.integrations[0].package_digest,
+        },
+      });
+      expect(res.statusCode).toBe(409);
+      expect(res.json().error).toContain("changed since it was reviewed");
+      expect(soul.applied).toHaveLength(0);
+    });
+
     it("installs a declarative integration and records its provenance", async () => {
       const repo = await makeTemp({ linear: declarativeManifest("linear") });
       const res = await app.inject({

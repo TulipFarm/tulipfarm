@@ -129,6 +129,81 @@ describe("POST /api/v1/hooks/oim/:slug", () => {
     expect(record).toHaveBeenCalledOnce();
   });
 
+  it("verifies Twilio form callbacks against the configured public URL", async () => {
+    const manifest = {
+      metadata: { id: "twilio", version: "1.0.0" },
+      events: {
+        path: "/twilio",
+        verification: {
+          scheme: "twilio_hmac_sha1",
+          secretSlot: "webhook_auth_token",
+          signatureHeader: "X-Twilio-Signature",
+          signatureEncoding: "base64",
+        },
+        deduplication: { kind: "none" },
+        acceptance: {
+          requireBodyPointers: ["/AccountSid", "/MessageSid"],
+          requireKnownEventType: true,
+        },
+        eventTypes: [
+          {
+            type: "message.received",
+            selector: { pointer: "/SmsMessageSid", matches: "^SM[A-Za-z0-9]{32}$" },
+            schema: { type: "object" },
+          },
+        ],
+      },
+    } as unknown as OimManifest;
+    resolve = vi.fn(async () => ({ businessId: "biz-1", manifest }));
+    binding = vi.fn(async () => ({
+      connectionId: "personal-connection",
+      secretRef: "secret://sec-1",
+    }));
+    const callbackUrl =
+      "https://api.tulipfarm.example/api/v1/hooks/oim/twilio?connectionId=personal-connection";
+    await build({
+      readSecret: async () => "12345",
+      callbackUrl: (_slug, connectionId) =>
+        `https://api.tulipfarm.example/api/v1/hooks/oim/twilio?connectionId=${connectionId}`,
+    });
+    const rawBody = [
+      "MessageSid=SM11111111111111111111111111111111",
+      "SmsMessageSid=SM11111111111111111111111111111111",
+      "AccountSid=AC00000000000000000000000000000000",
+      "From=%2B14017122661",
+      "To=%2B15558675310",
+      "Body=Launch+ready",
+      "NumMedia=0",
+      "NumSegments=1",
+    ].join("&");
+    const signed = [
+      callbackUrl,
+      ...[...new URLSearchParams(rawBody).entries()]
+        .sort(([left], [right]) => left.localeCompare(right))
+        .flat(),
+    ].join("");
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/v1/hooks/oim/twilio?connectionId=personal-connection",
+      headers: {
+        "content-type": "application/x-www-form-urlencoded",
+        host: "attacker.example",
+        "x-forwarded-host": "attacker.example",
+        "x-twilio-signature": createHmac("sha1", "12345").update(signed).digest("base64"),
+      },
+      payload: rawBody,
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.headers["content-type"]).toContain("application/xml");
+    expect(response.body).toBe("<Response></Response>");
+    expect(binding).toHaveBeenCalledWith(
+      expect.objectContaining({ connectionId: "personal-connection" })
+    );
+    expect(record).toHaveBeenCalledOnce();
+  });
+
   it("rejects a delivery signed with the wrong Secret", async () => {
     await build();
     const response = await post({ type: "forecast_updated" }, {}, "wrong-key");

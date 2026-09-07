@@ -1,6 +1,6 @@
 name: slack
 version: "1.0.0"
-description: Talk to TulipFarm agents from Slack via Socket Mode — DM or @mention in a channel.
+description: Legacy Slack channel connector for Socket Mode DMs and channel mentions.
 maintainer: TulipFarm
 # No `icon`: Slack asked Simple Icons to remove its mark, so there is none to name. The UI derives
 # a monogram instead — do not point this at a lookalike slug.

@@ -447,16 +447,20 @@ export class SoulLoader {
           // without the companion text. Read here rather than at compile time so a package with a
           // missing document fails to install rather than failing on the first Agent call.
           const oimDocuments: Record<string, string> = {};
+          const oimOpenApiDocuments: Record<string, unknown> = {};
           const oimFixtures: Record<string, string> = {};
+          const oimPackageFiles: Record<string, string> = {};
           for (const file of oimManifest.files ?? []) {
+            const source = await readContainedFile(this.soulPath, join(dir, file.path));
+            oimPackageFiles[file.path] = source;
+            if (file.role === "openapi") {
+              oimOpenApiDocuments[file.path] = parseYaml(source);
+            }
             if (file.role === "graphql") {
-              oimDocuments[file.path] = await readContainedFile(
-                this.soulPath,
-                join(dir, file.path)
-              );
+              oimDocuments[file.path] = source;
             }
             if (file.role === "fixture") {
-              oimFixtures[file.path] = await readContainedFile(this.soulPath, join(dir, file.path));
+              oimFixtures[file.path] = source;
             }
           }
           map.set(slug, {
@@ -464,7 +468,9 @@ export class SoulLoader {
             sourceIntegration: oimManifest.metadata.id,
             oimManifest,
             ...(Object.keys(oimDocuments).length === 0 ? {} : { oimDocuments }),
+            ...(Object.keys(oimOpenApiDocuments).length === 0 ? {} : { oimOpenApiDocuments }),
             ...(Object.keys(oimFixtures).length === 0 ? {} : { oimFixtures }),
+            ...(Object.keys(oimPackageFiles).length === 0 ? {} : { oimPackageFiles }),
             ...(oimConnection === undefined ? {} : { connection: oimConnection }),
             ...(oimSetupGuide === undefined ? {} : { setupGuide: oimSetupGuide }),
             ...(knowledgeGuide === undefined ? {} : { knowledgeGuide }),

@@ -7,14 +7,19 @@
  * projection and the opaque pagination token. Opening a direct HTTP client here would reproduce all
  * five badly, and would let a Knowledge Routine reach a provider under authority no Tool granted.
  *
- * Each operation call is given its own `toolCallId`. The declarative handler derives its effect id
- * from the call id, so reusing one would make the second page of a walk look like a replay of the
- * first and return the earlier page forever.
+ * Each operation call gets an id derived from the outer Tool call, its ordinal and its semantic
+ * request. Replaying the same walk repeats the ids, while a changed operation, parameters or page
+ * token cannot adopt an unrelated effect result that occupied the same ordinal.
  */
 
-import { randomUUID } from "node:crypto";
-import type { OimKnowledgeApiPort } from "@tulipfarm/integrations";
-import { NEXT_PAGE_TOKEN_PROPERTY, PAGE_TOKEN_ARGUMENT } from "@tulipfarm/integrations";
+import { createHash, randomUUID } from "node:crypto";
+import {
+  NEXT_PAGE_TOKEN_PROPERTY,
+  OIM_CONNECTION_ID_ARGUMENT,
+  type OimKnowledgeApiPort,
+  OimKnowledgeRetryRequiredError,
+  PAGE_TOKEN_ARGUMENT,
+} from "@tulipfarm/integrations";
 import type { OimManifest } from "@tulipfarm/schema";
 import type { RequestContext } from "@tulipfarm/tool-host";
 import type { ToolRegistry } from "../broker/tool-adapter";
@@ -35,9 +40,28 @@ export interface RegistryKnowledgeApiDeps {
   readonly slug: string;
   readonly manifest: OimManifest;
   readonly registry: ToolRegistry;
+  readonly connectionId: string;
   /** The caller's own context. The sync acts as whoever asked for it, never as the deployment. */
   readonly ctx: RequestContext;
   readonly newCallId?: () => string;
+}
+
+function requestFingerprint(
+  operationId: string,
+  parameters: Readonly<Record<string, unknown>>,
+  pageToken: string | undefined
+): string {
+  const canonical =
+    JSON.stringify({ operationId, pageToken, parameters }, (_key, value: unknown) =>
+      value !== null && typeof value === "object" && !Array.isArray(value)
+        ? Object.fromEntries(
+            Object.entries(value as Record<string, unknown>).sort(([left], [right]) =>
+              left < right ? -1 : left > right ? 1 : 0
+            )
+          )
+        : value
+    ) ?? "";
+  return createHash("sha256").update(canonical).digest("hex").slice(0, 16);
 }
 
 export function createRegistryKnowledgeApiPort(
@@ -47,6 +71,8 @@ export function createRegistryKnowledgeApiPort(
     deps.manifest.operations.map((operation) => [operation.id, operation.name])
   );
   const newCallId = deps.newCallId ?? randomUUID;
+  const outerCallId = deps.ctx.toolCallId ?? newCallId();
+  let callOrdinal = 0;
 
   return {
     async execute({ operationId, parameters, pageToken }) {
@@ -59,11 +85,24 @@ export function createRegistryKnowledgeApiPort(
         throw new OimKnowledgeApiError("tool_unavailable", operationId, toolName);
       }
 
-      const args: Record<string, unknown> = { ...parameters };
+      const args: Record<string, unknown> = {
+        ...parameters,
+        [OIM_CONNECTION_ID_ARGUMENT]: deps.connectionId,
+      };
       if (pageToken !== undefined) args[PAGE_TOKEN_ARGUMENT] = pageToken;
 
-      const result = await tool.execute(args, { ...deps.ctx, toolCallId: newCallId() });
+      const fingerprint = requestFingerprint(operationId, parameters, pageToken);
+      const toolCallId = `${outerCallId}:knowledge:${callOrdinal}:${fingerprint}`;
+      callOrdinal += 1;
+      const result = await tool.execute(args, {
+        ...deps.ctx,
+        toolCallId,
+        retryWaitPolicy: "refuse",
+      });
       if (result.success !== true) {
+        if ("error" in result && result.error.code === "retry_wait_unavailable") {
+          throw new OimKnowledgeRetryRequiredError(operationId);
+        }
         // A parked call has no verdict at all, so it is neither a page nor an error the sync can
         // interpret. Both land here as a failure the sync records against exactly this scope.
         const detail = "error" in result ? result.error.message : "parked";

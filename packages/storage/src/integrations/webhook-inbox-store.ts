@@ -1,10 +1,16 @@
 import type { TransactionPort } from "../ports";
 
 /**
- * A delivery's lifecycle. `accepted` means the bytes are durable and the provider has been
- * acknowledged; nothing downstream has run yet.
+ * A delivery's lifecycle. `normalized` is a durable dispatch intent; only `dispatched` means the
+ * stable event id reached the idempotent event-to-Run seam.
  */
-export type WebhookDeliveryState = "accepted" | "normalized" | "dead_letter";
+export type WebhookDeliveryState = "accepted" | "normalized" | "dispatched" | "dead_letter";
+
+interface WebhookClaimFence {
+  readonly expectedState: "accepted" | "normalized";
+  readonly expectedAttempts: number;
+  readonly expectedLeaseExpiresAt: Date;
+}
 
 export interface WebhookDeliveryInput {
   readonly id: string;
@@ -72,7 +78,7 @@ export const WEBHOOK_INBOX_STORAGE_STATEMENTS: readonly string[] = [
     event_type                 text,
     verification               text NOT NULL,
     state                      text NOT NULL
-      CHECK (state IN ('accepted', 'normalized', 'dead_letter')),
+      CHECK (state IN ('accepted', 'normalized', 'dispatched', 'dead_letter')),
     attempts                   integer NOT NULL DEFAULT 0 CHECK (attempts >= 0),
     last_error                 text,
     normalized_payload         jsonb,
@@ -89,7 +95,7 @@ export const WEBHOOK_INBOX_STORAGE_STATEMENTS: readonly string[] = [
      WHERE deduplication_key IS NOT NULL`,
   `CREATE INDEX IF NOT EXISTS webhook_deliveries_claim_idx
      ON webhook_deliveries (state, next_attempt_at)
-     WHERE state = 'accepted'`,
+     WHERE state IN ('accepted', 'normalized')`,
   `CREATE INDEX IF NOT EXISTS webhook_deliveries_retention_idx
      ON webhook_deliveries (received_at)
      WHERE encrypted_body IS NOT NULL`,
@@ -201,7 +207,7 @@ export class WebhookInboxStore {
 
   /**
    * Leases up to `limit` deliveries that are due. A lease is a deadline rather than a lock, so a
-   * worker that dies mid-normalization releases its work by expiry instead of stranding it.
+   * worker that dies mid-normalization or dispatch releases its work instead of stranding it.
    */
   async claim(
     limit: number,
@@ -215,7 +221,7 @@ export class WebhookInboxStore {
                 attempts = attempts + 1
           WHERE (business_id, id) IN (
             SELECT business_id, id FROM webhook_deliveries
-             WHERE state = 'accepted'
+             WHERE state IN ('accepted', 'normalized')
                AND next_attempt_at <= $1
                AND (lease_expires_at IS NULL OR lease_expires_at <= $1)
              ORDER BY received_at
@@ -229,44 +235,104 @@ export class WebhookInboxStore {
     });
   }
 
-  async markNormalized(businessId: string, id: string, payload: unknown): Promise<void> {
-    await this.transactions.withTransaction(async (transaction) => {
-      await transaction.query(
+  async markNormalized(
+    businessId: string,
+    id: string,
+    eventType: string,
+    payload: unknown,
+    options: WebhookClaimFence & { readonly now?: Date }
+  ): Promise<boolean> {
+    return this.transactions.withTransaction(async (transaction) => {
+      const { rows } = await transaction.query<{ id: string }>(
         `UPDATE webhook_deliveries
             SET state = 'normalized',
-                normalized_payload = $3::jsonb,
+                event_type = $3,
+                normalized_payload = $4::jsonb,
+                attempts = 0,
+                last_error = NULL,
+                lease_expires_at = NULL,
+                next_attempt_at = $5
+          WHERE business_id = $1
+            AND id = $2
+            AND state = $6
+            AND attempts = $7
+            AND lease_expires_at = $8::timestamptz
+          RETURNING id`,
+        [
+          businessId,
+          id,
+          eventType,
+          JSON.stringify(payload ?? null),
+          options.now ?? new Date(),
+          options.expectedState,
+          options.expectedAttempts,
+          options.expectedLeaseExpiresAt,
+        ]
+      );
+      return rows.length === 1;
+    });
+  }
+
+  async markDispatched(businessId: string, id: string, fence: WebhookClaimFence): Promise<boolean> {
+    return this.transactions.withTransaction(async (transaction) => {
+      const { rows } = await transaction.query<{ id: string }>(
+        `UPDATE webhook_deliveries
+            SET state = 'dispatched',
                 last_error = NULL,
                 lease_expires_at = NULL
-          WHERE business_id = $1 AND id = $2`,
-        [businessId, id, JSON.stringify(payload ?? null)]
+          WHERE business_id = $1
+            AND id = $2
+            AND state = $3
+            AND attempts = $4
+            AND lease_expires_at = $5::timestamptz
+          RETURNING id`,
+        [businessId, id, fence.expectedState, fence.expectedAttempts, fence.expectedLeaseExpiresAt]
       );
+      return rows.length === 1;
     });
   }
 
   /**
-   * Records a failed attempt. Past `maxAttempts` the delivery dead-letters rather than retrying
-   * forever: a payload the Integration cannot normalize will not start being normalizable, and a
-   * retry loop hides that from whoever has to fix it.
+   * Records a failed normalization or dispatch attempt without moving it back to an earlier phase.
+   * Past `maxAttempts` the delivery dead-letters rather than retrying forever.
    */
   async markFailed(
     businessId: string,
     id: string,
     error: string,
-    options: { readonly maxAttempts: number; readonly backoffSeconds: number; readonly now?: Date }
-  ): Promise<WebhookDeliveryState> {
+    options: WebhookClaimFence & {
+      readonly maxAttempts: number;
+      readonly backoffSeconds: number;
+      readonly now?: Date;
+    }
+  ): Promise<WebhookDeliveryState | null> {
     return this.transactions.withTransaction(async (transaction) => {
       const now = options.now ?? new Date();
       const { rows } = await transaction.query<{ state: WebhookDeliveryState }>(
         `UPDATE webhook_deliveries
-            SET state = CASE WHEN attempts >= $4 THEN 'dead_letter' ELSE 'accepted' END,
+            SET state = CASE WHEN attempts >= $4 THEN 'dead_letter' ELSE state END,
                 last_error = $3,
                 lease_expires_at = NULL,
                 next_attempt_at = $5::timestamptz + make_interval(secs => $6)
-          WHERE business_id = $1 AND id = $2
+          WHERE business_id = $1
+            AND id = $2
+            AND state = $7
+            AND attempts = $8
+            AND lease_expires_at = $9::timestamptz
           RETURNING state`,
-        [businessId, id, error.slice(0, 2000), options.maxAttempts, now, options.backoffSeconds]
+        [
+          businessId,
+          id,
+          error.slice(0, 2000),
+          options.maxAttempts,
+          now,
+          options.backoffSeconds,
+          options.expectedState,
+          options.expectedAttempts,
+          options.expectedLeaseExpiresAt,
+        ]
       );
-      return rows[0]?.state ?? "accepted";
+      return rows[0]?.state ?? null;
     });
   }
 

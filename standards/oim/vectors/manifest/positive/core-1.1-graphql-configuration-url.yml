@@ -1,0 +1,57 @@
+oimVersion: "1.0"
+kind: Integration
+metadata:
+  id: configured-graphql
+  name: Configured GraphQL
+  version: 1.0.0
+  description: Query a saved public GraphQL origin.
+  license: Apache-2.0
+profiles:
+  core: "1.1"
+  auth: "1.0"
+files:
+  - path: identity.graphql
+    role: graphql
+    sha256: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+auth:
+  credentialSlots:
+    - id: api_key
+      label: API key
+      kind: api_key
+  configurationFields:
+    - id: site
+      label: Site
+      type: url
+      required: true
+  allowedOriginHosts: ["*.example.com"]
+  steps:
+    - id: connect
+      type: fields
+      title: Connect
+      fields:
+        - id: api_key
+          label: API key
+          input: password
+          target: { type: credential, slot: api_key }
+        - id: site
+          label: Site
+          input: url
+          target: { type: configuration, field: site }
+operations:
+  - id: identity
+    name: read_identity
+    description: Read the current identity.
+    effect: read
+    identityMode: shared_only
+    source:
+      type: graphql
+      url: https://{site}/graphql
+      operation: Identity
+      documentFile: identity.graphql
+    requestSchema:
+      type: object
+      properties: {}
+      additionalProperties: false
+    response:
+      schema: { type: object }
+      maxBytes: 4096

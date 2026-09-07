@@ -1,0 +1,139 @@
+version: 1
+cases:
+  - name: identifies-member
+    operationId: current-member
+    request: {}
+    response:
+      status: 200
+      body:
+        id: AbCdEf123
+        localizedFirstName: Muskan
+        localizedLastName: Vijayvargiya
+        localizedHeadline: Operations lead
+        vanityName: muskan-example
+        profilePicture:
+          displayImage: urn:li:digitalmediaAsset:C4D00REDACTED
+    expect:
+      request:
+        method: GET
+        url: https://api.linkedin.com/v2/me
+        headers:
+          Authorization: Bearer oim-fixture-credential
+          X-Restli-Protocol-Version: 2.0.0
+      result:
+        id: AbCdEf123
+        localizedFirstName: Muskan
+        localizedLastName: Vijayvargiya
+
+  - name: reads-organization-post
+    operationId: read-post
+    request:
+      post_urn: urn:li:share:7000000000000000001
+    response:
+      status: 200
+      body:
+        id: urn:li:share:7000000000000000001
+        author: urn:li:organization:9000001
+        commentary: Redacted launch update.
+        lifecycleState: PUBLISHED
+        visibility: PUBLIC
+        createdAt: 1788757200000
+        publishedAt: 1788757200000
+        lastModifiedAt: 1788757200000
+        distribution:
+          feedDistribution: MAIN_FEED
+          targetEntities: []
+          thirdPartyDistributionChannels: []
+    expect:
+      request:
+        method: GET
+        url: https://api.linkedin.com/rest/posts/urn%3Ali%3Ashare%3A7000000000000000001
+        headers:
+          Authorization: Bearer oim-fixture-credential
+          X-Restli-Protocol-Version: 2.0.0
+          Linkedin-Version: "202608"
+      result:
+        id: urn:li:share:7000000000000000001
+        author: urn:li:organization:9000001
+        commentary: Redacted launch update.
+
+  - name: rejects-empty-read-response
+    operationId: read-post
+    request:
+      post_urn: urn:li:share:7000000000000000999
+    response:
+      status: 200
+      body: {}
+    expect:
+      request:
+        method: GET
+        url: https://api.linkedin.com/rest/posts/urn%3Ali%3Ashare%3A7000000000000000999
+        headers:
+          Authorization: Bearer oim-fixture-credential
+          X-Restli-Protocol-Version: 2.0.0
+          Linkedin-Version: "202608"
+      expectedError:
+        phase: after_dispatch
+        code: invalid_output
+        retryable: false
+
+  - name: creates-member-post
+    operationId: create-post
+    request:
+      body:
+        author: urn:li:person:AbCdEf123
+        commentary: Launch update is ready.
+        visibility: PUBLIC
+        distribution:
+          feedDistribution: MAIN_FEED
+          targetEntities: []
+          thirdPartyDistributionChannels: []
+        lifecycleState: PUBLISHED
+        isReshareDisabledByAuthor: false
+    response:
+      status: 201
+      headers:
+        x-restli-id: urn:li:share:7000000000000000002
+      body: {}
+    expect:
+      request:
+        method: POST
+        url: https://api.linkedin.com/rest/posts
+        headers:
+          Authorization: Bearer oim-fixture-credential
+          X-Restli-Protocol-Version: 2.0.0
+          Linkedin-Version: "202608"
+          content-type: application/json
+        body:
+          author: urn:li:person:AbCdEf123
+          commentary: Launch update is ready.
+          visibility: PUBLIC
+          distribution:
+            feedDistribution: MAIN_FEED
+            targetEntities: []
+            thirdPartyDistributionChannels: []
+          lifecycleState: PUBLISHED
+          isReshareDisabledByAuthor: false
+      result: {}
+
+  - name: rejects-invalid-credential
+    operationId: current-member
+    request: {}
+    response:
+      status: 401
+      body:
+        status: 401
+        serviceErrorCode: 65600
+        code: INVALID_ACCESS_TOKEN
+        message: Invalid access token
+    expect:
+      request:
+        method: GET
+        url: https://api.linkedin.com/v2/me
+        headers:
+          Authorization: Bearer oim-fixture-credential
+          X-Restli-Protocol-Version: 2.0.0
+      expectedError:
+        phase: before_dispatch
+        code: provider_unauthorized
+        retryable: false

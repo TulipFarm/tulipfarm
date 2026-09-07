@@ -28,6 +28,8 @@ export interface GraphqlOperationBinding {
   readonly document: string;
   readonly mutating: boolean;
   readonly headers: Readonly<Record<string, string>>;
+  /** OIM-declared header carrying delay-seconds or an HTTP-date after provider rejection. */
+  readonly retryAfterHeader?: string;
   readonly auth?: {
     readonly in: "header";
     readonly header: string;

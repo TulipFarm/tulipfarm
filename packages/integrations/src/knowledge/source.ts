@@ -31,6 +31,20 @@ export interface EmittedProvenance {
   readonly capturedAt: string;
   readonly contentHash: string;
   readonly checkpoint?: string;
+  readonly connectionId?: string;
+}
+
+export interface EmittedOimSourceLocator {
+  readonly kind: "oim";
+  readonly integrationSlug: string;
+  readonly integrationId: string;
+  readonly integrationMajorVersion: number;
+  readonly connectionId: string;
+  readonly sourceKindId: string;
+  readonly scope: string;
+  readonly itemId: string;
+  readonly fields?: Readonly<Record<string, string | number | boolean>>;
+  readonly sourceUrl?: string;
 }
 
 export interface KnowledgeSourceEmission {
@@ -41,6 +55,7 @@ export interface KnowledgeSourceEmission {
   readonly externalId: string;
   readonly externalTenantId: string;
   readonly ownerExternalId: string;
+  readonly locator?: EmittedOimSourceLocator;
   readonly revision: string;
   readonly classification: readonly string[];
   readonly status: EmittedSourceStatus;

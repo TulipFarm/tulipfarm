@@ -150,6 +150,7 @@ export {
   type ParkableToolDef,
   parked,
   type RequestContext,
+  type RetryWaitPolicy,
   refuseParkedResult,
   TOOL_FAULT_CLASS,
   type ToolCallResult,

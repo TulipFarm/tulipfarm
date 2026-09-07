@@ -12,13 +12,13 @@ metadata:
       url: https://tulipfarm.dev
 
 profiles:
-  core: "1.0"
+  core: "1.1"
   auth: "1.0"
 
 files:
   - path: fixtures.yml
     role: fixture
-    sha256: 227dbdcfd1a23ca7364408936222e8429d16513009876cbc6d80d34c3dd11044
+    sha256: "e8c205af83cc82a83d739509d7ec598a4ec0d3306bf4217ec994233ac190ff34"
 
 auth:
   credentialSlots:
@@ -41,7 +41,7 @@ auth:
           target:
             type: credential
             slot: api_key
-  healthCheckOperationId: current-weather
+  healthCheckOperationId: check-connection
 
 operations:
   - id: current-weather
@@ -221,6 +221,43 @@ operations:
             lon: { type: number }
             country: { type: string }
             state: { type: string }
+    rateLimit:
+      requests: 60
+      perSeconds: 60
+      scope: connection
+
+  - id: check-connection
+    name: openweather_check_connection
+    description: Check the API key with a fixed weather query, without using your location.
+    effect: read
+    identityMode: shared_only
+    credentialSlot: api_key
+    credentialInjection:
+      in: query
+      name: appid
+      format: "{token}"
+    source:
+      type: http
+      method: GET
+      baseUrl: https://api.openweathermap.org
+      path: /data/2.5/weather
+      parameters:
+        - name: lat
+          in: query
+          schema: { type: number }
+          value: "0"
+        - name: lon
+          in: query
+          schema: { type: number }
+          value: "0"
+    response:
+      maxBytes: 65536
+      schema:
+        type: object
+        required: [cod]
+        properties:
+          cod: { type: integer, const: 200 }
+      projection: [/cod]
     rateLimit:
       requests: 60
       perSeconds: 60

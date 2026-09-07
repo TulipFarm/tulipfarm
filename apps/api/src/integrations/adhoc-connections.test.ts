@@ -18,8 +18,8 @@ const RULE = { location: "header", name: "authorization", valuePrefix: "Bearer "
 class FakeConnections {
   readonly rows: PersistedConnection[] = [];
 
-  async put(_businessId: string, connection: unknown): Promise<void> {
-    this.rows.push(connection as PersistedConnection);
+  async put(businessId: string, connection: unknown): Promise<void> {
+    this.rows.push({ ...(connection as PersistedConnection), businessId });
   }
 
   async listForOwner(
@@ -32,6 +32,22 @@ class FakeConnections {
         row.integration.id === integration.id &&
         row.owner.scope === owner.scope &&
         (row.owner.scope !== "personal" || row.owner.principalId === owner.principalId)
+    );
+  }
+
+  async findById(businessId: string, id: string): Promise<PersistedConnection | null> {
+    return this.rows.find((row) => row.businessId === businessId && row.id === id) ?? null;
+  }
+
+  async listForIntegration(
+    businessId: string,
+    integration: { id: string; majorVersion: number }
+  ): Promise<PersistedConnection[]> {
+    return this.rows.filter(
+      (row) =>
+        row.businessId === businessId &&
+        row.integration.id === integration.id &&
+        row.integration.majorVersion === integration.majorVersion
     );
   }
 }
@@ -204,6 +220,76 @@ describe("matchAdhocConnection", () => {
     expect(match).toMatchObject({ kind: "match", rule: RULE });
   });
 
+  it("honors a live authorizer denial for the personal owner", async () => {
+    const connections = await seed({
+      scope: "personal",
+      principalKind: "user",
+      principalId: "user-1",
+    });
+    const match = await matchAdhocConnection(
+      { connections, connectionAccess: { canUse: async () => false } },
+      { businessId: BUSINESS, origin: ORIGIN, principalId: "user-1" }
+    );
+    expect(match).toEqual({ kind: "none" });
+  });
+
+  it("denies an exact personal Connection when the live authorizer denies its owner", async () => {
+    const connections = await seed({
+      scope: "personal",
+      principalKind: "user",
+      principalId: "user-1",
+    });
+    const [connection] = connections.rows;
+    if (connection === undefined) throw new Error("seed failed");
+    const match = await matchAdhocConnection(
+      { connections, connectionAccess: { canUse: async () => false } },
+      {
+        businessId: BUSINESS,
+        origin: ORIGIN,
+        principalId: "user-1",
+        connectionId: connection.id,
+      }
+    );
+    expect(match).toEqual({ kind: "denied", reason: "not_authorized" });
+  });
+
+  it("defaults organization Connections to denied without live use authority", async () => {
+    const connections = await seed({ scope: "organization" });
+    const match = await matchAdhocConnection(
+      { connections },
+      { businessId: BUSINESS, origin: ORIGIN, principalId: "user-1" }
+    );
+    expect(match).toEqual({ kind: "none" });
+  });
+
+  it("offers an organization Connection only when live use authority allows it", async () => {
+    const connections = await seed({ scope: "organization" });
+    const canUse = vi.fn(async () => true);
+    const match = await matchAdhocConnection(
+      { connections, connectionAccess: { canUse } },
+      { businessId: BUSINESS, origin: ORIGIN, principalId: "user-1" }
+    );
+    expect(match).toMatchObject({ kind: "match" });
+    expect(canUse).toHaveBeenCalledWith(
+      { kind: "user", id: "user-1" },
+      expect.objectContaining({ owner: { scope: "organization" } })
+    );
+  });
+
+  it("offers a Team Connection only when the live authorizer confirms membership", async () => {
+    const connections = await seed({
+      scope: "team",
+      teamId: "00000000-0000-4000-8000-000000000004",
+    });
+    const canUse = vi.fn(async () => true);
+    const match = await matchAdhocConnection(
+      { connections, connectionAccess: { canUse } },
+      { businessId: BUSINESS, origin: ORIGIN, principalId: "user-1" }
+    );
+    expect(match).toMatchObject({ kind: "match" });
+    expect(canUse).toHaveBeenCalledOnce();
+  });
+
   it("does not offer another person's personal Connection", async () => {
     const connections = await seed({
       scope: "personal",
@@ -215,6 +301,26 @@ describe("matchAdhocConnection", () => {
       { businessId: BUSINESS, origin: ORIGIN, principalId: "user-2" }
     );
     expect(match).toEqual({ kind: "none" });
+  });
+
+  it("denies another person's personal Connection by exact ID", async () => {
+    const connections = await seed({
+      scope: "personal",
+      principalKind: "user",
+      principalId: "user-1",
+    });
+    const [connection] = connections.rows;
+    if (connection === undefined) throw new Error("seed failed");
+    const match = await matchAdhocConnection(
+      { connections },
+      {
+        businessId: BUSINESS,
+        origin: ORIGIN,
+        principalId: "user-2",
+        connectionId: connection.id,
+      }
+    );
+    expect(match).toEqual({ kind: "denied", reason: "not_authorized" });
   });
 
   it("never matches a different origin", async () => {
@@ -236,10 +342,19 @@ describe("matchAdhocConnection", () => {
     });
     await seed({ scope: "organization" }, connections);
     const match = await matchAdhocConnection(
-      { connections },
+      { connections, connectionAccess: { canUse: async () => true } },
       { businessId: BUSINESS, origin: ORIGIN, principalId: "user-1" }
     );
-    expect(match).toEqual({ kind: "ambiguous", count: 2 });
+    expect(match).toMatchObject({
+      kind: "ambiguous",
+      count: 2,
+      candidates: [
+        { id: "id-2", label: "Example", ownerScope: "personal" },
+        { id: "id-4", label: "Example", ownerScope: "organization" },
+      ],
+    });
+    expect(JSON.stringify(match)).not.toContain("secret://");
+    expect(JSON.stringify(match)).not.toContain("authorization");
   });
 
   it("ignores a revoked or expired Connection", async () => {
@@ -249,7 +364,7 @@ describe("matchAdhocConnection", () => {
     connections.rows[0] = { ...row, status: "revoked" } as PersistedConnection;
     await expect(
       matchAdhocConnection(
-        { connections },
+        { connections, connectionAccess: { canUse: async () => true } },
         { businessId: BUSINESS, origin: ORIGIN, principalId: "u" }
       )
     ).resolves.toEqual({ kind: "none" });
@@ -257,10 +372,67 @@ describe("matchAdhocConnection", () => {
     connections.rows[0] = { ...row, expiresAt: "2000-01-01T00:00:00Z" } as PersistedConnection;
     await expect(
       matchAdhocConnection(
-        { connections },
+        { connections, connectionAccess: { canUse: async () => true } },
         { businessId: BUSINESS, origin: ORIGIN, principalId: "u" }
       )
     ).resolves.toEqual({ kind: "none" });
+  });
+
+  it("does not fall back when an exact Connection is unauthorized", async () => {
+    const connections = await seed({ scope: "organization" });
+    await seed({ scope: "personal", principalKind: "user", principalId: "user-1" }, connections);
+
+    await expect(
+      matchAdhocConnection(
+        { connections, connectionAccess: { canUse: async () => false } },
+        {
+          businessId: BUSINESS,
+          origin: ORIGIN,
+          principalId: "user-1",
+          connectionId: "id-2",
+        }
+      )
+    ).resolves.toEqual({ kind: "denied", reason: "not_authorized" });
+  });
+
+  it("does not use an exact Connection for another origin", async () => {
+    const connections = await seed({
+      scope: "personal",
+      principalKind: "user",
+      principalId: "user-1",
+    });
+
+    await expect(
+      matchAdhocConnection(
+        { connections },
+        {
+          businessId: BUSINESS,
+          origin: "https://other.example.com",
+          principalId: "user-1",
+          connectionId: "id-2",
+        }
+      )
+    ).resolves.toEqual({ kind: "denied", reason: "not_found" });
+  });
+
+  it("does not fall back when an exact Connection does not exist", async () => {
+    const connections = await seed({
+      scope: "personal",
+      principalKind: "user",
+      principalId: "user-1",
+    });
+
+    await expect(
+      matchAdhocConnection(
+        { connections },
+        {
+          businessId: BUSINESS,
+          origin: ORIGIN,
+          principalId: "user-1",
+          connectionId: "missing",
+        }
+      )
+    ).resolves.toEqual({ kind: "denied", reason: "not_found" });
   });
 });
 

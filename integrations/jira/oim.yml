@@ -14,8 +14,13 @@ metadata:
       url: https://tulipfarm.dev
 
 profiles:
-  core: "1.0"
+  core: "1.1"
   auth: "1.0"
+
+files:
+  - path: fixtures.yml
+    role: fixture
+    sha256: "d3414f747af891759e004d9ade5013278ec1c3e69d7b1b483fed501e0be80fb9"
 
 auth:
   # The site is the installation's own Atlassian tenant, so the base URL is templated rather than
@@ -31,7 +36,7 @@ auth:
   configurationFields:
     - id: jira_site
       label: Jira site
-      type: url
+      type: string
       required: true
       agentVisible: true
   steps:
@@ -44,7 +49,7 @@ auth:
       fields:
         - id: jira_site
           label: Site host
-          input: url
+          input: text
           required: true
           target:
             type: configuration
@@ -95,6 +100,7 @@ operations:
           displayName: { type: string }
           emailAddress: { type: string }
           active: { type: boolean }
+        required: [accountId, displayName]
       projection:
         - /accountId
         - /displayName
@@ -136,10 +142,6 @@ operations:
           type: integer
           minimum: 1
           maximum: 100
-        nextPageToken:
-          type: string
-          maxLength: 4096
-          description: The nextPageToken from a previous response, to read the following page.
         fields:
           type: array
           maxItems: 50
@@ -149,6 +151,11 @@ operations:
           description: Use changelog to retrieve status-change history.
       required: [jql]
       additionalProperties: false
+    pagination:
+      type: body_cursor
+      requestPointer: /nextPageToken
+      responsePath: /nextPageToken
+      itemsPath: /issues
     response:
       maxBytes: 524288
       schema:
@@ -163,6 +170,10 @@ operations:
                 id: { type: string }
                 key: { type: string }
                 fields: { type: object }
+              required: [id, key, fields]
+        required: [issues]
+      projection:
+        - /issues
     rateLimit:
       requests: 60
       perSeconds: 60
@@ -212,6 +223,7 @@ operations:
           key: { type: string }
           fields: { type: object }
           changelog: { type: object }
+        required: [id, key, fields]
     rateLimit:
       requests: 60
       perSeconds: 60
@@ -245,6 +257,7 @@ operations:
             id: { type: string }
             name: { type: string }
             description: { type: string }
+          required: [id, name]
     rateLimit:
       requests: 30
       perSeconds: 60
@@ -291,6 +304,9 @@ operations:
                   properties:
                     id: { type: string }
                     name: { type: string }
+                  required: [id, name]
+              required: [id, name, to]
+        required: [transitions]
     rateLimit:
       requests: 60
       perSeconds: 60
@@ -334,6 +350,7 @@ operations:
           id: { type: string }
           key: { type: string }
           self: { type: string }
+        required: [id, key, self]
       projection:
         - /id
         - /key

@@ -37,7 +37,9 @@ import { registerAdhocConnectionRoutes } from "./integrations/adhoc-routes";
 import { registerDeliveryRoutes } from "./integrations/delivery-routes";
 import { registerGitHubInstallRoutes } from "./integrations/github-install-routes";
 import { registerOimIngressRoutes } from "./integrations/oim-ingress-routes";
+import { registerOimReleaseRoutes } from "./integrations/oim-release-routes";
 import { registerInternalRouteFamily } from "./internal/route-family";
+import { registerRoutineOwnerAuthorityRoutes } from "./internal/routine-owner-authority-routes";
 import { registerKillSwitchRoutes } from "./kill-switches/routes";
 import { registerKnowledgeRoutes } from "./knowledge/routes";
 import { registerSubjectRoutes } from "./knowledge/subject-directory";
@@ -300,6 +302,7 @@ export async function buildApp(opts: AppOptions = {}) {
       rateLimiter: opts.rateLimiter,
       ...(opts.identity && { identity: opts.identity }),
       ...(opts.userAdminRepo && { userAdminRepo: opts.userAdminRepo }),
+      ...(opts.onUserDisabled && { onUserDisabled: opts.onUserDisabled }),
       ...(opts.passwordWriteRepo && { passwordWriteRepo: opts.passwordWriteRepo }),
       ...(opts.profileWriteRepo && { profileWriteRepo: opts.profileWriteRepo }),
       ...(opts.userInviteRepo && { inviteRepo: opts.userInviteRepo }),
@@ -455,6 +458,9 @@ export async function buildApp(opts: AppOptions = {}) {
       );
     }
     registerSoulRouteFamily(app, opts, requireAuth, requireAuthorization, authorizationCheck);
+    if (opts.oimReleaseTrust) {
+      registerOimReleaseRoutes(app, opts.oimReleaseTrust, requireAuth, requireAuthorization);
+    }
     // Not in the Soul family: a Connection is deployment state in Postgres, not Soul config, and
     // gating it on a writable Soul would leave a read-only deployment unable to store a Credential.
     if (opts.connectionStore && opts.secretsService) {
@@ -463,6 +469,9 @@ export async function buildApp(opts: AppOptions = {}) {
         secrets: opts.secretsService,
         requireAuth,
         authorizationCheck,
+        ...(opts.oimConnectionAccess === undefined
+          ? {}
+          : { connectionAccess: opts.oimConnectionAccess }),
         ...(opts.auditService === undefined
           ? {}
           : { audit: makeSoulAuditWriter(opts.auditService) }),
@@ -630,6 +639,7 @@ export async function buildApp(opts: AppOptions = {}) {
       registerRunEventRoutes(app, opts.runEvents, requireAuth, opts.rateLimiter);
     }
     registerInternalRouteFamily(app, opts, requireAuth);
+    registerRoutineOwnerAuthorityRoutes(app, opts.routineOwnerAuthority, requireAuth);
     if (opts.runReplay) {
       registerRunReplayRoutes(app, opts.runReplay, requireAuth, opts.rateLimiter);
     }

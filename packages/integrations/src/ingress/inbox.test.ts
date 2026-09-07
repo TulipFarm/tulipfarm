@@ -149,6 +149,50 @@ describe("receiveDelivery", () => {
     expect(record).not.toHaveBeenCalled();
   });
 
+  it("persists verified raw input for a declared classifier with only unioned safe headers", async () => {
+    const manifest = {
+      ...MANIFEST,
+      hooks: [
+        {
+          kind: "webhook_classify",
+          file: "hooks/classify.js",
+          export: "classify",
+        },
+      ],
+      events: {
+        ...MANIFEST.events,
+        eventTypes: [
+          ...(MANIFEST.events?.eventTypes ?? []),
+          {
+            type: "forecast.deleted",
+            selector: { pointer: "/type", equals: "forecast_deleted" },
+            schema: { type: "object" },
+            safeHeaders: ["x-event", "authorization"],
+          },
+        ],
+      },
+    } as unknown as OimManifest;
+    const signedRequest = request(
+      { providerType: "changed" },
+      {
+        "x-delivery-id": "d-10",
+        "x-event": "forecast",
+        authorization: "Bearer secret",
+      }
+    );
+
+    const result = await receiveDelivery({ ...signedRequest, manifest }, dependencies);
+
+    expect(result).toEqual({ kind: "accepted", deliveryId: "delivery-1", duplicate: false });
+    expect(record.mock.calls[0]?.[1]).toMatchObject({
+      eventType: null,
+      safeHeaders: {
+        "x-delivery-id": "d-10",
+        "x-event": "forecast",
+      },
+    });
+  });
+
   it("refuses an unparseable payload before it can be verified or stored", async () => {
     const result = await receiveDelivery(
       { businessId: "business-1", manifest: MANIFEST, rawBody: Buffer.from("nope"), headers: {} },

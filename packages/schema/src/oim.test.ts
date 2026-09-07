@@ -68,6 +68,95 @@ describe("validateOimManifest", () => {
     expect(validateOimManifest(valid())).toEqual(valid());
   });
 
+  it("accepts constant OAuth authorization parameters but reserves protocol parameters", () => {
+    const manifest = valid();
+    manifest.profiles.auth = "1.0";
+    manifest.auth = {
+      credentialSlots: [
+        { id: "client_id", label: "Client ID", kind: "api_key", required: true },
+        { id: "access_token", label: "Access token", kind: "oauth2_access_token", required: true },
+      ],
+      steps: [
+        {
+          id: "consent",
+          title: "Authorize",
+          type: "oauth2",
+          authorizationUrl: "https://accounts.example.com/oauth/authorize",
+          tokenUrl: "https://accounts.example.com/oauth/token",
+          scopes: ["read"],
+          authorizationParameters: { access_type: "offline", prompt: "consent" },
+          clientId: { type: "credential", slot: "client_id" },
+          bindings: [
+            { sourcePath: "/access_token", target: { type: "credential", slot: "access_token" } },
+          ],
+        },
+      ],
+    };
+
+    expect(validateOimManifest(manifest)).toEqual(manifest);
+
+    const oauth = manifest.auth.steps[0];
+    if (oauth.type !== "oauth2") throw new Error("expected OAuth step");
+    oauth.authorizationParameters = { state: "package-owned" };
+    expect(oimManifestIssues(manifest)).toContain(
+      "auth: step consent authorizationParameters cannot set host-owned state"
+    );
+  });
+
+  it("validates OAuth token endpoint client authentication", () => {
+    const manifest = valid();
+    manifest.profiles.auth = "1.0";
+    manifest.auth = {
+      credentialSlots: [
+        { id: "client_id", label: "Client ID", kind: "api_key", required: true },
+        { id: "access_token", label: "Access token", kind: "oauth2_access_token", required: true },
+      ],
+      steps: [
+        {
+          id: "consent",
+          title: "Authorize",
+          type: "oauth2",
+          authorizationUrl: "https://accounts.example.com/oauth/authorize",
+          tokenUrl: "https://accounts.example.com/oauth/token",
+          tokenEndpointAuthMethod: "none",
+          scopes: ["read"],
+          pkce: true,
+          clientId: { type: "credential", slot: "client_id" },
+          bindings: [
+            { sourcePath: "/access_token", target: { type: "credential", slot: "access_token" } },
+          ],
+        },
+      ],
+    };
+    expect(validateOimManifest(manifest)).toEqual(manifest);
+
+    const oauth = manifest.auth.steps[0];
+    if (oauth.type !== "oauth2") throw new Error("expected OAuth step");
+    oauth.tokenEndpointAuthMethod = "client_secret_basic";
+    expect(oimManifestIssues(manifest)).toContain(
+      "auth: step consent tokenEndpointAuthMethod client_secret_basic requires clientSecret"
+    );
+
+    manifest.auth.credentialSlots.push({
+      id: "client_secret",
+      label: "Client secret",
+      kind: "client_secret",
+      required: true,
+    });
+    oauth.clientSecret = { type: "credential", slot: "client_secret" };
+    expect(validateOimManifest(manifest)).toEqual(manifest);
+
+    oauth.tokenEndpointAuthMethod = "none";
+    expect(oimManifestIssues(manifest)).toContain(
+      "auth: step consent tokenEndpointAuthMethod none cannot declare clientSecret"
+    );
+    oauth.clientSecret = undefined;
+    oauth.pkce = false;
+    expect(oimManifestIssues(manifest)).toContain(
+      "auth: step consent public OAuth client requires PKCE"
+    );
+  });
+
   it("accepts a webhook registration step bound to native HTTP operations", () => {
     const manifest = valid();
     manifest.profiles = { core: "1.0", auth: "1.0", events: "1.0" };
@@ -160,7 +249,7 @@ describe("validateOimManifest", () => {
       ],
     };
 
-    expect(validateOimManifest(manifest)).toEqual(manifest);
+    expect(oimManifestIssues(manifest)).toEqual([]);
   });
 
   it("accepts polling ingress only when it names a cursor-capable read operation", () => {
@@ -193,6 +282,56 @@ describe("validateOimManifest", () => {
     };
 
     expect(oimManifestIssues(manifest)).toEqual([]);
+  });
+
+  it("accepts max-integer-plus-one polling cursors for batched provider updates", () => {
+    const manifest = valid();
+    manifest.profiles = { core: "1.0", events: "1.0" };
+    manifest.operations[0].effect = "sensitive_read";
+    manifest.operations[0].source = {
+      type: "http",
+      method: "GET",
+      baseUrl: "https://api.weather.example",
+      path: "/events",
+      parameters: [{ name: "offset", in: "query", schema: { type: "integer" } }],
+    };
+    (manifest as OimManifest & { ingress: unknown }).ingress = {
+      kind: "polling",
+      operationId: "current-weather",
+      intervalSeconds: 60,
+      eventTypes: [
+        {
+          type: "updated",
+          selector: { pointer: "/type", equals: "updated" },
+          schema: { type: "object" },
+        },
+      ],
+      cursor: {
+        mode: "max_integer_plus_one",
+        responsePointer: "/result",
+        itemPointer: "/update_id",
+        requestParameter: "offset",
+      },
+    };
+
+    expect(validateOimManifest(manifest)).toEqual(manifest);
+    expect(oimManifestIssues(manifest)).toEqual([]);
+  });
+
+  it("rejects a max-integer cursor without an item pointer", () => {
+    const manifest = valid() as OimManifest & { ingress: unknown };
+    manifest.ingress = {
+      kind: "polling",
+      operationId: "current-weather",
+      intervalSeconds: 60,
+      cursor: {
+        mode: "max_integer_plus_one",
+        responsePointer: "/result",
+        requestParameter: "offset",
+      },
+    };
+
+    expect(() => validateOimManifest(manifest)).toThrow(TulipFarmValidationError);
   });
 
   it("rejects polling ingress below the provider-safe interval floor", () => {
@@ -1283,10 +1422,190 @@ describe("OIM Knowledge profile", () => {
     expect(validateOimManifest(knowledgeManifest())).toEqual(knowledgeManifest());
   });
 
+  it("accepts bounded context arguments, scalar joins, and scalar ACL entries", () => {
+    const manifest = knowledgeManifest();
+    const operations = manifest.operations.map((operation) => {
+      if (
+        operation.id !== "get-page" ||
+        operation.source.type !== "http" ||
+        operation.source.contentType !== undefined
+      ) {
+        return operation;
+      }
+      return {
+        ...operation,
+        source: {
+          ...operation.source,
+          parameters: [
+            ...(operation.source.parameters ?? []),
+            { name: "channel", in: "query" as const, schema: { type: "string" } },
+          ],
+        },
+      };
+    });
+    const knowledge = manifest.knowledge;
+    const portable = {
+      ...manifest,
+      profiles: { ...manifest.profiles, knowledge: "1.1" },
+      operations,
+      knowledge: {
+        ...knowledge,
+        list: {
+          ...knowledge?.list,
+          mapping: {
+            itemFields: {
+              channel: { source: "scope" },
+              page_id: { source: "item", pointer: "/id" },
+            },
+            itemIdentity: ["channel", "page_id"],
+            revision: "/version/number",
+            title: "/title",
+          },
+        },
+        content: {
+          operationId: "get-page",
+          parameters: { id: "page_id", channel: "channel" },
+          mapping: {
+            content: {
+              itemsPointer: "/messages",
+              itemPointer: "/text",
+              separator: "\n",
+            },
+          },
+        },
+        acl: {
+          mode: "scope",
+          operationId: "get-restrictions",
+          scopeParameter: "id",
+          entriesPointer: "/members",
+          entry: { defaultKind: "user", providerUserId: "" },
+        },
+        liveAuthorization: {
+          operationId: "get-restrictions",
+          parameters: { id: "channel" },
+          principalSet: { entriesPointer: "/members", principalIdPointer: "" },
+        },
+      },
+    } as OimManifest;
+
+    expect(oimManifestIssues(portable)).toEqual([]);
+    expect(validateOimManifest(portable)).toEqual(portable);
+  });
+
+  it("refuses a parameter binding to an unknown item field", () => {
+    const manifest = knowledgeManifest();
+    const content = {
+      ...manifest.knowledge?.content,
+      parameters: { id: "missing" },
+    };
+    expect(
+      oimManifestIssues({
+        ...knowledgeManifest({ content }),
+        profiles: { ...manifest.profiles, knowledge: "1.1" },
+      })
+    ).toContain("knowledge: content parameter id references unknown item field missing");
+  });
+
+  it("refuses a field parameter the operation does not declare", () => {
+    const manifest = knowledgeManifest();
+    const content = {
+      ...manifest.knowledge?.content,
+      parameters: { channel: "page_id" },
+    };
+    expect(
+      oimManifestIssues({
+        ...knowledgeManifest({
+          list: {
+            ...manifest.knowledge?.list,
+            mapping: {
+              ...manifest.knowledge?.list.mapping,
+              itemFields: { page_id: { source: "item", pointer: "/id" } },
+            },
+          },
+          content,
+        }),
+        profiles: { ...manifest.profiles, knowledge: "1.1" },
+      })
+    ).toContain("knowledge: content operation get-page declares no parameter channel");
+  });
+
+  it("refuses an ambiguous live authorization result mapping", () => {
+    const liveAuthorization = {
+      operationId: "get-restrictions",
+      itemParameter: "id",
+      allowedPointer: "/allowed",
+      principalSet: { entriesPointer: "/members", principalIdPointer: "" },
+    };
+    const manifest = knowledgeManifest({ liveAuthorization });
+    expect(
+      oimManifestIssues({
+        ...manifest,
+        profiles: { ...manifest.profiles, knowledge: "1.1" },
+      })
+    ).toContain(
+      "knowledge: liveAuthorization requires exactly one of allowedPointer or principalSet"
+    );
+  });
+
+  it("keeps Knowledge 1.1 fields out of a 1.0 declaration", () => {
+    const manifest = knowledgeManifest();
+    const list = {
+      ...manifest.knowledge?.list,
+      mapping: {
+        ...manifest.knowledge?.list.mapping,
+        itemFields: { page_id: { source: "item" as const, pointer: "/id" } },
+      },
+    };
+    expect(oimManifestIssues(knowledgeManifest({ list }))).toContain(
+      'profiles: knowledge "1.1" is required for list.mapping.itemFields'
+    );
+  });
+
+  it("refuses an unknown field in the ordered item identity", () => {
+    const manifest = knowledgeManifest();
+    const list = {
+      ...manifest.knowledge?.list,
+      mapping: {
+        itemFields: { page_id: { source: "item" as const, pointer: "/id" } },
+        itemIdentity: ["missing"],
+      },
+    };
+    expect(
+      oimManifestIssues({
+        ...knowledgeManifest({ list }),
+        profiles: { ...manifest.profiles, knowledge: "1.1" },
+      })
+    ).toContain("knowledge: list itemIdentity references unknown item field missing");
+  });
+
+  it("allows deletion parameters to use only scope-projected fields", () => {
+    const manifest = knowledgeManifest();
+    const list = {
+      ...manifest.knowledge?.list,
+      mapping: {
+        ...manifest.knowledge?.list.mapping,
+        itemFields: { page_id: { source: "item" as const, pointer: "/id" } },
+      },
+    };
+    const deletion = {
+      kind: "operation" as const,
+      operationId: "list-pages",
+      parameters: { spaceKey: "page_id" },
+      itemsPointer: "/removed",
+      itemIdPointer: "/id",
+    };
+    expect(
+      oimManifestIssues({
+        ...knowledgeManifest({ list, deletion }),
+        profiles: { ...manifest.profiles, knowledge: "1.1" },
+      })
+    ).toContain("knowledge: deletion parameter spaceKey requires scope item field page_id");
+  });
+
   it("requires the knowledge profile to be declared alongside the section", () => {
     const manifest = knowledgeManifest();
     expect(oimManifestIssues({ ...manifest, profiles: { core: "1.0" } })).toContain(
-      'profiles: knowledge "1.0" is required when knowledge is declared'
+      'profiles: knowledge "1.0" or "1.1" is required when knowledge is declared'
     );
   });
 

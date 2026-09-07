@@ -13,7 +13,10 @@
 
 import { canonicalHash } from "@tulipfarm/schema";
 import { readPointer } from "../egress/oim-pagination";
+import { type OimHookPhaseRunner, runOimHookPhase } from "../oim-hooks";
+import { isOimKnowledgeRetryRequiredError } from "./oim-errors";
 import {
+  type KnowledgeItemFieldValue,
   mapAclEntries,
   mapContent,
   mapListItems,
@@ -57,6 +60,7 @@ export interface OimKnowledgeSyncDeps {
   readonly checkpoints: OimKnowledgeCheckpointStore;
   readonly sink: KnowledgeEmissionSink;
   readonly identity: Omit<ResolveKnowledgePrincipalsDeps, "businessId" | "provider">;
+  readonly hookRunner?: OimHookPhaseRunner;
   readonly now: () => Date;
 }
 
@@ -65,7 +69,6 @@ export interface OimKnowledgeSyncOptions {
   readonly integrationId: string;
   /** The exact Connection this Routine was bound to. Personal and organization data never mix. */
   readonly connectionId: string;
-  readonly externalTenantId: string;
   readonly sourceKindId: string;
   readonly scopes: readonly string[];
   readonly classification?: readonly string[];
@@ -74,7 +77,9 @@ export interface OimKnowledgeSyncOptions {
 }
 
 export type OimSyncFailureCode =
+  | "retry_required"
   | "list_failed"
+  | "mapping_failed"
   | "acl_failed"
   | "content_failed"
   | "content_absent"
@@ -118,6 +123,13 @@ function sourceIdFor(
   itemId: string
 ): string {
   return knowledgeSourceId(plan.integrationId, `${options.connectionId}/${itemId}`);
+}
+
+function checkpointIntegrationId(
+  plan: KnowledgeProfilePlan,
+  options: OimKnowledgeSyncOptions
+): string {
+  return `${options.integrationId}@${plan.majorVersion}:${options.connectionId}`;
 }
 
 export async function syncOimKnowledge(
@@ -173,7 +185,8 @@ async function syncScope(
     failures: [],
   };
   const scopeKey = `${options.sourceKindId}:${scope}`;
-  const stored = await deps.checkpoints.load(options.integrationId, scopeKey);
+  const checkpointId = checkpointIntegrationId(plan, options);
+  const stored = await deps.checkpoints.load(checkpointId, scopeKey);
 
   // Resolved once per scope when the provider expresses permissions at container level; asking
   // per item would be the same answer at N times the provider's rate limit.
@@ -181,7 +194,7 @@ async function syncScope(
   if (plan.acl.mode === "scope") {
     scopeAcl = await readAcl(plan, deps, options, { scope });
     if (scopeAcl.kind === "failed") {
-      outcome.failures.push({ code: "acl_failed", scope });
+      outcome.failures.push({ code: scopeAcl.failure, scope });
       return outcome;
     }
   }
@@ -211,13 +224,25 @@ async function syncScope(
         parameters,
         pageToken,
       });
-    } catch {
-      outcome.failures.push({ code: "list_failed", scope });
+    } catch (error) {
+      outcome.failures.push({
+        code: isOimKnowledgeRetryRequiredError(error) ? "retry_required" : "list_failed",
+        scope,
+      });
       complete = false;
       break;
     }
 
-    for (const item of mapListItems(plan, response.body)) {
+    let items: ReturnType<typeof mapListItems>;
+    try {
+      items = mapListItems(plan, response.body, scope);
+    } catch {
+      outcome.failures.push({ code: "mapping_failed", scope });
+      complete = false;
+      break;
+    }
+
+    for (const item of items) {
       outcome.items += 1;
       seenItemIds.push(item.itemId);
       const itemOutcome = await syncItem(plan, deps, options, scope, item, scopeAcl);
@@ -256,15 +281,19 @@ async function syncScope(
   }
   if (walkedWholeScope && plan.deletion.kind === "operation") {
     const swept = await sweepDeletions(plan, deps, options, scope);
-    if (swept === undefined) outcome.failures.push({ code: "deletion_sweep_failed", scope });
-    else outcome.removed += swept;
+    if (swept.failure !== undefined) {
+      outcome.failures.push({ code: swept.failure, scope });
+      complete = false;
+    } else {
+      outcome.removed += swept.removed;
+    }
   }
 
   // A partial walk keeps the old checkpoint: re-reading a page costs a request, whereas skipping
   // one loses the content on it until somebody notices, which nobody does.
   if (complete) {
     await deps.checkpoints.save({
-      integrationId: options.integrationId,
+      integrationId: checkpointId,
       scopeKey,
       cursor: plan.list.cursor.kind === "none" ? undefined : cursor,
       seenItemIds:
@@ -287,7 +316,7 @@ interface ItemOutcome {
 }
 
 type AclOutcome =
-  | { kind: "failed" }
+  | { kind: "failed"; failure: "acl_failed" | "retry_required" }
   | { kind: "unverifiable" }
   | {
       kind: "verified";
@@ -300,26 +329,57 @@ async function readAcl(
   plan: KnowledgeProfilePlan,
   deps: OimKnowledgeSyncDeps,
   options: OimKnowledgeSyncOptions,
-  target: { readonly scope?: string; readonly itemId?: string }
+  target: {
+    readonly scope?: string;
+    readonly itemId?: string;
+    readonly fields?: Readonly<Record<string, KnowledgeItemFieldValue>>;
+  }
 ): Promise<AclOutcome> {
-  const parameters: Record<string, unknown> = {
-    [plan.acl.parameter]: plan.acl.mode === "item" ? target.itemId : target.scope,
-  };
+  const parameters =
+    plan.acl.mode === "item"
+      ? fieldParameters(plan.acl.parameters, target.fields)
+      : ({} as Record<string, unknown>);
+  if (parameters === undefined) return { kind: "failed", failure: "acl_failed" };
+  if (plan.acl.parameter !== undefined) {
+    parameters[plan.acl.parameter] = plan.acl.mode === "item" ? target.itemId : target.scope;
+  }
   let body: unknown;
   try {
     ({ body } = await deps.api.execute({ operationId: plan.acl.operation.id, parameters }));
-  } catch {
-    return { kind: "failed" };
+    const mapped = await runOimHookPhase({
+      manifest: plan.hooks === undefined ? {} : { hooks: plan.hooks },
+      kind: "acl_map",
+      input: {
+        operationId: plan.acl.operation.id,
+        ...(target.itemId === undefined ? {} : { itemId: target.itemId }),
+        ...(target.scope === undefined ? {} : { scopeId: target.scope }),
+        payload: body,
+      },
+      ...(deps.hookRunner === undefined ? {} : { runner: deps.hookRunner }),
+    });
+    if (mapped.executed) body = mapped.value;
+  } catch (error) {
+    return {
+      kind: "failed",
+      failure: isOimKnowledgeRetryRequiredError(error) ? "retry_required" : "acl_failed",
+    };
   }
 
-  const read = mapAclEntries(plan, body);
-  if (read.status === "unverifiable") return { kind: "unverifiable" };
-
-  const resolved = await resolveKnowledgePrincipals(read.entries as readonly ProviderAclEntry[], {
-    ...deps.identity,
-    businessId: options.businessId,
-    provider: plan.integrationId,
-  });
+  let resolved: Awaited<ReturnType<typeof resolveKnowledgePrincipals>>;
+  try {
+    const read = mapAclEntries(plan, body);
+    if (read.status === "unverifiable") return { kind: "unverifiable" };
+    resolved = await resolveKnowledgePrincipals(read.entries as readonly ProviderAclEntry[], {
+      ...deps.identity,
+      businessId: options.businessId,
+      provider: plan.integrationId,
+    });
+  } catch (error) {
+    return {
+      kind: "failed",
+      failure: isOimKnowledgeRetryRequiredError(error) ? "retry_required" : "acl_failed",
+    };
+  }
   // A grant nothing could expand is a grant nobody can account for, so the item is recorded
   // without content rather than indexed under readers we only half know.
   if (resolved.incomplete) return { kind: "unverifiable" };
@@ -336,7 +396,13 @@ async function syncItem(
   deps: OimKnowledgeSyncDeps,
   options: OimKnowledgeSyncOptions,
   scope: string,
-  item: { readonly itemId: string; readonly revision?: string; readonly deleted: boolean },
+  item: {
+    readonly itemId: string;
+    readonly fields?: Readonly<Record<string, KnowledgeItemFieldValue>>;
+    readonly revision?: string;
+    readonly sourceUrl?: string;
+    readonly deleted: boolean;
+  },
   scopeAcl: AclOutcome | undefined
 ): Promise<ItemOutcome> {
   const outcome: ItemOutcome = { emitted: 0, unverifiable: 0, indexed: 0, removed: 0 };
@@ -349,8 +415,20 @@ async function syncItem(
     integrationId: options.integrationId,
     provider: plan.integrationId,
     externalId: item.itemId,
-    externalTenantId: options.externalTenantId,
+    externalTenantId: options.connectionId,
     ownerExternalId: scope,
+    locator: {
+      kind: "oim",
+      integrationSlug: options.integrationId,
+      integrationId: plan.integrationId,
+      integrationMajorVersion: plan.majorVersion,
+      connectionId: options.connectionId,
+      sourceKindId: options.sourceKindId,
+      scope,
+      itemId: item.itemId,
+      ...(item.fields === undefined ? {} : { fields: item.fields }),
+      ...(item.sourceUrl === undefined ? {} : { sourceUrl: item.sourceUrl }),
+    },
     classification,
     lastSyncedAt: capturedAt,
   } as const;
@@ -367,7 +445,11 @@ async function syncItem(
         status: "deleted",
         verification: "verified",
         accessControl: liveAccessControl,
-        provenance: { capturedAt, contentHash: canonicalHash({ deleted: sourceId }) },
+        provenance: {
+          capturedAt,
+          contentHash: canonicalHash({ deleted: sourceId }),
+          connectionId: options.connectionId,
+        },
       });
       await deps.sink.removeSourceContent(options.businessId, sourceId);
     } catch {
@@ -376,8 +458,14 @@ async function syncItem(
     return { ...outcome, removed: 1 };
   }
 
-  const acl = scopeAcl ?? (await readAcl(plan, deps, options, { itemId: item.itemId }));
-  if (acl.kind === "failed") return { ...outcome, failure: "acl_failed" };
+  const acl =
+    scopeAcl ??
+    (await readAcl(plan, deps, options, {
+      scope,
+      itemId: item.itemId,
+      fields: item.fields,
+    }));
+  if (acl.kind === "failed") return { ...outcome, failure: acl.failure };
 
   if (acl.kind === "unverifiable") {
     // The source stays recorded so it remains citable and invalidatable, but it holds no content
@@ -389,7 +477,11 @@ async function syncItem(
         status: "active",
         verification: "unverifiable",
         accessControl: liveAccessControl,
-        provenance: { capturedAt, contentHash: canonicalHash({ unverifiable: sourceId }) },
+        provenance: {
+          capturedAt,
+          contentHash: canonicalHash({ unverifiable: sourceId }),
+          connectionId: options.connectionId,
+        },
       });
       await deps.sink.removeSourceContent(options.businessId, sourceId);
     } catch {
@@ -399,13 +491,32 @@ async function syncItem(
   }
 
   let body: unknown;
+  const contentParameters = fieldParameters(plan.content.parameters, item.fields);
+  if (contentParameters === undefined) return { ...outcome, failure: "content_failed" };
+  if (plan.content.itemParameter !== undefined) {
+    contentParameters[plan.content.itemParameter] = item.itemId;
+  }
   try {
     ({ body } = await deps.api.execute({
       operationId: plan.content.operation.id,
-      parameters: { [plan.content.itemParameter]: item.itemId },
+      parameters: contentParameters,
     }));
-  } catch {
-    return { ...outcome, failure: "content_failed" };
+    const mapped = await runOimHookPhase({
+      manifest: plan.hooks === undefined ? {} : { hooks: plan.hooks },
+      kind: "content_map",
+      input: {
+        operationId: plan.content.operation.id,
+        itemId: item.itemId,
+        payload: body,
+      },
+      ...(deps.hookRunner === undefined ? {} : { runner: deps.hookRunner }),
+    });
+    if (mapped.executed) body = mapped.value;
+  } catch (error) {
+    return {
+      ...outcome,
+      failure: isOimKnowledgeRetryRequiredError(error) ? "retry_required" : "content_failed",
+    };
   }
   const content = mapContent(plan, body);
   if (!content) return { ...outcome, failure: "content_absent" };
@@ -437,6 +548,10 @@ async function syncItem(
   const revision = content.revision ?? item.revision ?? aclRevision;
   const emission: KnowledgeSourceEmission = {
     ...common,
+    locator: {
+      ...common.locator,
+      ...(content.sourceUrl === undefined ? {} : { sourceUrl: content.sourceUrl }),
+    },
     ...access,
     revision,
     status: "active",
@@ -445,6 +560,7 @@ async function syncItem(
       capturedAt,
       contentHash: canonicalHash({ content: content.content }),
       checkpoint: revision,
+      connectionId: options.connectionId,
     },
   };
 
@@ -496,26 +612,37 @@ async function removeAbsent(
   return removed;
 }
 
-/** Runs the declared deletion sweep. `undefined` reports the sweep itself failed. */
+/** Runs the declared deletion sweep. */
 async function sweepDeletions(
   plan: KnowledgeProfilePlan,
   deps: OimKnowledgeSyncDeps,
   options: OimKnowledgeSyncOptions,
   scope: string
-): Promise<number | undefined> {
-  if (plan.deletion.kind !== "operation") return 0;
+): Promise<{ readonly removed: number; readonly failure?: OimSyncFailureCode }> {
+  if (plan.deletion.kind !== "operation") return { removed: 0 };
   const parameters: Record<string, unknown> = {};
   if (plan.deletion.scopeParameter !== undefined) parameters[plan.deletion.scopeParameter] = scope;
+  const declaredParameters = fieldParameters(
+    plan.deletion.parameters,
+    projectScopeFields(plan, scope)
+  );
+  if (declaredParameters === undefined) {
+    return { removed: 0, failure: "deletion_sweep_failed" };
+  }
+  Object.assign(parameters, declaredParameters);
 
   let body: unknown;
   try {
     ({ body } = await deps.api.execute({ operationId: plan.deletion.operation.id, parameters }));
-  } catch {
-    return undefined;
+  } catch (error) {
+    return {
+      removed: 0,
+      failure: isOimKnowledgeRetryRequiredError(error) ? "retry_required" : "deletion_sweep_failed",
+    };
   }
 
   const raw = readPointer(body, plan.deletion.itemsPointer);
-  if (!Array.isArray(raw)) return undefined;
+  if (!Array.isArray(raw)) return { removed: 0, failure: "deletion_sweep_failed" };
 
   let removed = 0;
   for (const candidate of raw) {
@@ -527,5 +654,36 @@ async function sweepDeletions(
     );
     removed += 1;
   }
-  return removed;
+  return { removed };
+}
+
+function fieldParameters(
+  bindings: Readonly<Record<string, string>> | undefined,
+  fields: Readonly<Record<string, KnowledgeItemFieldValue>> | undefined
+): Record<string, unknown> | undefined {
+  const parameters: Record<string, unknown> = {};
+  for (const [name, field] of Object.entries(bindings ?? {})) {
+    if (fields === undefined || !Object.hasOwn(fields, field)) return undefined;
+    const value = fields[field];
+    if (
+      typeof value !== "string" &&
+      typeof value !== "boolean" &&
+      (typeof value !== "number" || !Number.isFinite(value))
+    ) {
+      return undefined;
+    }
+    parameters[name] = value;
+  }
+  return parameters;
+}
+
+function projectScopeFields(
+  plan: KnowledgeProfilePlan,
+  scope: string
+): Readonly<Record<string, KnowledgeItemFieldValue>> {
+  const fields: Record<string, KnowledgeItemFieldValue> = {};
+  for (const [name, field] of Object.entries(plan.list.mapping.itemFields ?? {})) {
+    if (field.source === "scope") fields[name] = scope;
+  }
+  return fields;
 }

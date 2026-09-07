@@ -1459,10 +1459,7 @@ describe("effect ledger", () => {
 
       const result = await drain(dispatcher.dispatch(AUTHORITY, CALL));
 
-      expect(result).toMatchObject({ status: "failed" });
-      expect(result.status === "failed" && result.reason).toContain(
-        "may already have been applied"
-      );
+      expect(result).toEqual({ status: "needs_reconciliation" });
       const records = await effects.list(BUSINESS_ID);
       expect(records[0]?.state).toBe("ambiguous");
       // The abandoned call keeps running; its write must never reach the caller's answer.
@@ -1484,7 +1481,7 @@ describe("effect ledger", () => {
       const second = await drain(dispatcher.dispatch(AUTHORITY, CALL));
 
       expect(execute).toHaveBeenCalledTimes(1);
-      expect(second).toMatchObject({ status: "failed" });
+      expect(second).toEqual({ status: "needs_reconciliation" });
     } finally {
       vi.useRealTimers();
     }
@@ -1497,7 +1494,9 @@ describe("effect ledger", () => {
       })
     );
 
-    expect(await dispatcher.dispatch(AUTHORITY, CALL)).toMatchObject({ status: "failed" });
+    expect(await dispatcher.dispatch(AUTHORITY, CALL)).toEqual({
+      status: "needs_reconciliation",
+    });
 
     // Throws are ambiguous effects; reconciler must inspect rather than assume failure.
     const records = await effects.list(BUSINESS_ID);

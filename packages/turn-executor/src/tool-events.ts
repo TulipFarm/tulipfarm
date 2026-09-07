@@ -128,7 +128,12 @@ export function announceToolCalls(
       const result = await tools.dispatch(request);
 
       // A park suspends the Turn mid-call; `tool.result` waits for the replay that settles it.
-      if (result.status === "awaiting_approval" || result.status === "awaiting_child") {
+      if (
+        result.status === "awaiting_approval" ||
+        result.status === "awaiting_child" ||
+        result.status === "awaiting_retry" ||
+        result.status === "needs_reconciliation"
+      ) {
         return result;
       }
 

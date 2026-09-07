@@ -51,7 +51,7 @@ Full glossary with banned synonyms: [`metadata/terminologies.md`](metadata/termi
 pnpm + Turborepo monorepo, TypeScript throughout.
 
 - **Node** `26.5.0` (`.node-version`) · **pnpm** `11.5.3` — never npm/yarn
-- **Workspaces**: `apps/*`, `packages/*`
+- **Workspaces**: `apps/*`, `packages/*`, `standards/oim`
 - PostgreSQL (pgvector + pg-boss), Fastify API, Remix web UI
 
 ## Navigating this repo
@@ -101,6 +101,7 @@ sibling `AGENTS.md`.
 | [`packages/editor`](packages/editor/AGENTS.md) | Shared rich-text editor |
 | [`packages/testkit`](packages/testkit/AGENTS.md) | Shared test fixtures and helpers |
 | [`packages/constants`](packages/constants/AGENTS.md) · [`tsconfig`](packages/tsconfig/AGENTS.md) | Env-aware constants, tsconfig bases |
+| [`standards/oim`](standards/oim/AGENTS.md) | Portable OIM specification, generated schemas, CLI, and runtime conformance |
 
 Not workspaces: `soul/` (separate git repo created by `scripts/setup-dev.sh` — Resources,
 Routines, Agents, Skills, Integrations), `docs/architecture/` (design decisions), `metadata/`

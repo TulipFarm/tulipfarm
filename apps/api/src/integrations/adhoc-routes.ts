@@ -1,3 +1,4 @@
+import type { ConnectionUseAuthorizer } from "@tulipfarm/integrations";
 import type { SecretsService } from "@tulipfarm/secrets";
 import type { ConnectionStore } from "@tulipfarm/storage";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
@@ -33,6 +34,8 @@ export interface AdhocConnectionRouteDeps {
    * business.
    */
   readonly authorizationCheck: AuthorizationCheck;
+  /** Filters shared Connections through the same live use-authority check as `api_request`. */
+  readonly connectionAccess?: ConnectionUseAuthorizer;
   readonly audit?: (
     req: FastifyRequest,
     action: string,
@@ -69,6 +72,20 @@ const MatchSchema = {
     state: { type: "string", enum: ["none", "match", "ambiguous"] },
     count: { type: "number" },
     label: { type: "string" },
+    connectionId: { type: "string" },
+    ownerScope: { type: "string", enum: ["personal", "organization", "team"] },
+    candidates: {
+      type: "array",
+      items: {
+        type: "object",
+        required: ["connectionId", "label", "ownerScope"],
+        properties: {
+          connectionId: { type: "string" },
+          label: { type: "string" },
+          ownerScope: { type: "string", enum: ["personal", "organization", "team"] },
+        },
+      },
+    },
   },
 } as const;
 
@@ -203,18 +220,38 @@ export function registerAdhocConnectionRoutes(
         return reply.code(403).send({ error: "only a signed-in person can read this" });
       }
       const match = await matchAdhocConnection(
-        { connections: deps.connections },
+        {
+          connections: deps.connections,
+          ...(deps.connectionAccess === undefined
+            ? {}
+            : { connectionAccess: deps.connectionAccess }),
+        },
         { businessId: principal.businessId, origin, principalId: principal.id }
       );
       switch (match.kind) {
         case "none":
           return { origin, state: "none" };
         case "ambiguous":
-          return { origin, state: "ambiguous", count: match.count };
+          return {
+            origin,
+            state: "ambiguous",
+            count: match.count,
+            candidates: match.candidates.map((candidate) => ({
+              connectionId: candidate.id,
+              label: candidate.label,
+              ownerScope: candidate.ownerScope,
+            })),
+          };
         // The label is safe to return and the injection rule is not: naming the header invites a
         // caller to rebuild the request by hand rather than going through the governed Tool.
         case "match":
-          return { origin, state: "match", label: match.connection.label };
+          return {
+            origin,
+            state: "match",
+            connectionId: match.connection.id,
+            label: match.connection.label,
+            ownerScope: match.connection.owner.scope,
+          };
       }
     }
   );

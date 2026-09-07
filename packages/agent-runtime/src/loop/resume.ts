@@ -9,9 +9,8 @@ export interface AgentLoopResumeState {
   /** Transcript messages the loop appended beyond `AgentLoopInput.messages`. */
   readonly messages: readonly ModelMessage[];
   /**
-   * The Tool call that parked this loop on an approval. It is recorded rather than replanned
-   * because it provably never executed: the dispatcher reports `awaiting_approval` before it
-   * runs the Tool, so replaying exactly this call performs the approved work exactly once.
+   * The Tool call that parked this loop. It is recorded rather than replanned: an approval has
+   * not executed yet, while child and retry waits must replay their idempotent durable operation.
    */
   readonly pendingCall?: {
     readonly callId: string;

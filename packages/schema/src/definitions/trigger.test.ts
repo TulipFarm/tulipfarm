@@ -56,6 +56,33 @@ describe("Trigger schema", () => {
     expect(() => validateTriggerDefinition(ok)).not.toThrow();
   });
 
+  it("requires an OIM Integration event to pin one major version and Connection", () => {
+    const exact = base("integration_event", {
+      provider: "gitlab",
+      matchEventType: "push",
+      protocol: "oim",
+      integrationMajorVersion: 1,
+      connectionId: "connection-1",
+    });
+    expect(() => validateTriggerDefinition(exact)).not.toThrow();
+
+    for (const incomplete of [
+      { protocol: "oim" },
+      { integrationMajorVersion: 1 },
+      { connectionId: "connection-1" },
+    ]) {
+      expect(() =>
+        validateTriggerDefinition(
+          base("integration_event", {
+            provider: "gitlab",
+            matchEventType: "push",
+            ...incomplete,
+          })
+        )
+      ).toThrow(SchemaValidationError);
+    }
+  });
+
   // A bare key is what the compiler refuses to put in an execution bundle. Accepting it here would
   // make the Trigger authorable but unpublishable, and under auto-publish one such Trigger wedges
   // every later Soul change behind it. The authoring and publication boundaries share one pattern.

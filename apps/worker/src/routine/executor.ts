@@ -54,6 +54,7 @@ import {
   assertSupportedInput,
   assertSupportedState,
   type ChainOutcome,
+  CLAIM_PATH,
   isRefusal,
   isRetryableFailure,
   type ManualRoutineRequest,
@@ -65,6 +66,7 @@ import {
   TOOL_ERROR_PREFIX,
 } from "./execution-support";
 import { type FanOutContext, runComposite } from "./fan-out";
+import type { RoutineOwnerGuard } from "./owner-guard";
 import type { RoutineScriptPort } from "./script-port";
 import type { RoutineToolPort } from "./tool-port";
 import {
@@ -86,14 +88,6 @@ interface RoutineRunStateReader {
   listStates: Pick<RunStore, "listStates">["listStates"];
 }
 
-export interface RoutineToolApprovalWaitPort {
-  register(input: {
-    runId: string;
-    stateKey: string;
-    approvalId: string;
-  }): Promise<{ waitId: string }>;
-}
-
 interface RoutineExecutorOptions {
   readonly definitions: Pick<WorkerRoutineDefinitionLoader, "load">;
   readonly artifacts: RoutineArtifactReader;
@@ -101,10 +95,13 @@ interface RoutineExecutorOptions {
   readonly scheduler: Pick<RoutineStateScheduler, "schedule">;
   readonly transitions: StateTransitionPort;
   readonly waits: RoutineWaitPort;
+  /**
+   * Rechecks the Routine's current owner before any State dispatch. The API derives ownership from
+   * the persisted Run and durable projection; the Worker never substitutes a company principal.
+   */
+  readonly ownerGuard?: RoutineOwnerGuard;
   /** Absent means `tool` States park; there is no second external-effect path. */
   readonly tools?: RoutineToolPort;
-  /** Registers Tool approval waits through the API, which alone retains resume tokens. */
-  readonly toolApprovalWaits?: RoutineToolApprovalWaitPort;
   /** Runs a `script` State's authored TypeScript; absent refuses the State by name. */
   readonly scripts?: RoutineScriptPort;
   /** Runs an `action` State's runtime Tool; absent refuses the State by name. */
@@ -209,6 +206,29 @@ export function createRoutineExecutor(options: RoutineExecutorOptions): RunExecu
 
   return async (run) => {
     const loaded = await options.definitions.load(run);
+    if (options.ownerGuard !== undefined) {
+      const owner = await options.ownerGuard.check({ runId: run.id });
+      if (owner.status === "denied") {
+        return {
+          status: "needs_reconciliation",
+          errorEvidenceRef: `routine:${owner.reason}`,
+        };
+      }
+      if (owner.status === "unavailable") {
+        return {
+          status: "needs_reconciliation",
+          errorEvidenceRef: "routine:owner_eligibility_unavailable",
+        };
+      }
+    } else if (
+      loaded.document.spec.ownership === undefined &&
+      loaded.document.spec.owner.startsWith("user:")
+    ) {
+      return {
+        status: "needs_reconciliation",
+        errorEvidenceRef: "routine:personal_owner_unverified",
+      };
+    }
     const routine = compileRoutine(loaded.document, { identityCeiling: ceiling(run) });
     const persisted = new Map(
       (await options.runs.listStates(run.businessId, run.id)).map((state) => [state.key, state])
@@ -407,21 +427,39 @@ class RoutineExecution {
   ): Promise<{ kind: "outcome"; outcome: StepOutcome } | { kind: ChainOutcome }> {
     let outcome: StepOutcome | ChainOutcome | null;
 
-    // A Tool approval resumes by replaying the same deterministic effect plan. Other waiting
-    // States are resolved by their wait, unless it is a concurrency backoff that re-enters work.
-    if (
-      row.status === "waiting" &&
-      state.type !== "tool" &&
-      !(await this.backoffElapsed(state, key))
-    ) {
-      const resumed =
-        state.type === "approval"
-          ? await resumeApproval(this.waitGate(), state, key, row)
-          : state.type === "child_routine"
-            ? await resumeChildRoutine(this.waitGate(), state, key, row)
-            : await resumeWait(this.waitGate(), state, key, row);
-      if (resumed.kind !== "outcome") return { kind: resumed.kind };
-      outcome = resumed.outcome;
+    // A `waiting` State is resolved by its wait, not by re-running it — unless the wait it is on
+    // is a concurrency backoff, which exists precisely to bring it back *into* execution.
+    if (row.status === "waiting" && !(await this.backoffElapsed(state, key))) {
+      if (state.type === "agent") {
+        // The Agent loop checkpoint owns the parked Tool call. Its host already registered the
+        // provider timer before the Run became waiting, so re-entry resumes that same call.
+        await this.claim(key, row.status as StateStatus, CLAIM_PATH);
+        outcome = await this.underConcurrencyKey(state, key, () =>
+          this.runAgent(state, key, row, scope)
+        );
+      } else {
+        const retryStatus =
+          state.type === "tool" && this.ctx.options.tools?.retryStatus !== undefined
+            ? await this.ctx.options.tools.retryStatus(this.toolRequest(state, key, scope))
+            : "none";
+        if (retryStatus === "pending") return { kind: "waiting" };
+        if (retryStatus === "unavailable") return { kind: "needs_reconciliation" };
+        if (retryStatus === "ready") {
+          await this.claim(key, row.status as StateStatus, CLAIM_PATH);
+          outcome = await this.underConcurrencyKey(state, key, () =>
+            this.runTool(state, key, scope, true)
+          );
+        } else {
+          const resumed =
+            state.type === "approval"
+              ? await resumeApproval(this.waitGate(), state, key, row)
+              : state.type === "child_routine"
+                ? await resumeChildRoutine(this.waitGate(), state, key, row)
+                : await resumeWait(this.waitGate(), state, key, row);
+          if (resumed.kind !== "outcome") return { kind: resumed.kind };
+          outcome = resumed.outcome;
+        }
+      }
     } else {
       const progression = progressionFrom(row.status);
       if (progression === null) return { kind: "needs_reconciliation" };
@@ -591,43 +629,24 @@ class RoutineExecution {
   private async runTool(
     state: CompiledState,
     key: string,
-    scope: Readonly<Record<string, unknown>>
+    scope: Readonly<Record<string, unknown>>,
+    resume = false
   ): Promise<StepOutcome | ChainOutcome | null> {
     const port = this.ctx.options.tools;
     if (port === undefined) throw new RoutineExecutionRefusal("unsupported_state", state.name);
 
+    const request = this.toolRequest(state, key, scope);
     const result = await this.withRetry(state, key, () =>
-      port.execute({
-        businessId: this.ctx.run.businessId,
-        runId: this.ctx.run.id,
-        stateKey: key,
-        plan: planToolDispatch(state, scope, {
-          businessId: this.ctx.run.businessId,
-          runId: this.ctx.run.id,
-          stateKey: key,
-        }),
-        requesterPrincipalId: `${this.ctx.run.identity.effectiveSubject.kind}:${this.ctx.run.identity.effectiveSubject.id}`,
-        bundle: this.ctx.bundle,
-        authorityLayers: this.ctx.options.authority?.(this.ctx.run, state) ?? [],
-      })
+      resume && port.resume !== undefined ? port.resume(request) : port.execute(request)
     );
 
     if (result.kind === "succeeded") {
       this.produced.set(key, result.output);
       return stateOutcome(state);
     }
-    if (result.kind === "awaiting_approval") {
-      const waits = this.ctx.options.toolApprovalWaits;
-      if (waits === undefined) {
-        throw new RoutineExecutionRefusal("unsupported_state", state.name);
-      }
-      await waits.register({
-        runId: this.ctx.run.id,
-        stateKey: key,
-        approvalId: result.approvalId,
-      });
+    if (result.kind === "waiting") {
       await this.transition(key, "running", "waiting");
-      return "waiting";
+      return null;
     }
     if (result.kind !== "failed") {
       await this.park(key, `routine:${result.reason}`);
@@ -640,6 +659,21 @@ class RoutineExecution {
     if (decision.kind === "failed") return this.refuse(key, code);
     await this.park(key, `routine:${code}`);
     return "needs_reconciliation";
+  }
+
+  private toolRequest(state: CompiledState, key: string, scope: Readonly<Record<string, unknown>>) {
+    return {
+      businessId: this.ctx.run.businessId,
+      runId: this.ctx.run.id,
+      stateKey: key,
+      plan: planToolDispatch(state, scope, {
+        businessId: this.ctx.run.businessId,
+        runId: this.ctx.run.id,
+        stateKey: key,
+      }),
+      bundle: this.ctx.bundle,
+      authorityLayers: this.ctx.options.authority?.(this.ctx.run, state) ?? [],
+    };
   }
 
   /** Agent States use the pinned bundle; failures take `agent_<reason>`, unknowns park. */
@@ -676,6 +710,10 @@ class RoutineExecution {
       return stateOutcome(state);
     }
     if (result.kind === "cancelled") return "cancelled";
+    if (result.kind === "waiting") {
+      await this.transition(key, "running", "waiting");
+      return null;
+    }
     if (result.kind !== "failed") {
       await this.park(key, `routine:${result.reason}`);
       return "needs_reconciliation";

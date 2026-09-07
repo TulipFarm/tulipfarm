@@ -15,6 +15,12 @@ metadata:
 profiles:
   core: "1.1"
   auth: "1.0"
+  events: "1.0"
+
+files:
+  - path: fixtures.yml
+    role: fixture
+    sha256: "5eab58645c434bb64b2337aab4e71cdab83155a745fc97b73a172b3da1ca1337"
 
 auth:
   allowedOriginHosts:
@@ -62,13 +68,15 @@ operations:
       schema:
         type: object
         properties:
-          ok: { type: boolean }
+          ok: { const: true }
           result:
             type: object
             properties:
               id: { type: number }
               username: { type: string }
               first_name: { type: string }
+            required: [id, first_name]
+        required: [ok, result]
       projection:
         - /ok
         - /result/id
@@ -112,12 +120,14 @@ operations:
       schema:
         type: object
         properties:
-          ok: { type: boolean }
+          ok: { const: true }
           result:
             type: object
             properties:
               message_id: { type: number }
               date: { type: number }
+            required: [message_id, date]
+        required: [ok, result]
       projection:
         - /ok
         - /result/message_id
@@ -129,7 +139,7 @@ operations:
 
   - id: get-updates
     name: telegram_get_updates
-    description: Read messages sent to the bot since the last update it acknowledged.
+    description: Read pending bot updates, optionally starting after a previously seen update.
     effect: sensitive_read
     identityMode: shared_only
     credentialSlot: bot_token
@@ -142,6 +152,13 @@ operations:
       baseUrl: https://api.telegram.org
       path: /{credential}/getUpdates
       parameters:
+        - name: offset
+          in: query
+          schema:
+            type: integer
+            description: >-
+              The previous update_id plus one. Telegram confirms all earlier updates when this
+              offset is supplied.
         - name: limit
           in: query
           schema:
@@ -159,13 +176,13 @@ operations:
       schema:
         type: object
         properties:
-          ok: { type: boolean }
+          ok: { const: true }
           result:
             type: array
             items:
               type: object
               properties:
-                update_id: { type: number }
+                update_id: { type: integer, minimum: 0 }
                 message:
                   type: object
                   properties:
@@ -177,7 +194,51 @@ operations:
                       properties:
                         id: { type: number }
                         title: { type: string }
+              required: [update_id]
+        required: [ok, result]
     rateLimit:
       requests: 30
       perSeconds: 60
       scope: connection
+
+ingress:
+  kind: polling
+  operationId: get-updates
+  intervalSeconds: 60
+  eventTypes:
+    - type: message.received
+      selector:
+        pointer: /message/message_id
+        matches: "^[0-9]+$"
+      schema:
+        type: object
+        properties:
+          update_id: { type: integer, minimum: 0 }
+          message:
+            type: object
+            properties:
+              message_id: { type: integer }
+              text: { type: string }
+              date: { type: integer }
+              chat:
+                type: object
+                properties:
+                  id: { type: integer }
+                  title: { type: string }
+                required: [id]
+            required: [message_id, date, chat]
+        required: [update_id, message]
+    - type: update.received
+      selector:
+        pointer: /update_id
+        matches: "^[0-9]+$"
+      schema:
+        type: object
+        properties:
+          update_id: { type: integer, minimum: 0 }
+        required: [update_id]
+  cursor:
+    mode: max_integer_plus_one
+    responsePointer: /result
+    itemPointer: /update_id
+    requestParameter: offset

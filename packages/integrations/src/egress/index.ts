@@ -52,6 +52,10 @@ export {
 export type { OimFilePort } from "./oim-files";
 export { type OimFixtureResult, runOimFixtures } from "./oim-fixtures";
 export {
+  OimGraphqlToolAdapter,
+  type OimGraphqlToolAdapterDeps,
+} from "./oim-graphql-adapter";
+export {
   type CompiledOimGraphqlTool,
   compileOimGraphqlOperations,
   OimGraphqlCompileError,
@@ -61,9 +65,19 @@ export { OimHttpToolAdapter, type OimHttpToolAdapterDeps } from "./oim-http-adap
 export {
   type CompiledOimHttpTool,
   compileOimHttpOperations,
+  type OimCompileOptions,
+  type OimConfiguration,
   OimHttpCompileError,
   type OimHttpCompileErrorCode,
+  resolveOimBaseUrl,
+  resolveOimUrlTemplate,
 } from "./oim-http-compile";
+export {
+  type CompiledOimOpenApiTool,
+  compileOimOpenApiOperations,
+  OimOpenApiCompileError,
+  type OimOpenApiCompileErrorCode,
+} from "./oim-openapi-compile";
 export {
   DEFAULT_OIM_PAGINATION_BOUNDS,
   decodePageToken,
@@ -79,6 +93,14 @@ export {
   recordPage,
   resumeFromToken,
 } from "./oim-pagination";
+export {
+  OIM_MAX_RETRY_AFTER_MS,
+  type OimRateLimitAdmissionPort,
+  OimRateLimitedToolAdapter,
+  type OimRateLimitedToolAdapterDeps,
+  oimRateLimitScope,
+  parseOimRetryAfterMs,
+} from "./oim-rate-limit";
 export {
   isCredentialFieldName,
   pointerSegments,

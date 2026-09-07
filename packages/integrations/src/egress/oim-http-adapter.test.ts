@@ -1,6 +1,8 @@
+import type { OimManifest } from "@tulipfarm/schema";
 import type { ToolAdapterRequest } from "@tulipfarm/tool-broker";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { IntegrationHttpResponse } from "../http";
+import type { OimHookPhaseRunner } from "../oim-hooks";
 import type { OimFilePort } from "./oim-files";
 import { OimHttpToolAdapter } from "./oim-http-adapter";
 import type { EgressHttpPort, EgressHttpRequest } from "./openapi-adapter";
@@ -35,6 +37,25 @@ function request(
     idempotencyKey: "effect-1",
     attempt: 1,
   };
+}
+
+function manifestWithResponseHook(): OimManifest {
+  return {
+    oimVersion: "1.0",
+    metadata: {
+      id: "weather",
+      name: "Weather",
+      description: "Weather provider",
+      version: "1.0.0",
+    },
+    hooks: [
+      {
+        kind: "response_normalize",
+        file: "hooks/normalize.js",
+        export: "normalize",
+      },
+    ],
+  } as unknown as OimManifest;
 }
 
 describe("OimHttpToolAdapter", () => {
@@ -114,6 +135,69 @@ describe("OimHttpToolAdapter", () => {
     await adapter.dispatch(request({ key: "model-value" }), "sealed-value");
 
     expect(http.sent[0]?.url).toBe("https://api.weather.example/v1/current?key=sealed-value");
+  });
+
+  it("redacts before the response Hook and projects the Hook output", async () => {
+    const run = vi.fn<OimHookPhaseRunner["run"]>(async (_hook, input) => {
+      expect(input).toEqual({
+        payload: {
+          access_token: "[redacted]",
+          data: { temperature: 18 },
+        },
+        safeHeaders: {},
+      });
+      return { result: { temperature: 19 }, access_token: "still-hidden" };
+    });
+    const adapter = new OimHttpToolAdapter({
+      http: new RecordingHttp({
+        status: 200,
+        headers: { "content-type": "application/json", "set-cookie": "secret=1" },
+        body: { access_token: "secret", data: { temperature: 18 } },
+      }),
+      binding: {
+        method: "GET",
+        baseUrl: "https://api.weather.example",
+        pathTemplate: "/v1/current",
+        mutating: false,
+        params: [],
+        hasBody: false,
+        headers: {},
+      },
+      projection: ["/result"],
+      manifest: manifestWithResponseHook(),
+      hookRunner: { run },
+    });
+
+    await expect(adapter.dispatch(request())).resolves.toEqual({
+      result: { temperature: 19 },
+    });
+    expect(run).toHaveBeenCalledOnce();
+  });
+
+  it("fails after dispatch when a response Hook is declared without a trusted runner", async () => {
+    const adapter = new OimHttpToolAdapter({
+      http: new RecordingHttp({
+        status: 200,
+        headers: {},
+        body: { temperature: 18 },
+      }),
+      binding: {
+        method: "GET",
+        baseUrl: "https://api.weather.example",
+        pathTemplate: "/v1/current",
+        mutating: false,
+        params: [],
+        hasBody: false,
+        headers: {},
+      },
+      manifest: manifestWithResponseHook(),
+    });
+
+    await expect(adapter.dispatch(request())).rejects.toMatchObject({
+      phase: "after_dispatch",
+      code: "response_normalize_hook_failed",
+      retryable: false,
+    });
   });
 });
 

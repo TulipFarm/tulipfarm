@@ -1,3 +1,4 @@
+import type { ConnectionUseAuthorizer } from "@tulipfarm/integrations";
 import type { SecretsService } from "@tulipfarm/secrets";
 import type { ConnectionStore, PersistedConnection } from "@tulipfarm/storage";
 import Fastify, { type FastifyInstance } from "fastify";
@@ -38,18 +39,26 @@ class FakeConnections {
         (row.owner.scope !== "personal" || row.owner.principalId === owner.principalId)
     );
   }
+  async listForIntegration(_businessId: string, integration: { id: string }) {
+    return this.rows.filter((row) => row.integration.id === integration.id);
+  }
+  async findById(_businessId: string, id: string) {
+    return this.rows.find((row) => row.id === id) ?? null;
+  }
 }
 
 let app: FastifyInstance;
 let connections: FakeConnections;
 let written: Map<string, string>;
 let authorize: ReturnType<typeof vi.fn>;
+let canUse: ReturnType<typeof vi.fn<ConnectionUseAuthorizer["canUse"]>>;
 let principal: RequestPrincipal | undefined;
 
 beforeEach(async () => {
   connections = new FakeConnections();
   written = new Map();
   authorize = vi.fn(async () => true);
+  canUse = vi.fn<ConnectionUseAuthorizer["canUse"]>(async () => true);
   principal = USER;
   app = Fastify();
   registerAdhocConnectionRoutes(app, {
@@ -63,6 +72,7 @@ beforeEach(async () => {
       (req as { principal?: RequestPrincipal }).principal = principal;
     },
     authorizationCheck: authorize as never,
+    connectionAccess: { canUse },
   });
   await app.ready();
 });
@@ -164,6 +174,7 @@ describe("POST /connections/adhoc", () => {
         (req as { principal?: RequestPrincipal }).principal = USER;
       },
       authorizationCheck: authorize as never,
+      connectionAccess: { canUse: async () => true },
       audit,
     });
     await auditApp.ready();
@@ -193,7 +204,13 @@ describe("GET /connections/adhoc", () => {
   it("names the Connection but never how it is attached", async () => {
     await post(VALID);
     const body = (await get(ORIGIN)).json();
-    expect(body).toEqual({ origin: ORIGIN, state: "match", label: "Example API" });
+    expect(body).toMatchObject({
+      origin: ORIGIN,
+      state: "match",
+      label: "Example API",
+      ownerScope: "personal",
+    });
+    expect(body.connectionId).toEqual(expect.any(String));
     // Naming the header would invite a caller to rebuild the request outside the governed Tool.
     expect(JSON.stringify(body)).not.toContain("x-api-key");
   });
@@ -201,7 +218,22 @@ describe("GET /connections/adhoc", () => {
   it("reports ambiguity rather than picking one", async () => {
     await post(VALID);
     await post({ ...VALID, scope: "organization" });
-    expect((await get(ORIGIN)).json()).toEqual({ origin: ORIGIN, state: "ambiguous", count: 2 });
+    expect((await get(ORIGIN)).json()).toMatchObject({
+      origin: ORIGIN,
+      state: "ambiguous",
+      count: 2,
+      candidates: [
+        { label: "Example API", ownerScope: "personal" },
+        { label: "Example API", ownerScope: "organization" },
+      ],
+    });
+  });
+
+  it("does not expose a Connection when live owner authority is disabled", async () => {
+    await post(VALID);
+    canUse.mockResolvedValue(false);
+
+    expect((await get(ORIGIN)).json()).toEqual({ origin: ORIGIN, state: "none" });
   });
 
   it("does not report a Connection confirmed for a different origin", async () => {

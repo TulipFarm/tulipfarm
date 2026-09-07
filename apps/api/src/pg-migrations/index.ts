@@ -39,6 +39,9 @@ import {
   INTEGRATION_STORAGE_STATEMENTS,
   KILL_SWITCH_STORAGE_STATEMENTS,
   LOOP_CHECKPOINT_STORAGE_STATEMENTS,
+  OIM_RATE_LIMIT_STORAGE_STATEMENTS,
+  OIM_RELEASE_MAINTENANCE_STORAGE_STATEMENTS,
+  OIM_RELEASE_TRUST_STORAGE_STATEMENTS,
   POLLING_INGRESS_STORAGE_STATEMENTS,
   PROVIDER_FILE_UPLOAD_STORAGE_STATEMENTS,
   PROVIDER_OBJECT_OWNERSHIP_STORAGE_STATEMENTS,
@@ -67,6 +70,7 @@ import {
 import { APPROVAL_EVIDENCE_STORAGE_STATEMENTS } from "@tulipfarm/tool-host";
 import type { Queryable } from "../db";
 import { resourceSideEffectMigration } from "../resources/outbox";
+import { WEBHOOK_INBOX_DISPATCH_MIGRATION_STATEMENTS } from "./webhook-inbox-dispatch";
 
 export interface PgMigration {
   version: number;
@@ -520,6 +524,7 @@ const KNOWLEDGE_SOURCES_STATEMENTS: string[] = [
     external_id                    text NOT NULL,
     external_tenant_id             text NOT NULL,
     owner_external_id              text NOT NULL,
+    source_locator                 jsonb,
     revision                       text NOT NULL,
     classification                 text[] NOT NULL DEFAULT '{}',
     status                         text NOT NULL,
@@ -532,6 +537,7 @@ const KNOWLEDGE_SOURCES_STATEMENTS: string[] = [
     provenance_captured_at         timestamptz NOT NULL,
     provenance_content_hash        text NOT NULL,
     provenance_checkpoint          text,
+    provenance_connection_id       text,
     last_synced_at                 timestamptz NOT NULL,
     created_at                     timestamptz NOT NULL,
     updated_at                     timestamptz NOT NULL,
@@ -3284,5 +3290,33 @@ export const PG_MIGRATIONS: PgMigration[] = [
           )
       `);
     },
+  },
+  {
+    version: 105,
+    description: "OIM Knowledge: exact source Connection attribution",
+    up: applyStatements([
+      "ALTER TABLE IF EXISTS knowledge_source_records ADD COLUMN IF NOT EXISTS source_locator jsonb",
+      "ALTER TABLE IF EXISTS knowledge_source_records ADD COLUMN IF NOT EXISTS provenance_connection_id text",
+    ]),
+  },
+  {
+    version: 106,
+    description: "OIM webhook inbox: durable event dispatch and recovery",
+    up: applyStatements(WEBHOOK_INBOX_DISPATCH_MIGRATION_STATEMENTS),
+  },
+  {
+    version: 107,
+    description: "OIM operation quotas and provider cooldowns",
+    up: applyStatements(OIM_RATE_LIMIT_STORAGE_STATEMENTS),
+  },
+  {
+    version: 108,
+    description: "OIM release trust roots, revocations, and installed provenance",
+    up: applyStatements(OIM_RELEASE_TRUST_STORAGE_STATEMENTS),
+  },
+  {
+    version: 109,
+    description: "OIM signed release maintenance feed configuration",
+    up: applyStatements(OIM_RELEASE_MAINTENANCE_STORAGE_STATEMENTS),
   },
 ];

@@ -158,6 +158,18 @@ export async function disconnectPersonalIntegration(name: string): Promise<void>
 /** One integration offered by a git repo, as reported by inspect. */
 export type InspectedIntegration = {
   name: string;
+  /** OIM compatibility boundary. Different majors install as independent integrations. */
+  majorVersion?: number;
+  /** Existing storage slug when this exact OIM major is already installed. */
+  installedSlug?: string;
+  /** Whether this inspected package may execute its declared Hook files. */
+  hooksAllowed?: boolean;
+  /** Whether this exact verified package may opt into automatic patch updates. */
+  autoPatchEligible?: boolean;
+  /** Operator-trusted key that verified this Official release. */
+  verifiedSignerKeyId?: string;
+  /** Signed revocation-list sequence checked while verifying this Official release. */
+  revocationSequence?: number;
   description?: string;
   version?: string;
   maintainer?: string;
@@ -165,12 +177,76 @@ export type InspectedIntegration = {
   /** False when the manifest declares something a third-party integration may not. */
   installable: boolean;
   issues: string[];
+  definition?: "oim" | "legacy";
+  support?: "official" | "community";
+  license?: string;
+  /** Exact content address an administrator approves for an OIM package. */
+  packageDigest?: string;
+  fixtures?: IntegrationFixtureResult[];
+  review?: IntegrationCapabilityReview;
 };
 
 export type InspectResult = {
   source: string;
+  sourceType?: "github" | "git" | "https";
   ref: string;
   integrations: InspectedIntegration[];
+};
+
+export type IntegrationFixtureResult = {
+  name: string;
+  fixture: string;
+  passed: boolean;
+  error?: string;
+};
+
+export type IntegrationCapabilityReview = {
+  integrationId: string;
+  name?: string;
+  version: string;
+  license?: string;
+  maintainers?: string[];
+  packageDigest: string;
+  destinations: string[];
+  allowedOriginHosts?: string[];
+  credentialSlots?: Array<{
+    id: string;
+    label?: string;
+    kind?: string;
+    required?: boolean;
+  }>;
+  configurationFields?: Array<{
+    id: string;
+    label?: string;
+    type?: string;
+    agentVisible?: boolean;
+  }>;
+  identityModes?: string[];
+  effects?: string[];
+  operations: Array<{
+    id?: string;
+    name?: string;
+    description?: string;
+    effect?: string;
+    mutating?: boolean;
+    identityMode?: string;
+    credentialSlot?: string;
+    destination?: string;
+  }>;
+  ingress?: {
+    path?: string;
+    verification?: string;
+    eventTypes?: string[];
+    rawRetentionDays?: number;
+  };
+  knowledge?: {
+    sourceKinds?: string[];
+    propagatesDeletions?: boolean;
+    liveAuthorization?: boolean;
+  };
+  files?: Array<{ path?: string; role?: string }>;
+  fixtures?: IntegrationFixtureResult[];
+  declaresHooks?: boolean;
 };
 
 export async function listIntegrations(): Promise<IntegrationSummary[]> {
@@ -183,19 +259,108 @@ export async function getIntegration(name: string): Promise<IntegrationDetail> {
 }
 
 /** Clone a git repo and report what it offers, without installing anything. */
-export async function inspectIntegrationSource(source: string): Promise<InspectResult> {
-  return apiWrite<InspectResult>("POST", "/api/v1/integrations/inspect", { source });
+export async function inspectIntegrationSource(
+  source: string,
+  signedRelease?: unknown
+): Promise<InspectResult> {
+  const result = await apiWrite<
+    Omit<InspectResult, "sourceType" | "integrations"> & {
+      source_type?: InspectResult["sourceType"];
+      integrations: Array<
+        Omit<
+          InspectedIntegration,
+          | "autoPatchEligible"
+          | "hooksAllowed"
+          | "installedSlug"
+          | "majorVersion"
+          | "packageDigest"
+          | "review"
+          | "revocationSequence"
+          | "verifiedSignerKeyId"
+        > & {
+          hooks_allowed?: boolean;
+          auto_patch_eligible?: boolean;
+          verified_signer_key_id?: string;
+          revocation_sequence?: number;
+          major_version?: number;
+          installed_slug?: string;
+          package_digest?: string;
+          review?: Omit<IntegrationCapabilityReview, "packageDigest"> & {
+            package_digest?: string;
+            packageDigest?: string;
+          };
+        }
+      >;
+    }
+  >("POST", "/api/v1/integrations/inspect", {
+    source,
+    ...(signedRelease === undefined ? {} : { signed_release: signedRelease }),
+  });
+  return {
+    source: result.source,
+    sourceType: result.source_type,
+    ref: result.ref,
+    integrations: result.integrations.map((integration) => {
+      const {
+        auto_patch_eligible: autoPatchEligible,
+        hooks_allowed: hooksAllowed,
+        installed_slug: installedSlug,
+        major_version: majorVersion,
+        package_digest: packageDigest,
+        revocation_sequence: revocationSequence,
+        review: rawReview,
+        verified_signer_key_id: verifiedSignerKeyId,
+        ...rest
+      } = integration;
+      const reviewDigest = rawReview?.package_digest ?? rawReview?.packageDigest ?? packageDigest;
+      return {
+        ...rest,
+        ...(autoPatchEligible === undefined ? {} : { autoPatchEligible }),
+        ...(hooksAllowed === undefined ? {} : { hooksAllowed }),
+        ...(majorVersion === undefined ? {} : { majorVersion }),
+        ...(installedSlug === undefined ? {} : { installedSlug }),
+        ...(packageDigest ? { packageDigest } : {}),
+        ...(revocationSequence === undefined ? {} : { revocationSequence }),
+        ...(verifiedSignerKeyId === undefined ? {} : { verifiedSignerKeyId }),
+        ...(rawReview && reviewDigest
+          ? {
+              review: {
+                ...rawReview,
+                packageDigest: reviewDigest,
+              },
+            }
+          : {}),
+      };
+    }),
+  };
 }
 
 export async function installIntegration(
   source: string,
-  name?: string
-): Promise<{ name: string; source: string; ref: string }> {
-  return apiWrite<{ name: string; source: string; ref: string }>(
-    "POST",
-    "/api/v1/integrations/install",
-    name ? { source, name } : { source }
-  );
+  name?: string,
+  approval?: {
+    ref: string;
+    digest?: string;
+    signedRelease?: unknown;
+    autoPatchOptIn?: boolean;
+  }
+): Promise<IntegrationMutationResult> {
+  return apiWrite<IntegrationMutationResult>("POST", "/api/v1/integrations/install", {
+    source,
+    ...(name ? { name } : {}),
+    ...(approval
+      ? {
+          ref: approval.ref,
+          ...(approval.digest === undefined ? {} : { approve_digest: approval.digest }),
+          ...(approval.signedRelease === undefined
+            ? {}
+            : { signed_release: approval.signedRelease }),
+          ...(approval.autoPatchOptIn === undefined
+            ? {}
+            : { auto_patch_opt_in: approval.autoPatchOptIn }),
+        }
+      : {}),
+  });
 }
 
 export async function connectIntegration(
@@ -219,14 +384,44 @@ export async function disconnectIntegration(name: string): Promise<{ status: str
 
 export async function updateIntegration(
   name: string,
-  source?: string
-): Promise<{ name: string; source: string; ref: string }> {
-  return apiWrite<{ name: string; source: string; ref: string }>(
+  source?: string,
+  approval?: {
+    ref: string;
+    digest?: string;
+    signedRelease?: unknown;
+    autoPatchOptIn?: boolean;
+  }
+): Promise<IntegrationMutationResult> {
+  return apiWrite<IntegrationMutationResult>(
     "POST",
     `/api/v1/integrations/${encodeURIComponent(name)}/update`,
-    source ? { source } : {}
+    {
+      ...(source ? { source } : {}),
+      ...(approval
+        ? {
+            ref: approval.ref,
+            ...(approval.digest === undefined ? {} : { approve_digest: approval.digest }),
+            ...(approval.signedRelease === undefined
+              ? {}
+              : { signed_release: approval.signedRelease }),
+            ...(approval.autoPatchOptIn === undefined
+              ? {}
+              : { auto_patch_opt_in: approval.autoPatchOptIn }),
+          }
+        : {}),
+    }
   );
 }
+
+export type IntegrationMutationResult = {
+  name: string;
+  source: string;
+  ref: string;
+  package_digest?: string;
+  integration_id?: string;
+  major_version?: number;
+  support?: "official" | "community";
+};
 
 export async function deleteIntegration(name: string): Promise<void> {
   return apiDelete(`/api/v1/integrations/${encodeURIComponent(name)}`);
@@ -242,6 +437,8 @@ export type OimConnectField = {
   required: boolean;
   /** Written to a Secret and never read back, so the form must not try to pre-fill it. */
   secret: boolean;
+  /** The stored public HTTPS origin must be explicitly approved after the value is saved. */
+  requiresOriginApproval?: boolean;
 };
 
 export type OimConnectStep = {
@@ -255,6 +452,12 @@ export type OimConnectForm = {
   integrationId: string;
   majorVersion: number;
   steps: OimConnectStep[];
+  authorizationSteps: Array<{
+    id: string;
+    type: "oauth2" | "app_manifest" | "install";
+    title: string;
+    description?: string;
+  }>;
   /** Sign-in step types this deployment cannot run yet; the form alone would look complete. */
   unsupportedStepTypes: string[];
   /** True when saving the form is only half the flow; the person must then consent at the provider. */
@@ -266,7 +469,7 @@ export type OimConnectionSummary = {
   label: string;
   scope: "organization" | "personal" | "team";
   teamId?: string;
-  status: "active" | "revoked";
+  status: "active" | "pending" | "revoked";
   isDefault: boolean;
   health: string;
   expiresAt: string | null;
@@ -287,8 +490,15 @@ export async function createOimConnection(
     scope: "personal" | "organization" | "team";
     teamId?: string;
     values: Record<string, string>;
+    isDefault?: boolean;
   }
-): Promise<{ connectionId: string; scope: string; teamId?: string }> {
+): Promise<{
+  connectionId: string;
+  scope: string;
+  teamId?: string;
+  status: "active" | "pending";
+  toolsResynced?: number;
+}> {
   return apiWrite("POST", `/api/v1/integrations/${encodeURIComponent(name)}/connections`, body);
 }
 
@@ -310,12 +520,50 @@ export async function testOimConnection(
   );
 }
 
-/** Starts the provider consent flow and returns where the browser must go next. */
-export async function authorizeOimConnection(name: string, id: string): Promise<{ url: string }> {
+export type OimAuthorizationAction =
+  | { action: "redirect"; stepId: string; url: string }
+  | { action: "form_post"; stepId: string; url: string; field: string; value: string };
+
+/** Starts the next browser-mediated setup step and returns where the browser must go next. */
+export async function authorizeOimConnection(
+  name: string,
+  id: string,
+  options: { stepId?: string; returnTo?: string } = {}
+): Promise<OimAuthorizationAction> {
   return apiWrite(
     "POST",
     `/api/v1/integrations/${encodeURIComponent(name)}/connections/${encodeURIComponent(id)}/authorize`,
+    options
+  );
+}
+
+export async function approveOimConnectionOrigin(
+  name: string,
+  id: string,
+  field: string
+): Promise<OimConnectionSummary> {
+  return apiWrite(
+    "POST",
+    `/api/v1/integrations/${encodeURIComponent(name)}/connections/${encodeURIComponent(id)}/origins/${encodeURIComponent(field)}/approve`,
     {}
+  );
+}
+
+export async function updateOimConnection(
+  name: string,
+  id: string,
+  body: {
+    label?: string;
+    values?: Record<string, string>;
+    isDefault?: boolean;
+    scope?: "personal" | "organization" | "team";
+    teamId?: string;
+  }
+): Promise<OimConnectionSummary> {
+  return apiWrite(
+    "PATCH",
+    `/api/v1/integrations/${encodeURIComponent(name)}/connections/${encodeURIComponent(id)}`,
+    body
   );
 }
 

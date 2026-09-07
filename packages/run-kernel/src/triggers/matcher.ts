@@ -36,6 +36,9 @@ export interface RegisteredTrigger {
   readonly eventType: string;
   readonly eventVersion: number;
   readonly provider?: string;
+  readonly protocol?: "oim";
+  readonly integrationMajorVersion?: number;
+  readonly connectionId?: string;
   readonly formRef?: string;
   readonly match?: readonly TriggerPredicate[];
   /**
@@ -66,6 +69,31 @@ export function dotPath(data: unknown, path: string): unknown {
     cursor = (cursor as Record<string, unknown>)[segment];
   }
   return cursor;
+}
+
+interface OimRoutingIdentity {
+  readonly declared: boolean;
+  readonly complete: boolean;
+  readonly integrationMajorVersion?: number;
+  readonly connectionId?: string;
+}
+
+function oimRoutingIdentity(
+  envelope: eventSchema.EventEnvelope<Record<string, unknown>>
+): OimRoutingIdentity {
+  if (envelope.data.protocol !== "oim") return { declared: false, complete: false };
+  const integrationMajorVersion = envelope.data.integrationMajorVersion;
+  const connectionId = envelope.data.connectionId;
+  if (
+    typeof integrationMajorVersion !== "number" ||
+    !Number.isInteger(integrationMajorVersion) ||
+    integrationMajorVersion < 0 ||
+    typeof connectionId !== "string" ||
+    connectionId.length === 0
+  ) {
+    return { declared: true, complete: false };
+  }
+  return { declared: true, complete: true, integrationMajorVersion, connectionId };
 }
 
 /**
@@ -139,6 +167,22 @@ function satisfies(
   if (trigger.eventType !== envelope.type) return false;
   if (trigger.eventVersion !== envelope.version) return false;
   if (trigger.provider !== undefined && trigger.provider !== envelope.source.provider) return false;
+
+  const oimIdentity = oimRoutingIdentity(envelope);
+  if (oimIdentity.declared) {
+    if (
+      !oimIdentity.complete ||
+      trigger.type !== "integration_event" ||
+      trigger.protocol !== "oim"
+    ) {
+      return false;
+    }
+    if (trigger.integrationMajorVersion !== oimIdentity.integrationMajorVersion) return false;
+    if (trigger.connectionId !== oimIdentity.connectionId) return false;
+  } else if (trigger.protocol === "oim") {
+    return false;
+  }
+
   if (trigger.formRef !== undefined && dotPath(envelope.data, "formRef") !== trigger.formRef) {
     return false;
   }

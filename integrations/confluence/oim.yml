@@ -18,6 +18,11 @@ profiles:
   auth: "1.0"
   knowledge: "1.0"
 
+files:
+  - path: fixtures.yml
+    role: fixture
+    sha256: "2173f83a4d5e1b1958e994ce8b28b22cd1a5c10300340af338c8ef26b57bc049"
+
 auth:
   # The site is the installation's own Atlassian tenant, so the base URL is templated rather than
   # fixed. allowedOriginHosts keeps that from becoming a way to point the Tools anywhere.
@@ -31,7 +36,7 @@ auth:
   configurationFields:
     - id: site
       label: Confluence site
-      type: url
+      type: string
       required: true
       agentVisible: true
   steps:
@@ -44,7 +49,7 @@ auth:
       fields:
         - id: site
           label: Site host
-          input: url
+          input: text
           required: true
           target:
             type: configuration

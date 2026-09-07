@@ -1,0 +1,117 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:oim:schema:1.0:runtime-capabilities.schema.json",
+  "title": "Open Integration Manifest runtime capabilities",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "standard",
+    "specificationVersions",
+    "packageEntrypoint",
+    "runtime",
+    "profiles",
+    "conformance"
+  ],
+  "properties": {
+    "standard": {
+      "const": "Open Integration Manifest"
+    },
+    "specificationVersions": {
+      "type": "array",
+      "const": ["1.0"]
+    },
+    "packageEntrypoint": {
+      "const": "oim.yml"
+    },
+    "runtime": {
+      "additionalProperties": false,
+      "type": "object",
+      "required": ["name", "version"],
+      "properties": {
+        "name": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "version": {
+          "minLength": 1,
+          "type": "string"
+        }
+      }
+    },
+    "profiles": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["core"],
+      "properties": {
+        "core": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "enum": ["1.0", "1.1", "1.2"]
+          }
+        },
+        "auth": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "enum": ["1.0"]
+          }
+        },
+        "events": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "enum": ["1.0"]
+          }
+        },
+        "knowledge": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "enum": ["1.0", "1.1"]
+          }
+        },
+        "hooks": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "enum": ["1.0"]
+          }
+        }
+      }
+    },
+    "conformance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["suiteVersion", "suiteDigest", "passedCases"],
+      "properties": {
+        "suiteVersion": {
+          "type": "string",
+          "minLength": 1
+        },
+        "suiteDigest": {
+          "type": "string",
+          "pattern": "^sha256:[a-f0-9]{64}$"
+        },
+        "passedCases": {
+          "uniqueItems": true,
+          "type": "array",
+          "items": {
+            "pattern": "^[a-z]+(?:[.-][a-z0-9]+)+$",
+            "type": "string"
+          }
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,66 @@
+version: 1
+cases:
+  - name: lists-open-boards
+    operationId: list-boards
+    request:
+      filter: open
+    response:
+      status: 200
+      body:
+        - id: board-redacted
+          name: Launch board
+          desc: Release work
+          closed: false
+          url: https://trello.com/b/redacted/launch-board
+          dateLastActivity: "2026-09-07T06:00:00.000Z"
+    expect:
+      request:
+        method: GET
+        url: https://api.trello.com/1/members/me/boards?filter=open&key=oim-fixture-credential&token=oim-fixture-credential&fields=id%2Cname%2Cdesc%2Cclosed%2Curl%2CdateLastActivity
+      result:
+        - id: board-redacted
+          name: Launch board
+          closed: false
+
+  - name: creates-card
+    operationId: create-card
+    request:
+      idList: list-redacted
+      name: Review launch checklist
+      desc: Confirm every release step.
+    response:
+      status: 200
+      body:
+        id: card-redacted
+        name: Review launch checklist
+        desc: Confirm every release step.
+        closed: false
+        due: null
+        dueComplete: false
+        idBoard: board-redacted
+        idList: list-redacted
+        url: https://trello.com/c/redacted/review-launch-checklist
+    expect:
+      request:
+        method: POST
+        url: https://api.trello.com/1/cards?idList=list-redacted&name=Review+launch+checklist&desc=Confirm+every+release+step.&key=oim-fixture-credential&token=oim-fixture-credential
+      result:
+        id: card-redacted
+        name: Review launch checklist
+        idList: list-redacted
+
+  - name: rejects-invalid-credential
+    operationId: list-boards
+    request:
+      filter: open
+    response:
+      status: 401
+      body: invalid key
+    expect:
+      request:
+        method: GET
+        url: https://api.trello.com/1/members/me/boards?filter=open&key=oim-fixture-credential&token=oim-fixture-credential&fields=id%2Cname%2Cdesc%2Cclosed%2Curl%2CdateLastActivity
+      expectedError:
+        phase: before_dispatch
+        code: provider_unauthorized
+        retryable: false

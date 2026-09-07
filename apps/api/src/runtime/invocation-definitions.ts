@@ -175,6 +175,13 @@ function toRegisteredTrigger(slug: string, definition: BundleDefinition): Regist
     ...(optionalNonEmptyString(spec.provider) === undefined
       ? {}
       : { provider: spec.provider as string }),
+    ...(spec.protocol === "oim" ? { protocol: "oim" as const } : {}),
+    ...(typeof spec.integrationMajorVersion === "number"
+      ? { integrationMajorVersion: spec.integrationMajorVersion }
+      : {}),
+    ...(optionalNonEmptyString(spec.connectionId) === undefined
+      ? {}
+      : { connectionId: spec.connectionId as string }),
     ...(optionalNonEmptyString(spec.formRef) === undefined
       ? {}
       : { formRef: spec.formRef as string }),

@@ -20,6 +20,7 @@ import {
   describeKnowledgeProfile,
   type KnowledgeEmissionSink,
   type KnowledgeIdentityPolicy,
+  type OimHookPhaseRunner,
   type OimKnowledgeCheckpointStore,
   type OimKnowledgeSyncResult,
   type ProviderIdentityLinkPort,
@@ -27,7 +28,7 @@ import {
   syncOimKnowledge,
   type VerifiedEmailPrincipalPort,
 } from "@tulipfarm/integrations";
-import { ajv } from "@tulipfarm/schema";
+import { ajv, type OimManifest } from "@tulipfarm/schema";
 import type { SoulIntegration } from "@tulipfarm/soul";
 import { type ApiToolDefinition, defineApiTool, err, ok } from "@tulipfarm/tool-host";
 import type { ToolRegistry } from "../broker/tool-adapter";
@@ -43,6 +44,15 @@ export interface IntegrationKnowledgeToolContext {
   readonly links: ProviderIdentityLinkPort;
   readonly emails?: VerifiedEmailPrincipalPort;
   readonly policy: KnowledgeIdentityPolicy;
+  readonly oimRuntimeHost: {
+    authorizeIntegration(integration: SoulIntegration): Promise<void>;
+    hookRunnerFor(input: {
+      readonly businessId: string;
+      readonly integrationId: string;
+      readonly integrationMajorVersion: number;
+      readonly manifest: OimManifest;
+    }): Promise<OimHookPhaseRunner | undefined>;
+  };
   /** The caller, so a sync acts as whoever asked for it rather than as the deployment. */
   readonly requestContext: { readonly userId?: string; readonly runId?: string };
   readonly now?: () => Date;
@@ -60,10 +70,11 @@ const PROFILE_SCHEMA: Record<string, unknown> = {
 const SCOPES_SCHEMA: Record<string, unknown> = {
   type: "object",
   additionalProperties: false,
-  required: ["integration", "source_kind"],
+  required: ["integration", "source_kind", "connection_id"],
   properties: {
     integration: { type: "string", minLength: 1 },
     source_kind: { type: "string", minLength: 1 },
+    connection_id: { type: "string", minLength: 1 },
     page_token: { type: "string", minLength: 1 },
   },
 };
@@ -82,7 +93,6 @@ const SYNC_SCHEMA: Record<string, unknown> = {
       items: { type: "string", minLength: 1 },
     },
     connection_id: { type: "string", minLength: 1 },
-    external_tenant_id: { type: "string", minLength: 1 },
     classification: { type: "array", maxItems: 8, items: { type: "string", minLength: 1 } },
   },
 };
@@ -96,13 +106,13 @@ interface ProfileArgs {
 }
 interface ScopesArgs extends ProfileArgs {
   readonly source_kind: string;
+  readonly connection_id: string;
   readonly page_token?: string;
 }
 interface SyncArgs extends ProfileArgs {
   readonly source_kind: string;
   readonly scopes: readonly string[];
   readonly connection_id: string;
-  readonly external_tenant_id?: string;
   readonly classification?: readonly string[];
 }
 
@@ -119,8 +129,8 @@ function installed(
 /**
  * Resolves the manifest, or the reason an Agent cannot proceed.
  *
- * A disabled Integration is refused rather than read: indexing content through a Connection the
- * operator just disconnected is exactly what disconnecting is meant to stop.
+ * Connection state is durable and checked by each provider operation. The Soul's legacy
+ * `connection.enabled` flag is not evidence that a current Connection exists.
  */
 function manifestFor(
   ctx: IntegrationKnowledgeToolContext,
@@ -133,9 +143,6 @@ function manifestFor(
   }
   if (integration.oimManifest.knowledge === undefined) {
     return { problem: `Integration "${slug}" declares no knowledge profile` };
-  }
-  if (integration.connection?.enabled !== true) {
-    return { problem: `Integration "${slug}" is not connected` };
   }
   return { integration };
 }
@@ -162,6 +169,11 @@ export const integrationKnowledgeProfileTool = defineApiTool<IntegrationKnowledg
     if ("problem" in resolved) return err("not_found", resolved.problem);
     const manifest = resolved.integration.oimManifest;
     if (manifest === undefined) return err("not_found", `Integration "${slug}" has no manifest`);
+    try {
+      await ctx.oimRuntimeHost.authorizeIntegration(resolved.integration);
+    } catch {
+      return err("unavailable", `Integration "${slug}" release is not authorized`);
+    }
     try {
       const description = describeKnowledgeProfile(manifest);
       return ok({
@@ -204,6 +216,11 @@ export const integrationKnowledgeScopesTool = defineApiTool<IntegrationKnowledge
     if ("problem" in resolved) return err("not_found", resolved.problem);
     const manifest = resolved.integration.oimManifest;
     if (manifest === undefined) return err("not_found", "no manifest");
+    try {
+      await ctx.oimRuntimeHost.authorizeIntegration(resolved.integration);
+    } catch {
+      return err("unavailable", `Integration "${input.integration}" release is not authorized`);
+    }
 
     const plan = compileKnowledgeProfile(manifest);
     const kind = plan.sourceKinds.find((candidate) => candidate.id === input.source_kind);
@@ -226,6 +243,7 @@ export const integrationKnowledgeScopesTool = defineApiTool<IntegrationKnowledge
       manifest,
       registry: ctx.registry,
       ctx: { userId: ctx.requestContext.userId ?? "", ...ctx.requestContext },
+      connectionId: input.connection_id,
     });
     let page: { readonly body: unknown; readonly nextPageToken?: string };
     try {
@@ -301,10 +319,16 @@ export const integrationKnowledgeSyncTool = defineApiTool<IntegrationKnowledgeTo
       manifest,
       registry: ctx.registry,
       ctx: { userId: ctx.requestContext.userId ?? "", ...ctx.requestContext },
+      connectionId: input.connection_id,
     });
-
     let result: OimKnowledgeSyncResult;
     try {
+      const hookRunner = await ctx.oimRuntimeHost.hookRunnerFor({
+        businessId: ctx.businessId,
+        integrationId: plan.integrationId,
+        integrationMajorVersion: plan.majorVersion,
+        manifest,
+      });
       result = await syncOimKnowledge(
         plan,
         {
@@ -317,15 +341,13 @@ export const integrationKnowledgeSyncTool = defineApiTool<IntegrationKnowledgeTo
             accounts: createOimProviderAccountPort(plan, api),
             policy: ctx.policy,
           },
+          ...(hookRunner === undefined ? {} : { hookRunner }),
           now: ctx.now ?? (() => new Date()),
         },
         {
           businessId: ctx.businessId,
           integrationId: input.integration,
           connectionId: input.connection_id,
-          // Absent, the Connection is its own tenant marker. An OIM Integration has no separate
-          // provider-tenant record, and inventing one would put a fabricated id on every emission.
-          externalTenantId: input.external_tenant_id ?? input.connection_id,
           sourceKindId: input.source_kind,
           scopes: input.scopes,
           ...(input.classification === undefined ? {} : { classification: input.classification }),

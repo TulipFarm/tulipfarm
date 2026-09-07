@@ -1,0 +1,275 @@
+{
+  "version": "1.0.0",
+  "cases": [
+    {
+      "id": "core.manifest.strict",
+      "profile": "core",
+      "vectors": [
+        {
+          "id": "core-manifest-rejects-unknown-field",
+          "input": {
+            "source": "{\"oimVersion\":\"1.0\",\"kind\":\"Integration\",\"metadata\":{\"id\":\"weather\",\"name\":\"Weather\",\"version\":\"1.0.0\",\"description\":\"Read weather.\",\"license\":\"Apache-2.0\"},\"profiles\":{\"core\":\"1.0\"},\"operations\":[{\"id\":\"weather\",\"name\":\"read_weather\",\"description\":\"Read weather.\",\"effect\":\"read\",\"identityMode\":\"shared_only\",\"source\":{\"type\":\"http\",\"method\":\"GET\",\"baseUrl\":\"https://api.example.test\",\"path\":\"/weather\"},\"response\":{\"schema\":{\"type\":\"object\"},\"maxBytes\":4096}}],\"unknown\":true}"
+          },
+          "expect": { "accepted": false }
+        }
+      ]
+    },
+    {
+      "id": "core.package.exact-files",
+      "profile": "core",
+      "vectors": [
+        {
+          "id": "core-package-rejects-undeclared-file",
+          "input": { "declared": ["guide.md"], "present": ["guide.md", "extra.md"] },
+          "expect": { "accepted": false, "undeclared": ["extra.md"] }
+        }
+      ]
+    },
+    {
+      "id": "core.operation.http",
+      "profile": "core",
+      "vectors": [
+        {
+          "id": "core-http-native-request",
+          "since": "1.0",
+          "input": {
+            "operation": "native-http",
+            "arguments": { "city": "Paris" },
+            "response": { "temperature": 18 }
+          },
+          "expect": {
+            "method": "GET",
+            "url": "https://api.example.test/weather?city=Paris",
+            "result": { "temperature": 18 },
+            "destinationGuard": "passed",
+            "authorization": "authorized",
+            "connection": "ready",
+            "credentialInjected": true
+          }
+        },
+        {
+          "id": "core-http-form-request",
+          "since": "1.1",
+          "input": {
+            "operation": "form-http",
+            "arguments": { "body": { "query": "OIM" } },
+            "response": { "matches": 1 }
+          },
+          "expect": {
+            "contentType": "application/x-www-form-urlencoded",
+            "body": "query=OIM",
+            "result": { "matches": 1 }
+          }
+        },
+        {
+          "id": "core-http-multipart-request",
+          "since": "1.2",
+          "input": {
+            "operation": "multipart-http",
+            "arguments": { "body": { "title": "Report", "fileId": "file-1" } },
+            "response": { "uploaded": true }
+          },
+          "expect": {
+            "parts": [{ "name": "title", "kind": "field" }, { "name": "document", "kind": "file" }],
+            "result": { "uploaded": true }
+          }
+        }
+      ]
+    },
+    {
+      "id": "core.operation.openapi",
+      "profile": "core",
+      "vectors": [
+        {
+          "id": "core-openapi-allowlisted-operation",
+          "input": {
+            "operationId": "getPet",
+            "arguments": { "id": "42" },
+            "response": { "id": "42", "name": "Tulip" }
+          },
+          "expect": {
+            "method": "GET",
+            "url": "https://api.example.test/pets/42",
+            "result": { "id": "42", "name": "Tulip" }
+          }
+        }
+      ]
+    },
+    {
+      "id": "core.operation.graphql",
+      "profile": "core",
+      "vectors": [
+        {
+          "id": "core-graphql-fixed-document",
+          "input": {
+            "operation": "GetPet",
+            "variables": { "id": "42" },
+            "response": { "data": { "pet": { "id": "42" } } }
+          },
+          "expect": {
+            "operation": "GetPet",
+            "variables": { "id": "42" },
+            "result": { "data": { "pet": { "id": "42" } } }
+          }
+        }
+      ]
+    },
+    {
+      "id": "core.fixtures.hermetic",
+      "profile": "core",
+      "vectors": [
+        {
+          "id": "core-fixture-uses-recording-transport",
+          "input": {
+            "request": { "city": "Paris" },
+            "response": { "temperature": 18 }
+          },
+          "expect": { "passed": true, "networkCalls": 0 }
+        }
+      ]
+    },
+    {
+      "id": "core.compatibility.same-major",
+      "profile": "core",
+      "vectors": [
+        {
+          "id": "core-compatibility-rejects-required-input",
+          "input": { "previous": "1.0.0", "next": "1.1.0", "change": "required-input" },
+          "expect": { "compatible": false }
+        }
+      ]
+    },
+    {
+      "id": "auth.fields.secure-submit",
+      "profile": "auth",
+      "vectors": [
+        {
+          "id": "auth-password-goes-to-secret-broker",
+          "input": { "field": "api_key", "value": "redacted" },
+          "expect": { "storedInManifest": false, "submittedToSecretBroker": true }
+        }
+      ]
+    },
+    {
+      "id": "auth.oauth2.authorization-code",
+      "profile": "auth",
+      "vectors": [
+        {
+          "id": "auth-oauth2-binds-token-response",
+          "input": { "code": "code-1", "state": "state-1" },
+          "expect": { "stateVerified": true, "accessTokenBound": true }
+        }
+      ]
+    },
+    {
+      "id": "auth.secret.prompt-omission",
+      "profile": "auth",
+      "vectors": [
+        {
+          "id": "auth-secret-not-in-model-context",
+          "input": { "slot": "api_key" },
+          "expect": { "promptContainsSecret": false }
+        }
+      ]
+    },
+    {
+      "id": "events.delivery.verify",
+      "profile": "events",
+      "vectors": [
+        {
+          "id": "events-reject-invalid-signature",
+          "input": { "signature": "invalid", "body": "{}" },
+          "expect": { "accepted": false, "reason": "signature" }
+        }
+      ]
+    },
+    {
+      "id": "events.delivery.durable",
+      "profile": "events",
+      "vectors": [
+        {
+          "id": "events-ack-after-durable-write",
+          "input": { "deliveryId": "delivery-1" },
+          "expect": { "durableBeforeAcknowledgement": true }
+        }
+      ]
+    },
+    {
+      "id": "events.normalize.typed",
+      "profile": "events",
+      "vectors": [
+        {
+          "id": "events-normalize-to-declared-type",
+          "input": { "body": { "kind": "issue" } },
+          "expect": { "eventType": "issue", "schemaValid": true }
+        }
+      ]
+    },
+    {
+      "id": "knowledge.operations.roles",
+      "profile": "knowledge",
+      "vectors": [
+        {
+          "id": "knowledge-runs-declared-read-roles",
+          "input": { "sourceKind": "space" },
+          "expect": { "roles": ["list", "content", "acl"], "writes": 0 }
+        }
+      ]
+    },
+    {
+      "id": "knowledge.acl.preserve",
+      "profile": "knowledge",
+      "vectors": [
+        {
+          "id": "knowledge-denies-unmapped-reader",
+          "input": { "providerReaders": ["user-1"], "requester": "user-2" },
+          "expect": { "visible": false }
+        }
+      ]
+    },
+    {
+      "id": "knowledge.deletion.propagate",
+      "profile": "knowledge",
+      "vectors": [
+        {
+          "id": "knowledge-removes-deleted-item",
+          "input": { "itemId": "page-1", "sourceDeleted": true },
+          "expect": { "indexed": false }
+        }
+      ]
+    },
+    {
+      "id": "hooks.capabilities.none",
+      "profile": "hooks",
+      "vectors": [
+        {
+          "id": "hooks-block-network-filesystem-process",
+          "input": { "attempts": ["network", "filesystem", "process"] },
+          "expect": { "blocked": ["network", "filesystem", "process"] }
+        }
+      ]
+    },
+    {
+      "id": "hooks.output.deterministic",
+      "profile": "hooks",
+      "vectors": [
+        {
+          "id": "hooks-repeat-output",
+          "input": { "runs": 2, "value": { "id": "1" } },
+          "expect": { "equal": true }
+        }
+      ]
+    },
+    {
+      "id": "hooks.execution.bounded",
+      "profile": "hooks",
+      "vectors": [
+        {
+          "id": "hooks-stop-unbounded-work",
+          "input": { "fixture": "infinite-loop" },
+          "expect": { "terminated": true, "reason": "limit" }
+        }
+      ]
+    }
+  ]
+}

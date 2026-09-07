@@ -12,6 +12,7 @@ export interface WebhookInboxWorkerDeps {
   readonly inbox: WebhookInboxStore;
   readonly soulLoader: SoulLoader;
   readonly decryptPayload: (encrypted: string) => Promise<Buffer>;
+  readonly hookRunnerFor?: DrainDeps["hookRunnerFor"];
   /** The single Integration-event-to-Run seam. */
   readonly dispatch: (event: IntegrationEvent) => Promise<void>;
   readonly newEventId: () => string;
@@ -57,6 +58,7 @@ export function webhookInboxDrainDeps(deps: WebhookInboxWorkerDeps): DrainDeps {
     manifestFor: manifestReader(deps.soulLoader),
     decryptPayload: deps.decryptPayload,
     emit: deps.dispatch,
+    ...(deps.hookRunnerFor === undefined ? {} : { hookRunnerFor: deps.hookRunnerFor }),
   };
 }
 
