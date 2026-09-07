@@ -10,8 +10,6 @@
  */
 
 import { randomUUID } from "node:crypto";
-import { readFile } from "node:fs/promises";
-import { join } from "node:path";
 import {
   type Finding,
   lintRoutineDocument,
@@ -51,6 +49,8 @@ export interface DoctorFixture {
     readonly slug: string;
     readonly content: string;
     readonly summary: string;
+    /** A real intervening write after the Doctor reads its repair base. */
+    readonly concurrentContent?: string;
   };
 }
 
@@ -68,9 +68,12 @@ export async function runDoctor(input: {
       if (finding.subject.kind !== "routine") return null;
       if (!soul.loader.routines.has(finding.subject.id)) return null;
       const path = `routines/${finding.subject.id}/routine.yaml`;
+      const snapshot = await input.writes.readWithBase("Routine", finding.subject.id);
+      if (snapshot.content === null) return null;
       return {
         path,
-        content: await readFile(join(soul.path, path), "utf8"),
+        content: snapshot.content,
+        baseCommit: snapshot.baseCommit,
         facts: [],
       };
     },
@@ -78,6 +81,24 @@ export async function runDoctor(input: {
       // Scoped to one slug: a sweep sees every defect in the bundle, and answering a finding about
       // some other artifact with these bytes would publish them over it.
       if (scripted === undefined || finding.subject.id !== scripted.slug) return null;
+      if (scripted.concurrentContent !== undefined) {
+        const intervening = await input.writes.port.dispatch({
+          businessId: "eval",
+          runId: "eval-intervening-edit",
+          stateId: "eval-intervening-edit",
+          callId: randomUUID(),
+          name: SOUL_WRITE_TOOL,
+          arguments: {
+            kind: "Routine",
+            slug: finding.subject.id,
+            content: scripted.concurrentContent,
+            definitionMode: "canonical",
+          },
+        });
+        if (intervening.status !== "succeeded") {
+          throw new Error(`intervening edit did not publish: ${JSON.stringify(intervening)}`);
+        }
+      }
       let lintsClean: boolean;
       try {
         lintsClean =
@@ -97,7 +118,11 @@ export async function runDoctor(input: {
         summary: scripted.summary,
       };
     },
-    async publish(finding: Finding, proposal: ProposedRepair): Promise<void> {
+    async publish(
+      finding: Finding,
+      proposal: ProposedRepair,
+      subject: RepairSubject
+    ): Promise<void> {
       const result = await input.writes.port.dispatch({
         businessId: "eval",
         runId: "eval-doctor",
@@ -110,6 +135,7 @@ export async function runDoctor(input: {
           content: proposal.content,
           definitionMode: "canonical",
           subject: `fix(soul): repair ${finding.subject.id}`,
+          expectedBaseCommit: subject.baseCommit,
         },
       });
       if (result.status !== "succeeded") {
@@ -135,10 +161,11 @@ export async function runDoctor(input: {
     unhealthyRuns: async () => [],
     ledger: memoryLedger(),
     repair,
-    // The sweep reports every escalation through `report`, so this port only has to be present.
-    escalate: async () => {},
+    escalate: async (finding) => {
+      events.push({ kind: "escalated", subject: finding.subject.id });
+    },
     report: async (event) => {
-      if (event.kind === "finding") return;
+      if (event.kind !== "repaired") return;
       events.push({ kind: event.kind, subject: event.finding.subject.id });
     },
   });

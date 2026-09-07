@@ -42,6 +42,7 @@ export interface SoulCommit {
 
 export interface SoulWriterTool {
   readonly port: ToolDispatchPort;
+  readonly readWithBase: SoulWriter["readWithBase"];
   /** Commits this Trial landed, in order. Empty means the Turn changed no configuration. */
   readonly commits: readonly SoulCommit[];
   /**
@@ -80,6 +81,7 @@ interface WriteArguments {
   readonly companion?: unknown;
   readonly definitionMode?: unknown;
   readonly subject?: unknown;
+  readonly expectedBaseCommit?: unknown;
 }
 
 /**
@@ -151,6 +153,7 @@ export function soulWriterTool(soul: EvalSoul): SoulWriterTool {
   return {
     commits,
     denials,
+    readWithBase: (kind, slug) => writer.readWithBase(kind, slug),
     published: async () => {
       const bundle = await publications.activeBundle(EVAL_BUSINESS, verifier);
       return bundle?.definitions.map((definition) => `${definition.kind}:${definition.slug}`) ?? [];
@@ -190,6 +193,8 @@ export function soulWriterTool(soul: EvalSoul): SoulWriterTool {
             source: "agent",
             actor: { principalId: "agent:eval", name: "Eval", email: "eval@tulipfarm.local" },
             businessId: EVAL_BUSINESS,
+            expectedBaseCommit:
+              typeof args.expectedBaseCommit === "string" ? args.expectedBaseCommit : undefined,
             changes: [
               {
                 op: "put",

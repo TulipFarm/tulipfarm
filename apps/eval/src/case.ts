@@ -317,6 +317,7 @@ export interface EvalCase {
       readonly slug: string;
       readonly content: string;
       readonly summary: string;
+      readonly concurrentContent?: string;
     };
   };
   /**

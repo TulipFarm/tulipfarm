@@ -165,6 +165,10 @@ function validate(raw: unknown, file: string): EvalCase {
       require(typeof repair === "object" &&
         repair !== null, `${file}: "doctor.repair" must be an object`);
       const fields = repair as Record<string, unknown>;
+      require(fields.concurrentContent === undefined ||
+        (typeof fields.concurrentContent === "string" &&
+          fields.concurrentContent.length >
+            0), `${file}: "doctor.repair.concurrentContent" must be a non-empty string when present`);
       for (const key of ["slug", "content", "summary"]) {
         require(typeof fields[key] === "string" &&
           (fields[key] as string).length >
