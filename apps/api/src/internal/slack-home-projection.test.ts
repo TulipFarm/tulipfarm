@@ -1,3 +1,4 @@
+import { agentIdOf } from "@tulipfarm/soul";
 import { describe, expect, it, vi } from "vitest";
 import { SlackHomeProjectionService } from "./slack-home-projection";
 
@@ -73,6 +74,7 @@ describe("SlackHomeProjectionService", () => {
         list: () =>
           Array.from({ length: 7 }, (_, index) => ({
             name: `agent-${index}`,
+            id: agentIdOf(`agent-${index}`, {}),
             frontmatter: { label: `Agent ${index}` },
             body: "",
           })),

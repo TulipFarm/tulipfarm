@@ -1,3 +1,4 @@
+import { agentIdOf } from "@tulipfarm/soul";
 import type { ToolDef } from "@tulipfarm/tool-host";
 import { describe, expect, it } from "vitest";
 import { ToolRegistry } from "../broker/tool-adapter";
@@ -60,6 +61,7 @@ describe("allowedToolNamesFor / availableToolsFor excluded param", () => {
     registry.register(stubTool("record_delete", true));
 
     const available = availableToolsFor(registry, {
+      id: agentIdOf("reporter", {}),
       name: "reporter",
       frontmatter: {},
       body: "",

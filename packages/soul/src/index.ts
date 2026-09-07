@@ -7,12 +7,14 @@ export type {
   PublishedAgentVersion,
 } from "./agent-publication";
 export { AgentPublicationError, publishAgentVersion } from "./agent-publication";
+export { agentIdOf, resolveAgentRef } from "./agents/agent-id";
 export { agentWriteRequest, serializeAgent } from "./agents/agent-write";
 export type { AgentExistingDecision, AgentNamePlan } from "./agents/name-conflict";
 export { AGENT_EXISTING_DECISIONS, resolveAgentName } from "./agents/name-conflict";
 export type { PlatformAgent } from "./agents/platform-agents";
 export {
   DEFAULT_ASSISTANT,
+  DEFAULT_ASSISTANT_ID,
   DEFAULT_ASSISTANT_NAME,
   FORGE_SKILL_NAMES,
   getDefaultAssistant,

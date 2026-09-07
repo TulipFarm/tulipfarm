@@ -1,3 +1,4 @@
+import { deriveDefinitionId } from "../converters/shared";
 import type { SoulAgent } from "../types";
 
 export const FORGE_SKILL_NAMES = [
@@ -71,7 +72,15 @@ Asked for a Resource type, Agent, Skill, Routine, Surface component, or first-ti
 - \`create_resource_type\` and \`agent_create\` commit immediately; do not ask for approval to edit those.
 - Never modify or remove an existing artifact unless the user asks for that change.`;
 
+/**
+ * Fixed, not minted: the default assistant is code-defined and exists on every deployment, so its
+ * identity must be the same everywhere. It is derived from the name like any pre-id Agent, but that
+ * name is a constant nothing can rename, so the derivation is stable rather than fragile here.
+ */
+export const DEFAULT_ASSISTANT_ID = deriveDefinitionId("Agent", DEFAULT_ASSISTANT_NAME);
+
 export const DEFAULT_ASSISTANT: PlatformAgent = {
+  id: DEFAULT_ASSISTANT_ID,
   name: DEFAULT_ASSISTANT_NAME,
   frontmatter: {
     label: "TulipFarm Assistant",

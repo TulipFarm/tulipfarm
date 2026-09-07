@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { SoulLoader } from "../published-loader";
 import type { SoulAgent } from "../types";
+import { agentIdOf } from "./agent-id";
 import { DEFAULT_ASSISTANT, getAgent, listAgents, resolveAgent } from "./registry";
 
 function makeSoulLoader(agents: SoulAgent[] = []): SoulLoader {
@@ -8,6 +9,7 @@ function makeSoulLoader(agents: SoulAgent[] = []): SoulLoader {
 }
 
 const PLANNER: SoulAgent = {
+  id: agentIdOf("sprint-planner", {}),
   name: "sprint-planner",
   frontmatter: { label: "Sprint Planner", domain: "engineering" },
   body: "# Role\nYou plan sprints.",

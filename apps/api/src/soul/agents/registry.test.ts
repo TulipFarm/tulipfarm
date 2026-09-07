@@ -1,5 +1,5 @@
 import type { SoulAgent, SoulLoader } from "@tulipfarm/soul";
-import { DEFAULT_ASSISTANT_NAME } from "@tulipfarm/soul";
+import { agentIdOf, DEFAULT_ASSISTANT_NAME } from "@tulipfarm/soul";
 import { describe, expect, it } from "vitest";
 import { delegableToolNames, hostedAgentResolver } from "./registry";
 
@@ -10,7 +10,12 @@ function loaderWith(agents: readonly SoulAgent[]): SoulLoader {
 describe("hostedAgentResolver", () => {
   it("carries the Agent's authored autonomy so the dispatcher can bound the turn by it", () => {
     const loader = loaderWith([
-      { name: "mutator", frontmatter: { autonomy: "approval-required" }, body: "" },
+      {
+        id: agentIdOf("mutator", {}),
+        name: "mutator",
+        frontmatter: { autonomy: "approval-required" },
+        body: "",
+      },
     ]);
 
     expect(hostedAgentResolver(loader).resolve("mutator")).toMatchObject({
@@ -21,8 +26,8 @@ describe("hostedAgentResolver", () => {
 
   it("states no autonomy for an Agent that declares none, or declares nonsense", () => {
     const loader = loaderWith([
-      { name: "plain", frontmatter: {}, body: "" },
-      { name: "bogus", frontmatter: { autonomy: "banana" }, body: "" },
+      { id: agentIdOf("plain", {}), name: "plain", frontmatter: {}, body: "" },
+      { id: agentIdOf("bogus", {}), name: "bogus", frontmatter: { autonomy: "banana" }, body: "" },
     ]);
     const resolver = hostedAgentResolver(loader);
 
@@ -33,6 +38,7 @@ describe("hostedAgentResolver", () => {
   it("carries authored capability restrictions to the dispatcher", () => {
     const loader = loaderWith([
       {
+        id: agentIdOf("cleanup", {}),
         name: "cleanup",
         frontmatter: { capabilityRestrictions: { records: { actions: { deny: ["delete"] } } } },
         body: "",
@@ -62,7 +68,9 @@ describe("delegableToolNames", () => {
   ];
 
   it("leaves the delegation root untouched for an Agent with no restrictions", () => {
-    const loader = loaderWith([{ name: "plain", frontmatter: {}, body: "" }]);
+    const loader = loaderWith([
+      { id: agentIdOf("plain", {}), name: "plain", frontmatter: {}, body: "" },
+    ]);
 
     expect(delegableToolNames(loader, "plain", catalog)).toBeUndefined();
     expect(delegableToolNames(loader, undefined, catalog)).toBeUndefined();
@@ -71,6 +79,7 @@ describe("delegableToolNames", () => {
   it("narrows the delegation root to what a restricted Agent itself holds", () => {
     const loader = loaderWith([
       {
+        id: agentIdOf("reporter", {}),
         name: "reporter",
         frontmatter: { capabilityRestrictions: { tools: { allowMutating: false } } },
         body: "",

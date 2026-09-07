@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { agentIdOf } from "./agents/agent-id";
 import { buildSoulCatalogue } from "./catalogue";
 import type { RegistryEntry } from "./integrations/registry";
 import type { SoulLoader } from "./published-loader";
@@ -16,6 +17,7 @@ const skill = (name: string, frontmatter: Record<string, unknown> = {}): SoulSki
   body: "",
 });
 const agent = (name: string, description?: string): SoulAgent => ({
+  id: agentIdOf(name, {}),
   name,
   frontmatter: description ? { description } : {},
   body: "",
