@@ -27,6 +27,54 @@ afterEach(() => {
 });
 
 describe("production uninstaller", () => {
+  it.each(["", "runtime-user-id=0\n"])(
+    "uses rootful Podman for a root-managed install even when rootless is available (%s)",
+    (identity) => {
+      const installDirectory = temporaryDirectory();
+      writeFileSync(
+        join(installDirectory, ".tulipfarm-install"),
+        `managed-by=tulipfarm-installer\ncompose-project=tulipfarm\nruntime=podman\n${identity}`
+      );
+      const harness = writeHarness(`
+        INSTALL_DIR="$2"
+        FS_SUDO="sudo"
+        id() { printf '501\\n'; }
+        podman() { printf 'rootless %s\\n' "$*"; }
+        sudo() {
+          if [ "$1" = podman ]; then printf 'rootful %s\\n' "$*"; else "$@"; fi
+        }
+        runtime podman ps -aq
+      `);
+      expect(
+        execFileSync("bash", [harness, UNINSTALLER, installDirectory], {
+          cwd: ROOT,
+          encoding: "utf8",
+        }).trim()
+      ).toBe("rootful podman ps -aq");
+    }
+  );
+
+  it("does not fall back to rootless Podman when the marked rootful engine is unavailable", () => {
+    const installDirectory = temporaryDirectory();
+    writeFileSync(
+      join(installDirectory, ".tulipfarm-install"),
+      "managed-by=tulipfarm-installer\nruntime=podman\nruntime-user-id=0\n"
+    );
+    const harness = writeHarness(`
+      INSTALL_DIR="$2"
+      id() { printf '501\\n'; }
+      podman() { printf 'wrong-store\\n'; }
+      sudo() { return 1; }
+      runtime podman ps -aq
+    `);
+    const result = spawnSync("bash", [harness, UNINSTALLER, installDirectory], {
+      cwd: ROOT,
+      encoding: "utf8",
+    });
+    expect(result.status).not.toBe(0);
+    expect(result.stdout).not.toContain("wrong-store");
+  });
+
   it("requires the complete typed confirmation phrase", () => {
     const terminalDirectory = temporaryDirectory();
     const inputPath = join(terminalDirectory, "input");

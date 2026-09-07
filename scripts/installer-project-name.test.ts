@@ -92,6 +92,7 @@ describe("installer compose project name", () => {
 
     const marker = readFileSync(join(installDirectory, ".tulipfarm-install"), "utf8");
     expect(marker).toContain("compose-project=acme");
+    expect(marker).toContain(`runtime-user-id=${process.getuid?.()}`);
   });
 });
 

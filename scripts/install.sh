@@ -384,12 +384,14 @@ update_runtime_version() {
 compose() { ( cd "$INSTALL_DIR" && $SUDO $ENGINE compose -p "$PROJECT_NAME" "$@" ); }
 
 write_install_marker() {
-  local project_name="$PROJECT_NAME" tmp
+  local project_name="$PROJECT_NAME" runtime_uid tmp
+  runtime_uid="$($SUDO id -u)"
   tmp="$($SUDO mktemp "${INSTALL_DIR}/.tulipfarm-install.tmp.XXXXXX")"
   $SUDO tee "$tmp" >/dev/null <<EOF
 managed-by=tulipfarm-installer
 compose-project=${project_name}
 runtime=${ENGINE}
+runtime-user-id=${runtime_uid}
 EOF
   $SUDO chmod 644 "$tmp"
   $SUDO mv "$tmp" "${INSTALL_DIR}/.tulipfarm-install"

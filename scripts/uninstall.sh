@@ -177,8 +177,29 @@ confirm_uninstall() {
 }
 
 runtime() {
-  local engine="$1"
+  local engine="$1" runtime_uid
   shift
+  if [ "$engine" = podman ]; then
+    runtime_uid="$(read_marker_value runtime-user-id)"
+    if [ -n "$runtime_uid" ]; then
+      if [ "$runtime_uid" = "$(id -u)" ]; then
+        "$engine" "$@"
+      elif [ "$runtime_uid" = 0 ]; then
+        command -v sudo >/dev/null 2>&1 || return 127
+        sudo "$engine" "$@"
+      else
+        warn "Podman belongs to user ${runtime_uid}; run uninstall as that user"
+        return 127
+      fi
+      return
+    fi
+    # Older root-managed installs have no engine UID marker. Do not prefer an unrelated
+    # rootless store merely because the invoking user can reach it.
+    if [ -n "$FS_SUDO" ]; then
+      "$FS_SUDO" "$engine" "$@"
+      return
+    fi
+  fi
   if "$engine" info >/dev/null 2>&1; then
     "$engine" "$@"
     return
