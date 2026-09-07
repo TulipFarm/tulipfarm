@@ -211,6 +211,14 @@ export type TraceStepProps = {
   diff?: { added: number; removed: number };
   /** What the step actually did. Shown while it is the live step, on demand once it settles. */
   detail?: ReactNode;
+  /**
+   * An error the reader must not have to notice on their own — an approval-gated call the
+   * participant themselves denied, say. Defaults to true, which is what makes an `error` status
+   * hold itself open below. Set false for a failure nothing asks the reader to act on (an
+   * automatic authorization denial, never surfaced as an approval), so it settles collapsed like
+   * any other finished step instead of flashing open until the turn ends.
+   */
+  holdOpenOnError?: boolean;
   className?: string;
 };
 
@@ -231,11 +239,12 @@ export function TraceStep({
   marker,
   diff,
   detail,
+  holdOpenOnError = true,
   className,
 }: TraceStepProps) {
   const [choice, setChoice] = useState<boolean | null>(null);
   const bodyId = useId();
-  const open = choice ?? (status === "running" || status === "error");
+  const open = choice ?? (status === "running" || (status === "error" && holdOpenOnError));
   const expandable = detail !== undefined;
   const shown = status === "running" ? (activeLabel ?? label) : label;
 

@@ -105,14 +105,29 @@ export type { ModelCallReceipt, ModelCallReceiptSource } from "@tulipfarm/turn-e
 
 export class LlmModelPort implements ModelPort, ModelCallReceiptSource {
   private receipt: ModelCallReceipt | undefined;
+  /** Cumulative across every model call this port makes; a turn shape can call the model twice. */
+  private totalModelCallLatencyMs = 0;
+  private modelCallCount = 0;
   /** Cached effort decision; `undefined` is a real inferred result and must not re-run. */
   private effort: { readonly value: RunEventEffortInference | undefined } | undefined;
 
   constructor(private readonly options: LlmModelPortOptions) {}
 
-  /** The last completed model call on this port, or `undefined` when none completed. */
+  /**
+   * The last completed model call on this port, or `undefined` when none completed.
+   *
+   * `modelId`/`effortPreset`/`effortApplied`/`modelCallLatencyMs` describe that last call, but
+   * `totalModelCallLatencyMs`/`modelCallCount` accumulate every call this port made — a turn
+   * shape that proposes tools, gets denials, then answers makes two, and reporting only the last
+   * call's latency understates the turn's real model time by the first call's whole duration.
+   */
   latestModelCallReceipt(): ModelCallReceipt | undefined {
-    return this.receipt;
+    if (this.receipt === undefined) return undefined;
+    return {
+      ...this.receipt,
+      totalModelCallLatencyMs: this.totalModelCallLatencyMs,
+      modelCallCount: this.modelCallCount,
+    };
   }
 
   async invoke(request: ModelInvocationRequest): Promise<ModelInvocationResult> {
@@ -309,9 +324,10 @@ export class LlmModelPort implements ModelPort, ModelCallReceiptSource {
     // Priced after the call, against the chain link that actually answered — never the head of
     // the chain, which is a prediction rather than an outcome.
     const cost = resolution.price(inputTokens, outputTokens);
-    this.receipt =
-      receiptFromRouting(resolution.routing, Math.max(0, Math.round(finishedAt - startedAt))) ??
-      this.receipt;
+    const latencyMs = Math.max(0, Math.round(finishedAt - startedAt));
+    this.totalModelCallLatencyMs += latencyMs;
+    this.modelCallCount += 1;
+    this.receipt = receiptFromRouting(resolution.routing, latencyMs) ?? this.receipt;
 
     // ai@7 can emit `finish` without running the provider; treat empty calls/text/usage as a fault.
     if (

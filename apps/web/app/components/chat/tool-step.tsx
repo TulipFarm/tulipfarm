@@ -47,6 +47,13 @@ export function ToolStepRow({
   const approval = part.approval;
   const fileDraft = fileDraftOf(part);
   const isAdmin = useIsAdmin();
+  // An automatic authorization denial (`errorCode: "denied"`, no `approval`) never entered the
+  // human approval flow — nothing asks the reader to act on it, so it settles collapsed like any
+  // other finished step. Every other failure (a genuine tool error, or a call the participant
+  // actually had to decide on) still holds itself open.
+  const isAutomaticDenial =
+    status === "error" && part.meta?.errorCode === "denied" && approval === undefined;
+  const holdOpenOnError = !isAutomaticDenial;
   return (
     <>
       <TraceStep
@@ -57,6 +64,7 @@ export function ToolStepRow({
         activeLabel={label === undefined ? describeToolCallActive(ran) : undefined}
         value={part.toolName}
         mono
+        holdOpenOnError={holdOpenOnError}
         className={className}
         marker={
           part.meta?.mutating === true ? (

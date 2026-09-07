@@ -52,6 +52,19 @@ function formatLatency(ms: number): string {
   return `${(ms / 1000).toFixed(ms < 10_000 ? 1 : 0)} s`;
 }
 
+/**
+ * When a turn shape makes more than one model call (e.g. a tool proposal denied, then a second
+ * call answers), `modelCallLatencyMs` alone reports only the last call and understates the
+ * turn's real model time. Render the total plus the call count whenever there is more than one,
+ * so triage can see the breakdown rather than a bare, misleadingly small number.
+ */
+function modelTimeLabel(receipt: ModelReceipt): string {
+  const total = receipt.totalModelCallLatencyMs ?? receipt.modelCallLatencyMs;
+  const count = receipt.modelCallCount ?? 1;
+  if (count <= 1) return `model call ${formatLatency(total)}`;
+  return `${count} model calls · ${formatLatency(total)} total`;
+}
+
 function ModelReceiptView({ receipt }: { receipt: ModelReceipt }) {
   const asked = effortLabel(receipt.effortPreset);
   // `auto` is a request, not an outcome. Showing only "Auto" hides the choice the deployment made
@@ -65,7 +78,7 @@ function ModelReceiptView({ receipt }: { receipt: ModelReceipt }) {
         {receipt.modelId}
       </code>
       {effort ? <span>· {effort} effort</span> : null}
-      <span>· model call {formatLatency(receipt.modelCallLatencyMs)}</span>
+      <span>· {modelTimeLabel(receipt)}</span>
     </p>
   );
 }
@@ -450,11 +463,30 @@ export function Transcript({
   onReviseDraft?: (draft: FileDraftResult) => void;
 }) {
   const scrollRef = useRef<HTMLDivElement>(null);
+  const lastBlockRef = useRef<HTMLDivElement>(null);
+  // Whether the reader is following the stream at the bottom. Only a deliberate user gesture
+  // (wheel/touch) may unstick it; a scroll event with no such gesture behind it is an incidental
+  // jump — a collapsing trace, a layout shift — and must not be read as "the reader scrolled up",
+  // or the tail of a finished turn silently stops reaching the viewport (#728).
   const stick = useRef(true);
+  const userGesture = useRef(false);
+
+  function onWheelOrTouch() {
+    userGesture.current = true;
+  }
 
   function onScroll() {
     const el = scrollRef.current;
-    if (el) stick.current = el.scrollHeight - el.scrollTop - el.clientHeight < 48;
+    if (!el) return;
+    const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 48;
+    // Reaching the bottom re-arms sticking regardless of what caused it — including our own
+    // programmatic jump — so a stale "unstuck" state from an earlier incidental scroll cannot
+    // outlive the moment the reader is actually back at the tail.
+    if (atBottom) {
+      stick.current = true;
+    } else if (userGesture.current) {
+      stick.current = false;
+    }
   }
 
   // Auto-scroll is layout-forcing, so coalesce bursts of stream updates into one write per frame.
@@ -466,29 +498,50 @@ export function Transcript({
     if (!stick.current) return;
     const frame = requestAnimationFrame(() => {
       const el = scrollRef.current;
-      if (el) el.scrollTop = el.scrollHeight;
+      if (!el) return;
+      const block = lastBlockRef.current;
+      // A block taller than the viewport lands the reader mid-card if the container is simply
+      // pinned to `scrollHeight` — the tail shows, not the start of what just appeared. Anchor to
+      // the block's own top instead, so a large delta always opens on its beginning.
+      if (block && block.getBoundingClientRect().height > el.clientHeight) {
+        const withinEl =
+          el.scrollTop + (block.getBoundingClientRect().top - el.getBoundingClientRect().top);
+        el.scrollTop = Math.max(0, withinEl);
+      } else {
+        el.scrollTop = el.scrollHeight;
+      }
     });
     return () => cancelAnimationFrame(frame);
   }, [messages, status]);
 
   return (
-    <div ref={scrollRef} onScroll={onScroll} className="flex-1 min-h-0 overflow-y-auto">
+    <div
+      ref={scrollRef}
+      onScroll={onScroll}
+      onWheel={onWheelOrTouch}
+      onTouchMove={onWheelOrTouch}
+      className="flex-1 min-h-0 overflow-y-auto"
+    >
       <div className="mx-auto flex w-full max-w-4xl flex-col gap-7 px-4 py-7 sm:px-6 sm:py-9">
-        {messages.map((m, i) => (
-          <Message
-            key={m.id}
-            message={m}
-            status={status}
-            isLast={i === messages.length - 1}
-            mentions={mentions}
-            onApprove={onApprove}
-            onRegenerate={onRegenerate}
-            onTryHarder={onTryHarder}
-            onFeedback={onFeedback}
-            onSurfaceInteraction={onSurfaceInteraction}
-            onReviseDraft={onReviseDraft}
-          />
-        ))}
+        {messages.map((m, i) => {
+          const isLast = i === messages.length - 1;
+          return (
+            <div key={m.id} ref={isLast ? lastBlockRef : undefined}>
+              <Message
+                message={m}
+                status={status}
+                isLast={isLast}
+                mentions={mentions}
+                onApprove={onApprove}
+                onRegenerate={onRegenerate}
+                onTryHarder={onTryHarder}
+                onFeedback={onFeedback}
+                onSurfaceInteraction={onSurfaceInteraction}
+                onReviseDraft={onReviseDraft}
+              />
+            </div>
+          );
+        })}
         {status === "submitted" ? <Loader /> : null}
       </div>
     </div>

@@ -108,7 +108,15 @@ export interface ModelCallReceipt {
   readonly effortPreset?: EffortPreset;
   /** Actual rung, when knowable, so clients can escalate `auto` without guessing. */
   readonly effortApplied?: EffortRung;
+  /** The last completed model call's own duration. */
   readonly modelCallLatencyMs: number;
+  /**
+   * Summed across every model call this Turn-attempt made — a turn shape that proposes tools,
+   * gets denials, then answers makes two calls, and `modelCallLatencyMs` alone reports only the
+   * second.
+   */
+  readonly totalModelCallLatencyMs?: number;
+  readonly modelCallCount?: number;
 }
 
 /** Latest-call receipt is scoped to this Turn-attempt port, not a process registry. */

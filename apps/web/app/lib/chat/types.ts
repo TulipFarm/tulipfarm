@@ -171,7 +171,11 @@ export type ModelReceipt = {
   modelId: string;
   effortPreset?: EffortPreset;
   effortApplied?: EffortRung;
+  /** The last model call's own duration. */
   modelCallLatencyMs: number;
+  /** Summed across every model call the turn made; absent on a legacy event. */
+  totalModelCallLatencyMs?: number;
+  modelCallCount?: number;
 };
 
 export type TimelinePart =

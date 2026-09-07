@@ -260,6 +260,8 @@ const TURN_FINISHED_SCHEMA = {
     effortPreset: { type: "string", enum: EFFORT_PRESETS },
     effortApplied: { type: "string", enum: EFFORT_RUNGS },
     modelCallLatencyMs: { type: "integer", minimum: 0 },
+    totalModelCallLatencyMs: { type: "integer", minimum: 0 },
+    modelCallCount: { type: "integer", minimum: 0 },
     usage: {
       type: "object",
       additionalProperties: false,
@@ -583,6 +585,8 @@ export interface RunEventPayloads {
     readonly effortPreset?: EffortPreset;
     readonly effortApplied?: EffortRung;
     readonly modelCallLatencyMs?: number;
+    readonly totalModelCallLatencyMs?: number;
+    readonly modelCallCount?: number;
     readonly usage?: { readonly inputTokens?: number; readonly outputTokens?: number };
   };
   readonly "context.assembled": {
