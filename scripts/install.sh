@@ -44,7 +44,8 @@ PORT_OVERRIDE="${TF_PORT:-${HOST_PORT:-}}"
 PORT="${PORT_OVERRIDE:-8080}"
 # Namespaces every container and volume. `uninstall.sh` reads the same two variables, in the
 # same order, and the value is recorded in the install marker so uninstall targets this stack.
-PROJECT_NAME="${TF_PROJECT_NAME:-${COMPOSE_PROJECT_NAME:-tulipfarm}}"
+PROJECT_OVERRIDE="${TF_PROJECT_NAME:-${COMPOSE_PROJECT_NAME:-}}"
+PROJECT_NAME="${PROJECT_OVERRIDE:-tulipfarm}"
 TF_RUNTIME="${TF_RUNTIME:-}"
 TF_LOCAL_SRC="${TF_LOCAL_SRC:-}"
 TTY_INPUT="/dev/tty"
@@ -383,6 +384,16 @@ update_runtime_version() {
 # shellcheck disable=SC2086  # $SUDO may be empty and $ENGINE is a bare word — both must split
 compose() { ( cd "$INSTALL_DIR" && $SUDO $ENGINE compose -p "$PROJECT_NAME" "$@" ); }
 
+resolve_project_name() {
+  local marker="${INSTALL_DIR}/.tulipfarm-install" marked=""
+  if $SUDO test -f "$marker"; then
+    marked="$($SUDO sed -n 's/^compose-project=//p' "$marker")"
+  fi
+  PROJECT_NAME="${PROJECT_OVERRIDE:-${marked:-tulipfarm}}"
+  [[ "$PROJECT_NAME" =~ ^[a-zA-Z0-9][a-zA-Z0-9_.-]*$ ]] \
+    || die "unsafe Compose project name: ${PROJECT_NAME}"
+}
+
 write_install_marker() {
   local project_name="$PROJECT_NAME" tmp
   tmp="$($SUDO mktemp "${INSTALL_DIR}/.tulipfarm-install.tmp.XXXXXX")"
@@ -485,6 +496,7 @@ main() {
   need curl
   detect_os
   detect_sudo
+  resolve_project_name
   ensure_engine
   $SUDO mkdir -p "$INSTALL_DIR"
   fetch_file docker-compose.yml "${INSTALL_DIR}/docker-compose.yml"
