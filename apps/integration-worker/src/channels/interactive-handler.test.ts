@@ -25,7 +25,7 @@ const SURFACE_INTERACTION = {
 };
 
 const SLACK_MANIFEST = readFileSync(
-  join(import.meta.dirname, "../../../../integrations/slack/manifest.yml"),
+  join(__dirname, "../../../../integrations/slack/manifest.yml"),
   "utf8"
 );
 
