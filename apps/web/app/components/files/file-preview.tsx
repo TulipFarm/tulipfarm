@@ -1,8 +1,9 @@
 import { isInlineRenderable } from "@tulipfarm/files/limits";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Download } from "~/components/icons";
 import { Modal } from "~/components/ui/modal";
-import { fetchFileObjectUrl } from "~/lib/files";
+import { Tooltip } from "~/components/ui/tooltip";
+import { fetchFileObjectUrl, UploadFailed } from "~/lib/files";
 import { cn } from "~/lib/utils";
 import { DocumentView, isDocumentPreviewable } from "./document-view";
 
@@ -90,6 +91,15 @@ export function FilePreview({
   );
 }
 
+type DownloadState =
+  | { readonly status: "idle" }
+  | { readonly status: "busy" }
+  | { readonly status: "done" }
+  | { readonly status: "error"; readonly reason: string };
+
+/** How long the post-download confirmation stays up before the button returns to idle. */
+const CONFIRMATION_MS = 2000;
+
 /**
  * Taking the File away with you, from inside the reader.
  *
@@ -103,10 +113,18 @@ export function DownloadButton({
   readonly fileId: string;
   readonly filename: string;
 }) {
-  const [busy, setBusy] = useState(false);
+  const [state, setState] = useState<DownloadState>({ status: "idle" });
+  const resetTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(
+    () => () => {
+      if (resetTimer.current) clearTimeout(resetTimer.current);
+    },
+    []
+  );
 
   async function download() {
-    setBusy(true);
+    setState({ status: "busy" });
     try {
       const url = await fetchFileObjectUrl(fileId);
       const anchor = document.createElement("a");
@@ -115,21 +133,45 @@ export function DownloadButton({
       anchor.click();
       // Revoked on the next tick: revoking synchronously races the browser's read of the URL.
       setTimeout(() => URL.revokeObjectURL(url), 0);
-    } finally {
-      setBusy(false);
+      setState({ status: "done" });
+      resetTimer.current = setTimeout(() => setState({ status: "idle" }), CONFIRMATION_MS);
+    } catch (error) {
+      const reason = error instanceof UploadFailed ? error.message : "The download failed.";
+      setState({ status: "error", reason });
     }
   }
 
-  return (
+  const disabled = state.status === "busy" || state.status === "error";
+  const label =
+    state.status === "busy"
+      ? "Downloading…"
+      : state.status === "done"
+        ? "Downloaded"
+        : state.status === "error"
+          ? "Download failed"
+          : "Download";
+
+  const button = (
     <button
       className="inline-flex items-center gap-1.5 rounded-md border border-border px-2.5 py-1.5 text-xs text-foreground hover:bg-secondary disabled:opacity-60"
-      disabled={busy}
+      disabled={disabled}
       onClick={download}
       type="button"
     >
       <Download aria-hidden className="size-3.5" />
-      Download
+      {label}
     </button>
+  );
+
+  return (
+    <div className="flex flex-col items-end gap-1">
+      {state.status === "error" ? <Tooltip content={state.reason}>{button}</Tooltip> : button}
+      {state.status === "error" ? (
+        <p role="alert" className="text-xs text-destructive">
+          {state.reason}
+        </p>
+      ) : null}
+    </div>
   );
 }
 
