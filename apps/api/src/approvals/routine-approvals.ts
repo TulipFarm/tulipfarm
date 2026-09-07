@@ -1,16 +1,22 @@
 import { randomUUID } from "node:crypto";
-import { DurableWaitError, type DurableWaitManager } from "@tulipfarm/run-kernel";
+import { DurableWaitManager, RunResumeGateway } from "@tulipfarm/run-kernel";
 import { canonicalHash } from "@tulipfarm/schema";
 import {
+  ambientTransactionPort,
+  type Queryable,
+  RunStore,
+  type TransactionPort,
+  WaitStore,
+} from "@tulipfarm/storage";
+import {
   type ApprovalSignalOutcome,
-  type ApprovalsRepo,
+  ApprovalsRepo,
   listPendingRoutineApprovals,
 } from "@tulipfarm/tool-host";
 import type { RoutineApprovalPayload } from "../internal/routine-approval-host";
 
 export interface RoutineApprovalServiceOptions {
-  readonly repo: ApprovalsRepo;
-  readonly waits: DurableWaitManager;
+  readonly transactions: TransactionPort;
   newId?(): string;
   now?(): Date;
 }
@@ -31,7 +37,10 @@ export class RoutineApprovalService {
   }
 
   async listPendingFor(input: { businessId: string; roles: readonly string[] }) {
-    return listPendingRoutineApprovals(this.options.repo, this.options.waits, input);
+    return this.options.transactions.withTransaction((transaction) => {
+      const { repo, waits } = transactionServices(transaction);
+      return listPendingRoutineApprovals(repo, waits, input);
+    });
   }
 
   async signal(input: {
@@ -43,25 +52,32 @@ export class RoutineApprovalService {
     /** Every role that principal holds; membership in one the wait allows is what authorizes. */
     roles: readonly string[];
   }): Promise<ApprovalSignalOutcome> {
-    const row = await this.options.repo.findById(input.approvalId);
-    if (row === null || row.kind !== "routine_state") return "not_found";
-    const { waitId, runId, resumeToken } = payloadOf(row);
-    if (waitId === undefined || runId === undefined || resumeToken === undefined) {
-      return "not_found";
-    }
+    return this.options.transactions.withTransaction(async (transaction) => {
+      const { repo, waits } = transactionServices(transaction);
+      const row = await repo.findById(input.approvalId);
+      if (row === null || row.kind !== "routine_state") return "not_found";
+      const { waitId, runId, resumeToken } = payloadOf(row);
+      if (waitId === undefined || runId === undefined || resumeToken === undefined) {
+        return "not_found";
+      }
 
-    const wait = await this.options.waits.find(input.businessId, waitId);
-    if (wait === null) return "not_found";
-    const held = new Set(input.roles.map((role) => `role:${role}`));
-    const asRole = wait.allowedPrincipals.find((allowed) => held.has(allowed));
-    if (asRole === undefined) return "forbidden";
+      const wait = await waits.find(input.businessId, waitId);
+      if (wait === null) return "not_found";
+      const held = new Set(input.roles.map((role) => `role:${role}`));
+      const asRole = wait.allowedPrincipals.find((allowed) => held.has(allowed));
+      if (asRole === undefined) return "forbidden";
 
-    if (!(await this.options.repo.settlePending(input.approvalId, input.decision))) {
-      return "already_settled";
-    }
+      let decidedBy = row.approverPrincipalId;
+      if (row.status === "pending") {
+        if (!(await repo.settlePending(input.approvalId, input.decision, input.principal))) {
+          return "already_settled";
+        }
+        decidedBy = input.principal;
+      } else if (row.status !== input.decision) {
+        return "already_settled";
+      }
 
-    try {
-      await this.options.waits.signal({
+      const result = await waits.signal({
         id: this.newId(),
         businessId: input.businessId,
         runId,
@@ -75,15 +91,23 @@ export class RoutineApprovalService {
         signalDigest: canonicalHash({
           approvalId: input.approvalId,
           decision: input.decision,
-          decidedBy: input.principal,
+          decidedBy,
         }),
         receivedAt: this.now().toISOString(),
       });
-    } catch (error) {
-      // A raced or swept wait must not turn a settled approval into a failed request.
-      if (!(error instanceof DurableWaitError)) throw error;
-      return "already_settled";
-    }
-    return "resumed";
+      if (result.outcome === "duplicate") {
+        await waits.resumeIfUnblocked(input.businessId, runId);
+      }
+      return "resumed";
+    });
   }
+}
+
+function transactionServices(transaction: Queryable) {
+  const transactions = ambientTransactionPort(transaction);
+  const runs = new RunStore(transactions);
+  return {
+    repo: new ApprovalsRepo(transaction),
+    waits: new DurableWaitManager(new WaitStore(transactions), new RunResumeGateway(runs)),
+  };
 }

@@ -7,6 +7,7 @@ import {
 } from "@tulipfarm/tool-host";
 import type { FastifyRequest } from "fastify";
 import type { ActivityService } from "../activity/service";
+import type { RoutineApprovalService } from "../approvals/routine-approvals";
 import type { AuthorizationCheck, RouteAuthorization } from "../authz/route-gate";
 import { makeAuthorizationCheck } from "../authz/route-gate";
 import { describeDeploymentRoles } from "../identity/roles";
@@ -25,18 +26,14 @@ import type { RunReader } from "./run-reader";
 
 type RuntimeOperationalDeps = {
   activity: Pick<ActivityService, "list">;
-  approvals: Pick<ApprovalsRepo, "findById" | "listPending" | "settle">;
+  approvals: Pick<ApprovalsRepo, "findById" | "listPending">;
   ownershipApprovals?: Pick<TeamAssetService, "listApprovals" | "decide">;
   /** Settles a Tool approval and resumes its parked Run; absent leaves only routine approvals. */
   toolApprovals?: Pick<ToolApprovalService, "signal">;
+  /** Settles a Routine State approval through its durable wait and one-use resume token. */
+  routineApprovals?: Pick<RoutineApprovalService, "signal">;
   runs: RunReader;
   healthProbes: readonly HealthProbe[];
-  enqueueWake(job: {
-    runId: string;
-    reason: "approval";
-    token: string;
-    decision: "approved" | "denied";
-  }): Promise<void>;
   guardrailsConfig(): unknown;
   teamMigrationReport?(businessId: string): Promise<TeamMigrationReportReadModel>;
   /** Decides operator authority; absent falls back to deployment admin. */
@@ -187,6 +184,7 @@ export function createRuntimeOperationalApi(deps: RuntimeOperationalDeps): Opera
       return {
         businessId: principal.businessId,
         principalId: principal.id,
+        roles: principal.role === undefined ? [] : [principal.role],
         permissions: ADMIN_PERMISSIONS,
       };
     },
@@ -310,25 +308,30 @@ export function createRuntimeOperationalApi(deps: RuntimeOperationalDeps): Opera
         principal: `user:${grant.principalId}`,
       });
       if (signalled === "forbidden") throw new Error("This approval is not yours to decide.");
-      if (signalled === "already_settled")
-        throw new Error("Approval not found or already resolved.");
-      if (signalled !== "resumed") {
-        const row = await deps.approvals.findById(input.approvalId);
-        const payload =
-          typeof row?.payload === "object" && row.payload !== null
-            ? (row.payload as Record<string, unknown>)
-            : {};
-        const runId = typeof payload.runId === "string" ? payload.runId : undefined;
-        if (row?.kind !== "routine_state" || row.status !== "pending" || !runId) {
+      if (signalled === "already_settled") {
+        const settled = await deps.approvals.findById(input.approvalId);
+        if (settled?.status !== input.decision) {
           throw new Error("Approval not found or already resolved.");
         }
-        await deps.approvals.settle(input.approvalId, input.decision);
-        await deps.enqueueWake({
-          runId,
-          reason: "approval",
-          token: `approval:${input.approvalId}`,
+      } else if (signalled !== "resumed") {
+        const routineSignalled = await deps.routineApprovals?.signal({
+          businessId: grant.businessId,
+          approvalId: input.approvalId,
           decision: input.decision,
+          principal: `user:${grant.principalId}`,
+          roles: grant.roles ?? [],
         });
+        if (routineSignalled === "forbidden") {
+          throw new Error("This approval is not yours to decide.");
+        }
+        if (routineSignalled === "already_settled") {
+          const settled = await deps.approvals.findById(input.approvalId);
+          if (settled?.status !== input.decision) {
+            throw new Error("Approval not found or already resolved.");
+          }
+        } else if (routineSignalled !== "resumed") {
+          throw new Error("Approval not found or already resolved.");
+        }
       }
 
       const result = {
