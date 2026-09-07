@@ -15,7 +15,8 @@ const storage = vi.hoisted(() => ({
 const proposeSoulRepair = vi.hoisted(() => vi.fn());
 
 vi.mock("@tulipfarm/built-in-agents", () => ({ proposeSoulRepair }));
-vi.mock("@tulipfarm/storage", () => ({
+vi.mock("@tulipfarm/storage", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@tulipfarm/storage")>()),
   closeSupersededRuns: storage.closeSupersededRuns,
   listUnhealthyRuns: storage.listUnhealthyRuns,
   SoulDoctorLedger: class {
