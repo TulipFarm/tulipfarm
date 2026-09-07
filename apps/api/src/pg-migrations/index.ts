@@ -57,7 +57,10 @@ import {
   TEAM_STORAGE_STATEMENTS,
   WAIT_STORAGE_STATEMENTS,
 } from "@tulipfarm/storage";
-import { EFFECT_STORAGE_STATEMENTS } from "@tulipfarm/tool-broker";
+import {
+  EFFECT_OUTPUT_STORAGE_STATEMENTS,
+  EFFECT_STORAGE_STATEMENTS,
+} from "@tulipfarm/tool-broker";
 import { APPROVAL_EVIDENCE_STORAGE_STATEMENTS } from "@tulipfarm/tool-host";
 import type { Queryable } from "../db";
 import { resourceSideEffectMigration } from "../resources/outbox";
@@ -3183,5 +3186,10 @@ export const PG_MIGRATIONS: PgMigration[] = [
         "ALTER TABLE routine_schedule_state ADD PRIMARY KEY (business_id, routine_slug, trigger_id)"
       );
     },
+  },
+  {
+    version: 99,
+    description: "effect ledger: persist immutable confirmed Tool outputs",
+    up: applyStatements(EFFECT_OUTPUT_STORAGE_STATEMENTS),
   },
 ];

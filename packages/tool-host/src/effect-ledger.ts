@@ -48,7 +48,12 @@ export type ReserveOutcome =
   /** Fresh reservation; the caller must execute and then report a terminal state. */
   | { readonly outcome: "reserved"; readonly effectId: string }
   /** This exact call already ran. `state` is what the earlier attempt settled on. */
-  | { readonly outcome: "duplicate"; readonly state: string }
+  | {
+      readonly outcome: "duplicate";
+      readonly state: string;
+      readonly outputStored: boolean;
+      readonly output: unknown;
+    }
   /** Same call id with different authorized arguments: refuse as an idempotency conflict. */
   | { readonly outcome: "conflict" };
 
@@ -93,7 +98,12 @@ export class ChatEffectLedger {
         createdAt: new Date().toISOString(),
       });
       return reserved.outcome === "duplicate"
-        ? { outcome: "duplicate", state: reserved.effect.state }
+        ? {
+            outcome: "duplicate",
+            state: reserved.effect.state,
+            outputStored: reserved.effect.outputStored,
+            output: reserved.effect.output,
+          }
         : { outcome: "reserved", effectId: reserved.effect.effectId };
     } catch (error) {
       if (error instanceof EffectLedgerError && error.code === "idempotency_digest_mismatch") {
@@ -113,7 +123,11 @@ export class ChatEffectLedger {
     businessId: string,
     effectId: string,
     attempt: number,
-    outcome: { readonly state: "confirmed" | "failed" | "ambiguous"; readonly errorCode?: string }
+    outcome: {
+      readonly state: "confirmed" | "failed" | "ambiguous";
+      readonly errorCode?: string;
+      readonly output?: { readonly value: unknown };
+    }
   ): Promise<void> {
     await this.store.finishAttempt({
       businessId,
@@ -122,6 +136,7 @@ export class ChatEffectLedger {
       attemptState: outcome.state,
       effectState: outcome.state,
       finishedAt: new Date().toISOString(),
+      ...(outcome.output === undefined ? {} : { output: outcome.output }),
       ...(outcome.errorCode === undefined ? {} : { errorCode: outcome.errorCode }),
     });
   }

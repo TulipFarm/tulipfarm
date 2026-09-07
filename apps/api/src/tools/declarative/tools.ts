@@ -20,6 +20,7 @@ import { isPersonalCredentialStep, resolveAuthSteps } from "@tulipfarm/soul";
 import {
   CredentialDispatcher,
   EffectDispatcher,
+  type EffectRecord,
   type EffectStore,
   intentDigest,
   normalizeToolIntent,
@@ -111,12 +112,14 @@ function mapDispatchError(error: ToolDispatchError, slug: string): ToolCallResul
   }
 }
 
-/** Rediscovered ledger effects cannot replay provider output; only settled state is stored. */
-function replayed(state: string): ToolCallResult {
-  if (state === "confirmed") {
-    return ok({ replayed: true, note: "This call already completed; not repeated." });
+/** Rediscovered confirmed effects return the first immutable provider result. */
+function replayed(effect: EffectRecord): ToolCallResult {
+  if (effect.state === "confirmed") {
+    return effect.outputStored
+      ? ok(effect.output)
+      : err("internal_error", "confirmed_effect_output_unavailable");
   }
-  return err("internal_error", `effect_${state}`);
+  return err("internal_error", `effect_${effect.state}`);
 }
 
 function declarationSlug(slug: string): string {
@@ -422,7 +425,7 @@ function buildToolDef(
         guardrailRevision: ctx.guardrailRevision ?? "none",
         createdAt: new Date().toISOString(),
       });
-      if (reserved.outcome === "duplicate") return replayed(reserved.effect.state);
+      if (reserved.outcome === "duplicate") return replayed(reserved.effect);
 
       try {
         return ok(

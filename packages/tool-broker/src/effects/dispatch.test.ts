@@ -97,7 +97,11 @@ describe("EffectDispatcher", () => {
     const result = await dispatcher(adapter).dispatch(BUSINESS_ID, EFFECT_ID);
 
     expect(result).toEqual({ providerId: "external-42" });
-    expect(await store.get(BUSINESS_ID, EFFECT_ID)).toMatchObject({ state: "confirmed" });
+    expect(await store.get(BUSINESS_ID, EFFECT_ID)).toMatchObject({
+      state: "confirmed",
+      outputStored: true,
+      output: { providerId: "external-42" },
+    });
   });
 
   it("retries a classified pre-dispatch failure with the same stable key and backoff", async () => {

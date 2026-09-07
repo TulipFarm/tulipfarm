@@ -524,7 +524,9 @@ export class RegistryToolDispatcher implements TurnToolDispatcher {
           ? {}
           : { destination: definition.definition.effectiveDestination }),
       });
-      if (reserved.outcome === "duplicate") return replayedEffect(call.name, reserved.state);
+      if (reserved.outcome === "duplicate") {
+        return replayedEffect(call.name, reserved.state, reserved.outputStored, reserved.output);
+      }
       if (reserved.outcome === "conflict") {
         return {
           status: "failed",
@@ -554,14 +556,25 @@ export class RegistryToolDispatcher implements TurnToolDispatcher {
   }
 }
 
-/** Confirmed ledger replays report success; unsettled states fail without repeating the call. */
-function replayedEffect(toolName: string, state: string): HostedToolResult {
+/** Confirmed ledger replays return the first immutable output; unsettled states fail closed. */
+function replayedEffect(
+  toolName: string,
+  state: string,
+  outputStored: boolean,
+  output: unknown
+): HostedToolResult {
   switch (state) {
     case "confirmed":
+      if (!outputStored) {
+        return {
+          status: "failed",
+          reason: `tool "${toolName}" already completed, but its output is unavailable`,
+        };
+      }
       return {
         status: "succeeded",
         replayed: true,
-        output: { replayed: true, note: "This action already completed; it was not repeated." },
+        output,
       };
     case "failed":
       return { status: "failed", reason: `tool "${toolName}" already ran and failed` };

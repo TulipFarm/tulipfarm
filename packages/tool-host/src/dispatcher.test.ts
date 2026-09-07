@@ -6,6 +6,8 @@ import {
   CompositeToolEntitlement,
   MemoryEffectStore,
   NOT_APPLICABLE,
+  type ReserveEffectInput,
+  type ReserveEffectResult,
 } from "@tulipfarm/tool-broker";
 import { describe, expect, it, vi } from "vitest";
 import type { TurnAuthority } from "./authority";
@@ -1332,10 +1334,25 @@ describe("effect ledger", () => {
     ) as ToolDef;
   }
 
-  function ledgerDispatcher(tool: ToolDef, executeTimeoutMs?: number) {
+  class LegacyOutputEffectStore extends MemoryEffectStore {
+    override async reserve(input: ReserveEffectInput): Promise<ReserveEffectResult> {
+      const reserved = await super.reserve(input);
+      return reserved.outcome === "duplicate"
+        ? {
+            ...reserved,
+            effect: Object.freeze({ ...reserved.effect, outputStored: false, output: null }),
+          }
+        : reserved;
+    }
+  }
+
+  function ledgerDispatcher(
+    tool: ToolDef,
+    executeTimeoutMs?: number,
+    effects = new MemoryEffectStore()
+  ) {
     const registry = new InMemoryToolCatalog();
     registry.register(tool);
-    const effects = new MemoryEffectStore();
     return {
       effects,
       dispatcher: new RegistryToolDispatcher({
@@ -1365,13 +1382,47 @@ describe("effect ledger", () => {
     const execute = vi.fn(async () => ok({ done: true }));
     const { dispatcher, effects } = ledgerDispatcher(ledgeredTool(execute));
 
-    await dispatcher.dispatch(AUTHORITY, CALL);
+    const first = await dispatcher.dispatch(AUTHORITY, CALL);
     const second = await dispatcher.dispatch(AUTHORITY, CALL);
 
     expect(execute).toHaveBeenCalledTimes(1);
-    expect(second).toMatchObject({ status: "succeeded" });
-    expect(second).toMatchObject({ output: { replayed: true } });
+    expect(first).toMatchObject({ status: "succeeded", output: { done: true } });
+    expect(second).toEqual({ status: "succeeded", replayed: true, output: { done: true } });
     expect(await effects.list(BUSINESS_ID)).toHaveLength(1);
+  });
+
+  it("replays an explicit null output without repeating the call", async () => {
+    const execute = vi.fn(async () => ok(null));
+    const { dispatcher } = ledgerDispatcher(ledgeredTool(execute));
+
+    expect(await dispatcher.dispatch(AUTHORITY, CALL)).toMatchObject({
+      status: "succeeded",
+      output: null,
+    });
+    expect(await dispatcher.dispatch(AUTHORITY, CALL)).toEqual({
+      status: "succeeded",
+      replayed: true,
+      output: null,
+    });
+    expect(execute).toHaveBeenCalledTimes(1);
+  });
+
+  it("fails closed when a confirmed legacy effect has no stored output", async () => {
+    const execute = vi.fn(async () => ok({ done: true }));
+    const { dispatcher } = ledgerDispatcher(
+      ledgeredTool(execute),
+      undefined,
+      new LegacyOutputEffectStore()
+    );
+
+    await dispatcher.dispatch(AUTHORITY, CALL);
+    const replay = await dispatcher.dispatch(AUTHORITY, CALL);
+
+    expect(replay).toEqual({
+      status: "failed",
+      reason: 'tool "echo" already completed, but its output is unavailable',
+    });
+    expect(execute).toHaveBeenCalledTimes(1);
   });
 
   it("refuses the same call id carrying different arguments without running it", async () => {

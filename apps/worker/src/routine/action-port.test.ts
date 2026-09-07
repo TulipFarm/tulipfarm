@@ -33,21 +33,15 @@ describe("DispatchRoutineActionPort", () => {
     });
   });
 
-  /**
-   * A confirmed-effect replay reports `succeeded` but returns `{replayed:true}` instead of what the
-   * Tool answered, because the ledger records that a call happened and not its result. An `action`
-   * State publishes its output to later States, so taking that marker as data would feed the rest
-   * of the Routine a value the Tool never produced.
-   */
-  it("parks rather than publishing a replay marker as if it were the Tool's answer", async () => {
+  it("publishes the immutable stored output when the Tool effect is replayed", async () => {
     const { port } = portReturning({
       status: "succeeded",
       replayed: true,
-      output: { replayed: true, note: "This action already completed; it was not repeated." },
+      output: { id: "rec_1" },
     });
     await expect(port.execute(request)).resolves.toEqual({
-      kind: "unavailable",
-      reason: "replayed_without_output",
+      kind: "succeeded",
+      output: { id: "rec_1" },
     });
   });
 

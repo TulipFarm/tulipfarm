@@ -77,11 +77,16 @@ async function wait(delayMs: number): Promise<void> {
  */
 export async function runToolAttempts(input: ToolAttemptInput): Promise<HostedToolResult> {
   const { businessId, tool, call, ledger, reservation } = input;
-  const settle = async (state: "confirmed" | "failed" | "ambiguous", errorCode?: string) => {
+  const settle = async (
+    state: "confirmed" | "failed" | "ambiguous",
+    errorCode?: string,
+    output?: { readonly value: unknown }
+  ) => {
     if (!ledger || !reservation) return;
     await ledger.finishAttempt(businessId, reservation.effectId, reservation.attempt, {
       state,
       ...(errorCode === undefined ? {} : { errorCode }),
+      ...(output === undefined ? {} : { output }),
     });
   };
 
@@ -102,7 +107,7 @@ export async function runToolAttempts(input: ToolAttemptInput): Promise<HostedTo
       return { status: "failed", reason: `tool "${call.name}" raised an internal error` };
     }
     if (result.success) {
-      await settle("confirmed");
+      await settle("confirmed", undefined, { value: result.data });
       return { status: "succeeded", output: result.data };
     }
     if (isParked(result)) {

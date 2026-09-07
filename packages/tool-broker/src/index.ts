@@ -73,6 +73,7 @@ export type {
 export {
   AdapterDispatchError,
   CompensationError,
+  EFFECT_OUTPUT_STORAGE_STATEMENTS,
   EFFECT_STORAGE_STATEMENTS,
   EffectCompensator,
   EffectDispatcher,

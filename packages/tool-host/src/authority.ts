@@ -83,9 +83,8 @@ export type HostedToolResult =
       readonly status: "succeeded";
       readonly output: unknown;
       /**
-       * The effect had already confirmed, so `output` is a marker rather than what the Tool
-       * returned — the ledger records that a call happened, not what it answered. Chat can say
-       * so in words; a caller that feeds the output to a later step must not treat it as data.
+       * The effect had already confirmed, so `output` is its immutable first result and the Tool
+       * was not run again.
        */
       readonly replayed?: true;
     }

@@ -203,7 +203,7 @@ describe("buildDeclarativeTools", () => {
     const second = await tool?.execute({ body: { q: "x" } }, CTX);
 
     expect(first).toMatchObject({ success: true });
-    expect(second).toMatchObject({ success: true, data: { replayed: true } });
+    expect(second).toEqual(first);
     expect(http.sent).toHaveLength(1);
   });
 

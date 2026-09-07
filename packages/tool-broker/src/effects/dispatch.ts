@@ -215,6 +215,7 @@ export class EffectDispatcher {
           attemptState: "confirmed",
           effectState: "confirmed",
           outputDigest: canonicalHash(output),
+          output: { value: output },
           finishedAt: this.now(),
         });
         return output;

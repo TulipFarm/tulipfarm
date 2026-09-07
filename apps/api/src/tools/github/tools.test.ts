@@ -469,9 +469,7 @@ describe("buildGitHubTools", () => {
 
     expect(first.success).toBe(true);
     expect(second.success).toBe(true);
-    if (second.success) {
-      expect(second.data).toMatchObject({ replayed: true });
-    }
+    expect(second).toEqual(first);
     expect(issueGets).toBe(1);
   });
 
