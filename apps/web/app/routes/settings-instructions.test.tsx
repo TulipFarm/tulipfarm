@@ -3,7 +3,7 @@ import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, expect, test, vi } from "vitest";
 import { getCustomInstructions, putCustomInstructions } from "~/lib/settings";
-import SettingsInstructions, { clientLoader } from "./_app.settings.instructions";
+import SettingsInstructions, { clientLoader, ErrorBoundary } from "./_app.settings.instructions";
 
 vi.mock("~/lib/settings", async () => {
   const actual = await vi.importActual<typeof import("~/lib/settings")>("~/lib/settings");
@@ -25,7 +25,7 @@ beforeEach(() => {
 
 function renderPage() {
   const Stub = createRemixStub([
-    { path: "/", Component: SettingsInstructions, loader: clientLoader },
+    { path: "/", Component: SettingsInstructions, loader: clientLoader, ErrorBoundary },
   ]);
   return render(<Stub initialEntries={["/"]} />);
 }
@@ -62,9 +62,16 @@ test("offers no memory list, suggestion queue, or per-fact editing", async () =>
 });
 
 test("survives a deployment that serves no instructions yet", async () => {
-  mockGet.mockRejectedValue(new Error("not found"));
+  mockGet.mockResolvedValue("");
   renderPage();
   expect(await screen.findByLabelText("Custom instructions", { selector: "textarea" })).toHaveValue(
     ""
   );
+});
+
+test("surfaces a load failure instead of offering an empty overwrite", async () => {
+  mockGet.mockRejectedValue(new Error("not found"));
+  renderPage();
+  expect(await screen.findByText(/not found/)).toBeInTheDocument();
+  expect(screen.queryByLabelText("Custom instructions", { selector: "textarea" })).toBeNull();
 });
