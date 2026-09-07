@@ -3,9 +3,10 @@ import { createRemixStub } from "@remix-run/testing";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, expect, test, vi } from "vitest";
+import { ApiError } from "~/lib/api";
 import type { TeamDirectoryEntry } from "~/lib/teams";
 import * as session from "~/lib/use-session-user";
-import TeamsDirectory from "./_app.business.access.teams";
+import TeamsDirectory, { ErrorBoundary } from "./_app.business.access.teams";
 
 vi.mock("@remix-run/react", async () => {
   const actual = await vi.importActual<typeof import("@remix-run/react")>("@remix-run/react");
@@ -152,4 +153,19 @@ test("shows useful empty and no-match states", async () => {
   await userEvent.type(screen.getByRole("searchbox", { name: "Search teams" }), "missing");
   expect(screen.getByText("No Teams found")).toBeInTheDocument();
   expect(screen.getByRole("button", { name: "Clear filters" })).toBeInTheDocument();
+});
+
+test("renders human copy, not the raw wire code, for a 403 on the Team directory", () => {
+  vi.mocked(remix.useRouteError).mockReturnValue(
+    new ApiError(403, "forbidden", undefined, "forbidden")
+  );
+
+  render(<ErrorBoundary />);
+
+  expect(screen.queryByText("forbidden")).not.toBeInTheDocument();
+  expect(
+    screen.getByText(
+      "The Team directory isn't available to your account. Ask an administrator if you need access."
+    )
+  ).toBeInTheDocument();
 });

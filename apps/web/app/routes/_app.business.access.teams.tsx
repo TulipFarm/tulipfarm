@@ -16,7 +16,7 @@ import { Input } from "~/components/ui/input";
 import { Link } from "~/components/ui/link";
 import { Panel } from "~/components/ui/panel";
 import { Select } from "~/components/ui/select";
-import { ApiError } from "~/lib/api";
+import { presentApiError } from "~/lib/present-api-error";
 import { listTeams, type TeamDirectoryEntry } from "~/lib/teams";
 import { useIsAdmin } from "~/lib/use-session-user";
 import { cn } from "~/lib/utils";
@@ -289,8 +289,7 @@ function compareTeams(a: TeamDirectoryEntry, b: TeamDirectoryEntry, sort: TeamSo
 }
 
 function errorMessage(error: unknown): string {
-  if (error instanceof ApiError) return error.message;
-  return "Could not load the Team directory.";
+  return presentApiError(error, "The Team directory");
 }
 
 export function ErrorBoundary() {
