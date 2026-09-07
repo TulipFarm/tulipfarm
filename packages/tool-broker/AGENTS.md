@@ -27,6 +27,8 @@ credential dispatch, sandbox adaptation, and reconciliation.
 - `EffectDispatcher` consults the mutation kill switch before recording an attempt, so a denied
   mutation leaves no attempt in the ledger. A dispatcher constructed without `mutationGuard` is
   outside the emergency stop; `scripts/mutation-kill-switch.test.ts` fails the build on one.
+- A confirmed effect stores its first output immutably. `outputStored` distinguishes JSON `null`
+  from legacy rows with no replay evidence; a caller must fail closed when that flag is false.
 - A kill switch scope is only meaningful if the dispatch site fills the matching `MutationContext`
   field. Adding a scope kind means supplying its identity in `mutationIdentity` first, never after.
 - `deriveContractTargets` refuses; it never returns `[]` for a target it failed to derive. An empty

@@ -122,6 +122,8 @@ function readIssueEffect(): EffectRecord {
     intentDigest: "digest-1",
     guardrailRevision: "guardrail-rev-1",
     state: "authorized",
+    outputStored: false,
+    output: null,
     createdAt: "2026-08-06T00:00:00.000Z",
     updatedAt: "2026-08-06T00:00:00.000Z",
     intent: {

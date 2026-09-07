@@ -13,6 +13,7 @@ import {
   type CredentialDispatcher,
   deriveContractTargets,
   EffectDispatcher,
+  type EffectRecord,
   type EffectStore,
   type ToolAdapter,
   ToolBroker,
@@ -28,13 +29,7 @@ import { GITHUB_INSTALLATION_SECRET_REF, githubInstallationSecretRef } from "./g
 /** Routine Tool authority: pinned bundle only; authorize, reserve, then dispatch fail-closed. */
 
 export type RoutineToolOutcome =
-  /**
-   * Dispatched and confirmed, or recognized as an effect this Run already confirmed.
-   *
-   * `output` is `null` for a `tool` State: the Broker settles a ToolContract as a durable *effect*
-   * in the ledger, and a replayed Run reads back only that the effect was confirmed, never what the
-   * provider returned. A State that needs the provider's data uses an `action` State instead.
-   */
+  /** Dispatched and confirmed, or replayed with the first immutable provider result. */
   | { readonly kind: "succeeded"; readonly output: unknown }
   /**
    * A definitive negative the authored `onError` path may claim, named by its reason code.
@@ -136,16 +131,18 @@ function targetsOf(catalog: ToolCatalog, request: RoutineToolRequest): readonly 
 }
 
 /** Replay durable effects; only reconciliation may resolve `ambiguous`. */
-function replayed(state: string): RoutineToolOutcome {
-  switch (state) {
+function replayed(effect: EffectRecord): RoutineToolOutcome {
+  switch (effect.state) {
     case "confirmed":
-      return { kind: "succeeded", output: null };
+      return effect.outputStored
+        ? { kind: "succeeded", output: effect.output }
+        : { kind: "unavailable", reason: "confirmed_effect_output_unavailable" };
     case "denied":
       return { kind: "failed", reason: "effect_denied" };
     case "failed":
       return { kind: "failed", reason: "effect_failed" };
     default:
-      return { kind: "unavailable", reason: `effect_${state}` };
+      return { kind: "unavailable", reason: `effect_${effect.state}` };
   }
 }
 
@@ -217,7 +214,7 @@ export class BrokerRoutineToolPort implements RoutineToolPort {
       guardrailRevision: request.bundle.digest,
       createdAt: this.now().toISOString(),
     });
-    if (reserved.outcome === "duplicate") return replayed(reserved.effect.state);
+    if (reserved.outcome === "duplicate") return replayed(reserved.effect);
 
     const adapters = new Map(this.options.adapters);
     for (const [ref, adapter] of this.options.adaptersFor?.(request) ?? []) {
@@ -235,8 +232,8 @@ export class BrokerRoutineToolPort implements RoutineToolPort {
       now: () => this.now().toISOString(),
     });
     try {
-      await dispatcher.dispatch(request.businessId, request.plan.effectId);
-      return { kind: "succeeded", output: null };
+      const output = await dispatcher.dispatch(request.businessId, request.plan.effectId);
+      return { kind: "succeeded", output };
     } catch (error) {
       if (!(error instanceof ToolDispatchError)) throw error;
       // Provider write may have landed; park `ambiguous` for reconciliation, never retry here.

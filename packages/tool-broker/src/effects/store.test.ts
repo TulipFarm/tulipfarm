@@ -56,6 +56,46 @@ describe("MemoryEffectStore", () => {
     });
   });
 
+  it("keeps a confirmed output immutable after settlement", async () => {
+    const store = new MemoryEffectStore();
+    await store.reserve(input());
+    const attempt = await store.beginAttempt(BUSINESS_ID, EFFECT_ID, "2026-07-25T00:00:01.000Z");
+    const output = { providerId: "external-42", nested: { status: "created" } };
+
+    await store.finishAttempt({
+      businessId: BUSINESS_ID,
+      effectId: EFFECT_ID,
+      attempt: attempt.attempt,
+      attemptState: "confirmed",
+      effectState: "confirmed",
+      output: { value: output },
+      finishedAt: "2026-07-25T00:00:02.000Z",
+    });
+    output.nested.status = "changed";
+
+    const stored = await store.get(BUSINESS_ID, EFFECT_ID);
+    expect(stored).toMatchObject({
+      outputStored: true,
+      output: { providerId: "external-42", nested: { status: "created" } },
+    });
+    expect(Object.isFrozen(stored?.output)).toBe(true);
+    await expect(
+      store.finishAttempt({
+        businessId: BUSINESS_ID,
+        effectId: EFFECT_ID,
+        attempt: attempt.attempt,
+        attemptState: "confirmed",
+        effectState: "confirmed",
+        output: { value: { providerId: "replacement" } },
+        finishedAt: "2026-07-25T00:00:03.000Z",
+      })
+    ).rejects.toThrow(new EffectLedgerError("attempt_not_found", String(attempt.attempt)));
+    expect((await store.get(BUSINESS_ID, EFFECT_ID))?.output).toEqual({
+      providerId: "external-42",
+      nested: { status: "created" },
+    });
+  });
+
   it("deduplicates concurrent matching keys into one durable intent", async () => {
     const store = new MemoryEffectStore();
     const ledger = new EffectLedger(store);
@@ -108,5 +148,128 @@ describe("PgEffectStore", () => {
     await expect(
       ledger.reserve(input({ effectId: crypto.randomUUID(), intentDigest: "c".repeat(64) }))
     ).rejects.toThrow(EffectLedgerError);
+  });
+
+  it("reloads the exact confirmed output after a store restart", async () => {
+    await store.reserve(input());
+    const attempt = await store.beginAttempt(BUSINESS_ID, EFFECT_ID, "2026-07-25T00:00:01.000Z");
+    await store.finishAttempt({
+      businessId: BUSINESS_ID,
+      effectId: EFFECT_ID,
+      attempt: attempt.attempt,
+      attemptState: "confirmed",
+      effectState: "confirmed",
+      output: { value: { providerId: "external-42", labels: ["triaged"] } },
+      finishedAt: "2026-07-25T00:00:02.000Z",
+    });
+
+    const restarted = new PgEffectStore({
+      withTransaction: (operation) => database.transaction(operation),
+    });
+    const replay = await restarted.reserve(input());
+
+    expect(replay).toMatchObject({
+      outcome: "duplicate",
+      effect: {
+        state: "confirmed",
+        outputStored: true,
+        output: { providerId: "external-42", labels: ["triaged"] },
+      },
+    });
+    await expect(
+      restarted.finishAttempt({
+        businessId: BUSINESS_ID,
+        effectId: EFFECT_ID,
+        attempt: attempt.attempt,
+        attemptState: "confirmed",
+        effectState: "confirmed",
+        output: { value: { providerId: "replacement" } },
+        finishedAt: "2026-07-25T00:00:03.000Z",
+      })
+    ).rejects.toThrow(new EffectLedgerError("attempt_not_found", String(attempt.attempt)));
+    expect((await restarted.get(BUSINESS_ID, EFFECT_ID))?.output).toEqual({
+      providerId: "external-42",
+      labels: ["triaged"],
+    });
+  });
+
+  it("distinguishes explicit null or void output from missing legacy output", async () => {
+    await store.reserve(input());
+    const attempt = await store.beginAttempt(BUSINESS_ID, EFFECT_ID, "2026-07-25T00:00:01.000Z");
+    await store.finishAttempt({
+      businessId: BUSINESS_ID,
+      effectId: EFFECT_ID,
+      attempt: attempt.attempt,
+      attemptState: "confirmed",
+      effectState: "confirmed",
+      output: { value: null },
+      finishedAt: "2026-07-25T00:00:02.000Z",
+    });
+
+    expect(await store.get(BUSINESS_ID, EFFECT_ID)).toMatchObject({
+      state: "confirmed",
+      outputStored: true,
+      output: null,
+    });
+
+    const voidEffect = input({
+      effectId: "33333333-3333-4333-8333-333333333333",
+      stateId: "void-label",
+      logicalEffectOrdinal: 2,
+      idempotencyKey: "effect-key-void",
+      intent: {
+        ...input().intent,
+        intentId: "intent-void",
+        stateId: "void-label",
+        idempotencyKey: "effect-key-void",
+      },
+    });
+    await store.reserve(voidEffect);
+    const voidAttempt = await store.beginAttempt(
+      BUSINESS_ID,
+      voidEffect.effectId,
+      "2026-07-25T00:00:03.000Z"
+    );
+    await store.finishAttempt({
+      businessId: BUSINESS_ID,
+      effectId: voidEffect.effectId,
+      attempt: voidAttempt.attempt,
+      attemptState: "confirmed",
+      effectState: "confirmed",
+      output: { value: undefined },
+      finishedAt: "2026-07-25T00:00:04.000Z",
+    });
+    expect(await store.get(BUSINESS_ID, voidEffect.effectId)).toMatchObject({
+      state: "confirmed",
+      outputStored: true,
+      output: null,
+    });
+
+    const legacy = input({
+      effectId: "44444444-4444-4444-8444-444444444444",
+      stateId: "legacy-label",
+      logicalEffectOrdinal: 3,
+      idempotencyKey: "effect-key-legacy",
+      intent: {
+        ...input().intent,
+        intentId: "intent-legacy",
+        stateId: "legacy-label",
+        idempotencyKey: "effect-key-legacy",
+      },
+    });
+    await store.reserve(legacy);
+    await store.transition({
+      businessId: BUSINESS_ID,
+      effectId: legacy.effectId,
+      expectedStates: ["authorized"],
+      state: "confirmed",
+      updatedAt: "2026-07-25T00:00:03.000Z",
+    });
+
+    expect(await store.get(BUSINESS_ID, legacy.effectId)).toMatchObject({
+      state: "confirmed",
+      outputStored: false,
+      output: null,
+    });
   });
 });

@@ -4,10 +4,10 @@ import { DEPLOYMENT_BUSINESS_ID } from "@tulipfarm/constants";
 /**
  * Refuse to boot below the schema floor the worker's work requires.
  *
- * 86, not 81: the hosted `file_create` Tool now writes Chat drafts and generation idempotency
- * fields added by migration 86. A worker below that floor could claim a Run and fail mid-Tool.
+ * 99: Routine Tool replay reads immutable confirmed outputs added by migration 99. A worker below
+ * that floor could claim a replayed State and lose the Tool result needed by following States.
  */
-export const REQUIRED_SCHEMA_VERSION = 90;
+export const REQUIRED_SCHEMA_VERSION = 99;
 
 export interface WorkerConfig {
   readonly databaseUrl: string;

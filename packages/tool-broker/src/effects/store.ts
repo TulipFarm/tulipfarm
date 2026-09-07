@@ -39,6 +39,8 @@ export const EFFECT_STORAGE_STATEMENTS: readonly string[] = [
       'failed', 'ambiguous', 'compensating', 'compensated', 'reconciliation_required'
     )),
     parent_effect_id       uuid,
+    output                 jsonb,
+    output_stored          boolean NOT NULL DEFAULT false,
     created_at             timestamptz NOT NULL,
     updated_at             timestamptz NOT NULL,
     PRIMARY KEY (business_id, effect_id),
@@ -69,6 +71,11 @@ export const EFFECT_STORAGE_STATEMENTS: readonly string[] = [
   )`,
 ];
 
+export const EFFECT_OUTPUT_STORAGE_STATEMENTS: readonly string[] = [
+  "ALTER TABLE effect_records ADD COLUMN IF NOT EXISTS output jsonb",
+  "ALTER TABLE effect_records ADD COLUMN IF NOT EXISTS output_stored boolean NOT NULL DEFAULT false",
+];
+
 export interface EffectStore {
   reserve(input: ReserveEffectInput): Promise<ReserveEffectResult>;
   reserveCompensation(
@@ -90,11 +97,30 @@ function freezeIntent(intent: ToolIntent): ToolIntent {
   });
 }
 
+function cloneOutput(output: unknown): unknown {
+  if (Array.isArray(output)) {
+    return Object.freeze(output.map((value) => cloneOutput(value)));
+  }
+  if (output !== null && typeof output === "object") {
+    return Object.freeze(
+      Object.fromEntries(
+        Object.entries(output as Record<string, unknown>).map(([key, value]) => [
+          key,
+          cloneOutput(value),
+        ])
+      )
+    );
+  }
+  return output;
+}
+
 function effect(input: ReserveEffectInput): EffectRecord {
   return Object.freeze({
     ...input,
     intent: freezeIntent(input.intent),
     state: "authorized",
+    outputStored: false,
+    output: null,
     updatedAt: input.createdAt,
   });
 }
@@ -194,7 +220,9 @@ export class MemoryEffectStore implements EffectStore {
     const key = this.key(input.businessId, record.idempotencyKey);
     const attempts = this.attempts.get(key) ?? [];
     const index = attempts.findIndex((attempt) => attempt.attempt === input.attempt);
-    if (index < 0) throw new EffectLedgerError("attempt_not_found", String(input.attempt));
+    if (index < 0 || attempts[index]?.state !== "dispatched") {
+      throw new EffectLedgerError("attempt_not_found", String(input.attempt));
+    }
     const completed = Object.freeze({
       ...attempts[index],
       state: input.attemptState,
@@ -210,6 +238,9 @@ export class MemoryEffectStore implements EffectStore {
     const updated = Object.freeze({
       ...record,
       state: input.effectState,
+      ...(input.output === undefined
+        ? {}
+        : { outputStored: true, output: cloneOutput(input.output.value) }),
       updatedAt: input.finishedAt,
     });
     this.records.set(key, updated);
@@ -236,6 +267,8 @@ interface EffectRow {
   approval_id: string | null;
   state: EffectRecord["state"];
   parent_effect_id: string | null;
+  output_stored: boolean;
+  output: unknown;
   created_at: string | Date;
   updated_at: string | Date;
 }
@@ -270,6 +303,8 @@ function fromRow(row: EffectRow): EffectRecord {
     approvalId: row.approval_id ?? undefined,
     state: row.state,
     parentEffectId: row.parent_effect_id ?? undefined,
+    outputStored: row.output_stored,
+    output: cloneOutput(row.output),
     createdAt: iso(row.created_at),
     updatedAt: iso(row.updated_at),
   });
@@ -519,9 +554,20 @@ export class PgEffectStore implements EffectStore {
         throw new EffectLedgerError("attempt_not_found", String(input.attempt));
       }
       await transaction.query(
-        `UPDATE effect_records SET state = $3, updated_at = $4
+        `UPDATE effect_records
+            SET state = $3,
+                updated_at = $4,
+                output_stored = output_stored OR $5,
+                output = CASE WHEN $5 THEN $6::jsonb ELSE output END
           WHERE business_id = $1 AND effect_id = $2`,
-        [input.businessId, input.effectId, input.effectState, input.finishedAt]
+        [
+          input.businessId,
+          input.effectId,
+          input.effectState,
+          input.finishedAt,
+          input.output !== undefined,
+          input.output === undefined ? null : (JSON.stringify(input.output.value) ?? null),
+        ]
       );
       const updated = await this.findById(transaction, input.businessId, input.effectId);
       if (updated === undefined) throw new EffectLedgerError("effect_not_found", input.effectId);

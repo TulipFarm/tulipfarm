@@ -1,10 +1,14 @@
+import { PGlite } from "@electric-sql/pglite";
 import type { AuthorityLayer } from "@tulipfarm/authz";
 import type { ToolDispatchPlan } from "@tulipfarm/run-kernel";
 import type { GuardrailDefinition, ToolContractDefinition } from "@tulipfarm/schema";
 import type { BundleDefinition, RuntimeBundle } from "@tulipfarm/soul";
+import type { TransactionPort } from "@tulipfarm/storage";
 import {
   AdapterDispatchError,
+  EFFECT_STORAGE_STATEMENTS,
   MemoryEffectStore,
+  PgEffectStore,
   type ToolAdapter,
   type ToolAdapterRequest,
 } from "@tulipfarm/tool-broker";
@@ -141,7 +145,10 @@ function port(): BrokerRoutineToolPort {
 
 describe("BrokerRoutineToolPort", () => {
   it("authorizes against the Run's pinned policy, reserves the effect, then dispatches", async () => {
-    expect(await port().execute(request())).toEqual({ kind: "succeeded", output: null });
+    expect(await port().execute(request())).toEqual({
+      kind: "succeeded",
+      output: { commentId: 12 },
+    });
 
     const effect = await effects.get(BUSINESS_ID, PLAN.effectId);
     expect(effect?.state).toBe("confirmed");
@@ -162,7 +169,10 @@ describe("BrokerRoutineToolPort", () => {
     });
 
     const input = request();
-    expect(await dynamic.execute(input)).toEqual({ kind: "succeeded", output: null });
+    expect(await dynamic.execute(input)).toEqual({
+      kind: "succeeded",
+      output: { commentId: 12 },
+    });
     expect(adaptersFor).toHaveBeenCalledWith(input);
     expect(dispatch).toHaveBeenCalledOnce();
   });
@@ -191,14 +201,17 @@ describe("BrokerRoutineToolPort", () => {
   it("authorizes from the bundle's own ToolContract alone, even with no external authority layers", async () => {
     expect(await port().execute(request({ authorityLayers: [] }))).toEqual({
       kind: "succeeded",
-      output: null,
+      output: { commentId: 12 },
     });
   });
 
   // Contracts that declare no target keep the coarser Tool-granular decision; that is the one
   // legitimate empty target list, and it is not the same as a target we could not work out.
   it("decides at Tool granularity when the contract declares no target of its own", async () => {
-    expect(await port().execute(request())).toEqual({ kind: "succeeded", output: null });
+    expect(await port().execute(request())).toEqual({
+      kind: "succeeded",
+      output: { commentId: 12 },
+    });
 
     const dispatched = dispatch.mock.calls[0]?.[0];
     expect(dispatched?.intent.arguments).not.toEqual({});
@@ -261,8 +274,108 @@ describe("BrokerRoutineToolPort", () => {
     const subject = port();
     await subject.execute(request());
 
-    expect(await subject.execute(request())).toEqual({ kind: "succeeded", output: null });
+    expect(await subject.execute(request())).toEqual({
+      kind: "succeeded",
+      output: { commentId: 12 },
+    });
     expect(dispatch).toHaveBeenCalledTimes(1);
+  });
+
+  it("replays the exact stored output after a database-backed port restart", async () => {
+    const database = new PGlite();
+    try {
+      for (const statement of EFFECT_STORAGE_STATEMENTS) await database.query(statement);
+      const transactions: TransactionPort = {
+        withTransaction: (operation) => database.transaction(operation),
+      };
+      const first = new BrokerRoutineToolPort({
+        effects: new PgEffectStore(transactions),
+        adapters,
+      });
+
+      await expect(first.execute(request())).resolves.toEqual({
+        kind: "succeeded",
+        output: { commentId: 12 },
+      });
+      const restarted = new BrokerRoutineToolPort({
+        effects: new PgEffectStore(transactions),
+        adapters,
+      });
+      await expect(restarted.execute(request())).resolves.toEqual({
+        kind: "succeeded",
+        output: { commentId: 12 },
+      });
+      expect(dispatch).toHaveBeenCalledTimes(1);
+    } finally {
+      await database.close();
+    }
+  });
+
+  it("replays an explicit null output after a database-backed port restart", async () => {
+    const database = new PGlite();
+    try {
+      for (const statement of EFFECT_STORAGE_STATEMENTS) await database.query(statement);
+      const transactions: TransactionPort = {
+        withTransaction: (operation) => database.transaction(operation),
+      };
+      dispatch.mockResolvedValue(null);
+      const nullRequest = request({
+        bundle: bundle([
+          {
+            kind: "ToolContract",
+            document: contract({ outputSchema: { type: "null" } }),
+          },
+          { kind: "Guardrail", document: guardrail([ALLOW_COMMENT]) },
+        ]),
+      });
+
+      await expect(
+        new BrokerRoutineToolPort({
+          effects: new PgEffectStore(transactions),
+          adapters,
+        }).execute(nullRequest)
+      ).resolves.toEqual({ kind: "succeeded", output: null });
+      await expect(
+        new BrokerRoutineToolPort({
+          effects: new PgEffectStore(transactions),
+          adapters,
+        }).execute(nullRequest)
+      ).resolves.toEqual({ kind: "succeeded", output: null });
+      expect(dispatch).toHaveBeenCalledTimes(1);
+    } finally {
+      await database.close();
+    }
+  });
+
+  it("parks a confirmed legacy effect when no output evidence exists", async () => {
+    const database = new PGlite();
+    try {
+      for (const statement of EFFECT_STORAGE_STATEMENTS) await database.query(statement);
+      const transactions: TransactionPort = {
+        withTransaction: (operation) => database.transaction(operation),
+      };
+      await new BrokerRoutineToolPort({
+        effects: new PgEffectStore(transactions),
+        adapters,
+      }).execute(request());
+      await database.query(
+        "UPDATE effect_records SET output_stored = false, output = NULL WHERE effect_id = $1",
+        [PLAN.effectId]
+      );
+
+      await expect(
+        new BrokerRoutineToolPort({
+          effects: new PgEffectStore(transactions),
+          adapters,
+        }).execute(request())
+      ).resolves.toEqual({
+        kind: "unavailable",
+        reason: "confirmed_effect_output_unavailable",
+      });
+      expect(dispatch).toHaveBeenCalledTimes(1);
+    } finally {
+      await database.close();
+    }
   });
 
   it("parks an ambiguous effect, which only reconciliation may resolve", async () => {
@@ -373,7 +486,10 @@ describe("BrokerRoutineToolPort contract-declared targets", () => {
   }
 
   it("carries the object the arguments name into the intent the gate and ledger see", async () => {
-    expect(await port().execute(targetedRequest())).toEqual({ kind: "succeeded", output: null });
+    expect(await port().execute(targetedRequest())).toEqual({
+      kind: "succeeded",
+      output: { commentId: 12 },
+    });
 
     const expected = [{ type: "github.issue", id: "tulip/farm#42" }];
     expect(dispatch.mock.calls[0]?.[0].intent.targetRefs).toEqual(expected);
@@ -383,7 +499,10 @@ describe("BrokerRoutineToolPort contract-declared targets", () => {
   it("lets a grant scoped to exactly that object authorize the call", async () => {
     const scoped = targetedRequest({ authorityLayers: operatorLayer("tulip/farm#42") });
 
-    expect(await port().execute(scoped)).toEqual({ kind: "succeeded", output: null });
+    expect(await port().execute(scoped)).toEqual({
+      kind: "succeeded",
+      output: { commentId: 12 },
+    });
   });
 
   it("refuses the same call under a grant scoped to a different object", async () => {

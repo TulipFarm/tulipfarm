@@ -9,6 +9,7 @@ import type { MutationGuard } from "@tulipfarm/observability";
 import type { ChannelMentionedThreadStore } from "@tulipfarm/storage";
 import {
   EffectDispatcher,
+  type EffectRecord,
   type EffectStore,
   intentDigest,
   normalizeToolIntent,
@@ -89,17 +90,19 @@ function mapDispatchError(error: ToolDispatchError): ToolCallResult {
   return err("internal_error", error.detail ? `${error.code}:${error.detail}` : error.message);
 }
 
-/** Replayed effect: settled state only, no retained Slack response body. */
-function replayed(state: string): ToolCallResult {
-  switch (state) {
+/** Replayed effect: `confirmed` returns the first immutable Slack result. */
+function replayed(effect: EffectRecord): ToolCallResult {
+  switch (effect.state) {
     case "confirmed":
-      return ok({ replayed: true, note: "This message already sent; not repeated." });
+      return effect.outputStored
+        ? ok(effect.output)
+        : err("internal_error", "confirmed_effect_output_unavailable");
     case "denied":
       return err("internal_error", "effect_denied");
     case "failed":
       return err("internal_error", "effect_failed");
     default:
-      return err("internal_error", `effect_${state}`);
+      return err("internal_error", `effect_${effect.state}`);
   }
 }
 
@@ -233,7 +236,7 @@ function buildToolDef(
         createdAt: new Date().toISOString(),
       });
 
-      if (reserved.outcome === "duplicate") return replayed(reserved.effect.state);
+      if (reserved.outcome === "duplicate") return replayed(reserved.effect);
 
       const dispatcher = new EffectDispatcher({
         store: tooling.effects,

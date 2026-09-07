@@ -26,6 +26,8 @@ export interface EffectRecord {
   readonly approvalId?: string;
   readonly state: EffectState;
   readonly parentEffectId?: string;
+  readonly outputStored: boolean;
+  readonly output: unknown;
   readonly createdAt: string;
   readonly updatedAt: string;
 }
@@ -72,6 +74,8 @@ export interface FinishEffectAttemptInput {
   readonly effectState: EffectState;
   readonly providerRequestId?: string;
   readonly outputDigest?: string;
+  /** Wrapped so an explicit `undefined`/`null` result differs from no saved output. */
+  readonly output?: { readonly value: unknown };
   readonly errorCode?: string;
   readonly finishedAt: string;
 }

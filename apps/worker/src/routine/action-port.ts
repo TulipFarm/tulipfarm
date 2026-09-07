@@ -55,13 +55,6 @@ export class DispatchRoutineActionPort implements RoutineActionPort {
 
     switch (result.status) {
       case "succeeded":
-        // A confirmed-effect replay reports success but hands back a marker, because the ledger
-        // records that the call happened and not what it answered. An `action` State publishes its
-        // output to later States, so accepting that marker would quietly feed them the wrong data.
-        // Parking is the honest answer: the effect stands, and reconciliation decides the rest.
-        if (result.replayed === true) {
-          return { kind: "unavailable", reason: "replayed_without_output" };
-        }
         return { kind: "succeeded", output: result.output };
       case "denied":
         return { kind: "failed", reason: `denied_${result.reason}` };

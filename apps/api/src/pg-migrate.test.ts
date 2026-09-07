@@ -1521,6 +1521,28 @@ describe("runPgMigrations concurrency and atomicity", () => {
     });
   });
 
+  describe("migration 99", () => {
+    it("marks existing confirmed effects as having no stored output evidence", async () => {
+      const effectId = "11111111-1111-4111-8111-111111111111";
+      await db.query("CREATE TABLE effect_records (effect_id uuid PRIMARY KEY)");
+      await db.query("INSERT INTO effect_records (effect_id) VALUES ($1)", [effectId]);
+      await db.query(`CREATE TABLE schema_version (
+        id boolean PRIMARY KEY DEFAULT true,
+        version integer NOT NULL,
+        CONSTRAINT schema_version_single_row CHECK (id)
+      )`);
+      await db.query("INSERT INTO schema_version (id, version) VALUES (true, 98)");
+
+      await runPgMigrations(db, undefined, NOOP_LOG);
+
+      const effects = await db.query<{
+        output: unknown;
+        output_stored: boolean;
+      }>("SELECT output, output_stored FROM effect_records WHERE effect_id = $1", [effectId]);
+      expect(effects.rows).toEqual([{ output: null, output_stored: false }]);
+    });
+  });
+
   describe("migration 50", () => {
     it("drops the single-admin index and revokes owner authority when admin is demoted", async () => {
       const adminId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";

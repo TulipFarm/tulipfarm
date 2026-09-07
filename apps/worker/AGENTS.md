@@ -58,7 +58,8 @@ reconciliation, turn execution, delivery classification, projections, and outbox
   delete, a withdrawal or a revoke has nothing to act on, so all three are re-asked once it does.
 - Integration Runs classify delivery, then hand real turns to the same chat executor as web chat.
 - Routine execution reads only the Run's exact signed bundle and immutable request Artifact.
-- Routine replay safety depends on persisting successors first and durable occurrence keys.
+- Routine replay safety depends on durable occurrence keys and immutable Tool outputs; a confirmed
+  legacy effect with no stored output parks instead of inventing data for following States.
 - Wait ids derive from `(runId, occurrence key)`; `event` waits are refused as `unsupported_wait`.
 - Routine `tool` States are the only Routine Tool authority: authorize, reserve, then dispatch.
 - A Routine Tool intent carries the objects the pinned ToolContract's `spec.targets` declares, so a
