@@ -110,7 +110,7 @@ describe("slack manifest", () => {
     const url = new URL(action.url);
     expect(url.searchParams.get("new_app")).toBe("1");
     const submitted = JSON.parse(url.searchParams.get("manifest_json") as string) as {
-      features: { agent_view: { agent_description: string }; assistant_view?: unknown };
+      features: { assistant_view: { assistant_description: string }; agent_view?: unknown };
       settings: {
         socket_mode_enabled: boolean;
         interactivity: { is_enabled: boolean };
@@ -122,10 +122,10 @@ describe("slack manifest", () => {
     expect(submitted.settings.event_subscriptions.bot_events).toEqual(
       expect.arrayContaining(["message.channels", "message.groups", "message.im", "message.mpim"])
     );
-    expect(submitted.features.agent_view.agent_description).toBe(
+    expect(submitted.features.assistant_view.assistant_description).toBe(
       "Talk to TulipFarm agents from Slack."
     );
-    expect(submitted.features.assistant_view).toBeUndefined();
+    expect(submitted.features.agent_view).toBeUndefined();
   });
 
   it("acquires the bot token and workspace id that channel routing needs", async () => {
@@ -145,7 +145,9 @@ describe("slack manifest", () => {
         redirectUri: endpoints.callbackUrl,
       })
     );
-    expect(url.searchParams.get("scope")).toContain("chat:write,app_mentions:read");
+    expect(url.searchParams.get("scope")?.split(",")).toEqual(
+      expect.arrayContaining(["chat:write", "app_mentions:read", "commands"])
+    );
     expect(url.searchParams.has("code_challenge")).toBe(false);
   });
 

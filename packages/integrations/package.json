@@ -9,6 +9,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@sinclair/typebox": "^0.34.52",
     "@tulipfarm/authz": "workspace:*",
     "@tulipfarm/schema": "workspace:*",
     "@tulipfarm/storage": "workspace:*",

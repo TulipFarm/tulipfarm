@@ -13,6 +13,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@slack/types": "^3.1.0",
     "@tulipfarm/surface": "workspace:*"
   },
   "devDependencies": {

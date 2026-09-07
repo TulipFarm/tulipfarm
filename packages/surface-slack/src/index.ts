@@ -1,3 +1,4 @@
+import type { Block, InputBlock, InputBlockElement, PlainTextOption, View } from "@slack/types";
 import {
   type SurfaceAction,
   type SurfaceArtifact,
@@ -6,10 +7,9 @@ import {
   sameTarget,
   validateSurfaceArtifact,
 } from "@tulipfarm/surface";
-import { slackMessageManifest, slackModalManifest } from "./manifest";
+import { slackHomeManifest, slackMessageManifest, slackModalManifest } from "./manifest";
 
-export interface SlackBlock {
-  readonly type: string;
+export interface SlackBlock extends Block {
   readonly text?: { readonly type: "mrkdwn" | "plain_text"; readonly text: string };
   readonly elements?: readonly Record<string, unknown>[];
   readonly accessory?: Record<string, unknown>;
@@ -21,10 +21,10 @@ export interface SlackBlock {
 }
 
 export interface SlackSurfacePayload {
-  readonly response_type: "message" | "modal";
+  readonly response_type: "message" | "modal" | "home";
   readonly text?: string;
   readonly blocks: readonly SlackBlock[];
-  readonly view?: Readonly<Record<string, unknown>>;
+  readonly view?: View;
 }
 
 function actionHandle(action: SurfaceAction, context: SurfaceRenderContext): string {
@@ -309,39 +309,96 @@ function blocksFor(
   }
 }
 
-function formFieldElement(field: Record<string, unknown>): Record<string, unknown> {
+function formFieldElement(field: Record<string, unknown>): InputBlockElement {
   const actionId = String(field.name);
-  const options = ((field.options as string[] | undefined) ?? []).map((option) => ({
-    text: { type: "plain_text", text: option },
-    value: option,
-  }));
+  const maxItems = typeof field.maxItems === "number" ? field.maxItems : undefined;
+  const textLengthProperties = {
+    min_length: typeof field.minLength === "number" ? field.minLength : 0,
+    max_length: typeof field.maxLength === "number" ? field.maxLength : 3_000,
+  };
+  const configuredOptions = (field.options as string[] | undefined) ?? [];
+  const options: PlainTextOption[] =
+    field.input === "checkbox" && configuredOptions.length === 0
+      ? [
+          {
+            text: { type: "plain_text", text: String(field.label) },
+            value: "true",
+          },
+        ]
+      : configuredOptions.map((option) => ({
+          text: { type: "plain_text", text: option },
+          value: option,
+        }));
   switch (field.input) {
     case "email":
       return { type: "email_text_input", action_id: actionId };
+    case "url":
+      return { type: "url_text_input", action_id: actionId };
     case "number":
       return { type: "number_input", action_id: actionId, is_decimal_allowed: true };
     case "textarea":
-      return { type: "plain_text_input", action_id: actionId, multiline: true };
+      return {
+        type: "plain_text_input",
+        action_id: actionId,
+        multiline: true,
+        ...textLengthProperties,
+      };
+    case "richtext":
+      return { type: "rich_text_input", action_id: actionId };
     case "select":
       return { type: "static_select", action_id: actionId, options };
     case "multiselect":
-      return { type: "multi_static_select", action_id: actionId, options };
+      return {
+        type: "multi_static_select",
+        action_id: actionId,
+        options,
+        ...(maxItems === undefined ? {} : { max_selected_items: maxItems }),
+      };
     case "checkbox":
       return { type: "checkboxes", action_id: actionId, options };
     case "radio":
       return { type: "radio_buttons", action_id: actionId, options };
     case "date":
       return { type: "datepicker", action_id: actionId };
+    case "time":
+      return { type: "timepicker", action_id: actionId };
+    case "datetime":
+      return { type: "datetimepicker", action_id: actionId };
+    case "user":
+      return { type: "users_select", action_id: actionId };
+    case "channel":
+      return { type: "channels_select", action_id: actionId };
+    case "conversation":
+      return { type: "conversations_select", action_id: actionId };
     default:
-      return { type: "plain_text_input", action_id: actionId };
+      return {
+        type: "plain_text_input",
+        action_id: actionId,
+        ...textLengthProperties,
+      };
   }
 }
 
+function formInputBlocks(artifact: SurfaceArtifact): InputBlock[] {
+  return (artifact.props.fields as Array<Record<string, unknown>>).map((field) => ({
+    type: "input",
+    block_id: String(field.name),
+    label: { type: "plain_text", text: String(field.label) },
+    element: formFieldElement(field),
+    optional: field.required !== true,
+  }));
+}
+
 export function createSlackRenderer(
-  surface: "message" | "modal"
+  surface: "message" | "modal" | "home"
 ): SurfaceRenderer<SlackSurfacePayload> {
   const target = { channel: "slack", surface } as const;
-  const manifest = surface === "modal" ? slackModalManifest : slackMessageManifest;
+  const manifest =
+    surface === "modal"
+      ? slackModalManifest
+      : surface === "home"
+        ? slackHomeManifest
+        : slackMessageManifest;
   const renderer: SurfaceRenderer<SlackSurfacePayload> = {
     target,
     manifest,
@@ -364,6 +421,18 @@ export function createSlackRenderer(
           });
         }
       }
+      if (surface === "modal" && artifact.component.name === "Form") {
+        for (const property of ["title", "submit"] as const) {
+          const value = artifact.props[property];
+          if (typeof value === "string" && value.length > 24) {
+            issues.push({
+              code: "provider_limit",
+              path: `/props/${property}`,
+              message: `Slack modal ${property} supports at most 24 characters.`,
+            });
+          }
+        }
+      }
       return issues;
     },
     render: (artifact, context) => {
@@ -379,14 +448,15 @@ export function createSlackRenderer(
             callback_id: actionHandle(artifact.props.action as SurfaceAction, context),
             title: { type: "plain_text", text: String(artifact.props.title ?? "Input") },
             submit: { type: "plain_text", text: String(artifact.props.submit) },
-            blocks: (artifact.props.fields as Array<Record<string, unknown>>).map((field) => ({
-              type: "input",
-              block_id: String(field.name),
-              label: { type: "plain_text", text: String(field.label) },
-              element: formFieldElement(field),
-              optional: field.required !== true,
-            })),
+            blocks: formInputBlocks(artifact),
           },
+        };
+      }
+      if (surface === "home") {
+        return {
+          response_type: "home",
+          blocks,
+          view: { type: "home", blocks: [...blocks] },
         };
       }
       return { response_type: surface, blocks };
@@ -398,3 +468,4 @@ export function createSlackRenderer(
 
 export const slackMessageRenderer = createSlackRenderer("message");
 export const slackModalRenderer = createSlackRenderer("modal");
+export const slackHomeRenderer = createSlackRenderer("home");

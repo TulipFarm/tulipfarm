@@ -28,7 +28,7 @@ describe("SHIPPED_SURFACE_COMPONENTS", () => {
     }
   });
 
-  it("widens Form.fields[].input to include multiselect and radio", () => {
+  it("supports the provider-neutral Form input catalog", () => {
     const form = SHIPPED_SURFACE_COMPONENTS.find((component) => component.name === "Form");
     const inputEnum = (
       form?.propsSchema as unknown as {
@@ -37,7 +37,64 @@ describe("SHIPPED_SURFACE_COMPONENTS", () => {
         };
       }
     )?.properties.fields.items.properties.input.anyOf.map((literal) => literal.const);
-    expect(inputEnum).toEqual(expect.arrayContaining(["multiselect", "radio"]));
+    expect(inputEnum).toEqual([
+      "text",
+      "textarea",
+      "email",
+      "number",
+      "url",
+      "date",
+      "time",
+      "datetime",
+      "richtext",
+      "select",
+      "multiselect",
+      "checkbox",
+      "radio",
+      "user",
+      "channel",
+      "conversation",
+    ]);
+  });
+
+  it("bounds Form text and multi-value constraints", () => {
+    const base = {
+      id: "form",
+      component: { name: "Form", version: "1.0" },
+      target: { channel: "web", surface: "chat" } as const,
+      audience: ["user:1"],
+      classification: "internal" as const,
+      catalog: SHIPPED_SURFACE_COMPONENTS,
+    };
+
+    expect(() =>
+      createSurfaceArtifact({
+        ...base,
+        props: {
+          fields: [{ name: "notes", label: "Notes", input: "richtext", maxLength: 3_001 }],
+          submit: "Continue",
+          action: { event: "form.submit" },
+        },
+      })
+    ).toThrow(/maxLength/);
+    expect(() =>
+      createSurfaceArtifact({
+        ...base,
+        props: {
+          fields: [
+            {
+              name: "reviewers",
+              label: "Reviewers",
+              input: "multiselect",
+              options: ["A"],
+              maxItems: 101,
+            },
+          ],
+          submit: "Continue",
+          action: { event: "form.submit" },
+        },
+      })
+    ).toThrow(/maxItems/);
   });
 
   it("keeps recommendation props optional so a neutral Choices still validates", () => {

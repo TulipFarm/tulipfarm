@@ -177,9 +177,7 @@ function harness(options: { mentionedThreads?: readonly string[] } = {}): Harnes
     inbound,
     identities,
     routing,
-    runs: httpChannelRunStarter(internalApi, "slack", {
-      assistantStatus: { http, credential: "xoxb-test", log },
-    }),
+    runs: httpChannelRunStarter(internalApi, "slack"),
     now: () => "2026-01-01T00:00:00.000Z",
   });
 
@@ -197,17 +195,37 @@ function harness(options: { mentionedThreads?: readonly string[] } = {}): Harnes
     appToken: "xapp-test",
     openWebSocket: () => socket,
     log,
-    onEnvelope: (envelope) =>
-      dispatchSlackEnvelope(envelope, {
-        businessId: BUSINESS_ID,
-        channelAdapter,
-        mentionGate: {
+    onEnvelope: (envelope, ack) =>
+      dispatchSlackEnvelope(
+        envelope,
+        {
           businessId: BUSINESS_ID,
-          provider: "slack",
-          mentionedThreads: mentioned.store,
+          channelAdapter,
+          mentionGate: {
+            businessId: BUSINESS_ID,
+            provider: "slack",
+            mentionedThreads: mentioned.store,
+          },
+          receipts: { accept: async () => ({ outcome: "accepted" }) },
+          now: () => "2026-01-01T00:00:00.000Z",
+          onMessageReserved: async ({ channelId, threadId }) => {
+            await http.send(
+              {
+                method: "POST",
+                path: "/assistant.threads.setStatus",
+                body: {
+                  channel_id: channelId,
+                  thread_ts: threadId,
+                  status: "is thinking…",
+                },
+              },
+              "xoxb-test"
+            );
+          },
+          log,
         },
-        log,
-      }),
+        ack
+      ),
   });
 
   let sequence = 0;
@@ -235,7 +253,7 @@ function harness(options: { mentionedThreads?: readonly string[] } = {}): Harnes
       onMessage?.({
         data: JSON.stringify({ envelope_id: `env-${sequence}`, type: "events_api", payload }),
       });
-      // `SlackSocketTransport` acks first and dispatches without awaiting; drain the queue.
+      // Socket handling runs asynchronously from the message event; drain the queue.
       await new Promise((resolve) => setTimeout(resolve, 0));
     },
   };

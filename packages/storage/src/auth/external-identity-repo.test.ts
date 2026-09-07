@@ -40,4 +40,28 @@ describe("InMemoryExternalIdentityRepo", () => {
       principalId: "principal-2",
     });
   });
+
+  it("scopes the same Slack subject per external tenant", async () => {
+    const repo = new InMemoryExternalIdentityRepo();
+
+    await repo.put(
+      mapping({
+        principalId: "principal-1",
+        externalTenantId: "T1",
+      })
+    );
+    await repo.put(
+      mapping({
+        principalId: "principal-2",
+        externalTenantId: "T2",
+      })
+    );
+
+    await expect(repo.find("business-1", "slack", "U123", "T1")).resolves.toMatchObject({
+      principalId: "principal-1",
+    });
+    await expect(repo.find("business-1", "slack", "U123", "T2")).resolves.toMatchObject({
+      principalId: "principal-2",
+    });
+  });
 });

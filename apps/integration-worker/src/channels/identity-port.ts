@@ -16,7 +16,13 @@ export function httpChannelIdentityPort(client: InternalApiClient): ChannelIdent
       const response = await client.require<ResolveResponse>(
         "POST",
         "/api/v1/internal/channels/identity/resolve",
-        { provider: input.provider, externalSubject: input.externalSubject }
+        {
+          provider: input.provider,
+          externalSubject: input.externalSubject,
+          ...(input.externalTenantId === undefined
+            ? {}
+            : { externalTenantId: input.externalTenantId }),
+        }
       );
       if (!response.linked || response.principal === undefined) return undefined;
       const kind = response.principal.kind;
@@ -30,6 +36,7 @@ export interface ChannelIdentityBindOfferPort {
   offer(input: {
     provider: string;
     externalSubject: string;
+    externalTenantId?: string;
     channelId: string;
     threadId?: string;
   }): Promise<void>;

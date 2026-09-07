@@ -12,10 +12,15 @@ export class ExternalLinkKnowledgeIdentityMap implements KnowledgeIdentityMapPor
     readonly businessId: string;
     readonly provider: string;
     readonly externalSubject: string;
+    readonly externalTenantId?: string;
   }): Promise<readonly EmittedPrincipalRef[] | undefined> {
     if (input.businessId !== DEPLOYMENT_BUSINESS_ID) return undefined;
 
-    const doc = await this.repo.findMapping(input.provider, input.externalSubject);
+    const doc = await this.repo.findMapping(
+      input.provider,
+      input.externalSubject,
+      input.externalTenantId
+    );
     if (!doc) return undefined;
     if (doc.expiresAt && doc.expiresAt.getTime() <= Date.now()) return undefined;
     if (!isProvenLink(doc)) return undefined;

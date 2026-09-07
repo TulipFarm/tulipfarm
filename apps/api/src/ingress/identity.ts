@@ -52,11 +52,14 @@ function senderAuthority(
   user: UserDoc,
   provider: string,
   sender: string,
+  externalTenantId: string | undefined,
   verifiedVia: IdentityVerificationMethod | undefined
 ): LinkedChannelSender {
   const proven = isProvenLink({ verifiedVia: verifiedVia ?? null });
   const principalKind = proven ? "user" : "guest";
-  const principalId = proven ? user._id : `${provider}:${sender}`;
+  const principalId = proven
+    ? user._id
+    : [provider, externalTenantId, sender].filter((part) => part !== undefined).join(":");
   return {
     outcome: "linked",
     user,
@@ -82,6 +85,7 @@ export class IngressIdentityResolver {
   async resolve(opts: {
     slug: string;
     sender: string;
+    externalTenantId?: string;
     identity?: ChatIngressConfig["identity"];
     registry?: ToolRegistry;
     /** The routed Agent's autonomy ceiling; the identity binding runs no higher than it. */
@@ -90,23 +94,46 @@ export class IngressIdentityResolver {
     channelId?: string;
     threadId?: string;
   }): Promise<ChannelSenderResolution> {
-    const linked = await this.findLinkedUser(opts.slug, opts.sender);
-    if (linked) return senderAuthority(linked.user, opts.slug, opts.sender, linked.verifiedVia);
+    const linked = await this.findLinkedUser(opts.slug, opts.sender, opts.externalTenantId);
+    if (linked) {
+      return senderAuthority(
+        linked.user,
+        opts.slug,
+        opts.sender,
+        opts.externalTenantId,
+        linked.verifiedVia
+      );
+    }
 
     const claimed = await this.claimByManifestEmail(opts);
     // Always guest-grade: the row this just wrote is `manifest_email` by construction.
-    if (claimed) return senderAuthority(claimed, opts.slug, opts.sender, "manifest_email");
+    if (claimed) {
+      return senderAuthority(
+        claimed,
+        opts.slug,
+        opts.sender,
+        opts.externalTenantId,
+        "manifest_email"
+      );
+    }
 
     return {
       outcome: "unlinked",
-      bindOffer: await this.offerBind(opts.slug, opts.sender, opts.channelId, opts.threadId),
+      bindOffer: await this.offerBind(
+        opts.slug,
+        opts.sender,
+        opts.externalTenantId,
+        opts.channelId,
+        opts.threadId
+      ),
     };
   }
 
   /** Step 1 — an existing verified mapping, checked by the same guard every other subject faces. */
   private async findLinkedUser(
     slug: string,
-    sender: string
+    sender: string,
+    externalTenantId?: string
   ): Promise<{ user: UserDoc; verifiedVia?: IdentityVerificationMethod } | null> {
     const mappings = this.deps.mappings;
     if (!mappings) return null;
@@ -114,7 +141,7 @@ export class IngressIdentityResolver {
     const now = (this.deps.now ?? (() => new Date()))();
     let resolved: { userId: string; verifiedVia?: IdentityVerificationMethod };
     try {
-      resolved = await resolveExternalSender(mappings, slug, sender, now);
+      resolved = await resolveExternalSender(mappings, slug, sender, now, externalTenantId);
     } catch (err) {
       if (err instanceof ExternalIdentityDeniedError) return null;
       throw err;
@@ -144,6 +171,7 @@ export class IngressIdentityResolver {
   private async claimByManifestEmail(opts: {
     slug: string;
     sender: string;
+    externalTenantId?: string;
     identity?: ChatIngressConfig["identity"];
     registry?: ToolRegistry;
     autonomy?: ChatAutonomy;
@@ -193,6 +221,7 @@ export class IngressIdentityResolver {
     await this.deps.mappings?.upsertMapping({
       provider: slug,
       externalSubject: sender,
+      ...(opts.externalTenantId === undefined ? {} : { externalTenantId: opts.externalTenantId }),
       userId: matched._id,
       verifiedAt: now,
       expiresAt: null,
@@ -205,6 +234,7 @@ export class IngressIdentityResolver {
   private async offerBind(
     slug: string,
     sender: string,
+    externalTenantId?: string,
     channelId?: string,
     threadId?: string
   ): Promise<IssuedChannelBind | null> {
@@ -213,6 +243,7 @@ export class IngressIdentityResolver {
       return await issueChannelBindToken(this.deps.bind, {
         slug,
         senderId: sender,
+        ...(externalTenantId === undefined ? {} : { externalTenantId }),
         ...(channelId === undefined ? {} : { channelId }),
         ...(threadId === undefined ? {} : { threadId }),
       });

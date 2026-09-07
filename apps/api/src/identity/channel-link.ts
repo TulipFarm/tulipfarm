@@ -12,7 +12,7 @@ import {
   verifyToken,
 } from "./signed-token";
 
-/** Channel bind links carry only `{slug, senderId, issuedAt, nonce}` under HMAC. */
+/** Channel bind links carry the external identity key and one-use nonce under HMAC. */
 
 /** Where the HMAC key lives. Held in the secret store, never a constant compiled into the build. */
 export const CHANNEL_BIND_SIGNING_KEY = "channel-bind.signing-key";
@@ -36,6 +36,7 @@ export function channelBindKeyResolver(secrets: ChannelBindKeyStore): () => Prom
 export interface ChannelBindClaims {
   slug: string;
   senderId: string;
+  externalTenantId?: string;
   issuedAt: number;
   nonce: string;
 }
@@ -46,10 +47,11 @@ function hashNonce(nonce: string): string {
 
 function isChannelBindClaims(claims: unknown): claims is ChannelBindClaims {
   if (typeof claims !== "object" || claims === null) return false;
-  const { slug, senderId, issuedAt, nonce } = claims as Record<string, unknown>;
+  const { slug, senderId, externalTenantId, issuedAt, nonce } = claims as Record<string, unknown>;
   return (
     typeof slug === "string" &&
     typeof senderId === "string" &&
+    (externalTenantId === undefined || typeof externalTenantId === "string") &&
     typeof issuedAt === "number" &&
     typeof nonce === "string"
   );
@@ -90,14 +92,24 @@ export interface IssuedChannelBind {
 export interface ChannelBindOffer {
   slug: string;
   senderId: string;
+  externalTenantId?: string;
   expiresAt: Date;
 }
 
 /** Write the nonce before returning the token so every token has a row to spend. */
 export async function issueChannelBindToken(
   deps: ChannelBindDeps,
-  input: { slug: string; senderId: string; channelId?: string; threadId?: string }
+  input: {
+    slug: string;
+    senderId: string;
+    externalTenantId?: string;
+    channelId?: string;
+    threadId?: string;
+  }
 ): Promise<IssuedChannelBind> {
+  if (input.slug === "slack" && input.externalTenantId === undefined) {
+    throw new Error("channel_bind_tenant_scope_required");
+  }
   const now = (deps.now ?? (() => new Date()))();
   const expiresAt = new Date(now.getTime() + (deps.ttlMs ?? CHANNEL_BIND_TTL_MS));
   const nonce = randomBytes(32).toString("base64url");
@@ -106,6 +118,7 @@ export async function issueChannelBindToken(
     nonceHash: hashNonce(nonce),
     integrationSlug: input.slug,
     externalSenderId: input.senderId,
+    ...(input.externalTenantId === undefined ? {} : { externalTenantId: input.externalTenantId }),
     issuedAt: now,
     expiresAt,
     consumedAt: null,
@@ -117,6 +130,7 @@ export async function issueChannelBindToken(
   const claims: ChannelBindClaims = {
     slug: input.slug,
     senderId: input.senderId,
+    ...(input.externalTenantId === undefined ? {} : { externalTenantId: input.externalTenantId }),
     issuedAt: now.getTime(),
     nonce,
   };
@@ -147,6 +161,12 @@ async function openOffer(
   if (row.integrationSlug !== claims.slug || row.externalSenderId !== claims.senderId) {
     throw new ChannelBindDeniedError("invalid_token", "bind token does not match its offer");
   }
+  if (
+    (claims.slug === "slack" && claims.externalTenantId === undefined) ||
+    row.externalTenantId !== claims.externalTenantId
+  ) {
+    throw new ChannelBindDeniedError("invalid_token", "bind token scope does not match its offer");
+  }
   return { claims, row };
 }
 
@@ -155,7 +175,12 @@ export async function previewChannelBind(
   token: string
 ): Promise<ChannelBindOffer> {
   const { claims, row } = await openOffer(deps, token);
-  return { slug: claims.slug, senderId: claims.senderId, expiresAt: row.expiresAt };
+  return {
+    slug: claims.slug,
+    senderId: claims.senderId,
+    ...(claims.externalTenantId === undefined ? {} : { externalTenantId: claims.externalTenantId }),
+    expiresAt: row.expiresAt,
+  };
 }
 
 /** The mapping just written, plus the offer's delivery ref, so a caller can reply where it was sent. */
@@ -178,6 +203,7 @@ export async function redeemChannelBindToken(
   const mapping: ExternalIdentityMappingDoc = {
     provider: spent.integrationSlug,
     externalSubject: spent.externalSenderId,
+    ...(spent.externalTenantId === undefined ? {} : { externalTenantId: spent.externalTenantId }),
     userId,
     verifiedAt: (deps.now ?? (() => new Date()))(),
     expiresAt: null,

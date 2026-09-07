@@ -63,6 +63,7 @@ interface DeliveryAuthority {
   readonly chat?: ChatIngressConfig;
   readonly eventTypes?: readonly string[];
   readonly dedupKey?: string;
+  readonly externalTenantId?: string;
   /** The external thread this delivery belongs to; absent when the manifest declares no chat. */
   readonly threadKey?: string;
   /** Manifest-declared, non-secret connection env the classifier is entitled to see. */
@@ -182,6 +183,9 @@ export class IngressDeliveryHost {
     const resolution = await this.options.identity.resolve({
       slug: delivery.slug,
       sender: decision.sender,
+      ...(delivery.externalTenantId === undefined
+        ? {}
+        : { externalTenantId: delivery.externalTenantId }),
       ...(chat.identity === undefined ? {} : { identity: chat.identity }),
       ...(this.options.toolRegistry === undefined ? {} : { registry: this.options.toolRegistry }),
       ...(routed.autonomy === undefined ? {} : { autonomy: routed.autonomy }),
@@ -491,6 +495,9 @@ export class IngressDeliveryHost {
       headers: envelope.headers ?? {},
       classifier: handler,
       env: classifierEnv(ingress.context_env, integration.connection.env),
+      ...(envelope.slug === "slack" && typeof integration.connection.env?.SLACK_TEAM_ID === "string"
+        ? { externalTenantId: integration.connection.env.SLACK_TEAM_ID }
+        : {}),
       ...(ingress.chat === undefined ? {} : { chat: ingress.chat }),
       ...(ingress.events === undefined ? {} : { eventTypes: ingress.events.types ?? [] }),
       ...(typeof dedupValue === "string" ? { dedupKey: dedupValue } : {}),

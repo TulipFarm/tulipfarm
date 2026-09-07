@@ -4,6 +4,8 @@ import type { AppOptions } from "../app";
 import { registerCuratorRoutes } from "../curator/routes";
 import { registerChannelInternalRoutes } from "./channel-routes";
 import { registerInternalTurnRoutes } from "./routes";
+import { registerSlackEventRoutes } from "./slack-event-routes";
+import { registerSlackHomeRoutes } from "./slack-home-routes";
 import { registerSurfaceInternalRoutes } from "./surfaces-routes";
 
 type PreHandler = (req: FastifyRequest, reply: FastifyReply) => Promise<void>;
@@ -41,5 +43,11 @@ export function registerInternalRouteFamily(
         requireAuth
       );
     }
+  }
+  if (opts.slackHome) {
+    registerSlackHomeRoutes(app, opts.slackHome(app.log), requireAuth);
+  }
+  if (opts.slackEvents) {
+    registerSlackEventRoutes(app, opts.slackEvents(app.log), requireAuth);
   }
 }

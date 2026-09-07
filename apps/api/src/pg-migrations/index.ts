@@ -25,6 +25,7 @@ import {
   CHANNEL_RUN_DELIVERY_ACKNOWLEDGE_STATEMENTS,
   CHANNEL_RUN_DELIVERY_APPROVAL_COLUMNS_STATEMENTS,
   CHANNEL_RUN_DELIVERY_STORAGE_STATEMENTS,
+  CHANNEL_SURFACE_STORAGE_STATEMENTS,
   CHILD_STORAGE_STATEMENTS,
   CONCURRENCY_STORAGE_STATEMENTS,
   CURATOR_ADMISSION_STATEMENTS,
@@ -37,6 +38,8 @@ import {
   INTEGRATION_STORAGE_STATEMENTS,
   KILL_SWITCH_STORAGE_STATEMENTS,
   LOOP_CHECKPOINT_STORAGE_STATEMENTS,
+  PROVIDER_FILE_UPLOAD_STORAGE_STATEMENTS,
+  PROVIDER_OBJECT_OWNERSHIP_STORAGE_STATEMENTS,
   PUBLIC_ORIGIN_STORAGE_STATEMENTS,
   RUN_BOUNDS_REMOVAL_STATEMENTS,
   RUN_BROWSE_STORAGE_STATEMENTS,
@@ -773,6 +776,25 @@ async function hasTableColumns(
     [table, columns]
   );
   return present.rows.length === columns.length;
+}
+
+async function repairEmptyPartialTable(
+  q: Queryable,
+  table: string,
+  requiredColumns: readonly string[]
+): Promise<void> {
+  if (!/^[a-z_]+$/.test(table)) throw new Error(`invalid migration table name: ${table}`);
+  const exists = await q.query(
+    `SELECT 1 FROM information_schema.tables
+     WHERE table_schema = 'public' AND table_name = $1`,
+    [table]
+  );
+  if (exists.rows.length === 0 || (await hasTableColumns(q, table, requiredColumns))) return;
+  const count = await q.query<{ count: string | number }>(`SELECT count(*) AS count FROM ${table}`);
+  if (Number(count.rows[0]?.count ?? 0) !== 0) {
+    throw new Error(`cannot repair non-empty partial migration table: ${table}`);
+  }
+  await q.query(`DROP TABLE ${table}`);
 }
 
 async function seedBootstrapRole(
@@ -2938,6 +2960,214 @@ export const PG_MIGRATIONS: PgMigration[] = [
   },
   {
     version: 98,
+    description: "channel surfaces: durable instances, publish jobs, and Slack capabilities",
+    up: async (q) => {
+      if (!(await hasTableColumns(q, "integrations", ["business_id", "id"]))) return;
+      await repairEmptyPartialTable(q, "channel_surface_instances", [
+        "business_id",
+        "provider",
+        "integration_id",
+        "external_tenant_id",
+        "external_subject",
+        "surface",
+        "external_id",
+        "provider_view_id",
+        "provider_hash",
+        "artifact_id",
+        "artifact_revision",
+        "render_digest",
+        "status",
+        "last_published_at",
+        "created_at",
+        "updated_at",
+      ]);
+      await repairEmptyPartialTable(q, "channel_surface_publish_jobs", [
+        "business_id",
+        "integration_id",
+        "external_tenant_id",
+        "external_subject",
+        "surface",
+        "coalescing_key",
+        "generation",
+        "status",
+        "lease_owner",
+        "lease_expires_at",
+        "attempt",
+        "next_attempt_at",
+        "last_error_code",
+        "created_at",
+        "updated_at",
+      ]);
+      await repairEmptyPartialTable(q, "slack_capability_observations", [
+        "business_id",
+        "integration_id",
+        "capability",
+        "renderer_version",
+        "status",
+        "expires_at",
+        "updated_at",
+      ]);
+      await applyStatements(CHANNEL_SURFACE_STORAGE_STATEMENTS)(q);
+    },
+  },
+  {
+    version: 99,
+    description: "durable Integration provider-object ownership",
+    up: async (q) => {
+      if (!(await hasTableColumns(q, "integrations", ["business_id", "id"]))) return;
+      await repairEmptyPartialTable(q, "integration_provider_objects", [
+        "business_id",
+        "integration_id",
+        "provider",
+        "object_type",
+        "provider_object_id",
+        "channel_id",
+        "creation_run_id",
+        "creation_intent_id",
+        "created_at",
+        "removed_at",
+      ]);
+      await applyStatements(PROVIDER_OBJECT_OWNERSHIP_STORAGE_STATEMENTS)(q);
+    },
+  },
+  {
+    version: 100,
+    description: "external identities: tenant-scoped mappings and channel bind offers",
+    up: async (q) => {
+      if (await hasTableColumns(q, "channel_bind_tokens", ["nonce_hash"])) {
+        await q.query(
+          "ALTER TABLE channel_bind_tokens ADD COLUMN IF NOT EXISTS external_tenant_id text"
+        );
+      }
+      if (
+        !(await hasTableColumns(q, "external_identity_mappings", ["provider", "external_subject"]))
+      ) {
+        return;
+      }
+      await q.query(
+        "ALTER TABLE external_identity_mappings ADD COLUMN IF NOT EXISTS external_tenant_id text"
+      );
+      if (
+        (await hasTableColumns(q, "integration_apps", ["business_id", "id", "provider"])) &&
+        (await hasTableColumns(q, "integrations", ["business_id", "app_id", "external_tenant_id"]))
+      ) {
+        await q.query(`WITH sole_slack_tenant AS (
+          SELECT min(i.external_tenant_id) AS external_tenant_id
+          FROM integrations i
+          JOIN integration_apps a
+            ON a.business_id = i.business_id AND a.id = i.app_id
+          WHERE a.provider = 'slack'
+          HAVING count(DISTINCT i.external_tenant_id) = 1
+            AND count(*) FILTER (
+              WHERE i.external_tenant_id IS NULL OR i.external_tenant_id = ''
+            ) = 0
+        )
+        UPDATE external_identity_mappings
+        SET external_tenant_id = sole_slack_tenant.external_tenant_id
+        FROM sole_slack_tenant
+        WHERE provider = 'slack' AND external_identity_mappings.external_tenant_id IS NULL`);
+      }
+      await q.query(
+        "ALTER TABLE external_identity_mappings DROP CONSTRAINT IF EXISTS external_identity_mappings_pkey"
+      );
+      await q.query(`CREATE UNIQUE INDEX IF NOT EXISTS external_identity_mappings_unscoped_idx
+        ON external_identity_mappings (provider, external_subject)
+        WHERE external_tenant_id IS NULL`);
+      await q.query(`CREATE UNIQUE INDEX IF NOT EXISTS external_identity_mappings_scoped_idx
+        ON external_identity_mappings (provider, external_tenant_id, external_subject)
+        WHERE external_tenant_id IS NOT NULL`);
+    },
+  },
+  {
+    version: 101,
+    description: "surface actions: durable follow-up reservations before consumption",
+    up: async (q) => {
+      if (!(await hasTableColumns(q, "surface_actions", ["handle", "consumed_at"]))) return;
+      await q.query(
+        "ALTER TABLE surface_actions ADD COLUMN IF NOT EXISTS reserved_interaction_id uuid"
+      );
+      await q.query(
+        "ALTER TABLE surface_actions ADD COLUMN IF NOT EXISTS reserved_principal_id text"
+      );
+      await q.query(
+        "ALTER TABLE surface_actions ADD COLUMN IF NOT EXISTS reserved_input_hash text"
+      );
+      await q.query("ALTER TABLE surface_actions ADD COLUMN IF NOT EXISTS reserved_at timestamptz");
+    },
+  },
+  {
+    version: 102,
+    description: "surface actions: identify and recover reserved follow-up work",
+    up: async (q) => {
+      if (!(await hasTableColumns(q, "surface_actions", ["reserved_interaction_id"]))) return;
+      await q.query(
+        "ALTER TABLE surface_actions ADD COLUMN IF NOT EXISTS reserved_principal_kind text"
+      );
+      await q.query(`UPDATE surface_actions
+        SET reserved_principal_kind = 'user'
+        WHERE reserved_interaction_id IS NOT NULL AND reserved_principal_kind IS NULL`);
+      await q.query(`CREATE UNIQUE INDEX IF NOT EXISTS surface_actions_reserved_interaction_idx
+        ON surface_actions (reserved_interaction_id)
+        WHERE reserved_interaction_id IS NOT NULL`);
+    },
+  },
+  {
+    version: 103,
+    description: "provider File uploads: durable phase-aware recovery",
+    up: async (q) => {
+      if (!(await hasTableColumns(q, "integrations", ["business_id", "id"]))) return;
+      await repairEmptyPartialTable(q, "integration_provider_file_uploads", [
+        "business_id",
+        "integration_id",
+        "provider",
+        "creation_intent_id",
+        "creation_run_id",
+        "channel_id",
+        "source_file_id",
+        "source_sha256",
+        "filename",
+        "media_type",
+        "size_bytes",
+        "provider_file_id",
+        "phase",
+        "created_at",
+        "updated_at",
+      ]);
+      await applyStatements(PROVIDER_FILE_UPLOAD_STORAGE_STATEMENTS)(q);
+    },
+  },
+  {
+    version: 104,
+    description: "slack commands: durable encrypted response URL delivery",
+    up: async (q) => {
+      await q.query(`CREATE TABLE IF NOT EXISTS slack_command_response_jobs (
+        business_id              text NOT NULL,
+        idempotency_key          text NOT NULL,
+        response_url_secret_key  text NOT NULL,
+        response_url_hash        text NOT NULL,
+        response_kind            text NOT NULL CHECK (
+          response_kind IN ('starting', 'unlinked', 'denied', 'prompt_unavailable')
+        ),
+        status                   text NOT NULL CHECK (
+          status IN ('pending', 'leased', 'retry_wait', 'succeeded', 'failed')
+        ),
+        attempts                 integer NOT NULL DEFAULT 0,
+        lease_owner              text,
+        lease_expires_at         timestamptz,
+        next_attempt_at          timestamptz NOT NULL DEFAULT now(),
+        last_error_code          text,
+        created_at               timestamptz NOT NULL DEFAULT now(),
+        updated_at               timestamptz NOT NULL DEFAULT now(),
+        PRIMARY KEY (business_id, idempotency_key)
+      )`);
+      await q.query(`CREATE INDEX IF NOT EXISTS slack_command_response_jobs_claim_idx
+        ON slack_command_response_jobs (
+          business_id, status, next_attempt_at, lease_expires_at
+        )`);
+    },
+  },
+  {
+    version: 105,
     description: "Routine schedule history follows stable Trigger identity rather than position",
     up: async (q) => {
       if (!(await hasTableColumns(q, "routine_schedule_state", ["trigger_index"]))) return;

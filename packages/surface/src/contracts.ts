@@ -18,7 +18,7 @@ export const SurfaceTargetSchema = Type.Union([
   Type.Object(
     {
       channel: Type.Literal("slack"),
-      surface: Type.Union([Type.Literal("message"), Type.Literal("modal")]),
+      surface: Type.Union([Type.Literal("message"), Type.Literal("modal"), Type.Literal("home")]),
     },
     { additionalProperties: false }
   ),

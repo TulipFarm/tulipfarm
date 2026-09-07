@@ -1,6 +1,7 @@
 import { createSurfaceArtifact } from "@tulipfarm/surface";
 import { describe, expect, it } from "vitest";
-import { slackMessageRenderer, slackModalRenderer } from "./index";
+import { slackHomeRenderer, slackMessageRenderer, slackModalRenderer } from "./index";
+import { slackHomeManifest, slackModalManifest } from "./manifest";
 
 describe("slackMessageRenderer", () => {
   it("renders Block Kit actions with opaque handles", () => {
@@ -130,6 +131,10 @@ describe("slackMessageRenderer", () => {
 });
 
 describe("slackModalRenderer", () => {
+  it("declares Slack's 100-block modal limit", () => {
+    expect(slackModalManifest.providerLimits.blocks).toBe(100);
+  });
+
   it("renders each Form field with its typed Slack element, not always plain_text_input", () => {
     const artifact = createSurfaceArtifact({
       id: "form",
@@ -143,6 +148,13 @@ describe("slackModalRenderer", () => {
           { name: "tags", label: "Tags", input: "multiselect", options: ["A", "B"] },
           { name: "start", label: "Start", input: "date" },
           { name: "notes", label: "Notes", input: "textarea" },
+          { name: "site", label: "Site", input: "url" },
+          { name: "at", label: "At", input: "time" },
+          { name: "when", label: "When", input: "datetime" },
+          { name: "brief", label: "Brief", input: "richtext" },
+          { name: "owner", label: "Owner", input: "user" },
+          { name: "publicChannel", label: "Channel", input: "channel" },
+          { name: "destination", label: "Conversation", input: "conversation" },
         ],
         submit: "Continue",
         action: { event: "contact.submit" },
@@ -164,7 +176,61 @@ describe("slackModalRenderer", () => {
       "multi_static_select",
       "datepicker",
       "plain_text_input",
+      "url_text_input",
+      "timepicker",
+      "datetimepicker",
+      "rich_text_input",
+      "users_select",
+      "channels_select",
+      "conversations_select",
     ]);
     expect(view.blocks[6]?.element).toMatchObject({ multiline: true });
+  });
+
+  it("rejects Form chrome that exceeds Slack's modal limits", () => {
+    const artifact = createSurfaceArtifact({
+      id: "form",
+      component: { name: "Form", version: "1.0" },
+      props: {
+        title: "A title longer than twenty-four characters",
+        fields: [{ name: "name", label: "Name", input: "text" }],
+        submit: "A submit label longer than twenty-four characters",
+        action: { event: "contact.submit" },
+      },
+      target: { channel: "slack", surface: "modal" },
+      audience: ["user:1"],
+      classification: "internal",
+    });
+
+    expect(slackModalRenderer.preflight(artifact)).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ path: "/props/title", code: "provider_limit" }),
+        expect.objectContaining({ path: "/props/submit", code: "provider_limit" }),
+      ])
+    );
+  });
+});
+
+describe("slackHomeRenderer", () => {
+  it("renders a Home view with Slack's 100-block limit", () => {
+    const artifact = createSurfaceArtifact({
+      id: "home-heading",
+      component: { name: "Heading", version: "1.0" },
+      props: { text: "Good morning" },
+      target: { channel: "slack", surface: "home" },
+      audience: ["user:1"],
+      classification: "internal",
+    });
+
+    const payload = slackHomeRenderer.render(artifact, { destination: "U1" });
+
+    expect(slackHomeManifest.providerLimits.blocks).toBe(100);
+    expect(payload).toMatchObject({
+      response_type: "home",
+      view: {
+        type: "home",
+        blocks: [{ type: "header" }],
+      },
+    });
   });
 });

@@ -81,6 +81,7 @@ export const CHAT_DLP_RULES: readonly DlpRule[] = [
   { dataClass: "memory" },
   { dataClass: "directory" },
   { dataClass: "internal" },
+  { dataClass: "file_content" },
 ];
 
 export interface ToolGate {

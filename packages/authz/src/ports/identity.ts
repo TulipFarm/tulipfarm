@@ -3,6 +3,7 @@ export interface IdentityResolutionRequest {
   readonly businessId: string;
   readonly provider: string;
   readonly externalSubject: string;
+  readonly externalTenantId?: string;
   /** Opaque reference to verified authentication evidence; never a token or assertion body. */
   readonly evidenceRef?: string;
 }

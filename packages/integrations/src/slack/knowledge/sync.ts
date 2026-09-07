@@ -91,7 +91,8 @@ function isSensitive(kind: SlackKnowledgeChannel["kind"]): boolean {
 async function mapPrincipals(
   members: readonly string[],
   identity: KnowledgeIdentityMapPort,
-  businessId: string
+  businessId: string,
+  externalTenantId: string
 ): Promise<EmittedPrincipalRef[]> {
   const principals: EmittedPrincipalRef[] = [];
   const seen = new Set<string>();
@@ -100,6 +101,7 @@ async function mapPrincipals(
       businessId,
       provider: SLACK_PROVIDER,
       externalSubject: member,
+      externalTenantId,
     });
     for (const principal of resolved ?? []) {
       const key = `${principal.kind}:${principal.id}`;
@@ -226,7 +228,12 @@ async function syncChannel(
     return { ...outcome, unverifiable: 1 };
   }
 
-  const principals = await mapPrincipals(members, deps.identity, options.businessId);
+  const principals = await mapPrincipals(
+    members,
+    deps.identity,
+    options.businessId,
+    options.externalTenantId
+  );
   const aclRevision = canonicalHash({ channelId: channel.id, principals });
   const access = sensitive
     ? { accessControl: liveAccessControl }

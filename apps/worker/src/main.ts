@@ -321,6 +321,12 @@ export async function main(): Promise<void> {
 
   const executors = new RunExecutorRegistry();
   const deliveryTargets = new DeliveryTargetRegistry();
+  deliveryTargets.register("event.accepted", async (message) => {
+    await internalApi.require(
+      "POST",
+      `/api/v1/internal/slack/events/${encodeURIComponent(message.inboxId)}/dispatch`
+    );
+  });
 
   // Installation scope only; GitHubAdapter narrows until Soul-authored AccessGrants exist.
   const githubTooling = buildGitHubTooling({

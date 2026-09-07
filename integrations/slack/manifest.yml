@@ -6,6 +6,7 @@ maintainer: TulipFarm
 # a monogram instead — do not point this at a lookalike slug.
 capabilities:
   - Answer DMs and @mentions from your workspace
+  - Show a personalized TulipFarm Home tab
   - Post messages and replies into channels it has been added to
   - Read channel history to follow a conversation before replying
 # No `grants`: the oauth2 step below declares the bot scopes, and those are resolved automatically.
@@ -29,14 +30,24 @@ auth:
         bot_user:
           display_name: TulipFarm
           always_online: true
-        agent_view:
-          agent_description: Talk to TulipFarm agents from Slack.
+        assistant_view:
+          assistant_description: Talk to TulipFarm agents from Slack.
+        app_home:
+          home_tab_enabled: true
+          messages_tab_enabled: true
+          messages_tab_read_only_enabled: false
+        slash_commands:
+          - command: /tulipfarm
+            description: Ask TulipFarm to do work.
+            usage_hint: "[request]"
+            should_escape: true
       oauth_config:
         redirect_urls:
           - "{callback_url}"
         scopes:
           bot:
             - chat:write
+            - commands
             - app_mentions:read
             - channels:read
             - channels:history
@@ -47,8 +58,14 @@ auth:
             - mpim:read
             - mpim:history
             - users:read
-            - users:read.email
             - assistant:write
+            - bookmarks:read
+            - bookmarks:write
+            - files:read
+            - files:write
+            - pins:read
+            - pins:write
+            - reactions:read
             - reactions:write
             - emoji:read
       settings:
@@ -59,6 +76,24 @@ auth:
             - message.im
             - message.mpim
             - app_mention
+            - app_home_opened
+            - assistant_thread_started
+            - assistant_thread_context_changed
+            - app_context_changed
+            - reaction_added
+            - reaction_removed
+            - channel_created
+            - channel_rename
+            - channel_archive
+            - channel_unarchive
+            - member_joined_channel
+            - member_left_channel
+            - file_shared
+            - file_deleted
+            - team_join
+            - user_change
+            - user_profile_changed
+            - emoji_changed
         interactivity:
           is_enabled: true
         org_deploy_enabled: false
@@ -121,6 +156,7 @@ auth:
       team.id: SLACK_TEAM_ID
     scopes:
       - chat:write
+      - commands
       - app_mentions:read
       - channels:read
       - channels:history
@@ -131,8 +167,14 @@ auth:
       - mpim:read
       - mpim:history
       - users:read
-      - users:read.email
       - assistant:write
+      - bookmarks:read
+      - bookmarks:write
+      - files:read
+      - files:write
+      - pins:read
+      - pins:write
+      - reactions:read
       - reactions:write
       - emoji:read
 setup_guide_path: setup-guide.md

@@ -10,10 +10,28 @@ export interface SlackSocketEnvelope {
   accepts_response_payload?: boolean;
 }
 
+export interface SlackResponseEnvelopeResult {
+  readonly acknowledgement: unknown;
+  readonly followUp?: () => Promise<void>;
+}
+
 function isSlackSocketEnvelope(value: unknown): value is SlackSocketEnvelope {
   if (value === null || typeof value !== "object" || Array.isArray(value)) return false;
   const record = value as Record<string, unknown>;
   return typeof record.envelope_id === "string" && typeof record.type === "string";
+}
+
+function requiresResponsePayload(envelope: SlackSocketEnvelope): boolean {
+  if (envelope.accepts_response_payload !== true || envelope.type !== "interactive") return false;
+  if (
+    envelope.payload === null ||
+    typeof envelope.payload !== "object" ||
+    Array.isArray(envelope.payload)
+  ) {
+    return false;
+  }
+  const type = (envelope.payload as Record<string, unknown>).type;
+  return type === "block_suggestion" || type === "view_submission";
 }
 
 /** The subset of the WHATWG `WebSocket` this transport uses — narrowed so tests can fake it. */
@@ -31,9 +49,15 @@ export interface SlackSocketTransportOptions {
   http: IntegrationHttpPort;
   /** `xapp-...` app-level token (`connections:write` scope). */
   appToken: string;
-  /** Called once per decoded envelope, after this transport has already acked it. */
-  onEnvelope: (envelope: SlackSocketEnvelope) => Promise<void>;
+  /** Reserves durable work, acknowledges through the callback, then performs bounded follow-up. */
+  onEnvelope: (envelope: SlackSocketEnvelope, ack: () => Promise<void>) => Promise<void>;
+  /**
+   * Reserves envelope families whose acknowledgement includes a response payload.
+   * Reservation is deadline-bounded; returned follow-up runs only after the Socket write.
+   */
+  onResponseEnvelope?: (envelope: SlackSocketEnvelope) => Promise<SlackResponseEnvelopeResult>;
   openWebSocket?: (url: string) => MinimalWebSocket;
+  acknowledgementDeadlineMs?: number;
   /** Injected in tests so acks aren't asserted against real time. */
   log?: { warn: (message: string, error?: unknown) => void };
 }
@@ -48,7 +72,7 @@ function defaultOpenWebSocket(url: string): MinimalWebSocket {
   return new WebSocket(url) as unknown as MinimalWebSocket;
 }
 
-/** Acks each Slack envelope before downstream work so slow Run starts cannot miss the window. */
+/** Lets handlers commit durable work before acknowledgement and closes on pre-ack failure. */
 export class SlackSocketTransport {
   constructor(private readonly options: SlackSocketTransportOptions) {}
 
@@ -112,7 +136,60 @@ export class SlackSocketTransport {
       return;
     }
 
-    socket.send(JSON.stringify({ envelope_id: parsed.envelope_id }));
-    await this.options.onEnvelope(parsed);
+    let acknowledged = false;
+    let acknowledgementAllowed = true;
+    let signalAcknowledged: () => void = () => {};
+    const acknowledgement = new Promise<void>((resolve) => {
+      signalAcknowledged = resolve;
+    });
+    const deadlineMs = this.options.acknowledgementDeadlineMs ?? 2_500;
+    let deadlineTimer: ReturnType<typeof setTimeout> | undefined;
+    const deadline = new Promise<never>((_, reject) => {
+      deadlineTimer = setTimeout(
+        () => reject(new Error("slack_acknowledgement_deadline_exceeded")),
+        deadlineMs
+      );
+    });
+    const sendAcknowledgement = async (payload?: unknown): Promise<void> => {
+      if (acknowledged) return;
+      if (!acknowledgementAllowed) {
+        throw new Error("slack_acknowledgement_deadline_exceeded");
+      }
+      socket.send(
+        JSON.stringify({
+          envelope_id: parsed.envelope_id,
+          ...(payload === undefined ? {} : { payload }),
+        })
+      );
+      acknowledged = true;
+      if (deadlineTimer !== undefined) clearTimeout(deadlineTimer);
+      signalAcknowledged();
+    };
+
+    try {
+      if (requiresResponsePayload(parsed) && this.options.onResponseEnvelope !== undefined) {
+        const response = await Promise.race([this.options.onResponseEnvelope(parsed), deadline]);
+        await sendAcknowledgement(response.acknowledgement);
+        await response.followUp?.();
+        return;
+      }
+
+      const work = this.options.onEnvelope(parsed, () => sendAcknowledgement());
+      const first = await Promise.race([
+        work.then(() => "finished" as const),
+        acknowledgement.then(() => "acknowledged" as const),
+        deadline,
+      ]);
+      if (first === "finished" && !acknowledged) {
+        throw new Error("slack_envelope_returned_without_acknowledgement");
+      }
+      await work;
+    } catch (error) {
+      acknowledgementAllowed = false;
+      if (!acknowledged) socket.close();
+      throw error;
+    } finally {
+      if (deadlineTimer !== undefined) clearTimeout(deadlineTimer);
+    }
   }
 }

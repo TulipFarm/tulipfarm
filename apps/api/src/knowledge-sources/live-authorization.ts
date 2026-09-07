@@ -20,6 +20,7 @@ export class SlackLiveSourceAuthorization implements LiveSourceAuthorizationPort
     readonly sourceId: string;
     readonly provider: string;
     readonly externalId: string;
+    readonly externalTenantId?: string;
     readonly principals: readonly { readonly kind: string; readonly id: string }[];
   }): Promise<{ readonly allowed: boolean; readonly aclRevision?: string } | undefined> {
     if (input.provider !== SLACK_PROVIDER) return undefined;
@@ -40,6 +41,7 @@ export class SlackLiveSourceAuthorization implements LiveSourceAuthorizationPort
       const mappings = await this.identity.listProvenMappingsForUser(principal.id);
       for (const mapping of mappings) {
         if (mapping.provider !== SLACK_PROVIDER) continue;
+        if (mapping.externalTenantId !== input.externalTenantId) continue;
         if (mapping.expiresAt && mapping.expiresAt.getTime() <= now) continue;
         if (memberSet.has(mapping.externalSubject)) return { allowed: true };
       }
@@ -62,7 +64,9 @@ export class SlackTenantLiveAuthorization implements LiveSourceAuthorizationPort
     if (input.provider !== SLACK_PROVIDER) return undefined;
 
     const snapshot = await this.integrations.loadProviderSnapshot(input.businessId, SLACK_PROVIDER);
-    const integration = snapshot.integrations.find((i) => i.status === "active");
+    const integration = snapshot.integrations.find(
+      (i) => i.status === "active" && i.externalTenantId === input.externalTenantId
+    );
     if (!integration) return undefined;
 
     const token = await this.secrets

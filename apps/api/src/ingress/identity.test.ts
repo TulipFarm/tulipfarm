@@ -314,4 +314,42 @@ describe("IngressIdentityResolver sender authority", () => {
     if (first.outcome !== "linked" || second.outcome !== "linked") throw new Error("expected both");
     expect(first.principalRef).not.toBe(second.principalRef);
   });
+
+  it("keeps the same Slack subject distinct across workspaces", async () => {
+    const { resolver, mappings } = harness();
+    await mappings.upsertMapping({
+      provider: "slack",
+      externalSubject: "U-SHARED",
+      externalTenantId: "T1",
+      userId: alice._id,
+      verifiedAt: new Date(),
+      expiresAt: null,
+      verifiedVia: "bind_link",
+    });
+    await mappings.upsertMapping({
+      provider: "slack",
+      externalSubject: "U-SHARED",
+      externalTenantId: "T2",
+      userId: admin._id,
+      verifiedAt: new Date(),
+      expiresAt: null,
+      verifiedVia: "bind_link",
+    });
+
+    const first = await resolver.resolve({
+      slug: "slack",
+      sender: "U-SHARED",
+      externalTenantId: "T1",
+    });
+    const second = await resolver.resolve({
+      slug: "slack",
+      sender: "U-SHARED",
+      externalTenantId: "T2",
+    });
+    const unscoped = await resolver.resolve({ slug: "slack", sender: "U-SHARED" });
+
+    expect(first).toMatchObject({ outcome: "linked", principalId: alice._id });
+    expect(second).toMatchObject({ outcome: "linked", principalId: admin._id });
+    expect(unscoped.outcome).toBe("unlinked");
+  });
 });

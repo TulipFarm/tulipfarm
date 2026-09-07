@@ -100,6 +100,8 @@ const REVERSE_EXCLUSIONS: Readonly<Record<string, string>> = {
     "Written into the egress proxy container the sandbox launches, read by its own entrypoint.",
   SLACK_BOT_TOKEN:
     "An Integration connection secret read from a connection.yaml `env` block, not from process.env.",
+  SLACK_TEAM_ID:
+    "An Integration connection field read from a connection.yaml `env` block, not from process.env.",
   TF_CODEX_BIN:
     "A developer-only override for the local Codex CLI binary; never set in a deployment.",
 };

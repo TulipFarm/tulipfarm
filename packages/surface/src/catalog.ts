@@ -4,9 +4,8 @@ import {
   defineSurfaceComponent,
   SurfaceActionSchema,
   type SurfaceComponentDefinition,
-  type SurfaceTarget,
-  targetKey,
 } from "./contracts";
+import { SurfaceFormFieldSchema } from "./forms";
 
 const text = Type.String({ minLength: 1, maxLength: 8_000 });
 const record = Type.Record(Type.String(), Type.Unknown());
@@ -216,29 +215,7 @@ const definitions = [
     description: "Typed structured input.",
     propsSchema: Type.Object({
       title: Type.Optional(Type.String({ maxLength: 300 })),
-      fields: Type.Array(
-        Type.Object({
-          name: Type.String({ minLength: 1, maxLength: 100 }),
-          label: Type.String({ minLength: 1, maxLength: 200 }),
-          input: Type.Union([
-            Type.Literal("text"),
-            Type.Literal("email"),
-            Type.Literal("number"),
-            Type.Literal("textarea"),
-            Type.Literal("select"),
-            Type.Literal("checkbox"),
-            Type.Literal("date"),
-            Type.Literal("multiselect"),
-            Type.Literal("radio"),
-          ]),
-          required: Type.Optional(Type.Boolean()),
-          options: Type.Optional(Type.Array(Type.String({ maxLength: 200 }), { maxItems: 100 })),
-          // Provenance/context for the field, e.g. which connected account a picker's options
-          // came from. Rendered under the label, before the control.
-          description: Type.Optional(Type.String({ maxLength: 300 })),
-        }),
-        { minItems: 1, maxItems: 50 }
-      ),
+      fields: Type.Array(SurfaceFormFieldSchema, { minItems: 1, maxItems: 50 }),
       submit: Type.String({ minLength: 1, maxLength: 100 }),
       action: SurfaceActionSchema,
     }),

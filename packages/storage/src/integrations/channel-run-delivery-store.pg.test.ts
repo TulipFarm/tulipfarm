@@ -177,4 +177,45 @@ describe("ChannelRunDeliveryStore", () => {
       "channel_run_delivery_not_found"
     );
   });
+
+  it("proves message and reaction ownership against the exact Slack Integration", async () => {
+    await store.create({ ...delivery, sourceMessageTs: "1720000000.000900" });
+    await store.setSlackMessageTs(BUSINESS_ID, "run-1", "1720000000.000200");
+    await store.markAcknowledged(BUSINESS_ID, "run-1", "eyes");
+
+    await expect(
+      store.ownsSlackMessage({
+        businessId: BUSINESS_ID,
+        integrationId: "integration-1",
+        channelId: "C-OPS",
+        messageTs: "1720000000.000200",
+      })
+    ).resolves.toBe(true);
+    await expect(
+      store.ownsSlackMessage({
+        businessId: BUSINESS_ID,
+        integrationId: "integration-other",
+        channelId: "C-OPS",
+        messageTs: "1720000000.000200",
+      })
+    ).resolves.toBe(false);
+    await expect(
+      store.ownsSlackReaction({
+        businessId: BUSINESS_ID,
+        integrationId: "integration-1",
+        channelId: "C-OPS",
+        messageTs: "1720000000.000900",
+        emoji: "eyes",
+      })
+    ).resolves.toBe(true);
+    await expect(
+      store.ownsSlackReaction({
+        businessId: BUSINESS_ID,
+        integrationId: "integration-other",
+        channelId: "C-OPS",
+        messageTs: "1720000000.000900",
+        emoji: "eyes",
+      })
+    ).resolves.toBe(false);
+  });
 });

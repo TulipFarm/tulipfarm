@@ -13,6 +13,7 @@ describe("ExternalLinkKnowledgeIdentityMap", () => {
     repo.mappings.push({
       provider: "slack",
       externalSubject: "U123",
+      externalTenantId: "T1",
       userId: "u1",
       verifiedAt: new Date(),
       expiresAt: null,
@@ -24,6 +25,7 @@ describe("ExternalLinkKnowledgeIdentityMap", () => {
       businessId: DEPLOYMENT_BUSINESS_ID,
       provider: "slack",
       externalSubject: "U123",
+      externalTenantId: "T1",
     });
 
     expect(principals).toEqual([{ kind: "user", id: "u1" }]);
@@ -37,6 +39,7 @@ describe("ExternalLinkKnowledgeIdentityMap", () => {
       businessId: DEPLOYMENT_BUSINESS_ID,
       provider: "slack",
       externalSubject: "U-unknown",
+      externalTenantId: "T1",
     });
 
     expect(principals).toBeUndefined();
@@ -47,6 +50,7 @@ describe("ExternalLinkKnowledgeIdentityMap", () => {
     repo.mappings.push({
       provider: "slack",
       externalSubject: "U123",
+      externalTenantId: "T1",
       userId: "u1",
       verifiedAt: new Date(),
       expiresAt: new Date(Date.now() - 1000),
@@ -57,6 +61,7 @@ describe("ExternalLinkKnowledgeIdentityMap", () => {
       businessId: DEPLOYMENT_BUSINESS_ID,
       provider: "slack",
       externalSubject: "U123",
+      externalTenantId: "T1",
     });
 
     expect(principals).toBeUndefined();
@@ -67,6 +72,7 @@ describe("ExternalLinkKnowledgeIdentityMap", () => {
     repo.mappings.push({
       provider: "slack",
       externalSubject: "U123",
+      externalTenantId: "T1",
       userId: "u1",
       verifiedAt: new Date(),
       expiresAt: null,
@@ -77,6 +83,7 @@ describe("ExternalLinkKnowledgeIdentityMap", () => {
       businessId: "some-other-business",
       provider: "slack",
       externalSubject: "U123",
+      externalTenantId: "T1",
     });
 
     expect(principals).toBeUndefined();
@@ -88,6 +95,7 @@ describe("ExternalLinkKnowledgeIdentityMap", () => {
       repo.mappings.push({
         provider: "slack",
         externalSubject: "U123",
+        externalTenantId: "T1",
         userId: "u1",
         verifiedAt: new Date(),
         expiresAt: null,
@@ -97,6 +105,7 @@ describe("ExternalLinkKnowledgeIdentityMap", () => {
         businessId: DEPLOYMENT_BUSINESS_ID,
         provider: "slack",
         externalSubject: "U123",
+        externalTenantId: "T1",
       });
     };
 

@@ -300,6 +300,19 @@ export class EventStore implements EventOutboxPort {
     });
   }
 
+  async find(businessId: string, id: string): Promise<StoredEvent | null> {
+    return this.transactions.withTransaction(async (transaction) => {
+      const result = await transaction.query<InboxRow>(
+        `SELECT id, business_id, source_key, deduplication_key, status, canonical_event
+           FROM events_inbox
+          WHERE business_id = $1 AND id = $2`,
+        [businessId, id]
+      );
+      const row = result.rows[0];
+      return row === undefined ? null : storedEvent(row);
+    });
+  }
+
   async claim(options: ClaimOutboxOptions): Promise<readonly ClaimedOutboxMessage[]> {
     return this.transactions.withTransaction(async (transaction) => {
       const result = await transaction.query<OutboxRow>(

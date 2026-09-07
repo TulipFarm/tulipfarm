@@ -31,6 +31,7 @@ import { MemorySurfaceArtifactStore } from "../surfaces/artifact-store";
 import { makeMigratedPglite } from "../test/pglite";
 import { FakeConversationStore } from "../test/turn-host-fixtures";
 import { type ChannelInternalRouteDeps, slackBlocksForReply } from "./channel-routes";
+import type { SlackCommandResponseService } from "./slack-command-response";
 
 const TEST_CSRF = "a".repeat(64);
 
@@ -80,6 +81,9 @@ describe("/api/v1/internal/channels", () => {
   let cancelled: { businessId: string; runId: string; reason: string }[];
   let surfaceStore: MemorySurfaceArtifactStore;
   let surfaceActionStore: MemorySurfaceActionStore;
+  let reserveCommandResponse: ReturnType<typeof vi.fn>;
+  let processCommandResponses: ReturnType<typeof vi.fn>;
+  let admin: UserDoc;
 
   beforeEach(async () => {
     db = await makeMigratedPglite();
@@ -87,7 +91,7 @@ describe("/api/v1/internal/channels", () => {
 
     const sessions = new MemorySessionStore();
     const userRepo = new PgUserRepo(db as unknown as Queryable);
-    const admin = await createUser(userRepo, "admin@example.com", "pass", "admin");
+    admin = await createUser(userRepo, "admin@example.com", "pass", "admin");
     sessionCookie = await sessions.create(admin._id);
     slackUser = await createUser(userRepo, "slack-user@example.com", "pass", "member");
 
@@ -103,6 +107,7 @@ describe("/api/v1/internal/channels", () => {
     await mappings.upsertMapping({
       provider: "slack",
       externalSubject: "U-LINKED",
+      externalTenantId: "T1",
       userId: slackUser._id,
       verifiedAt: new Date(),
       expiresAt: null,
@@ -112,10 +117,29 @@ describe("/api/v1/internal/channels", () => {
     await mappings.upsertMapping({
       provider: "slack",
       externalSubject: "U-GUEST",
+      externalTenantId: "T1",
       userId: slackUser._id,
       verifiedAt: new Date(),
       expiresAt: null,
       verifiedVia: "manifest_email",
+    });
+    await mappings.upsertMapping({
+      provider: "slack",
+      externalSubject: "U-SHARED",
+      externalTenantId: "T1",
+      userId: slackUser._id,
+      verifiedAt: new Date(),
+      expiresAt: null,
+      verifiedVia: "bind_link",
+    });
+    await mappings.upsertMapping({
+      provider: "slack",
+      externalSubject: "U-SHARED",
+      externalTenantId: "T2",
+      userId: admin._id,
+      verifiedAt: new Date(),
+      expiresAt: null,
+      verifiedVia: "bind_link",
     });
 
     runs = new RunStore(transactions);
@@ -127,6 +151,8 @@ describe("/api/v1/internal/channels", () => {
     cancelled = [];
     surfaceStore = new MemorySurfaceArtifactStore();
     surfaceActionStore = new MemorySurfaceActionStore();
+    reserveCommandResponse = vi.fn().mockResolvedValue("reserved");
+    processCommandResponses = vi.fn().mockResolvedValue({ attempted: 1, delivered: 1 });
 
     app = await buildApp({
       sessionStore: sessions,
@@ -160,6 +186,10 @@ describe("/api/v1/internal/channels", () => {
         },
         surfaceStore,
         surfaceActionStore,
+        commandResponses: {
+          reserve: reserveCommandResponse,
+          process: processCommandResponses,
+        } as unknown as SlackCommandResponseService,
         bindLinkUrl: (token) => `http://localhost:4000/link-channel?token=${token}`,
       }),
     });
@@ -178,7 +208,7 @@ describe("/api/v1/internal/channels", () => {
         method: "POST",
         url: "/api/v1/internal/channels/identity/resolve",
         headers: asWorker(),
-        payload: { provider: "slack", externalSubject: "U-LINKED" },
+        payload: { provider: "slack", externalSubject: "U-LINKED", externalTenantId: "T1" },
       });
       expect(res.statusCode).toBe(200);
       expect(res.json()).toEqual({
@@ -194,13 +224,44 @@ describe("/api/v1/internal/channels", () => {
         method: "POST",
         url: "/api/v1/internal/channels/identity/resolve",
         headers: asWorker(),
-        payload: { provider: "slack", externalSubject: "U-GUEST" },
+        payload: { provider: "slack", externalSubject: "U-GUEST", externalTenantId: "T1" },
       });
       expect(res.statusCode).toBe(200);
       expect(res.json()).toEqual({
         linked: true,
-        principal: { kind: "guest", id: "slack:U-GUEST" },
+        principal: { kind: "guest", id: "slack:T1:U-GUEST" },
       });
+    });
+
+    it("resolves the same Slack user ID to the principal in the requested workspace", async () => {
+      const first = await app.inject({
+        method: "POST",
+        url: "/api/v1/internal/channels/identity/resolve",
+        headers: asWorker(),
+        payload: { provider: "slack", externalSubject: "U-SHARED", externalTenantId: "T1" },
+      });
+      const second = await app.inject({
+        method: "POST",
+        url: "/api/v1/internal/channels/identity/resolve",
+        headers: asWorker(),
+        payload: { provider: "slack", externalSubject: "U-SHARED", externalTenantId: "T2" },
+      });
+      const unscoped = await app.inject({
+        method: "POST",
+        url: "/api/v1/internal/channels/identity/resolve",
+        headers: asWorker(),
+        payload: { provider: "slack", externalSubject: "U-SHARED" },
+      });
+
+      expect(first.json()).toEqual({
+        linked: true,
+        principal: { kind: "user", id: slackUser._id },
+      });
+      expect(second.json()).toEqual({
+        linked: true,
+        principal: { kind: "user", id: admin._id },
+      });
+      expect(unscoped.json()).toEqual({ linked: false });
     });
 
     it("never hands a worker the bind link for an unmapped sender", async () => {
@@ -208,7 +269,7 @@ describe("/api/v1/internal/channels", () => {
         method: "POST",
         url: "/api/v1/internal/channels/identity/resolve",
         headers: asWorker(),
-        payload: { provider: "slack", externalSubject: "U-UNKNOWN" },
+        payload: { provider: "slack", externalSubject: "U-UNKNOWN", externalTenantId: "T1" },
       });
       expect(res.statusCode).toBe(200);
       expect(res.json()).toEqual({ linked: false });
@@ -220,7 +281,7 @@ describe("/api/v1/internal/channels", () => {
         url: "/api/v1/internal/channels/identity/resolve",
         cookies: { [SESSION_COOKIE]: sessionCookie, [CSRF_COOKIE]: TEST_CSRF },
         headers: { "x-csrf-token": TEST_CSRF },
-        payload: { provider: "slack", externalSubject: "U-LINKED" },
+        payload: { provider: "slack", externalSubject: "U-LINKED", externalTenantId: "T1" },
       });
       expect(res.statusCode).toBe(403);
     });
@@ -229,7 +290,7 @@ describe("/api/v1/internal/channels", () => {
       const res = await app.inject({
         method: "POST",
         url: "/api/v1/internal/channels/identity/resolve",
-        payload: { provider: "slack", externalSubject: "U-LINKED" },
+        payload: { provider: "slack", externalSubject: "U-LINKED", externalTenantId: "T1" },
       });
       expect(res.statusCode).toBe(401);
     });
@@ -241,7 +302,12 @@ describe("/api/v1/internal/channels", () => {
         method: "POST",
         url: "/api/v1/internal/channels/identity/bind-offer",
         headers: asWorker(),
-        payload: { provider: "slack", externalSubject: "U-LINKED", channelId: "C1" },
+        payload: {
+          provider: "slack",
+          externalSubject: "U-LINKED",
+          externalTenantId: "T1",
+          channelId: "C1",
+        },
       });
       expect(res.statusCode).toBe(200);
       expect(res.json()).toEqual({ outcome: "no_offer" });
@@ -252,7 +318,12 @@ describe("/api/v1/internal/channels", () => {
         method: "POST",
         url: "/api/v1/internal/channels/identity/bind-offer",
         headers: asWorker(),
-        payload: { provider: "slack", externalSubject: "U-UNKNOWN", channelId: "C1" },
+        payload: {
+          provider: "slack",
+          externalSubject: "U-UNKNOWN",
+          externalTenantId: "T1",
+          channelId: "C1",
+        },
       });
       expect(res.statusCode).toBe(200);
       // No `bind` config on this app's identity resolver, so no offer is minted at all.
@@ -305,6 +376,7 @@ describe("/api/v1/internal/channels", () => {
             payload: {
               provider: "slack",
               externalSubject: "U-NEW",
+              externalTenantId: "T1",
               channelId: "C1",
               threadId: "1.1",
             },
@@ -934,12 +1006,32 @@ describe("/api/v1/internal/channels", () => {
       return decision.approvalId;
     }
 
+    it("rejects a Slack approval decision without tenant scope", async () => {
+      const res = await app.inject({
+        method: "POST",
+        url: "/api/v1/internal/channels/approvals/approval-1/decide",
+        headers: asWorker(),
+        payload: {
+          provider: "slack",
+          externalSubject: "U-LINKED",
+          decision: "approved",
+        },
+      });
+
+      expect(res.statusCode).toBe(400);
+    });
+
     it("reports unlinked without exposing a bind offer", async () => {
       const res = await app.inject({
         method: "POST",
         url: "/api/v1/internal/channels/approvals/approval-1/decide",
         headers: asWorker(),
-        payload: { provider: "slack", externalSubject: "U-UNKNOWN", decision: "approved" },
+        payload: {
+          provider: "slack",
+          externalSubject: "U-UNKNOWN",
+          externalTenantId: "T1",
+          decision: "approved",
+        },
       });
       expect(res.statusCode).toBe(200);
       expect(res.json()).toEqual({ outcome: "unlinked" });
@@ -952,7 +1044,12 @@ describe("/api/v1/internal/channels", () => {
         method: "POST",
         url: `/api/v1/internal/channels/approvals/${approvalId}/decide`,
         headers: asWorker(),
-        payload: { provider: "slack", externalSubject: "U-LINKED", decision: "approved" },
+        payload: {
+          provider: "slack",
+          externalSubject: "U-LINKED",
+          externalTenantId: "T1",
+          decision: "approved",
+        },
       });
       expect(res.statusCode).toBe(200);
       expect(res.json()).toEqual({ outcome: "resumed" });
@@ -968,10 +1065,53 @@ describe("/api/v1/internal/channels", () => {
         method: "POST",
         url: `/api/v1/internal/channels/approvals/${approvalId}/decide`,
         headers: asWorker(),
-        payload: { provider: "slack", externalSubject: "U-GUEST", decision: "approved" },
+        payload: {
+          provider: "slack",
+          externalSubject: "U-GUEST",
+          externalTenantId: "T1",
+          decision: "approved",
+        },
       });
       expect(res.statusCode).toBe(200);
       expect(res.json()).toEqual({ outcome: "forbidden" });
+    });
+  });
+
+  describe("POST /slack/command-responses", () => {
+    it("reserves the encrypted response URL delivery through the API service", async () => {
+      const res = await app.inject({
+        method: "POST",
+        url: "/api/v1/internal/channels/slack/command-responses",
+        headers: asWorker(),
+        payload: {
+          idempotencyKey: "slack-command-response:T1:trigger-1",
+          responseUrl: "https://hooks.slack.com/commands/1/2/3",
+          response: "starting",
+        },
+      });
+
+      expect(res.statusCode).toBe(200);
+      expect(res.json()).toEqual({ outcome: "reserved" });
+      expect(reserveCommandResponse).toHaveBeenCalledWith({
+        idempotencyKey: "slack-command-response:T1:trigger-1",
+        responseUrl: "https://hooks.slack.com/commands/1/2/3",
+        response: "starting",
+      });
+    });
+
+    it("processes due response URL deliveries through the retryable service", async () => {
+      const res = await app.inject({
+        method: "POST",
+        url: "/api/v1/internal/channels/slack/command-responses/process?idempotencyKey=slack-command-response%3AT1%3Atrigger-1",
+        headers: asWorker(),
+      });
+
+      expect(res.statusCode).toBe(200);
+      expect(res.json()).toEqual({ attempted: 1, delivered: 1 });
+      expect(processCommandResponses).toHaveBeenCalledWith(
+        expect.stringMatching(/^api:\d+:/),
+        "slack-command-response:T1:trigger-1"
+      );
     });
   });
 

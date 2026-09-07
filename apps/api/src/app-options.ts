@@ -60,6 +60,8 @@ import type { PrincipalProviderTokenRepo } from "./integrations/principal-tokens
 import type { SlackBindDeps } from "./integrations/slack-binding";
 import type { ChannelInternalRouteDeps } from "./internal/channel-routes";
 import type { InternalTurnRouteDeps } from "./internal/routes";
+import type { SlackEventRouteDeps } from "./internal/slack-event-routes";
+import type { SlackHomeRouteDeps } from "./internal/slack-home-routes";
 import type { KillSwitchService } from "./kill-switches/service";
 import type { AuthorLabeller } from "./knowledge/author-label";
 import type { PageReadAuthorizer } from "./knowledge/page-access";
@@ -240,6 +242,8 @@ export interface AppOptions {
    * exist until `buildApp` has run.
    */
   channels?(log: FastifyBaseLogger): ChannelInternalRouteDeps;
+  slackHome?(log: FastifyBaseLogger): SlackHomeRouteDeps;
+  slackEvents?(log: FastifyBaseLogger): SlackEventRouteDeps;
   ingress?: IngressRoutesDeps;
   hookIngress?: HookIngressDeps;
   systemRoutes?: SystemRoutesDeps;

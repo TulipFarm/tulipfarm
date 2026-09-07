@@ -11,6 +11,7 @@ export const ChannelIdentityResolveBodySchema = {
   properties: {
     provider: { type: "string", minLength: 1 },
     externalSubject: { type: "string", minLength: 1 },
+    externalTenantId: { type: "string", minLength: 1 },
   },
 } as const;
 
@@ -34,6 +35,7 @@ export const ChannelIdentityBindOfferBodySchema = {
   properties: {
     provider: { type: "string", minLength: 1 },
     externalSubject: { type: "string", minLength: 1 },
+    externalTenantId: { type: "string", minLength: 1 },
     channelId: { type: "string", minLength: 1 },
     threadId: { type: "string" },
   },
@@ -132,6 +134,46 @@ export const ChannelSlackCredentialResponseSchema = {
   },
 } as const;
 
+export const ChannelSlackCommandResponseCreateBodySchema = {
+  type: "object",
+  required: ["idempotencyKey", "responseUrl", "response"],
+  additionalProperties: false,
+  properties: {
+    idempotencyKey: { type: "string", minLength: 1 },
+    responseUrl: {
+      type: "string",
+      pattern: "^https://hooks\\.slack(?:-gov)?\\.com/commands/",
+    },
+    response: {
+      type: "string",
+      enum: ["starting", "unlinked", "denied", "prompt_unavailable"],
+    },
+  },
+} as const;
+
+export const ChannelSlackCommandResponseCreateResponseSchema = {
+  type: "object",
+  required: ["outcome"],
+  properties: { outcome: { type: "string", enum: ["reserved", "duplicate"] } },
+} as const;
+
+export const ChannelSlackCommandResponseProcessResponseSchema = {
+  type: "object",
+  required: ["attempted", "delivered"],
+  properties: {
+    attempted: { type: "integer", minimum: 0 },
+    delivered: { type: "integer", minimum: 0 },
+  },
+} as const;
+
+export const ChannelSlackCommandResponseProcessQuerySchema = {
+  type: "object",
+  additionalProperties: false,
+  properties: {
+    idempotencyKey: { type: "string", minLength: 1 },
+  },
+} as const;
+
 export const ChannelApprovalDecisionParamsSchema = {
   type: "object",
   required: ["approvalId"],
@@ -142,9 +184,20 @@ export const ChannelApprovalDecisionBodySchema = {
   type: "object",
   required: ["provider", "externalSubject", "decision"],
   additionalProperties: false,
+  anyOf: [
+    {
+      properties: { provider: { not: { const: "slack" } } },
+      required: ["provider"],
+    },
+    {
+      properties: { provider: { const: "slack" } },
+      required: ["provider", "externalTenantId"],
+    },
+  ],
   properties: {
     provider: { type: "string", minLength: 1 },
     externalSubject: { type: "string", minLength: 1 },
+    externalTenantId: { type: "string", minLength: 1 },
     decision: { type: "string", enum: ["approved", "denied"] },
   },
 } as const;

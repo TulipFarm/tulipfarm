@@ -241,12 +241,32 @@ function awaitedSchemaFor(component: {
       ) {
         continue;
       }
+      const options = Array.isArray(field.options)
+        ? field.options.filter((option: unknown): option is string => typeof option === "string")
+        : [];
+      const optionSchema =
+        options.length > 0
+          ? Type.Union(options.map((option: string) => Type.Literal(option)))
+          : Type.String();
+      const checkboxOptionSchema = Type.Union(
+        (options.length > 0 ? options : ["true"]).map((option: string) => Type.Literal(option))
+      );
+      const minItems =
+        typeof field.minItems === "number" ? field.minItems : field.required === true ? 1 : 0;
+      const maxItems = typeof field.maxItems === "number" ? field.maxItems : 100;
       const schema =
         field.input === "number"
-          ? Type.Number()
+          ? Type.String({ pattern: "^-?(?:0|[1-9]\\d*)(?:\\.\\d+)?(?:[eE][+-]?\\d+)?$" })
           : field.input === "checkbox"
-            ? Type.Boolean()
-            : Type.String();
+            ? Type.Array(checkboxOptionSchema, { minItems, maxItems, uniqueItems: true })
+            : field.input === "multiselect"
+              ? Type.Array(optionSchema, { minItems, maxItems, uniqueItems: true })
+              : field.input === "select" || field.input === "radio"
+                ? optionSchema
+                : Type.String({
+                    minLength: typeof field.minLength === "number" ? field.minLength : 0,
+                    maxLength: typeof field.maxLength === "number" ? field.maxLength : 3_000,
+                  });
       properties[field.name] = field.required === true ? schema : Type.Optional(schema);
     }
     return Type.Object(properties, { additionalProperties: false });

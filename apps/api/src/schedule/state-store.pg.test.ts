@@ -32,7 +32,7 @@ test("migrates old checkpoints without losing either history during a reordered 
      VALUES ('business', 'digest', 0, 'first', 1000, 2000, 1000),
             ('business', 'digest', 1, 'second', 1500, 2500, 1500)`
   );
-  await migrate(98);
+  await migrate(105);
   const store = new RoutineScheduleStateStore(queryable);
   const legacy = await store.listForBusiness("business");
   const first = legacy.find((row) => row.dedupKey === "first");
@@ -62,6 +62,6 @@ test("migrates old checkpoints without losing either history during a reordered 
       { ...second, triggerId: "second-id", triggerIndex: 0 },
     ])
   );
-  await migrate(98);
+  await migrate(105);
   expect(await restarted.listForBusiness("business")).toEqual(expect.arrayContaining(persisted));
 });

@@ -141,6 +141,12 @@ export interface StartTurnInput {
   readonly idempotencyKey: string;
 }
 
+export interface ReservedTurn {
+  readonly turnId: string;
+  readonly runId: string | null;
+  readonly cursor: number;
+}
+
 export interface StartedTurn {
   readonly turnId: string;
   readonly runId: string;
@@ -157,20 +163,18 @@ export interface RetryTurnInput {
 export class ConversationService {
   constructor(private readonly deps: ConversationServiceDeps) {}
 
-  async startTurn(input: StartTurnInput): Promise<StartedTurn> {
+  async reserveTurn(input: StartTurnInput): Promise<ReservedTurn> {
     await this.require("start_turn", input.businessId);
+    const turn = await this.reserve(input);
+    return { turnId: turn.id, runId: turn.runId, cursor: turn.cursor };
+  }
 
+  private async reserve(input: StartTurnInput): Promise<PersistedTurn> {
     const existing = await this.deps.store.findTurnByIdempotencyKey(
       input.businessId,
       input.idempotencyKey
     );
-    if (existing !== undefined) {
-      if (existing.runId !== null) {
-        return { turnId: existing.id, runId: existing.runId, cursor: existing.cursor };
-      }
-      // The Message is already durable; only the dispatch is missing.
-      return this.dispatch(existing, existing.attempt);
-    }
+    if (existing !== undefined) return existing;
 
     const now = this.deps.now();
     const turnId = this.deps.newId();
@@ -202,7 +206,32 @@ export class ConversationService {
     };
     await this.deps.store.saveTurn(turn);
 
-    return this.dispatch(turn, 1);
+    return turn;
+  }
+
+  async dispatchReservedTurn(input: {
+    businessId: string;
+    idempotencyKey: string;
+  }): Promise<StartedTurn> {
+    await this.require("start_turn", input.businessId);
+    const turn = await this.deps.store.findTurnByIdempotencyKey(
+      input.businessId,
+      input.idempotencyKey
+    );
+    if (turn === undefined) throw new ConversationAccessError("start_turn");
+    if (turn.runId !== null) {
+      return { turnId: turn.id, runId: turn.runId, cursor: turn.cursor };
+    }
+    return this.dispatch(turn, turn.attempt);
+  }
+
+  async startTurn(input: StartTurnInput): Promise<StartedTurn> {
+    await this.require("start_turn", input.businessId);
+    const turn = await this.reserve(input);
+    if (turn.runId !== null) {
+      return { turnId: turn.id, runId: turn.runId, cursor: turn.cursor };
+    }
+    return this.dispatch(turn, turn.attempt);
   }
 
   async retryTurn(input: RetryTurnInput): Promise<StartedTurn> {

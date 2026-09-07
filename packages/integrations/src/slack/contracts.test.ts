@@ -11,11 +11,20 @@ import {
 const byId = new Map(SLACK_TOOL_CONTRACTS.map((c) => [c.spec.toolId, c]));
 
 describe("SLACK_TOOL_CONTRACTS", () => {
-  it("publishes channel discovery, send, and acknowledge Tools", () => {
+  it("publishes the governed V1 Slack Tool allowlist", () => {
     expect([...byId.keys()]).toEqual([
       SLACK_TOOL_IDS.listChannels,
+      SLACK_TOOL_IDS.getConversation,
       SLACK_TOOL_IDS.sendMessage,
+      SLACK_TOOL_IDS.updateMessage,
+      SLACK_TOOL_IDS.deleteMessage,
       SLACK_TOOL_IDS.acknowledge,
+      SLACK_TOOL_IDS.removeReaction,
+      SLACK_TOOL_IDS.uploadFile,
+      SLACK_TOOL_IDS.getFileInfo,
+      SLACK_TOOL_IDS.manageBookmark,
+      SLACK_TOOL_IDS.managePin,
+      SLACK_TOOL_IDS.lookupUser,
     ]);
   });
 
@@ -23,6 +32,20 @@ describe("SLACK_TOOL_CONTRACTS", () => {
     const acknowledge = byId.get(SLACK_TOOL_IDS.acknowledge);
     expect(acknowledge?.spec.mutating).toBe(true);
     expect(acknowledge?.spec.idempotency.strategy).toBe("provider");
+  });
+
+  it("uses provider idempotency for convergent pin add/remove instead of a fake lookup", () => {
+    const pin = byId.get(SLACK_TOOL_IDS.managePin);
+    expect(pin?.spec.idempotency.strategy).toBe("provider");
+    expect(pin?.spec.compensation?.reconciliation).toBeUndefined();
+    expect(pin?.spec.retry?.safeToRetry).toBe(true);
+  });
+
+  it("never retries ambiguous bookmark writes without provider idempotency", () => {
+    const bookmark = byId.get(SLACK_TOOL_IDS.manageBookmark);
+    expect(bookmark?.spec.idempotency.strategy).toBe("reconcile");
+    expect(bookmark?.spec.compensation?.reconciliation).toBe("slack.bookmark.manage.lookup");
+    expect(bookmark?.spec.retry).toEqual({ maxAttempts: 1, safeToRetry: false });
   });
 
   it("loads into the Tool catalog as a published contract", () => {
@@ -101,5 +124,33 @@ describe("SLACK_TOOL_CONTRACTS", () => {
     expect(validate({ channel: "general" })).toBe(false);
     expect(validate({ text: "hi" })).toBe(false);
     expect(validate({ channel: "general", text: "x".repeat(4001) })).toBe(false);
+  });
+
+  it("requires ownership evidence for destructive Integration-owned operations", () => {
+    for (const toolId of [
+      SLACK_TOOL_IDS.updateMessage,
+      SLACK_TOOL_IDS.deleteMessage,
+      SLACK_TOOL_IDS.removeReaction,
+    ]) {
+      const contract = byId.get(toolId);
+      if (contract === undefined) expect.unreachable(`${toolId} missing`);
+      const validate = ajv.compile(contract.spec.inputSchema);
+      expect(validate({})).toBe(false);
+    }
+  });
+
+  it("bounds conversation reads and user lookup output", () => {
+    const conversation = byId.get(SLACK_TOOL_IDS.getConversation);
+    const users = byId.get(SLACK_TOOL_IDS.lookupUser);
+    if (conversation === undefined || users === undefined) expect.unreachable("read Tool missing");
+    expect(ajv.compile(conversation.spec.inputSchema)({ channel: "C1", limit: 201 })).toBe(false);
+    const validateUsers = ajv.compile(users.spec.outputSchema);
+    expect(
+      validateUsers({
+        users: [
+          { id: "U1", displayName: "Muskan", isBotOrApp: false, deleted: false, email: "no" },
+        ],
+      })
+    ).toBe(false);
   });
 });
