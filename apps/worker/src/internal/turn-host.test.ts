@@ -99,6 +99,24 @@ describe("HttpTurnHost", () => {
     await expect(published.turns.llmConfig()).resolves.toEqual({ tiers: {} });
   });
 
+  it("reads the boot-validated Observability Config without resolving its Secret ref", async () => {
+    const config = {
+      enabled: true,
+      retentionDays: 30,
+      captureContent: false,
+      spendAlertUsd: null,
+      otlp: {
+        endpoint: "https://otlp.example.test/otlp",
+        instanceId: "123",
+        token: "secret://grafana-otlp-token",
+      },
+      pricingOverrides: {},
+    };
+    const published = host(() => json(config));
+
+    await expect(published.turns.observabilityConfig()).resolves.toEqual(config);
+  });
+
   it("states the Run on every write, so authority is never claimed by this process", async () => {
     const bodies: string[] = [];
     const { turns } = host((_url, init) => {

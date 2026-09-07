@@ -118,6 +118,8 @@ export interface RoutineModelSelection {
   readonly routing: RunEventPayloads["model.routed"];
   /** The spending Run, so this State's model calls reach the ledger attributed to it. */
   readonly runId: string;
+  /** The State attempt treated as a Turn for telemetry. */
+  readonly turnId: string;
 }
 
 /** Run statuses that mean the question must stop being asked. */
@@ -400,6 +402,7 @@ export class BundleRoutineAgentPort implements RoutineAgentPort {
         modelIds: selection.chain.map((profile) => profile.model),
         routing,
         runId: request.runId,
+        turnId: `${request.stateKey}:${request.attempt}`,
       }),
       tools: exposed.length === 0 ? NO_TOOLS : this.toolPort(plan.agentRef.name, events),
       checkpoints: this.options.checkpoints ?? new InMemoryLoopCheckpointStore(),

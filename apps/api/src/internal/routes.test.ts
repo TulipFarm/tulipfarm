@@ -84,6 +84,16 @@ describe("/api/v1/internal/turns", () => {
   let runs: HostedRunReader;
   let llmConfig: unknown;
   let pricingOverrides: Record<string, { in: number; out: number }> = {};
+  let observabilityConfig:
+    | {
+        enabled: boolean;
+        retentionDays: number;
+        captureContent: boolean;
+        spendAlertUsd: number | null;
+        otlp: null;
+        pricingOverrides: Record<string, { in: number; out: number }>;
+      }
+    | undefined;
   let dispatched: { authority: RunAuthority; call: HostedToolCall }[];
   let parked: { authority: RunAuthority; stateKey: string; approvalId: string }[];
   let hostedAgent: HostedAgent | undefined;
@@ -105,6 +115,7 @@ describe("/api/v1/internal/turns", () => {
     store.turns.push(turn());
     runs = fakeRuns({ subject: { kind: "integration", id: "slack" } });
     llmConfig = undefined;
+    observabilityConfig = undefined;
     dispatched = [];
     parked = [];
     hostedAgent = undefined;
@@ -163,6 +174,7 @@ describe("/api/v1/internal/turns", () => {
         }),
         llmConfig: () => llmConfig,
         pricingOverrides: () => pricingOverrides,
+        observabilityConfig: () => observabilityConfig,
       },
     });
   });
@@ -220,6 +232,37 @@ describe("/api/v1/internal/turns", () => {
       headers: asWorker(),
     });
     expect(corrected.json()).toEqual({ overrides: pricingOverrides });
+  });
+
+  it("serves exporter configuration only to the Worker service principal", async () => {
+    const absent = await app.inject({
+      method: "GET",
+      url: "/api/v1/internal/observability/config",
+      headers: asWorker(),
+    });
+    expect(absent.statusCode).toBe(204);
+
+    observabilityConfig = {
+      enabled: false,
+      retentionDays: 30,
+      captureContent: false,
+      spendAlertUsd: null,
+      otlp: null,
+      pricingOverrides: {},
+    };
+    const configured = await app.inject({
+      method: "GET",
+      url: "/api/v1/internal/observability/config",
+      headers: asWorker(),
+    });
+    expect(configured.statusCode).toBe(200);
+    expect(configured.json()).toEqual(observabilityConfig);
+
+    const anonymous = await app.inject({
+      method: "GET",
+      url: "/api/v1/internal/observability/config",
+    });
+    expect([401, 403]).toContain(anonymous.statusCode);
   });
 
   it("refuses price corrections to anything but a service principal", async () => {

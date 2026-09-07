@@ -93,6 +93,8 @@ export interface LlmModelPortOptions {
    * ledger attributed to nothing, and the Run inspector can only report zero.
    */
   readonly runId?: string;
+  /** The Turn or Routine Agent State attempt this model call belongs to. */
+  readonly turnId?: string;
   /** Test hook for deterministic latency measurement. Defaults to `Date.now`. */
   now?(): number;
 }
@@ -381,19 +383,22 @@ export class LlmModelPort implements ModelPort, ModelCallReceiptSource {
     durationMs: number
   ): void {
     if (this.options.spend === undefined) return;
+    const selectedModel = routedModelId(resolution.routing);
+    const servedModel = resolution.attemptedModelId?.() ?? selectedModel;
+    const servedProvider = resolution.providerForModel?.(servedModel) ?? resolution.provider;
     this.options.spend.recordLlmCall({
-      status,
+      requestId: request.requestId,
+      status: status === "ok" && servedModel !== selectedModel ? "fallback" : status,
       durationMs: Math.max(0, Math.round(durationMs)),
       ...(usage === undefined ? {} : { usage }),
       ...(this.options.conversationId === undefined
         ? {}
         : { conversationId: this.options.conversationId }),
       ...(this.options.runId === undefined ? {} : { runId: this.options.runId }),
+      ...(this.options.turnId === undefined ? {} : { turnId: this.options.turnId }),
       ...(request.agentId === undefined ? {} : { agentId: request.agentId }),
-      ...(routedModelId(resolution.routing) === undefined
-        ? {}
-        : { model: routedModelId(resolution.routing) }),
-      ...(resolution.provider === undefined ? {} : { provider: resolution.provider }),
+      ...(servedModel === undefined ? {} : { model: servedModel }),
+      ...(servedProvider === undefined ? {} : { provider: servedProvider }),
       ...(request.principal === undefined ? {} : { principal: request.principal }),
     });
   }

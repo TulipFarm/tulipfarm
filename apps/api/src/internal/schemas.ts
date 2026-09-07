@@ -170,6 +170,48 @@ export const InternalObservabilityPricingResponseSchema = {
   },
 } as const;
 
+export const InternalObservabilityConfigResponseSchema = {
+  type: "object",
+  required: [
+    "enabled",
+    "retentionDays",
+    "captureContent",
+    "spendAlertUsd",
+    "otlp",
+    "pricingOverrides",
+  ],
+  additionalProperties: false,
+  properties: {
+    enabled: { type: "boolean" },
+    retentionDays: { type: "integer" },
+    captureContent: { type: "boolean" },
+    spendAlertUsd: { type: "number", nullable: true },
+    otlp: {
+      anyOf: [
+        { type: "null" },
+        {
+          type: "object",
+          required: ["endpoint", "instanceId", "token"],
+          additionalProperties: false,
+          properties: {
+            endpoint: { type: "string" },
+            instanceId: { type: "string" },
+            token: { type: "string" },
+          },
+        },
+      ],
+    },
+    pricingOverrides: {
+      type: "object",
+      additionalProperties: {
+        type: "object",
+        required: ["in", "out"],
+        properties: { in: { type: "number" }, out: { type: "number" } },
+      },
+    },
+  },
+} as const;
+
 export const InternalTurnLookupResponseSchema = {
   type: "object",
   required: ["turnId", "conversationId", "attempt"],

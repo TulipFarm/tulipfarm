@@ -1246,6 +1246,7 @@ async function boot() {
       // without restarting it.
       llmConfig: () => soulLoader.llmConfig,
       pricingOverrides: () => obsConfig.pricingOverrides,
+      observabilityConfig: () => obsConfig,
       taskReconcileSignals: async () => {
         const businessName =
           typeof soulLoader.manifest?.businessName === "string"

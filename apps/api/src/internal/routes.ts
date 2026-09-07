@@ -4,6 +4,7 @@ import { DEPLOYMENT_BUSINESS_ID } from "@tulipfarm/constants";
 import type { ParticipantToolCall } from "@tulipfarm/schema";
 import type { FastifyBaseLogger, FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { ErrorSchema } from "../auth/schemas";
+import type { ObservabilityConfig } from "../observability/config";
 import * as ChildRoutineHost from "./child-routine-host";
 import { registerChildRoutineRoutes } from "./child-routine-routes";
 import * as DeliveryHost from "./delivery-host";
@@ -58,6 +59,7 @@ export interface InternalTurnRouteDeps {
   deliveries?(log: FastifyBaseLogger): DeliveryHost.IngressDeliveryHost;
   llmConfig(): unknown;
   pricingOverrides(): Record<string, { in: number; out: number }>;
+  observabilityConfig?(): ObservabilityConfig | undefined;
   /**
    * Soul manifest and knowledge/memory signals the task reconciler cannot reach directly, since
    * those stores belong to this app, not the Worker (`apps/worker/AGENTS.md`: Soul access is
@@ -147,6 +149,28 @@ export function registerInternalTurnRoutes(
       const config = deps.llmConfig();
       if (config === undefined || config === null) return reply.code(204).send();
       return reply.send(config);
+    }
+  );
+
+  app.get(
+    "/api/v1/internal/observability/config",
+    {
+      preHandler,
+      schema: {
+        description: "Read the boot-validated Observability Config for Worker exporter setup.",
+        tags: ["internal"],
+        security: [{ bearerToken: [] }],
+        response: {
+          200: InternalSchemas.InternalObservabilityConfigResponseSchema,
+          204: { type: "null", description: "No Observability Config supplier is wired." },
+          401: ErrorSchema,
+          403: ErrorSchema,
+        },
+      },
+    },
+    async (_req, reply) => {
+      const config = deps.observabilityConfig?.();
+      return config === undefined ? reply.code(204).send() : reply.send(config);
     }
   );
 

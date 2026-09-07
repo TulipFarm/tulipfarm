@@ -989,7 +989,10 @@ describe("LlmModelPort — reporting spend", () => {
   function portWith(
     parts: StreamPart[],
     sink: SpendSink,
-    identity: { conversationId?: string; runId?: string } = { conversationId: "conv-1" }
+    identity: { conversationId?: string; runId?: string; turnId?: string } = {
+      conversationId: "conv-1",
+    },
+    actual?: { model: string; provider: string }
   ): LlmModelPort {
     const mock = new MockLanguageModelV4({
       doStream: async () => ({ stream: simulateReadableStream<StreamPart>({ chunks: parts }) }),
@@ -1003,6 +1006,12 @@ describe("LlmModelPort — reporting spend", () => {
           source: "table",
         }),
         provider: "anthropic",
+        ...(actual === undefined
+          ? {}
+          : {
+              attemptedModelId: () => actual.model,
+              providerForModel: () => actual.provider,
+            }),
         model: mock as unknown as LanguageModel,
         routing: {
           outcome: "raw_model",
@@ -1035,11 +1044,37 @@ describe("LlmModelPort — reporting spend", () => {
     expect(calls).toHaveLength(1);
     expect(calls[0]).toMatchObject({
       status: "ok",
+      requestId: "request-1",
       conversationId: "conv-1",
       agentId: "support",
       provider: "anthropic",
       model: "claude-opus-5",
       usage: { inputTokens: 11, outputTokens: 4 },
+    });
+  });
+
+  it("reports the model and provider that actually answered a fallback", async () => {
+    const { calls, sink } = spy();
+    const port = portWith(
+      [
+        { type: "text-start", id: "1" },
+        { type: "text-delta", id: "1", delta: "hi" },
+        { type: "text-end", id: "1" },
+        FINISH,
+      ],
+      sink,
+      { conversationId: "conv-1", runId: "run-1", turnId: "turn-1" },
+      { model: "gpt-5.6-sol", provider: "openai" }
+    );
+
+    await collect(port.stream(request()));
+
+    expect(calls[0]).toMatchObject({
+      status: "fallback",
+      model: "gpt-5.6-sol",
+      provider: "openai",
+      requestId: "request-1",
+      turnId: "turn-1",
     });
   });
 
