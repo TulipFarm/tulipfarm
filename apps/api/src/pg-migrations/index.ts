@@ -3190,6 +3190,11 @@ export const PG_MIGRATIONS: PgMigration[] = [
   {
     version: 99,
     description: "effect ledger: persist immutable confirmed Tool outputs",
-    up: applyStatements(EFFECT_OUTPUT_STORAGE_STATEMENTS),
+    up: async (q) => {
+      const present = await q.query<{ present: boolean }>(
+        "SELECT to_regclass('effect_records') IS NOT NULL AS present"
+      );
+      if (present.rows[0]?.present) await applyStatements(EFFECT_OUTPUT_STORAGE_STATEMENTS)(q);
+    },
   },
 ];
