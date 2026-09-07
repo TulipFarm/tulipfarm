@@ -1,4 +1,5 @@
 import {
+  collectPages,
   GitHubCredentialError,
   type IntegrationHttpPort,
   mintInstallationToken,
@@ -55,24 +56,49 @@ export async function listInstalledRepositories(
   http: IntegrationHttpPort,
   installationToken: string
 ): Promise<InstalledRepository[]> {
-  const res = await http.send(
-    { method: "GET", path: "/installation/repositories" },
-    installationToken
+  let seen = 0;
+  return collectPages<InstalledRepository>(
+    async (cursor) => {
+      const page = cursor === undefined ? 1 : Number(cursor);
+      const res = await http.send(
+        {
+          method: "GET",
+          path: "/installation/repositories",
+          query: { per_page: "100", page: String(page) },
+        },
+        installationToken
+      );
+      if (res.status < 200 || res.status >= 300) {
+        throw new Error(`failed to list installation repositories: status ${res.status}`);
+      }
+      const body = res.body as { total_count?: unknown; repositories?: unknown } | undefined;
+      if (!Array.isArray(body?.repositories)) {
+        throw new Error("failed to list installation repositories: invalid response");
+      }
+
+      const repositories: InstalledRepository[] = [];
+      for (const repo of body.repositories) {
+        const entry = repo as { full_name?: unknown; private?: unknown };
+        if (typeof entry.full_name !== "string") continue;
+        const [owner, name] = entry.full_name.split("/");
+        if (!owner || !name) continue;
+        repositories.push({ owner, repo: name, private: entry.private === true });
+      }
+
+      seen += body.repositories.length;
+      const totalCount = typeof body.total_count === "number" ? body.total_count : undefined;
+      if (totalCount !== undefined && seen < totalCount && body.repositories.length === 0) {
+        throw new Error("failed to list installation repositories: incomplete response");
+      }
+      const hasNext =
+        totalCount === undefined ? body.repositories.length === 100 : seen < totalCount;
+      return {
+        items: repositories,
+        ...(hasNext ? { nextCursor: String(page + 1) } : {}),
+      };
+    },
+    { maxPages: 1000, maxItems: 100_000 }
   );
-  if (res.status < 200 || res.status >= 300) {
-    throw new Error(`failed to list installation repositories: status ${res.status}`);
-  }
-  const body = res.body as { repositories?: unknown } | undefined;
-  if (!Array.isArray(body?.repositories)) return [];
-  const repositories: InstalledRepository[] = [];
-  for (const repo of body.repositories) {
-    const entry = repo as { full_name?: unknown; private?: unknown };
-    if (typeof entry.full_name !== "string") continue;
-    const [owner, name] = entry.full_name.split("/");
-    if (!owner || !name) continue;
-    repositories.push({ owner, repo: name, private: entry.private === true });
-  }
-  return repositories;
 }
 
 /** Fail soft after credential storage; reconnects upsert installation grants. */
