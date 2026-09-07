@@ -1,6 +1,13 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { MarkdownView } from "~/components/markdown-view";
 import type { StreamWordCounter } from "~/lib/rehype-stream-words";
+
+/**
+ * `.tf-word-in` runs a 420ms transition plus up to `--word-delay` per word (`app.css`); this is
+ * how long the pipeline stays in streaming mode after `streaming` itself goes false, so the last
+ * batch's spans can finish before the rebuild to plain text happens on an already-settled pass.
+ */
+const STREAM_WORD_SETTLE_MS = 600;
 
 /**
  * Assistant text rendered as terminal-native markdown (reuses the shared MarkdownView so code, lists,
@@ -25,12 +32,28 @@ export function Response({
     revealed.current = counter.current.total;
   });
 
+  // `streaming` flips false in the same commit that seals the message. Dropping the streamWords
+  // plugin on that same render rebuilds every already-transitioning `.tf-word-in` span straight to
+  // plain text mid-animation — the outgoing glyphs visibly smear. Holding the pipeline in streaming
+  // mode for one settle period lets that last batch finish before the rebuild happens.
+  const [settled, setSettled] = useState(streaming !== true);
+  useEffect(() => {
+    if (streaming) {
+      setSettled(false);
+      return;
+    }
+    const timer = setTimeout(() => setSettled(true), STREAM_WORD_SETTLE_MS);
+    return () => clearTimeout(timer);
+  }, [streaming]);
+
+  const animating = streaming === true || !settled;
+
   return (
     <div>
       {text ? (
         <MarkdownView
           citations={citations}
-          streamWords={streaming ? { from: revealed.current, counter: counter.current } : undefined}
+          streamWords={animating ? { from: revealed.current, counter: counter.current } : undefined}
         >
           {text}
         </MarkdownView>

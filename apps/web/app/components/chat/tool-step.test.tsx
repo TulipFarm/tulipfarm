@@ -215,6 +215,27 @@ describe("A Tool step on the trace", () => {
     expect(screen.getByText("Ask an administrator to add this Credential.")).toBeInTheDocument();
   });
 
+  it("settles an automatic authorization denial collapsed instead of flashing it open", () => {
+    // No `approval` field: an automatic denial never entered the human-approval flow, so it
+    // never had anything asking the reader to act on it — it should read as an already-resolved,
+    // collapsed step from first paint like any other finished call.
+    renderStep(toolPart({ outcome: "error", meta: { errorCode: "denied" } }));
+
+    expect(step()).toHaveAttribute("aria-expanded", "false");
+  });
+
+  it("still holds a genuinely human-denied call open, since the reader had to decide on it", () => {
+    renderStep(
+      toolPart({
+        outcome: "error",
+        meta: { errorCode: "denied" },
+        approval: { approvalId: "appr_1", status: "denied" },
+      })
+    );
+
+    expect(step()).toHaveAttribute("aria-expanded", "true");
+  });
+
   it("renders the running state while the call is still in flight", () => {
     const { container } = renderStep(toolPart({ status: "running", outcome: undefined }), {
       pending: true,

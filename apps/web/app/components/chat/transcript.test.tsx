@@ -746,4 +746,129 @@ describe("Transcript auto-scroll stays inside its own scroll container", () => {
       tracked.restore();
     }
   });
+
+  it("anchors a block taller than the viewport to its own top instead of the tail", async () => {
+    // A block taller than the container would land the reader mid-card under a bare
+    // `scrollTop = scrollHeight` jump. Give every element the same generous rect except the
+    // scroll container itself, so the last block reads as "taller than the viewport" and its
+    // computed top sits 50px below the container's.
+    const rectDescriptor = HTMLElement.prototype.getBoundingClientRect;
+    HTMLElement.prototype.getBoundingClientRect = function (this: HTMLElement) {
+      if (this.classList.contains("overflow-y-auto")) {
+        return { top: 0, height: 200 } as DOMRect;
+      }
+      return { top: 50, height: 400 } as DOMRect;
+    };
+    const clientHeightDescriptor = Object.getOwnPropertyDescriptor(
+      HTMLElement.prototype,
+      "clientHeight"
+    );
+    Object.defineProperty(HTMLElement.prototype, "clientHeight", {
+      configurable: true,
+      get(this: HTMLElement) {
+        return this.classList.contains("overflow-y-auto") ? 200 : 0;
+      },
+    });
+    const scrolled: number[] = [];
+    const scrollTopDescriptor = Object.getOwnPropertyDescriptor(Element.prototype, "scrollTop");
+    Object.defineProperty(Element.prototype, "scrollTop", {
+      configurable: true,
+      get: () => 0,
+      set: (value: number) => void scrolled.push(value),
+    });
+    try {
+      render(
+        <Transcript
+          messages={fold([{ type: "text", data: { delta: "streaming" } }], "hi").messages}
+          status="streaming"
+          onApprove={vi.fn()}
+        />
+      );
+      await act(async () => {
+        await new Promise((resolve) => requestAnimationFrame(() => resolve(null)));
+      });
+
+      // The container starts at top 0; the block starts 50px lower, so the anchor write is 50,
+      // never the tail-jump `scrollHeight` value a plain bottom-pin would have produced.
+      expect(scrolled).toContain(50);
+    } finally {
+      HTMLElement.prototype.getBoundingClientRect = rectDescriptor;
+      if (clientHeightDescriptor) {
+        Object.defineProperty(HTMLElement.prototype, "clientHeight", clientHeightDescriptor);
+      }
+      if (scrollTopDescriptor) {
+        Object.defineProperty(Element.prototype, "scrollTop", scrollTopDescriptor);
+      }
+    }
+  });
+
+  it("re-arms sticking once the reader is back at the bottom, undoing an incidental un-stick", async () => {
+    const scrolled: number[] = [];
+    let scrollTopValue = 0;
+    const scrollTopDescriptor = Object.getOwnPropertyDescriptor(Element.prototype, "scrollTop");
+    Object.defineProperty(Element.prototype, "scrollTop", {
+      configurable: true,
+      get: () => scrollTopValue,
+      set: (value: number) => {
+        scrollTopValue = value;
+        scrolled.push(value);
+      },
+    });
+
+    function flushFrames() {
+      return act(async () => {
+        await new Promise((resolve) => requestAnimationFrame(() => resolve(null)));
+      });
+    }
+
+    try {
+      const first = fold([{ type: "text", data: { delta: "hello" } }], "hi");
+      const { rerender, container } = render(
+        <Transcript messages={first.messages} status="streaming" onApprove={vi.fn()} />
+      );
+      await flushFrames();
+      const scrollEl = container.querySelector(".overflow-y-auto") as HTMLElement;
+      expect(scrollEl).not.toBeNull();
+      const before = scrolled.length;
+
+      // A deliberate scroll away from the bottom (a wheel gesture, then landing away from it)
+      // un-sticks the transcript — no further auto-scroll should happen while it stays there.
+      Object.defineProperty(scrollEl, "scrollHeight", { configurable: true, value: 1000 });
+      Object.defineProperty(scrollEl, "clientHeight", { configurable: true, value: 200 });
+      scrollTopValue = 0;
+      scrollEl.dispatchEvent(new Event("wheel", { bubbles: true }));
+      scrollEl.dispatchEvent(new Event("scroll", { bubbles: true }));
+
+      const second = fold(
+        [
+          { type: "text", data: { delta: "hello" } },
+          { type: "text", data: { delta: " world" } },
+        ],
+        "hi"
+      );
+      rerender(<Transcript messages={second.messages} status="streaming" onApprove={vi.fn()} />);
+      await flushFrames();
+      expect(scrolled.length).toBe(before);
+
+      // Reaching the bottom by any means (here, an incidental jump back) re-arms sticking, so the
+      // very next update auto-scrolls again instead of staying stuck un-stuck forever.
+      scrollTopValue = 800;
+      scrollEl.dispatchEvent(new Event("scroll", { bubbles: true }));
+
+      const third = fold(
+        [
+          { type: "text", data: { delta: "hello" } },
+          { type: "text", data: { delta: " world again" } },
+        ],
+        "hi"
+      );
+      rerender(<Transcript messages={third.messages} status="streaming" onApprove={vi.fn()} />);
+      await flushFrames();
+      expect(scrolled.length).toBeGreaterThan(before);
+    } finally {
+      if (scrollTopDescriptor) {
+        Object.defineProperty(Element.prototype, "scrollTop", scrollTopDescriptor);
+      }
+    }
+  });
 });
