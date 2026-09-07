@@ -190,6 +190,7 @@ const EXPECTED_FAMILY_TOOL_NAMES = [
       "slack_file_info",
       "slack_file_upload",
       "slack_message_delete",
+      "slack_message_history",
       "slack_message_update",
       "slack_pin_manage",
       "slack_reaction_remove",

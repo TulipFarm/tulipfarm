@@ -136,8 +136,19 @@ interface SlackApiChannel {
   readonly is_member?: unknown;
   readonly is_im?: unknown;
   readonly is_mpim?: unknown;
+  readonly is_private?: unknown;
   readonly topic?: { readonly value?: unknown };
   readonly purpose?: { readonly value?: unknown };
+}
+
+interface SlackApiMessage {
+  readonly ts?: unknown;
+  readonly text?: unknown;
+  readonly user?: unknown;
+  readonly thread_ts?: unknown;
+  readonly edited?: unknown;
+  readonly subtype?: unknown;
+  readonly message?: unknown;
 }
 
 interface SlackApiUser {
@@ -273,6 +284,42 @@ function userView(value: unknown) {
   };
 }
 
+function messageHistoryArgs(intent: ToolAdapterRequest["intent"]): {
+  channel: string;
+  cursor?: string;
+  oldest?: string;
+  threadTs?: string;
+  limit: number;
+} {
+  const raw = intent.arguments as Record<string, unknown>;
+  const channel = raw.channel;
+  if (typeof channel !== "string" || channel.trim().length === 0) {
+    throw new AdapterDispatchError("before_dispatch", "invalid_arguments", false);
+  }
+  const optionalString = (name: "cursor" | "oldest" | "threadTs") => {
+    const value = raw[name];
+    if (value === undefined) return undefined;
+    if (typeof value !== "string" || value.length === 0) {
+      throw new AdapterDispatchError("before_dispatch", "invalid_arguments", false);
+    }
+    return value;
+  };
+  const limit = raw.limit ?? 100;
+  if (!Number.isInteger(limit) || Number(limit) < 1 || Number(limit) > 200) {
+    throw new AdapterDispatchError("before_dispatch", "invalid_arguments", false);
+  }
+  const cursor = optionalString("cursor");
+  const oldest = optionalString("oldest");
+  const threadTs = optionalString("threadTs");
+  return {
+    channel: channel.trim(),
+    limit: Number(limit),
+    ...(cursor === undefined ? {} : { cursor }),
+    ...(oldest === undefined ? {} : { oldest }),
+    ...(threadTs === undefined ? {} : { threadTs }),
+  };
+}
+
 async function sha256(bytes: Uint8Array): Promise<string> {
   const digest = await crypto.subtle.digest("SHA-256", Uint8Array.from(bytes).buffer);
   return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
@@ -293,6 +340,8 @@ export class SlackToolAdapter implements ToolAdapter, ToolReconciliationAdapter 
         return { channels: await this.listChannels(credential) };
       case SLACK_TOOL_IDS.getConversation:
         return this.getConversation(request, credential);
+      case SLACK_TOOL_IDS.listMessages:
+        return this.listMessages(request, credential);
       case SLACK_TOOL_IDS.sendMessage:
         return this.sendMessage(request, credential);
       case SLACK_TOOL_IDS.updateMessage:
@@ -1570,5 +1619,88 @@ export class SlackToolAdapter implements ToolAdapter, ToolReconciliationAdapter 
       if (cursor === undefined) break;
     }
     return { exact, firstName };
+  }
+
+  private async listMessages(
+    request: ToolAdapterRequest,
+    credential: string
+  ): Promise<{
+    channelId: string;
+    messages: {
+      ts: string;
+      text: string;
+      userId?: string;
+      threadTs?: string;
+      editedTs?: string;
+    }[];
+    nextCursor?: string;
+  }> {
+    const input = messageHistoryArgs(request.intent);
+    const channelId = await this.resolvePublicChannelId(input.channel, credential);
+    const page = await this.api(
+      credential,
+      input.threadTs === undefined ? "/conversations.history" : "/conversations.replies",
+      {
+        method: "GET",
+        query: {
+          channel: channelId,
+          limit: String(input.limit),
+          ...(input.cursor === undefined ? {} : { cursor: input.cursor }),
+          ...(input.threadTs === undefined
+            ? input.oldest === undefined
+              ? {}
+              : { oldest: input.oldest }
+            : { ts: input.threadTs }),
+        },
+      }
+    );
+
+    const rawMessages = Array.isArray(page.messages) ? (page.messages as SlackApiMessage[]) : [];
+    const messages = rawMessages.flatMap((raw) => {
+      if (raw.subtype === "message_deleted") return [];
+      const source =
+        raw.subtype === "message_changed" && record(raw.message).ts !== undefined
+          ? (record(raw.message) as SlackApiMessage)
+          : raw;
+      if (typeof source.ts !== "string" || typeof source.text !== "string") return [];
+      const edited = record(source.edited).ts;
+      return [
+        {
+          ts: source.ts,
+          text: source.text,
+          ...(typeof source.user === "string" ? { userId: source.user } : {}),
+          ...(typeof source.thread_ts === "string" ? { threadTs: source.thread_ts } : {}),
+          ...(typeof edited === "string" ? { editedTs: edited } : {}),
+        },
+      ];
+    });
+    return {
+      channelId,
+      messages,
+      ...(nextCursor(page) === undefined ? {} : { nextCursor: nextCursor(page) }),
+    };
+  }
+
+  private async resolvePublicChannelId(channel: string, credential: string): Promise<string> {
+    const channelId = isChannelId(channel)
+      ? channel
+      : await this.resolveChannelId(normalizeChannelName(channel), credential);
+    const info = await this.api(credential, "/conversations.info", {
+      method: "GET",
+      query: { channel: channelId },
+    });
+    const conversation = record(info.channel);
+    if (conversation.is_member !== true) {
+      throw new AdapterDispatchError("before_dispatch", "channel_not_joined", false);
+    }
+    if (
+      conversation.is_private === true ||
+      conversation.is_im === true ||
+      conversation.is_mpim === true ||
+      !channelId.startsWith("C")
+    ) {
+      throw new AdapterDispatchError("before_dispatch", "restricted_channel", false);
+    }
+    return channelId;
   }
 }

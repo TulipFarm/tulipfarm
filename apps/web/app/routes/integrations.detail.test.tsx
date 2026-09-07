@@ -114,6 +114,34 @@ test("shows what agents can do when the manifest says so", async () => {
   expect(screen.getByText("Merge pull requests")).toBeInTheDocument();
 });
 
+test("offers connected Slack Knowledge setup without claiming automatic indexing", async () => {
+  renderDetail(
+    detail({
+      name: "slack",
+      title: "Slack",
+      connected: true,
+      status: "connected",
+      setupGuide: "# Slack setup",
+      knowledge: {
+        mode: "user_configured",
+        automatic_indexing: false,
+        source_tools: ["slack_channel_list", "slack_message_history"],
+        write_tools: ["create_knowledge_page"],
+      },
+    })
+  );
+
+  expect(await screen.findByRole("heading", { name: "Knowledge" })).toBeInTheDocument();
+  expect(screen.getByText(/nothing is indexed automatically/i)).toBeInTheDocument();
+  expect(screen.getByText(/private channels and DMs are refused/i)).toBeInTheDocument();
+  const link = screen.getByRole("link", { name: "Set up in Chat" });
+  expect(link).toHaveAttribute("href", expect.stringContaining("/?draft="));
+  expect(decodeURIComponent(link.getAttribute("href") ?? "")).toMatch(
+    /slack_message_history.*create_knowledge_page/i
+  );
+  expect(screen.getByRole("button", { name: "View setup guide" })).toBeInTheDocument();
+});
+
 test("shows connection state as a badge in the header", async () => {
   renderDetail(detail({ connected: true, status: "connected" }));
   expect(await screen.findByText("Connected")).toBeInTheDocument();

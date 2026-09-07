@@ -274,6 +274,13 @@ export interface IntegrationGrant {
   description?: string;
 }
 
+export interface IntegrationKnowledgeSetup {
+  mode: "user_configured";
+  automatic_indexing: false;
+  source_tools: string[];
+  write_tools: string[];
+}
+
 export interface IntegrationManifest {
   name: string;
   version?: string;
@@ -285,6 +292,8 @@ export interface IntegrationManifest {
   capabilities?: string[];
   /** Authority handed to TulipFarm; derived from OAuth scopes unless the source is opaque. */
   grants?: IntegrationGrant[];
+  /** User-reachable setup contract. It advertises Tools but never starts ingestion itself. */
+  knowledge?: IntegrationKnowledgeSetup;
   egress: EgressConfig;
   ingress?: IngressConfig;
   /** Ordered connect flow; use `resolveAuthSteps()` to include legacy fields. */

@@ -79,6 +79,26 @@ function listRequest(): ToolAdapterRequest {
   return { intent, idempotencyKey: intent.idempotencyKey, attempt: 1 };
 }
 
+function historyRequest(
+  channel: string,
+  overrides: Record<string, unknown> = {}
+): ToolAdapterRequest {
+  const intent: ToolIntent = {
+    intentId: "55555555-5555-4555-8555-555555555555",
+    businessId: "biz-1",
+    runId: "run-1",
+    stateId: "state-history",
+    toolId: SLACK_TOOL_IDS.listMessages,
+    toolVersion: "1.0.0",
+    action: SLACK_TOOL_IDS.listMessages,
+    targetRefs: [],
+    arguments: { channel, ...overrides },
+    credentialRef: "slack-bot-token",
+    idempotencyKey: "66666666-6666-4666-8666-666666666666",
+  };
+  return { intent, idempotencyKey: intent.idempotencyKey, attempt: 1 };
+}
+
 describe("SlackToolAdapter channel discovery", () => {
   it("paginates and returns stable ids only for channels the bot has joined", async () => {
     const calls: IntegrationHttpRequest[] = [];
@@ -128,6 +148,159 @@ describe("SlackToolAdapter channel discovery", () => {
       limit: "100",
     });
     expect(calls[1]?.query?.cursor).toBe("page-2");
+  });
+
+  describe("SlackToolAdapter message history", () => {
+    it("returns one bounded public-channel page and its cursor without writing anywhere", async () => {
+      const calls: IntegrationHttpRequest[] = [];
+      const http = {
+        async send(request: IntegrationHttpRequest): Promise<IntegrationHttpResponse> {
+          calls.push(request);
+          if (request.path === "/conversations.info") {
+            return {
+              status: 200,
+              headers: {},
+              body: {
+                ok: true,
+                channel: {
+                  id: "C1234567890",
+                  name: "general",
+                  is_member: true,
+                  is_private: false,
+                },
+              },
+            };
+          }
+          if (request.path === "/conversations.history") {
+            return {
+              status: 200,
+              headers: {},
+              body: {
+                ok: true,
+                messages: [
+                  {
+                    ts: "1700000000.000100",
+                    text: "Ship it",
+                    user: "U123",
+                    edited: { ts: "1700000001.000100" },
+                  },
+                  { ts: "1700000002.000100", subtype: "message_deleted" },
+                ],
+                response_metadata: { next_cursor: "next-page" },
+              },
+            };
+          }
+          throw new Error(`unexpected path: ${request.path}`);
+        },
+      };
+      const adapter = new SlackToolAdapter({ http });
+
+      await expect(
+        adapter.dispatch(
+          historyRequest("C1234567890", { oldest: "1699999999.000000", limit: 25 }),
+          CREDENTIAL
+        )
+      ).resolves.toEqual({
+        channelId: "C1234567890",
+        messages: [
+          {
+            ts: "1700000000.000100",
+            text: "Ship it",
+            userId: "U123",
+            editedTs: "1700000001.000100",
+          },
+        ],
+        nextCursor: "next-page",
+      });
+      expect(calls.map(({ path }) => path)).toEqual([
+        "/conversations.info",
+        "/conversations.history",
+      ]);
+      expect(calls[1]?.query).toEqual({
+        channel: "C1234567890",
+        limit: "25",
+        oldest: "1699999999.000000",
+      });
+    });
+
+    it("refuses private channels before reading their messages", async () => {
+      const calls: IntegrationHttpRequest[] = [];
+      const http = {
+        async send(request: IntegrationHttpRequest): Promise<IntegrationHttpResponse> {
+          calls.push(request);
+          return {
+            status: 200,
+            headers: {},
+            body: {
+              ok: true,
+              channel: {
+                id: "G1234567890",
+                name: "leadership",
+                is_member: true,
+                is_private: true,
+              },
+            },
+          };
+        },
+      };
+      const adapter = new SlackToolAdapter({ http });
+
+      await expect(
+        adapter.dispatch(historyRequest("G1234567890"), CREDENTIAL)
+      ).rejects.toMatchObject({
+        code: "restricted_channel",
+      });
+      expect(calls.map(({ path }) => path)).toEqual(["/conversations.info"]);
+    });
+
+    it("reads a selected thread instead of channel history", async () => {
+      const calls: IntegrationHttpRequest[] = [];
+      const http = {
+        async send(request: IntegrationHttpRequest): Promise<IntegrationHttpResponse> {
+          calls.push(request);
+          if (request.path === "/conversations.info") {
+            return {
+              status: 200,
+              headers: {},
+              body: {
+                ok: true,
+                channel: {
+                  id: "C1234567890",
+                  name: "general",
+                  is_member: true,
+                  is_private: false,
+                },
+              },
+            };
+          }
+          return {
+            status: 200,
+            headers: {},
+            body: {
+              ok: true,
+              messages: [
+                { ts: "1700000001.000100", text: "Reply", thread_ts: "1700000000.000100" },
+              ],
+            },
+          };
+        },
+      };
+      const adapter = new SlackToolAdapter({ http });
+
+      await adapter.dispatch(
+        historyRequest("C1234567890", { threadTs: "1700000000.000100" }),
+        CREDENTIAL
+      );
+
+      expect(calls[1]).toMatchObject({
+        path: "/conversations.replies",
+        query: {
+          channel: "C1234567890",
+          limit: "100",
+          ts: "1700000000.000100",
+        },
+      });
+    });
   });
 
   it("fails instead of silently returning a truncated channel directory", async () => {

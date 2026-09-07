@@ -97,6 +97,19 @@ function displayName(integration: IntegrationDetail): string {
   return integration.title ?? integration.name;
 }
 
+function knowledgeSetupDraft(integration: IntegrationDetail): string {
+  const sourceTools = integration.knowledge?.source_tools.join(", ") ?? "";
+  const writeTools = integration.knowledge?.write_tools.join(", ") ?? "";
+  return [
+    `Set up ${displayName(integration)} as a Knowledge source.`,
+    "Ask me which public channels, schedule, and summarization rules I want.",
+    "Do not read messages or create anything until I approve the plan.",
+    `Then create a durable Routine in the Soul using ${sourceTools} to read bounded pages and ${writeTools} to save reviewed content.`,
+    "Store the newest processed Slack timestamp and pass it as oldest on the next Run. Use nextCursor only to finish the current bounded scan.",
+    "Private channels and DMs must stay excluded.",
+  ].join(" ");
+}
+
 // Separators are decoration, and at narrow widths a wrapped line strands one at the end of the
 // row above. Below `sm` they are dropped and the gap widens instead, so the meta line still reads
 // as distinct items without the orphan.
@@ -504,6 +517,36 @@ export default function IntegrationDetailPage() {
                 : "What connecting asks the provider for. These are the provider's own terms. They should match what its consent screen shows you."}
             </p>
             <GrantList grants={integration.grants} />
+          </section>
+        )}
+
+        {integration.knowledge && (
+          <section className="flex flex-col gap-2">
+            <SectionHeading>Knowledge</SectionHeading>
+            <p className="max-w-prose text-sm text-foreground">
+              {isConnected
+                ? `${name} is authorized for user-configured Knowledge setup.`
+                : `Connect ${name} before setting it up as a Knowledge source.`}
+            </p>
+            <p className="max-w-prose text-xs text-muted-foreground">
+              Nothing is indexed automatically. The setup flow creates a Soul-backed Routine only
+              after you choose public channels, a schedule, and what should become Knowledge.
+              Private channels and DMs are refused.
+            </p>
+            {isConnected && (
+              <div className="flex flex-wrap gap-2">
+                <Button asChild size="sm">
+                  <Link to={`/?draft=${encodeURIComponent(knowledgeSetupDraft(integration))}`}>
+                    Set up in Chat
+                  </Link>
+                </Button>
+                {integration.setupGuide && (
+                  <Button size="sm" variant="outline" onClick={() => setGuideOpen(true)}>
+                    View setup guide
+                  </Button>
+                )}
+              </div>
+            )}
           </section>
         )}
 

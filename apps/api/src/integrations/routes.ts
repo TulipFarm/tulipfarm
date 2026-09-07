@@ -164,6 +164,7 @@ async function toDetail(
     iconColor: mark?.hex ?? listing?.color,
     capabilities: entry.manifest.capabilities,
     grants: resolveGrants(entry.manifest),
+    knowledge: entry.manifest.knowledge,
     manifest: {
       // Derived from the resolved flow, not read from the manifest: a manifest that declares
       // `auth` has no `required_env`, and every consumer must see one shape.

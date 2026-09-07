@@ -9,6 +9,7 @@ export const SLACK_ADAPTER_REF = "integration:slack";
 export const SLACK_TOOL_IDS = {
   listChannels: "slack.channel.list",
   getConversation: "slack.conversation.get",
+  listMessages: "slack.message.list",
   sendMessage: "slack.message.send",
   updateMessage: "slack.message.update",
   deleteMessage: "slack.message.delete",
@@ -84,6 +85,45 @@ const getConversationInput = {
     limit: { type: "integer", minimum: 1, maximum: 200, default: 100 },
   },
 } as const;
+
+const listMessagesInputSchema = {
+  type: "object",
+  additionalProperties: false,
+  required: ["channel"],
+  properties: {
+    channel: {
+      type: "string",
+      minLength: 1,
+      maxLength: 80,
+      description:
+        "Public channel name (with or without a leading '#') or stable Slack channel ID. The bot " +
+        "must be a member.",
+    },
+    cursor: {
+      type: "string",
+      minLength: 1,
+      maxLength: 512,
+      description: "Slack cursor returned by the previous call.",
+    },
+    oldest: {
+      type: "string",
+      pattern: "^\\d+(?:\\.\\d+)?$",
+      description: "Optional Slack timestamp. Only messages after this timestamp are returned.",
+    },
+    threadTs: {
+      type: "string",
+      pattern: "^\\d+(?:\\.\\d+)?$",
+      description: "Optional parent message timestamp. When present, list that thread's replies.",
+    },
+    limit: {
+      type: "integer",
+      minimum: 1,
+      maximum: 200,
+      default: 100,
+    },
+  },
+} as const;
+
 const messageItem = {
   type: "object",
   additionalProperties: false,
@@ -113,6 +153,34 @@ const getConversationOutput = {
     },
     messages: { type: "array", maxItems: 200, items: messageItem },
     nextCursor: { type: "string" },
+  },
+} as const;
+
+const slackMessageSchema = {
+  type: "object",
+  additionalProperties: false,
+  required: ["ts", "text"],
+  properties: {
+    ts: timestamp,
+    text: { type: "string", maxLength: 40_000 },
+    userId: { type: "string" },
+    threadTs: timestamp,
+    editedTs: timestamp,
+  },
+} as const;
+
+const listMessagesOutputSchema = {
+  type: "object",
+  additionalProperties: false,
+  required: ["channelId", "messages"],
+  properties: {
+    channelId: { type: "string", minLength: 1 },
+    messages: {
+      type: "array",
+      maxItems: 200,
+      items: slackMessageSchema,
+    },
+    nextCursor: { type: "string", minLength: 1 },
   },
 } as const;
 
@@ -386,6 +454,13 @@ const getConversation = read(
   getConversationInput,
   getConversationOutput
 );
+const listMessages = read(
+  "aaaaaaaa-0004-4000-8000-000000000013",
+  "slack-message-list",
+  SLACK_TOOL_IDS.listMessages,
+  listMessagesInputSchema,
+  listMessagesOutputSchema
+);
 const sendMessage = mutation(
   "aaaaaaaa-0004-4000-8000-000000000001",
   "slack-message-send",
@@ -486,6 +561,7 @@ const lookupUser = read(
 export const SLACK_TOOL_CONTRACTS: readonly ToolContractDefinition[] = [
   listChannels,
   getConversation,
+  listMessages,
   sendMessage,
   updateMessage,
   deleteMessage,
@@ -504,6 +580,13 @@ const declarations = [
     getConversation,
     "slack_conversation_get",
     "Read up to 200 messages from one Slack conversation the bot has joined.",
+  ],
+  [
+    listMessages,
+    "slack_message_history",
+    "Read one bounded page from a joined public Slack channel, or one thread. This never writes to " +
+      "Knowledge or schedules another read. Use it only after the user selects the channel for " +
+      "their own ingestion Routine. Private channels and DMs are refused.",
   ],
   [
     sendMessage,
