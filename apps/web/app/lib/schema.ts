@@ -36,11 +36,13 @@ export type FieldKind =
   | "date"
   | "unknown";
 
+export type SchemaEnumValue = string | number | boolean;
+
 export type FieldDescriptor = {
   name: string;
   kind: FieldKind;
   linkTarget?: string;
-  enumValues?: string[];
+  enumValues?: SchemaEnumValue[];
   isSystem: boolean;
   isIdField: boolean;
   required?: boolean;
@@ -113,7 +115,13 @@ function describe(
     name,
     kind,
     linkTarget: kind === "link" ? prop["x-links"]?.target : undefined,
-    enumValues: kind === "enum" ? (prop.enum ?? []).map(String) : undefined,
+    enumValues:
+      kind === "enum"
+        ? (prop.enum ?? []).filter(
+            (value): value is SchemaEnumValue =>
+              typeof value === "string" || typeof value === "number" || typeof value === "boolean"
+          )
+        : undefined,
     isSystem: (SYSTEM_FIELDS as readonly string[]).includes(name),
     isIdField: name === idField,
     required: required.has(name),

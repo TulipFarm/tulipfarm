@@ -38,6 +38,7 @@ function isJsonKind(field: FieldDescriptor): boolean {
 function initialValue(field: FieldDescriptor, initial?: Record<string, unknown>): unknown {
   const v = initial?.[field.name];
   if (v !== undefined && v !== null) return v;
+  if (field.kind === "enum") return undefined;
   return field.kind === "boolean" ? false : "";
 }
 
@@ -138,7 +139,10 @@ export function ResourceForm({
       }
 
       const value = values[field.name];
-      if (field.kind === "boolean") {
+      if (field.kind === "enum") {
+        if (value === undefined) continue;
+        payload[field.name] = value;
+      } else if (field.kind === "boolean") {
         payload[field.name] = Boolean(value);
       } else if (field.kind === "number") {
         if (value === "" || value === undefined) continue;
@@ -247,23 +251,29 @@ function Field({
           onChange={(e) => onValue(e.target.value)}
         />
       );
-    case "enum":
+    case "enum": {
+      const enumValues = field.enumValues ?? [];
+      const selectedIndex = enumValues.findIndex((option) => Object.is(option, value));
       return (
         <select
           id={field.name}
           className={inputClass}
           required={field.required}
-          value={String(value ?? "")}
-          onChange={(e) => onValue(e.target.value)}
+          value={selectedIndex === -1 ? "" : String(selectedIndex)}
+          onChange={(e) => {
+            const index = Number(e.target.value);
+            onValue(e.target.value === "" ? undefined : enumValues[index]);
+          }}
         >
           <option value="">-</option>
-          {(field.enumValues ?? []).map((opt) => (
-            <option key={opt} value={opt}>
-              {opt}
+          {enumValues.map((opt, index) => (
+            <option key={`${typeof opt}:${String(opt)}`} value={String(index)}>
+              {String(opt)}
             </option>
           ))}
         </select>
       );
+    }
     case "date":
       return (
         <input

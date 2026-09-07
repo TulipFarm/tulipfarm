@@ -61,6 +61,34 @@ test("a declared enum becomes a choice rather than free text", () => {
   expect(screen.getByRole("combobox", { name: /tier/i })).toBeInTheDocument();
 });
 
+test("preserves enum types and number input semantics in the submitted payload", async () => {
+  const onDryRun = vi.fn(async () => {});
+  renderPanel({
+    inputs: {
+      properties: {
+        score: { type: "integer", enum: [1, 2] },
+        ratio: { type: "number" },
+        count: { type: "integer" },
+      },
+    },
+    onDryRun,
+  });
+
+  const score = screen.getByRole("combobox", { name: /score/i });
+  const ratio = screen.getByRole("spinbutton", { name: /ratio/i });
+  const count = screen.getByRole("spinbutton", { name: /count/i });
+  expect(ratio).toHaveAttribute("step", "any");
+  expect(count).toHaveAttribute("step", "1");
+
+  await userEvent.selectOptions(score, screen.getByRole("option", { name: "2" }));
+  await userEvent.type(ratio, "1.5");
+  await userEvent.clear(ratio);
+  await userEvent.type(count, "3");
+  await userEvent.click(screen.getByRole("button", { name: /dry run/i }));
+
+  expect(onDryRun).toHaveBeenCalledWith({ score: 2, count: 3 });
+});
+
 test("neither button can be pressed twice while one is running", () => {
   renderPanel({ busy: "dry-run" });
   expect(screen.getByRole("button", { name: /run now/i })).toBeDisabled();

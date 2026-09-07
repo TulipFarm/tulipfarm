@@ -113,6 +113,42 @@ test("submit coerces typed values and omits empty optional fields", () => {
   expect(onSubmit).toHaveBeenCalledWith({ title: "Hello", count: 5, open: true });
 });
 
+test("submits enum values with their schema primitive types", () => {
+  const enumSchema = parseSchema(`
+type: object
+properties:
+  score: { type: integer, enum: [1, 2] }
+  visible: { type: boolean, enum: [true, false] }
+  label: { type: string, enum: [low, high] }
+  optional: { type: string, enum: [one, two] }
+required: [score, visible, label]
+`);
+  if (!enumSchema.ok) throw new Error(enumSchema.error);
+  const onSubmit = vi.fn();
+  const { container } = renderForm(
+    <ResourceForm
+      fields={formFields(enumSchema.schema)}
+      mode="create"
+      onSubmit={onSubmit}
+      submitting={false}
+      cancelTo="/"
+    />
+  );
+
+  fireEvent.change(container.querySelector("select#score") as HTMLSelectElement, {
+    target: { value: "1" },
+  });
+  fireEvent.change(container.querySelector("select#visible") as HTMLSelectElement, {
+    target: { value: "1" },
+  });
+  fireEvent.change(container.querySelector("select#label") as HTMLSelectElement, {
+    target: { value: "0" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Create" }));
+
+  expect(onSubmit).toHaveBeenCalledWith({ score: 2, visible: false, label: "low" });
+});
+
 test("invalid JSON in an array/object field blocks submit and shows an inline error", () => {
   const onSubmit = vi.fn();
   const { container } = renderForm(

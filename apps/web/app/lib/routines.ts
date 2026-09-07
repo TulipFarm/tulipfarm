@@ -58,7 +58,7 @@ export type RoutineInputsSchema = {
   required?: string[];
   properties?: Record<
     string,
-    { type?: string; description?: string; enum?: Array<string | number> }
+    { type?: string; description?: string; enum?: Array<string | number | boolean> }
   >;
 };
 
