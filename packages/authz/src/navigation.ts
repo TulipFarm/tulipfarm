@@ -34,6 +34,12 @@ const USER_MANAGE: NavigationAuthorization = {
   fallback: "admin",
 };
 
+const TEAM_DIRECTORY_READ: NavigationAuthorization = {
+  action: "team.directory.read",
+  resourceType: "team",
+  fallback: "authenticated",
+};
+
 /** Server-owned visibility requirements for every static destination in the product shell. */
 export const NAVIGATION_REQUIREMENTS: readonly NavigationRequirement[] = [
   { path: "/farm", authorizations: [AUTHENTICATED_NAVIGATION] },
@@ -48,6 +54,7 @@ export const NAVIGATION_REQUIREMENTS: readonly NavigationRequirement[] = [
   // whether to show the Runs lane at all. Removing it would hide Runs from every session.
   { path: "/runs", authorizations: [OPERATIONS_READ] },
   { path: "/business/activities", authorizations: [AUTHENTICATED_NAVIGATION] },
+  { path: "/teams", authorizations: [TEAM_DIRECTORY_READ] },
   { path: "/operations", authorizations: [OPERATIONS_READ] },
   {
     path: "/business/cost",

@@ -73,6 +73,8 @@ export const SIDEBAR_GROUPS: NavGroup[] = [
   {
     heading: "Work",
     items: [
+      // The sole item still bypassing visiblePaths — see the `always` field doc above. Every
+      // other destination, /teams included, sources its visibility from the server.
       { to: "/chats", label: "Chats", icon: MessageSquare, always: true },
       { to: "/inbox", label: "Inbox", icon: Inbox, badge: true },
       {
@@ -86,7 +88,6 @@ export const SIDEBAR_GROUPS: NavGroup[] = [
         to: "/teams",
         label: "Teams",
         icon: Users,
-        authenticated: true,
         description: "Browse the Teams and people that make up this business.",
       },
     ],

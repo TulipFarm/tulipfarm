@@ -61,7 +61,9 @@ test("a retired page still names its destination while it redirects", () => {
 });
 
 test("hides every denied destination and collapses its empty groups", () => {
-  expect(visibleSidebarGroups({ isDev: false, visiblePaths: ["/business/activities"] })).toEqual([
+  expect(
+    visibleSidebarGroups({ isDev: false, visiblePaths: ["/business/activities", "/teams"] })
+  ).toEqual([
     expect.objectContaining({
       heading: "Work",
       items: [
@@ -77,10 +79,18 @@ test("hides every denied destination and collapses its empty groups", () => {
 test("keeps Chat reachable for an account granted nothing", () => {
   const groups = visibleSidebarGroups({ isDev: false, visiblePaths: [] });
 
-  expect(groups.flatMap((group) => group.items).map((item) => item.to)).toEqual([
-    "/chats",
-    "/teams",
-  ]);
+  expect(groups.flatMap((group) => group.items).map((item) => item.to)).toEqual(["/chats"]);
+});
+
+/* Teams is server-sourced like everything else now — no more client-side `authenticated` guess. */
+test("shows Teams only when the server includes it in visiblePaths", () => {
+  const withTeams = visibleSidebarGroups({ isDev: false, visiblePaths: ["/teams"] });
+  const withoutTeams = visibleSidebarGroups({ isDev: false, visiblePaths: [] });
+
+  expect(withTeams.flatMap((group) => group.items.map((item) => item.to))).toContain("/teams");
+  expect(withoutTeams.flatMap((group) => group.items.map((item) => item.to))).not.toContain(
+    "/teams"
+  );
 });
 
 /*
