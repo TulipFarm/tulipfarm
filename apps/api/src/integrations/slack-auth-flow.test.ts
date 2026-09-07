@@ -270,6 +270,10 @@ describe("slack declarative auth flow", () => {
 
     const manifest = JSON.parse(url.searchParams.get("manifest_json") ?? "{}");
     expect(manifest.settings.socket_mode_enabled).toBe(true);
+    expect(manifest.settings.interactivity.is_enabled).toBe(true);
+    expect(manifest.settings.event_subscriptions.bot_events).toEqual(
+      expect.arrayContaining(["message.channels", "message.groups", "message.im", "message.mpim"])
+    );
     expect(manifest.features.agent_view.agent_description).toBe(
       "Talk to TulipFarm agents from Slack."
     );
