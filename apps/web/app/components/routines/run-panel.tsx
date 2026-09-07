@@ -38,16 +38,20 @@ function InputFields({
       {Object.entries(properties).map(([key, prop]) => {
         const id = `${idPrefix}-${key}`;
         if (prop.enum) {
+          const selectedIndex = prop.enum.findIndex((option) => Object.is(option, values[key]));
           return (
             <Field key={key} label={key} help={prop.description} required={required.has(key)}>
               <Select
                 disabled={disabled}
-                value={String(values[key] ?? "")}
-                onChange={(event) => onChange(key, event.target.value)}
+                value={selectedIndex === -1 ? "" : String(selectedIndex)}
+                onChange={(event) => {
+                  const index = Number(event.target.value);
+                  onChange(key, event.target.value === "" ? undefined : prop.enum?.[index]);
+                }}
               >
                 <option value="">Not set</option>
-                {prop.enum.map((option) => (
-                  <option key={String(option)} value={String(option)}>
+                {prop.enum.map((option, index) => (
+                  <option key={`${typeof option}:${String(option)}`} value={String(index)}>
                     {String(option)}
                   </option>
                 ))}
@@ -77,10 +81,12 @@ function InputFields({
             <Input
               disabled={disabled}
               type={isNumber ? "number" : "text"}
+              step={prop.type === "number" ? "any" : prop.type === "integer" ? 1 : undefined}
               value={String(values[key] ?? "")}
-              onChange={(event) =>
-                onChange(key, isNumber ? Number(event.target.value) : event.target.value)
-              }
+              onChange={(event) => {
+                const value = event.target.value;
+                onChange(key, isNumber ? (value === "" ? undefined : Number(value)) : value);
+              }}
             />
           </Field>
         );
@@ -130,7 +136,12 @@ export function RunPanel({
   const schema = inputs ?? {};
   const hasInputs = Object.keys(schema.properties ?? {}).length > 0;
   const setValue = (key: string, value: unknown) =>
-    setValues((previous) => ({ ...previous, [key]: value }));
+    setValues((previous) => {
+      if (value !== undefined) return { ...previous, [key]: value };
+      const next = { ...previous };
+      delete next[key];
+      return next;
+    });
 
   return (
     <Panel

@@ -64,6 +64,22 @@ test("deriveFields preserves declared order and resolves kinds, ignoring write-s
   expect(byName.id.isIdField).toBe(true);
 });
 
+test("deriveFields preserves number and boolean enum primitives", () => {
+  const parsed = parseSchema(`
+type: object
+properties:
+  score: { type: integer, enum: [1, 2] }
+  visible: { type: boolean, enum: [true, false] }
+`);
+  if (!parsed.ok) throw new Error(parsed.error);
+  const byName = Object.fromEntries(
+    deriveFields(parsed.schema).map((field) => [field.name, field])
+  );
+
+  expect(byName.score.enumValues).toEqual([1, 2]);
+  expect(byName.visible.enumValues).toEqual([true, false]);
+});
+
 test("listColumns promotes id first, drops object/array, appends updatedAt", () => {
   const schema = ticketSchema();
   const cols = listColumns(deriveFields(schema), schema).map((c) => c.name);
