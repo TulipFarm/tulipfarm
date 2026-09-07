@@ -10,6 +10,8 @@ export interface RepairSubject {
   /** Soul-repo path of the artifact the finding names. The gate holds the diff to exactly this. */
   readonly path: string;
   readonly content: string;
+  /** Soul revision read with the artifact, required to reject a stale repair at publication. */
+  readonly baseCommit: string;
   /** Facts the model may use instead of guessing — for a bad reference, the fields that exist. */
   readonly facts: readonly string[];
 }
@@ -49,7 +51,7 @@ export interface RepairPort {
   /** Asks for a repaired artifact and proves it lints. `null` when the model declined. */
   propose(finding: Finding, subject: RepairSubject): Promise<ProposedRepair | null>;
   /** Writes the repaired artifact through the Soul write gateway and republishes. */
-  publish(finding: Finding, repair: ProposedRepair): Promise<void>;
+  publish(finding: Finding, repair: ProposedRepair, subject: RepairSubject): Promise<void>;
 }
 
 export type SweepEvent =
@@ -132,7 +134,7 @@ async function treat(
     return "escalated";
   }
 
-  await repair.publish(finding, proposal);
+  await repair.publish(finding, proposal, subject);
   await ports.ledger.settle(finding.fingerprint, "repaired");
   await ports.report({ kind: "repaired", finding, summary: proposal.summary ?? "repaired" });
   return "repaired";

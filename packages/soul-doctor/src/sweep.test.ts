@@ -18,6 +18,7 @@ const SUBJECT: RepairSubject = {
   path: "soul/bundle",
   content: "states: []\n",
   facts: [],
+  baseCommit: "base-commit",
 };
 
 interface Harness {
@@ -25,6 +26,7 @@ interface Harness {
   events: SweepEvent[];
   escalations: { fingerprint: string; because: string }[];
   published: ProposedRepair[];
+  publishedBases: string[];
   settled: { fingerprint: string; state: string }[];
 }
 
@@ -41,6 +43,7 @@ function harness(
   const events: SweepEvent[] = [];
   const escalations: { fingerprint: string; because: string }[] = [];
   const published: ProposedRepair[] = [];
+  const publishedBases: string[] = [];
   const settled: { fingerprint: string; state: string }[] = [];
   const repair = {
     async locate() {
@@ -57,8 +60,9 @@ function harness(
             summary: "named the field the State publishes",
           };
     },
-    async publish(_finding: Finding, proposal: ProposedRepair) {
+    async publish(_finding: Finding, proposal: ProposedRepair, subject: RepairSubject) {
       published.push(proposal);
+      publishedBases.push(subject.baseCommit);
     },
   };
   const ports: SweepPorts = {
@@ -91,7 +95,7 @@ function harness(
       events.push(event);
     },
   };
-  return { ports, events, escalations, published, settled };
+  return { ports, events, escalations, published, publishedBases, settled };
 }
 
 describe("sweepSoul", () => {
@@ -100,6 +104,7 @@ describe("sweepSoul", () => {
     const report = await sweepSoul(h.ports);
     expect(report).toEqual({ found: 1, repaired: 1, escalated: 0, resolved: 3 });
     expect(h.published).toHaveLength(1);
+    expect(h.publishedBases).toEqual(["base-commit"]);
     expect(h.settled.at(-1)?.state).toBe("repaired");
     expect(h.events.map((event) => event.kind)).toEqual(["finding", "repaired"]);
   });
