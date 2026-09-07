@@ -64,7 +64,7 @@ export default function ChatRoute() {
   }, [draft, attach]);
   const { refresh, setActiveChatId, newChatNonce } = useConversations();
   const suggestions = useOnboardingSuggestions(newChatNonce);
-  const { tasks } = useCompanion();
+  const { tasks, pendingChatDraft } = useCompanion();
   const user = useSessionUser();
   // First turn of a fresh chat: refresh the Recent chats sidebar AND reflect the new conversation in
   // the URL so a reload restores it. We use `history.replaceState` rather than a router navigate so the
@@ -95,6 +95,7 @@ export default function ChatRoute() {
       greetingIndex={newChatNonce}
       onConversationChange={onConversationChange}
       initialDraft={draft}
+      pendingChatDraft={pendingChatDraft}
       attachFileId={attach}
     />
   );

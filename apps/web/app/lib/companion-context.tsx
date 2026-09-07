@@ -17,6 +17,10 @@ import { dismissTask, listTasks, type Task } from "~/lib/tasks";
 
 const POLL_INTERVAL_MS = 60_000;
 
+/** A Companion "chat"-action Task's prompt, seeded into the Chat composer. `id` is a monotonic
+    nonce, not the prompt text, so clicking the same card twice still triggers a fresh draft. */
+export type PendingChatDraft = { id: number; prompt: string };
+
 type CompanionContextValue = {
   tasks: Task[];
   loading: boolean;
@@ -24,6 +28,8 @@ type CompanionContextValue = {
   setOpen: (open: boolean) => void;
   refresh: () => Promise<void>;
   dismiss: (id: string) => Promise<void>;
+  pendingChatDraft: PendingChatDraft | null;
+  requestChatDraft: (prompt: string) => void;
 };
 
 const CompanionContext = createContext<CompanionContextValue | null>(null);
@@ -36,6 +42,12 @@ export function CompanionProvider({ children }: { children: ReactNode }) {
   const inFlight = useRef(false);
   const mounted = useRef(true);
   const lastPath = useRef<string | null>(null);
+  const [pendingChatDraft, setPendingChatDraft] = useState<PendingChatDraft | null>(null);
+  const draftNonce = useRef(0);
+  const requestChatDraft = useCallback((prompt: string) => {
+    draftNonce.current += 1;
+    setPendingChatDraft({ id: draftNonce.current, prompt });
+  }, []);
 
   const refresh = useCallback(async () => {
     if (inFlight.current) return;
@@ -100,7 +112,16 @@ export function CompanionProvider({ children }: { children: ReactNode }) {
     await dismissTask(id).catch(() => {});
   }, []);
 
-  const value: CompanionContextValue = { tasks, loading, open, setOpen, refresh, dismiss };
+  const value: CompanionContextValue = {
+    tasks,
+    loading,
+    open,
+    setOpen,
+    refresh,
+    dismiss,
+    pendingChatDraft,
+    requestChatDraft,
+  };
   return <CompanionContext.Provider value={value}>{children}</CompanionContext.Provider>;
 }
 
@@ -111,6 +132,8 @@ const INERT: CompanionContextValue = {
   setOpen: () => {},
   refresh: async () => {},
   dismiss: async () => {},
+  pendingChatDraft: null,
+  requestChatDraft: () => {},
 };
 
 export function useCompanion(): CompanionContextValue {
