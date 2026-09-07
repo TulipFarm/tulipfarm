@@ -73,8 +73,20 @@ const AgentCapabilityRestrictionsSchema = Type.Object(
   { additionalProperties: false }
 );
 
+/** UUID shape, matching what `randomUUID` mints and what `deriveDefinitionId` formats. */
+const AGENT_ID_PATTERN = "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$";
+
 export const AgentFrontmatterSchema = Type.Object(
   {
+    /**
+     * The Agent's permanent identity, minted on create and never rewritten. Optional because every
+     * Agent authored before this field existed has none, and the whole Soul tree is re-validated on
+     * every publication — requiring it would quarantine those Agents rather than migrate them. The
+     * loader supplies a derived id in its place; the next write persists it.
+     *
+     * Never taken from caller input: the writing Tools strip it and set it themselves.
+     */
+    id: Type.Optional(Type.String({ pattern: AGENT_ID_PATTERN })),
     label: Type.Optional(Type.String({ minLength: 1 })),
     domain: Type.Optional(Type.String({ minLength: 1 })),
     description: Type.Optional(Type.String({ minLength: 1 })),

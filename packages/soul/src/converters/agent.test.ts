@@ -1,5 +1,6 @@
 import { DEFINITION_REGISTRATIONS, SchemaRegistry } from "@tulipfarm/schema";
 import { describe, expect, it } from "vitest";
+import { agentIdOf } from "../agents/agent-id";
 import type { SoulAgent } from "../types";
 import { convertLegacyAgent } from "./agent";
 
@@ -13,6 +14,7 @@ function agentYaml(result: ReturnType<typeof convertLegacyAgent>): string {
 
 describe("convertLegacyAgent", () => {
   const validLegacy: SoulAgent = {
+    id: agentIdOf("Support Bot", {}),
     name: "Support Bot",
     frontmatter: {
       owner: "team-support",

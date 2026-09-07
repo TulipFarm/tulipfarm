@@ -10,6 +10,7 @@ import type {
   SoulSkill,
   SoulWriter,
 } from "@tulipfarm/soul";
+import { agentIdOf } from "@tulipfarm/soul";
 import { describe, expect, it, vi } from "vitest";
 import { delegateToAgentTool } from "./delegate-tool";
 import {
@@ -40,6 +41,7 @@ function makeBundledSkill(name: string, directory = `/bundled/core/${name}`): Bu
 function makeAgent(name: string, displayName?: string): SoulAgent {
   return {
     name,
+    id: agentIdOf(name, {}),
     frontmatter: displayName ? { name: displayName } : {},
     body: `# ${displayName ?? name}`,
   };

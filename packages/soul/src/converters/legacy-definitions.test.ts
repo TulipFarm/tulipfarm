@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { agentIdOf } from "../agents/agent-id";
 import type { SoulAgent } from "../types";
 import { convertLegacyDefinitions } from "./legacy-definitions";
 
@@ -6,6 +7,7 @@ describe("convertLegacyDefinitions (batch)", () => {
   it("aggregates files and warnings across agents", () => {
     const agents: SoulAgent[] = [
       {
+        id: agentIdOf("Support Bot", {}),
         name: "Support Bot",
         frontmatter: {
           owner: "team-support",

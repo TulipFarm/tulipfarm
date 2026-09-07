@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { DEPLOYMENT_BUSINESS_ID } from "@tulipfarm/constants";
 import { ajv, TulipFarmValidationError, validateAgentFrontmatter } from "@tulipfarm/schema";
 import {
@@ -101,6 +102,16 @@ function agentTargets(args: unknown) {
 
 // Write-time meta-schema gate (VAL-V1-010). Returns a validation_error
 // result on invalid frontmatter, or null when it passes.
+/**
+ * Caller-supplied frontmatter with `id` removed. The field is owned by `putAgent`, and a model that
+ * sent one would otherwise be told its value failed a pattern it was never meant to author.
+ */
+function withoutId(frontmatter: Record<string, unknown>): Record<string, unknown> {
+  if (!("id" in frontmatter)) return frontmatter;
+  const { id: _discarded, ...rest } = frontmatter;
+  return rest;
+}
+
 function frontmatterError(frontmatter: Record<string, unknown>): ToolCallResult | null {
   try {
     validateAgentFrontmatter(frontmatter);
@@ -113,18 +124,26 @@ function frontmatterError(frontmatter: Record<string, unknown>): ToolCallResult 
   }
 }
 
-/** The one `AGENT.md` write both agent Tools take: the failing result, or `null` once committed. */
+/**
+ * The one `AGENT.md` write both agent Tools take: the failing result, or `null` once committed.
+ *
+ * `id` is written here rather than by either caller, so there is exactly one place the Agent's
+ * permanent identity can be set. It overwrites whatever the frontmatter carries: an id that came
+ * from Tool arguments would let a model re-point an Agent at another Agent's Principal and
+ * ownership rows by editing a field.
+ */
 async function putAgent(
   ctx: AgentToolContext,
   verb: "add" | "update",
   name: string,
+  id: string,
   frontmatter: Record<string, unknown>,
   body: string,
   onPrecondition: () => ToolCallResult
 ): Promise<ToolCallResult | null> {
   const actor = ctx.requestContext?.actor ?? SYSTEM_SOUL_COMMIT_ACTOR;
   try {
-    await ctx.soulWriter.apply(agentWriteRequest(verb, name, frontmatter, body, actor));
+    await ctx.soulWriter.apply(agentWriteRequest(verb, name, { ...frontmatter, id }, body, actor));
     // Same-Turn tools (e.g. routine_forge) read ctx.soulLoader.agents synchronously right after
     // this call; without a reload here they'd validate against the pre-write snapshot and reject
     // an agentRef this Turn just created.
@@ -184,7 +203,7 @@ const agentCreate = defineApiTool<AgentToolContext>({
     const {
       name,
       body,
-      frontmatter = {},
+      frontmatter: authored = {},
       onExisting,
     } = args as {
       name: string;
@@ -192,6 +211,7 @@ const agentCreate = defineApiTool<AgentToolContext>({
       frontmatter?: Record<string, unknown>;
       onExisting?: AgentExistingDecision;
     };
+    const frontmatter = withoutId(authored);
 
     if (!NAME_RE.test(name)) return err("validation_error", "invalid agent name");
 
@@ -222,8 +242,17 @@ const agentCreate = defineApiTool<AgentToolContext>({
 
     const created = plan.outcome === "create";
     const target = created ? name : plan.agent.name;
-    const failure = await putAgent(ctx, created ? "add" : "update", target, frontmatter, body, () =>
-      err("validation_error", "agent already exists")
+    // A replace keeps the existing Agent's id: its Principal, ownership rows and history all point
+    // at it, and a fresh id would orphan every one of them while the Agent still looks the same.
+    const id = created ? randomUUID() : plan.agent.id;
+    const failure = await putAgent(
+      ctx,
+      created ? "add" : "update",
+      target,
+      id,
+      frontmatter,
+      body,
+      () => err("validation_error", "agent already exists")
     );
     if (!failure && created) {
       if (ctx.teamAssets) await ctx.teamAssets.ensure("agent", target, ownershipOf(frontmatter));
@@ -270,11 +299,16 @@ const agentUpdate = defineApiTool<AgentToolContext>({
   requiresApproval: false,
   handler: async (args, ctx) => {
     if (!validateUpdate(args)) return err("validation_error", firstError(validateUpdate.errors));
-    const { name, body, frontmatter } = args as {
+    const {
+      name,
+      body,
+      frontmatter: authored,
+    } = args as {
       name: string;
       body?: string;
       frontmatter?: Record<string, unknown>;
     };
+    const frontmatter = authored === undefined ? undefined : withoutId(authored);
     if (body === undefined && frontmatter === undefined)
       return err("validation_error", "at least one of body or frontmatter must be provided");
 
@@ -304,7 +338,10 @@ const agentUpdate = defineApiTool<AgentToolContext>({
     const newBody = body ?? existing.body;
     const newFm = frontmatter ?? existing.frontmatter;
 
-    const failure = await putAgent(ctx, "update", name, newFm, newBody, () =>
+    // `existing.id` is the authored id, or the derived one for an Agent that predates the field.
+    // Writing the derived value here is the backfill: it pins the id at what every stored reference
+    // already holds, so this Agent's next rename no longer moves its identity.
+    const failure = await putAgent(ctx, "update", name, existing.id, newFm, newBody, () =>
       err("not_found", `agent not found: ${name}`)
     );
     return failure ?? ok({ name, frontmatter: newFm, body: newBody });

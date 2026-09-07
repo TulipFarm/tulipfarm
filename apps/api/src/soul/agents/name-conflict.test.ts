@@ -1,4 +1,5 @@
 import type { GitSyncService, SoulAgent, SoulLoader, SoulWriter } from "@tulipfarm/soul";
+import { agentIdOf } from "@tulipfarm/soul";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { AGENT_TOOLS, type AgentToolContext } from "./tools";
 
@@ -46,6 +47,7 @@ describe("agent_create refuses a duplicate Agent name in the Tool execution path
   // absent-slug precondition never fires and the duplicate lands silently.
   it("refuses a frontmatter label that duplicates an existing Agent, even when the slug is free", async () => {
     const existing: SoulAgent = {
+      id: agentIdOf("qa-20260819-0102-fullstaging-authtest", {}),
       name: "qa-20260819-0102-fullstaging-authtest",
       frontmatter: { label: EXISTING_LABEL },
       body: "original",
@@ -74,7 +76,14 @@ describe("agent_create refuses a duplicate Agent name in the Tool execution path
         body: "triage",
         frontmatter: { label: "Support Triage" },
       },
-      ctx([{ name: "support-triage", frontmatter: { label: "Support Triage" }, body: "old" }])
+      ctx([
+        {
+          id: agentIdOf("support-triage", {}),
+          name: "support-triage",
+          frontmatter: { label: "Support Triage" },
+          body: "old",
+        },
+      ])
     );
 
     expect(result).toMatchObject({ success: false, error: { code: "validation_error" } });
@@ -85,6 +94,7 @@ describe("agent_create refuses a duplicate Agent name in the Tool execution path
   // Without one the answer has nowhere to land, so every later Turn re-derives the same card.
   it("terminates on 'leave the existing Agent unchanged' without writing", async () => {
     const existing: SoulAgent = {
+      id: agentIdOf("support-triage", {}),
       name: "support-triage",
       frontmatter: { label: "Support Triage" },
       body: "old",
@@ -110,6 +120,7 @@ describe("agent_create refuses a duplicate Agent name in the Tool execution path
   // #463: and so must "update the existing one", in one call, with no second question.
   it("terminates on 'update the existing Agent' with a single write", async () => {
     const existing: SoulAgent = {
+      id: agentIdOf("support-triage", {}),
       name: "support-triage",
       frontmatter: { label: "Support Triage" },
       body: "old",
@@ -137,8 +148,18 @@ describe("agent_create refuses a duplicate Agent name in the Tool execution path
   // A decided call must never re-enter the undecided branch: answering the question once ends it.
   it("never re-refuses a call that already carries a decision", async () => {
     const agents: SoulAgent[] = [
-      { name: "support-triage", frontmatter: { label: "Support Triage" }, body: "old" },
-      { name: "other", frontmatter: { label: "Support Triage" }, body: "other" },
+      {
+        id: agentIdOf("support-triage", {}),
+        name: "support-triage",
+        frontmatter: { label: "Support Triage" },
+        body: "old",
+      },
+      {
+        id: agentIdOf("other", {}),
+        name: "other",
+        frontmatter: { label: "Support Triage" },
+        body: "other",
+      },
     ];
     for (const onExisting of ["keep", "update"] as const) {
       const first = await createTool.handler(
@@ -157,7 +178,14 @@ describe("agent_create refuses a duplicate Agent name in the Tool execution path
   it("still creates when nothing collides", async () => {
     const result = await createTool.handler(
       { name: "brand-new", body: "b", frontmatter: { label: "Brand New" } },
-      ctx([{ name: "support-triage", frontmatter: { label: "Support Triage" }, body: "old" }])
+      ctx([
+        {
+          id: agentIdOf("support-triage", {}),
+          name: "support-triage",
+          frontmatter: { label: "Support Triage" },
+          body: "old",
+        },
+      ])
     );
     expect(result).toMatchObject({ success: true, data: { name: "brand-new", created: true } });
     expect(soulWriter.apply).toHaveBeenCalledOnce();

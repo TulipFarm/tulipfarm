@@ -1,6 +1,6 @@
 import type { AgentCapabilityRestrictions } from "@tulipfarm/schema";
 import type { GitSyncService, SoulAgent, SoulLoader, SoulWriter } from "@tulipfarm/soul";
-import { SoulWriteError, type SoulWriteErrorCode } from "@tulipfarm/soul";
+import { agentIdOf, SoulWriteError, type SoulWriteErrorCode } from "@tulipfarm/soul";
 import { agentCapabilityDenial } from "@tulipfarm/tool-host";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { parse } from "yaml";
@@ -114,7 +114,9 @@ describe("agent_create", () => {
           {
             op: "put",
             target: { kind: "Agent", slug: "task-planner", definitionMode: "legacy" },
-            content: "You plan tasks.",
+            // The minted id makes every AGENT.md carry a frontmatter block, even one the caller
+            // authored no frontmatter for.
+            content: expect.stringMatching(/^---\nid: [0-9a-f-]{36}\n---\nYou plan tasks\.$/),
           },
         ],
         preconditions: [{ kind: "Agent", slug: "task-planner", state: "absent" }],
@@ -234,6 +236,7 @@ describe("agent_create", () => {
 
 describe("agent_update", () => {
   const existingAgent: SoulAgent = {
+    id: agentIdOf("task-planner", {}),
     name: "task-planner",
     frontmatter: { domain: "engineering" },
     body: "Old body.",
@@ -320,6 +323,7 @@ describe("agent_update", () => {
     // validates every write (legacy AGENT.md included), so a body-only update no longer bypasses
     // it: the tool forwards the merged content and lets a VALIDATION_FAILED surface as one.
     const legacy: SoulAgent = {
+      id: agentIdOf("task-planner", {}),
       name: "task-planner",
       frontmatter: { custom: "kept-as-is", autonomy: "legacy-bad" },
       body: "Old body.",
@@ -345,7 +349,14 @@ describe("agent_update", () => {
 
 describe("agent_get", () => {
   it("returns agent frontmatter and body", async () => {
-    const ctx = makeCtx([{ name: "reviewer", frontmatter: { domain: "eng" }, body: "Review." }]);
+    const ctx = makeCtx([
+      {
+        id: agentIdOf("reviewer", {}),
+        name: "reviewer",
+        frontmatter: { domain: "eng" },
+        body: "Review.",
+      },
+    ]);
     const res = await getTool.handler({ name: "reviewer" }, ctx);
     expect(res).toEqual({
       success: true,
@@ -377,8 +388,13 @@ describe("agent_list", () => {
 
   it("returns agents with name and frontmatter", async () => {
     const ctx = makeCtx([
-      { name: "planner", frontmatter: { domain: "tasks" }, body: "Plan." },
-      { name: "reviewer", frontmatter: {}, body: "Review." },
+      {
+        id: agentIdOf("planner", {}),
+        name: "planner",
+        frontmatter: { domain: "tasks" },
+        body: "Plan.",
+      },
+      { id: agentIdOf("reviewer", {}), name: "reviewer", frontmatter: {}, body: "Review." },
     ]);
     const res = await listTool.handler({}, ctx);
     expect(res.success).toBe(true);
@@ -397,7 +413,9 @@ describe("agent_delete", () => {
   });
 
   it("deletes the agent artifact through the write gateway", async () => {
-    const ctx = makeCtx([{ name: "task-planner", frontmatter: {}, body: "body" }]);
+    const ctx = makeCtx([
+      { id: agentIdOf("task-planner", {}), name: "task-planner", frontmatter: {}, body: "body" },
+    ]);
     const res = await deleteTool.handler({ name: "task-planner" }, ctx);
 
     expect(res).toEqual({ success: true, data: { name: "task-planner", deleted: true } });
@@ -418,7 +436,9 @@ describe("agent_delete", () => {
   });
 
   it("maps a gateway PRECONDITION_FAILED to not_found", async () => {
-    const ctx = makeCtx([{ name: "task-planner", frontmatter: {}, body: "body" }]);
+    const ctx = makeCtx([
+      { id: agentIdOf("task-planner", {}), name: "task-planner", frontmatter: {}, body: "body" },
+    ]);
     rejectApplyWith(ctx.soulWriter, "PRECONDITION_FAILED", 'Agent "task-planner" does not exist');
     const res = await deleteTool.handler({ name: "task-planner" }, ctx);
     expect(res).toMatchObject({ success: false, error: { code: "not_found" } });
@@ -537,6 +557,7 @@ describe("capability restrictions authored from chat", () => {
   it("keeps the restriction when an edit rewrites the frontmatter", async () => {
     const ctx = makeCtx([
       {
+        id: agentIdOf("reporter", {}),
         name: "reporter",
         frontmatter: { capabilityRestrictions: READ_ONLY_REPORTER },
         body: "body",
@@ -553,5 +574,106 @@ describe("capability restrictions authored from chat", () => {
 
     expect(res).toMatchObject({ success: true });
     expect(writtenFrontmatter(ctx.soulWriter).capabilityRestrictions).toEqual(READ_ONLY_REPORTER);
+  });
+});
+
+// ── the Agent's permanent id ──────────────────────────────────────────────────
+
+/**
+ * The id has to be written by the Tool, not by the model: it is what the Agent's Principal and its
+ * ownership rows key on, so a model that could set it could point one Agent's authority at another.
+ */
+describe("agent id", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+
+  it("mints one on create", async () => {
+    const ctx = makeCtx();
+    const res = await createTool.handler({ name: "task-planner", body: "b" }, ctx);
+
+    expect(res).toMatchObject({ success: true });
+    expect(writtenFrontmatter(ctx.soulWriter).id).toMatch(UUID);
+  });
+
+  it("mints a different one for each Agent", async () => {
+    const first = makeCtx();
+    await createTool.handler({ name: "one", body: "b" }, first);
+    const second = makeCtx();
+    await createTool.handler({ name: "two", body: "b" }, second);
+
+    expect(writtenFrontmatter(first.soulWriter).id).not.toBe(
+      writtenFrontmatter(second.soulWriter).id
+    );
+  });
+
+  it("never takes the id from create arguments", async () => {
+    const ctx = makeCtx();
+    const res = await createTool.handler(
+      {
+        name: "task-planner",
+        body: "b",
+        frontmatter: { id: "11111111-2222-3333-4444-555555555555" },
+      },
+      ctx
+    );
+
+    expect(res).toMatchObject({ success: true });
+    expect(writtenFrontmatter(ctx.soulWriter).id).not.toBe("11111111-2222-3333-4444-555555555555");
+  });
+
+  it("never takes the id from update arguments", async () => {
+    const existing = agentIdOf("task-planner", {});
+    const ctx = makeCtx([{ id: existing, name: "task-planner", frontmatter: {}, body: "old" }]);
+    const res = await updateTool.handler(
+      { name: "task-planner", frontmatter: { id: "11111111-2222-3333-4444-555555555555" } },
+      ctx
+    );
+
+    expect(res).toMatchObject({ success: true });
+    expect(writtenFrontmatter(ctx.soulWriter).id).toBe(existing);
+  });
+
+  it("carries the authored id through an update that rewrites the frontmatter", async () => {
+    const authored = "11111111-2222-3333-4444-555555555555";
+    const ctx = makeCtx([
+      { id: authored, name: "task-planner", frontmatter: { id: authored }, body: "old" },
+    ]);
+    const res = await updateTool.handler(
+      { name: "task-planner", frontmatter: { domain: "qa" } },
+      ctx
+    );
+
+    expect(res).toMatchObject({ success: true });
+    expect(writtenFrontmatter(ctx.soulWriter)).toEqual({ id: authored, domain: "qa" });
+  });
+
+  it("backfills the derived id for an Agent that predates the field", async () => {
+    const derived = agentIdOf("task-planner", {});
+    const ctx = makeCtx([{ id: derived, name: "task-planner", frontmatter: {}, body: "old" }]);
+    await updateTool.handler({ name: "task-planner", body: "new" }, ctx);
+
+    expect(writtenFrontmatter(ctx.soulWriter).id).toBe(derived);
+  });
+
+  it("keeps the existing Agent's id when onExisting=update replaces it", async () => {
+    const authored = "11111111-2222-3333-4444-555555555555";
+    const ctx = makeCtx([
+      {
+        id: authored,
+        name: "task-planner",
+        frontmatter: { id: authored, label: "Task Planner" },
+        body: "old",
+      },
+    ]);
+    const res = await createTool.handler(
+      { name: "task-planner", body: "new", onExisting: "update" },
+      ctx
+    );
+
+    expect(res).toMatchObject({ success: true, data: { created: false } });
+    expect(writtenFrontmatter(ctx.soulWriter).id).toBe(authored);
   });
 });

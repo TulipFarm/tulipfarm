@@ -1,5 +1,5 @@
 import type { GitSyncService, SoulAgent, SoulLoader } from "@tulipfarm/soul";
-import { makeSoulWriterDouble } from "@tulipfarm/soul";
+import { agentIdOf, makeSoulWriterDouble } from "@tulipfarm/soul";
 import type { PaginatedResult } from "@tulipfarm/storage";
 import type { FastifyInstance } from "fastify";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -72,6 +72,7 @@ function makeSoulLoader(agents: SoulAgent[]) {
 }
 
 const PLANNER: SoulAgent = {
+  id: agentIdOf("sprint-planner", {}),
   name: "sprint-planner",
   frontmatter: {
     label: "Sprint Planner",
@@ -164,7 +165,12 @@ describe("agents routes", () => {
     });
 
     it("omits capabilityRestrictions entirely for an agent that declares none", async () => {
-      const bare: SoulAgent = { name: "bare", frontmatter: {}, body: "x" };
+      const bare: SoulAgent = {
+        id: agentIdOf("bare", {}),
+        name: "bare",
+        frontmatter: {},
+        body: "x",
+      };
       const solo = await buildApp({
         sessionStore: store,
         userRepo,

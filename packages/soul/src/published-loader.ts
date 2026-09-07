@@ -21,6 +21,7 @@ import {
   validateSoulSurfaceComponent,
 } from "@tulipfarm/surface";
 import { parse as parseYaml } from "yaml";
+import { agentIdOf } from "./agents/agent-id";
 import { readFrontmatterArtifact, resolveDefinition } from "./definition-reader";
 import { validateAuthSteps, validateIngressContextEnv } from "./integration-auth";
 import { readContainedFile } from "./safe-fs";
@@ -216,7 +217,7 @@ export class SoulLoader {
           name,
           definition
         );
-        map.set(name, { name, frontmatter, body });
+        map.set(name, { id: agentIdOf(name, frontmatter), name, frontmatter, body });
       } catch (err) {
         throw artifactLoadError("agent", name, err);
       }

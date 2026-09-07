@@ -1,6 +1,12 @@
 import type { RoleDefinition } from "@tulipfarm/schema";
 
 export interface SoulAgent {
+  /**
+   * The Agent's permanent identity. It outlives the name, which the product lets a user change.
+   * Anything that must still point at this Agent after a rename — its Principal, its ownership
+   * rows — keys on this. Use `agentIdOf` to derive it; never read `frontmatter.id` directly.
+   */
+  id: string;
   name: string;
   frontmatter: Record<string, unknown>;
   body: string;

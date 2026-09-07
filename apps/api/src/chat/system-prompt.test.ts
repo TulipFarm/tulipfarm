@@ -1,9 +1,11 @@
 import { assembleSystemPrompt } from "@tulipfarm/agent-runtime";
 import type { SoulAgent } from "@tulipfarm/soul";
+import { agentIdOf } from "@tulipfarm/soul";
 import { describe, expect, it } from "vitest";
 import { assembleAgentSystemPrompt } from "./system-prompt";
 
 const agent: SoulAgent = {
+  id: agentIdOf("test-agent", {}),
   name: "test-agent",
   frontmatter: { domain: "testing" },
   body: "You are a test agent.",

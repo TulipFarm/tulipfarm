@@ -13,6 +13,7 @@ import {
   textContent,
 } from "@tulipfarm/schema";
 import type { SoulAgent, SoulIntegration, SoulLoader } from "@tulipfarm/soul";
+import { agentIdOf } from "@tulipfarm/soul";
 import {
   DOMAIN_EVENTS,
   type IntegrationEventPayload,
@@ -396,7 +397,15 @@ describe("IngressDeliveryHost.attachChat", () => {
   // its Agent was configured with. The routed Agent now supplies both fields.
   it("carries the routed Agent's own autonomy into the derived chat request", async () => {
     const agents = new Map<string, SoulAgent>([
-      ["mutator", { name: "mutator", frontmatter: { autonomy: "approval-required" }, body: "" }],
+      [
+        "mutator",
+        {
+          id: agentIdOf("mutator", {}),
+          name: "mutator",
+          frontmatter: { autonomy: "approval-required" },
+          body: "",
+        },
+      ],
     ]);
     const { host, threads, conversations, artifacts } = await harness({ agents });
     conversations.push({
