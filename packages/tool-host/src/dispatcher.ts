@@ -513,6 +513,7 @@ export class RegistryToolDispatcher implements TurnToolDispatcher {
       const reserved = await ledger.reserve({
         businessId: authority.businessId,
         runId: authority.runId,
+        ...(call.stateId === undefined ? {} : { stateId: call.stateId }),
         callId: call.callId,
         toolId: definition.name,
         toolVersion: definition.definition.version,

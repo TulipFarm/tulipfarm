@@ -63,6 +63,8 @@ Individual Tool families (`packages/kv`, `apps/api/src/tools/**`), the model-fac
 - **A park settles its effect `confirmed` and is never retried.** The effect committed and the
   resume wait is registered; only the answer is outstanding. Anything else lets reconciliation
   read a merely-waiting Turn as a lost write.
+- Effect reservations use the caller's durable Run State key. `chat:<callId>` is only the legacy
+  fallback for callers that cannot supply one; cancellation treats that ownership as unknown.
 - No dependency on `@tulipfarm/agent-runtime` — it depends on this package's consumers' shape, not
   the reverse. Narrow structural types instead.
 - A Tool with call-level classification is validated first; the derived action, mutation state,

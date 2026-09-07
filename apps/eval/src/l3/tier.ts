@@ -23,8 +23,8 @@ import {
 } from "@tulipfarm/agent-runtime";
 import { soulDigest, soulSubjects, soulSummary } from "@tulipfarm/curator";
 import { CuratorHost, CuratorTaskDelivery } from "@tulipfarm/curator-host";
-import { INVOKE_STATE_KEY } from "@tulipfarm/run-kernel";
-import { CuratorRepo, type PersistedRun, TaskRepo } from "@tulipfarm/storage";
+import { INVOKE_STATE_KEY, RunCancellationManager } from "@tulipfarm/run-kernel";
+import { ChildLinkStore, CuratorRepo, type PersistedRun, TaskRepo } from "@tulipfarm/storage";
 import {
   createChatExecutor,
   RunStoreStateTransitions,
@@ -102,6 +102,15 @@ export interface PersistedTurn {
   readonly curatorTasks?: readonly { readonly title: string }[];
   /** What the Soul Doctor's sweep did to the Soul this Turn left behind. */
   readonly doctorEvents?: readonly DoctorEvent[];
+  /** Result of cancelling the same effect-bearing Run through a fresh manager after restart. */
+  readonly cancellation?: {
+    readonly firstOutcome: string;
+    readonly restartOutcome: string;
+    readonly runStatus: string;
+    readonly stateStatus: string;
+    readonly firstUnownedEffectIds: readonly string[];
+    readonly restartUnownedEffectIds: readonly string[];
+  };
   /** Real Tool dispatches this Turn's writer denied, with the exact reason it gave back. */
   readonly toolDenials: readonly { readonly name: string; readonly reason: string }[];
   /** The prompt the real Context assembler produced, so `prompt_contains` works at L3 too. */
@@ -158,6 +167,84 @@ async function mintRun(database: EvalDatabase, runId: string, turnId: string): P
   });
 }
 
+async function runCancellationProbe(
+  database: EvalDatabase,
+  evalCase: EvalCase
+): Promise<PersistedTurn["cancellation"]> {
+  const cancellation = evalCase.cancellation;
+  if (cancellation?.kind !== "legacy_unowned_effect") return undefined;
+
+  const runId = randomUUID();
+  const leaseExpiresAt = new Date(Date.now() + 60_000).toISOString();
+  await mintRun(database, runId, randomUUID());
+  const claimed = await database.runs.transitionRun(BUSINESS_ID, runId, {
+    expectedVersion: 0,
+    expectedStatus: "queued",
+    status: "claimed",
+    leaseOwner: "eval-cancellation",
+    leaseExpiresAt,
+  });
+  if (!claimed) throw new Error("Eval cancellation probe could not claim its Run");
+  const running = await database.runs.transitionRun(BUSINESS_ID, runId, {
+    expectedVersion: 1,
+    expectedStatus: "claimed",
+    status: "running",
+    leaseOwner: "eval-cancellation",
+    leaseExpiresAt,
+  });
+  if (!running) throw new Error("Eval cancellation probe could not start its Run");
+  const stateTransitions = [
+    { expectedVersion: 0, expectedStatus: "pending", status: "ready" },
+    { expectedVersion: 1, expectedStatus: "ready", status: "claimed" },
+    { expectedVersion: 2, expectedStatus: "claimed", status: "running" },
+  ] as const;
+  for (const transition of stateTransitions) {
+    const applied = await database.runs.transitionState(
+      BUSINESS_ID,
+      runId,
+      INVOKE_STATE_KEY,
+      transition
+    );
+    if (!applied) throw new Error("Eval cancellation probe could not start its State");
+  }
+
+  const effects = {
+    listByRun: async (businessId: string, effectRunId: string) =>
+      businessId === BUSINESS_ID && effectRunId === runId
+        ? [
+            {
+              effectId: cancellation.effectId,
+              stateId: "chat:legacy-call",
+              state: "dispatched",
+            },
+          ]
+        : [],
+  };
+  const children = new ChildLinkStore(database.transactions);
+  const first = await new RunCancellationManager(database.runs, children, effects).cancel({
+    businessId: BUSINESS_ID,
+    runId,
+    reason: "eval_operator_request",
+    now: new Date().toISOString(),
+  });
+  const restart = await new RunCancellationManager(database.runs, children, effects).cancel({
+    businessId: BUSINESS_ID,
+    runId,
+    reason: "eval_operator_request",
+    now: new Date().toISOString(),
+  });
+  const persistedRun = await database.runs.find(BUSINESS_ID, runId);
+  const persistedState = await database.runs.findState(BUSINESS_ID, runId, INVOKE_STATE_KEY);
+  return {
+    firstOutcome: first.outcome,
+    restartOutcome: restart.outcome,
+    runStatus: persistedRun?.status ?? "missing",
+    stateStatus: persistedState?.status ?? "missing",
+    firstUnownedEffectIds: first.unownedEffectIds,
+    restartUnownedEffectIds: restart.unownedEffectIds,
+  };
+}
+
 /**
  * Sends the two real Tools to the real implementations and everything else to the Case's script.
  *
@@ -193,6 +280,7 @@ async function readBack(
     generatedFiles: readonly GeneratedFile[];
     curatorTasks: readonly { readonly title: string }[];
     doctorEvents: readonly DoctorEvent[];
+    cancellation: PersistedTurn["cancellation"];
     toolDenials: readonly { readonly name: string; readonly reason: string }[];
     systemPrompt: string;
     spend: Spend;
@@ -230,6 +318,7 @@ async function readBack(
     generatedFiles: observed.generatedFiles,
     curatorTasks: observed.curatorTasks,
     doctorEvents: observed.doctorEvents,
+    cancellation: observed.cancellation,
     toolDenials: observed.toolDenials,
     systemPrompt: observed.systemPrompt,
   };
@@ -365,6 +454,7 @@ async function runOneTurn(
       evalCase: options.evalCase,
       input: shared.submit,
     });
+    const cancellation = await runCancellationProbe(database, options.evalCase);
 
     return await readBack(database, runId, turnId, {
       toolCalls: [...scripted.calls],
@@ -373,6 +463,7 @@ async function runOneTurn(
       generatedFiles: files.generated.slice(generatedBefore),
       curatorTasks,
       doctorEvents,
+      cancellation,
       toolDenials: soulWrites.denials
         .slice(deniedBefore)
         .map((reason) => ({ name: SOUL_WRITE_TOOL, reason })),
@@ -491,6 +582,7 @@ export function foldJourney(turns: readonly PersistedTurn[]): PersistedTurn {
     soulCommits: turns.flatMap((turn) => turn.soulCommits),
     generatedFiles: turns.flatMap((turn) => turn.generatedFiles),
     toolDenials: turns.flatMap((turn) => turn.toolDenials),
+    cancellation: turns.find((turn) => turn.cancellation !== undefined)?.cancellation,
     spend: turns.reduce<Spend>((total, turn) => mergeSpend(total, turn.spend), NO_SPEND),
   };
 }
@@ -576,5 +668,6 @@ function journeyCase(
     toolResults: turn.toolResults,
     script: turn.script,
     journey: undefined,
+    cancellation: undefined,
   };
 }

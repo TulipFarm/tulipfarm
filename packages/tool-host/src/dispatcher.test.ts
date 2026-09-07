@@ -1353,11 +1353,14 @@ describe("effect ledger", () => {
     const execute = vi.fn(async () => ok({ done: true }));
     const { dispatcher, effects } = ledgerDispatcher(ledgeredTool(execute));
 
-    expect(await dispatcher.dispatch(AUTHORITY, CALL)).toMatchObject({ status: "succeeded" });
+    expect(
+      await dispatcher.dispatch(AUTHORITY, { ...CALL, stateId: "routine-action" })
+    ).toMatchObject({ status: "succeeded" });
 
     const records = await effects.list(BUSINESS_ID);
     expect(records).toHaveLength(1);
     expect(records[0]?.state).toBe("confirmed");
+    expect(records[0]?.stateId).toBe("routine-action");
     expect(records[0]?.intent.toolId).toBe("echo");
   });
 

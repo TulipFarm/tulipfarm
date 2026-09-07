@@ -1,0 +1,27 @@
+{
+  "id": "runtime-recovery-cancellation-preserves-effect-evidence",
+  "tier": "l3",
+  "agent": "support",
+  "cancellation": {
+    "kind": "legacy_unowned_effect",
+    "effectId": "effect-legacy"
+  },
+  "input": [
+    {
+      "role": "user",
+      "content": "When do you open on Saturdays?"
+    }
+  ],
+  "script": [
+    {
+      "kind": "text",
+      "text": "We open at 9am on Saturdays."
+    }
+  ],
+  "expect": [
+    {
+      "kind": "run_cancellation_preserves_effect",
+      "effectId": "effect-legacy"
+    }
+  ]
+}

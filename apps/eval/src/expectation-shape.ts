@@ -81,6 +81,7 @@ const EXPECTATION_FIELDS: Record<string, readonly [string, FieldType][]> = {
   curator_task_visible: [["title", "string"]],
   doctor_repaired: [["subject", "string"]],
   doctor_escalated: [["subject", "string"]],
+  run_cancellation_preserves_effect: [["effectId", "string"]],
   tool_denial_contains: [
     ["name", "string"],
     ["text", "string"],

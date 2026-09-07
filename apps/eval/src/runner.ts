@@ -274,6 +274,7 @@ async function runL3Trial(
         generatedFiles: turn.generatedFiles,
         curatorTasks: turn.curatorTasks,
         doctorEvents: turn.doctorEvents,
+        cancellation: turn.cancellation,
         toolDenials: turn.toolDenials,
       },
     });

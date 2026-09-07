@@ -27,6 +27,9 @@ credential dispatch, sandbox adaptation, and reconciliation.
 - `EffectDispatcher` consults the mutation kill switch before recording an attempt, so a denied
   mutation leaves no attempt in the ledger. A dispatcher constructed without `mutationGuard` is
   outside the emergency stop; `scripts/mutation-kill-switch.test.ts` fails the build on one.
+- PostgreSQL effect reservation and attempt start share the Run-row lock with cancellation and
+  reject non-dispatchable Runs. Reconciliation compensation uses only `reserveCompensation` after
+  its confirmed parent and declared compensation intent have been verified.
 - A kill switch scope is only meaningful if the dispatch site fills the matching `MutationContext`
   field. Adding a scope kind means supplying its identity in `mutationIdentity` first, never after.
 - `deriveContractTargets` refuses; it never returns `[]` for a target it failed to derive. An empty

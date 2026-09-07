@@ -38,6 +38,7 @@ describe("Run model", () => {
 
   it("accepts declared recovery transitions and rejects invented transitions", () => {
     expect(() => assertRunTransition("needs_reconciliation", "succeeded")).not.toThrow();
+    expect(() => assertRunTransition("needs_reconciliation", "cancelling")).not.toThrow();
     expect(() => assertStateTransition("running", "needs_reconciliation")).not.toThrow();
 
     expect(() => assertRunTransition("succeeded", "running")).toThrow(

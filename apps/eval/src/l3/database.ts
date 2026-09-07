@@ -24,6 +24,7 @@ import {
   AUTHORIZATION_STORAGE_STATEMENTS,
   BUDGET_STORAGE_STATEMENTS,
   BudgetStore,
+  CHILD_STORAGE_STATEMENTS,
   CURATOR_STORAGE_STATEMENTS,
   CURATOR_WORK_STORAGE_STATEMENTS,
   type Queryable,
@@ -101,6 +102,7 @@ async function migratedSnapshot(): Promise<Blob | File> {
     const database = await PGlite.create();
     for (const statement of [
       ...RUN_STORAGE_STATEMENTS,
+      ...CHILD_STORAGE_STATEMENTS,
       ...WAIT_STORAGE_STATEMENTS,
       ...RUN_EVENT_STORAGE_STATEMENTS,
       ...BUDGET_STORAGE_STATEMENTS,

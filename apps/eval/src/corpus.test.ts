@@ -165,6 +165,19 @@ describe("loadCorpus", () => {
     expect(corpus.cases[0]?.tier).toBe("l3");
   });
 
+  it("accepts the durable cancellation probe only at L3", async () => {
+    const cancellation = {
+      ...valid("alpha"),
+      tier: "l3",
+      cancellation: { kind: "legacy_unowned_effect", effectId: "effect-legacy" },
+      expect: [{ kind: "run_cancellation_preserves_effect", effectId: "effect-legacy" }],
+    };
+    await expect(load(corpusDir({ "a.json": cancellation }))).resolves.toBeDefined();
+    await expect(load(corpusDir({ "a.json": { ...cancellation, tier: "l2" } }))).rejects.toThrow(
+      /"cancellation" needs tier "l3"/
+    );
+  });
+
   it("fails loudly on an empty directory rather than reporting a vacuous pass", async () => {
     const dir = corpusDir({});
     await expect(load(dir)).rejects.toThrow(/no Eval Cases/);

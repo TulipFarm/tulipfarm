@@ -34,6 +34,8 @@ export function ledgerOwnsCall(definition: ApiToolDefinition<unknown> | undefine
 export interface LedgerCallInput {
   readonly businessId: string;
   readonly runId: string;
+  /** Durable Run State occurrence this effect belongs to. */
+  readonly stateId?: string;
   readonly callId: string;
   readonly toolId: string;
   readonly toolVersion: string;
@@ -62,7 +64,7 @@ function intentFor(input: LedgerCallInput): ToolIntent {
     intentId: derivedEffectId("chat-tool-intent", input.runId, input.callId, input.toolId),
     businessId: input.businessId,
     runId: input.runId,
-    stateId: `chat:${input.callId}`,
+    stateId: input.stateId ?? `chat:${input.callId}`,
     toolId: input.toolId,
     toolVersion: input.toolVersion,
     action: input.action,

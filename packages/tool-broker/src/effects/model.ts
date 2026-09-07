@@ -88,7 +88,9 @@ export type EffectLedgerErrorCode =
   | "idempotency_digest_mismatch"
   | "effect_not_found"
   | "effect_state_conflict"
-  | "attempt_not_found";
+  | "attempt_not_found"
+  | "run_not_found"
+  | "run_not_dispatchable";
 
 export class EffectLedgerError extends Error {
   constructor(

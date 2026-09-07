@@ -52,6 +52,14 @@ export interface PersistedState {
   }[];
   readonly curatorTasks?: readonly { readonly title: string }[];
   readonly doctorEvents?: readonly { readonly kind: string; readonly subject: string }[];
+  readonly cancellation?: {
+    readonly firstOutcome: string;
+    readonly restartOutcome: string;
+    readonly runStatus: string;
+    readonly stateStatus: string;
+    readonly firstUnownedEffectIds: readonly string[];
+    readonly restartUnownedEffectIds: readonly string[];
+  };
   /** Real Tool dispatches that were denied, with the reason the dispatcher gave back. */
   readonly toolDenials?: readonly { readonly name: string; readonly reason: string }[];
 }
@@ -223,6 +231,36 @@ function evaluate(a: Expectation, obs: Observation): { passed: boolean; detail: 
             detail: `no ${a.eventType} Run event; the Turn appended ${
               persisted.events.length === 0 ? "none" : persisted.events.join(", ")
             }`,
+          };
+    }
+
+    case "run_cancellation_preserves_effect": {
+      const persisted = obs.persisted;
+      if (persisted === undefined) return notPersisted(a.kind);
+      const cancellation = persisted.cancellation;
+      if (cancellation === undefined) {
+        return { passed: false, detail: "the L3 cancellation probe did not run" };
+      }
+      const firstPreserved = cancellation.firstUnownedEffectIds.includes(a.effectId);
+      const restartPreserved = cancellation.restartUnownedEffectIds.includes(a.effectId);
+      const passed =
+        cancellation.firstOutcome === "needs_reconciliation" &&
+        cancellation.restartOutcome === "needs_reconciliation" &&
+        cancellation.runStatus === "needs_reconciliation" &&
+        cancellation.stateStatus === "needs_reconciliation" &&
+        firstPreserved &&
+        restartPreserved;
+      return passed
+        ? {
+            passed: true,
+            detail: `${a.effectId} remained reconciliation evidence after cancellation restart`,
+          }
+        : {
+            passed: false,
+            detail:
+              `${a.effectId} was not preserved: first=${cancellation.firstOutcome} ` +
+              `restart=${cancellation.restartOutcome} run=${cancellation.runStatus} ` +
+              `state=${cancellation.stateStatus}`,
           };
     }
 
@@ -626,6 +664,7 @@ const SEAM_INDEPENDENT: ReadonlySet<string> = new Set([
   "state_status",
   "loop_status",
   "run_event_emitted",
+  "run_cancellation_preserves_effect",
   "guardrail_blocked",
   "guardrail_allowed",
   "tool_not_called",

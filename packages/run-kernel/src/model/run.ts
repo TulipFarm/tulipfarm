@@ -60,7 +60,7 @@ const RUN_TRANSITIONS: Readonly<Record<RunStatus, readonly RunStatus[]>> = {
   cancelling: ["cancelled", "needs_reconciliation"],
   cancelled: [],
   attention_required: ["queued", "failed", "cancelling"],
-  needs_reconciliation: ["queued", "failed", "cancelled", "succeeded"],
+  needs_reconciliation: ["queued", "failed", "cancelling", "cancelled", "succeeded"],
 };
 
 const STATE_TRANSITIONS: Readonly<Record<StateStatus, readonly StateStatus[]>> = {

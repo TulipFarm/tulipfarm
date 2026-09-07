@@ -189,9 +189,9 @@ no database. It can observe everything the harness *decides*.
 **L3** exists for the one thing L2 structurally cannot see: whether a decision **survives**. It
 boots an in-process PGlite from `@tulipfarm/storage`'s own DDL, mints a real Run, and drives
 `createChatExecutor` from `@tulipfarm/turn-executor` — the same executor a production Turn runs
-through — then reads the persisted result back. That unlocks six Expectation kinds L2 cannot
-honour: `run_status`, `state_status`, `turn_status`, `run_event_emitted`, `soul_committed` and
-`soul_published`.
+through — then reads the persisted result back. That unlocks persisted Expectations L2 cannot
+honour, including `run_status`, `state_status`, `turn_status`, `run_event_emitted`,
+`soul_committed`, `soul_published`, and `run_cancellation_preserves_effect`.
 `loadCorpus` refuses any of them on an L2 Case, so the mistake costs no model calls.
 
 It deliberately stays small. Each L3 Case costs ~1.5s of setup against L2's milliseconds, and the
@@ -215,9 +215,10 @@ an answer that never quoted the card number, whether that Case sits in `corpus/`
 
 Two things keep this from becoming a blanket excuse. A failing Expectation that owes the seam
 nothing — `run_status`, `turn_status`, `state_status`, `loop_status`, `run_event_emitted`,
-`guardrail_blocked` at `input`, `tool_not_called` — always fails, so a broken Turn cannot launder
-itself into `UNEX`. And an unexercised Case is not a pass: it is reported by name and must be
-covered by *some* leg of the Matrix, so a guard nobody ever made fire still holds back the release.
+`run_cancellation_preserves_effect`, `guardrail_blocked` at `input`, `tool_not_called` — always
+fails, so a broken Turn cannot launder itself into `UNEX`. And an unexercised Case is not a pass:
+it is reported by name and must be covered by *some* leg of the Matrix, so a guard nobody ever made
+fire still holds back the release.
 
 It is also the **most expensive tier per Case**, because a `journey` bills the seat once per Turn
 rather than once per Case. Every one of those calls is metered and counted against the ceiling, so

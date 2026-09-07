@@ -120,6 +120,8 @@ export type Expectation =
   | { readonly kind: "doctor_repaired"; readonly subject: string }
   /** L3 only. The Doctor refused to publish and put the named artifact in front of a person. */
   | { readonly kind: "doctor_escalated"; readonly subject: string }
+  /** L3 only. Repeated cancellation retained an unsettled effect whose State owner is unknown. */
+  | { readonly kind: "run_cancellation_preserves_effect"; readonly effectId: string }
   /**
    * L3 only. The named Tool's real dispatch was denied, and the reason it gave back contains this
    * text.
@@ -144,6 +146,7 @@ const PERSISTED_KINDS: ReadonlySet<string> = new Set([
   "curator_task_visible",
   "doctor_repaired",
   "doctor_escalated",
+  "run_cancellation_preserves_effect",
   "tool_denial_contains",
 ]);
 
@@ -318,6 +321,11 @@ export interface EvalCase {
       readonly content: string;
       readonly summary: string;
     };
+  };
+  /** A deterministic post-Turn probe of effect-aware Run cancellation and restart replay. */
+  readonly cancellation?: {
+    readonly kind: "legacy_unowned_effect";
+    readonly effectId: string;
   };
   /**
    * The Files resolved for *this* Turn, as the Context assembler would resolve them.

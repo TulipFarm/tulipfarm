@@ -172,6 +172,18 @@ function validate(raw: unknown, file: string): EvalCase {
       }
     }
   }
+  if (c.cancellation !== undefined) {
+    require(c.tier ===
+      "l3", `${file}: "cancellation" needs tier "l3"; this Case is tier ${JSON.stringify(c.tier)}`);
+    require(typeof c.cancellation === "object" &&
+      c.cancellation !== null, `${file}: "cancellation" must be an object`);
+    const cancellation = c.cancellation as Record<string, unknown>;
+    require(cancellation.kind ===
+      "legacy_unowned_effect", `${file}: unknown cancellation fixture ${JSON.stringify(cancellation.kind)}`);
+    require(typeof cancellation.effectId === "string" &&
+      cancellation.effectId.length >
+        0, `${file}: "cancellation.effectId" must be a non-empty string`);
+  }
   // Every field a Case could once set here is retired: the assembler takes only the Agent's own
   // personality, which the Eval Soul owns. The key stays accepted so the retired-field errors below
   // still teach, but a Case that omits it is now the normal shape.

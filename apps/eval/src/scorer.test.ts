@@ -494,6 +494,47 @@ describe("an Expectation whose seam a Tool call has to open", () => {
   });
 });
 
+describe("effect-aware Run cancellation", () => {
+  const withCancellation = (
+    cancellation: NonNullable<NonNullable<Observation["persisted"]>["cancellation"]>
+  ): Observation => ({
+    ...base,
+    persisted: {
+      runStatus: "succeeded",
+      stateStatus: "succeeded",
+      turnStatus: "succeeded",
+      events: [],
+      soulCommits: [],
+      publishedArtifacts: [],
+      generatedFiles: [],
+      cancellation,
+    },
+  });
+
+  it("requires legacy effect evidence to survive the first and restarted cancellation", () => {
+    const effectId = "effect-legacy";
+    const cancellation = {
+      firstOutcome: "needs_reconciliation",
+      restartOutcome: "needs_reconciliation",
+      runStatus: "needs_reconciliation",
+      stateStatus: "needs_reconciliation",
+      firstUnownedEffectIds: [effectId],
+      restartUnownedEffectIds: [effectId],
+    };
+    const observation = withCancellation(cancellation);
+
+    expect(only({ kind: "run_cancellation_preserves_effect", effectId }, observation).passed).toBe(
+      true
+    );
+    expect(
+      only(
+        { kind: "run_cancellation_preserves_effect", effectId },
+        withCancellation({ ...cancellation, restartUnownedEffectIds: [] })
+      ).passed
+    ).toBe(false);
+  });
+});
+
 describe("what the active Soul publication serves", () => {
   const withPublication = (publishedArtifacts: string[]): Observation => ({
     ...base,

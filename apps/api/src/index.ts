@@ -615,7 +615,11 @@ async function boot() {
     const runEventStore = new RunEventStore(runTransactions);
     const budgetStore = new BudgetStore(runTransactions);
     const runCancel = runCanceller(
-      new RunCancellationManager(runStore, new ChildLinkStore(runTransactions))
+      new RunCancellationManager(
+        runStore,
+        new ChildLinkStore(runTransactions),
+        new PgEffectStore(runTransactions)
+      )
     );
 
     const hookExecutor =

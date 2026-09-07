@@ -10,7 +10,6 @@ export function runCanceller(manager: Pick<RunCancellationManager, "cancel">): C
           businessId,
           runId,
           reason,
-          inFlightEffects: {},
           now: new Date().toISOString(),
         });
         return true;

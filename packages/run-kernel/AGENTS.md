@@ -42,7 +42,8 @@ typed outputs, Artifacts, limits, budgets, and concurrency.
   quantity nothing meters no key at all, so authoring it fails validation instead of bounding
   nothing (`scripts/routine-limit-coverage.test.ts`).
 - Child authority never broadens; detach must be explicit. Cancellation parks in-flight effects.
-  Ambiguous effect evidence never becomes `cancelled`.
+  Ambiguous effect evidence never becomes `cancelled`. Fence the Run as `cancelling` before the
+  Run-scoped effect read; unknown legacy State ownership stays visible as reconciliation evidence.
 - A child link carries the `callId` that spawned it, so a replayed Tool call adopts the child it
   already made. `conversationId` is not a substitute — it is minted fresh on every replay.
 - A parent waits on its child through the durable wait on the link (`resume`), never by polling.

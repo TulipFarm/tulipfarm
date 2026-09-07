@@ -27,6 +27,7 @@ import {
   RunEventStore,
   RunStore,
 } from "@tulipfarm/storage";
+import { PgEffectStore } from "@tulipfarm/tool-broker";
 import type { FastifyInstance } from "fastify";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { buildApp } from "../app";
@@ -197,7 +198,11 @@ describe("durable chat submission over HTTP", () => {
         pollIntervalMs: 5,
       },
       runCancel: runCanceller(
-        new RunCancellationManager(runStore, new ChildLinkStore(runTransactions))
+        new RunCancellationManager(
+          runStore,
+          new ChildLinkStore(runTransactions),
+          new PgEffectStore(runTransactions)
+        )
       ),
       fileService: files,
       rateLimiter: {

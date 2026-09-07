@@ -77,6 +77,7 @@ export interface EffectStore {
   ): Promise<ReserveEffectResult>;
   get(businessId: string, effectId: string): Promise<EffectRecord | undefined>;
   list(businessId: string): Promise<EffectRecord[]>;
+  listByRun(businessId: string, runId: string): Promise<EffectRecord[]>;
   transition(input: TransitionEffectInput): Promise<EffectRecord>;
   beginAttempt(businessId: string, effectId: string, startedAt: string): Promise<EffectAttempt>;
   finishAttempt(input: FinishEffectAttemptInput): Promise<EffectRecord>;
@@ -108,6 +109,13 @@ export class MemoryEffectStore implements EffectStore {
   }
 
   async reserve(input: ReserveEffectInput): Promise<ReserveEffectResult> {
+    if (input.parentEffectId !== undefined) {
+      throw new EffectLedgerError("effect_state_conflict", input.parentEffectId);
+    }
+    return this.reserveRecord(input);
+  }
+
+  private async reserveRecord(input: ReserveEffectInput): Promise<ReserveEffectResult> {
     const key = this.key(input.businessId, input.idempotencyKey);
     const existing = this.records.get(key);
     if (existing !== undefined) {
@@ -127,10 +135,13 @@ export class MemoryEffectStore implements EffectStore {
   ): Promise<ReserveEffectResult> {
     const parent = await this.get(input.businessId, parentEffectId);
     if (parent === undefined) throw new EffectLedgerError("effect_not_found", parentEffectId);
-    if (parent.state !== "confirmed") {
+    if (parent.runId !== input.runId || parent.state !== "confirmed") {
       throw new EffectLedgerError("effect_state_conflict", parentEffectId);
     }
-    const result = await this.reserve({ ...input, parentEffectId });
+    const result = await this.reserveRecord({ ...input, parentEffectId });
+    if (result.effect.parentEffectId !== parentEffectId) {
+      throw new EffectLedgerError("effect_state_conflict", parentEffectId);
+    }
     const parentKey = this.key(input.businessId, parent.idempotencyKey);
     this.records.set(
       parentKey,
@@ -147,6 +158,12 @@ export class MemoryEffectStore implements EffectStore {
 
   async list(businessId: string): Promise<EffectRecord[]> {
     return [...this.records.values()].filter((record) => record.businessId === businessId);
+  }
+
+  async listByRun(businessId: string, runId: string): Promise<EffectRecord[]> {
+    return [...this.records.values()].filter(
+      (record) => record.businessId === businessId && record.runId === runId
+    );
   }
 
   async transition(input: TransitionEffectInput): Promise<EffectRecord> {
@@ -305,10 +322,41 @@ async function findByKey(
   return result.rows[0] === undefined ? undefined : fromRow(result.rows[0]);
 }
 
+type EffectRunFence = "normal" | "compensation";
+
+const NORMAL_EFFECT_RUN_STATUSES: ReadonlySet<string> = new Set(["claimed", "running"]);
+const COMPENSATION_RUN_STATUSES: ReadonlySet<string> = new Set([
+  ...NORMAL_EFFECT_RUN_STATUSES,
+  "attention_required",
+  "needs_reconciliation",
+]);
+
+async function lockEffectRun(
+  transaction: Queryable,
+  businessId: string,
+  runId: string,
+  fence: EffectRunFence
+): Promise<void> {
+  const result = await transaction.query<{ status: string }>(
+    `SELECT status
+       FROM runs
+      WHERE business_id = $1 AND id = $2
+      FOR UPDATE`,
+    [businessId, runId]
+  );
+  const status = result.rows[0]?.status;
+  if (status === undefined) throw new EffectLedgerError("run_not_found", runId);
+  const allowed = fence === "compensation" ? COMPENSATION_RUN_STATUSES : NORMAL_EFFECT_RUN_STATUSES;
+  if (!allowed.has(status)) throw new EffectLedgerError("run_not_dispatchable", runId);
+}
+
 export class PgEffectStore implements EffectStore {
   constructor(private readonly transactions: TransactionPort) {}
 
   reserve(input: ReserveEffectInput): Promise<ReserveEffectResult> {
+    if (input.parentEffectId !== undefined) {
+      return Promise.reject(new EffectLedgerError("effect_state_conflict", input.parentEffectId));
+    }
     return this.transactions.withTransaction((transaction) =>
       this.reserveWithin(transaction, input)
     );
@@ -319,18 +367,30 @@ export class PgEffectStore implements EffectStore {
     parentEffectId: string
   ): Promise<ReserveEffectResult> {
     return this.transactions.withTransaction(async (transaction) => {
-      const parent = await transaction.query<{ state: EffectRecord["state"] }>(
-        `SELECT state FROM effect_records
+      await lockEffectRun(transaction, input.businessId, input.runId, "compensation");
+      const parent = await transaction.query<{
+        run_id: string;
+        state: EffectRecord["state"];
+      }>(
+        `SELECT run_id, state FROM effect_records
           WHERE business_id = $1 AND effect_id = $2 FOR UPDATE`,
         [input.businessId, parentEffectId]
       );
       if (parent.rows[0] === undefined) {
         throw new EffectLedgerError("effect_not_found", parentEffectId);
       }
-      if (parent.rows[0].state !== "confirmed") {
+      if (parent.rows[0].run_id !== input.runId || parent.rows[0].state !== "confirmed") {
         throw new EffectLedgerError("effect_state_conflict", parentEffectId);
       }
-      const result = await this.reserveWithin(transaction, { ...input, parentEffectId });
+      const result = await this.reserveWithin(
+        transaction,
+        { ...input, parentEffectId },
+        "compensation",
+        true
+      );
+      if (result.effect.parentEffectId !== parentEffectId) {
+        throw new EffectLedgerError("effect_state_conflict", parentEffectId);
+      }
       await transaction.query(
         `UPDATE effect_records SET state = 'compensating', updated_at = $3
           WHERE business_id = $1 AND effect_id = $2`,
@@ -342,8 +402,13 @@ export class PgEffectStore implements EffectStore {
 
   private async reserveWithin(
     transaction: Queryable,
-    input: ReserveEffectInput
+    input: ReserveEffectInput,
+    fence: EffectRunFence = "normal",
+    fenceHeld = false
   ): Promise<ReserveEffectResult> {
+    if (!fenceHeld) {
+      await lockEffectRun(transaction, input.businessId, input.runId, fence);
+    }
     await transaction.query(
       `INSERT INTO tool_intents (
            business_id, intent_id, run_id, state_id, idempotency_key, intent_digest,
@@ -435,6 +500,21 @@ export class PgEffectStore implements EffectStore {
     });
   }
 
+  listByRun(businessId: string, runId: string): Promise<EffectRecord[]> {
+    return this.transactions.withTransaction(async (transaction) => {
+      const result = await transaction.query<EffectRow>(
+        `SELECT effects.*, intents.normalized_intent
+           FROM effect_records effects
+           JOIN tool_intents intents
+             ON intents.business_id = effects.business_id AND intents.intent_id = effects.intent_id
+          WHERE effects.business_id = $1 AND effects.run_id = $2
+          ORDER BY effects.created_at, effects.effect_id`,
+        [businessId, runId]
+      );
+      return result.rows.map(fromRow);
+    });
+  }
+
   transition(input: TransitionEffectInput): Promise<EffectRecord> {
     return this.transactions.withTransaction(async (transaction) => {
       const updated = await transaction.query(
@@ -458,6 +538,33 @@ export class PgEffectStore implements EffectStore {
 
   beginAttempt(businessId: string, effectId: string, startedAt: string): Promise<EffectAttempt> {
     return this.transactions.withTransaction(async (transaction) => {
+      const identity = await transaction.query<{
+        run_id: string;
+        parent_effect_id: string | null;
+      }>(
+        `SELECT run_id, parent_effect_id FROM effect_records
+          WHERE business_id = $1 AND effect_id = $2`,
+        [businessId, effectId]
+      );
+      const effectIdentity = identity.rows[0];
+      if (effectIdentity === undefined) {
+        throw new EffectLedgerError("effect_not_found", effectId);
+      }
+      const fence = effectIdentity.parent_effect_id === null ? "normal" : "compensation";
+      await lockEffectRun(transaction, businessId, effectIdentity.run_id, fence);
+      if (effectIdentity.parent_effect_id !== null) {
+        const parent = await transaction.query<{ run_id: string; state: EffectRecord["state"] }>(
+          `SELECT run_id, state FROM effect_records
+            WHERE business_id = $1 AND effect_id = $2 FOR UPDATE`,
+          [businessId, effectIdentity.parent_effect_id]
+        );
+        if (
+          parent.rows[0]?.run_id !== effectIdentity.run_id ||
+          parent.rows[0]?.state !== "compensating"
+        ) {
+          throw new EffectLedgerError("effect_state_conflict", effectIdentity.parent_effect_id);
+        }
+      }
       const current = await transaction.query<{ state: EffectRecord["state"] }>(
         `SELECT state FROM effect_records
           WHERE business_id = $1 AND effect_id = $2 FOR UPDATE`,
