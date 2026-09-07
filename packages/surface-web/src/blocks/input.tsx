@@ -399,8 +399,7 @@ export function SurfaceForm({
                   name={name}
                   type="checkbox"
                   required={required}
-                  value="true"
-                  onChange={(event) => update(name, event.target.checked ? ["true"] : [])}
+                  onChange={(event) => update(name, event.target.checked)}
                 />
                 <span>
                   {label}
