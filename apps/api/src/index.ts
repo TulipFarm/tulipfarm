@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { EventEmitter } from "node:events";
+import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import {
   createSubagentSpawning,
@@ -558,7 +559,10 @@ async function boot() {
     // Same root the Worker derives, so a blob-backed Run Artifact written by either process is
     // readable by the other. Without it `publishFile` fails with `artifact_blob_unavailable`,
     // which is how a sandboxed Skill command dies before its container ever starts.
-    const blobs = createBlobPort(join(resolveDataDir() ?? process.cwd(), "blobs"));
+    const dataDir = resolveDataDir();
+    // Compose mounts only this subdirectory writable in the worker, after API readiness.
+    if (dataDir !== undefined) await mkdir(join(dataDir, "blobs"), { recursive: true });
+    const blobs = createBlobPort(join(dataDir ?? process.cwd(), "blobs"));
     /** Every Artifact reader is the same service over a different transaction scope. */
     const artifactsOver = (transactions: ConstructorParameters<typeof ArtifactStore>[0]) =>
       new ArtifactService(new ArtifactStore(transactions), invocationValidator, blobs);

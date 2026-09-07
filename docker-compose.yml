@@ -171,9 +171,14 @@ services:
       S3_ACCESS_KEY_ID: ${S3_ACCESS_KEY_ID:-}
       S3_SECRET_ACCESS_KEY: ${S3_SECRET_ACCESS_KEY:-}
     volumes:
-      # Read-only: `app` owns everything on this volume. The worker only reads back the two
-      # values it was given.
+      # Credentials stay read-only. Only blobs are writable; keep the existing data location.
       - tulipfarm-data:/data:ro
+      - type: volume
+        source: tulipfarm-data
+        target: /data/blobs
+        volume:
+          subpath: blobs
+          nocopy: true
     # No published port: the probes are for the orchestrator, not for users.
     healthcheck:
       test:
