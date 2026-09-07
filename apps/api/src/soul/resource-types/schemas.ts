@@ -1,3 +1,5 @@
+import { MAX_RESOURCE_TYPE_NAME_LENGTH } from "../../resources/schema";
+
 export const ResourceTypeValidationErrorSchema = {
   type: "object",
   properties: {
@@ -23,7 +25,7 @@ export const CreateResourceTypeBodySchema = {
   type: "object",
   required: ["name", "schema"],
   properties: {
-    name: { type: "string" },
+    name: { type: "string", maxLength: MAX_RESOURCE_TYPE_NAME_LENGTH },
     schema: { type: "string" },
     domain: { type: "string" },
   },

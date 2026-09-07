@@ -3,9 +3,13 @@ import {
   assertValidType,
   createHistoryTableSql,
   createResourceTableSql,
+  dropOwnedUniqueIndexSql,
   historyTableName,
+  isValidResourceTypeName,
   rowToResourceDoc,
   tableName,
+  uniqueIndexName,
+  uniqueIndexSql,
 } from "./schema";
 
 describe("resources/schema", () => {
@@ -20,6 +24,12 @@ describe("resources/schema", () => {
       for (const bad of ["", "Ticket", "1ticket", "tick et", 'tick"et', "tick;drop", "tick_et"]) {
         expect(() => assertValidType(bad)).toThrow();
       }
+    });
+
+    it("limits new names without blocking access to existing longer types", () => {
+      expect(isValidResourceTypeName(`a${"b".repeat(54)}`)).toBe(true);
+      expect(isValidResourceTypeName(`a${"b".repeat(55)}`)).toBe(false);
+      expect(() => assertValidType(`a${"b".repeat(61)}`)).not.toThrow();
     });
   });
 
@@ -48,6 +58,34 @@ describe("resources/schema", () => {
       expect(hist).toContain('CREATE TABLE IF NOT EXISTS resources."ticket_history"');
       expect(hist).toContain("snapshot");
       expect(hist).toContain("resource_id");
+    });
+
+    it("creates deterministic owned unique indexes without masking an existing name", () => {
+      const name = uniqueIndexName("support-ticket", ["email"]);
+      expect(name).toMatch(/^uniq_support_ticket_[a-f0-9]{12}$/);
+      expect(uniqueIndexSql("support-ticket", ["email"])).toContain(
+        `CREATE UNIQUE INDEX "${name}"`
+      );
+      expect(uniqueIndexSql("support-ticket", ["email"])).not.toContain("IF NOT EXISTS");
+      expect(dropOwnedUniqueIndexSql("support-ticket", name)).toBe(
+        `DROP INDEX resources."${name}"`
+      );
+    });
+
+    it("keeps indexes for maximum-length type names distinct and within 63 bytes", () => {
+      const type = `a${"b".repeat(54)}`;
+      const email = uniqueIndexName(type, ["email"]);
+      const tenantEmail = uniqueIndexName(type, ["tenant", "email"]);
+
+      expect(Buffer.byteLength(email)).toBeLessThanOrEqual(63);
+      expect(Buffer.byteLength(tenantEmail)).toBeLessThanOrEqual(63);
+      expect(email).not.toBe(tenantEmail);
+    });
+
+    it("refuses to drop an index outside the resource type's owned namespace", () => {
+      expect(() => dropOwnedUniqueIndexSql("ticket", "users_email_key")).toThrow(
+        "invalid owned unique index name"
+      );
     });
   });
 

@@ -1,13 +1,14 @@
 import { randomUUID } from "node:crypto";
 import { HookError, type HookExecutor } from "@tulipfarm/sandbox";
 import type { SoulLoader, SoulResource } from "@tulipfarm/soul";
-import type { PaginatedResult } from "@tulipfarm/storage";
+import type { PaginatedResult, Queryable } from "@tulipfarm/storage";
 import {
   authorizeToolIntent,
   type PublishedToolContract,
   toolContractSpecOf,
 } from "@tulipfarm/tool-broker";
 import { describe, expect, it, vi } from "vitest";
+import { reconcileResourceTablesRecoverably } from "./reconcile.js";
 import type {
   CounterStore,
   HistoryOp,
@@ -132,7 +133,10 @@ function expectNoMalformedTargets(toolName: string, args: unknown): void {
   }
 }
 
-function makeCtx(factory?: FakeRepoFactory, soulLoader?: ReturnType<typeof makeSoulLoader>) {
+function makeCtx(
+  factory?: FakeRepoFactory,
+  soulLoader?: ReturnType<typeof makeSoulLoader> | SoulLoader
+) {
   return {
     userId: "u1",
     agentId: undefined,
@@ -152,6 +156,38 @@ function makeCtx(factory?: FakeRepoFactory, soulLoader?: ReturnType<typeof makeS
     hookExecutor: undefined,
     events: undefined,
   };
+}
+
+async function unavailableLoader(): Promise<SoulLoader> {
+  const loader = {
+    resources: new Map<string, SoulResource>([
+      [
+        "ticket",
+        {
+          name: "ticket",
+          schema: {
+            type: "object",
+            properties: { title: { type: "string" } },
+            required: ["title"],
+            "x-unique": [["title"]],
+          },
+          hasHooks: false,
+          hooksEnabled: false,
+        },
+      ],
+    ]),
+  } as unknown as SoulLoader;
+  const q = {
+    query: vi.fn(async (sql: string) => {
+      if (sql.startsWith("CREATE UNIQUE INDEX")) throw new Error("duplicate value");
+      return { rows: [] };
+    }),
+  } as unknown as Queryable & {
+    transaction<T>(callback: (tx: Queryable) => Promise<T>): Promise<T>;
+  };
+  q.transaction = async (callback) => callback(q);
+  await reconcileResourceTablesRecoverably(q, loader, { warn: vi.fn(), error: vi.fn() });
+  return loader;
 }
 
 describe("RESOURCE_TOOLS targetsFor", () => {
@@ -406,6 +442,21 @@ describe("record_create", () => {
     expect(result).toMatchObject({ success: false, error: { code: "not_found" } });
   });
 
+  it("returns unavailable while the active schema's constraints are not enforced", async () => {
+    const factory = new FakeRepoFactory();
+    const tool = getTool("record_create");
+    const result = await tool.handler(
+      { type: "ticket", data: { title: "Hello" } },
+      makeCtx(factory, await unavailableLoader())
+    );
+
+    expect(result).toMatchObject({
+      success: false,
+      error: { code: "unavailable", message: expect.stringMatching(/not enforced/i) },
+    });
+    expect(factory.repos.size).toBe(0);
+  });
+
   it("returns validation_error for missing required field", async () => {
     const tool = getTool("record_create");
     const result = await tool.handler({ type: "ticket", data: {} }, makeCtx());
@@ -526,6 +577,19 @@ describe("record_update", () => {
       makeCtx(factory)
     );
     expect(result).toMatchObject({ success: false, error: { code: "not_found" } });
+  });
+
+  it("returns unavailable while the active schema's constraints are not enforced", async () => {
+    const tool = getTool("record_update");
+    const result = await tool.handler(
+      { type: "ticket", id: randomUUID(), version: 1, data: { title: "New" } },
+      makeCtx(new FakeRepoFactory(), await unavailableLoader())
+    );
+
+    expect(result).toMatchObject({
+      success: false,
+      error: { code: "unavailable", message: expect.stringMatching(/not enforced/i) },
+    });
   });
 });
 

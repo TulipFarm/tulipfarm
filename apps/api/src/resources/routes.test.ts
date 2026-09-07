@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { EventEmitter } from "node:events";
 import { HookError, type HookExecutor } from "@tulipfarm/sandbox";
 import type { SoulLoader, SoulResource } from "@tulipfarm/soul";
-import type { PaginatedResult } from "@tulipfarm/storage";
+import type { PaginatedResult, Queryable } from "@tulipfarm/storage";
 import type { FastifyInstance } from "fastify";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { buildApp } from "../app";
@@ -13,6 +13,7 @@ import { MemorySessionStore } from "../auth/session-store";
 import { createUser, type UserDoc, type UserRepo } from "../auth/users";
 import { DEPLOYMENT_ROLES } from "../identity/roles";
 import { LiveRecordAuthorizer } from "./authorize";
+import { reconcileResourceTablesRecoverably } from "./reconcile";
 import type {
   CounterStore,
   HistoryOp,
@@ -102,6 +103,19 @@ class FakeResourceRepoFactory implements ResourceRepoFactory {
 }
 
 const stubCounterStore: CounterStore = { makeCounterFn: () => async () => 1 };
+
+async function markUnenforced(soulLoader: SoulLoader): Promise<void> {
+  const q = {
+    query: vi.fn(async (sql: string) => {
+      if (sql.startsWith("CREATE UNIQUE INDEX")) throw new Error("duplicate value");
+      return { rows: [] };
+    }),
+  } as unknown as Queryable & {
+    transaction<T>(callback: (tx: Queryable) => Promise<T>): Promise<T>;
+  };
+  q.transaction = async (callback) => callback(q);
+  await reconcileResourceTablesRecoverably(q, soulLoader, { warn: vi.fn(), error: vi.fn() });
+}
 
 // ── Fake auth deps ────────────────────────────────────────────────────────────
 
@@ -224,6 +238,28 @@ describe("resource routes", () => {
         payload: { title: "Bug" },
       });
       expect(res.statusCode).toBe(404);
+    });
+
+    it("refuses creates while the active schema's constraints are not enforced", async () => {
+      const resource = soulLoader.resources.get("ticket");
+      if (!resource) throw new Error("missing ticket fixture");
+      soulLoader.resources.set("ticket", {
+        ...resource,
+        schema: { ...resource.schema, "x-unique": [["title"]] },
+      });
+      await markUnenforced(soulLoader);
+
+      const res = await app.inject({
+        method: "POST",
+        url: "/api/v1/resources/ticket",
+        cookies: { [SESSION_COOKIE]: sid, [CSRF_COOKIE]: TEST_CSRF },
+        headers: { [CSRF_HEADER]: TEST_CSRF },
+        payload: { title: "Bug report" },
+      });
+
+      expect(res.statusCode).toBe(503);
+      expect(res.json()).toMatchObject({ error: expect.stringMatching(/not enforced/i) });
+      expect(fakeRepo.docs.size).toBe(0);
     });
 
     it("creates record — UUID id, version:1, history appended", async () => {
@@ -862,6 +898,34 @@ describe("resource routes", () => {
         headers: { [CSRF_HEADER]: TEST_CSRF },
       });
       expect(list.json<{ items: unknown[] }>().items).toHaveLength(0);
+    });
+
+    it("still permits deletion so duplicate data can be repaired while writes are blocked", async () => {
+      const id = randomUUID();
+      fakeRepo.docs.set(id, {
+        _id: id,
+        version: 1,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+        title: "Duplicate",
+      });
+      const resource = soulLoader.resources.get("ticket");
+      if (!resource) throw new Error("missing ticket fixture");
+      soulLoader.resources.set("ticket", {
+        ...resource,
+        schema: { ...resource.schema, "x-unique": [["title"]] },
+      });
+      await markUnenforced(soulLoader);
+
+      const res = await app.inject({
+        method: "DELETE",
+        url: `/api/v1/resources/ticket/${id}`,
+        cookies: { [SESSION_COOKIE]: sid, [CSRF_COOKIE]: TEST_CSRF },
+        headers: { [CSRF_HEADER]: TEST_CSRF, "if-match": "1" },
+      });
+
+      expect(res.statusCode).toBe(204);
+      expect(fakeRepo.docs.get(id)?.deletedAt).toBeInstanceOf(Date);
     });
   });
 });

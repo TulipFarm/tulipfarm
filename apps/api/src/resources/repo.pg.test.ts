@@ -61,6 +61,22 @@ describe("PgResourceRepo", () => {
     expect(await repo.findById(randomUUID())).toBeNull();
   });
 
+  it("keeps existing long-named types readable and supports soft-delete recovery", async () => {
+    const legacyType = `a${"b".repeat(61)}`;
+    await db.query(createResourceTableSql(legacyType));
+    await db.query(createHistoryTableSql(legacyType));
+    const legacy = new PgResourceRepo(db, legacyType);
+    const record = doc();
+    await legacy.insert(record);
+
+    expect(await legacy.findById(record._id)).toMatchObject({ title: "Bug", version: 1 });
+    await expect(
+      legacy.replaceOne(record._id, 1, { ...record, version: 2, deletedAt: new Date() }, "delete")
+    ).resolves.toBe(true);
+    expect((await legacy.list({ limit: 10 })).items).toHaveLength(0);
+    expect((await legacy.list({ limit: 10, includeDeleted: true })).items).toHaveLength(1);
+  });
+
   it("returns null for a malformed id without querying the UUID column", async () => {
     expect(await repo.findById("qa-does-not-exist-id")).toBeNull();
   });

@@ -20,6 +20,7 @@ import { ErrorSchema } from "../../auth/schemas";
 import type { AuthorizationCheck, RouteAuthorization } from "../../authz/route-gate";
 import type { RateLimiter } from "../../rate-limit";
 import { makeRateLimitHook } from "../../rate-limit";
+import { isValidResourceTypeName, isValidResourceTypeSlug } from "../../resources/schema";
 import { commitActorFromRequest } from "../commit-actor";
 import {
   CreateResourceTypeBodySchema,
@@ -35,8 +36,6 @@ import {
 } from "./schemas";
 
 type PreHandler = (req: FastifyRequest, reply: FastifyReply) => Promise<void>;
-
-const NAME_RE = /^[a-z][a-z0-9-]*$/;
 
 type SchemaCheck =
   | { ok: true; parsed: Record<string, unknown> }
@@ -143,6 +142,7 @@ export function registerResourceTypeRoutes(
           409: ErrorSchema,
           422: ResourceTypeValidationErrorSchema,
           500: ErrorSchema,
+          503: ErrorSchema,
         },
       },
     },
@@ -153,7 +153,7 @@ export function registerResourceTypeRoutes(
         domain,
       } = req.body as { name: string; schema: string; domain?: string };
 
-      if (!name || !NAME_RE.test(name)) {
+      if (!isValidResourceTypeName(name)) {
         return reply.code(400).send({ error: "invalid resource type name" });
       }
       if (domain !== undefined && !RESOURCE_DOMAIN_RE.test(domain)) {
@@ -182,8 +182,9 @@ export function registerResourceTypeRoutes(
         }
       }
 
+      let write: Awaited<ReturnType<SoulWriter["apply"]>>;
       try {
-        await soulWriter.apply({
+        write = await soulWriter.apply({
           subject: `soul: add resource type ${name}`,
           source: "api",
           actor: commitActorFromRequest(req),
@@ -211,6 +212,11 @@ export function registerResourceTypeRoutes(
       await soulLoader.reload();
       // Materialise the new type's Postgres table before the client can POST records to it.
       await reconcile?.();
+      if (!write.published) {
+        return reply.code(503).send({
+          error: `resource type ${name} was committed but its runtime bundle was not published`,
+        });
+      }
       await auditWrite(req, "resource-type.create", `resource-type:${name}`);
 
       return reply.code(201).send({
@@ -262,6 +268,7 @@ export function registerResourceTypeRoutes(
           409: ErrorSchema,
           422: ResourceTypeValidationErrorSchema,
           500: ErrorSchema,
+          503: ErrorSchema,
         },
       },
     },
@@ -269,7 +276,7 @@ export function registerResourceTypeRoutes(
       const { name } = req.params as { name: string };
       const { schema: schemaYaml, domain } = req.body as { schema: string; domain?: string };
 
-      if (!name || !NAME_RE.test(name)) {
+      if (!isValidResourceTypeSlug(name)) {
         return reply.code(400).send({ error: "invalid resource type name" });
       }
       if (domain !== undefined && !RESOURCE_DOMAIN_RE.test(domain)) {
@@ -320,8 +327,9 @@ export function registerResourceTypeRoutes(
         ];
       }
 
+      let write: Awaited<ReturnType<SoulWriter["apply"]>>;
       try {
-        await soulWriter.apply({
+        write = await soulWriter.apply({
           subject: `soul: update resource type ${name}`,
           source: "api",
           actor: commitActorFromRequest(req),
@@ -338,6 +346,11 @@ export function registerResourceTypeRoutes(
       await soulLoader.reload();
       // New columns may have been added — materialise them before records reference them.
       await reconcile?.();
+      if (!write.published) {
+        return reply.code(503).send({
+          error: `resource type ${name} was committed but its runtime bundle was not published`,
+        });
+      }
       await auditWrite(req, "resource-type.update", `resource-type:${name}`);
 
       const reloaded = soulLoader.resources.get(name);
@@ -375,7 +388,7 @@ export function registerResourceTypeRoutes(
     },
     async (req, reply) => {
       const { name } = req.params as { name: string };
-      if (!name || !NAME_RE.test(name)) {
+      if (!isValidResourceTypeSlug(name)) {
         return reply.code(400).send({ error: "invalid resource type name" });
       }
       const typeDir = join(soulPath, "resources", name);
@@ -460,7 +473,7 @@ export function registerResourceTypeRoutes(
       const { name } = req.params as { name: string };
       const { source } = req.body as { source: string };
 
-      if (!name || !NAME_RE.test(name)) {
+      if (!isValidResourceTypeSlug(name)) {
         return reply.code(400).send({ error: "invalid resource type name" });
       }
       if (!soulLoader.resources.has(name)) {
@@ -534,7 +547,7 @@ export function registerResourceTypeRoutes(
     },
     async (req, reply) => {
       const { name } = req.params as { name: string };
-      if (!name || !NAME_RE.test(name)) {
+      if (!isValidResourceTypeSlug(name)) {
         return reply.code(400).send({ error: "invalid resource type name" });
       }
       if (!soulLoader.resources.has(name)) {

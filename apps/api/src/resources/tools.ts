@@ -13,6 +13,7 @@ import { parsePaginationQuery } from "@tulipfarm/storage";
 import { type ApiToolDefinition, defineApiTool, err, ok } from "@tulipfarm/tool-host";
 import { firstError } from "../platform/tool-args";
 import { deliverResourceSideEffect, type ResourceSideEffect } from "./outbox.js";
+import { resourceWriteBlock } from "./reconcile.js";
 import { type CounterStore, type ResourceRepoFactory, toApiRecord } from "./repo.js";
 
 export interface ResourceToolContext {
@@ -243,6 +244,8 @@ const resourceCreate = defineApiTool<ResourceToolContext>({
 
     const resourceDef = ctx.soulLoader.resources.get(type);
     if (!resourceDef) return err("not_found", `resource type not found: ${type}`);
+    const writeBlock = resourceWriteBlock(ctx.soulLoader, type);
+    if (writeBlock) return err("unavailable", writeBlock);
 
     try {
       const created = await createRecord(
@@ -354,6 +357,8 @@ const resourceUpdate = defineApiTool<ResourceToolContext>({
 
     const resourceDef = ctx.soulLoader.resources.get(type);
     if (!resourceDef) return err("not_found", `resource type not found: ${type}`);
+    const writeBlock = resourceWriteBlock(ctx.soulLoader, type);
+    if (writeBlock) return err("unavailable", writeBlock);
 
     try {
       const updated = await updateRecord(

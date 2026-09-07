@@ -71,6 +71,10 @@ PostgreSQL persistence composition, auth, Soul Git writes, and Worker callback p
 - A Record mutation and its history snapshot are one `ResourceRepo` call, committed on one
   transaction. There is no separate `appendHistory`: a committed Record with no history entry is an
   audit gap, and the route emits its domain event only after that call returns.
+- Resource type authoring reconciles tables strictly. Boot and `soul.synced` reconcile each type
+  recoverably, report unenforced schemas, and continue so another type cannot take down the API.
+  Record create/update fail with 503 for an unenforced type; reads and soft-delete remain available
+  so an operator can inspect and repair duplicate data.
 - Tools return `ok(data)` or `err(code, message)`, never throw; ToolRegistry validates
   JSON Schema before execution. Read batches run in parallel; mutating batches are serial.
 - Every write to the authored Soul tree goes through `SoulWriter.apply()` (ADR-007) — routes, Tools

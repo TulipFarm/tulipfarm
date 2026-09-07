@@ -234,7 +234,11 @@ import { readCustomInstructions } from "./preferences/custom-instructions";
 import { PgRateLimiter } from "./rate-limit";
 import { LiveRecordAuthorizer } from "./resources/authorize";
 import { startDelivery } from "./resources/outbox";
-import { reconcileResourceTables, registerResourceReconcile } from "./resources/reconcile";
+import {
+  reconcileResourceTables,
+  reconcileResourceTablesRecoverably,
+  registerResourceReconcile,
+} from "./resources/reconcile";
 import { PgCounterStore, PgResourceRepoFactory } from "./resources/repo";
 import { runCanceller } from "./runs/cancel";
 import { RunEventNotifyListener } from "./runs/notify-listener";
@@ -542,7 +546,7 @@ async function boot() {
     const bundledIntegrations = await loadBundledIntegrations(console);
 
     // Per-type resource tables can't be created lazily (no `db.collection(type)`):
-    await reconcileResourceTables(pool, soulLoader, console);
+    await reconcileResourceTablesRecoverably(pool, soulLoader, console);
 
     const ttlSeconds = Number.parseInt(
       process.env.SESSION_TTL_SECONDS ?? String(DEFAULT_SESSION_TTL_SECONDS),

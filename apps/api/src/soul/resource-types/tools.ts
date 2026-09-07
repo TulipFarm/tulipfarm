@@ -20,10 +20,10 @@ import {
 } from "@tulipfarm/tool-host";
 import { parse as parseYaml } from "yaml";
 import { firstError } from "../../platform/tool-args";
+import { isValidResourceTypeName, MAX_RESOURCE_TYPE_NAME_LENGTH } from "../../resources/schema";
 import { SYSTEM_SOUL_COMMIT_ACTOR } from "../../runtime/soul-writer";
 import { soulCommitError } from "../../tools/soul-faults";
 
-const NAME_RE = /^[a-z][a-z0-9-]*$/;
 const SOUL_RESOURCE_TYPE_TARGET = "soul.resource_type";
 
 export interface ResourceTypeToolContext {
@@ -119,6 +119,7 @@ const CREATE_SCHEMA = {
     name: {
       type: "string",
       minLength: 1,
+      maxLength: MAX_RESOURCE_TYPE_NAME_LENGTH,
       description: "Resource type name (e.g. 'ticket'). Lowercase, alphanumeric + hyphens.",
     },
     schema: {
@@ -141,7 +142,11 @@ const SCHEMA_GET_SCHEMA = {
   required: ["name"],
   additionalProperties: false,
   properties: {
-    name: { type: "string", minLength: 1, description: "Resource type name." },
+    name: {
+      type: "string",
+      minLength: 1,
+      description: "Resource type name.",
+    },
   },
 } as const;
 
@@ -150,7 +155,11 @@ const UPDATE_SCHEMA = {
   required: ["name", "schema"],
   additionalProperties: false,
   properties: {
-    name: { type: "string", minLength: 1, description: "Resource type name to update." },
+    name: {
+      type: "string",
+      minLength: 1,
+      description: "Resource type name to update.",
+    },
     schema: {
       type: "string",
       minLength: 1,
@@ -182,7 +191,8 @@ const createResourceType = defineApiTool<ResourceTypeToolContext>({
     if (!validateCreate(args)) return err("validation_error", firstError(validateCreate.errors));
     const { name, schema: schemaYaml } = args as { name: string; schema: string };
 
-    if (!NAME_RE.test(name)) return err("validation_error", "invalid resource type name");
+    if (!isValidResourceTypeName(name))
+      return err("validation_error", "invalid resource type name");
 
     const typeDir = join(ctx.gitSync.path, "resources", name);
     if (existsSync(typeDir)) return err("validation_error", "resource type already exists");
@@ -190,8 +200,9 @@ const createResourceType = defineApiTool<ResourceTypeToolContext>({
     const validated = validateSchemaYaml(schemaYaml);
     if (!validated.ok) return validated.result;
 
+    let write: Awaited<ReturnType<SoulWriter["apply"]>>;
     try {
-      await ctx.soulWriter.apply({
+      write = await ctx.soulWriter.apply({
         subject: `soul: add resource type ${name}`,
         source: "agent",
         actor: ctx.requestContext?.actor ?? SYSTEM_SOUL_COMMIT_ACTOR,
@@ -214,6 +225,12 @@ const createResourceType = defineApiTool<ResourceTypeToolContext>({
       await ctx.reconcile?.();
     } catch (e) {
       return err("internal_error", reason(e));
+    }
+    if (!write.published) {
+      return err(
+        "internal_error",
+        `Resource type ${name} was committed to the Soul but its runtime bundle was not published.`
+      );
     }
 
     return ok({ name, schema: schemaYaml, hasHooks: false });
@@ -306,8 +323,9 @@ const resourceTypeUpdate = defineApiTool<ResourceTypeToolContext>({
       if (envelopeError !== undefined) return err("validation_error", envelopeError);
     }
 
+    let write: Awaited<ReturnType<SoulWriter["apply"]>>;
     try {
-      await ctx.soulWriter.apply({
+      write = await ctx.soulWriter.apply({
         subject: `soul: update resource type ${name}`,
         source: "agent",
         actor: ctx.requestContext?.actor ?? SYSTEM_SOUL_COMMIT_ACTOR,
@@ -340,6 +358,12 @@ const resourceTypeUpdate = defineApiTool<ResourceTypeToolContext>({
     } catch (e) {
       return err("internal_error", reason(e));
     }
+    if (!write.published) {
+      return err(
+        "internal_error",
+        `Resource type ${name} was committed to the Soul but its runtime bundle was not published.`
+      );
+    }
 
     const rt = ctx.soulLoader.resources.get(name);
     return ok({
@@ -358,7 +382,11 @@ const HOOKS_WRITE_SCHEMA = {
   required: ["name", "source"],
   additionalProperties: false,
   properties: {
-    name: { type: "string", minLength: 1, description: "Resource type name." },
+    name: {
+      type: "string",
+      minLength: 1,
+      description: "Resource type name.",
+    },
     source: {
       type: "string",
       minLength: 1,
@@ -373,7 +401,11 @@ const HOOKS_GET_SCHEMA = {
   required: ["name"],
   additionalProperties: false,
   properties: {
-    name: { type: "string", minLength: 1, description: "Resource type name." },
+    name: {
+      type: "string",
+      minLength: 1,
+      description: "Resource type name.",
+    },
   },
 } as const;
 
@@ -382,7 +414,11 @@ const HOOKS_DELETE_SCHEMA = {
   required: ["name"],
   additionalProperties: false,
   properties: {
-    name: { type: "string", minLength: 1, description: "Resource type name." },
+    name: {
+      type: "string",
+      minLength: 1,
+      description: "Resource type name.",
+    },
   },
 } as const;
 

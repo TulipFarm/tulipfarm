@@ -30,9 +30,13 @@ function makeSoulLoader(resources: SoulResource[] = []): SoulLoader {
 
 function makeSoulWriter(): SoulWriter {
   return {
-    apply: vi
-      .fn()
-      .mockResolvedValue({ commitSha: "abc1234", filesChanged: 1, paths: [], pushed: false }),
+    apply: vi.fn().mockResolvedValue({
+      commitSha: "abc1234",
+      filesChanged: 1,
+      paths: [],
+      pushed: false,
+      published: true,
+    }),
     // Non-null by default so hook deletion proceeds; tests that need "absent" override it.
     readCompanion: vi.fn().mockReturnValue("({ before() {} })"),
   } as unknown as SoulWriter;
@@ -185,6 +189,17 @@ describe("create_resource_type", () => {
     expect(ctx.soulWriter.apply).not.toHaveBeenCalled();
   });
 
+  it("rejects a name too long for its PostgreSQL tables before writing", async () => {
+    const ctx = makeCtx();
+    const res = await createTool.handler(
+      { name: `a${"b".repeat(55)}`, schema: VALID_SCHEMA_YAML },
+      ctx
+    );
+
+    expect(res).toMatchObject({ success: false, error: { code: "validation_error" } });
+    expect(ctx.soulWriter.apply).not.toHaveBeenCalled();
+  });
+
   it("returns validation_error for name starting with digit", async () => {
     const ctx = makeCtx();
     const res = await createTool.handler({ name: "1bad", schema: VALID_SCHEMA_YAML }, ctx);
@@ -246,6 +261,25 @@ describe("create_resource_type", () => {
     const ctx = makeCtx();
     const res = await createTool.handler({ name: "ticket" }, ctx);
     expect(res).toMatchObject({ success: false, error: { code: "validation_error" } });
+  });
+
+  it("does not report a committed but unpublished resource type as created", async () => {
+    const ctx = makeCtx();
+    ctx.soulWriter.apply.mockResolvedValueOnce({
+      commitSha: "abc1234",
+      filesChanged: 1,
+      paths: [],
+      pushed: true,
+      published: false,
+      publicationError: "bundle storage unavailable",
+    });
+
+    const res = await createTool.handler({ name: "ticket", schema: VALID_SCHEMA_YAML }, ctx);
+
+    expect(res).toMatchObject({
+      success: false,
+      error: { code: "internal_error", message: expect.stringContaining("not published") },
+    });
   });
 });
 
@@ -445,6 +479,46 @@ describe("resource_type_update", () => {
     ]);
     const res = await updateTool.handler({ name: "ticket" }, ctx);
     expect(res).toMatchObject({ success: false, error: { code: "validation_error" } });
+  });
+
+  it("surfaces a uniqueness reconciliation failure instead of reporting the schema as enforced", async () => {
+    const ctx = makeCtx([
+      { name: "ticket", schema: { type: "object" }, hasHooks: false, hooksEnabled: true },
+    ]);
+    ctx.reconcile.mockRejectedValueOnce(
+      new Error("duplicate key value violates unique constraint")
+    );
+
+    const res = await updateTool.handler({ name: "ticket", schema: UPDATED_YAML }, ctx);
+
+    expect(res).toMatchObject({
+      success: false,
+      error: {
+        code: "internal_error",
+        message: expect.stringContaining("duplicate key value"),
+      },
+    });
+  });
+
+  it("does not report a committed but unpublished schema update as active", async () => {
+    const ctx = makeCtx([
+      { name: "ticket", schema: { type: "object" }, hasHooks: false, hooksEnabled: true },
+    ]);
+    ctx.soulWriter.apply.mockResolvedValueOnce({
+      commitSha: "abc1234",
+      filesChanged: 1,
+      paths: [],
+      pushed: true,
+      published: false,
+      publicationError: "bundle storage unavailable",
+    });
+
+    const res = await updateTool.handler({ name: "ticket", schema: UPDATED_YAML }, ctx);
+
+    expect(res).toMatchObject({
+      success: false,
+      error: { code: "internal_error", message: expect.stringContaining("not published") },
+    });
   });
 });
 

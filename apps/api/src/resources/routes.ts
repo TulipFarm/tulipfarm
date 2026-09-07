@@ -14,6 +14,7 @@ import { ErrorSchema } from "../auth/schemas";
 import type { RecordAction, RecordAuthorizer } from "./authorize";
 import { recordPrincipalOf } from "./authorize";
 import { deliverResourceSideEffect, type ResourceSideEffect } from "./outbox";
+import { resourceWriteBlock } from "./reconcile";
 import { type CounterStore, type ResourceRepoFactory, toApiRecord } from "./repo";
 
 type PreHandler = (req: FastifyRequest, reply: FastifyReply) => Promise<void>;
@@ -206,6 +207,7 @@ export function registerResourceRoutes(
           404: ErrorSchema,
           409: ErrorSchema,
           422: ValidationErrorSchema,
+          503: ErrorSchema,
           401: ErrorSchema,
         },
       },
@@ -215,6 +217,8 @@ export function registerResourceRoutes(
       const resourceDef = soulLoader.resources.get(type);
       if (!resourceDef) return reply.code(404).send({ error: `resource type not found: ${type}` });
       if (await denyUnauthorized(req, reply, "record.create", type)) return reply;
+      const writeBlock = resourceWriteBlock(soulLoader, type);
+      if (writeBlock) return reply.code(503).send({ error: writeBlock });
 
       const actorId = (req.user as { _id: string } | undefined)?._id;
       const key = idempotencyKey(req);
@@ -351,6 +355,7 @@ export function registerResourceRoutes(
           404: ErrorSchema,
           409: ErrorSchema,
           422: ValidationErrorSchema,
+          503: ErrorSchema,
           401: ErrorSchema,
         },
       },
@@ -360,6 +365,8 @@ export function registerResourceRoutes(
       const resourceDef = soulLoader.resources.get(type);
       if (!resourceDef) return reply.code(404).send({ error: `resource type not found: ${type}` });
       if (await denyUnauthorized(req, reply, "record.update", type, id)) return reply;
+      const writeBlock = resourceWriteBlock(soulLoader, type);
+      if (writeBlock) return reply.code(503).send({ error: writeBlock });
 
       const ifMatch = parseIfMatch(req);
       if (ifMatch === null) return reply.code(400).send({ error: "If-Match header required" });
@@ -404,6 +411,7 @@ export function registerResourceRoutes(
           404: ErrorSchema,
           409: ErrorSchema,
           422: ValidationErrorSchema,
+          503: ErrorSchema,
           401: ErrorSchema,
         },
       },
@@ -413,6 +421,8 @@ export function registerResourceRoutes(
       const resourceDef = soulLoader.resources.get(type);
       if (!resourceDef) return reply.code(404).send({ error: `resource type not found: ${type}` });
       if (await denyUnauthorized(req, reply, "record.update", type, id)) return reply;
+      const writeBlock = resourceWriteBlock(soulLoader, type);
+      if (writeBlock) return reply.code(503).send({ error: writeBlock });
 
       const ifMatch = parseIfMatch(req);
       if (ifMatch === null) return reply.code(400).send({ error: "If-Match header required" });

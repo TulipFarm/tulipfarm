@@ -93,6 +93,7 @@ describe("resource-type routes", () => {
   let gitSync: GitSyncService;
   let soulLoader: SoulLoader;
   let soulWriterDouble: SoulWriterDouble;
+  let reconcileResources: (() => Promise<void>) & ReturnType<typeof vi.fn>;
   let sid: string;
   let adminSid: string;
 
@@ -106,6 +107,7 @@ describe("resource-type routes", () => {
     gitSync = makeFakeGitSync();
     soulLoader = makeFakeSoulLoader();
     soulWriterDouble = makeSoulWriterDouble();
+    reconcileResources = vi.fn(async () => undefined) as typeof reconcileResources;
 
     const user = await createUser(userRepo, "user@example.com", "pass", "member");
     sid = await store.create(user._id);
@@ -119,6 +121,7 @@ describe("resource-type routes", () => {
       gitSync,
       soulLoader,
       soulWriter: soulWriterDouble.writer,
+      reconcileResources,
     });
   });
 
@@ -230,6 +233,19 @@ describe("resource-type routes", () => {
       });
       expect(res.statusCode).toBe(400);
       expect(res.json()).toMatchObject({ error: "invalid resource type name" });
+    });
+
+    it("returns 400 before writing a name too long for its PostgreSQL tables", async () => {
+      const res = await app.inject({
+        method: "POST",
+        url: "/api/v1/resource-types",
+        cookies: { [SESSION_COOKIE]: sid, [CSRF_COOKIE]: TEST_CSRF },
+        headers: { [CSRF_HEADER]: TEST_CSRF },
+        payload: { name: `a${"b".repeat(55)}`, schema: VALID_SCHEMA_YAML },
+      });
+
+      expect(res.statusCode).toBe(400);
+      expect(soulWriterDouble.applied).toHaveLength(0);
     });
 
     it("returns 409 if resource type already exists", async () => {
@@ -424,6 +440,35 @@ x-computed:
         ],
       });
       expect(soulLoader.reload).toHaveBeenCalledOnce();
+    });
+
+    it("returns 500 when a new uniqueness constraint cannot be enforced", async () => {
+      vi.mocked(existsSync).mockReturnValue(true);
+      reconcileResources.mockRejectedValueOnce(
+        new Error("duplicate key value violates unique constraint")
+      );
+
+      const res = await app.inject(put({ schema: VALID_SCHEMA_YAML }));
+
+      expect(res.statusCode).toBe(500);
+      expect(res.json()).toMatchObject({ error: "Internal Server Error" });
+    });
+
+    it("returns 503 when the schema commit is not published", async () => {
+      vi.mocked(existsSync).mockReturnValue(true);
+      vi.spyOn(soulWriterDouble.writer, "apply").mockResolvedValueOnce({
+        commitSha: "abc1234",
+        filesChanged: 1,
+        paths: ["resources/ticket/schema.yml"],
+        pushed: true,
+        published: false,
+        publicationError: "bundle storage unavailable",
+      });
+
+      const res = await app.inject(put({ schema: VALID_SCHEMA_YAML }));
+
+      expect(res.statusCode).toBe(503);
+      expect(res.json()).toMatchObject({ error: expect.stringContaining("not published") });
     });
 
     it("returns 422 for a schema that is not a YAML object", async () => {
