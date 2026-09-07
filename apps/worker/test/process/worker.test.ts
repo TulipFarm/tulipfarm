@@ -171,7 +171,7 @@ describe("worker process", () => {
   );
 
   it(
-    "recovers a Run abandoned by a killed worker, without a second worker holding its lease",
+    "requeues a Run abandoned by a killed worker once, then fails it outright on a second dispatch throw",
     async () => {
       const handle = await bootWorker({ owner: "worker-a" });
       await handle.waitForReady();
@@ -205,12 +205,16 @@ describe("worker process", () => {
       worker = restarted;
       await restarted.waitForReady();
 
+      // "no-such-source" has no executor, so the requeue the second worker grants it is doomed to
+      // throw again — the dispatcher's bounded-retry rule then fails it outright rather than
+      // parking it a second time in front of the same sweep.
       const recovered = await waitFor(
         () => scratchDb.findRun(DEPLOYMENT_BUSINESS_ID, runId),
-        (value) => value?.status === "needs_reconciliation",
-        { describe: "the replacement worker to reclaim and finish the abandoned Run" }
+        (value) => value?.status === "failed",
+        { describe: "the replacement worker to reclaim, requeue once, and fail the abandoned Run" }
       );
       expect(recovered?.leaseOwner).toBeNull();
+      expect(recovered?.errorEvidenceRef).toBe("dispatch:handler_error_after_requeue");
     },
     TIMEOUT
   );

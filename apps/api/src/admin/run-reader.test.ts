@@ -44,6 +44,8 @@ describe("RunReader", () => {
           intent: {} as never,
           guardrailRevision: "guardrail-1",
           state: "confirmed",
+          outputStored: true,
+          output: null,
           createdAt: "2026-09-01T00:00:02.000Z",
           updatedAt: "2026-09-01T00:00:03.000Z",
         },
