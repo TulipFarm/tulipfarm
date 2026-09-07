@@ -315,6 +315,9 @@ export const OWNER_SCOPED_SURFACES: readonly {
  * Unrestricted authority, spelled for both request shapes: a grant with no domain covers only
  * domainless requests, so the pair is what "anything" actually means to `grantMatches`.
  */
+/** The Role every Agent Principal holds. Bootstrap-owned, so Soul may never redefine it. */
+export const AGENT_ROLE_ID = "agent";
+
 const UNRESTRICTED_GRANTS: readonly AccessGrant[] = [
   { action: "*", resourceType: "*", effect: "allow" },
   { action: "*", resourceType: "*", domain: "*", effect: "allow" },
@@ -340,6 +343,20 @@ export const DEPLOYMENT_ROLES: readonly Role[] = [
     id: "admin",
     businessId: DEPLOYMENT_BUSINESS_ID,
     assignableTo: ["user"],
+    parentRoleIds: [],
+    grants: [...UNRESTRICTED_GRANTS],
+  },
+  /**
+   * Every Agent's own Principal holds this. Authority is the intersection of the delegating
+   * caller's layer, this one, and the Tool allowlist (ADR authorization-design D9), so this layer
+   * is a ceiling and it starts fully open — narrowing it here would silently subtract from what
+   * the person driving the turn may already do. An Agent that must be bounded declares that in
+   * its own configuration; nothing is granted here that the caller does not already hold.
+   */
+  {
+    id: AGENT_ROLE_ID,
+    businessId: DEPLOYMENT_BUSINESS_ID,
+    assignableTo: ["agent"],
     parentRoleIds: [],
     grants: [...UNRESTRICTED_GRANTS],
   },
@@ -375,6 +392,7 @@ const ROLE_NAMES: Readonly<Record<string, string>> = {
   owner: "Owner",
   admin: "Administrator",
   member: "Member",
+  [AGENT_ROLE_ID]: "Agent",
 };
 
 function grantLabel(grant: AccessGrant): string {

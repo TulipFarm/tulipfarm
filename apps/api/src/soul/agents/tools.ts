@@ -35,6 +35,13 @@ export interface AgentToolContext {
   /** Which Agent is executing this Turn. Absent outside an Agent Turn. */
   agentId?: string;
   teamAssets?: TeamAssetService;
+  /**
+   * Registers the new Agent as a Principal. The boot and post-sync sweeps would reach it
+   * eventually, but "eventually" here means every Tool call the Agent makes until then is denied.
+   * Must not throw: the Agent is already written by the time it runs, so a failure here is a
+   * degraded Agent to be repaired by the next sweep, never a failed create the model should retry.
+   */
+  ensurePrincipal?: (agentId: string) => Promise<void>;
 }
 
 function ownershipOf(frontmatter: Record<string, unknown>) {
@@ -218,8 +225,9 @@ const agentCreate = defineApiTool<AgentToolContext>({
     const failure = await putAgent(ctx, created ? "add" : "update", target, frontmatter, body, () =>
       err("validation_error", "agent already exists")
     );
-    if (!failure && created && ctx.teamAssets) {
-      await ctx.teamAssets.ensure("agent", target, ownershipOf(frontmatter));
+    if (!failure && created) {
+      if (ctx.teamAssets) await ctx.teamAssets.ensure("agent", target, ownershipOf(frontmatter));
+      await ctx.ensurePrincipal?.(target);
     }
     return failure ?? ok({ name: target, created, changed: true, frontmatter, body });
   },

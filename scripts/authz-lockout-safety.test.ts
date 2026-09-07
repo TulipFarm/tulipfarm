@@ -171,6 +171,7 @@ describe("a deployment cannot lock itself out of its own authorization", () => {
 
     expect((await roles.listRoles(BUSINESS)).map((role) => role.id).sort()).toEqual([
       "admin",
+      "agent",
       "member",
       "owner",
     ]);
@@ -186,6 +187,7 @@ describe("a deployment cannot lock itself out of its own authorization", () => {
     const remaining = (await roles.listRoles(BUSINESS)).map((role) => role.id).sort();
     expect(remaining, "the reap took a bootstrap Role with it").toEqual([
       "admin",
+      "agent",
       "member",
       "owner",
     ]);

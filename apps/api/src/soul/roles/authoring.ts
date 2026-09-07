@@ -20,6 +20,7 @@ import {
 } from "@tulipfarm/soul";
 import { stringify as stringifyYaml } from "yaml";
 import type { CapabilityCatalog } from "../../authz/capabilities";
+import { RESERVED_ROLE_IDS } from "../../identity/role-reconcile";
 import { SYSTEM_SOUL_COMMIT_ACTOR } from "../../runtime/soul-writer";
 
 const definitionRegistry = new SchemaRegistry(DEFINITION_REGISTRATIONS);
@@ -48,13 +49,13 @@ export class LevelError extends Error {
 }
 
 /**
- * Slugs a level may not take. `owner`, `admin` and `member` are the bootstrap Roles:
- * `reconcileSoulRoles` refuses to project a Soul Role that collides with one, so a level authored
- * under those names would be written to git, reported as created, and then never take effect — the
- * worst of both outcomes. Refusing up front means the failure is a message the author reads rather
- * than silence they have to notice.
+ * Slugs a level may not take: the bootstrap Roles. `reconcileSoulRoles` refuses to project a Soul
+ * Role that collides with one, so a level authored under those names would be written to git,
+ * reported as created, and then never take effect — the worst of both outcomes. Refusing up front
+ * means the failure is a message the author reads rather than silence they have to notice. Taken
+ * from the reconcile's own set so the two can never disagree about what is reserved.
  */
-const RESERVED_SLUGS: ReadonlySet<string> = new Set(["owner", "admin", "member"]);
+const RESERVED_SLUGS: ReadonlySet<string> = RESERVED_ROLE_IDS;
 
 export function slugifyLevelName(name: string): string {
   return name

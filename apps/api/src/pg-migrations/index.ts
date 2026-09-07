@@ -63,6 +63,7 @@ import {
 } from "@tulipfarm/tool-broker";
 import { APPROVAL_EVIDENCE_STORAGE_STATEMENTS } from "@tulipfarm/tool-host";
 import type { Queryable } from "../db";
+import { AGENT_ROLE_ID } from "../identity/roles";
 import { resourceSideEffectMigration } from "../resources/outbox";
 
 export interface PgMigration {
@@ -808,7 +809,8 @@ async function seedBootstrapRole(
     readonly resourceType: string;
     readonly domain?: string;
     readonly effect: "allow" | "deny";
-  }>
+  }>,
+  assignableTo: readonly string[] = ["user"]
 ): Promise<void> {
   await q.query(
     `INSERT INTO roles (business_id, id, assignable_to)
@@ -816,7 +818,7 @@ async function seedBootstrapRole(
      ON CONFLICT (business_id, id) DO UPDATE SET
        assignable_to = EXCLUDED.assignable_to,
        updated_at = now()`,
-    [DEPLOYMENT_BUSINESS_ID, roleId, ["user"]]
+    [DEPLOYMENT_BUSINESS_ID, roleId, assignableTo]
   );
   for (const [index, grant] of grants.entries()) {
     await q.query(
@@ -879,6 +881,18 @@ async function seedAuthorizationBootstrap(q: Queryable): Promise<void> {
     { action: "*", resourceType: "*", domain: "*", effect: "allow" },
   ]);
   await seedBootstrapRole(q, "member", []);
+  // The Agent authority layer is an intersection member, so an Agent whose Role is missing can do
+  // nothing at all rather than merely less. Seeded here as well as synced on boot so a database
+  // built by the migrations alone is already able to authorize a Tool call.
+  await seedBootstrapRole(
+    q,
+    AGENT_ROLE_ID,
+    [
+      { action: "*", resourceType: "*", effect: "allow" },
+      { action: "*", resourceType: "*", domain: "*", effect: "allow" },
+    ],
+    ["agent"]
+  );
   await q.query(
     `INSERT INTO principal_groups (business_id, id)
      VALUES ($1, 'owners')

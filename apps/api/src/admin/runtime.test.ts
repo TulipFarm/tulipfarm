@@ -241,7 +241,7 @@ describe("runtime operational API", () => {
     expect(await api.getRun(grant, "missing")).toBeNull();
 
     const roles = await api.getRoles(grant);
-    expect(roles.items.map((role) => role.id)).toEqual(["owner", "admin", "member"]);
+    expect(roles.items.map((role) => role.id)).toEqual(["owner", "admin", "agent", "member"]);
     expect(roles.revision).toMatch(/^[a-f0-9]{64}$/);
     // Secret actions are absent from the member allow-list rather than spelled as an explicit
     // deny, because a deny would veto any exact secret grants configured on top of member.
