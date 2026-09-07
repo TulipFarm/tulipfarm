@@ -318,8 +318,14 @@ describe("BrokerRoutineToolPort", () => {
     });
     const subject = port();
 
-    expect(await subject.execute(gated)).toEqual({ kind: "succeeded", output: null });
-    expect(await subject.execute(gated)).toEqual({ kind: "succeeded", output: null });
+    expect(await subject.execute(gated)).toEqual({
+      kind: "succeeded",
+      output: { commentId: 12 },
+    });
+    expect(await subject.execute(gated)).toEqual({
+      kind: "succeeded",
+      output: { commentId: 12 },
+    });
 
     expect(consume).toHaveBeenCalledWith({
       approvalId: "approval-1",
@@ -384,6 +390,7 @@ describe("BrokerRoutineToolPort", () => {
       const first = new BrokerRoutineToolPort({
         effects: new PgEffectStore(transactions),
         adapters,
+        approvals: { decide, consume },
       });
 
       await expect(first.execute(request())).resolves.toEqual({
@@ -393,6 +400,7 @@ describe("BrokerRoutineToolPort", () => {
       const restarted = new BrokerRoutineToolPort({
         effects: new PgEffectStore(transactions),
         adapters,
+        approvals: { decide, consume },
       });
       await expect(restarted.execute(request())).resolves.toEqual({
         kind: "succeeded",
@@ -426,12 +434,14 @@ describe("BrokerRoutineToolPort", () => {
         new BrokerRoutineToolPort({
           effects: new PgEffectStore(transactions),
           adapters,
+          approvals: { decide, consume },
         }).execute(nullRequest)
       ).resolves.toEqual({ kind: "succeeded", output: null });
       await expect(
         new BrokerRoutineToolPort({
           effects: new PgEffectStore(transactions),
           adapters,
+          approvals: { decide, consume },
         }).execute(nullRequest)
       ).resolves.toEqual({ kind: "succeeded", output: null });
       expect(dispatch).toHaveBeenCalledTimes(1);
@@ -450,6 +460,7 @@ describe("BrokerRoutineToolPort", () => {
       await new BrokerRoutineToolPort({
         effects: new PgEffectStore(transactions),
         adapters,
+        approvals: { decide, consume },
       }).execute(request());
       await database.query(
         "UPDATE effect_records SET output_stored = false, output = NULL WHERE effect_id = $1",
@@ -460,6 +471,7 @@ describe("BrokerRoutineToolPort", () => {
         new BrokerRoutineToolPort({
           effects: new PgEffectStore(transactions),
           adapters,
+          approvals: { decide, consume },
         }).execute(request())
       ).resolves.toEqual({
         kind: "unavailable",
