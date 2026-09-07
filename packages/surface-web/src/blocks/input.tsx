@@ -3,7 +3,12 @@
 import type { SurfaceAction, SurfaceArtifact } from "@tulipfarm/surface/client";
 import type { ChangeEvent, FormEvent, ReactElement } from "react";
 import { useId, useState } from "react";
-import { ActionButton, inlineMarkup, type SurfaceWebProps } from "../primitives";
+import {
+  ActionButton,
+  inlineMarkup,
+  interactionErrorMessage,
+  type SurfaceWebProps,
+} from "../primitives";
 
 type Choice = {
   label: string;
@@ -78,16 +83,36 @@ export function SurfaceChoices({
   const [leadIndex, setLeadIndex] = useState(recommendedIndex);
   const [open, setOpen] = useState(false);
   const [selected, setSelected] = useState<string>();
+  const [pending, setPending] = useState<string>();
+  const [error, setError] = useState<string>();
   const questionId = `surface-${artifact.id}-question`;
 
   const choose = (choice: Choice) => ({
     ...action,
     payload: { ...action.payload, value: choice.value },
   });
+  const submitChoice = async (
+    choice: Choice,
+    handle: string,
+    input: Readonly<Record<string, unknown>>
+  ) => {
+    setPending(choice.value);
+    setError(undefined);
+    try {
+      await onInteraction?.(handle, input);
+      setSelected(choice.value);
+    } catch (error) {
+      setSelected(undefined);
+      setError(interactionErrorMessage(error));
+    } finally {
+      setPending(undefined);
+    }
+  };
 
   const question = (
     <header data-surface-choices-header>
       <h3 id={questionId}>{inlineMarkup(String(props.question))}</h3>
+      {error ? <p role="alert">{error}</p> : null}
     </header>
   );
 
@@ -102,16 +127,10 @@ export function SurfaceChoices({
               key={choice.value}
               label={choice.label}
               action={choose(choice)}
-              disabled={selected !== undefined}
+              disabled={selected !== undefined || pending !== undefined}
               selected={selected === choice.value}
-              onInteraction={async (handle, input) => {
-                setSelected(choice.value);
-                try {
-                  await onInteraction?.(handle, input);
-                } catch {
-                  setSelected(undefined);
-                }
-              }}
+              busy={pending === choice.value}
+              onInteraction={(handle, input) => submitChoice(choice, handle, input)}
               actionHandleFor={actionHandleFor}
             />
           ))}
@@ -121,7 +140,7 @@ export function SurfaceChoices({
   }
 
   const alternatives = choices.filter((_, index) => index !== leadIndex);
-  const decided = selected !== undefined;
+  const locked = selected !== undefined || pending !== undefined;
 
   return (
     <section data-surface-choices data-surface-recommend aria-labelledby={questionId}>
@@ -148,7 +167,7 @@ export function SurfaceChoices({
                 <button
                   key={choice.value}
                   type="button"
-                  disabled={decided}
+                  disabled={locked}
                   data-surface-choices-alternative
                   onClick={() => {
                     setLeadIndex(choices.indexOf(choice));
@@ -179,26 +198,20 @@ export function SurfaceChoices({
               data-surface-button
               data-variant="secondary"
               aria-expanded={open}
-              disabled={decided}
+              disabled={locked}
               onClick={() => setOpen((current) => !current)}
             >
               <span>Alternatives</span>
             </button>
           )}
           <ActionButton
-            label={decided ? "Accepted" : lead.label}
+            label={selected !== undefined ? "Accepted" : lead.label}
             action={choose(lead)}
-            disabled={decided}
-            state={decided ? "accepted" : undefined}
+            disabled={locked}
+            busy={pending === lead.value}
+            state={selected !== undefined ? "accepted" : undefined}
             primary
-            onInteraction={async (handle, input) => {
-              setSelected(lead.value);
-              try {
-                await onInteraction?.(handle, input);
-              } catch {
-                setSelected(undefined);
-              }
-            }}
+            onInteraction={(handle, input) => submitChoice(lead, handle, input)}
             actionHandleFor={actionHandleFor}
           />
         </span>
@@ -219,7 +232,8 @@ export function SurfaceMultiChoice({
   readonly actionHandleFor?: SurfaceWebProps["actionHandleFor"];
 }) {
   const [selected, setSelected] = useState<readonly string[]>([]);
-  const [submitted, setSubmitted] = useState(false);
+  const [submission, setSubmission] = useState<"idle" | "submitting" | "submitted">("idle");
+  const [error, setError] = useState<string>();
   const choices = props.choices as Array<{ label: string; value: string }>;
   const action = props.action as SurfaceAction;
   const handle = actionHandleFor?.(action);
@@ -229,13 +243,23 @@ export function SurfaceMultiChoice({
       previous.includes(value) ? previous.filter((item) => item !== value) : [...previous, value]
     );
   };
-  const submit = () => {
-    setSubmitted(true);
-    if (handle) void onInteraction?.(handle, { ...action.payload, values: selected });
+  const submit = async () => {
+    if (!handle) return;
+    setSubmission("submitting");
+    setError(undefined);
+    try {
+      await onInteraction?.(handle, { ...action.payload, values: selected });
+      setSubmission("submitted");
+    } catch (error) {
+      setSubmission("idle");
+      setError(interactionErrorMessage(error));
+    }
   };
+  const locked = submission !== "idle";
 
   return (
     <section data-surface-multi-choice aria-labelledby={questionId}>
+      {error ? <p role="alert">{error}</p> : null}
       <header data-surface-choices-header>
         <span data-surface-eyebrow>Select any</span>
         <h3 id={questionId}>{String(props.question)}</h3>
@@ -245,7 +269,7 @@ export function SurfaceMultiChoice({
           <label key={choice.value} data-surface-checkbox>
             <input
               type="checkbox"
-              disabled={submitted}
+              disabled={locked}
               checked={selected.includes(choice.value)}
               onChange={() => toggle(choice.value)}
             />
@@ -256,12 +280,19 @@ export function SurfaceMultiChoice({
       <footer data-surface-form-footer>
         <button
           type="button"
-          disabled={submitted || !handle || selected.length === 0}
+          disabled={locked || !handle || selected.length === 0}
+          aria-busy={submission === "submitting" || undefined}
           data-surface-button
           data-variant="primary"
-          onClick={submit}
+          onClick={() => void submit()}
         >
-          <span>Submit</span>
+          <span>
+            {submission === "submitting"
+              ? "Submitting…"
+              : submission === "submitted"
+                ? "Submitted"
+                : "Submit"}
+          </span>
         </button>
       </footer>
     </section>
@@ -279,12 +310,18 @@ export function SurfaceForm({
 }) {
   const formId = useId();
   const [values, setValues] = useState<Record<string, unknown>>({});
+  const [error, setError] = useState<string>();
   const fields = props.fields as Array<Record<string, unknown>>;
   const action = props.action as SurfaceAction;
   const handle = actionHandleFor?.(action);
   const submit = (event: FormEvent) => {
     event.preventDefault();
-    if (handle) void onInteraction?.(handle, values);
+    if (handle) {
+      setError(undefined);
+      void Promise.resolve()
+        .then(() => onInteraction?.(handle, values))
+        .catch((error) => setError(interactionErrorMessage(error)));
+    }
   };
   const update = (name: string, value: unknown) => {
     setValues((previous) => ({ ...previous, [name]: value }));
@@ -292,6 +329,7 @@ export function SurfaceForm({
 
   return (
     <form data-surface-form onSubmit={submit}>
+      {error ? <p role="alert">{error}</p> : null}
       {/*
         No eyebrow and no field count. A form with inputs and a submit button already says it is an
         ask, and a count of its own fields is a number no reader acts on.
