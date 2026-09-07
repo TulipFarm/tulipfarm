@@ -114,7 +114,7 @@ function fakeStateStore(): RoutineScheduleStateStore & { rows: RoutineScheduleSt
       store.rows = [
         ...store.rows.filter(
           (existing) =>
-            existing.routineSlug !== row.routineSlug || existing.triggerIndex !== row.triggerIndex
+            existing.routineSlug !== row.routineSlug || existing.triggerId !== row.triggerId
         ),
         row,
       ];

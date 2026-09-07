@@ -50,6 +50,7 @@ Run event/request vocabularies, canonical hashes, Secret references, and resourc
 - Skill `requiredSecrets` names references only; `allowedDomains` accepts exact hosts, never URLs or wildcards.
 - Invocation gateways must compile `INVOCATION_REQUEST_SCHEMAS` and deny unregistered refs.
 - `applyTransforms` order is `x-id-strategy` -> `x-normalize` -> `x-computed`; normalizer and
-  computed keys are closed sets and must be added beside their implementation maps.
+  computed keys are closed sets and must be added beside their implementation maps. An
+  `x-id-strategy` value is generated only for create; updates preserve the existing target field.
 - Call `validateResourceSchema()` when loading resource schemas; AJV `strict: false` will not reject
   unknown `x-*` keys or functions for you.

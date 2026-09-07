@@ -9,9 +9,9 @@ import {
   type SecretRepo,
   SecretsService,
 } from "@tulipfarm/secrets";
-import { writeLlmConfigToSoulYaml } from "@tulipfarm/soul";
+import { makeSoulWriterDouble, mergeLlmConfigIntoSoulYaml } from "@tulipfarm/soul";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { parse } from "yaml";
+import { parse, stringify } from "yaml";
 import type { UserDoc, UserRepo } from "../auth/users";
 import { bootstrapFromEnv } from "./bootstrap";
 import type { SetupAdminCreator } from "./first-admin";
@@ -82,6 +82,7 @@ let dir: string;
 function deps() {
   const userRepo = new FakeUserRepo();
   const setupAdminCreator = new FakeSetupAdminCreator(userRepo);
+  const soul = makeSoulWriterDouble();
   return {
     userRepo,
     setupAdminCreator,
@@ -90,6 +91,8 @@ function deps() {
       key: randomBytes(32),
     }),
     soulPath: path.join(dir, "soul"),
+    soulWriter: soul.writer,
+    soul,
   };
 }
 
@@ -120,7 +123,7 @@ describe("bootstrapFromEnv", () => {
     await bootstrapFromEnv(d); // second call is a no-op (user already exists)
     expect(await d.userRepo.count()).toBe(1);
     expect(d.setupAdminCreator.ownerPrincipalIds).toHaveLength(1);
-    const cfg = parse(await fs.readFile(path.join(dir, "soul", "soul.yaml"), "utf8")) as {
+    const cfg = parse(d.soulWriter.read("Settings") ?? "") as {
       businessName?: string;
       setupComplete?: boolean;
       llm?: { tiers?: Record<string, { providers?: { provider: string; model: string }[] }> };
@@ -135,6 +138,8 @@ describe("bootstrapFromEnv", () => {
       provider: "anthropic",
       model: "claude-sonnet-4-6",
     });
+    expect(d.soul.applied).toHaveLength(1);
+    expect(d.soul.applied[0]?.expectedBaseCommit).toBe("0".repeat(40));
   });
 
   it("never overwrites an LLM config the operator already tuned", async () => {
@@ -143,15 +148,16 @@ describe("bootstrapFromEnv", () => {
     vi.stubEnv("LLM_API_KEY", "sk-ant-xyz");
     const d = deps();
     await bootstrapFromEnv(d);
-    await writeLlmConfigToSoulYaml(path.join(dir, "soul"), {
+    const tuned = mergeLlmConfigIntoSoulYaml(d.soulWriter.read("Settings"), {
       tiers: {
         quick: { providers: [{ provider: "openai", model: "gpt-4o" }] },
         standard: { providers: [{ provider: "openai", model: "gpt-4o" }] },
         complex: { providers: [{ provider: "openai", model: "gpt-4o" }] },
       },
     });
+    d.soul.put("Settings", undefined, tuned);
     await bootstrapFromEnv(d); // a later boot must not revert it
-    const cfg = parse(await fs.readFile(path.join(dir, "soul", "soul.yaml"), "utf8")) as {
+    const cfg = parse(d.soulWriter.read("Settings") ?? "") as {
       llm?: { tiers?: Record<string, { providers?: { provider: string; model: string }[] }> };
     };
     expect(cfg.llm?.tiers?.standard?.providers?.[0]?.model).toBe("gpt-4o");
@@ -171,7 +177,7 @@ describe("bootstrapFromEnv", () => {
     const d = deps();
     await bootstrapFromEnv(d);
     expect(await d.userRepo.count()).toBe(1);
-    const cfg = parse(await fs.readFile(path.join(dir, "soul", "soul.yaml"), "utf8")) as {
+    const cfg = parse(d.soulWriter.read("Settings") ?? "") as {
       setupComplete?: boolean;
     };
     expect(cfg.setupComplete).toBe(true);
@@ -207,5 +213,52 @@ describe("bootstrapFromEnv", () => {
     vi.stubEnv("ADMIN_PASSWORD", "supersecret");
     vi.stubEnv("LLM_API_KEY", "sk-ant-xyz");
     await expect(bootstrapFromEnv(deps())).rejects.toThrow(/SKIP_ADMIN_BOOTSTRAP/);
+  });
+
+  it("preserves the business profile and rotated provider key on later boots", async () => {
+    vi.stubEnv("ADMIN_EMAIL", "admin@acme.io");
+    vi.stubEnv("ADMIN_PASSWORD", "supersecret");
+    vi.stubEnv("BUSINESS_NAME", "Seed name");
+    vi.stubEnv("LLM_API_KEY", "seed-key");
+    const d = deps();
+    await bootstrapFromEnv(d);
+    d.soul.put(
+      "Settings",
+      undefined,
+      stringify({ businessName: "Updated name", businessDescription: "Updated description" })
+    );
+    await d.secretsService.set("anthropic-api-key", "rotated-key");
+    await bootstrapFromEnv(d);
+    expect(parse(d.soulWriter.read("Settings") ?? "")).toEqual({
+      businessName: "Updated name",
+      businessDescription: "Updated description",
+    });
+    expect(await d.secretsService.get("anthropic-api-key")).toBe("rotated-key");
+    expect(d.soul.applied).toHaveLength(1);
+  });
+
+  it("does not require the seed model key again once an admin exists", async () => {
+    vi.stubEnv("ADMIN_EMAIL", "admin@acme.io");
+    vi.stubEnv("ADMIN_PASSWORD", "supersecret");
+    vi.stubEnv("LLM_API_KEY", "seed-key");
+    const d = deps();
+    await bootstrapFromEnv(d);
+    vi.stubEnv("LLM_API_KEY", "");
+    await expect(bootstrapFromEnv(d)).resolves.toBeUndefined();
+  });
+
+  it("does not mark the instance bootstrapped when publication fails", async () => {
+    vi.stubEnv("ADMIN_EMAIL", "admin@acme.io");
+    vi.stubEnv("ADMIN_PASSWORD", "supersecret");
+    vi.stubEnv("LLM_API_KEY", "seed-key");
+    const d = deps();
+    const apply = d.soulWriter.apply.bind(d.soulWriter);
+    vi.spyOn(d.soulWriter, "apply").mockImplementation(async (request) => ({
+      ...(await apply(request)),
+      published: false,
+      publicationError: "bundle store unavailable",
+    }));
+    await expect(bootstrapFromEnv(d)).rejects.toThrow(/publish/i);
+    expect(await d.userRepo.count()).toBe(0);
   });
 });

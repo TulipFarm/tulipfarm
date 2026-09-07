@@ -1,3 +1,4 @@
+import { definitions } from "@tulipfarm/schema";
 import type { RuntimeBundle } from "@tulipfarm/soul";
 import { describe, expect, it, vi } from "vitest";
 import { ScheduleDispatcher } from "./dispatcher";
@@ -21,7 +22,10 @@ function bundleGet(kind: string, slug: string) {
   return kind === "Routine" && slug === "daily-digest" ? ROUTINE_DEFINITION : undefined;
 }
 
-function bundleWith(triggerSpec: Record<string, unknown>): RuntimeBundle {
+function bundleWith(
+  triggerSpec: Record<string, unknown>,
+  moreTriggers: Record<string, unknown>[] = []
+): RuntimeBundle {
   const document = {
     apiVersion: "tulipfarm.ai/v1",
     kind: "Routine",
@@ -36,16 +40,14 @@ function bundleWith(triggerSpec: Record<string, unknown>): RuntimeBundle {
       owner: "operations",
       start: "Done",
       states: [],
-      triggers: [
-        {
-          name: "daily-digest-once",
-          eventType: "routine.scheduled",
-          eventVersion: 1,
-          backgroundIdentity: { principalKind: "service", principalId: "routine-runner" },
-          deduplication: { key: "daily-digest-once" },
-          ...triggerSpec,
-        },
-      ],
+      triggers: [triggerSpec, ...moreTriggers].map((spec) => ({
+        name: "daily-digest-once",
+        eventType: "routine.scheduled",
+        eventVersion: 1,
+        backgroundIdentity: { principalKind: "service", principalId: "routine-runner" },
+        deduplication: { key: "daily-digest-once" },
+        ...spec,
+      })),
     },
   };
   return {
@@ -94,6 +96,67 @@ function fakeStateStore(
 }
 
 describe("ScheduleDispatcher", () => {
+  it.each(["legacy", "stable"])(
+    "keeps interval history when Triggers are reordered (%s)",
+    async (identity) => {
+      const stateStore = fakeStateStore([
+        {
+          routineSlug: "daily-digest",
+          triggerIndex: 0,
+          triggerId:
+            identity === "legacy"
+              ? "legacy:0"
+              : definitions.routineTriggers.embeddedTriggerId(ROUTINE_DEFINITION.id, "first"),
+          dedupKey: "first",
+          lastScheduledForMs: NOW_MS,
+          nextDueAtMs: NOW_MS + 300_000,
+          anchorMs: NOW_MS,
+        },
+        {
+          routineSlug: "daily-digest",
+          triggerIndex: 1,
+          triggerId:
+            identity === "legacy"
+              ? "legacy:1"
+              : definitions.routineTriggers.embeddedTriggerId(ROUTINE_DEFINITION.id, "second"),
+          dedupKey: "second",
+          lastScheduledForMs: NOW_MS - 60_000,
+          nextDueAtMs: NOW_MS + 240_000,
+          anchorMs: NOW_MS - 60_000,
+        },
+      ]);
+      const startRoutine = vi.fn().mockResolvedValue({ runId: "run-1", outcome: "started" });
+      const dispatcher = new ScheduleDispatcher({
+        activeBundle: async () =>
+          bundleWith(
+            {
+              name: "second",
+              type: "interval",
+              everyMs: 300_000,
+              deduplication: { key: "second" },
+            },
+            [{ name: "first", type: "interval", everyMs: 300_000, deduplication: { key: "first" } }]
+          ),
+        stateStore,
+        startRoutine,
+        countActiveRuns: async () => 0,
+        businessId: "biz-1",
+        now: () => NOW_MS + 250_000,
+      });
+
+      await dispatcher.tick();
+
+      expect(stateStore.upserted).toEqual([
+        expect.objectContaining({ dedupKey: "second", anchorMs: NOW_MS - 60_000 }),
+        expect.objectContaining({ dedupKey: "first", anchorMs: NOW_MS }),
+      ]);
+      expect(startRoutine).toHaveBeenCalledTimes(1);
+      expect(startRoutine).toHaveBeenCalledWith(
+        expect.objectContaining({ idempotencyKey: expect.stringContaining("second") })
+      );
+    }
+  );
+
   it("does not advance the watermark when startRoutine fails, so the fire is retried next tick", async () => {
     const stateStore = fakeStateStore();
     const dispatcher = new ScheduleDispatcher({
@@ -111,6 +174,59 @@ describe("ScheduleDispatcher", () => {
     expect(stateStore.upserted).toEqual([
       expect.objectContaining({ routineSlug: "daily-digest", lastScheduledForMs: null }),
     ]);
+  });
+
+  it("retains ambiguous legacy history without firing either possible owner", async () => {
+    const stateStore = fakeStateStore([
+      {
+        routineSlug: "daily-digest",
+        triggerId: "legacy:0",
+        triggerIndex: 0,
+        dedupKey: "shared-key",
+        lastScheduledForMs: NOW_MS,
+        nextDueAtMs: NOW_MS + 300_000,
+        anchorMs: NOW_MS,
+      },
+    ]);
+    const prune = vi.spyOn(stateStore, "pruneMissing");
+    const startRoutine = vi.fn();
+    const warn = vi.fn();
+    const dispatcher = new ScheduleDispatcher({
+      activeBundle: async () =>
+        bundleWith(
+          {
+            name: "first",
+            type: "interval",
+            everyMs: 300_000,
+            deduplication: { key: "shared-key" },
+          },
+          [
+            {
+              name: "second",
+              type: "interval",
+              everyMs: 300_000,
+              deduplication: { key: "shared-key" },
+            },
+          ]
+        ),
+      stateStore,
+      startRoutine,
+      countActiveRuns: async () => 0,
+      businessId: "biz-1",
+      now: () => NOW_MS + 300_000,
+      log: { warn, error: vi.fn() },
+    });
+
+    await dispatcher.tick();
+
+    expect(startRoutine).not.toHaveBeenCalled();
+    expect(stateStore.upserted).toEqual([]);
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining("ambiguous legacy history"));
+    expect(prune).toHaveBeenCalledWith(
+      "biz-1",
+      expect.arrayContaining([expect.objectContaining({ triggerId: "legacy:0" })]),
+      expect.any(Array)
+    );
   });
 
   it("advances the watermark when startRoutine succeeds", async () => {
@@ -158,6 +274,7 @@ describe("ScheduleDispatcher", () => {
     const existingRow: RoutineScheduleStateRow = {
       routineSlug: "stale-routine",
       triggerIndex: 0,
+      triggerId: "legacy:0",
       dedupKey: "stale-routine:0",
       lastScheduledForMs: 1,
       nextDueAtMs: null,
@@ -243,6 +360,7 @@ describe("ScheduleDispatcher", () => {
       {
         routineSlug: "daily-digest",
         triggerIndex: 0,
+        triggerId: "legacy:0",
         dedupKey: "daily-digest-once",
         lastScheduledForMs: NOW_MS,
         nextDueAtMs: NOW_MS + 300_000,
@@ -274,6 +392,7 @@ describe("ScheduleDispatcher", () => {
         {
           routineSlug: "daily-digest",
           triggerIndex: 0,
+          triggerId: "legacy:0",
           dedupKey: "daily-digest-once",
           lastScheduledForMs: NOW_MS,
           nextDueAtMs: NOW_MS + 300_000,

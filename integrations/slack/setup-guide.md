@@ -20,11 +20,12 @@ If you'd rather build the app manually instead of importing a manifest: enable S
 (Features → Agents & AI Apps → enable Agent messaging), add Bot Token Scopes `chat:write`,
 `app_mentions:read`, `channels:read`, `channels:history`, `groups:read`, `groups:history`,
 `im:read`, `im:history`, `mpim:read`, `mpim:history`, `users:read`, `users:read.email`,
-`assistant:write` (Features → OAuth & Permissions), and turn on
+`assistant:write` (Features → OAuth & Permissions), turn on Interactivity
+(Features → Interactivity & Shortcuts, no Request URL needed under Socket Mode), and turn on
 Event Subscriptions (Features → Event Subscriptions, no Request URL needed under Socket Mode)
-subscribed to `message.channels`, `message.im`, `app_mention`. Under **OAuth & Permissions →
-Redirect URLs**, add the exact callback shown under TulipFarm's **Business → About → Public
-address**, then continue from step 2 above.
+subscribed to `message.channels`, `message.groups`, `message.im`, `message.mpim`, and
+`app_mention`. Under **OAuth & Permissions → Redirect URLs**, add the exact callback shown under
+TulipFarm's **Business → About → Public address**, then continue from step 2 above.
 
 If you already connected Slack before this app started using the Agents & AI Apps status
 indicator, `assistant:write` is a new scope, and if you connected before conversation indexing

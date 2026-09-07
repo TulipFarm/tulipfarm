@@ -1,7 +1,7 @@
 import { generateKeyPairSync } from "node:crypto";
 import type { IntegrationHttpPort, IntegrationHttpRequest } from "@tulipfarm/integrations";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { ensureGitHubInstallation } from "./github-install";
+import { ensureGitHubInstallation, listInstalledRepositories } from "./github-install";
 
 /** Recording starts after generic auth produces App credentials and an installation id. */
 
@@ -56,6 +56,68 @@ const OK_HTTP = (repos: string[]) =>
     }
     throw new Error(`unexpected request: ${req.method} ${req.path}`);
   });
+
+describe("listInstalledRepositories", () => {
+  it("collects every provider-authorized repository across pages", async () => {
+    const names = Array.from({ length: 205 }, (_, index) => `acme-corp/repo-${index + 1}`);
+    const requests: IntegrationHttpRequest[] = [];
+    const http = fakeHttp((request) => {
+      requests.push(request);
+      const page = Number(request.query?.page ?? "1");
+      const start = (page - 1) * 100;
+      return {
+        status: 200,
+        body: {
+          total_count: names.length,
+          repositories: names.slice(start, start + 100).map((full_name) => ({ full_name })),
+        },
+      };
+    });
+
+    const repositories = await listInstalledRepositories(http, "ghs_token");
+
+    expect(repositories).toHaveLength(205);
+    expect(repositories.at(-1)).toEqual({
+      owner: "acme-corp",
+      repo: "repo-205",
+      private: false,
+    });
+    expect(requests.map((request) => request.query)).toEqual([
+      { per_page: "100", page: "1" },
+      { per_page: "100", page: "2" },
+      { per_page: "100", page: "3" },
+    ]);
+  });
+
+  it("returns an empty grant only when GitHub reports no authorized repositories", async () => {
+    const http = fakeHttp(() => ({
+      status: 200,
+      body: { total_count: 0, repositories: [] },
+    }));
+
+    await expect(listInstalledRepositories(http, "ghs_token")).resolves.toEqual([]);
+  });
+
+  it("fails the whole read when a later page fails", async () => {
+    const http = fakeHttp((request) =>
+      request.query?.page === "2"
+        ? { status: 503, body: {} }
+        : {
+            status: 200,
+            body: {
+              total_count: 101,
+              repositories: Array.from({ length: 100 }, (_, index) => ({
+                full_name: `acme-corp/repo-${index + 1}`,
+              })),
+            },
+          }
+    );
+
+    await expect(listInstalledRepositories(http, "ghs_token")).rejects.toThrow(
+      "failed to list installation repositories: status 503"
+    );
+  });
+});
 
 describe("ensureGitHubInstallation", () => {
   let secretsService: FakeSecretsService;

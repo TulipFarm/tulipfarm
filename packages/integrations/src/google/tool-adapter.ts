@@ -122,20 +122,49 @@ function driveQuery(query: string): string {
   return `fullText contains '${escaped}' or name contains '${escaped}'`;
 }
 
-/** Flattens a Docs `body.content` tree into its text runs. */
-function extractDocumentText(document: Record<string, unknown>): string {
-  const body = asRecord(document.body);
-  const content = Array.isArray(body.content) ? body.content : [];
+function extractParagraphText(paragraph: Record<string, unknown>): string {
+  let text = "";
+  for (const element of asArray(paragraph.elements)) {
+    const textRun = asRecord(asRecord(element).textRun);
+    if (typeof textRun.content === "string") text += textRun.content;
+  }
+  return text;
+}
+
+function extractTableText(table: Record<string, unknown>): string {
+  const rows = asArray(table.tableRows).map((row) =>
+    asArray(asRecord(row).tableCells)
+      .map((cell) => extractStructuralText(asArray(asRecord(cell).content)).trimEnd())
+      .join("\t")
+  );
+  return rows.length === 0 ? "" : `${rows.join("\n")}\n`;
+}
+
+function extractStructuralText(content: readonly unknown[]): string {
   let text = "";
   for (const element of content) {
-    const paragraph = asRecord(asRecord(element).paragraph);
-    const elements = Array.isArray(paragraph.elements) ? paragraph.elements : [];
-    for (const run of elements) {
-      const textRun = asRecord(asRecord(run).textRun);
-      if (typeof textRun.content === "string") text += textRun.content;
+    const structuralElement = asRecord(element);
+    const paragraph = asRecord(structuralElement.paragraph);
+    if (Object.keys(paragraph).length > 0) {
+      text += extractParagraphText(paragraph);
+      continue;
+    }
+    const table = asRecord(structuralElement.table);
+    if (Object.keys(table).length > 0) {
+      text += extractTableText(table);
+      continue;
+    }
+    const tableOfContents = asRecord(structuralElement.tableOfContents);
+    if (Object.keys(tableOfContents).length > 0) {
+      text += extractStructuralText(asArray(tableOfContents.content));
     }
   }
   return text;
+}
+
+/** Flattens Docs structural elements, including tables nested inside table cells. */
+function extractDocumentText(document: Record<string, unknown>): string {
+  return extractStructuralText(asArray(asRecord(document.body).content));
 }
 
 export class GoogleToolAdapter implements ToolAdapter {
