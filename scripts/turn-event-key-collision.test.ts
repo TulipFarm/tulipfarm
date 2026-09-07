@@ -190,21 +190,12 @@ describe("resumed Turn Run event keys (L4-7)", () => {
     checkpoints = new RunLoopCheckpointStore(transactions);
     events = new RunEventStore(transactions);
     repo = new ApprovalsRepo(database as unknown as { query: Queryable["query"] });
-    approvals = new ToolApprovalService({ repo, waits: unusedWaits() });
+    approvals = new ToolApprovalService({ transactions });
   });
 
   afterEach(async () => {
     await database.close();
   });
-
-  /** The wait manager belongs to the resume path, not the decision path this test drives. */
-  function unusedWaits() {
-    return {
-      register: async () => {
-        throw new Error("this test approves through the repo, not the durable wait");
-      },
-    } as never;
-  }
 
   /**
    * One `AgentLoop.run` sinking into a fresh `TurnEventWriter` — the composition

@@ -273,6 +273,16 @@ export class ApprovalsRepo {
     return rows.length > 0 ? rowToApproval(rows[0]) : null;
   }
 
+  async findByIdForUpdate(id: string): Promise<ApprovalRow | null> {
+    const { rows } = await this.db.query(
+      `SELECT ${APPROVAL_COLUMNS}
+       FROM approvals WHERE id = $1
+       FOR UPDATE`,
+      [id]
+    );
+    return rows.length > 0 ? rowToApproval(rows[0]) : null;
+  }
+
   async listPending(kind?: ApprovalKind): Promise<ApprovalRow[]> {
     const { rows } = await this.db.query(
       `SELECT ${APPROVAL_COLUMNS}

@@ -14,7 +14,7 @@ import {
   type MemoryDocumentToolContext,
 } from "@tulipfarm/memory";
 import { PLATFORM_RUNTIME_TOOLS, type PlatformRuntimeContext } from "@tulipfarm/platform-tools";
-import type { ArtifactService, DurableWaitManager } from "@tulipfarm/run-kernel";
+import type { ArtifactService } from "@tulipfarm/run-kernel";
 import {
   type BlobPort,
   ChildLinkAncestryStore,
@@ -24,7 +24,6 @@ import {
 } from "@tulipfarm/storage";
 import {
   type ApiToolDefinition,
-  ApprovalsRepo,
   buildLiveAuthorityLayerResolver,
   InMemoryToolCatalog,
   LiveToolGate,
@@ -60,7 +59,6 @@ export interface LocalToolHostOptions {
   readonly db: Queryable;
   readonly transactions: TransactionPort;
   readonly artifacts: ArtifactService;
-  readonly waits: DurableWaitManager;
   /** Rebuilt from the control plane's published config before each vector-backed answer. */
   readonly embeddings: SoulEmbeddings;
   /** Absent only when this process runs without pg-boss; page writes then skip re-indexing. */
@@ -203,8 +201,7 @@ export function buildLocalToolHost(options: LocalToolHostOptions): LocalToolHost
       // Only `decide` is reachable from here. Parking a Run mints a one-use resume token, and that
       // stays on the control-plane path via `HttpTurnHost.register`.
       approvals: new ToolApprovalService({
-        repo: new ApprovalsRepo(options.db),
-        waits: options.waits,
+        transactions: options.transactions,
       }),
       localDispatchOnly: true,
       // No `agents` resolver: this process has no Soul to resolve one from. The Agent's authored

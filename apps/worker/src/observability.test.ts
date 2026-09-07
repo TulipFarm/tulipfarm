@@ -427,6 +427,7 @@ describe("Routine observability adapters", () => {
       businessId: "business-1",
       runId: "run-1",
       stateKey: "tool-state",
+      requesterPrincipalId: "user:user-1",
       plan: {
         toolRef: { name: "send_message", version: "1" },
         action: "send",
@@ -458,7 +459,10 @@ describe("Routine observability adapters", () => {
       const recorded = spend();
       const observed = observeRoutineToolPort(
         {
-          execute: async () => ({ kind, reason: "not_terminal" }),
+          execute: async () =>
+            kind === "awaiting_approval"
+              ? { kind, reason: "not_terminal", approvalId: "approval-1" }
+              : { kind, reason: "not_terminal" },
         },
         recorded.sink
       );
@@ -467,6 +471,7 @@ describe("Routine observability adapters", () => {
         businessId: "business-1",
         runId: "run-1",
         stateKey: "tool-state",
+        requesterPrincipalId: "user:user-1",
         plan: {
           toolRef: { name: "send_message", version: "1" },
           action: "send",

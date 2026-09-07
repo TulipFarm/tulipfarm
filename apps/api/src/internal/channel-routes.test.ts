@@ -1,16 +1,11 @@
 import { randomUUID } from "node:crypto";
 import type { PGlite } from "@electric-sql/pglite";
 import { DEPLOYMENT_BUSINESS_ID } from "@tulipfarm/constants";
-import {
-  DurableInvocationGateway,
-  DurableWaitManager,
-  RunResumeGateway,
-  TypedOutputValidator,
-} from "@tulipfarm/run-kernel";
+import { DurableInvocationGateway, TypedOutputValidator } from "@tulipfarm/run-kernel";
 import { INVOCATION_REQUEST_SCHEMAS, textContent } from "@tulipfarm/schema";
-import { ChannelRunDeliveryStore, RunStore, WaitStore } from "@tulipfarm/storage";
+import { ChannelRunDeliveryStore, RunStore } from "@tulipfarm/storage";
 import { createSurfaceArtifact } from "@tulipfarm/surface";
-import { ApprovalsRepo, ToolApprovalService } from "@tulipfarm/tool-host";
+import { ToolApprovalService } from "@tulipfarm/tool-host";
 import type { FastifyBaseLogger, FastifyInstance } from "fastify";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { buildApp } from "../app";
@@ -143,10 +138,7 @@ describe("/api/v1/internal/channels", () => {
     });
 
     runs = new RunStore(transactions);
-    toolApprovals = new ToolApprovalService({
-      repo: new ApprovalsRepo(db),
-      waits: new DurableWaitManager(new WaitStore(transactions), new RunResumeGateway(runs)),
-    });
+    toolApprovals = new ToolApprovalService({ transactions });
     runDeliveries = new ChannelRunDeliveryStore(transactions, () => new Date().toISOString());
     cancelled = [];
     surfaceStore = new MemorySurfaceArtifactStore();

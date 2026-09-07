@@ -54,6 +54,7 @@ import {
   WaitStore,
 } from "@tulipfarm/storage";
 import { PgEffectStore } from "@tulipfarm/tool-broker";
+import { ToolApprovalService } from "@tulipfarm/tool-host";
 import {
   type ChatExecutorOptions,
   createChatExecutor,
@@ -311,7 +312,6 @@ export async function main(): Promise<void> {
     db: pool,
     transactions,
     artifacts: artifactService,
-    waits,
     embeddings: localEmbeddings,
     // `file_create` renders here, not in the API: model-authored content is untrusted input.
     blobs,
@@ -499,11 +499,13 @@ export async function main(): Promise<void> {
       // Durable backoff budget, so a contended key queues on a timer instead of an operator.
       contention: stateContentionStore,
       waits,
+      toolApprovalWaits: turnHost,
       // Routine Tools must pass the Broker: pinned authority, ledger reservation, then adapter.
       // No `authority` callback: the bundle layer is the Run's only authority.
       tools: observeRoutineToolPort(
         new BrokerRoutineToolPort({
           effects: new PgEffectStore(transactions),
+          approvals: new ToolApprovalService({ transactions }),
           adapters: githubTooling.adapters,
           adaptersFor: (request) =>
             buildBundleSandboxAdapters(request, {

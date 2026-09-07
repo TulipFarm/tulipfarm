@@ -177,10 +177,11 @@ describe("approval park/resume transcript durability (L4-6)", () => {
   let checkpoints: RunLoopCheckpointStore;
   let approvals: ToolApprovalService;
   let repo: ApprovalsRepo;
+  let transactions: TransactionPort;
 
   beforeEach(async () => {
     database = await makeMigratedPglite();
-    const transactions: TransactionPort = {
+    transactions = {
       withTransaction: (operation) =>
         database.transaction((transaction) =>
           operation(transaction as unknown as StorageQueryable)
@@ -193,21 +194,12 @@ describe("approval park/resume transcript durability (L4-6)", () => {
     );
     checkpoints = new RunLoopCheckpointStore(transactions);
     repo = new ApprovalsRepo(database as unknown as { query: Queryable["query"] });
-    approvals = new ToolApprovalService({ repo, waits: unusedWaits() });
+    approvals = new ToolApprovalService({ transactions });
   });
 
   afterEach(async () => {
     await database.close();
   });
-
-  /** The wait manager belongs to the resume path, not the decision path this test drives. */
-  function unusedWaits() {
-    return {
-      register: async () => {
-        throw new Error("this test approves through the repo, not the durable wait");
-      },
-    } as never;
-  }
 
   /** Runs one `AgentLoop.run` against the durable checkpoint store, as an executor would. */
   async function runLoop(model: ModelPort, tools: ToolDispatchPort) {

@@ -75,10 +75,7 @@ describe("approval routes — durable tool_call kind", () => {
 
     const transactions = transactionPort(db as unknown as Queryable);
     runs = new RunStore(transactions);
-    toolApprovals = new ToolApprovalService({
-      repo: approvals,
-      waits: new DurableWaitManager(new WaitStore(transactions), new RunResumeGateway(runs)),
-    });
+    toolApprovals = new ToolApprovalService({ transactions });
 
     const store = new MemorySessionStore();
     const userRepo = new FakeUserRepo();
@@ -209,7 +206,7 @@ describe("approval routes — durable tool_call kind", () => {
     expect(await runs.find(DEPLOYMENT_BUSINESS_ID, runId)).toMatchObject({ status: "waiting" });
   });
 
-  it("404s a replayed decision without resuming the Run twice", async () => {
+  it("accepts a same-decision retry without resuming the Run twice", async () => {
     const { runId, approvalId } = await parkedRun();
     const decide = () =>
       app.inject({
@@ -230,7 +227,7 @@ describe("approval routes — durable tool_call kind", () => {
       leaseExpiresAt: new Date(Date.now() + 60_000).toISOString(),
     });
 
-    expect((await decide()).statusCode).toBe(404);
+    expect((await decide()).statusCode).toBe(200);
     expect(await runs.find(DEPLOYMENT_BUSINESS_ID, runId)).toMatchObject({ status: "claimed" });
   });
 });
