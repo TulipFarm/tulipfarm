@@ -19,7 +19,7 @@ export type PageFormProps = {
   lockPath?: boolean;
   initialContent?: string;
   initialTab?: Tab;
-  onSubmit: (path: string, content: string) => void | Promise<void>;
+  onSubmit: (path: string, content: string, confirmSaved: () => boolean) => void | Promise<void>;
   submitting: boolean;
   formError?: string | null;
   /** Server rejections keyed by the field that caused them, so each lands where it can be fixed. */
@@ -51,6 +51,8 @@ export function PageForm({
   const pathLocked = mode === "edit" || !!lockPath;
   const mentionExtensions = useWikiMentionExtensions(spaceId);
   const [dirty, setDirty] = useState(false);
+  const [submitError, setSubmitError] = useState<string | null>(null);
+  const draftRevision = useRef(0);
   // A ref, not state: the unload listener must read the current value without being re-registered
   // on every keystroke.
   const dirtyRef = useRef(false);
@@ -70,11 +72,17 @@ export function PageForm({
   // `beforeunload` only covers leaving the document. Most navigation here is in-SPA, where the
   // browser never fires it, so the same work would vanish on a stray sidebar click.
   const blocker = useBlocker(({ currentLocation, nextLocation }) => {
-    return dirty && currentLocation.pathname !== nextLocation.pathname;
+    return dirtyRef.current && currentLocation.pathname !== nextLocation.pathname;
   });
 
-  function setField<K extends keyof OkfFields>(key: K, value: OkfFields[K]) {
+  function markDirty() {
+    draftRevision.current += 1;
+    dirtyRef.current = true;
     setDirty(true);
+  }
+
+  function setField<K extends keyof OkfFields>(key: K, value: OkfFields[K]) {
+    markDirty();
     setFields((prev) => ({ ...prev, [key]: value }));
   }
 
@@ -85,18 +93,28 @@ export function PageForm({
     setTab(next);
   }
 
-  function handleSubmit(e: FormEvent) {
+  async function handleSubmit(e: FormEvent) {
     e.preventDefault();
+    setSubmitError(null);
     const content =
       tab === "raw" ? raw : serializeOkf({ ...fields, tags: mergeTags(fields.tags, fields.body) });
-    // Cleared on hand-off, not on success: a failed save leaves the work in the editor, where the
-    // author can retry it, and re-marks the form dirty the moment they touch it again.
-    setDirty(false);
-    onSubmit(path.trim(), content);
+    const submittedRevision = draftRevision.current;
+    const confirmSaved = () => {
+      if (draftRevision.current !== submittedRevision) return false;
+      dirtyRef.current = false;
+      setDirty(false);
+      return true;
+    };
+    try {
+      await onSubmit(path.trim(), content, confirmSaved);
+      confirmSaved();
+    } catch (error) {
+      setSubmitError(error instanceof Error ? error.message : "The page could not be saved.");
+    }
   }
 
   return (
-    <form onSubmit={handleSubmit} className="flex flex-col gap-4" noValidate>
+    <form onSubmit={(event) => void handleSubmit(event)} className="flex flex-col gap-4" noValidate>
       {blocker.state === "blocked" ? (
         <div
           role="alertdialog"
@@ -120,9 +138,12 @@ export function PageForm({
           </div>
         </div>
       ) : null}
-      {formError ? (
-        <p className="rounded-sm border border-destructive/40 bg-destructive/5 px-3 py-2 text-destructive">
-          error: {formError}
+      {formError || submitError ? (
+        <p
+          role="alert"
+          className="rounded-sm border border-destructive/40 bg-destructive/5 px-3 py-2 text-destructive"
+        >
+          error: {formError || submitError}
         </p>
       ) : null}
 
@@ -136,7 +157,7 @@ export function PageForm({
           className={fieldClass(!!fieldErrors?.path)}
           value={path}
           onChange={(e) => {
-            setDirty(true);
+            markDirty();
             setPath(e.target.value);
           }}
           placeholder="tables/orders"
@@ -250,7 +271,7 @@ export function PageForm({
             className={`${fieldClass(!!fieldErrors?.content)} min-h-96 font-mono`}
             value={raw}
             onChange={(e) => {
-              setDirty(true);
+              markDirty();
               setRaw(e.target.value);
             }}
             required

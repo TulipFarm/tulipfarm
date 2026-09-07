@@ -36,6 +36,16 @@ function mount(props: Partial<React.ComponentProps<typeof PageForm>> = {}) {
   return { onSubmit };
 }
 
+function deferred() {
+  let resolve!: () => void;
+  let reject!: (error: Error) => void;
+  const promise = new Promise<void>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise;
+    reject = rejectPromise;
+  });
+  return { promise, resolve, reject };
+}
+
 describe("PageForm", () => {
   it("reports a rejected path against the path field, not only at the top", async () => {
     mount({ fieldErrors: { path: "path is already taken" } });
@@ -68,15 +78,47 @@ describe("PageForm", () => {
     expect(dispatchUnload()).toBe(true);
   });
 
-  it("stops warning once the work has been handed to the server", async () => {
+  it("keeps warning while a save is pending and stops after it succeeds", async () => {
     const user = userEvent.setup();
-    mount({ onSubmit: vi.fn() });
+    const save = deferred();
+    mount({ onSubmit: vi.fn(() => save.promise) });
 
     await user.type(screen.getByLabelText(/path/i), "notes/one");
     await user.type(screen.getByLabelText("body"), "saved");
     await user.click(screen.getByRole("button", { name: /create/i }));
+    expect(dispatchUnload()).toBe(true);
 
+    save.resolve();
     await waitFor(() => expect(dispatchUnload()).toBe(false));
+  });
+
+  it("keeps warning after a save fails", async () => {
+    const user = userEvent.setup();
+    const save = deferred();
+    mount({ onSubmit: vi.fn(() => save.promise) });
+
+    await user.type(screen.getByLabelText(/path/i), "notes/one");
+    await user.type(screen.getByLabelText("body"), "draft");
+    await user.click(screen.getByRole("button", { name: /create/i }));
+    save.reject(new Error("save failed"));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("save failed");
+    await waitFor(() => expect(dispatchUnload()).toBe(true));
+  });
+
+  it("keeps warning when the draft changes during a successful save", async () => {
+    const user = userEvent.setup();
+    const save = deferred();
+    mount({ onSubmit: vi.fn(() => save.promise) });
+
+    await user.type(screen.getByLabelText(/path/i), "notes/one");
+    await user.type(screen.getByLabelText("body"), "first");
+    await user.click(screen.getByRole("button", { name: /create/i }));
+    await user.type(screen.getByLabelText("body"), " second");
+    save.resolve();
+
+    await waitFor(() => expect(screen.getByLabelText("body")).toHaveValue("first second"));
+    expect(dispatchUnload()).toBe(true);
   });
 
   it("offers a way back before an in-SPA navigation discards unsaved work", async () => {
@@ -113,7 +155,11 @@ describe("PageForm", () => {
     await user.type(screen.getByLabelText("body"), "hello");
     await user.click(screen.getByRole("button", { name: /create/i }));
 
-    expect(onSubmit).toHaveBeenCalledWith("notes/one", expect.stringContaining("hello"));
+    expect(onSubmit).toHaveBeenCalledWith(
+      "notes/one",
+      expect.stringContaining("hello"),
+      expect.any(Function)
+    );
   });
 });
 
