@@ -1,5 +1,36 @@
 # Changelog
 
+## [0.18.12](https://github.com/TulipFarm/tulipfarm/compare/v0.18.11...v0.18.12) (2026-09-07)
+
+### Features
+
+* **slack:** add first-party Slack platform ([#715](https://github.com/TulipFarm/tulipfarm/issues/715)) ([c7b0e9d](https://github.com/TulipFarm/tulipfarm/commit/c7b0e9df856805c0e92c4272000301442d3aa419))
+* **slack:** add user-configured Knowledge tooling ([#719](https://github.com/TulipFarm/tulipfarm/issues/719)) ([1b510a8](https://github.com/TulipFarm/tulipfarm/commit/1b510a8988f3e7ca15b20197844d4564edfa7c82))
+* **worker:** export worker telemetry ([#716](https://github.com/TulipFarm/tulipfarm/issues/716)) ([d8fbe8b](https://github.com/TulipFarm/tulipfarm/commit/d8fbe8b6726682623fa69c5a3e6a4f49ebec9392))
+
+### Bug Fixes
+
+* **approvals:** settle Routine decisions and wake Runs atomically ([#717](https://github.com/TulipFarm/tulipfarm/issues/717)) ([7a18fb5](https://github.com/TulipFarm/tulipfarm/commit/7a18fb5b709cdc1056b9c45e30354ea3434f6f0d))
+* **chat:** keep failed Surface choices retryable ([#713](https://github.com/TulipFarm/tulipfarm/issues/713)) ([11add35](https://github.com/TulipFarm/tulipfarm/commit/11add354b3534be7340d63272b7ae00d45980f98))
+* **deploy:** allow worker blob writes without exposing secrets ([#702](https://github.com/TulipFarm/tulipfarm/issues/702)) ([37d33dc](https://github.com/TulipFarm/tulipfarm/commit/37d33dccb007119ab0e60ae14627766861426ef3))
+* **forms:** preserve enum types and decimal number inputs ([#705](https://github.com/TulipFarm/tulipfarm/issues/705)) ([141dfe9](https://github.com/TulipFarm/tulipfarm/commit/141dfe94cf5b75f19a89d232e03c2170d470995d))
+* **github:** read all installation repository pages ([#703](https://github.com/TulipFarm/tulipfarm/issues/703)) ([134f02c](https://github.com/TulipFarm/tulipfarm/commit/134f02c8792474d9e67262541c2cb9604408191a))
+* **google:** include tables when reading Docs content ([#707](https://github.com/TulipFarm/tulipfarm/issues/707)) ([be95996](https://github.com/TulipFarm/tulipfarm/commit/be959960f791343c9e49ef7318d21a0e31cd875a))
+* **installer:** retain the saved Compose project on updates ([#701](https://github.com/TulipFarm/tulipfarm/issues/701)) ([0c2ffc8](https://github.com/TulipFarm/tulipfarm/commit/0c2ffc8b0a80584629b7f7d8ec7db9e7a53ad320))
+* **knowledge:** retain draft warnings until saves succeed ([#710](https://github.com/TulipFarm/tulipfarm/issues/710)) ([0592dbb](https://github.com/TulipFarm/tulipfarm/commit/0592dbb446893088671ffdd07fa75746f2a0278f))
+* **resources:** preserve generated Record IDs on updates ([#712](https://github.com/TulipFarm/tulipfarm/issues/712)) ([ce1d7b0](https://github.com/TulipFarm/tulipfarm/commit/ce1d7b087086323d4fb612daf3cc515c71f95283))
+* **routines:** report deletion publication failures ([#709](https://github.com/TulipFarm/tulipfarm/issues/709)) ([52952ac](https://github.com/TulipFarm/tulipfarm/commit/52952acbdcbdefdc3a8bf521f80ddd4eae375907))
+* **routines:** resume approved Tool States once ([#720](https://github.com/TulipFarm/tulipfarm/issues/720)) ([ad58dd3](https://github.com/TulipFarm/tulipfarm/commit/ad58dd3360861a129eb76573e2207f3b2eca8f63))
+* **runs:** recover only safely replayable work ([#721](https://github.com/TulipFarm/tulipfarm/issues/721)) ([5852d85](https://github.com/TulipFarm/tulipfarm/commit/5852d8573f567a950090b0e3479f5fe29fab6440))
+* **schedules:** preserve history across Trigger reordering ([#714](https://github.com/TulipFarm/tulipfarm/issues/714)) ([817addc](https://github.com/TulipFarm/tulipfarm/commit/817addceb3814f7773f192ecd500c276fb333cf9))
+* **settings:** surface instruction load errors before editing ([#706](https://github.com/TulipFarm/tulipfarm/issues/706)) ([c88f4cb](https://github.com/TulipFarm/tulipfarm/commit/c88f4cb58155a09f2756639a68663a7d68ee110c))
+* **setup:** publish headless config before starting services ([#704](https://github.com/TulipFarm/tulipfarm/issues/704)) ([2266e4e](https://github.com/TulipFarm/tulipfarm/commit/2266e4e4813c8588c2b74ea26bdfb02074566247))
+* **slack:** enable interactions and private message events ([#708](https://github.com/TulipFarm/tulipfarm/issues/708)) ([b057f9e](https://github.com/TulipFarm/tulipfarm/commit/b057f9eb4fe2bb60bbafd24ccfb017f465185abd))
+* **soul-doctor:** reject repairs based on stale Soul content ([#711](https://github.com/TulipFarm/tulipfarm/issues/711)) ([1aad66f](https://github.com/TulipFarm/tulipfarm/commit/1aad66f9cc2aa803d3d9799fbcf2772fb8b05061))
+* **storage:** stop leaking FileHandles from FileSystemBlobPort.get ([#722](https://github.com/TulipFarm/tulipfarm/issues/722)) ([0427396](https://github.com/TulipFarm/tulipfarm/commit/0427396377979682b71c94c52dd0e683db056f6d))
+* **tools:** replay durable Tool output after restart ([#718](https://github.com/TulipFarm/tulipfarm/issues/718)) ([9086f18](https://github.com/TulipFarm/tulipfarm/commit/9086f18e19ca4e798389f9d6134cd863cc012b2e))
+* **uninstall:** target the Podman engine that owns the install ([#700](https://github.com/TulipFarm/tulipfarm/issues/700)) ([faa4492](https://github.com/TulipFarm/tulipfarm/commit/faa4492f0b66a22393b6d915a0db276783a86710))
+
 ## [0.18.11](https://github.com/TulipFarm/tulipfarm/compare/v0.18.10...v0.18.11) (2026-09-06)
 
 ### Features
