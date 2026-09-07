@@ -12,6 +12,7 @@ import {
   type ToolAdapter,
   type ToolAdapterRequest,
 } from "@tulipfarm/tool-broker";
+import type { ToolApprovalPort } from "@tulipfarm/tool-host";
 import { beforeEach, describe, expect, it, type Mock, vi } from "vitest";
 import { GITHUB_INSTALLATION_SECRET_REF, githubInstallationSecretRef } from "./github-credentials";
 import { BrokerRoutineToolPort, type RoutineToolRequest } from "./tool-port";
@@ -19,6 +20,7 @@ import { BrokerRoutineToolPort, type RoutineToolRequest } from "./tool-port";
 const BUSINESS_ID = "biz-1";
 const RUN_ID = "11111111-1111-4111-8111-111111111111";
 const STATE_KEY = "CommentIssue";
+const REQUESTER_PRINCIPAL_ID = "user:33333333-3333-4333-8333-333333333333";
 
 const PLAN: ToolDispatchPlan = {
   toolRef: { name: "github.issue.comment", version: "1.0.0" },
@@ -118,6 +120,7 @@ function request(overrides: Partial<RoutineToolRequest> = {}): RoutineToolReques
     runId: RUN_ID,
     stateKey: STATE_KEY,
     plan: PLAN,
+    requesterPrincipalId: REQUESTER_PRINCIPAL_ID,
     bundle: bundle([
       { kind: "ToolContract", document: contract() },
       { kind: "Guardrail", document: guardrail([ALLOW_COMMENT]) },
@@ -130,6 +133,8 @@ function request(overrides: Partial<RoutineToolRequest> = {}): RoutineToolReques
 let effects: MemoryEffectStore;
 let dispatch: Mock<ToolAdapter["dispatch"]>;
 let adapters: Map<string, ToolAdapter>;
+let decide: Mock<ToolApprovalPort["decide"]>;
+let consume: Mock<ToolApprovalPort["consume"]>;
 
 beforeEach(() => {
   effects = new MemoryEffectStore();
@@ -137,10 +142,12 @@ beforeEach(() => {
     commentId: 12,
   }));
   adapters = new Map<string, ToolAdapter>([["github", { kind: "integration" as const, dispatch }]]);
+  decide = vi.fn<ToolApprovalPort["decide"]>();
+  consume = vi.fn<ToolApprovalPort["consume"]>();
 });
 
 function port(): BrokerRoutineToolPort {
-  return new BrokerRoutineToolPort({ effects, adapters });
+  return new BrokerRoutineToolPort({ effects, adapters, approvals: { decide, consume } });
 }
 
 describe("BrokerRoutineToolPort", () => {
@@ -166,6 +173,7 @@ describe("BrokerRoutineToolPort", () => {
       effects,
       adapters: new Map(),
       adaptersFor,
+      approvals: { decide, consume },
     });
 
     const input = request();
@@ -242,7 +250,8 @@ describe("BrokerRoutineToolPort", () => {
     expect(dispatch).not.toHaveBeenCalled();
   });
 
-  it("parks an intent policy sends to a human, because no Approval is composed here yet", async () => {
+  it("creates an ordinary Tool approval bound to the pinned Guardrail decision", async () => {
+    decide.mockResolvedValue({ status: "pending", approvalId: "approval-1" });
     const gated = request({
       bundle: bundle([
         { kind: "ToolContract", document: contract() },
@@ -266,8 +275,92 @@ describe("BrokerRoutineToolPort", () => {
     expect(await port().execute(gated)).toEqual({
       kind: "awaiting_approval",
       reason: "approval_required",
+      approvalId: "approval-1",
+    });
+    expect(decide).toHaveBeenCalledWith({
+      businessId: BUSINESS_ID,
+      runId: RUN_ID,
+      toolCallId: PLAN.effectId,
+      toolName: PLAN.toolRef.name,
+      args: PLAN.arguments,
+      requesterPrincipalId: REQUESTER_PRINCIPAL_ID,
+      demand: {
+        demandedBy: "guardrail_rule",
+        guardrailRevision: gated.bundle.digest,
+        reason: "approval_required",
+        ruleId: "approve-comment",
+      },
     });
     expect(dispatch).not.toHaveBeenCalled();
+  });
+
+  it("consumes the approval and executes a replayed State effect exactly once", async () => {
+    decide.mockResolvedValue({ status: "approved", approvalId: "approval-1" });
+    consume.mockResolvedValue(true);
+    const gated = request({
+      bundle: bundle([
+        { kind: "ToolContract", document: contract() },
+        {
+          kind: "Guardrail",
+          document: guardrail([
+            ALLOW_COMMENT,
+            {
+              id: "approve-comment",
+              type: "approval",
+              actions: ["issue.comment"],
+              category: "highRiskAction",
+              minimumApprovers: 1,
+              separationOfDuties: false,
+            },
+          ]),
+        },
+      ]),
+    });
+    const subject = port();
+
+    expect(await subject.execute(gated)).toEqual({ kind: "succeeded", output: null });
+    expect(await subject.execute(gated)).toEqual({ kind: "succeeded", output: null });
+
+    expect(consume).toHaveBeenCalledWith({
+      approvalId: "approval-1",
+      toolCallId: PLAN.effectId,
+    });
+    expect(dispatch).toHaveBeenCalledTimes(1);
+    expect(await effects.get(BUSINESS_ID, PLAN.effectId)).toMatchObject({
+      state: "confirmed",
+      approvalId: "approval-1",
+    });
+  });
+
+  it("fails closed after a denied or expired approval without reserving an effect", async () => {
+    decide.mockResolvedValue({ status: "denied", reason: "approval request timed out" });
+    const gated = request({
+      bundle: bundle([
+        { kind: "ToolContract", document: contract() },
+        {
+          kind: "Guardrail",
+          document: guardrail([
+            ALLOW_COMMENT,
+            {
+              id: "approve-comment",
+              type: "approval",
+              actions: ["issue.comment"],
+              category: "highRiskAction",
+              minimumApprovers: 1,
+              separationOfDuties: false,
+            },
+          ]),
+        },
+      ]),
+    });
+
+    expect(await port().execute(gated)).toEqual({
+      kind: "failed",
+      reason: "approval request timed out",
+    });
+    expect(consume).not.toHaveBeenCalled();
+    expect(dispatch).not.toHaveBeenCalled();
+    expect(await effects.get(BUSINESS_ID, PLAN.effectId)).toBeUndefined();
   });
 
   it("replays a confirmed effect instead of dispatching it a second time", async () => {
@@ -588,7 +681,11 @@ describe("BrokerRoutineToolPort contract-declared targets", () => {
 /** Bare GitHub refs must be narrowed before reservation, so effect and credential agree. */
 describe("BrokerRoutineToolPort GitHub credential scoping", () => {
   async function reservedIntent(plan: ToolDispatchPlan) {
-    const port = new BrokerRoutineToolPort({ effects, adapters });
+    const port = new BrokerRoutineToolPort({
+      effects,
+      adapters,
+      approvals: { decide, consume },
+    });
     await port.execute(request({ plan }));
     const effect = await effects.get(BUSINESS_ID, plan.effectId);
     if (effect === undefined) throw new Error("effect not reserved");

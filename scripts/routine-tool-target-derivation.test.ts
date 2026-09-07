@@ -208,6 +208,10 @@ async function run(options: {
   const port = new BrokerRoutineToolPort({
     effects,
     adapters: new Map<string, ToolAdapter>([["github", { kind: "integration", dispatch }]]),
+    approvals: {
+      decide: async () => ({ status: "denied", reason: "approval not expected" }),
+      consume: async () => false,
+    },
   });
   const plan = planFor(options.input ?? ISSUE_INPUT);
 
@@ -216,6 +220,7 @@ async function run(options: {
     runId: RUN_ID,
     stateKey: STATE_NAME,
     plan,
+    requesterPrincipalId: "agent:routine-owner",
     bundle: bundle([
       {
         kind: "ToolContract",

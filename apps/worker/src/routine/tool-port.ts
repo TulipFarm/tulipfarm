@@ -24,6 +24,7 @@ import {
   ToolTargetDerivationError,
   type ToolTargetRef,
 } from "@tulipfarm/tool-broker";
+import type { ToolApprovalPort } from "@tulipfarm/tool-host";
 import { GITHUB_INSTALLATION_SECRET_REF, githubInstallationSecretRef } from "./github-credentials";
 
 /** Routine Tool authority: pinned bundle only; authorize, reserve, then dispatch fail-closed. */
@@ -40,8 +41,8 @@ export type RoutineToolOutcome =
    * `unavailable`/`effect_ambiguous` and parks for reconciliation, which is its own durable retry.
    */
   | { readonly kind: "failed"; readonly reason: string }
-  /** Policy requires a human. Routine Approvals are not composed yet, so the Run parks. */
-  | { readonly kind: "awaiting_approval"; readonly reason: string }
+  /** Policy requires a human. The approval id is the durable wait's correlation point. */
+  | { readonly kind: "awaiting_approval"; readonly reason: string; readonly approvalId: string }
   /** Nothing decided the call. The State parks for reconciliation rather than guessing. */
   | { readonly kind: "unavailable"; readonly reason: string };
 
@@ -51,6 +52,8 @@ export interface RoutineToolRequest {
   /** Durable State occurrence key; the ledger's `state_id`. */
   readonly stateKey: string;
   readonly plan: ToolDispatchPlan;
+  /** The persisted Run subject whose authority proposed this effect. */
+  readonly requesterPrincipalId: string;
   /** The Run's exact pinned bundle — the only source of contracts and policy. */
   readonly bundle: RuntimeBundle;
   /** Extra layers cannot widen past the pinned ToolContracts' own authority. */
@@ -63,6 +66,7 @@ export interface RoutineToolPort {
 
 export interface BrokerRoutineToolPortOptions {
   readonly effects: EffectStore;
+  readonly approvals: ToolApprovalPort;
   /** Keyed by `ToolContract.adapter.ref`, exactly as `EffectDispatcher` resolves them. */
   readonly adapters: ReadonlyMap<string, ToolAdapter>;
   readonly credentials?: CredentialDispatcher;
@@ -198,8 +202,41 @@ export class BrokerRoutineToolPort implements RoutineToolPort {
       now: this.now(),
     });
     if (outcome.outcome === "denied") return { kind: "failed", reason: outcome.reason };
+    let approvalId: string | undefined;
     if (outcome.outcome === "awaiting_approval") {
-      return { kind: "awaiting_approval", reason: "approval_required" };
+      const decision = await this.options.approvals.decide({
+        businessId: request.businessId,
+        runId: request.runId,
+        toolCallId: request.plan.effectId,
+        toolName: request.plan.toolRef.name,
+        args: request.plan.arguments,
+        requesterPrincipalId: request.requesterPrincipalId,
+        demand: {
+          demandedBy: outcome.demand?.requiredBy ?? "guardrail_rule",
+          guardrailRevision: request.bundle.digest,
+          reason: outcome.demand?.reason ?? "unattributed",
+          ...(outcome.demand?.ruleId === undefined ? {} : { ruleId: outcome.demand.ruleId }),
+        },
+      });
+      if (decision.status === "pending") {
+        return {
+          kind: "awaiting_approval",
+          reason: "approval_required",
+          approvalId: decision.approvalId,
+        };
+      }
+      if (decision.status === "denied") {
+        return { kind: "failed", reason: decision.reason };
+      }
+      approvalId = decision.approvalId;
+      if (
+        !(await this.options.approvals.consume({
+          approvalId,
+          toolCallId: request.plan.effectId,
+        }))
+      ) {
+        return { kind: "failed", reason: "approval_not_consumable" };
+      }
     }
 
     const reserved = await this.options.effects.reserve({
@@ -212,6 +249,7 @@ export class BrokerRoutineToolPort implements RoutineToolPort {
       intentDigest: outcome.intentDigest,
       intent,
       guardrailRevision: request.bundle.digest,
+      ...(approvalId === undefined ? {} : { approvalId }),
       createdAt: this.now().toISOString(),
     });
     if (reserved.outcome === "duplicate") return replayed(reserved.effect);

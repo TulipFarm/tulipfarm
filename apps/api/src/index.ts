@@ -927,7 +927,7 @@ async function boot() {
     // registered here rather than in the Worker because its one-use resume token must never leave
     const runResume = new RunResumeGateway(runStore);
     const runWaits = new DurableWaitManager(new WaitStore(runTransactions), runResume);
-    const toolApprovals = new ToolApprovalService({ repo: approvalsRepo, waits: runWaits });
+    const toolApprovals = new ToolApprovalService({ transactions: runTransactions });
     const routineApprovals = new RoutineApprovalService({ transactions: runTransactions });
     const ingressDeliveries = new IngressDeliveriesRepo(pool);
     const integrationThreads = new IntegrationConversationsRepo(pool);

@@ -6,15 +6,12 @@ import { DEPLOYMENT_BUSINESS_ID } from "../packages/constants/src/index";
 import {
   ArtifactService,
   DurableInvocationGateway,
-  DurableWaitManager,
   PgDurableInvocationStore,
-  RunResumeGateway,
   TypedOutputValidator,
 } from "../packages/run-kernel/src/index";
 import { CHAT_REQUEST_SCHEMA_REF, INVOCATION_REQUEST_SCHEMAS } from "../packages/schema/src/index";
 import { ArtifactStore } from "../packages/storage/src/artifacts/artifact-store";
 import { RunStore } from "../packages/storage/src/runs/run-store";
-import { WaitStore } from "../packages/storage/src/runs/wait-store";
 import {
   type ApprovalGuardrailEvidence,
   approvalEvidenceDigest,
@@ -71,7 +68,6 @@ describe("approvals bind Guardrail evidence and enforce four eyes (L6-7)", () =>
   let runs: RunStore;
   let repo: ApprovalsRepo;
   let approvals: ToolApprovalService;
-  let waits: DurableWaitManager;
   let invocations: DurableInvocationGateway;
   let executed: unknown[];
 
@@ -90,8 +86,7 @@ describe("approvals bind Guardrail evidence and enforce four eyes (L6-7)", () =>
     });
     runs = new RunStore(transactions);
     repo = new ApprovalsRepo(queryable);
-    waits = new DurableWaitManager(new WaitStore(transactions), new RunResumeGateway(runs));
-    approvals = new ToolApprovalService({ repo, waits });
+    approvals = new ToolApprovalService({ transactions });
     executed = [];
     await addUser(SUBJECT.id, "requester@example.com", "admin");
   });

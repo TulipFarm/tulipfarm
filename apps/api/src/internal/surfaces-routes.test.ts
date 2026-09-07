@@ -2,16 +2,11 @@ import { randomUUID } from "node:crypto";
 import type { PGlite } from "@electric-sql/pglite";
 import { Type } from "@sinclair/typebox";
 import { DEPLOYMENT_BUSINESS_ID } from "@tulipfarm/constants";
-import {
-  DurableInvocationGateway,
-  DurableWaitManager,
-  RunResumeGateway,
-  TypedOutputValidator,
-} from "@tulipfarm/run-kernel";
+import { DurableInvocationGateway, TypedOutputValidator } from "@tulipfarm/run-kernel";
 import { INVOCATION_REQUEST_SCHEMAS, textContent } from "@tulipfarm/schema";
-import { ChannelRunDeliveryStore, RunStore, WaitStore } from "@tulipfarm/storage";
+import { ChannelRunDeliveryStore } from "@tulipfarm/storage";
 import { createSurfaceArtifact } from "@tulipfarm/surface";
-import { ApprovalsRepo, ToolApprovalService } from "@tulipfarm/tool-host";
+import { ToolApprovalService } from "@tulipfarm/tool-host";
 import type { FastifyInstance } from "fastify";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { buildApp } from "../app";
@@ -117,11 +112,7 @@ describe("POST /api/v1/internal/surfaces/interactions", () => {
       verifiedVia: "manifest_email",
     });
 
-    const runs = new RunStore(transactions);
-    const toolApprovals = new ToolApprovalService({
-      repo: new ApprovalsRepo(db),
-      waits: new DurableWaitManager(new WaitStore(transactions), new RunResumeGateway(runs)),
-    });
+    const toolApprovals = new ToolApprovalService({ transactions });
     surfaceActionStore = new MemorySurfaceActionStore();
     surfaceArtifactStore = new MemorySurfaceArtifactStore();
     conversationStore = new FakeConversationStore();

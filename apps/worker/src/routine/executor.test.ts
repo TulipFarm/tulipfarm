@@ -670,9 +670,11 @@ describe("createRoutineExecutor — tool States", () => {
   function toolExecutor(
     document: routine.RoutineDefinition,
     harness: StateHarness,
-    outcome: RoutineToolOutcome,
-    calls: RoutineToolRequest[] = []
+    outcome: RoutineToolOutcome | readonly RoutineToolOutcome[],
+    calls: RoutineToolRequest[] = [],
+    approvalWaits: { runId: string; stateKey: string; approvalId: string }[] = []
   ) {
+    const outcomes = Array.isArray(outcome) ? [...outcome] : [outcome];
     return createRoutineExecutor({
       definitions: {
         load: async () => ({ document, bundle }) as LoadedRoutineDefinition,
@@ -685,7 +687,15 @@ describe("createRoutineExecutor — tool States", () => {
       tools: {
         execute: async (request) => {
           calls.push(request);
-          return outcome;
+          const next = outcomes.shift();
+          if (next === undefined) throw new Error("no Tool outcome scripted");
+          return next;
+        },
+      },
+      toolApprovalWaits: {
+        register: async (input) => {
+          approvalWaits.push(input);
+          return { waitId: "approval-wait-1" };
         },
       },
       authority: () => [{ name: "routine", grants: [] }],
@@ -724,6 +734,7 @@ describe("createRoutineExecutor — tool States", () => {
     expect(calls[0]?.plan.arguments).toEqual({ body: "west" });
     expect(calls[0]?.plan.effectId).toBe(routineEffectId(run().id, "Start"));
     expect(calls[0]?.authorityLayers).toEqual([{ name: "routine", grants: [] }]);
+    expect(calls[0]?.requesterPrincipalId).toBe("agent:assistant");
   });
 
   it("parks a Tool State when no Tool authority is composed", async () => {
@@ -745,15 +756,36 @@ describe("createRoutineExecutor — tool States", () => {
     expect(harness.states.get("Start")?.errorEvidenceRef).toBe("routine:unsupported_state");
   });
 
-  it("parks an intent awaiting a human rather than dispatching or failing it", async () => {
+  it("parks and resumes the same Tool State occurrence after approval", async () => {
     const harness = new StateHarness([state("Start")]);
-    const execute = toolExecutor(definition([commentState]), harness, {
-      kind: "awaiting_approval",
-      reason: "approval_required",
-    });
+    const calls: RoutineToolRequest[] = [];
+    const approvalWaits: { runId: string; stateKey: string; approvalId: string }[] = [];
+    const execute = toolExecutor(
+      definition([commentState]),
+      harness,
+      [
+        {
+          kind: "awaiting_approval",
+          reason: "approval_required",
+          approvalId: "approval-1",
+        },
+        { kind: "succeeded", output: null },
+      ],
+      calls,
+      approvalWaits
+    );
 
-    await expect(execute(run())).resolves.toEqual({ status: "needs_reconciliation" });
-    expect(harness.states.get("Start")?.errorEvidenceRef).toBe("routine:approval_required");
+    await expect(execute(run())).resolves.toEqual({ status: "waiting" });
+    expect(harness.states.get("Start")).toMatchObject({ status: "waiting" });
+    expect(approvalWaits).toEqual([
+      { runId: run().id, stateKey: "Start", approvalId: "approval-1" },
+    ]);
+
+    await expect(execute(run())).resolves.toEqual({ status: "succeeded" });
+    expect(calls.map((call) => call.stateKey)).toEqual(["Start", "Start"]);
+    expect(harness.transitions).toContain("Start:waiting->ready");
+    expect(harness.states.get("Start")).toMatchObject({ status: "succeeded" });
+    expect(approvalWaits).toHaveLength(1);
   });
 
   it("parks an effect only reconciliation can resolve, naming what stopped it", async () => {

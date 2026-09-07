@@ -86,6 +86,14 @@ interface RoutineRunStateReader {
   listStates: Pick<RunStore, "listStates">["listStates"];
 }
 
+export interface RoutineToolApprovalWaitPort {
+  register(input: {
+    runId: string;
+    stateKey: string;
+    approvalId: string;
+  }): Promise<{ waitId: string }>;
+}
+
 interface RoutineExecutorOptions {
   readonly definitions: Pick<WorkerRoutineDefinitionLoader, "load">;
   readonly artifacts: RoutineArtifactReader;
@@ -95,6 +103,8 @@ interface RoutineExecutorOptions {
   readonly waits: RoutineWaitPort;
   /** Absent means `tool` States park; there is no second external-effect path. */
   readonly tools?: RoutineToolPort;
+  /** Registers Tool approval waits through the API, which alone retains resume tokens. */
+  readonly toolApprovalWaits?: RoutineToolApprovalWaitPort;
   /** Runs a `script` State's authored TypeScript; absent refuses the State by name. */
   readonly scripts?: RoutineScriptPort;
   /** Runs an `action` State's runtime Tool; absent refuses the State by name. */
@@ -397,9 +407,13 @@ class RoutineExecution {
   ): Promise<{ kind: "outcome"; outcome: StepOutcome } | { kind: ChainOutcome }> {
     let outcome: StepOutcome | ChainOutcome | null;
 
-    // A `waiting` State is resolved by its wait, not by re-running it — unless the wait it is on
-    // is a concurrency backoff, which exists precisely to bring it back *into* execution.
-    if (row.status === "waiting" && !(await this.backoffElapsed(state, key))) {
+    // A Tool approval resumes by replaying the same deterministic effect plan. Other waiting
+    // States are resolved by their wait, unless it is a concurrency backoff that re-enters work.
+    if (
+      row.status === "waiting" &&
+      state.type !== "tool" &&
+      !(await this.backoffElapsed(state, key))
+    ) {
       const resumed =
         state.type === "approval"
           ? await resumeApproval(this.waitGate(), state, key, row)
@@ -592,6 +606,7 @@ class RoutineExecution {
           runId: this.ctx.run.id,
           stateKey: key,
         }),
+        requesterPrincipalId: `${this.ctx.run.identity.effectiveSubject.kind}:${this.ctx.run.identity.effectiveSubject.id}`,
         bundle: this.ctx.bundle,
         authorityLayers: this.ctx.options.authority?.(this.ctx.run, state) ?? [],
       })
@@ -600,6 +615,19 @@ class RoutineExecution {
     if (result.kind === "succeeded") {
       this.produced.set(key, result.output);
       return stateOutcome(state);
+    }
+    if (result.kind === "awaiting_approval") {
+      const waits = this.ctx.options.toolApprovalWaits;
+      if (waits === undefined) {
+        throw new RoutineExecutionRefusal("unsupported_state", state.name);
+      }
+      await waits.register({
+        runId: this.ctx.run.id,
+        stateKey: key,
+        approvalId: result.approvalId,
+      });
+      await this.transition(key, "running", "waiting");
+      return "waiting";
     }
     if (result.kind !== "failed") {
       await this.park(key, `routine:${result.reason}`);

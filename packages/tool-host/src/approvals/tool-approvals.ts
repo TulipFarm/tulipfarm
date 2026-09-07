@@ -1,7 +1,16 @@
 import { randomUUID } from "node:crypto";
-import type { InvocationPrincipal } from "@tulipfarm/run-kernel";
-import { DurableWaitError, type DurableWaitManager } from "@tulipfarm/run-kernel";
+import {
+  DurableWaitManager,
+  type InvocationPrincipal,
+  RunResumeGateway,
+} from "@tulipfarm/run-kernel";
 import { canonicalHash } from "@tulipfarm/schema";
+import {
+  ambientTransactionPort,
+  RunStore,
+  type TransactionPort,
+  WaitStore,
+} from "@tulipfarm/storage";
 import type { ToolApprovalDecision, ToolApprovalPort } from "../ports";
 import {
   type ApprovalDemand,
@@ -10,7 +19,7 @@ import {
   readApprovalEvidence,
 } from "./evidence";
 import type { PendingToolApproval } from "./pending";
-import type { ApprovalRow, ApprovalsRepo } from "./repo";
+import { type ApprovalRow, ApprovalsRepo } from "./repo";
 
 /** Durable Tool approvals: intent-keyed rows park the Run; one-use wait tokens resume it.
  *
@@ -43,11 +52,15 @@ export interface ToolApprovalPayload {
 export const APPROVAL_DECIDER_ROLES: readonly string[] = ["role:admin", "role:member"];
 
 export interface ToolApprovalServiceOptions {
-  readonly repo: ApprovalsRepo;
-  readonly waits: DurableWaitManager;
+  readonly transactions: TransactionPort;
   newId?(): string;
   now?(): Date;
   readonly ttlMs?: number;
+}
+
+interface ToolApprovalTransaction {
+  readonly repo: ApprovalsRepo;
+  readonly waits: DurableWaitManager;
 }
 
 /** A settled row's status, as the dispatcher must read it. `timeout` is a denial with a reason. */
@@ -93,37 +106,46 @@ export class ToolApprovalService implements ToolApprovalPort {
     /** What demanded a human, from the evaluation that demanded it. */
     demand: ApprovalDemand;
   }): Promise<ToolApprovalDecision> {
-    const intentDigest = intentOf(input.runId, input.toolName, input.args);
-    const existing = await this.options.repo.findByIntent(
-      input.runId,
-      intentDigest,
-      input.toolCallId
-    );
-    if (existing !== null) return decisionFor(existing);
+    return await this.transact(async ({ repo }) => {
+      const intentDigest = intentOf(input.runId, input.toolName, input.args);
+      const existing = await repo.findByIntent(input.runId, intentDigest, input.toolCallId);
+      if (existing !== null) {
+        if (existing.status !== "pending" || existing.expiresAt > this.now()) {
+          return decisionFor(existing);
+        }
+        if (await repo.settlePending(existing.id, "timeout")) {
+          return { status: "denied", reason: "approval request timed out" };
+        }
+        const settled = await repo.findByIntent(input.runId, intentDigest, input.toolCallId);
+        return settled === null
+          ? { status: "denied", reason: "approval request timed out" }
+          : decisionFor(settled);
+      }
 
-    const approvalId = this.newId();
-    const payload: ToolApprovalPayload = {
-      runId: input.runId,
-      intentDigest,
-      toolCallId: input.toolCallId,
-      toolName: input.toolName,
-      args: input.args,
-    };
-    const evidence: ApprovalGuardrailEvidence = {
-      ...input.demand,
-      toolName: input.toolName,
-      intentDigest,
-      demandedAt: this.now().toISOString(),
-    };
-    await this.options.repo.insert({
-      id: approvalId,
-      kind: "tool_call",
-      payload,
-      expiresAt: new Date(this.now().getTime() + this.ttlMs),
-      requesterPrincipalId: input.requesterPrincipalId,
-      evidence,
+      const approvalId = this.newId();
+      const payload: ToolApprovalPayload = {
+        runId: input.runId,
+        intentDigest,
+        toolCallId: input.toolCallId,
+        toolName: input.toolName,
+        args: input.args,
+      };
+      const evidence: ApprovalGuardrailEvidence = {
+        ...input.demand,
+        toolName: input.toolName,
+        intentDigest,
+        demandedAt: this.now().toISOString(),
+      };
+      await repo.insert({
+        id: approvalId,
+        kind: "tool_call",
+        payload,
+        expiresAt: new Date(this.now().getTime() + this.ttlMs),
+        requesterPrincipalId: input.requesterPrincipalId,
+        evidence,
+      });
+      return { status: "pending", approvalId };
     });
-    return { status: "pending", approvalId };
   }
 
   /**
@@ -131,7 +153,9 @@ export class ToolApprovalService implements ToolApprovalPort {
    * call may not run: the row is not an open approval, or another call already spent it.
    */
   async consume(input: { approvalId: string; toolCallId: string }): Promise<boolean> {
-    return await this.options.repo.consume(input.approvalId, input.toolCallId, this.now());
+    return await this.transact(({ repo }) =>
+      repo.consume(input.approvalId, input.toolCallId, this.now())
+    );
   }
 
   /** Parks idempotently; stores a one-use server-only token, while the wait stores its digest. */
@@ -142,48 +166,52 @@ export class ToolApprovalService implements ToolApprovalPort {
     approvalId: string;
     subject: InvocationPrincipal;
   }): Promise<{ waitId: string }> {
-    const row = await this.options.repo.findById(input.approvalId);
-    if (row === null) throw new UnknownApprovalError(input.approvalId);
-    const existing = payloadOf(row).waitId;
-    if (existing !== undefined) return { waitId: existing };
+    return await this.transact(async ({ repo, waits }) => {
+      const row = await repo.findByIdForUpdate(input.approvalId);
+      if (row === null) throw new UnknownApprovalError(input.approvalId);
+      const existing = payloadOf(row).waitId;
+      if (existing !== undefined) return { waitId: existing };
 
-    const registered = await this.options.waits.register({
-      id: this.newId(),
-      businessId: input.businessId,
-      runId: input.runId,
-      stateKey: input.stateKey,
-      kind: "approval",
-      aggregation: "first",
-      schemaRef: APPROVAL_SIGNAL_SCHEMA_REF,
-      // Four-eyes (I-13) needs somebody other than the requester to be able to decide, so the
-      // wait admits the Roles that hold the `approval` surface as well as the requester. The
-      // requester is kept because a deployment with no other eligible approver must not be unable
-      // to decide at all; `signal` is what refuses self-approval when someone else could decide.
-      allowedPrincipals: [`${input.subject.kind}:${input.subject.id}`, ...APPROVAL_DECIDER_ROLES],
-      expectedSignals: 1,
-      quorum: null,
-      deadlineAt: row.expiresAt.toISOString(),
-      createdAt: this.now().toISOString(),
+      const registered = await waits.register({
+        id: this.newId(),
+        businessId: input.businessId,
+        runId: input.runId,
+        stateKey: input.stateKey,
+        kind: "approval",
+        aggregation: "first",
+        schemaRef: APPROVAL_SIGNAL_SCHEMA_REF,
+        // Four-eyes (I-13) needs somebody other than the requester to be able to decide, so the
+        // wait admits the Roles that hold the `approval` surface as well as the requester. The
+        // requester is kept because a deployment with no other eligible approver must not be unable
+        // to decide at all; `signal` is what refuses self-approval when someone else could decide.
+        allowedPrincipals: [`${input.subject.kind}:${input.subject.id}`, ...APPROVAL_DECIDER_ROLES],
+        expectedSignals: 1,
+        quorum: null,
+        deadlineAt: row.expiresAt.toISOString(),
+        createdAt: this.now().toISOString(),
+      });
+      await repo.mergePayload(input.approvalId, {
+        waitId: registered.wait.id,
+        resumeToken: registered.token,
+      });
+      return { waitId: registered.wait.id };
     });
-    await this.options.repo.mergePayload(input.approvalId, {
-      waitId: registered.wait.id,
-      resumeToken: registered.token,
-    });
-    return { waitId: registered.wait.id };
   }
 
   /** Pending approval a Channel host can prompt for. */
   async pendingForRun(
     runId: string
   ): Promise<{ approvalId: string; toolName: string; args: unknown } | null> {
-    const row = await this.options.repo.findPendingByRun(runId);
-    if (row === null) return null;
-    const payload = payloadOf(row);
-    return {
-      approvalId: row.id,
-      toolName: payload.toolName ?? "unknown tool",
-      args: payload.args,
-    };
+    return await this.transact(async ({ repo }) => {
+      const row = await repo.findPendingByRun(runId);
+      if (row === null) return null;
+      const payload = payloadOf(row);
+      return {
+        approvalId: row.id,
+        toolName: payload.toolName ?? "unknown tool",
+        args: payload.args,
+      };
+    });
   }
 
   /** Pending approvals the principal may decide, projected only after durable authorization. */
@@ -191,13 +219,17 @@ export class ToolApprovalService implements ToolApprovalPort {
     businessId: string;
     principal: string;
   }): Promise<PendingToolApproval[]> {
-    const rows = await this.options.repo.listPending("tool_call");
-    const authorized = await Promise.all(
-      rows.map(async (row) =>
-        (await this.authorizedWait(row, input.businessId, input.principal)) === null ? null : row
-      )
-    );
-    return authorized.flatMap((row) => (row === null ? [] : [pendingApprovalOf(row)]));
+    return await this.transact(async ({ repo, waits }) => {
+      const rows = await repo.listPending("tool_call");
+      const authorized = await Promise.all(
+        rows.map(async (row) =>
+          (await this.authorizedWait(repo, waits, row, input.businessId, input.principal)) === null
+            ? null
+            : row
+        )
+      );
+      return authorized.flatMap((row) => (row === null ? [] : [pendingApprovalOf(row)]));
+    });
   }
 
   /**
@@ -216,28 +248,39 @@ export class ToolApprovalService implements ToolApprovalPort {
     decision: "approved" | "denied";
     principal: string;
   }): Promise<ApprovalSignalOutcome> {
-    const row = await this.options.repo.findById(input.approvalId);
-    if (row === null || row.kind !== "tool_call") return "not_found";
-    const payload = payloadOf(row) as ToolApprovalPayload & { resumeToken?: string };
-    if (
-      payload.waitId === undefined ||
-      payload.runId === undefined ||
-      payload.resumeToken === undefined
-    ) {
-      return "not_found";
-    }
-    const authorized = await this.authorizedWait(row, input.businessId, input.principal);
-    if (authorized === null) return "forbidden";
-    const { runId, resumeToken, principalAs } = authorized;
+    return await this.transact(async ({ repo, waits }) => {
+      const row = await repo.findByIdForUpdate(input.approvalId);
+      if (row === null || row.kind !== "tool_call") return "not_found";
+      const payload = payloadOf(row) as ToolApprovalPayload & { resumeToken?: string };
+      if (
+        payload.waitId === undefined ||
+        payload.runId === undefined ||
+        payload.resumeToken === undefined
+      ) {
+        return "not_found";
+      }
+      const authorized = await this.authorizedWait(
+        repo,
+        waits,
+        row,
+        input.businessId,
+        input.principal
+      );
+      if (authorized === null) return "forbidden";
+      const { runId, resumeToken, principalAs } = authorized;
 
-    if (
-      !(await this.options.repo.settlePending(input.approvalId, input.decision, input.principal))
-    ) {
-      return "already_settled";
-    }
+      if (row.status !== "pending" && row.status !== input.decision) {
+        return "already_settled";
+      }
+      if (
+        row.status === "pending" &&
+        !(await repo.settlePending(input.approvalId, input.decision, input.principal))
+      ) {
+        return "already_settled";
+      }
+      const decidedBy = row.status === "pending" ? input.principal : row.approverPrincipalId;
 
-    try {
-      await this.options.waits.signal({
+      await waits.signal({
         id: this.newId(),
         businessId: input.businessId,
         runId,
@@ -249,20 +292,18 @@ export class ToolApprovalService implements ToolApprovalPort {
         signalDigest: canonicalHash({
           approvalId: input.approvalId,
           decision: input.decision,
-          decidedBy: input.principal,
+          decidedBy,
         }),
         receivedAt: this.now().toISOString(),
       });
-    } catch (error) {
-      // The decision is recorded either way — a wait already resolved by the deadline sweep, or by
-      // a racing decision, must not turn a settled approval into a failed request.
-      if (!(error instanceof DurableWaitError)) throw error;
-      return "already_settled";
-    }
-    return "resumed";
+      await waits.resumeIfUnblocked(input.businessId, runId);
+      return "resumed";
+    });
   }
 
   private async authorizedWait(
+    repo: ApprovalsRepo,
+    waits: DurableWaitManager,
     row: ApprovalRow,
     businessId: string,
     principal: string
@@ -271,7 +312,7 @@ export class ToolApprovalService implements ToolApprovalPort {
       resumeToken?: string;
     };
     if (waitId === undefined || runId === undefined || resumeToken === undefined) return null;
-    const wait = await this.options.waits.find(businessId, waitId);
+    const wait = await waits.find(businessId, waitId);
     if (wait === null) return null;
 
     const evidence = readApprovalEvidence(row.guardrailEvidence);
@@ -285,12 +326,9 @@ export class ToolApprovalService implements ToolApprovalPort {
 
     const requester = row.requesterPrincipalId;
     if (requester === null) return null;
-    const principalAs = await this.approverPrincipal(wait.allowedPrincipals, principal);
+    const principalAs = await this.approverPrincipal(repo, wait.allowedPrincipals, principal);
     if (principalAs === null) return null;
-    if (
-      principal === requester &&
-      (await this.options.repo.countOtherEligibleApprovers(requester)) > 0
-    ) {
+    if (principal === requester && (await repo.countOtherEligibleApprovers(requester)) > 0) {
       return null;
     }
     return { runId, resumeToken, principalAs };
@@ -301,12 +339,28 @@ export class ToolApprovalService implements ToolApprovalPort {
    * it holds that the wait allows. `null` means the wait admits nothing this decider has.
    */
   private async approverPrincipal(
+    repo: ApprovalsRepo,
     allowedPrincipals: readonly string[],
     principal: string
   ): Promise<string | null> {
     if (allowedPrincipals.includes(principal)) return principal;
-    const held = await this.options.repo.rolesForPrincipal(principal);
+    const held = await repo.rolesForPrincipal(principal);
     return allowedPrincipals.find((allowed) => held.includes(allowed)) ?? null;
+  }
+
+  private async transact<T>(
+    operation: (transaction: ToolApprovalTransaction) => Promise<T>
+  ): Promise<T> {
+    return await this.options.transactions.withTransaction(async (queryable) => {
+      const transactions = ambientTransactionPort(queryable);
+      return await operation({
+        repo: new ApprovalsRepo(queryable),
+        waits: new DurableWaitManager(
+          new WaitStore(transactions),
+          new RunResumeGateway(new RunStore(transactions))
+        ),
+      });
+    });
   }
 }
 

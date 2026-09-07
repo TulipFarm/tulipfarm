@@ -112,12 +112,13 @@ describe("one approval authorizes one dispatch (L6-6)", () => {
   let checkpoints: RunLoopCheckpointStore;
   let approvals: ToolApprovalService;
   let repo: ApprovalsRepo;
+  let transactions: TransactionPort;
   let executed: unknown[];
   let tools: ToolDispatchPort;
 
   beforeEach(async () => {
     database = await makeMigratedPglite();
-    const transactions: TransactionPort = {
+    transactions = {
       withTransaction: (operation) =>
         database.transaction((transaction) =>
           operation(transaction as unknown as StorageQueryable)
@@ -130,14 +131,7 @@ describe("one approval authorizes one dispatch (L6-6)", () => {
     );
     checkpoints = new RunLoopCheckpointStore(transactions);
     repo = new ApprovalsRepo(database as unknown as { query: Queryable["query"] });
-    approvals = new ToolApprovalService({
-      repo,
-      waits: {
-        register: async () => {
-          throw new Error("this test approves through the repo, not the durable wait");
-        },
-      } as never,
-    });
+    approvals = new ToolApprovalService({ transactions });
 
     executed = [];
     const registry = new InMemoryToolCatalog();
@@ -252,10 +246,7 @@ describe("one approval authorizes one dispatch (L6-6)", () => {
     expect(executed).toEqual([WRITE_ARGS]);
 
     // Everything in-memory is discarded; only PostgreSQL crosses the restart.
-    const restarted = new ToolApprovalService({
-      repo: new ApprovalsRepo(database as unknown as { query: Queryable["query"] }),
-      waits: {} as never,
-    });
+    const restarted = new ToolApprovalService({ transactions });
 
     // The decision the surviving row records is spent, and stays spent for anyone else.
     expect(await restarted.consume({ approvalId, toolCallId: "c3" })).toBe(false);
