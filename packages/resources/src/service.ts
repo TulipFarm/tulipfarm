@@ -213,7 +213,10 @@ async function prepareData(
   let data = stripReadOnly(resource.schema, stripSystemFields(raw));
   if (existing) data = stripImmutable(resource.schema, existing, data);
   try {
-    data = await applyTransforms(type, resource.schema, data, { counter: ports.counter });
+    data = await applyTransforms(type, resource.schema, data, {
+      counter: ports.counter,
+      ...(existing === undefined ? {} : { existingRecord: existing }),
+    });
   } catch (error) {
     if (error instanceof TulipFarmValidationError) {
       return { ok: false, err: { code: 422, body: validationError(error) } };
