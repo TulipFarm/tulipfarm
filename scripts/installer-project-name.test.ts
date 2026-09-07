@@ -36,6 +36,30 @@ afterEach(() => {
 });
 
 describe("installer compose project name", () => {
+  it("reuses the saved project name when an update omits the original override", () => {
+    const installDirectory = temporaryDirectory();
+    writeFileSync(
+      join(installDirectory, ".tulipfarm-install"),
+      "managed-by=tulipfarm-installer\ncompose-project=acme\nruntime=podman\n"
+    );
+    const output = runInstallerFunctions(
+      `
+      SUDO=""
+      ENGINE="echo"
+      resolve_project_name
+      compose up -d
+    `,
+      { TF_INSTALL_DIR: installDirectory, TF_PROJECT_NAME: "", COMPOSE_PROJECT_NAME: "" }
+    );
+    expect(output.trim()).toBe("compose -p acme up -d");
+  });
+
+  it("rejects unsafe project names before invoking Compose", () => {
+    expect(() =>
+      runInstallerFunctions("resolve_project_name", { TF_PROJECT_NAME: "bad/name" })
+    ).toThrow();
+  });
+
   it("defaults to tulipfarm so existing installs keep their volumes", () => {
     const output = runInstallerFunctions(`
       SUDO=""
@@ -92,6 +116,7 @@ describe("installer compose project name", () => {
 
     const marker = readFileSync(join(installDirectory, ".tulipfarm-install"), "utf8");
     expect(marker).toContain("compose-project=acme");
+    expect(marker).toContain(`runtime-user-id=${process.getuid?.()}`);
   });
 });
 

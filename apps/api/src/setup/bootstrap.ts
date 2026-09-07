@@ -1,16 +1,19 @@
-import { mkdir } from "node:fs/promises";
+import { DEPLOYMENT_BUSINESS_ID } from "@tulipfarm/constants";
+import { validateSoulConfig } from "@tulipfarm/schema";
 import type { SecretsService } from "@tulipfarm/secrets";
-import { writeLlmConfigToSoulYaml } from "@tulipfarm/soul";
+import { mergeLlmConfigIntoSoulYaml, type SoulWriter } from "@tulipfarm/soul";
+import { parse } from "yaml";
 import { createUser, normalizeEmail, type UserRepo } from "../auth/users";
+import { SYSTEM_SOUL_COMMIT_ACTOR } from "../runtime/soul-writer";
 import type { SetupAdminCreator } from "./first-admin";
 import { isProductionMode } from "./service";
-import { patchSoulConfig, readSoulConfig } from "./soul-config";
+import { mergeSoulConfig } from "./soul-config";
 
 export interface BootstrapDeps {
   userRepo: UserRepo;
   setupAdminCreator?: SetupAdminCreator;
   secretsService: SecretsService;
-  soulPath: string;
+  soulWriter: SoulWriter;
   log?: { info: (msg: string) => void; error: (msg: string) => void };
 }
 
@@ -24,18 +27,10 @@ const DEFAULT_MODEL: Record<"anthropic" | "openai", string> = {
   openai: "gpt-4o",
 };
 
-/** Headless bootstrap seeds an LLM chain only when `llm:` is absent, preserving operator edits. */
-async function seedLlmConfig(deps: BootstrapDeps, provider: "anthropic" | "openai"): Promise<void> {
-  const existing = (await readSoulConfig(deps.soulPath)) as { llm?: unknown };
-  if (existing.llm !== undefined) return;
-
-  // `writeLlmConfigToSoulYaml` assumes the soul directory exists. Nothing guarantees that here:
-  // the only earlier writer is the BUSINESS_NAME patch, which is optional.
-  // soul-write-exception: headless bootstrap seeds soul.yaml before the artifact catalog and the
-  // SoulWriter gateway exist, so there is no gateway to route this through yet.
-  await mkdir(deps.soulPath, { recursive: true });
+function seedLlmConfig(content: string, provider: "anthropic" | "openai"): string {
+  if (validateSoulConfig(parse(content)).llm !== undefined) return content;
   const entry = { provider, model: DEFAULT_MODEL[provider] };
-  await writeLlmConfigToSoulYaml(deps.soulPath, {
+  return mergeLlmConfigIntoSoulYaml(content, {
     tiers: {
       quick: { providers: [entry] },
       standard: { providers: [entry] },
@@ -44,7 +39,6 @@ async function seedLlmConfig(deps: BootstrapDeps, provider: "anthropic" | "opena
     presets: { default: "balanced" },
     mode: "basic",
   });
-  deps.log?.info(`Seeded LLM config: ${provider}/${entry.model} on all tiers`);
 }
 
 /**
@@ -86,6 +80,7 @@ export async function bootstrapFromEnv(deps: BootstrapDeps): Promise<void> {
   const llmKey = process.env.LLM_API_KEY;
 
   if (!adminEmail || !adminPass) return;
+  if ((await deps.userRepo.count()) > 0) return;
 
   // Partial headless: admin creds present but no LLM key → fail loud in production
   if (!llmKey && isProductionMode()) {
@@ -96,34 +91,46 @@ export async function bootstrapFromEnv(deps: BootstrapDeps): Promise<void> {
     );
   }
 
-  if ((await deps.userRepo.count()) === 0) {
-    const setupAdminCreator = deps.setupAdminCreator;
-    const insert = setupAdminCreator
-      ? (record: Parameters<SetupAdminCreator["create"]>[0]) => setupAdminCreator.create(record)
-      : undefined;
-    await createUser(deps.userRepo, adminEmail, adminPass, "admin", {
-      setupBootstrap: true,
-      ...(insert ? { insert } : {}),
-    });
-    deps.log?.info(`Bootstrapped admin user ${normalizeEmail(adminEmail)}`);
-  }
-
-  if (process.env.BUSINESS_NAME) {
-    await patchSoulConfig(deps.soulPath, {
-      businessName: process.env.BUSINESS_NAME,
-      businessDescription: process.env.BUSINESS_DESCRIPTION ?? "",
-    });
-  }
+  const base = await deps.soulWriter.readWithBase("Settings");
+  let content = mergeSoulConfig(base.content, {
+    setupComplete: true,
+    ...(process.env.BUSINESS_NAME
+      ? {
+          businessName: process.env.BUSINESS_NAME,
+          businessDescription: process.env.BUSINESS_DESCRIPTION ?? "",
+        }
+      : {}),
+  });
 
   if (llmKey) {
     const provider = llmProvider();
     await deps.secretsService.set(`${provider}-api-key`, llmKey);
     deps.log?.info(`Seeded ${provider} LLM API key from env`);
-    await seedLlmConfig(deps, provider);
+    content = seedLlmConfig(content, provider);
   } else {
     deps.log?.info("LLM_API_KEY not set — configure models via Operate > Business > Models");
   }
 
-  // Mark setup complete so the web wizard never appears
-  await patchSoulConfig(deps.soulPath, { setupComplete: true });
+  const result = await deps.soulWriter.apply({
+    subject: "chore(soul): seed headless setup",
+    source: "api",
+    actor: SYSTEM_SOUL_COMMIT_ACTOR,
+    businessId: DEPLOYMENT_BUSINESS_ID,
+    expectedBaseCommit: base.baseCommit,
+    changes: [{ op: "put", target: { kind: "Settings" }, content }],
+  });
+  if (!result.published) {
+    throw new Error(`Headless setup could not publish: ${result.publicationError ?? "unknown"}`);
+  }
+
+  // A failed seed must remain retryable on the next boot, so create the first user last.
+  const setupAdminCreator = deps.setupAdminCreator;
+  const insert = setupAdminCreator
+    ? (record: Parameters<SetupAdminCreator["create"]>[0]) => setupAdminCreator.create(record)
+    : undefined;
+  await createUser(deps.userRepo, adminEmail, adminPass, "admin", {
+    setupBootstrap: true,
+    ...(insert ? { insert } : {}),
+  });
+  deps.log?.info(`Bootstrapped admin user ${normalizeEmail(adminEmail)}`);
 }

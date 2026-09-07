@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { EventEmitter } from "node:events";
+import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import {
   createSubagentSpawning,
@@ -510,6 +511,15 @@ async function boot() {
       publisher: soulPublisher,
       treeReader: soulTreeReader,
     });
+    const userRepo = new PgUserRepo(pool);
+    const setupAdminCreator = new PgSetupAdminCreator(pool, DEPLOYMENT_BUSINESS_ID);
+    await bootstrapFromEnv({
+      userRepo,
+      setupAdminCreator,
+      secretsService,
+      soulWriter,
+      log: console,
+    });
     const bundledSkills = await loadBundledSkills(console);
     const disabledBundledSkills = await loadDisabledBundledSkills(soulPath, console);
     // Built-in Skills are authored artifacts, not a hidden overlay: seed them into the Soul repo so
@@ -539,8 +549,6 @@ async function boot() {
       10
     );
     const sessionStore = new PgSessionStore(pool, ttlSeconds);
-    const userRepo = new PgUserRepo(pool);
-    const setupAdminCreator = new PgSetupAdminCreator(pool, DEPLOYMENT_BUSINESS_ID);
     const tokenRepo = new PgTokenRepo(pool);
     const apiClientRepo = new PgApiClientRepo(pool);
     const externalIdentityRepo = new PgExternalIdentityRepo(pool);
@@ -558,7 +566,10 @@ async function boot() {
     // Same root the Worker derives, so a blob-backed Run Artifact written by either process is
     // readable by the other. Without it `publishFile` fails with `artifact_blob_unavailable`,
     // which is how a sandboxed Skill command dies before its container ever starts.
-    const blobs = createBlobPort(join(resolveDataDir() ?? process.cwd(), "blobs"));
+    const dataDir = resolveDataDir();
+    // Compose mounts only this subdirectory writable in the worker, after API readiness.
+    if (dataDir !== undefined) await mkdir(join(dataDir, "blobs"), { recursive: true });
+    const blobs = createBlobPort(join(dataDir ?? process.cwd(), "blobs"));
     /** Every Artifact reader is the same service over a different transaction scope. */
     const artifactsOver = (transactions: ConstructorParameters<typeof ArtifactStore>[0]) =>
       new ArtifactService(new ArtifactStore(transactions), invocationValidator, blobs);
@@ -1597,13 +1608,6 @@ async function boot() {
     // accepts Runs, so the Worker's and Integration Worker's credentials cannot wait on a human
     await provisionWorkerCredential(apiClientRepo, process.env, app.log);
     await provisionIntegrationWorkerCredential(apiClientRepo, process.env, app.log);
-    await bootstrapFromEnv({
-      userRepo,
-      setupAdminCreator,
-      secretsService,
-      soulPath,
-      log: app.log,
-    });
 
     const soulDoctor = buildSoulDoctor({
       pool,
