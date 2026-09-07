@@ -703,16 +703,43 @@ test("keeps / for the page when the reader is already typing", async () => {
 });
 
 /* Two controls claiming the same job is one control too many. */
-test("shows one collapse control at a time, moving it out of the sidebar when it narrows", async () => {
+test("shows one collapse control at a time, anchored in the sidebar in both states", async () => {
   const user = userEvent.setup();
   render(<ShellStub initialEntries={["/agents"]} />);
+  const aside = screen.getByRole("complementary", { name: "Application navigation" });
 
   expect(screen.getAllByRole("button", { name: "Collapse sidebar" })).toHaveLength(1);
   expect(screen.queryByRole("button", { name: "Expand sidebar" })).not.toBeInTheDocument();
+  expect(within(aside).getByRole("button", { name: "Collapse sidebar" })).toBeInTheDocument();
 
   await user.click(screen.getByRole("button", { name: "Collapse sidebar" }));
   expect(screen.getAllByRole("button", { name: "Expand sidebar" })).toHaveLength(1);
   expect(screen.queryByRole("button", { name: "Collapse sidebar" })).not.toBeInTheDocument();
+  expect(within(aside).getByRole("button", { name: "Expand sidebar" })).toBeInTheDocument();
+});
+
+/*
+ * The expanded and collapsed toggle used to be two separate <button> elements gated by
+ * `collapsed`, one inside the sidebar header and one in the content header. Swapping between them
+ * changed React's reconciliation identity, so focus dropped to the document body on every toggle.
+ * One button, driven by `collapsed`, keeps its identity across the swap.
+ */
+test("keeps focus on the toggle after it collapses and expands the sidebar", async () => {
+  const user = userEvent.setup();
+  render(<ShellStub initialEntries={["/agents"]} />);
+
+  const collapseButton = screen.getByRole("button", { name: "Collapse sidebar" });
+  collapseButton.focus();
+  expect(collapseButton).toHaveFocus();
+
+  await user.click(collapseButton);
+  const expandButton = screen.getByRole("button", { name: "Expand sidebar" });
+  expect(expandButton).toBe(collapseButton);
+  expect(document.activeElement).toBe(expandButton);
+
+  await user.click(expandButton);
+  expect(document.activeElement).toBe(expandButton);
+  expect(screen.getByRole("button", { name: "Collapse sidebar" })).toBe(expandButton);
 });
 
 /*

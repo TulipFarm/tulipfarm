@@ -190,19 +190,23 @@ function SidebarHeader({
         <>
           <SidebarCommand visibility={visibility} collapsed={false} compact />
           <NewChatButton collapsed={false} compact onNavigate={onNavigate} />
-          <Tooltip content="Collapse sidebar">
-            <button
-              type="button"
-              aria-label="Collapse sidebar"
-              aria-expanded
-              onClick={onToggleCollapsed}
-              className="hidden size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-sidebar-accent hover:text-foreground lg:flex"
-            >
-              <PanelLeftClose className="size-4" aria-hidden />
-            </button>
-          </Tooltip>
         </>
       )}
+      <Tooltip content={collapsed ? "Expand sidebar" : "Collapse sidebar"}>
+        <button
+          type="button"
+          aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+          aria-expanded={!collapsed}
+          onClick={onToggleCollapsed}
+          className="hidden size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-sidebar-accent hover:text-foreground lg:flex"
+        >
+          {collapsed ? (
+            <PanelLeftOpen className="size-4" aria-hidden />
+          ) : (
+            <PanelLeftClose className="size-4" aria-hidden />
+          )}
+        </button>
+      </Tooltip>
     </div>
   );
 }
@@ -848,7 +852,6 @@ export function AppShell({ children, user }: { children: ReactNode; user?: Sessi
     () => document.documentElement.dataset.sidebar === "collapsed"
   );
   const { pathname } = useLocation();
-  const settingsMode = isSettingsPath(pathname);
   const openerRef = useRef<HTMLButtonElement>(null);
   const { activeChatTitle, activeChatId } = useConversations();
   const isConversation = pathname === "/" || pathname.startsWith("/chat/");
@@ -910,25 +913,6 @@ export function AppShell({ children, user }: { children: ReactNode; user?: Sessi
           >
             <Menu className="size-5" aria-hidden />
           </button>
-          {/* Expanded, the collapse control lives in the sidebar's own header, next to the thing
-           * it resizes. Collapsed, that header has room for the mark alone, so the way back out
-           * moves here — one control, never two claiming the same job. */}
-          {collapsed && !settingsMode ? (
-            <>
-              <Tooltip content="Expand sidebar">
-                <button
-                  type="button"
-                  aria-label="Expand sidebar"
-                  aria-expanded={false}
-                  onClick={toggleCollapsed}
-                  className="hidden size-9 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground lg:flex"
-                >
-                  <PanelLeftOpen className="size-4" aria-hidden />
-                </button>
-              </Tooltip>
-              <Separator orientation="vertical" className="mx-1 hidden h-5 lg:block" />
-            </>
-          ) : null}
           <PageTitle pathname={pathname} pageTitle={pageTitle} titleSlot={chatTitleSlot} />
           <div className="ml-auto flex shrink-0 items-center gap-1 pl-2">
             {/* Page actions land left of the shell's own controls, so the reader meets what this
