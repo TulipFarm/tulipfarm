@@ -18,6 +18,7 @@ import {
   DurableWaitManager,
   RoutineStateScheduler,
   RunLeaseManager,
+  RunRecoveryManager,
   RunResumeGateway,
   type RunSource,
   SUBAGENT_RUN_SOURCE,
@@ -231,6 +232,7 @@ export async function main(): Promise<void> {
     },
   });
   const runStore = new RunStore(transactions);
+  const recoveryEffects = new PgEffectStore(transactions);
   const waitStore = new WaitStore(transactions);
   const eventStore = new EventStore(transactions, randomUUID);
   const runEventStore = new RunEventStore(transactions);
@@ -559,6 +561,7 @@ export async function main(): Promise<void> {
 
   const runDispatcher = new RunDispatcher({
     leases,
+    recovery: new RunRecoveryManager(runStore, recoveryEffects),
     businessId: config.businessId,
     owner: config.owner,
     // Every co-located Tool call this process makes happens inside this handler and is awaited

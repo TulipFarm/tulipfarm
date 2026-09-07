@@ -9,6 +9,7 @@ import {
   type OperationalPermission,
   registerOperationalRoutes,
 } from "./routes";
+import { RuntimeRunCommandService } from "./run-commands";
 
 const run = {
   id: "run-1",
@@ -16,6 +17,7 @@ const run = {
   routineVersion: "3",
   status: "attention_required" as const,
   version: 7,
+  availableCommands: ["cancel"] as const,
   createdAt: "2026-07-26T00:00:00.000Z",
   startedAt: "2026-07-26T00:00:01.000Z",
   finishedAt: null,
@@ -311,11 +313,21 @@ describe("operational API", () => {
   });
 
   it("requires an idempotency key and delegates Run commands without changing intent", async () => {
-    const commandRun = vi.fn(async (_grant, input) => ({
-      commandId: "command-1",
-      runId: input.runId,
-      status: "accepted" as const,
+    const cancel = vi.fn(async () => ({
+      runId: "run-1",
+      outcome: "cancelled" as const,
+      cancelledStateKeys: [],
+      reconcilingStateKeys: [],
+      cascadedChildRunIds: [],
+      detachedChildRunIds: [],
     }));
+    const commands = new RuntimeRunCommandService({
+      cancellation: { cancel },
+      recovery: {
+        reconcile: vi.fn(async () => ({ outcome: "requeued" as const, run: {} as never })),
+      },
+    });
+    const commandRun = vi.fn((grant, input) => commands.execute(grant.businessId, input));
     const app = await harness({ commandRun });
 
     const missing = await app.inject({
@@ -339,6 +351,13 @@ describe("operational API", () => {
       reason: "operator request",
       runId: "run-1",
     });
+    expect(cancel).toHaveBeenCalledWith(
+      expect.objectContaining({
+        businessId: "business-1",
+        expectedVersion: 7,
+        runId: "run-1",
+      })
+    );
     await app.close();
   });
 

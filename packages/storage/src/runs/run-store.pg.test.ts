@@ -1,7 +1,11 @@
 import { PGlite } from "@electric-sql/pglite";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { transactionPort } from "../pg/test-support";
-import { DISPATCH_HANDLER_ERROR_REF, DISPATCH_REQUEUED_ONCE_REF } from "./run-lease-store";
+import {
+  DISPATCH_HANDLER_ERROR_REF,
+  DISPATCH_LEASE_EXPIRED_REF,
+  DISPATCH_REQUEUED_ONCE_REF,
+} from "./run-lease-store";
 import {
   type AttemptEvidence,
   RUN_STORAGE_STATEMENTS,
@@ -359,7 +363,35 @@ describe("RunStore (PostgreSQL)", () => {
     });
   });
 
-  it("requeues a Run a crashed dispatch handler parked, exactly once", async () => {
+  it("parks an expired running Run until its durable effects are classified", async () => {
+    await store.start(run());
+    await store.transitionRun("business-1", run().id, {
+      expectedVersion: 0,
+      expectedStatus: "queued",
+      status: "claimed",
+      leaseOwner: "worker-1",
+      leaseExpiresAt: "2026-07-24T10:01:00.000Z",
+    });
+    await store.transitionRun("business-1", run().id, {
+      expectedVersion: 1,
+      expectedStatus: "claimed",
+      status: "running",
+      leaseOwner: "worker-1",
+      leaseExpiresAt: "2026-07-24T10:01:00.000Z",
+    });
+
+    const reclaimed = await store.reclaimExpiredRuns("business-1", "2026-07-24T10:01:00.001Z", 10);
+
+    expect(reclaimed).toEqual([
+      expect.objectContaining({
+        id: run().id,
+        status: "needs_reconciliation",
+        errorEvidenceRef: DISPATCH_LEASE_EXPIRED_REF,
+      }),
+    ]);
+  });
+
+  it("requeues one classified Run only under matching version and evidence fences", async () => {
     await store.start(run());
     await store.transitionRun("business-1", run().id, {
       expectedVersion: 0,
@@ -377,41 +409,15 @@ describe("RunStore (PostgreSQL)", () => {
       errorEvidenceRef: DISPATCH_HANDLER_ERROR_REF,
     });
 
-    const first = await store.requeueParkedRuns("business-1", 10);
-
-    expect(first).toEqual([
-      expect.objectContaining({
-        id: run().id,
-        status: "queued",
-        errorEvidenceRef: DISPATCH_REQUEUED_ONCE_REF,
-      }),
-    ]);
-    // The update consumes the ref it matches on, so a Run can never be requeued a second time.
-    expect(await store.requeueParkedRuns("business-1", 10)).toEqual([]);
-  });
-
-  it("leaves a Run parked for any reason other than a crashed dispatch handler", async () => {
-    await store.start(run());
-    await store.transitionRun("business-1", run().id, {
-      expectedVersion: 0,
-      expectedStatus: "queued",
-      status: "claimed",
-      leaseOwner: "worker-1",
-      leaseExpiresAt: "2026-07-24T10:01:00.000Z",
-    });
-    // An effect may be in flight, so requeueing this Run could double-apply it.
-    await store.transitionRun("business-1", run().id, {
-      expectedVersion: 1,
-      expectedStatus: "claimed",
-      status: "needs_reconciliation",
-      leaseOwner: null,
-      leaseExpiresAt: null,
-      errorEvidenceRef: "tool:ambiguous_effect",
-    });
-
-    expect(await store.requeueParkedRuns("business-1", 10)).toEqual([]);
-    expect(await store.find("business-1", run().id)).toMatchObject({
-      status: "needs_reconciliation",
+    expect(
+      await store.requeueParkedRun("business-1", run().id, 1, DISPATCH_HANDLER_ERROR_REF)
+    ).toBeNull();
+    await expect(
+      store.requeueParkedRun("business-1", run().id, 2, DISPATCH_HANDLER_ERROR_REF)
+    ).resolves.toMatchObject({
+      status: "queued",
+      version: 3,
+      errorEvidenceRef: DISPATCH_REQUEUED_ONCE_REF,
     });
   });
 

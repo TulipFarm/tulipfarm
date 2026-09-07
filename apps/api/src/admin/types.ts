@@ -36,6 +36,7 @@ export interface RunReadModel {
   readonly routineVersion: string;
   readonly status: string;
   readonly version: number;
+  readonly availableCommands: readonly RunCommandAction[];
   readonly createdAt: string;
   readonly startedAt: string | null;
   readonly finishedAt: string | null;

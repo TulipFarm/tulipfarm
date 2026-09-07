@@ -6,6 +6,8 @@ import type {
   RunLineage,
   RunStore,
 } from "@tulipfarm/storage";
+import { DISPATCH_HANDLER_ERROR_REF, DISPATCH_LEASE_EXPIRED_REF } from "@tulipfarm/storage";
+import type { EffectStore } from "@tulipfarm/tool-broker";
 import type { RunCosts } from "../observability/repo";
 import type { RunBudgetReadModel, RunReadModel, RunStateReadModel } from "./routes";
 
@@ -65,22 +67,31 @@ function lineageReadModel(link: RunLineage): Record<string, unknown> {
 function runReadModel(
   run: PersistedRun,
   states: readonly RunStateReadModel[],
+  effects: readonly Record<string, unknown>[],
   lineage: readonly Record<string, unknown>[],
   costs: RunCosts
 ): RunReadModel {
+  const terminal =
+    run.status === "succeeded" || run.status === "failed" || run.status === "cancelled";
   return {
     id: run.id,
     routineId: run.bundle.routineId,
     routineVersion: run.bundle.routineVersion,
     status: run.status,
     version: run.version,
+    availableCommands: [
+      ...(terminal ? [] : (["cancel"] as const)),
+      ...(run.status === "needs_reconciliation" &&
+      (run.errorEvidenceRef === DISPATCH_HANDLER_ERROR_REF ||
+        run.errorEvidenceRef === DISPATCH_LEASE_EXPIRED_REF)
+        ? (["reconcile"] as const)
+        : []),
+    ],
     createdAt: run.createdAt,
     startedAt: run.startedAt,
     finishedAt: run.finishedAt,
     states,
-    // Tool effects, waits and Guardrail decisions still have no writer. These are genuinely
-    // empty today, not withheld — the inspector shows an empty section rather than an invented one.
-    effects: [],
+    effects,
     waits: [],
     guardrailDecisions: [],
     lineage,
@@ -96,7 +107,8 @@ export function createRunReader(
    * The spend ledger. Optional so a deployment or test without observability still serves Runs;
    * costs then read zero, which is what the inspector reported unconditionally before.
    */
-  costs?: Pick<ObsCostReader, "costsForRun">
+  costs?: Pick<ObsCostReader, "costsForRun">,
+  effects?: Pick<EffectStore, "list">
 ): RunReader {
   return {
     async list(businessId, options) {
@@ -107,7 +119,7 @@ export function createRunReader(
         ...(options.routineId === undefined ? {} : { routineId: options.routineId }),
       });
       return {
-        items: page.items.map((run) => runReadModel(run, [], [], NO_COSTS)),
+        items: page.items.map((run) => runReadModel(run, [], [], [], NO_COSTS)),
         nextCursor: page.nextCursor,
       };
     },
@@ -115,15 +127,24 @@ export function createRunReader(
     async get(businessId, runId) {
       const run = await runs.find(businessId, runId);
       if (!run) return null;
-      const [states, attempts, lineage, spend] = await Promise.all([
+      const [states, attempts, lineage, spend, storedEffects] = await Promise.all([
         runs.listStates(businessId, runId),
         runs.countStateAttempts(businessId, runId),
         runs.listLineage(businessId, runId),
         costs?.costsForRun(runId) ?? Promise.resolve(NO_COSTS),
+        effects?.list(businessId) ?? Promise.resolve([]),
       ]);
       return runReadModel(
         run,
         states.map((state) => stateReadModel(state, attempts.get(state.key) ?? 0)),
+        storedEffects
+          .filter((effect) => effect.runId === runId)
+          .map((effect) => ({
+            effectId: effect.effectId,
+            stateId: effect.stateId,
+            state: effect.state,
+            updatedAt: effect.updatedAt,
+          })),
         lineage.map(lineageReadModel),
         spend
       );

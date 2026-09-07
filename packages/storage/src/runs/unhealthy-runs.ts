@@ -25,9 +25,9 @@ export const DEFAULT_STALL_AFTER_MS = 30 * 60_000;
  *
  * Two disjoint populations, deliberately in one query so the Doctor sees one ordered picture:
  *
- * - `needs_reconciliation`, unconditionally. Nothing requeues it — `requeueParkedRunRows` acts
- *   only on `dispatch:handler_error`, and only once — so age is irrelevant: it is stuck the moment
- *   it parks. Its `finished_at` stays null and it emits no further Run events, which is precisely
+ * - `needs_reconciliation`, unconditionally. Only effect-aware recovery may requeue it, so age is
+ *   irrelevant: it is unhealthy the moment it parks. Its `finished_at` stays null and it emits no
+ *   further Run events, which is precisely
  *   why no surface can tell it from a Run still in flight.
  * - `queued` older than the stall window, or `claimed`/`running` past an expired lease. The lease
  *   reclaimer normally rescues the second kind; one that is still here after a reclaim window has

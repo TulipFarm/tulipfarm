@@ -94,7 +94,13 @@ class FakeRunStore implements CancellableRunStore {
   ) {
     this.runTransitions.push({ runId, ...transition });
     const run = this.runs.get(runId);
-    if (!run || run.version !== transition.expectedVersion) return false;
+    if (
+      !run ||
+      run.version !== transition.expectedVersion ||
+      run.status !== transition.expectedStatus
+    ) {
+      return false;
+    }
     this.runs.set(runId, { status: transition.status, version: run.version + 1 });
     return true;
   }
@@ -205,13 +211,21 @@ describe("RunCancellationManager", () => {
     const runs = new FakeRunStore();
     seed(runs, RUN_ID, [state("fan-out", "waiting")]);
     seed(runs, CHILD_ID, [state("apply", "ready")]);
+    runs.runs.set(CHILD_ID, { status: "running", version: 7 });
     const children = new FakeChildLinkStore();
     children.links = [
       childLink(RUN_ID, CHILD_ID, null),
       childLink(RUN_ID, "00000000-0000-4000-8000-000000000003", NOW),
     ];
 
-    const result = await cancel(manager(runs, children));
+    const result = await manager(runs, children).cancel({
+      businessId: BUSINESS_ID,
+      runId: RUN_ID,
+      expectedVersion: 1,
+      reason: "operator_request",
+      inFlightEffects: {},
+      now: NOW,
+    });
 
     expect(result.cascadedChildRunIds).toEqual([CHILD_ID]);
     expect(result.detachedChildRunIds).toEqual(["00000000-0000-4000-8000-000000000003"]);
@@ -238,6 +252,23 @@ describe("RunCancellationManager", () => {
     await expect(cancel(manager(runs))).rejects.toThrow(
       new CancellationError("run_not_cancellable", "succeeded")
     );
+  });
+
+  it("refuses a stale operator command before changing the Run", async () => {
+    const runs = new FakeRunStore();
+    seed(runs, RUN_ID, [state("apply", "ready")]);
+
+    await expect(
+      manager(runs).cancel({
+        businessId: BUSINESS_ID,
+        runId: RUN_ID,
+        expectedVersion: 0,
+        reason: "operator_request",
+        inFlightEffects: {},
+        now: NOW,
+      })
+    ).rejects.toThrow(new CancellationError("cancellation_conflict", RUN_ID));
+    expect(runs.runTransitions).toEqual([]);
   });
 
   it("is idempotent for a Run already in `cancelling`", async () => {

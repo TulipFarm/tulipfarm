@@ -25,7 +25,10 @@ export async function heartbeatRun(
   return result.rows.length === 1;
 }
 
-/** Requeues Runs whose worker lease expired so another worker can claim them. */
+/**
+ * Requeues work that never entered a handler and parks abandoned running work for effect-aware
+ * recovery. A provider call may have landed before a running worker died.
+ */
 export async function reclaimExpiredRunRows(
   transaction: Queryable,
   businessId: string,
@@ -44,8 +47,15 @@ export async function reclaimExpiredRunRows(
         LIMIT $3
      )
      UPDATE runs
-        SET status = 'queued',
+        SET status = CASE
+              WHEN runs.status = 'claimed' THEN 'queued'
+              ELSE 'needs_reconciliation'
+            END,
             version = version + 1,
+            error_evidence_ref = CASE
+              WHEN runs.status = 'running' THEN $4
+              ELSE runs.error_evidence_ref
+            END,
             lease_owner = NULL,
             lease_expires_at = NULL
        FROM candidates
@@ -54,7 +64,7 @@ export async function reclaimExpiredRunRows(
                runs.status, runs.version, runs.created_at, runs.started_at, runs.finished_at,
                runs.result_artifact_id, runs.error_evidence_ref, runs.lease_owner,
                runs.lease_expires_at`,
-    [businessId, now, Math.max(0, limit)]
+    [businessId, now, Math.max(0, limit), DISPATCH_LEASE_EXPIRED_REF]
   );
   return result.rows.map(persistedRun);
 }
@@ -117,12 +127,11 @@ export async function requeueWaitingRunRow(
   return result.rows.length === 1;
 }
 
-/**
- * The evidence ref the dispatcher records when a handler throw parks a Run, and the only ref
- * `requeueParkedRunRows` will act on. A Run parked for any other reason may have an effect in
- * flight, and requeueing it could double-apply that effect.
- */
+/** The evidence ref the dispatcher records when a handler throw parks a Run. */
 export const DISPATCH_HANDLER_ERROR_REF = "dispatch:handler_error";
+
+/** Recorded when a worker lease expires after a Run entered its handler. */
+export const DISPATCH_LEASE_EXPIRED_REF = "dispatch:lease_expired";
 
 /**
  * Stamped in place of {@link DISPATCH_HANDLER_ERROR_REF} once a Run has been requeued. It is what
@@ -131,42 +140,49 @@ export const DISPATCH_HANDLER_ERROR_REF = "dispatch:handler_error";
  */
 export const DISPATCH_REQUEUED_ONCE_REF = "dispatch:requeued_once";
 
-/**
- * Requeues Runs parked by a crashed dispatch handler so a worker picks them up again.
- *
- * Nothing else moves a Run out of `needs_reconciliation`, so before this a handler throw parked
- * the Run forever. Bounded by construction: the update both requires
- * `DISPATCH_HANDLER_ERROR_REF` and overwrites it, so a second sweep matches nothing.
- */
-export async function requeueParkedRunRows(
+/** Lists the bounded recovery cases a manager must classify against durable effects. */
+export async function listRecoveryCandidateRows(
   transaction: Queryable,
   businessId: string,
   limit: number
 ): Promise<readonly PersistedRun[]> {
   const result = await transaction.query<RunRow>(
-    `WITH candidates AS (
-       SELECT id
-         FROM runs
-        WHERE business_id = $1
-          AND status = 'needs_reconciliation'
-          AND error_evidence_ref = $2
-        ORDER BY created_at
-        FOR UPDATE SKIP LOCKED
-        LIMIT $4
-     )
-     UPDATE runs
-        SET status = 'queued',
-            version = version + 1,
-            error_evidence_ref = $3,
-            lease_owner = NULL,
-            lease_expires_at = NULL
-       FROM candidates
-      WHERE runs.id = candidates.id
-     RETURNING runs.id, runs.business_id, runs.source, runs.bundle, runs.identity,
-               runs.status, runs.version, runs.created_at, runs.started_at, runs.finished_at,
-               runs.result_artifact_id, runs.error_evidence_ref, runs.lease_owner,
-               runs.lease_expires_at`,
-    [businessId, DISPATCH_HANDLER_ERROR_REF, DISPATCH_REQUEUED_ONCE_REF, Math.max(0, limit)]
+    `SELECT id, business_id, source, bundle, identity, status, version, created_at, started_at,
+            finished_at, result_artifact_id, error_evidence_ref, lease_owner, lease_expires_at
+       FROM runs
+      WHERE business_id = $1
+        AND status = 'needs_reconciliation'
+        AND error_evidence_ref IN ($2, $3)
+      ORDER BY created_at
+      LIMIT $4`,
+    [businessId, DISPATCH_HANDLER_ERROR_REF, DISPATCH_LEASE_EXPIRED_REF, Math.max(0, limit)]
   );
   return result.rows.map(persistedRun);
+}
+
+/** Requeues one classified recovery under status, version, and evidence CAS fences. */
+export async function requeueParkedRunRow(
+  transaction: Queryable,
+  businessId: string,
+  runId: string,
+  expectedVersion: number,
+  expectedEvidenceRef: string
+): Promise<PersistedRun | null> {
+  const result = await transaction.query<RunRow>(
+    `UPDATE runs
+        SET status = 'queued',
+            version = version + 1,
+            error_evidence_ref = $5,
+            lease_owner = NULL,
+            lease_expires_at = NULL
+      WHERE business_id = $1
+        AND id = $2
+        AND version = $3
+        AND status = 'needs_reconciliation'
+        AND error_evidence_ref = $4
+      RETURNING id, business_id, source, bundle, identity, status, version, created_at, started_at,
+                finished_at, result_artifact_id, error_evidence_ref, lease_owner, lease_expires_at`,
+    [businessId, runId, expectedVersion, expectedEvidenceRef, DISPATCH_REQUEUED_ONCE_REF]
+  );
+  return result.rows[0] === undefined ? null : persistedRun(result.rows[0]);
 }

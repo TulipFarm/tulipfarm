@@ -10,6 +10,7 @@ import {
   type TransactionPort,
   WAIT_STORAGE_STATEMENTS,
 } from "@tulipfarm/storage";
+import { EFFECT_STORAGE_STATEMENTS } from "@tulipfarm/tool-broker";
 import { fromPglite, PgBoss } from "pg-boss";
 import { freePort } from "./free-port";
 
@@ -41,6 +42,7 @@ export async function startScratchDatabase(schemaVersion: number): Promise<Scrat
     ...WAIT_STORAGE_STATEMENTS,
     ...CHILD_STORAGE_STATEMENTS,
     ...EVENT_STORAGE_STATEMENTS,
+    ...EFFECT_STORAGE_STATEMENTS,
   ]) {
     await database.exec(statement);
   }

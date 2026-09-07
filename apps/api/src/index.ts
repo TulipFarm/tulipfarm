@@ -46,6 +46,7 @@ import {
   DurableWaitManager,
   PgDurableInvocationStore,
   RunCancellationManager,
+  RunRecoveryManager,
   RunResumeGateway,
   TypedOutputValidator,
 } from "@tulipfarm/run-kernel";
@@ -130,6 +131,7 @@ import {
   soulPublicationProbe,
 } from "./admin/health";
 import { modelReachability } from "./admin/model-reachability";
+import { RuntimeRunCommandService } from "./admin/run-commands";
 import { createRunReader } from "./admin/run-reader";
 import { createRuntimeOperationalApi } from "./admin/runtime";
 import { buildApp } from "./app";
@@ -625,9 +627,12 @@ async function boot() {
     const runStore = new RunStore(runTransactions);
     const runEventStore = new RunEventStore(runTransactions);
     const budgetStore = new BudgetStore(runTransactions);
-    const runCancel = runCanceller(
-      new RunCancellationManager(runStore, new ChildLinkStore(runTransactions))
+    const recoveryEffects = new PgEffectStore(runTransactions);
+    const runCancellation = new RunCancellationManager(
+      runStore,
+      new ChildLinkStore(runTransactions)
     );
+    const runCancel = runCanceller(runCancellation);
 
     const hookExecutor =
       process.env.HOOKS_DISABLED === "true"
@@ -645,7 +650,7 @@ async function boot() {
     const observabilityService = new ObservabilityService(obsRepo);
     // One reader for both the operational API and the `routine_run_*` Tools, so what an Agent
     // reports about a Run and what the Run inspector shows can never disagree.
-    const runReader = createRunReader(runStore, budgetStore, obsRepo);
+    const runReader = createRunReader(runStore, budgetStore, obsRepo, recoveryEffects);
     // Built after observability so embedding spend lands in the same table as every other call.
     const embeddingService = new EmbeddingService({
       usage: createEmbeddingUsageSink(observabilityService, () => obsConfig.pricingOverrides),
@@ -684,6 +689,11 @@ async function boot() {
     // Persisted to an append-only ledger the runtime role cannot rewrite (see `audit/repo.ts`).
     const auditRepo = new PgAuditEventRepo(pool);
     const auditService = new AuditService(auditRepo);
+    const runCommands = new RuntimeRunCommandService({
+      cancellation: runCancellation,
+      recovery: new RunRecoveryManager(runStore, recoveryEffects),
+      audit: auditService,
+    });
     // The emergency stop's own state. Read live on every mutating effect by the guard below, and
     // armed only through the admin-gated routes.
     const killSwitchRepo = new KillSwitchRepo(transactionPort(pool));
@@ -1535,6 +1545,7 @@ async function boot() {
         toolApprovals,
         routineApprovals,
         runs: runReader,
+        runCommands,
         healthProbes: [
           postgresProbe(pool),
           queueProbe(boss),

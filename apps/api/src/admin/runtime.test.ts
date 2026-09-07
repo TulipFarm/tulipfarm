@@ -90,6 +90,7 @@ function runtime(
     routineVersion: "published:chat:1",
     status: "queued",
     version: 0,
+    availableCommands: ["cancel"] as const,
     createdAt: "2026-07-26T09:00:00.000Z",
     startedAt: null,
     finishedAt: null,
