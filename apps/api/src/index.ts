@@ -511,6 +511,15 @@ async function boot() {
       publisher: soulPublisher,
       treeReader: soulTreeReader,
     });
+    const userRepo = new PgUserRepo(pool);
+    const setupAdminCreator = new PgSetupAdminCreator(pool, DEPLOYMENT_BUSINESS_ID);
+    await bootstrapFromEnv({
+      userRepo,
+      setupAdminCreator,
+      secretsService,
+      soulWriter,
+      log: console,
+    });
     const bundledSkills = await loadBundledSkills(console);
     const disabledBundledSkills = await loadDisabledBundledSkills(soulPath, console);
     // Built-in Skills are authored artifacts, not a hidden overlay: seed them into the Soul repo so
@@ -540,8 +549,6 @@ async function boot() {
       10
     );
     const sessionStore = new PgSessionStore(pool, ttlSeconds);
-    const userRepo = new PgUserRepo(pool);
-    const setupAdminCreator = new PgSetupAdminCreator(pool, DEPLOYMENT_BUSINESS_ID);
     const tokenRepo = new PgTokenRepo(pool);
     const apiClientRepo = new PgApiClientRepo(pool);
     const externalIdentityRepo = new PgExternalIdentityRepo(pool);
@@ -1601,13 +1608,6 @@ async function boot() {
     // accepts Runs, so the Worker's and Integration Worker's credentials cannot wait on a human
     await provisionWorkerCredential(apiClientRepo, process.env, app.log);
     await provisionIntegrationWorkerCredential(apiClientRepo, process.env, app.log);
-    await bootstrapFromEnv({
-      userRepo,
-      setupAdminCreator,
-      secretsService,
-      soulPath,
-      log: app.log,
-    });
 
     const soulDoctor = buildSoulDoctor({
       pool,
