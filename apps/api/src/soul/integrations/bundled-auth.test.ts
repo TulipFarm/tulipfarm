@@ -111,9 +111,17 @@ describe("slack manifest", () => {
     expect(url.searchParams.get("new_app")).toBe("1");
     const submitted = JSON.parse(url.searchParams.get("manifest_json") as string) as {
       features: { assistant_view: { assistant_description: string }; agent_view?: unknown };
-      settings: { socket_mode_enabled: boolean };
+      settings: {
+        socket_mode_enabled: boolean;
+        interactivity: { is_enabled: boolean };
+        event_subscriptions: { bot_events: string[] };
+      };
     };
     expect(submitted.settings.socket_mode_enabled).toBe(true);
+    expect(submitted.settings.interactivity.is_enabled).toBe(true);
+    expect(submitted.settings.event_subscriptions.bot_events).toEqual(
+      expect.arrayContaining(["message.channels", "message.groups", "message.im", "message.mpim"])
+    );
     expect(submitted.features.assistant_view.assistant_description).toBe(
       "Talk to TulipFarm agents from Slack."
     );

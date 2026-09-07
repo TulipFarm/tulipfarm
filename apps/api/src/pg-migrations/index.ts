@@ -3166,4 +3166,22 @@ export const PG_MIGRATIONS: PgMigration[] = [
         )`);
     },
   },
+  {
+    version: 105,
+    description: "Routine schedule history follows stable Trigger identity rather than position",
+    up: async (q) => {
+      if (!(await hasTableColumns(q, "routine_schedule_state", ["trigger_index"]))) return;
+      await q.query("ALTER TABLE routine_schedule_state ADD COLUMN IF NOT EXISTS trigger_id text");
+      await q.query(
+        "UPDATE routine_schedule_state SET trigger_id = 'legacy:' || trigger_index::text WHERE trigger_id IS NULL"
+      );
+      await q.query("ALTER TABLE routine_schedule_state ALTER COLUMN trigger_id SET NOT NULL");
+      await q.query(
+        "ALTER TABLE routine_schedule_state DROP CONSTRAINT IF EXISTS routine_schedule_state_pkey"
+      );
+      await q.query(
+        "ALTER TABLE routine_schedule_state ADD PRIMARY KEY (business_id, routine_slug, trigger_id)"
+      );
+    },
+  },
 ];

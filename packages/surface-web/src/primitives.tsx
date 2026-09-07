@@ -5,7 +5,7 @@ import type {
   SurfaceAction,
   SurfaceArtifact,
 } from "@tulipfarm/surface/client";
-import type { ReactNode } from "react";
+import { type ReactNode, useId, useState } from "react";
 
 export interface SurfaceWebProps {
   readonly artifact: SurfaceArtifact;
@@ -122,6 +122,10 @@ export function SurfaceAlert({
   );
 }
 
+export function interactionErrorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : "The action could not be completed. Try again.";
+}
+
 export function ActionButton(props: {
   readonly label: string;
   readonly action: SurfaceAction;
@@ -131,30 +135,57 @@ export function ActionButton(props: {
   readonly selected?: boolean;
   readonly primary?: boolean;
   readonly submit?: boolean;
+  readonly busy?: boolean;
   /** Reports that this action already ran, so the button can say so instead of inviting a repeat. */
   readonly state?: "accepted";
 }) {
+  const [error, setError] = useState<string>();
+  const errorId = useId();
   const handle = props.actionHandleFor?.(props.action);
   return (
-    <button
-      type={props.submit ? "submit" : "button"}
-      disabled={props.disabled || props.action.disabled || !handle}
-      aria-label={props.selected ? `${props.label}, selected` : undefined}
-      aria-pressed={props.selected}
-      data-surface-action={handle}
-      data-surface-button
-      data-variant={props.primary ? "primary" : "secondary"}
-      data-state={props.state}
-      onClick={
-        props.submit
-          ? undefined
-          : () => {
-              if (handle) void props.onInteraction?.(handle, props.action.payload ?? {});
-            }
-      }
-    >
-      <span>{props.label}</span>
-      {props.selected ? <span data-surface-button-state>selected</span> : null}
-    </button>
+    <>
+      <button
+        type={props.submit ? "submit" : "button"}
+        disabled={props.disabled || props.action.disabled || !handle}
+        aria-label={
+          props.selected
+            ? `${props.label}, selected`
+            : props.busy
+              ? `${props.label}, submitting`
+              : undefined
+        }
+        aria-pressed={props.selected}
+        aria-busy={props.busy || undefined}
+        aria-describedby={error ? errorId : undefined}
+        data-surface-action={handle}
+        data-surface-button
+        data-variant={props.primary ? "primary" : "secondary"}
+        data-state={props.busy ? "submitting" : props.state}
+        onClick={
+          props.submit
+            ? undefined
+            : () => {
+                if (handle) {
+                  setError(undefined);
+                  void Promise.resolve()
+                    .then(() => props.onInteraction?.(handle, props.action.payload ?? {}))
+                    .catch((error) => setError(interactionErrorMessage(error)));
+                }
+              }
+        }
+      >
+        <span>{props.label}</span>
+        {props.busy ? (
+          <span data-surface-button-state>submitting</span>
+        ) : props.selected ? (
+          <span data-surface-button-state>selected</span>
+        ) : null}
+      </button>
+      {error ? (
+        <span id={errorId} role="alert">
+          {error}
+        </span>
+      ) : null}
+    </>
   );
 }

@@ -394,17 +394,21 @@ export function useChatStream(opts?: UseChatStreamOptions) {
   }, []);
 
   const sendSurfaceInteraction = useCallback(
-    (handle: string, input: Readonly<Record<string, unknown>>) => {
-      if (isChatBusy(stateRef.current.status)) return;
+    async (handle: string, input: Readonly<Record<string, unknown>>) => {
+      if (isChatBusy(stateRef.current.status)) {
+        throw new Error("Wait for the current response before choosing an option.");
+      }
       dispatch({ type: "surface-submit" });
-      void postSurfaceInteraction(handle, { ...input })
-        .then(() => send(surfaceInteractionAnswer(input), lastOptsRef.current))
-        .catch((error) => {
-          dispatch({
-            type: "error",
-            data: { message: error instanceof Error ? error.message : "interaction failed" },
-          });
+      try {
+        await postSurfaceInteraction(handle, { ...input });
+        await send(surfaceInteractionAnswer(input), lastOptsRef.current);
+      } catch (error) {
+        dispatch({
+          type: "error",
+          data: { message: error instanceof Error ? error.message : "interaction failed" },
         });
+        throw error;
+      }
     },
     [send]
   );

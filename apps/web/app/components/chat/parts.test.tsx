@@ -1,5 +1,5 @@
 import { createRemixStub } from "@remix-run/testing";
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { createSurfaceArtifact } from "@tulipfarm/surface";
 import { surfaceActionKey } from "@tulipfarm/surface/client";
@@ -25,6 +25,14 @@ const NARRATION_PARTS: { name: string; part: TimelinePart }[] = [
     part: { kind: "guardrail", stage: "output", reason: "policy", message: "Refunds are capped" },
   },
 ];
+
+function deferred() {
+  let resolve!: () => void;
+  const promise = new Promise<void>((resolvePromise) => {
+    resolve = resolvePromise;
+  });
+  return { promise, resolve };
+}
 
 /** Sources link in-app, so these parts need a router around them. */
 function renderPart(part: TimelinePart) {
@@ -189,6 +197,171 @@ test("Choices render as a decision card and lock after selection", async () => {
   expect(screen.getByRole("button", { name: "Keep investigating" })).toBeDisabled();
 });
 
+test("Choices stay retryable when an interaction fails", async () => {
+  const user = userEvent.setup();
+  const action = { event: "incident.choose" };
+  const artifact = createSurfaceArtifact({
+    id: "decision",
+    component: { name: "Choices", version: "1.0" },
+    props: {
+      question: "Which action should we take?",
+      choices: [
+        { label: "Roll back", value: "rollback" },
+        { label: "Keep investigating", value: "investigate" },
+      ],
+      action,
+    },
+    target: { channel: "web", surface: "chat" },
+    audience: ["user:1"],
+    classification: "internal",
+  });
+  const onInteraction = vi.fn().mockRejectedValue(new Error("busy"));
+
+  render(
+    <MessagePartView
+      part={{
+        kind: "surface",
+        artifactId: artifact.id,
+        revision: artifact.revision,
+        artifact,
+        actionHandles: {
+          [surfaceActionKey({ ...action, payload: { value: "rollback" } })]: "rollback-handle",
+          [surfaceActionKey({ ...action, payload: { value: "investigate" } })]:
+            "investigate-handle",
+        },
+      }}
+      onApprove={() => undefined}
+      onSurfaceInteraction={onInteraction}
+    />
+  );
+
+  await user.click(screen.getByRole("button", { name: "Roll back" }));
+  expect(await screen.findByRole("alert")).toHaveTextContent("busy");
+  await waitFor(() => expect(screen.getByRole("button", { name: "Roll back" })).toBeEnabled());
+  expect(screen.getByRole("button", { name: "Keep investigating" })).toBeEnabled();
+});
+
+test("Choices show a pending state before they report acceptance", async () => {
+  const user = userEvent.setup();
+  const pending = deferred();
+  const action = { event: "incident.choose" };
+  const artifact = createSurfaceArtifact({
+    id: "decision",
+    component: { name: "Choices", version: "1.0" },
+    props: {
+      question: "Which action should we take?",
+      choices: [{ label: "Roll back", value: "rollback" }],
+      action,
+    },
+    target: { channel: "web", surface: "chat" },
+    audience: ["user:1"],
+    classification: "internal",
+  });
+
+  render(
+    <MessagePartView
+      part={{
+        kind: "surface",
+        artifactId: artifact.id,
+        revision: artifact.revision,
+        artifact,
+        actionHandles: {
+          [surfaceActionKey({ ...action, payload: { value: "rollback" } })]: "rollback-handle",
+        },
+      }}
+      onApprove={() => undefined}
+      onSurfaceInteraction={() => pending.promise}
+    />
+  );
+
+  await user.click(screen.getByRole("button", { name: "Roll back" }));
+  expect(screen.getByRole("button", { name: "Roll back, submitting" })).toBeDisabled();
+  expect(screen.queryByRole("button", { name: "Roll back, selected" })).toBeNull();
+
+  pending.resolve();
+  expect(await screen.findByRole("button", { name: "Roll back, selected" })).toBeDisabled();
+});
+
+test("MultiChoice stays retryable when an interaction fails", async () => {
+  const user = userEvent.setup();
+  const action = { event: "incident.assign" };
+  const artifact = createSurfaceArtifact({
+    id: "assign",
+    component: { name: "MultiChoice", version: "1.0" },
+    props: {
+      question: "Who should investigate?",
+      choices: [
+        { label: "Operations", value: "operations" },
+        { label: "Support", value: "support" },
+      ],
+      action,
+    },
+    target: { channel: "web", surface: "chat" },
+    audience: ["user:1"],
+    classification: "internal",
+  });
+  const onInteraction = vi.fn().mockRejectedValue(new Error("network failed"));
+
+  render(
+    <MessagePartView
+      part={{
+        kind: "surface",
+        artifactId: artifact.id,
+        revision: artifact.revision,
+        artifact,
+        actionHandles: { [surfaceActionKey(action)]: "assign-handle" },
+      }}
+      onApprove={() => undefined}
+      onSurfaceInteraction={onInteraction}
+    />
+  );
+
+  await user.click(screen.getByRole("checkbox", { name: "Operations" }));
+  await user.click(screen.getByRole("button", { name: "Submit" }));
+
+  expect(await screen.findByRole("alert")).toHaveTextContent("network failed");
+  await waitFor(() => expect(screen.getByRole("button", { name: "Submit" })).toBeEnabled());
+  expect(screen.getByRole("checkbox", { name: "Operations" })).toBeChecked();
+});
+
+test("MultiChoice reports submitting before it reports success", async () => {
+  const user = userEvent.setup();
+  const pending = deferred();
+  const action = { event: "incident.assign" };
+  const artifact = createSurfaceArtifact({
+    id: "assign",
+    component: { name: "MultiChoice", version: "1.0" },
+    props: {
+      question: "Who should investigate?",
+      choices: [{ label: "Operations", value: "operations" }],
+      action,
+    },
+    target: { channel: "web", surface: "chat" },
+    audience: ["user:1"],
+    classification: "internal",
+  });
+
+  render(
+    <MessagePartView
+      part={{
+        kind: "surface",
+        artifactId: artifact.id,
+        revision: artifact.revision,
+        artifact,
+        actionHandles: { [surfaceActionKey(action)]: "assign-handle" },
+      }}
+      onApprove={() => undefined}
+      onSurfaceInteraction={() => pending.promise}
+    />
+  );
+
+  await user.click(screen.getByRole("checkbox", { name: "Operations" }));
+  await user.click(screen.getByRole("button", { name: "Submit" }));
+  expect(screen.getByRole("button", { name: "Submitting…" })).toBeDisabled();
+
+  pending.resolve();
+  expect(await screen.findByRole("button", { name: "Submitted" })).toBeDisabled();
+});
 function recommendationArtifact(recommend?: string) {
   return createSurfaceArtifact({
     id: "restock",
