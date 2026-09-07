@@ -3188,7 +3188,7 @@ export const PG_MIGRATIONS: PgMigration[] = [
     },
   },
   {
-    version: 99,
+    version: 106,
     description: "effect ledger: persist immutable confirmed Tool outputs",
     up: async (q) => {
       const present = await q.query<{ present: boolean }>(
