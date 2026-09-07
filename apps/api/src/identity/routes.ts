@@ -29,6 +29,7 @@ import {
 import {
   ExternalIdentityDeniedError,
   type ExternalIdentityRepo,
+  type ExternalIdentityUnlinker,
   LinkRedemptionDeniedError,
   mintLinkToken,
   redeemLinkToken,
@@ -61,6 +62,7 @@ export interface IdentityRouteDeps {
   userRepo: UserRepo;
   apiClientRepo?: ApiClientRepo;
   externalIdentityRepo?: ExternalIdentityRepo;
+  externalIdentityUnlinker?: ExternalIdentityUnlinker;
   channelBind?: ChannelBindDeps;
   /** Resolves the sealed Slack bot token; absent → confirm still binds, just skips the reply. */
   channelBindSecrets?: IdentityBindSecretStore;
@@ -81,11 +83,13 @@ const AUTH_METHODS: AuthMethod[] = ["password", "oidc", "totp", "passkey"];
 const toLink = (mapping: {
   provider: string;
   externalSubject: string;
+  externalTenantId?: string;
   userId: string;
   verifiedAt: Date;
 }) => ({
   provider: mapping.provider,
   externalSubject: mapping.externalSubject,
+  ...(mapping.externalTenantId === undefined ? {} : { externalTenantId: mapping.externalTenantId }),
   userId: mapping.userId,
   verifiedAt: mapping.verifiedAt.toISOString(),
 });
@@ -467,6 +471,7 @@ function registerExternalLinkRoutes(
         linkToken?: unknown;
         provider?: unknown;
         externalSubject?: unknown;
+        externalTenantId?: unknown;
       };
       if (
         typeof body.linkToken !== "string" ||
@@ -480,6 +485,9 @@ function registerExternalLinkRoutes(
           raw: body.linkToken,
           provider: body.provider,
           externalSubject: body.externalSubject,
+          ...(typeof body.externalTenantId === "string"
+            ? { externalTenantId: body.externalTenantId }
+            : {}),
         });
         return reply.code(201).send({ link: toLink(mapping) });
       } catch (error) {
@@ -527,11 +535,16 @@ function registerExternalLinkRoutes(
         provider: string;
         externalSubject: string;
       };
-      const mapping = await repo.findMapping(provider, externalSubject);
+      const { externalTenantId } = (req.query ?? {}) as { externalTenantId?: string };
+      const mapping = await repo.findMapping(provider, externalSubject, externalTenantId);
       if (!mapping || mapping.userId !== principal.id) {
         return reply.code(404).send({ error: "not found" });
       }
-      await repo.deleteMapping(provider, externalSubject);
+      if (deps.externalIdentityUnlinker) {
+        await deps.externalIdentityUnlinker.unlink(mapping);
+      } else {
+        await repo.deleteMapping(provider, externalSubject, externalTenantId);
+      }
       return reply.code(204).send();
     }
   );
@@ -572,6 +585,9 @@ function registerChannelBindRoutes(
         return reply.send({
           slug: offer.slug,
           senderId: offer.senderId,
+          ...(offer.externalTenantId === undefined
+            ? {}
+            : { externalTenantId: offer.externalTenantId }),
           expiresAt: offer.expiresAt.toISOString(),
           account: { userId: user._id, email: user.email },
         });

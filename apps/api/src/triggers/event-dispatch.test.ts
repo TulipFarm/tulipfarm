@@ -295,5 +295,42 @@ describe("EventTriggerGateway", () => {
 
       expect(await gateway.dispatchIntegrationEvent(event)).toMatchObject({ kind: "started" });
     });
+
+    it("preserves verified untrusted Slack event metadata at the Trigger boundary", async () => {
+      const { gateway, startRun } = gatewayWith([
+        slackTrigger({
+          eventType: "slack.reaction.added.v1",
+          requireVerified: true,
+          inputMappings: { actor: "payload.actorPrincipalId" },
+        }),
+      ]);
+
+      await expect(
+        gateway.dispatchIntegrationEvent({
+          integration: "slack",
+          protocol: "slack_socket_mode",
+          event: "slack.reaction.added.v1",
+          eventId: "integration-event-2",
+          payload: {
+            actorPrincipalId: "user-1",
+            untrustedPayload: { actorExternalId: "U1", reaction: "eyes" },
+          },
+          occurredAt: "2026-07-25T17:20:00.000Z",
+          integrationId: "integration-1",
+          externalTenantId: "T1",
+          actor: { kind: "user", id: "user-1", externalId: "U1" },
+          record: { type: "message", id: "1.1" },
+          classification: ["untrusted.external"],
+          verification: { status: "verified", method: "slack_socket_mode" },
+        })
+      ).resolves.toMatchObject({ kind: "started" });
+
+      expect(startRun).toHaveBeenCalledWith(
+        expect.objectContaining({
+          input: { actor: "user-1" },
+          classification: ["untrusted.external"],
+        })
+      );
+    });
   });
 });

@@ -147,6 +147,45 @@ describe("channel bind tokens", () => {
     });
   });
 
+  it("binds a Slack sender only inside the signed workspace scope", async () => {
+    const d = deps();
+    const { token } = await issueChannelBindToken(d, {
+      slug: "slack",
+      senderId: "U-SHARED",
+      externalTenantId: "T1",
+    });
+
+    expect(parseChannelBindToken(KEY, token)).toMatchObject({
+      slug: "slack",
+      senderId: "U-SHARED",
+      externalTenantId: "T1",
+    });
+    await redeemChannelBindToken(d, token, "u1");
+
+    await expect(d.repo.findMapping("slack", "U-SHARED", "T1")).resolves.toMatchObject({
+      userId: "u1",
+    });
+    await expect(d.repo.findMapping("slack", "U-SHARED", "T2")).resolves.toBeNull();
+  });
+
+  it("rejects a Slack bind token whose workspace claim was rewritten", async () => {
+    const d = deps();
+    const { token } = await issueChannelBindToken(d, {
+      slug: "slack",
+      senderId: "U-SHARED",
+      externalTenantId: "T1",
+    });
+    const claims = JSON.parse(Buffer.from(token.split(".")[0], "base64url").toString());
+    const forged = `${Buffer.from(JSON.stringify({ ...claims, externalTenantId: "T2" })).toString(
+      "base64url"
+    )}.${token.split(".")[1]}`;
+
+    await expect(redeemChannelBindToken(d, forged, "attacker")).rejects.toBeInstanceOf(
+      ChannelBindDeniedError
+    );
+    await expect(d.repo.findMapping("slack", "U-SHARED", "T1")).resolves.toBeNull();
+  });
+
   it("refuses a replayed link, so a captured URL cannot re-bind the sender", async () => {
     const d = deps();
     const { token } = await issueChannelBindToken(d, { slug: "chatapp", senderId: "EXT1" });

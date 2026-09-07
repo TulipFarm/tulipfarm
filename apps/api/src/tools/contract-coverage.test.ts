@@ -179,7 +179,23 @@ const EXPECTED_FAMILY_TOOL_NAMES = [
       "github_repository_list",
     ],
   },
-  { family: "slack", names: ["send_slack_message", "slack_channel_list", "slack_acknowledge"] },
+  {
+    family: "slack",
+    names: [
+      "send_slack_message",
+      "slack_acknowledge",
+      "slack_bookmark_manage",
+      "slack_channel_list",
+      "slack_conversation_get",
+      "slack_file_info",
+      "slack_file_upload",
+      "slack_message_delete",
+      "slack_message_update",
+      "slack_pin_manage",
+      "slack_reaction_remove",
+      "slack_user_lookup",
+    ],
+  },
   {
     family: "google",
     names: [

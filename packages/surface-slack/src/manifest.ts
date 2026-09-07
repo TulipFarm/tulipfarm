@@ -34,6 +34,14 @@ export const slackModalManifest: SurfaceRendererManifest = Object.freeze({
   renderer: "@tulipfarm/surface-slack/modal",
   targets: [{ channel: "slack", surface: "modal" }],
   components: { ...commonComponents, Form: ["1.0"] },
-  providerLimits: { blocks: 50, textCharacters: 3_000 },
+  providerLimits: { blocks: 100, textCharacters: 3_000 },
   interactionCapabilities: ["block_actions", "view_submission", "chat.update"],
+} as const);
+
+export const slackHomeManifest: SurfaceRendererManifest = Object.freeze({
+  renderer: "@tulipfarm/surface-slack/home",
+  targets: [{ channel: "slack", surface: "home" }],
+  components: commonComponents,
+  providerLimits: { blocks: 100, textCharacters: 3_000 },
+  interactionCapabilities: ["block_actions", "views.publish"],
 } as const);

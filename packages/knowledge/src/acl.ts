@@ -36,6 +36,7 @@ export interface LiveSourceAuthorizationPort {
     readonly sourceId: string;
     readonly provider: string;
     readonly externalId: string;
+    readonly externalTenantId?: string;
     readonly principals: readonly KnowledgePrincipalRef[];
   }): Promise<{ readonly allowed: boolean; readonly aclRevision?: string } | undefined>;
 }
@@ -123,6 +124,9 @@ export async function decideKnowledgeAccess(
         sourceId: subject.subjectId,
         provider: subject.provider,
         externalId: subject.externalId,
+        ...(subject.externalTenantId === undefined
+          ? {}
+          : { externalTenantId: subject.externalTenantId }),
         principals: request.principals,
       });
     } catch {

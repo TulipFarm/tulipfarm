@@ -36,6 +36,23 @@ const INTERNAL_VERIFICATION = { status: "verified" as const, method: "internal" 
 export const RESOURCE_EVENT_VERSION = 1;
 export const INTEGRATION_EVENT_VERSION = 1;
 
+export interface ClassifiedIntegrationEventPayload extends IntegrationEventPayload {
+  readonly occurredAt?: string;
+  readonly integrationId?: string;
+  readonly externalTenantId?: string;
+  readonly actor?: {
+    readonly kind: "user" | "guest";
+    readonly id: string;
+    readonly externalId: string;
+  };
+  readonly record?: { readonly type?: string; readonly id?: string };
+  readonly classification?: readonly string[];
+  readonly verification?: {
+    readonly status: "verified" | "unverified" | "failed";
+    readonly method?: string;
+  };
+}
+
 const RESOURCE_EVENT_TYPES = {
   create: "resource.created",
   update: "resource.updated",
@@ -98,27 +115,42 @@ export class EventTriggerGateway {
   }
 
   /** Bind a classified Integration event to any matching Trigger. */
-  async dispatchIntegrationEvent(event: IntegrationEventPayload): Promise<EventTriggerDispatch> {
+  async dispatchIntegrationEvent(
+    event: ClassifiedIntegrationEventPayload
+  ): Promise<EventTriggerDispatch> {
     const at = this.timestamp();
     const envelope = eventSchema.validateEventEnvelope<Record<string, unknown>>({
       eventId: event.eventId,
       type: event.event,
       version: INTEGRATION_EVENT_VERSION,
-      occurredAt: at,
+      occurredAt: event.occurredAt ?? at,
       receivedAt: at,
       businessId: DEPLOYMENT_BUSINESS_ID,
-      source: { provider: event.integration },
-      principal: { kind: "service", internalId: `integration:${event.integration}` },
-      record: {},
+      source: {
+        provider: event.integration,
+        ...(event.integrationId === undefined ? {} : { integrationId: event.integrationId }),
+        ...(event.externalTenantId === undefined
+          ? {}
+          : { externalTenantId: event.externalTenantId }),
+      },
+      principal:
+        event.actor === undefined
+          ? { kind: "service", internalId: `integration:${event.integration}` }
+          : {
+              kind: event.actor.kind,
+              internalId: event.actor.id,
+              externalId: event.actor.externalId,
+            },
+      record: event.record ?? {},
       deduplicationKey: event.eventId,
-      classification: [],
+      classification: [...(event.classification ?? [])],
       data: {
         integration: event.integration,
         protocol: event.protocol,
         event: event.event,
         payload: event.payload,
       },
-      verification: INTERNAL_VERIFICATION,
+      verification: event.verification ?? INTERNAL_VERIFICATION,
     });
     return this.dispatch(envelope);
   }

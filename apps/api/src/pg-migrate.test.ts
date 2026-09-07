@@ -237,6 +237,94 @@ describe("runPgMigrations", () => {
     });
   });
 
+  describe("migration 98", () => {
+    it("installs durable channel Surface state with composite Integration ownership", async () => {
+      await runPgMigrations(db, undefined, () => {});
+
+      const tables = await db.query<{ table_name: string }>(`SELECT table_name
+        FROM information_schema.tables
+        WHERE table_schema = 'public'
+          AND table_name IN (
+            'channel_surface_instances',
+            'channel_surface_publish_jobs',
+            'slack_capability_observations'
+          )
+        ORDER BY table_name`);
+      expect(tables.rows.map((row) => row.table_name)).toEqual([
+        "channel_surface_instances",
+        "channel_surface_publish_jobs",
+        "slack_capability_observations",
+      ]);
+
+      const foreignKeys = await db.query<{ table_name: string; columns: string[] }>(`
+        SELECT constraints.table_name,
+               array_agg(columns.column_name ORDER BY columns.ordinal_position) AS columns
+          FROM information_schema.table_constraints AS constraints
+          JOIN information_schema.key_column_usage AS columns
+            ON columns.constraint_name = constraints.constraint_name
+           AND columns.constraint_schema = constraints.constraint_schema
+         WHERE constraints.constraint_type = 'FOREIGN KEY'
+           AND constraints.table_name IN (
+             'channel_surface_instances',
+             'channel_surface_publish_jobs',
+             'slack_capability_observations'
+           )
+         GROUP BY constraints.table_name
+         ORDER BY constraints.table_name`);
+      expect(foreignKeys.rows).toEqual([
+        {
+          table_name: "channel_surface_instances",
+          columns: ["business_id", "integration_id"],
+        },
+        {
+          table_name: "channel_surface_publish_jobs",
+          columns: ["business_id", "integration_id"],
+        },
+        {
+          table_name: "slack_capability_observations",
+          columns: ["business_id", "integration_id"],
+        },
+      ]);
+    });
+
+    it("repairs empty partial Surface and provider-object tables", async () => {
+      await db.query(`CREATE TABLE integrations (
+        business_id text NOT NULL,
+        id text NOT NULL,
+        PRIMARY KEY (business_id, id)
+      )`);
+      await db.query("CREATE TABLE channel_surface_instances (business_id text)");
+      await db.query("CREATE TABLE channel_surface_publish_jobs (business_id text)");
+      await db.query("CREATE TABLE slack_capability_observations (business_id text)");
+      await db.query("CREATE TABLE integration_provider_objects (business_id text)");
+      await db.query("CREATE TABLE integration_provider_file_uploads (business_id text)");
+      await db.query(`CREATE TABLE schema_version (
+        id boolean PRIMARY KEY DEFAULT true,
+        version integer NOT NULL,
+        CONSTRAINT schema_version_single_row CHECK (id)
+      )`);
+      await db.query("INSERT INTO schema_version (id, version) VALUES (true, 97)");
+
+      await runPgMigrations(db, undefined, () => {});
+
+      for (const [table, column] of [
+        ["channel_surface_instances", "updated_at"],
+        ["channel_surface_publish_jobs", "lease_expires_at"],
+        ["slack_capability_observations", "renderer_version"],
+        ["integration_provider_objects", "creation_intent_id"],
+        ["integration_provider_file_uploads", "source_sha256"],
+        ["integration_provider_file_uploads", "phase"],
+      ] as const) {
+        const result = await db.query<{ column_name: string }>(
+          `SELECT column_name FROM information_schema.columns
+           WHERE table_schema = 'public' AND table_name = $1 AND column_name = $2`,
+          [table, column]
+        );
+        expect(result.rows).toHaveLength(1);
+      }
+    });
+  });
+
   describe("migration 20", () => {
     it("installs durable Soul publication and immutable bundle storage", async () => {
       await runPgMigrations(db, undefined, () => {});
@@ -989,6 +1077,115 @@ async function schemaVersion(db: PGlite): Promise<number> {
   );
   return Number(rows[0]?.version);
 }
+
+describe("migration 100", () => {
+  let db: PGlite;
+
+  beforeEach(async () => {
+    db = await makePglite();
+    await db.query(`CREATE TABLE external_identity_mappings (
+      provider text NOT NULL,
+      external_subject text NOT NULL,
+      user_id uuid NOT NULL,
+      verified_at timestamptz NOT NULL,
+      expires_at timestamptz,
+      verified_via text,
+      PRIMARY KEY (provider, external_subject)
+    )`);
+    await db.query(`CREATE TABLE channel_bind_tokens (
+      nonce_hash text PRIMARY KEY,
+      integration_slug text NOT NULL,
+      external_sender_id text NOT NULL,
+      issued_at timestamptz NOT NULL,
+      expires_at timestamptz NOT NULL,
+      consumed_at timestamptz,
+      consumed_by uuid,
+      channel_id text,
+      thread_id text
+    )`);
+    await db.query(`CREATE TABLE integration_apps (
+      business_id text NOT NULL,
+      id text NOT NULL,
+      provider text NOT NULL,
+      PRIMARY KEY (business_id, id)
+    )`);
+    await db.query(`CREATE TABLE integrations (
+      business_id text NOT NULL,
+      id text NOT NULL,
+      app_id text NOT NULL,
+      external_tenant_id text NOT NULL,
+      PRIMARY KEY (business_id, id)
+    )`);
+  });
+
+  afterEach(async () => {
+    await db.close();
+  });
+
+  async function migrateTenantScope(): Promise<void> {
+    const migration = PG_MIGRATIONS.find((candidate) => candidate.version === 100);
+    if (migration === undefined) throw new Error("migration 100 missing");
+    await migration.up(db as unknown as Queryable);
+  }
+
+  it("backfills a legacy Slack mapping only when exactly one workspace is known", async () => {
+    await db.query(
+      "INSERT INTO integration_apps (business_id, id, provider) VALUES ('business-1', 'app-1', 'slack')"
+    );
+    await db.query(
+      `INSERT INTO integrations (business_id, id, app_id, external_tenant_id)
+       VALUES ('business-1', 'integration-1', 'app-1', 'T1')`
+    );
+    await db.query(
+      `INSERT INTO external_identity_mappings
+       (provider, external_subject, user_id, verified_at)
+       VALUES ('slack', 'U1', '11111111-1111-4111-8111-111111111111', now())`
+    );
+
+    await migrateTenantScope();
+
+    const { rows } = await db.query<{ external_tenant_id: string | null }>(
+      "SELECT external_tenant_id FROM external_identity_mappings"
+    );
+    expect(rows).toEqual([{ external_tenant_id: "T1" }]);
+  });
+
+  it("leaves ambiguous legacy Slack mappings unscoped and permits scoped duplicates", async () => {
+    await db.query(
+      "INSERT INTO integration_apps (business_id, id, provider) VALUES ('business-1', 'app-1', 'slack')"
+    );
+    await db.query(
+      `INSERT INTO integrations (business_id, id, app_id, external_tenant_id) VALUES
+       ('business-1', 'integration-1', 'app-1', 'T1'),
+       ('business-1', 'integration-2', 'app-1', 'T2')`
+    );
+    await db.query(
+      `INSERT INTO external_identity_mappings
+       (provider, external_subject, user_id, verified_at)
+       VALUES ('slack', 'U1', '11111111-1111-4111-8111-111111111111', now())`
+    );
+
+    await migrateTenantScope();
+    await db.query(
+      `INSERT INTO external_identity_mappings
+         (provider, external_subject, external_tenant_id, user_id, verified_at)
+       VALUES
+         ('slack', 'U1', 'T1', '22222222-2222-4222-8222-222222222222', now()),
+         ('slack', 'U1', 'T2', '33333333-3333-4333-8333-333333333333', now())`
+    );
+
+    const { rows } = await db.query<{ external_tenant_id: string | null }>(
+      `SELECT external_tenant_id FROM external_identity_mappings
+       WHERE provider = 'slack' AND external_subject = 'U1'
+       ORDER BY external_tenant_id NULLS FIRST`
+    );
+    expect(rows).toEqual([
+      { external_tenant_id: null },
+      { external_tenant_id: "T1" },
+      { external_tenant_id: "T2" },
+    ]);
+  });
+});
 
 describe("runPgMigrations concurrency and atomicity", () => {
   let db: PGlite;

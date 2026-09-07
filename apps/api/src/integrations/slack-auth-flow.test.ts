@@ -270,10 +270,10 @@ describe("slack declarative auth flow", () => {
 
     const manifest = JSON.parse(url.searchParams.get("manifest_json") ?? "{}");
     expect(manifest.settings.socket_mode_enabled).toBe(true);
-    expect(manifest.features.agent_view.agent_description).toBe(
+    expect(manifest.features.assistant_view.assistant_description).toBe(
       "Talk to TulipFarm agents from Slack."
     );
-    expect(manifest.features).not.toHaveProperty("assistant_view");
+    expect(manifest.features).not.toHaveProperty("agent_view");
     // Registering our callback here is what lets step 3 run with zero manual configuration.
     expect(manifest.oauth_config.redirect_urls).toEqual([
       expect.stringContaining("/api/v1/integrations/auth/callback"),

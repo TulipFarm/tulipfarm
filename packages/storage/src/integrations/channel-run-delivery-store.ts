@@ -200,6 +200,52 @@ export class ChannelRunDeliveryStore {
     });
   }
 
+  async ownsSlackMessage(input: {
+    businessId: string;
+    integrationId: string;
+    channelId: string;
+    messageTs: string;
+  }): Promise<boolean> {
+    return this.transactions.withTransaction(async (transaction) => {
+      const result = await transaction.query(
+        `SELECT 1
+           FROM channel_run_deliveries
+          WHERE business_id = $1
+            AND integration_id = $2
+            AND provider = 'slack'
+            AND destination = $3
+            AND slack_message_ts = $4
+          LIMIT 1`,
+        [input.businessId, input.integrationId, input.channelId, input.messageTs]
+      );
+      return result.rows.length === 1;
+    });
+  }
+
+  async ownsSlackReaction(input: {
+    businessId: string;
+    integrationId: string;
+    channelId: string;
+    messageTs: string;
+    emoji: string;
+  }): Promise<boolean> {
+    return this.transactions.withTransaction(async (transaction) => {
+      const result = await transaction.query(
+        `SELECT 1
+           FROM channel_run_deliveries
+          WHERE business_id = $1
+            AND integration_id = $2
+            AND provider = 'slack'
+            AND destination = $3
+            AND source_message_ts = $4
+            AND acknowledged_emoji = $5
+          LIMIT 1`,
+        [input.businessId, input.integrationId, input.channelId, input.messageTs, input.emoji]
+      );
+      return result.rows.length === 1;
+    });
+  }
+
   async listPending(businessId: string): Promise<PersistedChannelRunDeliveryRecord[]> {
     return this.transactions.withTransaction(async (transaction) => {
       const result = await transaction.query<RunDeliveryRow>(

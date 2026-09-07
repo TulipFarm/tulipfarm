@@ -49,11 +49,17 @@ export class MemoryExternalIdentityRepo implements ExternalIdentityRepo {
 
   async findMapping(
     provider: string,
-    externalSubject: string
+    externalSubject: string,
+    externalTenantId?: string
   ): Promise<ExternalIdentityMappingDoc | null> {
+    if (provider === "slack" && externalTenantId === undefined) return null;
     return (
-      this.mappings.find((m) => m.provider === provider && m.externalSubject === externalSubject) ??
-      null
+      this.mappings.find(
+        (m) =>
+          m.provider === provider &&
+          m.externalSubject === externalSubject &&
+          m.externalTenantId === externalTenantId
+      ) ?? null
     );
   }
   async listMappingsForUser(userId: string): Promise<ExternalIdentityMappingDoc[]> {
@@ -63,16 +69,33 @@ export class MemoryExternalIdentityRepo implements ExternalIdentityRepo {
     return this.mappings.filter((m) => m.userId === userId && isProvenLink(m));
   }
   async upsertMapping(mapping: ExternalIdentityMappingDoc): Promise<void> {
-    const existing = await this.findMapping(mapping.provider, mapping.externalSubject);
+    if (mapping.provider === "slack" && mapping.externalTenantId === undefined) {
+      throw new Error("external_identity_tenant_scope_required");
+    }
+    const existing = await this.findMapping(
+      mapping.provider,
+      mapping.externalSubject,
+      mapping.externalTenantId
+    );
     if (existing) {
       Object.assign(existing, mapping);
       return;
     }
     this.mappings.push({ ...mapping });
   }
-  async deleteMapping(provider: string, externalSubject: string): Promise<void> {
+  async deleteMapping(
+    provider: string,
+    externalSubject: string,
+    externalTenantId?: string
+  ): Promise<void> {
+    if (provider === "slack" && externalTenantId === undefined) return;
     this.mappings = this.mappings.filter(
-      (m) => !(m.provider === provider && m.externalSubject === externalSubject)
+      (m) =>
+        !(
+          m.provider === provider &&
+          m.externalSubject === externalSubject &&
+          m.externalTenantId === externalTenantId
+        )
     );
   }
   async createLinkToken(token: ExternalLinkTokenDoc): Promise<void> {

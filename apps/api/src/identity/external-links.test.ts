@@ -26,19 +26,35 @@ describe("link tokens", () => {
       raw,
       provider: "slack",
       externalSubject: "U123",
+      externalTenantId: "T1",
     });
 
-    expect(mapping).toMatchObject({ provider: "slack", externalSubject: "U123", userId: "u1" });
-    expect(await resolveExternalIdentity(repo, "slack", "U123")).toBe("u1");
+    expect(mapping).toMatchObject({
+      provider: "slack",
+      externalSubject: "U123",
+      externalTenantId: "T1",
+      userId: "u1",
+    });
+    expect(await resolveExternalIdentity(repo, "slack", "U123", new Date(), "T1")).toBe("u1");
   });
 
   it("denies a replayed link token", async () => {
     const repo = new MemoryExternalIdentityRepo();
     const { raw } = await mintLinkToken(repo, { userId: "u1", provider: "slack" });
-    await redeemLinkToken(repo, { raw, provider: "slack", externalSubject: "U123" });
+    await redeemLinkToken(repo, {
+      raw,
+      provider: "slack",
+      externalSubject: "U123",
+      externalTenantId: "T1",
+    });
 
     await expect(
-      redeemLinkToken(repo, { raw, provider: "slack", externalSubject: "U-attacker" })
+      redeemLinkToken(repo, {
+        raw,
+        provider: "slack",
+        externalSubject: "U-attacker",
+        externalTenantId: "T1",
+      })
     ).rejects.toMatchObject({ reason: "invalid_token" });
     expect(repo.mappings).toHaveLength(1);
   });
@@ -48,8 +64,18 @@ describe("link tokens", () => {
     const { raw } = await mintLinkToken(repo, { userId: "u1", provider: "slack" });
 
     const results = await Promise.allSettled([
-      redeemLinkToken(repo, { raw, provider: "slack", externalSubject: "U1" }),
-      redeemLinkToken(repo, { raw, provider: "slack", externalSubject: "U2" }),
+      redeemLinkToken(repo, {
+        raw,
+        provider: "slack",
+        externalSubject: "U1",
+        externalTenantId: "T1",
+      }),
+      redeemLinkToken(repo, {
+        raw,
+        provider: "slack",
+        externalSubject: "U2",
+        externalTenantId: "T1",
+      }),
     ]);
 
     expect(results.filter((r) => r.status === "fulfilled")).toHaveLength(1);
@@ -65,7 +91,12 @@ describe("link tokens", () => {
     });
 
     await expect(
-      redeemLinkToken(repo, { raw, provider: "slack", externalSubject: "U123" })
+      redeemLinkToken(repo, {
+        raw,
+        provider: "slack",
+        externalSubject: "U123",
+        externalTenantId: "T1",
+      })
     ).rejects.toBeInstanceOf(LinkRedemptionDeniedError);
   });
 
@@ -84,7 +115,12 @@ describe("link tokens", () => {
     await mintLinkToken(repo, { userId: "u1", provider: "slack" });
 
     await expect(
-      redeemLinkToken(repo, { raw: "forged", provider: "slack", externalSubject: "U123" })
+      redeemLinkToken(repo, {
+        raw: "forged",
+        provider: "slack",
+        externalSubject: "U123",
+        externalTenantId: "T1",
+      })
     ).rejects.toMatchObject({ reason: "invalid_token" });
   });
 });
@@ -93,9 +129,9 @@ describe("resolveExternalIdentity", () => {
   it("denies an unmapped subject", async () => {
     const repo = new MemoryExternalIdentityRepo();
 
-    await expect(resolveExternalIdentity(repo, "slack", "U404")).rejects.toBeInstanceOf(
-      ExternalIdentityDeniedError
-    );
+    await expect(
+      resolveExternalIdentity(repo, "slack", "U404", new Date(), "T1")
+    ).rejects.toBeInstanceOf(ExternalIdentityDeniedError);
   });
 
   it("denies an expired mapping", async () => {
@@ -103,13 +139,30 @@ describe("resolveExternalIdentity", () => {
     await repo.upsertMapping({
       provider: "slack",
       externalSubject: "U123",
+      externalTenantId: "T1",
       userId: "u1",
       verifiedAt: new Date(Date.now() - 10_000),
       expiresAt: new Date(Date.now() - 1000),
     });
 
-    await expect(resolveExternalIdentity(repo, "slack", "U123")).rejects.toMatchObject({
-      reason: "expired",
+    await expect(
+      resolveExternalIdentity(repo, "slack", "U123", new Date(), "T1")
+    ).rejects.toMatchObject({ reason: "expired" });
+  });
+
+  it("fails closed when Slack resolution omits the workspace", async () => {
+    const repo = new MemoryExternalIdentityRepo();
+    await repo.upsertMapping({
+      provider: "slack",
+      externalSubject: "U123",
+      externalTenantId: "T1",
+      userId: "u1",
+      verifiedAt: new Date(),
+      expiresAt: null,
     });
+
+    await expect(resolveExternalIdentity(repo, "slack", "U123")).rejects.toBeInstanceOf(
+      ExternalIdentityDeniedError
+    );
   });
 });

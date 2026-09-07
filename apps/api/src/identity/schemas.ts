@@ -169,6 +169,7 @@ export const ExternalLinkSchema = {
   properties: {
     provider: { type: "string" },
     externalSubject: { type: "string" },
+    externalTenantId: { type: "string" },
     userId: { type: "string" },
     verifiedAt: { type: "string", format: "date-time" },
   },
@@ -211,6 +212,7 @@ export const ExternalLinkRedeemBodySchema = {
     linkToken: { type: "string" },
     provider: { type: "string", minLength: 1 },
     externalSubject: { type: "string", minLength: 1 },
+    externalTenantId: { type: "string", minLength: 1 },
   },
 } as const;
 
@@ -265,6 +267,12 @@ export const ExternalLinkDeleteRouteSchema = {
   tags: ["identity"],
   security: [{ sessionCookie: [] }, { bearerToken: [] }],
   params: ExternalLinkParamsSchema,
+  querystring: {
+    type: "object",
+    properties: {
+      externalTenantId: { type: "string", minLength: 1 },
+    },
+  },
   response: {
     204: NullResponseSchema,
     401: ErrorSchema,
@@ -278,6 +286,7 @@ export const ChannelBindOfferSchema = {
   properties: {
     slug: { type: "string" },
     senderId: { type: "string" },
+    externalTenantId: { type: "string" },
     expiresAt: { type: "string", format: "date-time" },
     account: {
       type: "object",

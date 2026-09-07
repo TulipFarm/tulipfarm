@@ -5,7 +5,8 @@ import {
   type ExternalIdentityMapping,
 } from "@tulipfarm/authz";
 import { DEPLOYMENT_BUSINESS_ID } from "@tulipfarm/constants";
-import type { Queryable } from "../db";
+import { ChannelSurfaceStore, IntegrationStore } from "@tulipfarm/storage";
+import { ambientTransactionPort, type Queryable, withTransaction } from "../db";
 
 /** External subjects act only through verified mappings; link tokens are one-use and expiring. */
 
@@ -46,6 +47,7 @@ export function isProvenLink(doc: { verifiedVia?: IdentityVerificationMethod | n
 export interface ExternalIdentityMappingDoc {
   provider: string;
   externalSubject: string;
+  externalTenantId?: string;
   userId: string;
   verifiedAt: Date;
   expiresAt: Date | null;
@@ -66,6 +68,7 @@ export interface ChannelBindTokenDoc {
   nonceHash: string;
   integrationSlug: string;
   externalSenderId: string;
+  externalTenantId?: string;
   issuedAt: Date;
   expiresAt: Date;
   consumedAt: Date | null;
@@ -78,7 +81,8 @@ export interface ChannelBindTokenDoc {
 export interface ExternalIdentityRepo {
   findMapping(
     provider: string,
-    externalSubject: string
+    externalSubject: string,
+    externalTenantId?: string
   ): Promise<ExternalIdentityMappingDoc | null>;
   listMappingsForUser(userId: string): Promise<ExternalIdentityMappingDoc[]>;
   /**
@@ -88,7 +92,11 @@ export interface ExternalIdentityRepo {
    */
   listProvenMappingsForUser(userId: string): Promise<ExternalIdentityMappingDoc[]>;
   upsertMapping(mapping: ExternalIdentityMappingDoc): Promise<void>;
-  deleteMapping(provider: string, externalSubject: string): Promise<void>;
+  deleteMapping(
+    provider: string,
+    externalSubject: string,
+    externalTenantId?: string
+  ): Promise<void>;
   createLinkToken(token: ExternalLinkTokenDoc): Promise<void>;
   /** Atomically marks the token consumed; returns null when unknown, expired, or already used. */
   consumeLinkToken(tokenHash: string): Promise<ExternalLinkTokenDoc | null>;
@@ -97,6 +105,78 @@ export interface ExternalIdentityRepo {
   findBindToken(nonceHash: string): Promise<ChannelBindTokenDoc | null>;
   /** Atomically spends the nonce for one user; null when unknown, expired, or already spent. */
   consumeBindToken(nonceHash: string, userId: string): Promise<ChannelBindTokenDoc | null>;
+}
+
+export interface ExternalIdentityUnlinker {
+  unlink(mapping: ExternalIdentityMappingDoc): Promise<void>;
+}
+
+export class PgExternalIdentityUnlinker implements ExternalIdentityUnlinker {
+  constructor(
+    private readonly q: Queryable,
+    private readonly businessId: string,
+    private readonly now: () => string = () => new Date().toISOString()
+  ) {}
+
+  async unlink(mapping: ExternalIdentityMappingDoc): Promise<void> {
+    if (mapping.provider !== "slack") {
+      await new PgExternalIdentityRepo(this.q).deleteMapping(
+        mapping.provider,
+        mapping.externalSubject,
+        mapping.externalTenantId
+      );
+      return;
+    }
+    if (mapping.externalTenantId === undefined) {
+      throw new Error("external_identity_tenant_scope_required");
+    }
+    const externalTenantId = mapping.externalTenantId;
+
+    await withTransaction(this.q, async (transaction) => {
+      const transactions = ambientTransactionPort(transaction);
+      const snapshot = await new IntegrationStore(transactions).loadRoutingSnapshot(
+        this.businessId,
+        "slack",
+        externalTenantId
+      );
+      const activeIntegrations = snapshot.integrations.filter(
+        (integration) =>
+          integration.status === "active" &&
+          snapshot.apps.some(
+            (app) =>
+              app.id === integration.appId && app.provider === "slack" && app.status === "active"
+          )
+      );
+
+      await new PgExternalIdentityRepo(transaction).deleteMapping(
+        mapping.provider,
+        mapping.externalSubject,
+        mapping.externalTenantId
+      );
+
+      const surfaces = new ChannelSurfaceStore(transactions, this.now);
+      for (const integration of activeIntegrations) {
+        await surfaces.enqueuePublish({
+          businessId: this.businessId,
+          provider: "slack",
+          integrationId: integration.id,
+          externalTenantId,
+          externalSubject: mapping.externalSubject,
+          surface: "home",
+          externalId: "home",
+          coalescingKey: [
+            "slack-home",
+            integration.id,
+            externalTenantId,
+            mapping.externalSubject,
+            "unlink",
+            mapping.verifiedAt.toISOString(),
+          ].join(":"),
+          supersedePending: true,
+        });
+      }
+    });
+  }
 }
 
 export const DEFAULT_LINK_TOKEN_TTL_SECONDS = 900;
@@ -109,6 +189,9 @@ function rowToMapping(row: Record<string, unknown>): ExternalIdentityMappingDoc 
   return {
     provider: row.provider as string,
     externalSubject: row.external_subject as string,
+    ...(typeof row.external_tenant_id === "string"
+      ? { externalTenantId: row.external_tenant_id }
+      : {}),
     userId: row.user_id as string,
     verifiedAt: row.verified_at as Date,
     expiresAt: (row.expires_at as Date | null) ?? null,
@@ -121,6 +204,9 @@ function rowToBindToken(row: Record<string, unknown>): ChannelBindTokenDoc {
     nonceHash: row.nonce_hash as string,
     integrationSlug: row.integration_slug as string,
     externalSenderId: row.external_sender_id as string,
+    ...(typeof row.external_tenant_id === "string"
+      ? { externalTenantId: row.external_tenant_id }
+      : {}),
     issuedAt: row.issued_at as Date,
     expiresAt: row.expires_at as Date,
     consumedAt: (row.consumed_at as Date | null) ?? null,
@@ -146,18 +232,24 @@ export class PgExternalIdentityRepo implements ExternalIdentityRepo {
 
   async findMapping(
     provider: string,
-    externalSubject: string
+    externalSubject: string,
+    externalTenantId?: string
   ): Promise<ExternalIdentityMappingDoc | null> {
+    if (provider === "slack" && externalTenantId === undefined) return null;
     const { rows } = await this.q.query(
-      "SELECT * FROM external_identity_mappings WHERE provider = $1 AND external_subject = $2",
-      [provider, externalSubject]
+      `SELECT * FROM external_identity_mappings
+       WHERE provider = $1 AND external_subject = $2
+         AND external_tenant_id IS NOT DISTINCT FROM $3`,
+      [provider, externalSubject, externalTenantId ?? null]
     );
     return rows.length > 0 ? rowToMapping(rows[0]) : null;
   }
 
   async listMappingsForUser(userId: string): Promise<ExternalIdentityMappingDoc[]> {
     const { rows } = await this.q.query(
-      "SELECT * FROM external_identity_mappings WHERE user_id = $1 ORDER BY provider, external_subject",
+      `SELECT * FROM external_identity_mappings
+       WHERE user_id = $1
+       ORDER BY provider, external_tenant_id, external_subject`,
       [userId]
     );
     return rows.map(rowToMapping);
@@ -169,22 +261,32 @@ export class PgExternalIdentityRepo implements ExternalIdentityRepo {
     const { rows } = await this.q.query(
       `SELECT * FROM external_identity_mappings
        WHERE user_id = $1 AND verified_via = ANY($2::text[])
-       ORDER BY provider, external_subject`,
+       ORDER BY provider, external_tenant_id, external_subject`,
       [userId, PROVEN_LINK_VERIFICATION]
     );
     return rows.map(rowToMapping);
   }
 
   async upsertMapping(mapping: ExternalIdentityMappingDoc): Promise<void> {
+    if (mapping.provider === "slack" && mapping.externalTenantId === undefined) {
+      throw new Error("external_identity_tenant_scope_required");
+    }
+    const conflict =
+      mapping.externalTenantId === undefined
+        ? `(provider, external_subject) WHERE external_tenant_id IS NULL`
+        : `(provider, external_tenant_id, external_subject)
+           WHERE external_tenant_id IS NOT NULL`;
     await this.q.query(
-      `INSERT INTO external_identity_mappings (provider, external_subject, user_id, verified_at, expires_at, verified_via)
-       VALUES ($1, $2, $3, $4, $5, $6)
-       ON CONFLICT (provider, external_subject)
+      `INSERT INTO external_identity_mappings
+         (provider, external_subject, external_tenant_id, user_id, verified_at, expires_at, verified_via)
+       VALUES ($1, $2, $3, $4, $5, $6, $7)
+       ON CONFLICT ${conflict}
        DO UPDATE SET user_id = EXCLUDED.user_id, verified_at = EXCLUDED.verified_at,
                      expires_at = EXCLUDED.expires_at, verified_via = EXCLUDED.verified_via`,
       [
         mapping.provider,
         mapping.externalSubject,
+        mapping.externalTenantId ?? null,
         mapping.userId,
         mapping.verifiedAt,
         mapping.expiresAt,
@@ -193,10 +295,17 @@ export class PgExternalIdentityRepo implements ExternalIdentityRepo {
     );
   }
 
-  async deleteMapping(provider: string, externalSubject: string): Promise<void> {
+  async deleteMapping(
+    provider: string,
+    externalSubject: string,
+    externalTenantId?: string
+  ): Promise<void> {
+    if (provider === "slack" && externalTenantId === undefined) return;
     await this.q.query(
-      "DELETE FROM external_identity_mappings WHERE provider = $1 AND external_subject = $2",
-      [provider, externalSubject]
+      `DELETE FROM external_identity_mappings
+       WHERE provider = $1 AND external_subject = $2
+         AND external_tenant_id IS NOT DISTINCT FROM $3`,
+      [provider, externalSubject, externalTenantId ?? null]
     );
   }
 
@@ -228,12 +337,14 @@ export class PgExternalIdentityRepo implements ExternalIdentityRepo {
   async createBindToken(token: ChannelBindTokenDoc): Promise<void> {
     await this.q.query(
       `INSERT INTO channel_bind_tokens
-         (nonce_hash, integration_slug, external_sender_id, issued_at, expires_at, consumed_at, consumed_by, channel_id, thread_id)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+         (nonce_hash, integration_slug, external_sender_id, external_tenant_id, issued_at,
+          expires_at, consumed_at, consumed_by, channel_id, thread_id)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
       [
         token.nonceHash,
         token.integrationSlug,
         token.externalSenderId,
+        token.externalTenantId ?? null,
         token.issuedAt,
         token.expiresAt,
         token.consumedAt,
@@ -284,7 +395,10 @@ export async function mintLinkToken(
   return { raw, expiresAt };
 }
 
-export type LinkRedemptionDenialReason = "invalid_token" | "provider_mismatch";
+export type LinkRedemptionDenialReason =
+  | "invalid_token"
+  | "provider_mismatch"
+  | "tenant_scope_required";
 
 export class LinkRedemptionDeniedError extends Error {
   constructor(
@@ -299,8 +413,19 @@ export class LinkRedemptionDeniedError extends Error {
 /** Consume link tokens atomically before writing mappings so replays create no second mapping. */
 export async function redeemLinkToken(
   repo: ExternalIdentityRepo,
-  input: { raw: string; provider: string; externalSubject: string }
+  input: {
+    raw: string;
+    provider: string;
+    externalSubject: string;
+    externalTenantId?: string;
+  }
 ): Promise<ExternalIdentityMappingDoc> {
+  if (input.provider === "slack" && input.externalTenantId === undefined) {
+    throw new LinkRedemptionDeniedError(
+      "tenant_scope_required",
+      "Slack identity links require a verified workspace"
+    );
+  }
   const token = await repo.consumeLinkToken(hashLinkToken(input.raw));
   if (!token) {
     throw new LinkRedemptionDeniedError("invalid_token", "link token is unknown, used, or expired");
@@ -314,6 +439,7 @@ export async function redeemLinkToken(
   const mapping: ExternalIdentityMappingDoc = {
     provider: input.provider,
     externalSubject: input.externalSubject,
+    ...(input.externalTenantId === undefined ? {} : { externalTenantId: input.externalTenantId }),
     userId: token.userId,
     verifiedAt: new Date(),
     expiresAt: null,
@@ -328,6 +454,7 @@ function toAuthzMapping(doc: ExternalIdentityMappingDoc): ExternalIdentityMappin
     businessId: DEPLOYMENT_BUSINESS_ID,
     provider: doc.provider,
     externalSubject: doc.externalSubject,
+    ...(doc.externalTenantId === undefined ? {} : { externalTenantId: doc.externalTenantId }),
     principalId: doc.userId,
     verifiedAt: doc.verifiedAt,
     ...(doc.expiresAt ? { expiresAt: doc.expiresAt } : {}),
@@ -339,9 +466,11 @@ export async function resolveExternalIdentity(
   repo: ExternalIdentityRepo,
   provider: string,
   externalSubject: string,
-  now: Date = new Date()
+  now: Date = new Date(),
+  externalTenantId?: string
 ): Promise<string> {
-  return (await resolveExternalSender(repo, provider, externalSubject, now)).userId;
+  return (await resolveExternalSender(repo, provider, externalSubject, now, externalTenantId))
+    .userId;
 }
 
 /**
@@ -355,9 +484,10 @@ export async function resolveExternalSender(
   repo: ExternalIdentityRepo,
   provider: string,
   externalSubject: string,
-  now: Date = new Date()
+  now: Date = new Date(),
+  externalTenantId?: string
 ): Promise<{ readonly userId: string; readonly verifiedVia?: IdentityVerificationMethod }> {
-  const doc = await repo.findMapping(provider, externalSubject);
+  const doc = await repo.findMapping(provider, externalSubject, externalTenantId);
   const mapping = doc ? toAuthzMapping(doc) : undefined;
   assertExternalIdentityMapped(mapping, DEPLOYMENT_BUSINESS_ID, now);
   return {

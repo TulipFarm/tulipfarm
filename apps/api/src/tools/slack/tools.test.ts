@@ -1,4 +1,8 @@
-import { type IntegrationHttpRequest, SLACK_TOOL_CONTRACTS } from "@tulipfarm/integrations";
+import {
+  type IntegrationHttpRequest,
+  SLACK_ADAPTER_REF,
+  SLACK_TOOL_CONTRACTS,
+} from "@tulipfarm/integrations";
 import type { SecretsService } from "@tulipfarm/secrets";
 import type { ChannelMentionedThreadStore } from "@tulipfarm/storage";
 import {
@@ -72,6 +76,13 @@ function fakeHttp(ts: string) {
           },
         };
       }
+      if (request.path === "/conversations.info") {
+        return {
+          status: 200,
+          headers: {},
+          body: { ok: true, channel: { id: "C123", is_member: true } },
+        };
+      }
       if (request.path === "/chat.postMessage") {
         return { status: 200, headers: {}, body: { ok: true, ts, channel: "C123" } };
       }
@@ -89,6 +100,37 @@ function expectNoNullishTargetText(targets: unknown): void {
 }
 
 describe("buildSlackTools", () => {
+  it("registers the credentialed Slack adapter for effect reconciliation", async () => {
+    const tooling = buildSlackTooling({ secrets: fakeSecretsService(), http: fakeHttp("100.000") });
+    const adapter = tooling.reconciliationAdapters?.get(SLACK_ADAPTER_REF);
+    expect(adapter).toBe(tooling.adapters.get(SLACK_ADAPTER_REF));
+    if (adapter === undefined) throw new Error("Slack reconciliation adapter not registered");
+    const dispatched = {
+      intentId: "11111111-1111-4111-8111-111111111111",
+      businessId: BUSINESS_ID,
+      runId: "run-1",
+      stateId: "state-1",
+      toolId: "slack.message.update",
+      toolVersion: "1.0.0",
+      action: "slack.message.update",
+      targetRefs: [],
+      arguments: {},
+      credentialRef: "secret://integrations/slack/bot-token",
+      idempotencyKey: "22222222-2222-4222-8222-222222222222",
+    };
+
+    await expect(
+      adapter.reconcile({
+        intent: dispatched,
+        idempotencyKey: dispatched.idempotencyKey,
+        operation: "unsupported",
+      })
+    ).resolves.toEqual({
+      outcome: "ambiguous",
+      evidenceRef: "slack:lookup_unsupported",
+    });
+  });
+
   it("derives egress destinations from the published Slack contract", () => {
     const tooling = buildSlackTooling({ secrets: fakeSecretsService(), http: fakeHttp("100.000") });
     const tools = buildSlackTools(BUSINESS_ID, {
@@ -185,6 +227,13 @@ describe("buildSlackTools", () => {
                 { id: "C0987654321", name: "visible-only", is_member: false },
               ],
             },
+          };
+        }
+        if (request.path === "/conversations.info") {
+          return {
+            status: 200,
+            headers: {},
+            body: { ok: true, channel: { id: "C1234567890", is_member: true } },
           };
         }
         if (request.path === "/chat.postMessage") {
@@ -293,6 +342,13 @@ describe("buildSlackTools", () => {
           listCalls += 1;
           return { status: 200, headers: {}, body: { ok: true, channels: [] } };
         }
+        if (request.path === "/conversations.info") {
+          return {
+            status: 200,
+            headers: {},
+            body: { ok: true, channel: { id: "C123", is_member: true } },
+          };
+        }
         return { status: 200, headers: {}, body: { ok: true, ts: "100.003", channel: "C999" } };
       },
     };
@@ -321,6 +377,13 @@ describe("buildSlackTools", () => {
             status: 200,
             headers: {},
             body: { ok: true, channels: [{ id: "C123", name: "slack-bot-test" }] },
+          };
+        }
+        if (request.path === "/conversations.info") {
+          return {
+            status: 200,
+            headers: {},
+            body: { ok: true, channel: { id: "C123", is_member: true } },
           };
         }
         posts += 1;

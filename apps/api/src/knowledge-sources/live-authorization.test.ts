@@ -45,6 +45,7 @@ function baseInput(principals: { kind: string; id: string }[]) {
     sourceId: `slack:T1:${CHANNEL}`,
     provider: "slack",
     externalId: CHANNEL,
+    externalTenantId: "T1",
     principals,
   };
 }
@@ -55,6 +56,7 @@ describe("SlackLiveSourceAuthorization", () => {
     identity.mappings.push({
       provider: "slack",
       externalSubject: "U1",
+      externalTenantId: "T1",
       userId: "user-1",
       verifiedAt: new Date(),
       expiresAt: null,
@@ -72,12 +74,31 @@ describe("SlackLiveSourceAuthorization", () => {
     identity.mappings.push({
       provider: "slack",
       externalSubject: "U9",
+      externalTenantId: "T1",
       userId: "user-1",
       verifiedAt: new Date(),
       expiresAt: null,
       verifiedVia: "link_token",
     });
     const auth = new SlackLiveSourceAuthorization(stubApi(["U1", "U2"]), identity);
+
+    const result = await auth.check(baseInput([{ kind: "user", id: "user-1" }]));
+
+    expect(result).toEqual({ allowed: false });
+  });
+
+  it("does not use a matching Slack user ID from another workspace", async () => {
+    const identity = new MemoryExternalIdentityRepo();
+    identity.mappings.push({
+      provider: "slack",
+      externalSubject: "U1",
+      externalTenantId: "T2",
+      userId: "user-1",
+      verifiedAt: new Date(),
+      expiresAt: null,
+      verifiedVia: "link_token",
+    });
+    const auth = new SlackLiveSourceAuthorization(stubApi(["U1"]), identity);
 
     const result = await auth.check(baseInput([{ kind: "user", id: "user-1" }]));
 
@@ -98,6 +119,7 @@ describe("SlackLiveSourceAuthorization", () => {
     identity.mappings.push({
       provider: "slack",
       externalSubject: "U1",
+      externalTenantId: "T1",
       userId: "user-1",
       verifiedAt: new Date(),
       expiresAt: new Date(Date.now() - 60_000),
@@ -162,6 +184,7 @@ describe("SlackLiveSourceAuthorization", () => {
       identity.mappings.push({
         provider: "slack",
         externalSubject: "U1",
+        externalTenantId: "T1",
         userId: "user-1",
         verifiedAt: new Date(),
         expiresAt: null,
@@ -284,6 +307,7 @@ describe("SlackTenantLiveAuthorization", () => {
     identity.mappings.push({
       provider: "slack",
       externalSubject: "U1",
+      externalTenantId: "T1",
       userId: "user-1",
       verifiedAt: new Date(),
       expiresAt: null,

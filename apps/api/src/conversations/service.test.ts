@@ -133,6 +133,22 @@ const turnInput = {
 };
 
 describe("ConversationService", () => {
+  it("keeps a reserved Turn pending until post-ack dispatch", async () => {
+    const { conversations, store, runs } = service();
+
+    const reserved = await conversations.reserveTurn(turnInput);
+    expect(reserved.runId).toBeNull();
+    expect(store.turns[0]).toMatchObject({ status: "pending", runId: null });
+    expect(runs.starts).toEqual([]);
+
+    const started = await conversations.dispatchReservedTurn({
+      businessId: turnInput.businessId,
+      idempotencyKey: turnInput.idempotencyKey,
+    });
+    expect(started.runId).toBe("run-1");
+    expect(runs.starts).toEqual([{ turnId: reserved.turnId, attempt: 1 }]);
+  });
+
   it("persists the user Message and Turn before the Run is started", async () => {
     const { conversations, store, runs } = service();
     const started = await conversations.startTurn(turnInput);

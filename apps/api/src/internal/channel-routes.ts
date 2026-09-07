@@ -22,6 +22,7 @@ import type { SurfaceActionStore } from "../surfaces/action-store";
 import type { SurfaceArtifactStore } from "../surfaces/artifact-store";
 import * as ChannelSchemas from "./channel-schemas";
 import * as InternalSchemas from "./schemas";
+import type { SlackCommandResponseService } from "./slack-command-response";
 
 /** The subset of `SecretsService` the credential route needs (narrow for testability). */
 export interface ChannelCredentialSecretStore {
@@ -45,6 +46,7 @@ export interface ChannelInternalRouteDeps {
   readonly surfaceActionStore?: SurfaceActionStore;
   /** Resolves fixed sealed Slack app/bot token keys; omitted routes report unconfigured. */
   readonly secrets?: ChannelCredentialSecretStore;
+  readonly commandResponses?: SlackCommandResponseService;
   /** Resolves an Agent label for `.../reply`'s `agentDisplayName`. */
   readonly soulLoader?: SoulLoader;
   /**
@@ -233,11 +235,16 @@ export function registerChannelInternalRoutes(
       },
     },
     async (req, reply) => {
-      const { provider, externalSubject } = req.body as {
+      const { provider, externalSubject, externalTenantId } = req.body as {
         provider: string;
         externalSubject: string;
+        externalTenantId?: string;
       };
-      const resolution = await deps.identity.resolve({ slug: provider, sender: externalSubject });
+      const resolution = await deps.identity.resolve({
+        slug: provider,
+        sender: externalSubject,
+        ...(externalTenantId === undefined ? {} : { externalTenantId }),
+      });
       if (resolution.outcome === "unlinked") return reply.send({ linked: false });
       // Reports the authority the sender holds, not the account they were matched to. A guest kind
       // is what makes the caller's `kind !== "user"` guard fire instead of starting a Run as them.
@@ -266,15 +273,17 @@ export function registerChannelInternalRoutes(
       },
     },
     async (req, reply) => {
-      const { provider, externalSubject, channelId, threadId } = req.body as {
+      const { provider, externalSubject, externalTenantId, channelId, threadId } = req.body as {
         provider: string;
         externalSubject: string;
+        externalTenantId?: string;
         channelId: string;
         threadId?: string;
       };
       const resolution = await deps.identity.resolve({
         slug: provider,
         sender: externalSubject,
+        ...(externalTenantId === undefined ? {} : { externalTenantId }),
         channelId,
         ...(threadId === undefined ? {} : { threadId }),
       });
@@ -579,6 +588,65 @@ export function registerChannelInternalRoutes(
   );
 
   app.post(
+    "/api/v1/internal/channels/slack/command-responses",
+    {
+      preHandler,
+      schema: {
+        description:
+          "Seal a Slack slash-command response URL and reserve one retryable ephemeral delivery.",
+        tags: ["internal"],
+        security: [{ bearerToken: [] }],
+        body: ChannelSchemas.ChannelSlackCommandResponseCreateBodySchema,
+        response: {
+          200: ChannelSchemas.ChannelSlackCommandResponseCreateResponseSchema,
+          401: ErrorSchema,
+          403: ErrorSchema,
+          503: ErrorSchema,
+        },
+      },
+    },
+    async (req, reply) => {
+      if (deps.commandResponses === undefined) {
+        return reply.code(503).send({ error: "Slack command responses are unavailable." });
+      }
+      const body = req.body as {
+        idempotencyKey: string;
+        responseUrl: string;
+        response: "starting" | "unlinked" | "denied" | "prompt_unavailable";
+      };
+      return reply.send({ outcome: await deps.commandResponses.reserve(body) });
+    }
+  );
+
+  app.post(
+    "/api/v1/internal/channels/slack/command-responses/process",
+    {
+      preHandler,
+      schema: {
+        description: "Deliver due Slack slash-command responses from encrypted response URLs.",
+        tags: ["internal"],
+        security: [{ bearerToken: [] }],
+        querystring: ChannelSchemas.ChannelSlackCommandResponseProcessQuerySchema,
+        response: {
+          200: ChannelSchemas.ChannelSlackCommandResponseProcessResponseSchema,
+          401: ErrorSchema,
+          403: ErrorSchema,
+          503: ErrorSchema,
+        },
+      },
+    },
+    async (req, reply) => {
+      if (deps.commandResponses === undefined) {
+        return reply.code(503).send({ error: "Slack command responses are unavailable." });
+      }
+      const { idempotencyKey } = req.query as { idempotencyKey?: string };
+      return reply.send(
+        await deps.commandResponses.process(`api:${process.pid}:${req.id}`, idempotencyKey)
+      );
+    }
+  );
+
+  app.post(
     "/api/v1/internal/channels/approvals/:approvalId/decide",
     {
       preHandler,
@@ -601,12 +669,14 @@ export function registerChannelInternalRoutes(
       const body = req.body as {
         provider: string;
         externalSubject: string;
+        externalTenantId?: string;
         decision: "approved" | "denied";
       };
 
       const resolution = await deps.identity.resolve({
         slug: body.provider,
         sender: body.externalSubject,
+        externalTenantId: body.externalTenantId,
       });
       if (resolution.outcome === "unlinked") return reply.send({ outcome: "unlinked" });
 

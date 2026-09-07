@@ -42,7 +42,8 @@ API clients, external identity mappings, and channel bind links.
   returns `principalKind`/`principalId`/`principalRef` alongside `user`. Anything conferring
   authority — Surface interactions, approval decisions, the resolve route — reads those. `user` is
   for routing only.
-- Channel bind links are HMAC credentials with `{slug, senderId, issuedAt, nonce}`, no account,
-  15-minute expiry, body-only token transport, and authenticated explicit redemption.
+- Channel bind links are HMAC credentials with
+  `{slug, senderId, externalTenantId?, issuedAt, nonce}`, no account, 15-minute expiry, body-only
+  token transport, and authenticated explicit redemption. Slack requires `externalTenantId`.
 - Authentication and privilege elevation rotate the session id. Do not use the legacy
   `SessionStore.create()` shim in product code because its CSRF token is unbound.

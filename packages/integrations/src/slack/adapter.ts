@@ -147,7 +147,7 @@ function normalizeSlackEvent(
   };
 }
 
-/** Durable inbound Slack boundary. Persistence and ack happen before identity/routing work. */
+/** Durable inbound Slack boundary. Ack follows the idempotent Run reservation, never execution. */
 export class SlackChannelAdapter {
   constructor(private readonly deps: SlackChannelAdapterDeps) {}
 
@@ -157,16 +157,16 @@ export class SlackChannelAdapter {
     ack: () => Promise<void>
   ): Promise<SlackReceiveResult> {
     const inbound = normalizeSlackEvent(businessId, envelope, this.deps.now());
-    const accepted = await this.deps.inbound.accept(inbound);
-    await ack();
-    if (accepted.outcome === "duplicate") return { outcome: "duplicate" };
+    await this.deps.inbound.accept(inbound);
 
     const principal = await this.deps.identities.resolve({
       businessId,
       provider: "slack",
       externalSubject: inbound.principal.externalId,
+      externalTenantId: inbound.source.externalTenantId,
     });
     if (principal === undefined) {
+      await ack();
       return { outcome: "denied", reason: "external_identity_unmapped" };
     }
 
@@ -203,9 +203,11 @@ export class SlackChannelAdapter {
         principal,
         message: { ...inbound.data, text: resolvedText },
       });
+      await ack();
       return { outcome: run.outcome, runId: run.runId };
     } catch (error) {
       if (error instanceof ChannelRouteDeniedError) {
+        await ack();
         return { outcome: "denied", reason: error.reason };
       }
       throw error;

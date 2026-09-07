@@ -75,6 +75,7 @@ export interface KnowledgeIdentityMapPort {
     readonly businessId: string;
     readonly provider: string;
     readonly externalSubject: string;
+    readonly externalTenantId?: string;
   }): Promise<readonly EmittedPrincipalRef[] | undefined>;
 }
 

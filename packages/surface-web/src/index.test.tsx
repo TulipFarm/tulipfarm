@@ -177,7 +177,12 @@ describe("surfaceWebRenderer", () => {
             input: "select",
             options: ["Low", "High"],
           },
-          { name: "subscribe", label: "Send updates", input: "checkbox" },
+          {
+            name: "subscribe",
+            label: "Send updates",
+            input: "checkbox",
+            options: ["Email", "SMS"],
+          },
         ],
         submit: "Continue",
         action: { event: "contact.submit" },
@@ -199,6 +204,8 @@ describe("surfaceWebRenderer", () => {
     expect(markup).toContain("<textarea");
     expect(markup).toContain("<select");
     expect(markup).toContain('type="checkbox"');
+    expect(markup).toContain('value="Email"');
+    expect(markup).toContain('value="SMS"');
     expect(markup).toContain('type="submit"');
     expect(markup).toContain('data-surface-action="sf_form"');
   });
@@ -278,6 +285,51 @@ describe("surfaceWebRenderer", () => {
     expect(markup).toContain('multiple=""');
     expect(markup).toContain("data-surface-radio-group");
     expect(markup).toContain('type="radio"');
+  });
+
+  it("renders the expanded provider-neutral Form inputs", () => {
+    const artifact = createSurfaceArtifact({
+      id: "expanded-form",
+      component: { name: "Form", version: "1.0" },
+      props: {
+        fields: [
+          { name: "site", label: "Site", input: "url", maxLength: 300 },
+          { name: "at", label: "At", input: "time" },
+          { name: "when", label: "When", input: "datetime" },
+          { name: "brief", label: "Brief", input: "richtext", minLength: 10 },
+          { name: "owner", label: "Owner", input: "user", options: ["user:one"] },
+          { name: "channel", label: "Channel", input: "channel", options: ["channel:one"] },
+          {
+            name: "conversation",
+            label: "Conversation",
+            input: "conversation",
+            options: ["conversation:one"],
+          },
+        ],
+        submit: "Continue",
+        action: { event: "expanded.submit" },
+      },
+      target: { channel: "web", surface: "chat" },
+      audience: ["user:1"],
+      classification: "internal",
+    });
+
+    const markup = renderToStaticMarkup(
+      surfaceWebRenderer.render(artifact, {
+        destination: "chat",
+        actionHandleFor: () => "sf_form",
+      })
+    );
+
+    expect(markup).toContain('type="url"');
+    expect(markup).toContain('maxLength="300"');
+    expect(markup).toContain('type="time"');
+    expect(markup).toContain('type="datetime-local"');
+    expect(markup).toContain('data-surface-input="richtext"');
+    expect(markup).toContain('minLength="10"');
+    expect(markup).toContain('data-surface-input="user"');
+    expect(markup).toContain('data-surface-input="channel"');
+    expect(markup).toContain('data-surface-input="conversation"');
   });
 
   it("renders charts and ForceGraphs as accessible native SVG instead of JSON", () => {

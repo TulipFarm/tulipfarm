@@ -307,11 +307,53 @@ export function SurfaceForm({
           const label = String(field.label);
           const required = field.required === true;
           const description = typeof field.description === "string" ? field.description : undefined;
+          const textLike = ["text", "textarea", "email", "url", "richtext"].includes(input);
+          const minLength =
+            typeof field.minLength === "number" ? field.minLength : textLike ? 0 : undefined;
+          const maxLength =
+            typeof field.maxLength === "number" ? field.maxLength : textLike ? 3_000 : undefined;
           const options = Array.isArray(field.options)
             ? field.options.filter((option): option is string => typeof option === "string")
             : [];
 
           if (input === "checkbox") {
+            if (options.length > 0) {
+              return (
+                <fieldset key={name} data-surface-radio-group>
+                  <legend data-surface-field-label>
+                    {label}
+                    {required ? <small data-surface-required>required</small> : null}
+                    {description ? (
+                      <small data-surface-field-description>{description}</small>
+                    ) : null}
+                  </legend>
+                  {options.map((option) => (
+                    <label key={option} htmlFor={`${fieldId}-${option}`} data-surface-checkbox>
+                      <input
+                        id={`${fieldId}-${option}`}
+                        name={name}
+                        type="checkbox"
+                        value={option}
+                        onChange={(event) =>
+                          setValues((previous) => {
+                            const selected = Array.isArray(previous[name])
+                              ? previous[name].filter(
+                                  (value): value is string => typeof value === "string"
+                                )
+                              : [];
+                            const next = event.target.checked
+                              ? [...selected.filter((value) => value !== option), option]
+                              : selected.filter((value) => value !== option);
+                            return { ...previous, [name]: next };
+                          })
+                        }
+                      />
+                      <span>{option}</span>
+                    </label>
+                  ))}
+                </fieldset>
+              );
+            }
             return (
               <label key={name} htmlFor={fieldId} data-surface-checkbox>
                 <input
@@ -319,7 +361,8 @@ export function SurfaceForm({
                   name={name}
                   type="checkbox"
                   required={required}
-                  onChange={(event) => update(name, event.target.checked)}
+                  value="true"
+                  onChange={(event) => update(name, event.target.checked ? ["true"] : [])}
                 />
                 <span>
                   {label}
@@ -368,6 +411,7 @@ export function SurfaceForm({
                   name={name}
                   required={required}
                   multiple
+                  data-surface-input={input}
                   onChange={(event: ChangeEvent<HTMLSelectElement>) =>
                     update(
                       name,
@@ -386,25 +430,34 @@ export function SurfaceForm({
           }
 
           let control: ReactElement;
-          if (input === "textarea") {
+          if (input === "textarea" || input === "richtext") {
             control = (
               <textarea
                 id={fieldId}
                 name={name}
                 required={required}
                 rows={4}
+                minLength={minLength}
+                maxLength={maxLength}
+                data-surface-input={input}
                 onChange={(event: ChangeEvent<HTMLTextAreaElement>) =>
                   update(name, event.target.value)
                 }
               />
             );
-          } else if (input === "select") {
+          } else if (
+            input === "select" ||
+            input === "user" ||
+            input === "channel" ||
+            input === "conversation"
+          ) {
             control = (
               <select
                 id={fieldId}
                 name={name}
                 required={required}
                 defaultValue=""
+                data-surface-input={input}
                 onChange={(event: ChangeEvent<HTMLSelectElement>) =>
                   update(name, event.target.value)
                 }
@@ -424,13 +477,16 @@ export function SurfaceForm({
               <input
                 id={fieldId}
                 name={name}
-                type={input}
+                type={input === "datetime" ? "datetime-local" : input}
                 required={required}
+                minLength={minLength}
+                maxLength={maxLength}
+                data-surface-input={input}
                 onChange={(event: ChangeEvent<HTMLInputElement>) =>
                   update(
                     name,
-                    input === "number" && event.target.value !== ""
-                      ? Number(event.target.value)
+                    input === "datetime" && event.target.value !== ""
+                      ? new Date(event.target.value).toISOString()
                       : event.target.value
                   )
                 }

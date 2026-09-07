@@ -1,0 +1,250 @@
+[
+  {
+    "catalogEvent": "message.channels",
+    "event": {
+      "type": "message",
+      "channel_type": "channel",
+      "channel": "C123",
+      "user": "U123",
+      "ts": "1785000000.000001",
+      "text": "channel message",
+      "files": [{ "id": "F123", "url_private": "https://files.slack.com/private" }],
+      "ignored": "do-not-copy"
+    },
+    "expectedName": "slack.message.received.v1"
+  },
+  {
+    "catalogEvent": "message.groups",
+    "event": {
+      "type": "message",
+      "channel_type": "group",
+      "channel": "G123",
+      "user": "U123",
+      "ts": "1785000000.000002",
+      "thread_ts": "1784999999.000001",
+      "text": "private channel message"
+    },
+    "expectedName": "slack.message.received.v1"
+  },
+  {
+    "catalogEvent": "message.im",
+    "event": {
+      "type": "message",
+      "channel_type": "im",
+      "channel": "D123",
+      "user": "U123",
+      "ts": "1785000000.000003",
+      "text": "direct message"
+    },
+    "expectedName": "slack.message.received.v1"
+  },
+  {
+    "catalogEvent": "message.mpim",
+    "event": {
+      "type": "message",
+      "channel_type": "mpim",
+      "channel": "G456",
+      "user": "U123",
+      "ts": "1785000000.000004",
+      "text": "group direct message"
+    },
+    "expectedName": "slack.message.received.v1"
+  },
+  {
+    "catalogEvent": "app_mention",
+    "event": {
+      "type": "app_mention",
+      "channel": "C123",
+      "user": "U123",
+      "ts": "1785000000.000005",
+      "text": "<@A123> status",
+      "app_id": "A123"
+    },
+    "expectedName": "slack.mention.received.v1"
+  },
+  {
+    "catalogEvent": "app_home_opened",
+    "event": {
+      "type": "app_home_opened",
+      "user": "U123",
+      "tab": "home",
+      "channel": "D123"
+    },
+    "expectedName": "slack.home.opened.v1"
+  },
+  {
+    "catalogEvent": "assistant_thread_started",
+    "event": {
+      "type": "assistant_thread_started",
+      "assistant_thread": {
+        "user_id": "U123",
+        "thread_ts": "1785000000.000006",
+        "channel_id": "D123",
+        "context": { "channel_id": "C123", "team_id": "T123", "enterprise_id": "E123" }
+      },
+      "event_ts": "1785000000.000006"
+    },
+    "expectedName": "slack.agent.thread.started.v1"
+  },
+  {
+    "catalogEvent": "assistant_thread_context_changed",
+    "event": {
+      "type": "assistant_thread_context_changed",
+      "assistant_thread": {
+        "user_id": "U123",
+        "thread_ts": "1785000000.000007",
+        "channel_id": "D123",
+        "context": { "channel_id": "C456", "team_id": "T123" }
+      },
+      "event_ts": "1785000000.000007"
+    },
+    "expectedName": "slack.agent.context.changed.v1"
+  },
+  {
+    "catalogEvent": "app_context_changed",
+    "event": {
+      "type": "app_context_changed",
+      "context": {
+        "entities": [
+          {
+            "type": "slack#/types/channel_id",
+            "value": "C789",
+            "team_id": "T123"
+          }
+        ]
+      }
+    },
+    "expectedName": "slack.agent.context.changed.v1"
+  },
+  {
+    "catalogEvent": "reaction_added",
+    "event": {
+      "type": "reaction_added",
+      "user": "U123",
+      "reaction": "eyes",
+      "item": { "type": "message", "channel": "C123", "ts": "1785000000.000008" },
+      "item_user": "U456"
+    },
+    "expectedName": "slack.reaction.added.v1"
+  },
+  {
+    "catalogEvent": "reaction_removed",
+    "event": {
+      "type": "reaction_removed",
+      "user": "U123",
+      "reaction": "eyes",
+      "item": { "type": "file", "file": "F123" }
+    },
+    "expectedName": "slack.reaction.removed.v1"
+  },
+  {
+    "catalogEvent": "channel_created",
+    "event": {
+      "type": "channel_created",
+      "channel": { "id": "C123", "name": "operations", "creator": "U123", "created": 1785000000 }
+    },
+    "expectedName": "slack.channel.created.v1"
+  },
+  {
+    "catalogEvent": "channel_rename",
+    "event": {
+      "type": "channel_rename",
+      "channel": { "id": "C123", "name": "incident-response", "created": 1785000000 }
+    },
+    "expectedName": "slack.channel.renamed.v1"
+  },
+  {
+    "catalogEvent": "channel_archive",
+    "event": { "type": "channel_archive", "channel": "C123", "user": "U123" },
+    "expectedName": "slack.channel.archived.v1"
+  },
+  {
+    "catalogEvent": "channel_unarchive",
+    "event": { "type": "channel_unarchive", "channel": "C123" },
+    "expectedName": "slack.channel.unarchived.v1"
+  },
+  {
+    "catalogEvent": "member_joined_channel",
+    "event": {
+      "type": "member_joined_channel",
+      "user": "U456",
+      "channel": "C123",
+      "channel_type": "C",
+      "inviter": "U123"
+    },
+    "expectedName": "slack.channel.member_joined.v1"
+  },
+  {
+    "catalogEvent": "member_left_channel",
+    "event": { "type": "member_left_channel", "user": "U456", "channel": "C123" },
+    "expectedName": "slack.channel.member_left.v1"
+  },
+  {
+    "catalogEvent": "file_shared",
+    "event": { "type": "file_shared", "file_id": "F123", "user_id": "U123", "channel_id": "C123" },
+    "expectedName": "slack.file.shared.v1"
+  },
+  {
+    "catalogEvent": "file_deleted",
+    "event": { "type": "file_deleted", "file_id": "F123" },
+    "expectedName": "slack.file.deleted.v1"
+  },
+  {
+    "catalogEvent": "team_join",
+    "event": {
+      "type": "team_join",
+      "user": {
+        "id": "U123",
+        "name": "muskan",
+        "real_name": "Muskan Vijayvargiya",
+        "deleted": false,
+        "is_bot": false,
+        "profile": {
+          "display_name": "Muskan",
+          "title": "Operator",
+          "email": "muskan@example.com",
+          "image_72": "https://cdn.slack.com/avatar.png",
+          "status_text": "secret status"
+        }
+      }
+    },
+    "expectedName": "slack.user.joined.v1"
+  },
+  {
+    "catalogEvent": "user_change",
+    "event": {
+      "type": "user_change",
+      "user": {
+        "id": "U123",
+        "name": "muskan",
+        "real_name": "Muskan Vijayvargiya",
+        "deleted": false,
+        "is_bot": false,
+        "profile": { "display_name": "Muskan", "title": "Lead" }
+      }
+    },
+    "expectedName": "slack.user.changed.v1"
+  },
+  {
+    "catalogEvent": "user_profile_changed",
+    "event": {
+      "type": "user_profile_changed",
+      "user": {
+        "id": "U123",
+        "name": "muskan",
+        "profile": { "display_name": "Muskan", "title": "Staff Engineer" }
+      }
+    },
+    "expectedName": "slack.user.profile_changed.v1"
+  },
+  {
+    "catalogEvent": "emoji_changed",
+    "event": {
+      "type": "emoji_changed",
+      "subtype": "rename",
+      "old_name": "party_parrot",
+      "new_name": "celebration_parrot"
+    },
+    "expectedName": "slack.emoji.changed.v1"
+  }
+]

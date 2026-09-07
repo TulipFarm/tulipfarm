@@ -304,12 +304,10 @@ export function SlackPreview({ artifact, onInteraction }: SlackPreviewProps) {
               ) : null}
 
               {/* Render Slack Modal View if present */}
-              {payload?.view ? (
+              {payload?.view?.type === "modal" ? (
                 <div className="mt-4 rounded-md border-2 border-[#4A154B]/30 bg-muted/10 p-4">
                   <div className="mb-3 flex items-center justify-between border-b border-border pb-2">
-                    <h5 className="font-bold text-sm text-foreground">
-                      {String((payload.view.title as { text?: string })?.text ?? "Modal View")}
-                    </h5>
+                    <h5 className="font-bold text-sm text-foreground">{payload.view.title.text}</h5>
                     <Badge variant="neutral">Slack Modal View</Badge>
                   </div>
                   <form onSubmit={handleModalSubmit} className="space-y-3">
@@ -407,7 +405,7 @@ export function SlackPreview({ artifact, onInteraction }: SlackPreviewProps) {
                         type="submit"
                         className="rounded bg-[#007a5a] px-4 py-1.5 text-xs font-semibold text-white hover:bg-[#148567]"
                       >
-                        {String((payload.view.submit as { text?: string })?.text ?? "Submit")}
+                        {payload.view.submit?.text ?? "Submit"}
                       </button>
                     </div>
                   </form>

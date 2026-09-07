@@ -11,6 +11,7 @@ import { createApiClient, formatApiClientCredential } from "./api-clients";
 import { CHANNEL_BIND_TTL_MS, issueChannelBindToken } from "./channel-link";
 import { MemoryApiClientRepo, MemoryExternalIdentityRepo, MemoryOidcRequestRepo } from "./fakes";
 import type { OidcClaims, OidcProvider } from "./oidc";
+import type { IdentityRouteDeps } from "./routes";
 import { type MfaVerifier, MfaVerifierRegistry } from "./step-up";
 
 const PASSWORD = "correct horse battery staple";
@@ -81,6 +82,7 @@ async function makeHarness(
     withOidc?: boolean;
     mfa?: MfaVerifier[];
     channelBindSecrets?: { get(key: string): Promise<string> };
+    externalIdentityUnlinker?: IdentityRouteDeps["externalIdentityUnlinker"];
   } = {}
 ) {
   const store = new MemorySessionStore();
@@ -106,6 +108,9 @@ async function makeHarness(
       externalIdentityRepo: external,
       channelBind: { repo: external, signingKey: async () => Buffer.alloc(32, 3) },
       ...(options.channelBindSecrets ? { channelBindSecrets: options.channelBindSecrets } : {}),
+      ...(options.externalIdentityUnlinker
+        ? { externalIdentityUnlinker: options.externalIdentityUnlinker }
+        : {}),
       ...(options.withOidc
         ? { oidc: { provider, requestRepo: oidcRequests, redirectUri: REDIRECT_URI } }
         : {}),
@@ -369,7 +374,12 @@ function redeem(harness: Harness, credential: string, linkToken: string, subject
   return harness.app.inject({
     method: "POST",
     url: "/api/v1/identity/external-links/redeem",
-    payload: { linkToken, provider: "slack", externalSubject: subject },
+    payload: {
+      linkToken,
+      provider: "slack",
+      externalSubject: subject,
+      externalTenantId: "T1",
+    },
     headers: { authorization: `Bearer ${credential}` },
   });
 }
@@ -409,7 +419,12 @@ describe("external identity linking", () => {
     const response = await harness.app.inject({
       method: "POST",
       url: "/api/v1/identity/external-links/redeem",
-      payload: { linkToken: raw, provider: "slack", externalSubject: "U123" },
+      payload: {
+        linkToken: raw,
+        provider: "slack",
+        externalSubject: "U123",
+        externalTenantId: "T1",
+      },
       cookies: { [SESSION_COOKIE]: sid, [CSRF_COOKIE]: csrf },
       headers: { [CSRF_HEADER]: csrf },
     });
@@ -424,7 +439,12 @@ describe("external identity linking", () => {
     const response = await harness.app.inject({
       method: "POST",
       url: "/api/v1/identity/external-links/redeem",
-      payload: { linkToken: raw, provider: "slack", externalSubject: "U123" },
+      payload: {
+        linkToken: raw,
+        provider: "slack",
+        externalSubject: "U123",
+        externalTenantId: "T1",
+      },
     });
 
     expect(response.statusCode).toBe(401);
@@ -437,13 +457,56 @@ describe("external identity linking", () => {
 
     const response = await harness.app.inject({
       method: "DELETE",
-      url: "/api/v1/identity/external-links/slack/U123",
+      url: "/api/v1/identity/external-links/slack/U123?externalTenantId=T1",
       cookies: { [SESSION_COOKIE]: sid, [CSRF_COOKIE]: csrf },
       headers: { [CSRF_HEADER]: csrf },
     });
 
     expect(response.statusCode).toBe(404);
     expect(harness.external.mappings).toHaveLength(1);
+  });
+
+  it("uses the durable unlink flow for the current user's mapping", async () => {
+    let unlinkHarness: Harness;
+    const unlink = vi.fn(
+      async (
+        mapping: Parameters<NonNullable<IdentityRouteDeps["externalIdentityUnlinker"]>["unlink"]>[0]
+      ) => {
+        await unlinkHarness.external.deleteMapping(
+          mapping.provider,
+          mapping.externalSubject,
+          mapping.externalTenantId
+        );
+      }
+    );
+    unlinkHarness = await makeHarness({ externalIdentityUnlinker: { unlink } });
+    const { doc, secret } = await createApiClient(unlinkHarness.apiClients, {
+      name: "adapter",
+      ownerUserId: unlinkHarness.admin._id,
+    });
+    const unlinkCredential = formatApiClientCredential(doc.clientId, secret);
+    const { raw } = await mintLink(unlinkHarness);
+    await redeem(unlinkHarness, unlinkCredential, raw, "U123");
+    const { sid, csrf } = await login(unlinkHarness, "member@example.com");
+
+    const response = await unlinkHarness.app.inject({
+      method: "DELETE",
+      url: "/api/v1/identity/external-links/slack/U123?externalTenantId=T1",
+      cookies: { [SESSION_COOKIE]: sid, [CSRF_COOKIE]: csrf },
+      headers: { [CSRF_HEADER]: csrf },
+    });
+
+    expect(response.statusCode).toBe(204);
+    expect(unlink).toHaveBeenCalledWith(
+      expect.objectContaining({
+        provider: "slack",
+        externalSubject: "U123",
+        externalTenantId: "T1",
+        userId: unlinkHarness.member._id,
+      })
+    );
+    expect(unlinkHarness.external.mappings).toHaveLength(0);
+    await unlinkHarness.app.close();
   });
 });
 
@@ -767,7 +830,13 @@ describe("channel bind confirm: reply into the offer's channel", () => {
     const session = await login(harness, "member@example.com");
     const { token } = await issueChannelBindToken(
       { repo: harness.external, signingKey: async () => Buffer.alloc(32, 3) },
-      { slug: "slack", senderId: "U1", channelId: "C1", threadId: "T1" }
+      {
+        slug: "slack",
+        senderId: "U1",
+        externalTenantId: "T1",
+        channelId: "C1",
+        threadId: "T1",
+      }
     );
 
     const response = await post("confirm", token, session);
@@ -806,7 +875,7 @@ describe("channel bind confirm: reply into the offer's channel", () => {
     const session = await login(harness, "member@example.com");
     const { token } = await issueChannelBindToken(
       { repo: harness.external, signingKey: async () => Buffer.alloc(32, 3) },
-      { slug: "slack", senderId: "U1", channelId: "C1" }
+      { slug: "slack", senderId: "U1", externalTenantId: "T1", channelId: "C1" }
     );
 
     const response = await post("confirm", token, session);

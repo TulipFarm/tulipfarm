@@ -83,6 +83,13 @@ describe("EventStore (PostgreSQL)", () => {
     expect(outbox.rows).toEqual([{ inbox_id: accepted.event.id }]);
   });
 
+  it("loads a durable event by business and inbox id", async () => {
+    const accepted = await store.accept(event());
+
+    await expect(store.find("business-1", accepted.event.id)).resolves.toEqual(accepted.event);
+    await expect(store.find("other-business", accepted.event.id)).resolves.toBeNull();
+  });
+
   it("rolls back the inbox when creating its outbox message fails", async () => {
     const failingTransactions: TransactionPort = {
       withTransaction: (operation) =>

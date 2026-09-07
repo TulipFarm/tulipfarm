@@ -42,7 +42,7 @@ export interface ChannelInboundEvent {
 }
 
 export interface ChannelInboundStore {
-  /** Resolves only after the canonical inbox row and its outbox message commit. */
+  /** Records the provider deduplication receipt without retaining the provider payload. */
   accept(event: ChannelInboundEvent): Promise<{ outcome: "accepted" | "duplicate" }>;
 }
 
@@ -51,7 +51,12 @@ export interface ChannelIdentityPort {
    * Resolve a verified external subject to its own Tulip principal or configured guest.
    * `undefined` is an unmapped denial; callers must never substitute another user.
    */
-  resolve(input: { businessId: string; provider: string; externalSubject: string }): Promise<
+  resolve(input: {
+    businessId: string;
+    provider: string;
+    externalSubject: string;
+    externalTenantId?: string;
+  }): Promise<
     | {
         kind: "user" | "guest";
         id: string;

@@ -52,8 +52,8 @@ export function httpChannelRunStarter(
         input.message.threadId !== undefined
       ) {
         const { http, credential, log } = options.assistantStatus;
-        try {
-          await http.send(
+        void http
+          .send(
             {
               method: "POST",
               path: "/assistant.threads.setStatus",
@@ -64,10 +64,10 @@ export function httpChannelRunStarter(
               },
             },
             credential
-          );
-        } catch (error) {
-          log?.warn("slack assistant status failed", error);
-        }
+          )
+          .catch((error: unknown) => {
+            log?.warn("slack assistant status failed", error);
+          });
       }
 
       return result;

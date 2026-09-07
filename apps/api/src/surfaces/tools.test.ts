@@ -1,5 +1,6 @@
+import type { TSchema } from "@sinclair/typebox";
 import type { ArtifactService } from "@tulipfarm/run-kernel";
-import type { SurfaceComponentDefinition } from "@tulipfarm/surface";
+import { type SurfaceComponentDefinition, surfaceSchemaIssues } from "@tulipfarm/surface";
 import {
   InMemoryToolCatalog,
   RegistryToolDispatcher,
@@ -219,6 +220,123 @@ describe("Surface presentation Tool schema", () => {
       },
       suspendRun: true,
     });
+  });
+
+  it("derives provider-neutral Form submission types", async () => {
+    const target = { channel: "web", surface: "chat" } as const;
+    const result = await requestInputTool.execute(
+      {
+        component: {
+          name: "Form",
+          version: "1.0",
+          props: {
+            fields: [
+              { name: "quantity", label: "Quantity", input: "number", required: true },
+              {
+                name: "notify",
+                label: "Notify by",
+                input: "checkbox",
+                options: ["Email", "SMS"],
+              },
+              {
+                name: "region",
+                label: "Region",
+                input: "radio",
+                options: ["US", "EU"],
+                required: true,
+              },
+              {
+                name: "plan",
+                label: "Plan",
+                input: "select",
+                options: ["Basic", "Pro"],
+                required: true,
+              },
+              {
+                name: "tags",
+                label: "Tags",
+                input: "multiselect",
+                options: ["A", "B"],
+              },
+            ],
+            submit: "Continue",
+            action: { event: "form.submit" },
+          },
+        },
+      },
+      {
+        userId: "user:1",
+        conversationId: "conversation:1",
+        presentationContext: presentationContextFor(target, "conversation:1"),
+        surfaceCatalog: surfaceCatalogFor(target),
+        surfaceCatalogRevision: "revision",
+        surfaceRendererManifest: surfaceRendererRegistry.manifestFor(target),
+        surfaceStore: new MemorySurfaceArtifactStore(),
+        surfaceActionStore: new MemorySurfaceActionStore(),
+      }
+    );
+
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    expect(result.data).toMatchObject({
+      awaitedSchema: {
+        type: "object",
+        additionalProperties: false,
+        required: ["quantity", "region", "plan"],
+        properties: {
+          quantity: { type: "string" },
+          notify: {
+            type: "array",
+            items: {
+              anyOf: [
+                { type: "string", const: "Email" },
+                { type: "string", const: "SMS" },
+              ],
+            },
+          },
+          region: {
+            anyOf: [
+              { type: "string", const: "US" },
+              { type: "string", const: "EU" },
+            ],
+          },
+          plan: {
+            anyOf: [
+              { type: "string", const: "Basic" },
+              { type: "string", const: "Pro" },
+            ],
+          },
+          tags: {
+            type: "array",
+            items: {
+              anyOf: [
+                { type: "string", const: "A" },
+                { type: "string", const: "B" },
+              ],
+            },
+          },
+        },
+      },
+    });
+    const awaitedSchema = (result.data as { awaitedSchema: TSchema }).awaitedSchema;
+    expect(
+      surfaceSchemaIssues(awaitedSchema, {
+        quantity: "12.50",
+        notify: ["Email", "SMS"],
+        region: "EU",
+        plan: "Pro",
+        tags: ["A", "B"],
+      })
+    ).toEqual([]);
+    expect(
+      surfaceSchemaIssues(awaitedSchema, {
+        quantity: 12.5,
+        notify: true,
+        region: "EU",
+        plan: "Pro",
+        tags: "A",
+      })
+    ).not.toEqual([]);
   });
 
   it("creates a presentation from an object component", async () => {

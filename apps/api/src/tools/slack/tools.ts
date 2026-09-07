@@ -66,6 +66,22 @@ function mapDispatchError(error: ToolDispatchError): ToolCallResult {
   if (error.detail === "channel_not_found") {
     return err("not_found", "No Slack channel by that name — check the bot has joined it.");
   }
+  if (error.detail === "channel_not_joined") {
+    return err("not_found", "The Slack app has not joined that conversation.");
+  }
+  if (error.detail === "file_unavailable") {
+    return err("not_found", "The File is unavailable to the person who started this Run.");
+  }
+  if (error.detail?.endsWith("_not_integration_owned") === true) {
+    return err("write_denied", "This Slack object was not created by this Integration.");
+  }
+  if (
+    error.detail === "file_upload_unavailable" ||
+    error.detail === "ownership_tracking_unavailable" ||
+    error.detail === "integration_identity_unavailable"
+  ) {
+    return err("unavailable", "This Slack Tool is not configured on this host.");
+  }
   // Treat missing credentials as infrastructure, not model-repairable bad arguments.
   if (error.detail === "provider_rate_limited" || error.detail === "provider_unavailable") {
     return err("unavailable", "Slack is temporarily unavailable; try again shortly.");
@@ -119,6 +135,18 @@ function allSlackChannelsTarget(): readonly ToolTargetRef[] {
   return [{ type: SLACK_AUTHZ_RESOURCE, id: SLACK_ALL_CHANNELS_TARGET_ID }];
 }
 
+function slackTargets(args: unknown): readonly ToolTargetRef[] {
+  const channelTargets = slackChannelTargets(args);
+  if (channelTargets.length > 0) return channelTargets;
+  if (args !== null && typeof args === "object" && !Array.isArray(args)) {
+    const fileId = (args as Record<string, unknown>).fileId;
+    if (typeof fileId === "string" && fileId.length > 0) {
+      return [{ type: SLACK_AUTHZ_RESOURCE, id: `file:${fileId}` }];
+    }
+  }
+  return allSlackChannelsTarget();
+}
+
 export interface SlackToolingContext extends SlackTooling {
   readonly effects: EffectStore;
   readonly threads: IntegrationConversationsRepo;
@@ -148,7 +176,7 @@ function buildToolDef(
     tier: "integration",
     mutating: contract.mutating,
     // A repeated `sendMessage` call is a second real Slack message, not a harmless echo (#646).
-    ...(toolId === SLACK_TOOL_IDS.sendMessage ? { sideEffecting: true } : {}),
+    ...(contract.mutating ? { sideEffecting: true } : {}),
     description: declaration.description,
     inputSchema: contract.inputSchema,
     outputSchema: contract.outputSchema,
@@ -157,10 +185,7 @@ function buildToolDef(
       resources: [SLACK_RESOURCE],
       // `acknowledge` takes no channel: its target is the message that started the Run, which
       // the adapter reads from the delivery row. There is no argument to scope the grant by.
-      targets:
-        toolId === SLACK_TOOL_IDS.listChannels || toolId === SLACK_TOOL_IDS.acknowledge
-          ? allSlackChannelsTarget
-          : slackChannelTargets,
+      targets: slackTargets,
       dataClasses: contract.dataClasses,
       allowedDestinations: contract.allowedDestinations,
     },

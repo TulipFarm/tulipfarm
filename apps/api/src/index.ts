@@ -67,6 +67,7 @@ import {
   GitSoulTreeReader,
   GitSyncService,
   getDefaultAssistant,
+  listAgents,
   loadBundledIntegrations,
   loadBundledSkills,
   loadDisabledBundledSkills,
@@ -103,6 +104,8 @@ import {
   PgSoulPublicationStore,
   PgTeamNotificationRepo,
   PgTeamRepo,
+  ProviderFileUploadStore,
+  ProviderObjectOwnershipStore,
   PublicOriginStore,
   RunEventStore,
   RunStore,
@@ -176,7 +179,7 @@ import { webhookSecretPort } from "./hooks/secret-port";
 import { PgApiClientRepo } from "./identity/api-clients";
 import { buildApiAuthorityLayerResolver } from "./identity/authority-layers";
 import { channelBindKeyResolver } from "./identity/channel-link";
-import { PgExternalIdentityRepo } from "./identity/external-links";
+import { PgExternalIdentityRepo, PgExternalIdentityUnlinker } from "./identity/external-links";
 import { ExternalLinkKnowledgeIdentityMap } from "./identity/knowledge-identity-map";
 import { reconcileSoulRoles, registerSoulRoleReconcile } from "./identity/role-reconcile";
 import { syncDeploymentRoles } from "./identity/roles";
@@ -193,6 +196,11 @@ import { IngressDeliveryHost } from "./internal/delivery-host";
 import { InternalEmitHost } from "./internal/emit-host";
 import { ModelSelectorGate, modelGateModeFromEnv } from "./internal/model-authz";
 import { InternalRoutineApprovalHost } from "./internal/routine-approval-host";
+import {
+  SlackCommandResponseService,
+  SlackCommandResponseStore,
+} from "./internal/slack-command-response";
+import { SlackHomeProjectionService } from "./internal/slack-home-projection";
 import { SubagentTurnContextResolver } from "./internal/subagent-context";
 import { buildDelegatedToolDispatch } from "./internal/tool-dispatch";
 import { ChatTurnContextResolver } from "./internal/turn-context";
@@ -300,6 +308,13 @@ import { buildGoogleTools } from "./tools/google/tools";
 import { composeNetworkTools } from "./tools/network/compose";
 import { buildToolRegistry } from "./tools/setup";
 import { buildSlackTooling } from "./tools/slack/compose";
+import {
+  GovernedSlackFileUploadSource,
+  SlackExternalUploadHttp,
+  SlackIntegrationIdentityResolver,
+  SlackProviderFileUploads,
+  SlackProviderObjectOwnership,
+} from "./tools/slack/ports";
 import { buildSlackTools } from "./tools/slack/tools";
 import { EventTriggerGateway } from "./triggers/event-dispatch";
 
@@ -552,6 +567,7 @@ async function boot() {
     const tokenRepo = new PgTokenRepo(pool);
     const apiClientRepo = new PgApiClientRepo(pool);
     const externalIdentityRepo = new PgExternalIdentityRepo(pool);
+    const externalIdentityUnlinker = new PgExternalIdentityUnlinker(pool, DEPLOYMENT_BUSINESS_ID);
     await syncDeploymentRoles(new PgRoleRepo(transactionPort(pool)));
     // authored Role actually resolves through the authority layers (and a Role deleted from Soul is
     // reaped). Reserved bootstrap ids are never touched. See identity/role-reconcile.ts.
@@ -920,6 +936,11 @@ async function boot() {
     const channelRunDeliveries = new ChannelRunDeliveryStore(runTransactions, () =>
       new Date().toISOString()
     );
+    const slackCommandResponses = new SlackCommandResponseService({
+      businessId: DEPLOYMENT_BUSINESS_ID,
+      store: new SlackCommandResponseStore(pool),
+      secrets: secretsService,
+    });
     const channelMentionedThreads = new ChannelMentionedThreadStore(runTransactions, () =>
       new Date().toISOString()
     );
@@ -946,6 +967,15 @@ async function boot() {
     const slackTooling = buildSlackTooling({
       secrets: async () => secretsService,
       channelRunDelivery: channelRunDeliveries,
+      integrationIdentity: new SlackIntegrationIdentityResolver(integrationStore),
+      ownedObjects: new SlackProviderObjectOwnership(
+        new ProviderObjectOwnershipStore(runTransactions, () => new Date().toISOString())
+      ),
+      files: new GovernedSlackFileUploadSource(runStore, fileService),
+      externalUpload: new SlackExternalUploadHttp(),
+      fileUploads: new SlackProviderFileUploads(
+        new ProviderFileUploadStore(runTransactions, () => new Date().toISOString())
+      ),
     });
     const slackEffects = new PgEffectStore(runTransactions);
     const slackTools = buildSlackTools(DEPLOYMENT_BUSINESS_ID, {
@@ -1299,6 +1329,7 @@ async function boot() {
       identity: {
         apiClientRepo,
         externalIdentityRepo,
+        externalIdentityUnlinker,
         channelBind,
         channelBindSecrets: secretsService,
       },
@@ -1425,6 +1456,7 @@ async function boot() {
           bind: channelBind,
         }),
         runDeliveries: channelRunDeliveries,
+        commandResponses: slackCommandResponses,
         toolApprovals,
         cancelRun: runCancel,
         surfaceStore: surfaceArtifactStore,
@@ -1434,6 +1466,52 @@ async function boot() {
         // redeemed inside an authenticated web session, so it must point at the origin users
         bindLinkUrl: (token) =>
           `${publicOrigins.current().webOrigin}/link-channel?token=${encodeURIComponent(token)}`,
+      }),
+      slackHome: (log: FastifyBaseLogger) => ({
+        businessId: DEPLOYMENT_BUSINESS_ID,
+        integrations: channelIntegrations,
+        identity: new IngressIdentityResolver({
+          users: userRepo,
+          log,
+          mappings: externalIdentityRepo,
+          bind: channelBind,
+        }),
+        projection: new SlackHomeProjectionService({
+          webOrigin: publicOrigins.current().webOrigin,
+          toolApprovals,
+          routineApprovals,
+          tasks: taskRepo,
+          conversations: conversationRepo,
+          conversationTurns: conversationStore,
+          agents: {
+            list: () => listAgents(soulLoader),
+            mayInvoke: async (agent, principal) =>
+              (
+                await teamAssets.access(
+                  "agent",
+                  agent.name,
+                  principal,
+                  agent.frontmatter.ownership as Parameters<typeof teamAssets.access>[3]
+                )
+              ).levels.includes("use"),
+          },
+        }),
+        bindLinkUrl: (token) =>
+          `${publicOrigins.current().webOrigin}/link-channel?token=${encodeURIComponent(token)}`,
+        unlinkedUrl: publicOrigins.current().webOrigin,
+      }),
+      slackEvents: (log: FastifyBaseLogger) => ({
+        businessId: DEPLOYMENT_BUSINESS_ID,
+        integrations: channelIntegrations,
+        identity: new IngressIdentityResolver({
+          users: userRepo,
+          log,
+          mappings: externalIdentityRepo,
+          bind: channelBind,
+        }),
+        events,
+        eventTriggers,
+        domainEvents: domainEventEmitter,
       }),
       runEvents: {
         events: runEventStore,

@@ -112,7 +112,14 @@ describe("SlackChannelAdapter", () => {
   it("persists before ack, then starts a Run as the mapped external principal", async () => {
     const order: string[] = [];
     let persisted: ChannelInboundEvent | undefined;
-    const start = vi.fn(async () => ({ runId: "run-1", outcome: "started" as const }));
+    const start = vi.fn(async () => {
+      order.push("start");
+      return { runId: "run-1", outcome: "started" as const };
+    });
+    const resolve = vi.fn(async () => {
+      order.push("identity");
+      return { kind: "user" as const, id: PRINCIPAL_ID };
+    });
     const adapter = new SlackChannelAdapter({
       inbound: {
         accept: async (input) => {
@@ -122,10 +129,7 @@ describe("SlackChannelAdapter", () => {
         },
       },
       identities: {
-        resolve: async () => {
-          order.push("identity");
-          return { kind: "user", id: PRINCIPAL_ID };
-        },
+        resolve,
       },
       routing: { load: async () => routing() },
       runs: { start },
@@ -136,7 +140,13 @@ describe("SlackChannelAdapter", () => {
       order.push("ack");
     });
 
-    expect(order).toEqual(["persist", "ack", "identity"]);
+    expect(order).toEqual(["persist", "identity", "start", "ack"]);
+    expect(resolve).toHaveBeenCalledWith({
+      businessId: BUSINESS_ID,
+      provider: "slack",
+      externalSubject: "U-ALICE",
+      externalTenantId: "T-ACME",
+    });
     expect(result).toEqual({ outcome: "started", runId: "run-1" });
     expect(start).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -192,24 +202,59 @@ describe("SlackChannelAdapter", () => {
     expect(persisted?.data.threadId).toBe("1785000000.000100");
   });
 
-  it("acks a duplicate after durable acceptance without resolving identity or starting a Run", async () => {
-    const resolve = vi.fn();
-    const start = vi.fn();
+  it("replays a duplicate through the idempotent Run reservation before ack", async () => {
+    const order: string[] = [];
+    const resolve = vi.fn(async () => {
+      order.push("identity");
+      return { kind: "user" as const, id: PRINCIPAL_ID };
+    });
+    const start = vi.fn(async () => {
+      order.push("start");
+      return { runId: "run-1", outcome: "duplicate" as const };
+    });
     const ack = vi.fn();
     const adapter = new SlackChannelAdapter({
-      inbound: { accept: async () => ({ outcome: "duplicate" }) },
+      inbound: {
+        accept: async () => {
+          order.push("persist");
+          return { outcome: "duplicate" };
+        },
+      },
       identities: { resolve },
-      routing: { load: vi.fn() },
+      routing: {
+        load: async () => {
+          order.push("routing");
+          return routing();
+        },
+      },
       runs: { start },
       now: () => "2026-07-26T10:00:00.000Z",
     });
 
-    expect(await adapter.receive(BUSINESS_ID, event(), ack)).toEqual({
-      outcome: "duplicate",
-    });
+    expect(
+      await adapter.receive(BUSINESS_ID, event(), async () => {
+        order.push("ack");
+        await ack();
+      })
+    ).toEqual({ outcome: "duplicate", runId: "run-1" });
     expect(ack).toHaveBeenCalledOnce();
-    expect(resolve).not.toHaveBeenCalled();
-    expect(start).not.toHaveBeenCalled();
+    expect(order).toEqual(["persist", "identity", "routing", "start", "ack"]);
+    expect(resolve).toHaveBeenCalledOnce();
+    expect(start).toHaveBeenCalledOnce();
+  });
+
+  it("leaves the envelope unacknowledged when Run reservation fails", async () => {
+    const ack = vi.fn();
+    const adapter = new SlackChannelAdapter({
+      inbound: { accept: async () => ({ outcome: "accepted" }) },
+      identities: { resolve: async () => ({ kind: "user", id: PRINCIPAL_ID }) },
+      routing: { load: async () => routing() },
+      runs: { start: vi.fn().mockRejectedValue(new Error("API unavailable")) },
+      now: () => "2026-07-26T10:00:00.000Z",
+    });
+
+    await expect(adapter.receive(BUSINESS_ID, event(), ack)).rejects.toThrow("API unavailable");
+    expect(ack).not.toHaveBeenCalled();
   });
 
   it("denies an unmapped actor and never substitutes an owner or admin", async () => {

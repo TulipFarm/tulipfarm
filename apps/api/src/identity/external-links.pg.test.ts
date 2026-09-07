@@ -1,10 +1,13 @@
 import type { PGlite } from "@electric-sql/pglite";
+import { DEPLOYMENT_BUSINESS_ID } from "@tulipfarm/constants";
+import { ChannelSurfaceStore, IntegrationStore, transactionPort } from "@tulipfarm/storage";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { makeMigratedPglite } from "../test/pglite";
 import {
   type ExternalIdentityMappingDoc,
   type IdentityVerificationMethod,
   PgExternalIdentityRepo,
+  PgExternalIdentityUnlinker,
 } from "./external-links";
 
 const NOW = new Date("2026-08-18T12:00:00Z");
@@ -40,6 +43,7 @@ describe("PgExternalIdentityRepo knowledge-grade filtering", () => {
   ): ExternalIdentityMappingDoc => ({
     provider,
     externalSubject: `subject-${provider}`,
+    ...(provider === "slack" ? { externalTenantId: "T1" } : {}),
     userId: USER,
     verifiedAt: NOW,
     expiresAt: null,
@@ -95,7 +99,7 @@ describe("PgExternalIdentityRepo knowledge-grade filtering", () => {
     await repo.upsertMapping(mapping("slack", "link_token"));
     expect(await knowledgeProviders()).toEqual(["slack"]);
 
-    await repo.deleteMapping("slack", "subject-slack");
+    await repo.deleteMapping("slack", "subject-slack", "T1");
 
     expect(await knowledgeProviders()).toEqual([]);
   });
@@ -107,5 +111,173 @@ describe("PgExternalIdentityRepo knowledge-grade filtering", () => {
     await repo.upsertMapping(mapping("slack", "manifest_email"));
 
     expect(await knowledgeProviders()).toEqual([]);
+  });
+
+  it("keeps the same Slack subject isolated across workspaces", async () => {
+    const other = "22222222-2222-4222-8222-222222222222";
+    await db.query(
+      `INSERT INTO users (id, email, password_hash, role, created_at)
+       VALUES ($1, 'other@example.com', 'x', 'member', now())`,
+      [other]
+    );
+    await repo.upsertMapping({
+      ...mapping("slack", "bind_link"),
+      externalSubject: "U-SHARED",
+      externalTenantId: "T1",
+    });
+    await repo.upsertMapping({
+      ...mapping("slack", "bind_link"),
+      externalSubject: "U-SHARED",
+      externalTenantId: "T2",
+      userId: other,
+    });
+
+    await expect(repo.findMapping("slack", "U-SHARED", "T1")).resolves.toMatchObject({
+      userId: USER,
+    });
+    await expect(repo.findMapping("slack", "U-SHARED", "T2")).resolves.toMatchObject({
+      userId: other,
+    });
+    await expect(repo.findMapping("slack", "U-SHARED")).resolves.toBeNull();
+  });
+
+  it("atomically enqueues an exact Slack Home replacement when unlinking", async () => {
+    const transactions = transactionPort(db);
+    const integrations = new IntegrationStore(transactions);
+    const surfaces = new ChannelSurfaceStore(transactions, () => NOW.toISOString());
+    await integrations.putApp({
+      id: "slack-app",
+      businessId: DEPLOYMENT_BUSINESS_ID,
+      provider: "slack",
+      externalAppId: "A1",
+      credentialRefs: ["secret://slack/bot"],
+      status: "active",
+    });
+    await integrations.putIntegration({
+      id: "slack-workspace",
+      businessId: DEPLOYMENT_BUSINESS_ID,
+      appId: "slack-app",
+      externalTenantId: "T1",
+      credentialRef: "secret://slack/bot",
+      status: "active",
+    });
+    const linked = mapping("slack", "link_token");
+    await repo.upsertMapping(linked);
+
+    await new PgExternalIdentityUnlinker(db, DEPLOYMENT_BUSINESS_ID, () =>
+      NOW.toISOString()
+    ).unlink(linked);
+
+    await expect(repo.findMapping("slack", "subject-slack", "T1")).resolves.toBeNull();
+    await expect(
+      surfaces.claimPublish({
+        businessId: DEPLOYMENT_BUSINESS_ID,
+        owner: "worker-1",
+        limit: 10,
+        leaseDurationMs: 30_000,
+      })
+    ).resolves.toEqual([
+      expect.objectContaining({
+        businessId: DEPLOYMENT_BUSINESS_ID,
+        integrationId: "slack-workspace",
+        externalTenantId: "T1",
+        externalSubject: "subject-slack",
+        surface: "home",
+      }),
+    ]);
+  });
+
+  it("rolls back a Slack unlink when the replacement cannot be enqueued", async () => {
+    const transactions = transactionPort(db);
+    const integrations = new IntegrationStore(transactions);
+    const surfaces = new ChannelSurfaceStore(transactions, () => NOW.toISOString());
+    await integrations.putApp({
+      id: "slack-app",
+      businessId: DEPLOYMENT_BUSINESS_ID,
+      provider: "slack",
+      externalAppId: "A1",
+      credentialRefs: ["secret://slack/bot"],
+      status: "active",
+    });
+    await integrations.putIntegration({
+      id: "slack-workspace",
+      businessId: DEPLOYMENT_BUSINESS_ID,
+      appId: "slack-app",
+      externalTenantId: "T1",
+      credentialRef: "secret://slack/bot",
+      status: "active",
+    });
+    const linked = mapping("slack", "link_token");
+    await repo.upsertMapping(linked);
+    await surfaces.upsertInstance({
+      businessId: DEPLOYMENT_BUSINESS_ID,
+      provider: "slack",
+      integrationId: "slack-workspace",
+      externalTenantId: "T1",
+      externalSubject: "subject-slack",
+      surface: "home",
+      externalId: "home",
+      renderDigest: "old-authorized-home",
+      status: "revoked",
+    });
+
+    await expect(
+      new PgExternalIdentityUnlinker(db, DEPLOYMENT_BUSINESS_ID, () => NOW.toISOString()).unlink(
+        linked
+      )
+    ).rejects.toThrow("channel_surface_instance_not_publishable");
+
+    await expect(repo.findMapping("slack", "subject-slack", "T1")).resolves.toMatchObject({
+      userId: USER,
+    });
+  });
+
+  it("deletes a Slack mapping when its Integration is revoked without enqueueing", async () => {
+    const transactions = transactionPort(db);
+    const integrations = new IntegrationStore(transactions);
+    const surfaces = new ChannelSurfaceStore(transactions, () => NOW.toISOString());
+    await integrations.putApp({
+      id: "slack-app",
+      businessId: DEPLOYMENT_BUSINESS_ID,
+      provider: "slack",
+      externalAppId: "A1",
+      credentialRefs: ["secret://slack/bot"],
+      status: "active",
+    });
+    await integrations.putIntegration({
+      id: "slack-workspace",
+      businessId: DEPLOYMENT_BUSINESS_ID,
+      appId: "slack-app",
+      externalTenantId: "T1",
+      credentialRef: "secret://slack/bot",
+      status: "revoked",
+    });
+    const linked = mapping("slack", "link_token");
+    await repo.upsertMapping(linked);
+
+    await new PgExternalIdentityUnlinker(db, DEPLOYMENT_BUSINESS_ID, () =>
+      NOW.toISOString()
+    ).unlink(linked);
+
+    await expect(repo.findMapping("slack", "subject-slack", "T1")).resolves.toBeNull();
+    await expect(
+      surfaces.claimPublish({
+        businessId: DEPLOYMENT_BUSINESS_ID,
+        owner: "worker-1",
+        limit: 10,
+        leaseDurationMs: 30_000,
+      })
+    ).resolves.toEqual([]);
+  });
+
+  it("keeps non-Slack unlink behavior independent of App Home", async () => {
+    const linked = mapping("github", "link_token");
+    await repo.upsertMapping(linked);
+
+    await new PgExternalIdentityUnlinker(db, DEPLOYMENT_BUSINESS_ID, () =>
+      NOW.toISOString()
+    ).unlink(linked);
+
+    await expect(repo.findMapping("github", "subject-github")).resolves.toBeNull();
   });
 });

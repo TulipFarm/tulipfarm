@@ -1,3 +1,53 @@
+import { type Static, Type } from "@sinclair/typebox";
+
+export const SurfaceFormInputSchema = Type.Union([
+  Type.Literal("text"),
+  Type.Literal("textarea"),
+  Type.Literal("email"),
+  Type.Literal("number"),
+  Type.Literal("url"),
+  Type.Literal("date"),
+  Type.Literal("time"),
+  Type.Literal("datetime"),
+  Type.Literal("richtext"),
+  Type.Literal("select"),
+  Type.Literal("multiselect"),
+  Type.Literal("checkbox"),
+  Type.Literal("radio"),
+  Type.Literal("user"),
+  Type.Literal("channel"),
+  Type.Literal("conversation"),
+]);
+
+export type SurfaceFormInput = Static<typeof SurfaceFormInputSchema>;
+
+export const SurfaceFormFieldSchema = Type.Object({
+  name: Type.String({ minLength: 1, maxLength: 100 }),
+  label: Type.String({ minLength: 1, maxLength: 200 }),
+  input: SurfaceFormInputSchema,
+  required: Type.Optional(Type.Boolean()),
+  options: Type.Optional(Type.Array(Type.String({ maxLength: 200 }), { maxItems: 100 })),
+  description: Type.Optional(Type.String({ maxLength: 300 })),
+  minLength: Type.Optional(Type.Integer({ minimum: 0, maximum: 3_000, default: 0 })),
+  maxLength: Type.Optional(Type.Integer({ minimum: 0, maximum: 3_000, default: 3_000 })),
+  minItems: Type.Optional(Type.Integer({ minimum: 0, maximum: 100, default: 0 })),
+  maxItems: Type.Optional(Type.Integer({ minimum: 1, maximum: 100, default: 100 })),
+});
+
+export type SurfaceFormField = Static<typeof SurfaceFormFieldSchema>;
+
+export type SurfaceFormValue =
+  | { readonly kind: "text" | "textarea" | "email" | "url" | "richtext"; readonly value: string }
+  | { readonly kind: "number"; readonly value: string }
+  | { readonly kind: "date"; readonly value: string }
+  | { readonly kind: "time"; readonly value: string }
+  | { readonly kind: "datetime"; readonly value: string }
+  | {
+      readonly kind: "select" | "radio" | "user" | "channel" | "conversation";
+      readonly value: string;
+    }
+  | { readonly kind: "multiselect" | "checkbox"; readonly values: readonly string[] };
+
 interface GovernedFormBase {
   readonly id: string;
   readonly version: string;

@@ -22,6 +22,7 @@ describe("httpChannelIdentityPort", () => {
       businessId: "business-1",
       provider: "slack",
       externalSubject: "U1",
+      externalTenantId: "T1",
     });
 
     expect(result).toEqual({ kind: "user", id: "user-1" });
@@ -30,6 +31,7 @@ describe("httpChannelIdentityPort", () => {
     expect(JSON.parse(init.body as string)).toEqual({
       provider: "slack",
       externalSubject: "U1",
+      externalTenantId: "T1",
     });
   });
 
@@ -42,8 +44,36 @@ describe("httpChannelIdentityPort", () => {
       businessId: "business-1",
       provider: "slack",
       externalSubject: "U-UNKNOWN",
+      externalTenantId: "T2",
     });
 
     expect(result).toBeUndefined();
+  });
+
+  it("keeps the same Slack user ID isolated by workspace", async () => {
+    const fetchImpl = vi.fn(async (_input: string | URL | Request, init?: RequestInit) => {
+      const body = JSON.parse(init?.body as string) as { externalTenantId: string };
+      const id = body.externalTenantId === "T1" ? "user-1" : "user-2";
+      return new Response(JSON.stringify({ linked: true, principal: { kind: "user", id } }), {
+        status: 200,
+      });
+    });
+    const identities = httpChannelIdentityPort(client(fetchImpl));
+
+    const first = await identities.resolve({
+      businessId: "business-1",
+      provider: "slack",
+      externalSubject: "U-SHARED",
+      externalTenantId: "T1",
+    });
+    const second = await identities.resolve({
+      businessId: "business-1",
+      provider: "slack",
+      externalSubject: "U-SHARED",
+      externalTenantId: "T2",
+    });
+
+    expect(first).toEqual({ kind: "user", id: "user-1" });
+    expect(second).toEqual({ kind: "user", id: "user-2" });
   });
 });

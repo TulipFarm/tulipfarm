@@ -1,6 +1,11 @@
 import {
   type IntegrationHttpPort,
   SLACK_ADAPTER_REF,
+  type SlackExternalUploadPort,
+  type SlackFileUploadSource,
+  type SlackFileUploadStatePort,
+  type SlackIntegrationIdentityPort,
+  type SlackOwnedObjectPort,
   SlackToolAdapter,
   type SlackToolAdapterDeps,
 } from "@tulipfarm/integrations";
@@ -10,7 +15,11 @@ import {
   type SecretsService,
   secretsServiceProvider,
 } from "@tulipfarm/secrets";
-import { CredentialDispatcher, type ToolAdapter } from "@tulipfarm/tool-broker";
+import {
+  CredentialDispatcher,
+  type ToolAdapter,
+  type ToolReconciliationAdapter,
+} from "@tulipfarm/tool-broker";
 import { SlackWebApiHttp } from "../../integrations/slack-http";
 import {
   SLACK_BOT_TOKEN_SECRET_REF,
@@ -27,10 +36,16 @@ export interface BuildSlackToolingOptions {
   readonly secrets: () => Promise<SecretsService>;
   readonly http?: IntegrationHttpPort;
   readonly channelRunDelivery?: SlackToolAdapterDeps["channelRunDelivery"];
+  readonly integrationIdentity?: SlackIntegrationIdentityPort;
+  readonly ownedObjects?: SlackOwnedObjectPort;
+  readonly files?: SlackFileUploadSource;
+  readonly externalUpload?: SlackExternalUploadPort;
+  readonly fileUploads?: SlackFileUploadStatePort;
 }
 
 export interface SlackTooling {
   readonly adapters: ReadonlyMap<string, ToolAdapter>;
+  readonly reconciliationAdapters?: ReadonlyMap<string, ToolReconciliationAdapter>;
   readonly credentials: CredentialDispatcher;
 }
 
@@ -45,13 +60,25 @@ const slackOnlyAuthorizer: SecretAuthorizer = {
 
 export function buildSlackTooling(options: BuildSlackToolingOptions): SlackTooling {
   const http = options.http ?? new SlackWebApiHttp();
-  const adapter = new SlackToolAdapter({ http, channelRunDelivery: options.channelRunDelivery });
-
   const tokenProvider = new SlackBotTokenProvider({ secrets: options.secrets });
   const provider = slackCompositeSecretProvider(
     secretsServiceProvider({ get: async (key) => (await options.secrets()).get(key) }),
     tokenProvider
   );
+  const adapter = new SlackToolAdapter({
+    http,
+    channelRunDelivery: options.channelRunDelivery,
+    integrationIdentity: options.integrationIdentity,
+    ownedObjects: options.ownedObjects,
+    files: options.files,
+    externalUpload: options.externalUpload,
+    fileUploads: options.fileUploads,
+    reconciliationCredential: {
+      async resolve() {
+        return (await tokenProvider.resolveCurrent(SLACK_BOT_TOKEN_SECRET_REF))?.value;
+      },
+    },
+  });
   const secretBroker = new SecretBroker({ provider, authorizer: slackOnlyAuthorizer });
   const credentials = new CredentialDispatcher({
     secrets: secretBroker,
@@ -60,6 +87,9 @@ export function buildSlackTooling(options: BuildSlackToolingOptions): SlackTooli
 
   return {
     adapters: new Map<string, ToolAdapter>([[SLACK_ADAPTER_REF, adapter]]),
+    reconciliationAdapters: new Map<string, ToolReconciliationAdapter>([
+      [SLACK_ADAPTER_REF, adapter],
+    ]),
     credentials,
   };
 }
