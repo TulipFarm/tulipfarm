@@ -5,6 +5,8 @@ import {
   BatchingLogSink,
   describeError,
   MutationKillSwitchGuard,
+  OtlpAiMetricsExporter,
+  OtlpAiTracesExporter,
   PgLogWriter,
   PgResourceWriter,
   processResourceProbe,
@@ -78,7 +80,13 @@ import { startMaintenanceConsumers } from "./maintenance";
 import { LlmModelPort } from "./model";
 import { MODEL_BUDGET_EXHAUSTION_POLICY } from "./model-budget";
 import { ProviderGate } from "./model-gate";
-import { PgSpendSink } from "./observability";
+import {
+  observeRoutineAgentPort,
+  observeRoutineToolPort,
+  observeToolDispatch,
+  PgSpendSink,
+} from "./observability";
+import { resolveWorkerOtlpTarget } from "./observability-config";
 import { waitForSchemaFloor } from "./preflight";
 import { startProbeServer } from "./probe-server";
 import { TaskSignalsGatherer } from "./reconcile/task-signals";
@@ -333,9 +341,44 @@ export async function main(): Promise<void> {
   // One per process, shared by every turn: a per-turn gate would cap nothing.
   const modelGate = new ProviderGate();
 
+  let aiMetrics: OtlpAiMetricsExporter | undefined;
+  let aiTraces: OtlpAiTracesExporter | undefined;
+  try {
+    const remoteObservability = await turnHost.observabilityConfig();
+    const target = await resolveWorkerOtlpTarget(remoteObservability, {
+      env: process.env,
+      secret: async (key) => (await secrets()).get(key),
+    });
+    if (target !== undefined) {
+      aiMetrics = new OtlpAiMetricsExporter(target, Date.now, fetch, (message) =>
+        logger.warn({ event: "observability.export_failed" }, message)
+      );
+      aiTraces = new OtlpAiTracesExporter(target, Date.now, Math.random, fetch, (message) =>
+        logger.warn({ event: "observability.export_failed" }, message)
+      );
+      aiMetrics.start();
+      aiTraces.start();
+      logger.info("[observability] Worker AI metrics + traces export enabled");
+    } else if (remoteObservability?.enabled && remoteObservability.otlp !== null) {
+      logger.warn(
+        { event: "observability.token_unresolved" },
+        "[observability] Worker OTLP enabled but token reference is invalid or unresolved"
+      );
+    }
+  } catch {
+    logger.warn(
+      { event: "observability.config_unavailable" },
+      "[observability] Worker OTLP configuration unavailable; export disabled"
+    );
+  }
+
   // The spend ledger the dashboard reads. Without this the Worker charges Run budgets correctly
   // and reports nothing, so every cost view showed zero.
-  const spendSink = new PgSpendSink(pool, logger);
+  const spendSink = new PgSpendSink(pool, logger, {
+    metrics: aiMetrics,
+    traces: aiTraces,
+  });
+  const observedToolDispatch = observeToolDispatch(toolDispatch, spendSink);
 
   // The intermediary the network Tools deliberately do not contain: `web_fetch` and `api_request`
   // return whole responses, and the judgement about which parts matter happens once, here, on the
@@ -359,7 +402,7 @@ export async function main(): Promise<void> {
 
   const chatExecutorOptions = {
     distiller: toolResultDistiller,
-    tools: toolDispatch,
+    tools: observedToolDispatch,
     context: turnHost,
     attachments: turnHost,
     runs: runStore,
@@ -368,7 +411,7 @@ export async function main(): Promise<void> {
     transitions: new RunStoreStateTransitions(runStore),
     waits: turnHost,
     checkpoints: loopCheckpointStore,
-    model: ({ events, budgets, businessId, runId, conversationId }) =>
+    model: ({ events, budgets, businessId, runId, turnId, conversationId }) =>
       new LlmModelPort({
         model: (selector, requirements, inference, principal, gate) =>
           llm.resolveModel(selector, requirements, inference, principal, gate),
@@ -377,6 +420,7 @@ export async function main(): Promise<void> {
         spend: spendSink,
         conversationId,
         runId,
+        turnId,
         effort: createEffortInference({
           models: llm,
           pinned: runEventEffortPin(runEventStore, businessId, runId),
@@ -451,22 +495,25 @@ export async function main(): Promise<void> {
       waits,
       // Routine Tools must pass the Broker: pinned authority, ledger reservation, then adapter.
       // No `authority` callback: the bundle layer is the Run's only authority.
-      tools: new BrokerRoutineToolPort({
-        effects: new PgEffectStore(transactions),
-        adapters: githubTooling.adapters,
-        adaptersFor: (request) =>
-          buildBundleSandboxAdapters(request, {
-            artifacts: artifactService,
-            ...(sandboxRuntimeImage === undefined ? {} : { runtimeImage: sandboxRuntimeImage }),
-          }),
-        credentials: githubTooling.credentials,
-        mutationGuard,
-      }),
+      tools: observeRoutineToolPort(
+        new BrokerRoutineToolPort({
+          effects: new PgEffectStore(transactions),
+          adapters: githubTooling.adapters,
+          adaptersFor: (request) =>
+            buildBundleSandboxAdapters(request, {
+              artifacts: artifactService,
+              ...(sandboxRuntimeImage === undefined ? {} : { runtimeImage: sandboxRuntimeImage }),
+            }),
+          credentials: githubTooling.credentials,
+          mutationGuard,
+        }),
+        spendSink
+      ),
       // Authored TypeScript, run in the sealed isolate: no network, no host reach, frozen clock.
       scripts: new SandboxRoutineScriptPort(),
       // Runtime Tools called with no model in the loop. The dispatch names no Agent, so the
       // control plane authorizes it as the Run's own recorded subject.
-      actions: new DispatchRoutineActionPort(toolDispatch),
+      actions: new DispatchRoutineActionPort(observedToolDispatch),
       // Approval resume tokens stay API-side; Worker gets only wait id and later decision.
       approvals: new HttpRoutineApprovalPort(internalApi),
       childRoutines: new HttpChildRoutinePort(internalApi),
@@ -474,27 +521,31 @@ export async function main(): Promise<void> {
       // Routine Agent States use the pinned Agent/ModelProfile, and reach Tools through the same
       // routed dispatch a Chat Turn uses, naming the State's Agent so the control plane can
       // confirm it against the Soul before authorizing anything.
-      agents: new BundleRoutineAgentPort({
-        tools: toolDispatch,
-        catalog: (runId, agentName) => turnHost.agentTools(runId, agentName),
-        // Chain, routing event, and budget are already selected/opened by the Routine port.
-        model: ({ modelIds, routing, runId }) =>
-          new LlmModelPort({
-            // Through `resolveChain`, so a Routine call is priced by the same authority as a Chat
-            // call. Building the resolution inline here is what left Routine spend reported free.
-            model: async (_selector, _requirements, _inference, principal, gate) =>
-              llm.resolveChain(modelIds, routing, principal, gate),
-            signal,
-            gate: modelGate,
-            spend: spendSink,
-            runId,
-          }),
-        events: runEventStore,
-        budgets: budgetStore,
-        runs: runStore,
-        checkpoints: loopCheckpointStore,
-        log: logger,
-      }),
+      agents: observeRoutineAgentPort(
+        new BundleRoutineAgentPort({
+          tools: observedToolDispatch,
+          catalog: (runId, agentName) => turnHost.agentTools(runId, agentName),
+          // Chain, routing event, and budget are already selected/opened by the Routine port.
+          model: ({ modelIds, routing, runId, turnId }) =>
+            new LlmModelPort({
+              // Through `resolveChain`, so a Routine call is priced by the same authority as a Chat
+              // call. Building the resolution inline here is what left Routine spend reported free.
+              model: async (_selector, _requirements, _inference, principal, gate) =>
+                llm.resolveChain(modelIds, routing, principal, gate),
+              signal,
+              gate: modelGate,
+              spend: spendSink,
+              runId,
+              turnId,
+            }),
+          events: runEventStore,
+          budgets: budgetStore,
+          runs: runStore,
+          checkpoints: loopCheckpointStore,
+          log: logger,
+        }),
+        spendSink
+      ),
     })
   );
 
@@ -667,6 +718,11 @@ export async function main(): Promise<void> {
       );
     }
 
+    await spendSink.flush();
+    aiMetrics?.stop();
+    aiTraces?.stop();
+    await Promise.all([aiMetrics?.flush(), aiTraces?.flush()]);
+
     // Stop samplers before pool.end(); a timed-out drain must still be recorded.
     await resourceSampler.stop();
     await logSink?.stop();
@@ -684,6 +740,8 @@ export async function main(): Promise<void> {
       shutdown(signalName).catch(async (error: unknown) => {
         logger.error("worker shutdown failed", error);
         // Best effort: if the pool is closed, this degrades to stderr.
+        aiMetrics?.stop();
+        aiTraces?.stop();
         await resourceSampler.stop();
         await logSink?.stop();
         process.exit(1);

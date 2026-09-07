@@ -61,6 +61,8 @@ export type LlmModelResolution =
        * call is about to be made against.
        */
       readonly provider?: string;
+      /** Provider for the model that actually answered, including a fallback-chain link. */
+      providerForModel?(modelId: string | undefined): string | undefined;
       /** The last chain link that a provider call actually entered. */
       attemptedModelId?(): string | undefined;
       /**
@@ -100,17 +102,17 @@ export class SoulLlm {
 
   constructor(private readonly options: SoulLlmOptions) {}
 
+  /** The provider behind a configured model id, for per-provider limits and the breaker. */
+  private providerOf(modelId: string | undefined): string | undefined {
+    return modelId === undefined ? undefined : this.service.entryFor(modelId)?.provider;
+  }
+
   /**
    * Prices a completed call, given the model that actually answered.
    *
    * The provider comes from the configured entry rather than the model id, so a subscription seat
    * is recognised as unmetered instead of being matched against the published API price table.
    */
-  /** The provider behind a configured model id, for per-provider limits and the breaker. */
-  private providerOf(modelId: string | undefined): string | undefined {
-    return modelId === undefined ? undefined : this.service.entryFor(modelId)?.provider;
-  }
-
   priceFor(modelId: string | undefined, tokensIn: number, tokensOut: number): CostBasis {
     if (modelId === undefined) return { kind: "unpriced" };
     const entry = this.service.entryFor(modelId);
@@ -186,6 +188,7 @@ export class SoulLlm {
       ...(this.providerOf(modelIds[0]) === undefined
         ? {}
         : { provider: this.providerOf(modelIds[0]) }),
+      providerForModel: (modelId) => this.providerOf(modelId),
       routing,
       attemptedModelId: () => attempted.modelId,
       price: (tokensIn, tokensOut) => this.priceFor(responder.modelId, tokensIn, tokensOut),
@@ -217,6 +220,7 @@ export class SoulLlm {
         ...(this.providerOf(resolved.modelId) === undefined
           ? {}
           : { provider: this.providerOf(resolved.modelId) }),
+        providerForModel: (modelId) => this.providerOf(modelId),
         routing: {
           outcome: "raw_model",
           selector,
@@ -305,6 +309,7 @@ export class SoulLlm {
         attempted
       ),
       ...(this.providerOf(chain[0]) === undefined ? {} : { provider: this.providerOf(chain[0]) }),
+      providerForModel: (modelId) => this.providerOf(modelId),
       ...(budgetEvidence === undefined ? {} : { budgetLimits }),
       // Attributed to the link that answered: a chain that rate-limits through to a cheaper model
       // must not be billed at the head model's price.

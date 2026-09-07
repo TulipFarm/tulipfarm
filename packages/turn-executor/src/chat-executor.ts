@@ -209,6 +209,7 @@ async function executeTurn(
           budgets: new RunBudgetManager(options.budgets),
           businessId: run.businessId,
           runId: run.id,
+          turnId: identity.turnId,
           conversationId: identity.conversationId,
         })
       : options.model;
@@ -244,6 +245,7 @@ async function executeTurn(
                   budgets: new RunBudgetManager(options.budgets),
                   businessId: run.businessId,
                   runId: run.id,
+                  turnId: identity.turnId,
                   conversationId: identity.conversationId,
                 })
               : options.distiller,
@@ -292,6 +294,8 @@ export interface ChatModelFactoryInput {
   readonly budgets: RunBudgetManager;
   readonly businessId: string;
   readonly runId: string;
+  /** Which Turn this model call belongs to, for per-Turn telemetry totals. */
+  readonly turnId: string;
   /** Which Conversation the turn belongs to, so its model spend can be attributed to it. */
   readonly conversationId: string;
 }

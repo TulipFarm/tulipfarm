@@ -13,6 +13,7 @@ and provider-neutral telemetry ports.
 | Path | Owns |
 | --- | --- |
 | `src/ports/` | `TelemetryPort` and capability catalog. |
+| `src/ai-export.ts` | Dependency-free Worker AI metrics and trace OTLP exporters. |
 | `src/logs.ts` | Structured log redaction helpers. |
 | `src/resources.ts` | Resource metadata helpers. |
 | `src/backpressure.ts`, `src/resilience.ts`, `src/prune.ts` | Operational health helpers. |

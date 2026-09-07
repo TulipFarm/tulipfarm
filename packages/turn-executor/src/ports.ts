@@ -1,4 +1,3 @@
-import type { ModelUsage } from "@tulipfarm/agent-runtime";
 import type { EffortPreset, EffortRung } from "@tulipfarm/schema";
 import type { PersistedRun } from "@tulipfarm/storage";
 
@@ -40,19 +39,43 @@ export interface RunOutcome {
 export type RunExecutor = (run: PersistedRun, signal?: AbortSignal) => Promise<RunOutcome>;
 
 /** One model call, as the spend ledger records it. */
+export interface LlmCallUsage {
+  readonly inputTokens?: number;
+  readonly outputTokens?: number;
+  readonly cacheReadTokens?: number;
+  readonly cacheWriteTokens?: number;
+  readonly reasoningTokens?: number;
+  readonly costUsd?: number;
+  readonly costBasis?: "priced" | "unpriced" | "subscription";
+}
+
 export interface LlmCallRecord {
+  /** Stable per-attempt request identity, used to make durable accounting idempotent. */
+  readonly requestId?: string;
   readonly conversationId?: string;
   readonly agentId?: string;
   readonly model?: string;
   readonly provider?: string;
   readonly tier?: string;
-  readonly usage?: ModelUsage;
+  readonly usage?: LlmCallUsage;
   readonly durationMs?: number;
-  readonly status: "ok" | "error";
+  readonly status: "ok" | "error" | "fallback";
   readonly runId?: string;
   readonly turnId?: string;
   /** Whom the call acted as, kind included, so spend can be grouped by member. */
   readonly principal?: { readonly kind: string; readonly id: string };
+}
+
+/** One terminal Tool execution. Arguments and results never cross this boundary. */
+export interface ToolCallRecord {
+  readonly runId: string;
+  readonly stateId: string;
+  readonly callId: string;
+  readonly toolName: string;
+  readonly agentId?: string;
+  readonly durationMs?: number;
+  readonly status: "ok" | "error";
+  readonly errorCode?: string;
 }
 
 /** One finished turn, for the reliability and volume half of the dashboard. */
@@ -75,6 +98,7 @@ export interface TurnRecord {
  */
 export interface SpendSink {
   recordLlmCall(record: LlmCallRecord): void;
+  recordToolCall?(record: ToolCallRecord): void;
   recordTurn(record: TurnRecord): void;
 }
 

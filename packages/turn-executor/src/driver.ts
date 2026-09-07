@@ -122,6 +122,8 @@ export interface TurnDriverOptions {
 /** What a finished turn is attributed to, carried rather than held so no state outlives a run. */
 interface TurnSpendScope {
   readonly startedAt: number;
+  readonly runId: string;
+  readonly turnId: string;
   readonly agentId: string;
   readonly conversationId: string;
   readonly principal?: { readonly kind: string; readonly id: string };
@@ -141,6 +143,8 @@ export class TurnDriver {
     const context = await this.options.context.resolve(request);
     const spend: TurnSpendScope = {
       startedAt,
+      runId: request.runId,
+      turnId: request.turnId,
       agentId: context.agentId,
       conversationId: request.conversationId,
       principal: context.principal,
@@ -402,6 +406,8 @@ export class TurnDriver {
       durationMs: Math.max(0, Date.now() - spend.startedAt),
       agentId: spend.agentId,
       conversationId: spend.conversationId,
+      runId: spend.runId,
+      turnId: spend.turnId,
       principal: spend.principal,
     });
   }

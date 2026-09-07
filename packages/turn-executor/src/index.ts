@@ -46,6 +46,7 @@ export type {
   RunOutcome,
   RunOutcomeStatus,
   SpendSink,
+  ToolCallRecord,
   TurnRecord,
 } from "./ports";
 export type {

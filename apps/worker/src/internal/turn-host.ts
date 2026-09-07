@@ -40,6 +40,19 @@ export interface TaskReconcileSignals {
   readonly memberCount?: number;
 }
 
+export interface RemoteObservabilityConfig {
+  readonly enabled: boolean;
+  readonly retentionDays: number;
+  readonly captureContent: boolean;
+  readonly spendAlertUsd: number | null;
+  readonly otlp: {
+    readonly endpoint: string;
+    readonly instanceId: string;
+    readonly token: string;
+  } | null;
+  readonly pricingOverrides: Readonly<Record<string, { in: number; out: number }>>;
+}
+
 /** A dispatch outcome as the host reports it: the caller already holds the `callId`. */
 type RemoteToolResult =
   | { readonly status: "succeeded"; readonly output: unknown; readonly replayed?: true }
@@ -111,6 +124,15 @@ export class HttpTurnHost
       overrides: Record<string, { in: number; out: number }>;
     }>("GET", "/api/v1/internal/observability/pricing");
     return body.overrides;
+  }
+
+  /** Boot-validated exporter config; Secret references remain unresolved in transit. */
+  async observabilityConfig(): Promise<RemoteObservabilityConfig | undefined> {
+    return this.client.find<RemoteObservabilityConfig>(
+      "GET",
+      "/api/v1/internal/observability/config",
+      [204]
+    );
   }
 
   /** Business profile and knowledge/memory signals for the task reconciler; see the API route. */
