@@ -70,6 +70,21 @@ export interface ConversationRoutesDeps {
   toolRegistry?: ToolRegistry;
 }
 
+/**
+ * The Agent handle a client sees for a Conversation, from the permanent id it stores.
+ *
+ * A Conversation records the id, which survives a rename; the product shows and links Agents by
+ * name. An id that resolves to nothing — the Agent was deleted — reports no Agent rather than a
+ * dangling identifier the UI would try to open.
+ */
+function agentHandle(
+  soulLoader: SoulLoader | undefined,
+  agentId: string | undefined
+): string | null {
+  if (agentId === undefined) return null;
+  return resolveAgent(soulLoader, agentId)?.name ?? null;
+}
+
 export function registerConversationRoutes(
   app: FastifyInstance,
   deps: ConversationRoutesDeps,
@@ -139,7 +154,7 @@ export function registerConversationRoutes(
         conversations: convos.map((c) => ({
           id: c._id,
           title: c.title ?? null,
-          agentId: c.agentId ?? null,
+          agentId: agentHandle(soulLoader, c.agentId),
           starred: c.starred ?? false,
           createdAt: c.createdAt,
           updatedAt: c.updatedAt,
@@ -215,7 +230,7 @@ export function registerConversationRoutes(
       return reply.send({
         id: updated._id,
         title: updated.title ?? null,
-        agentId: updated.agentId ?? null,
+        agentId: agentHandle(soulLoader, updated.agentId),
         starred: updated.starred ?? false,
         createdAt: updated.createdAt,
         updatedAt: updated.updatedAt,
@@ -293,7 +308,7 @@ export function registerConversationRoutes(
       return reply.send({
         id: convo._id,
         userId: convo.userId ?? null,
-        agentId: convo.agentId ?? null,
+        agentId: agentHandle(soulLoader, convo.agentId),
         model: convo.model ?? null,
         title: convo.title ?? null,
         starred: convo.starred ?? false,
@@ -423,6 +438,9 @@ export function registerConversationRoutes(
           return reply.code(404).send({ error: "conversation not found" });
         }
         const agent = resolveAgent(soulLoader, convo.agentId);
+        // The Conversation names an Agent this Soul no longer has. Previewing the default
+        // assistant's prompt under that Agent's name would misreport what the turn would run as.
+        if (agent === undefined) return reply.code(404).send({ error: "agent not found" });
         const systemPrompt = assembleAgentSystemPrompt({ agent });
         const soulReminder = await resolveSoulReminder({
           ...(authorityLayers === undefined ? {} : { authorityLayers }),

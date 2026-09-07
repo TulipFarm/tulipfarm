@@ -23,10 +23,16 @@ describe("agent registry", () => {
     );
   });
 
-  it("resolves a selected Soul agent, otherwise falls back to normal chat", () => {
+  it("resolves a selected Soul agent by name or by id", () => {
     const loader = makeSoulLoader([PLANNER]);
     expect(resolveAgent(loader, "sprint-planner")).toBe(PLANNER);
-    expect(resolveAgent(loader, "missing-agent")).toBe(DEFAULT_ASSISTANT);
+    expect(resolveAgent(loader, PLANNER.id)).toBe(PLANNER);
+  });
+
+  it("refuses a reference the Soul does not have rather than substituting the default", () => {
+    const loader = makeSoulLoader([PLANNER]);
+    expect(resolveAgent(loader, "missing-agent")).toBeUndefined();
+    expect(resolveAgent(undefined, "missing-agent")).toBeUndefined();
   });
 
   it("lists and retrieves only user-created Soul agents", () => {

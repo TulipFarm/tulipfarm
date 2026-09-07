@@ -1,5 +1,5 @@
 import type { SoulAgent, SoulLoader } from "@tulipfarm/soul";
-import { agentIdOf, DEFAULT_ASSISTANT_NAME } from "@tulipfarm/soul";
+import { agentIdOf, DEFAULT_ASSISTANT_ID, DEFAULT_ASSISTANT_NAME } from "@tulipfarm/soul";
 import { describe, expect, it } from "vitest";
 import { delegableToolNames, hostedAgentResolver } from "./registry";
 
@@ -51,11 +51,32 @@ describe("hostedAgentResolver", () => {
     });
   });
 
-  it("falls back to the default harness, which declares no ceiling", () => {
-    const resolved = hostedAgentResolver(loaderWith([])).resolve("missing");
+  it("resolves the default harness when a turn selected no Agent", () => {
+    const resolved = hostedAgentResolver(loaderWith([])).resolve(undefined);
 
     expect(resolved.name).toBe(DEFAULT_ASSISTANT_NAME);
+    expect(resolved.principalId).toBe(DEFAULT_ASSISTANT_ID);
     expect(resolved.autonomy).toBeUndefined();
+  });
+
+  it("reports a reference the Soul does not have, rather than substituting the default", () => {
+    const resolved = hostedAgentResolver(loaderWith([])).resolve("missing");
+
+    expect(resolved.unresolvedRef).toBe("missing");
+    expect(resolved.principalId).toBeUndefined();
+  });
+
+  it("carries the Agent's permanent id as the Principal the dispatcher authorizes by", () => {
+    const planner: SoulAgent = {
+      id: agentIdOf("planner", {}),
+      name: "planner",
+      frontmatter: {},
+      body: "",
+    };
+
+    expect(hostedAgentResolver(loaderWith([planner])).resolve("planner").principalId).toBe(
+      planner.id
+    );
   });
 });
 

@@ -3,7 +3,7 @@ import { type FileService, isAttachmentRefusal, resolveAttachments } from "@tuli
 import type { LlmService } from "@tulipfarm/llm";
 import type { DurableInvocationGateway } from "@tulipfarm/run-kernel";
 import type { SoulLoader } from "@tulipfarm/soul";
-import { DEFAULT_ASSISTANT_NAME } from "@tulipfarm/soul";
+import { DEFAULT_ASSISTANT_ID, resolveAgent } from "@tulipfarm/soul";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { ErrorSchema } from "../auth/schemas";
 import { chatConversationService } from "../conversations/chat-turns";
@@ -23,6 +23,22 @@ import { type ChatBody, ChatBodySchema, corsPassthrough } from "./turn-helpers";
 import { durableTurnSubmitter } from "./turn-submit";
 
 type PreHandler = (req: FastifyRequest, reply: FastifyReply) => Promise<void>;
+
+/**
+ * The Agent name a client should see, from the id the Conversation stores.
+ *
+ * Identity is the id and stays the id everywhere inside; the name is the handle, and it is the
+ * handle the composer echoes back to the participant. Normal chat runs on the default harness,
+ * which is not a user-selected Agent, so it announces none.
+ */
+function headerFor(name: string, value: string | undefined): Record<string, string> {
+  return value === undefined ? {} : { [name]: value };
+}
+
+function agentHandle(soulLoader: SoulLoader | undefined, agentId: string): string | undefined {
+  if (agentId === DEFAULT_ASSISTANT_ID) return undefined;
+  return resolveAgent(soulLoader, agentId)?.name;
+}
 
 /** 409 body for a replayed request: the Run that already answers it, so the client can reattach. */
 const DuplicateInvocationSchema = {
@@ -217,7 +233,7 @@ export function registerChatRoutes(
         "X-Turn-Id": claim.turnId,
         "X-Conversation-Id": entry.conversation._id,
         // Only user-selected Soul Agents are exposed; normal chat has no Agent identity.
-        ...(entry.agentId === DEFAULT_ASSISTANT_NAME ? {} : { "X-Agent-Id": entry.agentId }),
+        ...headerFor("X-Agent-Id", agentHandle(options.soulLoader, entry.agentId)),
         ...corsPassthrough(reply),
       });
       reply.hijack();
@@ -285,7 +301,7 @@ export function registerChatRoutes(
 
       // The Agent is the Conversation's, never the body's: a retry re-runs the question that was
       // asked, and letting the client re-target it here would be an edit wearing a retry's name.
-      const agentId = conversation.agentId ?? DEFAULT_ASSISTANT_NAME;
+      const agentId = conversation.agentId ?? DEFAULT_ASSISTANT_ID;
       const conversations = chatConversationService(
         { store: options.conversationStore, invocations: options.invocations },
         {
@@ -317,7 +333,7 @@ export function registerChatRoutes(
         "X-Run-Id": runId,
         "X-Turn-Id": turnId,
         "X-Conversation-Id": turn.conversationId,
-        ...(agentId === DEFAULT_ASSISTANT_NAME ? {} : { "X-Agent-Id": agentId }),
+        ...headerFor("X-Agent-Id", agentHandle(options.soulLoader, agentId)),
         ...corsPassthrough(reply),
       });
       reply.hijack();

@@ -177,7 +177,12 @@ import { registerGuardrailsReload } from "./guardrails/reload";
 import { createHookExecutor } from "./hooks/executor";
 import { PgRawPayloadVault } from "./hooks/raw-payload-vault";
 import { webhookSecretPort } from "./hooks/secret-port";
-import { ensureAgentPrincipal, reconcileAgentPrincipals } from "./identity/agent-principals";
+import { reconcileAgentIdentifiers } from "./identity/agent-identifiers";
+import {
+  ensureAgentPrincipal,
+  reconcileAgentPrincipals,
+  removeAgentPrincipal,
+} from "./identity/agent-principals";
 import { PgApiClientRepo } from "./identity/api-clients";
 import { buildApiAuthorityLayerResolver } from "./identity/authority-layers";
 import { channelBindKeyResolver } from "./identity/channel-link";
@@ -588,6 +593,10 @@ async function boot() {
       DEPLOYMENT_BUSINESS_ID,
       console
     );
+    // After the Principals exist under the new ids, never before: every row this moves is found by
+    // the Agent's old name, and the last thing it does is reap the name-keyed Principal the rows
+    // used to point at.
+    await reconcileAgentIdentifiers(pool, soulLoader, DEPLOYMENT_BUSINESS_ID, console);
     const rateLimiter = new PgRateLimiter(pool);
     const invocationValidator = new TypedOutputValidator(RUN_ARTIFACT_SCHEMAS);
     // Same root the Worker derives, so a blob-backed Run Artifact written by either process is
@@ -660,7 +669,8 @@ async function boot() {
     const feedbackRepo = new FeedbackRepo(pool);
     const surfaceArtifactStore = new PgSurfaceArtifactStore(pool);
     const surfaceActionStore = new PgSurfaceActionStore(pool);
-    const obsRepo = new PgObsRepo(pool);
+    // Given the Soul so spend rows can report Agent names; the events themselves store ids.
+    const obsRepo = new PgObsRepo(pool, soulLoader);
     const observabilityService = new ObservabilityService(obsRepo);
     // One reader for both the operational API and the `routine_run_*` Tools, so what an Agent
     // reports about a Run and what the Run inspector shows can never disagree.
@@ -1129,6 +1139,16 @@ async function boot() {
               );
             }
           ),
+        removePrincipal: (agentId) =>
+          removeAgentPrincipal(agentPrincipalRepos, DEPLOYMENT_BUSINESS_ID, agentId).catch(
+            (err) => {
+              app.log.error(
+                `[agents] could not retire principal for "${agentId}" — ${
+                  err instanceof Error ? err.message : String(err)
+                }`
+              );
+            }
+          ),
       },
       skillTools: { ...skillTools, hiddenSkillNames, teamAssets },
       github: githubTools,
@@ -1198,6 +1218,7 @@ async function boot() {
         // Tools that require one are filtered out here rather than refused at dispatch.
         agentTools: (agentName) => {
           const agent = resolveAgent(soulLoader, agentName);
+          if (agent === undefined) return [];
           const toolAgent = toolAgentFor(getDefaultAssistant(agent.name), agent);
           const allowed = allowedToolNamesFor(toolRegistry, toolAgent);
           return (toolRegistry?.getAll() ?? [])

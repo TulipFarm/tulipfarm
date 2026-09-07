@@ -19,6 +19,7 @@ import {
   canonicalHash,
   INVOCATION_REQUEST_SCHEMAS,
 } from "@tulipfarm/schema";
+import { DEFAULT_ASSISTANT_ID } from "@tulipfarm/soul";
 import type { PaginatedResult } from "@tulipfarm/storage";
 import {
   ArtifactStore,
@@ -311,7 +312,8 @@ describe("durable chat submission over HTTP", () => {
     );
     expect(artifact.rows).toHaveLength(1);
     expect(artifact.rows[0]?.id).toBe(`${runId}:request`);
-    const resolvedBody = { ...BODY, agentId: "__tulipfarm_default__" };
+    // The request Artifact records the Agent's permanent id, not the name the composer sent.
+    const resolvedBody = { ...BODY, agentId: DEFAULT_ASSISTANT_ID };
     expect(artifact.rows[0]?.content).toEqual(resolvedBody);
     expect(artifact.rows[0]?.content_hash).toBe(canonicalHash(resolvedBody));
 

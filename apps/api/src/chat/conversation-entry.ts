@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import type { EventEmitter } from "node:events";
 import type { LlmService } from "@tulipfarm/llm";
 import type { SoulLoader } from "@tulipfarm/soul";
-import { DEFAULT_ASSISTANT_NAME, getAgent } from "@tulipfarm/soul";
+import { DEFAULT_ASSISTANT_ID, getAgent } from "@tulipfarm/soul";
 import { DOMAIN_EVENTS } from "@tulipfarm/storage";
 import type { FastifyBaseLogger } from "fastify";
 import type { ConversationDoc, ConversationRepo } from "./conversations";
@@ -56,7 +56,7 @@ export async function resolveConversationEntry(
     return {
       conversation,
       isNew: true,
-      agentId: conversation.agentId ?? DEFAULT_ASSISTANT_NAME,
+      agentId: conversation.agentId ?? DEFAULT_ASSISTANT_ID,
     };
   }
 
@@ -68,15 +68,14 @@ export async function resolveConversationEntry(
   // Sticky `@mention` hand-off: a mid-conversation mention re-targets the Agent until a
   // different mention. Unknown names are ignored — the composer only offers real Agents,
   // so persisting one would leave a dangling reference.
-  const currentAgentId = found.agentId ?? DEFAULT_ASSISTANT_NAME;
-  const mentioned =
-    body.agentId && body.agentId !== currentAgentId
-      ? getAgent(soulLoader, body.agentId)
-      : undefined;
-  if (mentioned) {
-    found.agentId = mentioned.name;
+  const currentAgentId = found.agentId ?? DEFAULT_ASSISTANT_ID;
+  // This is the edge that turns a handle into an identity: `body.agentId` is whatever the composer
+  // put in the `@mention`, a name, and what is stored from here on is the Agent's permanent id.
+  const mentioned = body.agentId ? getAgent(soulLoader, body.agentId) : undefined;
+  if (mentioned && mentioned.id !== currentAgentId) {
+    found.agentId = mentioned.id;
     try {
-      await repo.setAgent(found._id, mentioned.name);
+      await repo.setAgent(found._id, mentioned.id);
     } catch (err) {
       // Non-fatal: the turn still runs as the mentioned Agent, it just does not stick to the
       // conversation. Failing the request would be a worse answer to a transient database error.
@@ -85,7 +84,7 @@ export async function resolveConversationEntry(
   }
 
   await repo.touch(found._id);
-  return { conversation: found, isNew: false, agentId: found.agentId ?? DEFAULT_ASSISTANT_NAME };
+  return { conversation: found, isNew: false, agentId: found.agentId ?? DEFAULT_ASSISTANT_ID };
 }
 
 async function openConversation(
@@ -94,7 +93,7 @@ async function openConversation(
 ): Promise<ConversationDoc> {
   const now = new Date();
   const requested = input.body.agentId;
-  const agentId = requested && getAgent(deps.soulLoader, requested) ? requested : undefined;
+  const agentId = requested ? getAgent(deps.soulLoader, requested)?.id : undefined;
   const conversation: ConversationDoc = {
     _id: randomUUID(),
     userId: input.userId,

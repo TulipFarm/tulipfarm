@@ -42,6 +42,19 @@ export interface ChannelDeliveryReader {
 /** The Agent a turn runs as, reduced to what Tool visibility and the gate actually read. */
 export interface HostedAgent {
   readonly name: string;
+  /**
+   * The Agent's permanent id, which is also its Principal id. Absent only for a stand-in this
+   * process invented rather than resolved, which names no Principal and contributes no layer.
+   */
+  readonly principalId?: string;
+  /**
+   * Set when a request named an Agent that resolves to nothing.
+   *
+   * Carried as an Agent rather than as absence because absence already means "this process was
+   * composed without a resolver", which is the *wider* authority — the durable runtime takes it as
+   * licence to run on its own default. An unknown name must narrow, so it is carried and refused.
+   */
+  readonly unresolvedRef?: string;
   readonly toolAllowlist?: readonly string[];
   /**
    * The Agent's own configured autonomy, which bounds every turn it runs. Absent means the Agent

@@ -20,6 +20,12 @@ export interface PrincipalRepo {
   put(record: PrincipalRecord): Promise<void>;
   /** Lists registered principals so non-human ids are discoverable for grants. */
   list(businessId: string): Promise<readonly PrincipalRecord[]>;
+  /**
+   * Removes a Principal and, by cascade, its Role assignments. For a subject that no longer
+   * exists: a deleted Agent whose id could otherwise be re-created under different ownership and
+   * inherit the authority the old one held.
+   */
+  delete(businessId: string, id: string): Promise<void>;
 }
 
 /**
@@ -45,6 +51,10 @@ export class InMemoryPrincipalRepo implements PrincipalRepo {
     return [...this.records.values()]
       .filter((record) => record.businessId === businessId)
       .sort((left, right) => left.id.localeCompare(right.id));
+  }
+
+  async delete(businessId: string, id: string): Promise<void> {
+    this.records.delete(this.key(businessId, id));
   }
 }
 
@@ -107,6 +117,15 @@ export class PgPrincipalRepo implements PrincipalRepo {
         [businessId]
       );
       return result.rows.map(principalFromRow);
+    });
+  }
+
+  async delete(businessId: string, id: string): Promise<void> {
+    await this.transactions.withTransaction(async (transaction) => {
+      await transaction.query(`DELETE FROM principals WHERE business_id = $1 AND id = $2`, [
+        businessId,
+        id,
+      ]);
     });
   }
 }

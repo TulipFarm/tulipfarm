@@ -1,4 +1,9 @@
-import { DEFAULT_ASSISTANT, DEFAULT_ASSISTANT_NAME } from "@tulipfarm/soul";
+import {
+  DEFAULT_ASSISTANT,
+  DEFAULT_ASSISTANT_ID,
+  resolveAgent,
+  type SoulLoader,
+} from "@tulipfarm/soul";
 import type { Queryable } from "../db";
 
 export type ObsEventType = "llm_call" | "tool_call" | "turn" | "job";
@@ -109,18 +114,24 @@ const numOrNull = (v: unknown): number | null => (v == null ? null : Number(v));
 const iso = (v: unknown): string => (v instanceof Date ? v.toISOString() : String(v));
 
 /**
- * Friendly label for a spend-by-agent row. The code-defined default assistant is stored under its
- * internal identity (`DEFAULT_ASSISTANT_NAME`), which must never leak to the dashboard; a call
- * with no agent attribution (a built-in/system task) reads as "System" rather than "(unknown)".
+ * Friendly label for a spend-by-agent row. Events store the Agent's permanent id, which is an
+ * opaque uuid and must never reach the dashboard; it is projected back to the Agent's name here,
+ * the same way Chat projects it. The code-defined default assistant is stored under
+ * `DEFAULT_ASSISTANT_ID`, and a call with no Agent attribution (a built-in or system task) reads
+ * as "System" rather than "(unknown)". An id the Soul no longer has keeps the id, because the
+ * spend it accounts for still happened and dropping the row would understate the total.
  */
-function agentLabel(agentId: string | null): string {
+function agentLabel(agentId: string | null, soulLoader: Pick<SoulLoader, "agents"> | undefined) {
   if (agentId == null) return "System";
-  if (agentId === DEFAULT_ASSISTANT_NAME) return DEFAULT_ASSISTANT.frontmatter.label as string;
-  return agentId;
+  if (agentId === DEFAULT_ASSISTANT_ID) return DEFAULT_ASSISTANT.frontmatter.label as string;
+  return resolveAgent(soulLoader as SoulLoader | undefined, agentId)?.name ?? agentId;
 }
 
 export class PgObsRepo implements ObsRepo {
-  constructor(private readonly q: Queryable) {}
+  constructor(
+    private readonly q: Queryable,
+    private readonly soulLoader?: Pick<SoulLoader, "agents">
+  ) {}
 
   async insert(row: ObsEventRow): Promise<void> {
     await this.q.query(
@@ -268,7 +279,10 @@ export class PgObsRepo implements ObsRepo {
       }),
       byAgent: byAgent.rows.map((r) => {
         const row = r as Record<string, unknown>;
-        return { agentId: agentLabel(row.agent as string | null), cost: num(row.cost) };
+        return {
+          agentId: agentLabel(row.agent as string | null, this.soulLoader),
+          cost: num(row.cost),
+        };
       }),
       byMember: byMember.rows.map((r) => {
         const row = r as Record<string, unknown>;
