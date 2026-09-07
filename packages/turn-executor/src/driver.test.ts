@@ -343,6 +343,25 @@ describe("TurnDriver", () => {
     });
   });
 
+  it("parks silently on a provider retry wait that the Tool already registered", async () => {
+    const { driver, events, store } = harness({
+      status: "awaiting_retry",
+      waitId: "wait-retry-1",
+      callId: "call-1",
+      ...counters,
+    });
+
+    const outcome = await driver.run(request());
+
+    expect(outcome).toEqual({ status: "waiting" });
+    expect(store.messages).toEqual([]);
+    expect(store.completed).toEqual([]);
+    expect(events.appended.map((event) => event.eventType)).toEqual([
+      "turn.started",
+      "context.assembled",
+    ]);
+  });
+
   // Stopping to ask is not the same as saying nothing: the prose the model streamed before the
   // question has to survive the reload that the question invites.
   it("settles for input keeping the reply it already streamed", async () => {

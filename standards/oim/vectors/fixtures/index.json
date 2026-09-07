@@ -1,0 +1,6 @@
+{
+  "vectors": [
+    { "file": "positive/http.yml", "valid": true },
+    { "file": "negative/network-capability.yml", "valid": false }
+  ]
+}

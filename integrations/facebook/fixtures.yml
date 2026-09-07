@@ -1,0 +1,116 @@
+version: 1
+cases:
+  - name: lists-managed-pages
+    operationId: list-pages
+    request:
+      limit: 2
+    response:
+      status: 200
+      body:
+        data:
+          - id: "100000000000001"
+            name: Muskan Studio
+            category: Business service
+            category_list:
+              - id: "1001"
+                name: Business service
+            tasks: [ANALYZE, MODERATE, CREATE_CONTENT, MANAGE]
+        paging:
+          cursors:
+            before: before-redacted
+            after: after-redacted
+    expect:
+      request:
+        method: GET
+        url: https://graph.facebook.com/v25.0/me/accounts?limit=2&access_token=oim-fixture-credential&fields=id%2Cname%2Ccategory%2Ccategory_list%2Ctasks
+      result:
+        data:
+          - id: "100000000000001"
+            name: Muskan Studio
+            tasks: [ANALYZE, MODERATE, CREATE_CONTENT, MANAGE]
+
+  - name: rejects-empty-page-list-response
+    operationId: list-pages
+    request:
+      limit: 2
+    response:
+      status: 200
+      body: {}
+    expect:
+      request:
+        method: GET
+        url: https://graph.facebook.com/v25.0/me/accounts?limit=2&access_token=oim-fixture-credential&fields=id%2Cname%2Ccategory%2Ccategory_list%2Ctasks
+      expectedError:
+        phase: after_dispatch
+        code: invalid_output
+        retryable: false
+
+  - name: lists-page-posts
+    operationId: list-page-posts
+    request:
+      page_id: "100000000000001"
+      limit: 2
+    response:
+      status: 200
+      body:
+        data:
+          - id: "100000000000001_200000000000002"
+            message: Redacted launch update.
+            created_time: "2026-09-07T06:00:00+0000"
+            permalink_url: https://www.facebook.com/100000000000001_200000000000002
+        paging:
+          cursors:
+            before: before-redacted
+            after: after-redacted
+    expect:
+      request:
+        method: GET
+        url: https://graph.facebook.com/v25.0/100000000000001/feed?limit=2&access_token=oim-fixture-credential&fields=id%2Cmessage%2Ccreated_time%2Cpermalink_url
+      result:
+        data:
+          - id: "100000000000001_200000000000002"
+            message: Redacted launch update.
+
+  - name: creates-page-post
+    operationId: create-page-post
+    request:
+      page_id: "100000000000001"
+      body:
+        message: Launch update is ready.
+        link: https://example.com/launch
+    response:
+      status: 200
+      body:
+        id: "100000000000001_200000000000003"
+    expect:
+      request:
+        method: POST
+        url: https://graph.facebook.com/v25.0/100000000000001/feed?access_token=oim-fixture-credential
+        headers:
+          content-type: application/json
+        body:
+          message: Launch update is ready.
+          link: https://example.com/launch
+      result:
+        id: "100000000000001_200000000000003"
+
+  - name: rejects-invalid-credential
+    operationId: list-pages
+    request:
+      limit: 2
+    response:
+      status: 401
+      body:
+        error:
+          message: Error validating access token.
+          type: OAuthException
+          code: 190
+          fbtrace_id: REDACTED
+    expect:
+      request:
+        method: GET
+        url: https://graph.facebook.com/v25.0/me/accounts?limit=2&access_token=oim-fixture-credential&fields=id%2Cname%2Ccategory%2Ccategory_list%2Ctasks
+      expectedError:
+        phase: before_dispatch
+        code: provider_unauthorized
+        retryable: false

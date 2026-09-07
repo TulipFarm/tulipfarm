@@ -1,0 +1,41 @@
+oimVersion: "1.0"
+kind: Integration
+metadata:
+  id: pages
+  name: Pages
+  version: 1.0.0
+  description: Index pages.
+  license: Apache-2.0
+profiles: { core: "1.0" }
+operations:
+  - id: pages
+    name: list_pages
+    description: List pages.
+    effect: read
+    identityMode: shared_only
+    source:
+      type: http
+      method: GET
+      baseUrl: https://api.example.test
+      path: /pages
+    response:
+      schema: { type: object }
+      maxBytes: 4096
+knowledge:
+  sourceKinds: [{ id: page, label: Page }]
+  list:
+    operationId: pages
+    itemsPointer: /items
+    mapping: { itemId: /id }
+    cursor: { kind: none }
+  content:
+    operationId: pages
+    itemParameter: id
+    mapping: { content: /content }
+  acl:
+    mode: item
+    operationId: pages
+    itemParameter: id
+    entriesPointer: /readers
+    entry: { defaultKind: domain, domain: /domain }
+  deletion: { kind: absent_from_full_list }

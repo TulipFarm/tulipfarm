@@ -1,7 +1,8 @@
+import type { IntegrationEvent } from "@tulipfarm/integrations";
 import type { RegisteredTrigger, RunInvocation } from "@tulipfarm/run-kernel";
 import type { IntegrationEventPayload, ResourceSideEffect } from "@tulipfarm/storage";
 import { describe, expect, it, vi } from "vitest";
-import { EventTriggerGateway } from "./event-dispatch";
+import { EventTriggerGateway, type OimTriggerAuthorizationInput } from "./event-dispatch";
 
 const baseTrigger = {
   authoredVersion: 2,
@@ -28,18 +29,23 @@ const effect: ResourceSideEffect = {
   record: { title: "Printer on fire", priority: "high" },
 };
 
-function gatewayWith(triggers: readonly RegisteredTrigger[]) {
+function gatewayWith(
+  triggers: readonly RegisteredTrigger[],
+  authorizeOimTrigger?: (input: OimTriggerAuthorizationInput) => Promise<boolean>
+) {
+  const listTriggers = vi.fn(async () => triggers);
   const startRun = vi.fn(async (_invocation: RunInvocation) => ({
     runId: "run-1",
     outcome: "started" as const,
   }));
   const gateway = new EventTriggerGateway({
-    listTriggers: async () => triggers,
+    listTriggers,
+    ...(authorizeOimTrigger === undefined ? {} : { authorizeOimTrigger }),
     startRun,
     nextEventId: () => "event-1",
     now: () => "2026-01-01T00:00:00.000Z",
   });
-  return { gateway, startRun };
+  return { gateway, listTriggers, startRun };
 }
 
 describe("EventTriggerGateway", () => {
@@ -270,6 +276,28 @@ describe("EventTriggerGateway", () => {
       };
     }
 
+    const oimEvent: IntegrationEvent = {
+      businessId: "business-2",
+      integrationId: "slack",
+      integrationMajorVersion: 2,
+      connectionId: "connection-1",
+      deliveryId: "integration-event-2",
+      type: "member_joined_channel",
+      payload: { channel: "C123", userId: "provider-user-not-a-principal" },
+      safeHeaders: {},
+      replayOfId: null,
+    };
+
+    function oimSlackTrigger(overrides: Partial<RegisteredTrigger> = {}): RegisteredTrigger {
+      return slackTrigger({
+        protocol: "oim",
+        integrationMajorVersion: 2,
+        connectionId: "connection-1",
+        backgroundIdentity: { principalKind: "user", principalId: "owner-1" },
+        ...overrides,
+      });
+    }
+
     it("starts the Run a classified Integration event matches", async () => {
       const { gateway, startRun } = gatewayWith([slackTrigger()]);
 
@@ -296,41 +324,74 @@ describe("EventTriggerGateway", () => {
       expect(await gateway.dispatchIntegrationEvent(event)).toMatchObject({ kind: "started" });
     });
 
-    it("preserves verified untrusted Slack event metadata at the Trigger boundary", async () => {
-      const { gateway, startRun } = gatewayWith([
-        slackTrigger({
-          eventType: "slack.reaction.added.v1",
-          requireVerified: true,
-          inputMappings: { actor: "payload.actorPrincipalId" },
-        }),
-      ]);
+    it("preserves OIM business, major, and Connection identity through authorization and Run start", async () => {
+      const authorizeOimTrigger = vi.fn(async () => true);
+      const { gateway, listTriggers, startRun } = gatewayWith(
+        [oimSlackTrigger()],
+        authorizeOimTrigger
+      );
+
+      await expect(gateway.dispatchIntegrationEvent(oimEvent)).resolves.toMatchObject({
+        kind: "started",
+      });
+      expect(authorizeOimTrigger).toHaveBeenCalledWith({
+        businessId: "business-2",
+        integrationId: "slack",
+        integrationMajorVersion: 2,
+        connectionId: "connection-1",
+        trigger: oimSlackTrigger(),
+      });
+      expect(listTriggers).toHaveBeenCalledWith("business-2");
+      expect(startRun.mock.calls[0]?.[0]).toMatchObject({
+        businessId: "business-2",
+        backgroundIdentity: { principalKind: "user", principalId: "owner-1" },
+        idempotencyKey: "greet-new-member:2:integration-event-2",
+      });
+    });
+
+    it("denies OIM events with a wrong major or Connection before authorization", async () => {
+      const authorizeOimTrigger = vi.fn(async () => true);
+      const { gateway, startRun } = gatewayWith([oimSlackTrigger()], authorizeOimTrigger);
 
       await expect(
-        gateway.dispatchIntegrationEvent({
-          integration: "slack",
-          protocol: "slack_socket_mode",
-          event: "slack.reaction.added.v1",
-          eventId: "integration-event-2",
-          payload: {
-            actorPrincipalId: "user-1",
-            untrustedPayload: { actorExternalId: "U1", reaction: "eyes" },
-          },
-          occurredAt: "2026-07-25T17:20:00.000Z",
-          integrationId: "integration-1",
-          externalTenantId: "T1",
-          actor: { kind: "user", id: "user-1", externalId: "U1" },
-          record: { type: "message", id: "1.1" },
-          classification: ["untrusted.external"],
-          verification: { status: "verified", method: "slack_socket_mode" },
-        })
-      ).resolves.toMatchObject({ kind: "started" });
+        gateway.dispatchIntegrationEvent({ ...oimEvent, integrationMajorVersion: 3 })
+      ).resolves.toEqual({ kind: "no_match" });
+      await expect(
+        gateway.dispatchIntegrationEvent({ ...oimEvent, connectionId: "connection-2" })
+      ).resolves.toEqual({ kind: "no_match" });
+      await expect(
+        gateway.dispatchIntegrationEvent({ ...oimEvent, connectionId: null })
+      ).resolves.toEqual({ kind: "no_match" });
+      expect(authorizeOimTrigger).not.toHaveBeenCalled();
+      expect(startRun).not.toHaveBeenCalled();
+    });
 
-      expect(startRun).toHaveBeenCalledWith(
-        expect.objectContaining({
-          input: { actor: "user-1" },
-          classification: ["untrusted.external"],
-        })
-      );
+    it("fails closed when OIM authorization is absent or denied", async () => {
+      const withoutAuthorization = gatewayWith([oimSlackTrigger()]);
+      await expect(
+        withoutAuthorization.gateway.dispatchIntegrationEvent(oimEvent)
+      ).resolves.toEqual({
+        kind: "rejected",
+        triggerSlug: "greet-new-member",
+        code: "authorization_denied",
+      });
+      expect(withoutAuthorization.startRun).not.toHaveBeenCalled();
+
+      const denied = gatewayWith([oimSlackTrigger()], async () => false);
+      await expect(denied.gateway.dispatchIntegrationEvent(oimEvent)).resolves.toMatchObject({
+        kind: "rejected",
+        code: "authorization_denied",
+      });
+      expect(denied.startRun).not.toHaveBeenCalled();
+    });
+
+    it("does not let a reduced legacy payload bypass OIM routing identity", async () => {
+      const { gateway, startRun } = gatewayWith([oimSlackTrigger()], async () => true);
+
+      await expect(
+        gateway.dispatchIntegrationEvent({ ...event, protocol: "oim" })
+      ).resolves.toEqual({ kind: "no_match" });
+      expect(startRun).not.toHaveBeenCalled();
     });
   });
 });

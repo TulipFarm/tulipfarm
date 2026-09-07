@@ -57,6 +57,47 @@ describe("matchTrigger", () => {
     });
   });
 
+  it("requires exact major and Connection pins for OIM events", () => {
+    const oimEnvelope = {
+      ...envelope,
+      data: {
+        protocol: "oim",
+        integrationMajorVersion: 2,
+        connectionId: "connection-1",
+        payload: envelope.data,
+      },
+    };
+    const exact = registered({
+      protocol: "oim",
+      integrationMajorVersion: 2,
+      connectionId: "connection-1",
+    });
+
+    expect(matchTrigger([exact], oimEnvelope)).toMatchObject({ kind: "matched" });
+    expect(
+      matchTrigger([registered({ ...exact, integrationMajorVersion: 1 })], oimEnvelope)
+    ).toEqual({ kind: "no_match" });
+    expect(
+      matchTrigger([registered({ ...exact, connectionId: "connection-2" })], oimEnvelope)
+    ).toEqual({ kind: "no_match" });
+    expect(matchTrigger([registered()], oimEnvelope)).toEqual({ kind: "no_match" });
+  });
+
+  it("fails closed when an OIM event omits its Connection identity", () => {
+    expect(
+      matchTrigger(
+        [
+          registered({
+            protocol: "oim",
+            integrationMajorVersion: 2,
+            connectionId: "connection-1",
+          }),
+        ],
+        { ...envelope, data: { protocol: "oim", integrationMajorVersion: 2 } }
+      )
+    ).toEqual({ kind: "no_match" });
+  });
+
   it("requires every declared predicate to hold, on nested paths too", () => {
     const strict = registered({
       match: [

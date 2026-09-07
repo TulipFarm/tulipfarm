@@ -1,5 +1,7 @@
 /** HTTP status maps to durability here; mutating 5xx is ambiguous and must reconcile. */
 
+import { parseOimRetryAfterMs } from "./egress/oim-rate-limit-header";
+
 export type IntegrationHttpMethod =
   | "GET"
   | "HEAD"
@@ -44,17 +46,12 @@ export interface HttpFailureClassification {
   readonly retryAfterMs?: number;
 }
 
-function retryAfterMs(headers: Readonly<Record<string, string>>): number | undefined {
-  const value = headers["retry-after"] ?? headers["Retry-After"];
-  if (value === undefined) return undefined;
-  const seconds = Number(value);
-  return Number.isFinite(seconds) && seconds >= 0 ? seconds * 1000 : undefined;
-}
-
 /** Classify by contract `mutating`, not guessed HTTP verb. */
 export function classifyHttpFailure(
   response: IntegrationHttpResponse,
-  mutating: boolean
+  mutating: boolean,
+  retryAfterHeader = "Retry-After",
+  now = new Date()
 ): HttpFailureClassification | null {
   const { status } = response;
   if (status >= 200 && status < 300) return null;
@@ -72,7 +69,7 @@ export function classifyHttpFailure(
     return { phase: "before_dispatch", code: "provider_rejected", retryable: false };
   }
   if (status === 429) {
-    const delay = retryAfterMs(response.headers);
+    const delay = parseOimRetryAfterMs(response.headers, now, retryAfterHeader);
     return {
       phase: "before_dispatch",
       code: "provider_rate_limited",

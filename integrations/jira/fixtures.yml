@@ -1,0 +1,87 @@
+version: 1
+cases:
+  - name: searches-issues
+    operationId: search-issues
+    configuration:
+      jira_site: example.atlassian.net
+    request:
+      body:
+        jql: project = ENG ORDER BY updated DESC
+        maxResults: 2
+        fields: [summary, status]
+    response:
+      status: 200
+      body:
+        nextPageToken: cursor-redacted
+        issues:
+          - id: "10041"
+            key: ENG-41
+            fields:
+              summary: Prepare the launch checklist
+              status: { name: In Progress }
+    expect:
+      request:
+        method: POST
+        url: https://example.atlassian.net/rest/api/3/search/jql
+        body:
+          jql: project = ENG ORDER BY updated DESC
+          maxResults: 2
+          fields: [summary, status]
+      result:
+        issues:
+          - id: "10041"
+            key: ENG-41
+            fields:
+              summary: Prepare the launch checklist
+
+  - name: creates-issue
+    operationId: create-issue
+    configuration:
+      jira_site: example.atlassian.net
+    request:
+      body:
+        fields:
+          project: { key: ENG }
+          issuetype: { name: Task }
+          summary: Review the launch checklist
+    response:
+      status: 201
+      body:
+        id: "10042"
+        key: ENG-42
+        self: https://example.atlassian.net/rest/api/3/issue/10042
+    expect:
+      request:
+        method: POST
+        url: https://example.atlassian.net/rest/api/3/issue
+        body:
+          fields:
+            project: { key: ENG }
+            issuetype: { name: Task }
+            summary: Review the launch checklist
+      result:
+        id: "10042"
+        key: ENG-42
+        self: https://example.atlassian.net/rest/api/3/issue/10042
+
+  - name: rejects-invalid-credential
+    operationId: search-issues
+    configuration:
+      jira_site: example.atlassian.net
+    request:
+      body:
+        jql: project = ENG
+        maxResults: 1
+    response:
+      status: 401
+      body:
+        errorMessages: [Unauthorized]
+        errors: {}
+    expect:
+      request:
+        method: POST
+        url: https://example.atlassian.net/rest/api/3/search/jql
+      expectedError:
+        phase: before_dispatch
+        code: provider_unauthorized
+        retryable: false

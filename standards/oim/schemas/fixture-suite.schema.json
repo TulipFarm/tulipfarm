@@ -1,0 +1,182 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:oim:schema:1.0:fixture-suite.schema.json",
+  "title": "Open Integration Manifest fixture suite",
+  "additionalProperties": false,
+  "type": "object",
+  "required": ["version", "cases"],
+  "properties": {
+    "version": {
+      "const": 1,
+      "type": "number"
+    },
+    "cases": {
+      "minItems": 1,
+      "type": "array",
+      "items": {
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["name", "operationId", "request", "response", "expect"],
+        "properties": {
+          "name": {
+            "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$",
+            "maxLength": 96,
+            "type": "string"
+          },
+          "operationId": {
+            "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$",
+            "maxLength": 96,
+            "type": "string"
+          },
+          "configuration": {
+            "additionalProperties": false,
+            "type": "object",
+            "patternProperties": {
+              "^[a-z][a-z0-9_]{1,63}$": {
+                "anyOf": [
+                  {
+                    "maxLength": 2048,
+                    "type": "string"
+                  },
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "boolean"
+                  }
+                ]
+              }
+            }
+          },
+          "request": {
+            "additionalProperties": false,
+            "type": "object",
+            "patternProperties": {
+              "^(.*)$": {}
+            }
+          },
+          "response": {
+            "additionalProperties": false,
+            "type": "object",
+            "required": ["status", "body"],
+            "properties": {
+              "status": {
+                "minimum": 100,
+                "maximum": 599,
+                "type": "integer"
+              },
+              "headers": {
+                "additionalProperties": false,
+                "type": "object",
+                "patternProperties": {
+                  "^(.*)$": {
+                    "type": "string"
+                  }
+                }
+              },
+              "body": {}
+            }
+          },
+          "expect": {
+            "anyOf": [
+              {
+                "additionalProperties": false,
+                "type": "object",
+                "required": ["request", "result"],
+                "properties": {
+                  "request": {
+                    "additionalProperties": false,
+                    "type": "object",
+                    "properties": {
+                      "method": {
+                        "type": "string",
+                        "enum": ["GET", "HEAD", "OPTIONS", "POST", "PUT", "PATCH", "DELETE"]
+                      },
+                      "url": {
+                        "minLength": 1,
+                        "maxLength": 4096,
+                        "type": "string"
+                      },
+                      "headers": {
+                        "additionalProperties": false,
+                        "type": "object",
+                        "patternProperties": {
+                          "^(.*)$": {
+                            "type": "string"
+                          }
+                        }
+                      },
+                      "body": {},
+                      "bodyText": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "result": {}
+                }
+              },
+              {
+                "additionalProperties": false,
+                "type": "object",
+                "required": ["request", "expectedError"],
+                "properties": {
+                  "request": {
+                    "additionalProperties": false,
+                    "type": "object",
+                    "properties": {
+                      "method": {
+                        "type": "string",
+                        "enum": ["GET", "HEAD", "OPTIONS", "POST", "PUT", "PATCH", "DELETE"]
+                      },
+                      "url": {
+                        "minLength": 1,
+                        "maxLength": 4096,
+                        "type": "string"
+                      },
+                      "headers": {
+                        "additionalProperties": false,
+                        "type": "object",
+                        "patternProperties": {
+                          "^(.*)$": {
+                            "type": "string"
+                          }
+                        }
+                      },
+                      "body": {},
+                      "bodyText": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "expectedError": {
+                    "additionalProperties": false,
+                    "type": "object",
+                    "required": ["phase", "code", "retryable"],
+                    "properties": {
+                      "phase": {
+                        "type": "string",
+                        "enum": ["before_dispatch", "after_dispatch"]
+                      },
+                      "code": {
+                        "pattern": "^[a-z][a-z0-9_]{1,127}$",
+                        "maxLength": 128,
+                        "type": "string"
+                      },
+                      "retryable": {
+                        "type": "boolean"
+                      },
+                      "retryAfterMs": {
+                        "minimum": 0,
+                        "type": "integer"
+                      }
+                    }
+                  }
+                }
+              }
+            ]
+          }
+        }
+      }
+    }
+  }
+}

@@ -64,14 +64,16 @@ export function allowedToolNamesFor(
     catalog.getAll().map((tool) => [tool.name, tool.definition?.availableTo])
   );
   return new Set(
-    [...agentAllowed].filter((name) => {
-      if (excluded?.has(name)) return false;
-      const tool = catalog.getAll().find((entry) => entry.name === name);
-      return (
-        tool !== undefined &&
-        offerable(availability.get(name), presentationContext) &&
+    catalog.getAll().flatMap((tool) => {
+      const allowedByName =
+        agentAllowed.has(tool.name) ||
+        (tool.canonicalId !== undefined && agentAllowed.has(tool.canonicalId));
+      if (!allowedByName || excluded?.has(tool.name)) return [];
+      const name = tool.name;
+      return offerable(availability.get(name), presentationContext) &&
         agentCanBeOfferedTool(agent?.capabilityRestrictions, tool)
-      );
+        ? [name]
+        : [];
     })
   );
 }

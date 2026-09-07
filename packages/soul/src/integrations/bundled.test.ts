@@ -135,10 +135,18 @@ describe("the integrations shipped in this repo", () => {
     // Derived from the directory rather than hardcoded: a fixed list would have to be edited
     // every time an integration ships, and the edit that silences it is the same edit that would
     // hide a genuine skip. Comparing against what is actually on disk keeps the guard honest.
-    const onDisk = (await readdir(dir, { withFileTypes: true }))
+    const directories = (await readdir(dir, { withFileTypes: true }))
       .filter((e) => e.isDirectory())
       .map((e) => e.name)
       .sort();
+    // An OIM package has no `manifest.yml`; the published loader owns it, so this loader must not
+    // claim it. Deriving the list from what each directory declares keeps the guard honest for
+    // both formats without hardcoding either.
+    const onDisk: string[] = [];
+    for (const slug of directories) {
+      const files = await readdir(join(dir, slug));
+      if (files.includes("manifest.yml")) onDisk.push(slug);
+    }
 
     expect(onDisk.length).toBeGreaterThan(0);
     expect([...integrations.keys()].sort()).toEqual(onDisk);

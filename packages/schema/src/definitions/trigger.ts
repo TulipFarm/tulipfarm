@@ -152,7 +152,7 @@ function variantsFor<const Ownership extends Record<string, TSchema>>(ownership:
   function variant<
     const VariantType extends TriggerType,
     const ExtraProps extends Record<string, TSchema>,
-  >(type: VariantType, extraProps: ExtraProps) {
+  >(type: VariantType, extraProps: ExtraProps, options: Record<string, unknown> = {}) {
     return Type.Object(
       {
         type: Type.Unsafe<VariantType>({ const: type }),
@@ -160,7 +160,7 @@ function variantsFor<const Ownership extends Record<string, TSchema>>(ownership:
         ...sharedSpecProps,
         ...extraProps,
       },
-      { additionalProperties: false }
+      { additionalProperties: false, ...options }
     );
   }
 
@@ -198,11 +198,24 @@ function variantsFor<const Ownership extends Record<string, TSchema>>(ownership:
         { additionalProperties: false }
       ),
     }),
-    variant("integration_event", {
-      provider: nonEmptyString,
-      matchEventType: nonEmptyString,
-      matchEventVersion: Type.Optional(positiveInteger),
-    }),
+    variant(
+      "integration_event",
+      {
+        provider: nonEmptyString,
+        matchEventType: nonEmptyString,
+        matchEventVersion: Type.Optional(positiveInteger),
+        protocol: Type.Optional(Type.Unsafe<"oim">({ const: "oim" })),
+        integrationMajorVersion: Type.Optional(Type.Integer({ minimum: 0 })),
+        connectionId: Type.Optional(nonEmptyString),
+      },
+      {
+        dependentRequired: {
+          protocol: ["integrationMajorVersion", "connectionId"],
+          integrationMajorVersion: ["protocol", "connectionId"],
+          connectionId: ["protocol", "integrationMajorVersion"],
+        },
+      }
+    ),
     variant("form", { formRef: nonEmptyString }),
     variant("internal_event", {
       matchEventType: nonEmptyString,

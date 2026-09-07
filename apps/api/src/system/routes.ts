@@ -5,6 +5,7 @@ import type { AuditService } from "../audit/service";
 import { ErrorSchema } from "../auth/schemas";
 import type { UserDoc } from "../auth/users";
 import type { RequireAuthorization } from "../authz/route-gate";
+import { registerOimCapabilitiesRoute } from "./oim-capabilities";
 import { isNewerVersion, runningVersion } from "./version";
 
 type PreHandler = (req: FastifyRequest, reply: FastifyReply) => Promise<void>;
@@ -28,6 +29,8 @@ export interface SystemRoutesDeps {
   audit?: AuditService;
   /** Injectable for tests. */
   fetchImpl?: typeof fetch;
+  /** Re-register provider webhooks after the public API origin changes. */
+  onPublicOriginsChanged?: (apiOrigin: string) => Promise<void>;
 }
 
 const PublicOriginsSchema = {
@@ -49,6 +52,7 @@ export function registerSystemRoutes(
   requireAuth: PreHandler,
   requireAuthorization: RequireAuthorization
 ): void {
+  registerOimCapabilitiesRoute(app, {}, requireAuth);
   app.get(
     "/api/v1/system/update-check",
     {
@@ -166,6 +170,7 @@ export function registerSystemRoutes(
       const body = req.body as { webOrigin: string; apiOrigin?: string | null };
       try {
         const origins = await publicOrigins.save(body);
+        await deps.onPublicOriginsChanged?.(origins.apiOrigin);
         await auditPublicOriginChange(deps.audit, req, "deployment.public_origins.update");
         return origins;
       } catch (error) {
@@ -205,6 +210,7 @@ export function registerSystemRoutes(
     async (req, reply) => {
       try {
         const origins = await publicOrigins.reset();
+        await deps.onPublicOriginsChanged?.(origins.apiOrigin);
         await auditPublicOriginChange(deps.audit, req, "deployment.public_origins.reset");
         return origins;
       } catch (error) {

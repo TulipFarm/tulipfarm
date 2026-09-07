@@ -13,7 +13,8 @@
     "./guards": "./src/guards.ts",
     "./llm": "./src/llm.ts",
     "./message-content": "./src/message-content.ts",
-    "./model-catalog": "./src/model-catalog.ts"
+    "./model-catalog": "./src/model-catalog.ts",
+    "./oim": "./src/oim.ts"
   },
   "scripts": {
     "lint": "biome check --no-errors-on-unmatched .",
@@ -24,6 +25,7 @@
     "@noble/hashes": "^2.3.0",
     "@sinclair/typebox": "^0.34.52",
     "ajv": "^8.20.0",
+    "graphql": "^16.14.2",
     "yaml": "^2.9.0"
   },
   "devDependencies": {

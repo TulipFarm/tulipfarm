@@ -152,5 +152,9 @@ export function googleCompositeSecretProvider(
       if (secretRef === GOOGLE_ACCESS_TOKEN_SECRET_REF) return google.resolveCurrent(secretRef);
       return base.resolveCurrent(secretRef);
     },
+    async currentVersion(secretRef) {
+      const provider = secretRef === GOOGLE_ACCESS_TOKEN_SECRET_REF ? google : base;
+      return provider.currentVersion?.(secretRef) ?? null;
+    },
   };
 }

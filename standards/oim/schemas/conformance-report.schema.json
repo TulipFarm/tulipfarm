@@ -1,0 +1,154 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:oim:schema:1.0:conformance-report.schema.json",
+  "title": "Open Integration Manifest conformance report",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "oimVersion",
+    "suiteVersion",
+    "suiteDigest",
+    "runtime",
+    "profiles",
+    "results",
+    "claim"
+  ],
+  "properties": {
+    "oimVersion": {
+      "const": "1.0"
+    },
+    "suiteVersion": {
+      "type": "string",
+      "minLength": 1
+    },
+    "suiteDigest": {
+      "type": "string",
+      "pattern": "^sha256:[a-f0-9]{64}$"
+    },
+    "runtime": {
+      "additionalProperties": false,
+      "type": "object",
+      "required": ["name", "version"],
+      "properties": {
+        "name": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "version": {
+          "minLength": 1,
+          "type": "string"
+        }
+      }
+    },
+    "profiles": {
+      "additionalProperties": false,
+      "type": "object",
+      "required": ["core"],
+      "properties": {
+        "core": {
+          "type": "string",
+          "enum": ["1.0", "1.1", "1.2"]
+        },
+        "auth": {
+          "type": "string",
+          "enum": ["1.0"]
+        },
+        "events": {
+          "type": "string",
+          "enum": ["1.0"]
+        },
+        "knowledge": {
+          "type": "string",
+          "enum": ["1.0", "1.1"]
+        },
+        "hooks": {
+          "type": "string",
+          "enum": ["1.0"]
+        }
+      }
+    },
+    "results": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["caseId", "vectorId", "status"],
+        "properties": {
+          "caseId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "vectorId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "status": {
+            "const": "passed"
+          }
+        }
+      }
+    },
+    "claim": {
+      "additionalProperties": false,
+      "type": "object",
+      "required": ["oimVersion", "runtime", "profiles", "passedCases"],
+      "properties": {
+        "oimVersion": {
+          "const": "1.0",
+          "type": "string"
+        },
+        "runtime": {
+          "additionalProperties": false,
+          "type": "object",
+          "required": ["name", "version"],
+          "properties": {
+            "name": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "version": {
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        },
+        "profiles": {
+          "additionalProperties": false,
+          "type": "object",
+          "required": ["core"],
+          "properties": {
+            "core": {
+              "type": "string",
+              "enum": ["1.0", "1.1", "1.2"]
+            },
+            "auth": {
+              "type": "string",
+              "enum": ["1.0"]
+            },
+            "events": {
+              "type": "string",
+              "enum": ["1.0"]
+            },
+            "knowledge": {
+              "type": "string",
+              "enum": ["1.0", "1.1"]
+            },
+            "hooks": {
+              "type": "string",
+              "enum": ["1.0"]
+            }
+          }
+        },
+        "passedCases": {
+          "uniqueItems": true,
+          "type": "array",
+          "items": {
+            "pattern": "^[a-z]+(?:[.-][a-z0-9]+)+$",
+            "type": "string"
+          }
+        }
+      }
+    }
+  }
+}

@@ -307,6 +307,35 @@ describe("announceToolCalls", () => {
     // here would tell a reader the call finished while it is still pending.
     expect(events.appended.map((event) => event.eventType)).toEqual(["tool.call"]);
   });
+
+  it("stays silent about a call parked on a provider retry timer", async () => {
+    const events = new FakeAppendPort();
+    const broker = port((request) => ({
+      status: "awaiting_retry",
+      callId: request.callId,
+      waitId: "wait-retry-1",
+    }));
+
+    const result = await announceToolCalls(broker.port, writer(events), {
+      now: clock(),
+    }).dispatch(REQUEST);
+
+    expect(result).toMatchObject({ status: "awaiting_retry", waitId: "wait-retry-1" });
+    expect(events.appended.map((event) => event.eventType)).toEqual(["tool.call"]);
+  });
+
+  it("does not publish a definitive Tool result for an indeterminate effect", async () => {
+    const events = new FakeAppendPort();
+    const broker = port((request) => ({
+      status: "needs_reconciliation",
+      callId: request.callId,
+    }));
+
+    const result = await announceToolCalls(broker.port, writer(events)).dispatch(REQUEST);
+
+    expect(result).toEqual({ status: "needs_reconciliation", callId: "call-1" });
+    expect(events.appended.map((event) => event.eventType)).toEqual(["tool.call"]);
+  });
 });
 
 describe("carrying what ran at the same time", () => {

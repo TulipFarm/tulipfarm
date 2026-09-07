@@ -1,5 +1,7 @@
+import { existsSync } from "node:fs";
 import { readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
+import { parseOimManifest } from "@tulipfarm/schema";
 import type { SecretsService } from "@tulipfarm/secrets";
 import type { IntegrationManifest, SoulIntegration } from "@tulipfarm/soul";
 import {
@@ -21,6 +23,9 @@ describe("bundled integrations", () => {
     const slugs = (await readdir(dir, { withFileTypes: true }))
       .filter((entry) => entry.isDirectory())
       .map((entry) => entry.name)
+      // An OIM package declares itself in `oim.yml` and has no legacy manifest; it is compiled by
+      // the OIM path, which its own reference tests cover.
+      .filter((slug) => existsSync(join(dir, slug, "manifest.yml")))
       .sort();
 
     entries = await Promise.all(
@@ -39,13 +44,7 @@ describe("bundled integrations", () => {
   });
 
   it("finds the integrations that ship in this repo", () => {
-    expect(entries.map((entry) => entry.slug)).toEqual([
-      "github",
-      "google",
-      "jira",
-      "linear",
-      "slack",
-    ]);
+    expect(entries.map((entry) => entry.slug)).toEqual(["github", "google", "slack"]);
   });
 
   it("declares a connect flow the loader accepts", () => {
@@ -125,4 +124,98 @@ function declaredEnv(manifest: IntegrationManifest): string[] {
     if (step.kind === "app_manifest") names.push(...Object.values(step.exchange?.map ?? {}));
   }
   return names;
+}
+
+/**
+ * The shipped OIM packages have to reach chat by the same composition root a third-party package
+ * uses. Their own reference tests prove the manifests compile; this proves the runtime publishes
+ * them, with the companion documents the soul loader reads at install.
+ */
+describe("bundled OIM packages", () => {
+  let slugs: string[];
+
+  beforeAll(async () => {
+    const dir = bundledIntegrationsDir();
+    slugs = (await readdir(dir, { withFileTypes: true }))
+      .filter((entry) => entry.isDirectory())
+      .filter((entry) => existsSync(join(dir, entry.name, "oim.yml")))
+      .map((entry) => entry.name)
+      .sort();
+  });
+
+  it("finds the OIM packages that ship in this repo", () => {
+    expect(slugs).toEqual([
+      "asana",
+      "clickup",
+      "confluence",
+      "confluence-data-center",
+      "discord",
+      "facebook",
+      "gitlab",
+      "google-workspace",
+      "hubspot",
+      "instagram",
+      "jira",
+      "linear",
+      "linkedin",
+      "mailchimp",
+      "notion",
+      "openweather",
+      "reddit",
+      "shopify",
+      "slack-oim",
+      "telegram",
+      "trello",
+      "twilio",
+      "x",
+      "zendesk",
+    ]);
+  });
+
+  it("publishes one Tool per declared operation", async () => {
+    const dir = bundledIntegrationsDir();
+    for (const slug of slugs) {
+      const oimManifest = parseOimManifest(await readFile(join(dir, slug, "oim.yml"), "utf8"));
+      const oimDocuments: Record<string, string> = {};
+      for (const file of oimManifest.files ?? []) {
+        if (file.role !== "graphql") continue;
+        oimDocuments[file.path] = await readFile(join(dir, slug, file.path), "utf8");
+      }
+      // Placeholder every configuration field, so a templated host resolves to an allowed one.
+      const env = Object.fromEntries(
+        (oimManifest.auth?.configurationFields ?? []).map((field) => [
+          field.id,
+          allowedHost(oimManifest.auth?.allowedOriginHosts ?? []),
+        ])
+      );
+
+      const { tools, problems } = buildDeclarativeTools(
+        [
+          {
+            slug,
+            sourceIntegration: oimManifest.metadata.id,
+            oimManifest,
+            oimDocuments,
+            connection: { enabled: true, env },
+          } as SoulIntegration,
+        ],
+        {
+          businessId: "biz",
+          effects: new MemoryEffectStore(),
+          secrets: async () => ({}) as SecretsService,
+          http: { send: async () => ({ status: 200, headers: {}, body: {} }) },
+        }
+      );
+
+      expect(problems, slug).toEqual([]);
+      expect(tools.length, slug).toBe(oimManifest.operations.length);
+    }
+  });
+});
+
+/** A host the manifest's own allowlist accepts, so the placeholder is not itself the thing tested. */
+function allowedHost(patterns: readonly string[]): string {
+  const [first] = patterns;
+  if (first === undefined) return "example.com";
+  return first.startsWith("*.") ? `acme.${first.slice(2)}` : first;
 }

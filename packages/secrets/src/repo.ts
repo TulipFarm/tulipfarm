@@ -33,6 +33,10 @@ export interface SecretRepo {
   list(): Promise<SecretMeta[]>;
   findByKey(key: string): Promise<SecretDoc | null>;
   upsert(key: string, fields: SecretEnvelopeFields): Promise<void>;
+  /** Optional batched write for stores that can atomically rotate related Secrets. */
+  upsertMany?(
+    entries: readonly { readonly key: string; readonly fields: SecretEnvelopeFields }[]
+  ): Promise<void>;
   delete(key: string): Promise<void>;
   /**
    * Current revision marker for a Secret — `updated_at`, or `null` when the row is gone.
@@ -99,6 +103,38 @@ export class PgSecretRepo implements SecretRepo {
          dek_id = EXCLUDED.dek_id,
          updated_at = now()`,
       [key, fields.encryptedValue, fields.iv, fields.authTag, fields.type, fields.dekId ?? null]
+    );
+  }
+
+  async upsertMany(
+    entries: readonly { readonly key: string; readonly fields: SecretEnvelopeFields }[]
+  ): Promise<void> {
+    if (entries.length === 0) return;
+    const values = entries
+      .map((_, index) => {
+        const offset = index * 6;
+        return `($${offset + 1}, $${offset + 2}, $${offset + 3}, $${offset + 4}, $${offset + 5}, $${offset + 6}, now(), now())`;
+      })
+      .join(", ");
+    const params = entries.flatMap(({ key, fields }) => [
+      key,
+      fields.encryptedValue,
+      fields.iv,
+      fields.authTag,
+      fields.type,
+      fields.dekId ?? null,
+    ]);
+    await this.q.query(
+      `INSERT INTO secrets (key, encrypted_value, iv, auth_tag, type, dek_id, created_at, updated_at)
+       VALUES ${values}
+       ON CONFLICT (key) DO UPDATE SET
+         encrypted_value = EXCLUDED.encrypted_value,
+         iv = EXCLUDED.iv,
+         auth_tag = EXCLUDED.auth_tag,
+         type = EXCLUDED.type,
+         dek_id = EXCLUDED.dek_id,
+         updated_at = now()`,
+      params
     );
   }
 

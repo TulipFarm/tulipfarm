@@ -65,6 +65,41 @@ describe("OpenApiToolAdapter", () => {
     expect(sent?.headers["X-Trace"]).toBe("t9");
   });
 
+  it("base64-encodes a basic credential so an operator never runs base64 by hand", async () => {
+    const http = new RecordingHttp(OK);
+    const adapter = new OpenApiToolAdapter({
+      binding: binding({
+        auth: {
+          in: "header",
+          header: "Authorization",
+          format: "Basic {token}",
+          encoding: "basic",
+        },
+      }),
+      http,
+    });
+
+    await adapter.dispatch(request({ page_id: "p1" }), "muskan@acme.example:t0ken");
+
+    expect(http.sent[0]?.headers.Authorization).toBe(
+      `Basic ${Buffer.from("muskan@acme.example:t0ken", "utf8").toString("base64")}`
+    );
+  });
+
+  it("sends a credential verbatim when no encoding is declared", async () => {
+    const http = new RecordingHttp(OK);
+    const adapter = new OpenApiToolAdapter({
+      binding: binding({
+        auth: { in: "header", header: "Authorization", format: "Bearer {token}" },
+      }),
+      http,
+    });
+
+    await adapter.dispatch(request({ page_id: "p1" }), "t0ken");
+
+    expect(http.sent[0]?.headers.Authorization).toBe("Bearer t0ken");
+  });
+
   it("percent-encodes a path argument so it cannot escape its segment", async () => {
     const http = new RecordingHttp(OK);
     const adapter = new OpenApiToolAdapter({ binding: binding(), http });

@@ -158,5 +158,9 @@ export function githubCompositeSecretProvider(
       if (isGitHubInstallationSecretRef(secretRef)) return github.resolveCurrent(secretRef);
       return base.resolveCurrent(secretRef);
     },
+    async currentVersion(secretRef) {
+      const provider = isGitHubInstallationSecretRef(secretRef) ? github : base;
+      return provider.currentVersion?.(secretRef) ?? null;
+    },
   };
 }

@@ -637,6 +637,62 @@ describe("AgentLoop", () => {
     expect(outcome).toMatchObject({ status: "awaiting_approval", approvalId: "appr-1" });
   });
 
+  it("yields a pre-registered provider retry wait without asking the model to retry", async () => {
+    const model = scriptedModel(
+      toolCallResult([{ callId: "c1", name: "github.issue.comment", arguments: { body: "1" } }])
+    );
+    const outcome = await loop({
+      model,
+      tools: dispatcher({ status: "awaiting_retry", callId: "c1", waitId: "wait-retry-1" }),
+    }).run(input());
+
+    expect(outcome).toMatchObject({
+      status: "awaiting_retry",
+      callId: "c1",
+      waitId: "wait-retry-1",
+    });
+    expect(model.requests).toBe(1);
+  });
+
+  it("replays the parked provider call after the durable retry wait resolves", async () => {
+    const checkpoints = new InMemoryLoopCheckpointStore();
+    const parked = await loop({
+      model: scriptedModel(
+        toolCallResult([{ callId: "c1", name: "github.issue.comment", arguments: { body: "1" } }])
+      ),
+      tools: dispatcher({ status: "awaiting_retry", callId: "c1", waitId: "wait-retry-1" }),
+      checkpoints,
+    }).run(input());
+    const model = scriptedModel(textResult("done"));
+    const tools = dispatcher({ status: "succeeded", callId: "c1", output: { ok: true } });
+
+    const resumed = await loop({ model, tools, checkpoints }).run(input());
+
+    expect(parked).toMatchObject({ status: "awaiting_retry", callId: "c1", toolCalls: 0 });
+    expect(tools.calls).toEqual([{ name: "github.issue.comment", arguments: { body: "1" } }]);
+    expect(model.requests).toBe(1);
+    expect(resumed).toMatchObject({ status: "completed", iterations: 2, toolCalls: 1 });
+  });
+
+  it("stops for reconciliation when a Tool response cannot prove a mutation outcome", async () => {
+    const model = scriptedModel(
+      toolCallResult([{ callId: "c1", name: "github.issue.comment", arguments: { body: "1" } }]),
+      textResult("I will try that mutation again")
+    );
+
+    const outcome = await loop({
+      model,
+      tools: dispatcher({ status: "needs_reconciliation", callId: "c1" }),
+    }).run(input());
+
+    expect(outcome).toMatchObject({
+      status: "needs_reconciliation",
+      iterations: 1,
+      toolCalls: 1,
+    });
+    expect(model.requests).toBe(1);
+  });
+
   it("stops after request_input before asking the model to continue", async () => {
     const model = scriptedModel(
       toolCallResult([{ callId: "input-1", name: "request_input", arguments: { component: {} } }]),

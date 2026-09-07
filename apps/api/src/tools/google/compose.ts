@@ -53,7 +53,10 @@ export function buildGoogleTooling(options: BuildGoogleToolingOptions): GoogleTo
     ...(options.fetchImpl === undefined ? {} : { fetchImpl: options.fetchImpl }),
   });
   const provider = googleCompositeSecretProvider(
-    secretsServiceProvider({ get: async (key) => (await options.secrets()).get(key) }),
+    secretsServiceProvider({
+      resolveCurrent: async (key) => (await options.secrets()).resolveCurrent(key),
+      revision: async (key) => (await options.secrets()).revision(key),
+    }),
     tokenProvider
   );
   const secretBroker = new SecretBroker({ provider, authorizer: googleOnlyAuthorizer });

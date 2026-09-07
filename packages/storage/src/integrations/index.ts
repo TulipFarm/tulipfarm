@@ -38,21 +38,18 @@ export {
 } from "./channel-run-delivery-store";
 export type {
   ChannelSurfaceInstanceKey,
-  ChannelSurfaceInstanceStatus,
-  ChannelSurfacePublishJobKey,
-  ChannelSurfacePublishJobStatus,
-  PersistedChannelSurfaceInstance,
   PersistedChannelSurfacePublishJob,
-  PersistedSlackCapabilityObservation,
-  SlackCapabilityObservationKey,
-  SlackCapabilityObservationStatus,
-  UpsertChannelSurfaceInstance,
 } from "./channel-surface-store";
 export {
   CHANNEL_SURFACE_STORAGE_STATEMENTS,
   ChannelSurfaceStore,
-  SlackCapabilityObservationStore,
 } from "./channel-surface-store";
+export type { PersistedConnection } from "./connection-store";
+export {
+  CONNECTION_STORAGE_STATEMENTS,
+  ConnectionIdentityConflictError,
+  ConnectionStore,
+} from "./connection-store";
 export type {
   IntegrationProjectionStatus,
   PersistedChannelRoute,
@@ -66,18 +63,43 @@ export {
   IntegrationStore,
 } from "./integration-store";
 export type {
-  ProviderFileUploadPhase,
-  ProviderFileUploadRecord,
-} from "./provider-file-upload-store";
+  AdmitOimRateLimitInput,
+  ImposeOimRateLimitCooldownInput,
+  OimRateLimitAdmission,
+  OimRateLimitQuota,
+  OimRateLimitStoreScope,
+} from "./oim-rate-limit-store";
+export {
+  OIM_RATE_LIMIT_STORAGE_STATEMENTS,
+  OimRateLimitStore,
+} from "./oim-rate-limit-store";
+export type {
+  AddOimTrustRootInput,
+  InstalledOimReleaseProvenance,
+  OimInstalledReleaseTrustClass,
+  OimRevocationFeed,
+  OimTrustRoot,
+  OimTrustRootPurpose,
+  PutInstalledOimReleaseProvenanceInput,
+  SetOimRevocationFeedInput,
+} from "./oim-release-trust-store";
+export {
+  OIM_RELEASE_MAINTENANCE_STORAGE_STATEMENTS,
+  OIM_RELEASE_TRUST_STORAGE_STATEMENTS,
+  OimReleaseTrustStore,
+  OimTrustRootConflictError,
+} from "./oim-release-trust-store";
+export type { PollingIngressLease } from "./polling-ingress-store";
+export {
+  POLLING_INGRESS_STORAGE_STATEMENTS,
+  PollingIngressStore,
+} from "./polling-ingress-store";
+export type { ProviderFileUploadRecord } from "./provider-file-upload-store";
 export {
   PROVIDER_FILE_UPLOAD_STORAGE_STATEMENTS,
   ProviderFileUploadStore,
 } from "./provider-file-upload-store";
-export type {
-  ProviderOwnedObjectKey,
-  ProviderOwnedObjectType,
-  RecordProviderOwnedObject,
-} from "./provider-object-ownership-store";
+export type { ProviderObjectOwnershipRecord } from "./provider-object-ownership-store";
 export {
   PROVIDER_OBJECT_OWNERSHIP_STORAGE_STATEMENTS,
   ProviderObjectOwnershipStore,
@@ -87,3 +109,14 @@ export {
   SOUL_REPOSITORY_STORAGE_STATEMENTS,
   SoulRepositoryStore,
 } from "./soul-repository-store";
+export type {
+  PersistedWebhookDelivery,
+  RecordedDelivery,
+  WebhookDeliveryInput,
+  WebhookDeliveryState,
+} from "./webhook-inbox-store";
+export {
+  RawPayloadDiscardedError,
+  WEBHOOK_INBOX_STORAGE_STATEMENTS,
+  WebhookInboxStore,
+} from "./webhook-inbox-store";

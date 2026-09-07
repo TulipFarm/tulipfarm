@@ -38,8 +38,20 @@ export interface CredentialResolverDeps {
   readonly personalCredentialProviders?: ReadonlySet<string>;
 }
 
-/** Personal support is explicit `personal: true`, never inferred from OAuth grant type. */
+/**
+ * Personal support is explicit — `personal: true` on a legacy step, or an OIM operation whose
+ * `identityMode` asks for a person — and is never inferred from an OAuth grant type.
+ *
+ * An OIM package carries no legacy manifest, so reading only `manifest` answered `false` for every
+ * one of them. That silently downgraded a `user_preferred` Tool to the business credential instead
+ * of telling the person to connect their own account, which is the failure this whole resolver
+ * exists to prevent.
+ */
 export function providerSupportsPersonalCredential(integration: SoulIntegration): boolean {
+  const oim = integration.oimManifest;
+  if (oim !== undefined) {
+    return oim.operations.some((operation) => operation.identityMode !== "shared_only");
+  }
   if (integration.manifest === undefined) return false;
   return resolveAuthSteps(integration.manifest).some(isPersonalCredentialStep);
 }

@@ -104,13 +104,21 @@ export async function runToolAttempts(input: ToolAttemptInput): Promise<HostedTo
       // Throws are unknown phase: never retry, and settle ledgered writes as `ambiguous`.
       input.logger?.error(`tool "${call.name}" raised during execution`, error);
       await settle("ambiguous", "tool_raised");
-      return { status: "failed", reason: `tool "${call.name}" raised an internal error` };
+      return tool.mutating
+        ? { status: "needs_reconciliation" }
+        : { status: "failed", reason: `tool "${call.name}" raised an internal error` };
     }
     if (result.success) {
       await settle("confirmed", undefined, { value: result.data });
       return { status: "succeeded", output: result.data };
     }
     if (isParked(result)) {
+      if (result.parked.kind === "retry_wait") {
+        return {
+          status: "awaiting_retry",
+          waitId: result.parked.waitId,
+        };
+      }
       // The spawn committed and its wait is registered, so the effect is done — only the *answer*
       // is outstanding. Settling `confirmed` is what stops reconciliation later reading a Turn
       // that is merely waiting as a write that never landed. Never retried, because a park is by
@@ -130,7 +138,7 @@ export async function runToolAttempts(input: ToolAttemptInput): Promise<HostedTo
   }
   if (isIndeterminateFault(failure.error.code)) {
     await settle("ambiguous", "tool_timeout");
-    return { status: "failed", reason: `tool "${call.name}" ${failure.error.message}` };
+    return { status: "needs_reconciliation" };
   }
   // Structured errors have a known phase; there is nothing to reconcile.
   await settle("failed", failure.error.code);

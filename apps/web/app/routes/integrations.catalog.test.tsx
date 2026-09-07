@@ -23,11 +23,10 @@ vi.mock("~/lib/integrations", async (importOriginal) => ({
   ...(await importOriginal<typeof import("~/lib/integrations")>()),
   listIntegrations: vi.fn(),
   getIntegration: vi.fn(),
-  updateIntegration: vi.fn(),
 }));
 
 import type { IntegrationSummary } from "~/lib/integrations";
-import { getIntegration, updateIntegration } from "~/lib/integrations";
+import { getIntegration } from "~/lib/integrations";
 import IntegrationsIndex from "./_app.integrations._index";
 
 function integration(over: Partial<IntegrationSummary> = {}): IntegrationSummary {
@@ -124,18 +123,21 @@ test("an installed integration opens its preview panel from its card action", as
   expect(screen.getByText("Browse repositories and review pull requests")).toBeInTheDocument();
 });
 
-test("a curated entry that is not installed yet is not a link to a detail page", async () => {
-  // Nothing has been cloned, so `/integrations/linear` would 404 — the row must not offer it.
+test("a curated entry that is not installed yet opens its reviewed install path", async () => {
   renderCatalog([
     integration({
       name: "linear",
       title: "Linear",
       installed: false,
-      source: "acme/tulipfarm-linear",
+      source: "https://github.com/acme/tulipfarm-linear.git",
     }),
   ]);
-  expect(await screen.findByText("Not installed")).toBeInTheDocument();
-  expect(screen.queryByRole("link", { name: /Linear/ })).not.toBeInTheDocument();
+  const install = await screen.findByRole("link", { name: "Install Linear" });
+  expect(install).toHaveAttribute(
+    "href",
+    "/?install=1&name=linear&source=https%3A%2F%2Fgithub.com%2Facme%2Ftulipfarm-linear.git"
+  );
+  expect(screen.queryByRole("link", { name: /view details for linear/i })).not.toBeInTheDocument();
 });
 
 test("searches the slug as well as the brand name", async () => {
@@ -173,13 +175,8 @@ test("says nothing matched rather than looking empty", async () => {
   expect(screen.getByText(/nothing matches that search/i)).toBeInTheDocument();
 });
 
-test("offers an update action without adding another status badge", async () => {
+test("opens a review panel for an update without adding another status badge", async () => {
   const user = userEvent.setup();
-  vi.mocked(updateIntegration).mockResolvedValue({
-    name: "linear",
-    source: "acme/linear",
-    ref: "main",
-  });
 
   renderCatalog([
     integration({
@@ -196,7 +193,7 @@ test("offers an update action without adding another status badge", async () => 
   expect(screen.queryByText(/update available/i)).not.toBeInTheDocument();
 
   await user.click(updateButton);
-  expect(updateIntegration).toHaveBeenCalledWith("linear", "acme/linear");
+  expect(screen.getByRole("dialog")).toHaveTextContent("Review integration update");
 });
 
 test("opens the preview panel straight from a ?view= URL, so the link is shareable", async () => {

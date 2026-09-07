@@ -1,0 +1,432 @@
+oimVersion: "1.0"
+kind: Integration
+
+metadata:
+  id: linear
+  name: Linear
+  version: 1.0.0
+  description: >-
+    Read, create, update and comment on Linear issues through fixed GraphQL documents and a scoped
+    Linear API key.
+  license: Apache-2.0
+  maintainers:
+    - name: TulipFarm
+      url: https://tulipfarm.dev
+
+profiles:
+  core: "1.0"
+  auth: "1.0"
+
+# Every GraphQL document this Integration can send is shipped here and digest-pinned. An Agent
+# supplies variables and nothing else, so no argument can widen what a call selects or mutates.
+files:
+  - path: operations/viewer.graphql
+    role: graphql
+    sha256: "09e0b4ab3a583a9a2ee156eecfca06cfe3529a6e083ec510ec99a9ca63d48c0c"
+  - path: operations/list-teams.graphql
+    role: graphql
+    sha256: "6778e581f0c46d203f23947481e23d7f2893a85475e9da3190812a88753cf76a"
+  - path: operations/list-issues.graphql
+    role: graphql
+    sha256: "cbe06f9c5192ba8344b11be501087e7d595b01872b77d38f1754d53a102bdb78"
+  - path: operations/read-issue.graphql
+    role: graphql
+    sha256: "fc72c44b01c4a75234c475a95d356619d1b3effd8c057301b10b03e62cab8143"
+  - path: operations/create-issue.graphql
+    role: graphql
+    sha256: "aa6e9febea50a256996a18c61a72c1019c0c708cdfb947920ec069cf92b5017d"
+  - path: operations/update-issue.graphql
+    role: graphql
+    sha256: "7f05c1af926ffc627bbb74ad8ba311ac20fad4cec60bb328fd455c8c0cf409d3"
+  - path: operations/create-comment.graphql
+    role: graphql
+    sha256: "869dd8b4d3163e2886ce6c06cd55afc7d787fffc39d1495f67416e159b9a8799"
+  - path: fixtures.yml
+    role: fixture
+    sha256: "7e3b1b6d0a330d9bed7d6ae336f790f863df287215ad288e60d79d5c61556327"
+
+auth:
+  # Linear is single-tenant on one host, so nothing about the destination is configurable.
+  allowedOriginHosts:
+    - api.linear.app
+  credentialSlots:
+    - id: api_key
+      label: Linear API key
+      kind: api_key
+      required: true
+  steps:
+    - id: key
+      type: fields
+      title: Create an API key
+      description: >-
+        In Linear, open Settings > Security & access > Personal API keys and create a key for
+        TulipFarm. Limit it to the teams and the read, write, issue-create or comment-create
+        permissions this Connection should have — the Connection can do exactly what the key can
+        do and nothing more. Linear shows the key once. Agents never see it.
+      fields:
+        - id: api_key
+          label: API key
+          input: password
+          required: true
+          target:
+            type: credential
+            slot: api_key
+  healthCheckOperationId: viewer
+
+operations:
+  - id: viewer
+    name: linear_viewer
+    description: The Linear account this Connection authenticates as. Use it to confirm the key works.
+    effect: read
+    identityMode: shared_or_personal
+    credentialSlot: api_key
+    # A Linear personal API key is the complete Authorization value, not a Bearer token.
+    credentialInjection:
+      in: header
+      name: Authorization
+      format: "{token}"
+    source:
+      type: graphql
+      url: https://api.linear.app/graphql
+      operation: Viewer
+      documentFile: operations/viewer.graphql
+    response:
+      maxBytes: 32768
+      schema:
+        type: object
+        properties:
+          data:
+            type: object
+            properties:
+              viewer:
+                type: object
+                properties:
+                  id: { type: string }
+                  name: { type: string }
+                  email: { type: string }
+                required: [id, name]
+            required: [viewer]
+        required: [data]
+    rateLimit:
+      requests: 60
+      perSeconds: 60
+      scope: connection
+
+  - id: list-teams
+    name: linear_list_teams
+    description: >-
+      List the Linear teams this Connection can reach. Read it before creating an issue when the
+      exact team id is not already known.
+    effect: read
+    identityMode: shared_or_personal
+    credentialSlot: api_key
+    credentialInjection:
+      in: header
+      name: Authorization
+      format: "{token}"
+    source:
+      type: graphql
+      url: https://api.linear.app/graphql
+      operation: ListTeams
+      documentFile: operations/list-teams.graphql
+    response:
+      maxBytes: 131072
+      schema:
+        type: object
+        properties:
+          data:
+            type: object
+            properties:
+              teams:
+                type: object
+                properties:
+                  nodes:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id: { type: string }
+                        name: { type: string }
+                        key: { type: string }
+                      required: [id, name, key]
+                required: [nodes]
+            required: [teams]
+        required: [data]
+    rateLimit:
+      requests: 60
+      perSeconds: 60
+      scope: connection
+
+  - id: list-issues
+    name: linear_list_issues
+    description: >-
+      List issues visible to this Connection, newest activity first. Use the returned ids before
+      reading, updating or commenting on one.
+    effect: read
+    identityMode: shared_or_personal
+    credentialSlot: api_key
+    credentialInjection:
+      in: header
+      name: Authorization
+      format: "{token}"
+    source:
+      type: graphql
+      url: https://api.linear.app/graphql
+      operation: ListIssues
+      documentFile: operations/list-issues.graphql
+    # GraphQL variables are the whole input. Linear pages with `first` and `after`, and the cursor
+    # comes back in the response, so the Agent asks for the next page itself.
+    requestSchema:
+      type: object
+      properties:
+        first:
+          type: integer
+          minimum: 1
+          maximum: 50
+        after:
+          type: string
+          maxLength: 4096
+          description: The endCursor from a previous response.
+      required: [first]
+      additionalProperties: false
+    response:
+      maxBytes: 262144
+      schema:
+        type: object
+        properties:
+          data:
+            type: object
+            properties:
+              issues:
+                type: object
+                properties:
+                  nodes:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id: { type: string }
+                        identifier: { type: string }
+                        title: { type: string }
+                        url: { type: string }
+                        updatedAt: { type: string }
+                      required: [id, identifier, title]
+                  pageInfo:
+                    type: object
+                    properties:
+                      hasNextPage: { type: boolean }
+                      endCursor: { type: ["string", "null"] }
+                    required: [hasNextPage, endCursor]
+                required: [nodes, pageInfo]
+            required: [issues]
+        required: [data]
+    rateLimit:
+      requests: 60
+      perSeconds: 60
+      scope: connection
+
+  - id: read-issue
+    name: linear_read_issue
+    description: >-
+      Read one issue by id or identifier. Read it before changing an issue so the edit rests on the
+      current title, description, state and team.
+    effect: read
+    identityMode: shared_or_personal
+    credentialSlot: api_key
+    credentialInjection:
+      in: header
+      name: Authorization
+      format: "{token}"
+    source:
+      type: graphql
+      url: https://api.linear.app/graphql
+      operation: ReadIssue
+      documentFile: operations/read-issue.graphql
+    requestSchema:
+      type: object
+      properties:
+        id:
+          type: string
+          minLength: 1
+          maxLength: 128
+          description: The issue id, or its identifier such as ENG-42.
+      required: [id]
+      additionalProperties: false
+    response:
+      maxBytes: 131072
+      schema:
+        type: object
+        properties:
+          data:
+            type: object
+            properties:
+              issue:
+                type: object
+                properties:
+                  id: { type: string }
+                  identifier: { type: string }
+                  title: { type: string }
+                  description: { type: string }
+                  url: { type: string }
+                  updatedAt: { type: string }
+                required: [id, identifier, title]
+            required: [issue]
+        required: [data]
+    rateLimit:
+      requests: 60
+      perSeconds: 60
+      scope: connection
+
+  - id: create-issue
+    name: linear_create_issue
+    description: >-
+      Create one issue in a team. Read linear_list_teams first for the team id.
+    effect: create
+    identityMode: shared_or_personal
+    credentialSlot: api_key
+    credentialInjection:
+      in: header
+      name: Authorization
+      format: "{token}"
+    source:
+      type: graphql
+      url: https://api.linear.app/graphql
+      operation: CreateIssue
+      documentFile: operations/create-issue.graphql
+    requestSchema:
+      type: object
+      properties:
+        teamId: { type: string, minLength: 1, maxLength: 128 }
+        title: { type: string, minLength: 1, maxLength: 255 }
+        description: { type: string, maxLength: 100000 }
+      required: [teamId, title]
+      additionalProperties: false
+    response:
+      maxBytes: 32768
+      schema:
+        type: object
+        properties:
+          data:
+            type: object
+            properties:
+              issueCreate:
+                type: object
+                properties:
+                  success: { const: true }
+                  issue:
+                    type: object
+                    properties:
+                      id: { type: string }
+                      identifier: { type: string }
+                      title: { type: string }
+                      url: { type: string }
+                    required: [id, identifier, title]
+                required: [success, issue]
+            required: [issueCreate]
+        required: [data]
+    rateLimit:
+      requests: 30
+      perSeconds: 60
+      scope: connection
+
+  - id: update-issue
+    name: linear_update_issue
+    description: >-
+      Update one issue's title or description. Read the issue first so the edit does not discard
+      something it never saw.
+    effect: update
+    identityMode: shared_or_personal
+    credentialSlot: api_key
+    credentialInjection:
+      in: header
+      name: Authorization
+      format: "{token}"
+    source:
+      type: graphql
+      url: https://api.linear.app/graphql
+      operation: UpdateIssue
+      documentFile: operations/update-issue.graphql
+    requestSchema:
+      type: object
+      properties:
+        id: { type: string, minLength: 1, maxLength: 128 }
+        title: { type: string, minLength: 1, maxLength: 255 }
+        description: { type: string, maxLength: 100000 }
+      required: [id]
+      additionalProperties: false
+    response:
+      maxBytes: 65536
+      schema:
+        type: object
+        properties:
+          data:
+            type: object
+            properties:
+              issueUpdate:
+                type: object
+                properties:
+                  success: { const: true }
+                  issue:
+                    type: object
+                    properties:
+                      id: { type: string }
+                      identifier: { type: string }
+                      title: { type: string }
+                      url: { type: string }
+                    required: [id, identifier, title]
+                required: [success, issue]
+            required: [issueUpdate]
+        required: [data]
+    rateLimit:
+      requests: 30
+      perSeconds: 60
+      scope: connection
+
+  - id: create-comment
+    name: linear_create_comment
+    description: Add one comment to an issue. Read the issue first to confirm its id and context.
+    effect: create
+    identityMode: shared_or_personal
+    credentialSlot: api_key
+    credentialInjection:
+      in: header
+      name: Authorization
+      format: "{token}"
+    source:
+      type: graphql
+      url: https://api.linear.app/graphql
+      operation: CreateComment
+      documentFile: operations/create-comment.graphql
+    requestSchema:
+      type: object
+      properties:
+        issueId: { type: string, minLength: 1, maxLength: 128 }
+        body: { type: string, minLength: 1, maxLength: 100000 }
+      required: [issueId, body]
+      additionalProperties: false
+    response:
+      maxBytes: 32768
+      schema:
+        type: object
+        properties:
+          data:
+            type: object
+            properties:
+              commentCreate:
+                type: object
+                properties:
+                  success: { const: true }
+                  comment:
+                    type: object
+                    properties:
+                      id: { type: string }
+                      body: { type: string }
+                      createdAt: { type: string }
+                    required: [id, body]
+                required: [success, comment]
+            required: [commentCreate]
+        required: [data]
+    rateLimit:
+      requests: 30
+      perSeconds: 60
+      scope: connection

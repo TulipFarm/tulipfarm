@@ -2,6 +2,12 @@
 
 export type HookType = "before" | "after";
 
+export const PURE_HOOK_LIMITS = Object.freeze({
+  sourceBytes: 512 * 1024,
+  inputBytes: 256 * 1024,
+  outputBytes: 256 * 1024,
+});
+
 /** Resource before/after hook (original shape — `kind` absent for compatibility). */
 export interface ResourceHookRequest {
   id: number;
@@ -49,7 +55,21 @@ export interface RoutineHookRequest {
   determinismSeed?: string;
 }
 
-export type WorkerRequest = ResourceHookRequest | ExpressionRequest | RoutineHookRequest;
+/** A capability-free ECMAScript module export invoked with one JSON value. */
+export interface PureHookRequest {
+  id: number;
+  kind: "pure-hook";
+  source: string;
+  sourceSha256: string;
+  exportName: string;
+  inputJson: string;
+}
+
+export type WorkerRequest =
+  | ResourceHookRequest
+  | ExpressionRequest
+  | RoutineHookRequest
+  | PureHookRequest;
 
 export type WorkerResponse =
   | { id: number; ok: true; record: Record<string, unknown> }

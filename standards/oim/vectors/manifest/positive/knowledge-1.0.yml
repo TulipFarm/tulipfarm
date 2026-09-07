@@ -1,0 +1,93 @@
+oimVersion: "1.0"
+kind: Integration
+metadata:
+  id: pages
+  name: Pages
+  version: 1.0.0
+  description: Index pages with source access controls.
+  license: Apache-2.0
+profiles:
+  core: "1.0"
+  knowledge: "1.0"
+operations:
+  - id: list-pages
+    name: list_pages
+    description: List pages.
+    effect: read
+    identityMode: shared_only
+    source:
+      type: http
+      method: GET
+      baseUrl: https://api.example.test
+      path: /pages
+    response:
+      schema: { type: object }
+      maxBytes: 16384
+    pagination:
+      type: cursor
+      requestParameter: cursor
+      responsePath: /next
+  - id: get-page
+    name: get_page
+    description: Read one page.
+    effect: read
+    identityMode: shared_only
+    source:
+      type: http
+      method: GET
+      baseUrl: https://api.example.test
+      path: /pages
+      parameters:
+        - name: id
+          in: query
+          schema: { type: string }
+    response:
+      schema: { type: object }
+      maxBytes: 16384
+  - id: get-page-acl
+    name: get_page_acl
+    description: Read one page access list.
+    effect: sensitive_read
+    identityMode: shared_only
+    source:
+      type: http
+      method: GET
+      baseUrl: https://api.example.test
+      path: /page-acl
+      parameters:
+        - name: id
+          in: query
+          schema: { type: string }
+    response:
+      schema: { type: object }
+      maxBytes: 16384
+knowledge:
+  sourceKinds:
+    - id: page
+      label: Page
+  list:
+    operationId: list-pages
+    itemsPointer: /items
+    mapping:
+      itemId: /id
+      revision: /revision
+      title: /title
+    cursor:
+      kind: operation_pagination
+  content:
+    operationId: get-page
+    itemParameter: id
+    mapping:
+      content: /content
+      revision: /revision
+      title: /title
+  acl:
+    mode: item
+    operationId: get-page-acl
+    itemParameter: id
+    entriesPointer: /readers
+    entry:
+      defaultKind: domain
+      domain: /domain
+  deletion:
+    kind: absent_from_full_list

@@ -1,9 +1,10 @@
 import { KillSwitchDeniedError, type MutationGuard } from "@tulipfarm/observability";
-import { ajv, canonicalHash, type ToolAdapterKind } from "@tulipfarm/schema";
+import { canonicalHash, type ToolAdapterKind } from "@tulipfarm/schema";
 import type { ToolCatalog } from "../catalog";
 import type { CredentialDispatcher } from "../credential-dispatch";
 import type { ToolIntent } from "../intent";
-import { mayRetry, retryDelayMs } from "./retry";
+import { compileToolOutputValidator } from "./output";
+import { mayRetry, nextRetryDelayMs } from "./retry";
 import type { EffectStore } from "./store";
 
 export type DispatchPhase = "before_dispatch" | "after_dispatch";
@@ -13,10 +14,41 @@ export class AdapterDispatchError extends Error {
     readonly phase: DispatchPhase,
     readonly code: string,
     readonly retryable: boolean,
-    readonly providerRequestId?: string
+    readonly providerRequestId?: string,
+    /** Provider-stated wait before a retry may succeed, honoured through the durable wait seam. */
+    readonly retryAfterMs?: number
   ) {
     super(code);
     this.name = "AdapterDispatchError";
+  }
+}
+
+export interface EffectRetryParkInput {
+  readonly businessId: string;
+  readonly effectId: string;
+  readonly runId: string;
+  readonly stateId: string;
+  readonly attempt: number;
+  readonly reason: string;
+  readonly delayMs: number;
+  readonly notBefore: string;
+}
+
+export interface EffectRetryDeferred extends EffectRetryParkInput {
+  readonly waitId: string;
+}
+
+export interface EffectRetryParkResult {
+  readonly waitId: string;
+}
+
+export type EffectRetryParker = (input: EffectRetryParkInput) => Promise<EffectRetryParkResult>;
+
+export class EffectDispatchDeferredError extends Error {
+  readonly name = "EffectDispatchDeferredError";
+
+  constructor(readonly deferred: EffectRetryDeferred) {
+    super(`retry_deferred:${deferred.effectId}:${deferred.waitId}`);
   }
 }
 
@@ -29,6 +61,14 @@ export interface ToolAdapterRequest {
   readonly abortSignal?: AbortSignal;
 }
 
+/**
+ * Plaintext credentials leased for one dispatch, keyed by their manifest credential slot.
+ *
+ * The second parameter remains the primary credential so every existing adapter retains its
+ * one-credential behavior. Adapters that need a second credential opt into this third parameter.
+ */
+export type ToolAdapterCredentials = Readonly<Record<string, string>>;
+
 export interface ToolAdapter {
   /**
    * The backend this adapter actually is. Resolution is by `ToolContractSpec.adapter.ref`, which a
@@ -37,7 +77,11 @@ export interface ToolAdapter {
    * dispatcher refuses when the two disagree.
    */
   readonly kind: ToolAdapterKind;
-  dispatch(request: ToolAdapterRequest, credential?: string): Promise<unknown>;
+  dispatch(
+    request: ToolAdapterRequest,
+    credential?: string,
+    credentials?: ToolAdapterCredentials
+  ): Promise<unknown>;
 }
 
 export type ToolDispatchErrorCode =
@@ -48,15 +92,14 @@ export type ToolDispatchErrorCode =
   | "dispatch_failed"
   | "ambiguous"
   | "invalid_output"
-  | "kill_switch_denied";
+  | "kill_switch_denied"
+  | "retry_wait_unavailable";
 
 export class ToolDispatchError extends Error {
   constructor(
     readonly code: ToolDispatchErrorCode,
     readonly effectId: string,
-    /** The underlying `AdapterDispatchError.code` that caused a `dispatch_failed`, when known —
-     * callers use this to give a specific, actionable message instead of the opaque
-     * `dispatch_failed:<effectId>` default. */
+    /** The underlying adapter or validation code, when known, for actionable host handling. */
     readonly detail?: string
   ) {
     super(`${code}:${effectId}`);
@@ -80,6 +123,9 @@ export interface EffectDispatcherDeps {
   readonly mutationGuard?: MutationGuard;
   /** Identity the effect ledger does not carry, supplied by whoever composed the dispatcher. */
   readonly mutationIdentity?: MutationIdentity;
+  /** Registers the durable timer that requeues this Run; never implemented with process sleep. */
+  readonly parkRetry?: EffectRetryParker;
+  /** Backoff for retries that have no provider-declared wait window. */
   readonly wait?: (delayMs: number) => Promise<void>;
   readonly now?: () => string;
 }
@@ -149,7 +195,7 @@ export class EffectDispatcher {
         `${contract.adapter.kind}!=${adapter.kind}`
       );
     }
-    const validateOutput = ajv.compile(contract.outputSchema);
+    const validateOutput = compileToolOutputValidator(contract.outputSchema);
 
     if (this.deps.mutationGuard !== undefined) {
       try {
@@ -175,10 +221,9 @@ export class EffectDispatcher {
       }
     }
 
-    let attemptNumber = 0;
     while (true) {
       const attempt = await this.deps.store.beginAttempt(businessId, effectId, this.now());
-      attemptNumber = attempt.attempt;
+      const attemptNumber = attempt.attempt;
       try {
         const request = {
           intent: effect.intent,
@@ -197,16 +242,19 @@ export class EffectDispatcher {
           abortSignal
         );
         if (!validateOutput(output)) {
+          const state = contract.mutating ? "ambiguous" : "failed";
           await this.deps.store.finishAttempt({
             businessId,
             effectId,
             attempt: attemptNumber,
-            attemptState: "failed",
-            effectState: "failed",
+            attemptState: state,
+            effectState: state,
             errorCode: "invalid_output",
             finishedAt: this.now(),
           });
-          throw new ToolDispatchError("invalid_output", effectId);
+          throw contract.mutating
+            ? new ToolDispatchError("ambiguous", effectId, "invalid_output")
+            : new ToolDispatchError("invalid_output", effectId);
         }
         await this.deps.store.finishAttempt({
           businessId,
@@ -225,19 +273,46 @@ export class EffectDispatcher {
         const ambiguous = error.phase === "after_dispatch" && contract.mutating;
         const retry =
           error.retryable && mayRetry(contract, attemptNumber, error.phase) && !ambiguous;
+        const durableRetryUnavailable =
+          retry && error.retryAfterMs !== undefined && this.deps.parkRetry === undefined;
+        const effectState = ambiguous
+          ? "ambiguous"
+          : retry && !durableRetryUnavailable
+            ? "authorized"
+            : "failed";
         await this.deps.store.finishAttempt({
           businessId,
           effectId,
           attempt: attemptNumber,
           attemptState: ambiguous ? "ambiguous" : "failed",
-          effectState: ambiguous ? "ambiguous" : retry ? "authorized" : "failed",
+          effectState,
           providerRequestId: error.providerRequestId,
           errorCode: error.code,
           finishedAt: this.now(),
         });
         if (ambiguous) throw new ToolDispatchError("ambiguous", effectId);
         if (!retry) throw new ToolDispatchError("dispatch_failed", effectId, error.code);
-        await this.wait(retryDelayMs(attemptNumber));
+        const delayMs = nextRetryDelayMs(attemptNumber, error.retryAfterMs);
+        if (error.retryAfterMs === undefined) {
+          await this.wait(delayMs);
+          continue;
+        }
+        if (this.deps.parkRetry === undefined) {
+          throw new ToolDispatchError("retry_wait_unavailable", effectId, error.code);
+        }
+        const parkedAt = this.now();
+        const input: EffectRetryParkInput = {
+          businessId,
+          effectId,
+          runId: effect.runId,
+          stateId: effect.stateId,
+          attempt: attemptNumber,
+          reason: error.code,
+          delayMs,
+          notBefore: new Date(Date.parse(parkedAt) + delayMs).toISOString(),
+        };
+        const { waitId } = await this.deps.parkRetry(input);
+        throw new EffectDispatchDeferredError({ ...input, waitId });
       }
     }
   }

@@ -1,0 +1,86 @@
+version: 1
+cases:
+  - name: lists-spaces
+    operationId: list-spaces
+    configuration:
+      site: example.atlassian.net
+    request:
+      limit: 2
+    response:
+      status: 200
+      body:
+        results:
+          - id: "1042"
+            key: ENG
+            name: Engineering
+          - id: "1043"
+            key: SUPPORT
+            name: Support
+    expect:
+      request:
+        method: GET
+        url: https://example.atlassian.net/wiki/api/v2/spaces?limit=2
+        headers:
+          Authorization: Basic b2ltLWZpeHR1cmUtY3JlZGVudGlhbA==
+      result:
+        results:
+          - id: "1042"
+            key: ENG
+            name: Engineering
+          - id: "1043"
+            key: SUPPORT
+            name: Support
+
+  - name: reads-page
+    operationId: get-page
+    configuration:
+      site: example.atlassian.net
+    request:
+      id: "2042"
+      body-format: storage
+    response:
+      status: 200
+      body:
+        id: "2042"
+        title: Launch checklist
+        status: current
+        body:
+          storage:
+            value: <p>Confirm every owner has signed off.</p>
+        version:
+          number: 4
+    expect:
+      request:
+        method: GET
+        url: https://example.atlassian.net/wiki/api/v2/pages/2042?body-format=storage
+        headers:
+          Authorization: Basic b2ltLWZpeHR1cmUtY3JlZGVudGlhbA==
+      result:
+        id: "2042"
+        title: Launch checklist
+        status: current
+        body:
+          storage:
+            value: <p>Confirm every owner has signed off.</p>
+        version:
+          number: 4
+
+  - name: rejects-invalid-credential
+    operationId: list-spaces
+    configuration:
+      site: example.atlassian.net
+    request: {}
+    response:
+      status: 401
+      body:
+        message: Unauthorized
+    expect:
+      request:
+        method: GET
+        url: https://example.atlassian.net/wiki/api/v2/spaces
+        headers:
+          Authorization: Basic b2ltLWZpeHR1cmUtY3JlZGVudGlhbA==
+      expectedError:
+        phase: before_dispatch
+        code: provider_unauthorized
+        retryable: false

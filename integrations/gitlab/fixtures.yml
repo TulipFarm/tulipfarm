@@ -1,0 +1,76 @@
+version: 1
+cases:
+  - name: reads-current-user
+    operationId: current-user
+    configuration:
+      gitlab_host: gitlab.com
+    request: {}
+    response:
+      status: 200
+      body:
+        id: 1042
+        username: muskan
+        name: Muskan Vijayvargiya
+        web_url: https://gitlab.com/muskan
+    expect:
+      request:
+        method: GET
+        url: https://gitlab.com/api/v4/user
+        headers:
+          PRIVATE-TOKEN: oim-fixture-credential
+      result:
+        id: 1042
+        username: muskan
+        name: Muskan Vijayvargiya
+        web_url: https://gitlab.com/muskan
+
+  - name: creates-issue
+    operationId: create-issue
+    configuration:
+      gitlab_host: gitlab.com
+    request:
+      id: "42"
+      body:
+        title: Review the launch checklist
+        description: Confirm every owner has signed off.
+    response:
+      status: 201
+      body:
+        iid: 17
+        title: Review the launch checklist
+        state: opened
+        web_url: https://gitlab.com/acme/web/-/issues/17
+    expect:
+      request:
+        method: POST
+        url: https://gitlab.com/api/v4/projects/42/issues
+        headers:
+          PRIVATE-TOKEN: oim-fixture-credential
+        body:
+          title: Review the launch checklist
+          description: Confirm every owner has signed off.
+      result:
+        iid: 17
+        title: Review the launch checklist
+        state: opened
+        web_url: https://gitlab.com/acme/web/-/issues/17
+
+  - name: rejects-invalid-credential
+    operationId: current-user
+    configuration:
+      gitlab_host: gitlab.com
+    request: {}
+    response:
+      status: 401
+      body:
+        message: 401 Unauthorized
+    expect:
+      request:
+        method: GET
+        url: https://gitlab.com/api/v4/user
+        headers:
+          PRIVATE-TOKEN: oim-fixture-credential
+      expectedError:
+        phase: before_dispatch
+        code: provider_unauthorized
+        retryable: false

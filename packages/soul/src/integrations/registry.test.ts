@@ -1,4 +1,4 @@
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -79,11 +79,19 @@ describe("loadIntegrationRegistry", () => {
   });
 
   describe("the shipped catalog", () => {
+    // Named slugs let a package ship unlisted and still pass. Reading the directory is what makes
+    // the claim in this test's own name true.
     it("lists every bundled integration, so nothing ships without a display name", async () => {
-      const registry = await loadIntegrationRegistry(logger, bundledIntegrationsDir());
-      for (const name of ["slack", "github", "jira"]) {
-        expect(registry.get(name)?.title).toBeTruthy();
-        expect(registry.get(name)?.category).toBeTruthy();
+      const dir = bundledIntegrationsDir();
+      const registry = await loadIntegrationRegistry(logger, dir);
+      const shipped = (await readdir(dir, { withFileTypes: true }))
+        .filter((entry) => entry.isDirectory())
+        .map((entry) => entry.name);
+
+      expect(shipped.length).toBeGreaterThan(0);
+      for (const name of shipped) {
+        expect([name, registry.get(name)?.title !== undefined]).toEqual([name, true]);
+        expect([name, registry.get(name)?.category !== undefined]).toEqual([name, true]);
       }
     });
   });

@@ -75,7 +75,12 @@ export class ToolRegistry {
   ): ToolSet {
     let presentationValidationFailures = 0;
     const authorized = allowedToolNames
-      ? this.getAll().filter((toolDefinition) => allowedToolNames.has(toolDefinition.name))
+      ? this.getAll().filter(
+          (toolDefinition) =>
+            allowedToolNames.has(toolDefinition.name) ||
+            (toolDefinition.canonicalId !== undefined &&
+              allowedToolNames.has(toolDefinition.canonicalId))
+        )
       : this.options.defaultDeny
         ? []
         : this.getAll();

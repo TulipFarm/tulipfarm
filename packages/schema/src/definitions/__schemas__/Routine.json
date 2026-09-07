@@ -4238,6 +4238,20 @@
               },
               {
                 "additionalProperties": false,
+                "dependentRequired": {
+                  "connectionId": [
+                    "protocol",
+                    "integrationMajorVersion"
+                  ],
+                  "integrationMajorVersion": [
+                    "protocol",
+                    "connectionId"
+                  ],
+                  "protocol": [
+                    "integrationMajorVersion",
+                    "connectionId"
+                  ]
+                },
                 "properties": {
                   "backgroundIdentity": {
                     "additionalProperties": false,
@@ -4286,6 +4300,10 @@
                     ],
                     "type": "object"
                   },
+                  "connectionId": {
+                    "minLength": 1,
+                    "type": "string"
+                  },
                   "deduplication": {
                     "additionalProperties": false,
                     "properties": {
@@ -4320,6 +4338,10 @@
                     "additionalProperties": true,
                     "type": "object"
                   },
+                  "integrationMajorVersion": {
+                    "minimum": 0,
+                    "type": "integer"
+                  },
                   "matchEventType": {
                     "minLength": 1,
                     "type": "string"
@@ -4332,6 +4354,9 @@
                     "maxLength": 128,
                     "pattern": "^[a-z][a-z0-9]*(-[a-z0-9]+)*$",
                     "type": "string"
+                  },
+                  "protocol": {
+                    "const": "oim"
                   },
                   "provider": {
                     "minLength": 1,

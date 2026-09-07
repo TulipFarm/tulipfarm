@@ -13,6 +13,10 @@ import { buildInvocation, type RunInvocation, TriggerBindError } from "./transfo
 export interface EventTriggerDispatchDeps {
   /** Published Triggers that can consume an event, read from the verified active bundle. */
   listTriggers(businessId: string): Promise<readonly RegisteredTrigger[]>;
+  authorizeTrigger?(
+    trigger: RegisteredTrigger,
+    envelope: eventSchema.EventEnvelope<Record<string, unknown>>
+  ): Promise<boolean>;
   startRun(invocation: RunInvocation): Promise<{ runId: string; outcome: "started" | "duplicate" }>;
 }
 
@@ -46,6 +50,31 @@ export async function dispatchEventTrigger(
   const match = matchTrigger(triggers, envelope);
   if (match.kind === "no_match") return { kind: "no_match" };
   if (match.kind === "ambiguous") return { kind: "ambiguous", candidates: match.candidates };
+
+  if (envelope.data.protocol === "oim" && deps.authorizeTrigger === undefined) {
+    return {
+      kind: "rejected",
+      triggerSlug: match.trigger.triggerSlug,
+      code: "authorization_denied",
+    };
+  }
+  if (deps.authorizeTrigger !== undefined) {
+    try {
+      if (!(await deps.authorizeTrigger(match.trigger, envelope))) {
+        return {
+          kind: "rejected",
+          triggerSlug: match.trigger.triggerSlug,
+          code: "authorization_denied",
+        };
+      }
+    } catch {
+      return {
+        kind: "rejected",
+        triggerSlug: match.trigger.triggerSlug,
+        code: "authorization_denied",
+      };
+    }
+  }
 
   let invocation: RunInvocation;
   try {

@@ -4,11 +4,13 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ToolCatalog } from "../catalog";
 import {
   AdapterDispatchError,
+  EffectDispatchDeferredError,
   EffectDispatcher,
   type ToolAdapter,
   ToolDispatchError,
 } from "./dispatch";
 import type { ReserveEffectInput } from "./model";
+import { compileToolOutputValidator } from "./output";
 import { EffectLedger, MemoryEffectStore } from "./store";
 
 const BUSINESS_ID = "business-1";
@@ -104,25 +106,130 @@ describe("EffectDispatcher", () => {
     });
   });
 
-  it("retries a classified pre-dispatch failure with the same stable key and backoff", async () => {
+  it("parks a classified retry instead of sleeping or replaying in-process", async () => {
     const keys: string[] = [];
     const adapter: ToolAdapter = {
       kind: "integration",
       dispatch: vi.fn(async (request) => {
         keys.push(request.idempotencyKey);
-        if (keys.length === 1) {
-          throw new AdapterDispatchError("before_dispatch", "transport_unavailable", true);
-        }
-        return { providerId: "external-42" };
+        throw new AdapterDispatchError(
+          "before_dispatch",
+          "provider_rate_limited",
+          true,
+          undefined,
+          45_000
+        );
       }),
+    };
+    const parkRetry = vi.fn(async () => {
+      expect(await store.listAttempts(BUSINESS_ID, EFFECT_ID)).toHaveLength(1);
+      expect(await store.get(BUSINESS_ID, EFFECT_ID)).toMatchObject({ state: "authorized" });
+      return { waitId: "wait-1" };
+    });
+    const wait = vi.fn(async () => undefined);
+
+    await expect(
+      dispatcher(adapter, parkRetry, definition, wait).dispatch(BUSINESS_ID, EFFECT_ID)
+    ).rejects.toEqual(
+      new EffectDispatchDeferredError({
+        businessId: BUSINESS_ID,
+        effectId: EFFECT_ID,
+        runId: reservation().runId,
+        stateId: reservation().stateId,
+        attempt: 1,
+        reason: "provider_rate_limited",
+        delayMs: 45_000,
+        notBefore: "2026-07-25T00:00:46.000Z",
+        waitId: "wait-1",
+      })
+    );
+
+    expect(keys).toEqual(["stable-effect-key"]);
+    expect(parkRetry).toHaveBeenCalledTimes(1);
+    expect(wait).not.toHaveBeenCalled();
+    expect(await store.listAttempts(BUSINESS_ID, EFFECT_ID)).toHaveLength(1);
+    expect(await store.get(BUSINESS_ID, EFFECT_ID)).toMatchObject({ state: "authorized" });
+  });
+
+  it("fails closed without a durable parker and leaves no resumable effect", async () => {
+    const readDefinition: ToolContractDefinition = {
+      ...definition,
+      spec: { ...definition.spec, mutating: false },
+    };
+    const adapter: ToolAdapter = {
+      kind: "integration",
+      dispatch: vi.fn(async () => {
+        throw new AdapterDispatchError(
+          "before_dispatch",
+          "provider_rate_limited",
+          true,
+          undefined,
+          45_000
+        );
+      }),
+    };
+
+    await expect(
+      dispatcher(adapter, undefined, readDefinition).dispatch(BUSINESS_ID, EFFECT_ID)
+    ).rejects.toEqual(
+      new ToolDispatchError("retry_wait_unavailable", EFFECT_ID, "provider_rate_limited")
+    );
+
+    expect(adapter.dispatch).toHaveBeenCalledTimes(1);
+    expect(await store.listAttempts(BUSINESS_ID, EFFECT_ID)).toEqual([
+      expect.objectContaining({ state: "failed", errorCode: "provider_rate_limited" }),
+    ]);
+    expect(await store.get(BUSINESS_ID, EFFECT_ID)).toMatchObject({ state: "failed" });
+  });
+
+  it("keeps bounded in-process backoff when the provider declares no wait window", async () => {
+    const adapter: ToolAdapter = {
+      kind: "integration",
+      dispatch: vi
+        .fn()
+        .mockRejectedValueOnce(
+          new AdapterDispatchError("before_dispatch", "transport_unavailable", true)
+        )
+        .mockResolvedValueOnce({ providerId: "external-42" }),
     };
     const wait = vi.fn(async () => undefined);
 
-    await dispatcher(adapter, wait).dispatch(BUSINESS_ID, EFFECT_ID);
+    await dispatcher(adapter, undefined, definition, wait).dispatch(BUSINESS_ID, EFFECT_ID);
 
-    expect(keys).toEqual(["stable-effect-key", "stable-effect-key"]);
     expect(wait).toHaveBeenCalledWith(100);
-    expect(await store.listAttempts(BUSINESS_ID, EFFECT_ID)).toHaveLength(2);
+    expect(adapter.dispatch).toHaveBeenCalledTimes(2);
+  });
+
+  it("resumes with the next durable attempt and stops at the contract bound", async () => {
+    const adapter: ToolAdapter = {
+      kind: "integration",
+      dispatch: vi.fn(async () => {
+        throw new AdapterDispatchError(
+          "before_dispatch",
+          "provider_rate_limited",
+          true,
+          undefined,
+          1_000
+        );
+      }),
+    };
+    const parkRetry = vi.fn(async ({ attempt }) => ({ waitId: `wait-${attempt}` }));
+    const durable = dispatcher(adapter, parkRetry);
+
+    await expect(durable.dispatch(BUSINESS_ID, EFFECT_ID)).rejects.toBeInstanceOf(
+      EffectDispatchDeferredError
+    );
+    await expect(durable.dispatch(BUSINESS_ID, EFFECT_ID)).rejects.toBeInstanceOf(
+      EffectDispatchDeferredError
+    );
+    await expect(durable.dispatch(BUSINESS_ID, EFFECT_ID)).rejects.toMatchObject({
+      code: "dispatch_failed",
+      detail: "provider_rate_limited",
+    });
+
+    expect(adapter.dispatch).toHaveBeenCalledTimes(3);
+    expect(parkRetry).toHaveBeenCalledTimes(2);
+    expect(await store.listAttempts(BUSINESS_ID, EFFECT_ID)).toHaveLength(3);
   });
 
   it("marks an uncertain mutation ambiguous and never blindly retries", async () => {
@@ -138,6 +245,32 @@ describe("EffectDispatcher", () => {
     );
     expect(adapter.dispatch).toHaveBeenCalledTimes(1);
     expect(await store.get(BUSINESS_ID, EFFECT_ID)).toMatchObject({ state: "ambiguous" });
+  });
+
+  it("can durably retry a safe read after dispatch", async () => {
+    const readDefinition: ToolContractDefinition = {
+      ...definition,
+      spec: { ...definition.spec, mutating: false },
+    };
+    const adapter: ToolAdapter = {
+      kind: "integration",
+      dispatch: vi.fn(async () => {
+        throw new AdapterDispatchError(
+          "after_dispatch",
+          "provider_rate_limited",
+          true,
+          undefined,
+          2_000
+        );
+      }),
+    };
+    const parkRetry = vi.fn(async () => ({ waitId: "read-wait" }));
+
+    await expect(
+      dispatcher(adapter, parkRetry, readDefinition).dispatch(BUSINESS_ID, EFFECT_ID)
+    ).rejects.toBeInstanceOf(EffectDispatchDeferredError);
+    expect(adapter.dispatch).toHaveBeenCalledTimes(1);
+    expect(await store.get(BUSINESS_ID, EFFECT_ID)).toMatchObject({ state: "authorized" });
   });
 
   it("aborts the adapter and marks a cancelled mutation ambiguous", async () => {
@@ -165,15 +298,64 @@ describe("EffectDispatcher", () => {
     expect(await store.get(BUSINESS_ID, EFFECT_ID)).toMatchObject({ state: "ambiguous" });
   });
 
-  it("validates provider output before confirming the effect", async () => {
+  it("fails a read whose provider output violates its contract", async () => {
+    const readDefinition: ToolContractDefinition = {
+      ...definition,
+      spec: { ...definition.spec, mutating: false },
+    };
     const adapter: ToolAdapter = {
       kind: "integration",
       dispatch: vi.fn(async () => ({ providerId: 42 })),
     };
 
-    await expect(dispatcher(adapter).dispatch(BUSINESS_ID, EFFECT_ID)).rejects.toThrow(
-      new ToolDispatchError("invalid_output", EFFECT_ID)
+    await expect(
+      dispatcher(adapter, undefined, readDefinition).dispatch(BUSINESS_ID, EFFECT_ID)
+    ).rejects.toThrow(new ToolDispatchError("invalid_output", EFFECT_ID));
+    expect(await store.get(BUSINESS_ID, EFFECT_ID)).toMatchObject({ state: "failed" });
+  });
+
+  it("requires reconciliation for a mutation missing its success field after HTTP 200", async () => {
+    const adapter: ToolAdapter = {
+      kind: "integration",
+      dispatch: vi.fn(async () => ({ accepted: true })),
+    };
+    const parkRetry = vi.fn(async () => ({ waitId: "must-not-park" }));
+    const subject = dispatcher(adapter, parkRetry);
+
+    await expect(subject.dispatch(BUSINESS_ID, EFFECT_ID)).rejects.toEqual(
+      new ToolDispatchError("ambiguous", EFFECT_ID, "invalid_output")
     );
+    await expect(subject.dispatch(BUSINESS_ID, EFFECT_ID)).rejects.toThrow();
+
+    expect(compileToolOutputValidator(definition.spec.outputSchema)({ providerId: 42 })).toBe(
+      false
+    );
+    expect(adapter.dispatch).toHaveBeenCalledTimes(1);
+    expect(parkRetry).not.toHaveBeenCalled();
+    const attempts = await store.listAttempts(BUSINESS_ID, EFFECT_ID);
+    expect(attempts).toEqual([
+      expect.objectContaining({ state: "ambiguous", errorCode: "invalid_output" }),
+    ]);
+    expect(attempts[0]?.outputDigest).toBeUndefined();
+    expect(await store.get(BUSINESS_ID, EFFECT_ID)).toMatchObject({ state: "ambiguous" });
+  });
+
+  it("fails a mutation only when the adapter explicitly classifies a provider rejection", async () => {
+    const adapter: ToolAdapter = {
+      kind: "integration",
+      dispatch: vi.fn(async () => {
+        throw new AdapterDispatchError("before_dispatch", "provider_rejected", false);
+      }),
+    };
+
+    await expect(dispatcher(adapter).dispatch(BUSINESS_ID, EFFECT_ID)).rejects.toEqual(
+      new ToolDispatchError("dispatch_failed", EFFECT_ID, "provider_rejected")
+    );
+
+    expect(adapter.dispatch).toHaveBeenCalledTimes(1);
+    expect(await store.listAttempts(BUSINESS_ID, EFFECT_ID)).toEqual([
+      expect.objectContaining({ state: "failed", errorCode: "provider_rejected" }),
+    ]);
     expect(await store.get(BUSINESS_ID, EFFECT_ID)).toMatchObject({ state: "failed" });
   });
 
@@ -282,11 +464,17 @@ describe("EffectDispatcher", () => {
     expect(assertAllowed).not.toHaveBeenCalled();
   });
 
-  function dispatcher(adapter: ToolAdapter, wait?: (delayMs: number) => Promise<void>) {
+  function dispatcher(
+    adapter: ToolAdapter,
+    parkRetry?: (input: { attempt: number }) => Promise<{ waitId: string }>,
+    contract: ToolContractDefinition = definition,
+    wait?: (delayMs: number) => Promise<void>
+  ) {
     return new EffectDispatcher({
       store,
-      catalog: ToolCatalog.load([definition]),
+      catalog: ToolCatalog.load([contract]),
       adapters: new Map([["github", adapter]]),
+      parkRetry,
       wait,
       now: () => "2026-07-25T00:00:01.000Z",
     });

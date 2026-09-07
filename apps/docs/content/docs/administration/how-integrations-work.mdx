@@ -3,9 +3,14 @@ title: Integrations
 description: The bundled integrations, what they enable, and current limits.
 ---
 
-Integrations connect TulipFarm to external systems. Five ship bundled: **GitHub**, **Slack**,
-**Google Workspace**, **Jira**, and **Linear**. All appear in the integrations UI and store their
-configuration through the soul and secrets store.
+Integrations connect TulipFarm to external systems. Twelve ship bundled: **GitHub**, **Slack**,
+**Google Workspace**, **Jira**, **Linear**, **GitLab**, **Confluence**, **HubSpot**, **Notion**,
+**Telegram**, **Twilio**, and **OpenWeather**. All appear in the integrations UI and store their
+configuration through the soul and secrets store. Nine of them — Jira, Linear, GitLab, Confluence,
+HubSpot, Notion, Telegram, Twilio and OpenWeather — are Open Integration Manifest packages, held as
+a connection that can be shared with the business or kept to one person. Most are connected by
+pasting a token; HubSpot instead sends you to the provider's consent screen, using an OAuth app you
+create yourself. Google Workspace is listed as coming soon until its own OAuth sign-in ships.
 
 You are not limited to those. An integration is a data file (a manifest describing how to
 connect and which provider API calls agents may make) so one can be installed from any git
@@ -49,14 +54,14 @@ account can. Use [Connect Google Workspace](/docs/administration/connect-an-inte
 
 ## Jira
 
-The Jira integration lets agents search Jira Cloud issues with JQL, read issue details and changelogs,
-list priorities and transitions, create and update issues, and move issues through workflow transitions
-after approval. It uses an Atlassian OAuth access token and Cloud ID that you connect through
-**Integrations → Jira**.
+The Jira integration lets agents search Jira Cloud issues with JQL, read issue details, comments and
+transitions, add comments, and create, update, and transition issues after approval. It uses your
+site address and an Atlassian API token that you connect through **Integrations → Jira**.
 
 ## Linear
 
-The Linear integration lets agents list teams and issues, read issue details, and (after approval), create or update issues and add comments. It uses a scoped Linear API key that you connect through
+The Linear integration lets agents list teams and issues, read issue details, and (after approval),
+create or update issues and add comments. It uses a Linear API key that you connect through
 **Integrations → Linear**.
 
 Each action is fixed by the integration. Agents provide issue details such as an ID or title, but

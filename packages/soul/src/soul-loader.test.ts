@@ -15,6 +15,38 @@ async function write(path: string, content: string) {
   await writeFile(path, content, "utf8");
 }
 
+const OIM_MANIFEST = `oimVersion: "1.0"
+kind: Integration
+metadata:
+  id: twilio
+  name: Twilio
+  version: 1.0.0
+  description: Send messages.
+  license: Apache-2.0
+profiles:
+  core: "1.0"
+operations:
+  - id: get-message
+    name: get_message
+    description: Read one message.
+    effect: read
+    identityMode: shared_only
+    source:
+      type: http
+      method: GET
+      baseUrl: https://api.twilio.test
+      path: /v1/messages/{message_id}
+      parameters:
+        - name: message_id
+          in: path
+          schema:
+            type: string
+    response:
+      schema:
+        type: object
+      maxBytes: 16384
+`;
+
 function makeLogger() {
   return { info: vi.fn(), warn: vi.fn(), error: vi.fn() };
 }
@@ -45,6 +77,111 @@ describe("SoulLoader", () => {
       expect(loader.llmConfig).toBeNull();
       expect(loader.guardrailsConfig).toBeNull();
       expect(loader.manifest).toBeNull();
+    });
+
+    it("loads an oim.yml integration and records its manifest id as the source", async () => {
+      await write(join(TMP, "integrations", "twilio", "oim.yml"), OIM_MANIFEST);
+      const loader = new SoulLoader(TMP, makeLogger());
+
+      await loader.load();
+
+      const loaded = loader.integrations.get("twilio");
+      expect(loaded?.oimManifest?.metadata.id).toBe("twilio");
+      expect(loaded?.sourceIntegration).toBe("twilio");
+      expect(loaded?.manifest).toBeUndefined();
+    });
+
+    it("keeps an OIM major's artifact slug separate from its stable manifest id", async () => {
+      await write(
+        join(TMP, "integrations", "twilio-v2", "oim.yml"),
+        OIM_MANIFEST.replace("version: 1.0.0", "version: 2.0.0")
+      );
+      const loader = new SoulLoader(TMP, makeLogger());
+
+      await loader.load();
+
+      expect([...loader.integrations.keys()]).toEqual(["twilio-v2"]);
+      expect(loader.integrations.get("twilio-v2")).toMatchObject({
+        slug: "twilio-v2",
+        sourceIntegration: "twilio",
+        oimManifest: { metadata: { id: "twilio", version: "2.0.0" } },
+      });
+      expect(loader.integrations.has("twilio")).toBe(false);
+    });
+
+    it("loads a declared OpenAPI companion as parsed data", async () => {
+      const manifest = `oimVersion: "1.0"
+kind: Integration
+metadata:
+  id: tasks
+  name: Tasks
+  version: 1.0.0
+  description: Read tasks.
+  license: Apache-2.0
+profiles:
+  core: "1.0"
+operations:
+  - id: get-task
+    name: get_task
+    description: Read one task.
+    effect: read
+    identityMode: shared_only
+    source:
+      type: openapi
+      file: openapi.yaml
+      operationId: getTask
+    response:
+      schema:
+        type: object
+      maxBytes: 16384
+files:
+  - path: openapi.yaml
+    role: openapi
+    sha256: "${"0".repeat(64)}"
+`;
+      await write(join(TMP, "integrations", "tasks", "oim.yml"), manifest);
+      await write(
+        join(TMP, "integrations", "tasks", "openapi.yaml"),
+        "openapi: 3.0.3\nservers:\n  - url: https://api.tasks.test\npaths: {}\n"
+      );
+      const loader = new SoulLoader(TMP, makeLogger());
+
+      await loader.load();
+
+      expect(loader.integrations.get("tasks")?.oimOpenApiDocuments).toEqual({
+        "openapi.yaml": {
+          openapi: "3.0.3",
+          servers: [{ url: "https://api.tasks.test" }],
+          paths: {},
+        },
+      });
+      expect(loader.integrations.get("tasks")?.oimPackageFiles).toEqual({
+        "openapi.yaml": "openapi: 3.0.3\nservers:\n  - url: https://api.tasks.test\npaths: {}\n",
+      });
+    });
+
+    it("quarantines an integration that declares both oim.yml and manifest.yml", async () => {
+      await write(join(TMP, "integrations", "both", "oim.yml"), OIM_MANIFEST);
+      await write(
+        join(TMP, "integrations", "both", "manifest.yml"),
+        "name: both\negress:\n  type: none\n"
+      );
+      const loader = new SoulLoader(TMP, makeLogger());
+
+      await expect(loader.load()).rejects.toThrow(/oim\.yml and manifest\.yml/);
+    });
+
+    it("quarantines an oim.yml that fails OIM validation", async () => {
+      await write(
+        join(TMP, "integrations", "bad", "oim.yml"),
+        "oimVersion: '1.0'\nkind: Integration\n"
+      );
+      const loader = new SoulLoader(TMP, makeLogger());
+
+      await loader.load();
+
+      expect(loader.integrations.has("bad")).toBe(false);
+      expect(loader.quarantined.some((entry) => entry.name === "bad")).toBe(true);
     });
 
     it("quarantines a manifest.yml that fails the legacy integration schema", async () => {

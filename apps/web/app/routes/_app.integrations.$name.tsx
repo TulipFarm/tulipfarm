@@ -7,11 +7,16 @@ import {
   useSearchParams,
 } from "@remix-run/react";
 import { useEffect, useRef, useState } from "react";
+import { FormStatus } from "~/components/form-status";
 import { ArrowLeft, ExternalLink, MoreHorizontal, Trash2 } from "~/components/icons";
 import { IntegrationAuthFlow, startHandoff } from "~/components/integrations/auth-flow";
 import { ComingSoonState } from "~/components/integrations/coming-soon-state";
 import { GitHubPersonalAccount } from "~/components/integrations/github-personal-account";
 import { IntegrationIcon } from "~/components/integrations/integration-icon";
+import {
+  IntegrationInstallPanel,
+  type IntegrationReviewRequest,
+} from "~/components/integrations/integration-install-panel";
 import { MarkdownView } from "~/components/markdown-view";
 import { ErrorState, NotFoundState } from "~/components/states";
 import { StatusBadge } from "~/components/status-badge";
@@ -31,8 +36,12 @@ import {
   type IntegrationDetail,
   type IntegrationGrant,
   listSlackRoutes,
-  updateIntegration,
 } from "~/lib/integrations";
+import {
+  getOimAutoPatchPreference,
+  type OimAutoPatchPreference,
+  setOimAutoPatchPreference,
+} from "~/lib/oim-release-trust";
 import { useIsAdmin } from "~/lib/use-session-user";
 
 export const meta: MetaFunction = () => [{ title: "Integration · tulipfarm" }];
@@ -76,7 +85,20 @@ export async function clientLoader({ params }: ClientLoaderFunctionArgs) {
       routesError = errMessage(err);
     }
   }
-  return { integration, routesError, githubInstallations };
+  let autoPatch: OimAutoPatchPreference | undefined;
+  if (integration.oim) {
+    try {
+      autoPatch = await getOimAutoPatchPreference(
+        integration.oim.integrationId,
+        integration.oim.majorVersion
+      );
+    } catch (error) {
+      if (!(error instanceof ApiError) || (error.status !== 403 && error.status !== 404)) {
+        throw error;
+      }
+    }
+  }
+  return { integration, routesError, githubInstallations, autoPatch };
 }
 
 /* Redirect error codes are the closed set in `AuthBrokerError`. */
@@ -123,6 +145,71 @@ function Dot() {
 
 function SectionHeading({ children }: { children: React.ReactNode }) {
   return <h2 className="text-sm font-semibold text-foreground">{children}</h2>;
+}
+
+function AutoPatchControl({ initial }: { initial: OimAutoPatchPreference }) {
+  const [preference, setPreference] = useState(initial);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string>();
+  const [saved, setSaved] = useState(false);
+
+  if (preference.support === "community") {
+    return (
+      <section className="flex flex-col gap-2">
+        <SectionHeading>Automatic patch updates</SectionHeading>
+        <p className="max-w-prose text-xs text-muted-foreground">
+          Community packages require a new digest review for every update. Automatic updates are
+          unavailable.
+        </p>
+      </section>
+    );
+  }
+
+  return (
+    <section className="flex flex-col gap-3">
+      <SectionHeading>Automatic patch updates</SectionHeading>
+      <p className="max-w-prose text-xs text-muted-foreground">
+        TulipFarm applies only compatible patch releases verified by an active trusted key.
+      </p>
+      {error ? <FormStatus tone="error">{error}</FormStatus> : null}
+      {saved ? <FormStatus tone="success">Automatic patch preference saved.</FormStatus> : null}
+      <label className="flex min-h-7 items-start gap-2 text-sm">
+        <input
+          type="checkbox"
+          checked={preference.autoPatchOptIn}
+          disabled={busy}
+          onChange={async (event) => {
+            const nextValue = event.target.checked;
+            setBusy(true);
+            setError(undefined);
+            setSaved(false);
+            try {
+              setPreference(
+                await setOimAutoPatchPreference(
+                  preference.integrationId,
+                  preference.majorVersion,
+                  nextValue
+                )
+              );
+              setSaved(true);
+            } catch (caught) {
+              setError(errMessage(caught));
+            } finally {
+              setBusy(false);
+            }
+          }}
+          className="mt-0.5 size-4 accent-foreground"
+        />
+        <span>
+          <span className="font-medium">Install verified patch updates automatically</span>
+          <span className="block text-xs text-muted-foreground">
+            Applies to {preference.integrationId} major {preference.majorVersion}. Current version{" "}
+            {preference.version}.
+          </span>
+        </span>
+      </label>
+    </section>
+  );
 }
 
 /** Keep consent visible after connection for audits. */
@@ -244,7 +331,8 @@ function MoreMenu({ onDelete, deleting }: { onDelete: () => void; deleting: bool
 }
 
 export default function IntegrationDetailPage() {
-  const { integration, routesError, githubInstallations } = useLoaderData<typeof clientLoader>();
+  const { integration, routesError, githubInstallations, autoPatch } =
+    useLoaderData<typeof clientLoader>();
   const revalidator = useRevalidator();
   const [searchParams, setSearchParams] = useSearchParams();
 
@@ -252,7 +340,7 @@ export default function IntegrationDetailPage() {
   const [disconnectingInstallId, setDisconnectingInstallId] = useState<string>();
   const [addingInstall, setAddingInstall] = useState(false);
   const [deleting, setDeleting] = useState(false);
-  const [updating, setUpdating] = useState(false);
+  const [reviewRequest, setReviewRequest] = useState<IntegrationReviewRequest>();
   const [actionError, setActionError] = useState<string>();
   const [callbackError, setCallbackError] = useState<string>();
   const [guideOpen, setGuideOpen] = useState(false);
@@ -325,17 +413,14 @@ export default function IntegrationDetailPage() {
     }
   }
 
-  async function handleUpdate() {
-    setUpdating(true);
-    setActionError(undefined);
-    try {
-      await updateIntegration(integration.name, integration.source);
-      revalidator.revalidate();
-    } catch (err) {
-      setActionError(errMessage(err));
-    } finally {
-      setUpdating(false);
-    }
+  function handleUpdate() {
+    if (!integration.source) return;
+    setReviewRequest({
+      kind: "update",
+      name: integration.name,
+      source: integration.source,
+      current: integration,
+    });
   }
 
   async function handleDelete() {
@@ -415,8 +500,8 @@ export default function IntegrationDetailPage() {
 
           <div className="flex shrink-0 items-center gap-2">
             {integration.updateAvailable && isAdmin && (
-              <Button size="sm" disabled={updating} onClick={handleUpdate}>
-                {updating ? "Updating…" : "Update"}
+              <Button size="sm" onClick={handleUpdate}>
+                Update
               </Button>
             )}
             <StatusBadge
@@ -436,13 +521,8 @@ export default function IntegrationDetailPage() {
               </span>
             </div>
             {isAdmin && (
-              <Button
-                size="sm"
-                disabled={updating}
-                onClick={handleUpdate}
-                className="self-start sm:self-auto"
-              >
-                {updating ? "Updating…" : "Update now"}
+              <Button size="sm" onClick={handleUpdate} className="self-start sm:self-auto">
+                Review update
               </Button>
             )}
           </div>
@@ -455,6 +535,8 @@ export default function IntegrationDetailPage() {
         {integration.errorMessage && (
           <p className="text-sm text-destructive">{integration.errorMessage}</p>
         )}
+
+        {autoPatch ? <AutoPatchControl initial={autoPatch} /> : null}
 
         {/* Connect, every step comes from the manifest, so there is nothing per-integration here. */}
         {!isConnected && (
@@ -471,7 +553,26 @@ export default function IntegrationDetailPage() {
                 </button>
               )}
             </div>
-            {authSteps.length === 0 ? (
+            {integration.oim ? (
+              // An OIM package's credential is a Connection, not sealed env, so this page never
+              // runs its setup — it hands over to the screen an Agent's own answer already cites,
+              // so both routes into connecting land in exactly one place.
+              <div className="flex flex-col gap-2">
+                <p className="max-w-prose text-xs text-muted-foreground">
+                  {integration.oim.connectSupported
+                    ? "This integration keeps its credential as a connection, so it can be shared with the business or kept to one person."
+                    : `This integration signs in with ${integration.oim.unsupportedStepTypes.join(", ")}, which this deployment cannot run yet.`}
+                </p>
+                {integration.oim.connectSupported ? (
+                  <Link
+                    to={`/business/integrations/${encodeURIComponent(integration.name)}/connections`}
+                    className="text-xs text-primary underline underline-offset-2 hover:opacity-80"
+                  >
+                    Manage connections →
+                  </Link>
+                ) : null}
+              </div>
+            ) : authSteps.length === 0 ? (
               <p className="text-xs text-muted-foreground">
                 This integration declares no credentials. Nothing to set up.
               </p>
@@ -689,6 +790,11 @@ export default function IntegrationDetailPage() {
           </div>
         </Modal>
       )}
+      <IntegrationInstallPanel
+        request={reviewRequest}
+        onClose={() => setReviewRequest(undefined)}
+        onComplete={() => revalidator.revalidate()}
+      />
     </>
   );
 }

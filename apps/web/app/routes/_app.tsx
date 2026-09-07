@@ -41,7 +41,8 @@ export async function clientLoader({ request }: ClientLoaderFunctionArgs) {
       // The destination Remix is loading, not `window.location`: history only commits after the
       // loaders resolve, so on a redirect hop (`/setup` -> `/`) the address bar still reads the
       // route we are leaving and would send the user back to it after login.
-      const here = new URL(request.url).pathname;
+      const destination = new URL(request.url);
+      const here = `${destination.pathname}${destination.search}`;
       throw redirect(`/login?redirectTo=${encodeURIComponent(here)}`);
     }
     throw session.err;

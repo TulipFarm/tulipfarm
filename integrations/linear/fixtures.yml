@@ -1,0 +1,110 @@
+version: 1
+cases:
+  - name: lists-issues
+    operationId: list-issues
+    request:
+      first: 2
+    response:
+      status: 200
+      body:
+        data:
+          issues:
+            nodes:
+              - id: issue-redacted
+                identifier: ENG-42
+                title: Review the launch checklist
+                url: https://linear.app/example/issue/ENG-42
+                updatedAt: "2026-09-07T06:00:00.000Z"
+            pageInfo:
+              hasNextPage: false
+              endCursor: null
+    expect:
+      request:
+        method: POST
+        url: https://api.linear.app/graphql
+        body:
+          operationName: ListIssues
+          variables:
+            first: 2
+      result:
+        data:
+          issues:
+            nodes:
+              - id: issue-redacted
+                identifier: ENG-42
+                title: Review the launch checklist
+
+  - name: creates-issue
+    operationId: create-issue
+    request:
+      teamId: team-redacted
+      title: Review the launch checklist
+      description: Confirm the release steps.
+    response:
+      status: 200
+      body:
+        data:
+          issueCreate:
+            success: true
+            issue:
+              id: issue-redacted
+              identifier: ENG-43
+              title: Review the launch checklist
+              url: https://linear.app/example/issue/ENG-43
+    expect:
+      request:
+        method: POST
+        url: https://api.linear.app/graphql
+        body:
+          operationName: CreateIssue
+          variables:
+            teamId: team-redacted
+            title: Review the launch checklist
+            description: Confirm the release steps.
+      result:
+        data:
+          issueCreate:
+            success: true
+            issue:
+              identifier: ENG-43
+
+  - name: rejects-invalid-credential
+    operationId: list-issues
+    request:
+      first: 1
+    response:
+      status: 401
+      body:
+        errors:
+          - message: Authentication required
+    expect:
+      request:
+        method: POST
+        url: https://api.linear.app/graphql
+      expectedError:
+        phase: before_dispatch
+        code: provider_unauthorized
+        retryable: false
+
+  - name: rejects-graphql-business-error
+    operationId: list-issues
+    request:
+      first: 1
+    response:
+      status: 200
+      body:
+        errors:
+          - message: Redacted provider error
+            path: [issues]
+    expect:
+      request:
+        method: POST
+        url: https://api.linear.app/graphql
+        body:
+          operationName: ListIssues
+          variables:
+            first: 1
+      expectedError:
+        phase: before_dispatch
+        code: provider_rejected
+        retryable: false

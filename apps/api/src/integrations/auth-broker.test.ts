@@ -260,6 +260,30 @@ describe("startAuthStep", () => {
     expect(action.url).toContain(`state=${repo.requests[0].state}`);
   });
 
+  it("renders the one-use state inside an app manifest callback field", async () => {
+    const repo = new MemoryAuthRequestRepo();
+    const action = await startAuthStep({
+      slug: "github",
+      manifest: manifestWith([
+        {
+          kind: "app_manifest",
+          create_url: "https://github.com/settings/apps/new",
+          manifest_param: "manifest",
+          delivery: "form_post",
+          manifest: { callback_url: "{callback_url}?state={state}" },
+        },
+      ]),
+      stepIndex: 0,
+      env: {},
+      endpoints,
+      repo,
+    });
+    if (action.action !== "form_post") throw new Error("expected form_post");
+    expect(JSON.parse(action.value)).toEqual({
+      callback_url: `${endpoints.callbackUrl}?state=${repo.requests[0].state}`,
+    });
+  });
+
   it("targets an org's create_url when the caller names one and the step supports it", async () => {
     const repo = new MemoryAuthRequestRepo();
     const action = await startAuthStep({
@@ -418,6 +442,75 @@ describe("completeAuthStep", () => {
     expect(sent.get("code")).toBe("abc");
     expect(sent.get("redirect_uri")).toBe(endpoints.callbackUrl);
     expect(sent.get("code_verifier")).toBe(repo.requests[0].codeVerifier);
+    expect(sent.get("client_id")).toBe("cid");
+    expect(sent.get("client_secret")).toBe("secret");
+  });
+
+  it("authenticates a confidential client with HTTP Basic without copying credentials into the body", async () => {
+    const basicManifest = manifestWith([
+      { ...oauthStep, token_endpoint_auth_method: "client_secret_basic" } as never,
+    ]);
+    const repo = new MemoryAuthRequestRepo();
+    const action = await startAuthStep({
+      slug: "notion",
+      manifest: basicManifest,
+      stepIndex: 0,
+      env: { NOTION_CLIENT_ID: "cid" },
+      endpoints,
+      repo,
+    });
+    if (action.action !== "redirect") throw new Error("expected redirect");
+
+    let sentAuthorization: string | null = null;
+    let sentBody = "";
+    await completeAuthStep({
+      query: { state: repo.requests[0].state, code: "abc" },
+      loadManifest: () => basicManifest,
+      loadEnv,
+      endpoints,
+      repo,
+      fetchImpl: async (_url, init) => {
+        sentAuthorization = new Headers(init?.headers).get("authorization");
+        sentBody = String(init?.body);
+        return jsonResponse({ access_token: "tok" });
+      },
+    });
+
+    expect(sentAuthorization).toBe(`Basic ${Buffer.from("cid:secret").toString("base64")}`);
+    const sent = new URLSearchParams(sentBody);
+    expect(sent.has("client_id")).toBe(false);
+    expect(sent.has("client_secret")).toBe(false);
+  });
+
+  it("does not leak client credentials when the token request fails", async () => {
+    const basicManifest = manifestWith([
+      { ...oauthStep, token_endpoint_auth_method: "client_secret_basic" } as never,
+    ]);
+    const repo = new MemoryAuthRequestRepo();
+    const action = await startAuthStep({
+      slug: "notion",
+      manifest: basicManifest,
+      stepIndex: 0,
+      env: { NOTION_CLIENT_ID: "cid" },
+      endpoints,
+      repo,
+    });
+    if (action.action !== "redirect") throw new Error("expected redirect");
+
+    const error = await completeAuthStep({
+      query: { state: repo.requests[0].state, code: "abc" },
+      loadManifest: () => basicManifest,
+      loadEnv,
+      endpoints,
+      repo,
+      fetchImpl: async () => {
+        throw new Error("request with secret failed");
+      },
+    }).catch((cause) => cause);
+
+    expect(error).toBeInstanceOf(AuthBrokerError);
+    expect(error).toMatchObject({ reason: "exchange_failed" });
+    expect(String(error.message)).not.toContain("secret");
   });
 
   it("rejects a replayed callback", async () => {
@@ -544,6 +637,39 @@ describe("completeAuthStep", () => {
     ).rejects.toMatchObject({ reason: "missing_credentials" });
   });
 
+  it("supports a PKCE public client that declares no client secret", async () => {
+    const publicManifest = manifestWith([{ ...oauthStep, client_secret_optional: true } as never]);
+    const repo = new MemoryAuthRequestRepo();
+    const action = await startAuthStep({
+      slug: "public",
+      manifest: publicManifest,
+      stepIndex: 0,
+      env: { NOTION_CLIENT_ID: "cid" },
+      endpoints,
+      repo,
+    });
+    if (action.action !== "redirect") throw new Error("expected redirect");
+    let sentBody = "";
+    let sentAuthorization: string | null = null;
+    await completeAuthStep({
+      query: { state: repo.requests[0].state, code: "abc" },
+      loadManifest: () => publicManifest,
+      loadEnv: async () => ({ NOTION_CLIENT_ID: "cid" }),
+      endpoints,
+      repo,
+      fetchImpl: async (_url, init) => {
+        sentAuthorization = new Headers(init?.headers).get("authorization");
+        sentBody = String(init?.body);
+        return jsonResponse({ access_token: "token" });
+      },
+    });
+
+    expect(sentAuthorization).toBeNull();
+    const sent = new URLSearchParams(sentBody);
+    expect(sent.get("client_id")).toBe("cid");
+    expect(sent.has("client_secret")).toBe(false);
+  });
+
   it("captures install params declared by an install step", async () => {
     const installManifest = manifestWith([
       {
@@ -561,6 +687,7 @@ describe("completeAuthStep", () => {
       endpoints,
       repo,
     });
+
     const outcome = await completeAuthStep({
       query: { state: repo.requests[0].state, installation_id: "42", setup_action: "install" },
       loadManifest: () => installManifest,
@@ -570,6 +697,40 @@ describe("completeAuthStep", () => {
     });
     // Only declared params are captured; `setup_action` was not asked for.
     expect(outcome.env).toEqual({ GITHUB_INSTALLATION_ID: "42" });
+  });
+
+  it("captures direct app-manifest callback values for an OIM bridge", async () => {
+    const appManifest = manifestWith([
+      {
+        kind: "app_manifest",
+        create_url: "https://acme.test/apps/new?state={state}",
+        manifest_param: "manifest",
+        delivery: "form_post",
+        manifest: { name: "Tulip" },
+        oim_capture: { client_id: "OIM_CLIENT_ID" },
+      } as never,
+    ]);
+    const repo = new MemoryAuthRequestRepo();
+    const action = await startAuthStep({
+      slug: "acme",
+      manifest: appManifest,
+      stepIndex: 0,
+      env: {},
+      endpoints,
+      repo,
+    });
+    if (action.action !== "form_post") throw new Error("expected form_post");
+    const state = repo.requests[0].state;
+
+    const outcome = await completeAuthStep({
+      query: { state, client_id: "app-123" },
+      loadManifest: () => appManifest,
+      loadEnv: async () => ({}),
+      endpoints,
+      repo,
+    });
+
+    expect(outcome.env).toEqual({ OIM_CLIENT_ID: "app-123" });
   });
 
   it("converts an app manifest code into the credentials the next step needs", async () => {
@@ -744,6 +905,28 @@ describe("refreshOAuth2Credentials", () => {
       fetchImpl: async () => jsonResponse({ access_token: "a2", refresh_token: "r2" }),
     });
     expect(env.NOTION_ACCESS_TOKEN_REFRESH_TOKEN).toBe("r2");
+  });
+
+  it("uses the declared HTTP Basic client authentication for refreshes", async () => {
+    let sentAuthorization: string | null = null;
+    let sentBody = "";
+    await refreshOAuth2Credentials(
+      { ...oauthStep, token_endpoint_auth_method: "client_secret_basic" } as never,
+      stored,
+      {
+        fetchImpl: async (_url, init) => {
+          sentAuthorization = new Headers(init?.headers).get("authorization");
+          sentBody = String(init?.body);
+          return jsonResponse({ access_token: "a2" });
+        },
+      }
+    );
+
+    expect(sentAuthorization).toBe(`Basic ${Buffer.from("cid:secret").toString("base64")}`);
+    const sent = new URLSearchParams(sentBody);
+    expect(sent.get("refresh_token")).toBe("r1");
+    expect(sent.has("client_id")).toBe(false);
+    expect(sent.has("client_secret")).toBe(false);
   });
 
   it("posts to refresh_url when the manifest declares a separate one", async () => {

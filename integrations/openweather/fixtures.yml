@@ -1,0 +1,63 @@
+version: 1
+cases:
+  - name: checks-api-key-without-arguments
+    operationId: check-connection
+    request: {}
+    response:
+      status: 200
+      body:
+        cod: 200
+        name: ""
+        coord: { lat: 0, lon: 0 }
+    expect:
+      request:
+        method: GET
+        url: https://api.openweathermap.org/data/2.5/weather?appid=oim-fixture-credential&lat=0&lon=0
+      result: { cod: 200 }
+  - name: rejects-invalid-api-key
+    operationId: check-connection
+    request: {}
+    response:
+      status: 401
+      body: { cod: 401, message: Invalid API key }
+    expect:
+      request:
+        method: GET
+        url: https://api.openweathermap.org/data/2.5/weather?appid=oim-fixture-credential&lat=0&lon=0
+      expectedError:
+        phase: before_dispatch
+        code: provider_unauthorized
+        retryable: false
+  - name: gets-current-weather
+    operationId: current-weather
+    request:
+      q: London
+      units: metric
+    response:
+      status: 200
+      body:
+        name: London
+        weather:
+          - main: Clouds
+            description: overcast clouds
+        main:
+          temp: 18
+          feels_like: 17
+          humidity: 74
+        wind:
+          speed: 3.2
+    expect:
+      request:
+        method: GET
+        url: https://api.openweathermap.org/data/2.5/weather?q=London&units=metric&appid=oim-fixture-credential
+      result:
+        name: London
+        weather:
+          - main: Clouds
+            description: overcast clouds
+        main:
+          temp: 18
+          feels_like: 17
+          humidity: 74
+        wind:
+          speed: 3.2

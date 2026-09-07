@@ -1,6 +1,7 @@
 import { existsSync } from "node:fs";
 import { readdir, readFile } from "node:fs/promises";
 import { basename, join, resolve } from "node:path";
+import { type OimManifest, parseOimManifest } from "@tulipfarm/schema";
 import { parse as parseYaml } from "yaml";
 import { repoDir } from "../repo-dir";
 import type { IntegrationManifest, Logger } from "../types";
@@ -78,6 +79,10 @@ export async function loadBundledIntegrations(
 
   for (const slug of slugs) {
     const dir = join(root, slug);
+    // An OIM package declares itself in `oim.yml` and is loaded by the published loader, not here.
+    // Skipping it quietly matters: reported as an error, every boot would log a failure for a
+    // package that is working exactly as designed.
+    if (existsSync(join(dir, "oim.yml")) && !existsSync(join(dir, "manifest.yml"))) continue;
     const manifestPath = join(dir, "manifest.yml");
     try {
       const manifest = (parseYaml(await readFile(manifestPath, "utf8")) ??
@@ -115,4 +120,51 @@ export async function loadBundledIntegrations(
   }
 
   return integrations;
+}
+
+/**
+ * The OIM packages shipped in the image, by slug.
+ *
+ * Loaded separately from `loadBundledIntegrations` rather than folded into it: a
+ * `BundledIntegration` promises a legacy `manifest`, and half of its consumers read that field
+ * directly. Widening it would make every one of them handle a case only the catalog cares about.
+ *
+ * Only the manifest is read. Installing a package copies its content-addressed companions through
+ * the ordinary installer, which verifies each digest; loading them here would be a second, weaker
+ * path to the same bytes.
+ */
+export async function loadBundledOimPackages(
+  logger: Logger,
+  root = bundledIntegrationsDir()
+): Promise<Map<string, OimManifest>> {
+  const packages = new Map<string, OimManifest>();
+  let slugs: string[];
+  try {
+    const entries = await readdir(root, { withFileTypes: true });
+    slugs = entries.filter((entry) => entry.isDirectory()).map((entry) => entry.name);
+  } catch (error) {
+    if (!isNotFound(error)) {
+      logger.error(
+        `Bundled OIM packages: cannot read "${root}": ${
+          error instanceof Error ? error.message : String(error)
+        }`
+      );
+    }
+    return packages;
+  }
+
+  for (const slug of slugs) {
+    const manifestPath = join(root, slug, "oim.yml");
+    if (!existsSync(manifestPath)) continue;
+    try {
+      packages.set(slug, parseOimManifest(await readFile(manifestPath, "utf8")));
+    } catch (error) {
+      logger.error(
+        `Bundled OIM package "${slug}" skipped: ${
+          error instanceof Error ? error.message : String(error)
+        }`
+      );
+    }
+  }
+  return packages;
 }

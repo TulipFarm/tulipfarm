@@ -203,6 +203,141 @@ function executor(document: routine.RoutineDefinition, harness: StateHarness) {
 }
 
 describe("createRoutineExecutor", () => {
+  it("denies a disabled personal owner before reading inputs or dispatching a State", async () => {
+    const harness = new StateHarness([state("Start")]);
+    let readArtifact = false;
+    const personalRoutine = definition([
+      {
+        type: "branch",
+        name: "Start",
+        conditions: [{ condition: "true", end: true }],
+        default: { end: true },
+      },
+    ]);
+    const execute = createRoutineExecutor({
+      definitions: {
+        load: async () =>
+          ({
+            document: {
+              ...personalRoutine,
+              spec: {
+                ...personalRoutine.spec,
+                owner: "user:disabled-user",
+              },
+            },
+          }) as LoadedRoutineDefinition,
+      },
+      artifacts: {
+        read: async () => {
+          readArtifact = true;
+          return requestArtifact;
+        },
+      },
+      runs: { listStates: async () => [...harness.states.values()] },
+      scheduler: harness.scheduler,
+      transitions: harness,
+      waits: harness.waitPort,
+      ownerGuard: {
+        check: async () => ({ status: "denied", reason: "personal_owner_disabled" }),
+      },
+      now: () => new Date(STARTED_AT),
+    });
+
+    await expect(execute(run())).resolves.toEqual({
+      status: "needs_reconciliation",
+      errorEvidenceRef: "routine:personal_owner_disabled",
+    });
+    expect(readArtifact).toBe(false);
+    expect(harness.transitions).toEqual([]);
+  });
+
+  it("keeps Team-owned Routines independent of their original creator", async () => {
+    const harness = new StateHarness([state("Start")]);
+    const execute = createRoutineExecutor({
+      definitions: {
+        load: async () =>
+          ({
+            document: definition([
+              {
+                type: "branch",
+                name: "Start",
+                conditions: [{ condition: "true", end: true }],
+                default: { end: true },
+              },
+            ]),
+          }) as LoadedRoutineDefinition,
+      },
+      artifacts: { read: async () => requestArtifact },
+      runs: { listStates: async () => [...harness.states.values()] },
+      scheduler: harness.scheduler,
+      transitions: harness,
+      waits: harness.waitPort,
+      ownerGuard: {
+        check: async () => ({ status: "allowed", ownership: "team" }),
+      },
+      now: () => new Date(STARTED_AT),
+    });
+
+    await expect(execute(run())).resolves.toEqual({ status: "succeeded" });
+  });
+
+  it("fails closed when authoritative Routine ownership is unavailable", async () => {
+    const harness = new StateHarness([state("Start")]);
+    const execute = createRoutineExecutor({
+      definitions: {
+        load: async () =>
+          ({
+            document: definition([
+              {
+                type: "branch",
+                name: "Start",
+                conditions: [{ condition: "true", end: true }],
+                default: { end: true },
+              },
+            ]),
+          }) as LoadedRoutineDefinition,
+      },
+      artifacts: { read: async () => requestArtifact },
+      runs: { listStates: async () => [...harness.states.values()] },
+      scheduler: harness.scheduler,
+      transitions: harness,
+      waits: harness.waitPort,
+      ownerGuard: { check: async () => ({ status: "unavailable" }) },
+      now: () => new Date(STARTED_AT),
+    });
+
+    await expect(execute(run())).resolves.toEqual({
+      status: "needs_reconciliation",
+      errorEvidenceRef: "routine:owner_eligibility_unavailable",
+    });
+    expect(harness.transitions).toEqual([]);
+  });
+
+  it("does not fall back to company authority when personal ownership cannot be checked", async () => {
+    const harness = new StateHarness([state("Start")]);
+    const personalRoutine = definition([
+      {
+        type: "branch",
+        name: "Start",
+        conditions: [{ condition: "true", end: true }],
+        default: { end: true },
+      },
+    ]);
+    const execute = executor(
+      {
+        ...personalRoutine,
+        spec: { ...personalRoutine.spec, owner: "user:personal-owner" },
+      },
+      harness
+    );
+
+    await expect(execute(run())).resolves.toEqual({
+      status: "needs_reconciliation",
+      errorEvidenceRef: "routine:personal_owner_unverified",
+    });
+    expect(harness.transitions).toEqual([]);
+  });
+
   it("advances a pure ending branch through canonical State transitions", async () => {
     const harness = new StateHarness([state("Start")]);
     const execute = executor(
@@ -788,6 +923,58 @@ describe("createRoutineExecutor — tool States", () => {
     expect(approvalWaits).toHaveLength(1);
   });
 
+  it("parks a provider-directed Tool retry as a durable wait", async () => {
+    const harness = new StateHarness([state("Start")]);
+    const execute = toolExecutor(definition([commentState]), harness, {
+      kind: "waiting",
+      waitId: "wait-1",
+      effectId: "effect-1",
+      attempt: 1,
+      notBefore: "2026-07-25T00:00:05.000Z",
+      delayMs: 5_000,
+      reason: "provider_rate_limited",
+    });
+
+    await expect(execute(run())).resolves.toEqual({ status: "waiting" });
+    expect(harness.transitions).toContain("Start:running->waiting");
+  });
+
+  it("re-dispatches a Tool after its durable provider wait is satisfied", async () => {
+    const harness = new StateHarness([state("Start", "waiting")]);
+    const calls: RoutineToolRequest[] = [];
+    const execute = createRoutineExecutor({
+      definitions: {
+        load: async () =>
+          ({ document: definition([commentState]), bundle }) as LoadedRoutineDefinition,
+      },
+      artifacts: { read: async () => requestArtifact },
+      runs: { listStates: async () => [...harness.states.values()] },
+      scheduler: harness.scheduler,
+      transitions: harness,
+      waits: harness.waitPort,
+      tools: {
+        retryStatus: async () => "ready",
+        execute: async () => {
+          throw new Error("resume must not reserve the effect again");
+        },
+        resume: async (request) => {
+          calls.push(request);
+          return { kind: "succeeded", output: null };
+        },
+      },
+      now: () => new Date(STARTED_AT),
+    });
+
+    await expect(execute(run())).resolves.toEqual({ status: "succeeded" });
+    expect(calls).toHaveLength(1);
+    expect(harness.transitions).toEqual([
+      "Start:waiting->ready",
+      "Start:ready->claimed",
+      "Start:claimed->running",
+      "Start:running->succeeded",
+    ]);
+  });
+
   it("parks an effect only reconciliation can resolve, naming what stopped it", async () => {
     const harness = new StateHarness([state("Start")]);
     const execute = toolExecutor(definition([commentState]), harness, {
@@ -1028,6 +1215,41 @@ describe("createRoutineExecutor — agent States", () => {
 
     await expect(execute(run())).resolves.toEqual({ status: "needs_reconciliation" });
     expect(harness.states.get("Start")?.errorEvidenceRef).toBe("routine:approval_required");
+  });
+
+  it("waits on the provider retry timer the Agent Tool host already registered", async () => {
+    const harness = new StateHarness([state("Start")]);
+    const execute = agentExecutor(definition([classifyState]), harness, {
+      kind: "waiting",
+      reason: "provider_retry_wait",
+      waitId: "wait-retry-1",
+      callId: "call-1",
+    });
+
+    await expect(execute(run())).resolves.toEqual({ status: "waiting" });
+    expect(harness.transitions).toContain("Start:running->waiting");
+    expect(harness.events).not.toContain("Start:wait-opened");
+  });
+
+  it("re-enters the Agent loop when its pre-registered provider wait requeues the Run", async () => {
+    const harness = new StateHarness([state("Start", "waiting")]);
+    const calls: RoutineAgentRequest[] = [];
+    const execute = agentExecutor(
+      definition([classifyState]),
+      harness,
+      { kind: "succeeded", output: { category: "billing" } },
+      calls
+    );
+
+    await expect(execute(run())).resolves.toEqual({ status: "succeeded" });
+    expect(harness.transitions).toEqual([
+      "Start:waiting->ready",
+      "Start:ready->claimed",
+      "Start:claimed->running",
+      "Start:running->succeeded",
+    ]);
+    expect(calls).toHaveLength(1);
+    expect(harness.events).not.toContain("Start:wait-opened");
   });
 
   it("leaves a cancelled Run's status to the cancellation manager", async () => {

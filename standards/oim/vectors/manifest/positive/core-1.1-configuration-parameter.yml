@@ -1,0 +1,53 @@
+oimVersion: "1.0"
+kind: Integration
+metadata:
+  id: configured-http
+  name: Configured HTTP
+  version: 1.0.0
+  description: Send a saved non-secret header.
+  license: Apache-2.0
+profiles:
+  core: "1.1"
+  auth: "1.0"
+auth:
+  credentialSlots:
+    - id: api_key
+      label: API key
+      kind: api_key
+  configurationFields:
+    - id: user_agent
+      label: User-Agent
+      type: string
+      required: true
+  steps:
+    - id: connect
+      type: fields
+      title: Connect
+      fields:
+        - id: api_key
+          label: API key
+          input: password
+          target: { type: credential, slot: api_key }
+        - id: user_agent
+          label: User-Agent
+          input: text
+          target: { type: configuration, field: user_agent }
+operations:
+  - id: identity
+    name: read_identity
+    description: Read the current identity.
+    effect: read
+    identityMode: shared_only
+    source:
+      type: http
+      method: GET
+      baseUrl: https://api.example.test
+      path: /identity
+      parameters:
+        - name: User-Agent
+          in: header
+          configurationField: user_agent
+          schema: { type: string }
+    response:
+      schema: { type: object }
+      maxBytes: 4096

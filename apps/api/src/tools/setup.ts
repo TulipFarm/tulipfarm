@@ -14,11 +14,19 @@ import { MEMORY_DOCUMENT_TOOLS } from "@tulipfarm/memory";
 import type { RequestContext, ToolDef } from "@tulipfarm/tool-host";
 import { type ParkableApiToolDefinition, toToolDef } from "@tulipfarm/tool-host";
 import { ToolRegistry } from "../broker/tool-adapter";
+import {
+  INTEGRATION_KNOWLEDGE_TOOLS,
+  type IntegrationKnowledgeToolContext,
+} from "../integrations/knowledge-tools";
 import { FRONTEND_TOOLS } from "../platform/frontend-tools";
 import { PLATFORM_TOOLS, type PlatformToolContext } from "../platform/tools";
 import { readCustomInstructions } from "../preferences/custom-instructions";
 import { RESOURCE_TOOLS, type ResourceServices } from "../resources/tools.js";
 import { AGENT_TOOLS, type AgentToolContext } from "../soul/agents/tools.js";
+import {
+  INTEGRATION_AUTHORING_TOOLS,
+  type IntegrationAuthoringToolContext,
+} from "../soul/integrations/tools.js";
 import { RESOURCE_TYPE_TOOLS, type ResourceTypeToolContext } from "../soul/resource-types/tools.js";
 import { SKILL_TOOLS, type SkillToolContext } from "../soul/skills/tools.js";
 import {
@@ -45,6 +53,8 @@ export function buildToolRegistry(services: {
   agentTools?: AgentToolContext;
   skillTools?: SkillToolContext;
   surfaceComponents?: SurfaceComponentToolContext;
+  /** OIM integration authoring — `integration_draft_review`/`integration_draft_create`. */
+  integrationAuthoring?: Omit<IntegrationAuthoringToolContext, "requestContext">;
   platform?: PlatformToolContext;
   /** `task_create`/`task_close`; absent leaves both unregistered. */
   tasks?: TaskToolContext;
@@ -56,6 +66,11 @@ export function buildToolRegistry(services: {
   google?: readonly ToolDef[];
   /** Governed public web and structured API ToolDefs. */
   network?: readonly ToolDef[];
+  /**
+   * OIM Knowledge indexing. The registry is passed in by the caller rather than read from here so
+   * the sync dispatches through the very Tools this function publishes.
+   */
+  integrationKnowledge?: Omit<IntegrationKnowledgeToolContext, "registry" | "requestContext">;
 }): ToolRegistry {
   const registry = new ToolRegistry({ defaultDeny: true });
 
@@ -157,6 +172,11 @@ export function buildToolRegistry(services: {
     registerFamily(SURFACE_COMPONENT_TOOLS, () => ctx);
   }
 
+  if (services.integrationAuthoring) {
+    const ctx = services.integrationAuthoring;
+    registerFamily(INTEGRATION_AUTHORING_TOOLS, (requestContext) => ({ ...ctx, requestContext }));
+  }
+
   if (services.tasks) {
     const ctx = services.tasks;
     registerFamily(TASK_TOOLS, ({ agentId, runId }) => ({ ...ctx, agentId, runId }));
@@ -178,6 +198,15 @@ export function buildToolRegistry(services: {
           }
         : { ...ctx, runtimeToolNames, requestContext: reqCtx }
     );
+  }
+
+  if (services.integrationKnowledge !== undefined) {
+    const ctx = services.integrationKnowledge;
+    registerFamily(INTEGRATION_KNOWLEDGE_TOOLS, (reqCtx) => ({
+      ...ctx,
+      registry,
+      requestContext: reqCtx,
+    }));
   }
 
   // Surface/frontend Tools already read RequestContext and need no service closure.

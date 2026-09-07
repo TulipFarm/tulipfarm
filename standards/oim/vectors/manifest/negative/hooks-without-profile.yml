@@ -1,0 +1,31 @@
+oimVersion: "1.0"
+kind: Integration
+metadata:
+  id: normalized
+  name: Normalized
+  version: 1.0.0
+  description: Normalize responses.
+  license: Apache-2.0
+profiles: { core: "1.0" }
+files:
+  - path: hooks/normalize.js
+    role: hook
+    sha256: "0000000000000000000000000000000000000000000000000000000000000000"
+operations:
+  - id: items
+    name: list_items
+    description: List items.
+    effect: read
+    identityMode: shared_only
+    source:
+      type: http
+      method: GET
+      baseUrl: https://api.example.test
+      path: /items
+    response:
+      schema: { type: array }
+      maxBytes: 4096
+hooks:
+  - kind: response_normalize
+    file: hooks/normalize.js
+    export: normalize

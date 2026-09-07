@@ -207,6 +207,29 @@ describe("buildDeclarativeTools", () => {
     expect(http.sent).toHaveLength(1);
   });
 
+  it("redispatches an authorized duplicate instead of stranding the effect", async () => {
+    class AuthorizedDuplicateStore extends MemoryEffectStore {
+      override async reserve(input: Parameters<MemoryEffectStore["reserve"]>[0]) {
+        const result = await super.reserve(input);
+        return { outcome: "duplicate" as const, effect: result.effect };
+      }
+    }
+
+    const http = new RecordingHttp();
+    const shared = {
+      ...deps(http, CONNECTED_SECRETS),
+      effects: new AuthorizedDuplicateStore(),
+    };
+    const { tools } = buildDeclarativeTools([integration(openApiEgress())], shared);
+
+    const result = await tools
+      .find((tool) => tool.name === "acme_search_docs")
+      ?.execute({ body: { q: "x" } }, CTX);
+
+    expect(result).toEqual({ success: true, data: { ok: true } });
+    expect(http.sent).toHaveLength(1);
+  });
+
   it("treats a different tool call in the same run as a new effect", async () => {
     const http = new RecordingHttp();
     const { tools } = buildDeclarativeTools(

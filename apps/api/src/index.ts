@@ -1,6 +1,5 @@
 import { randomUUID } from "node:crypto";
 import { EventEmitter } from "node:events";
-import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import {
   createSubagentSpawning,
@@ -15,7 +14,13 @@ import {
 } from "@tulipfarm/authz";
 import { DEPLOYMENT_BUSINESS_ID } from "@tulipfarm/constants";
 import { FileService, PgFileRepo } from "@tulipfarm/files";
-import { FetchEgressHttp, GuardedEgressHttp, PublicOriginsService } from "@tulipfarm/integrations";
+import {
+  ConnectionResolver,
+  FetchEgressHttp,
+  GuardedEgressHttp,
+  OimOperationConnectionResolver,
+  PublicOriginsService,
+} from "@tulipfarm/integrations";
 import {
   buildDefaultRegistry,
   enqueueIndex,
@@ -46,7 +51,6 @@ import {
   DurableWaitManager,
   PgDurableInvocationStore,
   RunCancellationManager,
-  RunRecoveryManager,
   RunResumeGateway,
   TypedOutputValidator,
 } from "@tulipfarm/run-kernel";
@@ -56,7 +60,9 @@ import {
   loadOrProvisionActiveDek,
   PgDekRepo,
   PgSecretRepo,
+  SecretBroker,
   SecretsService,
+  secretsServiceProvider,
 } from "@tulipfarm/secrets";
 import { SkillBashRunner, SkillCommandRunner } from "@tulipfarm/skill-sandbox";
 import type { AuthOAuth2Step } from "@tulipfarm/soul";
@@ -68,8 +74,8 @@ import {
   GitSoulTreeReader,
   GitSyncService,
   getDefaultAssistant,
-  listAgents,
   loadBundledIntegrations,
+  loadBundledOimPackages,
   loadBundledSkills,
   loadDisabledBundledSkills,
   loadIntegrationRegistry,
@@ -82,6 +88,7 @@ import {
   SoulPublicationCoordinator,
   SoulPublisher,
   syncBundledSkillsIntoSoul,
+  verifyExecutionBundle,
 } from "@tulipfarm/soul";
 import {
   ArtifactStore,
@@ -90,12 +97,15 @@ import {
   ChannelRunDeliveryStore,
   ChildLinkAncestryStore,
   ChildLinkStore,
+  ConnectionStore,
   createBlobPort,
   EventStore,
   ensureBundledBucket,
   ensureEmbeddingIndexes,
   IntegrationStore,
   KillSwitchRepo,
+  OimRateLimitStore,
+  OimReleaseTrustStore,
   PgApprovalGrantRepo,
   PgAssetOwnershipRepo,
   PgGroupRepo,
@@ -105,14 +115,14 @@ import {
   PgSoulPublicationStore,
   PgTeamNotificationRepo,
   PgTeamRepo,
-  ProviderFileUploadStore,
-  ProviderObjectOwnershipStore,
+  PollingIngressStore,
   PublicOriginStore,
   RunEventStore,
   RunStore,
   SoulRepositoryStore,
   TaskRepo,
   WaitStore,
+  WebhookInboxStore,
   writeBucketSecrets,
 } from "@tulipfarm/storage";
 import { PgEffectStore } from "@tulipfarm/tool-broker";
@@ -131,7 +141,7 @@ import {
   soulPublicationProbe,
 } from "./admin/health";
 import { modelReachability } from "./admin/model-reachability";
-import { RuntimeRunCommandService } from "./admin/run-commands";
+import { OperationalNotImplementedError } from "./admin/routes";
 import { createRunReader } from "./admin/run-reader";
 import { createRuntimeOperationalApi } from "./admin/runtime";
 import { buildApp } from "./app";
@@ -180,7 +190,11 @@ import { webhookSecretPort } from "./hooks/secret-port";
 import { PgApiClientRepo } from "./identity/api-clients";
 import { buildApiAuthorityLayerResolver } from "./identity/authority-layers";
 import { channelBindKeyResolver } from "./identity/channel-link";
-import { PgExternalIdentityRepo, PgExternalIdentityUnlinker } from "./identity/external-links";
+import { PgExternalIdentityRepo } from "./identity/external-links";
+import {
+  ExternalLinkKnowledgeIdentityMap,
+  providerIdentityLinkPort,
+} from "./identity/knowledge-identity-map";
 import { reconcileSoulRoles, registerSoulRoleReconcile } from "./identity/role-reconcile";
 import { syncDeploymentRoles } from "./identity/roles";
 import { IngressIdentityResolver } from "./ingress/identity";
@@ -189,18 +203,36 @@ import {
   IntegrationConversationsRepo,
   IntegrationEventsRepo,
 } from "./ingress/repo";
+import { connectionUseAuthorizer } from "./integrations/connection-authorizer";
 import { resolveSecretRef } from "./integrations/connection-env";
+import { ConnectionLeaseRegistry } from "./integrations/connection-lease-registry";
+import { deliveryCipher } from "./integrations/delivery-cipher";
+import { updateIntegrationFromSource } from "./integrations/install";
+import {
+  oimIngressCallbackUrl,
+  oimIngressResolver,
+  oimWebhookBinding,
+} from "./integrations/oim-ingress-binding";
+import { registerOimOAuthRefreshSchedule } from "./integrations/oim-oauth-refresh-schedule";
+import { OimPersonalRoutinePause } from "./integrations/oim-personal-routine-pause";
+import {
+  oimPollingSecretAuthorizer,
+  startOimPollingWorker,
+} from "./integrations/oim-polling-worker";
+import { OimReleaseTrustHost } from "./integrations/oim-release-compose";
+import { OimReleaseMaintenanceWorker } from "./integrations/oim-release-maintenance";
+import { createOimRuntimeHost } from "./integrations/oim-runtime-host";
+import { OimUserOffboarding } from "./integrations/oim-user-offboarding";
+import { OimUserOffboardingReconciler } from "./integrations/oim-user-offboarding-schedule";
+import { OimWebhookLifecycle } from "./integrations/oim-webhook-lifecycle";
 import { PgPrincipalProviderTokenRepo } from "./integrations/principal-tokens";
+import { startWebhookInboxWorker } from "./integrations/webhook-inbox-worker";
 import { InternalChildRoutineHost } from "./internal/child-routine-host";
 import { IngressDeliveryHost } from "./internal/delivery-host";
 import { InternalEmitHost } from "./internal/emit-host";
 import { ModelSelectorGate, modelGateModeFromEnv } from "./internal/model-authz";
 import { InternalRoutineApprovalHost } from "./internal/routine-approval-host";
-import {
-  SlackCommandResponseService,
-  SlackCommandResponseStore,
-} from "./internal/slack-command-response";
-import { SlackHomeProjectionService } from "./internal/slack-home-projection";
+import { RoutineOwnerAuthorityHost } from "./internal/routine-owner-authority";
 import { SubagentTurnContextResolver } from "./internal/subagent-context";
 import { buildDelegatedToolDispatch } from "./internal/tool-dispatch";
 import { ChatTurnContextResolver } from "./internal/turn-context";
@@ -211,11 +243,13 @@ import { knowledgeDenialSink as makeKnowledgeDenialSink } from "./knowledge/deni
 import { PageReadGate } from "./knowledge/page-access";
 import { ReaderDirectory } from "./knowledge/reader-directory";
 import { SubjectDirectory } from "./knowledge/subject-directory";
+import { PgSlackKnowledgeCheckpointStore } from "./knowledge-sources/checkpoint-store";
+import { PgKnowledgeEmissionSink } from "./knowledge-sources/emission-sink";
 import { PgKnowledgeIndexStore } from "./knowledge-sources/index-store";
-import {
-  CompositeLiveSourceAuthorization,
-  SlackTenantLiveAuthorization,
-} from "./knowledge-sources/live-authorization";
+import { SlackTenantLiveAuthorization } from "./knowledge-sources/live-authorization";
+import { PgOimKnowledgeCheckpointStore } from "./knowledge-sources/oim-checkpoint-store";
+import { OimLiveSourceAuthorization } from "./knowledge-sources/oim-live-authorization";
+import { registerSlackKnowledgeSync } from "./knowledge-sources/slack-sync-schedule";
 import { PgKnowledgeSourceStore } from "./knowledge-sources/source-store";
 import { registerLlmReload } from "./llm-reload";
 import { buildMemoryServices } from "./memory/composition";
@@ -296,6 +330,7 @@ import { apiSurfacePresentation, surfaceRendererRegistry } from "./surfaces/rend
 import { TeamAssetCatalogProvider } from "./team-assets/catalog-provider";
 import { TeamAssetService } from "./team-assets/service";
 import { TeamAssetLifecycle } from "./team-assets/team-lifecycle";
+import { oimFiles } from "./tools/declarative/oim-files";
 import { DeclarativeToolSync } from "./tools/declarative/sync";
 import { buildGitHubTooling } from "./tools/github/compose";
 import { buildGitHubTools } from "./tools/github/tools";
@@ -305,15 +340,9 @@ import { buildGoogleTools } from "./tools/google/tools";
 import { composeNetworkTools } from "./tools/network/compose";
 import { buildToolRegistry } from "./tools/setup";
 import { buildSlackTooling } from "./tools/slack/compose";
-import {
-  GovernedSlackFileUploadSource,
-  SlackExternalUploadHttp,
-  SlackIntegrationIdentityResolver,
-  SlackProviderFileUploads,
-  SlackProviderObjectOwnership,
-} from "./tools/slack/ports";
 import { buildSlackTools } from "./tools/slack/tools";
 import { EventTriggerGateway } from "./triggers/event-dispatch";
+import { oimEventDispatcher } from "./triggers/oim-event-dispatch";
 
 config({ path: ".env.local" });
 
@@ -523,15 +552,6 @@ async function boot() {
       publisher: soulPublisher,
       treeReader: soulTreeReader,
     });
-    const userRepo = new PgUserRepo(pool);
-    const setupAdminCreator = new PgSetupAdminCreator(pool, DEPLOYMENT_BUSINESS_ID);
-    await bootstrapFromEnv({
-      userRepo,
-      setupAdminCreator,
-      secretsService,
-      soulWriter,
-      log: console,
-    });
     const bundledSkills = await loadBundledSkills(console);
     const disabledBundledSkills = await loadDisabledBundledSkills(soulPath, console);
     // Built-in Skills are authored artifacts, not a hidden overlay: seed them into the Soul repo so
@@ -552,6 +572,7 @@ async function boot() {
       );
     }
     const bundledIntegrations = await loadBundledIntegrations(console);
+    const bundledOimPackages = await loadBundledOimPackages(console);
 
     // Per-type resource tables can't be created lazily (no `db.collection(type)`):
     await reconcileResourceTables(pool, soulLoader, console);
@@ -561,10 +582,11 @@ async function boot() {
       10
     );
     const sessionStore = new PgSessionStore(pool, ttlSeconds);
+    const userRepo = new PgUserRepo(pool);
+    const setupAdminCreator = new PgSetupAdminCreator(pool, DEPLOYMENT_BUSINESS_ID);
     const tokenRepo = new PgTokenRepo(pool);
     const apiClientRepo = new PgApiClientRepo(pool);
     const externalIdentityRepo = new PgExternalIdentityRepo(pool);
-    const externalIdentityUnlinker = new PgExternalIdentityUnlinker(pool, DEPLOYMENT_BUSINESS_ID);
     await syncDeploymentRoles(new PgRoleRepo(transactionPort(pool)));
     // authored Role actually resolves through the authority layers (and a Role deleted from Soul is
     // reaped). Reserved bootstrap ids are never touched. See identity/role-reconcile.ts.
@@ -579,10 +601,7 @@ async function boot() {
     // Same root the Worker derives, so a blob-backed Run Artifact written by either process is
     // readable by the other. Without it `publishFile` fails with `artifact_blob_unavailable`,
     // which is how a sandboxed Skill command dies before its container ever starts.
-    const dataDir = resolveDataDir();
-    // Compose mounts only this subdirectory writable in the worker, after API readiness.
-    if (dataDir !== undefined) await mkdir(join(dataDir, "blobs"), { recursive: true });
-    const blobs = createBlobPort(join(dataDir ?? process.cwd(), "blobs"));
+    const blobs = createBlobPort(join(resolveDataDir() ?? process.cwd(), "blobs"));
     /** Every Artifact reader is the same service over a different transaction scope. */
     const artifactsOver = (transactions: ConstructorParameters<typeof ArtifactStore>[0]) =>
       new ArtifactService(new ArtifactStore(transactions), invocationValidator, blobs);
@@ -627,12 +646,9 @@ async function boot() {
     const runStore = new RunStore(runTransactions);
     const runEventStore = new RunEventStore(runTransactions);
     const budgetStore = new BudgetStore(runTransactions);
-    const recoveryEffects = new PgEffectStore(runTransactions);
-    const runCancellation = new RunCancellationManager(
-      runStore,
-      new ChildLinkStore(runTransactions)
+    const runCancel = runCanceller(
+      new RunCancellationManager(runStore, new ChildLinkStore(runTransactions))
     );
-    const runCancel = runCanceller(runCancellation);
 
     const hookExecutor =
       process.env.HOOKS_DISABLED === "true"
@@ -650,7 +666,7 @@ async function boot() {
     const observabilityService = new ObservabilityService(obsRepo);
     // One reader for both the operational API and the `routine_run_*` Tools, so what an Agent
     // reports about a Run and what the Run inspector shows can never disagree.
-    const runReader = createRunReader(runStore, budgetStore, obsRepo, recoveryEffects);
+    const runReader = createRunReader(runStore, budgetStore, obsRepo);
     // Built after observability so embedding spend lands in the same table as every other call.
     const embeddingService = new EmbeddingService({
       usage: createEmbeddingUsageSink(observabilityService, () => obsConfig.pricingOverrides),
@@ -689,11 +705,6 @@ async function boot() {
     // Persisted to an append-only ledger the runtime role cannot rewrite (see `audit/repo.ts`).
     const auditRepo = new PgAuditEventRepo(pool);
     const auditService = new AuditService(auditRepo);
-    const runCommands = new RuntimeRunCommandService({
-      cancellation: runCancellation,
-      recovery: new RunRecoveryManager(runStore, recoveryEffects),
-      audit: auditService,
-    });
     // The emergency stop's own state. Read live on every mutating effect by the guard below, and
     // armed only through the admin-gated routes.
     const killSwitchRepo = new KillSwitchRepo(transactionPort(pool));
@@ -821,6 +832,11 @@ async function boot() {
 
     const knowledgePageRepo = new PgKnowledgePageRepo(pool);
     const knowledgeSpaceRepo = new PgKnowledgeSpaceRepo(pool);
+    const legacySlackAuthorization = new SlackTenantLiveAuthorization(
+      integrationStore,
+      secretsService,
+      externalIdentityRepo
+    );
     const knowledgeService = new KnowledgeService({
       pages: knowledgePageRepo,
       chunks: new PgKnowledgeChunkRepo(pool),
@@ -842,9 +858,12 @@ async function boot() {
         sources: knowledgeSourceStore,
         index: knowledgeIndexStore,
         ownership: knowledgeOwnership,
-        live: new CompositeLiveSourceAuthorization([
-          new SlackTenantLiveAuthorization(integrationStore, secretsService, externalIdentityRepo),
-        ]),
+        live: {
+          check: (input) =>
+            input.sourceLocator?.kind === "oim"
+              ? oimLiveSourceAuthorization.check(input)
+              : legacySlackAuthorization.check(input),
+        },
         now: () => new Date(),
       },
     });
@@ -933,19 +952,14 @@ async function boot() {
     // registered here rather than in the Worker because its one-use resume token must never leave
     const runResume = new RunResumeGateway(runStore);
     const runWaits = new DurableWaitManager(new WaitStore(runTransactions), runResume);
-    const toolApprovals = new ToolApprovalService({ transactions: runTransactions });
-    const routineApprovals = new RoutineApprovalService({ transactions: runTransactions });
+    const toolApprovals = new ToolApprovalService({ repo: approvalsRepo, waits: runWaits });
+    const routineApprovals = new RoutineApprovalService({ repo: approvalsRepo, waits: runWaits });
     const ingressDeliveries = new IngressDeliveriesRepo(pool);
     const integrationThreads = new IntegrationConversationsRepo(pool);
     const integrationEvents = new IntegrationEventsRepo(pool);
     const channelRunDeliveries = new ChannelRunDeliveryStore(runTransactions, () =>
       new Date().toISOString()
     );
-    const slackCommandResponses = new SlackCommandResponseService({
-      businessId: DEPLOYMENT_BUSINESS_ID,
-      store: new SlackCommandResponseStore(pool),
-      secrets: secretsService,
-    });
     const channelMentionedThreads = new ChannelMentionedThreadStore(runTransactions, () =>
       new Date().toISOString()
     );
@@ -972,15 +986,6 @@ async function boot() {
     const slackTooling = buildSlackTooling({
       secrets: async () => secretsService,
       channelRunDelivery: channelRunDeliveries,
-      integrationIdentity: new SlackIntegrationIdentityResolver(integrationStore),
-      ownedObjects: new SlackProviderObjectOwnership(
-        new ProviderObjectOwnershipStore(runTransactions, () => new Date().toISOString())
-      ),
-      files: new GovernedSlackFileUploadSource(runStore, fileService),
-      externalUpload: new SlackExternalUploadHttp(),
-      fileUploads: new SlackProviderFileUploads(
-        new ProviderFileUploadStore(runTransactions, () => new Date().toISOString())
-      ),
     });
     const slackEffects = new PgEffectStore(runTransactions);
     const slackTools = buildSlackTools(DEPLOYMENT_BUSINESS_ID, {
@@ -1071,10 +1076,84 @@ async function boot() {
       bundledSkills,
       disabledBundledSkills
     );
+    // One store behind both credentialed paths: an OIM operation and an ad-hoc `api_request` must
+    // agree on which Connections exist, or a person would confirm a Credential in one place and
+    // find the other still asking for it.
+    const connectionStore = new ConnectionStore(transactionPort(pool));
+    const connectionLeases = new ConnectionLeaseRegistry(DEPLOYMENT_BUSINESS_ID);
+    const onRoutinesChanged = async () => {
+      await soulLoader.reload();
+      await scheduleDispatcher.tick();
+    };
+    const personalRoutinePause = new OimPersonalRoutinePause({
+      businessId: DEPLOYMENT_BUSINESS_ID,
+      routines: routineCatalog,
+      ownership: assetOwnershipRepo,
+      soulWriter,
+      onRoutinesChanged,
+    });
+    const userOffboarding = new OimUserOffboarding({
+      businessId: DEPLOYMENT_BUSINESS_ID,
+      connections: connectionStore,
+      revokeConnectionLeases: connectionLeases.revokeConnectionLeases,
+      pausePersonalRoutines: personalRoutinePause.pausePersonalRoutines,
+    });
+    const routineOwnerAuthority = new RoutineOwnerAuthorityHost({
+      businessId: DEPLOYMENT_BUSINESS_ID,
+      runs: runStore,
+      bundles: {
+        load: async (businessId, digest) => {
+          const record = await new PgBundleStore(runTransactions).get(digest);
+          if (record === undefined || record.bundle.businessId !== businessId) return undefined;
+          return verifyExecutionBundle(record, soulBundleVerifier);
+        },
+      },
+      ownership: assetOwnershipRepo,
+      users: userRepo,
+    });
+    const oimReleaseTrustStore = new OimReleaseTrustStore(transactionPort(pool));
+    const oimReleaseTrust = new OimReleaseTrustHost(oimReleaseTrustStore);
+    const oimRuntimeHost = createOimRuntimeHost({
+      businessId: DEPLOYMENT_BUSINESS_ID,
+      integrations: () => soulLoader.integrations.values(),
+      releaseTrust: oimReleaseTrust,
+      ...(hookExecutor === undefined ? {} : { hookExecutor }),
+    });
+    const oimConnectionAccess = connectionUseAuthorizer({
+      businessId: DEPLOYMENT_BUSINESS_ID,
+      isUserActive: async (principalId) =>
+        (await userRepo.findById(principalId))?.status === "active",
+      isTeamActive: async (teamId) =>
+        (await teamRepo.getTeam(DEPLOYMENT_BUSINESS_ID, teamId))?.status === "active",
+      resolvePrincipalLayer: (name, principal) =>
+        authorityLayerResolver.resolvePrincipalLayer(name, principal),
+      hasTeamMembership: async (principalId, teamId) => {
+        const resolved = await teamDomain.resolvePrincipalForTeams(
+          DEPLOYMENT_BUSINESS_ID,
+          [teamId],
+          principalId
+        );
+        return (resolved.get(teamId)?.length ?? 0) > 0;
+      },
+    });
+    const oimLiveSourceAuthorization = new OimLiveSourceAuthorization({
+      integrations: () => soulLoader.integrations.values(),
+      registry: () => toolRegistry,
+      authorizeIntegration: oimRuntimeHost.authorizeIntegration,
+      connections: connectionStore,
+      connectionAccess: oimConnectionAccess,
+      identities: externalIdentityRepo,
+    });
+    const webhookInbox = new WebhookInboxStore(transactionPort(pool));
+    const pollingIngress = new PollingIngressStore(transactionPort(pool));
+    const oimDeliveryCipher = deliveryCipher(() => ({ current: activeDek.key }));
     const networkTools = composeNetworkTools({
       secrets: secretsService,
       soulLoader,
       authorityLayers: authorityLayerResolver,
+      connections: connectionStore,
+      connectionAccess: oimConnectionAccess,
+      trackConnectionBroker: connectionLeases.track,
     });
     // The GitHub Skill documents Tools that are excluded whenever the integration is uninstalled.
     // Hiding it on the same live check keeps `skill_list`/`skill` from advertising a workflow
@@ -1102,11 +1181,23 @@ async function boot() {
       resourceTypes: { gitSync, soulWriter, soulLoader, reconcile: reconcileResources },
       agentTools: { gitSync, soulWriter, soulLoader, teamAssets },
       skillTools: { ...skillTools, hiddenSkillNames, teamAssets },
+      integrationAuthoring: { gitSync, soulWriter, releaseTrust: oimReleaseTrust },
       github: githubTools,
       slack: slackTools,
       google: googleTools,
       network: networkTools,
       tasks: { businessId: DEPLOYMENT_BUSINESS_ID, tasks: taskRepo },
+      integrationKnowledge: {
+        businessId: DEPLOYMENT_BUSINESS_ID,
+        integrations: () => soulLoader.integrations.values(),
+        oimRuntimeHost,
+        checkpoints: new PgOimKnowledgeCheckpointStore(pool),
+        sink: new PgKnowledgeEmissionSink(knowledgeSourceStore, knowledgeIndexStore),
+        links: providerIdentityLinkPort(new ExternalLinkKnowledgeIdentityMap(externalIdentityRepo)),
+        // Verified-email matching stays off until an operator names a domain: an address a
+        // provider calls verified is still an address a stranger's account may hold.
+        policy: { verifiedEmailDomains: [] },
+      },
       platform: {
         events: domainEventEmitter,
         soulLoader,
@@ -1132,11 +1223,7 @@ async function boot() {
         teamAssets,
         delegateToAgent: agentDelegation.delegate,
         spawnSubagent: subagentSpawning.spawn,
-        onRoutinesChanged: async () => {
-          await soulLoader.reload();
-          // Ticks immediately so a newly-authored/edited schedule is reconciled without waiting up
-          await scheduleDispatcher.tick();
-        },
+        onRoutinesChanged,
         // The Soul write gateway reloads the catalog; the guard pipeline is rebuilt separately
         // because every Turn's Context reads this service, not the published bundle.
         onGuardrailsChanged: async () => {
@@ -1146,16 +1233,43 @@ async function boot() {
     });
 
     // who connects a provider expects its Tools without an API restart.
+    // OIM operations name a credential *slot*, not a Credential: which Connection fills it is a
+    // live decision per call, because one installed Integration may hold several — the
+    // organization's bot account and a person's own — and the operation's identity mode decides
+    // which of them this caller may spend.
+    const oimConnections = new OimOperationConnectionResolver(
+      new ConnectionResolver(connectionStore, oimConnectionAccess)
+    );
+
     const declarativeTools = new DeclarativeToolSync({
       registry: toolRegistry,
+      connections: oimConnections,
+      rateLimits: new OimRateLimitStore(transactionPort(pool)),
+      authorizeOimIntegration: oimRuntimeHost.authorizeIntegration,
+      verifiedOimHooks: oimRuntimeHost,
+      trackConnectionBroker: connectionLeases.track,
       integrations: () => soulLoader.integrations.values(),
       businessId: DEPLOYMENT_BUSINESS_ID,
       effects: slackEffects,
       secrets: async () => secretsService,
+      files: oimFiles(fileService),
       // Manifests are authored from chat, so the destination is untrusted right up to the socket.
       http: new GuardedEgressHttp(new FetchEgressHttp()),
       mutationGuard,
       logger: () => app.log,
+    });
+    const oimWebhookLifecycle = new OimWebhookLifecycle({
+      connections: connectionStore,
+      secrets: secretsService,
+      http: new GuardedEgressHttp(new FetchEgressHttp()),
+      manifestFor: (integrationId) =>
+        [...soulLoader.integrations.entries()]
+          .map(([slug, integration]) =>
+            integration.oimManifest === undefined
+              ? undefined
+              : { slug, manifest: integration.oimManifest }
+          )
+          .find((installed) => installed?.manifest.metadata.id === integrationId),
     });
 
     // with, so a worker credential is a key to a Run rather than a principal of its own.
@@ -1281,7 +1395,6 @@ async function boot() {
       // without restarting it.
       llmConfig: () => soulLoader.llmConfig,
       pricingOverrides: () => obsConfig.pricingOverrides,
-      observabilityConfig: () => obsConfig,
       taskReconcileSignals: async () => {
         const businessName =
           typeof soulLoader.manifest?.businessName === "string"
@@ -1328,6 +1441,7 @@ async function boot() {
       userRepo,
       setupAdminCreator,
       userAdminRepo: userRepo,
+      onUserDisabled: (userId) => userOffboarding.disableUser(userId),
       passwordWriteRepo: userRepo,
       profileWriteRepo: userRepo,
       userInviteRepo: new PgUserInviteRepo(pool),
@@ -1335,7 +1449,6 @@ async function boot() {
       identity: {
         apiClientRepo,
         externalIdentityRepo,
-        externalIdentityUnlinker,
         channelBind,
         channelBindSecrets: secretsService,
       },
@@ -1347,6 +1460,7 @@ async function boot() {
       bundledSkills,
       disabledBundledSkills,
       bundledIntegrations,
+      bundledOimPackages,
       slackBind: { integrations: channelIntegrations, businessId: DEPLOYMENT_BUSINESS_ID },
       githubInstall: {
         integrations: channelIntegrations,
@@ -1391,6 +1505,24 @@ async function boot() {
       integrationRegistry: { load: () => loadIntegrationRegistry(app.log) },
       kvService,
       taskStore: taskRepo,
+      connectionStore,
+      oimWebhookLifecycle,
+      oimConnectionAccess,
+      oimReleaseTrust,
+      routineOwnerAuthority,
+      systemRoutes: {
+        onPublicOriginsChanged: (apiOrigin) => oimWebhookLifecycle.reconcile(apiOrigin),
+      },
+      webhookInbox,
+      oimIngress: {
+        resolve: oimIngressResolver(soulLoader, DEPLOYMENT_BUSINESS_ID),
+        binding: oimWebhookBinding(connectionStore),
+        callbackUrl: (slug, connectionId) =>
+          oimIngressCallbackUrl(publicOrigins.current().apiOrigin, slug, connectionId),
+        readSecret: (ref) => resolveSecretRef(ref, secretsService),
+        encryptPayload: (raw) => oimDeliveryCipher.encrypt(raw),
+        inbox: webhookInbox,
+      },
       fileService,
       fileKnowledge: fileKnowledgeBridge,
       ...buildCurator({
@@ -1462,7 +1594,6 @@ async function boot() {
           bind: channelBind,
         }),
         runDeliveries: channelRunDeliveries,
-        commandResponses: slackCommandResponses,
         toolApprovals,
         cancelRun: runCancel,
         surfaceStore: surfaceArtifactStore,
@@ -1472,52 +1603,6 @@ async function boot() {
         // redeemed inside an authenticated web session, so it must point at the origin users
         bindLinkUrl: (token) =>
           `${publicOrigins.current().webOrigin}/link-channel?token=${encodeURIComponent(token)}`,
-      }),
-      slackHome: (log: FastifyBaseLogger) => ({
-        businessId: DEPLOYMENT_BUSINESS_ID,
-        integrations: channelIntegrations,
-        identity: new IngressIdentityResolver({
-          users: userRepo,
-          log,
-          mappings: externalIdentityRepo,
-          bind: channelBind,
-        }),
-        projection: new SlackHomeProjectionService({
-          webOrigin: publicOrigins.current().webOrigin,
-          toolApprovals,
-          routineApprovals,
-          tasks: taskRepo,
-          conversations: conversationRepo,
-          conversationTurns: conversationStore,
-          agents: {
-            list: () => listAgents(soulLoader),
-            mayInvoke: async (agent, principal) =>
-              (
-                await teamAssets.access(
-                  "agent",
-                  agent.name,
-                  principal,
-                  agent.frontmatter.ownership as Parameters<typeof teamAssets.access>[3]
-                )
-              ).levels.includes("use"),
-          },
-        }),
-        bindLinkUrl: (token) =>
-          `${publicOrigins.current().webOrigin}/link-channel?token=${encodeURIComponent(token)}`,
-        unlinkedUrl: publicOrigins.current().webOrigin,
-      }),
-      slackEvents: (log: FastifyBaseLogger) => ({
-        businessId: DEPLOYMENT_BUSINESS_ID,
-        integrations: channelIntegrations,
-        identity: new IngressIdentityResolver({
-          users: userRepo,
-          log,
-          mappings: externalIdentityRepo,
-          bind: channelBind,
-        }),
-        events,
-        eventTriggers,
-        domainEvents: domainEventEmitter,
       }),
       runEvents: {
         events: runEventStore,
@@ -1543,9 +1628,7 @@ async function boot() {
         approvals: approvalsRepo,
         ownershipApprovals: teamAssets,
         toolApprovals,
-        routineApprovals,
         runs: runReader,
-        runCommands,
         healthProbes: [
           postgresProbe(pool),
           queueProbe(boss),
@@ -1553,6 +1636,14 @@ async function boot() {
           soulPublicationProbe(pool),
           llmProbe(llmService, { reachability: modelReachability(llmService) }),
         ],
+        // strand the Run, so the attempt fails loudly instead. Tool-call Approvals — the ones
+        // this deployment actually produces — are resolved in-process and never reach here.
+        enqueueWake: async () => {
+          throw new OperationalNotImplementedError(
+            "Resuming a Routine-state Approval requires the Routine wake worker, which this " +
+              "deployment does not run."
+          );
+        },
         guardrailsConfig: () => soulLoader.guardrailsConfig,
         teamMigrationReport: async (businessId) => {
           const present = await pool.query<{ exists: boolean }>(
@@ -1686,6 +1777,13 @@ async function boot() {
     // accepts Runs, so the Worker's and Integration Worker's credentials cannot wait on a human
     await provisionWorkerCredential(apiClientRepo, process.env, app.log);
     await provisionIntegrationWorkerCredential(apiClientRepo, process.env, app.log);
+    await bootstrapFromEnv({
+      userRepo,
+      setupAdminCreator,
+      secretsService,
+      soulPath,
+      log: app.log,
+    });
 
     const soulDoctor = buildSoulDoctor({
       pool,
@@ -1715,6 +1813,12 @@ async function boot() {
     await registerCuratorSweepSchedule(boss);
     await registerSoulDoctorSchedule(boss, soulDoctor, { log: app.log });
     await registerObsPruneSchedule(boss, obsConfig.retentionDays * 24 * 60 * 60 * 1000);
+    await registerOimOAuthRefreshSchedule(boss, {
+      businessId: DEPLOYMENT_BUSINESS_ID,
+      connections: connectionStore,
+      secrets: secretsService,
+      soulLoader,
+    });
     // Every Soul commit publishes a bundle, so this table grows for the life of the deployment.
     await registerSoulBundlePruneSchedule(boss, bundleRetentionMs(process.env));
     await registerSpendAlertSchedule(boss, obsConfig.spendAlertUsd);
@@ -1803,12 +1907,81 @@ async function boot() {
         });
     }, 5_000);
     soulPublicationDrainInterval.unref?.();
+    const webhookInboxWorker = startWebhookInboxWorker({
+      inbox: webhookInbox,
+      soulLoader,
+      decryptPayload: (encrypted) => oimDeliveryCipher.decrypt(encrypted),
+      hookRunnerFor: oimRuntimeHost.hookRunnerFor,
+      dispatch: oimEventDispatcher({
+        authorizeEvent: oimRuntimeHost.authorizeEvent,
+        eventTriggers,
+      }),
+      newEventId: randomUUID,
+      log: app.log,
+    });
+    const oimPollingWorker = startOimPollingWorker({
+      connections: connectionStore,
+      connectionAccess: oimConnectionAccess,
+      authorizeIntegration: oimRuntimeHost.authorizeIntegration,
+      trackConnectionBroker: connectionLeases.track,
+      state: pollingIngress,
+      secrets: new SecretBroker({
+        provider: secretsServiceProvider(secretsService),
+        authorizer: oimPollingSecretAuthorizer({
+          businessId: DEPLOYMENT_BUSINESS_ID,
+          connections: connectionStore,
+          connectionAccess: oimConnectionAccess,
+          authorizeIntegration: oimRuntimeHost.authorizeIntegration,
+          soulLoader,
+        }),
+      }),
+      http: new GuardedEgressHttp(new FetchEgressHttp()),
+      soulLoader,
+      inbox: webhookInbox,
+      encryptPayload: (raw) => oimDeliveryCipher.encrypt(raw),
+      log: app.log,
+    });
+    const oimReleaseMaintenance = new OimReleaseMaintenanceWorker(
+      {
+        actorId: "system",
+        businessId: DEPLOYMENT_BUSINESS_ID,
+        http: new GuardedEgressHttp(new FetchEgressHttp()),
+        integrations: () => soulLoader.integrations.values(),
+        store: oimReleaseTrustStore,
+        releaseTrust: oimReleaseTrust,
+        applyPatch: (input) =>
+          updateIntegrationFromSource(input, {
+            soulLoader,
+            soulWriter,
+            bundledSlugs: new Set(bundledIntegrations.keys()),
+            actor: SYSTEM_SOUL_COMMIT_ACTOR,
+            actorId: "system",
+            releaseTrust: oimReleaseTrust,
+          }),
+      },
+      app.log
+    );
+    oimReleaseMaintenance.start();
+    const oimUserOffboarding = new OimUserOffboardingReconciler(
+      { users: userRepo, offboarding: userOffboarding },
+      app.log
+    );
+    oimUserOffboarding.start();
     await registerConnectorSync(boss, {
       registry: buildDefaultRegistry(),
       state: new PgConnectorStateRepo(pool),
       service: knowledgeService,
       activity: activityService,
     });
+    await registerSlackKnowledgeSync(boss, {
+      integrations: integrationStore,
+      secrets: secretsService,
+      checkpoints: new PgSlackKnowledgeCheckpointStore(pool),
+      sink: new PgKnowledgeEmissionSink(knowledgeSourceStore, knowledgeIndexStore),
+      identity: new ExternalLinkKnowledgeIdentityMap(externalIdentityRepo),
+      activity: activityService,
+    });
+
     app.listen({ port, host: "0.0.0.0" }, (err) => {
       if (err) {
         app.log.error(err);
@@ -1832,6 +2005,10 @@ async function boot() {
         stopDelivery();
         stopFileBlobCleanup();
         clearInterval(soulPublicationDrainInterval);
+        webhookInboxWorker.stop();
+        oimPollingWorker.stop();
+        await oimReleaseMaintenance.stop();
+        await oimUserOffboarding.stop();
         await app.close();
         await boss.stop({ graceful: false });
         await metricsSink?.flush();

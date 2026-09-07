@@ -542,6 +542,72 @@ describe("BundleRoutineAgentPort", () => {
     });
   });
 
+  it("parks on the provider retry wait already registered by the Tool host", async () => {
+    const tools: ExposedTool[] = [
+      {
+        name: "lookup",
+        description: "Looks something up.",
+        inputSchema: { type: "object", properties: {}, additionalProperties: false },
+      },
+    ];
+    invoke = vi.fn<ModelPort["invoke"]>(async () => ({
+      requestId: "req-1",
+      output: {
+        kind: "tool_calls",
+        calls: [{ callId: "call-1", name: "lookup", arguments: {} }],
+      },
+      usage: { inputTokens: 10, outputTokens: 4 },
+    }));
+
+    const result = await port({
+      tools: {
+        dispatch: async (call) => ({
+          status: "awaiting_retry",
+          callId: call.callId,
+          waitId: "wait-retry-1",
+        }),
+      },
+      catalog: async () => tools,
+    }).execute(request());
+
+    expect(result).toEqual({
+      kind: "waiting",
+      reason: "provider_retry_wait",
+      waitId: "wait-retry-1",
+      callId: "call-1",
+    });
+  });
+
+  it("parks an indeterminate Tool effect for reconciliation", async () => {
+    const tools: ExposedTool[] = [
+      {
+        name: "lookup",
+        description: "Looks something up.",
+        inputSchema: { type: "object", properties: {}, additionalProperties: false },
+      },
+    ];
+    invoke = vi.fn<ModelPort["invoke"]>(async () => ({
+      requestId: "req-1",
+      output: {
+        kind: "tool_calls",
+        calls: [{ callId: "call-1", name: "lookup", arguments: {} }],
+      },
+      usage: { inputTokens: 10, outputTokens: 4 },
+    }));
+
+    const result = await port({
+      tools: {
+        dispatch: async (call) => ({ status: "needs_reconciliation", callId: call.callId }),
+      },
+      catalog: async () => tools,
+    }).execute(request());
+
+    expect(result).toEqual({
+      kind: "unavailable",
+      reason: "indeterminate_tool_effect",
+    });
+  });
+
   it("reports a cancelling Run as cancelled rather than answering it", async () => {
     runStatus = "cancelling";
 

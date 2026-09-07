@@ -6,6 +6,14 @@ export interface ToolTargetRef {
   readonly domain?: string;
 }
 
+export interface ToolConnectionBinding {
+  readonly connectionId: string;
+  readonly integrationId: string;
+  readonly credentialSlot: string;
+  readonly principalKind?: string;
+  readonly principalId?: string;
+}
+
 export interface ToolIntent {
   readonly intentId: string;
   readonly businessId: string;
@@ -16,8 +24,14 @@ export interface ToolIntent {
   readonly action: string;
   readonly targetRefs: readonly ToolTargetRef[];
   readonly arguments: unknown;
+  /** The person whose File ACL permits an OIM upload or receives an OIM binary response. */
+  readonly filePrincipalId?: string;
   readonly destination?: string;
   readonly credentialRef?: string;
+  readonly connection?: ToolConnectionBinding;
+  /** A second bounded credential for an operation that declares `secondaryCredential`. */
+  readonly secondaryCredentialRef?: string;
+  readonly secondaryConnection?: ToolConnectionBinding;
   readonly idempotencyKey: string;
 }
 
@@ -46,6 +60,21 @@ function optionalString(value: unknown): value is string | undefined {
   return value === undefined || nonEmptyString(value);
 }
 
+function connectionBinding(value: unknown): value is ToolConnectionBinding | undefined {
+  if (value === undefined) return true;
+  if (
+    !record(value) ||
+    !nonEmptyString(value.connectionId) ||
+    !nonEmptyString(value.integrationId) ||
+    !nonEmptyString(value.credentialSlot) ||
+    !optionalString(value.principalKind) ||
+    !optionalString(value.principalId)
+  ) {
+    return false;
+  }
+  return (value.principalKind === undefined) === (value.principalId === undefined);
+}
+
 export function normalizeToolIntent(input: unknown): ToolIntent {
   if (
     !record(input) ||
@@ -57,8 +86,22 @@ export function normalizeToolIntent(input: unknown): ToolIntent {
     !nonEmptyString(input.toolVersion) ||
     !nonEmptyString(input.action) ||
     !Array.isArray(input.targetRefs) ||
+    !optionalString(input.filePrincipalId) ||
     !optionalString(input.destination) ||
     !optionalString(input.credentialRef) ||
+    !optionalString(input.secondaryCredentialRef) ||
+    !connectionBinding(input.connection) ||
+    !connectionBinding(input.secondaryConnection) ||
+    (input.connection !== undefined &&
+      (input.credentialRef === undefined ||
+        !input.credentialRef.startsWith("secret://") ||
+        input.destination === undefined)) ||
+    ((input.secondaryCredentialRef !== undefined || input.secondaryConnection !== undefined) &&
+      (input.credentialRef === undefined || input.connection === undefined)) ||
+    (input.secondaryConnection !== undefined &&
+      (input.secondaryCredentialRef === undefined ||
+        !input.secondaryCredentialRef.startsWith("secret://") ||
+        input.destination === undefined)) ||
     !nonEmptyString(input.idempotencyKey)
   ) {
     throw new ToolIntentError("invalid_intent");
@@ -93,8 +136,16 @@ export function normalizeToolIntent(input: unknown): ToolIntent {
     action: input.action,
     targetRefs: Object.freeze(targetRefs),
     arguments: structuredClone(input.arguments),
+    ...(input.filePrincipalId === undefined ? {} : { filePrincipalId: input.filePrincipalId }),
     destination: input.destination,
     credentialRef: input.credentialRef,
+    ...(input.connection === undefined
+      ? {}
+      : { connection: Object.freeze({ ...input.connection }) }),
+    secondaryCredentialRef: input.secondaryCredentialRef,
+    ...(input.secondaryConnection === undefined
+      ? {}
+      : { secondaryConnection: Object.freeze({ ...input.secondaryConnection }) }),
     idempotencyKey: input.idempotencyKey,
   };
   intentDigest(intent);
@@ -108,7 +159,11 @@ export function intentDigest(intent: ToolIntent): string {
     action: intent.action,
     targetRefs: intent.targetRefs,
     arguments: intent.arguments,
+    filePrincipalId: intent.filePrincipalId ?? null,
     destination: intent.destination ?? null,
     credentialRef: intent.credentialRef ?? null,
+    connection: intent.connection ?? null,
+    secondaryCredentialRef: intent.secondaryCredentialRef ?? null,
+    secondaryConnection: intent.secondaryConnection ?? null,
   });
 }

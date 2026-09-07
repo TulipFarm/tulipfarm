@@ -15,6 +15,7 @@ interface KnowledgeSourceRow {
   external_id: string;
   external_tenant_id: string;
   owner_external_id: string;
+  source_locator: KnowledgeSourceRecord["locator"] | null;
   revision: string;
   classification: string[];
   status: string;
@@ -27,6 +28,7 @@ interface KnowledgeSourceRow {
   provenance_captured_at: Date;
   provenance_content_hash: string;
   provenance_checkpoint: string | null;
+  provenance_connection_id: string | null;
   last_synced_at: Date;
 }
 
@@ -63,6 +65,7 @@ function rowToRecord(row: KnowledgeSourceRow): KnowledgeSourceRecord {
     externalId: row.external_id,
     externalTenantId: row.external_tenant_id,
     ownerExternalId: row.owner_external_id,
+    ...(row.source_locator === null ? {} : { locator: row.source_locator }),
     revision: row.revision,
     classification: row.classification,
     status: row.status as KnowledgeSourceRecord["status"],
@@ -73,6 +76,9 @@ function rowToRecord(row: KnowledgeSourceRow): KnowledgeSourceRecord {
       capturedAt: row.provenance_captured_at.toISOString(),
       contentHash: row.provenance_content_hash,
       ...(row.provenance_checkpoint === null ? {} : { checkpoint: row.provenance_checkpoint }),
+      ...(row.provenance_connection_id === null
+        ? {}
+        : { connectionId: row.provenance_connection_id }),
     },
     lastSyncedAt: row.last_synced_at.toISOString(),
   };
@@ -121,18 +127,20 @@ export class PgKnowledgeSourceStore implements MutableKnowledgeSourceStore {
     await this.q.query(
       `INSERT INTO knowledge_source_records
          (source_id, business_id, integration_id, provider, external_id, external_tenant_id,
-          owner_external_id, revision, classification, status, verification,
+          owner_external_id, source_locator, revision, classification, status, verification,
           access_control_mode, access_control_max_age_seconds, acl_revision, acl_captured_at,
           acl_principals, provenance_captured_at, provenance_content_hash, provenance_checkpoint,
+          provenance_connection_id,
           last_synced_at, created_at, updated_at)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9::text[],$10,$11,$12,$13,$14,$15,$16::jsonb,$17,$18,$19,
-               $20,now(),now())
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8::jsonb,$9,$10::text[],$11,$12,$13,$14,$15,$16,$17::jsonb,
+               $18,$19,$20,$21,$22,now(),now())
        ON CONFLICT (business_id, source_id) DO UPDATE SET
          integration_id = EXCLUDED.integration_id,
          provider = EXCLUDED.provider,
          external_id = EXCLUDED.external_id,
          external_tenant_id = EXCLUDED.external_tenant_id,
          owner_external_id = EXCLUDED.owner_external_id,
+         source_locator = EXCLUDED.source_locator,
          revision = EXCLUDED.revision,
          classification = EXCLUDED.classification,
          status = EXCLUDED.status,
@@ -145,6 +153,7 @@ export class PgKnowledgeSourceStore implements MutableKnowledgeSourceStore {
          provenance_captured_at = EXCLUDED.provenance_captured_at,
          provenance_content_hash = EXCLUDED.provenance_content_hash,
          provenance_checkpoint = EXCLUDED.provenance_checkpoint,
+         provenance_connection_id = EXCLUDED.provenance_connection_id,
          last_synced_at = EXCLUDED.last_synced_at,
          updated_at = now()`,
       [
@@ -155,6 +164,7 @@ export class PgKnowledgeSourceStore implements MutableKnowledgeSourceStore {
         record.externalId,
         record.externalTenantId,
         record.ownerExternalId,
+        record.locator === undefined ? null : JSON.stringify(record.locator),
         record.revision,
         record.classification,
         record.status,
@@ -167,6 +177,7 @@ export class PgKnowledgeSourceStore implements MutableKnowledgeSourceStore {
         record.provenance.capturedAt,
         record.provenance.contentHash,
         record.provenance.checkpoint ?? null,
+        record.provenance.connectionId ?? null,
         record.lastSyncedAt,
       ]
     );

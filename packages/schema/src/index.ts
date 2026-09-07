@@ -5,7 +5,7 @@ export {
   AUTONOMY_VALUES,
   validateAgentFrontmatter,
 } from "./agent";
-export { ajv } from "./ajv";
+export { ajv, compileJsonSchema } from "./ajv";
 export type {
   ArtifactCompanion,
   ArtifactKind,
@@ -111,6 +111,14 @@ export {
   validateGuardrailsConfig,
 } from "./guardrails";
 export { isRecord } from "./guards";
+export {
+  INTEGRATION_AUTHORING_TOOL_DECLARATIONS,
+  INTEGRATION_DRAFT_CREATE_TOOL_DECLARATION,
+  INTEGRATION_DRAFT_REVIEW_TOOL_DECLARATION,
+  INTEGRATION_GET_TOOL_DECLARATION,
+  INTEGRATION_LIST_TOOL_DECLARATION,
+  OIM_MANIFEST_ARGUMENT_MAX_BYTES,
+} from "./integration-authoring-tools";
 export type { LegacyIntegrationManifest } from "./integration-manifest";
 export {
   LegacyIntegrationManifestSchema,
@@ -214,6 +222,80 @@ export {
   NETWORK_TOOL_DECLARATIONS,
   WEB_FETCH_TOOL_DECLARATION,
 } from "./network-tools";
+export type {
+  OimAuth,
+  OimCompanionFile,
+  OimConformanceClaim,
+  OimConnection,
+  OimDeduplication,
+  OimEvents,
+  OimEventType,
+  OimFixtureCase,
+  OimFixtureSuite,
+  OimHandshake,
+  OimHook,
+  OimKnowledge,
+  OimKnowledgeAcl,
+  OimKnowledgeAclEntry,
+  OimKnowledgeContent,
+  OimKnowledgeDeletion,
+  OimKnowledgeIdentity,
+  OimKnowledgeList,
+  OimKnowledgePrincipalKind,
+  OimKnowledgeSourceKind,
+  OimManifest,
+  OimOperation,
+  OimPackageContent,
+  OimPagination,
+  OimPollingIngress,
+  OimVerification,
+} from "./oim";
+export {
+  OIM_CONFORMANCE_CASES,
+  OIM_CONNECTION_HEALTH_STATES,
+  OIM_CORE_1_1_FEATURES,
+  OIM_CORE_1_2_FEATURES,
+  OIM_CORE_PROFILE_VERSIONS,
+  OIM_CREDENTIAL_KINDS,
+  OIM_DEDUPLICATION_KINDS,
+  OIM_DELIVERY_STATES,
+  OIM_EFFECT_CLASSES,
+  OIM_FILE_ROLES,
+  OIM_HANDSHAKE_KINDS,
+  OIM_HOOK_KINDS,
+  OIM_IDENTITY_MODES,
+  OIM_KNOWLEDGE_ACL_MODES,
+  OIM_KNOWLEDGE_CURSOR_KINDS,
+  OIM_KNOWLEDGE_DELETION_KINDS,
+  OIM_KNOWLEDGE_PRINCIPAL_KINDS,
+  OIM_PROFILE_VERSIONS,
+  OIM_SIGNATURE_ENCODINGS,
+  OIM_VERIFICATION_SCHEMES,
+  OIM_VERSION,
+  OimConformanceClaimSchema,
+  OimConnectionSchema,
+  OimFixtureSuiteSchema,
+  OimManifestSchema,
+  type OimMultipartPart,
+  oimCompatibilityIssues,
+  oimConformanceIssues,
+  oimConnectionIssues,
+  oimFileDigest,
+  oimGraphqlOperationKind,
+  oimManifestIssues,
+  oimOriginAllowed,
+  oimOriginPlaceholder,
+  oimPackageDigest,
+  oimPackageIssues,
+  oimToolId,
+  PATH_CREDENTIAL_PLACEHOLDER,
+  parseOimFixtureSuite,
+  parseOimManifest,
+  validateOimConformanceClaim,
+  validateOimConnection,
+  validateOimFixtureSuite,
+  validateOimManifest,
+} from "./oim";
 export type { PrincipalKind } from "./principals";
 export { PRINCIPAL_KINDS } from "./principals";
 export type {

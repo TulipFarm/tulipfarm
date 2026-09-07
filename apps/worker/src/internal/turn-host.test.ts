@@ -81,6 +81,43 @@ describe("HttpTurnHost", () => {
     ).resolves.toEqual({ status: "denied", callId: "call-9", reason: "policy" });
   });
 
+  it("keeps a provider retry wait opaque to the model", async () => {
+    const { turns } = host(() => json({ status: "awaiting_retry", waitId: "wait-retry-1" }));
+
+    await expect(
+      turns.dispatch({
+        businessId: "business-1",
+        runId: "run-1",
+        stateId: "invoke",
+        callId: "call-9",
+        name: "list_tasks",
+        arguments: {},
+      })
+    ).resolves.toEqual({
+      status: "awaiting_retry",
+      callId: "call-9",
+      waitId: "wait-retry-1",
+    });
+  });
+
+  it("preserves a Tool effect that needs reconciliation", async () => {
+    const { turns } = host(() => json({ status: "needs_reconciliation" }));
+
+    await expect(
+      turns.dispatch({
+        businessId: "business-1",
+        runId: "run-1",
+        stateId: "invoke",
+        callId: "call-9",
+        name: "create_order",
+        arguments: {},
+      })
+    ).resolves.toEqual({
+      status: "needs_reconciliation",
+      callId: "call-9",
+    });
+  });
+
   it("reads only 204 as an unfinished attempt — a missing Run still raises", async () => {
     const empty = host(() => new Response(null, { status: 204 }));
     await expect(empty.turns.findCompletion(REF)).resolves.toBeUndefined();

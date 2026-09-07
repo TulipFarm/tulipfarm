@@ -212,5 +212,13 @@ export function githubCompositeSecretProvider(
       if (isGitHubPersonalSecretRef(secretRef)) return personal.resolveCurrent(secretRef);
       return base.resolveCurrent(secretRef);
     },
+    async currentVersion(secretRef) {
+      const provider = isGitHubInstallationSecretRef(secretRef)
+        ? installation
+        : isGitHubPersonalSecretRef(secretRef)
+          ? personal
+          : base;
+      return provider.currentVersion?.(secretRef) ?? null;
+    },
   };
 }

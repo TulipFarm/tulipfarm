@@ -1,5 +1,5 @@
 import type { ToolDispatchRequest, ToolDispatchResult } from "@tulipfarm/agent-runtime";
-import type { HostedToolCall, TurnAuthority } from "@tulipfarm/tool-host";
+import type { HostedToolCall, HostedToolResult, TurnAuthority } from "@tulipfarm/tool-host";
 import { describe, expect, it } from "vitest";
 import type { LocalToolHost } from "./local-host";
 import { RoutingToolDispatch } from "./routing-dispatch";
@@ -35,7 +35,8 @@ class RecordingRemote {
 
 function localHost(
   names: readonly string[],
-  ready: (name: string) => Promise<boolean> = async () => true
+  ready: (name: string) => Promise<boolean> = async () => true,
+  result: HostedToolResult = { status: "succeeded", output: "local" }
 ): LocalToolHost & { calls: HostedToolCall[] } {
   const calls: HostedToolCall[] = [];
   return {
@@ -45,7 +46,7 @@ function localHost(
     dispatcher: {
       async dispatch(_authority, call) {
         calls.push(call);
-        return { status: "succeeded", output: "local" };
+        return result;
       },
     },
   };
@@ -75,6 +76,21 @@ describe("RoutingToolDispatch", () => {
       { callId: "call-kv_set", name: "kv_set", arguments: { a: 1 }, stateId: "invoke" },
     ]);
     expect(remote.calls).toEqual([]);
+  });
+
+  it("preserves a local Tool effect that needs reconciliation", async () => {
+    const local = localHost(["create_order"], async () => true, { status: "needs_reconciliation" });
+    const routing = new RoutingToolDispatch(
+      local,
+      { authority: async () => AUTHORITY },
+      new RecordingRemote(),
+      SILENT
+    );
+
+    await expect(routing.dispatch(request("create_order"))).resolves.toEqual({
+      status: "needs_reconciliation",
+      callId: "call-create_order",
+    });
   });
 
   it("leaves every unhosted Tool on the control-plane path", async () => {

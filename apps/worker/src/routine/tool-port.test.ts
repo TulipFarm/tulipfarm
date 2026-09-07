@@ -151,6 +151,249 @@ function port(): BrokerRoutineToolPort {
 }
 
 describe("BrokerRoutineToolPort", () => {
+  it("records the exact OIM Connection before reservation and delegates provider dispatch", async () => {
+    const oimDispatch = vi.fn<ToolAdapter["dispatch"]>(async () => ({ ok: true }));
+    const oim = {
+      prepare: vi.fn(async () => ({
+        kind: "ready" as const,
+        arguments: { body: "hello" },
+        adapterRef: "oim-http:weather",
+        adapter: { kind: "native" as const, dispatch: oimDispatch },
+        hostCredentials: true as const,
+        destination: "api.weather.test",
+        credentialRef: "secret://connections/east/token",
+        connection: {
+          connectionId: "connection-east",
+          integrationId: "weather",
+          credentialSlot: "token",
+          principalKind: "user",
+          principalId: "user-1",
+        },
+      })),
+    };
+    const subject = new BrokerRoutineToolPort({ effects, adapters: new Map(), oim });
+    const input = request({
+      plan: {
+        ...PLAN,
+        toolRef: { name: "weather.forecast", version: "1.0.0" },
+        action: "integration.weather.forecast",
+        arguments: { connection_id: "connection-east", body: "hello" },
+      },
+      bundle: bundle([
+        {
+          kind: "ToolContract",
+          document: contract({
+            toolId: "weather.forecast",
+            action: "integration.weather.forecast",
+            adapter: { kind: "native", ref: "oim-http:weather" },
+            allowedDestinations: ["api.weather.test"],
+          }),
+        },
+        {
+          kind: "Guardrail",
+          document: guardrail([
+            {
+              ...ALLOW_COMMENT,
+              actions: ["integration.weather.forecast"],
+              destinations: ["api.weather.test"],
+            },
+          ]),
+        },
+      ]),
+    });
+
+    await expect(subject.execute(input)).resolves.toEqual({ kind: "succeeded", output: null });
+    const effect = await effects.get(BUSINESS_ID, PLAN.effectId);
+    expect(effect?.intent.arguments).toEqual({ body: "hello" });
+    expect(effect?.intent.connection).toMatchObject({ connectionId: "connection-east" });
+    expect(oimDispatch).toHaveBeenCalledOnce();
+  });
+
+  it("refuses an OIM adapter that does not match the pinned ToolContract", async () => {
+    const subject = new BrokerRoutineToolPort({
+      effects,
+      adapters: new Map(),
+      oim: {
+        prepare: async () => ({
+          kind: "ready",
+          arguments: {},
+          adapterRef: "oim-http:other",
+          adapter: { kind: "native", dispatch },
+          hostCredentials: true,
+        }),
+      },
+    });
+    const input = request({
+      plan: {
+        ...PLAN,
+        toolRef: { name: "weather.forecast", version: "1.0.0" },
+        action: "integration.weather.forecast",
+      },
+      bundle: bundle([
+        {
+          kind: "ToolContract",
+          document: contract({
+            toolId: "weather.forecast",
+            action: "integration.weather.forecast",
+            adapter: { kind: "native", ref: "oim-http:weather" },
+          }),
+        },
+        { kind: "Guardrail", document: guardrail([]) },
+      ]),
+    });
+
+    await expect(subject.execute(input)).resolves.toEqual({
+      kind: "unavailable",
+      reason: "adapter_binding_mismatch",
+    });
+  });
+
+  it("resumes an authorized OIM effect only after its durable Retry-After wait", async () => {
+    const waits = new Map<
+      string,
+      {
+        status: string;
+        runId: string;
+        stateKey: string;
+        kind: string;
+        schemaRef: string;
+        deadlineAt: string;
+        createdAt: string;
+      }
+    >();
+    const retryWaits = {
+      register: vi.fn(
+        async (input: {
+          readonly id: string;
+          readonly runId: string;
+          readonly stateKey: string;
+          readonly kind: string;
+          readonly schemaRef: string;
+          readonly deadlineAt: string;
+          readonly createdAt: string;
+        }) => {
+          waits.set(input.id, {
+            status: "pending",
+            runId: input.runId,
+            stateKey: input.stateKey,
+            kind: input.kind,
+            schemaRef: input.schemaRef,
+            deadlineAt: input.deadlineAt,
+            createdAt: input.createdAt,
+          });
+          throw new Error("simulated lost registration response");
+        }
+      ),
+      find: vi.fn(async (_businessId: string, waitId: string) => waits.get(waitId) ?? null),
+    };
+    const oimDispatch = vi
+      .fn<ToolAdapter["dispatch"]>()
+      .mockRejectedValueOnce(
+        new AdapterDispatchError("before_dispatch", "provider_rate_limited", true, undefined, 5_000)
+      )
+      .mockResolvedValueOnce({ ok: true });
+    const oim = {
+      prepare: vi.fn(async () => ({
+        kind: "ready" as const,
+        arguments: {},
+        adapterRef: "oim-http:weather",
+        adapter: { kind: "native" as const, dispatch: oimDispatch },
+        hostCredentials: true as const,
+      })),
+    };
+    const input = request({
+      plan: {
+        ...PLAN,
+        toolRef: { name: "weather.forecast", version: "1.0.0" },
+        action: "integration.weather.forecast",
+        destination: "weather",
+        arguments: {},
+      },
+      bundle: bundle([
+        {
+          kind: "ToolContract",
+          document: contract({
+            toolId: "weather.forecast",
+            action: "integration.weather.forecast",
+            inputSchema: { type: "object", additionalProperties: false },
+            outputSchema: {
+              type: "object",
+              properties: { ok: { type: "boolean" } },
+              required: ["ok"],
+              additionalProperties: false,
+            },
+            riskClass: "low",
+            mutating: false,
+            allowedDestinations: ["weather"],
+            retry: { maxAttempts: 2, safeToRetry: true },
+            adapter: { kind: "native", ref: "oim-http:weather" },
+          }),
+        },
+        {
+          kind: "Guardrail",
+          document: guardrail([
+            {
+              ...ALLOW_COMMENT,
+              actions: ["integration.weather.forecast"],
+              destinations: ["weather"],
+            },
+          ]),
+        },
+      ]),
+    });
+
+    const firstWorker = new BrokerRoutineToolPort({
+      effects,
+      adapters: new Map(),
+      oim,
+      retryWaits,
+    });
+    await expect(firstWorker.execute(input)).resolves.toMatchObject({
+      kind: "waiting",
+      waitId: expect.any(String),
+      effectId: PLAN.effectId,
+      attempt: 1,
+      notBefore: expect.any(String),
+      delayMs: 5_000,
+      reason: "provider_rate_limited",
+    });
+    expect((await effects.get(BUSINESS_ID, PLAN.effectId))?.state).toBe("authorized");
+    expect(oimDispatch).toHaveBeenCalledOnce();
+
+    const restartedWorker = new BrokerRoutineToolPort({
+      effects,
+      adapters: new Map(),
+      oim,
+      retryWaits,
+    });
+    const reserve = vi.spyOn(effects, "reserve");
+    reserve.mockClear();
+    await expect(restartedWorker.execute(input)).resolves.toMatchObject({
+      kind: "waiting",
+      waitId: expect.any(String),
+      effectId: PLAN.effectId,
+      attempt: 1,
+      notBefore: expect.any(String),
+      delayMs: 5_000,
+      reason: "provider_rate_limited",
+    });
+    expect(reserve).not.toHaveBeenCalled();
+    expect(oimDispatch).toHaveBeenCalledOnce();
+
+    const waitId = retryWaits.register.mock.calls[0]?.[0].id;
+    if (waitId === undefined) throw new Error("missing retry wait");
+    const pendingWait = waits.get(waitId);
+    if (pendingWait === undefined) throw new Error("missing persisted retry wait");
+    waits.set(waitId, { ...pendingWait, status: "satisfied" });
+    await expect(restartedWorker.execute(input)).resolves.toEqual({
+      kind: "succeeded",
+      output: null,
+    });
+    expect(reserve).not.toHaveBeenCalled();
+    expect(oimDispatch).toHaveBeenCalledTimes(2);
+    expect((await effects.get(BUSINESS_ID, PLAN.effectId))?.state).toBe("confirmed");
+  });
+
   it("authorizes against the Run's pinned policy, reserves the effect, then dispatches", async () => {
     expect(await port().execute(request())).toEqual({
       kind: "succeeded",

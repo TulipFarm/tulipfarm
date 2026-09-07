@@ -115,6 +115,25 @@ describe("AgentStateRunner", () => {
     });
   });
 
+  it("parks on a provider retry without registering a second wait", async () => {
+    const harness = runner({
+      status: "awaiting_retry",
+      waitId: "wait-retry-1",
+      callId: "call-1",
+      ...counters,
+    });
+    const result = await harness.agentState.execute(request(), LOOP_INPUT);
+
+    expect(harness.waits).toEqual([]);
+    expect(harness.transitions.at(-1)).toEqual({ from: "running", to: "waiting" });
+    expect(result).toEqual({
+      status: "waiting",
+      reason: "provider_retry_wait",
+      waitId: "wait-retry-1",
+      callId: "call-1",
+    });
+  });
+
   it("settles the State when input is required for a later Chat Turn", async () => {
     const harness = runner({
       status: "input_required",
@@ -176,6 +195,21 @@ describe("AgentStateRunner", () => {
 
     expect(harness.transitions.at(-1)).toEqual({ from: "running", to: "needs_reconciliation" });
     expect(result).toMatchObject({ status: "needs_reconciliation" });
+  });
+
+  it("preserves an indeterminate Tool effect as needing reconciliation", async () => {
+    const harness = runner({
+      status: "needs_reconciliation",
+      ...counters,
+    });
+
+    const result = await harness.agentState.execute(request(), LOOP_INPUT);
+
+    expect(harness.transitions.at(-1)).toEqual({
+      from: "running",
+      to: "needs_reconciliation",
+    });
+    expect(result).toEqual({ status: "needs_reconciliation" });
   });
 
   it("still reports needs_reconciliation when transition to needs_reconciliation hits a state conflict", async () => {

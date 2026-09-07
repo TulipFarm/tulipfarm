@@ -255,6 +255,9 @@ export class TurnDriver {
         );
         return { status: "waiting" };
       }
+      if (result.reason === "provider_retry_wait") {
+        return { status: "waiting" };
+      }
       await events.emit(
         "approval.requested",
         { waitId: result.waitId, intentId: result.approvalId, callId: result.callId },

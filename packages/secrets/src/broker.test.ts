@@ -1,6 +1,6 @@
 import { inspect } from "node:util";
-import { beforeEach, describe, expect, it } from "vitest";
-import { SecretBroker, type SecretBrokerEvent } from "./broker";
+import { beforeEach, describe, expect, expectTypeOf, it } from "vitest";
+import { SecretBroker, type SecretBrokerEvent, type SecretLeaseRequest } from "./broker";
 import { SecretLeakError, SecretLeaseDeniedError, SecretNotSerializableError } from "./lease";
 import { inMemorySecretProvider } from "./providers";
 
@@ -16,8 +16,18 @@ const SCOPE = {
   purpose: "create issue",
 } as const;
 
+const CONNECTION_SCOPE = {
+  ...SCOPE,
+  secretRef: "secret://github-personal-token",
+  connectionId: "connection-github-personal",
+  credentialSlot: "access_token",
+} as const;
+
 function harness(options: { allowed?: boolean; maxTtlMs?: number } = {}) {
-  const provider = inMemorySecretProvider({ [SCOPE.secretRef]: PLAINTEXT });
+  const provider = inMemorySecretProvider({
+    [SCOPE.secretRef]: PLAINTEXT,
+    [CONNECTION_SCOPE.secretRef]: PLAINTEXT,
+  });
   const events: SecretBrokerEvent[] = [];
   let clock = 1_000;
   const broker = new SecretBroker({
@@ -43,6 +53,37 @@ function harness(options: { allowed?: boolean; maxTtlMs?: number } = {}) {
 }
 
 describe("SecretBroker.lease", () => {
+  it("reserves Connection scopes for leaseConnection", () => {
+    expectTypeOf<typeof CONNECTION_SCOPE>().not.toMatchTypeOf<SecretLeaseRequest["scope"]>();
+  });
+
+  it("leases distinct Connection slots as one callback-only credential set", async () => {
+    const secondScope = {
+      ...CONNECTION_SCOPE,
+      secretRef: "secret://github-personal-refresh-token",
+      credentialSlot: "refresh_token",
+    } as const;
+    const broker = new SecretBroker({
+      provider: inMemorySecretProvider({
+        [CONNECTION_SCOPE.secretRef]: PLAINTEXT,
+        [secondScope.secretRef]: "refresh-live-abcdef",
+      }),
+      authorizer: { authorize: async () => ({ allowed: true as const }) },
+    });
+
+    const lease = await broker.leaseConnectionSet({
+      access_token: { scope: CONNECTION_SCOPE },
+      refresh_token: { scope: secondScope },
+    });
+
+    await expect(
+      lease.use(async (credentials) => ({
+        access: credentials.access_token,
+        refresh: credentials.refresh_token,
+      }))
+    ).rejects.toBeInstanceOf(SecretLeakError);
+  });
+
   it("denies by default when authorization fails, without naming the plaintext", async () => {
     const { broker, events } = harness({ allowed: false });
     const error = await broker.lease({ scope: SCOPE }).catch((err: unknown) => err);
@@ -105,11 +146,9 @@ describe("SecretLease.use", () => {
     expect(outcomes.filter((entry) => entry.status === "rejected")).toHaveLength(1);
   });
 
-  it("serves the rotated value on the next invocation", async () => {
+  it("revokes an existing lease when its Secret revision changes", async () => {
     const { broker, provider } = harness();
     const lease = await broker.lease({ scope: SCOPE, maxUses: 2 });
-    // The callback reports what it saw rather than returning it: echoing the Credential back is a
-    // leak the broker refuses, so equality is asserted inside the scope.
     await expect(lease.use(async (secret) => secret === PLAINTEXT)).resolves.toBe(true);
     provider.set(SCOPE.secretRef, "tok-live-rotated");
     await expect(lease.use(async (secret) => secret === "tok-live-rotated")).resolves.toBe(true);
@@ -134,6 +173,15 @@ describe("SecretLease.use", () => {
     });
   });
 
+  it("denies every outstanding lease once its Connection is revoked", async () => {
+    const { broker } = harness();
+    const lease = await broker.leaseConnection({ scope: CONNECTION_SCOPE, maxUses: 5 });
+    broker.revokeConnection(CONNECTION_SCOPE.connectionId);
+    await expect(lease.use(async (secret) => secret)).rejects.toMatchObject({
+      reason: "revoked",
+    });
+  });
+
   it("denies a lease that outlived the broker, as after a crash or restart", async () => {
     const { broker } = harness();
     const lease = await broker.lease({ scope: SCOPE, maxUses: 5 });
@@ -149,6 +197,72 @@ describe("SecretLease.use", () => {
     await expect(
       lease.use(async (secret) => secret, { ...SCOPE, targetId: "acme/other" })
     ).rejects.toMatchObject({ reason: "scope_mismatch" });
+  });
+
+  it("cannot use one Connection or credential slot through another lease", async () => {
+    const { broker } = harness();
+    const lease = await broker.leaseConnection({ scope: CONNECTION_SCOPE });
+    await expect(
+      lease.use(async () => "ok", { ...CONNECTION_SCOPE, connectionId: "connection-other" })
+    ).rejects.toMatchObject({ reason: "scope_mismatch" });
+    await expect(
+      lease.use(async () => "ok", { ...CONNECTION_SCOPE, credentialSlot: "refresh_token" })
+    ).rejects.toMatchObject({ reason: "scope_mismatch" });
+  });
+
+  it("requires durable revisions for Connection leases", async () => {
+    const events: SecretBrokerEvent[] = [];
+    const broker = new SecretBroker({
+      provider: {
+        resolveCurrent: async () => ({ value: PLAINTEXT }),
+      },
+      authorizer: { authorize: async () => ({ allowed: true }) },
+      onEvent: (event) => events.push(event),
+    });
+
+    await expect(broker.leaseConnection({ scope: CONNECTION_SCOPE })).rejects.toMatchObject({
+      reason: "not_authorized",
+    });
+    expect(events).toMatchObject([{ type: "secret.lease.denied", reason: "not_authorized" }]);
+  });
+
+  it("authorizes before checking the Connection credential revision", async () => {
+    let revisionReads = 0;
+    const events: SecretBrokerEvent[] = [];
+    const broker = new SecretBroker({
+      provider: {
+        resolveCurrent: async () => ({ value: PLAINTEXT }),
+        currentVersion: async () => {
+          revisionReads += 1;
+          return "1";
+        },
+      },
+      authorizer: { authorize: async () => ({ allowed: false, reason: "not_authorized" }) },
+      onEvent: (event) => events.push(event),
+    });
+
+    await expect(broker.leaseConnection({ scope: CONNECTION_SCOPE })).rejects.toMatchObject({
+      reason: "not_authorized",
+    });
+    expect(revisionReads).toBe(0);
+    expect(events).toMatchObject([{ type: "secret.lease.denied", reason: "not_authorized" }]);
+  });
+
+  it("emits denial evidence when the Connection credential is revoked", async () => {
+    const events: SecretBrokerEvent[] = [];
+    const broker = new SecretBroker({
+      provider: {
+        resolveCurrent: async () => null,
+        currentVersion: async () => null,
+      },
+      authorizer: { authorize: async () => ({ allowed: true }) },
+      onEvent: (event) => events.push(event),
+    });
+
+    await expect(broker.leaseConnection({ scope: CONNECTION_SCOPE })).rejects.toMatchObject({
+      reason: "revoked",
+    });
+    expect(events).toMatchObject([{ type: "secret.lease.denied", reason: "revoked" }]);
   });
 
   it("cannot be retargeted by mutating the caller-owned scope after issue", async () => {

@@ -1,0 +1,188 @@
+version: 1
+cases:
+  - name: gets-shop-without-arguments
+    operationId: get-shop
+    configuration:
+      shop: fixture-store.myshopify.com
+    request: {}
+    response:
+      status: 200
+      body:
+        data:
+          shop:
+            id: gid://shopify/Shop/1001
+            name: Muskan Nursery
+            myshopifyDomain: fixture-store.myshopify.com
+            currencyCode: USD
+    expect:
+      request:
+        method: POST
+        url: https://fixture-store.myshopify.com/admin/api/2026-07/graphql.json
+        body:
+          operationName: ShopifyGetShop
+          variables: {}
+      result:
+        data:
+          shop:
+            id: gid://shopify/Shop/1001
+            name: Muskan Nursery
+            myshopifyDomain: fixture-store.myshopify.com
+            currencyCode: USD
+
+  - name: lists-products
+    operationId: list-products
+    configuration:
+      shop: fixture-store.myshopify.com
+    request:
+      first: 2
+      query: "status:active"
+    response:
+      status: 200
+      body:
+        data:
+          products:
+            nodes:
+              - id: gid://shopify/Product/1001
+                title: Red Tulip
+                handle: red-tulip
+                status: ACTIVE
+                vendor: Muskan Nursery
+                productType: Bulbs
+                tags: [spring]
+                updatedAt: "2026-09-01T10:00:00Z"
+            pageInfo:
+              hasNextPage: true
+              endCursor: cursor-2
+    expect:
+      request:
+        method: POST
+        url: https://fixture-store.myshopify.com/admin/api/2026-07/graphql.json
+        body:
+          operationName: ShopifyListProducts
+          variables:
+            first: 2
+            query: "status:active"
+      result:
+        data:
+          products:
+            nodes:
+              - id: gid://shopify/Product/1001
+                title: Red Tulip
+            pageInfo:
+              hasNextPage: true
+              endCursor: cursor-2
+
+  - name: creates-product
+    operationId: create-product
+    configuration:
+      shop: fixture-store.myshopify.com
+    request:
+      product:
+        title: Spring Tulip Bulbs
+        vendor: Muskan Nursery
+        status: DRAFT
+        tags: [spring, bulbs]
+    response:
+      status: 200
+      body:
+        data:
+          productCreate:
+            product:
+              id: gid://shopify/Product/1002
+              title: Spring Tulip Bulbs
+              handle: spring-tulip-bulbs
+              status: DRAFT
+              updatedAt: "2026-09-01T10:05:00Z"
+            userErrors: []
+    expect:
+      request:
+        method: POST
+        url: https://fixture-store.myshopify.com/admin/api/2026-07/graphql.json
+        body:
+          operationName: ShopifyCreateProduct
+          variables:
+            product:
+              title: Spring Tulip Bulbs
+              vendor: Muskan Nursery
+              status: DRAFT
+              tags: [spring, bulbs]
+      result:
+        data:
+          productCreate:
+            product:
+              id: gid://shopify/Product/1002
+              title: Spring Tulip Bulbs
+              status: DRAFT
+            userErrors: []
+
+  - name: rejects-invalid-credential
+    operationId: get-shop
+    configuration:
+      shop: fixture-store.myshopify.com
+    request: {}
+    response:
+      status: 401
+      body:
+        errors: Unauthorized
+    expect:
+      request:
+        method: POST
+        url: https://fixture-store.myshopify.com/admin/api/2026-07/graphql.json
+      expectedError:
+        phase: before_dispatch
+        code: provider_unauthorized
+        retryable: false
+
+  - name: rejects-graphql-errors
+    operationId: get-shop
+    configuration:
+      shop: fixture-store.myshopify.com
+    request: {}
+    response:
+      status: 200
+      body:
+        errors:
+          - message: Access denied for shop field.
+            extensions:
+              code: ACCESS_DENIED
+    expect:
+      request:
+        method: POST
+        url: https://fixture-store.myshopify.com/admin/api/2026-07/graphql.json
+        body:
+          operationName: ShopifyGetShop
+          variables: {}
+      expectedError:
+        phase: before_dispatch
+        code: provider_rejected
+        retryable: false
+
+  - name: rejects-product-user-errors
+    operationId: create-product
+    configuration:
+      shop: fixture-store.myshopify.com
+    request:
+      product:
+        title: Reserved product
+    response:
+      status: 200
+      body:
+        data:
+          productCreate:
+            product: null
+            userErrors:
+              - field: [product, title]
+                message: Title is reserved.
+    expect:
+      request:
+        method: POST
+        url: https://fixture-store.myshopify.com/admin/api/2026-07/graphql.json
+        body:
+          operationName: ShopifyCreateProduct
+          variables:
+            product:
+              title: Reserved product
+      expectedError:
+        phase: after_dispatch
+        code: invalid_output
+        retryable: false

@@ -15,6 +15,12 @@ export interface IntegrationAuthRequestDoc {
   consumedAt: Date | null;
   /** Null means business-wide; otherwise the callback must seal a principal-owned credential. */
   principal: { readonly kind: string; readonly id: string } | null;
+  /**
+   * The OIM Connection this authorization belongs to, or null for a legacy connection.yaml flow.
+   * Held server-side so a callback cannot be pointed at a different Connection by editing a query
+   * parameter.
+   */
+  connectionId?: string | null;
 }
 
 export interface IntegrationAuthRequestRepo {
@@ -40,6 +46,7 @@ function rowToRequest(row: Record<string, unknown>): IntegrationAuthRequestDoc {
     consumedAt: (row.consumed_at as Date | null) ?? null,
     // Both or neither: half a principal would attribute credentials to the wrong subject.
     principal: kind !== null && id !== null ? { kind, id } : null,
+    connectionId: (row.connection_id as string | null) ?? null,
   };
 }
 
@@ -50,8 +57,8 @@ export class PgIntegrationAuthRequestRepo implements IntegrationAuthRequestRepo 
     await this.q.query(
       `INSERT INTO integration_auth_requests
          (state, integration_slug, step_index, code_verifier, created_at, expires_at, consumed_at,
-          principal_kind, principal_id, callback_url, web_url, api_url)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
+          principal_kind, principal_id, callback_url, web_url, api_url, connection_id)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`,
       [
         request.state,
         request.integrationSlug,
@@ -65,6 +72,7 @@ export class PgIntegrationAuthRequestRepo implements IntegrationAuthRequestRepo 
         request.callbackUrl ?? null,
         request.webUrl ?? null,
         request.apiUrl ?? null,
+        request.connectionId ?? null,
       ]
     );
   }

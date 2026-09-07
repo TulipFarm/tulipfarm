@@ -17,6 +17,7 @@ function toSourceRecord(source: KnowledgeSourceEmission): KnowledgeSourceRecord 
     externalId: source.externalId,
     externalTenantId: source.externalTenantId,
     ownerExternalId: source.ownerExternalId,
+    ...(source.locator === undefined ? {} : { locator: source.locator }),
     revision: source.revision,
     classification: source.classification,
     status: source.status,

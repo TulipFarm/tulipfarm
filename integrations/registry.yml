@@ -11,6 +11,8 @@
 # `availability: coming_soon` means the manifest is in the image but the connect flow is not
 # something an operator should be handed yet. The catalog lists the entry so the roadmap is
 # visible, and refuses to open it, rather than offering a setup that ends in a dead end.
+# Availability means the setup flow can be opened, not that a provider has granted production
+# access or that a live acceptance test has passed. Provider prerequisites live in its setup guide.
 #
 # Third-party integrations must be purely declarative. A manifest that runs code — `ts-code`
 # egress, a stdio MCP server, or an `ingress.handler` — is rejected at install
@@ -41,26 +43,187 @@ integrations:
     homepage: https://github.com
     description: Read and write repositories, issues, and pull requests.
 
+  - name: slack-oim
+    title: Slack API
+    icon: slack
+    color: "4A154B"
+    category: chat
+    homepage: https://slack.com
+    description: Use scoped Slack API operations and receive verified HTTP events through OIM.
+
   - name: jira
-    availability: coming_soon
     title: Jira
     icon: jira
     category: productivity
     homepage: https://www.atlassian.com/software/jira
-    description: Search, create, estimate, prioritize, and transition Jira Cloud issues.
+    description: Search, read, create, update, and transition Jira Cloud issues.
 
   - name: linear
-    availability: coming_soon
     title: Linear
     icon: linear
     category: productivity
     homepage: https://linear.app
     description: Read, create, update, and comment on issues with approval for changes.
+
+  - name: telegram
+    title: Telegram
+    icon: telegram
+    color: "26A5E4"
+    category: chat
+    homepage: https://telegram.org
+    description: Send and read messages through a Telegram bot.
+
+  - name: notion
+    title: Notion
+    icon: notion
+    category: productivity
+    homepage: https://www.notion.so
+    description: Search, read, and page through Notion content shared with an integration.
+
+  - name: hubspot
+    title: HubSpot
+    icon: hubspot
+    color: "FF7A59"
+    category: productivity
+    homepage: https://www.hubspot.com
+    description: Read and create HubSpot CRM contacts and companies through your own connected app.
+
+  - name: twilio
+    title: Twilio
+    icon: twilio
+    color: "F22F46"
+    category: communication
+    homepage: https://www.twilio.com
+    description: Send SMS and WhatsApp messages, and read message history.
+
+  - name: trello
+    title: Trello
+    icon: trello
+    color: "0C66E4"
+    category: productivity
+    homepage: https://trello.com
+    description: Read boards, lists, and cards, and create or update cards.
+
+  - name: gitlab
+    title: GitLab
+    icon: gitlab
+    category: engineering
+    homepage: https://gitlab.com
+    description: Read and write issues, merge requests, and notes, and receive project webhooks as
+      events.
+
+  - name: confluence
+    title: Confluence
+    icon: confluence
+    category: productivity
+    homepage: https://www.atlassian.com/software/confluence
+    description: Read spaces and pages, and index them into Knowledge with the page restrictions
+      Confluence enforces.
+
+  - name: openweather
+    title: OpenWeather
+    icon: openweathermap
+    category: data
+    homepage: https://openweathermap.org
+    description: Read current conditions and forecasts for a location.
+
+  - name: confluence-data-center
+    title: Confluence Data Center
+    icon: confluence
+    category: productivity
+    homepage: https://www.atlassian.com/software/confluence
+    description: Read spaces and pages from an explicitly approved public Confluence Data Center
+      site.
+
   - name: google
     availability: coming_soon
-    title: Google Workspace
+    title: Google Workspace (legacy)
     icon: google
     category: productivity
     homepage: https://workspace.google.com
     description: One Google sign-in for Gmail, Calendar, Drive, and Docs — read and write across all
       of them from a single connection.
+
+  - name: google-workspace
+    title: Google Workspace
+    icon: google
+    category: productivity
+    homepage: https://workspace.google.com
+    description: Connect a Google account for Docs, Sheets, Slides, Drive, Calendar, and Gmail.
+
+  - name: discord
+    title: Discord
+    icon: discord
+    category: chat
+    homepage: https://discord.com
+    description: Read channels and messages, and send messages through an installed bot.
+
+  - name: asana
+    title: Asana
+    icon: asana
+    category: productivity
+    homepage: https://asana.com
+    description: Read projects and tasks, create or update tasks, and add comments.
+
+  - name: clickup
+    title: ClickUp
+    icon: clickup
+    category: productivity
+    homepage: https://clickup.com
+    description: Read workspaces and tasks, create or update tasks, and add comments.
+
+  - name: zendesk
+    title: Zendesk
+    icon: zendesk
+    category: productivity
+    homepage: https://www.zendesk.com
+    description: Read users and search, create, update, and comment on support tickets.
+
+  - name: shopify
+    title: Shopify
+    icon: shopify
+    category: commerce
+    homepage: https://www.shopify.com
+    description: Read and manage store data through the Shopify Admin API.
+
+  - name: mailchimp
+    title: Mailchimp
+    icon: mailchimp
+    category: marketing
+    homepage: https://mailchimp.com
+    description: Work with audiences, members, and campaigns in a connected Mailchimp account.
+
+  - name: reddit
+    title: Reddit
+    icon: reddit
+    category: social
+    homepage: https://www.reddit.com
+    description: Read posts and submit posts or comments through an approved Reddit API app.
+
+  - name: x
+    title: X
+    icon: x
+    category: social
+    homepage: https://x.com
+    description: Read and create posts with a user account and the required API access.
+
+  - name: linkedin
+    title: LinkedIn
+    icon: linkedin
+    category: social
+    homepage: https://www.linkedin.com
+    description: Publish through approved LinkedIn API products and granted account permissions.
+
+  - name: instagram
+    title: Instagram
+    icon: instagram
+    category: social
+    homepage: https://www.instagram.com
+    description: Read and publish professional-account media through an approved Instagram app.
+
+  - name: facebook
+    title: Facebook
+    icon: facebook
+    category: social
+    homepage: https://www.facebook.com
+    description: Read and create Page posts with an approved app and the required Page permissions.

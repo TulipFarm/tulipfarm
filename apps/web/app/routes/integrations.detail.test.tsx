@@ -1,5 +1,5 @@
 import { createRemixStub } from "@remix-run/testing";
-import { render, screen, within } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, expect, test, vi } from "vitest";
 
@@ -25,11 +25,18 @@ vi.mock("~/lib/integrations", async (importOriginal) => ({
   disconnectIntegration: vi.fn(),
   disconnectGitHubInstallation: vi.fn(),
   disconnectPersonalIntegration: vi.fn(),
-  updateIntegration: vi.fn(),
+}));
+
+vi.mock("~/lib/oim-release-trust", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("~/lib/oim-release-trust")>()),
+  getOimAutoPatchPreference: vi.fn(),
+  setOimAutoPatchPreference: vi.fn(),
 }));
 
 import type { IntegrationDetail } from "~/lib/integrations";
-import { deleteIntegration, disconnectIntegration, updateIntegration } from "~/lib/integrations";
+import { deleteIntegration, disconnectIntegration } from "~/lib/integrations";
+import type { OimAutoPatchPreference } from "~/lib/oim-release-trust";
+import { setOimAutoPatchPreference } from "~/lib/oim-release-trust";
 import IntegrationDetailPage from "./_app.integrations.$name";
 
 function detail(over: Partial<IntegrationDetail> = {}): IntegrationDetail {
@@ -47,17 +54,87 @@ function detail(over: Partial<IntegrationDetail> = {}): IntegrationDetail {
   };
 }
 
-function renderDetail(integration: IntegrationDetail) {
+function renderDetail(integration: IntegrationDetail, autoPatch?: OimAutoPatchPreference) {
   const Stub = createRemixStub([
     {
       path: "/integrations/:name",
       Component: () => <IntegrationDetailPage />,
-      loader: () => ({ integration, routesError: undefined, githubInstallations: [] }),
+      loader: () => ({ integration, routesError: undefined, githubInstallations: [], autoPatch }),
     },
     { path: "/integrations", Component: () => <p>catalog</p> },
   ]);
   render(<Stub initialEntries={["/integrations/github"]} />);
 }
+
+test("shows and changes the persisted Official automatic patch preference", async () => {
+  const user = userEvent.setup();
+  vi.mocked(setOimAutoPatchPreference).mockResolvedValue({
+    integrationId: "wiki",
+    majorVersion: 2,
+    version: "2.4.0",
+    support: "official",
+    autoPatchOptIn: false,
+  });
+  renderDetail(
+    detail({
+      name: "wiki",
+      oim: {
+        integrationId: "wiki",
+        majorVersion: 2,
+        operationCount: 3,
+        unsupportedStepTypes: [],
+        requiresAuthorization: false,
+        connectSupported: true,
+      },
+    }),
+    {
+      integrationId: "wiki",
+      majorVersion: 2,
+      version: "2.4.0",
+      support: "official",
+      autoPatchOptIn: true,
+    }
+  );
+
+  const checkbox = await screen.findByRole("checkbox", {
+    name: /Install verified patch updates automatically/,
+  });
+  expect(checkbox).toBeChecked();
+  await user.click(checkbox);
+
+  await waitFor(() => expect(setOimAutoPatchPreference).toHaveBeenCalledWith("wiki", 2, false));
+  expect(checkbox).not.toBeChecked();
+});
+
+test("does not offer automatic updates for a Community package", async () => {
+  renderDetail(
+    detail({
+      name: "wiki",
+      oim: {
+        integrationId: "wiki",
+        majorVersion: 2,
+        operationCount: 3,
+        unsupportedStepTypes: [],
+        requiresAuthorization: false,
+        connectSupported: true,
+      },
+    }),
+    {
+      integrationId: "wiki",
+      majorVersion: 2,
+      version: "2.4.0",
+      support: "community",
+      autoPatchOptIn: false,
+    }
+  );
+
+  expect(
+    await screen.findByText(/Community packages require a new digest review/)
+  ).toBeInTheDocument();
+  expect(
+    screen.queryByRole("checkbox", { name: /Install verified patch updates automatically/ })
+  ).not.toBeInTheDocument();
+});
 
 test("leads with the brand name but keeps the slug visible", async () => {
   renderDetail(detail({ name: "github", title: "GitHub" }));
@@ -367,13 +444,8 @@ test("shows update button and update banner when an update is available", async 
   expect(updateButtons.length).toBeGreaterThan(0);
 });
 
-test("updates through the API when update is clicked", async () => {
+test("opens the exact review flow when update is clicked", async () => {
   const user = userEvent.setup();
-  vi.mocked(updateIntegration).mockResolvedValue({
-    name: "linear",
-    source: "acme/linear",
-    ref: "main",
-  });
 
   renderDetail(
     detail({
@@ -387,7 +459,7 @@ test("updates through the API when update is clicked", async () => {
   const updateButton = (await screen.findAllByRole("button", { name: /^update/i }))[0];
   await user.click(updateButton);
 
-  expect(updateIntegration).toHaveBeenCalledWith("linear", "acme/linear");
+  expect(screen.getByRole("dialog")).toHaveTextContent("Review integration update");
 });
 
 test("hides update button from a member even when an update is available", async () => {

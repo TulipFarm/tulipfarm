@@ -59,10 +59,15 @@ type RemoteToolResult =
   | { readonly status: "denied"; readonly reason: string; readonly connectUrl?: string }
   | { readonly status: "invalid_arguments"; readonly reason: string }
   | { readonly status: "failed"; readonly reason: string }
+  | { readonly status: "needs_reconciliation" }
   | { readonly status: "awaiting_approval"; readonly approvalId: string }
   | {
       readonly status: "awaiting_child";
       readonly childRunId: string;
+      readonly waitId: string;
+    }
+  | {
+      readonly status: "awaiting_retry";
       readonly waitId: string;
     };
 
@@ -85,6 +90,10 @@ function withCallId(callId: string, result: RemoteToolResult): ToolDispatchResul
         childRunId: result.childRunId,
         waitId: result.waitId,
       };
+    case "awaiting_retry":
+      return { status: "awaiting_retry", callId, waitId: result.waitId };
+    case "needs_reconciliation":
+      return { status: "needs_reconciliation", callId };
     case "denied":
       return { status: "denied", callId, reason: result.reason, connectUrl: result.connectUrl };
     default:

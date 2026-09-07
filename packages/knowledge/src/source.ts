@@ -44,6 +44,21 @@ export interface KnowledgeProvenance {
   readonly contentHash: string;
   /** Sync checkpoint that produced this capture; lets invalidation replay from a known point. */
   readonly checkpoint?: string;
+  /** Exact Connection that produced this capture. */
+  readonly connectionId?: string;
+}
+
+export interface OimKnowledgeSourceLocator {
+  readonly kind: "oim";
+  readonly integrationSlug: string;
+  readonly integrationId: string;
+  readonly integrationMajorVersion: number;
+  readonly connectionId: string;
+  readonly sourceKindId: string;
+  readonly scope: string;
+  readonly itemId: string;
+  readonly fields?: Readonly<Record<string, string | number | boolean>>;
+  readonly sourceUrl?: string;
 }
 
 export interface KnowledgeSourceRecord {
@@ -54,6 +69,7 @@ export interface KnowledgeSourceRecord {
   readonly externalId: string;
   readonly externalTenantId: string;
   readonly ownerExternalId: string;
+  readonly locator?: OimKnowledgeSourceLocator;
   /** Provider revision of the content. A new revision invalidates derived artifacts. */
   readonly revision: string;
   readonly classification: readonly string[];

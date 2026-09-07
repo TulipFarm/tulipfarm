@@ -1,15 +1,18 @@
 ---
 title: Bundled integrations
-description: The five providers TulipFarm ships manifests for, what agents can do with each, and how you connect them.
+description: The thirteen providers TulipFarm ships manifests for, what agents can do with each, and how you connect them.
 ---
 
-An integration is a connected third party. Five arrive with every instance, ready to connect. You
-do not install them. You connect them, which means giving TulipFarm the credentials it needs.
+An integration is a connected third party. Thirteen arrive with every instance. You do not install
+them. You connect them, which means giving TulipFarm the credentials it needs.
+
+Twelve are connectable today. `google` appears in the catalog marked **coming soon** — its connect
+flow is still being built, and the catalog will not open a setup that cannot finish.
 
 None of them are connected by default. Nothing leaves your instance until you connect one.
 
-{/* tf-claim kind=integration-slugs value="github,google,jira,linear,slack" */}
-{/* tf-claim kind=integration-count value="5" */}
+{/* tf-claim kind=integration-slugs value="confluence,github,gitlab,google,hubspot,jira,linear,notion,openweather,slack,telegram,trello,twilio" */}
+{/* tf-claim kind=integration-count value="13" */}
 
 ## What each one is for
 
@@ -17,9 +20,17 @@ None of them are connected by default. Nothing leaves your instance until you co
 | --- | --- |
 | `github` | Triage issues, review and merge pull requests, commit code, and read repositories. |
 | `slack` | Talk to your agents from Slack: direct message them, or mention them in a channel. |
-| `jira` | Search, create, estimate, prioritize, and transition Jira Cloud issues. |
+| `jira` | Search, read, create, update, and transition Jira Cloud issues. |
 | `linear` | List and read issues, then create, update, or comment on them after approval. |
+| `gitlab` | Read and write issues, merge requests, and notes, and receive project webhooks as events. |
 | `google` | One Google sign-in for Gmail (search, read, draft), Calendar (list, create, update, delete events), Drive (search), and Docs (read, create, append). |
+| `confluence` | Read spaces and pages, and index them into Knowledge with the page restrictions Confluence enforces. |
+| `hubspot` | Read and create CRM contacts through an OAuth app you own. |
+| `notion` | Search, read, and page through the Notion pages and databases you share with it. |
+| `telegram` | Send messages as a bot, and read what people send that bot. |
+| `trello` | Confirm its API key and token, then read the connected Trello member. |
+| `twilio` | Send SMS and WhatsApp messages, and read the account's message history. |
+| `openweather` | Read current conditions and forecasts. |
 
 ## Two different jobs
 
@@ -28,8 +39,9 @@ The list above mixes two things that are worth separating, because they answer d
 **Places you talk to agents.** Slack is a surface. Connecting it means your agents become reachable
 somewhere other than the TulipFarm web app. Your team can ask a question without opening a new tab.
 
-**Places agents reach into.** GitHub, Google Workspace, Jira, and Linear are sources and
-destinations. Connecting one means agents can read from it, and in some cases write back to it.
+**Places agents reach into.** GitHub, GitLab, Google Workspace, Jira, Linear, Confluence, Notion, HubSpot,
+Telegram, Trello, Twilio, HubSpot, and OpenWeather are sources and destinations. Connecting one means agents can read from it, and in most
+cases write back to it. Confluence and OpenWeather only ever read.
 
 GitHub is both. You can work pull requests from it, and agents can act on them.
 
@@ -41,8 +53,8 @@ applies.
 | How it works | integrations | What you do |
 | --- | --- | --- |
 | Guided app creation | `github`, `slack` | TulipFarm hands the provider a pre-filled form. You approve it, and the credentials come back automatically. |
-| Paste credentials | `jira`, `linear` | You create a token or API key on the provider's side and paste it in. |
-| OAuth sign-in | `google` | You create a Google Cloud OAuth client, paste its ID and secret, then authorize the scopes in Google's consent screen. |
+| OAuth sign-in *(coming soon)* | `google` | You create a Google Cloud OAuth client, paste its ID and secret, then authorize the scopes in Google's consent screen. |
+| Paste credentials | `confluence`, `gitlab`, `jira`, `linear`, `openweather`, `trello` | You create a token or API key on the provider's side and paste it in. Each package's setup guide describes exactly what to create. |
 
 Whichever path you take, credentials are stored encrypted in your instance's secret store, not in
 the soul and not in environment variables.
@@ -53,6 +65,10 @@ Every integration is defined by a manifest, and the manifest is the whole story.
 **egress**, what your agents may do to the provider, and **ingress**, what the provider may send
 you. An agent cannot call something the manifest does not declare, so the manifest is a boundary
 rather than a suggestion.
+
+Confluence, GitLab, Jira, Linear, Notion, OpenWeather, Telegram, Trello, and Twilio ship as Open Integration Manifest packages — the
+same portable format a third-party integration uses, with nothing code-owned about them. Read
+[How integrations work](/docs/administration/how-integrations-work) for what a manifest declares.
 
 <Cards>
   <Card title="Connect an integration" href="/docs/administration/connect-an-integration" description="The step-by-step for connecting one." />

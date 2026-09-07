@@ -55,6 +55,10 @@ export type {
   EffectLedgerErrorCode,
   EffectReconcilerDeps,
   EffectRecord,
+  EffectRetryDeferred,
+  EffectRetryParker,
+  EffectRetryParkInput,
+  EffectRetryParkResult,
   EffectState,
   EffectStore,
   FinishEffectAttemptInput,
@@ -63,6 +67,7 @@ export type {
   ReserveEffectInput,
   ReserveEffectResult,
   ToolAdapter,
+  ToolAdapterCredentials,
   ToolAdapterRequest,
   ToolDispatchErrorCode,
   ToolReconciliationAdapter,
@@ -73,16 +78,20 @@ export type {
 export {
   AdapterDispatchError,
   CompensationError,
+  compileToolOutputValidator,
   EFFECT_OUTPUT_STORAGE_STATEMENTS,
   EFFECT_STORAGE_STATEMENTS,
   EffectCompensator,
+  EffectDispatchDeferredError,
   EffectDispatcher,
   EffectLedger,
   EffectLedgerError,
   EffectReconciler,
+  MAX_PROVIDER_RETRY_DELAY_MS,
   MemoryEffectStore,
   maxDispatchAttempts,
   mayRetry,
+  nextRetryDelayMs,
   PgEffectStore,
   retryDelayMs,
   ToolDispatchError,
@@ -95,7 +104,12 @@ export type {
   ToolEntitlementPort,
 } from "./entitlement";
 export { CompositeToolEntitlement, NOT_APPLICABLE } from "./entitlement";
-export type { ToolIntent, ToolIntentErrorCode, ToolTargetRef } from "./intent";
+export type {
+  ToolConnectionBinding,
+  ToolIntent,
+  ToolIntentErrorCode,
+  ToolTargetRef,
+} from "./intent";
 export { intentDigest, normalizeToolIntent, ToolIntentError } from "./intent";
 export type { ToolRiskAssessment, ToolRiskContext, ToolRiskLevel } from "./risk";
 export { assessToolRisk } from "./risk";

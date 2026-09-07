@@ -170,11 +170,17 @@ export type HostedToolResult =
   | { readonly status: "denied"; readonly reason: string; readonly connectUrl?: string }
   | { readonly status: "invalid_arguments"; readonly reason: string }
   | { readonly status: "failed"; readonly reason: string }
+  | { readonly status: "needs_reconciliation" }
   | { readonly status: "awaiting_approval"; readonly approvalId: string }
   | {
       /** The Tool spawned a child Run and registered the wait that resumes this Turn. */
       readonly status: "awaiting_child";
       readonly childRunId: string;
+      readonly waitId: string;
+    }
+  | {
+      /** The Tool registered a durable provider retry timer that resumes this Turn. */
+      readonly status: "awaiting_retry";
       readonly waitId: string;
     };
 

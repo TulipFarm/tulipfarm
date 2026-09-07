@@ -1,4 +1,5 @@
 import { renderDocument } from "@tulipfarm/files";
+import { compileJsonSchema } from "@tulipfarm/schema";
 import { SecretUnavailableError } from "@tulipfarm/secrets";
 import { MemoryCache } from "@tulipfarm/storage";
 import { definitionForToolCall } from "@tulipfarm/tool-broker";
@@ -67,6 +68,27 @@ describe("api_request classification", () => {
     });
     expect(call).toMatchObject({ mutating: false, requiresApproval: true });
   });
+
+  it("requires exact Approval when a Connection is selected", () => {
+    const call = definitionForToolCall(apiRequestTool, {
+      url: "https://api.example.com/me",
+      method: "GET",
+      connection_id: "connection-1",
+    });
+    expect(call).toMatchObject({ mutating: false, requiresApproval: true });
+  });
+
+  it("does not accept both a named Credential and a Connection selector", () => {
+    const validate = compileJsonSchema(apiRequestTool.inputSchema);
+    expect(
+      validate({
+        url: "https://api.example.com/me",
+        method: "GET",
+        connection_id: "connection-1",
+        credential: { secret: "EXAMPLE_TOKEN", header: "authorization" },
+      })
+    ).not.toBeNull();
+  });
 });
 
 describe("caller cancellation", () => {
@@ -92,6 +114,30 @@ describe("caller cancellation", () => {
 });
 
 describe("network Tool handlers", () => {
+  it("returns secure setup to the originating Chat without copying the provider URL", async () => {
+    const ctx = context({
+      conversationId: "chat/with?reserved#characters",
+      http: {
+        send: vi.fn(async () => ({
+          status: 401,
+          headers: { "www-authenticate": "Bearer" },
+          body: "Sign in",
+        })),
+      },
+    });
+    const result = await apiRequestTool.handler(
+      { url: "https://api.example.com/items?private=value", method: "GET" },
+      ctx
+    );
+    expect(result).toMatchObject({
+      success: true,
+      data: {
+        setupUrl:
+          "/business/connections/new?origin=https%3A%2F%2Fapi.example.com&return_to=%2Fchat%2Fchat%252Fwith%253Freserved%2523characters",
+      },
+    });
+  });
+
   it("leases a Credential only around the request and does not return it", async () => {
     const ctx = context();
     const result = await apiRequestTool.handler(
@@ -654,6 +700,308 @@ describe("network Tool handlers", () => {
         code: "credential_required",
         connectUrl: "/business/secrets?required=EXAMPLE_TOKEN",
       },
+    });
+  });
+});
+
+describe("api_request ad-hoc authentication", () => {
+  const challengeContext = (status: number, headers: Record<string, string>) =>
+    context({
+      http: { send: vi.fn(async () => ({ status, headers, body: "<html>Sign in</html>" })) },
+    });
+
+  it("replaces a 401 with the parsed challenge instead of the provider's login page", async () => {
+    const result = await apiRequestTool.handler(
+      { url: "https://api.example.com/items", method: "GET" },
+      challengeContext(401, {
+        "content-type": "text/html",
+        "www-authenticate": 'Bearer realm="api"',
+      })
+    );
+    expect(result).toMatchObject({
+      success: true,
+      data: {
+        kind: "authentication_required",
+        origin: "https://api.example.com",
+        status: 401,
+        resume: "safe_retry",
+        accepts: [
+          {
+            location: "header",
+            name: "authorization",
+            valuePrefix: "Bearer ",
+            encoding: "verbatim",
+            origin: "https://api.example.com",
+            scheme: "bearer",
+            realm: "api",
+          },
+        ],
+      },
+    });
+    expect(JSON.stringify(result)).not.toContain("Sign in");
+  });
+
+  it("binds the proposed rule to the requested origin, not to one the response names", async () => {
+    // A provider that answers with a realm naming another host must not be able to aim a person's
+    // credential at that host.
+    const result = await apiRequestTool.handler(
+      { url: "https://api.example.com/items", method: "GET" },
+      challengeContext(401, { "www-authenticate": 'Bearer realm="https://evil.example.net/"' })
+    );
+    expect(result).toMatchObject({
+      data: { accepts: [{ origin: "https://api.example.com" }] },
+    });
+  });
+
+  it("requires a mutation to be authorized afresh rather than replayed", async () => {
+    const result = await apiRequestTool.handler(
+      { url: "https://api.example.com/items", method: "POST", body: { name: "x" } },
+      challengeContext(401, { "www-authenticate": "Bearer" })
+    );
+    expect(result).toMatchObject({ data: { resume: "reauthorize" } });
+  });
+
+  it("refuses schemes that one stored value cannot satisfy", async () => {
+    const result = await apiRequestTool.handler(
+      { url: "https://api.example.com/items", method: "GET" },
+      challengeContext(401, { "www-authenticate": "Negotiate" })
+    );
+    expect(result).toMatchObject({
+      data: { accepts: [], unsupported: [{ scheme: "negotiate", reason: "multi_round_scheme" }] },
+    });
+  });
+
+  it("reports a rejected Credential separately from one that was never configured", async () => {
+    const result = await apiRequestTool.handler(
+      {
+        url: "https://api.example.com/items",
+        method: "GET",
+        credential: { secret: "JIRA_API_TOKEN", header: "authorization" },
+      },
+      challengeContext(401, { "www-authenticate": "Bearer" })
+    );
+    expect(result).toMatchObject({ data: { kind: "credential_rejected" } });
+  });
+
+  it("leaves an ordinary failure on its existing path", async () => {
+    const result = await apiRequestTool.handler(
+      { url: "https://api.example.com/items", method: "GET" },
+      challengeContext(500, { "content-type": "text/plain" })
+    );
+    expect(result).toMatchObject({ data: { kind: "response", status: 500 } });
+  });
+});
+
+describe("api_request session cookies", () => {
+  it("refuses a copied browser session named as a Credential", async () => {
+    // A pasted `Cookie` works against most sites, which is why it has to be refused: it delegates
+    // a whole authenticated session, unscoped and unrevocable, in place of an issued token.
+    const send = vi.fn(async () => ({ status: 200, headers: {}, body: {} }));
+    const result = await apiRequestTool.handler(
+      {
+        url: "https://api.example.com/items",
+        method: "GET",
+        credential: { secret: "SESSION", header: "Cookie" },
+      },
+      context({ http: { send } })
+    );
+    expect(result).toMatchObject({ success: false });
+    expect(send).not.toHaveBeenCalled();
+  });
+});
+
+describe("api_request Connection reuse", () => {
+  const HEADER_MATCH = {
+    kind: "match" as const,
+    connectionId: "connection-1",
+    credentialRef: "secret://adhoc-1",
+    rule: { location: "header" as const, name: "authorization", valuePrefix: "Bearer " },
+    label: "Example API",
+  };
+
+  function reuseContext(overrides: Partial<NetworkToolContext> = {}) {
+    const send = vi.fn(async (_request: { url: string; headers: Record<string, string> }) => ({
+      status: 200,
+      headers: { "content-type": "application/json" },
+      body: { ok: true },
+    }));
+    const useConnection = vi.fn(
+      async (_input: unknown, callback: (secret: string) => Promise<unknown>) =>
+        callback("tok-live")
+    );
+    const ctx = context({
+      http: { send },
+      matchConnection: vi.fn(async () => HEADER_MATCH),
+      useConnection: useConnection as NetworkToolContext["useConnection"],
+      ...overrides,
+    });
+    return { ctx, send, useConnection };
+  }
+
+  it("spends the one authorized Connection instead of provoking a refusal", async () => {
+    const { ctx, send, useConnection } = reuseContext();
+    await apiRequestTool.handler({ url: "https://api.example.com/items", method: "GET" }, ctx);
+
+    expect(useConnection).toHaveBeenCalledTimes(1);
+    expect(send.mock.calls[0]?.[0]).toMatchObject({
+      headers: { authorization: `Bearer ${"tok" + "-live"}` },
+    });
+  });
+
+  it("puts a query-located Credential in the URL, not a header", async () => {
+    const { ctx, send } = reuseContext({
+      matchConnection: vi.fn(async () => ({
+        ...HEADER_MATCH,
+        rule: { location: "query" as const, name: "api_key", valuePrefix: "" },
+      })),
+    });
+    await apiRequestTool.handler({ url: "https://api.example.com/items?q=1", method: "GET" }, ctx);
+
+    const sent = send.mock.calls[0]?.[0];
+    if (sent === undefined) throw new Error("no request was sent");
+    expect(sent.url).toBe("https://api.example.com/items?q=1&api_key=tok-live");
+    expect(Object.keys(sent.headers)).not.toContain("api_key");
+  });
+
+  it("leaves a Credential the model named alone", async () => {
+    // Substituting a different Connection would send a token this call was never authorized for.
+    const { ctx, useConnection } = reuseContext();
+    await apiRequestTool.handler(
+      {
+        url: "https://api.example.com/items",
+        method: "GET",
+        credential: { secret: "named-key", header: "x-api-key" },
+      },
+      ctx
+    );
+    expect(useConnection).not.toHaveBeenCalled();
+    expect(ctx.useCredential).toHaveBeenCalledTimes(1);
+  });
+
+  it("asks rather than choosing when more than one Connection could serve the origin", async () => {
+    const { ctx, send } = reuseContext({
+      conversationId: "conversation-1",
+      matchConnection: vi.fn(async () => ({
+        kind: "ambiguous" as const,
+        count: 2,
+        candidates: [
+          { connectionId: "personal-1", label: "My account", ownerScope: "personal" as const },
+          {
+            connectionId: "organization-1",
+            label: "Company account",
+            ownerScope: "organization" as const,
+          },
+        ],
+      })),
+    });
+    const result = await apiRequestTool.handler(
+      { url: "https://api.example.com/items", method: "GET" },
+      ctx
+    );
+    expect(result).toMatchObject({
+      success: true,
+      data: {
+        kind: "connection_ambiguous",
+        origin: "https://api.example.com",
+        count: 2,
+        candidates: [
+          { connection_id: "personal-1", label: "My account", owner_scope: "personal" },
+          {
+            connection_id: "organization-1",
+            label: "Company account",
+            owner_scope: "organization",
+          },
+        ],
+        setupUrl:
+          "/business/connections?origin=https%3A%2F%2Fapi.example.com&return_to=%2Fchat%2Fconversation-1",
+      },
+    });
+    expect(JSON.stringify(result)).not.toContain("secret://");
+    expect(JSON.stringify(result)).not.toContain("authorization");
+    expect(send).not.toHaveBeenCalled();
+  });
+
+  it("uses only the exact Connection selected by the call", async () => {
+    const { ctx, useConnection } = reuseContext();
+    await apiRequestTool.handler(
+      {
+        url: "https://api.example.com/items",
+        method: "GET",
+        connection_id: "connection-1",
+      },
+      ctx
+    );
+    expect(ctx.matchConnection).toHaveBeenCalledWith("https://api.example.com", "connection-1");
+    expect(useConnection).toHaveBeenCalledWith(
+      expect.objectContaining({ connectionId: "connection-1" }),
+      expect.any(Function)
+    );
+  });
+
+  it("does not fall back when the selected Connection is unavailable", async () => {
+    const { ctx, send, useConnection } = reuseContext({
+      matchConnection: vi.fn(async () => ({ kind: "denied" as const })),
+    });
+    const result = await apiRequestTool.handler(
+      {
+        url: "https://api.example.com/items",
+        method: "GET",
+        connection_id: "missing",
+      },
+      ctx
+    );
+    expect(result).toMatchObject({ success: false, error: { code: "write_denied" } });
+    expect(useConnection).not.toHaveBeenCalled();
+    expect(send).not.toHaveBeenCalled();
+  });
+
+  it("sends uncredentialed when the caller has no Connection for the origin", async () => {
+    const { ctx, send, useConnection } = reuseContext({
+      matchConnection: vi.fn(async () => ({ kind: "none" as const })),
+    });
+    await apiRequestTool.handler({ url: "https://api.example.com/items", method: "GET" }, ctx);
+    expect(useConnection).not.toHaveBeenCalled();
+    expect(send.mock.calls[0]?.[0]).toMatchObject({ headers: {} });
+  });
+
+  it("refuses to reuse a Connection whose rule names a transport header", async () => {
+    // A stored rule is not a second confirmation; the transport still owns these names.
+    const { ctx } = reuseContext({
+      matchConnection: vi.fn(async () => ({
+        ...HEADER_MATCH,
+        rule: { location: "header" as const, name: "host", valuePrefix: "" },
+      })),
+    });
+    const result = await apiRequestTool.handler(
+      { url: "https://api.example.com/items", method: "GET" },
+      ctx
+    );
+    expect(result).toMatchObject({ success: false });
+  });
+
+  it("does not look for a Connection outside a durable Run", async () => {
+    const matchConnection = vi.fn(async () => HEADER_MATCH);
+    const { ctx, send } = reuseContext({ matchConnection, runId: "" });
+    await apiRequestTool.handler({ url: "https://api.example.com/items", method: "GET" }, ctx);
+    expect(matchConnection).not.toHaveBeenCalled();
+    expect(send.mock.calls[0]?.[0]).toMatchObject({ headers: {} });
+  });
+
+  it("does not expose a query Credential in the Tool result URL", async () => {
+    const { ctx } = reuseContext({
+      matchConnection: vi.fn(async () => ({
+        ...HEADER_MATCH,
+        rule: { location: "query" as const, name: "api_key", valuePrefix: "" },
+      })),
+    });
+    const result = await apiRequestTool.handler(
+      { url: "https://api.example.com/items?q=1", method: "GET" },
+      ctx
+    );
+    expect(JSON.stringify(result)).not.toContain("tok-live");
+    expect(result).toMatchObject({
+      success: true,
+      data: { url: "https://api.example.com/items?q=1" },
     });
   });
 });

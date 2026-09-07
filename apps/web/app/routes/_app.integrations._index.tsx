@@ -8,13 +8,17 @@ import {
 import { type ReactNode, useCallback, useId, useMemo, useState } from "react";
 import { CheckCircle2, Plug, Search } from "~/components/icons";
 import { displayName, IntegrationCard } from "~/components/integrations/integration-card";
+import {
+  IntegrationInstallPanel,
+  type IntegrationReviewRequest,
+} from "~/components/integrations/integration-install-panel";
 import { IntegrationOverview } from "~/components/integrations/integration-overview";
 import { IntegrationPanel } from "~/components/integrations/integration-panel";
 import { ErrorState } from "~/components/states";
 import { Input } from "~/components/ui/input";
 import { Panel, PanelEmpty } from "~/components/ui/panel";
 import { ApiError } from "~/lib/api";
-import { type IntegrationSummary, listIntegrations, updateIntegration } from "~/lib/integrations";
+import { type IntegrationSummary, listIntegrations } from "~/lib/integrations";
 import { useIsAdmin } from "~/lib/use-session-user";
 
 /* Connection state is a card property; install is only for curated entries not yet cloned. */
@@ -46,21 +50,44 @@ export default function IntegrationsIndex() {
   const [scope, setScope] = useState<"all" | "connected">("all");
   const searchId = useId();
   const isAdmin = useIsAdmin();
-  const [updatingName, setUpdatingName] = useState<string>();
-  const [updateError, setUpdateError] = useState<string>();
 
-  async function handleUpdate(name: string, source?: string) {
-    setUpdatingName(name);
-    setUpdateError(undefined);
-    try {
-      await updateIntegration(name, source);
-      revalidator.revalidate();
-    } catch (err) {
-      setUpdateError(err instanceof Error ? err.message : "Update failed.");
-    } finally {
-      setUpdatingName(undefined);
-    }
+  function openUpdate(integration: IntegrationSummary) {
+    if (!integration.source) return;
+    setSearchParams(
+      (prev) => {
+        const next = new URLSearchParams(prev);
+        next.set("update", integration.name);
+        next.set("source", integration.source ?? "");
+        return next;
+      },
+      { preventScrollReset: true }
+    );
   }
+
+  const reviewRequest = useMemo<IntegrationReviewRequest | undefined>(() => {
+    const updateName = searchParams.get("update");
+    const source = searchParams.get("source") ?? undefined;
+    if (updateName && source) return { kind: "update", name: updateName, source };
+    if (searchParams.get("install") === "1") {
+      return {
+        kind: "install",
+        ...(source ? { source } : {}),
+        ...(searchParams.get("name") ? { name: searchParams.get("name") ?? undefined } : {}),
+      };
+    }
+    return undefined;
+  }, [searchParams]);
+
+  const closeReview = useCallback(() => {
+    setSearchParams(
+      (prev) => {
+        const next = new URLSearchParams(prev);
+        for (const key of ["install", "update", "source", "name"]) next.delete(key);
+        return next;
+      },
+      { replace: true, preventScrollReset: true }
+    );
+  }, [setSearchParams]);
 
   const categories = useMemo(() => {
     const found = integrations.map((i) => i.category).filter((c): c is string => Boolean(c));
@@ -158,12 +185,6 @@ export default function IntegrationsIndex() {
       <div className="min-w-0">
         <IntegrationOverview integrations={integrations} />
 
-        {updateError && (
-          <p className="mt-5 rounded-sm border border-destructive bg-destructive/10 px-3 py-2 text-sm text-destructive">
-            {updateError}
-          </p>
-        )}
-
         <div className="mt-8">
           {visible.length === 0 ? (
             <Panel>
@@ -180,8 +201,7 @@ export default function IntegrationsIndex() {
                   key={title}
                   title={categoryLabel(title)}
                   items={items}
-                  onUpdate={handleUpdate}
-                  updatingName={updatingName}
+                  onUpdate={openUpdate}
                   isAdmin={isAdmin}
                 />
               ))}
@@ -190,6 +210,11 @@ export default function IntegrationsIndex() {
         </div>
 
         <IntegrationPanel name={viewing} onClose={closePanel} />
+        <IntegrationInstallPanel
+          request={reviewRequest}
+          onClose={closeReview}
+          onComplete={() => revalidator.revalidate()}
+        />
       </div>
     </div>
   );
@@ -234,13 +259,11 @@ function Group({
   title,
   items,
   onUpdate,
-  updatingName,
   isAdmin,
 }: {
   title: string;
   items: IntegrationSummary[];
-  onUpdate: (name: string, source?: string) => void;
-  updatingName?: string;
+  onUpdate: (integration: IntegrationSummary) => void;
   isAdmin: boolean;
 }) {
   const headingId = useId();
@@ -255,7 +278,6 @@ function Group({
             key={integration.name}
             integration={integration}
             onUpdate={onUpdate}
-            updating={updatingName === integration.name}
             isAdmin={isAdmin}
           />
         ))}

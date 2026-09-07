@@ -32,12 +32,26 @@ function sourceEmission(overrides: Partial<KnowledgeSourceEmission> = {}): Knowl
     externalId: "C1",
     externalTenantId: "T1",
     ownerExternalId: "U1",
+    locator: {
+      kind: "oim",
+      integrationSlug: "slack",
+      integrationId: "slack",
+      integrationMajorVersion: 1,
+      connectionId: "connection-1",
+      sourceKindId: "channel",
+      scope: "C1",
+      itemId: "C1",
+    },
     revision: "1.0",
     classification: ["internal"],
     status: "active",
     verification: "verified",
     accessControl: { mode: "live", maximumAgeSeconds: 60 },
-    provenance: { capturedAt: "2026-01-01T00:00:00.000Z", contentHash: "hash-1" },
+    provenance: {
+      capturedAt: "2026-01-01T00:00:00.000Z",
+      contentHash: "hash-1",
+      connectionId: "connection-1",
+    },
     lastSyncedAt: "2026-01-01T00:00:00.000Z",
     ...overrides,
   };
@@ -78,6 +92,8 @@ describe("PgKnowledgeEmissionSink", () => {
     const found = await sources.get(BUSINESS, "slack:T1:C1");
     expect(found?.sourceId).toBe("slack:T1:C1");
     expect(found?.provider).toBe("slack");
+    expect(found?.locator?.connectionId).toBe("connection-1");
+    expect(found?.provenance.connectionId).toBe("connection-1");
   });
 
   it("emitChunk writes an indexed chunk", async () => {

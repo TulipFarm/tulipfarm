@@ -1,0 +1,539 @@
+oimVersion: "1.0"
+kind: Integration
+
+metadata:
+  id: shopify
+  name: Shopify
+  version: 1.0.0
+  description: >-
+    Read Shopify shop, product, order and customer data, and create or update products and
+    customers through the versioned GraphQL Admin API.
+  license: Apache-2.0
+  maintainers:
+    - name: TulipFarm
+      url: https://tulipfarm.dev
+
+profiles:
+  core: "1.1"
+  auth: "1.0"
+
+files:
+  - path: operations/get-shop.graphql
+    role: graphql
+    sha256: "a6d698882b2d3c59010cdf82db42280ea786755d9ae1fb6dbf54b86f57a0f0f8"
+  - path: operations/list-products.graphql
+    role: graphql
+    sha256: "7db1c255e054592dc0f7010582ddf518de0d7c273d17743316ad679195404189"
+  - path: operations/get-product.graphql
+    role: graphql
+    sha256: "71e6ab6e4d9aa85cc5a6659ec7b5af9b71577eb1ee6e57f8c3e9e135998709d5"
+  - path: operations/create-product.graphql
+    role: graphql
+    sha256: "52a535c17f7f8ff7f3863d2b3aa2a6b881ed20cd8c1fa604fc165b9d86a04f03"
+  - path: operations/update-product.graphql
+    role: graphql
+    sha256: "07d99b91f2d26bef3db445509f6dc7d39c3cd34c400aa61ba90d26cebbfd7ca3"
+  - path: operations/list-orders.graphql
+    role: graphql
+    sha256: "089c5957a2849b296c842041555fcd4086daa3a2f771083447f212936eeefb25"
+  - path: operations/get-customer.graphql
+    role: graphql
+    sha256: "c397305cf7609f99231c7e46c3e79972d36ea8f9cbdee374012b58d028f7a521"
+  - path: operations/update-customer.graphql
+    role: graphql
+    sha256: "c428963c93b1b6af6224ded74f366bae439e84bb02b2f6501c07c23c99ede636"
+  - path: setup-guide.md
+    role: guide
+    sha256: "d0ba0fd1486e972f2617c3c074ae087d392eb9e668e01943fab21eff42cab2ff"
+  - path: fixtures.yml
+    role: fixture
+    sha256: "7d43475e4726a9e1e535fb6d008f344daca7c74b0ee215afba1945cac69097a6"
+
+auth:
+  allowedOriginHosts:
+    - "*.myshopify.com"
+  credentialSlots:
+    - id: access_token
+      label: Shopify Admin API access token
+      kind: bearer_token
+      required: true
+  configurationFields:
+    - id: shop
+      label: Shopify store host
+      type: string
+      required: true
+      agentVisible: true
+  steps:
+    - id: shop
+      type: fields
+      title: Enter the store's myshopify.com host
+      description: >-
+        Enter the permanent Shopify host, such as muskan-store.myshopify.com. Custom storefront
+        domains are not accepted.
+      fields:
+        - id: shop
+          label: Store host
+          input: text
+          required: true
+          target:
+            type: configuration
+            field: shop
+    - id: access_token
+      type: fields
+      title: Enter the Admin API access token
+      description: >-
+        Create and authorize an app outside TulipFarm, grant only the required Admin API scopes,
+        and paste the shop-specific access token. Agents never see it.
+      fields:
+        - id: access_token
+          label: Admin API access token
+          input: password
+          required: true
+          target:
+            type: credential
+            slot: access_token
+  healthCheckOperationId: get-shop
+
+operations:
+  - id: get-shop
+    name: shopify_get_shop
+    description: Identify the Shopify store represented by this access token.
+    effect: read
+    identityMode: shared_only
+    credentialSlot: access_token
+    credentialInjection:
+      in: header
+      name: X-Shopify-Access-Token
+      format: "{token}"
+    source:
+      type: graphql
+      url: https://{shop}/admin/api/2026-07/graphql.json
+      operation: ShopifyGetShop
+      documentFile: operations/get-shop.graphql
+    requestSchema:
+      type: object
+      properties: {}
+      additionalProperties: false
+    response:
+      maxBytes: 65536
+      schema:
+        type: object
+        properties:
+          data:
+            type: object
+            properties:
+              shop:
+                type: object
+                properties:
+                  id: { type: string }
+                  name: { type: string }
+                  myshopifyDomain: { type: string }
+                  currencyCode: { type: string }
+                required: [id, name, myshopifyDomain, currencyCode]
+            required: [shop]
+          errors: { type: array, maxItems: 0 }
+        required: [data]
+      projection:
+        - /data/shop
+        - /errors
+
+  - id: list-products
+    name: shopify_list_products
+    description: List products by latest update, with optional Shopify search syntax.
+    effect: read
+    identityMode: shared_only
+    credentialSlot: access_token
+    credentialInjection:
+      in: header
+      name: X-Shopify-Access-Token
+      format: "{token}"
+    source:
+      type: graphql
+      url: https://{shop}/admin/api/2026-07/graphql.json
+      operation: ShopifyListProducts
+      documentFile: operations/list-products.graphql
+    requestSchema:
+      type: object
+      properties:
+        first: { type: integer, minimum: 1, maximum: 100 }
+        after: { type: string, maxLength: 4096 }
+        query: { type: string, maxLength: 2048 }
+      required: [first]
+      additionalProperties: false
+    response:
+      maxBytes: 524288
+      schema:
+        type: object
+        properties:
+          data:
+            type: object
+            properties:
+              products:
+                type: object
+                properties:
+                  nodes:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id: { type: string }
+                        title: { type: string }
+                        handle: { type: string }
+                        status: { type: string }
+                        vendor: { type: string }
+                        productType: { type: string }
+                        tags: { type: array }
+                        updatedAt: { type: string }
+                  pageInfo:
+                    type: object
+                    properties:
+                      hasNextPage: { type: boolean }
+                      endCursor: { type: ["string", "null"] }
+                    required: [hasNextPage, endCursor]
+                required: [nodes, pageInfo]
+            required: [products]
+          errors: { type: array, maxItems: 0 }
+        required: [data]
+      projection:
+        - /data/products
+        - /errors
+
+  - id: get-product
+    name: shopify_get_product
+    description: Read one product and its first 20 variants by Shopify global id.
+    effect: read
+    identityMode: shared_only
+    credentialSlot: access_token
+    credentialInjection:
+      in: header
+      name: X-Shopify-Access-Token
+      format: "{token}"
+    source:
+      type: graphql
+      url: https://{shop}/admin/api/2026-07/graphql.json
+      operation: ShopifyGetProduct
+      documentFile: operations/get-product.graphql
+    requestSchema:
+      type: object
+      properties:
+        id:
+          type: string
+          pattern: "^gid://shopify/Product/[0-9]+$"
+      required: [id]
+      additionalProperties: false
+    response:
+      maxBytes: 524288
+      schema:
+        type: object
+        properties:
+          data:
+            type: object
+            properties:
+              product:
+                type: ["object", "null"]
+                properties:
+                  id: { type: string }
+                  title: { type: string }
+                  handle: { type: string }
+                  descriptionHtml: { type: string }
+                  status: { type: string }
+                  vendor: { type: string }
+                  productType: { type: string }
+                  tags: { type: array }
+                  createdAt: { type: string }
+                  updatedAt: { type: string }
+                  variants: { type: object }
+            required: [product]
+          errors: { type: array, maxItems: 0 }
+        required: [data]
+      projection:
+        - /data/product
+        - /errors
+
+  - id: create-product
+    name: shopify_create_product
+    description: Create one unpublished or explicitly statused Shopify product.
+    effect: create
+    identityMode: shared_only
+    credentialSlot: access_token
+    credentialInjection:
+      in: header
+      name: X-Shopify-Access-Token
+      format: "{token}"
+    source:
+      type: graphql
+      url: https://{shop}/admin/api/2026-07/graphql.json
+      operation: ShopifyCreateProduct
+      documentFile: operations/create-product.graphql
+    requestSchema:
+      type: object
+      properties:
+        product:
+          type: object
+          properties:
+            title: { type: string, minLength: 1, maxLength: 255 }
+            descriptionHtml: { type: string, maxLength: 100000 }
+            handle: { type: string, maxLength: 255 }
+            productType: { type: string, maxLength: 255 }
+            vendor: { type: string, maxLength: 255 }
+            status: { type: string, enum: [ACTIVE, ARCHIVED, DRAFT] }
+            tags:
+              type: array
+              maxItems: 250
+              items: { type: string, maxLength: 255 }
+          required: [title]
+          additionalProperties: false
+      required: [product]
+      additionalProperties: false
+    response:
+      maxBytes: 131072
+      schema:
+        type: object
+        properties:
+          data:
+            type: object
+            properties:
+              productCreate:
+                type: object
+                properties:
+                  product: { type: object }
+                  userErrors: { type: array, maxItems: 0 }
+                required: [product, userErrors]
+            required: [productCreate]
+          errors: { type: array, maxItems: 0 }
+        required: [data]
+      projection:
+        - /data/productCreate
+        - /errors
+
+  - id: update-product
+    name: shopify_update_product
+    description: Update one product's basic catalog fields; read it first to avoid overwriting tags.
+    effect: update
+    identityMode: shared_only
+    credentialSlot: access_token
+    credentialInjection:
+      in: header
+      name: X-Shopify-Access-Token
+      format: "{token}"
+    source:
+      type: graphql
+      url: https://{shop}/admin/api/2026-07/graphql.json
+      operation: ShopifyUpdateProduct
+      documentFile: operations/update-product.graphql
+    requestSchema:
+      type: object
+      properties:
+        product:
+          type: object
+          minProperties: 2
+          properties:
+            id:
+              type: string
+              pattern: "^gid://shopify/Product/[0-9]+$"
+            title: { type: string, minLength: 1, maxLength: 255 }
+            descriptionHtml: { type: string, maxLength: 100000 }
+            handle: { type: string, maxLength: 255 }
+            productType: { type: string, maxLength: 255 }
+            vendor: { type: string, maxLength: 255 }
+            status: { type: string, enum: [ACTIVE, ARCHIVED, DRAFT] }
+            tags:
+              type: array
+              maxItems: 250
+              items: { type: string, maxLength: 255 }
+          required: [id]
+          additionalProperties: false
+      required: [product]
+      additionalProperties: false
+    response:
+      maxBytes: 131072
+      schema:
+        type: object
+        properties:
+          data:
+            type: object
+            properties:
+              productUpdate:
+                type: object
+                properties:
+                  product: { type: object }
+                  userErrors: { type: array, maxItems: 0 }
+                required: [product, userErrors]
+            required: [productUpdate]
+          errors: { type: array, maxItems: 0 }
+        required: [data]
+      projection:
+        - /data/productUpdate
+        - /errors
+
+  - id: list-orders
+    name: shopify_list_orders
+    description: List orders by latest update without returning customer identity or line items.
+    effect: sensitive_read
+    identityMode: shared_only
+    credentialSlot: access_token
+    credentialInjection:
+      in: header
+      name: X-Shopify-Access-Token
+      format: "{token}"
+    source:
+      type: graphql
+      url: https://{shop}/admin/api/2026-07/graphql.json
+      operation: ShopifyListOrders
+      documentFile: operations/list-orders.graphql
+    requestSchema:
+      type: object
+      properties:
+        first: { type: integer, minimum: 1, maximum: 100 }
+        after: { type: string, maxLength: 4096 }
+        query: { type: string, maxLength: 2048 }
+      required: [first]
+      additionalProperties: false
+    response:
+      maxBytes: 524288
+      schema:
+        type: object
+        properties:
+          data:
+            type: object
+            properties:
+              orders:
+                type: object
+                properties:
+                  nodes:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id: { type: string }
+                        name: { type: string }
+                        createdAt: { type: string }
+                        updatedAt: { type: string }
+                        displayFinancialStatus: { type: string }
+                        displayFulfillmentStatus: { type: string }
+                        currentTotalPriceSet: { type: object }
+                  pageInfo:
+                    type: object
+                    properties:
+                      hasNextPage: { type: boolean }
+                      endCursor: { type: ["string", "null"] }
+                    required: [hasNextPage, endCursor]
+                required: [nodes, pageInfo]
+            required: [orders]
+          errors: { type: array, maxItems: 0 }
+        required: [data]
+      projection:
+        - /data/orders
+        - /errors
+
+  - id: get-customer
+    name: shopify_get_customer
+    description: Read one customer by Shopify global id after protected-data access is approved.
+    effect: sensitive_read
+    identityMode: shared_only
+    credentialSlot: access_token
+    credentialInjection:
+      in: header
+      name: X-Shopify-Access-Token
+      format: "{token}"
+    source:
+      type: graphql
+      url: https://{shop}/admin/api/2026-07/graphql.json
+      operation: ShopifyGetCustomer
+      documentFile: operations/get-customer.graphql
+    requestSchema:
+      type: object
+      properties:
+        id:
+          type: string
+          pattern: "^gid://shopify/Customer/[0-9]+$"
+      required: [id]
+      additionalProperties: false
+    response:
+      maxBytes: 131072
+      schema:
+        type: object
+        properties:
+          data:
+            type: object
+            properties:
+              customer:
+                type: ["object", "null"]
+                properties:
+                  id: { type: string }
+                  displayName: { type: string }
+                  firstName: { type: ["string", "null"] }
+                  lastName: { type: ["string", "null"] }
+                  defaultEmailAddress: { type: ["object", "null"] }
+                  defaultPhoneNumber: { type: ["object", "null"] }
+                  tags: { type: array }
+                  amountSpent: { type: object }
+                  createdAt: { type: string }
+                  updatedAt: { type: string }
+            required: [customer]
+          errors: { type: array, maxItems: 0 }
+        required: [data]
+      projection:
+        - /data/customer
+        - /errors
+
+  - id: update-customer
+    name: shopify_update_customer
+    description: Update one customer's basic details after protected-data access is approved.
+    effect: update
+    identityMode: shared_only
+    credentialSlot: access_token
+    credentialInjection:
+      in: header
+      name: X-Shopify-Access-Token
+      format: "{token}"
+    source:
+      type: graphql
+      url: https://{shop}/admin/api/2026-07/graphql.json
+      operation: ShopifyUpdateCustomer
+      documentFile: operations/update-customer.graphql
+    requestSchema:
+      type: object
+      properties:
+        input:
+          type: object
+          minProperties: 2
+          properties:
+            id:
+              type: string
+              pattern: "^gid://shopify/Customer/[0-9]+$"
+            email: { type: string, minLength: 3, maxLength: 320 }
+            phone: { type: string, maxLength: 64 }
+            firstName: { type: string, maxLength: 255 }
+            lastName: { type: string, maxLength: 255 }
+            locale: { type: string, maxLength: 32 }
+            note: { type: string, maxLength: 5000 }
+            taxExempt: { type: boolean }
+            tags:
+              type: array
+              maxItems: 250
+              items: { type: string, maxLength: 255 }
+          required: [id]
+          additionalProperties: false
+      required: [input]
+      additionalProperties: false
+    response:
+      maxBytes: 131072
+      schema:
+        type: object
+        properties:
+          data:
+            type: object
+            properties:
+              customerUpdate:
+                type: object
+                properties:
+                  customer: { type: object }
+                  userErrors: { type: array, maxItems: 0 }
+                required: [customer, userErrors]
+            required: [customerUpdate]
+          errors: { type: array, maxItems: 0 }
+        required: [data]
+      projection:
+        - /data/customerUpdate
+        - /errors

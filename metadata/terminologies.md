@@ -57,8 +57,9 @@ Never let these bleed: UI/URL never say "conversation"; domain/DB never say "cha
 | Who a Run event may be shown to | **Audience** | `RunEventAudience` | — | — | `participant` (in the conversation) \| `operator` (evidence: digests, dispatch records) |
 | How a routine starts | **Trigger** | `Trigger` | — | "Trigger" | event·manual·cron·webhook·agent |
 | A step in a routine | **State** | `State` | — | "State" | CNCF Serverless Workflow term |
-| A connected third-party | **Integration** | `Integration` | `/integrations`, `/api/v1/integrations` | "Integrations" | `connection`/`connector` → retired |
+| An installed third-party capability definition | **Integration** | `Integration` | `/integrations`, `/api/v1/integrations` | "Integrations" | One Integration may have many scoped Connections; `connector` → retired |
 | The data file that fully defines an Integration | **Integration manifest** | `IntegrationManifest` | — | — | `integrations/<slug>/manifest.yml`; identity + `auth` + `egress` (+ optional `ingress`). Authoring reference: `docs/architecture/building-an-integration.md`; ⛔ "integration config"/"connector definition" |
+| A scoped binding from an Integration to safe configuration and sealed Credentials | **Connection** | `Connection` | `/api/v1/integrations/:id/connections` | "Connection" | Personal Connections are owner-only; organization Connections require grants. A Connection stores only `secret://` references, never Credential plaintext. |
 | What an Integration lets agents *do* to the provider | **Egress** | `EgressConfig` | — | — | `openapi` \| `mcp` \| `ts-code` \| `none`; ⛔ "outbound"/"actions" as the block's name |
 | One provider API operation published as an agent Tool | **Egress operation** | `EgressOperation` | — | — | an explicit allowlist entry under `egress.operations`; compiles to a `ToolContractSpec`; ⛔ publishing a whole spec |
 | What an Integration lets the provider *send* TulipFarm | **Ingress** | `IngressConfig` | — | — | webhooks and event normalization; ⛔ "inbound"/"listener" as the block's name |

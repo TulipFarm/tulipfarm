@@ -318,13 +318,24 @@ export const InternalTurnToolResultResponseSchema = {
   properties: {
     status: {
       type: "string",
-      enum: ["succeeded", "denied", "invalid_arguments", "failed", "awaiting_approval"],
+      enum: [
+        "succeeded",
+        "denied",
+        "invalid_arguments",
+        "failed",
+        "needs_reconciliation",
+        "awaiting_approval",
+        "awaiting_child",
+        "awaiting_retry",
+      ],
     },
     output: {},
     /** Marks `output` as a replay marker rather than the Tool's answer; callers must not use it. */
     replayed: { type: "boolean" },
     reason: { type: "string" },
     approvalId: { type: "string" },
+    childRunId: { type: "string" },
+    waitId: { type: "string" },
     connectUrl: { type: "string", minLength: 1 },
   },
 } as const;

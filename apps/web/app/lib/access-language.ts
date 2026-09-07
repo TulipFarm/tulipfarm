@@ -100,7 +100,7 @@ const AREA_RULES: readonly AreaRule[] = [
     id: "apps",
     label: "Connected apps",
     blurb: "Slack, GitHub, Google Docs and anything else you link up.",
-    types: ["integration", "secret"],
+    types: ["integration", "secret", "soul.integration"],
     prefixes: ["integration", "tool"],
   },
   {

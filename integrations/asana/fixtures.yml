@@ -1,0 +1,137 @@
+version: 1
+cases:
+  - name: identifies-user
+    operationId: current-user
+    request: {}
+    response:
+      status: 200
+      body:
+        data:
+          gid: "1000000000000001"
+          name: Muskan Vijayvargiya
+          email: redacted@example.com
+          resource_type: user
+    expect:
+      request:
+        method: GET
+        url: https://app.asana.com/api/1.0/users/me
+        headers:
+          Authorization: Bearer oim-fixture-credential
+      result:
+        data:
+          gid: "1000000000000001"
+          name: Muskan Vijayvargiya
+
+  - name: lists-project-page
+    operationId: list-projects
+    request:
+      workspace: "2000000000000002"
+      limit: 2
+      page_token: eyJ2IjoxLCJ0Ijoib2ltLmFzYW5hLnYxLmxpc3QtcHJvamVjdHMiLCJrIjoiY3Vyc29yIiwiYyI6Im9sZC1jdXJzb3IifQ
+    response:
+      status: 200
+      body:
+        data:
+          - gid: "3000000000000003"
+            name: Launch
+            resource_type: project
+        next_page:
+          offset: next-cursor
+          path: /projects?limit=2&offset=next-cursor&workspace=2000000000000002
+          uri: https://app.asana.com/api/1.0/projects?limit=2&offset=next-cursor&workspace=2000000000000002
+    expect:
+      request:
+        method: GET
+        url: https://app.asana.com/api/1.0/projects?workspace=2000000000000002&limit=2&offset=old-cursor
+        headers:
+          Authorization: Bearer oim-fixture-credential
+      result:
+        data:
+          - gid: "3000000000000003"
+            name: Launch
+        next_page_token: eyJ2IjoxLCJ0Ijoib2ltLmFzYW5hLnYxLmxpc3QtcHJvamVjdHMiLCJrIjoiY3Vyc29yIiwiYyI6Im5leHQtY3Vyc29yIn0
+
+  - name: creates-task
+    operationId: create-task
+    request:
+      body:
+        data:
+          name: Publish launch notes
+          projects:
+            - "3000000000000003"
+          notes: Redacted release checklist
+    response:
+      status: 201
+      body:
+        data:
+          gid: "4000000000000004"
+          name: Publish launch notes
+          completed: false
+          resource_type: task
+    expect:
+      request:
+        method: POST
+        url: https://app.asana.com/api/1.0/tasks
+        headers:
+          Authorization: Bearer oim-fixture-credential
+          content-type: application/json
+        body:
+          data:
+            name: Publish launch notes
+            projects:
+              - "3000000000000003"
+            notes: Redacted release checklist
+      result:
+        data:
+          gid: "4000000000000004"
+          name: Publish launch notes
+
+  - name: comments-on-task
+    operationId: add-comment
+    request:
+      task_gid: "4000000000000004"
+      body:
+        data:
+          text: Ready for review.
+    response:
+      status: 201
+      body:
+        data:
+          gid: "5000000000000005"
+          resource_type: story
+          resource_subtype: comment_added
+          text: Ready for review.
+          created_at: "2026-09-07T06:20:00.000Z"
+    expect:
+      request:
+        method: POST
+        url: https://app.asana.com/api/1.0/tasks/4000000000000004/stories
+        headers:
+          Authorization: Bearer oim-fixture-credential
+          content-type: application/json
+        body:
+          data:
+            text: Ready for review.
+      result:
+        data:
+          gid: "5000000000000005"
+          text: Ready for review.
+
+  - name: rejects-invalid-credential
+    operationId: current-user
+    request: {}
+    response:
+      status: 401
+      body:
+        errors:
+          - message: Not Authorized
+    expect:
+      request:
+        method: GET
+        url: https://app.asana.com/api/1.0/users/me
+        headers:
+          Authorization: Bearer oim-fixture-credential
+      expectedError:
+        phase: before_dispatch
+        code: provider_unauthorized
+        retryable: false

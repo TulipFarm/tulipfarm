@@ -28,6 +28,25 @@ function stubTool(name: string, mutating = false): ToolDef {
 }
 
 describe("allowedToolNamesFor / availableToolsFor excluded param", () => {
+  it("resolves a persisted canonical Tool ID to the registered Tool name", () => {
+    const registry = new ToolRegistry();
+    registry.register({
+      ...stubTool("acme_v1_tickets_list"),
+      canonicalId: "oim.acme.v1.tickets-list",
+    });
+
+    const agent = {
+      name: "agent",
+      frontmatter: {},
+      body: "",
+      toolAllowlist: ["oim.acme.v1.tickets-list"],
+    };
+    expect([...(allowedToolNamesFor(registry, agent) ?? [])]).toEqual(["acme_v1_tickets_list"]);
+    expect(availableToolsFor(registry, agent).map((tool) => tool.name)).toEqual([
+      "acme_v1_tickets_list",
+    ]);
+  });
+
   it("drops excluded tool names from the allowlist and the prompt index", () => {
     const registry = new ToolRegistry();
     registry.register(stubTool("github_issue_read"));

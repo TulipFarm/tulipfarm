@@ -35,3 +35,21 @@ ajv.addFormat("date-time", {
   type: "string",
   validate: isValidIsoDateTime,
 });
+
+/**
+ * Compiles an Integration-declared JSON Schema into a checker that returns a bounded, readable
+ * reason or `null`.
+ *
+ * Callers get no Ajv types back on purpose: a validator handed out whole would let every consumer
+ * depend on the validator library the runtime happens to use today.
+ */
+export function compileJsonSchema(schema: unknown): (value: unknown) => string | null {
+  const validate = ajv.compile(schema as object);
+  return (value) => {
+    if (validate(value)) return null;
+    const reasons = (validate.errors ?? [])
+      .slice(0, 5)
+      .map((error) => `${error.instancePath || "/"} ${error.message ?? "is invalid"}`);
+    return reasons.join("; ") || "does not match the declared schema";
+  };
+}

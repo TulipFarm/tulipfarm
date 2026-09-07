@@ -1,0 +1,55 @@
+{
+  "name": "@oim-standard/conformance",
+  "version": "1.0.0",
+  "description": "Vendor-neutral Open Integration Manifest schemas and conformance tools",
+  "license": "Apache-2.0",
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "dependencies": {
+    "@noble/hashes": "^2.3.0",
+    "@sinclair/typebox": "^0.34.52",
+    "ajv": "^8.20.0",
+    "graphql": "^16.14.2",
+    "yaml": "^2.9.0"
+  },
+  "bin": {
+    "oim": "./bin/oim.mjs"
+  },
+  "types": "./src/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./src/index.d.ts",
+      "import": "./src/index.mjs",
+      "default": "./src/index.mjs"
+    },
+    "./capabilities": {
+      "types": "./src/capabilities.d.ts",
+      "import": "./src/capabilities.mjs",
+      "default": "./src/capabilities.mjs"
+    },
+    "./conformance": {
+      "types": "./src/conformance.d.ts",
+      "import": "./src/conformance.mjs",
+      "default": "./src/conformance.mjs"
+    },
+    "./schemas/*": "./schemas/*",
+    "./vectors/*": "./vectors/*"
+  },
+  "files": [
+    "LICENSE",
+    "NOTICE",
+    "README.md",
+    "SPECIFICATION.md",
+    "bin",
+    "conformance",
+    "dist",
+    "schemas",
+    "src",
+    "vectors"
+  ],
+  "scripts": {
+    "test": "node --test test/*.test.mjs"
+  }
+}

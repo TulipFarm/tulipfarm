@@ -1,0 +1,25 @@
+query ListIssues($first: Int!, $after: String) {
+  issues(first: $first, after: $after) {
+    nodes {
+      id
+      identifier
+      title
+      description
+      url
+      updatedAt
+      state {
+        id
+        name
+      }
+      team {
+        id
+        name
+        key
+      }
+    }
+    pageInfo {
+      hasNextPage
+      endCursor
+    }
+  }
+}

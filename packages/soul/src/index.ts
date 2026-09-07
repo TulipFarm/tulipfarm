@@ -126,7 +126,11 @@ export {
 } from "./integration-auth";
 export { validateThirdPartyManifest } from "./integration-trust";
 export type { BundledIntegration } from "./integrations/bundled";
-export { bundledIntegrationsDir, loadBundledIntegrations } from "./integrations/bundled";
+export {
+  bundledIntegrationsDir,
+  loadBundledIntegrations,
+  loadBundledOimPackages,
+} from "./integrations/bundled";
 export type { RegistryAvailability, RegistryEntry } from "./integrations/registry";
 export { loadIntegrationRegistry } from "./integrations/registry";
 export {

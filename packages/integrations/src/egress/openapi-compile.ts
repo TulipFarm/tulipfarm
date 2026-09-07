@@ -1,5 +1,6 @@
 import {
   canonicalHash,
+  type OimMultipartPart,
   type ToolContractDefinition,
   type ToolContractSpec,
 } from "@tulipfarm/schema";
@@ -7,6 +8,14 @@ import type { IntegrationHttpMethod } from "../http";
 import { assertPublicEgressUrl, EgressDestinationError } from "./destination";
 
 /** Structural copy of Soul `EgressConfig`; avoids coupling this provider-neutral compiler. */
+/** How a stored Secret is transformed before it fills `{token}`. */
+export type CredentialEncoding = "verbatim" | "basic";
+
+/** Applies a binding's declared encoding to the Secret about to be sent. */
+export function encodeCredential(value: string, encoding: CredentialEncoding | undefined): string {
+  return encoding === "basic" ? Buffer.from(value, "utf8").toString("base64") : value;
+}
+
 export interface OpenApiEgressAuth {
   /** Connection env var holding the credential. Sealed values resolve through the secrets store. */
   readonly token_env: string;
@@ -100,6 +109,31 @@ export interface OpenApiParamBinding {
 }
 
 /** Everything the adapter needs to turn validated arguments into one HTTP request. */
+export type OpenApiCredentialBinding =
+  | {
+      readonly in: "header";
+      readonly header: string;
+      readonly format: string;
+      readonly encoding?: CredentialEncoding;
+      /** Present for OIM bindings, so a multi-credential dispatch can select this Secret. */
+      readonly credentialSlot?: string;
+    }
+  | {
+      readonly in: "query";
+      readonly name: string;
+      readonly format: string;
+      readonly encoding?: CredentialEncoding;
+      readonly credentialSlot?: string;
+    }
+  | { readonly in: "base_url"; readonly credentialSlot?: string }
+  | {
+      /** Fills `{credential}` in `pathTemplate` — Telegram's `/bot{token}/…`. */
+      readonly in: "path";
+      readonly format: string;
+      readonly encoding?: CredentialEncoding;
+      readonly credentialSlot?: string;
+    };
+
 export interface OpenApiOperationBinding {
   readonly method: IntegrationHttpMethod;
   /** Origin plus any prefix, no trailing slash. */
@@ -111,15 +145,32 @@ export interface OpenApiOperationBinding {
   readonly params: readonly OpenApiParamBinding[];
   /** Whether a JSON request body is built from the `body` argument. */
   readonly hasBody: boolean;
+  /** Optional operation-specific response ceiling. */
+  readonly maxResponseBytes?: number;
   /** Static headers from the manifest (e.g. Notion's required `Notion-Version`). */
   readonly headers: Readonly<Record<string, string>>;
+  /**
+   * Query values the manifest pinned, which no argument can shadow.
+   *
+   * Held apart from `params` because these never appear in the Tool's input schema: an author
+   * pinned them precisely so the Agent has no say in them.
+   */
+  readonly pinnedQuery?: Readonly<Record<string, string>>;
+  /** How the `body` argument is serialised. Absent means JSON. */
+  readonly contentType?: "json" | "form" | "multipart";
+  /** OIM-only declared multipart parts. */
+  readonly multipart?: readonly OimMultipartPart[];
+  /** OIM-only signal that a successful response is a File, not JSON. */
+  readonly binaryResponse?: boolean;
+  /** OIM-declared header carrying delay-seconds or an HTTP-date after provider rejection. */
+  readonly retryAfterHeader?: string;
   /**
    * Absent when the manifest declares no credential — a genuinely public API. `base_url` carries
    * no header/format: the credential replaces `{token}` in `baseUrl` instead of riding a header.
    */
-  readonly auth?:
-    | { readonly in: "header"; readonly header: string; readonly format: string }
-    | { readonly in: "base_url" };
+  readonly auth?: OpenApiCredentialBinding;
+  /** A second bounded credential, kept distinct from the legacy primary binding. */
+  readonly secondaryAuth?: OpenApiCredentialBinding;
 }
 
 export interface CompiledEgressTool {

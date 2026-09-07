@@ -11,6 +11,7 @@ Detailed contracts:
 - [Boundaries and owners](boundaries.md)
 - [Dependency rules](dependency-rules.md)
 - [Building an Integration](building-an-integration.md)
+- [Open Integration Manifest](open-integration-manifest.md)
 - [Governed network Tools](governed-network-tools.md)
 - [Deployment manifest](deployment-manifest.md)
 - [Sandboxed Surface code views](adr-031-sandboxed-surface-code.md)
@@ -44,6 +45,7 @@ Detailed contracts:
 | ADR-029 | Curator output names only a closed `kind` and a Run-scoped subject; the server templates every user-visible string, URL, and dedupe key | A Proposal pill inserts its prompt straight into Chat, so model-authored text there is a direct injection path into the user's next turn | `packages/curator`, `apps/api` |
 | ADR-030 | Generic web and API access runs as governed first-party Tools with pure call-level read/write classification | One structured path keeps SSRF controls, exact destination and Secret authority, Approval, and effect recovery intact while allowing REST and GraphQL calls whose risk varies by operation | `packages/tool-host`, `packages/integrations`, `apps/api` |
 | ADR-031 | A Surface component may carry Agent-authored code, executed in an opaque-origin `sandbox="allow-scripts"` frame with `connect-src 'none'` | The shipped catalog cannot anticipate every visual a user asks for, and an Agent that can only re-compose it substitutes and narrates; the boundary is the missing origin and the missing network, never source inspection | `packages/surface`, `packages/surface-web`, `apps/web` |
+| ADR-032 | Portable Integration packages use the Open Integration Manifest: a strict YAML entry point, digest-covered companions, versioned conformance profiles, and no install-time dependency execution | A provider contract must be reviewable and portable without making package installation a code-execution or supply-chain boundary; TulipFarm-specific behavior stays namespaced and current manifests migrate incrementally | `packages/schema`, `packages/integrations` |
 
 ## Superseded decisions
 

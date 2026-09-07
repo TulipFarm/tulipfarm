@@ -1,11 +1,13 @@
 import {
   AdapterDispatchError,
   type ToolAdapter,
+  type ToolAdapterCredentials,
   type ToolAdapterRequest,
 } from "@tulipfarm/tool-broker";
 import { classifyHttpFailure, type IntegrationHttpResponse } from "../http";
 import type { GraphqlOperationBinding } from "./graphql-compile";
 import type { EgressHttpPort } from "./openapi-adapter";
+import { encodeCredential } from "./openapi-compile";
 
 export interface GraphqlToolAdapterDeps {
   readonly binding: GraphqlOperationBinding;
@@ -36,15 +38,26 @@ export class GraphqlToolAdapter implements ToolAdapter {
 
   constructor(private readonly deps: GraphqlToolAdapterDeps) {}
 
-  async dispatch(request: ToolAdapterRequest, credential?: string): Promise<unknown> {
+  async dispatch(
+    request: ToolAdapterRequest,
+    credential?: string,
+    credentials?: ToolAdapterCredentials
+  ): Promise<unknown> {
     const { binding, http } = this.deps;
-    if (binding.auth !== undefined && credential === undefined) {
+    const authCredential =
+      binding.auth?.credentialSlot === undefined
+        ? credential
+        : (credentials?.[binding.auth.credentialSlot] ?? credential);
+    if (binding.auth !== undefined && authCredential === undefined) {
       throw new AdapterDispatchError("before_dispatch", "credential_missing", false);
     }
 
     const headers: Record<string, string> = { accept: "application/json", ...binding.headers };
-    if (binding.auth !== undefined && credential !== undefined) {
-      headers[binding.auth.header] = binding.auth.format.replace("{token}", credential);
+    if (binding.auth !== undefined && authCredential !== undefined) {
+      headers[binding.auth.header] = binding.auth.format.replace(
+        "{token}",
+        encodeCredential(authCredential, binding.auth.encoding)
+      );
     }
 
     let response: IntegrationHttpResponse;
@@ -67,12 +80,26 @@ export class GraphqlToolAdapter implements ToolAdapter {
       );
     }
 
-    const failure = classifyHttpFailure(response, binding.mutating);
+    const failure = classifyHttpFailure(
+      response,
+      binding.mutating,
+      binding.retryAfterHeader ?? "Retry-After"
+    );
     if (failure !== null) {
-      throw new AdapterDispatchError(failure.phase, failure.code, failure.retryable);
+      throw new AdapterDispatchError(
+        failure.phase,
+        failure.code,
+        failure.retryable,
+        undefined,
+        failure.retryAfterMs
+      );
     }
     if (hasErrors(response.body)) {
-      throw new AdapterDispatchError("before_dispatch", "provider_rejected", false);
+      throw new AdapterDispatchError(
+        binding.mutating ? "after_dispatch" : "before_dispatch",
+        "provider_rejected",
+        false
+      );
     }
     return response.body;
   }

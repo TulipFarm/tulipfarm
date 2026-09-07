@@ -43,7 +43,13 @@ function shortDescription(integration: IntegrationSummary): string {
   return integration.description.split(/[.—]/, 1)[0].trim();
 }
 
-function StatusAction({ integration }: { integration: IntegrationSummary }) {
+function StatusAction({
+  integration,
+  isAdmin,
+}: {
+  integration: IntegrationSummary;
+  isAdmin: boolean;
+}) {
   const name = displayName(integration);
 
   if (integration.availability === "coming_soon") {
@@ -55,6 +61,20 @@ function StatusAction({ integration }: { integration: IntegrationSummary }) {
   }
 
   if (!integration.installed) {
+    if (isAdmin) {
+      const query = new URLSearchParams({ install: "1", name: integration.name });
+      if (integration.source) query.set("source", integration.source);
+      return (
+        <Link
+          to={`?${query.toString()}`}
+          preventScrollReset
+          aria-label={`Install ${name}`}
+          className="inline-flex items-center rounded-lg border border-border bg-background px-3 py-1.5 text-sm font-medium text-foreground transition-[background-color,transform] hover:bg-accent active:scale-[0.96]"
+        >
+          Install
+        </Link>
+      );
+    }
     return (
       <span className="rounded-lg bg-muted px-3 py-1.5 text-sm text-muted-foreground">
         Not installed
@@ -91,12 +111,10 @@ function StatusAction({ integration }: { integration: IntegrationSummary }) {
 export function IntegrationCard({
   integration,
   onUpdate,
-  updating,
   isAdmin,
 }: {
   integration: IntegrationSummary;
-  onUpdate: (name: string, source?: string) => void;
-  updating?: boolean;
+  onUpdate: (integration: IntegrationSummary) => void;
   isAdmin?: boolean;
 }) {
   const name = displayName(integration);
@@ -119,14 +137,13 @@ export function IntegrationCard({
           <Button
             size="sm"
             variant="outline"
-            disabled={updating}
             aria-label={`Update ${name}`}
-            onClick={() => onUpdate(integration.name, integration.source)}
+            onClick={() => onUpdate(integration)}
           >
-            {updating ? "Updating…" : "Update"}
+            Update
           </Button>
         ) : null}
-        <StatusAction integration={integration} />
+        <StatusAction integration={integration} isAdmin={Boolean(isAdmin)} />
       </div>
     </li>
   );

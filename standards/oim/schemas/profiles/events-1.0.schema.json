@@ -1,0 +1,201 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:oim:schema:1.0:profiles:events-1.0.schema.json",
+  "title": "Open Integration Manifest Events 1.0",
+  "additionalProperties": false,
+  "type": "object",
+  "required": ["path", "verification", "deduplication", "eventTypes"],
+  "properties": {
+    "path": {
+      "pattern": "^/[A-Za-z0-9][A-Za-z0-9._/-]*$",
+      "maxLength": 128,
+      "type": "string"
+    },
+    "verification": {
+      "additionalProperties": false,
+      "type": "object",
+      "required": ["scheme", "secretSlot"],
+      "properties": {
+        "scheme": {
+          "type": "string",
+          "enum": [
+            "shared_secret",
+            "twilio_hmac_sha1",
+            "hmac_sha256",
+            "hmac_sha512",
+            "ed25519",
+            "rsa_sha256",
+            "jwt"
+          ]
+        },
+        "secretSlot": {
+          "pattern": "^[a-z][a-z0-9_]{1,63}$",
+          "type": "string"
+        },
+        "signatureHeader": {
+          "pattern": "^[A-Za-z0-9!#$%&'*+.^_`|~-]+$",
+          "maxLength": 128,
+          "type": "string"
+        },
+        "signatureEncoding": {
+          "type": "string",
+          "enum": ["hex", "base64", "base64url"]
+        },
+        "signaturePrefix": {
+          "maxLength": 32,
+          "type": "string"
+        },
+        "signingInput": {
+          "minLength": 1,
+          "maxLength": 256,
+          "type": "string"
+        },
+        "timestampHeader": {
+          "pattern": "^[A-Za-z0-9!#$%&'*+.^_`|~-]+$",
+          "maxLength": 128,
+          "type": "string"
+        },
+        "toleranceSeconds": {
+          "minimum": 1,
+          "maximum": 3600,
+          "type": "integer"
+        },
+        "issuer": {
+          "minLength": 1,
+          "maxLength": 256,
+          "type": "string"
+        },
+        "audience": {
+          "minLength": 1,
+          "maxLength": 256,
+          "type": "string"
+        }
+      }
+    },
+    "handshake": {
+      "additionalProperties": false,
+      "type": "object",
+      "required": ["kind"],
+      "properties": {
+        "kind": {
+          "type": "string",
+          "enum": ["none", "echo_body_pointer", "echo_header"]
+        },
+        "bodyPointer": {
+          "pattern": "^(?:/(?:[^/~]|~[01])*)+$",
+          "maxLength": 512,
+          "type": "string"
+        },
+        "header": {
+          "pattern": "^[A-Za-z0-9!#$%&'*+.^_`|~-]+$",
+          "maxLength": 128,
+          "type": "string"
+        },
+        "responseField": {
+          "pattern": "^[a-z][a-z0-9_]{1,63}$",
+          "type": "string"
+        }
+      }
+    },
+    "acceptance": {
+      "additionalProperties": false,
+      "type": "object",
+      "properties": {
+        "requireBodyPointers": {
+          "uniqueItems": true,
+          "type": "array",
+          "items": {
+            "pattern": "^(?:/(?:[^/~]|~[01])*)+$",
+            "maxLength": 512,
+            "type": "string"
+          }
+        },
+        "requireKnownEventType": {
+          "type": "boolean"
+        }
+      }
+    },
+    "deduplication": {
+      "additionalProperties": false,
+      "type": "object",
+      "required": ["kind"],
+      "properties": {
+        "kind": {
+          "type": "string",
+          "enum": ["delivery_id_header", "body_pointer", "none"]
+        },
+        "header": {
+          "pattern": "^[A-Za-z0-9!#$%&'*+.^_`|~-]+$",
+          "maxLength": 128,
+          "type": "string"
+        },
+        "bodyPointer": {
+          "pattern": "^(?:/(?:[^/~]|~[01])*)+$",
+          "maxLength": 512,
+          "type": "string"
+        }
+      }
+    },
+    "eventTypes": {
+      "minItems": 1,
+      "type": "array",
+      "items": {
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["type", "selector", "schema"],
+        "properties": {
+          "type": {
+            "pattern": "^[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*$",
+            "maxLength": 128,
+            "type": "string"
+          },
+          "selector": {
+            "additionalProperties": false,
+            "type": "object",
+            "required": ["pointer"],
+            "properties": {
+              "pointer": {
+                "pattern": "^(?:/(?:[^/~]|~[01])*)+$",
+                "maxLength": 512,
+                "type": "string"
+              },
+              "equals": {
+                "maxLength": 256,
+                "type": "string"
+              },
+              "matches": {
+                "minLength": 1,
+                "maxLength": 256,
+                "type": "string"
+              }
+            }
+          },
+          "schema": {
+            "type": "object",
+            "patternProperties": {
+              "^(.*)$": {}
+            }
+          },
+          "normalize": {
+            "pattern": "^[A-Za-z_$][A-Za-z0-9_$]*$",
+            "type": "string"
+          },
+          "safeHeaders": {
+            "uniqueItems": true,
+            "type": "array",
+            "items": {
+              "pattern": "^[A-Za-z0-9!#$%&'*+.^_`|~-]+$",
+              "maxLength": 128,
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    "rawRetentionDays": {
+      "minimum": 1,
+      "maximum": 90,
+      "type": "integer"
+    }
+  }
+}

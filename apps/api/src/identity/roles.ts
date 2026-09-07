@@ -17,11 +17,64 @@ export const ADMIN_ONLY_SURFACES: readonly {
   readonly enforcedIn: string;
 }[] = [
   { type: "secret", actions: ["secret.write", "secret.delete"], enforcedIn: "secrets/routes.ts" },
+  /**
+   * An organization Connection is default-deny: creating one stores a Credential every authorized
+   * principal can then spend as the business, and using one spends it. A person's own Connection
+   * is not decided here — ownership settles that, so no grant can widen it.
+   */
+  {
+    type: "connection",
+    actions: ["connection.create", "connection.use"],
+    enforcedIn: "integrations/adhoc-routes.ts",
+  },
+  /**
+   * Replaying a webhook delivery re-runs whatever a Routine does on that event, using the
+   * business's own Connection. Reading one exposes the provider payload that was kept.
+   */
+  {
+    type: "integration.delivery",
+    actions: ["integration.delivery.read", "integration.delivery.replay"],
+    enforcedIn: "integrations/delivery-routes.ts",
+  },
   /** Business integration credential changes are admin-only; they affect every Agent. */
   {
     type: "integration",
-    actions: ["integration.connect", "integration.disconnect", "integration.remove"],
-    enforcedIn: "integrations/routes.ts",
+    actions: [
+      "integration.connect",
+      "integration.disconnect",
+      "integration.install",
+      "integration.remove",
+      "integration.update",
+    ],
+    enforcedIn: "integrations/routes.ts; integrations/marketplace-routes.ts",
+  },
+  {
+    type: "deployment",
+    actions: ["deployment.oim_trust.manage"],
+    enforcedIn: "integrations/oim-release-routes.ts",
+  },
+  /**
+   * Publishing an authored OIM package is an operator decision: the manifest states the
+   * destinations every Agent may then reach and the credential slots it may spend, so drafting one
+   * from documentation is free but landing it in the Soul is not.
+   */
+  {
+    type: "soul.integration",
+    actions: ["soul.integration.author"],
+    enforcedIn: "soul/integrations/tools.ts",
+  },
+  /**
+   * Indexing a provider's content into Knowledge is an operator decision, not a member one: it
+   * decides what every Agent can later retrieve, and it spends the provider's rate limit.
+   */
+  {
+    type: "integration.knowledge",
+    actions: [
+      "integration.knowledge.describe",
+      "integration.knowledge.discover",
+      "integration.knowledge.sync",
+    ],
+    enforcedIn: "integrations/knowledge-tools.ts",
   },
   /** Shared credentials and provider writes require an explicit Team-level grant. */
   {
@@ -136,6 +189,7 @@ export const ADMIN_ONLY_SURFACES: readonly {
     type: "team",
     actions: [
       "team.create",
+      "team.write",
       "team.hierarchy.manage",
       "team.delegation.manage",
       "team.archive",
@@ -143,7 +197,7 @@ export const ADMIN_ONLY_SURFACES: readonly {
       "team.emergency_override",
       "team.moved",
     ],
-    enforcedIn: "authz/team-routes.ts",
+    enforcedIn: "authz/team-routes.ts; integrations/oim-connection-routes.ts",
   },
   {
     type: "team_asset",
@@ -226,6 +280,15 @@ export const MEMBER_ALLOWED_SURFACES: readonly {
   },
   { type: "soul", actions: ["*"], enforcedIn: "soul/routes.ts" },
   { type: "soul.guardrails", actions: ["*"], enforcedIn: "platform/guardrail-tool.ts" },
+  /**
+   * Reading a published package and reviewing a draft one. Both are inspection: a review reports
+   * what a manifest would be allowed to do and writes nothing, so it is the write that is gated.
+   */
+  {
+    type: "soul.integration",
+    actions: ["soul.integration.read"],
+    enforcedIn: "soul/integrations/tools.ts",
+  },
   { type: "soul.repo", actions: ["*"], enforcedIn: "platform/tools.ts" },
   /** Resource type authoring requires an explicit Team-level grant. */
   {

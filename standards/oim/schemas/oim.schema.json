@@ -1,0 +1,2424 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:oim:schema:1.0:oim.schema.json",
+  "title": "Open Integration Manifest 1.0",
+  "additionalProperties": false,
+  "type": "object",
+  "required": ["oimVersion", "kind", "metadata", "profiles", "operations"],
+  "properties": {
+    "oimVersion": {
+      "const": "1.0",
+      "type": "string"
+    },
+    "kind": {
+      "const": "Integration",
+      "type": "string"
+    },
+    "metadata": {
+      "additionalProperties": false,
+      "type": "object",
+      "required": ["id", "name", "version", "description", "license"],
+      "properties": {
+        "id": {
+          "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$",
+          "maxLength": 96,
+          "type": "string"
+        },
+        "name": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "version": {
+          "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)(?:-(?:0|[1-9][0-9]*|[0-9A-Za-z-]*[A-Za-z-][0-9A-Za-z-]*)(?:\\.(?:0|[1-9][0-9]*|[0-9A-Za-z-]*[A-Za-z-][0-9A-Za-z-]*))*)?(?:\\+[0-9A-Za-z-]+(?:\\.[0-9A-Za-z-]+)*)?$",
+          "maxLength": 128,
+          "type": "string"
+        },
+        "description": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "license": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "maintainers": {
+          "minItems": 1,
+          "type": "array",
+          "items": {
+            "additionalProperties": false,
+            "type": "object",
+            "required": ["name"],
+            "properties": {
+              "name": {
+                "minLength": 1,
+                "type": "string"
+              },
+              "url": {
+                "pattern": "^https://[A-Za-z0-9](?:[A-Za-z0-9.-]*[A-Za-z0-9])?(?::[1-9][0-9]{0,4})?(?:/[^\\s]*)?$",
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    },
+    "profiles": {
+      "additionalProperties": false,
+      "type": "object",
+      "required": ["core"],
+      "properties": {
+        "core": {
+          "type": "string",
+          "enum": ["1.0", "1.1", "1.2"]
+        },
+        "auth": {
+          "type": "string",
+          "enum": ["1.0"]
+        },
+        "events": {
+          "type": "string",
+          "enum": ["1.0"]
+        },
+        "knowledge": {
+          "type": "string",
+          "enum": ["1.0", "1.1"]
+        },
+        "hooks": {
+          "type": "string",
+          "enum": ["1.0"]
+        }
+      }
+    },
+    "files": {
+      "uniqueItems": true,
+      "type": "array",
+      "items": {
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["path", "role", "sha256"],
+        "properties": {
+          "path": {
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*(?:/[A-Za-z0-9][A-Za-z0-9._-]*)*$",
+            "type": "string"
+          },
+          "role": {
+            "type": "string",
+            "enum": ["openapi", "graphql", "guide", "hook", "fixture"]
+          },
+          "sha256": {
+            "pattern": "^[a-f0-9]{64}$",
+            "type": "string"
+          }
+        }
+      }
+    },
+    "auth": {
+      "additionalProperties": false,
+      "type": "object",
+      "required": ["credentialSlots", "steps"],
+      "properties": {
+        "credentialSlots": {
+          "minItems": 1,
+          "type": "array",
+          "items": {
+            "additionalProperties": false,
+            "type": "object",
+            "required": ["id", "label", "kind"],
+            "properties": {
+              "id": {
+                "pattern": "^[a-z][a-z0-9_]{1,63}$",
+                "maxLength": 64,
+                "type": "string"
+              },
+              "label": {
+                "minLength": 1,
+                "maxLength": 128,
+                "type": "string"
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "api_key",
+                  "bearer_token",
+                  "oauth2_access_token",
+                  "oauth2_refresh_token",
+                  "client_secret",
+                  "private_key",
+                  "webhook_secret"
+                ]
+              },
+              "required": {
+                "type": "boolean"
+              }
+            }
+          }
+        },
+        "configurationFields": {
+          "type": "array",
+          "items": {
+            "additionalProperties": false,
+            "type": "object",
+            "required": ["id", "label", "type"],
+            "properties": {
+              "id": {
+                "pattern": "^[a-z][a-z0-9_]{1,63}$",
+                "maxLength": 64,
+                "type": "string"
+              },
+              "label": {
+                "minLength": 1,
+                "maxLength": 128,
+                "type": "string"
+              },
+              "type": {
+                "type": "string",
+                "enum": ["string", "url", "boolean", "integer"]
+              },
+              "required": {
+                "type": "boolean"
+              },
+              "agentVisible": {
+                "type": "boolean"
+              }
+            }
+          }
+        },
+        "steps": {
+          "minItems": 1,
+          "type": "array",
+          "items": {
+            "anyOf": [
+              {
+                "additionalProperties": false,
+                "type": "object",
+                "required": ["id", "title", "type", "fields"],
+                "properties": {
+                  "id": {
+                    "pattern": "^[a-z][a-z0-9_]{1,63}$",
+                    "maxLength": 64,
+                    "type": "string"
+                  },
+                  "title": {
+                    "minLength": 1,
+                    "maxLength": 128,
+                    "type": "string"
+                  },
+                  "description": {
+                    "minLength": 1,
+                    "maxLength": 2048,
+                    "type": "string"
+                  },
+                  "type": {
+                    "const": "fields",
+                    "type": "string"
+                  },
+                  "fields": {
+                    "minItems": 1,
+                    "type": "array",
+                    "items": {
+                      "additionalProperties": false,
+                      "type": "object",
+                      "required": ["id", "label", "input", "target"],
+                      "properties": {
+                        "id": {
+                          "pattern": "^[a-z][a-z0-9_]{1,63}$",
+                          "maxLength": 64,
+                          "type": "string"
+                        },
+                        "label": {
+                          "minLength": 1,
+                          "maxLength": 128,
+                          "type": "string"
+                        },
+                        "description": {
+                          "minLength": 1,
+                          "maxLength": 1024,
+                          "type": "string"
+                        },
+                        "input": {
+                          "type": "string",
+                          "enum": ["text", "password", "url"]
+                        },
+                        "target": {
+                          "anyOf": [
+                            {
+                              "additionalProperties": false,
+                              "type": "object",
+                              "required": ["type", "slot"],
+                              "properties": {
+                                "type": {
+                                  "const": "credential",
+                                  "type": "string"
+                                },
+                                "slot": {
+                                  "pattern": "^[a-z][a-z0-9_]{1,63}$",
+                                  "maxLength": 64,
+                                  "type": "string"
+                                }
+                              }
+                            },
+                            {
+                              "additionalProperties": false,
+                              "type": "object",
+                              "required": ["type", "field"],
+                              "properties": {
+                                "type": {
+                                  "const": "configuration",
+                                  "type": "string"
+                                },
+                                "field": {
+                                  "pattern": "^[a-z][a-z0-9_]{1,63}$",
+                                  "maxLength": 64,
+                                  "type": "string"
+                                }
+                              }
+                            }
+                          ]
+                        },
+                        "required": {
+                          "type": "boolean"
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "additionalProperties": false,
+                "type": "object",
+                "required": [
+                  "id",
+                  "title",
+                  "type",
+                  "authorizationUrl",
+                  "tokenUrl",
+                  "scopes",
+                  "clientId",
+                  "bindings"
+                ],
+                "properties": {
+                  "id": {
+                    "pattern": "^[a-z][a-z0-9_]{1,63}$",
+                    "maxLength": 64,
+                    "type": "string"
+                  },
+                  "title": {
+                    "minLength": 1,
+                    "maxLength": 128,
+                    "type": "string"
+                  },
+                  "description": {
+                    "minLength": 1,
+                    "maxLength": 2048,
+                    "type": "string"
+                  },
+                  "type": {
+                    "const": "oauth2",
+                    "type": "string"
+                  },
+                  "authorizationUrl": {
+                    "pattern": "^https://[A-Za-z0-9](?:[A-Za-z0-9.-]*[A-Za-z0-9])?(?::[1-9][0-9]{0,4})?(?:/[^\\s]*)?$",
+                    "type": "string"
+                  },
+                  "tokenUrl": {
+                    "pattern": "^https://[A-Za-z0-9](?:[A-Za-z0-9.-]*[A-Za-z0-9])?(?::[1-9][0-9]{0,4})?(?:/[^\\s]*)?$",
+                    "type": "string"
+                  },
+                  "scopes": {
+                    "uniqueItems": true,
+                    "type": "array",
+                    "items": {
+                      "minLength": 1,
+                      "type": "string"
+                    }
+                  },
+                  "pkce": {
+                    "type": "boolean"
+                  },
+                  "tokenEndpointAuthMethod": {
+                    "anyOf": [
+                      {
+                        "const": "none",
+                        "type": "string"
+                      },
+                      {
+                        "const": "client_secret_post",
+                        "type": "string"
+                      },
+                      {
+                        "const": "client_secret_basic",
+                        "type": "string"
+                      }
+                    ]
+                  },
+                  "authorizationParameters": {
+                    "additionalProperties": false,
+                    "type": "object",
+                    "patternProperties": {
+                      "^[A-Za-z][A-Za-z0-9_.-]{0,127}$": {
+                        "minLength": 1,
+                        "maxLength": 2048,
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "clientId": {
+                    "additionalProperties": false,
+                    "type": "object",
+                    "required": ["type", "slot"],
+                    "properties": {
+                      "type": {
+                        "const": "credential",
+                        "type": "string"
+                      },
+                      "slot": {
+                        "pattern": "^[a-z][a-z0-9_]{1,63}$",
+                        "maxLength": 64,
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "clientSecret": {
+                    "additionalProperties": false,
+                    "type": "object",
+                    "required": ["type", "slot"],
+                    "properties": {
+                      "type": {
+                        "const": "credential",
+                        "type": "string"
+                      },
+                      "slot": {
+                        "pattern": "^[a-z][a-z0-9_]{1,63}$",
+                        "maxLength": 64,
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "bindings": {
+                    "minItems": 1,
+                    "type": "array",
+                    "items": {
+                      "additionalProperties": false,
+                      "type": "object",
+                      "required": ["sourcePath", "target"],
+                      "properties": {
+                        "sourcePath": {
+                          "pattern": "^/",
+                          "maxLength": 512,
+                          "type": "string"
+                        },
+                        "target": {
+                          "anyOf": [
+                            {
+                              "additionalProperties": false,
+                              "type": "object",
+                              "required": ["type", "slot"],
+                              "properties": {
+                                "type": {
+                                  "const": "credential",
+                                  "type": "string"
+                                },
+                                "slot": {
+                                  "pattern": "^[a-z][a-z0-9_]{1,63}$",
+                                  "maxLength": 64,
+                                  "type": "string"
+                                }
+                              }
+                            },
+                            {
+                              "additionalProperties": false,
+                              "type": "object",
+                              "required": ["type", "field"],
+                              "properties": {
+                                "type": {
+                                  "const": "configuration",
+                                  "type": "string"
+                                },
+                                "field": {
+                                  "pattern": "^[a-z][a-z0-9_]{1,63}$",
+                                  "maxLength": 64,
+                                  "type": "string"
+                                }
+                              }
+                            }
+                          ]
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "additionalProperties": false,
+                "type": "object",
+                "required": ["id", "title", "type", "createUrl", "manifest", "bindings"],
+                "properties": {
+                  "id": {
+                    "pattern": "^[a-z][a-z0-9_]{1,63}$",
+                    "maxLength": 64,
+                    "type": "string"
+                  },
+                  "title": {
+                    "minLength": 1,
+                    "maxLength": 128,
+                    "type": "string"
+                  },
+                  "description": {
+                    "minLength": 1,
+                    "maxLength": 2048,
+                    "type": "string"
+                  },
+                  "type": {
+                    "const": "app_manifest",
+                    "type": "string"
+                  },
+                  "createUrl": {
+                    "pattern": "^https://[A-Za-z0-9](?:[A-Za-z0-9.-]*[A-Za-z0-9])?(?::[1-9][0-9]{0,4})?(?:/[^\\s]*)?$",
+                    "type": "string"
+                  },
+                  "manifest": {
+                    "type": "object",
+                    "patternProperties": {
+                      "^(.*)$": {}
+                    }
+                  },
+                  "bindings": {
+                    "minItems": 1,
+                    "type": "array",
+                    "items": {
+                      "additionalProperties": false,
+                      "type": "object",
+                      "required": ["sourcePath", "target"],
+                      "properties": {
+                        "sourcePath": {
+                          "pattern": "^/",
+                          "maxLength": 512,
+                          "type": "string"
+                        },
+                        "target": {
+                          "anyOf": [
+                            {
+                              "additionalProperties": false,
+                              "type": "object",
+                              "required": ["type", "slot"],
+                              "properties": {
+                                "type": {
+                                  "const": "credential",
+                                  "type": "string"
+                                },
+                                "slot": {
+                                  "pattern": "^[a-z][a-z0-9_]{1,63}$",
+                                  "maxLength": 64,
+                                  "type": "string"
+                                }
+                              }
+                            },
+                            {
+                              "additionalProperties": false,
+                              "type": "object",
+                              "required": ["type", "field"],
+                              "properties": {
+                                "type": {
+                                  "const": "configuration",
+                                  "type": "string"
+                                },
+                                "field": {
+                                  "pattern": "^[a-z][a-z0-9_]{1,63}$",
+                                  "maxLength": 64,
+                                  "type": "string"
+                                }
+                              }
+                            }
+                          ]
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "additionalProperties": false,
+                "type": "object",
+                "required": ["id", "title", "type", "url", "bindings"],
+                "properties": {
+                  "id": {
+                    "pattern": "^[a-z][a-z0-9_]{1,63}$",
+                    "maxLength": 64,
+                    "type": "string"
+                  },
+                  "title": {
+                    "minLength": 1,
+                    "maxLength": 128,
+                    "type": "string"
+                  },
+                  "description": {
+                    "minLength": 1,
+                    "maxLength": 2048,
+                    "type": "string"
+                  },
+                  "type": {
+                    "const": "install",
+                    "type": "string"
+                  },
+                  "url": {
+                    "pattern": "^https://[A-Za-z0-9](?:[A-Za-z0-9.-]*[A-Za-z0-9])?(?::[1-9][0-9]{0,4})?(?:/[^\\s]*)?$",
+                    "type": "string"
+                  },
+                  "bindings": {
+                    "minItems": 1,
+                    "type": "array",
+                    "items": {
+                      "additionalProperties": false,
+                      "type": "object",
+                      "required": ["sourcePath", "target"],
+                      "properties": {
+                        "sourcePath": {
+                          "pattern": "^/",
+                          "maxLength": 512,
+                          "type": "string"
+                        },
+                        "target": {
+                          "anyOf": [
+                            {
+                              "additionalProperties": false,
+                              "type": "object",
+                              "required": ["type", "slot"],
+                              "properties": {
+                                "type": {
+                                  "const": "credential",
+                                  "type": "string"
+                                },
+                                "slot": {
+                                  "pattern": "^[a-z][a-z0-9_]{1,63}$",
+                                  "maxLength": 64,
+                                  "type": "string"
+                                }
+                              }
+                            },
+                            {
+                              "additionalProperties": false,
+                              "type": "object",
+                              "required": ["type", "field"],
+                              "properties": {
+                                "type": {
+                                  "const": "configuration",
+                                  "type": "string"
+                                },
+                                "field": {
+                                  "pattern": "^[a-z][a-z0-9_]{1,63}$",
+                                  "maxLength": 64,
+                                  "type": "string"
+                                }
+                              }
+                            }
+                          ]
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "additionalProperties": false,
+                "type": "object",
+                "required": [
+                  "id",
+                  "title",
+                  "type",
+                  "operationId",
+                  "unregisterOperationId",
+                  "subscriptionIdPath",
+                  "secretSlot",
+                  "registration",
+                  "unregistration"
+                ],
+                "properties": {
+                  "id": {
+                    "pattern": "^[a-z][a-z0-9_]{1,63}$",
+                    "maxLength": 64,
+                    "type": "string"
+                  },
+                  "title": {
+                    "minLength": 1,
+                    "maxLength": 128,
+                    "type": "string"
+                  },
+                  "description": {
+                    "minLength": 1,
+                    "maxLength": 2048,
+                    "type": "string"
+                  },
+                  "type": {
+                    "const": "webhook",
+                    "type": "string"
+                  },
+                  "operationId": {
+                    "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$",
+                    "maxLength": 96,
+                    "type": "string"
+                  },
+                  "unregisterOperationId": {
+                    "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$",
+                    "maxLength": 96,
+                    "type": "string"
+                  },
+                  "subscriptionIdPath": {
+                    "pattern": "^(?:/(?:[^/~]|~[01])*)+$",
+                    "maxLength": 512,
+                    "type": "string"
+                  },
+                  "secretSlot": {
+                    "pattern": "^[a-z][a-z0-9_]{1,63}$",
+                    "maxLength": 64,
+                    "type": "string"
+                  },
+                  "registration": {
+                    "additionalProperties": false,
+                    "type": "object",
+                    "required": ["callbackUrl"],
+                    "properties": {
+                      "callbackUrl": {
+                        "anyOf": [
+                          {
+                            "additionalProperties": false,
+                            "type": "object",
+                            "required": ["in", "pointer"],
+                            "properties": {
+                              "in": {
+                                "const": "body",
+                                "type": "string"
+                              },
+                              "pointer": {
+                                "pattern": "^(?:/(?:[^/~]|~[01])*)+$",
+                                "maxLength": 512,
+                                "type": "string"
+                              }
+                            }
+                          },
+                          {
+                            "additionalProperties": false,
+                            "type": "object",
+                            "required": ["in", "name"],
+                            "properties": {
+                              "in": {
+                                "const": "parameter",
+                                "type": "string"
+                              },
+                              "name": {
+                                "pattern": "^[A-Za-z_][A-Za-z0-9_.-]{0,127}$",
+                                "maxLength": 128,
+                                "type": "string"
+                              }
+                            }
+                          }
+                        ]
+                      },
+                      "secret": {
+                        "anyOf": [
+                          {
+                            "additionalProperties": false,
+                            "type": "object",
+                            "required": ["in", "pointer"],
+                            "properties": {
+                              "in": {
+                                "const": "body",
+                                "type": "string"
+                              },
+                              "pointer": {
+                                "pattern": "^(?:/(?:[^/~]|~[01])*)+$",
+                                "maxLength": 512,
+                                "type": "string"
+                              }
+                            }
+                          },
+                          {
+                            "additionalProperties": false,
+                            "type": "object",
+                            "required": ["in", "name"],
+                            "properties": {
+                              "in": {
+                                "const": "parameter",
+                                "type": "string"
+                              },
+                              "name": {
+                                "pattern": "^[A-Za-z_][A-Za-z0-9_.-]{0,127}$",
+                                "maxLength": 128,
+                                "type": "string"
+                              }
+                            }
+                          }
+                        ]
+                      }
+                    }
+                  },
+                  "unregistration": {
+                    "additionalProperties": false,
+                    "type": "object",
+                    "required": ["subscriptionId"],
+                    "properties": {
+                      "subscriptionId": {
+                        "anyOf": [
+                          {
+                            "additionalProperties": false,
+                            "type": "object",
+                            "required": ["in", "pointer"],
+                            "properties": {
+                              "in": {
+                                "const": "body",
+                                "type": "string"
+                              },
+                              "pointer": {
+                                "pattern": "^(?:/(?:[^/~]|~[01])*)+$",
+                                "maxLength": 512,
+                                "type": "string"
+                              }
+                            }
+                          },
+                          {
+                            "additionalProperties": false,
+                            "type": "object",
+                            "required": ["in", "name"],
+                            "properties": {
+                              "in": {
+                                "const": "parameter",
+                                "type": "string"
+                              },
+                              "name": {
+                                "pattern": "^[A-Za-z_][A-Za-z0-9_.-]{0,127}$",
+                                "maxLength": 128,
+                                "type": "string"
+                              }
+                            }
+                          }
+                        ]
+                      }
+                    }
+                  }
+                }
+              }
+            ]
+          }
+        },
+        "healthCheckOperationId": {
+          "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$",
+          "maxLength": 96,
+          "type": "string"
+        },
+        "allowedOriginHosts": {
+          "minItems": 1,
+          "uniqueItems": true,
+          "type": "array",
+          "items": {
+            "pattern": "^(?:\\*\\.)?[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?(?:\\.[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?)+$",
+            "maxLength": 253,
+            "type": "string"
+          }
+        }
+      }
+    },
+    "operations": {
+      "minItems": 1,
+      "type": "array",
+      "items": {
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["id", "name", "description", "effect", "identityMode", "source", "response"],
+        "properties": {
+          "id": {
+            "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$",
+            "maxLength": 96,
+            "type": "string"
+          },
+          "name": {
+            "pattern": "^[a-z][a-z0-9_]{2,63}$",
+            "type": "string"
+          },
+          "description": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "effect": {
+            "type": "string",
+            "enum": ["read", "sensitive_read", "create", "update", "delete", "send", "admin"]
+          },
+          "identityMode": {
+            "type": "string",
+            "enum": ["shared_only", "personal_required", "shared_or_personal"]
+          },
+          "credentialSlot": {
+            "pattern": "^[a-z][a-z0-9_]{1,63}$",
+            "type": "string"
+          },
+          "credentialInjection": {
+            "anyOf": [
+              {
+                "additionalProperties": false,
+                "type": "object",
+                "required": ["in", "name", "format"],
+                "properties": {
+                  "in": {
+                    "const": "header",
+                    "type": "string"
+                  },
+                  "name": {
+                    "pattern": "^[A-Za-z0-9!#$%&'*+.^_`|~-]{1,128}$",
+                    "type": "string"
+                  },
+                  "format": {
+                    "minLength": 7,
+                    "maxLength": 256,
+                    "type": "string"
+                  },
+                  "encoding": {
+                    "type": "string",
+                    "enum": ["verbatim", "basic"]
+                  }
+                }
+              },
+              {
+                "additionalProperties": false,
+                "type": "object",
+                "required": ["in", "name", "format"],
+                "properties": {
+                  "in": {
+                    "const": "query",
+                    "type": "string"
+                  },
+                  "name": {
+                    "pattern": "^[A-Za-z_][A-Za-z0-9_.-]{0,127}$",
+                    "type": "string"
+                  },
+                  "format": {
+                    "minLength": 7,
+                    "maxLength": 256,
+                    "type": "string"
+                  },
+                  "encoding": {
+                    "type": "string",
+                    "enum": ["verbatim", "basic"]
+                  }
+                }
+              },
+              {
+                "additionalProperties": false,
+                "type": "object",
+                "required": ["in", "format"],
+                "properties": {
+                  "in": {
+                    "const": "path",
+                    "type": "string"
+                  },
+                  "format": {
+                    "minLength": 7,
+                    "maxLength": 256,
+                    "type": "string"
+                  },
+                  "encoding": {
+                    "type": "string",
+                    "enum": ["verbatim", "basic"]
+                  }
+                }
+              }
+            ]
+          },
+          "secondaryCredential": {
+            "additionalProperties": false,
+            "type": "object",
+            "required": ["slot", "injection"],
+            "properties": {
+              "slot": {
+                "pattern": "^[a-z][a-z0-9_]{1,63}$",
+                "type": "string"
+              },
+              "injection": {
+                "anyOf": [
+                  {
+                    "additionalProperties": false,
+                    "type": "object",
+                    "required": ["in", "name", "format"],
+                    "properties": {
+                      "in": {
+                        "const": "header",
+                        "type": "string"
+                      },
+                      "name": {
+                        "pattern": "^[A-Za-z0-9!#$%&'*+.^_`|~-]{1,128}$",
+                        "type": "string"
+                      },
+                      "format": {
+                        "minLength": 7,
+                        "maxLength": 256,
+                        "type": "string"
+                      },
+                      "encoding": {
+                        "type": "string",
+                        "enum": ["verbatim", "basic"]
+                      }
+                    }
+                  },
+                  {
+                    "additionalProperties": false,
+                    "type": "object",
+                    "required": ["in", "name", "format"],
+                    "properties": {
+                      "in": {
+                        "const": "query",
+                        "type": "string"
+                      },
+                      "name": {
+                        "pattern": "^[A-Za-z_][A-Za-z0-9_.-]{0,127}$",
+                        "type": "string"
+                      },
+                      "format": {
+                        "minLength": 7,
+                        "maxLength": 256,
+                        "type": "string"
+                      },
+                      "encoding": {
+                        "type": "string",
+                        "enum": ["verbatim", "basic"]
+                      }
+                    }
+                  },
+                  {
+                    "additionalProperties": false,
+                    "type": "object",
+                    "required": ["in", "format"],
+                    "properties": {
+                      "in": {
+                        "const": "path",
+                        "type": "string"
+                      },
+                      "format": {
+                        "minLength": 7,
+                        "maxLength": 256,
+                        "type": "string"
+                      },
+                      "encoding": {
+                        "type": "string",
+                        "enum": ["verbatim", "basic"]
+                      }
+                    }
+                  }
+                ]
+              }
+            }
+          },
+          "source": {
+            "anyOf": [
+              {
+                "additionalProperties": false,
+                "type": "object",
+                "required": ["type", "method", "baseUrl", "path"],
+                "properties": {
+                  "type": {
+                    "const": "http",
+                    "type": "string"
+                  },
+                  "method": {
+                    "type": "string",
+                    "enum": ["GET", "HEAD", "OPTIONS", "POST", "PUT", "PATCH", "DELETE"]
+                  },
+                  "baseUrl": {
+                    "pattern": "^https://(?:\\{[a-z][a-z0-9_]{1,63}\\}|[A-Za-z0-9])(?:[A-Za-z0-9.-]*[A-Za-z0-9])?(?::[1-9][0-9]{0,4})?(?:/[^\\s]*)?$",
+                    "maxLength": 2048,
+                    "type": "string"
+                  },
+                  "path": {
+                    "pattern": "^/(?!/)",
+                    "maxLength": 2048,
+                    "type": "string"
+                  },
+                  "parameters": {
+                    "maxItems": 64,
+                    "type": "array",
+                    "items": {
+                      "additionalProperties": false,
+                      "type": "object",
+                      "required": ["name", "in", "schema"],
+                      "properties": {
+                        "name": {
+                          "pattern": "^[A-Za-z_][A-Za-z0-9_.-]{0,127}$",
+                          "maxLength": 128,
+                          "type": "string"
+                        },
+                        "in": {
+                          "type": "string",
+                          "enum": ["path", "query", "header"]
+                        },
+                        "required": {
+                          "type": "boolean"
+                        },
+                        "schema": {
+                          "type": "object",
+                          "patternProperties": {
+                            "^(.*)$": {}
+                          }
+                        },
+                        "value": {
+                          "maxLength": 1024,
+                          "type": "string"
+                        },
+                        "configurationField": {
+                          "pattern": "^[a-z][a-z0-9_]{1,63}$",
+                          "maxLength": 64,
+                          "type": "string"
+                        }
+                      }
+                    }
+                  },
+                  "contentType": {
+                    "type": "string",
+                    "enum": ["json", "form", "multipart"]
+                  },
+                  "multipart": {
+                    "additionalProperties": false,
+                    "type": "object",
+                    "required": ["parts"],
+                    "properties": {
+                      "parts": {
+                        "minItems": 1,
+                        "maxItems": 16,
+                        "type": "array",
+                        "items": {
+                          "anyOf": [
+                            {
+                              "additionalProperties": false,
+                              "type": "object",
+                              "required": ["name", "kind", "pointer", "maxBytes"],
+                              "properties": {
+                                "name": {
+                                  "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$",
+                                  "maxLength": 128,
+                                  "type": "string"
+                                },
+                                "kind": {
+                                  "const": "field",
+                                  "type": "string"
+                                },
+                                "pointer": {
+                                  "pattern": "^(?:/(?:[^/~]|~[01])*)+$",
+                                  "maxLength": 512,
+                                  "type": "string"
+                                },
+                                "maxBytes": {
+                                  "minimum": 1,
+                                  "maximum": 1048576,
+                                  "type": "integer"
+                                }
+                              }
+                            },
+                            {
+                              "additionalProperties": false,
+                              "type": "object",
+                              "required": ["name", "kind", "pointer"],
+                              "properties": {
+                                "name": {
+                                  "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$",
+                                  "maxLength": 128,
+                                  "type": "string"
+                                },
+                                "kind": {
+                                  "const": "file",
+                                  "type": "string"
+                                },
+                                "pointer": {
+                                  "pattern": "^(?:/(?:[^/~]|~[01])*)+$",
+                                  "maxLength": 512,
+                                  "type": "string"
+                                }
+                              }
+                            }
+                          ]
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "additionalProperties": false,
+                "type": "object",
+                "required": ["type", "file", "operationId"],
+                "properties": {
+                  "type": {
+                    "const": "openapi",
+                    "type": "string"
+                  },
+                  "file": {
+                    "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*(?:/[A-Za-z0-9][A-Za-z0-9._-]*)*$",
+                    "type": "string"
+                  },
+                  "operationId": {
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "baseUrl": {
+                    "pattern": "^https://[A-Za-z0-9](?:[A-Za-z0-9.-]*[A-Za-z0-9])?(?::[1-9][0-9]{0,4})?(?:/[^\\s]*)?$",
+                    "type": "string"
+                  }
+                }
+              },
+              {
+                "additionalProperties": false,
+                "type": "object",
+                "required": ["type", "url", "operation", "documentFile"],
+                "properties": {
+                  "type": {
+                    "const": "graphql",
+                    "type": "string"
+                  },
+                  "url": {
+                    "pattern": "^https://(?:\\{[a-z][a-z0-9_]{1,63}\\}|[A-Za-z0-9])(?:[A-Za-z0-9.-]*[A-Za-z0-9])?(?::[1-9][0-9]{0,4})?(?:/[^\\s]*)?$",
+                    "maxLength": 2048,
+                    "type": "string"
+                  },
+                  "operation": {
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "documentFile": {
+                    "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*(?:/[A-Za-z0-9][A-Za-z0-9._-]*)*$",
+                    "type": "string"
+                  }
+                }
+              }
+            ]
+          },
+          "requestSchema": {
+            "type": "object",
+            "patternProperties": {
+              "^(.*)$": {}
+            }
+          },
+          "response": {
+            "anyOf": [
+              {
+                "additionalProperties": false,
+                "type": "object",
+                "required": ["schema", "maxBytes"],
+                "properties": {
+                  "schema": {
+                    "type": "object",
+                    "patternProperties": {
+                      "^(.*)$": {}
+                    }
+                  },
+                  "mode": {
+                    "const": "json",
+                    "type": "string"
+                  },
+                  "projection": {
+                    "minItems": 1,
+                    "uniqueItems": true,
+                    "type": "array",
+                    "items": {
+                      "pattern": "^/",
+                      "type": "string"
+                    }
+                  },
+                  "maxBytes": {
+                    "minimum": 1,
+                    "maximum": 10485760,
+                    "type": "integer"
+                  }
+                }
+              },
+              {
+                "additionalProperties": false,
+                "type": "object",
+                "required": ["mode", "maxBytes"],
+                "properties": {
+                  "mode": {
+                    "const": "binary",
+                    "type": "string"
+                  },
+                  "maxBytes": {
+                    "minimum": 1,
+                    "maximum": 10485760,
+                    "type": "integer"
+                  }
+                }
+              }
+            ]
+          },
+          "pagination": {
+            "anyOf": [
+              {
+                "additionalProperties": false,
+                "type": "object",
+                "required": ["type", "requestParameter", "responsePath"],
+                "properties": {
+                  "type": {
+                    "const": "cursor",
+                    "type": "string"
+                  },
+                  "requestParameter": {
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "responsePath": {
+                    "pattern": "^/",
+                    "maxLength": 256,
+                    "type": "string"
+                  },
+                  "itemsPath": {
+                    "pattern": "^/",
+                    "maxLength": 256,
+                    "type": "string"
+                  }
+                }
+              },
+              {
+                "additionalProperties": false,
+                "type": "object",
+                "required": ["type", "requestParameter"],
+                "properties": {
+                  "type": {
+                    "const": "page",
+                    "type": "string"
+                  },
+                  "requestParameter": {
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "start": {
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  "itemsPath": {
+                    "pattern": "^/",
+                    "maxLength": 256,
+                    "type": "string"
+                  }
+                }
+              },
+              {
+                "additionalProperties": false,
+                "type": "object",
+                "required": ["type"],
+                "properties": {
+                  "type": {
+                    "const": "link",
+                    "type": "string"
+                  },
+                  "header": {
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "itemsPath": {
+                    "pattern": "^/",
+                    "maxLength": 256,
+                    "type": "string"
+                  }
+                }
+              },
+              {
+                "additionalProperties": false,
+                "type": "object",
+                "required": ["type", "requestParameter", "responsePath"],
+                "properties": {
+                  "type": {
+                    "const": "continuation",
+                    "type": "string"
+                  },
+                  "requestParameter": {
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "responsePath": {
+                    "pattern": "^/",
+                    "maxLength": 256,
+                    "type": "string"
+                  },
+                  "itemsPath": {
+                    "pattern": "^/",
+                    "maxLength": 256,
+                    "type": "string"
+                  }
+                }
+              },
+              {
+                "additionalProperties": false,
+                "type": "object",
+                "required": ["type", "requestPointer", "responsePath"],
+                "properties": {
+                  "type": {
+                    "const": "body_cursor",
+                    "type": "string"
+                  },
+                  "requestPointer": {
+                    "pattern": "^/",
+                    "maxLength": 256,
+                    "type": "string"
+                  },
+                  "responsePath": {
+                    "pattern": "^/",
+                    "maxLength": 256,
+                    "type": "string"
+                  },
+                  "itemsPath": {
+                    "pattern": "^/",
+                    "maxLength": 256,
+                    "type": "string"
+                  }
+                }
+              }
+            ]
+          },
+          "rateLimit": {
+            "additionalProperties": false,
+            "type": "object",
+            "properties": {
+              "requests": {
+                "minimum": 1,
+                "type": "integer"
+              },
+              "perSeconds": {
+                "minimum": 1,
+                "type": "integer"
+              },
+              "scope": {
+                "type": "string",
+                "enum": ["connection", "operation"]
+              },
+              "remainingHeader": {
+                "minLength": 1,
+                "type": "string"
+              },
+              "resetHeader": {
+                "minLength": 1,
+                "type": "string"
+              },
+              "retryAfterHeader": {
+                "minLength": 1,
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    },
+    "events": {
+      "additionalProperties": false,
+      "type": "object",
+      "required": ["path", "verification", "deduplication", "eventTypes"],
+      "properties": {
+        "path": {
+          "pattern": "^/[A-Za-z0-9][A-Za-z0-9._/-]*$",
+          "maxLength": 128,
+          "type": "string"
+        },
+        "verification": {
+          "additionalProperties": false,
+          "type": "object",
+          "required": ["scheme", "secretSlot"],
+          "properties": {
+            "scheme": {
+              "type": "string",
+              "enum": [
+                "shared_secret",
+                "twilio_hmac_sha1",
+                "hmac_sha256",
+                "hmac_sha512",
+                "ed25519",
+                "rsa_sha256",
+                "jwt"
+              ]
+            },
+            "secretSlot": {
+              "pattern": "^[a-z][a-z0-9_]{1,63}$",
+              "type": "string"
+            },
+            "signatureHeader": {
+              "pattern": "^[A-Za-z0-9!#$%&'*+.^_`|~-]+$",
+              "maxLength": 128,
+              "type": "string"
+            },
+            "signatureEncoding": {
+              "type": "string",
+              "enum": ["hex", "base64", "base64url"]
+            },
+            "signaturePrefix": {
+              "maxLength": 32,
+              "type": "string"
+            },
+            "signingInput": {
+              "minLength": 1,
+              "maxLength": 256,
+              "type": "string"
+            },
+            "timestampHeader": {
+              "pattern": "^[A-Za-z0-9!#$%&'*+.^_`|~-]+$",
+              "maxLength": 128,
+              "type": "string"
+            },
+            "toleranceSeconds": {
+              "minimum": 1,
+              "maximum": 3600,
+              "type": "integer"
+            },
+            "issuer": {
+              "minLength": 1,
+              "maxLength": 256,
+              "type": "string"
+            },
+            "audience": {
+              "minLength": 1,
+              "maxLength": 256,
+              "type": "string"
+            }
+          }
+        },
+        "handshake": {
+          "additionalProperties": false,
+          "type": "object",
+          "required": ["kind"],
+          "properties": {
+            "kind": {
+              "type": "string",
+              "enum": ["none", "echo_body_pointer", "echo_header"]
+            },
+            "bodyPointer": {
+              "pattern": "^(?:/(?:[^/~]|~[01])*)+$",
+              "maxLength": 512,
+              "type": "string"
+            },
+            "header": {
+              "pattern": "^[A-Za-z0-9!#$%&'*+.^_`|~-]+$",
+              "maxLength": 128,
+              "type": "string"
+            },
+            "responseField": {
+              "pattern": "^[a-z][a-z0-9_]{1,63}$",
+              "type": "string"
+            }
+          }
+        },
+        "acceptance": {
+          "additionalProperties": false,
+          "type": "object",
+          "properties": {
+            "requireBodyPointers": {
+              "uniqueItems": true,
+              "type": "array",
+              "items": {
+                "pattern": "^(?:/(?:[^/~]|~[01])*)+$",
+                "maxLength": 512,
+                "type": "string"
+              }
+            },
+            "requireKnownEventType": {
+              "type": "boolean"
+            }
+          }
+        },
+        "deduplication": {
+          "additionalProperties": false,
+          "type": "object",
+          "required": ["kind"],
+          "properties": {
+            "kind": {
+              "type": "string",
+              "enum": ["delivery_id_header", "body_pointer", "none"]
+            },
+            "header": {
+              "pattern": "^[A-Za-z0-9!#$%&'*+.^_`|~-]+$",
+              "maxLength": 128,
+              "type": "string"
+            },
+            "bodyPointer": {
+              "pattern": "^(?:/(?:[^/~]|~[01])*)+$",
+              "maxLength": 512,
+              "type": "string"
+            }
+          }
+        },
+        "eventTypes": {
+          "minItems": 1,
+          "type": "array",
+          "items": {
+            "additionalProperties": false,
+            "type": "object",
+            "required": ["type", "selector", "schema"],
+            "properties": {
+              "type": {
+                "pattern": "^[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*$",
+                "maxLength": 128,
+                "type": "string"
+              },
+              "selector": {
+                "additionalProperties": false,
+                "type": "object",
+                "required": ["pointer"],
+                "properties": {
+                  "pointer": {
+                    "pattern": "^(?:/(?:[^/~]|~[01])*)+$",
+                    "maxLength": 512,
+                    "type": "string"
+                  },
+                  "equals": {
+                    "maxLength": 256,
+                    "type": "string"
+                  },
+                  "matches": {
+                    "minLength": 1,
+                    "maxLength": 256,
+                    "type": "string"
+                  }
+                }
+              },
+              "schema": {
+                "type": "object",
+                "patternProperties": {
+                  "^(.*)$": {}
+                }
+              },
+              "normalize": {
+                "pattern": "^[A-Za-z_$][A-Za-z0-9_$]*$",
+                "type": "string"
+              },
+              "safeHeaders": {
+                "uniqueItems": true,
+                "type": "array",
+                "items": {
+                  "pattern": "^[A-Za-z0-9!#$%&'*+.^_`|~-]+$",
+                  "maxLength": 128,
+                  "type": "string"
+                }
+              }
+            }
+          }
+        },
+        "rawRetentionDays": {
+          "minimum": 1,
+          "maximum": 90,
+          "type": "integer"
+        }
+      }
+    },
+    "ingress": {
+      "additionalProperties": false,
+      "type": "object",
+      "required": ["kind", "operationId", "intervalSeconds", "cursor"],
+      "properties": {
+        "kind": {
+          "const": "polling",
+          "type": "string"
+        },
+        "operationId": {
+          "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$",
+          "maxLength": 96,
+          "type": "string"
+        },
+        "intervalSeconds": {
+          "minimum": 60,
+          "maximum": 86400,
+          "type": "integer"
+        },
+        "eventTypes": {
+          "minItems": 1,
+          "type": "array",
+          "items": {
+            "additionalProperties": false,
+            "type": "object",
+            "required": ["type", "selector", "schema"],
+            "properties": {
+              "type": {
+                "pattern": "^[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*$",
+                "maxLength": 128,
+                "type": "string"
+              },
+              "selector": {
+                "additionalProperties": false,
+                "type": "object",
+                "required": ["pointer"],
+                "properties": {
+                  "pointer": {
+                    "pattern": "^(?:/(?:[^/~]|~[01])*)+$",
+                    "maxLength": 512,
+                    "type": "string"
+                  },
+                  "equals": {
+                    "maxLength": 256,
+                    "type": "string"
+                  },
+                  "matches": {
+                    "minLength": 1,
+                    "maxLength": 256,
+                    "type": "string"
+                  }
+                }
+              },
+              "schema": {
+                "type": "object",
+                "patternProperties": {
+                  "^(.*)$": {}
+                }
+              },
+              "normalize": {
+                "pattern": "^[A-Za-z_$][A-Za-z0-9_$]*$",
+                "type": "string"
+              },
+              "safeHeaders": {
+                "uniqueItems": true,
+                "type": "array",
+                "items": {
+                  "pattern": "^[A-Za-z0-9!#$%&'*+.^_`|~-]+$",
+                  "maxLength": 128,
+                  "type": "string"
+                }
+              }
+            }
+          }
+        },
+        "cursor": {
+          "anyOf": [
+            {
+              "additionalProperties": false,
+              "type": "object",
+              "required": ["responsePointer", "requestParameter"],
+              "properties": {
+                "responsePointer": {
+                  "pattern": "^(?:/(?:[^/~]|~[01])*)+$",
+                  "maxLength": 512,
+                  "type": "string"
+                },
+                "requestParameter": {
+                  "minLength": 1,
+                  "type": "string"
+                }
+              }
+            },
+            {
+              "additionalProperties": false,
+              "type": "object",
+              "required": ["mode", "responsePointer", "itemPointer", "requestParameter"],
+              "properties": {
+                "mode": {
+                  "const": "max_integer_plus_one",
+                  "type": "string"
+                },
+                "responsePointer": {
+                  "pattern": "^(?:/(?:[^/~]|~[01])*)+$",
+                  "maxLength": 512,
+                  "type": "string"
+                },
+                "itemPointer": {
+                  "pattern": "^(?:/(?:[^/~]|~[01])*)+$",
+                  "maxLength": 512,
+                  "type": "string"
+                },
+                "requestParameter": {
+                  "minLength": 1,
+                  "type": "string"
+                }
+              }
+            }
+          ]
+        }
+      }
+    },
+    "knowledge": {
+      "additionalProperties": false,
+      "type": "object",
+      "required": ["sourceKinds", "list", "content", "acl", "deletion"],
+      "properties": {
+        "sourceKinds": {
+          "minItems": 1,
+          "type": "array",
+          "items": {
+            "additionalProperties": false,
+            "type": "object",
+            "required": ["id", "label"],
+            "properties": {
+              "id": {
+                "pattern": "^[a-z][a-z0-9_]{1,63}$",
+                "maxLength": 64,
+                "type": "string"
+              },
+              "label": {
+                "minLength": 1,
+                "maxLength": 128,
+                "type": "string"
+              },
+              "description": {
+                "minLength": 1,
+                "maxLength": 1024,
+                "type": "string"
+              },
+              "discoverOperationId": {
+                "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$",
+                "maxLength": 96,
+                "type": "string"
+              },
+              "discoverItemsPointer": {
+                "pattern": "^(?:$|/(?:[^/~]|~[01])*(?:/(?:[^/~]|~[01])*)*)$",
+                "maxLength": 512,
+                "type": "string"
+              },
+              "discoverMapping": {
+                "additionalProperties": false,
+                "type": "object",
+                "required": ["id", "label"],
+                "properties": {
+                  "id": {
+                    "pattern": "^(?:$|/(?:[^/~]|~[01])*(?:/(?:[^/~]|~[01])*)*)$",
+                    "maxLength": 512,
+                    "type": "string"
+                  },
+                  "label": {
+                    "pattern": "^(?:$|/(?:[^/~]|~[01])*(?:/(?:[^/~]|~[01])*)*)$",
+                    "maxLength": 512,
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "list": {
+          "additionalProperties": false,
+          "type": "object",
+          "required": ["operationId", "itemsPointer", "mapping", "cursor"],
+          "properties": {
+            "operationId": {
+              "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$",
+              "maxLength": 96,
+              "type": "string"
+            },
+            "scopeParameter": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "itemsPointer": {
+              "pattern": "^(?:$|/(?:[^/~]|~[01])*(?:/(?:[^/~]|~[01])*)*)$",
+              "maxLength": 512,
+              "type": "string"
+            },
+            "mapping": {
+              "additionalProperties": false,
+              "type": "object",
+              "properties": {
+                "itemId": {
+                  "pattern": "^(?:$|/(?:[^/~]|~[01])*(?:/(?:[^/~]|~[01])*)*)$",
+                  "maxLength": 512,
+                  "type": "string"
+                },
+                "itemFields": {
+                  "additionalProperties": false,
+                  "type": "object",
+                  "patternProperties": {
+                    "^[a-z][a-z0-9_]{1,63}$": {
+                      "anyOf": [
+                        {
+                          "additionalProperties": false,
+                          "type": "object",
+                          "required": ["source"],
+                          "properties": {
+                            "source": {
+                              "const": "scope",
+                              "type": "string"
+                            }
+                          }
+                        },
+                        {
+                          "additionalProperties": false,
+                          "type": "object",
+                          "required": ["source", "pointer"],
+                          "properties": {
+                            "source": {
+                              "const": "item",
+                              "type": "string"
+                            },
+                            "pointer": {
+                              "pattern": "^(?:$|/(?:[^/~]|~[01])*(?:/(?:[^/~]|~[01])*)*)$",
+                              "maxLength": 512,
+                              "type": "string"
+                            }
+                          }
+                        }
+                      ]
+                    }
+                  }
+                },
+                "itemIdentity": {
+                  "minItems": 1,
+                  "uniqueItems": true,
+                  "type": "array",
+                  "items": {
+                    "pattern": "^[a-z][a-z0-9_]{1,63}$",
+                    "maxLength": 64,
+                    "type": "string"
+                  }
+                },
+                "revision": {
+                  "pattern": "^(?:$|/(?:[^/~]|~[01])*(?:/(?:[^/~]|~[01])*)*)$",
+                  "maxLength": 512,
+                  "type": "string"
+                },
+                "title": {
+                  "pattern": "^(?:$|/(?:[^/~]|~[01])*(?:/(?:[^/~]|~[01])*)*)$",
+                  "maxLength": 512,
+                  "type": "string"
+                },
+                "sourceUrl": {
+                  "pattern": "^(?:$|/(?:[^/~]|~[01])*(?:/(?:[^/~]|~[01])*)*)$",
+                  "maxLength": 512,
+                  "type": "string"
+                },
+                "updatedAt": {
+                  "pattern": "^(?:$|/(?:[^/~]|~[01])*(?:/(?:[^/~]|~[01])*)*)$",
+                  "maxLength": 512,
+                  "type": "string"
+                },
+                "contentType": {
+                  "pattern": "^(?:$|/(?:[^/~]|~[01])*(?:/(?:[^/~]|~[01])*)*)$",
+                  "maxLength": 512,
+                  "type": "string"
+                },
+                "deleted": {
+                  "pattern": "^(?:$|/(?:[^/~]|~[01])*(?:/(?:[^/~]|~[01])*)*)$",
+                  "maxLength": 512,
+                  "type": "string"
+                }
+              }
+            },
+            "cursor": {
+              "additionalProperties": false,
+              "type": "object",
+              "required": ["kind"],
+              "properties": {
+                "kind": {
+                  "type": "string",
+                  "enum": ["operation_pagination", "response_pointer", "none"]
+                },
+                "pointer": {
+                  "pattern": "^(?:/(?:[^/~]|~[01])*)+$",
+                  "maxLength": 512,
+                  "type": "string"
+                },
+                "requestParameter": {
+                  "minLength": 1,
+                  "type": "string"
+                }
+              }
+            },
+            "maxPagesPerRun": {
+              "minimum": 1,
+              "maximum": 10000,
+              "type": "integer"
+            }
+          }
+        },
+        "content": {
+          "additionalProperties": false,
+          "type": "object",
+          "required": ["operationId", "mapping"],
+          "properties": {
+            "operationId": {
+              "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$",
+              "maxLength": 96,
+              "type": "string"
+            },
+            "itemParameter": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "parameters": {
+              "additionalProperties": false,
+              "type": "object",
+              "patternProperties": {
+                "^[A-Za-z_][A-Za-z0-9_.-]{0,127}$": {
+                  "pattern": "^[a-z][a-z0-9_]{1,63}$",
+                  "maxLength": 64,
+                  "type": "string"
+                }
+              }
+            },
+            "mapping": {
+              "additionalProperties": false,
+              "type": "object",
+              "required": ["content"],
+              "properties": {
+                "content": {
+                  "anyOf": [
+                    {
+                      "pattern": "^(?:$|/(?:[^/~]|~[01])*(?:/(?:[^/~]|~[01])*)*)$",
+                      "maxLength": 512,
+                      "type": "string"
+                    },
+                    {
+                      "additionalProperties": false,
+                      "type": "object",
+                      "required": ["itemsPointer", "itemPointer", "separator"],
+                      "properties": {
+                        "itemsPointer": {
+                          "pattern": "^(?:$|/(?:[^/~]|~[01])*(?:/(?:[^/~]|~[01])*)*)$",
+                          "maxLength": 512,
+                          "type": "string"
+                        },
+                        "itemPointer": {
+                          "pattern": "^(?:$|/(?:[^/~]|~[01])*(?:/(?:[^/~]|~[01])*)*)$",
+                          "maxLength": 512,
+                          "type": "string"
+                        },
+                        "separator": {
+                          "maxLength": 64,
+                          "type": "string"
+                        }
+                      }
+                    }
+                  ]
+                },
+                "contentType": {
+                  "pattern": "^(?:$|/(?:[^/~]|~[01])*(?:/(?:[^/~]|~[01])*)*)$",
+                  "maxLength": 512,
+                  "type": "string"
+                },
+                "revision": {
+                  "pattern": "^(?:$|/(?:[^/~]|~[01])*(?:/(?:[^/~]|~[01])*)*)$",
+                  "maxLength": 512,
+                  "type": "string"
+                },
+                "title": {
+                  "pattern": "^(?:$|/(?:[^/~]|~[01])*(?:/(?:[^/~]|~[01])*)*)$",
+                  "maxLength": 512,
+                  "type": "string"
+                },
+                "sourceUrl": {
+                  "pattern": "^(?:$|/(?:[^/~]|~[01])*(?:/(?:[^/~]|~[01])*)*)$",
+                  "maxLength": 512,
+                  "type": "string"
+                },
+                "updatedAt": {
+                  "pattern": "^(?:$|/(?:[^/~]|~[01])*(?:/(?:[^/~]|~[01])*)*)$",
+                  "maxLength": 512,
+                  "type": "string"
+                }
+              }
+            }
+          }
+        },
+        "acl": {
+          "anyOf": [
+            {
+              "additionalProperties": false,
+              "type": "object",
+              "required": ["mode", "operationId", "entriesPointer", "entry"],
+              "properties": {
+                "mode": {
+                  "const": "item",
+                  "type": "string"
+                },
+                "operationId": {
+                  "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$",
+                  "maxLength": 96,
+                  "type": "string"
+                },
+                "itemParameter": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "parameters": {
+                  "additionalProperties": false,
+                  "type": "object",
+                  "patternProperties": {
+                    "^[A-Za-z_][A-Za-z0-9_.-]{0,127}$": {
+                      "pattern": "^[a-z][a-z0-9_]{1,63}$",
+                      "maxLength": 64,
+                      "type": "string"
+                    }
+                  }
+                },
+                "entriesPointer": {
+                  "pattern": "^(?:$|/(?:[^/~]|~[01])*(?:/(?:[^/~]|~[01])*)*)$",
+                  "maxLength": 512,
+                  "type": "string"
+                },
+                "entry": {
+                  "additionalProperties": false,
+                  "type": "object",
+                  "properties": {
+                    "kindPointer": {
+                      "pattern": "^(?:$|/(?:[^/~]|~[01])*(?:/(?:[^/~]|~[01])*)*)$",
+                      "maxLength": 512,
+                      "type": "string"
+                    },
+                    "kindValues": {
+                      "additionalProperties": false,
+                      "type": "object",
+                      "properties": {
+                        "user": {
+                          "uniqueItems": true,
+                          "type": "array",
+                          "items": {
+                            "maxLength": 128,
+                            "type": "string"
+                          }
+                        },
+                        "group": {
+                          "uniqueItems": true,
+                          "type": "array",
+                          "items": {
+                            "maxLength": 128,
+                            "type": "string"
+                          }
+                        },
+                        "domain": {
+                          "uniqueItems": true,
+                          "type": "array",
+                          "items": {
+                            "maxLength": 128,
+                            "type": "string"
+                          }
+                        },
+                        "public": {
+                          "uniqueItems": true,
+                          "type": "array",
+                          "items": {
+                            "maxLength": 128,
+                            "type": "string"
+                          }
+                        }
+                      }
+                    },
+                    "defaultKind": {
+                      "type": "string",
+                      "enum": ["user", "group", "domain", "public"]
+                    },
+                    "providerUserId": {
+                      "pattern": "^(?:$|/(?:[^/~]|~[01])*(?:/(?:[^/~]|~[01])*)*)$",
+                      "maxLength": 512,
+                      "type": "string"
+                    },
+                    "providerGroupId": {
+                      "pattern": "^(?:$|/(?:[^/~]|~[01])*(?:/(?:[^/~]|~[01])*)*)$",
+                      "maxLength": 512,
+                      "type": "string"
+                    },
+                    "domain": {
+                      "pattern": "^(?:$|/(?:[^/~]|~[01])*(?:/(?:[^/~]|~[01])*)*)$",
+                      "maxLength": 512,
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "additionalProperties": false,
+              "type": "object",
+              "required": ["mode", "operationId", "scopeParameter", "entriesPointer", "entry"],
+              "properties": {
+                "mode": {
+                  "const": "scope",
+                  "type": "string"
+                },
+                "operationId": {
+                  "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$",
+                  "maxLength": 96,
+                  "type": "string"
+                },
+                "scopeParameter": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "entriesPointer": {
+                  "pattern": "^(?:$|/(?:[^/~]|~[01])*(?:/(?:[^/~]|~[01])*)*)$",
+                  "maxLength": 512,
+                  "type": "string"
+                },
+                "entry": {
+                  "additionalProperties": false,
+                  "type": "object",
+                  "properties": {
+                    "kindPointer": {
+                      "pattern": "^(?:$|/(?:[^/~]|~[01])*(?:/(?:[^/~]|~[01])*)*)$",
+                      "maxLength": 512,
+                      "type": "string"
+                    },
+                    "kindValues": {
+                      "additionalProperties": false,
+                      "type": "object",
+                      "properties": {
+                        "user": {
+                          "uniqueItems": true,
+                          "type": "array",
+                          "items": {
+                            "maxLength": 128,
+                            "type": "string"
+                          }
+                        },
+                        "group": {
+                          "uniqueItems": true,
+                          "type": "array",
+                          "items": {
+                            "maxLength": 128,
+                            "type": "string"
+                          }
+                        },
+                        "domain": {
+                          "uniqueItems": true,
+                          "type": "array",
+                          "items": {
+                            "maxLength": 128,
+                            "type": "string"
+                          }
+                        },
+                        "public": {
+                          "uniqueItems": true,
+                          "type": "array",
+                          "items": {
+                            "maxLength": 128,
+                            "type": "string"
+                          }
+                        }
+                      }
+                    },
+                    "defaultKind": {
+                      "type": "string",
+                      "enum": ["user", "group", "domain", "public"]
+                    },
+                    "providerUserId": {
+                      "pattern": "^(?:$|/(?:[^/~]|~[01])*(?:/(?:[^/~]|~[01])*)*)$",
+                      "maxLength": 512,
+                      "type": "string"
+                    },
+                    "providerGroupId": {
+                      "pattern": "^(?:$|/(?:[^/~]|~[01])*(?:/(?:[^/~]|~[01])*)*)$",
+                      "maxLength": 512,
+                      "type": "string"
+                    },
+                    "domain": {
+                      "pattern": "^(?:$|/(?:[^/~]|~[01])*(?:/(?:[^/~]|~[01])*)*)$",
+                      "maxLength": 512,
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          ]
+        },
+        "identity": {
+          "additionalProperties": false,
+          "type": "object",
+          "properties": {
+            "user": {
+              "additionalProperties": false,
+              "type": "object",
+              "required": ["operationId", "idParameter", "mapping"],
+              "properties": {
+                "operationId": {
+                  "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$",
+                  "maxLength": 96,
+                  "type": "string"
+                },
+                "idParameter": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "mapping": {
+                  "additionalProperties": false,
+                  "type": "object",
+                  "required": ["providerId"],
+                  "properties": {
+                    "providerId": {
+                      "pattern": "^(?:$|/(?:[^/~]|~[01])*(?:/(?:[^/~]|~[01])*)*)$",
+                      "maxLength": 512,
+                      "type": "string"
+                    },
+                    "email": {
+                      "pattern": "^(?:$|/(?:[^/~]|~[01])*(?:/(?:[^/~]|~[01])*)*)$",
+                      "maxLength": 512,
+                      "type": "string"
+                    },
+                    "emailVerified": {
+                      "pattern": "^(?:$|/(?:[^/~]|~[01])*(?:/(?:[^/~]|~[01])*)*)$",
+                      "maxLength": 512,
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            },
+            "group": {
+              "additionalProperties": false,
+              "type": "object",
+              "required": ["operationId", "idParameter", "mapping"],
+              "properties": {
+                "operationId": {
+                  "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$",
+                  "maxLength": 96,
+                  "type": "string"
+                },
+                "idParameter": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "membersPointer": {
+                  "pattern": "^(?:$|/(?:[^/~]|~[01])*(?:/(?:[^/~]|~[01])*)*)$",
+                  "maxLength": 512,
+                  "type": "string"
+                },
+                "mapping": {
+                  "additionalProperties": false,
+                  "type": "object",
+                  "required": ["providerId"],
+                  "properties": {
+                    "providerId": {
+                      "pattern": "^(?:$|/(?:[^/~]|~[01])*(?:/(?:[^/~]|~[01])*)*)$",
+                      "maxLength": 512,
+                      "type": "string"
+                    },
+                    "memberUserId": {
+                      "pattern": "^(?:$|/(?:[^/~]|~[01])*(?:/(?:[^/~]|~[01])*)*)$",
+                      "maxLength": 512,
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "deletion": {
+          "additionalProperties": false,
+          "type": "object",
+          "required": ["kind"],
+          "properties": {
+            "kind": {
+              "type": "string",
+              "enum": ["list_flag", "absent_from_full_list", "operation", "none"]
+            },
+            "operationId": {
+              "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$",
+              "maxLength": 96,
+              "type": "string"
+            },
+            "scopeParameter": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "parameters": {
+              "additionalProperties": false,
+              "type": "object",
+              "patternProperties": {
+                "^[A-Za-z_][A-Za-z0-9_.-]{0,127}$": {
+                  "pattern": "^[a-z][a-z0-9_]{1,63}$",
+                  "maxLength": 64,
+                  "type": "string"
+                }
+              }
+            },
+            "itemsPointer": {
+              "pattern": "^(?:$|/(?:[^/~]|~[01])*(?:/(?:[^/~]|~[01])*)*)$",
+              "maxLength": 512,
+              "type": "string"
+            },
+            "itemIdPointer": {
+              "pattern": "^(?:$|/(?:[^/~]|~[01])*(?:/(?:[^/~]|~[01])*)*)$",
+              "maxLength": 512,
+              "type": "string"
+            }
+          }
+        },
+        "guideFile": {
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*(?:/[A-Za-z0-9][A-Za-z0-9._-]*)*$",
+          "type": "string"
+        },
+        "liveAuthorization": {
+          "additionalProperties": false,
+          "type": "object",
+          "required": ["operationId"],
+          "properties": {
+            "operationId": {
+              "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$",
+              "maxLength": 96,
+              "type": "string"
+            },
+            "itemParameter": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "parameters": {
+              "additionalProperties": false,
+              "type": "object",
+              "patternProperties": {
+                "^[A-Za-z_][A-Za-z0-9_.-]{0,127}$": {
+                  "pattern": "^[a-z][a-z0-9_]{1,63}$",
+                  "maxLength": 64,
+                  "type": "string"
+                }
+              }
+            },
+            "principalParameter": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "allowedPointer": {
+              "pattern": "^(?:$|/(?:[^/~]|~[01])*(?:/(?:[^/~]|~[01])*)*)$",
+              "maxLength": 512,
+              "type": "string"
+            },
+            "principalSet": {
+              "additionalProperties": false,
+              "type": "object",
+              "required": ["entriesPointer", "principalIdPointer"],
+              "properties": {
+                "entriesPointer": {
+                  "pattern": "^(?:$|/(?:[^/~]|~[01])*(?:/(?:[^/~]|~[01])*)*)$",
+                  "maxLength": 512,
+                  "type": "string"
+                },
+                "principalIdPointer": {
+                  "pattern": "^(?:$|/(?:[^/~]|~[01])*(?:/(?:[^/~]|~[01])*)*)$",
+                  "maxLength": 512,
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "hooks": {
+      "minItems": 1,
+      "type": "array",
+      "items": {
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["kind", "file", "export"],
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "input_validate",
+              "request_shape",
+              "response_normalize",
+              "webhook_classify",
+              "content_map",
+              "acl_map"
+            ]
+          },
+          "file": {
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*(?:/[A-Za-z0-9][A-Za-z0-9._-]*)*$",
+            "type": "string"
+          },
+          "export": {
+            "pattern": "^[A-Za-z_$][A-Za-z0-9_$]*$",
+            "type": "string"
+          }
+        }
+      }
+    },
+    "extensions": {
+      "type": "object",
+      "propertyNames": {
+        "pattern": "^x-[a-z][a-z0-9-]*$"
+      },
+      "additionalProperties": true
+    }
+  }
+}
