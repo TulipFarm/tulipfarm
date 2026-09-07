@@ -484,4 +484,44 @@ describe("routine_delete", () => {
     expect(result).toMatchObject({ success: false, error: { code: "unavailable" } });
     expect(onRoutinesChanged).not.toHaveBeenCalled();
   });
+
+  it("does not report deletion or remove ownership when publication fails", async () => {
+    soulWriter.apply.mockResolvedValueOnce({
+      commitSha: "abc1234",
+      filesChanged: 1,
+      paths: ["routines/daily-report/routine.yaml"],
+      pushed: true,
+      published: false,
+      publicationError: "bundle storage unavailable",
+    });
+    const remove = vi.fn().mockResolvedValue(undefined);
+    const context = ctx(
+      new Map([
+        [
+          "daily-report",
+          {
+            name: "daily-report",
+            config: { metadata: { id: "routine-id" } },
+            hasHooks: false,
+          },
+        ],
+      ])
+    );
+    context.teamAssets = {
+      consumeLifecycleApproval: vi.fn().mockResolvedValue(undefined),
+      remove,
+    } as unknown as NonNullable<PlatformToolContext["teamAssets"]>;
+
+    const result = await routineDeleteTool.handler(
+      { name: "daily-report", ownershipOperationId: "approval-id" },
+      context
+    );
+
+    expect(result).toMatchObject({
+      success: false,
+      error: { code: "internal_error", message: expect.stringContaining("still published") },
+    });
+    expect(onRoutinesChanged).not.toHaveBeenCalled();
+    expect(remove).not.toHaveBeenCalled();
+  });
 });

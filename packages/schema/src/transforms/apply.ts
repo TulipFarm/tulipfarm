@@ -16,6 +16,7 @@ interface ComputedSpec {
 
 interface TransformOpts {
   counter?: CounterFn;
+  existingRecord?: Record<string, unknown>;
 }
 
 async function applyIdStrategy(
@@ -27,6 +28,14 @@ async function applyIdStrategy(
   const idStrategy = schema["x-id-strategy"] as IdStrategy | undefined;
   if (!idStrategy?.sequence) return;
   const targetField = idStrategy.field ?? "id";
+  if (opts?.existingRecord !== undefined) {
+    if (Object.hasOwn(opts.existingRecord, targetField)) {
+      out[targetField] = opts.existingRecord[targetField];
+    } else {
+      delete out[targetField];
+    }
+    return;
+  }
   if (!opts?.counter) {
     throw new TulipFarmValidationError(
       "resource",

@@ -940,8 +940,9 @@ export const routineDeleteTool = defineApiTool<PlatformToolContext>({
       }
     }
 
+    let write: Awaited<ReturnType<SoulWriter["apply"]>>;
     try {
-      await ctx.soulWriter.apply({
+      write = await ctx.soulWriter.apply({
         subject: `soul: remove routine ${name}`,
         source: "agent",
         actor: ctx.requestContext?.actor ?? SYSTEM_SOUL_COMMIT_ACTOR,
@@ -953,6 +954,12 @@ export const routineDeleteTool = defineApiTool<PlatformToolContext>({
     } catch (e) {
       if (e instanceof SoulWriteError) return mapSoulWriteError(e);
       return err("internal_error", e instanceof Error ? e.message : String(e));
+    }
+    if (!write.published) {
+      return err(
+        "internal_error",
+        `Routine ${name} was committed as deleted, but its previous runtime bundle is still published, so the Routine remains available.`
+      );
     }
 
     try {
