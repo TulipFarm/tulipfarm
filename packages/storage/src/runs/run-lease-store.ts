@@ -140,6 +140,14 @@ export const DISPATCH_LEASE_EXPIRED_REF = "dispatch:lease_expired";
  */
 export const DISPATCH_REQUEUED_ONCE_REF = "dispatch:requeued_once";
 
+/**
+ * Recorded when an executor *returns* `needs_reconciliation` (rather than throwing) without
+ * naming its own reason. Without this, such a park carries a null `error_evidence_ref` and the
+ * recovery sweep's candidate query (`error_evidence_ref IN (...)`) never selects it — the Run
+ * parks forever, invisible to the reconciliation path that would otherwise requeue or escalate it.
+ */
+export const DISPATCH_UNSPECIFIED_PARK_REF = "dispatch:unspecified_park";
+
 /** Lists the bounded recovery cases a manager must classify against durable effects. */
 export async function listRecoveryCandidateRows(
   transaction: Queryable,

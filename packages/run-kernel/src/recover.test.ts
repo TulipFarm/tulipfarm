@@ -3,6 +3,7 @@ import {
   DISPATCH_HANDLER_ERROR_REF,
   DISPATCH_LEASE_EXPIRED_REF,
   DISPATCH_REQUEUED_ONCE_REF,
+  DISPATCH_UNSPECIFIED_PARK_REF,
 } from "@tulipfarm/storage";
 import { describe, expect, it } from "vitest";
 import {
@@ -67,7 +68,7 @@ function harness(
 }
 
 describe("RunRecoveryManager", () => {
-  it.each([DISPATCH_HANDLER_ERROR_REF, DISPATCH_LEASE_EXPIRED_REF])(
+  it.each([DISPATCH_HANDLER_ERROR_REF, DISPATCH_LEASE_EXPIRED_REF, DISPATCH_UNSPECIFIED_PARK_REF])(
     "requeues retryable abandoned work once for %s",
     async (errorEvidenceRef) => {
       const { manager } = harness(run({ errorEvidenceRef }), []);

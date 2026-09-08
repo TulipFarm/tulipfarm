@@ -471,4 +471,50 @@ describe("RunDispatcher", () => {
       }),
     ]);
   });
+
+  it("stamps an unspecified needs_reconciliation outcome so the recovery sweep can see it", async () => {
+    const store = new FakeRunStore();
+    store.claimBatchResult = [persistedRun()];
+    const dispatcher = new RunDispatcher({
+      leases: new RunLeaseManager(store),
+      businessId: BUSINESS_ID,
+      owner: "worker-1",
+      now: () => new Date("2026-07-24T10:00:00.000Z"),
+      handler: async () => ({ status: "needs_reconciliation" }),
+    });
+
+    await dispatcher.dispatchBatch();
+
+    // Without a stamped evidence ref, this Run's `error_evidence_ref` stays null and the recovery
+    // sweep's candidate query never selects it, so it parks at `needs_reconciliation` forever.
+    expect(store.releaseCalls).toEqual([
+      expect.objectContaining({
+        status: "needs_reconciliation",
+        errorEvidenceRef: "dispatch:unspecified_park",
+      }),
+    ]);
+  });
+
+  it("fails a Run that returns needs_reconciliation again after already being requeued once", async () => {
+    const store = new FakeRunStore();
+    store.claimBatchResult = [persistedRun()];
+    store.findOverrides = { errorEvidenceRef: DISPATCH_REQUEUED_ONCE_REF };
+    const dispatcher = new RunDispatcher({
+      leases: new RunLeaseManager(store),
+      businessId: BUSINESS_ID,
+      owner: "worker-1",
+      now: () => new Date("2026-07-24T10:00:00.000Z"),
+      handler: async () => ({ status: "needs_reconciliation" }),
+    });
+
+    await dispatcher.dispatchBatch();
+
+    // Parking it again would feed it straight back to the sweep it just came from.
+    expect(store.releaseCalls).toEqual([
+      expect.objectContaining({
+        status: "failed",
+        errorEvidenceRef: "dispatch:handler_error_after_requeue",
+      }),
+    ]);
+  });
 });

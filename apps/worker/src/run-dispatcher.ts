@@ -2,6 +2,7 @@ import type { RunLeaseManager, RunRecoveryManager } from "@tulipfarm/run-kernel"
 import {
   DISPATCH_HANDLER_ERROR_REF,
   DISPATCH_REQUEUED_ONCE_REF,
+  DISPATCH_UNSPECIFIED_PARK_REF,
   type PersistedRun,
 } from "@tulipfarm/storage";
 import type { RunOutcome } from "@tulipfarm/turn-executor";
@@ -101,28 +102,39 @@ export class RunDispatcher {
           waiting += 1;
           continue;
         }
+        // A Run already requeued once that parks again (without throwing) would otherwise carry
+        // no evidence ref and sit invisible to the sweep forever; fail it outright instead, same
+        // as the throwing path below.
+        const exhaustedPark =
+          outcome.status === "needs_reconciliation" &&
+          started.run.errorEvidenceRef === DISPATCH_REQUEUED_ONCE_REF;
+        const releaseStatus = exhaustedPark ? "failed" : outcome.status;
+        const releaseEvidenceRef = exhaustedPark
+          ? "dispatch:handler_error_after_requeue"
+          : (outcome.errorEvidenceRef ??
+            (outcome.status === "needs_reconciliation"
+              ? DISPATCH_UNSPECIFIED_PARK_REF
+              : undefined));
         const released = await this.options.leases.release({
           businessId: this.options.businessId,
           runId: run.id,
           expectedVersion: started.run.version,
           expectedStatus: "running",
-          status: outcome.status,
+          status: releaseStatus,
           now: this.options.now(),
-          ...(outcome.errorEvidenceRef === undefined
-            ? {}
-            : { errorEvidenceRef: outcome.errorEvidenceRef }),
+          ...(releaseEvidenceRef === undefined ? {} : { errorEvidenceRef: releaseEvidenceRef }),
         });
         if (!released) {
           failed += 1;
           continue;
         }
-        if (outcome.status === "succeeded") dispatched += 1;
-        else if (outcome.status === "waiting") waiting += 1;
+        if (releaseStatus === "succeeded") dispatched += 1;
+        else if (releaseStatus === "waiting") waiting += 1;
         else failed += 1;
-        if (outcome.status === "succeeded" || outcome.status === "failed") {
-          await this.notifyTerminal(started.run, outcome.status);
+        if (releaseStatus === "succeeded" || releaseStatus === "failed") {
+          await this.notifyTerminal(started.run, releaseStatus);
         }
-        if (outcome.status === "waiting") {
+        if (releaseStatus === "waiting") {
           await this.notifyWaiting(started.run);
         }
       } catch (error) {
