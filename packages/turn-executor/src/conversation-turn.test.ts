@@ -121,6 +121,26 @@ describe("ConversationTurnCompleter", () => {
     expect(result).toMatchObject({ status: "failed", reason: "iteration_limit" });
   });
 
+  it("carries the tool-call budget through to the completion record and the result (#736)", async () => {
+    const store = new FakeStore();
+    const completer = new ConversationTurnCompleter({ store });
+
+    const result = await completer.complete({
+      ...request,
+      outcome: {
+        status: "failed",
+        reason: "tool_call_limit",
+        toolCallBudget: { used: 15, max: 15 },
+      },
+    });
+
+    expect(result).toMatchObject({
+      status: "failed",
+      reason: "tool_call_limit",
+      toolCallBudget: { used: 15, max: 15 },
+    });
+  });
+
   // A Turn that stops to ask has already shown the reader prose, Tool steps and a question. Ending
   // it with no Message left all three on the wire only, so a reload emptied the reply and stranded
   // the question it is waiting on.

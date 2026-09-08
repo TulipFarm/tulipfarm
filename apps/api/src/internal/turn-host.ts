@@ -126,6 +126,12 @@ export interface HostedTurnContext {
      * this crosses the wire.
      */
     readonly sideEffecting?: boolean;
+    /**
+     * Whether a repeated call within one Turn may be served from a cache instead of dispatched
+     * again. Carried for the same reason `sideEffecting` is: the loop cannot tell once this
+     * crosses the wire.
+     */
+    readonly cacheable?: boolean;
   }[];
   readonly limits: {
     readonly maxIterations: number;

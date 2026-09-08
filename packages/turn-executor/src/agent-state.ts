@@ -54,6 +54,8 @@ export type AgentStateResult =
       readonly status: "failed";
       readonly reason: string;
       readonly modelFailure?: ModelFailureDiagnostic;
+      /** Present only for `tool_call_limit`, so a participant-facing message can say "N of M". */
+      readonly toolCallBudget?: { readonly used: number; readonly max: number };
     }
   | {
       readonly status: "waiting";
@@ -108,6 +110,9 @@ export class AgentStateRunner {
           status: "failed",
           reason: outcome.reason,
           ...(outcome.modelFailure === undefined ? {} : { modelFailure: outcome.modelFailure }),
+          ...(outcome.maxToolCalls === undefined
+            ? {}
+            : { toolCallBudget: { used: outcome.toolCalls, max: outcome.maxToolCalls } }),
         };
 
       case "awaiting_approval": {

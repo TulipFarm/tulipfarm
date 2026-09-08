@@ -251,6 +251,7 @@ export class ChatTurnContextResolver implements TurnContextResolver {
         tier: tool.tier,
         mutating: tool.mutating,
         sideEffecting: tool.sideEffecting,
+        cacheable: tool.cacheable,
       }));
 
     // A deployment that composed no guardrails service still ships the default policy rather than

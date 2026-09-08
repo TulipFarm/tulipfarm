@@ -385,6 +385,9 @@ export class TurnDriver {
           ...(completion.modelFailure === undefined
             ? {}
             : { modelFailure: completion.modelFailure }),
+          ...(completion.toolCallBudget === undefined
+            ? {}
+            : { toolCallBudget: completion.toolCallBudget }),
         },
         "finished"
       );
@@ -422,6 +425,7 @@ function turnOutcome(
       status: "failed",
       reason: result.reason,
       ...(result.modelFailure === undefined ? {} : { modelFailure: result.modelFailure }),
+      ...(result.toolCallBudget === undefined ? {} : { toolCallBudget: result.toolCallBudget }),
     };
   }
   if (result.status === "input_required") return { status: "input_required", text: result.text };

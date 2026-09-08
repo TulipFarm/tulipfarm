@@ -28,6 +28,13 @@ export interface ExposedTool {
    * means false. See `repeat.ts`'s `shortCircuitedRepeat`.
    */
   readonly sideEffecting?: boolean;
+  /**
+   * True when an identical repeated call within one Turn may be served from a cached result
+   * instead of dispatched again — a read whose answer does not change between calls in the same
+   * Turn. Absent means false: dispatch every call, which is every Tool's behavior before this
+   * field existed. Opt-in per Tool; the loop never infers it from `mutating`.
+   */
+  readonly cacheable?: boolean;
 }
 
 export interface AgentLoopInput {
@@ -160,8 +167,9 @@ export interface AgentLoopEvent {
   readonly toolName?: string;
   readonly callId?: string;
   /**
-   * The earlier call in the same batch whose result answered this one, present only when the loop
-   * collapsed two identical reads into a single dispatch.
+   * The earlier call whose result answered this one, present only when the loop served this call
+   * without dispatching it: either it collapsed into an identical read in the same batch, or it
+   * matched the first success of a `cacheable` Tool from earlier in the Turn.
    *
    * The dispatcher never saw this call, so nothing downstream of the dispatch port can report it.
    * Without this field a reader would see one call where the model asked twice — a quieter record
@@ -198,14 +206,17 @@ export type AgentLoopFailureReason =
 /**
  * Failures where re-running the same Turn could plausibly succeed, so its work is worth keeping.
  *
- * Deliberately narrow. A limit, an exhausted budget or a misconfigured provider fails again on
- * every retry, so holding that Turn's Tool arguments and outputs would retain them for nothing.
- * These three are the ones that come from the provider having a bad moment.
+ * Mostly narrow: a misconfigured provider fails again on every retry, so holding that Turn's Tool
+ * arguments and outputs would retain them for nothing. `tool_call_limit` is the exception — the
+ * ceiling was hit, not misconfigured, and every result gathered before it is exactly what the next
+ * attempt needs to avoid re-paying for calls it already made. Dropping that work on a limit failure
+ * is what turned "budget exhausted mid-plan" into "start the plan over from nothing."
  */
 const RETRYABLE_FAILURE_REASONS: ReadonlySet<string> = new Set<AgentLoopFailureReason>([
   "model_provider_unavailable",
   "model_rate_limited",
   "model_error",
+  "tool_call_limit",
 ]);
 
 export function isRetryableFailure(reason: AgentLoopFailureReason): boolean {
@@ -233,6 +244,11 @@ export type AgentLoopOutcome =
       readonly iterations: number;
       readonly toolCalls: number;
       readonly repairs: number;
+      /**
+       * The ceiling `toolCalls` hit, present only when `reason` is `tool_call_limit`. Carried so a
+       * participant-facing message can say "N of M calls used" instead of naming the limit alone.
+       */
+      readonly maxToolCalls?: number;
     }
   | {
       readonly status: "awaiting_approval";

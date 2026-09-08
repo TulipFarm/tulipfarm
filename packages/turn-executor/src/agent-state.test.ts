@@ -80,6 +80,31 @@ describe("AgentStateRunner", () => {
     expect(result).toMatchObject({ status: "failed", reason: "iteration_limit" });
   });
 
+  it("carries the tool-call budget onto the State result when the loop reports one (#736)", async () => {
+    const harness = runner({
+      status: "failed",
+      reason: "tool_call_limit",
+      iterations: 3,
+      toolCalls: 15,
+      repairs: 0,
+      maxToolCalls: 15,
+    });
+    const result = await harness.agentState.execute(request(), LOOP_INPUT);
+
+    expect(result).toMatchObject({
+      status: "failed",
+      reason: "tool_call_limit",
+      toolCallBudget: { used: 15, max: 15 },
+    });
+  });
+
+  it("omits the tool-call budget for a failure the loop did not attach one to", async () => {
+    const harness = runner({ status: "failed", reason: "iteration_limit", ...counters });
+    const result = await harness.agentState.execute(request(), LOOP_INPUT);
+
+    expect((result as { toolCallBudget?: unknown }).toolCallBudget).toBeUndefined();
+  });
+
   it("registers a durable wait and parks the State instead of finishing it", async () => {
     const harness = runner({
       status: "awaiting_approval",

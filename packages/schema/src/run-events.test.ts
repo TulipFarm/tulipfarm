@@ -203,6 +203,28 @@ describe("run event vocabulary", () => {
     expect(accepts("turn.finished", { status: "failed", messageId: null })).toBe(true);
   });
 
+  it("carries the tool-call budget a `tool_call_limit` failure exhausted (#736)", () => {
+    expect(
+      accepts("turn.finished", {
+        status: "failed",
+        messageId: null,
+        reason: "tool_call_limit",
+        toolCallBudget: { used: 15, max: 15 },
+      })
+    ).toBe(true);
+    // Both counters are required together — a budget notice naming only one half is not usable.
+    expect(
+      accepts("turn.finished", { status: "failed", messageId: null, toolCallBudget: { used: 15 } })
+    ).toBe(false);
+    expect(
+      accepts("turn.finished", {
+        status: "failed",
+        messageId: null,
+        toolCallBudget: { used: -1, max: 15 },
+      })
+    ).toBe(false);
+  });
+
   it("allows older finished turns without receipt fields", () => {
     expect(accepts("turn.finished", { status: "succeeded", messageId: "m1" })).toBe(true);
     expect(accepts("turn.finished", { status: "cancelled", messageId: null })).toBe(true);

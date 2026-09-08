@@ -435,6 +435,30 @@ describe("TurnDriver", () => {
     });
   });
 
+  it("carries the tool-call budget onto the finished turn event (#736)", async () => {
+    const { driver, events, store } = harness({
+      status: "failed",
+      reason: "tool_call_limit",
+      iterations: 3,
+      toolCalls: 15,
+      repairs: 0,
+      maxToolCalls: 15,
+    });
+    const outcome = await driver.run(request());
+
+    expect(outcome).toEqual({ status: "failed", errorEvidenceRef: "agent:tool_call_limit" });
+    expect(store.completed).toEqual([{ status: "failed", cursor: 2, messageId: null }]);
+    expect(events.appended.at(-1)).toEqual({
+      eventType: "turn.finished",
+      payload: {
+        status: "failed",
+        messageId: null,
+        reason: "tool_call_limit",
+        toolCallBudget: { used: 15, max: 15 },
+      },
+    });
+  });
+
   it("names reconciliation as the reason rather than reporting a plain failure", async () => {
     // A loop that throws mid-flight may have landed an effect; the State runner says so.
     const { driver, events, store } = harness(async () => {
