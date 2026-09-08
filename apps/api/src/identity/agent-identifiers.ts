@@ -17,9 +17,13 @@ interface AgentIdentifierColumn {
  *
  * Tables are created lazily by their owning repository rather than all at once, so each is probed
  * before it is written: a deployment that has never used a feature has no table for it.
+ *
+ * `audit_events.agent_id` is deliberately absent: that table is append-only and hash-chained, and
+ * the database grant refuses any `UPDATE` on it, in-place rekey or otherwise. A row written before
+ * an Agent's id cutover keeps recording whatever identifier was true at the time, which is what an
+ * immutable audit trail is for; it is never rewritten to match a later rename.
  */
 const AGENT_IDENTIFIER_COLUMNS: readonly AgentIdentifierColumn[] = [
-  { table: "audit_events", column: "agent_id" },
   { table: "conversations", column: "agent_id" },
   { table: "channel_delivery_attempts", column: "agent_id" },
   { table: "channel_run_deliveries", column: "agent_id" },
@@ -126,13 +130,16 @@ async function moveAssetOwnership(
  *
  * Idempotent and per-table isolated: a table that does not exist is skipped, and a table that
  * fails is logged rather than thrown, so one unmigratable feature cannot stop the deployment from
- * booting with the rest re-keyed.
+ * booting with the rest re-keyed. A per-table failure is logged at `error`, not `warn` — the
+ * durable app log only retains `error`/`fatal` records (`@tulipfarm/observability`), and a rejected
+ * rekey is exactly the kind of partial state an operator needs to be able to find later, not a
+ * transient notice that is fine to lose.
  */
 export async function reconcileAgentIdentifiers(
   q: Queryable,
   soul: SoulAgents,
   businessId: string,
-  logger?: Pick<Logger, "warn">
+  logger?: Pick<Logger, "error">
 ): Promise<void> {
   const mapping = renames(soul);
   if (mapping.size === 0) return;
@@ -146,7 +153,7 @@ export async function reconcileAgentIdentifiers(
       try {
         await q.query(`UPDATE ${table} SET ${column} = $1 WHERE ${column} = $2`, [id, name]);
       } catch (err) {
-        logger?.warn(`[agents] could not re-key ${table}.${column} for "${name}": ${msg(err)}`);
+        logger?.error(`[agents] could not re-key ${table}.${column} for "${name}": ${msg(err)}`);
       }
     }
   }
@@ -156,7 +163,7 @@ export async function reconcileAgentIdentifiers(
       try {
         await moveAssetOwnership(q, businessId, name, id);
       } catch (err) {
-        logger?.warn(`[agents] could not re-key ownership of agent "${name}": ${msg(err)}`);
+        logger?.error(`[agents] could not re-key ownership of agent "${name}": ${msg(err)}`);
       }
     }
   }
@@ -170,7 +177,7 @@ export async function reconcileAgentIdentifiers(
         [businessId, name]
       );
     } catch (err) {
-      logger?.warn(`[agents] could not reap the name-keyed principal "${name}": ${msg(err)}`);
+      logger?.error(`[agents] could not reap the name-keyed principal "${name}": ${msg(err)}`);
     }
   }
 }
