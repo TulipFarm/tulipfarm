@@ -2313,6 +2313,83 @@ describe("AgentLoop repeated Tool calls inside one Turn", () => {
   });
 });
 
+describe("AgentLoop breaking on a looping model", () => {
+  const listCall = (callId: string, args: unknown) =>
+    toolCallResult([{ callId, name: "github.issue.comment", arguments: args }]);
+
+  /** Every Tool result in the final prompt, in the order the model reads them. */
+  const results = (prompt: readonly ModelMessage[]) =>
+    prompt
+      .filter((message) => message.role === "tool")
+      .map((message) => JSON.parse(contentText(message.content)) as Record<string, unknown>);
+
+  it("ends the Turn as repeated_tool_calls instead of burning the whole tool-call budget (#749)", async () => {
+    // Regression for staging's `IndexSlackKnowledge`: raising `maxToolCalls` (#745) did not stop a
+    // model that proposes the exact same call, unchanged, every iteration. Before this fix, nothing
+    // in the loop broke on that pattern — it just re-dispatched forever and eventually reported
+    // `tool_call_limit`, however high the ceiling was raised.
+    const model = promptRecordingModel(
+      listCall("call-1", { body: "same" }),
+      listCall("call-2", { body: "same" }),
+      listCall("call-3", { body: "same" }),
+      listCall("call-4", { body: "same" })
+    );
+    const tools = dispatcher(
+      { status: "succeeded", callId: "call-1", output: { ok: true } },
+      { status: "succeeded", callId: "call-2", output: { ok: true } },
+      { status: "succeeded", callId: "call-3", output: { ok: true } }
+    );
+
+    const outcome = await loop({ model, tools }).run(
+      input({ limits: { maxIterations: 20, maxToolCalls: 20, maxRepairAttempts: 2 } })
+    );
+
+    expect(outcome).toMatchObject({ status: "failed", reason: "repeated_tool_calls" });
+    // Broken well short of the (generous) ceiling: the model was stopped for looping, not for
+    // spending its whole budget.
+    expect(tools.calls).toHaveLength(3);
+    expect(model.prompts).toHaveLength(4);
+
+    // The model saw a plain warning before the loop gave up on it.
+    const warned = model.prompts[3]?.at(-1);
+    expect(warned).toMatchObject({ role: "user" });
+    const warning = JSON.parse(contentText((warned as ModelMessage).content)) as {
+      warning: string;
+      detail: string;
+    };
+    expect(warning.warning).toBe("repeated_tool_calls");
+    expect(warning.detail).toContain("3 times in a row");
+  });
+
+  it("does not trip the loop guard when the arguments actually change", async () => {
+    const model = promptRecordingModel(
+      listCall("call-1", { body: "one" }),
+      listCall("call-2", { body: "two" }),
+      listCall("call-3", { body: "three" }),
+      listCall("call-4", { body: "four" }),
+      textResult("done")
+    );
+    const tools = dispatcher(
+      { status: "succeeded", callId: "call-1", output: { ok: true } },
+      { status: "succeeded", callId: "call-2", output: { ok: true } },
+      { status: "succeeded", callId: "call-3", output: { ok: true } },
+      { status: "succeeded", callId: "call-4", output: { ok: true } }
+    );
+
+    const outcome = await loop({ model, tools }).run(
+      input({ limits: { maxIterations: 20, maxToolCalls: 20, maxRepairAttempts: 2 } })
+    );
+
+    expect(outcome).toMatchObject({ status: "completed" });
+    expect(tools.calls).toHaveLength(4);
+    for (const prompt of model.prompts) {
+      for (const result of results(prompt)) {
+        expect(result.repeatedCall).toBeUndefined();
+      }
+    }
+  });
+});
+
 describe("AgentLoop park-time answers and cancellation accounting", () => {
   const readTools = [
     { name: "github.issue.search", inputSchema: { type: "object" }, mutating: false },

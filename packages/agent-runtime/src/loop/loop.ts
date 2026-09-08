@@ -31,8 +31,10 @@ import { askFor, distilledPayload, latestAsk } from "./distill";
 import { extractSkillName, narrowToolsToSkill, SKILL_TOOL } from "./narrowing";
 import { capToolResult, MAX_TOOL_RESULT_CHARS } from "./oversize";
 import {
+  batchSignature,
   callSignature,
   elideRepeatedSkillText,
+  repeatedBatchWarning,
   repeatedCall,
   servedFromCache,
   shortCircuitedRepeat,
@@ -73,6 +75,16 @@ const REPEATED_REJECTION_LIMIT = 2;
  * stays silent until the ceiling is close, so an ordinarily-sized Turn never sees it.
  */
 const BUDGET_WARNING_THRESHOLD = 3;
+
+/**
+ * How many times in a row the model may propose the exact same batch of Tool calls — same names,
+ * same arguments, nothing else in between — before the loop stops treating the repeat as a retry
+ * it can still learn from. Raising `maxToolCalls` cannot fix a model that is looping rather than
+ * running out of room, and it left a genuine loop free to burn the whole (now enormous) budget
+ * before failing; this catches it in a handful of iterations instead. One more identical batch
+ * past this count ends the Turn — see the warning appended at the threshold.
+ */
+const CONSECUTIVE_REPEAT_WARNING = 3;
 
 export class AgentLoop {
   constructor(private readonly deps: AgentLoopDependencies) {}
@@ -116,6 +128,11 @@ export class AgentLoop {
     // How often each Tool has already answered this exact question this attempt. Not checkpointed,
     // for the same reason: a resume replays the transcript, so the repetition stays visible there.
     const repeatCounts = new Map<string, number>();
+    // The signature of the last iteration's whole proposed batch, and how many times running it
+    // has repeated exactly. Not checkpointed, for the same reason as `repeatCounts`: a resumed
+    // attempt rebuilds it from the calls it can see rather than trusting a stale count.
+    let lastCallBatchSignature: string | undefined;
+    let consecutiveIdenticalBatches = 0;
     // The first successful result for each signature a `cacheable` Tool has answered this attempt,
     // keyed the same way as `repeatCounts`. Not checkpointed: a resume replays the transcript, so
     // a resumed Turn rebuilds this the same way a fresh one does, from the calls it can see.
@@ -960,11 +977,51 @@ export class AgentLoop {
       // operator never set.
 
       if (result.output.kind === "tool_calls") {
-        const outcome = await dispatchCalls(
-          normalizeCalls(result.output.calls, counters.iterations),
-          false
-        );
+        const calls = normalizeCalls(result.output.calls, counters.iterations);
+        const signature = batchSignature(calls);
+        if (signature !== undefined && signature === lastCallBatchSignature) {
+          consecutiveIdenticalBatches += 1;
+        } else {
+          lastCallBatchSignature = signature;
+          consecutiveIdenticalBatches = signature === undefined ? 0 : 1;
+        }
+
+        // Past the warning, the model has already been told once and repeated anyway: dispatching
+        // again would only spend more of the (now enormous) `maxToolCalls` budget on a loop that
+        // is not going to run out on its own. Ending here, before this batch dispatches, is what
+        // keeps the failure cheap instead of exhausting the whole ceiling first.
+        if (consecutiveIdenticalBatches > CONSECUTIVE_REPEAT_WARNING) {
+          this.deps.log?.warn(
+            {
+              event: "agent_loop.repeated_tool_calls",
+              runId: input.runId,
+              stateId: input.stateId,
+              iteration: counters.iterations,
+              occurrences: consecutiveIdenticalBatches,
+            },
+            "model repeated the same Tool call batch past the warning; ending the Turn"
+          );
+          return finish({ status: "failed", reason: "repeated_tool_calls", ...counters }, "failed");
+        }
+
+        const outcome = await dispatchCalls(calls, false);
         if (outcome !== undefined) return outcome;
+
+        // One warning, on the batch that trips the threshold, before the loop stops trusting the
+        // repeat — the same shape as the empty-completion and schema-repair nudges below, so the
+        // model gets to see it and change course on the very next call.
+        if (consecutiveIdenticalBatches === CONSECUTIVE_REPEAT_WARNING) {
+          messages.push({
+            role: "user",
+            content: textContent(
+              JSON.stringify({
+                warning: "repeated_tool_calls",
+                detail: repeatedBatchWarning(consecutiveIdenticalBatches),
+              })
+            ),
+          });
+          await checkpoint();
+        }
         continue;
       }
 

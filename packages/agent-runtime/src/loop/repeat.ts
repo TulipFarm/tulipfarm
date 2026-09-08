@@ -99,6 +99,39 @@ export function servedFromCache(count: number): { readonly count: number; readon
   };
 }
 
+/**
+ * A stable identity for one iteration's whole batch of proposed calls, order-independent so a
+ * provider that reorders an otherwise-identical batch still matches.
+ *
+ * `undefined` whenever any call's own signature could not be computed, so an unsignable batch is
+ * never mistaken for a repeat of itself — see `callSignature`.
+ */
+export function batchSignature(
+  calls: readonly { readonly name: string; readonly arguments: unknown }[]
+): string | undefined {
+  const signatures: string[] = [];
+  for (const call of calls) {
+    const signature = callSignature(call.name, call.arguments);
+    if (signature === undefined) return undefined;
+    signatures.push(signature);
+  }
+  return signatures.sort().join("");
+}
+
+/**
+ * What the model is told after proposing the exact same batch of calls several times running, one
+ * iteration before the loop gives up on it as a retry the model can steer out of.
+ */
+export function repeatedBatchWarning(count: number): string {
+  return (
+    `You have proposed this exact same set of Tool calls ${count} times in a row in this Turn, ` +
+    "with no different arguments and no other call in between. If the answer you already have is " +
+    "enough, stop calling Tools and use it. If you are stuck, change the arguments, try a " +
+    "different Tool, or explain the obstacle in your reply — repeating this call again will end " +
+    "the Turn."
+  );
+}
+
 /** What a repeated `skill` load carries instead of the text it already sent. */
 const REPEATED_SKILL_NOTE =
   "Already sent earlier in this Turn and omitted here, because a Skill cannot change mid-Turn. " +
