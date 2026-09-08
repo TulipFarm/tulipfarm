@@ -108,6 +108,11 @@ export interface BundleRoutineAgentPortOptions {
   /** Where a guard that timed out or threw is reported; it is skipped, never allowed to stall. */
   readonly log: { warn(obj: unknown, msg?: string): void };
   readonly now?: () => Date;
+  /**
+   * Overrides `MAX_ITERATIONS`/`MAX_TOOL_CALLS` for a test that needs to actually reach the
+   * ceiling. Absent in production, where the real (effectively unbounded) ceiling applies.
+   */
+  readonly toolCallCeiling?: { readonly maxIterations: number; readonly maxToolCalls: number };
 }
 
 /** A settled routing decision: the chain to invoke, in order, and the evidence that chose it. */
@@ -553,11 +558,15 @@ export class BundleRoutineAgentPort implements RoutineAgentPort {
   }
 
   private limits(plan: AgentInvocationPlan, toolCount: number): AgentLoopLimits {
-    return {
+    const ceiling = this.options.toolCallCeiling ?? {
       maxIterations: MAX_ITERATIONS,
+      maxToolCalls: MAX_TOOL_CALLS,
+    };
+    return {
+      maxIterations: ceiling.maxIterations,
       // Zero when the State is offered nothing, so a deployment with no Tool host keeps the exact
       // single-call shape this port had before.
-      maxToolCalls: toolCount === 0 ? 0 : MAX_TOOL_CALLS,
+      maxToolCalls: toolCount === 0 ? 0 : ceiling.maxToolCalls,
       maxRepairAttempts: plan.maxRepairAttempts ?? 0,
     };
   }
