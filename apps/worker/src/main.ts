@@ -416,7 +416,7 @@ export async function main(): Promise<void> {
     runs: runStore,
     events: runEventStore,
     budgets: budgetStore,
-    transitions: new RunStoreStateTransitions(runStore),
+    transitions: new RunStoreStateTransitions(runStore, logger),
     waits: turnHost,
     checkpoints: loopCheckpointStore,
     model: ({ events, budgets, businessId, runId, turnId, conversationId }) =>
@@ -468,7 +468,7 @@ export async function main(): Promise<void> {
       models: { model: (selector, requirements) => llm.model(selector, requirements) },
       artifacts: artifactService,
       runs: runStore,
-      transitions: new RunStoreStateTransitions(runStore),
+      transitions: new RunStoreStateTransitions(runStore, logger),
       log: logger,
     })
   );
@@ -493,7 +493,7 @@ export async function main(): Promise<void> {
       artifacts: artifactService,
       runs: runStore,
       scheduler: new RoutineStateScheduler(runStore),
-      transitions: new RunStoreStateTransitions(runStore),
+      transitions: new RunStoreStateTransitions(runStore, logger),
       // Durable retry budget for a State's authored `retry` policy; survives park/resume and crash.
       retries: stateRetryStore,
       // Durable, cross-worker exclusion for a State's authored `concurrencyKey`.
@@ -680,7 +680,10 @@ export async function main(): Promise<void> {
   if (jobBoss) {
     const settled = new Promise<void>((resolve, reject) => {
       stopJobConsumers = () => {
-        jobBoss.stop({ graceful: true }).then(resolve, reject);
+        jobBoss.stop({ graceful: true }).then(() => {
+          logger.info("queue consumers stopped");
+          resolve();
+        }, reject);
       };
     });
     loops.push({ name: "pg-boss-consumers", settled });
