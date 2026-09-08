@@ -73,13 +73,13 @@ export const NAVIGATION_REQUIREMENTS: readonly NavigationRequirement[] = [
     path: "/business/models",
     authorizations: [
       { action: "llm_config.read", resourceType: "llm_config", fallback: "admin" },
-      { action: "secret.read", resourceType: "secret", fallback: "authenticated" },
+      { action: "secret.read", resourceType: "secret", fallback: "admin" },
     ],
   },
   {
     path: "/business/secrets",
     authorizations: [
-      { action: "secret.read", resourceType: "secret", fallback: "authenticated" },
+      { action: "secret.read", resourceType: "secret", fallback: "admin" },
       { action: "llm_config.read", resourceType: "llm_config", fallback: "admin" },
     ],
   },
