@@ -7,9 +7,15 @@ import {
 } from "@tulipfarm/integrations";
 import type { SecretsService } from "@tulipfarm/secrets";
 import type { IntegrationStore, PersistedRoutingSnapshot } from "@tulipfarm/storage";
+import type { PgBoss } from "pg-boss";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { PgKnowledgeEmissionSink } from "./emission-sink";
-import { runSlackKnowledgeSync, SLACK_KNOWLEDGE_SYNC_CRON } from "./slack-sync-schedule";
+import {
+  retireSlackKnowledgeSyncSchedule,
+  runSlackKnowledgeSync,
+  SLACK_KNOWLEDGE_SYNC_CRON,
+  SLACK_KNOWLEDGE_SYNC_QUEUE,
+} from "./slack-sync-schedule";
 
 const { syncSlackKnowledge } = vi.hoisted(() => ({
   syncSlackKnowledge:
@@ -195,5 +201,25 @@ describe("Slack Knowledge ACL max age vs sync cadence", () => {
     expect(SLACK_KNOWLEDGE_ACL_MAX_AGE_SECONDS).toBeGreaterThanOrEqual(
       SLACK_KNOWLEDGE_SYNC_PERIOD_SECONDS * 2
     );
+  });
+});
+
+describe("retireSlackKnowledgeSyncSchedule", () => {
+  it("unschedules the queue so an upgraded instance stops enqueuing into it", async () => {
+    const unschedule = vi.fn(async () => {});
+    const boss = { unschedule } as unknown as PgBoss;
+
+    await retireSlackKnowledgeSyncSchedule(boss);
+
+    expect(unschedule).toHaveBeenCalledWith(SLACK_KNOWLEDGE_SYNC_QUEUE);
+  });
+
+  it("boots even when there is nothing to unschedule", async () => {
+    // A fresh instance, or one that never ran the automatic sync, has no persisted schedule for
+    // this queue; pg-boss is free to reject that, and boot must not fail over the cleanup.
+    const unschedule = vi.fn(async () => Promise.reject(new Error("no such schedule")));
+    const boss = { unschedule } as unknown as PgBoss;
+
+    await expect(retireSlackKnowledgeSyncSchedule(boss)).resolves.toBeUndefined();
   });
 });

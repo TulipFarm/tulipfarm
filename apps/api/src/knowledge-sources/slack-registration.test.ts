@@ -9,4 +9,12 @@ describe("Slack Knowledge registration", () => {
     expect(source).not.toContain("registerSlackKnowledgeSync");
     expect(source).not.toContain("SLACK_KNOWLEDGE_SYNC_QUEUE");
   });
+
+  it("retires any schedule a pre-#719 instance left behind for it", () => {
+    // registerSlackKnowledgeSync also called boss.schedule; removing the call without unscheduling
+    // leaves pg-boss enqueuing into a queue nothing consumes, forever (issue #750).
+    const source = readFileSync(join(__dirname, "..", "index.ts"), "utf8");
+
+    expect(source).toContain("retireSlackKnowledgeSyncSchedule");
+  });
 });

@@ -96,3 +96,13 @@ export async function registerSlackKnowledgeSync(
   );
   await boss.schedule(SLACK_KNOWLEDGE_SYNC_QUEUE, SLACK_KNOWLEDGE_SYNC_CRON);
 }
+
+/**
+ * Drops the `slack-knowledge-sync` schedule pg-boss persisted while `registerSlackKnowledgeSync`
+ * still ran. pg-boss schedules live in Postgres, independent of which code is deployed, so an
+ * instance upgraded from before automatic Slack history sync was retired keeps enqueuing into
+ * this queue forever — with no consumer left to drain it — unless the schedule itself is cleared.
+ */
+export async function retireSlackKnowledgeSyncSchedule(boss: PgBoss): Promise<void> {
+  await boss.unschedule(SLACK_KNOWLEDGE_SYNC_QUEUE).catch(() => {});
+}
