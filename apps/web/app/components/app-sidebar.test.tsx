@@ -202,13 +202,32 @@ test("hides denied destinations and the groups they empty", () => {
   const nav = screen.getByRole("navigation", { name: "Main" });
 
   expect(within(nav).getByRole("link", { name: "Activity" })).toBeInTheDocument();
-  expect(within(nav).getByRole("link", { name: "Teams" })).toBeInTheDocument();
   expect(within(nav).getByRole("link", { name: "Resources" })).toBeInTheDocument();
-  for (const label of ["Inbox", "Farm", "Knowledge"]) {
+  for (const label of ["Inbox", "Farm", "Knowledge", "Teams"]) {
     expect(within(nav).queryByRole("link", { name: label })).not.toBeInTheDocument();
   }
   expect(within(nav).queryByRole("heading", { name: "Build" })).toBeInTheDocument();
   expect(screen.queryByRole("link", { name: "Settings" })).not.toBeInTheDocument();
+});
+
+test("shows Teams once its path is granted, like any other visiblePaths-gated destination", () => {
+  const GrantedTeamsSidebarStub = createRemixStub([
+    {
+      path: "*",
+      Component: () => (
+        <AppSidebar
+          user={{
+            ...USER,
+            navigation: { visiblePaths: ["/resources", "/business/activities", "/teams"] },
+          }}
+        />
+      ),
+    },
+  ]);
+  render(<GrantedTeamsSidebarStub initialEntries={["/business/activities"]} />);
+  const nav = screen.getByRole("navigation", { name: "Main" });
+
+  expect(within(nav).getByRole("link", { name: "Teams" })).toBeInTheDocument();
 });
 
 test("replaces the app destinations with Settings navigation on a Settings-owned route", () => {

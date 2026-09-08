@@ -9,12 +9,17 @@ export class ApiError extends Error {
   // JSON Pointer to the offending field on a 422 (`{path}` from the API), so forms can map a
   // validation failure back onto the input that caused it. Undefined for non-validation errors.
   readonly path?: string;
+  // The raw wire code from the API's `{ error }` body (e.g. "forbidden"), kept for logging only.
+  // Never render it directly — it is not user copy. `presentApiError` in `lib/present-api-error.ts`
+  // translates it; a call site with no translation falls back to generic copy, not this string.
+  readonly code?: string;
 
-  constructor(status: number, message: string, path?: string) {
+  constructor(status: number, message: string, path?: string, code?: string) {
     super(message);
     this.name = "ApiError";
     this.status = status;
     this.path = path;
+    this.code = code;
   }
 }
 
@@ -222,6 +227,7 @@ function readCookie(name: string): string | null {
 export async function readError(res: Response): Promise<ApiError> {
   let message = res.statusText || `request failed (${res.status})`;
   let path: string | undefined;
+  let code: string | undefined;
   try {
     const body = (await res.json()) as {
       error?: unknown;
@@ -229,7 +235,15 @@ export async function readError(res: Response): Promise<ApiError> {
       code?: unknown;
       path?: unknown;
     };
-    if (typeof body.error === "string") message = body.error;
+    // `error` is sometimes a genuinely descriptive message (a thrown service error's `.message`)
+    // and sometimes a bare wire code (route-gate's `{ error: "forbidden" }`). `message` keeps the
+    // existing fallback behaviour every call site already depends on; `code` mirrors the same raw
+    // value so a caller that recognizes it as a code (via `presentApiError`) can translate it
+    // instead of displaying it verbatim.
+    if (typeof body.error === "string") {
+      message = body.error;
+      code = body.error;
+    }
     if (
       typeof body.error === "object" &&
       body.error !== null &&
@@ -254,7 +268,7 @@ export async function readError(res: Response): Promise<ApiError> {
   } catch {
     // non-JSON body — keep the status-text fallback
   }
-  return new ApiError(res.status, message, path);
+  return new ApiError(res.status, message, path, code);
 }
 
 // `invited` is an account that exists but has no password yet: it holds an outstanding invite link
