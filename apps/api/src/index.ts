@@ -18,6 +18,8 @@ import { FileService, PgFileRepo } from "@tulipfarm/files";
 import { FetchEgressHttp, GuardedEgressHttp, PublicOriginsService } from "@tulipfarm/integrations";
 import {
   buildDefaultRegistry,
+  CONNECTOR_SYNC_QUEUE,
+  EMBEDDING_BACKFILL_QUEUE,
   enqueueIndex,
   KnowledgeOwnershipProjector,
   KnowledgeService,
@@ -222,6 +224,7 @@ import {
   CompositeLiveSourceAuthorization,
   SlackTenantLiveAuthorization,
 } from "./knowledge-sources/live-authorization";
+import { retireSlackKnowledgeSyncSchedule } from "./knowledge-sources/slack-sync-schedule";
 import { PgKnowledgeSourceStore } from "./knowledge-sources/source-store";
 import { registerLlmReload } from "./llm-reload";
 import { buildMemoryServices } from "./memory/composition";
@@ -229,12 +232,12 @@ import { parseObservabilityConfig } from "./observability/config";
 import { createEmbeddingUsageSink } from "./observability/embedding-usage";
 import { subscribeObservability } from "./observability/events";
 import { OtlpMetricsExporter } from "./observability/metrics";
-import { registerObsPruneSchedule } from "./observability/prune-schedule";
+import { OBS_PRUNE_QUEUE, registerObsPruneSchedule } from "./observability/prune-schedule";
 import { PgObsRepo } from "./observability/repo";
 import { PgResourceRepo } from "./observability/resource-repo";
 import { startProcessSamplers } from "./observability/samplers";
 import { ObservabilityService } from "./observability/service";
-import { registerSpendAlertSchedule } from "./observability/spend-alert";
+import { registerSpendAlertSchedule, SPEND_ALERT_QUEUE } from "./observability/spend-alert";
 import { createObservabilityTelemetryPort } from "./observability/telemetry-port";
 import { OtlpTracesExporter } from "./observability/traces";
 import { runPgMigrations } from "./pg-migrate";
@@ -271,8 +274,9 @@ import {
   resolveSoulCommitSigner,
   SYSTEM_SOUL_COMMIT_ACTOR,
 } from "./runtime/soul-writer";
+import { auditPersistedSchedules } from "./schedule/audit";
 import { ScheduleDispatcher } from "./schedule/dispatcher";
-import { registerScheduleDispatch } from "./schedule/register";
+import { registerScheduleDispatch, SCHEDULE_DISPATCH_QUEUE } from "./schedule/register";
 import { RoutineScheduleStateStore } from "./schedule/state-store";
 import { supersedeRoutineRuns } from "./schedule/supersede";
 import { bootstrapFromEnv } from "./setup/bootstrap";
@@ -289,12 +293,20 @@ import {
   provisionWorkerCredential,
 } from "./setup/worker-credential";
 import { agentForRunResolver, delegableToolNames } from "./soul/agents/registry";
-import { bundleRetentionMs, registerSoulBundlePruneSchedule } from "./soul/bundle-prune-schedule";
+import {
+  bundleRetentionMs,
+  registerSoulBundlePruneSchedule,
+  SOUL_BUNDLE_PRUNE_QUEUE,
+} from "./soul/bundle-prune-schedule";
 import { createGitHubSoulCredentialProvider } from "./soul/github-repo-credential";
 import { registerSoulPublicationRoutes } from "./soul/publication-routes";
 import { composeSkillTools } from "./soul/skills/compose";
 import { buildSoulDoctor } from "./soul-doctor/compose";
-import { kickSoulDoctor, registerSoulDoctorSchedule } from "./soul-doctor/schedule";
+import {
+  kickSoulDoctor,
+  registerSoulDoctorSchedule,
+  SOUL_DOCTOR_QUEUE,
+} from "./soul-doctor/schedule";
 import { registerSoulSync } from "./soul-sync";
 import { PgSurfaceActionStore } from "./surfaces/action-store";
 import { PgSurfaceArtifactStore } from "./surfaces/artifact-store";
@@ -1770,6 +1782,7 @@ async function boot() {
     // Every Soul commit publishes a bundle, so this table grows for the life of the deployment.
     await registerSoulBundlePruneSchedule(boss, bundleRetentionMs(process.env));
     await registerSpendAlertSchedule(boss, obsConfig.spendAlertUsd);
+    await retireSlackKnowledgeSyncSchedule(boss);
     await registerKnowledgeIndexing(boss, {
       service: knowledgeService,
       loadConversationText: async (conversationId) => {
@@ -1861,6 +1874,20 @@ async function boot() {
       service: knowledgeService,
       activity: activityService,
     });
+    await auditPersistedSchedules(
+      boss,
+      [
+        SCHEDULE_DISPATCH_QUEUE,
+        CURATOR_SWEEP_QUEUE,
+        SOUL_DOCTOR_QUEUE,
+        OBS_PRUNE_QUEUE,
+        SOUL_BUNDLE_PRUNE_QUEUE,
+        SPEND_ALERT_QUEUE,
+        CONNECTOR_SYNC_QUEUE,
+        EMBEDDING_BACKFILL_QUEUE,
+      ],
+      app.log
+    );
     app.listen({ port, host: "0.0.0.0" }, (err) => {
       if (err) {
         app.log.error(err);
