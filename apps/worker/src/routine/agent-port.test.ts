@@ -529,6 +529,7 @@ describe("BundleRoutineAgentPort", () => {
         }),
       },
       catalog: async () => tools,
+      toolCallCeiling: { maxIterations: 12, maxToolCalls: 12 },
     }).execute(request());
 
     expect(result).toEqual({

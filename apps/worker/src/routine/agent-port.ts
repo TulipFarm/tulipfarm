@@ -108,6 +108,11 @@ export interface BundleRoutineAgentPortOptions {
   /** Where a guard that timed out or threw is reported; it is skipped, never allowed to stall. */
   readonly log: { warn(obj: unknown, msg?: string): void };
   readonly now?: () => Date;
+  /**
+   * Overrides `MAX_ITERATIONS`/`MAX_TOOL_CALLS` for a test that needs to actually reach the
+   * ceiling. Absent in production, where the real (effectively unbounded) ceiling applies.
+   */
+  readonly toolCallCeiling?: { readonly maxIterations: number; readonly maxToolCalls: number };
 }
 
 /** A settled routing decision: the chain to invoke, in order, and the evidence that chose it. */
@@ -151,11 +156,14 @@ export function isRetryableAgentFailure(reason: string): boolean {
  * A State that can call Tools needs room to call one and then answer with what it returned; at 1
  * the model could only ever describe the call it wanted. Matches the Chat Turn ceiling, so the
  * same Agent behaves the same in a Routine as in a conversation.
+ *
+ * Effectively unbounded, matching `MAX_TOOL_STEPS` in `@tulipfarm/memory` — kept finite because it
+ * crosses the internal checkpoint API's `type: "integer"` schema.
  */
-const MAX_ITERATIONS = 12;
+const MAX_ITERATIONS = 1_000_000;
 
 /** Tool calls one State may make. Same ceiling as the iteration budget, as in Chat. */
-const MAX_TOOL_CALLS = 12;
+const MAX_TOOL_CALLS = 1_000_000;
 
 const SYSTEM_SOURCE_ID = "system";
 const REQUEST_SOURCE_ID = "request";
@@ -550,11 +558,15 @@ export class BundleRoutineAgentPort implements RoutineAgentPort {
   }
 
   private limits(plan: AgentInvocationPlan, toolCount: number): AgentLoopLimits {
-    return {
+    const ceiling = this.options.toolCallCeiling ?? {
       maxIterations: MAX_ITERATIONS,
+      maxToolCalls: MAX_TOOL_CALLS,
+    };
+    return {
+      maxIterations: ceiling.maxIterations,
       // Zero when the State is offered nothing, so a deployment with no Tool host keeps the exact
       // single-call shape this port had before.
-      maxToolCalls: toolCount === 0 ? 0 : MAX_TOOL_CALLS,
+      maxToolCalls: toolCount === 0 ? 0 : ceiling.maxToolCalls,
       maxRepairAttempts: plan.maxRepairAttempts ?? 0,
     };
   }
