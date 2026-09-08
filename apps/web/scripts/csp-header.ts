@@ -20,11 +20,15 @@ export function cspHeaderForHtml(html: string): string {
   const scriptSrc = ["'self'", "'unsafe-eval'", ...hashes].join(" ");
   return (
     `default-src 'self'; script-src ${scriptSrc}; style-src 'self' 'unsafe-inline'; ` +
-    "img-src 'self' data:; font-src 'self' data:; connect-src 'self'; " +
+    // blob: on img-src/connect-src/frame-src: the file preview fetches File bytes itself (the
+    // content route needs the session, which an <img>/<iframe> src can't carry) and holds them as
+    // an object URL instead. That URL is same-origin, opaque and readable only by this page, so
+    // allowing it does not widen what default-src 'self' is guarding against.
+    "img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self' blob:; " +
     // Stated rather than inherited from default-src: the sandbox frame that runs authored code is
     // served from this origin, and a reader deleting a `default-src` fallback should not silently
     // take the frame with it.
-    "frame-src 'self'; frame-ancestors 'none'"
+    "frame-src 'self' blob:; frame-ancestors 'none'"
   );
 }
 
