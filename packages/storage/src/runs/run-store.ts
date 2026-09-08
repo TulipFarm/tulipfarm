@@ -580,7 +580,7 @@ export class RunStore {
     businessId: string,
     runId: string,
     expectedVersion: number,
-    expectedEvidenceRef: string
+    expectedEvidenceRef: string | null
   ): Promise<PersistedRun | null> {
     return this.transactions.withTransaction((transaction) =>
       requeueParkedRunRow(transaction, businessId, runId, expectedVersion, expectedEvidenceRef)

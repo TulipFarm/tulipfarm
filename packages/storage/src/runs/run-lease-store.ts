@@ -142,13 +142,25 @@ export const DISPATCH_REQUEUED_ONCE_REF = "dispatch:requeued_once";
 
 /**
  * Recorded when an executor *returns* `needs_reconciliation` (rather than throwing) without
- * naming its own reason. Without this, such a park carries a null `error_evidence_ref` and the
- * recovery sweep's candidate query (`error_evidence_ref IN (...)`) never selects it — the Run
- * parks forever, invisible to the reconciliation path that would otherwise requeue or escalate it.
+ * naming its own reason. `listRecoveryCandidateRows` also selects a NULL `error_evidence_ref`
+ * directly, so this ref exists only as an operator-facing breadcrumb — it names *why* a Run with
+ * no thrown error still parked, it is not what makes the Run visible to the sweep.
  */
 export const DISPATCH_UNSPECIFIED_PARK_REF = "dispatch:unspecified_park";
 
-/** Lists the bounded recovery cases a manager must classify against durable effects. */
+/**
+ * Stamped in place of {@link DISPATCH_HANDLER_ERROR_REF} once a `needs_reconciliation` outcome
+ * (rather than a throw) has already been requeued once and parks again. Bounds the same way
+ * {@link DISPATCH_REQUEUED_ONCE_REF} bounds a thrown error's retry.
+ */
+export const DISPATCH_REQUEUE_EXHAUSTED_REF = "dispatch:handler_error_after_requeue";
+
+/**
+ * Lists the bounded recovery cases a manager must classify against durable effects. A NULL
+ * `error_evidence_ref` is included alongside the named dispatch refs so a Run parked before this
+ * evidence-ref stamping existed (or by any future return path that forgets to name a reason)
+ * still surfaces here instead of parking forever.
+ */
 export async function listRecoveryCandidateRows(
   transaction: Queryable,
   businessId: string,
@@ -160,21 +172,30 @@ export async function listRecoveryCandidateRows(
        FROM runs
       WHERE business_id = $1
         AND status = 'needs_reconciliation'
-        AND error_evidence_ref IN ($2, $3)
+        AND (error_evidence_ref IS NULL OR error_evidence_ref IN ($2, $3, $4))
       ORDER BY created_at
-      LIMIT $4`,
-    [businessId, DISPATCH_HANDLER_ERROR_REF, DISPATCH_LEASE_EXPIRED_REF, Math.max(0, limit)]
+      LIMIT $5`,
+    [
+      businessId,
+      DISPATCH_HANDLER_ERROR_REF,
+      DISPATCH_LEASE_EXPIRED_REF,
+      DISPATCH_UNSPECIFIED_PARK_REF,
+      Math.max(0, limit),
+    ]
   );
   return result.rows.map(persistedRun);
 }
 
-/** Requeues one classified recovery under status, version, and evidence CAS fences. */
+/**
+ * Requeues one classified recovery under status, version, and evidence CAS fences.
+ * `expectedEvidenceRef` may be `null` to match a Run parked before evidence-ref stamping existed.
+ */
 export async function requeueParkedRunRow(
   transaction: Queryable,
   businessId: string,
   runId: string,
   expectedVersion: number,
-  expectedEvidenceRef: string
+  expectedEvidenceRef: string | null
 ): Promise<PersistedRun | null> {
   const result = await transaction.query<RunRow>(
     `UPDATE runs
@@ -187,7 +208,7 @@ export async function requeueParkedRunRow(
         AND id = $2
         AND version = $3
         AND status = 'needs_reconciliation'
-        AND error_evidence_ref = $4
+        AND error_evidence_ref IS NOT DISTINCT FROM $4
       RETURNING id, business_id, source, bundle, identity, status, version, created_at, started_at,
                 finished_at, result_artifact_id, error_evidence_ref, lease_owner, lease_expires_at`,
     [businessId, runId, expectedVersion, expectedEvidenceRef, DISPATCH_REQUEUED_ONCE_REF]

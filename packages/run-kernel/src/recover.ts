@@ -23,7 +23,7 @@ export interface TargetedRunRecoveryStore {
     businessId: string,
     runId: string,
     expectedVersion: number,
-    expectedEvidenceRef: string
+    expectedEvidenceRef: string | null
   ): Promise<PersistedRun | null>;
 }
 
@@ -89,10 +89,12 @@ export class RunRecoveryManager {
     if (current.version !== input.expectedVersion) {
       return { outcome: "version_conflict", run: current };
     }
+    // A NULL errorEvidenceRef is itself a recoverable case: it is how a Run parked before
+    // evidence-ref stamping existed (or by any future return path that forgets to name a reason)
+    // still surfaces here instead of being permanently unsupported.
     if (
       current.status !== "needs_reconciliation" ||
-      current.errorEvidenceRef === null ||
-      !RECOVERABLE_EVIDENCE.has(current.errorEvidenceRef)
+      (current.errorEvidenceRef !== null && !RECOVERABLE_EVIDENCE.has(current.errorEvidenceRef))
     ) {
       return { outcome: "unsupported", run: current };
     }
