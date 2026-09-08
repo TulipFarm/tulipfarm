@@ -109,6 +109,86 @@ describe("startJobConsumers", () => {
     expect(order).toEqual(["gather", "curator"]);
   });
 
+  it("logs what obs-prune actually deleted from each spine", async () => {
+    const query = vi.fn(async () => ({ rows: [{ id: "expired" }] }));
+    const database = { query } as Queryable;
+    const now = new Date("2026-08-01T12:00:00.000Z");
+    const info = vi.fn();
+    const boss = {
+      start: vi.fn(async () => {}),
+      createQueue: vi.fn(async () => {}),
+      work: vi.fn(
+        async (_name: string, _handler: (jobs: unknown[]) => Promise<void>) => "worker-id"
+      ),
+    };
+
+    await startJobConsumers({
+      databaseUrl: "postgres://database/tulipfarm",
+      database,
+      now: () => now,
+      boss: boss as unknown as PgBoss,
+      log: { error: vi.fn(), info },
+    });
+
+    const handler = boss.work.mock.calls.find(([queue]) => queue === OBS_PRUNE_QUEUE)?.[1];
+    await handler?.([{ data: { retentionMs: 60_000 } }]);
+
+    expect(info).toHaveBeenCalledWith(
+      expect.stringContaining("obs-prune deleted obs_event=1 log_event=1 resource_sample=1")
+    );
+  });
+
+  it("logs and rethrows when a queue handler throws", async () => {
+    const query = vi.fn(async () => {
+      throw new Error("connection reset");
+    });
+    const database = { query } as Queryable;
+    const error = vi.fn();
+    const boss = {
+      start: vi.fn(async () => {}),
+      createQueue: vi.fn(async () => {}),
+      work: vi.fn(
+        async (_name: string, _handler: (jobs: unknown[]) => Promise<void>) => "worker-id"
+      ),
+    };
+
+    await startJobConsumers({
+      databaseUrl: "postgres://database/tulipfarm",
+      database,
+      boss: boss as unknown as PgBoss,
+      log: { error, info: vi.fn() },
+    });
+
+    const handler = boss.work.mock.calls.find(([queue]) => queue === OBS_PRUNE_QUEUE)?.[1];
+    await expect(handler?.([{ data: {} }])).rejects.toThrow("connection reset");
+    expect(error).toHaveBeenCalledWith(
+      expect.stringContaining(`queue handler threw queue=${OBS_PRUNE_QUEUE}`)
+    );
+  });
+
+  it("logs each queue subscription once it is registered", async () => {
+    const info = vi.fn();
+    const boss = {
+      start: vi.fn(async () => {}),
+      createQueue: vi.fn(async () => {}),
+      work: vi.fn(async () => "worker-id"),
+      send: vi.fn(async () => "job-id"),
+    };
+
+    await startJobConsumers({
+      databaseUrl: "postgres://database/tulipfarm",
+      database: { query: vi.fn(async () => ({ rows: [] })) } as Queryable,
+      boss: boss as unknown as PgBoss,
+      businessId: "business-1",
+      taskStore: { upsertOpen: vi.fn(), closeByDedupeKey: vi.fn() } as never,
+      taskSignals: { gather: vi.fn(async () => ({}) as never) } as never,
+      log: { error: vi.fn(), info },
+    });
+
+    expect(info).toHaveBeenCalledWith(`queue subscribed queue=${OBS_PRUNE_QUEUE}`);
+    expect(info).toHaveBeenCalledWith(`queue subscribed queue=${CURATOR_SWEEP_QUEUE}`);
+  });
+
   it("registers no sweep queue, and no boot kick, without task deps", async () => {
     const boss = {
       start: vi.fn(async () => {}),

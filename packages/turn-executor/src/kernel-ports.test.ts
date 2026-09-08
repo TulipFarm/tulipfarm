@@ -1,5 +1,5 @@
 import type { PersistedState, RunStore, StateTransitionInput } from "@tulipfarm/storage";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { StateTransitionPort } from "./agent-state";
 import {
   MissingStateError,
@@ -112,6 +112,37 @@ describe("RunStoreStateTransitions", () => {
       reason: "ignored",
     });
     expect(succeeding.transitions[0]?.errorEvidenceRef).toBeUndefined();
+  });
+
+  it("logs an error carrying run id, state key, and evidence when a State fails", async () => {
+    const store = runs({ found: state(), moved: true });
+    const error = vi.fn();
+
+    await new RunStoreStateTransitions(store.runs, { error }).transition({
+      ...REQUEST,
+      from: "running",
+      to: "failed",
+      reason: "routine:agent_tool_call_limit",
+    });
+
+    expect(error).toHaveBeenCalledWith(
+      expect.stringContaining(
+        "run_id=run-1 state_key=invoke evidence=routine:agent_tool_call_limit"
+      )
+    );
+  });
+
+  it("does not log for a transition that is not a failure", async () => {
+    const store = runs({ found: state(), moved: true });
+    const error = vi.fn();
+
+    await new RunStoreStateTransitions(store.runs, { error }).transition({
+      ...REQUEST,
+      from: "running",
+      to: "succeeded",
+    });
+
+    expect(error).not.toHaveBeenCalled();
   });
 
   it("stamps started and finished times from the status it is moving to", async () => {

@@ -34,7 +34,16 @@ export class MissingStateError extends Error {
 
 /** Record `reason` only for non-success; RunStore never clears error evidence. */
 export class RunStoreStateTransitions implements StateTransitionPort {
-  constructor(private readonly runs: Pick<RunStore, "findState" | "transitionState">) {}
+  constructor(
+    private readonly runs: Pick<RunStore, "findState" | "transitionState">,
+    /**
+     * Reports a State's durable move to `failed`. Optional so existing tests and callers need not
+     * wire one, but production always does — this is the one place every Run source (chat,
+     * Routine, subagent, curator) settles a State as failed, so it is the single chokepoint that
+     * can report it without each caller remembering to.
+     */
+    private readonly log?: { error(message: string, error?: unknown): void }
+  ) {}
 
   async transition(input: {
     businessId: string;
@@ -62,6 +71,12 @@ export class RunStoreStateTransitions implements StateTransitionPort {
 
     if (!moved) {
       throw new StateTransitionConflictError(input.runId, input.stateKey, input.from, input.to);
+    }
+
+    if (input.to === "failed") {
+      this.log?.error(
+        `state failed run_id=${input.runId} state_key=${input.stateKey} evidence=${input.reason ?? "unknown"}`
+      );
     }
   }
 }
