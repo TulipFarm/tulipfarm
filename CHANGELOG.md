@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.18.16](https://github.com/TulipFarm/tulipfarm/compare/v0.18.15...v0.18.16) (2026-09-08)
+
+### Bug Fixes
+
+* **agent-runtime:** keep a turn's tool-call budget from being wasted ([#747](https://github.com/TulipFarm/tulipfarm/issues/747)) ([772f7aa](https://github.com/TulipFarm/tulipfarm/commit/772f7aade17e4d9cbc442a0e6e48b5ac4ac4e587))
+* raise chat and routine agent tool-call ceilings ([#745](https://github.com/TulipFarm/tulipfarm/issues/745)) ([7b9b780](https://github.com/TulipFarm/tulipfarm/commit/7b9b780a60ad0d871a66a866d7485975bd657ee5))
+* **web:** allow blob: object URLs in the production CSP ([#746](https://github.com/TulipFarm/tulipfarm/issues/746)) ([0e75a97](https://github.com/TulipFarm/tulipfarm/commit/0e75a97a2d70e24db4d62c61b3996ef5bbdeed4f))
+* **web:** single-source nav visibility and human-readable API errors ([#741](https://github.com/TulipFarm/tulipfarm/issues/741)) ([d1d6948](https://github.com/TulipFarm/tulipfarm/commit/d1d6948205888aa9e1de0b282da51e9cd733e6de))
+
 ## [0.18.15](https://github.com/TulipFarm/tulipfarm/compare/v0.18.14...v0.18.15) (2026-09-07)
 
 ### Bug Fixes
