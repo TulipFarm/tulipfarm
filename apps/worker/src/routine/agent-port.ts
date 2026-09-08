@@ -151,11 +151,14 @@ export function isRetryableAgentFailure(reason: string): boolean {
  * A State that can call Tools needs room to call one and then answer with what it returned; at 1
  * the model could only ever describe the call it wanted. Matches the Chat Turn ceiling, so the
  * same Agent behaves the same in a Routine as in a conversation.
+ *
+ * Effectively unbounded, matching `MAX_TOOL_STEPS` in `@tulipfarm/memory` — kept finite because it
+ * crosses the internal checkpoint API's `type: "integer"` schema.
  */
-const MAX_ITERATIONS = 12;
+const MAX_ITERATIONS = 1_000_000;
 
 /** Tool calls one State may make. Same ceiling as the iteration budget, as in Chat. */
-const MAX_TOOL_CALLS = 12;
+const MAX_TOOL_CALLS = 1_000_000;
 
 const SYSTEM_SOURCE_ID = "system";
 const REQUEST_SOURCE_ID = "request";
