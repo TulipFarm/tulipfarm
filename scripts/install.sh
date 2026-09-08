@@ -473,6 +473,19 @@ prune_orphaned_images() {
     || warn "could not prune orphaned images — reclaim them later with '${ENGINE} image prune -f'"
 }
 
+# journald has no size cap by default, and an instance with nobody watching disk usage can let
+# /var/log/journal grow unbounded. Best-effort and non-fatal: a host with no systemd (or one
+# already managing this itself) just skips it.
+configure_journald_limit() {
+  [ "$OS" = linux ] || return 0
+  command -v systemctl >/dev/null 2>&1 || return 0
+  $SUDO mkdir -p /etc/systemd/journald.conf.d 2>/dev/null || return 0
+  printf '[Journal]\nSystemMaxUse=200M\n' | $SUDO tee /etc/systemd/journald.conf.d/tulipfarm.conf >/dev/null 2>&1 \
+    || { warn "could not cap journald log size"; return 0; }
+  $SUDO systemctl restart systemd-journald >/dev/null 2>&1 \
+    || warn "wrote journald cap but could not restart systemd-journald — it takes effect on next boot"
+}
+
 wait_health() {
   log "Waiting for TulipFarm to become healthy…"
   local _
@@ -500,6 +513,7 @@ main() {
   detect_sudo
   resolve_project_name
   ensure_engine
+  configure_journald_limit
   $SUDO mkdir -p "$INSTALL_DIR"
   fetch_file docker-compose.yml "${INSTALL_DIR}/docker-compose.yml"
   fetch_file .env.example "${INSTALL_DIR}/.env.example" || true
