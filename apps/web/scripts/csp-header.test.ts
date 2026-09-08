@@ -19,6 +19,11 @@ describe("CSP header generation", () => {
     expect(header).not.toMatch(/script-src[^;]*'unsafe-inline'/);
     // The Surface code-view frame is same-origin; without this the sandbox would never load.
     expect(header).toContain("frame-src 'self'");
+    // The file preview holds fetched File bytes as an object URL, so blob: must be allowed
+    // alongside self on each directive that touches it.
+    expect(header).toMatch(/img-src[^;]*\bblob:/);
+    expect(header).toMatch(/connect-src[^;]*\bblob:/);
+    expect(header).toMatch(/frame-src[^;]*\bblob:/);
   });
 
   it("fails when the final HTML has no inline scripts", () => {
