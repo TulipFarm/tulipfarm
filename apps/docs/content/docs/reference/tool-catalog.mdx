@@ -133,6 +133,8 @@ How work is handed to another agent, automated, and reported on while it runs.
 | `routine_forge` | Yes | Create or update a ROUTINE (a scheduled/triggered automation) in the soul repo. |
 | `routine_get` | No | Read one Routine's full configuration: the canonical Routine document (metadata, spec.states and spec.triggers) plus the Triggers currently scheduling it. |
 | `routine_picker` | No | List all available routines from the soul so the user can pick one to trigger. |
+| `routine_run_get` | No | Read the status of one Routine Run by its run id — the id `trigger_routine` returns. |
+| `routine_run_list` | No | List the most recent Runs of one Routine, newest first, with the same status and error detail as `routine_run_get`. |
 | `skill` | No | The one door to a Skill: read it, or run the code it documents. |
 | `soul_repo_push` | Yes | Push committed soul changes to the configured git remote. |
 | `spawn_subagent` | Yes | Spawn a throwaway helper you define yourself, for one task. |
