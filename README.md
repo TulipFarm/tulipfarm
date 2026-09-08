@@ -116,9 +116,11 @@ for every knob (TLS, `POSTGRES_PASSWORD`, `PUBLIC_URL`).
 
 **Updating**: releases publish `ghcr.io/tulipfarm/tulipfarm:v<version>` (+ `:latest` for
 stable). Updates are always **manual** (no auto-update by design) — re-run the install
-command, or `docker compose pull && docker compose up -d`. Database migrations run
-automatically on boot; there are **no down-migrations**, so back up before updating. See
-the [update guide](https://tulipfarm.site/docs/self-hosting/updating) for the full procedure and
+command, or `docker compose pull && docker compose up -d && docker image prune -f`. The
+trailing prune reclaims the image the update replaced; skipping it leaves an orphaned
+~1.8 GB on disk every time. Database migrations run automatically on boot; there are **no
+down-migrations**, so back up before updating. See the
+[update guide](https://tulipfarm.site/docs/self-hosting/updating) for the full procedure and
 every deployment target.
 
 **Uninstall permanently** (deletes the database, soul, secrets, backups, volumes, and

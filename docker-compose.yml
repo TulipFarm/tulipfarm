@@ -122,6 +122,13 @@ services:
       # Generated bootstrap secrets and backups. Losing this volume loses the encryption
       # key for every stored secret — back it up.
       - tulipfarm-data:/data
+    # The default json-file driver has no size cap, so an instance nobody watches can fill its
+    # disk on logs alone. Bounded here so every deployment gets a ceiling with no extra setup.
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
     healthcheck:
       test:
         [
@@ -179,6 +186,11 @@ services:
         volume:
           subpath: blobs
           nocopy: true
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
     # No published port: the probes are for the orchestrator, not for users.
     healthcheck:
       test:
@@ -220,6 +232,11 @@ services:
       # Read-only: `app` owns everything on this volume. This process only reads back the
       # credential it was given.
       - tulipfarm-data:/data:ro
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
     # No published port: the probes are for the orchestrator, not for users.
     healthcheck:
       test:
@@ -261,6 +278,11 @@ services:
       # Read-only: `app` owns everything on this volume. Only the two secrets are read back.
       - tulipfarm-data:/data:ro
       - tulipfarm-bucket:/var/lib/garage
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
     # No published port: bytes reach a browser through the API, which is where authorization for
     # a File is decided. A bucket reachable from outside would be a way around that.
     healthcheck:
@@ -303,6 +325,11 @@ services:
       POSTGRES_DB: tulipfarm
     volumes:
       - tulipfarm-postgres:/var/lib/postgresql/data
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
     healthcheck:
       test: ["CMD", "pg_isready", "-U", "tulipfarm", "-d", "tulipfarm"]
       interval: 10s

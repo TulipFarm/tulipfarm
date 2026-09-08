@@ -19,6 +19,11 @@ One command. About five minutes, most of it waiting for the image to download.
 A machine with **Docker** or **Podman**. On Linux the installer installs Podman for you if neither
 is present. On macOS and Windows, install Docker Desktop or Podman yourself first.
 
+Leave real headroom on the disk holding `/var/lib/docker`. The app image alone is around
+1.8 GB, and every update briefly needs both the old and new image on disk before the old one
+is pruned, plus room for container logs and the Postgres data volume. 29 GB is tight for that;
+prefer 40 GB or more on anything you intend to keep updating.
+
 <Steps>
 
 <Step>
