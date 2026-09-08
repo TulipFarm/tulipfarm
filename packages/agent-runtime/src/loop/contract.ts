@@ -195,6 +195,7 @@ export interface AgentLoopBudgetPort {
 export type AgentLoopFailureReason =
   | "iteration_limit"
   | "tool_call_limit"
+  | "repeated_tool_calls"
   | "repair_budget_exhausted"
   | "budget_exhausted"
   | "input_request_failed"

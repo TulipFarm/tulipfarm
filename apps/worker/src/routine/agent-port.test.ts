@@ -506,14 +506,15 @@ describe("BundleRoutineAgentPort", () => {
       callCount += 1;
       // Two calls per iteration, so the 12-call ceiling is reached after 6 iterations — well under
       // the 12-iteration ceiling — proving this failure is attributed to the Tool-call limit and
-      // not merely to running out of iterations.
+      // not merely to running out of iterations. Arguments vary by iteration so the repeated-call
+      // guard never trips first and the ceiling is what actually ends the Turn.
       return {
         requestId: `req-${callCount}`,
         output: {
           kind: "tool_calls",
           calls: [
-            { callId: `call-${callCount}-a`, name: "lookup", arguments: {} },
-            { callId: `call-${callCount}-b`, name: "lookup", arguments: {} },
+            { callId: `call-${callCount}-a`, name: "lookup", arguments: { iteration: callCount } },
+            { callId: `call-${callCount}-b`, name: "lookup", arguments: { iteration: callCount } },
           ],
         },
         usage: { inputTokens: 10, outputTokens: 4 },
@@ -540,6 +541,50 @@ describe("BundleRoutineAgentPort", () => {
     expect(appended.at(-1)).toMatchObject({
       eventType: "turn.finished",
       payload: { status: "failed", messageId: null, reason: "tool_call_limit" },
+    });
+  });
+
+  it("surfaces a looping model repeating one Tool call as its own failure (#749)", async () => {
+    const tools: ExposedTool[] = [
+      {
+        name: "lookup",
+        description: "Looks something up.",
+        inputSchema: { type: "object", properties: {}, additionalProperties: false },
+      },
+    ];
+    let callCount = 0;
+    invoke = vi.fn<ModelPort["invoke"]>(async () => {
+      callCount += 1;
+      return {
+        requestId: `req-${callCount}`,
+        output: {
+          kind: "tool_calls",
+          calls: [{ callId: `call-${callCount}`, name: "lookup", arguments: {} }],
+        },
+        usage: { inputTokens: 10, outputTokens: 4 },
+      } as ModelInvocationResult;
+    });
+
+    const result = await port({
+      tools: {
+        dispatch: async (call) => ({
+          status: "succeeded",
+          callId: call.callId,
+          output: "ok",
+        }),
+      },
+      catalog: async () => tools,
+      toolCallCeiling: { maxIterations: 12, maxToolCalls: 12 },
+    }).execute(request());
+
+    expect(result).toEqual({
+      kind: "failed",
+      reason: "repeated_tool_calls",
+      retryable: false,
+    });
+    expect(appended.at(-1)).toMatchObject({
+      eventType: "turn.finished",
+      payload: { status: "failed", messageId: null, reason: "repeated_tool_calls" },
     });
   });
 
@@ -586,6 +631,7 @@ describe("isRetryableAgentFailure", () => {
       "model_not_found",
       "iteration_limit",
       "tool_call_limit",
+      "repeated_tool_calls",
       "repair_budget_exhausted",
       "budget_exhausted",
       "empty_model_output",
