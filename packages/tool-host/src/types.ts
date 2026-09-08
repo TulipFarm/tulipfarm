@@ -200,6 +200,12 @@ export interface ToolDef<Result extends ParkableToolCallResult = ToolCallResult>
    * default when running it again is the bug (#646).
    */
   sideEffecting?: boolean;
+  /**
+   * True when an identical repeated call within one Turn may be served from a cached result
+   * instead of dispatched again — a read whose answer does not change between calls in the same
+   * Turn. Absent means false. See `ExposedTool.cacheable` in `@tulipfarm/agent-runtime`.
+   */
+  cacheable?: boolean;
   description: string;
   inputSchema: Record<string, unknown>;
   /** Builds a target-scoped schema without exposing cross-channel component vocabulary. */

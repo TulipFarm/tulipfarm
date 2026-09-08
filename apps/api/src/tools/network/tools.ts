@@ -493,6 +493,9 @@ function reachableCacheEntry(
 export const webFetchTool = defineApiTool<NetworkToolContext>({
   ...WEB_FETCH_TOOL_DECLARATION,
   tier: "platform",
+  // Same URL and prompt always shrink to the same answer within a Turn (its description already
+  // promises this), so the loop may serve a repeat from cache instead of spending budget on it.
+  cacheable: true,
   timeout: { wallClockMs: NETWORK_TOOL_TIMEOUT_MS },
   outputSchema: { type: "object", additionalProperties: true },
   authorization: {

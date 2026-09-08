@@ -522,7 +522,57 @@ describe("AgentLoop", () => {
       ),
     }).run(input({ limits: { maxIterations: 9, maxToolCalls: 1, maxRepairAttempts: 2 } }));
 
-    expect(outcome).toMatchObject({ status: "failed", reason: "tool_call_limit" });
+    expect(outcome).toMatchObject({
+      status: "failed",
+      reason: "tool_call_limit",
+      maxToolCalls: 1,
+    });
+  });
+
+  it("warns the model of its remaining Tool-call budget as it nears the ceiling", async () => {
+    const model = promptRecordingModel(
+      toolCallResult([{ callId: "c1", name: "github.issue.comment", arguments: { body: "1" } }]),
+      toolCallResult([{ callId: "c2", name: "github.issue.comment", arguments: { body: "2" } }]),
+      textResult("done")
+    );
+
+    await loop({
+      model,
+      tools: dispatcher(
+        { status: "succeeded", callId: "c1", output: {} },
+        { status: "succeeded", callId: "c2", output: {} }
+      ),
+    }).run(input({ limits: { maxIterations: 9, maxToolCalls: 3, maxRepairAttempts: 2 } }));
+
+    const resultAt = (requestIndex: number) =>
+      model.prompts[requestIndex]
+        .filter((message) => message.role === "tool")
+        .map((message) => JSON.parse(contentText(message.content)) as Record<string, unknown>)
+        .at(-1);
+
+    // maxToolCalls: 3 and BUDGET_WARNING_THRESHOLD: 3 mean the very first call is already at the
+    // threshold, so the model sees the notice from its first Tool result, not only once it is
+    // one call from the limit.
+    expect(resultAt(1)?.toolBudget).toMatchObject({ used: 1, max: 3, remaining: 2 });
+    expect(resultAt(2)?.toolBudget).toMatchObject({ used: 2, max: 3, remaining: 1 });
+  });
+
+  it("omits the Tool-call budget notice while headroom is well above the warning threshold", async () => {
+    const model = promptRecordingModel(
+      toolCallResult([{ callId: "c1", name: "github.issue.comment", arguments: { body: "1" } }]),
+      textResult("done")
+    );
+
+    await loop({
+      model,
+      tools: dispatcher({ status: "succeeded", callId: "c1", output: {} }),
+    }).run(input({ limits: { maxIterations: 9, maxToolCalls: 20, maxRepairAttempts: 2 } }));
+
+    const result = model.prompts[1]
+      .filter((message) => message.role === "tool")
+      .map((message) => JSON.parse(contentText(message.content)) as Record<string, unknown>)
+      .at(-1);
+    expect(result?.toolBudget).toBeUndefined();
   });
 
   it("stops when the durable budget is exhausted", async () => {
@@ -1984,7 +2034,9 @@ describe("AgentLoop oversized Tool results", () => {
       model,
       tools: dispatcher({ status: "succeeded", callId: "call-1", output: { ok: true } }),
       log: { warn: (obj: unknown) => warnings.push(obj) },
-    }).run(input());
+      // Well above the Tool-call budget warning threshold, so this stays a test of the size cap
+      // alone and is not also asserting the unrelated budget-notice behavior.
+    }).run(input({ limits: { maxIterations: 5, maxToolCalls: 20, maxRepairAttempts: 2 } }));
 
     expect(JSON.parse(toolText(model.prompts[1]))).toEqual({
       callId: "call-1",
@@ -2222,6 +2274,42 @@ describe("AgentLoop repeated Tool calls inside one Turn", () => {
     }).run(input());
 
     expect(tools.calls).toHaveLength(2);
+  });
+
+  it("serves a repeated cacheable call from the first result instead of dispatching again", async () => {
+    const tools = dispatcher({ status: "succeeded", callId: "call-1", output: { ok: true } });
+    const events = collector();
+
+    const model = promptRecordingModel(
+      listCall("call-1", { body: "hi" }),
+      listCall("call-2", { body: "hi" }),
+      textResult("done")
+    );
+
+    await loop({ model, tools, events: events.sink }).run(
+      input({
+        tools: [
+          {
+            name: "github.issue.comment",
+            inputSchema: { type: "object", required: ["body"] },
+            cacheable: true,
+          },
+        ],
+        limits: { maxIterations: 9, maxToolCalls: 1, maxRepairAttempts: 2 },
+      })
+    );
+
+    // Only the first call reaches the broker; the repeat is answered without spending
+    // `maxToolCalls`, which is set to 1 here to prove the second call was never charged.
+    expect(tools.calls).toHaveLength(1);
+
+    const [first, second] = results(model.prompts[2]);
+    expect(first.servedFromCache).toBeUndefined();
+    expect(second.servedFromCache).toMatchObject({ count: 2 });
+    expect((second.servedFromCache as { note: string }).note).toContain("NOT run");
+
+    const dispatchEvents = events.events.filter((event) => event.type === "tool_call_dispatched");
+    expect(dispatchEvents[1]).toMatchObject({ callId: "call-2", answeredFromCallId: "call-1" });
   });
 });
 

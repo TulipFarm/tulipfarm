@@ -44,6 +44,10 @@ export function callSignature(name: string, args: unknown): string | undefined {
  * call — the same reason a re-read File is fetched again each iteration instead of held. Refusing
  * would decide for the model that the answer cannot have changed, which the loop does not know.
  * So the Tool runs, and the repetition becomes something the model can see and act on.
+ *
+ * A Tool that opts into `cacheable` is the one exception: its own contract already promises the
+ * answer cannot move within a Turn, so the loop trusts that promise instead of re-dispatching. See
+ * `servedFromCache`.
  */
 export function repeatedCall(count: number): { readonly count: number; readonly note: string } {
   return {
@@ -74,6 +78,24 @@ export function shortCircuitedRepeat(count: number): {
       `This is call ${count} with these exact arguments in this Turn. It was NOT run — this Tool ` +
       "has a real effect each time it runs, so an exact repeat is refused rather than dispatched " +
       "again. If the earlier call already did what you needed, there is nothing left to do.",
+  };
+}
+
+/**
+ * What a cache-served call carries back to the model, in place of a second dispatch.
+ *
+ * Unlike `repeatedCall`, the Tool does *not* run: it is flagged `cacheable`, so its own contract
+ * already promises this exact call cannot answer differently within the Turn. Skipping the
+ * dispatch is what keeps the repeat from spending the Turn's Tool-call budget on a question the
+ * Turn has already paid to answer.
+ */
+export function servedFromCache(count: number): { readonly count: number; readonly note: string } {
+  return {
+    count,
+    note:
+      `This is call ${count} with these exact arguments in this Turn. It was NOT run again — this ` +
+      "Tool's answer cannot change within a Turn, so the result below is the one already fetched " +
+      "and did not spend Tool-call budget.",
   };
 }
 

@@ -256,6 +256,15 @@ const TURN_FINISHED_SCHEMA = {
         modelId: { type: "string", minLength: 1 },
       },
     },
+    toolCallBudget: {
+      type: "object",
+      required: ["used", "max"],
+      additionalProperties: false,
+      properties: {
+        used: { type: "integer", minimum: 0 },
+        max: { type: "integer", minimum: 0 },
+      },
+    },
     modelId: { type: "string", minLength: 1 },
     effortPreset: { type: "string", enum: EFFORT_PRESETS },
     effortApplied: { type: "string", enum: EFFORT_RUNGS },
@@ -581,6 +590,8 @@ export interface RunEventPayloads {
     readonly messageId?: string | null;
     readonly reason?: string;
     readonly modelFailure?: { readonly requestId: string; readonly modelId?: string };
+    /** Present only for a `tool_call_limit` failure, so a reader can say "N of M calls used". */
+    readonly toolCallBudget?: { readonly used: number; readonly max: number };
     readonly modelId?: string;
     readonly effortPreset?: EffortPreset;
     readonly effortApplied?: EffortRung;

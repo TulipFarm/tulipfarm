@@ -334,6 +334,37 @@ test("turns allowlisted model failures into actionable participant-safe messages
   );
 });
 
+test("names the tool-call budget the turn exhausted, with numbers when they are known", () => {
+  // #736: a turn that burns its whole budget must say so in words the reader can act on — how
+  // many calls it used, of how many — rather than the raw `tool_call_limit` reason it fails with.
+  expect(modelFailureMessage("tool_call_limit", { used: 15, max: 15 })).toBe(
+    "The Agent used up its tool-call budget for this turn (15 of 15 calls used) before it could finish. What it already found is kept — ask it to continue and it will pick up from there, or try a narrower request."
+  );
+  // Numbers are absent when the failure predates them (e.g. an older Run event); the message
+  // must still make sense without a parenthetical of nothing.
+  expect(modelFailureMessage("tool_call_limit")).toBe(
+    "The Agent used up its tool-call budget for this turn before it could finish. What it already found is kept — ask it to continue and it will pick up from there, or try a narrower request."
+  );
+
+  const map = createRunEventMapper();
+  expect(
+    map({
+      seq: 1,
+      type: "turn.finished",
+      data: { status: "failed", reason: "tool_call_limit", toolCallBudget: { used: 15, max: 15 } },
+    })
+  ).toEqual([
+    {
+      type: "error",
+      data: {
+        message:
+          "The Agent used up its tool-call budget for this turn (15 of 15 calls used) before it could finish. What it already found is kept — ask it to continue and it will pick up from there, or try a narrower request.",
+        details: { reason: "tool_call_limit", toolCallsUsed: 15, toolCallsMax: 15 },
+      },
+    },
+  ]);
+});
+
 test("releases a held Tool call when the decision lets it report", () => {
   const map = createRunEventMapper();
 

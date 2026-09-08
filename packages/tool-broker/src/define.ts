@@ -101,6 +101,12 @@ export interface DefineToolInput<Ctx, Result> {
    * means false: safe to re-run, which is every Tool's behavior before this field existed.
    */
   readonly sideEffecting?: boolean;
+  /**
+   * True when an identical repeated call within one Turn may be served from a cached result
+   * instead of dispatched again. Absent means false: dispatch every call, which is every Tool's
+   * behavior before this field existed. See `ExposedTool.cacheable` in `@tulipfarm/agent-runtime`.
+   */
+  readonly cacheable?: boolean;
   readonly retry?: ToolRetryPolicy;
   readonly timeout?: ToolTimeoutPolicy;
   readonly compensation?: ToolCompensationPolicy;

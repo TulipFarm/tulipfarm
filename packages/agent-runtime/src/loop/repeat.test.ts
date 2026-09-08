@@ -3,6 +3,7 @@ import {
   callSignature,
   elideRepeatedSkillText,
   repeatedCall,
+  servedFromCache,
   shortCircuitedRepeat,
 } from "./repeat";
 
@@ -63,6 +64,17 @@ describe("shortCircuitedRepeat", () => {
     expect(marker.count).toBe(2);
     expect(marker.note).toContain("call 2");
     expect(marker.note).toContain("NOT run");
+  });
+});
+
+describe("servedFromCache", () => {
+  it("names the count and says the call was not run or budgeted", () => {
+    const marker = servedFromCache(2);
+
+    expect(marker.count).toBe(2);
+    expect(marker.note).toContain("call 2");
+    expect(marker.note).toContain("NOT run");
+    expect(marker.note).toContain("did not spend Tool-call budget");
   });
 });
 

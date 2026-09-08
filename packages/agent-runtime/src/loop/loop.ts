@@ -34,6 +34,7 @@ import {
   callSignature,
   elideRepeatedSkillText,
   repeatedCall,
+  servedFromCache,
   shortCircuitedRepeat,
 } from "./repeat";
 import {
@@ -63,6 +64,15 @@ const ITERATION_BUDGET_KEY = "iterations";
  * reason it has seen: a genuine schema complaint usually moves on the first retry.
  */
 const REPEATED_REJECTION_LIMIT = 2;
+
+/**
+ * How many Tool calls of headroom remain before every further result carries a budget notice.
+ *
+ * A model that only learns its ceiling by hitting `tool_call_limit` cannot plan around it — the
+ * turn that burned its whole budget on near-identical calls had no signal to change course. This
+ * stays silent until the ceiling is close, so an ordinarily-sized Turn never sees it.
+ */
+const BUDGET_WARNING_THRESHOLD = 3;
 
 export class AgentLoop {
   constructor(private readonly deps: AgentLoopDependencies) {}
@@ -106,6 +116,10 @@ export class AgentLoop {
     // How often each Tool has already answered this exact question this attempt. Not checkpointed,
     // for the same reason: a resume replays the transcript, so the repetition stays visible there.
     const repeatCounts = new Map<string, number>();
+    // The first successful result for each signature a `cacheable` Tool has answered this attempt,
+    // keyed the same way as `repeatCounts`. Not checkpointed: a resume replays the transcript, so
+    // a resumed Turn rebuilds this the same way a fresh one does, from the calls it can see.
+    const cachedResults = new Map<string, { callId: string; payload: Record<string, unknown> }>();
 
     const toolsForIteration = (): readonly ExposedTool[] =>
       narrowToolsToSkill(input.tools, activeSkillName, input.skillToolScopes);
@@ -113,7 +127,10 @@ export class AgentLoop {
     const emit = async (
       type: AgentLoopEventType,
       extra: Partial<
-        Pick<AgentLoopEvent, "toolName" | "callId" | "outcome" | "text" | "textIndex">
+        Pick<
+          AgentLoopEvent,
+          "toolName" | "callId" | "outcome" | "text" | "textIndex" | "answeredFromCallId"
+        >
       > = {}
     ): Promise<void> => {
       sequence += 1;
@@ -286,12 +303,30 @@ export class AgentLoop {
 
       /** Answers one declared call, and records that it now has an answer. */
       const answer = (callId: string, payload: Record<string, unknown>): void => {
-        const capped = capToolResult(payload, callId);
+        const remaining = input.limits.maxToolCalls - counters.toolCalls;
+        // Attached to the result rather than a separate message: the model reads Tool results
+        // every iteration regardless, so this rides along with something already in its context
+        // instead of competing for a slot of its own.
+        const withBudget =
+          remaining <= BUDGET_WARNING_THRESHOLD
+            ? {
+                ...payload,
+                toolBudget: {
+                  used: counters.toolCalls,
+                  max: input.limits.maxToolCalls,
+                  remaining: Math.max(0, remaining),
+                  note: `${Math.max(0, remaining)} of ${input.limits.maxToolCalls} Tool calls left this Turn. Plan the rest to fit, or wrap up now.`,
+                },
+              }
+            : payload;
+        const capped = capToolResult(withBudget, callId);
         // Shortening changes what the model is given, so it cannot be silent: without this line a
         // Turn that answered from a truncated result looks, in the logs, exactly like one that saw
         // the whole thing. The callId ties it to the `tool_call_dispatched` event that names the
-        // Tool.
-        if (capped !== payload) {
+        // Tool. Compared against `withBudget`, not `payload`: attaching the budget notice already
+        // changes the object identity, and comparing against the original would log every capped
+        // check as "shortened" once the notice is riding along.
+        if (capped !== withBudget) {
           this.deps.log?.warn(
             {
               event: "agent_loop.tool_result_capped",
@@ -419,6 +454,16 @@ export class AgentLoop {
             ...distilled,
             ...(repeats === 1 ? {} : { repeatedCall: repeatedCall(repeats) }),
           });
+          // Recorded on the first success only: a later repeat of the same signature is already
+          // being answered from the transcript by the time it would overwrite this, and keeping
+          // the first result is what a cache-served hit (below) reuses.
+          if (
+            repeats === 1 &&
+            repeatKey !== undefined &&
+            exposed.get(call.name)?.cacheable === true
+          ) {
+            cachedResults.set(repeatKey, { callId: call.callId, payload: distilled });
+          }
           if (isReportTool(call.name)) reported = true;
           if (call.name === SKILL_TOOL) {
             const loaded = extractSkillName(call.arguments);
@@ -453,6 +498,31 @@ export class AgentLoop {
           continue;
         }
 
+        // A `cacheable` Tool's own contract already promises this exact call cannot answer
+        // differently within the Turn, so a signature match is served from the first success
+        // instead of dispatched again — never charged against `maxToolCalls`, and never sent to
+        // the broker to re-authorize, unlike an ordinary repeat (see `repeat.ts`). Checked before
+        // the mutating/non-mutating split: a `cacheable` Tool is always a read, but the short
+        // circuit belongs here regardless, since it must win before either dispatch path spends
+        // budget.
+        if (tool.cacheable === true) {
+          const repeatKey = callSignature(call.name, call.arguments);
+          const cached = repeatKey === undefined ? undefined : cachedResults.get(repeatKey);
+          if (cached !== undefined) {
+            const repeats = (repeatCounts.get(repeatKey ?? "") ?? 1) + 1;
+            if (repeatKey !== undefined) repeatCounts.set(repeatKey, repeats);
+            await emit("tool_call_dispatched", {
+              toolName: call.name,
+              callId: call.callId,
+              outcome: "succeeded",
+              answeredFromCallId: cached.callId,
+            });
+            answer(call.callId, { ...cached.payload, servedFromCache: servedFromCache(repeats) });
+            index += 1;
+            continue;
+          }
+        }
+
         if (tool.mutating !== false) {
           // Nothing this Turn does next can correct a report the participant has already read, so
           // the effect that report does not describe must not land (#429).
@@ -485,7 +555,15 @@ export class AgentLoop {
           // a durable checkpoint, so a call counted after its effect would let a resume replay
           // past the limit.
           if (counters.toolCalls + 1 > input.limits.maxToolCalls) {
-            return finish({ status: "failed", reason: "tool_call_limit", ...counters }, "failed");
+            return finish(
+              {
+                status: "failed",
+                reason: "tool_call_limit",
+                ...counters,
+                maxToolCalls: input.limits.maxToolCalls,
+              },
+              "failed"
+            );
           }
           const dispatched = await this.deps.tools.dispatch({
             businessId: input.businessId,
@@ -537,7 +615,15 @@ export class AgentLoop {
 
         const available = input.limits.maxToolCalls - counters.toolCalls;
         if (available <= 0) {
-          return finish({ status: "failed", reason: "tool_call_limit", ...counters }, "failed");
+          return finish(
+            {
+              status: "failed",
+              reason: "tool_call_limit",
+              ...counters,
+              maxToolCalls: input.limits.maxToolCalls,
+            },
+            "failed"
+          );
         }
         const runBatch = batch.slice(0, available);
 

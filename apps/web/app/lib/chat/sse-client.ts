@@ -94,18 +94,29 @@ type RunEventData = {
   revision?: number;
   rounds?: PlanRound[];
   modelFailure?: { requestId?: string; modelId?: string };
+  toolCallBudget?: { used?: number; max?: number };
 };
 
 /** A turn that ended without an answer, whichever half of the runtime gave up on it. */
 const TURN_STOPPED_MESSAGE = "The turn stopped before it could answer. Try again.";
 
-export function modelFailureMessage(reason: string | undefined): string {
+export function modelFailureMessage(
+  reason: string | undefined,
+  toolCallBudget?: { used?: number; max?: number }
+): string {
   switch (reason) {
     case "turn_execution_failed":
     case "needs_reconciliation":
       return TURN_STOPPED_MESSAGE;
     case "repair_budget_exhausted":
       return "The Agent kept producing an invalid result and gave up retrying. Try rephrasing your request.";
+    case "tool_call_limit": {
+      const used = toolCallBudget?.used;
+      const max = toolCallBudget?.max;
+      const spent =
+        used !== undefined && max !== undefined ? ` (${used} of ${max} calls used)` : "";
+      return `The Agent used up its tool-call budget for this turn${spent} before it could finish. What it already found is kept — ask it to continue and it will pick up from there, or try a narrower request.`;
+    }
     case "model_billing_inactive":
       return "The model provider's API billing is inactive. Activate billing or use another Provider Credential.";
     case "model_authentication_failed":
@@ -129,18 +140,30 @@ export function modelFailureMessage(reason: string | undefined): string {
   }
 }
 
-function modelFailureDetails(
-  data: RunEventData
-):
-  | { readonly reason?: string; readonly requestId?: string; readonly modelId?: string }
+function modelFailureDetails(data: RunEventData):
+  | {
+      readonly reason?: string;
+      readonly requestId?: string;
+      readonly modelId?: string;
+      readonly toolCallsUsed?: number;
+      readonly toolCallsMax?: number;
+    }
   | undefined {
-  if (data.reason === undefined && data.modelFailure === undefined) return undefined;
+  if (
+    data.reason === undefined &&
+    data.modelFailure === undefined &&
+    data.toolCallBudget === undefined
+  ) {
+    return undefined;
+  }
   return {
     ...(data.reason === undefined ? {} : { reason: data.reason }),
     ...(data.modelFailure?.requestId === undefined
       ? {}
       : { requestId: data.modelFailure.requestId }),
     ...(data.modelFailure?.modelId === undefined ? {} : { modelId: data.modelFailure.modelId }),
+    ...(data.toolCallBudget?.used === undefined ? {} : { toolCallsUsed: data.toolCallBudget.used }),
+    ...(data.toolCallBudget?.max === undefined ? {} : { toolCallsMax: data.toolCallBudget.max }),
   };
 }
 
@@ -283,7 +306,7 @@ export function createRunEventMapper(): (frame: ParsedFrame) => ChatEvent[] {
           {
             type: "error",
             data: {
-              message: modelFailureMessage(data.reason),
+              message: modelFailureMessage(data.reason, data.toolCallBudget),
               ...(details === undefined ? {} : { details }),
             },
           },

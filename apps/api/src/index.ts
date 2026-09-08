@@ -1230,6 +1230,7 @@ async function boot() {
               ...(tool.tier === undefined ? {} : { tier: tool.tier }),
               ...(tool.mutating === undefined ? {} : { mutating: tool.mutating }),
               ...(tool.sideEffecting === undefined ? {} : { sideEffecting: tool.sideEffecting }),
+              ...(tool.cacheable === undefined ? {} : { cacheable: tool.cacheable }),
             }));
         },
         messages: messageRepo,

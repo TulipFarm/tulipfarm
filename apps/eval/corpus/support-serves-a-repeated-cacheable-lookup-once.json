@@ -1,0 +1,46 @@
+{
+  "id": "support-serves-a-repeated-cacheable-lookup-once",
+  "tier": "l2",
+  "agent": "support",
+  "input": [
+    {
+      "role": "user",
+      "content": "What's the tax rate for Nevada, and is it the same everywhere in the state?"
+    }
+  ],
+  "tools": [
+    {
+      "name": "lookup_tax_rate",
+      "description": "Look up the sales tax rate for a US state by its two-letter code.",
+      "inputSchema": {
+        "type": "object",
+        "properties": { "state": { "type": "string" } },
+        "required": ["state"]
+      },
+      "cacheable": true
+    }
+  ],
+  "toolResults": [
+    { "name": "lookup_tax_rate", "output": { "state": "NV", "ratePercent": "6.85%" } }
+  ],
+  "script": [
+    {
+      "kind": "tool_calls",
+      "calls": [{ "callId": "c1", "name": "lookup_tax_rate", "arguments": { "state": "NV" } }]
+    },
+    {
+      "kind": "tool_calls",
+      "calls": [{ "callId": "c2", "name": "lookup_tax_rate", "arguments": { "state": "NV" } }]
+    },
+    {
+      "kind": "text",
+      "text": "Nevada's state sales tax rate is 6.85%. Some counties add a local surcharge on top of it."
+    }
+  ],
+  "expect": [
+    { "kind": "tool_called", "name": "lookup_tax_rate" },
+    { "kind": "tool_call_count", "count": 1 },
+    { "kind": "output_contains", "text": "6.85%" },
+    { "kind": "loop_status", "status": "completed" }
+  ]
+}

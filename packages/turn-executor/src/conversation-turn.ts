@@ -47,6 +47,8 @@ export interface TurnCompletionStore {
       /** Bounded, participant-safe failure evidence; absent for a succeeded completion. */
       reason?: string;
       modelFailure?: ModelFailureDiagnostic;
+      /** Present only for `tool_call_limit`, so a participant-facing message can say "N of M". */
+      toolCallBudget?: { used: number; max: number };
     }
   ): Promise<void>;
 }
@@ -62,6 +64,8 @@ export type TurnOutcome =
       readonly status: "failed";
       readonly reason: string;
       readonly modelFailure?: ModelFailureDiagnostic;
+      /** Present only for `tool_call_limit`, so a participant-facing message can say "N of M". */
+      readonly toolCallBudget?: { readonly used: number; readonly max: number };
     }
   | { readonly status: "input_required"; readonly text: string }
   | { readonly status: "waiting"; readonly waitId: string };
@@ -88,6 +92,8 @@ export type CompleteTurnResult =
       readonly status: "failed";
       readonly reason: string;
       readonly modelFailure?: ModelFailureDiagnostic;
+      /** Present only for `tool_call_limit`, so a participant-facing message can say "N of M". */
+      readonly toolCallBudget?: { readonly used: number; readonly max: number };
     }
   | { readonly status: "waiting"; readonly waitId: string }
   | { readonly status: "stale" };
@@ -129,6 +135,9 @@ export class ConversationTurnCompleter {
             ...(input.outcome.status === "failed" && input.outcome.modelFailure !== undefined
               ? { modelFailure: input.outcome.modelFailure }
               : {}),
+            ...(input.outcome.status === "failed" && input.outcome.toolCallBudget !== undefined
+              ? { toolCallBudget: input.outcome.toolCallBudget }
+              : {}),
           };
     }
 
@@ -142,6 +151,9 @@ export class ConversationTurnCompleter {
         ...(input.outcome.modelFailure === undefined
           ? {}
           : { modelFailure: input.outcome.modelFailure }),
+        ...(input.outcome.toolCallBudget === undefined
+          ? {}
+          : { toolCallBudget: input.outcome.toolCallBudget }),
       });
       return {
         status: "failed",
@@ -149,6 +161,9 @@ export class ConversationTurnCompleter {
         ...(input.outcome.modelFailure === undefined
           ? {}
           : { modelFailure: input.outcome.modelFailure }),
+        ...(input.outcome.toolCallBudget === undefined
+          ? {}
+          : { toolCallBudget: input.outcome.toolCallBudget }),
       };
     }
 
