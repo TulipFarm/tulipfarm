@@ -48,6 +48,27 @@ describe("PgKnowledgePageRepo", () => {
     expect(await repo.getById(randomUUID())).toBeNull();
   });
 
+  // A caller-supplied id that is not a UUID must read as absent, not raise the driver's
+  // `invalid input syntax for type uuid` — sentinels ("*", "default") and near-UUID hallucinations
+  // both hit this (issue #752).
+  it("answers null rather than raise for a non-UUID id", async () => {
+    for (const bad of [
+      "*",
+      "default",
+      "null",
+      "_",
+      "90ab7ba3-5608-4065-a835-b6d25fb4cba95", // 13 hex chars in the last group, not 12
+      "a1561eea-c9a9-457-98ed-09cab7605f0e", // 3 hex chars in the second group, not 4
+    ]) {
+      await expect(repo.getById(bad)).resolves.toBeNull();
+      await expect(repo.replaceOne(bad, 1, page())).resolves.toBe(false);
+      await expect(repo.softDelete(bad)).resolves.toBe(false);
+      await expect(repo.bumpAclRevision(bad)).resolves.toBe(false);
+      await expect(repo.moveSubtree(bad, null, "x")).resolves.toEqual([]);
+      await expect(repo.listSubtree(bad)).resolves.toEqual([]);
+    }
+  });
+
   it("upsertBySource is idempotent on (source, source_id) and bumps version", async () => {
     const first = page({ source: "resource", sourceId: "r1", title: "v1" });
     const a = await repo.upsertBySource(first);

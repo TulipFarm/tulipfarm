@@ -1,5 +1,6 @@
 import type { Queryable } from "@tulipfarm/storage";
 import { type PaginatedResult, toPage } from "@tulipfarm/storage";
+import { isKnowledgeId } from "./ids";
 import type {
   KnowledgePage,
   KnowledgeRevision,
@@ -173,6 +174,9 @@ export class PgKnowledgePageRepo implements KnowledgePageRepo {
   }
 
   async getById(id: string): Promise<KnowledgePage | null> {
+    // `id` is a `uuid` column, so a malformed id (a sentinel like "*", a hallucinated near-uuid)
+    // must read as absent rather than raise `invalid input syntax for type uuid`.
+    if (!isKnowledgeId(id)) return null;
     const { rows } = await this.q.query(`SELECT ${PAGE_COLS} FROM knowledge_pages WHERE id = $1`, [
       id,
     ]);
@@ -245,6 +249,7 @@ export class PgKnowledgePageRepo implements KnowledgePageRepo {
   }
 
   async replaceOne(id: string, expectedVersion: number, page: KnowledgePage): Promise<boolean> {
+    if (!isKnowledgeId(id)) return false;
     const { rows } = await this.q.query(
       `UPDATE knowledge_pages
        SET title=$1, content=$2, plain_text=$3, domain=$4, tags=$5::text[],
@@ -277,6 +282,7 @@ export class PgKnowledgePageRepo implements KnowledgePageRepo {
   }
 
   async softDelete(id: string): Promise<boolean> {
+    if (!isKnowledgeId(id)) return false;
     const { rows } = await this.q.query(
       `UPDATE knowledge_pages SET active=false, version=version+1, updated_at=now()
        WHERE id=$1 AND active=true RETURNING id`,
@@ -358,6 +364,7 @@ export class PgKnowledgePageRepo implements KnowledgePageRepo {
   }
 
   async bumpAclRevision(id: string): Promise<boolean> {
+    if (!isKnowledgeId(id)) return false;
     const { rows } = await this.q.query(
       `UPDATE knowledge_pages
           SET acl_revision = (COALESCE(NULLIF(acl_revision, '')::bigint, 0) + 1)::text
@@ -369,6 +376,7 @@ export class PgKnowledgePageRepo implements KnowledgePageRepo {
   }
 
   async moveSubtree(id: string, spaceId: string | null, path: string): Promise<readonly string[]> {
+    if (!isKnowledgeId(id)) return [];
     const { rows } = await this.q.query(
       `WITH origin AS (SELECT business_id, space_id, path FROM knowledge_pages WHERE id = $1)
        UPDATE knowledge_pages p
@@ -387,6 +395,7 @@ export class PgKnowledgePageRepo implements KnowledgePageRepo {
   }
 
   async listSubtree(id: string): Promise<readonly { id: string; path: string }[]> {
+    if (!isKnowledgeId(id)) return [];
     const { rows } = await this.q.query(
       `WITH origin AS (SELECT business_id, space_id, path FROM knowledge_pages WHERE id = $1)
        SELECT p.id, p.path FROM knowledge_pages p, origin
