@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.18.17](https://github.com/TulipFarm/tulipfarm/compare/v0.18.16...v0.18.17) (2026-09-08)
+
+### Bug Fixes
+
+* **agent-runtime:** break the tool loop on repeated identical calls ([#760](https://github.com/TulipFarm/tulipfarm/issues/760)) ([e014ee6](https://github.com/TulipFarm/tulipfarm/commit/e014ee65bdba259bcf20b10243bc794345ae59af)), closes [#749](https://github.com/TulipFarm/tulipfarm/issues/749), references [#745](https://github.com/TulipFarm/tulipfarm/issues/745)
+* **api:** retire slack-knowledge-sync pg-boss schedule left with no consumer ([#764](https://github.com/TulipFarm/tulipfarm/issues/764)) ([35a5a26](https://github.com/TulipFarm/tulipfarm/commit/35a5a26e496f3aa091b2672f9723757d3b80b33a)), closes [#750](https://github.com/TulipFarm/tulipfarm/issues/750), references [#719](https://github.com/TulipFarm/tulipfarm/issues/719) [#750](https://github.com/TulipFarm/tulipfarm/issues/750)
+* **api:** stop rekeying append-only audit_events at boot ([#765](https://github.com/TulipFarm/tulipfarm/issues/765)) ([b52ed9d](https://github.com/TulipFarm/tulipfarm/commit/b52ed9d4652a0dd7b89a8f167d26ca336a9e7774))
+* **authz:** stop secret.read navigation gate from diverging in enforcing mode ([#759](https://github.com/TulipFarm/tulipfarm/issues/759)) ([da27e39](https://github.com/TulipFarm/tulipfarm/commit/da27e399d8fd7fa862f376c71632a29418c5a3a8))
+* **deploy:** cap docker logs, journald, and README update command ([#762](https://github.com/TulipFarm/tulipfarm/issues/762)) ([52a5b6a](https://github.com/TulipFarm/tulipfarm/commit/52a5b6a897595b16db116eea123d608e0a8f49b1)), closes [#751](https://github.com/TulipFarm/tulipfarm/issues/751), references [#634](https://github.com/TulipFarm/tulipfarm/issues/634)
+* **knowledge:** validate page id before querying knowledge_pages ([#761](https://github.com/TulipFarm/tulipfarm/issues/761)) ([ae6193d](https://github.com/TulipFarm/tulipfarm/commit/ae6193d754c7715602cedf769de73f17094e4894))
+
+### Documentation
+
+* regenerate the Tool catalog page ([#763](https://github.com/TulipFarm/tulipfarm/issues/763)) ([9141630](https://github.com/TulipFarm/tulipfarm/commit/9141630ff87cc1529b593c7db75b5769ac043e2e))
+
 ## [0.18.16](https://github.com/TulipFarm/tulipfarm/compare/v0.18.15...v0.18.16) (2026-09-08)
 
 ### Bug Fixes
