@@ -2,6 +2,7 @@ import {
   DISPATCH_HANDLER_ERROR_REF,
   DISPATCH_LEASE_EXPIRED_REF,
   DISPATCH_REQUEUED_ONCE_REF,
+  DISPATCH_UNSPECIFIED_PARK_REF,
   type PersistedRun,
 } from "@tulipfarm/storage";
 
@@ -42,6 +43,7 @@ export type RunRecoveryResult =
 const RECOVERABLE_EVIDENCE: ReadonlySet<string> = new Set([
   DISPATCH_HANDLER_ERROR_REF,
   DISPATCH_LEASE_EXPIRED_REF,
+  DISPATCH_UNSPECIFIED_PARK_REF,
 ]);
 
 const REPLAY_SAFE_EFFECT_STATES: ReadonlySet<string> = new Set([
