@@ -183,6 +183,54 @@ describe("EmbeddingService", () => {
     await svc.init(cfg(undefined), makeSecrets() as never, logger);
     expect(svc.isAvailable()).toBe(false);
   });
+
+  it("reports unconfigured, not merely unavailable, when no embeddings section is present", async () => {
+    const svc = new EmbeddingService();
+    await svc.init(cfg(undefined), makeSecrets() as never, logger);
+    expect(svc.isConfigured()).toBe(false);
+    expect(svc.isAvailable()).toBe(false);
+  });
+
+  it("reports configured but unavailable when every declared provider fails to resolve", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(() => Promise.reject(new Error("ECONNREFUSED")))
+    );
+    const svc = new EmbeddingService();
+    const secrets = makeSecrets();
+
+    await svc.init(
+      cfg({
+        providers: [
+          { provider: "ollama", model: "nomic-embed-text", base_url: "http://localhost:11434/v1" },
+        ],
+      }),
+      secrets as never,
+      logger
+    );
+
+    // This is the standing "embeddings unavailable — lexical fallback" degradation a health probe
+    // must be able to distinguish from an instance that was simply never given an `embeddings:`
+    // block — the second is nothing to fix, the first is an ongoing fault.
+    expect(svc.isConfigured()).toBe(true);
+    expect(svc.isAvailable()).toBe(false);
+  });
+
+  it("reports configured and available once a provider resolves", async () => {
+    const svc = new EmbeddingService();
+    const secrets = makeSecrets({ "openai-api-key": "sk-test" });
+    await svc.init(
+      cfg({
+        providers: [
+          { provider: "openai", model: "text-embedding-3-small", api_key_ref: "openai-api-key" },
+        ],
+      }),
+      secrets as never,
+      logger
+    );
+    expect(svc.isConfigured()).toBe(true);
+    expect(svc.isAvailable()).toBe(true);
+  });
 });
 
 describe("EmbeddingService — per-call failover", () => {

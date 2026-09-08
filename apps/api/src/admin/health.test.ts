@@ -1,6 +1,6 @@
 import { LlmNotConfiguredError, UnknownModelError } from "@tulipfarm/schema";
 import { describe, expect, it, vi } from "vitest";
-import { type HealthResult, llmProbe, probeHealth } from "./health";
+import { embeddingsProbe, type HealthResult, llmProbe, probeHealth } from "./health";
 
 /** A configured, resolvable model. Resolution alone cannot tell a live key from a revoked one. */
 const configured = { effortModel: vi.fn(() => ({})) };
@@ -102,5 +102,45 @@ describe("llmProbe", () => {
 
     expect(component.status).toBe("down");
     expect(component.detail).toContain("gpt-5.6-terra");
+  });
+});
+
+describe("embeddingsProbe", () => {
+  it("reports unknown when no embedding provider is configured", async () => {
+    const probe = embeddingsProbe({
+      isConfigured: () => false,
+      isAvailable: () => false,
+    });
+
+    const [component] = await probeHealth([probe], at);
+
+    expect(component.status).toBe("unknown");
+    expect(component.detail).toContain("no embedding provider is configured");
+  });
+
+  it("reports degraded — not down — when configured but no provider could resolve", async () => {
+    // This is the standing condition #755 reported: a boot-time warn and nothing thereafter, while
+    // embedding-backfill and knowledge-index jobs kept reporting `completed` against lexical-only
+    // search. The probe must keep surfacing it, and must not fail an otherwise-running instance.
+    const probe = embeddingsProbe({
+      isConfigured: () => true,
+      isAvailable: () => false,
+    });
+
+    const [component] = await probeHealth([probe], at);
+
+    expect(component.status).toBe("degraded");
+    expect(component.detail).toContain("lexical matching");
+  });
+
+  it("reports ok when a configured provider resolved", async () => {
+    const probe = embeddingsProbe({
+      isConfigured: () => true,
+      isAvailable: () => true,
+    });
+
+    const [component] = await probeHealth([probe], at);
+
+    expect(component.status).toBe("ok");
   });
 });

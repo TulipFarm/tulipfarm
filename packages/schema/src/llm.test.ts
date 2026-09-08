@@ -139,6 +139,74 @@ describe("validateLlmConfig", () => {
     };
     expect(() => validateLlmConfig(bad)).toThrow(LlmConfigValidationError);
   });
+
+  it("rejects an azure embedding entry missing both resource_name and base_url", () => {
+    const bad = {
+      ...validConfig,
+      embeddings: {
+        providers: [{ provider: "azure", model: "text-embedding-3-large" }],
+      },
+    };
+    expect(() => validateLlmConfig(bad)).toThrow(
+      "embeddings.providers[0]: azure provider requires resource_name or base_url"
+    );
+  });
+
+  it("accepts an azure embedding entry with only resource_name", () => {
+    const config = {
+      ...validConfig,
+      embeddings: {
+        providers: [
+          { provider: "azure", model: "text-embedding-3-large", resource_name: "my-resource" },
+        ],
+      },
+    };
+    expect(() => validateLlmConfig(config)).not.toThrow();
+  });
+
+  it("accepts an azure embedding entry with only base_url", () => {
+    const config = {
+      ...validConfig,
+      embeddings: {
+        providers: [
+          {
+            provider: "azure",
+            model: "text-embedding-3-large",
+            base_url: "https://example.openai.azure.com",
+          },
+        ],
+      },
+    };
+    expect(() => validateLlmConfig(config)).not.toThrow();
+  });
+
+  it("rejects an openai-compatible embedding entry missing base_url", () => {
+    const bad = {
+      ...validConfig,
+      embeddings: { providers: [{ provider: "openai-compatible", model: "text-embedding" }] },
+    };
+    expect(() => validateLlmConfig(bad)).toThrow(
+      "embeddings.providers[0]: openai-compatible provider requires base_url"
+    );
+  });
+
+  it("rejects an ollama embedding entry missing base_url", () => {
+    const bad = {
+      ...validConfig,
+      embeddings: { providers: [{ provider: "ollama", model: "nomic-embed-text" }] },
+    };
+    expect(() => validateLlmConfig(bad)).toThrow(
+      "embeddings.providers[0]: ollama provider requires base_url"
+    );
+  });
+
+  it("accepts an openai embedding entry with no base_url or resource_name", () => {
+    const config = {
+      ...validConfig,
+      embeddings: { providers: [{ provider: "openai", model: "text-embedding-3-large" }] },
+    };
+    expect(() => validateLlmConfig(config)).not.toThrow();
+  });
 });
 
 describe("dropUnusableProviderEntries", () => {

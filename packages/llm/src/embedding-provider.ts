@@ -10,6 +10,11 @@ import { resolveApiKey } from "./provider";
 /**
  * Build a text-embedding model from one config entry. Mirrors `createModel`
  * (provider.ts) — same credential resolution, same provider-switch shape.
+ *
+ * These required-field checks stay a second guard even though `@tulipfarm/schema`'s
+ * `validateLlmConfig` (via `describeMissingEmbeddingFields`) already rejects an incomplete entry
+ * at write time: a config written before that check existed, or edited outside the write gate,
+ * must still fail loud here rather than hand the AI SDK an unbuildable client.
  */
 export async function createEmbeddingModel(
   entry: EmbeddingProviderEntry,

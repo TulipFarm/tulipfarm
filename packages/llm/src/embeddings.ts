@@ -100,6 +100,13 @@ export class EmbeddingService {
   private readonly demoteMs: number;
   private readonly usage: EmbeddingUsageSink | undefined;
   private readonly now: () => number;
+  /**
+   * Whether the last `init` saw an `embeddings:` block at all. An unconfigured instance and a
+   * configured-but-unresolvable one are both `isAvailable() === false`, but they are different
+   * health conditions: the first has nothing to fix, the second is a standing degradation a health
+   * probe must keep surfacing past the one boot-time warning.
+   */
+  private configured = false;
 
   constructor(options: EmbeddingServiceOptions = {}) {
     this.timeoutMs = options.timeoutMs ?? EMBEDDING_TIMEOUT_MS;
@@ -115,6 +122,7 @@ export class EmbeddingService {
   ): Promise<void> {
     const embeddings = rawConfig ? validateLlmConfig(rawConfig).embeddings : undefined;
     this.logger = logger;
+    this.configured = embeddings !== undefined;
 
     if (!embeddings) {
       this.candidates = [];
@@ -184,6 +192,11 @@ export class EmbeddingService {
 
   isAvailable(): boolean {
     return this.active !== null;
+  }
+
+  /** Whether the last `init` saw an `embeddings:` block, regardless of whether it resolved. */
+  isConfigured(): boolean {
+    return this.configured;
   }
 
   getActive(): { provider: string; model: string; dimension: number | null } | null {

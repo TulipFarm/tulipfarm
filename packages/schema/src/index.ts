@@ -154,6 +154,7 @@ export type {
   UnusableProviderEntry,
 } from "./llm";
 export {
+  describeMissingEmbeddingFields,
   dropUnusableProviderEntries,
   EmbeddingUnavailableError,
   LlmConfigSchema,
