@@ -1,6 +1,7 @@
 import type { RunLeaseManager, RunRecoveryManager } from "@tulipfarm/run-kernel";
 import {
   DISPATCH_HANDLER_ERROR_REF,
+  DISPATCH_REQUEUE_EXHAUSTED_REF,
   DISPATCH_REQUEUED_ONCE_REF,
   DISPATCH_UNSPECIFIED_PARK_REF,
   type PersistedRun,
@@ -110,7 +111,7 @@ export class RunDispatcher {
           started.run.errorEvidenceRef === DISPATCH_REQUEUED_ONCE_REF;
         const releaseStatus = exhaustedPark ? "failed" : outcome.status;
         const releaseEvidenceRef = exhaustedPark
-          ? "dispatch:handler_error_after_requeue"
+          ? DISPATCH_REQUEUE_EXHAUSTED_REF
           : (outcome.errorEvidenceRef ??
             (outcome.status === "needs_reconciliation"
               ? DISPATCH_UNSPECIFIED_PARK_REF
@@ -153,9 +154,7 @@ export class RunDispatcher {
           expectedStatus: "running",
           status,
           now: this.options.now(),
-          errorEvidenceRef: exhausted
-            ? "dispatch:handler_error_after_requeue"
-            : DISPATCH_HANDLER_ERROR_REF,
+          errorEvidenceRef: exhausted ? DISPATCH_REQUEUE_EXHAUSTED_REF : DISPATCH_HANDLER_ERROR_REF,
         });
         failed += 1;
       }

@@ -1,5 +1,6 @@
 import { RunLeaseManager, type RunLeaseStore } from "@tulipfarm/run-kernel";
 import {
+  DISPATCH_REQUEUE_EXHAUSTED_REF,
   DISPATCH_REQUEUED_ONCE_REF,
   type PersistedRun,
   type PersistedRunStatus,
@@ -467,7 +468,7 @@ describe("RunDispatcher", () => {
     expect(store.releaseCalls).toEqual([
       expect.objectContaining({
         status: "failed",
-        errorEvidenceRef: "dispatch:handler_error_after_requeue",
+        errorEvidenceRef: DISPATCH_REQUEUE_EXHAUSTED_REF,
       }),
     ]);
   });
@@ -513,7 +514,7 @@ describe("RunDispatcher", () => {
     expect(store.releaseCalls).toEqual([
       expect.objectContaining({
         status: "failed",
-        errorEvidenceRef: "dispatch:handler_error_after_requeue",
+        errorEvidenceRef: DISPATCH_REQUEUE_EXHAUSTED_REF,
       }),
     ]);
   });

@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { DEPLOYMENT_BUSINESS_ID } from "@tulipfarm/constants";
+import { DISPATCH_REQUEUE_EXHAUSTED_REF } from "@tulipfarm/storage";
 import { PgBoss } from "pg-boss";
 import { afterEach, beforeAll, describe, expect, it } from "vitest";
 import { REQUIRED_SCHEMA_VERSION } from "../../src/config";
@@ -214,7 +215,7 @@ describe("worker process", () => {
         { describe: "the replacement worker to reclaim, requeue once, and fail the abandoned Run" }
       );
       expect(recovered?.leaseOwner).toBeNull();
-      expect(recovered?.errorEvidenceRef).toBe("dispatch:handler_error_after_requeue");
+      expect(recovered?.errorEvidenceRef).toBe(DISPATCH_REQUEUE_EXHAUSTED_REF);
     },
     TIMEOUT
   );
