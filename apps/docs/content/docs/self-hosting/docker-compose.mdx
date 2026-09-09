@@ -136,6 +136,15 @@ the default for a local instance; set `http://<your-lan-ip>:8080` for a LAN box;
 
 > **Check.** The login page loads at the address you set in PUBLIC_URL, and cookies are marked Secure only when that address is https.
 
+## Hardening the instance
+
+If you run this instance on the public internet, you must harden the host.
+
+* **Lock down SSH:** Restrict port 22 to known IP addresses in your cloud firewall (e.g. Azure NSG, AWS Security Group). If you must leave it open, install `fail2ban` and ensure `PasswordAuthentication no` is set in `/etc/ssh/sshd_config`.
+* **Put TLS in front:** The app has no built-in TLS terminator and is served over plain HTTP. Run a reverse proxy (like Caddy, Traefik, or Nginx) in front of the app to serve it over HTTPS and redirect port 80 to 443. Set `HOST_BIND=127.0.0.1` in your `.env` so the app is only reachable via the reverse proxy.
+
+> **Check.** The app is served securely over HTTPS, port 80 redirects to 443, and port 22 is restricted or protected by fail2ban and key-only auth.
+
 ## Use an external S3 provider instead
 
 _Applies when you chose **An external S3 provider**._

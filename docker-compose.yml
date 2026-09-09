@@ -73,6 +73,10 @@ name: tulipfarm
 #     production/enterprise deployments.
 #   * The `bucket` service publishes no port. Files are authorized per request by the API, so a
 #     bucket reachable from a browser would be a way around that check; do not publish 3900.
+#   * SSH (port 22) is exposed to brute force attacks on a public instance. Restrict it via
+#     your cloud firewall or install fail2ban, and ensure `PasswordAuthentication no`.
+#   * The app is served over plain HTTP. Put a reverse proxy with TLS in front, redirect
+#     port 80 to 443, and set HOST_BIND=127.0.0.1 so the app is only reachable via the proxy.
 services:
   app:
     # Shipped to the install dir, which has no build context — pull the published image only.
