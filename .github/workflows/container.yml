@@ -291,7 +291,16 @@ jobs:
       # It is the cheap half; only the CDN fetch above was ever the problem.
       - name: Install Chromium system dependencies
         if: ${{ env.RUN_SMOKE == 'true' }}
-        run: pnpm exec playwright install-deps chromium
+        run: |
+          for attempt in 1 2 3; do
+            if pnpm exec playwright install-deps chromium; then
+              exit 0
+            fi
+            echo "::warning::apt dependency install failed (attempt $attempt of 3); retrying."
+            sleep 5
+          done
+          echo "::error::Chromium system dependency install failed three times."
+          exit 1
       # A stall costs 6 minutes and a retry rather than the job's whole 25-minute budget.
       - name: Download Chromium
         if: ${{ env.RUN_SMOKE == 'true' && steps.playwright-cache.outputs.cache-hit != 'true' }}
