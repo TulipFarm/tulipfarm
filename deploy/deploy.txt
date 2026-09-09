@@ -710,7 +710,16 @@ the default for a local instance; set `http://<your-lan-ip>:8080` for a LAN box;
 
   Check (manual): The login page loads at the address you set in PUBLIC_URL, and cookies are marked Secure only when that address is https.
 
-Step 6: Use an external S3 provider instead
+Step 6: Hardening the instance
+
+If you run this instance on the public internet, you must harden the host.
+
+* **Lock down SSH:** Restrict port 22 to known IP addresses in your cloud firewall (e.g. Azure NSG, AWS Security Group). If you must leave it open, install `fail2ban` and ensure `PasswordAuthentication no` is set in `/etc/ssh/sshd_config`.
+* **Put TLS in front:** The app has no built-in TLS terminator and is served over plain HTTP. Run a reverse proxy (like Caddy, Traefik, or Nginx) in front of the app to serve it over HTTPS and redirect port 80 to 443. Set `HOST_BIND=127.0.0.1` in your `.env` so the app is only reachable via the reverse proxy.
+
+  Check (manual): The app is served securely over HTTPS, port 80 redirects to 443, and port 22 is restricted or protected by fail2ban and key-only auth.
+
+Step 7: Use an external S3 provider instead
   Branch (blob = external → "An external S3 provider"), Where do uploaded and generated files live?
 
 The stack ships its own S3 server, the `bucket` service, so uploading an image for an agent
@@ -748,7 +757,7 @@ NOTE:
 
   Check (manual): An image uploaded in chat opens again, confirming the app reached your S3 provider.
 
-Step 7: Health checks
+Step 8: Health checks
 
 Two endpoints, for the two questions an orchestrator asks:
 
@@ -765,7 +774,7 @@ both workers wait for healthy `app` because they never migrate.
 
   Verify (http): GET http://localhost:8080/livez returns 200.
 
-Step 8: Update
+Step 9: Update
 
 Migrations apply automatically on boot, and there are **no down-migrations**. Read
 [Updating and rollback](https://tulipfarm.site/docs/self-hosting/updating) before your first upgrade.
@@ -778,7 +787,7 @@ It removes only untagged images, so anything else on the same engine keeps its i
   Verify (http): GET http://localhost:8080/readyz returns 200 within 120s.
   On fail: https://tulipfarm.site/docs/self-hosting/when-install-fails#readyz
 
-Step 9: Running more than one business on one machine
+Step 10: Running more than one business on one machine
 
 Copying `docker-compose.yml` into a second directory does **not** give you a second instance.
 Compose tells stacks apart by **project name**, not by directory, and the file pins one
@@ -805,7 +814,7 @@ NOTE:
 
   Check (manual): Each project name owns its own volumes. `docker volume ls` shows the per-stack prefix you chose.
 
-Step 10: Scale-out is not supported
+Step 11: Scale-out is not supported
 
 Run **exactly one `app` replica**, **one maintenance `worker`**, and **one
 `integration-worker`**. The `app` owns the soul git worktree and applies migrations. The
