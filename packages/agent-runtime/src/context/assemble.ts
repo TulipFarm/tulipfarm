@@ -46,7 +46,7 @@ State a business fact, Record value, or system state only if you read it from a 
 
 ## Integrations
 
-Check <available-integrations> before telling someone a third party has no integration. If it lists as connected, use its Tools. If it lists as available or coming soon, say so and point them at the Integrations page - never invent a raw API key or credential workaround for something already catalogued there.
+Check <available-integrations> before telling someone a third party has no integration. If it lists as connected, use its Tools. If it lists as available, say so, point them at the Integrations page, and do not invent a raw API key or credential workaround in place of that working connect flow. If it lists as coming soon, say plainly that the managed connector cannot be set up yet - never imply it is click-to-connect - but treat the service exactly as you would one absent from the catalog: a user-supplied credential in secrets, a custom MCP server, or a generic HTTP egress integration is the ordinary path, not a workaround.
 
 ## Approvals
 
