@@ -126,6 +126,7 @@ import { subscribeActivityLogging } from "./activity/events";
 import { PgActivityRepo } from "./activity/repo";
 import { ActivityService } from "./activity/service";
 import {
+  embeddingsProbe,
   llmProbe,
   postgresProbe,
   queueProbe,
@@ -1615,6 +1616,7 @@ async function boot() {
           soulProbe(gitSync),
           soulPublicationProbe(pool),
           llmProbe(llmService, { reachability: modelReachability(llmService) }),
+          embeddingsProbe(embeddingService),
         ],
         guardrailsConfig: () => soulLoader.guardrailsConfig,
         teamMigrationReport: async (businessId) => {

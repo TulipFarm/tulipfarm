@@ -409,6 +409,34 @@ describe("llm-config routes", () => {
       expect(init).not.toHaveBeenCalled();
     });
 
+    it("rejects an azure embedding provider missing resource_name and base_url", async () => {
+      // Regression for #755: an Azure embedding provider saved with neither field builds no
+      // model at boot, and the runtime silently drops to lexical matching. The write path must
+      // reject it instead of accepting a config that can only fail later.
+      const res = await app.inject({
+        method: "PUT",
+        url: "/api/v1/llm-config",
+        cookies: cookies(adminSid),
+        headers,
+        payload: {
+          tiers: {
+            quick: { providers: [{ provider: "anthropic", model: "claude-haiku-4-5" }] },
+            standard: { providers: [{ provider: "anthropic", model: "claude-sonnet-4-6" }] },
+            complex: { providers: [{ provider: "anthropic", model: "claude-opus-4-8" }] },
+          },
+          embeddings: {
+            providers: [{ provider: "azure", model: "text-embedding-3-large" }],
+          },
+        },
+      });
+      expect(res.statusCode).toBe(422);
+      expect(res.json().error).toBe(
+        "embeddings.providers[0]: azure provider requires resource_name or base_url"
+      );
+      expect(soulWriterDouble.applied).toEqual([]);
+      expect(init).not.toHaveBeenCalled();
+    });
+
     it("rejects a structurally invalid config with 422, leaving the running config intact", async () => {
       const res = await app.inject({
         method: "PUT",

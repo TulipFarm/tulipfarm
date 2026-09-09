@@ -220,6 +220,45 @@ export function llmProbe(llm: ModelProbeTarget, options: LlmProbeOptions = {}): 
   };
 }
 
+export interface EmbeddingProbeTarget {
+  isConfigured(): boolean;
+  isAvailable(): boolean;
+}
+
+/**
+ * "no embedding provider available" was a one-shot boot warning: `embedding-backfill` and
+ * `knowledge-index` jobs kept reporting `completed` against a degraded backend, and nothing else
+ * ever surfaced it again. This probe makes the condition an ongoing health row instead, so a
+ * dashboard or `readyz` check keeps seeing it for as long as it stays true.
+ *
+ * Unconfigured is `unknown`, the same as `llmProbe`'s "no LLM configured": nothing is broken, an
+ * operator simply has not connected a provider. Configured-but-unresolved is `degraded`, never
+ * `down` — an instance in this state still runs, only knowledge search falls back to lexical
+ * matching.
+ */
+export function embeddingsProbe(embeddings: EmbeddingProbeTarget): HealthProbe {
+  return {
+    component: "embeddings",
+    async check() {
+      if (!embeddings.isConfigured()) {
+        return {
+          status: "unknown",
+          detail: "no embedding provider is configured — knowledge search runs lexical-only",
+        };
+      }
+      if (!embeddings.isAvailable()) {
+        return {
+          status: "degraded",
+          detail:
+            "no configured embedding provider could be initialized — knowledge search has " +
+            "fallen back to lexical matching",
+        };
+      }
+      return { status: "ok" };
+    },
+  };
+}
+
 function numberFrom(value: unknown): number {
   if (typeof value === "number") return Number.isFinite(value) ? value : 0;
   if (typeof value === "bigint") return Number(value);

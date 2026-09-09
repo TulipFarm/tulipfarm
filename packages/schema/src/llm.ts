@@ -201,6 +201,29 @@ function describeConfigError(error: {
   return `${path}${error.message ?? "invalid config"}`;
 }
 
+/**
+ * Fields a given embedding provider cannot build a model without. Mirrors the runtime switch in
+ * `@tulipfarm/llm`'s `createEmbeddingModel` — unlike a chat {@link ProviderEntry}, an embedding
+ * entry has no registry-keyed stored-secret fallback for `resource_name`/`base_url`, so a missing
+ * field here is missing for good; only a write-time reject catches it before boot.
+ */
+const EMBEDDING_PROVIDER_REQUIREMENTS: Readonly<
+  Record<string, (entry: EmbeddingProviderEntry) => string | null>
+> = {
+  azure: (entry) =>
+    entry.resource_name || entry.base_url
+      ? null
+      : "azure provider requires resource_name or base_url",
+  "openai-compatible": (entry) =>
+    entry.base_url ? null : "openai-compatible provider requires base_url",
+  ollama: (entry) => (entry.base_url ? null : "ollama provider requires base_url"),
+};
+
+/** Null when `entry` carries every field its provider needs to build a model. */
+export function describeMissingEmbeddingFields(entry: EmbeddingProviderEntry): string | null {
+  return EMBEDDING_PROVIDER_REQUIREMENTS[entry.provider]?.(entry) ?? null;
+}
+
 export function validateLlmConfig(data: unknown): LlmConfig {
   if (!checkConfig(data)) {
     const e = checkConfig.errors?.[0] ?? { instancePath: "", message: "invalid config" };
@@ -211,6 +234,12 @@ export function validateLlmConfig(data: unknown): LlmConfig {
   if (config.tiers === undefined) {
     throw new LlmConfigValidationError("config must declare provider chains in tiers");
   }
+  config.embeddings?.providers.forEach((entry, index) => {
+    const problem = describeMissingEmbeddingFields(entry);
+    if (problem) {
+      throw new LlmConfigValidationError(`embeddings.providers[${index}]: ${problem}`);
+    }
+  });
   return config;
 }
 
