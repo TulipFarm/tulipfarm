@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.18.18](https://github.com/TulipFarm/tulipfarm/compare/v0.18.17...v0.18.18) (2026-09-09)
+
+### Bug Fixes
+
+* **llm:** validate embedding provider fields at write time and surface degradation ([#772](https://github.com/TulipFarm/tulipfarm/issues/772)) ([52274ee](https://github.com/TulipFarm/tulipfarm/commit/52274eefda8529bc3c3fbf8f73458a10eb8ab5fc)), closes [#755](https://github.com/TulipFarm/tulipfarm/issues/755)
+* **observability:** log worker State failures and queue lifecycle ([#767](https://github.com/TulipFarm/tulipfarm/issues/767)) ([0bc9a22](https://github.com/TulipFarm/tulipfarm/commit/0bc9a22ba7c9f641ebd8fdc22d862513a85c3286))
+* **storage:** let the recovery sweep see parked runs with no evidence ref ([#769](https://github.com/TulipFarm/tulipfarm/issues/769)) ([d7ea9e0](https://github.com/TulipFarm/tulipfarm/commit/d7ea9e08a55aa14ce8e428da2799abc7498dfac8)), references [#768](https://github.com/TulipFarm/tulipfarm/issues/768)
+* **worker:** stamp evidence ref for unspecified needs_reconciliation parks ([#768](https://github.com/TulipFarm/tulipfarm/issues/768)) ([5270316](https://github.com/TulipFarm/tulipfarm/commit/5270316be7f3fad867f3538fc37ade5909249de1))
+
+### Documentation
+
+* **deploy:** add host hardening step to the docker-compose target ([#773](https://github.com/TulipFarm/tulipfarm/issues/773)) ([04f0cd5](https://github.com/TulipFarm/tulipfarm/commit/04f0cd5a7fe588c8c5732bfb03da6b20bbac66d1)), closes [#758](https://github.com/TulipFarm/tulipfarm/issues/758)
+
 ## [0.18.17](https://github.com/TulipFarm/tulipfarm/compare/v0.18.16...v0.18.17) (2026-09-08)
 
 ### Bug Fixes
