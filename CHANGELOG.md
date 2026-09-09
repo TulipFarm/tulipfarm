@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.18.21](https://github.com/TulipFarm/tulipfarm/compare/v0.18.20...v0.18.21) (2026-09-09)
+
+### Bug Fixes
+
+* **llm:** hydrate embedding entries from stored connection ([#780](https://github.com/TulipFarm/tulipfarm/issues/780)) ([8c5fe38](https://github.com/TulipFarm/tulipfarm/commit/8c5fe38756501482e89a5c6b2b06ff2abefe0f1d))
+
 ## [0.18.20](https://github.com/TulipFarm/tulipfarm/compare/v0.18.19...v0.18.20) (2026-09-09)
 
 ### Bug Fixes
