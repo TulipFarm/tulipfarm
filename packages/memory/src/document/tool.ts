@@ -164,19 +164,29 @@ const GET_MEMORY_SCHEMA: Record<string, unknown> = {
 const validateGetMemory = ajv.compile(GET_MEMORY_SCHEMA);
 
 /**
- * The one durable-memory read path.
+ * The fallback read path. In a healthy Turn nothing should call it.
  *
- * Nothing puts Memory in the prompt, so an Agent that does not call this knows nothing durable
- * about the person it is talking to. It also gates `update_memory`'s `remove`, which matches lines
- * verbatim and therefore cannot name a line the model has never read.
+ * The Soul reminder carries the whole document in `<user-memory>`, re-rendered from the store on
+ * every Turn, so an Agent has already been handed everything this returns and cannot hold a stale
+ * copy. Two cases are left over, and both are the reminder failing rather than the Agent needing
+ * more: a Turn that renders no reminder (no authority-layer resolver composed), and a reminder
+ * dropped by the context budget — it sits at `skill_instructions`, which is compactable.
+ *
+ * The description therefore has to argue *against* itself. A read Tool that merely says what it
+ * returns gets called on reflex, and that reflex is what this Tool used to buy on every single
+ * conversation.
  */
 export const getMemoryTool = defineApiTool<MemoryDocumentToolContext>({
   name: "get_memory",
-  description: `Read everything durable you have recorded about this user: who they are, how they want you to reply, and standing rules they have given you.
+  description: `Fallback read of this user's durable memory document. You will almost never need it.
 
-Nothing else tells you any of it, so call this at the start of a conversation with a person, before you rely on a preference, and before \`update_memory\` with \`remove\` (which matches lines verbatim, so you must read the line first).
+You already have the document. The <user-memory> block in the system reminder carries it in full, and <custom-instructions> carries the user's own standing instructions. Both are rebuilt from storage on every single turn, so what you can see is current — it cannot go stale mid-conversation, however long the conversation runs, and calling this returns exactly the text you already have.
 
-Returns what you have recorded as Markdown in \`document\`, plus any standing instructions the user wrote themselves in \`customInstructions\` — those are the user's own words and outrank your <agent-personality>. If \`timezone\` comes back, pass it to \`get_current_time\`; the clock defaults to UTC and will otherwise date things in the wrong day for this user.`,
+So do not call this to open a conversation, to look up a preference or a standing rule, to check whether anything is recorded about the user, or to re-read a line before removing it. Read the block instead.
+
+Call it only if <user-memory> is missing from your context entirely. That means the reminder failed to render, and this is the only way to recover what it would have told you.
+
+Returns the document as Markdown in \`document\`, plus any standing instructions in \`customInstructions\` — those are the user's own words and outrank your <agent-personality>. If \`timezone\` comes back, pass it to \`get_current_time\`; the clock defaults to UTC and will otherwise date things in the wrong day for this user.`,
   tier: "platform",
   mutating: false,
   inputSchema: GET_MEMORY_SCHEMA,

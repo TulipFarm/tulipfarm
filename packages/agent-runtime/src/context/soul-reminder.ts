@@ -333,9 +333,6 @@ function line(value: string): string {
  */
 const EMPTY_SECTION = "(none)";
 
-/** Longest Memory Document the reminder carries; `get_memory` returns the whole thing. */
-const MAX_MEMORY_CHARS = 8_000;
-
 /**
  * Flattens one authored *block* into safe lines, keeping the line breaks.
  *
@@ -346,8 +343,13 @@ const MAX_MEMORY_CHARS = 8_000;
  * Angle brackets are still stripped per line, for the same reason as in `line()` — this is the
  * one part of the reminder whose text a user or a compromised Agent chooses, and a body that can
  * write `</user-memory>` can continue as if it were the platform speaking.
+ *
+ * `limit` is optional because not every block needs one. The Memory Document passes none: every
+ * write path already asserts `MEMORY_DOCUMENT_CHAR_BUDGET`, so a second ceiling here could only
+ * ever cut a document the writer had judged legal — and an Agent told this block *is* its Memory
+ * would then act on a fragment believing it read the whole thing.
  */
-function blockText(value: string, limit: number): string {
+function blockText(value: string, limit?: number): string {
   const cleaned = value
     .replace(/[<>]/g, "")
     .split("\n")
@@ -355,7 +357,8 @@ function blockText(value: string, limit: number): string {
     .join("\n")
     .replace(/\n{3,}/g, "\n\n")
     .trim();
-  return cleaned.length > limit ? `${cleaned.slice(0, limit).trimEnd()}…` : cleaned;
+  if (limit === undefined || cleaned.length <= limit) return cleaned;
+  return `${cleaned.slice(0, limit).trimEnd()}…`;
 }
 
 function renderBlock(tag: string, body: string): string {
@@ -481,7 +484,7 @@ export function renderSoulReminder(
   const blocks = [
     renderBusiness(catalogue.business),
     `<soul>\n${soul}\n</soul>`,
-    renderBlock("user-memory", blockText(personal.memory ?? "", MAX_MEMORY_CHARS)),
+    renderBlock("user-memory", blockText(personal.memory ?? "")),
     renderBlock(
       "custom-instructions",
       blockText(personal.customInstructions ?? "", MAX_CUSTOM_INSTRUCTIONS_CHARS)

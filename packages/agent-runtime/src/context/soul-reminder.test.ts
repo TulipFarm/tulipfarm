@@ -359,11 +359,22 @@ describe("renderSoulReminder — the personal blocks", () => {
     expect(out).not.toContain("<platform-instructions>");
   });
 
-  it("truncates memory that would crowd out the conversation", () => {
-    const out = renderSoulReminder(catalogue(), { memory: "x".repeat(9_000) });
+  it("carries the whole Memory Document, because the write path is what bounds it", () => {
+    // `MEMORY_DOCUMENT_CHAR_BUDGET`, inlined: importing it would make `@tulipfarm/memory` a
+    // dependency of this package for one number, and drag its storage graph along with it.
+    const memory = "x".repeat(20_000);
 
-    expect(out).toContain(`${"x".repeat(8_000)}…`);
-    expect(out).not.toContain("x".repeat(8_001));
+    const out = renderSoulReminder(catalogue(), { memory });
+
+    expect(out).toContain(`<user-memory>\n${memory}\n</user-memory>`);
+    expect(out).not.toContain("…");
+  });
+
+  it("still caps standing instructions, which have their own budget", () => {
+    const out = renderSoulReminder(catalogue(), { customInstructions: "y".repeat(5_000) });
+
+    expect(out).toContain("y…");
+    expect(out).not.toContain("y".repeat(4_001));
   });
 });
 
