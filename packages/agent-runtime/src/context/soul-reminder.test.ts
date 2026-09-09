@@ -365,6 +365,25 @@ describe("renderSoulReminder — the personal blocks", () => {
     expect(out).toContain(`${"x".repeat(8_000)}…`);
     expect(out).not.toContain("x".repeat(8_001));
   });
+
+  it("names get_memory when it cut the document, so the Agent knows it read a part", () => {
+    const out = renderSoulReminder(catalogue(), { memory: "x".repeat(9_000) });
+
+    expect(out).toContain("call get_memory for the rest");
+  });
+
+  it("says nothing about get_memory when the whole document fit", () => {
+    const out = renderSoulReminder(catalogue(), { memory: "- Likes cricket" });
+
+    expect(out).not.toContain("get_memory");
+  });
+
+  it("leaves standing instructions without the memory note when they are cut", () => {
+    const out = renderSoulReminder(catalogue(), { customInstructions: "y".repeat(5_000) });
+
+    expect(out).toContain("y…");
+    expect(out).not.toContain("get_memory");
+  });
 });
 
 describe("filterSoulPersonal", () => {

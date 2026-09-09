@@ -164,19 +164,23 @@ const GET_MEMORY_SCHEMA: Record<string, unknown> = {
 const validateGetMemory = ajv.compile(GET_MEMORY_SCHEMA);
 
 /**
- * The one durable-memory read path.
+ * The whole-document read path, and the only one that is authoritative.
  *
- * Nothing puts Memory in the prompt, so an Agent that does not call this knows nothing durable
- * about the person it is talking to. It also gates `update_memory`'s `remove`, which matches lines
- * verbatim and therefore cannot name a line the model has never read.
+ * The Soul reminder already carries the document in `<user-memory>`, capped, so this is no longer
+ * how an Agent first learns about the person — telling it otherwise bought a wasted call on every
+ * conversation. What is left needs the Tool: a document too long for the reminder, a Turn that
+ * renders no reminder at all, and `update_memory`'s `remove`, which matches lines verbatim and
+ * therefore cannot name a line the model has never read.
  */
 export const getMemoryTool = defineApiTool<MemoryDocumentToolContext>({
   name: "get_memory",
-  description: `Read everything durable you have recorded about this user: who they are, how they want you to reply, and standing rules they have given you.
+  description: `Read the whole durable memory document for this user: who they are, how they want you to reply, and standing rules they have given you.
 
-Nothing else tells you any of it, so call this at the start of a conversation with a person, before you rely on a preference, and before \`update_memory\` with \`remove\` (which matches lines verbatim, so you must read the line first).
+You have already been given it. The <user-memory> block in the system reminder carries this document, and <custom-instructions> carries the user's own standing instructions, on every Turn. Do not call this to start a conversation, to look up a preference, or to check whether anything is recorded — read the block.
 
-Returns what you have recorded as Markdown in \`document\`, plus any standing instructions the user wrote themselves in \`customInstructions\` — those are the user's own words and outrank your <agent-personality>. If \`timezone\` comes back, pass it to \`get_current_time\`; the clock defaults to UTC and will otherwise date things in the wrong day for this user.`,
+Call it only when the block cannot answer you: it says it was truncated, it is missing entirely, or you are about to call \`update_memory\` with \`remove\` (which matches lines verbatim, so read the exact line first).
+
+Returns the document as Markdown in \`document\`, plus any standing instructions the user wrote themselves in \`customInstructions\` — those are the user's own words and outrank your <agent-personality>. If \`timezone\` comes back, pass it to \`get_current_time\`; the clock defaults to UTC and will otherwise date things in the wrong day for this user.`,
   tier: "platform",
   mutating: false,
   inputSchema: GET_MEMORY_SCHEMA,

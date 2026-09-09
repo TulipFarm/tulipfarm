@@ -337,6 +337,13 @@ const EMPTY_SECTION = "(none)";
 const MAX_MEMORY_CHARS = 8_000;
 
 /**
+ * Said out loud when the Memory Document did not fit, for the same reason as `EMPTY_SECTION`: the
+ * Agent is told everywhere else that this block *is* its Memory, so a silent cut would have it act
+ * on a partial document believing it read all of it. This names the Tool that returns the rest.
+ */
+const MEMORY_TRUNCATED_NOTE = "(truncated here — call get_memory for the rest)";
+
+/**
  * Flattens one authored *block* into safe lines, keeping the line breaks.
  *
  * `line()` cannot be used here: the Memory Document is Markdown whose headings and one-fact-per-
@@ -347,7 +354,7 @@ const MAX_MEMORY_CHARS = 8_000;
  * one part of the reminder whose text a user or a compromised Agent chooses, and a body that can
  * write `</user-memory>` can continue as if it were the platform speaking.
  */
-function blockText(value: string, limit: number): string {
+function blockText(value: string, limit: number, truncationNote?: string): string {
   const cleaned = value
     .replace(/[<>]/g, "")
     .split("\n")
@@ -355,7 +362,9 @@ function blockText(value: string, limit: number): string {
     .join("\n")
     .replace(/\n{3,}/g, "\n\n")
     .trim();
-  return cleaned.length > limit ? `${cleaned.slice(0, limit).trimEnd()}…` : cleaned;
+  if (cleaned.length <= limit) return cleaned;
+  const capped = `${cleaned.slice(0, limit).trimEnd()}…`;
+  return truncationNote === undefined ? capped : `${capped}\n${truncationNote}`;
 }
 
 function renderBlock(tag: string, body: string): string {
@@ -481,7 +490,10 @@ export function renderSoulReminder(
   const blocks = [
     renderBusiness(catalogue.business),
     `<soul>\n${soul}\n</soul>`,
-    renderBlock("user-memory", blockText(personal.memory ?? "", MAX_MEMORY_CHARS)),
+    renderBlock(
+      "user-memory",
+      blockText(personal.memory ?? "", MAX_MEMORY_CHARS, MEMORY_TRUNCATED_NOTE)
+    ),
     renderBlock(
       "custom-instructions",
       blockText(personal.customInstructions ?? "", MAX_CUSTOM_INSTRUCTIONS_CHARS)
