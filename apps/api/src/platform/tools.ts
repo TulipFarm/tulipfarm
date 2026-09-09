@@ -391,20 +391,27 @@ export const skillTool = defineApiTool<PlatformToolContext>({
     if (!skill) return err("not_found", `Skill "${name}" not found.`);
     const principal = assetPrincipal(ctx);
     if (ctx.teamAssets) {
-      if (!principal) return err("write_denied", "Skill access is required");
-      try {
-        await ctx.teamAssets.require(
-          "skill",
-          name,
-          principal,
-          mode === "inspect" ? "view" : "use",
-          typeof skill.frontmatter.ownership === "object" && skill.frontmatter.ownership !== null
-            ? (skill.frontmatter
-                .ownership as import("@tulipfarm/schema").TeamBusinessAssetOwnership)
-            : undefined
-        );
-      } catch {
-        return err("write_denied", "Skill access is required");
+      const ownership =
+        typeof skill.frontmatter.ownership === "object" && skill.frontmatter.ownership !== null
+          ? (skill.frontmatter.ownership as import("@tulipfarm/schema").TeamBusinessAssetOwnership)
+          : undefined;
+      // A platform/bundled Skill nobody ever authored as a business asset carries no ownership
+      // metadata and has no ownership row; it falls through to the Tool's own role-grant check
+      // instead. `isGoverned` still consults the row, not just the metadata, so a Team-authored
+      // Skill cannot be laundered into ungated access by stripping its frontmatter.
+      if (await ctx.teamAssets.isGoverned("skill", name, ownership)) {
+        if (!principal) return err("write_denied", "Skill access is required");
+        try {
+          await ctx.teamAssets.require(
+            "skill",
+            name,
+            principal,
+            mode === "inspect" ? "view" : "use",
+            ownership
+          );
+        } catch {
+          return err("write_denied", "Skill access is required");
+        }
       }
     }
 

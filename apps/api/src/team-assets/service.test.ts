@@ -136,6 +136,32 @@ describe("TeamAssetService", () => {
     });
   });
 
+  describe("isGoverned", () => {
+    it("is false for an asset with neither ownership metadata nor an ownership row", async () => {
+      const { service: assets } = service();
+
+      await expect(assets.isGoverned("skill", "bundled-skill", undefined)).resolves.toBe(false);
+    });
+
+    it("is true when authored ownership metadata is present", async () => {
+      const { service: assets } = service();
+
+      await expect(
+        assets.isGoverned("skill", "authored-skill", { owners: [{ teamId: TEAM_ID }] })
+      ).resolves.toBe(true);
+    });
+
+    // Anti-laundering: a Skill authored with ownership metadata always has an ownership row from
+    // `ensure`. Stripping the frontmatter afterward must not exempt it from the gate — `isGoverned`
+    // has to consult the row itself, not just whatever metadata this call happens to be given.
+    it("is true from the ownership row alone, once metadata is stripped", async () => {
+      const { service: assets } = service();
+      await assets.ensure("skill", "laundered-skill", { owners: [{ teamId: TEAM_ID }] });
+
+      await expect(assets.isGoverned("skill", "laundered-skill", undefined)).resolves.toBe(true);
+    });
+  });
+
   describe("a File's Knowledge Page after a Team share change", () => {
     const OTHER_TEAM = "223e4567-e89b-42d3-a456-426614174000";
     const sharer: TeamMembershipRecord = {

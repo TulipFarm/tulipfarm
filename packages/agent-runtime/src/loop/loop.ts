@@ -493,6 +493,28 @@ export class AgentLoop {
           return { kind: "continue" };
         }
 
+        // A `skill` call that would have adopted a Skill (any mode but `inspect` — see
+        // `extractSkillName`) came back denied or failed. The model must not be left to silently
+        // carry on as though the Skill's guidance loaded: emit a distinct Run event so this is
+        // visible outside the ordinary failed-call noise, and answer with a result the model
+        // cannot plausibly read as "the Skill is available."
+        const failedSkillName =
+          call.name === SKILL_TOOL ? extractSkillName(call.arguments) : undefined;
+        if (failedSkillName !== undefined) {
+          await emit("skill_load_failed", {
+            toolName: call.name,
+            callId: call.callId,
+            outcome: dispatched.status,
+          });
+          answer(call.callId, {
+            error: dispatched.status,
+            detail: dispatched.reason,
+            blocking: true,
+            guidance: `Skill "${failedSkillName}" did not load (${dispatched.status}: ${dispatched.reason}). Its instructions are NOT available. Do not proceed as though they were loaded — resolve the failure or tell the user the Skill could not be used.`,
+          });
+          return { kind: "continue" };
+        }
+
         // Denied and failed calls are data the model must reason about, not a retry signal.
         answer(call.callId, { error: dispatched.status, detail: dispatched.reason });
         return { kind: "continue" };
