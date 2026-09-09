@@ -6,16 +6,12 @@ import { AppShell, AppSidebar, iconForPath, titleForPath } from "~/components/ap
 import { BookOpen, FileText, Inbox, MessageSquare } from "~/components/icons";
 import * as approvalsContext from "~/lib/approvals-context";
 import * as conversationsContext from "~/lib/conversations-context";
-import * as sidebarCounts from "~/lib/sidebar-counts";
 
 vi.mock("~/lib/approvals-context", () => ({ useApprovals: vi.fn() }));
 const useApprovals = vi.mocked(approvalsContext.useApprovals);
 
 vi.mock("~/lib/conversations-context", () => ({ useConversations: vi.fn() }));
 const useConversations = vi.mocked(conversationsContext.useConversations);
-
-vi.mock("~/lib/sidebar-counts", () => ({ useSidebarCounts: vi.fn() }));
-const useSidebarCounts = vi.mocked(sidebarCounts.useSidebarCounts);
 
 const USER = {
   id: "u1",
@@ -77,7 +73,6 @@ beforeEach(() => {
     refresh: vi.fn(),
   });
   useConversations.mockReturnValue(CONVERSATIONS);
-  useSidebarCounts.mockReturnValue({});
 });
 
 test("maps deep routes to stable top-bar titles", () => {
@@ -169,16 +164,47 @@ test("carries the live approval count on Inbox", () => {
   expect(within(screen.getByRole("link", { name: /inbox/i })).getByText("2")).toBeInTheDocument();
 });
 
-test("aligns every expanded count on the same trailing slot", () => {
-  useSidebarCounts.mockReturnValue({ "/resources": 1, "/skills": 7 });
-  render(<SidebarStub initialEntries={["/skills"]} />);
+test("does not render item counts on nav rows", () => {
+  useConversations.mockReturnValue({
+    ...CONVERSATIONS,
+    conversations: [
+      {
+        id: "c1",
+        title: "Chat 1",
+        agentId: null,
+        starred: false,
+        createdAt: "2026-09-10T00:00:00Z",
+        updatedAt: "2026-09-10T00:00:00Z",
+      },
+      {
+        id: "c2",
+        title: "Chat 2",
+        agentId: null,
+        starred: false,
+        createdAt: "2026-09-10T00:00:00Z",
+        updatedAt: "2026-09-10T00:00:00Z",
+      },
+    ],
+  });
+  render(<SidebarStub initialEntries={["/inbox"]} />);
 
-  const counts = screen.getAllByText(/^[17]$/);
-  expect(counts).toHaveLength(2);
-  for (const count of counts) {
-    expect(count).toHaveAttribute("data-sidebar-count");
-    expect(count).toHaveClass("ms-auto", "w-5", "text-right", "leading-none");
-  }
+  expect(screen.queryByText("2")).not.toBeInTheDocument();
+  expect(document.querySelector("[data-sidebar-count]")).not.toBeInTheDocument();
+});
+
+test("aligns the expanded approval count on the trailing slot", () => {
+  useApprovals.mockReturnValue({
+    approvals: [],
+    count: 2,
+    loading: false,
+    error: null,
+    refresh: vi.fn(),
+  });
+  render(<SidebarStub initialEntries={["/inbox"]} />);
+
+  const count = screen.getByText("2");
+  expect(count).toHaveAttribute("data-sidebar-count");
+  expect(count).toHaveClass("ms-auto", "w-5", "text-right", "leading-none");
 });
 
 /* Collapsed, the count shrinks to a dot — so the row's own label has to carry the number. */
@@ -787,32 +813,4 @@ test("leads the command menu with what a reader can do, not only where they can 
   expect(options[0]).toHaveAccessibleName(/New chat/);
   expect(within(dialog).getByRole("button", { name: /New resource type/ })).toBeInTheDocument();
   expect(within(dialog).getByText("Actions")).toBeInTheDocument();
-});
-
-/* A section total is furniture; only something waiting on the reader earns the alarm colour. */
-test("tells a section total apart from something waiting on the reader", () => {
-  useApprovals.mockReturnValue({
-    approvals: [],
-    count: 2,
-    loading: false,
-    error: null,
-    refresh: vi.fn(),
-  });
-  useSidebarCounts.mockReturnValue({ "/agents": 7 });
-  render(<SidebarStub initialEntries={["/agents"]} />);
-
-  const quiet = within(screen.getByRole("link", { name: /Agents/ })).getByText("7");
-  expect(quiet.className).toContain("text-muted-foreground");
-
-  const alert = within(screen.getByRole("link", { name: /awaiting you/ })).getByText("2");
-  expect(alert.className).toContain("text-status-danger");
-});
-
-/* A source that cannot answer for the whole set is absent, never rendered as zero. */
-test("says nothing at all for a section whose total is unknown", () => {
-  useSidebarCounts.mockReturnValue({ "/agents": 7 });
-  render(<SidebarStub initialEntries={["/agents"]} />);
-
-  expect(screen.getByRole("link", { name: "Skills" })).toBeInTheDocument();
-  expect(screen.getByRole("link", { name: "Routines" })).toBeInTheDocument();
 });
