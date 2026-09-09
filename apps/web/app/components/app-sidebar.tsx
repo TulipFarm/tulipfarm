@@ -43,7 +43,6 @@ import {
   visibleSidebarGroups,
 } from "~/lib/nav";
 import { usePageChromeTitle, useSetActionSlot } from "~/lib/page-chrome-context";
-import { type SidebarCounts, useSidebarCounts } from "~/lib/sidebar-counts";
 import { isBusinessAdmin } from "~/lib/use-session-user";
 import { cn } from "~/lib/utils";
 
@@ -578,16 +577,12 @@ function UserCard({
 function NavGroupSection({
   group,
   approvals,
-  totals,
-  chatCount,
   narrow,
   isFirst,
   onNavigate,
 }: {
   group: NavGroup;
   approvals: number;
-  totals: SidebarCounts;
-  chatCount: number;
   narrow: boolean;
   isFirst: boolean;
   onNavigate: () => void;
@@ -606,14 +601,13 @@ function NavGroupSection({
       {showRows
         ? group.items.map((item) => {
             const alerting = Boolean(item.badge) && approvals > 0;
-            const quiet = item.to === "/chats" ? chatCount : totals[item.to];
             return (
               <NavRow
                 key={item.to}
                 to={item.to}
                 label={item.label}
                 icon={item.icon}
-                count={alerting ? approvals : quiet}
+                count={alerting ? approvals : undefined}
                 tone={alerting ? "alert" : "quiet"}
                 create={item.create}
                 collapsed={narrow}
@@ -712,8 +706,6 @@ export function AppSidebar({
   const farmItem = visibleFarmItem(visibility);
   const settingsItem = visibleSettingsItem(visibility);
   const { count } = useApprovals();
-  const { conversations } = useConversations();
-  const totals = useSidebarCounts(user?.navigation?.visiblePaths);
   const [persistent, setPersistent] = useState(true);
   const { pathname } = useLocation();
   const settingsMode = isSettingsPath(pathname);
@@ -777,8 +769,6 @@ export function AppSidebar({
                   key={group.heading}
                   group={group}
                   approvals={count}
-                  totals={totals}
-                  chatCount={conversations.length}
                   narrow={narrow}
                   isFirst={index === 0}
                   onNavigate={onClose}
