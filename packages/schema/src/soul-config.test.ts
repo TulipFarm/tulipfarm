@@ -52,4 +52,17 @@ describe("validateSoulConfig", () => {
       "config must declare provider chains in tiers"
     );
   });
+
+  it("boots on a legacy embedding entry missing resource_name/base_url instead of crashing", () => {
+    // A config saved before validateLlmConfig's write-time embeddings guard existed. Boot must
+    // degrade (createEmbeddingModel fails loud lazily, embeddingsProbe reports it) rather than
+    // reject the whole soul.yaml — see validateLlmConfig's `strict` option.
+    const config = validateSoulConfig({
+      llm: {
+        ...validLlm,
+        embeddings: { providers: [{ provider: "azure", model: "text-embedding-3-large" }] },
+      },
+    });
+    expect(config.llm?.embeddings?.providers[0]).toMatchObject({ provider: "azure" });
+  });
 });

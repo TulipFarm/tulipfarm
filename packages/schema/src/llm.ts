@@ -224,7 +224,15 @@ export function describeMissingEmbeddingFields(entry: EmbeddingProviderEntry): s
   return EMBEDDING_PROVIDER_REQUIREMENTS[entry.provider]?.(entry) ?? null;
 }
 
-export function validateLlmConfig(data: unknown): LlmConfig {
+/**
+ * @param opts.strict Reject an embedding entry missing its provider-required fields
+ * (`resource_name`/`base_url`). Defaults true for the write path (`PUT /api/v1/llm-config`),
+ * which must never persist an unbuildable entry. Boot must tolerate a config that predates this
+ * check — `createEmbeddingModel` (`@tulipfarm/llm`) fails loud lazily at first use instead, and
+ * `embeddingsProbe` (`apps/api/src/admin/health.ts`) surfaces the ongoing degradation — so
+ * `validateSoulConfig` calls this with `strict: false`.
+ */
+export function validateLlmConfig(data: unknown, opts: { strict?: boolean } = {}): LlmConfig {
   if (!checkConfig(data)) {
     const e = checkConfig.errors?.[0] ?? { instancePath: "", message: "invalid config" };
     throw new LlmConfigValidationError(describeConfigError(e));
@@ -234,12 +242,14 @@ export function validateLlmConfig(data: unknown): LlmConfig {
   if (config.tiers === undefined) {
     throw new LlmConfigValidationError("config must declare provider chains in tiers");
   }
-  config.embeddings?.providers.forEach((entry, index) => {
-    const problem = describeMissingEmbeddingFields(entry);
-    if (problem) {
-      throw new LlmConfigValidationError(`embeddings.providers[${index}]: ${problem}`);
-    }
-  });
+  if (opts.strict ?? true) {
+    config.embeddings?.providers.forEach((entry, index) => {
+      const problem = describeMissingEmbeddingFields(entry);
+      if (problem) {
+        throw new LlmConfigValidationError(`embeddings.providers[${index}]: ${problem}`);
+      }
+    });
+  }
   return config;
 }
 
