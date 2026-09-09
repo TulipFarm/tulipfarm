@@ -1,5 +1,6 @@
 import type { InvocationPrincipal } from "@tulipfarm/run-kernel";
 import type { HostedAgent } from "./ports";
+import type { ToolErrorCode } from "./types";
 
 /**
  * The Run-derived authority a Tool call executes under. It names only what the Run itself
@@ -90,7 +91,19 @@ export type HostedToolResult =
     }
   | { readonly status: "denied"; readonly reason: string; readonly connectUrl?: string }
   | { readonly status: "invalid_arguments"; readonly reason: string }
-  | { readonly status: "failed"; readonly reason: string }
+  | {
+      readonly status: "failed";
+      readonly reason: string;
+      /**
+       * The Tool's own {@link ToolErrorCode}, when a Tool handler produced this failure. Absent
+       * for a failure the dispatcher itself raised (a ledger conflict, a lost replay, an
+       * unacknowledged deadline) with no underlying Tool error to carry. Kept alongside `reason`
+       * so a caller that only wants prose loses nothing by ignoring it, while a caller that needs
+       * to tell "not entitled" apart from "not installed" from "auth expired" — which are three
+       * different remedies — does not have to parse `reason` to do it.
+       */
+      readonly code?: ToolErrorCode;
+    }
   | { readonly status: "awaiting_approval"; readonly approvalId: string }
   | {
       /** The Tool spawned a child Run and registered the wait that resumes this Turn. */

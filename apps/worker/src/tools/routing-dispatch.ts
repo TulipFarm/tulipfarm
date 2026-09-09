@@ -124,7 +124,9 @@ function withCallId(callId: string, result: HostedToolResult): ToolDispatchResul
       };
     case "denied":
       return { status: "denied", callId, reason: result.reason, connectUrl: result.connectUrl };
+    case "invalid_arguments":
+      return { status: "invalid_arguments", callId, reason: result.reason };
     default:
-      return { status: result.status, callId, reason: result.reason };
+      return { status: "failed", callId, reason: result.reason, code: result.code };
   }
 }

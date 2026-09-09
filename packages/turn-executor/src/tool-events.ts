@@ -151,7 +151,11 @@ export function announceToolCalls(
               callId: result.callId,
               status: "error" as const,
               summary: result.reason,
-              errorCode: result.status,
+              // A `failed` result's own `code` (e.g. `write_denied`, `not_found`,
+              // `credential_required`) distinguishes remedies the collapsed `status` cannot; other
+              // statuses (`denied`, `invalid_arguments`) carry no such code, so `status` is the code.
+              errorCode:
+                result.status === "failed" ? (result.code ?? result.status) : result.status,
               durationMs,
               ...(result.status === "denied" && result.connectUrl !== undefined
                 ? { connectUrl: result.connectUrl }

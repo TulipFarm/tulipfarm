@@ -187,6 +187,25 @@ export class TeamAssetService {
     }
   }
 
+  /**
+   * Whether this asset is subject to Team ownership gating at all.
+   *
+   * True when authored `ownership` frontmatter is present, or an ownership row already exists —
+   * the row check matters on its own: an authored asset that already has a row must stay gated
+   * even if its frontmatter is later stripped, or dropping the metadata would launder a
+   * Team-owned asset into ungated access. Only an asset with neither — a platform/bundled artifact
+   * nobody ever authored as a business asset — is exempt, and falls through to the owning Tool's
+   * own role-grant check instead.
+   */
+  async isGoverned(
+    assetType: TeamAssetType,
+    assetId: string,
+    metadata?: TeamBusinessAssetOwnership
+  ): Promise<boolean> {
+    if (metadata) return true;
+    return (await this.deps.ownershipRepo.get(this.businessId, assetType, assetId)) !== undefined;
+  }
+
   async access(
     assetType: TeamAssetType,
     assetId: string,

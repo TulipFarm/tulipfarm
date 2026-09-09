@@ -262,6 +262,81 @@ describe("skillTool loading a Skill", () => {
   });
 });
 
+describe("skillTool Team ownership gate", () => {
+  function ctxWithTeamAssets(
+    isGoverned: ReturnType<typeof vi.fn>,
+    requireAccess: ReturnType<typeof vi.fn> = vi.fn()
+  ): PlatformToolContext {
+    const ctx = makeCtx({ "data-analyst": makeSkill("data-analyst") });
+    ctx.requestContext = {
+      userId: "u1",
+      subject: { kind: "user", id: "u1" },
+      runId: "run-1",
+      stateKey: "invoke",
+      toolCallId: "call-1",
+    };
+    ctx.teamAssets = {
+      isGoverned,
+      require: requireAccess,
+    } as unknown as NonNullable<PlatformToolContext["teamAssets"]>;
+    return ctx;
+  }
+
+  it("loads a bundled/platform Skill with no ownership metadata and no ownership row for an ordinary member", async () => {
+    // Neither frontmatter ownership nor a row: not a Team-authored asset, falls through to the
+    // Tool's own role-grant check instead of the ownership gate.
+    const isGoverned = vi.fn(async () => false);
+    const requireAccess = vi.fn();
+    const ctx = ctxWithTeamAssets(isGoverned, requireAccess);
+
+    const res = await skillTool.handler({ name: "data-analyst" }, ctx);
+
+    expect(res).toMatchObject({ success: true, data: { name: "data-analyst" } });
+    expect(isGoverned).toHaveBeenCalledWith("skill", "data-analyst", undefined);
+    expect(requireAccess).not.toHaveBeenCalled();
+  });
+
+  it("still gates a Skill with an ownership row but no frontmatter metadata (anti-laundering)", async () => {
+    // A stripped-frontmatter Skill that already has an ownership row must not be laundered into
+    // ungated access: `isGoverned` consults the row, so this must return true and the gate must
+    // still run and deny an unauthorized principal.
+    const isGoverned = vi.fn(async () => true);
+    const requireAccess = vi.fn(async () => {
+      throw new Error("denied");
+    });
+    const ctx = ctxWithTeamAssets(isGoverned, requireAccess);
+
+    const res = await skillTool.handler({ name: "data-analyst" }, ctx);
+
+    expect(isGoverned).toHaveBeenCalledWith("skill", "data-analyst", undefined);
+    expect(requireAccess).toHaveBeenCalledWith(
+      "skill",
+      "data-analyst",
+      { id: "u1", kind: "user" },
+      "use",
+      undefined
+    );
+    expect(res).toMatchObject({ success: false, error: { code: "write_denied" } });
+  });
+
+  it("requires a Team-owned Skill's access grant when governed and it is granted", async () => {
+    const isGoverned = vi.fn(async () => true);
+    const requireAccess = vi.fn(async () => ({ levels: ["view", "use"] }));
+    const ctx = ctxWithTeamAssets(isGoverned, requireAccess);
+
+    const res = await skillTool.handler({ name: "data-analyst" }, ctx);
+
+    expect(res).toMatchObject({ success: true });
+    expect(requireAccess).toHaveBeenCalledWith(
+      "skill",
+      "data-analyst",
+      { id: "u1", kind: "user" },
+      "use",
+      undefined
+    );
+  });
+});
+
 // ── complete_task ─────────────────────────────────────────────────────────────
 
 describe("skillTool inspecting a Skill", () => {

@@ -1623,6 +1623,101 @@ describe("AgentLoop skill-scoped tool narrowing", () => {
   });
 });
 
+describe("AgentLoop a failed skill load is not silently continued past", () => {
+  const skillCatalog = [{ name: "skill", inputSchema: { type: "object" } }];
+
+  it("emits a distinct skill_load_failed event, not just an ordinary tool answer", async () => {
+    const tools = dispatcher({
+      status: "failed",
+      callId: "call-1",
+      reason: "Skill access is required",
+      code: "write_denied",
+    });
+    const model = scriptedModel(
+      toolCallResult([{ callId: "call-1", name: "skill", arguments: { name: "routine-forge" } }]),
+      textResult("done")
+    );
+    const events = collector();
+    const outcome = await loop({ model, tools, events: events.sink }).run(
+      input({ tools: skillCatalog })
+    );
+
+    expect(outcome).toMatchObject({ status: "completed" });
+    const skillLoadFailed = events.events.filter((e) => e.type === "skill_load_failed");
+    expect(skillLoadFailed).toHaveLength(1);
+    expect(skillLoadFailed[0]).toMatchObject({
+      toolName: "skill",
+      callId: "call-1",
+      outcome: "failed",
+    });
+  });
+
+  it("answers the model with a result it cannot mistake for the Skill having loaded", async () => {
+    const tools = dispatcher({
+      status: "failed",
+      callId: "call-1",
+      reason: "Skill access is required",
+      code: "write_denied",
+    });
+    const model = promptRecordingModel(
+      toolCallResult([{ callId: "call-1", name: "skill", arguments: { name: "routine-forge" } }]),
+      textResult("done")
+    );
+    const outcome = await loop({ model, tools }).run(input({ tools: skillCatalog }));
+
+    expect(outcome).toMatchObject({ status: "completed" });
+    // The second request's prompt carries the answer to call-1; it must say the Skill did not
+    // load and must not be a bare status word a model could shrug past.
+    const secondPrompt = model.prompts[1] ?? [];
+    const toolAnswer = secondPrompt.find(
+      (m) => m.role === "tool" && contentText(m.content).includes("call-1")
+    );
+    const answerText = toolAnswer ? contentText(toolAnswer.content) : "";
+    expect(answerText).toContain("routine-forge");
+    expect(answerText.toLowerCase()).toContain("not");
+  });
+
+  it("does not emit skill_load_failed for an ordinary (non-skill) Tool failure", async () => {
+    const tools = dispatcher({
+      status: "failed",
+      callId: "call-1",
+      reason: "boom",
+      code: "internal_error",
+    });
+    const model = scriptedModel(
+      toolCallResult([{ callId: "call-1", name: "record_search", arguments: {} }]),
+      textResult("done")
+    );
+    const events = collector();
+    const outcome = await loop({ model, tools, events: events.sink }).run(input());
+
+    expect(outcome).toMatchObject({ status: "completed" });
+    expect(events.events.some((e) => e.type === "skill_load_failed")).toBe(false);
+  });
+
+  it("does not emit skill_load_failed for a skill call in inspect mode", async () => {
+    const tools = dispatcher({
+      status: "failed",
+      callId: "call-1",
+      reason: "Skill access is required",
+      code: "write_denied",
+    });
+    const model = scriptedModel(
+      toolCallResult([
+        { callId: "call-1", name: "skill", arguments: { name: "routine-forge", mode: "inspect" } },
+      ]),
+      textResult("done")
+    );
+    const events = collector();
+    const outcome = await loop({ model, tools, events: events.sink }).run(
+      input({ tools: skillCatalog })
+    );
+
+    expect(outcome).toMatchObject({ status: "completed" });
+    expect(events.events.some((e) => e.type === "skill_load_failed")).toBe(false);
+  });
+});
+
 describe("AgentLoop resume after an approval park", () => {
   /** Records the prompt it was handed, so the recovered transcript can be inspected. */
   function promptRecordingModel(...results: readonly ModelInvocationResult[]): ModelPort & {

@@ -1063,6 +1063,64 @@ describe("skill_update", () => {
   });
 });
 
+describe("skill_update Team ownership gate", () => {
+  const existingSkill: SoulSkill = {
+    name: "code-review",
+    frontmatter: frontmatter("code-review", { tags: ["review"] }),
+    body: "Old body.",
+  };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  function ctxWithTeamAssets(
+    isGoverned: ReturnType<typeof vi.fn>,
+    requireAccess: ReturnType<typeof vi.fn> = vi.fn()
+  ) {
+    const ctx = makeCtx([existingSkill], makeLlmService());
+    ctx.requestContext = { userId: "u1", subject: { kind: "user", id: "u1" } };
+    (ctx as SkillToolContext).teamAssets = {
+      isGoverned,
+      require: requireAccess,
+    } as unknown as NonNullable<SkillToolContext["teamAssets"]>;
+    return ctx;
+  }
+
+  it("edits a Skill with no ownership metadata and no ownership row without a grant check", async () => {
+    const isGoverned = vi.fn(async () => false);
+    const requireAccess = vi.fn();
+    const ctx = ctxWithTeamAssets(isGoverned, requireAccess);
+
+    const res = await runConfirmed(updateTool, { name: "code-review", body: "New body." }, ctx);
+
+    expect(res).toMatchObject({ success: true, data: { status: "updated" } });
+    expect(isGoverned).toHaveBeenCalledWith("skill", "code-review", undefined);
+    expect(requireAccess).not.toHaveBeenCalled();
+  });
+
+  it("still gates an edit when an ownership row exists but frontmatter carries no metadata (anti-laundering)", async () => {
+    const isGoverned = vi.fn(async () => true);
+    const requireAccess = vi.fn(async () => {
+      throw new Error("denied");
+    });
+    const ctx = ctxWithTeamAssets(isGoverned, requireAccess);
+
+    const res = await updateTool.handler({ name: "code-review", body: "New body." }, ctx);
+
+    expect(isGoverned).toHaveBeenCalledWith("skill", "code-review", undefined);
+    expect(requireAccess).toHaveBeenCalledWith(
+      "skill",
+      "code-review",
+      { id: "u1", kind: "user" },
+      "edit",
+      undefined
+    );
+    expect(res).toMatchObject({ success: false, error: { code: "write_denied" } });
+    expect(ctx.soulWriter.apply).not.toHaveBeenCalled();
+  });
+});
+
 // ── skill_list ────────────────────────────────────────────────────────────────
 
 describe("skill_list", () => {
@@ -1087,6 +1145,53 @@ describe("skill_list", () => {
       provenance: "curated",
     });
     expect(skills).toContainEqual({ name: "planner", frontmatter: {}, provenance: "curated" });
+  });
+});
+
+describe("skill_list Team ownership gate", () => {
+  const skill: SoulSkill = {
+    name: "code-review",
+    frontmatter: frontmatter("code-review", { tags: ["review"] }),
+    body: "Review.",
+  };
+
+  it("shows a Skill with no ownership metadata and no ownership row to any principal", async () => {
+    const isGoverned = vi.fn(async () => false);
+    const access = vi.fn();
+    const ctx = makeCtx([skill]);
+    ctx.requestContext = { userId: "u1", subject: { kind: "user", id: "u1" } };
+    (ctx as SkillToolContext).teamAssets = {
+      isGoverned,
+      access,
+    } as unknown as NonNullable<SkillToolContext["teamAssets"]>;
+
+    const res = await listTool.handler({}, ctx);
+
+    expect(res).toMatchObject({ success: true, data: { skills: [{ name: "code-review" }] } });
+    expect(isGoverned).toHaveBeenCalledWith("skill", "code-review", undefined);
+    expect(access).not.toHaveBeenCalled();
+  });
+
+  it("still hides a Skill with an ownership row but no frontmatter metadata when access is denied (anti-laundering)", async () => {
+    const isGoverned = vi.fn(async () => true);
+    const access = vi.fn(async () => ({ levels: [] }));
+    const ctx = makeCtx([skill]);
+    ctx.requestContext = { userId: "u1", subject: { kind: "user", id: "u1" } };
+    (ctx as SkillToolContext).teamAssets = {
+      isGoverned,
+      access,
+    } as unknown as NonNullable<SkillToolContext["teamAssets"]>;
+
+    const res = await listTool.handler({}, ctx);
+
+    expect(isGoverned).toHaveBeenCalledWith("skill", "code-review", undefined);
+    expect(access).toHaveBeenCalledWith(
+      "skill",
+      "code-review",
+      { id: "u1", kind: "user" },
+      undefined
+    );
+    expect(res).toMatchObject({ success: true, data: { skills: [] } });
   });
 });
 

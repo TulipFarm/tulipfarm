@@ -117,7 +117,19 @@ export type ToolDispatchResult =
       readonly connectUrl?: string;
     }
   | { readonly status: "invalid_arguments"; readonly callId: string; readonly reason: string }
-  | { readonly status: "failed"; readonly callId: string; readonly reason: string }
+  | {
+      readonly status: "failed";
+      readonly callId: string;
+      readonly reason: string;
+      /**
+       * The Tool host's own error code (e.g. `write_denied`, `not_found`, `credential_required`),
+       * structural rather than imported — this package may not depend on `@tulipfarm/tool-host` —
+       * so a caller that needs to tell "not entitled" apart from "not installed" from "auth
+       * expired" does not have to parse `reason` to do it. Absent for a failure the dispatcher
+       * itself raised with no underlying Tool error to carry.
+       */
+      readonly code?: string;
+    }
   | {
       readonly status: "awaiting_approval";
       readonly callId: string;
@@ -154,7 +166,15 @@ export type AgentLoopEventType =
   | "awaiting_child"
   | "completed"
   | "failed"
-  | "cancelled";
+  | "cancelled"
+  /**
+   * A `skill` call that would have adopted a Skill (any mode but `inspect`) came back denied or
+   * failed. Distinct from `tool_call_rejected` because the loop still continues the Turn on this
+   * outcome — silently, from the model's point of view, unless something makes the failure loud.
+   * This event is that something: a reader watching Run events sees the prerequisite guidance
+   * never loaded, instead of inferring it from an ordinary failed-call entry among many.
+   */
+  | "skill_load_failed";
 
 /** Loop events carry model text only; Tool args/output stay with `ToolDispatchPort`. */
 export interface AgentLoopEvent {

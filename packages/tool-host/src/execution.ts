@@ -130,7 +130,11 @@ export async function runToolAttempts(input: ToolAttemptInput): Promise<HostedTo
   }
   if (isIndeterminateFault(failure.error.code)) {
     await settle("ambiguous", "tool_timeout");
-    return { status: "failed", reason: `tool "${call.name}" ${failure.error.message}` };
+    return {
+      status: "failed",
+      reason: `tool "${call.name}" ${failure.error.message}`,
+      code: failure.error.code,
+    };
   }
   // Structured errors have a known phase; there is nothing to reconcile.
   await settle("failed", failure.error.code);
@@ -147,6 +151,10 @@ export async function runToolAttempts(input: ToolAttemptInput): Promise<HostedTo
   }
   // Exhausted infra faults are machinery failures, not repairable argument failures.
   return isInfrastructureFault(failure.error.code)
-    ? { status: "failed", reason: `tool "${call.name}" is temporarily unavailable; try again` }
-    : { status: "failed", reason: failure.error.message };
+    ? {
+        status: "failed",
+        reason: `tool "${call.name}" is temporarily unavailable; try again`,
+        code: failure.error.code,
+      }
+    : { status: "failed", reason: failure.error.message, code: failure.error.code };
 }

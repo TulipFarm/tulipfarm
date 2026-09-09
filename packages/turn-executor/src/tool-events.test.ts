@@ -290,6 +290,43 @@ describe("announceToolCalls", () => {
     });
   });
 
+  it("reports a failed call's errorCode as its own ToolErrorCode, not the collapsed status", async () => {
+    const events = new FakeAppendPort();
+    const broker = port((request) => ({
+      status: "failed",
+      callId: request.callId,
+      reason: "Skill access is required",
+      code: "write_denied",
+    }));
+
+    await announceToolCalls(broker.port, writer(events), { now: clock() }).dispatch(REQUEST);
+
+    expect(events.appended.at(-1)).toMatchObject({
+      eventType: "tool.result",
+      payload: {
+        status: "error",
+        summary: "Skill access is required",
+        errorCode: "write_denied",
+      },
+    });
+  });
+
+  it("falls back to the bare status when a failed call carries no code", async () => {
+    const events = new FakeAppendPort();
+    const broker = port((request) => ({
+      status: "failed",
+      callId: request.callId,
+      reason: "dispatcher-raised, no underlying Tool error",
+    }));
+
+    await announceToolCalls(broker.port, writer(events), { now: clock() }).dispatch(REQUEST);
+
+    expect(events.appended.at(-1)).toMatchObject({
+      eventType: "tool.result",
+      payload: { status: "error", errorCode: "failed" },
+    });
+  });
+
   it("stays silent about the result of a call that is waiting on an approval", async () => {
     const events = new FakeAppendPort();
     const broker = port((request) => ({

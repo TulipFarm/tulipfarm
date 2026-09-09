@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { ChatEffectLedger } from "./effect-ledger";
 import { runToolAttempts } from "./execution";
 import type { ParkableToolDef, RequestContext, ToolDef } from "./types";
-import { ok, parked } from "./types";
+import { err, ok, parked } from "./types";
 
 const CONTEXT = {} as RequestContext;
 const CALL = { callId: "call-1", name: "slow", arguments: {} };
@@ -71,6 +71,63 @@ describe("execute deadline", () => {
 
     expect(settled).toMatchObject({ status: "succeeded" });
     expect(Date.now() - started).toBeLessThan(2_000);
+  });
+});
+
+describe("a failed call preserves its own ToolErrorCode", () => {
+  function failingTool(code: "write_denied" | "not_found" | "credential_required"): ToolDef {
+    return {
+      name: "denied-tool",
+      tier: "platform",
+      mutating: false,
+      description: "fails",
+      inputSchema: { type: "object" },
+      execute: async () => err(code, `tool refused: ${code}`),
+    };
+  }
+
+  it("keeps write_denied distinguishable from a bare 'failed'", async () => {
+    const settled = await runToolAttempts({
+      businessId: "business-1",
+      tool: failingTool("write_denied"),
+      call: CALL,
+      context: CONTEXT,
+    });
+    expect(settled).toMatchObject({ status: "failed", code: "write_denied" });
+  });
+
+  it("keeps not_found distinguishable from a bare 'failed'", async () => {
+    const settled = await runToolAttempts({
+      businessId: "business-1",
+      tool: failingTool("not_found"),
+      call: CALL,
+      context: CONTEXT,
+    });
+    expect(settled).toMatchObject({ status: "failed", code: "not_found" });
+  });
+
+  // credential_required maps to `status: "denied"`, a different branch entirely, but its remedy
+  // (reconnect) still has to survive — `connectUrl` is what a caller acts on there.
+  it("carries credential_required through as a denied result with its connect URL", async () => {
+    const tool: ToolDef = {
+      name: "denied-tool",
+      tier: "platform",
+      mutating: false,
+      description: "fails",
+      inputSchema: { type: "object" },
+      execute: async () =>
+        err("credential_required", "connect first", "https://example.test/connect"),
+    };
+    const settled = await runToolAttempts({
+      businessId: "business-1",
+      tool,
+      call: CALL,
+      context: CONTEXT,
+    });
+    expect(settled).toMatchObject({
+      status: "denied",
+      connectUrl: "https://example.test/connect",
+    });
   });
 });
 

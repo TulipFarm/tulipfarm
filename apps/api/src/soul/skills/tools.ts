@@ -387,16 +387,11 @@ const skillUpdate = defineApiTool<SkillToolContext>({
     const existing = soulSkill ?? bundledSkill;
     if (!existing) return err("not_found", `skill not found: ${name}`);
     const principal = assetPrincipal(ctx);
-    if (ctx.teamAssets && !principal) return err("write_denied", "Skill edit access is required");
-    if (ctx.teamAssets && principal) {
+    const ownership = ownershipOf(existing.frontmatter);
+    if (ctx.teamAssets && (await ctx.teamAssets.isGoverned("skill", name, ownership))) {
+      if (!principal) return err("write_denied", "Skill edit access is required");
       try {
-        await ctx.teamAssets.require(
-          "skill",
-          name,
-          principal,
-          "edit",
-          ownershipOf(existing.frontmatter)
-        );
+        await ctx.teamAssets.require("skill", name, principal, "edit", ownership);
       } catch {
         return err("write_denied", "Skill edit access is required");
       }
@@ -676,26 +671,29 @@ const skillList = defineApiTool<SkillToolContext>({
     const lock = await readSkillsLock(ctx.gitSync.path);
     const listed = Array.from(mergedSkills(ctx.soulLoader, ctx.bundledSkills, hidden).values());
     const principal = assetPrincipal(ctx);
+    const teamAssets = ctx.teamAssets;
     const visible =
-      ctx.teamAssets === undefined
+      teamAssets === undefined
         ? listed
-        : principal === undefined
-          ? []
-          : (
-              await Promise.all(
-                listed.map(async (skill) => ({
-                  skill,
-                  access: await ctx.teamAssets?.access(
-                    "skill",
-                    skill.name,
-                    principal,
-                    ownershipOf(skill.frontmatter)
-                  ),
-                }))
-              )
+        : (
+            await Promise.all(
+              listed.map(async (skill) => {
+                const metadata = ownershipOf(skill.frontmatter);
+                // A platform/bundled Skill with no ownership metadata and no ownership row was
+                // never authored as a business asset, so it stays visible regardless of Team
+                // membership; the row check still applies, so a Team-authored Skill cannot be
+                // laundered into ungated visibility by stripping its frontmatter.
+                if (!(await teamAssets.isGoverned("skill", skill.name, metadata))) {
+                  return { skill, visible: true };
+                }
+                if (principal === undefined) return { skill, visible: false };
+                const access = await teamAssets.access("skill", skill.name, principal, metadata);
+                return { skill, visible: access.levels.includes("view") };
+              })
             )
-              .filter(({ access }) => access?.levels.includes("view"))
-              .map(({ skill }) => skill);
+          )
+            .filter(({ visible }) => visible)
+            .map(({ skill }) => skill);
     const skills = visible.map(({ name, frontmatter }) => ({
       name,
       frontmatter,

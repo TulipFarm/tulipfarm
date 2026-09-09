@@ -628,7 +628,7 @@ describe("RegistryToolDispatcher", () => {
 
     await expect(
       dispatcher.dispatch(AUTHORITY, { callId: "c2", name: "declined", arguments: {} })
-    ).resolves.toEqual({ status: "failed", reason: "no such record" });
+    ).resolves.toEqual({ status: "failed", reason: "no such record", code: "not_found" });
   });
 
   it("classifies a handler's schema rejection as invalid_arguments, not a generic failure", async () => {
