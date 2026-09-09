@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.18.20](https://github.com/TulipFarm/tulipfarm/compare/v0.18.19...v0.18.20) (2026-09-09)
+
+### Bug Fixes
+
+* **schema:** don't crash boot on legacy embeddings config missing resource_name/base_url ([#778](https://github.com/TulipFarm/tulipfarm/issues/778)) ([b8b7d86](https://github.com/TulipFarm/tulipfarm/commit/b8b7d86c0ecc89d7678786b0587f632ce7d9629f)), references [#772](https://github.com/TulipFarm/tulipfarm/issues/772)
+
 ## [0.18.19](https://github.com/TulipFarm/tulipfarm/compare/v0.18.18...v0.18.19) (2026-09-09)
 
 ### Bug Fixes
