@@ -55,6 +55,8 @@ export function validateSoulConfig(data: unknown): SoulConfig {
     );
   }
   const config = data as SoulConfig;
-  if (config.llm !== undefined) validateLlmConfig(config.llm);
+  // strict:false — boot must survive a config saved before the write-time embeddings guard
+  // existed; `createEmbeddingModel` degrades loud-but-lazily instead. See validateLlmConfig.
+  if (config.llm !== undefined) validateLlmConfig(config.llm, { strict: false });
   return config;
 }
