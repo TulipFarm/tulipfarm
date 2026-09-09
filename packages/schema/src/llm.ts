@@ -203,9 +203,10 @@ function describeConfigError(error: {
 
 /**
  * Fields a given embedding provider cannot build a model without. Mirrors the runtime switch in
- * `@tulipfarm/llm`'s `createEmbeddingModel` — unlike a chat {@link ProviderEntry}, an embedding
- * entry has no registry-keyed stored-secret fallback for `resource_name`/`base_url`, so a missing
- * field here is missing for good; only a write-time reject catches it before boot.
+ * `@tulipfarm/llm`'s `createEmbeddingModel` after its own registry-keyed stored-secret fallback
+ * (added alongside this) — a caller that already resolved `resource_name`/`base_url` from the
+ * operator's saved connection should hydrate the entry with them before validating, so this
+ * check only ever rejects an entry with truly nothing to build from, entry or connection alike.
  */
 const EMBEDDING_PROVIDER_REQUIREMENTS: Readonly<
   Record<string, (entry: EmbeddingProviderEntry) => string | null>
@@ -227,10 +228,12 @@ export function describeMissingEmbeddingFields(entry: EmbeddingProviderEntry): s
 /**
  * @param opts.strict Reject an embedding entry missing its provider-required fields
  * (`resource_name`/`base_url`). Defaults true for the write path (`PUT /api/v1/llm-config`),
- * which must never persist an unbuildable entry. Boot must tolerate a config that predates this
- * check — `createEmbeddingModel` (`@tulipfarm/llm`) fails loud lazily at first use instead, and
- * `embeddingsProbe` (`apps/api/src/admin/health.ts`) surfaces the ongoing degradation — so
- * `validateSoulConfig` calls this with `strict: false`.
+ * which must never persist an unbuildable entry — the route hydrates each entry from its stored
+ * connection first, so this only fires when neither the entry nor a connection has the field.
+ * Boot must tolerate a config that predates this check — `createEmbeddingModel`
+ * (`@tulipfarm/llm`) fails loud lazily at first use instead (falling back to its own stored
+ * connection lookup too), and `embeddingsProbe` (`apps/api/src/admin/health.ts`) surfaces the
+ * ongoing degradation — so `validateSoulConfig` calls this with `strict: false`.
  */
 export function validateLlmConfig(data: unknown, opts: { strict?: boolean } = {}): LlmConfig {
   if (!checkConfig(data)) {

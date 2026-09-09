@@ -3,24 +3,43 @@ import { createOpenAI } from "@ai-sdk/openai";
 import { createOpenAICompatible } from "@ai-sdk/openai-compatible";
 import type { EmbeddingProviderEntry } from "@tulipfarm/schema";
 import { LlmConfigValidationError } from "@tulipfarm/schema";
-import type { SecretsService } from "@tulipfarm/secrets";
+import { llmProviderById, providerField, type SecretsService } from "@tulipfarm/secrets";
 import type { EmbeddingModel } from "ai";
-import { resolveApiKey } from "./provider";
+import { resolveApiKey, resolveStored } from "./provider";
 
 /**
  * Build a text-embedding model from one config entry. Mirrors `createModel`
  * (provider.ts) — same credential resolution, same provider-switch shape.
  *
- * These required-field checks stay a second guard even though `@tulipfarm/schema`'s
- * `validateLlmConfig` (via `describeMissingEmbeddingFields`) already rejects an incomplete entry
- * at write time: a config written before that check existed, or edited outside the write gate,
+ * Config fields fall back to the registry-keyed stored connection the same way `createModel`
+ * does: an entry that sets nothing still resolves through whatever the operator saved via
+ * Providers & credentials, rather than requiring a second, entry-local copy of the same value.
+ *
+ * These required-field checks are the only guard: `validateLlmConfig` allows an entry with
+ * neither field set (same as a chat entry), trusting the stored connection to cover it, so this
  * must still fail loud here rather than hand the AI SDK an unbuildable client.
  */
 export async function createEmbeddingModel(
   entry: EmbeddingProviderEntry,
   secrets: SecretsService
 ): Promise<EmbeddingModel> {
-  const apiKey = await resolveApiKey(entry.api_key_ref, secrets);
+  const info = llmProviderById(entry.provider);
+
+  const apiKeyField = info ? providerField(info, "api_key") : undefined;
+  const apiKey = entry.api_key_ref
+    ? await resolveApiKey(entry.api_key_ref, secrets)
+    : apiKeyField
+      ? apiKeyField.optional
+        ? await resolveStored(apiKeyField.key, secrets)
+        : await resolveApiKey(apiKeyField.key, secrets)
+      : undefined;
+
+  const resourceName =
+    entry.resource_name ??
+    (info ? await resolveStored(providerField(info, "resource_name")?.key, secrets) : undefined);
+  const baseUrl =
+    entry.base_url ??
+    (info ? await resolveStored(providerField(info, "base_url")?.key, secrets) : undefined);
 
   switch (entry.provider) {
     case "openai": {
@@ -28,33 +47,33 @@ export async function createEmbeddingModel(
       return p.textEmbeddingModel(entry.model);
     }
     case "azure": {
-      if (!entry.resource_name && !entry.base_url) {
+      if (!resourceName && !baseUrl) {
         throw new LlmConfigValidationError("azure provider requires resource_name or base_url");
       }
       const p = createAzure({
-        resourceName: entry.resource_name,
-        baseURL: entry.base_url,
+        resourceName,
+        baseURL: baseUrl,
         apiKey,
       });
       return p.textEmbeddingModel(entry.model);
     }
     case "openai-compatible": {
-      if (!entry.base_url) {
+      if (!baseUrl) {
         throw new LlmConfigValidationError("openai-compatible provider requires base_url");
       }
       const p = createOpenAICompatible({
-        baseURL: entry.base_url,
+        baseURL: baseUrl,
         name: "openai-compatible",
         apiKey,
       });
       return p.textEmbeddingModel(entry.model);
     }
     case "ollama": {
-      if (!entry.base_url) {
+      if (!baseUrl) {
         throw new LlmConfigValidationError("ollama provider requires base_url");
       }
       const p = createOpenAICompatible({
-        baseURL: entry.base_url,
+        baseURL: baseUrl,
         name: "ollama",
         // Ollama needs no key; a placeholder keeps the SDK from erroring.
         apiKey: apiKey ?? "ollama",

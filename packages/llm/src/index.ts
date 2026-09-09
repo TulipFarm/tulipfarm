@@ -53,6 +53,7 @@ export {
   createModel,
   type PrincipalCredentialResolver,
   type PrincipalRef,
+  resolveStored,
 } from "./provider";
 export {
   ClassifiedLanguageModel,
