@@ -49,7 +49,7 @@ export async function resolveApiKey(
 
 // Reads a registry config field's stored value. Unlike an API key, a missing config value is normal
 // (optional / not-yet-set) rather than an error, so SecretUnavailableError maps to undefined.
-async function resolveStored(
+export async function resolveStored(
   key: string | undefined,
   secrets: SecretsService
 ): Promise<string | undefined> {

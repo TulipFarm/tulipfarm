@@ -1,4 +1,5 @@
 import { LlmConfigValidationError } from "@tulipfarm/schema";
+import { SecretUnavailableError } from "@tulipfarm/secrets";
 import { describe, expect, it, vi } from "vitest";
 import { createEmbeddingModel } from "./embedding-provider";
 
@@ -25,10 +26,13 @@ vi.mock("@ai-sdk/openai-compatible", () => ({
   })),
 }));
 
+// Mirror the real SecretsService: an unavailable key throws SecretUnavailableError, not a plain
+// Error — resolveStored (provider.ts) matches on that type to treat a missing config value as
+// unset rather than a hard failure.
 const makeSecrets = (values: Record<string, string> = {}) => ({
   get: vi.fn((key: string) => {
     if (key in values) return Promise.resolve(values[key]);
-    return Promise.reject(new Error(`secret not found: ${key}`));
+    return Promise.reject(new SecretUnavailableError(`secret not found: ${key}`));
   }),
 });
 
@@ -87,14 +91,31 @@ describe("createEmbeddingModel", () => {
     expect(model).toMatchObject({ provider: "azure" });
   });
 
-  it("throws when azure has neither resource_name nor base_url", async () => {
-    const secrets = makeSecrets();
+  it("throws when azure has neither resource_name nor base_url, and none is stored either", async () => {
+    const secrets = makeSecrets({ "azure-openai-api-key": "az-test" });
     await expect(
       createEmbeddingModel({ provider: "azure", model: "d" }, secrets as never)
     ).rejects.toThrow(LlmConfigValidationError);
     await expect(
       createEmbeddingModel({ provider: "azure", model: "d" }, secrets as never)
     ).rejects.toThrow("azure provider requires resource_name or base_url");
+  });
+
+  it("falls back to the stored Azure Foundry connection when the entry sets no resource_name/base_url", async () => {
+    const secrets = makeSecrets({
+      "azure-openai-api-key": "az-test",
+      "azure-openai-resource-name": "my-resource",
+    });
+    const model = await createEmbeddingModel(
+      { provider: "azure", model: "text-embedding-3-large" },
+      secrets as never
+    );
+    expect(model).toMatchObject({
+      provider: "azure",
+      modelId: "text-embedding-3-large",
+      resourceName: "my-resource",
+    });
+    expect(secrets.get).toHaveBeenCalledWith("azure-openai-resource-name");
   });
 
   it("creates an openai-compatible embedding model with base_url", async () => {

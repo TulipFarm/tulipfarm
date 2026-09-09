@@ -12,16 +12,23 @@ import {
   litellmModelsForProvider,
   resolveModelSpec,
   resolveModelSpecCandidate,
+  resolveStored,
 } from "@tulipfarm/llm";
 import {
   deriveModelProfiles,
+  type EmbeddingsConfig,
   type LlmConfig,
   LlmConfigValidationError,
   ModelSpecSchema,
   type TierConfig,
   validateLlmConfig,
 } from "@tulipfarm/schema";
-import { LLM_PROVIDERS, type SecretsService } from "@tulipfarm/secrets";
+import {
+  LLM_PROVIDERS,
+  llmProviderById,
+  providerField,
+  type SecretsService,
+} from "@tulipfarm/secrets";
 import type { SoulLoader, SoulWriter } from "@tulipfarm/soul";
 import { isSoulWriteError, mergeLlmConfigIntoSoulYaml, soulWriteHttpError } from "@tulipfarm/soul";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
@@ -240,6 +247,34 @@ async function enrichSpecs(config: LlmConfig, force: boolean): Promise<LlmConfig
       complex: enrichTier(tiers.complex),
     },
   };
+}
+
+/**
+ * Fills a saved embedding entry's `resource_name`/`base_url` from the operator's stored provider
+ * connection when the entry sets neither — the same registry-keyed lookup `createModel` already
+ * gives a chat entry for free (`@tulipfarm/llm`'s `provider.ts`). Without this, an operator who
+ * already added a connection (e.g. Azure Foundry) still has to retype it per embedding entry to
+ * pass `validateLlmConfig`'s write-time check.
+ */
+async function hydrateEmbeddingConnections(
+  embeddings: EmbeddingsConfig | undefined,
+  secrets: SecretsService
+): Promise<EmbeddingsConfig | undefined> {
+  if (!embeddings) return embeddings;
+  const providers = await Promise.all(
+    embeddings.providers.map(async (entry) => {
+      if (entry.resource_name || entry.base_url) return entry;
+      const info = llmProviderById(entry.provider);
+      if (!info) return entry;
+      const [resourceName, baseUrl] = await Promise.all([
+        resolveStored(providerField(info, "resource_name")?.key, secrets),
+        resolveStored(providerField(info, "base_url")?.key, secrets),
+      ]);
+      if (!resourceName && !baseUrl) return entry;
+      return { ...entry, resource_name: resourceName, base_url: baseUrl };
+    })
+  );
+  return { ...embeddings, providers };
 }
 
 function validatePresetTargets(config: LlmConfig): string | null {
@@ -604,9 +639,14 @@ export function registerLlmConfigRoutes(
       },
     },
     async (req, reply) => {
+      const body = req.body as { embeddings?: EmbeddingsConfig };
+      const hydratedBody = {
+        ...body,
+        embeddings: await hydrateEmbeddingConnections(body.embeddings, secrets),
+      };
       let config: LlmConfig;
       try {
-        config = validateLlmConfig(req.body);
+        config = validateLlmConfig(hydratedBody);
       } catch (err) {
         if (err instanceof LlmConfigValidationError) {
           return reply.code(422).send({ error: err.message });

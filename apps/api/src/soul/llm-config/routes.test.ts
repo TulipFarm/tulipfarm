@@ -1,6 +1,7 @@
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { SecretUnavailableError } from "@tulipfarm/secrets";
 import type { GitSyncService, SoulLoader } from "@tulipfarm/soul";
 import { makeSoulWriterDouble, type SoulWriterDouble } from "@tulipfarm/soul";
 import type { PaginatedResult } from "@tulipfarm/storage";
@@ -124,7 +125,7 @@ describe("llm-config routes", () => {
     // default — tests that exercise the openai-compatible live-fetch path override this.
     secretsGet = vi.fn(async (key: string) => {
       if (key === "azure-openai-resource-name") return "my-res";
-      throw new Error("unset");
+      throw new SecretUnavailableError(`secret not found: ${key}`);
     });
     const secretsService = {
       list: vi.fn().mockResolvedValue([]),
@@ -413,6 +414,11 @@ describe("llm-config routes", () => {
       // Regression for #755: an Azure embedding provider saved with neither field builds no
       // model at boot, and the runtime silently drops to lexical matching. The write path must
       // reject it instead of accepting a config that can only fail later.
+      // No stored connection either, unlike the beforeEach default — this proves the reject still
+      // fires when there is genuinely nothing to hydrate from.
+      secretsGet.mockImplementation(async (key: string) => {
+        throw new SecretUnavailableError(`secret not found: ${key}`);
+      });
       const res = await app.inject({
         method: "PUT",
         url: "/api/v1/llm-config",
@@ -435,6 +441,57 @@ describe("llm-config routes", () => {
       );
       expect(soulWriterDouble.applied).toEqual([]);
       expect(init).not.toHaveBeenCalled();
+    });
+
+    it("accepts an azure embedding provider missing resource_name/base_url when a connection is already stored", async () => {
+      // The beforeEach default stubs "azure-openai-resource-name" as already saved (e.g. an
+      // operator who added the Azure Foundry connection). The write path should hydrate the
+      // entry from it rather than force retyping the same value per embedding entry.
+      const res = await app.inject({
+        method: "PUT",
+        url: "/api/v1/llm-config",
+        cookies: cookies(adminSid),
+        headers,
+        payload: {
+          tiers: {
+            quick: {
+              providers: [
+                {
+                  provider: "anthropic",
+                  model: "claude-haiku-4-5",
+                  spec: { max_input_tokens: 200000 },
+                },
+              ],
+            },
+            standard: {
+              providers: [
+                {
+                  provider: "anthropic",
+                  model: "claude-sonnet-4-6",
+                  spec: { max_input_tokens: 200000 },
+                },
+              ],
+            },
+            complex: {
+              providers: [
+                {
+                  provider: "anthropic",
+                  model: "claude-opus-4-8",
+                  spec: { max_input_tokens: 200000 },
+                },
+              ],
+            },
+          },
+          embeddings: {
+            providers: [{ provider: "azure", model: "text-embedding-3-large" }],
+          },
+        },
+      });
+      expect(res.statusCode).toBe(200);
+      expect(res.json().embeddings?.providers[0]).toMatchObject({
+        provider: "azure",
+        resource_name: "my-res",
+      });
     });
 
     it("rejects a structurally invalid config with 422, leaving the running config intact", async () => {
