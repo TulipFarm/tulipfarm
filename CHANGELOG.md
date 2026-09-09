@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.18.19](https://github.com/TulipFarm/tulipfarm/compare/v0.18.18...v0.18.19) (2026-09-09)
+
+### Bug Fixes
+
+* **agent-runtime:** scope coming-soon integration text to its own connect flow ([#775](https://github.com/TulipFarm/tulipfarm/issues/775)) ([a4cc052](https://github.com/TulipFarm/tulipfarm/commit/a4cc052e06a9f64b060947f424422157e7f197e9))
+* **platform:** gate Skill access by ownership, not silently degrade on it ([#776](https://github.com/TulipFarm/tulipfarm/issues/776)) ([83cbbf2](https://github.com/TulipFarm/tulipfarm/commit/83cbbf20cc015d262225e6ea20d47a7b2ed98ade))
+
 ## [0.18.18](https://github.com/TulipFarm/tulipfarm/compare/v0.18.17...v0.18.18) (2026-09-09)
 
 ### Bug Fixes
