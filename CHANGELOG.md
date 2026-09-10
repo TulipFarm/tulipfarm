@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.18.22](https://github.com/TulipFarm/tulipfarm/compare/v0.18.21...v0.18.22) (2026-09-10)
+
+### Features
+
+* **memory:** replace the Curator with an hourly Memory job ([#785](https://github.com/TulipFarm/tulipfarm/issues/785)) ([d519578](https://github.com/TulipFarm/tulipfarm/commit/d5195786f98024bb6f134921d6ae4604e1442242)), references [#591](https://github.com/TulipFarm/tulipfarm/issues/591) [#595](https://github.com/TulipFarm/tulipfarm/issues/595)
+* **web:** remove item counts from sidebar navigation rows ([#783](https://github.com/TulipFarm/tulipfarm/issues/783)) ([d423918](https://github.com/TulipFarm/tulipfarm/commit/d423918854c9439e791dc5059773f7b863467888))
+
+### Bug Fixes
+
+* **memory:** carry the whole Memory Document in the reminder ([#784](https://github.com/TulipFarm/tulipfarm/issues/784)) ([2e3922b](https://github.com/TulipFarm/tulipfarm/commit/2e3922b6de4446c7a2da3541332affbcb1ac3a93)), references [#591](https://github.com/TulipFarm/tulipfarm/issues/591) [#595](https://github.com/TulipFarm/tulipfarm/issues/595)
+
+### Continuous Integration
+
+* **container:** retry Chromium apt dependency install on failure ([#782](https://github.com/TulipFarm/tulipfarm/issues/782)) ([141039d](https://github.com/TulipFarm/tulipfarm/commit/141039d9bcea867b989b6bc745c8e8f586dd7f3c))
+
 ## [0.18.21](https://github.com/TulipFarm/tulipfarm/compare/v0.18.20...v0.18.21) (2026-09-09)
 
 ### Bug Fixes
