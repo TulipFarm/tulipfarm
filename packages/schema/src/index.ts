@@ -117,10 +117,6 @@ export {
   validateLegacyIntegrationManifest,
 } from "./integration-manifest";
 export type {
-  CuratorBusinessRequest,
-  CuratorRequest,
-  CuratorUserRequest,
-  CuratorWorkReason,
   InvocationRequestSchema,
   SubagentAnswer,
   SubagentRequest,
@@ -128,9 +124,6 @@ export type {
 export {
   CHAT_REQUEST_SCHEMA,
   CHAT_REQUEST_SCHEMA_REF,
-  CURATOR_REQUEST_SCHEMA,
-  CURATOR_REQUEST_SCHEMA_REF,
-  CURATOR_WORK_REASONS,
   INTEGRATION_REQUEST_SCHEMA,
   INTEGRATION_REQUEST_SCHEMA_REF,
   INVOCATION_REQUEST_SCHEMAS,

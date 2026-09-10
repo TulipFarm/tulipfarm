@@ -3,8 +3,9 @@ import { describe, expect, it, vi } from "vitest";
 import type { Queryable } from "./db";
 
 import {
-  CURATOR_SWEEP_QUEUE,
   jobBossOptions,
+  MAINTENANCE_SWEEP_QUEUE,
+  MEMORY_CURATION_QUEUE,
   OBS_PRUNE_QUEUE,
   SOUL_BUNDLE_PRUNE_QUEUE,
   startJobConsumers,
@@ -66,23 +67,18 @@ describe("startJobConsumers", () => {
 
     expect(send).toHaveBeenCalledOnce();
     const [queue, , options] = send.mock.calls[0] ?? [];
-    expect(queue).toBe(CURATOR_SWEEP_QUEUE);
+    expect(queue).toBe(MAINTENANCE_SWEEP_QUEUE);
     // Its own key keeps the boot kick out of the scheduler's dedupe slot, so it cannot swallow a
     // cron tick; the window collapses the restart storm `tsx watch` produces into one run.
     expect(options?.singletonKey).toBe("boot");
     expect(options?.singletonSeconds).toBeGreaterThan(0);
   });
 
-  // The Curator half needs a model. If its failure could skip the deterministic half, the very
-  // Task that tells the operator to connect one would disappear exactly when it is needed.
-  it("reconciles Tasks before the Curator fan-out, and still does so when it fails", async () => {
-    const order: string[] = [];
-    const gather = vi.fn(async () => {
-      order.push("gather");
-      return {} as never;
-    });
-    const curatorSweep = vi.fn(async () => {
-      order.push("curator");
+  // The Curator needs a model; the deterministic reconcile does not. They are separate queues so
+  // that a model outage cannot take down the very Task that tells the operator to connect one.
+  it("keeps the Curator off the deterministic sweep queue", async () => {
+    const gather = vi.fn(async () => ({}) as never);
+    const memoryCuration = vi.fn(async () => {
       throw new Error("no model provider configured");
     });
     const boss = {
@@ -101,12 +97,16 @@ describe("startJobConsumers", () => {
       businessId: "business-1",
       taskStore: { upsertOpen: vi.fn(), closeByDedupeKey: vi.fn() } as never,
       taskSignals: { gather } as never,
-      curatorSweep,
+      memoryCuration,
     });
 
-    const sweep = boss.work.mock.calls.find(([queue]) => queue === CURATOR_SWEEP_QUEUE)?.[1];
-    await expect(sweep?.([])).rejects.toThrow("no model provider configured");
-    expect(order).toEqual(["gather", "curator"]);
+    const sweep = boss.work.mock.calls.find(([queue]) => queue === MAINTENANCE_SWEEP_QUEUE)?.[1];
+    await sweep?.([]);
+    expect(gather).toHaveBeenCalledOnce();
+    expect(memoryCuration).not.toHaveBeenCalled();
+
+    const curate = boss.work.mock.calls.find(([queue]) => queue === MEMORY_CURATION_QUEUE)?.[1];
+    await expect(curate?.([])).rejects.toThrow("no model provider configured");
   });
 
   it("logs what obs-prune actually deleted from each spine", async () => {
@@ -186,7 +186,7 @@ describe("startJobConsumers", () => {
     });
 
     expect(info).toHaveBeenCalledWith(`queue subscribed queue=${OBS_PRUNE_QUEUE}`);
-    expect(info).toHaveBeenCalledWith(`queue subscribed queue=${CURATOR_SWEEP_QUEUE}`);
+    expect(info).toHaveBeenCalledWith(`queue subscribed queue=${MAINTENANCE_SWEEP_QUEUE}`);
   });
 
   it("registers no sweep queue, and no boot kick, without task deps", async () => {
@@ -204,7 +204,7 @@ describe("startJobConsumers", () => {
     });
 
     expect(boss.send).not.toHaveBeenCalled();
-    expect(boss.createQueue).not.toHaveBeenCalledWith(CURATOR_SWEEP_QUEUE);
+    expect(boss.createQueue).not.toHaveBeenCalledWith(MAINTENANCE_SWEEP_QUEUE);
   });
 });
 

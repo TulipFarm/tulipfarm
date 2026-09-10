@@ -301,8 +301,8 @@ export class InternalTurnHost {
       subject: run.identity.effectiveSubject,
       source: run.source,
       bundleDigest: run.bundle.digest,
-      // Every Run records a `routineId`, but only a Routine Run's names a Routine: chat and
-      // Curator Runs park their own source name there.
+      // Every Run records a `routineId`, but only a Routine Run's names a Routine: every other
+      // source parks its own name there.
       ...(run.source === "routine" ? { routineId: run.bundle.routineId } : {}),
       ...(agent === undefined ? {} : { agent }),
     };
@@ -448,7 +448,7 @@ export class InternalTurnHost {
     reason?: string;
     modelFailure?: ModelFailureDiagnostic;
   }): Promise<void> {
-    const { turn, subject } = await this.turnAuthority(input.businessId, input.runId);
+    const { turn } = await this.turnAuthority(input.businessId, input.runId);
     const now = this.now();
     // The Artifact is already durable; this records that *this* Conversation was shown it, which
     // is the only part a reload has to restore. One tool-role Message keeps the cards in the order
@@ -488,16 +488,6 @@ export class InternalTurnHost {
               // the turn ended asks for what follows this attempt rather than replaying it.
               cursor: input.cursor,
               updatedAt: now,
-            },
-          }
-        : {}),
-      ...(current && input.status === "succeeded" && subject.kind === "user"
-        ? {
-            work: {
-              businessId: input.businessId,
-              userId: subject.id,
-              reason: "turn_completed" as const,
-              sourceKey: turn.id,
             },
           }
         : {}),

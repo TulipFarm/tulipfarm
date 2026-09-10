@@ -70,10 +70,13 @@ async function seedChannelBindTokensAlterTarget(db: PGlite): Promise<void> {
 /**
  * The `conversation_turns` (v16) and `turn_completions` (v17) tables that v84 later alters.
  * Fixtures whose floor is above v17 must stand both in.
+ *
+ * `created_at` is here because v107 indexes it, not because v84 reads it.
  */
 async function seedTurnCompletionsAlterTarget(db: PGlite): Promise<void> {
   await db.query(`CREATE TABLE IF NOT EXISTS conversation_turns (
-    id uuid PRIMARY KEY
+    id         uuid PRIMARY KEY,
+    created_at timestamptz
   )`);
   await db.query(`CREATE TABLE IF NOT EXISTS turn_completions (
     turn_id    uuid NOT NULL REFERENCES conversation_turns(id),
@@ -1286,28 +1289,6 @@ describe("runPgMigrations concurrency and atomicity", () => {
     expect(rows.at(-1)?.description).toBe(
       PG_MIGRATIONS.find((m) => m.version === latestVersion)?.description
     );
-  });
-
-  describe("migration 64", () => {
-    /**
-     * The regression this exists for: the index was first written into
-     * `CURATOR_STORAGE_STATEMENTS`, which migration 63 applies. A fresh database therefore had it
-     * and every test passed, while every already-migrated deployment — the ones that actually
-     * matter — would have run the shadow review's window read as a full scan forever.
-     */
-    it("adds the review index to a database that already applied 63", async () => {
-      await runPgMigrations(db, undefined, NOOP_LOG);
-      await db.query("DROP INDEX curator_effect_review_idx");
-      await db.query("UPDATE schema_version SET version = 63 WHERE id = true");
-      await db.query("DELETE FROM schema_migrations WHERE version >= 64");
-
-      await runPgMigrations(db, undefined, NOOP_LOG);
-
-      const { rows } = await db.query<{ indexname: string }>(
-        "SELECT indexname FROM pg_indexes WHERE indexname = 'curator_effect_review_idx'"
-      );
-      expect(rows).toHaveLength(1);
-    });
   });
 
   describe("migration 65", () => {

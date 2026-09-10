@@ -41,5 +41,6 @@ the bound it claims is then a diff in two files, not a paragraph nobody re-read.
   is the one prompt here whose failure has consequences. Review it as such. Its rubric is
   `SKILL_AUDIT_TAXONOMY` from `@tulipfarm/soul`, shared with the bundled `skill-forge` Skill — edit
   the taxonomy there, not a paraphrase here, or the forge authors against rules this never checks.
-- Curator is deliberately not here: it is a two-process trust boundary, not a single-shot call.
-  See `packages/curator` and `packages/curator-host`.
+- `agents/memory-curator/` rewrites a whole Memory Document, so its budgets arrive as input rather
+  than as an import: this package may not import `@tulipfarm/memory`. The guards that act on its
+  reply live with its caller, in `apps/worker/src/memory-curation/guards.ts`.

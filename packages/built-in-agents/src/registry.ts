@@ -1,6 +1,7 @@
 import type { BuiltInAgentSpec } from "./agent";
 import { CHAT_TITLE } from "./agents/chat-title";
 import { EFFORT_CLASSIFIER } from "./agents/effort-classifier";
+import { MEMORY_CURATOR } from "./agents/memory-curator";
 import { ONBOARDING_PERSONALIZER } from "./agents/onboarding-personalizer";
 import { SKILL_AUDIT } from "./agents/skill-audit";
 import { SOUL_REPAIR } from "./agents/soul-repair";
@@ -27,4 +28,5 @@ export const BUILT_IN_AGENTS: readonly BuiltInAgentSpec[] = [
   SKILL_AUDIT,
   ONBOARDING_PERSONALIZER,
   SOUL_REPAIR,
+  MEMORY_CURATOR,
 ];

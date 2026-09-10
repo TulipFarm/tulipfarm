@@ -168,6 +168,54 @@ describe("MemoryDocumentRepo (PostgreSQL)", () => {
     });
   });
 
+  describe("replaceDocument", () => {
+    // The Curator reads the document, spends a model call deciding, and writes. An `update_memory`
+    // call landing in that gap was decided after the Curator's text was, so it has to survive the
+    // rewrite rather than be overwritten by it.
+    it("replays an Agent delta that landed while the Curator was thinking", async () => {
+      await delta("preferences", ["Prefers terse answers"]);
+      const base = await repo.read(BUSINESS, USER);
+      await delta("identity", ["Works at TulipFarm"]);
+
+      const proposed = emptyMemorySections();
+      proposed.preferences = "Prefers terse answers";
+      proposed.identity = "Lives in Bangalore";
+      const outcome = await repo.replaceDocument({
+        businessId: BUSINESS,
+        userId: USER,
+        sections: proposed,
+        baseDocument: base?.document ?? "",
+        expectedVersion: base?.version ?? 1,
+        writer: "curator",
+        now: NOW,
+      });
+
+      expect(outcome.outcome).toBe("applied");
+      expect(outcome.record.sections.identity).toBe("Lives in Bangalore\nWorks at TulipFarm");
+      expect(outcome.record.sections.preferences).toBe("Prefers terse answers");
+    });
+
+    it("writes the rewrite as given when nothing moved underneath it", async () => {
+      await delta("preferences", ["Prefers terse answers"]);
+      const base = await repo.read(BUSINESS, USER);
+
+      const proposed = emptyMemorySections();
+      proposed.preferences = "Prefers terse answers\nReplies in Hindi";
+      const outcome = await repo.replaceDocument({
+        businessId: BUSINESS,
+        userId: USER,
+        sections: proposed,
+        baseDocument: base?.document ?? "",
+        expectedVersion: base?.version ?? 1,
+        writer: "curator",
+        now: NOW,
+      });
+
+      expect(outcome.record.sections.preferences).toBe("Prefers terse answers\nReplies in Hindi");
+      expect(outcome.record.version).toBe((base?.version ?? 1) + 1);
+    });
+  });
+
   it("records a revision per applied write and prunes beyond retention", async () => {
     for (let index = 0; index < MEMORY_REVISION_RETENTION + 5; index += 1) {
       await delta("identity", [`fact ${index}`]);

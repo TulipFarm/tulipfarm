@@ -27,14 +27,14 @@ function deps(llmConfig: LlmConfig | undefined = undefined) {
 describe("makeLlmCascadeOnSecretSet", () => {
   it("auto-connects Claude Code with a tier per model on first token save", async () => {
     const d = deps(undefined);
-    const triggerCuratorSweep = vi.fn(async () => {});
+    const triggerMaintenanceSweep = vi.fn(async () => {});
     const cascade = makeLlmCascadeOnSecretSet(
       d.soulLoader,
       d.soul.writer,
       d.llmService,
       d.secretsService,
       d.logger,
-      triggerCuratorSweep
+      triggerMaintenanceSweep
     );
 
     await cascade("claude-code-oauth-token", ACTOR);
@@ -48,7 +48,7 @@ describe("makeLlmCascadeOnSecretSet", () => {
     expect(d.llmService.init).toHaveBeenCalled();
     // The Task clears via the reconciler's next tick; kicking it here means the Companion reflects
     // the auto-connect within seconds instead of waiting up to five minutes for cron.
-    expect(triggerCuratorSweep).toHaveBeenCalled();
+    expect(triggerMaintenanceSweep).toHaveBeenCalled();
   });
 
   it("auto-connects Codex on first auth.json save", async () => {

@@ -65,7 +65,7 @@ contract; they do not reimplement its decisions.
 | Agent and model behavior | `packages/agent-runtime` | Context assembly, model profiles, bounded Tool loop, budgets, delegation |
 | Knowledge authorization | `packages/knowledge` | Source ACL ingestion, retrieval, provenance, invalidation, deletion |
 | Durable Memory | `packages/memory` | The Memory Document: fixed sections, storage-time grammar, delta application, privileged stale-checked section replacement, canonical render, budgets, revisions, Erase¹ |
-| Curator reasoning | `packages/curator` | Curator prompt, output schema, citation and entailment validation, Memory Document merge, Proposal mapping — pure logic, no IO |
+| Curator reasoning | `packages/built-in-agents/src/agents/memory-curator` | The hourly Memory rewrite prompt and its parse — pure logic, no IO; its guards live with the Worker that calls it |
 | Tulip Surface Protocol and forms | `packages/surface` | Safe presentation schemas, Artifacts, signed actions, form contracts |
 | Integrations | `packages/integrations` | Adapter contracts, event normalization, delivery, identity mapping, checkpoints |
 | Isolated execution | `packages/sandbox` | Execution request, backend ports, workspace, egress and resource controls |
@@ -113,8 +113,8 @@ add stricter checks but cannot bypass or broaden the owner's decision.
 | I-16 | Optional infrastructure is never required for correctness | `packages/storage` | Provider ports declare capabilities; PostgreSQL fallback remains authoritative under adapter loss |
 | I-17 | Memory content never leaks through recall side channels or telemetry | `packages/memory` | Recall authorizes scope and Knowledge evidence before truncation; exclusions are reason counts only; metrics/spans use bounded enums and counts, never statements, subjects, entities, queries, or ids |
 | I-18 | A Memory Document is only ever mutated one named section at a time, and a Tool can only ever apply a delta | `packages/memory` | A Tool reaches `applyDelta`, which touches only the entries the caller named, so a concurrent writer's entry cannot be destroyed and no stale check is needed. Whole-section replacement is a separate repository method requiring the current section hash and a writer type that excludes `"tool"`, backed by a DB CHECK; both lock the row before applying |
-| I-19 | Curator model output names only a closed kind and a Run-scoped subject | `packages/curator` | Output schema forbids user-visible text, URLs, target ids, and dedupe keys; the server templates every rendered string and derives every key |
-| I-20 | One Curator Run reads exactly one user's private context | `packages/curator` | Business Runs receive only sanitized declarative candidates and emit audience-free seeds; a business Run cannot name an audience or emit a Proposal |
+| I-19 | The Curator reads only what the subject typed | `packages/storage/src/memory-curation` | The window selects `role='user'` messages; assistant text echoes Tool and Integration output, which is attacker-controlled |
+| I-20 | One curation reads exactly one user's private context | `apps/worker/src/memory-curation` | The window is keyed by user; the write is keyed by `(businessId, userId)`; the run summary carries counts only, never a subject id |
 
 ## Durable failure contract
 

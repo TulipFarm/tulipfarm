@@ -15,6 +15,7 @@ describe("BUILT_IN_AGENTS", () => {
     expect(BUILT_IN_AGENTS.map((agent) => agent.id).sort()).toEqual([
       "chat_title",
       "effort_classifier",
+      "memory_curator",
       "onboarding_personalizer",
       "skill_audit",
       "soul_repair",

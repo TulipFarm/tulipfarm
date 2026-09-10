@@ -44,7 +44,6 @@ import {
   EventStore,
   IntegrationStore,
   KillSwitchRepo,
-  listUsersWithDueWork,
   RunEventStore,
   RunLoopCheckpointStore,
   RunStateConcurrencyStore,
@@ -63,8 +62,6 @@ import {
 } from "@tulipfarm/turn-executor";
 import { config as loadEnv } from "dotenv";
 import { loadConfig, REQUIRED_SCHEMA_VERSION, type WorkerConfig } from "./config";
-import { CURATOR_RUN_SOURCE, createCuratorExecutor } from "./curator/executor";
-import { sweepCurator } from "./curator/sweep";
 import { resolveDataDir, waitForDataDirEnv } from "./data-dir";
 import { connectPg, transactionPort } from "./db";
 import { DeliveryTargetRegistry } from "./delivery";
@@ -304,6 +301,7 @@ export async function main(): Promise<void> {
         internalApi,
         blobs,
         embeddings: localEmbeddings,
+        models: llm,
       })
     : undefined;
   consumersReady = true;
@@ -459,18 +457,6 @@ export async function main(): Promise<void> {
   executors.register(
     SUBAGENT_RUN_SOURCE,
     createSubagentExecutor({ chat: chatExecutorOptions, artifacts: artifactService })
-  );
-
-  executors.register(
-    CURATOR_RUN_SOURCE,
-    createCuratorExecutor({
-      api: internalApi,
-      models: { model: (selector, requirements) => llm.model(selector, requirements) },
-      artifacts: artifactService,
-      runs: runStore,
-      transitions: new RunStoreStateTransitions(runStore, logger),
-      log: logger,
-    })
   );
 
   executors.register(

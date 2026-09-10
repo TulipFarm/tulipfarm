@@ -148,7 +148,6 @@ const IGNORED_DIRS = new Set([
 const OVERSIZED: Readonly<Record<string, number>> = {
   "apps/api/src/pg-migrations/index.ts": 2183,
   "apps/api/src/index.ts": 1353,
-  "packages/storage/src/curator/repo.ts": 660,
   "packages/integrations/src/google/contracts.ts": 655,
   "apps/web/app/routes/_app.integrations.$name.tsx": 647,
   "packages/agent-runtime/src/loop/loop.ts": 614,

@@ -5,7 +5,7 @@ import type { SecretsService } from "@tulipfarm/secrets";
 import { llmProviderForFieldKey } from "@tulipfarm/secrets";
 import type { CommitActor, Logger, SoulLoader, SoulWriter } from "@tulipfarm/soul";
 import { mergeLlmConfigIntoSoulYaml } from "@tulipfarm/soul";
-import { kickCuratorSweep } from "../../curator/sweep-schedule";
+import { kickMaintenanceSweep } from "../../schedule/maintenance-schedule";
 
 /**
  * Subscription CLI providers ship a fixed, known model per tier (`packages/llm/src/cli/specs.ts`),
@@ -29,9 +29,9 @@ export function makeLlmCascadeOnSecretSet(
   llmService: LlmService,
   secretsService: SecretsService,
   logger: Logger,
-  /** Kicks the Curator sweep outside its five-minute cron so "Connect a model provider" clears
+  /** Kicks the maintenance sweep outside its five-minute cron so "Connect a model provider" clears
    * within seconds of the auto-connect commit, not on the next scheduled tick. */
-  triggerCuratorSweep?: () => Promise<void>
+  triggerMaintenanceSweep?: () => Promise<void>
 ): (setKey: string, actor: CommitActor) => Promise<void> {
   return async (setKey: string, actor: CommitActor): Promise<void> => {
     const currentConfig = soulLoader.llmConfig as LlmConfig | undefined;
@@ -104,7 +104,7 @@ export function makeLlmCascadeOnSecretSet(
         await soulLoader.reload();
         await llmService.init(soulLoader.llmConfig, secretsService, logger);
 
-        await kickCuratorSweep(triggerCuratorSweep, logger, `${owner.id} auto-connect`);
+        await kickMaintenanceSweep(triggerMaintenanceSweep, logger, `${owner.id} auto-connect`);
 
         logger.info(`[llm] ${owner.id} auto-connected after secret ${setKey} added`);
         return;

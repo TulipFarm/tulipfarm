@@ -11,7 +11,7 @@ it.
 ## Map
 | Path | Owns |
 | --- | --- |
-| `src/document/sections.ts` | Char budgets and the `## Recent decisions` cap. The section vocabulary itself is `@tulipfarm/schema`'s, because memory, curator and api all have to agree on it. |
+| `src/document/sections.ts` | Char budgets and the `## Recent decisions` cap. The section vocabulary itself is `@tulipfarm/schema`'s, because memory, the Curator and api all have to agree on it. |
 | `src/document/document.ts` | Grammar, canonicalization, deltas, section replacement, hashing, render + its inverse parser. Pure. |
 | `src/document/store.ts` | Every line of SQL in the package. `user_memory.document` holds the rendered page itself, so `psql` shows the bytes the model got; `parseMemoryDocument` inverts the render, losslessly *only* because of the no-heading rule below. |
 | `src/document/tool.ts` | `update_memory` — the sole model-facing write. |
@@ -33,5 +33,11 @@ it.
   time, not only at render, so no writer can forge or split a section.
 - An over-budget mutation is **rejected** and the previous document survives — never truncated,
   because a silent truncation loses a fact the user was told was remembered.
+- `replaceDocument` is the Curator's whole-page write. It carries the document the writer was shown
+  and the version it was at; if an `update_memory` delta landed while the model was thinking,
+  `mergeConcurrentMemoryWrites` replays it on top. That replay is exact rather than a heuristic
+  because the DB CHECK makes every Tool write a delta, so two versions differ by a known set of
+  lines. When the two disagree it keeps the concurrent line: one hour of untidiness is recoverable,
+  a lost fact is not.
 - Telemetry labels/attributes are bounded enums or counts only — never document text, section
   content, or any principal/business/conversation/Run id.

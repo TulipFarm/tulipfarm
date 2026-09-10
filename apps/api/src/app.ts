@@ -7,7 +7,6 @@ import helmet from "@fastify/helmet";
 import fastifyStatic from "@fastify/static";
 import swagger from "@fastify/swagger";
 import scalar from "@scalar/fastify-api-reference";
-import { DEPLOYMENT_BUSINESS_ID } from "@tulipfarm/constants";
 import { BUSINESS_PRINCIPAL_ID } from "@tulipfarm/files";
 import { acceptedInputModalities, type LlmConfig } from "@tulipfarm/schema";
 import { SURFACE_SANDBOX_CSP, SURFACE_SANDBOX_PATH } from "@tulipfarm/surface";
@@ -26,7 +25,6 @@ import { registerAuthzRoutes } from "./authz/routes";
 import { registerTeamRoutes } from "./authz/team-routes";
 import { registerConversationRoutes } from "./chat/conversation-routes";
 import { registerChatRoutes } from "./chat/routes";
-import { registerCuratorReviewRoutes } from "./curator/review-routes";
 import { registerFeedbackRoutes } from "./feedback/routes";
 import { registerFileRoutes } from "./files/routes";
 import { registerFormRoutes } from "./forms/routes";
@@ -301,7 +299,9 @@ export async function buildApp(opts: AppOptions = {}) {
       ...(opts.userInviteRepo && { inviteRepo: opts.userInviteRepo }),
       requireAuthorization,
       authorizationCheck,
-      ...(opts.triggerCuratorSweep && { triggerCuratorSweep: opts.triggerCuratorSweep }),
+      ...(opts.triggerMaintenanceSweep && {
+        triggerMaintenanceSweep: opts.triggerMaintenanceSweep,
+      }),
       ...(opts.soulLoader && { soulLoader: opts.soulLoader }),
     });
     const requireAuth = makeRequireAuth({
@@ -329,7 +329,9 @@ export async function buildApp(opts: AppOptions = {}) {
         gitSync: opts.gitSync,
         soulPath,
         requireAuth,
-        ...(opts.triggerCuratorSweep && { triggerCuratorSweep: opts.triggerCuratorSweep }),
+        ...(opts.triggerMaintenanceSweep && {
+          triggerMaintenanceSweep: opts.triggerMaintenanceSweep,
+        }),
         ...(opts.soulLoader && {
           reloadSoul: () => opts.soulLoader?.reload() ?? Promise.resolve(),
         }),
@@ -361,7 +363,7 @@ export async function buildApp(opts: AppOptions = {}) {
                   opts.llmService,
                   opts.secretsService,
                   app.log,
-                  opts.triggerCuratorSweep
+                  opts.triggerMaintenanceSweep
                 )
               : undefined,
         }
@@ -383,15 +385,6 @@ export async function buildApp(opts: AppOptions = {}) {
       registerRoutineDetailRoutes(app, opts.routineDetail, requireAuth, requireAuthorization);
     }
 
-    if (opts.curatorReview) {
-      registerCuratorReviewRoutes(
-        app,
-        opts.curatorReview,
-        DEPLOYMENT_BUSINESS_ID,
-        requireAuth,
-        requireAuthorization
-      );
-    }
     if (opts.kvService) {
       registerKvRoutes(app, opts.kvService, requireAuth, requireAuthorization);
       registerPreferenceRoutes(app, opts.kvService, requireAuth);

@@ -1,10 +1,11 @@
 /**
  * The Memory Document's section contract.
  *
- * Three packages must agree on this vocabulary and none of them owns it: `memory` renders the
- * document, `curator` proposes patches against it, and the API applies them. The budgets that
- * bound a section deliberately stay in `memory` — they are runtime policy, and the *remaining*
- * budget depends on the current document, which no constant can express.
+ * Several packages must agree on this vocabulary and none of them owns it: `memory` renders the
+ * document, `built-in-agents` shows the headings to the model that rewrites it, and the API and
+ * the Worker read it back. The budgets that bound a section deliberately stay in `memory` — they
+ * are runtime policy, and the *remaining* budget depends on the current document, which no
+ * constant can express.
  */
 
 export const MEMORY_SECTION_KEYS = [

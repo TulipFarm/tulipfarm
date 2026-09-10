@@ -43,7 +43,7 @@ function routeGatingOptions(source: string): Set<string> {
 /**
  * What each `Pick<AppOptions, ...>` helper contributes, keyed by function name.
  *
- * Without this a spread — `...buildCurator({ ... })` — composes options the scan below cannot see,
+ * Without this, a spread of a builder's result composes options the scan below cannot see,
  * so every option a helper supplies would be reported missing while in fact being wired. Reading
  * the helper's own return annotation keeps the two halves from drifting: widening the `Pick` is
  * what tells this test the new key exists.

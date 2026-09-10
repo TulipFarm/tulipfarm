@@ -50,7 +50,6 @@ export interface PersistedState {
     readonly readableBy: readonly string[];
     readonly status?: "draft" | "saved";
   }[];
-  readonly curatorTasks?: readonly { readonly title: string }[];
   readonly doctorEvents?: readonly { readonly kind: string; readonly subject: string }[];
   /** Real Tool dispatches that were denied, with the reason the dispatcher gave back. */
   readonly toolDenials?: readonly { readonly name: string; readonly reason: string }[];
@@ -295,14 +294,6 @@ function evaluate(a: Expectation, obs: Observation): { passed: boolean; detail: 
       return drafts.length > 0
         ? { passed: true, detail: `${drafts.length} generated draft(s) were created` }
         : { passed: false, detail: "the Chat created no generated File draft" };
-    }
-
-    case "curator_task_visible": {
-      const persisted = obs.persisted;
-      if (persisted === undefined) return notPersisted(a.kind);
-      return (persisted.curatorTasks ?? []).some((task) => task.title === a.title)
-        ? { passed: true, detail: `Curator delivered Task "${a.title}"` }
-        : { passed: false, detail: `no Curator Task titled "${a.title}"` };
     }
 
     case "doctor_repaired":

@@ -3,9 +3,11 @@ import { emptyMemorySections, type MemorySectionKey, type MemorySections } from 
 import type { Queryable, TransactionPort } from "@tulipfarm/storage";
 import {
   applyMemoryDelta,
+  assertMemoryBudgets,
   hashMemoryDocument,
   hashMemorySection,
   type MemoryDelta,
+  mergeConcurrentMemoryWrites,
   parseMemoryDocument,
   renderMemoryDocument,
   replaceMemorySection,
@@ -50,6 +52,27 @@ export interface MemoryReplacementRequest {
   readonly section: MemorySectionKey;
   readonly content: string;
   readonly expectedSectionHash: string;
+  readonly writer: Exclude<MemoryWriter, "tool">;
+  readonly writerRunId?: string;
+  readonly now: Date;
+}
+
+/**
+ * A whole-document overwrite, for a writer that regenerates every section in one pass.
+ *
+ * `expectedVersion` is the version of the document the writer was shown, and `baseDocument` is
+ * those exact bytes. Both are mandatory, and the pair is what makes this safe: a rewrite is decided
+ * across a model call, so an `update_memory` delta can land in the gap. On a version mismatch the
+ * store does not reject — it replays that delta on top of the rewrite
+ * (see {@link mergeConcurrentMemoryWrites}), because rejecting would mean this writer can never
+ * finish for a user who is actively chatting.
+ */
+export interface MemoryDocumentReplacementRequest {
+  readonly businessId: string;
+  readonly userId: string;
+  readonly sections: MemorySections;
+  readonly baseDocument: string;
+  readonly expectedVersion: number;
   readonly writer: Exclude<MemoryWriter, "tool">;
   readonly writerRunId?: string;
   readonly now: Date;
@@ -232,6 +255,43 @@ export class MemoryDocumentRepo {
     });
   }
 
+  /**
+   * The whole-document write. Regenerates every section at once, under a version check that
+   * repairs rather than refuses.
+   *
+   * Not reachable from a model: `writer` excludes `"tool"`, and the DB CHECK
+   * `user_memory_revisions_tool_never_replaces` rejects the pairing again at the row, because a
+   * caller-supplied `writer` is a claim rather than evidence.
+   */
+  async replaceDocument(request: MemoryDocumentReplacementRequest): Promise<MemoryWriteOutcome> {
+    return this.transactions.withTransaction(async (tx) => {
+      const current = await this.lock(tx, request.businessId, request.userId, request.now);
+      const sections =
+        current.version === request.expectedVersion
+          ? assertMemoryBudgets(request.sections)
+          : mergeConcurrentMemoryWrites(
+              parseMemoryDocument(request.baseDocument),
+              current.sections,
+              request.sections
+            );
+
+      const record = await this.commit(tx, {
+        businessId: request.businessId,
+        userId: request.userId,
+        current,
+        sections,
+        section: null,
+        operation: "replace",
+        writer: request.writer,
+        ...(request.writerRunId === undefined ? {} : { writerRunId: request.writerRunId }),
+        now: request.now,
+      });
+      return record === current
+        ? { outcome: "unchanged" as const, record }
+        : { outcome: "applied" as const, record };
+    });
+  }
+
   private async commit(
     tx: Queryable,
     input: {
@@ -239,16 +299,19 @@ export class MemoryDocumentRepo {
       userId: string;
       current: MemoryDocumentRecord;
       sections: MemorySections;
-      section: MemorySectionKey;
+      /** The section a delta touched, or `null` for a write that regenerated all of them. */
+      section: MemorySectionKey | null;
       operation: MemoryOperation;
       writer: MemoryWriter;
       writerRunId?: string;
       now: Date;
     }
   ): Promise<MemoryDocumentRecord> {
-    if (input.sections[input.section] === input.current.sections[input.section]) {
-      return input.current;
-    }
+    const unchanged =
+      input.section === null
+        ? renderMemoryDocument(input.sections) === input.current.document
+        : input.sections[input.section] === input.current.sections[input.section];
+    if (unchanged) return input.current;
 
     const revisionId = randomUUID();
     const version = input.current.version + 1;

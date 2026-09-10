@@ -29,9 +29,9 @@ interface AuthRouteOptions {
   requireAuthorization?: RequireAuthorization;
   /** The value form of the same decision, for owner-scoped surfaces. */
   authorizationCheck?: AuthorizationCheck;
-  /** Kicks the Curator sweep outside its five-minute cron after an invite is issued, so
+  /** Kicks the maintenance sweep outside its five-minute cron after an invite is issued, so
    * "Invite your team" clears within seconds instead of waiting for the next scheduled tick. */
-  triggerCuratorSweep?: () => Promise<void>;
+  triggerMaintenanceSweep?: () => Promise<void>;
   /** Lets the session route report `llmMode` — the settings tab a chat page should render around —
    * without a separate admin-gated round trip. */
   soulLoader?: SoulLoader;
@@ -99,7 +99,7 @@ export function registerAuthRoutes(
       requireAuth,
       options.requireAuthorization ?? makeRequireAuthorization(),
       preHandler,
-      options.triggerCuratorSweep
+      options.triggerMaintenanceSweep
     );
   }
   registerIdentityRoutes(

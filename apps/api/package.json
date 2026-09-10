@@ -27,8 +27,6 @@
     "@tulipfarm/authz": "workspace:*",
     "@tulipfarm/built-in-agents": "workspace:*",
     "@tulipfarm/constants": "workspace:*",
-    "@tulipfarm/curator": "workspace:*",
-    "@tulipfarm/curator-host": "workspace:*",
     "@tulipfarm/files": "workspace:*",
     "@tulipfarm/integrations": "workspace:*",
     "@tulipfarm/knowledge": "workspace:*",

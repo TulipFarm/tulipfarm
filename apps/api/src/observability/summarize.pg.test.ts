@@ -157,7 +157,7 @@ describe("ObservabilityService.summary", () => {
       costUsd: 0.01,
       status: "ok",
       subjectKind: "service",
-      subjectId: "curator-sweep",
+      subjectId: "maintenance-sweep",
     });
     await service.record({ type: "llm_call", ts: now, costUsd: 0.03, status: "ok" });
 
