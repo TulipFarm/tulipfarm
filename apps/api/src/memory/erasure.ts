@@ -13,8 +13,8 @@ export class MemoryErasureService {
    * Erases everything Memory holds for one user, in one transaction. A partial erase is worse
    * than none: the caller is told the fact is gone while the half that survived still supplies it.
    *
-   * Curator work, effects and Run Artifacts join this sweep when they exist; until then there is
-   * nothing of the user's in them to erase.
+   * Run Artifacts join this sweep when they exist; until then there is nothing of the user's in
+   * them to erase.
    */
   async eraseUser(businessId: string, userId: string): Promise<MemoryErasureCounts> {
     return this.transactions.withTransaction(async (tx) => {

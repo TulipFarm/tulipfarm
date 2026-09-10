@@ -22,7 +22,7 @@ reconciliation, turn execution, delivery classification, projections, and outbox
 | `src/executors.ts`, `src/delivery.ts` | Run source and delivery target registries. |
 | `src/turn/` | Integration turn executor. Chat Turn execution moved to [`packages/turn-executor`](../../packages/turn-executor/AGENTS.md). |
 | `src/routine/` | Routine executor plus Tool, Agent, approval, child-Routine, and emission ports. |
-| `src/curator/` | Curator Run executor (resolve pinned context, reason once, submit raw output) and the `curator-sweep` fan-out. |
+| `src/memory-curation/` | The hourly Curator: `run.ts` scans users with new Turns, calls the fast `memory_curator` agent and writes the rewritten Memory Document; `guards.ts` holds the pure output guards (budget classification, standing-instruction check). |
 | `src/subagent/` | Ad-hoc sub-agent Run executor: the chat executor with its Conversation swapped for an answer Artifact. |
 | `src/internal/` | HTTP ports back to `/api/v1/internal/*`; Run identity is re-derived by API. |
 | `src/tools/` | In-process Tool host for co-locatable families, and the routing dispatcher. |
@@ -43,13 +43,15 @@ reconciliation, turn execution, delivery classification, projections, and outbox
 - Never migrate here; API owns `schema_version`; raise `REQUIRED_SCHEMA_VERSION` when needed.
 - Boot fails closed with `process.exit(1)`; unsafe drain timeout exits non-zero.
 - Leases/CAS are the only claim; recover expired leases, never force statuses.
-- Registered Run sources are `chat`, `integration`, `routine`, `curator`, and `subagent`; unknown sources
+- Registered Run sources are `chat`, `integration`, `routine`, and `subagent`; unknown sources
   reconcile.
-- The Curator executor holds no judgement: it never chooses inputs, validates output, or applies
-  effects. The API re-derives all of that from the job's own manifest.
-- `curator-sweep` (*/5, bare pg-boss, scheduled by the API) is deterministic maintenance only: it
-  reconciles Tasks, then asks the API to mint one Run per user with a backlog. Its queue name is a
-  plain string shared with `apps/api/src/curator/sweep-schedule.ts` — rename both or neither.
+- `maintenance-sweep` (*/5, bare pg-boss, scheduled by the API) is deterministic maintenance only:
+  it reconciles Tasks and calls no model. Its queue name is a plain string shared with
+  `apps/api/src/schedule/maintenance-schedule.ts` — rename both or neither.
+- `memory-curation` (hourly, same arrangement, shared with `apps/api/src/memory/curation-schedule.ts`)
+  is the only model-calling maintenance. It calls a model only for users who gained a Turn since
+  their watermark, so an idle hour costs nothing. An over-budget rewrite is retried exactly once and
+  then abandoned — the previous Memory Document survives, never truncated.
 - `file-index` runs here rather than in the API because indexing a File means running a PDF parser
   over a stranger's bytes, which does not belong in the process terminating HTTP requests. Its
   queue name is a plain string shared with `apps/api/src/files/knowledge-bridge.ts` — rename both

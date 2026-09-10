@@ -156,7 +156,7 @@ function fakeSoulLoader(reload: () => Promise<void>): AppOptions["soulLoader"] {
 async function makeApp(
   dir: string,
   extra: {
-    triggerCuratorSweep?: () => Promise<void>;
+    triggerMaintenanceSweep?: () => Promise<void>;
     soulLoader?: AppOptions["soulLoader"];
   } = {}
 ): Promise<FastifyInstance> {
@@ -495,10 +495,10 @@ describe("setup routes", () => {
     expect(status.json()).toEqual({ needsSetup: false });
   });
 
-  it("complete kicks the Curator sweep so setup gaps show at minute 0, not minute 5", async () => {
+  it("complete kicks the maintenance sweep so setup gaps show at minute 0, not minute 5", async () => {
     await app.close();
-    const triggerCuratorSweep = vi.fn(async () => {});
-    app = await makeApp(dir, { triggerCuratorSweep });
+    const triggerMaintenanceSweep = vi.fn(async () => {});
+    app = await makeApp(dir, { triggerMaintenanceSweep });
     const cookies = await createAdmin();
     const res = await app.inject({
       method: "POST",
@@ -506,15 +506,15 @@ describe("setup routes", () => {
       headers: authHeaders(cookies),
     });
     expect(res.statusCode).toBe(204);
-    expect(triggerCuratorSweep).toHaveBeenCalledOnce();
+    expect(triggerMaintenanceSweep).toHaveBeenCalledOnce();
   });
 
   it("complete still succeeds when the reconcile kick throws", async () => {
     await app.close();
-    const triggerCuratorSweep = vi.fn(async () => {
+    const triggerMaintenanceSweep = vi.fn(async () => {
       throw new Error("boss down");
     });
-    app = await makeApp(dir, { triggerCuratorSweep });
+    app = await makeApp(dir, { triggerMaintenanceSweep });
     const cookies = await createAdmin();
     const res = await app.inject({
       method: "POST",
@@ -545,10 +545,10 @@ describe("setup routes", () => {
     const reload = vi.fn(async () => {
       order.push("reload");
     });
-    const triggerCuratorSweep = vi.fn(async () => {
+    const triggerMaintenanceSweep = vi.fn(async () => {
       order.push("kick");
     });
-    app = await makeApp(dir, { triggerCuratorSweep, soulLoader: fakeSoulLoader(reload) });
+    app = await makeApp(dir, { triggerMaintenanceSweep, soulLoader: fakeSoulLoader(reload) });
     const cookies = await createAdmin();
     const res = await app.inject({
       method: "POST",

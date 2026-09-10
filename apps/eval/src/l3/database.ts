@@ -24,8 +24,6 @@ import {
   AUTHORIZATION_STORAGE_STATEMENTS,
   BUDGET_STORAGE_STATEMENTS,
   BudgetStore,
-  CURATOR_STORAGE_STATEMENTS,
-  CURATOR_WORK_STORAGE_STATEMENTS,
   type Queryable,
   RUN_EVENT_STORAGE_STATEMENTS,
   RUN_STORAGE_STATEMENTS,
@@ -105,8 +103,6 @@ async function migratedSnapshot(): Promise<Blob | File> {
       ...RUN_EVENT_STORAGE_STATEMENTS,
       ...BUDGET_STORAGE_STATEMENTS,
       ...TASK_STORAGE_STATEMENTS,
-      ...CURATOR_STORAGE_STATEMENTS,
-      ...CURATOR_WORK_STORAGE_STATEMENTS,
       ...CONVERSATION_STATEMENTS,
       // A generated File's audience is decided by the Roles its authoring Agent holds, and those
       // are rows: `role_assignments` against a registered Principal. Seeding the answer instead

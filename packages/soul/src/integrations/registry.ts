@@ -37,7 +37,7 @@ function asString(value: unknown): string | undefined {
   return typeof value === "string" && value.length > 0 ? value : undefined;
 }
 
-/* An unreadable value must not silently open a flow the curator meant to keep closed. */
+/* An unreadable value must not silently open a flow the manifest's author meant to keep closed. */
 function asAvailability(value: unknown): RegistryAvailability {
   return value === "coming_soon" ? "coming_soon" : "available";
 }

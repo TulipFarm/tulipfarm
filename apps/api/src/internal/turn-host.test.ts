@@ -97,7 +97,7 @@ describe("InternalTurnHost", () => {
     });
   });
 
-  it.each([["chat"], ["curator"]])(
+  it.each([["chat"]])(
     "refuses Tool dispatch for a %s Run whose Turn is missing",
     async (source) => {
       // Only a Routine or sub-agent Run is legitimately Conversation-less. Letting a

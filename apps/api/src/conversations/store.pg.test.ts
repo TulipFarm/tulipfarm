@@ -348,31 +348,14 @@ describe("PgConversationStore", () => {
       cursor: 4,
       createdAt: CREATED_AT,
     };
-    const work = {
-      businessId: DEPLOYMENT_BUSINESS_ID,
-      userId: USER_ID,
-      reason: "turn_completed" as const,
-      sourceKey: TURN_ID,
-    };
-
-    async function dueWork(): Promise<{ source_key: string; status: string }[]> {
-      const rows = await database.query<{ source_key: string; status: string }>(
-        "SELECT source_key, status FROM curator_user_work ORDER BY source_key"
-      );
-      return rows.rows;
-    }
 
     beforeEach(async () => {
       await store.saveTurn(turn({ status: "running" }));
     });
 
-    it("records the completion, the Turn and the Curator work in one call", async () => {
+    it("records the completion and the Turn in one call", async () => {
       await expect(
-        store.completeTurn({
-          completion,
-          turn: turn({ status: "succeeded", cursor: 4 }),
-          work,
-        })
+        store.completeTurn({ completion, turn: turn({ status: "succeeded", cursor: 4 }) })
       ).resolves.toEqual({ completionInserted: true });
 
       await expect(store.findCompletion(DEPLOYMENT_BUSINESS_ID, TURN_ID, 1)).resolves.toMatchObject(
@@ -382,40 +365,19 @@ describe("PgConversationStore", () => {
         status: "succeeded",
         cursor: 4,
       });
-      await expect(dueWork()).resolves.toEqual([{ source_key: TURN_ID, status: "due" }]);
     });
 
-    // A redelivered completion must not re-raise work the Curator has already claimed or finished.
-    it("raises work only for the writer that wins the completion insert", async () => {
-      await store.completeTurn({ completion, work });
-      await database.query("UPDATE curator_user_work SET status = 'done'");
-
-      await expect(store.completeTurn({ completion, work })).resolves.toEqual({
+    it("reports a redelivered completion as not inserted", async () => {
+      await store.completeTurn({ completion });
+      await expect(store.completeTurn({ completion })).resolves.toEqual({
         completionInserted: false,
       });
-
-      await expect(dueWork()).resolves.toEqual([{ source_key: TURN_ID, status: "done" }]);
     });
 
-    it("leaves no completion behind when the work insert fails", async () => {
-      await expect(
-        store.completeTurn({
-          completion,
-          work: { ...work, reason: "not_a_reason" as (typeof work)["reason"] },
-        })
-      ).rejects.toThrow();
-
-      await expect(
-        store.findCompletion(DEPLOYMENT_BUSINESS_ID, TURN_ID, 1)
-      ).resolves.toBeUndefined();
-      await expect(dueWork()).resolves.toEqual([]);
-    });
-
-    it("completes a Turn that earns no work", async () => {
+    it("completes a Turn", async () => {
       await expect(store.completeTurn({ completion })).resolves.toEqual({
         completionInserted: true,
       });
-      await expect(dueWork()).resolves.toEqual([]);
     });
   });
 });

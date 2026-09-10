@@ -272,7 +272,6 @@ async function runL3Trial(
         soulCommits: turn.soulCommits,
         publishedArtifacts: turn.publishedArtifacts,
         generatedFiles: turn.generatedFiles,
-        curatorTasks: turn.curatorTasks,
         doctorEvents: turn.doctorEvents,
         toolDenials: turn.toolDenials,
       },

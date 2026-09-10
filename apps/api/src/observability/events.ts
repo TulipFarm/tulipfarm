@@ -1,7 +1,6 @@
 import type { EventEmitter } from "node:events";
 import { type ModelPrice, priceCall } from "@tulipfarm/llm";
 import {
-  type CuratorObservedPayload,
   DOMAIN_EVENTS,
   type LlmStepFinishedPayload,
   type SurfaceRenderedPayload,
@@ -98,9 +97,6 @@ export function subscribeObservability(
   );
   emitter.on(DOMAIN_EVENTS.SURFACE_DELIVERED, (p: SurfaceRenderedPayload): void =>
     guard(() => metrics?.recordSurface?.(p))
-  );
-  emitter.on(DOMAIN_EVENTS.CURATOR_OBSERVED, (p: CuratorObservedPayload): void =>
-    guard(() => metrics?.recordCurator?.(p))
   );
 
   function onLlmStep(p: LlmStepFinishedPayload): void {

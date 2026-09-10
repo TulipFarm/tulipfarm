@@ -8,7 +8,6 @@
     "@tulipfarm/agent-runtime": "workspace:*",
     "@tulipfarm/built-in-agents": "workspace:*",
     "@tulipfarm/constants": "workspace:*",
-    "@tulipfarm/curator": "workspace:*",
     "@tulipfarm/files": "workspace:*",
     "@tulipfarm/integrations": "workspace:*",
     "@tulipfarm/knowledge": "workspace:*",

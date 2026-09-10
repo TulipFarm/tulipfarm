@@ -28,9 +28,6 @@ import {
   CHANNEL_SURFACE_STORAGE_STATEMENTS,
   CHILD_STORAGE_STATEMENTS,
   CONCURRENCY_STORAGE_STATEMENTS,
-  CURATOR_ADMISSION_STATEMENTS,
-  CURATOR_STORAGE_STATEMENTS,
-  CURATOR_WORK_STORAGE_STATEMENTS,
   dropInvalidEmbeddingIndexes,
   EMBEDDING_COLUMNS,
   EVENT_STORAGE_STATEMENTS,
@@ -38,6 +35,7 @@ import {
   INTEGRATION_STORAGE_STATEMENTS,
   KILL_SWITCH_STORAGE_STATEMENTS,
   LOOP_CHECKPOINT_STORAGE_STATEMENTS,
+  MEMORY_CURATION_STORAGE_STATEMENTS,
   PROVIDER_FILE_UPLOAD_STORAGE_STATEMENTS,
   PROVIDER_OBJECT_OWNERSHIP_STORAGE_STATEMENTS,
   PUBLIC_ORIGIN_STORAGE_STATEMENTS,
@@ -2434,24 +2432,21 @@ export const PG_MIGRATIONS: PgMigration[] = [
   },
   {
     version: 62,
-    description: "memory document: one Markdown page per user, plus durable Curator work",
-    up: applyStatements(MEMORY_DOCUMENT_STORAGE_STATEMENTS, CURATOR_WORK_STORAGE_STATEMENTS),
+    description: "memory document: one Markdown page per user",
+    up: applyStatements(MEMORY_DOCUMENT_STORAGE_STATEMENTS),
   },
   {
+    // Retired. These built the Proposal pipeline's eight tables, which migration 107 drops. A
+    // version may never be reused or renumbered — an existing database records what it has run by
+    // number — so the entries stay and do nothing rather than being deleted.
     version: 63,
-    description: "curator jobs, effect ledger, candidates, task metadata sidecar, admission ledger",
-    up: applyStatements(CURATOR_STORAGE_STATEMENTS, CURATOR_ADMISSION_STATEMENTS),
+    description: "retired: curator proposal pipeline tables (dropped by 107)",
+    up: async () => {},
   },
   {
     version: 64,
-    // The index is declared in CURATOR_STORAGE_STATEMENTS so one file owns the table's shape, but a
-    // database that already ran 63 never revisits it. `IF NOT EXISTS` makes replaying it here a
-    // no-op on a fresh install and the only way an upgraded one gets it.
-    description: "curator effect index for the shadow review window read",
-    up: applyStatements([
-      `CREATE INDEX IF NOT EXISTS curator_effect_review_idx
-         ON curator_effect (business_id, created_at DESC)`,
-    ]),
+    description: "retired: curator effect review index (dropped by 107)",
+    up: async () => {},
   },
   {
     version: 65,
@@ -3210,5 +3205,23 @@ export const PG_MIGRATIONS: PgMigration[] = [
       );
       if (present.rows[0]?.present) await applyStatements(EFFECT_OUTPUT_STORAGE_STATEMENTS)(q);
     },
+  },
+  {
+    version: 107,
+    // The Proposal pipeline is gone, and with it every table that only it wrote. The drop is
+    // irreversible: those rows were shadow-only and never reached a user, but an instance that
+    // upgrades cannot get them back.
+    description: "hourly memory curation watermark; drop the curator proposal pipeline",
+    up: applyStatements([
+      ...MEMORY_CURATION_STORAGE_STATEMENTS,
+      "DROP TABLE IF EXISTS curator_admission_reservation",
+      "DROP TABLE IF EXISTS curator_admission",
+      "DROP TABLE IF EXISTS curator_rejection",
+      "DROP TABLE IF EXISTS curator_effect",
+      "DROP TABLE IF EXISTS curator_candidate",
+      "DROP TABLE IF EXISTS curator_task_metadata",
+      "DROP TABLE IF EXISTS curator_job",
+      "DROP TABLE IF EXISTS curator_user_work",
+    ]),
   },
 ];

@@ -158,12 +158,6 @@ importers:
       '@tulipfarm/constants':
         specifier: workspace:*
         version: link:../../packages/constants
-      '@tulipfarm/curator':
-        specifier: workspace:*
-        version: link:../../packages/curator
-      '@tulipfarm/curator-host':
-        specifier: workspace:*
-        version: link:../../packages/curator-host
       '@tulipfarm/files':
         specifier: workspace:*
         version: link:../../packages/files
@@ -370,12 +364,6 @@ importers:
       '@tulipfarm/agent-runtime':
         specifier: workspace:*
         version: link:../../packages/agent-runtime
-      '@tulipfarm/curator':
-        specifier: workspace:*
-        version: link:../../packages/curator
-      '@tulipfarm/curator-host':
-        specifier: workspace:*
-        version: link:../../packages/curator-host
       '@tulipfarm/files':
         specifier: workspace:*
         version: link:../../packages/files
@@ -694,9 +682,6 @@ importers:
       '@tulipfarm/constants':
         specifier: workspace:*
         version: link:../../packages/constants
-      '@tulipfarm/curator':
-        specifier: workspace:*
-        version: link:../../packages/curator
       '@tulipfarm/files':
         specifier: workspace:*
         version: link:../../packages/files
@@ -909,62 +894,6 @@ importers:
       typescript:
         specifier: ^7.0.2
         version: 7.0.2
-
-  packages/curator:
-    dependencies:
-      '@tulipfarm/schema':
-        specifier: workspace:*
-        version: link:../schema
-    devDependencies:
-      '@tulipfarm/tsconfig':
-        specifier: workspace:*
-        version: link:../tsconfig
-      '@types/node':
-        specifier: ^26.2.0
-        version: 26.2.0
-      typescript:
-        specifier: ^7.0.2
-        version: 7.0.2
-      vitest:
-        specifier: ^5.0.0
-        version: 5.0.0(@opentelemetry/api@1.9.1)(@types/node@26.2.0)(@vitest/coverage-v8@5.0.0)(jsdom@30.0.1(@noble/hashes@2.3.0))(vite@8.2.2(@types/node@26.2.0)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.12)(yaml@2.9.0))
-
-  packages/curator-host:
-    dependencies:
-      '@tulipfarm/curator':
-        specifier: workspace:*
-        version: link:../curator
-      '@tulipfarm/memory':
-        specifier: workspace:*
-        version: link:../memory
-      '@tulipfarm/run-kernel':
-        specifier: workspace:*
-        version: link:../run-kernel
-      '@tulipfarm/schema':
-        specifier: workspace:*
-        version: link:../schema
-      '@tulipfarm/storage':
-        specifier: workspace:*
-        version: link:../storage
-    devDependencies:
-      '@electric-sql/pglite':
-        specifier: ^0.5.7
-        version: 0.5.7
-      '@tulipfarm/testkit':
-        specifier: workspace:*
-        version: link:../testkit
-      '@tulipfarm/tsconfig':
-        specifier: workspace:*
-        version: link:../tsconfig
-      '@types/node':
-        specifier: ^26.2.0
-        version: 26.2.0
-      typescript:
-        specifier: ^7.0.2
-        version: 7.0.2
-      vitest:
-        specifier: ^5.0.0
-        version: 5.0.0(@opentelemetry/api@1.9.1)(@types/node@26.2.0)(@vitest/coverage-v8@5.0.0)(jsdom@30.0.1(@noble/hashes@2.3.0))(vite@8.2.2(@types/node@26.2.0)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.12)(yaml@2.9.0))
 
   packages/deploy-render:
     dependencies:

@@ -14,7 +14,7 @@ export const INVOCATION_SOURCES = [
 
 export type InvocationSource = (typeof INVOCATION_SOURCES)[number];
 
-export const RUN_SOURCES = ["chat", "integration", "routine", "curator", "subagent"] as const;
+export const RUN_SOURCES = ["chat", "integration", "routine", "subagent"] as const;
 export type RunSource = (typeof RUN_SOURCES)[number];
 
 /**

@@ -23,7 +23,6 @@ PostgreSQL persistence composition, auth, Soul Git writes, and Worker callback p
 | `src/runs/` | Persisted Run event SSE, cursor resume, cancellation. |
 | `src/runtime/` | Durable invocation callers, Routine invocation resolution, Soul write gateway composition. |
 | `src/internal/` | Service-only Worker callbacks for Context, Tools, delivery, completion. `subagent-context.ts` assembles the Conversation-less sub-agent Context; `turn-host.ts` splits `RunAuthority` (no Turn) from `TurnAuthority` (has one). `route-family.ts` registers the whole service-principal plane — put new internal families there, not in `app.ts`. |
-| `src/curator/` | The Curator's internal routes, the admin-only shadow review route, composition, and the `curator-sweep` schedule, and nothing else. Reasoning is `@tulipfarm/curator`, minting/pinning/revalidation is `@tulipfarm/curator-host`, tables are `packages/storage`, the model call is the Worker's. |
 | `src/tools/` | ToolRegistry, batch execution, truncation, declarative egress sync. |
 | `src/platform/` | Platform Tools that need the API's own services. `delegate-tool.ts` hands work to a Soul Agent (which gets a Conversation); `spawn-tool.ts` + `subagent-{run,answers}.ts` spawn an ad-hoc helper the caller defines inline, which gets none. Both park the calling Turn on a child-Run wait. |
 | `src/resources/`, `src/soul/` | Resource CRUD and Soul HTTP routes/Tools; domain logic lives in `@tulipfarm/soul`. |
@@ -98,17 +97,9 @@ PostgreSQL persistence composition, auth, Soul Git writes, and Worker callback p
   Guardrail that guards nothing until the next restart.
 - A Run-minting request must go through `DurableInvocationGateway.start()` with a real request
   Artifact. Never pass a `payloadRef` that names nothing.
-- The Curator's model call belongs to the Worker, never this process. `POST /internal/curator/*/effects`
-  accepts raw model output plus the `contextDigest` it was produced from, then reloads the pinned
-  inputs and re-derives every decision. A Worker-authored effect is not trusted input.
-- `curator:<kind>:<subject-kind>:<subject-id>` is a reserved Task dedupe namespace. `tasks/tools.ts`
-  rejects it from Agents so a Proposal's identity cannot be forged or resurrected from a Tool call.
-- `GET /curator/shadow` is admin-gated and user-facing, so it registers in `app.ts` — never in the
-  internal route family, which is service-only by contract. Disclosure is `projectShadowEffect`'s
-  decision, not the route's: a memory patch or Proposal goes out in full only to its own subject.
-- The Curator reports through `DOMAIN_EVENTS.CURATOR_OBSERVED` and never holds a `MetricsSink`.
-  `observability/events.ts` maps it to metrics. Emit no subject id: an operator dashboard must not
-  become a way to read who learned what. Reporting can never fail the work it describes.
+- This process schedules the Curator but never runs it. `memory/curation-schedule.ts` owns the
+  `memory-curation` queue name and its `0 * * * *` cron; the model call and the Memory write are the
+  Worker's, because only the Worker may import `@tulipfarm/llm`.
 - Chat turns are persisted only through `ChatTurnSubmitter`; no turn executes in this process.
   Stopping a turn cancels its Run.
 - Routine invocations resolve only through `runtime/invocation-definitions.ts`; never fall back to

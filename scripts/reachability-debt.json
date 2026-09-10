@@ -244,8 +244,6 @@
     "packages/secrets/src/broker.ts#SecretBroker.revokeSecret",
     "packages/soul/src/publication.ts#SoulPublicationCoordinator.rebuildProjection",
     "packages/soul/src/writer.ts#SoulWriter.readCompanionWithBase",
-    "packages/storage/src/curator/repo.ts#CuratorRepo.listEffects",
-    "packages/storage/src/curator/repo.ts#CuratorRepo.listRejections",
     "packages/storage/src/integrations/channel-run-delivery-store.ts#ChannelRunDeliveryStore.setSlackMessageTs",
     "packages/storage/src/runs/events.ts#RunEventStore.latestSequence",
     "packages/storage/src/runs/run-store.ts#RunStore.appendAttempt",

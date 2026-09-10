@@ -160,8 +160,6 @@ import { PgConversationRepo } from "./chat/conversations";
 import { PgMessageRepo } from "./chat/messages";
 import { allowedToolNamesFor, toolAgentFor } from "./chat/turn-helpers";
 import { PgConversationStore } from "./conversations/store.pg";
-import { buildCurator } from "./curator/compose";
-import { CURATOR_SWEEP_QUEUE, registerCuratorSweepSchedule } from "./curator/sweep-schedule";
 import {
   ambientTransactionPort,
   connectPg,
@@ -229,6 +227,7 @@ import { retireSlackKnowledgeSyncSchedule } from "./knowledge-sources/slack-sync
 import { PgKnowledgeSourceStore } from "./knowledge-sources/source-store";
 import { registerLlmReload } from "./llm-reload";
 import { buildMemoryServices } from "./memory/composition";
+import { MEMORY_CURATION_QUEUE, registerMemoryCurationSchedule } from "./memory/curation-schedule";
 import { parseObservabilityConfig } from "./observability/config";
 import { createEmbeddingUsageSink } from "./observability/embedding-usage";
 import { subscribeObservability } from "./observability/events";
@@ -277,6 +276,10 @@ import {
 } from "./runtime/soul-writer";
 import { auditPersistedSchedules } from "./schedule/audit";
 import { ScheduleDispatcher } from "./schedule/dispatcher";
+import {
+  MAINTENANCE_SWEEP_QUEUE,
+  registerMaintenanceSweepSchedule,
+} from "./schedule/maintenance-schedule";
 import { registerScheduleDispatch, SCHEDULE_DISPATCH_QUEUE } from "./schedule/register";
 import { RoutineScheduleStateStore } from "./schedule/state-store";
 import { supersedeRoutineRuns } from "./schedule/supersede";
@@ -1440,8 +1443,8 @@ async function boot() {
       domainEventEmitter,
       llmService,
       skillMarketplace,
-      triggerCuratorSweep: async () => {
-        await boss.send(CURATOR_SWEEP_QUEUE, {});
+      triggerMaintenanceSweep: async () => {
+        await boss.send(MAINTENANCE_SWEEP_QUEUE, {});
       },
       guardrailsService,
       conversationRepo,
@@ -1457,15 +1460,6 @@ async function boot() {
       taskStore: taskRepo,
       fileService,
       fileKnowledge: fileKnowledgeBridge,
-      ...buildCurator({
-        pool,
-        documents: memoryDocuments,
-        tasks: taskRepo,
-        soul: soulLoader,
-        invocations,
-        llm: llmService,
-        events: domainEventEmitter,
-      }),
       knowledgeService,
       knowledgeRetrieval,
       knowledgePageGate,
@@ -1778,7 +1772,8 @@ async function boot() {
       },
     });
     await registerScheduleDispatch(boss, scheduleDispatcher, { log: app.log });
-    await registerCuratorSweepSchedule(boss);
+    await registerMaintenanceSweepSchedule(boss);
+    await registerMemoryCurationSchedule(boss);
     await registerSoulDoctorSchedule(boss, soulDoctor, { log: app.log });
     await registerObsPruneSchedule(boss, obsConfig.retentionDays * 24 * 60 * 60 * 1000);
     // Every Soul commit publishes a bundle, so this table grows for the life of the deployment.
@@ -1880,7 +1875,8 @@ async function boot() {
       boss,
       [
         SCHEDULE_DISPATCH_QUEUE,
-        CURATOR_SWEEP_QUEUE,
+        MAINTENANCE_SWEEP_QUEUE,
+        MEMORY_CURATION_QUEUE,
         SOUL_DOCTOR_QUEUE,
         OBS_PRUNE_QUEUE,
         SOUL_BUNDLE_PRUNE_QUEUE,

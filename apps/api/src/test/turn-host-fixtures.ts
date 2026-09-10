@@ -1,5 +1,4 @@
 import { DEPLOYMENT_BUSINESS_ID } from "@tulipfarm/constants";
-import type { CuratorWorkRef } from "@tulipfarm/storage";
 import type {
   CompleteTurnInput,
   CompleteTurnResult,
@@ -40,7 +39,6 @@ export class FakeConversationStore implements ConversationStore {
   readonly messages: PersistedMessage[] = [];
   readonly turns: PersistedTurn[] = [];
   readonly completions: TurnCompletion[] = [];
-  readonly work: CuratorWorkRef[] = [];
 
   async findTurnByIdempotencyKey(_businessId: string, key: string) {
     return this.turns.find((candidate) => candidate.idempotencyKey === key);
@@ -89,7 +87,6 @@ export class FakeConversationStore implements ConversationStore {
     const completionInserted = recorded === undefined;
     if (completionInserted) this.completions.push(input.completion);
     if (input.turn) await this.saveTurn(input.turn);
-    if (input.work && completionInserted) this.work.push(input.work);
     return { completionInserted };
   }
 }

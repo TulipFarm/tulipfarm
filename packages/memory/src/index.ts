@@ -1,5 +1,6 @@
 export {
   applyMemoryDelta,
+  assertMemoryBudgets,
   canonicalMemoryLine,
   getMemoryTool,
   hashMemoryDocument,
@@ -15,6 +16,7 @@ export {
   type MemoryDeltaRequest,
   type MemoryDeltaResult,
   type MemoryDocumentRecord,
+  type MemoryDocumentReplacementRequest,
   MemoryDocumentRepo,
   type MemoryDocumentToolContext,
   type MemoryOperation,
@@ -23,6 +25,7 @@ export {
   MemoryWriteRejected,
   type MemoryWriteRejection,
   type MemoryWriter,
+  mergeConcurrentMemoryWrites,
   parseMemoryDocument,
   parseMemoryEntries,
   renderMemoryDocument,

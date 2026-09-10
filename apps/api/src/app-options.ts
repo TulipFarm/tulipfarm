@@ -46,8 +46,6 @@ import type { ConversationRepo } from "./chat/conversations";
 import type { MessageRepo } from "./chat/messages";
 import type { ChatRunCanceller } from "./chat/routes";
 import type { ConversationStore } from "./conversations/service";
-import type { CuratorReviewDeps } from "./curator/review-routes";
-import type { CuratorRouteDeps } from "./curator/routes";
 import type { FeedbackRepo } from "./feedback/repo";
 import type { FileKnowledgeBridge } from "./files/knowledge-bridge";
 import type { FormsRoutesDeps } from "./forms/routes";
@@ -177,11 +175,11 @@ export interface AppOptions {
   domainEventEmitter?: EventEmitter;
   llmService?: LlmService;
   /**
-   * Kicks the pg-boss `curator-sweep` queue outside its five-minute cron, so a Task-clearing
+   * Kicks the pg-boss `maintenance-sweep` queue outside its five-minute cron, so a Task-clearing
    * change (e.g. auto-connecting a subscription LLM provider) reflects in the Companion within
    * seconds instead of up to five minutes. Absent in tests/deployments with no pg-boss wired.
    */
-  triggerCuratorSweep?: () => Promise<void>;
+  triggerMaintenanceSweep?: () => Promise<void>;
   conversationRepo?: ConversationRepo;
   messageRepo?: MessageRepo;
   feedbackRepo?: FeedbackRepo;
@@ -271,10 +269,6 @@ export interface AppOptions {
    * principals only; PR 4 moves the implementations into the Worker and this surface goes away.
    */
   internalTurns?: InternalTurnRouteDeps;
-  curator?: CuratorRouteDeps;
-  /** The admin-facing shadow review surface. Separate from `curator` because that family is
-   *  service-only, and one field for both audiences is how a gate gets applied to the wrong one. */
-  curatorReview?: CuratorReviewDeps;
   /**
    * Datastore handle backing `/readyz`. Absent (tests, partial assemblies) means readiness reports
    * ok on process liveness alone.

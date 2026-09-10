@@ -39,7 +39,7 @@ export class RunStoreStateTransitions implements StateTransitionPort {
     /**
      * Reports a State's durable move to `failed`. Optional so existing tests and callers need not
      * wire one, but production always does — this is the one place every Run source (chat,
-     * Routine, subagent, curator) settles a State as failed, so it is the single chokepoint that
+     * Routine, subagent) settles a State as failed, so it is the single chokepoint that
      * can report it without each caller remembering to.
      */
     private readonly log?: { error(message: string, error?: unknown): void }

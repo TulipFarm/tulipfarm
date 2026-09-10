@@ -21,10 +21,8 @@ import {
   type ModelUsage,
   type ToolDispatchPort,
 } from "@tulipfarm/agent-runtime";
-import { soulDigest, soulSubjects, soulSummary } from "@tulipfarm/curator";
-import { CuratorHost, CuratorTaskDelivery } from "@tulipfarm/curator-host";
 import { INVOKE_STATE_KEY } from "@tulipfarm/run-kernel";
-import { CuratorRepo, type PersistedRun, TaskRepo } from "@tulipfarm/storage";
+import type { PersistedRun } from "@tulipfarm/storage";
 import {
   createChatExecutor,
   RunStoreStateTransitions,
@@ -56,7 +54,6 @@ import { evalTurnHost } from "./turn-host.ts";
 const BUSINESS_ID = "eval";
 /** The person every L3 Turn runs for, and so the one reader a generated File always has. */
 const PARTICIPANT_ID = "eval";
-const CURATOR_TURN_ID = "eval-curator-turn";
 
 /** One dispatched Tool call, as a Case's Tool Expectations read it. */
 export interface ToolCall {
@@ -98,8 +95,6 @@ export interface PersistedTurn {
   readonly publishedArtifacts: readonly string[];
   /** Files the Turn generated, each with the audience `FileService` gave it. */
   readonly generatedFiles: readonly GeneratedFile[];
-  /** Tasks the Curator delivered after this Turn completed. */
-  readonly curatorTasks?: readonly { readonly title: string }[];
   /** What the Soul Doctor's sweep did to the Soul this Turn left behind. */
   readonly doctorEvents?: readonly DoctorEvent[];
   /** Real Tool dispatches this Turn's writer denied, with the exact reason it gave back. */
@@ -191,7 +186,6 @@ async function readBack(
     soulCommits: readonly SoulCommit[];
     publishedArtifacts: readonly string[];
     generatedFiles: readonly GeneratedFile[];
-    curatorTasks: readonly { readonly title: string }[];
     doctorEvents: readonly DoctorEvent[];
     toolDenials: readonly { readonly name: string; readonly reason: string }[];
     systemPrompt: string;
@@ -228,7 +222,6 @@ async function readBack(
     soulCommits: observed.soulCommits,
     publishedArtifacts: observed.publishedArtifacts,
     generatedFiles: observed.generatedFiles,
-    curatorTasks: observed.curatorTasks,
     doctorEvents: observed.doctorEvents,
     toolDenials: observed.toolDenials,
     systemPrompt: observed.systemPrompt,
@@ -359,19 +352,11 @@ async function runOneTurn(
         ? []
         : await runDoctor({ soul, writes: soulWrites, fixture: options.evalCase.doctor });
 
-    const curatorTasks = await deliverCurator({
-      database,
-      soul,
-      evalCase: options.evalCase,
-      input: shared.submit,
-    });
-
     return await readBack(database, runId, turnId, {
       toolCalls: [...scripted.calls],
       soulCommits: soulWrites.commits.slice(committedBefore),
       publishedArtifacts: await soulWrites.published(),
       generatedFiles: files.generated.slice(generatedBefore),
-      curatorTasks,
       doctorEvents,
       toolDenials: soulWrites.denials
         .slice(deniedBefore)
@@ -380,50 +365,6 @@ async function runOneTurn(
       spend,
     });
   }
-}
-
-async function deliverCurator(input: {
-  readonly database: EvalDatabase;
-  readonly soul: EvalSoul;
-  readonly evalCase: EvalCase;
-  readonly input: readonly ModelMessage[];
-}): Promise<readonly { readonly title: string }[]> {
-  if (input.evalCase.curator === undefined) return [];
-
-  const repo = new CuratorRepo(input.database.queryable);
-  const tasks = new TaskRepo(input.database.transactions);
-  const job = await repo.insertJob(input.database.queryable, {
-    businessId: BUSINESS_ID,
-    scope: "user",
-    userId: PARTICIPANT_ID,
-    state: "running",
-    executionMode: "shadow",
-    manifestDigest: CURATOR_TURN_ID,
-    manifest: { work: [], turnIds: [CURATOR_TURN_ID], candidateIds: [] },
-  });
-  if (!job) throw new Error("Eval Curator job did not mint");
-
-  const turns = input.input
-    .filter((message) => message.role === "user")
-    .map((message) => ({ turnId: CURATOR_TURN_ID, userText: contentText(message.content) }));
-  const host = new CuratorHost({
-    repo,
-    documents: { read: async () => null } as never,
-    turns: { read: async () => turns },
-    subjects: () => soulSubjects(input.soul.loader),
-    openProposalKeys: async (businessId, userId) =>
-      (await tasks.listForPrincipal(businessId, userId, [], true)).map((task) => task.dedupeKey),
-    soulDigest: () => soulDigest(input.soul.loader),
-    soulSummary: () => soulSummary(input.soul.loader),
-  });
-  const context = await host.context(BUSINESS_ID, job.id);
-  const contextDigest = context.contextDigest;
-  if (typeof contextDigest !== "string") throw new Error("Eval Curator context has no digest");
-  await host.submit(BUSINESS_ID, job.id, contextDigest, input.evalCase.curator.output);
-  await new CuratorTaskDelivery({ repo, tasks, now: () => new Date() }).run(BUSINESS_ID);
-  return (await tasks.listForPrincipal(BUSINESS_ID, PARTICIPANT_ID, [], false)).map((task) => ({
-    title: task.title,
-  }));
 }
 
 /**

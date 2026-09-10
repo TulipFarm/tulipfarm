@@ -1,7 +1,5 @@
-import { DEPLOYMENT_BUSINESS_ID } from "@tulipfarm/constants";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import type { AppOptions } from "../app";
-import { registerCuratorRoutes } from "../curator/routes";
 import { registerChannelInternalRoutes } from "./channel-routes";
 import { registerInternalTurnRoutes } from "./routes";
 import { registerSlackEventRoutes } from "./slack-event-routes";
@@ -22,9 +20,6 @@ export function registerInternalRouteFamily(
 ): void {
   if (opts.internalTurns) {
     registerInternalTurnRoutes(app, opts.internalTurns, requireAuth);
-  }
-  if (opts.curator) {
-    registerCuratorRoutes(app, opts.curator, DEPLOYMENT_BUSINESS_ID, requireAuth);
   }
   if (opts.channels) {
     const channelDeps = opts.channels(app.log);

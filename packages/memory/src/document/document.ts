@@ -101,13 +101,16 @@ function capSection(section: MemorySectionKey, entries: readonly string[]): read
   return entries.slice(0, MEMORY_RECENT_DECISIONS_LIMIT);
 }
 
-function assertBudgets(sections: MemorySections, section: MemorySectionKey): MemorySections {
+function assertSectionBudget(sections: MemorySections, section: MemorySectionKey): void {
   if (sections[section].length > MEMORY_SECTION_CHAR_BUDGET) {
     throw new MemoryWriteRejected(
       "section_over_budget",
-      `section would be ${sections[section].length} chars, over the ${MEMORY_SECTION_CHAR_BUDGET} budget`
+      `${MEMORY_SECTION_HEADINGS[section]} would be ${sections[section].length} chars, over the ${MEMORY_SECTION_CHAR_BUDGET} budget`
     );
   }
+}
+
+function assertDocumentBudget(sections: MemorySections): MemorySections {
   const total = MEMORY_SECTION_KEYS.reduce((sum, key) => sum + sections[key].length, 0);
   if (total > MEMORY_DOCUMENT_CHAR_BUDGET) {
     throw new MemoryWriteRejected(
@@ -116,6 +119,24 @@ function assertBudgets(sections: MemorySections, section: MemorySectionKey): Mem
     );
   }
   return sections;
+}
+
+function assertBudgets(sections: MemorySections, section: MemorySectionKey): MemorySections {
+  assertSectionBudget(sections, section);
+  return assertDocumentBudget(sections);
+}
+
+/**
+ * The budget check for a writer that supplies every section at once.
+ *
+ * {@link assertBudgets} checks only the one section a delta named, which is all a delta can have
+ * made worse. A whole-document write has no such narrowing — every section is the writer's, so
+ * every section has to be measured, or an over-budget section reaches storage as long as the
+ * document total happens to fit.
+ */
+export function assertMemoryBudgets(sections: MemorySections): MemorySections {
+  for (const key of MEMORY_SECTION_KEYS) assertSectionBudget(sections, key);
+  return assertDocumentBudget(sections);
 }
 
 function assertKnownSection(section: MemorySectionKey): void {
@@ -223,6 +244,54 @@ export function parseMemoryDocument(document: string): MemorySections {
   const sections = emptyMemorySections();
   for (const key of MEMORY_SECTION_KEYS) sections[key] = renderMemoryEntries(lines[key]);
   return sections;
+}
+
+/**
+ * Replays a concurrent Memory Delta on top of a whole-document rewrite.
+ *
+ * A whole-document writer reads the document, spends time deciding, and writes. An `update_memory`
+ * call landing in that gap would be destroyed by the write, because the writer's text was decided
+ * before that fact existed. This recovers it.
+ *
+ * It is exact rather than a heuristic, and the DB CHECK `user_memory_revisions_tool_never_replaces`
+ * is why: a Tool write is *always* a delta, so the difference between the document the rewriter
+ * read (`base`) and the one now stored (`current`) is precisely a set of added and removed entries,
+ * and entries are what a section is made of.
+ *
+ * The bias when the two disagree is deliberate. An entry the concurrent writer added is restored
+ * even if `proposed` chose to drop it: keeping a fact one cycle too long is recoverable, losing one
+ * the user was told was remembered is not.
+ */
+export function mergeConcurrentMemoryWrites(
+  base: MemorySections,
+  current: MemorySections,
+  proposed: MemorySections
+): MemorySections {
+  const merged = emptyMemorySections();
+  for (const key of MEMORY_SECTION_KEYS) {
+    const baseEntries = parseMemoryEntries(base[key]);
+    const currentEntries = parseMemoryEntries(current[key]);
+    const beforeSet = new Set(baseEntries);
+    const afterSet = new Set(currentEntries);
+
+    const concurrentlyAdded = currentEntries.filter((entry) => !beforeSet.has(entry));
+    const concurrentlyRemoved = new Set(baseEntries.filter((entry) => !afterSet.has(entry)));
+
+    const kept = parseMemoryEntries(proposed[key]).filter(
+      (entry) => !concurrentlyRemoved.has(entry)
+    );
+    const present = new Set(kept);
+    const restored = concurrentlyAdded.filter((entry) => {
+      if (present.has(entry)) return false;
+      present.add(entry);
+      return true;
+    });
+
+    // Same placement rule as a delta: newest first in `## Recent decisions`, appended elsewhere.
+    const entries = key === "recent_decisions" ? [...restored, ...kept] : [...kept, ...restored];
+    merged[key] = renderMemoryEntries(capSection(key, assertWritableEntries(entries)));
+  }
+  return assertMemoryBudgets(merged);
 }
 
 export function hashMemorySection(content: string): string {

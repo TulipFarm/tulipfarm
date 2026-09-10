@@ -12,8 +12,8 @@ import { ErrorSchema, PublicUserSchema } from "../auth/schemas";
 import { DEFAULT_SESSION_TTL_SECONDS, type SessionStore } from "../auth/session-store";
 import { AdminAlreadyExistsError, createUser, toPublicUser, type UserRepo } from "../auth/users";
 import type { RequireAuthorization } from "../authz/route-gate";
-import { kickCuratorSweep } from "../curator/sweep-schedule";
 import { makeRateLimitHook, type RateLimiter } from "../rate-limit";
+import { kickMaintenanceSweep } from "../schedule/maintenance-schedule";
 import { commitActorFromRequest } from "../soul/commit-actor";
 import type { SetupAdminCreator } from "./first-admin";
 import { isHeadlessBoot } from "./service";
@@ -47,7 +47,7 @@ export interface SetupDeps {
   ttlSeconds?: number;
   /** Kicks the reconciler when the wizard finishes; without it a brand-new instance shows an empty
    * Tasks list until the next five-minute cron tick, hiding the setup gaps it exists to surface. */
-  triggerCuratorSweep?: () => Promise<void>;
+  triggerMaintenanceSweep?: () => Promise<void>;
   /** Refreshes the in-memory Soul after the wizard's direct `soul.yaml` writes, which bypass the
    * SoulWriter gateway that normally reloads. Without it every reader of `manifest` — reconcile
    * signals, and any Agent speaking for the business — serves the empty name until a restart. */
@@ -135,7 +135,7 @@ export function registerSetupRoutes(app: FastifyInstance, deps: SetupDeps): void
     requireAuth,
     requireAuthorization,
     setupAdminCreator,
-    triggerCuratorSweep,
+    triggerMaintenanceSweep,
     reloadSoul,
     ttlSeconds = DEFAULT_SESSION_TTL_SECONDS,
   } = deps;
@@ -429,7 +429,7 @@ export function registerSetupRoutes(app: FastifyInstance, deps: SetupDeps): void
     },
     async (req, reply) => {
       await writeSoulConfig({ setupComplete: true }, "chore: complete first-run setup", req);
-      await kickCuratorSweep(triggerCuratorSweep, app.log, "first-run setup");
+      await kickMaintenanceSweep(triggerMaintenanceSweep, app.log, "first-run setup");
       return reply.code(204).send();
     }
   );

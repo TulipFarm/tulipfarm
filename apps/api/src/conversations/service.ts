@@ -8,7 +8,6 @@ import {
   type MessageFilePart,
   textContent,
 } from "@tulipfarm/schema";
-import type { CuratorWorkRef } from "@tulipfarm/storage";
 
 export type TurnStatus = ConversationTurn["status"];
 
@@ -72,11 +71,7 @@ export interface ConversationStore {
     turnId: string,
     attempt: number
   ): Promise<TurnCompletion | undefined>;
-  /**
-   * One transaction for the completion, the Turn status, and any Curator work the Turn earns.
-   * Recording work afterwards would lose every Turn whose process died in between, and no later
-   * sweep could discover it — the Turn is already `succeeded`, so nothing marks it unmined.
-   */
+  /** One transaction for the completion and the Turn status, so neither can land without the other. */
   completeTurn(input: CompleteTurnInput): Promise<CompleteTurnResult>;
 }
 
@@ -84,8 +79,6 @@ export interface CompleteTurnInput {
   readonly completion: TurnCompletion;
   /** Omitted for a superseded attempt, which must not restate the Turn outcome. */
   readonly turn?: PersistedTurn;
-  /** Written only when the completion insert wins, so a redelivery cannot re-enqueue it. */
-  readonly work?: CuratorWorkRef;
 }
 
 export interface CompleteTurnResult {

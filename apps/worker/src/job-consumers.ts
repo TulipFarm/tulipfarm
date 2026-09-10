@@ -30,8 +30,11 @@ export const SPEND_ALERT_QUEUE = "obs-spend-alert";
 /** Must match `SOUL_BUNDLE_PRUNE_QUEUE` in `apps/api/src/soul/bundle-prune-schedule.ts`. */
 export const SOUL_BUNDLE_PRUNE_QUEUE = "soul-bundle-prune";
 
-/** The five-minute maintenance sweep every open Task and Curator Run derives from. */
-export const CURATOR_SWEEP_QUEUE = "curator-sweep";
+/** The five-minute deterministic sweep every open Task derives from. */
+export const MAINTENANCE_SWEEP_QUEUE = "maintenance-sweep";
+
+/** Must match `MEMORY_CURATION_QUEUE` in `apps/api/src/memory/curation-schedule.ts`. */
+export const MEMORY_CURATION_QUEUE = "memory-curation";
 
 /**
  * Debounce window for the boot reconcile below. `tsx watch` restarts the Worker on every save, so
@@ -56,10 +59,11 @@ export interface JobConsumerOptions {
   readonly taskStore?: TaskStore;
   readonly taskSignals?: TaskSignalsGatherer;
   /**
-   * Curator fan-out, composed by `main.ts`. Absent leaves the sweep deterministic-only, which is
-   * exactly what an instance with the loop disabled should do — the setup Tasks still surface.
+   * The hourly Curator, composed by `main.ts` because only it holds a model source. Absent leaves
+   * the queue unregistered rather than consumed and dropped, so a composition with no provider
+   * parks its ticks instead of silently discarding an hour of somebody's history.
    */
-  readonly curatorSweep?: () => Promise<unknown>;
+  readonly memoryCuration?: () => Promise<unknown>;
   /**
    * Published-bundle retention. Paired with `businessId` for the same reason as the reconciler:
    * without both there is nothing to sweep, so the queue is simply not registered.
@@ -188,31 +192,40 @@ export async function startJobConsumers(options: JobConsumerOptions): Promise<Pg
     const businessId = options.businessId;
     const taskStore = options.taskStore;
     const taskSignals = options.taskSignals;
-    const curatorSweep = options.curatorSweep;
-    await boss.createQueue(CURATOR_SWEEP_QUEUE);
-    await boss.work(CURATOR_SWEEP_QUEUE, async () => {
+    await boss.createQueue(MAINTENANCE_SWEEP_QUEUE);
+    await boss.work(MAINTENANCE_SWEEP_QUEUE, async () => {
       try {
-        // Deterministic first, and never inside the Curator's try: a model outage, an exhausted
-        // budget or a missing provider must still leave "Connect a model provider" on screen. That
-        // Task is how the operator fixes the very thing the Curator half needs.
         const signals = await taskSignals.gather(businessId);
         await reconcileTasks({ businessId, signals, taskStore, now: now() });
-        if (curatorSweep) await curatorSweep();
       } catch (error) {
-        logHandlerThrew(options.log, CURATOR_SWEEP_QUEUE, error);
+        logHandlerThrew(options.log, MAINTENANCE_SWEEP_QUEUE, error);
         throw error;
       }
     });
-    logSubscribed(options.log, CURATOR_SWEEP_QUEUE);
+    logSubscribed(options.log, MAINTENANCE_SWEEP_QUEUE);
     // Minute 0, not minute 5. The cron alone leaves a fresh instance with an empty Tasks list
     // until the next tick, hiding the very setup gaps a first boot needs to surface. The
     // dedicated singletonKey keeps this out of the scheduler's own dedupe slot, so a boot kick can
     // never swallow a cron tick.
     await boss.send(
-      CURATOR_SWEEP_QUEUE,
+      MAINTENANCE_SWEEP_QUEUE,
       {},
       { singletonKey: "boot", singletonSeconds: BOOT_RECONCILE_DEBOUNCE_SECONDS }
     );
+  }
+
+  if (options.memoryCuration) {
+    const memoryCuration = options.memoryCuration;
+    await boss.createQueue(MEMORY_CURATION_QUEUE);
+    await boss.work(MEMORY_CURATION_QUEUE, async () => {
+      try {
+        await memoryCuration();
+      } catch (error) {
+        logHandlerThrew(options.log, MEMORY_CURATION_QUEUE, error);
+        throw error;
+      }
+    });
+    logSubscribed(options.log, MEMORY_CURATION_QUEUE);
   }
 
   if (options.fileIndex) {

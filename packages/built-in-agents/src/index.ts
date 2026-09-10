@@ -18,6 +18,14 @@ export {
   type EffortClassifierOptions,
 } from "./agents/effort-classifier";
 export {
+  curateMemory,
+  MEMORY_CURATOR,
+  type MemoryCurationInput,
+  memoryCuratorPrompt,
+  memoryCuratorRequirements,
+  memoryCuratorSystemPrompt,
+} from "./agents/memory-curator";
+export {
   generatePersonalized,
   ONBOARDING_PERSONALIZER,
   ONBOARDING_SYSTEM_PROMPT,

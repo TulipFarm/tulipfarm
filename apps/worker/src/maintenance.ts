@@ -6,17 +6,19 @@
  * outside maintenance mode.
  */
 
+import type { BuiltInAgentModelSource } from "@tulipfarm/built-in-agents";
+import { MemoryDocumentRepo } from "@tulipfarm/memory";
 import { PgBundleStore } from "@tulipfarm/soul";
 import type { BlobPort, TransactionPort } from "@tulipfarm/storage";
-import { listUsersWithDueWork, TaskRepo } from "@tulipfarm/storage";
+import { PgMemoryCurationStore, TaskRepo } from "@tulipfarm/storage";
 import type { Pool } from "pg";
 import type { PgBoss } from "pg-boss";
-import { sweepCurator } from "./curator/sweep";
 import { buildWorkerFileService } from "./files/service";
 import type { InternalApiClient } from "./internal/client";
 import type { HttpTurnHost } from "./internal/turn-host";
 import { startJobConsumers } from "./job-consumers";
 import { buildWorkerKnowledgeService } from "./knowledge/service";
+import { runMemoryCuration } from "./memory-curation/run";
 import { TaskSignalsGatherer } from "./reconcile/task-signals";
 import type { SoulEmbeddings } from "./tools/soul-embeddings";
 
@@ -30,9 +32,10 @@ export interface MaintenanceConsumerOptions {
   readonly internalApi: InternalApiClient;
   readonly blobs: BlobPort;
   readonly embeddings: SoulEmbeddings;
+  readonly models: BuiltInAgentModelSource;
 }
 
-/** `sweepCurator` needs `info`; the consumer options only promise `error`. */
+/** The Curator reports a per-run summary on `info`; the consumer options only promise `error`. */
 function sweepLog(
   log: MaintenanceConsumerOptions["log"]
 ): { info(message: string): void; error(message: string): void } | undefined {
@@ -49,12 +52,13 @@ export function startMaintenanceConsumers(o: MaintenanceConsumerOptions): Promis
     businessId: o.businessId,
     taskStore: new TaskRepo(o.transactions),
     taskSignals: new TaskSignalsGatherer(o.turnHost),
-    curatorSweep: () =>
-      sweepCurator({
+    memoryCuration: () =>
+      runMemoryCuration({
         businessId: o.businessId,
-        backlog: (input) => listUsersWithDueWork(o.pool, input),
-        api: o.internalApi,
-        log: sweepLog(o.log),
+        store: new PgMemoryCurationStore(o.pool),
+        documents: new MemoryDocumentRepo(o.transactions),
+        models: o.models,
+        ...(sweepLog(o.log) === undefined ? {} : { log: sweepLog(o.log) }),
       }),
     bundles: new PgBundleStore(o.transactions),
     // Indexing a File parses a stranger's PDF, so it runs here rather than in the API. Both

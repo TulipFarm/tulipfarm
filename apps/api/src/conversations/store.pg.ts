@@ -1,7 +1,7 @@
 import type { ModelFailureDiagnostic } from "@tulipfarm/agent-runtime";
 import { DEPLOYMENT_BUSINESS_ID } from "@tulipfarm/constants";
 import { normalizeMessageContent } from "@tulipfarm/schema";
-import { findLatestConversationTurn, recordCuratorWork } from "@tulipfarm/storage";
+import { findLatestConversationTurn } from "@tulipfarm/storage";
 import type { Queryable } from "../db";
 import { withTransaction } from "../db";
 import type {
@@ -301,11 +301,6 @@ export class PgConversationStore implements ConversationStore {
       const completionInserted = inserted.rows.length > 0;
 
       if (input.turn) await saveTurnWith(tx, input.turn);
-      // A redelivery of an already-recorded completion must not re-enqueue the work, or one Turn
-      // could be mined many times over.
-      if (input.work && completionInserted) {
-        await recordCuratorWork(tx, input.work, input.completion.createdAt);
-      }
       return { completionInserted };
     });
   }

@@ -1,4 +1,3 @@
-import { CURATOR_DEDUPE_PREFIX, isCuratorDedupeKey } from "@tulipfarm/curator";
 import { ajv } from "@tulipfarm/schema";
 import { DOCTOR_DEDUPE_PREFIX, isDoctorDedupeKey } from "@tulipfarm/soul-doctor";
 import {
@@ -140,17 +139,9 @@ export const taskCreateTool = defineApiTool<TaskToolContext>({
     if (input.assignee.kind === "role" && !TASK_ROLES.has(input.assignee.id)) {
       return err("validation_error", `unknown role "${input.assignee.id}"`);
     }
-    // The Curator derives its dedupe keys from a Proposal's identity so a rephrasing cannot
-    // resurrect a dismissed one. An Agent that could write into that namespace could resurrect it
-    // for them, or squat the key of a suggestion the Curator has not made yet.
-    if (isCuratorDedupeKey(input.dedupeKey)) {
-      return err(
-        "validation_error",
-        `dedupe keys beginning "${CURATOR_DEDUPE_PREFIX}" are reserved`
-      );
-    }
-    // Same reason, for the Doctor: an escalation an operator dismissed must stay dismissed, and
-    // the key of a defect nobody has found yet must not be claimable in advance.
+    // The Doctor derives its dedupe keys from a defect's identity so a rephrasing cannot resurrect
+    // a dismissed escalation, and so the key of a defect nobody has found yet must not be
+    // claimable in advance.
     if (isDoctorDedupeKey(input.dedupeKey)) {
       return err(
         "validation_error",
@@ -199,12 +190,6 @@ export const taskCloseTool = defineApiTool<TaskToolContext>({
   },
   handler: async (args, ctx) => {
     if (!validateClose(args)) return err("validation_error", firstError(validateClose.errors));
-    if (isCuratorDedupeKey((args as CloseTaskArgs).dedupeKey)) {
-      return err(
-        "validation_error",
-        `dedupe keys beginning "${CURATOR_DEDUPE_PREFIX}" are reserved`
-      );
-    }
     if (isDoctorDedupeKey((args as CloseTaskArgs).dedupeKey)) {
       return err(
         "validation_error",
