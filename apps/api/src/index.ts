@@ -250,6 +250,7 @@ import { LiveRecordAuthorizer } from "./resources/authorize";
 import { startDelivery } from "./resources/outbox";
 import { reconcileResourceTables, registerResourceReconcile } from "./resources/reconcile";
 import { PgCounterStore, PgResourceRepoFactory } from "./resources/repo";
+import { runAuthorizers } from "./runs/authorization";
 import { runCanceller } from "./runs/cancel";
 import { RunEventNotifyListener } from "./runs/notify-listener";
 import {
@@ -751,6 +752,7 @@ async function boot() {
     const routeAuthorizer = new LiveRouteAuthorizer(authorityLayerResolver);
     const gateOptions = deploymentGateOptions(() => app.log);
     const operationalCheck = makeAuthorizationCheck(routeAuthorizer, gateOptions);
+    const runAuthorization = runAuthorizers(runStore, operationalCheck);
     const roleRepo = new PgRoleRepo(transactionPort(pool));
     const teamNotifications = new TeamNotificationService(
       new PgTeamNotificationRepo(pool),
@@ -1260,6 +1262,7 @@ async function boot() {
           artifacts: runArtifacts,
           store: conversationStore,
           soulLoader,
+          teamAssets,
           toolRegistry,
           guardrails: guardrailsService,
           bundledSkills,
@@ -1481,6 +1484,7 @@ async function boot() {
       invocations,
       conversationStore,
       runCancel,
+      authorizeChatRunCancellation: runAuthorization.cancel,
       internalTurns,
       approvalsRepo,
       routineApprovals,
@@ -1581,19 +1585,7 @@ async function boot() {
         events: runEventStore,
         runs: runStore,
         waitForNotify: (runId) => runEventNotifyListener.waitForNotify(runId),
-        authorize: async (req) => {
-          const principal = req.principal;
-          if (!principal) return null;
-          const operator = await operationalCheck(principal, {
-            action: "operations.read",
-            resourceType: "operations",
-            fallback: "admin",
-          });
-          return {
-            businessId: principal.businessId,
-            audiences: operator ? ["participant", "operator"] : ["participant"],
-          };
-        },
+        authorize: runAuthorization.read,
       },
       operationalApi: createRuntimeOperationalApi({
         authorizationCheck: operationalCheck,

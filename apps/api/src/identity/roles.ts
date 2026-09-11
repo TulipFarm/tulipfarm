@@ -74,7 +74,7 @@ export const ADMIN_ONLY_SURFACES: readonly {
     actions: ["deployment.public_origins.write"],
     enforcedIn: "system/routes.ts",
   },
-  { type: "operations", actions: ["*"], enforcedIn: "admin/runtime.ts; index.ts" },
+  { type: "operations", actions: ["*"], enforcedIn: "admin/runtime.ts; runs/authorization.ts" },
   /** Arming the effect-plane emergency stop halts other people's work, so it is never self-service. */
   {
     type: "kill_switch",

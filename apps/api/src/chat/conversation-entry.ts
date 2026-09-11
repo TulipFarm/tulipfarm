@@ -2,9 +2,11 @@ import { randomUUID } from "node:crypto";
 import type { EventEmitter } from "node:events";
 import type { LlmService } from "@tulipfarm/llm";
 import type { SoulLoader } from "@tulipfarm/soul";
-import { DEFAULT_ASSISTANT_ID, getAgent } from "@tulipfarm/soul";
+import { DEFAULT_ASSISTANT_ID, getAgent, resolveAgent } from "@tulipfarm/soul";
 import { DOMAIN_EVENTS } from "@tulipfarm/storage";
 import type { FastifyBaseLogger } from "fastify";
+import type { AssetPrincipal, TeamAssetService } from "../team-assets/service";
+import { mayUseAgent } from "./agent-access";
 import type { ConversationDoc, ConversationRepo } from "./conversations";
 import { buildAndStoreTitle } from "./title";
 import type { ChatBody } from "./turn-helpers";
@@ -20,7 +22,7 @@ export interface ResolvedConversation {
 
 /** A request refused before anything durable exists; the route maps it to a status code. */
 export interface ConversationEntryError {
-  readonly status: 404;
+  readonly status: 403 | 404;
   readonly error: string;
 }
 
@@ -35,10 +37,12 @@ export interface ConversationEntryDeps {
   readonly llmService: LlmService;
   readonly soulLoader?: SoulLoader;
   readonly events?: EventEmitter;
+  readonly teamAssets?: Pick<TeamAssetService, "access">;
 }
 
 export interface ConversationEntryInput {
   readonly userId: string;
+  readonly principal: AssetPrincipal;
   readonly body: ChatBody;
   readonly log: FastifyBaseLogger;
 }
@@ -52,7 +56,11 @@ export async function resolveConversationEntry(
   const { body, userId, log } = input;
 
   if (!body.conversationId) {
-    const conversation = await openConversation(deps, input);
+    const requested = body.agentId ? getAgent(soulLoader, body.agentId) : undefined;
+    if (requested && !(await mayUseAgent(requested, input.principal, deps.teamAssets))) {
+      return { status: 403, error: "Agent use access is required" };
+    }
+    const conversation = await openConversation(deps, input, requested?.id);
     return {
       conversation,
       isNew: true,
@@ -72,6 +80,11 @@ export async function resolveConversationEntry(
   // This is the edge that turns a handle into an identity: `body.agentId` is whatever the composer
   // put in the `@mention`, a name, and what is stored from here on is the Agent's permanent id.
   const mentioned = body.agentId ? getAgent(soulLoader, body.agentId) : undefined;
+  const selected = mentioned ?? resolveAgent(soulLoader, currentAgentId);
+  if (!selected) return { status: 404, error: "agent not found" };
+  if (!(await mayUseAgent(selected, input.principal, deps.teamAssets))) {
+    return { status: 403, error: "Agent use access is required" };
+  }
   if (mentioned && mentioned.id !== currentAgentId) {
     found.agentId = mentioned.id;
     try {
@@ -89,11 +102,10 @@ export async function resolveConversationEntry(
 
 async function openConversation(
   deps: ConversationEntryDeps,
-  input: ConversationEntryInput
+  input: ConversationEntryInput,
+  agentId: string | undefined
 ): Promise<ConversationDoc> {
   const now = new Date();
-  const requested = input.body.agentId;
-  const agentId = requested ? getAgent(deps.soulLoader, requested)?.id : undefined;
   const conversation: ConversationDoc = {
     _id: randomUUID(),
     userId: input.userId,

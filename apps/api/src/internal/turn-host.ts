@@ -33,7 +33,8 @@ export type TurnAuthorityDenial =
   | "run_not_found"
   | "run_not_running"
   | "turn_not_found"
-  | "agent_not_found";
+  | "agent_not_found"
+  | "agent_use_denied";
 
 export class TurnAuthorityError extends Error {
   readonly name = "TurnAuthorityError";

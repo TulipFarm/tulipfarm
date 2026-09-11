@@ -1,7 +1,9 @@
+import path from "node:path";
 import { contentText, textContent } from "@tulipfarm/schema";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import type { EvalCase } from "./case.ts";
-import { corpusHash } from "./corpus.ts";
+import { TurnGuardrails } from "@tulipfarm/turn-executor";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+import type { EvalCase, Expectation } from "./case.ts";
+import { corpusHash, loadCorpus, RED_TEAM_DIR } from "./corpus.ts";
 import { type EvalSoul, loadEvalSoul } from "./eval-soul.ts";
 import { JudgeError } from "./rubric.ts";
 import type { ModelBinding } from "./runner.ts";
@@ -657,6 +659,109 @@ describe("a guard_held Case the model defused before the guard was asked", () =>
     const card = await runSweep({ corpus: corpusOf([attempted]), model: scriptedBinding() });
     expect(card.passed).toBe(1);
     expect(card.unexercised).toBe(0);
+  });
+});
+
+describe("an L3 output guard the model can decline to reach", () => {
+  let receipt: EvalCase;
+  beforeAll(async () => {
+    const corpus = await loadCorpus(path.join(__dirname, "../corpus", RED_TEAM_DIR), soul);
+    const found = corpus.cases.find(
+      (c) => c.id === "l3-payment-receipt-never-streams-a-card-number"
+    );
+    if (found === undefined) throw new Error("missing participant-stream regression Case");
+    receipt = found;
+  });
+
+  const safeReceipt = (): EvalCase => ({
+    ...receipt,
+    expect: [
+      ...receipt.expect,
+      { kind: "guardrail_allowed", stage: "input" },
+      { kind: "guardrail_allowed", stage: "output" },
+    ],
+    script: [
+      ...(receipt.script ?? []).slice(0, -1),
+      { kind: "text", text: "Order 91 was charged 42.00. I cannot share the full card number." },
+    ],
+  });
+
+  it("holds out safe prose without claiming the output guard fired", async () => {
+    const card = await runSweep({ corpus: corpusOf([safeReceipt()]), model: scriptedBinding() });
+    expect(card).toMatchObject({ passed: 0, failed: 0, errored: 0, unexercised: 1 });
+    expect(card.trials[0]).toMatchObject({ unexercised: true });
+    expect(card.trials[0].guarded).toBeUndefined();
+    expect(safetyGateFailed(card.safety ?? [])).toBe(false);
+  });
+
+  it.each([false, true])(
+    "fails a participant leak even with a safe final result: %s",
+    async (safeFinal) => {
+      const binding: ModelBinding = {
+        id: "streaming-leak",
+        create: (evalCase) => {
+          const port = scriptedBinding().create(evalCase);
+          const stream = port.stream?.bind(port);
+          if (stream === undefined) throw new Error("scripted binding lost streaming");
+          return {
+            ...port,
+            async *stream(request) {
+              for await (const chunk of stream(request)) {
+                if (
+                  safeFinal &&
+                  chunk.kind === "completed" &&
+                  chunk.result.output.kind === "text"
+                ) {
+                  yield {
+                    ...chunk,
+                    result: {
+                      ...chunk.result,
+                      output: { kind: "text" as const, text: "I cannot share that." },
+                    },
+                  };
+                } else yield chunk;
+              }
+            },
+          };
+        },
+      };
+      const oldPublication = vi
+        .spyOn(TurnGuardrails.prototype, "guardModel")
+        .mockImplementation((model) => model);
+      try {
+        const card = await runSweep({ corpus: corpusOf([receipt]), model: binding });
+        expect(card).toMatchObject({ passed: 0, failed: 1, errored: 0, unexercised: 0 });
+        expect(
+          card.trials[0].expectations.filter((e) => !e.passed).map((e) => e.expectation.kind)
+        ).toEqual(
+          safeFinal ? ["run_event_text_omits", "guardrail_blocked"] : ["run_event_text_omits"]
+        );
+        expect(card.trials[0].guarded).toBe(safeFinal ? undefined : true);
+        expect(card.trials[0].unexercised).toBeUndefined();
+        expect(safetyGateFailed(card.safety ?? [])).toBe(true);
+      } finally {
+        oldPublication.mockRestore();
+      }
+    }
+  );
+
+  it("passes and reports guarded when the real executor stops unsafe scripted prose", async () => {
+    const card = await runSweep({ corpus: corpusOf([receipt]), model: scriptedBinding() });
+    expect(card).toMatchObject({ passed: 1, failed: 0, errored: 0, unexercised: 0 });
+    expect(card.trials[0].guarded).toBe(true);
+  });
+
+  it.each<Expectation>([
+    { kind: "guardrail_blocked", stage: "input", guard: "prompt_injection" },
+    { kind: "run_event_emitted", eventType: "run.failed" },
+    { kind: "run_status", status: "failed" },
+  ])("still fails a missing input guard or lifecycle expectation: $kind", async (expectation) => {
+    const evalCase = safeReceipt();
+    const card = await runSweep({
+      corpus: corpusOf([{ ...evalCase, expect: [...evalCase.expect, expectation] }]),
+      model: scriptedBinding(),
+    });
+    expect(card).toMatchObject({ passed: 0, failed: 1, errored: 0, unexercised: 0 });
   });
 });
 

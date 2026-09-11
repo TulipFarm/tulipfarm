@@ -189,10 +189,18 @@ no database. It can observe everything the harness *decides*.
 **L3** exists for the one thing L2 structurally cannot see: whether a decision **survives**. It
 boots an in-process PGlite from `@tulipfarm/storage`'s own DDL, mints a real Run, and drives
 `createChatExecutor` from `@tulipfarm/turn-executor` — the same executor a production Turn runs
-through — then reads the persisted result back. That unlocks six Expectation kinds L2 cannot
-honour: `run_status`, `state_status`, `turn_status`, `run_event_emitted`, `soul_committed` and
+through — then reads the persisted result back. That unlocks Expectation kinds L2 cannot
+honour: `run_status`, `state_status`, `turn_status`, `run_event_emitted`, `run_event_text_omits`, `soul_committed` and
 `soul_published`.
 `loadCorpus` refuses any of them on an L2 Case, so the mistake costs no model calls.
+
+`run_event_text_omits` reads concatenated durable **participant** `text.delta` payloads, in
+sequence order and across every Turn of a journey. Operator evidence is excluded. Its text must
+be grounded just like `output_omits`, and a missing observation fails. Pair it with
+`run_event_emitted text.delta`: an observed empty stream contains no leak, but does not prove
+publication happened. A clean final Message alone cannot catch text leaked before its output guard.
+L3 preserves optional model streaming and meters each completed response once; the scripted binding
+splits text into deterministic chunks so the free tier reaches the same publication path.
 
 It deliberately stays small. Each L3 Case costs ~1.5s of setup against L2's milliseconds, and the
 extra reach buys nothing for a Case about prompt content or Tool ordering. Reach for L3 only when
@@ -214,7 +222,7 @@ an answer that never quoted the card number, whether that Case sits in `corpus/`
 `corpus/red-team/`.
 
 Two things keep this from becoming a blanket excuse. A failing Expectation that owes the seam
-nothing — `run_status`, `turn_status`, `state_status`, `loop_status`, `run_event_emitted`,
+nothing — `run_status`, `turn_status`, `state_status`, `loop_status`, `run_event_emitted`, `run_event_text_omits`,
 `guardrail_blocked` at `input`, `tool_not_called` — always fails, so a broken Turn cannot launder
 itself into `UNEX`. And an unexercised Case is not a pass: it is reported by name and must be
 covered by *some* leg of the Matrix, so a guard nobody ever made fire still holds back the release.
@@ -231,10 +239,16 @@ that import, so L3 owns the Conversation half itself and shares the executor. Th
 wiring is covered by `apps/api`'s `durable-submission.pg.test.ts`, so the residual gap is the
 route handler, not the Turn.
 
-`loadCorpus` refuses two mismatches before a Sweep spends anything: a persisted Expectation on an
-L2 Case, and a `guardrail_*` Expectation on an L3 Case. Both would otherwise pass by finding
-nothing. L3 does run the real guards — the executor calls them — but it does not collect their
-decisions, so guardrail Cases belong at L2 where they are measured.
+`loadCorpus` refuses a persisted Expectation on an L2 Case before a Sweep spends anything.
+Both tiers support `guardrail_*`: L2 collects refusals during execution, while L3 reads the actual
+`guardrail.decision` refusals from durable Run events, accumulating them across a journey.
+A publication guardrail Case belongs at L3 when it asserts durable participant text and the
+stage-specific `guardrail_blocked` expectation. A safe model answer that never reaches the output
+guard is then `UNEX`, while leaked text, a missing input guard or a missing lifecycle event still
+fails. An undifferentiated `run_event_emitted guardrail.blocked` cannot express that distinction.
+`l3-payment-receipt-never-streams-a-card-number` covers this in the red-team Corpus. Its regression
+test disables only `guardModel` in a scoped spy: the old final-Message guard still passes
+`output_omits`, while the leaked stream fails `run_event_text_omits`.
 
 ### Generated File lifecycle
 

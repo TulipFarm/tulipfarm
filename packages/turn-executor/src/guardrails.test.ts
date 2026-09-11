@@ -1,6 +1,10 @@
 import {
   DEFAULT_GUARDRAILS,
   type DistilledResult,
+  type ModelInvocationRequest,
+  type ModelInvocationResult,
+  type ModelPort,
+  type ModelStreamChunk,
   REFUSED_TOOL_RESULT_NOTICE,
   type ToolDispatchPort,
   type ToolDispatchRequest,
@@ -43,11 +47,13 @@ function writer(events: RunEventAppendPort): TurnEventWriter {
   });
 }
 
-function guardrails(over: { toolTiers?: ReadonlyMap<string, string> } = {}): TurnGuardrails {
+function guardrails(
+  over: { toolTiers?: ReadonlyMap<string, string>; policy?: Record<string, unknown> } = {}
+): TurnGuardrails {
   const guards = new TurnGuardrails({ warn: () => {} });
   guards.configure({
-    policy: POLICY,
-    digest: DIGEST,
+    policy: over.policy ?? POLICY,
+    digest: over.policy === undefined ? DIGEST : canonicalHash(over.policy),
     context: { userId: "user-1", agentId: "agent-1", conversationId: "conv-1" },
     toolTiers: over.toolTiers ?? new Map(),
   });
@@ -66,6 +72,157 @@ function dispatched(): { port: ToolDispatchPort; calls: ToolDispatchRequest[] } 
     },
   };
 }
+
+describe("TurnGuardrails.guardModel", () => {
+  const request: ModelInvocationRequest = {
+    requestId: "request-1",
+    modelProfileId: "primary",
+    messages: [],
+  };
+  const result: ModelInvocationResult = {
+    requestId: request.requestId,
+    providerRequestId: "provider-request-1",
+    output: { kind: "text", text: "Hello there." },
+    usage: { inputTokens: 12, outputTokens: 3, costUsd: 0.01 },
+  };
+  const streamed = (response: ModelInvocationResult, text: readonly string[]): ModelPort => ({
+    invoke: async () => response,
+    async *stream() {
+      for (const delta of text) yield { kind: "text_delta", text: delta };
+      yield { kind: "completed", result: response };
+    },
+  });
+  const collect = async (port: ModelPort): Promise<ModelStreamChunk[]> => {
+    if (port.stream === undefined) throw new Error("stream expected");
+    const chunks: ModelStreamChunk[] = [];
+    for await (const chunk of port.stream(request)) chunks.push(chunk);
+    return chunks;
+  };
+
+  it("publishes allowed text together and preserves result identity and usage", async () => {
+    const port = guardrails().guardModel(
+      streamed(result, ["Hello ", "there."]),
+      writer(new FakeAppendPort())
+    );
+    const chunks = await collect(port);
+
+    expect(chunks).toEqual([
+      { kind: "text_delta", text: "Hello there." },
+      { kind: "completed", result },
+    ]);
+    await expect(port.invoke(request)).resolves.toBe(result);
+  });
+
+  it("screens a Tool-call preamble and replaces the calls with a safe refusal", async () => {
+    const response: ModelInvocationResult = {
+      ...result,
+      output: {
+        kind: "tool_calls",
+        calls: [{ callId: "input-1", name: "request_input", arguments: {} }],
+      },
+    };
+    const port = guardrails().guardModel(
+      streamed(response, ["Confirm this card: 4111 1111 ", "1111 1111."]),
+      writer(new FakeAppendPort())
+    );
+    const text = "The response was blocked by a content guardrail.";
+
+    expect(await collect(port)).toEqual([
+      { kind: "text_delta", text },
+      { kind: "completed", result: { ...response, output: { kind: "text", text } } },
+    ]);
+  });
+
+  it("screens the completed answer even when its stream text was different", async () => {
+    const response: ModelInvocationResult = {
+      ...result,
+      output: { kind: "text", text: "4111 1111 1111 1111" },
+    };
+    const port = guardrails().guardModel(
+      streamed(response, ["A harmless prefix."]),
+      writer(new FakeAppendPort())
+    );
+    const chunks = await collect(port);
+
+    expect(JSON.stringify(chunks)).not.toContain("4111");
+    await expect(port.invoke(request)).resolves.toEqual({
+      ...response,
+      output: { kind: "text", text: "The response was blocked by a content guardrail." },
+    });
+  });
+
+  it("blocks a match split across consecutive model responses", async () => {
+    let call = 0;
+    const port = guardrails().guardModel(
+      {
+        invoke: async () => result,
+        async *stream() {
+          call += 1;
+          yield { kind: "text_delta", text: call === 1 ? "4111 1111 " : "1111 1111" };
+          yield {
+            kind: "completed",
+            result: { ...result, output: { kind: "tool_calls", calls: [] } },
+          };
+        },
+      },
+      writer(new FakeAppendPort())
+    );
+    const chunks = [...(await collect(port)), ...(await collect(port))];
+    const text = chunks
+      .flatMap((chunk) => (chunk.kind === "text_delta" ? [chunk.text] : []))
+      .join("");
+
+    expect(text).toBe("4111 1111 The response was blocked by a content guardrail.");
+    expect(text).not.toContain("4111 1111 1111 1111");
+  });
+
+  it("screens structured output before the loop can publish its text form", async () => {
+    const response: ModelInvocationResult = {
+      ...result,
+      output: { kind: "structured", value: { card: "4111 1111 1111 1111" } },
+    };
+    const port = guardrails().guardModel(streamed(response, []), writer(new FakeAppendPort()));
+
+    await expect(port.invoke(request)).resolves.toEqual({
+      ...response,
+      output: { kind: "text", text: "The response was blocked by a content guardrail." },
+    });
+  });
+
+  it("requires policy before sending an invocation to the model", async () => {
+    let invoked = false;
+    const port = new TurnGuardrails({ warn: () => {} }).guardModel(
+      {
+        invoke: async () => {
+          invoked = true;
+          return result;
+        },
+      },
+      writer(new FakeAppendPort())
+    );
+
+    await expect(port.invoke(request)).rejects.toThrow(/before the turn's policy/);
+    expect(invoked).toBe(false);
+  });
+
+  it("keeps token streaming when the policy has no output guards", async () => {
+    let received = 0;
+    const port = guardrails({ policy: { ...DEFAULT_GUARDRAILS, output: [] } }).guardModel(
+      {
+        invoke: async () => result,
+        async *stream() {
+          yield { kind: "text_delta", text: "Hello " };
+          expect(received).toBe(1);
+          yield { kind: "completed", result };
+        },
+      },
+      writer(new FakeAppendPort())
+    );
+
+    for await (const _chunk of port.stream?.(request) ?? []) received += 1;
+    expect(received).toBe(2);
+  });
+});
 
 describe("TurnGuardrails", () => {
   it("refuses a policy that does not hash to the digest the Context recorded", () => {

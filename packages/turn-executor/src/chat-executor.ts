@@ -218,7 +218,7 @@ async function executeTurn(
   const guardrails = new TurnGuardrails(options.log);
 
   const loop = new AgentLoop({
-    model,
+    model: guardrails.guardModel(model, writer),
     // Guard before announcing; refused Tool calls never ran.
     tools: guardrails.guard(announceToolCalls(options.tools ?? options.host, writer), writer),
     checkpoints: resumableFromPreviousRun(

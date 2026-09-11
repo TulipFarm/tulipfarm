@@ -8,9 +8,10 @@ import type { BundledSkill, SoulLoader, SoulSkill } from "@tulipfarm/soul";
 import { DEFAULT_ASSISTANT_NAME } from "@tulipfarm/soul";
 import type { ToolAvailability } from "@tulipfarm/tool-broker";
 import { ok, type ToolDef } from "@tulipfarm/tool-host";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { ToolRegistry } from "../broker/tool-adapter";
 import type { PersistedMessage } from "../conversations/service";
+import type { TeamAssetService } from "../team-assets/service";
 import {
   BUSINESS_ID,
   CONVERSATION_ID,
@@ -101,7 +102,13 @@ function makeResolver(
     bundledSkills?: Record<string, BundledSkill>;
     telemetry?: TelemetryPort;
     childLinks?: ChildLinkAncestry;
-    agents?: readonly { name: string; description?: string }[];
+    agents?: readonly {
+      id?: string;
+      name: string;
+      description?: string;
+      ownership?: Record<string, unknown>;
+    }[];
+    teamAssets?: Pick<TeamAssetService, "access">;
     manifest?: Record<string, unknown>;
     memory?: string;
     memoryFails?: boolean;
@@ -122,7 +129,12 @@ function makeResolver(
           agents: new Map(
             (options.agents ?? []).map((agent) => [
               agent.name,
-              { name: agent.name, frontmatter: { description: agent.description ?? "" }, body: "" },
+              {
+                id: agent.id ?? agent.name,
+                name: agent.name,
+                frontmatter: { description: agent.description ?? "", ownership: agent.ownership },
+                body: "",
+              },
             ])
           ),
           surfaceComponents: new Map(),
@@ -147,6 +159,7 @@ function makeResolver(
       ...(channelDeliveries ? { channelDeliveries } : {}),
       ...(options.childLinks ? { childLinks: options.childLinks } : {}),
       ...(soulLoader ? { soulLoader } : {}),
+      ...(options.teamAssets ? { teamAssets: options.teamAssets } : {}),
       ...(bundledSkills ? { bundledSkills } : {}),
       ...(options.authorityLayers ? { authorityLayers: options.authorityLayers } : {}),
       ...(options.memory === undefined
@@ -169,6 +182,53 @@ function makeResolver(
 }
 
 describe("ChatTurnContextResolver", () => {
+  it("rechecks Agent use for the effective subject before assembling Context", async () => {
+    const ownership = { owners: [{ teamId: "private-team" }] };
+    const access = vi.fn<TeamAssetService["access"]>();
+    access.mockResolvedValue({ levels: ["view", "use"], canManageOwnership: false, evidence: [] });
+    const { resolver, store } = makeResolver({
+      agents: [{ id: "private-agent-id", name: "private-agent", ownership }],
+      request: { agentId: "private-agent-id" },
+      teamAssets: { access },
+    });
+    await resolver.resolve(AUTHORITY);
+    access.mockResolvedValue({ levels: ["view"], canManageOwnership: false, evidence: [] });
+    const history = vi.spyOn(store, "listMessages");
+    await expect(resolver.resolve(AUTHORITY)).rejects.toMatchObject({ code: "agent_use_denied" });
+    expect(history).not.toHaveBeenCalled();
+    expect(access).toHaveBeenLastCalledWith("agent", "private-agent", AUTHORITY.subject, ownership);
+  });
+
+  it("does not run a selected Agent when its access service is absent", async () => {
+    const { resolver } = makeResolver({
+      agents: [{ name: "private-agent" }],
+      request: { agentId: "private-agent" },
+    });
+    await expect(resolver.resolve(AUTHORITY)).rejects.toMatchObject({ code: "agent_use_denied" });
+  });
+
+  it("keeps the default assistant accessible without Team use access", async () => {
+    const access = vi.fn<TeamAssetService["access"]>();
+    access.mockResolvedValue({ levels: [], canManageOwnership: false, evidence: [] });
+    const { resolver } = makeResolver({ teamAssets: { access } });
+    await expect(resolver.resolve(AUTHORITY)).resolves.toMatchObject({
+      agentId: DEFAULT_ASSISTANT_NAME,
+    });
+    expect(access).not.toHaveBeenCalled();
+  });
+
+  it("surfaces a failed Agent access lookup instead of running the Turn", async () => {
+    const access = vi
+      .fn<TeamAssetService["access"]>()
+      .mockRejectedValue(new Error("access store unavailable"));
+    const { resolver } = makeResolver({
+      agents: [{ name: "private-agent" }],
+      request: { agentId: "private-agent" },
+      teamAssets: { access },
+    });
+    await expect(resolver.resolve(AUTHORITY)).rejects.toThrow("access store unavailable");
+  });
+
   it("gives the model the durable transcript behind one system prompt", async () => {
     const { resolver } = makeResolver({
       messages: [

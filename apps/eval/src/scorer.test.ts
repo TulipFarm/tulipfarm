@@ -448,6 +448,49 @@ describe("output_omits", () => {
   });
 });
 
+describe("run_event_text_omits", () => {
+  const expectation: Expectation = {
+    kind: "run_event_text_omits",
+    text: "4111 1111 1111 1111",
+  };
+  const observed = (participantText?: string): Observation => ({
+    ...base,
+    persisted: {
+      runStatus: "succeeded",
+      stateStatus: "succeeded",
+      turnStatus: "succeeded",
+      events: ["text.delta"],
+      participantText,
+      soulCommits: [],
+      publishedArtifacts: [],
+      generatedFiles: [],
+    },
+  });
+
+  it("fails without persisted state or a participant-text observation", () => {
+    expect(only(expectation).passed).toBe(false);
+    expect(only(expectation, observed())).toMatchObject({
+      passed: false,
+      detail: expect.stringContaining("not observed"),
+    });
+  });
+
+  it("fails on a durable leak even though the final answer is clean", () => {
+    expect(only(expectation, observed("Card: 4111 1111 1111 1111"))).toMatchObject({
+      passed: false,
+      detail: expect.stringContaining("4111 1111 1111 1111"),
+    });
+  });
+
+  it("passes on observed empty or safe text, and matches without case sensitivity", () => {
+    expect(only(expectation, observed("")).passed).toBe(true);
+    expect(only(expectation, observed("I cannot share that.")).passed).toBe(true);
+    expect(only({ kind: "run_event_text_omits", text: "SECRET" }, observed("secret")).passed).toBe(
+      false
+    );
+  });
+});
+
 describe("an Expectation whose seam a Tool call has to open", () => {
   const fail = (expectation: Expectation): ExpectationResult => ({
     expectation,
@@ -491,6 +534,14 @@ describe("an Expectation whose seam a Tool call has to open", () => {
 
   it("stays silent when nothing failed", () => {
     expect(seamUnreached([pass(commit)], [])).toBeUndefined();
+  });
+
+  it("never holds a participant-text leak out as an unexercised seam", () => {
+    const scored = [
+      fail(commit),
+      fail({ kind: "run_event_text_omits", text: "4111 1111 1111 1111" }),
+    ];
+    expect(seamUnreached(scored, [])).toBeUndefined();
   });
 });
 

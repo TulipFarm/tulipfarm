@@ -19,7 +19,7 @@ import {
   canonicalHash,
   INVOCATION_REQUEST_SCHEMAS,
 } from "@tulipfarm/schema";
-import { DEFAULT_ASSISTANT_ID } from "@tulipfarm/soul";
+import { DEFAULT_ASSISTANT_ID, type SoulAgent, type SoulLoader } from "@tulipfarm/soul";
 import type { PaginatedResult } from "@tulipfarm/storage";
 import {
   ArtifactStore,
@@ -38,7 +38,9 @@ import { MemorySessionStore } from "../auth/session-store";
 import { createUser, type UserDoc, type UserRepo } from "../auth/users";
 import { PgConversationStore } from "../conversations/store.pg";
 import { ambientTransactionPort, type Queryable, transactionPort } from "../db";
+import { runAuthorizers } from "../runs/authorization";
 import { runCanceller } from "../runs/cancel";
+import type { TeamAssetService } from "../team-assets/service";
 import { makeMigratedPglite } from "../test/pglite";
 import type { ConversationDoc } from "./conversations";
 import { PgConversationRepo } from "./conversations";
@@ -134,9 +136,37 @@ describe("durable chat submission over HTTP", () => {
   /** Flipped by the budget test; every other test runs with the budget open. */
   let withinBudget: boolean;
   let blobRoot: string;
+  let operatorRead: boolean;
+  let agentUse: boolean;
+  let autoCompleteRuns: boolean;
+  let agents: Map<string, SoulAgent>;
+  let agentAccess: ReturnType<typeof vi.fn<TeamAssetService["access"]>>;
 
   beforeEach(async () => {
     withinBudget = true;
+    operatorRead = false;
+    agentUse = true;
+    autoCompleteRuns = false;
+    agents = new Map([
+      [
+        "support-triage",
+        { id: "support-triage", name: "support-triage", frontmatter: {}, body: "" },
+      ],
+      [
+        "private-agent",
+        {
+          id: "private-agent-id",
+          name: "private-agent",
+          frontmatter: { ownership: { owners: [{ teamId: "private-team" }] } },
+          body: "Private Team instructions",
+        },
+      ],
+    ]);
+    agentAccess = vi.fn(async () => ({
+      levels: agentUse ? ["view", "use"] : ["view"],
+      canManageOwnership: false,
+      evidence: [],
+    }));
     db = await makeMigratedPglite();
 
     const sessionStore = new MemorySessionStore();
@@ -169,7 +199,16 @@ describe("durable chat submission over HTTP", () => {
 
     const runTransactions = transactionPort(queryable);
     const runStore = new RunStore(runTransactions);
+    const start = invocations.start.bind(invocations);
+    vi.spyOn(invocations, "start").mockImplementation(async (input) => {
+      const result = await start(input);
+      if (autoCompleteRuns) {
+        await db.query("UPDATE runs SET status = 'succeeded' WHERE id = $1", [result.runId]);
+      }
+      return result;
+    });
     conversationRepo = new PgConversationRepo(queryable);
+    const authorization = runAuthorizers(runStore, async () => operatorRead);
 
     app = await buildApp({
       sessionStore,
@@ -184,6 +223,8 @@ describe("durable chat submission over HTTP", () => {
         })),
       } as unknown as LlmService,
       conversationRepo,
+      soulLoader: { agents, surfaceComponents: new Map(), skills: new Map() } as SoulLoader,
+      teamAssets: { access: agentAccess } as unknown as TeamAssetService,
       messageRepo: new PgMessageRepo(queryable),
       invocations,
       conversationStore: new PgConversationStore(queryable),
@@ -191,15 +232,13 @@ describe("durable chat submission over HTTP", () => {
       runEvents: {
         events: new RunEventStore(runTransactions),
         runs: runStore,
-        authorize: async (req) =>
-          req.principal
-            ? { businessId: req.principal.businessId, audiences: ["participant"] }
-            : null,
+        authorize: authorization.read,
         pollIntervalMs: 5,
       },
       runCancel: runCanceller(
         new RunCancellationManager(runStore, new ChildLinkStore(runTransactions))
       ),
+      authorizeChatRunCancellation: authorization.cancel,
       fileService: files,
       rateLimiter: {
         check: async (_key, limit) => ({
@@ -539,6 +578,176 @@ describe("durable chat submission over HTTP", () => {
     });
 
     expect(stopped.statusCode).toBe(404);
+  });
+
+  it("does not replay another participant's private Run events", async () => {
+    const first = await chat();
+    const runId = String(first.headers["x-run-id"]);
+    await appendEvent(
+      { id: runId, businessId: DEPLOYMENT_BUSINESS_ID },
+      {
+        sequence: 1,
+        type: "assistant.delta",
+        audience: "participant",
+        payload: { text: "private text" },
+      }
+    );
+    const response = await app.inject({
+      method: "GET",
+      url: `/api/v1/runs/${runId}/events`,
+      cookies: { [SESSION_COOKIE]: otherSid },
+    });
+    expect(response.statusCode).toBe(403);
+    expect(response.body).not.toContain("private text");
+  });
+
+  it.each([false, true])(
+    "does not let a foreign reader stop a Chat Run (operator read: %s)",
+    async (operator) => {
+      operatorRead = operator;
+      const first = await chat();
+      const runId = String(first.headers["x-run-id"]);
+      await db.query("UPDATE runs SET status = 'queued' WHERE id = $1", [runId]);
+      const response = await app.inject({
+        method: "POST",
+        url: `/api/v1/chat/runs/${runId}/stop`,
+        cookies: { [SESSION_COOKIE]: otherSid, [CSRF_COOKIE]: CSRF },
+        headers: { "x-csrf-token": CSRF },
+      });
+      expect(response.statusCode).toBe(403);
+      expect(
+        (await db.query<{ status: string }>("SELECT status FROM runs WHERE id = $1", [runId]))
+          .rows[0]?.status
+      ).toBe("queued");
+    }
+  );
+
+  it("does not treat a Routine Run as a participant's Chat Run", async () => {
+    const first = await chat();
+    const runId = String(first.headers["x-run-id"]);
+    await db.query("UPDATE runs SET source = 'routine', status = 'queued' WHERE id = $1", [runId]);
+    const stopped = await app.inject({
+      method: "POST",
+      url: `/api/v1/chat/runs/${runId}/stop`,
+      cookies: { [SESSION_COOKIE]: sid, [CSRF_COOKIE]: CSRF },
+      headers: { "x-csrf-token": CSRF },
+    });
+    expect(stopped.statusCode).toBe(403);
+    const read = await app.inject({
+      method: "GET",
+      url: `/api/v1/runs/${runId}/events`,
+      cookies: { [SESSION_COOKIE]: sid },
+    });
+    expect(read.statusCode).toBe(403);
+  });
+
+  it("lets operations.read replay operator events without owning the Run", async () => {
+    const first = await chat();
+    const runId = String(first.headers["x-run-id"]);
+    await appendEvent(
+      { id: runId, businessId: DEPLOYMENT_BUSINESS_ID },
+      {
+        sequence: 1,
+        type: "state.transitioned",
+        audience: "operator",
+        payload: { detail: "operator evidence" },
+      }
+    );
+    operatorRead = true;
+    const response = await app.inject({
+      method: "GET",
+      url: `/api/v1/runs/${runId}/events`,
+      cookies: { [SESSION_COOKIE]: otherSid },
+    });
+    expect(response.statusCode).toBe(200);
+    expect(response.body).toContain("operator evidence");
+  });
+
+  it("keeps an owner's previous attempt readable after retry without operator evidence", async () => {
+    const first = await chat();
+    const runId = String(first.headers["x-run-id"]);
+    await appendEvent(
+      { id: runId, businessId: DEPLOYMENT_BUSINESS_ID },
+      {
+        sequence: 1,
+        type: "state.transitioned",
+        audience: "operator",
+        payload: { detail: "operator evidence" },
+      }
+    );
+    await retry(String(first.headers["x-turn-id"]));
+    const response = await app.inject({
+      method: "GET",
+      url: `/api/v1/runs/${runId}/events`,
+      cookies: { [SESSION_COOKIE]: sid },
+    });
+    expect(response.statusCode).toBe(200);
+    expect(response.body).not.toContain("operator evidence");
+  });
+
+  async function submitAgent(body: Record<string, unknown>) {
+    autoCompleteRuns = true;
+    return app.inject({
+      method: "POST",
+      url: "/api/v1/chat",
+      cookies: { [SESSION_COOKIE]: sid, [CSRF_COOKIE]: CSRF },
+      headers: { "x-csrf-token": CSRF },
+      payload: { ...BODY, ...body },
+    });
+  }
+
+  it("denies a private Agent mention before creating a Conversation or Run", async () => {
+    agentUse = false;
+    const response = await submitAgent({ agentId: "private-agent" });
+    expect(response.statusCode).toBe(403);
+    expect(await count("conversations")).toBe(0);
+    expect(await count("runs")).toBe(0);
+  });
+
+  it("does not persist a denied Agent hand-off in an existing Conversation", async () => {
+    const first = await chat();
+    const conversationId = String(first.headers["x-conversation-id"]);
+    agentUse = false;
+    const response = await submitAgent({ conversationId, agentId: "private-agent-id" });
+    expect(response.statusCode).toBe(403);
+    expect((await conversationRepo.findById(conversationId))?.agentId).toBeUndefined();
+    expect(await count("runs")).toBe(1);
+  });
+
+  it.each(["follow-up", "retry"])(
+    "rechecks use access to a persisted Agent on %s",
+    async (mode) => {
+      const first = await submitAgent({ agentId: "private-agent" });
+      expect(first.statusCode).toBe(200);
+      agentUse = false;
+      const response =
+        mode === "follow-up"
+          ? await submitAgent({ conversationId: first.headers["x-conversation-id"] })
+          : await app.inject({
+              method: "POST",
+              url: `/api/v1/chat/turns/${first.headers["x-turn-id"]}/retry`,
+              cookies: { [SESSION_COOKIE]: sid, [CSRF_COOKIE]: CSRF },
+              headers: { "x-csrf-token": CSRF },
+              payload: BODY,
+            });
+      expect(response.statusCode).toBe(403);
+      expect(await count("runs")).toBe(1);
+    }
+  );
+
+  it("allows a Team member's Agent and leaves the default assistant accessible", async () => {
+    const selected = await submitAgent({ agentId: "private-agent-id" });
+    expect(selected.statusCode).toBe(200);
+    expect(agentAccess).toHaveBeenCalledWith(
+      "agent",
+      "private-agent",
+      expect.objectContaining({ id: userId, kind: "user" }),
+      agents.get("private-agent")?.frontmatter.ownership
+    );
+    agentAccess.mockClear();
+    agentUse = false;
+    expect((await submitAgent({})).statusCode).toBe(200);
+    expect(agentAccess).not.toHaveBeenCalled();
   });
 
   async function upload(ownerId: string) {

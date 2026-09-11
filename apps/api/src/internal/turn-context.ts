@@ -29,6 +29,7 @@ import type { IntegrationStore } from "@tulipfarm/storage";
 import type { PresentationContext } from "@tulipfarm/surface";
 import type { RequestContext } from "@tulipfarm/tool-host";
 import type { ToolRegistry } from "../broker/tool-adapter";
+import { mayUseAgent } from "../chat/agent-access";
 import { estimateTokens } from "../chat/compaction";
 import { assembleAgentSystemPrompt } from "../chat/system-prompt";
 import { availableToolsFor, toolAgentFor } from "../chat/turn-helpers";
@@ -45,6 +46,7 @@ import {
   surfaceCatalogRevisionFor,
   surfaceRendererRegistry,
 } from "../surfaces/renderer-registry";
+import type { TeamAssetService } from "../team-assets/service";
 import { githubExcludedToolNames } from "../tools/github/visibility";
 import { ModelSelectorDeniedError, type ModelSelectorGate } from "./model-authz";
 import { resolveModelSelector } from "./model-selector";
@@ -128,6 +130,7 @@ export interface ChatTurnContextResolverOptions {
   readonly artifacts: ArtifactService;
   readonly store: ConversationStore;
   readonly soulLoader?: SoulLoader;
+  readonly teamAssets?: Pick<TeamAssetService, "access">;
   readonly toolRegistry?: ToolRegistry;
   readonly guardrails?: GuardrailsService;
   readonly bundledSkills?: ReadonlyMap<string, BundledSkill>;
@@ -198,6 +201,9 @@ export class ChatTurnContextResolver implements TurnContextResolver {
     // The Turn names an Agent this Soul does not have. Assembling the default assistant's Context
     // for it would run the turn as somebody else, so the Turn fails instead.
     if (agent === undefined) throw new TurnAuthorityError("agent_not_found");
+    if (!(await mayUseAgent(agent, authority.subject, this.options.teamAssets))) {
+      throw new TurnAuthorityError("agent_use_denied");
+    }
     const platformAgent = getDefaultAssistant(agent.name);
     const toolAgent = toolAgentFor(platformAgent, agent);
     const presentationContext = await presentationContextForAuthority(
