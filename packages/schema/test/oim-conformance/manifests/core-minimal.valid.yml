@@ -1,0 +1,28 @@
+oimVersion: "1.0"
+kind: Integration
+metadata:
+  id: weather
+  name: Weather
+  version: 1.0.0
+  description: Read current weather from a public provider.
+  license: Apache-2.0
+profiles:
+  core: "1.0"
+operations:
+  - id: current-weather
+    name: current_weather
+    description: Read current weather for one location.
+    effect: read
+    identityMode: shared_only
+    source:
+      type: http
+      method: GET
+      baseUrl: https://api.weather.example
+      path: /v1/current
+    response:
+      schema:
+        type: object
+      projection:
+        - /temperature
+        - /conditions
+      maxBytes: 16384

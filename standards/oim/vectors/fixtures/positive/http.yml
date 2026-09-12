@@ -1,0 +1,16 @@
+version: 1
+cases:
+  - name: reads-current-weather
+    operationId: current-weather
+    request:
+      city: Paris
+    response:
+      status: 200
+      body:
+        temperature: 18
+    expect:
+      request:
+        method: GET
+        url: https://api.example.test/weather?city=Paris
+      result:
+        temperature: 18

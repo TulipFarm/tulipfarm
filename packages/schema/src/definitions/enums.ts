@@ -92,10 +92,19 @@ export const SLUG_PATTERN = "^[a-z][a-z0-9]*(-[a-z0-9]+)*$";
 /** Canonical `secret://` reference pattern; excludes bare keys, env vars, and traversal refs. */
 export const SECRET_REFERENCE_PATTERN =
   "^secret://[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?(?:/[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?)*$";
+/** Opaque one-segment Secret id used by Connections; authority is stored as metadata, not in it. */
+export const OPAQUE_SECRET_REFERENCE_PATTERN =
+  "^secret://(?!(?:constructor|prototype|__proto__)$)[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$";
 
 const SECRET_REFERENCE_REGEX = new RegExp(SECRET_REFERENCE_PATTERN);
+const OPAQUE_SECRET_REFERENCE_REGEX = new RegExp(OPAQUE_SECRET_REFERENCE_PATTERN);
 
 /** True when `value` is a `secret://` reference rather than an inline credential. */
 export function isSecretReference(value: string): boolean {
   return SECRET_REFERENCE_REGEX.test(value);
+}
+
+/** True for a Connection-safe opaque Secret id with no path-derived authority. */
+export function isOpaqueSecretReference(value: string): boolean {
+  return OPAQUE_SECRET_REFERENCE_REGEX.test(value);
 }

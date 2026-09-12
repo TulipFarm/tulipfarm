@@ -1,0 +1,34 @@
+oimVersion: "1.0"
+kind: Integration
+metadata:
+  id: issues
+  name: Issues
+  version: 1.0.0
+  description: Receive issue events.
+  license: Apache-2.0
+profiles: { core: "1.0" }
+operations:
+  - id: status
+    name: issue_status
+    description: Read service status.
+    effect: read
+    identityMode: shared_only
+    source:
+      type: http
+      method: GET
+      baseUrl: https://api.example.test
+      path: /status
+    response:
+      schema: { type: object }
+      maxBytes: 4096
+events:
+  path: /issues
+  verification:
+    scheme: hmac_sha256
+    secretSlot: webhook_secret
+    signatureHeader: X-Signature
+  deduplication: { kind: none }
+  eventTypes:
+    - type: issue
+      selector: { pointer: /type, equals: issue }
+      schema: { type: object }

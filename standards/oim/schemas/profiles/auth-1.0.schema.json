@@ -1,0 +1,707 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:oim:schema:1.0:profiles:auth-1.0.schema.json",
+  "title": "Open Integration Manifest Auth 1.0",
+  "additionalProperties": false,
+  "type": "object",
+  "required": ["credentialSlots", "steps"],
+  "properties": {
+    "credentialSlots": {
+      "minItems": 1,
+      "type": "array",
+      "items": {
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["id", "label", "kind"],
+        "properties": {
+          "id": {
+            "pattern": "^[a-z][a-z0-9_]{1,63}$",
+            "maxLength": 64,
+            "type": "string"
+          },
+          "label": {
+            "minLength": 1,
+            "maxLength": 128,
+            "type": "string"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "api_key",
+              "bearer_token",
+              "oauth2_access_token",
+              "oauth2_refresh_token",
+              "client_secret",
+              "private_key",
+              "webhook_secret"
+            ]
+          },
+          "required": {
+            "type": "boolean"
+          }
+        }
+      }
+    },
+    "configurationFields": {
+      "type": "array",
+      "items": {
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["id", "label", "type"],
+        "properties": {
+          "id": {
+            "pattern": "^[a-z][a-z0-9_]{1,63}$",
+            "maxLength": 64,
+            "type": "string"
+          },
+          "label": {
+            "minLength": 1,
+            "maxLength": 128,
+            "type": "string"
+          },
+          "type": {
+            "type": "string",
+            "enum": ["string", "url", "boolean", "integer"]
+          },
+          "required": {
+            "type": "boolean"
+          },
+          "agentVisible": {
+            "type": "boolean"
+          }
+        }
+      }
+    },
+    "steps": {
+      "minItems": 1,
+      "type": "array",
+      "items": {
+        "anyOf": [
+          {
+            "additionalProperties": false,
+            "type": "object",
+            "required": ["id", "title", "type", "fields"],
+            "properties": {
+              "id": {
+                "pattern": "^[a-z][a-z0-9_]{1,63}$",
+                "maxLength": 64,
+                "type": "string"
+              },
+              "title": {
+                "minLength": 1,
+                "maxLength": 128,
+                "type": "string"
+              },
+              "description": {
+                "minLength": 1,
+                "maxLength": 2048,
+                "type": "string"
+              },
+              "type": {
+                "const": "fields",
+                "type": "string"
+              },
+              "fields": {
+                "minItems": 1,
+                "type": "array",
+                "items": {
+                  "additionalProperties": false,
+                  "type": "object",
+                  "required": ["id", "label", "input", "target"],
+                  "properties": {
+                    "id": {
+                      "pattern": "^[a-z][a-z0-9_]{1,63}$",
+                      "maxLength": 64,
+                      "type": "string"
+                    },
+                    "label": {
+                      "minLength": 1,
+                      "maxLength": 128,
+                      "type": "string"
+                    },
+                    "description": {
+                      "minLength": 1,
+                      "maxLength": 1024,
+                      "type": "string"
+                    },
+                    "input": {
+                      "type": "string",
+                      "enum": ["text", "password", "url"]
+                    },
+                    "target": {
+                      "anyOf": [
+                        {
+                          "additionalProperties": false,
+                          "type": "object",
+                          "required": ["type", "slot"],
+                          "properties": {
+                            "type": {
+                              "const": "credential",
+                              "type": "string"
+                            },
+                            "slot": {
+                              "pattern": "^[a-z][a-z0-9_]{1,63}$",
+                              "maxLength": 64,
+                              "type": "string"
+                            }
+                          }
+                        },
+                        {
+                          "additionalProperties": false,
+                          "type": "object",
+                          "required": ["type", "field"],
+                          "properties": {
+                            "type": {
+                              "const": "configuration",
+                              "type": "string"
+                            },
+                            "field": {
+                              "pattern": "^[a-z][a-z0-9_]{1,63}$",
+                              "maxLength": 64,
+                              "type": "string"
+                            }
+                          }
+                        }
+                      ]
+                    },
+                    "required": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          {
+            "additionalProperties": false,
+            "type": "object",
+            "required": [
+              "id",
+              "title",
+              "type",
+              "authorizationUrl",
+              "tokenUrl",
+              "scopes",
+              "clientId",
+              "bindings"
+            ],
+            "properties": {
+              "id": {
+                "pattern": "^[a-z][a-z0-9_]{1,63}$",
+                "maxLength": 64,
+                "type": "string"
+              },
+              "title": {
+                "minLength": 1,
+                "maxLength": 128,
+                "type": "string"
+              },
+              "description": {
+                "minLength": 1,
+                "maxLength": 2048,
+                "type": "string"
+              },
+              "type": {
+                "const": "oauth2",
+                "type": "string"
+              },
+              "authorizationUrl": {
+                "pattern": "^https://[A-Za-z0-9](?:[A-Za-z0-9.-]*[A-Za-z0-9])?(?::[1-9][0-9]{0,4})?(?:/[^\\s]*)?$",
+                "type": "string"
+              },
+              "tokenUrl": {
+                "pattern": "^https://[A-Za-z0-9](?:[A-Za-z0-9.-]*[A-Za-z0-9])?(?::[1-9][0-9]{0,4})?(?:/[^\\s]*)?$",
+                "type": "string"
+              },
+              "scopes": {
+                "uniqueItems": true,
+                "type": "array",
+                "items": {
+                  "minLength": 1,
+                  "type": "string"
+                }
+              },
+              "pkce": {
+                "type": "boolean"
+              },
+              "tokenEndpointAuthMethod": {
+                "anyOf": [
+                  {
+                    "const": "none",
+                    "type": "string"
+                  },
+                  {
+                    "const": "client_secret_post",
+                    "type": "string"
+                  },
+                  {
+                    "const": "client_secret_basic",
+                    "type": "string"
+                  }
+                ]
+              },
+              "authorizationParameters": {
+                "additionalProperties": false,
+                "type": "object",
+                "patternProperties": {
+                  "^[A-Za-z][A-Za-z0-9_.-]{0,127}$": {
+                    "minLength": 1,
+                    "maxLength": 2048,
+                    "type": "string"
+                  }
+                }
+              },
+              "clientId": {
+                "additionalProperties": false,
+                "type": "object",
+                "required": ["type", "slot"],
+                "properties": {
+                  "type": {
+                    "const": "credential",
+                    "type": "string"
+                  },
+                  "slot": {
+                    "pattern": "^[a-z][a-z0-9_]{1,63}$",
+                    "maxLength": 64,
+                    "type": "string"
+                  }
+                }
+              },
+              "clientSecret": {
+                "additionalProperties": false,
+                "type": "object",
+                "required": ["type", "slot"],
+                "properties": {
+                  "type": {
+                    "const": "credential",
+                    "type": "string"
+                  },
+                  "slot": {
+                    "pattern": "^[a-z][a-z0-9_]{1,63}$",
+                    "maxLength": 64,
+                    "type": "string"
+                  }
+                }
+              },
+              "bindings": {
+                "minItems": 1,
+                "type": "array",
+                "items": {
+                  "additionalProperties": false,
+                  "type": "object",
+                  "required": ["sourcePath", "target"],
+                  "properties": {
+                    "sourcePath": {
+                      "pattern": "^/",
+                      "maxLength": 512,
+                      "type": "string"
+                    },
+                    "target": {
+                      "anyOf": [
+                        {
+                          "additionalProperties": false,
+                          "type": "object",
+                          "required": ["type", "slot"],
+                          "properties": {
+                            "type": {
+                              "const": "credential",
+                              "type": "string"
+                            },
+                            "slot": {
+                              "pattern": "^[a-z][a-z0-9_]{1,63}$",
+                              "maxLength": 64,
+                              "type": "string"
+                            }
+                          }
+                        },
+                        {
+                          "additionalProperties": false,
+                          "type": "object",
+                          "required": ["type", "field"],
+                          "properties": {
+                            "type": {
+                              "const": "configuration",
+                              "type": "string"
+                            },
+                            "field": {
+                              "pattern": "^[a-z][a-z0-9_]{1,63}$",
+                              "maxLength": 64,
+                              "type": "string"
+                            }
+                          }
+                        }
+                      ]
+                    }
+                  }
+                }
+              }
+            }
+          },
+          {
+            "additionalProperties": false,
+            "type": "object",
+            "required": ["id", "title", "type", "createUrl", "manifest", "bindings"],
+            "properties": {
+              "id": {
+                "pattern": "^[a-z][a-z0-9_]{1,63}$",
+                "maxLength": 64,
+                "type": "string"
+              },
+              "title": {
+                "minLength": 1,
+                "maxLength": 128,
+                "type": "string"
+              },
+              "description": {
+                "minLength": 1,
+                "maxLength": 2048,
+                "type": "string"
+              },
+              "type": {
+                "const": "app_manifest",
+                "type": "string"
+              },
+              "createUrl": {
+                "pattern": "^https://[A-Za-z0-9](?:[A-Za-z0-9.-]*[A-Za-z0-9])?(?::[1-9][0-9]{0,4})?(?:/[^\\s]*)?$",
+                "type": "string"
+              },
+              "manifest": {
+                "type": "object",
+                "patternProperties": {
+                  "^(.*)$": {}
+                }
+              },
+              "bindings": {
+                "minItems": 1,
+                "type": "array",
+                "items": {
+                  "additionalProperties": false,
+                  "type": "object",
+                  "required": ["sourcePath", "target"],
+                  "properties": {
+                    "sourcePath": {
+                      "pattern": "^/",
+                      "maxLength": 512,
+                      "type": "string"
+                    },
+                    "target": {
+                      "anyOf": [
+                        {
+                          "additionalProperties": false,
+                          "type": "object",
+                          "required": ["type", "slot"],
+                          "properties": {
+                            "type": {
+                              "const": "credential",
+                              "type": "string"
+                            },
+                            "slot": {
+                              "pattern": "^[a-z][a-z0-9_]{1,63}$",
+                              "maxLength": 64,
+                              "type": "string"
+                            }
+                          }
+                        },
+                        {
+                          "additionalProperties": false,
+                          "type": "object",
+                          "required": ["type", "field"],
+                          "properties": {
+                            "type": {
+                              "const": "configuration",
+                              "type": "string"
+                            },
+                            "field": {
+                              "pattern": "^[a-z][a-z0-9_]{1,63}$",
+                              "maxLength": 64,
+                              "type": "string"
+                            }
+                          }
+                        }
+                      ]
+                    }
+                  }
+                }
+              }
+            }
+          },
+          {
+            "additionalProperties": false,
+            "type": "object",
+            "required": ["id", "title", "type", "url", "bindings"],
+            "properties": {
+              "id": {
+                "pattern": "^[a-z][a-z0-9_]{1,63}$",
+                "maxLength": 64,
+                "type": "string"
+              },
+              "title": {
+                "minLength": 1,
+                "maxLength": 128,
+                "type": "string"
+              },
+              "description": {
+                "minLength": 1,
+                "maxLength": 2048,
+                "type": "string"
+              },
+              "type": {
+                "const": "install",
+                "type": "string"
+              },
+              "url": {
+                "pattern": "^https://[A-Za-z0-9](?:[A-Za-z0-9.-]*[A-Za-z0-9])?(?::[1-9][0-9]{0,4})?(?:/[^\\s]*)?$",
+                "type": "string"
+              },
+              "bindings": {
+                "minItems": 1,
+                "type": "array",
+                "items": {
+                  "additionalProperties": false,
+                  "type": "object",
+                  "required": ["sourcePath", "target"],
+                  "properties": {
+                    "sourcePath": {
+                      "pattern": "^/",
+                      "maxLength": 512,
+                      "type": "string"
+                    },
+                    "target": {
+                      "anyOf": [
+                        {
+                          "additionalProperties": false,
+                          "type": "object",
+                          "required": ["type", "slot"],
+                          "properties": {
+                            "type": {
+                              "const": "credential",
+                              "type": "string"
+                            },
+                            "slot": {
+                              "pattern": "^[a-z][a-z0-9_]{1,63}$",
+                              "maxLength": 64,
+                              "type": "string"
+                            }
+                          }
+                        },
+                        {
+                          "additionalProperties": false,
+                          "type": "object",
+                          "required": ["type", "field"],
+                          "properties": {
+                            "type": {
+                              "const": "configuration",
+                              "type": "string"
+                            },
+                            "field": {
+                              "pattern": "^[a-z][a-z0-9_]{1,63}$",
+                              "maxLength": 64,
+                              "type": "string"
+                            }
+                          }
+                        }
+                      ]
+                    }
+                  }
+                }
+              }
+            }
+          },
+          {
+            "additionalProperties": false,
+            "type": "object",
+            "required": [
+              "id",
+              "title",
+              "type",
+              "operationId",
+              "unregisterOperationId",
+              "subscriptionIdPath",
+              "secretSlot",
+              "registration",
+              "unregistration"
+            ],
+            "properties": {
+              "id": {
+                "pattern": "^[a-z][a-z0-9_]{1,63}$",
+                "maxLength": 64,
+                "type": "string"
+              },
+              "title": {
+                "minLength": 1,
+                "maxLength": 128,
+                "type": "string"
+              },
+              "description": {
+                "minLength": 1,
+                "maxLength": 2048,
+                "type": "string"
+              },
+              "type": {
+                "const": "webhook",
+                "type": "string"
+              },
+              "operationId": {
+                "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$",
+                "maxLength": 96,
+                "type": "string"
+              },
+              "unregisterOperationId": {
+                "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$",
+                "maxLength": 96,
+                "type": "string"
+              },
+              "subscriptionIdPath": {
+                "pattern": "^(?:/(?:[^/~]|~[01])*)+$",
+                "maxLength": 512,
+                "type": "string"
+              },
+              "secretSlot": {
+                "pattern": "^[a-z][a-z0-9_]{1,63}$",
+                "maxLength": 64,
+                "type": "string"
+              },
+              "registration": {
+                "additionalProperties": false,
+                "type": "object",
+                "required": ["callbackUrl"],
+                "properties": {
+                  "callbackUrl": {
+                    "anyOf": [
+                      {
+                        "additionalProperties": false,
+                        "type": "object",
+                        "required": ["in", "pointer"],
+                        "properties": {
+                          "in": {
+                            "const": "body",
+                            "type": "string"
+                          },
+                          "pointer": {
+                            "pattern": "^(?:/(?:[^/~]|~[01])*)+$",
+                            "maxLength": 512,
+                            "type": "string"
+                          }
+                        }
+                      },
+                      {
+                        "additionalProperties": false,
+                        "type": "object",
+                        "required": ["in", "name"],
+                        "properties": {
+                          "in": {
+                            "const": "parameter",
+                            "type": "string"
+                          },
+                          "name": {
+                            "pattern": "^[A-Za-z_][A-Za-z0-9_.-]{0,127}$",
+                            "maxLength": 128,
+                            "type": "string"
+                          }
+                        }
+                      }
+                    ]
+                  },
+                  "secret": {
+                    "anyOf": [
+                      {
+                        "additionalProperties": false,
+                        "type": "object",
+                        "required": ["in", "pointer"],
+                        "properties": {
+                          "in": {
+                            "const": "body",
+                            "type": "string"
+                          },
+                          "pointer": {
+                            "pattern": "^(?:/(?:[^/~]|~[01])*)+$",
+                            "maxLength": 512,
+                            "type": "string"
+                          }
+                        }
+                      },
+                      {
+                        "additionalProperties": false,
+                        "type": "object",
+                        "required": ["in", "name"],
+                        "properties": {
+                          "in": {
+                            "const": "parameter",
+                            "type": "string"
+                          },
+                          "name": {
+                            "pattern": "^[A-Za-z_][A-Za-z0-9_.-]{0,127}$",
+                            "maxLength": 128,
+                            "type": "string"
+                          }
+                        }
+                      }
+                    ]
+                  }
+                }
+              },
+              "unregistration": {
+                "additionalProperties": false,
+                "type": "object",
+                "required": ["subscriptionId"],
+                "properties": {
+                  "subscriptionId": {
+                    "anyOf": [
+                      {
+                        "additionalProperties": false,
+                        "type": "object",
+                        "required": ["in", "pointer"],
+                        "properties": {
+                          "in": {
+                            "const": "body",
+                            "type": "string"
+                          },
+                          "pointer": {
+                            "pattern": "^(?:/(?:[^/~]|~[01])*)+$",
+                            "maxLength": 512,
+                            "type": "string"
+                          }
+                        }
+                      },
+                      {
+                        "additionalProperties": false,
+                        "type": "object",
+                        "required": ["in", "name"],
+                        "properties": {
+                          "in": {
+                            "const": "parameter",
+                            "type": "string"
+                          },
+                          "name": {
+                            "pattern": "^[A-Za-z_][A-Za-z0-9_.-]{0,127}$",
+                            "maxLength": 128,
+                            "type": "string"
+                          }
+                        }
+                      }
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        ]
+      }
+    },
+    "healthCheckOperationId": {
+      "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$",
+      "maxLength": 96,
+      "type": "string"
+    },
+    "allowedOriginHosts": {
+      "minItems": 1,
+      "uniqueItems": true,
+      "type": "array",
+      "items": {
+        "pattern": "^(?:\\*\\.)?[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?(?:\\.[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?)+$",
+        "maxLength": 253,
+        "type": "string"
+      }
+    }
+  }
+}

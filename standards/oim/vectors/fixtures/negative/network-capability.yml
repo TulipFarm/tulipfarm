@@ -1,0 +1,12 @@
+version: 1
+network: true
+cases:
+  - name: attempts-network-access
+    operationId: current-weather
+    request: {}
+    response:
+      status: 200
+      body: {}
+    expect:
+      request: {}
+      result: {}

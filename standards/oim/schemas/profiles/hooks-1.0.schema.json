@@ -1,0 +1,33 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:oim:schema:1.0:profiles:hooks-1.0.schema.json",
+  "title": "Open Integration Manifest Hooks 1.0",
+  "minItems": 1,
+  "type": "array",
+  "items": {
+    "additionalProperties": false,
+    "type": "object",
+    "required": ["kind", "file", "export"],
+    "properties": {
+      "kind": {
+        "type": "string",
+        "enum": [
+          "input_validate",
+          "request_shape",
+          "response_normalize",
+          "webhook_classify",
+          "content_map",
+          "acl_map"
+        ]
+      },
+      "file": {
+        "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*(?:/[A-Za-z0-9][A-Za-z0-9._-]*)*$",
+        "type": "string"
+      },
+      "export": {
+        "pattern": "^[A-Za-z_$][A-Za-z0-9_$]*$",
+        "type": "string"
+      }
+    }
+  }
+}

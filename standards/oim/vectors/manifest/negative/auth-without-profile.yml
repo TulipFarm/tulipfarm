@@ -1,0 +1,37 @@
+oimVersion: "1.0"
+kind: Integration
+metadata:
+  id: contacts
+  name: Contacts
+  version: 1.0.0
+  description: Read contacts.
+  license: Apache-2.0
+profiles: { core: "1.0" }
+auth:
+  credentialSlots:
+    - id: api_key
+      label: API key
+      kind: api_key
+  steps:
+    - id: key
+      type: fields
+      title: Connect
+      fields:
+        - id: api_key
+          label: API key
+          input: password
+          target: { type: credential, slot: api_key }
+operations:
+  - id: contacts
+    name: list_contacts
+    description: List contacts.
+    effect: read
+    identityMode: shared_only
+    source:
+      type: http
+      method: GET
+      baseUrl: https://api.example.test
+      path: /contacts
+    response:
+      schema: { type: array }
+      maxBytes: 4096

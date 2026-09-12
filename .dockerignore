@@ -1,6 +1,8 @@
 **/node_modules
 .git
 **/dist
+!standards/oim/dist/
+!standards/oim/dist/oim-runtime.mjs
 **/build
 **/.turbo
 **/.next
