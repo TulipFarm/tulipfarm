@@ -57,6 +57,7 @@ export type {
   ConnectionAuthStep,
   ConnectionAuthStepStatus,
   PutConnectionAuthStep,
+  UpdateConnectionAuthStep,
   UpdateConnectionAuthStepHealth,
 } from "./connection-auth-step-store";
 export {
@@ -69,11 +70,16 @@ export type {
   VerifiedConnectionExternalIdentity,
 } from "./connection-external-identity-store";
 export {
+  bindVerifiedConnectionExternalIdentity,
   CONNECTION_EXTERNAL_IDENTITY_STORAGE_STATEMENTS,
   ConnectionExternalIdentityConflictError,
   ConnectionExternalIdentityStore,
 } from "./connection-external-identity-store";
-export type { PersistedConnection } from "./connection-store";
+export type {
+  ConnectionAuthStepFence,
+  PersistedConnection,
+  PublishConnectionAuthStep,
+} from "./connection-store";
 export {
   CONNECTION_STORAGE_STATEMENTS,
   ConnectionIdentityConflictError,

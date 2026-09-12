@@ -18,6 +18,7 @@ const DEFERRED_OPTIONS: Readonly<Record<string, string>> = {
   routineAuthoring: "PR 4 — jobs and tool effects to their owners",
   // PR 6: no form storage exists, and GovernedFormView is rendered by no route.
   forms: "PR 6 — compose the governed packages",
+  oimConnections: "P12 — final OIM product composition and activation",
 };
 
 /** Option keys in `app.ts` that gate at least one `registerXxxRoutes` call. */

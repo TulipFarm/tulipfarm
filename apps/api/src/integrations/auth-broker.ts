@@ -61,6 +61,15 @@ export interface StartAuthStepInput {
   principal?: { readonly kind: string; readonly id: string };
   /** Target org login for an `app_manifest` step; ignored by steps with no `create_url_for_org`. */
   org?: string;
+  /** The OIM Connection this authorization belongs to; absent for a legacy connection.yaml flow. */
+  connectionId?: string;
+  /** Server-held package identity that the callback must re-check before any provider request. */
+  oim?: {
+    readonly stepId: string;
+    readonly stepDigest: string;
+    readonly manifestDigest: string;
+    readonly packageDigest: string;
+  };
 }
 
 function stepAt(manifest: IntegrationManifest, index: number): AuthStep {
@@ -86,6 +95,11 @@ async function issueState(input: StartAuthStepInput, codeVerifier: string | null
     ),
     consumedAt: null,
     principal: input.principal ?? null,
+    connectionId: input.connectionId ?? null,
+    oimStepId: input.oim?.stepId ?? null,
+    oimStepDigest: input.oim?.stepDigest ?? null,
+    manifestDigest: input.oim?.manifestDigest ?? null,
+    packageDigest: input.oim?.packageDigest ?? null,
   });
   return state;
 }
@@ -197,7 +211,11 @@ export async function startAuthStep(input: StartAuthStepInput): Promise<AuthStar
   const step = stepAt(input.manifest, input.stepIndex);
 
   // Personal credentials must come from personal steps; grant type alone is insufficient.
-  if (input.principal !== undefined && !isPersonalCredentialStep(step)) {
+  if (
+    input.principal !== undefined &&
+    input.connectionId === undefined &&
+    !isPersonalCredentialStep(step)
+  ) {
     throw new AuthBrokerError(
       "unknown_step",
       `step ${input.stepIndex} cannot issue a personal credential; only an oauth2 authorization_code step declaring \`personal: true\` can`
@@ -218,6 +236,7 @@ export async function startAuthStep(input: StartAuthStepInput): Promise<AuthStar
       const vars = {
         ...integrationAuthEndpointVars(input.endpoints, input.env),
         webhook_url: ingressWebhookUrl(input.endpoints, input.slug),
+        state,
       };
       // An org can only be targeted through a template the step opts into; a step with no
       // create_url_for_org silently falls back to its personal-account create_url.
@@ -266,8 +285,9 @@ export async function startAuthStep(input: StartAuthStepInput): Promise<AuthStar
 
 export interface CompleteAuthStepInput {
   query: Record<string, string>;
-  loadManifest: (slug: string) => IntegrationManifest | undefined;
-  loadEnv: (slug: string) => Promise<Record<string, string>>;
+  loadManifest: (slug: string, connectionId?: string | null) => IntegrationManifest | undefined;
+  loadEnv: (slug: string, connectionId?: string | null) => Promise<Record<string, string>>;
+  validateRequest?: (request: IntegrationAuthRequestDoc) => Promise<void> | void;
   endpoints: AuthEndpoints;
   repo: IntegrationAuthRequestRepo;
   fetchImpl?: typeof globalThis.fetch;
@@ -282,21 +302,62 @@ export interface AuthStepOutcome {
   env: Record<string, string>;
   principal?: { readonly kind: string; readonly id: string };
   oauth2Step?: AuthOAuth2Step;
+  connectionId?: string;
+}
+
+interface AuthAppManifestCapture {
+  readonly oim_capture?: Readonly<Record<string, string>>;
+}
+
+interface OptionalClientSecretStep {
+  readonly client_secret_optional?: boolean;
+  readonly token_endpoint_auth_method?: "none" | "client_secret_post" | "client_secret_basic";
+}
+
+function oauthClientAuthentication(
+  step: AuthOAuth2Step,
+  clientId: string | undefined,
+  clientSecret: string | undefined,
+  missingMessage: string
+): { readonly body: Record<string, string>; readonly authorization?: string } {
+  const declared = (step as OptionalClientSecretStep).token_endpoint_auth_method;
+  const method =
+    declared ??
+    ((step as OptionalClientSecretStep).client_secret_optional === true
+      ? "none"
+      : "client_secret_post");
+  if (!clientId) throw new AuthBrokerError("missing_credentials", missingMessage);
+  if (method === "none") return { body: { client_id: clientId } };
+  if (!clientSecret) throw new AuthBrokerError("missing_credentials", missingMessage);
+  if (method === "client_secret_basic") {
+    return {
+      body: {},
+      authorization: `Basic ${Buffer.from(`${clientId}:${clientSecret}`).toString("base64")}`,
+    };
+  }
+  return { body: { client_id: clientId, client_secret: clientSecret } };
 }
 
 async function postForm(
   fetchImpl: typeof globalThis.fetch,
   url: string,
-  body: Record<string, string>
+  body: Record<string, string>,
+  authorization?: string
 ): Promise<Record<string, unknown>> {
-  const response = await fetchImpl(url, {
-    method: "POST",
-    headers: {
-      accept: "application/json",
-      "content-type": "application/x-www-form-urlencoded",
-    },
-    body: new URLSearchParams(body).toString(),
-  });
+  let response: Response;
+  try {
+    response = await fetchImpl(url, {
+      method: "POST",
+      headers: {
+        accept: "application/json",
+        "content-type": "application/x-www-form-urlencoded",
+        ...(authorization === undefined ? {} : { authorization }),
+      },
+      body: new URLSearchParams(body).toString(),
+    });
+  } catch {
+    throw new AuthBrokerError("exchange_failed", "token endpoint could not be reached");
+  }
   const text = await response.text();
   let parsed: unknown;
   try {
@@ -358,7 +419,8 @@ export async function completeAuthStep(input: CompleteAuthStepInput): Promise<Au
     throw new AuthBrokerError("invalid_state", "state is unknown, expired, or already used");
   }
 
-  const manifest = input.loadManifest(request.integrationSlug);
+  await input.validateRequest?.(request);
+  const manifest = input.loadManifest(request.integrationSlug, request.connectionId);
   if (!manifest) {
     throw new AuthBrokerError("unknown_step", `integration not found: ${request.integrationSlug}`);
   }
@@ -369,6 +431,7 @@ export async function completeAuthStep(input: CompleteAuthStepInput): Promise<Au
     stepIndex: request.stepIndex,
     webUrl: request.webUrl ?? input.endpoints.webUrl,
     ...(request.principal === null ? {} : { principal: request.principal }),
+    ...(request.connectionId ? { connectionId: request.connectionId } : {}),
   };
 
   try {
@@ -411,7 +474,15 @@ async function completeStep(ctx: {
     }
 
     case "app_manifest": {
-      if (!step.exchange) return { ...outcome, env: {} };
+      if (!step.exchange) {
+        const capture = (step as AuthAppManifestCapture).oim_capture ?? {};
+        const env: Record<string, string> = {};
+        for (const [param, envName] of Object.entries(capture)) {
+          const value = input.query[param];
+          if (value !== undefined) env[envName] = value;
+        }
+        return { ...outcome, env };
+      }
       const code = input.query.code;
       if (!code) throw new AuthBrokerError("exchange_failed", "callback carried no code");
       const response = await fetchImpl(renderTemplate(step.exchange.url, { code }), {
@@ -436,21 +507,28 @@ async function completeStep(ctx: {
     case "oauth2": {
       const code = input.query.code;
       if (!code) throw new AuthBrokerError("exchange_failed", "callback carried no code");
-      const env = await input.loadEnv(request.integrationSlug);
+      const env = await input.loadEnv(request.integrationSlug, request.connectionId);
       const clientId = env[step.client_id_env];
       const clientSecret = env[step.client_secret_env];
-      if (!clientId || !clientSecret) {
-        throw new AuthBrokerError("missing_credentials", "client credentials are not configured");
-      }
+      const clientAuthentication = oauthClientAuthentication(
+        step,
+        clientId,
+        clientSecret,
+        "client credentials are not configured"
+      );
       const body: Record<string, string> = {
         grant_type: "authorization_code",
         code,
         redirect_uri: request.callbackUrl ?? input.endpoints.callbackUrl,
-        client_id: clientId,
-        client_secret: clientSecret,
+        ...clientAuthentication.body,
       };
       if (request.codeVerifier) body.code_verifier = request.codeVerifier;
-      const response = await postForm(fetchImpl, step.token_url, body);
+      const response = await postForm(
+        fetchImpl,
+        step.token_url,
+        body,
+        clientAuthentication.authorization
+      );
       return { ...outcome, oauth2Step: step, env: mapTokenResponse(step, response, now) };
     }
   }
@@ -483,18 +561,22 @@ export async function refreshOAuth2Credentials(
 
   const clientId = env[step.client_id_env];
   const clientSecret = env[step.client_secret_env];
-  if (!clientId || !clientSecret) {
-    throw new AuthBrokerError("missing_credentials", "refresh requires stored app credentials");
-  }
+  const clientAuthentication = oauthClientAuthentication(
+    step,
+    clientId,
+    clientSecret,
+    "refresh requires stored app credentials"
+  );
+  const body: Record<string, string> = {
+    grant_type: "refresh_token",
+    refresh_token: refreshToken,
+    ...clientAuthentication.body,
+  };
   const response = await postForm(
     options.fetchImpl ?? globalThis.fetch,
     step.refresh_url ?? step.token_url,
-    {
-      grant_type: "refresh_token",
-      refresh_token: refreshToken,
-      client_id: clientId,
-      client_secret: clientSecret,
-    }
+    body,
+    clientAuthentication.authorization
   );
   // Preserve stored refresh tokens when providers do not rotate them.
   const mapped = mapTokenResponse(step, response, options.now ?? new Date());

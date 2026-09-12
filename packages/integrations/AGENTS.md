@@ -13,6 +13,7 @@ Owns adapter contracts, event normalization, source ACLs, sync checkpoints, and 
 | Path | Owns |
 | --- | --- |
 | `src/auth/` | Provider-neutral public origins and callback URL resolution. |
+| `src/connections/` | Exact-major Connection selection, operation credential binding, OAuth step refresh, and manifestless revoke. |
 | `src/http.ts` | Provider-neutral HTTP port, failure classification, bounded pagination. |
 | `src/grants.ts` | Default-deny grants for concrete external targets. |
 | `src/egress/` | Manifest-to-ToolContract compiler, adapter, fetch transport, destination cage. `web-content.ts` renders a fetched response to Markdown deterministically via turndown — no model, so the same bytes always give the same text. |

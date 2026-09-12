@@ -48,6 +48,10 @@ export interface UpdateConnectionAuthStepHealth {
   readonly healthCheckedAt: string;
 }
 
+export interface UpdateConnectionAuthStep extends PutConnectionAuthStep {
+  readonly expectedRevision: number;
+}
+
 export const CONNECTION_AUTH_STEP_STORAGE_STATEMENTS: readonly string[] = [
   `CREATE TABLE IF NOT EXISTS connection_auth_steps (
     business_id        text NOT NULL,
@@ -214,6 +218,44 @@ export class ConnectionAuthStepStore {
           input.stepId,
           input.expectedRevision,
           input.status,
+          input.expiresAt,
+          input.healthCheckedAt,
+        ]
+      );
+      return result.rows[0] === undefined ? null : fromRow(result.rows[0]);
+    });
+  }
+
+  async update(input: UpdateConnectionAuthStep): Promise<ConnectionAuthStep | null> {
+    return this.transactions.withTransaction(async (transaction) => {
+      const result = await transaction.query<AuthStepRow>(
+        `UPDATE connection_auth_steps
+            SET status = $5,
+                access_slot = $6,
+                access_secret_ref = $7,
+                refresh_slot = $8,
+                refresh_secret_ref = $9,
+                external_identity = $10::jsonb,
+                expires_at = $11,
+                health_checked_at = $12,
+                revision = revision + 1,
+                updated_at = now()
+          WHERE business_id = $1
+            AND connection_id = $2
+            AND step_id = $3
+            AND revision = $4
+          RETURNING *`,
+        [
+          input.businessId,
+          input.connectionId,
+          input.stepId,
+          input.expectedRevision,
+          input.status,
+          input.accessSlot,
+          input.accessSecretRef,
+          input.refreshSlot,
+          input.refreshSecretRef,
+          input.externalIdentity === null ? null : JSON.stringify(input.externalIdentity),
           input.expiresAt,
           input.healthCheckedAt,
         ]

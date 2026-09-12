@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { resolveAuthEndpoints } from "@tulipfarm/integrations";
 import type { IntegrationManifest } from "@tulipfarm/soul";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   AuthBrokerError,
   buildAuthorizeUrl,
@@ -260,6 +260,51 @@ describe("startAuthStep", () => {
     expect(action.url).toContain(`state=${repo.requests[0].state}`);
   });
 
+  it("renders the issued state into both the app URL and submitted manifest", async () => {
+    const repo = new MemoryAuthRequestRepo();
+    const action = await startAuthStep({
+      slug: "github-v2",
+      manifest: manifestWith([
+        {
+          kind: "app_manifest",
+          create_url: "https://github.com/settings/apps/new?state={state}",
+          manifest_param: "manifest",
+          delivery: "form_post",
+          manifest: { state: "{state}", callback: "{callback_url}" },
+        },
+      ]),
+      stepIndex: 0,
+      env: {},
+      endpoints,
+      repo,
+      connectionId: "connection-1",
+      oim: {
+        stepId: "app",
+        stepDigest: "step-digest",
+        manifestDigest: "manifest-digest",
+        packageDigest: "package-digest",
+      },
+    });
+    if (action.action !== "form_post") throw new Error("expected form_post");
+
+    const state = repo.requests[0]?.state;
+    expect(new URL(action.url).searchParams.get("state")).toBe(state);
+    expect(JSON.parse(action.value)).toEqual({
+      state,
+      callback: endpoints.callbackUrl,
+    });
+    expect(action.url).not.toContain("%7Bstate%7D");
+    expect(action.value).not.toContain("{state}");
+    expect(repo.requests[0]).toMatchObject({
+      integrationSlug: "github-v2",
+      connectionId: "connection-1",
+      oimStepId: "app",
+      oimStepDigest: "step-digest",
+      manifestDigest: "manifest-digest",
+      packageDigest: "package-digest",
+    });
+  });
+
   it("targets an org's create_url when the caller names one and the step supports it", async () => {
     const repo = new MemoryAuthRequestRepo();
     const action = await startAuthStep({
@@ -380,6 +425,32 @@ describe("completeAuthStep", () => {
     return new URL(action.url).searchParams.get("state") as string;
   }
 
+  it("validates consumed server-held identity before credentials or network are used", async () => {
+    const repo = new MemoryAuthRequestRepo();
+    const state = await startedState(repo);
+    const loadEnv = vi.fn(async () => ({
+      NOTION_CLIENT_ID: "cid",
+      NOTION_CLIENT_SECRET: "secret",
+    }));
+    const fetchImpl = vi.fn(async () => jsonResponse({ access_token: "token" }));
+
+    await expect(
+      completeAuthStep({
+        query: { state, code: "code", connectionId: "forged", stepId: "forged" },
+        loadManifest,
+        loadEnv,
+        endpoints,
+        repo,
+        fetchImpl,
+        validateRequest: () => {
+          throw new AuthBrokerError("invalid_state", "reviewed package changed");
+        },
+      })
+    ).rejects.toMatchObject({ reason: "invalid_state" });
+    expect(loadEnv).not.toHaveBeenCalled();
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
   it("exchanges the code and maps the token response into connection env", async () => {
     const repo = new MemoryAuthRequestRepo();
     const state = await startedState(repo);
@@ -418,6 +489,42 @@ describe("completeAuthStep", () => {
     expect(sent.get("code")).toBe("abc");
     expect(sent.get("redirect_uri")).toBe(endpoints.callbackUrl);
     expect(sent.get("code_verifier")).toBe(repo.requests[0].codeVerifier);
+  });
+
+  it("supports an OIM PKCE public client without sending a client secret", async () => {
+    const publicManifest = manifestWith([
+      {
+        ...oauthStep,
+        client_secret_optional: true,
+        token_endpoint_auth_method: "none",
+      } as never,
+    ]);
+    const repo = new MemoryAuthRequestRepo();
+    const action = await startAuthStep({
+      slug: "public",
+      manifest: publicManifest,
+      stepIndex: 0,
+      env: { NOTION_CLIENT_ID: "cid" },
+      endpoints,
+      repo,
+    });
+    if (action.action !== "redirect") throw new Error("expected redirect");
+    let sentBody = "";
+    await completeAuthStep({
+      query: { state: repo.requests[0].state, code: "abc" },
+      loadManifest: () => publicManifest,
+      loadEnv: async () => ({ NOTION_CLIENT_ID: "cid" }),
+      endpoints,
+      repo,
+      fetchImpl: async (_url, init) => {
+        sentBody = String(init?.body);
+        return jsonResponse({ access_token: "token" });
+      },
+    });
+
+    const sent = new URLSearchParams(sentBody);
+    expect(sent.get("client_id")).toBe("cid");
+    expect(sent.has("client_secret")).toBe(false);
   });
 
   it("rejects a replayed callback", async () => {
@@ -601,6 +708,7 @@ describe("completeAuthStep", () => {
       endpoints,
       repo,
     });
+
     let calledUrl = "";
     const outcome = await completeAuthStep({
       query: { state: repo.requests[0].state, code: "conv-code" },
@@ -627,6 +735,43 @@ describe("completeAuthStep", () => {
       GITHUB_PRIVATE_KEY: "-----BEGIN-----",
       GITHUB_APP_OWNER: "acme",
     });
+  });
+
+  it("captures only declared app-manifest callback values", async () => {
+    const ghManifest = manifestWith([
+      {
+        kind: "app_manifest",
+        create_url: "https://github.com/settings/apps/new?state={state}",
+        manifest_param: "manifest",
+        delivery: "form_post",
+        manifest: { name: "Tulip" },
+        oim_capture: { client_id: "OIM_CLIENT_ID" },
+      } as never,
+    ]);
+    const repo = new MemoryAuthRequestRepo();
+    await startAuthStep({
+      slug: "github",
+      manifest: ghManifest,
+      stepIndex: 0,
+      env: {},
+      endpoints,
+      repo,
+      connectionId: "connection-1",
+      principal: { kind: "user", id: "user-1" },
+    });
+    const outcome = await completeAuthStep({
+      query: {
+        state: repo.requests[0].state,
+        client_id: "client",
+        client_secret: "not-declared",
+      },
+      loadManifest: () => ghManifest,
+      loadEnv: async () => ({}),
+      endpoints,
+      repo,
+    });
+
+    expect(outcome.env).toEqual({ OIM_CLIENT_ID: "client" });
   });
 
   it("refuses to complete a fields step, which can never produce a callback", async () => {

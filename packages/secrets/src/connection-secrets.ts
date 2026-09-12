@@ -31,15 +31,20 @@ export class ConnectionSecretManager {
     this.broker.revokeSecret(secretRef);
   }
 
+  async revokeReferences(secretRefs: readonly string[]): Promise<void> {
+    const unique = new Set(secretRefs);
+    for (const secretRef of unique) this.broker.revokeSecret(secretRef);
+    for (const secretRef of unique) {
+      await this.store.delete(secretStorageKey(secretRef));
+    }
+  }
+
   async revokeConnection(
     connectionId: string,
     bindings: Readonly<Record<string, string>>,
     persistRevocation: () => Promise<void>
   ): Promise<void> {
-    for (const secretRef of new Set(Object.values(bindings))) {
-      await this.store.delete(secretStorageKey(secretRef));
-      this.broker.revokeSecret(secretRef);
-    }
+    await this.revokeReferences(Object.values(bindings));
     this.broker.revokeConnection(connectionId);
     await persistRevocation();
   }

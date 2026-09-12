@@ -1,5 +1,9 @@
 import { type OimConnection, validateOimConnection } from "@tulipfarm/schema";
 import type { TransactionPort } from "../ports";
+import {
+  type BindVerifiedConnectionExternalIdentity,
+  bindVerifiedConnectionExternalIdentity,
+} from "./connection-external-identity-store";
 
 export interface PersistedConnection extends OimConnection {
   readonly businessId: string;
@@ -12,6 +16,29 @@ export class ConnectionIdentityConflictError extends Error {
     super(`Connection ${id} cannot be rebound to another Integration or owner`);
     this.name = "ConnectionIdentityConflictError";
   }
+}
+
+export interface ConnectionAuthStepFence {
+  readonly businessId: string;
+  readonly connectionId: string;
+  readonly integration: OimConnection["integration"];
+  readonly owner: OimConnection["owner"];
+  readonly stepId: string;
+  readonly expectedRevision: number;
+  readonly healthCheckedAt: string;
+}
+
+export interface PublishConnectionAuthStep extends ConnectionAuthStepFence {
+  readonly status: "active" | "action_required";
+  readonly accessSlot: string | null;
+  readonly accessSecretRef: string | null;
+  readonly refreshSlot: string | null;
+  readonly refreshSecretRef: string | null;
+  readonly externalIdentity: Readonly<Record<string, unknown>> | null;
+  readonly expiresAt: string | null;
+  readonly configuration: Readonly<Record<string, string | number | boolean>>;
+  readonly secretBindings: Readonly<Record<string, `secret://${string}`>>;
+  readonly verifiedIdentity?: BindVerifiedConnectionExternalIdentity;
 }
 
 export const CONNECTION_STORAGE_STATEMENTS: readonly string[] = [
@@ -142,6 +169,14 @@ function ownerTeamId(connection: OimConnection): string | null {
   return connection.owner.scope === "team" ? connection.owner.teamId : null;
 }
 
+function sameOwner(row: ConnectionRow, owner: OimConnection["owner"]): boolean {
+  return (
+    row.owner_scope === owner.scope &&
+    row.owner_principal_id === (owner.scope === "personal" ? owner.principalId : null) &&
+    row.owner_team_id === (owner.scope === "team" ? owner.teamId : null)
+  );
+}
+
 export class ConnectionStore {
   constructor(private readonly transactions: TransactionPort) {}
 
@@ -150,6 +185,7 @@ export class ConnectionStore {
     if (connection.status === "revoked" && connection.isDefault) {
       throw new Error("a revoked Connection cannot be the default");
     }
+
     await this.transactions.withTransaction(async (transaction) => {
       if (connection.isDefault && connection.status === "active") {
         await transaction.query(
@@ -225,6 +261,212 @@ export class ConnectionStore {
         ]
       );
       if (result.rows.length === 0) throw new ConnectionIdentityConflictError(connection.id);
+    });
+  }
+
+  async claimAuthStep(input: ConnectionAuthStepFence): Promise<boolean> {
+    return this.transactions.withTransaction(async (transaction) => {
+      const connectionResult = await transaction.query<ConnectionRow>(
+        `SELECT * FROM connections
+          WHERE business_id = $1 AND id = $2
+          FOR UPDATE`,
+        [input.businessId, input.connectionId]
+      );
+      const connection = connectionResult.rows[0];
+      if (
+        connection === undefined ||
+        connection.status !== "active" ||
+        connection.integration_id !== input.integration.id ||
+        connection.integration_major_version !== input.integration.majorVersion ||
+        !sameOwner(connection, input.owner)
+      ) {
+        return false;
+      }
+
+      const result = await transaction.query(
+        `UPDATE connection_auth_steps
+            SET status = 'pending',
+                health_checked_at = $5,
+                revision = revision + 1,
+                updated_at = now()
+          WHERE business_id = $1
+            AND connection_id = $2
+            AND step_id = $3
+            AND revision = $4
+          RETURNING step_id`,
+        [
+          input.businessId,
+          input.connectionId,
+          input.stepId,
+          input.expectedRevision,
+          input.healthCheckedAt,
+        ]
+      );
+      return result.rows.length === 1;
+    });
+  }
+
+  async publishAuthStep(input: PublishConnectionAuthStep): Promise<boolean> {
+    return this.transactions.withTransaction(async (transaction) => {
+      const connectionResult = await transaction.query<ConnectionRow>(
+        `SELECT * FROM connections
+          WHERE business_id = $1 AND id = $2
+          FOR UPDATE`,
+        [input.businessId, input.connectionId]
+      );
+      const connection = connectionResult.rows[0];
+      if (
+        connection === undefined ||
+        connection.status !== "active" ||
+        connection.integration_id !== input.integration.id ||
+        connection.integration_major_version !== input.integration.majorVersion ||
+        !sameOwner(connection, input.owner)
+      ) {
+        return false;
+      }
+
+      const stepResult = await transaction.query(
+        `UPDATE connection_auth_steps
+            SET status = $5,
+                access_slot = $6,
+                access_secret_ref = $7,
+                refresh_slot = $8,
+                refresh_secret_ref = $9,
+                external_identity = $10::jsonb,
+                expires_at = $11,
+                health_checked_at = $12,
+                revision = revision + 1,
+                updated_at = now()
+          WHERE business_id = $1
+            AND connection_id = $2
+            AND step_id = $3
+            AND revision = $4
+            AND status = 'pending'
+          RETURNING step_id`,
+        [
+          input.businessId,
+          input.connectionId,
+          input.stepId,
+          input.expectedRevision,
+          input.status,
+          input.accessSlot,
+          input.accessSecretRef,
+          input.refreshSlot,
+          input.refreshSecretRef,
+          input.externalIdentity === null ? null : JSON.stringify(input.externalIdentity),
+          input.expiresAt,
+          input.healthCheckedAt,
+        ]
+      );
+      if (stepResult.rows.length !== 1) return false;
+
+      if (input.verifiedIdentity !== undefined) {
+        await bindVerifiedConnectionExternalIdentity(transaction, input.verifiedIdentity);
+      }
+      const aggregate = await transaction.query<{
+        healthy: boolean;
+        expires_at: Date | string | null;
+      }>(
+        `SELECT bool_and(status = 'active') AS healthy, min(expires_at) AS expires_at
+           FROM connection_auth_steps
+          WHERE business_id = $1 AND connection_id = $2`,
+        [input.businessId, input.connectionId]
+      );
+      const health = aggregate.rows[0]?.healthy === true ? "healthy" : "action_required";
+      const expiresAt = aggregate.rows[0]?.expires_at ?? null;
+      const updated = await transaction.query(
+        `UPDATE connections
+            SET configuration = configuration || $3::jsonb,
+                secret_bindings = secret_bindings || $4::jsonb,
+                health_status = $5,
+                health_checked_at = $6,
+                expires_at = $7,
+                updated_at = now()
+          WHERE business_id = $1 AND id = $2 AND status = 'active'
+          RETURNING id`,
+        [
+          input.businessId,
+          input.connectionId,
+          JSON.stringify(input.configuration),
+          JSON.stringify(input.secretBindings),
+          health,
+          input.healthCheckedAt,
+          expiresAt,
+        ]
+      );
+      if (updated.rows.length !== 1) throw new Error("connection_auth_publication_lost");
+      return true;
+    });
+  }
+
+  async fenceRevocation(
+    businessId: string,
+    connectionId: string
+  ): Promise<PersistedConnection | null> {
+    return this.transactions.withTransaction(async (transaction) => {
+      const result = await transaction.query<ConnectionRow>(
+        `SELECT * FROM connections
+          WHERE business_id = $1 AND id = $2
+          FOR UPDATE`,
+        [businessId, connectionId]
+      );
+      const row = result.rows[0];
+      if (row === undefined) return null;
+      let fenced = row;
+      if (row.status === "active") {
+        const updated = await transaction.query<ConnectionRow>(
+          `UPDATE connections
+              SET status = 'revoked', is_default = false,
+                  health_status = 'action_required', health_checked_at = now(), updated_at = now()
+            WHERE business_id = $1 AND id = $2
+          RETURNING *`,
+          [businessId, connectionId]
+        );
+        if (updated.rows[0] !== undefined) fenced = updated.rows[0];
+        await transaction.query(
+          `UPDATE connection_auth_steps
+              SET status = 'revoked', revision = revision + 1,
+                  health_checked_at = now(), updated_at = now()
+            WHERE business_id = $1 AND connection_id = $2 AND status <> 'revoked'`,
+          [businessId, connectionId]
+        );
+      }
+      return fromRow(fenced);
+    });
+  }
+
+  async markActionRequired(
+    businessId: string,
+    connectionId: string,
+    integration: OimConnection["integration"],
+    owner: OimConnection["owner"],
+    checkedAt: string
+  ): Promise<boolean> {
+    return this.transactions.withTransaction(async (transaction) => {
+      const result = await transaction.query<ConnectionRow>(
+        `UPDATE connections
+            SET health_status = 'action_required', health_checked_at = $6, updated_at = now()
+          WHERE business_id = $1
+            AND id = $2
+            AND integration_id = $3
+            AND integration_major_version = $4
+            AND owner_scope = $5
+            AND owner_principal_id IS NOT DISTINCT FROM $7
+            AND owner_team_id IS NOT DISTINCT FROM $8
+            AND status = 'active'
+          RETURNING *`,
+        [
+          businessId,
+          connectionId,
+          integration.id,
+          integration.majorVersion,
+          owner.scope,
+          checkedAt,
+          owner.scope === "personal" ? owner.principalId : null,
+          owner.scope === "team" ? owner.teamId : null,
+        ]
+      );
+      return result.rows.length === 1;
     });
   }
 

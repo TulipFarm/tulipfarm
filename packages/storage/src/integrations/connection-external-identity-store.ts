@@ -1,4 +1,4 @@
-import type { TransactionPort } from "../ports";
+import type { Queryable, TransactionPort } from "../ports";
 
 export type ConnectionIdentityProofKind = "auth" | "health";
 
@@ -68,6 +68,49 @@ export const CONNECTION_EXTERNAL_IDENTITY_STORAGE_STATEMENTS: readonly string[] 
      )`,
 ];
 
+export async function bindVerifiedConnectionExternalIdentity(
+  transaction: Queryable,
+  input: BindVerifiedConnectionExternalIdentity
+): Promise<VerifiedConnectionExternalIdentity> {
+  assertInput(input);
+  const result = await transaction.query<IdentityRow>(
+    `INSERT INTO connection_external_identities (
+       business_id, connection_id, integration_id, integration_major_version,
+       external_tenant_id, external_account_id, proof_kind, proof_digest,
+       verified_at, verified_by
+     ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+     ON CONFLICT (business_id, connection_id) DO UPDATE SET
+       proof_kind = EXCLUDED.proof_kind,
+       proof_digest = EXCLUDED.proof_digest,
+       verified_at = EXCLUDED.verified_at,
+       verified_by = EXCLUDED.verified_by,
+       updated_at = now()
+     WHERE connection_external_identities.integration_id = EXCLUDED.integration_id
+       AND connection_external_identities.integration_major_version =
+         EXCLUDED.integration_major_version
+       AND connection_external_identities.external_tenant_id = EXCLUDED.external_tenant_id
+       AND connection_external_identities.external_account_id = EXCLUDED.external_account_id
+     RETURNING *`,
+    [
+      input.businessId,
+      input.connectionId,
+      input.integrationId,
+      input.integrationMajorVersion,
+      input.externalTenantId,
+      input.externalAccountId,
+      input.proofKind,
+      input.proofDigest,
+      input.verifiedAt,
+      input.verifiedBy,
+    ]
+  );
+  const row = result.rows[0];
+  if (row === undefined) {
+    throw new ConnectionExternalIdentityConflictError(input.connectionId);
+  }
+  return fromRow(row);
+}
+
 interface IdentityRow {
   business_id: string;
   connection_id: string;
@@ -133,45 +176,9 @@ export class ConnectionExternalIdentityStore {
   async bindVerified(
     input: BindVerifiedConnectionExternalIdentity
   ): Promise<VerifiedConnectionExternalIdentity> {
-    assertInput(input);
-    return this.transactions.withTransaction(async (transaction) => {
-      const result = await transaction.query<IdentityRow>(
-        `INSERT INTO connection_external_identities (
-           business_id, connection_id, integration_id, integration_major_version,
-           external_tenant_id, external_account_id, proof_kind, proof_digest,
-           verified_at, verified_by
-         ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
-         ON CONFLICT (business_id, connection_id) DO UPDATE SET
-           proof_kind = EXCLUDED.proof_kind,
-           proof_digest = EXCLUDED.proof_digest,
-           verified_at = EXCLUDED.verified_at,
-           verified_by = EXCLUDED.verified_by,
-           updated_at = now()
-         WHERE connection_external_identities.integration_id = EXCLUDED.integration_id
-           AND connection_external_identities.integration_major_version =
-             EXCLUDED.integration_major_version
-           AND connection_external_identities.external_tenant_id = EXCLUDED.external_tenant_id
-           AND connection_external_identities.external_account_id = EXCLUDED.external_account_id
-         RETURNING *`,
-        [
-          input.businessId,
-          input.connectionId,
-          input.integrationId,
-          input.integrationMajorVersion,
-          input.externalTenantId,
-          input.externalAccountId,
-          input.proofKind,
-          input.proofDigest,
-          input.verifiedAt,
-          input.verifiedBy,
-        ]
-      );
-      const row = result.rows[0];
-      if (row === undefined) {
-        throw new ConnectionExternalIdentityConflictError(input.connectionId);
-      }
-      return fromRow(row);
-    });
+    return this.transactions.withTransaction((transaction) =>
+      bindVerifiedConnectionExternalIdentity(transaction, input)
+    );
   }
 
   async find(
