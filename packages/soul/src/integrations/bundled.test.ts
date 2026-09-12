@@ -1,7 +1,9 @@
-import { mkdir, mkdtemp, readdir, rm, writeFile } from "node:fs/promises";
+import { cp, mkdir, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+import { parseOimManifest } from "@tulipfarm/schema";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { SoulLoader } from "../published-loader";
 import type { Logger } from "../types";
 import { bundledIntegrationsDir, loadBundledIntegrations } from "./bundled";
 
@@ -123,22 +125,33 @@ describe("loadBundledIntegrations", () => {
 });
 
 describe("the integrations shipped in this repo", () => {
-  it("all load, including every declared OpenAPI document", async () => {
-    // The real directory, not a fixture. `loadBundledIntegrations` logs and skips a broken
-    // integration rather than throwing, so without this a manifest whose spec failed to read would
-    // simply vanish from the catalog — and the first symptom would be an operator connecting a
-    // provider and receiving no Tools.
-    const logger = makeLogger();
-    const dir = bundledIntegrationsDir();
-    const integrations = await loadBundledIntegrations(logger, dir);
+  it("gives every shipped directory a supported entry point", async () => {
+    const root = bundledIntegrationsDir();
+    for (const entry of await readdir(root, { withFileTypes: true })) {
+      if (!entry.isDirectory()) continue;
+      const files = await readdir(join(root, entry.name));
+      expect(
+        files.includes("manifest.yml") || files.includes("oim.yml"),
+        `${entry.name} entry point`
+      ).toBe(true);
+    }
+  });
 
-    // Derived from the directory rather than hardcoded: a fixed list would have to be edited
-    // every time an integration ships, and the edit that silences it is the same edit that would
-    // hide a genuine skip. Comparing against what is actually on disk keeps the guard honest.
-    const onDisk = (await readdir(dir, { withFileTypes: true }))
-      .filter((e) => e.isDirectory())
-      .map((e) => e.name)
-      .sort();
+  it("loads every legacy package, including every declared OpenAPI document", async () => {
+    const logger = makeLogger();
+    const sourceRoot = bundledIntegrationsDir();
+    const root = await mkdtemp(join(import.meta.dirname, "__bundled-legacy-test__-"));
+    temporaryDirectories.push(root);
+    const onDisk: string[] = [];
+    for (const entry of await readdir(sourceRoot, { withFileTypes: true })) {
+      if (!entry.isDirectory()) continue;
+      const files = await readdir(join(sourceRoot, entry.name));
+      if (!files.includes("manifest.yml")) continue;
+      onDisk.push(entry.name);
+      await cp(join(sourceRoot, entry.name), join(root, entry.name), { recursive: true });
+    }
+    onDisk.sort();
+    const integrations = await loadBundledIntegrations(logger, root);
 
     expect(onDisk.length).toBeGreaterThan(0);
     expect([...integrations.keys()].sort()).toEqual(onDisk);
@@ -148,6 +161,54 @@ describe("the integrations shipped in this repo", () => {
       if (entry.manifest.egress?.type !== "openapi") continue;
       expect(entry.egressSpec, `${slug} parsed spec`).toBeDefined();
       expect(entry.egressSpecFile?.file, `${slug} spec filename`).toBe(entry.manifest.egress.spec);
+    }
+  });
+
+  it("loads every OIM package through the published Soul loader", async () => {
+    const logger = makeLogger();
+    const sourceRoot = bundledIntegrationsDir();
+    const soulRoot = await mkdtemp(join(import.meta.dirname, "__bundled-oim-test__-"));
+    temporaryDirectories.push(soulRoot);
+    const targetRoot = join(soulRoot, "integrations");
+    const onDisk: string[] = [];
+
+    for (const entry of await readdir(sourceRoot, { withFileTypes: true })) {
+      if (!entry.isDirectory()) continue;
+      const sourceDirectory = join(sourceRoot, entry.name);
+      const files = await readdir(sourceDirectory);
+      if (!files.includes("oim.yml")) continue;
+
+      const source = await readFile(join(sourceDirectory, "oim.yml"), "utf8");
+      const manifest = parseOimManifest(source);
+      const targetDirectory = join(targetRoot, entry.name);
+      await mkdir(targetDirectory, { recursive: true });
+      await writeFile(join(targetDirectory, "oim.yml"), source, "utf8");
+      for (const file of manifest.files ?? []) {
+        const target = join(targetDirectory, file.path);
+        await mkdir(join(target, ".."), { recursive: true });
+        await cp(join(sourceDirectory, file.path), target);
+      }
+      onDisk.push(entry.name);
+    }
+
+    const loader = new SoulLoader(soulRoot, logger);
+    await loader.load();
+    onDisk.sort();
+
+    expect(onDisk.length).toBeGreaterThan(0);
+    expect([...loader.integrations.keys()].sort()).toEqual(onDisk);
+    expect(logger.error).not.toHaveBeenCalled();
+
+    for (const [slug, entry] of loader.integrations) {
+      expect(entry.oimManifest?.metadata.id, `${slug} manifest identity`).toBe(slug);
+      expect(
+        Object.keys(entry.oimPackageFiles ?? {}).sort(),
+        `${slug} declared companions`
+      ).toEqual((entry.oimManifest?.files ?? []).map(({ path }) => path).sort());
+      for (const file of entry.oimManifest?.files ?? []) {
+        if (file.role !== "openapi") continue;
+        expect(entry.oimOpenApiDocuments?.[file.path], `${slug} parsed ${file.path}`).toBeDefined();
+      }
     }
   });
 });
