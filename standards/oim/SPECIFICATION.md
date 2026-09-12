@@ -4,7 +4,8 @@
 
 Open Integration Manifest (OIM) is a vendor-neutral package format for declarative third-party
 Integrations. This text defines OIM specification version 1.0 and the Core 1.0, Core 1.1,
-Core 1.2, Auth 1.0, Events 1.0, Knowledge 1.0, Knowledge 1.1, and Hooks 1.0 profiles.
+Core 1.2, Auth 1.0, Events 1.0, Knowledge 1.0, Knowledge 1.1, Knowledge 1.2, and
+Hooks 1.0 profiles.
 
 The key words MUST, MUST NOT, REQUIRED, SHOULD, SHOULD NOT, and MAY are normative.
 
@@ -77,6 +78,22 @@ Knowledge 1.1 adds host-projected item fields, ordered item identity, operation-
 joined scalar content, principal-set live authorization, and the RFC 6901 root pointer. Parameter
 bindings MUST resolve only from declared projected item fields. A package using these constructs
 MUST claim Knowledge 1.1; Knowledge 1.0 packages remain valid without them.
+
+## Knowledge 1.2
+
+Knowledge 1.2 adds `liveAuthorization.principalBody` for providers whose authoritative access
+check requires a nested JSON body. `template` MUST be a fixed JSON object and `pointer` MUST name
+an absent object property using RFC 6901. The runtime MUST deep-clone the template, reject array
+traversal and the segments `__proto__`, `constructor`, and `prototype`, and insert only the
+provider identity proven for the requesting principal. Ordinary configuration, an Agent, and Tool
+input MUST NOT supply or replace that identity. The completed body MUST pass the operation's
+`requestSchema` before dispatch.
+
+The operation MUST be an HTTP JSON operation and `principalParameter` MUST be `body`. Provider
+failure, an invalid body, a missing identity proof, an invalid or non-Boolean `allowedPointer`
+result, or `false` MUST deny access. A runtime MUST NOT advertise Knowledge 1.2 unless it implements
+this binding and fail-closed decision behavior; Knowledge 1.0 and 1.1 declarations are not silently
+reinterpreted.
 
 ## Hooks 1.0
 

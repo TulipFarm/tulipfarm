@@ -16,7 +16,7 @@ export const OIM_PROFILE_VERSIONS = {
   core: "1.2",
   auth: "1.0",
   events: "1.0",
-  knowledge: "1.1",
+  knowledge: "1.2",
   hooks: "1.0",
 } as const;
 
@@ -29,7 +29,7 @@ export const OIM_PROFILE_VERSIONS = {
  * version number worth reading on a runtime that only implements `1.0`.
  */
 export const OIM_CORE_PROFILE_VERSIONS = ["1.0", "1.1", "1.2"] as const;
-const OIM_KNOWLEDGE_PROFILE_VERSIONS = ["1.0", "1.1"] as const;
+const OIM_KNOWLEDGE_PROFILE_VERSIONS = ["1.0", "1.1", "1.2"] as const;
 
 /** Constructs added in Core 1.1, named as they appear in a refusal message. */
 export const OIM_CORE_1_1_FEATURES = [
@@ -142,9 +142,16 @@ export const OIM_CONFORMANCE_CASES = {
     "knowledge.operations.roles",
     "knowledge.acl.preserve",
     "knowledge.deletion.propagate",
+    "knowledge.live-authorization.principal-body",
+    "knowledge.live-authorization.fail-closed",
   ],
   hooks: ["hooks.capabilities.none", "hooks.output.deterministic", "hooks.execution.bounded"],
 } as const;
+
+export const OIM_CONFORMANCE_CASE_SINCE: Readonly<Record<string, string>> = {
+  "knowledge.live-authorization.principal-body": "1.2",
+  "knowledge.live-authorization.fail-closed": "1.2",
+};
 
 const HTTP_METHODS = ["GET", "HEAD", "OPTIONS", "POST", "PUT", "PATCH", "DELETE"] as const;
 const PAGINATION_SCOPES = ["connection", "operation"] as const;
@@ -1184,6 +1191,16 @@ const KnowledgeDeletionSchema = Type.Object(
   { additionalProperties: false }
 );
 
+const KnowledgePrincipalBodySchema = Type.Object(
+  {
+    template: Type.Record(Type.String({ minLength: 1 }), Type.Unknown(), {
+      additionalProperties: false,
+    }),
+    pointer: JsonPointerSchema,
+  },
+  { additionalProperties: false }
+);
+
 /**
  * What an Integration teaches TulipFarm about indexing a provider.
  *
@@ -1213,6 +1230,8 @@ const KnowledgeSchema = Type.Object(
           itemParameter: Type.Optional(NonEmptyStringSchema),
           parameters: Type.Optional(KnowledgeParameterBindingsSchema),
           principalParameter: Type.Optional(NonEmptyStringSchema),
+          /** Fixed JSON body with one proven provider identity inserted by RFC 6901 pointer. */
+          principalBody: Type.Optional(KnowledgePrincipalBodySchema),
           allowedPointer: Type.Optional(KnowledgeJsonPointerSchema),
           principalSet: Type.Optional(
             Type.Object(
@@ -1384,9 +1403,103 @@ export type OimKnowledgeAcl = Static<typeof KnowledgeAclSchema>;
 export type OimKnowledgeAclEntry = Static<typeof KnowledgeAclEntrySchema>;
 export type OimKnowledgeIdentity = Static<typeof KnowledgeIdentitySchema>;
 export type OimKnowledgeDeletion = Static<typeof KnowledgeDeletionSchema>;
+export type OimKnowledgePrincipalBody = Static<typeof KnowledgePrincipalBodySchema>;
 export type OimKnowledgePrincipalKind = (typeof OIM_KNOWLEDGE_PRINCIPAL_KINDS)[number];
 export type OimPackageContent = string | Uint8Array;
 export type OimConformanceClaim = Static<typeof OimConformanceClaimSchema>;
+
+const UNSAFE_JSON_POINTER_SEGMENTS = new Set(["__proto__", "constructor", "prototype"]);
+const NON_ROOT_JSON_POINTER_PATTERN = /^(?:\/(?:[^/~]|~[01])*)+$/;
+
+function jsonPointerSegments(pointer: string): string[] {
+  if (!NON_ROOT_JSON_POINTER_PATTERN.test(pointer)) throw new Error("invalid JSON pointer");
+  return pointer
+    .slice(1)
+    .split("/")
+    .map((segment) => segment.replace(/~1/g, "/").replace(/~0/g, "~"));
+}
+
+function assertJsonValue(value: unknown): void {
+  if (
+    value === null ||
+    typeof value === "string" ||
+    typeof value === "boolean" ||
+    (typeof value === "number" && Number.isFinite(value))
+  ) {
+    return;
+  }
+  if (Array.isArray(value)) {
+    for (const item of value) assertJsonValue(item);
+    return;
+  }
+  if (typeof value !== "object") throw new Error("template must contain only JSON values");
+  const prototype = Object.getPrototypeOf(value);
+  if (prototype !== Object.prototype && prototype !== null) {
+    throw new Error("template must contain only plain JSON objects");
+  }
+  for (const [key, child] of Object.entries(value)) {
+    if (UNSAFE_JSON_POINTER_SEGMENTS.has(key)) {
+      throw new Error(`template contains unsafe object key ${key}`);
+    }
+    assertJsonValue(child);
+  }
+}
+
+/** Builds a fixed live-authorization body with one proven provider identity inserted. */
+export function oimPrincipalBody(
+  binding: OimKnowledgePrincipalBody,
+  externalSubject: string,
+  requestSchema: Record<string, unknown>
+): Record<string, unknown> {
+  if (externalSubject.length === 0) throw new Error("external subject must not be empty");
+  assertJsonValue(binding.template);
+  const body = structuredClone(binding.template);
+  const segments = jsonPointerSegments(binding.pointer);
+  let parent: Record<string, unknown> = body;
+  for (const segment of segments.slice(0, -1)) {
+    if (UNSAFE_JSON_POINTER_SEGMENTS.has(segment)) {
+      throw new Error(`pointer contains unsafe segment ${segment}`);
+    }
+    const child = parent[segment];
+    if (child === null || typeof child !== "object" || Array.isArray(child)) {
+      throw new Error(`pointer parent ${segment} is not an object`);
+    }
+    parent = child as Record<string, unknown>;
+  }
+  const leaf = segments.at(-1);
+  if (leaf === undefined) throw new Error("pointer has no target");
+  if (UNSAFE_JSON_POINTER_SEGMENTS.has(leaf))
+    throw new Error(`pointer contains unsafe segment ${leaf}`);
+  if (Object.hasOwn(parent, leaf)) throw new Error("pointer target must be absent from template");
+  parent[leaf] = externalSubject;
+  const schema = structuredClone(requestSchema);
+  delete schema.$id;
+  const validate = ajv.compile(schema);
+  if (!validate(body)) throw new Error("completed body does not satisfy request schema");
+  return body;
+}
+
+/** Returns true only when a live-authorization response carries an explicit Boolean grant. */
+export function oimLiveAuthorizationAllowed(response: unknown, pointer: string): boolean {
+  try {
+    let value = response;
+    for (const segment of jsonPointerSegments(pointer)) {
+      if (
+        UNSAFE_JSON_POINTER_SEGMENTS.has(segment) ||
+        value === null ||
+        typeof value !== "object" ||
+        Array.isArray(value) ||
+        !Object.hasOwn(value, segment)
+      ) {
+        return false;
+      }
+      value = (value as Record<string, unknown>)[segment];
+    }
+    return value === true;
+  } catch {
+    return false;
+  }
+}
 
 const check = ajv.compile(OimManifestSchema);
 const fixtureSuiteCheck = ajv.compile(OimFixtureSuiteSchema);
@@ -2470,7 +2583,9 @@ function oimKnowledgeIssues(manifest: OimManifest): string[] {
   const profileVersion = manifest.profiles.knowledge;
 
   if (profileVersion === undefined || !OIM_KNOWLEDGE_PROFILE_VERSIONS.includes(profileVersion)) {
-    issues.push('profiles: knowledge "1.0" or "1.1" is required when knowledge is declared');
+    issues.push(
+      'profiles: knowledge "1.0", "1.1", or "1.2" is required when knowledge is declared'
+    );
   }
 
   const operations = new Map(manifest.operations.map((operation) => [operation.id, operation]));
@@ -2733,6 +2848,34 @@ function oimKnowledgeIssues(manifest: OimManifest): string[] {
         "knowledge: liveAuthorization principalSet compares the linked identity locally and cannot declare principalParameter"
       );
     }
+    if (knowledge.liveAuthorization.principalBody !== undefined) {
+      const binding = knowledge.liveAuthorization.principalBody;
+      if (knowledge.liveAuthorization.principalParameter !== "body") {
+        issues.push(
+          'knowledge: liveAuthorization principalBody requires principalParameter "body"'
+        );
+      }
+      if (
+        live?.source.type !== "http" ||
+        live.source.contentType !== "json" ||
+        live.requestSchema === undefined
+      ) {
+        issues.push(
+          "knowledge: liveAuthorization principalBody requires an HTTP JSON operation with requestSchema"
+        );
+      }
+      try {
+        if (live?.requestSchema !== undefined) {
+          oimPrincipalBody(binding, "oim-principal-validation", live.requestSchema);
+        }
+      } catch (error) {
+        issues.push(
+          `knowledge: liveAuthorization principalBody is invalid: ${
+            error instanceof Error ? error.message : String(error)
+          }`
+        );
+      }
+    }
     if (
       knowledge.liveAuthorization.itemParameter === undefined &&
       Object.keys(knowledge.liveAuthorization.parameters ?? {}).length === 0
@@ -2770,6 +2913,10 @@ function oimKnowledgeIssues(manifest: OimManifest): string[] {
   }
   if (knowledge.liveAuthorization?.principalSet !== undefined) {
     knowledge11Features.push("liveAuthorization.principalSet");
+  }
+  const knowledge12Features: string[] = [];
+  if (knowledge.liveAuthorization?.principalBody !== undefined) {
+    knowledge12Features.push("liveAuthorization.principalBody");
   }
 
   const pointers: (string | undefined)[] = [
@@ -2823,6 +2970,11 @@ function oimKnowledgeIssues(manifest: OimManifest): string[] {
   if (profileVersion === "1.0" && knowledge11Features.length > 0) {
     issues.push(
       `profiles: knowledge "1.1" is required for ${knowledge11Features.sort().join(", ")}`
+    );
+  }
+  if (profileVersion !== "1.2" && knowledge12Features.length > 0) {
+    issues.push(
+      `profiles: knowledge "1.2" is required for ${knowledge12Features.sort().join(", ")}`
     );
   }
 
@@ -3783,8 +3935,11 @@ export function oimConformanceIssues(
   for (const profile of Object.keys(OIM_CONFORMANCE_CASES) as Array<
     keyof typeof OIM_CONFORMANCE_CASES
   >) {
-    if (claim.profiles[profile] === undefined) continue;
+    const selectedVersion = claim.profiles[profile];
+    if (selectedVersion === undefined) continue;
     for (const required of OIM_CONFORMANCE_CASES[profile]) {
+      const since = OIM_CONFORMANCE_CASE_SINCE[required] ?? "1.0";
+      if (Number(selectedVersion) < Number(since)) continue;
       if (!passed.has(required)) issues.push(`passedCases: missing ${required}`);
     }
   }

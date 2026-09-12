@@ -1,0 +1,218 @@
+version: 1
+cases:
+  - name: reads-current-user
+    operationId: current-user
+    configuration:
+      gitlab_host: gitlab.com
+    request: {}
+    response:
+      status: 200
+      body:
+        id: 1042
+        username: muskan
+        name: Muskan Vijayvargiya
+        web_url: https://gitlab.com/muskan
+    expect:
+      request:
+        method: GET
+        url: https://gitlab.com/api/v4/user
+        headers:
+          PRIVATE-TOKEN: oim-fixture-credential
+      result:
+        id: 1042
+        username: muskan
+        name: Muskan Vijayvargiya
+        web_url: https://gitlab.com/muskan
+
+  - name: creates-issue
+    operationId: create-issue
+    configuration:
+      gitlab_host: gitlab.com
+    request:
+      id: "42"
+      body:
+        title: Review the launch checklist
+        description: Confirm every owner has signed off.
+    response:
+      status: 201
+      body:
+        iid: 17
+        title: Review the launch checklist
+        state: opened
+        web_url: https://gitlab.com/acme/web/-/issues/17
+    expect:
+      request:
+        method: POST
+        url: https://gitlab.com/api/v4/projects/42/issues
+        headers:
+          PRIVATE-TOKEN: oim-fixture-credential
+        body:
+          title: Review the launch checklist
+          description: Confirm every owner has signed off.
+      result:
+        iid: 17
+        title: Review the launch checklist
+        state: opened
+        web_url: https://gitlab.com/acme/web/-/issues/17
+
+  - name: rejects-invalid-credential
+    operationId: current-user
+    configuration:
+      gitlab_host: gitlab.com
+    request: {}
+    response:
+      status: 401
+      body:
+        message: 401 Unauthorized
+    expect:
+      request:
+        method: GET
+        url: https://gitlab.com/api/v4/user
+        headers:
+          PRIVATE-TOKEN: oim-fixture-credential
+      expectedError:
+        phase: before_dispatch
+        code: provider_unauthorized
+        retryable: false
+
+  - name: lists-projects
+    operationId: list-projects
+    configuration:
+      gitlab_host: gitlab.com
+    request:
+      search: tulip
+      membership: true
+      per_page: 2
+    response:
+      status: 200
+      body:
+        - id: 42
+          name: TulipFarm
+          path_with_namespace: acme/tulipfarm
+          web_url: https://gitlab.com/acme/tulipfarm
+          default_branch: main
+    expect:
+      request:
+        method: GET
+        url: https://gitlab.com/api/v4/projects?search=tulip&membership=true&per_page=2&page=1
+        headers:
+          PRIVATE-TOKEN: oim-fixture-credential
+      result:
+        items:
+          - id: 42
+            name: TulipFarm
+            path_with_namespace: acme/tulipfarm
+
+  - name: lists-issues
+    operationId: list-issues
+    configuration:
+      gitlab_host: gitlab.com
+    request:
+      id: "42"
+      state: opened
+      labels: launch
+      per_page: 2
+    response:
+      status: 200
+      body:
+        - iid: 17
+          title: Review the launch checklist
+          state: opened
+          web_url: https://gitlab.com/acme/tulipfarm/-/issues/17
+          updated_at: "2026-09-07T06:00:00.000Z"
+    expect:
+      request:
+        method: GET
+        url: https://gitlab.com/api/v4/projects/42/issues?state=opened&labels=launch&per_page=2&page=1
+        headers:
+          PRIVATE-TOKEN: oim-fixture-credential
+      result:
+        items:
+          - iid: 17
+            title: Review the launch checklist
+            state: opened
+
+  - name: gets-issue
+    operationId: get-issue
+    configuration:
+      gitlab_host: gitlab.com
+    request:
+      id: "42"
+      issue_iid: 17
+    response:
+      status: 200
+      body:
+        iid: 17
+        title: Review the launch checklist
+        description: Confirm every owner has signed off.
+        state: opened
+        web_url: https://gitlab.com/acme/tulipfarm/-/issues/17
+        labels: [launch]
+    expect:
+      request:
+        method: GET
+        url: https://gitlab.com/api/v4/projects/42/issues/17
+        headers:
+          PRIVATE-TOKEN: oim-fixture-credential
+      result:
+        iid: 17
+        title: Review the launch checklist
+        labels: [launch]
+
+  - name: comments-on-issue
+    operationId: comment-issue
+    configuration:
+      gitlab_host: gitlab.com
+    request:
+      id: "42"
+      issue_iid: 17
+      body:
+        body: The checklist is approved.
+    response:
+      status: 201
+      body:
+        id: 9001
+        body: The checklist is approved.
+        created_at: "2026-09-07T06:05:00.000Z"
+    expect:
+      request:
+        method: POST
+        url: https://gitlab.com/api/v4/projects/42/issues/17/notes
+        headers:
+          PRIVATE-TOKEN: oim-fixture-credential
+          content-type: application/json
+        body:
+          body: The checklist is approved.
+      result:
+        id: 9001
+        body: The checklist is approved.
+
+  - name: lists-merge-requests
+    operationId: list-merge-requests
+    configuration:
+      gitlab_host: gitlab.com
+    request:
+      id: "42"
+      state: opened
+      per_page: 2
+    response:
+      status: 200
+      body:
+        - iid: 8
+          title: Ship the launch checklist
+          state: opened
+          draft: false
+          source_branch: launch-checklist
+          target_branch: main
+          web_url: https://gitlab.com/acme/tulipfarm/-/merge_requests/8
+    expect:
+      request:
+        method: GET
+        url: https://gitlab.com/api/v4/projects/42/merge_requests?state=opened&per_page=2&page=1
+        headers:
+          PRIVATE-TOKEN: oim-fixture-credential
+      result:
+        items:
+          - iid: 8
+            title: Ship the launch checklist
+            draft: false

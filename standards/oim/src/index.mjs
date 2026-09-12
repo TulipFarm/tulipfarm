@@ -2,6 +2,7 @@ import { lstat, readdir, readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
+  OIM_CONFORMANCE_CASE_SINCE,
   OIM_CONFORMANCE_CASES,
   OIM_CORE_PROFILE_VERSIONS,
   OIM_PROFILE_VERSIONS,
@@ -12,9 +13,11 @@ import {
   oimCompatibilityIssues,
   oimConformanceIssues,
   oimFileDigest,
+  oimLiveAuthorizationAllowed,
   oimManifestIssues,
   oimPackageDigest,
   oimPackageIssues,
+  oimPrincipalBody,
   oimToolId,
   parseOimFixtureSuite,
   parseOimManifest,
@@ -37,6 +40,7 @@ export const OIM_PROFILE_VERSION_MATRIX = Object.freeze(
 );
 
 export {
+  OIM_CONFORMANCE_CASE_SINCE,
   OIM_CONFORMANCE_CASES,
   OIM_CORE_PROFILE_VERSIONS,
   OIM_PROFILE_VERSIONS,
@@ -46,9 +50,11 @@ export {
   OimManifestSchema,
   oimCompatibilityIssues,
   oimFileDigest,
+  oimLiveAuthorizationAllowed,
   oimManifestIssues,
   oimPackageDigest,
   oimPackageIssues,
+  oimPrincipalBody,
   oimToolId,
   validateOimFixtureSuite,
   validateOimManifest,
@@ -89,7 +95,11 @@ export function validateConformanceClaim(data) {
     const claim = validateClaimShape(data);
     const issues = oimConformanceIssues(claim);
     const allowedCases = new Set(
-      Object.keys(claim.profiles).flatMap((profile) => OIM_CONFORMANCE_CASES[profile])
+      Object.entries(claim.profiles).flatMap(([profile, version]) =>
+        OIM_CONFORMANCE_CASES[profile].filter(
+          (caseId) => Number(version) >= Number(OIM_CONFORMANCE_CASE_SINCE[caseId] ?? "1.0")
+        )
+      )
     );
     for (const caseId of claim.passedCases) {
       if (!allowedCases.has(caseId)) issues.push(`passedCases: ${caseId} is not claimed`);

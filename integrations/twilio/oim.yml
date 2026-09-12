@@ -1,0 +1,306 @@
+oimVersion: "1.0"
+kind: Integration
+
+metadata:
+  id: twilio
+  name: Twilio
+  version: 1.0.0
+  description: Send SMS, read message history, and receive signed messaging webhooks.
+  license: Apache-2.0
+  maintainers:
+    - name: TulipFarm
+      url: https://tulipfarm.dev
+
+profiles:
+  core: "1.1"
+  auth: "1.0"
+  events: "1.0"
+
+files:
+  - path: setup-guide.md
+    role: guide
+    sha256: "173ab213ac6f303563a26870ff104dca5db053eaf42e7a85f166b35399d183e9"
+  - path: fixtures.yml
+    role: fixture
+    sha256: "ab4d627b84f1edd339aa454ffa87fdb5ac55197aebb0b1edba9193186c9aece3"
+
+auth:
+  allowedOriginHosts:
+    - api.twilio.com
+  credentialSlots:
+    # Twilio authenticates with HTTP Basic over `SID:secret`. One slot holds the pair rather than
+    # two, because Basic encodes them as a single credential and splitting them here would mean
+    # inventing a second lease for a value that never travels separately.
+    - id: api_credential
+      label: Twilio API key SID and secret
+      kind: api_key
+      required: true
+    - id: webhook_auth_token
+      label: Twilio Account Auth Token
+      kind: webhook_secret
+      required: false
+  configurationFields:
+    - id: account_sid
+      label: Account SID
+      type: string
+      required: true
+  steps:
+    - id: account
+      type: fields
+      title: Find your Account SID
+      description: >-
+        Open the Twilio Console dashboard and copy the Account SID. It starts with AC and is not a
+        secret — it identifies which account every request addresses.
+      fields:
+        - id: account_sid
+          label: Account SID
+          input: text
+          required: true
+          target:
+            type: configuration
+            field: account_sid
+    - id: credential
+      type: fields
+      title: Create an API key
+      description: >-
+        In the Console go to Account → API keys & tokens → Create API key. Paste the value as
+        SID:SECRET — for example SKxxxxxxxx:your-secret. Use an API key rather than the Auth Token
+        so you can revoke TulipFarm's access alone.
+      fields:
+        - id: api_credential
+          label: API key SID and secret
+          input: password
+          required: true
+          target:
+            type: credential
+            slot: api_credential
+    - id: webhook
+      type: fields
+      title: Verify messaging webhooks
+      description: >-
+        Optional. Copy the Account Auth Token from the Twilio Console to verify incoming-message
+        and message-status webhooks. This is distinct from the API key secret used by Tools.
+      fields:
+        - id: webhook_auth_token
+          label: Account Auth Token
+          input: password
+          required: false
+          target:
+            type: credential
+            slot: webhook_auth_token
+  healthCheckOperationId: get-account
+
+operations:
+  - id: get-account
+    name: twilio_get_account
+    description: Confirm the credential works and report the account's friendly name and status.
+    effect: read
+    identityMode: shared_only
+    credentialSlot: api_credential
+    credentialInjection:
+      in: header
+      name: Authorization
+      format: "Basic {token}"
+      encoding: basic
+    source:
+      type: http
+      method: GET
+      baseUrl: https://api.twilio.com
+      path: /2010-04-01/Accounts/{account_sid}.json
+    response:
+      maxBytes: 32768
+      schema:
+        type: object
+        properties:
+          sid: { type: string }
+          friendly_name: { type: string }
+          status: { type: string }
+          type: { type: string }
+        required: [sid, status]
+      projection:
+        - /sid
+        - /friendly_name
+        - /status
+        - /type
+    rateLimit:
+      requests: 60
+      perSeconds: 60
+      scope: connection
+
+  - id: send-message
+    name: twilio_send_sms
+    description: Send an SMS or WhatsApp message from an owned sender or Messaging Service.
+    effect: send
+    identityMode: shared_only
+    credentialSlot: api_credential
+    credentialInjection:
+      in: header
+      name: Authorization
+      format: "Basic {token}"
+      encoding: basic
+    source:
+      type: http
+      method: POST
+      baseUrl: https://api.twilio.com
+      # `{account_sid}` is filled from installation configuration, not from a Tool argument: an
+      # Agent that could choose the account could address one this Connection never authorized.
+      path: /2010-04-01/Accounts/{account_sid}/Messages.json
+      # Twilio's REST API takes form-encoded bodies, not JSON.
+      contentType: form
+    requestSchema:
+      type: object
+      properties:
+        To:
+          type: string
+          description: Destination in E.164 form, e.g. +14155552671.
+        From:
+          type: string
+          description: A number or channel address the account owns.
+        MessagingServiceSid:
+          type: string
+          pattern: "^MG[0-9A-Fa-f]{32}$"
+          description: A Messaging Service SID whose sender pool should choose the sender.
+        Body:
+          type: string
+          maxLength: 1600
+      required: [To, Body]
+      anyOf:
+        - required: [From]
+        - required: [MessagingServiceSid]
+      additionalProperties: false
+    response:
+      maxBytes: 32768
+      schema:
+        type: object
+        properties:
+          sid: { type: string }
+          status: { type: string }
+          to: { type: string }
+          from: { type: string }
+          date_created: { type: string }
+        required: [sid, status, to]
+      projection:
+        - /sid
+        - /status
+        - /to
+        - /from
+        - /date_created
+    rateLimit:
+      requests: 60
+      perSeconds: 60
+      scope: connection
+
+  - id: list-messages
+    name: twilio_list_messages
+    description: List messages the account has sent or received, newest first.
+    effect: sensitive_read
+    identityMode: shared_only
+    credentialSlot: api_credential
+    credentialInjection:
+      in: header
+      name: Authorization
+      format: "Basic {token}"
+      encoding: basic
+    source:
+      type: http
+      method: GET
+      baseUrl: https://api.twilio.com
+      path: /2010-04-01/Accounts/{account_sid}/Messages.json
+      parameters:
+        - name: To
+          in: query
+          schema: { type: string }
+        - name: From
+          in: query
+          schema: { type: string }
+        - name: PageSize
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+    pagination:
+      type: page
+      requestParameter: Page
+      start: 0
+      itemsPath: /messages
+    response:
+      maxBytes: 262144
+      schema:
+        type: object
+        properties:
+          messages:
+            type: array
+            items:
+              type: object
+              properties:
+                sid: { type: string }
+                status: { type: string }
+                to: { type: string }
+                from: { type: string }
+                body: { type: string }
+                date_sent: { type: string }
+              required: [sid, status]
+          page: { type: integer }
+          page_size: { type: integer }
+          next_page_uri: { type: ["string", "null"] }
+        required: [messages, page, page_size]
+      projection:
+        - /messages
+        - /page
+        - /page_size
+    rateLimit:
+      requests: 60
+      perSeconds: 60
+      scope: connection
+
+events:
+  path: /twilio
+  verification:
+    scheme: twilio_hmac_sha1
+    secretSlot: webhook_auth_token
+    signatureHeader: X-Twilio-Signature
+    signatureEncoding: base64
+  acceptance:
+    requireBodyPointers:
+      - /AccountSid
+      - /MessageSid
+    requireKnownEventType: true
+  deduplication:
+    # Twilio supplies no delivery id, and status changes for one Message share its MessageSid.
+    kind: none
+  eventTypes:
+    - type: message.received
+      selector:
+        pointer: /SmsMessageSid
+        matches: "^SM[A-Za-z0-9]{32}$"
+      schema:
+        type: object
+        properties:
+          AccountSid: { type: string }
+          MessageSid: { type: string }
+          SmsSid: { type: string }
+          SmsMessageSid: { type: string }
+          MessagingServiceSid: { type: string }
+          From: { type: string }
+          To: { type: string }
+          Body: { type: string }
+          NumMedia: { type: string }
+          NumSegments: { type: string }
+        required: [AccountSid, MessageSid, SmsMessageSid, From, To, Body, NumMedia]
+    - type: message.status_changed
+      selector:
+        pointer: /MessageStatus
+        matches: "^(queued|sent|failed|delivered|undelivered|read|canceled)$"
+      schema:
+        type: object
+        properties:
+          AccountSid: { type: string }
+          MessageSid: { type: string }
+          MessageStatus: { type: string }
+          SmsSid: { type: string }
+          SmsStatus: { type: string }
+          ErrorCode: { type: string }
+          From: { type: string }
+          To: { type: string }
+        required: [AccountSid, MessageSid, MessageStatus]

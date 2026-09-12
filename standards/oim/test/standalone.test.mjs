@@ -155,6 +155,33 @@ cases:
         }
         return { compatible: oimCompatibilityIssues(previous, next).length === 0 };
       }
+      case "knowledge.operations.roles":
+        return { roles: ["list", "content", "acl"], writes: 0 };
+      case "knowledge.acl.preserve":
+        return { visible: input.providerReaders.includes(input.requester) };
+      case "knowledge.deletion.propagate":
+        return { indexed: !input.sourceDeleted };
+      case "knowledge.live-authorization.principal-body":
+        try {
+          return {
+            accepted: true,
+            body: oimPrincipalBody(
+              { template: input.template, pointer: input.pointer },
+              input.externalSubject,
+              input.requestSchema
+            ),
+          };
+        } catch {
+          return { accepted: false };
+        }
+      case "knowledge.live-authorization.fail-closed":
+        return {
+          visible:
+            typeof input.identityProof === "string" &&
+            input.identityProof.length > 0 &&
+            input.providerFailure !== true &&
+            oimLiveAuthorizationAllowed(input.response, input.allowedPointer),
+        };
       default:
         throw new Error(`unsupported reference vector ${vector.id}`);
     }
@@ -164,10 +191,13 @@ cases:
 import {
   OIM_ENTRYPOINT,
   OIM_PROFILE_VERSION_MATRIX,
+  OIM_PROFILE_VERSIONS,
   OimManifestSchema,
   oimCompatibilityIssues,
   oimFileDigest,
+  oimLiveAuthorizationAllowed,
   oimPackageIssues,
+  oimPrincipalBody,
   validateConformanceClaim,
   validateFixtureSuiteSource,
   validateManifestSource,
@@ -189,6 +219,55 @@ test("the public profile matrix comes from the generated manifest schema", () =>
 test("the package export resolves to the standalone API", async () => {
   const packageApi = await import("@oim-standard/conformance");
   assert.equal(packageApi.OIM_ENTRYPOINT, "oim.yml");
+});
+
+test("the public declarations compile for Knowledge 1.2", async () => {
+  const directory = new URL("../.test-work/types/", import.meta.url);
+  const source = new URL("knowledge-1-2.mts", directory);
+  await mkdir(directory, { recursive: true });
+  try {
+    await writeFile(
+      source,
+      `import {
+  OIM_PROFILE_VERSIONS,
+  oimLiveAuthorizationAllowed,
+  oimPrincipalBody,
+  type OimProfiles,
+} from "@oim-standard/conformance";
+
+const profiles: OimProfiles = { core: "1.2", knowledge: "1.2" };
+const body = oimPrincipalBody(
+  { template: { subject: { type: "user" } }, pointer: "/subject/identifier" },
+  "account-123",
+  { type: "object" },
+);
+const allowed: boolean = oimLiveAuthorizationAllowed({ hasPermission: true }, "/hasPermission");
+void [profiles, body, allowed, OIM_PROFILE_VERSIONS.knowledge];
+`
+    );
+    const compile = spawnSync(
+      "pnpm",
+      [
+        "exec",
+        "tsc",
+        "--noEmit",
+        "--strict",
+        "--skipLibCheck",
+        "--module",
+        "NodeNext",
+        "--moduleResolution",
+        "NodeNext",
+        "--target",
+        "ES2022",
+        fileURLToPath(source),
+      ],
+      { cwd: fileURLToPath(new URL("../", import.meta.url)), encoding: "utf8" }
+    );
+    assert.equal(compile.status, 0, compile.stderr || compile.stdout);
+    assert.equal(OIM_PROFILE_VERSIONS.knowledge, "1.2");
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
 });
 
 test("the generated runtime imports no private package", async () => {
@@ -336,6 +415,46 @@ test("a runtime cannot claim an untested optional profile", async () => {
   );
   claim.profiles.auth = "1.0";
   assert.throws(() => validateConformanceClaim(claim), /missing auth\.fields\.secure-submit/);
+});
+
+test("Knowledge 1.1 does not require Knowledge 1.2 conformance cases", async () => {
+  const report = await runConformance({
+    runtime: { name: "Example Runtime", version: "2.0.0" },
+    profiles: { core: "1.0", knowledge: "1.1" },
+    adapter: referenceAdapter,
+  });
+  assert.equal(
+    report.results.some(({ caseId }) => caseId.startsWith("knowledge.live-authorization.")),
+    false
+  );
+});
+
+test("an older Knowledge runtime cannot advertise Knowledge 1.2", async () => {
+  await assert.rejects(
+    runConformance({
+      runtime: { name: "Older Runtime", version: "1.0.0" },
+      profiles: { core: "1.0", knowledge: "1.2" },
+      adapter: {
+        async runCase(vector) {
+          if (vector.caseId.startsWith("knowledge.live-authorization.")) {
+            throw new Error("Knowledge 1.2 behavior is not implemented");
+          }
+          return referenceAdapter.runCase(vector);
+        },
+      },
+    }),
+    /conformance failed/
+  );
+});
+
+test("Knowledge 1.2 conformance proves binding and fail-closed decisions", async () => {
+  const report = await runConformance({
+    runtime: { name: "Example Runtime", version: "2.0.0" },
+    profiles: { core: "1.0", knowledge: "1.2" },
+    adapter: referenceAdapter,
+  });
+  const advertisement = createRuntimeCapabilityAdvertisement(report);
+  assert.deepEqual(advertisement.profiles.knowledge, ["1.0", "1.1", "1.2"]);
 });
 
 test("a runtime cannot report cases for an unclaimed profile", async () => {

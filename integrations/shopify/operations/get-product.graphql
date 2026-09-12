@@ -1,0 +1,23 @@
+query ShopifyGetProduct($id: ID!) {
+  product(id: $id) {
+    id
+    title
+    handle
+    descriptionHtml
+    status
+    vendor
+    productType
+    tags
+    createdAt
+    updatedAt
+    variants(first: 20) {
+      nodes {
+        id
+        title
+        sku
+        price
+        inventoryQuantity
+      }
+    }
+  }
+}

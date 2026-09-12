@@ -1,0 +1,460 @@
+oimVersion: "1.0"
+kind: Integration
+
+metadata:
+  id: confluence
+  name: Confluence
+  version: 1.0.0
+  description: >-
+    Read Confluence Cloud spaces and pages, and index them into Knowledge with the page
+    restrictions the source enforces.
+  license: Apache-2.0
+  maintainers:
+    - name: TulipFarm
+      url: https://tulipfarm.dev
+
+profiles:
+  core: "1.1"
+  auth: "1.0"
+  knowledge: "1.2"
+
+files:
+  - path: setup-guide.md
+    role: guide
+    sha256: "79f4388c323b3ad3d5b1bf1f3338fdabe68c0ea87c65374a67242b39341330be"
+  - path: fixtures.yml
+    role: fixture
+    sha256: "3e6659d2731cc7f19adeb9ea3f20bd8333fa5d7d5e381a4c796903bbfb8c0f9f"
+
+auth:
+  # The site is the installation's own Atlassian tenant, so the base URL is templated rather than
+  # fixed. allowedOriginHosts keeps that from becoming a way to point the Tools anywhere.
+  allowedOriginHosts:
+    - "*.atlassian.net"
+  credentialSlots:
+    - id: api_credential
+      label: Atlassian email and API token
+      kind: api_key
+      required: true
+  configurationFields:
+    - id: site
+      label: Confluence site
+      type: string
+      required: true
+      agentVisible: true
+  steps:
+    - id: site
+      type: fields
+      title: Name your Confluence site
+      description: >-
+        Paste the host of your Atlassian site, for example acme.atlassian.net. Only Atlassian Cloud
+        sites are accepted; a host outside atlassian.net is refused when the Integration compiles.
+      fields:
+        - id: site
+          label: Site host
+          input: text
+          required: true
+          target:
+            type: configuration
+            field: site
+    - id: token
+      type: fields
+      title: Create an API token
+      description: >-
+        Create a token at https://id.atlassian.com/manage-profile/security/api-tokens using the
+        account whose access this Connection should carry. Confluence authenticates with the
+        account email and the token together, so paste them as one value separated by a colon —
+        for example muskan.vijayvargiya@acme.com:the-token. TulipFarm encodes the pair itself; you
+        never run base64 by hand, and Agents never see either half.
+      fields:
+        - id: api_credential
+          label: Email and API token
+          input: password
+          required: true
+          target:
+            type: credential
+            slot: api_credential
+  healthCheckOperationId: list-spaces
+
+operations:
+  - id: list-spaces
+    name: confluence_list_spaces
+    description: List the spaces this Connection can read.
+    effect: read
+    identityMode: shared_or_personal
+    credentialSlot: api_credential
+    credentialInjection:
+      in: header
+      name: Authorization
+      format: "Basic {token}"
+      encoding: basic
+    source:
+      type: http
+      method: GET
+      baseUrl: https://{site}
+      path: /wiki/api/v2/spaces
+      parameters:
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 250
+    pagination:
+      type: link
+      header: Link
+      itemsPath: /results
+    response:
+      maxBytes: 262144
+      schema:
+        type: object
+        properties:
+          results:
+            type: array
+            items:
+              type: object
+              properties:
+                id: { type: string }
+                key: { type: string }
+                name: { type: string }
+      projection:
+        - /results
+    rateLimit:
+      requests: 100
+      perSeconds: 60
+      scope: connection
+
+  - id: list-pages
+    name: confluence_list_pages
+    description: List pages in one space, with their current revision.
+    effect: read
+    identityMode: shared_or_personal
+    credentialSlot: api_credential
+    credentialInjection:
+      in: header
+      name: Authorization
+      format: "Basic {token}"
+      encoding: basic
+    source:
+      type: http
+      method: GET
+      baseUrl: https://{site}
+      path: /wiki/api/v2/pages
+      parameters:
+        - name: space-id
+          in: query
+          schema: { type: string }
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 250
+    pagination:
+      type: link
+      header: Link
+      itemsPath: /results
+    response:
+      maxBytes: 1048576
+      schema:
+        type: object
+        properties:
+          results:
+            type: array
+            items:
+              type: object
+              properties:
+                id: { type: string }
+                title: { type: string }
+                status: { type: string }
+                version:
+                  type: object
+                  properties:
+                    number: { type: integer }
+                    createdAt: { type: string }
+                _links:
+                  type: object
+                  properties:
+                    webui: { type: string }
+      projection:
+        - /results
+    rateLimit:
+      requests: 100
+      perSeconds: 60
+      scope: connection
+
+  - id: get-page
+    name: confluence_get_page
+    description: Read one page including its storage-format body.
+    effect: sensitive_read
+    identityMode: shared_or_personal
+    credentialSlot: api_credential
+    credentialInjection:
+      in: header
+      name: Authorization
+      format: "Basic {token}"
+      encoding: basic
+    source:
+      type: http
+      method: GET
+      baseUrl: https://{site}
+      path: /wiki/api/v2/pages/{id}
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+        - name: body-format
+          in: query
+          value: storage
+          schema:
+            type: string
+            const: storage
+    response:
+      maxBytes: 1048576
+      schema:
+        type: object
+        properties:
+          id: { type: string }
+          title: { type: string }
+          status: { type: string }
+          body:
+            type: object
+            properties:
+              storage:
+                type: object
+                properties:
+                  value: { type: string }
+                required: [value]
+            required: [storage]
+          version:
+            type: object
+            properties:
+              number: { type: integer }
+    rateLimit:
+      requests: 100
+      perSeconds: 60
+      scope: connection
+
+  - id: get-restrictions
+    name: confluence_get_restrictions
+    description: Read one page's direct user and group view restrictions.
+    effect: sensitive_read
+    identityMode: shared_only
+    credentialSlot: api_credential
+    credentialInjection:
+      in: header
+      name: Authorization
+      format: "Basic {token}"
+      encoding: basic
+    source:
+      type: http
+      method: GET
+      baseUrl: https://{site}
+      path: /wiki/rest/api/content/{id}/restriction/byOperation/read
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+    response:
+      maxBytes: 262144
+      schema:
+        type: object
+        properties:
+          operation: { type: string }
+          restrictions:
+            type: object
+            properties:
+              user:
+                type: object
+                properties:
+                  results:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        accountId: { type: string }
+                        type: { type: string }
+                      required: [type]
+                  start: { type: integer }
+                  limit: { type: integer }
+                  size: { type: integer }
+                  totalSize: { type: integer }
+                required: [results]
+              group:
+                type: object
+                properties:
+                  results:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id: { type: string }
+                        name: { type: string }
+                        type: { type: string }
+                      required: [id, name, type]
+                  start: { type: integer }
+                  limit: { type: integer }
+                  size: { type: integer }
+                required: [results, start, limit, size]
+            required: [user, group]
+        required: [operation, restrictions]
+    rateLimit:
+      requests: 100
+      perSeconds: 60
+      scope: connection
+
+  - id: get-user
+    name: confluence_get_user
+    description: Resolve one Atlassian account, so a restriction can be linked to a TulipFarm user.
+    effect: read
+    identityMode: shared_only
+    credentialSlot: api_credential
+    credentialInjection:
+      in: header
+      name: Authorization
+      format: "Basic {token}"
+      encoding: basic
+    source:
+      type: http
+      method: GET
+      baseUrl: https://{site}
+      path: /wiki/rest/api/user
+      parameters:
+        - name: accountId
+          in: query
+          required: true
+          schema: { type: string }
+    response:
+      maxBytes: 32768
+      schema:
+        type: object
+        properties:
+          accountId: { type: string }
+          email: { type: string }
+          publicName: { type: string }
+      projection:
+        - /accountId
+        - /email
+        - /publicName
+    rateLimit:
+      requests: 100
+      perSeconds: 60
+      scope: connection
+
+  - id: check-page-read
+    name: confluence_check_page_read
+    description: Ask Confluence whether one proven account can currently read a page.
+    effect: sensitive_read
+    identityMode: shared_or_personal
+    credentialSlot: api_credential
+    credentialInjection:
+      in: header
+      name: Authorization
+      format: "Basic {token}"
+      encoding: basic
+    source:
+      type: http
+      method: POST
+      baseUrl: https://{site}
+      path: /wiki/rest/api/content/{id}/permission/check
+      contentType: json
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+    requestSchema:
+      type: object
+      properties:
+        subject:
+          type: object
+          properties:
+            type: { type: string, const: user }
+            identifier: { type: string, minLength: 1 }
+          required: [type, identifier]
+          additionalProperties: false
+        operation: { type: string, const: read }
+      required: [subject, operation]
+      additionalProperties: false
+    response:
+      maxBytes: 4096
+      schema:
+        type: object
+        properties:
+          hasPermission: { type: boolean }
+        required: [hasPermission]
+        additionalProperties: false
+      projection:
+        - /hasPermission
+    rateLimit:
+      requests: 100
+      perSeconds: 60
+      scope: connection
+
+knowledge:
+  sourceKinds:
+    - id: space
+      label: Space
+      discoverOperationId: list-spaces
+      discoverItemsPointer: /results
+      discoverMapping:
+        id: /id
+        label: /name
+  list:
+    operationId: list-pages
+    scopeParameter: space-id
+    itemsPointer: /results
+    mapping:
+      itemId: /id
+      revision: /version/number
+      title: /title
+      sourceUrl: /_links/webui
+      updatedAt: /version/createdAt
+    cursor:
+      kind: operation_pagination
+  content:
+    operationId: get-page
+    itemParameter: id
+    mapping:
+      content: /body/storage/value
+      revision: /version/number
+      title: /title
+  # This direct-user list is retained only as source ACL evidence. get-page is sensitive_read, so
+  # the runtime must deny retrieval until an effective provider live check is available.
+  acl:
+    mode: item
+    operationId: get-restrictions
+    itemParameter: id
+    entriesPointer: /restrictions/user/results
+    entry:
+      kindPointer: /type
+      kindValues:
+        user: [known]
+        public: [anonymous]
+      providerUserId: /accountId
+  # Accounts link by Atlassian account id alone. Confluence never reports whether an address is
+  # verified, and an unverified address is a claim rather than an identity, so matching on one
+  # would let a Confluence user claim a TulipFarm user's Knowledge access.
+  identity:
+    user:
+      operationId: get-user
+      idParameter: accountId
+      mapping:
+        providerId: /accountId
+  liveAuthorization:
+    operationId: check-page-read
+    itemParameter: id
+    principalParameter: body
+    principalBody:
+      template:
+        subject:
+          type: user
+        operation: read
+      pointer: /subject/identifier
+    allowedPointer: /hasPermission
+  # Confluence does not report a page as deleted once it is gone, so a missing item on a full list
+  # is the only honest signal; a flag would leave withdrawn pages searchable forever.
+  deletion:
+    kind: absent_from_full_list

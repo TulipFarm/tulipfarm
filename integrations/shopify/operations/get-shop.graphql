@@ -1,0 +1,8 @@
+query ShopifyGetShop {
+  shop {
+    id
+    name
+    myshopifyDomain
+    currencyCode
+  }
+}

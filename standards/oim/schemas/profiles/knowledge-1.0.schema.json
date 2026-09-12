@@ -639,6 +639,25 @@
           "minLength": 1,
           "type": "string"
         },
+        "principalBody": {
+          "additionalProperties": false,
+          "type": "object",
+          "required": ["template", "pointer"],
+          "properties": {
+            "template": {
+              "additionalProperties": false,
+              "type": "object",
+              "patternProperties": {
+                "^(.*)$": {}
+              }
+            },
+            "pointer": {
+              "pattern": "^(?:/(?:[^/~]|~[01])*)+$",
+              "maxLength": 512,
+              "type": "string"
+            }
+          }
+        },
         "allowedPointer": {
           "pattern": "^(?:$|/(?:[^/~]|~[01])*(?:/(?:[^/~]|~[01])*)*)$",
           "maxLength": 512,

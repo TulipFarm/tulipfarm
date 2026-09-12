@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "urn:oim:schema:1.0:profiles:knowledge-1.1.schema.json",
-  "title": "Open Integration Manifest Knowledge 1.1",
+  "$id": "urn:oim:schema:1.0:profiles:knowledge-1.2.schema.json",
+  "title": "Open Integration Manifest Knowledge 1.2",
   "additionalProperties": false,
   "type": "object",
   "required": ["sourceKinds", "list", "content", "acl", "deletion"],

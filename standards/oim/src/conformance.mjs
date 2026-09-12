@@ -1,6 +1,5 @@
 import { isDeepStrictEqual } from "node:util";
 import {
-  OIM_CONFORMANCE_CASES,
   OIM_PROFILE_VERSION_MATRIX,
   OIM_VERSION,
   OimValidationError,
@@ -93,7 +92,7 @@ export async function runConformance({ runtime, profiles, adapter }) {
 }
 
 function requiredCaseIds(profiles) {
-  return Object.keys(profiles).flatMap((profile) => OIM_CONFORMANCE_CASES[profile]);
+  return [...new Set(requiredConformanceVectors(profiles).map((vector) => vector.caseId))];
 }
 
 function validateProfileSelection(profiles) {
