@@ -22,6 +22,7 @@ const DENIAL_STATUS: Readonly<Record<TurnHost.TurnAuthorityDenial, number>> = {
   run_not_running: 409,
   turn_not_found: 404,
   agent_not_found: 404,
+  agent_use_denied: 403,
 };
 
 const DELIVERY_DENIAL_STATUS: Readonly<Record<DeliveryHost.DeliveryDenial, number>> = {

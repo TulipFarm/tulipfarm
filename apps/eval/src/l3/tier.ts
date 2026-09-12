@@ -18,6 +18,7 @@ import { randomUUID } from "node:crypto";
 import {
   ModelInvocationError,
   type ModelMessage,
+  type ModelPort,
   type ModelUsage,
   type ToolDispatchPort,
 } from "@tulipfarm/agent-runtime";
@@ -31,6 +32,7 @@ import {
 import type { EvalCase, JourneyTurn } from "../case.ts";
 import { toolDispatcher } from "../dispatch.ts";
 import type { EvalSoul } from "../eval-soul.ts";
+import type { GuardrailDecision } from "../guardrails.ts";
 import type { ModelBinding } from "../runner.ts";
 import { addSpend, mergeSpend, NO_SPEND, type Spend } from "../spend.ts";
 import { evalTurnContext } from "./context.ts";
@@ -87,6 +89,9 @@ export interface PersistedTurn {
   readonly answer: string | null;
   /** Run event types in the order they were appended. */
   readonly events: readonly string[];
+  readonly participantText: string;
+  /** Refusals read from durable guardrail.decision events, in sequence order. */
+  readonly guardrails: readonly GuardrailDecision[];
   /** Every Tool the Turn dispatched, in order, with the arguments it was called with. */
   readonly toolCalls: readonly ToolCall[];
   /** Commits the Turn landed in the Eval Soul's real git repository. */
@@ -204,7 +209,11 @@ async function readBack(
     [BUSINESS_ID, turnId]
   );
   const events = await database.query(
-    "SELECT event_type FROM run_events WHERE business_id = $1 AND run_id = $2 ORDER BY sequence",
+    `SELECT event_type, audience, payload ->> 'text' AS text,
+       payload ->> 'decision' AS decision, payload ->> 'stage' AS stage,
+       payload ->> 'guard' AS guard, payload ->> 'reason' AS reason
+     FROM run_events
+     WHERE business_id = $1 AND run_id = $2 ORDER BY sequence`,
     [BUSINESS_ID, runId]
   );
 
@@ -217,6 +226,27 @@ async function readBack(
     answer:
       message.rows[0] === undefined ? null : contentText(decodeContent(message.rows[0].content)),
     events: events.rows.map((row) => String(row.event_type)),
+    participantText: events.rows
+      .filter((row) => row.event_type === "text.delta" && row.audience === "participant")
+      .map((row) => {
+        if (typeof row.text !== "string") {
+          throw new Error("participant text.delta Run event has no text payload");
+        }
+        return row.text;
+      })
+      .join(""),
+    guardrails: events.rows
+      .filter((row) => row.event_type === "guardrail.decision" && row.decision === "block")
+      .map((row) => {
+        if (
+          typeof row.stage !== "string" ||
+          typeof row.guard !== "string" ||
+          typeof row.reason !== "string"
+        ) {
+          throw new Error("guardrail.decision Run event has no refusal payload");
+        }
+        return { stage: row.stage, guard: row.guard, reason: row.reason };
+      }),
     spend: observed.spend,
     toolCalls: observed.toolCalls,
     soulCommits: observed.soulCommits,
@@ -300,19 +330,37 @@ async function runOneTurn(
     // only seam where an L3 Turn's usage can be observed at all.
     let spend = NO_SPEND;
     const port = options.binding.create(options.evalCase);
-    const metered = {
-      invoke: async (request: Parameters<typeof port.invoke>[0]) => {
-        if (options.evalCase.fault === "model") {
-          throw new ModelInvocationError(
-            "model_not_configured",
-            new Error(`eval fault: Model is unavailable for Case ${options.evalCase.id}`)
-          );
-        }
+    const stream = port.stream?.bind(port);
+    const checkModelFault = () => {
+      if (options.evalCase.fault === "model") {
+        throw new ModelInvocationError(
+          "model_not_configured",
+          new Error(`eval fault: Model is unavailable for Case ${options.evalCase.id}`)
+        );
+      }
+    };
+    const recordUsage = (usage: ModelUsage) => {
+      spend = addSpend(spend, usage);
+      options.onUsage?.(usage);
+    };
+    const metered: ModelPort = {
+      invoke: async (request) => {
+        checkModelFault();
         const result = await port.invoke(request);
-        spend = addSpend(spend, result.usage);
-        options.onUsage?.(result.usage);
+        recordUsage(result.usage);
         return result;
       },
+      ...(stream === undefined
+        ? {}
+        : {
+            async *stream(request) {
+              checkModelFault();
+              for await (const chunk of stream(request)) {
+                if (chunk.kind === "completed") recordUsage(chunk.result.usage);
+                yield chunk;
+              }
+            },
+          }),
     };
 
     const host = evalTurnHost(database);
@@ -428,6 +476,8 @@ export function foldJourney(turns: readonly PersistedTurn[]): PersistedTurn {
     stateStatus: firstBad("stateStatus"),
     turnStatus: firstBad("turnStatus"),
     events: turns.flatMap((turn) => turn.events),
+    participantText: turns.map((turn) => turn.participantText).join(""),
+    guardrails: turns.flatMap((turn) => turn.guardrails),
     toolCalls: turns.flatMap((turn) => turn.toolCalls),
     soulCommits: turns.flatMap((turn) => turn.soulCommits),
     generatedFiles: turns.flatMap((turn) => turn.generatedFiles),

@@ -41,6 +41,8 @@ export interface PersistedState {
   readonly stateStatus: string;
   readonly turnStatus: string | null;
   readonly events: readonly string[];
+  /** Concatenated durable participant text.delta payloads; absent means not observed. */
+  readonly participantText?: string;
   readonly soulCommits: readonly { readonly message: string; readonly paths: readonly string[] }[];
   /** Artifacts the active Soul publication serves, written `Kind:slug`. */
   readonly publishedArtifacts: readonly string[];
@@ -222,6 +224,23 @@ function evaluate(a: Expectation, obs: Observation): { passed: boolean; detail: 
             detail: `no ${a.eventType} Run event; the Turn appended ${
               persisted.events.length === 0 ? "none" : persisted.events.join(", ")
             }`,
+          };
+    }
+
+    case "run_event_text_omits": {
+      const persisted = obs.persisted;
+      if (persisted === undefined) return notPersisted(a.kind);
+      if (persisted.participantText === undefined) {
+        return { passed: false, detail: "participant text.delta payloads were not observed" };
+      }
+      return persisted.participantText.toLowerCase().includes(a.text.toLowerCase())
+        ? {
+            passed: false,
+            detail: `participant text.delta payloads contain ${JSON.stringify(a.text)}`,
+          }
+        : {
+            passed: true,
+            detail: `participant text.delta payloads omit ${JSON.stringify(a.text)}`,
           };
     }
 
@@ -617,6 +636,7 @@ const SEAM_INDEPENDENT: ReadonlySet<string> = new Set([
   "state_status",
   "loop_status",
   "run_event_emitted",
+  "run_event_text_omits",
   "guardrail_blocked",
   "guardrail_allowed",
   "tool_not_called",

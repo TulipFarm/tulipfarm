@@ -20,7 +20,7 @@ PostgreSQL persistence composition, auth, Soul Git writes, and Worker callback p
 | [`src/auth/`](src/auth/AGENTS.md) | Sessions, CSRF, passwords, users, invites, API tokens. |
 | [`src/identity/`](src/identity/AGENTS.md) | Principals, OIDC, step-up, API clients. |
 | `src/chat/`, `src/conversations/` | Chat routes, Turn persistence, durable stream handoff. |
-| `src/runs/` | Persisted Run event SSE, cursor resume, cancellation. |
+| `src/runs/` | Persisted Run event SSE, cursor resume, cancellation. `authorization.ts` separates participant ownership from operator event reads; Chat cancellation never inherits a read grant. |
 | `src/runtime/` | Durable invocation callers, Routine invocation resolution, Soul write gateway composition. |
 | `src/internal/` | Service-only Worker callbacks for Context, Tools, delivery, completion. `subagent-context.ts` assembles the Conversation-less sub-agent Context; `turn-host.ts` splits `RunAuthority` (no Turn) from `TurnAuthority` (has one). `route-family.ts` registers the whole service-principal plane — put new internal families there, not in `app.ts`. |
 | `src/tools/` | ToolRegistry, batch execution, truncation, declarative egress sync. |
@@ -102,6 +102,9 @@ PostgreSQL persistence composition, auth, Soul Git writes, and Worker callback p
   Worker's, because only the Worker may import `@tulipfarm/llm`.
 - Chat turns are persisted only through `ChatTurnSubmitter`; no turn executes in this process.
   Stopping a turn cancels its Run.
+- Selected Agents require live Team `use` access at Chat entry, retry, and Worker Context assembly.
+  `chat/agent-access.ts` shares the gate; the default assistant is exempt.
+- Operator Run commands require `operations.runs.control` as well as `operations.read`.
 - Routine invocations resolve only through `runtime/invocation-definitions.ts`; never fall back to
   the live Soul checkout, legacy registry, or `bundle.routineId`.
 - Schedule checkpoints follow embedded Trigger identity, never list position. Legacy checkpoints

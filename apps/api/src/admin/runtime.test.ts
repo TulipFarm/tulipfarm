@@ -1,5 +1,6 @@
 import type { FastifyRequest } from "fastify";
 import { describe, expect, it, vi } from "vitest";
+import type { AuthorizationCheck } from "../authz/route-gate";
 import { OperationalNotImplementedError } from "./routes";
 import type { RunReader } from "./run-reader";
 import { createRuntimeOperationalApi } from "./runtime";
@@ -23,7 +24,8 @@ function runtime(
   withOwnershipApproval = false,
   toolSignalResult: "resumed" | "not_found" | "already_settled" = "resumed",
   routineSignalResult: "resumed" | "already_settled" = "resumed",
-  settledDecision?: "approved" | "denied"
+  settledDecision?: "approved" | "denied",
+  authorizationCheck?: AuthorizationCheck
 ) {
   const signal = vi.fn(async () => toolSignalResult);
   const routineSignal = vi.fn(async () => routineSignalResult);
@@ -118,6 +120,7 @@ function runtime(
     ),
   };
   const api = createRuntimeOperationalApi({
+    ...(authorizationCheck ? { authorizationCheck } : {}),
     activity,
     approvals,
     toolApprovals: { signal },
@@ -197,6 +200,25 @@ function runtime(
 }
 
 describe("runtime operational API", () => {
+  it.each([false, true])(
+    "requires a separate Run control grant for an operator (control: %s)",
+    async (control) => {
+      const check = vi.fn<AuthorizationCheck>(
+        async (_principal, authorization) =>
+          authorization.action === "operations.read" ||
+          (control && authorization.action === "operations.runs.control")
+      );
+      const { api } = runtime(false, "resumed", "resumed", undefined, check);
+      const grant = await api.authorize(request());
+      expect(grant?.permissions).toContain("runs:read");
+      expect(grant?.permissions.includes("runs:control")).toBe(control);
+      expect(check).toHaveBeenCalledWith(principal, {
+        action: "operations.runs.control",
+        resourceType: "operations",
+        fallback: "admin",
+      });
+    }
+  );
   it("grants an admin every operational authority, including control", async () => {
     const { api } = runtime();
     const grant = await api.authorize(request());

@@ -349,9 +349,9 @@ export class TurnDriver {
 
   /** Guard output before it is durable; blocked answers are replaced, not dropped. */
   private async guardOutput(outcome: TurnOutcome, events: TurnEventWriter): Promise<TurnOutcome> {
-    if (outcome.status !== "succeeded") return outcome;
+    if (outcome.status !== "succeeded" && outcome.status !== "input_required") return outcome;
     const guarded = await this.options.guardrails.output(outcome.text, events);
-    return { status: "succeeded", text: guarded.blocked ? guarded.message : guarded.text };
+    return { ...outcome, text: guarded.blocked ? guarded.message : guarded.text };
   }
 
   private async finish(

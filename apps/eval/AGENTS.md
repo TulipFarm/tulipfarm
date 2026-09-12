@@ -80,6 +80,10 @@ before changing how a Case is scored, run or compared.** These are the ones that
   `generated_file_not_readable_by` for a Role the Agent lacks, or the Case passes just as well
   against an audience that shares every File with everyone.
 - **Every Case carries a `script`,** so the whole Corpus runs free in ordinary CI.
+- **L3 preserves model streaming.** `run_event_text_omits` reads concatenated durable participant
+  text, not the final Message or operator evidence; missing observations fail.
+- **Both tiers collect guard refusals.** L3 reads durable `guardrail.decision` events. Use
+  stage-specific `guardrail_blocked` so safe model refusals can be reported as unexercised.
 - **Two models are a control, not a contest,** and they never run at once.
 - **A Judge failure errors the Trial; it never scores low.**
 - **A `fault` is L3-only and names a dependency, not an outcome.** It breaks what the executor was

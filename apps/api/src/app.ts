@@ -561,6 +561,10 @@ export async function buildApp(opts: AppOptions = {}) {
             stream: opts.runEvents,
             ...(opts.rateLimiter ? { rateLimiter: opts.rateLimiter } : {}),
             ...(opts.runCancel ? { cancel: opts.runCancel } : {}),
+            ...(opts.authorizeChatRunCancellation
+              ? { authorizeCancel: opts.authorizeChatRunCancellation }
+              : {}),
+            ...(opts.teamAssets ? { teamAssets: opts.teamAssets } : {}),
             ...(opts.soulLoader ? { soulLoader: opts.soulLoader } : {}),
             ...(opts.domainEventEmitter ? { events: opts.domainEventEmitter } : {}),
             ...(opts.fileService ? { fileService: opts.fileService } : {}),

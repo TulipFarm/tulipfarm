@@ -33,6 +33,7 @@ import {
   type HostedToolCall,
   InternalTurnHost,
   type RunAuthority,
+  TurnAuthorityError,
 } from "./turn-host";
 
 const TEST_CSRF = "a".repeat(64);
@@ -97,6 +98,7 @@ describe("/api/v1/internal/turns", () => {
   let dispatched: { authority: RunAuthority; call: HostedToolCall }[];
   let parked: { authority: RunAuthority; stateKey: string; approvalId: string }[];
   let hostedAgent: HostedAgent | undefined;
+  let agentUseDenied: boolean;
 
   beforeEach(async () => {
     const sessions = new MemorySessionStore();
@@ -119,6 +121,7 @@ describe("/api/v1/internal/turns", () => {
     dispatched = [];
     parked = [];
     hostedAgent = undefined;
+    agentUseDenied = false;
 
     app = await buildApp({
       sessionStore: sessions,
@@ -133,6 +136,7 @@ describe("/api/v1/internal/turns", () => {
           store,
           context: {
             async resolve(authority) {
+              if (agentUseDenied) throw new TurnAuthorityError("agent_use_denied");
               return {
                 agentId: "assistant",
                 subjectId: authority.subject.id,
@@ -366,6 +370,17 @@ describe("/api/v1/internal/turns", () => {
     });
     expect(settled.statusCode).toBe(409);
     expect(settled.json()).toEqual({ error: "run_not_running" });
+  });
+
+  it("returns a documented 403 when Agent use was revoked before Context assembly", async () => {
+    agentUseDenied = true;
+    const response = await app.inject({
+      method: "POST",
+      url: `/api/v1/internal/turns/${RUN_ID}/context`,
+      headers: asWorker(),
+    });
+    expect(response.statusCode).toBe(403);
+    expect(response.json()).toEqual({ error: "agent_use_denied" });
   });
 
   it("dispatches a Tool call under the Run's authority", async () => {

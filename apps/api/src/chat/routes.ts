@@ -15,7 +15,8 @@ import {
   sinkFor,
   streamRunEvents,
 } from "../runs/events";
-
+import type { TeamAssetService } from "../team-assets/service";
+import { mayUseAgent } from "./agent-access";
 import { isConversationEntryError, resolveConversationEntry } from "./conversation-entry";
 import type { ConversationRepo } from "./conversations";
 import { SSE_KEEPALIVE_MS, writeSseHeaders } from "./sse";
@@ -69,6 +70,8 @@ export interface ChatRoutesOptions {
   readonly invocations: DurableInvocationGateway;
   readonly stream: ChatStreamDeps;
   readonly cancel?: ChatRunCanceller;
+  readonly authorizeCancel?: (req: FastifyRequest, runId: string) => Promise<boolean>;
+  readonly teamAssets?: Pick<TeamAssetService, "access">;
   readonly soulLoader?: SoulLoader;
   readonly events?: EventEmitter;
   /** Shared limiter; absent falls back to an in-process one, so a turn is never unbudgeted. */
@@ -177,8 +180,9 @@ export function registerChatRoutes(
           llmService: options.llmService,
           ...(options.soulLoader ? { soulLoader: options.soulLoader } : {}),
           ...(options.events ? { events: options.events } : {}),
+          ...(options.teamAssets ? { teamAssets: options.teamAssets } : {}),
         },
-        { userId: user._id, body, log: req.log }
+        { userId: user._id, principal, body, log: req.log }
       );
       if (isConversationEntryError(entry)) {
         return reply.code(entry.status).send({ error: entry.error });
@@ -302,6 +306,11 @@ export function registerChatRoutes(
       // The Agent is the Conversation's, never the body's: a retry re-runs the question that was
       // asked, and letting the client re-target it here would be an edit wearing a retry's name.
       const agentId = conversation.agentId ?? DEFAULT_ASSISTANT_ID;
+      const agent = resolveAgent(options.soulLoader, agentId);
+      if (!agent) return reply.code(404).send({ error: "agent not found" });
+      if (!(await mayUseAgent(agent, principal, options.teamAssets))) {
+        return reply.code(403).send({ error: "Agent use access is required" });
+      }
       const conversations = chatConversationService(
         { store: options.conversationStore, invocations: options.invocations },
         {
@@ -361,7 +370,8 @@ export function registerChatRoutes(
         description:
           "Stop the Run answering a chat turn. Cancellation is requested of the Run itself, so it " +
           "halts the turn in whichever process is executing it — the stream then ends with the " +
-          "Run's terminal status. 404 if the Run is unknown or already finished.",
+          "Run's terminal status. 403 if the Run is unknown or not the caller's Chat Run; " +
+          "404 if their Run is already finished.",
         tags: ["chat"],
         security: [{ sessionCookie: [] }, { bearerToken: [] }],
         params: {
@@ -384,12 +394,13 @@ export function registerChatRoutes(
       if (!options.cancel) {
         return reply.code(503).send({ error: "run cancellation is not available" });
       }
-      // Stop uses the same grant as Run reads so one reader cannot halt another's Run.
-      const grant = await stream.authorize(req, runId);
-      if (!grant) return reply.code(403).send({ error: "run not yours to stop" });
+      const principal = req.principal;
+      if (!principal || !(await options.authorizeCancel?.(req, runId))) {
+        return reply.code(403).send({ error: "run not yours to stop" });
+      }
 
       const stopped = await options.cancel.cancel({
-        businessId: grant.businessId,
+        businessId: principal.businessId,
         runId,
         reason: "stopped by participant",
       });

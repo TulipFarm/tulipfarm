@@ -92,6 +92,8 @@ export type Expectation =
   /** L3 only. This Run event type was appended durably. L2 stubs the event port, so this is the
    *  only place a Turn that stopped emitting its events can be caught. */
   | { readonly kind: "run_event_emitted"; readonly eventType: string }
+  /** L3 only. Concatenated durable participant text.delta payloads omit this grounded text. */
+  | { readonly kind: "run_event_text_omits"; readonly text: string; readonly ungrounded?: string }
   /** L3 only. A Soul artifact was committed to the Eval Soul's real git repository. */
   | { readonly kind: "soul_committed"; readonly path: string }
   /**
@@ -134,6 +136,7 @@ const PERSISTED_KINDS: ReadonlySet<string> = new Set([
   "state_status",
   "turn_status",
   "run_event_emitted",
+  "run_event_text_omits",
   "soul_committed",
   "soul_published",
   "generated_file_readable_by",
@@ -146,17 +149,6 @@ const PERSISTED_KINDS: ReadonlySet<string> = new Set([
 
 export function isPersisted(expectation: Expectation): boolean {
   return PERSISTED_KINDS.has(expectation.kind);
-}
-
-/**
- * Expectations that read guardrail decisions, which only the L2 tier collects.
- *
- * L3 really does run the guards — the executor calls them — but it does not surface their
- * decisions, so `guardrail_allowed` would pass by finding nothing rather than by the guard having
- * allowed anything.
- */
-export function isGuardrail(expectation: Expectation): boolean {
-  return expectation.kind.startsWith("guardrail_");
 }
 
 /**

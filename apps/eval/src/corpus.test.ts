@@ -110,25 +110,31 @@ describe("loadCorpus", () => {
     await expect(load(dir)).rejects.toThrow(/l4/);
   });
 
-  it("rejects a persisted expectation on an L2 Case, before any model call is spent", async () => {
+  it.each([
+    { kind: "run_status", status: "succeeded" },
+    { kind: "run_event_text_omits", text: "hello" },
+  ])("rejects a persisted expectation on an L2 Case: $kind", async (expectation) => {
     const dir = corpusDir({
       "a.json": {
         ...valid("alpha"),
-        expect: [{ kind: "run_status", status: "succeeded" }],
+        expect: [expectation],
       },
     });
     await expect(load(dir)).rejects.toThrow(/only tier "l3" observes/);
   });
 
-  it("rejects a guardrail expectation on an L3 Case, which never collects a decision", async () => {
+  it("accepts guardrail expectations on L3, which reads durable decisions", async () => {
     const dir = corpusDir({
       "a.json": {
         ...valid("alpha"),
         tier: "l3",
-        expect: [{ kind: "guardrail_allowed", stage: "input" }],
+        expect: [
+          { kind: "guardrail_allowed", stage: "input" },
+          { kind: "guardrail_blocked", stage: "output", guard: "content_filter" },
+        ],
       },
     });
-    await expect(load(dir)).rejects.toThrow(/only tier "l2" collects/);
+    await expect(load(dir)).resolves.toBeDefined();
   });
 
   it("rejects a batching expectation on an L3 Case, which cannot see how calls were grouped", async () => {
@@ -178,6 +184,8 @@ describe("loadCorpus", () => {
   it("rejects an expectation missing the field its kind needs", async () => {
     const cases: Record<string, unknown>[] = [
       { kind: "output_matches" },
+      { kind: "run_event_text_omits" },
+      { kind: "run_event_text_omits", text: "" },
       { kind: "prompt_contains" },
       { kind: "tool_argument_equals", name: "t", path: "a" },
       { kind: "output_field_equals", value: 1 },
@@ -214,6 +222,26 @@ describe("loadCorpus grounding", () => {
     ...valid("c1"),
     expect: [...expectations, { kind: "loop_status", status: "completed" }],
     ...over,
+  });
+
+  it("grounds participant-text omissions in given facts, never the model script", async () => {
+    const cased = withExpect([{ kind: "run_event_text_omits", text: "4111 1111 1111 1111" }], {
+      tier: "l3",
+      script: [{ kind: "text", text: "4111 1111 1111 1111" }],
+    });
+    await expect(load(corpusDir({ "a.json": cased }))).rejects.toThrow(
+      /passes even with the guard removed/
+    );
+    await expect(
+      load(
+        corpusDir({
+          "a.json": {
+            ...cased,
+            toolResults: [{ name: "payment_record", output: "4111 1111 1111 1111" }],
+          },
+        })
+      )
+    ).resolves.toBeDefined();
   });
 
   it("refuses text the model was never given, which it could only produce by guessing", async () => {

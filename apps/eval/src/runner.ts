@@ -259,7 +259,7 @@ async function runL3Trial(
         spend = addSpend(spend, usage);
       },
     });
-    return await scored(evalCase, trial, vacuous, turn.spend, 0, [], judge, {
+    return await scored(evalCase, trial, vacuous, turn.spend, 0, turn.guardrails, judge, {
       systemPrompt: turn.systemPrompt,
       toolCalls: turn.toolCalls,
       output: turn.answer === null ? undefined : { kind: "text", text: turn.answer },
@@ -269,6 +269,7 @@ async function runL3Trial(
         stateStatus: turn.stateStatus,
         turnStatus: turn.turnStatus,
         events: turn.events,
+        participantText: turn.participantText,
         soulCommits: turn.soulCommits,
         publishedArtifacts: turn.publishedArtifacts,
         generatedFiles: turn.generatedFiles,

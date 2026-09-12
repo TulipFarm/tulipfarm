@@ -238,6 +238,27 @@ describe("operational API", () => {
     await app.close();
   });
 
+  it("does not dispatch cancellation for an operator with read permissions only", async () => {
+    const commandRun = vi.fn();
+    const app = await harness({
+      authorize: async () => ({
+        businessId: "business-1",
+        principalId: "user-1",
+        permissions: ["operations:read", "runs:read"],
+      }),
+      commandRun,
+    });
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/v1/runs/run-1/cancel",
+      headers: { "idempotency-key": "cancel-run-1-v7" },
+      payload: { expectedVersion: 7, reason: "Stop the Run" },
+    });
+    expect(response.statusCode).toBe(403);
+    expect(commandRun).not.toHaveBeenCalled();
+    await app.close();
+  });
+
   it("shows the admin-visible Team migration report", async () => {
     const app = await harness();
     const response = await app.inject({

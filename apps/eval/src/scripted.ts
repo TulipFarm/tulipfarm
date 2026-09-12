@@ -25,16 +25,26 @@ export function scriptedBinding(): ModelBinding {
     create(evalCase: EvalCase): ModelPort {
       const script = [...(evalCase.script ?? [])];
       let call = 0;
+      const invoke: ModelPort["invoke"] = async (request) => {
+        call += 1;
+        const output = script.shift();
+        if (output === undefined) throw new ScriptExhaustedError(evalCase.id, call);
+        return {
+          requestId: request.requestId,
+          output,
+          usage: { inputTokens: 0, outputTokens: 0, costUsd: 0, costBasis: "priced" },
+        };
+      };
       return {
-        invoke: async (request) => {
-          call += 1;
-          const output = script.shift();
-          if (output === undefined) throw new ScriptExhaustedError(evalCase.id, call);
-          return {
-            requestId: request.requestId,
-            output,
-            usage: { inputTokens: 0, outputTokens: 0, costUsd: 0, costBasis: "priced" },
-          };
+        invoke,
+        async *stream(request) {
+          const result = await invoke(request);
+          if (result.output.kind === "text") {
+            for (let offset = 0; offset < result.output.text.length; offset += 8) {
+              yield { kind: "text_delta", text: result.output.text.slice(offset, offset + 8) };
+            }
+          }
+          yield { kind: "completed", result };
         },
       };
     },

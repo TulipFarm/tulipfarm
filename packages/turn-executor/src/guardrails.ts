@@ -2,6 +2,9 @@ import {
   type GuardContext,
   GuardrailsService,
   isBlocked,
+  type ModelInvocationResult,
+  type ModelPort,
+  type ModelStreamChunk,
   REFUSED_TOOL_RESULT_NOTICE,
   type ToolDispatchPort,
   type ToolDispatchRequest,
@@ -160,6 +163,70 @@ export class TurnGuardrails {
     if (!result.blocked) return { blocked: false, text: result.value };
     await this.record(events, "output", result.guard, result.reason, "output");
     return { blocked: true, message: result.message ?? DEFAULT_BLOCK_MESSAGE };
+  }
+
+  /** Buffer a model response until its output guard allows publication, including split matches. */
+  guardModel(model: ModelPort, events: TurnEventWriter): ModelPort {
+    let publishedText = "";
+    const screen = async (
+      result: ModelInvocationResult,
+      streamedText = ""
+    ): Promise<string | undefined> => {
+      const output = result.output;
+      const finalText =
+        output.kind === "text"
+          ? output.text
+          : output.kind === "structured"
+            ? (JSON.stringify(output.value) ?? "")
+            : "";
+      for (const text of new Set([publishedText + streamedText, finalText])) {
+        if (text.length === 0) continue;
+        const guarded = await this.output(text, events);
+        if (guarded.blocked) return guarded.message;
+      }
+      return undefined;
+    };
+    const refused = (result: ModelInvocationResult, text: string): ModelInvocationResult => ({
+      ...result,
+      output: { kind: "text", text },
+    });
+    const stream = model.stream?.bind(model);
+    const guards = this;
+    return {
+      invoke: async (request) => {
+        this.require();
+        const result = await model.invoke(request);
+        const refusal = await screen(result);
+        return refusal === undefined ? result : refused(result, refusal);
+      },
+      ...(stream === undefined
+        ? {}
+        : {
+            async *stream(request): AsyncIterable<ModelStreamChunk> {
+              if ((guards.require().service.config.output?.length ?? 0) === 0) {
+                yield* stream(request);
+                return;
+              }
+              let text = "";
+              let result: ModelInvocationResult | undefined;
+              for await (const chunk of stream(request)) {
+                if (chunk.kind === "completed") result = chunk.result;
+                else text += chunk.text;
+              }
+              // An incomplete or failed stream must never publish an unchecked prefix.
+              if (result === undefined) return;
+              const refusal = await screen(result, text);
+              if (refusal !== undefined) {
+                yield { kind: "text_delta", text: refusal };
+                yield { kind: "completed", result: refused(result, refusal) };
+                return;
+              }
+              publishedText += text;
+              if (text.length > 0) yield { kind: "text_delta", text };
+              yield { kind: "completed", result };
+            },
+          }),
+    };
   }
 
   /**

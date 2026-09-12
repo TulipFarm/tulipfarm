@@ -3,14 +3,7 @@ import { readdir, readFile } from "node:fs/promises";
 import path from "node:path";
 import type { AssembleContext, ModelMessage } from "@tulipfarm/agent-runtime";
 import { normalizeMessageContent } from "@tulipfarm/schema";
-import {
-  type EvalCase,
-  type Expectation,
-  everyString,
-  isBatching,
-  isGuardrail,
-  isPersisted,
-} from "./case.ts";
+import { type EvalCase, type Expectation, everyString, isBatching, isPersisted } from "./case.ts";
 import { type EvalSoul, SOUL_OWNED_CONTEXT_KEYS, soulContext } from "./eval-soul.ts";
 import { expectationShapeError, isKnownExpectationKind } from "./expectation-shape.ts";
 import { platformToolNames, resolvePlatformTool } from "./platform-tools.ts";
@@ -190,11 +183,6 @@ function validate(raw: unknown, file: string): EvalCase {
     require(c.tier === "l3" ||
       !isPersisted(a as Expectation), `${file}: expectation "${kind}" reads persisted state, ` +
       `which only tier "l3" observes; this Case is tier ${JSON.stringify(c.tier)}`);
-    // The mirror of the rule above. L3 runs the guards but does not collect their decisions, so
-    // this would pass by finding nothing — the vacuous pass this framework exists to prevent.
-    require(c.tier !== "l3" ||
-      !isGuardrail(a as Expectation), `${file}: expectation "${kind}" reads guardrail decisions, ` +
-      `which only tier "l2" collects; move this Case to tier "l2"`);
     // Same mirror, same reason. L3 reports the Tools a Turn dispatched but not which model
     // response asked for them, so this would find no batches and fail for the tier's omission
     // rather than for the model's behaviour.
@@ -461,7 +449,12 @@ function givenToModel(c: EvalCase, fromSoul: Partial<AssembleContext>): string {
 function requireGrounded(c: EvalCase, file: string, fromSoul: Partial<AssembleContext>): void {
   const given = givenToModel(c, fromSoul);
   for (const e of c.expect) {
-    if (e.kind !== "output_contains" && e.kind !== "output_matches" && e.kind !== "output_omits")
+    if (
+      e.kind !== "output_contains" &&
+      e.kind !== "output_matches" &&
+      e.kind !== "output_omits" &&
+      e.kind !== "run_event_text_omits"
+    )
       continue;
     if (typeof e.ungrounded === "string" && e.ungrounded.length > 0) continue;
     const needle = e.kind === "output_matches" ? e.pattern : e.text;
@@ -478,7 +471,7 @@ function requireGrounded(c: EvalCase, file: string, fromSoul: Partial<AssembleCo
     } else grounded = given.toLowerCase().includes(needle.toLowerCase());
 
     const why =
-      e.kind === "output_omits"
+      e.kind === "output_omits" || e.kind === "run_event_text_omits"
         ? `the model is never given it, so it could not have emitted it and this expectation ` +
           `passes even with the guard removed. Put the text in a Tool result or the Context so ` +
           `the guard has something to catch, or set "ungrounded" to the reason this is about ` +

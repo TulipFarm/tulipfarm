@@ -81,6 +81,7 @@ function harness(
     answer?: string;
     run?: PersistedRun;
     contextError?: Error;
+    model?: ModelPort;
   } = {}
 ): { execute: () => Promise<RunOutcomeStatus>; recorded: Recorded } {
   const events: Recorded["events"] = [];
@@ -153,7 +154,7 @@ function harness(
       },
     },
     waits: { register: async () => ({ waitId: "wait-1" }) },
-    model,
+    model: over.model ?? model,
     log: { warn: () => {} },
     now: () => new Date("2026-01-01T00:00:00.000Z"),
   });
@@ -174,6 +175,60 @@ function harness(
 }
 
 describe("createChatExecutor", () => {
+  it("screens the whole model response before any text reaches participant events", async () => {
+    const answer = "The card is 4111 1111 1111 1111.";
+    const { execute, recorded } = harness({
+      model: {
+        invoke: async () => {
+          throw new Error("stream expected");
+        },
+        async *stream(request) {
+          yield { kind: "text_delta", text: "The card is 4111 1111 " };
+          expect(recorded.events.filter((event) => event.eventType === "text.delta")).toEqual([]);
+          yield { kind: "text_delta", text: "1111 1111." };
+          yield {
+            kind: "completed",
+            result: {
+              requestId: request.requestId,
+              output: { kind: "text", text: answer },
+              usage: { inputTokens: 12, outputTokens: 3 },
+            },
+          };
+        },
+      },
+    });
+
+    await expect(execute()).resolves.toBe("succeeded");
+
+    expect(JSON.stringify(recorded.events)).not.toContain("4111");
+    expect(recorded.messages).toEqual(["The response was blocked by a content guardrail."]);
+    expect(recorded.events).toContainEqual({
+      eventType: "text.delta",
+      payload: { text: "The response was blocked by a content guardrail.", index: 1 },
+    });
+    expect(recorded.charges).toContainEqual({ key: "tokens", amount: 15 });
+  });
+
+  it.each(["disconnect", "missing_completion"])(
+    "withholds an incomplete stream: %s",
+    async (end) => {
+      const { execute, recorded } = harness({
+        model: {
+          invoke: async () => {
+            throw new Error("stream expected");
+          },
+          async *stream() {
+            yield { kind: "text_delta", text: "The card is 4111 1111 " };
+            if (end === "disconnect") throw new Error("provider disconnected");
+          },
+        },
+      });
+
+      await expect(execute()).resolves.toBe("failed");
+      expect(recorded.events.filter((event) => event.eventType === "text.delta")).toEqual([]);
+    }
+  );
+
   it("runs the turn and leaves the Run succeeded with the answer persisted", async () => {
     const { execute, recorded } = harness();
 

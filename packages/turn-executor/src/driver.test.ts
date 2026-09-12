@@ -386,6 +386,7 @@ describe("TurnDriver", () => {
       text: "Two things before I start.",
       ...counters,
     });
+
     const outcome = await driver.run(request());
 
     expect(outcome).toEqual({ status: "succeeded" });
@@ -394,6 +395,24 @@ describe("TurnDriver", () => {
     expect(events.appended.at(-1)).toEqual({
       eventType: "turn.finished",
       payload: { status: "succeeded", messageId: "msg-1" },
+    });
+  });
+
+  it("screens input-required prose before saving it as a Message", async () => {
+    const { driver, store, events } = harness({
+      status: "input_required",
+      callId: "input-1",
+      text: "Confirm this card: 4111 1111 1111 1111.",
+      ...counters,
+    });
+
+    await expect(driver.run(request())).resolves.toEqual({ status: "succeeded" });
+    expect(store.messages).toEqual([
+      { content: "The response was blocked by a content guardrail.", attempt: 1 },
+    ]);
+    expect(events.appended).toContainEqual({
+      eventType: "guardrail.blocked",
+      payload: { stage: "output", reason: "content_filter:credit_card" },
     });
   });
 

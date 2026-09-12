@@ -48,6 +48,12 @@ const OPERATIONS_READ: RouteAuthorization = {
   fallback: "admin",
 };
 
+const RUN_CONTROL: RouteAuthorization = {
+  action: "operations.runs.control",
+  resourceType: "operations",
+  fallback: "admin",
+};
+
 /** Admins get every defined operational permission; missing capabilities still return 501. */
 const ADMIN_PERMISSIONS: readonly OperationalPermission[] = [
   "runs:read",
@@ -183,11 +189,14 @@ export function createRuntimeOperationalApi(deps: RuntimeOperationalDeps): Opera
       const principal = request.principal;
       if (principal === undefined) return null;
       if (!(await check(principal, OPERATIONS_READ))) return null;
+      const canControlRuns = await check(principal, RUN_CONTROL);
       return {
         businessId: principal.businessId,
         principalId: principal.id,
         roles: principal.role === undefined ? [] : [principal.role],
-        permissions: ADMIN_PERMISSIONS,
+        permissions: ADMIN_PERMISSIONS.filter(
+          (permission) => permission !== "runs:control" || canControlRuns
+        ),
       };
     },
 

@@ -27,7 +27,7 @@ import type {
 } from "@tulipfarm/soul";
 import type { IntegrationStore, TaskStore } from "@tulipfarm/storage";
 import type { ApprovalsRepo, ToolApprovalService } from "@tulipfarm/tool-host";
-import type { FastifyBaseLogger } from "fastify";
+import type { FastifyBaseLogger, FastifyRequest } from "fastify";
 import type { ActivityService } from "./activity/service";
 import type { QueryableProbeTarget } from "./admin/health";
 import type { OperationalApiDeps } from "./admin/routes";
@@ -184,6 +184,7 @@ export interface AppOptions {
   messageRepo?: MessageRepo;
   feedbackRepo?: FeedbackRepo;
   runEvents?: RunEventRouteDeps;
+  authorizeChatRunCancellation?: (req: FastifyRequest, runId: string) => Promise<boolean>;
   runReplay?: RunReplayDeps;
   taskStore?: TaskStore;
   /** Composed in `index.ts`, where the blob substrate lives. Absent in tests that never upload. */
