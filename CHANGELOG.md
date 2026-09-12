@@ -1,5 +1,26 @@
 # Changelog
 
+## [0.18.23](https://github.com/TulipFarm/tulipfarm/compare/v0.18.22...v0.18.23) (2026-09-12)
+
+### Features
+
+* **integrations:** add core OIM provider packages ([#797](https://github.com/TulipFarm/tulipfarm/issues/797)) ([f038aaf](https://github.com/TulipFarm/tulipfarm/commit/f038aaf1ede61724609936d265afd814ffbd1075))
+* **integrations:** add the OIM provider catalog ([#796](https://github.com/TulipFarm/tulipfarm/issues/796)) ([0f5c5d2](https://github.com/TulipFarm/tulipfarm/commit/0f5c5d267a790b9dc1fb5b044d5a304d3b4a4968))
+* **oim:** add the portable standard contract ([#792](https://github.com/TulipFarm/tulipfarm/issues/792)) ([1a99864](https://github.com/TulipFarm/tulipfarm/commit/1a99864682a5bbedb28a65722668c7cd7b3d6b95))
+* **oim:** operation runtime ([#795](https://github.com/TulipFarm/tulipfarm/issues/795)) ([8dc8be5](https://github.com/TulipFarm/tulipfarm/commit/8dc8be5a368613a0ccb18e028532964de260f3b2))
+* **storage:** add OIM persistence foundations ([#794](https://github.com/TulipFarm/tulipfarm/issues/794)) ([51afdb8](https://github.com/TulipFarm/tulipfarm/commit/51afdb8a7227fae8b3d90a57ae620f655e458eb0))
+
+### Bug Fixes
+
+* **chat:** enforce run access and guard model output ([#789](https://github.com/TulipFarm/tulipfarm/issues/789)) ([e1cea92](https://github.com/TulipFarm/tulipfarm/commit/e1cea92f042d1648b18922bf4a3f6ed77fd19142))
+* **chat:** harden streaming and model execution ([#790](https://github.com/TulipFarm/tulipfarm/issues/790)) ([2f49e91](https://github.com/TulipFarm/tulipfarm/commit/2f49e917ab9e8cdb8845a31744ee9eb1220f9c04))
+* **chat:** improve run and tool execution reliability ([#793](https://github.com/TulipFarm/tulipfarm/issues/793)) ([b9d78bd](https://github.com/TulipFarm/tulipfarm/commit/b9d78bdb09f452ea7b729f5412da8835ecf55f49))
+* **chat:** make turn history and tool replay durable ([#791](https://github.com/TulipFarm/tulipfarm/issues/791)) ([3b0d451](https://github.com/TulipFarm/tulipfarm/commit/3b0d4518868cdfb2a07602b1c25c3fa4a4e0889d))
+
+### Continuous Integration
+
+* **release:** guard against manual release-branch and tag tampering ([#798](https://github.com/TulipFarm/tulipfarm/issues/798)) ([8c8f335](https://github.com/TulipFarm/tulipfarm/commit/8c8f335213f1890eef03f1924c9a6237545e4bdc))
+
 ## [0.18.22](https://github.com/TulipFarm/tulipfarm/compare/v0.18.21...v0.18.22) (2026-09-10)
 
 ### Features
