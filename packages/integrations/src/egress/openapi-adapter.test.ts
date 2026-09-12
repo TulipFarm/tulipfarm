@@ -65,6 +65,41 @@ describe("OpenApiToolAdapter", () => {
     expect(sent?.headers["X-Trace"]).toBe("t9");
   });
 
+  it("base64-encodes a basic credential so an operator never runs base64 by hand", async () => {
+    const http = new RecordingHttp(OK);
+    const adapter = new OpenApiToolAdapter({
+      binding: binding({
+        auth: {
+          in: "header",
+          header: "Authorization",
+          format: "Basic {token}",
+          encoding: "basic",
+        },
+      }),
+      http,
+    });
+
+    await adapter.dispatch(request({ page_id: "p1" }), "muskan@acme.example:t0ken");
+
+    expect(http.sent[0]?.headers.Authorization).toBe(
+      `Basic ${Buffer.from("muskan@acme.example:t0ken", "utf8").toString("base64")}`
+    );
+  });
+
+  it("sends a credential verbatim when no encoding is declared", async () => {
+    const http = new RecordingHttp(OK);
+    const adapter = new OpenApiToolAdapter({
+      binding: binding({
+        auth: { in: "header", header: "Authorization", format: "Bearer {token}" },
+      }),
+      http,
+    });
+
+    await adapter.dispatch(request({ page_id: "p1" }), "t0ken");
+
+    expect(http.sent[0]?.headers.Authorization).toBe("Bearer t0ken");
+  });
+
   it("percent-encodes a path argument so it cannot escape its segment", async () => {
     const http = new RecordingHttp(OK);
     const adapter = new OpenApiToolAdapter({ binding: binding(), http });
@@ -117,6 +152,32 @@ describe("OpenApiToolAdapter", () => {
     await expect(adapter.dispatch(request({ page_id: "p1" }))).rejects.toThrow(
       AdapterDispatchError
     );
+    expect(http.sent).toHaveLength(0);
+  });
+
+  it("does not reuse the primary credential for a missing secondary slot", async () => {
+    const http = new RecordingHttp(OK);
+    const adapter = new OpenApiToolAdapter({
+      binding: binding({
+        auth: {
+          in: "query",
+          name: "key",
+          format: "{token}",
+          credentialSlot: "api_key",
+        },
+        secondaryAuth: {
+          in: "query",
+          name: "token",
+          format: "{token}",
+          credentialSlot: "token",
+        },
+      }),
+      http,
+    });
+
+    await expect(
+      adapter.dispatch(request({ page_id: "p1" }), "primary", { api_key: "primary" })
+    ).rejects.toThrow(AdapterDispatchError);
     expect(http.sent).toHaveLength(0);
   });
 
@@ -218,6 +279,22 @@ describe("OpenApiToolAdapter base_url credential placement", () => {
 
     expect(http.sent[0]?.url).toBe("https://api.telegram.org/bot123:AAE-secret/pages/p1");
     expect(http.sent[0]?.headers.Authorization).toBeUndefined();
+  });
+
+  it("returns only a credential-neutral URL for pagination metadata", async () => {
+    const http = new RecordingHttp(OK);
+    const adapter = new OpenApiToolAdapter({
+      binding: binding({
+        auth: { in: "base_url" },
+        baseUrl: "https://api.telegram.org/bot{token}",
+      }),
+      http,
+    });
+
+    const result = await adapter.dispatchDetailed(request({ page_id: "p1" }), "123:AAE-secret");
+
+    expect(result.paginationUrl).not.toContain("123:AAE-secret");
+    expect(JSON.stringify(result)).not.toContain("123:AAE-secret");
   });
 
   it("refuses a credential that would restructure the URL", async () => {

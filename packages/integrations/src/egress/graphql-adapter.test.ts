@@ -93,4 +93,37 @@ describe("GraphqlToolAdapter", () => {
       phase: "before_dispatch",
     } satisfies Partial<AdapterDispatchError>);
   });
+
+  it("treats GraphQL errors after a mutation request as indeterminate", async () => {
+    const adapter = new GraphqlToolAdapter({
+      binding: binding({ mutating: true }),
+      http: new RecordingHttp({
+        status: 200,
+        headers: {},
+        body: { errors: [{ message: "mutation result missing" }] },
+      }),
+    });
+
+    await expect(adapter.dispatch(request({ id: "issue-1" }))).rejects.toMatchObject({
+      code: "provider_rejected",
+      phase: "after_dispatch",
+    } satisfies Partial<AdapterDispatchError>);
+  });
+
+  it("classifies the declared provider retry header", async () => {
+    const adapter = new GraphqlToolAdapter({
+      binding: binding({ retryAfterHeader: "X-Rate-Reset" }),
+      http: new RecordingHttp({
+        status: 429,
+        headers: { "X-Rate-Reset": "30" },
+        body: {},
+      }),
+    });
+
+    await expect(adapter.dispatch(request({ id: "issue-1" }))).rejects.toMatchObject({
+      code: "provider_rate_limited",
+      phase: "before_dispatch",
+      retryAfterMs: 30_000,
+    } satisfies Partial<AdapterDispatchError>);
+  });
 });

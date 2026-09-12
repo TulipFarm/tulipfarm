@@ -4,7 +4,7 @@ import {
   type ToolContractSpec,
 } from "@tulipfarm/schema";
 import { assertPublicEgressUrl, EgressDestinationError } from "./destination";
-import type { OpenApiEgressAuth } from "./openapi-compile";
+import type { CredentialEncoding, OpenApiEgressAuth } from "./openapi-compile";
 
 export interface GraphqlEgressOperation {
   readonly name: string;
@@ -28,7 +28,16 @@ export interface GraphqlOperationBinding {
   readonly document: string;
   readonly mutating: boolean;
   readonly headers: Readonly<Record<string, string>>;
-  readonly auth?: { readonly in: "header"; readonly header: string; readonly format: string };
+  readonly maxResponseBytes?: number;
+  /** OIM-declared header carrying delay-seconds or an HTTP-date after provider rejection. */
+  readonly retryAfterHeader?: string;
+  readonly auth?: {
+    readonly in: "header";
+    readonly header: string;
+    readonly format: string;
+    readonly encoding?: CredentialEncoding;
+    readonly credentialSlot?: string;
+  };
 }
 
 export interface CompiledGraphqlTool {

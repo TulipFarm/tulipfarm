@@ -3,7 +3,7 @@ import { ajv, canonicalHash, type ToolAdapterKind } from "@tulipfarm/schema";
 import type { ToolCatalog } from "../catalog";
 import type { CredentialDispatcher } from "../credential-dispatch";
 import type { ToolIntent } from "../intent";
-import { mayRetry, retryDelayMs } from "./retry";
+import { mayRetry, nextRetryDelayMs } from "./retry";
 import type { EffectStore } from "./store";
 
 export type DispatchPhase = "before_dispatch" | "after_dispatch";
@@ -13,7 +13,9 @@ export class AdapterDispatchError extends Error {
     readonly phase: DispatchPhase,
     readonly code: string,
     readonly retryable: boolean,
-    readonly providerRequestId?: string
+    readonly providerRequestId?: string,
+    /** Provider-stated delay before a safe retry, bounded by the broker before waiting. */
+    readonly retryAfterMs?: number
   ) {
     super(code);
     this.name = "AdapterDispatchError";
@@ -29,6 +31,9 @@ export interface ToolAdapterRequest {
   readonly abortSignal?: AbortSignal;
 }
 
+/** Plaintext credentials leased for one dispatch, keyed by manifest credential slot. */
+export type ToolAdapterCredentials = Readonly<Record<string, string>>;
+
 export interface ToolAdapter {
   /**
    * The backend this adapter actually is. Resolution is by `ToolContractSpec.adapter.ref`, which a
@@ -37,7 +42,11 @@ export interface ToolAdapter {
    * dispatcher refuses when the two disagree.
    */
   readonly kind: ToolAdapterKind;
-  dispatch(request: ToolAdapterRequest, credential?: string): Promise<unknown>;
+  dispatch(
+    request: ToolAdapterRequest,
+    credential?: string,
+    credentials?: ToolAdapterCredentials
+  ): Promise<unknown>;
 }
 
 export type ToolDispatchErrorCode =
@@ -266,7 +275,7 @@ export class EffectDispatcher {
         if (ambiguous) throw new ToolDispatchError("ambiguous", effectId);
         if (!retry) throw new ToolDispatchError("dispatch_failed", effectId, error.code);
         try {
-          await this.wait(retryDelayMs(attemptNumber), abortSignal);
+          await this.wait(nextRetryDelayMs(attemptNumber, error.retryAfterMs), abortSignal);
         } catch (waitError) {
           if (waitError instanceof RetryWaitAbortedError || abortSignal?.aborted) {
             throw new ToolDispatchError("dispatch_failed", effectId, "dispatch_cancelled");
