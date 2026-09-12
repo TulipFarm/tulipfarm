@@ -1,0 +1,39 @@
+name: Release branch guard
+
+# v0.18.6 shipped a stray commit onto its release branch after the release PR was
+# already open. publish-image.yml's file-allowlist correctly rejected the merge, but
+# only at merge time -- by then the release PR had looked green for a while. This
+# fails loud the moment the extra commit lands, instead of waiting for a failed merge.
+on:
+  push:
+    branches: ["release/v**"]
+
+permissions:
+  contents: read
+
+jobs:
+  guard:
+    name: Reject extra commits on a release branch
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - name: Verify the branch holds only the automated version bump
+        run: |
+          set -euo pipefail
+          git fetch origin main --quiet
+          commits="$(git rev-list --count origin/main..HEAD)"
+          if [ "$commits" != "1" ]; then
+            echo "##[error]$GITHUB_REF has $commits commit(s) ahead of main; release branches must carry exactly the automated chore(release) commit. publish-image.yml will reject this at merge -- reset the branch instead of adding commits to it."
+            exit 1
+          fi
+          subject="$(git log -1 --format=%s)"
+          case "$subject" in
+            "chore(release): v"*) ;;
+            *)
+              echo "##[error]$GITHUB_REF's HEAD commit ('$subject') is not the automated chore(release) bump. Only release.yml should commit to a release branch."
+              exit 1
+              ;;
+          esac
