@@ -1,0 +1,667 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:oim:schema:1.0:profiles:knowledge-1.1.schema.json",
+  "title": "Open Integration Manifest Knowledge 1.1",
+  "additionalProperties": false,
+  "type": "object",
+  "required": ["sourceKinds", "list", "content", "acl", "deletion"],
+  "properties": {
+    "sourceKinds": {
+      "minItems": 1,
+      "type": "array",
+      "items": {
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["id", "label"],
+        "properties": {
+          "id": {
+            "pattern": "^[a-z][a-z0-9_]{1,63}$",
+            "maxLength": 64,
+            "type": "string"
+          },
+          "label": {
+            "minLength": 1,
+            "maxLength": 128,
+            "type": "string"
+          },
+          "description": {
+            "minLength": 1,
+            "maxLength": 1024,
+            "type": "string"
+          },
+          "discoverOperationId": {
+            "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$",
+            "maxLength": 96,
+            "type": "string"
+          },
+          "discoverItemsPointer": {
+            "pattern": "^(?:$|/(?:[^/~]|~[01])*(?:/(?:[^/~]|~[01])*)*)$",
+            "maxLength": 512,
+            "type": "string"
+          },
+          "discoverMapping": {
+            "additionalProperties": false,
+            "type": "object",
+            "required": ["id", "label"],
+            "properties": {
+              "id": {
+                "pattern": "^(?:$|/(?:[^/~]|~[01])*(?:/(?:[^/~]|~[01])*)*)$",
+                "maxLength": 512,
+                "type": "string"
+              },
+              "label": {
+                "pattern": "^(?:$|/(?:[^/~]|~[01])*(?:/(?:[^/~]|~[01])*)*)$",
+                "maxLength": 512,
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    },
+    "list": {
+      "additionalProperties": false,
+      "type": "object",
+      "required": ["operationId", "itemsPointer", "mapping", "cursor"],
+      "properties": {
+        "operationId": {
+          "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$",
+          "maxLength": 96,
+          "type": "string"
+        },
+        "scopeParameter": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "itemsPointer": {
+          "pattern": "^(?:$|/(?:[^/~]|~[01])*(?:/(?:[^/~]|~[01])*)*)$",
+          "maxLength": 512,
+          "type": "string"
+        },
+        "mapping": {
+          "additionalProperties": false,
+          "type": "object",
+          "properties": {
+            "itemId": {
+              "pattern": "^(?:$|/(?:[^/~]|~[01])*(?:/(?:[^/~]|~[01])*)*)$",
+              "maxLength": 512,
+              "type": "string"
+            },
+            "itemFields": {
+              "additionalProperties": false,
+              "type": "object",
+              "patternProperties": {
+                "^[a-z][a-z0-9_]{1,63}$": {
+                  "anyOf": [
+                    {
+                      "additionalProperties": false,
+                      "type": "object",
+                      "required": ["source"],
+                      "properties": {
+                        "source": {
+                          "const": "scope",
+                          "type": "string"
+                        }
+                      }
+                    },
+                    {
+                      "additionalProperties": false,
+                      "type": "object",
+                      "required": ["source", "pointer"],
+                      "properties": {
+                        "source": {
+                          "const": "item",
+                          "type": "string"
+                        },
+                        "pointer": {
+                          "pattern": "^(?:$|/(?:[^/~]|~[01])*(?:/(?:[^/~]|~[01])*)*)$",
+                          "maxLength": 512,
+                          "type": "string"
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            },
+            "itemIdentity": {
+              "minItems": 1,
+              "uniqueItems": true,
+              "type": "array",
+              "items": {
+                "pattern": "^[a-z][a-z0-9_]{1,63}$",
+                "maxLength": 64,
+                "type": "string"
+              }
+            },
+            "revision": {
+              "pattern": "^(?:$|/(?:[^/~]|~[01])*(?:/(?:[^/~]|~[01])*)*)$",
+              "maxLength": 512,
+              "type": "string"
+            },
+            "title": {
+              "pattern": "^(?:$|/(?:[^/~]|~[01])*(?:/(?:[^/~]|~[01])*)*)$",
+              "maxLength": 512,
+              "type": "string"
+            },
+            "sourceUrl": {
+              "pattern": "^(?:$|/(?:[^/~]|~[01])*(?:/(?:[^/~]|~[01])*)*)$",
+              "maxLength": 512,
+              "type": "string"
+            },
+            "updatedAt": {
+              "pattern": "^(?:$|/(?:[^/~]|~[01])*(?:/(?:[^/~]|~[01])*)*)$",
+              "maxLength": 512,
+              "type": "string"
+            },
+            "contentType": {
+              "pattern": "^(?:$|/(?:[^/~]|~[01])*(?:/(?:[^/~]|~[01])*)*)$",
+              "maxLength": 512,
+              "type": "string"
+            },
+            "deleted": {
+              "pattern": "^(?:$|/(?:[^/~]|~[01])*(?:/(?:[^/~]|~[01])*)*)$",
+              "maxLength": 512,
+              "type": "string"
+            }
+          }
+        },
+        "cursor": {
+          "additionalProperties": false,
+          "type": "object",
+          "required": ["kind"],
+          "properties": {
+            "kind": {
+              "type": "string",
+              "enum": ["operation_pagination", "response_pointer", "none"]
+            },
+            "pointer": {
+              "pattern": "^(?:/(?:[^/~]|~[01])*)+$",
+              "maxLength": 512,
+              "type": "string"
+            },
+            "requestParameter": {
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        },
+        "maxPagesPerRun": {
+          "minimum": 1,
+          "maximum": 10000,
+          "type": "integer"
+        }
+      }
+    },
+    "content": {
+      "additionalProperties": false,
+      "type": "object",
+      "required": ["operationId", "mapping"],
+      "properties": {
+        "operationId": {
+          "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$",
+          "maxLength": 96,
+          "type": "string"
+        },
+        "itemParameter": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "parameters": {
+          "additionalProperties": false,
+          "type": "object",
+          "patternProperties": {
+            "^[A-Za-z_][A-Za-z0-9_.-]{0,127}$": {
+              "pattern": "^[a-z][a-z0-9_]{1,63}$",
+              "maxLength": 64,
+              "type": "string"
+            }
+          }
+        },
+        "mapping": {
+          "additionalProperties": false,
+          "type": "object",
+          "required": ["content"],
+          "properties": {
+            "content": {
+              "anyOf": [
+                {
+                  "pattern": "^(?:$|/(?:[^/~]|~[01])*(?:/(?:[^/~]|~[01])*)*)$",
+                  "maxLength": 512,
+                  "type": "string"
+                },
+                {
+                  "additionalProperties": false,
+                  "type": "object",
+                  "required": ["itemsPointer", "itemPointer", "separator"],
+                  "properties": {
+                    "itemsPointer": {
+                      "pattern": "^(?:$|/(?:[^/~]|~[01])*(?:/(?:[^/~]|~[01])*)*)$",
+                      "maxLength": 512,
+                      "type": "string"
+                    },
+                    "itemPointer": {
+                      "pattern": "^(?:$|/(?:[^/~]|~[01])*(?:/(?:[^/~]|~[01])*)*)$",
+                      "maxLength": 512,
+                      "type": "string"
+                    },
+                    "separator": {
+                      "maxLength": 64,
+                      "type": "string"
+                    }
+                  }
+                }
+              ]
+            },
+            "contentType": {
+              "pattern": "^(?:$|/(?:[^/~]|~[01])*(?:/(?:[^/~]|~[01])*)*)$",
+              "maxLength": 512,
+              "type": "string"
+            },
+            "revision": {
+              "pattern": "^(?:$|/(?:[^/~]|~[01])*(?:/(?:[^/~]|~[01])*)*)$",
+              "maxLength": 512,
+              "type": "string"
+            },
+            "title": {
+              "pattern": "^(?:$|/(?:[^/~]|~[01])*(?:/(?:[^/~]|~[01])*)*)$",
+              "maxLength": 512,
+              "type": "string"
+            },
+            "sourceUrl": {
+              "pattern": "^(?:$|/(?:[^/~]|~[01])*(?:/(?:[^/~]|~[01])*)*)$",
+              "maxLength": 512,
+              "type": "string"
+            },
+            "updatedAt": {
+              "pattern": "^(?:$|/(?:[^/~]|~[01])*(?:/(?:[^/~]|~[01])*)*)$",
+              "maxLength": 512,
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    "acl": {
+      "anyOf": [
+        {
+          "additionalProperties": false,
+          "type": "object",
+          "required": ["mode", "operationId", "entriesPointer", "entry"],
+          "properties": {
+            "mode": {
+              "const": "item",
+              "type": "string"
+            },
+            "operationId": {
+              "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$",
+              "maxLength": 96,
+              "type": "string"
+            },
+            "itemParameter": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "parameters": {
+              "additionalProperties": false,
+              "type": "object",
+              "patternProperties": {
+                "^[A-Za-z_][A-Za-z0-9_.-]{0,127}$": {
+                  "pattern": "^[a-z][a-z0-9_]{1,63}$",
+                  "maxLength": 64,
+                  "type": "string"
+                }
+              }
+            },
+            "entriesPointer": {
+              "pattern": "^(?:$|/(?:[^/~]|~[01])*(?:/(?:[^/~]|~[01])*)*)$",
+              "maxLength": 512,
+              "type": "string"
+            },
+            "entry": {
+              "additionalProperties": false,
+              "type": "object",
+              "properties": {
+                "kindPointer": {
+                  "pattern": "^(?:$|/(?:[^/~]|~[01])*(?:/(?:[^/~]|~[01])*)*)$",
+                  "maxLength": 512,
+                  "type": "string"
+                },
+                "kindValues": {
+                  "additionalProperties": false,
+                  "type": "object",
+                  "properties": {
+                    "user": {
+                      "uniqueItems": true,
+                      "type": "array",
+                      "items": {
+                        "maxLength": 128,
+                        "type": "string"
+                      }
+                    },
+                    "group": {
+                      "uniqueItems": true,
+                      "type": "array",
+                      "items": {
+                        "maxLength": 128,
+                        "type": "string"
+                      }
+                    },
+                    "domain": {
+                      "uniqueItems": true,
+                      "type": "array",
+                      "items": {
+                        "maxLength": 128,
+                        "type": "string"
+                      }
+                    },
+                    "public": {
+                      "uniqueItems": true,
+                      "type": "array",
+                      "items": {
+                        "maxLength": 128,
+                        "type": "string"
+                      }
+                    }
+                  }
+                },
+                "defaultKind": {
+                  "type": "string",
+                  "enum": ["user", "group", "domain", "public"]
+                },
+                "providerUserId": {
+                  "pattern": "^(?:$|/(?:[^/~]|~[01])*(?:/(?:[^/~]|~[01])*)*)$",
+                  "maxLength": 512,
+                  "type": "string"
+                },
+                "providerGroupId": {
+                  "pattern": "^(?:$|/(?:[^/~]|~[01])*(?:/(?:[^/~]|~[01])*)*)$",
+                  "maxLength": 512,
+                  "type": "string"
+                },
+                "domain": {
+                  "pattern": "^(?:$|/(?:[^/~]|~[01])*(?:/(?:[^/~]|~[01])*)*)$",
+                  "maxLength": 512,
+                  "type": "string"
+                }
+              }
+            }
+          }
+        },
+        {
+          "additionalProperties": false,
+          "type": "object",
+          "required": ["mode", "operationId", "scopeParameter", "entriesPointer", "entry"],
+          "properties": {
+            "mode": {
+              "const": "scope",
+              "type": "string"
+            },
+            "operationId": {
+              "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$",
+              "maxLength": 96,
+              "type": "string"
+            },
+            "scopeParameter": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "entriesPointer": {
+              "pattern": "^(?:$|/(?:[^/~]|~[01])*(?:/(?:[^/~]|~[01])*)*)$",
+              "maxLength": 512,
+              "type": "string"
+            },
+            "entry": {
+              "additionalProperties": false,
+              "type": "object",
+              "properties": {
+                "kindPointer": {
+                  "pattern": "^(?:$|/(?:[^/~]|~[01])*(?:/(?:[^/~]|~[01])*)*)$",
+                  "maxLength": 512,
+                  "type": "string"
+                },
+                "kindValues": {
+                  "additionalProperties": false,
+                  "type": "object",
+                  "properties": {
+                    "user": {
+                      "uniqueItems": true,
+                      "type": "array",
+                      "items": {
+                        "maxLength": 128,
+                        "type": "string"
+                      }
+                    },
+                    "group": {
+                      "uniqueItems": true,
+                      "type": "array",
+                      "items": {
+                        "maxLength": 128,
+                        "type": "string"
+                      }
+                    },
+                    "domain": {
+                      "uniqueItems": true,
+                      "type": "array",
+                      "items": {
+                        "maxLength": 128,
+                        "type": "string"
+                      }
+                    },
+                    "public": {
+                      "uniqueItems": true,
+                      "type": "array",
+                      "items": {
+                        "maxLength": 128,
+                        "type": "string"
+                      }
+                    }
+                  }
+                },
+                "defaultKind": {
+                  "type": "string",
+                  "enum": ["user", "group", "domain", "public"]
+                },
+                "providerUserId": {
+                  "pattern": "^(?:$|/(?:[^/~]|~[01])*(?:/(?:[^/~]|~[01])*)*)$",
+                  "maxLength": 512,
+                  "type": "string"
+                },
+                "providerGroupId": {
+                  "pattern": "^(?:$|/(?:[^/~]|~[01])*(?:/(?:[^/~]|~[01])*)*)$",
+                  "maxLength": 512,
+                  "type": "string"
+                },
+                "domain": {
+                  "pattern": "^(?:$|/(?:[^/~]|~[01])*(?:/(?:[^/~]|~[01])*)*)$",
+                  "maxLength": 512,
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    "identity": {
+      "additionalProperties": false,
+      "type": "object",
+      "properties": {
+        "user": {
+          "additionalProperties": false,
+          "type": "object",
+          "required": ["operationId", "idParameter", "mapping"],
+          "properties": {
+            "operationId": {
+              "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$",
+              "maxLength": 96,
+              "type": "string"
+            },
+            "idParameter": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "mapping": {
+              "additionalProperties": false,
+              "type": "object",
+              "required": ["providerId"],
+              "properties": {
+                "providerId": {
+                  "pattern": "^(?:$|/(?:[^/~]|~[01])*(?:/(?:[^/~]|~[01])*)*)$",
+                  "maxLength": 512,
+                  "type": "string"
+                },
+                "email": {
+                  "pattern": "^(?:$|/(?:[^/~]|~[01])*(?:/(?:[^/~]|~[01])*)*)$",
+                  "maxLength": 512,
+                  "type": "string"
+                },
+                "emailVerified": {
+                  "pattern": "^(?:$|/(?:[^/~]|~[01])*(?:/(?:[^/~]|~[01])*)*)$",
+                  "maxLength": 512,
+                  "type": "string"
+                }
+              }
+            }
+          }
+        },
+        "group": {
+          "additionalProperties": false,
+          "type": "object",
+          "required": ["operationId", "idParameter", "mapping"],
+          "properties": {
+            "operationId": {
+              "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$",
+              "maxLength": 96,
+              "type": "string"
+            },
+            "idParameter": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "membersPointer": {
+              "pattern": "^(?:$|/(?:[^/~]|~[01])*(?:/(?:[^/~]|~[01])*)*)$",
+              "maxLength": 512,
+              "type": "string"
+            },
+            "mapping": {
+              "additionalProperties": false,
+              "type": "object",
+              "required": ["providerId"],
+              "properties": {
+                "providerId": {
+                  "pattern": "^(?:$|/(?:[^/~]|~[01])*(?:/(?:[^/~]|~[01])*)*)$",
+                  "maxLength": 512,
+                  "type": "string"
+                },
+                "memberUserId": {
+                  "pattern": "^(?:$|/(?:[^/~]|~[01])*(?:/(?:[^/~]|~[01])*)*)$",
+                  "maxLength": 512,
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "deletion": {
+      "additionalProperties": false,
+      "type": "object",
+      "required": ["kind"],
+      "properties": {
+        "kind": {
+          "type": "string",
+          "enum": ["list_flag", "absent_from_full_list", "operation", "none"]
+        },
+        "operationId": {
+          "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$",
+          "maxLength": 96,
+          "type": "string"
+        },
+        "scopeParameter": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "parameters": {
+          "additionalProperties": false,
+          "type": "object",
+          "patternProperties": {
+            "^[A-Za-z_][A-Za-z0-9_.-]{0,127}$": {
+              "pattern": "^[a-z][a-z0-9_]{1,63}$",
+              "maxLength": 64,
+              "type": "string"
+            }
+          }
+        },
+        "itemsPointer": {
+          "pattern": "^(?:$|/(?:[^/~]|~[01])*(?:/(?:[^/~]|~[01])*)*)$",
+          "maxLength": 512,
+          "type": "string"
+        },
+        "itemIdPointer": {
+          "pattern": "^(?:$|/(?:[^/~]|~[01])*(?:/(?:[^/~]|~[01])*)*)$",
+          "maxLength": 512,
+          "type": "string"
+        }
+      }
+    },
+    "guideFile": {
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*(?:/[A-Za-z0-9][A-Za-z0-9._-]*)*$",
+      "type": "string"
+    },
+    "liveAuthorization": {
+      "additionalProperties": false,
+      "type": "object",
+      "required": ["operationId"],
+      "properties": {
+        "operationId": {
+          "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$",
+          "maxLength": 96,
+          "type": "string"
+        },
+        "itemParameter": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "parameters": {
+          "additionalProperties": false,
+          "type": "object",
+          "patternProperties": {
+            "^[A-Za-z_][A-Za-z0-9_.-]{0,127}$": {
+              "pattern": "^[a-z][a-z0-9_]{1,63}$",
+              "maxLength": 64,
+              "type": "string"
+            }
+          }
+        },
+        "principalParameter": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "allowedPointer": {
+          "pattern": "^(?:$|/(?:[^/~]|~[01])*(?:/(?:[^/~]|~[01])*)*)$",
+          "maxLength": 512,
+          "type": "string"
+        },
+        "principalSet": {
+          "additionalProperties": false,
+          "type": "object",
+          "required": ["entriesPointer", "principalIdPointer"],
+          "properties": {
+            "entriesPointer": {
+              "pattern": "^(?:$|/(?:[^/~]|~[01])*(?:/(?:[^/~]|~[01])*)*)$",
+              "maxLength": 512,
+              "type": "string"
+            },
+            "principalIdPointer": {
+              "pattern": "^(?:$|/(?:[^/~]|~[01])*(?:/(?:[^/~]|~[01])*)*)$",
+              "maxLength": 512,
+              "type": "string"
+            }
+          }
+        }
+      }
+    }
+  }
+}

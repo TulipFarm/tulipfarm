@@ -1,5 +1,7 @@
 node_modules/
 dist/
+!standards/oim/dist/
+!standards/oim/dist/oim-runtime.mjs
 build/
 coverage/
 .vitest/

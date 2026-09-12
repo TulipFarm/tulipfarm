@@ -1,0 +1,23 @@
+oimVersion: "1.0"
+kind: Integration
+metadata:
+  id: documents
+  name: Documents
+  version: 1.0.0
+  description: Download documents.
+  license: Apache-2.0
+profiles: { core: "1.1" }
+operations:
+  - id: download
+    name: download_document
+    description: Download one document.
+    effect: read
+    identityMode: shared_only
+    source:
+      type: http
+      method: GET
+      baseUrl: https://api.example.test
+      path: /documents
+    response:
+      mode: binary
+      maxBytes: 1048576
