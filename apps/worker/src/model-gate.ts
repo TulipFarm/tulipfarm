@@ -31,7 +31,21 @@ export interface ProviderGateOptions {
 interface ProviderState {
   readonly breaker: CircuitBreaker;
   inFlight: number;
-  readonly waiting: { resolve: () => void; reject: (err: Error) => void; timer: NodeJS.Timeout }[];
+  readonly waiting: {
+    resolve: () => void;
+    reject: (err: Error) => void;
+    timer: NodeJS.Timeout;
+    signal?: AbortSignal;
+    onAbort?: () => void;
+  }[];
+}
+
+function abortError(): DOMException {
+  return new DOMException("The model call was aborted", "AbortError");
+}
+
+function isAborted(signal: AbortSignal | undefined): boolean {
+  return signal?.aborted === true;
 }
 
 /**
@@ -60,11 +74,19 @@ export class ProviderGate implements ModelCallGate {
     this.now = options.now ?? Date.now;
   }
 
-  async acquire(provider: string): Promise<ModelCallLease> {
+  async acquire(provider: string, signal?: AbortSignal): Promise<ModelCallLease> {
     const state = this.stateFor(provider);
 
-    if (state.inFlight >= this.maxConcurrency) await this.waitForSlot(provider, state);
+    if (isAborted(signal)) throw abortError();
+
+    if (state.inFlight >= this.maxConcurrency) await this.waitForSlot(provider, state, signal);
     else state.inFlight += 1;
+
+    if (isAborted(signal)) {
+      state.inFlight = Math.max(0, state.inFlight - 1);
+      this.wake(state);
+      throw abortError();
+    }
 
     // Checked after the slot is held, never before. `tryAcquire` consumes the breaker's single
     // half-open probe, and a call that then failed to get capacity would leave that probe
@@ -75,13 +97,31 @@ export class ProviderGate implements ModelCallGate {
       throw new ProviderUnavailableError(provider, "circuit open after repeated failures");
     }
 
+    const halfOpenProbe = state.breaker.currentState() === "half_open";
+    let outcome = false;
     let settled = false;
     return {
-      succeeded: () => state.breaker.recordSuccess(),
-      failed: () => state.breaker.recordFailure(),
+      succeeded: () => {
+        if (outcome) return;
+        outcome = true;
+        state.breaker.recordSuccess();
+      },
+      failed: () => {
+        if (outcome) return;
+        outcome = true;
+        state.breaker.recordFailure();
+      },
+      cancelled: () => {
+        if (outcome) return;
+        outcome = true;
+        if (halfOpenProbe) state.breaker.abandonProbe();
+      },
       release: () => {
         if (settled) return;
         settled = true;
+        // A forgotten outcome must not strand the breaker's single half-open probe or erase its
+        // failure history. Only a completed provider response closes the circuit.
+        if (!outcome && halfOpenProbe) state.breaker.abandonProbe();
         state.inFlight = Math.max(0, state.inFlight - 1);
         this.wake(state);
       },
@@ -109,15 +149,37 @@ export class ProviderGate implements ModelCallGate {
     return state;
   }
 
-  private waitForSlot(provider: string, state: ProviderState): Promise<void> {
+  private waitForSlot(
+    provider: string,
+    state: ProviderState,
+    signal: AbortSignal | undefined
+  ): Promise<void> {
     return new Promise<void>((resolve, reject) => {
-      const timer = setTimeout(() => {
-        const index = state.waiting.findIndex((w) => w.timer === timer);
+      const remove = (waiter: ProviderState["waiting"][number]) => {
+        const index = state.waiting.indexOf(waiter);
         if (index >= 0) state.waiting.splice(index, 1);
+        clearTimeout(waiter.timer);
+        if (waiter.signal !== undefined && waiter.onAbort !== undefined) {
+          waiter.signal.removeEventListener("abort", waiter.onAbort);
+        }
+      };
+      const timer = setTimeout(() => {
+        remove(waiter);
         reject(new ProviderUnavailableError(provider, "no capacity within the queue budget"));
       }, this.queueTimeoutMs);
       timer.unref?.();
-      state.waiting.push({ resolve, reject, timer });
+      const waiter: ProviderState["waiting"][number] = { resolve, reject, timer };
+      if (signal !== undefined) {
+        const onAbort = () => {
+          remove(waiter);
+          reject(abortError());
+        };
+        waiter.signal = signal;
+        waiter.onAbort = onAbort;
+        signal.addEventListener("abort", onAbort, { once: true });
+      }
+      state.waiting.push(waiter);
+      if (isAborted(signal)) waiter.onAbort?.();
     });
   }
 
@@ -132,6 +194,9 @@ export class ProviderGate implements ModelCallGate {
     const next = state.waiting.shift();
     if (next === undefined) return;
     clearTimeout(next.timer);
+    if (next.signal !== undefined && next.onAbort !== undefined) {
+      next.signal.removeEventListener("abort", next.onAbort);
+    }
     state.inFlight += 1;
     next.resolve();
   }

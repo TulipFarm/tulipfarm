@@ -19,6 +19,46 @@ import type {
 } from "~/lib/chat/types";
 
 const TERMINAL_EVENT_TYPES = new Set<ChatEventType>(["finish", "error"]);
+const RECONNECT_DELAYS_MS = [100, 250, 500] as const;
+
+class StreamReadError extends Error {
+  constructor(
+    readonly lastSequence: number,
+    readonly readError: unknown
+  ) {
+    super(readError instanceof Error ? readError.message : "stream read failed");
+    this.name = "StreamReadError";
+  }
+}
+
+function isAbortError(error: unknown): boolean {
+  return error instanceof DOMException && error.name === "AbortError";
+}
+
+function isRecoverableNetworkFailure(error: unknown): boolean {
+  if (isAbortError(error)) return false;
+  if (error instanceof ApiError) {
+    return (
+      error.status === 408 || error.status === 425 || error.status === 429 || error.status >= 500
+    );
+  }
+  return error instanceof Error;
+}
+
+function waitForReconnect(delayMs: number, signal?: AbortSignal): Promise<void> {
+  if (signal?.aborted) return Promise.reject(new DOMException("Aborted", "AbortError"));
+  return new Promise((resolve, reject) => {
+    const timeout = setTimeout(() => {
+      signal?.removeEventListener("abort", abort);
+      resolve();
+    }, delayMs);
+    const abort = () => {
+      clearTimeout(timeout);
+      reject(new DOMException("Aborted", "AbortError"));
+    };
+    signal?.addEventListener("abort", abort, { once: true });
+  });
+}
 
 function fieldValue(line: string, name: string): string | null {
   const prefix = `${name}:`;
@@ -480,19 +520,47 @@ async function consumeRunStream(
 ): Promise<void> {
   let currentResponse = response;
   let cursor = after;
+  let reconnectAttempts = 0;
+  let reconnecting = false;
+  let recoveryError: unknown;
 
-  for (let attempt = 0; attempt <= 3; attempt++) {
-    const outcome = await consumeSse(currentResponse, handlers, cursor, map);
-    cursor = outcome.lastSequence;
-    if (outcome.terminal) {
-      if (attempt > 0) handlers.onConnectionState?.("online");
-      return;
+  while (true) {
+    try {
+      const outcome = await consumeSse(currentResponse, handlers, cursor, map);
+      cursor = outcome.lastSequence;
+      recoveryError = undefined;
+      if (outcome.terminal) {
+        if (reconnecting) handlers.onConnectionState?.("online");
+        return;
+      }
+    } catch (error) {
+      if (!(error instanceof StreamReadError)) throw error;
+      cursor = error.lastSequence;
+      if (!isRecoverableNetworkFailure(error.readError)) throw error.readError;
+      recoveryError = error.readError;
     }
-    if (attempt === 3) break;
-    handlers.onConnectionState?.("reconnecting");
-    currentResponse = await fetchRunEvents(runId, cursor, handlers.signal);
+
+    while (true) {
+      if (reconnectAttempts >= RECONNECT_DELAYS_MS.length) {
+        if (recoveryError !== undefined) throw recoveryError;
+        throw new ApiError(503, "The stream could not be recovered from its persisted cursor.");
+      }
+      if (!reconnecting) {
+        reconnecting = true;
+        handlers.onConnectionState?.("reconnecting");
+      }
+      const delayMs = recoveryError === undefined ? 0 : RECONNECT_DELAYS_MS[reconnectAttempts];
+      reconnectAttempts += 1;
+      if (delayMs > 0) await waitForReconnect(delayMs, handlers.signal);
+      try {
+        currentResponse = await fetchRunEvents(runId, cursor, handlers.signal);
+        break;
+      } catch (error) {
+        if (!isRecoverableNetworkFailure(error)) throw error;
+        recoveryError = error;
+      }
+    }
   }
-  throw new ApiError(503, "The stream could not be recovered from its persisted cursor.");
 }
 
 export async function resumeRun(runId: string, handlers: PostChatHandlers): Promise<void> {
@@ -513,7 +581,13 @@ async function consumeSse(
   let lastSequence = afterSequence;
 
   while (true) {
-    const { value, done } = await reader.read();
+    let read: ReadableStreamReadResult<Uint8Array>;
+    try {
+      read = await reader.read();
+    } catch (error) {
+      throw new StreamReadError(lastSequence, error);
+    }
+    const { value, done } = read;
     if (done) break;
 
     buffer += decoder.decode(value, { stream: true });

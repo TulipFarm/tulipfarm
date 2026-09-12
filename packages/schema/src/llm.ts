@@ -30,6 +30,13 @@ export class UnknownModelError extends Error {
   }
 }
 
+export class AmbiguousModelError extends Error {
+  constructor(modelId: string) {
+    super(`model is configured on more than one provider connection: ${modelId}`);
+    this.name = "AmbiguousModelError";
+  }
+}
+
 export class EmbeddingUnavailableError extends Error {
   constructor() {
     super("no embedding provider available");

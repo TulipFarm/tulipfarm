@@ -64,8 +64,13 @@ describe("extractStepUsage", () => {
 
 describe("attributeModel", () => {
   const chain = [
-    { provider: "azure", modelId: "gpt-4o-mini", spec: { input_cost_per_token: 0.001 } },
-    { provider: "anthropic", modelId: "claude-haiku-4-5" },
+    {
+      connection: "fast:0",
+      provider: "azure",
+      modelId: "gpt-4o-mini",
+      spec: { input_cost_per_token: 0.001 },
+    },
+    { connection: "fast:1", provider: "anthropic", modelId: "claude-haiku-4-5" },
   ];
 
   it("attributes the served model to its provider (primary, no fallback) + carries its spec", () => {

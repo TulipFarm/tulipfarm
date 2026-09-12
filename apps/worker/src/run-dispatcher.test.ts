@@ -6,7 +6,7 @@ import {
   type PersistedRunStatus,
 } from "@tulipfarm/storage";
 import type { RunOutcomeStatus } from "@tulipfarm/turn-executor";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { RunDispatcher, type RunDispatcherOptions, type RunOutcome } from "./run-dispatcher";
 
 const BUSINESS_ID = "business-1";
@@ -38,7 +38,10 @@ function persistedRun(overrides: Partial<PersistedRun> = {}): PersistedRun {
 class FakeRunStore implements RunLeaseStore {
   releaseCalls: unknown[] = [];
   releaseResult = true;
-  claimBatchResult: readonly PersistedRun[] = [];
+  claimBatchResult: PersistedRun[] = [];
+  claimBatchCalls: Array<{ owner: string; limit: number }> = [];
+  heartbeatCalls: Array<{ owner: string; expectedVersion: number }> = [];
+  heartbeatResults: boolean[] = [];
   reclaimResult: readonly PersistedRun[] = [];
   requeueParkedCalls: { businessId: string; limit: number }[] = [];
   requeueParkedResult: readonly PersistedRun[] = [];
@@ -66,8 +69,14 @@ class FakeRunStore implements RunLeaseStore {
     return true;
   }
 
-  async heartbeat(): Promise<boolean> {
-    return true;
+  async heartbeat(
+    _businessId: string,
+    _runId: string,
+    owner: string,
+    heartbeat: { expectedVersion: number }
+  ): Promise<boolean> {
+    this.heartbeatCalls.push({ owner, expectedVersion: heartbeat.expectedVersion });
+    return this.heartbeatResults.shift() ?? true;
   }
 
   async reclaimExpiredRuns(): Promise<readonly PersistedRun[]> {
@@ -79,8 +88,13 @@ class FakeRunStore implements RunLeaseStore {
     return this.requeueParkedResult;
   }
 
-  async claimNextQueued(): Promise<readonly PersistedRun[]> {
-    return this.claimBatchResult;
+  async claimNextQueued(
+    _businessId: string,
+    owner: string,
+    input: { limit: number }
+  ): Promise<readonly PersistedRun[]> {
+    this.claimBatchCalls.push({ owner, limit: input.limit });
+    return this.claimBatchResult.splice(0, input.limit);
   }
 
   async find(_businessId: string, runId: string): Promise<PersistedRun | null> {
@@ -516,6 +530,253 @@ describe("RunDispatcher", () => {
         status: "failed",
         errorEvidenceRef: DISPATCH_REQUEUE_EXHAUSTED_REF,
       }),
+    ]);
+  });
+
+  it.each(["succeeded", "waiting"] as const)(
+    "renews a long-running Run and releases %s with the renewed version",
+    async (status) => {
+      vi.useFakeTimers();
+      try {
+        vi.setSystemTime("2026-07-24T10:00:00.000Z");
+        const store = new FakeRunStore();
+        store.claimBatchResult = [persistedRun()];
+        let finish: ((outcome: RunOutcome) => void) | undefined;
+        const dispatcher = new RunDispatcher({
+          leases: new RunLeaseManager(store),
+          businessId: BUSINESS_ID,
+          owner: "worker-1",
+          now: () => new Date(),
+          leaseDurationMs: 300,
+          handler: (_run, signal) =>
+            new Promise<RunOutcome>((resolve, reject) => {
+              finish = resolve;
+              signal.addEventListener("abort", () => reject(new Error("lost lease")), {
+                once: true,
+              });
+            }),
+        });
+
+        const dispatching = dispatcher.dispatchBatch();
+        await vi.advanceTimersByTimeAsync(100);
+        finish?.({ status });
+        const result = await dispatching;
+
+        expect(store.heartbeatCalls).toEqual([{ owner: "worker-1", expectedVersion: 2 }]);
+        expect(store.releaseCalls).toEqual([
+          expect.objectContaining({ expectedVersion: 3, status }),
+        ]);
+        expect(result[status === "succeeded" ? "dispatched" : "waiting"]).toBe(1);
+      } finally {
+        vi.useRealTimers();
+      }
+    }
+  );
+
+  it("aborts the handler and stops the batch when lease renewal loses ownership", async () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime("2026-07-24T10:00:00.000Z");
+      const store = new FakeRunStore();
+      store.claimBatchResult = [
+        persistedRun(),
+        persistedRun({ id: "00000000-0000-4000-8000-000000000002" }),
+      ];
+      store.heartbeatResults = [false];
+      const aborted: string[] = [];
+      const dispatcher = new RunDispatcher({
+        leases: new RunLeaseManager(store),
+        businessId: BUSINESS_ID,
+        owner: "worker-1",
+        now: () => new Date(),
+        leaseDurationMs: 300,
+        handler: (run, signal) =>
+          new Promise<RunOutcome>((resolve) => {
+            signal.addEventListener(
+              "abort",
+              () => {
+                aborted.push(run.id);
+                resolve({ status: "cancelled" });
+              },
+              { once: true }
+            );
+          }),
+      });
+
+      const dispatching = dispatcher.dispatchBatch();
+      await vi.advanceTimersByTimeAsync(100);
+      const result = await dispatching;
+
+      expect(aborted).toEqual([persistedRun().id]);
+      expect(store.releaseCalls).toEqual([]);
+      expect(store.claimBatchCalls).toEqual([{ owner: "worker-1", limit: 1 }]);
+      expect(result).toMatchObject({ claimed: 1, dispatched: 0, waiting: 0, failed: 1 });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("settles a rejected heartbeat as lease loss and always removes the drain listener", async () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime("2026-07-24T10:00:00.000Z");
+      const store = new FakeRunStore();
+      store.claimBatchResult = [persistedRun()];
+      store.heartbeat = async () => {
+        throw new Error("database unavailable");
+      };
+      const drain = new AbortController();
+      const removeListener = vi.spyOn(drain.signal, "removeEventListener");
+      let toolAborted = false;
+      const dispatcher = new RunDispatcher({
+        leases: new RunLeaseManager(store),
+        businessId: BUSINESS_ID,
+        owner: "worker-1",
+        now: () => new Date(),
+        leaseDurationMs: 300,
+        signal: drain.signal,
+        handler: (_run, signal) =>
+          new Promise<RunOutcome>((resolve) => {
+            signal.addEventListener(
+              "abort",
+              () => {
+                toolAborted = true;
+                resolve({ status: "cancelled" });
+              },
+              { once: true }
+            );
+          }),
+      });
+
+      const dispatching = dispatcher.dispatchBatch();
+      await vi.advanceTimersByTimeAsync(100);
+
+      await expect(dispatching).resolves.toMatchObject({
+        claimed: 1,
+        dispatched: 0,
+        waiting: 0,
+        failed: 1,
+      });
+      expect(toolAborted).toBe(true);
+      expect(store.releaseCalls).toEqual([]);
+      expect(removeListener).toHaveBeenCalledWith("abort", expect.any(Function));
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("does not wait for a stuck heartbeat after process shutdown loses the lease", async () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime("2026-07-24T10:00:00.000Z");
+      const store = new FakeRunStore();
+      store.claimBatchResult = [persistedRun()];
+      store.heartbeat = () => new Promise<boolean>(() => {});
+      const drain = new AbortController();
+      let started: (() => void) | undefined;
+      const handling = new Promise<void>((resolve) => {
+        started = resolve;
+      });
+      const dispatcher = new RunDispatcher({
+        leases: new RunLeaseManager(store),
+        businessId: BUSINESS_ID,
+        owner: "worker-1",
+        now: () => new Date(),
+        leaseDurationMs: 300,
+        signal: drain.signal,
+        handler: (_run, signal) =>
+          new Promise<RunOutcome>((resolve) => {
+            started?.();
+            signal.addEventListener("abort", () => resolve({ status: "cancelled" }), {
+              once: true,
+            });
+          }),
+      });
+
+      const dispatching = dispatcher.dispatchBatch();
+      await handling;
+      await vi.advanceTimersByTimeAsync(100);
+      drain.abort("worker_shutdown");
+      let settled = false;
+      void dispatching.then(() => {
+        settled = true;
+      });
+      await vi.advanceTimersByTimeAsync(0);
+
+      expect(settled).toBe(true);
+      await expect(dispatching).resolves.toMatchObject({ claimed: 1, failed: 1 });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("aborts active work and leaves its lease fenced during process shutdown", async () => {
+    const store = new FakeRunStore();
+    store.claimBatchResult = [
+      persistedRun(),
+      persistedRun({ id: "00000000-0000-4000-8000-000000000002" }),
+    ];
+    const drain = new AbortController();
+    let started: (() => void) | undefined;
+    const handling = new Promise<void>((resolve) => {
+      started = resolve;
+    });
+    const dispatcher = new RunDispatcher({
+      leases: new RunLeaseManager(store),
+      businessId: BUSINESS_ID,
+      owner: "worker-1",
+      now: () => new Date("2026-07-24T10:00:00.000Z"),
+      signal: drain.signal,
+      handler: (_run, signal) =>
+        new Promise<RunOutcome>((resolve) => {
+          started?.();
+          signal.addEventListener("abort", () => resolve({ status: "cancelled" }), { once: true });
+        }),
+    });
+
+    const dispatching = dispatcher.dispatchBatch();
+    await handling;
+    drain.abort("worker_shutdown");
+    const result = await dispatching;
+
+    expect(store.releaseCalls).toEqual([]);
+    expect(store.claimBatchCalls).toEqual([{ owner: "worker-1", limit: 1 }]);
+    expect(result).toMatchObject({ claimed: 1, failed: 1 });
+  });
+
+  it("does not lease later batch work until the current handler settles", async () => {
+    const store = new FakeRunStore();
+    const secondId = "00000000-0000-4000-8000-000000000002";
+    store.claimBatchResult = [persistedRun(), persistedRun({ id: secondId })];
+    let finishFirst: (() => void) | undefined;
+    const handled: string[] = [];
+    const dispatcher = new RunDispatcher({
+      leases: new RunLeaseManager(store),
+      businessId: BUSINESS_ID,
+      owner: "worker-1",
+      now: () => new Date("2026-07-24T10:00:00.000Z"),
+      handler: async (run) => {
+        handled.push(run.id);
+        if (run.id === persistedRun().id) {
+          await new Promise<void>((resolve) => {
+            finishFirst = resolve;
+          });
+        }
+        return { status: "succeeded" };
+      },
+      batchSize: 2,
+    });
+
+    const dispatching = dispatcher.dispatchBatch();
+    await vi.waitFor(() => expect(handled).toEqual([persistedRun().id]));
+    expect(store.claimBatchCalls).toEqual([{ owner: "worker-1", limit: 1 }]);
+    finishFirst?.();
+    await dispatching;
+
+    expect(handled).toEqual([persistedRun().id, secondId]);
+    expect(store.claimBatchCalls).toEqual([
+      { owner: "worker-1", limit: 1 },
+      { owner: "worker-1", limit: 1 },
     ]);
   });
 });

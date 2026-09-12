@@ -151,4 +151,60 @@ describe("RunRecoveryManager", () => {
       needsReconciliation: 1,
     });
   });
+
+  it("reaches a safe Run after a full page of blocked candidates across a restart", async () => {
+    const candidates = Array.from({ length: 26 }, (_, index) =>
+      run({
+        id: `run-${index + 1}`,
+        createdAt: new Date(Date.parse("2026-09-01T00:00:00.000Z") + index * 1_000).toISOString(),
+      })
+    );
+    let cursor = 0;
+    const store: TargetedRunRecoveryStore = {
+      find: async (_businessId, runId) =>
+        candidates.find((candidate) => candidate.id === runId) ?? null,
+      listRecoveryCandidates: async (_businessId, limit) => {
+        const page = candidates
+          .filter((candidate) => candidate.status === "needs_reconciliation")
+          .slice(cursor, cursor + limit);
+        cursor = page.length < limit ? 0 : cursor + page.length;
+        return page;
+      },
+      requeueParkedRun: async (_businessId, runId, expectedVersion, expectedEvidenceRef) => {
+        const index = candidates.findIndex((candidate) => candidate.id === runId);
+        const current = candidates[index];
+        if (
+          current === undefined ||
+          current.version !== expectedVersion ||
+          current.errorEvidenceRef !== expectedEvidenceRef
+        ) {
+          return null;
+        }
+        const requeued = run({
+          ...current,
+          status: "queued",
+          version: current.version + 1,
+          errorEvidenceRef: DISPATCH_REQUEUED_ONCE_REF,
+        });
+        candidates[index] = requeued;
+        return requeued;
+      },
+    };
+    const effects = {
+      list: async () =>
+        candidates.slice(0, 25).map((candidate) => ({
+          runId: candidate.id,
+          stateId: "write",
+          state: "ambiguous",
+        })),
+    };
+
+    await expect(
+      new RunRecoveryManager(store, effects).sweep({ businessId: "business-1", limit: 25 })
+    ).resolves.toEqual({ examined: 25, requeued: 0, needsReconciliation: 25 });
+    await expect(
+      new RunRecoveryManager(store, effects).sweep({ businessId: "business-1", limit: 25 })
+    ).resolves.toEqual({ examined: 1, requeued: 1, needsReconciliation: 0 });
+    expect(candidates[25]?.status).toBe("queued");
+  });
 });

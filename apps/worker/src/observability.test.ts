@@ -68,6 +68,24 @@ describe("PgSpendSink", () => {
     expect(row?.params[COLUMN.costUsd]).toBe(0.05);
   });
 
+  it("stores configured connection identity without changing vendor model attribution", async () => {
+    const { queries, q } = db();
+
+    new PgSpendSink(q).recordLlmCall({
+      model: "house-model",
+      provider: "openai",
+      connection: "west",
+      status: "fallback",
+    });
+    await flush();
+
+    expect(queries[0]?.params[COLUMN.model]).toBe("house-model");
+    expect(queries[0]?.params[COLUMN.provider]).toBe("openai");
+    expect(JSON.parse(String(queries[0]?.params[COLUMN.attributes]))).toMatchObject({
+      connection: "west",
+    });
+  });
+
   it("uses one stable event id across replay outcomes for model accounting", async () => {
     const { queries, q } = db();
     const sink = new PgSpendSink(q);

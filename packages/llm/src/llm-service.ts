@@ -1,10 +1,15 @@
 import type { LanguageModelV4 } from "@ai-sdk/provider";
 import {
+  AmbiguousModelError,
   asEffortPreset,
+  type ConfiguredModelRef,
+  configuredModelKey,
+  configuredModelRef,
   type DerivedModelProfile,
   deriveModelProfiles,
   dropUnusableProviderEntries,
   type EffortPreset,
+  hoistProviderConnections,
   isDeprecatedTierAlias,
   type LlmConfig,
   LlmConfigValidationError,
@@ -42,6 +47,7 @@ const TIERS: Tier[] = ["quick", "standard", "complex"];
 
 /** One resolved fallback-chain link: provider plus model id, in config order. */
 export interface ResolvedModelEntry {
+  connection: string;
   provider: string;
   modelId: string;
   /** Pinned spec from llm.config (pricing/context/capabilities), when resolved for this model. */
@@ -57,13 +63,16 @@ export class LlmService {
   private logger: FallbackLogger = console;
   // Always a built provider model, never the bare model-id string `LanguageModel` also permits.
   private byModelId: Map<string, LanguageModelV4> = new Map();
+  private byConfiguredModel: Map<string, LanguageModelV4> = new Map();
   private entryByModelId: Map<string, ResolvedModelEntry> = new Map();
+  private entryByConfiguredModel: Map<string, ResolvedModelEntry> = new Map();
+  private configuredRefsByModelId: Map<string, ConfiguredModelRef[]> = new Map();
   private presets: Pick<LlmConfig, "presets"> = {};
   private profiles: Map<string, DerivedModelProfile> = new Map();
   /** Retained from init so a principal-scoped model can be built after boot. */
   private secrets: SecretsService | undefined;
   private credentials: PrincipalCredentialResolver | undefined;
-  /** Principal-scoped models, keyed `kind:id:modelId`. Built once, then reused like the shared set. */
+  /** Principal-scoped models, keyed by principal plus configured endpoint. */
   private readonly byPrincipal: Map<string, LanguageModelV4> = new Map();
 
   /** Whether any provider built. Callers that must not start work without one ask this first. */
@@ -99,7 +108,11 @@ export class LlmService {
     const presets = { presets: config.presets };
     const profiles = new Map(deriveModelProfiles(config).map((p) => [p.profileId, p]));
     const byModelId = new Map<string, LanguageModelV4>();
+    const byConfiguredModel = new Map<string, LanguageModelV4>();
     const entryByModelId = new Map<string, ResolvedModelEntry>();
+    const entryByConfiguredModel = new Map<string, ResolvedModelEntry>();
+    const configuredRefsByModelId = new Map<string, ConfiguredModelRef[]>();
+    const { nameFor } = hoistProviderConnections(config);
 
     for (const tier of TIERS) {
       // The schema requires every chain, but the optional access keeps this boundary defensive
@@ -116,6 +129,7 @@ export class LlmService {
             return {
               model: await createModel(entry, secrets, { log: logger }),
               id: entry.model,
+              connection: nameFor(entry),
               provider: entry.provider,
               spec: entry.spec,
               entry,
@@ -136,14 +150,21 @@ export class LlmService {
       for (const r of resolved) {
         if (r === null) continue;
         available += 1;
-        if (!byModelId.has(r.id)) byModelId.set(r.id, r.model);
-        if (!entryByModelId.has(r.id))
-          entryByModelId.set(r.id, {
+        const ref: ConfiguredModelRef = { connection: r.connection, modelId: r.id };
+        const key = configuredModelKey(ref);
+        if (!byConfiguredModel.has(key)) {
+          byConfiguredModel.set(key, r.model);
+          entryByConfiguredModel.set(key, {
+            connection: r.connection,
             provider: r.provider,
             modelId: r.id,
             spec: r.spec,
             entry: r.entry,
           });
+          const refs = configuredRefsByModelId.get(r.id) ?? [];
+          refs.push(ref);
+          configuredRefsByModelId.set(r.id, refs);
+        }
       }
 
       if (available === 0) {
@@ -153,7 +174,16 @@ export class LlmService {
       logger.info(`[llm] tier=${tier} providers=${available}`);
     }
 
-    if (byModelId.size === 0) {
+    for (const [modelId, refs] of configuredRefsByModelId) {
+      if (refs.length !== 1) continue;
+      const key = configuredModelKey(refs[0]);
+      const model = byConfiguredModel.get(key);
+      const entry = entryByConfiguredModel.get(key);
+      if (model !== undefined) byModelId.set(modelId, model);
+      if (entry !== undefined) entryByModelId.set(modelId, entry);
+    }
+
+    if (byConfiguredModel.size === 0) {
       logger.warn("[llm] no providers available across all tiers — LLM features disabled");
       return;
     }
@@ -162,7 +192,10 @@ export class LlmService {
     this.configured = true;
     this.logger = logger;
     this.byModelId = byModelId;
+    this.byConfiguredModel = byConfiguredModel;
     this.entryByModelId = entryByModelId;
+    this.entryByConfiguredModel = entryByConfiguredModel;
+    this.configuredRefsByModelId = configuredRefsByModelId;
     this.presets = presets;
     this.profiles = profiles;
     this.secrets = secrets;
@@ -191,31 +224,44 @@ export class LlmService {
     const profile = profileId === undefined ? undefined : this.profiles.get(profileId);
     if (profile === undefined) throw new LlmNotConfiguredError();
 
-    const chain = [profile.model, ...(profile.fallbacks ?? []).flatMap(this.modelOf)];
+    const chain = [configuredModelRef(profile), ...(profile.fallbacks ?? []).flatMap(this.modelOf)];
     return this.chainModel(chain, logger);
   }
 
-  /** A fallback ref resolved to its provider model id, or nothing when it is not configured. */
-  private readonly modelOf = (profileId: string): string[] => {
-    const model = this.profiles.get(profileId)?.model;
-    return model === undefined ? [] : [model];
+  /** A fallback ref resolved to its configured endpoint, or nothing when it is not configured. */
+  private readonly modelOf = (profileId: string): ConfiguredModelRef[] => {
+    const profile = this.profiles.get(profileId);
+    return profile === undefined ? [] : [configuredModelRef(profile)];
   };
 
   getModelById(id: string): LanguageModel {
     if (!this.configured) throw new LlmNotConfiguredError();
     const model = this.byModelId.get(id);
+    if (model === undefined && (this.configuredRefsByModelId.get(id)?.length ?? 0) > 1) {
+      throw new AmbiguousModelError(id);
+    }
     if (!model) throw new UnknownModelError(id);
     return model;
   }
 
   /** Whether a model id was configured, so a caller can choose a route without catching a throw. */
   hasModelId(id: string): boolean {
-    return this.byModelId.has(id);
+    return this.configuredRefsByModelId.has(id);
+  }
+
+  /** Whether one exact configured endpoint built successfully. */
+  hasConfiguredModel(ref: ConfiguredModelRef): boolean {
+    return this.byConfiguredModel.has(configuredModelKey(ref));
   }
 
   /** The configured entry behind a model id — provider, id and pinned spec, as one pricing input. */
   entryFor(id: string): ResolvedModelEntry | undefined {
     return this.entryByModelId.get(id);
+  }
+
+  /** The configured entry behind an exact non-secret endpoint identity. */
+  entryForConfiguredModel(ref: ConfiguredModelRef): ResolvedModelEntry | undefined {
+    return this.entryByConfiguredModel.get(configuredModelKey(ref));
   }
 
   /**
@@ -225,8 +271,8 @@ export class LlmService {
    * same provider, and keying on the provider alone let one throttled deployment shed the very
    * fallback that exists to absorb it.
    */
-  private linkGateKey(id: string, model: LanguageModelV4): string {
-    return `${this.entryByModelId.get(id)?.provider ?? model.provider}:${model.modelId}`;
+  private linkGateKey(ref: ConfiguredModelRef, model: LanguageModelV4): string {
+    return `${ref.connection}:${model.modelId}`;
   }
 
   /**
@@ -243,7 +289,7 @@ export class LlmService {
    * partially-connected principal still gets a whole chain rather than a truncated one.
    */
   async chainModelFor(
-    modelIds: readonly string[],
+    modelIds: readonly (string | ConfiguredModelRef)[],
     principal: PrincipalRef | undefined,
     logger: FallbackLogger = this.logger,
     responder?: ModelResponderRef,
@@ -253,38 +299,51 @@ export class LlmService {
     if (principal === undefined || this.credentials === undefined) {
       return this.chainModel(modelIds, logger, responder, gate, attempted);
     }
-    const built = (
+    const resolved = (
       await Promise.all(
-        modelIds.map(async (id) => ({ id, model: await this.principalModel(id, principal) }))
+        modelIds.map(async (id) => {
+          const ref = this.resolveConfiguredRef(id);
+          return ref === undefined
+            ? undefined
+            : { ref, model: await this.principalModel(ref, principal) };
+        })
       )
-    ).filter((link): link is { id: string; model: LanguageModelV4 } => link.model !== undefined);
-    if (built.length === 0) throw new LlmNotConfiguredError();
-    if (built.length === 1 && gate === undefined) {
-      if (responder !== undefined) responder.modelId = built[0].model.modelId;
-      return built[0].model;
+    ).filter(
+      (link): link is { ref: ConfiguredModelRef; model: LanguageModelV4 } =>
+        link !== undefined && link.model !== undefined
+    );
+    if (resolved.length === 0) throw new LlmNotConfiguredError();
+    if (resolved.length === 1 && gate === undefined) {
+      if (responder !== undefined) {
+        responder.modelId = resolved[0].model.modelId;
+        responder.configuredModel = resolved[0].ref;
+      }
+      return resolved[0].model;
     }
     return new FallbackModel(
-      built.map((link) => link.model),
+      resolved.map((link) => link.model),
       logger,
       responder,
       gate,
-      built.map((link) => this.linkGateKey(link.id, link.model)),
-      attempted
+      resolved.map((link) => this.linkGateKey(link.ref, link.model)),
+      attempted,
+      resolved.map((link) => link.ref)
     );
   }
 
   /** One model built for one principal, cached; falls back to the shared model when they have none. */
   private async principalModel(
-    id: string,
+    ref: ConfiguredModelRef,
     principal: PrincipalRef
   ): Promise<LanguageModelV4 | undefined> {
-    const shared = this.byModelId.get(id);
-    const entry = this.entryByModelId.get(id)?.entry;
+    const key = configuredModelKey(ref);
+    const shared = this.byConfiguredModel.get(key);
+    const entry = this.entryByConfiguredModel.get(key)?.entry;
     const secrets = this.secrets;
     const credentials = this.credentials;
     if (entry === undefined || secrets === undefined || credentials === undefined) return shared;
 
-    const cacheKey = `${principal.kind}:${principal.id}:${id}`;
+    const cacheKey = `${principal.kind}:${principal.id}:${key}`;
     const cached = this.byPrincipal.get(cacheKey);
     if (cached !== undefined) return cached;
 
@@ -302,7 +361,7 @@ export class LlmService {
       // A principal's own credential being unusable must not take down a call the deployment
       // credential could still serve; the shared model is the safe, already-working route.
       this.logger.warn(
-        `[llm] principal credential unusable for model=${id} — using the shared credential (${
+        `[llm] principal credential unusable for model=${ref.modelId} — using the shared credential (${
           err instanceof Error ? err.message : String(err)
         })`
       );
@@ -311,7 +370,7 @@ export class LlmService {
   }
 
   chainModel(
-    modelIds: readonly string[],
+    modelIds: readonly (string | ConfiguredModelRef)[],
     logger: FallbackLogger = this.logger,
     responder?: ModelResponderRef,
     gate?: FallbackCallGate,
@@ -319,8 +378,10 @@ export class LlmService {
   ): LanguageModel {
     if (!this.configured) throw new LlmNotConfiguredError();
     const built = modelIds.flatMap((id) => {
-      const model = this.byModelId.get(id);
-      return model === undefined ? [] : [{ id, model }];
+      const ref = this.resolveConfiguredRef(id);
+      if (ref === undefined) return [];
+      const model = this.byConfiguredModel.get(configuredModelKey(ref));
+      return model === undefined ? [] : [{ ref, model }];
     });
     // The ids came from the catalog, so an empty chain means every provider behind them failed to
     // build — a configuration or credential fault, not an unknown model. Callers surface the two
@@ -330,7 +391,10 @@ export class LlmService {
     // A single link needs no wrapper — and wrapping would hide a genuinely unconfigured chain.
     // Its responder is known without executing anything: there is nothing else that could answer.
     if (built.length === 1 && gate === undefined) {
-      if (responder !== undefined) responder.modelId = built[0].model.modelId;
+      if (responder !== undefined) {
+        responder.modelId = built[0].model.modelId;
+        responder.configuredModel = built[0].ref;
+      }
       return built[0].model;
     }
     return new FallbackModel(
@@ -338,8 +402,16 @@ export class LlmService {
       logger,
       responder,
       gate,
-      built.map((link) => this.linkGateKey(link.id, link.model)),
-      attempted
+      built.map((link) => this.linkGateKey(link.ref, link.model)),
+      attempted,
+      built.map((link) => link.ref)
     );
+  }
+
+  private resolveConfiguredRef(id: string | ConfiguredModelRef): ConfiguredModelRef | undefined {
+    if (typeof id !== "string") return id;
+    const refs = this.configuredRefsByModelId.get(id) ?? [];
+    if (refs.length > 1) throw new AmbiguousModelError(id);
+    return refs[0];
   }
 }

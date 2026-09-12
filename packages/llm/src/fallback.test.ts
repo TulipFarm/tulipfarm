@@ -88,9 +88,54 @@ describe("FallbackModel.doGenerate", () => {
     const abort = new DOMException("aborted", "AbortError");
     const m1 = makeModel({ doGenerate: vi.fn().mockRejectedValue(abort) });
     const m2 = makeModel({ doGenerate: vi.fn().mockResolvedValue({}) });
-    const fallback = new FallbackModel([m1, m2]);
+    const outcomes: string[] = [];
+    const gate: FallbackCallGate = {
+      async acquire() {
+        return {
+          succeeded() {
+            outcomes.push("succeeded");
+          },
+          failed(reason) {
+            outcomes.push(`failed:${reason}`);
+          },
+          cancelled() {
+            outcomes.push("cancelled");
+          },
+          release() {
+            outcomes.push("released");
+          },
+        };
+      },
+    };
+    const fallback = new FallbackModel([m1, m2], undefined, undefined, gate);
     await expect(fallback.doGenerate(opts)).rejects.toBe(abort);
     expect(m2.doGenerate).not.toHaveBeenCalled();
+    expect(outcomes).toEqual(["cancelled", "released"]);
+  });
+
+  it("cancels gate acquisition before calling a generate provider", async () => {
+    const controller = new AbortController();
+    const gate: FallbackCallGate = {
+      acquire: async (_provider, signal) =>
+        new Promise<Awaited<ReturnType<FallbackCallGate["acquire"]>>>((_resolve, reject) => {
+          signal?.addEventListener(
+            "abort",
+            () => reject(new DOMException("aborted", "AbortError")),
+            { once: true }
+          );
+        }),
+    };
+    const primary = makeModel();
+    const fallback = new FallbackModel([primary], undefined, undefined, gate);
+
+    const pending = fallback.doGenerate({
+      ...opts,
+      abortSignal: controller.signal,
+    } as LanguageModelV4CallOptions);
+    controller.abort();
+
+    await expect(pending).rejects.toMatchObject({ name: "AbortError" });
+    expect(primary.doGenerate).not.toHaveBeenCalled();
   });
 
   it("retries a rate-limited link in place instead of advancing to fallback", async () => {
@@ -240,6 +285,98 @@ describe("FallbackModel.doStream", () => {
     expect(m2.doStream).toHaveBeenCalledOnce();
   });
 
+  it("falls back when the first provider emits an in-band error before output", async () => {
+    const primaryError = apiError(503, true);
+    const streamResult = makeStreamResult([
+      { type: "stream-start", warnings: [] },
+      { type: "error", error: primaryError },
+    ]);
+    const m1 = makeModel({ doStream: vi.fn().mockResolvedValue(streamResult) });
+    const fallbackResult = makeStreamResult([
+      { type: "text-start", id: "2" },
+      { type: "text-delta", id: "2", delta: "complete" },
+      { type: "text-end", id: "2" },
+    ]);
+    const m2 = makeModel({ doStream: vi.fn().mockResolvedValue(fallbackResult) });
+    const fallback = new FallbackModel([m1, m2]);
+
+    const result = await fallback.doStream(opts);
+    const seen: unknown[] = [];
+    for await (const part of result.stream) seen.push(part);
+
+    expect(seen).not.toContainEqual(expect.objectContaining({ type: "error" }));
+    expect(seen).toContainEqual(expect.objectContaining({ type: "text-delta", delta: "complete" }));
+    expect(m2.doStream).toHaveBeenCalledOnce();
+  });
+
+  it.each([
+    ["text framing", [{ type: "text-start", id: "1" }]],
+    ["Tool-input framing", [{ type: "tool-input-start", id: "1", toolName: "lookup" }]],
+    [
+      "empty deltas and framing",
+      [
+        { type: "text-start", id: "1" },
+        { type: "text-delta", id: "1", delta: "" },
+        { type: "text-end", id: "1" },
+        { type: "reasoning-start", id: "r1" },
+        { type: "reasoning-delta", id: "r1", delta: "" },
+        { type: "reasoning-end", id: "r1" },
+        { type: "tool-input-start", id: "tool-1", toolName: "lookup" },
+        { type: "tool-input-delta", id: "tool-1", delta: "" },
+        { type: "tool-input-end", id: "tool-1" },
+      ],
+    ],
+  ])("falls back when %s precedes an in-band error", async (_label, framing) => {
+    const primaryError = apiError(503, true);
+    const primary = makeModel({
+      doStream: vi
+        .fn()
+        .mockResolvedValue(makeStreamResult([...framing, { type: "error", error: primaryError }])),
+    });
+    const fallbackParts = [
+      { type: "text-start", id: "2" },
+      { type: "text-delta", id: "2", delta: "complete" },
+      { type: "text-end", id: "2" },
+    ];
+    const backup = makeModel({
+      doStream: vi.fn().mockResolvedValue(makeStreamResult(fallbackParts)),
+    });
+
+    const result = await new FallbackModel([primary, backup]).doStream(opts);
+    const seen: unknown[] = [];
+    for await (const part of result.stream) seen.push(part);
+
+    expect(seen).toEqual(fallbackParts);
+    expect(backup.doStream).toHaveBeenCalledOnce();
+  });
+
+  it("bounds framing-only buffering and advances to the backup", async () => {
+    const primary = makeModel({
+      doStream: vi
+        .fn()
+        .mockResolvedValue(
+          makeStreamResult(
+            Array.from({ length: 128 }, (_, index) => ({ type: "text-start", id: String(index) }))
+          )
+        ),
+    });
+    const fallbackParts = [
+      { type: "text-start", id: "backup" },
+      { type: "text-delta", id: "backup", delta: "complete" },
+      { type: "text-end", id: "backup" },
+    ];
+    const backup = makeModel({
+      doStream: vi.fn().mockResolvedValue(makeStreamResult(fallbackParts)),
+    });
+
+    const result = await new FallbackModel([primary, backup]).doStream(opts);
+    const seen: unknown[] = [];
+    for await (const part of result.stream) seen.push(part);
+
+    expect(seen).toEqual(fallbackParts);
+    expect(backup.doStream).toHaveBeenCalledOnce();
+  });
+
   it("forwards held-back metadata ahead of the output it preceded", async () => {
     const streamResult = makeStreamResult([
       { type: "stream-start", warnings: [] },
@@ -258,9 +395,90 @@ describe("FallbackModel.doStream", () => {
     const abort = new DOMException("aborted", "AbortError");
     const m1 = makeModel({ doStream: vi.fn().mockRejectedValue(abort) });
     const m2 = makeModel({ doStream: vi.fn().mockResolvedValue(makeStreamResult([])) });
-    const fallback = new FallbackModel([m1, m2]);
+    const outcomes: string[] = [];
+    const gate: FallbackCallGate = {
+      async acquire() {
+        return {
+          succeeded() {
+            outcomes.push("succeeded");
+          },
+          failed(reason) {
+            outcomes.push(`failed:${reason}`);
+          },
+          cancelled() {
+            outcomes.push("cancelled");
+          },
+          release() {
+            outcomes.push("released");
+          },
+        };
+      },
+    };
+    const fallback = new FallbackModel([m1, m2], undefined, undefined, gate);
     await expect(fallback.doStream(opts)).rejects.toBe(abort);
     expect(m2.doStream).not.toHaveBeenCalled();
+    expect(outcomes).toEqual(["cancelled", "released"]);
+  });
+
+  it("cancels gate acquisition before opening a provider stream", async () => {
+    const controller = new AbortController();
+    const gate: FallbackCallGate = {
+      acquire: async (_provider, signal) =>
+        new Promise<Awaited<ReturnType<FallbackCallGate["acquire"]>>>((_resolve, reject) => {
+          signal?.addEventListener(
+            "abort",
+            () => reject(new DOMException("aborted", "AbortError")),
+            { once: true }
+          );
+        }),
+    };
+    const primary = makeModel();
+    const fallback = new FallbackModel([primary], undefined, undefined, gate);
+
+    const pending = fallback.doStream({
+      ...opts,
+      abortSignal: controller.signal,
+    } as LanguageModelV4CallOptions);
+    controller.abort();
+
+    await expect(pending).rejects.toMatchObject({ name: "AbortError" });
+    expect(primary.doStream).not.toHaveBeenCalled();
+  });
+
+  it("settles cancellation when the first stream read aborts before commitment", async () => {
+    const abort = new DOMException("aborted", "AbortError");
+    const m1 = makeModel({
+      doStream: vi.fn().mockResolvedValue({
+        stream: new ReadableStream({
+          pull(controller) {
+            controller.error(abort);
+          },
+        }),
+      }),
+    });
+    const outcomes: string[] = [];
+    const gate: FallbackCallGate = {
+      async acquire() {
+        return {
+          succeeded() {
+            outcomes.push("succeeded");
+          },
+          failed(reason) {
+            outcomes.push(`failed:${reason}`);
+          },
+          cancelled() {
+            outcomes.push("cancelled");
+          },
+          release() {
+            outcomes.push("released");
+          },
+        };
+      },
+    };
+    const fallback = new FallbackModel([m1], undefined, undefined, gate);
+
+    await expect(fallback.doStream(opts)).rejects.toBe(abort);
+    expect(outcomes).toEqual(["cancelled", "released"]);
   });
 
   it("falls back on a non-retryable 401 error before any chunk", async () => {
@@ -416,6 +634,7 @@ describe("FallbackModel link health", () => {
           failed() {
             blocked.add(provider);
           },
+          cancelled() {},
           release() {},
         };
       },
@@ -450,6 +669,9 @@ describe("FallbackModel lease settlement after commit", () => {
           failed(reason: string) {
             outcomes.push(`failed:${reason}`);
           },
+          cancelled() {
+            outcomes.push("cancelled");
+          },
           release() {
             released += 1;
           },
@@ -477,7 +699,7 @@ describe("FallbackModel lease settlement after commit", () => {
     const gate: FallbackCallGate = {
       async acquire(key: string) {
         keys.push(key);
-        return { succeeded() {}, failed() {}, release() {} };
+        return { succeeded() {}, failed() {}, cancelled() {}, release() {} };
       },
     };
     // Defaulted, not passed: a chain's primary and its fallback usually sit behind the same
@@ -502,7 +724,7 @@ describe("FallbackModel lease settlement after commit", () => {
     await reader.read();
     await reader.cancel("caller done");
 
-    expect(outcomes).toEqual(["succeeded"]);
+    expect(outcomes).toEqual(["cancelled"]);
     expect(releases()).toBe(1);
   });
 
@@ -521,7 +743,7 @@ describe("FallbackModel lease settlement after commit", () => {
     controller.abort();
     await Promise.resolve();
 
-    expect(outcomes).toEqual(["succeeded"]);
+    expect(outcomes).toEqual(["cancelled"]);
     expect(releases()).toBe(1);
   });
 
@@ -547,7 +769,45 @@ describe("FallbackModel lease settlement after commit", () => {
     await reader.read();
     await expect(reader.read()).rejects.toThrow("aborted");
 
-    expect(outcomes).toEqual(["succeeded"]);
+    expect(outcomes).toEqual(["cancelled"]);
     expect(releases()).toBe(1);
+  });
+
+  it("marks an in-band error after output as failed and never tries another provider", async () => {
+    const { gate, outcomes, releases } = recordingGate();
+    const failed = makeModel({
+      doStream: vi.fn().mockResolvedValue(
+        makeStreamResult([
+          { type: "text-start", id: "1" },
+          { type: "text-delta", id: "1", delta: "partial" },
+          { type: "error", error: apiError(503, true) },
+          {
+            type: "finish",
+            finishReason: { unified: "error", raw: "error" },
+            usage: {
+              inputTokens: { total: 7, noCache: 7, cacheRead: 0, cacheWrite: 0 },
+              outputTokens: { total: 1, text: 1, reasoning: 0 },
+            },
+          },
+        ])
+      ),
+    });
+    const backup = makeModel({
+      doStream: vi
+        .fn()
+        .mockResolvedValue(
+          makeStreamResult([{ type: "text-delta", id: "2", delta: "wrong provider" }])
+        ),
+    });
+    const fallback = new FallbackModel([failed, backup], undefined, undefined, gate);
+
+    const { stream } = await fallback.doStream(opts);
+    const seen: string[] = [];
+    for await (const part of stream) seen.push(part.type);
+
+    expect(seen).toEqual(["text-start", "text-delta", "error", "finish"]);
+    expect(outcomes).toEqual(["failed:model_provider_unavailable"]);
+    expect(releases()).toBe(1);
+    expect(backup.doStream).not.toHaveBeenCalled();
   });
 });

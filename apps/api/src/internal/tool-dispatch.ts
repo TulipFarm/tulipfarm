@@ -1,8 +1,12 @@
 import type { DelegatedAuthorityGuardDeps } from "@tulipfarm/agent-runtime";
-import { withDelegatedAuthority } from "@tulipfarm/agent-runtime";
+import { watchForCancel, withDelegatedAuthority } from "@tulipfarm/agent-runtime";
 import { GitHubEntitlementPort, HttpGitHubPermissionApi } from "@tulipfarm/integrations";
 import { CompositeToolEntitlement, PgEffectStore } from "@tulipfarm/tool-broker";
-import type { RegistryToolDispatcherOptions } from "@tulipfarm/tool-host";
+import type {
+  RegistryToolDispatcherOptions,
+  TurnAuthority,
+  TurnToolDispatcher,
+} from "@tulipfarm/tool-host";
 import { CredentialResolver, LiveToolGate, RegistryToolDispatcher } from "@tulipfarm/tool-host";
 import type { PrincipalProviderTokenRepo } from "../integrations/principal-tokens";
 import { hostedAgentResolver } from "../soul/agents/registry";
@@ -29,7 +33,48 @@ export type DelegatedToolDispatchDeps = Pick<
   readonly identities: ConstructorParameters<typeof GitHubEntitlementPort>[0];
   readonly githubInstallationToken: ConstructorParameters<typeof HttpGitHubPermissionApi>[0];
   readonly transactions: ConstructorParameters<typeof PgEffectStore>[0];
+  readonly runCancellation?: RunCancellationSource;
 };
+
+export interface RunCancellationSource {
+  shouldAbort(businessId: string, runId: string): Promise<boolean>;
+  readonly pollMs?: number;
+}
+
+export interface RunCancellationLookup {
+  find(businessId: string, runId: string): Promise<{ readonly status: string } | null>;
+}
+
+export function runCancellationSourceFor(runs: RunCancellationLookup): RunCancellationSource {
+  return {
+    shouldAbort: async (businessId, runId) =>
+      (await runs.find(businessId, runId))?.status !== "running",
+  };
+}
+
+/** Delivers durable Run cancellation to the API-hosted Tool, independent of the HTTP connection. */
+export function withRunCancellation(
+  dispatcher: TurnToolDispatcher,
+  source: RunCancellationSource
+): TurnToolDispatcher {
+  return {
+    async dispatch(authority: TurnAuthority, call) {
+      const watch = watchForCancel(
+        () => source.shouldAbort(authority.businessId, authority.runId),
+        source.pollMs
+      );
+      try {
+        const abortSignal =
+          call.abortSignal === undefined
+            ? watch.signal
+            : AbortSignal.any([call.abortSignal, watch.signal]);
+        return await dispatcher.dispatch(authority, { ...call, abortSignal });
+      } finally {
+        watch.stop();
+      }
+    },
+  };
+}
 
 /**
  * Composes the control plane's chat Tool dispatcher already bounded by its Run's delegated
@@ -45,9 +90,10 @@ export function buildDelegatedToolDispatch({
   identities,
   githubInstallationToken,
   transactions,
+  runCancellation,
   ...base
 }: DelegatedToolDispatchDeps) {
-  return withDelegatedAuthority(
+  const dispatcher = withDelegatedAuthority(
     { links, catalog },
     new RegistryToolDispatcher({
       ...base,
@@ -77,4 +123,7 @@ export function buildDelegatedToolDispatch({
       effects: new PgEffectStore(transactions),
     })
   );
+  return runCancellation === undefined
+    ? dispatcher
+    : withRunCancellation(dispatcher, runCancellation);
 }

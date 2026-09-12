@@ -21,6 +21,25 @@ function streamResponse(frames: string, headers: Record<string, string> = {}) {
   return new Response(body, { status: 200, headers });
 }
 
+function rejectedStreamResponse(
+  frames: string,
+  headers: Record<string, string> = {},
+  error: Error = new TypeError("network connection lost")
+) {
+  let sent = false;
+  const body = new ReadableStream({
+    pull(controller) {
+      if (!sent) {
+        sent = true;
+        controller.enqueue(new TextEncoder().encode(frames));
+        return;
+      }
+      controller.error(error);
+    },
+  });
+  return new Response(body, { status: 200, headers });
+}
+
 test("parses a single frame with the spec spacing (space after the colon)", () => {
   const { frames, rest } = parseSseFrames('id: 1\nevent: text\ndata: {"delta":"hi"}\n\n');
   expect(rest).toBe("");
@@ -125,6 +144,141 @@ test("recovers a dropped stream from the Run's own events without duplicating th
   expect(fetchMock.mock.calls[1]?.[1]).toMatchObject({
     headers: expect.objectContaining({ "Last-Event-ID": "1" }),
   });
+});
+
+test("recovers when the active stream reader rejects after a durable event", async () => {
+  const fetchMock = vi
+    .fn()
+    .mockResolvedValueOnce(
+      rejectedStreamResponse('id: 1\nevent: text.delta\ndata: {"text":"hello"}\n\n', {
+        "X-Run-Id": "run-1",
+      })
+    )
+    .mockResolvedValueOnce(
+      streamResponse(
+        'id: 1\nevent: text.delta\ndata: {"text":"hello"}\n\n' +
+          'id: 2\nevent: turn.finished\ndata: {"status":"succeeded","messageId":"msg-1"}\n\n'
+      )
+    );
+  vi.stubGlobal("fetch", fetchMock);
+  const events: string[] = [];
+
+  await postChat(
+    { message: { role: "user", content: "hello" } },
+    { onEvent: (event) => events.push(event.type) }
+  );
+
+  expect(events).toEqual(["text", "finish"]);
+  expect(fetchMock.mock.calls[1]?.[0]).toContain("/api/v1/runs/run-1/events?after=1");
+});
+
+test("recovers when a reconnect fetch itself loses the network", async () => {
+  const fetchMock = vi
+    .fn()
+    .mockResolvedValueOnce(
+      streamResponse('id: 1\nevent: text.delta\ndata: {"text":"hello"}\n\n', {
+        "X-Run-Id": "run-1",
+      })
+    )
+    .mockRejectedValueOnce(new TypeError("fetch failed"))
+    .mockResolvedValueOnce(
+      streamResponse(
+        'id: 1\nevent: text.delta\ndata: {"text":"hello"}\n\n' +
+          'id: 2\nevent: turn.finished\ndata: {"status":"succeeded","messageId":"msg-1"}\n\n'
+      )
+    );
+  vi.stubGlobal("fetch", fetchMock);
+  const events: string[] = [];
+
+  await postChat(
+    { message: { role: "user", content: "hello" } },
+    { onEvent: (event) => events.push(event.type) }
+  );
+
+  expect(events).toEqual(["text", "finish"]);
+  expect(fetchMock).toHaveBeenCalledTimes(3);
+  expect(fetchMock.mock.calls[2]?.[0]).toContain("/api/v1/runs/run-1/events?after=1");
+});
+
+test("does not retry a permanent reconnect HTTP failure", async () => {
+  const fetchMock = vi
+    .fn()
+    .mockResolvedValueOnce(
+      streamResponse('id: 1\nevent: text.delta\ndata: {"text":"hello"}\n\n', {
+        "X-Run-Id": "run-1",
+      })
+    )
+    .mockResolvedValueOnce(
+      new Response(JSON.stringify({ error: "forbidden" }), {
+        status: 403,
+        headers: { "Content-Type": "application/json" },
+      })
+    );
+  vi.stubGlobal("fetch", fetchMock);
+
+  await expect(
+    postChat({ message: { role: "user", content: "hello" } }, { onEvent: vi.fn() })
+  ).rejects.toMatchObject({ status: 403, message: "forbidden" });
+  expect(fetchMock).toHaveBeenCalledTimes(2);
+});
+
+test("does not reconnect after an intentional stream abort", async () => {
+  const fetchMock = vi
+    .fn()
+    .mockResolvedValueOnce(
+      rejectedStreamResponse(
+        'id: 1\nevent: text.delta\ndata: {"text":"hello"}\n\n',
+        { "X-Run-Id": "run-1" },
+        new DOMException("Aborted", "AbortError")
+      )
+    );
+  vi.stubGlobal("fetch", fetchMock);
+
+  await expect(
+    postChat({ message: { role: "user", content: "hello" } }, { onEvent: vi.fn() })
+  ).rejects.toMatchObject({ name: "AbortError" });
+  expect(fetchMock).toHaveBeenCalledOnce();
+});
+
+test("surfaces the last network failure after bounded reconnect attempts", async () => {
+  const fetchMock = vi
+    .fn()
+    .mockResolvedValueOnce(
+      streamResponse('id: 1\nevent: text.delta\ndata: {"text":"hello"}\n\n', {
+        "X-Run-Id": "run-1",
+      })
+    )
+    .mockRejectedValueOnce(new TypeError("fetch failed 1"))
+    .mockRejectedValueOnce(new TypeError("fetch failed 2"))
+    .mockRejectedValueOnce(new TypeError("fetch failed 3"));
+  vi.stubGlobal("fetch", fetchMock);
+
+  await expect(
+    postChat({ message: { role: "user", content: "hello" } }, { onEvent: vi.fn() })
+  ).rejects.toThrow("fetch failed 3");
+  expect(fetchMock).toHaveBeenCalledTimes(4);
+});
+
+test("does not reconnect after a terminal Run frame", async () => {
+  const fetchMock = vi
+    .fn()
+    .mockResolvedValueOnce(
+      streamResponse(
+        'id: 1\nevent: text.delta\ndata: {"text":"done"}\n\n' +
+          'id: 2\nevent: turn.finished\ndata: {"status":"succeeded","messageId":"msg-1"}\n\n',
+        { "X-Run-Id": "run-1" }
+      )
+    );
+  vi.stubGlobal("fetch", fetchMock);
+  const events: string[] = [];
+
+  await postChat(
+    { message: { role: "user", content: "hello" } },
+    { onEvent: (event) => events.push(event.type) }
+  );
+
+  expect(events).toEqual(["text", "finish"]);
+  expect(fetchMock).toHaveBeenCalledOnce();
 });
 
 test("replays a persisted Run from the beginning when a Chat mounts again", async () => {

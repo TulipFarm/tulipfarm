@@ -166,7 +166,13 @@ describe("run event vocabulary", () => {
         selector: "balanced",
         resolution: "effort_preset",
         profileId: "primary",
-        chain: [{ profileId: "primary", modelId: "claude-sonnet-5" }],
+        chain: [
+          {
+            profileId: "primary",
+            modelId: "claude-sonnet-5",
+            connection: "anthropic-production",
+          },
+        ],
         cacheAllowed: true,
         rejectedFallbacks: [{ profileId: "tiny", reason: "context_window_exceeded" }],
         budgetLimits: {

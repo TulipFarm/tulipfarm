@@ -219,7 +219,8 @@ export class HttpTurnHost
         ...(request.permissionCeiling === undefined
           ? {}
           : { permissionCeiling: request.permissionCeiling }),
-      }
+      },
+      request.signal === undefined ? {} : { signal: request.signal }
     );
     return withCallId(request.callId, result);
   }

@@ -72,10 +72,29 @@ export async function getConversation(id: string): Promise<Conversation> {
 }
 
 export async function getConversationMessages(id: string): Promise<ConversationMessage[]> {
-  const body = await apiGet<{ messages: ConversationMessage[]; nextCursor: string | null }>(
-    `/api/v1/chats/${encodeURIComponent(id)}/messages`
-  );
-  return body.messages;
+  const messages: ConversationMessage[] = [];
+  const seenCursors = new Set<string>();
+  const path = `/api/v1/chats/${encodeURIComponent(id)}/messages`;
+  let cursor: string | null = null;
+
+  do {
+    const params = new URLSearchParams({ limit: "100" });
+    if (cursor !== null) params.set("cursor", cursor);
+    const body = await apiGet<{
+      messages: ConversationMessage[];
+      nextCursor: string | null;
+    }>(`${path}?${params}`);
+    messages.push(...body.messages);
+    cursor = body.nextCursor;
+    if (cursor !== null) {
+      if (seenCursors.has(cursor)) {
+        throw new Error("The Message API repeated its pagination cursor.");
+      }
+      seenCursors.add(cursor);
+    }
+  } while (cursor !== null);
+
+  return messages;
 }
 
 export type DebugTool = {

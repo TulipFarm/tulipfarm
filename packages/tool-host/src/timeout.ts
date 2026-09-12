@@ -25,7 +25,7 @@ export type LateSettlement<T> =
  */
 export type CancellationOutcome<T> =
   | { readonly kind: "settled"; readonly value: T }
-  | { readonly kind: "cancelled" }
+  | { readonly kind: "cancelled"; readonly source: "deadline" | "outer" }
   | { readonly kind: "indeterminate" };
 
 export interface CancellationOptions<T> {
@@ -51,15 +51,25 @@ export async function runWithCancellation<T>(
   timeoutMs: number,
   options: CancellationOptions<T> = {}
 ): Promise<CancellationOutcome<T>> {
-  const controller = new AbortController();
-  const abort = () => controller.abort();
   const { outerSignal, onLateSettlement } = options;
-  if (outerSignal?.aborted === true) abort();
-  else outerSignal?.addEventListener("abort", abort, { once: true });
-  const timer = timeoutMs > 0 ? setTimeout(abort, timeoutMs) : undefined;
+  if (outerSignal?.aborted === true) return { kind: "cancelled", source: "outer" };
+
+  const controller = new AbortController();
+  let cancellationSource: "deadline" | "outer" | undefined;
+  const abort = (source: "deadline" | "outer") => {
+    if (controller.signal.aborted) return;
+    cancellationSource = source;
+    controller.abort(source);
+  };
+  const aborted = new Promise<typeof EXPIRED>((resolve) => {
+    controller.signal.addEventListener("abort", () => resolve(EXPIRED), { once: true });
+  });
+  const abortFromOuter = () => abort("outer");
+  outerSignal?.addEventListener("abort", abortFromOuter, { once: true });
+  const timer = timeoutMs > 0 ? setTimeout(() => abort("deadline"), timeoutMs) : undefined;
   const release = () => {
     if (timer !== undefined) clearTimeout(timer);
-    outerSignal?.removeEventListener("abort", abort);
+    outerSignal?.removeEventListener("abort", abortFromOuter);
   };
 
   // Settlement is observed rather than raced away, so a result arriving after the deadline is
@@ -71,9 +81,6 @@ export async function runWithCancellation<T>(
       return { kind: "rejected", error };
     }
   })();
-  const aborted = new Promise<typeof EXPIRED>((resolve) => {
-    controller.signal.addEventListener("abort", () => resolve(EXPIRED), { once: true });
-  });
 
   const first = await Promise.race([observed, aborted]);
   if (first !== EXPIRED) {
@@ -89,7 +96,9 @@ export async function runWithCancellation<T>(
     if (onLateSettlement !== undefined) void observed.then(onLateSettlement);
     return { kind: "indeterminate" };
   }
-  if (acknowledged.kind === "rejected") return { kind: "cancelled" };
+  if (acknowledged.kind === "rejected") {
+    return { kind: "cancelled", source: cancellationSource ?? "deadline" };
+  }
   onLateSettlement?.(acknowledged);
   return { kind: "indeterminate" };
 }
@@ -128,6 +137,9 @@ export async function executeToolWithTimeout(
   );
   if (outcome.kind === "settled") return outcome.value;
   // A read that timed out committed nothing, so there is nothing to reconcile either way.
+  if (outcome.kind === "cancelled" && outcome.source === "outer") {
+    return err("cancelled", "tool execution cancelled");
+  }
   if (outcome.kind === "cancelled" || !tool.mutating) {
     return err("internal_error", "tool execution timed out");
   }

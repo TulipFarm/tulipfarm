@@ -1675,6 +1675,36 @@ describe("runPgMigrations concurrency and atomicity", () => {
     });
   });
 
+  describe("migration 109", () => {
+    it("adds a durable high-water boundary to existing recovery cursors", async () => {
+      await db.query(`CREATE TABLE run_recovery_cursors (
+        business_id     text PRIMARY KEY,
+        last_created_at timestamptz,
+        last_run_id     uuid
+      )`);
+      await db.query(`CREATE TABLE schema_version (
+        id boolean PRIMARY KEY DEFAULT true,
+        version integer NOT NULL,
+        CONSTRAINT schema_version_single_row CHECK (id)
+      )`);
+      await db.query("INSERT INTO schema_version (id, version) VALUES (true, 108)");
+
+      await runPgMigrations(db, undefined, NOOP_LOG);
+
+      const columns = await db.query<{ column_name: string }>(`SELECT column_name
+        FROM information_schema.columns
+        WHERE table_name = 'run_recovery_cursors'
+        ORDER BY column_name`);
+      expect(columns.rows.map((row) => row.column_name)).toEqual([
+        "business_id",
+        "cycle_end_created_at",
+        "cycle_end_run_id",
+        "last_created_at",
+        "last_run_id",
+      ]);
+    });
+  });
+
   it("is a no-op on an already-current database", async () => {
     await runPgMigrations(db, undefined, NOOP_LOG);
     const { queryable, statements } = watch(db);

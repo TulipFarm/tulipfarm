@@ -44,11 +44,22 @@ describe("seedState", () => {
     ).toMatchObject({ status: "error", error: "The response could not be started. Try again." });
   });
 
-  it("does not replay stale active metadata over a persisted assistant reply", () => {
+  it("replays the current active Turn after an older assistant attempt", () => {
     const state = seedState({
       initialConversationId: "conversation",
       initialMessages: [{ id: "reply", role: "assistant", parts: [], sealed: true }],
       initialTurn: { id: "turn-1", runId: "run-1", status: "running" },
+    });
+
+    expect(state).toMatchObject({ status: "submitted", runId: "run-1" });
+    expect(state.messages).toHaveLength(1);
+  });
+
+  it("does not replay a completed Turn over its persisted assistant reply", () => {
+    const state = seedState({
+      initialConversationId: "conversation",
+      initialMessages: [{ id: "reply", role: "assistant", parts: [], sealed: true }],
+      initialTurn: { id: "turn-1", runId: "run-1", status: "succeeded" },
     });
 
     expect(state.status).toBe("idle");

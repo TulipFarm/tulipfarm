@@ -50,8 +50,31 @@ export function isDeprecatedTierAlias(value: string): boolean {
 /** A derived profile keeps the ref it was derived from so evidence can name its origin. */
 export interface DerivedModelProfile extends ModelProfileSpec {
   readonly profileId: string;
+  /** Required on derived profiles: it is the non-secret identity of the configured endpoint. */
+  readonly connection: string;
   /** The pinned pricing/capability spec, carried through for cost attribution. */
   readonly spec?: ModelSpec;
+}
+
+/** Secret-free identity for one configured model endpoint. */
+export interface ConfiguredModelRef {
+  readonly connection: string;
+  readonly modelId: string;
+}
+
+/** Preserve endpoint identity while keeping the vendor's model id unchanged for receipts/UI. */
+export function configuredModelRef(
+  profile: Pick<ModelProfileSpec, "connection" | "model" | "provider">
+): ConfiguredModelRef {
+  return {
+    connection: profile.connection ?? profile.provider,
+    modelId: profile.model,
+  };
+}
+
+/** Collision-free in-memory key for a configured model endpoint. */
+export function configuredModelKey(ref: ConfiguredModelRef): string {
+  return JSON.stringify([ref.connection, ref.modelId]);
 }
 
 function modalitiesFor(spec: ModelSpec | undefined): ModelModality[] {

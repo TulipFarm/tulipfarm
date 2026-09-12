@@ -3,6 +3,7 @@ import type {
   ModelInvocationRequest,
   ModelInvocationResult,
   ModelMessage,
+  ModelOutput,
   ModelPort,
   ModelRequirements,
   ModelRequirementsPolicy,
@@ -23,7 +24,9 @@ import {
 } from "@tulipfarm/model-adapter";
 import type { ResolvedLimits } from "@tulipfarm/run-kernel";
 import {
+  ajv,
   asEffortPreset,
+  configuredModelKey,
   contentText,
   type EffortRung,
   isEffortRung,
@@ -31,12 +34,25 @@ import {
   type RunEventEffortInference,
   type RunEventPayloads,
 } from "@tulipfarm/schema";
-import { type ModelMessage as SdkMessage, streamText } from "ai";
+import { jsonSchema, Output, type ModelMessage as SdkMessage, streamText } from "ai";
 import type { EffortInferencePort } from "./effort-inference";
 import type { LlmModelResolution } from "./llm";
 import type { ModelCallGate } from "./model-gate";
 import { ModelCallWatchdog, withAbort } from "./model-watchdog";
-import type { SpendSink } from "./observability";
+import type { WorkerSpendSink } from "./observability";
+
+function validatedJsonSchema(schema: Readonly<Record<string, unknown>>) {
+  const validate = ajv.compile(schema);
+  return jsonSchema(schema as Parameters<typeof jsonSchema>[0], {
+    validate: (value) =>
+      validate(value)
+        ? { success: true, value }
+        : {
+            success: false,
+            error: new Error(ajv.errorsText(validate.errors, { separator: "; " })),
+          },
+  });
+}
 
 /** ModelPort over Soul providers; SDK Tools never execute, so Broker remains sole effect path. */
 
@@ -85,7 +101,7 @@ export interface LlmModelPortOptions {
    */
   readonly gate?: ModelCallGate;
   /** Where each model call is reported as spend. Best-effort; never blocks the turn. */
-  readonly spend?: SpendSink;
+  readonly spend?: WorkerSpendSink;
   /** The Conversation this port serves, for attributing spend. Absent for Routine Runs. */
   readonly conversationId?: string;
   /**
@@ -242,12 +258,19 @@ export class LlmModelPort implements ModelPort, ModelCallReceiptSource {
     let calls: Awaited<ReturnType<typeof streamText>["toolCalls"]>;
     let text: string;
     let usage: Awaited<ReturnType<typeof streamText>["usage"]>;
+    let structuredValue: unknown;
     let result: ReturnType<typeof streamText>;
 
     const providerOptions = reasoningProviderOptions(
       resolution.provider,
       resolution.routing.outcome === "selected" ? appliedRung(resolution.routing) : undefined
     );
+    const structuredOutput =
+      request.outputSchema === undefined
+        ? undefined
+        : Output.object({
+            schema: validatedJsonSchema(request.outputSchema),
+          });
 
     try {
       result = streamText({
@@ -261,6 +284,7 @@ export class LlmModelPort implements ModelPort, ModelCallReceiptSource {
           ? {}
           : { maxOutputTokens: request.maxOutputTokens }),
         ...(providerOptions === undefined ? {} : { providerOptions }),
+        ...(structuredOutput === undefined ? {} : { output: structuredOutput }),
         abortSignal: watchdog.signal,
       });
 
@@ -290,13 +314,17 @@ export class LlmModelPort implements ModelPort, ModelCallReceiptSource {
       if (streamError !== undefined) throw streamError;
 
       [calls, text, usage] = await Promise.all([result.toolCalls, result.text, result.usage]);
+      if (calls.length === 0 && structuredOutput !== undefined) {
+        structuredValue = await result.output;
+      }
     } catch (error) {
       // A watchdog abort must not be reported as a generic provider error: the operator needs to
       // know the call was cut off here, and by which bound.
       // Whatever the provider consumed before it stopped rides out on the error, so the Run is
       // charged for a failed call instead of being handed it free.
+      const attemptedConfiguredModel = resolution.attemptedConfiguredModel?.();
       const partial = observed.settle((tokensIn, tokensOut) =>
-        resolution.price(tokensIn, tokensOut)
+        resolution.price(tokensIn, tokensOut, attemptedConfiguredModel)
       );
       this.reportSpend(request, resolution, "error", partial, this.now() - startedAt);
       if (watchdog.expired !== undefined) {
@@ -323,7 +351,11 @@ export class LlmModelPort implements ModelPort, ModelCallReceiptSource {
     const outputTokens = usage.outputTokens ?? 0;
     // Priced after the call, against the chain link that actually answered — never the head of
     // the chain, which is a prediction rather than an outcome.
-    const cost = resolution.price(inputTokens, outputTokens);
+    const cost = resolution.price(
+      inputTokens,
+      outputTokens,
+      resolution.respondingConfiguredModel?.()
+    );
     const latencyMs = Math.max(0, Math.round(finishedAt - startedAt));
     this.totalModelCallLatencyMs += latencyMs;
     this.modelCallCount += 1;
@@ -373,12 +405,18 @@ export class LlmModelPort implements ModelPort, ModelCallReceiptSource {
       costBasis: cost.kind,
     };
     this.reportSpend(request, resolution, "ok", finalUsage, finishedAt - startedAt);
+    const output: ModelOutput =
+      calls.length > 0
+        ? toOutput(calls, text)
+        : structuredOutput === undefined
+          ? toOutput(calls, text)
+          : { kind: "structured", value: structuredValue };
 
     yield {
       kind: "completed",
       result: {
         requestId: request.requestId,
-        output: toOutput(calls, text),
+        output,
         usage: finalUsage,
       },
     };
@@ -400,11 +438,27 @@ export class LlmModelPort implements ModelPort, ModelCallReceiptSource {
   ): void {
     if (this.options.spend === undefined) return;
     const selectedModel = routedModelId(resolution.routing);
-    const servedModel = resolution.attemptedModelId?.() ?? selectedModel;
-    const servedProvider = resolution.providerForModel?.(servedModel) ?? resolution.provider;
+    const configuredModel =
+      status === "ok"
+        ? (resolution.respondingConfiguredModel?.() ??
+          resolution.attemptedConfiguredModel?.() ??
+          resolution.selectedConfiguredModel)
+        : (resolution.attemptedConfiguredModel?.() ??
+          resolution.respondingConfiguredModel?.() ??
+          resolution.selectedConfiguredModel);
+    const servedModel =
+      configuredModel?.modelId ?? resolution.attemptedModelId?.() ?? selectedModel;
+    const servedProvider =
+      resolution.providerForModel?.(configuredModel ?? servedModel) ?? resolution.provider;
+    const usedFallback =
+      status === "ok" &&
+      (configuredModel !== undefined && resolution.selectedConfiguredModel !== undefined
+        ? configuredModelKey(configuredModel) !==
+          configuredModelKey(resolution.selectedConfiguredModel)
+        : servedModel !== selectedModel);
     this.options.spend.recordLlmCall({
       requestId: request.requestId,
-      status: status === "ok" && servedModel !== selectedModel ? "fallback" : status,
+      status: usedFallback ? "fallback" : status,
       durationMs: Math.max(0, Math.round(durationMs)),
       ...(usage === undefined ? {} : { usage }),
       ...(this.options.conversationId === undefined
@@ -415,6 +469,7 @@ export class LlmModelPort implements ModelPort, ModelCallReceiptSource {
       ...(request.agentId === undefined ? {} : { agentId: request.agentId }),
       ...(servedModel === undefined ? {} : { model: servedModel }),
       ...(servedProvider === undefined ? {} : { provider: servedProvider }),
+      ...(configuredModel === undefined ? {} : { connection: configuredModel.connection }),
       ...(request.principal === undefined ? {} : { principal: request.principal }),
     });
   }

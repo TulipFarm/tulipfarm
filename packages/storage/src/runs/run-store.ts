@@ -170,6 +170,23 @@ export const RUN_BROWSE_STORAGE_STATEMENTS: readonly string[] = [
     ON runs (business_id, created_at DESC, id DESC)`,
 ];
 
+export const RUN_RECOVERY_CURSOR_STORAGE_STATEMENTS: readonly string[] = [
+  `CREATE TABLE IF NOT EXISTS run_recovery_cursors (
+    business_id           text PRIMARY KEY,
+    last_created_at       timestamptz,
+    last_run_id           uuid,
+    CHECK (
+      (last_created_at IS NULL AND last_run_id IS NULL)
+      OR (last_created_at IS NOT NULL AND last_run_id IS NOT NULL)
+    )
+  )`,
+];
+
+export const RUN_RECOVERY_CURSOR_CYCLE_STORAGE_STATEMENTS: readonly string[] = [
+  "ALTER TABLE run_recovery_cursors ADD COLUMN IF NOT EXISTS cycle_end_created_at timestamptz",
+  "ALTER TABLE run_recovery_cursors ADD COLUMN IF NOT EXISTS cycle_end_run_id uuid",
+];
+
 /** Immutable Run identity. Kept separate because the bounds removal must replace it in place. */
 const RUN_IDENTITY_IMMUTABLE_FUNCTION = `CREATE OR REPLACE FUNCTION reject_run_identity_change()
     RETURNS trigger LANGUAGE plpgsql AS $$
@@ -313,6 +330,8 @@ export const RUN_STORAGE_STATEMENTS: readonly string[] = [
   `CREATE INDEX IF NOT EXISTS run_lineage_target_idx
     ON run_lineage (business_id, target_run_id, created_at)`,
   ...RUN_BROWSE_STORAGE_STATEMENTS,
+  ...RUN_RECOVERY_CURSOR_STORAGE_STATEMENTS,
+  ...RUN_RECOVERY_CURSOR_CYCLE_STORAGE_STATEMENTS,
 ];
 
 /**

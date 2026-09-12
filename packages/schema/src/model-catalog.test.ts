@@ -3,6 +3,7 @@ import type { LlmConfig, ProviderEntry } from "./llm";
 import {
   acceptedInputModalities,
   asEffortPreset,
+  configuredModelRef,
   deriveModelProfiles,
   hoistProviderConnections,
   isDeprecatedTierAlias,
@@ -281,6 +282,33 @@ describe("deriveModelProfiles — connections", () => {
 
     expect(derived.find((p) => p.profileId === "fast")?.connection).toBe("azure");
     expect(derived.find((p) => p.profileId === "fast-fallback-1")?.connection).toBe("azure-2");
+  });
+
+  it("keeps equal vendor model ids distinct by their configured connection", () => {
+    const first: ProviderEntry = {
+      provider: "openai-compatible",
+      model: "house-model",
+      api_key_ref: "key-a",
+      base_url: "https://one.example",
+    };
+    const second: ProviderEntry = {
+      provider: "openai-compatible",
+      model: "house-model",
+      api_key_ref: "key-b",
+      base_url: "https://two.example",
+    };
+    const derived = deriveModelProfiles(config({ quick: { providers: [first, second] } }));
+    const primary = derived.find((profile) => profile.profileId === "fast");
+    const fallback = derived.find((profile) => profile.profileId === "fast-fallback-1");
+
+    expect(primary && configuredModelRef(primary)).toEqual({
+      connection: "openai-compatible",
+      modelId: "house-model",
+    });
+    expect(fallback && configuredModelRef(fallback)).toEqual({
+      connection: "openai-compatible-2",
+      modelId: "house-model",
+    });
   });
 });
 

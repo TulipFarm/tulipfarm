@@ -1,5 +1,6 @@
 import type { LanguageModelV4, LanguageModelV4CallOptions } from "@ai-sdk/provider";
 import {
+  AmbiguousModelError,
   LlmConfigValidationError,
   LlmCredentialError,
   LlmNotConfiguredError,
@@ -286,6 +287,186 @@ describe("LlmService.effortModel", () => {
     );
 
     expect(svc.effortModel("fast")).toMatchObject({ modelId: "haiku|mini" });
+  });
+
+  it("falls back to the second configured connection when both use the same vendor model id", async () => {
+    const firstCall = vi.fn().mockRejectedValue(new Error("first endpoint down"));
+    const secondResult = {
+      text: "second endpoint",
+      finishReason: "stop",
+      usage: {},
+      rawCall: { rawPrompt: null, rawSettings: {} },
+    };
+    const secondCall = vi.fn().mockResolvedValue(secondResult);
+    vi.mocked(createModel)
+      .mockResolvedValueOnce({
+        specificationVersion: "v4",
+        provider: "openai-compatible",
+        modelId: "house-model",
+        supportedUrls: {},
+        doGenerate: firstCall,
+        doStream: vi.fn(),
+      } as unknown as LanguageModelV4)
+      .mockResolvedValueOnce({
+        specificationVersion: "v4",
+        provider: "openai-compatible",
+        modelId: "house-model",
+        supportedUrls: {},
+        doGenerate: secondCall,
+        doStream: vi.fn(),
+      } as unknown as LanguageModelV4);
+
+    const svc = new LlmService();
+    await svc.init(
+      {
+        tiers: {
+          quick: {
+            providers: [
+              {
+                provider: "openai-compatible",
+                model: "house-model",
+                api_key_ref: "key-a",
+                base_url: "https://one.example",
+              },
+              {
+                provider: "openai-compatible",
+                model: "house-model",
+                api_key_ref: "key-b",
+                base_url: "https://two.example",
+              },
+            ],
+          },
+          standard: validConfig.tiers.standard,
+          complex: validConfig.tiers.complex,
+        },
+      },
+      fakeSecrets
+    );
+
+    await expect(
+      (svc.effortModel("fast") as LanguageModelV4).doGenerate({} as LanguageModelV4CallOptions)
+    ).resolves.toBe(secondResult);
+    expect(firstCall).toHaveBeenCalledOnce();
+    expect(secondCall).toHaveBeenCalledOnce();
+  });
+
+  it("refuses an ambiguous raw model id instead of choosing a configured endpoint", async () => {
+    const svc = new LlmService();
+    await svc.init(
+      {
+        tiers: {
+          quick: {
+            providers: [
+              {
+                provider: "openai-compatible",
+                model: "house-model",
+                api_key_ref: "key-a",
+                base_url: "https://one.example",
+              },
+              {
+                provider: "openai-compatible",
+                model: "house-model",
+                api_key_ref: "key-b",
+                base_url: "https://two.example",
+              },
+            ],
+          },
+          standard: validConfig.tiers.standard,
+          complex: validConfig.tiers.complex,
+        },
+      },
+      fakeSecrets
+    );
+
+    expect(() => svc.getModelById("house-model")).toThrow(AmbiguousModelError);
+  });
+
+  it("keys and attributes equal model ids by their configured connection", async () => {
+    const firstCall = vi.fn().mockRejectedValue(new Error("first endpoint down"));
+    const secondResult = {
+      text: "second endpoint",
+      finishReason: "stop",
+      usage: {},
+      rawCall: { rawPrompt: null, rawSettings: {} },
+    };
+    const secondCall = vi.fn().mockResolvedValue(secondResult);
+    vi.mocked(createModel)
+      .mockResolvedValueOnce({
+        specificationVersion: "v4",
+        provider: "openai-compatible",
+        modelId: "house-model",
+        supportedUrls: {},
+        doGenerate: firstCall,
+        doStream: vi.fn(),
+      } as unknown as LanguageModelV4)
+      .mockResolvedValueOnce({
+        specificationVersion: "v4",
+        provider: "openai-compatible",
+        modelId: "house-model",
+        supportedUrls: {},
+        doGenerate: secondCall,
+        doStream: vi.fn(),
+      } as unknown as LanguageModelV4);
+
+    const svc = new LlmService();
+    await svc.init(
+      {
+        tiers: {
+          quick: {
+            providers: [
+              {
+                provider: "openai-compatible",
+                model: "house-model",
+                api_key_ref: "key-a",
+                base_url: "https://one.example",
+              },
+              {
+                provider: "openai-compatible",
+                model: "house-model",
+                api_key_ref: "key-b",
+                base_url: "https://two.example",
+              },
+            ],
+          },
+          standard: validConfig.tiers.standard,
+          complex: validConfig.tiers.complex,
+        },
+      },
+      fakeSecrets
+    );
+
+    const gateKeys: string[] = [];
+    const gate = {
+      acquire: async (key: string) => {
+        gateKeys.push(key);
+        return {
+          succeeded() {},
+          failed() {},
+          cancelled() {},
+          release() {},
+        };
+      },
+    };
+    const responder: {
+      modelId?: string;
+      configuredModel?: { connection: string; modelId: string };
+    } = {};
+    const chain = svc.chainModel(
+      [
+        { connection: "openai-compatible", modelId: "house-model" },
+        { connection: "openai-compatible-2", modelId: "house-model" },
+      ],
+      undefined,
+      responder,
+      gate
+    ) as LanguageModelV4;
+
+    await expect(chain.doGenerate({} as LanguageModelV4CallOptions)).resolves.toBe(secondResult);
+    expect(gateKeys).toEqual(["openai-compatible:house-model", "openai-compatible-2:house-model"]);
+    expect(responder).toEqual({
+      modelId: "house-model",
+      configuredModel: { connection: "openai-compatible-2", modelId: "house-model" },
+    });
   });
 
   it("refuses rather than substituting a weaker chain when the preset's providers fail", async () => {

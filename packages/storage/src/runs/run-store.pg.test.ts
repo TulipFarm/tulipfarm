@@ -60,7 +60,7 @@ describe("RunStore (PostgreSQL)", () => {
   }, 60_000);
 
   beforeEach(async () => {
-    await database.query("TRUNCATE TABLE runs CASCADE");
+    await database.query("TRUNCATE TABLE run_recovery_cursors, runs CASCADE");
     store = new RunStore(transactionPort(database));
   });
 
@@ -419,6 +419,75 @@ describe("RunStore (PostgreSQL)", () => {
       version: 3,
       errorEvidenceRef: DISPATCH_REQUEUED_ONCE_REF,
     });
+  });
+
+  it("cycles past a crashed page despite sustained arrival of newer candidates", async () => {
+    const ids = Array.from(
+      { length: 26 },
+      (_, index) => `00000000-0000-4000-8000-${String(index + 1).padStart(12, "0")}`
+    );
+    for (const [index, id] of ids.entries()) {
+      await store.start(
+        run({
+          id,
+          createdAt: new Date(Date.parse(CREATED_AT) + index * 1_000).toISOString(),
+        })
+      );
+      await store.transitionRun("business-1", id, {
+        expectedVersion: 0,
+        expectedStatus: "queued",
+        status: "needs_reconciliation",
+        leaseOwner: null,
+        leaseExpiresAt: null,
+        errorEvidenceRef: DISPATCH_HANDLER_ERROR_REF,
+      });
+    }
+
+    const first = await store.listRecoveryCandidates("business-1", 25);
+    for (let index = 26; index < 51; index += 1) {
+      const id = `00000000-0000-4000-8000-${String(index + 1).padStart(12, "0")}`;
+      await store.start(
+        run({
+          id,
+          createdAt: new Date(Date.parse(CREATED_AT) + index * 1_000).toISOString(),
+        })
+      );
+      await store.transitionRun("business-1", id, {
+        expectedVersion: 0,
+        expectedStatus: "queued",
+        status: "needs_reconciliation",
+        leaseOwner: null,
+        leaseExpiresAt: null,
+        errorEvidenceRef: DISPATCH_HANDLER_ERROR_REF,
+      });
+    }
+    const restarted = new RunStore(transactionPort(database));
+    const second = await restarted.listRecoveryCandidates("business-1", 25);
+    for (let index = 51; index < 76; index += 1) {
+      const id = `00000000-0000-4000-8000-${String(index + 1).padStart(12, "0")}`;
+      await store.start(
+        run({
+          id,
+          createdAt: new Date(Date.parse(CREATED_AT) + index * 1_000).toISOString(),
+        })
+      );
+      await store.transitionRun("business-1", id, {
+        expectedVersion: 0,
+        expectedStatus: "queued",
+        status: "needs_reconciliation",
+        leaseOwner: null,
+        leaseExpiresAt: null,
+        errorEvidenceRef: DISPATCH_HANDLER_ERROR_REF,
+      });
+    }
+    const third = await new RunStore(transactionPort(database)).listRecoveryCandidates(
+      "business-1",
+      25
+    );
+
+    expect(first.map((candidate) => candidate.id)).toEqual(ids.slice(0, 25));
+    expect(second.map((candidate) => candidate.id)).toEqual([ids[25]]);
+    expect(third.map((candidate) => candidate.id)).toEqual(ids.slice(0, 25));
   });
 
   it("does not reclaim a Run whose lease has not expired", async () => {

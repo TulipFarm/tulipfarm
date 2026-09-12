@@ -522,12 +522,12 @@ export async function main(): Promise<void> {
           tools: observedToolDispatch,
           catalog: (runId, agentName) => turnHost.agentTools(runId, agentName),
           // Chain, routing event, and budget are already selected/opened by the Routine port.
-          model: ({ modelIds, routing, runId, turnId }) =>
+          model: ({ models, routing, runId, turnId }) =>
             new LlmModelPort({
               // Through `resolveChain`, so a Routine call is priced by the same authority as a Chat
               // call. Building the resolution inline here is what left Routine spend reported free.
               model: async (_selector, _requirements, _inference, principal, gate) =>
-                llm.resolveChain(modelIds, routing, principal, gate),
+                llm.resolveChain(models, routing, principal, gate),
               signal,
               gate: modelGate,
               spend: spendSink,
@@ -556,13 +556,15 @@ export async function main(): Promise<void> {
     // authority cache by in-flight Runs instead of by process lifetime, and covers terminal
     // paths this worker never observes: a Run abandoned, cancelled, or reconciled while parked
     // was already forgotten when it parked.
-    handler: async (run) => {
+    handler: async (run, runSignal) => {
+      toolDispatch.bind(run.id, runSignal);
       try {
-        return await executors.execute(run);
+        return await executors.execute(run, runSignal);
       } finally {
         toolDispatch.forget(run.id);
       }
     },
+    signal,
     now: () => new Date(),
     leaseDurationMs: config.leaseDurationMs,
     batchSize: config.batchSize,

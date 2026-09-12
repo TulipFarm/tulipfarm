@@ -166,6 +166,46 @@ describe("RegistryToolDispatcher", () => {
     );
   });
 
+  it("delivers per-call Run cancellation to cooperative Tool work", async () => {
+    const run = new AbortController();
+    let aborted = false;
+    let started: (() => void) | undefined;
+    const executing = new Promise<void>((resolve) => {
+      started = resolve;
+    });
+    const { dispatcher } = makeDispatcher([
+      toolDef({
+        definition: {
+          timeout: { wallClockMs: 20 },
+        } as unknown as ToolDef["definition"],
+        execute: (_args, context) =>
+          new Promise((_resolve, reject) => {
+            started?.();
+            context.abortSignal?.addEventListener(
+              "abort",
+              () => {
+                aborted = true;
+                reject(new Error("run cancelled"));
+              },
+              { once: true }
+            );
+          }),
+      }),
+    ]);
+
+    const result = dispatcher.dispatch(AUTHORITY, {
+      callId: "c1",
+      name: "echo",
+      arguments: { text: "hi" },
+      abortSignal: run.signal,
+    });
+    await executing;
+    run.abort("run_cancelled");
+
+    await expect(result).resolves.toMatchObject({ status: "failed", code: "cancelled" });
+    expect(aborted).toBe(true);
+  });
+
   it("denies a Tool never registered, without running it", async () => {
     const execute = vi.fn(async () => ok({}));
     const { dispatcher } = makeDispatcher([toolDef({ name: "present", execute })]);

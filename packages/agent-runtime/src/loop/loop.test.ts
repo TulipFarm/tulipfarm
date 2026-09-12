@@ -1078,6 +1078,84 @@ describe("AgentLoop concurrent dispatch", () => {
     expect(tools.batches).toEqual([undefined]);
   });
 
+  it("aborts active Tool work and dispatches no later sequential call after cancellation", async () => {
+    let cancelled = false;
+    const calls: string[] = [];
+    const tools: ToolDispatchPort = {
+      dispatch: async (request) => {
+        calls.push(request.name);
+        if (calls.length > 1) {
+          return { status: "succeeded", callId: request.callId, output: {} };
+        }
+        cancelled = true;
+        return new Promise((resolve) => {
+          request.signal?.addEventListener(
+            "abort",
+            () =>
+              resolve({
+                status: "failed",
+                callId: request.callId,
+                reason: "cancelled",
+              }),
+            { once: true }
+          );
+        });
+      },
+    };
+
+    const outcome = await loop({
+      model: scriptedModel(
+        toolCallResult([
+          { callId: "c1", name: "github.issue.comment", arguments: { body: "first" } },
+          { callId: "c2", name: "github.issue.comment", arguments: { body: "second" } },
+        ])
+      ),
+      tools,
+      cancelled: async () => cancelled,
+      cancelPollMs: 1,
+    }).run(
+      input({
+        limits: { maxIterations: 5, maxToolCalls: 5, maxRepairAttempts: 2 },
+      })
+    );
+
+    expect(outcome.status).toBe("cancelled");
+    expect(calls).toEqual(["github.issue.comment"]);
+  });
+
+  it("stops after a Tool reports Run cancellation without dispatching the next write", async () => {
+    const calls: string[] = [];
+    const tools: ToolDispatchPort = {
+      dispatch: async (request) => {
+        calls.push(request.name);
+        return {
+          status: "failed",
+          callId: request.callId,
+          code: "cancelled",
+          reason: "tool execution cancelled",
+        };
+      },
+    };
+
+    const outcome = await loop({
+      model: scriptedModel(
+        toolCallResult([
+          { callId: "c1", name: "github.issue.comment", arguments: { body: "first" } },
+          { callId: "c2", name: "github.issue.comment", arguments: { body: "second" } },
+        ]),
+        textResult("should not run")
+      ),
+      tools,
+    }).run(
+      input({
+        limits: { maxIterations: 5, maxToolCalls: 5, maxRepairAttempts: 2 },
+      })
+    );
+
+    expect(outcome.status).toBe("cancelled");
+    expect(calls).toEqual(["github.issue.comment"]);
+  });
+
   // Concurrency is what actually ran, not what was asked for. Two identical reads collapse to one
   // dispatch, so nothing ran beside anything and the trace must not claim a batch.
   it("leaves a batch unnamed when it collapses to a single dispatch", async () => {

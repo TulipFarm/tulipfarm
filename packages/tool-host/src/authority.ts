@@ -58,6 +58,8 @@ export interface HostedToolCall {
   readonly callId: string;
   readonly name: string;
   readonly arguments: unknown;
+  /** Per-Run cancellation. The host combines it with process drain and its own deadline. */
+  readonly abortSignal?: AbortSignal;
   /** The Run State this call executes in; a Tool that parks registers its wait against it. */
   readonly stateId?: string;
   readonly activeSkillName?: string;

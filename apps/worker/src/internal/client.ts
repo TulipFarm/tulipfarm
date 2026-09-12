@@ -35,8 +35,13 @@ export class InternalApiClient {
   }
 
   /** Require a body; `204` is a fault when the caller has no fallback. */
-  async require<T>(method: "GET" | "POST", path: string, body?: unknown): Promise<T> {
-    const response = await this.send(method, path, body);
+  async require<T>(
+    method: "GET" | "POST",
+    path: string,
+    body?: unknown,
+    options: { readonly signal?: AbortSignal } = {}
+  ): Promise<T> {
+    const response = await this.send(method, path, body, options.signal);
     if (!response.ok || response.status === 204) {
       throw new InternalApiError(response.status, method, path, await safeText(response));
     }
@@ -73,7 +78,13 @@ export class InternalApiClient {
     return new Uint8Array(await response.arrayBuffer());
   }
 
-  private async send(method: "GET" | "POST", path: string, body?: unknown): Promise<Response> {
+  private async send(
+    method: "GET" | "POST",
+    path: string,
+    body?: unknown,
+    outerSignal?: AbortSignal
+  ): Promise<Response> {
+    const timeoutSignal = AbortSignal.timeout(this.timeoutMs);
     return this.fetch(`${this.options.baseUrl}${path}`, {
       method,
       headers: {
@@ -81,7 +92,8 @@ export class InternalApiClient {
         ...(body === undefined ? {} : { "content-type": "application/json" }),
       },
       ...(body === undefined ? {} : { body: JSON.stringify(body) }),
-      signal: AbortSignal.timeout(this.timeoutMs),
+      signal:
+        outerSignal === undefined ? timeoutSignal : AbortSignal.any([timeoutSignal, outerSignal]),
     });
   }
 }

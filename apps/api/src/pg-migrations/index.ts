@@ -43,6 +43,8 @@ import {
   RUN_BROWSE_STORAGE_STATEMENTS,
   RUN_EVENT_NOTIFY_STATEMENTS,
   RUN_EVENT_STORAGE_STATEMENTS,
+  RUN_RECOVERY_CURSOR_CYCLE_STORAGE_STATEMENTS,
+  RUN_RECOVERY_CURSOR_STORAGE_STATEMENTS,
   RUN_STORAGE_STATEMENTS,
   SOUL_DOCTOR_STORAGE_STATEMENTS,
   SOUL_PUBLICATION_STORAGE_STATEMENTS,
@@ -3223,5 +3225,15 @@ export const PG_MIGRATIONS: PgMigration[] = [
       "DROP TABLE IF EXISTS curator_job",
       "DROP TABLE IF EXISTS curator_user_work",
     ]),
+  },
+  {
+    version: 108,
+    description: "persist fair Run recovery scan progress",
+    up: applyStatements(RUN_RECOVERY_CURSOR_STORAGE_STATEMENTS),
+  },
+  {
+    version: 109,
+    description: "bound each Run recovery scan cycle",
+    up: applyStatements(RUN_RECOVERY_CURSOR_CYCLE_STORAGE_STATEMENTS),
   },
 ];

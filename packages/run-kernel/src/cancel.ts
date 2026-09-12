@@ -191,13 +191,23 @@ export class RunCancellationManager {
         detached.push(link.childRunId);
         continue;
       }
-      const childResult = await this.cancel({
-        businessId: input.businessId,
-        runId: link.childRunId,
-        reason: input.reason,
-        inFlightEffects: input.inFlightEffects,
-        now: input.now,
-      });
+      let childResult: CancellationResult;
+      try {
+        childResult = await this.cancel({
+          businessId: input.businessId,
+          runId: link.childRunId,
+          reason: input.reason,
+          inFlightEffects: input.inFlightEffects,
+          now: input.now,
+        });
+      } catch (error) {
+        if (error instanceof CancellationError && error.code === "run_not_cancellable") continue;
+        if (error instanceof CancellationError && error.code === "cancellation_conflict") {
+          const child = await this.runs.find(input.businessId, link.childRunId);
+          if (child && UNCANCELLABLE_RUN_STATUSES.includes(child.status)) continue;
+        }
+        throw error;
+      }
       cascaded.push(link.childRunId);
       childNeedsReconciliation ||= childResult.outcome === "needs_reconciliation";
     }

@@ -15,7 +15,9 @@ export interface RunDispatcherOptions {
   recovery?: Pick<RunRecoveryManager, "sweep">;
   businessId: string;
   owner: string;
-  handler: (run: PersistedRun) => Promise<RunOutcome>;
+  handler: (run: PersistedRun, signal: AbortSignal) => Promise<RunOutcome>;
+  /** Process drain signal. An active handler is aborted and its lease is left to expire safely. */
+  signal?: AbortSignal;
   /**
    * Reports a handler throw that parked its Run at `needs_reconciliation`. Optional so existing
    * callers and tests need not wire one, but production always does — an unrecorded throw here is
@@ -72,18 +74,22 @@ export class RunDispatcher {
       limit,
     });
 
-    const claimed = await this.options.leases.claimBatch({
-      businessId: this.options.businessId,
-      owner: this.options.owner,
-      now: this.options.now(),
-      leaseDurationMs,
-      limit,
-    });
-
+    let claimed = 0;
     let dispatched = 0;
     let waiting = 0;
     let failed = 0;
-    for (const run of claimed) {
+    for (let index = 0; index < limit; index += 1) {
+      if (this.options.signal?.aborted === true) break;
+      const next = await this.options.leases.claimBatch({
+        businessId: this.options.businessId,
+        owner: this.options.owner,
+        now: this.options.now(),
+        leaseDurationMs,
+        limit: 1,
+      });
+      const run = next[0];
+      if (run === undefined) break;
+      claimed += 1;
       const started = await this.options.leases.claim({
         businessId: this.options.businessId,
         runId: run.id,
@@ -96,8 +102,14 @@ export class RunDispatcher {
       });
       if (!started.claimed || !started.run) continue;
 
-      try {
-        const outcome = await this.options.handler(started.run);
+      const execution = await this.executeOwned(started.run, leaseDurationMs);
+      if (execution.kind === "lease_lost") {
+        failed += 1;
+        break;
+      }
+      const { version } = execution;
+      if (execution.kind === "outcome") {
+        const outcome = execution.outcome;
         if (outcome.status === "cancelled") {
           // Cancellation manager owns this transition; do not race it here.
           waiting += 1;
@@ -119,7 +131,7 @@ export class RunDispatcher {
         const released = await this.options.leases.release({
           businessId: this.options.businessId,
           runId: run.id,
-          expectedVersion: started.run.version,
+          expectedVersion: version,
           expectedStatus: "running",
           status: releaseStatus,
           now: this.options.now(),
@@ -132,13 +144,25 @@ export class RunDispatcher {
         if (releaseStatus === "succeeded") dispatched += 1;
         else if (releaseStatus === "waiting") waiting += 1;
         else failed += 1;
+        const settledRun: PersistedRun = {
+          ...started.run,
+          status: releaseStatus,
+          version: version + 1,
+          leaseOwner: null,
+          leaseExpiresAt: null,
+          ...(releaseStatus === "succeeded" || releaseStatus === "failed"
+            ? { finishedAt: this.options.now().toISOString() }
+            : {}),
+          ...(releaseEvidenceRef === undefined ? {} : { errorEvidenceRef: releaseEvidenceRef }),
+        };
         if (releaseStatus === "succeeded" || releaseStatus === "failed") {
-          await this.notifyTerminal(started.run, releaseStatus);
+          await this.notifyTerminal(settledRun, releaseStatus);
         }
         if (releaseStatus === "waiting") {
-          await this.notifyWaiting(started.run);
+          await this.notifyWaiting(settledRun);
         }
-      } catch (error) {
+      } else {
+        const error = execution.error;
         // A Run already requeued once has now thrown twice. Parking it again would put it straight
         // back in front of the sweep it just came from, so it fails here with the reason recorded.
         const exhausted = started.run.errorEvidenceRef === DISPATCH_REQUEUED_ONCE_REF;
@@ -150,7 +174,7 @@ export class RunDispatcher {
         await this.options.leases.release({
           businessId: this.options.businessId,
           runId: run.id,
-          expectedVersion: started.run.version,
+          expectedVersion: version,
           expectedStatus: "running",
           status,
           now: this.options.now(),
@@ -163,11 +187,88 @@ export class RunDispatcher {
     return {
       reclaimed: reclaimed.length,
       requeuedParked: recovered?.requeued ?? 0,
-      claimed: claimed.length,
+      claimed,
       dispatched,
       waiting,
       failed,
     };
+  }
+
+  private async executeOwned(
+    run: PersistedRun,
+    leaseDurationMs: number
+  ): Promise<
+    | { readonly kind: "outcome"; readonly outcome: RunOutcome; readonly version: number }
+    | { readonly kind: "error"; readonly error: unknown; readonly version: number }
+    | { readonly kind: "lease_lost" }
+  > {
+    const controller = new AbortController();
+    const intervalMs = Math.max(1, Math.floor(leaseDurationMs / 3));
+    let version = run.version;
+    let stopped = false;
+    let leaseLost = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    let heartbeat: Promise<void> | undefined;
+    let resolveLeaseLost: (() => void) | undefined;
+    const lost = new Promise<{ readonly kind: "lease_lost" }>((resolve) => {
+      resolveLeaseLost = () => resolve({ kind: "lease_lost" });
+    });
+    const loseLease = (reason?: unknown) => {
+      if (leaseLost) return;
+      leaseLost = true;
+      controller.abort(reason);
+      resolveLeaseLost?.();
+    };
+    const renew = async () => {
+      const expectedVersion = version;
+      const renewed = await this.options.leases.heartbeat({
+        businessId: this.options.businessId,
+        runId: run.id,
+        owner: this.options.owner,
+        now: this.options.now(),
+        leaseDurationMs,
+        expectedVersion,
+      });
+      if (!renewed) {
+        loseLease("run_lease_lost");
+        return;
+      }
+      version = expectedVersion + 1;
+      if (!stopped) schedule();
+    };
+    const schedule = () => {
+      timer = setTimeout(() => {
+        heartbeat = renew().catch((error) => loseLease(error));
+      }, intervalMs);
+      timer.unref?.();
+    };
+    const onDrain = () => loseLease(this.options.signal?.reason);
+    if (this.options.signal?.aborted === true) onDrain();
+    else this.options.signal?.addEventListener("abort", onDrain, { once: true });
+    if (leaseLost) {
+      this.options.signal?.removeEventListener("abort", onDrain);
+      return { kind: "lease_lost" };
+    }
+    schedule();
+
+    try {
+      const handled = Promise.resolve()
+        .then(() => this.options.handler(run, controller.signal))
+        .then(
+          (outcome) => ({ kind: "outcome" as const, outcome }),
+          (error: unknown) => ({ kind: "error" as const, error })
+        );
+      const first = await Promise.race([handled, lost]);
+      stopped = true;
+      if (leaseLost || first.kind === "lease_lost") return { kind: "lease_lost" };
+      await heartbeat;
+      if (leaseLost) return { kind: "lease_lost" };
+      return { ...first, version };
+    } finally {
+      stopped = true;
+      if (timer !== undefined) clearTimeout(timer);
+      this.options.signal?.removeEventListener("abort", onDrain);
+    }
   }
 
   /**

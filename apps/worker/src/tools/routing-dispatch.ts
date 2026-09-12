@@ -21,6 +21,7 @@ export interface TurnAuthoritySource {
  */
 export class RoutingToolDispatch implements ToolDispatchPort {
   private readonly authorities = new Map<string, Promise<TurnAuthority | undefined>>();
+  private readonly runSignals = new Map<string, AbortSignal>();
 
   constructor(
     private readonly local: LocalToolHost,
@@ -30,28 +31,31 @@ export class RoutingToolDispatch implements ToolDispatchPort {
   ) {}
 
   async dispatch(request: ToolDispatchRequest): Promise<ToolDispatchResult> {
-    if (!this.local.hostedNames.has(request.name)) return this.remote.dispatch(request);
+    const signal = combinedSignal(request.signal, this.runSignals.get(request.runId));
+    const routedRequest = signal === undefined ? request : { ...request, signal };
+    if (!this.local.hostedNames.has(request.name)) return this.remote.dispatch(routedRequest);
     if (!(await this.local.ready(request.name))) {
       this.log.warn({ tool: request.name }, "local host not ready; dispatching over the API");
-      return this.remote.dispatch(request);
+      return this.remote.dispatch(routedRequest);
     }
 
     const authority = await this.authorityFor(request.runId, request.agentName);
     if (authority === undefined) {
       // The Run no longer names a Turn we may act for. The control plane owns that answer.
-      return this.remote.dispatch(request);
+      return this.remote.dispatch(routedRequest);
     }
     if (authority.businessId !== request.businessId) {
       // The Run and the control plane disagree on whose deployment this is. Executing here would
       // pick a side; the API is the one that can tell which.
       this.log.warn({ runId: request.runId }, "authority business mismatch; dispatching over API");
-      return this.remote.dispatch(request);
+      return this.remote.dispatch(routedRequest);
     }
 
     const result = await this.local.dispatcher.dispatch(authority, {
       callId: request.callId,
       name: request.name,
       arguments: request.arguments,
+      ...(signal === undefined ? {} : { abortSignal: signal }),
       stateId: request.stateId,
       ...(request.activeSkillName === undefined
         ? {}
@@ -61,6 +65,11 @@ export class RoutingToolDispatch implements ToolDispatchPort {
         : { permissionCeiling: request.permissionCeiling }),
     });
     return withCallId(request.callId, result);
+  }
+
+  /** Binds the worker's ownership lease to every Tool call made during this Run attempt. */
+  bind(runId: string, signal: AbortSignal): void {
+    this.runSignals.set(runId, signal);
   }
 
   /**
@@ -93,10 +102,20 @@ export class RoutingToolDispatch implements ToolDispatchPort {
    * extra read, but it is the reason the hook is at the dispatch boundary and not inside a Tool.
    */
   forget(runId: string): void {
+    this.runSignals.delete(runId);
     for (const key of this.authorities.keys()) {
       if (key === runId || key.startsWith(`${runId}\u0000`)) this.authorities.delete(key);
     }
   }
+}
+
+function combinedSignal(
+  requestSignal: AbortSignal | undefined,
+  runSignal: AbortSignal | undefined
+): AbortSignal | undefined {
+  if (requestSignal === undefined) return runSignal;
+  if (runSignal === undefined) return requestSignal;
+  return AbortSignal.any([requestSignal, runSignal]);
 }
 
 /** Keys one cached authority. `\u0000` cannot occur in a Run id or an Agent name. */

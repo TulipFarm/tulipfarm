@@ -33,6 +33,23 @@ async function settle<T>(promise: Promise<T>): Promise<T> {
 }
 
 describe("runWithCancellation", () => {
+  it("does not invoke an operation whose outer signal is already aborted", async () => {
+    vi.useFakeTimers();
+    try {
+      const outer = new AbortController();
+      outer.abort("run_cancelled");
+      const execute = vi.fn(() => new Promise<string>(() => {}));
+
+      const outcome = runWithCancellation(execute, 60_000, { outerSignal: outer.signal });
+      await Promise.resolve();
+
+      expect(execute).not.toHaveBeenCalled();
+      await expect(outcome).resolves.toEqual({ kind: "cancelled", source: "outer" });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("returns the value when the operation beats its deadline", async () => {
     const outcome = await runWithCancellation(async () => "fast", 1_000);
     expect(outcome).toEqual({ kind: "settled", value: "fast" });
@@ -50,7 +67,7 @@ describe("runWithCancellation", () => {
           1_000
         )
       );
-      expect(await outcome).toEqual({ kind: "cancelled" });
+      expect(await outcome).toEqual({ kind: "cancelled", source: "deadline" });
     } finally {
       vi.useRealTimers();
     }
@@ -99,7 +116,7 @@ describe("runWithCancellation", () => {
       { outerSignal: outer.signal }
     );
     outer.abort();
-    expect(await promise).toEqual({ kind: "cancelled" });
+    expect(await promise).toEqual({ kind: "cancelled", source: "outer" });
     expect(inner?.aborted).toBe(true);
   });
 });
@@ -178,6 +195,38 @@ describe("executeToolWithTimeout", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it("reports acknowledged Run cancellation distinctly from a Tool deadline", async () => {
+    const outer = new AbortController();
+    let started: (() => void) | undefined;
+    const executing = new Promise<void>((resolve) => {
+      started = resolve;
+    });
+    const result = executeToolWithTimeout(
+      tool({
+        mutating: true,
+        execute: (_args, context) =>
+          new Promise<ToolCallResult>((_resolve, reject) => {
+            started?.();
+            context.abortSignal?.addEventListener(
+              "abort",
+              () => reject(new Error("run cancelled")),
+              { once: true }
+            );
+          }),
+      }),
+      {},
+      { ...ctx, abortSignal: outer.signal },
+      60_000
+    );
+    await executing;
+    outer.abort("run_cancelled");
+
+    await expect(result).resolves.toEqual({
+      success: false,
+      error: { code: "cancelled", message: "tool execution cancelled" },
+    });
   });
 
   it("does not commit a mutating Tool's post-deadline write into the caller's result", async () => {

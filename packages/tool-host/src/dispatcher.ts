@@ -115,6 +115,15 @@ type AuthorizeVerdict =
   | { readonly decision: "approval"; readonly demand: ApprovalDemand }
   | { readonly decision: "denied"; readonly result: HostedToolResult };
 
+function combinedAbortSignal(
+  hostSignal: AbortSignal | undefined,
+  callSignal: AbortSignal | undefined
+): AbortSignal | undefined {
+  if (hostSignal === undefined) return callSignal;
+  if (callSignal === undefined) return hostSignal;
+  return AbortSignal.any([hostSignal, callSignal]);
+}
+
 /**
  * Spends the one-use approval this dispatch is about to act on. Fails closed: a decision that
  * cannot be spent is not a decision this call may run under.
@@ -496,6 +505,7 @@ export class RegistryToolDispatcher implements TurnToolDispatcher {
             surfaceRendererManifest: surfaces.manifestFor(presentationContext.target),
           }
         : {};
+    const abortSignal = combinedAbortSignal(this.options.abortSignal, call.abortSignal);
     const context: RequestContext = {
       userId: authority.subject.id,
       subject: { kind: authority.subject.kind, id: authority.subject.id },
@@ -519,7 +529,7 @@ export class RegistryToolDispatcher implements TurnToolDispatcher {
       surfaceActionStore: this.options.surfaceActionStore,
       surfaceComponents,
       ...surfaceFields,
-      ...(this.options.abortSignal === undefined ? {} : { abortSignal: this.options.abortSignal }),
+      ...(abortSignal === undefined ? {} : { abortSignal }),
       ...(credential.use === "principal" ? { credentialPrincipal: credential.principal } : {}),
     };
     // Reserve only after refusals and approval; denied calls leave no effect row.
