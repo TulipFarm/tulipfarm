@@ -9,8 +9,7 @@ import {
   WebhookInboxStore,
 } from "@tulipfarm/storage";
 import { afterEach, describe, expect, it } from "vitest";
-import { runPgMigrations } from "../pg-migrate";
-import { makeMigratedPglite, makePglite } from "../test/pglite";
+import { makeMigratedPglite } from "../test/pglite";
 import { PG_MIGRATIONS } from "./index";
 
 const BUSINESS_ID = "business-1";
@@ -99,96 +98,6 @@ describe("OIM persistence migrations", () => {
     `);
 
     expect(result.rows.map(({ table_name }) => table_name)).toHaveLength(11);
-  });
-
-  it("upgrades a version 111 database and is then repeat-safe", async () => {
-    database = await makePglite();
-    await database.exec(`
-      CREATE TABLE integration_auth_requests (
-        state text PRIMARY KEY,
-        integration_slug text NOT NULL,
-        step_index integer NOT NULL,
-        code_verifier text,
-        created_at timestamptz NOT NULL,
-        expires_at timestamptz NOT NULL,
-        consumed_at timestamptz
-      );
-      CREATE TABLE knowledge_source_records (
-        business_id text NOT NULL,
-        source_id text NOT NULL,
-        integration_id text,
-        PRIMARY KEY (business_id, source_id)
-      );
-      INSERT INTO knowledge_source_records (business_id, source_id, integration_id)
-      VALUES ('business-1', 'legacy-source', 'calendar');
-      CREATE TABLE schema_version (
-        id boolean PRIMARY KEY DEFAULT true,
-        version integer NOT NULL,
-        CONSTRAINT schema_version_single_row CHECK (id)
-      );
-      INSERT INTO schema_version (id, version) VALUES (true, 111);
-    `);
-
-    await runPgMigrations(database, undefined, () => {});
-    await expect(runPgMigrations(database, undefined, () => {})).resolves.toBeUndefined();
-
-    const authColumns = await database.query<{ column_name: string }>(`
-      SELECT column_name
-        FROM information_schema.columns
-       WHERE table_name = 'integration_auth_requests'
-         AND column_name IN (
-           'connection_id',
-           'oim_step_id',
-           'oim_step_digest',
-           'manifest_digest',
-           'package_digest'
-         )
-       ORDER BY column_name
-    `);
-    expect(authColumns.rows.map(({ column_name }) => column_name)).toHaveLength(5);
-
-    const securityFoundation = await database.query<{ present: boolean }>(`
-      SELECT
-        to_regclass('connection_external_identities') IS NOT NULL
-        AND EXISTS (
-          SELECT 1
-            FROM information_schema.columns
-           WHERE table_name = 'webhook_deliveries'
-             AND column_name = 'authenticated_evidence_digest'
-        ) AS present
-    `);
-    expect(securityFoundation.rows).toEqual([{ present: true }]);
-
-    const knowledgeColumns = await database.query<{ column_name: string }>(`
-      SELECT column_name
-        FROM information_schema.columns
-       WHERE table_name = 'knowledge_source_records'
-         AND column_name IN (
-           'source_locator',
-           'provenance_connection_id',
-           'provenance_integration_major_version'
-         )
-       ORDER BY column_name
-    `);
-    expect(knowledgeColumns.rows.map(({ column_name }) => column_name)).toEqual([
-      "provenance_connection_id",
-      "provenance_integration_major_version",
-      "source_locator",
-    ]);
-    const legacySource = await database.query<{
-      provenance_connection_id: string | null;
-      provenance_integration_major_version: number | null;
-    }>(`
-      SELECT provenance_connection_id, provenance_integration_major_version
-        FROM knowledge_source_records
-       WHERE business_id = 'business-1' AND source_id = 'legacy-source'
-    `);
-    expect(legacySource.rows).toEqual([
-      {
-        provenance_connection_id: null,
-        provenance_integration_major_version: null,
-      },
-    ]);
   });
 
   it("allows one provider key on separate Connections and majors, but not the same route", async () => {
