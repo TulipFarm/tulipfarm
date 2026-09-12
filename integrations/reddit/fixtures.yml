@@ -1,0 +1,234 @@
+version: 1
+cases:
+  - name: gets-identity
+    operationId: get-identity
+    configuration:
+      user_agent: "linux:com.example.tulipfarm:v1.0.0 (by /u/muskan)"
+    request: {}
+    response:
+      status: 200
+      body:
+        id: abc123
+        name: muskan
+        created_utc: 1700000000
+        comment_karma: 12
+        link_karma: 34
+    expect:
+      request:
+        method: GET
+        url: https://oauth.reddit.com/api/v1/me
+        headers:
+          Authorization: Bearer oim-fixture-credential
+          User-Agent: "linux:com.example.tulipfarm:v1.0.0 (by /u/muskan)"
+      result:
+        id: abc123
+        name: muskan
+        created_utc: 1700000000
+        comment_karma: 12
+        link_karma: 34
+
+  - name: lists-subreddit-posts
+    operationId: list-subreddit-posts
+    configuration:
+      user_agent: "linux:com.example.tulipfarm:v1.0.0 (by /u/muskan)"
+    request:
+      subreddit: tulips
+      sort: new
+      limit: 25
+    response:
+      status: 200
+      body:
+        kind: Listing
+        data:
+          after: t3_next
+          children:
+            - kind: t3
+              data:
+                id: post1
+                name: t3_post1
+                title: Spring tulips
+                subreddit: tulips
+                author: muskan
+                created_utc: 1700000000
+                permalink: /r/tulips/comments/post1/spring_tulips/
+                url: https://example.com/tulips
+                selftext: ""
+    expect:
+      request:
+        method: GET
+        url: https://oauth.reddit.com/r/tulips/new?limit=25
+      result:
+        kind: Listing
+        data:
+          after: t3_next
+          children:
+            - kind: t3
+              data:
+                id: post1
+                name: t3_post1
+                title: Spring tulips
+
+  - name: adds-comment
+    operationId: add-comment
+    configuration:
+      user_agent: "linux:com.example.tulipfarm:v1.0.0 (by /u/muskan)"
+    request:
+      body:
+        api_type: json
+        thing_id: t3_post1
+        text: Lovely tulips
+    response:
+      status: 200
+      body:
+        json:
+          errors: []
+          data:
+            things:
+              - kind: t1
+                data:
+                  id: comment1
+                  name: t1_comment1
+                  body: Lovely tulips
+                  permalink: /r/tulips/comments/post1/comment1/
+    expect:
+      request:
+        method: POST
+        url: https://oauth.reddit.com/api/comment
+        bodyText: api_type=json&thing_id=t3_post1&text=Lovely+tulips
+      result:
+        json:
+          errors: []
+          data:
+            things:
+              - kind: t1
+                data:
+                  id: comment1
+                  name: t1_comment1
+                  body: Lovely tulips
+
+  - name: creates-self-post
+    operationId: create-post
+    configuration:
+      user_agent: "linux:com.example.tulipfarm:v1.0.0 (by /u/muskan)"
+    request:
+      body:
+        api_type: json
+        kind: self
+        sr: tulips
+        title: Spring planting notes
+        text: Plant bulbs before the ground freezes.
+    response:
+      status: 200
+      body:
+        json:
+          errors: []
+          data:
+            url: https://www.reddit.com/r/tulips/comments/post2/spring_planting_notes/
+            name: t3_post2
+            id: post2
+    expect:
+      request:
+        method: POST
+        url: https://oauth.reddit.com/api/submit
+        bodyText: api_type=json&kind=self&sr=tulips&title=Spring+planting+notes&text=Plant+bulbs+before+the+ground+freezes.
+      result:
+        json:
+          errors: []
+          data:
+            url: https://www.reddit.com/r/tulips/comments/post2/spring_planting_notes/
+            name: t3_post2
+            id: post2
+
+  - name: rejects-invalid-credential
+    operationId: get-identity
+    configuration:
+      user_agent: "linux:com.example.tulipfarm:v1.0.0 (by /u/muskan)"
+    request: {}
+    response:
+      status: 401
+      body:
+        message: Unauthorized
+        error: 401
+    expect:
+      request:
+        method: GET
+        url: https://oauth.reddit.com/api/v1/me
+      expectedError:
+        phase: before_dispatch
+        code: provider_unauthorized
+        retryable: false
+
+  - name: rejects-comment-errors
+    operationId: add-comment
+    configuration:
+      user_agent: "linux:com.example.tulipfarm:v1.0.0 (by /u/muskan)"
+    request:
+      body:
+        api_type: json
+        thing_id: t3_post1
+        text: Lovely tulips
+    response:
+      status: 200
+      body:
+        json:
+          errors:
+            - [RATELIMIT, "you are doing that too much. try again later.", ratelimit]
+          data: {}
+    expect:
+      request:
+        method: POST
+        url: https://oauth.reddit.com/api/comment
+        bodyText: api_type=json&thing_id=t3_post1&text=Lovely+tulips
+      expectedError:
+        phase: after_dispatch
+        code: invalid_output
+        retryable: false
+
+  - name: reads-submission-thread
+    operationId: get-submission
+    configuration:
+      user_agent: "linux:com.example.tulipfarm:v1.0.0 (by /u/muskan)"
+    request:
+      subreddit: tulips
+      article: post1
+      context: 2
+      depth: 3
+      limit: 25
+      sort: top
+    response:
+      status: 200
+      body:
+        - kind: Listing
+          data:
+            children:
+              - kind: t3
+                data:
+                  id: post1
+                  title: Spring tulips
+        - kind: Listing
+          data:
+            children:
+              - kind: t1
+                data:
+                  id: comment1
+                  body: Lovely tulips
+    expect:
+      request:
+        method: GET
+        url: https://oauth.reddit.com/r/tulips/comments/post1?context=2&depth=3&limit=25&sort=top
+        headers:
+          Authorization: Bearer oim-fixture-credential
+          User-Agent: "linux:com.example.tulipfarm:v1.0.0 (by /u/muskan)"
+      result:
+        - data:
+            children:
+              - kind: t3
+                data:
+                  id: post1
+                  title: Spring tulips
+        - data:
+            children:
+              - kind: t1
+                data:
+                  id: comment1
+                  body: Lovely tulips

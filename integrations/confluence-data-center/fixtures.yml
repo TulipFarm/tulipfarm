@@ -1,0 +1,172 @@
+version: 1
+cases:
+  - name: identifies-current-user
+    operationId: current-user
+    configuration:
+      site_origin: approval-required.invalid
+    request: {}
+    response:
+      status: 200
+      body:
+        type: known
+        username: muskan
+        userKey: "4028"
+        displayName: Muskan Vijayvargiya
+    expect:
+      request:
+        method: GET
+        url: https://approval-required.invalid/rest/api/user/current
+        headers:
+          Authorization: Bearer oim-fixture-credential
+      result:
+        type: known
+        username: muskan
+        userKey: "4028"
+        displayName: Muskan Vijayvargiya
+
+  - name: lists-spaces
+    operationId: list-spaces
+    configuration:
+      site_origin: approval-required.invalid
+    request:
+      start: 0
+      limit: 2
+    response:
+      status: 200
+      body:
+        results:
+          - id: 101
+            key: OPS
+            name: Operations
+            type: global
+        start: 0
+        limit: 2
+        size: 1
+    expect:
+      request:
+        method: GET
+        url: https://approval-required.invalid/rest/api/space?start=0&limit=2
+        headers:
+          Authorization: Bearer oim-fixture-credential
+      result:
+        results:
+          - id: 101
+            key: OPS
+            name: Operations
+            type: global
+        start: 0
+        limit: 2
+        size: 1
+
+  - name: lists-current-pages
+    operationId: list-pages
+    configuration:
+      site_origin: approval-required.invalid
+    request:
+      spaceKey: OPS
+      start: 0
+      limit: 2
+    response:
+      status: 200
+      body:
+        results:
+          - id: "2001"
+            type: page
+            status: current
+            title: Launch checklist
+            version:
+              number: 4
+              when: "2026-09-12T09:00:00.000Z"
+            _links:
+              webui: /spaces/OPS/pages/2001
+        start: 0
+        limit: 2
+        size: 1
+    expect:
+      request:
+        method: GET
+        url: https://approval-required.invalid/rest/api/content?spaceKey=OPS&start=0&limit=2&type=page&status=current&expand=version
+        headers:
+          Authorization: Bearer oim-fixture-credential
+      result:
+        results:
+          - id: "2001"
+            type: page
+            status: current
+            title: Launch checklist
+            version:
+              number: 4
+              when: "2026-09-12T09:00:00.000Z"
+            _links:
+              webui: /spaces/OPS/pages/2001
+        start: 0
+        limit: 2
+        size: 1
+
+  - name: gets-page
+    operationId: get-page
+    configuration:
+      site_origin: approval-required.invalid
+    request:
+      id: "2001"
+    response:
+      status: 200
+      body:
+        id: "2001"
+        type: page
+        status: current
+        title: Launch checklist
+        space:
+          id: 101
+          key: OPS
+          name: Operations
+        body:
+          storage:
+            value: <p>Ready for review.</p>
+            representation: storage
+        version:
+          number: 4
+          when: "2026-09-12T09:00:00.000Z"
+    expect:
+      request:
+        method: GET
+        url: https://approval-required.invalid/rest/api/content/2001?expand=body.storage%2Cversion%2Cspace
+        headers:
+          Authorization: Bearer oim-fixture-credential
+      result:
+        id: "2001"
+        type: page
+        status: current
+        title: Launch checklist
+        space:
+          id: 101
+          key: OPS
+          name: Operations
+        body:
+          storage:
+            value: <p>Ready for review.</p>
+            representation: storage
+        version:
+          number: 4
+          when: "2026-09-12T09:00:00.000Z"
+
+  - name: rejects-invalid-credential
+    operationId: current-user
+    configuration:
+      site_origin: approval-required.invalid
+    request: {}
+    response:
+      status: 401
+      body:
+        statusCode: 401
+        message: Unauthorized
+    expect:
+      request:
+        method: GET
+        url: https://approval-required.invalid/rest/api/user/current
+        headers:
+          Authorization: Bearer oim-fixture-credential
+      expectedError:
+        phase: before_dispatch
+        code: provider_unauthorized
+        retryable: false

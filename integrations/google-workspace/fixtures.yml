@@ -1,0 +1,668 @@
+version: 1
+cases:
+  - name: docs-gets-document
+    operationId: docs-get
+    request:
+      document_id: doc-123
+    response:
+      status: 200
+      body:
+        documentId: doc-123
+        title: Launch plan
+        revisionId: rev-7
+        body:
+          content:
+            - startIndex: 1
+              endIndex: 13
+              paragraph:
+                elements:
+                  - startIndex: 1
+                    endIndex: 13
+                    textRun:
+                      content: "Launch plan\n"
+    expect:
+      request:
+        method: GET
+        url: https://docs.googleapis.com/v1/documents/doc-123
+        headers:
+          Authorization: Bearer oim-fixture-credential
+      result:
+        documentId: doc-123
+        title: Launch plan
+        revisionId: rev-7
+
+  - name: docs-creates-document
+    operationId: docs-create
+    request:
+      body:
+        title: Weekly brief
+    response:
+      status: 200
+      body:
+        documentId: doc-456
+        title: Weekly brief
+        revisionId: rev-1
+    expect:
+      request:
+        method: POST
+        url: https://docs.googleapis.com/v1/documents
+        headers:
+          Authorization: Bearer oim-fixture-credential
+          content-type: application/json
+        body:
+          title: Weekly brief
+      result:
+        documentId: doc-456
+        title: Weekly brief
+
+  - name: docs-edits-document
+    operationId: docs-batch-update
+    request:
+      document_id: doc-456
+      body:
+        requests:
+          - insertText:
+              location:
+                index: 1
+              text: "Hello team\n"
+        writeControl:
+          requiredRevisionId: rev-1
+    response:
+      status: 200
+      body:
+        documentId: doc-456
+        replies:
+          - {}
+        writeControl:
+          requiredRevisionId: rev-2
+    expect:
+      request:
+        method: POST
+        url: https://docs.googleapis.com/v1/documents/doc-456:batchUpdate
+        headers:
+          Authorization: Bearer oim-fixture-credential
+          content-type: application/json
+        body:
+          requests:
+            - insertText:
+                location:
+                  index: 1
+                text: "Hello team\n"
+          writeControl:
+            requiredRevisionId: rev-1
+      result:
+        documentId: doc-456
+        replies:
+          - {}
+
+  - name: sheets-gets-values
+    operationId: sheets-get-values
+    request:
+      spreadsheet_id: sheet-123
+      range: Sheet1!A1:B2
+      majorDimension: ROWS
+    response:
+      status: 200
+      body:
+        range: Sheet1!A1:B2
+        majorDimension: ROWS
+        values:
+          - [Name, Status]
+          - [Muskan Vijayvargiya, Ready]
+    expect:
+      request:
+        method: GET
+        url: https://sheets.googleapis.com/v4/spreadsheets/sheet-123/values/Sheet1!A1%3AB2?majorDimension=ROWS
+        headers:
+          Authorization: Bearer oim-fixture-credential
+      result:
+        range: Sheet1!A1:B2
+        majorDimension: ROWS
+        values:
+          - [Name, Status]
+          - [Muskan Vijayvargiya, Ready]
+
+  - name: sheets-creates-spreadsheet
+    operationId: sheets-create
+    request:
+      body:
+        properties:
+          title: Operations tracker
+    response:
+      status: 200
+      body:
+        spreadsheetId: sheet-456
+        spreadsheetUrl: https://docs.google.com/spreadsheets/d/sheet-456/edit
+        properties:
+          title: Operations tracker
+    expect:
+      request:
+        method: POST
+        url: https://sheets.googleapis.com/v4/spreadsheets
+        headers:
+          Authorization: Bearer oim-fixture-credential
+          content-type: application/json
+        body:
+          properties:
+            title: Operations tracker
+      result:
+        spreadsheetId: sheet-456
+        properties:
+          title: Operations tracker
+
+  - name: sheets-updates-values
+    operationId: sheets-update-values
+    request:
+      spreadsheet_id: sheet-456
+      range: Sheet1!A1:B2
+      valueInputOption: USER_ENTERED
+      body:
+        range: Sheet1!A1:B2
+        majorDimension: ROWS
+        values:
+          - [Name, Status]
+          - [Muskan Vijayvargiya, Done]
+    response:
+      status: 200
+      body:
+        spreadsheetId: sheet-456
+        updatedRange: Sheet1!A1:B2
+        updatedRows: 2
+        updatedColumns: 2
+        updatedCells: 4
+    expect:
+      request:
+        method: PUT
+        url: https://sheets.googleapis.com/v4/spreadsheets/sheet-456/values/Sheet1!A1%3AB2?valueInputOption=USER_ENTERED
+        headers:
+          Authorization: Bearer oim-fixture-credential
+          content-type: application/json
+        body:
+          range: Sheet1!A1:B2
+          majorDimension: ROWS
+          values:
+            - [Name, Status]
+            - [Muskan Vijayvargiya, Done]
+      result:
+        spreadsheetId: sheet-456
+        updatedRange: Sheet1!A1:B2
+        updatedCells: 4
+
+  - name: slides-gets-presentation
+    operationId: slides-get
+    request:
+      presentation_id: deck-123
+    response:
+      status: 200
+      body:
+        presentationId: deck-123
+        title: Quarterly review
+        revisionId: rev-4
+        slides:
+          - objectId: slide-1
+            pageElements: []
+    expect:
+      request:
+        method: GET
+        url: https://slides.googleapis.com/v1/presentations/deck-123
+        headers:
+          Authorization: Bearer oim-fixture-credential
+      result:
+        presentationId: deck-123
+        title: Quarterly review
+        revisionId: rev-4
+
+  - name: slides-creates-presentation
+    operationId: slides-create
+    request:
+      body:
+        title: Customer review
+    response:
+      status: 200
+      body:
+        presentationId: deck-456
+        title: Customer review
+        revisionId: rev-1
+        slides: []
+    expect:
+      request:
+        method: POST
+        url: https://slides.googleapis.com/v1/presentations
+        headers:
+          Authorization: Bearer oim-fixture-credential
+          content-type: application/json
+        body:
+          title: Customer review
+      result:
+        presentationId: deck-456
+        title: Customer review
+
+  - name: slides-edits-presentation
+    operationId: slides-batch-update
+    request:
+      presentation_id: deck-456
+      body:
+        requests:
+          - replaceAllText:
+              containsText:
+                text: "{{customer}}"
+                matchCase: true
+              replaceText: Acme
+        writeControl:
+          requiredRevisionId: rev-1
+    response:
+      status: 200
+      body:
+        presentationId: deck-456
+        replies:
+          - replaceAllText:
+              occurrencesChanged: 2
+        writeControl:
+          requiredRevisionId: rev-2
+    expect:
+      request:
+        method: POST
+        url: https://slides.googleapis.com/v1/presentations/deck-456:batchUpdate
+        headers:
+          Authorization: Bearer oim-fixture-credential
+          content-type: application/json
+        body:
+          requests:
+            - replaceAllText:
+                containsText:
+                  text: "{{customer}}"
+                  matchCase: true
+                replaceText: Acme
+          writeControl:
+            requiredRevisionId: rev-1
+      result:
+        presentationId: deck-456
+        replies:
+          - replaceAllText:
+              occurrencesChanged: 2
+
+  - name: drive-lists-files
+    operationId: drive-list-files
+    request:
+      q: "trashed = false"
+      pageSize: 20
+      orderBy: modifiedTime desc
+    response:
+      status: 200
+      body:
+        nextPageToken: next-drive-page
+        files:
+          - id: file-123
+            name: Operations
+            mimeType: application/vnd.google-apps.folder
+            modifiedTime: "2026-09-07T05:00:00.000Z"
+            webViewLink: https://drive.google.com/drive/folders/file-123
+            capabilities:
+              canDownload: false
+    expect:
+      request:
+        method: GET
+        headers:
+          Authorization: Bearer oim-fixture-credential
+      result:
+        files:
+          - id: file-123
+            name: Operations
+            mimeType: application/vnd.google-apps.folder
+
+  - name: drive-creates-folder
+    operationId: drive-create-file
+    request:
+      body:
+        name: Customer exports
+        mimeType: application/vnd.google-apps.folder
+    response:
+      status: 200
+      body:
+        id: file-456
+        name: Customer exports
+        mimeType: application/vnd.google-apps.folder
+        webViewLink: https://drive.google.com/drive/folders/file-456
+    expect:
+      request:
+        method: POST
+        headers:
+          Authorization: Bearer oim-fixture-credential
+          content-type: application/json
+        body:
+          name: Customer exports
+          mimeType: application/vnd.google-apps.folder
+      result:
+        id: file-456
+        name: Customer exports
+        mimeType: application/vnd.google-apps.folder
+
+  - name: drive-downloads-file
+    operationId: drive-download-file
+    request:
+      file_id: file-blob-123
+    response:
+      status: 200
+      headers:
+        content-type: text/plain
+        content-disposition: 'attachment; filename="quarterly-plan.txt"'
+        content-length: "15"
+      body: "Quarterly plan\n"
+    expect:
+      request:
+        method: GET
+        url: https://www.googleapis.com/drive/v3/files/file-blob-123?alt=media
+        headers:
+          Authorization: Bearer oim-fixture-credential
+      result:
+        fileId: fixture-drive-downloads-file-file
+        summary:
+          filename: quarterly-plan.txt
+          mediaType: text/plain
+          sizeBytes: 15
+          truncated: false
+
+  - name: calendar-lists-events
+    operationId: calendar-list-events
+    request:
+      calendar_id: primary
+      timeMin: "2026-09-07T00:00:00Z"
+      timeMax: "2026-09-08T00:00:00Z"
+      singleEvents: true
+      orderBy: startTime
+      maxResults: 25
+    response:
+      status: 200
+      body:
+        kind: calendar#events
+        nextPageToken: next-calendar-page
+        items:
+          - id: event-123
+            status: confirmed
+            summary: Daily review
+            start:
+              dateTime: "2026-09-07T09:00:00+05:30"
+            end:
+              dateTime: "2026-09-07T09:30:00+05:30"
+    expect:
+      request:
+        method: GET
+        headers:
+          Authorization: Bearer oim-fixture-credential
+      result:
+        items:
+          - id: event-123
+            status: confirmed
+            summary: Daily review
+
+  - name: calendar-creates-event
+    operationId: calendar-create-event
+    request:
+      calendar_id: primary
+      sendUpdates: all
+      body:
+        summary: Customer review
+        description: Review open customer items.
+        start:
+          dateTime: "2026-09-08T10:00:00+05:30"
+          timeZone: Asia/Kolkata
+        end:
+          dateTime: "2026-09-08T10:30:00+05:30"
+          timeZone: Asia/Kolkata
+        attendees:
+          - email: muskan@example.com
+    response:
+      status: 200
+      body:
+        id: event-456
+        status: confirmed
+        htmlLink: https://calendar.google.com/calendar/event?eid=event-456
+        summary: Customer review
+        start:
+          dateTime: "2026-09-08T10:00:00+05:30"
+        end:
+          dateTime: "2026-09-08T10:30:00+05:30"
+    expect:
+      request:
+        method: POST
+        headers:
+          Authorization: Bearer oim-fixture-credential
+          content-type: application/json
+        body:
+          summary: Customer review
+          description: Review open customer items.
+          start:
+            dateTime: "2026-09-08T10:00:00+05:30"
+            timeZone: Asia/Kolkata
+          end:
+            dateTime: "2026-09-08T10:30:00+05:30"
+            timeZone: Asia/Kolkata
+          attendees:
+            - email: muskan@example.com
+      result:
+        id: event-456
+        status: confirmed
+        summary: Customer review
+
+  - name: calendar-edits-event
+    operationId: calendar-update-event
+    request:
+      calendar_id: primary
+      event_id: event-456
+      sendUpdates: all
+      body:
+        summary: Customer review and decisions
+    response:
+      status: 200
+      body:
+        id: event-456
+        status: confirmed
+        summary: Customer review and decisions
+    expect:
+      request:
+        method: PATCH
+        headers:
+          Authorization: Bearer oim-fixture-credential
+          content-type: application/json
+        body:
+          summary: Customer review and decisions
+      result:
+        id: event-456
+        summary: Customer review and decisions
+
+  - name: gmail-gets-message
+    operationId: gmail-get-message
+    request:
+      message_id: msg-123
+      format: metadata
+    response:
+      status: 200
+      body:
+        id: msg-123
+        threadId: thread-123
+        labelIds: [INBOX, IMPORTANT]
+        snippet: The weekly report is ready.
+        payload:
+          mimeType: multipart/alternative
+          headers:
+            - name: From
+              value: muskan@example.com
+            - name: Subject
+              value: Weekly report
+    expect:
+      request:
+        method: GET
+        url: https://gmail.googleapis.com/gmail/v1/users/me/messages/msg-123?format=metadata
+        headers:
+          Authorization: Bearer oim-fixture-credential
+      result:
+        id: msg-123
+        threadId: thread-123
+        snippet: The weekly report is ready.
+
+  - name: gmail-rejects-expired-token
+    operationId: gmail-get-message
+    request:
+      message_id: msg-123
+      format: metadata
+    response:
+      status: 401
+      body:
+        error:
+          code: 401
+          message: Request had invalid authentication credentials.
+          status: UNAUTHENTICATED
+    expect:
+      request:
+        method: GET
+        url: https://gmail.googleapis.com/gmail/v1/users/me/messages/msg-123?format=metadata
+        headers:
+          Authorization: Bearer oim-fixture-credential
+      expectedError:
+        phase: before_dispatch
+        code: provider_unauthorized
+        retryable: false
+
+  - name: gmail-sends-message
+    operationId: gmail-send-message
+    request:
+      body:
+        raw: RnJvbTogTXVza2FuIFZpamF5dmFyZ2l5YSA8bXVza2FuQGV4YW1wbGUuY29tPg0KVG86IG9wZXJhdGlvbnNAZXhhbXBsZS5jb20NClN1YmplY3Q6IFdlZWtseSB1cGRhdGUNCg0KRG9uZS4
+    response:
+      status: 200
+      body:
+        id: msg-456
+        threadId: thread-456
+        labelIds: [SENT]
+    expect:
+      request:
+        method: POST
+        url: https://gmail.googleapis.com/gmail/v1/users/me/messages/send
+        headers:
+          Authorization: Bearer oim-fixture-credential
+          content-type: application/json
+        body:
+          raw: RnJvbTogTXVza2FuIFZpamF5dmFyZ2l5YSA8bXVza2FuQGV4YW1wbGUuY29tPg0KVG86IG9wZXJhdGlvbnNAZXhhbXBsZS5jb20NClN1YmplY3Q6IFdlZWtseSB1cGRhdGUNCg0KRG9uZS4
+      result:
+        id: msg-456
+        threadId: thread-456
+        labelIds: [SENT]
+
+  - name: sheets-gets-spreadsheet
+    operationId: sheets-get
+    request:
+      spreadsheet_id: sheet-456
+      ranges: Sheet1!A1:B2
+      includeGridData: false
+    response:
+      status: 200
+      body:
+        spreadsheetId: sheet-456
+        spreadsheetUrl: https://docs.google.com/spreadsheets/d/sheet-456/edit
+        properties:
+          title: Operations tracker
+        sheets:
+          - properties:
+              sheetId: 0
+              title: Sheet1
+    expect:
+      request:
+        method: GET
+        url: https://sheets.googleapis.com/v4/spreadsheets/sheet-456?ranges=Sheet1%21A1%3AB2&includeGridData=false
+        headers:
+          Authorization: Bearer oim-fixture-credential
+      result:
+        spreadsheetId: sheet-456
+        properties:
+          title: Operations tracker
+
+  - name: drive-gets-file-metadata
+    operationId: drive-get-file
+    request:
+      file_id: file-blob-123
+    response:
+      status: 200
+      body:
+        id: file-blob-123
+        name: quarterly-plan.txt
+        mimeType: text/plain
+        description: Quarterly planning notes
+        createdTime: "2026-09-01T08:00:00.000Z"
+        modifiedTime: "2026-09-12T09:00:00.000Z"
+        size: "15"
+        parents: [folder-123]
+        webViewLink: https://drive.google.com/file/d/file-blob-123/view
+        capabilities:
+          canDownload: true
+          canEdit: true
+    expect:
+      request:
+        method: GET
+        headers:
+          Authorization: Bearer oim-fixture-credential
+      result:
+        id: file-blob-123
+        name: quarterly-plan.txt
+        mimeType: text/plain
+        capabilities:
+          canDownload: true
+          canEdit: true
+
+  - name: drive-updates-file-metadata
+    operationId: drive-update-file
+    request:
+      file_id: file-blob-123
+      body:
+        name: final-quarterly-plan.txt
+        starred: true
+    response:
+      status: 200
+      body:
+        id: file-blob-123
+        name: final-quarterly-plan.txt
+        mimeType: text/plain
+        description: Quarterly planning notes
+        starred: true
+        trashed: false
+        modifiedTime: "2026-09-12T10:00:00.000Z"
+        webViewLink: https://drive.google.com/file/d/file-blob-123/view
+    expect:
+      request:
+        method: PATCH
+        headers:
+          Authorization: Bearer oim-fixture-credential
+          content-type: application/json
+        body:
+          name: final-quarterly-plan.txt
+          starred: true
+      result:
+        id: file-blob-123
+        name: final-quarterly-plan.txt
+        starred: true
+
+  - name: gmail-lists-messages
+    operationId: gmail-list-messages
+    request:
+      q: newer_than:7d
+      labelIds: INBOX
+      maxResults: 25
+      includeSpamTrash: false
+    response:
+      status: 200
+      body:
+        messages:
+          - id: msg-123
+            threadId: thread-123
+        nextPageToken: next-gmail-page
+        resultSizeEstimate: 1
+    expect:
+      request:
+        method: GET
+        url: https://gmail.googleapis.com/gmail/v1/users/me/messages?q=newer_than%3A7d&labelIds=INBOX&maxResults=25&includeSpamTrash=false
+        headers:
+          Authorization: Bearer oim-fixture-credential
+      result:
+        messages:
+          - id: msg-123
+            threadId: thread-123
+        resultSizeEstimate: 1

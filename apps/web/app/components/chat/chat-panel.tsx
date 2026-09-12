@@ -167,11 +167,6 @@ export function ChatPanel({
     if (!pendingChatDraft) return;
     setRevisionDraft({ key: `companion-${pendingChatDraft.id}`, text: pendingChatDraft.prompt });
   }, [pendingChatDraft]);
-  // Fetch the transcript's chunk as soon as the panel exists rather than when the first turn needs
-  // it — off the critical path, but resident well before anyone has finished typing.
-  useEffect(() => {
-    void import("./transcript");
-  }, []);
   // Prefer the live agent from a handoff; fall back to the restored conversation's persisted agent.
   const routedAgentName = currentAgent || agentId;
   const activeAgentName = routedAgentName === "TulipFarm" ? undefined : routedAgentName;

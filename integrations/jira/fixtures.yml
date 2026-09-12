@@ -1,0 +1,225 @@
+version: 1
+cases:
+  - name: searches-issues
+    operationId: search-issues
+    configuration:
+      jira_site: example.atlassian.net
+    request:
+      body:
+        jql: project = ENG ORDER BY updated DESC
+        maxResults: 2
+        fields: [summary, status]
+    response:
+      status: 200
+      body:
+        nextPageToken: cursor-redacted
+        issues:
+          - id: "10041"
+            key: ENG-41
+            fields:
+              summary: Prepare the launch checklist
+              status: { name: In Progress }
+    expect:
+      request:
+        method: POST
+        url: https://example.atlassian.net/rest/api/3/search/jql
+        body:
+          jql: project = ENG ORDER BY updated DESC
+          maxResults: 2
+          fields: [summary, status]
+      result:
+        issues:
+          - id: "10041"
+            key: ENG-41
+            fields:
+              summary: Prepare the launch checklist
+        next_page_token: fixture-continuation:1
+
+  - name: creates-issue
+    operationId: create-issue
+    configuration:
+      jira_site: example.atlassian.net
+    request:
+      body:
+        fields:
+          project: { key: ENG }
+          issuetype: { name: Task }
+          summary: Review the launch checklist
+    response:
+      status: 201
+      body:
+        id: "10042"
+        key: ENG-42
+        self: https://example.atlassian.net/rest/api/3/issue/10042
+    expect:
+      request:
+        method: POST
+        url: https://example.atlassian.net/rest/api/3/issue
+        body:
+          fields:
+            project: { key: ENG }
+            issuetype: { name: Task }
+            summary: Review the launch checklist
+      result:
+        id: "10042"
+        key: ENG-42
+        self: https://example.atlassian.net/rest/api/3/issue/10042
+
+  - name: rejects-invalid-credential
+    operationId: search-issues
+    configuration:
+      jira_site: example.atlassian.net
+    request:
+      body:
+        jql: project = ENG
+        maxResults: 1
+    response:
+      status: 401
+      body:
+        errorMessages: [Unauthorized]
+        errors: {}
+    expect:
+      request:
+        method: POST
+        url: https://example.atlassian.net/rest/api/3/search/jql
+      expectedError:
+        phase: before_dispatch
+        code: provider_unauthorized
+        retryable: false
+
+  - name: identifies-current-user
+    operationId: current-user
+    configuration:
+      jira_site: example.atlassian.net
+    request: {}
+    response:
+      status: 200
+      body:
+        accountId: account-redacted
+        displayName: Muskan Vijayvargiya
+        emailAddress: muskan@example.com
+        active: true
+    expect:
+      request:
+        method: GET
+        url: https://example.atlassian.net/rest/api/3/myself
+      result:
+        accountId: account-redacted
+        displayName: Muskan Vijayvargiya
+        emailAddress: muskan@example.com
+        active: true
+
+  - name: reads-issue
+    operationId: get-issue
+    configuration:
+      jira_site: example.atlassian.net
+    request:
+      issueIdOrKey: ENG-41
+      fields: summary,status,priority
+      expand: changelog
+    response:
+      status: 200
+      body:
+        id: "10041"
+        key: ENG-41
+        fields:
+          summary: Prepare the launch checklist
+          status: { name: In Progress }
+          priority: { name: High }
+        changelog:
+          histories: []
+    expect:
+      request:
+        method: GET
+        url: https://example.atlassian.net/rest/api/3/issue/ENG-41?fields=summary%2Cstatus%2Cpriority&expand=changelog
+      result:
+        id: "10041"
+        key: ENG-41
+        fields:
+          summary: Prepare the launch checklist
+
+  - name: lists-priorities
+    operationId: list-priorities
+    configuration:
+      jira_site: example.atlassian.net
+    request: {}
+    response:
+      status: 200
+      body:
+        - id: "2"
+          name: High
+          description: Important problem.
+          statusColor: "#f15c75"
+    expect:
+      request:
+        method: GET
+        url: https://example.atlassian.net/rest/api/3/priority
+      result:
+        - id: "2"
+          name: High
+
+  - name: lists-issue-transitions
+    operationId: list-transitions
+    configuration:
+      jira_site: example.atlassian.net
+    request:
+      issueIdOrKey: ENG-41
+    response:
+      status: 200
+      body:
+        transitions:
+          - id: "31"
+            name: In Progress
+            to:
+              id: "3"
+              name: In Progress
+    expect:
+      request:
+        method: GET
+        url: https://example.atlassian.net/rest/api/3/issue/ENG-41/transitions
+      result:
+        transitions:
+          - id: "31"
+            name: In Progress
+
+  - name: updates-issue
+    operationId: update-issue
+    configuration:
+      jira_site: example.atlassian.net
+    request:
+      issueIdOrKey: ENG-41
+      body:
+        fields:
+          priority: { id: "2" }
+    response:
+      status: 204
+      body: {}
+    expect:
+      request:
+        method: PUT
+        url: https://example.atlassian.net/rest/api/3/issue/ENG-41
+        body:
+          fields:
+            priority: { id: "2" }
+      result: {}
+
+  - name: transitions-issue
+    operationId: transition-issue
+    configuration:
+      jira_site: example.atlassian.net
+    request:
+      issueIdOrKey: ENG-41
+      body:
+        transition:
+          id: "31"
+    response:
+      status: 204
+      body: {}
+    expect:
+      request:
+        method: POST
+        url: https://example.atlassian.net/rest/api/3/issue/ENG-41/transitions
+        body:
+          transition:
+            id: "31"
+      result: {}

@@ -1,0 +1,239 @@
+version: 1
+cases:
+  - name: identifies-user
+    operationId: current-user
+    request: {}
+    response:
+      status: 200
+      body:
+        user:
+          id: 123
+          username: Muskan Vijayvargiya
+          email: redacted@example.com
+          initials: MV
+    expect:
+      request:
+        method: GET
+        url: https://api.clickup.com/api/v2/user
+        headers:
+          Authorization: oim-fixture-credential
+      result:
+        user:
+          id: 123
+          username: Muskan Vijayvargiya
+
+  - name: lists-task-page
+    operationId: list-tasks
+    request:
+      team_id: "2000001"
+      order_by: updated
+      reverse: true
+      page_token: fixture-continuation:input
+    response:
+      status: 200
+      body:
+        tasks:
+          - id: task-redacted
+            name: Publish launch notes
+            date_updated: "1788762000000"
+    expect:
+      request:
+        method: GET
+        url: https://api.clickup.com/api/v2/team/2000001/task?order_by=updated&reverse=true&page=1
+        headers:
+          Authorization: oim-fixture-credential
+      result:
+        tasks:
+          - id: task-redacted
+            name: Publish launch notes
+        next_page_token: fixture-continuation:1
+
+  - name: creates-task
+    operationId: create-task
+    request:
+      list_id: "3000001"
+      body:
+        name: Publish launch notes
+        description: Redacted release checklist
+        notify_all: false
+    response:
+      status: 200
+      body:
+        id: task-redacted
+        name: Publish launch notes
+        description: Redacted release checklist
+        archived: false
+    expect:
+      request:
+        method: POST
+        url: https://api.clickup.com/api/v2/list/3000001/task
+        headers:
+          Authorization: oim-fixture-credential
+          content-type: application/json
+        body:
+          name: Publish launch notes
+          description: Redacted release checklist
+          notify_all: false
+      result:
+        id: task-redacted
+        name: Publish launch notes
+
+  - name: comments-on-task
+    operationId: add-comment
+    request:
+      task_id: task-redacted
+      body:
+        comment_text: Ready for review.
+        notify_all: false
+    response:
+      status: 200
+      body:
+        id: "458"
+        hist_id: "26508"
+        date: 1788762300000
+    expect:
+      request:
+        method: POST
+        url: https://api.clickup.com/api/v2/task/task-redacted/comment
+        headers:
+          Authorization: oim-fixture-credential
+          content-type: application/json
+        body:
+          comment_text: Ready for review.
+          notify_all: false
+      result:
+        id: "458"
+        hist_id: "26508"
+
+  - name: rejects-invalid-credential
+    operationId: current-user
+    request: {}
+    response:
+      status: 401
+      body:
+        err: Token invalid
+        ECODE: OAUTH_017
+    expect:
+      request:
+        method: GET
+        url: https://api.clickup.com/api/v2/user
+        headers:
+          Authorization: oim-fixture-credential
+      expectedError:
+        phase: before_dispatch
+        code: provider_unauthorized
+        retryable: false
+
+  - name: lists-workspaces
+    operationId: list-workspaces
+    request: {}
+    response:
+      status: 200
+      body:
+        teams:
+          - id: "2000001"
+            name: Operations
+            color: "#2563eb"
+            avatar: null
+    expect:
+      request:
+        method: GET
+        url: https://api.clickup.com/api/v2/team
+        headers:
+          Authorization: oim-fixture-credential
+      result:
+        teams:
+          - id: "2000001"
+            name: Operations
+
+  - name: lists-workspace-spaces
+    operationId: list-spaces
+    request:
+      team_id: "2000001"
+      archived: false
+    response:
+      status: 200
+      body:
+        spaces:
+          - id: "2100001"
+            name: Delivery
+            private: false
+            archived: false
+            statuses: []
+    expect:
+      request:
+        method: GET
+        url: https://api.clickup.com/api/v2/team/2000001/space?archived=false
+        headers:
+          Authorization: oim-fixture-credential
+      result:
+        spaces:
+          - id: "2100001"
+            name: Delivery
+            archived: false
+
+  - name: reads-task
+    operationId: get-task
+    request:
+      task_id: task-redacted
+      include_subtasks: true
+      include_markdown_description: true
+    response:
+      status: 200
+      body:
+        id: task-redacted
+        name: Publish launch notes
+        description: Release checklist
+        markdown_description: Release checklist
+        status: { status: in progress }
+        priority: null
+        assignees: []
+        due_date: null
+        date_created: "1788761000000"
+        date_updated: "1788762000000"
+        url: https://app.clickup.com/t/task-redacted
+    expect:
+      request:
+        method: GET
+        url: https://api.clickup.com/api/v2/task/task-redacted?include_subtasks=true&include_markdown_description=true
+        headers:
+          Authorization: oim-fixture-credential
+      result:
+        id: task-redacted
+        name: Publish launch notes
+        markdown_description: Release checklist
+
+  - name: updates-task
+    operationId: update-task
+    request:
+      task_id: task-redacted
+      body:
+        name: Publish final launch notes
+        priority: 2
+        archived: false
+    response:
+      status: 200
+      body:
+        id: task-redacted
+        name: Publish final launch notes
+        description: Release checklist
+        status: { status: in progress }
+        priority: { priority: high }
+        archived: false
+        date_updated: "1788763000000"
+        url: https://app.clickup.com/t/task-redacted
+    expect:
+      request:
+        method: PUT
+        url: https://api.clickup.com/api/v2/task/task-redacted
+        headers:
+          Authorization: oim-fixture-credential
+          content-type: application/json
+        body:
+          name: Publish final launch notes
+          priority: 2
+          archived: false
+      result:
+        id: task-redacted
+        name: Publish final launch notes
+        archived: false

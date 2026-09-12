@@ -1,0 +1,246 @@
+version: 1
+cases:
+  - name: reads-page-blocks
+    operationId: get-block-children
+    request:
+      block_id: page-redacted
+      page_size: 2
+    response:
+      status: 200
+      body:
+        object: list
+        results:
+          - object: block
+            id: block-redacted
+            type: paragraph
+            has_children: false
+            paragraph:
+              rich_text:
+                - type: text
+                  text: { content: Launch checklist }
+        next_cursor: null
+        has_more: false
+    expect:
+      request:
+        method: GET
+        url: https://api.notion.com/v1/blocks/page-redacted/children?page_size=2
+      result:
+        results:
+          - id: block-redacted
+            type: paragraph
+            has_children: false
+
+  - name: creates-page
+    operationId: create-page
+    request:
+      body:
+        parent:
+          page_id: parent-redacted
+        properties:
+          title:
+            title:
+              - type: text
+                text: { content: Launch checklist }
+    response:
+      status: 200
+      body:
+        object: page
+        id: page-redacted
+        created_time: "2026-09-07T06:00:00.000Z"
+        last_edited_time: "2026-09-07T06:00:00.000Z"
+        url: https://www.notion.so/page-redacted
+        properties: {}
+    expect:
+      request:
+        method: POST
+        url: https://api.notion.com/v1/pages
+        body:
+          parent:
+            page_id: parent-redacted
+          properties:
+            title:
+              title:
+                - type: text
+                  text: { content: Launch checklist }
+      result:
+        id: page-redacted
+        object: page
+
+  - name: rejects-invalid-credential
+    operationId: get-block-children
+    request:
+      block_id: page-redacted
+      page_size: 1
+    response:
+      status: 401
+      body:
+        object: error
+        status: 401
+        code: unauthorized
+        message: API token is invalid.
+    expect:
+      request:
+        method: GET
+        url: https://api.notion.com/v1/blocks/page-redacted/children?page_size=1
+      expectedError:
+        phase: before_dispatch
+        code: provider_unauthorized
+        retryable: false
+
+  - name: searches-workspace
+    operationId: search
+    request:
+      body:
+        query: Launch
+        page_size: 2
+    response:
+      status: 200
+      body:
+        object: list
+        results:
+          - object: page
+            id: page-redacted
+            url: https://www.notion.so/page-redacted
+            properties: {}
+        next_cursor: null
+        has_more: false
+    expect:
+      request:
+        method: POST
+        url: https://api.notion.com/v1/search
+        body:
+          query: Launch
+          page_size: 2
+      result:
+        results:
+          - object: page
+            id: page-redacted
+        has_more: false
+
+  - name: reads-page
+    operationId: get-page
+    request:
+      page_id: page-redacted
+    response:
+      status: 200
+      body:
+        id: page-redacted
+        url: https://www.notion.so/page-redacted
+        created_time: "2026-09-01T10:00:00.000Z"
+        last_edited_time: "2026-09-12T10:00:00.000Z"
+        properties: {}
+    expect:
+      request:
+        method: GET
+        url: https://api.notion.com/v1/pages/page-redacted
+      result:
+        id: page-redacted
+        properties: {}
+
+  - name: lists-users
+    operationId: list-users
+    request:
+      page_size: 2
+    response:
+      status: 200
+      body:
+        object: list
+        results:
+          - object: user
+            id: user-redacted
+            type: person
+            name: Muskan Vijayvargiya
+        next_cursor: null
+        has_more: false
+    expect:
+      request:
+        method: GET
+        url: https://api.notion.com/v1/users?page_size=2
+      result:
+        results:
+          - object: user
+            id: user-redacted
+            name: Muskan Vijayvargiya
+        has_more: false
+
+  - name: queries-database
+    operationId: query-database
+    request:
+      database_id: database-redacted
+      body:
+        page_size: 2
+        sorts:
+          - timestamp: last_edited_time
+            direction: descending
+    response:
+      status: 200
+      body:
+        object: list
+        results:
+          - object: page
+            id: page-redacted
+            properties: {}
+        next_cursor: null
+        has_more: false
+    expect:
+      request:
+        method: POST
+        url: https://api.notion.com/v1/databases/database-redacted/query
+        body:
+          page_size: 2
+          sorts:
+            - timestamp: last_edited_time
+              direction: descending
+      result:
+        results:
+          - object: page
+            id: page-redacted
+        has_more: false
+
+  - name: appends-block-children
+    operationId: append-block-children
+    request:
+      block_id: page-redacted
+      body:
+        children:
+          - object: block
+            type: paragraph
+            paragraph:
+              rich_text:
+                - type: text
+                  text:
+                    content: Ready for review.
+    response:
+      status: 200
+      body:
+        object: list
+        results:
+          - object: block
+            id: block-redacted
+            type: paragraph
+            has_children: false
+            paragraph:
+              rich_text:
+                - type: text
+                  text:
+                    content: Ready for review.
+        next_cursor: null
+        has_more: false
+    expect:
+      request:
+        method: PATCH
+        url: https://api.notion.com/v1/blocks/page-redacted/children
+        body:
+          children:
+            - object: block
+              type: paragraph
+              paragraph:
+                rich_text:
+                  - type: text
+                    text:
+                      content: Ready for review.
+      result:
+        results:
+          - id: block-redacted
+            type: paragraph
+        has_more: false

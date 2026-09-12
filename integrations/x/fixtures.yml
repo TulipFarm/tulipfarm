@@ -1,0 +1,132 @@
+version: 1
+cases:
+  - name: identifies-user
+    operationId: current-user
+    request: {}
+    response:
+      status: 200
+      body:
+        data:
+          id: "1000000000000000001"
+          name: Muskan Vijayvargiya
+          username: muskan_example
+          created_at: "2024-01-02T03:04:05.000Z"
+          protected: false
+          verified: false
+          verified_type: none
+    expect:
+      request:
+        method: GET
+        url: https://api.x.com/2/users/me?user.fields=id%2Cname%2Cusername%2Ccreated_at%2Cdescription%2Cprofile_image_url%2Cprotected%2Cverified%2Cverified_type
+        headers:
+          Authorization: Bearer oim-fixture-credential
+      result:
+        data:
+          id: "1000000000000000001"
+          name: Muskan Vijayvargiya
+          username: muskan_example
+
+  - name: reads-post
+    operationId: read-post
+    request:
+      post_id: "2000000000000000002"
+    response:
+      status: 200
+      body:
+        data:
+          id: "2000000000000000002"
+          text: Redacted launch update.
+          author_id: "1000000000000000001"
+          created_at: "2026-09-07T06:00:00.000Z"
+          conversation_id: "2000000000000000002"
+          lang: en
+          public_metrics:
+            reply_count: 1
+            repost_count: 2
+            like_count: 3
+            quote_count: 0
+          reply_settings: everyone
+    expect:
+      request:
+        method: GET
+        url: https://api.x.com/2/tweets/2000000000000000002?tweet.fields=id%2Ctext%2Cauthor_id%2Ccreated_at%2Cconversation_id%2Clang%2Cpublic_metrics%2Creply_settings
+        headers:
+          Authorization: Bearer oim-fixture-credential
+      result:
+        data:
+          id: "2000000000000000002"
+          text: Redacted launch update.
+
+  - name: rejects-http-200-error-envelope
+    operationId: read-post
+    request:
+      post_id: "2000000000000000999"
+    response:
+      status: 200
+      body:
+        errors:
+          - value: "2000000000000000999"
+            detail: Could not find post with id 2000000000000000999.
+            title: Not Found Error
+            resource_type: tweet
+            parameter: id
+            resource_id: "2000000000000000999"
+            type: https://api.x.com/2/problems/resource-not-found
+    expect:
+      request:
+        method: GET
+        url: https://api.x.com/2/tweets/2000000000000000999?tweet.fields=id%2Ctext%2Cauthor_id%2Ccreated_at%2Cconversation_id%2Clang%2Cpublic_metrics%2Creply_settings
+        headers:
+          Authorization: Bearer oim-fixture-credential
+      expectedError:
+        phase: after_dispatch
+        code: invalid_output
+        retryable: false
+
+  - name: creates-post
+    operationId: create-post
+    request:
+      body:
+        text: Launch update is ready.
+    response:
+      status: 201
+      body:
+        data:
+          id: "2000000000000000003"
+          text: Launch update is ready.
+          edit_history_post_ids:
+            - "2000000000000000003"
+    expect:
+      request:
+        method: POST
+        url: https://api.x.com/2/tweets
+        headers:
+          Authorization: Bearer oim-fixture-credential
+          content-type: application/json
+        body:
+          text: Launch update is ready.
+      result:
+        data:
+          id: "2000000000000000003"
+          text: Launch update is ready.
+
+  - name: rejects-invalid-credential
+    operationId: current-user
+    request: {}
+    response:
+      status: 401
+      body:
+        title: Unauthorized
+        type: about:blank
+        status: 401
+        detail: Unauthorized
+    expect:
+      request:
+        method: GET
+        url: https://api.x.com/2/users/me?user.fields=id%2Cname%2Cusername%2Ccreated_at%2Cdescription%2Cprofile_image_url%2Cprotected%2Cverified%2Cverified_type
+        headers:
+          Authorization: Bearer oim-fixture-credential
+      expectedError:
+        phase: before_dispatch
+        code: provider_unauthorized
+        retryable: false
