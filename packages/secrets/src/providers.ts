@@ -1,5 +1,6 @@
-/** Secret providers must return current plaintext at call time, or `null` after revoke/delete. */
+/** Secret providers keep legacy freshness policy and expose uncached reads for pinned leases. */
 
+import { secretStorageKey } from "./connection-secrets";
 import type { SecretsService } from "./encrypted-store";
 import { SecretUnavailableError } from "./encrypted-store";
 
@@ -10,8 +11,12 @@ export interface ResolvedSecret {
 }
 
 export interface SecretProvider {
-  /** Current plaintext for `secretRef`, or `null` when it is revoked, deleted, or unknown. */
+  /** Plaintext using the provider's normal cache/freshness policy. */
   resolveCurrent(secretRef: string): Promise<ResolvedSecret | null>;
+  /** Durable plaintext bypassing caches. Required for revision-pinned Connection leases. */
+  resolveUncached?(secretRef: string): Promise<ResolvedSecret | null>;
+  /** Durable revision without plaintext. Required for Connection leases. */
+  currentVersion?(secretRef: string): Promise<string | null>;
 }
 
 export interface InMemorySecretProvider extends SecretProvider {
@@ -39,6 +44,17 @@ export function inMemorySecretProvider(
       }
       return { value, version: String(versions.get(secretRef) ?? 1) };
     },
+    async resolveUncached(secretRef) {
+      const value = values.get(secretRef);
+      if (value === undefined) {
+        return null;
+      }
+      return { value, version: String(versions.get(secretRef) ?? 1) };
+    },
+    async currentVersion(secretRef) {
+      const version = versions.get(secretRef);
+      return version === undefined ? null : String(version);
+    },
     set(secretRef, value) {
       values.set(secretRef, value);
       versions.set(secretRef, (versions.get(secretRef) ?? 0) + 1);
@@ -50,12 +66,19 @@ export function inMemorySecretProvider(
   };
 }
 
-/** Fresh only with same-instance rotation/revocation; out-of-band changes must invalidate cache. */
-export function secretsServiceProvider(service: Pick<SecretsService, "get">): SecretProvider {
-  return {
+/** Preserves legacy cache semantics while exposing uncached reads for Connection leases. */
+export function secretsServiceProvider(
+  service: Pick<SecretsService, "get"> &
+    Partial<Pick<SecretsService, "resolveCurrent" | "revision">>
+): SecretProvider {
+  const resolveUncached = service.resolveCurrent?.bind(service);
+  const currentVersion = service.revision?.bind(service);
+  const keyFor = (secretRef: string) =>
+    secretRef.startsWith("secret://") ? secretStorageKey(secretRef) : secretRef;
+  const provider: SecretProvider = {
     async resolveCurrent(secretRef) {
       try {
-        return { value: await service.get(secretRef) };
+        return { value: await service.get(keyFor(secretRef)) };
       } catch (error) {
         if (error instanceof SecretUnavailableError) {
           return null;
@@ -63,5 +86,29 @@ export function secretsServiceProvider(service: Pick<SecretsService, "get">): Se
         throw error;
       }
     },
+  };
+  return {
+    ...provider,
+    ...(resolveUncached === undefined
+      ? {}
+      : {
+          async resolveUncached(secretRef: string) {
+            try {
+              return await resolveUncached(keyFor(secretRef));
+            } catch (error) {
+              if (error instanceof SecretUnavailableError) {
+                return null;
+              }
+              throw error;
+            }
+          },
+        }),
+    ...(currentVersion === undefined
+      ? {}
+      : {
+          async currentVersion(secretRef: string) {
+            return await currentVersion(keyFor(secretRef));
+          },
+        }),
   };
 }

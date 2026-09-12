@@ -1,6 +1,8 @@
 export type { BackfillResult } from "./backfill";
 export { backfillSecretsToDek } from "./backfill";
 export type {
+  ConnectionSecretLeaseRequest,
+  ConnectionSecretLeaseSetRequest,
   SecretAuthorization,
   SecretAuthorizer,
   SecretBrokerDeps,
@@ -9,6 +11,8 @@ export type {
   SecretLeaseRequest,
 } from "./broker";
 export { SecretBroker } from "./broker";
+export type { MutableSecretStore } from "./connection-secrets";
+export { ConnectionSecretManager, secretStorageKey } from "./connection-secrets";
 export type { SecretEnvelope } from "./crypto";
 export { DecryptError, decryptSecret, encryptSecret } from "./crypto";
 export type { DekRepo, InsertWrapInput, KekLabel, WrappedDekRow } from "./dek-repo";
@@ -44,7 +48,10 @@ export {
 export type { EncryptionKeys } from "./keys";
 export { loadEncryptionKeys } from "./keys";
 export type {
+  ConnectionSecretScope,
+  LegacySecretScope,
   ScopedSecretCallback,
+  ScopedSecretSetCallback,
   SecretLeaseDenialReason,
   SecretScope,
 } from "./lease";
@@ -52,6 +59,7 @@ export {
   SecretLeakError,
   SecretLease,
   SecretLeaseDeniedError,
+  SecretLeaseSet,
   SecretNotSerializableError,
 } from "./lease";
 export type { KmsPort, MasterKeyRef, WrappedKey } from "./ports/kms";
