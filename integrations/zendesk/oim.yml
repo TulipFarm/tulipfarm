@@ -1,0 +1,487 @@
+oimVersion: "1.0"
+kind: Integration
+
+metadata:
+  id: zendesk
+  name: Zendesk
+  version: 1.0.0
+  description: Read users and search, create, update, and comment on Zendesk Support tickets.
+  license: Apache-2.0
+  maintainers:
+    - name: TulipFarm
+      url: https://tulipfarm.dev
+
+profiles:
+  core: "1.0"
+  auth: "1.0"
+
+files:
+  - path: fixtures.yml
+    role: fixture
+    sha256: "eb78567b70458fb4394c1656d7b50b8e97dbd540dc0d5d3eae51b1c324678508"
+  - path: setup-guide.md
+    role: guide
+    sha256: "fe6d01b88e8bcbff64dd163ca8b0a5ad594131985c620697a261025b37e876b2"
+
+auth:
+  allowedOriginHosts:
+    - "*.zendesk.com"
+  credentialSlots:
+    - id: api_credential
+      label: Zendesk email and API token
+      kind: api_key
+      required: true
+  configurationFields:
+    - id: zendesk_host
+      label: Zendesk account URL
+      type: url
+      required: true
+      agentVisible: true
+  steps:
+    - id: account
+      type: fields
+      title: Name your Zendesk account
+      description: >-
+        Enter the full account URL, for example https://acme.zendesk.com. TulipFarm stores only
+        the normalized host, and only customer subdomains under zendesk.com are accepted.
+      fields:
+        - id: zendesk_host
+          label: Account URL
+          input: url
+          required: true
+          target:
+            type: configuration
+            field: zendesk_host
+    - id: token
+      type: fields
+      title: Create a Zendesk API token
+      description: >-
+        In Admin Center, enable token access and create a token. Paste the verified agent email,
+        literal /token suffix, colon, and token as one value: email@example.com/token:api-token.
+        TulipFarm applies Basic encoding; Agents never see the credential.
+      fields:
+        - id: api_credential
+          label: Email and API token
+          description: email@example.com/token:api-token
+          input: password
+          required: true
+          target:
+            type: credential
+            slot: api_credential
+  healthCheckOperationId: current-user
+
+operations:
+  - id: current-user
+    name: zendesk_current_user
+    description: Identify the Zendesk user authenticated by this Connection.
+    effect: read
+    identityMode: shared_or_personal
+    credentialSlot: api_credential
+    credentialInjection:
+      in: header
+      name: Authorization
+      format: "Basic {token}"
+      encoding: basic
+    source:
+      type: http
+      method: GET
+      baseUrl: https://{zendesk_host}
+      path: /api/v2/users/me.json
+    response:
+      maxBytes: 65536
+      schema:
+        type: object
+        properties:
+          user:
+            type: object
+            properties:
+              id: { type: integer }
+              name: { type: string }
+              email: { type: string }
+              role: { type: string }
+              active: { type: boolean }
+              suspended: { type: boolean }
+
+  - id: list-users
+    name: zendesk_list_users
+    description: List Zendesk users with supported offset pagination.
+    effect: sensitive_read
+    identityMode: shared_or_personal
+    credentialSlot: api_credential
+    credentialInjection:
+      in: header
+      name: Authorization
+      format: "Basic {token}"
+      encoding: basic
+    source:
+      type: http
+      method: GET
+      baseUrl: https://{zendesk_host}
+      path: /api/v2/users.json
+      parameters:
+        - name: role
+          in: query
+          schema:
+            type: string
+            enum: [end-user, agent, admin]
+        - name: per_page
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 100 }
+    pagination:
+      type: page
+      requestParameter: page
+      start: 1
+      itemsPath: /users
+    response:
+      maxBytes: 1048576
+      schema:
+        type: object
+        properties:
+          users:
+            type: array
+            items:
+              type: object
+              properties:
+                id: { type: integer }
+                name: { type: string }
+                email: { type: string }
+                role: { type: string }
+                active: { type: boolean }
+                suspended: { type: boolean }
+                created_at: { type: string }
+                updated_at: { type: string }
+          next_page: { type: ["string", "null"] }
+          previous_page: { type: ["string", "null"] }
+          count: { type: integer }
+
+  - id: get-user
+    name: zendesk_get_user
+    description: Read one Zendesk user by id.
+    effect: sensitive_read
+    identityMode: shared_or_personal
+    credentialSlot: api_credential
+    credentialInjection:
+      in: header
+      name: Authorization
+      format: "Basic {token}"
+      encoding: basic
+    source:
+      type: http
+      method: GET
+      baseUrl: https://{zendesk_host}
+      path: /api/v2/users/{user_id}.json
+      parameters:
+        - name: user_id
+          in: path
+          required: true
+          schema: { type: integer, minimum: 1 }
+    response:
+      maxBytes: 131072
+      schema:
+        type: object
+        properties:
+          user:
+            type: object
+            properties:
+              id: { type: integer }
+              name: { type: string }
+              email: { type: string }
+              role: { type: string }
+              active: { type: boolean }
+              suspended: { type: boolean }
+              organization_id: { type: ["integer", "null"] }
+              created_at: { type: string }
+              updated_at: { type: string }
+
+  - id: list-tickets
+    name: zendesk_list_tickets
+    description: List Zendesk tickets with supported offset pagination.
+    effect: sensitive_read
+    identityMode: shared_or_personal
+    credentialSlot: api_credential
+    credentialInjection:
+      in: header
+      name: Authorization
+      format: "Basic {token}"
+      encoding: basic
+    source:
+      type: http
+      method: GET
+      baseUrl: https://{zendesk_host}
+      path: /api/v2/tickets.json
+      parameters:
+        - name: sort_by
+          in: query
+          schema:
+            type: string
+            enum: [id, created_at, updated_at, priority, status, ticket_type]
+        - name: sort_order
+          in: query
+          schema:
+            type: string
+            enum: [asc, desc]
+        - name: per_page
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 100 }
+    pagination:
+      type: page
+      requestParameter: page
+      start: 1
+      itemsPath: /tickets
+    response:
+      maxBytes: 2097152
+      schema:
+        type: object
+        properties:
+          tickets:
+            type: array
+            items:
+              type: object
+              properties:
+                id: { type: integer }
+                subject: { type: ["string", "null"] }
+                description: { type: string }
+                status: { type: string }
+                priority: { type: ["string", "null"] }
+                requester_id: { type: integer }
+                assignee_id: { type: ["integer", "null"] }
+                organization_id: { type: ["integer", "null"] }
+                tags: { type: array, items: { type: string } }
+                created_at: { type: string }
+                updated_at: { type: string }
+          next_page: { type: ["string", "null"] }
+          previous_page: { type: ["string", "null"] }
+          count: { type: integer }
+
+  - id: get-ticket
+    name: zendesk_get_ticket
+    description: Read one Zendesk ticket by id.
+    effect: sensitive_read
+    identityMode: shared_or_personal
+    credentialSlot: api_credential
+    credentialInjection:
+      in: header
+      name: Authorization
+      format: "Basic {token}"
+      encoding: basic
+    source:
+      type: http
+      method: GET
+      baseUrl: https://{zendesk_host}
+      path: /api/v2/tickets/{ticket_id}.json
+      parameters:
+        - name: ticket_id
+          in: path
+          required: true
+          schema: { type: integer, minimum: 1 }
+    response:
+      maxBytes: 524288
+      schema:
+        type: object
+        properties:
+          ticket:
+            type: object
+            properties:
+              id: { type: integer }
+              subject: { type: ["string", "null"] }
+              description: { type: string }
+              status: { type: string }
+              priority: { type: ["string", "null"] }
+              requester_id: { type: integer }
+              assignee_id: { type: ["integer", "null"] }
+              organization_id: { type: ["integer", "null"] }
+              tags: { type: array, items: { type: string } }
+              created_at: { type: string }
+              updated_at: { type: string }
+
+  - id: search
+    name: zendesk_search
+    description: Search Zendesk tickets, users, groups, and organizations with Zendesk query syntax.
+    effect: sensitive_read
+    identityMode: shared_or_personal
+    credentialSlot: api_credential
+    credentialInjection:
+      in: header
+      name: Authorization
+      format: "Basic {token}"
+      encoding: basic
+    source:
+      type: http
+      method: GET
+      baseUrl: https://{zendesk_host}
+      path: /api/v2/search.json
+      parameters:
+        - name: query
+          in: query
+          required: true
+          schema: { type: string, minLength: 1, maxLength: 4096 }
+        - name: sort_by
+          in: query
+          schema:
+            type: string
+            enum: [updated_at, created_at, priority, status, ticket_type]
+        - name: sort_order
+          in: query
+          schema:
+            type: string
+            enum: [asc, desc]
+        - name: per_page
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 100 }
+        - name: page
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 10 }
+    response:
+      maxBytes: 2097152
+      schema:
+        type: object
+        properties:
+          results:
+            type: array
+            items:
+              type: object
+              additionalProperties: true
+          count: { type: integer }
+          next_page: { type: ["string", "null"] }
+          previous_page: { type: ["string", "null"] }
+
+  - id: create-ticket
+    name: zendesk_create_ticket
+    description: Create a Zendesk ticket; ticket.comment becomes its first comment.
+    effect: create
+    identityMode: shared_or_personal
+    credentialSlot: api_credential
+    credentialInjection:
+      in: header
+      name: Authorization
+      format: "Basic {token}"
+      encoding: basic
+    source:
+      type: http
+      method: POST
+      baseUrl: https://{zendesk_host}
+      path: /api/v2/tickets.json
+    requestSchema:
+      type: object
+      properties:
+        ticket:
+          type: object
+          properties:
+            subject: { type: string, maxLength: 1000 }
+            comment:
+              type: object
+              properties:
+                body: { type: string, minLength: 1, maxLength: 100000 }
+                public: { type: boolean }
+              required: [body]
+              additionalProperties: false
+            requester_id: { type: integer, minimum: 1 }
+            submitter_id: { type: integer, minimum: 1 }
+            assignee_id: { type: ["integer", "null"] }
+            group_id: { type: ["integer", "null"] }
+            organization_id: { type: ["integer", "null"] }
+            status:
+              type: string
+              enum: [new, open, pending, hold, solved]
+            priority:
+              type: ["string", "null"]
+              enum: [null, low, normal, high, urgent]
+            type:
+              type: ["string", "null"]
+              enum: [null, problem, incident, question, task]
+            tags:
+              type: array
+              maxItems: 100
+              items: { type: string }
+            external_id: { type: ["string", "null"] }
+          required: [comment]
+          additionalProperties: false
+      required: [ticket]
+      additionalProperties: false
+    response:
+      maxBytes: 524288
+      schema:
+        type: object
+        properties:
+          ticket:
+            type: object
+            properties:
+              id: { type: integer }
+              subject: { type: ["string", "null"] }
+              status: { type: string }
+              priority: { type: ["string", "null"] }
+              requester_id: { type: integer }
+              assignee_id: { type: ["integer", "null"] }
+              created_at: { type: string }
+              updated_at: { type: string }
+
+  - id: update-ticket
+    name: zendesk_update_ticket
+    description: Update ticket fields and optionally append a public reply or private note.
+    effect: update
+    identityMode: shared_or_personal
+    credentialSlot: api_credential
+    credentialInjection:
+      in: header
+      name: Authorization
+      format: "Basic {token}"
+      encoding: basic
+    source:
+      type: http
+      method: PUT
+      baseUrl: https://{zendesk_host}
+      path: /api/v2/tickets/{ticket_id}.json
+      parameters:
+        - name: ticket_id
+          in: path
+          required: true
+          schema: { type: integer, minimum: 1 }
+    requestSchema:
+      type: object
+      properties:
+        ticket:
+          type: object
+          minProperties: 1
+          properties:
+            subject: { type: string, maxLength: 1000 }
+            comment:
+              type: object
+              properties:
+                body: { type: string, minLength: 1, maxLength: 100000 }
+                public: { type: boolean }
+              required: [body]
+              additionalProperties: false
+            assignee_id: { type: ["integer", "null"] }
+            group_id: { type: ["integer", "null"] }
+            organization_id: { type: ["integer", "null"] }
+            status:
+              type: string
+              enum: [new, open, pending, hold, solved]
+            priority:
+              type: ["string", "null"]
+              enum: [null, low, normal, high, urgent]
+            type:
+              type: ["string", "null"]
+              enum: [null, problem, incident, question, task]
+            tags:
+              type: array
+              maxItems: 100
+              items: { type: string }
+            external_id: { type: ["string", "null"] }
+          additionalProperties: false
+      required: [ticket]
+      additionalProperties: false
+    response:
+      maxBytes: 524288
+      schema:
+        type: object
+        properties:
+          ticket:
+            type: object
+            properties:
+              id: { type: integer }
+              subject: { type: ["string", "null"] }
+              status: { type: string }
+              priority: { type: ["string", "null"] }
+              assignee_id: { type: ["integer", "null"] }
+              updated_at: { type: string }

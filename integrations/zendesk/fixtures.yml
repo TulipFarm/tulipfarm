@@ -1,0 +1,283 @@
+version: 1
+cases:
+  - name: identifies-agent
+    operationId: current-user
+    configuration:
+      zendesk_host: acme.zendesk.com
+    request: {}
+    response:
+      status: 200
+      body:
+        user:
+          id: 100001
+          name: Muskan Vijayvargiya
+          email: redacted@example.com
+          role: agent
+          active: true
+    expect:
+      request:
+        method: GET
+        url: https://acme.zendesk.com/api/v2/users/me.json
+        headers:
+          Authorization: Basic b2ltLWZpeHR1cmUtY3JlZGVudGlhbA==
+      result:
+        user:
+          id: 100001
+          name: Muskan Vijayvargiya
+          role: agent
+
+  - name: lists-ticket-page
+    operationId: list-tickets
+    configuration:
+      zendesk_host: acme.zendesk.com
+    request:
+      per_page: 2
+      page_token: fixture-continuation:input
+    response:
+      status: 200
+      body:
+        tickets:
+          - id: 200001
+            subject: Redacted login issue
+            status: open
+            updated_at: "2026-09-07T06:30:00Z"
+        next_page: null
+        previous_page: https://acme.zendesk.com/api/v2/tickets.json?page=1
+        count: 3
+    expect:
+      request:
+        method: GET
+        url: https://acme.zendesk.com/api/v2/tickets.json?per_page=2&page=2
+        headers:
+          Authorization: Basic b2ltLWZpeHR1cmUtY3JlZGVudGlhbA==
+      result:
+        tickets:
+          - id: 200001
+            subject: Redacted login issue
+        next_page_token: fixture-continuation:1
+
+  - name: searches-tickets
+    operationId: search
+    configuration:
+      zendesk_host: acme.zendesk.com
+    request:
+      query: "type:ticket status:open redacted"
+      per_page: 25
+    response:
+      status: 200
+      body:
+        results:
+          - id: 200001
+            result_type: ticket
+            subject: Redacted login issue
+            status: open
+        count: 1
+        next_page: null
+        previous_page: null
+    expect:
+      request:
+        method: GET
+        url: https://acme.zendesk.com/api/v2/search.json?query=type%3Aticket+status%3Aopen+redacted&per_page=25
+        headers:
+          Authorization: Basic b2ltLWZpeHR1cmUtY3JlZGVudGlhbA==
+      result:
+        count: 1
+        results:
+          - id: 200001
+            result_type: ticket
+
+  - name: creates-ticket
+    operationId: create-ticket
+    configuration:
+      zendesk_host: acme.zendesk.com
+    request:
+      body:
+        ticket:
+          subject: Login issue
+          comment:
+            body: Redacted customer report
+            public: true
+          priority: normal
+    response:
+      status: 201
+      body:
+        ticket:
+          id: 200002
+          subject: Login issue
+          status: new
+          priority: normal
+    expect:
+      request:
+        method: POST
+        url: https://acme.zendesk.com/api/v2/tickets.json
+        headers:
+          Authorization: Basic b2ltLWZpeHR1cmUtY3JlZGVudGlhbA==
+          content-type: application/json
+        body:
+          ticket:
+            subject: Login issue
+            comment:
+              body: Redacted customer report
+              public: true
+            priority: normal
+      result:
+        ticket:
+          id: 200002
+          subject: Login issue
+
+  - name: adds-private-note
+    operationId: update-ticket
+    configuration:
+      zendesk_host: acme.zendesk.com
+    request:
+      ticket_id: 200002
+      body:
+        ticket:
+          status: pending
+          comment:
+            body: Redacted internal follow-up
+            public: false
+    response:
+      status: 200
+      body:
+        ticket:
+          id: 200002
+          subject: Login issue
+          status: pending
+          updated_at: "2026-09-07T06:40:00Z"
+    expect:
+      request:
+        method: PUT
+        url: https://acme.zendesk.com/api/v2/tickets/200002.json
+        headers:
+          Authorization: Basic b2ltLWZpeHR1cmUtY3JlZGVudGlhbA==
+          content-type: application/json
+        body:
+          ticket:
+            status: pending
+            comment:
+              body: Redacted internal follow-up
+              public: false
+      result:
+        ticket:
+          id: 200002
+          status: pending
+
+  - name: rejects-invalid-credential
+    operationId: current-user
+    configuration:
+      zendesk_host: acme.zendesk.com
+    request: {}
+    response:
+      status: 401
+      body:
+        error: Could not authenticate you
+    expect:
+      request:
+        method: GET
+        url: https://acme.zendesk.com/api/v2/users/me.json
+        headers:
+          Authorization: Basic b2ltLWZpeHR1cmUtY3JlZGVudGlhbA==
+      expectedError:
+        phase: before_dispatch
+        code: provider_unauthorized
+        retryable: false
+
+  - name: lists-active-agents
+    operationId: list-users
+    configuration:
+      zendesk_host: acme.zendesk.com
+    request:
+      role: agent
+      per_page: 2
+    response:
+      status: 200
+      body:
+        users:
+          - id: 100001
+            name: Muskan Vijayvargiya
+            email: redacted@example.com
+            role: agent
+            active: true
+            suspended: false
+            created_at: "2026-08-01T10:00:00Z"
+            updated_at: "2026-09-12T10:00:00Z"
+        next_page: null
+        previous_page: null
+        count: 1
+    expect:
+      request:
+        method: GET
+        url: https://acme.zendesk.com/api/v2/users.json?role=agent&per_page=2&page=1
+        headers:
+          Authorization: Basic b2ltLWZpeHR1cmUtY3JlZGVudGlhbA==
+      result:
+        users:
+          - id: 100001
+            name: Muskan Vijayvargiya
+            role: agent
+        count: 1
+
+  - name: reads-user
+    operationId: get-user
+    configuration:
+      zendesk_host: acme.zendesk.com
+    request:
+      user_id: 100001
+    response:
+      status: 200
+      body:
+        user:
+          id: 100001
+          name: Muskan Vijayvargiya
+          email: redacted@example.com
+          role: agent
+          active: true
+          suspended: false
+          organization_id: null
+          created_at: "2026-08-01T10:00:00Z"
+          updated_at: "2026-09-12T10:00:00Z"
+    expect:
+      request:
+        method: GET
+        url: https://acme.zendesk.com/api/v2/users/100001.json
+        headers:
+          Authorization: Basic b2ltLWZpeHR1cmUtY3JlZGVudGlhbA==
+      result:
+        user:
+          id: 100001
+          name: Muskan Vijayvargiya
+          role: agent
+
+  - name: reads-ticket
+    operationId: get-ticket
+    configuration:
+      zendesk_host: acme.zendesk.com
+    request:
+      ticket_id: 200001
+    response:
+      status: 200
+      body:
+        ticket:
+          id: 200001
+          subject: Redacted login issue
+          description: Redacted customer report
+          status: open
+          priority: normal
+          requester_id: 300001
+          assignee_id: 100001
+          organization_id: null
+          tags: [login]
+          created_at: "2026-09-07T06:00:00Z"
+          updated_at: "2026-09-07T06:30:00Z"
+    expect:
+      request:
+        method: GET
+        url: https://acme.zendesk.com/api/v2/tickets/200001.json
+        headers:
+          Authorization: Basic b2ltLWZpeHR1cmUtY3JlZGVudGlhbA==
+      result:
+        ticket:
+          id: 200001
+          subject: Redacted login issue
+          status: open

@@ -1,0 +1,190 @@
+version: 1
+cases:
+  - name: reads-company
+    operationId: get-company
+    request:
+      company_id: "1042"
+      properties: name,domain
+    response:
+      status: 200
+      body:
+        id: "1042"
+        createdAt: "2026-09-01T08:00:00.000Z"
+        updatedAt: "2026-09-07T06:00:00.000Z"
+        properties:
+          name: Example Company
+          domain: example.invalid
+    expect:
+      request:
+        method: GET
+        url: https://api.hubapi.com/crm/v3/objects/companies/1042?properties=name%2Cdomain
+      result:
+        id: "1042"
+        properties:
+          name: Example Company
+          domain: example.invalid
+
+  - name: updates-contact
+    operationId: update-contact
+    request:
+      contact_id: "2042"
+      body:
+        properties:
+          firstname: Muskan
+          lastname: Vijayvargiya
+    response:
+      status: 200
+      body:
+        id: "2042"
+        createdAt: "2026-09-01T08:00:00.000Z"
+        updatedAt: "2026-09-07T06:00:00.000Z"
+        properties:
+          firstname: Muskan
+          lastname: Vijayvargiya
+    expect:
+      request:
+        method: PATCH
+        url: https://api.hubapi.com/crm/v3/objects/contacts/2042
+        body:
+          properties:
+            firstname: Muskan
+            lastname: Vijayvargiya
+      result:
+        id: "2042"
+        properties:
+          firstname: Muskan
+          lastname: Vijayvargiya
+
+  - name: rejects-invalid-credential
+    operationId: get-company
+    request:
+      company_id: "1042"
+    response:
+      status: 401
+      body:
+        status: error
+        message: Authentication credentials not found.
+        category: INVALID_AUTHENTICATION
+    expect:
+      request:
+        method: GET
+        url: https://api.hubapi.com/crm/v3/objects/companies/1042
+      expectedError:
+        phase: before_dispatch
+        code: provider_unauthorized
+        retryable: false
+
+  - name: lists-contacts
+    operationId: list-contacts
+    request:
+      limit: 2
+      properties: firstname,lastname,email
+    response:
+      status: 200
+      body:
+        results:
+          - id: "2042"
+            createdAt: "2026-09-01T08:00:00.000Z"
+            updatedAt: "2026-09-07T06:00:00.000Z"
+            properties:
+              firstname: Muskan
+              lastname: Vijayvargiya
+              email: muskan@example.com
+        paging:
+          next:
+            after: "2043"
+            link: https://api.hubapi.com/crm/v3/objects/contacts?after=2043
+    expect:
+      request:
+        method: GET
+        url: https://api.hubapi.com/crm/v3/objects/contacts?limit=2&properties=firstname%2Clastname%2Cemail
+      result:
+        results:
+          - id: "2042"
+            properties:
+              firstname: Muskan
+              lastname: Vijayvargiya
+              email: muskan@example.com
+
+  - name: reads-contact
+    operationId: get-contact
+    request:
+      contact_id: "2042"
+      properties: firstname,lastname,email
+    response:
+      status: 200
+      body:
+        id: "2042"
+        createdAt: "2026-09-01T08:00:00.000Z"
+        updatedAt: "2026-09-07T06:00:00.000Z"
+        properties:
+          firstname: Muskan
+          lastname: Vijayvargiya
+          email: muskan@example.com
+    expect:
+      request:
+        method: GET
+        url: https://api.hubapi.com/crm/v3/objects/contacts/2042?properties=firstname%2Clastname%2Cemail
+      result:
+        id: "2042"
+        properties:
+          email: muskan@example.com
+
+  - name: creates-contact
+    operationId: create-contact
+    request:
+      body:
+        properties:
+          firstname: Muskan
+          lastname: Vijayvargiya
+          email: muskan@example.com
+    response:
+      status: 201
+      body:
+        id: "2043"
+        createdAt: "2026-09-12T10:00:00.000Z"
+        properties:
+          firstname: Muskan
+          lastname: Vijayvargiya
+          email: muskan@example.com
+    expect:
+      request:
+        method: POST
+        url: https://api.hubapi.com/crm/v3/objects/contacts
+        body:
+          properties:
+            firstname: Muskan
+            lastname: Vijayvargiya
+            email: muskan@example.com
+      result:
+        id: "2043"
+        properties:
+          email: muskan@example.com
+
+  - name: creates-company
+    operationId: create-company
+    request:
+      body:
+        properties:
+          name: Example Company
+          domain: example.invalid
+    response:
+      status: 201
+      body:
+        id: "1043"
+        createdAt: "2026-09-12T10:00:00.000Z"
+        properties:
+          name: Example Company
+          domain: example.invalid
+    expect:
+      request:
+        method: POST
+        url: https://api.hubapi.com/crm/v3/objects/companies
+        body:
+          properties:
+            name: Example Company
+            domain: example.invalid
+      result:
+        id: "1043"
+        properties:
+          name: Example Company

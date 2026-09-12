@@ -1,0 +1,293 @@
+oimVersion: "1.0"
+kind: Integration
+
+metadata:
+  id: confluence-data-center
+  name: Confluence Data Center
+  version: 1.0.0
+  description: >-
+    Read spaces and pages from an explicitly approved public Confluence Data Center origin through
+    the REST v1 API.
+  license: Apache-2.0
+  maintainers:
+    - name: TulipFarm
+      url: https://tulipfarm.dev
+
+profiles:
+  core: "1.1"
+  auth: "1.0"
+
+files:
+  - path: setup-guide.md
+    role: guide
+    sha256: "e29bee4f04612797780157a521882384c90f035825ecd7b76a162c0bea161926"
+  - path: fixtures.yml
+    role: fixture
+    sha256: "cb401c86ad2444ddfadc8c7d8ca05687cbc53b481a63151972812acf2a74d210"
+
+auth:
+  # The reserved sentinel satisfies the Auth 1.0 static-bound shape but cannot resolve. The runtime
+  # adds one exact host only after an operator confirms that Connection's public HTTPS origin.
+  allowedOriginHosts:
+    - approval-required.invalid
+  credentialSlots:
+    - id: personal_access_token
+      label: Confluence personal access token
+      kind: api_key
+      required: true
+  configurationFields:
+    - id: site_origin
+      label: Confluence site host
+      type: string
+      required: true
+      agentVisible: true
+  steps:
+    - id: site
+      type: fields
+      title: Name your Confluence site
+      description: >-
+        Enter the bare public host, for example confluence.example.com. TulipFarm requires HTTPS
+        and a separate confirmation for this Connection's exact origin.
+      fields:
+        - id: site_origin
+          label: Site host
+          input: text
+          required: true
+          target:
+            type: configuration
+            field: site_origin
+    - id: token
+      type: fields
+      title: Create a personal access token
+      description: >-
+        In Confluence, open your profile settings, choose Personal access tokens, and create a
+        token for this Connection. Personal access tokens require Confluence 7.9 or later.
+      fields:
+        - id: personal_access_token
+          label: Personal access token
+          input: password
+          required: true
+          target:
+            type: credential
+            slot: personal_access_token
+  healthCheckOperationId: current-user
+
+operations:
+  - id: current-user
+    name: confluence_data_center_current_user
+    description: The Confluence user this Connection authenticates as.
+    effect: read
+    identityMode: shared_or_personal
+    credentialSlot: personal_access_token
+    credentialInjection:
+      in: header
+      name: Authorization
+      format: "Bearer {token}"
+    source:
+      type: http
+      method: GET
+      baseUrl: https://{site_origin}
+      path: /rest/api/user/current
+    response:
+      maxBytes: 32768
+      schema:
+        type: object
+        properties:
+          type: { type: string }
+          username: { type: string }
+          userKey: { type: string }
+          displayName: { type: string }
+      projection:
+        - /type
+        - /username
+        - /userKey
+        - /displayName
+    rateLimit:
+      requests: 60
+      perSeconds: 60
+      scope: connection
+
+  - id: list-spaces
+    name: confluence_data_center_list_spaces
+    description: List spaces visible to this Connection.
+    effect: read
+    identityMode: shared_or_personal
+    credentialSlot: personal_access_token
+    credentialInjection:
+      in: header
+      name: Authorization
+      format: "Bearer {token}"
+    source:
+      type: http
+      method: GET
+      baseUrl: https://{site_origin}
+      path: /rest/api/space
+      parameters:
+        - name: start
+          in: query
+          schema: { type: integer, minimum: 0 }
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 200 }
+    response:
+      maxBytes: 262144
+      schema:
+        type: object
+        properties:
+          results:
+            type: array
+            items:
+              type: object
+              properties:
+                id: { type: integer }
+                key: { type: string }
+                name: { type: string }
+                type: { type: string }
+          start: { type: integer }
+          limit: { type: integer }
+          size: { type: integer }
+      projection:
+        - /results
+        - /start
+        - /limit
+        - /size
+    rateLimit:
+      requests: 60
+      perSeconds: 60
+      scope: connection
+
+  - id: list-pages
+    name: confluence_data_center_list_pages
+    description: List current pages in one space, with their current version.
+    effect: read
+    identityMode: shared_or_personal
+    credentialSlot: personal_access_token
+    credentialInjection:
+      in: header
+      name: Authorization
+      format: "Bearer {token}"
+    source:
+      type: http
+      method: GET
+      baseUrl: https://{site_origin}
+      path: /rest/api/content
+      parameters:
+        - name: spaceKey
+          in: query
+          required: true
+          schema: { type: string, minLength: 1 }
+        - name: start
+          in: query
+          schema: { type: integer, minimum: 0 }
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 200 }
+        - name: type
+          in: query
+          value: page
+          schema: { type: string }
+        - name: status
+          in: query
+          value: current
+          schema: { type: string }
+        - name: expand
+          in: query
+          value: version
+          schema: { type: string }
+    response:
+      maxBytes: 1048576
+      schema:
+        type: object
+        properties:
+          results:
+            type: array
+            items:
+              type: object
+              properties:
+                id: { type: string }
+                type: { type: string }
+                status: { type: string }
+                title: { type: string }
+                version:
+                  type: object
+                  properties:
+                    number: { type: integer }
+                    when: { type: string }
+                _links:
+                  type: object
+                  properties:
+                    webui: { type: string }
+          start: { type: integer }
+          limit: { type: integer }
+          size: { type: integer }
+      projection:
+        - /results
+        - /start
+        - /limit
+        - /size
+    rateLimit:
+      requests: 60
+      perSeconds: 60
+      scope: connection
+
+  - id: get-page
+    name: confluence_data_center_get_page
+    description: Read one page, including its storage-format body and current version.
+    effect: read
+    identityMode: shared_or_personal
+    credentialSlot: personal_access_token
+    credentialInjection:
+      in: header
+      name: Authorization
+      format: "Bearer {token}"
+    source:
+      type: http
+      method: GET
+      baseUrl: https://{site_origin}
+      path: /rest/api/content/{id}
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, minLength: 1 }
+        - name: expand
+          in: query
+          value: body.storage,version,space
+          schema: { type: string }
+    response:
+      maxBytes: 1048576
+      schema:
+        type: object
+        properties:
+          id: { type: string }
+          type: { type: string }
+          status: { type: string }
+          title: { type: string }
+          space:
+            type: object
+            properties:
+              id: { type: integer }
+              key: { type: string }
+              name: { type: string }
+          body:
+            type: object
+            properties:
+              storage:
+                type: object
+                properties:
+                  value: { type: string }
+                  representation: { type: string }
+          version:
+            type: object
+            properties:
+              number: { type: integer }
+              when: { type: string }
+    rateLimit:
+      requests: 60
+      perSeconds: 60
+      scope: connection
+
+extensions:
+  x-tulipfarm-origin-policy:
+    mode: approved_public_exact
+    fields: [site_origin]

@@ -1,0 +1,235 @@
+oimVersion: "1.0"
+kind: Integration
+
+metadata:
+  id: x
+  name: X
+  version: 1.0.0
+  description: Identify one X user, read posts by id, and create text posts with OAuth 2.0 user context.
+  license: Apache-2.0
+  maintainers:
+    - name: TulipFarm
+      url: https://tulipfarm.dev
+
+profiles:
+  core: "1.1"
+  auth: "1.0"
+
+files:
+  - path: fixtures.yml
+    role: fixture
+    sha256: "1944f8aac4d5ab4abdae10c9c3c75049f30a0070f8642cb92c6f77a4b6310edb"
+  - path: setup-guide.md
+    role: guide
+    sha256: "bddf239ae5ef0f246d1608eb1986fd167f9a95413a3638fd61600fb41e60ddaa"
+
+auth:
+  allowedOriginHosts:
+    - api.x.com
+  credentialSlots:
+    - id: client_id
+      label: X OAuth client ID
+      kind: api_key
+      required: true
+    - id: client_secret
+      label: X OAuth client secret
+      kind: client_secret
+      required: true
+    - id: access_token
+      label: X user access token
+      kind: oauth2_access_token
+      required: true
+    - id: refresh_token
+      label: X refresh token
+      kind: oauth2_refresh_token
+      required: true
+  steps:
+    - id: oauth_client
+      type: fields
+      title: Add your X OAuth client
+      fields:
+        - id: client_id
+          label: Client ID
+          input: text
+          required: true
+          target:
+            type: credential
+            slot: client_id
+        - id: client_secret
+          label: Client secret
+          input: password
+          required: true
+          target:
+            type: credential
+            slot: client_secret
+    - id: user_consent
+      type: oauth2
+      title: Connect an X user
+      authorizationUrl: https://x.com/i/oauth2/authorize
+      tokenUrl: https://api.x.com/2/oauth2/token
+      tokenEndpointAuthMethod: client_secret_basic
+      scopes:
+        - tweet.read
+        - users.read
+        - tweet.write
+        - offline.access
+      pkce: true
+      clientId:
+        type: credential
+        slot: client_id
+      clientSecret:
+        type: credential
+        slot: client_secret
+      bindings:
+        - sourcePath: /access_token
+          target:
+            type: credential
+            slot: access_token
+        - sourcePath: /refresh_token
+          target:
+            type: credential
+            slot: refresh_token
+  healthCheckOperationId: current-user
+
+operations:
+  - id: current-user
+    name: x_current_user
+    description: Identify the X user who authorized this Connection.
+    effect: read
+    identityMode: personal_required
+    credentialSlot: access_token
+    credentialInjection:
+      in: header
+      name: Authorization
+      format: "Bearer {token}"
+    source:
+      type: http
+      method: GET
+      baseUrl: https://api.x.com
+      path: /2/users/me
+      parameters:
+        - name: user.fields
+          in: query
+          value: id,name,username,created_at,description,profile_image_url,protected,verified,verified_type
+          schema: { type: string }
+    response:
+      maxBytes: 131072
+      schema:
+        type: object
+        properties:
+          data:
+            type: object
+            properties:
+              id: { type: string }
+              name: { type: string }
+              username: { type: string }
+              created_at: { type: string }
+              description: { type: string }
+              profile_image_url: { type: string }
+              protected: { type: boolean }
+              verified: { type: boolean }
+              verified_type: { type: string }
+            required: [id, name, username]
+        required: [data]
+      projection:
+        - /data
+    rateLimit:
+      requests: 75
+      perSeconds: 900
+      scope: connection
+
+  - id: read-post
+    name: x_read_post
+    description: Read one X post by its numeric id.
+    effect: read
+    identityMode: personal_required
+    credentialSlot: access_token
+    credentialInjection:
+      in: header
+      name: Authorization
+      format: "Bearer {token}"
+    source:
+      type: http
+      method: GET
+      baseUrl: https://api.x.com
+      path: /2/tweets/{post_id}
+      parameters:
+        - name: post_id
+          in: path
+          required: true
+          schema:
+            type: string
+            pattern: "^[0-9]{1,19}$"
+        - name: tweet.fields
+          in: query
+          value: id,text,author_id,created_at,conversation_id,lang,public_metrics,reply_settings
+          schema: { type: string }
+    response:
+      maxBytes: 262144
+      schema:
+        type: object
+        properties:
+          data:
+            type: object
+            properties:
+              id: { type: string }
+              text: { type: string }
+              author_id: { type: string }
+              created_at: { type: string }
+              conversation_id: { type: string }
+              lang: { type: string }
+              public_metrics: { type: object }
+              reply_settings: { type: string }
+            required: [id, text]
+        required: [data]
+      projection:
+        - /data
+    rateLimit:
+      requests: 900
+      perSeconds: 900
+      scope: connection
+
+  - id: create-post
+    name: x_create_post
+    description: Create one plain-text X post as the user who authorized this Connection.
+    effect: send
+    identityMode: personal_required
+    credentialSlot: access_token
+    credentialInjection:
+      in: header
+      name: Authorization
+      format: "Bearer {token}"
+    source:
+      type: http
+      method: POST
+      baseUrl: https://api.x.com
+      path: /2/tweets
+    requestSchema:
+      type: object
+      properties:
+        text:
+          type: string
+          minLength: 1
+      required: [text]
+      additionalProperties: false
+    response:
+      maxBytes: 131072
+      schema:
+        type: object
+        properties:
+          data:
+            type: object
+            properties:
+              id: { type: string }
+              text: { type: string }
+              edit_history_post_ids:
+                type: array
+                items: { type: string }
+            required: [id, text]
+        required: [data]
+      projection:
+        - /data
+    rateLimit:
+      requests: 100
+      perSeconds: 900
+      scope: connection

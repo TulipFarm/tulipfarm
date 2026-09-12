@@ -1,0 +1,436 @@
+oimVersion: "1.0"
+kind: Integration
+
+metadata:
+  id: clickup
+  name: ClickUp
+  version: 1.0.0
+  description: Read and manage ClickUp Workspace tasks with a personal API token.
+  license: Apache-2.0
+  maintainers:
+    - name: TulipFarm
+      url: https://tulipfarm.dev
+
+profiles:
+  core: "1.0"
+  auth: "1.0"
+
+files:
+  - path: fixtures.yml
+    role: fixture
+    sha256: "f14fc8d41066f6d61ca1bd637ecf5965e0b50a056f7e690f45a52ade68112eaa"
+  - path: setup-guide.md
+    role: guide
+    sha256: "f60d204878f66c0cefdce4be0b11d24344e78ae32f66ece7acd2816982208077"
+
+auth:
+  allowedOriginHosts:
+    - api.clickup.com
+  credentialSlots:
+    - id: api_token
+      label: ClickUp personal API token
+      kind: api_key
+      required: true
+  steps:
+    - id: token
+      type: fields
+      title: Create a ClickUp personal API token
+      description: >-
+        Generate a token under Settings > Apps. It acts as its owner and reaches only Workspaces
+        and tasks that owner can access. Agents never see the token.
+      fields:
+        - id: api_token
+          label: Personal API token
+          input: password
+          required: true
+          target:
+            type: credential
+            slot: api_token
+  healthCheckOperationId: current-user
+
+operations:
+  - id: current-user
+    name: clickup_current_user
+    description: Identify the ClickUp user authenticated by this Connection.
+    effect: read
+    identityMode: shared_or_personal
+    credentialSlot: api_token
+    credentialInjection:
+      in: header
+      name: Authorization
+      format: "{token}"
+    source:
+      type: http
+      method: GET
+      baseUrl: https://api.clickup.com
+      path: /api/v2/user
+    response:
+      maxBytes: 65536
+      schema:
+        type: object
+        properties:
+          user:
+            type: object
+            properties:
+              id: { type: integer }
+              username: { type: string }
+              email: { type: string }
+              initials: { type: string }
+              timezone: { type: string }
+
+  - id: list-workspaces
+    name: clickup_list_workspaces
+    description: List ClickUp Workspaces authorized for this token.
+    effect: read
+    identityMode: shared_or_personal
+    credentialSlot: api_token
+    credentialInjection:
+      in: header
+      name: Authorization
+      format: "{token}"
+    source:
+      type: http
+      method: GET
+      baseUrl: https://api.clickup.com
+      path: /api/v2/team
+    response:
+      maxBytes: 524288
+      schema:
+        type: object
+        properties:
+          teams:
+            type: array
+            items:
+              type: object
+              properties:
+                id: { type: string }
+                name: { type: string }
+                color: { type: string }
+                avatar: { type: ["string", "null"] }
+
+  - id: list-spaces
+    name: clickup_list_spaces
+    description: List spaces in one ClickUp Workspace.
+    effect: read
+    identityMode: shared_or_personal
+    credentialSlot: api_token
+    credentialInjection:
+      in: header
+      name: Authorization
+      format: "{token}"
+    source:
+      type: http
+      method: GET
+      baseUrl: https://api.clickup.com
+      path: /api/v2/team/{team_id}/space
+      parameters:
+        - name: team_id
+          in: path
+          required: true
+          schema: { type: string, minLength: 1, maxLength: 64 }
+        - name: archived
+          in: query
+          schema: { type: boolean }
+    response:
+      maxBytes: 524288
+      schema:
+        type: object
+        properties:
+          spaces:
+            type: array
+            items:
+              type: object
+              properties:
+                id: { type: string }
+                name: { type: string }
+                private: { type: boolean }
+                archived: { type: boolean }
+                statuses: { type: array }
+
+  - id: list-tasks
+    name: clickup_list_tasks
+    description: List tasks visible in one Workspace, 100 tasks per zero-based page.
+    effect: read
+    identityMode: shared_or_personal
+    credentialSlot: api_token
+    credentialInjection:
+      in: header
+      name: Authorization
+      format: "{token}"
+    source:
+      type: http
+      method: GET
+      baseUrl: https://api.clickup.com
+      path: /api/v2/team/{team_id}/task
+      parameters:
+        - name: team_id
+          in: path
+          required: true
+          schema: { type: string, minLength: 1, maxLength: 64 }
+        - name: order_by
+          in: query
+          schema:
+            type: string
+            enum: [id, created, updated, due_date]
+        - name: reverse
+          in: query
+          schema: { type: boolean }
+        - name: subtasks
+          in: query
+          schema: { type: boolean }
+        - name: include_closed
+          in: query
+          schema: { type: boolean }
+        - name: due_date_gt
+          in: query
+          schema: { type: integer }
+        - name: due_date_lt
+          in: query
+          schema: { type: integer }
+        - name: date_created_gt
+          in: query
+          schema: { type: integer }
+        - name: date_created_lt
+          in: query
+          schema: { type: integer }
+        - name: date_updated_gt
+          in: query
+          schema: { type: integer }
+        - name: date_updated_lt
+          in: query
+          schema: { type: integer }
+    pagination:
+      type: page
+      requestParameter: page
+      start: 0
+      itemsPath: /tasks
+    response:
+      maxBytes: 1048576
+      schema:
+        type: object
+        properties:
+          tasks:
+            type: array
+            items:
+              type: object
+              properties:
+                id: { type: string }
+                custom_id: { type: ["string", "null"] }
+                name: { type: string }
+                description: { type: string }
+                status: { type: object }
+                priority: { type: ["object", "null"] }
+                assignees: { type: array }
+                due_date: { type: ["string", "null"] }
+                date_created: { type: string }
+                date_updated: { type: string }
+                url: { type: string }
+
+  - id: get-task
+    name: clickup_get_task
+    description: Read one ClickUp task by task id or custom task id.
+    effect: read
+    identityMode: shared_or_personal
+    credentialSlot: api_token
+    credentialInjection:
+      in: header
+      name: Authorization
+      format: "{token}"
+    source:
+      type: http
+      method: GET
+      baseUrl: https://api.clickup.com
+      path: /api/v2/task/{task_id}
+      parameters:
+        - name: task_id
+          in: path
+          required: true
+          schema: { type: string, minLength: 1, maxLength: 128 }
+        - name: custom_task_ids
+          in: query
+          schema: { type: boolean }
+        - name: team_id
+          in: query
+          schema: { type: string, minLength: 1, maxLength: 64 }
+        - name: include_subtasks
+          in: query
+          schema: { type: boolean }
+        - name: include_markdown_description
+          in: query
+          schema: { type: boolean }
+    response:
+      maxBytes: 524288
+      schema:
+        type: object
+        properties:
+          id: { type: string }
+          custom_id: { type: ["string", "null"] }
+          name: { type: string }
+          text_content: { type: string }
+          description: { type: string }
+          markdown_description: { type: string }
+          status: { type: object }
+          priority: { type: ["object", "null"] }
+          assignees: { type: array }
+          due_date: { type: ["string", "null"] }
+          date_created: { type: string }
+          date_updated: { type: string }
+          url: { type: string }
+
+  - id: create-task
+    name: clickup_create_task
+    description: Create one task in a ClickUp List.
+    effect: create
+    identityMode: shared_or_personal
+    credentialSlot: api_token
+    credentialInjection:
+      in: header
+      name: Authorization
+      format: "{token}"
+    source:
+      type: http
+      method: POST
+      baseUrl: https://api.clickup.com
+      path: /api/v2/list/{list_id}/task
+      parameters:
+        - name: list_id
+          in: path
+          required: true
+          schema: { type: string, minLength: 1, maxLength: 64 }
+    requestSchema:
+      type: object
+      properties:
+        name: { type: string, minLength: 1, maxLength: 1000 }
+        description: { type: string, maxLength: 100000 }
+        markdown_content: { type: string, maxLength: 100000 }
+        assignees:
+          type: array
+          maxItems: 100
+          items: { type: integer }
+        tags:
+          type: array
+          maxItems: 100
+          items: { type: string }
+        status: { type: string }
+        priority: { type: ["integer", "null"], minimum: 1, maximum: 4 }
+        due_date: { type: integer }
+        due_date_time: { type: boolean }
+        start_date: { type: integer }
+        start_date_time: { type: boolean }
+        time_estimate: { type: integer, minimum: 0 }
+        notify_all: { type: boolean }
+        parent: { type: ["string", "null"] }
+      required: [name]
+      additionalProperties: false
+    response:
+      maxBytes: 524288
+      schema:
+        type: object
+        properties:
+          id: { type: string }
+          custom_id: { type: ["string", "null"] }
+          name: { type: string }
+          description: { type: string }
+          status: { type: object }
+          priority: { type: ["object", "null"] }
+          archived: { type: boolean }
+          url: { type: string }
+
+  - id: update-task
+    name: clickup_update_task
+    description: Update selected fields on one ClickUp task.
+    effect: update
+    identityMode: shared_or_personal
+    credentialSlot: api_token
+    credentialInjection:
+      in: header
+      name: Authorization
+      format: "{token}"
+    source:
+      type: http
+      method: PUT
+      baseUrl: https://api.clickup.com
+      path: /api/v2/task/{task_id}
+      parameters:
+        - name: task_id
+          in: path
+          required: true
+          schema: { type: string, minLength: 1, maxLength: 128 }
+        - name: custom_task_ids
+          in: query
+          schema: { type: boolean }
+        - name: team_id
+          in: query
+          schema: { type: string, minLength: 1, maxLength: 64 }
+    requestSchema:
+      type: object
+      minProperties: 1
+      properties:
+        name: { type: string, minLength: 1, maxLength: 1000 }
+        description: { type: string, maxLength: 100000 }
+        status: { type: string }
+        priority: { type: ["integer", "null"], minimum: 1, maximum: 4 }
+        due_date: { type: ["integer", "null"] }
+        due_date_time: { type: boolean }
+        start_date: { type: ["integer", "null"] }
+        start_date_time: { type: boolean }
+        time_estimate: { type: ["integer", "null"], minimum: 0 }
+        archived: { type: boolean }
+      additionalProperties: false
+    response:
+      maxBytes: 524288
+      schema:
+        type: object
+        properties:
+          id: { type: string }
+          name: { type: string }
+          description: { type: string }
+          status: { type: object }
+          priority: { type: ["object", "null"] }
+          archived: { type: boolean }
+          date_updated: { type: string }
+          url: { type: string }
+
+  - id: add-comment
+    name: clickup_add_comment
+    description: Add a plain-text comment to one ClickUp task.
+    effect: send
+    identityMode: shared_or_personal
+    credentialSlot: api_token
+    credentialInjection:
+      in: header
+      name: Authorization
+      format: "{token}"
+    source:
+      type: http
+      method: POST
+      baseUrl: https://api.clickup.com
+      path: /api/v2/task/{task_id}/comment
+      parameters:
+        - name: task_id
+          in: path
+          required: true
+          schema: { type: string, minLength: 1, maxLength: 128 }
+        - name: custom_task_ids
+          in: query
+          schema: { type: boolean }
+        - name: team_id
+          in: query
+          schema: { type: string, minLength: 1, maxLength: 64 }
+    requestSchema:
+      type: object
+      properties:
+        comment_text: { type: string, minLength: 1, maxLength: 100000 }
+        assignee: { type: integer }
+        group_assignee: { type: string }
+        notify_all: { type: boolean }
+      required: [comment_text, notify_all]
+      additionalProperties: false
+    response:
+      maxBytes: 65536
+      schema:
+        type: object
+        properties:
+          id: { type: string }
+          hist_id: { type: string }
+          date: { type: integer }

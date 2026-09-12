@@ -1,0 +1,458 @@
+oimVersion: "1.0"
+kind: Integration
+
+metadata:
+  id: notion
+  name: Notion
+  version: 1.0.0
+  description: Search, read, query, and add content shared with a Notion integration.
+  license: Apache-2.0
+  maintainers:
+    - name: TulipFarm
+      url: https://tulipfarm.dev
+
+profiles:
+  core: "1.1"
+  auth: "1.0"
+
+files:
+  - path: setup-guide.md
+    role: guide
+    sha256: "0b5867c6dd662c22967650d3f5fc7cc497877fb7fea3a5fab92e9ac861cbab1d"
+  - path: fixtures.yml
+    role: fixture
+    sha256: "149b21b88f42718831729425a68f2de1577c45e811e91245b291f2061e5024db"
+
+auth:
+  allowedOriginHosts:
+    - api.notion.com
+  credentialSlots:
+    - id: integration_token
+      label: Notion internal integration secret
+      kind: bearer_token
+      required: true
+  steps:
+    - id: token
+      type: fields
+      title: Create an internal integration
+      description: >-
+        Open https://www.notion.so/profile/integrations, create an internal integration, and copy
+        its secret. Enable Read content, plus Insert content if agents may write. Then open each
+        page or database you want reachable and share it with that integration — Notion returns
+        nothing that has not been shared explicitly.
+      fields:
+        - id: integration_token
+          label: Internal integration secret
+          input: password
+          required: true
+          target:
+            type: credential
+            slot: integration_token
+  healthCheckOperationId: list-users
+
+operations:
+  - id: search
+    name: notion_search
+    description: Search pages and databases shared with this integration.
+    effect: read
+    identityMode: shared_only
+    credentialSlot: integration_token
+    credentialInjection:
+      in: header
+      name: Authorization
+      format: "Bearer {token}"
+    source:
+      type: http
+      method: POST
+      baseUrl: https://api.notion.com
+      path: /v1/search
+      parameters:
+        # Notion refuses a request without this header, and the value pins the response shape the
+        # response schema below describes. It is pinned rather than an argument for that reason:
+        # an Agent that chose a different version would get a body this manifest does not describe.
+        - name: Notion-Version
+          in: header
+          value: "2022-06-28"
+          schema: { type: string }
+    requestSchema:
+      type: object
+      properties:
+        query:
+          type: string
+          description: Text to match against page and database titles.
+        page_size:
+          type: integer
+          minimum: 1
+          maximum: 100
+      additionalProperties: false
+    # Notion pages by a cursor in the request *body*, not a query parameter.
+    pagination:
+      type: body_cursor
+      requestPointer: /start_cursor
+      responsePath: /next_cursor
+      itemsPath: /results
+    response:
+      maxBytes: 524288
+      schema:
+        type: object
+        properties:
+          results:
+            type: array
+            items:
+              type: object
+              properties:
+                id: { type: string }
+                object: { type: string }
+                url: { type: string }
+                last_edited_time: { type: string }
+              required: [id, object]
+          next_cursor: { type: ["string", "null"] }
+          has_more: { type: boolean }
+        required: [results, has_more]
+      projection:
+        - /results
+        - /has_more
+    rateLimit:
+      requests: 180
+      perSeconds: 60
+      scope: connection
+
+  - id: get-page
+    name: notion_get_page
+    description: Read one page's properties by id.
+    effect: read
+    identityMode: shared_only
+    credentialSlot: integration_token
+    credentialInjection:
+      in: header
+      name: Authorization
+      format: "Bearer {token}"
+    source:
+      type: http
+      method: GET
+      baseUrl: https://api.notion.com
+      path: /v1/pages/{page_id}
+      parameters:
+        - name: page_id
+          in: path
+          required: true
+          schema: { type: string }
+        - name: Notion-Version
+          in: header
+          value: "2022-06-28"
+          schema: { type: string }
+    response:
+      maxBytes: 262144
+      schema:
+        type: object
+        properties:
+          id: { type: string }
+          url: { type: string }
+          created_time: { type: string }
+          last_edited_time: { type: string }
+          properties: { type: object }
+        required: [id, properties]
+    rateLimit:
+      requests: 180
+      perSeconds: 60
+      scope: connection
+
+  - id: list-users
+    name: notion_list_users
+    description: List workspace members visible to this integration.
+    effect: read
+    identityMode: shared_only
+    credentialSlot: integration_token
+    credentialInjection:
+      in: header
+      name: Authorization
+      format: "Bearer {token}"
+    source:
+      type: http
+      method: GET
+      baseUrl: https://api.notion.com
+      path: /v1/users
+      parameters:
+        - name: page_size
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+        - name: Notion-Version
+          in: header
+          value: "2022-06-28"
+          schema: { type: string }
+    pagination:
+      type: cursor
+      requestParameter: start_cursor
+      responsePath: /next_cursor
+      itemsPath: /results
+    response:
+      maxBytes: 131072
+      schema:
+        type: object
+        properties:
+          results:
+            type: array
+            items:
+              type: object
+              properties:
+                id: { type: string }
+                name: { type: string }
+                type: { type: string }
+              required: [id, type]
+          has_more: { type: boolean }
+        required: [results, has_more]
+      projection:
+        - /results
+        - /has_more
+    rateLimit:
+      requests: 180
+      perSeconds: 60
+      scope: connection
+
+  - id: get-block-children
+    name: notion_get_block_children
+    description: Read the first-level content blocks under a page or block.
+    effect: read
+    identityMode: shared_only
+    credentialSlot: integration_token
+    credentialInjection:
+      in: header
+      name: Authorization
+      format: "Bearer {token}"
+    source:
+      type: http
+      method: GET
+      baseUrl: https://api.notion.com
+      path: /v1/blocks/{block_id}/children
+      parameters:
+        - name: block_id
+          in: path
+          required: true
+          schema: { type: string }
+        - name: page_size
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+        - name: Notion-Version
+          in: header
+          value: "2022-06-28"
+          schema: { type: string }
+    pagination:
+      type: cursor
+      requestParameter: start_cursor
+      responsePath: /next_cursor
+      itemsPath: /results
+    response:
+      maxBytes: 524288
+      schema:
+        type: object
+        properties:
+          results:
+            type: array
+            items:
+              type: object
+              properties:
+                id: { type: string }
+                type: { type: string }
+                has_children: { type: boolean }
+              required: [id, type, has_children]
+          next_cursor: { type: ["string", "null"] }
+          has_more: { type: boolean }
+        required: [results, has_more]
+      projection:
+        - /results
+        - /has_more
+    rateLimit:
+      requests: 180
+      perSeconds: 60
+      scope: connection
+
+  - id: query-database
+    name: notion_query_database
+    description: >-
+      Query pages in a database using the API version pinned by this Connection. In newer Notion
+      versions this operation is named query a data source.
+    effect: read
+    identityMode: shared_only
+    credentialSlot: integration_token
+    credentialInjection:
+      in: header
+      name: Authorization
+      format: "Bearer {token}"
+    source:
+      type: http
+      method: POST
+      baseUrl: https://api.notion.com
+      path: /v1/databases/{database_id}/query
+      parameters:
+        - name: database_id
+          in: path
+          required: true
+          schema: { type: string }
+        - name: Notion-Version
+          in: header
+          value: "2022-06-28"
+          schema: { type: string }
+    requestSchema:
+      type: object
+      properties:
+        filter:
+          type: object
+        sorts:
+          type: array
+          maxItems: 100
+          items: { type: object }
+        page_size:
+          type: integer
+          minimum: 1
+          maximum: 100
+      additionalProperties: false
+    pagination:
+      type: body_cursor
+      requestPointer: /start_cursor
+      responsePath: /next_cursor
+      itemsPath: /results
+    response:
+      maxBytes: 524288
+      schema:
+        type: object
+        properties:
+          results:
+            type: array
+            items:
+              type: object
+              properties:
+                id: { type: string }
+                object: { type: string }
+                url: { type: string }
+                created_time: { type: string }
+                last_edited_time: { type: string }
+                properties: { type: object }
+              required: [id, object, properties]
+          next_cursor: { type: ["string", "null"] }
+          has_more: { type: boolean }
+        required: [results, has_more]
+      projection:
+        - /results
+        - /has_more
+    rateLimit:
+      requests: 180
+      perSeconds: 60
+      scope: connection
+
+  - id: create-page
+    name: notion_create_page
+    description: Create a page under a shared page or database.
+    effect: create
+    identityMode: shared_only
+    credentialSlot: integration_token
+    credentialInjection:
+      in: header
+      name: Authorization
+      format: "Bearer {token}"
+    source:
+      type: http
+      method: POST
+      baseUrl: https://api.notion.com
+      path: /v1/pages
+      parameters:
+        - name: Notion-Version
+          in: header
+          value: "2022-06-28"
+          schema: { type: string }
+    requestSchema:
+      type: object
+      required: [parent, properties]
+      properties:
+        parent:
+          type: object
+          minProperties: 1
+          maxProperties: 1
+          properties:
+            page_id: { type: string }
+            database_id: { type: string }
+          additionalProperties: false
+        properties:
+          type: object
+        children:
+          type: array
+          maxItems: 100
+          items: { type: object }
+      additionalProperties: false
+    response:
+      maxBytes: 262144
+      schema:
+        type: object
+        properties:
+          id: { type: string }
+          object: { type: string }
+          url: { type: string }
+          created_time: { type: string }
+          last_edited_time: { type: string }
+          properties: { type: object }
+        required: [id, object, properties]
+    rateLimit:
+      requests: 180
+      perSeconds: 60
+      scope: connection
+
+  - id: append-block-children
+    name: notion_append_block_children
+    description: Append up to 100 content blocks to a page or block.
+    effect: update
+    identityMode: shared_only
+    credentialSlot: integration_token
+    credentialInjection:
+      in: header
+      name: Authorization
+      format: "Bearer {token}"
+    source:
+      type: http
+      method: PATCH
+      baseUrl: https://api.notion.com
+      path: /v1/blocks/{block_id}/children
+      parameters:
+        - name: block_id
+          in: path
+          required: true
+          schema: { type: string }
+        - name: Notion-Version
+          in: header
+          value: "2022-06-28"
+          schema: { type: string }
+    requestSchema:
+      type: object
+      required: [children]
+      properties:
+        children:
+          type: array
+          minItems: 1
+          maxItems: 100
+          items: { type: object }
+      additionalProperties: false
+    response:
+      maxBytes: 524288
+      schema:
+        type: object
+        properties:
+          results:
+            type: array
+            items:
+              type: object
+              properties:
+                id: { type: string }
+                type: { type: string }
+                has_children: { type: boolean }
+              required: [id, type, has_children]
+          next_cursor: { type: ["string", "null"] }
+          has_more: { type: boolean }
+        required: [results, has_more]
+    rateLimit:
+      requests: 180
+      perSeconds: 60
+      scope: connection

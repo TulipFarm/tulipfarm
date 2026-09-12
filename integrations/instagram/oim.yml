@@ -1,0 +1,344 @@
+oimVersion: "1.0"
+kind: Integration
+
+metadata:
+  id: instagram
+  name: Instagram
+  version: 1.0.0
+  description: Read and publish images for one professional account through Instagram Login.
+  license: Apache-2.0
+  maintainers:
+    - name: TulipFarm
+      url: https://tulipfarm.dev
+
+profiles:
+  core: "1.1"
+  auth: "1.0"
+
+files:
+  - path: fixtures.yml
+    role: fixture
+    sha256: "c39bc2997693e04d514a5870883ea4d5b253cbfd4c332141081617e7f97b975f"
+  - path: setup-guide.md
+    role: guide
+    sha256: "839f1982545efe2f6708fdff2157bee8da3601e0c90aa1978f45888d272d2e6e"
+
+auth:
+  allowedOriginHosts:
+    - graph.instagram.com
+  credentialSlots:
+    - id: access_token
+      label: Long-lived Instagram User access token
+      kind: oauth2_access_token
+      required: true
+  steps:
+    - id: access_token
+      type: fields
+      title: Add an Instagram Login access token
+      description: >-
+        Generate a long-lived Instagram User token for a professional account with
+        instagram_business_basic and instagram_business_content_publish, then paste it here.
+      fields:
+        - id: access_token
+          label: Long-lived Instagram User access token
+          input: password
+          required: true
+          target:
+            type: credential
+            slot: access_token
+  healthCheckOperationId: current-account
+
+operations:
+  - id: current-account
+    name: instagram_current_account
+    description: Identify the professional Instagram account authorized by this Connection.
+    effect: read
+    identityMode: shared_only
+    credentialSlot: access_token
+    credentialInjection:
+      in: header
+      name: Authorization
+      format: "Bearer {token}"
+    source:
+      type: http
+      method: GET
+      baseUrl: https://graph.instagram.com
+      path: /v25.0/me
+      parameters:
+        - name: fields
+          in: query
+          value: id,user_id,username,name,account_type,profile_picture_url,followers_count,follows_count,media_count
+          schema: { type: string }
+    response:
+      maxBytes: 131072
+      schema:
+        type: object
+        properties:
+          data:
+            type: array
+            minItems: 1
+            items:
+              type: object
+              properties:
+                id: { type: string }
+                user_id: { type: string }
+                username: { type: string }
+                name: { type: string }
+                account_type: { type: string }
+                profile_picture_url: { type: string }
+                followers_count: { type: integer }
+                follows_count: { type: integer }
+                media_count: { type: integer }
+              required: [user_id, username]
+        required: [data]
+      projection:
+        - /data
+
+  - id: list-media
+    name: instagram_list_media
+    description: List media owned by one authorized Instagram professional account.
+    effect: read
+    identityMode: shared_only
+    credentialSlot: access_token
+    credentialInjection:
+      in: header
+      name: Authorization
+      format: "Bearer {token}"
+    source:
+      type: http
+      method: GET
+      baseUrl: https://graph.instagram.com
+      path: /v25.0/{ig_user_id}/media
+      parameters:
+        - name: ig_user_id
+          in: path
+          required: true
+          schema:
+            type: string
+            pattern: "^[0-9]+$"
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+        - name: fields
+          in: query
+          value: id,alt_text,is_ai_generated,media_type,media_url,permalink,thumbnail_url,timestamp,username
+          schema: { type: string }
+    pagination:
+      type: cursor
+      requestParameter: after
+      responsePath: /paging/cursors/after
+      itemsPath: /data
+    response:
+      maxBytes: 1048576
+      schema:
+        type: object
+        properties:
+          data:
+            type: array
+            items:
+              type: object
+              properties:
+                id: { type: string }
+                alt_text: { type: string }
+                is_ai_generated: { type: boolean }
+                media_type: { type: string }
+                media_url: { type: string }
+                permalink: { type: string }
+                thumbnail_url: { type: string }
+                timestamp: { type: string }
+                username: { type: string }
+              required: [id, media_type]
+          paging:
+            type: object
+            properties:
+              cursors:
+                type: object
+                properties:
+                  before: { type: string }
+                  after: { type: string }
+        required: [data]
+      projection:
+        - /data
+
+  - id: read-media
+    name: instagram_read_media
+    description: Read one media object owned by the authorized professional account.
+    effect: read
+    identityMode: shared_only
+    credentialSlot: access_token
+    credentialInjection:
+      in: header
+      name: Authorization
+      format: "Bearer {token}"
+    source:
+      type: http
+      method: GET
+      baseUrl: https://graph.instagram.com
+      path: /v25.0/{media_id}
+      parameters:
+        - name: media_id
+          in: path
+          required: true
+          schema:
+            type: string
+            pattern: "^[0-9]+$"
+        - name: fields
+          in: query
+          value: id,alt_text,is_ai_generated,media_type,media_url,permalink,thumbnail_url,timestamp,username
+          schema: { type: string }
+    response:
+      maxBytes: 524288
+      schema:
+        type: object
+        properties:
+          id: { type: string }
+          alt_text: { type: string }
+          is_ai_generated: { type: boolean }
+          media_type: { type: string }
+          media_url: { type: string }
+          permalink: { type: string }
+          thumbnail_url: { type: string }
+          timestamp: { type: string }
+          username: { type: string }
+        required: [id, media_type]
+      projection:
+        - /id
+        - /alt_text
+        - /is_ai_generated
+        - /media_type
+        - /media_url
+        - /permalink
+        - /thumbnail_url
+        - /timestamp
+        - /username
+
+  - id: create-image-container
+    name: instagram_create_image_container
+    description: >-
+      Create an image container from a publicly reachable JPEG URL. Creating a container does not
+      publish it.
+    effect: create
+    identityMode: shared_only
+    credentialSlot: access_token
+    credentialInjection:
+      in: header
+      name: Authorization
+      format: "Bearer {token}"
+    source:
+      type: http
+      method: POST
+      baseUrl: https://graph.instagram.com
+      path: /v25.0/{ig_user_id}/media
+      parameters:
+        - name: ig_user_id
+          in: path
+          required: true
+          schema:
+            type: string
+            pattern: "^[0-9]+$"
+    requestSchema:
+      type: object
+      properties:
+        image_url:
+          type: string
+          pattern: "^https://"
+        caption:
+          type: string
+        alt_text:
+          type: string
+        is_ai_generated:
+          type: boolean
+      required: [image_url]
+      additionalProperties: false
+    response:
+      maxBytes: 32768
+      schema:
+        type: object
+        properties:
+          id: { type: string }
+        required: [id]
+      projection:
+        - /id
+
+  - id: read-container-status
+    name: instagram_read_container_status
+    description: Check whether an Instagram media container is ready to publish.
+    effect: read
+    identityMode: shared_only
+    credentialSlot: access_token
+    credentialInjection:
+      in: header
+      name: Authorization
+      format: "Bearer {token}"
+    source:
+      type: http
+      method: GET
+      baseUrl: https://graph.instagram.com
+      path: /v25.0/{container_id}
+      parameters:
+        - name: container_id
+          in: path
+          required: true
+          schema:
+            type: string
+            pattern: "^[0-9]+$"
+        - name: fields
+          in: query
+          value: id,status_code,status
+          schema: { type: string }
+    response:
+      maxBytes: 32768
+      schema:
+        type: object
+        properties:
+          id: { type: string }
+          status_code: { type: string }
+          status: { type: string }
+        required: [id, status_code]
+      projection:
+        - /id
+        - /status_code
+        - /status
+
+  - id: publish-media
+    name: instagram_publish_media
+    description: Publish a ready image container to the authorized professional account.
+    effect: send
+    identityMode: shared_only
+    credentialSlot: access_token
+    credentialInjection:
+      in: header
+      name: Authorization
+      format: "Bearer {token}"
+    source:
+      type: http
+      method: POST
+      baseUrl: https://graph.instagram.com
+      path: /v25.0/{ig_user_id}/media_publish
+      parameters:
+        - name: ig_user_id
+          in: path
+          required: true
+          schema:
+            type: string
+            pattern: "^[0-9]+$"
+    requestSchema:
+      type: object
+      properties:
+        creation_id:
+          type: string
+          pattern: "^[0-9]+$"
+      required: [creation_id]
+      additionalProperties: false
+    response:
+      maxBytes: 32768
+      schema:
+        type: object
+        properties:
+          id: { type: string }
+        required: [id]
+      projection:
+        - /id

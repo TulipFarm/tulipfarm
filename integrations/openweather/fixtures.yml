@@ -1,0 +1,185 @@
+version: 1
+cases:
+  - name: checks-api-key-without-arguments
+    operationId: check-connection
+    request: {}
+    response:
+      status: 200
+      body:
+        cod: 200
+        name: ""
+        coord: { lat: 0, lon: 0 }
+    expect:
+      request:
+        method: GET
+        url: https://api.openweathermap.org/data/2.5/weather?lat=0&lon=0&appid=oim-fixture-credential
+      result: { cod: 200 }
+  - name: rejects-invalid-api-key
+    operationId: check-connection
+    request: {}
+    response:
+      status: 401
+      body: { cod: 401, message: Invalid API key }
+    expect:
+      request:
+        method: GET
+        url: https://api.openweathermap.org/data/2.5/weather?lat=0&lon=0&appid=oim-fixture-credential
+      expectedError:
+        phase: before_dispatch
+        code: provider_unauthorized
+        retryable: false
+  - name: gets-current-weather
+    operationId: current-weather
+    request:
+      q: London
+      units: metric
+    response:
+      status: 200
+      body:
+        name: London
+        weather:
+          - main: Clouds
+            description: overcast clouds
+        main:
+          temp: 18
+          feels_like: 17
+          humidity: 74
+        wind:
+          speed: 3.2
+    expect:
+      request:
+        method: GET
+        url: https://api.openweathermap.org/data/2.5/weather?q=London&units=metric&appid=oim-fixture-credential
+      result:
+        name: London
+        weather:
+          - main: Clouds
+            description: overcast clouds
+        main:
+          temp: 18
+          feels_like: 17
+          humidity: 74
+        wind:
+          speed: 3.2
+
+  - name: gets-current-weather-by-coordinates
+    operationId: current-weather-coordinates
+    request:
+      lat: 51.5072
+      lon: -0.1276
+      units: metric
+    response:
+      status: 200
+      body:
+        name: London
+        weather:
+          - main: Clouds
+            description: overcast clouds
+        main:
+          temp: 18
+          feels_like: 17
+          humidity: 74
+        wind:
+          speed: 3.2
+    expect:
+      request:
+        method: GET
+        url: https://api.openweathermap.org/data/2.5/weather?lat=51.5072&lon=-0.1276&units=metric&appid=oim-fixture-credential
+      result:
+        name: London
+        weather:
+          - main: Clouds
+            description: overcast clouds
+        main:
+          temp: 18
+          feels_like: 17
+          humidity: 74
+        wind:
+          speed: 3.2
+
+  - name: gets-forecast
+    operationId: forecast
+    request:
+      q: London
+      units: metric
+      cnt: 2
+    response:
+      status: 200
+      body:
+        city:
+          name: London
+        list:
+          - dt_txt: "2026-09-12 18:00:00"
+            main:
+              temp: 17
+            weather:
+              - description: light rain
+    expect:
+      request:
+        method: GET
+        url: https://api.openweathermap.org/data/2.5/forecast?q=London&units=metric&cnt=2&appid=oim-fixture-credential
+      result:
+        city:
+          name: London
+        list:
+          - dt_txt: "2026-09-12 18:00:00"
+            main:
+              temp: 17
+            weather:
+              - description: light rain
+
+  - name: gets-forecast-by-coordinates
+    operationId: forecast-coordinates
+    request:
+      lat: 51.5072
+      lon: -0.1276
+      units: metric
+      cnt: 2
+    response:
+      status: 200
+      body:
+        city:
+          name: London
+        list:
+          - dt_txt: "2026-09-12 18:00:00"
+            main:
+              temp: 17
+            weather:
+              - description: light rain
+    expect:
+      request:
+        method: GET
+        url: https://api.openweathermap.org/data/2.5/forecast?lat=51.5072&lon=-0.1276&units=metric&cnt=2&appid=oim-fixture-credential
+      result:
+        city:
+          name: London
+        list:
+          - dt_txt: "2026-09-12 18:00:00"
+            main:
+              temp: 17
+            weather:
+              - description: light rain
+
+  - name: geocodes-place
+    operationId: geocode
+    request:
+      q: London,GB
+      limit: 1
+    response:
+      status: 200
+      body:
+        - name: London
+          lat: 51.5072
+          lon: -0.1276
+          country: GB
+          state: England
+    expect:
+      request:
+        method: GET
+        url: https://api.openweathermap.org/geo/1.0/direct?q=London%2CGB&limit=1&appid=oim-fixture-credential
+      result:
+        - name: London
+          lat: 51.5072
+          lon: -0.1276
+          country: GB
+          state: England

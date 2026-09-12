@@ -1,0 +1,195 @@
+version: 1
+cases:
+  - name: identifies-professional-account
+    operationId: current-account
+    request: {}
+    response:
+      status: 200
+      body:
+        data:
+          - id: "10000000000000001"
+            user_id: "20000000000000002"
+            username: muskan_studio
+            name: Muskan Studio
+            account_type: Business
+            followers_count: 1200
+            follows_count: 75
+            media_count: 42
+    expect:
+      request:
+        method: GET
+        url: https://graph.instagram.com/v25.0/me?fields=id%2Cuser_id%2Cusername%2Cname%2Caccount_type%2Cprofile_picture_url%2Cfollowers_count%2Cfollows_count%2Cmedia_count
+        headers:
+          Authorization: Bearer oim-fixture-credential
+      result:
+        data:
+          - user_id: "20000000000000002"
+            username: muskan_studio
+            account_type: Business
+
+  - name: rejects-empty-account-response
+    operationId: current-account
+    request: {}
+    response:
+      status: 200
+      body: {}
+    expect:
+      request:
+        method: GET
+        url: https://graph.instagram.com/v25.0/me?fields=id%2Cuser_id%2Cusername%2Cname%2Caccount_type%2Cprofile_picture_url%2Cfollowers_count%2Cfollows_count%2Cmedia_count
+        headers:
+          Authorization: Bearer oim-fixture-credential
+      expectedError:
+        phase: after_dispatch
+        code: invalid_output
+        retryable: false
+
+  - name: lists-media
+    operationId: list-media
+    request:
+      ig_user_id: "20000000000000002"
+      limit: 2
+    response:
+      status: 200
+      body:
+        data:
+          - id: "30000000000000003"
+            alt_text: Product launch graphic
+            is_ai_generated: false
+            media_type: IMAGE
+            media_url: https://cdn.example.com/redacted.jpg
+            permalink: https://www.instagram.com/p/REDACTED/
+            timestamp: "2026-09-07T06:00:00+0000"
+            username: muskan_studio
+        paging:
+          cursors:
+            before: before-redacted
+            after: after-redacted
+    expect:
+      request:
+        method: GET
+        url: https://graph.instagram.com/v25.0/20000000000000002/media?limit=2&fields=id%2Calt_text%2Cis_ai_generated%2Cmedia_type%2Cmedia_url%2Cpermalink%2Cthumbnail_url%2Ctimestamp%2Cusername
+        headers:
+          Authorization: Bearer oim-fixture-credential
+      result:
+        data:
+          - id: "30000000000000003"
+            media_type: IMAGE
+
+  - name: reads-media
+    operationId: read-media
+    request:
+      media_id: "30000000000000003"
+    response:
+      status: 200
+      body:
+        id: "30000000000000003"
+        alt_text: Product launch graphic
+        is_ai_generated: false
+        media_type: IMAGE
+        media_url: https://cdn.example.com/redacted.jpg
+        permalink: https://www.instagram.com/p/REDACTED/
+        timestamp: "2026-09-07T06:00:00+0000"
+        username: muskan_studio
+    expect:
+      request:
+        method: GET
+        url: https://graph.instagram.com/v25.0/30000000000000003?fields=id%2Calt_text%2Cis_ai_generated%2Cmedia_type%2Cmedia_url%2Cpermalink%2Cthumbnail_url%2Ctimestamp%2Cusername
+        headers:
+          Authorization: Bearer oim-fixture-credential
+      result:
+        id: "30000000000000003"
+        media_type: IMAGE
+        alt_text: Product launch graphic
+
+  - name: creates-image-container
+    operationId: create-image-container
+    request:
+      ig_user_id: "20000000000000002"
+      body:
+        image_url: https://cdn.example.com/launch.jpg
+        caption: Launch update is ready.
+        alt_text: Product launch graphic
+        is_ai_generated: false
+    response:
+      status: 200
+      body:
+        id: "40000000000000004"
+    expect:
+      request:
+        method: POST
+        url: https://graph.instagram.com/v25.0/20000000000000002/media
+        headers:
+          Authorization: Bearer oim-fixture-credential
+          content-type: application/json
+        body:
+          image_url: https://cdn.example.com/launch.jpg
+          caption: Launch update is ready.
+          alt_text: Product launch graphic
+          is_ai_generated: false
+      result:
+        id: "40000000000000004"
+
+  - name: checks-container-status
+    operationId: read-container-status
+    request:
+      container_id: "40000000000000004"
+    response:
+      status: 200
+      body:
+        id: "40000000000000004"
+        status_code: FINISHED
+        status: Finished
+    expect:
+      request:
+        method: GET
+        url: https://graph.instagram.com/v25.0/40000000000000004?fields=id%2Cstatus_code%2Cstatus
+        headers:
+          Authorization: Bearer oim-fixture-credential
+      result:
+        id: "40000000000000004"
+        status_code: FINISHED
+
+  - name: publishes-image
+    operationId: publish-media
+    request:
+      ig_user_id: "20000000000000002"
+      body:
+        creation_id: "40000000000000004"
+    response:
+      status: 200
+      body:
+        id: "30000000000000005"
+    expect:
+      request:
+        method: POST
+        url: https://graph.instagram.com/v25.0/20000000000000002/media_publish
+        headers:
+          Authorization: Bearer oim-fixture-credential
+          content-type: application/json
+        body:
+          creation_id: "40000000000000004"
+      result:
+        id: "30000000000000005"
+
+  - name: rejects-invalid-credential
+    operationId: current-account
+    request: {}
+    response:
+      status: 401
+      body:
+        error:
+          message: Error validating access token.
+          type: OAuthException
+          code: 190
+          fbtrace_id: REDACTED
+    expect:
+      request:
+        method: GET
+        url: https://graph.instagram.com/v25.0/me?fields=id%2Cuser_id%2Cusername%2Cname%2Caccount_type%2Cprofile_picture_url%2Cfollowers_count%2Cfollows_count%2Cmedia_count
+        headers:
+          Authorization: Bearer oim-fixture-credential
+      expectedError:
+        phase: before_dispatch
+        code: provider_unauthorized
+        retryable: false

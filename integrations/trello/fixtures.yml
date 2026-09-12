@@ -1,0 +1,162 @@
+version: 1
+cases:
+  - name: lists-open-boards
+    operationId: list-boards
+    request:
+      filter: open
+    response:
+      status: 200
+      body:
+        - id: board-redacted
+          name: Launch board
+          desc: Release work
+          closed: false
+          url: https://trello.com/b/redacted/launch-board
+          dateLastActivity: "2026-09-07T06:00:00.000Z"
+    expect:
+      request:
+        method: GET
+        url: https://api.trello.com/1/members/me/boards?filter=open&fields=id%2Cname%2Cdesc%2Cclosed%2Curl%2CdateLastActivity&key=oim-fixture-credential&token=oim-fixture-credential
+      result:
+        - id: board-redacted
+          name: Launch board
+          closed: false
+
+  - name: creates-card
+    operationId: create-card
+    request:
+      idList: list-redacted
+      name: Review launch checklist
+      desc: Confirm every release step.
+    response:
+      status: 200
+      body:
+        id: card-redacted
+        name: Review launch checklist
+        desc: Confirm every release step.
+        closed: false
+        due: null
+        dueComplete: false
+        idBoard: board-redacted
+        idList: list-redacted
+        url: https://trello.com/c/redacted/review-launch-checklist
+    expect:
+      request:
+        method: POST
+        url: https://api.trello.com/1/cards?idList=list-redacted&name=Review+launch+checklist&desc=Confirm+every+release+step.&key=oim-fixture-credential&token=oim-fixture-credential
+      result:
+        id: card-redacted
+        name: Review launch checklist
+        idList: list-redacted
+
+  - name: rejects-invalid-credential
+    operationId: list-boards
+    request:
+      filter: open
+    response:
+      status: 401
+      body: invalid key
+    expect:
+      request:
+        method: GET
+        url: https://api.trello.com/1/members/me/boards?filter=open&fields=id%2Cname%2Cdesc%2Cclosed%2Curl%2CdateLastActivity&key=oim-fixture-credential&token=oim-fixture-credential
+      expectedError:
+        phase: before_dispatch
+        code: provider_unauthorized
+        retryable: false
+
+  - name: identifies-member
+    operationId: get-member
+    request: {}
+    response:
+      status: 200
+      body:
+        id: member-redacted
+        fullName: Muskan Vijayvargiya
+        username: muskan
+    expect:
+      request:
+        method: GET
+        url: https://api.trello.com/1/members/me?fields=fullName%2Cusername&key=oim-fixture-credential&token=oim-fixture-credential
+      result:
+        id: member-redacted
+        fullName: Muskan Vijayvargiya
+        username: muskan
+
+  - name: lists-board-lists
+    operationId: list-lists
+    request:
+      board_id: board-redacted
+      filter: open
+    response:
+      status: 200
+      body:
+        - id: list-redacted
+          name: Ready
+          closed: false
+          idBoard: board-redacted
+          pos: 16384
+    expect:
+      request:
+        method: GET
+        url: https://api.trello.com/1/boards/board-redacted/lists?filter=open&fields=id%2Cname%2Cclosed%2CidBoard%2Cpos&key=oim-fixture-credential&token=oim-fixture-credential
+      result:
+        - id: list-redacted
+          name: Ready
+          idBoard: board-redacted
+
+  - name: lists-list-cards
+    operationId: list-cards
+    request:
+      list_id: list-redacted
+    response:
+      status: 200
+      body:
+        - id: card-redacted
+          name: Review launch checklist
+          desc: Confirm every release step.
+          closed: false
+          due: null
+          dueComplete: false
+          idBoard: board-redacted
+          idList: list-redacted
+          url: https://trello.com/c/redacted/review-launch-checklist
+    expect:
+      request:
+        method: GET
+        url: https://api.trello.com/1/lists/list-redacted/cards?key=oim-fixture-credential&token=oim-fixture-credential
+      result:
+        - id: card-redacted
+          name: Review launch checklist
+          idBoard: board-redacted
+          idList: list-redacted
+
+  - name: updates-card
+    operationId: update-card
+    request:
+      card_id: card-redacted
+      name: Review final launch checklist
+      closed: false
+      dueComplete: true
+    response:
+      status: 200
+      body:
+        id: card-redacted
+        name: Review final launch checklist
+        desc: Confirm every release step.
+        closed: false
+        due: null
+        dueComplete: true
+        idBoard: board-redacted
+        idList: list-redacted
+        url: https://trello.com/c/redacted/review-launch-checklist
+    expect:
+      request:
+        method: PUT
+        url: https://api.trello.com/1/cards/card-redacted?name=Review+final+launch+checklist&closed=false&dueComplete=true&key=oim-fixture-credential&token=oim-fixture-credential
+      result:
+        id: card-redacted
+        name: Review final launch checklist
+        dueComplete: true
+        idBoard: board-redacted
+        idList: list-redacted

@@ -1,0 +1,443 @@
+oimVersion: "1.0"
+kind: Integration
+
+metadata:
+  id: reddit
+  name: Reddit
+  version: 1.0.0
+  description: >-
+    Read Reddit identity, subreddit posts and submission comments, and create comments or posts
+    through an approved Reddit OAuth app.
+  license: Apache-2.0
+  maintainers:
+    - name: TulipFarm
+      url: https://tulipfarm.dev
+
+profiles:
+  core: "1.1"
+  auth: "1.0"
+
+files:
+  - path: setup-guide.md
+    role: guide
+    sha256: "dc3d7d50ba78a4df1578d907cffe0c467d2470ba6b84167ec1038c398f20c281"
+  - path: fixtures.yml
+    role: fixture
+    sha256: "58994651d090824906e7fca1312d8d17bd660b59964027856bf7cdc6f5f069df"
+
+auth:
+  allowedOriginHosts:
+    - oauth.reddit.com
+  configurationFields:
+    - id: user_agent
+      label: Reddit User-Agent
+      type: string
+      required: true
+  credentialSlots:
+    - id: client_id
+      label: Reddit OAuth client ID
+      kind: api_key
+      required: true
+    - id: client_secret
+      label: Reddit OAuth client secret
+      kind: client_secret
+      required: true
+    - id: access_token
+      label: Reddit OAuth access token
+      kind: oauth2_access_token
+      required: true
+    - id: refresh_token
+      label: Reddit OAuth refresh token
+      kind: oauth2_refresh_token
+      required: true
+  steps:
+    - id: oauth_client
+      type: fields
+      title: Add your approved Reddit OAuth app
+      description: >-
+        Reddit must approve the app and its use before it calls the Data API. Register the exact
+        callback URL shown by TulipFarm.
+      fields:
+        - id: client_id
+          label: Client ID
+          input: text
+          required: true
+          target:
+            type: credential
+            slot: client_id
+        - id: client_secret
+          label: Client secret
+          input: password
+          required: true
+          target:
+            type: credential
+            slot: client_secret
+        - id: user_agent
+          label: User-Agent
+          description: "<platform>:<app-id>:<version> (by /u/<reddit-username>)"
+          input: text
+          required: true
+          target:
+            type: configuration
+            field: user_agent
+    - id: user_consent
+      type: oauth2
+      title: Connect your Reddit account
+      description: Authorize only the identity, read and submit scopes for the approved use.
+      authorizationUrl: https://www.reddit.com/api/v1/authorize
+      tokenUrl: https://www.reddit.com/api/v1/access_token
+      tokenEndpointAuthMethod: client_secret_basic
+      authorizationParameters:
+        duration: permanent
+      scopes:
+        - identity
+        - read
+        - submit
+      clientId:
+        type: credential
+        slot: client_id
+      clientSecret:
+        type: credential
+        slot: client_secret
+      bindings:
+        - sourcePath: /access_token
+          target:
+            type: credential
+            slot: access_token
+        - sourcePath: /refresh_token
+          target:
+            type: credential
+            slot: refresh_token
+  healthCheckOperationId: get-identity
+
+operations:
+  - id: get-identity
+    name: reddit_get_identity
+    description: Identify the Reddit account represented by this access token.
+    effect: read
+    identityMode: shared_or_personal
+    credentialSlot: access_token
+    credentialInjection:
+      in: header
+      name: Authorization
+      format: "Bearer {token}"
+    source:
+      type: http
+      method: GET
+      baseUrl: https://oauth.reddit.com
+      path: /api/v1/me
+      parameters:
+        - name: User-Agent
+          in: header
+          configurationField: user_agent
+          schema:
+            type: string
+            minLength: 10
+            maxLength: 256
+            description: >-
+              The approved app's unique Reddit User-Agent:
+              <platform>:<app-id>:<version> (by /u/<reddit-username>).
+    response:
+      maxBytes: 65536
+      schema:
+        type: object
+        properties:
+          id: { type: string }
+          name: { type: string }
+          created_utc: { type: number }
+          comment_karma: { type: integer }
+          link_karma: { type: integer }
+      projection:
+        - /id
+        - /name
+        - /created_utc
+        - /comment_karma
+        - /link_karma
+  - id: list-subreddit-posts
+    name: reddit_list_subreddit_posts
+    description: List posts from one subreddit using a documented Reddit listing order.
+    effect: read
+    identityMode: shared_or_personal
+    credentialSlot: access_token
+    credentialInjection:
+      in: header
+      name: Authorization
+      format: "Bearer {token}"
+    source:
+      type: http
+      method: GET
+      baseUrl: https://oauth.reddit.com
+      path: /r/{subreddit}/{sort}
+      parameters:
+        - name: User-Agent
+          in: header
+          configurationField: user_agent
+          schema: { type: string, minLength: 10, maxLength: 256 }
+        - name: subreddit
+          in: path
+          required: true
+          schema:
+            type: string
+            pattern: "^[A-Za-z0-9_]{2,21}$"
+        - name: sort
+          in: path
+          required: true
+          schema:
+            type: string
+            enum: [hot, new, top, rising]
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+        - name: count
+          in: query
+          schema:
+            type: integer
+            minimum: 0
+        - name: t
+          in: query
+          schema:
+            type: string
+            enum: [hour, day, week, month, year, all]
+            description: Time window used by the top listing.
+    pagination:
+      type: cursor
+      requestParameter: after
+      responsePath: /data/after
+      itemsPath: /data/children
+    response:
+      maxBytes: 1048576
+      schema:
+        type: object
+        properties:
+          kind: { type: string }
+          data:
+            type: object
+            properties:
+              after: { type: ["string", "null"] }
+              children:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    kind: { type: string }
+                    data:
+                      type: object
+                      properties:
+                        id: { type: string }
+                        name: { type: string }
+                        title: { type: string }
+                        subreddit: { type: string }
+                        author: { type: string }
+                        created_utc: { type: number }
+                        permalink: { type: string }
+                        url: { type: string }
+                        selftext: { type: string }
+      projection:
+        - /kind
+        - /data/after
+        - /data/children
+  - id: get-submission
+    name: reddit_get_submission
+    description: Read one submission and its comment tree by subreddit and base-36 post id.
+    effect: read
+    identityMode: shared_or_personal
+    credentialSlot: access_token
+    credentialInjection:
+      in: header
+      name: Authorization
+      format: "Bearer {token}"
+    source:
+      type: http
+      method: GET
+      baseUrl: https://oauth.reddit.com
+      path: /r/{subreddit}/comments/{article}
+      parameters:
+        - name: User-Agent
+          in: header
+          configurationField: user_agent
+          schema: { type: string, minLength: 10, maxLength: 256 }
+        - name: subreddit
+          in: path
+          required: true
+          schema: { type: string, pattern: "^[A-Za-z0-9_]{2,21}$" }
+        - name: article
+          in: path
+          required: true
+          schema:
+            type: string
+            pattern: "^[a-z0-9]+$"
+            description: Base-36 submission id without the t3_ prefix.
+        - name: comment
+          in: query
+          schema:
+            type: string
+            pattern: "^[a-z0-9]+$"
+        - name: context
+          in: query
+          schema:
+            type: integer
+            minimum: 0
+            maximum: 8
+        - name: depth
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+        - name: sort
+          in: query
+          schema:
+            type: string
+            enum: [confidence, top, new, controversial, old, random, qa, live]
+    response:
+      maxBytes: 2097152
+      schema:
+        type: array
+        items:
+          type: object
+          properties:
+            kind: { type: string }
+            data:
+              type: object
+              properties:
+                children: { type: array }
+      projection:
+        - /0/data/children
+        - /1/data/children
+  - id: add-comment
+    name: reddit_add_comment
+    description: Add a Markdown comment to a submission or reply to an existing comment.
+    effect: send
+    identityMode: shared_or_personal
+    credentialSlot: access_token
+    credentialInjection:
+      in: header
+      name: Authorization
+      format: "Bearer {token}"
+    source:
+      type: http
+      method: POST
+      baseUrl: https://oauth.reddit.com
+      path: /api/comment
+      contentType: form
+      parameters:
+        - name: User-Agent
+          in: header
+          configurationField: user_agent
+          schema: { type: string, minLength: 10, maxLength: 256 }
+    requestSchema:
+      type: object
+      properties:
+        api_type:
+          type: string
+          const: json
+        thing_id:
+          type: string
+          pattern: "^t[13]_[a-z0-9]+$"
+          description: Fullname of the parent submission or comment.
+        text:
+          type: string
+          minLength: 1
+          maxLength: 10000
+      required: [api_type, thing_id, text]
+      additionalProperties: false
+    response:
+      maxBytes: 262144
+      schema:
+        type: object
+        properties:
+          json:
+            type: object
+            properties:
+              errors: { type: array, maxItems: 0 }
+              data:
+                type: object
+                properties:
+                  things: { type: array }
+                required: [things]
+            required: [errors, data]
+        required: [json]
+      projection:
+        - /json/errors
+        - /json/data/things
+  - id: create-post
+    name: reddit_create_post
+    description: Create one link post or self post in a subreddit.
+    effect: send
+    identityMode: shared_or_personal
+    credentialSlot: access_token
+    credentialInjection:
+      in: header
+      name: Authorization
+      format: "Bearer {token}"
+    source:
+      type: http
+      method: POST
+      baseUrl: https://oauth.reddit.com
+      path: /api/submit
+      contentType: form
+      parameters:
+        - name: User-Agent
+          in: header
+          configurationField: user_agent
+          schema: { type: string, minLength: 10, maxLength: 256 }
+    requestSchema:
+      type: object
+      properties:
+        api_type: { type: string, const: json }
+        kind: { type: string, enum: [link, self] }
+        sr:
+          type: string
+          pattern: "^[A-Za-z0-9_]{2,21}$"
+        title:
+          type: string
+          minLength: 1
+          maxLength: 300
+        url:
+          type: string
+          maxLength: 2048
+        text:
+          type: string
+          maxLength: 40000
+        nsfw: { type: boolean }
+        spoiler: { type: boolean }
+        sendreplies: { type: boolean }
+        resubmit: { type: boolean }
+      required: [api_type, kind, sr, title]
+      additionalProperties: false
+      allOf:
+        - if:
+            properties:
+              kind: { const: link }
+          then:
+            required: [url]
+    response:
+      maxBytes: 262144
+      schema:
+        type: object
+        properties:
+          json:
+            type: object
+            properties:
+              errors: { type: array, maxItems: 0 }
+              data:
+                type: object
+                properties:
+                  url: { type: string }
+                  name: { type: string }
+                  id: { type: string }
+                required: [url, name, id]
+            required: [errors, data]
+        required: [json]
+      projection:
+        - /json/errors
+        - /json/data/url
+        - /json/data/name
+        - /json/data/id
