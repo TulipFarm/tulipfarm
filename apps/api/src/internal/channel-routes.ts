@@ -427,7 +427,12 @@ export function registerChannelInternalRoutes(
       // Resolve a redelivery of an event we already answered *before* superseding anything: a
       // replay must never cancel the Run it is a replay of.
       const replayed = await submitter.findSubmitted?.();
-      if (replayed) return reply.send({ runId: replayed.runId, outcome: "duplicate" });
+      if (replayed?.outcome === "conflict") {
+        return reply.code(409).send({ error: "idempotency_key_payload_conflict" });
+      }
+      if (replayed?.outcome === "replayed") {
+        return reply.send({ runId: replayed.runId, outcome: "duplicate" });
+      }
 
       // Then stop the earlier Run, before this one starts, so the two never execute side by side.
       await supersedeInFlightThreadRun(
@@ -446,13 +451,13 @@ export function registerChannelInternalRoutes(
         content: body.message.text,
       });
 
-      if (submission.outcome === "duplicate") {
-        return reply.send({ runId: submission.runId, outcome: "duplicate" });
+      if (submission.outcome === "conflict") {
+        return reply.code(409).send({ error: "idempotency_key_payload_conflict" });
       }
 
-      const runId = submission.run?.runId;
-      if (runId === undefined) {
-        return reply.code(409).send({ error: "run_not_started" });
+      const runId = submission.run.runId;
+      if (submission.run.replayed) {
+        return reply.send({ runId, outcome: "duplicate" });
       }
 
       await deps.runDeliveries.create({

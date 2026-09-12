@@ -154,7 +154,11 @@ describe("announceToolCalls", () => {
       status: "succeeded",
       callId: request.callId,
       output: {
-        artifact: { id: "artifact-1", component: { name: "RecordTable", version: "1.0" } },
+        artifact: {
+          id: "artifact-1",
+          revision: 4,
+          component: { name: "RecordTable", version: "1.0" },
+        },
         actionHandles: {},
       },
     }));
@@ -169,7 +173,7 @@ describe("announceToolCalls", () => {
     ]);
     expect(events.appended.at(-1)).toEqual({
       eventType: "surface.emitted",
-      payload: { artifactId: "artifact-1", componentId: "RecordTable" },
+      payload: { artifactId: "artifact-1", revision: 4, componentId: "RecordTable" },
       key: "turn-1:1:surface:emitted:call-1",
     });
   });

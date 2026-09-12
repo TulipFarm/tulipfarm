@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type { DurableInvocationGateway } from "@tulipfarm/run-kernel";
 import { CHAT_REQUEST_SCHEMA_REF } from "@tulipfarm/schema";
+import type { Queryable } from "../db";
 import {
   ConversationService,
   type ConversationStore,
@@ -38,18 +39,21 @@ function chatRunLauncher(
     id: submission.principal.id,
   };
   return {
-    start: async ({ businessId, turnId, attempt }) => {
-      const result = await invocations.start({
-        source: "chat",
-        runSource: "chat",
-        businessId,
-        initiator: principal,
-        effectiveSubject: principal,
-        definitionRef: `published:agent:${submission.agentId}`,
-        payload: submission.payload,
-        payloadSchemaRef: CHAT_REQUEST_SCHEMA_REF,
-        idempotencyKey: `${turnId}:${attempt}`,
-      });
+    start: async ({ businessId, turnId, attempt }, transaction?: Queryable) => {
+      const result = await invocations.start(
+        {
+          source: "chat",
+          runSource: "chat",
+          businessId,
+          initiator: principal,
+          effectiveSubject: principal,
+          definitionRef: `published:agent:${submission.agentId}`,
+          payload: submission.payload,
+          payloadSchemaRef: CHAT_REQUEST_SCHEMA_REF,
+          idempotencyKey: `${turnId}:${attempt}`,
+        },
+        transaction
+      );
       return { runId: result.runId };
     },
   };

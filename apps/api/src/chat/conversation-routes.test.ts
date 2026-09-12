@@ -1,3 +1,4 @@
+import { DEPLOYMENT_BUSINESS_ID } from "@tulipfarm/constants";
 import { CHAT_TITLE_MAX_LENGTH } from "@tulipfarm/schema";
 import Fastify, { type FastifyInstance } from "fastify";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -60,6 +61,51 @@ describe("restoring the latest Turn", () => {
       runId: "run-1",
       status: "running",
     });
+  });
+});
+
+describe("restoring messages after a missed terminal callback", () => {
+  let app: FastifyInstance;
+
+  afterEach(async () => {
+    await app.close();
+  });
+
+  it("reconciles the terminal Turn before reading the first message page", async () => {
+    const items: Awaited<ReturnType<MessageRepo["listByConversation"]>>["items"][number][] = [];
+    const reconcileTurn = vi.fn(async () => {
+      items.push({
+        _id: "assistant-1",
+        conversationId: "chat-1",
+        role: "assistant",
+        content: "Recovered answer.",
+        createdAt: new Date("2026-08-21T00:00:02.000Z"),
+      });
+    });
+    const messageRepo = {
+      listByConversation: vi.fn(async () => ({ items: [...items], nextCursor: null })),
+    } as unknown as MessageRepo;
+    const repo = {
+      findById: async () => ({
+        _id: "chat-1",
+        userId: "user-1",
+        createdAt: new Date("2026-08-21T00:00:00.000Z"),
+        updatedAt: new Date("2026-08-21T00:00:01.000Z"),
+      }),
+    } as unknown as ConversationRepo;
+    app = Fastify();
+    registerConversationRoutes(app, { repo, messageRepo, reconcileTurn }, async (request) => {
+      request.user = { _id: "user-1" } as UserDoc;
+    });
+    await app.ready();
+
+    const response = await app.inject({ method: "GET", url: "/api/v1/chats/chat-1/messages" });
+
+    expect(response.statusCode).toBe(200);
+    expect(reconcileTurn).toHaveBeenCalledWith(DEPLOYMENT_BUSINESS_ID, "chat-1");
+    expect(response.json().messages).toEqual([
+      expect.objectContaining({ _id: "assistant-1", content: "Recovered answer." }),
+    ]);
   });
 });
 

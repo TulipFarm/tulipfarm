@@ -57,6 +57,22 @@ export type ReserveOutcome =
   /** Same call id with different authorized arguments: refuse as an idempotency conflict. */
   | { readonly outcome: "conflict" };
 
+export interface ChildParkReplay {
+  readonly kind: "child_park";
+  readonly childRunId: string;
+  readonly waitId: string;
+}
+
+export function childParkReplay(output: unknown): ChildParkReplay | undefined {
+  if (typeof output !== "object" || output === null) return undefined;
+  const value = output as Record<string, unknown>;
+  return value.kind === "child_park" &&
+    typeof value.childRunId === "string" &&
+    typeof value.waitId === "string"
+    ? { kind: "child_park", childRunId: value.childRunId, waitId: value.waitId }
+    : undefined;
+}
+
 /** Idempotency excludes the argument digest so both unique constraints agree on conflicts. */
 function idempotencyKeyFor(input: LedgerCallInput): string {
   return derivedEffectId("chat-tool-idempotency", input.runId, input.callId, input.toolId);
@@ -80,6 +96,22 @@ function intentFor(input: LedgerCallInput): ToolIntent {
 
 export class ChatEffectLedger {
   constructor(private readonly store: EffectStore) {}
+
+  async inspect(
+    input: LedgerCallInput
+  ): Promise<Exclude<ReserveOutcome, { outcome: "reserved" }> | undefined> {
+    const intent = intentFor(input);
+    const effectId = derivedEffectId("chat-tool-effect", input.runId, input.callId, input.toolId);
+    const existing = await this.store.get(input.businessId, effectId);
+    if (existing === undefined) return undefined;
+    if (existing.intentDigest !== intentDigest(intent)) return { outcome: "conflict" };
+    return {
+      outcome: "duplicate",
+      state: existing.state,
+      outputStored: existing.outputStored,
+      output: existing.output,
+    };
+  }
 
   async reserve(input: LedgerCallInput): Promise<ReserveOutcome> {
     const intent = intentFor(input);
@@ -119,12 +151,25 @@ export class ChatEffectLedger {
     return attempt.attempt;
   }
 
+  async reopenChild(input: LedgerCallInput): Promise<{ effectId: string; attempt: number }> {
+    const effectId = derivedEffectId("chat-tool-effect", input.runId, input.callId, input.toolId);
+    const attempt = await this.store.resumeChildAttempt(
+      input.businessId,
+      effectId,
+      new Date().toISOString()
+    );
+    return {
+      effectId,
+      attempt: attempt.attempt,
+    };
+  }
+
   async finishAttempt(
     businessId: string,
     effectId: string,
     attempt: number,
     outcome: {
-      readonly state: "confirmed" | "failed" | "ambiguous";
+      readonly state: "confirmed" | "failed" | "ambiguous" | "awaiting_child";
       readonly errorCode?: string;
       readonly output?: { readonly value: unknown };
     }
@@ -133,7 +178,7 @@ export class ChatEffectLedger {
       businessId,
       effectId,
       attempt,
-      attemptState: outcome.state,
+      attemptState: outcome.state === "awaiting_child" ? "confirmed" : outcome.state,
       effectState: outcome.state,
       finishedAt: new Date().toISOString(),
       ...(outcome.output === undefined ? {} : { output: outcome.output }),

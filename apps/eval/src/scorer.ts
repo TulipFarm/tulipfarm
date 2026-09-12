@@ -13,7 +13,29 @@ export interface Observation {
    * fails with a reason instead of quietly reading nothing and calling that an omission.
    */
   readonly attachedFileIds?: readonly string[];
+  /**
+   * Binary parts read from the model adapter's provider-facing prompt.
+   *
+   * Each entry is matched back to an immutable Case File when possible. Exactness compares the
+   * emitted bytes and media metadata with that fixture, rather than trusting runtime attachments
+   * or the splitter's intermediate attached-id report.
+   */
+  readonly providerPromptFiles?: readonly {
+    readonly fileId?: string;
+    readonly part: "file" | "image";
+    readonly mediaType?: string;
+    readonly filename?: string;
+    readonly bytesExact: boolean;
+    readonly mediaTypeExact: boolean;
+    readonly filenameExact: boolean;
+  }[];
   readonly toolCalls: readonly { readonly name: string; readonly arguments: unknown }[];
+  /** L2 scripted denials, including the arguments whose authorization was refused. */
+  readonly toolDenials?: readonly {
+    readonly name: string;
+    readonly arguments: unknown;
+    readonly reason: string;
+  }[];
   /**
    * How many Tool calls each assistant message asked for, in the order the model produced them.
    *
@@ -22,6 +44,19 @@ export interface Observation {
    * instead of reading no batches and reporting that as a failure to batch.
    */
   readonly toolCallBatches?: readonly number[];
+  /** Observation from the one narrowly faulted L2 checkpoint-resume fixture. */
+  readonly checkpointReplay?: {
+    readonly crashed: boolean;
+    readonly originalBatch?: {
+      readonly callIds: readonly string[];
+      readonly modelCalls: number;
+    };
+    readonly dispatches: readonly {
+      readonly callId: string;
+      readonly modelCalls: number;
+    }[];
+    readonly effectCallIds: readonly string[];
+  };
   readonly output: ModelOutput | undefined;
   readonly status: string;
   /** Guard refusals in the order they fired. Empty means the policy let the whole turn through. */
@@ -43,6 +78,11 @@ export interface PersistedState {
   readonly events: readonly string[];
   /** Concatenated durable participant text.delta payloads; absent means not observed. */
   readonly participantText?: string;
+  /** Assistant Messages read back from persistence, including their durable metadata. */
+  readonly assistantMessages?: readonly {
+    readonly content: string;
+    readonly metadata: Readonly<Record<string, unknown>>;
+  }[];
   readonly soulCommits: readonly { readonly message: string; readonly paths: readonly string[] }[];
   /** Artifacts the active Soul publication serves, written `Kind:slug`. */
   readonly publishedArtifacts: readonly string[];
@@ -244,6 +284,32 @@ function evaluate(a: Expectation, obs: Observation): { passed: boolean; detail: 
           };
     }
 
+    case "persisted_message_metadata_equals": {
+      const persisted = obs.persisted;
+      if (persisted === undefined) return notPersisted(a.kind);
+      const messages = persisted.assistantMessages;
+      if (messages === undefined) {
+        return { passed: false, detail: "persisted assistant Messages were not observed" };
+      }
+      if (messages.length === 0) {
+        return { passed: false, detail: "the Turn persisted no assistant Message" };
+      }
+      const reads = messages
+        .map((message) => readPath(message.metadata, a.path))
+        .filter((read) => read.found);
+      if (reads.length === 0) {
+        return { passed: false, detail: `persisted assistant Messages have no path ${a.path}` };
+      }
+      return reads.some((read) => equal(read.value, a.value))
+        ? { passed: true, detail: `persisted Message metadata ${a.path} = ${show(a.value)}` }
+        : {
+            passed: false,
+            detail: `persisted Message metadata ${a.path} was ${reads
+              .map((read) => show(read.value))
+              .join(", ")}, expected ${show(a.value)}`,
+          };
+    }
+
     case "soul_committed": {
       const persisted = obs.persisted;
       if (persisted === undefined) return notPersisted(a.kind);
@@ -387,6 +453,63 @@ function evaluate(a: Expectation, obs: Observation): { passed: boolean; detail: 
       };
     }
 
+    case "provider_prompt_file_exact": {
+      const files = obs.providerPromptFiles;
+      if (files === undefined) {
+        return { passed: false, detail: "this tier does not observe the provider-facing prompt" };
+      }
+      const matching = files.filter((file) => file.fileId === a.fileId);
+      const exact = matching.find(
+        (file) =>
+          file.part === a.part && file.bytesExact && file.mediaTypeExact && file.filenameExact
+      );
+      if (exact !== undefined) {
+        return {
+          passed: true,
+          detail: `${a.fileId} reached the provider as an exact ${a.part} part`,
+        };
+      }
+      if (matching.length === 0) {
+        return {
+          passed: false,
+          detail: `${a.fileId} produced no provider-facing binary part`,
+        };
+      }
+      return {
+        passed: false,
+        detail: `${a.fileId} reached the provider with ${matching
+          .map(
+            (file) =>
+              `${file.part} bytes=${file.bytesExact ? "exact" : "changed"} ` +
+              `media=${file.mediaType ?? "missing"} filename=${file.filename ?? "missing"}`
+          )
+          .join("; ")}`,
+      };
+    }
+
+    case "provider_prompt_omits_file": {
+      const files = obs.providerPromptFiles;
+      if (files === undefined) {
+        return { passed: false, detail: "this tier does not observe the provider-facing prompt" };
+      }
+      const leaked = files.some((file) => file.fileId === a.fileId);
+      if (leaked) {
+        return {
+          passed: false,
+          detail: `${a.fileId} produced a provider-facing binary part but should not have`,
+        };
+      }
+      const unmatched = files.filter((file) => file.fileId === undefined);
+      return unmatched.length > 0
+        ? {
+            passed: false,
+            detail:
+              `${unmatched.length} provider-facing binary part(s) could not be attributed to a ` +
+              `declared File, so confinement of ${a.fileId} is unproven`,
+          }
+        : { passed: true, detail: `${a.fileId} produced no provider-facing binary part` };
+    }
+
     case "tool_called":
       return obs.toolCalls.some((c) => c.name === a.name)
         ? { passed: true, detail: `${a.name} was called` }
@@ -434,6 +557,29 @@ function evaluate(a: Expectation, obs: Observation): { passed: boolean; detail: 
           };
     }
 
+    case "tool_denied": {
+      const denials = obs.toolDenials;
+      if (denials === undefined) {
+        return { passed: false, detail: "this tier does not observe scripted Tool denials" };
+      }
+      const named = denials.filter((denial) => denial.name === a.name);
+      if (named.length === 0) return { passed: false, detail: `${a.name} was never denied` };
+      const reads = named
+        .map((denial) => readPath(denial.arguments, a.path))
+        .filter((r) => r.found);
+      if (reads.length === 0) {
+        return { passed: false, detail: `${a.name} denied calls have no path ${a.path}` };
+      }
+      return reads.some((read) => equal(read.value, a.value))
+        ? { passed: true, detail: `${a.name} denied ${a.path} = ${show(a.value)}` }
+        : {
+            passed: false,
+            detail: `${a.name} denied ${a.path} values ${reads
+              .map((read) => show(read.value))
+              .join(", ")}, expected ${show(a.value)}`,
+          };
+    }
+
     case "tool_argument_present": {
       const named = obs.toolCalls.filter((c) => c.name === a.name);
       if (named.length === 0) return { passed: false, detail: `${a.name} was never called` };
@@ -478,6 +624,53 @@ function evaluate(a: Expectation, obs: Observation): { passed: boolean; detail: 
       return {
         passed: false,
         detail: `largest batch was ${largest}, expected at least ${a.min}; ${asked}`,
+      };
+    }
+
+    case "tool_batch_replayed": {
+      const replay = obs.checkpointReplay;
+      if (replay === undefined) {
+        return { passed: false, detail: "this Trial did not exercise checkpoint replay" };
+      }
+      const original = replay.originalBatch;
+      if (original === undefined || original.callIds.length < 2) {
+        return {
+          passed: false,
+          detail: `the model produced ${
+            original === undefined ? "no Tool batch" : `${original.callIds.length} Tool call`
+          }; checkpoint replay needs at least two calls in one response`,
+        };
+      }
+      if (!replay.crashed) {
+        return {
+          passed: false,
+          detail: "the checkpoint fault never fired, so no pending Tool batch resumed",
+        };
+      }
+      const expectedDispatches = [original.callIds[0], ...original.callIds];
+      const actualDispatches = replay.dispatches.map((dispatch) => dispatch.callId);
+      if (!equal(actualDispatches, expectedDispatches)) {
+        return {
+          passed: false,
+          detail: `dispatch ids were ${show(actualDispatches)}, expected ${show(expectedDispatches)}`,
+        };
+      }
+      if (!equal(replay.effectCallIds, original.callIds)) {
+        return {
+          passed: false,
+          detail: `effect ids were ${show(replay.effectCallIds)}, expected exactly once ${show(original.callIds)}`,
+        };
+      }
+      const modelCalls = replay.dispatches.map((dispatch) => dispatch.modelCalls);
+      if (modelCalls.some((count) => count !== original.modelCalls)) {
+        return {
+          passed: false,
+          detail: `model call count advanced during replay: ${modelCalls.join(", ")}`,
+        };
+      }
+      return {
+        passed: true,
+        detail: `replayed ${original.callIds.join(", ")} before another model call; each effect ran once`,
       };
     }
 
@@ -637,6 +830,7 @@ const SEAM_INDEPENDENT: ReadonlySet<string> = new Set([
   "loop_status",
   "run_event_emitted",
   "run_event_text_omits",
+  "persisted_message_metadata_equals",
   "guardrail_blocked",
   "guardrail_allowed",
   "tool_not_called",
@@ -657,11 +851,18 @@ const SEAM_INDEPENDENT: ReadonlySet<string> = new Set([
  */
 export function seamUnreached(
   scored: readonly ExpectationResult[],
-  toolCalls: readonly { readonly name: string }[]
+  toolCalls: readonly { readonly name: string }[],
+  observation?: Observation
 ): string | undefined {
   const failed = scored.filter((e) => !e.passed);
   if (failed.length === 0) return undefined;
   if (failed.some((e) => SEAM_INDEPENDENT.has(e.expectation.kind))) return undefined;
+  if (
+    failed.some((e) => e.expectation.kind === "tool_batch_replayed") &&
+    (observation?.checkpointReplay?.originalBatch?.callIds.length ?? 0) < 2
+  ) {
+    return "multi-call Tool batch";
+  }
   for (const e of scored) {
     const tool = SEAM_TOOL[e.expectation.kind];
     if (tool !== undefined && !toolCalls.some((c) => c.name === tool)) return tool;

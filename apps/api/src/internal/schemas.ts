@@ -221,6 +221,45 @@ export const InternalTurnLookupResponseSchema = {
     conversationId: { type: "string" },
     attempt: { type: "integer" },
     previousRunId: { type: "string" },
+    history: {
+      type: "object",
+      required: ["text", "toolCalls", "surfaces", "cursor", "outcome", "complete"],
+      additionalProperties: false,
+      properties: {
+        text: { type: "string" },
+        toolCalls: { type: "array", items: MESSAGE_METADATA_SCHEMA.properties.toolCalls.items },
+        surfaces: {
+          type: "array",
+          items: {
+            type: "object",
+            required: ["artifactId", "revision"],
+            additionalProperties: false,
+            properties: {
+              artifactId: { type: "string", minLength: 1 },
+              revision: { type: "integer", minimum: 1 },
+            },
+          },
+        },
+        cursor: { type: "integer", minimum: 0 },
+        outcome: {
+          type: "string",
+          enum: ["active", "waiting", "succeeded", "failed", "cancelled"],
+        },
+        complete: { type: "boolean" },
+        wait: {
+          type: "object",
+          required: ["kind", "waitId", "callId"],
+          additionalProperties: false,
+          properties: {
+            kind: { type: "string", enum: ["approval", "child"] },
+            waitId: { type: "string" },
+            approvalId: { type: "string" },
+            childRunId: { type: "string" },
+            callId: { type: "string" },
+          },
+        },
+      },
+    },
   },
 } as const;
 
@@ -392,10 +431,11 @@ export const InternalTurnCompletionEmptyResponseSchema = {
 
 export const InternalTurnMessageBodySchema = {
   type: "object",
-  required: ["attempt", "content"],
+  required: ["attempt", "leaseGeneration", "content"],
   additionalProperties: false,
   properties: {
     attempt: { type: "integer", minimum: 1 },
+    leaseGeneration: { type: "integer", minimum: 1 },
     // Empty is legal: a Turn that only ran Tools still needs a Message to carry `toolCalls`.
     content: { type: "string" },
     metadata: MESSAGE_METADATA_SCHEMA,
@@ -404,8 +444,12 @@ export const InternalTurnMessageBodySchema = {
 
 export const InternalTurnMessageResponseSchema = {
   type: "object",
-  required: ["messageId"],
-  properties: { messageId: { type: "string" } },
+  required: ["status", "messageId"],
+  additionalProperties: false,
+  properties: {
+    status: { type: "string", enum: ["recorded", "replayed", "stale", "ownership_lost"] },
+    messageId: { type: ["string", "null"] },
+  },
 } as const;
 
 /** A Surface an attempt presented; rides with the outcome so the two cannot diverge. */
@@ -421,10 +465,11 @@ const SURFACE_LINK_SCHEMA = {
 
 export const InternalTurnCompletionRecordBodySchema = {
   type: "object",
-  required: ["attempt", "status", "cursor"],
+  required: ["attempt", "leaseGeneration", "status", "cursor"],
   additionalProperties: false,
   properties: {
     attempt: { type: "integer", minimum: 1 },
+    leaseGeneration: { type: "integer", minimum: 1 },
     status: { type: "string", enum: ["succeeded", "failed"] },
     cursor: { type: "integer", minimum: 0 },
     messageId: { type: ["string", "null"] },
@@ -438,7 +483,10 @@ export const InternalTurnCompletionRecordBodySchema = {
 export const InternalTurnCompletionRecordResponseSchema = {
   type: "object",
   required: ["status"],
-  properties: { status: { type: "string" } },
+  additionalProperties: false,
+  properties: {
+    status: { type: "string", enum: ["recorded", "replayed", "stale", "ownership_lost"] },
+  },
 } as const;
 
 export const InternalDeliveryDescriptionResponseSchema = {

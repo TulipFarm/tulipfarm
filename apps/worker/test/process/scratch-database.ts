@@ -3,6 +3,7 @@ import { PGLiteSocketServer } from "@electric-sql/pglite-socket";
 import {
   CHILD_STORAGE_STATEMENTS,
   EVENT_STORAGE_STATEMENTS,
+  LOOP_CHECKPOINT_STORAGE_STATEMENTS,
   type PersistedRun,
   type Queryable,
   RUN_STORAGE_STATEMENTS,
@@ -42,6 +43,7 @@ export async function startScratchDatabase(schemaVersion: number): Promise<Scrat
     ...WAIT_STORAGE_STATEMENTS,
     ...CHILD_STORAGE_STATEMENTS,
     ...EVENT_STORAGE_STATEMENTS,
+    ...LOOP_CHECKPOINT_STORAGE_STATEMENTS,
     ...EFFECT_STORAGE_STATEMENTS,
   ]) {
     await database.exec(statement);

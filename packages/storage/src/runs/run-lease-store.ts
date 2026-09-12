@@ -63,7 +63,7 @@ export async function reclaimExpiredRunRows(
      RETURNING runs.id, runs.business_id, runs.source, runs.bundle, runs.identity,
                runs.status, runs.version, runs.created_at, runs.started_at, runs.finished_at,
                runs.result_artifact_id, runs.error_evidence_ref, runs.lease_owner,
-               runs.lease_expires_at`,
+               runs.lease_expires_at, runs.lease_generation`,
     [businessId, now, Math.max(0, limit), DISPATCH_LEASE_EXPIRED_REF]
   );
   return result.rows.map(persistedRun);
@@ -93,13 +93,14 @@ export async function claimNextQueuedRunRows(
         SET status = 'claimed',
             version = version + 1,
             lease_owner = $2,
-            lease_expires_at = $3::timestamptz
+            lease_expires_at = $3::timestamptz,
+            lease_generation = lease_generation + 1
        FROM candidates
       WHERE runs.id = candidates.id
      RETURNING runs.id, runs.business_id, runs.source, runs.bundle, runs.identity,
                runs.status, runs.version, runs.created_at, runs.started_at, runs.finished_at,
                runs.result_artifact_id, runs.error_evidence_ref, runs.lease_owner,
-               runs.lease_expires_at`,
+               runs.lease_expires_at, runs.lease_generation`,
     [businessId, owner, leaseExpiresAt, Math.max(0, input.limit)]
   );
   return result.rows.map(persistedRun);
@@ -214,7 +215,8 @@ export async function listRecoveryCandidateRows(
   ) =>
     transaction.query<RunRow>(
       `SELECT id, business_id, source, bundle, identity, status, version, created_at, started_at,
-            finished_at, result_artifact_id, error_evidence_ref, lease_owner, lease_expires_at
+            finished_at, result_artifact_id, error_evidence_ref, lease_owner, lease_expires_at,
+            lease_generation
        FROM runs
       WHERE business_id = $1
         AND status = 'needs_reconciliation'
@@ -313,7 +315,8 @@ export async function requeueParkedRunRow(
         AND status = 'needs_reconciliation'
         AND error_evidence_ref IS NOT DISTINCT FROM $4
       RETURNING id, business_id, source, bundle, identity, status, version, created_at, started_at,
-                finished_at, result_artifact_id, error_evidence_ref, lease_owner, lease_expires_at`,
+                finished_at, result_artifact_id, error_evidence_ref, lease_owner, lease_expires_at,
+                lease_generation`,
     [businessId, runId, expectedVersion, expectedEvidenceRef, DISPATCH_REQUEUED_ONCE_REF]
   );
   return result.rows[0] === undefined ? null : persistedRun(result.rows[0]);

@@ -36,6 +36,7 @@ function run(overrides: Partial<PersistedRun> = {}): PersistedRun {
     errorEvidenceRef: null,
     leaseOwner: null,
     leaseExpiresAt: null,
+    leaseGeneration: 1,
     ...overrides,
   };
 }
@@ -228,6 +229,7 @@ function dispatcher(
     runId: string;
     stateId: string;
     state: string;
+    outputStored: boolean;
   }[] = []
 ): RunDispatcher {
   return new RunDispatcher({
@@ -318,7 +320,7 @@ describe("Run dispatch recovery", () => {
         return { status: "succeeded" };
       },
       () => AFTER_LEASE,
-      [{ runId: RUN_ID, stateId: "send", state: "dispatched" }]
+      [{ runId: RUN_ID, stateId: "send", state: "dispatched", outputStored: false }]
     ).dispatchBatch();
 
     expect(result).toMatchObject({ reclaimed: 1, requeuedParked: 0, claimed: 0 });

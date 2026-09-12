@@ -113,6 +113,7 @@ describe("loadCorpus", () => {
   it.each([
     { kind: "run_status", status: "succeeded" },
     { kind: "run_event_text_omits", text: "hello" },
+    { kind: "persisted_message_metadata_equals", path: "turnAttempt.outcome", value: "failed" },
   ])("rejects a persisted expectation on an L2 Case: $kind", async (expectation) => {
     const dir = corpusDir({
       "a.json": {
@@ -146,6 +147,77 @@ describe("loadCorpus", () => {
       },
     });
     await expect(load(dir)).rejects.toThrow(/only tier "l2" observes/);
+  });
+
+  it.each([
+    "provider_prompt_file_exact",
+    "provider_prompt_omits_file",
+    "tool_batch_replayed",
+    "tool_denied",
+  ])("rejects the L2-only %s expectation on an L3 Case", async (kind) => {
+    const expectation =
+      kind === "provider_prompt_file_exact"
+        ? { kind, fileId: "file-1", part: "file" }
+        : kind === "provider_prompt_omits_file"
+          ? { kind, fileId: "file-1" }
+          : kind === "tool_denied"
+            ? { kind, name: "file_read", path: "fileId", value: "file-1" }
+            : { kind };
+    const dir = corpusDir({
+      "a.json": { ...valid("alpha"), tier: "l3", expect: [expectation] },
+    });
+    await expect(load(dir)).rejects.toThrow(/L2-only runtime seam/);
+  });
+
+  it("rejects provider File expectations that name no declared File", async () => {
+    const dir = corpusDir({
+      "a.json": {
+        ...valid("alpha"),
+        expect: [{ kind: "provider_prompt_file_exact", fileId: "ghost", part: "file" }],
+      },
+    });
+    await expect(load(dir)).rejects.toThrow(/neither "attachments" nor "readable"/);
+  });
+
+  it("rejects a vacuous provider File omission", async () => {
+    const dir = corpusDir({
+      "a.json": {
+        ...valid("alpha"),
+        readable: [{ fileId: "file-1", mediaType: "application/pdf", name: "one.pdf" }],
+        expect: [{ kind: "provider_prompt_omits_file", fileId: "file-1" }],
+      },
+    });
+    await expect(load(dir)).rejects.toThrow(/pass vacuously/);
+  });
+
+  it("rejects checkpoint replay without the fixed crash seam", async () => {
+    const dir = corpusDir({
+      "a.json": {
+        ...valid("alpha"),
+        expect: [{ kind: "tool_batch_replayed" }],
+      },
+    });
+    await expect(load(dir)).rejects.toThrow(/needs "checkpointCrash"/);
+  });
+
+  it("rejects authored replay call ids instead of pinning vendor-generated ids", async () => {
+    const dir = corpusDir({
+      "a.json": {
+        ...valid("alpha"),
+        checkpointCrash: "after_first_tool_result",
+        script: [
+          {
+            kind: "tool_calls",
+            calls: [
+              { callId: "one", name: "write", arguments: {} },
+              { callId: "two", name: "write", arguments: {} },
+            ],
+          },
+        ],
+        expect: [{ kind: "tool_batch_replayed", callIds: ["one", "two"] }],
+      },
+    });
+    await expect(load(dir)).rejects.toThrow(/derives call ids/);
   });
 
   it("rejects a batch of one, which every model already produces", async () => {
@@ -186,6 +258,7 @@ describe("loadCorpus", () => {
       { kind: "output_matches" },
       { kind: "run_event_text_omits" },
       { kind: "run_event_text_omits", text: "" },
+      { kind: "persisted_message_metadata_equals", value: "failed" },
       { kind: "prompt_contains" },
       { kind: "tool_argument_equals", name: "t", path: "a" },
       { kind: "output_field_equals", value: 1 },

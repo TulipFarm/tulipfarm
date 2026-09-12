@@ -1,20 +1,39 @@
 import {
+  type ExposedTool,
+  InMemoryLoopCheckpointStore,
+  type ModelPort,
+  type ToolDispatchPort,
+} from "@tulipfarm/agent-runtime";
+import {
   type ArtifactContent,
   InMemoryStateConcurrencyStore,
   InMemoryStateContentionStore,
   InMemoryStateRetryStore,
   type RegisterWaitInput,
   RoutineStateScheduler,
+  RunInterruptedError,
   routineConcurrencyWaitId,
   routineEffectId,
   routineWaitId,
   STATE_CONCURRENCY_MAX_WAITS,
 } from "@tulipfarm/run-kernel";
-import { MANUAL_REQUEST_SCHEMA_REF, type routine } from "@tulipfarm/schema";
+import {
+  type AgentDefinition,
+  MANUAL_REQUEST_SCHEMA_REF,
+  type ModelProfileDefinition,
+  type routine,
+  textContent,
+} from "@tulipfarm/schema";
+import type { BundleDefinition, RuntimeBundle } from "@tulipfarm/soul";
 import type { PersistedRun, PersistedState, PersistedWait } from "@tulipfarm/storage";
-import type { StateTransitionPort } from "@tulipfarm/turn-executor";
-import { describe, expect, it } from "vitest";
-import type { RoutineAgentOutcome, RoutineAgentPort, RoutineAgentRequest } from "./agent-port";
+import type { RunEventAppendPort, StateTransitionPort } from "@tulipfarm/turn-executor";
+import { describe, expect, it, vi } from "vitest";
+import {
+  BundleRoutineAgentPort,
+  type RoutineAgentOutcome,
+  type RoutineAgentPort,
+  type RoutineAgentRequest,
+} from "./agent-port";
 import type {
   RoutineApprovalDecision,
   RoutineApprovalPort,
@@ -74,6 +93,7 @@ function run(): PersistedRun {
     errorEvidenceRef: null,
     leaseOwner: "worker-1",
     leaseExpiresAt: "2026-08-02T00:01:00.000Z",
+    leaseGeneration: 1,
   };
 }
 
@@ -737,6 +757,78 @@ describe("createRoutineExecutor — tool States", () => {
     expect(calls[0]?.requesterPrincipalId).toBe("agent:assistant");
   });
 
+  it("unwinds a lost lease without settling or starting a successor, then reclaims safely", async () => {
+    const harness = new StateHarness([state("Start")]);
+    const controller = new AbortController();
+    const actualEffects: string[] = [];
+    const stored = new Set<string>();
+    let releaseFirst: (() => void) | undefined;
+    let startedFirst: (() => void) | undefined;
+    const firstStarted = new Promise<void>((resolve) => {
+      startedFirst = resolve;
+    });
+    const firstReleased = new Promise<void>((resolve) => {
+      releaseFirst = resolve;
+    });
+    const document = definition([
+      {
+        type: "tool",
+        name: "Start",
+        toolRef: { name: "github.issue.comment", version: "1.0.0" },
+        action: "issue.comment",
+        destination: "github",
+        input: { body: INPUT_REGION_EXPRESSION },
+        transition: "Finish",
+      } as routine.RoutineState,
+      { ...commentState, name: "Finish" },
+    ]);
+    const execute = createRoutineExecutor({
+      definitions: {
+        load: async () => ({ document, bundle }) as LoadedRoutineDefinition,
+      },
+      artifacts: { read: async () => requestArtifact },
+      runs: { listStates: async () => [...harness.states.values()] },
+      scheduler: harness.scheduler,
+      transitions: harness,
+      waits: harness.waitPort,
+      tools: {
+        execute: async (request) => {
+          expect(request.signal).toBeDefined();
+          if (stored.has(request.plan.effectId)) {
+            return { kind: "succeeded", output: { replayed: true } };
+          }
+          actualEffects.push(request.plan.effectId);
+          if (request.stateKey === "Start") {
+            startedFirst?.();
+            await firstReleased;
+          }
+          stored.add(request.plan.effectId);
+          return { kind: "succeeded", output: { replayed: false } };
+        },
+      },
+      authority: () => [{ name: "routine", grants: [] }],
+      now: () => new Date(STARTED_AT),
+    });
+
+    const abandoned = execute(run(), controller.signal);
+    await firstStarted;
+    controller.abort("run_lease_lost");
+    releaseFirst?.();
+
+    await expect(abandoned).rejects.toBeInstanceOf(RunInterruptedError);
+    expect(harness.states.get("Start")?.status).toBe("running");
+    expect(harness.states.has("Finish")).toBe(false);
+    expect(actualEffects).toEqual([routineEffectId(run().id, "Start")]);
+
+    await expect(execute(run(), new AbortController().signal)).resolves.toEqual({
+      status: "succeeded",
+    });
+    expect(actualEffects).toEqual([
+      routineEffectId(run().id, "Start"),
+      routineEffectId(run().id, "Finish"),
+    ]);
+  });
+
   it("parks a Tool State when no Tool authority is composed", async () => {
     const harness = new StateHarness([state("Start")]);
     const execute = createRoutineExecutor({
@@ -1292,11 +1384,13 @@ describe("createRoutineExecutor — retry policy", () => {
     harness: StateHarness;
     agent: RoutineAgentPort;
     retries: InMemoryStateRetryStore;
+    bundle?: RuntimeBundle;
     delay?: (ms: number) => Promise<void>;
   }) {
     return createRoutineExecutor({
       definitions: {
-        load: async () => ({ document: input.document, bundle }) as LoadedRoutineDefinition,
+        load: async () =>
+          ({ document: input.document, bundle: input.bundle ?? bundle }) as LoadedRoutineDefinition,
       },
       artifacts: { read: async () => requestArtifact },
       runs: { listStates: async () => [...input.harness.states.values()] },
@@ -1307,6 +1401,108 @@ describe("createRoutineExecutor — retry policy", () => {
       retries: input.retries,
       delay: input.delay ?? (async () => {}),
       now: () => new Date(STARTED_AT),
+    });
+  }
+
+  function realAgentBundle(): RuntimeBundle {
+    const documents = [
+      {
+        kind: "Agent",
+        id: "agent-definition",
+        slug: "triage",
+        authoredVersion: 1,
+        hash: "a".repeat(64),
+        document: {
+          apiVersion: "tulipfarm.ai/v1",
+          kind: "Agent",
+          metadata: {
+            id: "01J000000000000000000AGNT",
+            slug: "triage",
+            schemaVersion: 1,
+            authoredVersion: 1,
+            lifecycle: "published",
+          },
+          spec: {
+            owner: "ops",
+            instructions: { path: "agents/triage/instructions.md" },
+            personality: "Triage the request.",
+            modelProfile: "fast",
+            autonomy: "execute_low_risk",
+            trustTier: "business_authored",
+          },
+        } as AgentDefinition,
+        references: [],
+      },
+      {
+        kind: "ModelProfile",
+        id: "profile-definition",
+        slug: "fast",
+        authoredVersion: 1,
+        hash: "b".repeat(64),
+        document: {
+          apiVersion: "tulipfarm.ai/v1",
+          kind: "ModelProfile",
+          metadata: {
+            id: "01J00000000000000000MODEL",
+            slug: "fast",
+            schemaVersion: 1,
+            authoredVersion: 1,
+            lifecycle: "published",
+          },
+          spec: {
+            provider: "anthropic",
+            model: "claude-sonnet-5",
+            reasoning: "medium",
+            supports: {
+              tools: true,
+              structuredOutput: true,
+              contextWindowTokens: 100_000,
+            },
+            allowCaching: false,
+          },
+        } as ModelProfileDefinition,
+        references: [],
+      },
+    ] as unknown as readonly BundleDefinition[];
+
+    return {
+      digest: "c".repeat(64),
+      businessId: "business-1",
+      changesetId: "changeset-1",
+      commitSha: "d".repeat(40),
+      definitions: documents,
+      assets: [],
+      get: (kind, slug) =>
+        documents.find((document) => document.kind === kind && document.slug === slug),
+      getById: (id) => documents.find((document) => document.id === id),
+      asset: () => undefined,
+    };
+  }
+
+  function realAgentPort(input: {
+    checkpoints: InMemoryLoopCheckpointStore;
+    invoke: ModelPort["invoke"];
+    events: RunEventAppendPort;
+    tools: readonly ExposedTool[];
+    dispatch: ToolDispatchPort["dispatch"];
+  }): BundleRoutineAgentPort {
+    return new BundleRoutineAgentPort({
+      model: () => ({ invoke: input.invoke }),
+      events: input.events,
+      budgets: {
+        open: async () => {},
+        consume: async () => ({
+          outcome: "allowed",
+          consumed: 1,
+          limit: null,
+          exhaustionPolicy: null,
+        }),
+      },
+      runs: { find: async () => run() },
+      checkpoints: input.checkpoints,
+      catalog: async () => input.tools,
+      tools: { dispatch: input.dispatch },
+      log: { warn: () => {} },
     });
   }
 
@@ -1452,6 +1648,146 @@ describe("createRoutineExecutor — retry policy", () => {
     expect(calls).toBe(5);
     expect((await retries.load("business-1", run().id, "Start"))?.attempts).toBe(5);
     expect(harness.transitions).toContain("Start:running->failed");
+  });
+
+  it.each(["before commit", "after commit"] as const)(
+    "does not charge terminal redelivery after an event append failure %s",
+    async (failurePoint) => {
+      const harness = new StateHarness([state("Start")]);
+      const retries = new InMemoryStateRetryStore();
+      const checkpoints = new InMemoryLoopCheckpointStore();
+      const tools: ExposedTool[] = [
+        {
+          name: "lookup",
+          inputSchema: { type: "object", properties: {}, additionalProperties: false },
+        },
+      ];
+      const invoke = vi
+        .fn<ModelPort["invoke"]>()
+        .mockRejectedValueOnce(new Error("provider unavailable"))
+        .mockResolvedValueOnce({
+          requestId: "answer-request",
+          output: { kind: "text", text: "billing" },
+          usage: { inputTokens: 1, outputTokens: 1 },
+        });
+      const dispatch = vi.fn<ToolDispatchPort["dispatch"]>(async (call) => ({
+        status: "succeeded" as const,
+        callId: call.callId,
+        output: "stored",
+      }));
+      const durableEvents = new Map<string, number>();
+      let failTerminal = true;
+      const events: RunEventAppendPort = {
+        append: async (event) => {
+          const existing = durableEvents.get(event.idempotencyKey);
+          if (existing !== undefined) return { sequence: existing };
+          const sequence = durableEvents.size + 1;
+          if (event.eventType === "turn.finished" && failTerminal) {
+            failTerminal = false;
+            if (failurePoint === "after commit") {
+              durableEvents.set(event.idempotencyKey, sequence);
+            }
+            throw new Error(`event append failed ${failurePoint}`);
+          }
+          durableEvents.set(event.idempotencyKey, sequence);
+          return { sequence };
+        },
+      };
+      await checkpoints.save({
+        businessId: "business-1",
+        runId: run().id,
+        stateId: "Start",
+        iterations: 1,
+        toolCalls: 1,
+        repairs: 0,
+        resume: {
+          retryable: true,
+          messages: [
+            {
+              role: "assistant",
+              content: textContent(
+                JSON.stringify({
+                  toolCalls: [{ callId: "lookup-1", name: "lookup", arguments: {} }],
+                })
+              ),
+            },
+            {
+              role: "tool",
+              content: textContent(JSON.stringify({ callId: "lookup-1", output: "stored" })),
+            },
+          ],
+          sequence: 3,
+          textIndex: 0,
+        },
+      });
+      const reconstruct = () =>
+        retryExecutor({
+          document: definition([retryingAgentState(2)]),
+          harness,
+          agent: realAgentPort({ checkpoints, invoke, events, tools, dispatch }),
+          retries,
+          bundle: realAgentBundle(),
+        });
+
+      await expect(reconstruct()(run())).rejects.toThrow(`event append failed ${failurePoint}`);
+      expect((await retries.load("business-1", run().id, "Start"))?.attempts).toBe(1);
+
+      await expect(reconstruct()(run())).resolves.toEqual({ status: "succeeded" });
+      expect((await retries.load("business-1", run().id, "Start"))?.attempts).toBe(2);
+      expect(invoke).toHaveBeenCalledTimes(2);
+      expect(dispatch).not.toHaveBeenCalled();
+      for (const invocation of invoke.mock.calls) {
+        expect(invocation[0].messages.some((message) => message.role === "tool")).toBe(true);
+      }
+    }
+  );
+
+  it("exhausts maxAttempts after two genuine Agent failures", async () => {
+    const harness = new StateHarness([state("Start")]);
+    const retries = new InMemoryStateRetryStore();
+    const checkpoints = new InMemoryLoopCheckpointStore();
+    const tools: ExposedTool[] = [
+      {
+        name: "lookup",
+        inputSchema: { type: "object", properties: {}, additionalProperties: false },
+      },
+    ];
+    const invoke = vi
+      .fn<ModelPort["invoke"]>()
+      .mockResolvedValueOnce({
+        requestId: "tool-request",
+        output: {
+          kind: "tool_calls",
+          calls: [{ callId: "lookup-1", name: "lookup", arguments: {} }],
+        },
+        usage: { inputTokens: 1, outputTokens: 1 },
+      })
+      .mockRejectedValueOnce(new Error("provider unavailable"))
+      .mockRejectedValueOnce(new Error("provider still unavailable"));
+    const dispatch = vi.fn<ToolDispatchPort["dispatch"]>(async (call) => ({
+      status: "succeeded" as const,
+      callId: call.callId,
+      output: "stored",
+    }));
+    const events: RunEventAppendPort = {
+      append: async () => ({ sequence: 1 }),
+    };
+    const agent = realAgentPort({ checkpoints, invoke, events, tools, dispatch });
+    const execute = retryExecutor({
+      document: definition([retryingAgentState(2)]),
+      harness,
+      agent,
+      retries,
+      bundle: realAgentBundle(),
+    });
+
+    await expect(execute(run())).resolves.toEqual({
+      status: "failed",
+      errorEvidenceRef: "routine:agent_model_error",
+    });
+    expect((await retries.load("business-1", run().id, "Start"))?.attempts).toBe(2);
+    expect(invoke).toHaveBeenCalledTimes(3);
+    expect(dispatch).toHaveBeenCalledTimes(1);
   });
 });
 

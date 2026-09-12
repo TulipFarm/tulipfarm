@@ -1,11 +1,16 @@
 import {
   AgentLoop,
+  type AgentLoopCheckpoint,
   type AgentLoopFailureReason,
   type AgentLoopInput,
+  type AgentLoopOutcome,
   assembleSystemPrompt,
   InMemoryLoopCheckpointStore,
   type ModelOutput,
   type ModelPort,
+  type ToolDispatchPort,
+  type ToolDispatchRequest,
+  type ToolDispatchResult,
 } from "@tulipfarm/agent-runtime";
 import { splitPrompt } from "@tulipfarm/model-adapter";
 import { textContent } from "@tulipfarm/schema";
@@ -23,6 +28,7 @@ import { runPersistedTurn } from "./l3/tier.ts";
 import { measureNoise, type NoiseFloor } from "./noise.ts";
 import { exposedToolsFor } from "./platform-tools.ts";
 import type { SweepProgress } from "./progress.ts";
+import { observeProviderPromptFiles } from "./provider-prompt.ts";
 import { guardUnexercised } from "./red-team.ts";
 import { measureResistance, type ResistanceRate } from "./resistance.ts";
 import { DEFAULT_RETRY, type RetryPolicy, withRetry } from "./retry.ts";
@@ -196,6 +202,59 @@ function isVendorFault(reason: AgentLoopFailureReason): boolean {
   return reason.startsWith("model_") || reason === "empty_model_output";
 }
 
+class CrashAfterFirstToolResultStore extends InMemoryLoopCheckpointStore {
+  readonly crash = new Error("eval checkpoint fault after first Tool result");
+  crashed = false;
+
+  override async save(checkpoint: AgentLoopCheckpoint): Promise<void> {
+    if (!this.crashed && checkpoint.resume?.pendingBatch?.nextCallIndex === 1) {
+      this.crashed = true;
+      throw this.crash;
+    }
+    await super.save(checkpoint);
+  }
+}
+
+function checkpointReplayFixture(
+  delegate: ToolDispatchPort,
+  modelCalls: () => number
+): {
+  readonly checkpoints: CrashAfterFirstToolResultStore;
+  readonly port: ToolDispatchPort;
+  recordOriginalBatch(callIds: readonly string[], modelCalls: number): void;
+  observation(): NonNullable<Observation["checkpointReplay"]>;
+} {
+  const checkpoints = new CrashAfterFirstToolResultStore();
+  const dispatches: { callId: string; modelCalls: number }[] = [];
+  const effectCallIds: string[] = [];
+  const results = new Map<string, ToolDispatchResult>();
+  let originalBatch: { callIds: readonly string[]; modelCalls: number } | undefined;
+  const port: ToolDispatchPort = {
+    dispatch: async (request: ToolDispatchRequest) => {
+      dispatches.push({ callId: request.callId, modelCalls: modelCalls() });
+      const replayed = results.get(request.callId);
+      if (replayed !== undefined) return replayed;
+      const result = await delegate.dispatch(request);
+      results.set(request.callId, result);
+      effectCallIds.push(request.callId);
+      return result;
+    },
+  };
+  return {
+    checkpoints,
+    port,
+    recordOriginalBatch: (callIds, calls) => {
+      originalBatch ??= { callIds, modelCalls: calls };
+    },
+    observation: () => ({
+      crashed: checkpoints.crashed,
+      dispatches,
+      effectCallIds,
+      ...(originalBatch === undefined ? {} : { originalBatch }),
+    }),
+  };
+}
+
 async function scored(
   evalCase: EvalCase,
   trial: number,
@@ -225,7 +284,7 @@ async function scored(
     ...(evalCase.redTeam?.outcome === "model_resisted" ? { probabilistic: true as const } : {}),
     ...(guardrails.length > 0 ? { guarded: true as const } : {}),
     ...(guardUnexercised(expectations, guardrails) ||
-    seamUnreached(expectations, observation.toolCalls) !== undefined
+    seamUnreached(expectations, observation.toolCalls, full) !== undefined
       ? { unexercised: true as const }
       : {}),
     ...(evalCase.redTeam === undefined ? {} : { vulnerability: evalCase.redTeam.class }),
@@ -270,6 +329,7 @@ async function runL3Trial(
         turnStatus: turn.turnStatus,
         events: turn.events,
         participantText: turn.participantText,
+        assistantMessages: turn.assistantMessages,
         soulCommits: turn.soulCommits,
         publishedArtifacts: turn.publishedArtifacts,
         generatedFiles: turn.generatedFiles,
@@ -302,6 +362,11 @@ async function runTrial(
   const tools = toolDispatcher(evalCase);
   const guards = turnGuardrails(soul, `${evalCase.id}#${trial}`);
   let lastOutput: ModelOutput | undefined;
+  const attached = (evalCase.attachments ?? []).map(synthesizeAttachment);
+  const declaredFiles = [
+    ...(evalCase.attachments ?? []).map(synthesizeAttachment),
+    ...(evalCase.readable ?? []).map(synthesizeAttachment),
+  ];
 
   // The real assembler runs here, over the real Soul. Without either, the tier would measure the
   // Tool loop against a hand-written prompt and would never notice a Context-assembly regression.
@@ -329,18 +394,33 @@ async function runTrial(
   // What the production prompt splitter actually emitted, not a second opinion about what it
   // should have. A Case asserting confinement has to read the same traversal that sends the bytes.
   const attachedFileIds = new Set<string>();
+  const providerFiles: NonNullable<Observation["providerPromptFiles"]>[number][] = [];
   // Counted here rather than off the loop's results because only this seam sees a model response
   // whole: by the time the loop has dispatched them, four calls from one message and four calls
   // from four messages are the same flat list.
   const toolCallBatches: number[] = [];
+  let modelCalls = 0;
+  const replay =
+    evalCase.checkpointCrash === "after_first_tool_result"
+      ? checkpointReplayFixture(tools.port, () => modelCalls)
+      : undefined;
   const model: ModelPort = {
     invoke: async (request) => {
-      for (const id of splitPrompt(request.messages, request.attachments).attached) {
+      modelCalls += 1;
+      const converted = splitPrompt(request.messages, request.attachments);
+      for (const id of converted.attached) {
         attachedFileIds.add(id);
       }
+      providerFiles.push(...observeProviderPromptFiles(converted.messages, declaredFiles));
       const result = await port.invoke(request);
       lastOutput = result.output;
-      if (result.output.kind === "tool_calls") toolCallBatches.push(result.output.calls.length);
+      if (result.output.kind === "tool_calls") {
+        toolCallBatches.push(result.output.calls.length);
+        replay?.recordOriginalBatch(
+          result.output.calls.map((call) => call.callId),
+          modelCalls
+        );
+      }
       spend = addSpend(spend, result.usage);
       return result;
     },
@@ -363,10 +443,14 @@ async function runTrial(
     // Agent's autonomy ceiling sits inside the guards, matching production's order: policy decides
     // before the ceiling is consulted about what is left.
     tools: guards.guard(
-      capabilityBoundedDispatch(soul, evalCase, autonomyBoundedDispatch(soul, evalCase, tools.port))
+      capabilityBoundedDispatch(
+        soul,
+        evalCase,
+        autonomyBoundedDispatch(soul, evalCase, replay?.port ?? tools.port)
+      )
     ),
     ...readableLibrary(evalCase),
-    checkpoints: new InMemoryLoopCheckpointStore(),
+    checkpoints: replay?.checkpoints ?? new InMemoryLoopCheckpointStore(),
     events: { append: async () => {} },
     budget: { consume: async () => ({ outcome: "allowed" }) },
     isCancelled: async () => false,
@@ -377,16 +461,18 @@ async function runTrial(
     // Ordering is the driver's: bytes are resolved first because nothing can screen text it has
     // not read, then the input guard settles the turn before any model or Tool work — so a
     // refused request must cost nothing and must never reach the vendor.
-    const attached = (evalCase.attachments ?? []).map(synthesizeAttachment);
     const guarded = await guardInput(guards, evalCase.input, await screenableText(attached));
     if (guarded.blocked) {
       return await scored(evalCase, trial, vacuous, spend, retries, guards.decisions, judge, {
         systemPrompt,
         toolCalls: [],
+        toolDenials: [],
         toolCallBatches: [],
         output: { kind: "text", text: guarded.message },
         status: "completed",
         attachedFileIds: [...attachedFileIds],
+        providerPromptFiles: providerFiles,
+        ...(replay === undefined ? {} : { checkpointReplay: replay.observation() }),
       });
     }
 
@@ -403,7 +489,13 @@ async function runTrial(
       ...(attached.length === 0 ? {} : { attachments: attached }),
     };
 
-    const outcome = await loop.run(input);
+    let outcome: AgentLoopOutcome;
+    try {
+      outcome = await loop.run(input);
+    } catch (cause) {
+      if (replay === undefined || cause !== replay.checkpoints.crash) throw cause;
+      outcome = await loop.run(input);
+    }
 
     // A vendor call that died is not a verdict on the harness. Scoring a rate-limit as a Case
     // failure is precisely the confound this framework exists to remove, so it is counted apart.
@@ -416,8 +508,11 @@ async function runTrial(
     return await scored(evalCase, trial, vacuous, spend, retries, guards.decisions, judge, {
       systemPrompt,
       attachedFileIds: [...attachedFileIds],
+      providerPromptFiles: providerFiles,
       toolCalls: tools.calls,
+      toolDenials: tools.denials,
       toolCallBatches,
+      ...(replay === undefined ? {} : { checkpointReplay: replay.observation() }),
       // The output guard is the last thing production runs before an answer becomes durable, so a
       // Case scores the text a participant would actually have received.
       output: await guardOutput(guards, answered),

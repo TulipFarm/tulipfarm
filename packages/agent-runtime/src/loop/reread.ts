@@ -80,7 +80,7 @@ export async function resolveIterationAttachments(
   const fetched = await Promise.all(
     reread.map(async (file) => {
       const data = await port.read(runId, file.fileId);
-      return data === undefined ? undefined : { ...file, data };
+      return data === undefined ? undefined : { ...file, data, source: "tool" as const };
     })
   );
   return mergeAttachments(

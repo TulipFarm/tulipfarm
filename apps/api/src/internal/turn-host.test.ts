@@ -20,13 +20,20 @@ import {
 
 const NOW = new Date("2026-07-27T00:01:00.000Z");
 
-function makeHost(options: { runs?: HostedRunReader; store?: FakeConversationStore } = {}) {
+function makeHost(
+  options: {
+    runs?: HostedRunReader;
+    store?: FakeConversationStore;
+    events?: ConstructorParameters<typeof InternalTurnHost>[0]["events"];
+  } = {}
+) {
   const store = options.store ?? new FakeConversationStore();
   const seen: { context: TurnAuthority[]; tools: RunAuthority[] } = { context: [], tools: [] };
   let issued = 0;
   const host = new InternalTurnHost({
     runs: options.runs ?? fakeRuns(),
     store,
+    ...(options.events === undefined ? {} : { events: options.events }),
     context: {
       async resolve(authority) {
         seen.context.push(authority);
@@ -57,6 +64,108 @@ function makeHost(options: { runs?: HostedRunReader; store?: FakeConversationSto
 }
 
 describe("InternalTurnHost", () => {
+  it("reconstructs participant-safe attempt history after a restart", async () => {
+    const store = new FakeConversationStore();
+    store.turns.push(turn());
+    store.messages.push({
+      id: "reply-1",
+      businessId: BUSINESS_ID,
+      conversationId: CONVERSATION_ID,
+      turnId: TURN_ID,
+      role: "assistant",
+      content: textContent("Already checked. "),
+      metadata: {
+        toolCalls: [{ callId: "call-1", name: "record_list", argsDigest: "sha256:args" }],
+        surfaces: [{ artifactId: "artifact-1", revision: 6 }],
+        turnAttempt: {
+          runId: RUN_ID,
+          attempt: 1,
+          cursor: 2,
+          outcome: "waiting",
+          complete: false,
+        },
+      },
+      attempt: 1,
+      createdAt: CREATED_AT,
+    });
+    const { host } = makeHost({
+      store,
+      events: {
+        list: async (_businessId, _runId, options) =>
+          options.after < 6
+            ? [
+                {
+                  businessId: BUSINESS_ID,
+                  runId: RUN_ID,
+                  sequence: 3,
+                  eventType: "tool.result",
+                  audience: "participant",
+                  payload: {
+                    callId: "call-1",
+                    status: "ok",
+                    resultPreview: { json: '{"count":2}', bytes: 11 },
+                  },
+                  occurredAt: NOW.toISOString(),
+                },
+                {
+                  businessId: BUSINESS_ID,
+                  runId: RUN_ID,
+                  sequence: 4,
+                  eventType: "text.delta",
+                  audience: "participant",
+                  payload: { text: "Done.", index: 1 },
+                  occurredAt: NOW.toISOString(),
+                },
+                {
+                  businessId: BUSINESS_ID,
+                  runId: RUN_ID,
+                  sequence: 5,
+                  eventType: "approval.requested",
+                  audience: "participant",
+                  payload: { waitId: "wait-1", intentId: "approval-1", callId: "call-2" },
+                  occurredAt: NOW.toISOString(),
+                },
+                {
+                  businessId: BUSINESS_ID,
+                  runId: RUN_ID,
+                  sequence: 6,
+                  eventType: "surface.emitted",
+                  audience: "participant",
+                  payload: { artifactId: "artifact-2", revision: 3 },
+                  occurredAt: NOW.toISOString(),
+                },
+              ]
+            : [],
+      },
+    });
+
+    await expect(host.describeTurn(BUSINESS_ID, RUN_ID)).resolves.toMatchObject({
+      history: {
+        text: "Already checked. Done.",
+        cursor: 6,
+        toolCalls: [
+          {
+            callId: "call-1",
+            name: "record_list",
+            argsDigest: "sha256:args",
+            outcome: "ok",
+            resultPreview: { json: '{"count":2}', bytes: 11 },
+          },
+        ],
+        surfaces: [
+          { artifactId: "artifact-1", revision: 6 },
+          { artifactId: "artifact-2", revision: 3 },
+        ],
+        wait: {
+          kind: "approval",
+          waitId: "wait-1",
+          approvalId: "approval-1",
+          callId: "call-2",
+        },
+      },
+    });
+  });
+
   it("takes the subject from the Run, not from whoever asked", async () => {
     const store = new FakeConversationStore();
     store.turns.push(turn());
@@ -129,6 +238,7 @@ describe("InternalTurnHost", () => {
     const { messageId } = await host.appendAssistantMessage({
       businessId: BUSINESS_ID,
       runId: RUN_ID,
+      leaseGeneration: 1,
       attempt: 2,
       content: "the answer",
       metadata: {
@@ -174,14 +284,17 @@ describe("InternalTurnHost", () => {
     store.turns.push(turn());
     const { host } = makeHost({ store });
 
-    await host.completeTurn({
-      businessId: BUSINESS_ID,
-      runId: RUN_ID,
-      attempt: 1,
-      status: "succeeded",
-      cursor: 12,
-      messageId: "message-1",
-    });
+    await expect(
+      host.completeTurn({
+        businessId: BUSINESS_ID,
+        runId: RUN_ID,
+        leaseGeneration: 1,
+        attempt: 1,
+        status: "succeeded",
+        cursor: 12,
+        messageId: "message-1",
+      })
+    ).resolves.toEqual({ status: "recorded" });
 
     expect(store.completions).toEqual([
       {
@@ -201,26 +314,83 @@ describe("InternalTurnHost", () => {
     await expect(host.findCompletion(BUSINESS_ID, RUN_ID, 2)).resolves.toBeUndefined();
   });
 
-  it("lets a superseded attempt record its outcome without restating the Turn's", async () => {
+  it("ignores a superseded attempt without recording stale completion state", async () => {
     const store = new FakeConversationStore();
-    store.turns.push(turn({ attempt: 2, status: "succeeded", cursor: 12, updatedAt: CREATED_AT }));
+    store.turns.push(
+      turn({
+        attempt: 2,
+        runId: RUN_ID,
+        status: "succeeded",
+        cursor: 12,
+        updatedAt: CREATED_AT,
+      })
+    );
     const { host } = makeHost({ store });
 
     // Attempt 1 dying late must not tell every reader the conversation broke.
     await host.completeTurn({
       businessId: BUSINESS_ID,
       runId: RUN_ID,
+      leaseGeneration: 1,
       attempt: 1,
       status: "failed",
       cursor: 3,
       messageId: null,
     });
 
-    expect(store.completions).toHaveLength(1);
+    expect(store.completions).toHaveLength(0);
     expect(store.turns[0]).toMatchObject({
       status: "succeeded",
       cursor: 12,
       updatedAt: CREATED_AT,
     });
+  });
+
+  it("fences a completion when retry wins after the authority snapshot", async () => {
+    const store = new FakeConversationStore();
+    store.turns.push(turn());
+    store.onFindTurnByRunId = () => {
+      store.turns[0] = turn({
+        attempt: 2,
+        runId: "run-2",
+        supersededRunIds: [RUN_ID],
+      });
+    };
+    const { host } = makeHost({ store });
+
+    const appended = await host.appendAssistantMessage({
+      businessId: BUSINESS_ID,
+      runId: RUN_ID,
+      leaseGeneration: 1,
+      attempt: 1,
+      content: "stale answer",
+    });
+    expect(appended).toEqual({ status: "stale", messageId: null });
+    expect(store.messages).toEqual([]);
+
+    store.turns[0] = turn();
+    store.onFindTurnByRunId = () => {
+      store.turns[0] = turn({
+        attempt: 2,
+        runId: "run-2",
+        supersededRunIds: [RUN_ID],
+      });
+    };
+    await expect(
+      host.completeTurn({
+        businessId: BUSINESS_ID,
+        runId: RUN_ID,
+        leaseGeneration: 1,
+        attempt: 1,
+        status: "succeeded",
+        cursor: 4,
+        messageId: appended.messageId,
+        surfaces: [{ artifactId: "surface-1", revision: 1 }],
+      })
+    ).resolves.toEqual({ status: "stale" });
+
+    expect(store.surfaceMessages).toEqual([]);
+    expect(store.completions).toEqual([]);
+    expect(store.turns[0]).toMatchObject({ attempt: 2, runId: "run-2", status: "running" });
   });
 });

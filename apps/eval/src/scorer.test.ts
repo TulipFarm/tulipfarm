@@ -30,6 +30,39 @@ describe("prompt expectations", () => {
     expect(only({ kind: "prompt_omits", text: "SECRET" }).passed).toBe(true);
     expect(only({ kind: "prompt_omits", text: "Never guess a status." }).passed).toBe(false);
   });
+
+  it("requires exact provider-facing bytes and metadata", () => {
+    const observed: Observation = {
+      ...base,
+      providerPromptFiles: [
+        {
+          fileId: "file-1",
+          part: "file",
+          mediaType: "application/pdf",
+          filename: "invoice.pdf",
+          bytesExact: true,
+          mediaTypeExact: true,
+          filenameExact: true,
+        },
+      ],
+    };
+    expect(
+      only({ kind: "provider_prompt_file_exact", fileId: "file-1", part: "file" }, observed).passed
+    ).toBe(true);
+    expect(
+      only({ kind: "provider_prompt_file_exact", fileId: "file-1", part: "image" }, observed).passed
+    ).toBe(false);
+  });
+
+  it("does not turn a missing provider-prompt observation into an omission pass", () => {
+    expect(only({ kind: "provider_prompt_omits_file", fileId: "file-1" }).passed).toBe(false);
+    expect(
+      only(
+        { kind: "provider_prompt_omits_file", fileId: "file-1" },
+        { ...base, providerPromptFiles: [] }
+      ).passed
+    ).toBe(true);
+  });
 });
 
 describe("tool expectations", () => {
@@ -75,6 +108,30 @@ describe("tool expectations", () => {
     expect(only({ kind: "tool_call_count", count: 3 }).passed).toBe(false);
   });
 
+  it("ties a denial to the arguments of the refused call", () => {
+    const observed: Observation = {
+      ...base,
+      toolDenials: [
+        {
+          name: "file_read",
+          arguments: { fileId: "file-revoked" },
+          reason: "access revoked",
+        },
+      ],
+    };
+    expect(
+      only(
+        {
+          kind: "tool_denied",
+          name: "file_read",
+          path: "fileId",
+          value: "file-revoked",
+        },
+        observed
+      ).passed
+    ).toBe(true);
+  });
+
   it("names the calls it counted, so a wrong count can be acted on", () => {
     // A bare count cannot distinguish a harness re-dispatching one call from a model choosing to
     // split its work, and recovering the difference costs another Sweep against a paid seat.
@@ -118,6 +175,59 @@ describe("how the model grouped its Tool calls", () => {
     const r = only({ kind: "tool_calls_batched", min: 2 });
     expect(r.passed).toBe(false);
     expect(r.detail).toContain("does not observe");
+  });
+
+  it("proves checkpoint replay kept call ids without another model call or duplicate effect", () => {
+    const observation: Observation = {
+      ...base,
+      checkpointReplay: {
+        crashed: true,
+        originalBatch: { callIds: ["write-1", "write-2"], modelCalls: 1 },
+        dispatches: [
+          { callId: "write-1", modelCalls: 1 },
+          { callId: "write-1", modelCalls: 1 },
+          { callId: "write-2", modelCalls: 1 },
+        ],
+        effectCallIds: ["write-1", "write-2"],
+      },
+    };
+    expect(only({ kind: "tool_batch_replayed" }, observation).passed).toBe(true);
+  });
+
+  it("fails replay coverage when the checkpoint fault never fired", () => {
+    const observation: Observation = {
+      ...base,
+      checkpointReplay: {
+        crashed: false,
+        originalBatch: { callIds: ["write-1", "write-2"], modelCalls: 1 },
+        dispatches: [
+          { callId: "write-1", modelCalls: 1 },
+          { callId: "write-2", modelCalls: 1 },
+        ],
+        effectCallIds: ["write-1", "write-2"],
+      },
+    };
+    const result = only({ kind: "tool_batch_replayed" }, observation);
+    expect(result.passed).toBe(false);
+    expect(result.detail).toContain("never fired");
+  });
+
+  it("does not pass replay coverage when the model produced no multi-call batch", () => {
+    const observation: Observation = {
+      ...base,
+      checkpointReplay: {
+        crashed: true,
+        originalBatch: { callIds: ["write-1"], modelCalls: 1 },
+        dispatches: [
+          { callId: "write-1", modelCalls: 1 },
+          { callId: "write-1", modelCalls: 1 },
+        ],
+        effectCallIds: ["write-1"],
+      },
+    };
+    const result = only({ kind: "tool_batch_replayed" }, observation);
+    expect(result.passed).toBe(false);
+    expect(result.detail).toContain("at least two");
   });
 });
 
@@ -491,6 +601,73 @@ describe("run_event_text_omits", () => {
   });
 });
 
+describe("persisted_message_metadata_equals", () => {
+  const observed = (
+    assistantMessages?: NonNullable<Observation["persisted"]>["assistantMessages"]
+  ): Observation => ({
+    ...base,
+    persisted: {
+      runStatus: "failed",
+      stateStatus: "failed",
+      turnStatus: "failed",
+      events: ["turn.finished"],
+      assistantMessages,
+      soulCommits: [],
+      publishedArtifacts: [],
+      generatedFiles: [],
+    },
+  });
+
+  it("reads nested durable Message metadata", () => {
+    const observation = observed([
+      {
+        content: "Order 104 is ready.",
+        metadata: {
+          toolCalls: [{ callId: "lookup-104", name: "lookup_order", outcome: "ok" }],
+          turnAttempt: { outcome: "failed", complete: true },
+        },
+      },
+    ]);
+
+    expect(
+      only(
+        {
+          kind: "persisted_message_metadata_equals",
+          path: "toolCalls.0.name",
+          value: "lookup_order",
+        },
+        observation
+      ).passed
+    ).toBe(true);
+    expect(
+      only(
+        {
+          kind: "persisted_message_metadata_equals",
+          path: "turnAttempt.complete",
+          value: true,
+        },
+        observation
+      ).passed
+    ).toBe(true);
+  });
+
+  it("fails when no assistant Message was persisted", () => {
+    expect(
+      only(
+        {
+          kind: "persisted_message_metadata_equals",
+          path: "turnAttempt.outcome",
+          value: "failed",
+        },
+        observed([])
+      )
+    ).toMatchObject({
+      passed: false,
+      detail: expect.stringContaining("no assistant Message"),
+    });
+  });
+});
+
 describe("an Expectation whose seam a Tool call has to open", () => {
   const fail = (expectation: Expectation): ExpectationResult => ({
     expectation,
@@ -542,6 +719,22 @@ describe("an Expectation whose seam a Tool call has to open", () => {
       fail({ kind: "run_event_text_omits", text: "4111 1111 1111 1111" }),
     ];
     expect(seamUnreached(scored, [])).toBeUndefined();
+  });
+
+  it("holds out replay when the model did not produce a multi-call batch", () => {
+    const expectation: Expectation = { kind: "tool_batch_replayed" };
+    const observation: Observation = {
+      ...base,
+      checkpointReplay: {
+        crashed: true,
+        originalBatch: { callIds: ["write-1"], modelCalls: 1 },
+        dispatches: [],
+        effectCallIds: [],
+      },
+    };
+    expect(seamUnreached([fail(expectation)], base.toolCalls, observation)).toBe(
+      "multi-call Tool batch"
+    );
   });
 });
 

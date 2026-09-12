@@ -21,6 +21,7 @@ export interface EmitEventInput {
   readonly eventType: string;
   readonly eventVersion: number;
   readonly data: Record<string, unknown>;
+  readonly signal?: AbortSignal;
 }
 
 export interface EmitPort {
@@ -46,7 +47,8 @@ export class HttpEmitPort implements EmitPort {
         eventType: input.eventType,
         eventVersion: input.eventVersion,
         data: input.data,
-      }
+      },
+      { ...(input.signal === undefined ? {} : { signal: input.signal }) }
     );
   }
 }

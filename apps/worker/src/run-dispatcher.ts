@@ -1,3 +1,4 @@
+import type { LoopCheckpointStore } from "@tulipfarm/agent-runtime";
 import type { RunLeaseManager, RunRecoveryManager } from "@tulipfarm/run-kernel";
 import {
   DISPATCH_HANDLER_ERROR_REF,
@@ -16,6 +17,8 @@ export interface RunDispatcherOptions {
   businessId: string;
   owner: string;
   handler: (run: PersistedRun, signal: AbortSignal) => Promise<RunOutcome>;
+  /** Retires terminal delivery only after the Run transition is durable. */
+  checkpoints?: Pick<LoopCheckpointStore, "settle">;
   /** Process drain signal. An active handler is aborted and its lease is left to expire safely. */
   signal?: AbortSignal;
   /**
@@ -156,6 +159,7 @@ export class RunDispatcher {
           ...(releaseEvidenceRef === undefined ? {} : { errorEvidenceRef: releaseEvidenceRef }),
         };
         if (releaseStatus === "succeeded" || releaseStatus === "failed") {
+          await this.clearTerminalCheckpoints(settledRun);
           await this.notifyTerminal(settledRun, releaseStatus);
         }
         if (releaseStatus === "waiting") {
@@ -171,7 +175,7 @@ export class RunDispatcher {
           `run dispatch failed run=${run.id} business=${this.options.businessId} source=${run.source} — ${exhausted ? "already requeued once, failing" : "parking at needs_reconciliation"}`,
           error
         );
-        await this.options.leases.release({
+        const released = await this.options.leases.release({
           businessId: this.options.businessId,
           runId: run.id,
           expectedVersion: version,
@@ -180,6 +184,19 @@ export class RunDispatcher {
           now: this.options.now(),
           errorEvidenceRef: exhausted ? DISPATCH_REQUEUE_EXHAUSTED_REF : DISPATCH_HANDLER_ERROR_REF,
         });
+        if (released && exhausted) {
+          const settledRun: PersistedRun = {
+            ...started.run,
+            status: "failed",
+            version: version + 1,
+            finishedAt: this.options.now().toISOString(),
+            errorEvidenceRef: DISPATCH_REQUEUE_EXHAUSTED_REF,
+            leaseOwner: null,
+            leaseExpiresAt: null,
+          };
+          await this.clearTerminalCheckpoints(settledRun);
+          await this.notifyTerminal(settledRun, "failed");
+        }
         failed += 1;
       }
     }
@@ -281,6 +298,17 @@ export class RunDispatcher {
       await this.options.onTerminal(run, status);
     } catch {
       // Intentionally swallowed; see above.
+    }
+  }
+
+  private async clearTerminalCheckpoints(run: PersistedRun): Promise<void> {
+    if (!this.options.checkpoints) return;
+    try {
+      await this.options.checkpoints.settle(run.businessId, run.id, undefined, {
+        leaseGeneration: run.leaseGeneration,
+      });
+    } catch (error) {
+      this.options.log?.error(`terminal checkpoint cleanup failed run=${run.id}`, error);
     }
   }
 

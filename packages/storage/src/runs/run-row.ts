@@ -16,6 +16,7 @@ export interface RunRow {
   error_evidence_ref: string | null;
   lease_owner: string | null;
   lease_expires_at: string | Date | null;
+  lease_generation: number;
 }
 
 export function persistedRun(row: RunRow): PersistedRun {
@@ -34,5 +35,6 @@ export function persistedRun(row: RunRow): PersistedRun {
     errorEvidenceRef: row.error_evidence_ref,
     leaseOwner: row.lease_owner,
     leaseExpiresAt: optionalTimestamp(row.lease_expires_at),
+    leaseGeneration: row.lease_generation,
   };
 }

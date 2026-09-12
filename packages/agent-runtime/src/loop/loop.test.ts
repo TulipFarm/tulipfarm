@@ -138,6 +138,7 @@ function dispatcher(...results: readonly ToolDispatchResult[]): ToolDispatchPort
         arguments: call.arguments,
         ...(call.activeSkillName === undefined ? {} : { activeSkillName: call.activeSkillName }),
       });
+
       return queue.shift() ?? { status: "succeeded" as const, callId: "call-1", output: {} };
     },
   };
@@ -527,6 +528,157 @@ describe("AgentLoop", () => {
       reason: "tool_call_limit",
       maxToolCalls: 1,
     });
+  });
+
+  describe("AgentLoop terminal replay", () => {
+    it("redelivers a terminal event after append fails without asking the model again", async () => {
+      const checkpoints = new InMemoryLoopCheckpointStore();
+      const appended: AgentLoopEvent[] = [];
+      let fail = true;
+      const events = {
+        append: async (event: AgentLoopEvent) => {
+          if (fail && event.type === "completed") {
+            fail = false;
+            throw new Error("event append failed before commit");
+          }
+          appended.push(event);
+        },
+      };
+      const firstModel = scriptedModel(
+        toolCallResult([
+          { callId: "read-1", name: "github.issue.comment", arguments: { body: "once" } },
+        ]),
+        textResult("done")
+      );
+      const tools = dispatcher({
+        status: "succeeded",
+        callId: "read-1",
+        output: { recorded: true },
+      });
+      const budgetKeys: string[] = [];
+      const budget = {
+        consume: async (entry: { key: string }) => {
+          budgetKeys.push(entry.key);
+          return { outcome: "allowed" };
+        },
+      };
+
+      await expect(
+        loop({ model: firstModel, tools, checkpoints, events, budget }).run(input())
+      ).rejects.toThrow("event append failed before commit");
+      const spent = [...budgetKeys];
+      const resumedModel = scriptedModel(textResult("must not run"));
+      const outcome = await loop({
+        model: resumedModel,
+        tools,
+        checkpoints,
+        events,
+        budget,
+      }).run(input());
+
+      expect(outcome).toMatchObject({ status: "completed", output: "done", iterations: 2 });
+      expect(firstModel.requests).toBe(2);
+      expect(resumedModel.requests).toBe(0);
+      expect(tools.calls).toHaveLength(1);
+      expect(budgetKeys).toEqual(spent);
+      expect(appended.filter((event) => event.type === "tool_call_dispatched")).toHaveLength(1);
+      expect(appended.filter((event) => event.type === "completed")).toHaveLength(1);
+    });
+
+    it("redelivers the same terminal event identity when append commits before throwing", async () => {
+      const checkpoints = new InMemoryLoopCheckpointStore();
+      const durable = new Map<number, AgentLoopEvent>();
+      let throwAfterCommit = true;
+      const events = {
+        append: async (event: AgentLoopEvent) => {
+          const prior = durable.get(event.sequence);
+          if (prior === undefined) durable.set(event.sequence, event);
+          else expect(event).toEqual(prior);
+          if (throwAfterCommit && event.type === "completed") {
+            throwAfterCommit = false;
+            throw new Error("event acknowledgement lost");
+          }
+        },
+      };
+
+      await expect(
+        loop({ model: scriptedModel(textResult("done")), checkpoints, events }).run(input())
+      ).rejects.toThrow("event acknowledgement lost");
+      const resumedModel = scriptedModel(textResult("must not run"));
+      const outcome = await loop({ model: resumedModel, checkpoints, events }).run(input());
+
+      expect(outcome).toMatchObject({ status: "completed", output: "done", iterations: 1 });
+      expect(resumedModel.requests).toBe(0);
+      expect([...durable.values()].filter((event) => event.type === "completed")).toHaveLength(1);
+    });
+
+    it.each(["before_commit", "after_commit"] as const)(
+      "redelivers a retryable terminal event after %s acknowledgement loss without re-running work",
+      async (failurePoint) => {
+        const checkpoints = new InMemoryLoopCheckpointStore();
+        const durable = new Map<number, AgentLoopEvent>();
+        let failed = false;
+        const events = {
+          append: async (event: AgentLoopEvent) => {
+            if (event.type === "failed" && !failed) {
+              failed = true;
+              if (failurePoint === "after_commit") durable.set(event.sequence, event);
+              throw new Error("terminal acknowledgement lost");
+            }
+            const prior = durable.get(event.sequence);
+            if (prior === undefined) durable.set(event.sequence, event);
+            else expect(event).toEqual(prior);
+          },
+        };
+        let modelCalls = 0;
+        const model: ModelPort = {
+          invoke: async () => {
+            modelCalls += 1;
+            if (modelCalls === 1) {
+              return toolCallResult([
+                { callId: "read-1", name: "github.issue.comment", arguments: { body: "once" } },
+              ]);
+            }
+            throw new ModelInvocationError(
+              "model_provider_unavailable",
+              new Error("provider down")
+            );
+          },
+        };
+        const tools = dispatcher({
+          status: "succeeded",
+          callId: "read-1",
+          output: { recorded: true },
+        });
+
+        await expect(loop({ model, tools, checkpoints, events }).run(input())).rejects.toThrow(
+          "terminal acknowledgement lost"
+        );
+        const recoveredModel = scriptedModel(textResult("must not run"));
+        const outcome = await loop({
+          model: recoveredModel,
+          tools,
+          checkpoints,
+          events,
+        }).run(input());
+
+        expect(outcome).toMatchObject({
+          status: "failed",
+          reason: "model_provider_unavailable",
+          toolCalls: 1,
+        });
+        expect(recoveredModel.requests).toBe(0);
+        expect(tools.calls).toHaveLength(1);
+        expect([...durable.values()].filter((event) => event.type === "failed")).toHaveLength(1);
+        expect((await checkpoints.load("biz-1", "run-1", "state-1"))?.resume).toMatchObject({
+          retryable: true,
+          messages: expect.arrayContaining([expect.objectContaining({ role: "tool" })]),
+          terminal: {
+            outcome: { status: "failed", reason: "model_provider_unavailable" },
+          },
+        });
+      }
+    );
   });
 
   it("warns the model of its remaining Tool-call budget as it nears the ceiling", async () => {
@@ -1962,26 +2114,192 @@ describe("AgentLoop keeping a failed Turn's work for the retry", () => {
           }
         : {}),
     }).run(input());
-    return { outcome, saved: await checkpoints.load("biz-1", "run-1", "state-1") };
+    return {
+      outcome,
+      saved: await checkpoints.load("biz-1", "run-1", "state-1"),
+      checkpoints,
+    };
   }
 
   it("keeps the Tool results when the provider had a bad moment, so a retry need not buy them again", async () => {
-    const { outcome, saved } = await failAfterOneTool("model_provider_unavailable");
+    const { outcome, saved, checkpoints } = await failAfterOneTool("model_provider_unavailable");
 
     expect(outcome).toMatchObject({ status: "failed", reason: "model_provider_unavailable" });
     // The expensive part of the Turn is the Tool result, not the model call that died after it.
     // Dropping it here is what made Retry re-run every Tool from the top.
     expect(saved?.resume).toBeDefined();
     expect(JSON.stringify(saved?.resume?.messages)).toContain("412");
+    expect(saved?.resume).toMatchObject({
+      retryable: true,
+      terminal: {
+        outcome: { status: "failed", reason: "model_provider_unavailable" },
+      },
+    });
+
+    await checkpoints.settle("biz-1", "run-1");
+    expect((await checkpoints.load("biz-1", "run-1", "state-1"))?.resume?.terminal).toBeUndefined();
+
+    const tools = dispatcher();
+    const retry = await loop({
+      model: scriptedModel(textResult("recovered")),
+      tools,
+      checkpoints,
+    }).run(input());
+
+    expect(retry).toMatchObject({ status: "completed", toolCalls: 1 });
+    expect(tools.calls).toEqual([]);
   });
 
   it("drops them when the failure is one a retry cannot fix", async () => {
     const { outcome, saved } = await failAfterOneTool("budget_exhausted");
 
     expect(outcome).toMatchObject({ status: "failed", reason: "budget_exhausted" });
-    // Retrying an exhausted budget fails the same way, so holding the Tool arguments and outputs
-    // would retain them for a Turn that can never use them.
-    expect(saved?.resume).toBeUndefined();
+    // Retrying an exhausted budget fails the same way, so retain only the terminal receipt needed
+    // for event redelivery, not the Tool arguments and outputs.
+    expect(saved?.resume?.messages).toEqual([]);
+    expect(saved?.resume?.pendingBatch).toBeUndefined();
+    expect(saved?.resume?.terminal?.outcome).toMatchObject({
+      status: "failed",
+      reason: "budget_exhausted",
+    });
+  });
+});
+
+describe("AgentLoop durable Tool batch replay", () => {
+  it("does not rewind the iteration cap after a process loss before the model request", async () => {
+    class CrashAfterIterationCheckpointStore extends InMemoryLoopCheckpointStore {
+      private crashed = false;
+
+      override async save(checkpoint: Parameters<InMemoryLoopCheckpointStore["save"]>[0]) {
+        await super.save(checkpoint);
+        if (!this.crashed && checkpoint.iterations === 1) {
+          this.crashed = true;
+          throw new Error("process crashed before the model request");
+        }
+      }
+    }
+
+    const checkpoints = new CrashAfterIterationCheckpointStore();
+    const firstModel = scriptedModel(textResult("must not run"));
+    await expect(
+      loop({ model: firstModel, checkpoints }).run(
+        input({ limits: { maxIterations: 1, maxToolCalls: 3, maxRepairAttempts: 2 } })
+      )
+    ).rejects.toThrow("process crashed before the model request");
+
+    const resumedModel = scriptedModel(textResult("must not run either"));
+    const outcome = await loop({ model: resumedModel, checkpoints }).run(
+      input({ limits: { maxIterations: 1, maxToolCalls: 3, maxRepairAttempts: 2 } })
+    );
+
+    expect(firstModel.requests).toBe(0);
+    expect(resumedModel.requests).toBe(0);
+    expect(outcome).toMatchObject({
+      status: "failed",
+      reason: "iteration_limit",
+      iterations: 1,
+    });
+  });
+
+  it("resumes a checkpointed batch with stable call ids instead of asking the model to plan again", async () => {
+    class CrashAfterFirstResultStore extends InMemoryLoopCheckpointStore {
+      private crashed = false;
+
+      override async save(checkpoint: Parameters<InMemoryLoopCheckpointStore["save"]>[0]) {
+        if (!this.crashed && checkpoint.resume?.pendingBatch?.nextCallIndex === 1) {
+          this.crashed = true;
+          throw new Error("process crashed after the first effect");
+        }
+        await super.save(checkpoint);
+      }
+    }
+
+    const checkpoints = new CrashAfterFirstResultStore();
+    const executed = new Map<string, ToolDispatchResult>();
+    const dispatchIds: string[] = [];
+    let checkpointedBeforeDispatch = false;
+    const tools: ToolDispatchPort = {
+      dispatch: async (call) => {
+        const saved = await checkpoints.load("biz-1", "run-1", "state-1");
+        checkpointedBeforeDispatch = saved?.resume?.pendingBatch?.calls[0]?.callId === "write-1";
+        dispatchIds.push(call.callId);
+        const stored = executed.get(call.callId);
+        if (stored !== undefined) return stored;
+        const result: ToolDispatchResult = {
+          status: "succeeded",
+          callId: call.callId,
+          output: { written: call.callId },
+        };
+        executed.set(call.callId, result);
+        return result;
+      },
+    };
+    const firstModel = scriptedModel(
+      toolCallResult([
+        { callId: "write-1", name: "github.issue.comment", arguments: { body: "one" } },
+        { callId: "write-2", name: "github.issue.comment", arguments: { body: "two" } },
+      ])
+    );
+
+    await expect(loop({ model: firstModel, tools, checkpoints }).run(input())).rejects.toThrow(
+      "process crashed after the first effect"
+    );
+
+    const resumedModel = promptRecordingModel(textResult("done"));
+    const outcome = await loop({ model: resumedModel, tools, checkpoints }).run(input());
+
+    expect(firstModel.requests).toBe(1);
+    expect(checkpointedBeforeDispatch).toBe(true);
+    expect(resumedModel.prompts).toHaveLength(1);
+    expect(dispatchIds).toEqual(["write-1", "write-1", "write-2"]);
+    expect([...executed.keys()]).toEqual(["write-1", "write-2"]);
+    expect(outcome).toMatchObject({ status: "completed", iterations: 2, toolCalls: 2 });
+    const resumedTranscript = resumedModel.prompts[0] ?? [];
+    expect(resumedTranscript.filter((message) => message.role === "assistant")).toHaveLength(1);
+    expect(resumedTranscript.filter((message) => message.role === "tool")).toHaveLength(2);
+  });
+
+  it("continues after the last durably completed write when the process dies before the next one", async () => {
+    const checkpoints = new InMemoryLoopCheckpointStore();
+    const firstDispatches: string[] = [];
+    const firstTools: ToolDispatchPort = {
+      dispatch: async (call) => {
+        firstDispatches.push(call.callId);
+        if (call.callId === "write-2") throw new Error("process died before the second effect");
+        return { status: "succeeded", callId: call.callId, output: { written: call.callId } };
+      },
+    };
+
+    await expect(
+      loop({
+        model: scriptedModel(
+          toolCallResult([
+            { callId: "write-1", name: "github.issue.comment", arguments: { body: "one" } },
+            { callId: "write-2", name: "github.issue.comment", arguments: { body: "two" } },
+          ])
+        ),
+        tools: firstTools,
+        checkpoints,
+      }).run(input())
+    ).rejects.toThrow("process died before the second effect");
+
+    const resumedDispatches: string[] = [];
+    const resumedModel = promptRecordingModel(textResult("done"));
+    const outcome = await loop({
+      model: resumedModel,
+      tools: {
+        dispatch: async (call) => {
+          resumedDispatches.push(call.callId);
+          return { status: "succeeded", callId: call.callId, output: { written: call.callId } };
+        },
+      },
+      checkpoints,
+    }).run(input());
+
+    expect(firstDispatches).toEqual(["write-1", "write-2"]);
+    expect(resumedDispatches).toEqual(["write-2"]);
+    expect(resumedModel.prompts).toHaveLength(1);
+    expect(outcome).toMatchObject({ status: "completed", toolCalls: 2 });
   });
 });
 
@@ -2029,6 +2347,24 @@ describe("AgentLoop re-reading a File mid-Turn", () => {
 
     expect(outcome.status).toBe("completed");
     expect(model.attachmentsByRequest).toEqual([[], ["file-1"], []]);
+  });
+
+  it("does not attach bytes when file_read was denied", async () => {
+    const model = attachmentRecordingModel(readCall, textResult("could not read it"));
+    const port = { read: vi.fn(async () => new Uint8Array([1, 2, 3])) };
+    const outcome = await loop({
+      model,
+      tools: dispatcher({
+        status: "denied",
+        callId: "call-1",
+        reason: "access revoked",
+      }),
+      attachments: port,
+    }).run(input({ tools: [{ name: "file_read", inputSchema: { type: "object" } }] }));
+
+    expect(outcome.status).toBe("completed");
+    expect(port.read).not.toHaveBeenCalled();
+    expect(model.attachmentsByRequest).toEqual([[], []]);
   });
 
   it("carries a File exactly once when it was both attached and re-read", async () => {

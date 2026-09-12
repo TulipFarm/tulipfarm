@@ -60,6 +60,10 @@ publication, approvals, integrations, events, and blob/vector/cache/queue ports.
   Run, Audit event, or non-dead-lettered publication references the digest.
 - Run `source` selects the Worker executor independently from the canonical Routine in `bundle`.
 - Run budgets are write-once; concurrency and wait resolution are lock-guarded.
+- Agent-loop checkpoints replace their JSON resume state while counters only increase; unfinished
+  Tool batches, terminal receipts, and cursors must round-trip unchanged across process
+  reconstruction. Writes, acknowledgements, and clears are fenced by the Run's per-claim lease
+  generation. Owned State transitions lock and verify that same running Run generation first.
 - Child links are authority-immutable and detach-final; Run events are append-only,
   audience-scoped, and gapless per Run.
 - Kill switch rows are never deleted or re-enabled: standing one down stamps `disabled_at`, because

@@ -6,9 +6,10 @@ import {
   type ToolDispatchPort,
   type ToolDispatchResult,
 } from "@tulipfarm/agent-runtime";
+import { RunInterruptedError } from "@tulipfarm/run-kernel";
 import { canonicalHash, textContent } from "@tulipfarm/schema";
 import type { BudgetConsumeResult, PersistedRun, PersistedState } from "@tulipfarm/storage";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { type ChatExecutorHost, createChatExecutor } from "./chat-executor";
 import type { TurnCompletionRecord, TurnCompletionStore } from "./conversation-turn";
 import type { ResolvedTurnContext, TurnContextPort } from "./driver";
@@ -34,6 +35,7 @@ const RUN: PersistedRun = {
   errorEvidenceRef: null,
   leaseOwner: "worker-1",
   leaseExpiresAt: "2026-01-01T00:01:00.000Z",
+  leaseGeneration: 1,
 };
 
 const STATE: PersistedState = {
@@ -82,8 +84,9 @@ function harness(
     run?: PersistedRun;
     contextError?: Error;
     model?: ModelPort;
+    append?: RunEventAppendPort["append"];
   } = {}
-): { execute: () => Promise<RunOutcomeStatus>; recorded: Recorded } {
+): { execute: (signal?: AbortSignal) => Promise<RunOutcomeStatus>; recorded: Recorded } {
   const events: Recorded["events"] = [];
   const messages: string[] = [];
   const completions: Recorded["completions"] = [];
@@ -98,10 +101,11 @@ function harness(
     findCompletion: async (): Promise<TurnCompletionRecord | undefined> => undefined,
     appendAssistantMessage: async (input) => {
       messages.push(input.content);
-      return { messageId: `message-${messages.length}` };
+      return { status: "recorded", messageId: `message-${messages.length}` };
     },
     completeTurn: async (input) => {
       completions.push({ status: input.status, messageId: input.messageId });
+      return { status: "recorded" };
     },
     // No Tool is exposed in this Context, so a dispatch here would be the loop inventing a call.
     dispatch: async (): Promise<ToolDispatchResult> => {
@@ -111,6 +115,7 @@ function harness(
 
   const appendPort: RunEventAppendPort = {
     append: async (input) => {
+      if (over.append !== undefined) return over.append(input);
       sequence += 1;
       events.push({ eventType: input.eventType, payload: input.payload });
       return { sequence };
@@ -160,7 +165,7 @@ function harness(
   });
 
   return {
-    execute: async () => (await executor(over.run ?? RUN)).status,
+    execute: async (signal) => (await executor(over.run ?? RUN, signal)).status,
     recorded: {
       events,
       messages,
@@ -314,7 +319,24 @@ describe("createChatExecutor", () => {
       eventType: "turn.finished",
       payload: { status: "failed", messageId: null, reason: "turn_execution_failed" },
     });
+
     expect(recorded.messages).toEqual([]);
+  });
+
+  it("parks without replacing a terminal event whose acknowledgement was lost", async () => {
+    let terminalAttempts = 0;
+    const { execute } = harness({
+      append: async (event) => {
+        if (event.eventType === "turn.finished") {
+          terminalAttempts += 1;
+          throw new Error("terminal acknowledgement lost");
+        }
+        return { sequence: 1 };
+      },
+    });
+
+    await expect(execute()).resolves.toBe("needs_reconciliation");
+    expect(terminalAttempts).toBe(1);
   });
 
   it("re-claims the State a resumed Run is still parked on, rather than restarting anything", async () => {
@@ -361,6 +383,56 @@ describe("createChatExecutor", () => {
 
     expect(recorded.messages).toEqual([]);
     expect(recorded.completions).toEqual([]);
+  });
+
+  it("propagates a lost Run lease into the provider request", async () => {
+    vi.useFakeTimers();
+    try {
+      const controller = new AbortController();
+      let providerSignal: AbortSignal | undefined;
+      let started: (() => void) | undefined;
+      let release: (() => void) | undefined;
+      const providerStarted = new Promise<void>((resolve) => {
+        started = resolve;
+      });
+      const providerReleased = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      const { execute, recorded } = harness({
+        model: {
+          invoke: async () => {
+            throw new Error("stream expected");
+          },
+          async *stream(request) {
+            providerSignal = request.signal;
+            started?.();
+            await providerReleased;
+            yield {
+              kind: "completed",
+              result: {
+                requestId: request.requestId,
+                output: { kind: "text", text: "late answer" },
+                usage: { inputTokens: 1, outputTokens: 1 },
+              },
+            };
+          },
+        },
+      });
+
+      const executing = execute(controller.signal);
+      await providerStarted;
+      controller.abort("lease_lost");
+      await vi.advanceTimersByTimeAsync(600);
+
+      expect(providerSignal?.aborted).toBe(true);
+      release?.();
+      await expect(executing).rejects.toBeInstanceOf(RunInterruptedError);
+      expect(recorded.transitions).not.toContainEqual({ from: "running", to: "cancelling" });
+      expect(recorded.transitions).not.toContainEqual({ from: "cancelling", to: "cancelled" });
+      expect(recorded.completions).toEqual([]);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("aborts execution when the Run is already cancelled", async () => {

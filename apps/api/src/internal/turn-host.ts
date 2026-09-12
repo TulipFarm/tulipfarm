@@ -2,10 +2,18 @@ import { randomUUID } from "node:crypto";
 import type { ModelFailureDiagnostic, ModelRequirementsPolicy } from "@tulipfarm/agent-runtime";
 import { readTurnAttachment, type TurnAttachmentStore } from "@tulipfarm/files";
 import { type InvocationPrincipal, SUBAGENT_RUN_SOURCE } from "@tulipfarm/run-kernel";
-import { type MessageContent, type ParticipantToolCall, textContent } from "@tulipfarm/schema";
+import {
+  contentText,
+  type MessageContent,
+  type ParticipantToolCall,
+  textContent,
+} from "@tulipfarm/schema";
+import type { PersistedRunEvent } from "@tulipfarm/storage";
 import type { HostedAgent } from "@tulipfarm/tool-host";
-import { fromToolResult, type MessageRepo } from "../chat/messages";
+import { fromToolResult } from "../chat/messages";
 import type {
+  AssistantMessageWriteResult,
+  CompleteTurnResult,
   ConversationStore,
   PersistedTurn,
   TurnCompletion,
@@ -160,6 +168,30 @@ export interface HostedTurnIdentity {
   readonly attempt: number;
   /** The Run this attempt supersedes, so a retry can reread what the failed attempt already did. */
   readonly previousRunId?: string;
+  /** Participant-safe activity already durable for this attempt. */
+  readonly history?: HostedTurnHistory;
+}
+
+export interface HostedTurnHistory {
+  readonly text: string;
+  readonly toolCalls: readonly ParticipantToolCall[];
+  readonly surfaces: readonly { readonly artifactId: string; readonly revision: number }[];
+  readonly cursor: number;
+  readonly outcome: "active" | "waiting" | "succeeded" | "failed" | "cancelled";
+  readonly complete: boolean;
+  readonly wait?:
+    | {
+        readonly kind: "approval";
+        readonly waitId: string;
+        readonly approvalId: string;
+        readonly callId: string;
+      }
+    | {
+        readonly kind: "child";
+        readonly waitId: string;
+        readonly childRunId: string;
+        readonly callId: string;
+      };
 }
 
 export interface HostedToolCall {
@@ -204,6 +236,14 @@ export interface TurnApprovalRegistrar {
 export interface InternalTurnHostOptions {
   readonly runs: HostedRunReader;
   readonly store: ConversationStore;
+  /** Participant-only Run events used to recover activity written after the latest checkpoint. */
+  readonly events?: {
+    list(
+      businessId: string,
+      runId: string,
+      options: { after: number; audiences: readonly ["participant"]; limit: number }
+    ): Promise<readonly PersistedRunEvent[]>;
+  };
   readonly context: TurnContextResolver;
   /** Absent leaves a deployment unable to execute sub-agent Runs, rather than silently unguarded. */
   readonly subagentContext?: SubagentContextResolver;
@@ -235,13 +275,6 @@ export interface InternalTurnHostOptions {
    * from the public File routes because the Worker acts as a Run, not as a session.
    */
   readonly files?: TurnAttachmentStore;
-  /**
-   * Writes the tool-role rows that link a Turn's Surfaces into its Conversation.
-   *
-   * Separate from `store` because `ConversationStore` models LLM history, where every row is
-   * prose. A Surface link is a reference, not text, and must never reach the model as either.
-   */
-  readonly messages?: MessageRepo;
   newId?(): string;
   now?(): Date;
 }
@@ -346,6 +379,7 @@ export class InternalTurnHost {
       conversationId: turn.conversationId,
       attempt: turn.attempt,
       ...(previousRunId === undefined ? {} : { previousRunId }),
+      ...(await this.attemptHistory(turn, runId)),
     };
   }
 
@@ -419,56 +453,83 @@ export class InternalTurnHost {
     businessId: string;
     runId: string;
     attempt: number;
+    leaseGeneration: number;
     content: string;
-    metadata?: { readonly toolCalls?: readonly ParticipantToolCall[] };
-  }): Promise<{ messageId: string }> {
+    metadata?: Record<string, unknown>;
+  }): Promise<AssistantMessageWriteResult> {
     const { turn } = await this.turnAuthority(input.businessId, input.runId);
     const messageId = this.newId();
-    await this.options.store.appendMessage({
-      id: messageId,
-      businessId: input.businessId,
-      conversationId: turn.conversationId,
-      turnId: turn.id,
-      role: "assistant",
-      content: textContent(input.content),
-      ...(input.metadata === undefined ? {} : { metadata: input.metadata }),
+    const appended = await this.options.store.appendAssistantMessage({
+      message: {
+        id: messageId,
+        businessId: input.businessId,
+        conversationId: turn.conversationId,
+        turnId: turn.id,
+        role: "assistant",
+        content: textContent(input.content),
+        ...(input.metadata === undefined ? {} : { metadata: input.metadata }),
+        attempt: input.attempt,
+        createdAt: this.now(),
+      },
+      runId: input.runId,
       attempt: input.attempt,
-      createdAt: this.now(),
+      expectedLeaseGeneration: input.leaseGeneration,
     });
-    return { messageId };
+    return appended;
+  }
+
+  private async attemptHistory(
+    turn: PersistedTurn,
+    runId: string
+  ): Promise<{ history?: HostedTurnHistory }> {
+    const message = await this.options.store.findAttemptMessage?.(
+      turn.businessId,
+      turn.id,
+      turn.attempt
+    );
+    let history = historyFromMessage(message?.content, message?.metadata, runId, turn.attempt);
+    const events = this.options.events;
+    if (events === undefined) {
+      return history.cursor === 0 &&
+        history.text.length === 0 &&
+        history.toolCalls.length === 0 &&
+        history.surfaces.length === 0
+        ? {}
+        : { history };
+    }
+
+    while (true) {
+      const page = await events.list(turn.businessId, runId, {
+        after: history.cursor,
+        audiences: ["participant"],
+        limit: 500,
+      });
+      for (const event of page) history = foldParticipantEvent(history, event);
+      if (page.length < 500) break;
+    }
+    return history.cursor === 0 &&
+      history.text.length === 0 &&
+      history.toolCalls.length === 0 &&
+      history.surfaces.length === 0
+      ? {}
+      : { history };
   }
 
   async completeTurn(input: {
     businessId: string;
     runId: string;
     attempt: number;
+    leaseGeneration: number;
     status: TurnCompletionStatus;
     cursor: number;
     messageId: string | null;
     surfaces?: readonly { artifactId: string; revision: number }[];
     reason?: string;
     modelFailure?: ModelFailureDiagnostic;
-  }): Promise<void> {
+  }): Promise<Pick<CompleteTurnResult, "status">> {
     const { turn } = await this.turnAuthority(input.businessId, input.runId);
     const now = this.now();
-    // The Artifact is already durable; this records that *this* Conversation was shown it, which
-    // is the only part a reload has to restore. One tool-role Message keeps the cards in the order
-    // the reader saw them, and writing it here keeps the link and the outcome inseparable.
-    if (input.surfaces?.length && this.options.messages !== undefined) {
-      await this.options.messages.create(
-        fromToolResult(
-          turn.conversationId,
-          input.surfaces.map((surface) => ({
-            type: "surface" as const,
-            artifactId: surface.artifactId,
-            revision: surface.revision,
-          }))
-        )
-      );
-    }
-    // Late completion from a superseded attempt must not restate the Turn outcome.
-    const current = input.attempt >= turn.attempt;
-    await this.options.store.completeTurn({
+    const result = await this.options.store.completeTurn({
       completion: {
         businessId: input.businessId,
         turnId: turn.id,
@@ -480,18 +541,241 @@ export class InternalTurnHost {
         ...(input.reason === undefined ? {} : { reason: input.reason }),
         ...(input.modelFailure === undefined ? {} : { modelFailure: input.modelFailure }),
       },
-      ...(current
+      runId: input.runId,
+      expectedLeaseGeneration: input.leaseGeneration,
+      ...(input.surfaces?.length
         ? {
-            turn: {
-              ...turn,
-              status: input.status,
-              // The reader's resume point moves with the answer, so a client reconnecting after
-              // the turn ended asks for what follows this attempt rather than replaying it.
-              cursor: input.cursor,
-              updatedAt: now,
-            },
+            surfaceMessage: fromToolResult(
+              turn.conversationId,
+              input.surfaces.map((surface) => ({
+                type: "surface" as const,
+                artifactId: surface.artifactId,
+                revision: surface.revision,
+              }))
+            ),
           }
         : {}),
     });
+    return { status: result.status };
   }
+}
+
+export function historyFromMessage(
+  content: MessageContent | undefined,
+  metadata: Record<string, unknown> | undefined,
+  runId: string,
+  attempt: number
+): HostedTurnHistory {
+  const attemptMeta = record(metadata?.turnAttempt);
+  const cursor = attemptMeta?.cursor;
+  const belongsToAttempt =
+    attemptMeta?.runId === runId && attemptMeta.attempt === attempt && typeof cursor === "number";
+  if (!belongsToAttempt) {
+    return {
+      text: "",
+      toolCalls: [],
+      surfaces: [],
+      cursor: 0,
+      outcome: "active",
+      complete: false,
+    };
+  }
+  const wait = waitFrom(attemptMeta.wait);
+  return {
+    text: content === undefined ? "" : contentText(content),
+    toolCalls: participantToolCalls(metadata?.toolCalls),
+    surfaces: surfaceRefs(metadata?.surfaces),
+    cursor,
+    outcome: historyOutcome(attemptMeta.outcome),
+    complete: attemptMeta.complete === true,
+    ...(wait === undefined ? {} : { wait }),
+  };
+}
+
+export function foldParticipantEvent(
+  history: HostedTurnHistory,
+  event: PersistedRunEvent
+): HostedTurnHistory {
+  let text = history.text;
+  let wait = history.wait;
+  const toolCalls = history.toolCalls.map((call) => ({ ...call }));
+  const surfaces = history.surfaces.map((surface) => ({ ...surface }));
+  const payload = event.payload;
+  if (event.eventType === "text.delta" && typeof payload.text === "string") {
+    text += payload.text;
+  }
+  if (
+    event.eventType === "tool.call" &&
+    typeof payload.callId === "string" &&
+    typeof payload.name === "string"
+  ) {
+    const existing = toolCalls.findIndex((call) => call.callId === payload.callId);
+    const argsPreview = preview(payload.argsPreview);
+    const next: ParticipantToolCall = {
+      ...(existing < 0 ? { callId: payload.callId, name: payload.name } : toolCalls[existing]),
+      name: payload.name,
+      ...(typeof payload.argsDigest === "string" ? { argsDigest: payload.argsDigest } : {}),
+      ...(argsPreview === undefined ? {} : { argsPreview }),
+      ...(typeof payload.batchId === "string" ? { batchId: payload.batchId } : {}),
+    };
+    if (existing < 0) toolCalls.push(next);
+    else toolCalls[existing] = next;
+  }
+  if (
+    event.eventType === "tool.result" &&
+    typeof payload.callId === "string" &&
+    (payload.status === "ok" || payload.status === "error")
+  ) {
+    const existing = toolCalls.findIndex((call) => call.callId === payload.callId);
+    if (existing >= 0) {
+      const resultPreview = preview(payload.resultPreview);
+      toolCalls[existing] = {
+        ...toolCalls[existing],
+        outcome: payload.status,
+        ...(resultPreview === undefined ? {} : { resultPreview }),
+        ...(typeof payload.durationMs === "number" ? { durationMs: payload.durationMs } : {}),
+        ...(typeof payload.errorCode === "string" ? { errorCode: payload.errorCode } : {}),
+      };
+    }
+  }
+  if (
+    event.eventType === "approval.requested" &&
+    typeof payload.waitId === "string" &&
+    typeof payload.intentId === "string" &&
+    typeof payload.callId === "string"
+  ) {
+    wait = {
+      kind: "approval",
+      waitId: payload.waitId,
+      approvalId: payload.intentId,
+      callId: payload.callId,
+    };
+  }
+  if (
+    event.eventType === "child.started" &&
+    typeof payload.waitId === "string" &&
+    typeof payload.childRunId === "string" &&
+    typeof payload.callId === "string"
+  ) {
+    wait = {
+      kind: "child",
+      waitId: payload.waitId,
+      childRunId: payload.childRunId,
+      callId: payload.callId,
+    };
+  }
+  if (
+    event.eventType === "surface.emitted" &&
+    typeof payload.artifactId === "string" &&
+    typeof payload.revision === "number" &&
+    Number.isInteger(payload.revision) &&
+    payload.revision > 0 &&
+    !surfaces.some(
+      (surface) =>
+        surface.artifactId === payload.artifactId && surface.revision === payload.revision
+    )
+  ) {
+    surfaces.push({ artifactId: payload.artifactId, revision: payload.revision });
+  }
+  return {
+    ...history,
+    text,
+    toolCalls,
+    surfaces,
+    cursor: Math.max(history.cursor, event.sequence),
+    ...(wait === undefined ? {} : { wait }),
+  };
+}
+
+function participantToolCalls(value: unknown): ParticipantToolCall[] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((item) => {
+    const call = record(item);
+    if (typeof call?.callId !== "string" || typeof call.name !== "string") return [];
+    const argsPreview = preview(call.argsPreview);
+    const resultPreview = preview(call.resultPreview);
+    return [
+      {
+        callId: call.callId,
+        name: call.name,
+        ...(typeof call.argsDigest === "string" ? { argsDigest: call.argsDigest } : {}),
+        ...(argsPreview === undefined ? {} : { argsPreview }),
+        ...(resultPreview === undefined ? {} : { resultPreview }),
+        ...(typeof call.durationMs === "number" ? { durationMs: call.durationMs } : {}),
+        ...(call.outcome === "ok" || call.outcome === "error" ? { outcome: call.outcome } : {}),
+        ...(typeof call.errorCode === "string" ? { errorCode: call.errorCode } : {}),
+        ...(typeof call.batchId === "string" ? { batchId: call.batchId } : {}),
+      },
+    ];
+  });
+}
+
+function surfaceRefs(value: unknown): { artifactId: string; revision: number }[] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((item) => {
+    const surface = record(item);
+    return typeof surface?.artifactId === "string" &&
+      typeof surface.revision === "number" &&
+      Number.isInteger(surface.revision) &&
+      surface.revision > 0
+      ? [{ artifactId: surface.artifactId, revision: surface.revision }]
+      : [];
+  });
+}
+
+function preview(value: unknown): ParticipantToolCall["argsPreview"] {
+  const candidate = record(value);
+  if (typeof candidate?.json !== "string") return undefined;
+  return {
+    json: candidate.json,
+    ...(typeof candidate.bytes === "number" ? { bytes: candidate.bytes } : {}),
+    ...(typeof candidate.truncated === "boolean" ? { truncated: candidate.truncated } : {}),
+    ...(Array.isArray(candidate.redactedPaths) &&
+    candidate.redactedPaths.every((path) => typeof path === "string")
+      ? { redactedPaths: candidate.redactedPaths }
+      : {}),
+  };
+}
+
+function historyOutcome(value: unknown): HostedTurnHistory["outcome"] {
+  return value === "waiting" || value === "succeeded" || value === "failed" || value === "cancelled"
+    ? value
+    : "active";
+}
+
+function waitFrom(value: unknown): HostedTurnHistory["wait"] {
+  const wait = record(value);
+  if (
+    wait?.kind === "approval" &&
+    typeof wait.waitId === "string" &&
+    typeof wait.approvalId === "string" &&
+    typeof wait.callId === "string"
+  ) {
+    return {
+      kind: "approval",
+      waitId: wait.waitId,
+      approvalId: wait.approvalId,
+      callId: wait.callId,
+    };
+  }
+  if (
+    wait?.kind === "child" &&
+    typeof wait.waitId === "string" &&
+    typeof wait.childRunId === "string" &&
+    typeof wait.callId === "string"
+  ) {
+    return {
+      kind: "child",
+      waitId: wait.waitId,
+      childRunId: wait.childRunId,
+      callId: wait.callId,
+    };
+  }
+  return undefined;
+}
+
+function record(value: unknown): Record<string, unknown> | undefined {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : undefined;
 }

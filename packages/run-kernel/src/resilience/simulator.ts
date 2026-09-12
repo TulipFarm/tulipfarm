@@ -50,6 +50,7 @@ function baseRun(overrides: Partial<PersistedRun>): PersistedRun {
     errorEvidenceRef: null,
     leaseOwner: null,
     leaseExpiresAt: null,
+    leaseGeneration: 0,
     ...overrides,
   };
 }

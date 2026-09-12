@@ -64,6 +64,7 @@ const CONVERSATION_STATEMENTS: readonly string[] = [
      role             text NOT NULL,
      content          text NOT NULL,
      tool_calls       jsonb,
+     metadata         jsonb,
      seq              bigserial
    )`,
 ];

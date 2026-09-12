@@ -60,3 +60,7 @@ Run event emission, Tool-call announcement or preview, or the ports a Turn host 
   requeued. `TurnWaitPort.resumeIfResolved` closes that window and only means anything once the Run
   is `waiting`. Approvals need no such claim: their wait is registered here, and a human cannot
   answer one before it exists.
+- A lost Run lease is process control, not participant cancellation: abort model/Tool work and
+  unwind without cancellation State transitions or Turn completion. State transitions, assistant
+  Message checkpoints, and Turn completion carry the claim's lease generation to a database fence.
+  A terminal event acknowledgement failure leaves the State resumable instead of replacing it.

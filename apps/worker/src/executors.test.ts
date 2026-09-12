@@ -26,6 +26,7 @@ function persistedRun(overrides: Partial<PersistedRun> = {}): PersistedRun {
     errorEvidenceRef: null,
     leaseOwner: "worker-1",
     leaseExpiresAt: "2026-07-24T10:01:00.000Z",
+    leaseGeneration: 1,
     ...overrides,
   };
 }

@@ -1,0 +1,64 @@
+{
+  "id": "triage-resumes-pending-tool-batch",
+  "tier": "l2",
+  "agent": "triage",
+  "input": [
+    {
+      "role": "user",
+      "content": "Append one record with value \"one\" and one record with value \"two\", then reply that both records are saved."
+    }
+  ],
+  "tools": [
+    {
+      "name": "record_append",
+      "description": "Append one record.",
+      "inputSchema": {
+        "type": "object",
+        "required": ["value"],
+        "additionalProperties": false,
+        "properties": { "value": { "type": "string" } }
+      },
+      "mutating": true,
+      "sideEffecting": true
+    }
+  ],
+  "toolResults": [
+    { "name": "record_append", "output": { "stored": "one" } },
+    { "name": "record_append", "output": { "stored": "two" } }
+  ],
+  "script": [
+    {
+      "kind": "tool_calls",
+      "calls": [
+        {
+          "callId": "append-one",
+          "name": "record_append",
+          "arguments": { "value": "one" }
+        },
+        {
+          "callId": "append-two",
+          "name": "record_append",
+          "arguments": { "value": "two" }
+        }
+      ]
+    },
+    { "kind": "text", "text": "Both records are saved." }
+  ],
+  "checkpointCrash": "after_first_tool_result",
+  "expect": [
+    { "kind": "tool_batch_replayed" },
+    {
+      "kind": "tool_argument_equals",
+      "name": "record_append",
+      "path": "value",
+      "value": "one"
+    },
+    {
+      "kind": "tool_argument_equals",
+      "name": "record_append",
+      "path": "value",
+      "value": "two"
+    },
+    { "kind": "loop_status", "status": "completed" }
+  ]
+}

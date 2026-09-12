@@ -26,7 +26,13 @@ import { autonomyCeiling, autonomyDemandsApproval } from "./autonomy";
 import { agentCapabilityDenial } from "./capability-restrictions";
 import { availableToolsFor, type ToolCatalog } from "./catalog";
 import type { CredentialResolution, CredentialResolver } from "./credential-mode";
-import { ChatEffectLedger, ledgerOwnsCall } from "./effect-ledger";
+import {
+  ChatEffectLedger,
+  type ChildParkReplay,
+  childParkReplay,
+  type LedgerCallInput,
+  ledgerOwnsCall,
+} from "./effect-ledger";
 import { localDispatchRefusal } from "./eligibility";
 import { runToolAttempts } from "./execution";
 import { gateAutonomyOf, type ToolGate } from "./gate";
@@ -434,11 +440,51 @@ export class RegistryToolDispatcher implements TurnToolDispatcher {
     const denial = await this.entitlementDenial(authority, definition, call);
     if (denial !== undefined) return { status: "denied", reason: denial };
 
+    const ledger =
+      this.options.effects && ledgerOwnsCall(definition.definition)
+        ? new ChatEffectLedger(this.options.effects)
+        : undefined;
+    const ledgerInput: LedgerCallInput | undefined =
+      ledger && definition.definition
+        ? {
+            businessId: authority.businessId,
+            runId: authority.runId,
+            callId: call.callId,
+            toolId: definition.name,
+            toolVersion: definition.definition.version,
+            action: definition.definition.authorization.action,
+            arguments: call.arguments,
+            targetRefs: this.ledgerTargets(definition, call),
+            guardrailRevision: this.options.guardrails?.revision ?? "none",
+            ...(definition.definition.effectiveDestination === undefined
+              ? {}
+              : { destination: definition.definition.effectiveDestination }),
+          }
+        : undefined;
+    let childReplay: ChildParkReplay | undefined;
+    if (ledger && ledgerInput) {
+      const existing = await ledger.inspect(ledgerInput);
+      if (existing?.outcome === "duplicate") {
+        childReplay =
+          (existing.state === "awaiting_child" ||
+            existing.state === "authorized" ||
+            existing.state === "dispatched") &&
+          existing.outputStored
+            ? childParkReplay(existing.output)
+            : undefined;
+        if (childReplay === undefined) {
+          return replayedEffect(call.name, existing.state, existing.outputStored, existing.output);
+        }
+      }
+      if (existing?.outcome === "conflict") return idempotencyConflict(call.name);
+    }
+
     // Ask after validation and before `execute`, so no invalid call or effect reaches approval.
     const approvalRequired =
-      verdict.decision === "approval" ||
-      definition.requiresApproval === true ||
-      autonomyDemandsApproval(definition, autonomy);
+      childReplay === undefined &&
+      (verdict.decision === "approval" ||
+        definition.requiresApproval === true ||
+        autonomyDemandsApproval(definition, autonomy));
     if (approvalRequired && this.options.approvals === undefined) {
       // Missing approval plumbing must deny, not convert "not yet" into "yes".
       return {
@@ -533,41 +579,21 @@ export class RegistryToolDispatcher implements TurnToolDispatcher {
       ...(credential.use === "principal" ? { credentialPrincipal: credential.principal } : {}),
     };
     // Reserve only after refusals and approval; denied calls leave no effect row.
-    const ledger =
-      this.options.effects && ledgerOwnsCall(definition.definition)
-        ? new ChatEffectLedger(this.options.effects)
-        : undefined;
     let reservation: { readonly effectId: string; readonly attempt: number } | undefined;
-    if (ledger && definition.definition) {
-      const reserved = await ledger.reserve({
-        businessId: authority.businessId,
-        runId: authority.runId,
-        callId: call.callId,
-        toolId: definition.name,
-        toolVersion: definition.definition.version,
-        action: definition.definition.authorization.action,
-        arguments: call.arguments,
-        targetRefs: this.ledgerTargets(definition, call),
-        guardrailRevision: this.options.guardrails?.revision ?? "none",
-        ...(definition.definition.effectiveDestination === undefined
-          ? {}
-          : { destination: definition.definition.effectiveDestination }),
-      });
-      if (reserved.outcome === "duplicate") {
-        return replayedEffect(call.name, reserved.state, reserved.outputStored, reserved.output);
-      }
-      if (reserved.outcome === "conflict") {
-        return {
-          status: "failed",
-          reason:
-            `tool "${call.name}" was already called with this id and different arguments; ` +
-            "the earlier call stands",
+    if (ledger && ledgerInput) {
+      if (childReplay !== undefined) {
+        reservation = await ledger.reopenChild(ledgerInput);
+      } else {
+        const reserved = await ledger.reserve(ledgerInput);
+        if (reserved.outcome === "duplicate") {
+          return replayedEffect(call.name, reserved.state, reserved.outputStored, reserved.output);
+        }
+        if (reserved.outcome === "conflict") return idempotencyConflict(call.name);
+        reservation = {
+          effectId: reserved.effectId,
+          attempt: await ledger.beginAttempt(authority.businessId, reserved.effectId),
         };
       }
-      reservation = {
-        effectId: reserved.effectId,
-        attempt: await ledger.beginAttempt(authority.businessId, reserved.effectId),
-      };
     }
 
     return runToolAttempts({
@@ -580,9 +606,19 @@ export class RegistryToolDispatcher implements TurnToolDispatcher {
         : { timeoutMs: this.options.executeTimeoutMs }),
       ...(ledger === undefined ? {} : { ledger }),
       ...(reservation === undefined ? {} : { reservation }),
+      ...(childReplay === undefined ? {} : { childReplay }),
       ...(this.options.logger === undefined ? {} : { logger: this.options.logger }),
     });
   }
+}
+
+function idempotencyConflict(toolName: string): HostedToolResult {
+  return {
+    status: "failed",
+    reason:
+      `tool "${toolName}" was already called with this id and different arguments; ` +
+      "the earlier call stands",
+  };
 }
 
 /** Confirmed ledger replays return the first immutable output; unsettled states fail closed. */

@@ -1,5 +1,9 @@
-import type { AgentLoopInput, AgentLoopOutcome } from "@tulipfarm/agent-runtime";
-import { RunTransitionError, type StateStatus } from "@tulipfarm/run-kernel";
+import {
+  type AgentLoopInput,
+  type AgentLoopOutcome,
+  TerminalEventDeliveryError,
+} from "@tulipfarm/agent-runtime";
+import { RunInterruptedError, RunTransitionError, type StateStatus } from "@tulipfarm/run-kernel";
 import { describe, expect, it } from "vitest";
 import { type AgentStateRequest, AgentStateRunner } from "./agent-state";
 import { StateTransitionConflictError } from "./kernel-ports";
@@ -7,7 +11,13 @@ import { StateTransitionConflictError } from "./kernel-ports";
 const counters = { iterations: 1, toolCalls: 0, repairs: 0 };
 
 function request(from: StateStatus = "claimed"): AgentStateRequest {
-  return { businessId: "biz-1", runId: "run-1", stateKey: "state-1", from };
+  return {
+    businessId: "biz-1",
+    runId: "run-1",
+    stateKey: "state-1",
+    leaseGeneration: 1,
+    from,
+  };
 }
 
 const LOOP_INPUT: AgentLoopInput = {
@@ -61,6 +71,16 @@ function runner(
 }
 
 describe("AgentStateRunner", () => {
+  it("unwinds ownership loss without changing the participant-visible State", async () => {
+    const interruption = new RunInterruptedError("lease_lost");
+    const harness = runner(async () => {
+      throw interruption;
+    });
+
+    await expect(harness.agentState.execute(request(), LOOP_INPUT)).rejects.toBe(interruption);
+    expect(harness.transitions).toEqual([{ from: "claimed", to: "running" }]);
+  });
+
   it("drives a completed loop through running to succeeded", async () => {
     const harness = runner({ status: "completed", output: { label: "bug" }, ...counters });
     const result = await harness.agentState.execute(request(), LOOP_INPUT);
@@ -197,10 +217,31 @@ describe("AgentStateRunner", () => {
     const harness = runner(async () => {
       throw new Error("worker crashed");
     });
+
     const result = await harness.agentState.execute(request(), LOOP_INPUT);
 
     expect(harness.transitions.at(-1)).toEqual({ from: "running", to: "needs_reconciliation" });
     expect(result).toMatchObject({ status: "needs_reconciliation" });
+  });
+
+  it("leaves a running State resumable when only terminal event acknowledgement failed", async () => {
+    const harness = runner(async () => {
+      throw new TerminalEventDeliveryError(new Error("acknowledgement lost"));
+    });
+
+    await expect(harness.agentState.execute(request("running"), LOOP_INPUT)).resolves.toEqual({
+      status: "terminal_event_pending",
+    });
+    expect(harness.transitions).toEqual([]);
+  });
+
+  it("replays a terminal checkpoint through an already-settled State without transitioning it", async () => {
+    const harness = runner({ status: "completed", output: "done", ...counters });
+
+    await expect(
+      harness.agentState.execute(request("succeeded"), { ...LOOP_INPUT, resumeOnly: true })
+    ).resolves.toEqual({ status: "succeeded", output: "done" });
+    expect(harness.transitions).toEqual([]);
   });
 
   it("still reports needs_reconciliation when transition to needs_reconciliation hits a state conflict", async () => {

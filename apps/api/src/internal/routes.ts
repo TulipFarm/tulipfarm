@@ -4,6 +4,7 @@ import { DEPLOYMENT_BUSINESS_ID } from "@tulipfarm/constants";
 import type { ParticipantToolCall } from "@tulipfarm/schema";
 import type { FastifyBaseLogger, FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { ErrorSchema } from "../auth/schemas";
+import type { TerminalTurnSettler } from "../conversations/terminal-turns";
 import type { ObservabilityConfig } from "../observability/config";
 import * as ChildRoutineHost from "./child-routine-host";
 import { registerChildRoutineRoutes } from "./child-routine-routes";
@@ -58,6 +59,7 @@ const EMIT_DENIAL_STATUS: Readonly<Record<EmitHost.EmitDenial, number>> = {
 
 export interface InternalTurnRouteDeps {
   readonly host: TurnHost.InternalTurnHost;
+  readonly terminalTurns?: Pick<TerminalTurnSettler, "reconcileRun">;
   deliveries?(log: FastifyBaseLogger): DeliveryHost.IngressDeliveryHost;
   llmConfig(): unknown;
   pricingOverrides(): Record<string, { in: number; out: number }>;
@@ -244,6 +246,34 @@ export function registerInternalTurnRoutes(
         deps.host.describeTurn(DEPLOYMENT_BUSINESS_ID, runId)
       );
       if (identity !== undefined) return reply.send(identity);
+    }
+  );
+
+  app.post(
+    "/api/v1/internal/turns/:runId/terminal",
+    {
+      preHandler,
+      schema: {
+        description: "Settle a Conversation Turn from its durable terminal Run outcome.",
+        tags: ["internal"],
+        security: [{ bearerToken: [] }],
+        params: InternalSchemas.InternalRunParamsSchema,
+        response: {
+          200: {
+            type: "object",
+            required: ["settled"],
+            properties: { settled: { type: "boolean" } },
+          },
+          401: ErrorSchema,
+          403: ErrorSchema,
+        },
+      },
+    },
+    async (req, reply) => {
+      const { runId } = req.params as { runId: string };
+      const settled =
+        (await deps.terminalTurns?.reconcileRun(DEPLOYMENT_BUSINESS_ID, runId)) ?? false;
+      return reply.send({ settled });
     }
   );
 
@@ -500,6 +530,7 @@ export function registerInternalTurnRoutes(
       const { runId } = req.params as { runId: string };
       const body = req.body as {
         attempt: number;
+        leaseGeneration: number;
         content: string;
         metadata?: { toolCalls?: ParticipantToolCall[] };
       };
@@ -508,6 +539,7 @@ export function registerInternalTurnRoutes(
           businessId: DEPLOYMENT_BUSINESS_ID,
           runId,
           attempt: body.attempt,
+          leaseGeneration: body.leaseGeneration,
           content: body.content,
           ...(body.metadata === undefined ? {} : { metadata: body.metadata }),
         })
@@ -539,6 +571,7 @@ export function registerInternalTurnRoutes(
       const { runId } = req.params as { runId: string };
       const body = req.body as {
         attempt: number;
+        leaseGeneration: number;
         status: "succeeded" | "failed";
         cursor: number;
         messageId?: string | null;
@@ -546,21 +579,21 @@ export function registerInternalTurnRoutes(
         reason?: string;
         modelFailure?: ModelFailureDiagnostic;
       };
-      const recorded = await guard(reply, async () => {
-        await deps.host.completeTurn({
+      const recorded = await guard(reply, () =>
+        deps.host.completeTurn({
           businessId: DEPLOYMENT_BUSINESS_ID,
           runId,
           attempt: body.attempt,
+          leaseGeneration: body.leaseGeneration,
           status: body.status,
           cursor: body.cursor,
           messageId: body.messageId ?? null,
           surfaces: body.surfaces ?? [],
           ...(body.reason === undefined ? {} : { reason: body.reason }),
           ...(body.modelFailure === undefined ? {} : { modelFailure: body.modelFailure }),
-        });
-        return true;
-      });
-      if (recorded !== undefined) return reply.send({ status: "recorded" });
+        })
+      );
+      if (recorded !== undefined) return reply.send(recorded);
     }
   );
 

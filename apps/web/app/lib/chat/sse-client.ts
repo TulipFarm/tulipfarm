@@ -348,6 +348,7 @@ export function createRunEventMapper(): (frame: ParsedFrame) => ChatEvent[] {
             data: {
               message: modelFailureMessage(data.reason, data.toolCallBudget),
               ...(details === undefined ? {} : { details }),
+              terminal: true,
             },
           },
         ];
@@ -363,7 +364,7 @@ export function createRunEventMapper(): (frame: ParsedFrame) => ChatEvent[] {
         return [
           {
             type: "error",
-            data: { message: TURN_STOPPED_MESSAGE },
+            data: { message: TURN_STOPPED_MESSAGE, terminal: true },
           },
         ];
       }
@@ -373,7 +374,17 @@ export function createRunEventMapper(): (frame: ParsedFrame) => ChatEvent[] {
 
       case "surface.emitted": {
         if (!data.artifactId) return [];
-        return [{ type: "surface", data: { artifactId: data.artifactId } }];
+        const revision =
+          Number.isInteger(data.revision) && (data.revision ?? 0) > 0 ? data.revision : undefined;
+        return [
+          {
+            type: "surface",
+            data: {
+              artifactId: data.artifactId,
+              ...(revision === undefined ? {} : { revision }),
+            },
+          },
+        ];
       }
 
       // A plan of one Round is a list, not a plan; drop it here so no later layer has to decide.
@@ -563,9 +574,13 @@ async function consumeRunStream(
   }
 }
 
-export async function resumeRun(runId: string, handlers: PostChatHandlers): Promise<void> {
-  const response = await fetchRunEvents(runId, 0, handlers.signal);
-  await consumeRunStream(runId, response, handlers, 0, createRunEventMapper());
+export async function resumeRun(
+  runId: string,
+  handlers: PostChatHandlers,
+  after = 0
+): Promise<void> {
+  const response = await fetchRunEvents(runId, after, handlers.signal);
+  await consumeRunStream(runId, response, handlers, after, createRunEventMapper());
 }
 
 async function consumeSse(

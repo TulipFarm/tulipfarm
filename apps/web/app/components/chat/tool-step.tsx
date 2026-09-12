@@ -43,7 +43,8 @@ export function ToolStepRow({
   onReviseDraft?: (draft: FileDraftResult) => void;
 }) {
   const ran = summarizeToolCall(part);
-  const status = part.status === "running" ? "running" : outcomeOf(part);
+  const interrupted = part.status === "interrupted";
+  const status = part.status === "running" ? "running" : interrupted ? "error" : outcomeOf(part);
   const approval = part.approval;
   const fileDraft = fileDraftOf(part);
   const isAdmin = useIsAdmin();
@@ -74,7 +75,7 @@ export function ToolStepRow({
             />
           ) : undefined
         }
-        detail={detailOf(part, status, isAdmin, label === undefined ? undefined : ran)}
+        detail={detailOf(part, status, isAdmin, interrupted, label === undefined ? undefined : ran)}
       />
       {/*
        * The one thing a step may not hide behind its own disclosure. Everything else in a trace is
@@ -109,10 +110,15 @@ function detailOf(
   part: ToolPart,
   status: "running" | "done" | "error",
   isAdmin: boolean,
+  interrupted: boolean,
   ran?: string
 ) {
   const code = status === "error" ? part.meta?.errorCode : undefined;
-  const hint = status === "done" ? describeToolResult(part) : undefined;
+  const hint = interrupted
+    ? "Interrupted before a result was recorded."
+    : status === "done"
+      ? describeToolResult(part)
+      : undefined;
   const duration = formatDuration(part.meta?.durationMs);
   const inspectable = toolHasDetails(part);
   const connectUrl = status === "error" ? part.meta?.connectUrl : undefined;

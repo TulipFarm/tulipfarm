@@ -43,10 +43,11 @@ export {
   RUN_EVENT_STORAGE_STATEMENTS,
   RunEventStore,
 } from "./events";
-export type { LoopCheckpoint, LoopResumeState } from "./loop-checkpoint-store";
+export type { LoopCheckpoint, LoopCheckpointFence, LoopResumeState } from "./loop-checkpoint-store";
 export {
   LOOP_CHECKPOINT_STORAGE_STATEMENTS,
   RunLoopCheckpointStore,
+  StaleLoopCheckpointWriterError,
 } from "./loop-checkpoint-store";
 export { MemoryWaitStore } from "./memory-wait-store";
 export {
@@ -86,6 +87,7 @@ export {
   MAX_RUN_PAGE_SIZE,
   RUN_BOUNDS_REMOVAL_STATEMENTS,
   RUN_BROWSE_STORAGE_STATEMENTS,
+  RUN_LEASE_GENERATION_STORAGE_STATEMENTS,
   RUN_RECOVERY_CURSOR_CYCLE_STORAGE_STATEMENTS,
   RUN_RECOVERY_CURSOR_STORAGE_STATEMENTS,
   RUN_STORAGE_STATEMENTS,

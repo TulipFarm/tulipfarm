@@ -49,6 +49,7 @@ export interface WaitGateContext {
   /** Absent means `child_routine` States park; a Routine cannot silently skip a call it authored. */
   readonly childRoutines?: ChildRoutinePort;
   readonly now: () => Date;
+  readonly assertActive?: () => void;
   readonly transition: (
     key: string,
     from: StateStatus,
@@ -63,6 +64,13 @@ export interface WaitGateContext {
   readonly park: (key: string, reason: string) => Promise<void>;
 }
 
+async function whileActive<T>(ctx: WaitGateContext, work: Promise<T>): Promise<T> {
+  ctx.assertActive?.();
+  const result = await work;
+  ctx.assertActive?.();
+  return result;
+}
+
 /** Open a durable timer and park the State on it. */
 export async function openWait(
   ctx: WaitGateContext,
@@ -71,16 +79,19 @@ export async function openWait(
 ): Promise<{ kind: "outcome"; outcome: StepOutcome } | { kind: ChainOutcome }> {
   const waitId = routineWaitId(ctx.run.id, key);
   // A worker that died between creating the wait and parking the State finds its own wait here.
-  const existing = await ctx.waits.find(ctx.run.businessId, waitId);
+  const existing = await whileActive(ctx, ctx.waits.find(ctx.run.businessId, waitId));
   if (existing === null) {
-    await ctx.waits.register(
-      planTimerWait(state, {
-        businessId: ctx.run.businessId,
-        runId: ctx.run.id,
-        waitId,
-        stateKey: key,
-        now: ctx.now().toISOString(),
-      })
+    await whileActive(
+      ctx,
+      ctx.waits.register(
+        planTimerWait(state, {
+          businessId: ctx.run.businessId,
+          runId: ctx.run.id,
+          waitId,
+          stateKey: key,
+          now: ctx.now().toISOString(),
+        })
+      )
     );
   }
   await ctx.transition(key, "running", "waiting");
@@ -96,20 +107,23 @@ export async function openApproval(
   const port = ctx.approvals;
   if (port === undefined) throw new RoutineExecutionRefusal("unsupported_state", state.name);
 
-  await port.open({
-    businessId: ctx.run.businessId,
-    runId: ctx.run.id,
-    stateKey: key,
-    stateName: state.name,
-    wait: planApprovalWait(state, {
+  await whileActive(
+    ctx,
+    port.open({
       businessId: ctx.run.businessId,
       runId: ctx.run.id,
-      // Derived from `(runId, occurrence key)` so replay finds the same approval.
-      waitId: routineWaitId(ctx.run.id, key),
       stateKey: key,
-      now: ctx.now().toISOString(),
-    }),
-  });
+      stateName: state.name,
+      wait: planApprovalWait(state, {
+        businessId: ctx.run.businessId,
+        runId: ctx.run.id,
+        // Derived from `(runId, occurrence key)` so replay finds the same approval.
+        waitId: routineWaitId(ctx.run.id, key),
+        stateKey: key,
+        now: ctx.now().toISOString(),
+      }),
+    })
+  );
   await ctx.transition(key, "running", "waiting");
   return { kind: "waiting" };
 }
@@ -124,11 +138,14 @@ export async function resumeApproval(
   const port = ctx.approvals;
   if (port === undefined) return { kind: "needs_reconciliation" };
 
-  const record = await port.find({
-    businessId: ctx.run.businessId,
-    runId: ctx.run.id,
-    stateKey: key,
-  });
+  const record = await whileActive(
+    ctx,
+    port.find({
+      businessId: ctx.run.businessId,
+      runId: ctx.run.id,
+      stateKey: key,
+    })
+  );
   // Missing approval for a parked State is reconciliation-only.
   if (record === undefined) return { kind: "needs_reconciliation" };
   if (record.decision === "pending") return { kind: "waiting" };
@@ -160,7 +177,10 @@ export async function resumeWait(
   key: string,
   row: PersistedState
 ): Promise<{ kind: "outcome"; outcome: StepOutcome } | { kind: ChainOutcome }> {
-  const wait = await ctx.waits.find(ctx.run.businessId, routineWaitId(ctx.run.id, key));
+  const wait = await whileActive(
+    ctx,
+    ctx.waits.find(ctx.run.businessId, routineWaitId(ctx.run.id, key))
+  );
   if (wait === null) return { kind: "needs_reconciliation" };
   if (wait.status === "pending") return { kind: "waiting" };
 
@@ -194,16 +214,19 @@ export async function openChildRoutine(
   if (port === undefined) throw new RoutineExecutionRefusal("unsupported_state", state.name);
 
   const call = planChildRoutineCall(state, scope);
-  const record = await port.start({
-    businessId: ctx.run.businessId,
-    runId: ctx.run.id,
-    stateKey: key,
-    stateName: state.name,
-    routineRef: call.routineRef,
-    mode: call.mode,
-    input: call.input,
-    ...(call.deadlineMs === null ? {} : { deadlineMs: call.deadlineMs }),
-  });
+  const record = await whileActive(
+    ctx,
+    port.start({
+      businessId: ctx.run.businessId,
+      runId: ctx.run.id,
+      stateKey: key,
+      stateName: state.name,
+      routineRef: call.routineRef,
+      mode: call.mode,
+      input: call.input,
+      ...(call.deadlineMs === null ? {} : { deadlineMs: call.deadlineMs }),
+    })
+  );
 
   // A detached caller never learns its child's outcome; it continues once the child exists.
   if (call.mode === "detach") return { kind: "outcome", outcome: stateOutcome(state) };
@@ -223,11 +246,14 @@ export async function resumeChildRoutine(
   const port = ctx.childRoutines;
   if (port === undefined) return { kind: "needs_reconciliation" };
 
-  const record = await port.find({
-    businessId: ctx.run.businessId,
-    runId: ctx.run.id,
-    stateKey: key,
-  });
+  const record = await whileActive(
+    ctx,
+    port.find({
+      businessId: ctx.run.businessId,
+      runId: ctx.run.id,
+      stateKey: key,
+    })
+  );
   if (record === undefined) return { kind: "needs_reconciliation" };
   if (record.status === "pending") return { kind: "waiting" };
 

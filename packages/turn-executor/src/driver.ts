@@ -7,6 +7,7 @@ import type {
   ResolvedAttachment,
 } from "@tulipfarm/agent-runtime";
 import type { StateStatus } from "@tulipfarm/run-kernel";
+import { assertRunActive } from "@tulipfarm/run-kernel";
 import type { AgentStateRequest, AgentStateResult, AgentStateRunner } from "./agent-state";
 import type {
   CompleteTurnResult,
@@ -15,7 +16,7 @@ import type {
 } from "./conversation-turn";
 import type { TurnGuardrails } from "./guardrails";
 import type { ModelCallReceipt, RunOutcome, SpendSink } from "./ports";
-import type { TurnEventWriter } from "./run-events";
+import type { TurnAttemptHistory, TurnEventWriter } from "./run-events";
 
 /** Orders one turn; emit `turn.finished` only after completion is durable. */
 
@@ -24,6 +25,9 @@ export interface TurnRequest {
   readonly businessId: string;
   readonly runId: string;
   readonly stateKey: string;
+  readonly leaseGeneration: number;
+  /** Worker ownership loss; separate from a participant cancelling the Run. */
+  readonly signal?: AbortSignal;
   /** Observed State status; the driver must not invent a claim. */
   readonly stateStatus: StateStatus;
   readonly turnId: string;
@@ -119,6 +123,16 @@ export interface TurnDriverOptions {
   readonly attachments?: TurnAttachmentPort;
 }
 
+/** The Turn is complete, but its terminal event may already have committed. */
+export class TerminalTurnEventDeliveryError extends Error {
+  constructor(readonly cause: unknown) {
+    super(cause instanceof Error ? cause.message : "terminal Turn event delivery failed", {
+      cause,
+    });
+    this.name = "TerminalTurnEventDeliveryError";
+  }
+}
+
 /** What a finished turn is attributed to, carried rather than held so no state outlives a run. */
 interface TurnSpendScope {
   readonly startedAt: number;
@@ -133,6 +147,7 @@ export class TurnDriver {
   constructor(private readonly options: TurnDriverOptions) {}
 
   async run(request: TurnRequest): Promise<RunOutcome> {
+    assertRunActive(request.signal);
     if (this.options.completer.isStale(request)) {
       // Superseded attempts must not spend model/tool work.
       return { status: "succeeded" };
@@ -141,6 +156,7 @@ export class TurnDriver {
     const startedAt = Date.now();
     const events = this.options.buildEvents(request);
     const context = await this.options.context.resolve(request);
+    assertRunActive(request.signal);
     const spend: TurnSpendScope = {
       startedAt,
       runId: request.runId,
@@ -172,6 +188,7 @@ export class TurnDriver {
       },
       "started"
     );
+    assertRunActive(request.signal);
     await events.emit(
       "context.assembled",
       {
@@ -183,21 +200,26 @@ export class TurnDriver {
       },
       "context"
     );
+    assertRunActive(request.signal);
 
     const stateRequest: AgentStateRequest = {
       businessId: request.businessId,
       runId: request.runId,
       stateKey: request.stateKey,
+      leaseGeneration: request.leaseGeneration,
       from: request.stateStatus,
+      ...(request.signal === undefined ? {} : { signal: request.signal }),
     };
 
     // Bytes are fetched before the guard runs because nothing can screen text it has not read.
     // This costs no vendor call: the Files come from this deployment, so a refused Turn still
     // reaches no provider, which is the property the guard-first ordering exists to protect.
     const resolved = await this.resolveAttachments(request.runId, context);
+    assertRunActive(request.signal);
 
     // Input guard runs before model/tool work; a block settles the State with the guard reply.
     const guarded = await this.guardInput(context, resolved, events);
+    assertRunActive(request.signal);
     if (guarded.blocked) {
       return this.complete(
         request,
@@ -215,6 +237,11 @@ export class TurnDriver {
       businessId: request.businessId,
       runId: request.runId,
       stateId: request.stateKey,
+      checkpointFence: { leaseGeneration: request.leaseGeneration },
+      ...(request.signal === undefined ? {} : { signal: request.signal }),
+      ...(request.stateStatus === "succeeded" || request.stateStatus === "failed"
+        ? { resumeOnly: true }
+        : {}),
       modelProfileId: context.modelProfileId,
       ...(context.modelPolicy === undefined ? {} : { modelPolicy: context.modelPolicy }),
       ...(context.principal === undefined ? {} : { principal: context.principal }),
@@ -230,14 +257,22 @@ export class TurnDriver {
         : { skillToolScopes: new Map(Object.entries(context.skillToolScopes)) }),
     };
     const result = await this.options.states.execute(stateRequest, input);
+    assertRunActive(request.signal);
+
+    if (result.status === "terminal_event_pending") {
+      return { status: "needs_reconciliation" };
+    }
 
     if (result.status === "cancelled") {
       // Cancellation manager owns this Run; do not record another outcome.
-      return { status: "cancelled" };
+      return (await this.checkpoint(request, events, "cancelled"))
+        ? { status: "cancelled" }
+        : { status: "succeeded" };
     }
 
     if (result.status === "needs_reconciliation") {
       // An effect may have landed; reconciliation must decide.
+      if (!(await this.checkpoint(request, events, "failed"))) return { status: "succeeded" };
       await events.emit(
         "turn.finished",
         { status: "failed", messageId: null, reason: "needs_reconciliation" },
@@ -248,19 +283,35 @@ export class TurnDriver {
 
     if (result.status === "waiting") {
       if (result.reason === "child_running") {
+        assertRunActive(request.signal);
         await events.emit(
           "child.started",
           { waitId: result.waitId, childRunId: result.childRunId, callId: result.callId },
           "child"
         );
-        return { status: "waiting" };
+        assertRunActive(request.signal);
+        const current = await this.checkpoint(request, events, "waiting", {
+          kind: "child",
+          waitId: result.waitId,
+          childRunId: result.childRunId,
+          callId: result.callId,
+        });
+        return current ? { status: "waiting" } : { status: "succeeded" };
       }
+      assertRunActive(request.signal);
       await events.emit(
         "approval.requested",
         { waitId: result.waitId, intentId: result.approvalId, callId: result.callId },
         "approval"
       );
-      return { status: "waiting" };
+      assertRunActive(request.signal);
+      const current = await this.checkpoint(request, events, "waiting", {
+        kind: "approval",
+        waitId: result.waitId,
+        approvalId: result.approvalId,
+        callId: result.callId,
+      });
+      return current ? { status: "waiting" } : { status: "succeeded" };
     }
 
     return this.complete(request, events, result, spend);
@@ -331,20 +382,50 @@ export class TurnDriver {
     result: Extract<AgentStateResult, { status: "succeeded" | "failed" | "input_required" }>,
     spend: TurnSpendScope
   ): Promise<RunOutcome> {
+    assertRunActive(request.signal);
+    const outcome = await this.guardOutput(turnOutcome(result), events);
+    assertRunActive(request.signal);
+    const text =
+      outcome.status === "succeeded" || outcome.status === "input_required"
+        ? completedText(events.text, outcome.text)
+        : events.text;
+    const historyOutcome = outcome.status === "input_required" ? "succeeded" : outcome.status;
     const completion = await this.options.completer.complete({
       businessId: request.businessId,
       runId: request.runId,
+      leaseGeneration: request.leaseGeneration,
       conversationId: request.conversationId,
       turnId: request.turnId,
       attempt: request.attempt,
       cursor: events.cursor,
-      outcome: await this.guardOutput(turnOutcome(result), events),
-      ...(events.toolCalls.length === 0 ? {} : { metadata: { toolCalls: events.toolCalls } }),
+      outcome,
+      history: { ...events.history(historyOutcome, true), text },
       ...(events.surfaces.length === 0 ? {} : { surfaces: events.surfaces }),
       ...(request.latestAttempt === undefined ? {} : { latestAttempt: request.latestAttempt }),
     });
+    assertRunActive(request.signal);
 
-    return this.finish(events, completion, spend);
+    return this.finish(request, events, completion, spend);
+  }
+
+  private async checkpoint(
+    request: TurnRequest,
+    events: TurnEventWriter,
+    outcome: "waiting" | "failed" | "cancelled",
+    wait?: NonNullable<TurnAttemptHistory["wait"]>
+  ): Promise<boolean> {
+    assertRunActive(request.signal);
+    const result = await this.options.completer.checkpoint({
+      businessId: request.businessId,
+      runId: request.runId,
+      leaseGeneration: request.leaseGeneration,
+      conversationId: request.conversationId,
+      turnId: request.turnId,
+      attempt: request.attempt,
+      history: { ...events.history(outcome), ...(wait === undefined ? {} : { wait }) },
+    });
+    assertRunActive(request.signal);
+    return result.status !== "stale";
   }
 
   /** Guard output before it is durable; blocked answers are replaced, not dropped. */
@@ -355,10 +436,12 @@ export class TurnDriver {
   }
 
   private async finish(
+    request: TurnRequest,
     events: TurnEventWriter,
     completion: CompleteTurnResult,
     spend: TurnSpendScope
   ): Promise<RunOutcome> {
+    assertRunActive(request.signal);
     if (completion.status === "stale") {
       // A newer attempt already answered; do not announce this one.
       return { status: "succeeded" };
@@ -366,31 +449,41 @@ export class TurnDriver {
 
     if (completion.status === "succeeded") {
       const receipt = this.options.modelReceipt?.();
-      await events.emit(
-        "turn.finished",
-        { status: "succeeded", messageId: completion.messageId, ...(receipt ?? {}) },
-        "finished"
-      );
+      try {
+        await events.emit(
+          "turn.finished",
+          { status: "succeeded", messageId: completion.messageId, ...(receipt ?? {}) },
+          "finished"
+        );
+        assertRunActive(request.signal);
+      } catch (error) {
+        throw new TerminalTurnEventDeliveryError(error);
+      }
       this.reportTurn(spend, "ok");
       return { status: "succeeded" };
     }
 
     if (completion.status === "failed") {
-      await events.emit(
-        "turn.finished",
-        {
-          status: "failed",
-          messageId: null,
-          reason: completion.reason,
-          ...(completion.modelFailure === undefined
-            ? {}
-            : { modelFailure: completion.modelFailure }),
-          ...(completion.toolCallBudget === undefined
-            ? {}
-            : { toolCallBudget: completion.toolCallBudget }),
-        },
-        "finished"
-      );
+      try {
+        await events.emit(
+          "turn.finished",
+          {
+            status: "failed",
+            messageId: completion.messageId,
+            reason: completion.reason,
+            ...(completion.modelFailure === undefined
+              ? {}
+              : { modelFailure: completion.modelFailure }),
+            ...(completion.toolCallBudget === undefined
+              ? {}
+              : { toolCallBudget: completion.toolCallBudget }),
+          },
+          "finished"
+        );
+        assertRunActive(request.signal);
+      } catch (error) {
+        throw new TerminalTurnEventDeliveryError(error);
+      }
       this.reportTurn(spend, "error");
       // `completion.reason` is always an `AgentLoopFailureReason` (or `"empty_model_output"`) —
       // the same bounded value `AgentStateRunner` already writes as the State's own
@@ -414,6 +507,12 @@ export class TurnDriver {
       principal: spend.principal,
     });
   }
+}
+
+function completedText(published: string, completed: string): string {
+  if (completed.length === 0 || published.endsWith(completed)) return published;
+  if (completed.startsWith(published)) return completed;
+  return published + completed;
 }
 
 /** Serialize structured output; empty output fails instead of writing a blank Message. */

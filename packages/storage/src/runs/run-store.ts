@@ -28,9 +28,11 @@ import {
   findStateRow,
   insertStateRow,
   listStateRows,
+  type OwnedStateTransitionResult,
   type PersistedState,
   type StartStateInput,
   type StateTransitionInput,
+  transitionOwnedStateRow,
   transitionStateRow,
 } from "./state-store";
 
@@ -46,6 +48,7 @@ export { RunPersistenceError } from "./run-persistence-error";
 export type {
   EnsureStateInput,
   EnsureStateResult,
+  OwnedStateTransitionResult,
   PersistedState,
   PersistedStateStatus,
   StartStateInput,
@@ -110,6 +113,8 @@ export interface PersistedRun {
   readonly errorEvidenceRef: string | null;
   readonly leaseOwner: string | null;
   readonly leaseExpiresAt: string | null;
+  /** Increments only when a worker acquires this Run; heartbeats leave it unchanged. */
+  readonly leaseGeneration: number;
 }
 
 export interface RunTransitionInput {
@@ -182,6 +187,12 @@ export const RUN_RECOVERY_CURSOR_STORAGE_STATEMENTS: readonly string[] = [
   )`,
 ];
 
+export const RUN_LEASE_GENERATION_STORAGE_STATEMENTS: readonly string[] = [
+  `ALTER TABLE runs
+     ADD COLUMN IF NOT EXISTS lease_generation integer NOT NULL DEFAULT 0
+     CHECK (lease_generation >= 0)`,
+];
+
 export const RUN_RECOVERY_CURSOR_CYCLE_STORAGE_STATEMENTS: readonly string[] = [
   "ALTER TABLE run_recovery_cursors ADD COLUMN IF NOT EXISTS cycle_end_created_at timestamptz",
   "ALTER TABLE run_recovery_cursors ADD COLUMN IF NOT EXISTS cycle_end_run_id uuid",
@@ -219,6 +230,7 @@ export const RUN_STORAGE_STATEMENTS: readonly string[] = [
     error_evidence_ref    text,
     lease_owner           text,
     lease_expires_at      timestamptz,
+    lease_generation      integer NOT NULL DEFAULT 0 CHECK (lease_generation >= 0),
     UNIQUE (business_id, id),
     CHECK (
       (status IN ('claimed', 'running') AND lease_owner IS NOT NULL AND lease_expires_at IS NOT NULL)
@@ -374,7 +386,8 @@ function decodeRunCursor(decoded: string | undefined): RunCursor | null {
 
 /** PostgreSQL persistence for business-scoped Runs, States, attempts, and lineage. */
 export const RUN_COLUMNS = `id, business_id, source, bundle, identity, status, version, created_at,
-  started_at, finished_at, result_artifact_id, error_evidence_ref, lease_owner, lease_expires_at`;
+  started_at, finished_at, result_artifact_id, error_evidence_ref, lease_owner, lease_expires_at,
+  lease_generation`;
 
 export class RunStore {
   constructor(private readonly transactions: TransactionPort) {}
@@ -539,7 +552,12 @@ export class RunStore {
                 result_artifact_id = COALESCE($8, result_artifact_id),
                 error_evidence_ref = COALESCE($9, error_evidence_ref),
                 lease_owner = $10,
-                lease_expires_at = $11::timestamptz
+                lease_expires_at = $11::timestamptz,
+                lease_generation = CASE
+                  WHEN $10::text IS NOT NULL AND lease_owner IS DISTINCT FROM $10::text
+                    THEN lease_generation + 1
+                  ELSE lease_generation
+                END
           WHERE business_id = $1
             AND id = $2
             AND version = $3
@@ -635,6 +653,18 @@ export class RunStore {
   ): Promise<boolean> {
     return this.transactions.withTransaction((transaction) =>
       transitionStateRow(transaction, businessId, runId, stateKey, transition)
+    );
+  }
+
+  async transitionOwnedState(
+    businessId: string,
+    runId: string,
+    stateKey: string,
+    leaseGeneration: number,
+    transition: StateTransitionInput
+  ): Promise<OwnedStateTransitionResult> {
+    return this.transactions.withTransaction((transaction) =>
+      transitionOwnedStateRow(transaction, businessId, runId, stateKey, leaseGeneration, transition)
     );
   }
 

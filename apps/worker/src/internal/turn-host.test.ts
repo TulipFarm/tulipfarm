@@ -1,3 +1,4 @@
+import { RunInterruptedError } from "@tulipfarm/run-kernel";
 import { describe, expect, it } from "vitest";
 import { InternalApiClient, InternalApiError } from "./client";
 import { HttpTurnHost } from "./turn-host";
@@ -22,9 +23,22 @@ function host(handler: (url: string, init?: RequestInit) => Response): {
 const json = (body: unknown, status = 200): Response =>
   new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
 
-const REF = { businessId: "business-1", runId: "run-1", turnId: "turn-1", attempt: 2 };
+const REF = {
+  businessId: "business-1",
+  runId: "run-1",
+  turnId: "turn-1",
+  attempt: 2,
+  leaseGeneration: 3,
+};
 
 describe("HttpTurnHost", () => {
+  it("asks the API to settle a terminal Run without trusting callback payload state", async () => {
+    const { turns, urls } = host(() => json({ settled: true }));
+
+    await expect(turns.settleTerminal("run-1")).resolves.toBe(true);
+    expect(urls[0]).toContain("/api/v1/internal/turns/run-1/terminal");
+  });
+
   it("names the Turn a Run answers", async () => {
     const { turns } = host(() =>
       json({ turnId: "turn-1", conversationId: "conversation-1", attempt: 2 })
@@ -121,26 +135,59 @@ describe("HttpTurnHost", () => {
     const bodies: string[] = [];
     const { turns } = host((_url, init) => {
       bodies.push(typeof init?.body === "string" ? init.body : "");
-      return json({ messageId: "message-1" });
+      return json({ status: "recorded", messageId: "message-1" });
     });
 
     await turns.appendAssistantMessage({ ...REF, content: "hello" });
     await turns.completeTurn({ ...REF, status: "succeeded", cursor: 7, messageId: "message-1" });
 
-    expect(JSON.parse(bodies[0] as string)).toEqual({ attempt: 2, content: "hello" });
+    expect(JSON.parse(bodies[0] as string)).toEqual({
+      attempt: 2,
+      leaseGeneration: 3,
+      content: "hello",
+    });
     expect(JSON.parse(bodies[1] as string)).toEqual({
       attempt: 2,
+      leaseGeneration: 3,
       status: "succeeded",
       cursor: 7,
       messageId: "message-1",
     });
   });
 
+  it("preserves stale writes so the executor treats a lost retry race as superseded", async () => {
+    const { turns } = host((url) =>
+      url.endsWith("/messages")
+        ? json({ status: "stale", messageId: null })
+        : json({ status: "stale" })
+    );
+
+    await expect(turns.appendAssistantMessage({ ...REF, content: "late" })).resolves.toEqual({
+      status: "stale",
+      messageId: null,
+    });
+
+    await expect(
+      turns.completeTurn({ ...REF, status: "succeeded", cursor: 7, messageId: null })
+    ).resolves.toEqual({ status: "stale" });
+  });
+
+  it("maps a Run ownership conflict on a write to interruption", async () => {
+    const { turns } = host(() => json({ error: "run_not_running" }, 409));
+
+    await expect(turns.appendAssistantMessage({ ...REF, content: "late" })).rejects.toBeInstanceOf(
+      RunInterruptedError
+    );
+    await expect(
+      turns.completeTurn({ ...REF, status: "succeeded", cursor: 7, messageId: null })
+    ).rejects.toBeInstanceOf(RunInterruptedError);
+  });
+
   it("forwards the failure reason and model diagnostic on a failed completion", async () => {
     const bodies: string[] = [];
     const { turns } = host((_url, init) => {
       bodies.push(typeof init?.body === "string" ? init.body : "");
-      return json({});
+      return json({ status: "recorded" });
     });
 
     await turns.completeTurn({
@@ -154,6 +201,7 @@ describe("HttpTurnHost", () => {
 
     expect(JSON.parse(bodies[0] as string)).toEqual({
       attempt: 2,
+      leaseGeneration: 3,
       status: "failed",
       cursor: 7,
       messageId: null,
@@ -166,7 +214,7 @@ describe("HttpTurnHost", () => {
     const bodies: string[] = [];
     const { turns } = host((_url, init) => {
       bodies.push(typeof init?.body === "string" ? init.body : "");
-      return json({});
+      return json({ status: "recorded" });
     });
 
     await turns.completeTurn({ ...REF, status: "failed", cursor: 7, messageId: null });

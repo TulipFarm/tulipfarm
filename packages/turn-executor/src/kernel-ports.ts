@@ -1,4 +1,4 @@
-import type { StateStatus } from "@tulipfarm/run-kernel";
+import { RunInterruptedError, type StateStatus } from "@tulipfarm/run-kernel";
 import type { RunStore } from "@tulipfarm/storage";
 import type { StateTransitionPort } from "./agent-state";
 
@@ -35,7 +35,7 @@ export class MissingStateError extends Error {
 /** Record `reason` only for non-success; RunStore never clears error evidence. */
 export class RunStoreStateTransitions implements StateTransitionPort {
   constructor(
-    private readonly runs: Pick<RunStore, "findState" | "transitionState">,
+    private readonly runs: Pick<RunStore, "findState" | "transitionOwnedState">,
     /**
      * Reports a State's durable move to `failed`. Optional so existing tests and callers need not
      * wire one, but production always does — this is the one place every Run source (chat,
@@ -49,6 +49,7 @@ export class RunStoreStateTransitions implements StateTransitionPort {
     businessId: string;
     runId: string;
     stateKey: string;
+    leaseGeneration: number;
     from: StateStatus;
     to: StateStatus;
     reason?: string;
@@ -57,19 +58,28 @@ export class RunStoreStateTransitions implements StateTransitionPort {
     const state = await this.runs.findState(input.businessId, input.runId, input.stateKey);
     if (state === null) throw new MissingStateError(input.runId, input.stateKey);
 
-    const moved = await this.runs.transitionState(input.businessId, input.runId, input.stateKey, {
-      expectedVersion: state.version,
-      expectedStatus: input.from,
-      status: input.to,
-      ...(input.to === "running" ? { startedAt: new Date().toISOString() } : {}),
-      ...(TERMINAL_STATUSES.has(input.to) ? { finishedAt: new Date().toISOString() } : {}),
-      ...(input.reason !== undefined && input.to !== "succeeded"
-        ? { errorEvidenceRef: input.reason }
-        : {}),
-      ...(input.output === undefined ? {} : { output: input.output }),
-    });
+    const moved = await this.runs.transitionOwnedState(
+      input.businessId,
+      input.runId,
+      input.stateKey,
+      input.leaseGeneration,
+      {
+        expectedVersion: state.version,
+        expectedStatus: input.from,
+        status: input.to,
+        ...(input.to === "running" ? { startedAt: new Date().toISOString() } : {}),
+        ...(TERMINAL_STATUSES.has(input.to) ? { finishedAt: new Date().toISOString() } : {}),
+        ...(input.reason !== undefined && input.to !== "succeeded"
+          ? { errorEvidenceRef: input.reason }
+          : {}),
+        ...(input.output === undefined ? {} : { output: input.output }),
+      }
+    );
 
-    if (!moved) {
+    if (moved === "ownership_lost") {
+      throw new RunInterruptedError();
+    }
+    if (moved === "conflict") {
       throw new StateTransitionConflictError(input.runId, input.stateKey, input.from, input.to);
     }
 
@@ -94,7 +104,7 @@ export const RECLAIM_PATH: readonly StateStatus[] = ["ready", "claimed"];
 
 async function walkReclaimPath(
   transitions: StateTransitionPort,
-  request: { businessId: string; runId: string; stateKey: string },
+  request: { businessId: string; runId: string; stateKey: string; leaseGeneration: number },
   from: StateStatus
 ): Promise<void> {
   let current = from;
@@ -106,7 +116,7 @@ async function walkReclaimPath(
 
 export async function reclaimWaitingState(
   transitions: StateTransitionPort,
-  request: { businessId: string; runId: string; stateKey: string }
+  request: { businessId: string; runId: string; stateKey: string; leaseGeneration: number }
 ): Promise<void> {
   await walkReclaimPath(transitions, request, "waiting");
 }
@@ -114,7 +124,7 @@ export async function reclaimWaitingState(
 /** First chat dispatch claims `pending` invoke State through `ready` and `claimed`. */
 export async function reclaimPendingState(
   transitions: StateTransitionPort,
-  request: { businessId: string; runId: string; stateKey: string }
+  request: { businessId: string; runId: string; stateKey: string; leaseGeneration: number }
 ): Promise<void> {
   await walkReclaimPath(transitions, request, "pending");
 }

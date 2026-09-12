@@ -118,27 +118,12 @@ function appendText(
   return [...parts, { kind, text: delta }];
 }
 
-function hasSurface(messages: ChatMessage[], artifactId: string): boolean {
-  return messages.some((message) =>
-    message.parts.some((part) => part.kind === "surface" && part.artifactId === artifactId)
-  );
-}
-
-function mapSurface(
-  messages: ChatMessage[],
+function isSurface(
+  part: TimelinePart,
   artifactId: string,
-  fn: (part: Extract<TimelinePart, { kind: "surface" }>) => TimelinePart
-): ChatMessage[] {
-  return messages.map((message) =>
-    message.parts.some((part) => part.kind === "surface" && part.artifactId === artifactId)
-      ? {
-          ...message,
-          parts: message.parts.map((part) =>
-            part.kind === "surface" && part.artifactId === artifactId ? fn(part) : part
-          ),
-        }
-      : message
-  );
+  revision: number | undefined
+): part is Extract<TimelinePart, { kind: "surface" }> {
+  return part.kind === "surface" && part.artifactId === artifactId && part.revision === revision;
 }
 
 function mapTool(
@@ -147,6 +132,12 @@ function mapTool(
   fn: (part: Extract<TimelinePart, { kind: "tool" }>) => TimelinePart
 ): TimelinePart[] {
   return parts.map((p) => (p.kind === "tool" && p.toolCallId === toolCallId ? fn(p) : p));
+}
+
+function interruptRunningTools(parts: TimelinePart[]): TimelinePart[] {
+  return parts.map((part) =>
+    part.kind === "tool" && part.status === "running" ? { ...part, status: "interrupted" } : part
+  );
 }
 
 export function chatReducer(state: ChatState, event: ChatEvent): ChatState {
@@ -284,36 +275,28 @@ export function chatReducer(state: ChatState, event: ChatEvent): ChatState {
     }
 
     case "surface": {
-      const { artifactId, artifact } = event.data;
-      if (hasSurface(state.messages, artifactId)) {
-        return {
-          ...state,
-          status: "streaming",
-          messages: mapSurface(state.messages, artifactId, () => ({
-            kind: "surface",
-            artifactId,
-            revision: artifact?.revision,
-            artifact,
-            actionHandles: event.data.actionHandles,
-            resolvedView: event.data.resolvedView,
-            codeView: event.data.codeView,
-          })),
-        };
-      }
       const { messages, target } = ensureAssistant(state.messages);
-      const part: TimelinePart = {
+      const { artifactId, artifact } = event.data;
+      const revision = event.data.revision ?? artifact?.revision;
+      const surface: Extract<TimelinePart, { kind: "surface" }> = {
         kind: "surface",
         artifactId,
-        revision: artifact?.revision,
-        artifact,
-        actionHandles: event.data.actionHandles,
-        resolvedView: event.data.resolvedView,
-        codeView: event.data.codeView,
+        ...(revision === undefined ? {} : { revision }),
+        ...(artifact === undefined ? {} : { artifact }),
+        ...(event.data.actionHandles === undefined
+          ? {}
+          : { actionHandles: event.data.actionHandles }),
+        ...(event.data.resolvedView === undefined ? {} : { resolvedView: event.data.resolvedView }),
+        ...(event.data.codeView === undefined ? {} : { codeView: event.data.codeView }),
       };
+      const exists = target.parts.some((part) => isSurface(part, artifactId, revision));
+      const parts = exists
+        ? target.parts.map((part) => (isSurface(part, artifactId, revision) ? surface : part))
+        : [...target.parts, surface];
       return {
         ...state,
         status: "streaming",
-        messages: withParts(messages, target, [...target.parts, part]),
+        messages: withParts(messages, target, parts),
       };
     }
 
@@ -335,7 +318,7 @@ export function chatReducer(state: ChatState, event: ChatEvent): ChatState {
 
     case "finish": {
       const { messages, target } = ensureAssistant(state.messages);
-      const sealed = withParts(messages, target, target.parts).map((m) =>
+      const sealed = withParts(messages, target, interruptRunningTools(target.parts)).map((m) =>
         m.id === target.id
           ? {
               ...m,
@@ -345,16 +328,27 @@ export function chatReducer(state: ChatState, event: ChatEvent): ChatState {
             }
           : m
       );
-      return { ...state, status: "idle", messages: sealed };
+      return { ...state, status: "idle", messages: sealed, pendingApprovals: {} };
     }
 
-    case "error":
+    case "error": {
+      const active = state.messages.at(-1);
+      const messages =
+        event.data.terminal === true && active?.role === "assistant" && !active.sealed
+          ? [
+              ...state.messages.slice(0, -1),
+              { ...active, parts: interruptRunningTools(active.parts), sealed: true },
+            ]
+          : state.messages;
       return {
         ...state,
         status: "error",
+        messages,
+        ...(event.data.terminal === true ? { pendingApprovals: {} } : {}),
         error: event.data.message,
         errorDetails: event.data.details,
       };
+    }
 
     case "client-action":
       return state;

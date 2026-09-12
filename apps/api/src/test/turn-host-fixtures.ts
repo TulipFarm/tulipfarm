@@ -1,4 +1,5 @@
 import { DEPLOYMENT_BUSINESS_ID } from "@tulipfarm/constants";
+import type { MessageDoc } from "../chat/messages";
 import type {
   CompleteTurnInput,
   CompleteTurnResult,
@@ -7,6 +8,7 @@ import type {
   PersistedTurn,
   TurnCompletion,
 } from "../conversations/service";
+import type { Queryable } from "../db";
 import type { HostedRunReader } from "../internal/turn-host";
 
 /** Shared doubles for the internal turn host's tests. */
@@ -36,9 +38,21 @@ export function turn(overrides: Partial<PersistedTurn> = {}): PersistedTurn {
 }
 
 export class FakeConversationStore implements ConversationStore {
+  onFindTurnByRunId?: () => void;
   readonly messages: PersistedMessage[] = [];
   readonly turns: PersistedTurn[] = [];
   readonly completions: TurnCompletion[] = [];
+  readonly surfaceMessages: MessageDoc[] = [];
+
+  async withTransaction<T>(
+    operation: (store: ConversationStore, transaction: Queryable) => Promise<T>
+  ): Promise<T> {
+    return operation(this, {
+      query: async () => {
+        throw new Error("fake transaction query is unavailable");
+      },
+    });
+  }
 
   async findTurnByIdempotencyKey(_businessId: string, key: string) {
     return this.turns.find((candidate) => candidate.idempotencyKey === key);
@@ -48,6 +62,14 @@ export class FakeConversationStore implements ConversationStore {
     return this.turns.find((candidate) => candidate.id === turnId);
   }
 
+  async lockTurnByIdempotencyKey(businessId: string, key: string) {
+    return this.findTurnByIdempotencyKey(businessId, key);
+  }
+
+  async lockTurn(businessId: string, turnId: string) {
+    return this.findTurn(businessId, turnId);
+  }
+
   async findLatestTurn(_businessId: string, conversationId: string) {
     return [...this.turns]
       .reverse()
@@ -55,11 +77,78 @@ export class FakeConversationStore implements ConversationStore {
   }
 
   async findTurnByRunId(_businessId: string, runId: string) {
-    return this.turns.find((candidate) => candidate.runId === runId);
+    const found = this.turns.find((candidate) => candidate.runId === runId);
+    const hook = this.onFindTurnByRunId;
+    this.onFindTurnByRunId = undefined;
+    hook?.();
+    return found;
   }
 
   async appendMessage(message: PersistedMessage) {
     this.messages.push(message);
+  }
+
+  async appendAssistantMessage(input: {
+    readonly message: PersistedMessage;
+    readonly runId: string;
+    readonly attempt: number;
+  }) {
+    const current = this.turns.find((candidate) => candidate.id === input.message.turnId);
+    if (
+      current === undefined ||
+      current.runId !== input.runId ||
+      current.attempt !== input.attempt
+    ) {
+      return { status: "stale" as const, messageId: null };
+    }
+    const existing = this.messages.find(
+      (message) =>
+        message.turnId === input.message.turnId &&
+        message.role === "assistant" &&
+        message.attempt === input.attempt
+    );
+    if (existing !== undefined) {
+      const index = this.messages.indexOf(existing);
+      this.messages[index] = { ...input.message, id: existing.id, createdAt: existing.createdAt };
+      return { status: "recorded" as const, messageId: existing.id };
+    }
+    this.messages.push(input.message);
+    return { status: "recorded" as const, messageId: input.message.id };
+  }
+
+  async findAttemptMessage(_businessId: string, turnId: string, attempt: number) {
+    return this.messages.find(
+      (message) =>
+        message.turnId === turnId && message.role === "assistant" && message.attempt === attempt
+    );
+  }
+
+  async reserveTurn(input: {
+    readonly message: PersistedMessage;
+    readonly turn: PersistedTurn;
+    readonly requestFingerprint?: string;
+  }) {
+    const existing = await this.findTurnByIdempotencyKey(
+      input.turn.businessId,
+      input.turn.idempotencyKey
+    );
+    if (existing !== undefined) {
+      const request = this.messages.find((message) => message.id === existing.requestMessageId);
+      const fingerprint = request?.metadata?.submissionFingerprint;
+      return {
+        turn: existing,
+        outcome:
+          input.requestFingerprint !== undefined &&
+          fingerprint !== undefined &&
+          fingerprint !== input.requestFingerprint
+            ? ("conflict" as const)
+            : ("replayed" as const),
+        conversationCreated: false,
+      };
+    }
+    this.turns.push(input.turn);
+    this.messages.push(input.message);
+    return { turn: input.turn, outcome: "created" as const, conversationCreated: false };
   }
 
   async saveTurn(saved: PersistedTurn) {
@@ -68,8 +157,15 @@ export class FakeConversationStore implements ConversationStore {
     else this.turns[index] = saved;
   }
 
-  async listMessages(_businessId: string, conversationId: string) {
-    return this.messages.filter((message) => message.conversationId === conversationId);
+  async listMessages(
+    _businessId: string,
+    conversationId: string,
+    throughRequestMessageId?: string
+  ) {
+    const messages = this.messages.filter((message) => message.conversationId === conversationId);
+    if (throughRequestMessageId === undefined) return messages;
+    const cutoff = messages.findIndex((message) => message.id === throughRequestMessageId);
+    return cutoff < 0 ? [] : messages.slice(0, cutoff + 1);
   }
 
   async findCompletion(_businessId: string, turnId: string, attempt: number) {
@@ -79,6 +175,14 @@ export class FakeConversationStore implements ConversationStore {
   }
 
   async completeTurn(input: CompleteTurnInput): Promise<CompleteTurnResult> {
+    const turn = this.turns.find((candidate) => candidate.id === input.completion.turnId);
+    if (
+      turn === undefined ||
+      turn.runId !== input.runId ||
+      turn.attempt !== input.completion.attempt
+    ) {
+      return { completionInserted: false, status: "stale" };
+    }
     const recorded = await this.findCompletion(
       input.completion.businessId,
       input.completion.turnId,
@@ -86,8 +190,15 @@ export class FakeConversationStore implements ConversationStore {
     );
     const completionInserted = recorded === undefined;
     if (completionInserted) this.completions.push(input.completion);
-    if (input.turn) await this.saveTurn(input.turn);
-    return { completionInserted };
+    if (!completionInserted) return { completionInserted: false, status: "replayed" };
+    if (input.surfaceMessage !== undefined) this.surfaceMessages.push(input.surfaceMessage);
+    await this.saveTurn({
+      ...turn,
+      status: input.completion.status,
+      cursor: input.completion.cursor,
+      updatedAt: input.completion.createdAt,
+    });
+    return { completionInserted: true, status: "recorded" };
   }
 }
 

@@ -152,6 +152,18 @@ test("a presentation Tool never draws a row, even when it failed", () => {
   expect(container).toBeEmptyDOMElement();
 });
 
+test("an interrupted Tool says that no result was recorded", () => {
+  renderPart({
+    kind: "tool",
+    toolCallId: "call-1",
+    toolName: "record_create",
+    args: {},
+    status: "interrupted",
+  });
+
+  expect(screen.getByText("Interrupted before a result was recorded.")).toBeInTheDocument();
+});
+
 test("Choices render as a decision card and lock after selection", async () => {
   const user = userEvent.setup();
   const action = { event: "incident.choose" };

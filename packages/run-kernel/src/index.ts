@@ -5,6 +5,7 @@ export * from "./child-completion";
 export * from "./child-sweep";
 export * from "./children";
 export * from "./concurrency";
+export * from "./interruption";
 export * from "./invocation";
 export * from "./lease";
 export * from "./limits";

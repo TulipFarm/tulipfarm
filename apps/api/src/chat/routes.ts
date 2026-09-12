@@ -17,11 +17,15 @@ import {
 } from "../runs/events";
 import type { TeamAssetService } from "../team-assets/service";
 import { mayUseAgent } from "./agent-access";
-import { isConversationEntryError, resolveConversationEntry } from "./conversation-entry";
+import {
+  announceConversationCreated,
+  isConversationEntryError,
+  resolveConversationEntry,
+} from "./conversation-entry";
 import type { ConversationRepo } from "./conversations";
 import { SSE_KEEPALIVE_MS, writeSseHeaders } from "./sse";
 import { type ChatBody, ChatBodySchema, corsPassthrough } from "./turn-helpers";
-import { durableTurnSubmitter } from "./turn-submit";
+import { type ChatSubmission, durableTurnSubmitter } from "./turn-submit";
 
 type PreHandler = (req: FastifyRequest, reply: FastifyReply) => Promise<void>;
 
@@ -41,8 +45,16 @@ function agentHandle(soulLoader: SoulLoader | undefined, agentId: string): strin
   return resolveAgent(soulLoader, agentId)?.name;
 }
 
-/** 409 body for a replayed request: the Run that already answers it, so the client can reattach. */
-const DuplicateInvocationSchema = {
+function scopedIdempotencyKey(
+  principal: { businessId: string; kind: string; id: string },
+  conversationId: string | undefined,
+  clientKey: string
+): string {
+  return `${principal.businessId}:${principal.kind}:${principal.id}:${conversationId ?? "new"}:${clientKey}`;
+}
+
+/** 409 body when a client key is reused for a different normalized request. */
+const IdempotencyConflictSchema = {
   type: "object",
   required: ["error"],
   properties: { error: { type: "string" }, runId: { type: "string" } },
@@ -122,7 +134,7 @@ export function registerChatRoutes(
           401: ErrorSchema,
           403: ErrorSchema,
           404: ErrorSchema,
-          409: DuplicateInvocationSchema,
+          409: IdempotencyConflictSchema,
           429: ErrorSchema,
           503: ErrorSchema,
         },
@@ -141,25 +153,9 @@ export function registerChatRoutes(
         typeof idempotencyHeader === "string" && idempotencyHeader.length > 0
           ? idempotencyHeader
           : req.id;
-      const submitter = durableTurnSubmitter({
-        store: options.conversationStore,
-        invocations: options.invocations,
-        principal: { kind: principal.kind, id: principal.id, businessId: principal.businessId },
-        payload: body,
-        agentId: body.agentId ?? "assistant",
-        // Scope the client key to the submitter; unscoped keys let callers claim each other's Runs.
-        idempotencyKey: `${principal.kind}:${principal.id}:${clientKey}`,
-        log: req.log,
-      });
+      const idempotencyKey = scopedIdempotencyKey(principal, body.conversationId, clientKey);
 
-      // Check replay before opening a Conversation so retries do not leave empty shells.
-      const replayed = await submitter.findSubmitted?.();
-      if (replayed) {
-        return reply.code(409).send({ error: "duplicate chat invocation", runId: replayed.runId });
-      }
-
-      // Resolved before the Conversation is opened, for the same reason the replay check is: a
-      // refusal afterwards would leave an empty thread in the sidebar for every rejected attempt.
+      // Resolve authorization and Files before any transactional persistence begins.
       const attachments = await resolveAttachments(
         options.fileService,
         principal.businessId,
@@ -193,24 +189,45 @@ export function registerChatRoutes(
         invocations: options.invocations,
         principal: { kind: principal.kind, id: principal.id, businessId: principal.businessId },
         payload: { ...body, agentId: entry.agentId },
+        requestFingerprintPayload: body,
         agentId: entry.agentId,
-        idempotencyKey: `${principal.kind}:${principal.id}:${clientKey}`,
+        idempotencyKey,
         log: req.log,
       });
-      const submission = await resolvedSubmitter.submit({
-        conversationId: entry.conversation._id,
-        content: body.message.content,
-        files: attachments,
-      });
-      if (submission.outcome === "duplicate") {
-        // Replayed turn: return the existing Run so one message is not answered twice.
-        return reply
-          .code(409)
-          .send({ error: "duplicate chat invocation", runId: submission.runId });
+      let submission: ChatSubmission;
+      try {
+        submission = await resolvedSubmitter.submit({
+          conversationId: entry.conversation._id,
+          content: body.message.content,
+          files: attachments,
+          ...(entry.isNew ? { newConversation: entry.conversation } : {}),
+          ...(entry.isNew
+            ? {}
+            : {
+                conversationUpdate:
+                  entry.agentIdToPersist === undefined ? {} : { agentId: entry.agentIdToPersist },
+              }),
+        });
+      } catch (error) {
+        req.log.warn({ err: error }, "chat turn could not be submitted");
+        return reply.code(503).send({ error: "chat turn could not be dispatched" });
+      }
+      if (submission.outcome === "conflict") {
+        return reply.code(409).send({ error: "idempotency key reused with different payload" });
       }
       const claim = submission.run;
-      if (!claim) {
-        return reply.code(503).send({ error: "chat turn could not be dispatched" });
+      if (claim.conversationCreated) {
+        announceConversationCreated(
+          {
+            repo: options.repo,
+            llmService: options.llmService,
+            ...(options.soulLoader ? { soulLoader: options.soulLoader } : {}),
+            ...(options.events ? { events: options.events } : {}),
+            ...(options.teamAssets ? { teamAssets: options.teamAssets } : {}),
+          },
+          { userId: user._id, principal, body, log: req.log },
+          entry.conversation
+        );
       }
       const runId = claim.runId;
 
@@ -221,7 +238,7 @@ export function registerChatRoutes(
           ?.noteSentIn(
             principal.businessId,
             attachments.map((file) => file.fileId),
-            entry.conversation._id
+            claim.conversationId
           )
           .catch((error: unknown) => req.log.warn({ err: error }, "file provenance not recorded"));
       }
@@ -235,7 +252,7 @@ export function registerChatRoutes(
         "X-Run-Id": runId,
         // The Turn, so a retry can re-enter this one rather than asking the question twice.
         "X-Turn-Id": claim.turnId,
-        "X-Conversation-Id": entry.conversation._id,
+        "X-Conversation-Id": claim.conversationId,
         // Only user-selected Soul Agents are exposed; normal chat has no Agent identity.
         ...headerFor("X-Agent-Id", agentHandle(options.soulLoader, entry.agentId)),
         ...corsPassthrough(reply),

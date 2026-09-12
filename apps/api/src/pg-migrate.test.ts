@@ -1705,6 +1705,31 @@ describe("runPgMigrations concurrency and atomicity", () => {
     });
   });
 
+  describe("migration 111", () => {
+    it("adds a zero-based lease generation to existing Runs", async () => {
+      await db.query(`CREATE TABLE runs (
+        id uuid PRIMARY KEY,
+        business_id text NOT NULL
+      )`);
+      await db.query(
+        "INSERT INTO runs (id, business_id) VALUES ('00000000-0000-4000-8000-000000000001', 'business-1')"
+      );
+      await db.query(`CREATE TABLE schema_version (
+        id boolean PRIMARY KEY DEFAULT true,
+        version integer NOT NULL,
+        CONSTRAINT schema_version_single_row CHECK (id)
+      )`);
+      await db.query("INSERT INTO schema_version (id, version) VALUES (true, 110)");
+
+      await runPgMigrations(db, undefined, NOOP_LOG);
+
+      const rows = await db.query<{ lease_generation: number }>(
+        "SELECT lease_generation FROM runs"
+      );
+      expect(rows.rows).toEqual([{ lease_generation: 0 }]);
+    });
+  });
+
   it("is a no-op on an already-current database", async () => {
     await runPgMigrations(db, undefined, NOOP_LOG);
     const { queryable, statements } = watch(db);

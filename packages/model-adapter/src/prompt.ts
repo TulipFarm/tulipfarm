@@ -171,6 +171,13 @@ export function splitPrompt(
     );
   }
   flushResults();
+  const reread = attachments.filter(
+    (file) => file.source === "tool" && !attached.includes(file.fileId)
+  );
+  if (reread.length > 0) {
+    for (const file of reread) attached.push(file.fileId);
+    messages.push({ role: "user", content: reread.map((file) => filePartFor(file, true)) });
+  }
   return { instructions, messages, attached };
 }
 
@@ -209,8 +216,11 @@ function userParts(
  * accepted as binary; every other media type is refused as a file part, so a document that has
  * text is sent as text and only a document with none is left to try its luck as a file.
  */
-function filePartFor(file: ResolvedAttachment): TextPart | ImagePart | FilePart {
-  if (modalityForMediaType(file.mediaType) === "image") {
+function filePartFor(
+  file: ResolvedAttachment,
+  preserveFilename = false
+): TextPart | ImagePart | FilePart {
+  if (modalityForMediaType(file.mediaType) === "image" && !preserveFilename) {
     return { type: "image", image: file.data, mediaType: file.mediaType };
   }
   if (file.mediaType !== "application/pdf" && file.text !== undefined && file.text.length > 0) {

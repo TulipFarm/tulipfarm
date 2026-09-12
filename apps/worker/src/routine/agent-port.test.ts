@@ -1,10 +1,11 @@
-import type {
-  ExposedTool,
-  ModelInvocationRequest,
-  ModelInvocationResult,
-  ModelPort,
+import {
+  type ExposedTool,
+  InMemoryLoopCheckpointStore,
+  type ModelInvocationRequest,
+  type ModelInvocationResult,
+  type ModelPort,
 } from "@tulipfarm/agent-runtime";
-import type { AgentInvocationPlan } from "@tulipfarm/run-kernel";
+import { type AgentInvocationPlan, RunInterruptedError } from "@tulipfarm/run-kernel";
 import { type AgentDefinition, contentText, type ModelProfileDefinition } from "@tulipfarm/schema";
 import type { BundleDefinition, RuntimeBundle } from "@tulipfarm/soul";
 import type { RunEventAppendPort } from "@tulipfarm/turn-executor";
@@ -126,6 +127,7 @@ function request(overrides: Partial<RoutineAgentRequest> = {}): RoutineAgentRequ
     businessId: BUSINESS_ID,
     runId: RUN_ID,
     stateKey: STATE_KEY,
+    leaseGeneration: 1,
     attempt: 3,
     plan: PLAN,
     bundle: bundle([
@@ -211,6 +213,207 @@ describe("BundleRoutineAgentPort", () => {
     expect(contentText(invoked.messages[0]?.content ?? [])).toContain("You triage incoming work.");
     expect(contentText(invoked.messages[1]?.content ?? [])).toContain("invoice overdue");
     expect(appended[1]?.payload).toMatchObject({ modelProfileId: "fast" });
+  });
+
+  it("fences every Routine Agent checkpoint with the active Run claim", async () => {
+    class FenceRecordingStore extends InMemoryLoopCheckpointStore {
+      readonly generations: number[] = [];
+
+      override async save(
+        checkpoint: Parameters<InMemoryLoopCheckpointStore["save"]>[0],
+        fence?: Parameters<InMemoryLoopCheckpointStore["save"]>[1]
+      ) {
+        this.generations.push(fence?.leaseGeneration ?? -1);
+        await super.save(checkpoint, fence);
+      }
+    }
+
+    const checkpoints = new FenceRecordingStore();
+    await port({ checkpoints }).execute(request({ leaseGeneration: 7 }));
+
+    expect(checkpoints.generations.length).toBeGreaterThan(0);
+    expect(new Set(checkpoints.generations)).toEqual(new Set([7]));
+  });
+
+  it("acknowledges a retryable terminal so the next authored attempt calls the model", async () => {
+    const checkpoints = new InMemoryLoopCheckpointStore();
+    const tools: ExposedTool[] = [
+      {
+        name: "lookup",
+        description: "Looks something up.",
+        inputSchema: { type: "object", properties: {}, additionalProperties: false },
+      },
+    ];
+    invoke = vi
+      .fn<ModelPort["invoke"]>()
+      .mockResolvedValueOnce({
+        requestId: "req-tool",
+        output: {
+          kind: "tool_calls",
+          calls: [{ callId: "lookup-1", name: "lookup", arguments: { invoice: "overdue" } }],
+        },
+        usage: { inputTokens: 10, outputTokens: 4 },
+      })
+      .mockRejectedValueOnce(new Error("provider unavailable"))
+      .mockResolvedValueOnce(answered("billing"));
+    const dispatch = vi.fn(async (call) => ({
+      status: "succeeded" as const,
+      callId: call.callId,
+      output: { category: "billing" },
+    }));
+    const agentPort = port({
+      checkpoints,
+      tools: { dispatch },
+      catalog: async () => tools,
+    });
+
+    await expect(agentPort.execute(request({ attempt: 3 }))).resolves.toEqual({
+      kind: "failed",
+      reason: "model_error",
+      retryable: true,
+    });
+    expect((await checkpoints.load(BUSINESS_ID, RUN_ID, STATE_KEY))?.resume).toMatchObject({
+      retryable: true,
+      messages: expect.arrayContaining([expect.objectContaining({ role: "tool" })]),
+    });
+    expect(
+      (await checkpoints.load(BUSINESS_ID, RUN_ID, STATE_KEY))?.resume?.terminal
+    ).toBeUndefined();
+
+    await expect(agentPort.execute(request({ attempt: 3 }))).resolves.toEqual({
+      kind: "succeeded",
+      output: "billing",
+    });
+    expect(invoke).toHaveBeenCalledTimes(3);
+    expect(dispatch).toHaveBeenCalledTimes(1);
+    const retried = invoke.mock.calls[2]?.[0] as ModelInvocationRequest;
+    expect(retried.messages.some((message) => message.role === "tool")).toBe(true);
+  });
+
+  it("redelivers a retryable terminal before acknowledgement without reusing model or Tool work", async () => {
+    const checkpoints = new InMemoryLoopCheckpointStore();
+    const tools: ExposedTool[] = [
+      {
+        name: "lookup",
+        inputSchema: { type: "object", properties: {}, additionalProperties: false },
+      },
+    ];
+    invoke = vi
+      .fn<ModelPort["invoke"]>()
+      .mockResolvedValueOnce({
+        requestId: "req-tool",
+        output: {
+          kind: "tool_calls",
+          calls: [{ callId: "lookup-1", name: "lookup", arguments: {} }],
+        },
+        usage: { inputTokens: 1, outputTokens: 1 },
+      })
+      .mockRejectedValueOnce(new Error("provider unavailable"))
+      .mockResolvedValueOnce(answered("billing"));
+    const dispatch = vi.fn(async (call) => ({
+      status: "succeeded" as const,
+      callId: call.callId,
+      output: "stored",
+    }));
+    let failTerminal = true;
+    const durableEvents = new Map<string, Record<string, unknown>>();
+    const agentPort = port({
+      checkpoints,
+      tools: { dispatch },
+      catalog: async () => tools,
+      events: {
+        append: async (input) => {
+          if (input.eventType === "turn.finished" && failTerminal) {
+            failTerminal = false;
+            throw new Error("event append failed before commit");
+          }
+          durableEvents.set(input.idempotencyKey, input.payload);
+          return { sequence: durableEvents.size };
+        },
+      },
+    });
+
+    await expect(agentPort.execute(request())).rejects.toThrow("event append failed before commit");
+    expect(
+      (await checkpoints.load(BUSINESS_ID, RUN_ID, STATE_KEY))?.resume?.terminal
+    ).toBeDefined();
+
+    await expect(agentPort.execute(request())).resolves.toMatchObject({
+      kind: "failed",
+      retryable: true,
+    });
+    expect(invoke).toHaveBeenCalledTimes(2);
+    expect(dispatch).toHaveBeenCalledTimes(1);
+
+    await expect(agentPort.execute(request())).resolves.toEqual({
+      kind: "succeeded",
+      output: "billing",
+    });
+    expect(invoke).toHaveBeenCalledTimes(3);
+    expect(dispatch).toHaveBeenCalledTimes(1);
+  });
+
+  it("starts the intended next attempt when acknowledgement commits before its caller crashes", async () => {
+    class CommitThenThrowStore extends InMemoryLoopCheckpointStore {
+      private fail = true;
+
+      override async acknowledgeTerminal(
+        ...args: Parameters<InMemoryLoopCheckpointStore["acknowledgeTerminal"]>
+      ): Promise<void> {
+        await super.acknowledgeTerminal(...args);
+        if (this.fail) {
+          this.fail = false;
+          throw new Error("acknowledgement result lost");
+        }
+      }
+    }
+
+    const checkpoints = new CommitThenThrowStore();
+    const tools: ExposedTool[] = [
+      {
+        name: "lookup",
+        inputSchema: { type: "object", properties: {}, additionalProperties: false },
+      },
+    ];
+    invoke = vi
+      .fn<ModelPort["invoke"]>()
+      .mockResolvedValueOnce({
+        requestId: "req-tool",
+        output: {
+          kind: "tool_calls",
+          calls: [{ callId: "lookup-1", name: "lookup", arguments: {} }],
+        },
+        usage: { inputTokens: 1, outputTokens: 1 },
+      })
+      .mockRejectedValueOnce(new Error("provider unavailable"))
+      .mockResolvedValueOnce(answered("billing"));
+    const dispatch = vi.fn(async (call) => ({
+      status: "succeeded" as const,
+      callId: call.callId,
+      output: "stored",
+    }));
+    const agentPort = port({
+      checkpoints,
+      tools: { dispatch },
+      catalog: async () => tools,
+    });
+
+    await expect(agentPort.execute(request())).rejects.toThrow("acknowledgement result lost");
+    expect((await checkpoints.load(BUSINESS_ID, RUN_ID, STATE_KEY))?.resume).toMatchObject({
+      retryable: true,
+      retryAttempt: 1,
+    });
+    expect(
+      (await checkpoints.load(BUSINESS_ID, RUN_ID, STATE_KEY))?.resume?.terminal
+    ).toBeUndefined();
+
+    await expect(agentPort.execute(request())).resolves.toEqual({
+      kind: "succeeded",
+      output: "billing",
+    });
+    expect(invoke).toHaveBeenCalledTimes(3);
+    expect(dispatch).toHaveBeenCalledTimes(1);
+    expect(appended.some((event) => event.idempotencyKey === `${STATE_KEY}:4:finished`)).toBe(true);
   });
 
   it("names the Run's own clock, because this State can call no clock Tool", async () => {
@@ -617,6 +820,40 @@ describe("BundleRoutineAgentPort", () => {
 
     expect(await port().execute(request())).toEqual({ kind: "cancelled" });
     expect(invoke).not.toHaveBeenCalled();
+  });
+
+  it("aborts a Routine model on lease loss without reporting participant cancellation", async () => {
+    const controller = new AbortController();
+    let providerSignal: AbortSignal | undefined;
+    let started: (() => void) | undefined;
+    let release: (() => void) | undefined;
+    const providerStarted = new Promise<void>((resolve) => {
+      started = resolve;
+    });
+    const providerReleased = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const execution = port({
+      model: () => ({
+        invoke: async () => {
+          throw new Error("stream expected");
+        },
+        async *stream(input) {
+          providerSignal = input.signal;
+          started?.();
+          await providerReleased;
+          yield { kind: "completed", result: answered("late answer") };
+        },
+      }),
+    }).execute(request({ signal: controller.signal }));
+
+    await providerStarted;
+    controller.abort("run_lease_lost");
+    expect(providerSignal?.aborted).toBe(true);
+    release?.();
+
+    await expect(execution).rejects.toBeInstanceOf(RunInterruptedError);
+    expect(appended.some((event) => event.eventType === "turn.finished")).toBe(false);
   });
 
   it("validates a structured answer against the schema the State declared", async () => {

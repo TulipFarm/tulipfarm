@@ -160,6 +160,7 @@ import { PgConversationRepo } from "./chat/conversations";
 import { PgMessageRepo } from "./chat/messages";
 import { allowedToolNamesFor, toolAgentFor } from "./chat/turn-helpers";
 import { PgConversationStore } from "./conversations/store.pg";
+import { TerminalTurnSettler } from "./conversations/terminal-turns";
 import {
   ambientTransactionPort,
   connectPg,
@@ -672,7 +673,17 @@ async function boot() {
       runStore,
       new ChildLinkStore(runTransactions)
     );
-    const runCancel = runCanceller(runCancellation);
+    const conversationStore = new PgConversationStore(
+      pool,
+      (queryable) => new PgMessageRepo(queryable),
+      (queryable) => new PgConversationRepo(queryable)
+    );
+    const terminalTurns = new TerminalTurnSettler({
+      turns: conversationStore,
+      runs: runStore,
+      events: runEventStore,
+    });
+    const runCancel = runCanceller(runCancellation, terminalTurns);
 
     const hookExecutor =
       process.env.HOOKS_DISABLED === "true"
@@ -1057,7 +1068,10 @@ async function boot() {
       mutationGuard,
     });
 
-    const delegationConversations = new PgConversationStore(pool);
+    const delegationConversations = new PgConversationStore(
+      pool,
+      (queryable) => new PgMessageRepo(queryable)
+    );
     const childLinks = new ChildLinkAncestryStore(pool);
     // Read at call time: the registry is still being built on the next statement.
     const delegationCatalog = delegationCatalogOf({ getAll: () => toolRegistry.getAll() });
@@ -1226,11 +1240,11 @@ async function boot() {
     });
 
     // with, so a worker credential is a key to a Run rather than a principal of its own.
-    const conversationStore = new PgConversationStore(pool);
     const internalTurns = {
       host: new InternalTurnHost({
         runs: runStore,
         store: conversationStore,
+        events: runEventStore,
         agentForRun: agentForRunResolver(soulLoader, runArtifacts),
         // No presentation context: a Run that assembles its own context has no surface, so the
         // Tools that require one are filtered out here rather than refused at dispatch.
@@ -1251,7 +1265,6 @@ async function boot() {
               ...(tool.cacheable === undefined ? {} : { cacheable: tool.cacheable }),
             }));
         },
-        messages: messageRepo,
         subagentContext: new SubagentTurnContextResolver({
           artifacts: runArtifacts,
           toolRegistry,
@@ -1325,6 +1338,7 @@ async function boot() {
             }),
         },
       }),
+      terminalTurns,
       deliveries: (log: FastifyBaseLogger) =>
         new IngressDeliveryHost({
           runs: runStore,
@@ -1332,6 +1346,11 @@ async function boot() {
           store: conversationStore,
           conversations: conversationRepo,
           threads: integrationThreads,
+          transactionScope: (transaction) => ({
+            artifacts: artifactsOver(ambientTransactionPort(transaction)),
+            conversations: new PgConversationRepo(transaction),
+            threads: new IntegrationConversationsRepo(transaction),
+          }),
           integrationEvents,
           soulLoader,
           bundled: bundledIntegrations,
@@ -1484,6 +1503,7 @@ async function boot() {
       observabilityConfig: obsConfig,
       invocations,
       conversationStore,
+      terminalTurns,
       runCancel,
       authorizeChatRunCancellation: runAuthorization.cancel,
       internalTurns,

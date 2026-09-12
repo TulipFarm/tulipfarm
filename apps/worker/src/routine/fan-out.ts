@@ -32,6 +32,7 @@ export interface FanOutContext {
   /** Durable State rows this attempt has seen, keyed by occurrence key. */
   readonly persisted: Map<string, PersistedState>;
   readonly now: () => Date;
+  readonly assertActive?: () => void;
   /** Schedules a unit's first State under its occurrence key, then walks that unit's chain. */
   readonly runUnit: (
     bodyName: string,
@@ -52,6 +53,7 @@ export async function runComposite(
   outputs: StateOutputs,
   depth: number
 ): Promise<StepOutcome | ChainOutcome | null> {
+  ctx.assertActive?.();
   if (state.type === "parallel") return runParallel(ctx, state, key, outputs, depth);
   if (state.type === "foreach") return runForeach(ctx, state, key, scope, outputs, depth);
   if (state.type === "repeat_until") return runRepeat(ctx, state, key, scope, outputs, depth);
@@ -71,7 +73,9 @@ async function runParallel(
     const plan = planParallel(state, progress);
     if (plan.dispatch.length === 0) break;
     for (const branch of plan.dispatch) {
+      ctx.assertActive?.();
       const settled = await ctx.runUnit(branch, key, branch, {}, outputs, depth);
+      ctx.assertActive?.();
       if (settled === "cancelled" || settled === "needs_reconciliation") return settled;
       progress = settleParallelBranch(progress, branch, unitStatus(settled));
     }
@@ -96,6 +100,7 @@ async function runForeach(
     const plan = planForeach(state, progress);
     if (plan.dispatch.length === 0) break;
     for (const index of plan.dispatch) {
+      ctx.assertActive?.();
       const settled = await ctx.runUnit(
         state.body,
         key,
@@ -104,6 +109,7 @@ async function runForeach(
         outputs,
         depth
       );
+      ctx.assertActive?.();
       if (settled === "cancelled" || settled === "needs_reconciliation") return settled;
       progress = settleForeachItem(state, progress, index, unitStatus(settled));
     }
@@ -126,6 +132,7 @@ async function runRepeat(
   let iterations = 0;
 
   for (;;) {
+    ctx.assertActive?.();
     const loopScope = { ...scope, loop: { iteration: iterations } };
     const decision = stepRepeat(state, { iterations, startedAtMs }, loopScope, ctx.now().getTime());
     if (decision.kind === "exit") return decision.outcome;
@@ -138,6 +145,7 @@ async function runRepeat(
       outputs,
       depth
     );
+    ctx.assertActive?.();
     if (settled === "succeeded") {
       iterations += 1;
       continue;

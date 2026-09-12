@@ -23,7 +23,6 @@ import {
   type ToolDispatchPort,
 } from "@tulipfarm/agent-runtime";
 import { INVOKE_STATE_KEY } from "@tulipfarm/run-kernel";
-import type { PersistedRun } from "@tulipfarm/storage";
 import {
   createChatExecutor,
   RunStoreStateTransitions,
@@ -87,6 +86,11 @@ export interface PersistedTurn {
   readonly turnStatus: string | null;
   /** The assistant Message the Turn appended, if it appended one. */
   readonly answer: string | null;
+  /** Assistant Messages read back from the database, including their durable metadata. */
+  readonly assistantMessages: readonly {
+    readonly content: string;
+    readonly metadata: Readonly<Record<string, unknown>>;
+  }[];
   /** Run event types in the order they were appended. */
   readonly events: readonly string[];
   readonly participantText: string;
@@ -204,7 +208,7 @@ async function readBack(
     [BUSINESS_ID, turnId]
   );
   const message = await database.query(
-    `SELECT content FROM eval_messages
+    `SELECT content, metadata FROM eval_messages
      WHERE business_id = $1 AND turn_id = $2 AND role = 'assistant' ORDER BY seq`,
     [BUSINESS_ID, turnId]
   );
@@ -225,6 +229,10 @@ async function readBack(
       turnRow?.status === undefined || turnRow.status === null ? null : String(turnRow.status),
     answer:
       message.rows[0] === undefined ? null : contentText(decodeContent(message.rows[0].content)),
+    assistantMessages: message.rows.map((row) => ({
+      content: contentText(decodeContent(row.content)),
+      metadata: decodeMetadata(row.metadata),
+    })),
     events: events.rows.map((row) => String(row.event_type)),
     participantText: events.rows
       .filter((row) => row.event_type === "text.delta" && row.audience === "participant")
@@ -363,7 +371,7 @@ async function runOneTurn(
           }),
     };
 
-    const host = evalTurnHost(database);
+    const host = evalTurnHost(database, options.evalCase.attemptHistory);
     const context = evalTurnContext({ evalCase: options.evalCase, soul });
     const executor = createChatExecutor({
       host: { ...host, dispatch: tools.dispatch },
@@ -377,11 +385,26 @@ async function runOneTurn(
       log: { warn: () => {} },
     });
 
+    const [claimed] = await database.runs.claimNextQueued(BUSINESS_ID, "eval", {
+      now: new Date().toISOString(),
+      leaseDurationMs: 60_000,
+      limit: 1,
+    });
+    if (claimed?.id !== runId) throw new Error(`L3 could not claim minted Run ${runId}`);
+    const started = await database.runs.transitionRun(BUSINESS_ID, runId, {
+      expectedVersion: claimed.version,
+      expectedStatus: "claimed",
+      status: "running",
+      startedAt: new Date().toISOString(),
+      leaseOwner: claimed.leaseOwner,
+      leaseExpiresAt: claimed.leaseExpiresAt,
+    });
+    if (!started) throw new Error(`L3 could not start claimed Run ${runId}`);
     const run = await database.runs.find(BUSINESS_ID, runId);
-    if (run === null) throw new Error(`L3 minted Run ${runId} but could not read it back`);
-    const outcome = await executor(run as PersistedRun);
+    if (run === null) throw new Error(`L3 could not read running Run ${runId}`);
+    const outcome = await executor(run);
     // The Worker records the executor's verdict on the Run; without it every L3 Trial would read
-    // back `queued` and the Run-status Expectation would measure the tier's own omission.
+    // back `running` and the Run-status Expectation would measure the tier's own omission.
     const settled = await database.runs.find(BUSINESS_ID, runId);
     await database.runs.transitionRun(BUSINESS_ID, runId, {
       expectedVersion: settled?.version ?? run.version,
@@ -482,6 +505,7 @@ export function foldJourney(turns: readonly PersistedTurn[]): PersistedTurn {
     soulCommits: turns.flatMap((turn) => turn.soulCommits),
     generatedFiles: turns.flatMap((turn) => turn.generatedFiles),
     toolDenials: turns.flatMap((turn) => turn.toolDenials),
+    assistantMessages: turns.flatMap((turn) => turn.assistantMessages),
     spend: turns.reduce<Spend>((total, turn) => mergeSpend(total, turn.spend), NO_SPEND),
   };
 }
@@ -568,4 +592,9 @@ function journeyCase(
     script: turn.script,
     journey: undefined,
   };
+}
+
+function decodeMetadata(raw: unknown): Readonly<Record<string, unknown>> {
+  const decoded = typeof raw === "string" ? JSON.parse(raw) : (raw ?? {});
+  return typeof decoded === "object" && decoded !== null && !Array.isArray(decoded) ? decoded : {};
 }

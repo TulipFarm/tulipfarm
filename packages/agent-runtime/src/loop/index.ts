@@ -19,6 +19,7 @@ export type {
   ToolDispatchResult,
 } from "./contract";
 export { isRetryableFailure } from "./contract";
+export { TerminalEventDeliveryError } from "./diagnostics";
 export type {
   DistillBlocked,
   DistillCitation,

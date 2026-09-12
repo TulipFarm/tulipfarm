@@ -133,6 +133,16 @@ Vocabulary is binding: [`metadata/terminologies.md` → Offline eval](../../meta
   pass by finding nothing. `min: 1` is refused at load — a batch of one is just a Tool call, so
   such a Case could never fail. Assert it only where the reads are genuinely independent; asking a
   model to batch a call whose arguments it cannot know yet is asking it to guess.
+- **`provider_prompt_file_exact` reads the converted provider prompt, not the attachment list.**
+  It compares the binary part byte-for-byte with the immutable Case File and checks its media type,
+  filename and SDK part kind. `provider_prompt_omits_file` names a File that was either attached or
+  explicitly requested through `file_read`; an unattributed provider-native part also fails it, so
+  leaked bytes cannot disappear merely because runtime attachments omitted their source.
+- **`tool_batch_replayed` belongs only to the fixed checkpoint fault fixture.** The fixture crashes
+  after the first Tool result, retries the same loop input, and compares resumed dispatches with
+  the call ids the model actually produced. A model that never makes a multi-call batch leaves the
+  seam unexercised; no vendor-generated id is authored into the Case. The Worker's durable
+  `PgEffectStore` remains covered in the Worker workspace.
 - **A Case must script a result for every Tool it exposes.** An unscripted call fails with a
   message naming the Tool, and a Tool called more often than the Case scripted repeats its last
   result. Neither fabricates an empty success — a payload the author never wrote would drive the
@@ -284,6 +294,12 @@ which is the shape the Routines browser hit when a forged Routine stayed invisib
 
 History is deliberately re-read from `eval_messages` rather than accumulated in a variable: holding
 it in memory would let a journey pass while the Turn persisted nothing at all.
+
+`attemptHistory` is the narrow fault seam for a prior executor pass of the same Turn attempt. It is
+handed to `createChatExecutor` as recovered participant-safe history, then
+`persisted_message_metadata_equals` reads the assistant Message back from `eval_messages`. This
+proves that a later failure does not erase prose, Tool metadata or exact Surface revisions without
+asking a model to choose a failure path. Run events are not accepted as a proxy for the Message.
 
 Keep journeys rare. Anything a journey appears to test other than that seam — ordering, wording,
 refusal — is carried far more cheaply by an L2 Case.

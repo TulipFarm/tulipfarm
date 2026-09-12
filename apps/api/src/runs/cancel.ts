@@ -2,7 +2,10 @@ import { CancellationError, type RunCancellationManager } from "@tulipfarm/run-k
 import type { ChatRunCanceller } from "../chat/routes";
 
 /** Missing or closed Runs map to idempotent stop success. */
-export function runCanceller(manager: Pick<RunCancellationManager, "cancel">): ChatRunCanceller {
+export function runCanceller(
+  manager: Pick<RunCancellationManager, "cancel">,
+  terminalTurns?: { reconcileRun(businessId: string, runId: string): Promise<boolean> }
+): ChatRunCanceller {
   return {
     cancel: async ({ businessId, runId, reason }) => {
       try {
@@ -13,7 +16,6 @@ export function runCanceller(manager: Pick<RunCancellationManager, "cancel">): C
           inFlightEffects: {},
           now: new Date().toISOString(),
         });
-        return true;
       } catch (error) {
         if (
           error instanceof CancellationError &&
@@ -23,6 +25,8 @@ export function runCanceller(manager: Pick<RunCancellationManager, "cancel">): C
         }
         throw error;
       }
+      await terminalTurns?.reconcileRun(businessId, runId).catch(() => false);
+      return true;
     },
   };
 }

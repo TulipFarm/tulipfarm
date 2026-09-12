@@ -23,6 +23,7 @@ import {
 import { ROUTINE_SERVICE_PRINCIPAL_ID } from "@tulipfarm/constants";
 import {
   type AgentInvocationPlan,
+  assertRunActive,
   type JsonObject,
   LIMIT_KEYS,
   type LimitKey,
@@ -67,8 +68,13 @@ export interface RoutineAgentRequest {
   readonly runId: string;
   /** Durable State occurrence key, so a fan-out unit's events are its own. */
   readonly stateKey: string;
-  /** State row version at claim time; distinguishes this attempt's events from an earlier one's. */
+  readonly leaseGeneration: number;
+  /**
+   * State row version at claim time. The port adds its durable acknowledged-retry offset so
+   * retry event identities remain distinct even when a process restarts between attempts.
+   */
   readonly attempt: number;
+  readonly signal?: AbortSignal;
   readonly plan: AgentInvocationPlan;
   /** The schema the answer must satisfy, when the State declared one. */
   readonly outputSchema?: JsonObject;
@@ -83,6 +89,13 @@ export interface RoutineAgentRequest {
 }
 
 export interface RoutineAgentPort {
+  /**
+   * Returns the authored attempt represented by a terminal checkpoint awaiting redelivery.
+   *
+   * The Routine retry ledger already charged this attempt before model work began. A reclaim must
+   * deliver and acknowledge that terminal result without charging another attempt.
+   */
+  pendingTerminalAttempt?(request: RoutineAgentRequest): Promise<number | undefined>;
   execute(request: RoutineAgentRequest): Promise<RoutineAgentOutcome>;
 }
 
@@ -287,13 +300,28 @@ function answerText(output: unknown): string {
 }
 
 export class BundleRoutineAgentPort implements RoutineAgentPort {
+  private readonly checkpoints: LoopCheckpointStore;
   private readonly now: () => Date;
 
   constructor(private readonly options: BundleRoutineAgentPortOptions) {
+    this.checkpoints = options.checkpoints ?? new InMemoryLoopCheckpointStore();
     this.now = options.now ?? (() => new Date());
   }
 
+  async pendingTerminalAttempt(request: RoutineAgentRequest): Promise<number | undefined> {
+    assertRunActive(request.signal);
+    const checkpoint = await this.checkpoints.load(
+      request.businessId,
+      request.runId,
+      request.stateKey
+    );
+    assertRunActive(request.signal);
+    if (checkpoint?.resume?.terminal === undefined) return undefined;
+    return (checkpoint.resume.retryAttempt ?? 0) + 1;
+  }
+
   async execute(request: RoutineAgentRequest): Promise<RoutineAgentOutcome> {
+    assertRunActive(request.signal);
     const { plan, bundle } = request;
     const agent = definitionOf<AgentDefinition>(bundle, "Agent", plan.agentRef.name);
     if (agent === undefined) return { kind: "unavailable", reason: "agent_not_in_bundle" };
@@ -323,6 +351,10 @@ export class BundleRoutineAgentPort implements RoutineAgentPort {
     );
     const question = canonicalize(plan.input);
 
+    const checkpoints = this.checkpoints;
+    const previous = await checkpoints.load(request.businessId, request.runId, request.stateKey);
+    const eventAttempt = request.attempt + (previous?.resume?.retryAttempt ?? 0);
+
     // Built before the first guard runs so every "failed" outcome below — including a blocked
     // question — can announce a terminal `turn.finished`. Without it, a Routine Run reaching
     // `failed` leaves only State-level evidence: the Run event stream never says the Run ended,
@@ -333,17 +365,22 @@ export class BundleRoutineAgentPort implements RoutineAgentPort {
       runId: request.runId,
       // No Turn exists; State occurrence plus row version make event keys attempt-scoped.
       turnId: request.stateKey,
-      attempt: request.attempt,
+      attempt: eventAttempt,
       now: this.now,
     });
 
     const guardedInput = await guardrails.runInput(question, guardContext);
+    assertRunActive(request.signal);
     if (guardedInput.blocked) {
-      return this.finished(events, {
-        kind: "failed",
-        reason: "guardrail_input_blocked",
-        retryable: false,
-      });
+      return this.finished(
+        events,
+        {
+          kind: "failed",
+          reason: "guardrail_input_blocked",
+          retryable: false,
+        },
+        request.signal
+      );
     }
 
     // Route through the pinned-bundle catalog; denial parks instead of bypassing profile terms.
@@ -366,6 +403,7 @@ export class BundleRoutineAgentPort implements RoutineAgentPort {
         modelRoutingPayload(agent.spec.modelProfile, selection),
         "model"
       );
+      assertRunActive(request.signal);
       this.options.log.warn(
         { runId: request.runId, profileId: selection.profileId, reason: selection.reason },
         "routine model profile denied"
@@ -383,8 +421,10 @@ export class BundleRoutineAgentPort implements RoutineAgentPort {
       profile: primary,
       scoped: request.scopedLimits ?? [],
     });
+    assertRunActive(request.signal);
     const routing = modelRoutingPayload(agent.spec.modelProfile, selection, budgetLimits);
     await events.emit("model.routed", routing, "model");
+    assertRunActive(request.signal);
 
     const manifest = assembleContext({
       businessId: request.businessId,
@@ -409,8 +449,10 @@ export class BundleRoutineAgentPort implements RoutineAgentPort {
       },
       "context"
     );
+    assertRunActive(request.signal);
 
     const exposed = await this.exposedTools(request, plan.agentRef.name);
+    assertRunActive(request.signal);
     const loop = new AgentLoop({
       model: this.options.model({
         models: selection.chain.map(configuredModelRef),
@@ -419,7 +461,7 @@ export class BundleRoutineAgentPort implements RoutineAgentPort {
         turnId: `${request.stateKey}:${request.attempt}`,
       }),
       tools: exposed.length === 0 ? NO_TOOLS : this.toolPort(plan.agentRef.name, events),
-      checkpoints: this.options.checkpoints ?? new InMemoryLoopCheckpointStore(),
+      checkpoints,
       events,
       budget: this.budget(request),
       isCancelled: async () => {
@@ -434,6 +476,7 @@ export class BundleRoutineAgentPort implements RoutineAgentPort {
       businessId: request.businessId,
       runId: request.runId,
       stateId: request.stateKey,
+      checkpointFence: { leaseGeneration: request.leaseGeneration },
       modelProfileId: selection.profileId,
       contextDigest: manifest.digest,
       guardrailDigest: guardrails.revision,
@@ -443,53 +486,74 @@ export class BundleRoutineAgentPort implements RoutineAgentPort {
       ],
       tools: exposed,
       limits: this.limits(plan, exposed.length),
+      ...(request.signal === undefined ? {} : { signal: request.signal }),
       ...(request.outputSchema === undefined ? {} : { outputSchema: request.outputSchema }),
     });
 
     if (outcome.status === "cancelled") return { kind: "cancelled" };
     if (outcome.status === "failed") {
-      return this.finished(
+      const result = await this.finished(
         events,
         {
           kind: "failed",
           reason: outcome.reason,
           retryable: isRetryableAgentFailure(outcome.reason),
         },
+        request.signal,
         outcome.modelFailure
       );
+      if (result.kind === "failed" && result.retryable) {
+        await checkpoints.acknowledgeTerminal(request.businessId, request.runId, request.stateKey, {
+          leaseGeneration: request.leaseGeneration,
+        });
+      }
+      return result;
     }
     if (outcome.status === "awaiting_approval") {
       return { kind: "awaiting_approval", reason: "approval_required" };
     }
     if (outcome.status === "input_required") {
       // Routine Agents expose no Surface-capable Tools, so this outcome cannot be resumed here.
-      return this.finished(events, {
-        kind: "failed",
-        reason: "input_required_without_surface",
-        retryable: false,
-      });
+      return this.finished(
+        events,
+        {
+          kind: "failed",
+          reason: "input_required_without_surface",
+          retryable: false,
+        },
+        request.signal
+      );
     }
     if (outcome.status === "awaiting_child") {
       // Same impossibility as above: a Routine Agent exposes no Tool that can spawn a child, so
       // reaching here means the Tool surface changed without this State learning how to park.
-      return this.finished(events, {
-        kind: "failed",
-        reason: "child_spawn_without_wait_support",
-        retryable: false,
-      });
+      return this.finished(
+        events,
+        {
+          kind: "failed",
+          reason: "child_spawn_without_wait_support",
+          retryable: false,
+        },
+        request.signal
+      );
     }
 
     // Last zero-cost refusal point: no State is settled and no downstream effect has run.
     const guardedOutput = await guardrails.runOutput(answerText(outcome.output), guardContext);
+    assertRunActive(request.signal);
     if (guardedOutput.blocked) {
-      return this.finished(events, {
-        kind: "failed",
-        reason: "guardrail_output_blocked",
-        retryable: false,
-      });
+      return this.finished(
+        events,
+        {
+          kind: "failed",
+          reason: "guardrail_output_blocked",
+          retryable: false,
+        },
+        request.signal
+      );
     }
 
-    return this.finished(events, { kind: "succeeded", output: outcome.output });
+    return this.finished(events, { kind: "succeeded", output: outcome.output }, request.signal);
   }
 
   /**
@@ -506,8 +570,10 @@ export class BundleRoutineAgentPort implements RoutineAgentPort {
   private async finished(
     events: TurnEventWriter,
     outcome: RoutineAgentOutcome,
+    signal?: AbortSignal,
     modelFailure?: ModelFailureDiagnostic
   ): Promise<RoutineAgentOutcome> {
+    assertRunActive(signal);
     if (outcome.kind === "succeeded") {
       await events.emit("turn.finished", { status: "succeeded", messageId: null }, "finished");
     } else if (outcome.kind === "failed") {
@@ -522,6 +588,7 @@ export class BundleRoutineAgentPort implements RoutineAgentPort {
         "finished"
       );
     }
+    assertRunActive(signal);
     return outcome;
   }
 
@@ -538,8 +605,11 @@ export class BundleRoutineAgentPort implements RoutineAgentPort {
     const { tools, catalog } = this.options;
     if (tools === undefined || catalog === undefined) return [];
     try {
-      return await catalog(request.runId, agentName);
+      const exposed = await catalog(request.runId, agentName);
+      assertRunActive(request.signal);
+      return exposed;
     } catch (error) {
+      assertRunActive(request.signal);
       this.options.log.warn(
         { err: error, runId: request.runId, agent: agentName },
         "routine agent tool catalog unavailable; running without Tools"

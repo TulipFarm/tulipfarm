@@ -84,6 +84,8 @@ function planFrom(
 /** Injectable clock so a test can assert a duration instead of racing the real one. */
 export interface AnnounceToolCallsOptions {
   readonly now?: () => number;
+  /** Persists exact Surface revisions before they are announced on the revision-less event. */
+  readonly checkpointSurface?: () => Promise<void>;
 }
 
 /** Announce Tool calls with digests/redacted previews; never synthesize `tool.dispatched`. */
@@ -167,9 +169,9 @@ export function announceToolCalls(
       if (result.status === "succeeded") {
         const surface = surfaceArtifactFrom(result.output);
         if (surface !== undefined) {
-          const { revision, ...emitted } = surface;
-          events.recordSurface({ artifactId: surface.artifactId, revision });
-          await events.emit("surface.emitted", emitted, `surface:emitted:${request.callId}`);
+          events.recordSurface({ artifactId: surface.artifactId, revision: surface.revision });
+          await options.checkpointSurface?.();
+          await events.emit("surface.emitted", surface, `surface:emitted:${request.callId}`);
         }
       }
 

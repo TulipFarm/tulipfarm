@@ -1,11 +1,13 @@
 import { textContent } from "@tulipfarm/schema";
 import { describe, expect, it } from "vitest";
+import type { Queryable } from "../db";
 import {
   type CompleteTurnInput,
   type CompleteTurnResult,
   ConversationAccessError,
   ConversationService,
   type ConversationStore,
+  type NewConversation,
   type PersistedMessage,
   type PersistedTurn,
   type RunLauncher,
@@ -24,6 +26,26 @@ class FakeStore implements ConversationStore {
   turns: PersistedTurn[] = [];
   completions: TurnCompletion[] = [];
 
+  async withTransaction<T>(
+    operation: (store: ConversationStore, transaction: Queryable) => Promise<T>
+  ): Promise<T> {
+    const messages = [...this.messages];
+    const turns = [...this.turns];
+    const completions = [...this.completions];
+    try {
+      return await operation(this, {
+        query: async () => {
+          throw new Error("fake transaction query is unavailable");
+        },
+      });
+    } catch (error) {
+      this.messages = messages;
+      this.turns = turns;
+      this.completions = completions;
+      throw error;
+    }
+  }
+
   async findTurnByIdempotencyKey(
     _businessId: string,
     key: string
@@ -33,6 +55,17 @@ class FakeStore implements ConversationStore {
 
   async findTurn(_businessId: string, turnId: string): Promise<PersistedTurn | undefined> {
     return this.turns.find((turn) => turn.id === turnId);
+  }
+
+  async lockTurnByIdempotencyKey(
+    businessId: string,
+    key: string
+  ): Promise<PersistedTurn | undefined> {
+    return this.findTurnByIdempotencyKey(businessId, key);
+  }
+
+  async lockTurn(businessId: string, turnId: string): Promise<PersistedTurn | undefined> {
+    return this.findTurn(businessId, turnId);
   }
 
   async findLatestTurn(
@@ -50,6 +83,61 @@ class FakeStore implements ConversationStore {
     this.messages.push(message);
   }
 
+  async appendAssistantMessage(input: {
+    readonly message: PersistedMessage;
+    readonly runId: string;
+    readonly attempt: number;
+  }) {
+    const turn = this.turns.find((candidate) => candidate.id === input.message.turnId);
+    if (turn === undefined || turn.runId !== input.runId || turn.attempt !== input.attempt) {
+      return { status: "stale" as const, messageId: null };
+    }
+    const existing = this.messages.find(
+      (message) =>
+        message.turnId === input.message.turnId &&
+        message.role === "assistant" &&
+        message.attempt === input.attempt
+    );
+    if (existing !== undefined) {
+      return { status: "recorded" as const, messageId: existing.id };
+    }
+    this.messages.push(input.message);
+    return { status: "recorded" as const, messageId: input.message.id };
+  }
+
+  async reserveTurn(input: {
+    readonly message: PersistedMessage;
+    readonly turn: PersistedTurn;
+    readonly requestFingerprint?: string;
+    readonly newConversation?: NewConversation;
+  }) {
+    const existing = await this.findTurnByIdempotencyKey(
+      input.turn.businessId,
+      input.turn.idempotencyKey
+    );
+    if (existing !== undefined) {
+      const request = this.messages.find((message) => message.id === existing.requestMessageId);
+      const fingerprint = request?.metadata?.submissionFingerprint;
+      return {
+        turn: existing,
+        outcome:
+          input.requestFingerprint !== undefined &&
+          fingerprint !== undefined &&
+          fingerprint !== input.requestFingerprint
+            ? ("conflict" as const)
+            : ("replayed" as const),
+        conversationCreated: false,
+      };
+    }
+    this.turns.push(input.turn);
+    this.messages.push(input.message);
+    return {
+      turn: input.turn,
+      outcome: "created" as const,
+      conversationCreated: input.newConversation !== undefined,
+    };
+  }
+
   async saveTurn(turn: PersistedTurn): Promise<void> {
     const index = this.turns.findIndex((existing) => existing.id === turn.id);
     if (index === -1) this.turns.push(turn);
@@ -58,9 +146,13 @@ class FakeStore implements ConversationStore {
 
   async listMessages(
     _businessId: string,
-    conversationId: string
+    conversationId: string,
+    throughRequestMessageId?: string
   ): Promise<readonly PersistedMessage[]> {
-    return this.messages.filter((message) => message.conversationId === conversationId);
+    const messages = this.messages.filter((message) => message.conversationId === conversationId);
+    if (throughRequestMessageId === undefined) return messages;
+    const cutoff = messages.findIndex((message) => message.id === throughRequestMessageId);
+    return cutoff < 0 ? [] : messages.slice(0, cutoff + 1);
   }
 
   async findCompletion(
@@ -74,6 +166,14 @@ class FakeStore implements ConversationStore {
   }
 
   async completeTurn(input: CompleteTurnInput): Promise<CompleteTurnResult> {
+    const turn = this.turns.find((candidate) => candidate.id === input.completion.turnId);
+    if (
+      turn === undefined ||
+      turn.runId !== input.runId ||
+      turn.attempt !== input.completion.attempt
+    ) {
+      return { completionInserted: false, status: "stale" };
+    }
     const recorded = await this.findCompletion(
       input.completion.businessId,
       input.completion.turnId,
@@ -81,8 +181,14 @@ class FakeStore implements ConversationStore {
     );
     const completionInserted = recorded === undefined;
     if (completionInserted) this.completions.push(input.completion);
-    if (input.turn) await this.saveTurn(input.turn);
-    return { completionInserted };
+    if (!completionInserted) return { completionInserted: false, status: "replayed" };
+    await this.saveTurn({
+      ...turn,
+      status: input.completion.status,
+      cursor: input.completion.cursor,
+      updatedAt: input.completion.createdAt,
+    });
+    return { completionInserted: true, status: "recorded" };
   }
 }
 
@@ -167,7 +273,12 @@ describe("ConversationService", () => {
     const first = await conversations.startTurn(turnInput);
     const second = await conversations.startTurn(turnInput);
 
-    expect(second).toEqual(first);
+    expect(second).toMatchObject({
+      turnId: first.turnId,
+      runId: first.runId,
+      conversationId: first.conversationId,
+      outcome: "replayed",
+    });
     expect(store.messages).toHaveLength(1);
     expect(runs.starts).toHaveLength(1);
   });
@@ -178,7 +289,8 @@ describe("ConversationService", () => {
     const { conversations, store } = service({ runs });
 
     await expect(conversations.startTurn(turnInput)).rejects.toThrow("run kernel unavailable");
-    expect(store.turns[0]).toMatchObject({ status: "start_failed" });
+    expect(store.turns).toEqual([]);
+    expect(store.messages).toEqual([]);
 
     const retried = await conversations.startTurn(turnInput);
     expect(store.messages).toHaveLength(1);

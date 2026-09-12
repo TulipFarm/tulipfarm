@@ -1,4 +1,5 @@
 import type { ModelMessage } from "../ports";
+import type { AgentLoopEvent, AgentLoopOutcome } from "./contract";
 
 /**
  * What a parked or interrupted Agent loop must carry across process boundaries so the model reads
@@ -8,6 +9,21 @@ import type { ModelMessage } from "../ports";
 export interface AgentLoopResumeState {
   /** Transcript messages the loop appended beyond `AgentLoopInput.messages`. */
   readonly messages: readonly ModelMessage[];
+  /** Keep this transcript after terminal delivery so a later attempt can retry from it. */
+  readonly retryable?: true;
+  /** Number of acknowledged retryable attempts, used to keep retry event identities monotonic. */
+  readonly retryAttempt?: number;
+  /**
+   * A settled result whose terminal event may not have been acknowledged yet.
+   *
+   * The full immutable event is retained so recovery redelivers its original sequence and time.
+   */
+  readonly terminal?: {
+    readonly outcome: AgentLoopOutcome;
+    readonly event: AgentLoopEvent;
+    /** Backward-compatible marker written before retry retention became attempt-level state. */
+    readonly retryable?: true;
+  };
   /**
    * The Tool call that parked this loop on an approval. It is recorded rather than replanned
    * because it provably never executed: the dispatcher reports `awaiting_approval` before it
@@ -17,6 +33,20 @@ export interface AgentLoopResumeState {
     readonly callId: string;
     readonly name: string;
     readonly arguments: unknown;
+  };
+  /**
+   * A model-produced batch made durable before its first dispatch.
+   *
+   * `nextCallIndex` is the first call whose result is not durable yet. Re-entering from here uses
+   * the same call ids and never asks a model to invent replacements.
+   */
+  readonly pendingBatch?: {
+    readonly calls: readonly {
+      readonly callId: string;
+      readonly name: string;
+      readonly arguments: unknown;
+    }[];
+    readonly nextCallIndex: number;
   };
   /** Last loaded Skill, so narrowing does not silently re-widen the catalog on resume. */
   readonly activeSkillName?: string;
@@ -33,6 +63,14 @@ export interface AgentLoopResumeState {
     readonly mediaType: string;
     readonly name: string;
   }[];
+  readonly rejectionCounts?: readonly (readonly [string, number])[];
+  readonly repeatCounts?: readonly (readonly [string, number])[];
+  readonly cachedResults?: readonly (readonly [
+    string,
+    { readonly callId: string; readonly payload: Record<string, unknown> },
+  ])[];
+  readonly lastCallBatchSignature?: string;
+  readonly consecutiveIdenticalBatches?: number;
   /** Loop event sequence already emitted, so resumed events do not collide on idempotency keys. */
   readonly sequence: number;
   /** Text delta index already released, so a reader's ordering stays monotonic across a park. */

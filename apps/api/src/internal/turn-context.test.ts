@@ -232,8 +232,16 @@ describe("ChatTurnContextResolver", () => {
   it("gives the model the durable transcript behind one system prompt", async () => {
     const { resolver } = makeResolver({
       messages: [
-        message({ id: "message-1", role: "user", content: "hello" }),
-        message({ id: "message-2", role: "assistant", content: "hi", attempt: 1 }),
+        message({ id: "message-previous-user", turnId: "turn-previous", content: "hello" }),
+        message({
+          id: "message-previous-assistant",
+          turnId: "turn-previous",
+          role: "assistant",
+          content: "hi",
+          attempt: 1,
+        }),
+        message({ id: "message-1", content: "current question" }),
+        message({ id: "message-later", turnId: "turn-later", content: "later question" }),
       ],
     });
 
@@ -243,6 +251,7 @@ describe("ChatTurnContextResolver", () => {
     expect(context.messages.slice(1)).toEqual([
       { role: "user", content: textContent("hello") },
       { role: "assistant", content: textContent("hi") },
+      { role: "user", content: textContent("current question") },
     ]);
     expect(context.compacted).toBe(false);
     expect(context.agentId).toBe(DEFAULT_ASSISTANT_NAME);
@@ -350,8 +359,8 @@ describe("ChatTurnContextResolver", () => {
     const oversized = "x".repeat(MAX_HISTORY_TOKENS * 3);
     const { resolver } = makeResolver({
       messages: [
-        message({ id: "message-1", content: `old ${oversized}` }),
-        message({ id: "message-2", content: `new ${oversized}` }),
+        message({ id: "message-old", turnId: "turn-previous", content: `old ${oversized}` }),
+        message({ id: "message-1", content: `new ${oversized}` }),
       ],
     });
 

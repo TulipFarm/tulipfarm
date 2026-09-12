@@ -43,6 +43,14 @@ reconciliation, turn execution, delivery classification, projections, and outbox
 - Never migrate here; API owns `schema_version`; raise `REQUIRED_SCHEMA_VERSION` when needed.
 - Boot fails closed with `process.exit(1)`; unsafe drain timeout exits non-zero.
 - Leases/CAS are the only claim; recover expired leases, never force statuses.
+- Each claim increments `lease_generation`; Agent-loop checkpoint writes use that generation, and
+  terminal delivery retires only after its event is acknowledged. Retryable Routine attempts keep
+  transcript, counters, and an acknowledged attempt offset so crashes do not repeat Tools or event
+  identities. Re-delivering a pending terminal checkpoint does not spend another authored retry;
+  only the next fresh Agent execution advances the retry ledger. Run settlement retains that
+  transcript for a later retry Run.
+- Run-dispatcher aborts mean ownership loss, not participant cancellation. Chat and Routine
+  executors must stop model, Tool, wait, retry, fan-out, and State progress without settling.
 - Registered Run sources are `chat`, `integration`, `routine`, and `subagent`; unknown sources
   reconcile.
 - `maintenance-sweep` (*/5, bare pg-boss, scheduled by the API) is deterministic maintenance only:
@@ -60,8 +68,8 @@ reconciliation, turn execution, delivery classification, projections, and outbox
   delete, a withdrawal or a revoke has nothing to act on, so all three are re-asked once it does.
 - Integration Runs classify delivery, then hand real turns to the same chat executor as web chat.
 - Routine execution reads only the Run's exact signed bundle and immutable request Artifact.
-- Routine replay safety depends on durable occurrence keys and immutable Tool outputs; a confirmed
-  legacy effect with no stored output parks instead of inventing data for following States.
+- Routine replay safety depends on durable occurrence keys and immutable Tool outputs. Confirmed
+  legacy effects without output park; `awaiting_child` re-enters only its bound child lookup.
 - Wait ids derive from `(runId, occurrence key)`; `event` waits are refused as `unsupported_wait`.
 - Routine `tool` States are the only Routine Tool authority: authorize, reserve, then dispatch.
 - A Routine Tool intent carries the objects the pinned ToolContract's `spec.targets` declares, so a
@@ -74,6 +82,8 @@ reconciliation, turn execution, delivery classification, projections, and outbox
 - Agent `instructions.md` is a Soul companion hash, not bundled prompt text; use personality.
 - Approval resume tokens never cross to the worker; replay by wait id and State occurrence.
 - Tools hosted in `src/tools/` must clear `localDispatchRefusal`; boot fails rather than weaken it.
+- The local Tool host uses the same durable `PgEffectStore` as recovery. Never compose a mutating
+  local Tool without it; a repeated call id returns evidence or fails closed instead of executing.
 - A dispatch carries the `stateId` it was raised under, and both hosts must forward it as
   `RequestContext.stateKey`. A Tool that parks its Run needs the State to resume, and Chat Turns
   and Routine Agent States do not share one key — never hardcode `"invoke"`.

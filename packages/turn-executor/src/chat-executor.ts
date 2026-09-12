@@ -4,10 +4,13 @@ import {
   InMemoryLoopCheckpointStore,
   type LoopCheckpointStore,
   type ModelPort,
+  TerminalEventDeliveryError,
   type ToolDispatchPort,
   type ToolResultDistillerPort,
 } from "@tulipfarm/agent-runtime";
 import {
+  assertRunActive,
+  isRunInterruption,
   LIMIT_KEYS,
   type LimitKey,
   RunBudgetManager,
@@ -17,6 +20,7 @@ import type { PersistedRun, RunStore } from "@tulipfarm/storage";
 import { AgentStateRunner, type StateTransitionPort, type TurnWaitPort } from "./agent-state";
 import { ConversationTurnCompleter, type TurnCompletionStore } from "./conversation-turn";
 import {
+  TerminalTurnEventDeliveryError,
   type TurnAttachmentPort,
   type TurnContextPort,
   TurnDriver,
@@ -25,6 +29,7 @@ import {
 import { TurnGuardrails } from "./guardrails";
 import { reclaimPendingState, reclaimWaitingState } from "./kernel-ports";
 import type { ModelCallReceiptSource, RunExecutor, RunOutcome, SpendSink } from "./ports";
+import type { TurnAttemptHistory } from "./run-events";
 import { type RunEventAppendPort, TurnEventWriter } from "./run-events";
 import { announceToolCalls } from "./tool-events";
 
@@ -41,6 +46,8 @@ export interface ChatExecutorHost {
         attempt: number;
         /** The Run this attempt supersedes; its unfinished work is readable, never writable. */
         previousRunId?: string;
+        /** Durable participant-safe activity from earlier passes of this same attempt. */
+        history?: TurnAttemptHistory;
       }
     | undefined
   >;
@@ -60,7 +67,11 @@ export function resumableFromPreviousRun(
 ): LoopCheckpointStore {
   if (previousRunId === undefined) return inner;
   return {
-    save: (checkpoint) => inner.save(checkpoint),
+    save: (checkpoint, fence) => inner.save(checkpoint, fence),
+    clear: (businessId, runId, stateId, fence) => inner.clear(businessId, runId, stateId, fence),
+    acknowledgeTerminal: (businessId, runId, stateId, fence) =>
+      inner.acknowledgeTerminal(businessId, runId, stateId, fence),
+    settle: (businessId, runId, stateId, fence) => inner.settle(businessId, runId, stateId, fence),
     load: async (businessId, runId, stateId) => {
       const own = await inner.load(businessId, runId, stateId);
       if (own !== undefined) return own;
@@ -68,7 +79,13 @@ export function resumableFromPreviousRun(
       // Counters without a transcript are a settled loop whose work was deliberately dropped.
       // Adopting that spend would charge this attempt for results it does not receive.
       if (previous?.resume === undefined) return undefined;
-      return { ...previous, runId };
+      const terminal = previous.resume.terminal;
+      const retryable =
+        previous.resume.retryable === true || previous.resume.terminal?.retryable === true;
+      if (terminal !== undefined && !retryable) return undefined;
+      if (terminal === undefined) return { ...previous, runId };
+      const { terminal: _delivered, ...resume } = previous.resume;
+      return { ...previous, runId, resume };
     },
   };
 }
@@ -114,7 +131,7 @@ export interface ChatExecutorOptions {
 const CANCELLING_STATUSES: ReadonlySet<string> = new Set(["cancelling", "cancelled"]);
 
 export function createChatExecutor(options: ChatExecutorOptions): RunExecutor {
-  return async (run: PersistedRun): Promise<RunOutcome> => {
+  return async (run: PersistedRun, signal?: AbortSignal): Promise<RunOutcome> => {
     const identity = await options.host.findTurn(run.id);
     if (identity === undefined) {
       // No Turn means superseded or already answered; nothing is owed.
@@ -127,12 +144,20 @@ export function createChatExecutor(options: ChatExecutorOptions): RunExecutor {
       runId: run.id,
       turnId: identity.turnId,
       attempt: identity.attempt,
+      ...(identity.history === undefined ? {} : { initial: identity.history }),
       ...(options.now === undefined ? {} : { now: options.now }),
     });
 
     try {
-      return await executeTurn(options, run, identity, writer);
+      return await executeTurn(options, run, identity, writer, signal);
     } catch (error) {
+      if (isRunInterruption(error)) throw error;
+      if (
+        error instanceof TerminalEventDeliveryError ||
+        error instanceof TerminalTurnEventDeliveryError
+      ) {
+        return { status: "needs_reconciliation" };
+      }
       // Everything before the driver — State reclaim, Context assembly, guard configuration — runs
       // where no `turn.finished` has been written yet, and a throw from here reaches the dispatcher,
       // which parks the Run at `needs_reconciliation`. That is not a status the Run event stream
@@ -165,9 +190,12 @@ async function executeTurn(
   options: ChatExecutorOptions,
   run: PersistedRun,
   identity: { turnId: string; conversationId: string; attempt: number; previousRunId?: string },
-  writer: TurnEventWriter
+  writer: TurnEventWriter,
+  signal?: AbortSignal
 ): Promise<RunOutcome> {
+  assertRunActive(signal);
   const state = await options.runs.findState(run.businessId, run.id, INVOKE_STATE_KEY);
+  assertRunActive(signal);
   if (state === null) {
     // A Chat Run without its `invoke` State cannot have been minted by the invocation gateway.
     return announceTurnFailure(writer, options.log);
@@ -179,7 +207,9 @@ async function executeTurn(
       businessId: run.businessId,
       runId: run.id,
       stateKey: INVOKE_STATE_KEY,
+      leaseGeneration: run.leaseGeneration,
     });
+    assertRunActive(signal);
   }
 
   // First dispatch claims the gateway's `pending` invoke State.
@@ -188,13 +218,17 @@ async function executeTurn(
       businessId: run.businessId,
       runId: run.id,
       stateKey: INVOKE_STATE_KEY,
+      leaseGeneration: run.leaseGeneration,
     });
+    assertRunActive(signal);
   }
 
   const request: TurnRequest = {
     businessId: run.businessId,
     runId: run.id,
     stateKey: INVOKE_STATE_KEY,
+    leaseGeneration: run.leaseGeneration,
+    ...(signal === undefined ? {} : { signal }),
     stateStatus:
       state.status === "waiting" || state.status === "pending" ? "claimed" : state.status,
     turnId: identity.turnId,
@@ -216,18 +250,39 @@ async function executeTurn(
 
   // Wrap dispatch before the loop exists; unconfigured guards refuse every stage.
   const guardrails = new TurnGuardrails(options.log);
+  const completer = new ConversationTurnCompleter({ store: options.host });
+  let superseded = false;
+  const checkpointHistory = async (): Promise<void> => {
+    const result = await completer.checkpoint({
+      businessId: run.businessId,
+      runId: run.id,
+      leaseGeneration: run.leaseGeneration,
+      conversationId: identity.conversationId,
+      turnId: identity.turnId,
+      attempt: identity.attempt,
+      history: writer.history(),
+    });
+    superseded ||= result.status === "stale";
+  };
 
+  const checkpoints = resumableFromPreviousRun(
+    options.checkpoints ?? new InMemoryLoopCheckpointStore(),
+    identity.previousRunId
+  );
   const loop = new AgentLoop({
     model: guardrails.guardModel(model, writer),
     // Guard before announcing; refused Tool calls never ran.
-    tools: guardrails.guard(announceToolCalls(options.tools ?? options.host, writer), writer),
-    checkpoints: resumableFromPreviousRun(
-      options.checkpoints ?? new InMemoryLoopCheckpointStore(),
-      identity.previousRunId
+    tools: guardrails.guard(
+      announceToolCalls(options.tools ?? options.host, writer, {
+        checkpointSurface: checkpointHistory,
+      }),
+      writer
     ),
+    checkpoints,
     events: writer,
     budget: runBudget(options.budgets, run.businessId, run.id),
     isCancelled: async () => {
+      if (superseded) return true;
       const current = await options.runs.find(run.businessId, run.id);
       return current !== null && CANCELLING_STATUSES.has(current.status);
     },
@@ -262,7 +317,7 @@ async function executeTurn(
       waits: options.waits,
     }),
     context: options.context,
-    completer: new ConversationTurnCompleter({ store: options.host }),
+    completer,
     guardrails,
     buildEvents: () => writer,
     // Only receipt-capable model ports can name the model actually observed.

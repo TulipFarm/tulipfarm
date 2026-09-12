@@ -36,6 +36,7 @@ const RUN: PersistedRun = {
   errorEvidenceRef: null,
   leaseOwner: "worker-1",
   leaseExpiresAt: "2026-08-02T10:01:01.000Z",
+  leaseGeneration: 1,
 };
 
 function state(input: EnsureStateInput): PersistedState {

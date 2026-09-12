@@ -1,0 +1,75 @@
+{
+  "id": "l3-a-failed-turn-retains-safe-history",
+  "tier": "l3",
+  "agent": "support",
+  "fault": "model",
+  "attemptHistory": {
+    "text": "Order 104 is ready for pickup.",
+    "toolCalls": [
+      {
+        "callId": "lookup-104",
+        "name": "lookup_order",
+        "outcome": "ok"
+      }
+    ]
+  },
+  "input": [
+    {
+      "role": "user",
+      "content": "Earlier in this attempt you already told me: Order 104 is ready for pickup. Continue checking order 104."
+    }
+  ],
+  "tools": [
+    {
+      "name": "lookup_order",
+      "description": "Look up one order by its numeric order number.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "orderNumber": {
+            "type": "number"
+          }
+        },
+        "required": ["orderNumber"]
+      }
+    }
+  ],
+  "expect": [
+    {
+      "kind": "output_contains",
+      "text": "Order 104 is ready for pickup."
+    },
+    {
+      "kind": "persisted_message_metadata_equals",
+      "path": "toolCalls.0.name",
+      "value": "lookup_order"
+    },
+    {
+      "kind": "persisted_message_metadata_equals",
+      "path": "toolCalls.0.outcome",
+      "value": "ok"
+    },
+    {
+      "kind": "persisted_message_metadata_equals",
+      "path": "turnAttempt.outcome",
+      "value": "failed"
+    },
+    {
+      "kind": "persisted_message_metadata_equals",
+      "path": "turnAttempt.complete",
+      "value": true
+    },
+    {
+      "kind": "run_status",
+      "status": "failed"
+    },
+    {
+      "kind": "state_status",
+      "status": "failed"
+    },
+    {
+      "kind": "turn_status",
+      "status": "failed"
+    }
+  ]
+}

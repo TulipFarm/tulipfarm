@@ -20,7 +20,7 @@ Individual Tool families (`packages/kv`, `apps/api/src/tools/**`), the model-fac
 | --- | --- |
 | `src/types.ts` | `ToolDef`, `RequestContext`, `ToolCallResult`, `ToolPark`, `ToolErrorCode`, faults |
 | `src/define.ts` | `defineApiTool` / `defineParkableApiTool` / `toToolDef` — declaration plus bound context |
-| `src/dispatcher.ts` | `RegistryToolDispatcher`: authorize → credential → entitlement → approve → execute |
+| `src/dispatcher.ts` | `RegistryToolDispatcher`: authorize → credential → entitlement → replay → approve → execute |
 | `src/timeout.ts`, `src/execution.ts` | Deadline and abort delivery; the attempt loop and effect settlement |
 | `src/gate.ts` | `LiveToolGate`, autonomy mapping, agent authority layer, DLP rules |
 | `src/authority-layers.ts` | Live direct and inherited Team authority; opt-in legacy fallback. |
@@ -60,11 +60,12 @@ Individual Tool families (`packages/kv`, `apps/api/src/tools/**`), the model-fac
   parked member omits `success` rather than setting a string, because a truthy value would let
   `if (result.success)` read `undefined` as data. A path with no Run to suspend — ingress, the
   model adapter, a nested call — calls `refuseParkedResult`.
-- **A park settles its effect `confirmed` and is never retried.** The effect committed and the
-  resume wait is registered; only the answer is outstanding. Anything else lets reconciliation
-  read a merely-waiting Turn as a lost write.
+- **A child park settles its effect `awaiting_child` with the exact child/wait ids.** Only that
+  descriptor permits the same call to re-enter its idempotent child lookup; a different child
+  settles ambiguous, and an ordinary confirmed effect is never rerun.
 - **A confirmed replay returns the immutable first Tool output.** A legacy confirmation without
   `outputStored` fails closed; never replace missing evidence with a replay marker or empty value.
+  Recheck live authority and access first, but do not consume a second one-use approval.
 - No dependency on `@tulipfarm/agent-runtime` — it depends on this package's consumers' shape, not
   the reverse. Narrow structural types instead.
 - A Tool with call-level classification is validated first; the derived action, mutation state,

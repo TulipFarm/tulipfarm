@@ -1,0 +1,121 @@
+{
+  "id": "support-rereads-binary-files-into-provider-prompt",
+  "tier": "l2",
+  "agent": "support",
+  "input": [
+    {
+      "role": "user",
+      "content": "Try to read the warranty PDF, dashboard image, and invoice. Use only Files that the Tool authorizes. If access is denied, do not use that File's contents."
+    }
+  ],
+  "readable": [
+    {
+      "fileId": "file-warranty",
+      "mediaType": "application/pdf",
+      "name": "warranty.pdf",
+      "content": "Warranty claims must be filed within 90 days."
+    },
+    {
+      "fileId": "file-dashboard",
+      "mediaType": "image/png",
+      "name": "dashboard.png"
+    },
+    {
+      "fileId": "file-revoked",
+      "mediaType": "application/pdf",
+      "name": "revoked-invoice.pdf",
+      "content": "This invoice is no longer shared."
+    }
+  ],
+  "platformTools": ["file_read"],
+  "toolResults": [
+    {
+      "name": "file_read",
+      "when": { "fileId": "file-warranty" },
+      "output": {
+        "fileId": "file-warranty",
+        "filename": "warranty.pdf",
+        "mediaType": "application/pdf",
+        "kind": "attached",
+        "attached": true
+      }
+    },
+    {
+      "name": "file_read",
+      "when": { "fileId": "file-dashboard" },
+      "output": {
+        "fileId": "file-dashboard",
+        "filename": "dashboard.png",
+        "mediaType": "image/png",
+        "kind": "attached",
+        "attached": true
+      }
+    },
+    {
+      "name": "file_read",
+      "when": { "fileId": "file-revoked" },
+      "denied": "access revoked"
+    }
+  ],
+  "script": [
+    {
+      "kind": "tool_calls",
+      "calls": [
+        {
+          "callId": "read-pdf",
+          "name": "file_read",
+          "arguments": { "fileId": "file-warranty" }
+        },
+        {
+          "callId": "read-image",
+          "name": "file_read",
+          "arguments": { "fileId": "file-dashboard" }
+        },
+        {
+          "callId": "read-revoked",
+          "name": "file_read",
+          "arguments": { "fileId": "file-revoked" }
+        }
+      ]
+    },
+    {
+      "kind": "text",
+      "text": "The authorized Files are available. The revoked invoice is not."
+    }
+  ],
+  "expect": [
+    {
+      "kind": "provider_prompt_file_exact",
+      "fileId": "file-warranty",
+      "part": "file"
+    },
+    {
+      "kind": "provider_prompt_file_exact",
+      "fileId": "file-dashboard",
+      "part": "file"
+    },
+    {
+      "kind": "provider_prompt_omits_file",
+      "fileId": "file-revoked"
+    },
+    {
+      "kind": "tool_argument_equals",
+      "name": "file_read",
+      "path": "fileId",
+      "value": "file-warranty"
+    },
+    {
+      "kind": "tool_argument_equals",
+      "name": "file_read",
+      "path": "fileId",
+      "value": "file-dashboard"
+    },
+    {
+      "kind": "tool_denied",
+      "name": "file_read",
+      "path": "fileId",
+      "value": "file-revoked"
+    },
+    { "kind": "loop_status", "status": "completed" }
+  ]
+}

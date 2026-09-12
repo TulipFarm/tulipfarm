@@ -68,6 +68,8 @@ export interface StateTransitionInput {
   readonly output?: { readonly value: unknown };
 }
 
+export type OwnedStateTransitionResult = "transitioned" | "ownership_lost" | "conflict";
+
 interface StateRow {
   business_id: string;
   run_id: string;
@@ -240,4 +242,68 @@ export async function transitionStateRow(
     ]
   );
   return result.rows.length === 1;
+}
+
+/**
+ * Moves a State only while the caller still owns the Run claim.
+ *
+ * Locking the Run before touching its State puts claim transfer and State settlement in one
+ * database order. A heartbeat may change the Run row version, but not its lease generation, so it
+ * does not invalidate the active executor.
+ */
+export async function transitionOwnedStateRow(
+  transaction: Queryable,
+  businessId: string,
+  runId: string,
+  stateKey: string,
+  leaseGeneration: number,
+  transition: StateTransitionInput
+): Promise<OwnedStateTransitionResult> {
+  const result = await transaction.query<{ owned: boolean; transitioned: boolean }>(
+    `WITH owned_run AS MATERIALIZED (
+       SELECT 1
+         FROM runs
+        WHERE business_id = $1
+          AND id = $2
+          AND status = 'running'
+          AND lease_generation = $4
+        FOR UPDATE
+     ),
+     transitioned AS (
+       UPDATE run_states
+          SET status = $7,
+              version = version + 1,
+              started_at = COALESCE($8::timestamptz, started_at),
+              finished_at = COALESCE($9::timestamptz, finished_at),
+              result_artifact_id = COALESCE($10, result_artifact_id),
+              error_evidence_ref = COALESCE($11, error_evidence_ref),
+              output = COALESCE($12::jsonb, output)
+        WHERE business_id = $1
+          AND run_id = $2
+          AND state_key = $3
+          AND version = $5
+          AND status = $6
+          AND EXISTS (SELECT 1 FROM owned_run)
+        RETURNING 1
+     )
+     SELECT EXISTS (SELECT 1 FROM owned_run) AS owned,
+            EXISTS (SELECT 1 FROM transitioned) AS transitioned`,
+    [
+      businessId,
+      runId,
+      stateKey,
+      leaseGeneration,
+      transition.expectedVersion,
+      transition.expectedStatus,
+      transition.status,
+      transition.startedAt ?? null,
+      transition.finishedAt ?? null,
+      transition.resultArtifactId ?? null,
+      transition.errorEvidenceRef ?? null,
+      transition.output === undefined ? null : JSON.stringify(transition.output.value ?? null),
+    ]
+  );
+  const outcome = result.rows[0];
+  if (outcome?.transitioned) return "transitioned";
+  return outcome?.owned ? "conflict" : "ownership_lost";
 }

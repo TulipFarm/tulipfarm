@@ -21,6 +21,7 @@ const run: PersistedRun = {
   errorEvidenceRef: DISPATCH_LEASE_EXPIRED_REF,
   leaseOwner: null,
   leaseExpiresAt: null,
+  leaseGeneration: 1,
 };
 
 describe("RunReader", () => {

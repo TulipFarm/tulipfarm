@@ -1,4 +1,4 @@
-import type { Queryable, TransactionPort } from "@tulipfarm/storage";
+import { ambientTransactionPort, type Queryable, type TransactionPort } from "@tulipfarm/storage";
 import type { ArtifactService } from "../artifacts";
 import type { DurableInvocationRecord, DurableInvocationStore } from "./gateway";
 
@@ -29,8 +29,10 @@ export class PgDurableInvocationStore implements DurableInvocationStore {
     private readonly artifacts: TransactionalArtifactService
   ) {}
 
-  async persist(record: DurableInvocationRecord) {
-    return this.transactions.withTransaction(async (transaction) => {
+  async persist(record: DurableInvocationRecord, transaction?: Queryable) {
+    const transactions =
+      transaction === undefined ? this.transactions : ambientTransactionPort(transaction);
+    return transactions.withTransaction(async (transaction) => {
       const claimed = await transaction.query(
         `INSERT INTO durable_invocations (
            business_id, source, idempotency_key, run_id, created_at

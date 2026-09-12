@@ -16,6 +16,7 @@ import type {
   ModelStreamChunk,
 } from "../packages/agent-runtime/src/ports";
 import { DEPLOYMENT_BUSINESS_ID } from "../packages/constants/src/index";
+import { textContent } from "../packages/schema/src/message-content";
 import type { Queryable as StorageQueryable, TransactionPort } from "../packages/storage/src/ports";
 import { RunEventStore } from "../packages/storage/src/runs/events";
 import { RunLoopCheckpointStore } from "../packages/storage/src/runs/loop-checkpoint-store";
@@ -154,10 +155,11 @@ function loopInput(): AgentLoopInput {
     businessId: DEPLOYMENT_BUSINESS_ID,
     runId: RUN_ID,
     stateId: STATE_KEY,
+    checkpointFence: { leaseGeneration: 1 },
     modelProfileId: "profile-1",
     contextDigest: "sha256:context",
     guardrailDigest: "sha256:guardrail",
-    messages: [{ role: "user", content: "upgrade cust-1 to gold" }],
+    messages: [{ role: "user", content: textContent("upgrade cust-1 to gold") }],
     tools: TOOLS,
     limits: { maxIterations: 8, maxToolCalls: 4, maxRepairAttempts: 2 },
   };
@@ -186,7 +188,15 @@ describe("resumed Turn Run event keys (L4-7)", () => {
           operation(transaction as unknown as StorageQueryable)
         ),
     };
-    await new RunStore(transactions).start(startRun());
+    const runs = new RunStore(transactions);
+    await runs.start(startRun());
+    await runs.transitionRun(DEPLOYMENT_BUSINESS_ID, RUN_ID, {
+      expectedVersion: 0,
+      expectedStatus: "queued",
+      status: "running",
+      leaseOwner: "worker-1",
+      leaseExpiresAt: "2026-01-01T00:01:00.000Z",
+    });
     checkpoints = new RunLoopCheckpointStore(transactions);
     events = new RunEventStore(transactions);
     repo = new ApprovalsRepo(database as unknown as { query: Queryable["query"] });

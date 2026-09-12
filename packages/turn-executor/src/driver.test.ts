@@ -44,6 +44,7 @@ function request(over: Partial<TurnRequest> = {}): TurnRequest {
     businessId: "biz",
     runId: "run-1",
     stateKey: "state-1",
+    leaseGeneration: 1,
     stateStatus: "claimed",
     turnId: "turn-1",
     conversationId: "conv-1",
@@ -73,6 +74,7 @@ class FakeCompletionStore implements TurnCompletionStore {
     metadata?: Record<string, unknown>;
   }[] = [];
   readonly completed: { status: string; cursor: number; messageId: string | null }[] = [];
+  appendStatus: "recorded" | "stale" = "recorded";
 
   async findCompletion(): Promise<TurnCompletionRecord | undefined> {
     return undefined;
@@ -82,25 +84,23 @@ class FakeCompletionStore implements TurnCompletionStore {
     attempt: number;
     content: string;
     metadata?: Record<string, unknown>;
-  }): Promise<{ messageId: string }> {
+  }) {
+    if (this.appendStatus === "stale") return { status: "stale" as const, messageId: null };
     this.messages.push({
       content: input.content,
       attempt: input.attempt,
       ...(input.metadata === undefined ? {} : { metadata: input.metadata }),
     });
-    return { messageId: `msg-${this.messages.length}` };
+    return { status: "recorded" as const, messageId: `msg-${this.messages.length}` };
   }
 
-  async completeTurn(input: {
-    status: string;
-    cursor: number;
-    messageId: string | null;
-  }): Promise<void> {
+  async completeTurn(input: { status: string; cursor: number; messageId: string | null }) {
     this.completed.push({
       status: input.status,
       cursor: input.cursor,
       messageId: input.messageId,
     });
+    return { status: "recorded" as const };
   }
 }
 
@@ -214,7 +214,7 @@ describe("TurnDriver", () => {
     const outcome = await driver.run(request());
 
     expect(outcome).toEqual({ status: "succeeded" });
-    expect(store.messages).toEqual([{ content: "the answer", attempt: 1 }]);
+    expect(store.messages).toMatchObject([{ content: "the answer", attempt: 1 }]);
     // A reader that sees `turn.finished` can fetch the Message it names.
     expect(events.appended.at(-1)).toEqual({
       eventType: "turn.finished",
@@ -254,7 +254,7 @@ describe("TurnDriver", () => {
 
     await driver.run(request());
 
-    expect(store.messages).toEqual([
+    expect(store.messages).toMatchObject([
       {
         content: "sent",
         attempt: 1,
@@ -377,6 +377,27 @@ describe("TurnDriver", () => {
     });
   });
 
+  it("treats a wait checkpoint lost to a newer retry as superseded", async () => {
+    let writer: TurnEventWriter | undefined;
+    const { driver, store } = harness(
+      async () => {
+        if (writer === undefined) throw new Error("writer was not built before the loop ran");
+        await writer.emit("text.delta", { text: "Safe progress.", index: 0 }, "loop:1");
+        return {
+          status: "awaiting_approval",
+          approvalId: "approval-1",
+          callId: "call-1",
+          ...counters,
+        };
+      },
+      { onWriter: (built) => (writer = built) }
+    );
+    store.appendStatus = "stale";
+
+    await expect(driver.run(request())).resolves.toEqual({ status: "succeeded" });
+    expect(store.messages).toEqual([]);
+  });
+
   // Stopping to ask is not the same as saying nothing: the prose the model streamed before the
   // question has to survive the reload that the question invites.
   it("settles for input keeping the reply it already streamed", async () => {
@@ -390,7 +411,7 @@ describe("TurnDriver", () => {
     const outcome = await driver.run(request());
 
     expect(outcome).toEqual({ status: "succeeded" });
-    expect(store.messages).toEqual([{ attempt: 1, content: "Two things before I start." }]);
+    expect(store.messages).toMatchObject([{ attempt: 1, content: "Two things before I start." }]);
     expect(store.completed).toEqual([{ status: "succeeded", cursor: 2, messageId: "msg-1" }]);
     expect(events.appended.at(-1)).toEqual({
       eventType: "turn.finished",
@@ -407,7 +428,7 @@ describe("TurnDriver", () => {
     });
 
     await expect(driver.run(request())).resolves.toEqual({ status: "succeeded" });
-    expect(store.messages).toEqual([
+    expect(store.messages).toMatchObject([
       { content: "The response was blocked by a content guardrail.", attempt: 1 },
     ]);
     expect(events.appended).toContainEqual({
@@ -422,6 +443,7 @@ describe("TurnDriver", () => {
       reason: "iteration_limit",
       ...counters,
     });
+
     const outcome = await driver.run(request());
 
     expect(outcome).toEqual({ status: "failed", errorEvidenceRef: "agent:iteration_limit" });
@@ -430,6 +452,41 @@ describe("TurnDriver", () => {
     expect(events.appended.at(-1)).toEqual({
       eventType: "turn.finished",
       payload: { status: "failed", messageId: null, reason: "iteration_limit" },
+    });
+  });
+
+  it("persists already-published safe prose and Tool history when the attempt fails", async () => {
+    let writer: TurnEventWriter | undefined;
+    const { driver, events, store } = harness(
+      async () => {
+        if (writer === undefined) throw new Error("writer was not built before the loop ran");
+        await writer.emit("text.delta", { text: "Safe progress.", index: 0 }, "loop:1");
+        await writer.emit(
+          "tool.call",
+          { callId: "call-1", name: "record_list", argsDigest: "sha256:args" },
+          "tool:call:call-1"
+        );
+        await writer.emit("tool.result", { callId: "call-1", status: "ok" }, "tool:result:call-1");
+        return { status: "failed", reason: "iteration_limit", ...counters };
+      },
+      { onWriter: (next) => (writer = next) }
+    );
+
+    await driver.run(request());
+
+    expect(store.messages).toMatchObject([
+      {
+        content: "Safe progress.",
+        metadata: {
+          toolCalls: [{ callId: "call-1", name: "record_list", outcome: "ok" }],
+          turnAttempt: { runId: "run-1", attempt: 1, outcome: "failed", complete: true },
+        },
+      },
+    ]);
+    expect(store.completed).toEqual([{ status: "failed", cursor: 5, messageId: "msg-1" }]);
+    expect(events.appended.at(-1)).toMatchObject({
+      eventType: "turn.finished",
+      payload: { status: "failed", messageId: "msg-1" },
     });
   });
 
@@ -528,7 +585,7 @@ describe("TurnDriver", () => {
     });
     await driver.run(request());
 
-    expect(store.messages).toEqual([{ content: '{"label":"bug"}', attempt: 1 }]);
+    expect(store.messages).toMatchObject([{ content: '{"label":"bug"}', attempt: 1 }]);
   });
 
   it("refuses a blocked request without asking the model, and answers it anyway", async () => {
@@ -547,7 +604,7 @@ describe("TurnDriver", () => {
 
     expect(await driver.run(request())).toEqual({ status: "succeeded" });
     expect(seen).toEqual([]);
-    expect(store.messages).toEqual([
+    expect(store.messages).toMatchObject([
       { content: "This request was blocked by a safety guardrail.", attempt: 1 },
     ]);
     // The State still walks the kernel's path rather than being left for the lease to reclaim.
@@ -578,7 +635,7 @@ describe("TurnDriver", () => {
     });
 
     expect(await driver.run(request())).toEqual({ status: "succeeded" });
-    expect(store.messages).toEqual([
+    expect(store.messages).toMatchObject([
       { content: "The response was blocked by a content guardrail.", attempt: 1 },
     ]);
     expect(events.appended.at(-2)).toEqual({

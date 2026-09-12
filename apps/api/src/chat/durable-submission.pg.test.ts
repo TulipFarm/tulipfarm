@@ -139,6 +139,8 @@ describe("durable chat submission over HTTP", () => {
   let operatorRead: boolean;
   let agentUse: boolean;
   let autoCompleteRuns: boolean;
+  let failAfterInvocation: boolean;
+  let invocationUsedOuterTransaction: boolean;
   let agents: Map<string, SoulAgent>;
   let agentAccess: ReturnType<typeof vi.fn<TeamAssetService["access"]>>;
 
@@ -147,6 +149,8 @@ describe("durable chat submission over HTTP", () => {
     operatorRead = false;
     agentUse = true;
     autoCompleteRuns = false;
+    failAfterInvocation = false;
+    invocationUsedOuterTransaction = false;
     agents = new Map([
       [
         "support-triage",
@@ -200,10 +204,15 @@ describe("durable chat submission over HTTP", () => {
     const runTransactions = transactionPort(queryable);
     const runStore = new RunStore(runTransactions);
     const start = invocations.start.bind(invocations);
-    vi.spyOn(invocations, "start").mockImplementation(async (input) => {
-      const result = await start(input);
+    vi.spyOn(invocations, "start").mockImplementation(async (input, transaction) => {
+      const result = await start(input, transaction);
+      invocationUsedOuterTransaction ||= transaction !== undefined;
+      if (failAfterInvocation) throw new Error("injected after invocation persistence");
       if (autoCompleteRuns) {
-        await db.query("UPDATE runs SET status = 'succeeded' WHERE id = $1", [result.runId]);
+        await (transaction ?? queryable).query(
+          "UPDATE runs SET status = 'succeeded' WHERE id = $1",
+          [result.runId]
+        );
       }
       return result;
     });
@@ -227,7 +236,11 @@ describe("durable chat submission over HTTP", () => {
       teamAssets: { access: agentAccess } as unknown as TeamAssetService,
       messageRepo: new PgMessageRepo(queryable),
       invocations,
-      conversationStore: new PgConversationStore(queryable),
+      conversationStore: new PgConversationStore(
+        queryable,
+        (transaction) => new PgMessageRepo(transaction),
+        (transaction) => new PgConversationRepo(transaction)
+      ),
       // Streaming reads `run_events`; without it the API refuses instead of executing locally.
       runEvents: {
         events: new RunEventStore(runTransactions),
@@ -256,13 +269,22 @@ describe("durable chat submission over HTTP", () => {
     await db.close();
   });
 
-  function postChat(session = sid) {
+  function postChat(
+    session = sid,
+    options: {
+      body?: typeof BODY;
+      idempotencyKey?: string;
+    } = {}
+  ) {
     return app.inject({
       method: "POST",
       url: "/api/v1/chat",
       cookies: { [SESSION_COOKIE]: session, [CSRF_COOKIE]: CSRF },
-      headers: { "x-csrf-token": CSRF, "idempotency-key": IDEMPOTENCY_KEY },
-      payload: BODY,
+      headers: {
+        "x-csrf-token": CSRF,
+        "idempotency-key": options.idempotencyKey ?? IDEMPOTENCY_KEY,
+      },
+      payload: options.body ?? BODY,
     });
   }
 
@@ -362,13 +384,165 @@ describe("durable chat submission over HTTP", () => {
     expect(states.rows[0]?.resolved_input.payloadRef).toBe(`artifact:${runId}:request`);
   });
 
+  it("rolls back Message, Turn, Run, and Artifact when submission fails after Run persistence", async () => {
+    failAfterInvocation = true;
+
+    const response = await postChat();
+
+    expect(response.statusCode).toBe(503);
+    expect(await count("conversations")).toBe(0);
+    expect(await count("messages", "WHERE role = 'user'")).toBe(0);
+    expect(await count("conversation_turns")).toBe(0);
+    expect(await count("runs")).toBe(0);
+    expect(await count("artifacts")).toBe(0);
+  });
+
+  it("commits the Chat Run through the same transaction as its Turn binding", async () => {
+    const response = await chat();
+
+    expect(response.statusCode).toBe(200);
+    expect(invocationUsedOuterTransaction).toBe(true);
+    await expect(
+      db.query<{ count: number }>(
+        `SELECT count(*)::int AS count
+         FROM runs r
+         LEFT JOIN conversation_turns t ON t.run_id = r.id
+        WHERE r.source = 'chat' AND t.id IS NULL`
+      )
+    ).resolves.toMatchObject({ rows: [{ count: 0 }] });
+  });
+
+  it("returns one established Turn and Run to competing same-key submissions", async () => {
+    autoCompleteRuns = true;
+
+    const responses = await Promise.all([postChat(), postChat()]);
+
+    expect(responses.map((response) => response.statusCode)).toEqual([200, 200]);
+    expect(new Set(responses.map((response) => response.headers["x-run-id"]))).toHaveLength(1);
+    expect(new Set(responses.map((response) => response.headers["x-turn-id"]))).toHaveLength(1);
+    expect(
+      new Set(responses.map((response) => response.headers["x-conversation-id"]))
+    ).toHaveLength(1);
+    expect(await count("conversations")).toBe(1);
+    expect(await count("messages", "WHERE role = 'user'")).toBe(1);
+    expect(await count("conversation_turns")).toBe(1);
+    expect(await count("runs")).toBe(1);
+    expect(await count("artifacts")).toBe(1);
+  });
+
+  it("resumes the established response for a sequential equivalent replay", async () => {
+    autoCompleteRuns = true;
+
+    const first = await postChat();
+    const replay = await postChat();
+
+    expect(first.statusCode).toBe(200);
+    expect(replay.statusCode).toBe(200);
+    expect(replay.headers["x-run-id"]).toBe(first.headers["x-run-id"]);
+    expect(replay.headers["x-turn-id"]).toBe(first.headers["x-turn-id"]);
+    expect(replay.headers["x-conversation-id"]).toBe(first.headers["x-conversation-id"]);
+    expect(await count("conversations")).toBe(1);
+    expect(await count("messages", "WHERE role = 'user'")).toBe(1);
+  });
+
+  it("rejects a changed payload that reuses an established idempotency key", async () => {
+    autoCompleteRuns = true;
+
+    const first = await postChat();
+    const mismatch = await postChat(sid, {
+      body: { message: { role: "user", content: "different question" } },
+    });
+
+    expect(first.statusCode).toBe(200);
+    expect(mismatch.statusCode).toBe(409);
+    expect(await count("conversations")).toBe(1);
+    expect(await count("messages", "WHERE role = 'user'")).toBe(1);
+    expect(await count("runs")).toBe(1);
+  });
+
+  it("resumes one established response for concurrent retries in an existing Conversation", async () => {
+    autoCompleteRuns = true;
+    const conversationId = randomUUID();
+    await conversationRepo.create({
+      _id: conversationId,
+      userId,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    });
+    const body = { ...BODY, conversationId };
+
+    const responses = await Promise.all([postChat(sid, { body }), postChat(sid, { body })]);
+
+    expect(responses.map((response) => response.statusCode)).toEqual([200, 200]);
+    expect(new Set(responses.map((response) => response.headers["x-run-id"]))).toHaveLength(1);
+    expect(new Set(responses.map((response) => response.headers["x-turn-id"]))).toHaveLength(1);
+    expect(responses.map((response) => response.headers["x-conversation-id"])).toEqual([
+      conversationId,
+      conversationId,
+    ]);
+    expect(await count("conversations")).toBe(1);
+    expect(await count("messages", "WHERE role = 'user'")).toBe(1);
+  });
+
+  it("treats different idempotency keys as distinct submissions", async () => {
+    autoCompleteRuns = true;
+    const conversationId = randomUUID();
+    await conversationRepo.create({
+      _id: conversationId,
+      userId,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    });
+    const body = { ...BODY, conversationId };
+
+    const responses = await Promise.all([
+      postChat(sid, { body, idempotencyKey: "client-turn-key-a" }),
+      postChat(sid, { body, idempotencyKey: "client-turn-key-b" }),
+    ]);
+
+    expect(responses.map((response) => response.statusCode)).toEqual([200, 200]);
+    expect(new Set(responses.map((response) => response.headers["x-run-id"]))).toHaveLength(2);
+    expect(await count("messages", "WHERE role = 'user'")).toBe(2);
+    expect(await count("runs")).toBe(2);
+  });
+
+  it("does not collide the same weak client key across distinct Conversations", async () => {
+    autoCompleteRuns = true;
+    const conversations = [randomUUID(), randomUUID()];
+    for (const conversationId of conversations) {
+      await conversationRepo.create({
+        _id: conversationId,
+        userId,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      });
+    }
+
+    const responses = await Promise.all(
+      conversations.map((conversationId) =>
+        app.inject({
+          method: "POST",
+          url: "/api/v1/chat",
+          cookies: { [SESSION_COOKIE]: sid, [CSRF_COOKIE]: CSRF },
+          headers: { "x-csrf-token": CSRF, "idempotency-key": "weak-key" },
+          payload: { ...BODY, conversationId },
+        })
+      )
+    );
+
+    expect(responses.map((response) => response.statusCode)).toEqual([200, 200]);
+    expect(await count("conversation_turns")).toBe(2);
+    expect(await count("runs")).toBe(2);
+  });
+
   it("mints a Run for the Conversation's resolved Agent on a follow-up turn", async () => {
+    const previousActivity = new Date("2026-01-01T00:00:00.000Z");
     const conversation: ConversationDoc = {
       _id: randomUUID(),
       userId,
       agentId: "support-triage",
-      createdAt: new Date(),
-      updatedAt: new Date(),
+      createdAt: previousActivity,
+      updatedAt: previousActivity,
     };
     await conversationRepo.create(conversation);
 
@@ -398,6 +572,9 @@ describe("durable chat submission over HTTP", () => {
         ])
       ).rows[0]?.content
     ).toEqual({ ...BODY, conversationId: conversation._id, agentId: "support-triage" });
+    const updated = await conversationRepo.findById(conversation._id);
+    expect(updated?.agentId).toBe("support-triage");
+    expect(updated?.updatedAt.getTime()).toBeGreaterThan(previousActivity.getTime());
   });
 
   it("lets the Run executor reconstruct the request, and denies a reader outside the ACL", async () => {
@@ -426,22 +603,6 @@ describe("durable chat submission over HTTP", () => {
     await expect(reader.read({ ...request, reader: "user:intruder" })).rejects.toMatchObject({
       code: "artifact_unauthorized",
     });
-  });
-
-  it("answers a replayed Idempotency-Key with 409 and creates nothing new", async () => {
-    const first = await chat();
-    const runId = first.headers["x-run-id"];
-
-    const replay = await postChat();
-
-    expect(replay.statusCode).toBe(409);
-    expect(replay.json()).toEqual({ error: "duplicate chat invocation", runId });
-    // Refusal before prepare must not create an empty Conversation.
-    expect(await count("conversations")).toBe(1);
-    expect(await count("conversation_turns")).toBe(1);
-    expect(await count("runs")).toBe(1);
-    expect(await count("artifacts")).toBe(1);
-    expect(await count("messages", "WHERE role = 'user'")).toBe(1);
   });
 
   it("streams the Run's persisted events, withholding the ones this reader may not see", async () => {
@@ -685,13 +846,16 @@ describe("durable chat submission over HTTP", () => {
     expect(response.body).not.toContain("operator evidence");
   });
 
-  async function submitAgent(body: Record<string, unknown>) {
+  async function submitAgent(body: Record<string, unknown>, idempotencyKey?: string) {
     autoCompleteRuns = true;
     return app.inject({
       method: "POST",
       url: "/api/v1/chat",
       cookies: { [SESSION_COOKIE]: sid, [CSRF_COOKIE]: CSRF },
-      headers: { "x-csrf-token": CSRF },
+      headers: {
+        "x-csrf-token": CSRF,
+        ...(idempotencyKey === undefined ? {} : { "idempotency-key": idempotencyKey }),
+      },
       payload: { ...BODY, ...body },
     });
   }
@@ -748,6 +912,83 @@ describe("durable chat submission over HTTP", () => {
     agentUse = false;
     expect((await submitAgent({})).statusCode).toBe(200);
     expect(agentAccess).not.toHaveBeenCalled();
+  });
+
+  it("does not roll back the sticky Agent when an old submission is replayed", async () => {
+    const conversation: ConversationDoc = {
+      _id: randomUUID(),
+      userId,
+      createdAt: new Date("2026-01-01T00:00:00.000Z"),
+      updatedAt: new Date("2026-01-01T00:00:00.000Z"),
+    };
+    await conversationRepo.create(conversation);
+
+    const first = await submitAgent(
+      { conversationId: conversation._id, agentId: "support-triage" },
+      "agent-a"
+    );
+    const switched = await submitAgent(
+      { conversationId: conversation._id, agentId: "private-agent" },
+      "agent-b"
+    );
+    const beforeReplay = await conversationRepo.findById(conversation._id);
+    const replay = await submitAgent(
+      { conversationId: conversation._id, agentId: "support-triage" },
+      "agent-a"
+    );
+
+    expect([first.statusCode, switched.statusCode, replay.statusCode]).toEqual([200, 200, 200]);
+    expect(replay.headers["x-run-id"]).toBe(first.headers["x-run-id"]);
+    const afterReplay = await conversationRepo.findById(conversation._id);
+    expect(afterReplay?.agentId).toBe("private-agent-id");
+    expect(afterReplay?.updatedAt).toEqual(beforeReplay?.updatedAt);
+  });
+
+  it("does not mutate the sticky Agent or timestamp on an idempotency conflict", async () => {
+    const conversation: ConversationDoc = {
+      _id: randomUUID(),
+      userId,
+      createdAt: new Date("2026-01-01T00:00:00.000Z"),
+      updatedAt: new Date("2026-01-01T00:00:00.000Z"),
+    };
+    await conversationRepo.create(conversation);
+
+    await submitAgent(
+      { conversationId: conversation._id, agentId: "support-triage" },
+      "agent-conflict"
+    );
+    const beforeConflict = await conversationRepo.findById(conversation._id);
+    const conflict = await submitAgent(
+      { conversationId: conversation._id, agentId: "private-agent" },
+      "agent-conflict"
+    );
+
+    expect(conflict.statusCode).toBe(409);
+    const afterConflict = await conversationRepo.findById(conversation._id);
+    expect(afterConflict?.agentId).toBe("support-triage");
+    expect(afterConflict?.updatedAt).toEqual(beforeConflict?.updatedAt);
+  });
+
+  it("replays an omitted-Agent request after the sticky default changes", async () => {
+    const conversation: ConversationDoc = {
+      _id: randomUUID(),
+      userId,
+      agentId: "support-triage",
+      createdAt: new Date("2026-01-01T00:00:00.000Z"),
+      updatedAt: new Date("2026-01-01T00:00:00.000Z"),
+    };
+    await conversationRepo.create(conversation);
+
+    const first = await submitAgent({ conversationId: conversation._id }, "implicit-agent");
+    await submitAgent(
+      { conversationId: conversation._id, agentId: "private-agent" },
+      "switch-agent"
+    );
+    const replay = await submitAgent({ conversationId: conversation._id }, "implicit-agent");
+
+    expect(replay.statusCode).toBe(200);
+    expect(replay.headers["x-run-id"]).toBe(first.headers["x-run-id"]);
+    expect((await conversationRepo.findById(conversation._id))?.agentId).toBe("private-agent-id");
   });
 
   async function upload(ownerId: string) {

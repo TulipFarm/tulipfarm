@@ -11,13 +11,15 @@ import type { ConversationDoc, ConversationRepo } from "./conversations";
 import { buildAndStoreTitle } from "./title";
 import type { ChatBody } from "./turn-helpers";
 
-/** Chat destination resolved before durable writes; the conversation must exist before the Run. */
+/** Chat destination resolved before durable writes. New Conversations remain uncommitted drafts. */
 
 export interface ResolvedConversation {
   readonly conversation: ConversationDoc;
   readonly isNew: boolean;
   /** The Agent this turn runs as; the request Artifact carries it to the Worker. */
   readonly agentId: string;
+  /** Explicit hand-off to commit only if this request creates a Turn. */
+  readonly agentIdToPersist?: string;
 }
 
 /** A request refused before anything durable exists; the route maps it to a status code. */
@@ -47,20 +49,20 @@ export interface ConversationEntryInput {
   readonly log: FastifyBaseLogger;
 }
 
-/** Opens or loads the conversation before Message, Turn, or Run creation. */
+/** Resolves an existing Conversation or prepares a new one for atomic Turn submission. */
 export async function resolveConversationEntry(
   deps: ConversationEntryDeps,
   input: ConversationEntryInput
 ): Promise<ResolvedConversation | ConversationEntryError> {
   const { repo, soulLoader } = deps;
-  const { body, userId, log } = input;
+  const { body, userId } = input;
 
   if (!body.conversationId) {
     const requested = body.agentId ? getAgent(soulLoader, body.agentId) : undefined;
     if (requested && !(await mayUseAgent(requested, input.principal, deps.teamAssets))) {
       return { status: 403, error: "Agent use access is required" };
     }
-    const conversation = await openConversation(deps, input, requested?.id);
+    const conversation = prepareConversation(input, requested?.id);
     return {
       conversation,
       isNew: true,
@@ -85,43 +87,26 @@ export async function resolveConversationEntry(
   if (!(await mayUseAgent(selected, input.principal, deps.teamAssets))) {
     return { status: 403, error: "Agent use access is required" };
   }
-  if (mentioned && mentioned.id !== currentAgentId) {
-    found.agentId = mentioned.id;
-    try {
-      await repo.setAgent(found._id, mentioned.id);
-    } catch (err) {
-      // Non-fatal: the turn still runs as the mentioned Agent, it just does not stick to the
-      // conversation. Failing the request would be a worse answer to a transient database error.
-      log.error({ err, conversationId: found._id }, "setAgent (user @mention switch) failed");
-    }
-  }
-
-  await repo.touch(found._id);
-  return { conversation: found, isNew: false, agentId: found.agentId ?? DEFAULT_ASSISTANT_ID };
+  return {
+    conversation: found,
+    isNew: false,
+    agentId: selected.id,
+    ...(mentioned !== undefined && mentioned.id !== currentAgentId
+      ? { agentIdToPersist: mentioned.id }
+      : {}),
+  };
 }
 
-async function openConversation(
+export function announceConversationCreated(
   deps: ConversationEntryDeps,
   input: ConversationEntryInput,
-  agentId: string | undefined
-): Promise<ConversationDoc> {
-  const now = new Date();
-  const conversation: ConversationDoc = {
-    _id: randomUUID(),
-    userId: input.userId,
-    agentId,
-    model: undefined,
-    createdAt: now,
-    updatedAt: now,
-  };
-  await deps.repo.create(conversation);
+  conversation: ConversationDoc
+): void {
   deps.events?.emit(DOMAIN_EVENTS.CONVERSATION_CREATED, {
     conversationId: conversation._id,
     actorId: input.userId,
-    agentId,
+    agentId: conversation.agentId,
   });
-  // Best-effort and off the critical path: the title is derived from the first message by the quick
-  // tier and lands whenever it lands. A failure degrades to a truncated-prompt fallback.
   void buildAndStoreTitle({
     repo: deps.repo,
     getModel: () => deps.llmService.effortModel("fast"),
@@ -129,5 +114,19 @@ async function openConversation(
     prompt: input.body.message.content,
     log: input.log,
   });
-  return conversation;
+}
+
+function prepareConversation(
+  input: ConversationEntryInput,
+  agentId: string | undefined
+): ConversationDoc {
+  const now = new Date();
+  return {
+    _id: randomUUID(),
+    userId: input.userId,
+    agentId,
+    model: undefined,
+    createdAt: now,
+    updatedAt: now,
+  };
 }

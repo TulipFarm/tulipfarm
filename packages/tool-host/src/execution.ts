@@ -1,6 +1,6 @@
 import { retryDelayMs } from "@tulipfarm/tool-broker";
 import type { HostedToolCall, HostedToolResult } from "./authority";
-import type { ChatEffectLedger } from "./effect-ledger";
+import type { ChatEffectLedger, ChildParkReplay } from "./effect-ledger";
 import { executeToolWithTimeout } from "./timeout";
 import type {
   ParkableToolCallResult,
@@ -47,6 +47,7 @@ export interface ToolAttemptInput {
   readonly timeoutMs?: number;
   readonly ledger?: ChatEffectLedger;
   readonly reservation?: EffectReservation;
+  readonly childReplay?: ChildParkReplay;
   readonly logger?: ToolHostLogger;
 }
 
@@ -78,7 +79,7 @@ async function wait(delayMs: number): Promise<void> {
 export async function runToolAttempts(input: ToolAttemptInput): Promise<HostedToolResult> {
   const { businessId, tool, call, ledger, reservation } = input;
   const settle = async (
-    state: "confirmed" | "failed" | "ambiguous",
+    state: "confirmed" | "failed" | "ambiguous" | "awaiting_child",
     errorCode?: string,
     output?: { readonly value: unknown }
   ) => {
@@ -111,11 +112,26 @@ export async function runToolAttempts(input: ToolAttemptInput): Promise<HostedTo
       return { status: "succeeded", output: result.data };
     }
     if (isParked(result)) {
+      if (
+        input.childReplay !== undefined &&
+        (result.parked.childRunId !== input.childReplay.childRunId ||
+          result.parked.waitId !== input.childReplay.waitId)
+      ) {
+        await settle("ambiguous", "child_replay_mismatch");
+        return {
+          status: "failed",
+          reason: `tool "${call.name}" returned a different child while resuming`,
+        };
+      }
       // The spawn committed and its wait is registered, so the effect is done — only the *answer*
-      // is outstanding. Settling `confirmed` is what stops reconciliation later reading a Turn
-      // that is merely waiting as a write that never landed. Never retried, because a park is by
-      // definition a side effect that already happened.
-      await settle("confirmed");
+      // is outstanding. The distinct state permits only this bound child lookup to run again.
+      await settle("awaiting_child", undefined, {
+        value: {
+          kind: "child_park",
+          childRunId: result.parked.childRunId,
+          waitId: result.parked.waitId,
+        },
+      });
       return {
         status: "awaiting_child",
         childRunId: result.parked.childRunId,

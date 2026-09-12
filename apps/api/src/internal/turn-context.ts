@@ -215,7 +215,8 @@ export class ChatTurnContextResolver implements TurnContextResolver {
       : undefined;
     const history = await this.options.store.listMessages(
       authority.businessId,
-      authority.turn.conversationId
+      authority.turn.conversationId,
+      authority.turn.requestMessageId
     );
     const system = assembleAgentSystemPrompt({ agent });
     const soulReminder = await this.soulReminder(authority, toolAgent?.capabilityRestrictions, {

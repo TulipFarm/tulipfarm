@@ -22,6 +22,7 @@ import {
   type Queryable,
   type TransactionPort,
 } from "@tulipfarm/storage";
+import type { EffectStore } from "@tulipfarm/tool-broker";
 import {
   type ApiToolDefinition,
   buildLiveAuthorityLayerResolver,
@@ -58,6 +59,7 @@ function principal(ctx: RequestContext): { userId: string; agentId?: string } {
 export interface LocalToolHostOptions {
   readonly db: Queryable;
   readonly transactions: TransactionPort;
+  readonly effects: EffectStore;
   readonly artifacts: ArtifactService;
   /** Rebuilt from the control plane's published config before each vector-backed answer. */
   readonly embeddings: SoulEmbeddings;
@@ -203,6 +205,7 @@ export function buildLocalToolHost(options: LocalToolHostOptions): LocalToolHost
       approvals: new ToolApprovalService({
         transactions: options.transactions,
       }),
+      effects: options.effects,
       localDispatchOnly: true,
       // No `agents` resolver: this process has no Soul to resolve one from. The Agent's authored
       // autonomy and capability restrictions ride in on `TurnAuthority.agent`, which the control

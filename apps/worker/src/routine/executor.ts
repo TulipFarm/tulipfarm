@@ -2,6 +2,7 @@ import type { AuthorityLayer } from "@tulipfarm/authz";
 import {
   type ArtifactService,
   agentOutputSchema,
+  assertRunActive,
   type CompiledRoutine,
   type CompiledState,
   compileRoutine,
@@ -207,12 +208,15 @@ export function createRoutineExecutor(options: RoutineExecutorOptions): RunExecu
   const contention = options.contention ?? new InMemoryStateContentionStore();
   const delay = options.delay ?? ((ms) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
 
-  return async (run) => {
+  return async (run, signal) => {
+    assertRunActive(signal);
     const loaded = await options.definitions.load(run);
+    assertRunActive(signal);
     const routine = compileRoutine(loaded.document, { identityCeiling: ceiling(run) });
     const persisted = new Map(
       (await options.runs.listStates(run.businessId, run.id)).map((state) => [state.key, state])
     );
+    assertRunActive(signal);
     const start = persisted.get(routine.start);
     if (start === undefined) return { status: "needs_reconciliation" };
 
@@ -223,6 +227,7 @@ export function createRoutineExecutor(options: RoutineExecutorOptions): RunExecu
       allowedClassifications: [],
       now: now(),
     });
+    assertRunActive(signal);
     if (requestArtifact.schemaRef !== MANUAL_REQUEST_SCHEMA_REF) {
       return { status: "needs_reconciliation" };
     }
@@ -241,6 +246,7 @@ export function createRoutineExecutor(options: RoutineExecutorOptions): RunExecu
       contention,
       delay,
       now,
+      signal,
     });
     // `waiting` holds no lease; replay starts from durable rows after the sweep requeues it.
     const outcome = await execution.runChain(routine.start, "", {}, {}, 0);
@@ -264,6 +270,7 @@ interface ExecutionContext {
   readonly contention: StateContentionStore;
   readonly delay: (ms: number) => Promise<void>;
   readonly now: () => Date;
+  readonly signal?: AbortSignal;
 }
 
 /** One attempt at one Routine Run. Holds no state a replay could not rebuild from the database. */
@@ -292,6 +299,10 @@ class RoutineExecution {
 
   constructor(private readonly ctx: ExecutionContext) {}
 
+  private assertActive(): void {
+    assertRunActive(this.ctx.signal);
+  }
+
   /** The evidence ref of whichever State most recently failed this chain, if any. */
   get failureEvidenceRef(): string | undefined {
     return this.lastFailureEvidenceRef;
@@ -319,10 +330,12 @@ class RoutineExecution {
     outputs: StateOutputs,
     depth: number
   ): Promise<ChainOutcome> {
+    this.assertActive();
     if (depth > this.ctx.routine.order.length) return "needs_reconciliation";
     let currentName = startName;
 
     for (let step = 0; step <= this.ctx.routine.order.length; step += 1) {
+      this.assertActive();
       const state = this.ctx.routine.states.get(currentName);
       const key = `${prefix}${currentName}`;
       const row = this.ctx.persisted.get(key);
@@ -347,6 +360,7 @@ class RoutineExecution {
           outcome = this.replayOutcome(state, scope);
         } else {
           const settled = await this.executeState(state, key, row, scope, outputs, depth);
+          this.assertActive();
           if (settled.kind !== "outcome") return settled.kind;
           outcome = settled.outcome;
         }
@@ -377,6 +391,7 @@ class RoutineExecution {
 
       outputs[state.name] = { output };
       if (outcome.kind === "end") return "succeeded";
+      this.assertActive();
       currentName = outcome.target;
     }
 
@@ -405,6 +420,7 @@ class RoutineExecution {
     outputs: StateOutputs,
     depth: number
   ): Promise<{ kind: "outcome"; outcome: StepOutcome } | { kind: ChainOutcome }> {
+    this.assertActive();
     let outcome: StepOutcome | ChainOutcome | null;
 
     // A Tool approval resumes by replaying the same deterministic effect plan. Other waiting
@@ -414,18 +430,21 @@ class RoutineExecution {
       state.type !== "tool" &&
       !(await this.backoffElapsed(state, key))
     ) {
+      this.assertActive();
       const resumed =
         state.type === "approval"
           ? await resumeApproval(this.waitGate(), state, key, row)
           : state.type === "child_routine"
             ? await resumeChildRoutine(this.waitGate(), state, key, row)
             : await resumeWait(this.waitGate(), state, key, row);
+      this.assertActive();
       if (resumed.kind !== "outcome") return { kind: resumed.kind };
       outcome = resumed.outcome;
     } else {
       const progression = progressionFrom(row.status);
       if (progression === null) return { kind: "needs_reconciliation" };
       await this.claim(key, row.status as StateStatus, progression);
+      this.assertActive();
       assertSupportedState(state);
 
       if (state.type === "wait") return openWait(this.waitGate(), state, key);
@@ -455,6 +474,7 @@ class RoutineExecution {
                         ? this.runAgent(state, key, row, scope)
                         : runComposite(this.fanOut(), state, key, scope, outputs, depth)
         );
+        this.assertActive();
       }
     }
     if (outcome === null) return { kind: "waiting" };
@@ -501,6 +521,7 @@ class RoutineExecution {
     if (port === undefined) throw new RoutineExecutionRefusal("unsupported_state", state.name);
 
     const planned = planEmit(state, scope);
+    this.assertActive();
     await port.emit({
       businessId: this.ctx.run.businessId,
       runId: this.ctx.run.id,
@@ -508,7 +529,9 @@ class RoutineExecution {
       eventType: planned.eventType,
       eventVersion: planned.eventVersion,
       data: planned.data,
+      ...(this.ctx.signal === undefined ? {} : { signal: this.ctx.signal }),
     });
+    this.assertActive();
     return stateOutcome(state);
   }
 
@@ -535,6 +558,7 @@ class RoutineExecution {
         plan: planScriptExecution(state, scope),
       })
     );
+    this.assertActive();
 
     if (result.kind === "succeeded") {
       this.produced.set(key, result.output);
@@ -569,8 +593,10 @@ class RoutineExecution {
         runId: this.ctx.run.id,
         stateKey: key,
         plan: planActionDispatch(state, scope, { runId: this.ctx.run.id, stateKey: key }),
+        ...(this.ctx.signal === undefined ? {} : { signal: this.ctx.signal }),
       })
     );
+    this.assertActive();
 
     if (result.kind === "succeeded") {
       this.produced.set(key, result.output);
@@ -609,8 +635,10 @@ class RoutineExecution {
         requesterPrincipalId: `${this.ctx.run.identity.effectiveSubject.kind}:${this.ctx.run.identity.effectiveSubject.id}`,
         bundle: this.ctx.bundle,
         authorityLayers: this.ctx.options.authority?.(this.ctx.run, state) ?? [],
+        ...(this.ctx.signal === undefined ? {} : { signal: this.ctx.signal }),
       })
     );
+    this.assertActive();
 
     if (result.kind === "succeeded") {
       this.produced.set(key, result.output);
@@ -626,6 +654,7 @@ class RoutineExecution {
         stateKey: key,
         approvalId: result.approvalId,
       });
+      this.assertActive();
       await this.transition(key, "running", "waiting");
       return "waiting";
     }
@@ -657,19 +686,25 @@ class RoutineExecution {
     // The authored Routine's cost/token ceiling; resolved with the ModelProfile's own budgets by
     // the port, so the ledger it opens carries one ceiling per key rather than two.
     const scopedLimits = routineBudgetScopedLimits(this.ctx.routine);
-    const result = await this.withRetry(state, key, (attemptNumber) =>
-      port.execute({
-        businessId: this.ctx.run.businessId,
-        runId: this.ctx.run.id,
-        stateKey: key,
-        // Claimed row version plus the retry attempt keep each attempt's loop events distinct.
-        attempt: row.version + (attemptNumber - 1),
-        plan,
-        ...(schema === undefined ? {} : { outputSchema: schema }),
-        ...(scopedLimits === undefined ? {} : { scopedLimits: [scopedLimits] }),
-        bundle: this.ctx.bundle,
-      })
-    );
+    const request = {
+      businessId: this.ctx.run.businessId,
+      runId: this.ctx.run.id,
+      stateKey: key,
+      leaseGeneration: this.ctx.run.leaseGeneration,
+      // The checkpoint's acknowledged retry count keeps attempt event identities crash-safe.
+      attempt: row.version,
+      ...(this.ctx.signal === undefined ? {} : { signal: this.ctx.signal }),
+      plan,
+      ...(schema === undefined ? {} : { outputSchema: schema }),
+      ...(scopedLimits === undefined ? {} : { scopedLimits: [scopedLimits] }),
+      bundle: this.ctx.bundle,
+    };
+    const pendingTerminalAttempt = port.pendingTerminalAttempt?.bind(port);
+    const result = await this.withRetry(state, key, () => port.execute(request), {
+      pendingAttempt:
+        pendingTerminalAttempt === undefined ? undefined : () => pendingTerminalAttempt(request),
+    });
+    this.assertActive();
 
     if (result.kind === "succeeded") {
       this.produced.set(key, result.output);
@@ -704,6 +739,7 @@ class RoutineExecution {
     const unitScope = { input: this.ctx.request.inputs, states: { ...outputs }, ...extras };
 
     assertSupportedInput(body);
+    this.assertActive();
     const scheduled = await this.ctx.options.scheduler.schedule({
       run: this.ctx.run,
       stateKey: `${prefix}${body.name}`,
@@ -711,6 +747,7 @@ class RoutineExecution {
       resolvedInput: resolveRoutineStateInput(body, unitScope),
       createdAt: this.ctx.now().toISOString(),
     });
+    this.assertActive();
     this.ctx.persisted.set(`${prefix}${body.name}`, scheduled.state);
 
     return this.runChain(bodyName, prefix, extras, { ...outputs }, depth + 1);
@@ -734,6 +771,7 @@ class RoutineExecution {
     return {
       persisted: this.ctx.persisted,
       now: this.ctx.now,
+      assertActive: () => this.assertActive(),
       runUnit: (bodyName, parentKey, unit, extras, outputs, depth) =>
         this.runUnit(bodyName, parentKey, unit, extras, outputs, depth),
     };
@@ -750,6 +788,7 @@ class RoutineExecution {
         ? {}
         : { childRoutines: this.ctx.options.childRoutines }),
       now: this.ctx.now,
+      assertActive: () => this.assertActive(),
       transition: (key, from, to, reason) => this.transition(key, from, to, reason),
       claim: (key, from, progression) => this.claim(key, from, progression),
       park: (key, reason) => this.park(key, reason),
@@ -763,7 +802,7 @@ class RoutineExecution {
       contention: this.ctx.contention,
       waits: this.ctx.options.waits,
       now: this.ctx.now,
-      delay: this.ctx.delay,
+      delay: (ms) => this.interruptibleDelay(ms),
       transition: (key, from, to, reason) => this.transition(key, from, to, reason),
     };
   }
@@ -776,7 +815,9 @@ class RoutineExecution {
    * returns at once. The count is loaded from and written to the durable store before every
    * attempt, so a park-and-resume or a crash-and-reclaim continues from the attempts already spent
    * rather than restarting the budget — the same durability the Run's budget ledger gives. A State
-   * with no `retry` policy makes exactly one attempt and never touches the store.
+   * with no `retry` policy makes exactly one attempt and never touches the store. A durable Agent
+   * terminal replay is not another attempt: its checkpoint identifies the attempt already charged,
+   * and only the next fresh Agent execution advances the ledger.
    *
    * A crash between recording the final attempt and settling the State can cost one extra attempt
    * on reclaim; the guarantee is that the budget is never *refunded*, never that it is never
@@ -785,26 +826,51 @@ class RoutineExecution {
   private async withRetry<T extends { readonly kind: string }>(
     state: CompiledState,
     key: string,
-    attempt: (attemptNumber: number) => Promise<T>
+    attempt: (attemptNumber: number) => Promise<T>,
+    accounting?: {
+      readonly pendingAttempt?: () => Promise<number | undefined>;
+    }
   ): Promise<T> {
+    this.assertActive();
     const policy = state.retry;
-    if (policy === null) return attempt(1);
+    if (policy === null) {
+      const outcome = await attempt(1);
+      this.assertActive();
+      return outcome;
+    }
 
     const loaded = await this.ctx.retries.load(this.ctx.run.businessId, this.ctx.run.id, key);
+    this.assertActive();
     let made = loaded?.attempts ?? 0;
     for (;;) {
-      made += 1;
-      // Persist before the attempt so a crash mid-attempt cannot refund the budget it spends.
-      await this.ctx.retries.record({
-        businessId: this.ctx.run.businessId,
-        runId: this.ctx.run.id,
-        stateKey: key,
-        attempts: made,
-      });
+      const pendingAttempt = await accounting?.pendingAttempt?.();
+      this.assertActive();
+      if (pendingAttempt === undefined) {
+        made += 1;
+        // Persist before the attempt so a crash mid-attempt cannot refund the budget it spends.
+        await this.ctx.retries.record({
+          businessId: this.ctx.run.businessId,
+          runId: this.ctx.run.id,
+          stateKey: key,
+          attempts: made,
+        });
+      } else if (pendingAttempt > made) {
+        // Repair a legacy/missing counter from the durable terminal evidence without charging
+        // redelivery itself.
+        made = pendingAttempt;
+        await this.ctx.retries.record({
+          businessId: this.ctx.run.businessId,
+          runId: this.ctx.run.id,
+          stateKey: key,
+          attempts: made,
+        });
+      }
+      this.assertActive();
       const outcome = await attempt(made);
+      this.assertActive();
       if (made >= policy.maxAttempts || !isRetryableFailure(outcome)) return outcome;
       const backoffMs = retryBackoffMs(policy, made);
-      if (backoffMs > 0) await this.ctx.delay(backoffMs);
+      if (backoffMs > 0) await this.interruptibleDelay(backoffMs);
     }
   }
 
@@ -824,6 +890,7 @@ class RoutineExecution {
       ...scope,
       states: { ...outputs, [state.name]: { output: this.outputFor(state, key, scope) } },
     };
+    this.assertActive();
     const scheduled = await this.ctx.options.scheduler.schedule({
       run: this.ctx.run,
       stateKey: `${prefix}${next.name}`,
@@ -831,6 +898,7 @@ class RoutineExecution {
       resolvedInput: resolveRoutineStateInput(next, targetScope),
       createdAt: this.ctx.now().toISOString(),
     });
+    this.assertActive();
     this.ctx.persisted.set(`${prefix}${next.name}`, scheduled.state);
   }
 
@@ -858,16 +926,19 @@ class RoutineExecution {
 
   /** Succeed a State, storing what it published so a replay republishes the same value. */
   private async settle(key: string, state: CompiledState): Promise<void> {
+    this.assertActive();
     await this.ctx.options.transitions.transition({
       businessId: this.ctx.run.businessId,
       runId: this.ctx.run.id,
       stateKey: key,
+      leaseGeneration: this.ctx.run.leaseGeneration,
       from: "running",
       to: "succeeded",
       ...(recomputes(state) || !this.produced.has(key)
         ? {}
         : { output: { value: boundedOutput(this.produced.get(key)) } }),
     });
+    this.assertActive();
   }
 
   private async transition(
@@ -876,14 +947,37 @@ class RoutineExecution {
     to: StateStatus,
     reason?: string
   ): Promise<void> {
+    this.assertActive();
     await this.ctx.options.transitions.transition({
       businessId: this.ctx.run.businessId,
       runId: this.ctx.run.id,
       stateKey: key,
+      leaseGeneration: this.ctx.run.leaseGeneration,
       from,
       to,
       ...(reason === undefined ? {} : { reason }),
     });
+    this.assertActive();
+  }
+
+  private async interruptibleDelay(ms: number): Promise<void> {
+    this.assertActive();
+    const signal = this.ctx.signal;
+    if (signal === undefined) {
+      await this.ctx.delay(ms);
+      return;
+    }
+    let interrupt: EventListener | undefined;
+    const interrupted = new Promise<void>((resolve) => {
+      interrupt = () => resolve();
+      signal.addEventListener("abort", interrupt, { once: true });
+    });
+    try {
+      await Promise.race([this.ctx.delay(ms), interrupted]);
+    } finally {
+      if (interrupt !== undefined) signal.removeEventListener("abort", interrupt);
+    }
+    this.assertActive();
   }
 }
 

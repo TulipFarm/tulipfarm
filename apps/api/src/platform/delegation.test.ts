@@ -98,11 +98,26 @@ class FakeConversationStore implements ConversationStore {
   readonly messages: PersistedMessage[] = [];
   private readonly completions: TurnCompletion[] = [];
 
+  async withTransaction<T>(
+    operation: (store: ConversationStore, transaction: Queryable) => Promise<T>
+  ): Promise<T> {
+    return operation(this, {
+      query: async () => {
+        throw new Error("fake transaction query is unavailable");
+      },
+    });
+  }
   async findTurnByIdempotencyKey(_b: string, key: string) {
     return this.turns.find((turn) => turn.idempotencyKey === key);
   }
+  async lockTurnByIdempotencyKey(businessId: string, key: string) {
+    return this.findTurnByIdempotencyKey(businessId, key);
+  }
   async findTurn(_b: string, turnId: string) {
     return this.turns.find((turn) => turn.id === turnId);
+  }
+  async lockTurn(businessId: string, turnId: string) {
+    return this.findTurn(businessId, turnId);
   }
   async findLatestTurn(_b: string, conversationId: string) {
     return [...this.turns].reverse().find((turn) => turn.conversationId === conversationId);
@@ -116,13 +131,53 @@ class FakeConversationStore implements ConversationStore {
   async appendMessage(message: PersistedMessage) {
     this.messages.push(message);
   }
+  async appendAssistantMessage(input: {
+    readonly message: PersistedMessage;
+    readonly runId: string;
+    readonly attempt: number;
+  }) {
+    const current = this.turns.find((turn) => turn.id === input.message.turnId);
+    if (
+      current === undefined ||
+      current.runId !== input.runId ||
+      current.attempt !== input.attempt
+    ) {
+      return { status: "stale" as const, messageId: null };
+    }
+    const existing = this.messages.find(
+      (message) =>
+        message.turnId === input.message.turnId &&
+        message.role === "assistant" &&
+        message.attempt === input.attempt
+    );
+    if (existing !== undefined) {
+      return { status: "recorded" as const, messageId: existing.id };
+    }
+    this.messages.push(input.message);
+    return { status: "recorded" as const, messageId: input.message.id };
+  }
+  async reserveTurn(input: { readonly message: PersistedMessage; readonly turn: PersistedTurn }) {
+    const existing = await this.findTurnByIdempotencyKey(
+      input.turn.businessId,
+      input.turn.idempotencyKey
+    );
+    if (existing !== undefined) {
+      return { turn: existing, outcome: "replayed" as const, conversationCreated: false };
+    }
+    this.turns.push(input.turn);
+    this.messages.push(input.message);
+    return { turn: input.turn, outcome: "created" as const, conversationCreated: false };
+  }
   async saveTurn(turn: PersistedTurn) {
     const index = this.turns.findIndex((existing) => existing.id === turn.id);
     if (index === -1) this.turns.push(turn);
     else this.turns[index] = turn;
   }
-  async listMessages(_b: string, conversationId: string) {
-    return this.messages.filter((message) => message.conversationId === conversationId);
+  async listMessages(_b: string, conversationId: string, throughRequestMessageId?: string) {
+    const messages = this.messages.filter((message) => message.conversationId === conversationId);
+    if (throughRequestMessageId === undefined) return messages;
+    const cutoff = messages.findIndex((message) => message.id === throughRequestMessageId);
+    return cutoff < 0 ? [] : messages.slice(0, cutoff + 1);
   }
   async findCompletion(_b: string, turnId: string, attempt: number) {
     return this.completions.find(
@@ -133,6 +188,14 @@ class FakeConversationStore implements ConversationStore {
     this.completions.push(completion);
   }
   async completeTurn(input: CompleteTurnInput): Promise<CompleteTurnResult> {
+    const turn = this.turns.find((candidate) => candidate.id === input.completion.turnId);
+    if (
+      turn === undefined ||
+      turn.runId !== input.runId ||
+      turn.attempt !== input.completion.attempt
+    ) {
+      return { completionInserted: false, status: "stale" };
+    }
     const recorded = await this.findCompletion(
       input.completion.businessId,
       input.completion.turnId,
@@ -140,8 +203,14 @@ class FakeConversationStore implements ConversationStore {
     );
     const completionInserted = recorded === undefined;
     if (completionInserted) this.completions.push(input.completion);
-    if (input.turn) await this.saveTurn(input.turn);
-    return { completionInserted };
+    if (!completionInserted) return { completionInserted: false, status: "replayed" };
+    await this.saveTurn({
+      ...turn,
+      status: input.completion.status,
+      cursor: input.completion.cursor,
+      updatedAt: input.completion.createdAt,
+    });
+    return { completionInserted: true, status: "recorded" };
   }
 
   /** Stands in for the Worker answering the helper's Turn. */

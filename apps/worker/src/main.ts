@@ -311,6 +311,7 @@ export async function main(): Promise<void> {
   const localTools = buildLocalToolHost({
     db: pool,
     transactions,
+    effects: recoveryEffects,
     artifacts: artifactService,
     embeddings: localEmbeddings,
     // `file_create` renders here, not in the API: model-authored content is untrusted input.
@@ -564,21 +565,25 @@ export async function main(): Promise<void> {
         toolDispatch.forget(run.id);
       }
     },
+    checkpoints: loopCheckpointStore,
     signal,
     now: () => new Date(),
     leaseDurationMs: config.leaseDurationMs,
     batchSize: config.batchSize,
     log: logger,
     onTerminal: async (run, status) => {
-      const outcome = await signalChildCompletion(
-        { ancestry: childAncestry, waits },
-        {
-          businessId: config.businessId,
-          childRunId: run.id,
-          status,
-          completedAt: new Date().toISOString(),
-        }
-      );
+      const [, outcome] = await Promise.all([
+        turnHost.settleTerminal(run.id),
+        signalChildCompletion(
+          { ancestry: childAncestry, waits },
+          {
+            businessId: config.businessId,
+            childRunId: run.id,
+            status,
+            completedAt: new Date().toISOString(),
+          }
+        ),
+      ]);
       if (outcome.kind === "signalled") {
         logger.info(
           `child completion signalled child=${run.id} parent=${outcome.parentRunId} status=${status} outcome=${outcome.result.outcome}`

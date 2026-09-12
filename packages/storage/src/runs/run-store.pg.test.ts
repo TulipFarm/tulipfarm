@@ -76,6 +76,7 @@ describe("RunStore (PostgreSQL)", () => {
       source: "routine",
       status: "queued",
       version: 0,
+      leaseGeneration: 0,
       bundle: run().bundle,
       identity: run().identity,
     });
@@ -252,6 +253,7 @@ describe("RunStore (PostgreSQL)", () => {
     expect(await store.find("business-1", run().id)).toMatchObject({
       status: "claimed",
       version: 1,
+      leaseGeneration: 1,
     });
   });
 
@@ -335,6 +337,7 @@ describe("RunStore (PostgreSQL)", () => {
 
     expect(await store.find("business-1", run().id)).toMatchObject({
       version: 2,
+      leaseGeneration: 1,
       leaseOwner: "worker-1",
       leaseExpiresAt: "2026-07-24T10:02:00.000Z",
     });
@@ -605,6 +608,140 @@ describe("RunStore (PostgreSQL)", () => {
         version: 1,
       })
     );
+  });
+
+  it("rejects an in-flight State settlement after the same worker reclaims a newer generation", async () => {
+    await store.start(run());
+    for (const [expectedVersion, expectedStatus, status] of [
+      [0, "pending", "ready"],
+      [1, "ready", "claimed"],
+      [2, "claimed", "running"],
+    ] as const) {
+      await store.transitionState("business-1", run().id, "classify", {
+        expectedVersion,
+        expectedStatus,
+        status,
+      });
+    }
+    const [firstClaim] = await store.claimNextQueued("business-1", "worker-1", {
+      now: "2026-07-24T10:00:00.000Z",
+      leaseDurationMs: 60_000,
+      limit: 1,
+    });
+    if (firstClaim === undefined) throw new Error("first claim missing");
+    await store.transitionRun("business-1", run().id, {
+      expectedVersion: firstClaim.version,
+      expectedStatus: "claimed",
+      status: "running",
+      leaseOwner: "worker-1",
+      leaseExpiresAt: firstClaim.leaseExpiresAt,
+    });
+
+    let releaseOldWriter = () => {};
+    let oldWriterStarted = () => {};
+    const oldWriterReady = new Promise<void>((resolve) => {
+      oldWriterStarted = resolve;
+    });
+    const oldWriterGate = new Promise<void>((resolve) => {
+      releaseOldWriter = resolve;
+    });
+    const baseTransactions = transactionPort(database);
+    const staleStore = new RunStore({
+      withTransaction: async (operation) => {
+        oldWriterStarted();
+        await oldWriterGate;
+        return baseTransactions.withTransaction(operation);
+      },
+    });
+    const staleSettlement = staleStore.transitionOwnedState(
+      "business-1",
+      run().id,
+      "classify",
+      firstClaim.leaseGeneration,
+      {
+        expectedVersion: 3,
+        expectedStatus: "running",
+        status: "succeeded",
+      }
+    );
+    await oldWriterReady;
+
+    await store.reclaimExpiredRuns("business-1", "2026-07-24T10:01:00.001Z", 10);
+    const parked = await store.find("business-1", run().id);
+    if (parked === null) throw new Error("parked Run missing");
+    await store.requeueParkedRun(
+      "business-1",
+      run().id,
+      parked.version,
+      DISPATCH_LEASE_EXPIRED_REF
+    );
+    const [secondClaim] = await store.claimNextQueued("business-1", "worker-1", {
+      now: "2026-07-24T10:02:00.000Z",
+      leaseDurationMs: 60_000,
+      limit: 1,
+    });
+    if (secondClaim === undefined) throw new Error("second claim missing");
+    await store.transitionRun("business-1", run().id, {
+      expectedVersion: secondClaim.version,
+      expectedStatus: "claimed",
+      status: "running",
+      leaseOwner: "worker-1",
+      leaseExpiresAt: secondClaim.leaseExpiresAt,
+    });
+
+    releaseOldWriter();
+    await expect(staleSettlement).resolves.toBe("ownership_lost");
+    expect(await store.findState("business-1", run().id, "classify")).toMatchObject({
+      status: "running",
+      version: 3,
+    });
+    await expect(
+      store.transitionOwnedState("business-1", run().id, "classify", secondClaim.leaseGeneration, {
+        expectedVersion: 3,
+        expectedStatus: "running",
+        status: "succeeded",
+      })
+    ).resolves.toBe("transitioned");
+  });
+
+  it("keeps an owned State writer valid across a live heartbeat", async () => {
+    await store.start(run());
+    for (const [expectedVersion, expectedStatus, status] of [
+      [0, "pending", "ready"],
+      [1, "ready", "claimed"],
+      [2, "claimed", "running"],
+    ] as const) {
+      await store.transitionState("business-1", run().id, "classify", {
+        expectedVersion,
+        expectedStatus,
+        status,
+      });
+    }
+    const [claim] = await store.claimNextQueued("business-1", "worker-1", {
+      now: "2026-07-24T10:00:00.000Z",
+      leaseDurationMs: 60_000,
+      limit: 1,
+    });
+    if (claim === undefined) throw new Error("claim missing");
+    await store.transitionRun("business-1", run().id, {
+      expectedVersion: claim.version,
+      expectedStatus: "claimed",
+      status: "running",
+      leaseOwner: "worker-1",
+      leaseExpiresAt: claim.leaseExpiresAt,
+    });
+    await store.heartbeat("business-1", run().id, "worker-1", {
+      expectedVersion: 2,
+      leaseExpiresAt: "2026-07-24T10:02:00.000Z",
+    });
+
+    await expect(
+      store.transitionOwnedState("business-1", run().id, "classify", claim.leaseGeneration, {
+        expectedVersion: 3,
+        expectedStatus: "running",
+        status: "succeeded",
+      })
+    ).resolves.toBe("transitioned");
   });
 
   it("appends idempotent immutable attempt evidence and rejects a conflicting replay", async () => {
