@@ -92,6 +92,7 @@ import {
   ChannelRunDeliveryStore,
   ChildLinkAncestryStore,
   ChildLinkStore,
+  ConversationContextSummaryStore,
   createBlobPort,
   EventStore,
   ensureBundledBucket,
@@ -678,6 +679,7 @@ async function boot() {
       (queryable) => new PgMessageRepo(queryable),
       (queryable) => new PgConversationRepo(queryable)
     );
+    const conversationContextSummaries = new ConversationContextSummaryStore(pool);
     const terminalTurns = new TerminalTurnSettler({
       turns: conversationStore,
       runs: runStore,
@@ -1274,6 +1276,7 @@ async function boot() {
         context: new ChatTurnContextResolver({
           artifacts: runArtifacts,
           store: conversationStore,
+          contextSummaries: conversationContextSummaries,
           soulLoader,
           teamAssets,
           toolRegistry,

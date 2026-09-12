@@ -107,6 +107,12 @@ export interface HostedTurnContext {
   /** Validated guardrail policy named by digest; Worker enforces it without reading Soul. */
   readonly guardrailPolicy: Record<string, unknown>;
   readonly messages: readonly { readonly role: string; readonly content: MessageContent }[];
+  /** Leading trusted instructions that model-facing compaction must retain exactly. */
+  readonly pinnedMessageCount?: number;
+  /** Maximum model-facing Context before the Worker summarizes older content. */
+  readonly contextTokenBudget?: number;
+  /** Source Message ids aligned to `messages`; null entries are synthesized Context. */
+  readonly contextMessageIds?: readonly (string | null)[];
   /**
    * The Files this Turn may send to the model, re-authorized at assembly time.
    *

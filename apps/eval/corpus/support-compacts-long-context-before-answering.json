@@ -1,0 +1,56 @@
+{
+  "id": "support-compacts-long-context-before-answering",
+  "tier": "l2",
+  "agent": "support",
+  "contextTokenBudget": 2300,
+  "input": [
+    {
+      "role": "user",
+      "content": "ARCHIVED-CONTEXT historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail historical detail "
+    },
+    {
+      "role": "assistant",
+      "content": "I recorded the older discussion."
+    },
+    {
+      "role": "user",
+      "content": "Answer only this latest request: confirm that Context compaction kept this sentence."
+    }
+  ],
+  "script": [
+    {
+      "kind": "text",
+      "text": "The archived Context included ARCHIVED-CONTEXT."
+    },
+    {
+      "kind": "text",
+      "text": "The archived Context included ARCHIVED-CONTEXT and was compacted safely."
+    },
+    {
+      "kind": "text",
+      "text": "Context compaction kept this sentence."
+    }
+  ],
+  "expect": [
+    {
+      "kind": "model_prompt_contains",
+      "text": "[Compacted context:"
+    },
+    {
+      "kind": "model_prompt_contains",
+      "text": "Answer only this latest request: confirm that Context compaction kept this sentence."
+    },
+    {
+      "kind": "model_prompt_contains",
+      "text": "ARCHIVED-CONTEXT"
+    },
+    {
+      "kind": "output_contains",
+      "text": "Context compaction kept this sentence."
+    },
+    {
+      "kind": "loop_status",
+      "status": "completed"
+    }
+  ]
+}

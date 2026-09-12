@@ -881,6 +881,44 @@ describe("RunDispatcher", () => {
     }
   });
 
+  it("abandons an overlong claimed execution for normal lease reclaim", async () => {
+    vi.useFakeTimers();
+    try {
+      const store = new FakeRunStore();
+      store.claimBatchResult = [persistedRun()];
+      let aborted = false;
+      const dispatcher = new RunDispatcher({
+        leases: new RunLeaseManager(store),
+        businessId: BUSINESS_ID,
+        owner: "worker-1",
+        now: () => new Date(),
+        leaseDurationMs: 300,
+        maxLifetimeMs: 750,
+        handler: (_run, signal) =>
+          new Promise<RunOutcome>((resolve) => {
+            signal.addEventListener(
+              "abort",
+              () => {
+                aborted = true;
+                resolve({ status: "cancelled" });
+              },
+              { once: true }
+            );
+          }),
+      });
+
+      const dispatching = dispatcher.dispatchBatch();
+      await vi.advanceTimersByTimeAsync(750);
+
+      await expect(dispatching).resolves.toMatchObject({ claimed: 1, failed: 1 });
+      expect(aborted).toBe(true);
+      expect(store.releaseCalls).toEqual([]);
+      expect(store.heartbeatCalls.length).toBeGreaterThan(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("settles a rejected heartbeat as lease loss and always removes the drain listener", async () => {
     vi.useFakeTimers();
     try {

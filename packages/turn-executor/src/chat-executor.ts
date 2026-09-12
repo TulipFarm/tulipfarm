@@ -1,6 +1,7 @@
 import {
   AgentLoop,
   type AgentLoopBudgetPort,
+  type ContextCompactorPort,
   InMemoryLoopCheckpointStore,
   type LoopCheckpointStore,
   type ModelPort,
@@ -108,6 +109,17 @@ export interface ChatExecutorOptions {
   readonly distiller?:
     | ToolResultDistillerPort
     | ((input: ChatModelFactoryInput) => ToolResultDistillerPort);
+  readonly contextCompactor?:
+    | ContextCompactorPort
+    | ((input: ChatModelFactoryInput) => ContextCompactorPort);
+  readonly contextSummaries?: {
+    save(input: {
+      readonly businessId: string;
+      readonly conversationId: string;
+      readonly throughMessageId: string;
+      readonly summary: string;
+    }): Promise<void>;
+  };
   readonly runs: Pick<RunStore, "find" | "findState">;
   readonly events: RunEventAppendPort;
   readonly budgets: RunBudgetStore;
@@ -269,6 +281,42 @@ async function executeTurn(
     options.checkpoints ?? new InMemoryLoopCheckpointStore(),
     identity.previousRunId
   );
+  const guardedCompactor =
+    options.contextCompactor === undefined
+      ? undefined
+      : guardrails.guardCompactor(
+          typeof options.contextCompactor === "function"
+            ? options.contextCompactor({
+                events: writer,
+                budgets: new RunBudgetManager(options.budgets),
+                businessId: run.businessId,
+                runId: run.id,
+                turnId: identity.turnId,
+                conversationId: identity.conversationId,
+              })
+            : options.contextCompactor,
+          writer
+        );
+  const contextCompactor =
+    guardedCompactor === undefined || options.contextSummaries === undefined
+      ? guardedCompactor
+      : {
+          compact: async (
+            request: Parameters<ContextCompactorPort["compact"]>[0],
+            signal: AbortSignal
+          ) => {
+            const summary = await guardedCompactor.compact(request, signal);
+            if (summary !== undefined && request.throughMessageId !== undefined) {
+              await options.contextSummaries?.save({
+                businessId: run.businessId,
+                conversationId: identity.conversationId,
+                throughMessageId: request.throughMessageId,
+                summary,
+              });
+            }
+            return summary;
+          },
+        };
   const loop = new AgentLoop({
     model: guardrails.guardModel(model, writer),
     // Guard before announcing; refused Tool calls never ran.
@@ -287,6 +335,7 @@ async function executeTurn(
       return current !== null && CANCELLING_STATUSES.has(current.status);
     },
     log: options.log,
+    ...(contextCompactor === undefined ? {} : { contextCompactor }),
     // The same port the Context's own attachments come from: a File re-read mid-Turn is fetched
     // and re-authorized exactly as one the person attached, through one gate rather than two.
     ...(options.attachments === undefined ? {} : { attachments: options.attachments }),

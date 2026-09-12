@@ -5,7 +5,12 @@ import type {
 } from "@ai-sdk/provider";
 import { APICallError, LoadAPIKeyError } from "ai";
 import { describe, expect, it, vi } from "vitest";
-import { type FallbackCallGate, FallbackModel, isHardFailure } from "./fallback";
+import {
+  FallbackBudgetInfrastructureError,
+  type FallbackCallGate,
+  FallbackModel,
+  isHardFailure,
+} from "./fallback";
 import { LlmProviderError } from "./provider-error";
 
 const opts = {} as LanguageModelV4CallOptions;
@@ -313,6 +318,56 @@ describe("FallbackModel.doStream", () => {
     expect(m2.doStream).toHaveBeenCalledOnce();
   });
 
+  it("records billed usage from an uncommitted provider before falling back", async () => {
+    const primaryError = apiError(503, true);
+    const first = makeModel({
+      doStream: vi.fn().mockResolvedValue(
+        makeStreamResult([
+          { type: "stream-start", warnings: [] },
+          { type: "error", error: primaryError },
+          {
+            type: "finish",
+            finishReason: { unified: "error", raw: "error" },
+            usage: {
+              inputTokens: { total: 17, noCache: 17, cacheRead: 0, cacheWrite: 0 },
+              outputTokens: { total: 3, text: 3, reasoning: 0 },
+            },
+          },
+        ])
+      ),
+    });
+    const second = makeModel({
+      doStream: vi
+        .fn()
+        .mockResolvedValue(makeStreamResult([{ type: "text-delta", id: "2", delta: "complete" }])),
+    });
+    const attemptUsage = { attempts: [] };
+    const fallback = new FallbackModel(
+      [first, second],
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      attemptUsage
+    );
+
+    const result = await fallback.doStream(opts);
+    for await (const _part of result.stream) {
+      // Consume the fallback response.
+    }
+
+    expect(attemptUsage.attempts).toEqual([
+      expect.objectContaining({
+        attemptId: 0,
+        modelId: first.modelId,
+        inputTokens: 17,
+        outputTokens: 3,
+      }),
+    ]);
+  });
+
   it.each([
     ["text framing", [{ type: "text-start", id: "1" }]],
     ["Tool-input framing", [{ type: "tool-input-start", id: "1", toolName: "lookup" }]],
@@ -508,6 +563,53 @@ describe("FallbackModel.doStream", () => {
 });
 
 describe("FallbackModel error classification", () => {
+  it.each(["generate", "stream"] as const)(
+    "does not dispatch or penalize a provider when %s budget reservation fails",
+    async (method) => {
+      const first = makeModel();
+      const second = makeModel();
+      const failed = vi.fn();
+      const cancelled = vi.fn();
+      const released = vi.fn();
+      const acquire = vi.fn(async () => ({
+        succeeded: vi.fn(),
+        failed,
+        cancelled,
+        release: released,
+      }));
+      const fallback = new FallbackModel(
+        [first, second],
+        undefined,
+        undefined,
+        { acquire },
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        {
+          current: {
+            admit: async () => {
+              throw new FallbackBudgetInfrastructureError(
+                "reserve",
+                new Error("database unavailable")
+              );
+            },
+          },
+        }
+      );
+
+      const call = method === "generate" ? fallback.doGenerate(opts) : fallback.doStream(opts);
+      await expect(call).rejects.toBeInstanceOf(FallbackBudgetInfrastructureError);
+      expect(first.doGenerate).not.toHaveBeenCalled();
+      expect(first.doStream).not.toHaveBeenCalled();
+      expect(second.doGenerate).not.toHaveBeenCalled();
+      expect(second.doStream).not.toHaveBeenCalled();
+      expect(acquire).toHaveBeenCalledOnce();
+      expect(failed).not.toHaveBeenCalled();
+      expect(cancelled).toHaveBeenCalledOnce();
+      expect(released).toHaveBeenCalledOnce();
+    }
+  );
   it("falls back on a 401 auth error", async () => {
     const err = apiError(401, false);
     const m1 = makeModel({ doGenerate: vi.fn().mockRejectedValue(err) });
@@ -516,6 +618,59 @@ describe("FallbackModel error classification", () => {
     const fallback = new FallbackModel([m1, m2]);
     await expect(fallback.doGenerate(opts)).resolves.toBe(result);
     expect(m2.doGenerate).toHaveBeenCalledOnce();
+  });
+
+  it("does not penalize or replay providers when durable budget settlement fails", async () => {
+    const result = {
+      text: "hello",
+      finishReason: "stop",
+      usage: {
+        inputTokens: { total: 10 },
+        outputTokens: { total: 2 },
+      },
+      rawCall: { rawPrompt: null, rawSettings: {} },
+    };
+    const m1 = makeModel({ doGenerate: vi.fn().mockResolvedValue(result) });
+    const m2 = makeModel({ doGenerate: vi.fn().mockResolvedValue(result) });
+    const failed = vi.fn();
+    const cancelled = vi.fn();
+    const fallback = new FallbackModel(
+      [m1, m2],
+      undefined,
+      undefined,
+      {
+        acquire: async () => ({
+          succeeded: vi.fn(),
+          failed,
+          cancelled,
+          release: vi.fn(),
+        }),
+      },
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      {
+        current: {
+          admit: async () => ({
+            settle: async () => {
+              throw new FallbackBudgetInfrastructureError(
+                "settle",
+                new Error("database unavailable")
+              );
+            },
+          }),
+        },
+      }
+    );
+
+    await expect(fallback.doGenerate(opts)).rejects.toBeInstanceOf(
+      FallbackBudgetInfrastructureError
+    );
+    expect(m1.doGenerate).toHaveBeenCalledOnce();
+    expect(m2.doGenerate).not.toHaveBeenCalled();
+    expect(failed).not.toHaveBeenCalled();
+    expect(cancelled).toHaveBeenCalledOnce();
   });
 
   it("falls back on a 404 model-not-found error", async () => {
@@ -606,8 +761,13 @@ describe("FallbackModel logging", () => {
 });
 
 describe("isHardFailure", () => {
-  it("classifies only caller cancellation as hard", () => {
+  it("classifies cancellation and budget infrastructure failures as hard", () => {
     expect(isHardFailure(new DOMException("aborted", "AbortError"))).toBe(true);
+    expect(
+      isHardFailure(
+        new FallbackBudgetInfrastructureError("reserve", new Error("database unavailable"))
+      )
+    ).toBe(true);
     expect(isHardFailure(new LoadAPIKeyError({ message: "no key" }))).toBe(false);
     expect(
       isHardFailure(new LlmProviderError("model_billing_inactive", new Error("provider response")))
@@ -697,6 +857,144 @@ describe("FallbackModel lease settlement after commit", () => {
       }),
     });
   }
+
+  it.each([
+    {
+      name: "pre-admission database failure",
+      mode: "pre_admission",
+      outcomes: ["cancelled"],
+      providerCalls: 0,
+      settlementAttempts: 0,
+      rejects: true,
+    },
+    {
+      name: "admitted provider failure",
+      mode: "provider_failure",
+      outcomes: ["failed:model_error"],
+      providerCalls: 1,
+      settlementAttempts: 1,
+      rejects: true,
+    },
+    {
+      name: "committed finish",
+      mode: "finish",
+      outcomes: ["succeeded"],
+      providerCalls: 1,
+      settlementAttempts: 1,
+      rejects: false,
+    },
+    {
+      name: "consumer cancellation",
+      mode: "cancel",
+      outcomes: ["cancelled"],
+      providerCalls: 1,
+      settlementAttempts: 1,
+      rejects: false,
+    },
+    {
+      name: "temporary settlement failure",
+      mode: "temporary_settlement",
+      outcomes: ["succeeded"],
+      providerCalls: 1,
+      settlementAttempts: 2,
+      rejects: false,
+    },
+    {
+      name: "persistent settlement failure",
+      mode: "persistent_settlement",
+      outcomes: ["succeeded"],
+      providerCalls: 1,
+      settlementAttempts: 2,
+      rejects: true,
+    },
+  ] as const)(
+    "releases exactly once after $name",
+    async ({ mode, outcomes: expectedOutcomes, providerCalls, settlementAttempts, rejects }) => {
+      const { gate, outcomes, releases } = recordingGate();
+      const provider = vi.fn(async () => {
+        if (mode === "provider_failure") throw new Error("provider failed");
+        if (mode === "cancel") {
+          return {
+            stream: new ReadableStream({
+              start(controller) {
+                controller.enqueue({ type: "text-delta", id: "1", delta: "visible" });
+              },
+              pull: () => new Promise<void>(() => {}),
+            }),
+          };
+        }
+        return makeStreamResult([
+          { type: "text-delta", id: "1", delta: "visible" },
+          {
+            type: "finish",
+            finishReason: "stop",
+            usage: {
+              inputTokens: { total: 10 },
+              outputTokens: { total: 2 },
+            },
+          },
+        ]);
+      });
+      let durableAttempts = 0;
+      let budgetSettled = false;
+      const fallback = new FallbackModel(
+        [makeModel({ doStream: provider })],
+        undefined,
+        undefined,
+        gate,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        {
+          current: {
+            admit: async () => {
+              if (mode === "pre_admission") {
+                throw new FallbackBudgetInfrastructureError(
+                  "reserve",
+                  new Error("database unavailable")
+                );
+              }
+              return {
+                settle: async () => {
+                  if (budgetSettled) return;
+                  durableAttempts +=
+                    mode === "temporary_settlement" || mode === "persistent_settlement" ? 2 : 1;
+                  if (mode === "persistent_settlement") {
+                    throw new FallbackBudgetInfrastructureError(
+                      "settle",
+                      new Error("database unavailable")
+                    );
+                  }
+                  budgetSettled = true;
+                },
+              };
+            },
+          },
+        }
+      );
+
+      const exercise = async () => {
+        const result = await fallback.doStream(opts);
+        const reader = result.stream.getReader();
+        if (mode === "cancel") {
+          await reader.read();
+          await reader.cancel("caller done");
+          return;
+        }
+        while (!(await reader.read()).done) {
+          // Drain the stream.
+        }
+      };
+
+      if (rejects) await expect(exercise()).rejects.toBeDefined();
+      else await expect(exercise()).resolves.toBeUndefined();
+      expect(outcomes).toEqual(expectedOutcomes);
+      expect(releases()).toBe(1);
+      expect(provider).toHaveBeenCalledTimes(providerCalls);
+      expect(durableAttempts).toBe(settlementAttempts);
+    }
+  );
 
   it("gates each link by deployment, so two models of one provider do not share a key", async () => {
     const keys: string[] = [];
@@ -857,5 +1155,71 @@ describe("FallbackModel lease settlement after commit", () => {
     expect(outcomes).toEqual(["succeeded"]);
     expect(releases()).toBe(1);
     expect(backup.doStream).not.toHaveBeenCalled();
+  });
+
+  it("releases a successful provider even when durable budget settlement keeps failing", async () => {
+    const first = makeModel({
+      doStream: vi.fn().mockResolvedValue(
+        makeStreamResult([
+          { type: "text-delta", id: "1", delta: "visible" },
+          {
+            type: "finish",
+            finishReason: "stop",
+            usage: {
+              inputTokens: { total: 10 },
+              outputTokens: { total: 2 },
+            },
+          },
+        ])
+      ),
+    });
+    const second = makeModel();
+    const succeeded = vi.fn();
+    const failed = vi.fn();
+    const released = vi.fn();
+    const fallback = new FallbackModel(
+      [first, second],
+      undefined,
+      undefined,
+      {
+        acquire: async () => ({
+          succeeded,
+          failed,
+          cancelled: vi.fn(),
+          release: released,
+        }),
+      },
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      {
+        current: {
+          admit: async () => ({
+            settle: async () => {
+              throw new FallbackBudgetInfrastructureError(
+                "settle",
+                new Error("database unavailable")
+              );
+            },
+          }),
+        },
+      }
+    );
+
+    const result = await fallback.doStream(opts);
+    const reader = result.stream.getReader();
+    await expect(
+      (async () => {
+        while (!(await reader.read()).done) {
+          // Drain the committed stream.
+        }
+      })()
+    ).rejects.toBeInstanceOf(FallbackBudgetInfrastructureError);
+
+    expect(succeeded).toHaveBeenCalledOnce();
+    expect(failed).not.toHaveBeenCalled();
+    expect(released).toHaveBeenCalledOnce();
+    expect(second.doStream).not.toHaveBeenCalled();
   });
 });

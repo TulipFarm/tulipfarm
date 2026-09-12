@@ -9,8 +9,9 @@ import { DEPLOYMENT_BUSINESS_ID } from "@tulipfarm/constants";
  * 108: Recovery sweeps persist their cursor so blocked Runs cannot starve later safe candidates.
  * 110: Parked child Tool effects carry a replayable, non-terminal ledger state.
  * 111: Agent loop checkpoints are fenced by the active Run claim generation.
+ * 116: Model calls reserve configured Run budgets and persist bounded Conversation Context.
  */
-export const REQUIRED_SCHEMA_VERSION = 111;
+export const REQUIRED_SCHEMA_VERSION = 116;
 
 export interface WorkerConfig {
   readonly databaseUrl: string;

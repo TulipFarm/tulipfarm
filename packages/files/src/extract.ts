@@ -13,8 +13,13 @@
  * was put in the Worker to begin with.
  */
 
+import { type ImageSize, imageSize } from "./dimensions";
 import { isImageMediaType, isTextualMediaType } from "./limits";
 import { isOfficePreviewable, type PreviewBlock, previewOffice } from "./office-preview";
+
+export type ExtractedVisual =
+  | { readonly kind: "image"; readonly width: number; readonly height: number }
+  | { readonly kind: "pdf"; readonly pages: readonly ImageSize[] };
 
 /**
  * Why a File yielded no text.
@@ -44,11 +49,13 @@ export interface ExtractedText {
   readonly text: string;
   /** Whether the cap cut the document short. Callers say so rather than implying completeness. */
   readonly truncated: boolean;
+  readonly visual?: ExtractedVisual;
 }
 
 export interface ExtractionRefused {
   readonly kind: "refused";
   readonly reason: ExtractionRefusal;
+  readonly visual?: ExtractedVisual;
 }
 
 export type ExtractionResult = ExtractedText | ExtractionRefused;
@@ -84,7 +91,12 @@ export async function extractText(
     return capped(new TextDecoder().decode(bytes), maxChars);
   }
   if (isImageMediaType(mediaType)) {
-    return { kind: "refused", reason: "image_not_extractable" };
+    const dimensions = imageSize(bytes, mediaType);
+    return {
+      kind: "refused",
+      reason: "image_not_extractable",
+      ...(dimensions === null ? {} : { visual: { kind: "image" as const, ...dimensions } }),
+    };
   }
   if (mediaType === "application/pdf") {
     return await extractPdf(bytes, maxChars);
@@ -128,6 +140,7 @@ function officeBlockText(block: PreviewBlock): string {
 
 async function extractPdf(bytes: Uint8Array, maxChars: number): Promise<ExtractionResult> {
   let text: string;
+  let pages: ImageSize[];
   try {
     const { extractText: extractPdfText, getDocumentProxy } = await import("unpdf");
     // Silent: a malformed File is an expected outcome here, and pdf.js otherwise writes its
@@ -138,6 +151,14 @@ async function extractPdf(bytes: Uint8Array, maxChars: number): Promise<Extracti
     const document = await getDocumentProxy(new Uint8Array(bytes), { verbosity: 0 });
     const extracted = await extractPdfText(document, { mergePages: true });
     text = Array.isArray(extracted.text) ? extracted.text.join("\n") : extracted.text;
+    pages = [];
+    for (let index = 1; index <= document.numPages; index += 1) {
+      const page = await document.getPage(index);
+      // Providers rasterize PDF pages before metering them. A 2× viewport is a conservative
+      // 144-DPI proxy; exact billing remains provider-owned.
+      const viewport = page.getViewport({ scale: 2 });
+      pages.push({ width: Math.ceil(viewport.width), height: Math.ceil(viewport.height) });
+    }
   } catch {
     // The bytes are the untrusted input here, so a parser failure describes the File rather than
     // the system: encrypted, truncated or simply not a PDF all arrive as the same refusal.
@@ -145,10 +166,11 @@ async function extractPdf(bytes: Uint8Array, maxChars: number): Promise<Extracti
   }
 
   const normalized = normalizeWhitespace(text);
+  const visual = { kind: "pdf" as const, pages };
   if (normalized.length === 0) {
-    return { kind: "refused", reason: "no_text_layer" };
+    return { kind: "refused", reason: "no_text_layer", visual };
   }
-  return capped(normalized, maxChars);
+  return { ...capped(normalized, maxChars), visual };
 }
 
 function capped(text: string, maxChars: number): ExtractedText {

@@ -192,6 +192,7 @@ function validate(raw: unknown, file: string): EvalCase {
     require(c.tier !== "l3" ||
       (kind !== "provider_prompt_file_exact" &&
         kind !== "provider_prompt_omits_file" &&
+        kind !== "model_prompt_contains" &&
         kind !== "tool_batch_replayed" &&
         kind !== "tool_denied"), `${file}: expectation "${kind}" reads an L2-only runtime seam; ` +
       `move this Case to tier "l2"`);
@@ -282,6 +283,13 @@ function validate(raw: unknown, file: string): EvalCase {
     );
     require(replay !==
       undefined, `${file}: "checkpointCrash" needs a "tool_batch_replayed" Expectation`);
+  }
+  if (c.contextTokenBudget !== undefined) {
+    require(c.tier ===
+      "l2", `${file}: "contextTokenBudget" needs tier "l2"; this Case is tier ${JSON.stringify(c.tier)}`);
+    require(typeof c.contextTokenBudget === "number" &&
+      Number.isInteger(c.contextTokenBudget) &&
+      c.contextTokenBudget > 0, `${file}: "contextTokenBudget" must be a positive integer`);
   }
   if (
     (c.expect as { kind?: string }[]).some(

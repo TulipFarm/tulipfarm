@@ -41,6 +41,9 @@ Vocabulary is binding: [`metadata/terminologies.md` → Offline eval](../../meta
 - **The assembler must stay in the path.** `AgentLoopInput.messages` is *already assembled*, so a
   runner that fed hand-written prompts to the loop would never catch a Context-assembly regression.
   `runTrial` calls `assembleSystemPrompt` itself; `prompt_contains` is the expectation that proves it.
+- **`model_prompt_contains` reads the final L2 model request.** A Case may set
+  `contextTokenBudget` to exercise the production loop's compaction seam; the summary call and the
+  final answer consume that Case's script in order.
 - **Expectations are data, never functions.** That is what lets the Corpus be content-hashed and a
   Case be authored without writing code. Add a new `kind` to the union and handle it in `scoreCase`.
 - **A vendor failure is not a verdict.** A loop failure whose reason starts with `model_` is counted

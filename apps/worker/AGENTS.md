@@ -53,6 +53,8 @@ reconciliation, turn execution, delivery classification, projections, and outbox
   transcript for a later retry Run.
 - Run-dispatcher aborts mean ownership loss, not participant cancellation. Chat and Routine
   executors must stop model, Tool, wait, retry, fan-out, and State progress without settling.
+- A configured Run lifetime aborts the current claim and leaves its lease for normal reclaim; it
+  does not create an active-Run concurrency cap.
 - Registered Run sources are `chat`, `integration`, `routine`, and `subagent`; unknown sources
   reconcile.
 - `maintenance-sweep` (*/5, bare pg-boss, scheduled by the API) is deterministic maintenance only:

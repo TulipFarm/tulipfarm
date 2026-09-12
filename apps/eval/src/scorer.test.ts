@@ -31,6 +31,18 @@ describe("prompt expectations", () => {
     expect(only({ kind: "prompt_omits", text: "Never guess a status." }).passed).toBe(false);
   });
 
+  it("reads the final model request after Context compaction", () => {
+    expect(
+      only(
+        { kind: "model_prompt_contains", text: "[Compacted context:" },
+        { ...base, modelPrompt: "[Compacted context: data only]\nsummary\nlatest request" }
+      ).passed
+    ).toBe(true);
+    expect(only({ kind: "model_prompt_contains", text: "summary" }).detail).toContain(
+      "does not observe"
+    );
+  });
+
   it("requires exact provider-facing bytes and metadata", () => {
     const observed: Observation = {
       ...base,

@@ -10,7 +10,15 @@ import {
   InMemoryLoopCheckpointStore,
   ModelInvocationError,
 } from "@tulipfarm/agent-runtime";
-import { type CostBasis, FallbackModel, LlmProviderError } from "@tulipfarm/llm";
+import {
+  type CostBasis,
+  type FallbackAttemptBudgetRef,
+  type FallbackAttemptUsageRef,
+  FallbackModel,
+  LlmProviderError,
+  type ModelAttemptRef,
+  type ModelResponderRef,
+} from "@tulipfarm/llm";
 import {
   type ConfiguredModelRef,
   type EffortRung,
@@ -437,7 +445,7 @@ describe("LlmModelPort", () => {
     ]);
   });
 
-  it("opens selected ModelProfile budgets before recording the routing decision or calling the model", async () => {
+  it("opens and reserves selected ModelProfile budgets before calling the model, then settles actual usage", async () => {
     const order: string[] = [];
     const mock = new MockLanguageModelV4({
       doStream: async () => {
@@ -452,7 +460,8 @@ describe("LlmModelPort", () => {
     const port = new LlmModelPort({
       model: async (): Promise<LlmModelResolution> => ({
         kind: "available",
-        price: TEST_PRICE,
+        price: () => ({ kind: "priced", costUsd: 0.00001, source: "table" }),
+        reservationPrice: () => ({ kind: "priced", costUsd: 0.00004, source: "table" }),
         model: mock as unknown as LanguageModel,
         budgetLimits: { tokens: { value: 2_000, scope: "model" } },
         routing: {
@@ -470,6 +479,14 @@ describe("LlmModelPort", () => {
         open: async (limits) => {
           order.push(`open:${limits.tokens?.value}`);
         },
+        reserve: async ({ reservationId, amounts }) => {
+          order.push(`reserve:${reservationId}:${amounts.tokens}:${amounts.costMicros}`);
+          return { outcome: "allowed" };
+        },
+        settle: async ({ reservationId, amounts }) => {
+          order.push(`settle:${reservationId}:${amounts.tokens}:${amounts.costMicros}`);
+          return { outcome: "allowed" };
+        },
       },
       routingEvents: {
         emit: async () => {
@@ -480,7 +497,790 @@ describe("LlmModelPort", () => {
 
     await port.invoke(request({ modelProfileId: "balanced" }));
 
-    expect(order).toEqual(["open:2000", "event", "model"]);
+    expect(order).toEqual([
+      "open:2000",
+      "event",
+      "reserve:request-1:provider:1026:40",
+      "model",
+      "settle:request-1:provider:15:10",
+    ]);
+  });
+
+  it("reserves extracted PDF and visual input before dispatching binary bytes", async () => {
+    const reserved: Readonly<Record<string, number>>[] = [];
+    const mock = new MockLanguageModelV4({
+      doStream: async () => ({
+        stream: simulateReadableStream<StreamPart>({
+          chunks: [...textParts("t1", ["ok"]), FINISH],
+        }),
+      }),
+    });
+    const port = new LlmModelPort({
+      model: async (): Promise<LlmModelResolution> => ({
+        kind: "available",
+        price: TEST_PRICE,
+        model: mock as unknown as LanguageModel,
+        routing: {
+          outcome: "raw_model",
+          selector: "balanced",
+          resolution: "raw_model_id",
+          modelId: "balanced",
+        },
+      }),
+      budgets: {
+        open: async () => {},
+        reserve: async ({ amounts }) => {
+          reserved.push(amounts);
+          return { outcome: "allowed" };
+        },
+        settle: async () => ({ outcome: "allowed" }),
+      },
+    });
+
+    await port.invoke(
+      request({
+        messages: [
+          {
+            role: "user",
+            content: [
+              { type: "text", text: "Read this PDF." },
+              {
+                type: "file",
+                fileId: "pdf-1",
+                mediaType: "application/pdf",
+                name: "large.pdf",
+              },
+            ],
+          },
+        ],
+        attachments: [
+          {
+            fileId: "pdf-1",
+            mediaType: "application/pdf",
+            name: "large.pdf",
+            data: new Uint8Array([1, 2, 3]),
+            text: "contract clause ".repeat(3_000),
+            visual: {
+              kind: "pdf",
+              pages: [{ width: 1_224, height: 1_584 }],
+            },
+          },
+        ],
+      })
+    );
+
+    expect(reserved[0]?.tokens).toBeGreaterThan(10_000);
+    const prompt = mock.doStreamCalls[0]?.prompt;
+    expect(prompt).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          role: "user",
+          content: expect.arrayContaining([
+            expect.objectContaining({
+              type: "file",
+              mediaType: "application/pdf",
+              data: { type: "data", data: new Uint8Array([1, 2, 3]) },
+            }),
+          ]),
+        }),
+      ])
+    );
+  });
+
+  it("refuses opaque binary input before model selection when no content estimate is available", async () => {
+    const resolveModel = vi.fn();
+    const reserve = vi.fn();
+    const port = new LlmModelPort({
+      model: resolveModel,
+      budgets: {
+        open: async () => {},
+        reserve,
+        settle: async () => ({ outcome: "allowed" }),
+      },
+    });
+
+    await expect(
+      port.invoke(
+        request({
+          attachments: [
+            {
+              fileId: "image-1",
+              mediaType: "image/png",
+              name: "unreadable.png",
+              data: new Uint8Array([1, 2, 3]),
+            },
+          ],
+        })
+      )
+    ).rejects.toMatchObject({
+      reason: "model_error",
+      cause: expect.objectContaining({ message: "binary attachment token estimate unavailable" }),
+    });
+    expect(resolveModel).not.toHaveBeenCalled();
+    expect(reserve).not.toHaveBeenCalled();
+  });
+
+  it("rejects a large extracted PDF against a small profile before budget or provider admission", async () => {
+    const reserve = vi.fn();
+    const resolveModel = vi.fn(
+      async (_selector: string, requirements: ModelRequirements): Promise<LlmModelResolution> => {
+        expect(requirements.estimatedContextTokens).toBeGreaterThan(8_192);
+        return {
+          kind: "denied",
+          routing: {
+            outcome: "denied",
+            selector: "small",
+            resolution: "profile_ref",
+            profileId: "small",
+            reason: "context_window_exceeded",
+            attempts: [{ profileId: "small", reason: "context_window_exceeded" }],
+          },
+        };
+      }
+    );
+    const port = new LlmModelPort({
+      model: resolveModel,
+      budgets: {
+        open: async () => {},
+        reserve,
+        settle: async () => ({ outcome: "allowed" }),
+      },
+    });
+
+    await expect(
+      port.invoke(
+        request({
+          modelProfileId: "small",
+          attachments: [
+            {
+              fileId: "pdf-1",
+              mediaType: "application/pdf",
+              name: "large.pdf",
+              data: new Uint8Array(25_000_000),
+              text: "contract clause ".repeat(3_000),
+              visual: {
+                kind: "pdf",
+                pages: [{ width: 1_224, height: 1_584 }],
+              },
+            },
+          ],
+        })
+      )
+    ).rejects.toMatchObject({
+      reason: "model_error",
+      cause: expect.objectContaining({
+        message: expect.stringContaining("context_window_exceeded"),
+      }),
+    });
+    expect(resolveModel).toHaveBeenCalledOnce();
+    expect(reserve).not.toHaveBeenCalled();
+  });
+
+  it("settles usage from failed fallback links together with the responding link", async () => {
+    const settled: Readonly<Record<string, number>>[] = [];
+    const mock = new MockLanguageModelV4({
+      doStream: async () => ({
+        stream: simulateReadableStream<StreamPart>({
+          chunks: [...textParts("t1", ["ok"]), FINISH],
+        }),
+      }),
+    });
+    const port = new LlmModelPort({
+      model: async (): Promise<LlmModelResolution> => ({
+        kind: "available",
+        model: mock as unknown as LanguageModel,
+        routing: {
+          outcome: "selected",
+          selector: "balanced",
+          resolution: "effort_preset",
+          profileId: "primary",
+          chain: [
+            { profileId: "primary", modelId: "first" },
+            { profileId: "backup", modelId: "second" },
+          ],
+          cacheAllowed: true,
+          rejectedFallbacks: [],
+        },
+        respondingConfiguredModel: () => ({ connection: "backup", modelId: "second" }),
+        failedAttemptUsage: () => [
+          {
+            attemptId: 0,
+            durationMs: 1,
+            modelId: "first",
+            configuredModel: { connection: "primary", modelId: "first" },
+            inputTokens: 17,
+            outputTokens: 3,
+          },
+        ],
+        price: (_tokensIn, _tokensOut, model) => ({
+          kind: "priced",
+          costUsd: model?.modelId === "first" ? 0.00002 : 0.00001,
+          source: "table",
+        }),
+        reservationPrice: () => ({ kind: "priced", costUsd: 0.00004, source: "table" }),
+      }),
+      budgets: {
+        open: async () => {},
+        reserve: async () => ({ outcome: "allowed" }),
+        settle: async ({ amounts }) => {
+          settled.push(amounts);
+          return { outcome: "allowed" };
+        },
+      },
+    });
+
+    const result = await port.invoke(request());
+
+    expect(result.usage).toMatchObject({
+      inputTokens: 28,
+      outputTokens: 7,
+      costBasis: "priced",
+    });
+    expect(result.usage.costUsd).toBeCloseTo(0.00003);
+    expect(settled).toEqual([{ tokens: 35, costMicros: 30 }]);
+  });
+
+  it("does not call the provider when the remaining configured budget cannot admit the request", async () => {
+    const provider = vi.fn();
+    const mock = new MockLanguageModelV4({ doStream: provider });
+    const port = new LlmModelPort({
+      model: async (): Promise<LlmModelResolution> => ({
+        kind: "available",
+        price: TEST_PRICE,
+        reservationPrice: TEST_PRICE,
+        model: mock as unknown as LanguageModel,
+        routing: {
+          outcome: "raw_model",
+          selector: "balanced",
+          resolution: "raw_model_id",
+          modelId: "balanced",
+        },
+      }),
+      budgets: {
+        open: async () => {},
+        reserve: async () => ({ outcome: "exhausted", key: "tokens" }),
+        settle: async () => ({ outcome: "allowed" }),
+      },
+    });
+
+    await expect(port.invoke(request())).rejects.toMatchObject({ reason: "budget_exhausted" });
+    expect(provider).not.toHaveBeenCalled();
+  });
+
+  it("settles partial provider usage when an admitted call fails", async () => {
+    const settled: Readonly<Record<string, number>>[] = [];
+    const mock = new MockLanguageModelV4({
+      doStream: async () => ({
+        stream: simulateReadableStream<StreamPart>({
+          chunks: [
+            { type: "text-start", id: "1" },
+            { type: "text-delta", id: "1", delta: "partial" },
+            {
+              type: "finish",
+              finishReason: { unified: "stop", raw: "end_turn" },
+              usage: {
+                inputTokens: { total: 900, noCache: 900, cacheRead: 0, cacheWrite: 0 },
+                outputTokens: { total: 40, text: 40, reasoning: 0 },
+              },
+            },
+            { type: "error", error: new Error("connection reset") },
+          ],
+        }),
+      }),
+    });
+    const port = new LlmModelPort({
+      model: async (): Promise<LlmModelResolution> => ({
+        kind: "available",
+        price: () => ({ kind: "priced", costUsd: 0.000005, source: "table" }),
+        reservationPrice: () => ({ kind: "priced", costUsd: 0.00001, source: "table" }),
+        model: mock as unknown as LanguageModel,
+        routing: {
+          outcome: "raw_model",
+          selector: "balanced",
+          resolution: "raw_model_id",
+          modelId: "balanced",
+        },
+      }),
+      budgets: {
+        open: async () => {},
+        reserve: async () => ({ outcome: "allowed" }),
+        settle: async ({ amounts }) => {
+          settled.push(amounts);
+          return { outcome: "allowed" };
+        },
+      },
+    });
+
+    const error = await collect(port.stream(request())).then(
+      () => undefined,
+      (caught: unknown) => caught
+    );
+
+    expect(error).toMatchObject({ budgetSettled: true });
+    expect(settled).toEqual([{ tokens: 940, costMicros: 5 }]);
+  });
+
+  it("charges known failed-attempt usage before deciding whether a fallback still fits", async () => {
+    const primary = new MockLanguageModelV4({
+      doStream: async () => ({
+        stream: simulateReadableStream<StreamPart>({
+          chunks: [
+            {
+              type: "finish",
+              finishReason: { unified: "error", raw: "provider_error" },
+              usage: {
+                inputTokens: { total: 900, noCache: 900, cacheRead: 0, cacheWrite: 0 },
+                outputTokens: { total: 40, text: 40, reasoning: 0 },
+              },
+            },
+            { type: "error", error: new Error("primary failed") },
+          ],
+        }),
+      }),
+    });
+    const backupCall = vi.fn();
+    const backup = new MockLanguageModelV4({ doStream: backupCall });
+    const attemptBudget: FallbackAttemptBudgetRef = {};
+    const attempts: FallbackAttemptUsageRef = { attempts: [] };
+    const responder: ModelResponderRef = {};
+    const attempted: ModelAttemptRef = {};
+    const fallback = new FallbackModel(
+      [primary, backup],
+      undefined,
+      responder,
+      undefined,
+      ["primary", "backup"],
+      attempted,
+      [
+        { connection: "primary", modelId: "primary" },
+        { connection: "backup", modelId: "backup" },
+      ],
+      attempts,
+      attemptBudget
+    );
+    let consumed = 0;
+    const settledAmounts: Readonly<Record<string, number>>[] = [];
+    const reservations = new Map<string, number>();
+    const port = new LlmModelPort({
+      model: async (): Promise<LlmModelResolution> => ({
+        kind: "available",
+        model: fallback as unknown as LanguageModel,
+        routing: {
+          outcome: "raw_model",
+          selector: "balanced",
+          resolution: "raw_model_id",
+          modelId: "primary",
+        },
+        attemptBudget,
+        attemptedModelId: () => attempted.modelId,
+        attemptedConfiguredModel: () => attempted.configuredModel,
+        respondingConfiguredModel: () => responder.configuredModel,
+        failedAttemptUsage: () => attempts.attempts,
+        price: (inputTokens, outputTokens) => ({
+          kind: "priced",
+          costUsd: (inputTokens + outputTokens) / 1_000_000,
+          source: "table",
+        }),
+      }),
+      budgets: {
+        open: async () => {},
+        reserve: async ({ reservationId, amounts }) => {
+          const amount = amounts.tokens ?? 0;
+          if (consumed + amount > 1_500) return { outcome: "exhausted", key: "tokens" };
+          reservations.set(reservationId, amount);
+          return { outcome: "allowed" };
+        },
+        settle: async ({ reservationId, amounts, consumeReservation }) => {
+          settledAmounts.push(amounts);
+          consumed +=
+            amounts.tokens ??
+            (consumeReservation === true ? (reservations.get(reservationId) ?? 0) : 0);
+          return { outcome: "allowed" };
+        },
+      },
+    });
+
+    await expect(port.invoke(request())).rejects.toMatchObject({ reason: "budget_exhausted" });
+    expect(consumed).toBe(940);
+    expect(settledAmounts).toEqual([{ tokens: 940, costMicros: 940 }]);
+    expect(backupCall).not.toHaveBeenCalled();
+  });
+
+  it("keeps an unknown post-admission failure charged instead of resetting the fallback budget", async () => {
+    const primary = new MockLanguageModelV4({
+      doStream: async () => {
+        throw new Error("accepted request lost its response");
+      },
+    });
+    const backupCall = vi.fn();
+    const backup = new MockLanguageModelV4({ doStream: backupCall });
+    const attemptBudget: FallbackAttemptBudgetRef = {};
+    const attempts: FallbackAttemptUsageRef = { attempts: [] };
+    const fallback = new FallbackModel(
+      [primary, backup],
+      undefined,
+      {},
+      undefined,
+      ["primary", "backup"],
+      {},
+      [
+        { connection: "primary", modelId: "primary" },
+        { connection: "backup", modelId: "backup" },
+      ],
+      attempts,
+      attemptBudget
+    );
+    const reservations = new Map<string, number>();
+    let consumed = 0;
+    const port = new LlmModelPort({
+      model: async (): Promise<LlmModelResolution> => ({
+        kind: "available",
+        model: fallback as unknown as LanguageModel,
+        routing: {
+          outcome: "raw_model",
+          selector: "balanced",
+          resolution: "raw_model_id",
+          modelId: "primary",
+        },
+        attemptBudget,
+        failedAttemptUsage: () => attempts.attempts,
+        price: TEST_PRICE,
+      }),
+      budgets: {
+        open: async () => {},
+        reserve: async ({ reservationId, amounts }) => {
+          const amount = amounts.tokens ?? 0;
+          if (consumed + amount > 1_500) return { outcome: "exhausted", key: "tokens" };
+          reservations.set(reservationId, amount);
+          return { outcome: "allowed" };
+        },
+        settle: async ({ reservationId, amounts, consumeReservation }) => {
+          consumed +=
+            amounts.tokens ??
+            (consumeReservation === true ? (reservations.get(reservationId) ?? 0) : 0);
+          return { outcome: "allowed" };
+        },
+      },
+    });
+
+    await expect(port.invoke(request())).rejects.toMatchObject({ reason: "budget_exhausted" });
+    expect(consumed).toBe(1_026);
+    expect(backupCall).not.toHaveBeenCalled();
+  });
+
+  it("retries a failed durable settlement without replaying or penalizing the provider", async () => {
+    const primaryCall = vi.fn(async () => ({
+      stream: simulateReadableStream<StreamPart>({
+        chunks: [...textParts("t1", ["ok"]), FINISH],
+      }),
+    }));
+    const backupCall = vi.fn();
+    const primary = new MockLanguageModelV4({ doStream: primaryCall });
+    const backup = new MockLanguageModelV4({ doStream: backupCall });
+    const attemptBudget: FallbackAttemptBudgetRef = {};
+    const failed = vi.fn();
+    const succeeded = vi.fn();
+    const fallback = new FallbackModel(
+      [primary, backup],
+      undefined,
+      {},
+      {
+        acquire: async () => ({
+          succeeded,
+          failed,
+          cancelled: vi.fn(),
+          release: vi.fn(),
+        }),
+      },
+      ["primary", "backup"],
+      {},
+      [
+        { connection: "primary", modelId: "primary" },
+        { connection: "backup", modelId: "backup" },
+      ],
+      { attempts: [] },
+      attemptBudget
+    );
+    const settle = vi
+      .fn()
+      .mockRejectedValueOnce(new Error("budget transaction rolled back"))
+      .mockResolvedValueOnce({ outcome: "allowed" });
+    const port = new LlmModelPort({
+      model: async (): Promise<LlmModelResolution> => ({
+        kind: "available",
+        model: fallback as unknown as LanguageModel,
+        routing: {
+          outcome: "raw_model",
+          selector: "balanced",
+          resolution: "raw_model_id",
+          modelId: "primary",
+        },
+        attemptBudget,
+        price: TEST_PRICE,
+      }),
+      budgets: {
+        open: async () => {},
+        reserve: async () => ({ outcome: "allowed" }),
+        settle,
+      },
+    });
+
+    await expect(port.invoke(request())).resolves.toMatchObject({
+      output: { kind: "text", text: "ok" },
+      budgetSettled: true,
+    });
+    expect(settle).toHaveBeenCalledTimes(2);
+    expect(primaryCall).toHaveBeenCalledTimes(1);
+    expect(backupCall).not.toHaveBeenCalled();
+    expect(succeeded).toHaveBeenCalledOnce();
+    expect(failed).not.toHaveBeenCalled();
+  });
+
+  it("releases the provider and fails visibly when both settlement attempts fail", async () => {
+    const primaryCall = vi.fn(async () => ({
+      stream: simulateReadableStream<StreamPart>({
+        chunks: [...textParts("t1", ["ok"]), FINISH],
+      }),
+    }));
+    const backupCall = vi.fn();
+    const primary = new MockLanguageModelV4({ doStream: primaryCall });
+    const backup = new MockLanguageModelV4({ doStream: backupCall });
+    const attemptBudget: FallbackAttemptBudgetRef = {};
+    const failed = vi.fn();
+    const succeeded = vi.fn();
+    const released = vi.fn();
+    const fallback = new FallbackModel(
+      [primary, backup],
+      undefined,
+      {},
+      {
+        acquire: async () => ({
+          succeeded,
+          failed,
+          cancelled: vi.fn(),
+          release: released,
+        }),
+      },
+      ["primary", "backup"],
+      {},
+      [
+        { connection: "primary", modelId: "primary" },
+        { connection: "backup", modelId: "backup" },
+      ],
+      { attempts: [] },
+      attemptBudget
+    );
+    const settle = vi.fn(async () => {
+      throw new Error("budget transaction unavailable");
+    });
+    const port = new LlmModelPort({
+      model: async (): Promise<LlmModelResolution> => ({
+        kind: "available",
+        model: fallback as unknown as LanguageModel,
+        routing: {
+          outcome: "raw_model",
+          selector: "balanced",
+          resolution: "raw_model_id",
+          modelId: "primary",
+        },
+        attemptBudget,
+        price: TEST_PRICE,
+      }),
+      budgets: {
+        open: async () => {},
+        reserve: async () => ({ outcome: "allowed" }),
+        settle,
+      },
+    });
+
+    await expect(port.invoke(request())).rejects.toMatchObject({ reason: "model_error" });
+    expect(settle).toHaveBeenCalledTimes(2);
+    expect(primaryCall).toHaveBeenCalledOnce();
+    expect(backupCall).not.toHaveBeenCalled();
+    expect(succeeded).toHaveBeenCalledOnce();
+    expect(failed).not.toHaveBeenCalled();
+    expect(released).toHaveBeenCalledOnce();
+  });
+
+  it("conservatively settles an existing reservation instead of replaying an uncertain provider", async () => {
+    const provider = vi.fn();
+    const attemptBudget: FallbackAttemptBudgetRef = {};
+    const fallback = new FallbackModel(
+      [new MockLanguageModelV4({ doStream: provider })],
+      undefined,
+      {},
+      undefined,
+      ["primary"],
+      {},
+      [{ connection: "primary", modelId: "primary" }],
+      { attempts: [] },
+      attemptBudget
+    );
+    const settle = vi.fn(async () => ({ outcome: "allowed" as const }));
+    const port = new LlmModelPort({
+      model: async (): Promise<LlmModelResolution> => ({
+        kind: "available",
+        model: fallback as unknown as LanguageModel,
+        routing: {
+          outcome: "raw_model",
+          selector: "balanced",
+          resolution: "raw_model_id",
+          modelId: "primary",
+        },
+        attemptBudget,
+        price: TEST_PRICE,
+      }),
+      budgets: {
+        open: async () => {},
+        reserve: async () => ({ outcome: "duplicate" }),
+        settle,
+      },
+    });
+
+    await expect(port.invoke(request())).rejects.toMatchObject({ reason: "budget_exhausted" });
+    expect(settle).toHaveBeenCalledWith({
+      reservationId: "request-1:provider:0",
+      amounts: {},
+      consumeReservation: true,
+    });
+    expect(provider).not.toHaveBeenCalled();
+  });
+
+  it("treats reservation-store failure as terminal before any provider dispatch", async () => {
+    const primaryCall = vi.fn();
+    const backupCall = vi.fn();
+    const failed = vi.fn();
+    const cancelled = vi.fn();
+    const acquire = vi.fn(async () => ({
+      succeeded: vi.fn(),
+      failed,
+      cancelled,
+      release: vi.fn(),
+    }));
+    const attemptBudget: FallbackAttemptBudgetRef = {};
+    const fallback = new FallbackModel(
+      [
+        new MockLanguageModelV4({ doStream: primaryCall }),
+        new MockLanguageModelV4({ doStream: backupCall }),
+      ],
+      undefined,
+      {},
+      { acquire },
+      ["primary", "backup"],
+      {},
+      [
+        { connection: "primary", modelId: "primary" },
+        { connection: "backup", modelId: "backup" },
+      ],
+      { attempts: [] },
+      attemptBudget
+    );
+    const port = new LlmModelPort({
+      model: async (): Promise<LlmModelResolution> => ({
+        kind: "available",
+        model: fallback as unknown as LanguageModel,
+        routing: {
+          outcome: "raw_model",
+          selector: "balanced",
+          resolution: "raw_model_id",
+          modelId: "primary",
+        },
+        attemptBudget,
+        price: TEST_PRICE,
+      }),
+      budgets: {
+        open: async () => {},
+        reserve: async () => {
+          throw new Error("budget database unavailable");
+        },
+        settle: async () => ({ outcome: "allowed" }),
+      },
+    });
+
+    await expect(port.invoke(request())).rejects.toMatchObject({ reason: "model_error" });
+    expect(primaryCall).not.toHaveBeenCalled();
+    expect(backupCall).not.toHaveBeenCalled();
+    expect(acquire).toHaveBeenCalledOnce();
+    expect(failed).not.toHaveBeenCalled();
+    expect(cancelled).toHaveBeenCalledOnce();
+  });
+
+  it("settles each attempted provider once without charging the aggregate fallback usage again", async () => {
+    const primary = new MockLanguageModelV4({
+      doStream: async () => ({
+        stream: simulateReadableStream<StreamPart>({
+          chunks: [
+            {
+              type: "finish",
+              finishReason: { unified: "error", raw: "provider_error" },
+              usage: {
+                inputTokens: { total: 17, noCache: 17, cacheRead: 0, cacheWrite: 0 },
+                outputTokens: { total: 3, text: 3, reasoning: 0 },
+              },
+            },
+            { type: "error", error: new Error("primary failed") },
+          ],
+        }),
+      }),
+    });
+    const backup = new MockLanguageModelV4({
+      doStream: async () => ({
+        stream: simulateReadableStream<StreamPart>({
+          chunks: [...textParts("t1", ["ok"]), FINISH],
+        }),
+      }),
+    });
+    const attemptBudget: FallbackAttemptBudgetRef = {};
+    const attemptUsage: FallbackAttemptUsageRef = { attempts: [] };
+    const responder: ModelResponderRef = {};
+    const attempted: ModelAttemptRef = {};
+    const fallback = new FallbackModel(
+      [primary, backup],
+      undefined,
+      responder,
+      undefined,
+      ["primary", "backup"],
+      attempted,
+      [
+        { connection: "primary", modelId: "primary" },
+        { connection: "backup", modelId: "backup" },
+      ],
+      attemptUsage,
+      attemptBudget
+    );
+    const settlements: Readonly<Record<string, number>>[] = [];
+    const port = new LlmModelPort({
+      model: async (): Promise<LlmModelResolution> => ({
+        kind: "available",
+        model: fallback as unknown as LanguageModel,
+        routing: {
+          outcome: "raw_model",
+          selector: "balanced",
+          resolution: "raw_model_id",
+          modelId: "primary",
+        },
+        attemptBudget,
+        attemptedModelId: () => attempted.modelId,
+        attemptedConfiguredModel: () => attempted.configuredModel,
+        respondingConfiguredModel: () => responder.configuredModel,
+        failedAttemptUsage: () => attemptUsage.attempts,
+        price: TEST_PRICE,
+      }),
+      budgets: {
+        open: async () => {},
+        reserve: async () => ({ outcome: "allowed" }),
+        settle: async ({ amounts }) => {
+          settlements.push(amounts);
+          return { outcome: "allowed" };
+        },
+      },
+    });
+
+    const result = await port.invoke(request());
+
+    expect(result.budgetSettled).toBe(true);
+    expect(result.usage).toMatchObject({ inputTokens: 28, outputTokens: 7 });
+    expect(settlements).toEqual([{ tokens: 20 }, { tokens: 15 }]);
   });
 
   /** A selected chain with more than one link, so the head is not necessarily who answers. */
@@ -969,7 +1769,16 @@ describe("LlmModelPort", () => {
       events: { append: async () => {} },
       budget: { consume: async () => ({ outcome: "allowed" }) },
       isCancelled: async () => false,
-      attachments: { read },
+      attachments: {
+        read,
+        inspect: async (mediaType) =>
+          mediaType === "application/pdf"
+            ? {
+                text: "invoice total",
+                visual: { kind: "pdf", pages: [{ width: 1_224, height: 1_584 }] },
+              }
+            : { visual: { kind: "image", width: 1_024, height: 768 } },
+      },
     });
 
     const outcome = await loop.run({
@@ -986,6 +1795,7 @@ describe("LlmModelPort", () => {
           mediaType: "image/png",
           name: "unrelated.png",
           data: new Uint8Array([1, 2, 3]),
+          visual: { kind: "image", width: 1_024, height: 768 },
         },
       ],
       tools: [{ name: "file_read", inputSchema: { type: "object" }, mutating: false }],
@@ -1604,6 +2414,199 @@ describe("LlmModelPort — reporting spend", () => {
       connection: "west",
       usage: { costUsd: 7 },
     });
+  });
+
+  it("records failed and responding fallback attempts under their own provider identities", async () => {
+    const primaryRef = { connection: "anthropic-east", modelId: "primary-model" };
+    const backupRef = { connection: "openai-west", modelId: "backup-model" };
+    const primary = new MockLanguageModelV4({
+      doStream: async () => ({
+        stream: simulateReadableStream<StreamPart>({
+          chunks: [
+            {
+              type: "finish",
+              finishReason: { unified: "error", raw: "provider_error" },
+              usage: {
+                inputTokens: { total: 90, noCache: 90, cacheRead: 0, cacheWrite: 0 },
+                outputTokens: { total: 10, text: 10, reasoning: 0 },
+              },
+            },
+            { type: "error", error: new Error("primary failed") },
+          ],
+        }),
+      }),
+    });
+    const backup = new MockLanguageModelV4({
+      doStream: async () => ({
+        stream: simulateReadableStream<StreamPart>({
+          chunks: [...textParts("t1", ["ok"]), FINISH],
+        }),
+      }),
+    });
+    const responder: ModelResponderRef = {};
+    const attempted: ModelAttemptRef = {};
+    const attemptUsage: FallbackAttemptUsageRef = { attempts: [] };
+    const fallback = new FallbackModel(
+      [primary, backup],
+      undefined,
+      responder,
+      undefined,
+      ["anthropic", "openai"],
+      attempted,
+      [primaryRef, backupRef],
+      attemptUsage
+    );
+    const calls: Parameters<WorkerSpendSink["recordLlmCall"]>[0][] = [];
+    const port = new LlmModelPort({
+      model: async (): Promise<LlmModelResolution> => ({
+        kind: "available",
+        model: fallback as unknown as LanguageModel,
+        routing: {
+          outcome: "selected",
+          selector: "balanced",
+          resolution: "profile_ref",
+          profileId: "primary",
+          chain: [
+            { profileId: "primary", ...primaryRef },
+            { profileId: "backup", ...backupRef },
+          ],
+          cacheAllowed: false,
+          rejectedFallbacks: [],
+        },
+        provider: "anthropic",
+        selectedConfiguredModel: primaryRef,
+        attemptedConfiguredModel: () => attempted.configuredModel,
+        respondingConfiguredModel: () => responder.configuredModel,
+        respondingAttemptId: () => responder.attemptId,
+        attemptedModelId: () => attempted.modelId,
+        failedAttemptUsage: () => attemptUsage.attempts,
+        providerForModel: (model) =>
+          typeof model === "string" || model?.connection === "anthropic-east"
+            ? "anthropic"
+            : "openai",
+        price: (_input, _output, model) => ({
+          kind: "priced",
+          costUsd: model?.connection === "anthropic-east" ? 2 : 1,
+          source: "table",
+        }),
+      }),
+      spend: {
+        recordLlmCall: (record) => calls.push(record),
+        recordTurn: () => undefined,
+      },
+    });
+
+    const result = await port.invoke(request());
+
+    expect(result.usage.costUsd).toBe(3);
+    expect(calls).toEqual([
+      expect.objectContaining({
+        requestId: "request-1:attempt:0",
+        status: "error",
+        provider: "anthropic",
+        connection: "anthropic-east",
+        model: "primary-model",
+        usage: expect.objectContaining({ inputTokens: 90, outputTokens: 10, costUsd: 2 }),
+      }),
+      expect.objectContaining({
+        requestId: "request-1:attempt:1",
+        status: "fallback",
+        provider: "openai",
+        connection: "openai-west",
+        model: "backup-model",
+        usage: expect.objectContaining({ costUsd: 1 }),
+      }),
+    ]);
+  });
+
+  it("records a committed fallback responder even when its usage remains unknown", async () => {
+    const primaryRef = { connection: "anthropic-east", modelId: "primary-model" };
+    const backupRef = { connection: "openai-west", modelId: "backup-model" };
+    const primary = new MockLanguageModelV4({
+      doStream: async () => {
+        throw new Error("primary failed before output");
+      },
+    });
+    const backup = new MockLanguageModelV4({
+      doStream: async () => ({
+        stream: simulateReadableStream<StreamPart>({
+          chunks: [
+            { type: "text-start", id: "1" },
+            { type: "text-delta", id: "1", delta: "partial" },
+            { type: "error", error: new Error("fallback lost usage") },
+          ],
+        }),
+      }),
+    });
+    const responder: ModelResponderRef = {};
+    const attempted: ModelAttemptRef = {};
+    const attemptUsage: FallbackAttemptUsageRef = { attempts: [] };
+    const fallback = new FallbackModel(
+      [primary, backup],
+      undefined,
+      responder,
+      undefined,
+      ["anthropic", "openai"],
+      attempted,
+      [primaryRef, backupRef],
+      attemptUsage
+    );
+    const calls: Parameters<WorkerSpendSink["recordLlmCall"]>[0][] = [];
+    const port = new LlmModelPort({
+      model: async (): Promise<LlmModelResolution> => ({
+        kind: "available",
+        model: fallback as unknown as LanguageModel,
+        routing: {
+          outcome: "selected",
+          selector: "balanced",
+          resolution: "profile_ref",
+          profileId: "primary",
+          chain: [
+            { profileId: "primary", ...primaryRef },
+            { profileId: "backup", ...backupRef },
+          ],
+          cacheAllowed: false,
+          rejectedFallbacks: [],
+        },
+        provider: "anthropic",
+        selectedConfiguredModel: primaryRef,
+        attemptedConfiguredModel: () => attempted.configuredModel,
+        respondingConfiguredModel: () => responder.configuredModel,
+        respondingAttemptId: () => responder.attemptId,
+        attemptedModelId: () => attempted.modelId,
+        failedAttemptUsage: () => attemptUsage.attempts,
+        providerForModel: (model) =>
+          typeof model === "string" || model?.connection === "anthropic-east"
+            ? "anthropic"
+            : "openai",
+        price: TEST_PRICE,
+      }),
+      spend: {
+        recordLlmCall: (record) => calls.push(record),
+        recordTurn: () => undefined,
+      },
+    });
+
+    await expect(port.invoke(request())).rejects.toBeDefined();
+
+    expect(calls).toEqual([
+      expect.objectContaining({
+        requestId: "request-1:attempt:0",
+        status: "error",
+        provider: "anthropic",
+        connection: "anthropic-east",
+        model: "primary-model",
+      }),
+      expect.objectContaining({
+        requestId: "request-1:attempt:1",
+        status: "error",
+        provider: "openai",
+        connection: "openai-west",
+        model: "backup-model",
+      }),
+    ]);
+    expect(calls[0]).not.toHaveProperty("usage");
+    expect(calls[1]).not.toHaveProperty("usage");
   });
 
   it("attributes a Routine Run's call to its Run, which carries no conversation", async () => {

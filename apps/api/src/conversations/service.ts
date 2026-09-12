@@ -26,6 +26,18 @@ export interface PersistedMessage {
   readonly createdAt: Date;
 }
 
+export type AssistantAttemptStatus =
+  | "succeeded"
+  | "failed"
+  | "cancelled"
+  | "superseded"
+  | "incomplete";
+
+export interface ContextMessage extends PersistedMessage {
+  /** Model-facing status for assistant attempt evidence; never changes the persisted Message. */
+  readonly attemptStatus?: AssistantAttemptStatus;
+}
+
 export type TurnCompletionStatus = Extract<TurnStatus, "succeeded" | "failed">;
 export type TurnPersistenceStatus = "recorded" | "replayed" | "stale" | "ownership_lost";
 
@@ -105,6 +117,12 @@ export interface ConversationStore {
     conversationId: string,
     throughRequestMessageId?: string
   ): Promise<readonly PersistedMessage[]>;
+  listContextMessages(
+    businessId: string,
+    conversationId: string,
+    throughRequestMessageId?: string,
+    afterMessageId?: string
+  ): Promise<readonly ContextMessage[]>;
   findCompletion(
     businessId: string,
     turnId: string,

@@ -179,6 +179,13 @@ class FakeConversationStore implements ConversationStore {
     const cutoff = messages.findIndex((message) => message.id === throughRequestMessageId);
     return cutoff < 0 ? [] : messages.slice(0, cutoff + 1);
   }
+  async listContextMessages(
+    businessId: string,
+    conversationId: string,
+    throughRequestMessageId?: string
+  ) {
+    return this.listMessages(businessId, conversationId, throughRequestMessageId);
+  }
   async findCompletion(_b: string, turnId: string, attempt: number) {
     return this.completions.find(
       (completion) => completion.turnId === turnId && completion.attempt === attempt

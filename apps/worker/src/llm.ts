@@ -2,6 +2,9 @@ import type { ModelProfileCatalog, ModelRequirements } from "@tulipfarm/agent-ru
 import { selectModelProfile } from "@tulipfarm/agent-runtime";
 import type {
   CostBasis,
+  FallbackAttemptBudgetRef,
+  FallbackAttemptUsage,
+  FallbackAttemptUsageRef,
   FallbackCallGate,
   ModelAttemptRef,
   ModelPrice,
@@ -73,6 +76,12 @@ export type LlmModelResolution =
       respondingConfiguredModel?(): ConfiguredModelRef | undefined;
       /** The last chain link that a provider call actually entered. */
       attemptedModelId?(): string | undefined;
+      /** Metered usage from links that failed before the fallback chain committed an answer. */
+      failedAttemptUsage?(): readonly FallbackAttemptUsage[];
+      /** Request-scoped hook installed by the Worker to admit each provider attempt separately. */
+      readonly attemptBudget?: FallbackAttemptBudgetRef;
+      /** Sequential provider-attempt id for the link that committed an answer. */
+      respondingAttemptId?(): number | undefined;
       /**
        * Prices this call against an explicit attempted link, or the link that answered.
        *
@@ -80,6 +89,8 @@ export type LlmModelResolution =
        * it because the responder is known after commitment.
        */
       price(tokensIn: number, tokensOut: number, configuredModel?: ConfiguredModelRef): CostBasis;
+      /** Conservative price for every fallback link that could be attempted by one logical call. */
+      reservationPrice?(tokensIn: number, tokensOut: number): CostBasis;
     }
   | {
       readonly kind: "denied";
@@ -167,6 +178,20 @@ export class SoulLlm {
     });
   }
 
+  private reservationPrice(
+    models: readonly ModelIdentity[],
+    tokensIn: number,
+    tokensOut: number
+  ): CostBasis {
+    let costUsd = 0;
+    for (const model of models) {
+      const cost = this.priceFor(model, tokensIn, tokensOut);
+      if (cost.kind === "unpriced") return cost;
+      if (cost.kind === "priced") costUsd += cost.costUsd;
+    }
+    return costUsd === 0 ? { kind: "subscription" } : { kind: "priced", costUsd, source: "table" };
+  }
+
   /** Resolves selectors to the full selected chain; raw model ids bypass profile checks. */
   async model(
     selector: string,
@@ -199,13 +224,32 @@ export class SoulLlm {
    */
   async resolveChain(
     modelIds: readonly ModelIdentity[],
-    routing: ModelRoutingPayload,
+    routing: Extract<ModelRoutingPayload, { readonly outcome: "selected" }>,
     principal?: PrincipalRef,
-    gate?: FallbackCallGate
+    gate?: FallbackCallGate,
+    budgetLimits?: ResolvedLimits
   ): Promise<LlmModelResolution> {
     await this.sync();
+    if (budgetLimits?.costMicros !== undefined) {
+      const unpriceable = this.unpriceableLink(modelIds);
+      if (unpriceable !== undefined) {
+        return {
+          kind: "denied",
+          routing: {
+            outcome: "denied",
+            selector: routing.selector,
+            resolution: routing.resolution,
+            profileId: routing.profileId,
+            reason: "cost_unpriceable",
+            attempts: [{ profileId: routing.profileId, reason: "cost_unpriceable" }],
+          },
+        };
+      }
+    }
     const responder: ModelResponderRef = {};
     const attempted: ModelAttemptRef = {};
+    const attemptUsage: FallbackAttemptUsageRef = { attempts: [] };
+    const attemptBudget: FallbackAttemptBudgetRef = {};
     const selectedConfiguredModel = this.configuredIdentity(modelIds[0]);
     return {
       kind: "available",
@@ -215,7 +259,9 @@ export class SoulLlm {
         undefined,
         responder,
         gate,
-        attempted
+        attempted,
+        attemptUsage,
+        attemptBudget
       ),
       ...(this.providerOf(modelIds[0]) === undefined
         ? {}
@@ -223,8 +269,12 @@ export class SoulLlm {
       providerForModel: (model) =>
         this.providerOf(typeof model === "string" ? (attempted.configuredModel ?? model) : model),
       ...(selectedConfiguredModel === undefined ? {} : { selectedConfiguredModel }),
+      ...(budgetLimits === undefined ? {} : { budgetLimits }),
       routing,
       attemptedModelId: () => attempted.modelId,
+      failedAttemptUsage: () => attemptUsage.attempts,
+      attemptBudget,
+      respondingAttemptId: () => responder.attemptId,
       attemptedConfiguredModel: () => attempted.configuredModel,
       respondingConfiguredModel: () => responder.configuredModel,
       price: (tokensIn, tokensOut, configuredModel) =>
@@ -233,6 +283,8 @@ export class SoulLlm {
           tokensIn,
           tokensOut
         ),
+      reservationPrice: (tokensIn, tokensOut) =>
+        this.reservationPrice(modelIds, tokensIn, tokensOut),
     };
   }
 
@@ -249,6 +301,8 @@ export class SoulLlm {
     if (resolved.kind === "raw_model") {
       const responder: ModelResponderRef = {};
       const attempted: ModelAttemptRef = {};
+      const attemptUsage: FallbackAttemptUsageRef = { attempts: [] };
+      const attemptBudget: FallbackAttemptBudgetRef = {};
       const selectedConfiguredModel = this.configuredIdentity(resolved.modelId);
       return {
         kind: "available",
@@ -258,7 +312,9 @@ export class SoulLlm {
           undefined,
           responder,
           gate,
-          attempted
+          attempted,
+          attemptUsage,
+          attemptBudget
         ),
         ...(this.providerOf(resolved.modelId) === undefined
           ? {}
@@ -272,6 +328,9 @@ export class SoulLlm {
           modelId: resolved.modelId,
         },
         attemptedModelId: () => attempted.modelId,
+        failedAttemptUsage: () => attemptUsage.attempts,
+        attemptBudget,
+        respondingAttemptId: () => responder.attemptId,
         attemptedConfiguredModel: () => attempted.configuredModel,
         respondingConfiguredModel: () => responder.configuredModel,
         // A raw model id names exactly one model; nothing else could answer.
@@ -281,6 +340,8 @@ export class SoulLlm {
             tokensIn,
             tokensOut
           ),
+        reservationPrice: (tokensIn, tokensOut) =>
+          this.reservationPrice([resolved.modelId], tokensIn, tokensOut),
       };
     }
 
@@ -348,6 +409,8 @@ export class SoulLlm {
 
     const responder: ModelResponderRef = {};
     const attempted: ModelAttemptRef = {};
+    const attemptUsage: FallbackAttemptUsageRef = { attempts: [] };
+    const attemptBudget: FallbackAttemptBudgetRef = {};
 
     return {
       kind: "available",
@@ -357,7 +420,9 @@ export class SoulLlm {
         undefined,
         responder,
         gate,
-        attempted
+        attempted,
+        attemptUsage,
+        attemptBudget
       ),
       ...(this.providerOf(chain[0]) === undefined ? {} : { provider: this.providerOf(chain[0]) }),
       providerForModel: (model) =>
@@ -372,6 +437,7 @@ export class SoulLlm {
           tokensIn,
           tokensOut
         ),
+      reservationPrice: (tokensIn, tokensOut) => this.reservationPrice(chain, tokensIn, tokensOut),
       routing: {
         outcome: "selected",
         selector,
@@ -388,6 +454,9 @@ export class SoulLlm {
         ...evidence,
       },
       attemptedModelId: () => attempted.modelId,
+      failedAttemptUsage: () => attemptUsage.attempts,
+      attemptBudget,
+      respondingAttemptId: () => responder.attemptId,
       attemptedConfiguredModel: () => attempted.configuredModel,
       respondingConfiguredModel: () => responder.configuredModel,
     };

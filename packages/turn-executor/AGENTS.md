@@ -40,8 +40,8 @@ Run event emission, Tool-call announcement or preview, or the ports a Turn host 
 - **`model` is injected as `ModelPort | ((input) => ModelPort)`.** The factory form is what lets a
   host bind a different model per Turn; the eval harness relies on it.
 - **The input guard screens an attachment's text, not just its name.** `TurnAttachmentPort` carries
-  both `read` and `extract` so a host cannot supply Files without also supplying the means to screen
-  them; `run()` therefore resolves attachments *before* `guardInput`, at no vendor cost. Text is
+  `read`, `extract`, and content inspection so a host supplies both guard text and image/PDF
+  dimensions for model accounting; `run()` resolves attachments *before* `guardInput`. Text is
   extracted as the type the Context authorized, never as what the bytes claim. Both the name and the
   extracted text are **block-only** — a redaction cannot be applied to bytes already on their way to
   the model, and rewriting a name would change which File the part refers to. `read` keeps a

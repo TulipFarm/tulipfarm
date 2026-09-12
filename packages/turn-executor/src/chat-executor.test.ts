@@ -1,4 +1,5 @@
 import {
+  type ContextCompactorPort,
   DEFAULT_GUARDRAILS,
   type ModelInvocationRequest,
   type ModelInvocationResult,
@@ -12,7 +13,7 @@ import type { BudgetConsumeResult, PersistedRun, PersistedState } from "@tulipfa
 import { describe, expect, it, vi } from "vitest";
 import { type ChatExecutorHost, createChatExecutor } from "./chat-executor";
 import type { TurnCompletionRecord, TurnCompletionStore } from "./conversation-turn";
-import type { ResolvedTurnContext, TurnContextPort } from "./driver";
+import type { ResolvedTurnContext, TurnAttachmentPort, TurnContextPort } from "./driver";
 import type { RunOutcomeStatus } from "./ports";
 import type { RunEventAppendPort } from "./run-events";
 
@@ -83,7 +84,18 @@ function harness(
     answer?: string;
     run?: PersistedRun;
     contextError?: Error;
+    context?: ResolvedTurnContext;
+    contextCompactor?: ContextCompactorPort;
+    contextSummaries?: {
+      save(input: {
+        businessId: string;
+        conversationId: string;
+        throughMessageId: string;
+        summary: string;
+      }): Promise<void>;
+    };
     model?: ModelPort;
+    attachments?: TurnAttachmentPort;
     append?: RunEventAppendPort["append"];
   } = {}
 ): { execute: (signal?: AbortSignal) => Promise<RunOutcomeStatus>; recorded: Recorded } {
@@ -126,7 +138,7 @@ function harness(
     resolve: async () => {
       contexts += 1;
       if (over.contextError !== undefined) throw over.contextError;
-      return CONTEXT;
+      return over.context ?? CONTEXT;
     },
   };
 
@@ -160,6 +172,9 @@ function harness(
     },
     waits: { register: async () => ({ waitId: "wait-1" }) },
     model: over.model ?? model,
+    ...(over.attachments === undefined ? {} : { attachments: over.attachments }),
+    ...(over.contextCompactor === undefined ? {} : { contextCompactor: over.contextCompactor }),
+    ...(over.contextSummaries === undefined ? {} : { contextSummaries: over.contextSummaries }),
     log: { warn: () => {} },
     now: () => new Date("2026-01-01T00:00:00.000Z"),
   });
@@ -180,6 +195,74 @@ function harness(
 }
 
 describe("createChatExecutor", () => {
+  it("carries extracted PDF text and page dimensions into the model request", async () => {
+    const requests: ModelInvocationRequest[] = [];
+    const model: ModelPort = {
+      invoke: async (request) => {
+        requests.push(request);
+        return {
+          requestId: request.requestId,
+          output: { kind: "text", text: "done" },
+          usage: { inputTokens: 10, outputTokens: 2 },
+        };
+      },
+    };
+    const { execute } = harness({
+      context: {
+        ...CONTEXT,
+        attachments: [{ fileId: "pdf-1", mediaType: "application/pdf", name: "contract.pdf" }],
+      },
+      attachments: {
+        read: async () => new Uint8Array([1, 2, 3]),
+        extract: async () => "legacy text",
+        inspect: async () => ({
+          text: "extracted contract",
+          visual: { kind: "pdf", pages: [{ width: 1_224, height: 1_584 }] },
+        }),
+      },
+      model,
+    });
+
+    await expect(execute()).resolves.toBe("succeeded");
+    expect(requests[0]?.attachments).toEqual([
+      {
+        fileId: "pdf-1",
+        mediaType: "application/pdf",
+        name: "contract.pdf",
+        data: new Uint8Array([1, 2, 3]),
+        text: "extracted contract",
+        visual: { kind: "pdf", pages: [{ width: 1_224, height: 1_584 }] },
+      },
+    ]);
+  });
+
+  it("persists a safe Context summary with the durable Message cursor", async () => {
+    const save = vi.fn().mockResolvedValue(undefined);
+    const { execute } = harness({
+      context: {
+        ...CONTEXT,
+        messages: [
+          { role: "system", content: textContent("trusted instructions") },
+          { role: "user", content: textContent(`old request ${"x".repeat(6_000)}`) },
+          { role: "user", content: textContent("current request") },
+        ],
+        pinnedMessageCount: 1,
+        contextTokenBudget: 1_300,
+        contextMessageIds: [null, "message-old", "message-current"],
+      },
+      contextCompactor: { compact: async () => "The older request established ticket T-42." },
+      contextSummaries: { save },
+    });
+
+    await expect(execute()).resolves.toBe("succeeded");
+    expect(save).toHaveBeenCalledWith({
+      businessId: "business-1",
+      conversationId: "conv-1",
+      throughMessageId: "message-old",
+      summary: "The older request established ticket T-42.",
+    });
+  });
+
   it("screens the whole model response before any text reaches participant events", async () => {
     const answer = "The card is 4111 1111 1111 1111.";
     const { execute, recorded } = harness({

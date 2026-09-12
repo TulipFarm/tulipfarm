@@ -18,6 +18,7 @@ that is `agent-runtime` and `turn-executor`.
 | `src/untrusted.ts` | `UNTRUSTED_PREAMBLE` and `untrusted()` — nonce-fenced blocks for hostile input |
 | `src/registry.ts` | `BUILT_IN_AGENTS`, the list the fitness test iterates |
 | `src/agents/tool-result-distiller/` | Compresses an oversized Tool result; `grounding.ts` validates citations against the sent bytes |
+| `src/agents/context-compactor/` | Summarises older model-facing Conversation and Tool activity without changing durable Chat history |
 | `src/agents/effort-classifier/` | Resolves `auto` effort to a rung |
 | `src/agents/chat-title/` | Names a Conversation from its first Turn; `sanitize.ts` is the pure fallback path |
 | `src/agents/skill-audit/` | Reads a proposed Skill for intent before it may be written |
@@ -31,7 +32,7 @@ the bound it claims is then a diff in two files, not a paragraph nobody re-read.
 ## Rules
 
 - **Every agent is in `BUILT_IN_AGENTS`.** `registry.test.ts` fails the build otherwise, and it is
-  the only thing that keeps bounds and timeouts from being forgotten on a sixth.
+  the only thing that keeps bounds and timeouts from being forgotten on a new agent.
 - **Every untrusted input goes through `untrusted()`.** It fences with a per-call nonce so content
   cannot forge its own closing tag, and it passes bytes through unmodified — the distiller
   validates citations by substring against exactly what it sent, so escaping would break grounding.

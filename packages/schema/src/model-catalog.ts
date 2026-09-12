@@ -26,7 +26,7 @@ export const DEPRECATED_TIER_ALIASES: Readonly<Record<string, EffortPreset>> = {
 const TIER_TO_PRESET: Readonly<Record<string, EffortPreset>> = DEPRECATED_TIER_ALIASES;
 
 /** Conservative default when a spec pins no context window; the smallest window in common use. */
-const FALLBACK_CONTEXT_TOKENS = 8_192;
+export const DEFAULT_MODEL_CONTEXT_WINDOW_TOKENS = 8_192;
 
 export function isEffortPreset(value: string): value is EffortPreset {
   return (EFFORT_PRESETS as readonly string[]).includes(value);
@@ -122,7 +122,7 @@ function profileFrom(
       // Only explicit `false` denies tools; unpinned specs keep legacy tool behavior.
       tools: spec?.supports_function_calling !== false,
       structuredOutput: spec?.supports_function_calling !== false,
-      contextWindowTokens: spec?.max_input_tokens ?? FALLBACK_CONTEXT_TOKENS,
+      contextWindowTokens: spec?.max_input_tokens ?? DEFAULT_MODEL_CONTEXT_WINDOW_TOKENS,
       inputModalities: modalitiesFor(spec),
       outputModalities: ["text"],
     },

@@ -12,6 +12,10 @@ export {
   sanitizeTitle,
 } from "./agents/chat-title";
 export {
+  CONTEXT_COMPACTOR,
+  createContextCompactor,
+} from "./agents/context-compactor";
+export {
   classifierRequirements,
   createEffortClassifier,
   EFFORT_CLASSIFIER,

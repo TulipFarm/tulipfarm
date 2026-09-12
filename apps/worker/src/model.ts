@@ -10,9 +10,18 @@ import type {
   ModelStreamChunk,
   ModelUsage,
 } from "@tulipfarm/agent-runtime";
-import { deriveModelRequirements, ModelInvocationError } from "@tulipfarm/agent-runtime";
+import {
+  deriveModelRequirements,
+  estimateModelUsage,
+  hasUnknownAttachmentEstimate,
+  ModelInvocationError,
+} from "@tulipfarm/agent-runtime";
 import type { PrincipalRef } from "@tulipfarm/llm";
-import { classifyProviderError, decidePromptCache } from "@tulipfarm/llm";
+import {
+  classifyProviderError,
+  decidePromptCache,
+  FallbackBudgetInfrastructureError,
+} from "@tulipfarm/llm";
 import {
   assertModelOutputComplete,
   splitPrompt,
@@ -23,7 +32,7 @@ import {
   UsageAccumulator,
   withCacheBreakpoint,
 } from "@tulipfarm/model-adapter";
-import type { ResolvedLimits } from "@tulipfarm/run-kernel";
+import { type ResolvedLimits, usdToCostMicros } from "@tulipfarm/run-kernel";
 import {
   ajv,
   asEffortPreset,
@@ -88,6 +97,20 @@ export interface LlmModelPortOptions {
   /** Opens write-once Run budgets from the selected ModelProfile before the call spends them. */
   readonly budgets?: {
     open(limits: ResolvedLimits): Promise<void>;
+    reserve?(input: {
+      readonly reservationId: string;
+      readonly amounts: Readonly<Record<string, number>>;
+    }): Promise<
+      | { readonly outcome: "allowed" | "unbounded" | "duplicate" }
+      | { readonly outcome: "exhausted"; readonly key: string }
+    >;
+    settle?(input: {
+      readonly reservationId: string;
+      readonly amounts: Readonly<Record<string, number>>;
+      readonly consumeReservation?: boolean;
+    }): Promise<
+      { readonly outcome: "allowed" } | { readonly outcome: "exhausted"; readonly key: string }
+    >;
   };
   /**
    * Process-wide governance floor, used only when a request carries no policy of its own.
@@ -161,6 +184,12 @@ export class LlmModelPort implements ModelPort, ModelCallReceiptSource {
   }
 
   async *stream(request: ModelInvocationRequest): AsyncIterable<ModelStreamChunk> {
+    if (request.attachments?.some(hasUnknownAttachmentEstimate) === true) {
+      throw new ModelInvocationError(
+        "model_error",
+        new Error("binary attachment token estimate unavailable")
+      );
+    }
     const requirements = deriveModelRequirements(request, request.policy ?? this.options.policy);
     const inference = await this.inferEffort(request, requirements);
     let resolution: LlmModelResolution;
@@ -196,13 +225,273 @@ export class LlmModelPort implements ModelPort, ModelCallReceiptSource {
     }
 
     try {
-      yield* this.streamProvider(request, resolution);
+      yield* this.streamBudgeted(request, resolution);
     } catch (error) {
       // Re-classifying an already-classified failure would read the wrapper rather than the
       // provider's own error and flatten every reason to `model_error`.
       if (error instanceof ModelInvocationError) throw error;
       throw new ModelInvocationError(classifyProviderError(error), error);
     }
+  }
+
+  private async *streamBudgeted(
+    request: ModelInvocationRequest,
+    resolution: Extract<LlmModelResolution, { kind: "available" }>
+  ): AsyncIterable<ModelStreamChunk> {
+    if (
+      resolution.attemptBudget !== undefined &&
+      this.options.budgets?.reserve !== undefined &&
+      this.options.budgets.settle !== undefined
+    ) {
+      const estimated = estimateModelUsage(request);
+      const reserve = this.options.budgets.reserve;
+      resolution.attemptBudget.current = {
+        admit: async ({ attemptId, configuredModel }) => {
+          const amounts: Record<string, number> = {
+            tokens: estimated.inputTokens + estimated.outputTokens,
+          };
+          const price = resolution.price(
+            estimated.inputTokens,
+            estimated.outputTokens,
+            configuredModel
+          );
+          if (price.kind === "priced" && price.costUsd > 0) {
+            amounts.costMicros = usdToCostMicros(price.costUsd);
+          }
+          const reservationId = `${request.requestId}:provider:${attemptId}`;
+          let decision: Awaited<
+            ReturnType<NonNullable<NonNullable<LlmModelPortOptions["budgets"]>["reserve"]>>
+          >;
+          try {
+            decision = await reserve({ reservationId, amounts });
+          } catch (error) {
+            throw new FallbackBudgetInfrastructureError("reserve", error);
+          }
+          if (decision === undefined || decision.outcome === "unbounded") {
+            return { settle: async () => {} };
+          }
+          if (decision.outcome === "exhausted") {
+            throw new ModelInvocationError(
+              "budget_exhausted",
+              new Error(`model budget exhausted:${decision.key}`)
+            );
+          }
+          if (decision.outcome === "duplicate") {
+            await this.settleBudgetDurably(reservationId, undefined, true);
+            throw new ModelInvocationError(
+              "budget_exhausted",
+              new Error("model provider attempt was already admitted")
+            );
+          }
+          let settled = false;
+          let settling: Promise<void> | undefined;
+          return {
+            settle: async (usage) => {
+              if (settled) return;
+              if (settling === undefined) {
+                settling = (async () => {
+                  const settlement = await this.settleBudgetDurably(
+                    reservationId,
+                    usage === undefined
+                      ? undefined
+                      : (() => {
+                          const actualPrice = resolution.price(
+                            usage.inputTokens,
+                            usage.outputTokens,
+                            configuredModel
+                          );
+                          return {
+                            inputTokens: usage.inputTokens,
+                            outputTokens: usage.outputTokens,
+                            ...(actualPrice.kind === "priced"
+                              ? { costUsd: actualPrice.costUsd }
+                              : {}),
+                            costBasis: actualPrice.kind,
+                          };
+                        })(),
+                    usage === undefined
+                  );
+                  settled = true;
+                  if (settlement.outcome === "exhausted") {
+                    throw new ModelInvocationError(
+                      "budget_exhausted",
+                      new Error(`model budget estimate exceeded:${settlement.key}`),
+                      usage,
+                      undefined,
+                      true
+                    );
+                  }
+                })();
+              }
+              try {
+                await settling;
+              } finally {
+                if (!settled) settling = undefined;
+              }
+            },
+          };
+        },
+      };
+      try {
+        for await (const chunk of this.streamProvider(request, resolution)) {
+          if (chunk.kind !== "completed") {
+            yield chunk;
+            continue;
+          }
+          yield { kind: "completed", result: { ...chunk.result, budgetSettled: true } };
+        }
+      } catch (error) {
+        if (error instanceof ModelInvocationError) {
+          throw new ModelInvocationError(
+            error.reason,
+            error.cause,
+            error.usage,
+            error.modelId,
+            true
+          );
+        }
+        throw error;
+      } finally {
+        delete resolution.attemptBudget.current;
+      }
+      return;
+    }
+
+    const reservation = await this.reserveBudget(request, resolution);
+    if (reservation === undefined) {
+      yield* this.streamProvider(request, resolution);
+      return;
+    }
+
+    let settled = false;
+    try {
+      for await (const chunk of this.streamProvider(request, resolution)) {
+        if (chunk.kind !== "completed") {
+          yield chunk;
+          continue;
+        }
+        const settlement = await this.settleBudget(reservation, chunk.result.usage);
+        settled = true;
+        if (settlement.outcome === "exhausted") {
+          throw new ModelInvocationError(
+            "budget_exhausted",
+            new Error(`model budget estimate exceeded:${settlement.key}`),
+            chunk.result.usage,
+            undefined,
+            true
+          );
+        }
+        yield {
+          kind: "completed",
+          result: { ...chunk.result, budgetSettled: true },
+        };
+      }
+    } catch (error) {
+      if (!settled) {
+        const usage = error instanceof ModelInvocationError ? error.usage : undefined;
+        const settlement = await this.settleBudget(
+          reservation,
+          usage,
+          usage === undefined && resolution.attemptedModelId?.() !== undefined
+        );
+        settled = true;
+        if (settlement.outcome === "exhausted") {
+          throw new ModelInvocationError(
+            "budget_exhausted",
+            new Error(`model budget estimate exceeded:${settlement.key}`, { cause: error }),
+            usage,
+            error instanceof ModelInvocationError ? error.modelId : undefined,
+            true
+          );
+        }
+      }
+      if (error instanceof ModelInvocationError) {
+        throw new ModelInvocationError(error.reason, error.cause, error.usage, error.modelId, true);
+      }
+      throw error;
+    } finally {
+      if (!settled) {
+        await this.settleBudget(
+          reservation,
+          undefined,
+          resolution.attemptedModelId?.() !== undefined
+        );
+      }
+    }
+  }
+
+  private async reserveBudget(
+    request: ModelInvocationRequest,
+    resolution: Extract<LlmModelResolution, { kind: "available" }>
+  ): Promise<string | undefined> {
+    const reserve = this.options.budgets?.reserve;
+    const settle = this.options.budgets?.settle;
+    if (reserve === undefined || settle === undefined) return undefined;
+    const estimated = estimateModelUsage(request);
+    const price = resolution.reservationPrice?.(estimated.inputTokens, estimated.outputTokens);
+    const amounts: Record<string, number> = {
+      tokens: estimated.inputTokens + estimated.outputTokens,
+    };
+    if (price?.kind === "priced" && price.costUsd > 0) {
+      amounts.costMicros = usdToCostMicros(price.costUsd);
+    }
+    const reservationId = `${request.requestId}:provider`;
+    const decision = await reserve({ reservationId, amounts });
+    if (decision.outcome === "unbounded") return undefined;
+    if (decision.outcome === "exhausted") {
+      throw new ModelInvocationError(
+        "budget_exhausted",
+        new Error(`model budget exhausted:${decision.key}`)
+      );
+    }
+    if (decision.outcome === "duplicate") {
+      throw new ModelInvocationError(
+        "budget_exhausted",
+        new Error("model request was already admitted")
+      );
+    }
+    return reservationId;
+  }
+
+  private settleBudget(
+    reservationId: string,
+    usage: ModelUsage | undefined,
+    consumeReservation = false
+  ): Promise<
+    { readonly outcome: "allowed" } | { readonly outcome: "exhausted"; readonly key: string }
+  > {
+    const amounts: Record<string, number> = {};
+    if (usage !== undefined) {
+      amounts.tokens = usage.inputTokens + usage.outputTokens;
+      if (usage.costUsd !== undefined && usage.costUsd > 0) {
+        amounts.costMicros = usdToCostMicros(usage.costUsd);
+      }
+    }
+    const settle = this.options.budgets?.settle;
+    if (settle === undefined) throw new Error("budget_reservations_unavailable");
+    return settle({
+      reservationId,
+      amounts,
+      ...(consumeReservation ? { consumeReservation } : {}),
+    });
+  }
+
+  private async settleBudgetDurably(
+    reservationId: string,
+    usage: ModelUsage | undefined,
+    consumeReservation = false
+  ): Promise<
+    { readonly outcome: "allowed" } | { readonly outcome: "exhausted"; readonly key: string }
+  > {
+    let failure: unknown;
+    for (let attempt = 0; attempt < 2; attempt++) {
+      try {
+        return await this.settleBudget(reservationId, usage, consumeReservation);
+      } catch (error) {
+        failure = error;
+      }
+    }
+    throw new FallbackBudgetInfrastructureError("settle", failure);
   }
 
   /** Infer only `auto`, from the latest user message so effort tracks difficulty, not age. */
@@ -330,10 +619,11 @@ export class LlmModelPort implements ModelPort, ModelCallReceiptSource {
       // Whatever the provider consumed before it stopped rides out on the error, so the Run is
       // charged for a failed call instead of being handed it free.
       const attemptedConfiguredModel = resolution.attemptedConfiguredModel?.();
-      const partial = observed.settle((tokensIn, tokensOut) =>
+      const respondingPartial = observed.settle((tokensIn, tokensOut) =>
         resolution.price(tokensIn, tokensOut, attemptedConfiguredModel)
       );
-      this.reportSpend(request, resolution, "error", partial, this.now() - startedAt);
+      const partial = this.withFailedFallbackUsage(respondingPartial, resolution);
+      this.reportSpend(request, resolution, "error", respondingPartial, this.now() - startedAt);
       if (watchdog.expired !== undefined) {
         throw new ModelInvocationError(
           "model_provider_unavailable",
@@ -403,13 +693,14 @@ export class LlmModelPort implements ModelPort, ModelCallReceiptSource {
       );
     }
 
-    const finalUsage: ModelUsage = {
+    const respondingUsage: ModelUsage = {
       inputTokens,
       outputTokens,
       ...tokenDetail(usage),
       ...(cost.kind === "priced" ? { costUsd: cost.costUsd } : {}),
       costBasis: cost.kind,
     };
+    const finalUsage = this.withFailedFallbackUsage(respondingUsage, resolution);
     try {
       assertModelOutputComplete({
         finishReason,
@@ -418,11 +709,11 @@ export class LlmModelPort implements ModelPort, ModelCallReceiptSource {
         modelId: resolution.attemptedModelId?.(),
       });
     } catch (error) {
-      this.reportSpend(request, resolution, "error", finalUsage, finishedAt - startedAt);
+      this.reportSpend(request, resolution, "error", respondingUsage, finishedAt - startedAt);
       throw error;
     }
     this.receipt = receiptFromRouting(resolution.routing, latencyMs) ?? this.receipt;
-    this.reportSpend(request, resolution, "ok", finalUsage, finishedAt - startedAt);
+    this.reportSpend(request, resolution, "ok", respondingUsage, finishedAt - startedAt);
     const output: ModelOutput =
       calls.length > 0
         ? toOutput(calls, text)
@@ -437,6 +728,62 @@ export class LlmModelPort implements ModelPort, ModelCallReceiptSource {
         output,
         usage: finalUsage,
       },
+    };
+  }
+
+  private withFailedFallbackUsage(
+    usage: ModelUsage,
+    resolution: Extract<LlmModelResolution, { kind: "available" }>
+  ): ModelUsage;
+  private withFailedFallbackUsage(
+    usage: ModelUsage | undefined,
+    resolution: Extract<LlmModelResolution, { kind: "available" }>
+  ): ModelUsage | undefined;
+  private withFailedFallbackUsage(
+    usage: ModelUsage | undefined,
+    resolution: Extract<LlmModelResolution, { kind: "available" }>
+  ): ModelUsage | undefined {
+    const attempts = resolution.failedAttemptUsage?.() ?? [];
+    if (attempts.length === 0) return usage;
+
+    let inputTokens = usage?.inputTokens ?? 0;
+    let outputTokens = usage?.outputTokens ?? 0;
+    let pricedCostMicros =
+      usage?.costBasis === "priced" && usage.costUsd !== undefined
+        ? usdToCostMicros(usage.costUsd)
+        : 0;
+    let hasPriced = usage?.costBasis === "priced";
+    let hasUnpriced = usage?.costBasis === "unpriced";
+    let hasKnownUsage = usage !== undefined;
+    for (const attempt of attempts) {
+      if (attempt.inputTokens === undefined && attempt.outputTokens === undefined) continue;
+      hasKnownUsage = true;
+      inputTokens += attempt.inputTokens ?? 0;
+      outputTokens += attempt.outputTokens ?? 0;
+      const cost = resolution.price(
+        attempt.inputTokens ?? 0,
+        attempt.outputTokens ?? 0,
+        attempt.configuredModel
+      );
+      if (cost.kind === "priced") {
+        hasPriced = true;
+        pricedCostMicros += usdToCostMicros(cost.costUsd);
+      } else if (cost.kind === "unpriced") {
+        hasUnpriced = true;
+      }
+    }
+
+    if (!hasKnownUsage) return undefined;
+    return {
+      inputTokens,
+      outputTokens,
+      ...(usage?.cacheReadTokens === undefined ? {} : { cacheReadTokens: usage.cacheReadTokens }),
+      ...(usage?.cacheWriteTokens === undefined
+        ? {}
+        : { cacheWriteTokens: usage.cacheWriteTokens }),
+      ...(usage?.reasoningTokens === undefined ? {} : { reasoningTokens: usage.reasoningTokens }),
+      ...(hasUnpriced ? {} : hasPriced ? { costUsd: pricedCostMicros / 1_000_000 } : {}),
+      costBasis: hasUnpriced ? "unpriced" : hasPriced ? "priced" : "subscription",
     };
   }
 
@@ -455,6 +802,50 @@ export class LlmModelPort implements ModelPort, ModelCallReceiptSource {
     durationMs: number
   ): void {
     if (this.options.spend === undefined) return;
+    const attempts = resolution.failedAttemptUsage?.() ?? [];
+    for (const attempt of attempts) {
+      const inputTokens = attempt.inputTokens ?? 0;
+      const outputTokens = attempt.outputTokens ?? 0;
+      const cost = resolution.price(inputTokens, outputTokens, attempt.configuredModel);
+      const attemptUsage =
+        attempt.inputTokens === undefined && attempt.outputTokens === undefined
+          ? undefined
+          : {
+              inputTokens,
+              outputTokens,
+              ...(cost.kind === "priced" ? { costUsd: cost.costUsd } : {}),
+              costBasis: cost.kind,
+            };
+      this.options.spend.recordLlmCall({
+        requestId: `${request.requestId}:attempt:${attempt.attemptId}`,
+        status: "error",
+        durationMs: attempt.durationMs,
+        ...(attemptUsage === undefined ? {} : { usage: attemptUsage }),
+        ...(this.options.conversationId === undefined
+          ? {}
+          : { conversationId: this.options.conversationId }),
+        ...(this.options.runId === undefined ? {} : { runId: this.options.runId }),
+        ...(this.options.turnId === undefined ? {} : { turnId: this.options.turnId }),
+        ...(request.agentId === undefined ? {} : { agentId: request.agentId }),
+        model: attempt.configuredModel?.modelId ?? attempt.modelId,
+        ...(resolution.providerForModel?.(attempt.configuredModel ?? attempt.modelId) === undefined
+          ? {}
+          : {
+              provider: resolution.providerForModel?.(attempt.configuredModel ?? attempt.modelId),
+            }),
+        ...(attempt.configuredModel === undefined
+          ? {}
+          : { connection: attempt.configuredModel.connection }),
+        ...(request.principal === undefined ? {} : { principal: request.principal }),
+      });
+    }
+    if (
+      usage === undefined &&
+      attempts.length > 0 &&
+      resolution.respondingAttemptId?.() === undefined
+    ) {
+      return;
+    }
     const selectedModel = routedModelId(resolution.routing);
     const configuredModel =
       status === "ok"
@@ -475,9 +866,15 @@ export class LlmModelPort implements ModelPort, ModelCallReceiptSource {
           configuredModelKey(resolution.selectedConfiguredModel)
         : servedModel !== selectedModel);
     this.options.spend.recordLlmCall({
-      requestId: request.requestId,
+      requestId:
+        attempts.length === 0 || resolution.respondingAttemptId?.() === undefined
+          ? request.requestId
+          : `${request.requestId}:attempt:${resolution.respondingAttemptId?.()}`,
       status: usedFallback ? "fallback" : status,
-      durationMs: Math.max(0, Math.round(durationMs)),
+      durationMs: Math.max(
+        0,
+        Math.round(durationMs) - attempts.reduce((total, attempt) => total + attempt.durationMs, 0)
+      ),
       ...(usage === undefined ? {} : { usage }),
       ...(this.options.conversationId === undefined
         ? {}

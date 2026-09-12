@@ -38,6 +38,7 @@ const EXPECTATION_FIELDS: Record<string, readonly [string, FieldType][]> = {
     ["part", ["file", "image"]],
   ],
   provider_prompt_omits_file: [["fileId", "string"]],
+  model_prompt_contains: [["text", "string"]],
   tool_called: [["name", "string"]],
   tool_not_called: [["name", "string"]],
   tool_call_order: [["names", "strings"]],

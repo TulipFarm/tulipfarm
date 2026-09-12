@@ -45,6 +45,8 @@ export interface RunDispatcherOptions {
   onWaiting?: (run: PersistedRun) => Promise<void>;
   now: () => Date;
   leaseDurationMs?: number;
+  /** Stops renewing one claimed execution so the normal reclaim path can resume it. */
+  maxLifetimeMs?: number;
   batchSize?: number;
 }
 
@@ -303,6 +305,7 @@ export class RunDispatcher {
     let leaseLost = false;
     let timer: ReturnType<typeof setTimeout> | undefined;
     let heartbeat: Promise<void> | undefined;
+    let lifetimeTimer: ReturnType<typeof setTimeout> | undefined;
     let resolveLeaseLost: (() => void) | undefined;
     let onDrain: (() => void) | undefined;
     const lost = new Promise<{ readonly kind: "lease_lost" }>((resolve) => {
@@ -314,6 +317,7 @@ export class RunDispatcher {
     };
     const stopOwnership = () => {
       stopRenewal();
+      if (lifetimeTimer !== undefined) clearTimeout(lifetimeTimer);
       if (onDrain !== undefined) signal?.removeEventListener("abort", onDrain);
     };
     const loseLease = (reason?: unknown) => {
@@ -351,6 +355,13 @@ export class RunDispatcher {
     else signal?.addEventListener("abort", onDrain, { once: true });
     if (leaseLost) {
       return { kind: "lease_lost" };
+    }
+    if (this.options.maxLifetimeMs !== undefined) {
+      lifetimeTimer = setTimeout(
+        () => loseLease("run_max_lifetime_exceeded"),
+        this.options.maxLifetimeMs
+      );
+      lifetimeTimer.unref?.();
     }
     schedule();
 

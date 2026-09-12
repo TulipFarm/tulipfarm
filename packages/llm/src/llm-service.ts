@@ -24,6 +24,8 @@ import {
 import type { SecretsService } from "@tulipfarm/secrets";
 import type { LanguageModel } from "ai";
 import {
+  type FallbackAttemptBudgetRef,
+  type FallbackAttemptUsageRef,
   type FallbackCallGate,
   type FallbackLogger,
   FallbackModel,
@@ -294,10 +296,20 @@ export class LlmService {
     logger: FallbackLogger = this.logger,
     responder?: ModelResponderRef,
     gate?: FallbackCallGate,
-    attempted?: ModelAttemptRef
+    attempted?: ModelAttemptRef,
+    attemptUsage?: FallbackAttemptUsageRef,
+    attemptBudget?: FallbackAttemptBudgetRef
   ): Promise<LanguageModel> {
     if (principal === undefined || this.credentials === undefined) {
-      return this.chainModel(modelIds, logger, responder, gate, attempted);
+      return this.chainModel(
+        modelIds,
+        logger,
+        responder,
+        gate,
+        attempted,
+        attemptUsage,
+        attemptBudget
+      );
     }
     const resolved = (
       await Promise.all(
@@ -327,7 +339,9 @@ export class LlmService {
       gate,
       resolved.map((link) => this.linkGateKey(link.ref, link.model)),
       attempted,
-      resolved.map((link) => link.ref)
+      resolved.map((link) => link.ref),
+      attemptUsage,
+      attemptBudget
     );
   }
 
@@ -374,7 +388,9 @@ export class LlmService {
     logger: FallbackLogger = this.logger,
     responder?: ModelResponderRef,
     gate?: FallbackCallGate,
-    attempted?: ModelAttemptRef
+    attempted?: ModelAttemptRef,
+    attemptUsage?: FallbackAttemptUsageRef,
+    attemptBudget?: FallbackAttemptBudgetRef
   ): LanguageModel {
     if (!this.configured) throw new LlmNotConfiguredError();
     const built = modelIds.flatMap((id) => {
@@ -404,7 +420,9 @@ export class LlmService {
       gate,
       built.map((link) => this.linkGateKey(link.ref, link.model)),
       attempted,
-      built.map((link) => link.ref)
+      built.map((link) => link.ref),
+      attemptUsage,
+      attemptBudget
     );
   }
 

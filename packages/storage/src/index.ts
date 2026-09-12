@@ -2,6 +2,7 @@ export * from "./approvals";
 export * from "./artifacts";
 export * from "./asset-ownership";
 export * from "./auth";
+export * from "./conversations/context-summary-store";
 export * from "./conversations/latest-turn";
 export * from "./events";
 export * from "./integrations";

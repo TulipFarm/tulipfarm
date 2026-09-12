@@ -571,6 +571,10 @@ describe("BundleRoutineAgentPort", () => {
     );
 
     expect(openedBudgets).toEqual([{ tokens: 2_000, costMicros: 1 }]);
+    expect(modelSelections[0]?.budgetLimits).toEqual({
+      tokens: { value: 2_000, scope: "model" },
+      costMicros: { value: 1, scope: "model" },
+    });
     expect(appended[0]).toMatchObject({
       eventType: "model.routed",
       payload: {

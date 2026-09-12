@@ -2,10 +2,12 @@ import {
   DISTILL_TIMEOUT_MS,
   type DistilledResult,
   type DistillRequest,
+  type ModelPort,
   type ModelRequirements,
   type ModelRequirementsPolicy,
   type ToolResultDistillerPort,
 } from "@tulipfarm/agent-runtime";
+import { textContent } from "@tulipfarm/schema";
 import { generateText } from "ai";
 import {
   type BuiltInAgentModelSource,
@@ -52,6 +54,8 @@ export interface DistillerAttribution {
 
 export interface ToolResultDistillerOptions<TGate = never> {
   readonly models: BuiltInAgentModelSource<TGate>;
+  /** Production model authority; when present it owns routing, cancellation, pricing, and budget. */
+  readonly modelPort?: ModelPort;
   readonly log?: { warn(obj: unknown, msg?: string): void };
   /**
    * Where this call is reported as spend.
@@ -89,34 +93,54 @@ export function createToolResultDistiller<TGate = never>(
       let modelId: string | undefined;
       let text: string;
       try {
-        const model = await withDeadline(
-          options.models.model(
-            TOOL_RESULT_DISTILLER.rung,
-            distillerRequirements(request.policy),
-            options.gate
-          ),
-          signal
-        );
-        modelId = typeof model === "string" ? model : model.modelId;
-        const generated = await generateText({
-          model,
-          system: DISTILLER_SYSTEM_PROMPT,
-          prompt: distillerPrompt(request.toolName, request.ask, content),
-          maxOutputTokens: TOOL_RESULT_DISTILLER.maxOutputTokens,
-          abortSignal: signal,
-        });
-        text = generated.text;
-        options.spend?.recordLlmCall({
-          ...options.attribution,
-          status: "ok",
-          tier: TOOL_RESULT_DISTILLER.rung,
-          durationMs: Date.now() - startedAt,
-          ...(modelId === undefined ? {} : { model: modelId }),
-          usage: {
-            inputTokens: generated.usage?.inputTokens ?? 0,
-            outputTokens: generated.usage?.outputTokens ?? 0,
-          },
-        });
+        if (options.modelPort !== undefined) {
+          const result = await options.modelPort.invoke({
+            requestId:
+              request.requestId ??
+              `tool-result-distiller:${request.toolName}:${startedAt.toString(36)}`,
+            modelProfileId: request.modelProfileId ?? TOOL_RESULT_DISTILLER.rung,
+            messages: [
+              { role: "system", content: textContent(DISTILLER_SYSTEM_PROMPT) },
+              {
+                role: "user",
+                content: textContent(distillerPrompt(request.toolName, request.ask, content)),
+              },
+            ],
+            maxOutputTokens: TOOL_RESULT_DISTILLER.maxOutputTokens,
+            policy: request.policy,
+            signal,
+          });
+          text = result.output.kind === "text" ? result.output.text : "";
+        } else {
+          const model = await withDeadline(
+            options.models.model(
+              TOOL_RESULT_DISTILLER.rung,
+              distillerRequirements(request.policy),
+              options.gate
+            ),
+            signal
+          );
+          modelId = typeof model === "string" ? model : model.modelId;
+          const generated = await generateText({
+            model,
+            system: DISTILLER_SYSTEM_PROMPT,
+            prompt: distillerPrompt(request.toolName, request.ask, content),
+            maxOutputTokens: TOOL_RESULT_DISTILLER.maxOutputTokens,
+            abortSignal: signal,
+          });
+          text = generated.text;
+          options.spend?.recordLlmCall({
+            ...options.attribution,
+            status: "ok",
+            tier: TOOL_RESULT_DISTILLER.rung,
+            durationMs: Date.now() - startedAt,
+            ...(modelId === undefined ? {} : { model: modelId }),
+            usage: {
+              inputTokens: generated.usage?.inputTokens ?? 0,
+              outputTokens: generated.usage?.outputTokens ?? 0,
+            },
+          });
+        }
       } catch (error) {
         // Never thrown onward: the Tool already succeeded, and a summariser outage must leave the
         // caller with a truncated raw result rather than fail a Turn that has done real work.
@@ -126,13 +150,15 @@ export function createToolResultDistiller<TGate = never>(
         );
         // A failed provider call still consumed a request, so it is reported. A cost view that
         // only counts successes understates exactly the deployments that are struggling.
-        options.spend?.recordLlmCall({
-          ...options.attribution,
-          status: "error",
-          tier: TOOL_RESULT_DISTILLER.rung,
-          durationMs: Date.now() - startedAt,
-          ...(modelId === undefined ? {} : { model: modelId }),
-        });
+        if (options.modelPort === undefined) {
+          options.spend?.recordLlmCall({
+            ...options.attribution,
+            status: "error",
+            tier: TOOL_RESULT_DISTILLER.rung,
+            durationMs: Date.now() - startedAt,
+            ...(modelId === undefined ? {} : { model: modelId }),
+          });
+        }
         return undefined;
       }
 

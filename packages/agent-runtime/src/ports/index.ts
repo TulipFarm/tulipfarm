@@ -1,4 +1,5 @@
 export type {
+  AttachmentVisual,
   ModelInvocationFailureReason,
   ModelInvocationRequest,
   ModelInvocationResult,

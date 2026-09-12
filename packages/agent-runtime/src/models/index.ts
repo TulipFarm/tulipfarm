@@ -33,6 +33,11 @@ export type { ModelRequirementsPolicy } from "./requirements";
 export {
   charsForTokens,
   deriveModelRequirements,
+  estimateAttachmentTokens,
   estimateContextTokens,
+  estimateModelUsage,
   estimateTokens,
+  hasUnknownAttachmentEstimate,
+  providerAttachmentText,
+  providerInputModality,
 } from "./requirements";

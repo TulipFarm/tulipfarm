@@ -370,6 +370,9 @@ importers:
       '@tulipfarm/agent-runtime':
         specifier: workspace:*
         version: link:../../packages/agent-runtime
+      '@tulipfarm/built-in-agents':
+        specifier: workspace:*
+        version: link:../../packages/built-in-agents
       '@tulipfarm/files':
         specifier: workspace:*
         version: link:../../packages/files

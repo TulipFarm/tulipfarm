@@ -52,6 +52,12 @@ describe("extractText", () => {
     expect(result.kind).toBe("text");
     expect((result as { text: string }).text).toContain("Retrieval augmented generation");
     expect((result as { text: string }).text).toContain("Report");
+    expect(result).toMatchObject({
+      visual: {
+        kind: "pdf",
+        pages: [expect.objectContaining({ width: expect.any(Number), height: expect.any(Number) })],
+      },
+    });
   });
 
   it("leaves the caller's bytes intact, so a screened PDF can still be sent to a model", async () => {

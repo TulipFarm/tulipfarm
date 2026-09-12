@@ -311,6 +311,12 @@ export const InternalTurnContextResponseSchema = {
         properties: { role: { type: "string" }, content: MessageContentSchema },
       },
     },
+    pinnedMessageCount: { type: "integer", minimum: 0 },
+    contextTokenBudget: { type: "integer", minimum: 1 },
+    contextMessageIds: {
+      type: "array",
+      items: { anyOf: [{ type: "string" }, { type: "null" }] },
+    },
     attachments: {
       type: "array",
       items: {
