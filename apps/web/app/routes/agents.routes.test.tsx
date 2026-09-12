@@ -127,10 +127,16 @@ test("index groups by domain only once a domain holds more than one agent", asyn
   expect(await screen.findByRole("heading", { name: "github" })).toBeInTheDocument();
 });
 
-test("index with no agents explains what an agent is and points at Skills", () => {
+test("index with no agents offers a useful draft and Skills as a secondary path", () => {
   renderWithData(<AgentsIndex />, { agents: [] });
-  expect(screen.getByText(/An agent is who does the work/)).toBeInTheDocument();
-  expect(screen.getByText(/add a skill instead/)).toBeInTheDocument();
+  const create = screen.getByRole("link", { name: "Create an agent in chat" });
+  const draft = new URL(create.getAttribute("href") ?? "", "http://localhost").searchParams.get(
+    "draft"
+  );
+  expect(draft).toMatch(/create an agent/i);
+  expect(draft).toMatch(/instructions|limits/i);
+  expect(screen.getByRole("link", { name: "Browse skills" })).toHaveAttribute("href", "/skills");
+  expect(document.querySelectorAll(".bg-primary")).toHaveLength(1);
 });
 
 test("index distinguishes an agent from a Skill and links to Skills", () => {
@@ -193,6 +199,16 @@ test("detail links each record type it can reach to that type's records", () => 
   expect(screen.getByRole("link", { name: "github-star" })).toHaveAttribute(
     "href",
     "/resources/github-star"
+  );
+});
+
+test("detail links declared Skills to their own detail rather than the catalog", () => {
+  renderWithData(<AgentDetail />, {
+    agent: { ...agent, capabilityRestrictions: { skills: { allow: ["sprint-planning"] } } },
+  });
+  expect(screen.getByRole("link", { name: "sprint-planning" })).toHaveAttribute(
+    "href",
+    "/skills/sprint-planning"
   );
 });
 

@@ -1,7 +1,9 @@
 import { type MetaFunction, useLoaderData, useRouteError } from "@remix-run/react";
+import { EmptyState } from "~/components/empty-state";
 import { BookText, FileText, Plus, Waypoints } from "~/components/icons";
 import { AgentAuthoredBadge } from "~/components/knowledge/agent-authored-badge";
 import { VisibilityBadge } from "~/components/knowledge/visibility-badge";
+import { PageShell } from "~/components/page-shell";
 import { ErrorState } from "~/components/states";
 import { Button } from "~/components/ui/button";
 import { Link } from "~/components/ui/link";
@@ -16,58 +18,66 @@ export async function clientLoader() {
   return getKnowledgeOverview(8);
 }
 
-// Without this Remix renders nothing while the overview loads, so the first paint of Knowledge is
-// a blank pane rather than the shape of the screen that is arriving.
-// Landing pane for /knowledge — a real home: a grid of every space (page count + last activity) and
-// a "Recently edited" list across all spaces. Falls back to a quiet welcome when there are no spaces.
 export default function KnowledgeIndex() {
   const { spaces, recent } = useLoaderData<typeof clientLoader>();
 
   if (spaces.length === 0) {
     return (
-      <div className="h-full min-h-0 overflow-y-auto">
-        <div className="mx-auto flex min-h-full max-w-md flex-col items-center justify-center gap-4 px-6 py-16 text-center">
-          <BookText className="size-8 text-muted-foreground" aria-hidden />
-          <div className="flex flex-col gap-1">
-            <h1 className="text-base font-bold text-foreground">Knowledge</h1>
-            <p className="text-sm text-muted-foreground">
-              Pick a page from the tree on the left, or create a new space to start a wiki.
-            </p>
-          </div>
-          <NewSpaceLink />
-        </div>
-      </div>
+      <PageShell title="Knowledge">
+        <EmptyState
+          section="knowledge"
+          title="Keep useful knowledge in one place"
+          hint="Keep guides, decisions and useful facts in pages. Group them in spaces so people and agents can find the context they need."
+        >
+          <Button asChild>
+            <Link
+              to={`/?draft=${encodeURIComponent(
+                "Help me start our business knowledge. Ask what we need to document, then help me create a knowledge space and its first page using the facts I provide."
+              )}`}
+            >
+              Start knowledge in chat
+            </Link>
+          </Button>
+          <Button asChild variant="outline">
+            <Link to="/knowledge/spaces/new">Create a space manually</Link>
+          </Button>
+        </EmptyState>
+      </PageShell>
     );
   }
 
   return (
-    <div className="h-full min-h-0 overflow-y-auto">
-      <div className="mx-auto flex w-full max-w-3xl flex-col gap-8 px-6 py-8">
+    <PageShell
+      title="Knowledge"
+      actions={
+        <>
+          <GraphLink />
+          <NewSpaceLink />
+        </>
+      }
+    >
+      <div className="flex w-full max-w-3xl flex-col gap-8">
         <section className="flex flex-col gap-3">
-          <header className="flex items-center justify-between">
-            <h1 className="text-base font-bold text-foreground">Spaces</h1>
-            <div className="flex items-center gap-2">
-              <GraphLink />
-              <NewSpaceLink />
-            </div>
-          </header>
-          <ul className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+          <h2 className="text-sm font-semibold text-foreground">Spaces</h2>
+          <ul className="divide-y divide-border">
             {spaces.map((s) => (
               <li key={s.id}>
                 <Link
                   to={`/knowledge/spaces/${encodeURIComponent(s.id)}`}
-                  className="flex h-full cursor-pointer flex-col gap-2 rounded-sm border border-border bg-card px-4 py-3 transition-colors hover:border-primary/50 hover:bg-accent"
+                  className="flex min-w-0 cursor-pointer flex-col gap-1 rounded-md px-3 py-3 transition-colors hover:bg-accent focus-visible:bg-accent sm:flex-row sm:items-center sm:gap-4"
                 >
-                  <span className="flex items-center gap-2 text-sm font-semibold text-foreground">
-                    <BookText className="size-4 shrink-0 text-muted-foreground" aria-hidden />
-                    {s.name}
-                  </span>
-                  {s.description ? (
-                    <span className="line-clamp-2 text-xs text-muted-foreground">
-                      {s.description}
+                  <span className="flex min-w-0 flex-1 flex-col gap-1">
+                    <span className="flex min-w-0 items-center gap-2 text-sm font-medium text-foreground">
+                      <BookText className="size-4 shrink-0 text-muted-foreground" aria-hidden />
+                      <span className="truncate">{s.name}</span>
                     </span>
-                  ) : null}
-                  <span className="mt-auto text-[0.7rem] text-muted-foreground">
+                    {s.description ? (
+                      <span className="line-clamp-2 text-xs text-muted-foreground">
+                        {s.description}
+                      </span>
+                    ) : null}
+                  </span>
+                  <span className="shrink-0 text-xs tabular-nums text-muted-foreground">
                     {s.pageCount} {s.pageCount === 1 ? "page" : "pages"} · {timeAgo(s.lastActivity)}
                   </span>
                 </Link>
@@ -78,26 +88,25 @@ export default function KnowledgeIndex() {
 
         {recent.length ? (
           <section className="flex flex-col gap-3">
-            <h2 className="text-base font-bold text-foreground">Recently edited</h2>
+            <h2 className="text-sm font-semibold text-foreground">Recently edited</h2>
             <ul className="flex flex-col divide-y divide-border rounded-sm border border-border">
               {recent.map((p) => (
                 <li key={p.pageId}>
                   <Link
                     to={pageHref(p.pageId, p.path)}
-                    className="flex cursor-pointer items-center gap-3 px-3 py-2 transition-colors hover:bg-accent"
+                    className="flex min-w-0 cursor-pointer items-center gap-3 px-3 py-3 transition-colors hover:bg-accent"
                   >
                     <FileText className="size-4 shrink-0 text-muted-foreground" aria-hidden />
-                    <span className="min-w-0 flex-1 truncate text-sm text-foreground">
-                      {p.title}
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate text-sm text-foreground">{p.title}</span>
+                      <span className="block truncate text-xs text-muted-foreground">
+                        {p.spaceName} · {timeAgo(p.updatedAt)}
+                      </span>
                     </span>
                     <AgentAuthoredBadge authorKind={p.authorKind} />
                     {p.visibility && p.visibility !== "business" ? (
                       <VisibilityBadge visibility={p.visibility} compact />
                     ) : null}
-                    <span className="shrink-0 text-xs text-muted-foreground">{p.spaceName}</span>
-                    <span className="shrink-0 text-xs text-muted-foreground">
-                      · {timeAgo(p.updatedAt)}
-                    </span>
                   </Link>
                 </li>
               ))}
@@ -105,7 +114,7 @@ export default function KnowledgeIndex() {
           </section>
         ) : null}
       </div>
-    </div>
+    </PageShell>
   );
 }
 

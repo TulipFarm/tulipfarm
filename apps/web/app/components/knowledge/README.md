@@ -35,9 +35,11 @@ documents/collections tabs); pages are markdown, edited with the shared `@tulipf
 
 ## Routes (`app/routes/_app.knowledge.*`)
 
-`_app.knowledge.tsx` = the wiki **shell**: persistent `<KnowledgeTree/>` rail + content `<Outlet/>`;
-the main app sidebar auto-collapses here (wired in `_app.tsx` via `forceCollapsed`). `_index` =
-welcome pane. `spaces.$id` = thin context provider (no chrome); its `_index` = front page;
+`_app.knowledge.tsx` = the wiki **shell**: one `<KnowledgeTree/>` + content `<Outlet/>`.
+The tree sits in-page on desktop; below `lg`, **Browse pages** opens it in a native dialog.
+Navigation, shared search, or growing to desktop closes the dialog; dismissal restores focus to
+Browse pages. `_index` uses `PageShell` for the spaces list, recent pages, and actionable empty
+state. `spaces.$id` = thin context provider (no chrome); its `_index` = front page;
 `pages.$` = page read; `pages.new` (accepts `?parent=` / `?path=index`) + `pages.edit.$`
 = edit via `<PageEditor>`; `spaces.$id.graph` = graph; `spaces.new` / `spaces.$id.edit` = space
 create / settings.

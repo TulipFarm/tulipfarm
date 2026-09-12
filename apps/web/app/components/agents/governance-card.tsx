@@ -1,14 +1,32 @@
+import { Button } from "~/components/ui/button";
+import { Link } from "~/components/ui/link";
 import type { AgentGovernance } from "~/lib/agents";
 
-function Values({ values }: { values: readonly string[] }) {
+function Values({
+  values,
+  linkSkills = false,
+}: {
+  values: readonly string[];
+  linkSkills?: boolean;
+}) {
   if (values.length === 0) return <span className="text-muted-foreground">none</span>;
   return (
     <span className="flex flex-wrap gap-1">
-      {values.map((value) => (
-        <span key={value} className="rounded-sm border border-border px-1.5 py-0.5">
-          {value}
-        </span>
-      ))}
+      {values.map((value) =>
+        linkSkills ? (
+          <Link
+            key={value}
+            to={`/skills/${encodeURIComponent(value)}`}
+            className="inline-flex min-h-6 items-center rounded-sm border border-border px-1.5 py-0.5 text-brand hover:underline"
+          >
+            {value}
+          </Link>
+        ) : (
+          <span key={value} className="rounded-sm border border-border px-1.5 py-0.5">
+            {value}
+          </span>
+        )
+      )}
     </span>
   );
 }
@@ -44,7 +62,7 @@ export function AgentGovernanceCard({
         <div>
           <dt className="mb-1 text-muted-foreground">Skills</dt>
           <dd>
-            <Values values={governance.skills} />
+            <Values values={governance.skills} linkSkills />
           </dd>
         </div>
         <div>
@@ -81,14 +99,16 @@ export function AgentGovernanceCard({
             {result}
           </span>
         ) : null}
-        <button
+        <Button
           type="button"
+          variant="outline"
+          size="sm"
           disabled={!governance.publication.canPublish || busy}
           onClick={onPublish}
-          className="ml-auto rounded-sm bg-primary px-2 py-1 text-xs text-primary-foreground disabled:cursor-not-allowed disabled:opacity-50"
+          className="ms-auto"
         >
           {busy ? "Proposing…" : `Propose version ${candidate}`}
-        </button>
+        </Button>
       </div>
     </section>
   );

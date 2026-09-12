@@ -61,7 +61,13 @@ function SearchSkeleton() {
   );
 }
 
-export function CommandPalette({ spaceId }: { spaceId?: string | null }) {
+export function CommandPalette({
+  spaceId,
+  onOpenChange,
+}: {
+  spaceId?: string | null;
+  onOpenChange?: (open: boolean) => void;
+}) {
   const navigate = useNavigate();
   const [open, setOpen] = useState(false);
   const [spaceNames, setSpaceNames] = useState<Map<string, string>>(new Map());
@@ -69,20 +75,25 @@ export function CommandPalette({ spaceId }: { spaceId?: string | null }) {
     usePageSearch(spaceId);
 
   useEffect(() => {
+    onOpenChange?.(open);
+  }, [open, onOpenChange]);
+
+  useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
         e.preventDefault();
+        if (open) e.stopPropagation();
         setOpen((o) => !o);
       }
     };
     const onOpen = () => setOpen(true);
-    window.addEventListener("keydown", onKey);
+    window.addEventListener("keydown", onKey, { capture: open });
     window.addEventListener(OPEN_SEARCH_EVENT, onOpen);
     return () => {
-      window.removeEventListener("keydown", onKey);
+      window.removeEventListener("keydown", onKey, { capture: open });
       window.removeEventListener(OPEN_SEARCH_EVENT, onOpen);
     };
-  }, []);
+  }, [open]);
 
   useEffect(() => {
     if (!open || spaceNames.size > 0) return;
@@ -117,7 +128,7 @@ export function CommandPalette({ spaceId }: { spaceId?: string | null }) {
           onValueChange={setQuery}
           autoFocus
           placeholder="Search knowledge…"
-          className="w-full border-b border-border bg-transparent px-4 py-3 text-sm outline-none placeholder:text-muted-foreground"
+          className="w-full border-b border-border bg-transparent px-4 py-3 text-base outline-none placeholder:text-muted-foreground sm:text-sm"
         />
         {spaceId ? (
           <div className="flex shrink-0 items-center gap-1 border-b border-border px-3 py-1.5 text-xs">

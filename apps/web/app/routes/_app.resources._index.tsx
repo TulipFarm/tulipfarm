@@ -1,5 +1,6 @@
 import { type MetaFunction, useLoaderData, useRouteError } from "@remix-run/react";
 import { useMemo, useState } from "react";
+import { EmptyState } from "~/components/empty-state";
 import { Plus, Search } from "~/components/icons";
 import { PageShell } from "~/components/page-shell";
 import { CatalogTable } from "~/components/resources/catalog-table";
@@ -81,20 +82,25 @@ export default function ResourcesIndex() {
 
   if (rows.length === 0) {
     return (
-      <PageShell crumbs={[{ label: "Resources" }]} title="Resources" actions={newTypeButton}>
-        <div className="rounded-md border border-dashed border-border px-6 py-12 text-center">
-          <p className="text-sm font-medium text-foreground">No resource types yet</p>
-          <p className="mx-auto mt-1 max-w-prose text-base text-muted-foreground">
-            A resource type is a table your agents can read and write — a Ticket, a Customer, an
-            Invoice. Describe one in chat and an agent will build it, or define the schema yourself.
-          </p>
-          <div className="mt-4 flex justify-center gap-2">
-            {newTypeButton}
-            <Button asChild variant="outline" size="sm">
-              <Link to="/">Ask in chat</Link>
-            </Button>
-          </div>
-        </div>
+      <PageShell crumbs={[{ label: "Resources" }]} title="Resources">
+        <EmptyState
+          section="resources"
+          title="No resource types yet"
+          hint="Keep customers, tickets or invoices as records. Describe what you need to track, and an agent will help define the fields and links."
+        >
+          <Button asChild>
+            <Link
+              to={`/?draft=${encodeURIComponent(
+                "Help me create a resource type for my business. Ask what records I need to track, then suggest useful fields and any links to existing resource types before creating it."
+              )}`}
+            >
+              Create a resource type in chat
+            </Link>
+          </Button>
+          <Button asChild variant="outline">
+            <Link to="/resources/new">Create manually</Link>
+          </Button>
+        </EmptyState>
       </PageShell>
     );
   }

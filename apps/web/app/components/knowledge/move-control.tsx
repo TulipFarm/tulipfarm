@@ -1,6 +1,7 @@
-import { useState } from "react";
+import { useId, useState } from "react";
 import { FolderInput } from "~/components/icons";
 import { Button } from "~/components/ui/button";
+import { Input } from "~/components/ui/input";
 import { Modal } from "~/components/ui/modal";
 import {
   listSubjects,
@@ -29,6 +30,7 @@ export function MoveControl({
   currentPath: string;
   onMoved: () => void;
 }) {
+  const pathId = useId();
   const [asking, setAsking] = useState(false);
   const [path, setPath] = useState(currentPath);
   const [preview, setPreview] = useState<PageMovePreview | null>(null);
@@ -69,19 +71,15 @@ export function MoveControl({
         onClick={() => setAsking(true)}
         title="Move"
         aria-label={`Move ${pageTitle}`}
-        className="cursor-pointer rounded-sm p-1 text-muted-foreground opacity-0 transition hover:text-primary group-hover:opacity-100 focus-visible:opacity-100"
+        className="flex size-11 shrink-0 cursor-pointer items-center justify-center rounded-sm text-muted-foreground hover:bg-accent hover:text-foreground sm:size-6"
       >
         <FolderInput className="size-3" aria-hidden />
       </button>
 
       <Modal open={asking} onClose={() => setAsking(false)} title={`Move ${pageTitle}`}>
-        <label className="flex flex-col gap-1">
+        <label htmlFor={pathId} className="flex flex-col gap-1">
           <span className="text-muted-foreground">New path</span>
-          <input
-            value={path}
-            onChange={(e) => setPath(e.target.value)}
-            className="rounded border border-border bg-background px-2 py-1.5 text-foreground"
-          />
+          <Input id={pathId} value={path} onChange={(e) => setPath(e.target.value)} />
         </label>
         {error && (
           <p role="alert" className="mt-2 text-danger">

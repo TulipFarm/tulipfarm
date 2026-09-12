@@ -1,5 +1,7 @@
+import { createRemixStub } from "@remix-run/testing";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import type { ReactElement } from "react";
 import { describe, expect, it, vi } from "vitest";
 import { AgentGovernanceCard } from "./governance-card";
 
@@ -18,20 +20,27 @@ const governance = {
   },
 };
 
+function renderCard(node: ReactElement) {
+  const Stub = createRemixStub([{ path: "/", Component: () => node }]);
+  render(<Stub />);
+}
+
 describe("AgentGovernanceCard", () => {
   it("shows exact candidate and governed publication evidence", async () => {
     const onPublish = vi.fn();
     const user = userEvent.setup();
-    render(<AgentGovernanceCard governance={governance} onPublish={onPublish} />);
+    renderCard(<AgentGovernanceCard governance={governance} onPublish={onPublish} />);
 
     expect(screen.getByText("candidate 4")).toBeInTheDocument();
     expect(screen.getByText(/support-v2/)).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "triage" })).toHaveAttribute("href", "/skills/triage");
+    expect(screen.getByRole("button", { name: "Propose version 4" })).not.toHaveClass("bg-primary");
     await user.click(screen.getByRole("button", { name: "Propose version 4" }));
     expect(onPublish).toHaveBeenCalledTimes(1);
   });
 
   it("blocks stale or failed candidates as presentation", () => {
-    render(
+    renderCard(
       <AgentGovernanceCard
         governance={{
           ...governance,

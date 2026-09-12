@@ -73,7 +73,7 @@ export function KnowledgeTree() {
         ) : spaces.length === 0 ? (
           <p className="px-2 py-1 text-xs text-muted-foreground">
             No spaces yet.{" "}
-            <Link to="/knowledge/spaces/new" className="cursor-pointer text-primary underline">
+            <Link to="/knowledge/spaces/new" className="cursor-pointer text-brand underline">
               Create one
             </Link>
           </p>
@@ -116,19 +116,19 @@ function SpaceNode({
           onClick={toggle}
           aria-expanded={open}
           aria-label={open ? `Collapse ${space.name}` : `Expand ${space.name}`}
-          className="cursor-pointer rounded-sm p-1 text-muted-foreground"
+          className="flex size-11 shrink-0 cursor-pointer items-center justify-center rounded-sm text-muted-foreground sm:size-6"
         >
           <ChevronRight
             className={cn("size-3.5 transition-transform", open && "rotate-90")}
             aria-hidden
           />
         </button>
-        <Library className="size-3.5 shrink-0 text-primary" aria-hidden />
+        <Library className="size-3.5 shrink-0 text-muted-foreground" aria-hidden />
         <Link
           to={base}
           className={cn(
-            "min-w-0 flex-1 cursor-pointer truncate py-1 font-medium",
-            isActiveSpace && !activePath ? "text-primary" : "text-foreground"
+            "min-w-0 flex-1 cursor-pointer truncate py-3 font-medium sm:py-1",
+            isActiveSpace && !activePath ? "text-brand" : "text-foreground"
           )}
           title={space.name}
         >
@@ -138,7 +138,7 @@ function SpaceNode({
           to={`${base}/pages/new`}
           title="New page"
           aria-label={`New page in ${space.name}`}
-          className="cursor-pointer rounded-sm p-1 text-muted-foreground opacity-0 transition hover:text-primary group-hover:opacity-100"
+          className="flex size-11 shrink-0 cursor-pointer items-center justify-center rounded-sm text-muted-foreground hover:bg-accent hover:text-foreground sm:size-6"
         >
           <Plus className="size-3" aria-hidden />
         </Link>
@@ -192,7 +192,7 @@ function Dir({
     return () => window.removeEventListener("okf:space-changed", onChanged);
   }, [load]);
 
-  const pad = { paddingLeft: `${depth * 0.75 + 0.25}rem` };
+  const pad = { paddingInlineStart: `${depth * 0.75 + 0.25}rem` };
 
   if (loading && nodes === null)
     return (
@@ -250,7 +250,7 @@ function PageRow({
   });
   const base = `/knowledge/spaces/${enc(spaceId)}`;
   const isActive = activePath === node.path;
-  const pad = { paddingLeft: `${depth * 0.75 + 0.25}rem` };
+  const pad = { paddingInlineStart: `${depth * 0.75 + 0.25}rem` };
   // A page with a body links to its stable page UUID route (resolved from its path).
   const ref = resolver.bySpaceIdPath(spaceId, node.path);
   const to = node.hasBody && ref ? pageHref(ref.pageId, node.path) : null;
@@ -270,7 +270,7 @@ function PageRow({
             onClick={toggle}
             aria-expanded={open}
             aria-label={open ? `Collapse ${node.label}` : `Expand ${node.label}`}
-            className="cursor-pointer rounded-sm p-0.5 text-muted-foreground"
+            className="flex size-11 shrink-0 cursor-pointer items-center justify-center rounded-sm text-muted-foreground sm:size-6"
           >
             <ChevronRight
               className={cn("size-3.5 transition-transform", open && "rotate-90")}
@@ -278,7 +278,7 @@ function PageRow({
             />
           </button>
         ) : (
-          <span className="w-[1.375rem] shrink-0" aria-hidden />
+          <span className="w-11 shrink-0 sm:w-6" aria-hidden />
         )}
         {node.hasChildren && !node.hasBody ? (
           <Folder className="size-3.5 shrink-0 text-muted-foreground" aria-hidden />
@@ -290,7 +290,7 @@ function PageRow({
             to={to}
             aria-current={isActive ? "page" : undefined}
             className={cn(
-              "min-w-0 flex-1 cursor-pointer truncate py-1",
+              "min-w-0 flex-1 cursor-pointer truncate py-3 sm:py-1",
               isActive ? "font-medium text-sidebar-primary" : "text-foreground"
             )}
             title={node.label}
@@ -301,7 +301,7 @@ function PageRow({
           <button
             type="button"
             onClick={toggle}
-            className="min-w-0 flex-1 cursor-pointer truncate py-1 text-left font-medium text-foreground"
+            className="min-w-0 flex-1 cursor-pointer truncate py-3 text-start font-medium text-foreground sm:py-1"
             title={node.label}
           >
             {node.label}
@@ -323,7 +323,7 @@ function PageRow({
           to={`${base}/pages/new?parent=${enc(node.path)}`}
           title="New sub-page"
           aria-label={`New page under ${node.label}`}
-          className="cursor-pointer rounded-sm p-1 text-muted-foreground opacity-0 transition hover:text-primary group-hover:opacity-100"
+          className="flex size-11 shrink-0 cursor-pointer items-center justify-center rounded-sm text-muted-foreground hover:bg-accent hover:text-foreground sm:size-6"
         >
           <Plus className="size-3" aria-hidden />
         </Link>

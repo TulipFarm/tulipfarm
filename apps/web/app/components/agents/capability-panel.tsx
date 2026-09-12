@@ -114,7 +114,10 @@ export function CapabilityPanel({ facts }: { facts: CapabilityFacts }) {
         {facts.skillsAllowed.length > 0 || facts.skillsDenied.length > 0 ? (
           <Row label="Skills" hint="Procedures it may load">
             {facts.skillsAllowed.map((skill) => (
-              <Chip key={skill} to="/skills">
+              <Chip
+                key={skill}
+                to={skill.includes("*") ? "/skills" : `/skills/${encodeURIComponent(skill)}`}
+              >
                 {skill}
               </Chip>
             ))}
@@ -126,9 +129,9 @@ export function CapabilityPanel({ facts }: { facts: CapabilityFacts }) {
           </Row>
         ) : null}
 
-        <Row label="Record types" hint="The data it can reach">
+        <Row label="Resource types" hint="The records it can reach">
           {facts.resourceTypes.length === 0 ? (
-            <Nothing>Not pinned to any record type.</Nothing>
+            <Nothing>Not pinned to any resource type.</Nothing>
           ) : (
             facts.resourceTypes.map((type) => (
               <Chip key={type} to={`/resources/${encodeURIComponent(type)}`}>
