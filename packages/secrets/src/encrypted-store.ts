@@ -77,23 +77,32 @@ export class SecretsService {
       return cached.value;
     }
 
+    try {
+      return (await this.resolveCurrent(key)).value;
+    } catch (error) {
+      if (
+        error instanceof SecretUnavailableError &&
+        !(error instanceof SecretRevokedError) &&
+        cached &&
+        this.now() - cached.fetchedAt < this.staleMs
+      ) {
+        return await this.serveStale(key, cached);
+      }
+      throw error;
+    }
+  }
+
+  /** Reads and decrypts the current durable revision, bypassing the plaintext cache. */
+  async resolveCurrent(key: string): Promise<{ value: string; version: string }> {
     let doc: Awaited<ReturnType<SecretRepo["findByKey"]>>;
     try {
       doc = await this.repo.findByKey(key);
     } catch {
-      // Serving a cached plaintext past its TTL is a deliberate availability tradeoff for a
-      // transient read failure. It must not outlive a rotation or deletion, so the extension is
-      // gated on positive proof that the row is still the revision we cached.
-      if (cached && this.now() - cached.fetchedAt < this.staleMs) {
-        return await this.serveStale(key, cached);
-      }
       throw new SecretUnavailableError(`secret unavailable: ${key}`);
     }
-
     if (!doc) {
-      throw new SecretUnavailableError(`secret not found: ${key}`);
+      throw new SecretRevokedError(`secret not found: ${key}`);
     }
-
     const envelope: SecretEnvelope = {
       encryptedValue: doc.encryptedValue,
       iv: doc.iv,
@@ -101,7 +110,18 @@ export class SecretsService {
     };
     const value = this.decrypt(doc.dekId, envelope);
     this.cache.set(key, { value, fetchedAt: this.now(), revision: doc.updatedAt });
-    return value;
+    return { value, version: doc.updatedAt.toISOString() };
+  }
+
+  /** Current durable revision marker, or `null` after deletion/revocation. */
+  async revision(key: string): Promise<string | null> {
+    let revision: Date | null;
+    try {
+      revision = await this.repo.findRevision(key);
+    } catch {
+      throw new SecretUnavailableError(`secret unavailable: ${key}`);
+    }
+    return revision?.toISOString() ?? null;
   }
 
   /**

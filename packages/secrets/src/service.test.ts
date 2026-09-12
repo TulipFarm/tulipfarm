@@ -1,8 +1,11 @@
 import { randomBytes, randomUUID } from "node:crypto";
 import { describe, expect, it, vi } from "vitest";
+import { SecretBroker } from "./broker";
+import { secretStorageKey } from "./connection-secrets";
 import { encryptSecret } from "./crypto";
 import { SecretRevokedError, SecretsService, SecretUnavailableError } from "./encrypted-store";
 import type { ActiveDek } from "./key-manager";
+import { secretsServiceProvider } from "./providers";
 import type { SecretDoc, SecretEnvelopeFields, SecretRepo } from "./repo";
 
 class FakeRepo implements SecretRepo {
@@ -84,6 +87,29 @@ function seedLegacy(repo: FakeRepo, key: string, plaintext: string, envKey: Buff
 }
 
 describe("SecretsService", () => {
+  it("keeps its receiver when a Connection lease reads revision and plaintext", async () => {
+    const service = new SecretsService(new FakeRepo(), makeDek());
+    const secretRef = "secret://00000000-0000-4000-8000-000000000001" as const;
+    await service.set(secretStorageKey(secretRef), "connection-secret");
+    const broker = new SecretBroker({
+      provider: secretsServiceProvider(service),
+      authorizer: { authorize: () => ({ allowed: true }) },
+    });
+    const lease = await broker.leaseConnection({
+      scope: {
+        secretRef,
+        connectionId: "connection-1",
+        credentialSlot: "access",
+        toolId: "oim.calendar.v2.events.list",
+        integrationId: "calendar",
+        runId: "run-1",
+        purpose: "read calendar",
+      },
+    });
+
+    await expect(lease.use((plaintext) => plaintext === "connection-secret")).resolves.toBe(true);
+  });
+
   it("set then get returns the original plaintext (round-trip under the DEK)", async () => {
     const repo = new FakeRepo();
     const svc = new SecretsService(repo, makeDek());

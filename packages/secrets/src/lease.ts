@@ -14,8 +14,7 @@ export type SecretLeaseDenialReason =
   /** The broker no longer knows this lease, as after a restart or `revokeAll`. */
   | "lease_unknown";
 
-/** Exact lease authority; every field narrows use and `secretRef` is never the value. */
-export interface SecretScope {
+interface SecretScopeBase {
   readonly secretRef: string;
   readonly toolId: string;
   readonly integrationId?: string;
@@ -28,6 +27,23 @@ export interface SecretScope {
   readonly destination?: string;
   readonly activeSkillName?: string;
 }
+
+/** Legacy Secret authority for platform-owned credentials that are not Connection-backed. */
+export interface LegacySecretScope extends SecretScopeBase {
+  readonly connectionId?: never;
+  readonly credentialSlot?: never;
+}
+
+/** Exact authority for one credential slot on one product Connection. */
+export interface ConnectionSecretScope extends SecretScopeBase {
+  readonly secretRef: `secret://${string}`;
+  readonly connectionId: string;
+  readonly credentialSlot: string;
+  readonly integrationId: string;
+}
+
+/** Exact lease authority; every field narrows use and `secretRef` is never the value. */
+export type SecretScope = LegacySecretScope | ConnectionSecretScope;
 
 /** Denial evidence: a reason code plus the lease id. Never the Credential or its value. */
 export class SecretLeaseDeniedError extends Error {
@@ -59,6 +75,9 @@ export class SecretLeakError extends Error {
 
 /** Called with the plaintext for the duration of one authorized use, and no longer. */
 export type ScopedSecretCallback<T> = (secret: string) => T | Promise<T>;
+export type ScopedSecretSetCallback<T> = (
+  credentials: Readonly<Record<string, string>>
+) => T | Promise<T>;
 
 /** What the broker exposes to a handle: one guarded, evidence-producing use. */
 export type LeaseRedeemer = <T>(
@@ -97,5 +116,24 @@ export class SecretLease {
   /** `util.inspect` hook, so console and structured logs print the marker instead of the fields. */
   [Symbol.for("nodejs.util.inspect.custom")](): string {
     return REDACTED_LEASE;
+  }
+}
+
+/** A bounded group of leases that exposes all plaintext only within one callback. */
+export class SecretLeaseSet {
+  constructor(private readonly leases: Readonly<Record<string, SecretLease>>) {}
+
+  async use<T>(callback: ScopedSecretSetCallback<T>): Promise<T> {
+    const entries = Object.entries(this.leases);
+    const redeem = async (
+      index: number,
+      credentials: Readonly<Record<string, string>>
+    ): Promise<T> => {
+      const entry = entries[index];
+      if (entry === undefined) return callback(Object.freeze(credentials));
+      const [slot, lease] = entry;
+      return lease.use((credential) => redeem(index + 1, { ...credentials, [slot]: credential }));
+    };
+    return redeem(0, {});
   }
 }

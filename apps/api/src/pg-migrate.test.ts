@@ -123,6 +123,95 @@ describe("runPgMigrations", () => {
     await db.close();
   });
 
+  it("upgrades OIM persistence from version 111 and is then repeat-safe", async () => {
+    await db.exec(`
+      CREATE TABLE integration_auth_requests (
+        state text PRIMARY KEY,
+        integration_slug text NOT NULL,
+        step_index integer NOT NULL,
+        code_verifier text,
+        created_at timestamptz NOT NULL,
+        expires_at timestamptz NOT NULL,
+        consumed_at timestamptz
+      );
+      CREATE TABLE knowledge_source_records (
+        business_id text NOT NULL,
+        source_id text NOT NULL,
+        integration_id text,
+        PRIMARY KEY (business_id, source_id)
+      );
+      INSERT INTO knowledge_source_records (business_id, source_id, integration_id)
+      VALUES ('business-1', 'legacy-source', 'calendar');
+      CREATE TABLE schema_version (
+        id boolean PRIMARY KEY DEFAULT true,
+        version integer NOT NULL,
+        CONSTRAINT schema_version_single_row CHECK (id)
+      );
+      INSERT INTO schema_version (id, version) VALUES (true, 111);
+    `);
+
+    await runPgMigrations(db, undefined, () => {});
+    await expect(runPgMigrations(db, undefined, () => {})).resolves.toBeUndefined();
+
+    const authColumns = await db.query<{ column_name: string }>(`
+      SELECT column_name
+        FROM information_schema.columns
+       WHERE table_name = 'integration_auth_requests'
+         AND column_name IN (
+           'connection_id',
+           'oim_step_id',
+           'oim_step_digest',
+           'manifest_digest',
+           'package_digest'
+         )
+       ORDER BY column_name
+    `);
+    expect(authColumns.rows.map(({ column_name }) => column_name)).toHaveLength(5);
+
+    const securityFoundation = await db.query<{ present: boolean }>(`
+      SELECT
+        to_regclass('connection_external_identities') IS NOT NULL
+        AND EXISTS (
+          SELECT 1
+            FROM information_schema.columns
+           WHERE table_name = 'webhook_deliveries'
+             AND column_name = 'authenticated_evidence_digest'
+        ) AS present
+    `);
+    expect(securityFoundation.rows).toEqual([{ present: true }]);
+
+    const knowledgeColumns = await db.query<{ column_name: string }>(`
+      SELECT column_name
+        FROM information_schema.columns
+       WHERE table_name = 'knowledge_source_records'
+         AND column_name IN (
+           'source_locator',
+           'provenance_connection_id',
+           'provenance_integration_major_version'
+         )
+       ORDER BY column_name
+    `);
+    expect(knowledgeColumns.rows.map(({ column_name }) => column_name)).toEqual([
+      "provenance_connection_id",
+      "provenance_integration_major_version",
+      "source_locator",
+    ]);
+    const legacySource = await db.query<{
+      provenance_connection_id: string | null;
+      provenance_integration_major_version: number | null;
+    }>(`
+      SELECT provenance_connection_id, provenance_integration_major_version
+        FROM knowledge_source_records
+       WHERE business_id = 'business-1' AND source_id = 'legacy-source'
+    `);
+    expect(legacySource.rows).toEqual([
+      {
+        provenance_connection_id: null,
+        provenance_integration_major_version: null,
+      },
+    ]);
+  });
+
   it("repairs Surface storage for databases that already recorded schema version 14", async () => {
     // Stand-in for a database stopped at v14; v27 needs pgvector.
     await db.query("CREATE EXTENSION IF NOT EXISTS vector");

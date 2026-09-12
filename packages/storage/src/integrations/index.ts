@@ -54,6 +54,32 @@ export {
   SlackCapabilityObservationStore,
 } from "./channel-surface-store";
 export type {
+  ConnectionAuthStep,
+  ConnectionAuthStepStatus,
+  PutConnectionAuthStep,
+  UpdateConnectionAuthStepHealth,
+} from "./connection-auth-step-store";
+export {
+  CONNECTION_AUTH_STEP_STORAGE_STATEMENTS,
+  ConnectionAuthStepStore,
+} from "./connection-auth-step-store";
+export type {
+  BindVerifiedConnectionExternalIdentity,
+  ConnectionIdentityProofKind,
+  VerifiedConnectionExternalIdentity,
+} from "./connection-external-identity-store";
+export {
+  CONNECTION_EXTERNAL_IDENTITY_STORAGE_STATEMENTS,
+  ConnectionExternalIdentityConflictError,
+  ConnectionExternalIdentityStore,
+} from "./connection-external-identity-store";
+export type { PersistedConnection } from "./connection-store";
+export {
+  CONNECTION_STORAGE_STATEMENTS,
+  ConnectionIdentityConflictError,
+  ConnectionStore,
+} from "./connection-store";
+export type {
   IntegrationProjectionStatus,
   PersistedChannelRoute,
   PersistedIntegration,
@@ -65,6 +91,53 @@ export {
   INTEGRATION_STORAGE_STATEMENTS,
   IntegrationStore,
 } from "./integration-store";
+export type {
+  OimKnowledgeCheckpoint,
+  OimKnowledgeCheckpointKey,
+} from "./oim-knowledge-checkpoint-store";
+export {
+  OIM_KNOWLEDGE_CHECKPOINT_STORAGE_STATEMENTS,
+  OimKnowledgeCheckpointStore,
+} from "./oim-knowledge-checkpoint-store";
+export type {
+  DeleteOimKnowledgeSource,
+  OimKnowledgeChunkPublication,
+  OimKnowledgeSourcePublication,
+  PublishOimKnowledgeRevision,
+} from "./oim-knowledge-publication-store";
+export { OimKnowledgePublicationStore } from "./oim-knowledge-publication-store";
+export type {
+  AdmitOimRateLimitInput,
+  ImposeOimRateLimitCooldownInput,
+  OimRateLimitAdmission,
+  OimRateLimitQuota,
+  OimRateLimitStoreScope,
+} from "./oim-rate-limit-store";
+export {
+  OIM_RATE_LIMIT_STORAGE_STATEMENTS,
+  OimRateLimitStore,
+} from "./oim-rate-limit-store";
+export type {
+  AddOimTrustRootInput,
+  InstalledOimReleaseProvenance,
+  OimInstalledReleaseTrustClass,
+  OimRevocationFeed,
+  OimTrustRoot,
+  OimTrustRootPurpose,
+  PutInstalledOimReleaseProvenanceInput,
+  SetOimRevocationFeedInput,
+} from "./oim-release-trust-store";
+export {
+  OIM_RELEASE_MAINTENANCE_STORAGE_STATEMENTS,
+  OIM_RELEASE_TRUST_STORAGE_STATEMENTS,
+  OimReleaseTrustStore,
+  OimTrustRootConflictError,
+} from "./oim-release-trust-store";
+export type { PollingIngressLease } from "./polling-ingress-store";
+export {
+  POLLING_INGRESS_STORAGE_STATEMENTS,
+  PollingIngressStore,
+} from "./polling-ingress-store";
 export type {
   ProviderFileUploadPhase,
   ProviderFileUploadRecord,
@@ -87,3 +160,16 @@ export {
   SOUL_REPOSITORY_STORAGE_STATEMENTS,
   SoulRepositoryStore,
 } from "./soul-repository-store";
+export type {
+  PersistedWebhookDelivery,
+  RecordedDelivery,
+  VerifiedWebhookDeliveryInput,
+  WebhookDeliveryInput,
+  WebhookDeliveryState,
+} from "./webhook-inbox-store";
+export {
+  RawPayloadDiscardedError,
+  WEBHOOK_INBOX_STORAGE_STATEMENTS,
+  WebhookDeduplicationConflictError,
+  WebhookInboxStore,
+} from "./webhook-inbox-store";

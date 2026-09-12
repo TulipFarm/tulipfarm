@@ -28,6 +28,9 @@ import {
   CHANNEL_SURFACE_STORAGE_STATEMENTS,
   CHILD_STORAGE_STATEMENTS,
   CONCURRENCY_STORAGE_STATEMENTS,
+  CONNECTION_AUTH_STEP_STORAGE_STATEMENTS,
+  CONNECTION_EXTERNAL_IDENTITY_STORAGE_STATEMENTS,
+  CONNECTION_STORAGE_STATEMENTS,
   dropInvalidEmbeddingIndexes,
   EMBEDDING_COLUMNS,
   EVENT_STORAGE_STATEMENTS,
@@ -36,6 +39,11 @@ import {
   KILL_SWITCH_STORAGE_STATEMENTS,
   LOOP_CHECKPOINT_STORAGE_STATEMENTS,
   MEMORY_CURATION_STORAGE_STATEMENTS,
+  OIM_KNOWLEDGE_CHECKPOINT_STORAGE_STATEMENTS,
+  OIM_RATE_LIMIT_STORAGE_STATEMENTS,
+  OIM_RELEASE_MAINTENANCE_STORAGE_STATEMENTS,
+  OIM_RELEASE_TRUST_STORAGE_STATEMENTS,
+  POLLING_INGRESS_STORAGE_STATEMENTS,
   PROVIDER_FILE_UPLOAD_STORAGE_STATEMENTS,
   PROVIDER_OBJECT_OWNERSHIP_STORAGE_STATEMENTS,
   PUBLIC_ORIGIN_STORAGE_STATEMENTS,
@@ -57,6 +65,7 @@ import {
   TEAM_NOTIFICATION_STORAGE_STATEMENTS,
   TEAM_STORAGE_STATEMENTS,
   WAIT_STORAGE_STATEMENTS,
+  WEBHOOK_INBOX_STORAGE_STATEMENTS,
 } from "@tulipfarm/storage";
 import {
   EFFECT_AWAITING_CHILD_STORAGE_STATEMENTS,
@@ -3266,6 +3275,95 @@ export const PG_MIGRATIONS: PgMigration[] = [
       if (present.rows[0]?.present) {
         await applyStatements(RUN_LEASE_GENERATION_STORAGE_STATEMENTS)(q);
       }
+    },
+  },
+  {
+    version: 112,
+    description: "OIM Connections and durable per-step authorization state",
+    up: applyStatements([
+      ...CONNECTION_STORAGE_STATEMENTS,
+      ...CONNECTION_AUTH_STEP_STORAGE_STATEMENTS,
+      ...CONNECTION_EXTERNAL_IDENTITY_STORAGE_STATEMENTS,
+      ...INTEGRATION_AUTH_REQUEST_STATEMENTS,
+      "ALTER TABLE integration_auth_requests ADD COLUMN IF NOT EXISTS connection_id text",
+      "ALTER TABLE integration_auth_requests ADD COLUMN IF NOT EXISTS oim_step_id text",
+      "ALTER TABLE integration_auth_requests ADD COLUMN IF NOT EXISTS oim_step_digest text",
+      "ALTER TABLE integration_auth_requests ADD COLUMN IF NOT EXISTS manifest_digest text",
+      "ALTER TABLE integration_auth_requests ADD COLUMN IF NOT EXISTS package_digest text",
+    ]),
+  },
+  {
+    version: 113,
+    description: "OIM ingress, rate-limit, release trust, provenance, and maintenance state",
+    up: applyStatements([
+      ...WEBHOOK_INBOX_STORAGE_STATEMENTS,
+      ...POLLING_INGRESS_STORAGE_STATEMENTS,
+      ...OIM_RATE_LIMIT_STORAGE_STATEMENTS,
+      ...OIM_RELEASE_TRUST_STORAGE_STATEMENTS,
+      ...OIM_RELEASE_MAINTENANCE_STORAGE_STATEMENTS,
+    ]),
+  },
+  {
+    version: 114,
+    description: "OIM Knowledge attribution and fenced scan checkpoints",
+    up: async (q) => {
+      const present = await q.query<{ present: boolean }>(
+        "SELECT to_regclass('knowledge_source_records') IS NOT NULL AS present"
+      );
+      if (!present.rows[0]?.present) {
+        const sourceRecordsStatement = KNOWLEDGE_SOURCES_STATEMENTS[0];
+        if (sourceRecordsStatement === undefined) {
+          throw new Error("knowledge_source_records migration statement is missing");
+        }
+        await q.query(sourceRecordsStatement);
+      }
+      await applyStatements([
+        "ALTER TABLE knowledge_source_records ADD COLUMN IF NOT EXISTS source_locator jsonb",
+        "ALTER TABLE knowledge_source_records ADD COLUMN IF NOT EXISTS provenance_connection_id text",
+        "ALTER TABLE knowledge_source_records ADD COLUMN IF NOT EXISTS provenance_integration_major_version integer",
+      ])(q);
+      const constraints = [
+        [
+          "knowledge_source_records_provenance_connection_pair_check",
+          `ALTER TABLE knowledge_source_records
+             ADD CONSTRAINT knowledge_source_records_provenance_connection_pair_check
+             CHECK (
+               (
+                 provenance_connection_id IS NULL
+                 AND provenance_integration_major_version IS NULL
+               )
+               OR (
+                 provenance_connection_id IS NOT NULL
+                 AND provenance_integration_major_version >= 0
+               )
+             )`,
+        ],
+        [
+          "knowledge_source_records_provenance_connection_fkey",
+          `ALTER TABLE knowledge_source_records
+             ADD CONSTRAINT knowledge_source_records_provenance_connection_fkey
+             FOREIGN KEY (
+               business_id,
+               provenance_connection_id,
+               integration_id,
+               provenance_integration_major_version
+             ) REFERENCES connections (
+               business_id,
+               id,
+               integration_id,
+               integration_major_version
+             )`,
+        ],
+      ] as const;
+      for (const [name, statement] of constraints) {
+        const exists = await q.query(
+          `SELECT 1 FROM pg_constraint
+            WHERE conrelid = 'knowledge_source_records'::regclass AND conname = $1`,
+          [name]
+        );
+        if (exists.rows.length === 0) await q.query(statement);
+      }
+      await applyStatements(OIM_KNOWLEDGE_CHECKPOINT_STORAGE_STATEMENTS)(q);
     },
   },
 ];
