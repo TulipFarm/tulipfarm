@@ -5,6 +5,8 @@ import { beforeEach, expect, test, vi } from "vitest";
 import { CompanionProvider } from "~/lib/companion-context";
 import ChatRoute, { clientLoader } from "~/routes/_app._index";
 
+const transcriptModuleLoaded = vi.hoisted(() => vi.fn());
+
 // Mock the loader hook and render the Component directly (the convention used by the other route
 // tests) — avoids the async clientLoader boundary while still supplying router context for the
 // composer's links/nav.
@@ -24,6 +26,10 @@ vi.mock("~/lib/onboarding", () => ({
 vi.mock("~/lib/tasks", () => ({
   listTasks: vi.fn(),
 }));
+vi.mock("~/components/chat/transcript", () => {
+  transcriptModuleLoaded();
+  return { Transcript: () => null };
+});
 
 import { getAgent } from "~/lib/agents";
 import { listOnboardingSuggestions } from "~/lib/onboarding";
@@ -76,6 +82,7 @@ test("default view is the live chat empty state with adaptive suggestions", asyn
   expect(
     await screen.findByRole("button", { name: "Set up ticket management?" })
   ).toBeInTheDocument();
+  expect(transcriptModuleLoaded).not.toHaveBeenCalled();
 
   // The empty state composes a full message, attachments included.
   expect(document.querySelector('input[type="file"]')).not.toBeNull();
