@@ -1,6 +1,8 @@
+import { randomUUID } from "node:crypto";
+import { Readable } from "node:stream";
 import { Agent, fetch as undiciFetch } from "undici";
 import type { IntegrationHttpResponse } from "../http";
-import type { EgressHttpPort, EgressHttpRequest } from "./openapi-adapter";
+import type { EgressHttpPort, EgressHttpRequest, EgressMultipartPart } from "./openapi-adapter";
 
 /** Manifest OpenAPI transport; applies no auth and maps network faults to 503. */
 
@@ -70,15 +72,28 @@ export class FetchEgressHttp implements EgressHttpPort {
             },
           });
     try {
+      const multipart =
+        request.multipart === undefined ? undefined : encodeMultipart(request.multipart);
       response = await this.fetchImpl(request.url, {
         method: request.method,
         headers: {
-          accept: "application/json",
+          accept: request.acceptBinary === true ? "*/*" : "application/json",
           "user-agent": this.userAgent,
-          ...(request.body === undefined ? {} : { "content-type": "application/json" }),
+          ...(request.multipart === undefined && request.body !== undefined
+            ? { "content-type": "application/json" }
+            : {}),
+          ...(multipart === undefined
+            ? {}
+            : { "content-type": `multipart/form-data; boundary=${multipart.boundary}` }),
           ...request.headers,
         },
-        ...(request.body === undefined ? {} : { body: JSON.stringify(request.body) }),
+        ...(multipart !== undefined
+          ? { body: Readable.from(multipart.body), duplex: "half" }
+          : request.bodyText !== undefined
+            ? { body: request.bodyText }
+            : request.body === undefined
+              ? {}
+              : { body: JSON.stringify(request.body) }),
         // Never follow redirects: a 3xx could walk an authenticated request, credential header
         // intact, to a host the manifest never declared.
         redirect: "manual",
@@ -98,18 +113,123 @@ export class FetchEgressHttp implements EgressHttpPort {
     }
 
     try {
-      const body = await parseBody(response, this.maxResponseBytes, request.acceptBinary === true);
+      const headers = Object.fromEntries(response.headers.entries());
+      if (request.binaryResponse !== undefined && response.ok) {
+        const maxBytes = Math.min(
+          request.maxResponseBytes ?? this.maxResponseBytes,
+          this.maxResponseBytes
+        );
+        const declaredBytes = declaredLength(response.headers.get("content-length"));
+        if (declaredBytes > maxBytes) {
+          await response.body?.cancel();
+          return { status: 413, headers: {}, body: { error: "response_too_large" } };
+        }
+        const chunks = await boundedResponseChunks(response.body, maxBytes);
+        if (chunks === RESPONSE_TOO_LARGE) {
+          return { status: 413, headers: {}, body: { error: "response_too_large" } };
+        }
+        const receivedBytes = chunks.reduce((total, chunk) => total + chunk.byteLength, 0);
+        return {
+          status: response.status,
+          headers,
+          body: await request.binaryResponse({
+            headers,
+            declaredBytes: declaredBytes === 0 ? receivedBytes : declaredBytes,
+            body: (async function* () {
+              yield* chunks;
+            })(),
+          }),
+        };
+      }
+      const body = await parseBody(
+        response,
+        Math.min(request.maxResponseBytes ?? this.maxResponseBytes, this.maxResponseBytes),
+        request.acceptBinary === true
+      );
       if (body === RESPONSE_TOO_LARGE) {
         return { status: 413, headers: {}, body: { error: "response_too_large" } };
       }
       return {
         status: response.status,
-        headers: Object.fromEntries(response.headers.entries()),
+        headers,
         body,
       };
     } finally {
       await dispatcher?.close();
     }
+  }
+}
+
+function encodeMultipart(parts: readonly EgressMultipartPart[]): {
+  readonly boundary: string;
+  readonly body: AsyncIterable<Uint8Array>;
+} {
+  const boundary = `tulipfarm-${randomUUID()}`;
+  return { boundary, body: multipartBody(boundary, parts) };
+}
+
+function quoted(value: string): string {
+  return value.replace(/[\\"]/g, "\\$&").replace(/[\r\n]/g, "");
+}
+
+async function* multipartBody(
+  boundary: string,
+  parts: readonly EgressMultipartPart[]
+): AsyncIterable<Uint8Array> {
+  const encode = new TextEncoder();
+  for (const part of parts) {
+    const disposition = [
+      `--${boundary}`,
+      `Content-Disposition: form-data; name="${quoted(part.name)}"${
+        part.filename === undefined ? "" : `; filename="${quoted(part.filename)}"`
+      }`,
+      ...(part.mediaType === undefined ? [] : [`Content-Type: ${part.mediaType}`]),
+      "",
+      "",
+    ].join("\r\n");
+    yield encode.encode(disposition);
+    if (typeof part.body === "string") {
+      yield encode.encode(part.body);
+    } else {
+      yield* part.body;
+    }
+    yield encode.encode("\r\n");
+  }
+  yield encode.encode(`--${boundary}--\r\n`);
+}
+
+function declaredLength(header: string | null): number {
+  const value = Number(header);
+  return Number.isSafeInteger(value) && value >= 0 ? value : 0;
+}
+
+async function boundedResponseChunks(
+  body: ReadableStream<Uint8Array> | null,
+  maxBytes: number
+): Promise<readonly Uint8Array[] | typeof RESPONSE_TOO_LARGE> {
+  if (body === null) return [];
+  const reader = body.getReader();
+  const chunks: Uint8Array[] = [];
+  let bytes = 0;
+  let complete = false;
+  try {
+    for (;;) {
+      const chunk = await reader.read();
+      if (chunk.done) {
+        complete = true;
+        return chunks;
+      }
+      bytes += chunk.value.byteLength;
+      if (bytes > maxBytes) {
+        await reader.cancel();
+        complete = true;
+        return RESPONSE_TOO_LARGE;
+      }
+      chunks.push(chunk.value);
+    }
+  } finally {
+    if (!complete) await reader.cancel().catch(() => undefined);
+    reader.releaseLock();
   }
 }
 

@@ -3,7 +3,10 @@ import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { Worker } from "node:worker_threads";
 import { analyzeHook, HookAnalysisError } from "./analyzer";
-import type { WorkerRequest, WorkerResponse } from "./protocol";
+import { serializeJson } from "./json";
+import { PURE_HOOK_LIMITS, type WorkerRequest, type WorkerResponse } from "./protocol";
+
+export { PURE_HOOK_LIMITS } from "./protocol";
 
 export class HookError extends Error {
   constructor(
@@ -16,6 +19,19 @@ export class HookError extends Error {
 }
 
 const CIRCUIT_BREAKER_THRESHOLD = 3;
+const PURE_HOOK_EXPORT_RE = /^[A-Za-z_$][A-Za-z0-9_$]*$/;
+
+export interface PureHookExecutionRequest {
+  readonly source: string;
+  readonly sourceSha256: string;
+  readonly exportName: string;
+  readonly input: unknown;
+  readonly breakerKey: string;
+}
+
+function utf8Bytes(value: string): number {
+  return Buffer.byteLength(value, "utf8");
+}
 
 export interface HookExecutorOptions {
   /** Entrypoint module for the worker thread — see `resolveHookWorkerPath`. */
@@ -253,6 +269,78 @@ export class HookExecutor {
     }
     this.recordSuccess(breakerKey);
     return "value" in res ? res.value : undefined;
+  }
+
+  /** Runs a reviewed, synchronous ECMAScript module export with no ambient capabilities. */
+  async runPureHook(request: PureHookExecutionRequest): Promise<unknown> {
+    if (process.env.HOOKS_DISABLED === "true") {
+      throw new HookError("mandatory pure hook execution is disabled");
+    }
+    if (utf8Bytes(request.source) > PURE_HOOK_LIMITS.sourceBytes) {
+      throw new HookError(`hook source exceeds ${PURE_HOOK_LIMITS.sourceBytes} bytes`);
+    }
+    if (!PURE_HOOK_EXPORT_RE.test(request.exportName)) {
+      throw new HookError("hook export name is invalid");
+    }
+    if (!/^[a-f0-9]{64}$/.test(request.sourceSha256)) {
+      throw new HookError("hook SHA-256 is invalid");
+    }
+    const actualHash = createHash("sha256").update(request.source).digest("hex");
+    if (actualHash !== request.sourceSha256) throw new HookError("hook hash mismatch");
+    if (/\b(?:async|await)\b/.test(request.source)) {
+      throw new HookError("pure hook must execute synchronously");
+    }
+    try {
+      analyzeHook(request.source);
+    } catch (err) {
+      if (err instanceof HookAnalysisError) throw new HookError(err.message);
+      throw err;
+    }
+
+    const inputJson = serializeJson(request.input);
+    if (inputJson === undefined) throw new HookError("hook input must be a JSON value");
+    if (utf8Bytes(inputJson) > PURE_HOOK_LIMITS.inputBytes) {
+      throw new HookError(`hook input exceeds ${PURE_HOOK_LIMITS.inputBytes} bytes`);
+    }
+
+    const cb = this.breaker.get(request.breakerKey);
+    if (cb?.disabled) throw new HookError("pure hook disabled by circuit breaker");
+
+    let res: WorkerResponse;
+    try {
+      res = await this.send({
+        kind: "pure-hook",
+        source: request.source,
+        sourceSha256: request.sourceSha256,
+        exportName: request.exportName,
+        inputJson,
+      });
+    } catch (err) {
+      this.recordFailure(request.breakerKey);
+      throw err instanceof HookError
+        ? err
+        : new HookError(`hook worker error: ${(err as Error).message}`);
+    }
+    if (!res.ok) {
+      this.recordFailure(request.breakerKey);
+      throw new HookError(
+        res.timedOut ? "pure hook timed out" : `pure hook error: ${res.error}`,
+        res.timedOut
+      );
+    }
+
+    const value = "value" in res ? res.value : undefined;
+    const outputJson = serializeJson(value);
+    if (outputJson === undefined) {
+      this.recordFailure(request.breakerKey);
+      throw new HookError("pure hook output must be a JSON value");
+    }
+    if (utf8Bytes(outputJson) > PURE_HOOK_LIMITS.outputBytes) {
+      this.recordFailure(request.breakerKey);
+      throw new HookError(`hook output exceeds ${PURE_HOOK_LIMITS.outputBytes} bytes`);
+    }
+    this.recordSuccess(request.breakerKey);
+    return value;
   }
 
   async close(): Promise<void> {

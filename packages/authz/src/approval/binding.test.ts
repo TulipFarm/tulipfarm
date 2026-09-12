@@ -55,6 +55,7 @@ describe("computeApprovalBinding", () => {
     ],
     ["destination", { destination: "other.example.com" }],
     ["credentialRef", { credentialRef: "secret://crm/admin" }],
+    ["filePrincipalId", { filePrincipalId: "principal-2" }],
   ])("changes the intent digest when %s changes", (_label, patch) => {
     const base = computeApprovalBinding(input());
     const changed = computeApprovalBinding(

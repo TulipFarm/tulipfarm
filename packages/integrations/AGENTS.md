@@ -16,6 +16,7 @@ Owns adapter contracts, event normalization, source ACLs, sync checkpoints, and 
 | `src/http.ts` | Provider-neutral HTTP port, failure classification, bounded pagination. |
 | `src/grants.ts` | Default-deny grants for concrete external targets. |
 | `src/egress/` | Manifest-to-ToolContract compiler, adapter, fetch transport, destination cage. `web-content.ts` renders a fetched response to Markdown deterministically via turndown — no model, so the same bytes always give the same text. |
+| `src/catalog/`, `src/oim-hooks.ts` | Pure OIM capability review and trusted, declared Hook phase dispatch. |
 | `src/git-source/` | Pre-clone Git source cage and the bounded, sanitised clone helper. |
 | `src/import/`, `src/ingress/`, `src/external-protocol/` | Import and ingress protocols. |
 | `src/github/` | GitHub Tool adapters and provider contracts. |
@@ -41,6 +42,10 @@ Owns adapter contracts, event normalization, source ACLs, sync checkpoints, and 
   and a `<p hidden>` would reach the prompt. Unhardened turndown also emits `<script>`/`<style>`
   text verbatim.
 - `collectPages` must throw `PaginationBoundError` rather than silently truncate a paged read.
+- OIM multipart File reads require both exact declared-pointer extraction and an explicit host
+  authorization port before the effective user's File ACL may open content.
+- OIM pagination requires a host-owned confidential, authenticated continuation codec and clock;
+  fixture-only process-local handles must never be wired into a running deployment.
 - Integration events must resolve external principals; never borrow Conversation owner identity.
 - Knowledge sync: preserve ACLs, explicit domain identity mappings, live-authorize sensitive data.
 - Unreadable/unverifiable permissions remove or suppress content; never leak it.

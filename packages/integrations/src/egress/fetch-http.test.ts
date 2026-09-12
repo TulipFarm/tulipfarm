@@ -19,6 +19,27 @@ describe("FetchEgressHttp", () => {
     });
   });
 
+  it("rejects an oversized binary response before invoking the File sink", async () => {
+    const binaryResponse = vi.fn();
+    const http = new FetchEgressHttp({
+      fetch: vi.fn(async () => new Response("12345", { status: 200 })) as typeof globalThis.fetch,
+    });
+
+    await expect(
+      http.send({
+        ...request,
+        maxResponseBytes: 4,
+        acceptBinary: true,
+        binaryResponse,
+      })
+    ).resolves.toEqual({
+      status: 413,
+      headers: {},
+      body: { error: "response_too_large" },
+    });
+    expect(binaryResponse).not.toHaveBeenCalled();
+  });
+
   it("aborts the socket when the caller's own deadline fires", async () => {
     // Without this the request outlives the Tool that issued it: the caller has already been
     // told the call failed while a mutating request is still on the wire.

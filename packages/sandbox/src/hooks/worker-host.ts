@@ -1,5 +1,11 @@
 import { parentPort } from "node:worker_threads";
-import { type ResourceLookup, runExpression, runResourceHook, runRoutineHook } from "./isolate";
+import {
+  type ResourceLookup,
+  runExpression,
+  runPureHook,
+  runResourceHook,
+  runRoutineHook,
+} from "./isolate";
 import type { WorkerRequest, WorkerResponse } from "./protocol";
 
 export interface HookWorkerHostOptions {
@@ -15,6 +21,7 @@ export async function handleHookRequest(
   options: HookWorkerHostOptions = {}
 ): Promise<WorkerResponse> {
   if (request.kind === "expression") return runExpression(request);
+  if (request.kind === "pure-hook") return runPureHook(request);
   if (request.kind === "routine-hook") return runRoutineHook(request);
   return runResourceHook(request, options.resourceLookup);
 }

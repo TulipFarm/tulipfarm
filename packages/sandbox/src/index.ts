@@ -35,8 +35,8 @@ export {
   authorizeSandboxExecutionRequest,
 } from "./guardrail";
 export { analyzeHook, HookAnalysisError } from "./hooks/analyzer";
-export type { HookExecutorOptions } from "./hooks/executor";
-export { HookError, HookExecutor, resolveHookWorkerPath } from "./hooks/executor";
+export type { HookExecutorOptions, PureHookExecutionRequest } from "./hooks/executor";
+export { HookError, HookExecutor, PURE_HOOK_LIMITS, resolveHookWorkerPath } from "./hooks/executor";
 export type { ResourceLookup } from "./hooks/isolate";
 export { runExpression, runResourceHook, runRoutineHook } from "./hooks/isolate";
 export type {

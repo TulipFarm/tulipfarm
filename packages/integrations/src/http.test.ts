@@ -29,6 +29,25 @@ describe("classifyHttpFailure", () => {
     });
   });
 
+  it("reads an OIM-declared Retry-After HTTP-date header against the dispatch clock", () => {
+    const failure = classifyHttpFailure(
+      {
+        status: 429,
+        headers: { "X-Rate-Reset": "Mon, 07 Sep 2026 06:30:20 GMT" },
+        body: {},
+      },
+      false,
+      "X-Rate-Reset",
+      new Date("2026-09-07T06:30:00.000Z")
+    );
+    expect(failure).toMatchObject({
+      phase: "before_dispatch",
+      code: "provider_rate_limited",
+      retryable: true,
+      retryAfterMs: 20_000,
+    });
+  });
+
   it("classifies a 5xx on a mutating call as after_dispatch so it reconciles", () => {
     expect(classifyHttpFailure({ status: 502, headers: {}, body: {} }, true)).toMatchObject({
       phase: "after_dispatch",

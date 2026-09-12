@@ -9,6 +9,7 @@ export interface ApprovalIntent {
   readonly action: string;
   readonly targetRefs: readonly { readonly type: string; readonly id: string }[];
   readonly arguments: unknown;
+  readonly filePrincipalId?: string;
   readonly destination?: string;
   readonly credentialRef?: string;
 }
@@ -37,6 +38,7 @@ export function computeApprovalBinding(input: ApprovalBindingInput): ApprovalBin
       action: intent.action,
       targetRefs: intent.targetRefs.map((ref) => ({ type: ref.type, id: ref.id })),
       arguments: intent.arguments,
+      filePrincipalId: intent.filePrincipalId ?? null,
       destination: intent.destination ?? null,
       credentialRef: intent.credentialRef ?? null,
     }),

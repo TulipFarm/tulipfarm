@@ -346,6 +346,48 @@ describe("compileOpenApiEgress", () => {
     expect(overridden?.binding.baseUrl).toBe("https://eu.example.com/v1");
   });
 
+  it("uses operation and path servers before the document server", () => {
+    const pathItem = SPEC.paths["/search"];
+    const pathServerDocument = {
+      ...SPEC,
+      paths: {
+        ...SPEC.paths,
+        "/search": {
+          ...pathItem,
+          servers: [{ url: "https://path.example.com/v1" }],
+        },
+      },
+    };
+    const operationServerDocument = {
+      ...pathServerDocument,
+      paths: {
+        ...pathServerDocument.paths,
+        "/search": {
+          ...pathServerDocument.paths["/search"],
+          post: {
+            ...pathServerDocument.paths["/search"].post,
+            servers: [{ url: "https://operation.example.com/v1" }],
+          },
+        },
+      },
+    };
+
+    expect(
+      compileOpenApiEgress({
+        slug: "acme",
+        egress: { type: "openapi", spec: "spec.json", operations: [SEARCH_OP] },
+        document: pathServerDocument,
+      })[0]?.binding.baseUrl
+    ).toBe("https://path.example.com/v1");
+    expect(
+      compileOpenApiEgress({
+        slug: "acme",
+        egress: { type: "openapi", spec: "spec.json", operations: [SEARCH_OP] },
+        document: operationServerDocument,
+      })[0]?.binding.baseUrl
+    ).toBe("https://operation.example.com/v1");
+  });
+
   it("records the destination host on the contract", () => {
     const [tool] = compileOpenApiEgress({
       slug: "acme",

@@ -16,6 +16,8 @@ export interface ToolIntent {
   readonly action: string;
   readonly targetRefs: readonly ToolTargetRef[];
   readonly arguments: unknown;
+  /** The Principal whose File ACL authorizes upload reads and owns downloaded Files. */
+  readonly filePrincipalId?: string;
   readonly destination?: string;
   readonly credentialRef?: string;
   readonly idempotencyKey: string;
@@ -57,6 +59,7 @@ export function normalizeToolIntent(input: unknown): ToolIntent {
     !nonEmptyString(input.toolVersion) ||
     !nonEmptyString(input.action) ||
     !Array.isArray(input.targetRefs) ||
+    !optionalString(input.filePrincipalId) ||
     !optionalString(input.destination) ||
     !optionalString(input.credentialRef) ||
     !nonEmptyString(input.idempotencyKey)
@@ -93,6 +96,7 @@ export function normalizeToolIntent(input: unknown): ToolIntent {
     action: input.action,
     targetRefs: Object.freeze(targetRefs),
     arguments: structuredClone(input.arguments),
+    ...(input.filePrincipalId === undefined ? {} : { filePrincipalId: input.filePrincipalId }),
     destination: input.destination,
     credentialRef: input.credentialRef,
     idempotencyKey: input.idempotencyKey,
@@ -108,6 +112,7 @@ export function intentDigest(intent: ToolIntent): string {
     action: intent.action,
     targetRefs: intent.targetRefs,
     arguments: intent.arguments,
+    filePrincipalId: intent.filePrincipalId ?? null,
     destination: intent.destination ?? null,
     credentialRef: intent.credentialRef ?? null,
   });
