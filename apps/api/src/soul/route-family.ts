@@ -35,7 +35,8 @@ export function registerSoulRouteFamily(
   requireAuth: PreHandler,
   requireAuthorization: RequireAuthorization,
   authorizationCheck: AuthorizationCheck
-): void {
+): boolean {
+  let integrationAuthCallbackRegistered = false;
   const publicOrigins = opts.publicOrigins;
   if (opts.gitSync && opts.soulWriter) {
     registerSoulRoutes(
@@ -154,10 +155,12 @@ export function registerSoulRouteFamily(
               fetchImpl: opts.integrationAuth.fetchImpl,
               onConnected,
               tokens: opts.integrationAuth.tokens,
+              oimConnections: opts.oimConnections,
             },
             requireAuth,
             authorizationCheck
           );
+          integrationAuthCallbackRegistered = true;
         }
       }
       registerOnboardingRoutes(app, opts.soulLoader, requireAuth, {
@@ -194,4 +197,5 @@ export function registerSoulRouteFamily(
       }
     }
   }
+  return integrationAuthCallbackRegistered;
 }

@@ -161,6 +161,10 @@ describe("OIM persistence migrations", () => {
       packageDigest: "package-digest",
     });
 
+    await expect(repo.findActive("state-1")).resolves.toMatchObject({
+      connectionId: "connection-1",
+      oimStepId: "admin-consent",
+    });
     await expect(repo.consume("state-1")).resolves.toMatchObject({
       connectionId: "connection-1",
       oimStepId: "admin-consent",
@@ -168,6 +172,7 @@ describe("OIM persistence migrations", () => {
       manifestDigest: "manifest-digest",
       packageDigest: "package-digest",
     });
+    await expect(repo.findActive("state-1")).resolves.toBeNull();
     await expect(repo.consume("state-1")).resolves.toBeNull();
   });
 

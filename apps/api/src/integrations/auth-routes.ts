@@ -17,6 +17,7 @@ import {
   startAuthStep,
 } from "./auth-broker";
 import { mergeConnectionEnv, readConnectionEnv } from "./connection-writer";
+import type { OimConnectionService } from "./connections/service";
 import { resolveGitHubPrincipalSubject } from "./github-principal";
 import { sealPrincipalCredential } from "./principal-connect";
 import type { PrincipalProviderTokenRepo } from "./principal-tokens";
@@ -38,6 +39,11 @@ export interface AuthRoutesDeps {
   onConnected?: (slug: string) => Promise<void>;
   /** Personal credentials require a store; absence is a compile-time error, not shared fallback. */
   tokens: PrincipalProviderTokenRepo | undefined;
+  /** Versioned OIM Connection callback handler. Production wiring is composed separately. */
+  oimConnections?: Pick<
+    OimConnectionService,
+    "authorizationWebUrl" | "completeAuthorization" | "hasPendingAuthorization"
+  >;
 }
 
 const NAME_RE = /^[a-z0-9][a-z0-9._-]{0,63}$/;
@@ -65,6 +71,61 @@ function denialStatus(reason: AuthBrokerError["reason"]): 400 | 404 | 409 | 502 
     case "exchange_failed":
       return 502;
   }
+}
+
+const CALLBACK_ROUTE_OPTIONS = {
+  // Provider callbacks are unauthenticated; one-use state proves authenticity and replay.
+  schema: {
+    description:
+      "Single provider callback for every integration auth flow: consumes the one-use state and stores what the step produced.",
+    tags: ["integrations"],
+    querystring: { type: "object", properties: { state: { type: "string" } } },
+    response: { 302: { type: "null" }, 400: ErrorSchema, 404: ErrorSchema, 502: ErrorSchema },
+  },
+};
+
+function redirectOimCallback(
+  reply: FastifyReply,
+  webUrl: string,
+  outcome: { readonly key: string; readonly connectionId: string }
+) {
+  return reply.redirect(
+    `${webUrl}/integrations/${outcome.key}?connection=${encodeURIComponent(
+      outcome.connectionId
+    )}&status=ok`,
+    302
+  );
+}
+
+async function handleOimCallback(
+  service: NonNullable<AuthRoutesDeps["oimConnections"]>,
+  query: Record<string, string>,
+  reply: FastifyReply
+) {
+  try {
+    const outcome = await service.completeAuthorization(query);
+    return redirectOimCallback(reply, service.authorizationWebUrl(), outcome);
+  } catch (err) {
+    if (err instanceof AuthBrokerError) {
+      return reply.redirect(
+        `${err.webUrl ?? service.authorizationWebUrl()}/integrations/${
+          err.slug ?? ""
+        }?status=error&reason=${err.reason}`,
+        302
+      );
+    }
+    throw err;
+  }
+}
+
+/** Registers the callback when the OIM lifecycle is hosted without legacy Soul auth routes. */
+export function registerOimConnectionAuthCallbackRoute(
+  app: FastifyInstance,
+  service: NonNullable<AuthRoutesDeps["oimConnections"]>
+): void {
+  app.get("/api/v1/integrations/auth/callback", CALLBACK_ROUTE_OPTIONS, async (req, reply) =>
+    handleOimCallback(service, req.query as Record<string, string>, reply)
+  );
 }
 
 export function registerIntegrationAuthRoutes(
@@ -243,75 +304,69 @@ export function registerIntegrationAuthRoutes(
     }
   );
 
-  app.get(
-    "/api/v1/integrations/auth/callback",
-    {
-      // Provider callbacks are unauthenticated; one-use state proves authenticity and replay.
-      schema: {
-        description:
-          "Single provider callback for every integration auth flow: consumes the one-use state and stores what the step produced.",
-        tags: ["integrations"],
-        querystring: { type: "object", properties: { state: { type: "string" } } },
-        response: { 302: { type: "null" }, 400: ErrorSchema, 404: ErrorSchema, 502: ErrorSchema },
-      },
-    },
-    async (req, reply) => {
-      const query = req.query as Record<string, string>;
-      try {
-        const endpoints = await resolveEndpoints();
-        const outcome = await completeAuthStep({
-          query,
-          loadManifest: resolveManifest,
-          loadEnv: (slug) => readConnectionEnv(deps, slug),
-          endpoints,
-          repo: deps.repo,
-          fetchImpl: deps.fetchImpl,
-        });
+  app.get("/api/v1/integrations/auth/callback", CALLBACK_ROUTE_OPTIONS, async (req, reply) => {
+    const query = req.query as Record<string, string>;
+    try {
+      const pendingOim =
+        query.state !== undefined &&
+        deps.oimConnections !== undefined &&
+        (await deps.oimConnections.hasPendingAuthorization(query.state));
+      if (pendingOim && deps.oimConnections !== undefined) {
+        return handleOimCallback(deps.oimConnections, query, reply);
+      }
+      const endpoints = await resolveEndpoints();
+      const outcome = await completeAuthStep({
+        query,
+        loadManifest: resolveManifest,
+        loadEnv: (slug) => readConnectionEnv(deps, slug),
+        endpoints,
+        repo: deps.repo,
+        fetchImpl: deps.fetchImpl,
+      });
 
-        const manifest = resolveManifest(outcome.slug);
-        // Personal credentials must never be merged into shared `connection.yaml`.
-        if (outcome.principal !== undefined) {
-          if (deps.tokens === undefined) {
-            throw new AuthBrokerError(
-              "missing_credentials",
-              "this deployment cannot store personal credentials",
-              outcome.slug
-            );
-          }
-          const externalSubject =
-            outcome.slug === "github"
-              ? await resolveGitHubPrincipalSubject(outcome, deps.fetchImpl)
-              : null;
-          await sealPrincipalCredential({
-            outcome,
-            secrets: deps.secrets,
-            tokens: deps.tokens,
-            externalSubject,
-          });
-        } else if (manifest && Object.keys(outcome.env).length > 0) {
-          const { connectedNow } = await mergeConnectionEnv(deps, {
-            slug: outcome.slug,
-            manifest,
-            patch: outcome.env,
-            commitMessage: `soul: integration ${outcome.slug} auth step ${outcome.stepIndex}`,
-          });
-          if (connectedNow) await deps.onConnected?.(outcome.slug);
-        }
-        return reply.redirect(
-          `${outcome.webUrl}/integrations/${outcome.slug}?step=${outcome.stepIndex}&status=ok`,
-          302
-        );
-      } catch (err) {
-        if (err instanceof AuthBrokerError) {
-          // Browser failures redirect to an Integration page; unknown slugs land on the list.
-          const slug = err.slug ?? "";
-          return reply.redirect(
-            `${err.webUrl ?? (await resolveEndpoints()).webUrl}/integrations/${slug}?status=error&reason=${err.reason}`,
-            302
+      const manifest = resolveManifest(outcome.slug);
+      // Personal credentials must never be merged into shared `connection.yaml`.
+      if (outcome.principal !== undefined) {
+        if (deps.tokens === undefined) {
+          throw new AuthBrokerError(
+            "missing_credentials",
+            "this deployment cannot store personal credentials",
+            outcome.slug
           );
         }
-        throw err;
+        const externalSubject =
+          outcome.slug === "github"
+            ? await resolveGitHubPrincipalSubject(outcome, deps.fetchImpl)
+            : null;
+        await sealPrincipalCredential({
+          outcome,
+          secrets: deps.secrets,
+          tokens: deps.tokens,
+          externalSubject,
+        });
+      } else if (manifest && Object.keys(outcome.env).length > 0) {
+        const { connectedNow } = await mergeConnectionEnv(deps, {
+          slug: outcome.slug,
+          manifest,
+          patch: outcome.env,
+          commitMessage: `soul: integration ${outcome.slug} auth step ${outcome.stepIndex}`,
+        });
+        if (connectedNow) await deps.onConnected?.(outcome.slug);
       }
+      return reply.redirect(
+        `${outcome.webUrl}/integrations/${outcome.slug}?step=${outcome.stepIndex}&status=ok`,
+        302
+      );
+    } catch (err) {
+      if (err instanceof AuthBrokerError) {
+        // Browser failures redirect to an Integration page; unknown slugs land on the list.
+        const slug = err.slug ?? "";
+        return reply.redirect(
+          `${err.webUrl ?? (await resolveEndpoints()).webUrl}/integrations/${slug}?status=error&reason=${err.reason}`,
+          302
+        );
+      }
+      throw err;
     }
-  );
+  });
 }

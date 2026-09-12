@@ -23,6 +23,11 @@ export const ADMIN_ONLY_SURFACES: readonly {
     actions: ["integration.connect", "integration.disconnect", "integration.remove"],
     enforcedIn: "integrations/routes.ts",
   },
+  {
+    type: "integration_connection",
+    actions: ["integration_connection.manage_shared"],
+    enforcedIn: "integrations/connections/routes.ts",
+  },
   /** Shared credentials and provider writes require an explicit Team-level grant. */
   {
     type: "integration.github",
@@ -195,6 +200,11 @@ export const MEMBER_ALLOWED_SURFACES: readonly {
     type: "integration",
     actions: ["integration.read"],
     enforcedIn: "integrations/routes.ts",
+  },
+  {
+    type: "integration_connection",
+    actions: ["integration_connection.authorize", "integration_connection.manage"],
+    enforcedIn: "integrations/auth-routes.ts; integrations/connections/routes.ts",
   },
   /** Use exact Tool-declared resource types; kind distinctions live in target ids. */
   { type: "platform.knowledge", actions: ["*"], enforcedIn: "packages/knowledge/src/tools.ts" },

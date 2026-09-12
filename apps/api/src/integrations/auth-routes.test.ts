@@ -82,6 +82,14 @@ class MemoryAuthRequestRepo implements IntegrationAuthRequestRepo {
   async create(request: IntegrationAuthRequestDoc): Promise<void> {
     this.requests.push({ ...request });
   }
+  async findActive(state: string): Promise<IntegrationAuthRequestDoc | null> {
+    return (
+      this.requests.find(
+        (request) =>
+          request.state === state && request.consumedAt === null && request.expiresAt > new Date()
+      ) ?? null
+    );
+  }
   async consume(state: string): Promise<IntegrationAuthRequestDoc | null> {
     const request = this.requests.find(
       (r) => r.state === state && r.consumedAt === null && r.expiresAt > new Date()
@@ -127,6 +135,8 @@ describe("integration auth routes", () => {
   let principalTokens: InMemoryPrincipalProviderTokenRepo;
   let memberSid: string;
   let fetchImpl: ReturnType<typeof vi.fn>;
+  let completeOimAuthorization: ReturnType<typeof vi.fn>;
+  let oimStates: Set<string>;
 
   beforeEach(async () => {
     const store = new MemorySessionStore();
@@ -177,6 +187,11 @@ describe("integration auth routes", () => {
     repo = new MemoryAuthRequestRepo();
     principalTokens = new InMemoryPrincipalProviderTokenRepo();
     fetchImpl = vi.fn();
+    oimStates = new Set();
+    completeOimAuthorization = vi.fn(async () => ({
+      key: "acme-v2",
+      connectionId: "connection-1",
+    }));
 
     app = await buildApp({
       sessionStore: store,
@@ -192,6 +207,11 @@ describe("integration auth routes", () => {
         fetchImpl: fetchImpl as never,
         tokens: principalTokens,
       },
+      oimConnections: {
+        completeAuthorization: completeOimAuthorization,
+        hasPendingAuthorization: async (state: string) => oimStates.has(state),
+        authorizationWebUrl: () => "https://app.example.test",
+      } as never,
     });
   });
 
@@ -314,6 +334,26 @@ describe("integration auth routes", () => {
   });
 
   describe("GET /integrations/auth/callback", () => {
+    it("dispatches OIM state from its own repository when the legacy repository differs", async () => {
+      oimStates.add("oim-state");
+      expect(repo.requests).toHaveLength(0);
+
+      const response = await app.inject({
+        method: "GET",
+        url: "/api/v1/integrations/auth/callback?state=oim-state&connectionId=forged&stepId=forged",
+      });
+
+      expect(response.statusCode).toBe(302);
+      expect(completeOimAuthorization).toHaveBeenCalledWith({
+        state: "oim-state",
+        connectionId: "forged",
+        stepId: "forged",
+      });
+      expect(response.headers.location).toBe(
+        "https://app.example.test/integrations/acme-v2?connection=connection-1&status=ok"
+      );
+    });
+
     async function startedState(): Promise<string> {
       await connectFields();
       const res = await start(1);

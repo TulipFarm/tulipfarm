@@ -30,6 +30,7 @@ import { registerFileRoutes } from "./files/routes";
 import { registerFormRoutes } from "./forms/routes";
 import { registerHookIngressRoutes } from "./hooks/routes";
 import { registerIngressRoutes } from "./ingress/routes";
+import { registerOimConnectionFeature } from "./integrations/connections/compose";
 import { registerGitHubInstallRoutes } from "./integrations/github-install-routes";
 import { registerInternalRouteFamily } from "./internal/route-family";
 import { registerKillSwitchRoutes } from "./kill-switches/routes";
@@ -443,7 +444,13 @@ export async function buildApp(opts: AppOptions = {}) {
         opts.resourceRepo
       );
     }
-    registerSoulRouteFamily(app, opts, requireAuth, requireAuthorization, authorizationCheck);
+    const integrationAuthCallbackRegistered = registerSoulRouteFamily(
+      app,
+      opts,
+      requireAuth,
+      requireAuthorization,
+      authorizationCheck
+    );
     if (opts.fileService) {
       registerFileRoutes(
         app,
@@ -500,6 +507,16 @@ export async function buildApp(opts: AppOptions = {}) {
         requireAuth,
         requireAuthorization,
       });
+    }
+    if (opts.oimConnections) {
+      registerOimConnectionFeature(
+        app,
+        opts.oimConnections,
+        requireAuth,
+        requireAuthorization,
+        authorizationCheck,
+        integrationAuthCallbackRegistered
+      );
     }
     if (opts.resourceRepoFactory && opts.counterStore && opts.soulLoader) {
       registerResourceRoutes(

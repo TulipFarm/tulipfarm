@@ -43,6 +43,47 @@ export type {
   ChannelRunStarter,
 } from "./channels";
 export type {
+  OimPackageCatalogEntry,
+  ResolvedOimPackage,
+} from "./connections/catalog";
+export {
+  connectionMatchesPackage,
+  oimManifestMajor,
+  resolveOimPackage,
+} from "./connections/catalog";
+export type {
+  ConnectionCredentialVault,
+  CreateOimConnectionDeps,
+  CreateOimConnectionInput,
+  OimOAuthRefresh,
+  OimOAuthRefreshRequest,
+  OimOAuthRefreshResult,
+  OimOAuthRefreshStepResult,
+  RefreshOimConnectionDeps,
+  RevokeOimConnectionDeps,
+  VerifiedConnectionIdentityEvidence,
+} from "./connections/lifecycle";
+export {
+  createOimConnection,
+  refreshOimConnection,
+  revokeOimConnection,
+} from "./connections/lifecycle";
+export type {
+  OimOperationConnection,
+  OimOperationConnectionRequest,
+  ToolConnectionBinding,
+} from "./connections/operation";
+export { OimOperationConnectionResolver } from "./connections/operation";
+export type {
+  ConnectionPrincipal,
+  ConnectionReader,
+  ConnectionResolution,
+  ConnectionResolutionRequest,
+  ConnectionSummary,
+  ConnectionUseAuthorizer,
+} from "./connections/resolver";
+export { ConnectionResolver } from "./connections/resolver";
+export type {
   CompiledEgressTool,
   CompiledGraphqlTool,
   CompiledOimGraphqlTool,

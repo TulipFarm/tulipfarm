@@ -54,6 +54,7 @@ import type { HookIngressDeps } from "./hooks/routes";
 import type { IdentityRouteDeps } from "./identity/routes";
 import type { IngressRoutesDeps } from "./ingress/routes";
 import type { IntegrationAuthRequestRepo } from "./integrations/auth-broker";
+import type { OimConnectionService } from "./integrations/connections/service";
 import type { GitHubInstallDeps } from "./integrations/github-install-routes";
 import type { PrincipalProviderTokenRepo } from "./integrations/principal-tokens";
 import type { SlackBindDeps } from "./integrations/slack-binding";
@@ -143,6 +144,11 @@ export interface AppOptions {
      */
     tokens: PrincipalProviderTokenRepo | undefined;
   };
+  /**
+   * Versioned OIM Connection lifecycle service. P12 supplies its catalog, stores, Secret manager,
+   * provider HTTP adapter, and public origins; omission leaves these routes unregistered.
+   */
+  oimConnections?: OimConnectionService;
   hookExecutor?: HookExecutor;
   resourceRepoFactory?: ResourceRepoFactory;
   counterStore?: CounterStore;

@@ -134,17 +134,37 @@ describe("OIM persistence foundations", () => {
     });
 
     const account = await store.find(BUSINESS_ID, CONNECTION_ID, "account");
-    expect(
-      await store.updateHealth({
+    const claimed = await store.update({
+      businessId: BUSINESS_ID,
+      connectionId: CONNECTION_ID,
+      stepId: "account",
+      expectedRevision: account?.revision ?? 0,
+      status: "pending",
+      accessSlot: "access_token",
+      accessSecretRef: "secret://00000000-0000-4000-8000-000000000011",
+      refreshSlot: "refresh_token",
+      refreshSecretRef: "secret://00000000-0000-4000-8000-000000000013",
+      externalIdentity: { subject: "user-1" },
+      expiresAt: "2026-09-12T10:00:00.000Z",
+      healthCheckedAt: "2026-09-12T09:15:00.000Z",
+    });
+    expect(claimed).toMatchObject({ status: "pending", revision: 2 });
+    await expect(
+      store.update({
         businessId: BUSINESS_ID,
         connectionId: CONNECTION_ID,
         stepId: "account",
         expectedRevision: account?.revision ?? 0,
         status: "action_required",
+        accessSlot: "access_token",
+        accessSecretRef: "secret://00000000-0000-4000-8000-000000000011",
+        refreshSlot: "refresh_token",
+        refreshSecretRef: "secret://00000000-0000-4000-8000-000000000013",
+        externalIdentity: { subject: "user-1" },
         expiresAt: null,
         healthCheckedAt: "2026-09-12T09:30:00.000Z",
       })
-    ).not.toBeNull();
+    ).resolves.toBeNull();
 
     await expect(store.find(BUSINESS_ID, CONNECTION_ID, "admin")).resolves.toMatchObject({
       status: "active",
@@ -191,6 +211,151 @@ describe("OIM persistence foundations", () => {
       proofKind: "auth",
       verifiedBy: "oim-auth-service",
     });
+  });
+
+  it("atomically publishes step patches, preserves concurrent bindings, and fences revoke", async () => {
+    const connections = new ConnectionStore(transactionPort(database));
+    const authSteps = new ConnectionAuthStepStore(transactionPort(database));
+    for (const stepId of ["account", "admin"]) {
+      await authSteps.put({
+        businessId: BUSINESS_ID,
+        connectionId: CONNECTION_ID,
+        stepId,
+        status: "pending",
+        accessSlot: null,
+        accessSecretRef: null,
+        refreshSlot: null,
+        refreshSecretRef: null,
+        externalIdentity: null,
+        expiresAt: null,
+        healthCheckedAt: "2026-09-12T09:00:00.000Z",
+      });
+    }
+    const identity = {
+      businessId: BUSINESS_ID,
+      connectionId: CONNECTION_ID,
+      integrationId: "calendar",
+      integrationMajorVersion: 2,
+      externalTenantId: "tenant-1",
+      externalAccountId: "account-1",
+      proofKind: "auth" as const,
+      proofDigest: "b".repeat(64),
+      verifiedAt: "2026-09-12T09:00:00.000Z",
+      verifiedBy: "provider-profile",
+    };
+    const publish = async (stepId: string, expectedRevision: number, ref: `secret://${string}`) =>
+      connections.publishAuthStep({
+        businessId: BUSINESS_ID,
+        connectionId: CONNECTION_ID,
+        integration: { id: "calendar", majorVersion: 2 },
+        owner: { scope: "organization" },
+        stepId,
+        expectedRevision,
+        status: "active",
+        accessSlot: `${stepId}_access`,
+        accessSecretRef: ref,
+        refreshSlot: null,
+        refreshSecretRef: null,
+        externalIdentity: {
+          externalTenantId: "tenant-1",
+          externalAccountId: "account-1",
+        },
+        expiresAt: "2026-09-12T10:00:00.000Z",
+        healthCheckedAt: "2026-09-12T09:00:00.000Z",
+        configuration: { [`${stepId}_site`]: `${stepId}.example.test` },
+        secretBindings: { [`${stepId}_access`]: ref },
+        verifiedIdentity: identity,
+      });
+
+    await expect(
+      Promise.all([
+        publish("account", 1, "secret://00000000-0000-4000-8000-000000000021"),
+        publish("admin", 1, "secret://00000000-0000-4000-8000-000000000022"),
+      ])
+    ).resolves.toEqual([true, true]);
+    await expect(
+      publish("account", 1, "secret://00000000-0000-4000-8000-000000000023")
+    ).resolves.toBe(false);
+
+    await expect(connections.findById(BUSINESS_ID, CONNECTION_ID)).resolves.toMatchObject({
+      configuration: {
+        region: "us",
+        account_site: "account.example.test",
+        admin_site: "admin.example.test",
+      },
+      secretBindings: {
+        access: "secret://00000000-0000-4000-8000-000000000001",
+        account_access: "secret://00000000-0000-4000-8000-000000000021",
+        admin_access: "secret://00000000-0000-4000-8000-000000000022",
+      },
+      health: { status: "healthy" },
+    });
+
+    await connections.claimAuthStep({
+      businessId: BUSINESS_ID,
+      connectionId: CONNECTION_ID,
+      integration: { id: "calendar", majorVersion: 2 },
+      owner: { scope: "organization" },
+      stepId: "account",
+      expectedRevision: 2,
+      healthCheckedAt: "2026-09-12T09:30:00.000Z",
+    });
+    await expect(
+      connections.publishAuthStep({
+        businessId: BUSINESS_ID,
+        connectionId: CONNECTION_ID,
+        integration: { id: "calendar", majorVersion: 2 },
+        owner: { scope: "organization" },
+        stepId: "account",
+        expectedRevision: 3,
+        status: "active",
+        accessSlot: "account_access",
+        accessSecretRef: "secret://00000000-0000-4000-8000-000000000024",
+        refreshSlot: null,
+        refreshSecretRef: null,
+        externalIdentity: null,
+        expiresAt: null,
+        healthCheckedAt: "2026-09-12T09:30:00.000Z",
+        configuration: {},
+        secretBindings: {
+          account_access: "secret://00000000-0000-4000-8000-000000000024",
+        },
+        verifiedIdentity: { ...identity, externalAccountId: "account-2" },
+      })
+    ).rejects.toBeInstanceOf(ConnectionExternalIdentityConflictError);
+    await expect(connections.findById(BUSINESS_ID, CONNECTION_ID)).resolves.toMatchObject({
+      secretBindings: {
+        account_access: "secret://00000000-0000-4000-8000-000000000021",
+      },
+    });
+    await expect(authSteps.find(BUSINESS_ID, CONNECTION_ID, "account")).resolves.toMatchObject({
+      status: "pending",
+      revision: 3,
+    });
+
+    const revoked = await connections.fenceRevocation(BUSINESS_ID, CONNECTION_ID);
+    expect(revoked).toMatchObject({
+      status: "revoked",
+      isDefault: false,
+      health: { status: "action_required" },
+    });
+    expect(revoked?.secretBindings.admin_access).toBe(
+      "secret://00000000-0000-4000-8000-000000000022"
+    );
+    await expect(
+      publish("admin", 2, "secret://00000000-0000-4000-8000-000000000025")
+    ).resolves.toBe(false);
+    await expect(
+      connections.claimAuthStep({
+        businessId: BUSINESS_ID,
+        connectionId: CONNECTION_ID,
+        integration: { id: "calendar", majorVersion: 2 },
+        owner: { scope: "organization" },
+        stepId: "admin",
+        expectedRevision: 3,
+        healthCheckedAt: "2026-09-12T10:00:00.000Z",
+      })
+    ).resolves.toBe(false);
   });
 
   it("deduplicates only within the full webhook routing identity", async () => {

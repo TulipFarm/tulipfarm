@@ -25,6 +25,7 @@ export interface IntegrationAuthRequestDoc {
 
 export interface IntegrationAuthRequestRepo {
   create(request: IntegrationAuthRequestDoc): Promise<void>;
+  findActive?(state: string): Promise<IntegrationAuthRequestDoc | null>;
   consume(state: string): Promise<IntegrationAuthRequestDoc | null>;
 }
 
@@ -93,6 +94,15 @@ export class PgIntegrationAuthRequestRepo implements IntegrationAuthRequestRepo 
       `UPDATE integration_auth_requests SET consumed_at = now()
        WHERE state = $1 AND consumed_at IS NULL AND expires_at > now()
        RETURNING *`,
+      [state]
+    );
+    return rows.length > 0 ? rowToRequest(rows[0]) : null;
+  }
+
+  async findActive(state: string): Promise<IntegrationAuthRequestDoc | null> {
+    const { rows } = await this.q.query(
+      `SELECT * FROM integration_auth_requests
+       WHERE state = $1 AND consumed_at IS NULL AND expires_at > now()`,
       [state]
     );
     return rows.length > 0 ? rowToRequest(rows[0]) : null;
