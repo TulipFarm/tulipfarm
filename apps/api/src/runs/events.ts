@@ -1,6 +1,7 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { ErrorSchema } from "../auth/schemas";
 import { formatSseEvent, SSE_KEEPALIVE_MS, writeSseHeaders } from "../chat/sse";
+import { corsPassthrough } from "../chat/turn-helpers";
 import { makeRateLimitHook, type RateLimiter } from "../rate-limit";
 
 export type RunEventAudience = "participant" | "operator";
@@ -93,6 +94,7 @@ export async function streamRunEvents(
   const now = deps.now ?? Date.now;
   let cursor = request.after;
   let lastWriteAt: number | undefined;
+  let closingStatus: string | undefined;
 
   for (;;) {
     if (sink.destroyed) return "client_disconnected";
@@ -117,10 +119,22 @@ export async function streamRunEvents(
         eventType: event.eventType,
         data: { ...event.payload, occurredAt: event.occurredAt },
       });
+      if (sink.destroyed) return "client_disconnected";
       lastWriteAt = now();
     }
     // A full page means more backlog is waiting; drain it before polling for Run status.
     if (page.length === pageSize) continue;
+
+    if (closingStatus !== undefined) {
+      await emit(sink, {
+        seq: cursor,
+        eventType: "stream.closed",
+        data: { status: closingStatus },
+      });
+      if (sink.destroyed) return "client_disconnected";
+      sink.end();
+      return "completed";
+    }
 
     const run = await deps.runs.find(grant.businessId, request.runId);
     if (!run) {
@@ -128,13 +142,8 @@ export async function streamRunEvents(
       return "run_not_found";
     }
     if (STREAM_CLOSING_RUN_STATUSES.includes(run.status)) {
-      await emit(sink, {
-        seq: cursor,
-        eventType: "stream.closed",
-        data: { status: run.status },
-      });
-      sink.end();
-      return "completed";
+      closingStatus = run.status;
+      continue;
     }
     if (
       deps.keepaliveMs !== undefined &&
@@ -191,10 +200,18 @@ export function sinkFor(reply: FastifyReply): SseSink {
       return raw.destroyed;
     },
     write: (chunk) => raw.write(chunk),
-    waitForDrain: () =>
-      new Promise((resolve) => {
-        raw.once("drain", resolve);
-      }),
+    waitForDrain: () => {
+      if (raw.destroyed) return Promise.resolve();
+      return new Promise((resolve) => {
+        const done = () => {
+          raw.off("drain", done);
+          raw.off("close", done);
+          resolve();
+        };
+        raw.once("drain", done);
+        raw.once("close", done);
+      });
+    },
     end: () => raw.end(),
   };
 }
@@ -264,7 +281,7 @@ export function registerRunEventRoutes(
         req.headers["last-event-id"],
         (req.query as { after?: number }).after
       );
-      writeSseHeaders(reply.raw);
+      writeSseHeaders(reply.raw, corsPassthrough(reply));
       reply.hijack();
       await streamRunEvents(
         sinkFor(reply),

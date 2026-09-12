@@ -209,7 +209,7 @@ import {
 } from "./internal/slack-command-response";
 import { SlackHomeProjectionService } from "./internal/slack-home-projection";
 import { SubagentTurnContextResolver } from "./internal/subagent-context";
-import { buildDelegatedToolDispatch } from "./internal/tool-dispatch";
+import { buildDelegatedToolDispatch, runCancellationSourceFor } from "./internal/tool-dispatch";
 import { ChatTurnContextResolver } from "./internal/turn-context";
 import { InternalTurnHost } from "./internal/turn-host";
 import { KillSwitchService } from "./kill-switches/service";
@@ -1310,6 +1310,7 @@ async function boot() {
           identities: externalIdentityRepo,
           githubInstallationToken: githubTooling.installationToken,
           transactions: runTransactions,
+          runCancellation: runCancellationSourceFor(runStore),
           logger: { error: (message, error) => app.log.error({ err: error }, message) },
         }),
         approvals: {

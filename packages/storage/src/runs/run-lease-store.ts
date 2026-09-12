@@ -166,21 +166,124 @@ export async function listRecoveryCandidateRows(
   businessId: string,
   limit: number
 ): Promise<readonly PersistedRun[]> {
-  const result = await transaction.query<RunRow>(
-    `SELECT id, business_id, source, bundle, identity, status, version, created_at, started_at,
+  const pageSize = Math.max(0, limit);
+  if (pageSize === 0) return [];
+  await transaction.query(
+    `INSERT INTO run_recovery_cursors (business_id)
+     VALUES ($1)
+     ON CONFLICT (business_id) DO NOTHING`,
+    [businessId]
+  );
+  const cursor = await transaction.query<{
+    last_created_at: string | Date | null;
+    last_run_id: string | null;
+    cycle_end_created_at: string | Date | null;
+    cycle_end_run_id: string | null;
+  }>(
+    `SELECT last_created_at, last_run_id, cycle_end_created_at, cycle_end_run_id
+       FROM run_recovery_cursors
+      WHERE business_id = $1
+      FOR UPDATE`,
+    [businessId]
+  );
+  const current = cursor.rows[0];
+  const latestBoundary = async () => {
+    const result = await transaction.query<{ created_at: string | Date; id: string }>(
+      `SELECT created_at, id
+         FROM runs
+        WHERE business_id = $1
+          AND status = 'needs_reconciliation'
+          AND (error_evidence_ref IS NULL OR error_evidence_ref IN ($2, $3, $4))
+        ORDER BY created_at DESC, id DESC
+        LIMIT 1`,
+      [
+        businessId,
+        DISPATCH_HANDLER_ERROR_REF,
+        DISPATCH_LEASE_EXPIRED_REF,
+        DISPATCH_UNSPECIFIED_PARK_REF,
+      ]
+    );
+    return result.rows[0];
+  };
+  const page = async (
+    after: {
+      readonly last_created_at: string | Date | null;
+      readonly last_run_id: string | null;
+    },
+    cycleEnd: { readonly created_at: string | Date; readonly id: string }
+  ) =>
+    transaction.query<RunRow>(
+      `SELECT id, business_id, source, bundle, identity, status, version, created_at, started_at,
             finished_at, result_artifact_id, error_evidence_ref, lease_owner, lease_expires_at
        FROM runs
       WHERE business_id = $1
         AND status = 'needs_reconciliation'
         AND (error_evidence_ref IS NULL OR error_evidence_ref IN ($2, $3, $4))
-      ORDER BY created_at
-      LIMIT $5`,
+        AND (
+          $5::timestamptz IS NULL
+          OR (created_at, id) > ($5::timestamptz, $6::uuid)
+        )
+        AND (created_at, id) <= ($7::timestamptz, $8::uuid)
+      ORDER BY created_at, id
+      LIMIT $9`,
+      [
+        businessId,
+        DISPATCH_HANDLER_ERROR_REF,
+        DISPATCH_LEASE_EXPIRED_REF,
+        DISPATCH_UNSPECIFIED_PARK_REF,
+        after?.last_created_at ?? null,
+        after?.last_run_id ?? null,
+        cycleEnd.created_at,
+        cycleEnd.id,
+        pageSize,
+      ]
+    );
+  let cycleEnd =
+    current?.cycle_end_created_at !== null &&
+    current?.cycle_end_created_at !== undefined &&
+    current.cycle_end_run_id !== null
+      ? { created_at: current.cycle_end_created_at, id: current.cycle_end_run_id }
+      : await latestBoundary();
+  if (cycleEnd === undefined) return [];
+
+  let result = await page(
+    {
+      last_created_at: current?.last_created_at ?? null,
+      last_run_id: current?.last_run_id ?? null,
+    },
+    cycleEnd
+  );
+  if (result.rows.length === 0) {
+    const nextCycleEnd = await latestBoundary();
+    if (nextCycleEnd === undefined) {
+      await transaction.query(
+        `UPDATE run_recovery_cursors
+            SET last_created_at = NULL,
+                last_run_id = NULL,
+                cycle_end_created_at = NULL,
+                cycle_end_run_id = NULL
+          WHERE business_id = $1`,
+        [businessId]
+      );
+      return [];
+    }
+    cycleEnd = nextCycleEnd;
+    result = await page({ last_created_at: null, last_run_id: null }, cycleEnd);
+  }
+  const last = result.rows.at(-1);
+  await transaction.query(
+    `UPDATE run_recovery_cursors
+        SET last_created_at = $2::timestamptz,
+            last_run_id = $3::uuid,
+            cycle_end_created_at = $4::timestamptz,
+            cycle_end_run_id = $5::uuid
+      WHERE business_id = $1`,
     [
       businessId,
-      DISPATCH_HANDLER_ERROR_REF,
-      DISPATCH_LEASE_EXPIRED_REF,
-      DISPATCH_UNSPECIFIED_PARK_REF,
-      Math.max(0, limit),
+      last?.created_at ?? null,
+      last?.id ?? null,
+      result.rows.length === 0 ? null : cycleEnd.created_at,
+      result.rows.length === 0 ? null : cycleEnd.id,
     ]
   );
   return result.rows.map(persistedRun);

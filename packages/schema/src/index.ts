@@ -147,6 +147,7 @@ export type {
   UnusableProviderEntry,
 } from "./llm";
 export {
+  AmbiguousModelError,
   describeMissingEmbeddingFields,
   dropUnusableProviderEntries,
   EmbeddingUnavailableError,
@@ -185,6 +186,7 @@ export {
   textContent,
 } from "./message-content";
 export type {
+  ConfiguredModelRef,
   DerivedModelProfile,
   EffortPreset,
   EffortRung,
@@ -193,6 +195,8 @@ export type {
 export {
   acceptedInputModalities,
   asEffortPreset,
+  configuredModelKey,
+  configuredModelRef,
   DEPRECATED_TIER_ALIASES,
   deriveModelProfiles,
   EFFORT_PRESETS,

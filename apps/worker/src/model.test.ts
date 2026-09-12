@@ -12,6 +12,7 @@ import {
 } from "@tulipfarm/agent-runtime";
 import { type CostBasis, FallbackModel, LlmProviderError } from "@tulipfarm/llm";
 import {
+  type ConfiguredModelRef,
   type EffortRung,
   LlmNotConfiguredError,
   type RunEventEffortInference,
@@ -24,7 +25,7 @@ import type { EffortInferencePort } from "./effort-inference";
 import type { LlmModelResolution } from "./llm";
 import { LlmModelPort } from "./model";
 import { type ModelCallGate, ProviderGate } from "./model-gate";
-import type { SpendSink } from "./observability";
+import type { SpendSink, WorkerSpendSink } from "./observability";
 
 /**
  * These tests exercise streaming, cancellation and receipts, not pricing. Pricing itself belongs
@@ -118,6 +119,141 @@ describe("LlmModelPort", () => {
     await expect(port.invoke(request())).resolves.toMatchObject({
       output: { kind: "text", text: "done" },
     });
+  });
+
+  it("sends a structured-output schema as the SDK response format and returns parsed data", async () => {
+    const schema = {
+      type: "object",
+      required: ["label"],
+      properties: { label: { type: "string" } },
+      additionalProperties: false,
+    };
+    const { port, calls } = model([...textParts("t1", ['{"label":"bug"}']), FINISH]);
+
+    await expect(port.invoke(request({ outputSchema: schema }))).resolves.toMatchObject({
+      output: { kind: "structured", value: { label: "bug" } },
+    });
+
+    expect(calls()[0]?.responseFormat).toEqual({ type: "json", schema });
+    expect(calls()[0]?.prompt).toEqual([
+      { role: "user", content: [{ type: "text", text: "hello" }] },
+    ]);
+  });
+
+  it("streams a structured result through the same schema contract", async () => {
+    const schema = {
+      type: "object",
+      required: ["count"],
+      properties: { count: { type: "number" } },
+    };
+    const { port, calls } = model([...textParts("t1", ['{"count":2}']), FINISH]);
+
+    const chunks = await collect(port.stream(request({ outputSchema: schema })));
+
+    expect(chunks.at(-1)).toMatchObject({
+      kind: "completed",
+      result: { output: { kind: "structured", value: { count: 2 } } },
+    });
+    expect(calls()[0]?.responseFormat).toEqual({ type: "json", schema });
+  });
+
+  it("rejects valid JSON that violates the structured-output schema when invoked", async () => {
+    const schema = {
+      type: "object",
+      required: ["label"],
+      properties: { label: { type: "string", minLength: 3 } },
+      additionalProperties: false,
+    };
+    const { port } = model([...textParts("t1", ['{"label":42}']), FINISH]);
+
+    await expect(port.invoke(request({ outputSchema: schema }))).rejects.toBeInstanceOf(
+      ModelInvocationError
+    );
+  });
+
+  it("rejects a streamed JSON object that omits a required output field", async () => {
+    const schema = {
+      type: "object",
+      required: ["count"],
+      properties: { count: { type: "number", minimum: 1 } },
+      additionalProperties: false,
+    };
+    const { port } = model([...textParts("t1", ["{}"]), FINISH]);
+
+    await expect(collect(port.stream(request({ outputSchema: schema })))).rejects.toBeInstanceOf(
+      ModelInvocationError
+    );
+  });
+
+  it("keeps Tool-call rounds working when the final answer is structured", async () => {
+    const schema = {
+      type: "object",
+      required: ["answer"],
+      properties: { answer: { type: "string" } },
+    };
+    const mock = new MockLanguageModelV4({
+      doStream: vi
+        .fn()
+        .mockResolvedValueOnce({
+          stream: simulateReadableStream<StreamPart>({
+            chunks: [
+              {
+                type: "tool-call",
+                toolCallId: "call-1",
+                toolName: "lookup",
+                input: JSON.stringify({ id: 7 }),
+              },
+              FINISH,
+            ],
+          }),
+        })
+        .mockResolvedValueOnce({
+          stream: simulateReadableStream<StreamPart>({
+            chunks: [...textParts("t2", ['{"answer":"found"}']), FINISH],
+          }),
+        }),
+    });
+    const port = new LlmModelPort({
+      model: async (selector): Promise<LlmModelResolution> => ({
+        kind: "available",
+        price: TEST_PRICE,
+        model: mock as unknown as LanguageModel,
+        routing: {
+          outcome: "raw_model",
+          selector,
+          resolution: "raw_model_id",
+          modelId: selector,
+        },
+      }),
+    });
+    const loop = new AgentLoop({
+      model: port,
+      tools: {
+        dispatch: async () => ({ status: "succeeded", callId: "call-1", output: { found: true } }),
+      },
+      checkpoints: new InMemoryLoopCheckpointStore(),
+      events: { append: async () => {} },
+      budget: { consume: async () => ({ outcome: "allowed" }) },
+      isCancelled: async () => false,
+    });
+
+    const outcome = await loop.run({
+      businessId: "biz-1",
+      runId: "run-1",
+      stateId: "state-1",
+      modelProfileId: "balanced",
+      contextDigest: "sha256:context",
+      guardrailDigest: "sha256:guardrail",
+      messages: [{ role: "user", content: textContent("look it up") }],
+      tools: [{ name: "lookup", inputSchema: { type: "object" } }],
+      outputSchema: schema,
+      limits: { maxIterations: 2, maxToolCalls: 1, maxRepairAttempts: 1 },
+    });
+
+    expect(outcome).toMatchObject({ status: "completed", output: { answer: "found" } });
+    expect(mock.doStreamCalls).toHaveLength(2);
+    expect(mock.doStreamCalls[0]?.responseFormat).toEqual({ type: "json", schema });
+    expect(mock.doStreamCalls[1]?.responseFormat).toEqual({ type: "json", schema });
   });
 
   it("carries a safe provider failure reason across the model port", async () => {
@@ -1117,6 +1253,147 @@ describe("LlmModelPort — reporting spend", () => {
       provider: "openai",
       requestId: "request-1",
       turnId: "turn-1",
+    });
+  });
+
+  it("marks a same-model fallback by configured connection and prices the responder", async () => {
+    const selected = { connection: "east", modelId: "house-model" };
+    const responder = { connection: "west", modelId: "house-model" };
+    const calls: Parameters<WorkerSpendSink["recordLlmCall"]>[0][] = [];
+    const mock = new MockLanguageModelV4({
+      doStream: async () => ({
+        stream: simulateReadableStream<StreamPart>({
+          chunks: [
+            { type: "text-start", id: "1" },
+            { type: "text-delta", id: "1", delta: "hi" },
+            { type: "text-end", id: "1" },
+            FINISH,
+          ],
+        }),
+      }),
+    });
+    const resolution = {
+      kind: "available",
+      model: mock as unknown as LanguageModel,
+      routing: {
+        outcome: "selected",
+        selector: "balanced",
+        resolution: "profile_ref",
+        profileId: "balanced",
+        chain: [
+          { profileId: "primary", modelId: selected.modelId, connection: selected.connection },
+          { profileId: "backup", modelId: responder.modelId, connection: responder.connection },
+        ],
+        cacheAllowed: false,
+        rejectedFallbacks: [],
+      },
+      provider: "openai",
+      selectedConfiguredModel: selected,
+      attemptedConfiguredModel: () => responder,
+      respondingConfiguredModel: () => responder,
+      attemptedModelId: () => responder.modelId,
+      providerForModel: () => "openai",
+      price: (
+        _tokensIn: number,
+        _tokensOut: number,
+        configured?: ConfiguredModelRef
+      ): CostBasis => ({
+        kind: "priced",
+        costUsd: configured?.connection === "west" ? 7 : 1,
+        source: "spec",
+      }),
+    } as unknown as LlmModelResolution;
+    const port = new LlmModelPort({
+      model: async () => resolution,
+      spend: {
+        recordLlmCall: (record) => calls.push(record),
+        recordTurn: () => undefined,
+      },
+    });
+
+    await port.invoke(request());
+
+    expect(calls).toHaveLength(1);
+    expect(calls[0]).toMatchObject({
+      status: "fallback",
+      model: "house-model",
+      provider: "openai",
+      connection: "west",
+      usage: { costUsd: 7 },
+    });
+  });
+
+  it("attributes a failed same-model fallback to the attempted connection", async () => {
+    const selected = { connection: "east", modelId: "house-model" };
+    const attempted = { connection: "west", modelId: "house-model" };
+    const calls: Parameters<WorkerSpendSink["recordLlmCall"]>[0][] = [];
+    const mock = new MockLanguageModelV4({
+      doStream: async () => ({
+        stream: simulateReadableStream<StreamPart>({
+          chunks: [
+            { type: "text-start", id: "1" },
+            { type: "text-delta", id: "1", delta: "partial" },
+            {
+              type: "finish",
+              finishReason: { unified: "stop", raw: "end_turn" },
+              usage: {
+                inputTokens: { total: 900, noCache: 900, cacheRead: 0, cacheWrite: 0 },
+                outputTokens: { total: 40, text: 40, reasoning: 0 },
+              },
+            },
+            { type: "error", error: new Error("connection reset") },
+          ],
+        }),
+      }),
+    });
+    const resolution = {
+      kind: "available",
+      model: mock as unknown as LanguageModel,
+      routing: {
+        outcome: "selected",
+        selector: "balanced",
+        resolution: "profile_ref",
+        profileId: "balanced",
+        chain: [
+          { profileId: "primary", modelId: selected.modelId, connection: selected.connection },
+          { profileId: "backup", modelId: attempted.modelId, connection: attempted.connection },
+        ],
+        cacheAllowed: false,
+        rejectedFallbacks: [],
+      },
+      provider: "openai",
+      selectedConfiguredModel: selected,
+      attemptedConfiguredModel: () => attempted,
+      respondingConfiguredModel: () => selected,
+      attemptedModelId: () => attempted.modelId,
+      providerForModel: () => "openai",
+      price: (
+        _tokensIn: number,
+        _tokensOut: number,
+        configured?: ConfiguredModelRef
+      ): CostBasis => ({
+        kind: "priced",
+        costUsd: configured?.connection === "west" ? 7 : 1,
+        source: "spec",
+      }),
+    } as unknown as LlmModelResolution;
+    const port = new LlmModelPort({
+      model: async () => resolution,
+      spend: {
+        recordLlmCall: (record) => calls.push(record),
+        recordTurn: () => undefined,
+      },
+    });
+
+    await collect(port.stream(request())).catch(() => undefined);
+
+    expect(calls).toHaveLength(1);
+    expect(calls[0]).toMatchObject({
+      status: "error",
+      model: "house-model",
+      provider: "openai",
+      connection: "west",
+      usage: { costUsd: 7 },
     });
   });
 

@@ -51,6 +51,11 @@ export class CircuitBreaker {
     this.probeInFlight = false;
   }
 
+  /** Releases a half-open probe without changing circuit health. */
+  abandonProbe(): void {
+    if (this.state === "half_open") this.probeInFlight = false;
+  }
+
   currentState(): CircuitBreakerState {
     return this.state;
   }

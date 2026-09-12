@@ -30,8 +30,13 @@ import {
   type RunBudgetStore,
   type ScopedLimits,
 } from "@tulipfarm/run-kernel";
-import type { AgentDefinition, ModelProfileDefinition, RunEventPayloads } from "@tulipfarm/schema";
-import { canonicalHash, canonicalize, textContent } from "@tulipfarm/schema";
+import type {
+  AgentDefinition,
+  ConfiguredModelRef,
+  ModelProfileDefinition,
+  RunEventPayloads,
+} from "@tulipfarm/schema";
+import { canonicalHash, canonicalize, configuredModelRef, textContent } from "@tulipfarm/schema";
 import type { RuntimeBundle } from "@tulipfarm/soul";
 import type { RunStore } from "@tulipfarm/storage";
 import type { RunEventAppendPort } from "@tulipfarm/turn-executor";
@@ -117,8 +122,8 @@ export interface BundleRoutineAgentPortOptions {
 
 /** A settled routing decision: the chain to invoke, in order, and the evidence that chose it. */
 export interface RoutineModelSelection {
-  /** Provider Model IDs, primary first, then its constraint-equivalent fallbacks. */
-  readonly modelIds: readonly string[];
+  /** Configured endpoints, primary first, then their constraint-equivalent fallbacks. */
+  readonly models: readonly ConfiguredModelRef[];
   /** The routing evidence already emitted for this State, so the port need not re-derive it. */
   readonly routing: RunEventPayloads["model.routed"];
   /** The spending Run, so this State's model calls reach the ledger attributed to it. */
@@ -214,6 +219,7 @@ function modelRoutingPayload(
     chain: selection.chain.map((profile) => ({
       profileId: profile.profileId,
       modelId: profile.model,
+      connection: configuredModelRef(profile).connection,
     })),
     cacheAllowed: selection.cacheAllowed,
     rejectedFallbacks: selection.rejectedFallbacks,
@@ -407,7 +413,7 @@ export class BundleRoutineAgentPort implements RoutineAgentPort {
     const exposed = await this.exposedTools(request, plan.agentRef.name);
     const loop = new AgentLoop({
       model: this.options.model({
-        modelIds: selection.chain.map((profile) => profile.model),
+        models: selection.chain.map(configuredModelRef),
         routing,
         runId: request.runId,
         turnId: `${request.stateKey}:${request.attempt}`,

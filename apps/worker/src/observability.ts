@@ -23,6 +23,15 @@ export type {
   TurnRecord,
 } from "@tulipfarm/turn-executor";
 
+export interface WorkerLlmCallRecord extends LlmCallRecord {
+  /** Non-secret configured connection identity; vendor model and provider remain separate. */
+  readonly connection?: string;
+}
+
+export interface WorkerSpendSink extends Omit<SpendSink, "recordLlmCall"> {
+  recordLlmCall(record: WorkerLlmCallRecord): void;
+}
+
 export interface WorkerTelemetrySinks {
   metrics?: AiMetricsSink;
   traces?: AiTracesSink;
@@ -76,7 +85,7 @@ interface ObsInsert {
  * Stable event ids make retries harmless. Metrics and traces run only after the insert succeeds,
  * and only for a newly inserted row, so a replay cannot inflate either durable or exported counts.
  */
-export class PgSpendSink implements SpendSink {
+export class PgSpendSink implements WorkerSpendSink {
   private readonly queues = new Map<string, Promise<void>>();
 
   constructor(
@@ -85,7 +94,7 @@ export class PgSpendSink implements SpendSink {
     private readonly telemetry: WorkerTelemetrySinks = {}
   ) {}
 
-  recordLlmCall(record: LlmCallRecord): void {
+  recordLlmCall(record: WorkerLlmCallRecord): void {
     const usage = record.usage;
     const scope = record.runId ?? record.conversationId;
     const trace = scope === undefined ? undefined : traceId(scope);
@@ -115,6 +124,7 @@ export class PgSpendSink implements SpendSink {
           cacheWrite: usage?.cacheWriteTokens,
           reasoning: usage?.reasoningTokens,
           costBasis: usage?.costBasis,
+          connection: record.connection,
           runId: record.runId,
           turnId: record.turnId,
           requestId: record.requestId,

@@ -118,6 +118,97 @@ describe("conversations client", () => {
     expect(out[0].role).toBe("user");
   });
 
+  it("loads every Message page in chronological order", async () => {
+    const calls = mockFetch((url) =>
+      url.includes("cursor=page-2")
+        ? {
+            messages: [
+              {
+                _id: "m2",
+                conversationId: "c1",
+                role: "assistant",
+                content: "done",
+                createdAt: "t2",
+              },
+              {
+                _id: "m3",
+                conversationId: "c1",
+                role: "tool",
+                content: [
+                  {
+                    type: "tool-result",
+                    toolCallId: "call-1",
+                    toolName: "record_list",
+                    result: { status: "ok" },
+                  },
+                ],
+                createdAt: "t3",
+              },
+            ],
+            nextCursor: null,
+          }
+        : {
+            messages: [
+              {
+                _id: "m1",
+                conversationId: "c1",
+                role: "user",
+                content: "check",
+                createdAt: "t1",
+              },
+            ],
+            nextCursor: "page-2",
+          }
+    );
+
+    const out = await getConversationMessages("c1");
+
+    expect(out.map((message) => message._id)).toEqual(["m1", "m2", "m3"]);
+    expect(calls).toHaveLength(2);
+    expect(calls[0].url).toContain("limit=100");
+    expect(calls[1].url).toContain("cursor=page-2");
+  });
+
+  it("surfaces a later Message page failure instead of returning partial history", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            messages: [
+              {
+                _id: "m1",
+                conversationId: "c1",
+                role: "user",
+                content: "check",
+                createdAt: "t1",
+              },
+            ],
+            nextCursor: "page-2",
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } }
+        )
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ error: "message page unavailable" }), {
+          status: 503,
+          headers: { "Content-Type": "application/json" },
+        })
+      );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(getConversationMessages("c1")).rejects.toThrow("message page unavailable");
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("fails when the Message API repeats a cursor", async () => {
+    mockFetch(() => ({ messages: [], nextCursor: "same-page" }));
+
+    await expect(getConversationMessages("c1")).rejects.toThrow(
+      "The Message API repeated its pagination cursor."
+    );
+  });
+
   it("url-encodes the conversation id", async () => {
     const calls = mockFetch(() => ({
       id: "a/b",

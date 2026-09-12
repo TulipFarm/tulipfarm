@@ -53,7 +53,9 @@ function agent(overrides: Partial<AgentDefinition["spec"]> = {}): AgentDefinitio
 function profile(
   overrides: {
     readonly slug?: string;
+    readonly provider?: string;
     readonly model?: string;
+    readonly connection?: string;
     readonly contextWindowTokens?: number;
     readonly supports?: Partial<ModelProfileDefinition["spec"]["supports"]>;
     readonly fallbacks?: readonly string[];
@@ -72,8 +74,9 @@ function profile(
       lifecycle: "published",
     },
     spec: {
-      provider: "anthropic",
+      provider: overrides.provider ?? "anthropic",
       model: overrides.model ?? "claude-sonnet-5",
+      ...(overrides.connection === undefined ? {} : { connection: overrides.connection }),
       reasoning: "medium",
       supports: {
         tools: true,
@@ -292,12 +295,15 @@ describe("BundleRoutineAgentPort", () => {
           {
             kind: "ModelProfile",
             slug: "fast",
-            document: profile({ fallbacks: ["backup"] }),
+            document: profile({ connection: "anthropic-primary", fallbacks: ["backup"] }),
           },
           {
             kind: "ModelProfile",
             slug: "backup",
-            document: profile({ slug: "backup", model: "claude-haiku-5" }),
+            document: profile({
+              slug: "backup",
+              connection: "anthropic-backup",
+            }),
           },
         ]),
       })
@@ -307,8 +313,26 @@ describe("BundleRoutineAgentPort", () => {
     // Resolving `fast` a second time would search the deployment's *current* configuration, where a
     // bundle-authored profile need not exist — dropping the pinned bundle and, with it, `backup`.
     expect(modelSelections).toHaveLength(1);
-    expect(modelSelections[0]?.modelIds).toEqual(["claude-sonnet-5", "claude-haiku-5"]);
-    expect(modelSelections[0]?.routing).toMatchObject({ outcome: "selected", profileId: "fast" });
+    expect(modelSelections[0]?.models).toEqual([
+      { connection: "anthropic-primary", modelId: "claude-sonnet-5" },
+      { connection: "anthropic-backup", modelId: "claude-sonnet-5" },
+    ]);
+    expect(modelSelections[0]?.routing).toMatchObject({
+      outcome: "selected",
+      profileId: "fast",
+      chain: [
+        {
+          profileId: "fast",
+          modelId: "claude-sonnet-5",
+          connection: "anthropic-primary",
+        },
+        {
+          profileId: "backup",
+          modelId: "claude-sonnet-5",
+          connection: "anthropic-backup",
+        },
+      ],
+    });
   });
 
   it("builds no model at all when the profile is denied", async () => {

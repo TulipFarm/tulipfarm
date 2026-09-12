@@ -47,7 +47,7 @@ export type UseChatStreamOptions = {
 function needsRunReplay(opts?: UseChatStreamOptions): boolean {
   const turn = opts?.initialTurn;
   if (!turn) return false;
-  return opts?.initialMessages?.at(-1)?.role !== "assistant";
+  return turn.status !== "succeeded";
 }
 
 export function seedState(opts?: UseChatStreamOptions): ChatState {
@@ -81,10 +81,18 @@ type ChatAction =
   | ChatEvent
   | { type: "user"; text: string; options?: SendOptions }
   | { type: "meta"; meta: ChatStreamMeta }
+  | { type: "submission" }
   | { type: "regenerate"; resume: boolean }
   | { type: "surface-submit" }
   | { type: "stopped" }
   | { type: "reset" };
+
+type ActiveStream = {
+  controller: AbortController;
+  runId?: string;
+  stopRequested: boolean;
+  stopPromise?: Promise<void>;
+};
 
 function captureClientContext(): { route: string; title?: string } | undefined {
   if (typeof window === "undefined") return undefined;
@@ -126,6 +134,16 @@ export function surfaceInteractionAnswer(input: Readonly<Record<string, unknown>
 
 function reducer(state: ChatState, action: ChatAction): ChatState {
   if (action.type === "user") return appendUserMessage(state, action.text, action.options);
+  if (action.type === "submission") {
+    const next = {
+      ...state,
+      status: "submitted" as const,
+      error: undefined,
+      errorDetails: undefined,
+    };
+    delete next.runId;
+    return next;
+  }
   if (action.type === "surface-submit") {
     return { ...state, status: "submitted", error: undefined, errorDetails: undefined };
   }
@@ -179,8 +197,7 @@ export function useChatStream(opts?: UseChatStreamOptions) {
   const stateRef = useRef(state);
   stateRef.current = state;
   const lastOptsRef = useRef<SendOptions | undefined>(undefined);
-  const abortRef = useRef<AbortController | null>(null);
-  const stopRequestedRef = useRef(false);
+  const activeStreamRef = useRef<ActiveStream | null>(null);
   const onConversationChangeRef = useRef(opts?.onConversationChange);
   onConversationChangeRef.current = opts?.onConversationChange;
   const navigate = useNavigate();
@@ -189,50 +206,105 @@ export function useChatStream(opts?: UseChatStreamOptions) {
 
   useEffect(
     () => () => {
-      abortRef.current?.abort();
+      const active = activeStreamRef.current;
+      activeStreamRef.current = null;
+      active?.controller.abort();
     },
     []
   );
 
+  const requestStop = useCallback((active: ActiveStream) => {
+    if (!active.runId || active.stopPromise) return active.stopPromise;
+    const request = stopChatRun(active.runId)
+      .then(() => {
+        if (activeStreamRef.current === active) active.controller.abort();
+      })
+      .catch((error) => {
+        if (activeStreamRef.current === active) {
+          active.stopRequested = false;
+          dispatch({
+            type: "error",
+            data: { message: error instanceof Error ? error.message : "stop request failed" },
+          });
+        }
+      })
+      .finally(() => {
+        if (active.stopPromise === request) active.stopPromise = undefined;
+      });
+    active.stopPromise = request;
+    return request;
+  }, []);
+
   const initialConversationId = opts?.initialConversationId;
   const initialTurn = opts?.initialTurn;
+  const initialTurnId = initialTurn?.id;
+  const initialRunId = initialTurn?.runId;
+  const initialTurnStatus = initialTurn?.status;
   const replayInitialTurn = needsRunReplay(opts);
 
   useEffect(() => {
-    if (!replayInitialTurn || !initialConversationId || !initialTurn) return;
     if (
-      initialTurn.status === "start_failed" ||
-      (initialTurn.status === "failed" && initialTurn.runId === null)
+      !replayInitialTurn ||
+      !initialConversationId ||
+      !initialTurnId ||
+      initialRunId === undefined ||
+      !initialTurnStatus
+    ) {
+      return;
+    }
+    if (
+      initialTurnStatus === "start_failed" ||
+      (initialTurnStatus === "failed" && initialRunId === null)
     ) {
       return;
     }
 
     const controller = new AbortController();
+    const active: ActiveStream = {
+      controller,
+      ...(initialRunId === null ? {} : { runId: initialRunId }),
+      stopRequested: false,
+    };
     const conversationId = initialConversationId;
-    const restoredTurn = initialTurn;
-    abortRef.current = controller;
-    stopRequestedRef.current = false;
+    const restoredTurn: ConversationTurn = {
+      id: initialTurnId,
+      runId: initialRunId,
+      status: initialTurnStatus,
+    };
+    activeStreamRef.current = active;
+    const ownsStream = () => activeStreamRef.current === active;
+    const canDispatch = () => ownsStream() && !controller.signal.aborted;
 
     async function restore(): Promise<void> {
       let turn: ConversationTurn = restoredTurn;
       while (turn.runId === null && turn.status === "pending") {
         await new Promise((resolve) => setTimeout(resolve, 250));
-        if (controller.signal.aborted) return;
+        if (!canDispatch()) return;
         const conversation = await getConversation(conversationId);
+        if (!canDispatch()) return;
         if (!conversation.latestTurn) {
           throw new Error("The response state could not be restored. Try again.");
         }
         turn = conversation.latestTurn;
       }
 
+      if (!canDispatch()) return;
       if (turn.status === "start_failed" || turn.runId === null) {
         throw new Error("The response could not be started. Try again.");
       }
 
+      active.runId = turn.runId;
       dispatch({ type: "meta", meta: { runId: turn.runId } });
+      if (active.stopRequested) await requestStop(active);
+      if (!ownsStream()) return;
+      if (controller.signal.aborted) {
+        if (active.stopRequested) dispatch({ type: "stopped" });
+        return;
+      }
       await resumeRun(turn.runId, {
         signal: controller.signal,
         onEvent: (event) => {
+          if (!canDispatch()) return;
           if (event.type === "client-action") {
             handleClientAction(event.data, navigateRef.current);
             return;
@@ -242,14 +314,17 @@ export function useChatStream(opts?: UseChatStreamOptions) {
             onConversationChangeRef.current?.(conversationIdRef.current);
           }
         },
-        onConnectionState: setConnectionState,
+        onConnectionState: (next) => {
+          if (canDispatch()) setConnectionState(next);
+        },
       });
     }
 
     void restore()
       .catch((error) => {
+        if (!ownsStream()) return;
         if (controller.signal.aborted) {
-          if (stopRequestedRef.current) dispatch({ type: "stopped" });
+          if (active.stopRequested) dispatch({ type: "stopped" });
           return;
         }
         dispatch({
@@ -258,77 +333,97 @@ export function useChatStream(opts?: UseChatStreamOptions) {
         });
       })
       .finally(() => {
-        if (abortRef.current === controller) abortRef.current = null;
-        stopRequestedRef.current = false;
+        if (activeStreamRef.current === active) activeStreamRef.current = null;
       });
 
     return () => {
+      if (activeStreamRef.current === active) activeStreamRef.current = null;
       controller.abort();
     };
-  }, [initialConversationId, initialTurn, replayInitialTurn]);
+  }, [
+    initialConversationId,
+    initialRunId,
+    initialTurnId,
+    initialTurnStatus,
+    requestStop,
+    replayInitialTurn,
+  ]);
 
-  const runStream = useCallback(async (text: string, opts?: SendOptions, retryTurnId?: string) => {
-    const controller = new AbortController();
-    abortRef.current = controller;
-    stopRequestedRef.current = false;
-    // A fresh send must not inherit the previous Turn's id: if it fails before the server names
-    // its own, a retry would otherwise re-enter the Turn before it.
-    if (retryTurnId === undefined) turnIdRef.current = undefined;
-    const idempotencyKey = randomUUID();
-    try {
-      const body = {
-        message: {
-          role: "user" as const,
-          content: text,
-          ...(opts?.files?.length ? { fileIds: opts.files.map((file) => file.fileId) } : {}),
-        },
-        conversationId: conversationIdRef.current,
-        model: opts?.model,
-        autonomy: opts?.autonomy,
-        agentId: opts?.agentId,
-        skills: opts?.skills,
-        resources: opts?.resources,
-        knowledgePages: opts?.knowledgePages,
-        clientContext: captureClientContext(),
-      };
-      const handlers = {
-        signal: controller.signal,
-        onMeta: (meta: ChatStreamMeta) => {
-          if (meta.conversationId) {
-            conversationIdRef.current = meta.conversationId;
-            onConversationChangeRef.current?.(meta.conversationId);
-          }
-          if (meta.turnId) turnIdRef.current = meta.turnId;
-          dispatch({ type: "meta", meta });
-        },
-        onEvent: (event: ChatEvent) => {
-          if (event.type === "client-action") {
-            handleClientAction(event.data, navigateRef.current);
-            return;
-          }
-          dispatch(event);
-          if (event.type === "finish") onConversationChangeRef.current?.(conversationIdRef.current);
-        },
-        onConnectionState: setConnectionState,
-      };
-      // A retry re-enters the Turn that already holds the question; only a fresh send writes one.
-      await (retryTurnId === undefined
-        ? postChat(body, handlers, idempotencyKey)
-        : postChatRetry(retryTurnId, body, handlers));
-    } catch (err) {
-      if (err instanceof DOMException && err.name === "AbortError") {
-        dispatch({ type: "stopped" });
-      } else {
+  const runStream = useCallback(
+    async (text: string, opts?: SendOptions, retryTurnId?: string) => {
+      const controller = new AbortController();
+      const active: ActiveStream = { controller, stopRequested: false };
+      activeStreamRef.current = active;
+      dispatch({ type: "submission" });
+      // A fresh send must not inherit the previous Turn's id: if it fails before the server names
+      // its own, a retry would otherwise re-enter the Turn before it.
+      if (retryTurnId === undefined) turnIdRef.current = undefined;
+      const idempotencyKey = randomUUID();
+      try {
+        const body = {
+          message: {
+            role: "user" as const,
+            content: text,
+            ...(opts?.files?.length ? { fileIds: opts.files.map((file) => file.fileId) } : {}),
+          },
+          conversationId: conversationIdRef.current,
+          model: opts?.model,
+          autonomy: opts?.autonomy,
+          agentId: opts?.agentId,
+          skills: opts?.skills,
+          resources: opts?.resources,
+          knowledgePages: opts?.knowledgePages,
+          clientContext: captureClientContext(),
+        };
+        const handlers = {
+          signal: controller.signal,
+          onMeta: (meta: ChatStreamMeta) => {
+            if (activeStreamRef.current !== active || controller.signal.aborted) return;
+            if (meta.conversationId) {
+              conversationIdRef.current = meta.conversationId;
+              onConversationChangeRef.current?.(meta.conversationId);
+            }
+            if (meta.turnId) turnIdRef.current = meta.turnId;
+            if (meta.runId) active.runId = meta.runId;
+            dispatch({ type: "meta", meta });
+            if (active.stopRequested) void requestStop(active);
+          },
+          onEvent: (event: ChatEvent) => {
+            if (activeStreamRef.current !== active || controller.signal.aborted) return;
+            if (event.type === "client-action") {
+              handleClientAction(event.data, navigateRef.current);
+              return;
+            }
+            dispatch(event);
+            if (event.type === "finish")
+              onConversationChangeRef.current?.(conversationIdRef.current);
+          },
+          onConnectionState: (next: "online" | "reconnecting") => {
+            if (activeStreamRef.current === active && !controller.signal.aborted) {
+              setConnectionState(next);
+            }
+          },
+        };
+        // A retry re-enters the Turn that already holds the question; only a fresh send writes one.
+        await (retryTurnId === undefined
+          ? postChat(body, handlers, idempotencyKey)
+          : postChatRetry(retryTurnId, body, handlers));
+      } catch (err) {
+        if (activeStreamRef.current !== active) return;
+        if (controller.signal.aborted) {
+          if (active.stopRequested) dispatch({ type: "stopped" });
+          return;
+        }
         dispatch({
           type: "error",
           data: { message: err instanceof Error ? err.message : "stream failed" },
         });
+      } finally {
+        if (activeStreamRef.current === active) activeStreamRef.current = null;
       }
-    } finally {
-      abortRef.current = null;
-      stopRequestedRef.current = false;
-    }
-  }, []);
+    },
+    [requestStop]
+  );
 
   const send = useCallback(
     async (text: string, opts?: SendOptions) => {
@@ -366,11 +461,11 @@ export function useChatStream(opts?: UseChatStreamOptions) {
   );
 
   const stop = useCallback(() => {
-    const runId = stateRef.current.runId;
-    if (runId) void stopChatRun(runId).catch(() => {});
-    stopRequestedRef.current = true;
-    abortRef.current?.abort();
-  }, []);
+    const active = activeStreamRef.current;
+    if (!active) return;
+    active.stopRequested = true;
+    if (active.runId) void requestStop(active);
+  }, [requestStop]);
 
   const approve = useCallback(async (approvalId: string, decision: "approve" | "deny") => {
     try {

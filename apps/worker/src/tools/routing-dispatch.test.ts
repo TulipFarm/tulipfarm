@@ -77,6 +77,37 @@ describe("RoutingToolDispatch", () => {
     expect(remote.calls).toEqual([]);
   });
 
+  it("delivers the active Run signal to a locally hosted Tool", async () => {
+    const local = localHost(["kv_set"]);
+    const routing = new RoutingToolDispatch(
+      local,
+      { authority: async () => AUTHORITY },
+      new RecordingRemote(),
+      SILENT
+    );
+    const controller = new AbortController();
+
+    await routing.dispatch({ ...request("kv_set"), signal: controller.signal });
+
+    expect(local.calls[0]?.abortSignal).toBe(controller.signal);
+  });
+
+  it("adds the dispatcher's owned lease signal to every Tool call in the Run", async () => {
+    const local = localHost(["kv_set"]);
+    const routing = new RoutingToolDispatch(
+      local,
+      { authority: async () => AUTHORITY },
+      new RecordingRemote(),
+      SILENT
+    );
+    const controller = new AbortController();
+    routing.bind("run-1", controller.signal);
+
+    await routing.dispatch(request("kv_set"));
+
+    expect(local.calls[0]?.abortSignal).toBe(controller.signal);
+  });
+
   it("leaves every unhosted Tool on the control-plane path", async () => {
     const local = localHost(["kv_set"]);
     const remote = new RecordingRemote();

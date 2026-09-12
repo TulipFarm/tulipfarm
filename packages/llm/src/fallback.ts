@@ -3,6 +3,7 @@ import type {
   LanguageModelV4CallOptions,
   LanguageModelV4StreamPart,
 } from "@ai-sdk/provider";
+import type { ConfiguredModelRef } from "@tulipfarm/schema";
 import { APICallError } from "ai";
 import { classifyProviderError } from "./provider-error";
 
@@ -22,22 +23,25 @@ export interface FallbackLogger {
  */
 export interface ModelResponderRef {
   modelId?: string;
+  configuredModel?: ConfiguredModelRef;
 }
 
 /** The chain link whose provider call actually began, including a failed final attempt. */
 export interface ModelAttemptRef {
   modelId?: string;
+  configuredModel?: ConfiguredModelRef;
 }
 
 export interface FallbackCallLease {
   succeeded(): void;
   failed(reason: string): void;
+  cancelled(): void;
   release(): void;
 }
 
 /** Per-link admission control shared across model chains in one process. */
 export interface FallbackCallGate {
-  acquire(provider: string): Promise<FallbackCallLease>;
+  acquire(provider: string, signal?: AbortSignal): Promise<FallbackCallLease>;
 }
 
 const noopLogger: FallbackLogger = { warn() {} };
@@ -89,20 +93,53 @@ function errorReason(err: unknown): string {
   return String(err);
 }
 
+function inBandError(error: unknown): unknown {
+  return error ?? new Error("provider emitted an empty error stream part");
+}
+
 /**
  * Stream parts that carry nothing a participant could see.
  *
  * They are held back rather than forwarded, which keeps the chain free to switch links right up
  * to the first part that is real output.
  */
-const PRELUDE_PARTS: ReadonlySet<string> = new Set(["stream-start", "response-metadata"]);
+const MAX_UNCOMMITTED_PARTS = 128;
+
+function nonEmptyDelta(part: LanguageModelV4StreamPart, legacyField: string): boolean {
+  const value =
+    "delta" in part
+      ? part.delta
+      : (part as unknown as Readonly<Record<string, unknown>>)[legacyField];
+  return typeof value === "string" && value.length > 0;
+}
+
+function isSubstantiveOutput(part: LanguageModelV4StreamPart): boolean {
+  switch (part.type) {
+    case "text-delta":
+      return nonEmptyDelta(part, "textDelta");
+    case "reasoning-delta":
+      return nonEmptyDelta(part, "reasoningDelta");
+    case "tool-input-delta":
+      return nonEmptyDelta(part, "argsTextDelta");
+    case "tool-call":
+    case "tool-result":
+    case "tool-approval-request":
+    case "file":
+    case "reasoning-file":
+    case "source":
+    case "custom":
+      return true;
+    default:
+      return false;
+  }
+}
 
 /**
  * One terminal outcome per lease.
  *
  * `ProviderGate.acquire` consumes the breaker's single half-open probe, and the breaker resolves
- * it only on `succeeded`/`failed`. Reporting both — which a cancel racing a pending read does —
- * corrupts the failure count, and reporting neither leaves the probe outstanding forever, wedging
+ * it only on a terminal outcome. Reporting two — which a cancel racing a pending read can do —
+ * corrupts health accounting, and reporting none leaves the probe outstanding forever, wedging
  * the provider shut with no call in flight to reopen it.
  */
 function settleOnce(lease: FallbackCallLease | undefined): FallbackCallLease | undefined {
@@ -119,6 +156,11 @@ function settleOnce(lease: FallbackCallLease | undefined): FallbackCallLease | u
       if (outcome) return;
       outcome = true;
       lease.failed(reason);
+    },
+    cancelled: () => {
+      if (outcome) return;
+      outcome = true;
+      lease.cancelled();
     },
     release: () => {
       if (released) return;
@@ -154,7 +196,8 @@ export class FallbackModel implements LanguageModelV4 {
     private readonly providerKeys: readonly string[] = models.map(
       (model) => `${model.provider}:${model.modelId}`
     ),
-    private readonly attempted?: ModelAttemptRef
+    private readonly attempted?: ModelAttemptRef,
+    private readonly configuredModels: readonly (ConfiguredModelRef | undefined)[] = []
   ) {
     const primary = models[0];
     if (!primary) throw new Error("FallbackModel requires at least one model");
@@ -162,8 +205,20 @@ export class FallbackModel implements LanguageModelV4 {
   }
 
   /** Marks a link as the responder the moment it commits, before any output is consumed. */
-  private commit(model: LanguageModelV4): void {
-    if (this.responder !== undefined) this.responder.modelId = model.modelId;
+  private commit(index: number, model: LanguageModelV4): void {
+    if (this.responder === undefined) return;
+    this.responder.modelId = model.modelId;
+    const configured = this.configuredModels[index];
+    if (configured === undefined) delete this.responder.configuredModel;
+    else this.responder.configuredModel = configured;
+  }
+
+  private attempt(index: number, model: LanguageModelV4): void {
+    if (this.attempted === undefined) return;
+    this.attempted.modelId = model.modelId;
+    const configured = this.configuredModels[index];
+    if (configured === undefined) delete this.attempted.configuredModel;
+    else this.attempted.configuredModel = configured;
   }
 
   async doGenerate(options: LanguageModelV4CallOptions) {
@@ -171,16 +226,19 @@ export class FallbackModel implements LanguageModelV4 {
     for (const [index, model] of this.models.entries()) {
       let lease: FallbackCallLease | undefined;
       try {
-        lease = settleOnce(await this.gate?.acquire(this.providerKey(index, model)));
-        if ((lease !== undefined || this.gate === undefined) && this.attempted !== undefined) {
-          this.attempted.modelId = model.modelId;
-        }
+        lease = settleOnce(
+          await this.gate?.acquire(this.providerKey(index, model), options.abortSignal)
+        );
+        if (lease !== undefined || this.gate === undefined) this.attempt(index, model);
         const generated = await this.callWithRateLimitRetry(model, () => model.doGenerate(options));
         lease?.succeeded();
-        this.commit(model);
+        this.commit(index, model);
         return generated;
       } catch (err) {
-        if (isHardFailure(err)) throw err;
+        if (isHardFailure(err)) {
+          lease?.cancelled();
+          throw err;
+        }
         lease?.failed(classifyProviderError(err));
         lastError = err;
         this.logFallback(model, err);
@@ -227,13 +285,14 @@ export class FallbackModel implements LanguageModelV4 {
       let lease: FallbackCallLease | undefined;
       let result: Awaited<ReturnType<LanguageModelV4["doStream"]>>;
       try {
-        lease = settleOnce(await this.gate?.acquire(this.providerKey(index, model)));
-        if ((lease !== undefined || this.gate === undefined) && this.attempted !== undefined) {
-          this.attempted.modelId = model.modelId;
-        }
+        lease = settleOnce(
+          await this.gate?.acquire(this.providerKey(index, model), options.abortSignal)
+        );
+        if (lease !== undefined || this.gate === undefined) this.attempt(index, model);
         result = await this.callWithRateLimitRetry(model, () => model.doStream(options));
       } catch (err) {
         if (isHardFailure(err)) {
+          lease?.cancelled();
           lease?.release();
           throw err;
         }
@@ -247,6 +306,8 @@ export class FallbackModel implements LanguageModelV4 {
       const reader = result.stream.getReader();
       const head: LanguageModelV4StreamPart[] = [];
       let ended = false;
+      let sawError = false;
+      let firstError: unknown;
       try {
         // Read only as far as the first part that is real output. Draining the whole stream here
         // is what made time-to-first-token equal the provider's time-to-last-token.
@@ -256,12 +317,21 @@ export class FallbackModel implements LanguageModelV4 {
             ended = true;
             break;
           }
+          if (chunk.value.type === "error") {
+            sawError = true;
+            firstError = inBandError(chunk.value.error);
+            break;
+          }
           head.push(chunk.value);
-          if (!PRELUDE_PARTS.has(chunk.value.type)) break;
+          if (isSubstantiveOutput(chunk.value)) break;
+          if (head.length >= MAX_UNCOMMITTED_PARTS) {
+            throw new Error("provider emitted too many stream frames before output");
+          }
         }
       } catch (err) {
         reader.cancel().catch(() => {});
         if (isHardFailure(err)) {
+          lease?.cancelled();
           lease?.release();
           throw err;
         }
@@ -272,7 +342,16 @@ export class FallbackModel implements LanguageModelV4 {
         continue;
       }
 
-      this.commit(model);
+      if (sawError) {
+        reader.cancel(firstError).catch(() => {});
+        lease?.failed(classifyProviderError(firstError));
+        lease?.release();
+        lastError = firstError;
+        this.logFallback(model, firstError);
+        continue;
+      }
+
+      this.commit(index, model);
       if (ended) {
         lease?.succeeded();
         lease?.release();
@@ -300,13 +379,13 @@ export class FallbackModel implements LanguageModelV4 {
   ): ReadableStream<LanguageModelV4StreamPart> {
     const { logger, modelId } = this;
     let detachAbort = () => {};
+    let committedError: unknown;
 
-    // The caller walking away says nothing about provider health, but the breaker has only two
-    // verbs and an unsettled half-open probe never reopens on its own. The provider was answering
-    // when we left, so that is what it is told.
+    // The caller walking away says nothing about provider health. Cancellation settles the lease
+    // without counting a provider failure, including the breaker's single half-open probe.
     const abandoned = () => {
       detachAbort();
-      lease?.succeeded();
+      lease?.cancelled();
       lease?.release();
     };
 
@@ -331,17 +410,24 @@ export class FallbackModel implements LanguageModelV4 {
           const chunk = await reader.read();
           if (chunk.done) {
             detachAbort();
-            lease?.succeeded();
+            if (committedError === undefined) lease?.succeeded();
             lease?.release();
             controller.close();
             return;
+          }
+          if (chunk.value.type === "error" && committedError === undefined) {
+            committedError = inBandError(chunk.value.error);
+            lease?.failed(classifyProviderError(committedError));
+            logger.warn(
+              `[llm] stream failed after commit models=${modelId} reason=${errorReason(committedError)}`
+            );
           }
           controller.enqueue(chunk.value);
         } catch (err) {
           detachAbort();
           if (isHardFailure(err)) {
             // The caller aborted us; the provider is not at fault and must not be marked down.
-            lease?.succeeded();
+            lease?.cancelled();
             lease?.release();
             controller.error(err);
             return;

@@ -313,6 +313,7 @@ const MODEL_ROUTED_CHAIN_ENTRY_SCHEMA = {
   properties: {
     profileId: { type: "string", minLength: 1 },
     modelId: { type: "string", minLength: 1 },
+    connection: { type: "string", minLength: 1 },
   },
 } as const;
 
@@ -616,6 +617,8 @@ export interface RunEventPayloads {
         readonly chain: readonly {
           readonly profileId: string;
           readonly modelId: string;
+          /** Present on new events; absent on events recorded before configured endpoint identity. */
+          readonly connection?: string;
         }[];
         readonly cacheAllowed: boolean;
         readonly rejectedFallbacks: readonly {

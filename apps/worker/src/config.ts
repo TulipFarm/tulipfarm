@@ -6,8 +6,10 @@ import { DEPLOYMENT_BUSINESS_ID } from "@tulipfarm/constants";
  *
  * 99: Routine Tool replay reads immutable confirmed outputs added by migration 99. A worker below
  * that floor could claim a replayed State and lose the Tool result needed by following States.
+ * 108: Recovery sweeps persist their cursor so blocked Runs cannot starve later safe candidates.
+ * 109: Recovery cursors bound each cycle so sustained arrivals cannot prevent a restart-safe wrap.
  */
-export const REQUIRED_SCHEMA_VERSION = 99;
+export const REQUIRED_SCHEMA_VERSION = 109;
 
 export interface WorkerConfig {
   readonly databaseUrl: string;

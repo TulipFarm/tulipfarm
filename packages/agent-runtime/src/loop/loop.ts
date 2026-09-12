@@ -17,6 +17,7 @@ import type {
   AgentLoopInput,
   AgentLoopOutcome,
   ExposedTool,
+  ToolDispatchRequest,
   ToolDispatchResult,
 } from "./contract";
 import { isRetryableFailure } from "./contract";
@@ -140,6 +141,21 @@ export class AgentLoop {
 
     const toolsForIteration = (): readonly ExposedTool[] =>
       narrowToolsToSkill(input.tools, activeSkillName, input.skillToolScopes);
+
+    const dispatchWithCancellation = async (
+      requests: readonly ToolDispatchRequest[]
+    ): Promise<readonly ToolDispatchResult[] | undefined> => {
+      if (await this.deps.isCancelled()) return undefined;
+      const watch = watchForCancel(() => this.deps.isCancelled(), this.deps.cancelPollMs);
+      try {
+        const results = await Promise.all(
+          requests.map((request) => this.deps.tools.dispatch({ ...request, signal: watch.signal }))
+        );
+        return watch.cancelled() || (await this.deps.isCancelled()) ? undefined : results;
+      } finally {
+        watch.stop();
+      }
+    };
 
     const emit = async (
       type: AgentLoopEventType,
@@ -604,17 +620,27 @@ export class AgentLoop {
               "failed"
             );
           }
-          const dispatched = await this.deps.tools.dispatch({
-            businessId: input.businessId,
-            runId: input.runId,
-            stateId: input.stateId,
-            callId: call.callId,
-            name: call.name,
-            arguments: call.arguments,
-            ...(activeSkillName === undefined ? {} : { activeSkillName }),
-          });
+          const dispatchedBatch = await dispatchWithCancellation([
+            {
+              businessId: input.businessId,
+              runId: input.runId,
+              stateId: input.stateId,
+              callId: call.callId,
+              name: call.name,
+              arguments: call.arguments,
+              ...(activeSkillName === undefined ? {} : { activeSkillName }),
+            },
+          ]);
+          if (dispatchedBatch === undefined) {
+            return finish({ status: "cancelled", ...counters }, "cancelled");
+          }
+          const dispatched = dispatchedBatch[0];
+          if (dispatched === undefined) throw new Error("tool_dispatch_without_result");
           dispatchedIds.add(call.callId);
           counters.toolCalls += 1;
+          if (dispatched.status === "failed" && dispatched.code === "cancelled") {
+            return finish({ status: "cancelled", ...counters }, "cancelled");
+          }
           const outcome = await applyDispatch(call, dispatched);
           if (outcome.kind === "fail") {
             return finish({ status: "failed", reason: outcome.reason, ...counters }, "failed");
@@ -705,24 +731,30 @@ export class AgentLoop {
             ? `${input.stateId}:${counters.iterations}:${batchAnchor}`
             : undefined;
 
-        const distinct = await Promise.all(
-          unique.map((batched) =>
-            this.deps.tools.dispatch({
-              businessId: input.businessId,
-              runId: input.runId,
-              stateId: input.stateId,
-              callId: batched.callId,
-              name: batched.name,
-              arguments: batched.arguments,
-              ...(activeSkillName === undefined ? {} : { activeSkillName }),
-              ...(batchId === undefined ? {} : { batchId }),
-            })
-          )
+        const distinct = await dispatchWithCancellation(
+          unique.map((batched) => ({
+            businessId: input.businessId,
+            runId: input.runId,
+            stateId: input.stateId,
+            callId: batched.callId,
+            name: batched.name,
+            arguments: batched.arguments,
+            ...(activeSkillName === undefined ? {} : { activeSkillName }),
+            ...(batchId === undefined ? {} : { batchId }),
+          }))
         );
+        if (distinct === undefined) {
+          return finish({ status: "cancelled", ...counters }, "cancelled");
+        }
         const dispatched = resultOf.map((at) => distinct[at]);
         counters.toolCalls += runBatch.length;
         for (const batched of runBatch) dispatchedIds.add(batched.callId);
         index += runBatch.length;
+        if (
+          dispatched.some((result) => result?.status === "failed" && result.code === "cancelled")
+        ) {
+          return finish({ status: "cancelled", ...counters }, "cancelled");
+        }
 
         // Every call in the batch has already run: its effect landed and its Tool-call budget
         // is already spent. So every result is applied — stopping at the first decisive one

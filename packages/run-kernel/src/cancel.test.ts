@@ -232,6 +232,53 @@ describe("RunCancellationManager", () => {
     expect(runs.runs.get(CHILD_ID)?.status).toBe("cancelled");
   });
 
+  it("settles a parent with terminal and active attached children", async () => {
+    const runs = new FakeRunStore();
+    const terminalChildId = "00000000-0000-4000-8000-000000000003";
+    seed(runs, RUN_ID, [state("fan-out", "waiting")]);
+    seed(runs, CHILD_ID, [state("apply", "ready")]);
+    seed(runs, terminalChildId, [state("done", "succeeded")], "succeeded");
+    const children = new FakeChildLinkStore();
+    children.links = [childLink(RUN_ID, terminalChildId, null), childLink(RUN_ID, CHILD_ID, null)];
+
+    const result = await cancel(manager(runs, children));
+
+    expect(result).toMatchObject({
+      outcome: "cancelled",
+      cascadedChildRunIds: [CHILD_ID],
+    });
+    expect(runs.runs.get(RUN_ID)?.status).toBe("cancelled");
+    expect(runs.runs.get(terminalChildId)?.status).toBe("succeeded");
+    expect(runs.runs.get(CHILD_ID)?.status).toBe("cancelled");
+  });
+
+  it("settles the parent when an attached child finishes during cancellation", async () => {
+    const runs = new FakeRunStore();
+    seed(runs, RUN_ID, [state("fan-out", "waiting")]);
+    seed(runs, CHILD_ID, [state("apply", "ready")]);
+    const children = new FakeChildLinkStore();
+    children.links = [childLink(RUN_ID, CHILD_ID, null)];
+    const transitionRun = runs.transitionRun.bind(runs);
+    let childFinished = false;
+    runs.transitionRun = async (businessId, runId, transition) => {
+      if (runId === CHILD_ID && transition.status === "cancelling" && !childFinished) {
+        childFinished = true;
+        runs.runs.set(CHILD_ID, {
+          status: "succeeded",
+          version: transition.expectedVersion + 1,
+        });
+        return false;
+      }
+      return transitionRun(businessId, runId, transition);
+    };
+
+    const result = await cancel(manager(runs, children));
+
+    expect(result).toMatchObject({ outcome: "cancelled", cascadedChildRunIds: [] });
+    expect(runs.runs.get(RUN_ID)?.status).toBe("cancelled");
+    expect(runs.runs.get(CHILD_ID)?.status).toBe("succeeded");
+  });
+
   it("reports a child that could not be cancelled without claiming the parent is clean", async () => {
     const runs = new FakeRunStore();
     seed(runs, RUN_ID, [state("fan-out", "waiting")]);

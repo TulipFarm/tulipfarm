@@ -115,6 +115,80 @@ describe("ProviderGate", () => {
     await expect(gate.acquire("openai")).resolves.toBeDefined();
   });
 
+  it("abandons a cancelled half-open probe without closing the circuit", async () => {
+    let clock = 0;
+    const gate = new ProviderGate({
+      failureThreshold: 2,
+      recoveryAfterMs: 5_000,
+      now: () => clock,
+    });
+
+    const firstFailure = await gate.acquire("openai");
+    firstFailure.failed("model_provider_unavailable");
+    firstFailure.release();
+    const secondFailure = await gate.acquire("openai");
+    secondFailure.failed("model_provider_unavailable");
+    secondFailure.release();
+
+    clock += 5_001;
+    const cancelledProbe = await gate.acquire("openai");
+    cancelledProbe.cancelled();
+    cancelledProbe.release();
+
+    const nextProbe = await gate.acquire("openai");
+    await expect(gate.acquire("openai")).rejects.toBeInstanceOf(ProviderUnavailableError);
+    nextProbe.succeeded();
+    nextProbe.release();
+
+    const healthy = await gate.acquire("openai");
+    healthy.succeeded();
+    healthy.release();
+  });
+
+  it("abandons an unsettled half-open probe without closing the circuit", async () => {
+    let clock = 0;
+    const gate = new ProviderGate({
+      failureThreshold: 1,
+      recoveryAfterMs: 5_000,
+      now: () => clock,
+    });
+
+    const failure = await gate.acquire("openai");
+    failure.failed("model_provider_unavailable");
+    failure.release();
+
+    clock += 5_001;
+    const abandonedProbe = await gate.acquire("openai");
+    abandonedProbe.release();
+
+    const nextProbe = await gate.acquire("openai");
+    await expect(gate.acquire("openai")).rejects.toBeInstanceOf(ProviderUnavailableError);
+    nextProbe.succeeded();
+    nextProbe.release();
+
+    const healthy = await gate.acquire("openai");
+    healthy.succeeded();
+    healthy.release();
+  });
+
+  it("does not erase closed-state failures when a caller cancels", async () => {
+    const gate = new ProviderGate({ failureThreshold: 2 });
+
+    const firstFailure = await gate.acquire("openai");
+    firstFailure.failed("model_provider_unavailable");
+    firstFailure.release();
+
+    const cancelled = await gate.acquire("openai");
+    cancelled.cancelled();
+    cancelled.release();
+
+    const secondFailure = await gate.acquire("openai");
+    secondFailure.failed("model_provider_unavailable");
+    secondFailure.release();
+
+    await expect(gate.acquire("openai")).rejects.toBeInstanceOf(ProviderUnavailableError);
+  });
+
   it("does not strand the half-open probe when the prober cannot get capacity", async () => {
     vi.useFakeTimers();
     try {
@@ -158,5 +232,24 @@ describe("ProviderGate", () => {
     lease.release();
 
     expect(gate.inFlight("openai")).toBe(0);
+  });
+
+  it("removes an aborted capacity waiter without handing it a later slot", async () => {
+    const gate = new ProviderGate({ maxConcurrency: 1 });
+    const held = await gate.acquire("openai");
+    const controller = new AbortController();
+
+    const waiting = gate.acquire("openai", controller.signal);
+    controller.abort();
+    await expect(waiting).rejects.toMatchObject({ name: "AbortError" });
+
+    held.succeeded();
+    held.release();
+    expect(gate.inFlight("openai")).toBe(0);
+
+    const next = await gate.acquire("openai");
+    expect(gate.inFlight("openai")).toBe(1);
+    next.succeeded();
+    next.release();
   });
 });

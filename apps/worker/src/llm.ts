@@ -19,6 +19,8 @@ import type { ResolvedLimits } from "@tulipfarm/run-kernel";
 import { resolveModelProfileBudgetLimits } from "@tulipfarm/run-kernel";
 import {
   asEffortPreset,
+  type ConfiguredModelRef,
+  configuredModelRef,
   deriveModelProfiles,
   isDeprecatedTierAlias,
   type RunEventEffortInference,
@@ -61,17 +63,23 @@ export type LlmModelResolution =
        * call is about to be made against.
        */
       readonly provider?: string;
-      /** Provider for the model that actually answered, including a fallback-chain link. */
-      providerForModel?(modelId: string | undefined): string | undefined;
+      /** Provider for the configured model that actually answered or was attempted. */
+      providerForModel?(model: ModelIdentity | undefined): string | undefined;
+      /** The configured identity selected at the head of this route. */
+      readonly selectedConfiguredModel?: ConfiguredModelRef;
+      /** The last configured chain link whose provider call began. */
+      attemptedConfiguredModel?(): ConfiguredModelRef | undefined;
+      /** The configured chain link that committed an answer. */
+      respondingConfiguredModel?(): ConfiguredModelRef | undefined;
       /** The last chain link that a provider call actually entered. */
       attemptedModelId?(): string | undefined;
       /**
-       * Prices this call against whichever chain link actually answered.
+       * Prices this call against an explicit attempted link, or the link that answered.
        *
-       * Valid only once the call has committed; before that the responder is unknown and this
-       * reports `unpriced` rather than guessing at the head of the chain.
+       * Passing the attempted identity keeps failed calls attributable; successful calls can omit
+       * it because the responder is known after commitment.
        */
-      price(tokensIn: number, tokensOut: number): CostBasis;
+      price(tokensIn: number, tokensOut: number, configuredModel?: ConfiguredModelRef): CostBasis;
     }
   | {
       readonly kind: "denied";
@@ -88,6 +96,8 @@ type ResolvedProfileSelector =
     }
   | { readonly kind: "raw_model"; readonly modelId: string };
 
+type ModelIdentity = string | ConfiguredModelRef;
+
 export class SoulLlm {
   private readonly service = new LlmService();
   /** The exact configuration the service was last built from; `null` before the first build. */
@@ -102,9 +112,25 @@ export class SoulLlm {
 
   constructor(private readonly options: SoulLlmOptions) {}
 
-  /** The provider behind a configured model id, for per-provider limits and the breaker. */
-  private providerOf(modelId: string | undefined): string | undefined {
-    return modelId === undefined ? undefined : this.service.entryFor(modelId)?.provider;
+  private entryFor(identity: ModelIdentity | undefined) {
+    if (identity === undefined) return undefined;
+    return typeof identity === "string"
+      ? this.service.entryFor(identity)
+      : this.service.entryForConfiguredModel(identity);
+  }
+
+  private configuredIdentity(identity: ModelIdentity | undefined): ConfiguredModelRef | undefined {
+    if (identity === undefined) return undefined;
+    if (typeof identity !== "string") return identity;
+    const entry = this.service.entryFor(identity);
+    return entry === undefined
+      ? undefined
+      : { connection: entry.connection, modelId: entry.modelId };
+  }
+
+  /** The provider behind a configured model, for per-provider limits and the breaker. */
+  private providerOf(identity: ModelIdentity | undefined): string | undefined {
+    return this.entryFor(identity)?.provider;
   }
 
   /**
@@ -113,9 +139,10 @@ export class SoulLlm {
    * The provider comes from the configured entry rather than the model id, so a subscription seat
    * is recognised as unmetered instead of being matched against the published API price table.
    */
-  priceFor(modelId: string | undefined, tokensIn: number, tokensOut: number): CostBasis {
-    if (modelId === undefined) return { kind: "unpriced" };
-    const entry = this.service.entryFor(modelId);
+  priceFor(identity: ModelIdentity | undefined, tokensIn: number, tokensOut: number): CostBasis {
+    if (identity === undefined) return { kind: "unpriced" };
+    const modelId = typeof identity === "string" ? identity : identity.modelId;
+    const entry = this.entryFor(identity);
     return priceCall({
       provider: entry?.provider ?? "",
       modelId,
@@ -127,9 +154,10 @@ export class SoulLlm {
   }
 
   /** The first chain link whose calls could not be priced, or `undefined` when all can. */
-  private unpriceableLink(modelIds: readonly string[]): string | undefined {
-    return modelIds.find((modelId) => {
-      const entry = this.service.entryFor(modelId);
+  private unpriceableLink(models: readonly ModelIdentity[]): ModelIdentity | undefined {
+    return models.find((identity) => {
+      const modelId = typeof identity === "string" ? identity : identity.modelId;
+      const entry = this.entryFor(identity);
       return !isPriceable({
         provider: entry?.provider ?? "",
         modelId,
@@ -157,7 +185,10 @@ export class SoulLlm {
   }
 
   /** Builds an already-routed Routine chain without re-resolving against current config. */
-  async chainModel(modelIds: readonly string[], gate?: FallbackCallGate): Promise<LanguageModel> {
+  async chainModel(
+    modelIds: readonly ModelIdentity[],
+    gate?: FallbackCallGate
+  ): Promise<LanguageModel> {
     await this.sync();
     return this.service.chainModel(modelIds, undefined, undefined, gate);
   }
@@ -167,7 +198,7 @@ export class SoulLlm {
    * through the same authority the Chat path uses rather than reporting them as free.
    */
   async resolveChain(
-    modelIds: readonly string[],
+    modelIds: readonly ModelIdentity[],
     routing: ModelRoutingPayload,
     principal?: PrincipalRef,
     gate?: FallbackCallGate
@@ -175,6 +206,7 @@ export class SoulLlm {
     await this.sync();
     const responder: ModelResponderRef = {};
     const attempted: ModelAttemptRef = {};
+    const selectedConfiguredModel = this.configuredIdentity(modelIds[0]);
     return {
       kind: "available",
       model: await this.service.chainModelFor(
@@ -188,10 +220,19 @@ export class SoulLlm {
       ...(this.providerOf(modelIds[0]) === undefined
         ? {}
         : { provider: this.providerOf(modelIds[0]) }),
-      providerForModel: (modelId) => this.providerOf(modelId),
+      providerForModel: (model) =>
+        this.providerOf(typeof model === "string" ? (attempted.configuredModel ?? model) : model),
+      ...(selectedConfiguredModel === undefined ? {} : { selectedConfiguredModel }),
       routing,
       attemptedModelId: () => attempted.modelId,
-      price: (tokensIn, tokensOut) => this.priceFor(responder.modelId, tokensIn, tokensOut),
+      attemptedConfiguredModel: () => attempted.configuredModel,
+      respondingConfiguredModel: () => responder.configuredModel,
+      price: (tokensIn, tokensOut, configuredModel) =>
+        this.priceFor(
+          configuredModel ?? responder.configuredModel ?? responder.modelId,
+          tokensIn,
+          tokensOut
+        ),
     };
   }
 
@@ -206,21 +247,24 @@ export class SoulLlm {
 
     const resolved = this.resolveSelector(selector, inference);
     if (resolved.kind === "raw_model") {
+      const responder: ModelResponderRef = {};
       const attempted: ModelAttemptRef = {};
+      const selectedConfiguredModel = this.configuredIdentity(resolved.modelId);
       return {
         kind: "available",
         model: await this.service.chainModelFor(
           [resolved.modelId],
           principal,
           undefined,
-          undefined,
+          responder,
           gate,
           attempted
         ),
         ...(this.providerOf(resolved.modelId) === undefined
           ? {}
           : { provider: this.providerOf(resolved.modelId) }),
-        providerForModel: (modelId) => this.providerOf(modelId),
+        providerForModel: (model) => this.providerOf(model),
+        ...(selectedConfiguredModel === undefined ? {} : { selectedConfiguredModel }),
         routing: {
           outcome: "raw_model",
           selector,
@@ -228,8 +272,15 @@ export class SoulLlm {
           modelId: resolved.modelId,
         },
         attemptedModelId: () => attempted.modelId,
+        attemptedConfiguredModel: () => attempted.configuredModel,
+        respondingConfiguredModel: () => responder.configuredModel,
         // A raw model id names exactly one model; nothing else could answer.
-        price: (tokensIn, tokensOut) => this.priceFor(resolved.modelId, tokensIn, tokensOut),
+        price: (tokensIn, tokensOut, configuredModel) =>
+          this.priceFor(
+            configuredModel ?? responder.configuredModel ?? resolved.modelId,
+            tokensIn,
+            tokensOut
+          ),
       };
     }
 
@@ -271,7 +322,7 @@ export class SoulLlm {
     }
     const budgetLimits = resolveModelProfileBudgetLimits(primary);
     const budgetEvidence = modelBudgetEvidence(budgetLimits);
-    const chain = selection.chain.map((profile) => profile.model);
+    const chain = selection.chain.map(configuredModelRef);
 
     // An unpriceable call cannot be charged against a cost ceiling, so a profile that declares one
     // must not route to a chain we cannot price — otherwise the ceiling is strictest on the models
@@ -309,11 +360,18 @@ export class SoulLlm {
         attempted
       ),
       ...(this.providerOf(chain[0]) === undefined ? {} : { provider: this.providerOf(chain[0]) }),
-      providerForModel: (modelId) => this.providerOf(modelId),
+      providerForModel: (model) =>
+        this.providerOf(typeof model === "string" ? (attempted.configuredModel ?? model) : model),
+      selectedConfiguredModel: chain[0],
       ...(budgetEvidence === undefined ? {} : { budgetLimits }),
       // Attributed to the link that answered: a chain that rate-limits through to a cheaper model
       // must not be billed at the head model's price.
-      price: (tokensIn, tokensOut) => this.priceFor(responder.modelId, tokensIn, tokensOut),
+      price: (tokensIn, tokensOut, configuredModel) =>
+        this.priceFor(
+          configuredModel ?? responder.configuredModel ?? responder.modelId,
+          tokensIn,
+          tokensOut
+        ),
       routing: {
         outcome: "selected",
         selector,
@@ -322,6 +380,7 @@ export class SoulLlm {
         chain: selection.chain.map((profile) => ({
           profileId: profile.profileId,
           modelId: profile.model,
+          connection: configuredModelRef(profile).connection,
         })),
         cacheAllowed: selection.cacheAllowed,
         rejectedFallbacks: selection.rejectedFallbacks,
@@ -329,6 +388,8 @@ export class SoulLlm {
         ...evidence,
       },
       attemptedModelId: () => attempted.modelId,
+      attemptedConfiguredModel: () => attempted.configuredModel,
+      respondingConfiguredModel: () => responder.configuredModel,
     };
   }
 
@@ -426,7 +487,7 @@ export class SoulLlm {
     const byId = new Map(
       profiles
         // Unbuilt models are not routable; fallback must happen before selection commits.
-        .filter((profile) => this.service.hasModelId(profile.model))
+        .filter((profile) => this.service.hasConfiguredModel(configuredModelRef(profile)))
         .map((profile) => [profile.profileId, profile])
     );
     this.catalog = { get: (id) => byId.get(id) };

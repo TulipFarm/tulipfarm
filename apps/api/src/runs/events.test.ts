@@ -1,3 +1,5 @@
+import { EventEmitter } from "node:events";
+import type { FastifyReply } from "fastify";
 import { describe, expect, it } from "vitest";
 import {
   parseAfterCursor,
@@ -6,6 +8,7 @@ import {
   type RunStatusReader,
   type RunStreamGrant,
   type SseSink,
+  sinkFor,
   streamRunEvents,
 } from "./events";
 
@@ -57,11 +60,13 @@ class RecordingSink implements SseSink {
   drains = 0;
   /** Sequence numbers at which `write` reports a full buffer. */
   backpressureAt = new Set<number>();
+  disconnectAt = new Set<number>();
   private writes = 0;
 
   write(chunk: string): boolean {
     this.chunks.push(chunk);
     this.writes += 1;
+    if (this.disconnectAt.has(this.writes)) this.destroyed = true;
     return !this.backpressureAt.has(this.writes);
   }
 
@@ -140,10 +145,16 @@ describe("streamRunEvents", () => {
   it("withholds events outside the caller's audience", async () => {
     const sink = new RecordingSink();
     const events = [record(1), record(2, { audience: "operator", eventType: "cost.recorded" })];
+    const reader = new FakeEventReader(events);
 
-    await streamRunEvents(sink, deps(events, "succeeded"), { runId: RUN_ID, after: 0 });
+    await streamRunEvents(
+      sink,
+      { ...deps(events, "succeeded"), events: reader },
+      { runId: RUN_ID, after: 0 }
+    );
 
     expect(types(sink)).toEqual(["state.transitioned", "stream.closed"]);
+    expect(reader.calls.map((call) => call.after)).toEqual([0, 1]);
   });
 
   it("waits for the consumer to drain before writing more", async () => {
@@ -234,7 +245,88 @@ describe("streamRunEvents", () => {
 
     expect(outcome).toBe("completed");
     expect(ids(sink)).toEqual([1, 2, 2]);
-    expect(reader.calls.map((call) => call.after)).toEqual([0, 1]);
+    expect(reader.calls.map((call) => call.after)).toEqual([0, 1, 2]);
+  });
+
+  it("drains final events committed between the event read and terminal status read", async () => {
+    const sink = new RecordingSink();
+    const events: RunEventRecord[] = [];
+    const reader = new FakeEventReader(events);
+
+    const outcome = await streamRunEvents(
+      sink,
+      {
+        events: reader,
+        runs: {
+          async find() {
+            events.push(record(1), record(2));
+            return { status: "succeeded" };
+          },
+        },
+        authorize: async () => GRANT,
+        sleep: noSleep,
+        pageSize: 1,
+      },
+      { runId: RUN_ID, after: 0 }
+    );
+
+    expect(outcome).toBe("completed");
+    expect(ids(sink)).toEqual([1, 2, 2]);
+    expect(types(sink)).toEqual(["state.transitioned", "state.transitioned", "stream.closed"]);
+    expect(reader.calls.map((call) => call.after)).toEqual([0, 0, 1, 2]);
+  });
+
+  it("closes an empty terminal Run after one final event read", async () => {
+    const sink = new RecordingSink();
+    const reader = new FakeEventReader([]);
+    let statusReads = 0;
+
+    const outcome = await streamRunEvents(
+      sink,
+      {
+        events: reader,
+        runs: {
+          async find() {
+            statusReads += 1;
+            return { status: "succeeded" };
+          },
+        },
+        authorize: async () => GRANT,
+        sleep: noSleep,
+      },
+      { runId: RUN_ID, after: 0 }
+    );
+
+    expect(outcome).toBe("completed");
+    expect(types(sink)).toEqual(["stream.closed"]);
+    expect(reader.calls.map((call) => call.after)).toEqual([0, 0]);
+    expect(statusReads).toBe(1);
+  });
+
+  it("does not write stream.closed after the client disconnects during the final drain", async () => {
+    const sink = new RecordingSink();
+    sink.disconnectAt.add(1);
+    const events: RunEventRecord[] = [];
+
+    const outcome = await streamRunEvents(
+      sink,
+      {
+        events: new FakeEventReader(events),
+        runs: {
+          async find() {
+            events.push(record(1));
+            return { status: "succeeded" };
+          },
+        },
+        authorize: async () => GRANT,
+        sleep: noSleep,
+      },
+      { runId: RUN_ID, after: 0 }
+    );
+
+    expect(outcome).toBe("client_disconnected");
+    expect(types(sink)).toEqual(["state.transitioned"]);
+    expect(sink.ended).toBe(false);
   });
 
   it("shortcuts a slow poll sleep once waitForNotify resolves, and cancels it after", async () => {
@@ -368,5 +460,31 @@ describe("streamRunEvents", () => {
 
     // Polls at t=0, 10s and 20s: the opening comment, nothing at 10s, a second at 20s.
     expect(sink.chunks.filter((chunk) => chunk.startsWith(":"))).toHaveLength(2);
+  });
+});
+
+describe("sinkFor", () => {
+  it("releases a backpressure wait when the client connection closes", async () => {
+    const raw = new EventEmitter() as EventEmitter & {
+      destroyed: boolean;
+      write(chunk: string): boolean;
+      end(): void;
+    };
+    raw.destroyed = false;
+    raw.write = () => false;
+    raw.end = () => {};
+    const sink = sinkFor({ raw } as unknown as FastifyReply);
+    let resolved = false;
+
+    void sink.waitForDrain().then(() => {
+      resolved = true;
+    });
+    raw.destroyed = true;
+    raw.emit("close");
+    await Promise.resolve();
+
+    expect(resolved).toBe(true);
+    expect(raw.listenerCount("drain")).toBe(0);
+    expect(raw.listenerCount("close")).toBe(0);
   });
 });

@@ -1,6 +1,6 @@
 import type { PaginatedResult } from "@tulipfarm/storage";
 import type { FastifyInstance } from "fastify";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { buildApp } from "../app";
 import type { TokenDoc, TokenRepo } from "../auth/api-tokens";
 import { CSRF_COOKIE } from "../auth/csrf";
@@ -12,6 +12,7 @@ import type { RunEventRecord, RunStreamGrant } from "./events";
 const TEST_CSRF = "a".repeat(64);
 const RUN_ID = "00000000-0000-4000-8000-000000000001";
 const BUSINESS_ID = "business-1";
+const ALLOWED_ORIGIN = "http://localhost:4000";
 
 class FakeUserRepo implements UserRepo {
   private users: UserDoc[] = [];
@@ -69,6 +70,7 @@ describe("GET /api/v1/runs/:id/events", () => {
   let runStatus: string | null;
 
   beforeEach(async () => {
+    vi.stubEnv("CORS_ORIGIN", ALLOWED_ORIGIN);
     const store = new MemorySessionStore();
     const userRepo = new FakeUserRepo();
     const user = await createUser(userRepo, "user@example.com", "pass", "member");
@@ -98,6 +100,7 @@ describe("GET /api/v1/runs/:id/events", () => {
 
   afterEach(async () => {
     await app.close();
+    vi.unstubAllEnvs();
   });
 
   const authed = () => ({ [SESSION_COOKIE]: sid, [CSRF_COOKIE]: TEST_CSRF });
@@ -113,6 +116,29 @@ describe("GET /api/v1/runs/:id/events", () => {
     expect(res.payload).toContain("id: 1\nevent: state.transitioned\n");
     expect(res.payload).toContain("id: 2\nevent: state.transitioned\n");
     expect(res.payload).toContain("event: stream.closed");
+  });
+
+  it("preserves configured CORS headers on the hijacked stream", async () => {
+    const res = await app.inject({
+      method: "GET",
+      url: `/api/v1/runs/${RUN_ID}/events`,
+      cookies: authed(),
+      headers: { origin: ALLOWED_ORIGIN },
+    });
+
+    expect(res.headers["access-control-allow-origin"]).toBe(ALLOWED_ORIGIN);
+    expect(res.headers["access-control-allow-credentials"]).toBe("true");
+  });
+
+  it("does not allow an unknown origin on the hijacked stream", async () => {
+    const res = await app.inject({
+      method: "GET",
+      url: `/api/v1/runs/${RUN_ID}/events`,
+      cookies: authed(),
+      headers: { origin: "http://evil.example" },
+    });
+    expect(res.headers["access-control-allow-origin"]).not.toBe("http://evil.example");
+    expect(res.headers["access-control-allow-origin"]).not.toBe("*");
   });
 
   it("resumes strictly after the requested cursor", async () => {

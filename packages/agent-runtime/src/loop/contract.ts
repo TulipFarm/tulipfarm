@@ -73,6 +73,8 @@ export interface ToolDispatchRequest {
   readonly callId: string;
   readonly name: string;
   readonly arguments: unknown;
+  /** Aborts this hosted call when the Run stops while the Tool is in flight. */
+  readonly signal?: AbortSignal;
   /** Skill currently narrowing the loop; absent means the call came directly from Chat. */
   readonly activeSkillName?: string;
   /**

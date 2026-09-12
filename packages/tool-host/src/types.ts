@@ -7,6 +7,7 @@ export type ToolErrorCode =
   | "oversize_value"
   | "not_found"
   | "internal_error"
+  | "cancelled"
   /** Well-formed request, refused by policy. The reason stays server-side — see `err`'s callers. */
   | "write_denied"
   | "audit_required"
@@ -47,6 +48,7 @@ export const TOOL_FAULT_CLASS: Readonly<
   audit_required: "business",
   credential_required: "business",
   internal_error: "business",
+  cancelled: "business",
   unavailable: "infrastructure",
   indeterminate: "indeterminate",
 };
@@ -145,7 +147,7 @@ export interface RequestContext {
    * name the same principal the Run carries, not assume it is a user.
    */
   subject?: { readonly kind: string; readonly id: string };
-  /** Aborts the active Tool call when its host deadline expires. */
+  /** Aborts the active Tool call when its deadline, Run, or host stops. */
   abortSignal?: AbortSignal;
   actor?: CommitActor;
   /** Server-resolved target. Request payloads cannot override it. */

@@ -1,8 +1,20 @@
-import type { ModelRequirements } from "@tulipfarm/agent-runtime";
-import { LlmConfigValidationError, LlmNotConfiguredError } from "@tulipfarm/schema";
+import type { ModelInvocationRequest, ModelRequirements } from "@tulipfarm/agent-runtime";
+import type { FallbackCallGate } from "@tulipfarm/llm";
+import {
+  AmbiguousModelError,
+  LlmConfigValidationError,
+  LlmNotConfiguredError,
+  textContent,
+} from "@tulipfarm/schema";
 import type { SecretsService } from "@tulipfarm/secrets";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import type { LanguageModel } from "ai";
+import { MockLanguageModelV4, simulateReadableStream } from "ai/test";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { SoulLlm } from "./llm";
+import { LlmModelPort } from "./model";
+import type { WorkerSpendSink } from "./observability";
+
+afterEach(() => vi.unstubAllGlobals());
 
 /** The undemanding request: any configured profile can serve it. */
 const ANY: ModelRequirements = {
@@ -115,6 +127,31 @@ const TWO_PROVIDER_SOUL = {
     },
     complex: {
       providers: [{ provider: "anthropic", model: "opus", api_key_ref: "env://TEST_KEY" }],
+    },
+  },
+};
+
+const DUPLICATE_MODEL_SOUL = {
+  tiers: {
+    ...TWO_PROVIDER_SOUL.tiers,
+    standard: {
+      providers: [
+        {
+          provider: "openai-compatible",
+          model: "house-model",
+          api_key_ref: "env://TEST_KEY_A",
+          base_url: "https://one.example/v1",
+          spec: { input_cost_per_token: 0.000001, output_cost_per_token: 0.000002 },
+        },
+        {
+          provider: "azure",
+          model: "house-model",
+          api_key_ref: "env://TEST_KEY_B",
+          base_url: "https://two.example",
+          resource_name: "test-resource",
+          spec: { input_cost_per_token: 0.000007, output_cost_per_token: 0.000009 },
+        },
+      ],
     },
   },
 };
@@ -306,6 +343,153 @@ describe("SoulLlm — profile routing", () => {
     const model = await llm.model("balanced", ANY);
 
     expect(typeof model === "string" ? model : model.modelId).toBe("sonnet|gpt-4o");
+  });
+
+  it("routes duplicate model ids through distinct connections and attributes the fallback price", async () => {
+    process.env.TEST_KEY_A = "key-a";
+    process.env.TEST_KEY_B = "key-b";
+    const requests: { credentialHeader: string | undefined; url: string }[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+        const url = input instanceof Request ? input.url : String(input);
+        const headers = new Headers(input instanceof Request ? input.headers : init?.headers);
+        requests.push({
+          credentialHeader: headers.has("api-key")
+            ? "api-key"
+            : headers.has("authorization")
+              ? "authorization"
+              : undefined,
+          url,
+        });
+        if (url.startsWith("https://one.example/")) {
+          return new Response(JSON.stringify({ error: { message: "first endpoint down" } }), {
+            status: 500,
+            headers: { "content-type": "application/json" },
+          });
+        }
+        return new Response(
+          JSON.stringify({
+            id: "response-2",
+            created_at: 1,
+            model: "house-model",
+            output: [],
+            usage: { input_tokens: 1, output_tokens: 1 },
+          }),
+          { status: 200, headers: { "content-type": "application/json" } }
+        );
+      })
+    );
+    const gateKeys: string[] = [];
+    const gate: FallbackCallGate = {
+      acquire: async (key) => {
+        gateKeys.push(key);
+        return {
+          succeeded() {},
+          failed() {},
+          cancelled() {},
+          release() {},
+        };
+      },
+    };
+    const { llm } = soul({ sources: [DUPLICATE_MODEL_SOUL] });
+
+    const resolution = await llm.resolveModel("balanced", ANY, undefined, undefined, gate);
+
+    if (resolution.kind !== "available") throw new Error("expected an available resolution");
+    if (typeof resolution.model === "string") throw new Error("expected a built model");
+    await expect(resolution.model.doGenerate({ prompt: [] })).resolves.toMatchObject({
+      finishReason: { unified: "stop" },
+    });
+    expect(requests).toHaveLength(2);
+    expect(requests[0]).toEqual({
+      credentialHeader: "authorization",
+      url: "https://one.example/v1/chat/completions",
+    });
+    expect(requests[1]?.credentialHeader).toBe("api-key");
+    expect(requests[1]?.url).toMatch(/^https:\/\/two\.example\//);
+    expect(gateKeys).toEqual(["openai-compatible:house-model", "azure:house-model"]);
+    expect(resolution.providerForModel?.(resolution.attemptedModelId?.())).toBe("azure");
+    expect(resolution.attemptedConfiguredModel?.()).toEqual({
+      connection: "azure",
+      modelId: "house-model",
+    });
+    expect(resolution.respondingConfiguredModel?.()).toEqual({
+      connection: "azure",
+      modelId: "house-model",
+    });
+    expect(resolution.routing).toMatchObject({
+      outcome: "selected",
+      chain: [
+        {
+          modelId: "house-model",
+          connection: "openai-compatible",
+        },
+        {
+          modelId: "house-model",
+          connection: "azure",
+        },
+      ],
+    });
+    expect(resolution.price(1_000_000, 0)).toEqual({
+      kind: "priced",
+      costUsd: 7,
+      source: "spec",
+    });
+
+    const spend: Parameters<WorkerSpendSink["recordLlmCall"]>[0][] = [];
+    const responseModel = new MockLanguageModelV4({
+      doStream: async () => ({
+        stream: simulateReadableStream({
+          chunks: [
+            { type: "text-start", id: "answer" },
+            { type: "text-delta", id: "answer", delta: "done" },
+            { type: "text-end", id: "answer" },
+            {
+              type: "finish",
+              finishReason: { unified: "stop", raw: "stop" },
+              usage: {
+                inputTokens: { total: 1_000_000, noCache: 1_000_000, cacheRead: 0, cacheWrite: 0 },
+                outputTokens: { total: 0, text: 0, reasoning: 0 },
+              },
+            },
+          ],
+        }),
+      }),
+    });
+    const port = new LlmModelPort({
+      model: async () => ({ ...resolution, model: responseModel as unknown as LanguageModel }),
+      spend: {
+        recordLlmCall: (record) => spend.push(record),
+        recordTurn: () => undefined,
+      },
+    });
+    const request: ModelInvocationRequest = {
+      requestId: "duplicate-connection",
+      modelProfileId: "balanced",
+      messages: [{ role: "user", content: textContent("hello") }],
+      tools: [],
+    };
+
+    await port.invoke(request);
+
+    expect(spend).toEqual([
+      expect.objectContaining({
+        status: "fallback",
+        model: "house-model",
+        provider: "azure",
+        connection: "azure",
+        usage: expect.objectContaining({ costUsd: 7 }),
+      }),
+    ]);
+  });
+
+  it("rejects a duplicate raw model id instead of hiding a caller that dropped connection identity", async () => {
+    process.env.TEST_KEY_A = "key-a";
+    process.env.TEST_KEY_B = "key-b";
+    const { llm } = soul({ sources: [DUPLICATE_MODEL_SOUL] });
+
+    await expect(llm.model("house-model", ANY)).rejects.toBeInstanceOf(AmbiguousModelError);
   });
 
   it("accepts a retired tier name as a deprecated alias for its effort preset", async () => {
