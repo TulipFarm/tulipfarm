@@ -1,0 +1,254 @@
+version: 1
+cases:
+  - name: lists-issues
+    operationId: list-issues
+    request:
+      first: 2
+    response:
+      status: 200
+      body:
+        data:
+          issues:
+            nodes:
+              - id: issue-redacted
+                identifier: ENG-42
+                title: Review the launch checklist
+                url: https://linear.app/example/issue/ENG-42
+                updatedAt: "2026-09-07T06:00:00.000Z"
+            pageInfo:
+              hasNextPage: false
+              endCursor: null
+    expect:
+      request:
+        method: POST
+        url: https://api.linear.app/graphql
+        body:
+          operationName: ListIssues
+          variables:
+            first: 2
+      result:
+        data:
+          issues:
+            nodes:
+              - id: issue-redacted
+                identifier: ENG-42
+                title: Review the launch checklist
+
+  - name: creates-issue
+    operationId: create-issue
+    request:
+      teamId: team-redacted
+      title: Review the launch checklist
+      description: Confirm the release steps.
+    response:
+      status: 200
+      body:
+        data:
+          issueCreate:
+            success: true
+            issue:
+              id: issue-redacted
+              identifier: ENG-43
+              title: Review the launch checklist
+              url: https://linear.app/example/issue/ENG-43
+    expect:
+      request:
+        method: POST
+        url: https://api.linear.app/graphql
+        body:
+          operationName: CreateIssue
+          variables:
+            teamId: team-redacted
+            title: Review the launch checklist
+            description: Confirm the release steps.
+      result:
+        data:
+          issueCreate:
+            success: true
+            issue:
+              identifier: ENG-43
+
+  - name: rejects-invalid-credential
+    operationId: list-issues
+    request:
+      first: 1
+    response:
+      status: 401
+      body:
+        errors:
+          - message: Authentication required
+    expect:
+      request:
+        method: POST
+        url: https://api.linear.app/graphql
+      expectedError:
+        phase: before_dispatch
+        code: provider_unauthorized
+        retryable: false
+
+  - name: rejects-graphql-business-error
+    operationId: list-issues
+    request:
+      first: 1
+    response:
+      status: 200
+      body:
+        errors:
+          - message: Redacted provider error
+            path: [issues]
+    expect:
+      request:
+        method: POST
+        url: https://api.linear.app/graphql
+        body:
+          operationName: ListIssues
+          variables:
+            first: 1
+      expectedError:
+        phase: before_dispatch
+        code: provider_rejected
+        retryable: false
+
+  - name: identifies-viewer
+    operationId: viewer
+    request: {}
+    response:
+      status: 200
+      body:
+        data:
+          viewer:
+            id: user-123
+            name: Muskan Vijayvargiya
+            email: muskan@example.com
+    expect:
+      request:
+        method: POST
+        url: https://api.linear.app/graphql
+        body:
+          operationName: Viewer
+          variables: {}
+      result:
+        data:
+          viewer:
+            id: user-123
+            name: Muskan Vijayvargiya
+
+  - name: lists-teams
+    operationId: list-teams
+    request: {}
+    response:
+      status: 200
+      body:
+        data:
+          teams:
+            nodes:
+              - id: team-123
+                name: Engineering
+                key: ENG
+    expect:
+      request:
+        method: POST
+        url: https://api.linear.app/graphql
+        body:
+          operationName: ListTeams
+          variables: {}
+      result:
+        data:
+          teams:
+            nodes:
+              - id: team-123
+                key: ENG
+
+  - name: reads-issue
+    operationId: read-issue
+    request:
+      id: ENG-42
+    response:
+      status: 200
+      body:
+        data:
+          issue:
+            id: issue-123
+            identifier: ENG-42
+            title: Review the launch checklist
+            description: Confirm the release steps.
+            url: https://linear.app/example/issue/ENG-42
+            updatedAt: "2026-09-07T06:00:00.000Z"
+    expect:
+      request:
+        method: POST
+        url: https://api.linear.app/graphql
+        body:
+          operationName: ReadIssue
+          variables:
+            id: ENG-42
+      result:
+        data:
+          issue:
+            identifier: ENG-42
+            title: Review the launch checklist
+
+  - name: updates-issue
+    operationId: update-issue
+    request:
+      id: issue-123
+      title: Approve the launch checklist
+    response:
+      status: 200
+      body:
+        data:
+          issueUpdate:
+            success: true
+            issue:
+              id: issue-123
+              identifier: ENG-42
+              title: Approve the launch checklist
+              url: https://linear.app/example/issue/ENG-42
+    expect:
+      request:
+        method: POST
+        url: https://api.linear.app/graphql
+        body:
+          operationName: UpdateIssue
+          variables:
+            id: issue-123
+            title: Approve the launch checklist
+      result:
+        data:
+          issueUpdate:
+            success: true
+            issue:
+              identifier: ENG-42
+              title: Approve the launch checklist
+
+  - name: creates-comment
+    operationId: create-comment
+    request:
+      issueId: issue-123
+      body: The checklist is approved.
+    response:
+      status: 200
+      body:
+        data:
+          commentCreate:
+            success: true
+            comment:
+              id: comment-123
+              body: The checklist is approved.
+              createdAt: "2026-09-07T06:05:00.000Z"
+    expect:
+      request:
+        method: POST
+        url: https://api.linear.app/graphql
+        body:
+          operationName: CreateComment
+          variables:
+            issueId: issue-123
+            body: The checklist is approved.
+      result:
+        data:
+          commentCreate:
+            success: true
+            comment:
+              id: comment-123
+              body: The checklist is approved.

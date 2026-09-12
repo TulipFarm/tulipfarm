@@ -59,7 +59,7 @@
         },
         "knowledge": {
           "type": "string",
-          "enum": ["1.0", "1.1"]
+          "enum": ["1.0", "1.1", "1.2"]
         },
         "hooks": {
           "type": "string",
@@ -132,7 +132,7 @@
             },
             "knowledge": {
               "type": "string",
-              "enum": ["1.0", "1.1"]
+              "enum": ["1.0", "1.1", "1.2"]
             },
             "hooks": {
               "type": "string",

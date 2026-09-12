@@ -1,0 +1,445 @@
+version: 1
+cases:
+  - name: lists-first-space-page
+    operationId: list-spaces
+    configuration:
+      site: example.atlassian.net
+    request:
+      limit: 2
+    response:
+      status: 200
+      headers:
+        Link: </wiki/api/v2/spaces?limit=2&cursor=next-space-page>; rel="next"
+      body:
+        results:
+          - id: "1042"
+            key: ENG
+            name: Engineering
+          - id: "1043"
+            key: SUPPORT
+            name: Support
+        _links:
+          next: /wiki/api/v2/spaces?limit=2&cursor=next-space-page
+    expect:
+      request:
+        method: GET
+        url: https://example.atlassian.net/wiki/api/v2/spaces?limit=2
+        headers:
+          Authorization: Basic b2ltLWZpeHR1cmUtY3JlZGVudGlhbA==
+      result:
+        results:
+          - id: "1042"
+            key: ENG
+            name: Engineering
+          - id: "1043"
+            key: SUPPORT
+            name: Support
+
+  - name: lists-first-page-page
+    operationId: list-pages
+    configuration:
+      site: example.atlassian.net
+    request:
+      space-id: "1042"
+      limit: 1
+    response:
+      status: 200
+      headers:
+        Link: </wiki/api/v2/pages?space-id=1042&limit=1&cursor=next-page-page>; rel="next"
+      body:
+        results:
+          - id: "2042"
+            title: Launch checklist
+            status: current
+            version:
+              number: 4
+              createdAt: "2026-09-07T06:00:00.000Z"
+            _links:
+              webui: /spaces/ENG/pages/2042/Launch+checklist
+        _links:
+          next: /wiki/api/v2/pages?space-id=1042&limit=1&cursor=next-page-page
+    expect:
+      request:
+        method: GET
+        url: https://example.atlassian.net/wiki/api/v2/pages?space-id=1042&limit=1
+        headers:
+          Authorization: Basic b2ltLWZpeHR1cmUtY3JlZGVudGlhbA==
+      result:
+        results:
+          - id: "2042"
+            title: Launch checklist
+            status: current
+            version:
+              number: 4
+              createdAt: "2026-09-07T06:00:00.000Z"
+            _links:
+              webui: /spaces/ENG/pages/2042/Launch+checklist
+
+  - name: reads-page-with-pinned-storage-body
+    operationId: get-page
+    configuration:
+      site: example.atlassian.net
+    request:
+      id: "2042"
+    response:
+      status: 200
+      body:
+        id: "2042"
+        title: Launch checklist
+        status: current
+        body:
+          storage:
+            value: <p>Confirm every owner has signed off.</p>
+        version:
+          number: 4
+    expect:
+      request:
+        method: GET
+        url: https://example.atlassian.net/wiki/api/v2/pages/2042?body-format=storage
+        headers:
+          Authorization: Basic b2ltLWZpeHR1cmUtY3JlZGVudGlhbA==
+      result:
+        id: "2042"
+        title: Launch checklist
+        status: current
+        body:
+          storage:
+            value: <p>Confirm every owner has signed off.</p>
+        version:
+          number: 4
+
+  - name: reads-user-and-group-restrictions
+    operationId: get-restrictions
+    configuration:
+      site: example.atlassian.net
+    request:
+      id: "2042"
+    response:
+      status: 200
+      body:
+        operation: read
+        restrictions:
+          user:
+            results:
+              - type: known
+                accountId: user-123
+            start: 0
+            limit: 100
+            size: 1
+            totalSize: 1
+          group:
+            results:
+              - type: group
+                id: group-456
+                name: engineering
+            start: 0
+            limit: 100
+            size: 1
+    expect:
+      request:
+        method: GET
+        url: https://example.atlassian.net/wiki/rest/api/content/2042/restriction/byOperation/read
+        headers:
+          Authorization: Basic b2ltLWZpeHR1cmUtY3JlZGVudGlhbA==
+      result:
+        operation: read
+        restrictions:
+          user:
+            results:
+              - type: known
+                accountId: user-123
+            start: 0
+            limit: 100
+            size: 1
+            totalSize: 1
+          group:
+            results:
+              - type: group
+                id: group-456
+                name: engineering
+            start: 0
+            limit: 100
+            size: 1
+
+  - name: reads-group-only-restrictions
+    operationId: get-restrictions
+    configuration:
+      site: example.atlassian.net
+    request:
+      id: "2043"
+    response:
+      status: 200
+      body:
+        operation: read
+        restrictions:
+          user:
+            results: []
+            start: 0
+            limit: 100
+            size: 0
+            totalSize: 0
+          group:
+            results:
+              - type: group
+                id: group-456
+                name: engineering
+            start: 0
+            limit: 100
+            size: 1
+    expect:
+      request:
+        method: GET
+        url: https://example.atlassian.net/wiki/rest/api/content/2043/restriction/byOperation/read
+        headers:
+          Authorization: Basic b2ltLWZpeHR1cmUtY3JlZGVudGlhbA==
+      result:
+        operation: read
+        restrictions:
+          user:
+            results: []
+            start: 0
+            limit: 100
+            size: 0
+            totalSize: 0
+          group:
+            results:
+              - type: group
+                id: group-456
+                name: engineering
+            start: 0
+            limit: 100
+            size: 1
+
+  - name: reads-empty-direct-restrictions
+    operationId: get-restrictions
+    configuration:
+      site: example.atlassian.net
+    request:
+      id: "2044"
+    response:
+      status: 200
+      body:
+        operation: read
+        restrictions:
+          user:
+            results: []
+            start: 0
+            limit: 100
+            size: 0
+            totalSize: 0
+          group:
+            results: []
+            start: 0
+            limit: 100
+            size: 0
+    expect:
+      request:
+        method: GET
+        url: https://example.atlassian.net/wiki/rest/api/content/2044/restriction/byOperation/read
+        headers:
+          Authorization: Basic b2ltLWZpeHR1cmUtY3JlZGVudGlhbA==
+      result:
+        operation: read
+        restrictions:
+          user:
+            results: []
+            start: 0
+            limit: 100
+            size: 0
+            totalSize: 0
+          group:
+            results: []
+            start: 0
+            limit: 100
+            size: 0
+
+  - name: allows-effective-group-or-inherited-access
+    operationId: check-page-read
+    configuration:
+      site: example.atlassian.net
+    request:
+      id: "2042"
+      body:
+        subject:
+          type: user
+          identifier: user-123
+        operation: read
+    response:
+      status: 200
+      body:
+        hasPermission: true
+    expect:
+      request:
+        method: POST
+        url: https://example.atlassian.net/wiki/rest/api/content/2042/permission/check
+        headers:
+          Authorization: Basic b2ltLWZpeHR1cmUtY3JlZGVudGlhbA==
+          content-type: application/json
+        body:
+          subject:
+            type: user
+            identifier: user-123
+          operation: read
+      result:
+        hasPermission: true
+
+  - name: denies-effective-page-space-or-product-access
+    operationId: check-page-read
+    configuration:
+      site: example.atlassian.net
+    request:
+      id: "2043"
+      body:
+        subject:
+          type: user
+          identifier: user-456
+        operation: read
+    response:
+      status: 200
+      body:
+        hasPermission: false
+    expect:
+      request:
+        method: POST
+        url: https://example.atlassian.net/wiki/rest/api/content/2043/permission/check
+        headers:
+          Authorization: Basic b2ltLWZpeHR1cmUtY3JlZGVudGlhbA==
+          content-type: application/json
+        body:
+          subject:
+            type: user
+            identifier: user-456
+          operation: read
+      result:
+        hasPermission: false
+
+  - name: rejects-unverifiable-effective-access
+    operationId: check-page-read
+    configuration:
+      site: example.atlassian.net
+    request:
+      id: "2045"
+      body:
+        subject:
+          type: user
+          identifier: user-789
+        operation: read
+    response:
+      status: 403
+      body:
+        message: Current user is not permitted to check this subject
+    expect:
+      request:
+        method: POST
+        url: https://example.atlassian.net/wiki/rest/api/content/2045/permission/check
+        headers:
+          Authorization: Basic b2ltLWZpeHR1cmUtY3JlZGVudGlhbA==
+          content-type: application/json
+        body:
+          subject:
+            type: user
+            identifier: user-789
+          operation: read
+      expectedError:
+        phase: before_dispatch
+        code: provider_unauthorized
+        retryable: false
+
+  - name: rejects-malformed-permission-proof
+    operationId: check-page-read
+    configuration:
+      site: example.atlassian.net
+    request:
+      id: "2046"
+      body:
+        subject:
+          type: user
+          identifier: user-999
+        operation: read
+    response:
+      status: 200
+      body:
+        hasPermission: "true"
+    expect:
+      request:
+        method: POST
+        url: https://example.atlassian.net/wiki/rest/api/content/2046/permission/check
+        headers:
+          Authorization: Basic b2ltLWZpeHR1cmUtY3JlZGVudGlhbA==
+          content-type: application/json
+        body:
+          subject:
+            type: user
+            identifier: user-999
+          operation: read
+      expectedError:
+        phase: after_dispatch
+        code: invalid_output
+        retryable: false
+
+  - name: rejects-missing-page
+    operationId: get-page
+    configuration:
+      site: example.atlassian.net
+    request:
+      id: "9999"
+    response:
+      status: 404
+      body:
+        errors:
+          - status: "404"
+            code: NOT_FOUND
+            title: Page not found
+    expect:
+      request:
+        method: GET
+        url: https://example.atlassian.net/wiki/api/v2/pages/9999?body-format=storage
+        headers:
+          Authorization: Basic b2ltLWZpeHR1cmUtY3JlZGVudGlhbA==
+      expectedError:
+        phase: before_dispatch
+        code: provider_not_found
+        retryable: false
+
+  - name: rejects-unreadable-restrictions
+    operationId: get-restrictions
+    configuration:
+      site: example.atlassian.net
+    request:
+      id: "2045"
+    response:
+      status: 403
+      body:
+        message: Current user not permitted to use Confluence
+    expect:
+      request:
+        method: GET
+        url: https://example.atlassian.net/wiki/rest/api/content/2045/restriction/byOperation/read
+        headers:
+          Authorization: Basic b2ltLWZpeHR1cmUtY3JlZGVudGlhbA==
+      expectedError:
+        phase: before_dispatch
+        code: provider_unauthorized
+        retryable: false
+
+  - name: resolves-user-account
+    operationId: get-user
+    configuration:
+      site: example.atlassian.net
+    request:
+      accountId: user-123
+    response:
+      status: 200
+      body:
+        accountId: user-123
+        email: muskan@example.com
+        publicName: Muskan Vijayvargiya
+    expect:
+      request:
+        method: GET
+        url: https://example.atlassian.net/wiki/rest/api/user?accountId=user-123
+        headers:
+          Authorization: Basic b2ltLWZpeHR1cmUtY3JlZGVudGlhbA==
+      result:
+        accountId: user-123
+        publicName: Muskan Vijayvargiya

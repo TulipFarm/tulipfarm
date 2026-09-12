@@ -1,0 +1,273 @@
+version: 1
+cases:
+  - name: identifies-bot-workspace
+    operationId: bot-auth-test
+    request: {}
+    response:
+      status: 200
+      body:
+        ok: true
+        url: https://acme.slack.com/
+        team: Acme
+        user: tulipfarm
+        team_id: T01234567
+        user_id: U01234567
+        bot_id: B01234567
+    expect:
+      request:
+        method: GET
+        url: https://slack.com/api/auth.test
+        headers:
+          Authorization: Bearer oim-fixture-credential
+      result:
+        ok: true
+        team: Acme
+        team_id: T01234567
+        bot_id: B01234567
+
+  - name: lists-bot-conversations
+    operationId: bot-list-conversations
+    request:
+      exclude_archived: true
+      limit: 2
+    response:
+      status: 200
+      body:
+        ok: true
+        channels:
+          - id: C01234567
+            name: operations
+            is_private: false
+            is_archived: false
+          - id: G01234567
+            name: incident-room
+            is_private: true
+            is_archived: false
+        response_metadata:
+          next_cursor: cursor-redacted
+    expect:
+      request:
+        method: GET
+        url: https://slack.com/api/conversations.list?exclude_archived=true&limit=2&types=public_channel%2Cprivate_channel%2Cmpim%2Cim
+        headers:
+          Authorization: Bearer oim-fixture-credential
+      result:
+        ok: true
+        channels:
+          - id: C01234567
+            name: operations
+          - id: G01234567
+            name: incident-room
+            is_private: true
+        response_metadata:
+          next_cursor: cursor-redacted
+
+  - name: reads-bot-history
+    operationId: bot-conversation-history
+    request:
+      channel: C01234567
+      oldest: "1788760800.000000"
+      limit: 2
+    response:
+      status: 200
+      body:
+        ok: true
+        messages:
+          - type: message
+            user: U01234567
+            text: Deployment is ready.
+            ts: "1788760860.000100"
+          - type: message
+            user: U07654321
+            text: Ship it.
+            ts: "1788760920.000200"
+            thread_ts: "1788760860.000100"
+        has_more: false
+        response_metadata:
+          next_cursor: ""
+    expect:
+      request:
+        method: GET
+        url: https://slack.com/api/conversations.history?channel=C01234567&oldest=1788760800.000000&limit=2
+        headers:
+          Authorization: Bearer oim-fixture-credential
+      result:
+        ok: true
+        messages:
+          - user: U01234567
+            text: Deployment is ready.
+            ts: "1788760860.000100"
+          - user: U07654321
+            text: Ship it.
+            thread_ts: "1788760860.000100"
+
+  - name: lists-channel-members
+    operationId: bot-list-members
+    request:
+      channel: C01234567
+      limit: 2
+    response:
+      status: 200
+      body:
+        ok: true
+        members: [U01234567, U07654321]
+        response_metadata:
+          next_cursor: ""
+    expect:
+      request:
+        method: GET
+        url: https://slack.com/api/conversations.members?channel=C01234567&limit=2
+        headers:
+          Authorization: Bearer oim-fixture-credential
+      result:
+        ok: true
+        members: [U01234567, U07654321]
+
+  - name: reads-one-bot-message
+    operationId: bot-read-message
+    request:
+      channel: C01234567
+      latest: "1788760860.000100"
+      oldest: "1788760860.000100"
+    response:
+      status: 200
+      body:
+        ok: true
+        messages:
+          - type: message
+            user: U01234567
+            text: Deployment is ready.
+            ts: "1788760860.000100"
+            edited:
+              user: U01234567
+              ts: "1788760861.000200"
+        has_more: false
+        response_metadata:
+          next_cursor: ""
+    expect:
+      request:
+        method: GET
+        url: https://slack.com/api/conversations.history?channel=C01234567&latest=1788760860.000100&oldest=1788760860.000100&inclusive=true&limit=1
+        headers:
+          Authorization: Bearer oim-fixture-credential
+      result:
+        ok: true
+        messages:
+          - user: U01234567
+            text: Deployment is ready.
+            ts: "1788760860.000100"
+            edited:
+              user: U01234567
+              ts: "1788760861.000200"
+
+  - name: sends-bot-message
+    operationId: bot-send-message
+    request:
+      body:
+        channel: C01234567
+        text: Deployment is complete.
+        thread_ts: "1788760860.000100"
+        unfurl_links: false
+        unfurl_media: false
+    response:
+      status: 200
+      body:
+        ok: true
+        channel: C01234567
+        ts: "1788760980.000300"
+        message:
+          text: Deployment is complete.
+          user: U0BOT
+    expect:
+      request:
+        method: POST
+        url: https://slack.com/api/chat.postMessage
+        headers:
+          Authorization: Bearer oim-fixture-credential
+          content-type: application/json
+        body:
+          channel: C01234567
+          text: Deployment is complete.
+          thread_ts: "1788760860.000100"
+          unfurl_links: false
+          unfurl_media: false
+      result:
+        ok: true
+        channel: C01234567
+        ts: "1788760980.000300"
+
+  - name: resolves-bot-user
+    operationId: bot-user-info
+    request:
+      user: U01234567
+    response:
+      status: 200
+      body:
+        ok: true
+        user:
+          id: U01234567
+          team_id: T01234567
+          name: muskan
+          real_name: Muskan Vijayvargiya
+          deleted: false
+          is_bot: false
+          profile:
+            email: muskan@example.com
+    expect:
+      request:
+        method: GET
+        url: https://slack.com/api/users.info?user=U01234567
+      result:
+        ok: true
+        user:
+          id: U01234567
+          team_id: T01234567
+          deleted: false
+
+  - name: rejects-send-ok-false
+    operationId: bot-send-message
+    request:
+      body:
+        channel: C01234567
+        text: Deployment is complete.
+    response:
+      status: 200
+      body:
+        ok: false
+        error: channel_not_found
+    expect:
+      request:
+        method: POST
+        url: https://slack.com/api/chat.postMessage
+        body:
+          channel: C01234567
+          text: Deployment is complete.
+      expectedError:
+        phase: after_dispatch
+        code: invalid_output
+        retryable: false
+
+  - name: rejects-send-missing-ok
+    operationId: bot-send-message
+    request:
+      body:
+        channel: C01234567
+        text: Deployment is complete.
+    response:
+      status: 200
+      body:
+        channel: C01234567
+        ts: "1788760980.000300"
+        message:
+          text: Deployment is complete.
+    expect:
+      request:
+        method: POST
+        url: https://slack.com/api/chat.postMessage
+        body:
+          channel: C01234567
+          text: Deployment is complete.
+      expectedError:
+        phase: after_dispatch
+        code: invalid_output
+        retryable: false

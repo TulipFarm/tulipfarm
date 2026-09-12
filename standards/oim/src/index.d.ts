@@ -1,5 +1,5 @@
 export type OimCoreProfileVersion = "1.0" | "1.1" | "1.2";
-export type OimKnowledgeProfileVersion = "1.0" | "1.1";
+export type OimKnowledgeProfileVersion = "1.0" | "1.1" | "1.2";
 export type OimOptionalProfile = "auth" | "events" | "knowledge" | "hooks";
 export type OimProfiles = {
   readonly core: OimCoreProfileVersion;
@@ -52,13 +52,14 @@ export declare const OIM_PROFILE_VERSIONS: Readonly<{
   core: "1.2";
   auth: "1.0";
   events: "1.0";
-  knowledge: "1.1";
+  knowledge: "1.2";
   hooks: "1.0";
 }>;
 export declare const OIM_PROFILE_VERSION_MATRIX: OimProfileVersionMatrix;
 export declare const OIM_CONFORMANCE_CASES: Readonly<
   Record<"core" | OimOptionalProfile, readonly string[]>
 >;
+export declare const OIM_CONFORMANCE_CASE_SINCE: Readonly<Record<string, string>>;
 export declare const OimManifestSchema: Readonly<Record<string, unknown>>;
 export declare const OimFixtureSuiteSchema: Readonly<Record<string, unknown>>;
 export declare const OimConformanceClaimSchema: Readonly<Record<string, unknown>>;
@@ -78,6 +79,16 @@ export declare function oimPackageIssues(
 export declare function oimCompatibilityIssues(previous: OimManifest, next: OimManifest): string[];
 export declare function oimFileDigest(content: string | Uint8Array): string;
 export declare function oimPackageDigest(manifest: OimManifest): string;
+export interface OimKnowledgePrincipalBody {
+  readonly template: Readonly<Record<string, unknown>>;
+  readonly pointer: string;
+}
+export declare function oimPrincipalBody(
+  binding: OimKnowledgePrincipalBody,
+  externalSubject: string,
+  requestSchema: Readonly<Record<string, unknown>>
+): Record<string, unknown>;
+export declare function oimLiveAuthorizationAllowed(response: unknown, pointer: string): boolean;
 export declare function oimToolId(manifest: OimManifest, operationId: string): string;
 export declare function validatePackageDirectory(
   directory: string | URL

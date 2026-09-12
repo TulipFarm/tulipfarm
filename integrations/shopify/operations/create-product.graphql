@@ -1,0 +1,15 @@
+mutation ShopifyCreateProduct($product: ProductCreateInput!) {
+  productCreate(product: $product) {
+    product {
+      id
+      title
+      handle
+      status
+      updatedAt
+    }
+    userErrors {
+      field
+      message
+    }
+  }
+}

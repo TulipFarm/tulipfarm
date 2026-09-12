@@ -1,0 +1,586 @@
+oimVersion: "1.0"
+kind: Integration
+
+metadata:
+  id: gitlab
+  name: GitLab
+  version: 1.0.0
+  description: >-
+    Read and write GitLab.com, Dedicated, or explicitly approved public self-managed GitLab issues,
+    merge requests and notes with an access token, and receive project webhooks as typed events.
+  license: Apache-2.0
+  maintainers:
+    - name: TulipFarm
+      url: https://tulipfarm.dev
+
+profiles:
+  core: "1.0"
+  auth: "1.0"
+  events: "1.0"
+
+files:
+  - path: setup-guide.md
+    role: guide
+    sha256: "0f61bbed2069e74a9421527ed59e05b5533f01d127966a091e53a903bc15bd7c"
+  - path: fixtures.yml
+    role: fixture
+    sha256: "a71c67bc158296fd6a4f9d417a077877e5fb8f4e754ea72c121dee881c3f0d2c"
+
+auth:
+  # GitLab.com and GitLab Dedicated are statically allowed. A self-managed host is added only for
+  # one Connection after the runtime records an explicit exact-origin approval.
+  allowedOriginHosts:
+    - gitlab.com
+    - "*.gitlab.com"
+  credentialSlots:
+    - id: access_token
+      label: GitLab access token
+      kind: api_key
+      required: true
+    - id: webhook_secret
+      label: GitLab webhook secret token
+      kind: webhook_secret
+      required: false
+  configurationFields:
+    - id: gitlab_host
+      label: GitLab host
+      type: string
+      required: true
+      agentVisible: true
+  steps:
+    - id: host
+      type: fields
+      title: Name your GitLab host
+      description: >-
+        Enter the bare host you sign in to, for example gitlab.com or gitlab.example.com. A host
+        outside gitlab.com must be public HTTPS and needs a separate exact-origin confirmation.
+      fields:
+        - id: gitlab_host
+          label: GitLab host
+          input: text
+          required: true
+          target:
+            type: configuration
+            field: gitlab_host
+    - id: token
+      type: fields
+      title: Create an access token
+      description: >-
+        Create a personal, group or project access token under Settings > Access tokens with the
+        api scope. The Connection can do exactly what that token can do and nothing more, so scope
+        it to the projects this Integration should reach. Agents never see the token.
+      fields:
+        - id: access_token
+          label: Access token
+          input: password
+          required: true
+          target:
+            type: credential
+            slot: access_token
+    - id: webhook
+      type: fields
+      title: Add a webhook secret token
+      description: >-
+        Only needed if you want GitLab events. In your project or group, open Settings > Webhooks,
+        add a webhook pointing at this deployment's ingress URL, and paste the same value into the
+        Secret token field there and here. GitLab sends that value verbatim in the X-Gitlab-Token
+        header, so treat it as a password and generate a long random one.
+      fields:
+        - id: webhook_secret
+          label: Secret token
+          input: password
+          required: false
+          target:
+            type: credential
+            slot: webhook_secret
+  healthCheckOperationId: current-user
+
+operations:
+  - id: current-user
+    name: gitlab_current_user
+    description: The GitLab account this Connection authenticates as. Use it to confirm the token works.
+    effect: read
+    identityMode: shared_or_personal
+    credentialSlot: access_token
+    credentialInjection:
+      in: header
+      name: PRIVATE-TOKEN
+      format: "{token}"
+    source:
+      type: http
+      method: GET
+      baseUrl: https://{gitlab_host}
+      path: /api/v4/user
+    response:
+      maxBytes: 32768
+      schema:
+        type: object
+        properties:
+          id: { type: integer }
+          username: { type: string }
+          name: { type: string }
+          web_url: { type: string }
+      projection:
+        - /id
+        - /username
+        - /name
+        - /web_url
+    rateLimit:
+      requests: 60
+      perSeconds: 60
+      scope: connection
+
+  - id: list-projects
+    name: gitlab_list_projects
+    description: >-
+      List the projects this Connection can reach. Use it to find a project id before reading or
+      creating issues.
+    effect: read
+    identityMode: shared_or_personal
+    credentialSlot: access_token
+    credentialInjection:
+      in: header
+      name: PRIVATE-TOKEN
+      format: "{token}"
+    source:
+      type: http
+      method: GET
+      baseUrl: https://{gitlab_host}
+      path: /api/v4/projects
+      parameters:
+        - name: search
+          in: query
+          schema:
+            type: string
+            description: Match project names containing this text.
+        - name: membership
+          in: query
+          schema:
+            type: boolean
+            description: Limit to projects the token's account is a member of.
+        - name: per_page
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+    pagination:
+      type: page
+      requestParameter: page
+      start: 1
+    response:
+      maxBytes: 262144
+      schema:
+        type: array
+        items:
+          type: object
+          properties:
+            id: { type: integer }
+            name: { type: string }
+            path_with_namespace: { type: string }
+            web_url: { type: string }
+            default_branch: { type: string }
+    rateLimit:
+      requests: 60
+      perSeconds: 60
+      scope: connection
+
+  - id: list-issues
+    name: gitlab_list_issues
+    description: List issues in one project, newest first by default.
+    effect: read
+    identityMode: shared_or_personal
+    credentialSlot: access_token
+    credentialInjection:
+      in: header
+      name: PRIVATE-TOKEN
+      format: "{token}"
+    source:
+      type: http
+      method: GET
+      baseUrl: https://{gitlab_host}
+      path: /api/v4/projects/{id}/issues
+      parameters:
+        - name: id
+          in: path
+          schema:
+            type: string
+            description: Numeric project id, or the URL-encoded path such as acme%2Fweb.
+        - name: state
+          in: query
+          schema:
+            type: string
+            enum: [opened, closed, all]
+        - name: search
+          in: query
+          schema: { type: string }
+        - name: labels
+          in: query
+          schema:
+            type: string
+            description: Comma-separated label names.
+        - name: per_page
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+    pagination:
+      type: page
+      requestParameter: page
+      start: 1
+    response:
+      maxBytes: 262144
+      schema:
+        type: array
+        items:
+          type: object
+          properties:
+            iid: { type: integer }
+            title: { type: string }
+            state: { type: string }
+            web_url: { type: string }
+            updated_at: { type: string }
+    rateLimit:
+      requests: 60
+      perSeconds: 60
+      scope: connection
+
+  - id: get-issue
+    name: gitlab_get_issue
+    description: One issue in full, by its project-scoped iid.
+    effect: read
+    identityMode: shared_or_personal
+    credentialSlot: access_token
+    credentialInjection:
+      in: header
+      name: PRIVATE-TOKEN
+      format: "{token}"
+    source:
+      type: http
+      method: GET
+      baseUrl: https://{gitlab_host}
+      path: /api/v4/projects/{id}/issues/{issue_iid}
+      parameters:
+        - name: id
+          in: path
+          schema:
+            type: string
+            description: Numeric project id, or the URL-encoded path such as acme%2Fweb.
+        - name: issue_iid
+          in: path
+          schema:
+            type: integer
+            description: The issue number shown in the UI, not the global id.
+    response:
+      maxBytes: 131072
+      schema:
+        type: object
+        properties:
+          iid: { type: integer }
+          title: { type: string }
+          description: { type: string }
+          state: { type: string }
+          web_url: { type: string }
+          labels:
+            type: array
+            items: { type: string }
+      projection:
+        - /iid
+        - /title
+        - /description
+        - /state
+        - /web_url
+        - /labels
+    rateLimit:
+      requests: 60
+      perSeconds: 60
+      scope: connection
+
+  - id: create-issue
+    name: gitlab_create_issue
+    description: Open a new issue in a project.
+    effect: create
+    identityMode: shared_or_personal
+    credentialSlot: access_token
+    credentialInjection:
+      in: header
+      name: PRIVATE-TOKEN
+      format: "{token}"
+    source:
+      type: http
+      method: POST
+      baseUrl: https://{gitlab_host}
+      path: /api/v4/projects/{id}/issues
+      parameters:
+        - name: id
+          in: path
+          schema:
+            type: string
+            description: Numeric project id, or the URL-encoded path such as acme%2Fweb.
+    requestSchema:
+      type: object
+      properties:
+        title: { type: string, minLength: 1, maxLength: 255 }
+        description: { type: string, maxLength: 100000 }
+        labels:
+          type: string
+          description: Comma-separated label names.
+      required: [title]
+      additionalProperties: false
+    response:
+      maxBytes: 131072
+      schema:
+        type: object
+        properties:
+          iid: { type: integer }
+          title: { type: string }
+          state: { type: string }
+          web_url: { type: string }
+      projection:
+        - /iid
+        - /title
+        - /state
+        - /web_url
+    rateLimit:
+      requests: 30
+      perSeconds: 60
+      scope: connection
+
+  - id: comment-issue
+    name: gitlab_comment_issue
+    description: Add a note to an existing issue.
+    effect: create
+    identityMode: shared_or_personal
+    credentialSlot: access_token
+    credentialInjection:
+      in: header
+      name: PRIVATE-TOKEN
+      format: "{token}"
+    source:
+      type: http
+      method: POST
+      baseUrl: https://{gitlab_host}
+      path: /api/v4/projects/{id}/issues/{issue_iid}/notes
+      parameters:
+        - name: id
+          in: path
+          schema:
+            type: string
+            description: Numeric project id, or the URL-encoded path such as acme%2Fweb.
+        - name: issue_iid
+          in: path
+          schema: { type: integer }
+    requestSchema:
+      type: object
+      properties:
+        body: { type: string, minLength: 1, maxLength: 100000 }
+      required: [body]
+      additionalProperties: false
+    response:
+      maxBytes: 65536
+      schema:
+        type: object
+        properties:
+          id: { type: integer }
+          body: { type: string }
+          created_at: { type: string }
+      projection:
+        - /id
+        - /body
+        - /created_at
+    rateLimit:
+      requests: 30
+      perSeconds: 60
+      scope: connection
+
+  - id: list-merge-requests
+    name: gitlab_list_merge_requests
+    description: List merge requests in one project.
+    effect: read
+    identityMode: shared_or_personal
+    credentialSlot: access_token
+    credentialInjection:
+      in: header
+      name: PRIVATE-TOKEN
+      format: "{token}"
+    source:
+      type: http
+      method: GET
+      baseUrl: https://{gitlab_host}
+      path: /api/v4/projects/{id}/merge_requests
+      parameters:
+        - name: id
+          in: path
+          schema:
+            type: string
+            description: Numeric project id, or the URL-encoded path such as acme%2Fweb.
+        - name: state
+          in: query
+          schema:
+            type: string
+            enum: [opened, closed, locked, merged, all]
+        - name: per_page
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+    pagination:
+      type: page
+      requestParameter: page
+      start: 1
+    response:
+      maxBytes: 262144
+      schema:
+        type: array
+        items:
+          type: object
+          properties:
+            iid: { type: integer }
+            title: { type: string }
+            state: { type: string }
+            draft: { type: boolean }
+            source_branch: { type: string }
+            target_branch: { type: string }
+            web_url: { type: string }
+    rateLimit:
+      requests: 60
+      perSeconds: 60
+      scope: connection
+
+events:
+  path: /gitlab
+  # GitLab's secret token is sent verbatim in X-Gitlab-Token rather than signing the body, so the
+  # header value is compared against the stored Secret and nothing about the payload is proven.
+  # GitLab's newer signing token is deliberately not used: it signs `{message_id}.{timestamp}.{body}`
+  # with a base64-decoded key, which this profile's signingInput template cannot express.
+  verification:
+    scheme: shared_secret
+    secretSlot: webhook_secret
+    signatureHeader: X-Gitlab-Token
+  deduplication:
+    kind: delivery_id_header
+    header: X-Gitlab-Event-UUID
+  acceptance:
+    requireBodyPointers:
+      - /object_kind
+    requireKnownEventType: true
+  eventTypes:
+    - type: issue
+      selector:
+        pointer: /object_kind
+        equals: issue
+      safeHeaders:
+        - X-Gitlab-Event
+        - X-Gitlab-Event-UUID
+      schema:
+        type: object
+        properties:
+          object_kind: { type: string }
+          user:
+            type: object
+            properties:
+              username: { type: string }
+              name: { type: string }
+          project:
+            type: object
+            properties:
+              id: { type: integer }
+              path_with_namespace: { type: string }
+              web_url: { type: string }
+          object_attributes:
+            type: object
+            properties:
+              iid: { type: integer }
+              title: { type: string }
+              description: { type: string }
+              state: { type: string }
+              action: { type: string }
+              url: { type: string }
+        required: [object_kind, object_attributes]
+    - type: merge_request
+      selector:
+        pointer: /object_kind
+        equals: merge_request
+      safeHeaders:
+        - X-Gitlab-Event
+        - X-Gitlab-Event-UUID
+      schema:
+        type: object
+        properties:
+          object_kind: { type: string }
+          user:
+            type: object
+            properties:
+              username: { type: string }
+          project:
+            type: object
+            properties:
+              id: { type: integer }
+              path_with_namespace: { type: string }
+          object_attributes:
+            type: object
+            properties:
+              iid: { type: integer }
+              title: { type: string }
+              state: { type: string }
+              action: { type: string }
+              source_branch: { type: string }
+              target_branch: { type: string }
+              url: { type: string }
+        required: [object_kind, object_attributes]
+    - type: note
+      selector:
+        pointer: /object_kind
+        equals: note
+      safeHeaders:
+        - X-Gitlab-Event
+        - X-Gitlab-Event-UUID
+      schema:
+        type: object
+        properties:
+          object_kind: { type: string }
+          user:
+            type: object
+            properties:
+              username: { type: string }
+          project:
+            type: object
+            properties:
+              id: { type: integer }
+              path_with_namespace: { type: string }
+          object_attributes:
+            type: object
+            properties:
+              id: { type: integer }
+              note: { type: string }
+              noteable_type: { type: string }
+              url: { type: string }
+        required: [object_kind, object_attributes]
+    - type: push
+      selector:
+        pointer: /object_kind
+        equals: push
+      safeHeaders:
+        - X-Gitlab-Event
+        - X-Gitlab-Event-UUID
+      schema:
+        type: object
+        properties:
+          object_kind: { type: string }
+          ref: { type: string }
+          user_username: { type: string }
+          total_commits_count: { type: integer }
+          project:
+            type: object
+            properties:
+              id: { type: integer }
+              path_with_namespace: { type: string }
+        required: [object_kind, ref]
+  rawRetentionDays: 7
+
+extensions:
+  x-tulipfarm-origin-policy:
+    mode: approved_public_exact
+    fields: [gitlab_host]

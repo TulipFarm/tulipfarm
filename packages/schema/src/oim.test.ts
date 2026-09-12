@@ -1832,7 +1832,7 @@ describe("OIM Knowledge profile", () => {
   it("requires the knowledge profile to be declared alongside the section", () => {
     const manifest = knowledgeManifest();
     expect(oimManifestIssues({ ...manifest, profiles: { core: "1.0" } })).toContain(
-      'profiles: knowledge "1.0" or "1.1" is required when knowledge is declared'
+      'profiles: knowledge "1.0", "1.1", or "1.2" is required when knowledge is declared'
     );
   });
 

@@ -1,0 +1,9 @@
+query ListTeams {
+  teams {
+    nodes {
+      id
+      name
+      key
+    }
+  }
+}

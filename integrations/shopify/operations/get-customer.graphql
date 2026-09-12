@@ -1,0 +1,21 @@
+query ShopifyGetCustomer($id: ID!) {
+  customer(id: $id) {
+    id
+    displayName
+    firstName
+    lastName
+    defaultEmailAddress {
+      emailAddress
+    }
+    defaultPhoneNumber {
+      phoneNumber
+    }
+    tags
+    amountSpent {
+      amount
+      currencyCode
+    }
+    createdAt
+    updatedAt
+  }
+}

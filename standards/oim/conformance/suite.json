@@ -1,5 +1,5 @@
 {
-  "version": "1.0.0",
+  "version": "1.1.0",
   "cases": [
     {
       "id": "core.manifest.strict",
@@ -253,6 +253,158 @@
           "id": "knowledge-removes-deleted-item",
           "input": { "itemId": "page-1", "sourceDeleted": true },
           "expect": { "indexed": false }
+        }
+      ]
+    },
+    {
+      "id": "knowledge.live-authorization.principal-body",
+      "profile": "knowledge",
+      "vectors": [
+        {
+          "id": "knowledge-principal-body-inserts-proven-identity",
+          "since": "1.2",
+          "input": {
+            "template": { "subject": { "type": "user" }, "operation": "read" },
+            "pointer": "/subject/identifier",
+            "externalSubject": "account-123",
+            "requestSchema": {
+              "type": "object",
+              "required": ["subject", "operation"],
+              "properties": {
+                "subject": {
+                  "type": "object",
+                  "required": ["type", "identifier"],
+                  "properties": {
+                    "type": { "const": "user" },
+                    "identifier": { "type": "string" }
+                  }
+                },
+                "operation": { "const": "read" }
+              }
+            }
+          },
+          "expect": {
+            "accepted": true,
+            "body": {
+              "subject": { "type": "user", "identifier": "account-123" },
+              "operation": "read"
+            }
+          }
+        },
+        {
+          "id": "knowledge-principal-body-rejects-request-schema-mismatch",
+          "since": "1.2",
+          "input": {
+            "template": { "subject": { "type": "user" } },
+            "pointer": "/subject/identifier",
+            "externalSubject": "account-123",
+            "requestSchema": {
+              "type": "object",
+              "required": ["operation"]
+            }
+          },
+          "expect": { "accepted": false }
+        },
+        {
+          "id": "knowledge-principal-body-rejects-prototype-path",
+          "since": "1.2",
+          "input": {
+            "template": { "subject": { "type": "user" }, "operation": "read" },
+            "pointer": "/subject/__proto__",
+            "externalSubject": "account-123",
+            "requestSchema": { "type": "object" }
+          },
+          "expect": { "accepted": false }
+        },
+        {
+          "id": "knowledge-principal-body-rejects-template-collision",
+          "since": "1.2",
+          "input": {
+            "template": {
+              "subject": { "type": "user", "identifier": "attacker-selected" },
+              "operation": "read"
+            },
+            "pointer": "/subject/identifier",
+            "externalSubject": "account-123",
+            "requestSchema": { "type": "object" }
+          },
+          "expect": { "accepted": false }
+        }
+      ]
+    },
+    {
+      "id": "knowledge.live-authorization.fail-closed",
+      "profile": "knowledge",
+      "vectors": [
+        {
+          "id": "knowledge-live-authorization-allows-explicit-true",
+          "since": "1.2",
+          "input": {
+            "identityProof": "account-123",
+            "response": { "hasPermission": true },
+            "allowedPointer": "/hasPermission"
+          },
+          "expect": { "visible": true }
+        },
+        {
+          "id": "knowledge-live-authorization-denies-false",
+          "since": "1.2",
+          "input": {
+            "identityProof": "account-123",
+            "response": { "hasPermission": false },
+            "allowedPointer": "/hasPermission"
+          },
+          "expect": { "visible": false }
+        },
+        {
+          "id": "knowledge-live-authorization-denies-missing-proof",
+          "since": "1.2",
+          "input": {
+            "identityProof": null,
+            "response": { "hasPermission": true },
+            "allowedPointer": "/hasPermission"
+          },
+          "expect": { "visible": false }
+        },
+        {
+          "id": "knowledge-live-authorization-denies-malformed-proof",
+          "since": "1.2",
+          "input": {
+            "identityProof": { "subject": "account-123" },
+            "response": { "hasPermission": true },
+            "allowedPointer": "/hasPermission"
+          },
+          "expect": { "visible": false }
+        },
+        {
+          "id": "knowledge-live-authorization-denies-missing-result",
+          "since": "1.2",
+          "input": {
+            "identityProof": "account-123",
+            "response": {},
+            "allowedPointer": "/hasPermission"
+          },
+          "expect": { "visible": false }
+        },
+        {
+          "id": "knowledge-live-authorization-denies-non-boolean-result",
+          "since": "1.2",
+          "input": {
+            "identityProof": "account-123",
+            "response": { "hasPermission": "true" },
+            "allowedPointer": "/hasPermission"
+          },
+          "expect": { "visible": false }
+        },
+        {
+          "id": "knowledge-live-authorization-denies-provider-failure",
+          "since": "1.2",
+          "input": {
+            "identityProof": "account-123",
+            "providerFailure": true,
+            "allowedPointer": "/hasPermission"
+          },
+          "expect": { "visible": false }
         }
       ]
     },
