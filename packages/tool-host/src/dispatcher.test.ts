@@ -1465,6 +1465,13 @@ describe("effect ledger", () => {
   }
 
   class LegacyOutputEffectStore extends MemoryEffectStore {
+    override async get(businessId: string, effectId: string) {
+      const effect = await super.get(businessId, effectId);
+      return effect === undefined
+        ? undefined
+        : Object.freeze({ ...effect, outputStored: false, output: null });
+    }
+
     override async reserve(input: ReserveEffectInput): Promise<ReserveEffectResult> {
       const reserved = await super.reserve(input);
       return reserved.outcome === "duplicate"

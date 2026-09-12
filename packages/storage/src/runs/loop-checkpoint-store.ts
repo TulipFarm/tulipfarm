@@ -17,6 +17,17 @@ export interface LoopCheckpoint {
   readonly resume?: LoopResumeState;
 }
 
+export interface LoopCheckpointFence {
+  readonly leaseGeneration: number;
+}
+
+export class StaleLoopCheckpointWriterError extends Error {
+  constructor(runId: string, leaseGeneration: number) {
+    super(`Run ${runId} is no longer owned by lease generation ${leaseGeneration}`);
+    this.name = "StaleLoopCheckpointWriterError";
+  }
+}
+
 /**
  * Structural mirror of `AgentLoopResumeState` in `@tulipfarm/agent-runtime`, which owns the
  * meaning of every field. Restated rather than imported because storage sits below the runtime
@@ -27,12 +38,111 @@ export interface LoopResumeState {
     readonly role: "system" | "user" | "assistant" | "tool";
     readonly content: MessageContent;
   }[];
+  readonly retryable?: true;
+  readonly retryAttempt?: number;
+  readonly terminal?: {
+    readonly outcome:
+      | {
+          readonly status: "completed";
+          readonly output: unknown;
+          readonly iterations: number;
+          readonly toolCalls: number;
+          readonly repairs: number;
+        }
+      | {
+          readonly status: "failed";
+          readonly reason:
+            | "iteration_limit"
+            | "tool_call_limit"
+            | "repeated_tool_calls"
+            | "repair_budget_exhausted"
+            | "budget_exhausted"
+            | "input_request_failed"
+            | "handoff_unavailable"
+            | "effect_after_report"
+            | "model_billing_inactive"
+            | "model_authentication_failed"
+            | "model_not_configured"
+            | "model_not_found"
+            | "model_rate_limited"
+            | "model_provider_unavailable"
+            | "model_error"
+            | "empty_model_output";
+          readonly modelFailure?: { readonly requestId: string; readonly modelId?: string };
+          readonly iterations: number;
+          readonly toolCalls: number;
+          readonly repairs: number;
+          readonly maxToolCalls?: number;
+        }
+      | {
+          readonly status: "input_required";
+          readonly callId: string;
+          readonly text: string;
+          readonly iterations: number;
+          readonly toolCalls: number;
+          readonly repairs: number;
+        }
+      | {
+          readonly status: "cancelled";
+          readonly iterations: number;
+          readonly toolCalls: number;
+          readonly repairs: number;
+        };
+    readonly event: {
+      readonly sequence: number;
+      readonly businessId: string;
+      readonly runId: string;
+      readonly stateId: string;
+      readonly type:
+        | "iteration_started"
+        | "text_delta"
+        | "tool_call_dispatched"
+        | "tool_call_rejected"
+        | "awaiting_approval"
+        | "awaiting_child"
+        | "completed"
+        | "failed"
+        | "cancelled"
+        | "skill_load_failed";
+      readonly iteration: number;
+      readonly toolName?: string;
+      readonly callId?: string;
+      readonly answeredFromCallId?: string;
+      readonly outcome?: string;
+      readonly text?: string;
+      readonly textIndex?: number;
+      readonly occurredAt: string;
+    };
+    readonly retryable?: true;
+  };
   readonly pendingCall?: {
     readonly callId: string;
     readonly name: string;
     readonly arguments: unknown;
   };
+  readonly pendingBatch?: {
+    readonly calls: readonly {
+      readonly callId: string;
+      readonly name: string;
+      readonly arguments: unknown;
+    }[];
+    readonly nextCallIndex: number;
+  };
   readonly activeSkillName?: string;
+  readonly reported?: boolean;
+  readonly rereadFiles?: readonly {
+    readonly fileId: string;
+    readonly mediaType: string;
+    readonly name: string;
+  }[];
+  readonly rejectionCounts?: readonly (readonly [string, number])[];
+  readonly repeatCounts?: readonly (readonly [string, number])[];
+  readonly cachedResults?: readonly (readonly [
+    string,
+    { readonly callId: string; readonly payload: Record<string, unknown> },
+  ])[];
+  readonly lastCallBatchSignature?: string;
+  readonly consecutiveIdenticalBatches?: number;
   readonly sequence: number;
   readonly textIndex: number;
 }
@@ -91,7 +201,8 @@ function decodeResume(raw: RawResumeState): LoopResumeState {
  * writer unable to lower a ceiling that a later pass already advanced past.
  *
  * `resume_state` is the one field that is *not* monotonic: it is the loop's live transcript, so
- * the latest writer replaces it outright and a settled loop clears it.
+ * the current lease generation replaces it outright. The Run row lock makes claim transfer and
+ * checkpoint replacement one atomic order rather than two writes that can pass each other.
  */
 export class RunLoopCheckpointStore {
   constructor(private readonly transactions: TransactionPort) {}
@@ -124,19 +235,36 @@ export class RunLoopCheckpointStore {
     });
   }
 
-  async save(checkpoint: LoopCheckpoint): Promise<void> {
-    await this.transactions.withTransaction((transaction) =>
-      transaction.query(
-        `INSERT INTO agent_loop_checkpoints
-           (business_id, run_id, state_id, iterations, tool_calls, repairs, resume_state,
-            updated_at)
-         VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, now())
-         ON CONFLICT (business_id, run_id, state_id) DO UPDATE SET
-           iterations = GREATEST(agent_loop_checkpoints.iterations, EXCLUDED.iterations),
-           tool_calls = GREATEST(agent_loop_checkpoints.tool_calls, EXCLUDED.tool_calls),
-           repairs = GREATEST(agent_loop_checkpoints.repairs, EXCLUDED.repairs),
-           resume_state = EXCLUDED.resume_state,
-           updated_at = now()`,
+  async save(checkpoint: LoopCheckpoint, fence?: LoopCheckpointFence): Promise<void> {
+    if (fence === undefined) {
+      throw new StaleLoopCheckpointWriterError(checkpoint.runId, -1);
+    }
+    await this.transactions.withTransaction(async (transaction) => {
+      const result = await transaction.query<{ saved: number }>(
+        `WITH owned_run AS MATERIALIZED (
+           SELECT 1
+             FROM runs
+            WHERE business_id = $1
+              AND id = $2
+              AND lease_generation = $8
+              AND status = 'running'
+            FOR UPDATE
+         ),
+         saved AS (
+           INSERT INTO agent_loop_checkpoints
+             (business_id, run_id, state_id, iterations, tool_calls, repairs, resume_state,
+              updated_at)
+           SELECT $1, $2, $3, $4, $5, $6, $7::jsonb, now()
+             FROM owned_run
+           ON CONFLICT (business_id, run_id, state_id) DO UPDATE SET
+             iterations = GREATEST(agent_loop_checkpoints.iterations, EXCLUDED.iterations),
+             tool_calls = GREATEST(agent_loop_checkpoints.tool_calls, EXCLUDED.tool_calls),
+             repairs = GREATEST(agent_loop_checkpoints.repairs, EXCLUDED.repairs),
+             resume_state = EXCLUDED.resume_state,
+             updated_at = now()
+           RETURNING 1 AS saved
+         )
+         SELECT saved FROM saved`,
         [
           checkpoint.businessId,
           checkpoint.runId,
@@ -145,8 +273,133 @@ export class RunLoopCheckpointStore {
           checkpoint.toolCalls,
           checkpoint.repairs,
           checkpoint.resume === undefined ? null : JSON.stringify(checkpoint.resume),
+          fence.leaseGeneration,
         ]
-      )
-    );
+      );
+      if (result.rows.length === 0) {
+        throw new StaleLoopCheckpointWriterError(checkpoint.runId, fence.leaseGeneration);
+      }
+    });
+  }
+
+  async clear(
+    businessId: string,
+    runId: string,
+    stateId?: string,
+    fence?: LoopCheckpointFence
+  ): Promise<void> {
+    if (fence === undefined) throw new StaleLoopCheckpointWriterError(runId, -1);
+    await this.transactions.withTransaction(async (transaction) => {
+      const result = await transaction.query<{ owned: number }>(
+        `WITH owned_run AS MATERIALIZED (
+           SELECT 1
+             FROM runs
+            WHERE business_id = $1
+              AND id = $2
+              AND lease_generation = $4
+            FOR UPDATE
+         ),
+         cleared AS (
+           DELETE FROM agent_loop_checkpoints
+            WHERE business_id = $1
+              AND run_id = $2
+              AND ($3::text IS NULL OR state_id = $3)
+              AND EXISTS (SELECT 1 FROM owned_run)
+           RETURNING 1
+         )
+         SELECT 1 AS owned FROM owned_run`,
+        [businessId, runId, stateId ?? null, fence.leaseGeneration]
+      );
+      if (result.rows.length === 0) {
+        throw new StaleLoopCheckpointWriterError(runId, fence.leaseGeneration);
+      }
+    });
+  }
+
+  async acknowledgeTerminal(
+    businessId: string,
+    runId: string,
+    stateId: string,
+    fence?: LoopCheckpointFence
+  ): Promise<void> {
+    if (fence === undefined) throw new StaleLoopCheckpointWriterError(runId, -1);
+    await this.transactions.withTransaction(async (transaction) => {
+      const result = await transaction.query<{ owned: number }>(
+        `WITH owned_run AS MATERIALIZED (
+           SELECT 1
+             FROM runs
+            WHERE business_id = $1
+              AND id = $2
+              AND lease_generation = $4
+              AND status = 'running'
+            FOR UPDATE
+         ),
+         acknowledged AS (
+           UPDATE agent_loop_checkpoints
+              SET resume_state = jsonb_set(
+                    resume_state - 'terminal',
+                    '{retryAttempt}',
+                    to_jsonb(COALESCE((resume_state->>'retryAttempt')::integer, 0) + 1)
+                  ),
+                  updated_at = now()
+            WHERE business_id = $1
+              AND run_id = $2
+              AND state_id = $3
+              AND EXISTS (SELECT 1 FROM owned_run)
+              AND resume_state ? 'terminal'
+           RETURNING 1
+         )
+         SELECT 1 AS owned FROM owned_run`,
+        [businessId, runId, stateId, fence.leaseGeneration]
+      );
+      if (result.rows.length === 0) {
+        throw new StaleLoopCheckpointWriterError(runId, fence.leaseGeneration);
+      }
+    });
+  }
+
+  async settle(
+    businessId: string,
+    runId: string,
+    stateId?: string,
+    fence?: LoopCheckpointFence
+  ): Promise<void> {
+    if (fence === undefined) throw new StaleLoopCheckpointWriterError(runId, -1);
+    await this.transactions.withTransaction(async (transaction) => {
+      const owned = await transaction.query(
+        `SELECT 1
+           FROM runs
+          WHERE business_id = $1
+            AND id = $2
+            AND lease_generation = $3
+          FOR UPDATE`,
+        [businessId, runId, fence.leaseGeneration]
+      );
+      if (owned.rows.length === 0) {
+        throw new StaleLoopCheckpointWriterError(runId, fence.leaseGeneration);
+      }
+      await transaction.query(
+        `DELETE FROM agent_loop_checkpoints
+          WHERE business_id = $1
+            AND run_id = $2
+            AND ($3::text IS NULL OR state_id = $3)
+            AND COALESCE(resume_state->>'retryable', 'false') <> 'true'
+            AND COALESCE(resume_state->'terminal'->>'retryable', 'false') <> 'true'`,
+        [businessId, runId, stateId ?? null]
+      );
+      await transaction.query(
+        `UPDATE agent_loop_checkpoints
+            SET resume_state = resume_state - 'terminal',
+                updated_at = now()
+          WHERE business_id = $1
+            AND run_id = $2
+            AND ($3::text IS NULL OR state_id = $3)
+            AND (
+              resume_state->>'retryable' = 'true'
+              OR resume_state->'terminal'->>'retryable' = 'true'
+            )`,
+        [businessId, runId, stateId ?? null]
+      );
+    });
   }
 }

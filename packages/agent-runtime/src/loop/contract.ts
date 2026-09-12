@@ -41,6 +41,12 @@ export interface AgentLoopInput {
   readonly businessId: string;
   readonly runId: string;
   readonly stateId: string;
+  /** Durable Run claim that may replace this loop's checkpoint. */
+  readonly checkpointFence?: { readonly leaseGeneration: number };
+  /** Refuses fresh model work when replaying a State that has already settled. */
+  readonly resumeOnly?: boolean;
+  /** Stops work when this process loses the Run lease; this is not participant cancellation. */
+  readonly signal?: AbortSignal;
   readonly modelProfileId: string;
   /** Governance the acting Agent requires of the model; see `ModelInvocationRequest.policy`. */
   readonly modelPolicy?: ModelRequirementsPolicy;

@@ -82,12 +82,18 @@ before changing how a Case is scored, run or compared.** These are the ones that
 - **Every Case carries a `script`,** so the whole Corpus runs free in ordinary CI.
 - **L3 preserves model streaming.** `run_event_text_omits` reads concatenated durable participant
   text, not the final Message or operator evidence; missing observations fail.
+- **L3 claims each Run before execution,** so State writes use the real lease-generation fence.
 - **Both tiers collect guard refusals.** L3 reads durable `guardrail.decision` events. Use
   stage-specific `guardrail_blocked` so safe model refusals can be reported as unexercised.
 - **Two models are a control, not a contest,** and they never run at once.
 - **A Judge failure errors the Trial; it never scores low.**
 - **A `fault` is L3-only and names a dependency, not an outcome.** It breaks what the executor was
   given, so a Case can measure a Turn abandoned before the loop ever ran.
+- **Persisted Message Expectations read `eval_messages`, never Run events or recomputed history.**
+  `attemptHistory` is L3-only and seeds participant-safe history recovered by the real executor.
+- **Provider File Expectations read `splitPrompt` binary parts against immutable Case Files.**
+- **Checkpoint replay is one L2 fault seam.** It crashes after the first Tool result and retries the
+  same input; do not turn it into a general workflow fixture.
 - This workspace is CJS-by-default — no `import.meta`.
 
 ## Commands

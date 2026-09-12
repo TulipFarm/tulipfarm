@@ -47,7 +47,7 @@ export type UseChatStreamOptions = {
 function needsRunReplay(opts?: UseChatStreamOptions): boolean {
   const turn = opts?.initialTurn;
   if (!turn) return false;
-  return turn.status !== "succeeded";
+  return turn.status === "pending" || turn.status === "running";
 }
 
 export function seedState(opts?: UseChatStreamOptions): ChatState {
@@ -60,7 +60,6 @@ export function seedState(opts?: UseChatStreamOptions): ChatState {
       ? {}
       : { conversationId: opts.initialConversationId }),
   };
-  if (!needsRunReplay(opts)) return base;
   const turn = opts?.initialTurn;
   if (!turn) return base;
   if (turn.status === "start_failed" || (turn.status === "failed" && turn.runId === null)) {
@@ -70,6 +69,14 @@ export function seedState(opts?: UseChatStreamOptions): ChatState {
       error: "The response could not be started. Try again.",
     };
   }
+  if (turn.status === "failed") {
+    return {
+      ...base,
+      status: "error",
+      error: "The model request failed. Try again.",
+    };
+  }
+  if (!needsRunReplay(opts)) return base;
   return {
     ...base,
     status: "submitted",
@@ -151,17 +158,7 @@ function reducer(state: ChatState, action: ChatAction): ChatState {
   if (action.type === "stopped") return rewindLastTurn(state);
   if (action.type === "regenerate") {
     const messages = state.messages.slice();
-    const last = messages[messages.length - 1];
-    if (action.resume && last?.role === "assistant") {
-      // A resumed attempt re-enters the loop holding the failed attempt's tool results, so it
-      // never re-emits those calls. Popping the message would erase them from the transcript for
-      // good; unsealing it instead lets the new answer land under the work it was built on. The
-      // dead attempt's own prose goes, because the fresh model call does not continue it.
-      messages[messages.length - 1] = {
-        ...last,
-        sealed: false,
-        parts: last.parts.filter((part) => part.kind !== "text" && part.kind !== "reasoning"),
-      };
+    if (action.resume) {
       return { ...state, messages, status: "submitted", error: undefined, errorDetails: undefined };
     }
     while (messages.length > 0 && messages[messages.length - 1].role === "assistant") {
@@ -193,7 +190,7 @@ export function useChatStream(opts?: UseChatStreamOptions) {
   const [connectionState, setConnectionState] = useState<"online" | "reconnecting">("online");
   const conversationIdRef = useRef<string | undefined>(opts?.initialConversationId);
   /** The Turn the last stream answered; Retry re-enters it instead of re-asking. */
-  const turnIdRef = useRef<string | undefined>(undefined);
+  const turnIdRef = useRef<string | undefined>(opts?.initialTurn?.id);
   const stateRef = useRef(state);
   stateRef.current = state;
   const lastOptsRef = useRef<SendOptions | undefined>(undefined);
@@ -271,6 +268,13 @@ export function useChatStream(opts?: UseChatStreamOptions) {
       runId: initialRunId,
       status: initialTurnStatus,
     };
+    const persistedCursor =
+      [...stateRef.current.messages]
+        .reverse()
+        .find(
+          (message: ChatMessage) =>
+            message.role === "assistant" && message.turnAttempt?.runId === initialRunId
+        )?.turnAttempt?.cursor ?? 0;
     activeStreamRef.current = active;
     const ownsStream = () => activeStreamRef.current === active;
     const canDispatch = () => ownsStream() && !controller.signal.aborted;
@@ -284,6 +288,9 @@ export function useChatStream(opts?: UseChatStreamOptions) {
         if (!canDispatch()) return;
         if (!conversation.latestTurn) {
           throw new Error("The response state could not be restored. Try again.");
+        }
+        if (conversation.latestTurn.id !== restoredTurn.id) {
+          throw new Error("The response state changed while it was being restored.");
         }
         turn = conversation.latestTurn;
       }
@@ -301,23 +308,27 @@ export function useChatStream(opts?: UseChatStreamOptions) {
         if (active.stopRequested) dispatch({ type: "stopped" });
         return;
       }
-      await resumeRun(turn.runId, {
-        signal: controller.signal,
-        onEvent: (event) => {
-          if (!canDispatch()) return;
-          if (event.type === "client-action") {
-            handleClientAction(event.data, navigateRef.current);
-            return;
-          }
-          dispatch(event);
-          if (event.type === "finish") {
-            onConversationChangeRef.current?.(conversationIdRef.current);
-          }
+      await resumeRun(
+        turn.runId,
+        {
+          signal: controller.signal,
+          onEvent: (event) => {
+            if (!canDispatch()) return;
+            if (event.type === "client-action") {
+              handleClientAction(event.data, navigateRef.current);
+              return;
+            }
+            dispatch(event);
+            if (event.type === "finish") {
+              onConversationChangeRef.current?.(conversationIdRef.current);
+            }
+          },
+          onConnectionState: (next) => {
+            if (canDispatch()) setConnectionState(next);
+          },
         },
-        onConnectionState: (next) => {
-          if (canDispatch()) setConnectionState(next);
-        },
-      });
+        persistedCursor
+      );
     }
 
     void restore()

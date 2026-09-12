@@ -116,6 +116,36 @@ describe("runSweep", () => {
     expect(card.trials[0].expectations.every((a) => a.passed)).toBe(true);
   });
 
+  it("holds out replay coverage when the model never produces a multi-call batch", async () => {
+    const oneAtATime: EvalCase = {
+      id: "one-at-a-time",
+      tier: "l2",
+      agent: "triage",
+      input: [{ role: "user", content: textContent("append two records") }],
+      tools: [{ name: "record_append", inputSchema: { type: "object" }, mutating: true }],
+      toolResults: [{ name: "record_append", output: { stored: true } }],
+      script: [
+        {
+          kind: "tool_calls",
+          calls: [{ callId: "generated-by-model", name: "record_append", arguments: {} }],
+        },
+        { kind: "text", text: "done" },
+      ],
+      checkpointCrash: "after_first_tool_result",
+      expect: [{ kind: "tool_batch_replayed" }, { kind: "loop_status", status: "completed" }],
+    };
+
+    const card = await runSweep({
+      corpus: corpusOf([oneAtATime]),
+      model: scriptedBinding(),
+    });
+
+    expect(card.failed).toBe(0);
+    expect(card.unexercised).toBe(1);
+    expect(card.trials[0]?.unexercised).toBe(true);
+    expect(card.trials[0]?.expectations[0]?.passed).toBe(false);
+  });
+
   it("does not abort the Sweep when one Case errors, and counts it apart from a failure", async () => {
     const exploding: EvalCase = { ...answering("boom", "", []), script: [] };
     const corpus = corpusOf([
@@ -734,7 +764,9 @@ describe("an L3 output guard the model can decline to reach", () => {
         expect(
           card.trials[0].expectations.filter((e) => !e.passed).map((e) => e.expectation.kind)
         ).toEqual(
-          safeFinal ? ["run_event_text_omits", "guardrail_blocked"] : ["run_event_text_omits"]
+          safeFinal
+            ? ["run_event_text_omits", "output_omits", "guardrail_blocked"]
+            : ["run_event_text_omits", "output_omits"]
         );
         expect(card.trials[0].guarded).toBe(safeFinal ? undefined : true);
         expect(card.trials[0].unexercised).toBeUndefined();

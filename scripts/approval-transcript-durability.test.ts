@@ -163,6 +163,7 @@ function loopInput(): AgentLoopInput {
     businessId: DEPLOYMENT_BUSINESS_ID,
     runId: RUN_ID,
     stateId: STATE_KEY,
+    checkpointFence: { leaseGeneration: 1 },
     modelProfileId: "profile-1",
     contextDigest: "sha256:context",
     guardrailDigest: "sha256:guardrail",
@@ -187,7 +188,15 @@ describe("approval park/resume transcript durability (L4-6)", () => {
           operation(transaction as unknown as StorageQueryable)
         ),
     };
-    await new RunStore(transactions).start(startRun());
+    const runs = new RunStore(transactions);
+    await runs.start(startRun());
+    await runs.transitionRun(DEPLOYMENT_BUSINESS_ID, RUN_ID, {
+      expectedVersion: 0,
+      expectedStatus: "queued",
+      status: "running",
+      leaseOwner: "worker-1",
+      leaseExpiresAt: "2026-01-01T00:01:00.000Z",
+    });
     await database.query(
       "INSERT INTO conversations (id, user_id, created_at, updated_at) VALUES ($1, $2, $3, $3)",
       [CONVERSATION_ID, USER_ID, CREATED_AT]
@@ -253,12 +262,18 @@ describe("approval park/resume transcript durability (L4-6)", () => {
     expect(transcript).toContain('"updated":true');
     expect(resumedPrompt.filter((message) => message.role === "tool")).toHaveLength(2);
 
-    // A settled loop keeps its counters and drops the transcript it no longer owes anyone.
+    // A settled loop drops the transcript but retains its exact terminal receipt until the Run's
+    // fenced terminal transition clears it.
     const settled = await database.query<{ resume_state: unknown; tool_calls: string }>(
       "SELECT resume_state, tool_calls FROM agent_loop_checkpoints WHERE run_id = $1",
       [RUN_ID]
     );
-    expect(settled.rows[0]?.resume_state).toBeNull();
+    expect(settled.rows[0]?.resume_state).toMatchObject({
+      messages: [],
+      terminal: {
+        outcome: { status: "completed", output: "cust-1 is now gold." },
+      },
+    });
     expect(Number(settled.rows[0]?.tool_calls)).toBe(2);
   });
 

@@ -13,7 +13,7 @@ typed outputs, Artifacts, limits, budgets, and concurrency.
 | --- | --- |
 | `src/model/`, `src/routine/`, `src/triggers/` | Run/State, Routine, and trigger models. `triggers/dispatch.ts` matches an event envelope to a Trigger and starts the Run; `triggers/matcher.ts` owns the authored `filter` expression and the specificity tie-break. |
 | `src/invocation/` | Persist-first Run/request-Artifact gateway and PostgreSQL adapter. |
-| `src/{lease,outputs,artifacts,lineage}.ts` | Leases, typed outputs, Artifacts, lineage. |
+| `src/{lease,interruption,outputs,artifacts,lineage}.ts` | Leases, ownership-loss control flow, typed outputs, Artifacts, lineage. |
 | `src/{waits,timers,resume}.ts` | Durable waits, deadline sweeps, one-use resume tokens. |
 | `src/{limits,budgets,concurrency}.ts` | Limits, budget ledgers, concurrency admission. |
 | `src/{children,cancel,reconcile-state}.ts` | Child Runs, cancellation, reconciliation. |

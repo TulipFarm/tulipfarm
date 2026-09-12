@@ -431,6 +431,7 @@ describe("/api/v1/internal/turns", () => {
       headers: asWorker(),
       payload: {
         attempt: 1,
+        leaseGeneration: 1,
         content: "the answer",
         metadata: {
           toolCalls: [
@@ -447,7 +448,7 @@ describe("/api/v1/internal/turns", () => {
         },
       },
     });
-    expect(appended.json()).toEqual({ messageId: "message-1" });
+    expect(appended.json()).toEqual({ status: "recorded", messageId: "message-1" });
     expect(store.messages[0]?.metadata).toEqual({
       toolCalls: [
         {
@@ -466,9 +467,29 @@ describe("/api/v1/internal/turns", () => {
       method: "POST",
       url: `/api/v1/internal/turns/${RUN_ID}/completion`,
       headers: asWorker(),
-      payload: { attempt: 1, status: "succeeded", cursor: 12, messageId: "message-1" },
+      payload: {
+        attempt: 1,
+        leaseGeneration: 1,
+        status: "succeeded",
+        cursor: 12,
+        messageId: "message-1",
+      },
     });
     expect(completed.statusCode).toBe(200);
+    expect(completed.json()).toEqual({ status: "recorded" });
+    const replayedCompletion = await app.inject({
+      method: "POST",
+      url: `/api/v1/internal/turns/${RUN_ID}/completion`,
+      headers: asWorker(),
+      payload: {
+        attempt: 1,
+        leaseGeneration: 1,
+        status: "succeeded",
+        cursor: 12,
+        messageId: "message-1",
+      },
+    });
+    expect(replayedCompletion.json()).toEqual({ status: "replayed" });
 
     // What a redelivered job asks before it produces a second answer.
     const recorded = await app.inject({
@@ -486,6 +507,37 @@ describe("/api/v1/internal/turns", () => {
     expect(store.turns[0]).toMatchObject({ businessId: BUSINESS_ID, status: "succeeded" });
   });
 
+  it("returns stale when a retry wins after internal write authorization", async () => {
+    store.onFindTurnByRunId = () => {
+      store.turns[0] = turn({ attempt: 2, runId: "run-2", supersededRunIds: [RUN_ID] });
+    };
+    const appended = await app.inject({
+      method: "POST",
+      url: `/api/v1/internal/turns/${RUN_ID}/messages`,
+      headers: asWorker(),
+      payload: { attempt: 1, leaseGeneration: 1, content: "late answer" },
+    });
+    expect(appended.json()).toEqual({ status: "stale", messageId: null });
+
+    store.turns[0] = turn();
+    store.onFindTurnByRunId = () => {
+      store.turns[0] = turn({ attempt: 2, runId: "run-2", supersededRunIds: [RUN_ID] });
+    };
+    const completed = await app.inject({
+      method: "POST",
+      url: `/api/v1/internal/turns/${RUN_ID}/completion`,
+      headers: asWorker(),
+      payload: {
+        attempt: 1,
+        leaseGeneration: 1,
+        status: "succeeded",
+        cursor: 4,
+        messageId: null,
+      },
+    });
+    expect(completed.json()).toEqual({ status: "stale" });
+  });
+
   it("records and replays a failure reason and model diagnostic for a failed attempt", async () => {
     const completed = await app.inject({
       method: "POST",
@@ -493,6 +545,7 @@ describe("/api/v1/internal/turns", () => {
       headers: asWorker(),
       payload: {
         attempt: 1,
+        leaseGeneration: 1,
         status: "failed",
         cursor: 3,
         messageId: null,

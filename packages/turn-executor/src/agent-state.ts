@@ -3,7 +3,13 @@ import type {
   AgentLoopOutcome,
   ModelFailureDiagnostic,
 } from "@tulipfarm/agent-runtime";
-import { assertStateTransition, type StateStatus } from "@tulipfarm/run-kernel";
+import { TerminalEventDeliveryError } from "@tulipfarm/agent-runtime";
+import {
+  assertRunActive,
+  assertStateTransition,
+  isRunInterruption,
+  type StateStatus,
+} from "@tulipfarm/run-kernel";
 import { StateTransitionConflictError } from "./kernel-ports";
 
 /** Maps Agent loop outcomes onto legal Run-kernel State transitions and durable waits. */
@@ -12,7 +18,9 @@ export interface AgentStateRequest {
   readonly businessId: string;
   readonly runId: string;
   readonly stateKey: string;
+  readonly leaseGeneration: number;
   readonly from: StateStatus;
+  readonly signal?: AbortSignal;
 }
 
 export interface StateTransitionPort {
@@ -20,6 +28,7 @@ export interface StateTransitionPort {
     businessId: string;
     runId: string;
     stateKey: string;
+    leaseGeneration: number;
     from: StateStatus;
     to: StateStatus;
     reason?: string;
@@ -75,6 +84,7 @@ export type AgentStateResult =
     }
   | { readonly status: "input_required"; readonly text: string }
   | { readonly status: "cancelled" }
+  | { readonly status: "terminal_event_pending" }
   | { readonly status: "needs_reconciliation" };
 
 export class AgentStateRunner {
@@ -82,14 +92,28 @@ export class AgentStateRunner {
 
   /** Runs one Agent State over the already-announced Context bundle. */
   async execute(request: AgentStateRequest, input: AgentLoopInput): Promise<AgentStateResult> {
+    assertRunActive(request.signal);
     // Fail before any model or Tool work if the State cannot legally start.
-    assertStateTransition(request.from, "running");
-    await this.move(request, request.from, "running");
+    const alreadyRunning = request.from === "running";
+    const alreadySettled = request.from === "succeeded" || request.from === "failed";
+    if (alreadySettled && input.resumeOnly !== true) {
+      assertStateTransition(request.from, "running");
+    }
+    if (!alreadyRunning && !alreadySettled) {
+      assertStateTransition(request.from, "running");
+      await this.move(request, request.from, "running");
+      assertRunActive(request.signal);
+    }
 
     let outcome: AgentLoopOutcome;
     try {
       outcome = await this.options.loop.run(input);
-    } catch {
+      assertRunActive(request.signal);
+    } catch (error) {
+      if (isRunInterruption(error)) throw error;
+      if (error instanceof TerminalEventDeliveryError || alreadySettled) {
+        return { status: "terminal_event_pending" };
+      }
       // Effects may or may not have landed; reconciliation decides, not the worker.
       try {
         await this.move(request, "running", "needs_reconciliation", "agent_loop_error");
@@ -101,11 +125,13 @@ export class AgentStateRunner {
 
     switch (outcome.status) {
       case "completed":
-        await this.move(request, "running", "succeeded");
+        if (!alreadySettled) await this.move(request, "running", "succeeded");
+        else if (request.from !== "succeeded") return { status: "needs_reconciliation" };
         return { status: "succeeded", output: outcome.output };
 
       case "failed":
-        await this.move(request, "running", "failed", outcome.reason);
+        if (!alreadySettled) await this.move(request, "running", "failed", outcome.reason);
+        else if (request.from !== "failed") return { status: "needs_reconciliation" };
         return {
           status: "failed",
           reason: outcome.reason,
@@ -171,6 +197,7 @@ export class AgentStateRunner {
     request: AgentStateRequest,
     output: unknown
   ): Promise<Extract<AgentStateResult, { status: "succeeded" }>> {
+    assertRunActive(request.signal);
     assertStateTransition(request.from, "running");
     await this.move(request, request.from, "running");
     await this.move(request, "running", "succeeded");
@@ -188,9 +215,11 @@ export class AgentStateRunner {
       businessId: request.businessId,
       runId: request.runId,
       stateKey: request.stateKey,
+      leaseGeneration: request.leaseGeneration,
       from,
       to,
       ...(reason === undefined ? {} : { reason }),
     });
+    assertRunActive(request.signal);
   }
 }

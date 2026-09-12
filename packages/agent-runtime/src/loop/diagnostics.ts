@@ -7,6 +7,14 @@ export class EventSinkFailure extends Error {
   }
 }
 
+/** A terminal loop event whose durable acknowledgement is unknown after its replay state was saved. */
+export class TerminalEventDeliveryError extends Error {
+  constructor(readonly cause: unknown) {
+    super(cause instanceof Error ? cause.message : "terminal event delivery failed", { cause });
+    this.name = "TerminalEventDeliveryError";
+  }
+}
+
 /** Walks `.cause` to the innermost diagnostic message. */
 export function deepestErrorMessage(diagnostic: unknown): string {
   let current = diagnostic;

@@ -31,6 +31,7 @@ function persistedRun(overrides: Partial<PersistedRun> = {}): PersistedRun {
     errorEvidenceRef: null,
     leaseOwner: "worker-1",
     leaseExpiresAt: "2026-07-24T10:01:00.000Z",
+    leaseGeneration: 1,
     ...overrides,
   };
 }
@@ -337,6 +338,31 @@ describe("RunDispatcher", () => {
       expect(seen).toEqual([]);
     });
 
+    it("clears terminal replay state only after the Run is durably settled", async () => {
+      const store = new FakeRunStore();
+      store.claimBatchResult = [persistedRun()];
+      const cleared: unknown[][] = [];
+      const dispatcher = new RunDispatcher({
+        leases: new RunLeaseManager(store),
+        checkpoints: {
+          settle: async (...args) => {
+            expect(store.releaseCalls).toHaveLength(1);
+            cleared.push(args);
+          },
+        },
+        businessId: BUSINESS_ID,
+        owner: "worker-1",
+        now: () => new Date("2026-07-24T10:00:00.000Z"),
+        handler: async () => ({ status: "succeeded" }),
+      });
+
+      await dispatcher.dispatchBatch();
+
+      expect(cleared).toEqual([
+        [BUSINESS_ID, persistedRun().id, undefined, { leaseGeneration: 1 }],
+      ]);
+    });
+
     it("keeps the Run terminal when the hook throws", async () => {
       const dispatcher = dispatcherWith("succeeded", async () => {
         throw new Error("signal transport down");
@@ -466,6 +492,7 @@ describe("RunDispatcher", () => {
     const store = new FakeRunStore();
     store.claimBatchResult = [persistedRun()];
     store.findOverrides = { errorEvidenceRef: DISPATCH_REQUEUED_ONCE_REF };
+    const onTerminal = vi.fn();
     const dispatcher = new RunDispatcher({
       leases: new RunLeaseManager(store),
       businessId: BUSINESS_ID,
@@ -474,6 +501,7 @@ describe("RunDispatcher", () => {
       handler: async () => {
         throw new Error("boom again");
       },
+      onTerminal,
     });
 
     await dispatcher.dispatchBatch();
@@ -485,6 +513,14 @@ describe("RunDispatcher", () => {
         errorEvidenceRef: DISPATCH_REQUEUE_EXHAUSTED_REF,
       }),
     ]);
+    expect(onTerminal).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: persistedRun().id,
+        status: "failed",
+        errorEvidenceRef: DISPATCH_REQUEUE_EXHAUSTED_REF,
+      }),
+      "failed"
+    );
   });
 
   it("stamps an unspecified needs_reconciliation outcome so the recovery sweep can see it", async () => {

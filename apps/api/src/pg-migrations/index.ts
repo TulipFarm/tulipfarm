@@ -43,6 +43,7 @@ import {
   RUN_BROWSE_STORAGE_STATEMENTS,
   RUN_EVENT_NOTIFY_STATEMENTS,
   RUN_EVENT_STORAGE_STATEMENTS,
+  RUN_LEASE_GENERATION_STORAGE_STATEMENTS,
   RUN_RECOVERY_CURSOR_CYCLE_STORAGE_STATEMENTS,
   RUN_RECOVERY_CURSOR_STORAGE_STATEMENTS,
   RUN_STORAGE_STATEMENTS,
@@ -58,6 +59,7 @@ import {
   WAIT_STORAGE_STATEMENTS,
 } from "@tulipfarm/storage";
 import {
+  EFFECT_AWAITING_CHILD_STORAGE_STATEMENTS,
   EFFECT_OUTPUT_STORAGE_STATEMENTS,
   EFFECT_STORAGE_STATEMENTS,
 } from "@tulipfarm/tool-broker";
@@ -3235,5 +3237,35 @@ export const PG_MIGRATIONS: PgMigration[] = [
     version: 109,
     description: "bound each Run recovery scan cycle",
     up: applyStatements(RUN_RECOVERY_CURSOR_CYCLE_STORAGE_STATEMENTS),
+  },
+  {
+    version: 110,
+    description: "persist replayable child Tool parks",
+    up: async (q) => {
+      const present = await q.query<{ present: boolean }>(
+        `SELECT EXISTS (
+           SELECT 1
+             FROM information_schema.columns
+            WHERE table_schema = 'public'
+              AND table_name = 'effect_records'
+              AND column_name = 'state'
+         ) AS present`
+      );
+      if (present.rows[0]?.present) {
+        await applyStatements(EFFECT_AWAITING_CHILD_STORAGE_STATEMENTS)(q);
+      }
+    },
+  },
+  {
+    version: 111,
+    description: "fence Agent loop checkpoints by Run claim generation",
+    up: async (q) => {
+      const present = await q.query<{ present: boolean }>(
+        "SELECT to_regclass('runs') IS NOT NULL AS present"
+      );
+      if (present.rows[0]?.present) {
+        await applyStatements(RUN_LEASE_GENERATION_STORAGE_STATEMENTS)(q);
+      }
+    },
   },
 ];

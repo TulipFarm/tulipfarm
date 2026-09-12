@@ -41,6 +41,7 @@ const RUN: PersistedRun = {
   errorEvidenceRef: null,
   leaseOwner: "worker-1",
   leaseExpiresAt: "2026-01-01T00:01:00.000Z",
+  leaseGeneration: 1,
 };
 
 const CLAIMED_STATE: PersistedState = {
@@ -114,8 +115,8 @@ function harness(checkpoints: LoopCheckpointStore) {
   const host: ChatExecutorHost & TurnCompletionStore & ToolDispatchPort = {
     findTurn: async () => ({ turnId: "turn-1", conversationId: "conv-1", attempt: 1 }),
     findCompletion: async (): Promise<TurnCompletionRecord | undefined> => undefined,
-    appendAssistantMessage: async () => ({ messageId: "message-1" }),
-    completeTurn: async () => {},
+    appendAssistantMessage: async () => ({ status: "recorded", messageId: "message-1" }),
+    completeTurn: async () => ({ status: "recorded" }),
     dispatch: async (input): Promise<ToolDispatchResult> => {
       dispatched.push(input.callId);
       // The first call parks for a human; a later one would land, if it were ever reached.
@@ -190,5 +191,25 @@ describe("createChatExecutor durable loop counters", () => {
       errorEvidenceRef: "agent:tool_call_limit",
     });
     expect(scenario.dispatched).toEqual(["call-1", "call-1"]);
+  });
+
+  it("fences every Chat checkpoint with the active Run claim", async () => {
+    class FenceRecordingStore extends InMemoryLoopCheckpointStore {
+      readonly generations: number[] = [];
+
+      override async save(
+        checkpoint: Parameters<InMemoryLoopCheckpointStore["save"]>[0],
+        fence?: Parameters<InMemoryLoopCheckpointStore["save"]>[1]
+      ) {
+        this.generations.push(fence?.leaseGeneration ?? -1);
+        await super.save(checkpoint, fence);
+      }
+    }
+
+    const checkpoints = new FenceRecordingStore();
+    await harness(checkpoints).park();
+
+    expect(checkpoints.generations.length).toBeGreaterThan(0);
+    expect(new Set(checkpoints.generations)).toEqual(new Set([RUN.leaseGeneration]));
   });
 });

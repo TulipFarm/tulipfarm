@@ -208,23 +208,29 @@ async function harness(
     agents: options.agents ?? new Map<string, SoulAgent>(),
   } as unknown as SoulLoader;
 
+  const conversationRepo = {
+    create: async (doc: ConversationDoc) => {
+      conversations.push(doc);
+    },
+    findById: async (id: string) => conversations.find((doc) => doc._id === id) ?? null,
+    deleteOwned: async (id: string, userId: string) => {
+      const index = conversations.findIndex((doc) => doc._id === id && doc.userId === userId);
+      if (index === -1) return "not_found" as const;
+      conversations.splice(index, 1);
+      return "deleted" as const;
+    },
+  };
   const host = new IngressDeliveryHost({
     runs: options.runs ?? fakeRuns({ source: "integration" }),
     artifacts,
     store,
-    conversations: {
-      create: async (doc: ConversationDoc) => {
-        conversations.push(doc);
-      },
-      findById: async (id: string) => conversations.find((doc) => doc._id === id) ?? null,
-      deleteOwned: async (id: string, userId: string) => {
-        const index = conversations.findIndex((doc) => doc._id === id && doc.userId === userId);
-        if (index === -1) return "not_found" as const;
-        conversations.splice(index, 1);
-        return "deleted" as const;
-      },
-    },
+    conversations: conversationRepo,
     threads: threads as unknown as IntegrationConversationsRepo,
+    transactionScope: () => ({
+      artifacts,
+      conversations: conversationRepo,
+      threads,
+    }),
     integrationEvents: {
       insert: async (doc: Record<string, unknown>) => {
         recordedEvents.push(doc);
@@ -672,6 +678,7 @@ describe("IngressDeliveryHost.postReplyForAttempt", () => {
         cursor: 1,
         createdAt: NOW,
       },
+      runId: RUN_ID,
     });
 
     await expect(

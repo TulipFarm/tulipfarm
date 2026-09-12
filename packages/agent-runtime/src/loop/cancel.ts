@@ -33,6 +33,8 @@ export interface CancelWatch {
   readonly signal: AbortSignal;
   /** Whether the Run has been seen to be cancelling. */
   cancelled(): boolean;
+  /** Whether this worker lost ownership while the call was running. */
+  interrupted(): boolean;
   stop(): void;
 }
 
@@ -46,10 +48,15 @@ export interface CancelWatch {
  */
 export function watchForCancel(
   isCancelled: () => Promise<boolean>,
-  intervalMs: number = CANCEL_POLL_MS
+  intervalMs: number = CANCEL_POLL_MS,
+  interruptionSignal?: AbortSignal
 ): CancelWatch {
   const controller = new AbortController();
   let polling = false;
+  let participantCancelled = false;
+  const interrupt = () => controller.abort(interruptionSignal?.reason);
+  if (interruptionSignal?.aborted === true) interrupt();
+  else interruptionSignal?.addEventListener("abort", interrupt, { once: true });
 
   const timer = setInterval(() => {
     // One read at a time: a slow status read would otherwise stack a queue of them behind it.
@@ -57,7 +64,10 @@ export function watchForCancel(
     polling = true;
     void isCancelled()
       .then((stopped) => {
-        if (stopped) controller.abort(CANCELLED_REASON);
+        if (stopped) {
+          participantCancelled = true;
+          controller.abort(CANCELLED_REASON);
+        }
       })
       .catch(() => {})
       .finally(() => {
@@ -68,7 +78,11 @@ export function watchForCancel(
 
   return {
     signal: controller.signal,
-    cancelled: () => controller.signal.aborted,
-    stop: () => clearInterval(timer),
+    cancelled: () => participantCancelled,
+    interrupted: () => interruptionSignal?.aborted === true,
+    stop: () => {
+      clearInterval(timer);
+      interruptionSignal?.removeEventListener("abort", interrupt);
+    },
   };
 }

@@ -123,6 +123,168 @@ describe("messagesToTimeline", () => {
       { kind: "surface-unavailable", message: "Legacy presentation unavailable" },
     ]);
   });
+
+  it("retains exact Surfaces, safe prose, and both retry attempts", () => {
+    const timeline = messagesToTimeline([
+      {
+        _id: "attempt-1",
+        conversationId: "conversation",
+        role: "assistant",
+        content: "Safe progress from attempt one.",
+        metadata: {
+          surfaces: [{ artifactId: "artifact", revision: 4 }],
+          turnAttempt: {
+            runId: "run-1",
+            attempt: 1,
+            cursor: 8,
+            outcome: "failed",
+            complete: true,
+          },
+        },
+        createdAt: "2026-01-01T00:00:00.000Z",
+      },
+      {
+        _id: "surface-link",
+        conversationId: "conversation",
+        role: "tool",
+        content: [{ type: "surface", artifactId: "artifact", revision: 4 }],
+        createdAt: "2026-01-01T00:00:01.000Z",
+      },
+      {
+        _id: "attempt-2",
+        conversationId: "conversation",
+        role: "assistant",
+        content: "The retry finished.",
+        metadata: {
+          turnAttempt: {
+            runId: "run-2",
+            attempt: 2,
+            cursor: 3,
+            outcome: "succeeded",
+            complete: true,
+          },
+        },
+        createdAt: "2026-01-01T00:00:02.000Z",
+      },
+    ]);
+
+    expect(timeline).toHaveLength(2);
+    expect(timeline[0]).toMatchObject({
+      sealed: true,
+      turnAttempt: { runId: "run-1", attempt: 1, cursor: 8, complete: true },
+      parts: [
+        { kind: "text", text: "Safe progress from attempt one." },
+        { kind: "surface", artifactId: "artifact", revision: 4 },
+      ],
+    });
+    expect(timeline[1]?.parts).toEqual([{ kind: "text", text: "The retry finished." }]);
+  });
+
+  it("leaves an incomplete attempt open for live events to continue", () => {
+    const timeline = messagesToTimeline([
+      {
+        _id: "attempt",
+        conversationId: "conversation",
+        role: "assistant",
+        content: "Already saved. ",
+        metadata: {
+          toolCalls: [{ callId: "call-1", name: "record_create", argsDigest: "sha256:args" }],
+          turnAttempt: {
+            runId: "run-1",
+            attempt: 1,
+            cursor: 6,
+            outcome: "waiting",
+            complete: false,
+            wait: {
+              kind: "approval",
+              waitId: "wait-1",
+              approvalId: "approval-1",
+              callId: "call-1",
+            },
+          },
+        },
+        createdAt: "2026-01-01T00:00:00.000Z",
+      },
+    ]);
+
+    expect(timeline[0]).toMatchObject({
+      sealed: false,
+      turnAttempt: { runId: "run-1", cursor: 6, complete: false },
+      parts: [
+        {
+          kind: "tool",
+          toolCallId: "call-1",
+          status: "running",
+          approval: { approvalId: "approval-1", status: "pending" },
+        },
+        { kind: "text", text: "Already saved. " },
+      ],
+    });
+  });
+
+  it.each(["failed", "cancelled"] as const)(
+    "marks an outcome-less Tool from a completed %s attempt as interrupted",
+    (outcome) => {
+      const timeline = messagesToTimeline([
+        {
+          _id: "attempt",
+          conversationId: "conversation",
+          role: "assistant",
+          content: "",
+          metadata: {
+            toolCalls: [{ callId: "call-1", name: "record_create" }],
+            turnAttempt: {
+              runId: "run-1",
+              attempt: 1,
+              cursor: 6,
+              outcome,
+              complete: true,
+            },
+          },
+          createdAt: "2026-01-01T00:00:00.000Z",
+        },
+      ]);
+
+      expect(timeline[0]?.parts).toEqual([
+        expect.objectContaining({
+          kind: "tool",
+          toolCallId: "call-1",
+          status: "interrupted",
+        }),
+      ]);
+    }
+  );
+
+  it("keeps a Tool with a recorded successful result done after terminal reconciliation", () => {
+    const timeline = messagesToTimeline([
+      {
+        _id: "attempt",
+        conversationId: "conversation",
+        role: "assistant",
+        content: "",
+        metadata: {
+          toolCalls: [{ callId: "call-1", name: "record_create", outcome: "ok" }],
+          turnAttempt: {
+            runId: "run-1",
+            attempt: 1,
+            cursor: 7,
+            outcome: "failed",
+            complete: true,
+          },
+        },
+        createdAt: "2026-01-01T00:00:00.000Z",
+      },
+    ]);
+
+    expect(timeline[0]?.parts).toEqual([
+      expect.objectContaining({
+        kind: "tool",
+        toolCallId: "call-1",
+        status: "done",
+        outcome: "ok",
+      }),
+    ]);
+  });
 });
 
 describe("messagesToTimeline and user attachments", () => {

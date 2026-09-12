@@ -143,10 +143,11 @@ const TOOL_RESULT_SCHEMA = {
 
 const SURFACE_EMITTED_SCHEMA = {
   type: "object",
-  required: ["artifactId"],
+  required: ["artifactId", "revision"],
   additionalProperties: false,
   properties: {
     artifactId: { type: "string", minLength: 1 },
+    revision: { type: "integer", minimum: 1 },
     componentId: { type: "string", minLength: 1 },
   },
 } as const;
@@ -561,7 +562,11 @@ export interface RunEventPayloads {
     /** UI-only deep link to a connect page; never surfaced to the model. */
     readonly connectUrl?: string;
   };
-  readonly "surface.emitted": { readonly artifactId: string; readonly componentId?: string };
+  readonly "surface.emitted": {
+    readonly artifactId: string;
+    readonly revision: number;
+    readonly componentId?: string;
+  };
   readonly "plan.declared": {
     readonly revision: number;
     readonly rounds: readonly {

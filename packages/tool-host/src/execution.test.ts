@@ -148,15 +148,15 @@ describe("a parked call", () => {
     };
   }
 
-  function recordingLedger(states: string[]) {
+  function recordingLedger(outcomes: { state: string; output?: { readonly value: unknown } }[]) {
     return {
       finishAttempt: async (
         _businessId: string,
         _effectId: string,
         _attempt: number,
-        outcome: { state: string }
+        outcome: { state: string; output?: { readonly value: unknown } }
       ) => {
-        states.push(outcome.state);
+        outcomes.push(outcome);
       },
     } as unknown as ChatEffectLedger;
   }
@@ -191,18 +191,42 @@ describe("a parked call", () => {
     expect(attempts.count).toBe(1);
   });
 
-  it("confirms the effect, so reconciliation cannot read the park as a lost write", async () => {
-    const states: string[] = [];
+  it("stores a replayable child descriptor instead of a terminal confirmation", async () => {
+    const outcomes: { state: string; output?: { readonly value: unknown } }[] = [];
 
     await runToolAttempts({
       businessId: "business-1",
       tool: parkingTool({ count: 0 }),
       call: CALL,
       context: CONTEXT,
-      ledger: recordingLedger(states),
+      ledger: recordingLedger(outcomes),
       reservation: { effectId: "effect-1", attempt: 1 },
     });
 
-    expect(states).toEqual(["confirmed"]);
+    expect(outcomes).toEqual([
+      {
+        state: "awaiting_child",
+        output: {
+          value: { kind: "child_park", childRunId: "child-1", waitId: "wait-1" },
+        },
+      },
+    ]);
+  });
+
+  it("fails closed when a replayed child call points at a different child", async () => {
+    const outcomes: { state: string; output?: { readonly value: unknown } }[] = [];
+
+    await expect(
+      runToolAttempts({
+        businessId: "business-1",
+        tool: parkingTool({ count: 0 }),
+        call: CALL,
+        context: CONTEXT,
+        ledger: recordingLedger(outcomes),
+        reservation: { effectId: "effect-1", attempt: 2 },
+        childReplay: { kind: "child_park", childRunId: "other-child", waitId: "other-wait" },
+      })
+    ).resolves.toMatchObject({ status: "failed" });
+    expect(outcomes).toEqual([{ state: "ambiguous", errorCode: "child_replay_mismatch" }]);
   });
 });

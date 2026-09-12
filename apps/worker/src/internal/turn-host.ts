@@ -6,20 +6,24 @@ import type {
   ToolDispatchResult,
 } from "@tulipfarm/agent-runtime";
 import { extractText } from "@tulipfarm/files";
-import type { ParticipantToolCall } from "@tulipfarm/schema";
+import { RunInterruptedError } from "@tulipfarm/run-kernel";
 import type { TurnAuthority } from "@tulipfarm/tool-host";
 import type {
+  AssistantMessageWriteResult,
   ResolvedTurnContext,
   TurnAttachmentPort,
+  TurnAttemptHistory,
+  TurnAttemptMessageMetadata,
   TurnCompletionRecord,
   TurnCompletionRef,
   TurnCompletionStatus,
   TurnCompletionStore,
   TurnContextPort,
+  TurnPersistenceStatus,
   TurnRequest,
   TurnWaitPort,
 } from "@tulipfarm/turn-executor";
-import type { InternalApiClient } from "./client";
+import { type InternalApiClient, InternalApiError } from "./client";
 
 /** API-backed turn ports; every path names only a Run and API re-derives authority. */
 
@@ -30,6 +34,7 @@ export interface RemoteTurnIdentity {
   readonly attempt: number;
   /** The Run this attempt supersedes, so a retry can reread what the failed attempt already did. */
   readonly previousRunId?: string;
+  readonly history?: TurnAttemptHistory;
 }
 
 /** Mirrors `TaskReconcileSignals` in `apps/api/src/internal/routes.ts` across the HTTP boundary. */
@@ -111,6 +116,15 @@ export class HttpTurnHost
     // `409` is a Run no executor may write for; `404` is a Run or Turn that is gone. Both mean
     // this worker holds nothing, and neither is a fault worth reconciling.
     return this.client.find<RemoteTurnIdentity>("GET", turnPath(runId), [404, 409]);
+  }
+
+  /** Idempotently settles the Conversation Turn after the Run outcome is durable. */
+  async settleTerminal(runId: string): Promise<boolean> {
+    const body = await this.client.require<{ settled: boolean }>(
+      "POST",
+      turnPath(runId, "/terminal")
+    );
+    return body.settled;
   }
 
   /** The published LLM configuration, or `undefined` when the Soul publishes none. */
@@ -249,19 +263,33 @@ export class HttpTurnHost
 
   async appendAssistantMessage(
     input: TurnCompletionRef & {
+      leaseGeneration: number;
       content: string;
-      metadata?: { readonly toolCalls?: readonly ParticipantToolCall[] };
+      metadata?: TurnAttemptMessageMetadata;
     }
-  ): Promise<{ messageId: string }> {
-    return this.client.require<{ messageId: string }>("POST", turnPath(input.runId, "/messages"), {
-      attempt: input.attempt,
-      content: input.content,
-      ...(input.metadata === undefined ? {} : { metadata: input.metadata }),
-    });
+  ): Promise<AssistantMessageWriteResult> {
+    try {
+      return await this.client.require<AssistantMessageWriteResult>(
+        "POST",
+        turnPath(input.runId, "/messages"),
+        {
+          attempt: input.attempt,
+          leaseGeneration: input.leaseGeneration,
+          content: input.content,
+          ...(input.metadata === undefined ? {} : { metadata: input.metadata }),
+        }
+      );
+    } catch (error) {
+      if (error instanceof InternalApiError && error.status === 409) {
+        throw new RunInterruptedError();
+      }
+      throw error;
+    }
   }
 
   async completeTurn(
     input: TurnCompletionRef & {
+      leaseGeneration: number;
       status: TurnCompletionStatus;
       cursor: number;
       messageId: string | null;
@@ -269,15 +297,23 @@ export class HttpTurnHost
       reason?: string;
       modelFailure?: ModelFailureDiagnostic;
     }
-  ): Promise<void> {
-    await this.client.require("POST", turnPath(input.runId, "/completion"), {
-      attempt: input.attempt,
-      status: input.status,
-      cursor: input.cursor,
-      messageId: input.messageId,
-      ...(input.surfaces?.length ? { surfaces: input.surfaces } : {}),
-      ...(input.reason === undefined ? {} : { reason: input.reason }),
-      ...(input.modelFailure === undefined ? {} : { modelFailure: input.modelFailure }),
-    });
+  ): Promise<{ status: TurnPersistenceStatus }> {
+    try {
+      return await this.client.require("POST", turnPath(input.runId, "/completion"), {
+        attempt: input.attempt,
+        leaseGeneration: input.leaseGeneration,
+        status: input.status,
+        cursor: input.cursor,
+        messageId: input.messageId,
+        ...(input.surfaces?.length ? { surfaces: input.surfaces } : {}),
+        ...(input.reason === undefined ? {} : { reason: input.reason }),
+        ...(input.modelFailure === undefined ? {} : { modelFailure: input.modelFailure }),
+      });
+    } catch (error) {
+      if (error instanceof InternalApiError && error.status === 409) {
+        throw new RunInterruptedError();
+      }
+      throw error;
+    }
   }
 }

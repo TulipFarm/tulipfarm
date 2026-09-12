@@ -211,7 +211,8 @@ function asUnplanned(part: ToolPart): PlannedCall {
 }
 
 function statusOf(part: ToolPart): PlannedCallStatus {
-  if (part.status !== "done") return "running";
+  if (part.status === "running") return "running";
+  if (part.status === "interrupted") return "failed";
   return part.outcome === "error" ? "failed" : "done";
 }
 
@@ -243,7 +244,7 @@ export function planClaimedCallIds(parts: readonly TimelinePart[]): Set<string> 
  * click strands the reader waiting on a decision they cannot see.
  */
 function isFoldable(part: ToolPart): boolean {
-  if (part.status !== "done") return false;
+  if (part.status === "running") return false;
   if (part.approval !== undefined) return false;
   return true;
 }
@@ -263,7 +264,7 @@ export function groupTimelineParts(
     if (part.kind === "tool" && (isHiddenToolPart(part) || claimed.has(part.toolCallId))) {
       // A presentation Tool has no row, but while it is in flight the reader is owed something:
       // the reply is visibly building its own UI, and silence reads as a stalled turn.
-      if (isPresentationToolPart(part) && part.status !== "done") building = index;
+      if (isPresentationToolPart(part) && part.status === "running") building = index;
       return;
     }
     visible.push({ part, index });

@@ -164,6 +164,52 @@ describe("splitPrompt — attached files", () => {
     expect(messages).toEqual([{ role: "user", content: "hello" }]);
   });
 
+  it("appends only Tool-authorized reread bytes when no user File part names them", () => {
+    const rereadPdf: ResolvedAttachment = { ...pdf, source: "tool" };
+    const rereadImage: ResolvedAttachment = { ...png, source: "tool" };
+    const unrelatedImage: ResolvedAttachment = { ...png, fileId: "unrelated" };
+
+    const { messages, attached } = splitPrompt(
+      [
+        { role: "user", content: textContent("read the invoice") },
+        {
+          role: "assistant",
+          content: textContent(
+            JSON.stringify({
+              toolCalls: [{ callId: "read-1", name: "file_read", arguments: { fileId: "file-2" } }],
+            })
+          ),
+        },
+        {
+          role: "tool",
+          content: textContent(
+            JSON.stringify({ callId: "read-1", output: { attached: true, fileId: "file-2" } })
+          ),
+        },
+      ],
+      [rereadPdf, rereadImage, unrelatedImage]
+    );
+
+    expect(messages.at(-1)).toEqual({
+      role: "user",
+      content: [
+        {
+          type: "file",
+          data: pdf.data,
+          mediaType: "application/pdf",
+          filename: "invoice.pdf",
+        },
+        {
+          type: "file",
+          data: png.data,
+          mediaType: "image/png",
+          filename: "dashboard.png",
+        },
+      ],
+    });
+    expect(attached).toEqual(["file-2", "file-1"]);
+  });
+
   it("never puts bytes in a system instruction, which must stay a string", () => {
     const { instructions } = splitPrompt(
       [

@@ -114,6 +114,7 @@ export type ChatEvent =
       type: "surface";
       data: {
         artifactId: string;
+        revision?: number;
         artifact?: SurfaceArtifact;
         actionHandles?: Readonly<Record<string, string>>;
         resolvedView?: ResolvedSurfaceViewNode;
@@ -133,7 +134,10 @@ export type ChatEvent =
         receipt?: ModelReceipt;
       };
     }
-  | { type: "error"; data: { message: string; details?: ChatFailureDetails } };
+  | {
+      type: "error";
+      data: { message: string; details?: ChatFailureDetails; terminal?: true };
+    };
 
 export type ParsedFrame = { seq: number; type: string; data: unknown };
 
@@ -159,7 +163,7 @@ export type ChatTurnSource = {
 };
 
 export type Role = "user" | "assistant";
-export type ToolStatus = "running" | "done";
+export type ToolStatus = "running" | "done" | "interrupted";
 
 export type ApprovalState = {
   approvalId: string;
@@ -240,6 +244,17 @@ export type ChatMessage = {
   feedback?: "up" | "down";
   receipt?: ModelReceipt;
   sourceTurn?: ChatTurnSource;
+  /** Durable identity/cursor for one persisted attempt; absent on legacy Messages. */
+  turnAttempt?: {
+    runId: string;
+    attempt: number;
+    cursor: number;
+    outcome: "active" | "waiting" | "succeeded" | "failed" | "cancelled";
+    complete: boolean;
+    wait?:
+      | { kind: "approval"; waitId: string; approvalId: string; callId: string }
+      | { kind: "child"; waitId: string; childRunId: string; callId: string };
+  };
 };
 
 export type ChatStatus = "idle" | "submitted" | "streaming" | "error";

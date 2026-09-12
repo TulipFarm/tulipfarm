@@ -531,6 +531,9 @@ export async function buildApp(opts: AppOptions = {}) {
           repo: opts.conversationRepo,
           messageRepo: opts.messageRepo,
           ...(opts.conversationStore === undefined ? {} : { turnStore: opts.conversationStore }),
+          ...(opts.terminalTurns === undefined
+            ? {}
+            : { reconcileTurn: opts.terminalTurns.reconcileConversation.bind(opts.terminalTurns) }),
           soulLoader: opts.soulLoader,
           ...(opts.authorityLayers === undefined ? {} : { authorityLayers: opts.authorityLayers }),
           ...(opts.memoryDocuments === undefined ? {} : { memory: opts.memoryDocuments }),

@@ -47,6 +47,7 @@ async function findOwnedConversation(
 export interface ConversationRoutesDeps {
   repo: ConversationRepo;
   turnStore?: Pick<ConversationStore, "findLatestTurn">;
+  reconcileTurn?(businessId: string, conversationId: string): Promise<void>;
   messageRepo: MessageRepo;
   /**
    * Resolves which attached Files the reader can still open, so a transcript can render a
@@ -96,6 +97,7 @@ export function registerConversationRoutes(
     soulLoader,
     files,
     turnStore,
+    reconcileTurn,
     authorityLayers,
     memory,
     customInstructions,
@@ -304,6 +306,7 @@ export function registerConversationRoutes(
       if (!convo) {
         return reply.code(404).send({ error: "conversation not found" });
       }
+      await reconcileTurn?.(DEPLOYMENT_BUSINESS_ID, id);
       const latestTurn = await turnStore?.findLatestTurn(DEPLOYMENT_BUSINESS_ID, id);
       return reply.send({
         id: convo._id,
@@ -370,6 +373,9 @@ export function registerConversationRoutes(
         return reply.code(400).send({ error: "invalid cursor" });
       }
 
+      if (after === undefined) {
+        await reconcileTurn?.(DEPLOYMENT_BUSINESS_ID, id);
+      }
       const result = await messageRepo.listByConversation(id, limit, after);
       // Asked once for the whole page rather than per attachment: an old Chat can name a dozen
       // Files, and a query each would make scrolling back through it cost more than reading it.

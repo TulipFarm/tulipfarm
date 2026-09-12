@@ -39,8 +39,9 @@ export function ToolTrace({
   onReviseDraft?: (draft: FileDraftResult) => void;
 }) {
   const [betweenCallsLabel] = useState(() => pick(LOADER_LABELS));
-  const settled = parts.filter((part) => part.status === "done").length;
+  const settled = parts.filter((part) => part.status !== "running").length;
   const failed = parts.filter((part) => part.status === "done" && part.outcome === "error").length;
+  const interrupted = parts.filter((part) => part.status === "interrupted").length;
   const countLabel = `Ran ${parts.length} ${parts.length === 1 ? "tool" : "tools"}`;
   // The rows carry concurrency, and folding hides the rows — so the header has to carry it too, or
   // the fact only exists while the run happens to be open.
@@ -49,6 +50,7 @@ export function ToolTrace({
     countLabel,
     ...(atOnce === undefined ? [] : [`${atOnce} at the same time`]),
     ...(failed === 0 ? [] : [`${failed} failed`]),
+    ...(interrupted === 0 ? [] : [`${interrupted} interrupted`]),
   ].join(" · ");
   const concurrent = concurrentRuns(parts);
   const running = parts.find((part) => part.status === "running");
@@ -63,7 +65,7 @@ export function ToolTrace({
       // The count is why a failed run is allowed to fold at all: it reports the failure on the one
       // line that survives, so folding costs the reader a click, never the fact.
       settledLabel={settledLabel}
-      tone={failed === 0 ? undefined : "error"}
+      tone={failed === 0 && interrupted === 0 ? undefined : "error"}
       working={pending || running !== undefined}
       // Folding is about attention, not evidence. A run below three steps saves nothing by
       // collapsing, and a run still holding an approval is an ask the reader must be able to see.

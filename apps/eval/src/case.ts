@@ -18,6 +18,17 @@ export type Expectation =
   | { readonly kind: "prompt_contains"; readonly text: string }
   | { readonly kind: "prompt_attaches"; readonly fileId: string }
   | { readonly kind: "prompt_omits_attachment"; readonly fileId: string }
+  /**
+   * L2 only. The model adapter's provider-facing prompt carries this File with byte-for-byte
+   * identity and the declared media metadata.
+   */
+  | {
+      readonly kind: "provider_prompt_file_exact";
+      readonly fileId: string;
+      readonly part: "file" | "image";
+    }
+  /** L2 only. No provider-facing binary part came from this declared File. */
+  | { readonly kind: "provider_prompt_omits_file"; readonly fileId: string }
   | { readonly kind: "prompt_omits"; readonly text: string }
   | { readonly kind: "tool_called"; readonly name: string }
   | { readonly kind: "tool_not_called"; readonly name: string }
@@ -25,6 +36,13 @@ export type Expectation =
   | { readonly kind: "tool_call_order"; readonly names: readonly string[] }
   | {
       readonly kind: "tool_argument_equals";
+      readonly name: string;
+      readonly path: string;
+      readonly value: unknown;
+    }
+  /** The named Tool was denied on a call carrying this exact argument value. */
+  | {
+      readonly kind: "tool_denied";
       readonly name: string;
       readonly path: string;
       readonly value: unknown;
@@ -64,6 +82,11 @@ export type Expectation =
    * a Case pinning it would report a batching regression whenever its fixture merely grew a step.
    */
   | { readonly kind: "tool_calls_batched"; readonly min: number }
+  /**
+   * L2 only. A forced checkpoint crash replayed this model-produced batch with stable call ids,
+   * before another model request, while the fixture's idempotent effect seam executed each once.
+   */
+  | { readonly kind: "tool_batch_replayed" }
   /** A guard refused at this stage. Naming the guard pins *which* rule fired, not merely that one
    *  did — a Case that only asserted "something blocked" would go on passing after the policy was
    *  replaced by a stricter unrelated rule. */
@@ -94,6 +117,12 @@ export type Expectation =
   | { readonly kind: "run_event_emitted"; readonly eventType: string }
   /** L3 only. Concatenated durable participant text.delta payloads omit this grounded text. */
   | { readonly kind: "run_event_text_omits"; readonly text: string; readonly ungrounded?: string }
+  /** L3 only. Assistant Message metadata read back from persistence has this field and value. */
+  | {
+      readonly kind: "persisted_message_metadata_equals";
+      readonly path: string;
+      readonly value: unknown;
+    }
   /** L3 only. A Soul artifact was committed to the Eval Soul's real git repository. */
   | { readonly kind: "soul_committed"; readonly path: string }
   /**
@@ -137,6 +166,7 @@ const PERSISTED_KINDS: ReadonlySet<string> = new Set([
   "turn_status",
   "run_event_emitted",
   "run_event_text_omits",
+  "persisted_message_metadata_equals",
   "soul_committed",
   "soul_published",
   "generated_file_readable_by",
@@ -166,7 +196,11 @@ export function isBatching(expectation: Expectation): boolean {
 /** A faked Tool dispatch, matched to a call by Tool name and consumed in order. */
 export interface ScriptedToolResult {
   readonly name: string;
+  /** When present, this result only answers a call with these exact arguments. */
+  readonly when?: unknown;
   readonly output?: unknown;
+  /** Present to script an authorization denial rather than a Tool execution failure. */
+  readonly denied?: string;
   /** Present to script a Tool that fails, so refusal and recovery behaviour can be measured. */
   readonly error?: string;
   /**
@@ -349,6 +383,22 @@ export interface EvalCase {
    */
   readonly journey?: readonly JourneyTurn[];
   /**
+   * L3 only. Participant-safe history recovered from an earlier executor pass of this attempt.
+   *
+   * This is a narrow dependency seam for proving that later failure, cancellation or resumption
+   * does not erase prose, Tool metadata or exact Surface revisions already shown to the person.
+   */
+  readonly attemptHistory?: {
+    readonly text: string;
+    readonly toolCalls?: readonly {
+      readonly callId: string;
+      readonly name: string;
+      readonly outcome?: "ok" | "error";
+    }[];
+    readonly surfaces?: readonly { readonly artifactId: string; readonly revision: number }[];
+    readonly cursor?: number;
+  };
+  /**
    * L3 only. Breaks one of the executor's dependencies, so a Case can measure what the Turn does
    * when its surroundings fail rather than when the model does.
    *
@@ -359,6 +409,11 @@ export interface EvalCase {
    * Model Port.
    */
   readonly fault?: "context" | "model";
+  /**
+   * L2 only. Crashes the checkpoint write immediately after the first Tool result in a
+   * model-produced batch, then retries the same loop input against the saved checkpoint.
+   */
+  readonly checkpointCrash?: "after_first_tool_result";
   /**
    * L3 only. Roles an admin has assigned this Case's Agent, seeded as `role_assignments` rows.
    *

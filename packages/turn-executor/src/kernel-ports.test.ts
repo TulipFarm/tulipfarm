@@ -1,3 +1,4 @@
+import { RunInterruptedError } from "@tulipfarm/run-kernel";
 import type { PersistedState, RunStore, StateTransitionInput } from "@tulipfarm/storage";
 import { describe, expect, it, vi } from "vitest";
 import type { StateTransitionPort } from "./agent-state";
@@ -28,20 +29,27 @@ function state(overrides: Partial<PersistedState> = {}): PersistedState {
   };
 }
 
-function runs(options: { found: PersistedState | null; moved: boolean }): {
-  runs: Pick<RunStore, "findState" | "transitionState">;
+function runs(options: {
+  found: PersistedState | null;
+  moved: "transitioned" | "ownership_lost" | "conflict";
+}): {
+  runs: Pick<RunStore, "findState" | "transitionOwnedState">;
   transitions: StateTransitionInput[];
+  leaseGenerations: number[];
 } {
   const transitions: StateTransitionInput[] = [];
+  const leaseGenerations: number[] = [];
   return {
     runs: {
       findState: async () => options.found,
-      transitionState: async (_businessId, _runId, _stateKey, transition) => {
+      transitionOwnedState: async (_businessId, _runId, _stateKey, leaseGeneration, transition) => {
+        leaseGenerations.push(leaseGeneration);
         transitions.push(transition);
         return options.moved;
       },
     },
     transitions,
+    leaseGenerations,
   };
 }
 
@@ -49,11 +57,12 @@ const REQUEST = {
   businessId: "business-1",
   runId: "run-1",
   stateKey: "invoke",
+  leaseGeneration: 7,
 } as const;
 
 describe("RunStoreStateTransitions", () => {
   it("guards the write with the version it just read", async () => {
-    const store = runs({ found: state(), moved: true });
+    const store = runs({ found: state(), moved: "transitioned" });
 
     await new RunStoreStateTransitions(store.runs).transition({
       ...REQUEST,
@@ -66,10 +75,11 @@ describe("RunStoreStateTransitions", () => {
       expectedStatus: "running",
       status: "succeeded",
     });
+    expect(store.leaseGenerations).toEqual([7]);
   });
 
   it("raises when the State moved under it, rather than overwriting the winner", async () => {
-    const store = runs({ found: state(), moved: false });
+    const store = runs({ found: state(), moved: "conflict" });
 
     await expect(
       new RunStoreStateTransitions(store.runs).transition({
@@ -80,8 +90,20 @@ describe("RunStoreStateTransitions", () => {
     ).rejects.toBeInstanceOf(StateTransitionConflictError);
   });
 
+  it("interrupts a stale Run owner instead of settling its State", async () => {
+    const store = runs({ found: state(), moved: "ownership_lost" });
+
+    await expect(
+      new RunStoreStateTransitions(store.runs).transition({
+        ...REQUEST,
+        from: "running",
+        to: "succeeded",
+      })
+    ).rejects.toBeInstanceOf(RunInterruptedError);
+  });
+
   it("raises when the State does not exist at all", async () => {
-    const store = runs({ found: null, moved: true });
+    const store = runs({ found: null, moved: "transitioned" });
 
     await expect(
       new RunStoreStateTransitions(store.runs).transition({
@@ -95,7 +117,7 @@ describe("RunStoreStateTransitions", () => {
   it("records a reason only where one can be retracted", async () => {
     // `RunStore` never clears `error_evidence_ref`, so writing one on a healthy State would leave
     // it permanently carrying an error nobody can take back.
-    const failing = runs({ found: state(), moved: true });
+    const failing = runs({ found: state(), moved: "transitioned" });
     await new RunStoreStateTransitions(failing.runs).transition({
       ...REQUEST,
       from: "running",
@@ -104,7 +126,7 @@ describe("RunStoreStateTransitions", () => {
     });
     expect(failing.transitions[0]?.errorEvidenceRef).toBe("agent_loop_error");
 
-    const succeeding = runs({ found: state(), moved: true });
+    const succeeding = runs({ found: state(), moved: "transitioned" });
     await new RunStoreStateTransitions(succeeding.runs).transition({
       ...REQUEST,
       from: "running",
@@ -115,7 +137,7 @@ describe("RunStoreStateTransitions", () => {
   });
 
   it("logs an error carrying run id, state key, and evidence when a State fails", async () => {
-    const store = runs({ found: state(), moved: true });
+    const store = runs({ found: state(), moved: "transitioned" });
     const error = vi.fn();
 
     await new RunStoreStateTransitions(store.runs, { error }).transition({
@@ -133,7 +155,7 @@ describe("RunStoreStateTransitions", () => {
   });
 
   it("does not log for a transition that is not a failure", async () => {
-    const store = runs({ found: state(), moved: true });
+    const store = runs({ found: state(), moved: "transitioned" });
     const error = vi.fn();
 
     await new RunStoreStateTransitions(store.runs, { error }).transition({
@@ -146,7 +168,7 @@ describe("RunStoreStateTransitions", () => {
   });
 
   it("stamps started and finished times from the status it is moving to", async () => {
-    const started = runs({ found: state({ status: "claimed" }), moved: true });
+    const started = runs({ found: state({ status: "claimed" }), moved: "transitioned" });
     await new RunStoreStateTransitions(started.runs).transition({
       ...REQUEST,
       from: "claimed",
@@ -155,7 +177,7 @@ describe("RunStoreStateTransitions", () => {
     expect(started.transitions[0]?.startedAt).toEqual(expect.any(String));
     expect(started.transitions[0]?.finishedAt).toBeUndefined();
 
-    const finished = runs({ found: state(), moved: true });
+    const finished = runs({ found: state(), moved: "transitioned" });
     await new RunStoreStateTransitions(finished.runs).transition({
       ...REQUEST,
       from: "running",

@@ -33,10 +33,20 @@ const EXPECTATION_FIELDS: Record<string, readonly [string, FieldType][]> = {
   prompt_omits: [["text", "string"]],
   prompt_attaches: [["fileId", "string"]],
   prompt_omits_attachment: [["fileId", "string"]],
+  provider_prompt_file_exact: [
+    ["fileId", "string"],
+    ["part", ["file", "image"]],
+  ],
+  provider_prompt_omits_file: [["fileId", "string"]],
   tool_called: [["name", "string"]],
   tool_not_called: [["name", "string"]],
   tool_call_order: [["names", "strings"]],
   tool_argument_equals: [
+    ["name", "string"],
+    ["path", "string"],
+    ["value", "any"],
+  ],
+  tool_denied: [
     ["name", "string"],
     ["path", "string"],
     ["value", "any"],
@@ -59,6 +69,7 @@ const EXPECTATION_FIELDS: Record<string, readonly [string, FieldType][]> = {
   loop_status: [["status", "string"]],
   tool_call_count: [["count", "number"]],
   tool_calls_batched: [["min", "number"]],
+  tool_batch_replayed: [],
   guardrail_blocked: [
     ["stage", GUARD_STAGES],
     ["guard", GUARD_NAMES],
@@ -74,6 +85,10 @@ const EXPECTATION_FIELDS: Record<string, readonly [string, FieldType][]> = {
   turn_status: [["status", "string"]],
   run_event_emitted: [["eventType", "string"]],
   run_event_text_omits: [["text", "string"]],
+  persisted_message_metadata_equals: [
+    ["path", "string"],
+    ["value", "any"],
+  ],
   soul_committed: [["path", "string"]],
   soul_published: [["artifact", "string"]],
   generated_file_readable_by: [["grantee", "string"]],
@@ -140,6 +155,9 @@ export function expectationShapeError(kind: string, record: Record<string, unkno
   // cannot fail is worse than no Case: it reports the gate as covering ground it never walked.
   if (kind === "tool_calls_batched" && Number(record.min) < 2) {
     return `expectation "tool_calls_batched" needs "min" of at least 2; a batch of one is a Tool call`;
+  }
+  if (kind === "tool_batch_replayed" && record.callIds !== undefined) {
+    return `expectation "tool_batch_replayed" derives call ids from the model-produced batch`;
   }
   return "";
 }

@@ -1,4 +1,8 @@
-import { type AgentLoopCheckpoint, InMemoryLoopCheckpointStore } from "@tulipfarm/agent-runtime";
+import {
+  AgentLoop,
+  type AgentLoopCheckpoint,
+  InMemoryLoopCheckpointStore,
+} from "@tulipfarm/agent-runtime";
 import { textContent } from "@tulipfarm/schema";
 import { describe, expect, it } from "vitest";
 import { resumableFromPreviousRun } from "./chat-executor";
@@ -61,6 +65,112 @@ describe("resumableFromPreviousRun", () => {
     // would charge this attempt for Tool calls it never receives, and could exhaust the ceiling
     // before its first call.
     expect(loaded).toBeUndefined();
+  });
+
+  it("does not redeliver a previous Run's terminal event under a retry Run", async () => {
+    const inner = new InMemoryLoopCheckpointStore();
+    await inner.save(
+      withWork({
+        resume: {
+          messages: [],
+          sequence: 10,
+          textIndex: 0,
+          terminal: {
+            outcome: {
+              status: "completed",
+              output: "old answer",
+              iterations: 5,
+              toolCalls: 5,
+              repairs: 0,
+            },
+            event: {
+              sequence: 10,
+              businessId: BUSINESS,
+              runId: PREVIOUS_RUN,
+              stateId: STATE,
+              type: "completed",
+              iteration: 5,
+              occurredAt: "2026-01-01T00:00:00.000Z",
+            },
+          },
+        },
+      })
+    );
+
+    expect(
+      await resumableFromPreviousRun(inner, PREVIOUS_RUN).load(BUSINESS, RETRY_RUN, STATE)
+    ).toBeUndefined();
+  });
+
+  it("gives a new retry Run prior Tool results even if terminal cleanup was not acknowledged", async () => {
+    const inner = new InMemoryLoopCheckpointStore();
+    await inner.save(
+      withWork({
+        resume: {
+          messages: [{ role: "tool", content: textContent('{"callId":"c1","stars":412}') }],
+          sequence: 10,
+          textIndex: 0,
+          terminal: {
+            retryable: true,
+            outcome: {
+              status: "failed",
+              reason: "model_provider_unavailable",
+              iterations: 5,
+              toolCalls: 5,
+              repairs: 0,
+            },
+            event: {
+              sequence: 10,
+              businessId: BUSINESS,
+              runId: PREVIOUS_RUN,
+              stateId: STATE,
+              type: "failed",
+              iteration: 5,
+              occurredAt: "2026-01-01T00:00:00.000Z",
+            },
+          },
+        },
+      })
+    );
+    let modelCalls = 0;
+    let toolCalls = 0;
+    const outcome = await new AgentLoop({
+      model: {
+        invoke: async (request) => {
+          modelCalls += 1;
+          expect(JSON.stringify(request.messages)).toContain("412");
+          return {
+            requestId: request.requestId,
+            output: { kind: "text", text: "recovered" },
+            usage: { inputTokens: 1, outputTokens: 1 },
+          };
+        },
+      },
+      tools: {
+        dispatch: async () => {
+          toolCalls += 1;
+          throw new Error("prior mutation must not run");
+        },
+      },
+      checkpoints: resumableFromPreviousRun(inner, PREVIOUS_RUN),
+      events: { append: async () => {} },
+      budget: { consume: async () => ({ outcome: "allowed" }) },
+      isCancelled: async () => false,
+    }).run({
+      businessId: BUSINESS,
+      runId: RETRY_RUN,
+      stateId: STATE,
+      modelProfileId: "primary",
+      contextDigest: "sha256:context",
+      guardrailDigest: "sha256:guardrail",
+      messages: [{ role: "user", content: textContent("retry") }],
+      tools: [{ name: "write", inputSchema: { type: "object" }, mutating: true }],
+      limits: { maxIterations: 8, maxToolCalls: 8, maxRepairAttempts: 2 },
+    });
+
+    expect(outcome).toMatchObject({ status: "completed", toolCalls: 5, iterations: 6 });
+    expect(modelCalls).toBe(1);
+    expect(toolCalls).toBe(0);
   });
 
   it("prefers the retry's own progress once it has any", async () => {

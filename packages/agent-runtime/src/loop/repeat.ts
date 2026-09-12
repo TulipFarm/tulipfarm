@@ -20,8 +20,8 @@ function stableJson(value: unknown): string {
 /**
  * A stable identity for one Tool call, so the same request written two ways still matches.
  *
- * The separator is a character JSON can never leave unescaped inside a string, which is what stops
- * a Tool named `a` with argument `b` from colliding with a Tool named `a\u0000b`.
+ * The tuple boundary stops a Tool name from colliding with bytes at the start of its arguments.
+ * It also keeps the durable signature valid PostgreSQL JSON when a checkpoint persists it.
  *
  * Answers `undefined` rather than throwing when the arguments cannot be walked — nesting deep
  * enough to exhaust the stack, or a `BigInt` JSON cannot carry. This runs *after* the Tool has
@@ -30,7 +30,7 @@ function stableJson(value: unknown): string {
  */
 export function callSignature(name: string, args: unknown): string | undefined {
   try {
-    return `${name}\u0000${stableJson(args)}`;
+    return stableJson([name, args]);
   } catch {
     return undefined;
   }

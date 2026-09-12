@@ -6,7 +6,7 @@ import {
   GuardrailPolicyError,
 } from "@tulipfarm/authz";
 import type { MutationGuard } from "@tulipfarm/observability";
-import type { ToolDispatchPlan } from "@tulipfarm/run-kernel";
+import { assertRunActive, type ToolDispatchPlan } from "@tulipfarm/run-kernel";
 import type { GuardrailDefinition, ToolContractDefinition } from "@tulipfarm/schema";
 import type { RuntimeBundle } from "@tulipfarm/soul";
 import {
@@ -51,6 +51,7 @@ export interface RoutineToolRequest {
   readonly runId: string;
   /** Durable State occurrence key; the ledger's `state_id`. */
   readonly stateKey: string;
+  readonly signal?: AbortSignal;
   readonly plan: ToolDispatchPlan;
   /** The persisted Run subject whose authority proposed this effect. */
   readonly requesterPrincipalId: string;
@@ -162,6 +163,7 @@ export class BrokerRoutineToolPort implements RoutineToolPort {
   }
 
   async execute(request: RoutineToolRequest): Promise<RoutineToolOutcome> {
+    assertRunActive(request.signal);
     let policy: GuardrailPolicy;
     let catalog: ToolCatalog;
     try {
@@ -218,6 +220,7 @@ export class BrokerRoutineToolPort implements RoutineToolPort {
           ...(outcome.demand?.ruleId === undefined ? {} : { ruleId: outcome.demand.ruleId }),
         },
       });
+      assertRunActive(request.signal);
       if (decision.status === "pending") {
         return {
           kind: "awaiting_approval",
@@ -229,12 +232,12 @@ export class BrokerRoutineToolPort implements RoutineToolPort {
         return { kind: "failed", reason: decision.reason };
       }
       approvalId = decision.approvalId;
-      if (
-        !(await this.options.approvals.consume({
-          approvalId,
-          toolCallId: request.plan.effectId,
-        }))
-      ) {
+      const consumed = await this.options.approvals.consume({
+        approvalId,
+        toolCallId: request.plan.effectId,
+      });
+      assertRunActive(request.signal);
+      if (!consumed) {
         return { kind: "failed", reason: "approval_not_consumable" };
       }
     }
@@ -252,6 +255,7 @@ export class BrokerRoutineToolPort implements RoutineToolPort {
       ...(approvalId === undefined ? {} : { approvalId }),
       createdAt: this.now().toISOString(),
     });
+    assertRunActive(request.signal);
     if (reserved.outcome === "duplicate") return replayed(reserved.effect);
 
     const adapters = new Map(this.options.adapters);
@@ -270,12 +274,19 @@ export class BrokerRoutineToolPort implements RoutineToolPort {
       now: () => this.now().toISOString(),
     });
     try {
-      const output = await dispatcher.dispatch(request.businessId, request.plan.effectId);
+      const output = await dispatcher.dispatch(
+        request.businessId,
+        request.plan.effectId,
+        request.signal
+      );
+      assertRunActive(request.signal);
       return { kind: "succeeded", output };
     } catch (error) {
+      assertRunActive(request.signal);
       if (!(error instanceof ToolDispatchError)) throw error;
       // Provider write may have landed; park `ambiguous` for reconciliation, never retry here.
       const effect = await this.options.effects.get(request.businessId, request.plan.effectId);
+      assertRunActive(request.signal);
       if (effect?.state === "ambiguous") return { kind: "unavailable", reason: "effect_ambiguous" };
       return error.code === "adapter_not_found"
         ? { kind: "unavailable", reason: error.code }

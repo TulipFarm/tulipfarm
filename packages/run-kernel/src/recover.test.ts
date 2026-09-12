@@ -32,6 +32,7 @@ function run(overrides: Partial<PersistedRun> = {}): PersistedRun {
     errorEvidenceRef: DISPATCH_HANDLER_ERROR_REF,
     leaseOwner: null,
     leaseExpiresAt: null,
+    leaseGeneration: 1,
     ...overrides,
   };
 }
@@ -104,7 +105,9 @@ describe("RunRecoveryManager", () => {
     "reconciliation_required",
     "future_provider_state",
   ])("leaves an effect without proven replay safety %s in reconciliation", async (state) => {
-    const { manager, current } = harness(run(), [{ runId: "run-1", stateId: "write", state }]);
+    const { manager, current } = harness(run(), [
+      { runId: "run-1", stateId: "write", state, outputStored: false },
+    ]);
 
     await expect(
       manager.reconcile({
@@ -117,7 +120,9 @@ describe("RunRecoveryManager", () => {
   });
 
   it("keeps a confirmed effect parked until durable output replay is available", async () => {
-    const { manager } = harness(run(), [{ runId: "run-1", stateId: "write", state: "confirmed" }]);
+    const { manager } = harness(run(), [
+      { runId: "run-1", stateId: "write", state: "confirmed", outputStored: false },
+    ]);
 
     await expect(
       manager.reconcile({
@@ -127,6 +132,53 @@ describe("RunRecoveryManager", () => {
       })
     ).resolves.toMatchObject({ outcome: "needs_reconciliation" });
   });
+
+  it("requeues a confirmed effect whose immutable output can be replayed", async () => {
+    const { manager } = harness(run(), [
+      { runId: "run-1", stateId: "write", state: "confirmed", outputStored: true },
+    ]);
+
+    await expect(
+      manager.reconcile({
+        businessId: "business-1",
+        runId: "run-1",
+        expectedVersion: 3,
+      })
+    ).resolves.toMatchObject({ outcome: "requeued" });
+  });
+
+  it.each(["awaiting_child", "authorized", "dispatched"])(
+    "requeues a %s child adoption only with its immutable replay descriptor",
+    async (state) => {
+      const safe = harness(run(), [
+        {
+          runId: "run-1",
+          stateId: "write",
+          state,
+          outputStored: true,
+          output: { kind: "child_park", childRunId: "child-1", waitId: "wait-1" },
+        },
+      ]).manager;
+      await expect(
+        safe.reconcile({
+          businessId: "business-1",
+          runId: "run-1",
+          expectedVersion: 3,
+        })
+      ).resolves.toMatchObject({ outcome: "requeued" });
+
+      const unsafe = harness(run(), [
+        { runId: "run-1", stateId: "write", state, outputStored: true, output: { kind: "other" } },
+      ]).manager;
+      await expect(
+        unsafe.reconcile({
+          businessId: "business-1",
+          runId: "run-1",
+          expectedVersion: 3,
+        })
+      ).resolves.toMatchObject({ outcome: "needs_reconciliation" });
+    }
+  );
 
   it("reports stale and terminal commands explicitly", async () => {
     const stale = harness(run({ version: 4 })).manager;
@@ -143,7 +195,9 @@ describe("RunRecoveryManager", () => {
   });
 
   it("sweeps only recovery candidates and preserves Runs needing provider evidence", async () => {
-    const { manager } = harness(run(), [{ runId: "run-1", stateId: "write", state: "ambiguous" }]);
+    const { manager } = harness(run(), [
+      { runId: "run-1", stateId: "write", state: "ambiguous", outputStored: false },
+    ]);
 
     await expect(manager.sweep({ businessId: "business-1", limit: 10 })).resolves.toEqual({
       examined: 1,
@@ -196,6 +250,7 @@ describe("RunRecoveryManager", () => {
           runId: candidate.id,
           stateId: "write",
           state: "ambiguous",
+          outputStored: false,
         })),
     };
 

@@ -46,6 +46,7 @@ import type { ConversationRepo } from "./chat/conversations";
 import type { MessageRepo } from "./chat/messages";
 import type { ChatRunCanceller } from "./chat/routes";
 import type { ConversationStore } from "./conversations/service";
+import type { TerminalTurnSettler } from "./conversations/terminal-turns";
 import type { FeedbackRepo } from "./feedback/repo";
 import type { FileKnowledgeBridge } from "./files/knowledge-bridge";
 import type { FormsRoutesDeps } from "./forms/routes";
@@ -264,6 +265,7 @@ export interface AppOptions {
    * never recorded as a Turn is not reconstructable, so the chat routes refuse the half-wired pair.
    */
   conversationStore?: ConversationStore;
+  terminalTurns?: Pick<TerminalTurnSettler, "reconcileConversation">;
   runCancel?: ChatRunCanceller;
   /**
    * The turn machinery the Worker calls back into while it cannot import this app. Service

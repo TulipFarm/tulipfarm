@@ -8,6 +8,8 @@ import {
   type MessageFilePart,
   textContent,
 } from "@tulipfarm/schema";
+import type { MessageDoc } from "../chat/messages";
+import type { Queryable } from "../db";
 
 export type TurnStatus = ConversationTurn["status"];
 
@@ -25,6 +27,11 @@ export interface PersistedMessage {
 }
 
 export type TurnCompletionStatus = Extract<TurnStatus, "succeeded" | "failed">;
+export type TurnPersistenceStatus = "recorded" | "replayed" | "stale" | "ownership_lost";
+
+export type AssistantMessageWriteResult =
+  | { readonly status: "recorded" | "replayed"; readonly messageId: string }
+  | { readonly status: "stale" | "ownership_lost"; readonly messageId: null };
 
 /** One Worker attempt for a Turn; retries use a new attempt so dead records do not collide. */
 export interface TurnCompletion {
@@ -58,14 +65,46 @@ export interface PersistedTurn {
 }
 
 export interface ConversationStore {
+  withTransaction<T>(
+    operation: (store: ConversationStore, transaction: Queryable) => Promise<T>
+  ): Promise<T>;
   findTurnByIdempotencyKey(businessId: string, key: string): Promise<PersistedTurn | undefined>;
+  lockTurnByIdempotencyKey(businessId: string, key: string): Promise<PersistedTurn | undefined>;
   findTurn(businessId: string, turnId: string): Promise<PersistedTurn | undefined>;
+  lockTurn(businessId: string, turnId: string): Promise<PersistedTurn | undefined>;
   findLatestTurn(businessId: string, conversationId: string): Promise<ConversationTurn | undefined>;
   /** Live Run→Turn mapping; `same_turn` retries supersede stale executors. */
   findTurnByRunId(businessId: string, runId: string): Promise<PersistedTurn | undefined>;
   appendMessage(message: PersistedMessage): Promise<void>;
+  appendAssistantMessage(input: {
+    readonly message: PersistedMessage;
+    readonly runId: string;
+    readonly attempt: number;
+    readonly expectedLeaseGeneration?: number;
+  }): Promise<AssistantMessageWriteResult>;
+  /** Participant-safe history for the named attempt, if it has checkpointed any. */
+  findAttemptMessage?(
+    businessId: string,
+    turnId: string,
+    attempt: number
+  ): Promise<PersistedMessage | undefined>;
+  reserveTurn(input: {
+    readonly message: PersistedMessage;
+    readonly turn: PersistedTurn;
+    readonly requestFingerprint?: string;
+    readonly newConversation?: NewConversation;
+    readonly conversationUpdate?: { readonly agentId?: string };
+  }): Promise<{
+    readonly turn: PersistedTurn;
+    readonly outcome: "created" | "replayed" | "conflict";
+    readonly conversationCreated: boolean;
+  }>;
   saveTurn(turn: PersistedTurn): Promise<void>;
-  listMessages(businessId: string, conversationId: string): Promise<readonly PersistedMessage[]>;
+  listMessages(
+    businessId: string,
+    conversationId: string,
+    throughRequestMessageId?: string
+  ): Promise<readonly PersistedMessage[]>;
   findCompletion(
     businessId: string,
     turnId: string,
@@ -77,22 +116,51 @@ export interface ConversationStore {
 
 export interface CompleteTurnInput {
   readonly completion: TurnCompletion;
-  /** Omitted for a superseded attempt, which must not restate the Turn outcome. */
-  readonly turn?: PersistedTurn;
+  readonly runId: string;
+  readonly expectedLeaseGeneration?: number;
+  readonly surfaceMessage?: MessageDoc;
 }
 
 export interface CompleteTurnResult {
   /** False when this attempt's completion was already recorded. */
   readonly completionInserted: boolean;
+  readonly status: TurnPersistenceStatus;
+}
+
+export interface SettleTerminalTurnInput {
+  readonly businessId: string;
+  readonly turnId: string;
+  readonly runId: string;
+  readonly attempt: number;
+  readonly status: TurnCompletionStatus;
+  readonly cursor: number;
+  readonly reason?: string;
+  readonly createdAt: Date;
+  readonly historyOutcome: "succeeded" | "failed" | "cancelled";
+}
+
+export interface TerminalTurnStore
+  extends Pick<
+    ConversationStore,
+    | "appendAssistantMessage"
+    | "findAttemptMessage"
+    | "findLatestTurn"
+    | "findTurn"
+    | "findTurnByRunId"
+  > {
+  settleTerminalTurn(input: SettleTerminalTurnInput): Promise<CompleteTurnResult>;
 }
 
 export interface RunLauncher {
-  start(input: {
-    businessId: string;
-    conversationId: string;
-    turnId: string;
-    attempt: number;
-  }): Promise<{ runId: string }>;
+  start(
+    input: {
+      businessId: string;
+      conversationId: string;
+      turnId: string;
+      attempt: number;
+    },
+    transaction?: Queryable
+  ): Promise<{ runId: string }>;
 }
 
 export interface TurnGrant {
@@ -108,6 +176,14 @@ export class ConversationAccessError extends Error {
 
   constructor(readonly action: ConversationAction) {
     super(`conversation_access_denied:${action}`);
+  }
+}
+
+export class ConversationIdempotencyConflictError extends Error {
+  readonly name = "ConversationIdempotencyConflictError";
+
+  constructor() {
+    super("conversation_idempotency_payload_conflict");
   }
 }
 
@@ -132,18 +208,38 @@ export interface StartTurnInput {
    */
   readonly files?: readonly MessageFilePart[];
   readonly idempotencyKey: string;
+  /** Hash of the normalized submission. Reusing a client key for a different request conflicts. */
+  readonly requestFingerprint?: string;
+  /** New Chat Conversation to commit only if this request wins the idempotency claim. */
+  readonly newConversation?: NewConversation;
+  /** Existing Chat Conversation update to commit only if this request wins the claim. */
+  readonly conversationUpdate?: { readonly agentId?: string };
+}
+
+export interface NewConversation {
+  readonly id: string;
+  readonly userId: string;
+  readonly agentId?: string;
+  readonly createdAt: Date;
+  readonly updatedAt: Date;
 }
 
 export interface ReservedTurn {
   readonly turnId: string;
   readonly runId: string | null;
   readonly cursor: number;
+  readonly conversationId: string;
+  readonly outcome: "created" | "replayed";
+  readonly conversationCreated: boolean;
 }
 
 export interface StartedTurn {
   readonly turnId: string;
   readonly runId: string;
   readonly cursor: number;
+  readonly conversationId: string;
+  readonly outcome: "started" | "replayed";
+  readonly conversationCreated: boolean;
 }
 
 export interface RetryTurnInput {
@@ -158,30 +254,44 @@ export class ConversationService {
 
   async reserveTurn(input: StartTurnInput): Promise<ReservedTurn> {
     await this.require("start_turn", input.businessId);
-    const turn = await this.reserve(input);
-    return { turnId: turn.id, runId: turn.runId, cursor: turn.cursor };
+    const reservation = await this.deps.store.withTransaction((store) =>
+      this.reserve(input, store)
+    );
+    const { turn } = reservation;
+    return {
+      turnId: turn.id,
+      runId: turn.runId,
+      cursor: turn.cursor,
+      conversationId: turn.conversationId,
+      outcome: reservation.outcome,
+      conversationCreated: reservation.conversationCreated,
+    };
   }
 
-  private async reserve(input: StartTurnInput): Promise<PersistedTurn> {
-    const existing = await this.deps.store.findTurnByIdempotencyKey(
-      input.businessId,
-      input.idempotencyKey
-    );
-    if (existing !== undefined) return existing;
-
+  private async reserve(
+    input: StartTurnInput,
+    store: ConversationStore
+  ): Promise<{
+    turn: PersistedTurn;
+    outcome: "created" | "replayed";
+    conversationCreated: boolean;
+  }> {
     const now = this.deps.now();
     const turnId = this.deps.newId();
     const messageId = this.deps.newId();
 
-    await this.deps.store.appendMessage({
+    const message: PersistedMessage = {
       id: messageId,
       businessId: input.businessId,
       conversationId: input.conversationId,
       turnId,
       role: "user",
       content: [...textContent(input.content), ...(input.files ?? [])],
+      ...(input.requestFingerprint === undefined
+        ? {}
+        : { metadata: { submissionFingerprint: input.requestFingerprint } }),
       createdAt: now,
-    });
+    };
 
     const turn: PersistedTurn = {
       id: turnId,
@@ -197,9 +307,25 @@ export class ConversationService {
       createdAt: now,
       updatedAt: now,
     };
-    await this.deps.store.saveTurn(turn);
-
-    return turn;
+    const reservation = await store.reserveTurn({
+      message,
+      turn,
+      ...(input.requestFingerprint === undefined
+        ? {}
+        : { requestFingerprint: input.requestFingerprint }),
+      ...(input.newConversation === undefined ? {} : { newConversation: input.newConversation }),
+      ...(input.conversationUpdate === undefined
+        ? {}
+        : { conversationUpdate: input.conversationUpdate }),
+    });
+    if (reservation.outcome === "conflict") {
+      throw new ConversationIdempotencyConflictError();
+    }
+    return {
+      turn: reservation.turn,
+      outcome: reservation.outcome,
+      conversationCreated: reservation.conversationCreated,
+    };
   }
 
   async dispatchReservedTurn(input: {
@@ -207,55 +333,106 @@ export class ConversationService {
     idempotencyKey: string;
   }): Promise<StartedTurn> {
     await this.require("start_turn", input.businessId);
-    const turn = await this.deps.store.findTurnByIdempotencyKey(
-      input.businessId,
-      input.idempotencyKey
-    );
-    if (turn === undefined) throw new ConversationAccessError("start_turn");
-    if (turn.runId !== null) {
-      return { turnId: turn.id, runId: turn.runId, cursor: turn.cursor };
-    }
-    return this.dispatch(turn, turn.attempt);
+    return this.deps.store.withTransaction(async (store, transaction) => {
+      const turn = await store.lockTurnByIdempotencyKey(input.businessId, input.idempotencyKey);
+      if (turn === undefined) throw new ConversationAccessError("start_turn");
+      if (turn.runId !== null) {
+        return {
+          turnId: turn.id,
+          runId: turn.runId,
+          cursor: turn.cursor,
+          conversationId: turn.conversationId,
+          outcome: "replayed",
+          conversationCreated: false,
+        };
+      }
+      return this.dispatch(turn, turn.attempt, store, transaction, "replayed", false);
+    });
   }
 
   async startTurn(input: StartTurnInput): Promise<StartedTurn> {
     await this.require("start_turn", input.businessId);
-    const turn = await this.reserve(input);
-    if (turn.runId !== null) {
-      return { turnId: turn.id, runId: turn.runId, cursor: turn.cursor };
-    }
-    return this.dispatch(turn, turn.attempt);
+    return this.deps.store.withTransaction(async (store, transaction) => {
+      const reservation = await this.reserve(input, store);
+      const { turn } = reservation;
+      if (turn.runId !== null) {
+        return {
+          turnId: turn.id,
+          runId: turn.runId,
+          cursor: turn.cursor,
+          conversationId: turn.conversationId,
+          outcome: "replayed",
+          conversationCreated: false,
+        };
+      }
+      const locked = await store.lockTurn(input.businessId, turn.id);
+      if (locked === undefined) throw new ConversationAccessError("start_turn");
+      if (locked.runId !== null) {
+        return {
+          turnId: locked.id,
+          runId: locked.runId,
+          cursor: locked.cursor,
+          conversationId: locked.conversationId,
+          outcome: "replayed",
+          conversationCreated: false,
+        };
+      }
+      return this.dispatch(
+        locked,
+        locked.attempt,
+        store,
+        transaction,
+        reservation.outcome === "created" ? "started" : "replayed",
+        reservation.conversationCreated
+      );
+    });
   }
 
   async retryTurn(input: RetryTurnInput): Promise<StartedTurn> {
     await this.require("retry_turn", input.businessId);
-    const turn = await this.load(input.businessId, input.turnId, "retry_turn");
+    return this.deps.store.withTransaction(async (store, transaction) => {
+      const turn = await store.lockTurn(input.businessId, input.turnId);
+      if (turn === undefined) throw new ConversationAccessError("retry_turn");
 
-    if (input.mode === "same_turn") {
-      const superseded =
-        turn.runId === null ? turn.supersededRunIds : [...turn.supersededRunIds, turn.runId];
+      if (input.mode === "same_turn") {
+        const superseded =
+          turn.runId === null ? turn.supersededRunIds : [...turn.supersededRunIds, turn.runId];
+        return this.dispatch(
+          {
+            ...turn,
+            attempt: turn.attempt + 1,
+            runId: null,
+            // A new attempt streams its own Run, so the reader's cursor restarts with it.
+            cursor: 0,
+            supersededRunIds: superseded,
+          },
+          turn.attempt + 1,
+          store,
+          transaction,
+          "started",
+          false
+        );
+      }
+
+      const messages = await store.listMessages(turn.businessId, turn.conversationId);
+      const request = messages.find((message) => message.id === turn.requestMessageId);
+      if (request === undefined) throw new ConversationAccessError("retry_turn");
+
+      const replay: StartTurnInput = {
+        businessId: turn.businessId,
+        conversationId: turn.conversationId,
+        content: contentText(request.content),
+        idempotencyKey: `${turn.idempotencyKey}:retry:${this.deps.newId()}`,
+      };
+      const replayedTurn = await this.reserve(replay, store);
       return this.dispatch(
-        {
-          ...turn,
-          attempt: turn.attempt + 1,
-          runId: null,
-          // A new attempt streams its own Run, so the reader's cursor restarts with it.
-          cursor: 0,
-          supersededRunIds: superseded,
-        },
-        turn.attempt + 1
+        replayedTurn.turn,
+        replayedTurn.turn.attempt,
+        store,
+        transaction,
+        "started",
+        false
       );
-    }
-
-    const messages = await this.deps.store.listMessages(turn.businessId, turn.conversationId);
-    const request = messages.find((message) => message.id === turn.requestMessageId);
-    if (request === undefined) throw new ConversationAccessError("retry_turn");
-
-    return this.startTurn({
-      businessId: turn.businessId,
-      conversationId: turn.conversationId,
-      content: contentText(request.content),
-      idempotencyKey: `${turn.idempotencyKey}:retry:${this.deps.newId()}`,
     });
   }
 
@@ -278,35 +455,38 @@ export class ConversationService {
     return { runId: turn.runId, after: turn.cursor };
   }
 
-  private async dispatch(turn: PersistedTurn, attempt: number): Promise<StartedTurn> {
-    let runId: string;
-    try {
-      const started = await this.deps.runs.start({
+  private async dispatch(
+    turn: PersistedTurn,
+    attempt: number,
+    store: ConversationStore,
+    transaction: Queryable,
+    outcome: "started" | "replayed",
+    conversationCreated: boolean
+  ): Promise<StartedTurn> {
+    const { runId } = await this.deps.runs.start(
+      {
         businessId: turn.businessId,
         conversationId: turn.conversationId,
         turnId: turn.id,
         attempt,
-      });
-      runId = started.runId;
-    } catch (error) {
-      // The Turn stays durable and resumable; only the dispatch failed.
-      await this.deps.store.saveTurn({
-        ...turn,
-        attempt,
-        status: "start_failed",
-        updatedAt: this.deps.now(),
-      });
-      throw error;
-    }
-
-    await this.deps.store.saveTurn({
+      },
+      transaction
+    );
+    await store.saveTurn({
       ...turn,
       attempt,
       runId,
       status: "running",
       updatedAt: this.deps.now(),
     });
-    return { turnId: turn.id, runId, cursor: turn.cursor };
+    return {
+      turnId: turn.id,
+      runId,
+      cursor: turn.cursor,
+      conversationId: turn.conversationId,
+      outcome,
+      conversationCreated,
+    };
   }
 
   private async require(action: ConversationAction, businessId: string): Promise<TurnGrant> {

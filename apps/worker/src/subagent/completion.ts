@@ -77,7 +77,7 @@ export class SubagentCompletionStore implements TurnCompletionStore {
 
   async appendAssistantMessage(
     input: TurnCompletionRef & { content: string }
-  ): Promise<{ messageId: string }> {
+  ): Promise<{ status: "recorded"; messageId: string }> {
     const artifactId = subagentAnswerArtifactId(input.runId);
     await this.options.artifacts.publish({
       id: artifactId,
@@ -98,7 +98,7 @@ export class SubagentCompletionStore implements TurnCompletionStore {
       producer: { runId: input.runId, stateKey: INVOKE_STATE_KEY, attempt: input.attempt },
       createdAt: this.now().toISOString(),
     });
-    return { messageId: artifactId };
+    return { status: "recorded", messageId: artifactId };
   }
 
   /**
@@ -114,5 +114,7 @@ export class SubagentCompletionStore implements TurnCompletionStore {
       cursor: number;
       messageId: string | null;
     }
-  ): Promise<void> {}
+  ): Promise<{ status: "recorded" }> {
+    return { status: "recorded" };
+  }
 }

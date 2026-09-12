@@ -7,9 +7,10 @@ import { DEPLOYMENT_BUSINESS_ID } from "@tulipfarm/constants";
  * 99: Routine Tool replay reads immutable confirmed outputs added by migration 99. A worker below
  * that floor could claim a replayed State and lose the Tool result needed by following States.
  * 108: Recovery sweeps persist their cursor so blocked Runs cannot starve later safe candidates.
- * 109: Recovery cursors bound each cycle so sustained arrivals cannot prevent a restart-safe wrap.
+ * 110: Parked child Tool effects carry a replayable, non-terminal ledger state.
+ * 111: Agent loop checkpoints are fenced by the active Run claim generation.
  */
-export const REQUIRED_SCHEMA_VERSION = 109;
+export const REQUIRED_SCHEMA_VERSION = 111;
 
 export interface WorkerConfig {
   readonly databaseUrl: string;

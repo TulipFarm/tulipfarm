@@ -1,5 +1,5 @@
 import type { ToolDispatchPort } from "@tulipfarm/agent-runtime";
-import type { ActionDispatchPlan } from "@tulipfarm/run-kernel";
+import { type ActionDispatchPlan, assertRunActive } from "@tulipfarm/run-kernel";
 
 /**
  * Runs one runtime Tool for an `action` State, with no model in the loop.
@@ -26,6 +26,7 @@ export interface RoutineActionRequest {
   readonly runId: string;
   /** Durable State occurrence key, so a parked Tool registers its wait against this State. */
   readonly stateKey: string;
+  readonly signal?: AbortSignal;
   readonly plan: ActionDispatchPlan;
 }
 
@@ -41,6 +42,7 @@ export class DispatchRoutineActionPort implements RoutineActionPort {
   constructor(private readonly tools: ToolDispatchPort) {}
 
   async execute(request: RoutineActionRequest): Promise<RoutineActionOutcome> {
+    assertRunActive(request.signal);
     const { plan } = request;
     const result = await this.tools.dispatch({
       businessId: request.businessId,
@@ -51,7 +53,9 @@ export class DispatchRoutineActionPort implements RoutineActionPort {
       name: plan.action,
       arguments: plan.arguments,
       permissionCeiling: plan.permissionCeiling,
+      ...(request.signal === undefined ? {} : { signal: request.signal }),
     });
+    assertRunActive(request.signal);
 
     switch (result.status) {
       case "succeeded":

@@ -13,8 +13,7 @@ import { apiGet } from "~/lib/api";
 export interface SurfaceArtifactProps {
   readonly artifact?: SurfaceArtifactValue;
   readonly artifactId: string;
-  // Absent on a live `surface.emitted` event (the wire names only the id) — the fetch below omits
-  // the query param, which resolves to the latest revision server-side.
+  // Absent only on legacy events; those resolve to the latest revision server-side.
   readonly revision?: number;
   readonly resolvedView?: ResolvedSurfaceViewNode;
   readonly codeView?: SurfaceCodeViewPayload;

@@ -31,6 +31,8 @@ folded into `ModelUsage`.
   one it does not — that absence is how a File stays confined to its own Turn. Never inline bytes
   into `MessageContent`, which is persisted. `splitPrompt` reports what it emitted as `attached`;
   read that rather than re-deriving it.
+- A `source: "tool"` attachment was authorized by `file_read` for this iteration. Append it as a
+  named SDK file part; never append an unmarked attachment that no Message names.
 - **A provider only takes an image or a PDF as binary.** Every other media type — CSV, JSON, and
   the OOXML packages — is refused as a `file` part, which surfaces to the person as a bare
   `model_error`. So `filePartFor` routes on what the provider will accept, not on the File's

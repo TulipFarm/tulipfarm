@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import type { Queryable } from "@tulipfarm/storage";
 import type { PublishArtifactInput } from "../artifacts";
 import { TypedOutputError, type TypedOutputValidator } from "../outputs";
 
@@ -75,7 +76,8 @@ export interface DurableInvocationRecord {
 
 export interface DurableInvocationStore {
   persist(
-    record: DurableInvocationRecord
+    record: DurableInvocationRecord,
+    transaction?: Queryable
   ): Promise<{ readonly outcome: "started" | "duplicate"; readonly runId: string }>;
 }
 
@@ -152,7 +154,7 @@ export class DurableInvocationGateway {
     this.now = options.now ?? (() => new Date().toISOString());
   }
 
-  async start(input: StartInvocationInput) {
+  async start(input: StartInvocationInput, transaction?: Queryable) {
     if (
       input.businessId.length === 0 ||
       input.idempotencyKey.length === 0 ||
@@ -212,49 +214,52 @@ export class DurableInvocationGateway {
 
     const runId = this.nextId();
     const createdAt = this.now();
-    return this.options.store.persist({
-      runId,
-      source: input.source,
-      runSource: input.runSource,
-      businessId: input.businessId,
-      initiator: input.initiator,
-      effectiveSubject: input.effectiveSubject,
-      ...(input.identityMappingEvidenceRef === undefined
-        ? {}
-        : { identityMappingEvidenceRef: input.identityMappingEvidenceRef }),
-      idempotencyKey: input.idempotencyKey,
-      createdAt,
-      bundle,
-      state: {
-        key: initialState.key,
-        definitionRef: initialState.definitionRef,
-        resolvedInput: { payloadRef: requestPayloadRef(runId) },
-      },
-      requestArtifact: {
-        id: requestArtifactId(runId),
+    return this.options.store.persist(
+      {
+        runId,
+        source: input.source,
+        runSource: input.runSource,
         businessId: input.businessId,
-        schemaRef: input.payloadSchemaRef,
-        value: input.payload,
-        storage: "inline",
-        // No classification vocabulary is enforced anywhere yet; labels nothing reads would be
-        // ceremony that later policy work would have to reconcile against.
-        classification: [],
-        // Artifact rows are append-only, so an ACL missing a reader can never be corrected. Both
-        // principals and the Run executor go in on the first write.
-        acl: {
-          readers: [
-            ...new Set([
-              `${input.initiator.kind}:${input.initiator.id}`,
-              `${input.effectiveSubject.kind}:${input.effectiveSubject.id}`,
-              RUN_EXECUTOR_PRINCIPAL_REF,
-            ]),
-          ],
-        },
-        retention: { policy: "standard", expiresAt: null },
-        redaction: { redactedPaths: [] },
-        producer: { runId, stateKey: initialState.key, attempt: 0 },
+        initiator: input.initiator,
+        effectiveSubject: input.effectiveSubject,
+        ...(input.identityMappingEvidenceRef === undefined
+          ? {}
+          : { identityMappingEvidenceRef: input.identityMappingEvidenceRef }),
+        idempotencyKey: input.idempotencyKey,
         createdAt,
+        bundle,
+        state: {
+          key: initialState.key,
+          definitionRef: initialState.definitionRef,
+          resolvedInput: { payloadRef: requestPayloadRef(runId) },
+        },
+        requestArtifact: {
+          id: requestArtifactId(runId),
+          businessId: input.businessId,
+          schemaRef: input.payloadSchemaRef,
+          value: input.payload,
+          storage: "inline",
+          // No classification vocabulary is enforced anywhere yet; labels nothing reads would be
+          // ceremony that later policy work would have to reconcile against.
+          classification: [],
+          // Artifact rows are append-only, so an ACL missing a reader can never be corrected. Both
+          // principals and the Run executor go in on the first write.
+          acl: {
+            readers: [
+              ...new Set([
+                `${input.initiator.kind}:${input.initiator.id}`,
+                `${input.effectiveSubject.kind}:${input.effectiveSubject.id}`,
+                RUN_EXECUTOR_PRINCIPAL_REF,
+              ]),
+            ],
+          },
+          retention: { policy: "standard", expiresAt: null },
+          redaction: { redactedPaths: [] },
+          producer: { runId, stateKey: initialState.key, attempt: 0 },
+          createdAt,
+        },
       },
-    });
+      transaction
+    );
   }
 }

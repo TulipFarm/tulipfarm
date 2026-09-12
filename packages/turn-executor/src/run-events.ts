@@ -13,6 +13,9 @@ import {
 
 export interface AppendedRunEvent {
   readonly sequence: number;
+  /** Present on durable stores so redelivery projects the immutable recorded event. */
+  readonly eventType?: string;
+  readonly payload?: Record<string, unknown>;
 }
 
 /**
@@ -50,6 +53,8 @@ export interface TurnEventWriterOptions {
    * turn-event-key-collision.test.ts` holds that coupling.
    */
   readonly attempt: number;
+  /** Durable participant-safe activity from an earlier executor pass of this same attempt. */
+  readonly initial?: TurnAttemptHistory;
   now?(): Date;
 }
 
@@ -101,20 +106,66 @@ export interface TurnSurfaceRef {
   readonly revision: number;
 }
 
+export type TurnAttemptHistoryOutcome = "active" | "waiting" | "succeeded" | "failed" | "cancelled";
+
+/** Participant-safe history for one Turn attempt. Raw model/Tool data never enters this shape. */
+export interface TurnAttemptHistory {
+  readonly text: string;
+  readonly toolCalls: readonly ParticipantToolCall[];
+  readonly surfaces: readonly TurnSurfaceRef[];
+  readonly cursor: number;
+  readonly outcome: TurnAttemptHistoryOutcome;
+  readonly complete: boolean;
+  readonly wait?:
+    | {
+        readonly kind: "approval";
+        readonly waitId: string;
+        readonly approvalId: string;
+        readonly callId: string;
+      }
+    | {
+        readonly kind: "child";
+        readonly waitId: string;
+        readonly childRunId: string;
+        readonly callId: string;
+      };
+}
+
 /** Project only loop text and pre-dispatch rejections; Tool args stay out of participant events. */
 export class TurnEventWriter implements AgentLoopEventSink {
-  private cursorSequence = 0;
+  private cursorSequence: number;
   private lastLoopSequence = 0;
-  private readonly toolCallOrder: string[] = [];
-  private readonly toolCallsById = new Map<string, ParticipantToolCall>();
-  private readonly surfacesById = new Map<string, TurnSurfaceRef>();
+  private readonly toolCallOrder: string[];
+  private readonly toolCallsById: Map<string, ParticipantToolCall>;
+  private readonly surfacesById: Map<string, TurnSurfaceRef>;
+  private textValue: string;
   private plansDeclared = 0;
+  private emitQueue: Promise<void> = Promise.resolve();
 
-  constructor(private readonly options: TurnEventWriterOptions) {}
+  constructor(private readonly options: TurnEventWriterOptions) {
+    const initial = options.initial;
+    this.cursorSequence = initial?.cursor ?? 0;
+    this.textValue = initial?.text ?? "";
+    this.toolCallOrder = initial?.toolCalls.map((call) => call.callId) ?? [];
+    this.toolCallsById = new Map(
+      initial?.toolCalls.map((call) => [call.callId, { ...call }]) ?? []
+    );
+    this.surfacesById = new Map(
+      initial?.surfaces.map((surface) => [
+        `${surface.artifactId}:${surface.revision}`,
+        { ...surface },
+      ]) ?? []
+    );
+  }
 
   /** Highest Run event sequence this writer appended; readers resume strictly after it. */
   get cursor(): number {
     return this.cursorSequence;
+  }
+
+  /** Output-guard-approved prose already published for this attempt. */
+  get text(): string {
+    return this.textValue;
   }
 
   /** Participant Tool timeline: redacted previews/receipts only, never raw args or outputs. */
@@ -128,9 +179,8 @@ export class TurnEventWriter implements AgentLoopEventSink {
   /**
    * Surfaces this Turn presented, in the order they were emitted.
    *
-   * `surface.emitted` carries no revision, so the reference is recorded here rather than
-   * reconstructed from the event stream: a persisted transcript has to name the exact revision the
-   * reader saw, not whichever one the Artifact has reached by the time it is replayed.
+   * The reference is recorded here before publication so a checkpoint and the event both preserve
+   * the exact revision the reader saw, not whichever revision the Artifact later reaches.
    */
   get surfaces(): readonly TurnSurfaceRef[] {
     return [...this.surfacesById.values()].map((surface) => ({ ...surface }));
@@ -138,7 +188,19 @@ export class TurnEventWriter implements AgentLoopEventSink {
 
   /** Records a presented Surface so a completed Turn can link it into the transcript. */
   recordSurface(surface: TurnSurfaceRef): void {
-    this.surfacesById.set(surface.artifactId, surface);
+    this.surfacesById.set(`${surface.artifactId}:${surface.revision}`, surface);
+  }
+
+  /** Immutable participant-safe snapshot suitable for durable attempt history. */
+  history(outcome: TurnAttemptHistoryOutcome = "active", complete = false): TurnAttemptHistory {
+    return {
+      text: this.text,
+      toolCalls: this.toolCalls,
+      surfaces: this.surfaces,
+      cursor: this.cursor,
+      outcome,
+      complete,
+    };
   }
 
   /**
@@ -159,6 +221,16 @@ export class TurnEventWriter implements AgentLoopEventSink {
     payload: RunEventPayloads[T],
     key: string
   ): Promise<void> {
+    const operation = this.emitQueue.then(() => this.appendAndProject(type, payload, key));
+    this.emitQueue = operation.catch(() => {});
+    return operation;
+  }
+
+  private async appendAndProject<T extends RunEventType>(
+    type: T,
+    payload: RunEventPayloads[T],
+    key: string
+  ): Promise<void> {
     const definition = runEventDefinition(type);
     if (definition === undefined) throw new UnknownRunEventTypeError(type);
 
@@ -167,6 +239,7 @@ export class TurnEventWriter implements AgentLoopEventSink {
       throw new InvalidRunEventPayloadError(type, errorText(validate));
     }
 
+    const preAppendCursor = this.cursorSequence;
     const appended = await this.options.events.append({
       businessId: this.options.businessId,
       runId: this.options.runId,
@@ -177,7 +250,16 @@ export class TurnEventWriter implements AgentLoopEventSink {
       occurredAt: (this.options.now?.() ?? new Date()).toISOString(),
     });
     this.cursorSequence = Math.max(this.cursorSequence, appended.sequence);
-    this.recordToolEvent(type, payload);
+    if (appended.sequence <= preAppendCursor) return;
+
+    const recordedPayload =
+      appended.eventType === type && appended.payload !== undefined
+        ? (appended.payload as RunEventPayloads[T])
+        : payload;
+    this.recordToolEvent(type, recordedPayload);
+    if (type === "text.delta") {
+      this.textValue += (recordedPayload as RunEventPayloads["text.delta"]).text;
+    }
   }
 
   /** `AgentLoopEventSink`. Loop events that have no participant-visible counterpart are dropped. */

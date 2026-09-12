@@ -811,6 +811,126 @@ describe("LlmModelPort", () => {
       },
     ]);
   });
+
+  it("sends file_read-authorized PDF and image bytes through the SDK provider prompt", async () => {
+    const pdfBytes = new Uint8Array([37, 80, 68, 70]);
+    const imageBytes = new Uint8Array([137, 80, 78, 71]);
+    const mock = new MockLanguageModelV4({
+      doStream: vi
+        .fn()
+        .mockResolvedValueOnce({
+          stream: simulateReadableStream<StreamPart>({
+            chunks: [
+              {
+                type: "tool-call",
+                toolCallId: "read-pdf",
+                toolName: "file_read",
+                input: JSON.stringify({ fileId: "invoice" }),
+              },
+              {
+                type: "tool-call",
+                toolCallId: "read-image",
+                toolName: "file_read",
+                input: JSON.stringify({ fileId: "diagram" }),
+              },
+              FINISH,
+            ],
+          }),
+        })
+        .mockResolvedValueOnce({
+          stream: simulateReadableStream<StreamPart>({
+            chunks: [...textParts("t2", ["done"]), FINISH],
+          }),
+        }),
+    });
+    const port = new LlmModelPort({
+      model: async (selector): Promise<LlmModelResolution> => ({
+        kind: "available",
+        price: TEST_PRICE,
+        model: mock as unknown as LanguageModel,
+        routing: {
+          outcome: "raw_model",
+          selector,
+          resolution: "raw_model_id",
+          modelId: selector,
+        },
+      }),
+    });
+    const read = vi.fn(async (_runId: string, fileId: string) =>
+      fileId === "invoice" ? pdfBytes : imageBytes
+    );
+    const loop = new AgentLoop({
+      model: port,
+      tools: {
+        dispatch: async (call) => {
+          const image = call.arguments as { fileId: string };
+          return {
+            status: "succeeded",
+            callId: call.callId,
+            output: {
+              attached: true,
+              fileId: image.fileId,
+              mediaType: image.fileId === "invoice" ? "application/pdf" : "image/png",
+              filename: image.fileId === "invoice" ? "invoice.pdf" : "diagram.png",
+            },
+          };
+        },
+      },
+      checkpoints: new InMemoryLoopCheckpointStore(),
+      events: { append: async () => {} },
+      budget: { consume: async () => ({ outcome: "allowed" }) },
+      isCancelled: async () => false,
+      attachments: { read },
+    });
+
+    const outcome = await loop.run({
+      businessId: "biz-1",
+      runId: "run-1",
+      stateId: "state-1",
+      modelProfileId: "balanced",
+      contextDigest: "sha256:context",
+      guardrailDigest: "sha256:guardrail",
+      messages: [{ role: "user", content: textContent("read the invoice and diagram") }],
+      attachments: [
+        {
+          fileId: "unrelated",
+          mediaType: "image/png",
+          name: "unrelated.png",
+          data: new Uint8Array([1, 2, 3]),
+        },
+      ],
+      tools: [{ name: "file_read", inputSchema: { type: "object" }, mutating: false }],
+      limits: { maxIterations: 2, maxToolCalls: 2, maxRepairAttempts: 1 },
+    });
+
+    expect(outcome.status).toBe("completed");
+    expect(read.mock.calls).toEqual([
+      ["run-1", "invoice"],
+      ["run-1", "diagram"],
+    ]);
+    const prompt = mock.doStreamCalls[1]?.prompt ?? [];
+    expect(prompt.at(-1)).toEqual({
+      role: "user",
+      content: [
+        {
+          type: "file",
+          data: { type: "data", data: pdfBytes },
+          mediaType: "application/pdf",
+          filename: "invoice.pdf",
+          providerOptions: undefined,
+        },
+        {
+          type: "file",
+          data: { type: "data", data: imageBytes },
+          mediaType: "image/png",
+          filename: "diagram.png",
+          providerOptions: undefined,
+        },
+      ],
+      providerOptions: undefined,
+    });
+    expect(JSON.stringify(prompt)).not.toContain("unrelated.png");
+  });
 });
 
 describe("LlmModelPort effort inference", () => {

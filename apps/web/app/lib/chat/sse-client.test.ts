@@ -110,6 +110,32 @@ test("defaults seq to 0 when no id line is present but event+data are", () => {
   expect(frames).toEqual([{ seq: 0, type: "text", data: { delta: "x" } }]);
 });
 
+test("keeps a valid Surface revision and supports legacy events without one", () => {
+  const map = createRunEventMapper();
+
+  expect(
+    map({
+      seq: 1,
+      type: "surface.emitted",
+      data: { artifactId: "status", revision: 2 },
+    })
+  ).toEqual([{ type: "surface", data: { artifactId: "status", revision: 2 } }]);
+  expect(
+    map({
+      seq: 2,
+      type: "surface.emitted",
+      data: { artifactId: "legacy" },
+    })
+  ).toEqual([{ type: "surface", data: { artifactId: "legacy" } }]);
+  expect(
+    map({
+      seq: 3,
+      type: "surface.emitted",
+      data: { artifactId: "invalid", revision: 0 },
+    })
+  ).toEqual([{ type: "surface", data: { artifactId: "invalid" } }]);
+});
+
 test("recovers a dropped stream from the Run's own events without duplicating them", async () => {
   const fetchMock = vi
     .fn()
@@ -436,6 +462,7 @@ test("turns allowlisted model failures into actionable participant-safe messages
         message:
           "The model provider's API billing is inactive. Activate billing or use another Provider Credential.",
         details: { reason: "model_billing_inactive" },
+        terminal: true,
       },
     },
   ]);
@@ -462,6 +489,7 @@ test("turns allowlisted model failures into actionable participant-safe messages
           requestId: "run-1:invoke:1",
           modelId: "gpt-5.6-terra",
         },
+        terminal: true,
       },
     },
   ]);
@@ -514,6 +542,7 @@ test("names the tool-call budget the turn exhausted, with numbers when they are 
         message:
           "The Agent used up its tool-call budget for this turn (15 of 15 calls used) before it could finish. What it already found is kept — ask it to continue and it will pick up from there, or try a narrower request.",
         details: { reason: "tool_call_limit", toolCallsUsed: 15, toolCallsMax: 15 },
+        terminal: true,
       },
     },
   ]);
@@ -569,14 +598,20 @@ test("surfaces an error when the Run ends badly and never said why", () => {
   // composer idle with no answer and no banner — indistinguishable from a turn that succeeded.
   const failed = createRunEventMapper();
   expect(failed({ seq: 1, type: "stream.closed", data: { status: "failed" } })).toEqual([
-    { type: "error", data: { message: "The turn stopped before it could answer. Try again." } },
+    {
+      type: "error",
+      data: { message: "The turn stopped before it could answer. Try again.", terminal: true },
+    },
   ]);
 
   const parked = createRunEventMapper();
   expect(
     parked({ seq: 1, type: "stream.closed", data: { status: "needs_reconciliation" } })
   ).toEqual([
-    { type: "error", data: { message: "The turn stopped before it could answer. Try again." } },
+    {
+      type: "error",
+      data: { message: "The turn stopped before it could answer. Try again.", terminal: true },
+    },
   ]);
 });
 

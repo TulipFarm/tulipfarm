@@ -20,6 +20,7 @@ import type { FastifyBaseLogger } from "fastify";
 import type { ToolRegistry } from "../broker/tool-adapter";
 import type { ConversationRepo } from "../chat/conversations";
 import type { ConversationStore, PersistedTurn } from "../conversations/service";
+import type { Queryable } from "../db";
 import type { IngressIdentityResolver } from "../ingress/identity";
 import type { IntegrationConversationsRepo, IntegrationEventsRepo } from "../ingress/repo";
 import { postReply } from "../ingress/responder";
@@ -103,6 +104,11 @@ export interface IngressDeliveryHostOptions {
   readonly store: ConversationStore;
   readonly conversations: Pick<ConversationRepo, "create" | "deleteOwned" | "findById">;
   readonly threads: IntegrationConversationsRepo;
+  readonly transactionScope: (transaction: Queryable) => {
+    readonly artifacts: Pick<ArtifactService, "publish">;
+    readonly conversations: Pick<ConversationRepo, "create" | "deleteOwned" | "findById">;
+    readonly threads: Pick<IntegrationConversationsRepo, "find" | "insert">;
+  };
   readonly integrationEvents: IntegrationEventsRepo;
   readonly soulLoader: SoulLoader;
   /** Bundled (code-owned) integrations; see `resolveIngressIntegration`. */
@@ -166,13 +172,9 @@ export class IngressDeliveryHost {
     if (chat === undefined || delivery.threadKey === undefined) {
       return { outcome: "ignored", reason: "chat_not_declared" };
     }
+    const threadKey = delivery.threadKey;
 
-    const existing = await this.options.store.findTurnByRunId(businessId, runId);
-    if (existing !== undefined) {
-      return { outcome: "attached", turnId: existing.id, attempt: existing.attempt };
-    }
-
-    const mapping = await this.options.threads.find(delivery.slug, delivery.threadKey);
+    const mapping = await this.options.threads.find(delivery.slug, threadKey);
     if (decision.requireExistingThread === true && mapping === null) {
       return { outcome: "ignored", reason: "no_thread_mapping" };
     }
@@ -211,95 +213,111 @@ export class IngressDeliveryHost {
       return { outcome: "ignored", reason: "sender_not_thread_owner" };
     }
 
-    const now = this.now();
-    let conversationId = mapping?.conversationId;
-    if (conversationId === undefined) {
-      const mintedId = this.newId();
-      await this.options.conversations.create({
-        _id: mintedId,
-        userId: user._id,
-        createdAt: now,
-        updatedAt: now,
-      });
-      // The mapping insert, not our minted id, decides who owns the thread: on a lost race a
-      // concurrent first message already created the Conversation, so we route onto its mapping,
-      // drop our now-orphaned Conversation, and re-apply the ownership guard against the winner we
-      // did not write — the pre-read guard above never saw it.
-      const winner = await this.options.threads.insert({
-        integrationSlug: delivery.slug,
-        externalKey: delivery.threadKey,
-        conversationId: mintedId,
-        userId: user._id,
-      });
-      if (winner.conversationId !== mintedId) {
-        await this.options.conversations.deleteOwned(mintedId, user._id);
-        if (winner.userId !== user._id) {
-          this.options.log.warn(
-            { slug: delivery.slug, runId },
-            "channel sender does not own the mapped Conversation; refusing the turn"
-          );
-          return { outcome: "ignored", reason: "sender_not_thread_owner" };
-        }
+    return this.options.store.withTransaction(async (store, transaction) => {
+      const scope = this.options.transactionScope(transaction);
+      const existing = await store.findTurnByRunId(businessId, runId);
+      if (existing !== undefined) {
+        const establishedAgent = await this.routedAgent(
+          existing.conversationId,
+          scope.conversations
+        );
+        await this.publishChatRequest(
+          scope.artifacts,
+          delivery,
+          decision,
+          user._id,
+          existing.conversationId,
+          establishedAgent,
+          existing.createdAt
+        );
+        return { outcome: "attached", turnId: existing.id, attempt: existing.attempt };
       }
-      conversationId = winner.conversationId;
-    }
 
-    const turnId = this.newId();
-    const messageId = this.newId();
-    await this.options.store.appendMessage({
-      id: messageId,
-      businessId,
-      conversationId,
-      turnId,
-      role: "user",
-      content: textContent(decision.text),
-      createdAt: now,
+      const now = this.now();
+      const currentMapping = await scope.threads.find(delivery.slug, threadKey);
+      if (currentMapping !== null && currentMapping.userId !== user._id) {
+        this.options.log.warn(
+          { slug: delivery.slug, runId },
+          "channel sender does not own the mapped Conversation; refusing the turn"
+        );
+        return { outcome: "ignored", reason: "sender_not_thread_owner" };
+      }
+
+      let conversationId = currentMapping?.conversationId;
+      if (conversationId === undefined) {
+        const mintedId = this.newId();
+        await scope.conversations.create({
+          _id: mintedId,
+          userId: user._id,
+          createdAt: now,
+          updatedAt: now,
+        });
+        const winner = await scope.threads.insert({
+          integrationSlug: delivery.slug,
+          externalKey: threadKey,
+          conversationId: mintedId,
+          userId: user._id,
+        });
+        if (winner.conversationId !== mintedId) {
+          await scope.conversations.deleteOwned(mintedId, user._id);
+          if (winner.userId !== user._id) {
+            this.options.log.warn(
+              { slug: delivery.slug, runId },
+              "channel sender does not own the mapped Conversation; refusing the turn"
+            );
+            return { outcome: "ignored", reason: "sender_not_thread_owner" };
+          }
+        }
+        conversationId = winner.conversationId;
+      }
+
+      const turnId = this.newId();
+      const messageId = this.newId();
+      const reservation = await store.reserveTurn({
+        message: {
+          id: messageId,
+          businessId,
+          conversationId,
+          turnId,
+          role: "user",
+          content: textContent(decision.text),
+          createdAt: now,
+        },
+        turn: {
+          id: turnId,
+          businessId,
+          conversationId,
+          // Keyed by the Run: one durable delivery Run answers exactly one Turn.
+          idempotencyKey: `${runId}:ingress`,
+          requestMessageId: messageId,
+          status: "running",
+          attempt: 1,
+          runId,
+          cursor: 0,
+          supersededRunIds: [],
+          createdAt: now,
+          updatedAt: now,
+        },
+      });
+      const establishedAgent = await this.routedAgent(
+        reservation.turn.conversationId,
+        scope.conversations
+      );
+      await this.publishChatRequest(
+        scope.artifacts,
+        delivery,
+        decision,
+        user._id,
+        reservation.turn.conversationId,
+        establishedAgent,
+        reservation.turn.createdAt
+      );
+      return {
+        outcome: "attached",
+        turnId: reservation.turn.id,
+        attempt: reservation.turn.attempt,
+      };
     });
-    const turn: PersistedTurn = {
-      id: turnId,
-      businessId,
-      conversationId,
-      // Keyed by the Run, not by the delivery: the delivery was already deduped when it was
-      // acknowledged, and one Run answers exactly one Turn.
-      idempotencyKey: `${runId}:ingress`,
-      requestMessageId: messageId,
-      status: "running",
-      attempt: 1,
-      runId,
-      cursor: 0,
-      supersededRunIds: [],
-      createdAt: now,
-      updatedAt: now,
-    };
-    await this.options.store.saveTurn(turn);
-
-    // The derived Chat request, with lineage back to the raw envelope. This is what the Worker's
-    // turn actually runs off, so "what was the model asked?" and "which delivery asked it?" are
-    // one recorded chain rather than two records that happen to agree.
-    await this.options.artifacts.publish({
-      id: chatRequestArtifactId(runId),
-      businessId,
-      schemaRef: CHAT_REQUEST_SCHEMA_REF,
-      value: {
-        conversationId,
-        message: { role: "user", content: decision.text },
-        // Never a literal: this is read straight back out as `request.autonomy` at dispatch.
-        ...(routed.agentId === undefined ? {} : { agentId: routed.agentId }),
-        ...(routed.autonomy === undefined ? {} : { autonomy: routed.autonomy }),
-      },
-      storage: "inline",
-      classification: [],
-      acl: {
-        readers: [...new Set([RUN_EXECUTOR_PRINCIPAL_REF, `user:${user._id}`])],
-      },
-      retention: { policy: "standard", expiresAt: null },
-      redaction: { redactedPaths: [] },
-      producer: { runId, stateKey: INVOKE_STATE_KEY, attempt: 0 },
-      createdAt: now.toISOString(),
-      derivedFrom: [requestArtifactId(runId)],
-    });
-
-    return { outcome: "attached", turnId, attempt: 1 };
   }
 
   /** Records an `event` decision, gated by what the manifest actually declares. */
@@ -392,6 +410,38 @@ export class IngressDeliveryHost {
     return (answer === undefined ? "" : contentText(answer.content).trim()) || ERROR_REPLY;
   }
 
+  private async publishChatRequest(
+    artifacts: Pick<ArtifactService, "publish">,
+    delivery: DeliveryAuthority,
+    decision: { text: string },
+    userId: string,
+    conversationId: string,
+    routed: { agentId?: string; autonomy?: ChatAutonomy },
+    createdAt: Date
+  ): Promise<void> {
+    await artifacts.publish({
+      id: chatRequestArtifactId(delivery.runId),
+      businessId: delivery.businessId,
+      schemaRef: CHAT_REQUEST_SCHEMA_REF,
+      value: {
+        conversationId,
+        message: { role: "user", content: decision.text },
+        ...(routed.agentId === undefined ? {} : { agentId: routed.agentId }),
+        ...(routed.autonomy === undefined ? {} : { autonomy: routed.autonomy }),
+      },
+      storage: "inline",
+      classification: [],
+      acl: {
+        readers: [...new Set([RUN_EXECUTOR_PRINCIPAL_REF, `user:${userId}`])],
+      },
+      retention: { policy: "standard", expiresAt: null },
+      redaction: { redactedPaths: [] },
+      producer: { runId: delivery.runId, stateKey: INVOKE_STATE_KEY, attempt: 0 },
+      createdAt: createdAt.toISOString(),
+      derivedFrom: [requestArtifactId(delivery.runId)],
+    });
+  }
+
   /** Sends single-use bind links from this process only; the Worker never receives them. */
   private async offerBind(
     delivery: DeliveryAuthority,
@@ -429,10 +479,11 @@ export class IngressDeliveryHost {
 
   /** The Agent a Channel thread routes to; an unpinned thread declares no ceiling, as before. */
   private async routedAgent(
-    conversationId: string | undefined
+    conversationId: string | undefined,
+    conversations: Pick<ConversationRepo, "findById"> = this.options.conversations
   ): Promise<{ agentId?: string; autonomy?: ChatAutonomy }> {
     if (conversationId === undefined) return {};
-    const conversation = await this.options.conversations.findById(conversationId);
+    const conversation = await conversations.findById(conversationId);
     const agentId = conversation?.agentId;
     if (agentId === undefined) return {};
     const autonomy = asChatAutonomy(

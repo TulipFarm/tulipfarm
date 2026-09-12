@@ -73,9 +73,9 @@ function Harness() {
   return (
     <div>
       <p>{chat.status}</p>
+      <p>{chat.error}</p>
       <p>{assistant?.parts.find((part) => part.kind === "text")?.text}</p>
       <p>{tool?.kind === "tool" ? `${tool.toolName}:${tool.outcome}` : ""}</p>
-      <p>{chat.error}</p>
     </div>
   );
 }
@@ -90,6 +90,7 @@ function PendingHarness() {
   return (
     <div>
       <p>{chat.status}</p>
+      <p>{chat.error}</p>
       <p>{assistant?.parts.find((part) => part.kind === "text")?.text}</p>
     </div>
   );
@@ -112,6 +113,41 @@ function RetryRestoreHarness() {
   return (
     <div>
       <p>{chat.status}</p>
+      <p>{chat.error}</p>
+      {chat.messages.map((message) => (
+        <p key={message.id}>
+          {message.parts.map((part) => (part.kind === "text" ? part.text : "")).join("")}
+        </p>
+      ))}
+    </div>
+  );
+}
+
+function PersistedAttemptHarness({ turn = initialTurn }: { turn?: ConversationTurn }) {
+  const chat = useChatStream({
+    initialConversationId: "conversation-1",
+    initialMessages: [
+      ...initialMessages,
+      {
+        id: "attempt-1",
+        role: "assistant",
+        parts: [{ kind: "text", text: "Already saved. " }],
+        sealed: false,
+        turnAttempt: {
+          runId: "run-1",
+          attempt: 1,
+          cursor: 7,
+          outcome: "waiting",
+          complete: false,
+        },
+      },
+    ],
+    initialTurn: turn,
+  });
+  return (
+    <div>
+      <p>{chat.status}</p>
+      <p>{chat.error}</p>
       {chat.messages.map((message) => (
         <p key={message.id}>
           {message.parts.map((part) => (part.kind === "text" ? part.text : "")).join("")}
@@ -244,6 +280,69 @@ test("restores the current running retry even when history ends with an older as
   expect(await screen.findByText("The retry worked")).toBeInTheDocument();
   expect(screen.getByText("The first attempt failed")).toBeInTheDocument();
   expect(fetchMock).toHaveBeenCalledOnce();
+});
+
+test("continues a persisted attempt strictly after its durable cursor", async () => {
+  const fetchMock = vi
+    .fn()
+    .mockResolvedValueOnce(
+      streamResponse(
+        'id: 8\nevent: text.delta\ndata: {"text":"and resumed."}\n\n' +
+          'id: 9\nevent: turn.finished\ndata: {"status":"succeeded","messageId":"attempt-1"}\n\n'
+      )
+    );
+  vi.stubGlobal("fetch", fetchMock);
+  const App = createRemixStub([{ path: "/", Component: PersistedAttemptHarness }]);
+
+  render(<App />);
+
+  expect(await screen.findByText("Already saved. and resumed.")).toBeInTheDocument();
+  expect(fetchMock.mock.calls[0]?.[0]).toContain("/api/v1/runs/run-1/events?after=7");
+});
+
+test("does not replay a failed Turn whose attempt history is already persisted", async () => {
+  const fetchMock = vi.fn();
+  vi.stubGlobal("fetch", fetchMock);
+  const App = createRemixStub([
+    {
+      path: "/",
+      Component: () => (
+        <PersistedAttemptHarness turn={{ id: "turn-1", runId: "run-1", status: "failed" }} />
+      ),
+    },
+  ]);
+
+  render(<App />);
+
+  expect(screen.getByText("Already saved.")).toBeInTheDocument();
+  expect(screen.getByText("The model request failed. Try again.")).toBeInTheDocument();
+  expect(fetchMock).not.toHaveBeenCalled();
+});
+
+test("never adopts another Turn while polling a pending submission", async () => {
+  const fetchMock = vi.fn().mockResolvedValueOnce(
+    Response.json({
+      id: "conversation-1",
+      userId: "user-1",
+      agentId: null,
+      model: null,
+      title: null,
+      starred: false,
+      createdAt: "2026-08-21T00:00:00.000Z",
+      updatedAt: "2026-08-21T00:00:01.000Z",
+      latestTurn: { id: "turn-2", runId: "run-2", status: "running" },
+    })
+  );
+  vi.stubGlobal("fetch", fetchMock);
+  const App = createRemixStub([{ path: "/", Component: PendingHarness }]);
+
+  render(<App />);
+
+  expect(
+    await screen.findByText("The response state changed while it was being restored.")
+  ).toBeInTheDocument();
+  expect(fetchMock).toHaveBeenCalledOnce();
+  expect(fetchMock.mock.calls[0]?.[0]).toContain("/api/v1/chats/conversation-1");
 });
 
 test("does not replay the same running Turn again for an equivalent loader object", async () => {

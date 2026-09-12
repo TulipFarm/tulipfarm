@@ -44,7 +44,11 @@ function Harness() {
       <p data-testid="tool-count">{tools.length}</p>
       <p data-testid="message-count">{chat.messages.length}</p>
       {chat.messages.map((message) => (
-        <p key={message.id}>
+        <p
+          key={message.id}
+          data-testid="chat-message"
+          data-tool-count={message.parts.filter((part) => part.kind === "tool").length}
+        >
           {message.parts.map((part) => (part.kind === "text" ? part.text : "")).join("")}
         </p>
       ))}
@@ -52,7 +56,7 @@ function Harness() {
   );
 }
 
-test("Retry resumes the Turn, keeping the tools the failed attempt already ran", async () => {
+test("Retry keeps the failed attempt's Tools separate from the new answer", async () => {
   const user = userEvent.setup();
   const fetchMock = vi
     .fn()
@@ -80,10 +84,13 @@ test("Retry resumes the Turn, keeping the tools the failed attempt already ran",
   await user.click(screen.getByRole("button", { name: "Retry" }));
   await screen.findByText("the routine is ready");
 
-  // A resumed attempt never re-emits the calls it is resuming from, so the only way the tool
-  // survives on screen is if the retry kept the failed attempt's message instead of popping it.
   expect(screen.getByTestId("tool-count")).toHaveTextContent("1");
-  expect(screen.getByTestId("message-count")).toHaveTextContent("2");
+  expect(screen.getByTestId("message-count")).toHaveTextContent("3");
+  const messages = screen.getAllByTestId("chat-message");
+  expect(messages[1]).toHaveAttribute("data-tool-count", "1");
+  expect(messages[1]).not.toHaveTextContent("the routine is ready");
+  expect(messages[2]).toHaveAttribute("data-tool-count", "0");
+  expect(messages[2]).toHaveTextContent("the routine is ready");
 
   expect(String(fetchMock.mock.calls[1]?.[0])).toMatch(/\/api\/v1\/chat\/turns\/t1\/retry$/);
 });

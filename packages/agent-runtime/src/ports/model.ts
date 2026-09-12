@@ -22,6 +22,14 @@ export interface ResolvedAttachment {
   readonly name: string;
   readonly data: Uint8Array;
   /**
+   * A File fetched after `file_read`, rather than one named by the Turn's own Message.
+   *
+   * The adapter appends only this marked kind when no persisted File part names it. Unmarked
+   * resolved Files still require a matching Message part, so an unrelated authorization result
+   * can never make bytes appear in a provider prompt.
+   */
+  readonly source?: "tool";
+  /**
    * The File's text, when something upstream could extract it.
    *
    * Carried rather than re-derived because `packages/files` owns the single definition of what a

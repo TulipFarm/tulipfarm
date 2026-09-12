@@ -1,3 +1,4 @@
+import { RunInterruptedError } from "@tulipfarm/run-kernel";
 import { ajv, textContent } from "@tulipfarm/schema";
 import type {
   ModelInvocationRequest,
@@ -27,6 +28,7 @@ import {
   isHandoffTool,
   isReportTool,
   REQUEST_INPUT_TOOL,
+  TerminalEventDeliveryError,
 } from "./diagnostics";
 import { askFor, distilledPayload, latestAsk } from "./distill";
 import { extractSkillName, narrowToolsToSkill, SKILL_TOOL } from "./narrowing";
@@ -91,6 +93,12 @@ export class AgentLoop {
   constructor(private readonly deps: AgentLoopDependencies) {}
 
   async run(input: AgentLoopInput): Promise<AgentLoopOutcome> {
+    const assertOwned = (): void => {
+      if (input.signal?.aborted === true) {
+        throw new RunInterruptedError(input.signal.reason);
+      }
+    };
+    assertOwned();
     const resumed = await this.deps.checkpoints.load(input.businessId, input.runId, input.stateId);
     const counters = {
       iterations: resumed?.iterations ?? 0,
@@ -116,28 +124,30 @@ export class AgentLoop {
     // The approved-but-never-executed call this Turn parked on, replayed before the model runs
     // again so the user's one approval performs the work once, with no re-planning round trip.
     let replay = recovered?.pendingCall;
+    // A model-produced batch is saved before its first dispatch. A crash therefore re-enters the
+    // same calls at the first result not durably recorded, with the provider's call ids unchanged.
+    let pendingBatch = recovered?.pendingBatch;
     // Files the Agent went back for mid-Turn. Held as names, not bytes: what the model is sent is
     // re-fetched every iteration, so authority is re-checked at assembly time rather than trusted
     // from the moment the Tool ran.
     let reread: readonly RereadFile[] = recovered?.rereadFiles ?? [];
     // A report cannot describe an effect that lands after it, so a reported Turn may not write.
     let reported = recovered?.reported ?? false;
-    // How often each Tool has answered with the same rejection this attempt. Deliberately not
-    // checkpointed: a resume replays the transcript, so the model can see the repetition itself,
-    // and `repairs` — which is persisted — still bounds what a resumed Turn may spend.
-    const rejectionCounts = new Map<string, number>();
-    // How often each Tool has already answered this exact question this attempt. Not checkpointed,
-    // for the same reason: a resume replays the transcript, so the repetition stays visible there.
-    const repeatCounts = new Map<string, number>();
+    // How often each Tool has answered with the same rejection. Persisted with the transcript so
+    // a process restart cannot buy another repair path for an unchanged rejection.
+    const rejectionCounts = new Map<string, number>(recovered?.rejectionCounts ?? []);
+    // How often each Tool has already answered this exact question. Persisted so side-effect
+    // suppression and cache annotations do not reset after a process restart.
+    const repeatCounts = new Map<string, number>(recovered?.repeatCounts ?? []);
     // The signature of the last iteration's whole proposed batch, and how many times running it
-    // has repeated exactly. Not checkpointed, for the same reason as `repeatCounts`: a resumed
-    // attempt rebuilds it from the calls it can see rather than trusting a stale count.
-    let lastCallBatchSignature: string | undefined;
-    let consecutiveIdenticalBatches = 0;
-    // The first successful result for each signature a `cacheable` Tool has answered this attempt,
-    // keyed the same way as `repeatCounts`. Not checkpointed: a resume replays the transcript, so
-    // a resumed Turn rebuilds this the same way a fresh one does, from the calls it can see.
-    const cachedResults = new Map<string, { callId: string; payload: Record<string, unknown> }>();
+    // has repeated exactly. Both survive resume so the loop ceiling cannot rewind after a crash.
+    let lastCallBatchSignature: string | undefined = recovered?.lastCallBatchSignature;
+    let consecutiveIdenticalBatches = recovered?.consecutiveIdenticalBatches ?? 0;
+    // The first successful result for each signature a `cacheable` Tool has answered, keyed the
+    // same way as `repeatCounts` and persisted so a resumed Turn does not re-run a cached read.
+    const cachedResults = new Map<string, { callId: string; payload: Record<string, unknown> }>(
+      recovered?.cachedResults ?? []
+    );
 
     const toolsForIteration = (): readonly ExposedTool[] =>
       narrowToolsToSkill(input.tools, activeSkillName, input.skillToolScopes);
@@ -145,18 +155,46 @@ export class AgentLoop {
     const dispatchWithCancellation = async (
       requests: readonly ToolDispatchRequest[]
     ): Promise<readonly ToolDispatchResult[] | undefined> => {
+      assertOwned();
       if (await this.deps.isCancelled()) return undefined;
-      const watch = watchForCancel(() => this.deps.isCancelled(), this.deps.cancelPollMs);
+      assertOwned();
+      const watch = watchForCancel(
+        () => this.deps.isCancelled(),
+        this.deps.cancelPollMs,
+        input.signal
+      );
       try {
         const results = await Promise.all(
           requests.map((request) => this.deps.tools.dispatch({ ...request, signal: watch.signal }))
         );
+        if (watch.interrupted()) throw new RunInterruptedError(input.signal?.reason);
         return watch.cancelled() || (await this.deps.isCancelled()) ? undefined : results;
+      } catch (error) {
+        if (watch.interrupted()) throw new RunInterruptedError(input.signal?.reason);
+        throw error;
       } finally {
         watch.stop();
       }
     };
 
+    const nextEvent = (
+      type: AgentLoopEventType,
+      extra: Partial<
+        Pick<
+          AgentLoopEvent,
+          "toolName" | "callId" | "outcome" | "text" | "textIndex" | "answeredFromCallId"
+        >
+      > = {}
+    ): AgentLoopEvent => ({
+      sequence: sequence + 1,
+      businessId: input.businessId,
+      runId: input.runId,
+      stateId: input.stateId,
+      type,
+      iteration: counters.iterations,
+      occurredAt: (this.deps.now?.() ?? new Date()).toISOString(),
+      ...extra,
+    });
     const emit = async (
       type: AgentLoopEventType,
       extra: Partial<
@@ -166,40 +204,62 @@ export class AgentLoop {
         >
       > = {}
     ): Promise<void> => {
-      sequence += 1;
-      await this.deps.events.append({
-        sequence,
-        businessId: input.businessId,
-        runId: input.runId,
-        stateId: input.stateId,
-        type,
-        iteration: counters.iterations,
-        occurredAt: (this.deps.now?.() ?? new Date()).toISOString(),
-        ...extra,
-      });
+      const event = nextEvent(type, extra);
+      sequence = event.sequence;
+      assertOwned();
+      await this.deps.events.append(event);
+      assertOwned();
     };
 
+    if (recovered?.terminal !== undefined) {
+      try {
+        assertOwned();
+        await this.deps.events.append(recovered.terminal.event);
+        assertOwned();
+      } catch (error) {
+        assertOwned();
+        throw new TerminalEventDeliveryError(error);
+      }
+      return recovered.terminal.outcome;
+    }
+    if (input.resumeOnly === true) {
+      throw new Error("terminal loop checkpoint is missing");
+    }
+
     const resumeState = (
-      pendingCall?: AgentLoopResumeState["pendingCall"]
+      pendingCall?: AgentLoopResumeState["pendingCall"],
+      unfinishedBatch?: AgentLoopResumeState["pendingBatch"]
     ): AgentLoopResumeState => ({
       messages: messages.slice(input.messages.length),
+      ...(recovered?.retryAttempt === undefined ? {} : { retryAttempt: recovered.retryAttempt }),
       ...(pendingCall === undefined ? {} : { pendingCall }),
+      ...(unfinishedBatch === undefined ? {} : { pendingBatch: unfinishedBatch }),
       ...(activeSkillName === undefined ? {} : { activeSkillName }),
       ...(reported ? { reported } : {}),
       ...(reread.length === 0 ? {} : { rereadFiles: reread }),
+      ...(rejectionCounts.size === 0 ? {} : { rejectionCounts: [...rejectionCounts] }),
+      ...(repeatCounts.size === 0 ? {} : { repeatCounts: [...repeatCounts] }),
+      ...(cachedResults.size === 0 ? {} : { cachedResults: [...cachedResults] }),
+      ...(lastCallBatchSignature === undefined ? {} : { lastCallBatchSignature }),
+      ...(consecutiveIdenticalBatches === 0 ? {} : { consecutiveIdenticalBatches }),
       sequence,
       textIndex,
     });
 
-    const checkpoint = async (pendingCall?: AgentLoopResumeState["pendingCall"]): Promise<void> => {
+    const checkpoint = async (
+      pendingCall?: AgentLoopResumeState["pendingCall"],
+      unfinishedBatch: AgentLoopResumeState["pendingBatch"] | undefined = pendingBatch
+    ): Promise<void> => {
       const next: AgentLoopCheckpoint = {
         businessId: input.businessId,
         runId: input.runId,
         stateId: input.stateId,
         ...counters,
-        resume: resumeState(pendingCall),
+        resume: resumeState(pendingCall, unfinishedBatch),
       };
-      await this.deps.checkpoints.save(next);
+      assertOwned();
+      await this.deps.checkpoints.save(next, input.checkpointFence);
+      assertOwned();
     };
 
     /**
@@ -216,14 +276,32 @@ export class AgentLoop {
       type: AgentLoopEventType
     ): Promise<AgentLoopOutcome> => {
       const retryable = outcome.status === "failed" && isRetryableFailure(outcome.reason);
-      await this.deps.checkpoints.save({
-        businessId: input.businessId,
-        runId: input.runId,
-        stateId: input.stateId,
-        ...counters,
-        ...(retryable ? { resume: resumeState() } : {}),
-      });
-      await emit(type);
+      const event = nextEvent(type);
+      await this.deps.checkpoints.save(
+        {
+          businessId: input.businessId,
+          runId: input.runId,
+          stateId: input.stateId,
+          ...counters,
+          resume: {
+            ...(retryable ? resumeState() : { messages: [] }),
+            ...(retryable ? { retryable: true as const } : {}),
+            terminal: { outcome, event },
+            sequence: event.sequence,
+            textIndex,
+          },
+        },
+        input.checkpointFence
+      );
+      sequence = event.sequence;
+      try {
+        assertOwned();
+        await this.deps.events.append(event);
+        assertOwned();
+      } catch (error) {
+        assertOwned();
+        throw new TerminalEventDeliveryError(error);
+      }
       return outcome;
     };
 
@@ -256,6 +334,7 @@ export class AgentLoop {
       // completion and is caught by these checks instead. Both have to end the Turn the same way,
       // or a stop would work only against the adapters that chose to implement it.
       const stopped = () => {
+        if (watch.interrupted()) throw new RunInterruptedError(input.signal?.reason);
         if (watch.cancelled()) throw new TurnCancelled();
       };
 
@@ -313,12 +392,18 @@ export class AgentLoop {
      */
     const dispatchCalls = async (
       calls: readonly NormalizedToolCall[],
-      replayed: boolean
+      replayed: boolean,
+      startIndex = 0,
+      durableBatch = true
     ): Promise<AgentLoopOutcome | undefined> => {
       // Recorded before dispatch so the transcript carries the model's own proposed call
       // alongside the result it provoked — without this, a validation error arrives as an
       // unattributed message and the model cannot tell it is feedback on its own last action.
       if (!replayed) messages.push(assistantToolCallMessage(calls));
+      if (durableBatch && !replayed) {
+        pendingBatch = { calls, nextCallIndex: 0 };
+        await checkpoint(undefined, pendingBatch);
+      }
       let park:
         | { kind: "approval"; approvalId: string; call: NormalizedToolCall }
         | { kind: "child"; childRunId: string; waitId: string; call: NormalizedToolCall }
@@ -328,11 +413,11 @@ export class AgentLoop {
       // sequential path stops *at* the parked call, the concurrent one has already advanced past
       // the whole batch it is in — so any index arithmetic at park time would be wrong for one of
       // them.
-      const answered = new Set<string>();
+      const answered = new Set(calls.slice(0, startIndex).map((call) => call.callId));
       // Which of the declared calls actually reached the dispatcher. A call that ran and a call
       // that never ran need different answers at park time: the first may have left an approval
       // pending at the broker, so telling the model to re-issue it would ask for a second one.
-      const dispatchedIds = new Set<string>();
+      const dispatchedIds = new Set(calls.slice(0, startIndex).map((call) => call.callId));
 
       /** Answers one declared call, and records that it now has an answer. */
       const answer = (callId: string, payload: Record<string, unknown>): void => {
@@ -422,7 +507,7 @@ export class AgentLoop {
         }
 
         if (dispatched.status === "invalid_arguments") {
-          const signature = `${call.name} ${dispatched.reason}`;
+          const signature = JSON.stringify([call.name, dispatched.reason]);
           const seen = (rejectionCounts.get(signature) ?? 0) + 1;
           rejectionCounts.set(signature, seen);
           // A rejection the model has now provoked past the limit is not tracking its arguments:
@@ -536,7 +621,13 @@ export class AgentLoop {
         return { kind: "continue" };
       };
 
-      let index = 0;
+      let index = startIndex;
+      const advance = async (nextCallIndex: number): Promise<void> => {
+        index = nextCallIndex;
+        if (!durableBatch) return;
+        pendingBatch = { calls, nextCallIndex };
+        await checkpoint(undefined, pendingBatch);
+      };
       while (index < calls.length) {
         const call = calls[index];
         const tool = exposed.get(call.name);
@@ -549,7 +640,7 @@ export class AgentLoop {
           const outcome = "tool_not_available";
           answer(call.callId, { error: outcome });
           await emit("tool_call_rejected", { toolName: call.name, callId: call.callId, outcome });
-          index += 1;
+          await advance(index + 1);
           continue;
         }
 
@@ -573,7 +664,7 @@ export class AgentLoop {
               answeredFromCallId: cached.callId,
             });
             answer(call.callId, { ...cached.payload, servedFromCache: servedFromCache(repeats) });
-            index += 1;
+            await advance(index + 1);
             continue;
           }
         }
@@ -600,7 +691,7 @@ export class AgentLoop {
                 callId: call.callId,
                 outcome: "repeated_side_effect",
               });
-              index += 1;
+              await advance(index + 1);
               continue;
             }
           }
@@ -659,7 +750,7 @@ export class AgentLoop {
             break;
           }
           if (outcome.kind === "input_required") return askedForInput(outcome.call.callId);
-          index += 1;
+          await advance(index + 1);
           continue;
         }
 
@@ -749,7 +840,7 @@ export class AgentLoop {
         const dispatched = resultOf.map((at) => distinct[at]);
         counters.toolCalls += runBatch.length;
         for (const batched of runBatch) dispatchedIds.add(batched.callId);
-        index += runBatch.length;
+        const nextCallIndex = index + runBatch.length;
         if (
           dispatched.some((result) => result?.status === "failed" && result.code === "cancelled")
         ) {
@@ -819,6 +910,7 @@ export class AgentLoop {
                 };
           break;
         }
+        await advance(nextCallIndex);
         // A batch clipped by budget leaves its remainder at `index`; the next pass re-enters this
         // branch, forms a fresh (now over-budget) peek, and fails via `available <= 0` above
         // rather than ever dispatching past the limit.
@@ -879,12 +971,13 @@ export class AgentLoop {
         // Counters and the transcript are made durable together, so the resumed Turn is charged
         // for exactly what it can still see.
         counters.toolCalls -= 1;
-        await checkpoint(park.call);
+        pendingBatch = undefined;
+        await checkpoint(park.call, undefined);
         await emit(park.kind === "approval" ? "awaiting_approval" : "awaiting_child");
         // Saved again for one reason only: to carry the sequence that event just consumed, so the
         // resumed attempt numbers its events past this one instead of colliding with it. The save
         // above stays first, because a crash between the two must still find durable counters.
-        await checkpoint(park.call);
+        await checkpoint(park.call, undefined);
         return park.kind === "approval"
           ? {
               status: "awaiting_approval",
@@ -902,7 +995,8 @@ export class AgentLoop {
       }
       // Checkpointed after every dispatched batch, so a Turn that dies here resumes with the
       // Tool results it already paid for rather than re-running them.
-      await checkpoint();
+      pendingBatch = undefined;
+      await checkpoint(undefined, undefined);
       return undefined;
     };
 
@@ -912,9 +1006,11 @@ export class AgentLoop {
       // the budget is charged before the model is called — a charge after the call would let a
       // Run spend past an exhausted budget. `counters.iterations` only advances once all three
       // have passed, so a resumed checkpoint never double-counts a refused iteration.
+      assertOwned();
       if (await this.deps.isCancelled()) {
         return finish({ status: "cancelled", ...counters }, "cancelled");
       }
+      assertOwned();
 
       // A replayed approval is the tail of an iteration that already ran and was already charged;
       // it re-enters dispatch without a model call, so it takes no iteration, no budget and no
@@ -922,7 +1018,18 @@ export class AgentLoop {
       const replayed = replay;
       if (replayed !== undefined) {
         replay = undefined;
-        const outcome = await dispatchCalls([replayed], true);
+        const outcome = await dispatchCalls([replayed], true, 0, false);
+        if (outcome !== undefined) return outcome;
+        continue;
+      }
+
+      const unfinishedBatch = pendingBatch;
+      if (unfinishedBatch !== undefined) {
+        const outcome = await dispatchCalls(
+          unfinishedBatch.calls,
+          true,
+          unfinishedBatch.nextCallIndex
+        );
         if (outcome !== undefined) return outcome;
         continue;
       }
@@ -941,6 +1048,9 @@ export class AgentLoop {
 
       counters.iterations += 1;
       await emit("iteration_started");
+      // The model request is spend too. Persist its counter and event position before crossing the
+      // provider boundary, so a process loss cannot buy another iteration or reuse the sequence.
+      await checkpoint();
 
       const attachments = await resolveIterationAttachments(
         input.attachments ?? [],
@@ -948,7 +1058,11 @@ export class AgentLoop {
         this.deps.attachments,
         input.runId
       );
-      const watch = watchForCancel(() => this.deps.isCancelled(), this.deps.cancelPollMs);
+      const watch = watchForCancel(
+        () => this.deps.isCancelled(),
+        this.deps.cancelPollMs,
+        input.signal
+      );
       const request: ModelInvocationRequest = {
         requestId: `${input.runId}:${input.stateId}:${counters.iterations}`,
         modelProfileId: input.modelProfileId,
@@ -970,6 +1084,7 @@ export class AgentLoop {
         // happened is not: the caller must reconcile it, so it escapes rather than being recorded
         // as a model failure through the very sink that just failed.
         if (error instanceof EventSinkFailure) throw error.cause;
+        if (watch.interrupted()) throw new RunInterruptedError(input.signal?.reason);
         // A stop is something the participant asked for, not something that went wrong. Recording
         // it as a model failure would put a red Turn in front of them for doing what the button
         // offered, and would charge a retry budget against it.

@@ -4,6 +4,7 @@ export type EffectState =
   | "proposed"
   | "denied"
   | "awaiting_approval"
+  | "awaiting_child"
   | "authorized"
   | "dispatched"
   | "confirmed"

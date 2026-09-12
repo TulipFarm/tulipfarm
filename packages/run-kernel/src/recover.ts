@@ -10,6 +10,8 @@ export interface RecoveryEffect {
   readonly runId: string;
   readonly stateId: string;
   readonly state: string;
+  readonly outputStored: boolean;
+  readonly output?: unknown;
 }
 
 export interface RecoveryEffectReader {
@@ -57,9 +59,34 @@ const REPLAY_SAFE_EFFECT_STATES: ReadonlySet<string> = new Set([
 
 const TERMINAL_RUN_STATUSES: ReadonlySet<string> = new Set(["succeeded", "failed", "cancelled"]);
 
+function hasChildReplayDescriptor(effect: RecoveryEffect): boolean {
+  if (!effect.outputStored || effect.output === null || typeof effect.output !== "object") {
+    return false;
+  }
+  const output = effect.output as Record<string, unknown>;
+  return (
+    output.kind === "child_park" &&
+    typeof output.childRunId === "string" &&
+    output.childRunId.length > 0 &&
+    typeof output.waitId === "string" &&
+    output.waitId.length > 0
+  );
+}
+
 function effectsNeedReconciliation(effects: readonly RecoveryEffect[]): boolean {
   // Unknown states stay parked. Recovery must prove replay safety rather than infer it.
-  return effects.some((effect) => !REPLAY_SAFE_EFFECT_STATES.has(effect.state));
+  return effects.some((effect) => {
+    if (effect.state === "authorized") {
+      return effect.outputStored && !hasChildReplayDescriptor(effect);
+    }
+    if (effect.state === "awaiting_child" || effect.state === "dispatched") {
+      return !hasChildReplayDescriptor(effect);
+    }
+    return (
+      !REPLAY_SAFE_EFFECT_STATES.has(effect.state) &&
+      !(effect.state === "confirmed" && effect.outputStored)
+    );
+  });
 }
 
 /** Requeues abandoned work only when every durable effect has a replay-safe outcome. */

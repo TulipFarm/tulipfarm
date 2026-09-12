@@ -128,12 +128,14 @@ describe("participant-stream content filtering", () => {
       try {
         const leaked = await runPersistedTurn({ evalCase, soul, binding: scriptedBinding() });
         expect(leaked.participantText).toContain("4111 1111 1111 1111");
-        expect(leaked.answer).not.toContain("4111 1111 1111 1111");
+        // Once unsafe prose was published, durable history must preserve it. The output guard's
+        // replacement cannot rewrite what the participant already saw.
+        expect(leaked.answer).toContain("4111 1111 1111 1111");
         expect(
           score(leaked)
             .filter((e) => !e.passed)
             .map((e) => e.expectation.kind)
-        ).toEqual(["run_event_text_omits"]);
+        ).toEqual(["run_event_text_omits", "output_omits"]);
       } finally {
         oldPublication.mockRestore();
       }
@@ -387,6 +389,7 @@ describe("folding a journey into one result", () => {
     spend: NO_SPEND,
     events: [],
     participantText: "",
+    assistantMessages: [],
     guardrails: [],
     toolCalls: [],
     soulCommits: [],

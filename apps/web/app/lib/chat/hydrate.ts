@@ -76,7 +76,10 @@ function persistedToolCallFrom(value: unknown): PersistedToolCall | undefined {
   };
 }
 
-function toolPartsFromMetadata(metadata: Record<string, unknown> | undefined): TimelinePart[] {
+function toolPartsFromMetadata(
+  metadata: Record<string, unknown> | undefined,
+  turnAttempt: ChatMessage["turnAttempt"]
+): TimelinePart[] {
   const rawToolCalls = metadata?.toolCalls;
   if (!Array.isArray(rawToolCalls)) return [];
   return rawToolCalls.flatMap((raw): TimelinePart[] => {
@@ -88,13 +91,17 @@ function toolPartsFromMetadata(metadata: Record<string, unknown> | undefined): T
       ...(tool.errorCode === undefined ? {} : { errorCode: tool.errorCode }),
       ...(tool.batchId === undefined ? {} : { batchId: tool.batchId }),
     };
+    const interrupted =
+      tool.outcome === undefined &&
+      turnAttempt?.complete === true &&
+      (turnAttempt.outcome === "failed" || turnAttempt.outcome === "cancelled");
     return [
       {
         kind: "tool",
         toolCallId: tool.callId,
         toolName: tool.name,
         args: tool.argsDigest === undefined ? {} : { argsDigest: tool.argsDigest },
-        status: "done",
+        status: interrupted ? "interrupted" : "done",
         ...(tool.argsPreview === undefined ? {} : { argsPreview: tool.argsPreview }),
         ...(tool.resultPreview === undefined ? {} : { resultPreview: tool.resultPreview }),
         ...(Object.keys(meta).length === 0 ? {} : { meta }),
@@ -112,6 +119,76 @@ function toolPartsFromMetadata(metadata: Record<string, unknown> | undefined): T
   });
 }
 
+function surfacePartsFromMetadata(metadata: Record<string, unknown> | undefined): TimelinePart[] {
+  const rawSurfaces = metadata?.surfaces;
+  if (!Array.isArray(rawSurfaces)) return [];
+  return rawSurfaces.flatMap((raw): TimelinePart[] => {
+    if (
+      !isRecord(raw) ||
+      typeof raw.artifactId !== "string" ||
+      typeof raw.revision !== "number" ||
+      !Number.isInteger(raw.revision) ||
+      raw.revision < 1
+    ) {
+      return [];
+    }
+    return [{ kind: "surface", artifactId: raw.artifactId, revision: raw.revision }];
+  });
+}
+
+function turnAttemptFrom(
+  metadata: Record<string, unknown> | undefined
+): ChatMessage["turnAttempt"] {
+  const value = metadata?.turnAttempt;
+  if (
+    !isRecord(value) ||
+    typeof value.runId !== "string" ||
+    typeof value.attempt !== "number" ||
+    typeof value.cursor !== "number" ||
+    typeof value.complete !== "boolean" ||
+    !(
+      value.outcome === "active" ||
+      value.outcome === "waiting" ||
+      value.outcome === "succeeded" ||
+      value.outcome === "failed" ||
+      value.outcome === "cancelled"
+    )
+  ) {
+    return undefined;
+  }
+  const wait = isRecord(value.wait) ? value.wait : undefined;
+  const parsedWait =
+    wait?.kind === "approval" &&
+    typeof wait.waitId === "string" &&
+    typeof wait.approvalId === "string" &&
+    typeof wait.callId === "string"
+      ? {
+          kind: "approval" as const,
+          waitId: wait.waitId,
+          approvalId: wait.approvalId,
+          callId: wait.callId,
+        }
+      : wait?.kind === "child" &&
+          typeof wait.waitId === "string" &&
+          typeof wait.childRunId === "string" &&
+          typeof wait.callId === "string"
+        ? {
+            kind: "child" as const,
+            waitId: wait.waitId,
+            childRunId: wait.childRunId,
+            callId: wait.callId,
+          }
+        : undefined;
+  return {
+    runId: value.runId,
+    attempt: value.attempt,
+    cursor: value.cursor,
+    outcome: value.outcome,
+    complete: value.complete,
+    ...(parsedWait === undefined ? {} : { wait: parsedWait }),
+  };
+}
+
 // Pull the SourceRef[] out of a persisted cite_sources tool-result (`{ data: { sources } }`), so a
 // restored transcript can rebuild its citation chips. Defensive — unknown/legacy shapes yield [].
 function sourcesFromResult(result: unknown): SourceRef[] {
@@ -125,14 +202,20 @@ function sourcesFromResult(result: unknown): SourceRef[] {
 function mergeToolResults(assistant: ChatMessage, content: WireMessagePart[]): void {
   for (const part of content) {
     if (part.type === "surface") {
-      assistant.parts = [
-        ...assistant.parts.filter((existing) => existing.kind !== "text"),
-        {
+      if (
+        !assistant.parts.some(
+          (existing) =>
+            existing.kind === "surface" &&
+            existing.artifactId === part.artifactId &&
+            existing.revision === part.revision
+        )
+      ) {
+        assistant.parts.push({
           kind: "surface",
           artifactId: part.artifactId,
           revision: part.revision,
-        },
-      ];
+        });
+      }
       continue;
     }
     if (part.type === "surface-unavailable") {
@@ -191,14 +274,12 @@ export function messagesToTimeline(
 ): ChatMessage[] {
   const out: ChatMessage[] = [];
   let lastAssistant: ChatMessage | undefined;
-  let surfaceOnly = false;
   for (const doc of docs) {
     if (doc.role === "user") {
       out.push({ id: newId(), role: "user", parts: userParts(doc.content), sealed: true });
       lastAssistant = undefined;
-      surfaceOnly = false;
     } else if (doc.role === "assistant") {
-      if (surfaceOnly) continue;
+      const turnAttempt = turnAttemptFrom(doc.metadata);
       const message: ChatMessage = {
         id: newId(),
         serverId: doc._id,
@@ -208,17 +289,34 @@ export function messagesToTimeline(
         // not on the wire. A restored transcript therefore groups the whole run as one block even
         // when the live one split it around a preamble. Accepted — restoring the interleaving means
         // persisting ordered parts instead of a string, which the LLM history rebuild also reads.
-        parts: [...toolPartsFromMetadata(doc.metadata), ...assistantParts(doc.content)],
-        sealed: true,
+        parts: [
+          ...toolPartsFromMetadata(doc.metadata, turnAttempt),
+          ...assistantParts(doc.content),
+          ...surfacePartsFromMetadata(doc.metadata),
+        ],
+        sealed: turnAttempt?.complete ?? true,
         feedback: votes?.get(doc._id),
+        ...(turnAttempt === undefined ? {} : { turnAttempt }),
       };
+      if (turnAttempt !== undefined && !turnAttempt.complete) {
+        for (const part of message.parts) {
+          if (part.kind === "tool" && part.outcome === undefined) part.status = "running";
+        }
+      }
+      const pendingApproval = turnAttempt?.wait?.kind === "approval" ? turnAttempt.wait : undefined;
+      if (pendingApproval !== undefined) {
+        const tool = message.parts.find(
+          (part) => part.kind === "tool" && part.toolCallId === pendingApproval.callId
+        );
+        if (tool?.kind === "tool") {
+          tool.status = "running";
+          tool.approval = { approvalId: pendingApproval.approvalId, status: "pending" };
+        }
+      }
       out.push(message);
       lastAssistant = message;
     } else if (doc.role === "tool" && lastAssistant && Array.isArray(doc.content)) {
       mergeToolResults(lastAssistant, doc.content);
-      surfaceOnly = doc.content.some(
-        (part) => part.type === "surface" || part.type === "surface-unavailable"
-      );
     }
     // system / summary / orphan tool rows are not part of the rendered timeline.
   }

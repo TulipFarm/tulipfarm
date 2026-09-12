@@ -1,3 +1,4 @@
+import { RunInterruptedError } from "@tulipfarm/run-kernel";
 import { describe, expect, it } from "vitest";
 import {
   ConversationTurnCompleter,
@@ -16,6 +17,8 @@ class FakeStore implements TurnCompletionStore {
   }[] = [];
   /** Every write states the Run it acts under; a store proving its authority needs it. */
   runIds: string[] = [];
+  appendStatus: "recorded" | "replayed" | "stale" | "ownership_lost" = "recorded";
+  completionStatus: "recorded" | "replayed" | "stale" | "ownership_lost" = "recorded";
 
   async findCompletion(ref: TurnCompletionRef): Promise<TurnCompletionRecord | undefined> {
     this.runIds.push(ref.runId);
@@ -26,10 +29,13 @@ class FakeStore implements TurnCompletionStore {
 
   async appendAssistantMessage(
     input: TurnCompletionRef & { content: string }
-  ): Promise<{ messageId: string }> {
+  ): ReturnType<TurnCompletionStore["appendAssistantMessage"]> {
     this.runIds.push(input.runId);
+    if (this.appendStatus === "stale" || this.appendStatus === "ownership_lost") {
+      return { status: this.appendStatus, messageId: null };
+    }
     this.appended.push({ turnId: input.turnId, attempt: input.attempt, content: input.content });
-    return { messageId: `msg-${this.appended.length}` };
+    return { status: this.appendStatus, messageId: `msg-${this.appended.length}` };
   }
 
   async completeTurn(
@@ -40,8 +46,9 @@ class FakeStore implements TurnCompletionStore {
       conversationId?: string;
       surfaces?: readonly { artifactId: string; revision: number }[];
     }
-  ): Promise<void> {
+  ): ReturnType<TurnCompletionStore["completeTurn"]> {
     this.runIds.push(input.runId);
+    if (this.completionStatus === "stale") return { status: "stale" };
     if (input.surfaces?.length) {
       this.surfaceMessages.push({
         conversationId: input.conversationId ?? "",
@@ -60,12 +67,14 @@ class FakeStore implements TurnCompletionStore {
       status: input.status,
       messageId: input.messageId,
     });
+    return { status: this.completionStatus };
   }
 }
 
 const request = {
   businessId: "biz-1",
   runId: "run-1",
+  leaseGeneration: 1,
   conversationId: "conv-1",
   turnId: "turn-1",
   attempt: 1,
@@ -73,6 +82,19 @@ const request = {
 };
 
 describe("ConversationTurnCompleter", () => {
+  it("treats a lease-fenced Message write as ownership interruption", async () => {
+    const store = new FakeStore();
+    store.appendStatus = "ownership_lost";
+
+    await expect(
+      new ConversationTurnCompleter({ store }).complete({
+        ...request,
+        outcome: { status: "succeeded", text: "late answer" },
+      })
+    ).rejects.toBeInstanceOf(RunInterruptedError);
+    expect(store.completed).toEqual([]);
+  });
+
   it("appends the assistant Message and completes the Turn at the final cursor", async () => {
     const store = new FakeStore();
     const completer = new ConversationTurnCompleter({ store });
@@ -103,6 +125,47 @@ describe("ConversationTurnCompleter", () => {
     expect(second).toEqual(first);
     expect(store.appended).toHaveLength(1);
     expect(store.completed).toHaveLength(1);
+  });
+
+  it("treats a locked Message write lost to a retry as superseded", async () => {
+    const store = new FakeStore();
+    store.appendStatus = "stale";
+    const completer = new ConversationTurnCompleter({ store });
+
+    await expect(
+      completer.complete({
+        ...request,
+        outcome: { status: "succeeded", text: "late answer" },
+      })
+    ).resolves.toEqual({ status: "stale" });
+    expect(store.completed).toEqual([]);
+  });
+
+  it("treats a locked completion lost to a retry as superseded", async () => {
+    const store = new FakeStore();
+    store.completionStatus = "stale";
+    const completer = new ConversationTurnCompleter({ store });
+
+    await expect(
+      completer.complete({
+        ...request,
+        outcome: { status: "succeeded", text: "late answer" },
+      })
+    ).resolves.toEqual({ status: "stale" });
+  });
+
+  it("keeps an idempotently replayed completion successful", async () => {
+    const store = new FakeStore();
+    store.appendStatus = "replayed";
+    store.completionStatus = "replayed";
+    const completer = new ConversationTurnCompleter({ store });
+
+    await expect(
+      completer.complete({
+        ...request,
+        outcome: { status: "succeeded", text: "same answer" },
+      })
+    ).resolves.toEqual({ status: "succeeded", messageId: "msg-1" });
   });
 
   it("fails the Turn without inventing an assistant Message", async () => {
@@ -182,7 +245,7 @@ describe("ConversationTurnCompleter", () => {
     expect(result).toEqual({ status: "succeeded", messageId: "msg-1" });
   });
 
-  it("writes no Message when a Turn asked for input having said and done nothing", async () => {
+  it("writes a Message when a Surface is the whole reply", async () => {
     const store = new FakeStore();
     const completer = new ConversationTurnCompleter({ store });
 
@@ -193,9 +256,9 @@ describe("ConversationTurnCompleter", () => {
     });
 
     // The Surface is still linked: it is the question, and it is the whole point of the Turn.
-    expect(store.appended).toEqual([]);
+    expect(store.appended).toEqual([{ turnId: "turn-1", attempt: 1, content: "" }]);
     expect(store.surfaceMessages).toHaveLength(1);
-    expect(result).toEqual({ status: "succeeded", messageId: null });
+    expect(result).toEqual({ status: "succeeded", messageId: "msg-1" });
   });
 
   it("leaves a waiting Turn open so the Approval can resume it", async () => {

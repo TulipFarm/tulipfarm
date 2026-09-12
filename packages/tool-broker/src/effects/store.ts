@@ -35,7 +35,7 @@ export const EFFECT_STORAGE_STATEMENTS: readonly string[] = [
     guardrail_revision     text NOT NULL,
     approval_id            text,
     state                  text NOT NULL CHECK (state IN (
-      'proposed', 'denied', 'awaiting_approval', 'authorized', 'dispatched', 'confirmed',
+      'proposed', 'denied', 'awaiting_approval', 'awaiting_child', 'authorized', 'dispatched', 'confirmed',
       'failed', 'ambiguous', 'compensating', 'compensated', 'reconciliation_required'
     )),
     parent_effect_id       uuid,
@@ -76,6 +76,15 @@ export const EFFECT_OUTPUT_STORAGE_STATEMENTS: readonly string[] = [
   "ALTER TABLE effect_records ADD COLUMN IF NOT EXISTS output_stored boolean NOT NULL DEFAULT false",
 ];
 
+export const EFFECT_AWAITING_CHILD_STORAGE_STATEMENTS: readonly string[] = [
+  "ALTER TABLE effect_records DROP CONSTRAINT IF EXISTS effect_records_state_check",
+  `ALTER TABLE effect_records ADD CONSTRAINT effect_records_state_check CHECK (state IN (
+    'proposed', 'denied', 'awaiting_approval', 'awaiting_child', 'authorized', 'dispatched',
+    'confirmed', 'failed', 'ambiguous', 'compensating', 'compensated',
+    'reconciliation_required'
+  ))`,
+];
+
 export interface EffectStore {
   reserve(input: ReserveEffectInput): Promise<ReserveEffectResult>;
   reserveCompensation(
@@ -86,6 +95,11 @@ export interface EffectStore {
   list(businessId: string): Promise<EffectRecord[]>;
   transition(input: TransitionEffectInput): Promise<EffectRecord>;
   beginAttempt(businessId: string, effectId: string, startedAt: string): Promise<EffectAttempt>;
+  resumeChildAttempt(
+    businessId: string,
+    effectId: string,
+    startedAt: string
+  ): Promise<EffectAttempt>;
   finishAttempt(input: FinishEffectAttemptInput): Promise<EffectRecord>;
   listAttempts(businessId: string, effectId: string): Promise<EffectAttempt[]>;
 }
@@ -210,6 +224,35 @@ export class MemoryEffectStore implements EffectStore {
       state: "dispatched" as const,
       startedAt,
     });
+    this.attempts.set(key, [...existing, attempt]);
+    return attempt;
+  }
+
+  async resumeChildAttempt(
+    businessId: string,
+    effectId: string,
+    startedAt: string
+  ): Promise<EffectAttempt> {
+    const record = await this.get(businessId, effectId);
+    if (record === undefined) throw new EffectLedgerError("effect_not_found", effectId);
+    const key = this.key(businessId, record.idempotencyKey);
+    const existing = this.attempts.get(key) ?? [];
+    if (record.state === "dispatched") {
+      const attempt = [...existing].reverse().find((candidate) => candidate.state === "dispatched");
+      if (attempt === undefined) throw new EffectLedgerError("attempt_not_found", effectId);
+      return attempt;
+    }
+    if (record.state !== "awaiting_child" && record.state !== "authorized") {
+      throw new EffectLedgerError("effect_state_conflict", effectId);
+    }
+    const attempt = Object.freeze({
+      businessId,
+      effectId,
+      attempt: existing.length + 1,
+      state: "dispatched" as const,
+      startedAt,
+    });
+    this.records.set(key, Object.freeze({ ...record, state: "dispatched", updatedAt: startedAt }));
     this.attempts.set(key, [...existing, attempt]);
     return attempt;
   }
@@ -502,6 +545,60 @@ export class PgEffectStore implements EffectStore {
         throw new EffectLedgerError("effect_not_found", effectId);
       }
       if (current.rows[0].state !== "authorized") {
+        throw new EffectLedgerError("effect_state_conflict", effectId);
+      }
+      const number = await transaction.query<{ attempt: number }>(
+        `SELECT COALESCE(MAX(attempt), 0) + 1 AS attempt FROM effect_attempts
+          WHERE business_id = $1 AND effect_id = $2`,
+        [businessId, effectId]
+      );
+      const attemptNumber = Number(number.rows[0]?.attempt ?? 1);
+      const inserted = await transaction.query<EffectAttemptRow>(
+        `INSERT INTO effect_attempts (
+           business_id, effect_id, attempt, state, started_at
+         ) VALUES ($1, $2, $3, 'dispatched', $4)
+         RETURNING *`,
+        [businessId, effectId, attemptNumber, startedAt]
+      );
+      await transaction.query(
+        `UPDATE effect_records SET state = 'dispatched', updated_at = $3
+          WHERE business_id = $1 AND effect_id = $2`,
+        [businessId, effectId, startedAt]
+      );
+      const attempt = inserted.rows[0];
+      if (attempt === undefined) {
+        throw new EffectLedgerError("attempt_not_found", String(attemptNumber));
+      }
+      return attemptFromRow(attempt);
+    });
+  }
+
+  resumeChildAttempt(
+    businessId: string,
+    effectId: string,
+    startedAt: string
+  ): Promise<EffectAttempt> {
+    return this.transactions.withTransaction(async (transaction) => {
+      const current = await transaction.query<{ state: EffectRecord["state"] }>(
+        `SELECT state FROM effect_records
+          WHERE business_id = $1 AND effect_id = $2 FOR UPDATE`,
+        [businessId, effectId]
+      );
+      const state = current.rows[0]?.state;
+      if (state === undefined) throw new EffectLedgerError("effect_not_found", effectId);
+      if (state === "dispatched") {
+        const attempt = await transaction.query<EffectAttemptRow>(
+          `SELECT * FROM effect_attempts
+            WHERE business_id = $1 AND effect_id = $2 AND state = 'dispatched'
+            ORDER BY attempt DESC
+            LIMIT 1`,
+          [businessId, effectId]
+        );
+        const existing = attempt.rows[0];
+        if (existing === undefined) throw new EffectLedgerError("attempt_not_found", effectId);
+        return attemptFromRow(existing);
+      }
+      if (state !== "awaiting_child" && state !== "authorized") {
         throw new EffectLedgerError("effect_state_conflict", effectId);
       }
       const number = await transaction.query<{ attempt: number }>(

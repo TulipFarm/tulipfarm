@@ -16,6 +16,18 @@ export interface TurnIdentity {
   readonly turnId: string;
   readonly conversationId: string;
   readonly attempt: number;
+  readonly history?: {
+    readonly text: string;
+    readonly toolCalls: readonly {
+      readonly callId: string;
+      readonly name: string;
+      readonly outcome?: "ok" | "error";
+    }[];
+    readonly surfaces: readonly { readonly artifactId: string; readonly revision: number }[];
+    readonly cursor: number;
+    readonly outcome: "active";
+    readonly complete: false;
+  };
 }
 
 /** Every method the Chat executor calls on its `host`, minus Tool dispatch. */
@@ -26,7 +38,7 @@ export interface EvalTurnHost {
     input: TurnCompletionRef & {
       conversationId: string;
       content: string;
-      metadata?: { toolCalls?: readonly unknown[] };
+      metadata?: Readonly<Record<string, unknown>> & { toolCalls?: readonly unknown[] };
     }
   ): Promise<{ messageId: string }>;
   completeTurn(
@@ -38,7 +50,19 @@ export interface EvalTurnHost {
   ): Promise<void>;
 }
 
-export function evalTurnHost(database: EvalDatabase): EvalTurnHost {
+export function evalTurnHost(
+  database: EvalDatabase,
+  attemptHistory?: {
+    readonly text: string;
+    readonly toolCalls?: readonly {
+      readonly callId: string;
+      readonly name: string;
+      readonly outcome?: "ok" | "error";
+    }[];
+    readonly surfaces?: readonly { readonly artifactId: string; readonly revision: number }[];
+    readonly cursor?: number;
+  }
+): EvalTurnHost {
   return {
     async findTurn(runId) {
       const { rows } = await database.query(
@@ -51,6 +75,18 @@ export function evalTurnHost(database: EvalDatabase): EvalTurnHost {
         turnId: String(row.turn_id),
         conversationId: String(row.conversation_id),
         attempt: Number(row.attempt),
+        ...(attemptHistory === undefined
+          ? {}
+          : {
+              history: {
+                text: attemptHistory.text,
+                toolCalls: attemptHistory.toolCalls ?? [],
+                surfaces: attemptHistory.surfaces ?? [],
+                cursor: attemptHistory.cursor ?? 0,
+                outcome: "active" as const,
+                complete: false as const,
+              },
+            }),
       };
     },
 
@@ -78,8 +114,8 @@ export function evalTurnHost(database: EvalDatabase): EvalTurnHost {
       const messageId = `msg-${input.turnId}-${input.attempt}`;
       await database.query(
         `INSERT INTO eval_messages
-           (id, business_id, conversation_id, turn_id, attempt, role, content, tool_calls)
-         VALUES ($1, $2, $3, $4, $5, 'assistant', $6, $7)
+           (id, business_id, conversation_id, turn_id, attempt, role, content, tool_calls, metadata)
+         VALUES ($1, $2, $3, $4, $5, 'assistant', $6, $7, $8)
          ON CONFLICT (id) DO NOTHING`,
         [
           messageId,
@@ -89,6 +125,7 @@ export function evalTurnHost(database: EvalDatabase): EvalTurnHost {
           input.attempt,
           JSON.stringify(textContent(input.content)),
           JSON.stringify(input.metadata?.toolCalls ?? []),
+          JSON.stringify(input.metadata ?? {}),
         ]
       );
       return { messageId };

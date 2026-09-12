@@ -520,6 +520,7 @@ describe("Routine observability adapters", () => {
       businessId: "business-1",
       runId: "run-1",
       stateKey: "agent-state",
+      leaseGeneration: 1,
       attempt: 2,
       plan: {
         agentRef: { name: "support", version: "1" },
@@ -556,6 +557,7 @@ describe("Routine observability adapters", () => {
         businessId: "business-1",
         runId: "run-1",
         stateKey: "agent-state",
+        leaseGeneration: 1,
         attempt: 2,
         plan: {
           agentRef: { name: "support", version: "1" },

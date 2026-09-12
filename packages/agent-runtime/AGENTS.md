@@ -45,6 +45,14 @@ orchestration. It owns prompt assembly and runtime control, not model providers.
   `DEFAULT_GUARDRAILS`, and digest checks depend on `config` returning the validated policy.
 - If `ModelPort.stream` exists, a missing `completed` chunk fails the turn. `AgentLoopEvent`
   carries model text only; Tool args/output stay with `ToolDispatchPort`.
+- Persist each iteration before its model request and each model-produced Tool batch before its
+  first dispatch. Resume stable call ids and cursors first; never buy back any loop limit.
+- Persist terminal outcomes with their exact final loop event until the owning Run settles; replay
+  that receipt without another model call when event acknowledgement is unknown. Acknowledging a
+  retryable terminal removes only its delivery obligation and advances its durable retry attempt;
+  transcript and counters remain so retries cannot repeat Tools or event identities.
+- A Run-lease interruption aborts model and Tool requests and unwinds without writing a
+  participant-cancelled outcome; provider implementations that ignore abort are fenced afterward.
 - After a `skill` load, every dispatch carries `activeSkillName`; the Tool Host consumes it as
   authorization context, while model-visible Tool narrowing remains presentation-only.
 - A Turn sends a File once, on the Turn it was attached to. `file_read` is the only Tool the loop

@@ -189,6 +189,12 @@ function validate(raw: unknown, file: string): EvalCase {
     require(c.tier !== "l3" ||
       !isBatching(a as Expectation), `${file}: expectation "${kind}" reads how the model grouped ` +
       `its Tool calls, which only tier "l2" observes; move this Case to tier "l2"`);
+    require(c.tier !== "l3" ||
+      (kind !== "provider_prompt_file_exact" &&
+        kind !== "provider_prompt_omits_file" &&
+        kind !== "tool_batch_replayed" &&
+        kind !== "tool_denied"), `${file}: expectation "${kind}" reads an L2-only runtime seam; ` +
+      `move this Case to tier "l2"`);
   }
   if (c.agentRoles !== undefined) {
     require(Array.isArray(c.agentRoles) &&
@@ -214,6 +220,44 @@ function validate(raw: unknown, file: string): EvalCase {
         t.input.length > 0, `${file}: every "journey" Turn needs a non-empty "input"`);
     }
   }
+  if (c.attemptHistory !== undefined) {
+    require(c.tier ===
+      "l3", `${file}: "attemptHistory" needs tier "l3"; this Case is tier ${JSON.stringify(c.tier)}`);
+    require(typeof c.attemptHistory === "object" &&
+      c.attemptHistory !== null, `${file}: "attemptHistory" must be an object`);
+    const history = c.attemptHistory as Record<string, unknown>;
+    require(typeof history.text === "string", `${file}: "attemptHistory.text" must be a string`);
+    require(history.cursor === undefined ||
+      (typeof history.cursor === "number" &&
+        Number.isInteger(history.cursor) &&
+        history.cursor >= 0), `${file}: "attemptHistory.cursor" must be a non-negative integer`);
+    require(history.toolCalls === undefined ||
+      (Array.isArray(history.toolCalls) &&
+        history.toolCalls.every((call) => {
+          if (typeof call !== "object" || call === null) return false;
+          const value = call as Record<string, unknown>;
+          return (
+            typeof value.callId === "string" &&
+            value.callId.length > 0 &&
+            typeof value.name === "string" &&
+            value.name.length > 0 &&
+            (value.outcome === undefined || value.outcome === "ok" || value.outcome === "error")
+          );
+        })), `${file}: "attemptHistory.toolCalls" must contain valid participant Tool calls`);
+    require(history.surfaces === undefined ||
+      (Array.isArray(history.surfaces) &&
+        history.surfaces.every((surface) => {
+          if (typeof surface !== "object" || surface === null) return false;
+          const value = surface as Record<string, unknown>;
+          return (
+            typeof value.artifactId === "string" &&
+            value.artifactId.length > 0 &&
+            typeof value.revision === "number" &&
+            Number.isInteger(value.revision) &&
+            value.revision > 0
+          );
+        })), `${file}: "attemptHistory.surfaces" must contain exact positive revisions`);
+  }
   if (c.fault !== undefined) {
     require(c.fault === "context" ||
       c.fault === "model", `${file}: unknown fault ${JSON.stringify(c.fault)}`);
@@ -221,6 +265,31 @@ function validate(raw: unknown, file: string): EvalCase {
     // by nothing and the Case would quietly measure an ordinary Turn.
     require(c.tier ===
       "l3", `${file}: "fault" needs tier "l3"; this Case is tier ${JSON.stringify(c.tier)}`);
+  }
+  if (c.checkpointCrash !== undefined) {
+    require(c.checkpointCrash ===
+      "after_first_tool_result", `${file}: unknown checkpoint crash ${JSON.stringify(c.checkpointCrash)}`);
+    require(c.tier ===
+      "l2", `${file}: "checkpointCrash" needs tier "l2"; this Case is tier ${JSON.stringify(c.tier)}`);
+    const first = (c.script as { kind?: string; calls?: { callId?: string }[] }[] | undefined)?.[0];
+    require(first?.kind === "tool_calls" &&
+      Array.isArray(first.calls) &&
+      first.calls.length >=
+        2, `${file}: "checkpointCrash" needs the first scripted response to contain at least two Tool calls`);
+    const replay = (c.expect as { kind?: string }[]).find(
+      (expectation) => expectation.kind === "tool_batch_replayed"
+    );
+    require(replay !==
+      undefined, `${file}: "checkpointCrash" needs a "tool_batch_replayed" Expectation`);
+  }
+  if (
+    (c.expect as { kind?: string }[]).some(
+      (expectation) => expectation.kind === "tool_batch_replayed"
+    )
+  ) {
+    require(c.checkpointCrash ===
+      "after_first_tool_result", `${file}: "tool_batch_replayed" needs ` +
+      `"checkpointCrash": "after_first_tool_result"`);
   }
   if (c.redTeam !== undefined) {
     validateRedTeam(c.redTeam, file);
@@ -354,6 +423,28 @@ function validateAttachments(c: Record<string, unknown>, file: string): void {
         a.fileId ?? ""
       ), `${file}: "prompt_omits_attachment" names "${a.fileId}", which no message references. ` +
         `Nothing was there to omit, so the Case would pass with the confinement removed.`);
+    }
+    if (a.kind === "provider_prompt_file_exact") {
+      require(declared.has(a.fileId ?? "") ||
+        readable.has(
+          a.fileId ?? ""
+        ), `${file}: "provider_prompt_file_exact" names "${a.fileId}", which the Case declares in ` +
+        `neither "attachments" nor "readable"`);
+    }
+    if (a.kind === "provider_prompt_omits_file") {
+      const fileId = a.fileId ?? "";
+      const requestedByFileRead = (
+        (c.script ?? []) as {
+          kind?: string;
+          calls?: { name?: string; arguments?: { fileId?: string } }[];
+        }[]
+      ).some((entry) =>
+        entry.calls?.some((call) => call.name === "file_read" && call.arguments?.fileId === fileId)
+      );
+      require((declared.has(fileId) && referenced.has(fileId)) ||
+        (readable.has(fileId) &&
+          requestedByFileRead), `${file}: "provider_prompt_omits_file" names "${fileId}" without ` +
+        `a matching attached File or scripted file_read call, so omission would pass vacuously`);
     }
   }
 }

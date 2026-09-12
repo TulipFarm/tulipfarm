@@ -1,9 +1,11 @@
 import type { AgentLoopEvent } from "@tulipfarm/agent-runtime";
 import { describe, expect, it } from "vitest";
 import {
+  type AppendedRunEvent,
   DuplicateLoopEventError,
   InvalidRunEventPayloadError,
   type RunEventAppendPort,
+  type TurnAttemptHistory,
   TurnEventWriter,
 } from "./run-events";
 
@@ -27,9 +29,12 @@ class FakeAppendPort implements RunEventAppendPort {
     payload: Record<string, unknown>;
     idempotencyKey: string;
     occurredAt: string;
-  }): Promise<{ sequence: number }> {
+  }): Promise<AppendedRunEvent> {
     const existing = this.byKey.get(input.idempotencyKey);
-    if (existing !== undefined) return { sequence: existing };
+    if (existing !== undefined) {
+      const event = this.appended[existing - 1];
+      return { sequence: existing, eventType: event?.eventType, payload: event?.payload };
+    }
     this.sequence += 1;
     this.byKey.set(input.idempotencyKey, this.sequence);
     this.appended.push({
@@ -38,17 +43,22 @@ class FakeAppendPort implements RunEventAppendPort {
       payload: input.payload,
       idempotencyKey: input.idempotencyKey,
     });
-    return { sequence: this.sequence };
+    return { sequence: this.sequence, eventType: input.eventType, payload: input.payload };
   }
 }
 
-function makeWriter(events: RunEventAppendPort, attempt = 1): TurnEventWriter {
+function makeWriter(
+  events: RunEventAppendPort,
+  attempt = 1,
+  initial?: TurnAttemptHistory
+): TurnEventWriter {
   return new TurnEventWriter({
     events,
     businessId: "biz",
     runId: "run-1",
     turnId: "turn-1",
     attempt,
+    ...(initial === undefined ? {} : { initial }),
     now: () => new Date("2026-01-01T00:00:00.000Z"),
   });
 }
@@ -134,6 +144,99 @@ describe("TurnEventWriter", () => {
     await writer.emit("turn.started", { turnId: "turn-1", attempt: 1, agentId: "a" }, "started");
     await writer.emit("turn.finished", { status: "succeeded", messageId: "m1" }, "finished");
 
+    expect(writer.cursor).toBe(2);
+  });
+
+  it("folds later passes into the same ordered Tool and exact Surface history", async () => {
+    const events = new FakeAppendPort();
+    const first = makeWriter(events);
+    await first.append(
+      loopEvent({ sequence: 1, type: "text_delta", text: "First. ", textIndex: 0 })
+    );
+    await first.emit(
+      "tool.call",
+      { callId: "call-1", name: "record_list", argsDigest: "sha256:first" },
+      "tool:call:call-1"
+    );
+    first.recordSurface({ artifactId: "surface-1", revision: 3 });
+
+    const resumed = makeWriter(events, 1, first.history("waiting"));
+    await resumed.emit("tool.result", { callId: "call-1", status: "ok" }, "tool:result:call-1");
+    await resumed.emit(
+      "tool.call",
+      { callId: "call-2", name: "record_get", argsDigest: "sha256:second" },
+      "tool:call:call-2"
+    );
+    resumed.recordSurface({ artifactId: "surface-2", revision: 7 });
+
+    expect(resumed.history("succeeded", true)).toMatchObject({
+      text: "First. ",
+      toolCalls: [
+        { callId: "call-1", name: "record_list", outcome: "ok" },
+        { callId: "call-2", name: "record_get" },
+      ],
+      surfaces: [
+        { artifactId: "surface-1", revision: 3 },
+        { artifactId: "surface-2", revision: 7 },
+      ],
+      outcome: "succeeded",
+      complete: true,
+    });
+  });
+
+  it("projects the immutable durable delta after a crash, not the replayed model text", async () => {
+    const events = new FakeAppendPort();
+    await makeWriter(events).append(
+      loopEvent({ sequence: 1, type: "text_delta", text: "Saved once.", textIndex: 0 })
+    );
+
+    const same = makeWriter(events);
+    await same.append(
+      loopEvent({ sequence: 1, type: "text_delta", text: "Saved once.", textIndex: 0 })
+    );
+    const diverged = makeWriter(events);
+    await diverged.append(
+      loopEvent({ sequence: 1, type: "text_delta", text: "Different replay.", textIndex: 0 })
+    );
+
+    expect(same.text).toBe("Saved once.");
+    expect(diverged.text).toBe("Saved once.");
+    expect(events.appended).toHaveLength(1);
+  });
+
+  it("does not project a durable event already included in the restored cursor", async () => {
+    const events = new FakeAppendPort();
+    const first = makeWriter(events);
+    await first.append(
+      loopEvent({ sequence: 1, type: "text_delta", text: "Already saved.", textIndex: 0 })
+    );
+
+    const resumed = makeWriter(events, 1, first.history("waiting"));
+    await resumed.append(
+      loopEvent({ sequence: 1, type: "text_delta", text: "Already saved.", textIndex: 0 })
+    );
+
+    expect(resumed.text).toBe("Already saved.");
+  });
+
+  it("projects concurrent appends in durable sequence order", async () => {
+    let sequence = 0;
+    const events: RunEventAppendPort = {
+      append: async (input) => {
+        sequence += 1;
+        const current = sequence;
+        await new Promise((resolve) => setTimeout(resolve, current === 1 ? 10 : 0));
+        return { sequence: current, eventType: input.eventType, payload: input.payload };
+      },
+    };
+    const writer = makeWriter(events);
+
+    await Promise.all([
+      writer.emit("text.delta", { text: "First.", index: 0 }, "first"),
+      writer.emit("text.delta", { text: "Second.", index: 1 }, "second"),
+    ]);
+
+    expect(writer.text).toBe("First.Second.");
     expect(writer.cursor).toBe(2);
   });
 
