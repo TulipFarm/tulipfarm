@@ -1,4 +1,8 @@
-import type { LanguageModelV4, LanguageModelV4CallOptions } from "@ai-sdk/provider";
+import type {
+  LanguageModelV4,
+  LanguageModelV4CallOptions,
+  LanguageModelV4StreamPart,
+} from "@ai-sdk/provider";
 import { APICallError, LoadAPIKeyError } from "ai";
 import { describe, expect, it, vi } from "vitest";
 import { type FallbackCallGate, FallbackModel, isHardFailure } from "./fallback";
@@ -807,6 +811,50 @@ describe("FallbackModel lease settlement after commit", () => {
 
     expect(seen).toEqual(["text-start", "text-delta", "error", "finish"]);
     expect(outcomes).toEqual(["failed:model_provider_unavailable"]);
+    expect(releases()).toBe(1);
+    expect(backup.doStream).not.toHaveBeenCalled();
+  });
+
+  it("does not fall back after a committed stream reaches its output-token limit", async () => {
+    const { gate, outcomes, releases } = recordingGate();
+    const limited = makeModel({
+      doStream: vi.fn().mockResolvedValue(
+        makeStreamResult([
+          {
+            type: "tool-call",
+            toolCallId: "call-1",
+            toolName: "write_record",
+            input: JSON.stringify({ value: "one" }),
+          },
+          {
+            type: "finish",
+            finishReason: { unified: "length", raw: "max_tokens" },
+            usage: {
+              inputTokens: { total: 7, noCache: 7, cacheRead: 0, cacheWrite: 0 },
+              outputTokens: { total: 1, text: 1, reasoning: 0 },
+            },
+          },
+        ])
+      ),
+    });
+    const backup = makeModel({
+      doStream: vi
+        .fn()
+        .mockResolvedValue(
+          makeStreamResult([{ type: "text-delta", id: "2", delta: "wrong provider" }])
+        ),
+    });
+    const fallback = new FallbackModel([limited, backup], undefined, undefined, gate);
+
+    const { stream } = await fallback.doStream(opts);
+    const parts: LanguageModelV4StreamPart[] = [];
+    for await (const part of stream) parts.push(part);
+
+    expect(parts.at(-1)).toMatchObject({
+      type: "finish",
+      finishReason: { unified: "length", raw: "max_tokens" },
+    });
+    expect(outcomes).toEqual(["succeeded"]);
     expect(releases()).toBe(1);
     expect(backup.doStream).not.toHaveBeenCalled();
   });

@@ -14,6 +14,7 @@ import { deriveModelRequirements, ModelInvocationError } from "@tulipfarm/agent-
 import type { PrincipalRef } from "@tulipfarm/llm";
 import { classifyProviderError, decidePromptCache } from "@tulipfarm/llm";
 import {
+  assertModelOutputComplete,
   splitPrompt,
   stablePrefixChars,
   tokenDetail,
@@ -34,7 +35,13 @@ import {
   type RunEventEffortInference,
   type RunEventPayloads,
 } from "@tulipfarm/schema";
-import { jsonSchema, Output, type ModelMessage as SdkMessage, streamText } from "ai";
+import {
+  type FinishReason,
+  jsonSchema,
+  Output,
+  type ModelMessage as SdkMessage,
+  streamText,
+} from "ai";
 import type { EffortInferencePort } from "./effort-inference";
 import type { LlmModelResolution } from "./llm";
 import type { ModelCallGate } from "./model-gate";
@@ -249,7 +256,7 @@ export class LlmModelPort implements ModelPort, ModelCallReceiptSource {
         : { callTimeoutMs: this.options.callTimeoutMs }),
     });
 
-    let finishReason: string | undefined;
+    let finishReason: FinishReason | undefined;
     let rawFinishReason: string | undefined;
     // Accumulated as the stream runs, not read from the terminal chunk: a call that dies
     // mid-stream never produces that chunk, and the provider still bills for what it did.
@@ -359,7 +366,6 @@ export class LlmModelPort implements ModelPort, ModelCallReceiptSource {
     const latencyMs = Math.max(0, Math.round(finishedAt - startedAt));
     this.totalModelCallLatencyMs += latencyMs;
     this.modelCallCount += 1;
-    this.receipt = receiptFromRouting(resolution.routing, latencyMs) ?? this.receipt;
 
     // ai@7 can emit `finish` without running the provider; treat empty calls/text/usage as a fault.
     if (
@@ -404,6 +410,18 @@ export class LlmModelPort implements ModelPort, ModelCallReceiptSource {
       ...(cost.kind === "priced" ? { costUsd: cost.costUsd } : {}),
       costBasis: cost.kind,
     };
+    try {
+      assertModelOutputComplete({
+        finishReason,
+        rawFinishReason,
+        usage: finalUsage,
+        modelId: resolution.attemptedModelId?.(),
+      });
+    } catch (error) {
+      this.reportSpend(request, resolution, "error", finalUsage, finishedAt - startedAt);
+      throw error;
+    }
+    this.receipt = receiptFromRouting(resolution.routing, latencyMs) ?? this.receipt;
     this.reportSpend(request, resolution, "ok", finalUsage, finishedAt - startedAt);
     const output: ModelOutput =
       calls.length > 0

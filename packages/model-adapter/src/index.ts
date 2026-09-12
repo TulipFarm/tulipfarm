@@ -1,4 +1,5 @@
 export {
+  assertModelOutputComplete,
   parseToolCalls,
   parseToolResult,
   splitPrompt,

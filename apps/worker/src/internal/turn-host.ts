@@ -7,7 +7,7 @@ import type {
 } from "@tulipfarm/agent-runtime";
 import { extractText } from "@tulipfarm/files";
 import { RunInterruptedError } from "@tulipfarm/run-kernel";
-import type { TurnAuthority } from "@tulipfarm/tool-host";
+import { MARKETPLACE_SKILL_TOOL_TIMEOUTS_MS, type TurnAuthority } from "@tulipfarm/tool-host";
 import type {
   AssistantMessageWriteResult,
   ResolvedTurnContext,
@@ -70,6 +70,10 @@ type RemoteToolResult =
       readonly childRunId: string;
       readonly waitId: string;
     };
+
+// A Tool may consume its full server budget; transport keeps 15s to deliver and read the response.
+const TOOL_HTTP_TIMEOUT_MS =
+  Math.max(...Object.values(MARKETPLACE_SKILL_TOOL_TIMEOUTS_MS)) + 15_000;
 
 /** Re-attaches the `callId` by hand: spreading a union would lose which variant this is. */
 function withCallId(callId: string, result: RemoteToolResult): ToolDispatchResult {
@@ -234,7 +238,10 @@ export class HttpTurnHost
           ? {}
           : { permissionCeiling: request.permissionCeiling }),
       },
-      request.signal === undefined ? {} : { signal: request.signal }
+      {
+        timeoutMs: TOOL_HTTP_TIMEOUT_MS,
+        ...(request.signal === undefined ? {} : { signal: request.signal }),
+      }
     );
     return withCallId(request.callId, result);
   }

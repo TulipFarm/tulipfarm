@@ -1,5 +1,6 @@
+import { DEPLOYMENT_BUSINESS_ID } from "@tulipfarm/constants";
 import type { PaginatedResult } from "@tulipfarm/storage";
-import type { FastifyInstance } from "fastify";
+import Fastify, { type FastifyInstance, type FastifyRequest } from "fastify";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { buildApp } from "../app";
 import type { TokenDoc, TokenRepo } from "../auth/api-tokens";
@@ -7,7 +8,9 @@ import { CSRF_COOKIE } from "../auth/csrf";
 import { SESSION_COOKIE } from "../auth/routes";
 import { MemorySessionStore } from "../auth/session-store";
 import { createUser, type UserDoc, type UserRepo } from "../auth/users";
-import type { RunEventRecord, RunStreamGrant } from "./events";
+import type { RequestPrincipal } from "../identity/principal";
+import { MemoryRateLimiter, type RateLimiter } from "../rate-limit";
+import { type RunEventRecord, type RunStreamGrant, registerRunEventRoutes } from "./events";
 
 const TEST_CSRF = "a".repeat(64);
 const RUN_ID = "00000000-0000-4000-8000-000000000001";
@@ -61,6 +64,51 @@ function event(sequence: number): RunEventRecord {
     payload: { stateKey: "apply", status: "succeeded" },
     occurredAt: "2026-07-25T10:00:00.000Z",
   };
+}
+
+function principal(id: string, businessId: string): RequestPrincipal {
+  return {
+    id,
+    kind: "user",
+    businessId,
+    credential: "session",
+    authMethods: ["password"],
+    authenticatedAt: new Date(),
+    userId: id,
+    role: "member",
+  };
+}
+
+async function makeRateLimitedRouteApp(
+  authenticatedPrincipal: RequestPrincipal,
+  rateLimiter: RateLimiter
+): Promise<FastifyInstance> {
+  const routeApp = Fastify();
+  registerRunEventRoutes(
+    routeApp,
+    {
+      events: {
+        async list() {
+          return [];
+        },
+      },
+      runs: {
+        async find() {
+          return { status: "succeeded" };
+        },
+      },
+      authorize: async (request) => ({
+        businessId: request.principal?.businessId ?? "",
+        audiences: ["participant"],
+      }),
+    },
+    async (request: FastifyRequest) => {
+      request.principal = authenticatedPrincipal;
+    },
+    rateLimiter
+  );
+  await routeApp.ready();
+  return routeApp;
 }
 
 describe("GET /api/v1/runs/:id/events", () => {
@@ -182,11 +230,15 @@ describe("GET /api/v1/runs/:id/events", () => {
     expect(res.statusCode).toBe(403);
   });
 
-  it("rate-limits how fast one client may open streams", async () => {
+  it("rate-limits an authenticated principal rather than its shared IP", async () => {
     const seen: Array<{ key: string; limit: number; windowMs: number }> = [];
+    const store = new MemorySessionStore();
+    const userRepo = new FakeUserRepo();
+    const user = await createUser(userRepo, "limited@example.com", "pass", "member");
+    const limitedSid = await store.create(user._id);
     const limited = await buildApp({
-      sessionStore: new MemorySessionStore(),
-      userRepo: new FakeUserRepo(),
+      sessionStore: store,
+      userRepo,
       tokenRepo: new FakeTokenRepo(),
       rateLimiter: {
         async check(key, limit, windowMs) {
@@ -209,11 +261,123 @@ describe("GET /api/v1/runs/:id/events", () => {
       },
     });
 
-    const res = await limited.inject({ method: "GET", url: `/api/v1/runs/${RUN_ID}/events` });
+    const res = await limited.inject({
+      method: "GET",
+      url: `/api/v1/runs/${RUN_ID}/events`,
+      cookies: { [SESSION_COOKIE]: limitedSid, [CSRF_COOKIE]: TEST_CSRF },
+      headers: { "x-principal-id": "spoofed" },
+    });
 
     expect(res.statusCode).toBe(429);
     expect(res.json()).toEqual({ error: "rate_limit_exceeded" });
-    expect(seen).toEqual([{ key: "rl:run-events:127.0.0.1", limit: 30, windowMs: 60_000 }]);
+    expect(seen).toEqual([
+      {
+        key: `rl:run-events:${DEPLOYMENT_BUSINESS_ID}:user:${user._id}`,
+        limit: 30,
+        windowMs: 60_000,
+      },
+    ]);
+    await limited.close();
+  });
+
+  it("does not spend the authenticated stream budget on unauthenticated requests", async () => {
+    const seen: string[] = [];
+    const limited = await buildApp({
+      sessionStore: new MemorySessionStore(),
+      userRepo: new FakeUserRepo(),
+      tokenRepo: new FakeTokenRepo(),
+      rateLimiter: {
+        async check(key, limit, windowMs) {
+          seen.push(key);
+          return { allowed: true, limit, remaining: limit - 1, resetAt: Date.now() + windowMs };
+        },
+      },
+      runEvents: {
+        events: {
+          async list() {
+            return [];
+          },
+        },
+        runs: {
+          async find() {
+            return { status: "succeeded" };
+          },
+        },
+        authorize: async () => grant,
+      },
+    });
+
+    const res = await limited.inject({ method: "GET", url: `/api/v1/runs/${RUN_ID}/events` });
+
+    expect(res.statusCode).toBe(401);
+    expect(seen).toEqual([]);
+    await limited.close();
+  });
+
+  it("gives principals behind one IP independent stream budgets", async () => {
+    const seen: string[] = [];
+    const rateLimiter: RateLimiter = {
+      async check(key, limit, windowMs) {
+        seen.push(key);
+        return { allowed: true, limit, remaining: limit - 1, resetAt: Date.now() + windowMs };
+      },
+    };
+    const first = await makeRateLimitedRouteApp(principal("user-1", BUSINESS_ID), rateLimiter);
+    const second = await makeRateLimitedRouteApp(principal("user-2", BUSINESS_ID), rateLimiter);
+
+    await first.inject({ method: "GET", url: `/api/v1/runs/${RUN_ID}/events` });
+    await second.inject({ method: "GET", url: `/api/v1/runs/${RUN_ID}/events` });
+
+    expect(seen).toEqual([
+      `rl:run-events:${BUSINESS_ID}:user:user-1`,
+      `rl:run-events:${BUSINESS_ID}:user:user-2`,
+    ]);
+    await first.close();
+    await second.close();
+  });
+
+  it("isolates the same principal id across businesses", async () => {
+    const seen: string[] = [];
+    const rateLimiter: RateLimiter = {
+      async check(key, limit, windowMs) {
+        seen.push(key);
+        return { allowed: true, limit, remaining: limit - 1, resetAt: Date.now() + windowMs };
+      },
+    };
+    const first = await makeRateLimitedRouteApp(principal("user-1", "business-1"), rateLimiter);
+    const second = await makeRateLimitedRouteApp(principal("user-1", "business-2"), rateLimiter);
+
+    await first.inject({ method: "GET", url: `/api/v1/runs/${RUN_ID}/events` });
+    await second.inject({ method: "GET", url: `/api/v1/runs/${RUN_ID}/events` });
+
+    expect(seen).toEqual([
+      "rl:run-events:business-1:user:user-1",
+      "rl:run-events:business-2:user:user-1",
+    ]);
+    await first.close();
+    await second.close();
+  });
+
+  it("rejects a principal after thirty stream opens in one minute", async () => {
+    const limited = await makeRateLimitedRouteApp(
+      principal("user-1", BUSINESS_ID),
+      new MemoryRateLimiter()
+    );
+
+    for (let attempt = 0; attempt < 30; attempt += 1) {
+      const res = await limited.inject({
+        method: "GET",
+        url: `/api/v1/runs/${RUN_ID}/events`,
+      });
+      expect(res.statusCode).toBe(200);
+    }
+    const rejected = await limited.inject({
+      method: "GET",
+      url: `/api/v1/runs/${RUN_ID}/events`,
+    });
+
+    expect(rejected.statusCode).toBe(429);
+    expect(rejected.json()).toEqual({ error: "rate_limit_exceeded" });
     await limited.close();
   });
 

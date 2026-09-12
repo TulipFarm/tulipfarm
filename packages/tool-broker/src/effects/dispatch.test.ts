@@ -121,8 +121,59 @@ describe("EffectDispatcher", () => {
     await dispatcher(adapter, wait).dispatch(BUSINESS_ID, EFFECT_ID);
 
     expect(keys).toEqual(["stable-effect-key", "stable-effect-key"]);
-    expect(wait).toHaveBeenCalledWith(100);
+    expect(wait).toHaveBeenCalledWith(100, undefined);
     expect(await store.listAttempts(BUSINESS_ID, EFFECT_ID)).toHaveLength(2);
+  });
+
+  it("uses a real bounded delay on the production retry path", async () => {
+    vi.useFakeTimers();
+    try {
+      const adapter: ToolAdapter = {
+        kind: "integration",
+        dispatch: vi
+          .fn()
+          .mockRejectedValueOnce(
+            new AdapterDispatchError("before_dispatch", "transport_unavailable", true)
+          )
+          .mockResolvedValueOnce({ providerId: "external-42" }),
+      };
+
+      const pending = dispatcher(adapter).dispatch(BUSINESS_ID, EFFECT_ID);
+      await vi.advanceTimersByTimeAsync(99);
+      expect(adapter.dispatch).toHaveBeenCalledTimes(1);
+
+      await vi.advanceTimersByTimeAsync(1);
+      await expect(pending).resolves.toEqual({ providerId: "external-42" });
+      expect(adapter.dispatch).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("cancels a retry backoff without starting another provider attempt", async () => {
+    vi.useFakeTimers();
+    try {
+      const adapter: ToolAdapter = {
+        kind: "integration",
+        dispatch: vi.fn(async () => {
+          throw new AdapterDispatchError("before_dispatch", "transport_unavailable", true);
+        }),
+      };
+      const controller = new AbortController();
+      const pending = dispatcher(adapter).dispatch(BUSINESS_ID, EFFECT_ID, controller.signal);
+      await vi.advanceTimersByTimeAsync(0);
+
+      controller.abort();
+
+      await expect(pending).rejects.toEqual(
+        new ToolDispatchError("dispatch_failed", EFFECT_ID, "dispatch_cancelled")
+      );
+      await vi.runAllTimersAsync();
+      expect(adapter.dispatch).toHaveBeenCalledTimes(1);
+      expect(await store.listAttempts(BUSINESS_ID, EFFECT_ID)).toHaveLength(1);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("marks an uncertain mutation ambiguous and never blindly retries", async () => {
@@ -165,15 +216,37 @@ describe("EffectDispatcher", () => {
     expect(await store.get(BUSINESS_ID, EFFECT_ID)).toMatchObject({ state: "ambiguous" });
   });
 
-  it("validates provider output before confirming the effect", async () => {
+  it("preserves uncertainty when a mutation returns malformed success output", async () => {
     const adapter: ToolAdapter = {
       kind: "integration",
       dispatch: vi.fn(async () => ({ providerId: 42 })),
     };
 
     await expect(dispatcher(adapter).dispatch(BUSINESS_ID, EFFECT_ID)).rejects.toThrow(
-      new ToolDispatchError("invalid_output", EFFECT_ID)
+      new ToolDispatchError("ambiguous", EFFECT_ID, "invalid_output")
     );
+    expect(await store.get(BUSINESS_ID, EFFECT_ID)).toMatchObject({ state: "ambiguous" });
+
+    const restarted = dispatcher(adapter);
+    await expect(restarted.dispatch(BUSINESS_ID, EFFECT_ID)).rejects.toThrow(
+      new ToolDispatchError("ambiguous", EFFECT_ID)
+    );
+    expect(adapter.dispatch).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps malformed read output as a safe terminal failure", async () => {
+    const adapter: ToolAdapter = {
+      kind: "integration",
+      dispatch: vi.fn(async () => ({ providerId: 42 })),
+    };
+    const readDefinition: ToolContractDefinition = {
+      ...definition,
+      spec: { ...definition.spec, mutating: false },
+    };
+
+    await expect(
+      dispatcher(adapter, undefined, readDefinition).dispatch(BUSINESS_ID, EFFECT_ID)
+    ).rejects.toThrow(new ToolDispatchError("invalid_output", EFFECT_ID, "invalid_output"));
     expect(await store.get(BUSINESS_ID, EFFECT_ID)).toMatchObject({ state: "failed" });
   });
 
@@ -282,10 +355,14 @@ describe("EffectDispatcher", () => {
     expect(assertAllowed).not.toHaveBeenCalled();
   });
 
-  function dispatcher(adapter: ToolAdapter, wait?: (delayMs: number) => Promise<void>) {
+  function dispatcher(
+    adapter: ToolAdapter,
+    wait?: (delayMs: number) => Promise<void>,
+    contractDefinition: ToolContractDefinition = definition
+  ) {
     return new EffectDispatcher({
       store,
-      catalog: ToolCatalog.load([definition]),
+      catalog: ToolCatalog.load([contractDefinition]),
       adapters: new Map([["github", adapter]]),
       wait,
       now: () => "2026-07-25T00:00:01.000Z",

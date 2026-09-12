@@ -1,7 +1,12 @@
 import type { ResolvedAttachment } from "@tulipfarm/agent-runtime";
 import { textContent } from "@tulipfarm/schema";
 import { describe, expect, it } from "vitest";
-import { splitPrompt, stablePrefixChars, withCacheBreakpoint } from "./prompt";
+import {
+  assertModelOutputComplete,
+  splitPrompt,
+  stablePrefixChars,
+  withCacheBreakpoint,
+} from "./prompt";
 
 const png: ResolvedAttachment = {
   fileId: "file-1",
@@ -16,6 +21,35 @@ const pdf: ResolvedAttachment = {
   name: "invoice.pdf",
   data: new Uint8Array([4, 5, 6]),
 };
+
+describe("assertModelOutputComplete", () => {
+  const usage = { inputTokens: 11, outputTokens: 4 };
+
+  it("fails with billed usage when the SDK says the token ceiling cut generation", () => {
+    expect(() =>
+      assertModelOutputComplete({
+        finishReason: "length",
+        rawFinishReason: "max_tokens",
+        usage,
+        modelId: "model-1",
+      })
+    ).toThrowError(
+      expect.objectContaining({
+        name: "ModelInvocationError",
+        reason: "model_error",
+        usage,
+        modelId: "model-1",
+      })
+    );
+  });
+
+  it("does not reject unrelated finish reasons without a failure signal", () => {
+    for (const reason of ["stop", "content-filter", "tool-calls", "error", "other"] as const) {
+      expect(() => assertModelOutputComplete({ finishReason: reason, usage })).not.toThrow();
+    }
+    expect(() => assertModelOutputComplete({ finishReason: undefined, usage })).not.toThrow();
+  });
+});
 
 function filePart(file: ResolvedAttachment) {
   return { type: "file", fileId: file.fileId, mediaType: file.mediaType, name: file.name } as const;

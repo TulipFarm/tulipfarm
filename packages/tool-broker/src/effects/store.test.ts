@@ -193,6 +193,65 @@ describe("PgEffectStore", () => {
     });
   });
 
+  it("loads recovery evidence with a business-and-Run-scoped query", async () => {
+    const otherRun = "55555555-5555-4555-8555-555555555555";
+    const otherBusiness = "business-2";
+    await store.reserve(input());
+    await store.reserve(
+      input({
+        effectId: "66666666-6666-4666-8666-666666666666",
+        runId: otherRun,
+        stateId: "other-run",
+        logicalEffectOrdinal: 2,
+        idempotencyKey: "effect-key-other-run",
+        intent: {
+          ...input().intent,
+          intentId: "intent-other-run",
+          runId: otherRun,
+          stateId: "other-run",
+          idempotencyKey: "effect-key-other-run",
+        },
+      })
+    );
+    await store.reserve(
+      input({
+        effectId: "77777777-7777-4777-8777-777777777777",
+        businessId: otherBusiness,
+        stateId: "other-business",
+        logicalEffectOrdinal: 3,
+        idempotencyKey: "effect-key-other-business",
+        intent: {
+          ...input().intent,
+          intentId: "intent-other-business",
+          businessId: otherBusiness,
+          stateId: "other-business",
+          idempotencyKey: "effect-key-other-business",
+        },
+      })
+    );
+
+    const queries: Array<{ sql: string; parameters?: unknown[] }> = [];
+    const scoped = new PgEffectStore({
+      withTransaction: (operation) =>
+        database.transaction((transaction) =>
+          operation({
+            query: (sql, parameters) => {
+              const copiedParameters = parameters === undefined ? undefined : [...parameters];
+              queries.push({ sql, parameters: copiedParameters });
+              return transaction.query(sql, copiedParameters);
+            },
+          })
+        ),
+    });
+
+    await expect(scoped.listByRun(BUSINESS_ID, RUN_ID)).resolves.toMatchObject([
+      { businessId: BUSINESS_ID, runId: RUN_ID, effectId: EFFECT_ID },
+    ]);
+    expect(queries).toHaveLength(1);
+    expect(queries[0]?.sql).toContain("WHERE effects.business_id = $1 AND effects.run_id = $2");
+    expect(queries[0]?.parameters).toEqual([BUSINESS_ID, RUN_ID]);
+  });
+
   it("distinguishes explicit null or void output from missing legacy output", async () => {
     await store.reserve(input());
     const attempt = await store.beginAttempt(BUSINESS_ID, EFFECT_ID, "2026-07-25T00:00:01.000Z");

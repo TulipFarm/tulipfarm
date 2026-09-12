@@ -22,6 +22,7 @@ import {
   type ModelUsage,
   type ToolDispatchPort,
 } from "@tulipfarm/agent-runtime";
+import { assertModelOutputComplete } from "@tulipfarm/model-adapter";
 import { INVOKE_STATE_KEY } from "@tulipfarm/run-kernel";
 import {
   createChatExecutor,
@@ -351,11 +352,21 @@ async function runOneTurn(
       spend = addSpend(spend, usage);
       options.onUsage?.(usage);
     };
+    const checkOutputLimit = (usage: ModelUsage) => {
+      if (options.evalCase.fault === "model_output_limit") {
+        assertModelOutputComplete({
+          finishReason: "length",
+          rawFinishReason: "max_tokens",
+          usage,
+        });
+      }
+    };
     const metered: ModelPort = {
       invoke: async (request) => {
         checkModelFault();
         const result = await port.invoke(request);
         recordUsage(result.usage);
+        checkOutputLimit(result.usage);
         return result;
       },
       ...(stream === undefined
@@ -364,7 +375,10 @@ async function runOneTurn(
             async *stream(request) {
               checkModelFault();
               for await (const chunk of stream(request)) {
-                if (chunk.kind === "completed") recordUsage(chunk.result.usage);
+                if (chunk.kind === "completed") {
+                  recordUsage(chunk.result.usage);
+                  checkOutputLimit(chunk.result.usage);
+                }
                 yield chunk;
               }
             },

@@ -1,8 +1,10 @@
 import type {
   ModelInvocationRequest,
   ModelOutput,
+  ModelUsage,
   ResolvedAttachment,
 } from "@tulipfarm/agent-runtime";
+import { ModelInvocationError } from "@tulipfarm/agent-runtime";
 import type { PromptCacheDecision } from "@tulipfarm/llm";
 import {
   contentFiles,
@@ -12,6 +14,7 @@ import {
 } from "@tulipfarm/schema";
 import {
   type FilePart,
+  type FinishReason,
   type ImagePart,
   jsonSchema,
   type ModelMessage as SdkMessage,
@@ -48,6 +51,25 @@ export function toOutput(
     };
   }
   return { kind: "text", text };
+}
+
+/** Fails only when the SDK says its output-token ceiling cut generation short. */
+export function assertModelOutputComplete(input: {
+  readonly finishReason: FinishReason | undefined;
+  readonly rawFinishReason?: string;
+  readonly usage: ModelUsage;
+  readonly modelId?: string;
+}): void {
+  if (input.finishReason !== "length") return;
+  throw new ModelInvocationError(
+    "model_error",
+    new Error(
+      `model output incomplete (finishReason=${input.finishReason}` +
+        `${input.rawFinishReason ? `, rawFinishReason=${input.rawFinishReason}` : ""})`
+    ),
+    input.usage,
+    input.modelId
+  );
 }
 
 /**

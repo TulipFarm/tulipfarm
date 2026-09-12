@@ -1,9 +1,9 @@
 import { RunInterruptedError } from "@tulipfarm/run-kernel";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { InternalApiClient, InternalApiError } from "./client";
 import { HttpTurnHost } from "./turn-host";
 
-function host(handler: (url: string, init?: RequestInit) => Response): {
+function host(handler: (url: string, init?: RequestInit) => Response | Promise<Response>): {
   turns: HttpTurnHost;
   urls: string[];
 } {
@@ -31,7 +31,39 @@ const REF = {
   leaseGeneration: 3,
 };
 
+function useFakeAbortTimeout(): void {
+  vi.spyOn(AbortSignal, "timeout").mockImplementation((delay) => {
+    const controller = new AbortController();
+    setTimeout(
+      () => controller.abort(new DOMException("The operation timed out", "TimeoutError")),
+      delay
+    );
+    return controller.signal;
+  });
+}
+
+function delayedResponse(delayMs: number, response: Response) {
+  return (_url: string, init?: RequestInit): Promise<Response> =>
+    new Promise((resolve, reject) => {
+      const timer = setTimeout(() => resolve(response), delayMs);
+      const signal = init?.signal;
+      signal?.addEventListener(
+        "abort",
+        () => {
+          clearTimeout(timer);
+          reject(signal.reason);
+        },
+        { once: true }
+      );
+    });
+}
+
 describe("HttpTurnHost", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+  });
+
   it("asks the API to settle a terminal Run without trusting callback payload state", async () => {
     const { turns, urls } = host(() => json({ settled: true }));
 
@@ -93,6 +125,103 @@ describe("HttpTurnHost", () => {
         arguments: {},
       })
     ).resolves.toEqual({ status: "denied", callId: "call-9", reason: "policy" });
+  });
+
+  it.each([75_000, 120_000])("lets a valid Tool response finish after %i ms", async (delayMs) => {
+    vi.useFakeTimers();
+    useFakeAbortTimeout();
+    const { turns } = host(
+      delayedResponse(delayMs, json({ status: "succeeded", output: { ok: true } }))
+    );
+
+    const result = turns.dispatch({
+      businessId: "business-1",
+      runId: "run-1",
+      stateId: "invoke",
+      callId: "call-9",
+      name: "skill_install",
+      arguments: {},
+    });
+    const expectation = expect(result).resolves.toEqual({
+      status: "succeeded",
+      callId: "call-9",
+      output: { ok: true },
+    });
+    await vi.advanceTimersByTimeAsync(delayMs);
+
+    await expectation;
+  });
+
+  it("still times out a stuck Tool request at the bounded Tool HTTP deadline", async () => {
+    vi.useFakeTimers();
+    useFakeAbortTimeout();
+    const { turns } = host(
+      (_url, init) =>
+        new Promise((_resolve, reject) => {
+          const signal = init?.signal;
+          signal?.addEventListener("abort", () => reject(signal.reason), { once: true });
+        })
+    );
+
+    const result = turns.dispatch({
+      businessId: "business-1",
+      runId: "run-1",
+      stateId: "invoke",
+      callId: "call-9",
+      name: "skill_install",
+      arguments: {},
+    });
+    const expectation = expect(result).rejects.toMatchObject({ name: "TimeoutError" });
+    await vi.advanceTimersByTimeAsync(135_000);
+
+    await expectation;
+  });
+
+  it("keeps ordinary control-plane requests on the 60 second deadline", async () => {
+    vi.useFakeTimers();
+    useFakeAbortTimeout();
+    const { turns } = host(
+      (_url, init) =>
+        new Promise((_resolve, reject) => {
+          const signal = init?.signal;
+          signal?.addEventListener("abort", () => reject(signal.reason), { once: true });
+        })
+    );
+
+    const result = turns.findTurn("run-1");
+    const expectation = expect(result).rejects.toMatchObject({ name: "TimeoutError" });
+    await vi.advanceTimersByTimeAsync(60_000);
+
+    await expectation;
+  });
+
+  it("lets Run interruption abort a Tool request before its HTTP deadline", async () => {
+    vi.useFakeTimers();
+    useFakeAbortTimeout();
+    const interruption = new RunInterruptedError();
+    const stop = new AbortController();
+    const { turns } = host(
+      (_url, init) =>
+        new Promise((_resolve, reject) => {
+          const signal = init?.signal;
+          signal?.addEventListener("abort", () => reject(signal.reason), { once: true });
+        })
+    );
+
+    const result = turns.dispatch({
+      businessId: "business-1",
+      runId: "run-1",
+      stateId: "invoke",
+      callId: "call-9",
+      name: "skill_install",
+      arguments: {},
+      signal: stop.signal,
+    });
+    const expectation = expect(result).rejects.toBe(interruption);
+    await vi.advanceTimersByTimeAsync(1_000);
+    stop.abort(interruption);
+
+    await expectation;
   });
 
   it("reads only 204 as an unfinished attempt — a missing Run still raises", async () => {

@@ -614,12 +614,8 @@ export async function main(): Promise<void> {
   const loops: DrainableLoop[] = [
     {
       name: "run-dispatch",
-      settled: runLoop({
-        name: "run-dispatch",
+      settled: runDispatcher.run({
         intervalMs: config.runPollMs,
-        tick: async () => {
-          await runDispatcher.dispatchBatch();
-        },
         signal,
         logger,
       }),
