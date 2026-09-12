@@ -164,13 +164,18 @@ test("index empty search state names the query that found nothing", () => {
   expect(screen.getByText("2 types")).toBeInTheDocument();
 });
 
-test("index with no types explains what a resource type is and links to the builder", () => {
+test("index with no types drafts a resource type and keeps manual creation secondary", () => {
   renderWithData(<ResourcesIndex />, { rows: [] });
   expect(screen.getByText(/No resource types yet/i)).toBeInTheDocument();
-  expect(screen.getAllByRole("link", { name: /New type/i })[0]).toHaveAttribute(
+  const draft = screen.getByRole("link", { name: "Create a resource type in chat" });
+  expect(
+    new URL(draft.getAttribute("href") ?? "", "http://localhost").searchParams.get("draft")
+  ).toMatch(/resource type.*fields/i);
+  expect(screen.getByRole("link", { name: "Create manually" })).toHaveAttribute(
     "href",
     "/resources/new"
   );
+  expect(document.querySelectorAll(".bg-primary")).toHaveLength(1);
 });
 
 test("index ErrorBoundary surfaces 401 as authentication required", () => {

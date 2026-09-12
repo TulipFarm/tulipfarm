@@ -6,7 +6,7 @@ import {
   useRevalidator,
   useRouteError,
 } from "@remix-run/react";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { PageShell } from "~/components/page-shell";
 import { DryRunResultPanel } from "~/components/routines/dry-run-result";
 import { EffectsPanel } from "~/components/routines/effects-panel";
@@ -45,9 +45,22 @@ function Fact({ label, value }: { label: string; value?: string }) {
 }
 
 export default function RoutineDetailRoute() {
+  const { routine } = useLoaderData<typeof clientLoader>();
+  return <RoutineDetail key={`${routine.slug}:${routine.hash}`} />;
+}
+
+function RoutineDetail() {
   const { routine, runs } = useLoaderData<typeof clientLoader>();
   const navigate = useNavigate();
   const revalidator = useRevalidator();
+  const isCurrentRoutine = useRef(false);
+
+  useEffect(() => {
+    isCurrentRoutine.current = true;
+    return () => {
+      isCurrentRoutine.current = false;
+    };
+  }, []);
 
   const [busy, setBusy] = useState<"run" | "dry-run" | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -73,11 +86,13 @@ export default function RoutineDetailRoute() {
     setError(null);
     try {
       const { runId } = await triggerRun(routine.slug, values);
-      navigate(`/runs/${runId}`);
+      if (isCurrentRoutine.current) navigate(`/runs/${runId}`);
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : String(caught));
+      if (isCurrentRoutine.current) {
+        setError(caught instanceof Error ? caught.message : String(caught));
+      }
     } finally {
-      setBusy(null);
+      if (isCurrentRoutine.current) setBusy(null);
     }
   };
 
@@ -85,8 +100,10 @@ export default function RoutineDetailRoute() {
     setBusy("dry-run");
     setError(null);
     try {
-      setDryRun(await dryRunRoutine(routine.slug, values));
+      const result = await dryRunRoutine(routine.slug, values);
+      if (isCurrentRoutine.current) setDryRun(result);
     } catch (caught) {
+      if (!isCurrentRoutine.current) return;
       /*
        * Rehearsing takes the same right as running. A reader being refused one is a permission
        * fact, not a broken simulation, and saying "simulation failed" would send them off to
@@ -101,7 +118,7 @@ export default function RoutineDetailRoute() {
             : String(caught)
       );
     } finally {
-      setBusy(null);
+      if (isCurrentRoutine.current) setBusy(null);
     }
   };
 

@@ -10,6 +10,10 @@ import { ApiError } from "~/lib/api";
 import { listOperationalRuns } from "~/lib/operations";
 import { listRoutines, type RunStatus } from "~/lib/routines";
 
+const createRoutineHref = `/?draft=${encodeURIComponent(
+  "Help me create a routine for repeated work. Ask what should start it, what inputs it needs and what result I want. Help me review its steps and limits before publishing."
+)}`;
+
 /**
  * The newest Run per Routine, from one page of the global Run feed.
  *
@@ -52,17 +56,28 @@ export default function RoutinesIndex() {
       crumbs={[{ label: "Routines" }]}
       title="Routines"
       actions={
-        <Button asChild size="sm" variant="outline">
-          <Link to="/business/activities?source=run">All runs</Link>
-        </Button>
+        <>
+          <Button asChild size="sm" variant="outline">
+            <Link to="/business/activities?source=run">All runs</Link>
+          </Button>
+          {routines.length > 0 ? (
+            <Button asChild size="sm">
+              <Link to={createRoutineHref}>Create a routine in chat</Link>
+            </Button>
+          ) : null}
+        </>
       }
     >
       {routines.length === 0 ? (
         <EmptyState
           section="routines"
           title="No published routines yet"
-          hint="Ask the assistant to create and publish one."
-        />
+          hint="Turn repeated work into a routine. Describe when it should start and the result you need, then review the steps before it runs."
+        >
+          <Button asChild>
+            <Link to={createRoutineHref}>Create a routine in chat</Link>
+          </Button>
+        </EmptyState>
       ) : (
         <RoutineCatalog routines={routines} latest={latest} />
       )}

@@ -1,5 +1,6 @@
 import { Bot, Braces, Clock, GitBranch, Hand, Radio, Wrench } from "~/components/icons";
 import { Badge } from "~/components/ui/badge";
+import { Link } from "~/components/ui/link";
 import { Panel } from "~/components/ui/panel";
 import type { RoutineEffectKind } from "~/lib/routines";
 import { EFFECT_LABEL, type RoutineEffect, type RoutineFacts } from "~/lib/routines/facts";
@@ -27,13 +28,27 @@ const TONE: Record<RoutineEffectKind, "neutral" | "warning" | "info"> = {
 
 function EffectRow({ effect }: { effect: RoutineEffect }) {
   const Icon = ICON[effect.kind];
+  const to =
+    effect.kind === "agent"
+      ? `/agents/${encodeURIComponent(effect.target)}`
+      : effect.kind === "child_routine"
+        ? `/routines/${encodeURIComponent(effect.target)}`
+        : null;
   return (
     <li className="flex flex-col gap-1 px-4 py-3 sm:flex-row sm:items-center sm:gap-4">
       <div className="flex min-w-0 items-center gap-2 sm:w-52 sm:shrink-0">
         <Icon aria-hidden="true" className="size-4 shrink-0 text-muted-foreground" />
         <span className="truncate text-sm text-foreground">{EFFECT_LABEL[effect.kind]}</span>
       </div>
-      <p className="min-w-0 flex-1 truncate font-mono text-xs text-foreground">{effect.target}</p>
+      <p className="min-w-0 flex-1 break-words font-mono text-xs text-foreground">
+        {to ? (
+          <Link to={to} className="inline-flex min-h-6 items-center text-brand hover:underline">
+            {effect.target}
+          </Link>
+        ) : (
+          effect.target
+        )}
+      </p>
       {effect.detail ? (
         <p className="min-w-0 truncate text-xs text-muted-foreground sm:w-44">{effect.detail}</p>
       ) : null}
