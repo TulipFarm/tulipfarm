@@ -70,7 +70,9 @@ describe("OIM persistence migrations", () => {
 
   it("appends the persistence foundation after main migrations 110 and 111", () => {
     expect(
-      PG_MIGRATIONS.filter(({ version }) => version >= 110).map(({ version }) => version)
+      PG_MIGRATIONS.filter(({ version }) => version >= 110)
+        .slice(0, 5)
+        .map(({ version }) => version)
     ).toEqual([110, 111, 112, 113, 114]);
   });
 
