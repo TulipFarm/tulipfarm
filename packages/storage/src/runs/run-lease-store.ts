@@ -53,6 +53,8 @@ export async function reclaimExpiredRunRows(
             END,
             version = version + 1,
             error_evidence_ref = CASE
+              WHEN runs.status = 'running' AND runs.error_evidence_ref = $5
+                THEN runs.error_evidence_ref
               WHEN runs.status = 'running' THEN $4
               ELSE runs.error_evidence_ref
             END,
@@ -64,7 +66,7 @@ export async function reclaimExpiredRunRows(
                runs.status, runs.version, runs.created_at, runs.started_at, runs.finished_at,
                runs.result_artifact_id, runs.error_evidence_ref, runs.lease_owner,
                runs.lease_expires_at, runs.lease_generation`,
-    [businessId, now, Math.max(0, limit), DISPATCH_LEASE_EXPIRED_REF]
+    [businessId, now, Math.max(0, limit), DISPATCH_LEASE_EXPIRED_REF, DISPATCH_REQUEUED_ONCE_REF]
   );
   return result.rows.map(persistedRun);
 }

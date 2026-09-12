@@ -147,6 +147,9 @@ describe("/api/v1/internal/turns", () => {
                 guardrailDigest: "guardrail-digest",
                 guardrailPolicy: { input: [] },
                 messages: [{ role: "user", content: textContent(`as ${authority.subject.id}`) }],
+                pinnedMessageCount: 0,
+                contextTokenBudget: 12_000,
+                contextMessageIds: ["message-1"],
                 tools: [
                   {
                     name: "record_create",
@@ -289,6 +292,9 @@ describe("/api/v1/internal/turns", () => {
     expect(res.json()).toMatchObject({
       contextDigest: "context-digest",
       messages: [{ role: "user", content: textContent("as slack") }],
+      pinnedMessageCount: 0,
+      contextTokenBudget: 12_000,
+      contextMessageIds: ["message-1"],
     });
   });
 

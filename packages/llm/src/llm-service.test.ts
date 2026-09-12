@@ -465,6 +465,7 @@ describe("LlmService.effortModel", () => {
     expect(gateKeys).toEqual(["openai-compatible:house-model", "openai-compatible-2:house-model"]);
     expect(responder).toEqual({
       modelId: "house-model",
+      attemptId: 1,
       configuredModel: { connection: "openai-compatible-2", modelId: "house-model" },
     });
   });

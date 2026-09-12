@@ -44,6 +44,7 @@ describe("BudgetStore (PostgreSQL)", () => {
   });
 
   beforeEach(async () => {
+    await database.exec("DELETE FROM run_budget_reservations");
     await database.exec("DELETE FROM run_budgets");
     await database.exec("DELETE FROM state_attempts");
     await database.exec("DELETE FROM run_states");
@@ -173,5 +174,109 @@ describe("BudgetStore (PostgreSQL)", () => {
     await expect(
       database.exec("UPDATE run_budgets SET consumed = 11 WHERE limit_key = 'tokens'")
     ).rejects.toThrow();
+  });
+
+  it("reserves before work and settles only the actual usage", async () => {
+    await store.open({
+      businessId: BUSINESS,
+      runId: RUN_ID,
+      limits: { tokens: 100, costMicros: 50 },
+      exhaustionPolicy: "failure_path",
+    });
+
+    await expect(
+      store.reserve(BUSINESS, RUN_ID, "model-request-1", {
+        tokens: 80,
+        costMicros: 40,
+      })
+    ).resolves.toMatchObject({ outcome: "allowed" });
+    await expect(
+      store.reserve(BUSINESS, RUN_ID, "model-request-2", { tokens: 30 })
+    ).resolves.toMatchObject({ outcome: "exhausted", key: "tokens" });
+
+    await expect(
+      store.settle(BUSINESS, RUN_ID, "model-request-1", {
+        tokens: 25,
+        costMicros: 10,
+      })
+    ).resolves.toEqual({ outcome: "allowed" });
+    expect(await store.usage(BUSINESS, RUN_ID)).toEqual([
+      {
+        key: "costMicros",
+        limit: 50,
+        consumed: 10,
+        exhaustionPolicy: "failure_path",
+      },
+      { key: "tokens", limit: 100, consumed: 25, exhaustionPolicy: "failure_path" },
+    ]);
+  });
+
+  it("does not admit the same provider request twice after a crash boundary", async () => {
+    await store.open({
+      businessId: BUSINESS,
+      runId: RUN_ID,
+      limits: { tokens: 100 },
+      exhaustionPolicy: "failure_path",
+    });
+
+    await store.reserve(BUSINESS, RUN_ID, "model-request-1", { tokens: 80 });
+
+    await expect(
+      store.reserve(BUSINESS, RUN_ID, "model-request-1", { tokens: 80 })
+    ).resolves.toEqual({ outcome: "duplicate" });
+  });
+
+  it("keeps the reservation charged when an admitted provider reports no usage", async () => {
+    await store.open({
+      businessId: BUSINESS,
+      runId: RUN_ID,
+      limits: { tokens: 100 },
+      exhaustionPolicy: "failure_path",
+    });
+    await store.reserve(BUSINESS, RUN_ID, "model-request-1", { tokens: 80 });
+
+    await expect(store.settle(BUSINESS, RUN_ID, "model-request-1", {}, true)).resolves.toEqual({
+      outcome: "allowed",
+    });
+    await expect(store.settle(BUSINESS, RUN_ID, "model-request-1", {})).resolves.toEqual({
+      outcome: "allowed",
+    });
+    await expect(
+      store.reserve(BUSINESS, RUN_ID, "model-request-2", { tokens: 30 })
+    ).resolves.toMatchObject({ outcome: "exhausted", key: "tokens" });
+    expect((await store.usage(BUSINESS, RUN_ID))[0]?.consumed).toBe(80);
+  });
+
+  it("serializes concurrent admission of the same provider request", async () => {
+    await store.open({
+      businessId: BUSINESS,
+      runId: RUN_ID,
+      limits: { tokens: 100 },
+      exhaustionPolicy: "failure_path",
+    });
+
+    const decisions = await Promise.all([
+      store.reserve(BUSINESS, RUN_ID, "model-request-1", { tokens: 80 }),
+      store.reserve(BUSINESS, RUN_ID, "model-request-1", { tokens: 80 }),
+    ]);
+
+    expect(decisions).toEqual(
+      expect.arrayContaining([{ outcome: "allowed" }, { outcome: "duplicate" }])
+    );
+  });
+
+  it("marks an underestimated call exhausted without storing an overdrawn balance", async () => {
+    await store.open({
+      businessId: BUSINESS,
+      runId: RUN_ID,
+      limits: { tokens: 100 },
+      exhaustionPolicy: "failure_path",
+    });
+    await store.reserve(BUSINESS, RUN_ID, "model-request-1", { tokens: 80 });
+
+    await expect(
+      store.settle(BUSINESS, RUN_ID, "model-request-1", { tokens: 120 })
+    ).resolves.toEqual({ outcome: "exhausted", key: "tokens" });
+    expect((await store.usage(BUSINESS, RUN_ID))[0]?.consumed).toBe(100);
   });
 });

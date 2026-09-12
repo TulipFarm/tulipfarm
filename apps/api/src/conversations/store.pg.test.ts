@@ -408,6 +408,26 @@ describe("PgConversationStore", () => {
         createdAt: new Date("2026-07-26T00:00:05.000Z"),
       },
     ]);
+
+    const contextMessages = await store.listContextMessages(
+      DEPLOYMENT_BUSINESS_ID,
+      CONVERSATION_ID
+    );
+    expect(contextMessages.map(({ id, attemptStatus }) => ({ id, attemptStatus }))).toEqual([
+      {
+        id: "00000000-0000-4000-8000-000000000007",
+        attemptStatus: "superseded",
+      },
+      { id: REPLY_ID, attemptStatus: "succeeded" },
+    ]);
+    await expect(
+      store.listContextMessages(
+        DEPLOYMENT_BUSINESS_ID,
+        CONVERSATION_ID,
+        undefined,
+        "00000000-0000-4000-8000-000000000007"
+      )
+    ).resolves.toMatchObject([{ id: REPLY_ID }]);
   });
 
   it("surfaces a reply that was written but never completed (#662)", async () => {

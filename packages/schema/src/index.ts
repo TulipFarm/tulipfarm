@@ -197,6 +197,7 @@ export {
   asEffortPreset,
   configuredModelKey,
   configuredModelRef,
+  DEFAULT_MODEL_CONTEXT_WINDOW_TOKENS,
   DEPRECATED_TIER_ALIASES,
   deriveModelProfiles,
   EFFORT_PRESETS,

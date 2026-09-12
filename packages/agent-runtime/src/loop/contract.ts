@@ -1,11 +1,13 @@
 import type { ModelRequirementsPolicy } from "../models/requirements";
 import type {
+  AttachmentVisual,
   ModelInvocationFailureReason,
   ModelMessage,
   ModelPort,
   ResolvedAttachment,
 } from "../ports";
 import type { LoopCheckpointStore } from "./checkpoint";
+import type { ContextCompactorPort } from "./compaction";
 import type { ToolResultDistillerPort } from "./distill";
 
 /** What a caller of the bounded Tool loop supplies, implements, and receives back. */
@@ -58,6 +60,12 @@ export interface AgentLoopInput {
   readonly contextDigest: string;
   readonly guardrailDigest: string;
   readonly messages: readonly ModelMessage[];
+  /** Leading trusted instructions that compaction must preserve byte-for-byte. */
+  readonly pinnedMessageCount?: number;
+  /** Model-facing transcript ceiling; absent leaves Context unchanged. */
+  readonly contextTokenBudget?: number;
+  /** Source Message ids aligned to `messages`; null entries are synthesized Context. */
+  readonly contextMessageIds?: readonly (string | null)[];
   /**
    * Bytes for the Files this Turn attached; see {@link ResolvedAttachment}.
    *
@@ -324,6 +332,10 @@ export type AgentLoopOutcome =
  */
 export interface LoopAttachmentPort {
   read(runId: string, fileId: string): Promise<Uint8Array | undefined>;
+  inspect?(
+    mediaType: string,
+    bytes: Uint8Array
+  ): Promise<{ readonly text?: string; readonly visual?: AttachmentVisual }>;
 }
 
 export interface AgentLoopDependencies {
@@ -336,6 +348,7 @@ export interface AgentLoopDependencies {
    * raw but bounded, which is what a deterministic replay or the offline eval harness needs.
    */
   readonly distiller?: ToolResultDistillerPort;
+  readonly contextCompactor?: ContextCompactorPort;
   readonly checkpoints: LoopCheckpointStore;
   readonly events: AgentLoopEventSink;
   readonly budget: AgentLoopBudgetPort;

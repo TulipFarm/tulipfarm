@@ -73,6 +73,10 @@ const MAX_RAW_RESULT_CHARS = charsForTokens(MAX_RAW_RESULT_TOKENS);
 export const DISTILL_TIMEOUT_MS = 20_000;
 
 export interface DistillRequest {
+  /** Stable identity for durable model-budget admission and spend attribution. */
+  readonly requestId?: string;
+  /** The Turn's profile, so this supporting call cannot establish a different Run budget. */
+  readonly modelProfileId?: string;
   readonly toolName: string;
   readonly arguments: unknown;
   readonly output: unknown;

@@ -29,6 +29,8 @@ export interface Observation {
     readonly mediaTypeExact: boolean;
     readonly filenameExact: boolean;
   }[];
+  /** Text in the final request handed to the model after loop-owned Context compaction. */
+  readonly modelPrompt?: string;
   readonly toolCalls: readonly { readonly name: string; readonly arguments: unknown }[];
   /** L2 scripted denials, including the arguments whose authorization was refused. */
   readonly toolDenials?: readonly {
@@ -429,6 +431,14 @@ function evaluate(a: Expectation, obs: Observation): { passed: boolean; detail: 
       return obs.systemPrompt.includes(a.text)
         ? { passed: false, detail: `assembled prompt contains ${show(a.text)} but should not` }
         : { passed: true, detail: "absent from the assembled prompt" };
+
+    case "model_prompt_contains":
+      if (obs.modelPrompt === undefined) {
+        return { passed: false, detail: "this tier does not observe the model request" };
+      }
+      return obs.modelPrompt.includes(a.text)
+        ? { passed: true, detail: "present in the final model request" }
+        : { passed: false, detail: `final model request does not contain ${show(a.text)}` };
 
     case "prompt_attaches":
     case "prompt_omits_attachment": {

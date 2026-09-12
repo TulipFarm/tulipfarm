@@ -7,6 +7,8 @@ import type { AgentLoopEvent, AgentLoopOutcome } from "./contract";
  * sees only the persisted text history and has no record that any Tool call ever happened.
  */
 export interface AgentLoopResumeState {
+  /** Compacted base Context, persisted so resume reads the exact same summary. */
+  readonly baseMessages?: readonly ModelMessage[];
   /** Transcript messages the loop appended beyond `AgentLoopInput.messages`. */
   readonly messages: readonly ModelMessage[];
   /** Keep this transcript after terminal delivery so a later attempt can retry from it. */

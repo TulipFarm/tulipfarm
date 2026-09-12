@@ -14,6 +14,7 @@ describe("BUILT_IN_AGENTS", () => {
   it("holds every shipped agent", () => {
     expect(BUILT_IN_AGENTS.map((agent) => agent.id).sort()).toEqual([
       "chat_title",
+      "context_compactor",
       "effort_classifier",
       "memory_curator",
       "onboarding_personalizer",

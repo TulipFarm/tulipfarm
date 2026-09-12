@@ -1,16 +1,30 @@
-import { DEFAULT_GUARDRAILS, type GuardrailsService } from "@tulipfarm/agent-runtime";
+import {
+  compactModelContext,
+  DEFAULT_GUARDRAILS,
+  estimateModelUsage,
+  type GuardrailsService,
+  type ModelInvocationRequest,
+  type ModelMessage,
+  type ModelPort,
+} from "@tulipfarm/agent-runtime";
 import type { AccessGrant } from "@tulipfarm/authz";
+import { createContextCompactor } from "@tulipfarm/built-in-agents";
 import { MAX_HISTORY_TOKENS, MAX_TOOL_STEPS } from "@tulipfarm/memory";
 import type { TelemetryPort } from "@tulipfarm/observability";
 import type { ArtifactService, ChildLinkAncestry } from "@tulipfarm/run-kernel";
-import { canonicalHash, contentText, textContent } from "@tulipfarm/schema";
+import {
+  canonicalHash,
+  contentText,
+  DEFAULT_MODEL_CONTEXT_WINDOW_TOKENS,
+  textContent,
+} from "@tulipfarm/schema";
 import type { BundledSkill, SoulLoader, SoulSkill } from "@tulipfarm/soul";
 import { DEFAULT_ASSISTANT_NAME } from "@tulipfarm/soul";
 import type { ToolAvailability } from "@tulipfarm/tool-broker";
 import { ok, type ToolDef } from "@tulipfarm/tool-host";
 import { describe, expect, it, vi } from "vitest";
 import { ToolRegistry } from "../broker/tool-adapter";
-import type { PersistedMessage } from "../conversations/service";
+import type { ContextMessage, PersistedMessage } from "../conversations/service";
 import type { TeamAssetService } from "../team-assets/service";
 import {
   BUSINESS_ID,
@@ -42,8 +56,8 @@ const AUTHORITY: TurnAuthority = {
 };
 
 function message(
-  overrides: Partial<Omit<PersistedMessage, "content">> & { content?: string } = {}
-): PersistedMessage {
+  overrides: Partial<Omit<ContextMessage, "content">> & { content?: string } = {}
+): ContextMessage {
   const { content, ...rest } = overrides;
   return {
     id: "message-1",
@@ -114,6 +128,7 @@ function makeResolver(
     memoryFails?: boolean;
     customInstructions?: string;
     authorityLayers?: SubjectAuthorityLayers;
+    contextSummary?: { readonly throughMessageId: string; readonly summary: string };
   } = {},
   channelDeliveries?: ChannelDeliveryReader
 ) {
@@ -138,6 +153,7 @@ function makeResolver(
             ])
           ),
           surfaceComponents: new Map(),
+          llmConfig: options.manifest?.llm ?? null,
           manifest: options.manifest ?? null,
         } as unknown as SoulLoader);
   const bundledSkills =
@@ -152,6 +168,9 @@ function makeResolver(
         read: async () => ({ content: options.request ?? {} }),
       } as unknown as ArtifactService,
       store,
+      ...(options.contextSummary === undefined
+        ? {}
+        : { contextSummaries: { find: async () => options.contextSummary } }),
       toolRegistry: registry,
       ...(options.guardrails ? { guardrails: options.guardrails } : {}),
       ...(options.now ? { now: options.now } : {}),
@@ -258,6 +277,76 @@ describe("ChatTurnContextResolver", () => {
     expect(context.contextDigest).not.toBe("");
   });
 
+  it("shows abandoned attempt evidence to the model with its non-canonical status", async () => {
+    const { resolver } = makeResolver({
+      messages: [
+        message({ id: "message-old-user", turnId: "turn-old", content: "do the work" }),
+        message({
+          id: "message-abandoned",
+          turnId: "turn-old",
+          role: "assistant",
+          content: "I changed the first file",
+          attempt: 1,
+          attemptStatus: "superseded",
+        }),
+        message({
+          id: "message-complete",
+          turnId: "turn-old",
+          role: "assistant",
+          content: "The retry completed the work",
+          attempt: 2,
+          attemptStatus: "succeeded",
+        }),
+        message({ id: "message-1", content: "what happened?" }),
+      ],
+    });
+
+    const context = await resolver.resolve(AUTHORITY);
+
+    expect(context.messages.slice(1)).toEqual([
+      { role: "user", content: textContent("do the work") },
+      {
+        role: "assistant",
+        content: textContent(
+          "[Earlier assistant attempt: superseded by a retry; not the final answer]\n" +
+            "I changed the first file"
+        ),
+      },
+      { role: "assistant", content: textContent("The retry completed the work") },
+      { role: "user", content: textContent("what happened?") },
+    ]);
+  });
+
+  it("keeps participant-visible Tool and Surface evidence in model-facing attempt history", async () => {
+    const { resolver } = makeResolver({
+      messages: [
+        message({
+          id: "message-failed",
+          turnId: "turn-old",
+          role: "assistant",
+          content: "I could not finish.",
+          attempt: 1,
+          attemptStatus: "failed",
+          metadata: {
+            toolCalls: [{ callId: "call-1", name: "record_update", outcome: "ok" }],
+            surfaces: [{ artifactId: "artifact-1", revision: 3 }],
+          },
+        }),
+        message({ id: "message-1", content: "continue safely" }),
+      ],
+    });
+
+    const context = await resolver.resolve(AUTHORITY);
+    const history = context.messages
+      .slice(1)
+      .map((entry) => contentText(entry.content))
+      .join("\n");
+
+    expect(history).toContain("[Earlier assistant attempt: failed; not the final answer]");
+    expect(history).toContain("Tool record_update (call-1): ok");
+    expect(history).toContain("Surface artifact-1 revision 3");
+  });
+
   it("puts no clock in the prompt — the Agent must call get_current_time for one", async () => {
     const { resolver } = makeResolver({ now: () => new Date("2026-08-08T11:12:00Z") });
 
@@ -354,8 +443,7 @@ describe("ChatTurnContextResolver", () => {
     expect(context.tools.map((tool) => tool.name)).toEqual(["record_create", "present"]);
   });
 
-  it("drops the oldest history first when the transcript outgrows the budget", async () => {
-    // Two messages that cannot both fit, so the budget has to choose between them.
+  it("hands full durable history to the Worker for budgeted model-facing compaction", async () => {
     const oversized = "x".repeat(MAX_HISTORY_TOKENS * 3);
     const { resolver } = makeResolver({
       messages: [
@@ -366,10 +454,131 @@ describe("ChatTurnContextResolver", () => {
 
     const context = await resolver.resolve(AUTHORITY);
 
-    // The Agent's instructions outrank the transcript, so they are never what gets dropped; of the
-    // history, the message the user just sent survives and the start of the conversation goes.
-    expect(context.messages.map((entry) => entry.role)).toEqual(["system", "user"]);
-    expect(contentText(context.messages[1]?.content ?? []).startsWith("new")).toBe(true);
+    expect(context.messages.map((entry) => entry.role)).toEqual(["system", "user", "user"]);
+    expect(contentText(context.messages[1]?.content ?? []).startsWith("old")).toBe(true);
+    expect(contentText(context.messages[2]?.content ?? []).startsWith("new")).toBe(true);
+    expect(context.contextTokenBudget).toBeLessThan(DEFAULT_MODEL_CONTEXT_WINDOW_TOKENS);
+    expect(context.compacted).toBe(false);
+  });
+
+  it("bounds ordinary and summary requests to the selected route's smallest context window", async () => {
+    const manifest = {
+      llm: {
+        tiers: {
+          quick: {
+            providers: [
+              {
+                provider: "custom",
+                model: "small-primary",
+                api_key_ref: "env://TEST_KEY",
+                spec: { max_input_tokens: 8_192 },
+              },
+              {
+                provider: "custom",
+                model: "small-fallback",
+                api_key_ref: "env://TEST_KEY",
+                spec: { max_input_tokens: 6_000 },
+              },
+            ],
+          },
+          standard: {
+            providers: [
+              {
+                provider: "custom",
+                model: "small-standard",
+                api_key_ref: "env://TEST_KEY",
+                spec: { max_input_tokens: 8_192 },
+              },
+            ],
+          },
+          complex: {
+            providers: [
+              {
+                provider: "custom",
+                model: "small-complex",
+                api_key_ref: "env://TEST_KEY",
+                spec: { max_input_tokens: 8_192 },
+              },
+            ],
+          },
+        },
+      },
+    };
+    const { resolver } = makeResolver({
+      request: { model: "fast" },
+      manifest,
+      messages: [
+        message({
+          id: "message-old",
+          turnId: "turn-previous",
+          content: `historical fact ${"x".repeat(48_000)}`,
+        }),
+        message({ id: "message-1", content: "Use the saved historical fact." }),
+      ],
+    });
+    const context = await resolver.resolve(AUTHORITY);
+    const summaryRequests: ModelInvocationRequest[] = [];
+    const summaryModel: ModelPort = {
+      invoke: async (request) => {
+        summaryRequests.push(request);
+        return {
+          requestId: request.requestId,
+          output: { kind: "text", text: "The historical fact remains available." },
+          usage: { inputTokens: 10, outputTokens: 5 },
+        };
+      },
+    };
+
+    const compacted = await compactModelContext({
+      requestId: "small-profile",
+      modelProfileId: context.modelProfileId,
+      messages: context.messages as readonly ModelMessage[],
+      sourceMessageIds: context.contextMessageIds,
+      pinnedMessageCount: context.pinnedMessageCount ?? 0,
+      budgetTokens: context.contextTokenBudget ?? MAX_HISTORY_TOKENS,
+      compactor: createContextCompactor(summaryModel),
+      signal: new AbortController().signal,
+    });
+    const ordinary = estimateModelUsage({
+      requestId: "ordinary-small-profile",
+      modelProfileId: context.modelProfileId,
+      messages: compacted ?? (context.messages as readonly ModelMessage[]),
+      tools: context.tools,
+    });
+
+    expect(context.contextTokenBudget).toBeLessThan(6_000);
+    expect(summaryRequests.length).toBeGreaterThan(0);
+    expect(
+      summaryRequests.every((request) => {
+        const usage = estimateModelUsage(request);
+        return usage.inputTokens + usage.outputTokens <= 6_000;
+      })
+    ).toBe(true);
+    expect(ordinary.inputTokens + ordinary.outputTokens).toBeLessThanOrEqual(6_000);
+  });
+
+  it("reads only messages after a durable Context summary cursor", async () => {
+    const { resolver, store } = makeResolver({
+      contextSummary: {
+        throughMessageId: "message-old",
+        summary: "The earlier request established ticket T-42.",
+      },
+      messages: [
+        message({ id: "message-old", turnId: "turn-previous", content: "old request" }),
+        message({ id: "message-1", content: "finish ticket T-42" }),
+      ],
+    });
+    const history = vi.spyOn(store, "listContextMessages");
+
+    const context = await resolver.resolve(AUTHORITY);
+
+    expect(history).toHaveBeenCalledWith(BUSINESS_ID, CONVERSATION_ID, "message-1", "message-old");
+    expect(context.messages.map((entry) => contentText(entry.content))).toEqual([
+      expect.any(String),
+      expect.stringContaining("The earlier request established ticket T-42."),
+      "finish ticket T-42",
+    ]);
+    expect(context.contextMessageIds).toEqual([null, null, "message-1"]);
     expect(context.compacted).toBe(true);
   });
 

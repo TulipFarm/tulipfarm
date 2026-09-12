@@ -22,7 +22,10 @@ export class TurnCancelled extends Error {
    *   Carried because a stop does not refund the tokens spent before it: dropping them here would
    *   let a Run that is started and stopped repeatedly spend against a budget it never charges.
    */
-  constructor(readonly usage?: ModelUsage) {
+  constructor(
+    readonly usage?: ModelUsage,
+    readonly budgetSettled = false
+  ) {
     super("the Run was cancelled while the model call was in flight");
     this.name = "TurnCancelled";
   }

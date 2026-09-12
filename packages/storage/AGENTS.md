@@ -59,7 +59,11 @@ publication, approvals, integrations, events, and blob/vector/cache/queue ports.
 - Bundle retention must be negative-list safe: delete only when no active alias, activation record,
   Run, Audit event, or non-dead-lettered publication references the digest.
 - Run `source` selects the Worker executor independently from the canonical Routine in `bundle`.
-- Run budgets are write-once; concurrency and wait resolution are lock-guarded.
+- Run budgets are write-once. Model calls reserve configured token and priced-cost headroom before
+  provider admission, then atomically release the reservation and settle actual usage.
+- Conversation Context summaries advance monotonically by source Message cursor; exact Messages
+  remain the audit record and are never replaced.
+- Run concurrency and wait resolution are lock-guarded.
 - Agent-loop checkpoints replace their JSON resume state while counters only increase; unfinished
   Tool batches, terminal receipts, and cursors must round-trip unchanged across process
   reconstruction. Writes, acknowledgements, and clears are fenced by the Run's per-claim lease

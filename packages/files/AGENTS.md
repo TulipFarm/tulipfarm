@@ -18,7 +18,7 @@ an **Artifact** is a different entity, in `packages/storage`.
 | `src/limits.ts` | Byte/count caps, type allowlist, textual split, read caps, `BUSINESS_PRINCIPAL_ID` |
 | `src/sniff.ts` · `src/filename.ts` | Magic-byte `resolveMediaType`; safe-to-store filenames |
 | `src/dimensions.ts` · `src/bound.ts` | Header-only pixel size; `boundImage` refuse-or-downscale |
-| `src/extract.ts` | The one answer to "what is the text of this File". Lazy-loads the PDF parser. |
+| `src/extract.ts` | File text plus image/PDF dimensions used for model-input accounting. Lazy-loads the PDF parser. |
 | `src/office-preview.ts` · `src/delimited-preview.ts` | Reading OOXML and separated-value files back into `PreviewBlock`s for the viewer |
 | `src/render.ts` | Markdown → PDF, safe structured-text validation/serialization, pass-through formats, and render bounds |
 | `src/turn-attachments.ts` | Which Files a Turn may send, and the two-gate read of their bytes |

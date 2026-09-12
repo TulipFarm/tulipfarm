@@ -29,6 +29,8 @@ export type Expectation =
     }
   /** L2 only. No provider-facing binary part came from this declared File. */
   | { readonly kind: "provider_prompt_omits_file"; readonly fileId: string }
+  /** L2 only. The final model request contains model-facing Context after loop compaction. */
+  | { readonly kind: "model_prompt_contains"; readonly text: string }
   | { readonly kind: "prompt_omits"; readonly text: string }
   | { readonly kind: "tool_called"; readonly name: string }
   | { readonly kind: "tool_not_called"; readonly name: string }
@@ -415,6 +417,8 @@ export interface EvalCase {
    * model-produced batch, then retries the same loop input against the saved checkpoint.
    */
   readonly checkpointCrash?: "after_first_tool_result";
+  /** L2 only. Forces the production loop's Context compaction seam at this token budget. */
+  readonly contextTokenBudget?: number;
   /**
    * L3 only. Roles an admin has assigned this Case's Agent, seeded as `role_assignments` rows.
    *

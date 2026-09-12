@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { join } from "node:path";
-import { createToolResultDistiller } from "@tulipfarm/built-in-agents";
+import { createContextCompactor, createToolResultDistiller } from "@tulipfarm/built-in-agents";
 import {
   BatchingLogSink,
   describeError,
@@ -40,6 +40,7 @@ import {
   ArtifactStore,
   BudgetStore,
   ChildLinkAncestryStore,
+  ConversationContextSummaryStore,
   createBlobPort,
   EventStore,
   IntegrationStore,
@@ -57,6 +58,7 @@ import { PgEffectStore } from "@tulipfarm/tool-broker";
 import { ToolApprovalService } from "@tulipfarm/tool-host";
 import {
   type ChatExecutorOptions,
+  type ChatModelFactoryInput,
   createChatExecutor,
   RunStoreStateTransitions,
 } from "@tulipfarm/turn-executor";
@@ -234,6 +236,7 @@ export async function main(): Promise<void> {
   const eventStore = new EventStore(transactions, randomUUID);
   const runEventStore = new RunEventStore(transactions);
   const budgetStore = new BudgetStore(transactions);
+  const conversationContextSummaries = new ConversationContextSummaryStore(pool);
   const childAncestry = new ChildLinkAncestryStore(pool);
   // Durable Agent-loop counters: the one store both Agent-loop sites share, so an approval park
   // reloads spent Tool-call and repair budget instead of restarting it at zero.
@@ -386,29 +389,58 @@ export async function main(): Promise<void> {
     traces: aiTraces,
   });
   const observedToolDispatch = observeToolDispatch(toolDispatch, spendSink);
+  const builtInModelPort = ({
+    events,
+    budgets,
+    businessId,
+    runId,
+    turnId,
+    conversationId,
+  }: ChatModelFactoryInput) =>
+    new LlmModelPort({
+      model: (selector, requirements, inference, principal, gate) =>
+        llm.resolveModel(selector, requirements, inference, principal, gate),
+      signal,
+      gate: modelGate,
+      spend: spendSink,
+      conversationId,
+      runId,
+      turnId,
+      routingEvents: events,
+      budgets: {
+        open: (limits) =>
+          budgets.open({
+            businessId,
+            runId,
+            limits,
+            exhaustionPolicy: MODEL_BUDGET_EXHAUSTION_POLICY,
+          }),
+        reserve: ({ reservationId, amounts }) =>
+          budgets.reserve({ businessId, runId, reservationId, amounts }),
+        settle: ({ reservationId, amounts, consumeReservation }) =>
+          budgets.settle({ businessId, runId, reservationId, amounts, consumeReservation }),
+      },
+    });
 
   // The intermediary the network Tools deliberately do not contain: `web_fetch` and `api_request`
   // return whole responses, and the judgement about which parts matter happens once, here, on the
   // cheapest rung, against what the Turn actually asked.
   // Built per Turn, not once: this is a real provider call, and the case for making it here
   // rather than inside the Tool rests on it being attributed and gated like any other.
-  const toolResultDistiller = ({
-    runId,
-    conversationId,
-  }: {
-    runId: string;
-    conversationId: string;
-  }) =>
+  const toolResultDistiller = (input: ChatModelFactoryInput) =>
     createToolResultDistiller({
       models: llm,
+      modelPort: builtInModelPort(input),
       log: logger,
-      spend: spendSink,
-      gate: modelGate,
-      attribution: { runId, conversationId },
+      attribution: { runId: input.runId, conversationId: input.conversationId },
     });
+  const contextCompactor = (input: ChatModelFactoryInput) =>
+    createContextCompactor(builtInModelPort(input));
 
   const chatExecutorOptions = {
     distiller: toolResultDistiller,
+    contextCompactor,
+    contextSummaries: conversationContextSummaries,
     tools: observedToolDispatch,
     context: turnHost,
     attachments: turnHost,
@@ -445,6 +477,10 @@ export async function main(): Promise<void> {
               limits,
               exhaustionPolicy: MODEL_BUDGET_EXHAUSTION_POLICY,
             }),
+          reserve: ({ reservationId, amounts }) =>
+            budgets.reserve({ businessId, runId, reservationId, amounts }),
+          settle: ({ reservationId, amounts, consumeReservation }) =>
+            budgets.settle({ businessId, runId, reservationId, amounts, consumeReservation }),
         },
       }),
     spend: spendSink,
@@ -523,17 +559,24 @@ export async function main(): Promise<void> {
           tools: observedToolDispatch,
           catalog: (runId, agentName) => turnHost.agentTools(runId, agentName),
           // Chain, routing event, and budget are already selected/opened by the Routine port.
-          model: ({ models, routing, runId, turnId }) =>
+          model: ({ models, routing, budgetLimits, businessId, runId, turnId }) =>
             new LlmModelPort({
               // Through `resolveChain`, so a Routine call is priced by the same authority as a Chat
               // call. Building the resolution inline here is what left Routine spend reported free.
               model: async (_selector, _requirements, _inference, principal, gate) =>
-                llm.resolveChain(models, routing, principal, gate),
+                llm.resolveChain(models, routing, principal, gate, budgetLimits),
               signal,
               gate: modelGate,
               spend: spendSink,
               runId,
               turnId,
+              budgets: {
+                open: async () => {},
+                reserve: ({ reservationId, amounts }) =>
+                  budgetStore.reserve(businessId, runId, reservationId, amounts),
+                settle: ({ reservationId, amounts, consumeReservation }) =>
+                  budgetStore.settle(businessId, runId, reservationId, amounts, consumeReservation),
+              },
             }),
           events: runEventStore,
           budgets: budgetStore,
@@ -551,6 +594,7 @@ export async function main(): Promise<void> {
     recovery: new RunRecoveryManager(runStore, recoveryEffects),
     businessId: config.businessId,
     owner: config.owner,
+    maxLifetimeMs: config.runMaxLifetimeMs,
     // Every co-located Tool call this process makes happens inside this handler and is awaited
     // by it, so its settlement — succeeded, failed, parked on a wait, cancelled, or thrown — is
     // the one point where no further dispatch can follow for this Run. Evicting here bounds the

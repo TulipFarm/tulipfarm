@@ -1,6 +1,7 @@
 import type {
   AgentLoopInput,
   AgentLoopLimits,
+  AttachmentVisual,
   ExposedTool,
   ModelMessage,
   ModelRequirementsPolicy,
@@ -52,6 +53,10 @@ export interface ResolvedTurnContext {
   /** The validated guardrail policy `guardrailDigest` names, rebuilt into guards here. */
   readonly guardrailPolicy: Record<string, unknown>;
   readonly messages: readonly ModelMessage[];
+  readonly pinnedMessageCount?: number;
+  readonly contextTokenBudget?: number;
+  /** Source Message ids aligned to `messages`; null entries are synthesized Context. */
+  readonly contextMessageIds?: readonly (string | null)[];
   /**
    * The Files this Turn attached, named rather than carried.
    *
@@ -99,6 +104,11 @@ export interface TurnAttachmentPort {
    * It never means screening was skipped.
    */
   extract(mediaType: string, bytes: Uint8Array): Promise<string | undefined>;
+  /** Text plus content-derived visual dimensions for model Context and budget estimates. */
+  inspect?(
+    mediaType: string,
+    bytes: Uint8Array
+  ): Promise<{ readonly text?: string; readonly visual?: AttachmentVisual }>;
 }
 
 /** A fetched File paired with the text the guards screen for it, if it offered any. */
@@ -249,6 +259,15 @@ export class TurnDriver {
       contextDigest: context.contextDigest,
       guardrailDigest: context.guardrailDigest,
       messages: guarded.messages,
+      ...(context.pinnedMessageCount === undefined
+        ? {}
+        : { pinnedMessageCount: context.pinnedMessageCount }),
+      ...(context.contextTokenBudget === undefined
+        ? {}
+        : { contextTokenBudget: context.contextTokenBudget }),
+      ...(context.contextMessageIds === undefined
+        ? {}
+        : { contextMessageIds: context.contextMessageIds }),
       ...(attachments.length === 0 ? {} : { attachments }),
       tools: context.tools,
       limits: context.limits,
@@ -343,8 +362,21 @@ export class TurnDriver {
         const data = await port.read(runId, ref.fileId);
         if (data === undefined) return undefined;
         // Extracted as the type the Context authorized, not as whatever the bytes claim to be.
-        const text = await port.extract(ref.mediaType, data);
-        return { file: { ...ref, data }, ...(text === undefined ? {} : { text }) };
+        const resolvedInspection =
+          port.inspect === undefined
+            ? { text: await port.extract(ref.mediaType, data) }
+            : await port.inspect(ref.mediaType, data);
+        return {
+          file: {
+            ...ref,
+            data,
+            ...(resolvedInspection.text === undefined ? {} : { text: resolvedInspection.text }),
+            ...(resolvedInspection.visual === undefined
+              ? {}
+              : { visual: resolvedInspection.visual }),
+          },
+          ...(resolvedInspection.text === undefined ? {} : { text: resolvedInspection.text }),
+        };
       })
     );
     return fetched.filter((each) => each !== undefined);

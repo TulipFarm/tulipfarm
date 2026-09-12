@@ -1,5 +1,6 @@
 import { RunInterruptedError } from "@tulipfarm/run-kernel";
 import { ajv, textContent } from "@tulipfarm/schema";
+import { estimateAttachmentTokens } from "../models";
 import type {
   ModelInvocationRequest,
   ModelInvocationResult,
@@ -10,6 +11,7 @@ import { ModelInvocationError } from "../ports";
 import { chargeModelUsage } from "./budget";
 import { type CancelWatch, TurnCancelled, watchForCancel } from "./cancel";
 import type { AgentLoopCheckpoint } from "./checkpoint";
+import { compactModelContext } from "./compaction";
 import type {
   AgentLoopDependencies,
   AgentLoopEvent,
@@ -112,7 +114,9 @@ export class AgentLoop {
     // re-assembles the participant-visible history each attempt, and only what the loop itself
     // added — proposed Tool calls and their results — is missing from it.
     const recovered = resumed?.resume;
-    const messages: ModelMessage[] = [...input.messages, ...(recovered?.messages ?? [])];
+    let baseMessages = [...(recovered?.baseMessages ?? input.messages)];
+    let hasCompactedBase = recovered?.baseMessages !== undefined;
+    const messages: ModelMessage[] = [...baseMessages, ...(recovered?.messages ?? [])];
     // Resolved before the loop appends anything. `messages` grows to hold this loop's own repair
     // prompts, which carry the `user` role and would otherwise become the summariser's ask.
     const participantAsk = latestAsk(input.messages);
@@ -230,7 +234,8 @@ export class AgentLoop {
       pendingCall?: AgentLoopResumeState["pendingCall"],
       unfinishedBatch?: AgentLoopResumeState["pendingBatch"]
     ): AgentLoopResumeState => ({
-      messages: messages.slice(input.messages.length),
+      messages: messages.slice(baseMessages.length),
+      ...(hasCompactedBase ? { baseMessages } : {}),
       ...(recovered?.retryAttempt === undefined ? {} : { retryAttempt: recovered.retryAttempt }),
       ...(pendingCall === undefined ? {} : { pendingCall }),
       ...(unfinishedBatch === undefined ? {} : { pendingBatch: unfinishedBatch }),
@@ -374,7 +379,10 @@ export class AgentLoop {
         // A stop does not refund what the provider already burned, so whatever partial usage the
         // failure carried is handed on rather than dropped with the error it came in.
         if (watch.cancelled()) {
-          throw new TurnCancelled(error instanceof ModelInvocationError ? error.usage : undefined);
+          throw new TurnCancelled(
+            error instanceof ModelInvocationError ? error.usage : undefined,
+            error instanceof ModelInvocationError && error.budgetSettled
+          );
         }
         throw error;
       }
@@ -556,6 +564,8 @@ export class AgentLoop {
           // call in this Turn already is — budgeted, logged, and visible as second-hand.
           const distilled = await distilledPayload(
             {
+              requestId: `${input.runId}:${input.stateId}:distill:${call.callId}`,
+              modelProfileId: input.modelProfileId,
               toolName: call.name,
               arguments: call.arguments,
               output,
@@ -1063,6 +1073,57 @@ export class AgentLoop {
         this.deps.cancelPollMs,
         input.signal
       );
+      if (input.contextTokenBudget !== undefined && this.deps.contextCompactor !== undefined) {
+        const attachmentTokens = attachments.reduce(
+          (total, attachment) => total + estimateAttachmentTokens(attachment),
+          0
+        );
+        let compacted: readonly ModelMessage[] | undefined;
+        try {
+          compacted = await compactModelContext({
+            requestId: `${input.runId}:${input.stateId}:compact:${counters.iterations}`,
+            modelProfileId: input.modelProfileId,
+            messages,
+            ...(input.contextMessageIds === undefined ||
+            hasCompactedBase ||
+            messages.length !== input.messages.length
+              ? {}
+              : { sourceMessageIds: input.contextMessageIds }),
+            pinnedMessageCount: input.pinnedMessageCount ?? 0,
+            budgetTokens: Math.max(1, input.contextTokenBudget - attachmentTokens),
+            ...(input.modelPolicy === undefined ? {} : { policy: input.modelPolicy }),
+            compactor: this.deps.contextCompactor,
+            signal: watch.signal,
+          });
+        } catch (error) {
+          watch.stop();
+          if (
+            error instanceof ModelInvocationError &&
+            error.usage !== undefined &&
+            !error.budgetSettled
+          ) {
+            await chargeUsage(error.usage);
+          }
+          if (watch.interrupted()) throw new RunInterruptedError(input.signal?.reason);
+          if (watch.cancelled()) {
+            return finish({ status: "cancelled", ...counters }, "cancelled");
+          }
+          const reason =
+            error instanceof ModelInvocationError ? error.reason : ("model_error" as const);
+          return finish({ status: "failed", reason, ...counters }, "failed");
+        }
+        if (compacted !== undefined) {
+          messages.splice(0, messages.length, ...compacted);
+          baseMessages = [...messages];
+          hasCompactedBase = true;
+          try {
+            await checkpoint();
+          } catch (error) {
+            watch.stop();
+            throw error;
+          }
+        }
+      }
       const request: ModelInvocationRequest = {
         requestId: `${input.runId}:${input.stateId}:${counters.iterations}`,
         modelProfileId: input.modelProfileId,
@@ -1091,7 +1152,7 @@ export class AgentLoop {
         if (error instanceof TurnCancelled) {
           // Charged on the way out for the same reason a failed call is: a Run started and stopped
           // over and over would otherwise spend against a budget it never touches.
-          if (error.usage !== undefined) await chargeUsage(error.usage);
+          if (error.usage !== undefined && !error.budgetSettled) await chargeUsage(error.usage);
           return finish({ status: "cancelled", ...counters }, "cancelled");
         }
         const reason =
@@ -1111,7 +1172,11 @@ export class AgentLoop {
         // A failed call still spent whatever the provider consumed before it stopped. Charging it
         // before finishing is what stops a Run that fails every iteration from spending without
         // limit against a budget it never touches.
-        if (error instanceof ModelInvocationError && error.usage !== undefined) {
+        if (
+          error instanceof ModelInvocationError &&
+          error.usage !== undefined &&
+          !error.budgetSettled
+        ) {
           await chargeUsage(error.usage);
         }
         return finish(
@@ -1135,7 +1200,7 @@ export class AgentLoop {
         watch.stop();
       }
 
-      const spend = await chargeUsage(result.usage);
+      const spend = result.budgetSettled ? "ok" : await chargeUsage(result.usage);
       if (spend === "exhausted") {
         return finish({ status: "failed", reason: "budget_exhausted", ...counters }, "failed");
       }

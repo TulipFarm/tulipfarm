@@ -77,6 +77,14 @@ describe("loadCorpus", () => {
     expect(corpus.hash).toHaveLength(64);
   });
 
+  it("accepts a positive L2 Context token budget and rejects it on L3", async () => {
+    const bounded = { ...valid("bounded"), contextTokenBudget: 2_300 };
+    await expect(load(corpusDir({ "bounded.json": bounded }))).resolves.toBeDefined();
+    await expect(
+      load(corpusDir({ "persisted.json": { ...bounded, id: "persisted", tier: "l3" } }))
+    ).rejects.toThrow(/"contextTokenBudget" needs tier "l2"/);
+  });
+
   it("ignores files that are not .json", async () => {
     const dir = corpusDir({ "a.json": valid("alpha"), "README.md": "not a case" });
     expect((await load(dir)).cases).toHaveLength(1);

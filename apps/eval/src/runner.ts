@@ -12,8 +12,9 @@ import {
   type ToolDispatchRequest,
   type ToolDispatchResult,
 } from "@tulipfarm/agent-runtime";
+import { createContextCompactor } from "@tulipfarm/built-in-agents";
 import { splitPrompt } from "@tulipfarm/model-adapter";
-import { textContent } from "@tulipfarm/schema";
+import { contentText, textContent } from "@tulipfarm/schema";
 import { autonomyBoundedDispatch, capabilityBoundedDispatch } from "./autonomy.ts";
 import { type EvalCase, LOOP_LIMITS, readableLibrary, synthesizeAttachment } from "./case.ts";
 import type { Corpus } from "./corpus.ts";
@@ -399,6 +400,7 @@ async function runTrial(
   // whole: by the time the loop has dispatched them, four calls from one message and four calls
   // from four messages are the same flat list.
   const toolCallBatches: number[] = [];
+  const modelPrompts: string[] = [];
   let modelCalls = 0;
   const replay =
     evalCase.checkpointCrash === "after_first_tool_result"
@@ -407,6 +409,7 @@ async function runTrial(
   const model: ModelPort = {
     invoke: async (request) => {
       modelCalls += 1;
+      modelPrompts.push(request.messages.map((message) => contentText(message.content)).join("\n"));
       const converted = splitPrompt(request.messages, request.attachments);
       for (const id of converted.attached) {
         attachedFileIds.add(id);
@@ -454,6 +457,7 @@ async function runTrial(
     events: { append: async () => {} },
     budget: { consume: async () => ({ outcome: "allowed" }) },
     isCancelled: async () => false,
+    contextCompactor: createContextCompactor(model),
     log,
   });
 
@@ -486,6 +490,9 @@ async function runTrial(
       messages: [{ role: "system", content: textContent(systemPrompt) }, ...guarded.messages],
       tools: exposedToolsFor(evalCase),
       limits: LOOP_LIMITS,
+      ...(evalCase.contextTokenBudget === undefined
+        ? {}
+        : { pinnedMessageCount: 1, contextTokenBudget: evalCase.contextTokenBudget }),
       ...(attached.length === 0 ? {} : { attachments: attached }),
     };
 
@@ -509,6 +516,7 @@ async function runTrial(
       systemPrompt,
       attachedFileIds: [...attachedFileIds],
       providerPromptFiles: providerFiles,
+      ...(modelPrompts.at(-1) === undefined ? {} : { modelPrompt: modelPrompts.at(-1) }),
       toolCalls: tools.calls,
       toolDenials: tools.denials,
       toolCallBatches,

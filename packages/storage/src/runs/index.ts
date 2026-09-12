@@ -2,10 +2,15 @@ export type {
   BudgetConsumeOutcome,
   BudgetConsumeResult,
   BudgetExhaustionPolicy,
+  BudgetReservationResult,
   OpenBudgetInput,
   PersistedBudget,
 } from "./budget-store";
-export { BUDGET_STORAGE_STATEMENTS, BudgetStore } from "./budget-store";
+export {
+  BUDGET_RESERVATION_STORAGE_STATEMENTS,
+  BUDGET_STORAGE_STATEMENTS,
+  BudgetStore,
+} from "./budget-store";
 export type {
   ChildAuthorityBinding,
   ChildAuthorityRecord,

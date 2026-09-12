@@ -27,6 +27,7 @@ import {
   type JsonObject,
   LIMIT_KEYS,
   type LimitKey,
+  type ResolvedLimits,
   RunBudgetManager,
   type RunBudgetStore,
   type ScopedLimits,
@@ -138,11 +139,14 @@ export interface RoutineModelSelection {
   /** Configured endpoints, primary first, then their constraint-equivalent fallbacks. */
   readonly models: readonly ConfiguredModelRef[];
   /** The routing evidence already emitted for this State, so the port need not re-derive it. */
-  readonly routing: RunEventPayloads["model.routed"];
+  readonly routing: Extract<RunEventPayloads["model.routed"], { readonly outcome: "selected" }>;
+  readonly businessId: string;
   /** The spending Run, so this State's model calls reach the ledger attributed to it. */
   readonly runId: string;
   /** The State attempt treated as a Turn for telemetry. */
   readonly turnId: string;
+  /** Resolved Run limits used to reject a chain whose cost cannot be priced. */
+  readonly budgetLimits?: ResolvedLimits;
 }
 
 /** Run statuses that mean the question must stop being asked. */
@@ -423,6 +427,9 @@ export class BundleRoutineAgentPort implements RoutineAgentPort {
     });
     assertRunActive(request.signal);
     const routing = modelRoutingPayload(agent.spec.modelProfile, selection, budgetLimits);
+    if (routing.outcome !== "selected") {
+      return { kind: "unavailable", reason: "model_unknown_profile" };
+    }
     await events.emit("model.routed", routing, "model");
     assertRunActive(request.signal);
 
@@ -457,6 +464,8 @@ export class BundleRoutineAgentPort implements RoutineAgentPort {
       model: this.options.model({
         models: selection.chain.map(configuredModelRef),
         routing,
+        budgetLimits,
+        businessId: request.businessId,
         runId: request.runId,
         turnId: `${request.stateKey}:${request.attempt}`,
       }),

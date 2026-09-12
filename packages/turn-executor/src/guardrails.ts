@@ -1,4 +1,5 @@
 import {
+  type ContextCompactorPort,
   type GuardContext,
   GuardrailsService,
   isBlocked,
@@ -316,6 +317,30 @@ export class TurnGuardrails {
         // Not `undefined`: that means "no summary available" and leaves the caller holding the
         // raw result, which is the content this guard just refused.
         return { blocked: true };
+      },
+    };
+  }
+
+  guardCompactor(compactor: ContextCompactorPort, events: TurnEventWriter): ContextCompactorPort {
+    return {
+      compact: async (request, signal) => {
+        const summary = await compactor.compact(request, signal);
+        if (summary === undefined || summary.trim() === "") return summary;
+        const { service, ctx } = this.require();
+        const screened = await service.runToolResult(
+          { toolName: "context_compactor", text: summary },
+          ctx
+        );
+        if (!screened.blocked) return summary;
+        await this.record(
+          events,
+          "tool_result",
+          screened.guard,
+          screened.reason,
+          `compacted:${request.requestId}`,
+          false
+        );
+        return "[Older Context was withheld because it failed safety checks.]";
       },
     };
   }

@@ -6,6 +6,13 @@ export interface ModelMessage {
   readonly content: MessageContent;
 }
 
+export type AttachmentVisual =
+  | { readonly kind: "image"; readonly width: number; readonly height: number }
+  | {
+      readonly kind: "pdf";
+      readonly pages: readonly { readonly width: number; readonly height: number }[];
+    };
+
 /**
  * One File's bytes, resolved and re-authorized for this invocation.
  *
@@ -21,6 +28,8 @@ export interface ResolvedAttachment {
   readonly mediaType: string;
   readonly name: string;
   readonly data: Uint8Array;
+  /** Actual image or PDF-page dimensions used for a conservative visual-token estimate. */
+  readonly visual?: AttachmentVisual;
   /**
    * A File fetched after `file_read`, rather than one named by the Turn's own Message.
    *
@@ -80,6 +89,7 @@ export interface ModelInvocationRequest {
 }
 
 export type ModelInvocationFailureReason =
+  | "budget_exhausted"
   | "model_billing_inactive"
   | "model_authentication_failed"
   | "model_not_configured"
@@ -102,7 +112,9 @@ export class ModelInvocationError extends Error {
      */
     readonly usage?: ModelUsage,
     /** The provider model whose call began, when the adapter can know it. */
-    readonly modelId?: string
+    readonly modelId?: string,
+    /** True when the host already settled this usage against the Run's durable budget. */
+    readonly budgetSettled = false
   ) {
     super(reason, { cause });
     this.name = "ModelInvocationError";
@@ -155,6 +167,8 @@ export interface ModelInvocationResult {
   readonly output: ModelOutput;
   readonly usage: ModelUsage;
   readonly providerRequestId?: string;
+  /** True when the host already settled this call against the Run's durable budget. */
+  readonly budgetSettled?: boolean;
 }
 
 /** Stream ends with one `completed` chunk; adapters without streaming omit `stream`. */

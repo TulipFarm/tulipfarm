@@ -71,6 +71,54 @@ describe("HttpTurnHost", () => {
     expect(urls[0]).toContain("/api/v1/internal/turns/run-1/terminal");
   });
 
+  it("receives model-facing Context limits and durable Message cursors", async () => {
+    const response = {
+      agentId: "assistant",
+      subjectId: "user-1",
+      modelProfileId: "balanced",
+      contextDigest: "context-digest",
+      guardrailDigest: "guardrail-digest",
+      guardrailPolicy: {},
+      messages: [{ role: "user", content: [{ type: "text", text: "help" }] }],
+      pinnedMessageCount: 1,
+      contextTokenBudget: 12_000,
+      contextMessageIds: [null, "message-1"],
+      tools: [],
+      limits: { maxIterations: 4, maxToolCalls: 4, maxRepairAttempts: 2 },
+      compacted: false,
+    };
+    const { turns } = host(() => json(response));
+
+    await expect(
+      turns.resolve({
+        businessId: "business-1",
+        runId: "run-1",
+        stateKey: "state-1",
+        leaseGeneration: 1,
+        stateStatus: "running",
+        turnId: "turn-1",
+        conversationId: "conversation-1",
+        attempt: 1,
+      })
+    ).resolves.toMatchObject({
+      pinnedMessageCount: 1,
+      contextTokenBudget: 12_000,
+      contextMessageIds: [null, "message-1"],
+    });
+  });
+
+  it("derives visual dimensions from normal image bytes for model accounting", async () => {
+    const png = new Uint8Array(24);
+    png.set(new TextEncoder().encode("IHDR"), 12);
+    png.set([0, 0, 4, 0], 16);
+    png.set([0, 0, 3, 0], 20);
+    const { turns } = host(() => json({}));
+
+    await expect(turns.inspect("image/png", png)).resolves.toEqual({
+      visual: { kind: "image", width: 1_024, height: 768 },
+    });
+  });
+
   it("names the Turn a Run answers", async () => {
     const { turns } = host(() =>
       json({ turnId: "turn-1", conversationId: "conversation-1", attempt: 2 })

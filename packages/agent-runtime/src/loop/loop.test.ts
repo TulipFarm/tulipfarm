@@ -1,5 +1,6 @@
 import { contentText, textContent } from "@tulipfarm/schema";
 import { describe, expect, it, vi } from "vitest";
+import { estimateModelUsage } from "../models";
 import type {
   ModelInvocationRequest,
   ModelInvocationResult,
@@ -9,6 +10,7 @@ import type {
 } from "../ports";
 import { ModelInvocationError } from "../ports";
 import { InMemoryLoopCheckpointStore } from "./checkpoint";
+import type { ContextCompactorPort } from "./compaction";
 import type {
   AgentLoopEvent,
   AgentLoopInput,
@@ -200,6 +202,7 @@ function loop(options: {
   log?: { warn(obj: unknown, msg?: string): void };
   attachments?: LoopAttachmentPort;
   distiller?: ToolResultDistillerPort;
+  compactor?: ContextCompactorPort;
 }) {
   return new AgentLoop({
     model: options.model,
@@ -212,6 +215,7 @@ function loop(options: {
     ...(options.log === undefined ? {} : { log: options.log }),
     ...(options.attachments === undefined ? {} : { attachments: options.attachments }),
     ...(options.distiller === undefined ? {} : { distiller: options.distiller }),
+    ...(options.compactor === undefined ? {} : { contextCompactor: options.compactor }),
   });
 }
 
@@ -757,6 +761,197 @@ describe("AgentLoop", () => {
       { key: "tokens", amount: 10 },
       { key: "costMicros", amount: 1 },
     ]);
+  });
+
+  it("does not charge model usage a second time when the model authority already settled it", async () => {
+    const charges: { key: string; amount: number }[] = [];
+    const outcome = await loop({
+      model: scriptedModel({
+        ...textResult("done"),
+        usage: { inputTokens: 7, outputTokens: 3, costUsd: 0.000001 },
+        budgetSettled: true,
+      }),
+      budget: {
+        consume: async (charge) => {
+          charges.push(charge);
+          return { outcome: "allowed" };
+        },
+      },
+    }).run(input());
+
+    expect(outcome).toMatchObject({ status: "completed" });
+    expect(charges).toEqual([{ key: "iterations", amount: 1 }]);
+  });
+
+  it("sends a real summary and the exact latest request instead of silently dropping old Context", async () => {
+    const oldFact = `old:${"x".repeat(8_000)}`;
+    const latestRequest = "Use the current request exactly.";
+    const model = promptRecordingModel(textResult("done"));
+    const compacted: string[] = [];
+    const outcome = await loop({
+      model,
+      compactor: {
+        compact: async (request) => {
+          compacted.push(
+            ...request.messages
+              .map((message) => contentText(message.content))
+              .filter((text) => !text.startsWith("[Earlier compacted context:"))
+          );
+          return "The old discussion was compacted.";
+        },
+      },
+    }).run(
+      input({
+        messages: [
+          { role: "system", content: textContent("trusted instructions") },
+          { role: "user", content: textContent(oldFact) },
+          { role: "assistant", content: textContent("old reply") },
+          { role: "user", content: textContent(latestRequest) },
+        ],
+        pinnedMessageCount: 1,
+        contextTokenBudget: 1_500,
+      })
+    );
+
+    expect(outcome).toMatchObject({ status: "completed" });
+    expect(compacted.join("")).toContain(oldFact);
+    const prompt = model.prompts[0]?.map((message) => contentText(message.content)).join("\n");
+    expect(prompt).toContain("[Compacted context:");
+    expect(prompt).toContain("The old discussion was compacted.");
+    expect(prompt).toContain(latestRequest);
+    expect(prompt).not.toContain(oldFact);
+  });
+
+  it("compacts Tool activity that grows beyond the Context budget during the loop", async () => {
+    const largeToolOutput = { body: `tool:${"y".repeat(8_000)}` };
+    const model = promptRecordingModel(
+      toolCallResult([
+        { callId: "read-1", name: "github.issue.comment", arguments: { body: "inspect" } },
+      ]),
+      textResult("done")
+    );
+    let compactCalls = 0;
+    const outcome = await loop({
+      model,
+      tools: dispatcher({ status: "succeeded", callId: "read-1", output: largeToolOutput }),
+      compactor: {
+        compact: async () => {
+          compactCalls += 1;
+          return "The Tool activity was compacted.";
+        },
+      },
+    }).run(input({ pinnedMessageCount: 0, contextTokenBudget: 1_500 }));
+
+    expect(outcome).toMatchObject({ status: "completed" });
+    expect(compactCalls).toBeGreaterThan(1);
+    const secondPrompt = model.prompts[1]
+      ?.map((message) => contentText(message.content))
+      .join("\n");
+    expect(secondPrompt).toContain("The Tool activity was compacted.");
+    expect(secondPrompt).not.toContain(largeToolOutput.body);
+  });
+
+  it("reserves Context space for extracted attachment text before the provider call", async () => {
+    const requests: ModelInvocationRequest[] = [];
+    const model: ModelPort = {
+      invoke: async (request) => {
+        requests.push(request);
+        return textResult("done");
+      },
+    };
+    let compactCalls = 0;
+    const outcome = await loop({
+      model,
+      compactor: {
+        compact: async () => {
+          compactCalls += 1;
+          return "The older discussion was compacted.";
+        },
+      },
+    }).run(
+      input({
+        messages: [
+          { role: "system", content: textContent("trusted instructions") },
+          { role: "user", content: textContent(`old:${"x".repeat(9_000)}`) },
+          { role: "assistant", content: textContent("old reply") },
+          { role: "user", content: textContent("answer from the attached document") },
+        ],
+        pinnedMessageCount: 1,
+        contextTokenBudget: 3_000,
+        tools: [],
+        attachments: [
+          {
+            fileId: "file-1",
+            mediaType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            name: "brief.docx",
+            data: new Uint8Array([1]),
+            text: "document text ".repeat(300),
+          },
+        ],
+      })
+    );
+
+    expect(outcome).toMatchObject({ status: "completed" });
+    expect(compactCalls).toBeGreaterThan(0);
+    expect(requests).toHaveLength(1);
+    const providerRequest = requests[0];
+    if (providerRequest === undefined) throw new Error("provider request missing");
+    expect(
+      estimateModelUsage({ ...providerRequest, maxOutputTokens: 0 }).inputTokens
+    ).toBeLessThanOrEqual(3_000);
+  });
+
+  it("reuses the checkpointed Context summary after a crash", async () => {
+    class CrashAfterCompactionStore extends InMemoryLoopCheckpointStore {
+      private crashed = false;
+
+      override async save(checkpoint: Parameters<InMemoryLoopCheckpointStore["save"]>[0]) {
+        await super.save(checkpoint);
+        if (!this.crashed && checkpoint.resume?.baseMessages !== undefined) {
+          this.crashed = true;
+          throw new Error("crash after compaction");
+        }
+      }
+    }
+
+    const checkpoints = new CrashAfterCompactionStore();
+    let compactCalls = 0;
+    const compactor: ContextCompactorPort = {
+      compact: async () => {
+        compactCalls += 1;
+        return "Persist this exact summary.";
+      },
+    };
+    const loopInput = input({
+      messages: [
+        { role: "system", content: textContent("trusted instructions") },
+        { role: "user", content: textContent(`old:${"z".repeat(8_000)}`) },
+        { role: "assistant", content: textContent("old reply") },
+        { role: "user", content: textContent("latest request") },
+      ],
+      pinnedMessageCount: 1,
+      contextTokenBudget: 1_500,
+    });
+
+    await expect(
+      loop({ model: scriptedModel(textResult("not reached")), checkpoints, compactor }).run(
+        loopInput
+      )
+    ).rejects.toThrow("crash after compaction");
+    const callsBeforeResume = compactCalls;
+
+    const resumedModel = promptRecordingModel(textResult("done"));
+    const outcome = await loop({
+      model: resumedModel,
+      checkpoints,
+      compactor,
+    }).run(loopInput);
+
+    expect(outcome).toMatchObject({ status: "completed" });
+    expect(compactCalls).toBe(callsBeforeResume);
+    expect(
+      resumedModel.prompts[0]?.map((message) => contentText(message.content)).join("\n")
+    ).toContain("Persist this exact summary.");
   });
 
   it("charges what a failed model call already spent", async () => {

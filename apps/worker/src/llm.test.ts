@@ -223,6 +223,8 @@ describe("SoulLlm — cost ceilings and pricing", () => {
     vi.spyOn(console, "warn").mockImplementation(() => {});
     vi.spyOn(console, "info").mockImplementation(() => {});
     process.env.TEST_KEY = "sk-test";
+    process.env.TEST_KEY_A = "sk-test-a";
+    process.env.TEST_KEY_B = "sk-test-b";
   });
 
   /** `sonnet` is not a priceable id; `gpt-4o` is in the built-in table. */
@@ -266,6 +268,33 @@ describe("SoulLlm — cost ceilings and pricing", () => {
     expect(resolution.kind).toBe("available");
   });
 
+  it("refuses an unpriceable Routine chain when its resolved Run limits include cost", async () => {
+    const { llm } = soul({ sources: [TWO_PROVIDER_SOUL] });
+
+    const resolution = await llm.resolveChain(
+      ["sonnet"],
+      {
+        outcome: "selected",
+        selector: "fast",
+        resolution: "profile_ref",
+        profileId: "fast",
+        chain: [{ profileId: "fast", modelId: "sonnet" }],
+        cacheAllowed: false,
+        rejectedFallbacks: [],
+      },
+      undefined,
+      undefined,
+      { costMicros: { value: 5_000_000, scope: "model" } }
+    );
+
+    expect(resolution.kind).toBe("denied");
+    expect(resolution.routing).toMatchObject({
+      outcome: "denied",
+      profileId: "fast",
+      reason: "cost_unpriceable",
+    });
+  });
+
   it("serves a priceable chain under a declared ceiling", async () => {
     const { llm } = soul({ sources: [soulWithCeiling("gpt-4o")] });
 
@@ -288,6 +317,18 @@ describe("SoulLlm — cost ceilings and pricing", () => {
     const unpriceable = await llm.resolveModel("sonnet", ANY);
     if (unpriceable.kind !== "available") throw new Error("expected an available resolution");
     expect(unpriceable.price(1_000_000, 0)).toEqual({ kind: "unpriced" });
+  });
+
+  it("reserves enough priced cost for every fallback link that one call may attempt", async () => {
+    const { llm } = soul({ sources: [DUPLICATE_MODEL_SOUL] });
+    const resolution = await llm.resolveModel("balanced", ANY);
+
+    if (resolution.kind !== "available") throw new Error("expected an available resolution");
+    expect(resolution.reservationPrice?.(100, 50)).toEqual({
+      kind: "priced",
+      costUsd: 0.00135,
+      source: "table",
+    });
   });
 
   it("applies an operator price correction on the branch that charges the budget", async () => {
@@ -324,6 +365,23 @@ describe("SoulLlm — cost ceilings and pricing", () => {
 
     if (resolution.kind !== "available") throw new Error("expected an available resolution");
     expect(resolution.price(1_000_000, 1_000_000)).toEqual({ kind: "subscription" });
+
+    const routine = await llm.resolveChain(
+      ["sonnet"],
+      {
+        outcome: "selected",
+        selector: "fast",
+        resolution: "profile_ref",
+        profileId: "fast",
+        chain: [{ profileId: "fast", modelId: "sonnet" }],
+        cacheAllowed: false,
+        rejectedFallbacks: [],
+      },
+      undefined,
+      undefined,
+      { costMicros: { value: 1, scope: "model" } }
+    );
+    expect(routine.kind).toBe("available");
   });
 });
 
@@ -475,6 +533,14 @@ describe("SoulLlm — profile routing", () => {
 
     expect(spend).toEqual([
       expect.objectContaining({
+        requestId: "duplicate-connection:attempt:0",
+        status: "error",
+        model: "house-model",
+        provider: "openai-compatible",
+        connection: "openai-compatible",
+      }),
+      expect.objectContaining({
+        requestId: "duplicate-connection:attempt:1",
         status: "fallback",
         model: "house-model",
         provider: "azure",

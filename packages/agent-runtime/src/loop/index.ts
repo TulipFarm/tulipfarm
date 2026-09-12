@@ -1,6 +1,11 @@
 export { CANCEL_POLL_MS, type CancelWatch, TurnCancelled, watchForCancel } from "./cancel";
 export type { AgentLoopCheckpoint, LoopCheckpointStore } from "./checkpoint";
 export { InMemoryLoopCheckpointStore } from "./checkpoint";
+export {
+  type ContextCompactionRequest,
+  type ContextCompactorPort,
+  compactModelContext,
+} from "./compaction";
 export type {
   AgentLoopBudgetPort,
   AgentLoopDependencies,

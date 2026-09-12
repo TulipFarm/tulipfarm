@@ -1,7 +1,7 @@
 import { textContent } from "@tulipfarm/schema";
 import { describe, expect, it } from "vitest";
 import type { ModelInvocationRequest } from "../ports/model";
-import { deriveModelRequirements, estimateContextTokens } from "./requirements";
+import { deriveModelRequirements, estimateContextTokens, estimateTokens } from "./requirements";
 
 function request(overrides: Partial<ModelInvocationRequest> = {}): ModelInvocationRequest {
   return {
@@ -91,6 +91,41 @@ describe("deriveModelRequirements — input modalities", () => {
     expect(derived.inputModalities).toEqual(["text", "document"]);
   });
 
+  it("treats an extracted document as text because that is what reaches the provider", () => {
+    const derived = deriveModelRequirements(
+      request({
+        attachments: [
+          {
+            fileId: "csv-1",
+            mediaType: "text/csv",
+            name: "customers.csv",
+            data: new Uint8Array([1, 2, 3]),
+            text: "name,email\nMuskan Vijayvargiya,muskan@example.com",
+          },
+        ],
+      })
+    );
+
+    expect(derived.inputModalities).toEqual(["text"]);
+  });
+
+  it("keeps an unextractable document binary instead of smuggling it through as text", () => {
+    const derived = deriveModelRequirements(
+      request({
+        attachments: [
+          {
+            fileId: "sheet-1",
+            mediaType: "application/vnd.ms-excel",
+            name: "customers.xls",
+            data: new Uint8Array([1, 2, 3]),
+          },
+        ],
+      })
+    );
+
+    expect(derived.inputModalities).toEqual(["text", "document"]);
+  });
+
   it("names each modality once however many files of that kind are attached", () => {
     const derived = deriveModelRequirements(
       request({ attachments: [image, { ...image, fileId: "f3" }, pdf] })
@@ -164,5 +199,69 @@ describe("estimateContextTokens", () => {
 
   it("reserves the caller's own output budget when one is declared", () => {
     expect(estimateContextTokens(request({ maxOutputTokens: 8_000 }))).toBeGreaterThan(8_000);
+  });
+
+  it("counts extracted document text exactly once in the provider Context estimate", () => {
+    const extracted = "x".repeat(4_000);
+    const withoutAttachment = estimateContextTokens(request());
+    const withAttachment = estimateContextTokens(
+      request({
+        attachments: [
+          {
+            fileId: "csv-1",
+            mediaType: "text/csv",
+            name: "customers.csv",
+            data: new Uint8Array(100_000),
+            text: extracted,
+          },
+        ],
+      })
+    );
+
+    expect(withAttachment - withoutAttachment).toBe(
+      estimateTokens(`customers.csv:\n\n${extracted}`)
+    );
+  });
+
+  it("counts extracted PDF text as a conservative proxy while preserving binary input", () => {
+    const withoutAttachment = estimateContextTokens(request());
+    const extracted = "important contract clause ".repeat(2_000);
+    const withPdf = estimateContextTokens(
+      request({
+        attachments: [
+          {
+            fileId: "pdf-1",
+            mediaType: "application/pdf",
+            name: "large.pdf",
+            data: new Uint8Array(25_000_000),
+            text: extracted,
+            visual: {
+              kind: "pdf",
+              pages: Array.from({ length: 25 }, () => ({ width: 1_224, height: 1_584 })),
+            },
+          },
+        ],
+      })
+    );
+
+    expect(withPdf - withoutAttachment).toBeGreaterThanOrEqual(estimateTokens(extracted));
+  });
+
+  it("uses image dimensions rather than raw byte size for visual input", () => {
+    const withoutAttachment = estimateContextTokens(request());
+    const image = {
+      fileId: "image-1",
+      mediaType: "image/png",
+      name: "normal.png",
+      data: new Uint8Array(2_000_000),
+      visual: { kind: "image" as const, width: 1_024, height: 768 },
+    };
+    const first = estimateContextTokens(request({ attachments: [image] }));
+    const samePixelsMoreBytes = estimateContextTokens(
+      request({ attachments: [{ ...image, data: new Uint8Array(8_000_000) }] })
+    );
+
+    expect(first).toBeGreaterThan(withoutAttachment);
+    expect(samePixelsMoreBytes).toBe(first);
   });
 });

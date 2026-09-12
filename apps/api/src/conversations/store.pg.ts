@@ -7,9 +7,11 @@ import type { MessageRepo } from "../chat/messages";
 import type { Queryable } from "../db";
 import { withTransaction } from "../db";
 import type {
+  AssistantAttemptStatus,
   AssistantMessageWriteResult,
   CompleteTurnInput,
   CompleteTurnResult,
+  ContextMessage,
   ConversationStore,
   NewConversation,
   PersistedMessage,
@@ -53,6 +55,7 @@ interface MessageRow {
   metadata: Record<string, unknown> | null;
   attempt: number | null;
   created_at: Date;
+  attempt_status?: string | null;
 }
 
 interface CompletionRow {
@@ -127,6 +130,13 @@ function toMessage(row: MessageRow): PersistedMessage {
     ...(row.attempt === null ? {} : { attempt: row.attempt }),
     createdAt: row.created_at,
   };
+}
+
+function toContextMessage(row: MessageRow): ContextMessage {
+  const message = toMessage(row);
+  return row.attempt_status === null || row.attempt_status === undefined
+    ? message
+    : { ...message, attemptStatus: row.attempt_status as AssistantAttemptStatus };
 }
 
 function toCompletion(row: CompletionRow): TurnCompletion {
@@ -532,6 +542,72 @@ export class PgConversationStore implements ConversationStore {
       [conversationId, throughRequestMessageId ?? null]
     );
     return (rows as unknown as MessageRow[]).map(toMessage);
+  }
+
+  async listContextMessages(
+    businessId: string,
+    conversationId: string,
+    throughRequestMessageId?: string,
+    afterMessageId?: string
+  ): Promise<readonly ContextMessage[]> {
+    assertDeploymentBusiness(businessId);
+    const { rows } = await this.q.query(
+      `SELECT m.id, m.conversation_id, m.turn_id, m.role,
+              m.content, m.metadata, m.attempt, m.created_at,
+              CASE
+                WHEN m.role <> 'assistant' THEN NULL
+                WHEN completed.status = 'succeeded' THEN 'succeeded'
+                WHEN completed.status = 'failed' THEN
+                  CASE
+                    WHEN m.metadata #>> '{turnAttempt,outcome}' = 'cancelled' THEN 'cancelled'
+                    ELSE 'failed'
+                  END
+                WHEN m.attempt IS NOT NULL AND m.attempt < message_turn.attempt THEN
+                  CASE
+                    WHEN m.metadata #>> '{turnAttempt,outcome}' = 'cancelled' THEN 'cancelled'
+                    WHEN m.metadata #>> '{turnAttempt,outcome}' = 'failed' THEN 'failed'
+                    ELSE 'superseded'
+                  END
+                WHEN m.metadata #>> '{turnAttempt,outcome}' = 'cancelled' THEN 'cancelled'
+                WHEN m.metadata #>> '{turnAttempt,outcome}' = 'failed' THEN 'failed'
+                WHEN m.metadata #>> '{turnAttempt,outcome}' = 'succeeded' THEN 'succeeded'
+                ELSE 'incomplete'
+              END AS attempt_status
+         FROM messages m
+         JOIN conversation_turns message_turn ON message_turn.id = m.turn_id
+         LEFT JOIN turn_completions completed
+           ON completed.turn_id = m.turn_id AND completed.message_id = m.id
+        WHERE m.conversation_id = $1
+          AND (
+            $3::uuid IS NULL
+            OR (m.created_at, m.id) > (
+              SELECT previous.created_at, previous.id
+                FROM messages previous
+               WHERE previous.id = $3
+                 AND previous.conversation_id = $1
+            )
+          )
+          AND (
+            $2::uuid IS NULL
+            OR EXISTS (
+              SELECT 1
+                FROM conversation_turns current_turn
+               WHERE current_turn.conversation_id = $1
+                 AND current_turn.request_message_id = $2
+                 AND (
+                   (message_turn.created_at, message_turn.id)
+                     < (current_turn.created_at, current_turn.id)
+                   OR (
+                     message_turn.id = current_turn.id
+                     AND m.id = current_turn.request_message_id
+                   )
+                 )
+            )
+          )
+        ORDER BY m.created_at, m.id`,
+      [conversationId, throughRequestMessageId ?? null, afterMessageId ?? null]
+    );
+    return (rows as unknown as MessageRow[]).map(toContextMessage);
   }
 
   async findCompletion(

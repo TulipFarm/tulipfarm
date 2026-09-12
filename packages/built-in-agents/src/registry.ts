@@ -1,5 +1,6 @@
 import type { BuiltInAgentSpec } from "./agent";
 import { CHAT_TITLE } from "./agents/chat-title";
+import { CONTEXT_COMPACTOR } from "./agents/context-compactor";
 import { EFFORT_CLASSIFIER } from "./agents/effort-classifier";
 import { MEMORY_CURATOR } from "./agents/memory-curator";
 import { ONBOARDING_PERSONALIZER } from "./agents/onboarding-personalizer";
@@ -22,6 +23,7 @@ import { TOOL_RESULT_DISTILLER } from "./agents/tool-result-distiller";
  * stay next to the code they bound.
  */
 export const BUILT_IN_AGENTS: readonly BuiltInAgentSpec[] = [
+  CONTEXT_COMPACTOR,
   TOOL_RESULT_DISTILLER,
   EFFORT_CLASSIFIER,
   CHAT_TITLE,

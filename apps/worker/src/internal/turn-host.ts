@@ -193,8 +193,15 @@ export class HttpTurnHost
    * unreadable to a text guard by nature, and refusing it would ban vision rather than screen it.
    */
   async extract(mediaType: string, bytes: Uint8Array): Promise<string | undefined> {
+    return (await this.inspect(mediaType, bytes)).text;
+  }
+
+  async inspect(mediaType: string, bytes: Uint8Array) {
     const extracted = await extractText(mediaType, bytes);
-    return extracted.kind === "text" ? extracted.text : undefined;
+    return {
+      ...(extracted.kind === "text" ? { text: extracted.text } : {}),
+      ...(extracted.visual === undefined ? {} : { visual: extracted.visual }),
+    };
   }
 
   /** `ToolDispatchPort`. The far side re-derives the callId's authority from the Run. */

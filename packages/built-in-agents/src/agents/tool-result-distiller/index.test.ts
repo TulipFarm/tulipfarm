@@ -133,6 +133,42 @@ describe("spend accounting", () => {
 
     expect(gates).toEqual([{ arm: "shared-gate" }]);
   });
+
+  it("uses the Turn's model authority so production routing and budget settlement cannot be bypassed", async () => {
+    const invoke = vi.fn().mockResolvedValue({
+      requestId: "distill-1",
+      output: {
+        kind: "text",
+        text: JSON.stringify({ summary: "Redis 7.2 shipped.", citations: [], caveat: "" }),
+      },
+      usage: { inputTokens: 40, outputTokens: 8, costUsd: 0.00001 },
+      budgetSettled: true,
+    });
+    const legacyModel = vi.fn();
+    const legacySpend = vi.fn();
+    const port = createToolResultDistiller({
+      models: { model: legacyModel },
+      modelPort: { invoke },
+      spend: { recordLlmCall: legacySpend },
+    });
+
+    await expect(
+      port.distill(
+        { ...request(), requestId: "distill-1", modelProfileId: "primary" },
+        new AbortController().signal
+      )
+    ).resolves.toMatchObject({ summary: "Redis 7.2 shipped." });
+
+    expect(invoke).toHaveBeenCalledWith(
+      expect.objectContaining({
+        requestId: "distill-1",
+        modelProfileId: "primary",
+        maxOutputTokens: 900,
+      })
+    );
+    expect(legacyModel).not.toHaveBeenCalled();
+    expect(legacySpend).not.toHaveBeenCalled();
+  });
 });
 
 describe("the extraction request", () => {

@@ -18,6 +18,7 @@ import {
   ASSET_OWNERSHIP_APPROVAL_STORAGE_STATEMENTS,
   ASSET_OWNERSHIP_STORAGE_STATEMENTS,
   AUTHORIZATION_STORAGE_STATEMENTS,
+  BUDGET_RESERVATION_STORAGE_STATEMENTS,
   BUDGET_STORAGE_STATEMENTS,
   CHANNEL_DELIVERY_STORAGE_STATEMENTS,
   CHANNEL_INBOUND_STORAGE_STATEMENTS,
@@ -31,6 +32,7 @@ import {
   CONNECTION_AUTH_STEP_STORAGE_STATEMENTS,
   CONNECTION_EXTERNAL_IDENTITY_STORAGE_STATEMENTS,
   CONNECTION_STORAGE_STATEMENTS,
+  CONVERSATION_CONTEXT_SUMMARY_STORAGE_STATEMENTS,
   dropInvalidEmbeddingIndexes,
   EMBEDDING_COLUMNS,
   EVENT_STORAGE_STATEMENTS,
@@ -3364,6 +3366,30 @@ export const PG_MIGRATIONS: PgMigration[] = [
         if (exists.rows.length === 0) await q.query(statement);
       }
       await applyStatements(OIM_KNOWLEDGE_CHECKPOINT_STORAGE_STATEMENTS)(q);
+    },
+  },
+  {
+    version: 115,
+    description: "reserve Run model budgets before provider calls",
+    up: async (q) => {
+      const present = await q.query<{ present: boolean }>(
+        "SELECT to_regclass('run_budgets') IS NOT NULL AS present"
+      );
+      if (present.rows[0]?.present) {
+        await applyStatements(BUDGET_RESERVATION_STORAGE_STATEMENTS)(q);
+      }
+    },
+  },
+  {
+    version: 116,
+    description: "durable model-facing Conversation Context summaries",
+    up: async (q) => {
+      const present = await q.query<{ present: boolean }>(
+        "SELECT to_regclass('messages') IS NOT NULL AS present"
+      );
+      if (present.rows[0]?.present) {
+        await applyStatements(CONVERSATION_CONTEXT_SUMMARY_STORAGE_STATEMENTS)(q);
+      }
     },
   },
 ];

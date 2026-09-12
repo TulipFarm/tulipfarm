@@ -24,12 +24,55 @@ export interface FallbackLogger {
 export interface ModelResponderRef {
   modelId?: string;
   configuredModel?: ConfiguredModelRef;
+  attemptId?: number;
 }
 
 /** The chain link whose provider call actually began, including a failed final attempt. */
 export interface ModelAttemptRef {
   modelId?: string;
   configuredModel?: ConfiguredModelRef;
+}
+
+export interface FallbackAttemptUsage {
+  readonly attemptId: number;
+  readonly modelId: string;
+  readonly configuredModel?: ConfiguredModelRef;
+  readonly durationMs: number;
+  readonly inputTokens?: number;
+  readonly outputTokens?: number;
+}
+
+export interface FallbackAttemptUsageRef {
+  readonly attempts: FallbackAttemptUsage[];
+}
+
+export interface FallbackAttemptBudgetLease {
+  settle(
+    usage: { readonly inputTokens: number; readonly outputTokens: number } | undefined
+  ): Promise<void>;
+}
+
+export interface FallbackAttemptBudgetController {
+  admit(input: {
+    readonly attemptId: number;
+    readonly modelId: string;
+    readonly configuredModel?: ConfiguredModelRef;
+  }): Promise<FallbackAttemptBudgetLease>;
+}
+
+export interface FallbackAttemptBudgetRef {
+  current?: FallbackAttemptBudgetController;
+}
+
+/** Durable Run-budget infrastructure failed before or after a provider attempt. */
+export class FallbackBudgetInfrastructureError extends Error {
+  constructor(
+    readonly operation: "reserve" | "settle",
+    cause: unknown
+  ) {
+    super(`model provider attempt budget ${operation} failed`, { cause });
+    this.name = "FallbackBudgetInfrastructureError";
+  }
 }
 
 export interface FallbackCallLease {
@@ -82,9 +125,16 @@ function isAbortError(err: unknown): boolean {
   return err instanceof Error && err.name === "AbortError";
 }
 
-/** Caller cancellation ends the whole request; every model/provider failure advances the chain. */
+/** Caller cancellation and budget-store faults end the request; provider failures may fall back. */
 export function isHardFailure(err: unknown): boolean {
-  return isAbortError(err);
+  return (
+    isAbortError(err) ||
+    err instanceof FallbackBudgetInfrastructureError ||
+    (typeof err === "object" &&
+      err !== null &&
+      "reason" in err &&
+      err.reason === "budget_exhausted")
+  );
 }
 
 function errorReason(err: unknown): string {
@@ -181,11 +231,27 @@ function replayStream(
   });
 }
 
+function attemptUsage(
+  parts: readonly LanguageModelV4StreamPart[]
+): { inputTokens: number; outputTokens: number } | undefined {
+  let inputTokens = 0;
+  let outputTokens = 0;
+  let found = false;
+  for (const part of parts) {
+    if (part.type !== "finish") continue;
+    found = true;
+    inputTokens += part.usage.inputTokens.total ?? 0;
+    outputTokens += part.usage.outputTokens.total ?? 0;
+  }
+  return found ? { inputTokens, outputTokens } : undefined;
+}
+
 export class FallbackModel implements LanguageModelV4 {
   readonly specificationVersion = "v4" as const;
   readonly provider = "fallback";
   readonly modelId: string;
   readonly supportedUrls: Record<string, RegExp[]> = {};
+  private budgetAttempt = 0;
 
   constructor(
     private readonly models: LanguageModelV4[],
@@ -197,7 +263,9 @@ export class FallbackModel implements LanguageModelV4 {
       (model) => `${model.provider}:${model.modelId}`
     ),
     private readonly attempted?: ModelAttemptRef,
-    private readonly configuredModels: readonly (ConfiguredModelRef | undefined)[] = []
+    private readonly configuredModels: readonly (ConfiguredModelRef | undefined)[] = [],
+    private readonly attemptUsage?: FallbackAttemptUsageRef,
+    private readonly attemptBudget?: FallbackAttemptBudgetRef
   ) {
     const primary = models[0];
     if (!primary) throw new Error("FallbackModel requires at least one model");
@@ -205,9 +273,10 @@ export class FallbackModel implements LanguageModelV4 {
   }
 
   /** Marks a link as the responder the moment it commits, before any output is consumed. */
-  private commit(index: number, model: LanguageModelV4): void {
+  private commit(index: number, model: LanguageModelV4, attemptId: number): void {
     if (this.responder === undefined) return;
     this.responder.modelId = model.modelId;
+    this.responder.attemptId = attemptId;
     const configured = this.configuredModels[index];
     if (configured === undefined) delete this.responder.configuredModel;
     else this.responder.configuredModel = configured;
@@ -221,6 +290,26 @@ export class FallbackModel implements LanguageModelV4 {
     else this.attempted.configuredModel = configured;
   }
 
+  private recordAttemptUsage(
+    attemptId: number,
+    index: number,
+    model: LanguageModelV4,
+    parts: readonly LanguageModelV4StreamPart[],
+    startedAt: number
+  ): void {
+    if (this.attemptUsage === undefined) return;
+    const usage = attemptUsage(parts);
+    this.attemptUsage.attempts.push({
+      attemptId,
+      modelId: model.modelId,
+      durationMs: Math.max(0, Date.now() - startedAt),
+      ...(this.configuredModels[index] === undefined
+        ? {}
+        : { configuredModel: this.configuredModels[index] }),
+      ...(usage === undefined ? {} : usage),
+    });
+  }
+
   async doGenerate(options: LanguageModelV4CallOptions) {
     let lastError: unknown;
     for (const [index, model] of this.models.entries()) {
@@ -229,10 +318,16 @@ export class FallbackModel implements LanguageModelV4 {
         lease = settleOnce(
           await this.gate?.acquire(this.providerKey(index, model), options.abortSignal)
         );
-        if (lease !== undefined || this.gate === undefined) this.attempt(index, model);
-        const generated = await this.callWithRateLimitRetry(model, () => model.doGenerate(options));
+        const admitted = await this.callWithRateLimitRetry(index, model, () =>
+          model.doGenerate(options)
+        );
+        const generated = admitted.value;
+        await admitted.budget?.settle({
+          inputTokens: generated.usage.inputTokens.total ?? 0,
+          outputTokens: generated.usage.outputTokens.total ?? 0,
+        });
         lease?.succeeded();
-        this.commit(index, model);
+        this.commit(index, model, admitted.attemptId);
         return generated;
       } catch (err) {
         if (isHardFailure(err)) {
@@ -256,13 +351,31 @@ export class FallbackModel implements LanguageModelV4 {
    * existing failure handling (breaker strike + advance to the next link).
    */
   private async callWithRateLimitRetry<T>(
+    index: number,
     model: LanguageModelV4,
     call: () => PromiseLike<T>
-  ): Promise<T> {
+  ): Promise<{
+    readonly value: T;
+    readonly budget: FallbackAttemptBudgetLease | undefined;
+    readonly attemptId: number;
+    readonly startedAt: number;
+  }> {
     for (let attempt = 0; ; attempt++) {
+      const attemptId = this.budgetAttempt++;
+      const budget = await this.attemptBudget?.current?.admit({
+        attemptId,
+        modelId: model.modelId,
+        ...(this.configuredModels[index] === undefined
+          ? {}
+          : { configuredModel: this.configuredModels[index] }),
+      });
+      this.attempt(index, model);
+      const startedAt = Date.now();
       try {
-        return await call();
+        return { value: await call(), budget, attemptId, startedAt };
       } catch (err) {
+        this.recordAttemptUsage(attemptId, index, model, [], startedAt);
+        await budget?.settle(undefined);
         if (isHardFailure(err)) throw err;
         if (
           classifyProviderError(err) !== "model_rate_limited" ||
@@ -284,12 +397,20 @@ export class FallbackModel implements LanguageModelV4 {
     for (const [index, model] of this.models.entries()) {
       let lease: FallbackCallLease | undefined;
       let result: Awaited<ReturnType<LanguageModelV4["doStream"]>>;
+      let budget: FallbackAttemptBudgetLease | undefined;
+      let attemptId = -1;
+      let startedAt = 0;
       try {
         lease = settleOnce(
           await this.gate?.acquire(this.providerKey(index, model), options.abortSignal)
         );
-        if (lease !== undefined || this.gate === undefined) this.attempt(index, model);
-        result = await this.callWithRateLimitRetry(model, () => model.doStream(options));
+        const admitted = await this.callWithRateLimitRetry(index, model, () =>
+          model.doStream(options)
+        );
+        result = admitted.value;
+        budget = admitted.budget;
+        attemptId = admitted.attemptId;
+        startedAt = admitted.startedAt;
       } catch (err) {
         if (isHardFailure(err)) {
           lease?.cancelled();
@@ -319,24 +440,28 @@ export class FallbackModel implements LanguageModelV4 {
           }
           if (chunk.value.type === "error") {
             sawError = true;
-            firstError = inBandError(chunk.value.error);
-            break;
+            firstError ??= inBandError(chunk.value.error);
+            continue;
           }
           head.push(chunk.value);
-          if (isSubstantiveOutput(chunk.value)) break;
+          if (!sawError && isSubstantiveOutput(chunk.value)) break;
           if (head.length >= MAX_UNCOMMITTED_PARTS) {
             throw new Error("provider emitted too many stream frames before output");
           }
         }
       } catch (err) {
         reader.cancel().catch(() => {});
+        const usage = attemptUsage(head);
+        this.recordAttemptUsage(attemptId, index, model, head, startedAt);
         if (isHardFailure(err)) {
           lease?.cancelled();
           lease?.release();
+          await budget?.settle(usage);
           throw err;
         }
         lease?.failed(classifyProviderError(err));
         lease?.release();
+        await budget?.settle(usage);
         lastError = err;
         this.logFallback(model, err);
         continue;
@@ -344,20 +469,27 @@ export class FallbackModel implements LanguageModelV4 {
 
       if (sawError) {
         reader.cancel(firstError).catch(() => {});
+        const usage = attemptUsage(head);
+        this.recordAttemptUsage(attemptId, index, model, head, startedAt);
         lease?.failed(classifyProviderError(firstError));
         lease?.release();
+        await budget?.settle(usage);
         lastError = firstError;
         this.logFallback(model, firstError);
         continue;
       }
 
-      this.commit(index, model);
+      this.commit(index, model, attemptId);
       if (ended) {
         lease?.succeeded();
         lease?.release();
+        await budget?.settle(attemptUsage(head));
         return { ...result, stream: replayStream(head) };
       }
-      return { ...result, stream: this.committedStream(head, reader, lease, options.abortSignal) };
+      return {
+        ...result,
+        stream: this.committedStream(head, reader, lease, budget, options.abortSignal),
+      };
     }
     this.logExhausted(lastError);
     throw lastError;
@@ -375,26 +507,37 @@ export class FallbackModel implements LanguageModelV4 {
     head: readonly LanguageModelV4StreamPart[],
     reader: ReadableStreamDefaultReader<LanguageModelV4StreamPart>,
     lease: FallbackCallLease | undefined,
+    budget: FallbackAttemptBudgetLease | undefined,
     signal: AbortSignal | undefined
   ): ReadableStream<LanguageModelV4StreamPart> {
     const { logger, modelId } = this;
     let detachAbort = () => {};
     let committedError: unknown;
+    const parts = [...head];
 
     // The caller walking away says nothing about provider health. Cancellation settles the lease
     // without counting a provider failure, including the breaker's single half-open probe.
-    const abandoned = () => {
+    const abandoned = async () => {
       detachAbort();
       lease?.cancelled();
       lease?.release();
+      await budget?.settle(attemptUsage(parts));
     };
 
     if (signal?.aborted === true) {
-      abandoned();
+      abandoned().catch((error) => {
+        (logger.error ?? logger.warn)(
+          `[llm] budget settlement failed after cancellation models=${modelId} reason=${errorReason(error)}`
+        );
+      });
       reader.cancel(signal.reason).catch(() => {});
     } else if (signal !== undefined) {
       const onAbort = () => {
-        abandoned();
+        abandoned().catch((error) => {
+          (logger.error ?? logger.warn)(
+            `[llm] budget settlement failed after cancellation models=${modelId} reason=${errorReason(error)}`
+          );
+        });
         reader.cancel(signal.reason).catch(() => {});
       };
       signal.addEventListener("abort", onAbort, { once: true });
@@ -406,45 +549,55 @@ export class FallbackModel implements LanguageModelV4 {
         for (const part of head) controller.enqueue(part);
       },
       async pull(controller) {
+        let chunk: Awaited<ReturnType<typeof reader.read>>;
         try {
-          const chunk = await reader.read();
-          if (chunk.done) {
-            detachAbort();
-            if (committedError === undefined) lease?.succeeded();
-            lease?.release();
-            controller.close();
-            return;
-          }
-          if (chunk.value.type === "error" && committedError === undefined) {
-            committedError = inBandError(chunk.value.error);
-            lease?.failed(classifyProviderError(committedError));
-            logger.warn(
-              `[llm] stream failed after commit models=${modelId} reason=${errorReason(committedError)}`
-            );
-          }
-          controller.enqueue(chunk.value);
+          chunk = await reader.read();
         } catch (err) {
           detachAbort();
           if (isHardFailure(err)) {
-            // The caller aborted us; the provider is not at fault and must not be marked down.
             lease?.cancelled();
-            lease?.release();
-            controller.error(err);
+          } else {
+            lease?.failed(classifyProviderError(err));
+            logger.warn(
+              `[llm] stream failed after commit models=${modelId} reason=${errorReason(err)}`
+            );
+          }
+          lease?.release();
+          try {
+            await budget?.settle(attemptUsage(parts));
+          } catch (settlementError) {
+            controller.error(settlementError);
             return;
           }
-          // Output is already downstream, so another link would splice two different answers into
-          // one reply. A failure here ends the call instead of advancing the chain.
-          lease?.failed(classifyProviderError(err));
-          lease?.release();
-          logger.warn(
-            `[llm] stream failed after commit models=${modelId} reason=${errorReason(err)}`
-          );
           controller.error(err);
+          return;
         }
+
+        if (chunk.done) {
+          detachAbort();
+          if (committedError === undefined) lease?.succeeded();
+          lease?.release();
+          try {
+            await budget?.settle(attemptUsage(parts));
+          } catch (error) {
+            controller.error(error);
+            return;
+          }
+          controller.close();
+          return;
+        }
+        parts.push(chunk.value);
+        if (chunk.value.type === "error" && committedError === undefined) {
+          committedError = inBandError(chunk.value.error);
+          lease?.failed(classifyProviderError(committedError));
+          logger.warn(
+            `[llm] stream failed after commit models=${modelId} reason=${errorReason(committedError)}`
+          );
+        }
+        controller.enqueue(chunk.value);
       },
       cancel(reason) {
-        abandoned();
-        return reader.cancel(reason);
+        return Promise.all([reader.cancel(reason), abandoned()]).then(() => undefined);
       },
     });
   }

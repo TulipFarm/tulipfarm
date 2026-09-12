@@ -13,6 +13,12 @@ export {
   type EmbeddingUsageSink,
 } from "./embeddings";
 export {
+  type FallbackAttemptBudgetController,
+  type FallbackAttemptBudgetLease,
+  type FallbackAttemptBudgetRef,
+  type FallbackAttemptUsage,
+  type FallbackAttemptUsageRef,
+  FallbackBudgetInfrastructureError,
   type FallbackCallGate,
   type FallbackCallLease,
   type FallbackLogger,

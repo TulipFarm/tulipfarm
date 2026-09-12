@@ -109,6 +109,24 @@ export interface RunBudgetStore {
     key: string,
     amount: number
   ): Promise<BudgetConsumeResult>;
+  reserve?(
+    businessId: string,
+    runId: string,
+    reservationId: string,
+    amounts: Readonly<Record<string, number>>
+  ): Promise<
+    | { readonly outcome: "allowed" | "unbounded" | "duplicate" }
+    | { readonly outcome: "exhausted"; readonly key: string }
+  >;
+  settle?(
+    businessId: string,
+    runId: string,
+    reservationId: string,
+    amounts: Readonly<Record<string, number>>,
+    consumeReservation?: boolean
+  ): Promise<
+    { readonly outcome: "allowed" } | { readonly outcome: "exhausted"; readonly key: string }
+  >;
 }
 
 /**
@@ -153,5 +171,32 @@ export class RunBudgetManager {
       limit: result.limit,
       remaining,
     };
+  }
+
+  async reserve(input: {
+    readonly businessId: string;
+    readonly runId: string;
+    readonly reservationId: string;
+    readonly amounts: Readonly<Record<string, number>>;
+  }) {
+    if (this.store.reserve === undefined) throw new Error("budget_reservations_unavailable");
+    return this.store.reserve(input.businessId, input.runId, input.reservationId, input.amounts);
+  }
+
+  async settle(input: {
+    readonly businessId: string;
+    readonly runId: string;
+    readonly reservationId: string;
+    readonly amounts: Readonly<Record<string, number>>;
+    readonly consumeReservation?: boolean;
+  }) {
+    if (this.store.settle === undefined) throw new Error("budget_reservations_unavailable");
+    return this.store.settle(
+      input.businessId,
+      input.runId,
+      input.reservationId,
+      input.amounts,
+      input.consumeReservation
+    );
   }
 }

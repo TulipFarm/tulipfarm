@@ -394,6 +394,53 @@ describe("RunStore (PostgreSQL)", () => {
     ]);
   });
 
+  it("does not make a second expired execution eligible for another recovery retry", async () => {
+    await store.start(run());
+    await store.transitionRun("business-1", run().id, {
+      expectedVersion: 0,
+      expectedStatus: "queued",
+      status: "claimed",
+      leaseOwner: "worker-1",
+      leaseExpiresAt: "2026-07-24T10:01:00.000Z",
+    });
+    await store.transitionRun("business-1", run().id, {
+      expectedVersion: 1,
+      expectedStatus: "claimed",
+      status: "needs_reconciliation",
+      leaseOwner: null,
+      leaseExpiresAt: null,
+      errorEvidenceRef: DISPATCH_LEASE_EXPIRED_REF,
+    });
+    const requeued = await store.requeueParkedRun(
+      "business-1",
+      run().id,
+      2,
+      DISPATCH_LEASE_EXPIRED_REF
+    );
+    await store.transitionRun("business-1", run().id, {
+      expectedVersion: requeued?.version ?? -1,
+      expectedStatus: "queued",
+      status: "claimed",
+      leaseOwner: "worker-2",
+      leaseExpiresAt: "2026-07-24T10:02:00.000Z",
+    });
+    await store.transitionRun("business-1", run().id, {
+      expectedVersion: (requeued?.version ?? -1) + 1,
+      expectedStatus: "claimed",
+      status: "running",
+      leaseOwner: "worker-2",
+      leaseExpiresAt: "2026-07-24T10:02:00.000Z",
+    });
+
+    await store.reclaimExpiredRuns("business-1", "2026-07-24T10:02:00.001Z", 10);
+
+    expect(await store.find("business-1", run().id)).toMatchObject({
+      status: "needs_reconciliation",
+      errorEvidenceRef: DISPATCH_REQUEUED_ONCE_REF,
+    });
+    expect(await store.listRecoveryCandidates("business-1", 10)).toEqual([]);
+  });
+
   it("requeues one classified Run only under matching version and evidence fences", async () => {
     await store.start(run());
     await store.transitionRun("business-1", run().id, {

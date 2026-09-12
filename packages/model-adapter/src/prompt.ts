@@ -4,7 +4,7 @@ import type {
   ModelUsage,
   ResolvedAttachment,
 } from "@tulipfarm/agent-runtime";
-import { ModelInvocationError } from "@tulipfarm/agent-runtime";
+import { ModelInvocationError, providerAttachmentText } from "@tulipfarm/agent-runtime";
 import type { PromptCacheDecision } from "@tulipfarm/llm";
 import {
   contentFiles,
@@ -245,9 +245,8 @@ function filePartFor(
   if (modalityForMediaType(file.mediaType) === "image" && !preserveFilename) {
     return { type: "image", image: file.data, mediaType: file.mediaType };
   }
-  if (file.mediaType !== "application/pdf" && file.text !== undefined && file.text.length > 0) {
-    return { type: "text", text: `${file.name}:\n\n${file.text}` };
-  }
+  const text = providerAttachmentText(file);
+  if (text !== undefined) return { type: "text", text };
   return { type: "file", data: file.data, mediaType: file.mediaType, filename: file.name };
 }
 

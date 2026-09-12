@@ -4,6 +4,7 @@ export * from "./guardrails";
 export * from "./loop";
 export * from "./models";
 export type {
+  AttachmentVisual,
   ModelInvocationFailureReason,
   ModelInvocationRequest,
   ModelInvocationResult,
