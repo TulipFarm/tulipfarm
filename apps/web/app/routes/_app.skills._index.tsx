@@ -1,7 +1,7 @@
 import { type MetaFunction, useLoaderData, useRouteError } from "@remix-run/react";
+import { EmptyState } from "~/components/empty-state";
 import { PageShell } from "~/components/page-shell";
 import { SkillCatalog } from "~/components/skills/skill-catalog";
-import { SkillStarterPacks } from "~/components/skills/starter-packs";
 import { ErrorState } from "~/components/states";
 import { Button } from "~/components/ui/button";
 import { Link } from "~/components/ui/link";
@@ -27,15 +27,26 @@ export default function SkillsIndex() {
       crumbs={[{ label: "Skills" }]}
       title="Skills"
       actions={
-        <Button asChild size="sm">
-          <Link to="/skills/marketplace">Browse marketplace</Link>
-        </Button>
+        skills.length > 0 ? (
+          <Button asChild size="sm">
+            <Link to="/skills/marketplace">Browse marketplace</Link>
+          </Button>
+        ) : undefined
       }
     >
-      <div className="flex flex-col gap-10">
-        <SkillStarterPacks />
+      {skills.length > 0 ? (
         <SkillCatalog skills={skills} agents={agents} />
-      </div>
+      ) : (
+        <EmptyState
+          section="Skills"
+          title="No skills installed yet"
+          hint="Find a skill in the marketplace, then review its audit before installing."
+        >
+          <Button asChild>
+            <Link to="/skills/marketplace">Browse marketplace</Link>
+          </Button>
+        </EmptyState>
+      )}
     </PageShell>
   );
 }

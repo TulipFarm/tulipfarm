@@ -24,6 +24,7 @@ export type PendingChatDraft = { id: number; prompt: string };
 type CompanionContextValue = {
   tasks: Task[];
   loading: boolean;
+  error: string | null;
   open: boolean;
   setOpen: (open: boolean) => void;
   refresh: () => Promise<void>;
@@ -38,6 +39,7 @@ export function CompanionProvider({ children }: { children: ReactNode }) {
   const { pathname } = useLocation();
   const [tasks, setTasks] = useState<Task[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [open, setOpen] = useState(false);
   const inFlight = useRef(false);
   const mounted = useRef(true);
@@ -54,9 +56,12 @@ export function CompanionProvider({ children }: { children: ReactNode }) {
     inFlight.current = true;
     try {
       const items = await listTasks();
-      if (mounted.current) setTasks(items);
+      if (mounted.current) {
+        setTasks(items);
+        setError(null);
+      }
     } catch {
-      // Keep the last-known list on a transient failure; retry next tick.
+      if (mounted.current) setError("Couldn't load your next steps. Try again.");
     } finally {
       if (mounted.current) setLoading(false);
       inFlight.current = false;
@@ -108,13 +113,21 @@ export function CompanionProvider({ children }: { children: ReactNode }) {
   }, [pathname, refresh]);
 
   const dismiss = useCallback(async (id: string) => {
-    setTasks((current) => current.filter((t) => t.id !== id));
-    await dismissTask(id).catch(() => {});
+    try {
+      await dismissTask(id);
+      if (mounted.current) {
+        setTasks((current) => current.filter((t) => t.id !== id));
+        setError(null);
+      }
+    } catch {
+      if (mounted.current) setError("Couldn't dismiss that step. Try again.");
+    }
   }, []);
 
   const value: CompanionContextValue = {
     tasks,
     loading,
+    error,
     open,
     setOpen,
     refresh,
@@ -128,6 +141,7 @@ export function CompanionProvider({ children }: { children: ReactNode }) {
 const INERT: CompanionContextValue = {
   tasks: [],
   loading: false,
+  error: null,
   open: false,
   setOpen: () => {},
   refresh: async () => {},

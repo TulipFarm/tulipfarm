@@ -1,26 +1,23 @@
 import { useId, useMemo, useState } from "react";
 import { Search } from "~/components/icons";
 import { Badge } from "~/components/ui/badge";
+import { Button } from "~/components/ui/button";
 import { Input } from "~/components/ui/input";
 import { Link } from "~/components/ui/link";
 import { type SortDir, SortHeader } from "~/components/ui/sort-header";
 import { agentDisplayName } from "~/lib/agent-capabilities";
 import type { AgentSummary } from "~/lib/agents";
 import { timeAgo } from "~/lib/schema";
+import { matchesSkillQuery, SKILL_REACH_LABEL, skillFacts } from "~/lib/skill-facts";
 import type { SkillSummary } from "~/lib/skills";
 import { skillAudience } from "./audience-panel";
+import { SkillReachBadge } from "./reach-badge";
 
 type SkillSortKey = "name" | "description" | "type" | "author" | "updated";
 type SkillSort = { key: SkillSortKey; dir: SortDir };
 
 function skillType(skill: SkillSummary): string {
   return skill.category?.replaceAll("-", " ") ?? "uncategorised";
-}
-
-function skillTypeBadge(skill: SkillSummary): "info" | "warning" | "neutral" {
-  if (skill.category === "core") return "info";
-  if (skill.category === "forge") return "warning";
-  return "neutral";
 }
 
 function compareText(left: string | undefined, right: string | undefined, dir: SortDir): number {
@@ -93,16 +90,13 @@ export function SkillCatalog({
       .filter((skill) => {
         if (needle === "") return true;
         const agentNames = skillAudience(skill.name, agents).pinned.map(agentDisplayName);
-        return [
-          skill.name,
-          skill.description ?? "",
-          skillType(skill),
-          skill.author ?? "",
-          ...agentNames,
-        ]
-          .join(" ")
-          .toLowerCase()
-          .includes(needle);
+        return (
+          matchesSkillQuery(skill, needle) ||
+          [skillType(skill), skill.author ?? "", ...agentNames]
+            .join(" ")
+            .toLowerCase()
+            .includes(needle)
+        );
       })
       .sort((left, right) => compareSkills(left, right, sort));
   }, [agents, query, skills, sort]);
@@ -114,19 +108,19 @@ export function SkillCatalog({
     }));
   }
 
-  const header = (key: SkillSortKey, label: string) => (
+  const header = (key: SkillSortKey, label: string, className = "") => (
     <SortHeader
       label={label}
       sortKey={key}
       active={sort.key === key}
       dir={sort.key === key ? sort.dir : "asc"}
       onSort={onSort}
-      className="border-b border-border"
+      className={`border-b border-border ${className}`}
     />
   );
 
   return (
-    <section aria-labelledby="installed-skills-heading" className="flex flex-col gap-4">
+    <section aria-labelledby="installed-skills-heading" className="flex min-w-0 flex-col gap-4">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex items-center gap-2">
           <h2 id="installed-skills-heading" className="text-base font-medium text-foreground">
@@ -149,60 +143,85 @@ export function SkillCatalog({
             id={searchId}
             type="search"
             value={query}
-            placeholder="Search by name, type, agent, or author"
+            placeholder="Search skills, tools, or hosts"
             className="ps-8"
             onChange={(event) => setQuery(event.target.value)}
           />
         </div>
       </div>
 
+      <p role="status" className={query.trim() ? "text-xs text-muted-foreground" : "sr-only"}>
+        {query.trim() ? `${visible.length} of ${skills.length} skills match` : ""}
+      </p>
+
       {skills.length === 0 ? (
         <p className="rounded-lg border border-dashed border-border px-4 py-12 text-center text-sm text-muted-foreground">
           No skills installed yet.
         </p>
       ) : visible.length === 0 ? (
-        <p className="rounded-lg border border-dashed border-border px-4 py-12 text-center text-sm text-muted-foreground">
-          No installed skill matches that search.
-        </p>
+        <div className="flex flex-col items-center gap-3 py-12 text-sm text-muted-foreground">
+          <p>No installed skill matches that search.</p>
+          <Button variant="outline" onClick={() => setQuery("")}>
+            Clear search
+          </Button>
+        </div>
       ) : (
-        <div className="max-h-[70svh] overflow-auto rounded-lg border border-border bg-card">
-          <table className="w-full min-w-[64rem] border-separate border-spacing-0 text-sm">
-            <thead className="sticky top-0 z-10">
+        <div className="min-w-0 rounded-lg border border-border bg-card">
+          <table className="w-full table-fixed border-separate border-spacing-0 text-sm">
+            <caption className="sr-only">Installed skills and their declared reach</caption>
+            <thead>
               <tr>
                 {header("name", "Name")}
-                {header("description", "Description")}
-                {header("type", "Type")}
-                <SortHeader label="Agents" sortKey="agents" className="border-b border-border" />
-                {header("author", "Author")}
-                {header("updated", "Updated")}
+                {header("description", "Description", "hidden md:table-cell")}
+                {header("type", "Type", "hidden lg:table-cell lg:w-28")}
+                <SortHeader
+                  label="Agents"
+                  sortKey="agents"
+                  className="hidden border-b border-border xl:table-cell"
+                />
+                {header("author", "Author", "hidden 2xl:table-cell")}
+                {header("updated", "Updated", "hidden xl:table-cell xl:w-28")}
               </tr>
             </thead>
             <tbody className="[&>tr:last-child>td]:border-b-0 [&>tr>td]:border-b [&>tr>td]:border-border">
               {visible.map((skill) => (
                 <tr key={skill.name} className="group transition-colors hover:bg-muted/50">
-                  <td className="w-48 px-3 py-2.5 align-top">
+                  <td className="px-3 py-3 align-top">
                     <Link
                       to={`/skills/${encodeURIComponent(skill.name)}`}
-                      className="font-medium text-foreground underline-offset-4 group-hover:underline"
+                      className="break-words font-medium text-foreground underline-offset-4 hover:underline"
                     >
                       {skill.name}
                     </Link>
+                    <p className="mt-1 break-words text-muted-foreground md:hidden">
+                      {skill.description ?? "No description written."}
+                    </p>
+                    <Link
+                      to={`/skills/${encodeURIComponent(skill.name)}#skill-reach`}
+                      aria-label={`Declared reach for ${skill.name}: ${SKILL_REACH_LABEL[skillFacts(skill).reach]}`}
+                      className="mt-1 flex min-h-11 w-fit items-center rounded-sm focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring sm:min-h-6"
+                    >
+                      <SkillReachBadge reach={skillFacts(skill).reach} />
+                    </Link>
                   </td>
-                  <td className="max-w-80 px-3 py-2.5 align-top text-muted-foreground">
-                    <p className="truncate">{skill.description ?? "No description written."}</p>
+                  <td className="hidden px-3 py-3 align-top text-muted-foreground md:table-cell">
+                    <p className="break-words">{skill.description ?? "No description written."}</p>
                   </td>
-                  <td className="w-36 px-3 py-2.5 align-top">
-                    <Badge variant={skillTypeBadge(skill)} className="capitalize">
+                  <td className="hidden px-3 py-3 align-top lg:table-cell">
+                    <Badge
+                      variant="neutral"
+                      className="max-w-full whitespace-normal break-words capitalize"
+                    >
                       {skillType(skill)}
                     </Badge>
                   </td>
-                  <td className="w-56 px-3 py-2.5 align-top">
+                  <td className="hidden px-3 py-3 align-top xl:table-cell">
                     <AgentsCell skill={skill} agents={agents} />
                   </td>
-                  <td className="w-40 px-3 py-2.5 align-top text-muted-foreground">
+                  <td className="hidden break-words px-3 py-3 align-top text-muted-foreground 2xl:table-cell">
                     {skill.author ?? "\u2014"}
                   </td>
-                  <td className="w-28 whitespace-nowrap px-3 py-2.5 align-top text-muted-foreground">
+                  <td className="hidden px-3 py-3 align-top text-muted-foreground xl:table-cell">
                     {skill.updatedAt ? (
                       <span title={new Date(skill.updatedAt).toLocaleString()}>
                         {timeAgo(skill.updatedAt)}

@@ -36,6 +36,10 @@ Terminology is binding: [`metadata/terminologies.md`](metadata/terminologies.md)
 - **Neutral by default.** Achromatic surfaces, quiet hairlines, near-black ink for the one
   committing action. Ruby is the product's own mark and nothing else. Destructive red is for
   danger. Nothing else.
+- **Improve the flow without replacing the language.** Preserve the existing typeface, compact
+  control scale, restrained palette and quiet hairlines. A useful UX change does not justify larger
+  controls, heavier surfaces or extra decoration. The blue Integrations banner is a specific
+  illustration, not a template to spread across the product.
 - **Structure should be felt, not seen.** Hierarchy comes from layout, type, and spacing. A
   resting surface separates on a hairline and a one-step change of ground — **no shadow at all**
   (§6). Shadow is reserved for things that genuinely float above the page. Never a gradient,
@@ -44,8 +48,8 @@ Terminology is binding: [`metadata/terminologies.md`](metadata/terminologies.md)
   sidebar sits one step away from the content in both themes so it falls back whichever way the
   theme runs.
 - **Color never carries meaning alone.** Every tone ships with a label, an icon, or a shape.
-- **Motion must report real state.** An animation that runs regardless of what is happening is
-  decoration, and decoration is not permitted. See §7.
+- **Motion must report real state.** The existing Integrations illustration is the sole bounded
+  exception: it may float once on arrival and stays static with reduced motion. See §7.
 - **Reusable at the right layer.** Tokens express decisions, primitives express controls,
   composites express repeated arrangements, features express domain behavior.
 - **Accessible in every state.** Keyboard, screen reader, contrast, reduced motion, zoom, long
@@ -328,8 +332,8 @@ tracking is a large part of why the type reads as dense rather than merely small
 | `text-xs` | 12 / 1.4 / 0 | Metadata, compact labels |
 | `text-sm` | **13** / 1.5 / −0.01em | **Chrome default**: controls, navigation, table cells |
 | `text-base` | **15** / 1.6 / −0.011em | **Reading default**: prose, chat, inputs you type into |
-| `text-lg` | 17 / 1.6 / 0 | Panel titles |
-| `text-xl` | 20 / 1.33 / −0.012em | Page title |
+| `text-lg` | 17 / 1.6 / 0 | Occasional content heading |
+| `text-xl` | 20 / 1.33 / −0.012em | Chat welcome heading |
 | `text-2xl` | 24 / 1.33 / −0.012em | Major content heading |
 | `text-3xl` | 32 / 1.125 / −0.022em | Rare empty-state or welcome moment |
 
@@ -390,8 +394,9 @@ characters without anything appearing to change.
 
 ### Chrome bar page title
 
-Navigation chrome. It takes Label, not Title, even though it names the current page. Reserve
-Title for a heading the content area owns, and only when it says something the bar does not.
+Navigation chrome. It takes Label (`text-sm font-medium`), not Title, even though it names the
+current page. Panel and empty-state headings stay at `text-sm`; weight carries their hierarchy.
+Reserve larger type for content that says something the bar does not.
 
 ## 6. Shape, depth, and material
 
@@ -453,13 +458,17 @@ Neither is available in the product app. Do not port them there.
 
 ## 7. Motion
 
-**Motion is permitted only when it reports real state.** Three effects in the product app pass this
-test and are the precedent for judging a fourth:
+**Motion on work controls reports real state.** Three effects in the product app pass this test
+and are the precedent for judging another work-state effect:
 
 - The run rail's indeterminate sweep runs only while a Tool call is genuinely in flight.
 - `LoadingState`'s pixel grid loops only while work is in flight, beside a `tabular-nums` timer that
   keeps the claim honest.
 - The onboarding tulip's growth stage is answered-input count, not ornament.
+
+The existing Integrations banner is the bounded illustration exception: its pills float once on
+arrival, settle within five seconds, and do not animate under reduced motion. Its text is visible
+from the first frame; the motion never stands in for loading, progress, or real business activity.
 
 ### Most state changes are not animated
 
@@ -478,6 +487,7 @@ occurrences left in **either** app, and a new one is a regression.
 | Selection, checkbox, switch | 100ms |
 | Popover, menu, tooltip enter | 150ms |
 | Modal, sheet enter | 200ms |
+| Integrations illustration arrival | Up to 5s, once, `ease-in-out` |
 | Everything else | **it does not animate** |
 
 Default easing is `ease-out`. Layer entry uses `--ease-layer`
@@ -596,13 +606,14 @@ Notes from real failures:
 
 ### Layout
 
-One sidebar, 248px, one chrome bar 40px. There is no rail and no second panel. In product mode,
+One sidebar, 248px, one chrome bar 40px on desktop (48px below `sm` for touch navigation). There is
+no rail and no second panel. In product mode,
 every daily destination is a row in one flat list under a Work or Build heading. Farm and Settings
 are pinned below that list, above the account card, so those utility destinations stay fixed
 instead of drifting as the list grows. Settings routes reuse the same sidebar frame and replace its
 contents with configuration navigation; they never add another shell column. The mobile drawer is
 that same 248px sidebar, so docking it does not change the layout's width. The sidebar header and
-the content column share that one 40px row so both columns start on the same line.
+the content column share that one row so both columns start on the same line.
 
 - `>=1024px`: persistent sidebar, collapsible to a 56px icon column
 - `<1024px`: one menu opens it as an overlay drawer, always full width
@@ -659,7 +670,7 @@ the product's own navigation. Promotion belongs on the public site. Nothing may 
 sidebar's destination list, regardless of whether it is an upsell.
 
 **One icon spine.** Every navigation row and the account button share one box model, so their icons
-land on the same x. Search and New chat are compact controls in the 40px header beside the
+land on the same x. Search and New chat are compact controls in the 40px desktop header beside the
 workspace name. Collapsed, all controls become squares on the centre line, so no block is wider
 than its neighbour.
 
@@ -780,11 +791,17 @@ only name is a 10px crumb has no heading at all — that is an accessibility fai
 aesthetic. Do not add a second `h1` inside the content; pass `title`, `meta` and `actions` to the
 shell instead.
 
-**One bar, 40px, and it is the sidebar's.** The app renders exactly one chrome row: the `<header>`
+**One bar, and it is the sidebar's.** The app renders exactly one chrome row: the `<header>`
 in `app-sidebar.tsx`, spanning the sidebar and the content column so both start on the same line.
+It stays 40px on desktop and gives touch navigation 48px below `sm`.
 `PageShell` does **not** render a second one. This is worth stating because the mistake is easy and
 was made: adding a header block to `PageShell` produced two stacked bars, since the shell already
 had one. Before adding chrome, check what the shell already renders.
+
+**On small screens, actions yield to the page name.** Below `sm`, Page actions opens one wrapping
+popover containing the same action slot and app utilities. Do not duplicate or remount route
+actions to move them between layouts: an open dialog or an upload would lose its state. Escape
+returns focus to the trigger; leaving the disclosure or navigating closes it.
 
 **The sidebar is the frame; the workspace is the surface.** On desktop, the work area sits inside
 the sidebar ground with a small outer gap, a faint border and one rounded edge. This makes the
@@ -962,10 +979,9 @@ tie-break by name. The natural `(a ?? -1) - (b ?? -1)` idiom multiplied by a sig
 ascending, so reversing a sort buries the rows with data under the rows without any.
 
 **Exactly one filled action per rendered view, counting empty states.** A page header action and an
-empty-state call to action are visible at the same time, so giving both the accent fill leaves the
-reader two identical primaries for one destination. The header keeps the fill in every state,
-because it is the affordance that never moves; the empty state's copy carries the invitation and its
-button stays `outline`.
+empty-state call to action are visible at the same time, so giving both the primary fill leaves the
+reader two identical primaries for one destination. Keep the header action and make the empty-state
+button `outline`, or let the first-use invitation own the action and omit its header duplicate.
 
 **Sticky headers need a bounded scroll container.** `overflow-x-auto` alone gives a sticky `<thead>`
 nothing to stick to. The wrapper owns vertical scroll (`max-h-[70svh] overflow-auto`) so the grid
@@ -1006,18 +1022,24 @@ runtime-managed ones; because adjacent inline spans concatenate with no space, t
 **Every empty state names its own cause.** "No records yet", "no column is visible", "nothing matches
 that filter" and "this schema will not parse" are four different problems with four different exits.
 One shared "No results" for all four tells the reader nothing they can act on.
+First-use `EmptyState` uses a quiet dashed boundary, a small `h2`, a short hint and a real next
+action. No added flower, fixed tall card or colored illustration. The workspace stays fluid.
 
 ### The integrations catalog
 
-**This is the sanctioned card grid.** §1 bans card grids "without a content reason"; §6 lists the
-one place elevation is allowed. Both exemptions point here, and the reason is the same. Every other
-roster in this app lists objects *the operator authored* — agents, skills, routines — where the name
-is the identity and a list column aligns cleanly. The integrations catalog lists **other people's
-brands**, which an operator recognises by mark before name. A tile that leads with the logo is
-faster to scan than a row that leads with text, and the set is small and slow-growing, so the
-vertical cost cards pay at three hundred rows is never charged. Grid at `sm:2 / xl:3`.
+Lead with actual connection state and available providers. Coming-soon entries follow usable
+providers. Keep the blue capability banner, its floating pills, translucent surfaces and circular
+motifs. Label sample activity visibly as examples; stack its pills on narrow screens rather than
+clipping their text. This illustration is an intentional exception to neutral resting surfaces,
+not a general-purpose banner family. Never present examples or unavailable Skill packs as work the
+business has done or capabilities it can install. Marketplace browsing uses compact rows and the
+real audit flow; declared reach links back to the assets that use it.
 
-**One tile design for every entry.** The logo is the only place brand colour is allowed to land —
+**Provider rows, not a grid of large cards.** Keep the logo, name, short description, connection
+state and actions aligned in one quiet list below the banner. Hairlines separate rows; do not add
+a filled, rounded container around each provider. On narrow screens, actions wrap below the name.
+
+**One logo treatment for every entry.** The logo is the only place provider colour is allowed to land —
 the tile behind it is the same neutral surface at every tier, whether the mark is a vendored
 full-colour SVG, a monochrome glyph, or a fallback monogram. Tinting the tile to match the brand
 produces as many card designs as there are cards.
@@ -1344,7 +1366,8 @@ in [`apps/docs/AGENTS.md`](apps/docs/AGENTS.md) and the `tulipfarm-docs` skill, 
 - Artificial per-row stagger on data that arrives when the work happens.
 - A JS-driven entrance whose hidden start state is not guarded by `@media (scripting: enabled)`.
 - Decorative shadows, an arbitrary `shadow-[…]`, a shadow with no hairline under it, gradients,
-  glass, oversized radii, emoji icons, gratuitous animation.
+  glass outside the existing Integrations illustration, oversized radii, emoji icons, gratuitous
+  animation.
 - **Putting a shadow on resting chrome** — a button, input, card, table or panel. It separates on a
   hairline and its ground (§6).
 - **Writing `duration-150`.** The default is 80ms and a bare `transition-colors` inherits it. There

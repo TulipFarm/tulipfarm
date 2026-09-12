@@ -1,4 +1,4 @@
-import { lazy, type ReactNode, Suspense, useEffect, useState } from "react";
+import { lazy, type ReactNode, Suspense, useEffect, useRef, useState } from "react";
 import { AgentGlyph } from "~/components/agent-glyph";
 import { ConnectionStatus } from "~/components/shell/states";
 import { Link } from "~/components/ui/link";
@@ -11,8 +11,8 @@ import type { Suggestion } from "~/lib/onboarding";
 import type { Task } from "~/lib/tasks";
 import { ChatDebugDrawer } from "./chat-debug-drawer";
 import { Composer } from "./composer";
+import { ChatHomeWork } from "./home-work";
 import { asPickerPreset, DEFAULT_CHAT_MODEL_SELECTOR } from "./model-selector";
-import { TasksPreviewCard } from "./tasks-preview-card";
 import { useMentionCatalog } from "./use-mention-catalog";
 
 /*
@@ -23,7 +23,7 @@ import { useMentionCatalog } from "./use-mention-catalog";
 const Transcript = lazy(() => import("./transcript").then((m) => ({ default: m.Transcript })));
 
 const GENERIC_GREETINGS = [
-  "What’s on your mind?",
+  "What would you like to get done?",
   "Where should we start?",
   "What needs sorting out?",
   "What are you thinking through?",
@@ -37,7 +37,7 @@ function greetingFor(userName: string | undefined, greetingIndex: number) {
   const firstName = userName?.trim().split(/\s+/)[0];
   const greetings = firstName
     ? [
-        `What’s on your mind, ${firstName}?`,
+        `What would you like to get done, ${firstName}?`,
         `Where should we start, ${firstName}?`,
         `What needs sorting out, ${firstName}?`,
         `What are you thinking through, ${firstName}?`,
@@ -82,12 +82,12 @@ function EmptyState({
         className="mx-auto flex min-h-full w-full max-w-2xl flex-col justify-center px-4 py-10 sm:px-6"
       >
         <div className="text-center">
-          <h1
+          <h2
             id="new-chat-title"
             className="text-balance text-xl font-semibold tracking-tight text-foreground"
           >
             {title}
-          </h1>
+          </h2>
           {agent ? (
             <p className="mt-2 text-sm text-muted-foreground">
               This Chat is using a user-created Agent.
@@ -95,7 +95,7 @@ function EmptyState({
           ) : null}
         </div>
         <div className="mt-5">{composer}</div>
-        {!agent && tasks.length > 0 ? <TasksPreviewCard tasks={tasks} onPick={onPick} /> : null}
+        {!agent ? <ChatHomeWork tasks={tasks} onPick={onPick} /> : null}
       </section>
     </div>
   );
@@ -160,6 +160,7 @@ export function ChatPanel({
   });
   const busy = status === "submitted" || status === "streaming";
   const [revisionDraft, setRevisionDraft] = useState<{ key: string; text: string } | null>(null);
+  const homeDraftNonce = useRef(0);
   // Composer only re-seeds its draft on remount (see composer.tsx), so a Companion "chat" action
   // rides the same key-forced-remount mechanism as a revision draft, keyed on its nonce rather
   // than its text — otherwise re-clicking the same Task card would be a no-op.
@@ -220,6 +221,8 @@ export function ChatPanel({
 
   return (
     <div className="flex h-full min-h-0 flex-col overflow-hidden">
+      {/* The restored route supplies its heading only once Messages exist. */}
+      {!hasMessages && initialConversationId ? <h1 className="sr-only">Chat</h1> : null}
       {/* The top bar names the conversation, so this strip only says what it can't: which Agent is
           driving the chat. Without an Agent there is nothing left to show and it collapses away. */}
       {hasMessages && activeAgentName ? (
@@ -268,7 +271,10 @@ export function ChatPanel({
           agent={activeAgentName}
           label={agentInfo?.label}
           tasks={tasks}
-          onPick={(text) => send(text, { model: activeAgentPreset ?? defaultModel, agentId })}
+          onPick={(text) => {
+            homeDraftNonce.current += 1;
+            setRevisionDraft({ key: `home-${homeDraftNonce.current}`, text });
+          }}
           composer={composer}
         />
       )}

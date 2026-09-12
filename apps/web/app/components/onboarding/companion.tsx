@@ -15,16 +15,19 @@ const AVATAR_SRC = "/logo-128.png";
  * and a gentle breathe, never a popup.
  */
 export function OnboardingCompanion() {
-  const { tasks, loading, open, setOpen, refresh, dismiss } = useCompanion();
+  const { tasks, loading, error, open, setOpen, refresh, dismiss } = useCompanion();
   const triggerRef = useRef<HTMLButtonElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (!open) return;
+    const previousFocus = document.activeElement;
+    panelRef.current?.focus({ preventScroll: true });
     function onKeyDown(e: KeyboardEvent) {
       if (e.key === "Escape") {
         setOpen(false);
-        triggerRef.current?.focus();
+        if (previousFocus instanceof HTMLElement) previousFocus.focus();
+        else triggerRef.current?.focus();
       }
     }
     function onPointerDown(e: PointerEvent) {
@@ -40,7 +43,7 @@ export function OnboardingCompanion() {
     };
   }, [open, setOpen]);
 
-  if (!loading && tasks.length === 0 && !open) return null;
+  if (!loading && tasks.length === 0 && !error && !open) return null;
 
   return (
     <div className="fixed bottom-4 right-4 z-40 hidden sm:block">
@@ -48,12 +51,14 @@ export function OnboardingCompanion() {
         <div
           ref={panelRef}
           role="dialog"
+          tabIndex={-1}
           aria-label="Onboarding companion"
           className="absolute bottom-14 right-0 max-h-[70vh] w-80 overflow-y-auto rounded-lg border border-border bg-card shadow-lg"
         >
           <CompanionPanel
             tasks={tasks}
             loading={loading}
+            error={error}
             onDismiss={dismiss}
             onAnswered={refresh}
             onClose={() => setOpen(false)}
@@ -89,7 +94,7 @@ export function OnboardingCompanion() {
  * header) instead of floating, so it never overlaps the chat composer. Panel reuses `Sheet`.
  */
 export function CompanionMobileTrigger() {
-  const { tasks, loading, open, setOpen, refresh, dismiss } = useCompanion();
+  const { tasks, loading, error, open, setOpen, refresh, dismiss } = useCompanion();
   // Native <dialog> promotes to the top layer on showModal() regardless of an ancestor's
   // `sm:hidden`, so its full-viewport ::backdrop would swallow clicks on the desktop floating
   // panel below unless the <Sheet> itself is kept unmounted outside its own breakpoint.
@@ -103,7 +108,7 @@ export function CompanionMobileTrigger() {
     return () => query.removeEventListener("change", update);
   }, []);
 
-  if (!loading && tasks.length === 0 && !open) return null;
+  if (!loading && tasks.length === 0 && !error && !open) return null;
 
   return (
     <>
@@ -116,7 +121,7 @@ export function CompanionMobileTrigger() {
         }
         aria-expanded={open}
         onClick={() => setOpen(true)}
-        className="relative flex size-10 shrink-0 items-center justify-center rounded-md transition-colors hover:bg-accent"
+        className="relative flex size-11 shrink-0 items-center justify-center rounded-md transition-colors hover:bg-accent active:bg-accent"
       >
         <img src={AVATAR_SRC} alt="" width={22} height={22} className="size-[22px]" />
         {tasks.length > 0 ? (
@@ -131,6 +136,7 @@ export function CompanionMobileTrigger() {
           <CompanionPanel
             tasks={tasks}
             loading={loading}
+            error={error}
             onDismiss={dismiss}
             onAnswered={refresh}
             onClose={() => setOpen(false)}

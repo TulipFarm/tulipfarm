@@ -2,6 +2,7 @@ import { type ClientLoaderFunctionArgs, type MetaFunction, useLoaderData } from 
 import { useCallback, useEffect, useState } from "react";
 import { ChatPanel } from "~/components/chat/chat-panel";
 import { DEFAULT_CHAT_MODEL_SELECTOR } from "~/components/chat/model-selector";
+import { PageShell } from "~/components/page-shell";
 import type { ChatModelSelector } from "~/lib/chat/types";
 import { useCompanion } from "~/lib/companion-context";
 import { useConversations } from "~/lib/conversations-context";
@@ -81,22 +82,22 @@ export default function ChatRoute() {
     },
     [refresh, setActiveChatId]
   );
+  // A new-chat nonce resets the transcript without remounting during a live Turn.
   return (
-    // `key` is bumped by startNewChat ("+ new chat") to force a fresh transcript even when the router
-    // location is unchanged (a shallow-routed chat at "/"). It never changes mid-turn, so the live
-    // stream is safe.
-    <ChatPanel
-      key={newChatNonce}
-      agentId={agentId}
-      defaultModel={defaultModel}
-      suggestions={suggestions}
-      tasks={tasks}
-      userName={user?.name ?? undefined}
-      greetingIndex={newChatNonce}
-      onConversationChange={onConversationChange}
-      initialDraft={draft}
-      pendingChatDraft={pendingChatDraft}
-      attachFileId={attach}
-    />
+    <PageShell title="Chat" contentClassName="h-full gap-0 p-0 sm:p-0 md:p-0">
+      <ChatPanel
+        key={newChatNonce}
+        agentId={agentId}
+        defaultModel={defaultModel}
+        suggestions={suggestions}
+        tasks={tasks}
+        userName={user?.name ?? undefined}
+        greetingIndex={newChatNonce}
+        onConversationChange={onConversationChange}
+        initialDraft={draft}
+        pendingChatDraft={pendingChatDraft}
+        attachFileId={attach}
+      />
+    </PageShell>
   );
 }

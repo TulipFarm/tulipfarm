@@ -140,3 +140,13 @@ test("clicking the same Task card twice redrafts it both times, not just the fir
   await waitFor(() => expect(setContent).toHaveBeenCalledTimes(1));
   expect(setContent).toHaveBeenCalledWith("Help me describe my business.");
 });
+
+test("opening Companion moves focus inside and Escape returns to its trigger", async () => {
+  render(<Stub initialEntries={["/"]} />);
+  const trigger = await screen.findByRole("button", { name: "Onboarding companion, 1 suggestion" });
+  await userEvent.click(trigger);
+  expect(screen.getByRole("dialog", { name: "Onboarding companion" })).toHaveFocus();
+  await userEvent.keyboard("{Escape}");
+  expect(screen.queryByRole("dialog", { name: "Onboarding companion" })).not.toBeInTheDocument();
+  expect(trigger).toHaveFocus();
+});

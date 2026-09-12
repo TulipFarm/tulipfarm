@@ -229,15 +229,12 @@
     }
   }
 
-  .integration-capability-bubble {
-    animation: integration-capability-float 6s ease-in-out infinite;
-  }
-
-  @media (prefers-reduced-motion: reduce) {
+  @media (prefers-reduced-motion: no-preference) {
     .integration-capability-bubble {
-      animation: none;
+      animation: integration-capability-float 5s ease-in-out;
     }
   }
+
   html,
   body {
     height: 100%;
@@ -267,6 +264,15 @@
     outline: 2px solid var(--ring);
     outline-offset: 2px;
     border-radius: 4px;
+  }
+}
+
+@media (max-width: 639px) {
+  input,
+  textarea,
+  select,
+  [contenteditable="true"] {
+    font-size: 1rem;
   }
 }
 

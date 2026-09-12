@@ -19,17 +19,17 @@ export default function InboxRoute() {
   const [refusal, setRefusal] = useState<string>();
   if (items.length === 0) {
     return (
-      <PageShell title="Inbox" description="Exact server-authorized decisions and waiting work.">
+      <PageShell title="Inbox" description="Requests and decisions that need your attention.">
         <EmptyState
           section="inbox"
           title="Nothing is waiting on you"
-          hint="Approvals, human tasks, form waits, and access requests appear here."
+          hint="Review approvals, answer questions, and manage access requests here."
         />
       </PageShell>
     );
   }
   return (
-    <PageShell title="Inbox" description="Exact server-authorized decisions and waiting work.">
+    <PageShell title="Inbox" description="Requests and decisions that need your attention.">
       {refusal ? <FormStatus tone="error">{refusal}</FormStatus> : null}
       {items.map((item) => (
         <InboxItem

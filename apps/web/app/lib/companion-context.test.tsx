@@ -7,11 +7,22 @@ import { CompanionProvider, useCompanion } from "~/lib/companion-context";
 
 vi.mock("~/lib/tasks", () => ({ listTasks: vi.fn(), dismissTask: vi.fn() }));
 
-import { listTasks } from "~/lib/tasks";
+import { dismissTask, listTasks } from "~/lib/tasks";
 
 function TaskCount() {
-  const { tasks } = useCompanion();
-  return <div data-testid="count">{tasks.length}</div>;
+  const { tasks, error, refresh, dismiss } = useCompanion();
+  return (
+    <>
+      <div data-testid="count">{tasks.length}</div>
+      <p role="status">{error}</p>
+      <button type="button" onClick={() => void refresh()}>
+        Refresh
+      </button>
+      <button type="button" onClick={() => void dismiss("t1")}>
+        Dismiss
+      </button>
+    </>
+  );
 }
 
 /** The provider lives on the parent route, so it stays mounted across the navigation below — a
@@ -56,4 +67,31 @@ test("refetches when the user comes back to the tab", async () => {
   vi.mocked(listTasks).mockResolvedValue([] as never);
   window.dispatchEvent(new Event("focus"));
   await waitFor(() => expect(screen.getByTestId("count")).toHaveTextContent("0"));
+});
+
+test("a failed refresh retains the last list and exposes a recoverable error", async () => {
+  vi.mocked(listTasks).mockResolvedValue([{ id: "t1" }] as never);
+  renderApp("/");
+  await waitFor(() => expect(screen.getByTestId("count")).toHaveTextContent("1"));
+
+  vi.mocked(listTasks).mockRejectedValue(new Error("offline"));
+  await userEvent.click(screen.getByRole("button", { name: "Refresh" }));
+  await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("Couldn't load"));
+  expect(screen.getByTestId("count")).toHaveTextContent("1");
+
+  vi.mocked(listTasks).mockResolvedValue([]);
+  await userEvent.click(screen.getByRole("button", { name: "Refresh" }));
+  await waitFor(() => expect(screen.getByRole("status")).toBeEmptyDOMElement());
+  expect(screen.getByTestId("count")).toHaveTextContent("0");
+});
+
+test("a failed dismissal leaves the task visible and reports the failure", async () => {
+  vi.mocked(listTasks).mockResolvedValue([{ id: "t1" }] as never);
+  vi.mocked(dismissTask).mockRejectedValue(new Error("offline"));
+  renderApp("/");
+  await waitFor(() => expect(screen.getByTestId("count")).toHaveTextContent("1"));
+
+  await userEvent.click(screen.getByRole("button", { name: "Dismiss" }));
+  await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("Couldn't dismiss"));
+  expect(screen.getByTestId("count")).toHaveTextContent("1");
 });

@@ -1,6 +1,11 @@
 import { useLocation, useNavigate } from "@remix-run/react";
-import { useState } from "react";
+import { useId, useRef, useState } from "react";
+import { isSetupTask } from "~/components/chat/task-presentation";
 import { ArrowRight, Check, MessageCircle, X } from "~/components/icons";
+import { Button } from "~/components/ui/button";
+import { Input } from "~/components/ui/input";
+import { Link } from "~/components/ui/link";
+import { Tooltip } from "~/components/ui/tooltip";
 import { ApiError } from "~/lib/api";
 import { useCompanion } from "~/lib/companion-context";
 import { answerTask, completeTask, type Task, type TaskAction } from "~/lib/tasks";
@@ -17,16 +22,25 @@ function AnswerTask({
 }) {
   const [value, setValue] = useState("");
   const [busy, setBusy] = useState(false);
+  const [saved, setSaved] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const inputId = useId();
+  const inputRef = useRef<HTMLInputElement>(null);
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
     const trimmed = value.trim();
-    if (!trimmed || busy) return;
+    if (busy) return;
+    if (!trimmed) {
+      setError("Enter an answer to continue.");
+      inputRef.current?.focus();
+      return;
+    }
     setBusy(true);
     setError(null);
     try {
       await answerTask(task.id, trimmed);
+      setSaved(true);
       onAnswered();
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Couldn't save that, try again.");
@@ -34,30 +48,49 @@ function AnswerTask({
     }
   }
 
+  if (saved) {
+    return (
+      <div>
+        <p className="text-sm font-medium text-foreground">{task.title}</p>
+        <p role="status" className="mt-1 flex items-center gap-1.5 text-sm text-muted-foreground">
+          <Check className="size-4" aria-hidden />
+          Saved
+        </p>
+      </div>
+    );
+  }
+
   return (
     <form onSubmit={submit} className="flex flex-col gap-1.5">
-      <label htmlFor={`task-${task.id}`} className="text-sm font-medium text-foreground">
+      <label htmlFor={inputId} className="text-sm font-medium text-foreground">
         {task.title}
       </label>
-      {action.hint ? <p className="text-xs text-muted-foreground">{action.hint}</p> : null}
+      {action.hint ? (
+        <p id={`${inputId}-hint`} className="text-sm text-muted-foreground">
+          {action.hint}
+        </p>
+      ) : null}
       <div className="flex gap-1.5">
-        <input
-          id={`task-${task.id}`}
+        <Input
+          ref={inputRef}
+          id={inputId}
+          name={action.field}
+          autoComplete={action.field === "businessName" ? "organization" : undefined}
           value={value}
           onChange={(e) => setValue(e.target.value)}
           disabled={busy}
-          className="h-7 pointer-coarse:h-8 min-w-0 flex-1 rounded-md border border-input bg-background px-2.5 text-sm text-foreground outline-none focus-visible:ring-[3px] focus-visible:ring-ring/25"
+          aria-invalid={error ? true : undefined}
+          aria-describedby={
+            error ? `${inputId}-error` : action.hint ? `${inputId}-hint` : undefined
+          }
+          className="min-w-0 flex-1"
         />
-        <button
-          type="submit"
-          disabled={busy || !value.trim()}
-          className="inline-flex h-7 pointer-coarse:h-8 shrink-0 items-center rounded-md bg-primary px-3 text-sm font-medium text-primary-foreground transition hover:bg-primary/90 disabled:opacity-40"
-        >
-          Save
-        </button>
+        <Button type="submit" variant="outline" disabled={busy} className="shrink-0">
+          {busy ? "Saving…" : "Save"}
+        </Button>
       </div>
       {error ? (
-        <p role="alert" className="text-xs text-destructive">
+        <p id={`${inputId}-error`} role="alert" className="text-sm text-destructive">
           {error}
         </p>
       ) : null}
@@ -80,47 +113,58 @@ function TaskRow({
   const { pathname } = useLocation();
   const { requestChatDraft } = useCompanion();
   const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   async function acknowledge() {
     if (busy) return;
     setBusy(true);
+    setError(null);
     try {
       await completeTask(task.id);
       onAnswered();
+    } catch {
+      setError("Couldn't complete that step. Try again.");
     } finally {
       setBusy(false);
     }
   }
 
   return (
-    <li className="flex items-start gap-2 rounded-lg border border-border bg-background p-3">
-      <div className="min-w-0 flex-1">
+    <li className="flex items-start gap-2 py-3">
+      <div className="min-w-0 flex-1 break-words">
         {task.action.kind === "answer" ? (
           <AnswerTask task={task} action={task.action} onAnswered={onAnswered} />
         ) : (
           <>
             <p className="text-sm font-medium text-foreground">{task.title}</p>
             {task.detail ? (
-              <p className="mt-0.5 text-xs text-muted-foreground">{task.detail}</p>
+              <p className="mt-1 text-sm text-muted-foreground">{task.detail}</p>
             ) : null}
             {task.action.kind === "ack" ? (
-              <button
+              <Button
                 type="button"
+                variant="outline"
                 disabled={busy}
                 onClick={() => void acknowledge()}
-                className="mt-2 inline-flex h-8 items-center gap-1.5 rounded-md border border-input bg-background px-2.5 text-xs font-medium text-muted-foreground transition hover:border-primary/60 hover:bg-accent hover:text-foreground active:translate-y-px disabled:opacity-40"
+                className="mt-2"
               >
                 <Check className="size-3.5 text-primary" aria-hidden />
                 Got it
-              </button>
+              </Button>
+            ) : task.action.kind === "link" ? (
+              <Button asChild variant="outline" className="mt-2">
+                <Link to={task.action.href} onClick={onClose}>
+                  <ArrowRight className="size-4" aria-hidden />
+                  {isSetupTask(task) ? "Connect model" : "Open"}
+                </Link>
+              </Button>
             ) : (
-              <button
+              <Button
                 type="button"
+                variant="outline"
                 onClick={() => {
                   const action = task.action;
-                  if (action.kind === "link") {
-                    navigate(action.href);
-                  } else if (action.kind === "chat") {
+                  if (action.kind === "chat") {
                     // Prefill through shared state, not a `?draft=` URL: the Companion is mounted
                     // globally and must also work from routes other than "/", and a raw
                     // `history.replaceState` elsewhere desyncs the router if we round-trip through
@@ -130,27 +174,30 @@ function TaskRow({
                   }
                   onClose();
                 }}
-                className="mt-2 inline-flex h-8 items-center gap-1.5 rounded-md border border-input bg-background px-2.5 text-xs font-medium text-muted-foreground transition hover:border-primary/60 hover:bg-accent hover:text-foreground active:translate-y-px"
+                className="mt-2"
               >
-                {task.action.kind === "chat" ? (
-                  <MessageCircle className="size-3.5 text-primary" aria-hidden />
-                ) : (
-                  <ArrowRight className="size-3.5 text-primary" aria-hidden />
-                )}
-                {task.action.kind === "chat" ? "Ask in chat" : "Go"}
-              </button>
+                <MessageCircle className="size-4" aria-hidden />
+                Ask in chat
+              </Button>
             )}
+            {error ? (
+              <p role="alert" className="mt-2 text-sm text-destructive">
+                {error}
+              </p>
+            ) : null}
           </>
         )}
       </div>
-      <button
-        type="button"
-        onClick={() => onDismiss(task.id)}
-        aria-label={`Dismiss "${task.title}"`}
-        className="-mr-1 -mt-1 inline-flex size-8 shrink-0 items-center justify-center rounded-md text-muted-foreground transition hover:bg-accent hover:text-foreground"
-      >
-        <X className="size-3.5" aria-hidden />
-      </button>
+      <Tooltip content={`Dismiss "${task.title}"`}>
+        <button
+          type="button"
+          onClick={() => onDismiss(task.id)}
+          aria-label={`Dismiss "${task.title}"`}
+          className="inline-flex size-11 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground active:bg-accent sm:size-7"
+        >
+          <X className="size-3.5" aria-hidden />
+        </button>
+      </Tooltip>
     </li>
   );
 }
@@ -158,43 +205,68 @@ function TaskRow({
 export function CompanionPanel({
   tasks,
   loading,
+  error,
   onDismiss,
   onAnswered,
   onClose,
 }: {
   tasks: Task[];
   loading: boolean;
+  error?: string | null;
   onDismiss: (id: string) => void;
   onAnswered: () => void;
   onClose: () => void;
 }) {
   if (loading && tasks.length === 0) {
-    return <p className="p-4 text-sm text-muted-foreground">Loading…</p>;
+    return (
+      <p role="status" className="p-4 text-sm text-muted-foreground">
+        Loading next steps…
+      </p>
+    );
   }
-  if (tasks.length === 0) {
+  if (tasks.length === 0 && !error) {
     return <p className="p-4 text-sm text-muted-foreground">You're all caught up.</p>;
   }
 
-  // Ranking already suppresses non-blocking Tasks server-side whenever a blocking one exists, so
-  // the list here is always homogeneous — one label for the whole batch, no client-side re-sort.
-  const label = tasks[0].blocking ? "Get set up" : "For you";
+  const setup = tasks.filter(isSetupTask);
+  const other = tasks.filter((task) => !isSetupTask(task));
 
   return (
     <div className="flex flex-col gap-4 p-4">
-      <section>
-        <p className="mb-2 text-xs font-medium text-muted-foreground">{label}</p>
-        <ul className="flex flex-col gap-2">
-          {tasks.map((task) => (
-            <TaskRow
-              key={task.id}
-              task={task}
-              onDismiss={onDismiss}
-              onAnswered={onAnswered}
-              onClose={onClose}
-            />
-          ))}
-        </ul>
-      </section>
+      {error ? (
+        <div role="alert" className="text-sm">
+          <p className="text-destructive">{error}</p>
+          <Button variant="outline" onClick={onAnswered} className="mt-2">
+            Try again
+          </Button>
+        </div>
+      ) : null}
+      {[
+        { label: "Get set up", items: setup },
+        { label: "Next steps", items: other },
+      ].map(({ label, items }) =>
+        items.length > 0 ? (
+          <section key={label} aria-label={label}>
+            <h2 className="text-sm font-semibold text-foreground">{label}</h2>
+            {label === "Get set up" ? (
+              <p className="mt-1 text-sm text-muted-foreground">
+                A few details to help your agents start.
+              </p>
+            ) : null}
+            <ul className="mt-1 flex flex-col divide-y divide-border">
+              {items.map((task) => (
+                <TaskRow
+                  key={task.id}
+                  task={task}
+                  onDismiss={onDismiss}
+                  onAnswered={onAnswered}
+                  onClose={onClose}
+                />
+              ))}
+            </ul>
+          </section>
+        ) : null
+      )}
     </div>
   );
 }

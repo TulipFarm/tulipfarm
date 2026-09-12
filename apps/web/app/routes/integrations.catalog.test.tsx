@@ -1,13 +1,18 @@
 import { createRemixStub } from "@remix-run/testing";
 import { cleanup, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { afterEach, expect, test, vi } from "vitest";
+import { afterEach, beforeEach, expect, test, vi } from "vitest";
 
 afterEach(() => {
   cleanup();
 });
 
-const admin = true;
+let admin = true;
+
+beforeEach(() => {
+  admin = true;
+  vi.clearAllMocks();
+});
 
 vi.mock("~/lib/use-session-user", () => ({
   useSessionUser: () => ({
@@ -72,9 +77,9 @@ test("lists a coming-soon entry without offering a way to connect it", async () 
   ]);
 
   const headings = await screen.findAllByRole("heading", { level: 2 });
-  expect(headings.map((h) => h.textContent)).toEqual(["Other"]);
+  expect(headings.map((h) => h.textContent)).toEqual(["Available", "Coming soon"]);
   expect(screen.getByText("Jira")).toBeInTheDocument();
-  expect(screen.getByText("Coming soon")).toBeInTheDocument();
+  expect(screen.getAllByText("Coming soon")).toHaveLength(2);
   expect(screen.queryByRole("link", { name: /view details for jira/i })).not.toBeInTheDocument();
 });
 
@@ -95,24 +100,35 @@ test("filters the catalog to connected integrations", async () => {
   expect(screen.getByText("Slack")).toBeInTheDocument();
 });
 
-test("shows static capability examples in the visual banner", async () => {
+test("keeps the blue capability banner and labels its activity as examples", async () => {
   renderCatalog([
+    integration({ name: "jira", title: "Jira", availability: "coming_soon" }),
     integration({ name: "github", title: "GitHub", status: "connected" }),
     integration({ name: "slack", title: "Slack", status: "disconnected" }),
   ]);
 
-  const overview = await screen.findByRole("region", {
-    name: "Integration capability examples",
-  });
-  expect(within(overview).getByText("Reviewed 14 pull requests before merge")).toBeInTheDocument();
-  expect(within(overview).getByText("Updated 23 tasks after the last run")).toBeInTheDocument();
-  expect(within(overview).getByText("Sent 8 updates to team channels")).toBeInTheDocument();
+  await screen.findByText("GitHub");
+  const banner = screen.getByRole("region", { name: "Integration capability examples" });
+  expect(within(banner).getByText("Example activity")).toBeInTheDocument();
+  for (const example of [
+    "Reviewed 14 pull requests before merge",
+    "Updated 23 tasks after the last run",
+    "Sent 8 updates to team channels",
+  ]) {
+    expect(within(banner).getByText(example)).toBeInTheDocument();
+  }
+  expect(
+    screen.getAllByRole("heading", { level: 2 }).map((heading) => heading.textContent)
+  ).toEqual(["Connected", "Available", "Coming soon"]);
+  expect(
+    within(screen.getByRole("region", { name: "Connected" })).getByText("GitHub")
+  ).toBeInTheDocument();
 });
 
-test("groups entries without a category under Other", async () => {
+test("groups a disconnected provider as available even without a category", async () => {
   renderCatalog([integration({ status: "disconnected" })]);
   const headings = await screen.findAllByRole("heading", { level: 2 });
-  expect(headings[0].textContent).toBe("Other");
+  expect(headings[0].textContent).toBe("Available");
 });
 
 test("an installed integration opens its preview panel from its card action", async () => {
@@ -121,7 +137,10 @@ test("an installed integration opens its preview panel from its card action", as
   // `?view=` and not a click handler: the preview has an address, so Back closes it and the link
   // can be opened in a new tab or shared.
   expect(link).toHaveAttribute("href", "/?view=github");
-  expect(screen.getByText("Browse repositories and review pull requests")).toBeInTheDocument();
+  expect(screen.getByText("Repos.")).toBeInTheDocument();
+  expect(
+    screen.queryByText("Browse repositories and review pull requests")
+  ).not.toBeInTheDocument();
 });
 
 test("a curated entry that is not installed yet is not a link to a detail page", async () => {
@@ -171,9 +190,12 @@ test("says nothing matched rather than looking empty", async () => {
 
   await user.type(await screen.findByLabelText(/search integrations/i), "zzzz");
   expect(screen.getByText(/nothing matches that search/i)).toBeInTheDocument();
+  expect(screen.getByRole("status")).toHaveTextContent("0 integrations match");
+  await user.click(screen.getByRole("button", { name: "Clear filters" }));
+  expect(screen.getByText("GitHub")).toBeInTheDocument();
 });
 
-test("offers an update action without adding another status badge", async () => {
+test("offers an update without hiding the integration's real connection state", async () => {
   const user = userEvent.setup();
   vi.mocked(updateIntegration).mockResolvedValue({
     name: "linear",
@@ -193,10 +215,77 @@ test("offers an update action without adding another status badge", async () => 
 
   const updateButton = await screen.findByRole("button", { name: /update linear/i });
   expect(updateButton).toBeInTheDocument();
-  expect(screen.queryByText(/update available/i)).not.toBeInTheDocument();
+  expect(screen.getByText("Update available")).toBeInTheDocument();
+  expect(screen.getByText("Not connected")).toBeInTheDocument();
 
   await user.click(updateButton);
   expect(updateIntegration).toHaveBeenCalledWith("linear", "acme/linear");
+});
+
+test("keeps connection states distinct instead of replacing errors with a connect action", async () => {
+  renderCatalog([
+    integration({ name: "github", title: "GitHub", status: "error" }),
+    integration({ name: "slack", title: "Slack", status: "connecting" }),
+  ]);
+  expect(await screen.findByText("Error")).toBeInTheDocument();
+  expect(screen.getByText("Connecting")).toBeInTheDocument();
+  expect(screen.queryByText("Not connected")).not.toBeInTheDocument();
+  expect(screen.getByRole("link", { name: /view details for github/i })).toHaveTextContent(
+    "View details"
+  );
+});
+
+test("connected and category filters work together and expose their selected state", async () => {
+  const user = userEvent.setup();
+  renderCatalog([
+    integration({ name: "github", title: "GitHub", category: "code", status: "connected" }),
+    integration({ name: "slack", title: "Slack", category: "chat", status: "connected" }),
+    integration({ name: "chat-api", title: "Chat API", category: "chat" }),
+  ]);
+  await user.click(await screen.findByRole("button", { name: "Connected" }));
+  await user.click(screen.getByRole("button", { name: "chat" }));
+  expect(screen.getByRole("button", { name: "Connected" })).toHaveAttribute("aria-pressed", "true");
+  expect(screen.getByRole("button", { name: "chat" })).toHaveAttribute("aria-pressed", "true");
+  expect(screen.getByText("Slack")).toBeInTheDocument();
+  expect(screen.queryByText("GitHub")).not.toBeInTheDocument();
+  expect(screen.queryByText("Chat API")).not.toBeInTheDocument();
+});
+
+test("an empty connected filter offers the available providers", async () => {
+  const user = userEvent.setup();
+  renderCatalog([integration()]);
+  await user.click(await screen.findByRole("button", { name: "Connected" }));
+  expect(screen.getByRole("heading", { name: "No connected integrations" })).toBeInTheDocument();
+  await user.click(screen.getByRole("button", { name: "Browse available" }));
+  expect(screen.getByText("GitHub")).toBeInTheDocument();
+});
+
+test("an empty catalog offers chat rather than a nonexistent install form", async () => {
+  renderCatalog([]);
+  expect(
+    await screen.findByRole("heading", { name: "No integrations available" })
+  ).toBeInTheDocument();
+  expect(screen.getByRole("link", { name: "Ask in chat" }).getAttribute("href")).toMatch(
+    /^\/\?draft=/
+  );
+  expect(screen.queryByText(/install one from a git repository/i)).not.toBeInTheDocument();
+});
+
+test("a non-admin cannot update a provider from its catalog card", async () => {
+  admin = false;
+  renderCatalog([integration({ updateAvailable: true })]);
+  await screen.findByText("GitHub");
+  expect(screen.queryByRole("button", { name: /update github/i })).not.toBeInTheDocument();
+  expect(updateIntegration).not.toHaveBeenCalled();
+});
+
+test("an update failure is announced and preserves the catalog", async () => {
+  const user = userEvent.setup();
+  vi.mocked(updateIntegration).mockRejectedValue(new Error("Update refused"));
+  renderCatalog([integration({ updateAvailable: true })]);
+  await user.click(await screen.findByRole("button", { name: /update github/i }));
+  expect(await screen.findByRole("alert")).toHaveTextContent("Update refused");
+  expect(screen.getByText("GitHub")).toBeInTheDocument();
 });
 
 test("opens the preview panel straight from a ?view= URL, so the link is shareable", async () => {
