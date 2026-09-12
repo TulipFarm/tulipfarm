@@ -13,6 +13,7 @@ import {
   ChevronsUpDown,
   LogOut,
   Menu,
+  MoreHorizontal,
   PanelLeftClose,
   PanelLeftOpen,
   Plus,
@@ -20,6 +21,7 @@ import {
   UserRound,
 } from "~/components/icons";
 import { CompanionMobileTrigger } from "~/components/onboarding/companion";
+import { PAGE_BAR } from "~/components/page-shell";
 import { ReportBugButton } from "~/components/report-bug-button";
 import { SidebarCommand } from "~/components/sidebar-command";
 import { ThemeToggle } from "~/components/theme-toggle";
@@ -46,12 +48,7 @@ import { usePageChromeTitle, useSetActionSlot } from "~/lib/page-chrome-context"
 import { isBusinessAdmin } from "~/lib/use-session-user";
 import { cn } from "~/lib/utils";
 
-/**
- * The height the app header and the sidebar's own header share, so the two line up across the
- * seam between them. 40px leaves 6px of air around a 28px control, so the chrome reads as an edge
- * of the frame rather than a band laid on the page.
- */
-const HEADER_ROW = "flex h-10 shrink-0 items-center";
+const HEADER_ROW = PAGE_BAR;
 /**
  * A nav group's label. Sentence case at body-adjacent size, not the old micro-label
  * treatment it replaced: shouting a word the reader is not meant to act on is the clearest case
@@ -835,6 +832,10 @@ function PageTitle({
 
 export function AppShell({ children, user }: { children: ReactNode; user?: SessionUser }) {
   const [open, setOpen] = useState(false);
+  const [toolsOpen, setToolsOpen] = useState(false);
+  const toolsRef = useRef<HTMLDivElement>(null);
+  const toolsTriggerRef = useRef<HTMLButtonElement>(null);
+  const toolsId = useId();
   // Seeded from the [data-sidebar] the pre-hydration script in root.tsx already resolved, so the
   // real shell adopts the persisted width on its first render — matching the HydrateFallback
   // skeleton instead of rendering expanded and snapping to collapsed in an effect.
@@ -843,6 +844,7 @@ export function AppShell({ children, user }: { children: ReactNode; user?: Sessi
   );
   const { pathname } = useLocation();
   const openerRef = useRef<HTMLButtonElement>(null);
+  const previousPath = useRef(pathname);
   const { activeChatTitle, activeChatId } = useConversations();
   const isConversation = pathname === "/" || pathname.startsWith("/chat/");
   // A page that renders `PageShell` publishes its own name, so a detail route is titled by the
@@ -857,6 +859,35 @@ export function AppShell({ children, user }: { children: ReactNode; user?: Sessi
     isConversation && activeChatId ? (
       <ChatCrumbTitle key={activeChatId} chatId={activeChatId} title={activeChatTitle ?? null} />
     ) : undefined;
+
+  useEffect(() => {
+    if (previousPath.current !== pathname) {
+      previousPath.current = pathname;
+      setToolsOpen(false);
+    }
+  }, [pathname]);
+
+  useEffect(() => {
+    if (!toolsOpen) return;
+    function dismissOutside(event: Event) {
+      if (event.target instanceof Node && !toolsRef.current?.contains(event.target)) {
+        setToolsOpen(false);
+      }
+    }
+    function dismissOnEscape(event: KeyboardEvent) {
+      if (event.key !== "Escape") return;
+      setToolsOpen(false);
+      toolsTriggerRef.current?.focus();
+    }
+    document.addEventListener("pointerdown", dismissOutside);
+    document.addEventListener("focusin", dismissOutside);
+    document.addEventListener("keydown", dismissOnEscape);
+    return () => {
+      document.removeEventListener("pointerdown", dismissOutside);
+      document.removeEventListener("focusin", dismissOutside);
+      document.removeEventListener("keydown", dismissOnEscape);
+    };
+  }, [toolsOpen]);
 
   useEffect(() => {
     if (!open) return;
@@ -899,22 +930,43 @@ export function AppShell({ children, user }: { children: ReactNode; user?: Sessi
             aria-label="Open navigation"
             aria-expanded={open}
             onClick={() => setOpen(true)}
-            className="flex size-10 shrink-0 items-center justify-center rounded-md transition-colors hover:bg-accent lg:hidden"
+            className="flex size-11 shrink-0 items-center justify-center rounded-md transition-colors hover:bg-accent sm:size-10 lg:hidden"
           >
             <Menu className="size-5" aria-hidden />
           </button>
           <PageTitle pathname={pathname} pageTitle={pageTitle} titleSlot={chatTitleSlot} />
-          <div className="ml-auto flex shrink-0 items-center gap-1 pl-2">
-            {/* Page actions land left of the shell's own controls, so the reader meets what this
-             * page can do before what the app can do. */}
-            <div ref={setActionSlot} className="flex items-center gap-1.5 empty:hidden" />
-            <span className="sm:hidden">
-              <CompanionMobileTrigger />
-            </span>
-            <ReportBugButton />
-            <span className="flex items-center lg:hidden">
-              <ThemeToggle iconOnly />
-            </span>
+          <div ref={toolsRef} className="relative ml-auto shrink-0">
+            <button
+              ref={toolsTriggerRef}
+              type="button"
+              aria-label="Page actions"
+              aria-controls={toolsId}
+              aria-expanded={toolsOpen}
+              onClick={() => setToolsOpen((current) => !current)}
+              className="flex size-11 items-center justify-center rounded-md hover:bg-accent sm:hidden"
+            >
+              <MoreHorizontal className="size-5" aria-hidden />
+            </button>
+            <div
+              id={toolsId}
+              className={cn(
+                "absolute right-0 top-full z-50 max-h-[calc(100dvh-4rem)] w-[min(22rem,calc(100vw-1.5rem))] flex-wrap items-center gap-3 overflow-y-auto rounded-lg border border-border bg-popover p-3 shadow-md",
+                toolsOpen ? "flex" : "hidden",
+                "sm:static sm:flex sm:w-auto sm:flex-nowrap sm:gap-1 sm:overflow-visible sm:rounded-none sm:border-0 sm:bg-transparent sm:p-0 sm:pl-2 sm:shadow-none"
+              )}
+            >
+              <div
+                ref={setActionSlot}
+                className="flex min-w-0 max-w-full flex-wrap items-center gap-2 empty:hidden max-sm:[&>div]:flex-wrap"
+              />
+              <span className="sm:hidden">
+                <CompanionMobileTrigger />
+              </span>
+              <ReportBugButton />
+              <span className="flex items-center lg:hidden">
+                <ThemeToggle iconOnly />
+              </span>
+            </div>
           </div>
         </header>
         <main id="main-content" tabIndex={-1} className="min-h-0 min-w-0 flex-1 overflow-hidden">

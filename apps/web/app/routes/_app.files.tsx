@@ -1,5 +1,6 @@
 import { type MetaFunction, useLoaderData, useNavigate, useRouteError } from "@remix-run/react";
 import { useEffect, useId, useMemo, useRef, useState } from "react";
+import { EmptyState } from "~/components/empty-state";
 import { FileList } from "~/components/files/file-list";
 import { FilePreview } from "~/components/files/file-preview";
 import { ShareDialog } from "~/components/files/file-share";
@@ -48,10 +49,10 @@ const PAGE_SIZE = 50;
 const MAX_AUTO_PAGES = 20;
 
 const TABS = [
-  { id: "all", label: "All Files" },
-  { id: "mine", label: "My Files" },
-  { id: "shared", label: "Shared with me" },
-  { id: "archived", label: "Trash" },
+  { id: "all", label: "All Files", compactLabel: "All" },
+  { id: "mine", label: "My Files", compactLabel: "Mine" },
+  { id: "shared", label: "Shared with me", compactLabel: "Shared" },
+  { id: "archived", label: "Trash", compactLabel: "Trash" },
 ] as const;
 
 type TabId = (typeof TABS)[number]["id"];
@@ -228,6 +229,13 @@ export default function FilesIndex() {
     accessFilter !== "all" ||
     knowledgeFilter !== "all" ||
     sort !== "modified-desc";
+
+  const hasFilters =
+    query.trim().length > 0 ||
+    typeFilter !== "all" ||
+    (tab === "all" && ownerFilter !== "all") ||
+    accessFilter !== "all" ||
+    (tab !== "shared" && knowledgeFilter !== "all");
 
   // Depending on loadMore would re-enter on every render, since it is re-created each time.
   // biome-ignore lint/correctness/useExhaustiveDependencies: paging state alone decides re-entry.
@@ -511,14 +519,35 @@ export default function FilesIndex() {
       ) : null}
 
       {files.length === 0 && !loading && !searching ? (
-        <div
-          id={`files-panel-${tab}`}
-          role="tabpanel"
-          aria-labelledby={`files-tab-${tab}`}
-          className="rounded-lg border border-dashed border-border px-4 py-10 text-center"
-        >
-          <p className="text-sm font-medium text-foreground">{emptyTitle(tab, query)}</p>
-          <p className="mt-1 text-sm text-muted-foreground">{emptyDescription(tab, query)}</p>
+        <div id={`files-panel-${tab}`} role="tabpanel" aria-labelledby={`files-tab-${tab}`}>
+          <EmptyState
+            section="files"
+            title={hasFilters ? "No files match these filters" : emptyTitle(tab, query)}
+            hint={
+              hasFilters
+                ? "Try a different search or clear your filters."
+                : emptyDescription(tab, query)
+            }
+          >
+            {hasFilters ? (
+              <Button
+                variant="outline"
+                onClick={() => {
+                  setQuery("");
+                  setTypeFilter("all");
+                  setOwnerFilter("all");
+                  setAccessFilter("all");
+                  setKnowledgeFilter("all");
+                }}
+              >
+                Clear filters
+              </Button>
+            ) : tab === "all" || tab === "mine" ? (
+              <Button variant="outline" onClick={() => setUploadOpen(true)}>
+                {currentFolderId === null ? "Add your first file" : "Add a file"}
+              </Button>
+            ) : null}
+          </EmptyState>
         </div>
       ) : (
         <div
@@ -859,6 +888,7 @@ function FileTabs({
           }}
           type="button"
           role="tab"
+          aria-label={tab.label}
           aria-selected={selected === tab.id}
           aria-controls={`files-panel-${tab.id}`}
           tabIndex={selected === tab.id ? 0 : -1}
@@ -883,7 +913,8 @@ function FileTabs({
             refs.current[next.id]?.focus();
           }}
         >
-          {tab.label}
+          <span className="sm:hidden">{tab.compactLabel}</span>
+          <span className="hidden sm:inline">{tab.label}</span>
         </button>
       ))}
     </div>

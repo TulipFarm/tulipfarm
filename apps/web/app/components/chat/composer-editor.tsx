@@ -127,6 +127,8 @@ export function ComposerEditor({
           /* Matches the transcript: what you type and what you read back must be the same size. */
           "tf-editor max-h-[220px] min-h-[4.25rem] overflow-y-auto px-3.5 py-2.5 text-base text-foreground outline-none",
         "aria-label": "Message",
+        role: "textbox",
+        "aria-multiline": "true",
       },
       handleKeyDown: (view, event) => {
         if (event.key === "Enter" && !event.shiftKey) {

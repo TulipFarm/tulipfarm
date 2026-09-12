@@ -85,18 +85,20 @@ function detail(overrides: Partial<SkillDetailData> = {}): { skill: SkillDetailD
   };
 }
 
-test("index shows starter packs and links each installed skill to its detail page", () => {
+test("index leads with installed skills and a real marketplace route, not unavailable packs", () => {
   renderWithData(<SkillsIndex />, { skills: SKILLS, agents: AGENTS });
 
-  expect(screen.getByRole("link", { name: /demo-skill/ })).toHaveAttribute(
+  expect(
+    screen.queryByRole("region", { name: "Skill capability examples" })
+  ).not.toBeInTheDocument();
+  expect(screen.getByRole("link", { name: "demo-skill" })).toHaveAttribute(
     "href",
     "/skills/demo-skill"
   );
-  expect(screen.getByRole("heading", { name: "Starter packs" })).toBeInTheDocument();
-  expect(screen.getByText("Product design kit")).toBeInTheDocument();
-  expect(screen.getByText("Frontend engineer")).toBeInTheDocument();
-  expect(screen.getByText("Backend and infra")).toBeInTheDocument();
-  expect(screen.getAllByText("Coming soon")).toHaveLength(4);
+  expect(screen.getByRole("heading", { name: "Installed skills" })).toBeInTheDocument();
+  expect(screen.queryByRole("heading", { name: "Starter packs" })).not.toBeInTheDocument();
+  expect(screen.queryByText("Product design kit")).not.toBeInTheDocument();
+  expect(screen.queryByText("Coming soon")).not.toBeInTheDocument();
   expect(screen.getByRole("link", { name: /browse marketplace/i })).toHaveAttribute(
     "href",
     "/skills/marketplace"
@@ -120,8 +122,8 @@ test("index shows useful installed-skill columns and searches across them", asyn
   expect(screen.getByText("Muskan Vijayvargiya")).toBeInTheDocument();
 
   await user.type(screen.getByLabelText("Search installed skills"), "review agent");
-  expect(screen.getByRole("link", { name: /demo-skill/ })).toBeInTheDocument();
-  expect(screen.queryByRole("link", { name: /my-skill/ })).not.toBeInTheDocument();
+  expect(screen.getByRole("link", { name: "demo-skill" })).toBeInTheDocument();
+  expect(screen.queryByRole("link", { name: "my-skill" })).not.toBeInTheDocument();
 });
 
 test("index search matches the skill type", async () => {
@@ -129,15 +131,52 @@ test("index search matches the skill type", async () => {
   renderWithData(<SkillsIndex />, { skills: SKILLS, agents: AGENTS });
 
   await user.type(screen.getByLabelText("Search installed skills"), "forge");
-  expect(screen.getByRole("link", { name: /demo-skill/ })).toBeInTheDocument();
-  expect(screen.queryByRole("link", { name: /my-skill/ })).not.toBeInTheDocument();
+  expect(screen.getByRole("link", { name: "demo-skill" })).toBeInTheDocument();
+  expect(screen.queryByRole("link", { name: "my-skill" })).not.toBeInTheDocument();
 });
 
-test("index with no skills keeps the starter previews and shows an empty installed section", () => {
+test("index with no skills offers one marketplace action in the empty state", () => {
   renderWithData(<SkillsIndex />, { skills: [], agents: [] });
-  expect(screen.getByText(/no skills installed yet/i)).toBeInTheDocument();
+  expect(
+    screen.queryByRole("region", { name: "Skill capability examples" })
+  ).not.toBeInTheDocument();
+  const empty = screen.getByRole("region", { name: "Skills" });
+  expect(
+    within(empty).getByRole("heading", { name: /no skills installed yet/i })
+  ).toBeInTheDocument();
+  expect(within(empty).getByRole("link", { name: /browse marketplace/i })).toHaveAttribute(
+    "href",
+    "/skills/marketplace"
+  );
   expect(screen.getAllByRole("link", { name: /browse marketplace/i })).toHaveLength(1);
-  expect(screen.getByText("Product design kit")).toBeInTheDocument();
+  expect(screen.queryByText("Product design kit")).not.toBeInTheDocument();
+});
+
+test("installed skills link their declared reach and match tools and hosts in search", async () => {
+  const user = userEvent.setup();
+  renderWithData(<SkillsIndex />, { skills: SKILLS, agents: AGENTS });
+
+  expect(
+    screen.getByRole("link", { name: "Declared reach for my-skill: Reaches network" })
+  ).toHaveAttribute("href", "/skills/my-skill#skill-reach");
+
+  const search = screen.getByLabelText("Search installed skills");
+  await user.type(search, "record_search");
+  expect(screen.getByRole("link", { name: "demo-skill" })).toBeInTheDocument();
+  expect(screen.queryByRole("link", { name: "my-skill" })).not.toBeInTheDocument();
+  await user.clear(search);
+  await user.type(search, "example.com");
+  expect(screen.getByRole("link", { name: "my-skill" })).toBeInTheDocument();
+  expect(screen.queryByRole("link", { name: "demo-skill" })).not.toBeInTheDocument();
+});
+
+test("installed-skill search offers a working reset when nothing matches", async () => {
+  const user = userEvent.setup();
+  renderWithData(<SkillsIndex />, { skills: SKILLS, agents: AGENTS });
+  await user.type(screen.getByLabelText("Search installed skills"), "not-a-skill");
+  expect(screen.getByRole("status")).toHaveTextContent("0 of 2 skills match");
+  await user.click(screen.getByRole("button", { name: "Clear search" }));
+  expect(screen.getByRole("link", { name: "demo-skill" })).toBeInTheDocument();
 });
 
 test("detail renders the SKILL.md body and its provenance facts", () => {
@@ -162,6 +201,10 @@ test("detail names the tools, hosts and secrets the skill declares", () => {
   expect(screen.getByText("web_fetch")).toBeInTheDocument();
   expect(screen.getByText("raw.githubusercontent.com")).toBeInTheDocument();
   expect(screen.getByText("GITHUB_TOKEN")).toBeInTheDocument();
+  expect(screen.getByRole("region", { name: "What it reaches" }).parentElement).toHaveAttribute(
+    "id",
+    "skill-reach"
+  );
   // Leasing a credential is the top of the reach scale, so it must be what the header reports.
   expect(screen.getAllByText("Needs secrets").length).toBeGreaterThan(0);
 });

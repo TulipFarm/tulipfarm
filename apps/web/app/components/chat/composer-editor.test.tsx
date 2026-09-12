@@ -1,5 +1,7 @@
 import { fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import type { EditorOptions } from "@tiptap/core";
+import type { EditorView } from "@tiptap/pm/view";
 import { beforeEach, expect, test, vi } from "vitest";
 import { ComposerEditor } from "~/components/chat/composer-editor";
 import type { PMNode } from "~/components/chat/editor/serialize";
@@ -16,6 +18,8 @@ const setContent = vi.fn();
 const selectTextblockEnd = vi.fn();
 const insertContent = vi.fn();
 const viewFocus = vi.fn();
+let editorOptions: Partial<EditorOptions>;
+let mentionActive = false;
 
 const fakeEditor = {
   isEmpty: false,
@@ -28,7 +32,10 @@ const fakeEditor = {
 };
 
 vi.mock("@tiptap/react", () => ({
-  useEditor: () => fakeEditor,
+  useEditor: (options: Partial<EditorOptions>) => {
+    editorOptions = options;
+    return fakeEditor;
+  },
   EditorContent: () => <div />,
   useEditorState: ({ selector }: { selector: (ctx: { editor: typeof fakeEditor }) => unknown }) =>
     selector({ editor: fakeEditor }),
@@ -55,7 +62,7 @@ vi.mock("@tiptap/extension-link", () => ({
 }));
 vi.mock("~/components/chat/editor/mentions", () => ({
   buildMentionExtensions: () => [],
-  MENTION_PLUGIN_KEYS: [],
+  MENTION_PLUGIN_KEYS: [{ getState: () => ({ active: mentionActive }) }],
 }));
 vi.mock("~/components/chat/editor/use-mention-data", () => ({ useMentionData: () => () => [] }));
 
@@ -75,6 +82,7 @@ const textDoc = (t: string): PMNode => ({
 });
 
 beforeEach(() => {
+  mentionActive = false;
   doc = textDoc("do it");
   clearContent.mockClear();
   setContent.mockClear();
@@ -103,6 +111,59 @@ test("the Link mark does not extend when typing at its edge", () => {
   // (#603). It is a Mark config field, not a `LinkOptions` field, so it must come from `.extend()`.
   expect(linkConfig.extend?.inclusive()).toBe(false);
   expect(linkConfig.configure).toEqual(expect.objectContaining({ autolink: true }));
+});
+
+test("the message editor exposes a named multiline textbox", () => {
+  render(<ComposerEditor onSend={vi.fn()} />);
+
+  expect(editorOptions.editorProps?.attributes).toEqual(
+    expect.objectContaining({
+      role: "textbox",
+      "aria-label": "Message",
+      "aria-multiline": "true",
+    })
+  );
+});
+
+test("Enter sends, while Shift+Enter keeps the editor's newline behavior", () => {
+  const onSend = vi.fn();
+  render(<ComposerEditor onSend={onSend} />);
+  const view = {} as EditorView;
+
+  expect(
+    editorOptions.editorProps?.handleKeyDown?.(
+      view,
+      new KeyboardEvent("keydown", {
+        key: "Enter",
+        shiftKey: true,
+      })
+    )
+  ).toBe(false);
+  expect(onSend).not.toHaveBeenCalled();
+  expect(
+    editorOptions.editorProps?.handleKeyDown?.(
+      view,
+      new KeyboardEvent("keydown", {
+        key: "Enter",
+      })
+    )
+  ).toBe(true);
+  expect(onSend).toHaveBeenCalledOnce();
+});
+
+test("an active mention menu owns Enter instead of sending", () => {
+  const onSend = vi.fn();
+  mentionActive = true;
+  render(<ComposerEditor onSend={onSend} />);
+  expect(
+    editorOptions.editorProps?.handleKeyDown?.(
+      {} as EditorView,
+      new KeyboardEvent("keydown", {
+        key: "Enter",
+      })
+    )
+  ).toBe(false);
+  expect(onSend).not.toHaveBeenCalled();
 });
 
 test("Model Selector sets the per-message effort preset override on send", async () => {

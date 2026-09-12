@@ -1,12 +1,10 @@
 import { type MetaFunction, useNavigate, useSearchParams } from "@remix-run/react";
 import { type FormEvent, useState } from "react";
 import { Button } from "~/components/ui/button";
+import { Input } from "~/components/ui/input";
 import { ApiError, login } from "~/lib/api";
 
-export const meta: MetaFunction = () => [{ title: "Sign in · tulipfarm" }];
-
-const inputClass =
-  "w-full rounded-sm border border-border bg-background px-3 py-2 text-sm outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:opacity-60";
+export const meta: MetaFunction = () => [{ title: "Sign in · TulipFarm" }];
 
 // Standalone (outside the _app gate) email+password sign-in. On success the API has set the session
 // + CSRF cookies, so we just navigate into the app (honoring ?redirectTo). The _app loader then sees
@@ -30,9 +28,7 @@ export default function Login() {
       const safe = to.startsWith("/") && !to.startsWith("//") && !to.startsWith("/\\");
       navigate(safe ? to : "/", { replace: true });
     } catch (err) {
-      setError(
-        err instanceof ApiError ? err.message : "could not reach the API, is it running on :4010?"
-      );
+      setError(err instanceof ApiError ? err.message : "Could not connect. Try again.");
     } finally {
       setBusy(false);
     }
@@ -41,9 +37,9 @@ export default function Login() {
   return (
     <div className="h-full min-h-0 overflow-y-auto">
       <section className="mx-auto flex min-h-full max-w-sm flex-col justify-center px-6 py-16">
-        <p className="text-xs font-medium text-primary">Sign in</p>
-        <h1 className="mt-1 text-2xl font-semibold text-foreground">tulipfarm</h1>
-        <p className="mt-1 text-sm text-muted-foreground">Sign in to this tenant.</p>
+        <p className="text-sm font-medium text-brand">TulipFarm</p>
+        <h1 className="mt-1 text-2xl font-semibold text-foreground">Welcome back</h1>
+        <p className="mt-2 text-base text-muted-foreground">Sign in with your business account.</p>
 
         <form onSubmit={onSubmit} className="mt-8 flex flex-col gap-3">
           {error ? (
@@ -51,31 +47,29 @@ export default function Login() {
               role="alert"
               className="rounded-sm border border-destructive/50 bg-destructive/10 px-3 py-2 text-sm text-destructive"
             >
-              error: {error}
+              {error}
             </p>
           ) : null}
 
-          <label className="flex flex-col gap-1 text-xs text-muted-foreground">
-            email
-            <input
+          <label htmlFor="login-email" className="flex flex-col gap-2 text-sm">
+            Email
+            <Input
+              id="login-email"
               type="email"
               autoComplete="username"
-              className={inputClass}
               value={email}
               onChange={(e) => setEmail(e.target.value)}
-              aria-label="email"
             />
           </label>
 
-          <label className="flex flex-col gap-1 text-xs text-muted-foreground">
-            password
-            <input
+          <label htmlFor="login-password" className="flex flex-col gap-2 text-sm">
+            Password
+            <Input
+              id="login-password"
               type="password"
               autoComplete="current-password"
-              className={inputClass}
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              aria-label="password"
             />
           </label>
 

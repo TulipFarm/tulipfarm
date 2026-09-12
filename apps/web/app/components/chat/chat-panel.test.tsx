@@ -1,9 +1,37 @@
-import { render, screen } from "@testing-library/react";
+import { createRemixStub } from "@remix-run/testing";
+import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, expect, test, vi } from "vitest";
 import { ChatPanel } from "~/components/chat/chat-panel";
+import type { PendingApproval } from "~/lib/approvals";
 import type { ChatMessage } from "~/lib/chat/types";
+import type { ConversationSummary } from "~/lib/conversations";
 import type { Suggestion } from "~/lib/onboarding";
+
+let approvals: PendingApproval[] = [];
+let approvalsLoading = false;
+let approvalsError: string | null = null;
+let conversations: ConversationSummary[] = [];
+let conversationsLoading = false;
+let conversationsError: string | null = null;
+const refreshApprovals = vi.fn();
+const refreshConversations = vi.fn();
+vi.mock("~/lib/approvals-context", () => ({
+  useApprovals: () => ({
+    approvals,
+    loading: approvalsLoading,
+    error: approvalsError,
+    refresh: refreshApprovals,
+  }),
+}));
+vi.mock("~/lib/conversations-context", () => ({
+  useConversations: () => ({
+    conversations,
+    loading: conversationsLoading,
+    error: conversationsError,
+    refresh: refreshConversations,
+  }),
+}));
 
 // ChatPanel drives the conversation through useChatStream; mock it so the empty-state surface
 // renders deterministically and `send` is observable.
@@ -39,6 +67,14 @@ vi.mock("~/lib/chat/use-chat-stream", () => ({
 }));
 
 beforeEach(() => {
+  approvals = [];
+  approvalsLoading = false;
+  approvalsError = null;
+  conversations = [];
+  conversationsLoading = false;
+  conversationsError = null;
+  refreshApprovals.mockClear();
+  refreshConversations.mockClear();
   send.mockClear();
   regenerate.mockClear();
   stream = {
@@ -52,6 +88,98 @@ beforeEach(() => {
     reset: vi.fn(),
     sendSurfaceInteraction: vi.fn(),
   };
+});
+
+function renderHome(props: React.ComponentProps<typeof ChatPanel> = {}) {
+  const Stub = createRemixStub([{ path: "/", Component: () => <ChatPanel {...props} /> }]);
+  return render(<Stub />);
+}
+
+test("shows waiting approvals and the three newest authorized chats without inventing activity", () => {
+  approvals = [
+    { approvalId: "a1", createdAt: "2026-09-10T00:00:00Z", expiresAt: "2027-01-01T00:00:00Z" },
+    { approvalId: "a2", createdAt: "2026-09-11T00:00:00Z", expiresAt: "2027-01-01T00:00:00Z" },
+  ];
+  conversations = [1, 4, 2, 3].map((index) => ({
+    id: `chat-${index}`,
+    title: `Work ${index}`,
+    agentId: null,
+    starred: false,
+    createdAt: `2026-09-0${index}T00:00:00Z`,
+    updatedAt: `2026-09-0${index}T00:00:00Z`,
+  }));
+  renderHome();
+
+  expect(screen.getByRole("link", { name: /2 approvals waiting for review/ })).toHaveAttribute(
+    "href",
+    "/inbox"
+  );
+  expect(
+    screen.getAllByRole("link", { name: /Work \d/ }).map((link) => link.getAttribute("href"))
+  ).toEqual(["/chat/chat-4", "/chat/chat-3", "/chat/chat-2"]);
+  expect(
+    screen.queryByText(/completed today|hours saved|tasks completed/i)
+  ).not.toBeInTheDocument();
+});
+
+test("keeps the composer ready while real work context loads", () => {
+  approvalsLoading = true;
+  conversationsLoading = true;
+  renderHome();
+
+  expect(screen.getByLabelText("Message")).toBeInTheDocument();
+  expect(screen.getByText("Checking pending approvals…")).toBeInTheDocument();
+  expect(screen.getByText("Loading recent chats…")).toBeInTheDocument();
+  expect(screen.queryByText(/all caught up|0 approvals/i)).not.toBeInTheDocument();
+});
+
+test("shows recovery instead of false zero counts when work context fails", async () => {
+  approvalsError = "offline";
+  conversationsError = "offline";
+  renderHome();
+
+  expect(screen.getByText("Couldn't check pending approvals.")).toBeInTheDocument();
+  expect(screen.getByText("Couldn't load recent chats.")).toBeInTheDocument();
+  expect(screen.queryByText(/all caught up|0 approvals/i)).not.toBeInTheDocument();
+  await userEvent.click(screen.getByRole("button", { name: "Retry approvals" }));
+  await userEvent.click(screen.getByRole("button", { name: "Retry recent chats" }));
+  expect(refreshApprovals).toHaveBeenCalledOnce();
+  expect(refreshConversations).toHaveBeenCalledOnce();
+});
+
+test("choosing a home task drafts its prompt without starting a Turn", async () => {
+  renderHome({
+    tasks: [
+      {
+        id: "task-1",
+        title: "Describe your business",
+        action: { kind: "chat", prompt: "Help me describe my business." },
+        blocking: false,
+        status: "open",
+        createdAt: "2026-09-01T00:00:00Z",
+      },
+    ],
+  });
+  await userEvent.click(screen.getByRole("button", { name: /Describe your business/ }));
+  await waitFor(() =>
+    expect(screen.getByRole("textbox", { name: "Message" })).toHaveTextContent(
+      "Help me describe my business."
+    )
+  );
+  expect(send).not.toHaveBeenCalled();
+});
+
+test("selected Agents do not show the general work-home sections", () => {
+  approvals = [
+    { approvalId: "a1", createdAt: "2026-09-10T00:00:00Z", expiresAt: "2027-01-01T00:00:00Z" },
+  ];
+  renderHome({ agentId: "InventoryPlanner" });
+  expect(screen.queryByRole("link", { name: /approvals waiting/ })).not.toBeInTheDocument();
+});
+
+test("an empty restored Chat keeps a screen-reader page heading", () => {
+  renderHome({ initialConversationId: "empty-chat" });
+  expect(screen.getByRole("heading", { level: 1, name: "Chat" })).toHaveClass("sr-only");
 });
 
 const SUGGESTIONS: Suggestion[] = [
@@ -126,7 +254,7 @@ test("docks one composer beneath the transcript after the first message", async 
   render(<ChatPanel suggestions={SUGGESTIONS} />);
 
   expect(await screen.findByText("Hello")).toBeInTheDocument();
-  expect(screen.queryByRole("region", { name: "What’s on your mind?" })).toBeNull();
+  expect(screen.queryByRole("region", { name: "What would you like to get done?" })).toBeNull();
   expect(screen.queryByRole("button", { name: "Set up ticket management?" })).toBeNull();
   expect(screen.getAllByLabelText("Message")).toHaveLength(1);
   expect(screen.getByLabelText("Message").closest("[data-composer-placement]")).toHaveAttribute(

@@ -4,8 +4,11 @@ import userEvent from "@testing-library/user-event";
 import { beforeEach, expect, test, vi } from "vitest";
 import { AppShell, AppSidebar, iconForPath, titleForPath } from "~/components/app-sidebar";
 import { BookOpen, FileText, Inbox, MessageSquare } from "~/components/icons";
+import { PageShell } from "~/components/page-shell";
+import { Link } from "~/components/ui/link";
 import * as approvalsContext from "~/lib/approvals-context";
 import * as conversationsContext from "~/lib/conversations-context";
+import { PageChromeProvider } from "~/lib/page-chrome-context";
 
 vi.mock("~/lib/approvals-context", () => ({ useApprovals: vi.fn() }));
 const useApprovals = vi.mocked(approvalsContext.useApprovals);
@@ -631,6 +634,72 @@ test("calls an untitled chat surface a new chat", () => {
 test("renders the report a bug button in the top bar", () => {
   render(<ShellStub initialEntries={["/inbox"]} />);
   expect(screen.getByRole("button", { name: "Report a bug" })).toBeInTheDocument();
+});
+
+test("opens page actions from a compact header and restores focus on Escape", async () => {
+  const user = userEvent.setup();
+  render(<ShellStub initialEntries={["/files"]} />);
+  const trigger = screen.getByRole("button", { name: "Page actions" });
+  const actionsId = trigger.getAttribute("aria-controls");
+  expect(actionsId).toBeTruthy();
+  expect(trigger).toHaveAttribute("aria-expanded", "false");
+
+  await user.click(trigger);
+  expect(trigger).toHaveAttribute("aria-expanded", "true");
+  expect(document.getElementById(actionsId ?? "")).toContainElement(
+    screen.getByRole("button", { name: "Report a bug" })
+  );
+  await user.keyboard("{Escape}");
+  expect(trigger).toHaveAttribute("aria-expanded", "false");
+  expect(trigger).toHaveFocus();
+});
+
+test("dismisses page actions when focus moves outside the disclosure", async () => {
+  const user = userEvent.setup();
+  render(<ShellStub initialEntries={["/files"]} />);
+  const trigger = screen.getByRole("button", { name: "Page actions" });
+  await user.click(trigger);
+  await user.click(screen.getByText("Page content"));
+  expect(trigger).toHaveAttribute("aria-expanded", "false");
+});
+
+test("keeps one live action portal when the disclosure closes and reopens", async () => {
+  const user = userEvent.setup();
+  const ActionsStub = createRemixStub([
+    {
+      path: "*",
+      Component: () => (
+        <PageChromeProvider>
+          <AppShell>
+            <PageShell
+              title="Files"
+              actions={
+                <>
+                  <input aria-label="Page filter" />
+                  <Link to="/inbox">Next page</Link>
+                </>
+              }
+            >
+              Page content
+            </PageShell>
+          </AppShell>
+        </PageChromeProvider>
+      ),
+    },
+  ]);
+  render(<ActionsStub initialEntries={["/files"]} />);
+  const trigger = screen.getByRole("button", { name: "Page actions" });
+  await user.click(trigger);
+  const filter = screen.getByRole("textbox", { name: "Page filter" });
+  expect(screen.getByRole("banner")).toContainElement(filter);
+  await user.type(filter, "invoice");
+  await user.keyboard("{Escape}");
+  await user.click(trigger);
+  expect(screen.getByRole("textbox", { name: "Page filter" })).toBe(filter);
+  expect(filter).toHaveValue("invoice");
+
+  await user.click(screen.getByRole("link", { name: "Next page" }));
+  expect(trigger).toHaveAttribute("aria-expanded", "false");
 });
 
 /*

@@ -13,10 +13,10 @@ POST /api/v1/chat ─SSE→ lib/chat/sse-client.ts (parse frames → ChatEvent)
                           → chat-panel.tsx → transcript.tsx → parts.tsx (+ approval-card)
 ```
 
-`chat-panel.tsx` owns the hook and switches the empty state (welcome + Suggested prompts) to the live
-transcript on first send. `composer.tsx` is a **Tiptap rich-text editor** (see below) + model selector,
-with **no attachment affordance** (no blob storage in V1). User messages render as markdown in their own
-bubble (`transcript.tsx` → `MarkdownView`), so formatting + the literal mention tokens show.
+`chat-panel.tsx` owns the hook and switches the home prompt surface to the live transcript on first
+send. `composer.tsx` loads the **Tiptap rich-text editor** (see below), model selector and File
+attachments. User messages render as markdown in their own bubble (`transcript.tsx` →
+`MarkdownView`), so formatting + the literal mention tokens show.
 
 Both `composer.tsx` and `transcript.tsx` are **code-split**. Tiptap/ProseMirror and the markdown
 renderer are the two heaviest chunks in the app and sat on the landing route's critical path, where —
@@ -36,7 +36,28 @@ Normal Chat uses the default harness and does not label it as an Agent. The Agen
 only when a user-created Agent is explicitly selected or takes over the Chat. Product identity,
 business identity, and Agent identity are separate UI layers and must not reuse the TulipFarm name.
 
+## Work-aware home
+
+`_app._index.tsx` uses `PageShell` for the one screen-reader `h1`; the prompt heading is an `h2`.
+`home-work.tsx` reads the shell's existing authorized Approvals and Conversations contexts. It shows
+pending approval review, next steps and up to three recent Chats, without fetching another list or
+claiming completed work. Loading and failed reads stay distinct from empty lists and offer retry.
+These sections leave with the first Message and do not appear when an Agent is explicitly selected.
+
+`tasks-preview-card.tsx` reuses `CompanionPanel` for the reconciler's two setup actions: an answer
+to `business_profile.businessName` and a link to `/business/models`. `task-presentation.ts`
+recognizes those actions rather than their display text. They appear under **Get set up**, with the
+existing inline Save and Connect model actions. Other blocking and overdue Tasks retain their
+urgency. The server ranks and scopes Tasks; the home does not widen or reconstruct that queue.
+
+Task Chat actions draft editable text and never send it. Other pages can link to
+`/?draft=${encodeURIComponent(prompt)}`; optional `agent` selects an Agent and `attach` stages an
+existing File. The route removes `draft` and `attach` after applying them. Companion uses its
+nonce-keyed shared draft state for in-place requests.
+
 ## Composer editor (`composer-editor.tsx` + `editor/`)
+
+The contenteditable exposes `role="textbox"`, `aria-label="Message"` and `aria-multiline="true"`.
 
 A Tiptap (`@tiptap/*` v3) editor replacing the old textarea. It supports markdown formatting
 (bold/italic/code/link via Cmd shortcuts + a selection `BubbleMenu`) and four mention triggers, each a

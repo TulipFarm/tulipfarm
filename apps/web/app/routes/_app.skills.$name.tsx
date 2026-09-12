@@ -126,7 +126,9 @@ export default function SkillDetail() {
         </p>
       ) : null}
 
-      <SkillCapabilityPanel facts={facts} />
+      <div id="skill-reach" className="scroll-mt-6">
+        <SkillCapabilityPanel facts={facts} />
+      </div>
 
       <Panel
         flush

@@ -68,13 +68,15 @@ test("default view is the live chat empty state with adaptive suggestions", asyn
   render(<Stub initialEntries={["/"]} />);
 
   // Normal Chat is the default harness, not a user-created Agent.
-  expect(screen.getByRole("heading", { name: "What’s on your mind?" })).toBeInTheDocument();
+  expect(
+    screen.getByRole("heading", { name: "What would you like to get done?" })
+  ).toBeInTheDocument();
   expect(screen.queryByText("ready")).not.toBeInTheDocument();
   expect(screen.queryByText("TulipFarm")).not.toBeInTheDocument();
 
   // Chat is usable immediately — the composer does not wait on onboarding.
   expect(screen.getByLabelText("Message")).toBeInTheDocument();
-  const start = screen.getByRole("region", { name: "What’s on your mind?" });
+  const start = screen.getByRole("region", { name: "What would you like to get done?" });
   expect(within(start).getByLabelText("Message")).toBeInTheDocument();
   expect(screen.queryByText("Add context as you write")).not.toBeInTheDocument();
 
@@ -98,6 +100,34 @@ test("clientLoader does no fetching, so nothing can delay the first paint", asyn
   expect(listOnboardingSuggestions).not.toHaveBeenCalled();
 });
 
+test("create-in-chat links decode draft text without sending or fetching", async () => {
+  const prompt = "Create a support Agent for Muskan's shop & ask what I need.";
+  const data = await clientLoader({
+    request: new Request(
+      `http://localhost/?draft=${encodeURIComponent(prompt)}&agent=Support&attach=file-1`
+    ),
+    params: {},
+  } as Parameters<typeof clientLoader>[0]);
+
+  expect(data).toEqual({
+    agentId: "Support",
+    defaultModel: "auto",
+    draft: prompt,
+    attach: "file-1",
+  });
+  expect(listOnboardingSuggestions).not.toHaveBeenCalled();
+  expect(listTasks).not.toHaveBeenCalled();
+});
+
+test("the Chat page has one screen-reader h1 and a separate prompt heading", () => {
+  render(<Stub initialEntries={["/"]} />);
+  expect(screen.getAllByRole("heading", { level: 1 })).toHaveLength(1);
+  expect(screen.getByRole("heading", { level: 1, name: "Chat" })).toHaveClass("sr-only");
+  expect(
+    screen.getByRole("heading", { level: 2, name: "What would you like to get done?" })
+  ).toBeInTheDocument();
+});
+
 test("a failed onboarding fetch leaves chat usable", async () => {
   vi.mocked(getAgent).mockRejectedValue(new Error("api down"));
   vi.mocked(listOnboardingSuggestions).mockRejectedValue(new Error("api down"));
@@ -105,11 +135,13 @@ test("a failed onboarding fetch leaves chat usable", async () => {
 
   render(<Stub initialEntries={["/"]} />);
 
-  expect(screen.getByRole("heading", { name: "What’s on your mind?" })).toBeInTheDocument();
+  expect(
+    screen.getByRole("heading", { name: "What would you like to get done?" })
+  ).toBeInTheDocument();
   expect(await screen.findByLabelText("Message")).toBeInTheDocument();
 });
 
-test("open Tasks render in the My Tasks preview card", async () => {
+test("open Tasks render in the next steps list", async () => {
   vi.mocked(listTasks).mockResolvedValue([
     {
       id: "t1",

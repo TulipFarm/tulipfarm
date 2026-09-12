@@ -1,19 +1,9 @@
-import { Check } from "~/components/icons";
-import type { StatusTone } from "~/components/status-badge";
+import { StatusBadge, type StatusTone } from "~/components/status-badge";
+import { Badge } from "~/components/ui/badge";
 import { Button } from "~/components/ui/button";
 import { Link } from "~/components/ui/link";
 import type { IntegrationSummary, McpConnectionStatus } from "~/lib/integrations";
-import { cn } from "~/lib/utils";
 import { IntegrationIcon } from "./integration-icon";
-
-const SHORT_DESCRIPTIONS: Record<string, string> = {
-  github: "Browse repositories and review pull requests",
-  slack: "Send messages and read channels",
-  jira: "Track issues and delivery work",
-  linear: "Track issues and plan cycles",
-  google: "Work across Gmail, Drive, Calendar, and Docs",
-  googleworkspace: "Work across Gmail, Drive, Calendar, and Docs",
-};
 
 /** Uncurated entries carry no registry title, so the slug is the honest display name. */
 export function displayName(integration: IntegrationSummary): string {
@@ -36,58 +26,6 @@ export const CONNECTION: Record<McpConnectionStatus, { label: string; tone: Stat
   disconnected: { label: "Not connected", tone: "neutral" },
 };
 
-function shortDescription(integration: IntegrationSummary): string {
-  const curated = SHORT_DESCRIPTIONS[integration.name.toLowerCase()];
-  if (curated) return curated;
-  if (!integration.description) return "Use this tool in agent workflows";
-  return integration.description.split(/[.—]/, 1)[0].trim();
-}
-
-function StatusAction({ integration }: { integration: IntegrationSummary }) {
-  const name = displayName(integration);
-
-  if (integration.availability === "coming_soon") {
-    return (
-      <span className="rounded-lg bg-muted px-3 py-1.5 text-sm text-muted-foreground">
-        Coming soon
-      </span>
-    );
-  }
-
-  if (!integration.installed) {
-    return (
-      <span className="rounded-lg bg-muted px-3 py-1.5 text-sm text-muted-foreground">
-        Not installed
-      </span>
-    );
-  }
-
-  const connected = integration.status === "connected";
-  return (
-    <Link
-      to={`?view=${encodeURIComponent(integration.name)}`}
-      preventScrollReset
-      aria-label={`View details for ${name}`}
-      className={cn(
-        "inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-medium",
-        "transition-[background-color,transform] active:scale-[0.98]",
-        connected
-          ? "bg-muted text-foreground hover:bg-accent"
-          : "border border-border bg-background text-foreground hover:bg-accent"
-      )}
-    >
-      {connected ? <Check aria-hidden className="size-3.5" /> : null}
-      {connected
-        ? "Connected"
-        : integration.status === "connecting"
-          ? "Connecting"
-          : integration.status === "error"
-            ? "Try again"
-            : "Connect"}
-    </Link>
-  );
-}
-
 export function IntegrationCard({
   integration,
   onUpdate,
@@ -100,9 +38,10 @@ export function IntegrationCard({
   isAdmin?: boolean;
 }) {
   const name = displayName(integration);
+  const soon = integration.availability === "coming_soon";
 
   return (
-    <li className="flex min-w-0 items-center gap-4 py-4">
+    <li className="grid min-w-0 grid-cols-[auto_minmax(0,1fr)] items-start gap-x-4 gap-y-2 py-4 sm:grid-cols-[auto_minmax(0,1fr)_auto] sm:items-center">
       <IntegrationIcon
         label={name}
         iconSlug={integration.iconSlug}
@@ -110,23 +49,48 @@ export function IntegrationCard({
         iconColor={integration.iconColor}
         size="lg"
       />
-      <div className="min-w-0 flex-1">
+      <div className="min-w-0">
         <h3 className="truncate text-base font-semibold text-foreground">{name}</h3>
-        <p className="truncate text-base text-muted-foreground">{shortDescription(integration)}</p>
+        <p
+          className="mt-0.5 truncate text-sm text-muted-foreground"
+          title={integration.description}
+        >
+          {integration.description || "No description provided."}
+        </p>
       </div>
-      <div className="flex shrink-0 items-center gap-2">
-        {integration.updateAvailable && isAdmin ? (
-          <Button
-            size="sm"
-            variant="outline"
-            disabled={updating}
-            aria-label={`Update ${name}`}
-            onClick={() => onUpdate(integration.name, integration.source)}
-          >
-            {updating ? "Updating…" : "Update"}
-          </Button>
+      <div className="col-start-2 flex flex-wrap items-center gap-2 sm:col-start-auto">
+        {soon ? (
+          <StatusBadge label="Coming soon" tone="neutral" />
+        ) : !integration.installed ? (
+          <StatusBadge label="Not installed" tone="neutral" />
+        ) : (
+          <StatusBadge {...CONNECTION[integration.status]} />
+        )}
+        {integration.updateAvailable && isAdmin ? <Badge>Update available</Badge> : null}
+        {!soon && integration.installed ? (
+          <>
+            <Button asChild size="sm" variant="outline">
+              <Link
+                to={`?view=${encodeURIComponent(integration.name)}`}
+                preventScrollReset
+                aria-label={`View details for ${name}`}
+              >
+                View details
+              </Link>
+            </Button>
+            {integration.updateAvailable && isAdmin ? (
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={updating}
+                aria-label={`Update ${name}`}
+                onClick={() => onUpdate(integration.name, integration.source)}
+              >
+                {updating ? "Updating…" : "Update"}
+              </Button>
+            ) : null}
+          </>
         ) : null}
-        <StatusAction integration={integration} />
       </div>
     </li>
   );

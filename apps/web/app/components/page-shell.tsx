@@ -27,9 +27,9 @@ export const PAGE_COLUMN = "flex w-full flex-col gap-5 px-4 py-5 sm:px-6 md:px-8
  * `usePageActionSlot`, and contributes nothing else.
  *
  * This constant is the shape that bar and the sidebar's own header share, so the two line up
- * across the seam between them. 40px: enough for a 28px control with 6px of air.
+ * across the seam between them. Desktop stays at 40px; mobile leaves room for touch navigation.
  */
-export const PAGE_BAR = "flex h-10 shrink-0 items-center";
+export const PAGE_BAR = "flex h-12 shrink-0 items-center sm:h-10";
 
 /**
  * The frame every page in the app renders into: a fixed bar carrying the breadcrumb, the `h1` and
@@ -38,11 +38,6 @@ export const PAGE_BAR = "flex h-10 shrink-0 items-center";
  * There is one of these on purpose. Two frames drift — they disagree on width, on breadcrumb
  * styling, and on whether a page states its own name — and the reader pays for that on every
  * navigation between them.
- *
- * The title is `text-sm`, the same size as the breadcrumb beside it, because at this size the bar
- * is chrome rather than content. A page announces itself by being the thing on screen; restating
- * that in 20px display type is the "competing for attention it has not earned" that the rest of
- * this system is built to avoid.
  *
  * The last crumb is not rendered: `title` is that crumb. Every page therefore has exactly one
  * `h1`, which is what a screen reader's heading list is for — the size it is painted at does not

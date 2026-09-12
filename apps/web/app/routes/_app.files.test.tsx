@@ -188,6 +188,24 @@ describe("Files library", () => {
     expect(all).toHaveFocus();
   });
 
+  it("opens the upload dialog from the first-use invitation", async () => {
+    const user = userEvent.setup();
+    renderRoute();
+    await user.click(await screen.findByRole("button", { name: "Add your first file" }));
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
+  });
+
+  it("distinguishes an empty filter from an empty library and offers a reset", async () => {
+    const user = userEvent.setup();
+    renderRoute({ mine: [file("mine", "plan.pdf")] });
+    await user.selectOptions(await screen.findByLabelText("File type"), "images");
+    expect(
+      await screen.findByRole("heading", { name: "No files match these filters" })
+    ).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Clear filters" }));
+    expect(await screen.findByText("plan.pdf")).toBeInTheDocument();
+  });
+
   it("uses server filename search for active Files", async () => {
     searchFiles.mockResolvedValue([file("result", "pricing.pdf")]);
     renderRoute({ mine: [file("mine", "mine.pdf")] });

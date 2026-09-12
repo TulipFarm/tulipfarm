@@ -16,7 +16,7 @@ export default function IntegrationsLayout() {
   return (
     <SectionShell
       actions={
-        <Button asChild size="sm">
+        <Button asChild size="sm" variant="outline">
           <a href={REQUEST_INTEGRATION_URL} target="_blank" rel="noreferrer">
             Request integration
             <ArrowUpRight aria-hidden />

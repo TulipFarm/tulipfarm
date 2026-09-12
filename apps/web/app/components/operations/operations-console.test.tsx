@@ -1,5 +1,5 @@
 import { createRemixStub } from "@remix-run/testing";
-import { render, screen } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import type { OperationsModel } from "~/lib/operations";
@@ -62,6 +62,10 @@ describe("OperationsConsole", () => {
     expect(screen.getByText("worker heartbeat is overdue")).toBeInTheDocument();
     expect(screen.getByText("High")).toBeInTheDocument();
     expect(screen.getByRole("table", { name: "Recent operational activity" })).toBeInTheDocument();
+    expect(screen.getByRole("region", { name: "Scrollable operational activity" })).toHaveAttribute(
+      "tabindex",
+      "0"
+    );
     expect(screen.getByRole("columnheader", { name: "Event" })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "View all activities" })).toHaveAttribute(
       "href",
@@ -99,6 +103,56 @@ describe("OperationsConsole", () => {
     expect(screen.getByText("No deployment flags set")).toBeInTheDocument();
     expect(screen.getByText("No operational activity recorded")).toBeInTheDocument();
     expect(screen.getByText("No backup reported")).toBeInTheDocument();
+    expect(screen.getByText("Health has not been reported")).toBeInTheDocument();
+    expect(screen.queryByText("All reported systems operational")).not.toBeInTheDocument();
+  });
+
+  it("puts failed and unknown checks before reported healthy checks without hiding details", () => {
+    renderConsole({
+      ...model,
+      health: [
+        { component: "postgres", status: "ok", checkedAt: "2026-09-12T10:00:00Z" },
+        {
+          component: "llm",
+          status: "unknown",
+          detail: "No model provider is configured",
+          checkedAt: "2026-09-12T10:00:00Z",
+        },
+        {
+          component: "worker",
+          status: "down",
+          detail: "Worker is not responding",
+          checkedAt: "2026-09-12T10:00:00Z",
+        },
+      ],
+    });
+
+    const health = screen.getByRole("region", { name: "Health" });
+    const rows = within(health).getAllByRole("listitem");
+    expect(rows.map((row) => row.textContent)).toEqual([
+      expect.stringContaining("worker"),
+      expect.stringContaining("llm"),
+      expect.stringContaining("postgres"),
+    ]);
+    expect(within(health).getByText("Unknown")).toBeInTheDocument();
+    expect(within(health).getByText("Down")).toBeInTheDocument();
+    expect(within(health).getByText("No model provider is configured")).toBeInTheDocument();
+    const headings = screen.getAllByRole("heading", { level: 2 }).map((node) => node.textContent);
+    expect(headings.indexOf("Recovery")).toBeLessThan(
+      headings.indexOf("Recent operational activity")
+    );
+  });
+
+  it("keeps unknown health distinct from a successful check", () => {
+    renderConsole({
+      ...model,
+      incidents: [],
+      quarantine: [],
+      killSwitches: [],
+      health: [{ component: "embeddings", status: "unknown", checkedAt: "2026-09-12T10:00:00Z" }],
+    });
+    expect(screen.getByText("1 item needs attention")).toBeInTheDocument();
+    expect(screen.queryByText("All reported systems operational")).not.toBeInTheDocument();
   });
 
   it("filters operational activity using the rendered summary fields", async () => {
@@ -134,7 +188,19 @@ describe("OperationsConsole", () => {
     const onCommand = vi.fn();
     renderConsole(model, onCommand);
     await user.click(screen.getByRole("button", { name: "Create support bundle" }));
+    expect(onCommand).not.toHaveBeenCalled();
+    await user.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(onCommand).not.toHaveBeenCalled();
+    await user.click(screen.getByRole("button", { name: "Create support bundle" }));
     await user.click(screen.getByRole("button", { name: "Confirm Create Support Bundle" }));
     expect(onCommand).toHaveBeenCalledWith("support-bundle.create", {});
+  });
+
+  it("shows command refusal without claiming a support bundle was created", async () => {
+    const user = userEvent.setup();
+    renderConsole(model, vi.fn().mockRejectedValue(new Error("Recovery permission denied")));
+    await user.click(screen.getByRole("button", { name: "Create support bundle" }));
+    await user.click(screen.getByRole("button", { name: "Confirm Create Support Bundle" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("Recovery permission denied");
   });
 });

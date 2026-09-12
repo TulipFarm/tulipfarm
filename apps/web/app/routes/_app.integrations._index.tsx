@@ -6,18 +6,18 @@ import {
   useSearchParams,
 } from "@remix-run/react";
 import { type ReactNode, useCallback, useId, useMemo, useState } from "react";
-import { CheckCircle2, Plug, Search } from "~/components/icons";
+import { EmptyState } from "~/components/empty-state";
+import { Search } from "~/components/icons";
 import { displayName, IntegrationCard } from "~/components/integrations/integration-card";
 import { IntegrationOverview } from "~/components/integrations/integration-overview";
 import { IntegrationPanel } from "~/components/integrations/integration-panel";
 import { ErrorState } from "~/components/states";
+import { Button } from "~/components/ui/button";
 import { Input } from "~/components/ui/input";
-import { Panel, PanelEmpty } from "~/components/ui/panel";
+import { Link } from "~/components/ui/link";
 import { ApiError } from "~/lib/api";
 import { type IntegrationSummary, listIntegrations, updateIntegration } from "~/lib/integrations";
 import { useIsAdmin } from "~/lib/use-session-user";
-
-/* Connection state is a card property; install is only for curated entries not yet cloned. */
 
 export const meta: MetaFunction = () => [{ title: "Integrations · tulipfarm" }];
 
@@ -43,7 +43,7 @@ export default function IntegrationsIndex() {
   }, [setSearchParams]);
   const [query, setQuery] = useState("");
   const [category, setCategory] = useState<string>();
-  const [scope, setScope] = useState<"all" | "connected">("all");
+  const [scope, setScope] = useState<"all" | "connected" | "available">("all");
   const searchId = useId();
   const isAdmin = useIsAdmin();
   const [updatingName, setUpdatingName] = useState<string>();
@@ -71,10 +71,10 @@ export default function IntegrationsIndex() {
     const needle = query.trim().toLowerCase();
     return integrations.filter((i) => {
       if (scope === "connected" && i.status !== "connected") return false;
+      if (scope === "available" && (i.availability === "coming_soon" || i.status === "connected"))
+        return false;
       if (category && i.category !== category) return false;
       if (!needle) return true;
-      // Slug included alongside the title: an operator who knows an integration as "github" should
-      // not have to guess that it is listed as "GitHub".
       return [displayName(i), i.name, i.description, i.category]
         .filter((field): field is string => Boolean(field))
         .some((field) => field.toLowerCase().includes(needle));
@@ -84,111 +84,160 @@ export default function IntegrationsIndex() {
   const groups = useMemo(() => {
     const grouped = new Map<string, IntegrationSummary[]>();
     for (const integration of visible) {
-      const key = integration.category ?? "Other";
+      const key =
+        integration.availability === "coming_soon"
+          ? "Coming soon"
+          : integration.status === "connected"
+            ? "Connected"
+            : "Available";
       grouped.set(key, [...(grouped.get(key) ?? []), integration]);
     }
-    return [...grouped.entries()];
+    return ["Connected", "Available", "Coming soon"].flatMap((title) => {
+      const items = grouped.get(title);
+      return items
+        ? [
+            [
+              title,
+              items.sort((left, right) => displayName(left).localeCompare(displayName(right))),
+            ] as const,
+          ]
+        : [];
+    });
   }, [visible]);
 
+  function clearFilters() {
+    setQuery("");
+    setScope("all");
+    setCategory(undefined);
+  }
+
+  const filtered = Boolean(query.trim() || category || scope !== "all");
+  const emptyConnected = scope === "connected" && !query.trim() && !category;
+
   return (
-    <div className="grid gap-8 lg:grid-cols-[12rem_minmax(0,1fr)] lg:gap-10">
-      <aside>
-        <div className="sticky top-0 flex flex-col gap-5">
-          <div className="relative">
-            <label className="sr-only" htmlFor={searchId}>
-              Search integrations
-            </label>
-            <Search
-              aria-hidden
-              className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground"
-            />
-            <Input
-              id={searchId}
-              type="search"
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              placeholder="Search"
-              className="pl-8"
-            />
-          </div>
-
-          <nav aria-label="Integration filters" className="flex flex-col gap-1">
-            <FilterButton
-              selected={scope === "all" && !category}
-              onClick={() => {
-                setScope("all");
-                setCategory(undefined);
-              }}
-              icon={<Plug aria-hidden className="size-4" />}
-            >
-              All
-            </FilterButton>
-            <FilterButton
-              selected={scope === "connected" && !category}
-              onClick={() => {
-                setScope("connected");
-                setCategory(undefined);
-              }}
-              icon={<CheckCircle2 aria-hidden className="size-4" />}
-            >
-              Connected
-            </FilterButton>
-
-            {categories.length > 0 ? (
-              <div className="mt-4 flex flex-col gap-1">
-                <p className="mb-2 px-2 text-xs text-muted-foreground">Categories</p>
-                {categories.map((name) => (
-                  <FilterButton
-                    key={name}
-                    selected={scope === "all" && category === name}
-                    onClick={() => {
-                      setScope("all");
-                      setCategory(name);
-                    }}
-                  >
-                    <span className="capitalize">{name}</span>
-                  </FilterButton>
-                ))}
-              </div>
-            ) : null}
-          </nav>
-        </div>
-      </aside>
-
-      <div className="min-w-0">
+    <div
+      className={
+        integrations.length > 0
+          ? "grid min-w-0 gap-6 lg:grid-cols-[12rem_minmax(0,1fr)] lg:gap-x-10"
+          : "flex min-w-0 flex-col gap-6"
+      }
+    >
+      <div className="min-w-0 lg:col-start-2">
         <IntegrationOverview integrations={integrations} />
+      </div>
+      {integrations.length > 0 ? (
+        <div className="flex min-w-0 flex-col gap-5 lg:sticky lg:top-0 lg:col-start-1 lg:row-span-2 lg:row-start-1 lg:self-start">
+          <div className="flex flex-col gap-3">
+            <div className="relative w-full sm:max-w-sm">
+              <label className="sr-only" htmlFor={searchId}>
+                Search integrations
+              </label>
+              <Search
+                aria-hidden
+                className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground"
+              />
+              <Input
+                id={searchId}
+                type="search"
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                placeholder="Search providers"
+                className="pl-8"
+              />
+            </div>
 
+            <nav aria-label="Integration filters" className="flex flex-wrap gap-1 lg:flex-col">
+              <FilterButton selected={scope === "all"} onClick={clearFilters}>
+                All
+              </FilterButton>
+              <FilterButton selected={scope === "connected"} onClick={() => setScope("connected")}>
+                Connected
+              </FilterButton>
+              <FilterButton selected={scope === "available"} onClick={() => setScope("available")}>
+                Available
+              </FilterButton>
+            </nav>
+          </div>
+          {categories.length > 0 ? (
+            <nav aria-label="Integration categories" className="flex flex-wrap gap-1 lg:flex-col">
+              <FilterButton selected={!category} onClick={() => setCategory(undefined)}>
+                All categories
+              </FilterButton>
+              {categories.map((name) => (
+                <FilterButton
+                  key={name}
+                  selected={category === name}
+                  onClick={() => setCategory(name)}
+                >
+                  <span className="capitalize">{name}</span>
+                </FilterButton>
+              ))}
+            </nav>
+          ) : null}
+        </div>
+      ) : null}
+
+      <div className="flex min-w-0 flex-col gap-6 lg:col-start-2">
         {updateError && (
-          <p className="mt-5 rounded-sm border border-destructive bg-destructive/10 px-3 py-2 text-sm text-destructive">
+          <p
+            role="alert"
+            className="rounded-sm border border-destructive bg-destructive/10 px-3 py-2 text-sm text-destructive"
+          >
             {updateError}
           </p>
         )}
 
-        <div className="mt-8">
-          {visible.length === 0 ? (
-            <Panel>
-              <PanelEmpty>
-                {integrations.length === 0
-                  ? "No integrations are available yet. Install one from a git repository to get started."
-                  : "Nothing matches that search."}
-              </PanelEmpty>
-            </Panel>
-          ) : (
-            <div className="flex flex-col gap-8">
-              {groups.map(([title, items]) => (
-                <Group
-                  key={title}
-                  title={categoryLabel(title)}
-                  items={items}
-                  onUpdate={handleUpdate}
-                  updatingName={updatingName}
-                  isAdmin={isAdmin}
-                />
-              ))}
-            </div>
-          )}
-        </div>
-
+        <p role="status" className={filtered ? "text-xs text-muted-foreground" : "sr-only"}>
+          {filtered
+            ? `${visible.length} integration${visible.length === 1 ? " matches" : "s match"}`
+            : ""}
+        </p>
+        {integrations.length === 0 ? (
+          <EmptyState
+            section="Integrations"
+            title="No integrations available"
+            hint="Ask in chat for help adding the service your agents need."
+          >
+            <Button asChild>
+              <Link to="/?draft=Help%20me%20add%20an%20integration%20for%20the%20service%20I%20use.">
+                Ask in chat
+              </Link>
+            </Button>
+          </EmptyState>
+        ) : visible.length === 0 ? (
+          <EmptyState
+            section="Integration results"
+            title={emptyConnected ? "No connected integrations" : "Nothing matches that search"}
+            hint={
+              emptyConnected
+                ? "Choose an available provider to review its access and setup."
+                : "Try a different provider name or clear the filters."
+            }
+          >
+            <Button
+              variant="outline"
+              onClick={() => {
+                clearFilters();
+                if (emptyConnected) setScope("available");
+              }}
+            >
+              {emptyConnected ? "Browse available" : "Clear filters"}
+            </Button>
+          </EmptyState>
+        ) : (
+          <div className="flex flex-col gap-8">
+            {groups.map(([title, items]) => (
+              <Group
+                key={title}
+                title={title}
+                items={items}
+                onUpdate={handleUpdate}
+                updatingName={updatingName}
+                isAdmin={isAdmin}
+              />
+            ))}
+          </div>
+        )}
         <IntegrationPanel name={viewing} onClose={closePanel} />
       </div>
     </div>
@@ -198,38 +247,28 @@ export default function IntegrationsIndex() {
 function FilterButton({
   selected,
   onClick,
-  icon,
   children,
 }: {
   selected: boolean;
   onClick: () => void;
-  icon?: ReactNode;
   children: ReactNode;
 }) {
   return (
     <button
       type="button"
       onClick={onClick}
-      className={`flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-sm transition-colors ${
+      aria-pressed={selected}
+      className={`inline-flex min-h-11 max-w-full items-center break-words rounded-md px-2.5 py-1 text-left text-sm transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring active:bg-accent sm:min-h-7 ${
         selected
           ? "bg-muted font-medium text-foreground"
           : "text-muted-foreground hover:bg-muted/60 hover:text-foreground"
       }`}
     >
-      {icon}
       {children}
     </button>
   );
 }
 
-function categoryLabel(category: string): string {
-  return category.replace(/[-_]/g, " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
-}
-
-/**
- * A named group of cards. Deliberately not a `Panel`: a bordered container around bordered cards
- * frames the same content twice, so the heading names the group and the cards carry the only edge.
- */
 function Group({
   title,
   items,

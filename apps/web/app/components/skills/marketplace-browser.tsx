@@ -1,13 +1,14 @@
 import { useId, useMemo, useState } from "react";
 import { Badge } from "~/components/ui/badge";
 import { Button } from "~/components/ui/button";
+import { Combobox } from "~/components/ui/combobox";
 import { Input } from "~/components/ui/input";
-import { Panel } from "~/components/ui/panel";
-import { Select } from "~/components/ui/select";
+import { Link } from "~/components/ui/link";
 import type { MarketplaceCatalog, MarketplaceSkill } from "~/lib/skills";
 import { skillRowKey } from "~/lib/skills";
 
 const UNCATEGORISED = "uncategorised";
+const ANY_CATEGORY = "Any category";
 
 function categoryOf(skill: MarketplaceSkill): string {
   return skill.category ?? UNCATEGORISED;
@@ -27,18 +28,6 @@ function InstallState({ skill }: { skill: MarketplaceSkill }) {
   return null;
 }
 
-/**
- * The official catalog, as something you can actually search.
- *
- * The catalog runs to dozens of packages, so browsing it by scrolling a list of category headings
- * only answers "what exists" and never "is there one for X" — which is the question that brings
- * anyone here. Search and the category filter are therefore the primary controls, and the list is
- * whatever survives them.
- *
- * Filtering is client-side because the whole catalog arrives in one response; a request per
- * keystroke would buy nothing and would make the page fail differently when the catalog repo is
- * unreachable.
- */
 export function MarketplaceBrowser({
   catalog,
   busy,
@@ -51,8 +40,10 @@ export function MarketplaceBrowser({
 }) {
   const searchId = useId();
   const categoryId = useId();
+  const headingId = useId();
   const [query, setQuery] = useState("");
   const [category, setCategory] = useState("");
+  const [categoryInput, setCategoryInput] = useState(ANY_CATEGORY);
   const [updatesOnly, setUpdatesOnly] = useState(false);
 
   const categories = useMemo(
@@ -63,46 +54,32 @@ export function MarketplaceBrowser({
 
   const visible = useMemo(
     () =>
-      catalog.skills.filter(
-        (skill) =>
-          matches(skill, query) &&
-          (category === "" || categoryOf(skill) === category) &&
-          (!updatesOnly || skill.updateAvailable)
-      ),
+      catalog.skills
+        .filter(
+          (skill) =>
+            matches(skill, query) &&
+            (category === "" || categoryOf(skill) === category) &&
+            (!updatesOnly || skill.updateAvailable)
+        )
+        .sort((left, right) => left.name.localeCompare(right.name)),
     [catalog.skills, query, category, updatesOnly]
   );
-
-  // Grouped, not flat: the category headings are what make an unfiltered catalog skimmable, and
-  // they mirror how installed skills are grouped on /skills so the two lists read the same way.
-  const grouped = useMemo(() => {
-    const groups = new Map<string, MarketplaceSkill[]>();
-    for (const skill of visible) {
-      const key = categoryOf(skill);
-      const existing = groups.get(key);
-      if (existing) existing.push(skill);
-      else groups.set(key, [skill]);
-    }
-    return [...groups].sort(([left], [right]) => {
-      if (left === UNCATEGORISED) return 1;
-      if (right === UNCATEGORISED) return -1;
-      return left.localeCompare(right);
-    });
-  }, [visible]);
 
   const updateCount = useMemo(
     () => catalog.skills.filter((skill) => skill.updateAvailable).length,
     [catalog.skills]
   );
-  const installedCount = useMemo(
-    () => catalog.skills.filter((skill) => skill.installed).length,
-    [catalog.skills]
-  );
-
   return (
-    <Panel
-      title="Official catalog"
-      description={`${catalog.skills.length} skills reviewed and published by TulipFarm, from ${catalog.source}. ${installedCount} already installed.`}
-      actions={
+    <section aria-labelledby={headingId} className="flex min-w-0 flex-col gap-4">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="min-w-0">
+          <h2 id={headingId} className="text-base font-medium">
+            Official catalog
+          </h2>
+          <p className="mt-1 break-words text-sm text-muted-foreground">
+            From {catalog.source}. Review the audit before installing.
+          </p>
+        </div>
         <Button
           size="sm"
           variant="outline"
@@ -111,8 +88,7 @@ export function MarketplaceBrowser({
         >
           Review {visible.length === catalog.skills.length ? "all" : "these"} ({visible.length})
         </Button>
-      }
-    >
+      </div>
       <div className="flex flex-col gap-4">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
           <div className="min-w-0 flex-1">
@@ -131,23 +107,26 @@ export function MarketplaceBrowser({
             <label htmlFor={categoryId} className="mb-1 block text-xs text-muted-foreground">
               Category
             </label>
-            <Select
+            <Combobox
               id={categoryId}
-              value={category}
-              onChange={(event) => setCategory(event.target.value)}
-            >
-              <option value="">Any category</option>
-              {categories.map((value) => (
-                <option key={value} value={value}>
-                  {value.replaceAll("-", " ")}
-                </option>
-              ))}
-            </Select>
+              value={categoryInput}
+              options={[ANY_CATEGORY, ...categories]}
+              onValueChange={setCategoryInput}
+              onCommit={(value) => {
+                if (value === ANY_CATEGORY || categories.includes(value)) {
+                  setCategory(value === ANY_CATEGORY ? "" : value);
+                  setCategoryInput(value);
+                } else {
+                  setCategoryInput(category || ANY_CATEGORY);
+                }
+              }}
+              emptyLabel="Choose a listed category."
+            />
           </div>
           {updateCount > 0 ? (
             <Button
               size="sm"
-              variant={updatesOnly ? "default" : "outline"}
+              variant={updatesOnly ? "secondary" : "outline"}
               aria-pressed={updatesOnly}
               onClick={() => setUpdatesOnly((previous) => !previous)}
             >
@@ -156,73 +135,82 @@ export function MarketplaceBrowser({
           ) : null}
         </div>
 
-        <p role="status" className="text-xs text-muted-foreground">
+        <p
+          role="status"
+          className={
+            visible.length === catalog.skills.length ? "sr-only" : "text-xs text-muted-foreground"
+          }
+        >
           {visible.length === catalog.skills.length
             ? ""
             : `${visible.length} of ${catalog.skills.length} skills match`}
         </p>
 
         {visible.length === 0 ? (
-          <p className="rounded-md border border-dashed border-border px-4 py-10 text-center text-sm text-muted-foreground">
-            Nothing in the catalog matches that. Try a broader word, or install from a git repo
-            below.
-          </p>
-        ) : (
-          <div className="flex flex-col gap-5">
-            {grouped.map(([groupName, skills]) => (
-              <section key={groupName} className="flex flex-col gap-1.5">
-                <h3 className="text-xs font-medium capitalize text-muted-foreground">
-                  {groupName.replaceAll("-", " ")}
-                </h3>
-                <ul className="divide-y divide-border overflow-hidden rounded-md border border-border">
-                  {skills.map((skill) => (
-                    <li
-                      key={skillRowKey(skill)}
-                      className="flex flex-col gap-2 px-3 py-2.5 sm:flex-row sm:items-center sm:gap-4"
-                    >
-                      <div className="min-w-0 sm:w-52 sm:shrink-0 lg:w-60">
-                        <p className="truncate text-sm font-medium leading-tight text-foreground">
-                          {skill.name}
-                        </p>
-                        {skill.installs !== undefined ? (
-                          <p className="truncate text-[11px] leading-tight text-muted-foreground">
-                            {skill.installs} installs
-                          </p>
-                        ) : null}
-                      </div>
-                      <p className="min-w-0 flex-1 truncate text-sm text-muted-foreground">
-                        {skill.description ?? "No description written."}
-                      </p>
-                      <div className="sm:w-24 sm:shrink-0">
-                        <InstallState skill={skill} />
-                      </div>
-                      {skill.installed && !skill.updateAvailable ? (
-                        <span className="text-xs text-muted-foreground sm:w-24 sm:shrink-0 sm:text-right">
-                          Up to date
-                        </span>
-                      ) : (
-                        <Button
-                          size="sm"
-                          variant={skill.updateAvailable ? "default" : "outline"}
-                          className="shrink-0 sm:w-24"
-                          disabled={busy}
-                          // #447: every row ships the same verb, so the accessible name is all a
-                          // reader navigating by role has to tell them apart. The visible word
-                          // stays first so it remains contained in the name (WCAG 2.5.3).
-                          aria-label={`${skill.updateAvailable ? "Update" : "Install"} ${skill.name}`}
-                          onClick={() => onReview(catalog.scanId, [skill])}
-                        >
-                          {skill.updateAvailable ? "Update" : "Install"}
-                        </Button>
-                      )}
-                    </li>
-                  ))}
-                </ul>
-              </section>
-            ))}
+          <div className="flex flex-col items-center gap-3 py-10 text-center text-sm text-muted-foreground">
+            <p>Nothing in the catalog matches that. Try another search or clear the filters.</p>
+            <Button
+              variant="outline"
+              onClick={() => {
+                setQuery("");
+                setCategory("");
+                setCategoryInput(ANY_CATEGORY);
+                setUpdatesOnly(false);
+              }}
+            >
+              Clear filters
+            </Button>
           </div>
+        ) : (
+          <ul className="min-w-0 divide-y divide-border border-y border-border">
+            {visible.map((skill) => (
+              <li
+                key={skillRowKey(skill)}
+                className="grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-start gap-x-3 gap-y-2 py-3 lg:grid-cols-[minmax(0,1fr)_minmax(0,2fr)_auto] lg:items-center lg:gap-x-6"
+              >
+                <div className="min-w-0">
+                  {skill.installed ? (
+                    <Link
+                      to={`/skills/${encodeURIComponent(skill.name)}`}
+                      className="break-words text-sm font-medium text-foreground underline-offset-4 hover:underline"
+                    >
+                      {skill.name}
+                    </Link>
+                  ) : (
+                    <p className="break-words text-sm font-medium text-foreground">{skill.name}</p>
+                  )}
+                  <p className="mt-1 text-xs capitalize text-muted-foreground">
+                    {categoryOf(skill).replaceAll("-", " ")}
+                  </p>
+                  {skill.installs !== undefined ? (
+                    <p className="text-xs text-muted-foreground">{skill.installs} installs</p>
+                  ) : null}
+                </div>
+                <p className="col-span-2 row-start-2 min-w-0 break-words text-sm text-muted-foreground lg:col-span-1 lg:col-start-2 lg:row-start-1">
+                  {skill.description ?? "No description written."}
+                </p>
+                <div className="col-start-2 row-start-1 flex flex-col items-end gap-2 lg:col-start-3">
+                  <InstallState skill={skill} />
+                  {skill.installed && !skill.updateAvailable ? (
+                    <span className="text-xs text-muted-foreground">Up to date</span>
+                  ) : (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="w-24 shrink-0"
+                      disabled={busy}
+                      aria-label={`${skill.updateAvailable ? "Update" : "Install"} ${skill.name}`}
+                      onClick={() => onReview(catalog.scanId, [skill])}
+                    >
+                      {skill.updateAvailable ? "Update" : "Install"}
+                    </Button>
+                  )}
+                </div>
+              </li>
+            ))}
+          </ul>
         )}
       </div>
-    </Panel>
+    </section>
   );
 }

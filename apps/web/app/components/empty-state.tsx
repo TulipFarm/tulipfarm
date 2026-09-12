@@ -23,11 +23,11 @@ export function EmptyState({
       aria-label={section}
       className="flex flex-col items-start gap-4 rounded-sm border border-dashed border-border px-4 py-10"
     >
-      <div>
-        <p className="text-sm font-medium text-foreground">{title}</p>
+      <div className="max-w-prose">
+        <h2 className="text-sm font-medium text-foreground">{title}</h2>
         <p className="mt-1 text-base text-muted-foreground">{hint}</p>
       </div>
-      {children}
+      {children ? <div className="flex flex-wrap gap-2">{children}</div> : null}
     </section>
   );
 }

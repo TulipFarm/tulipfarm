@@ -188,8 +188,8 @@ test("catalog rows badge installed and update-available skills", async () => {
   expect(within(catalogPanel).getByText(/^installed$/i)).toBeInTheDocument();
   expect(screen.getByRole("button", { name: "Install fresh-skill" })).toBeInTheDocument();
   expect(screen.getByRole("button", { name: "Update stale-skill" })).toBeInTheDocument();
-  expect(screen.getByRole("heading", { name: "productivity" })).toBeInTheDocument();
-  expect(screen.getByRole("heading", { name: "engineering" })).toBeInTheDocument();
+  expect(within(catalogPanel).getAllByText("productivity")).toHaveLength(2);
+  expect(within(catalogPanel).getByText("engineering")).toBeInTheDocument();
   expect(screen.getByRole("button", { name: "1 update" })).toBeInTheDocument();
 });
 
@@ -584,10 +584,43 @@ test("the category filter narrows the catalog to one category", async () => {
     ],
   });
 
-  await user.selectOptions(await screen.findByLabelText(/^category$/i), "writing");
+  await user.click(await screen.findByRole("combobox", { name: /^category$/i }));
+  await user.click(screen.getByRole("option", { name: "writing" }));
 
   expect(screen.getByRole("button", { name: "Install kb-article" })).toBeInTheDocument();
   expect(screen.queryByRole("button", { name: "Install sql-queries" })).not.toBeInTheDocument();
+});
+
+test("marketplace discovery uses one dense list and links installed skills to their declarations", async () => {
+  renderInstall({
+    scanId: "mkt-dense",
+    source: "tulipfarm/skills",
+    skills: [
+      { name: "writing-helper", category: "writing", installed: false, updateAvailable: false },
+      { name: "query-helper", category: "engineering", installed: true, updateAvailable: false },
+    ],
+  });
+  const catalog = await screen.findByRole("region", { name: "Official catalog" });
+  expect(within(catalog).getAllByRole("list")).toHaveLength(1);
+  expect(within(catalog).getByRole("link", { name: "query-helper" })).toHaveAttribute(
+    "href",
+    "/skills/query-helper"
+  );
+  expect(within(catalog).queryByRole("heading", { name: "engineering" })).not.toBeInTheDocument();
+  expect(within(catalog).getByText("engineering")).toBeInTheDocument();
+});
+
+test("a marketplace search with no results can clear its filters", async () => {
+  const user = userEvent.setup();
+  renderInstall({
+    scanId: "mkt-reset",
+    source: "tulipfarm/skills",
+    skills: [{ name: "query-helper", installed: false, updateAvailable: false }],
+  });
+  await user.type(await screen.findByLabelText(/search the catalog/i), "not-found");
+  expect(screen.getByRole("status")).toHaveTextContent("0 of 1 skills match");
+  await user.click(screen.getByRole("button", { name: "Clear filters" }));
+  expect(screen.getByRole("button", { name: "Install query-helper" })).toBeInTheDocument();
 });
 
 // "Review these" hands the *filtered* set to the audit pipeline, never the whole catalog — an
@@ -616,7 +649,8 @@ test("bulk review passes only the skills left after filtering", async () => {
     ],
   });
 
-  await user.selectOptions(await screen.findByLabelText(/^category$/i), "writing");
+  await user.click(await screen.findByRole("combobox", { name: /^category$/i }));
+  await user.click(screen.getByRole("option", { name: "writing" }));
   await user.click(screen.getByRole("button", { name: /review these \(1\)/i }));
 
   expect(await screen.findByText(/1 discovered, select skills to review/i)).toBeInTheDocument();

@@ -25,7 +25,7 @@ data loading, schema-driven resource UI, and browser rendering of Surface Artifa
 | `app/components/skills/` | Catalog, reach badge, capability/package/audience panels, marketplace browser. |
 | `app/components/resources/` | Stat strip, catalog table, schema summary for `/resources`. |
 | `app/components/routines/` | Catalog, row, canvas, run/dry-run, effects and bounds panels for `/routines`. |
-| `app/components/integrations/` | Brand-tile card grid, vendored colour logos, the `···` menu, and the `?view=` preview sheet for `/integrations`. The one sanctioned card grid — see DESIGN.md "The integrations catalog". |
+| `app/components/integrations/` | Compact provider rows, the blue capability banner, connection states, and the `?view=` preview sheet. `integration-card.tsx` renders a row, not a boxed card. |
 | `app/components/ui/` | Vendored shadcn primitives for this app only, plus `combobox.tsx` — hand-rolled, because `cmdk` forces its own input `id` and breaks `<label htmlFor>`. `select.tsx` is a thin native `<select>` wrapper; deprecated (see Rules), kept only until its 16 existing callers migrate. |
 | `app/lib/api.ts` | API client with cookies, CSRF header, optional bearer token, `ApiError`. |
 | `app/lib/schema.ts` | JSON-Schema field detection, list/detail/form metadata, value rendering, shared formatters. |
@@ -62,12 +62,16 @@ data loading, schema-driven resource UI, and browser rendering of Surface Artifa
 - Gate admin UI on `isBusinessAdmin`/`useIsAdmin`, never `user.role` — People & access grants admin
   authority without rewriting the role. Operator items except Inbox are `adminOnly`.
 - Every route renders `PageShell` and names itself once via `title`; the shell publishes that
-  string into the one 40px chrome bar and keeps one `sr-only` `h1`. Actions portal into the bar and
-  must render in place when no slot exists. Never add a second bar or visible `h1`. The workspace
+  string into one 40px desktop chrome bar (48px below `sm`) and keeps one `sr-only` `h1`.
+  Actions portal into one stable
+  slot, disclosed by Page actions below `sm`, and render in place when no slot exists.
+  Never add a second bar or visible `h1`. The workspace
   is full-width with one shared set of gutters — empty, error and 404 included. Reading text,
   forms and focused tasks cap their own measure; dense lists, grids and canvases do not. Empty
   Chat centres its composer; after the first message, the same composer docks below the transcript.
 - Theme is `[data-theme="dark"]` on `<html>`, not shadcn `.dark`; keep the no-flash init script.
+  Preserve the original compact type/control scale and surface palette. Keep the blue Integrations
+  banner as a specific exception, not a new decorative theme for other pages.
   Keep design neutral, compact, hairline; depth is the four-step `--elevation-*` ladder and never
   an arbitrary `shadow-[…]`. `--primary` is near-black ink for the one committing action, coral
   `--brand` is identity only, `--destructive` danger only. `app/components/ui` is app-local shadcn until a second app needs it.

@@ -48,6 +48,7 @@ export default function BusinessProfilePage() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [done, setDone] = useState(false);
+  const [nameTouched, setNameTouched] = useState(false);
   // The Combobox's `value` is the literal input text; it must be its own state so a keystroke
   // isn't reverted next render, and re-synced whenever the committed currency changes elsewhere
   // (a fresh load, or Cancel resetting the whole draft).
@@ -104,7 +105,7 @@ export default function BusinessProfilePage() {
   if (!isAdmin) {
     return (
       <Panel
-        title="Business profile"
+        title="Business details"
         description="Only an admin can change these. Ask one if something here is wrong."
       >
         <dl className="grid gap-4 sm:grid-cols-2">
@@ -125,16 +126,24 @@ export default function BusinessProfilePage() {
 
   return (
     <Panel
-      title="Business profile"
-      description="Committed to the soul repository, so every change is versioned alongside the rest of your configuration."
+      title="Business details"
+      description="Tell your agents about your business. Changes are saved with a history you can review."
       footer={
         <>
           <span className="text-xs text-muted-foreground">
-            Agents see these values on every turn.
+            Your agents use this information in every chat.
           </span>
           <div className="flex items-center gap-2">
             {dirty ? (
-              <Button variant="ghost" size="sm" onClick={() => setDraft(profile)} disabled={busy}>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => {
+                  setDraft(profile);
+                  setNameTouched(false);
+                }}
+                disabled={busy}
+              >
                 Cancel
               </Button>
             ) : null}
@@ -152,12 +161,13 @@ export default function BusinessProfilePage() {
         <Field
           label="Name"
           help="What your business is called."
-          error={nameMissing ? "Name can't be empty." : undefined}
+          error={nameTouched && nameMissing ? "Name can't be empty." : undefined}
           required
         >
           <Input
             value={draft.name}
             onChange={(e) => set("name", e.target.value)}
+            onBlur={() => setNameTouched(true)}
             placeholder="e.g. Ridgeline Landscaping"
           />
         </Field>

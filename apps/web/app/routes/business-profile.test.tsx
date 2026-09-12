@@ -86,6 +86,27 @@ test("a non-admin reads the profile but cannot edit it", () => {
   expect(screen.queryByRole("button", { name: /^save$/i })).not.toBeInTheDocument();
 });
 
+test("guides a new business without showing an error before the name is touched", async () => {
+  renderPage({ ...PROFILE, name: "" });
+  expect(screen.queryByText("Name can't be empty.")).not.toBeInTheDocument();
+  expect(screen.getByRole("button", { name: /^save$/i })).toBeDisabled();
+
+  await userEvent.click(screen.getByLabelText(/^Name/));
+  await userEvent.tab();
+  expect(screen.getByText("Name can't be empty.")).toBeInTheDocument();
+});
+
+test("clears name validation when an edit is cancelled", async () => {
+  renderPage({ ...PROFILE, name: "" });
+  await userEvent.type(screen.getByLabelText(/^Name/), " ");
+  await userEvent.tab();
+  expect(screen.getByText("Name can't be empty.")).toBeInTheDocument();
+
+  await userEvent.click(screen.getByRole("button", { name: "Cancel" }));
+  expect(screen.getByLabelText(/^Name/)).toHaveValue("");
+  expect(screen.queryByText("Name can't be empty.")).not.toBeInTheDocument();
+});
+
 test("a rejected save reports the API's reason", async () => {
   vi.mocked(settings.putBusinessProfile).mockRejectedValueOnce(new ApiError(403, "forbidden"));
   renderPage();

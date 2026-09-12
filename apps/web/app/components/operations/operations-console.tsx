@@ -1,9 +1,9 @@
-import { type ReactNode, useState } from "react";
+import { type ReactNode, useId, useState } from "react";
+import { FormStatus } from "~/components/form-status";
 import {
   Activity,
   AlertTriangle,
   Ban,
-  CheckCircle2,
   DatabaseBackup,
   RefreshCw,
   Search,
@@ -11,10 +11,11 @@ import {
 } from "~/components/icons";
 import { DestructivePreview } from "~/components/shell/states";
 import { StatusBadge as SemanticStatusBadge, type StatusTone } from "~/components/status-badge";
+import { Button } from "~/components/ui/button";
 import { Link } from "~/components/ui/link";
 import type { OperationsModel } from "~/lib/operations";
 import { formatIso } from "~/lib/schema";
-import { cn } from "~/lib/utils";
+import { useIsAdmin } from "~/lib/use-session-user";
 import { AuditLedgerPanel } from "./audit-ledger-panel";
 
 export type OperationAction =
@@ -51,9 +52,13 @@ function statusValue(item: OperationalItem, fallback: string): string {
 
 function statusTone(status: string): StatusTone {
   const normalized = status.toLowerCase();
-  if (/critical|error|failed|high|blocked|enabled/.test(normalized)) return "danger";
-  if (/degraded|warning|medium|pending|quarantined/.test(normalized)) return "warning";
-  if (/ok|healthy|resolved|disabled|success|low/.test(normalized)) return "success";
+  if (["critical", "error", "failed", "high", "blocked", "enabled", "down"].includes(normalized)) {
+    return "danger";
+  }
+  if (["degraded", "warning", "medium", "pending", "quarantined"].includes(normalized)) {
+    return "warning";
+  }
+  if (["ok", "healthy", "resolved", "success"].includes(normalized)) return "success";
   return "neutral";
 }
 
@@ -72,11 +77,17 @@ function Section({
   count?: number;
   children: ReactNode;
 }) {
+  const headingId = useId();
   return (
-    <section className="min-w-0 border border-border bg-card">
+    <section
+      aria-labelledby={headingId}
+      className="min-w-0 rounded-md border border-border bg-card"
+    >
       <header className="flex items-center gap-2 border-b border-border px-3 py-2.5">
         <span className="text-muted-foreground">{icon}</span>
-        <h2 className="text-xs font-medium">{title}</h2>
+        <h2 id={headingId} className="text-sm font-medium">
+          {title}
+        </h2>
         {count === undefined ? null : (
           <span className="ml-auto text-[0.625rem] tabular-nums text-muted-foreground">
             {count}
@@ -90,14 +101,16 @@ function Section({
 
 function EmptyPanel({ children }: { children: ReactNode }) {
   return (
-    <div className="flex min-h-16 items-center gap-2 px-3 py-3 text-xs text-muted-foreground">
-      <CheckCircle2 aria-hidden="true" className="size-3.5 text-status-success" />
+    <div className="px-3 py-4 text-sm text-muted-foreground">
       <span>{children}</span>
     </div>
   );
 }
 
 function HealthPanel({ items }: { items: OperationsModel["health"] }) {
+  const isAdmin = useIsAdmin();
+  const priority = { down: 0, degraded: 1, unknown: 2, ok: 3 };
+  const ordered = [...items].sort((a, b) => priority[a.status] - priority[b.status]);
   return (
     <Section
       title="Health"
@@ -108,26 +121,36 @@ function HealthPanel({ items }: { items: OperationsModel["health"] }) {
         <EmptyPanel>No health checks reported</EmptyPanel>
       ) : (
         <ul className="divide-y divide-border">
-          {items.map((item, index) => {
+          {ordered.map((item, index) => {
             const component = text(item, "component", "name", "id") ?? "Unknown component";
             const status = statusValue(item, "unknown");
             const detail = text(item, "detail");
             return (
               <li
                 key={itemKey(item, index)}
-                className="flex min-h-12 items-start gap-3 px-3 py-2 text-xs"
+                className="flex min-h-12 flex-wrap items-start gap-x-3 gap-y-2 px-3 py-3 text-sm"
               >
-                <div className="min-w-0 flex-1">
-                  <p className="truncate font-medium" title={component}>
+                <div className="min-w-0 flex-1 basis-40 break-words">
+                  <p className="font-medium" title={component}>
                     {component}
                   </p>
                   {status !== "ok" && detail ? (
                     <p className="mt-0.5 text-muted-foreground">{detail}</p>
                   ) : null}
                   {status !== "ok" ? (
-                    <p className="mt-0.5 text-[0.625rem] text-muted-foreground">
+                    <p className="mt-1 text-xs text-muted-foreground">
                       Last checked {formatIso(item.checkedAt)}
                     </p>
+                  ) : null}
+                  {isAdmin &&
+                  status !== "ok" &&
+                  (component === "llm" || component === "embeddings") ? (
+                    <Link
+                      to="/business/models"
+                      className="mt-1 inline-flex min-h-11 items-center text-sm underline underline-offset-4 sm:min-h-9"
+                    >
+                      {component === "llm" ? "Review model settings" : "Review embedding settings"}
+                    </Link>
                   ) : null}
                 </div>
                 <StatusBadge status={status} />
@@ -302,7 +325,7 @@ function OperationalActivityTable({ items }: { items: readonly OperationalItem[]
       ) : (
         <>
           <div className="flex flex-wrap items-center gap-2 border-b border-border px-3 py-2">
-            <label className="relative min-w-48 flex-1 sm:max-w-xs">
+            <label className="relative min-w-0 basis-48 flex-1 sm:max-w-xs">
               <span className="sr-only">Filter operational activity</span>
               <Search
                 aria-hidden="true"
@@ -313,7 +336,7 @@ function OperationalActivityTable({ items }: { items: readonly OperationalItem[]
                 value={query}
                 onChange={(event) => setQuery(event.currentTarget.value)}
                 placeholder="Filter recent activity"
-                className="h-8 w-full rounded-sm border border-border bg-background pl-7 pr-2 text-xs outline-none placeholder:text-muted-foreground focus:border-ring"
+                className="h-11 w-full rounded-md border border-border bg-background pl-7 pr-2 text-base placeholder:text-muted-foreground sm:h-9 sm:text-sm"
               />
             </label>
             <span className="text-[0.625rem] text-muted-foreground">
@@ -321,7 +344,7 @@ function OperationalActivityTable({ items }: { items: readonly OperationalItem[]
             </span>
             <Link
               to="/business/activities"
-              className="ml-auto text-xs text-primary underline-offset-2 hover:underline"
+              className="ml-auto inline-flex min-h-11 items-center text-sm underline underline-offset-4 sm:min-h-9"
             >
               View all activities
             </Link>
@@ -331,7 +354,12 @@ function OperationalActivityTable({ items }: { items: readonly OperationalItem[]
               No matching operational activity
             </div>
           ) : (
-            <div className="max-w-full overflow-x-auto">
+            <section
+              aria-label="Scrollable operational activity"
+              // biome-ignore lint/a11y/noNoninteractiveTabindex: Keyboard users must focus the overflowing table to scroll it.
+              tabIndex={0}
+              className="max-w-full overflow-x-auto"
+            >
               <table
                 aria-label="Recent operational activity"
                 className="w-full min-w-[46rem] text-left"
@@ -395,7 +423,7 @@ function OperationalActivityTable({ items }: { items: readonly OperationalItem[]
                   })}
                 </tbody>
               </table>
-            </div>
+            </section>
           )}
         </>
       )}
@@ -404,11 +432,9 @@ function OperationalActivityTable({ items }: { items: readonly OperationalItem[]
 }
 
 function attentionItems(model: OperationsModel): number {
-  const unhealthy = model.health.filter(
-    (item) => statusTone(statusValue(item, "unknown")) !== "success"
-  ).length;
+  const unhealthy = model.health.filter((item) => item.status !== "ok").length;
   const activeKillSwitches = model.killSwitches.filter(
-    (item) => statusTone(statusValue(item, "unknown")) !== "success"
+    (item) => !["disabled", "ok"].includes(statusValue(item, "unknown"))
   ).length;
   return unhealthy + model.incidents.length + model.quarantine.length + activeKillSwitches;
 }
@@ -418,88 +444,63 @@ export function OperationsConsole({
   busy = false,
   onCommand,
   onRefresh,
+  safety,
 }: {
   model: OperationsModel;
   busy?: boolean;
-  onCommand: (action: OperationAction, input: Record<string, unknown>) => void;
+  onCommand: (action: OperationAction, input: Record<string, unknown>) => void | Promise<void>;
   onRefresh?: () => void;
+  safety?: ReactNode;
 }) {
   const [previewSupport, setPreviewSupport] = useState(false);
+  const [commandError, setCommandError] = useState<string | null>(null);
   const attentionCount = attentionItems(model);
+
+  async function createSupportBundle() {
+    setCommandError(null);
+    try {
+      await onCommand("support-bundle.create", {});
+      setPreviewSupport(false);
+    } catch (error) {
+      setCommandError(error instanceof Error ? error.message : "Could not create support bundle.");
+    }
+  }
 
   return (
     <div className="flex min-w-0 flex-col gap-4">
       <header className="flex flex-wrap items-start gap-3">
         <div className="min-w-0">
-          {/* The page shell names this page; repeating it here would title it twice. */}
-          <p className="max-w-2xl text-xs text-muted-foreground">
-            Authorized operational summaries. Protected payloads remain redacted.
+          <p className="max-w-2xl text-sm text-muted-foreground">
+            Check service health, resolve issues, and recover safely.
           </p>
-          <p
-            role="status"
-            className={cn(
-              "mt-2 inline-flex items-center gap-1.5 text-xs",
-              attentionCount > 0 ? "text-status-warning" : "text-status-success"
-            )}
-          >
-            {attentionCount > 0 ? (
-              <AlertTriangle aria-hidden="true" className="size-3.5" />
-            ) : (
-              <CheckCircle2 aria-hidden="true" className="size-3.5" />
-            )}
+          <p role="status" className="mt-2 inline-flex items-center gap-1.5 text-sm font-medium">
+            {attentionCount > 0 ? <AlertTriangle aria-hidden="true" className="size-3.5" /> : null}
             {attentionCount > 0
-              ? `${attentionCount} item${attentionCount === 1 ? "" : "s"} need attention`
-              : "All reported systems operational"}
+              ? `${attentionCount} ${attentionCount === 1 ? "item needs" : "items need"} attention`
+              : model.health.length > 0
+                ? "All reported health checks passed"
+                : "Health has not been reported"}
           </p>
         </div>
-        {model.recovery.supportBundleAvailable ? (
-          <button
-            type="button"
-            disabled={busy}
-            onClick={() => setPreviewSupport(true)}
-            className="ml-auto rounded-sm border border-border px-2.5 py-1.5 text-xs hover:bg-muted disabled:opacity-60"
-          >
-            Create support bundle
-          </button>
+        {onRefresh ? (
+          <Button variant="outline" onClick={onRefresh} disabled={busy} className="sm:ml-auto">
+            <RefreshCw aria-hidden="true" className="size-3.5" />
+            Refresh status
+          </Button>
         ) : null}
-        <button
-          type="button"
-          onClick={onRefresh}
-          className="inline-flex items-center gap-1.5 rounded-sm border border-border px-2.5 py-1.5 text-xs hover:bg-muted disabled:opacity-60"
-        >
-          <RefreshCw aria-hidden="true" className="size-3.5" />
-          Refresh status
-        </button>
       </header>
 
-      {previewSupport ? (
-        <DestructivePreview
-          action="Create Support Bundle"
-          target="redacted operational diagnostics"
-          destination="authorized support bundle Artifact"
-          reversibility="Bundle creation is audited; the immutable Artifact can expire by retention"
-          busy={busy}
-          onCancel={() => setPreviewSupport(false)}
-          onConfirm={() => {
-            setPreviewSupport(false);
-            onCommand("support-bundle.create", {});
-          }}
-        />
-      ) : null}
+      <HealthPanel items={model.health} />
 
-      <div className="grid min-w-0 gap-4 sm:grid-cols-2">
-        <HealthPanel items={model.health} />
+      <div className="grid min-w-0 items-start gap-4 sm:grid-cols-2">
         <IncidentsPanel items={model.incidents} />
         <QuarantinePanel items={model.quarantine} />
-        <KillSwitchesPanel items={model.killSwitches} />
       </div>
 
-      <OperationalActivityTable items={model.activity} />
-
-      <AuditLedgerPanel />
+      <KillSwitchesPanel items={model.killSwitches} />
 
       <Section title="Recovery" icon={<DatabaseBackup aria-hidden="true" className="size-3.5" />}>
-        <div className="flex flex-wrap items-center gap-x-6 gap-y-2 px-3 py-3 text-xs">
+        <div className="flex flex-wrap items-center gap-x-6 gap-y-3 px-3 py-3 text-sm">
           <div>
             <span className="text-muted-foreground">Last backup</span>
             <p className="mt-0.5 font-medium">
@@ -514,8 +515,43 @@ export function OperationsConsole({
               {model.recovery.supportBundleAvailable ? "Available" : "Unavailable"}
             </p>
           </div>
+          {model.recovery.supportBundleAvailable ? (
+            <Button
+              variant="outline"
+              disabled={busy}
+              onClick={() => {
+                setCommandError(null);
+                setPreviewSupport(true);
+              }}
+              className="sm:ml-auto"
+            >
+              Create support bundle
+            </Button>
+          ) : null}
         </div>
+        {commandError ? (
+          <div className="px-3 pb-3">
+            <FormStatus tone="error">{commandError}</FormStatus>
+          </div>
+        ) : null}
+        {previewSupport ? (
+          <div className="px-3 pb-3 [&_button]:min-h-11 [&_button]:whitespace-normal [&_dl]:grid-cols-1 [&_section>div]:flex-wrap sm:[&_dl]:grid-cols-[7rem_1fr]">
+            <DestructivePreview
+              action="Create Support Bundle"
+              target="redacted operational diagnostics"
+              destination="authorized support bundle Artifact"
+              reversibility="Bundle creation is audited; the immutable Artifact can expire by retention"
+              busy={busy}
+              onCancel={() => setPreviewSupport(false)}
+              onConfirm={() => void createSupportBundle()}
+            />
+          </div>
+        ) : null}
       </Section>
+
+      {safety}
+      <OperationalActivityTable items={model.activity} />
+      <AuditLedgerPanel />
     </div>
   );
 }
