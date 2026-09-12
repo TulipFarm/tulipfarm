@@ -129,6 +129,25 @@ describe("pinnedBinding", () => {
     expect(result.requestId).toBe("r1");
   });
 
+  it("fails a partial answer when the pinned model reaches its output-token limit", async () => {
+    const { fn } = stubCreateModel([
+      ...text(["cut off"]),
+      finish(usage(1000, 200), { unified: "length", raw: "max_tokens" }),
+    ]);
+
+    await expect(
+      pinnedBinding(SONNET, { createModel: fn }).create(evalCase()).invoke(request())
+    ).rejects.toMatchObject({
+      name: "ModelInvocationError",
+      reason: "model_error",
+      usage: {
+        inputTokens: 1000,
+        outputTokens: 200,
+        costBasis: "subscription",
+      },
+    });
+  });
+
   it("reports a seat as unmetered rather than charging it published API rates", async () => {
     const { fn } = stubCreateModel([...text(["ok"]), finish(usage(1_000_000, 1_000_000))]);
 

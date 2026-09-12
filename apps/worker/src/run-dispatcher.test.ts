@@ -11,6 +11,19 @@ import { RunDispatcher, type RunDispatcherOptions, type RunOutcome } from "./run
 
 const BUSINESS_ID = "business-1";
 
+function timerWait(ms: number, signal: AbortSignal): Promise<void> {
+  return new Promise((resolve) => {
+    const finish = () => {
+      clearTimeout(timer);
+      signal.removeEventListener("abort", finish);
+      resolve();
+    };
+    const timer = setTimeout(finish, ms);
+    if (signal.aborted) finish();
+    else signal.addEventListener("abort", finish, { once: true });
+  });
+}
+
 function persistedRun(overrides: Partial<PersistedRun> = {}): PersistedRun {
   return {
     id: "00000000-0000-4000-8000-000000000001",
@@ -39,6 +52,7 @@ function persistedRun(overrides: Partial<PersistedRun> = {}): PersistedRun {
 class FakeRunStore implements RunLeaseStore {
   releaseCalls: unknown[] = [];
   releaseResult = true;
+  releaseErrorRunIds = new Set<string>();
   claimBatchResult: PersistedRun[] = [];
   claimBatchCalls: Array<{ owner: string; limit: number }> = [];
   heartbeatCalls: Array<{ owner: string; expectedVersion: number }> = [];
@@ -64,6 +78,9 @@ class FakeRunStore implements RunLeaseStore {
     }
   ): Promise<boolean> {
     if (transition.leaseOwner === null) {
+      if (this.releaseErrorRunIds.delete(_runId)) {
+        throw new Error(`release failed for ${_runId}`);
+      }
       this.releaseCalls.push(transition);
       return this.releaseResult;
     }
@@ -104,6 +121,218 @@ class FakeRunStore implements RunLeaseStore {
 }
 
 describe("RunDispatcher", () => {
+  it("starts more than four blocked Runs and renews every owned lease", async () => {
+    vi.useFakeTimers();
+    const drain = new AbortController();
+    const store = new FakeRunStore();
+    store.claimBatchResult = ["one", "two", "three", "four", "five", "six", "next-poll"].map((id) =>
+      persistedRun({ id })
+    );
+    const started: string[] = [];
+    const aborted: string[] = [];
+    const dispatcher = new RunDispatcher({
+      leases: new RunLeaseManager(store),
+      businessId: BUSINESS_ID,
+      owner: "worker-1",
+      batchSize: 6,
+      leaseDurationMs: 300,
+      now: () => new Date(),
+      handler: async (run, signal) => {
+        started.push(run.id);
+        await new Promise<void>((resolve) =>
+          signal.addEventListener(
+            "abort",
+            () => {
+              aborted.push(run.id);
+              resolve();
+            },
+            { once: true }
+          )
+        );
+        return { status: "cancelled" };
+      },
+    });
+    const running = dispatcher.run({
+      intervalMs: 1_000,
+      wait: timerWait,
+      signal: drain.signal,
+      logger: { error: vi.fn() },
+    });
+    try {
+      await vi.waitFor(() => expect(started).toHaveLength(6));
+      await vi.advanceTimersByTimeAsync(100);
+
+      expect(started).toEqual(["one", "two", "three", "four", "five", "six"]);
+      expect(store.heartbeatCalls).toHaveLength(6);
+      expect(store.claimBatchResult.map((run) => run.id)).toEqual(["next-poll"]);
+      expect(store.claimBatchCalls.every((call) => call.limit === 1)).toBe(true);
+    } finally {
+      drain.abort();
+      await running;
+      expect(aborted.sort()).toEqual(["five", "four", "one", "six", "three", "two"]);
+      vi.useRealTimers();
+    }
+  });
+
+  it("admits newly queued Runs while earlier Runs remain blocked", async () => {
+    vi.useFakeTimers();
+    const drain = new AbortController();
+    const store = new FakeRunStore();
+    store.claimBatchResult = ["one", "two"].map((id) => persistedRun({ id }));
+    const started: string[] = [];
+    const dispatcher = new RunDispatcher({
+      leases: new RunLeaseManager(store),
+      businessId: BUSINESS_ID,
+      owner: "worker-1",
+      batchSize: 2,
+      now: () => new Date(),
+      handler: async (run, signal) => {
+        started.push(run.id);
+        await new Promise<void>((resolve) =>
+          signal.addEventListener("abort", () => resolve(), { once: true })
+        );
+        return { status: "cancelled" };
+      },
+    });
+    const running = dispatcher.run({
+      intervalMs: 10,
+      wait: timerWait,
+      signal: drain.signal,
+      logger: { error: vi.fn() },
+    });
+    try {
+      await vi.waitFor(() => expect(started).toHaveLength(2));
+      store.claimBatchResult.push(persistedRun({ id: "later" }));
+      await vi.advanceTimersByTimeAsync(10);
+
+      expect(started).toEqual(["one", "two", "later"]);
+      expect(store.claimBatchResult).toHaveLength(0);
+    } finally {
+      drain.abort();
+      await running;
+      vi.useRealTimers();
+    }
+  });
+
+  it("keeps admitting after one Run fails outside its handler", async () => {
+    vi.useFakeTimers();
+    const drain = new AbortController();
+    const store = new FakeRunStore();
+    store.claimBatchResult = [persistedRun({ id: "bad" })];
+    store.releaseErrorRunIds.add("bad");
+    const started: string[] = [];
+    const logger = { error: vi.fn() };
+    const dispatcher = new RunDispatcher({
+      leases: new RunLeaseManager(store),
+      businessId: BUSINESS_ID,
+      owner: "worker-1",
+      batchSize: 1,
+      now: () => new Date(),
+      handler: async (run) => {
+        started.push(run.id);
+        return { status: "succeeded" };
+      },
+    });
+    const running = dispatcher.run({
+      intervalMs: 10,
+      wait: timerWait,
+      signal: drain.signal,
+      logger,
+    });
+    try {
+      await vi.waitFor(() => expect(logger.error).toHaveBeenCalledOnce());
+      store.claimBatchResult.push(persistedRun({ id: "good" }));
+      await vi.advanceTimersByTimeAsync(10);
+
+      expect(started).toEqual(["bad", "good"]);
+      expect(store.releaseCalls).toEqual([
+        expect.objectContaining({ expectedVersion: 2, status: "succeeded" }),
+      ]);
+    } finally {
+      drain.abort();
+      await running;
+      vi.useRealTimers();
+    }
+  });
+
+  it("waits for an abort-ignoring handler before reporting a clean drain", async () => {
+    const drain = new AbortController();
+    const store = new FakeRunStore();
+    store.claimBatchResult = [persistedRun()];
+    let finish: (() => void) | undefined;
+    let markStarted: (() => void) | undefined;
+    let aborted = false;
+    const started = new Promise<void>((resolve) => {
+      markStarted = resolve;
+    });
+    const dispatcher = new RunDispatcher({
+      leases: new RunLeaseManager(store),
+      businessId: BUSINESS_ID,
+      owner: "worker-1",
+      batchSize: 1,
+      now: () => new Date(),
+      handler: async (_run, signal) => {
+        signal.addEventListener("abort", () => {
+          aborted = true;
+        });
+        markStarted?.();
+        await new Promise<void>((resolve) => {
+          finish = resolve;
+        });
+        return { status: "cancelled" };
+      },
+    });
+    const running = dispatcher.run({
+      intervalMs: 10,
+      signal: drain.signal,
+      logger: { error: vi.fn() },
+    });
+
+    await started;
+    drain.abort();
+    await Promise.resolve();
+    expect(aborted).toBe(true);
+
+    let settled = false;
+    void running.then(() => {
+      settled = true;
+    });
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    expect(settled).toBe(false);
+
+    finish?.();
+    await running;
+  });
+
+  it("makes one empty claim attempt per poll instead of spinning", async () => {
+    vi.useFakeTimers();
+    const drain = new AbortController();
+    const store = new FakeRunStore();
+    const dispatcher = new RunDispatcher({
+      leases: new RunLeaseManager(store),
+      businessId: BUSINESS_ID,
+      owner: "worker-1",
+      now: () => new Date(),
+      handler: async () => ({ status: "succeeded" }),
+    });
+    const running = dispatcher.run({
+      intervalMs: 10,
+      wait: timerWait,
+      signal: drain.signal,
+      logger: { error: vi.fn() },
+    });
+    try {
+      await vi.advanceTimersByTimeAsync(0);
+      expect(store.claimBatchCalls).toHaveLength(1);
+      await vi.advanceTimersByTimeAsync(10);
+      expect(store.claimBatchCalls).toHaveLength(2);
+    } finally {
+      drain.abort();
+      await running;
+      vi.useRealTimers();
+    }
+  });
+
   it("drives a claimed Run through running to succeeded", async () => {
     const store = new FakeRunStore();
     store.claimBatchResult = [persistedRun()];
@@ -710,6 +939,8 @@ describe("RunDispatcher", () => {
       store.heartbeat = () => new Promise<boolean>(() => {});
       const drain = new AbortController();
       let started: (() => void) | undefined;
+      let finish: ((outcome: RunOutcome) => void) | undefined;
+      let aborted = false;
       const handling = new Promise<void>((resolve) => {
         started = resolve;
       });
@@ -722,9 +953,10 @@ describe("RunDispatcher", () => {
         signal: drain.signal,
         handler: (_run, signal) =>
           new Promise<RunOutcome>((resolve) => {
+            finish = resolve;
             started?.();
-            signal.addEventListener("abort", () => resolve({ status: "cancelled" }), {
-              once: true,
+            signal.addEventListener("abort", () => {
+              aborted = true;
             });
           }),
       });
@@ -732,6 +964,8 @@ describe("RunDispatcher", () => {
       const dispatching = dispatcher.dispatchBatch();
       await handling;
       await vi.advanceTimersByTimeAsync(100);
+      finish?.({ status: "succeeded" });
+      await vi.advanceTimersByTimeAsync(0);
       drain.abort("worker_shutdown");
       let settled = false;
       void dispatching.then(() => {
@@ -740,6 +974,7 @@ describe("RunDispatcher", () => {
       await vi.advanceTimersByTimeAsync(0);
 
       expect(settled).toBe(true);
+      expect(aborted).toBe(true);
       await expect(dispatching).resolves.toMatchObject({ claimed: 1, failed: 1 });
     } finally {
       vi.useRealTimers();

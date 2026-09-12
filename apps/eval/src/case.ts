@@ -406,9 +406,10 @@ export interface EvalCase {
    * a Turn that got as far as the loop. A Turn abandoned *before* the loop — Context unreadable,
    * Soul unreachable — is the one failure a participant can neither see nor retry, so it is worth
    * the one knob it takes to reach it. `"context"` fails Context resolution; `"model"` fails the
-   * Model Port.
+   * Model Port before output; `"model_output_limit"` lets the scripted model produce partial text,
+   * then passes the SDK's `length` finish reason through the shared production completion guard.
    */
-  readonly fault?: "context" | "model";
+  readonly fault?: "context" | "model" | "model_output_limit";
   /**
    * L2 only. Crashes the checkpoint write immediately after the first Tool result in a
    * model-produced batch, then retries the same loop input against the saved checkpoint.

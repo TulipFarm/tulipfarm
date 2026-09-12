@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { InternalApiClient, InternalApiError } from "./client";
 
 interface RecordedCall {
@@ -53,6 +53,10 @@ const json = (body: unknown, status = 200): Response =>
   });
 
 describe("InternalApiClient", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
   it("carries the service credential and the base url on every call", async () => {
     const { api, calls } = client([json({ ok: true })]);
 
@@ -117,5 +121,23 @@ describe("InternalApiClient", () => {
     await expect(api.find("GET", "/api/v1/internal/turns/run-1", [404, 409])).resolves.toEqual({
       turnId: "turn-1",
     });
+  });
+
+  it("keeps the configured default unless a request supplies its own timeout", async () => {
+    const timeout = vi
+      .spyOn(AbortSignal, "timeout")
+      .mockImplementation(() => new AbortController().signal);
+    const { fetch } = stubFetch([json({ ok: true }), json({ ok: true })]);
+    const api = new InternalApiClient({
+      baseUrl: "http://api:4010",
+      credential: "tfc_client.secret",
+      timeoutMs: 12_345,
+      fetch,
+    });
+
+    await api.require("GET", "/api/v1/internal/default");
+    await api.require("GET", "/api/v1/internal/override", undefined, { timeoutMs: 67_890 });
+
+    expect(timeout.mock.calls).toEqual([[12_345], [67_890]]);
   });
 });

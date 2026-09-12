@@ -15,7 +15,7 @@ export interface RecoveryEffect {
 }
 
 export interface RecoveryEffectReader {
-  list(businessId: string): Promise<readonly RecoveryEffect[]>;
+  listByRun(businessId: string, runId: string): Promise<readonly RecoveryEffect[]>;
 }
 
 export interface TargetedRunRecoveryStore {
@@ -126,9 +126,7 @@ export class RunRecoveryManager {
       return { outcome: "unsupported", run: current };
     }
 
-    const effects = (await this.effects.list(input.businessId)).filter(
-      (effect) => effect.runId === input.runId
-    );
+    const effects = await this.effects.listByRun(input.businessId, input.runId);
     if (effectsNeedReconciliation(effects)) {
       return { outcome: "needs_reconciliation", run: current };
     }

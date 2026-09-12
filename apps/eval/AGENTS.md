@@ -87,8 +87,8 @@ before changing how a Case is scored, run or compared.** These are the ones that
   stage-specific `guardrail_blocked` so safe model refusals can be reported as unexercised.
 - **Two models are a control, not a contest,** and they never run at once.
 - **A Judge failure errors the Trial; it never scores low.**
-- **A `fault` is L3-only and names a dependency, not an outcome.** It breaks what the executor was
-  given, so a Case can measure a Turn abandoned before the loop ever ran.
+- **A `fault` is L3-only and breaks a dependency before or during a Turn.** The output-limit fault
+  sends scripted partial text through the production model completion guard, not a synthetic error.
 - **Persisted Message Expectations read `eval_messages`, never Run events or recomputed history.**
   `attemptHistory` is L3-only and seeds participant-safe history recovered by the real executor.
 - **Provider File Expectations read `splitPrompt` binary parts against immutable Case Files.**

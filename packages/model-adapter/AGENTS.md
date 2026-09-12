@@ -16,7 +16,7 @@ folded into `ModelUsage`.
 
 | Path | Owns |
 | --- | --- |
-| `src/prompt.ts` | Request → SDK prompt (`splitPrompt`, `toToolSet`, `withCacheBreakpoint`, `stablePrefixChars`), SDK result → `ModelOutput` (`toOutput`, `parseToolCalls`, `parseToolResult`) |
+| `src/prompt.ts` | Request → SDK prompt (`splitPrompt`, `toToolSet`, `withCacheBreakpoint`, `stablePrefixChars`), SDK completion guard (`assertModelOutputComplete`), SDK result → `ModelOutput` (`toOutput`, `parseToolCalls`, `parseToolResult`) |
 | `src/usage.ts` | `UsageAccumulator` and `tokenDetail` — folding SDK usage into `ModelUsage` |
 
 ## Rules

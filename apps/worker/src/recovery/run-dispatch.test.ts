@@ -234,7 +234,9 @@ function dispatcher(
 ): RunDispatcher {
   return new RunDispatcher({
     leases: new RunLeaseManager(store),
-    recovery: new RunRecoveryManager(store, { list: async () => effects }),
+    recovery: new RunRecoveryManager(store, {
+      listByRun: async (_businessId, runId) => effects.filter((effect) => effect.runId === runId),
+    }),
     businessId: BUSINESS_ID,
     owner,
     handler,

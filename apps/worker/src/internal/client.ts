@@ -39,9 +39,9 @@ export class InternalApiClient {
     method: "GET" | "POST",
     path: string,
     body?: unknown,
-    options: { readonly signal?: AbortSignal } = {}
+    options: { readonly signal?: AbortSignal; readonly timeoutMs?: number } = {}
   ): Promise<T> {
-    const response = await this.send(method, path, body, options.signal);
+    const response = await this.send(method, path, body, options.signal, options.timeoutMs);
     if (!response.ok || response.status === 204) {
       throw new InternalApiError(response.status, method, path, await safeText(response));
     }
@@ -82,9 +82,10 @@ export class InternalApiClient {
     method: "GET" | "POST",
     path: string,
     body?: unknown,
-    outerSignal?: AbortSignal
+    outerSignal?: AbortSignal,
+    timeoutMs = this.timeoutMs
   ): Promise<Response> {
-    const timeoutSignal = AbortSignal.timeout(this.timeoutMs);
+    const timeoutSignal = AbortSignal.timeout(timeoutMs);
     return this.fetch(`${this.options.baseUrl}${path}`, {
       method,
       headers: {

@@ -39,7 +39,7 @@ function run(overrides: Partial<PersistedRun> = {}): PersistedRun {
 
 function harness(
   initial: PersistedRun | null,
-  effects: Awaited<ReturnType<RecoveryEffectReader["list"]>> = []
+  effects: Awaited<ReturnType<RecoveryEffectReader["listByRun"]>> = []
 ) {
   let current = initial;
   const store: TargetedRunRecoveryStore = {
@@ -63,7 +63,7 @@ function harness(
     },
   };
   return {
-    manager: new RunRecoveryManager(store, { list: async () => effects }),
+    manager: new RunRecoveryManager(store, { listByRun: async () => effects }),
     current: () => current,
   };
 }
@@ -206,6 +206,27 @@ describe("RunRecoveryManager", () => {
     });
   });
 
+  it("requests only the candidate Run's effect evidence", async () => {
+    const calls: Array<{ businessId: string; runId: string }> = [];
+    const effects: RecoveryEffectReader = {
+      listByRun: async (businessId, runId) => {
+        calls.push({ businessId, runId });
+        return [];
+      },
+    };
+    const scoped = new RunRecoveryManager(
+      {
+        find: async () => run(),
+        listRecoveryCandidates: async () => [run()],
+        requeueParkedRun: async () =>
+          run({ status: "queued", version: 4, errorEvidenceRef: DISPATCH_REQUEUED_ONCE_REF }),
+      },
+      effects
+    );
+    await scoped.sweep({ businessId: "business-1", limit: 10 });
+    expect(calls).toEqual([{ businessId: "business-1", runId: "run-1" }]);
+  });
+
   it("reaches a safe Run after a full page of blocked candidates across a restart", async () => {
     const candidates = Array.from({ length: 26 }, (_, index) =>
       run({
@@ -245,13 +266,16 @@ describe("RunRecoveryManager", () => {
       },
     };
     const effects = {
-      list: async () =>
-        candidates.slice(0, 25).map((candidate) => ({
-          runId: candidate.id,
-          stateId: "write",
-          state: "ambiguous",
-          outputStored: false,
-        })),
+      listByRun: async (_businessId: string, runId: string) =>
+        candidates
+          .slice(0, 25)
+          .map((candidate) => ({
+            runId: candidate.id,
+            stateId: "write",
+            state: "ambiguous",
+            outputStored: false,
+          }))
+          .filter((effect) => effect.runId === runId),
     };
 
     await expect(

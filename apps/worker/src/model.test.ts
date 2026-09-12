@@ -72,6 +72,15 @@ const FINISH: StreamPart = {
   },
 };
 
+const OUTPUT_LIMIT_FINISH: StreamPart = {
+  type: "finish",
+  finishReason: { unified: "length", raw: "max_tokens" },
+  usage: {
+    inputTokens: { total: 11, noCache: 11, cacheRead: 0, cacheWrite: 0 },
+    outputTokens: { total: 4, text: 4, reasoning: 0 },
+  },
+};
+
 const request = (overrides: Partial<ModelInvocationRequest> = {}): ModelInvocationRequest => ({
   requestId: "request-1",
   modelProfileId: "claude-opus-5",
@@ -118,6 +127,86 @@ describe("LlmModelPort", () => {
 
     await expect(port.invoke(request())).resolves.toMatchObject({
       output: { kind: "text", text: "done" },
+    });
+  });
+
+  it("fails a streamed partial answer when the provider reaches its output-token limit", async () => {
+    const { port } = model([...textParts("t1", ["cut off"]), OUTPUT_LIMIT_FINISH]);
+    const stream = port.stream(request())[Symbol.asyncIterator]();
+
+    await expect(stream.next()).resolves.toEqual({
+      done: false,
+      value: { kind: "text_delta", text: "cut off" },
+    });
+    await expect(stream.next()).rejects.toMatchObject({
+      name: "ModelInvocationError",
+      reason: "model_error",
+      usage: { inputTokens: 11, outputTokens: 4 },
+    });
+    expect(port.latestModelCallReceipt()).toBeUndefined();
+  });
+
+  it("fails an invoked partial answer when the provider reaches its output-token limit", async () => {
+    const { port } = model([...textParts("t1", ["cut off"]), OUTPUT_LIMIT_FINISH]);
+
+    await expect(port.invoke(request())).rejects.toMatchObject({
+      name: "ModelInvocationError",
+      reason: "model_error",
+      usage: { inputTokens: 11, outputTokens: 4 },
+    });
+  });
+
+  it("fails structured output that only looks complete when the provider reaches its limit", async () => {
+    const schema = {
+      type: "object",
+      required: ["answer"],
+      properties: { answer: { type: "string" } },
+    };
+    const { port } = model([...textParts("t1", ['{"answer":"cut off"}']), OUTPUT_LIMIT_FINISH]);
+
+    await expect(port.invoke(request({ outputSchema: schema }))).rejects.toMatchObject({
+      name: "ModelInvocationError",
+      reason: "model_error",
+      usage: { inputTokens: 11, outputTokens: 4 },
+    });
+  });
+
+  it("keeps a valid Tool-call finish successful", async () => {
+    const { port } = model([
+      {
+        type: "tool-call",
+        toolCallId: "call-1",
+        toolName: "lookup",
+        input: JSON.stringify({ id: 7 }),
+      },
+      {
+        ...FINISH,
+        finishReason: { unified: "tool-calls", raw: "tool_use" },
+      },
+    ]);
+
+    await expect(port.invoke(request())).resolves.toMatchObject({
+      output: {
+        kind: "tool_calls",
+        calls: [{ callId: "call-1", name: "lookup", arguments: { id: 7 } }],
+      },
+    });
+  });
+
+  it("does not return Tool calls from an output-limited response", async () => {
+    const { port } = model([
+      {
+        type: "tool-call",
+        toolCallId: "call-1",
+        toolName: "lookup",
+        input: JSON.stringify({ id: 7 }),
+      },
+      OUTPUT_LIMIT_FINISH,
+    ]);
+
+    await expect(port.invoke(request())).rejects.toMatchObject({
+      name: "ModelInvocationError",
+      reason: "model_error",
     });
   });
 
@@ -1563,6 +1652,20 @@ describe("LlmModelPort — reporting spend", () => {
       status: "error",
       usage: { inputTokens: 900, outputTokens: 40 },
     });
+  });
+
+  it("reports an output-limited call as failed while preserving its billed usage", async () => {
+    const { calls, sink } = spy();
+    const port = portWith([...textParts("t1", ["cut off"]), OUTPUT_LIMIT_FINISH], sink);
+
+    await collect(port.stream(request())).catch(() => undefined);
+
+    expect(calls).toEqual([
+      expect.objectContaining({
+        status: "error",
+        usage: expect.objectContaining({ inputTokens: 11, outputTokens: 4 }),
+      }),
+    ]);
   });
 });
 

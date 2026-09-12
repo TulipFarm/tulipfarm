@@ -464,7 +464,7 @@ describe("streamRunEvents", () => {
 });
 
 describe("sinkFor", () => {
-  it("releases a backpressure wait when the client connection closes", async () => {
+  function rawSink() {
     const raw = new EventEmitter() as EventEmitter & {
       destroyed: boolean;
       write(chunk: string): boolean;
@@ -473,18 +473,43 @@ describe("sinkFor", () => {
     raw.destroyed = false;
     raw.write = () => false;
     raw.end = () => {};
-    const sink = sinkFor({ raw } as unknown as FastifyReply);
+    return { raw, sink: sinkFor({ raw } as unknown as FastifyReply) };
+  }
+
+  it.each(["close", "error"] as const)(
+    "releases a backpressure wait when the client connection emits %s",
+    async (eventName) => {
+      const { raw, sink } = rawSink();
+      let resolved = false;
+
+      void sink.waitForDrain().then(() => {
+        resolved = true;
+      });
+      raw.destroyed = true;
+      if (eventName === "error") raw.emit(eventName, new Error("disconnected"));
+      else raw.emit(eventName);
+      await Promise.resolve();
+
+      expect(resolved).toBe(true);
+      expect(raw.listenerCount("drain")).toBe(0);
+      expect(raw.listenerCount("close")).toBe(0);
+      expect(raw.listenerCount("error")).toBe(0);
+    }
+  );
+
+  it("releases disconnect listeners after a normal drain", async () => {
+    const { raw, sink } = rawSink();
     let resolved = false;
 
     void sink.waitForDrain().then(() => {
       resolved = true;
     });
-    raw.destroyed = true;
-    raw.emit("close");
+    raw.emit("drain");
     await Promise.resolve();
 
     expect(resolved).toBe(true);
     expect(raw.listenerCount("drain")).toBe(0);
     expect(raw.listenerCount("close")).toBe(0);
+    expect(raw.listenerCount("error")).toBe(0);
   });
 });

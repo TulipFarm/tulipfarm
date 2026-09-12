@@ -93,6 +93,7 @@ export interface EffectStore {
   ): Promise<ReserveEffectResult>;
   get(businessId: string, effectId: string): Promise<EffectRecord | undefined>;
   list(businessId: string): Promise<EffectRecord[]>;
+  listByRun(businessId: string, runId: string): Promise<EffectRecord[]>;
   transition(input: TransitionEffectInput): Promise<EffectRecord>;
   beginAttempt(businessId: string, effectId: string, startedAt: string): Promise<EffectAttempt>;
   resumeChildAttempt(
@@ -187,6 +188,12 @@ export class MemoryEffectStore implements EffectStore {
 
   async list(businessId: string): Promise<EffectRecord[]> {
     return [...this.records.values()].filter((record) => record.businessId === businessId);
+  }
+
+  async listByRun(businessId: string, runId: string): Promise<EffectRecord[]> {
+    return [...this.records.values()].filter(
+      (record) => record.businessId === businessId && record.runId === runId
+    );
   }
 
   async transition(input: TransitionEffectInput): Promise<EffectRecord> {
@@ -508,6 +515,21 @@ export class PgEffectStore implements EffectStore {
              ON intents.business_id = effects.business_id AND intents.intent_id = effects.intent_id
           WHERE effects.business_id = $1 ORDER BY effects.created_at, effects.effect_id`,
         [businessId]
+      );
+      return result.rows.map(fromRow);
+    });
+  }
+
+  listByRun(businessId: string, runId: string): Promise<EffectRecord[]> {
+    return this.transactions.withTransaction(async (transaction) => {
+      const result = await transaction.query<EffectRow>(
+        `SELECT effects.*, intents.normalized_intent
+           FROM effect_records effects
+           JOIN tool_intents intents
+             ON intents.business_id = effects.business_id AND intents.intent_id = effects.intent_id
+          WHERE effects.business_id = $1 AND effects.run_id = $2
+          ORDER BY effects.created_at, effects.effect_id`,
+        [businessId, runId]
       );
       return result.rows.map(fromRow);
     });

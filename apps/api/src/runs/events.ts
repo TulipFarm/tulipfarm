@@ -195,21 +195,29 @@ export function parseAfterCursor(
 
 export function sinkFor(reply: FastifyReply): SseSink {
   const raw = reply.raw;
+  let disconnected = raw.destroyed;
   return {
     get destroyed() {
-      return raw.destroyed;
+      return disconnected || raw.destroyed;
     },
     write: (chunk) => raw.write(chunk),
     waitForDrain: () => {
-      if (raw.destroyed) return Promise.resolve();
+      if (disconnected || raw.destroyed) return Promise.resolve();
       return new Promise((resolve) => {
         const done = () => {
           raw.off("drain", done);
-          raw.off("close", done);
+          raw.off("close", disconnect);
+          raw.off("error", disconnect);
           resolve();
         };
+        const disconnect = () => {
+          disconnected = true;
+          done();
+        };
         raw.once("drain", done);
-        raw.once("close", done);
+        raw.once("close", disconnect);
+        raw.once("error", disconnect);
+        if (raw.destroyed) disconnect();
       });
     },
     end: () => raw.end(),
@@ -228,7 +236,12 @@ export function registerRunEventRoutes(
   const rateLimitHook = rateLimiter
     ? makeRateLimitHook(
         rateLimiter,
-        (req) => `rl:run-events:${req.ip}`,
+        (req) => {
+          const principal = req.principal;
+          return principal
+            ? `rl:run-events:${principal.businessId}:${principal.kind}:${principal.id}`
+            : `rl:run-events:${req.ip}`;
+        },
         STREAM_LIMIT,
         STREAM_WINDOW_MS
       )
@@ -237,7 +250,7 @@ export function registerRunEventRoutes(
   app.get(
     "/api/v1/runs/:id/events",
     {
-      preHandler: rateLimitHook ? [rateLimitHook, requireAuth] : [requireAuth],
+      preHandler: rateLimitHook ? [requireAuth, rateLimitHook] : [requireAuth],
       schema: {
         description:
           "SSE stream of a Run's persisted events. Delivery resumes strictly after the cursor — " +

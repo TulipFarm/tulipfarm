@@ -80,7 +80,7 @@ export interface EffectDispatcherDeps {
   readonly mutationGuard?: MutationGuard;
   /** Identity the effect ledger does not carry, supplied by whoever composed the dispatcher. */
   readonly mutationIdentity?: MutationIdentity;
-  readonly wait?: (delayMs: number) => Promise<void>;
+  readonly wait?: (delayMs: number, abortSignal?: AbortSignal) => Promise<void>;
   readonly now?: () => string;
 }
 
@@ -119,12 +119,32 @@ async function withTimeout(
   }
 }
 
+class RetryWaitAbortedError extends Error {}
+
+function waitForDelay(delayMs: number, abortSignal?: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (abortSignal?.aborted) {
+      reject(new RetryWaitAbortedError());
+      return;
+    }
+    const timer = setTimeout(() => {
+      abortSignal?.removeEventListener("abort", abort);
+      resolve();
+    }, delayMs);
+    const abort = () => {
+      clearTimeout(timer);
+      reject(new RetryWaitAbortedError());
+    };
+    abortSignal?.addEventListener("abort", abort, { once: true });
+  });
+}
+
 export class EffectDispatcher {
-  private readonly wait: (delayMs: number) => Promise<void>;
+  private readonly wait: (delayMs: number, abortSignal?: AbortSignal) => Promise<void>;
   private readonly now: () => string;
 
   constructor(private readonly deps: EffectDispatcherDeps) {
-    this.wait = deps.wait ?? (() => Promise.resolve());
+    this.wait = deps.wait ?? waitForDelay;
     this.now = deps.now ?? (() => new Date().toISOString());
   }
 
@@ -135,6 +155,9 @@ export class EffectDispatcher {
   ): Promise<unknown> {
     const effect = await this.deps.store.get(businessId, effectId);
     if (effect === undefined) throw new ToolDispatchError("effect_not_found", effectId);
+    if (effect.state === "ambiguous" || effect.state === "reconciliation_required") {
+      throw new ToolDispatchError("ambiguous", effectId);
+    }
     const contract = this.deps.catalog.get(effect.intent.toolId, effect.intent.toolVersion);
     if (contract === undefined) throw new ToolDispatchError("contract_not_found", effectId);
     const adapter = this.deps.adapters.get(contract.adapter.ref);
@@ -197,16 +220,21 @@ export class EffectDispatcher {
           abortSignal
         );
         if (!validateOutput(output)) {
+          const uncertainMutation = contract.mutating;
           await this.deps.store.finishAttempt({
             businessId,
             effectId,
             attempt: attemptNumber,
-            attemptState: "failed",
-            effectState: "failed",
+            attemptState: uncertainMutation ? "ambiguous" : "failed",
+            effectState: uncertainMutation ? "ambiguous" : "failed",
             errorCode: "invalid_output",
             finishedAt: this.now(),
           });
-          throw new ToolDispatchError("invalid_output", effectId);
+          throw new ToolDispatchError(
+            uncertainMutation ? "ambiguous" : "invalid_output",
+            effectId,
+            "invalid_output"
+          );
         }
         await this.deps.store.finishAttempt({
           businessId,
@@ -237,7 +265,17 @@ export class EffectDispatcher {
         });
         if (ambiguous) throw new ToolDispatchError("ambiguous", effectId);
         if (!retry) throw new ToolDispatchError("dispatch_failed", effectId, error.code);
-        await this.wait(retryDelayMs(attemptNumber));
+        try {
+          await this.wait(retryDelayMs(attemptNumber), abortSignal);
+        } catch (waitError) {
+          if (waitError instanceof RetryWaitAbortedError || abortSignal?.aborted) {
+            throw new ToolDispatchError("dispatch_failed", effectId, "dispatch_cancelled");
+          }
+          throw waitError;
+        }
+        if (abortSignal?.aborted) {
+          throw new ToolDispatchError("dispatch_failed", effectId, "dispatch_cancelled");
+        }
       }
     }
   }

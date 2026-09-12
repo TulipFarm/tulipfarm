@@ -43,6 +43,8 @@ reconciliation, turn execution, delivery classification, projections, and outbox
 - Never migrate here; API owns `schema_version`; raise `REQUIRED_SCHEMA_VERSION` when needed.
 - Boot fails closed with `process.exit(1)`; unsafe drain timeout exits non-zero.
 - Leases/CAS are the only claim; recover expired leases, never force statuses.
+- Run admission starts each claimed Run independently, without a fixed active-Run cap. Database
+  work remains bounded per poll, and shutdown waits for every admitted executor to settle.
 - Each claim increments `lease_generation`; Agent-loop checkpoint writes use that generation, and
   terminal delivery retires only after its event is acknowledged. Retryable Routine attempts keep
   transcript, counters, and an acknowledged attempt offset so crashes do not repeat Tools or event

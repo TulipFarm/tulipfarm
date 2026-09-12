@@ -12,6 +12,7 @@ import {
   priceCall,
 } from "@tulipfarm/llm";
 import {
+  assertModelOutputComplete,
   splitPrompt,
   stablePrefixChars,
   toOutput,
@@ -21,7 +22,7 @@ import {
 } from "@tulipfarm/model-adapter";
 import type { EffortRung, ProviderEntry } from "@tulipfarm/schema";
 import type { SecretsService } from "@tulipfarm/secrets";
-import { type LanguageModel, streamText } from "ai";
+import { type FinishReason, type LanguageModel, streamText } from "ai";
 import type { EvalCase } from "./case.ts";
 import type { ModelBinding } from "./runner.ts";
 
@@ -342,6 +343,8 @@ async function invokeOnce(
       maxRetries: 0,
     });
 
+    let finishReason: FinishReason | undefined;
+    let rawFinishReason: string | undefined;
     let streamError: Error | undefined;
     for await (const part of result.fullStream) {
       if (part.type === "error") {
@@ -351,11 +354,20 @@ async function invokeOnce(
         continue;
       }
       if (part.type === "finish-step") observed.add(part.usage);
+      if (part.type === "finish") {
+        finishReason = part.finishReason;
+        rawFinishReason = part.rawFinishReason;
+      }
     }
     if (streamError !== undefined) throw streamError;
 
     const [calls, text, usage] = await Promise.all([result.toolCalls, result.text, result.usage]);
     const settled = observed.settle(price);
+    const finalUsage = settled ?? {
+      inputTokens: usage.inputTokens ?? 0,
+      outputTokens: usage.outputTokens ?? 0,
+      ...basis(price(usage.inputTokens ?? 0, usage.outputTokens ?? 0)),
+    };
     // Only a *reported* version is worth recording. The SDK seeds the response id from the id we
     // asked for, so a provider that never emits `response-metadata` — which both vendor CLIs do
     // not — would otherwise have its echo rendered as confirmation. Printing `version=sonnet`
@@ -365,6 +377,7 @@ async function invokeOnce(
     if (responseModelId !== undefined && responseModelId !== pinned.model) {
       onVersion(responseModelId);
     }
+    assertModelOutputComplete({ finishReason, rawFinishReason, usage: finalUsage });
 
     return {
       requestId: request.requestId,
@@ -372,16 +385,12 @@ async function invokeOnce(
       // Priced through the same authority as the settled path. Hardcoding `unpriced` here would
       // report a seat's zero marginal cost as an unknown one, which is the collapse the spend
       // ledger exists to prevent.
-      usage: settled ?? {
-        inputTokens: usage.inputTokens ?? 0,
-        outputTokens: usage.outputTokens ?? 0,
-        ...basis(price(usage.inputTokens ?? 0, usage.outputTokens ?? 0)),
-      },
+      usage: finalUsage,
     };
   } catch (error) {
     const partial = observed.settle(price);
     throw error instanceof ModelInvocationError
-      ? new ModelInvocationError(error.reason, error.cause, partial)
+      ? new ModelInvocationError(error.reason, error.cause, partial ?? error.usage, error.modelId)
       : new ModelInvocationError(classifyProviderError(error), error, partial);
   }
 }
