@@ -32,7 +32,7 @@ function persistedRun(overrides: Partial<PersistedRun> = {}): PersistedRun {
 
 class FakeRunStore implements RunLeaseStore {
   releaseCalls: { status: PersistedRunStatus }[] = [];
-  claimBatchResult: readonly PersistedRun[] = [];
+  claimBatchResult: PersistedRun[] = [];
 
   async transitionRun(
     _businessId: string,
@@ -63,8 +63,12 @@ class FakeRunStore implements RunLeaseStore {
     return [];
   }
 
-  async claimNextQueued(): Promise<readonly PersistedRun[]> {
-    return this.claimBatchResult;
+  async claimNextQueued(
+    _businessId: string,
+    _owner: string,
+    input: { limit: number }
+  ): Promise<readonly PersistedRun[]> {
+    return this.claimBatchResult.splice(0, input.limit);
   }
 
   async find(_businessId: string, runId: string): Promise<PersistedRun | null> {
