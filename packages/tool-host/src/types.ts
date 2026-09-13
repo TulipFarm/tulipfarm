@@ -67,11 +67,16 @@ export function isIndeterminateFault(code: ToolErrorCode): boolean {
  *
  * `kind` leaves room for future park reasons without reopening this contract.
  */
-export interface ToolPark {
-  readonly kind: "child_run";
-  readonly childRunId: string;
-  readonly waitId: string;
-}
+export type ToolPark =
+  | {
+      readonly kind: "child_run";
+      readonly childRunId: string;
+      readonly waitId: string;
+    }
+  | {
+      readonly kind: "retry_wait";
+      readonly waitId: string;
+    };
 
 /**
  * A Tool call's verdict. Unchanged for the overwhelming majority of Tools, which cannot park.
@@ -181,6 +186,8 @@ export interface RequestContext {
    * own sealed credential instead.
    */
   credentialPrincipal?: { readonly kind: string; readonly id: string };
+  /** Immutable host-prepared dispatch binding. Never reconstructed from model arguments. */
+  toolIntent?: ToolIntent;
 }
 
 /**
@@ -249,5 +256,6 @@ import type {
   SurfaceComponentDefinition,
   SurfaceRendererManifest,
 } from "@tulipfarm/surface";
+import type { ToolIntent } from "@tulipfarm/tool-broker";
 import type { ApiToolDefinition } from "./define";
 import type { SurfaceActionStore, SurfaceArtifactStore } from "./surface-ports";

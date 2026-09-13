@@ -3,7 +3,11 @@ export type {
   ApprovalBindingInput,
   ApprovalIntent,
 } from "./approval/binding";
-export { bindingsMatch, computeApprovalBinding } from "./approval/binding";
+export {
+  approvalIntentDigest,
+  bindingsMatch,
+  computeApprovalBinding,
+} from "./approval/binding";
 export type {
   ApprovalApprover,
   ApprovalDecisionRecord,

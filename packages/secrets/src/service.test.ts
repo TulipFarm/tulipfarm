@@ -90,7 +90,10 @@ describe("SecretsService", () => {
   it("keeps its receiver when a Connection lease reads revision and plaintext", async () => {
     const service = new SecretsService(new FakeRepo(), makeDek());
     const secretRef = "secret://00000000-0000-4000-8000-000000000001" as const;
-    await service.set(secretStorageKey(secretRef), "connection-secret");
+    const storageKey = secretStorageKey(secretRef);
+    await service.set(storageKey, "connection-secret");
+    const credentialRevision = await service.revision(storageKey);
+    if (credentialRevision === null) throw new Error("missing credential revision");
     const broker = new SecretBroker({
       provider: secretsServiceProvider(service),
       authorizer: { authorize: () => ({ allowed: true }) },
@@ -98,10 +101,17 @@ describe("SecretsService", () => {
     const lease = await broker.leaseConnection({
       scope: {
         secretRef,
+        businessId: "business-1",
         connectionId: "connection-1",
         credentialSlot: "access",
+        credentialRevision,
         toolId: "oim.calendar.v2.events.list",
         integrationId: "calendar",
+        integrationMajorVersion: 2,
+        operationId: "events-list",
+        identityMode: "shared_only",
+        manifestDigest: "manifest-digest",
+        configurationDigest: "configuration-digest",
         runId: "run-1",
         purpose: "read calendar",
       },

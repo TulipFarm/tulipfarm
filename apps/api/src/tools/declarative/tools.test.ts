@@ -382,7 +382,7 @@ describe("buildDeclarativeTools", () => {
 
     const result = await tools[0]?.execute({ page_id: "p1" }, CTX);
 
-    if (!result.success) throw new Error(JSON.stringify(result.error));
+    if (result?.success !== true) throw new Error(JSON.stringify(result));
     expect(http.sent[0]?.headers.Authorization).toBe("Bearer tok-eu");
   });
 

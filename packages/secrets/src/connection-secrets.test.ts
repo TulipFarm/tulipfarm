@@ -47,13 +47,20 @@ function harness() {
   return { broker, manager, values };
 }
 
-function scope(secretRef: `secret://${string}`, credentialSlot: string) {
+function scope(secretRef: `secret://${string}`, credentialSlot: string, credentialRevision = "1") {
   return {
     secretRef,
+    businessId: "business-1",
     connectionId: CONNECTION_ID,
     credentialSlot,
+    credentialRevision,
     toolId: "oim.calendar.v2.events.list",
     integrationId: "calendar",
+    integrationMajorVersion: 2,
+    operationId: "events-list",
+    identityMode: "shared_only",
+    manifestDigest: "manifest-digest",
+    configurationDigest: "configuration-digest",
     runId: "run-1",
     purpose: "read calendar",
   } as const;
@@ -81,7 +88,7 @@ describe("Connection Secret leases", () => {
       },
     });
     const connection = await broker.leaseConnection({
-      scope: scope(ACCESS_REF, "access"),
+      scope: scope(ACCESS_REF, "access", "7"),
     });
 
     await expect(legacy.use((plaintext) => plaintext === "legacy-cached")).resolves.toBe(true);
@@ -102,6 +109,28 @@ describe("Connection Secret leases", () => {
     await manager.rotate(ACCESS_REF, "new-access");
 
     await expect(lease.use(() => "used")).rejects.toMatchObject({ reason: "revoked" });
+  });
+
+  it("reauthorizes the live Connection before plaintext redemption", async () => {
+    const values = new Map([[secretStorageKey(ACCESS_REF), { value: "access", revision: "1" }]]);
+    const authorize = vi
+      .fn()
+      .mockReturnValueOnce({ allowed: true })
+      .mockReturnValueOnce({ allowed: false, reason: "revoked" });
+    const broker = new SecretBroker({
+      provider: {
+        resolveCurrent: async () => ({ value: "access", version: "1" }),
+        resolveUncached: async () => ({ value: "access", version: "1" }),
+        currentVersion: async () => values.get(secretStorageKey(ACCESS_REF))?.revision ?? null,
+      },
+      authorizer: { authorize },
+    });
+    const lease = await broker.leaseConnection({
+      scope: scope(ACCESS_REF, "access"),
+    });
+
+    await expect(lease.use(() => "must-not-run")).rejects.toMatchObject({ reason: "revoked" });
+    expect(authorize).toHaveBeenCalledTimes(2);
   });
 
   it("revokes every bound lease when the Connection is revoked", async () => {

@@ -207,6 +207,8 @@ export interface ScriptedToolResult {
   readonly approvalId?: string;
   /** Present to script a Tool that fails, so refusal and recovery behaviour can be measured. */
   readonly error?: string;
+  /** Present when the Tool already registered the durable provider retry timer for this call. */
+  readonly retryWaitId?: string;
   /**
    * Present to script a Tool that rejects the call's arguments. Distinct from `error`: only this
    * outcome reaches the loop's repair path, so it is the only way a Case can measure what the

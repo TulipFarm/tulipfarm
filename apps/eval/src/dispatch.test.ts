@@ -40,4 +40,23 @@ describe("scripted Tool results", () => {
       },
     ]);
   });
+
+  it("returns the durable provider retry wait without inventing a Tool result", async () => {
+    const tools = toolDispatcher({
+      ...evalCase,
+      toolResults: [{ name: "send_message", retryWaitId: "wait-retry-1" }],
+    });
+
+    await expect(
+      tools.port.dispatch({
+        callId: "call-retry",
+        name: "send_message",
+        arguments: { text: "hello" },
+      })
+    ).resolves.toEqual({
+      status: "awaiting_retry",
+      callId: "call-retry",
+      waitId: "wait-retry-1",
+    });
+  });
 });

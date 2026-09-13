@@ -82,6 +82,13 @@ export type AgentStateResult =
       /** The Tool call being held, so a reader can show the child against that call. */
       readonly callId: string;
     }
+  | {
+      readonly status: "waiting";
+      readonly reason: "provider_retry_wait";
+      readonly waitId: string;
+      /** The Tool call replayed after the provider timer resolves. */
+      readonly callId: string;
+    }
   | { readonly status: "input_required"; readonly text: string }
   | { readonly status: "cancelled" }
   | { readonly status: "terminal_event_pending" }
@@ -171,6 +178,15 @@ export class AgentStateRunner {
           reason: "child_running",
           waitId: outcome.waitId,
           childRunId: outcome.childRunId,
+          callId: outcome.callId,
+        };
+
+      case "awaiting_retry":
+        await this.move(request, "running", "waiting", "provider_retry_wait");
+        return {
+          status: "waiting",
+          reason: "provider_retry_wait",
+          waitId: outcome.waitId,
           callId: outcome.callId,
         };
 

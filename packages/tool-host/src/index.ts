@@ -109,8 +109,10 @@ export type {
   SurfacePresentationPort,
   ToolApprovalDecision,
   ToolApprovalPort,
+  ToolCallPreparationPort,
   ToolVisibilityPort,
 } from "./ports";
+export { ToolPreparationDeniedError } from "./ports";
 export { type AuthorityPrincipal, principalKindOf } from "./principal";
 export {
   type ChatRequestPayload,

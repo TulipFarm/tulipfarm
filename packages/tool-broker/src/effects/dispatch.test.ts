@@ -4,7 +4,10 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ToolCatalog } from "../catalog";
 import {
   AdapterDispatchError,
+  EffectDispatchDeferredError,
   EffectDispatcher,
+  type EffectRetryParker,
+  type EffectRetryWaitReader,
   type ToolAdapter,
   ToolDispatchError,
 } from "./dispatch";
@@ -61,6 +64,7 @@ function reservation(): ReserveEffectInput {
       businessId: BUSINESS_ID,
       runId: "11111111-1111-4111-8111-111111111111",
       stateId: "label",
+      runStateId: "agent-state-1",
       toolId: "github.issue.label",
       toolVersion: "1.0.0",
       action: "issue.label",
@@ -123,6 +127,222 @@ describe("EffectDispatcher", () => {
     expect(keys).toEqual(["stable-effect-key", "stable-effect-key"]);
     expect(wait).toHaveBeenCalledWith(100, undefined);
     expect(await store.listAttempts(BUSINESS_ID, EFFECT_ID)).toHaveLength(2);
+  });
+
+  it("parks a provider Retry-After instead of sleeping or replaying in-process", async () => {
+    const adapter: ToolAdapter = {
+      kind: "integration",
+      dispatch: vi.fn(async () => {
+        throw new AdapterDispatchError(
+          "before_dispatch",
+          "provider_rate_limited",
+          true,
+          undefined,
+          45_000
+        );
+      }),
+    };
+    const parkRetry = vi.fn(async () => ({ waitId: "wait-1" }));
+    const wait = vi.fn(async () => undefined);
+
+    await expect(
+      dispatcher(adapter, wait, definition, parkRetry).dispatch(BUSINESS_ID, EFFECT_ID)
+    ).rejects.toEqual(
+      new EffectDispatchDeferredError({
+        businessId: BUSINESS_ID,
+        effectId: EFFECT_ID,
+        runId: reservation().runId,
+        stateId: "agent-state-1",
+        attempt: 1,
+        reason: "provider_rate_limited",
+        delayMs: 45_000,
+        notBefore: "2026-07-25T00:00:46.000Z",
+        waitId: "wait-1",
+      })
+    );
+
+    expect(adapter.dispatch).toHaveBeenCalledTimes(1);
+    expect(parkRetry).toHaveBeenCalledTimes(1);
+    expect(parkRetry).toHaveBeenCalledWith(expect.objectContaining({ stateId: "agent-state-1" }));
+    expect(wait).not.toHaveBeenCalled();
+    expect(await store.get(BUSINESS_ID, EFFECT_ID)).toMatchObject({ state: "authorized" });
+  });
+
+  it("keeps a restarted duplicate parked until its durable retry wait is ready", async () => {
+    const adapter: ToolAdapter = {
+      kind: "integration",
+      dispatch: vi
+        .fn()
+        .mockRejectedValueOnce(
+          new AdapterDispatchError(
+            "before_dispatch",
+            "provider_rate_limited",
+            true,
+            undefined,
+            45_000
+          )
+        )
+        .mockResolvedValueOnce({ providerId: "external-42" }),
+    };
+    let waitStatus = "pending" as "pending" | "ready";
+    const retryWaitStatus: EffectRetryWaitReader = async () => ({
+      status: waitStatus,
+      waitId: "wait-1",
+      notBefore: "2026-07-25T00:00:46.000Z",
+    });
+    const deps = {
+      store,
+      catalog: ToolCatalog.load([definition]),
+      adapters: new Map([["github", adapter]]),
+      parkRetry: async () => ({ waitId: "wait-1" }),
+      retryWaitStatus,
+      now: () => "2026-07-25T00:00:01.000Z",
+    };
+
+    await expect(new EffectDispatcher(deps).dispatch(BUSINESS_ID, EFFECT_ID)).rejects.toMatchObject(
+      {
+        deferred: { waitId: "wait-1" },
+      }
+    );
+    await expect(new EffectDispatcher(deps).dispatch(BUSINESS_ID, EFFECT_ID)).rejects.toMatchObject(
+      {
+        deferred: { waitId: "wait-1" },
+      }
+    );
+    expect(adapter.dispatch).toHaveBeenCalledTimes(1);
+
+    waitStatus = "ready";
+    await expect(new EffectDispatcher(deps).dispatch(BUSINESS_ID, EFFECT_ID)).resolves.toEqual({
+      providerId: "external-42",
+    });
+    expect(adapter.dispatch).toHaveBeenCalledTimes(2);
+  });
+
+  it("recovers a persisted retry wait when the process crashes before attempt completion", async () => {
+    const adapter: ToolAdapter = {
+      kind: "integration",
+      dispatch: vi.fn(async () => {
+        throw new AdapterDispatchError(
+          "before_dispatch",
+          "provider_rate_limited",
+          true,
+          undefined,
+          45_000
+        );
+      }),
+    };
+    const parkRetry = vi.fn(async () => ({ waitId: "wait-1" }));
+    const finish = vi.spyOn(store, "finishAttempt").mockRejectedValueOnce(new Error("crash"));
+    await expect(
+      new EffectDispatcher({
+        store,
+        catalog: ToolCatalog.load([definition]),
+        adapters: new Map([["github", adapter]]),
+        parkRetry,
+        now: () => "2026-07-25T00:00:01.000Z",
+      }).dispatch(BUSINESS_ID, EFFECT_ID)
+    ).rejects.toThrow("crash");
+    finish.mockRestore();
+    expect(await store.get(BUSINESS_ID, EFFECT_ID)).toMatchObject({ state: "dispatched" });
+
+    await expect(
+      new EffectDispatcher({
+        store,
+        catalog: ToolCatalog.load([definition]),
+        adapters: new Map([["github", adapter]]),
+        retryWaitStatus: async () => ({
+          status: "pending",
+          waitId: "wait-1",
+          notBefore: "2026-07-25T00:00:46.000Z",
+        }),
+        now: () => "2026-07-25T00:00:02.000Z",
+      }).dispatch(BUSINESS_ID, EFFECT_ID)
+    ).rejects.toMatchObject({ deferred: { waitId: "wait-1" } });
+    expect(await store.get(BUSINESS_ID, EFFECT_ID)).toMatchObject({ state: "authorized" });
+    expect(adapter.dispatch).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not reconcile a live dispatch but fences a stale orphan", async () => {
+    await store.beginAttempt(BUSINESS_ID, EFFECT_ID, "2026-07-25T00:00:01.000Z");
+    const adapter: ToolAdapter = {
+      kind: "integration",
+      dispatch: vi.fn(async () => ({ providerId: "must-not-run" })),
+    };
+
+    await expect(
+      new EffectDispatcher({
+        store,
+        catalog: ToolCatalog.load([definition]),
+        adapters: new Map([["github", adapter]]),
+        now: () => "2026-07-25T00:00:30.000Z",
+      }).dispatch(BUSINESS_ID, EFFECT_ID)
+    ).rejects.toEqual(new ToolDispatchError("dispatch_in_progress", EFFECT_ID));
+    expect(await store.get(BUSINESS_ID, EFFECT_ID)).toMatchObject({ state: "dispatched" });
+
+    await expect(
+      new EffectDispatcher({
+        store,
+        catalog: ToolCatalog.load([definition]),
+        adapters: new Map([["github", adapter]]),
+        now: () => "2026-07-25T00:02:00.000Z",
+      }).dispatch(BUSINESS_ID, EFFECT_ID)
+    ).rejects.toEqual(new ToolDispatchError("ambiguous", EFFECT_ID));
+    expect(await store.get(BUSINESS_ID, EFFECT_ID)).toMatchObject({
+      state: "reconciliation_required",
+    });
+    expect(adapter.dispatch).not.toHaveBeenCalled();
+  });
+
+  it("parks computed backoff when a durable retry host is available", async () => {
+    const adapter: ToolAdapter = {
+      kind: "integration",
+      dispatch: vi.fn(async () => {
+        throw new AdapterDispatchError("before_dispatch", "provider_unavailable", true);
+      }),
+    };
+    const parkRetry = vi.fn(async () => ({ waitId: "wait-1" }));
+    const wait = vi.fn(async () => undefined);
+
+    await expect(
+      dispatcher(adapter, wait, definition, parkRetry).dispatch(BUSINESS_ID, EFFECT_ID)
+    ).rejects.toMatchObject({
+      deferred: {
+        stateId: "agent-state-1",
+        reason: "provider_unavailable",
+        delayMs: 100,
+        waitId: "wait-1",
+      },
+    });
+    expect(parkRetry).toHaveBeenCalledTimes(1);
+    expect(wait).not.toHaveBeenCalled();
+  });
+
+  it("fails closed when Retry-After has no durable wait host", async () => {
+    const readDefinition: ToolContractDefinition = {
+      ...definition,
+      spec: { ...definition.spec, mutating: false },
+    };
+    const adapter: ToolAdapter = {
+      kind: "integration",
+      dispatch: vi.fn(async () => {
+        throw new AdapterDispatchError(
+          "before_dispatch",
+          "provider_rate_limited",
+          true,
+          undefined,
+          45_000
+        );
+      }),
+    };
+
+    await expect(
+      dispatcher(adapter, undefined, readDefinition).dispatch(BUSINESS_ID, EFFECT_ID)
+    ).rejects.toEqual(
+      new ToolDispatchError("retry_wait_unavailable", EFFECT_ID, "provider_rate_limited")
+    );
+
+    expect(adapter.dispatch).toHaveBeenCalledTimes(1);
+    expect(await store.get(BUSINESS_ID, EFFECT_ID)).toMatchObject({ state: "failed" });
   });
 
   it("uses a real bounded delay on the production retry path", async () => {
@@ -273,7 +493,7 @@ describe("EffectDispatcher", () => {
       businessId: BUSINESS_ID,
       mutation: true,
       runId: reservation().runId,
-      stateId: reservation().stateId,
+      stateId: "agent-state-1",
       effectId: EFFECT_ID,
       toolId: definition.spec.toolId,
       provider: definition.spec.adapter.ref,
@@ -358,13 +578,15 @@ describe("EffectDispatcher", () => {
   function dispatcher(
     adapter: ToolAdapter,
     wait?: (delayMs: number) => Promise<void>,
-    contractDefinition: ToolContractDefinition = definition
+    contractDefinition: ToolContractDefinition = definition,
+    parkRetry?: EffectRetryParker
   ) {
     return new EffectDispatcher({
       store,
       catalog: ToolCatalog.load([contractDefinition]),
       adapters: new Map([["github", adapter]]),
       wait,
+      parkRetry,
       now: () => "2026-07-25T00:00:01.000Z",
     });
   }

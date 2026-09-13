@@ -15,6 +15,7 @@ import {
   INVOCATION_REQUEST_SCHEMAS,
 } from "@tulipfarm/schema";
 import { ArtifactStore, RunStore, type TransactionPort, WaitStore } from "@tulipfarm/storage";
+import { normalizeToolIntent } from "@tulipfarm/tool-broker";
 import { ApprovalsRepo, ToolApprovalService } from "@tulipfarm/tool-host";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { ambientTransactionPort, type Queryable, transactionPort } from "../db";
@@ -106,14 +107,53 @@ describe("tool approvals as durable waits", () => {
       expectedStatus: state?.status ?? "ready",
       status: "waiting",
     });
+    const run = await runs.find(DEPLOYMENT_BUSINESS_ID, runId);
+    if (run === null) throw new Error("expected Run");
     await runs.transitionRun(DEPLOYMENT_BUSINESS_ID, runId, {
-      expectedVersion: 2,
+      expectedVersion: run.version,
       expectedStatus: "running",
       status: "waiting",
       leaseOwner: null,
       leaseExpiresAt: null,
     });
     return registered;
+  }
+
+  async function resumeRunning(runId: string): Promise<void> {
+    const run = await runs.find(DEPLOYMENT_BUSINESS_ID, runId);
+    if (run === null) throw new Error("expected Run");
+    await runs.transitionRun(DEPLOYMENT_BUSINESS_ID, runId, {
+      expectedVersion: run.version,
+      expectedStatus: "queued",
+      status: "claimed",
+      leaseOwner: "worker-2",
+      leaseExpiresAt: new Date(Date.now() + 60_000).toISOString(),
+    });
+    await runs.transitionRun(DEPLOYMENT_BUSINESS_ID, runId, {
+      expectedVersion: run.version + 1,
+      expectedStatus: "claimed",
+      status: "running",
+      leaseOwner: "worker-2",
+      leaseExpiresAt: new Date(Date.now() + 60_000).toISOString(),
+    });
+
+    const state = await runs.findState(DEPLOYMENT_BUSINESS_ID, runId, STATE_KEY);
+    if (state === null) throw new Error("expected State");
+    await runs.transitionState(DEPLOYMENT_BUSINESS_ID, runId, STATE_KEY, {
+      expectedVersion: state.version,
+      expectedStatus: "waiting",
+      status: "ready",
+    });
+    await runs.transitionState(DEPLOYMENT_BUSINESS_ID, runId, STATE_KEY, {
+      expectedVersion: state.version + 1,
+      expectedStatus: "ready",
+      status: "claimed",
+    });
+    await runs.transitionState(DEPLOYMENT_BUSINESS_ID, runId, STATE_KEY, {
+      expectedVersion: state.version + 2,
+      expectedStatus: "claimed",
+      status: "running",
+    });
   }
 
   async function requestApproval(
@@ -143,6 +183,52 @@ describe("tool approvals as durable waits", () => {
     return Number(rows[0]?.count ?? "0");
   }
 
+  function concurrentApprovalTransactions(): TransactionPort {
+    // PGlite serializes transactions, so this adapter exposes the race while preserving the
+    // lifetime and exclusion semantics of PostgreSQL's transaction-scoped advisory lock.
+    let lockTail = Promise.resolve();
+    let concurrentReads = 0;
+    let releaseReads: (() => void) | undefined;
+    const readsReady = new Promise<void>((resolve) => {
+      releaseReads = resolve;
+    });
+
+    return {
+      withTransaction: async (operation) => {
+        let releaseLock: (() => void) | undefined;
+        let holdsLock = false;
+        const queryable = {
+          query: async (text: string, params?: readonly unknown[]) => {
+            if (text.includes("pg_advisory_xact_lock")) {
+              const previous = lockTail;
+              lockTail = new Promise<void>((resolve) => {
+                releaseLock = resolve;
+              });
+              await previous;
+              holdsLock = true;
+              return { rows: [{ pg_advisory_xact_lock: "" }] };
+            }
+            const result = await (db as unknown as Queryable).query(text, params);
+            if (
+              !holdsLock &&
+              text.includes("COALESCE(payload->>'requestDigest', payload->>'intentDigest')")
+            ) {
+              concurrentReads += 1;
+              if (concurrentReads === 2) releaseReads?.();
+              await readsReady;
+            }
+            return result;
+          },
+        } as Queryable;
+        try {
+          return await operation(queryable);
+        } finally {
+          releaseLock?.();
+        }
+      },
+    };
+  }
+
   it("parks the Run and resumes the same runId, minting no second Run", async () => {
     const runId = await startRunningRun();
     const { approvalId } = await requestApproval(runId);
@@ -170,6 +256,92 @@ describe("tool approvals as durable waits", () => {
     expect(await countRuns()).toBe(1);
     expect(await runs.findState(DEPLOYMENT_BUSINESS_ID, runId, STATE_KEY)).toMatchObject({
       status: "waiting",
+    });
+  });
+
+  it("reloads the exact prepared Tool intent after the approval service restarts", async () => {
+    const runId = await startRunningRun();
+    const intent = normalizeToolIntent({
+      intentId: "intent-1",
+      businessId: DEPLOYMENT_BUSINESS_ID,
+      runId,
+      stateId: "chat:call-1",
+      toolId: "oim.acme.v1.send",
+      toolVersion: "1",
+      action: "acme.send",
+      targetRefs: [{ type: "platform.file", id: "file-1" }],
+      arguments: { body: { fileId: "file-1" } },
+      filePrincipalId: "user-1",
+      fileIds: ["file-1"],
+      agentPrincipalId: "agent-1",
+      principalKind: "user",
+      principalId: "user-1",
+      integrationId: "acme",
+      integrationMajorVersion: 1,
+      operationId: "send",
+      manifestDigest: "a".repeat(64),
+      configurationDigest: "b".repeat(64),
+      destination: "https://api.acme.test",
+      credentialRef: "secret://00000000-0000-4000-8000-000000000001",
+      connection: {
+        connectionId: "connection-1",
+        integrationId: "acme",
+        integrationMajorVersion: 1,
+        operationId: "send",
+        credentialSlot: "token",
+        credentialRevision: "7",
+        identityMode: "personal_required",
+        principalKind: "user",
+        principalId: "user-1",
+        manifestDigest: "a".repeat(64),
+        configurationDigest: "b".repeat(64),
+      },
+      idempotencyKey: "idempotency-1",
+    });
+    await approvals.decide({
+      businessId: DEPLOYMENT_BUSINESS_ID,
+      runId,
+      toolCallId: "call-1",
+      toolName: "acme_send",
+      args: { body: { fileId: "file-1" }, connection_id: "connection-1" },
+      requesterPrincipalId: "user:user-1",
+      demand: {
+        demandedBy: "guardrail_rule",
+        guardrailRevision: "gr-1",
+        reason: "approval_required",
+      },
+      intent,
+    });
+
+    const restarted = new ToolApprovalService({ transactions });
+    await expect(
+      restarted.findIntent({
+        runId,
+        toolCallId: "call-1",
+        toolName: "acme_send",
+        args: { body: { fileId: "file-1" }, connection_id: "connection-1" },
+      })
+    ).resolves.toEqual(intent);
+    const changedIntent = await restarted.decide({
+      businessId: DEPLOYMENT_BUSINESS_ID,
+      runId,
+      toolCallId: "call-1",
+      toolName: "acme_send",
+      args: { body: { fileId: "file-1" }, connection_id: "connection-1" },
+      requesterPrincipalId: "user:user-1",
+      demand: {
+        demandedBy: "guardrail_rule",
+        guardrailRevision: "gr-1",
+        reason: "approval_required",
+      },
+      intent: { ...intent, destination: "https://redirected.example" },
+    });
+    expect(changedIntent.status).toBe("pending");
+    if (changedIntent.status !== "pending") throw new Error("expected replacement approval");
+    expect(await repo.findById(changedIntent.approvalId)).toMatchObject({
+      payload: {
+        intent: { destination: "https://redirected.example" },
+      },
     });
   });
 
@@ -203,6 +375,183 @@ describe("tool approvals as durable waits", () => {
     ).toEqual({ status: "approved", approvalId });
 
     expect((await repo.listPending("tool_call")).length).toBe(0);
+  });
+
+  it("supersedes an approval when the live Guardrail revision changes", async () => {
+    const runId = await startRunningRun();
+    const { approvalId: oldApprovalId } = await requestApproval(runId, "call-1");
+    await park(runId, oldApprovalId);
+    await approvals.signal({
+      businessId: DEPLOYMENT_BUSINESS_ID,
+      approvalId: oldApprovalId,
+      decision: "approved",
+      principal: PRINCIPAL,
+    });
+    await resumeRunning(runId);
+
+    const changedRevision = await approvals.decide({
+      businessId: DEPLOYMENT_BUSINESS_ID,
+      runId,
+      toolCallId: "call-2",
+      toolName: "record_delete",
+      args: { id: "record-1" },
+      requesterPrincipalId: "user:requester-1",
+      demand: {
+        demandedBy: "guardrail_rule",
+        guardrailRevision: "gr-2",
+        reason: "approval_required",
+        ruleId: "rule-1",
+      },
+    });
+    expect(changedRevision.status).toBe("pending");
+    if (changedRevision.status !== "pending") throw new Error("expected replacement approval");
+    expect(changedRevision.approvalId).not.toBe(oldApprovalId);
+    expect(await repo.findById(oldApprovalId)).toMatchObject({
+      status: "approved",
+      payload: { approvalBindingSuperseded: true },
+    });
+    expect(await approvals.consume({ approvalId: oldApprovalId, toolCallId: "call-2" })).toBe(
+      false
+    );
+
+    await park(runId, changedRevision.approvalId);
+    await approvals.signal({
+      businessId: DEPLOYMENT_BUSINESS_ID,
+      approvalId: changedRevision.approvalId,
+      decision: "approved",
+      principal: PRINCIPAL,
+    });
+
+    expect(
+      await approvals.decide({
+        businessId: DEPLOYMENT_BUSINESS_ID,
+        runId,
+        toolCallId: "call-3",
+        toolName: "record_delete",
+        args: { id: "record-1" },
+        requesterPrincipalId: "user:requester-1",
+        demand: {
+          demandedBy: "guardrail_rule",
+          guardrailRevision: "gr-2",
+          reason: "approval_required",
+          ruleId: "rule-1",
+        },
+      })
+    ).toEqual({ status: "approved", approvalId: changedRevision.approvalId });
+    expect(
+      await approvals.consume({
+        approvalId: changedRevision.approvalId,
+        toolCallId: "call-3",
+      })
+    ).toBe(true);
+  });
+
+  it("serializes concurrent first creation and stale-binding replacement", async () => {
+    const decide = (
+      service: ToolApprovalService,
+      runId: string,
+      guardrailRevision: string,
+      toolCallId: string
+    ) =>
+      service.decide({
+        businessId: DEPLOYMENT_BUSINESS_ID,
+        runId,
+        toolCallId,
+        toolName: "record_delete",
+        args: { id: "record-1" },
+        requesterPrincipalId: "user:requester-1",
+        demand: {
+          demandedBy: "guardrail_rule",
+          guardrailRevision,
+          reason: "approval_required",
+          ruleId: "rule-1",
+        },
+      });
+
+    const firstRunId = await startRunningRun("concurrent-first");
+    const firstCreationService = new ToolApprovalService({
+      transactions: concurrentApprovalTransactions(),
+    });
+    const [firstCreation, duplicateCreation] = await Promise.all([
+      decide(firstCreationService, firstRunId, "gr-1", "call-1"),
+      decide(firstCreationService, firstRunId, "gr-1", "call-2"),
+    ]);
+    expect(firstCreation.status).toBe("pending");
+    expect(duplicateCreation).toEqual(firstCreation);
+    const firstRows = await db.query<{ active: string }>(
+      `SELECT COUNT(*)::text AS active
+       FROM approvals
+       WHERE payload->>'runId' = $1
+         AND payload->>'approvalBindingSuperseded' IS DISTINCT FROM 'true'`,
+      [firstRunId]
+    );
+    expect(Number(firstRows.rows[0]?.active ?? "0")).toBe(1);
+
+    const runId = await startRunningRun("concurrent-replacement");
+    const { approvalId: oldApprovalId } = await requestApproval(runId, "call-1");
+    expect(await repo.settlePending(oldApprovalId, "approved")).toBe(true);
+    const replacementService = new ToolApprovalService({
+      transactions: concurrentApprovalTransactions(),
+    });
+    const [first, second] = await Promise.all([
+      decide(replacementService, runId, "gr-2", "call-2"),
+      decide(replacementService, runId, "gr-2", "call-3"),
+    ]);
+    expect(first.status).toBe("pending");
+    expect(second).toEqual(first);
+    if (first.status !== "pending") throw new Error("expected replacement approval");
+
+    const { rows } = await db.query<{ active: string }>(
+      `SELECT COUNT(*)::text AS active
+       FROM approvals
+       WHERE payload->>'runId' = $1
+         AND payload->>'approvalBindingSuperseded' IS DISTINCT FROM 'true'`,
+      [runId]
+    );
+    expect(Number(rows[0]?.active ?? "0")).toBe(1);
+    expect(await approvals.consume({ approvalId: oldApprovalId, toolCallId: "call-2" })).toBe(
+      false
+    );
+
+    expect(await repo.settlePending(first.approvalId, "approved")).toBe(true);
+    expect(await approvals.consume({ approvalId: first.approvalId, toolCallId: "call-2" })).toBe(
+      true
+    );
+    expect(await approvals.consume({ approvalId: first.approvalId, toolCallId: "call-3" })).toBe(
+      false
+    );
+  });
+
+  it("supersedes an approval when its demand evidence changes", async () => {
+    const runId = await startRunningRun();
+    const { approvalId: oldApprovalId } = await requestApproval(runId, "call-1");
+    expect(await repo.settlePending(oldApprovalId, "approved")).toBe(true);
+
+    const changedDemand = await approvals.decide({
+      businessId: DEPLOYMENT_BUSINESS_ID,
+      runId,
+      toolCallId: "call-2",
+      toolName: "record_delete",
+      args: { id: "record-1" },
+      requesterPrincipalId: "user:requester-1",
+      demand: {
+        demandedBy: "guardrail_rule",
+        guardrailRevision: "gr-1",
+        reason: "sensitive_destination",
+        ruleId: "rule-1",
+      },
+    });
+
+    expect(changedDemand.status).toBe("pending");
+    if (changedDemand.status !== "pending") throw new Error("expected replacement approval");
+    expect(changedDemand.approvalId).not.toBe(oldApprovalId);
+    expect(await repo.findById(oldApprovalId)).toMatchObject({
+      status: "approved",
+      payload: { approvalBindingSuperseded: true },
+    });
+    expect(await approvals.consume({ approvalId: oldApprovalId, toolCallId: "call-2" })).toBe(
+      false
+    );
   });
 
   it("asks again for a second identical call once the approved one has been spent", async () => {
@@ -259,6 +608,39 @@ describe("tool approvals as durable waits", () => {
         },
       })
     ).toEqual({ status: "approved", approvalId });
+  });
+
+  it("fails closed and replaces an approval with malformed persisted binding evidence", async () => {
+    const runId = await startRunningRun();
+    const { approvalId: oldApprovalId } = await requestApproval(runId, "call-1");
+    expect(await repo.settlePending(oldApprovalId, "approved")).toBe(true);
+    await repo.mergePayload(oldApprovalId, { intentDigest: "tampered-intent-digest" });
+
+    const replacement = await approvals.decide({
+      businessId: DEPLOYMENT_BUSINESS_ID,
+      runId,
+      toolCallId: "call-2",
+      toolName: "record_delete",
+      args: { id: "record-1" },
+      requesterPrincipalId: "user:requester-1",
+      demand: {
+        demandedBy: "guardrail_rule",
+        guardrailRevision: "gr-1",
+        reason: "approval_required",
+        ruleId: "rule-1",
+      },
+    });
+
+    expect(replacement.status).toBe("pending");
+    if (replacement.status !== "pending") throw new Error("expected replacement approval");
+    expect(replacement.approvalId).not.toBe(oldApprovalId);
+    expect(await repo.findById(oldApprovalId)).toMatchObject({
+      status: "approved",
+      payload: { approvalBindingSuperseded: true },
+    });
+    expect(await approvals.consume({ approvalId: oldApprovalId, toolCallId: "call-2" })).toBe(
+      false
+    );
   });
 
   it("never lets a denial be spent, so a retry keeps getting the same no", async () => {

@@ -142,6 +142,11 @@ export interface TurnAttemptHistory {
         readonly waitId: string;
         readonly childRunId: string;
         readonly callId: string;
+      }
+    | {
+        readonly kind: "retry";
+        readonly waitId: string;
+        readonly callId: string;
       };
 }
 

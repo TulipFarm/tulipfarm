@@ -173,10 +173,17 @@ describe("OIM lifecycle Secret leases", () => {
     };
     const scope = {
       secretRef: ACCESS_REF,
+      businessId: connection.businessId,
       connectionId: connection.id,
       credentialSlot: "access",
+      credentialRevision: "1",
       toolId: "oim.acme.v2.read",
       integrationId: "acme",
+      integrationMajorVersion: 2,
+      operationId: "read",
+      identityMode: "shared_only",
+      manifestDigest: "manifest-digest",
+      configurationDigest: "configuration-digest",
       runId: "run-1",
       purpose: "read",
     } as const;

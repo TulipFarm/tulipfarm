@@ -1,4 +1,5 @@
 import {
+  canonicalHash,
   type OimManifest,
   type OimOperation,
   oimOriginPlaceholder,
@@ -16,10 +17,14 @@ import type {
 export interface ToolConnectionBinding {
   readonly connectionId: string;
   readonly integrationId: string;
-  readonly credentialSlot: string;
+  readonly integrationMajorVersion: number;
+  readonly operationId: string;
+  readonly credentialSlot?: string;
   readonly identityMode: OimOperation["identityMode"];
   readonly principalKind?: string;
   readonly principalId?: string;
+  readonly manifestDigest: string;
+  readonly configurationDigest: string;
 }
 
 export const OIM_CONNECTION_ID_ARGUMENT = "connection_id";
@@ -230,10 +235,14 @@ export class OimOperationConnectionResolver {
     const binding = {
       connectionId: connection.id,
       integrationId: request.manifest.metadata.id,
+      integrationMajorVersion: oimManifestMajor(request.manifest),
+      operationId: request.operation.id,
       credentialSlot: slot,
       identityMode: request.operation.identityMode,
       principalKind: request.principal.kind,
       principalId: request.principal.id,
+      manifestDigest: canonicalHash(request.manifest),
+      configurationDigest: canonicalHash(connection.configuration),
     };
     if (secondarySlot === undefined) {
       return {
@@ -271,6 +280,9 @@ export class OimOperationConnectionResolver {
   ): Promise<boolean> {
     if (
       binding.integrationId !== manifest.metadata.id ||
+      binding.integrationMajorVersion !== oimManifestMajor(manifest) ||
+      binding.manifestDigest !== canonicalHash(manifest) ||
+      binding.credentialSlot === undefined ||
       binding.principalKind === undefined ||
       binding.principalId === undefined
     ) {
@@ -294,11 +306,59 @@ export class OimOperationConnectionResolver {
     if (
       (connection.expiresAt !== null && new Date(connection.expiresAt) <= now) ||
       (connection.health.status !== "healthy" && connection.health.status !== "expiring") ||
+      binding.configurationDigest !== canonicalHash(connection.configuration) ||
       connection.secretBindings[binding.credentialSlot] !== credentialRef
     ) {
       return false;
     }
     const rows = await this.authSteps.list(connection.businessId, connection.id);
     return availableSlots(manifest, connection, rows, now).includes(binding.credentialSlot);
+  }
+
+  async reauthorizeConnection(
+    businessId: string,
+    manifest: OimManifest,
+    operation: OimOperation,
+    binding: ToolConnectionBinding,
+    credentialRef?: `secret://${string}`
+  ): Promise<PersistedConnection | null> {
+    if (
+      binding.operationId !== operation.id ||
+      binding.identityMode !== operation.identityMode ||
+      (binding.credentialSlot !== operation.credentialSlot &&
+        binding.credentialSlot !== operation.secondaryCredential?.slot) ||
+      (credentialRef === undefined
+        ? binding.credentialSlot !== undefined
+        : !(await this.reauthorize(businessId, manifest, binding, credentialRef)))
+    ) {
+      return null;
+    }
+    const principal = {
+      kind: binding.principalKind as string,
+      id: binding.principalId as string,
+    };
+    const resolution = await this.resolve({
+      businessId,
+      manifest,
+      operation,
+      principal,
+      ...(principal.kind === "user" ? { personalOwnerId: principal.id } : {}),
+      connectionId: binding.connectionId,
+    });
+    if (credentialRef === undefined) {
+      return resolution.kind === "configured" &&
+        canonicalHash(resolution.connection.configuration) === binding.configurationDigest
+        ? resolution.connection
+        : null;
+    }
+    if (resolution.kind !== "ready") return null;
+    const resolvedCredentialRef =
+      binding.credentialSlot === operation.credentialSlot
+        ? resolution.credentialRef
+        : resolution.secondaryCredentialRef;
+    return resolvedCredentialRef === credentialRef &&
+      resolution.binding.configurationDigest === binding.configurationDigest
+      ? resolution.connection
+      : null;
   }
 }

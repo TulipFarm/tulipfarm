@@ -129,7 +129,9 @@ async function runTurn(props: Record<string, unknown>, alsoInSameBatch: readonly
                 childRunId: result.childRunId,
                 waitId: result.waitId,
               }
-            : { status: result.status, callId: request.callId, reason: result.reason };
+            : result.status === "awaiting_retry"
+              ? { status: "awaiting_retry", callId: request.callId, waitId: result.waitId }
+              : { status: result.status, callId: request.callId, reason: result.reason };
     },
   };
 

@@ -851,6 +851,177 @@ describe("authorization gate", () => {
     { action: "platform.kv.read", resourceType: "platform.kv", effect: "allow" },
   ];
 
+  it("prepares exact Connection, destination, and File bindings before policy and approval", async () => {
+    const execute = vi.fn(async () => ok({}));
+    const tool = gatedTool(execute);
+    const registry = new InMemoryToolCatalog();
+    registry.register(tool);
+    const pinnedIntent = {
+      intentId: "intent-1",
+      businessId: BUSINESS_ID,
+      runId: RUN_ID,
+      stateId: "chat:c1",
+      runStateId: "chat:c1",
+      toolId: "echo",
+      toolVersion: tool.definition?.version ?? "1",
+      action: "platform.kv.read",
+      targetRefs: [{ type: "platform.file", id: "file-1" }],
+      arguments: { text: "hi" },
+      destination: "https://api.example.com",
+      fileIds: ["file-1"],
+      connection: {
+        connectionId: "connection-1",
+        integrationId: "example",
+        integrationMajorVersion: 1,
+        operationId: "send",
+        identityMode: "personal_required" as const,
+        credentialSlot: "token",
+        credentialRevision: "7",
+        manifestDigest: "a".repeat(64),
+        configurationDigest: "b".repeat(64),
+        principalKind: "user",
+        principalId: "user-1",
+      },
+      credentialRef: "secret://example/token",
+      idempotencyKey: "idem-1",
+    };
+    const findIntent = vi.fn(async () => pinnedIntent);
+    const decide = vi.fn(
+      async (): Promise<ToolApprovalDecision> => ({ status: "pending", approvalId: "ap-1" })
+    );
+    const authorize = vi.fn(() => ({ outcome: "authorized" as const }));
+    const credentials = {
+      resolve: vi.fn(async () => ({ use: "denied" as const, reason: "legacy" })),
+    };
+    const dispatcher = new RegistryToolDispatcher({
+      registry,
+      artifacts: fakeArtifacts({ autonomy: "approval-required" }) as unknown as ArtifactService,
+      approvals: {
+        findIntent,
+        decide,
+      } as unknown as ToolApprovalPort,
+      credentials: credentials as unknown as CredentialResolver,
+      preparation: {
+        prepare: vi.fn(async ({ pinnedIntent: recovered }) => {
+          expect(recovered).toEqual(pinnedIntent);
+          const definition = tool.definition;
+          if (definition === undefined) throw new Error("missing definition");
+          return {
+            intent: pinnedIntent,
+            definition: {
+              ...definition,
+              requiresApproval: true,
+              effectiveDestination: "https://api.example.com",
+              authorization: {
+                ...definition.authorization,
+                allowedDestinations: ["https://api.example.com"],
+              },
+              targetsFor: () => [{ type: "platform.file", id: "file-1" }],
+            },
+          };
+        }),
+      },
+      authorityLayers: layers(ALLOW),
+      gate: { authorize },
+    });
+
+    await expect(
+      dispatcher.dispatch(AUTHORITY, { callId: "c1", name: "echo", arguments: { text: "hi" } })
+    ).resolves.toEqual({ status: "awaiting_approval", approvalId: "ap-1" });
+
+    expect(authorize).toHaveBeenCalledWith(
+      expect.objectContaining({
+        definition: expect.objectContaining({
+          effectiveDestination: "https://api.example.com",
+          authorization: expect.objectContaining({
+            allowedDestinations: ["https://api.example.com"],
+          }),
+        }),
+      })
+    );
+    expect(decide).toHaveBeenCalledWith(expect.objectContaining({ intent: pinnedIntent }));
+    expect(credentials.resolve).not.toHaveBeenCalled();
+    expect(execute).not.toHaveBeenCalled();
+  });
+
+  it("does not fall back to legacy credentials for a prepared public operation", async () => {
+    const execute = vi.fn(async () => ok({}));
+    const tool = gatedTool(execute);
+    const definition = tool.definition;
+    if (definition === undefined) throw new Error("missing definition");
+    const registry = new InMemoryToolCatalog();
+    registry.register(tool);
+    const credentials = {
+      resolve: vi.fn(async () => ({ use: "denied" as const, reason: "legacy" })),
+    };
+    const dispatcher = new RegistryToolDispatcher({
+      registry,
+      artifacts: fakeArtifacts() as unknown as ArtifactService,
+      credentials: credentials as unknown as CredentialResolver,
+      preparation: {
+        prepare: async () => ({
+          intent: {
+            intentId: "intent-public",
+            businessId: BUSINESS_ID,
+            runId: RUN_ID,
+            stateId: "chat:c-public",
+            runStateId: "chat:c-public",
+            toolId: "echo",
+            toolVersion: definition.version,
+            action: definition.authorization.action,
+            targetRefs: [],
+            arguments: { text: "hi" },
+            integrationId: "public-api",
+            integrationMajorVersion: 1,
+            operationId: "lookup",
+            manifestDigest: "a".repeat(64),
+            configurationDigest: "b".repeat(64),
+            principalKind: "user",
+            principalId: "user-1",
+            idempotencyKey: "idem-public",
+          },
+          definition,
+        }),
+      },
+      authorityLayers: layers(ALLOW),
+      gate: new LiveToolGate(),
+    });
+
+    await expect(
+      dispatcher.dispatch(AUTHORITY, {
+        callId: "c-public",
+        name: "echo",
+        arguments: { text: "hi" },
+      })
+    ).resolves.toMatchObject({ status: "succeeded" });
+    expect(credentials.resolve).not.toHaveBeenCalled();
+    expect(execute).toHaveBeenCalledTimes(1);
+  });
+
+  it("fails closed before policy when a prepared binding cannot be reauthorized", async () => {
+    const execute = vi.fn(async () => ok({}));
+    const tool = gatedTool(execute);
+    const registry = new InMemoryToolCatalog();
+    registry.register(tool);
+    const authorize = vi.fn(() => ({ outcome: "authorized" as const }));
+    const dispatcher = new RegistryToolDispatcher({
+      registry,
+      artifacts: fakeArtifacts() as unknown as ArtifactService,
+      preparation: { prepare: async () => Promise.reject(new Error("binding changed")) },
+      authorityLayers: layers(ALLOW),
+      gate: { authorize },
+    });
+
+    await expect(
+      dispatcher.dispatch(AUTHORITY, { callId: "c1", name: "echo", arguments: { text: "hi" } })
+    ).resolves.toEqual({
+      status: "denied",
+      reason: 'tool "echo" could not establish a safe dispatch binding',
+    });
+    expect(authorize).not.toHaveBeenCalled();
+    expect(execute).not.toHaveBeenCalled();
+  });
+
   function throwingTool(): ToolDef {
     return toToolDef(
       defineApiTool<RequestContext>({

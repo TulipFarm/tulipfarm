@@ -6,8 +6,9 @@ import type {
   SurfaceRendererManifest,
   SurfaceTarget,
 } from "@tulipfarm/surface";
+import type { ToolIntent } from "@tulipfarm/tool-broker";
 import type { ApprovalDemand } from "./approvals/evidence";
-import type { ChatAutonomy } from "./types";
+import type { ChatAutonomy, ParkableToolDef } from "./types";
 
 /**
  * Ports the Tool host needs but must not own. Each one is something a process may legitimately
@@ -93,6 +94,13 @@ export type ToolApprovalDecision =
  * Run mints a one-use resume token, and that token must never reach a process that only executes.
  */
 export interface ToolApprovalPort {
+  /** Reloads the immutable intent parked for this raw model call, if one exists. */
+  findIntent?(input: {
+    runId: string;
+    toolCallId: string;
+    toolName: string;
+    args: unknown;
+  }): Promise<ToolIntent | undefined>;
   decide(input: {
     businessId: string;
     runId: string;
@@ -103,6 +111,8 @@ export interface ToolApprovalPort {
     requesterPrincipalId: string;
     /** The policy evaluation that demanded a human, bound to the approval it creates. */
     demand: ApprovalDemand;
+    /** Exact prepared intent, including Connection, destination, and File bindings. */
+    intent?: ToolIntent;
   }): Promise<ToolApprovalDecision>;
   /**
    * Spends an approved decision at the dispatch that will execute it. `false` means the decision
@@ -110,4 +120,52 @@ export interface ToolApprovalPort {
    * refused rather than run on an approval nobody granted it.
    */
   consume(input: { approvalId: string; toolCallId: string }): Promise<boolean>;
+}
+
+export interface ToolCallPreparationPort {
+  replayConfirmed?(input: {
+    businessId: string;
+    runId: string;
+    stateId: string;
+    toolCallId: string;
+    tool: ParkableToolDef;
+    arguments: unknown;
+    subject: { readonly kind: string; readonly id: string };
+    agent: HostedAgent;
+    activeSkillName?: string;
+    pinnedIntent?: ToolIntent;
+  }): Promise<
+    | { readonly outcome: "confirmed"; readonly output: unknown }
+    | { readonly outcome: "denied"; readonly reason: string }
+    | undefined
+  >;
+  prepare(input: {
+    businessId: string;
+    runId: string;
+    stateId: string;
+    toolCallId: string;
+    tool: ParkableToolDef;
+    arguments: unknown;
+    subject: { readonly kind: string; readonly id: string };
+    agent: HostedAgent;
+    activeSkillName?: string;
+    pinnedIntent?: ToolIntent;
+  }): Promise<
+    | {
+        readonly intent: ToolIntent;
+        readonly definition: NonNullable<ParkableToolDef["definition"]>;
+      }
+    | undefined
+  >;
+}
+
+export class ToolPreparationDeniedError extends Error {
+  readonly name = "ToolPreparationDeniedError";
+
+  constructor(
+    readonly reason: string,
+    readonly connectUrl?: string
+  ) {
+    super(reason);
+  }
 }

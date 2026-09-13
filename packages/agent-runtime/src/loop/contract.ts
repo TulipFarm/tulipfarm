@@ -170,6 +170,12 @@ export type ToolDispatchResult =
        * grant has to be durable on the link row before that.
        */
       readonly waitId: string;
+    }
+  | {
+      /** The Tool registered a durable provider retry timer and must be replayed after it fires. */
+      readonly status: "awaiting_retry";
+      readonly callId: string;
+      readonly waitId: string;
     };
 
 export interface ToolDispatchPort {
@@ -183,6 +189,7 @@ export type AgentLoopEventType =
   | "tool_call_rejected"
   | "awaiting_approval"
   | "awaiting_child"
+  | "awaiting_retry"
   | "completed"
   | "failed"
   | "cancelled"
@@ -303,6 +310,15 @@ export type AgentLoopOutcome =
       /** Parked on a spawned child Run; resumed by that Run reaching a terminal status. */
       readonly status: "awaiting_child";
       readonly childRunId: string;
+      readonly waitId: string;
+      readonly callId: string;
+      readonly iterations: number;
+      readonly toolCalls: number;
+      readonly repairs: number;
+    }
+  | {
+      /** Parked on a provider retry timer that the Tool already registered. */
+      readonly status: "awaiting_retry";
       readonly waitId: string;
       readonly callId: string;
       readonly iterations: number;

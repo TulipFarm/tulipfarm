@@ -432,6 +432,7 @@ export class AgentLoop {
       let park:
         | { kind: "approval"; approvalId: string; call: NormalizedToolCall }
         | { kind: "child"; childRunId: string; waitId: string; call: NormalizedToolCall }
+        | { kind: "retry"; waitId: string; call: NormalizedToolCall }
         | undefined;
       // Which of the declared calls already carry an answer. Tracked by callId rather than by
       // position because the two dispatch paths leave the cursor in different places — the
@@ -496,6 +497,7 @@ export class AgentLoop {
         | { kind: "continue" }
         | { kind: "approval"; approvalId: string; call: NormalizedToolCall }
         | { kind: "child"; childRunId: string; waitId: string; call: NormalizedToolCall }
+        | { kind: "retry"; waitId: string; call: NormalizedToolCall }
         | { kind: "input_required"; call: NormalizedToolCall }
         | { kind: "fail"; reason: AgentLoopFailureReason }
       > => {
@@ -517,6 +519,10 @@ export class AgentLoop {
             waitId: dispatched.waitId,
             call,
           };
+        }
+
+        if (dispatched.status === "awaiting_retry") {
+          return { kind: "retry", waitId: dispatched.waitId, call };
         }
 
         // The barrier is the question, not the answer: once this Turn has asked the operator to
@@ -780,6 +786,10 @@ export class AgentLoop {
             };
             break;
           }
+          if (outcome.kind === "retry") {
+            park = { kind: "retry", waitId: outcome.waitId, call: outcome.call };
+            break;
+          }
           if (outcome.kind === "input_required") return askedForInput(outcome.call.callId);
           await advance(index + 1);
           continue;
@@ -889,6 +899,7 @@ export class AgentLoop {
         let decision:
           | { kind: "approval"; approvalId: string; call: NormalizedToolCall }
           | { kind: "child"; childRunId: string; waitId: string; call: NormalizedToolCall }
+          | { kind: "retry"; waitId: string; call: NormalizedToolCall }
           | { kind: "input_required"; call: NormalizedToolCall }
           | { kind: "fail"; reason: AgentLoopFailureReason }
           | undefined;
@@ -936,12 +947,14 @@ export class AgentLoop {
           park =
             decision.kind === "approval"
               ? { kind: "approval", approvalId: decision.approvalId, call: decision.call }
-              : {
-                  kind: "child",
-                  childRunId: decision.childRunId,
-                  waitId: decision.waitId,
-                  call: decision.call,
-                };
+              : decision.kind === "retry"
+                ? { kind: "retry", waitId: decision.waitId, call: decision.call }
+                : {
+                    kind: "child",
+                    childRunId: decision.childRunId,
+                    waitId: decision.waitId,
+                    call: decision.call,
+                  };
           break;
         }
         await advance(nextCallIndex);
@@ -951,7 +964,7 @@ export class AgentLoop {
       }
 
       if (park !== undefined) {
-        // Why this Turn stopped, in words the model can act on. Both parks replay the parked call
+        // Why this Turn stopped, in words the model can act on. Every park replays the parked call
         // on resume, so the distinction the sibling calls need is only what is already pending on
         // their behalf: an operator decision, or a Run that is already doing the work.
         const parked =
@@ -961,11 +974,17 @@ export class AgentLoop {
                 alsoPending:
                   "If it also needed approval, one is already pending — do not re-issue it.",
               }
-            : {
-                waitingFor: "a child Run started by an earlier call",
-                alsoPending:
-                  "If it also started a child Run, that Run is already going — do not re-issue it.",
-              };
+            : park.kind === "retry"
+              ? {
+                  waitingFor: "a provider retry timer for an earlier call",
+                  alsoPending:
+                    "If it also registered a retry, that timer is already pending — do not re-issue it.",
+                }
+              : {
+                  waitingFor: "a child Run started by an earlier call",
+                  alsoPending:
+                    "If it also started a child Run, that Run is already going — do not re-issue it.",
+                };
         // The assistant message above declared every call in the batch, and this park is the only
         // exit that makes that transcript durable. A call sitting after the parked one never
         // dispatched, so nothing answered it — and a proposed Tool call with no matching result is
@@ -1007,25 +1026,40 @@ export class AgentLoop {
         counters.toolCalls -= 1;
         pendingBatch = undefined;
         await checkpoint(park.call, undefined);
-        await emit(park.kind === "approval" ? "awaiting_approval" : "awaiting_child");
+        await emit(
+          park.kind === "approval"
+            ? "awaiting_approval"
+            : park.kind === "retry"
+              ? "awaiting_retry"
+              : "awaiting_child"
+        );
         // Saved again for one reason only: to carry the sequence that event just consumed, so the
         // resumed attempt numbers its events past this one instead of colliding with it. The save
         // above stays first, because a crash between the two must still find durable counters.
         await checkpoint(park.call, undefined);
-        return park.kind === "approval"
-          ? {
-              status: "awaiting_approval",
-              approvalId: park.approvalId,
-              callId: park.call.callId,
-              ...counters,
-            }
-          : {
-              status: "awaiting_child",
-              childRunId: park.childRunId,
-              waitId: park.waitId,
-              callId: park.call.callId,
-              ...counters,
-            };
+        if (park.kind === "approval") {
+          return {
+            status: "awaiting_approval",
+            approvalId: park.approvalId,
+            callId: park.call.callId,
+            ...counters,
+          };
+        }
+        if (park.kind === "retry") {
+          return {
+            status: "awaiting_retry",
+            waitId: park.waitId,
+            callId: park.call.callId,
+            ...counters,
+          };
+        }
+        return {
+          status: "awaiting_child",
+          childRunId: park.childRunId,
+          waitId: park.waitId,
+          callId: park.call.callId,
+          ...counters,
+        };
       }
       // Checkpointed after every dispatched batch, so a Turn that dies here resumes with the
       // Tool results it already paid for rather than re-running them.

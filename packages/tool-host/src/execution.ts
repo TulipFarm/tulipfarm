@@ -112,6 +112,12 @@ export async function runToolAttempts(input: ToolAttemptInput): Promise<HostedTo
       return { status: "succeeded", output: result.data };
     }
     if (isParked(result)) {
+      if (result.parked.kind === "retry_wait") {
+        return {
+          status: "awaiting_retry",
+          waitId: result.parked.waitId,
+        };
+      }
       if (
         input.childReplay !== undefined &&
         (result.parked.childRunId !== input.childReplay.childRunId ||

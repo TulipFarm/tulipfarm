@@ -94,10 +94,17 @@ function snapshotScope(scope: SecretScope): SecretScope {
 function sameScope(a: SecretScope, b: SecretScope): boolean {
   return (
     a.secretRef === b.secretRef &&
+    a.businessId === b.businessId &&
     a.connectionId === b.connectionId &&
     a.credentialSlot === b.credentialSlot &&
+    a.credentialRevision === b.credentialRevision &&
     a.toolId === b.toolId &&
     a.integrationId === b.integrationId &&
+    a.integrationMajorVersion === b.integrationMajorVersion &&
+    a.operationId === b.operationId &&
+    a.identityMode === b.identityMode &&
+    a.manifestDigest === b.manifestDigest &&
+    a.configurationDigest === b.configurationDigest &&
     a.targetId === b.targetId &&
     a.runId === b.runId &&
     a.stateId === b.stateId &&
@@ -172,13 +179,7 @@ export class SecretBroker {
   ): Promise<SecretLease> {
     const leaseId = `lease-${++this.counter}`;
     const scope = snapshotScope(request.scope);
-    let decision: SecretAuthorization;
-    try {
-      decision = await this.authorizer.authorize(scope);
-    } catch {
-      decision = { allowed: false, reason: "not_authorized" };
-    }
-
+    const decision = await this.authorize(scope);
     if (!decision.allowed) {
       this.deny(leaseId, scope, decision.reason ?? "not_authorized", "lease is not authorized");
     }
@@ -199,6 +200,9 @@ export class SecretBroker {
       const resolvedVersion = await this.provider.currentVersion(scope.secretRef);
       if (resolvedVersion === null) {
         this.deny(leaseId, scope, "revoked", "Connection credential is not usable");
+      }
+      if ("credentialRevision" in scope && resolvedVersion !== scope.credentialRevision) {
+        this.deny(leaseId, scope, "revoked", "Connection credential revision changed");
       }
       secretVersion = resolvedVersion;
     }
@@ -292,8 +296,17 @@ export class SecretBroker {
     if (record.uses >= record.maxUses) {
       this.deny(leaseId, record.scope, "exhausted", `lease ${leaseId} has no remaining uses`);
     }
-    // Claimed before the await so two concurrent redemptions cannot both pass the check above.
+    // Claimed before the awaits below so concurrent redemptions cannot both spend one use.
     record.uses += 1;
+    const decision = await this.authorize(record.scope);
+    if (!decision.allowed) {
+      this.deny(
+        leaseId,
+        record.scope,
+        decision.reason ?? "not_authorized",
+        `lease ${leaseId} is no longer authorized`
+      );
+    }
 
     const resolved =
       record.secretVersion === undefined
@@ -303,6 +316,7 @@ export class SecretBroker {
       record.revoked = true;
       this.deny(leaseId, record.scope, "revoked", `the Credential for lease ${leaseId} is revoked`);
     }
+
     if (record.secretVersion !== undefined && resolved.version !== record.secretVersion) {
       record.revoked = true;
       this.deny(
@@ -310,6 +324,15 @@ export class SecretBroker {
         record.scope,
         "revoked",
         `the Credential for lease ${leaseId} was rotated`
+      );
+    }
+    const currentDecision = await this.authorize(record.scope);
+    if (!currentDecision.allowed) {
+      this.deny(
+        leaseId,
+        record.scope,
+        currentDecision.reason ?? "not_authorized",
+        `lease ${leaseId} is no longer authorized`
       );
     }
 
@@ -333,6 +356,14 @@ export class SecretBroker {
       throw new SecretLeakError(leaseId);
     }
     return result;
+  }
+
+  private async authorize(scope: SecretScope): Promise<SecretAuthorization> {
+    try {
+      return await this.authorizer.authorize(scope);
+    } catch {
+      return { allowed: false, reason: "not_authorized" };
+    }
   }
 
   private async resolveConnectionSecret(
