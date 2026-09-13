@@ -542,7 +542,8 @@ test("Form renders typed controls and submits their structured values", async ()
   );
 
   await user.type(screen.getByRole("textbox", { name: /email/i }), "sam@example.com");
-  await user.selectOptions(screen.getByRole("combobox", { name: "Priority" }), "High");
+  await user.click(screen.getByRole("combobox", { name: "Priority" }));
+  await user.click(screen.getByRole("option", { name: "High" }));
   await user.type(screen.getByRole("textbox", { name: "Notes" }), "Call tomorrow");
   await user.click(screen.getByRole("checkbox", { name: "Send updates" }));
   await user.click(screen.getByRole("button", { name: "Continue" }));

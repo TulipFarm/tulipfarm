@@ -92,7 +92,8 @@ describe("/dev/surfaces - Tulip Surface Protocol Sandbox", () => {
       target: { value: "interactive-form" },
     });
     await user.type(screen.getByLabelText(/Ticket Title/i), "Database issue");
-    await user.selectOptions(screen.getByLabelText(/Environment/i), "production");
+    await user.click(screen.getByLabelText(/Environment/i));
+    await user.click(screen.getByRole("option", { name: "production" }));
     await user.type(screen.getByLabelText(/Contact Email/i), "admin@tulipfarm.dev");
     await user.click(screen.getByRole("button", { name: "Submit Form" }));
 

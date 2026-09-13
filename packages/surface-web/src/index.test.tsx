@@ -162,7 +162,7 @@ describe("surfaceWebRenderer", () => {
     }
   });
 
-  it("renders typed forms with native controls and the shared card structure", () => {
+  it("renders typed forms with themed controls and the shared card structure", () => {
     const artifact = createSurfaceArtifact({
       id: "contact",
       component: { name: "Form", version: "1.0" },
@@ -202,7 +202,8 @@ describe("surfaceWebRenderer", () => {
     expect(markup).toContain("data-surface-form");
     expect(markup).toContain('type="email"');
     expect(markup).toContain("<textarea");
-    expect(markup).toContain("<select");
+    expect(markup).toContain("data-surface-select-trigger");
+    expect(markup).toContain('data-surface-input="select"');
     expect(markup).toContain('type="checkbox"');
     expect(markup).toContain('value="Email"');
     expect(markup).toContain('value="SMS"');
@@ -260,7 +261,7 @@ describe("surfaceWebRenderer", () => {
     expect(multiChoiceMarkup).toContain('type="checkbox"');
   });
 
-  it("renders multiselect and radio Form fields with native controls", () => {
+  it("renders multiselect and radio Form fields with themed controls", () => {
     const artifact = createSurfaceArtifact({
       id: "prefs",
       component: { name: "Form", version: "1.0" },
@@ -281,8 +282,9 @@ describe("surfaceWebRenderer", () => {
       surfaceWebRenderer.render(artifact, { destination: "chat", actionHandleFor: () => "sf_form" })
     );
 
-    expect(markup).toContain("<select");
-    expect(markup).toContain('multiple=""');
+    expect(markup).toContain('data-surface-input="multiselect"');
+    expect(markup).toContain("data-surface-select-trigger");
+    expect(markup).not.toContain("<select");
     expect(markup).toContain("data-surface-radio-group");
     expect(markup).toContain('type="radio"');
   });
