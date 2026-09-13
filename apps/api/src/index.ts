@@ -136,6 +136,7 @@ import {
 } from "./admin/health";
 import { modelReachability } from "./admin/model-reachability";
 import { RuntimeRunCommandService } from "./admin/run-commands";
+import { createRunContextReader } from "./admin/run-context";
 import { createRunReader } from "./admin/run-reader";
 import { createRuntimeOperationalApi } from "./admin/runtime";
 import { buildApp } from "./app";
@@ -1629,6 +1630,17 @@ async function boot() {
         toolApprovals,
         routineApprovals,
         runs: runReader,
+        runContext: createRunContextReader({
+          runs: runStore,
+          turns: conversationStore,
+          conversations: conversationRepo,
+          ancestry: childLinks,
+          children: new ChildLinkStore(runTransactions),
+          soul: soulLoader,
+          routines: routineCatalog,
+          teamAssets,
+          authorizationCheck: operationalCheck,
+        }),
         runCommands,
         healthProbes: [
           postgresProbe(pool),

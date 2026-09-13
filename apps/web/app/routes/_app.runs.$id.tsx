@@ -4,7 +4,8 @@ import {
   useRevalidator,
   useRouteError,
 } from "@remix-run/react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { PageShell } from "~/components/page-shell";
 import { RunBudgets, type RunBudgetsState } from "~/components/runs/run-budgets";
 import { RunInspector } from "~/components/runs/run-inspector";
 import { ConnectionStatus } from "~/components/shell/states";
@@ -14,6 +15,7 @@ import {
   commandRun,
   getOperationalRun,
   getRunBudgets,
+  type OperationalRun,
   type RunCommandAction,
 } from "~/lib/operations";
 
@@ -24,11 +26,24 @@ export async function clientLoader({ params }: ClientLoaderFunctionArgs) {
 
 export default function OperationalRunRoute() {
   const { run } = useLoaderData<typeof clientLoader>();
+  return <RunDetail key={run.id} run={run} />;
+}
+
+function RunDetail({ run }: { run: OperationalRun }) {
   const revalidator = useRevalidator();
   const [busy, setBusy] = useState(false);
   const [unavailable, setUnavailable] = useState<string>();
+  const [commandError, setCommandError] = useState<string>();
   const [connection, setConnection] = useState<"online" | "reconnecting">("online");
   const [budgets, setBudgets] = useState<RunBudgetsState>({ status: "loading" });
+  const active = useRef(true);
+
+  useEffect(() => {
+    active.current = true;
+    return () => {
+      active.current = false;
+    };
+  }, []);
 
   useEffect(() => {
     let active = true;
@@ -51,6 +66,7 @@ export default function OperationalRunRoute() {
   }, [run.id]);
 
   useEffect(() => {
+    setConnection("online");
     if (["succeeded", "failed", "cancelled"].includes(run.status)) return;
     const key = `run-cursor:${run.id}`;
     const after = sessionStorage.getItem(key) ?? "0";
@@ -77,39 +93,53 @@ export default function OperationalRunRoute() {
   }, [revalidator, run.id, run.status]);
 
   async function submit(action: RunCommandAction) {
+    if (busy || unavailable || !run.availableCommands?.includes(action)) return;
     setBusy(true);
+    setCommandError(undefined);
     try {
       await commandRun(run, action, `Operator requested ${action} from the Run inspector`);
-      revalidator.revalidate();
+      if (active.current) revalidator.revalidate();
     } catch (error) {
       // 501 means this deployment has no authority for the command at all, not that this attempt
       // failed. Lock the controls and repeat the server's reason instead of inviting a retry.
-      if (!(error instanceof ApiError) || error.status !== 501) throw error;
-      setUnavailable(error.message);
+      if (!active.current) return;
+      if (error instanceof ApiError && error.status === 501) {
+        setUnavailable(error.message);
+      } else {
+        setCommandError(error instanceof Error ? error.message : "Could not update this Run.");
+        if (error instanceof ApiError && error.status === 409) revalidator.revalidate();
+      }
     } finally {
-      setBusy(false);
+      if (active.current) setBusy(false);
     }
   }
 
   return (
-    <div className="h-full min-h-0 overflow-y-auto">
-      <h1 className="sr-only">Run {run.id}</h1>
-      <div className="mx-auto flex max-w-6xl flex-col gap-4 px-4 py-6 sm:px-6">
-        {connection === "reconnecting" ? <ConnectionStatus state="reconnecting" /> : null}
-        <RunInspector run={run} busy={busy} unavailable={unavailable} onCommand={submit} />
-        <RunBudgets state={budgets} />
-      </div>
-    </div>
+    <PageShell
+      title="Run results"
+      crumbs={[{ label: "Runs", to: "/runs" }, { label: "Run results" }]}
+    >
+      {connection === "reconnecting" ? <ConnectionStatus state="reconnecting" /> : null}
+      {commandError ? (
+        <p role="alert" className="text-sm text-status-danger [overflow-wrap:anywhere]">
+          {commandError}
+        </p>
+      ) : null}
+      <RunInspector run={run} busy={busy} unavailable={unavailable} onCommand={submit} />
+      <RunBudgets state={budgets} />
+    </PageShell>
   );
 }
 
 export function ErrorBoundary() {
   const error = useRouteError();
   return (
-    <ErrorState
-      section="runs"
-      status={error instanceof ApiError ? error.status : undefined}
-      message={error instanceof Error ? error.message : undefined}
-    />
+    <PageShell title="Run results">
+      <ErrorState
+        section="runs"
+        status={error instanceof ApiError ? error.status : undefined}
+        message={error instanceof Error ? error.message : undefined}
+      />
+    </PageShell>
   );
 }

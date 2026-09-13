@@ -17,6 +17,7 @@ data loading, schema-driven resource UI, and browser rendering of Surface Artifa
 | `app/root.tsx`, `app/app.css`, `app/tokens.css` | Document shell, no-flash theme script, fonts, HydrateFallback; Tailwind v4 OKLCH `[data-theme]` tokens. |
 | `app/routes/` | Remix SPA routes under `_app`; Chat is `/`. |
 | `app/components/activity/` | Filters, timeline, detail panel for the merged Activity feed. |
+| `app/components/runs/` | Run outcomes, persisted State results, authorized related-work links, server-granted controls, and expandable evidence. |
 | `app/components/settings/` | Panels for `_app.settings.*`; the Memory panel is read-only by contract. |
 | `app/components/farm/`, `app/lib/farm.ts` | `/farm` tulip canvas, season/legend strips, crop metadata, its parallel Soul read. |
 | `app/components/page-shell.tsx`, `app/lib/page-chrome-context.tsx` | The one page frame; publishes its title and portals actions into the shell's single chrome bar. |

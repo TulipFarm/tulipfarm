@@ -178,6 +178,27 @@ describe("GET /api/v1/runs/:id/events", () => {
     expect(res.headers["access-control-allow-credentials"]).toBe("true");
   });
 
+  it("allows the browser's cursor header on a cross-origin resume preflight", async () => {
+    const res = await app.inject({
+      method: "OPTIONS",
+      url: `/api/v1/runs/${RUN_ID}/events?after=1`,
+      headers: {
+        origin: ALLOWED_ORIGIN,
+        "access-control-request-method": "GET",
+        "access-control-request-headers": "last-event-id,x-csrf-token",
+      },
+    });
+
+    expect(res.statusCode).toBe(204);
+    expect(res.headers["access-control-allow-origin"]).toBe(ALLOWED_ORIGIN);
+    expect(res.headers["access-control-allow-credentials"]).toBe("true");
+    const allowedHeaders = String(res.headers["access-control-allow-headers"])
+      .toLowerCase()
+      .split(",")
+      .map((header) => header.trim());
+    expect(allowedHeaders).toEqual(expect.arrayContaining(["last-event-id", "x-csrf-token"]));
+  });
+
   it("does not allow an unknown origin on the hijacked stream", async () => {
     const res = await app.inject({
       method: "GET",

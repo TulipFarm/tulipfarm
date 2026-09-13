@@ -377,22 +377,26 @@ export function TraceSource({
   const face = (
     <>
       {Icon === undefined ? null : (
-        <Icon aria-hidden className="size-3.5 shrink-0 text-tool-tier-platform" />
+        <Icon aria-hidden className="mt-0.5 size-3.5 shrink-0 text-tool-tier-platform" />
       )}
       {reference === undefined ? null : (
-        <span className="shrink-0 font-mono text-[11px] tabular-nums text-muted-foreground">
+        <span className="shrink-0 font-mono text-[11px] leading-5 tabular-nums text-muted-foreground">
           [{reference}]
         </span>
       )}
-      <span className="min-w-0 truncate text-sm text-foreground">{title}</span>
-      {host === undefined ? null : (
-        <span className="shrink-0 truncate text-xs text-muted-foreground">{host}</span>
-      )}
+      <span className="min-w-0 flex-1">
+        <span className="block text-sm text-foreground [overflow-wrap:anywhere]">{title}</span>
+        {host === undefined || host === title ? null : (
+          <span className="block text-xs text-muted-foreground [overflow-wrap:anywhere]">
+            {host}
+          </span>
+        )}
+      </span>
     </>
   );
 
   const rowClass = cn(
-    "tf-trace-row -mx-1.5 flex items-center gap-2 rounded-md px-1.5 py-1",
+    "tf-trace-row -mx-1.5 flex items-start gap-2 rounded-md px-1.5 py-1",
     className
   );
 

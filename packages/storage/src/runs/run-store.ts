@@ -687,4 +687,11 @@ export class RunStore {
       listLineageRows(transaction, businessId, targetRunId)
     );
   }
+
+  /** Both directions for browsing related Runs; execution lineage remains incoming-only. */
+  async listRelatedLineage(businessId: string, runId: string): Promise<readonly RunLineage[]> {
+    return this.transactions.withTransaction((transaction) =>
+      listLineageRows(transaction, businessId, runId, true)
+    );
+  }
 }

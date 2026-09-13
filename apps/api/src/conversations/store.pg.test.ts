@@ -2,8 +2,16 @@ import { randomUUID } from "node:crypto";
 import type { PGlite } from "@electric-sql/pglite";
 import { DEPLOYMENT_BUSINESS_ID } from "@tulipfarm/constants";
 import { textContent } from "@tulipfarm/schema";
-import { RunStore, type StartRunInput } from "@tulipfarm/storage";
+import type { SoulLoader } from "@tulipfarm/soul";
+import {
+  ChildLinkAncestryStore,
+  ChildLinkStore,
+  RunStore,
+  type StartRunInput,
+} from "@tulipfarm/storage";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { createRunContextReader } from "../admin/run-context";
+import { PgConversationRepo } from "../chat/conversations";
 import { fromToolResult, PgMessageRepo } from "../chat/messages";
 import { type Queryable, transactionPort } from "../db";
 import { makeMigratedPglite } from "../test/pglite";
@@ -84,6 +92,78 @@ describe("PgConversationStore", () => {
         createdAt: CREATED_AT,
       },
     ]);
+  });
+
+  it("finds historical Run context without reviving the superseded executor mapping", async () => {
+    const historicalRunId = "00000000-0000-4000-8000-000000000009";
+    await store.saveTurn(turn({ runId: RUN_ID, supersededRunIds: [historicalRunId] }));
+
+    await expect(
+      store.findTurnByAttemptRunId(DEPLOYMENT_BUSINESS_ID, historicalRunId)
+    ).resolves.toMatchObject({ id: TURN_ID, conversationId: CONVERSATION_ID });
+    await expect(
+      store.findTurnByAttemptRunId(DEPLOYMENT_BUSINESS_ID, RUN_ID)
+    ).resolves.toMatchObject({ id: TURN_ID });
+    await expect(
+      store.findTurnByRunId(DEPLOYMENT_BUSINESS_ID, historicalRunId)
+    ).resolves.toBeUndefined();
+    await expect(
+      store.findTurnByAttemptRunId("another-business", historicalRunId)
+    ).resolves.toBeUndefined();
+    await expect(
+      store.findTurnByAttemptRunId(DEPLOYMENT_BUSINESS_ID, REPLY_ID)
+    ).resolves.toBeUndefined();
+  });
+
+  it("resolves Run detail context through the production repositories and migrated schema", async () => {
+    const transactions = transactionPort(database as unknown as Queryable);
+    const runs = new RunStore(transactions);
+    await runs.start({
+      id: RUN_ID,
+      businessId: DEPLOYMENT_BUSINESS_ID,
+      source: "chat",
+      bundle: {
+        digest: "published:agent:assistant",
+        routineId: "chat",
+        routineVersion: "published:agent:assistant",
+      },
+      identity: {
+        initiator: { kind: "user", id: USER_ID },
+        effectiveSubject: { kind: "user", id: USER_ID },
+        guardrailContextRef: "guardrails",
+      },
+      createdAt: CREATED_AT.toISOString(),
+      states: [{ key: "invoke", definitionRef: "published:agent:assistant", resolvedInput: {} }],
+    });
+    await store.saveTurn(turn({ runId: RUN_ID }));
+    const reader = createRunContextReader({
+      runs,
+      turns: store,
+      conversations: new PgConversationRepo(database as unknown as Queryable),
+      ancestry: new ChildLinkAncestryStore(database as unknown as Queryable),
+      children: new ChildLinkStore(transactions),
+      soul: { agents: new Map() } as unknown as SoulLoader,
+      routines: { list: async () => [], get: async () => undefined },
+      teamAssets: {
+        access: async () => ({ levels: [], canManageOwnership: false, evidence: [] }),
+      },
+      authorizationCheck: async () => true,
+    });
+
+    await expect(
+      reader.get(
+        {
+          id: USER_ID,
+          kind: "user",
+          businessId: DEPLOYMENT_BUSINESS_ID,
+          credential: "session",
+          authMethods: ["password"],
+          authenticatedAt: CREATED_AT,
+          role: "admin",
+        },
+        RUN_ID
+      )
+    ).resolves.toEqual({ sourceChat: { id: CONVERSATION_ID }, relatedRuns: [] });
   });
 
   it("rolls back the user Message when Turn reservation fails", async () => {

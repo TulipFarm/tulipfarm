@@ -1,4 +1,9 @@
-import { DISPATCH_LEASE_EXPIRED_REF, type PersistedRun, type RunStore } from "@tulipfarm/storage";
+import {
+  DISPATCH_LEASE_EXPIRED_REF,
+  type PersistedRun,
+  type PersistedState,
+  type RunStore,
+} from "@tulipfarm/storage";
 import { describe, expect, it } from "vitest";
 import { createRunReader } from "./run-reader";
 
@@ -25,6 +30,55 @@ const run: PersistedRun = {
 };
 
 describe("RunReader", () => {
+  it.each([
+    { output: { summary: "Saved two Records" }, artifactId: null },
+    { output: "Completed the review", artifactId: "artifact-1" },
+    { output: 0, artifactId: null },
+    { output: false, artifactId: null },
+    { output: "", artifactId: null },
+    { output: null, artifactId: "artifact-1" },
+  ])(
+    "preserves persisted output $output apart from Artifact references",
+    async ({ output, artifactId }) => {
+      const state: PersistedState = {
+        businessId: run.businessId,
+        runId: run.id,
+        key: "review",
+        definitionRef: "routine:review",
+        resolvedInput: {},
+        status: "succeeded",
+        version: 2,
+        createdAt: run.createdAt,
+        startedAt: run.startedAt,
+        finishedAt: "2026-09-01T00:00:02.000Z",
+        resultArtifactId: artifactId,
+        errorEvidenceRef: null,
+        output,
+      };
+      const reader = createRunReader(
+        {
+          find: async () => run,
+          list: async () => ({ items: [], nextCursor: null }),
+          listStates: async () => [state],
+          countStateAttempts: async () => new Map(),
+          listLineage: async () => [],
+        },
+        { usage: async () => [] }
+      );
+      const result = (await reader.get(run.businessId, run.id))?.states[0];
+      if (output === null) {
+        expect(result).not.toHaveProperty("output");
+      } else {
+        expect(result?.output).toEqual(output);
+      }
+      if (artifactId === null) {
+        expect(result).not.toHaveProperty("resultArtifactId");
+      } else {
+        expect(result).toHaveProperty("resultArtifactId", artifactId);
+      }
+    }
+  );
+
   it("exposes durable recovery commands and immutable effect outcomes", async () => {
     const runs = {
       find: async () => run,

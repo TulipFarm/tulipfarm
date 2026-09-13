@@ -144,6 +144,7 @@ export async function buildApp(opts: AppOptions = {}) {
       "x-csrf-token",
       "If-Match",
       "Idempotency-Key",
+      "Last-Event-ID",
     ],
     exposedHeaders: [
       "X-Conversation-Id",

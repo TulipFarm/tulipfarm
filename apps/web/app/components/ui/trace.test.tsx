@@ -1,7 +1,7 @@
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { expect, test } from "vitest";
-import { Trace, TraceNote, TraceStep } from "./trace";
+import { Trace, TraceNote, TraceSource, TraceStep } from "./trace";
 
 function Sample({ working, keepOpen }: { working: boolean; keepOpen?: boolean }) {
   return (
@@ -134,4 +134,34 @@ test("does not make a step with nothing to reveal into a control", () => {
 
   expect(screen.queryByRole("button", { name: /Send to each owner/ })).not.toBeInTheDocument();
   expect(screen.getByText("Send to each owner")).toBeInTheDocument();
+});
+
+test("does not repeat a source path that is already its title", () => {
+  render(
+    <TraceSource
+      title="qa-review-checklist"
+      host="qa-review-checklist"
+      href="/knowledge/pages/page-1"
+      ref={1}
+    />
+  );
+  expect(screen.getAllByText("qa-review-checklist")).toHaveLength(1);
+  expect(screen.getByRole("link", { name: /\[1\]\s*qa-review-checklist/ })).toHaveAttribute(
+    "href",
+    "/knowledge/pages/page-1"
+  );
+});
+
+test("keeps long source titles and distinct paths readable instead of competing for one row", () => {
+  const title = "Review the support tickets awaiting a second response";
+  render(
+    <TraceSource
+      title={title}
+      host="support/guides/triage/escalations"
+      href="/knowledge/pages/page-2"
+    />
+  );
+  expect(screen.getByText(title)).not.toHaveClass("truncate");
+  expect(screen.getByText(title)).toHaveClass("[overflow-wrap:anywhere]");
+  expect(screen.getByText("support/guides/triage/escalations")).not.toHaveClass("shrink-0");
 });

@@ -23,6 +23,7 @@ import type {
 } from "./routes";
 import { OperationalNotImplementedError } from "./routes";
 import type { RuntimeRunCommandService } from "./run-commands";
+import type { RunContextReader } from "./run-context";
 import type { RunReader } from "./run-reader";
 
 type RuntimeOperationalDeps = {
@@ -34,6 +35,7 @@ type RuntimeOperationalDeps = {
   /** Settles a Routine State approval through its durable wait and one-use resume token. */
   routineApprovals?: Pick<RoutineApprovalService, "signal">;
   runs: RunReader;
+  runContext?: RunContextReader;
   runCommands?: Pick<RuntimeRunCommandService, "execute">;
   healthProbes: readonly HealthProbe[];
   guardrailsConfig(): unknown;
@@ -206,6 +208,11 @@ export function createRuntimeOperationalApi(deps: RuntimeOperationalDeps): Opera
 
     async getRun(grant: OperationalGrant, runId: string) {
       return deps.runs.get(grant.businessId, runId);
+    },
+
+    async getRunContext(request, runId) {
+      if (!request.principal) return;
+      return deps.runContext?.get(request.principal, runId);
     },
 
     async getRunBudgets(grant: OperationalGrant, runId: string) {

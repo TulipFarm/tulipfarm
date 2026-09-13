@@ -39,14 +39,15 @@ export async function insertLineageRow(
 export async function listLineageRows(
   transaction: Queryable,
   businessId: string,
-  targetRunId: string
+  targetRunId: string,
+  includeOutgoing = false
 ): Promise<readonly RunLineage[]> {
   const result = await transaction.query<LineageRow>(
     `SELECT business_id, source_run_id, target_run_id, relation, created_at
        FROM run_lineage
-      WHERE business_id = $1 AND target_run_id = $2
-      ORDER BY created_at, source_run_id`,
-    [businessId, targetRunId]
+      WHERE business_id = $1 AND (target_run_id = $2 OR ($3 AND source_run_id = $2))
+      ORDER BY created_at, source_run_id, target_run_id`,
+    [businessId, targetRunId, includeOutgoing]
   );
   return result.rows.map((row) => ({
     businessId: row.business_id,

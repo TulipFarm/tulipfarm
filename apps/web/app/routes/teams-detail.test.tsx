@@ -597,10 +597,12 @@ test("does not claim owner or Approval details for redacted asset rows", () => {
 test("offers create and edit only when asset authority permits it", () => {
   const first = renderPage("/business/access/teams/product?section=agents");
 
-  expect(screen.getByRole("link", { name: "Create Agent" })).toHaveAttribute(
-    "href",
-    expect.stringContaining("Preselect%20Product%20as%20owner")
-  );
+  const createHref = screen.getByRole("link", { name: "Create Agent" }).getAttribute("href");
+  const createUrl = new URL(createHref ?? "", "http://localhost");
+  expect(createUrl.pathname).toBe("/");
+  expect(createUrl.searchParams.has("prompt")).toBe(false);
+  expect(createUrl.searchParams.get("draft")).toContain("owned by Product");
+  expect(createUrl.searchParams.get("draft")).toContain(`Team ID: ${PRODUCT.id}`);
   expect(screen.getByRole("link", { name: "Edit" })).toHaveAttribute(
     "href",
     "/agents/support-agent"

@@ -8,6 +8,16 @@ export type OperationalRun = {
   routineVersion: string;
   status: string;
   version: number;
+  availableCommands?: readonly RunCommandAction[];
+  context?: {
+    sourceChat?: { id: string; title?: string };
+    agent?: { id: string; name: string };
+    routine?: { id: string; name: string };
+    relatedRuns: readonly {
+      id: string;
+      relation: "parent" | "child" | "replayed_from" | "replay";
+    }[];
+  };
   createdAt: string;
   startedAt: string | null;
   finishedAt: string | null;
@@ -17,6 +27,7 @@ export type OperationalRun = {
     attempts: number;
     input?: unknown;
     output?: unknown;
+    resultArtifactId?: string;
     errorEvidenceRef?: string;
   }>;
   effects: Array<Record<string, unknown>>;

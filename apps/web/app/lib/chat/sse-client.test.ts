@@ -309,6 +309,116 @@ test("does not reconnect after a terminal Run frame", async () => {
   expect(fetchMock).toHaveBeenCalledOnce();
 });
 
+test.each([
+  { status: "succeeded", type: "finish" },
+  { status: "cancelled", type: "finish" },
+  { status: "failed", type: "error" },
+  { status: "needs_reconciliation", type: "error" },
+])("settles a $status stream closed at the last delivered cursor", async ({ status, type }) => {
+  const fetchMock = vi
+    .fn()
+    .mockResolvedValueOnce(
+      streamResponse(
+        'id: 1\nevent: text.delta\ndata: {"text":"Saved progress"}\n\n' +
+          `id: 1\nevent: stream.closed\ndata: ${JSON.stringify({ status })}\n\n`,
+        { "X-Run-Id": "run-1" }
+      )
+    );
+  vi.stubGlobal("fetch", fetchMock);
+  const events: string[] = [];
+
+  await postChat(
+    { message: { role: "user", content: "hello" } },
+    { onEvent: (event) => events.push(event.type) }
+  );
+
+  expect(events).toEqual(["text", type]);
+  expect(fetchMock).toHaveBeenCalledOnce();
+});
+
+test.each([0, 7])("settles a resumed stream with no new events after cursor %s", async (cursor) => {
+  const fetchMock = vi
+    .fn()
+    .mockResolvedValueOnce(
+      streamResponse(`id: ${cursor}\nevent: stream.closed\ndata: {"status":"succeeded"}\n\n`)
+    );
+  vi.stubGlobal("fetch", fetchMock);
+  const onEvent = vi.fn();
+
+  await resumeRun("run-1", { onEvent }, cursor);
+
+  expect(onEvent).toHaveBeenCalledExactlyOnceWith({ type: "finish", data: { reason: "closed" } });
+  expect(fetchMock).toHaveBeenCalledOnce();
+  expect(fetchMock.mock.calls[0]?.[0]).toContain(`/api/v1/runs/run-1/events?after=${cursor}`);
+  expect(fetchMock.mock.calls[0]?.[1].headers["Last-Event-ID"]).toBe(String(cursor));
+});
+
+test("reports access revoked at the replay cursor without reconnecting", async () => {
+  const fetchMock = vi
+    .fn()
+    .mockResolvedValueOnce(
+      streamResponse('id: 7\nevent: stream.revoked\ndata: {"reason":"revoked"}\n\n')
+    );
+  vi.stubGlobal("fetch", fetchMock);
+  const onEvent = vi.fn();
+
+  await resumeRun("run-1", { onEvent }, 7);
+
+  expect(onEvent).toHaveBeenCalledExactlyOnceWith({
+    type: "error",
+    data: { message: "access to this run was revoked" },
+  });
+  expect(fetchMock).toHaveBeenCalledOnce();
+});
+
+test.each([
+  {
+    terminal: 'id: 2\nevent: turn.finished\ndata: {"status":"failed","reason":"model_timeout"}\n\n',
+    message: "The model request failed. Try again.",
+  },
+  {
+    terminal: 'id: 1\nevent: stream.closed\ndata: {"status":"failed"}\n\n',
+    message: "The turn stopped before it could answer. Try again.",
+  },
+])("recovers a failed Run after a Tool's stream drops: $message", async ({ terminal, message }) => {
+  const fetchMock = vi
+    .fn()
+    .mockResolvedValueOnce(
+      rejectedStreamResponse(
+        'id: 1\nevent: tool.call\ndata: {"callId":"c1","name":"create_resource_type"}\n\n',
+        { "X-Run-Id": "run-1" },
+        new TypeError("Failed to fetch")
+      )
+    )
+    .mockResolvedValueOnce(streamResponse(terminal));
+  vi.stubGlobal("fetch", fetchMock);
+  let state = appendUserMessage(initialChatState, "Create a resource type");
+  const connectionStates: string[] = [];
+
+  await postChat(
+    { message: { role: "user", content: "Create a resource type" } },
+    {
+      onEvent: (event) => {
+        state = chatReducer(state, event);
+      },
+      onConnectionState: (connectionState) => connectionStates.push(connectionState),
+    }
+  );
+
+  expect(state.status).toBe("error");
+  expect(state.error).toBe(message);
+  expect(state.messages.at(-1)).toMatchObject({
+    sealed: true,
+    parts: [
+      { kind: "tool", toolCallId: "c1", toolName: "create_resource_type", status: "interrupted" },
+    ],
+  });
+  expect(connectionStates).toEqual(["reconnecting", "online"]);
+  expect(fetchMock).toHaveBeenCalledTimes(2);
+  expect(fetchMock.mock.calls[1]?.[0]).toContain("/api/v1/runs/run-1/events?after=1");
+  expect(fetchMock.mock.calls[1]?.[1].headers["Last-Event-ID"]).toBe("1");
+});
+
 test("replays a persisted Run from the beginning when a Chat mounts again", async () => {
   const fetchMock = vi
     .fn()
