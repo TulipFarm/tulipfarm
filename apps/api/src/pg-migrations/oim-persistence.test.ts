@@ -147,7 +147,7 @@ describe("OIM persistence migrations", () => {
         .slice(0, 5)
         .map(({ version }) => version)
     ).toEqual([110, 111, 112, 113, 114]);
-    expect(PG_MIGRATIONS.at(-1)?.version).toBe(118);
+    expect(PG_MIGRATIONS.at(-1)?.version).toBe(119);
   });
 
   it("builds every OIM persistence table on a fresh database", async () => {
@@ -169,15 +169,34 @@ describe("OIM persistence migrations", () => {
            'oim_rate_limits',
            'oim_release_trust_roots',
            'oim_release_revocation_state',
+           'oim_known_signed_releases',
            'oim_installed_release_provenance',
            'oim_release_maintenance_config',
+           'oim_release_lifecycle_state',
+           'oim_release_uninstall_journals',
+           'oim_release_dispatch_leases',
+           'oim_release_install_operations',
+           'oim_release_slug_reservations',
            'oim_knowledge_scan_checkpoints',
            'oim_knowledge_connection_fences'
          )
        ORDER BY table_name
     `);
 
-    expect(result.rows.map(({ table_name }) => table_name)).toHaveLength(15);
+    expect(result.rows.map(({ table_name }) => table_name)).toHaveLength(21);
+
+    const releaseOperationColumns = await database.query<{ column_name: string }>(`
+      SELECT column_name
+        FROM information_schema.columns
+       WHERE table_name = 'oim_release_install_operations'
+         AND column_name IN ('authored_draft', 'expected_authored_draft', 'package_snapshot')
+       ORDER BY column_name
+    `);
+    expect(releaseOperationColumns.rows).toEqual([
+      { column_name: "authored_draft" },
+      { column_name: "expected_authored_draft" },
+      { column_name: "package_snapshot" },
+    ]);
 
     const registrationGeneration = await database.query<{ column_name: string }>(`
       SELECT column_name
@@ -237,6 +256,19 @@ describe("OIM persistence migrations", () => {
       "cursor_watermark",
       "pending_cursor_watermark",
       "requires_full_rebuild",
+    ]);
+
+    const uninstallColumns = await database.query<{ column_name: string }>(`
+      SELECT column_name
+        FROM information_schema.columns
+       WHERE table_schema = 'public'
+         AND table_name = 'oim_release_uninstall_journals'
+         AND column_name IN ('package_digest', 'soul_revision')
+       ORDER BY column_name
+    `);
+    expect(uninstallColumns.rows.map(({ column_name }) => column_name)).toEqual([
+      "package_digest",
+      "soul_revision",
     ]);
   });
 

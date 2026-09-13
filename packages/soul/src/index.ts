@@ -129,6 +129,21 @@ export {
 export { validateThirdPartyManifest } from "./integration-trust";
 export type { BundledIntegration } from "./integrations/bundled";
 export { bundledIntegrationsDir, loadBundledIntegrations } from "./integrations/bundled";
+export type {
+  OimSoulArtifactRevisionPort,
+  OimSoulReleasePackageReceipt,
+  OimSoulReleasePackageSnapshot,
+  OimSoulReleasePackageSnapshotFile,
+  OimSoulReleasePackageWritePlan,
+  OimSoulReleasePublicationPort,
+  OimSoulReleaseRollbackReceipt,
+} from "./integrations/oim-release-package";
+export {
+  createOimSoulReleasePackageWriter,
+  OimSoulReleasePackageError,
+} from "./integrations/oim-release-package";
+export type { GitBackedOimSoulReleasePackageWriterDeps } from "./integrations/oim-release-package-host";
+export { createGitBackedOimSoulReleasePackageWriter } from "./integrations/oim-release-package-host";
 export type { RegistryAvailability, RegistryEntry } from "./integrations/registry";
 export { loadIntegrationRegistry } from "./integrations/registry";
 export {

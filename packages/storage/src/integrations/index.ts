@@ -144,14 +144,49 @@ export {
   OimRateLimitStore,
 } from "./oim-rate-limit-store";
 export type {
+  AcquireOimReleaseDispatchLeaseInput,
+  OimReleaseDispatchLease,
+} from "./oim-release-dispatch-store";
+export { OimReleaseDispatchLeaseStore } from "./oim-release-dispatch-store";
+export type {
+  OimReleaseInstallStorageScope,
+  OimReleaseSession,
+  OimReleaseSessionSource,
+  OimReleaseStorageScope,
+} from "./oim-release-lifecycle-store";
+export {
+  OIM_RELEASE_LIFECYCLE_STORAGE_STATEMENTS,
+  OimReleaseLifecycleStore,
+} from "./oim-release-lifecycle-store";
+export type {
+  BeginOimReleaseOperationInput,
+  OimReleaseExpectedGeneration,
+  OimReleaseOperation,
+  OimReleaseOperationKind,
+  OimReleaseOperationPhase,
+} from "./oim-release-operation-store";
+export { OimReleaseOperationStore } from "./oim-release-operation-store";
+export type { OimReleaseStorageDatabase } from "./oim-release-storage";
+export { createOimReleaseStorage } from "./oim-release-storage";
+export type {
   AddOimTrustRootInput,
+  CompareAndSwapInstalledOimReleaseProvenanceInput,
+  CompareAndSwapInstalledOimReleaseProvenanceResult,
   InstalledOimReleaseProvenance,
+  OimAuthoredDraftReleaseSourceProvenance,
   OimInstalledReleaseTrustClass,
+  OimKnownSignedReleaseIdentity,
+  OimReleaseSourceProvenance,
   OimRevocationFeed,
   OimTrustRoot,
   OimTrustRootPurpose,
+  PersistedInstalledOimReleaseProvenance,
   PutInstalledOimReleaseProvenanceInput,
+  QuarantinedOimReleaseProvenance,
+  RecordOimKnownSignedReleaseInput,
+  RecoverQuarantinedOimReleaseInput,
   SetOimRevocationFeedInput,
+  UpdateRestoredOimReleaseSoulRevisionInput,
 } from "./oim-release-trust-store";
 export {
   OIM_RELEASE_MAINTENANCE_STORAGE_STATEMENTS,
@@ -159,6 +194,14 @@ export {
   OimReleaseTrustStore,
   OimTrustRootConflictError,
 } from "./oim-release-trust-store";
+export type {
+  OimReleaseStorageTarget,
+  OimReleaseStorageUninstallJournal,
+  OimReleaseStorageUninstallRetry,
+  OimReleaseStorageUninstallStage,
+  OimReleaseStorageUninstallStep,
+} from "./oim-release-uninstall-store";
+export { OimReleaseUninstallJournalStore } from "./oim-release-uninstall-store";
 export type { PollingIngressLease } from "./polling-ingress-store";
 export {
   POLLING_INGRESS_STORAGE_STATEMENTS,
