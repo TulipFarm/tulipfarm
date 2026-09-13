@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.18.24](https://github.com/TulipFarm/tulipfarm/compare/v0.18.23...v0.18.24) (2026-09-13)
+
+### Features
+
+* **integrations:** add OIM connection lifecycle ([#802](https://github.com/TulipFarm/tulipfarm/issues/802)) ([d98c60d](https://github.com/TulipFarm/tulipfarm/commit/d98c60d4c3a9da130f48c649a2e0bc99b86702aa))
+* **web:** improve build workflows and mobile knowledge ([#803](https://github.com/TulipFarm/tulipfarm/issues/803)) ([b518ab0](https://github.com/TulipFarm/tulipfarm/commit/b518ab0088466b9b9e25a7fdf30d5226456024a1))
+* **web:** improve workspace UX with compact styling ([#800](https://github.com/TulipFarm/tulipfarm/issues/800)) ([b07bdde](https://github.com/TulipFarm/tulipfarm/commit/b07bdde26ef8925766bffee2b178a660fc82083f))
+
+### Bug Fixes
+
+* **chat:** align context and enforce run budgets ([#801](https://github.com/TulipFarm/tulipfarm/issues/801)) ([0f5c772](https://github.com/TulipFarm/tulipfarm/commit/0f5c772744fe88379bf8ecf631b0dce6f65db251))
+
 ## [0.18.23](https://github.com/TulipFarm/tulipfarm/compare/v0.18.22...v0.18.23) (2026-09-12)
 
 ### Features
