@@ -1,8 +1,9 @@
+import { useLocation } from "@remix-run/react";
 import { createRemixStub } from "@remix-run/testing";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, expect, test, vi } from "vitest";
-import { createResourceType } from "~/lib/api";
+import { ApiError, createResourceType } from "~/lib/api";
 import ResourceTypeNew from "./_app.resources.new";
 
 vi.mock("~/lib/api", async () => {
@@ -16,7 +17,7 @@ function renderWizard() {
   vi.mocked(createResourceType).mockResolvedValue({ name: "ticket", schema: "", hasHooks: false });
   const Stub = createRemixStub([
     { path: "/", Component: () => <ResourceTypeNew /> },
-    { path: "/resources/:type", Component: () => null },
+    { path: "/resources/:type", Component: () => <p>{useLocation().pathname}</p> },
   ]);
   render(<Stub initialEntries={["/"]} />);
 }
@@ -86,7 +87,7 @@ test("wizard: every checked field lands in the submitted schema's required array
 test("wizard explains field types without exposing schema jargon", async () => {
   renderWizard();
   expect(screen.getByLabelText("Resource type name")).toHaveAccessibleDescription(
-    /lowercase letters.*support-ticket/i
+    /Support tickets.*saved name/i
   );
   expect(screen.queryByText(/kebab-case|createdAt|updatedAt/)).not.toBeInTheDocument();
   await userEvent.click(screen.getByLabelText("field 1 type"));
@@ -106,16 +107,74 @@ test("wizard explains field types without exposing schema jargon", async () => {
 test("wizard announces invalid names and returns focus to the named input", async () => {
   renderWizard();
   fireEvent.change(screen.getByLabelText("Resource type name"), {
-    target: { value: "Bad Name" },
+    target: { value: "!!!" },
   });
   await userEvent.click(screen.getByRole("button", { name: "Create type" }));
-  expect(screen.getByRole("alert")).toHaveTextContent(/lowercase letters/);
+  expect(screen.getByRole("alert")).toHaveTextContent(/start with a letter/i);
   expect(screen.getByLabelText("Resource type name")).toHaveFocus();
   expect(screen.getByLabelText("Resource type name")).toHaveAttribute("aria-invalid", "true");
   expect(createResourceType).not.toHaveBeenCalled();
   await userEvent.clear(screen.getByLabelText("Resource type name"));
   await userEvent.type(screen.getByLabelText("Resource type name"), "ticket");
   expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+});
+
+test.each([
+  ["Support tickets", "support-tickets"],
+  ["  Customer   Follow Ups  ", "customer-follow-ups"],
+  ["Caf\u00e9 orders", "cafe-orders"],
+  ["Sales & billing", "sales-billing"],
+  ["ticket-v2", "ticket-v2"],
+  ["ticket--archive", "ticket--archive"],
+])("wizard derives the saved name for %s", async (name, savedName) => {
+  renderWizard();
+  fireEvent.change(screen.getByLabelText("Resource type name"), { target: { value: name } });
+  expect(screen.getByLabelText("Resource type name")).toHaveAccessibleDescription(
+    expect.stringContaining(`Saved name: ${savedName}`)
+  );
+  fireEvent.change(screen.getByLabelText("field 1 name"), { target: { value: "subject" } });
+  await userEvent.click(screen.getByRole("button", { name: "Create type" }));
+  await waitFor(() => expect(createResourceType).toHaveBeenCalledOnce());
+  expect(createResourceType).toHaveBeenCalledWith(savedName, expect.any(String));
+  expect(await screen.findByText(`/resources/${savedName}`)).toBeInTheDocument();
+});
+
+test.each(["", "   ", "123 tickets", "\u6771\u4eac"])(
+  "wizard rejects a name that cannot produce a valid identifier: %s",
+  async (name) => {
+    renderWizard();
+    fireEvent.change(screen.getByLabelText("Resource type name"), { target: { value: name } });
+    fireEvent.change(screen.getByLabelText("field 1 name"), { target: { value: "subject" } });
+    await userEvent.click(screen.getByRole("button", { name: "Create type" }));
+    expect(screen.getByRole("alert")).toHaveTextContent(/start with a letter/i);
+    expect(screen.getByLabelText("Resource type name")).toHaveFocus();
+    expect(createResourceType).not.toHaveBeenCalled();
+  }
+);
+
+test("a saved-name conflict keeps the draft and lets the user choose another name", async () => {
+  renderWizard();
+  vi.mocked(createResourceType).mockRejectedValueOnce(
+    new ApiError(409, "resource type already exists")
+  );
+  fireEvent.change(screen.getByLabelText("Resource type name"), {
+    target: { value: "Support tickets" },
+  });
+  fireEvent.change(screen.getByLabelText("field 1 name"), { target: { value: "subject" } });
+  await userEvent.click(screen.getByRole("button", { name: "Create type" }));
+  expect(await screen.findByRole("alert")).toHaveTextContent(
+    /support-tickets.*already exists.*different name/i
+  );
+  expect(screen.getByLabelText("Resource type name")).toHaveValue("Support tickets");
+  expect(screen.getByLabelText("Resource type name")).toHaveFocus();
+  expect(screen.getByLabelText("field 1 name")).toHaveValue("subject");
+  fireEvent.change(screen.getByLabelText("Resource type name"), {
+    target: { value: "Customer tickets" },
+  });
+  expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  await userEvent.click(screen.getByRole("button", { name: "Create type" }));
+  await waitFor(() => expect(createResourceType).toHaveBeenCalledTimes(2));
+  expect(createResourceType).toHaveBeenLastCalledWith("customer-tickets", expect.any(String));
 });
 
 test.each([

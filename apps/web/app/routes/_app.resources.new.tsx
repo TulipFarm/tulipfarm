@@ -14,6 +14,17 @@ export const meta: MetaFunction = () => [{ title: "New type · Resources · tuli
 
 const NAME_RE = /^[a-z][a-z0-9-]*$/;
 
+function resourceTypeName(value: string): string {
+  const trimmed = value.trim();
+  if (NAME_RE.test(trimmed)) return trimmed;
+  return trimmed
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+}
+
 type FieldType = "string" | "number" | "integer" | "boolean" | "date" | "datetime" | "enum";
 
 const FIELD_TYPES: { value: FieldType; label: string }[] = [
@@ -125,6 +136,7 @@ export default function ResourceTypeNew() {
   const [error, setError] = useState<string | null>(null);
   const [invalidName, setInvalidName] = useState(false);
   const nameRef = useRef<HTMLInputElement>(null);
+  const savedName = resourceTypeName(name);
 
   function setField(id: string, patch: Partial<FieldRow>) {
     setFields((prev) => prev.map((f) => (f.id === id ? { ...f, ...patch } : f)));
@@ -134,9 +146,9 @@ export default function ResourceTypeNew() {
     e.preventDefault();
     setError(null);
     setInvalidName(false);
-    if (!NAME_RE.test(name)) {
+    if (!NAME_RE.test(savedName)) {
       setError(
-        "Use lowercase letters, numbers and hyphens. Start with a letter, for example support-ticket."
+        "Enter a name such as Support tickets. Start with a letter from A to Z; spaces and capitals are fine."
       );
       setInvalidName(true);
       nameRef.current?.focus();
@@ -165,10 +177,16 @@ export default function ResourceTypeNew() {
 
     setSubmitting(true);
     try {
-      await createResourceType(name, JSON.stringify(schema, null, 2));
-      navigate(`/resources/${encodeURIComponent(name)}`);
+      await createResourceType(savedName, JSON.stringify(schema, null, 2));
+      navigate(`/resources/${encodeURIComponent(savedName)}`);
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "failed to create resource type");
+      if (err instanceof ApiError && err.status === 409) {
+        setError(`The saved name "${savedName}" already exists. Choose a different name.`);
+        setInvalidName(true);
+        nameRef.current?.focus();
+      } else {
+        setError(err instanceof ApiError ? err.message : "failed to create resource type");
+      }
       setSubmitting(false);
     }
   }
@@ -211,11 +229,12 @@ export default function ResourceTypeNew() {
               if (invalidName) setError(null);
               setInvalidName(false);
             }}
-            placeholder="support-ticket"
+            placeholder="Support tickets"
           />
-          <p id="type-name-help" className="text-xs text-muted-foreground">
-            Required. Use lowercase letters, numbers and hyphens, for example support-ticket. This
-            name is used in the web address.
+          <p id="type-name-help" className="break-words text-xs text-muted-foreground">
+            {NAME_RE.test(savedName)
+              ? `Saved name: ${savedName}. Used in lists and web addresses.`
+              : "For example, Support tickets. We create the saved name for you."}
           </p>
         </div>
 
