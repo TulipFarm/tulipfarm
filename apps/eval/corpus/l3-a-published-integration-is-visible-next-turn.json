@@ -1,0 +1,119 @@
+{
+  "id": "l3-a-published-integration-is-visible-next-turn",
+  "tier": "l3",
+  "agent": "support",
+  "input": [
+    {
+      "role": "user",
+      "content": "Review and publish the Journey Acme Integration now. The package is complete and I approve publishing the exact reviewed bytes."
+    }
+  ],
+  "platformTools": ["integration_draft_review", "integration_draft_create", "integration_get"],
+  "script": [
+    {
+      "kind": "tool_calls",
+      "calls": [
+        {
+          "callId": "review",
+          "name": "integration_draft_review",
+          "arguments": {
+            "manifest": "oimVersion: \"1.0\"\nkind: Integration\nmetadata:\n  id: journey-acme\n  name: Journey Acme\n  version: 1.0.0\n  description: Read Acme status.\n  license: MIT\nprofiles:\n  core: \"1.0\"\nfiles:\n  - path: setup-guide.md\n    role: guide\n    sha256: \"666d27da1fbdd7dad2aa0b2b0973797b4ba2bb3f843b97b32cc82063183c3a63\"\n  - path: fixtures.yml\n    role: fixture\n    sha256: \"9597c7ef6636c81cff98b58cc4bfeccf944173226a776f0511104fc5075a1a23\"\noperations:\n  - id: status\n    name: journey_acme_status\n    description: Read Acme status.\n    effect: read\n    identityMode: shared_only\n    source:\n      type: http\n      method: GET\n      baseUrl: https://status.acme.example\n      path: /v1/status\n    response:\n      maxBytes: 65536\n      schema:\n        type: object\n        properties:\n          status: { type: string }\n      projection: [/status]\n",
+            "files": [
+              {
+                "path": "setup-guide.md",
+                "role": "guide",
+                "content": "# Connect Journey Acme\n"
+              },
+              {
+                "path": "fixtures.yml",
+                "role": "fixture",
+                "content": "version: 1\ncases:\n  - name: gets-status\n    operationId: status\n    request: {}\n    response:\n      status: 200\n      body: { status: operational }\n    expect:\n      request:\n        method: GET\n        url: https://status.acme.example/v1/status\n      result: { status: operational }\n"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "kind": "tool_calls",
+      "calls": [
+        {
+          "callId": "publish",
+          "name": "integration_draft_create",
+          "arguments": {
+            "slug": "journey-acme",
+            "package_digest": "886ea147b37b0845a6eaf60590ca9e19d3e38407ac76294e5cfab56049c9d37b"
+          }
+        }
+      ]
+    },
+    {
+      "kind": "text",
+      "text": "I reviewed and published Journey Acme. It can reach status.acme.example for one read operation."
+    }
+  ],
+  "journey": [
+    {
+      "input": [
+        {
+          "role": "user",
+          "content": "Read the installed Journey Acme Integration and tell me its name."
+        }
+      ],
+      "script": [
+        {
+          "kind": "tool_calls",
+          "calls": [
+            {
+              "callId": "read",
+              "name": "integration_get",
+              "arguments": {
+                "slug": "journey-acme"
+              }
+            }
+          ]
+        },
+        {
+          "kind": "text",
+          "text": "The installed Integration is Journey Acme."
+        }
+      ]
+    }
+  ],
+  "expect": [
+    {
+      "kind": "tool_call_order",
+      "names": ["integration_draft_review", "integration_draft_create", "integration_get"]
+    },
+    {
+      "kind": "soul_committed",
+      "path": "integrations/journey-acme/oim.yml"
+    },
+    {
+      "kind": "soul_committed",
+      "path": "integrations/journey-acme/setup-guide.md"
+    },
+    {
+      "kind": "soul_published",
+      "artifact": "Integration:journey-acme"
+    },
+    {
+      "kind": "tool_result_field_equals",
+      "name": "integration_get",
+      "argumentPath": "slug",
+      "argumentValue": "journey-acme",
+      "status": "succeeded",
+      "turnIndex": 2,
+      "outputPath": "oimManifest.metadata.name",
+      "value": "Journey Acme"
+    },
+    {
+      "kind": "output_contains",
+      "text": "Journey Acme"
+    },
+    {
+      "kind": "run_status",
+      "status": "succeeded"
+    }
+  ]
+}

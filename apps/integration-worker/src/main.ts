@@ -12,6 +12,9 @@ import { createSlackChannelLoops, watchForSlackChannelCredential } from "./chann
 import { loadConfig, REQUIRED_SCHEMA_VERSION } from "./config";
 import { waitForDataDirEnv } from "./data-dir";
 import { connectPg } from "./db";
+import { InternalApiClient } from "./internal/client";
+import { composeOimRuntime } from "./oim-runtime";
+import { InternalOimWorkerHost } from "./oim-worker-host";
 import { waitForSchemaFloor } from "./preflight";
 import { startProbeServer } from "./probe-server";
 import { type DrainableLoop, drain } from "./shutdown";
@@ -100,6 +103,23 @@ export async function main(): Promise<void> {
   let serving = true;
   const controller = new AbortController();
   const loops: DrainableLoop[] = [];
+
+  loops.push(
+    ...(await composeOimRuntime(controller.signal, {
+      pool,
+      host: new InternalOimWorkerHost(
+        new InternalApiClient({
+          baseUrl: config.internalApiUrl,
+          credential: config.internalApiCredential,
+        })
+      ),
+      log: {
+        info: (detail, message) => logger.info(`${message}: ${JSON.stringify(detail)}`),
+        error: (detail, message) => logger.error(message, detail),
+        warn: logger.warn,
+      },
+    }))
+  );
 
   const slackDeps = {
     businessId: config.businessId,

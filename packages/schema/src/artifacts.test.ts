@@ -154,6 +154,15 @@ describe("classifySoulPath — content modes", () => {
     expect(classifySoulPath("skills/triage/scripts/run.py")?.modes).toEqual(["executable"]);
   });
 
+  it("admits portable OIM companions at their declared nested paths", () => {
+    expect(
+      classifySoulPath("integrations/shopify/operations/list-products.graphql")?.modes
+    ).toEqual(["prose"]);
+    expect(classifySoulPath("integrations/acme/hooks/normalize.mjs")?.modes).toEqual([
+      "executable",
+    ]);
+  });
+
   it("admits both formats where the migration reuses the same filename", () => {
     expect(classifySoulPath("routines/onboarding/routine.yaml")?.modes).toEqual([
       "definition",
@@ -190,8 +199,8 @@ describe("classifySoulPath — rejection", () => {
     expect(classifySoulPath(`agents/support/${"a".repeat(1100)}.md`)).toBeNull();
   });
 
-  it("does not let an extension glob match inside a subdirectory", () => {
-    expect(classifySoulPath("integrations/github/nested/spec.json")).toBeNull();
+  it("does not let a flat extension glob match inside a subdirectory", () => {
+    expect(classifySoulPath("integrations/github/nested/handler.ts")).toBeNull();
   });
 });
 

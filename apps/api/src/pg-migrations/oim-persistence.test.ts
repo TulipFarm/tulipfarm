@@ -147,7 +147,7 @@ describe("OIM persistence migrations", () => {
         .slice(0, 5)
         .map(({ version }) => version)
     ).toEqual([110, 111, 112, 113, 114]);
-    expect(PG_MIGRATIONS.at(-1)?.version).toBe(119);
+    expect(PG_MIGRATIONS.at(-1)?.version).toBe(120);
   });
 
   it("builds every OIM persistence table on a fresh database", async () => {
@@ -161,6 +161,7 @@ describe("OIM persistence migrations", () => {
            'connections',
            'connection_auth_steps',
            'connection_external_identities',
+           'connection_verification_evidence',
            'webhook_deliveries',
            'polling_ingress_state',
            'oim_ingress_teardowns',
@@ -183,7 +184,39 @@ describe("OIM persistence migrations", () => {
        ORDER BY table_name
     `);
 
-    expect(result.rows.map(({ table_name }) => table_name)).toHaveLength(21);
+    expect(result.rows.map(({ table_name }) => table_name)).toHaveLength(22);
+
+    const verificationEvidenceColumns = await database.query<{ column_name: string }>(`
+      SELECT column_name
+        FROM information_schema.columns
+       WHERE table_name = 'connection_verification_evidence'
+       ORDER BY ordinal_position
+    `);
+    expect(verificationEvidenceColumns.rows.map(({ column_name }) => column_name)).toEqual([
+      "business_id",
+      "connection_id",
+      "proof_digest",
+      "binding_digest",
+      "package_digest",
+      "configuration_digest",
+      "assurance",
+      "evidence",
+      "verified_at",
+      "invalidated_at",
+      "invalidation_reason",
+      "created_at",
+    ]);
+    const verificationEvidenceIndexes = await database.query<{ indexname: string }>(`
+      SELECT indexname
+        FROM pg_indexes
+       WHERE schemaname = 'public'
+         AND tablename = 'connection_verification_evidence'
+       ORDER BY indexname
+    `);
+    expect(verificationEvidenceIndexes.rows).toEqual([
+      { indexname: "connection_verification_evidence_active_idx" },
+      { indexname: "connection_verification_evidence_pkey" },
+    ]);
 
     const releaseOperationColumns = await database.query<{ column_name: string }>(`
       SELECT column_name

@@ -1,18 +1,18 @@
 ---
 title: Connect an integration
-description: Install one of the bundled integrations and connect its credentials.
+description: Install a bundled or reviewed integration, connect its credentials, verify provider access, and disconnect it safely.
 ---
 
-This guide connects a bundled [integration](/docs/administration/how-integrations-work). TulipFarm ships five
-bundled integrations today: `github`, `slack`, `google`, `jira`, and `linear`.
+Open **Integrations** to connect a bundled
+[integration](/docs/administration/how-integrations-work) or install a reviewed package from a
+source repository. An integration gives agents a fixed set of actions in an external service.
 
 ## Outcome
 
 At the end, the integration's credentials are stored as secrets and it shows as connected.
 
 Bundled integrations need no installation step. They ship with TulipFarm and are present the
-first time you open the page. Installing is only for integrations that come from a git
-repository.
+first time you open the page.
 
 ## Choose the integration
 
@@ -22,7 +22,7 @@ repository.
     you have already connected grouped first.
   </Step>
   <Step>
-    Choose **github**, **slack**, or **google**.
+    Choose the service you want to connect.
   </Step>
 </Steps>
 
@@ -31,45 +31,116 @@ Use the dedicated guides for provider-specific setup:
 - [Connect GitHub](/docs/administration/connect-github)
 - [Connect Slack](/docs/administration/connect-slack)
 
-## Install from a git repository
+## Add a missing provider
 
-Integrations are not limited to the five above. An integration is a data file (a manifest
-describing how to connect and which provider API calls agents may make) so one can be installed
-from any git repository.
+If no suitable package exists yet, open **Chat** and ask to build an integration from the
+provider's public documentation. The integration forge prepares its manifest and companion files,
+runs offline checks, and presents the exact files for approval before publishing.
 
 <Steps>
   <Step>
-    On **integrations**, choose **Install from git**.
+    Describe the small set of provider actions you need.
   </Step>
   <Step>
-    Enter the repository as `owner/repo` or a full URL, optionally with a branch:
-    `https://host/owner/repo#branch`.
+    The integration forge reads the provider's public documentation and prepares the manifest,
+    setup guide, API contract, and offline checks.
   </Step>
   <Step>
-    TulipFarm inspects the repository and lists the integrations it found. Anything that would
-    run code on your host is rejected here and cannot be installed.
+    Review the exact destinations, credentials, and provider actions it presents. Publishing
+    requires approval of those exact reviewed files.
   </Step>
   <Step>
-    Choose one and select **Install**. It then appears in the catalog and connects like any
+    Approve publication. The integration then appears in **Integrations** and connects like a
     bundled integration.
   </Step>
 </Steps>
 
-Only the manifest, its OpenAPI document, and the setup guide are copied into your soul. Installing
-an integration never means running someone's code.
+Publishing writes only the manifest and the companion files it declares to the soul. It never runs
+code from the provider or its documentation.
+
+## Install from a source
+
+An integration source is a repository containing one or more declarative packages. Installing a
+package does not run code from that repository.
+
+<Steps>
+  <Step>
+    Open **Integrations** and select **Install from source**.
+  </Step>
+  <Step>
+    Enter the package source URL and select **Inspect source**.
+  </Step>
+  <Step>
+    Review the resolved source ref and package digest. The digest identifies the exact package
+    bytes. Also review its capabilities, effects, provider destinations, authorization fields, and
+    incoming data.
+  </Step>
+  <Step>
+    Choose how TulipFarm should verify trust:
+
+    - **Verify as Official on the server before installation** requires a valid package signature
+      from an active public release trust root configured on this instance. **Official** does not
+      mean that TulipFarm globally endorses the package.
+    - **Install as a reviewed Community package** requires approval of the capabilities,
+      destinations, effects, and exact digest shown on the screen.
+  </Step>
+  <Step>
+    Select **Install**. If installation fails, **Retry same package** retries the same reviewed ref,
+    selection, and digest instead of inspecting new source bytes.
+  </Step>
+</Steps>
+
+## Manage package security
+
+Open **Integrations**, then select **Package security**.
+
+- **Public trust roots** hold public keys for release or revocation signatures. Private signing
+  keys remain with the publisher. Disabling a root stops new signatures using that key from
+  verifying.
+- **Signed revocation feed** accepts a credential-free HTTPS feed. TulipFarm reads it only when
+  maintenance runs.
+- **Run maintenance** checks the signed feed and applies eligible patch releases only to Official
+  packages that have automatic patches enabled.
+
+Community packages never update automatically. Open an Official integration and enable
+**Automatically install verified patch releases** if you want maintenance to apply eligible
+patches for that package.
 
 ## Connect credentials
 
-After installation, open the integration detail page. TulipFarm shows the fields from the
-integration manifest. Secret fields are encrypted in the secrets store; non-secret fields
-stay as integration config in the soul.
+After installation, open the integration detail page. TulipFarm shows the setup steps from the
+integration manifest. Secret fields are encrypted in the secrets store. Other setup values stay
+with the connection.
 
 For Slack, this is the Socket Mode app token, bot token, and team id. For GitHub, the
 flow is GitHub App installation rather than a pasted OAuth token. For Google Workspace, it is an
 OAuth sign-in that authorizes the Gmail, Calendar, Drive, and Docs scopes.
 
+Some packages declare a provider verification step. When they do, the Connection remains
+unavailable until TulipFarm saves successful verification evidence. **Retry verification** runs
+that declared check again. A temporarily unavailable check means the result is unknown, not that
+the provider accepted the credentials. If the provider rejects them, correct or reconnect the
+credentials before retrying.
+
 ## Verify
 
-Return to **integrations** and confirm the integration shows connected. Then ask in chat
-for a small provider-specific action, such as listing covered GitHub issues or sending a
-message through Slack after the channel is linked.
+Return to **Integrations** and confirm the Connection is available. This confirms that required
+setup and declared verification completed; it does not promise that every later provider request
+will succeed.
+
+## Disconnect
+
+Open the integration detail page, find the connection, and select **Disconnect**. The connection
+becomes unavailable at once. If the provider needs remote cleanup, the page shows
+**Disconnecting** until that cleanup succeeds.
+
+## Remove an installed package
+
+Open the integration detail page, open its actions menu, and select **Remove integration**.
+TulipFarm removes the exact installed generation: it first stops new traffic, waits for active
+work, cleans up provider subscriptions and Connections, then removes package-owned state and the
+published package.
+
+If cleanup cannot finish, the package stays fenced and the page shows **Removal needs another
+try**. Select **Retry removal** to resume cleanup for that exact installation. A newer installation
+cannot be removed by an older pending cleanup.

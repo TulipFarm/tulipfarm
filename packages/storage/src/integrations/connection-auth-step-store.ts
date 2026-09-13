@@ -132,6 +132,43 @@ function fromRow(row: AuthStepRow): ConnectionAuthStep {
 export class ConnectionAuthStepStore {
   constructor(private readonly transactions: TransactionPort) {}
 
+  async initialize(input: PutConnectionAuthStep): Promise<ConnectionAuthStep> {
+    return this.transactions.withTransaction(async (transaction) => {
+      const inserted = await transaction.query<AuthStepRow>(
+        `INSERT INTO connection_auth_steps (
+           business_id, connection_id, step_id, status, access_slot, access_secret_ref,
+           refresh_slot, refresh_secret_ref, external_identity, expires_at, health_checked_at
+         ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb, $10, $11)
+         ON CONFLICT (business_id, connection_id, step_id) DO NOTHING
+         RETURNING *`,
+        [
+          input.businessId,
+          input.connectionId,
+          input.stepId,
+          input.status,
+          input.accessSlot,
+          input.accessSecretRef,
+          input.refreshSlot,
+          input.refreshSecretRef,
+          input.externalIdentity === null ? null : JSON.stringify(input.externalIdentity),
+          input.expiresAt,
+          input.healthCheckedAt,
+        ]
+      );
+      const created = inserted.rows[0];
+      if (created !== undefined) return fromRow(created);
+
+      const existing = await transaction.query<AuthStepRow>(
+        `SELECT * FROM connection_auth_steps
+          WHERE business_id = $1 AND connection_id = $2 AND step_id = $3`,
+        [input.businessId, input.connectionId, input.stepId]
+      );
+      const row = existing.rows[0];
+      if (row === undefined) throw new Error("connection_auth_step_not_initialized");
+      return fromRow(row);
+    });
+  }
+
   async put(input: PutConnectionAuthStep): Promise<ConnectionAuthStep> {
     return this.transactions.withTransaction(async (transaction) => {
       const result = await transaction.query<AuthStepRow>(

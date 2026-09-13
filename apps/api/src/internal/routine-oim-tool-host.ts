@@ -23,11 +23,13 @@ import {
   runOimHookPhase,
 } from "@tulipfarm/integrations";
 import { routineStateDefinitionRef } from "@tulipfarm/run-kernel";
+import type { HookExecutor } from "@tulipfarm/sandbox";
 import {
   ajv,
   canonicalHash,
   type OimManifest,
   type OimOperation,
+  oimFileDigest,
   oimToolId,
   type routine,
   type ToolContractDefinition,
@@ -43,6 +45,7 @@ import {
   type BundleStore,
   type BundleVerifier,
   type RuntimeBundle,
+  type SoulIntegration,
   verifyExecutionBundle,
 } from "@tulipfarm/soul";
 import type {
@@ -73,12 +76,17 @@ import {
   type LiveAuthorityLayerResolver,
   principalKindOf,
 } from "@tulipfarm/tool-host";
+import type {
+  OimDispatchSettlement,
+  OimReleaseDispatchPort,
+} from "../integrations/releases/dispatch-host";
 import type { RunAuthority } from "./turn-host";
 
 export interface RoutineOimRegistration {
   readonly manifest: OimManifest;
   readonly documents?: Readonly<Record<string, string>>;
   readonly openApiDocuments?: Readonly<Record<string, unknown>>;
+  readonly hookFiles?: Readonly<Record<string, string>>;
 }
 
 /**
@@ -383,6 +391,8 @@ type CompiledRoutineOimTool = CompiledOimHttpTool | CompiledOimOpenApiTool | Com
 
 export interface InternalRoutineOimToolHostOptions {
   readonly businessId: string;
+  readonly releaseIntegration: (manifest: OimManifest) => SoulIntegration | undefined;
+  readonly releaseDispatch: OimReleaseDispatchPort;
   readonly runs: RoutineOimRunAuthority;
   readonly bundles: RoutineOimBundleReader;
   readonly registrations: RoutineOimRegistrationReader;
@@ -391,7 +401,7 @@ export interface InternalRoutineOimToolHostOptions {
   readonly secrets: () => Promise<SecretsService>;
   readonly http: EgressHttpPort;
   readonly authorize: RoutineOimLiveAuthorizer;
-  readonly hookRunner?: OimHookPhaseRunner;
+  readonly hookExecutor?: Pick<HookExecutor, "runPureHook">;
   readonly files?: OimFilePort;
   readonly fileAuthorizer?: RoutineOimFileAuthorizer;
   readonly paginationRuntime?: OimPaginationRuntime;
@@ -412,7 +422,7 @@ export interface InternalRoutineOimToolHostFactoryOptions
     | "fileAuthorizer"
     | "files"
     | "paginationRuntime"
-    | "hookRunner"
+    | "hookExecutor"
   > {
   readonly runAuthorityHost: {
     authority(businessId: string, runId: string): Promise<RunAuthority>;
@@ -424,7 +434,7 @@ export interface InternalRoutineOimToolHostFactoryOptions
   readonly fileAuthority: RoutineOimFileAuthorityPort;
   readonly files: OimFilePort;
   readonly paginationRuntime: OimPaginationRuntime;
-  readonly hookRunner: OimHookPhaseRunner;
+  readonly hookExecutor: Pick<HookExecutor, "runPureHook">;
 }
 
 export function createInternalRoutineOimToolHost(
@@ -553,6 +563,46 @@ function compileTool(
 
 function destinationOf(tool: CompiledRoutineOimTool): string {
   return new URL("baseUrl" in tool.binding ? tool.binding.baseUrl : tool.binding.url).origin;
+}
+
+function hookRunnerFor(
+  registration: RoutineOimRegistration,
+  businessId: string,
+  bundleDigest: string,
+  executor: Pick<HookExecutor, "runPureHook"> | undefined
+): OimHookPhaseRunner | undefined {
+  if ((registration.manifest.hooks ?? []).length === 0) return undefined;
+  return {
+    run: async (hook, input) => {
+      if (executor === undefined) {
+        throw new AdapterDispatchError("before_dispatch", "hook_runtime_unavailable", false);
+      }
+      const source = registration.hookFiles?.[hook.file];
+      const file = registration.manifest.files?.find(
+        (candidate) => candidate.path === hook.file && candidate.role === "hook"
+      );
+      if (source === undefined || file === undefined) {
+        throw new AdapterDispatchError("before_dispatch", "hook_source_unavailable", false);
+      }
+      if (oimFileDigest(source) !== file.sha256) {
+        throw new AdapterDispatchError("before_dispatch", "hook_source_mismatch", false);
+      }
+      return executor.runPureHook({
+        source,
+        sourceSha256: file.sha256,
+        exportName: hook.export,
+        input,
+        breakerKey: [
+          "oim-routine",
+          businessId,
+          bundleDigest,
+          canonicalHash(registration.manifest),
+          hook.kind,
+          hook.export,
+        ].join(":"),
+      });
+    },
+  };
 }
 
 function record(value: unknown): Readonly<Record<string, unknown>> | undefined {
@@ -1007,7 +1057,12 @@ export class InternalRoutineOimToolHost {
     }
 
     try {
-      const runner = this.options.hookRunner;
+      const runner = hookRunnerFor(
+        context.registration,
+        this.options.businessId,
+        context.bundle.digest,
+        this.options.hookExecutor
+      );
       const fileReadAuthorization: OimFileReadAuthorizationPort | undefined =
         this.options.fileAuthorizer === undefined
           ? undefined
@@ -1061,13 +1116,39 @@ export class InternalRoutineOimToolHost {
       ) {
         return this.failed("before_dispatch", "run_claim_lost", false);
       }
-      const output =
-        credentials === undefined
-          ? await adapter.dispatch(request)
-          : await credentials.dispatch(effect, adapter, request);
-      if (!ajv.compile(context.contract.spec.outputSchema)(output)) {
-        throw new AdapterDispatchError("after_dispatch", "invalid_output", false);
+      const integration = this.options.releaseIntegration(context.registration.manifest);
+      if (integration === undefined) {
+        return this.failed("before_dispatch", "oim_release_not_active", false);
       }
+      let settlement: OimDispatchSettlement = "not_dispatched";
+      const output = await this.options.releaseDispatch.dispatch(
+        { businessId: this.options.businessId, integration },
+        async (providerDispatch) => {
+          try {
+            const result = await providerDispatch(() =>
+              credentials === undefined
+                ? adapter.dispatch(request)
+                : credentials.dispatch(effect, adapter, request)
+            );
+            settlement = "settled";
+            if (!ajv.compile(context.contract.spec.outputSchema)(result)) {
+              throw new AdapterDispatchError("after_dispatch", "invalid_output", false);
+            }
+            return result;
+          } catch (error) {
+            settlement =
+              error instanceof AdapterDispatchError
+                ? error.phase === "before_dispatch"
+                  ? "not_dispatched"
+                  : context.contract.spec.mutating
+                    ? "ambiguous"
+                    : "settled"
+                : "ambiguous";
+            throw error;
+          }
+        },
+        async () => settlement
+      );
       return { kind: "succeeded", output };
     } catch (error) {
       if (!(error instanceof AdapterDispatchError)) throw error;

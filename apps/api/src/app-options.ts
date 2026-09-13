@@ -57,9 +57,14 @@ import type { IntegrationAuthRequestRepo } from "./integrations/auth-broker";
 import type { OimConnectionService } from "./integrations/connections/service";
 import type { GitHubInstallDeps } from "./integrations/github-install-routes";
 import type { PrincipalProviderTokenRepo } from "./integrations/principal-tokens";
+import type { OimReleaseControlPlane } from "./integrations/releases/control-plane";
+import type { OimIntegrationCatalogRoutes } from "./integrations/routes";
 import type { SlackBindDeps } from "./integrations/slack-binding";
 import type { ChannelInternalRouteDeps } from "./internal/channel-routes";
+import type { InternalOimConnectionRouteDeps } from "./internal/oim-connection-routes";
+import type { InternalOimWorkerRouteDeps } from "./internal/oim-worker-routes";
 import type { InternalTurnRouteDeps } from "./internal/routes";
+import type { InternalRoutineOimToolHost } from "./internal/routine-oim-tool-host";
 import type { SlackEventRouteDeps } from "./internal/slack-event-routes";
 import type { SlackHomeRouteDeps } from "./internal/slack-home-routes";
 import type { KillSwitchService } from "./kill-switches/service";
@@ -149,6 +154,13 @@ export interface AppOptions {
    * provider HTTP adapter, and public origins; omission leaves these routes unregistered.
    */
   oimConnections?: OimConnectionService;
+  /** Verified OIM packages and current Connection status for the shared Integration catalog. */
+  oimCatalog?: OimIntegrationCatalogRoutes;
+  /** Public management routes for one fully composed OIM release control plane. */
+  oimReleases?: {
+    readonly controlPlane: OimReleaseControlPlane;
+    readonly businessId: string;
+  };
   hookExecutor?: HookExecutor;
   resourceRepoFactory?: ResourceRepoFactory;
   counterStore?: CounterStore;
@@ -278,6 +290,9 @@ export interface AppOptions {
    * principals only; PR 4 moves the implementations into the Worker and this surface goes away.
    */
   internalTurns?: InternalTurnRouteDeps;
+  internalOimConnections?: InternalOimConnectionRouteDeps;
+  internalOimWorker?: InternalOimWorkerRouteDeps;
+  internalRoutineOim?: Pick<InternalRoutineOimToolHost, "prepare" | "dispatch">;
   /**
    * Datastore handle backing `/readyz`. Absent (tests, partial assemblies) means readiness reports
    * ok on process liveness alone.

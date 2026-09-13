@@ -57,6 +57,25 @@ function postForm(url: string, field: string, value: string, newTab: boolean): v
   form.submit();
 }
 
+export function followAuthAction(
+  action:
+    | { action: "redirect"; url: string }
+    | { action: "form_post"; url: string; field: string; value: string }
+    | { action: "completed" },
+  newTab = false
+): "handed_off" | "completed" {
+  if (action.action === "redirect") {
+    if (newTab) window.open(action.url, "_blank", "noopener,noreferrer");
+    else window.location.assign(action.url);
+    return "handed_off";
+  }
+  if (action.action === "form_post") {
+    postForm(action.url, action.field, action.value, newTab);
+    return "handed_off";
+  }
+  return "completed";
+}
+
 /**
  * Starts one step that does not collect fields, and hands the browser over if the step needs
  * it. Returns `"completed"` when the server finished the step by itself — a `webhook`
@@ -74,17 +93,10 @@ export async function startHandoff(
     ...(org ? { org } : {}),
     ...(scope === "user" ? { scope } : {}),
   });
-  if (action.action === "redirect") {
-    if (newTab) window.open(action.url, "_blank", "noopener,noreferrer");
-    else window.location.assign(action.url);
-    return "handed_off";
+  if (action.action === "collect_fields") {
+    throw new Error("This step expects credentials. Reload the page to continue.");
   }
-  if (action.action === "form_post") {
-    postForm(action.url, action.field, action.value, newTab);
-    return "handed_off";
-  }
-  if (action.action === "completed") return "completed";
-  throw new Error("This step expects credentials. Reload the page to continue.");
+  return followAuthAction(action, newTab);
 }
 
 type StepState = "done" | "current" | "upcoming";

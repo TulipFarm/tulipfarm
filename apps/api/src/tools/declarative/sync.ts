@@ -11,6 +11,7 @@ import type { Logger, SoulIntegration } from "@tulipfarm/soul";
 import type { EffectRetryParker, EffectRetryWaitReader, EffectStore } from "@tulipfarm/tool-broker";
 import type { ToolCallPreparationPort } from "@tulipfarm/tool-host";
 import type { ToolRegistry } from "../../broker/tool-adapter";
+import type { OimReleaseDispatchPort } from "../../integrations/releases/dispatch-host";
 import { buildDeclarativeTools, type DeclarativeToolingDeps } from "./tools";
 
 /**
@@ -35,6 +36,7 @@ export interface DeclarativeToolSyncDeps {
   readonly paginationRuntime?: OimPaginationRuntime;
   readonly parkRetry?: EffectRetryParker;
   readonly retryWaitStatus?: EffectRetryWaitReader;
+  readonly releaseDispatch?: OimReleaseDispatchPort;
   readonly authorizeFiles?: DeclarativeToolingDeps["authorizeFiles"];
   /**
    * Resolved lazily: Fastify's logger does not exist until `buildApp`, and this syncer must be
@@ -77,6 +79,9 @@ export class DeclarativeToolSync implements ToolCallPreparationPort {
         ...(this.deps.retryWaitStatus === undefined
           ? {}
           : { retryWaitStatus: this.deps.retryWaitStatus }),
+        ...(this.deps.releaseDispatch === undefined
+          ? {}
+          : { releaseDispatch: this.deps.releaseDispatch }),
         ...(this.deps.authorizeFiles === undefined
           ? {}
           : { authorizeFiles: this.deps.authorizeFiles }),

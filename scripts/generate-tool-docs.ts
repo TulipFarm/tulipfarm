@@ -148,6 +148,7 @@ export function collectTools(): CatalogTool[] {
     resources: present,
     resourceTypes: present,
     agentTools: present,
+    integrationAuthoring: present,
     skillTools: present,
     surfaceComponents: present,
     platform: present,

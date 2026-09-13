@@ -74,6 +74,7 @@ export {
   CONNECTION_EXTERNAL_IDENTITY_STORAGE_STATEMENTS,
   ConnectionExternalIdentityConflictError,
   ConnectionExternalIdentityStore,
+  clearVerifiedConnectionExternalIdentity,
 } from "./connection-external-identity-store";
 export type {
   ConnectionAuthStepFence,
@@ -85,6 +86,11 @@ export {
   ConnectionIdentityConflictError,
   ConnectionStore,
 } from "./connection-store";
+export {
+  CONNECTION_VERIFICATION_EVIDENCE_STORAGE_STATEMENTS,
+  ConnectionVerificationEvidenceStore,
+  publishConnectionVerificationEvidence,
+} from "./connection-verification-evidence-store";
 export {
   INGRESS_TEARDOWN_STORAGE_STATEMENTS,
   IngressTeardownStore,
@@ -245,6 +251,7 @@ export {
 export type {
   ActiveWebhookRegistration,
   CompleteWebhookRegistrationResult,
+  OimWebhookCleanupPackageSnapshot,
   PersistedWebhookRegistration,
   PersistedWebhookRegistrationAttempt,
   WebhookRegistrationAttemptClaim,

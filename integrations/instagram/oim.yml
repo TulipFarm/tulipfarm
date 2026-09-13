@@ -4,7 +4,7 @@ kind: Integration
 metadata:
   id: instagram
   name: Instagram
-  version: 1.0.0
+  version: 2.0.0
   description: Read and publish images for one professional account through Instagram Login.
   license: Apache-2.0
   maintainers:
@@ -13,12 +13,12 @@ metadata:
 
 profiles:
   core: "1.1"
-  auth: "1.0"
+  auth: "1.1"
 
 files:
   - path: fixtures.yml
     role: fixture
-    sha256: "c39bc2997693e04d514a5870883ea4d5b253cbfd4c332141081617e7f97b975f"
+    sha256: "9bae7efb6cc7044b530a9194b80ff965126454745fd94249608e1e2ee189bccc"
   - path: setup-guide.md
     role: guide
     sha256: "839f1982545efe2f6708fdff2157bee8da3601e0c90aa1978f45888d272d2e6e"
@@ -47,6 +47,28 @@ auth:
             type: credential
             slot: access_token
   healthCheckOperationId: current-account
+  verification:
+    issuer:
+      source: package
+      value: https://graph.instagram.com
+    checks:
+      - id: current-account
+        operationId: current-account
+        credentialSlots: [access_token]
+        success:
+          - kind: present
+            path: /id
+          - kind: present
+            path: /user_id
+          - kind: present
+            path: /username
+    evidence:
+      assurance: identified
+      subject:
+        kind: account
+        checkId: current-account
+        path: /user_id
+        namespace: issuer
 
 operations:
   - id: current-account
@@ -74,25 +96,26 @@ operations:
       schema:
         type: object
         properties:
-          data:
-            type: array
-            minItems: 1
-            items:
-              type: object
-              properties:
-                id: { type: string }
-                user_id: { type: string }
-                username: { type: string }
-                name: { type: string }
-                account_type: { type: string }
-                profile_picture_url: { type: string }
-                followers_count: { type: integer }
-                follows_count: { type: integer }
-                media_count: { type: integer }
-              required: [user_id, username]
-        required: [data]
+          id: { type: string, minLength: 1 }
+          user_id: { type: string, minLength: 1 }
+          username: { type: string, minLength: 1 }
+          name: { type: string }
+          account_type: { type: string }
+          profile_picture_url: { type: string }
+          followers_count: { type: integer }
+          follows_count: { type: integer }
+          media_count: { type: integer }
+        required: [id, user_id, username]
       projection:
-        - /data
+        - /id
+        - /user_id
+        - /username
+        - /name
+        - /account_type
+        - /profile_picture_url
+        - /followers_count
+        - /follows_count
+        - /media_count
 
   - id: list-media
     name: instagram_list_media

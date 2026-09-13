@@ -32,6 +32,7 @@ import {
   CONNECTION_AUTH_STEP_STORAGE_STATEMENTS,
   CONNECTION_EXTERNAL_IDENTITY_STORAGE_STATEMENTS,
   CONNECTION_STORAGE_STATEMENTS,
+  CONNECTION_VERIFICATION_EVIDENCE_STORAGE_STATEMENTS,
   CONVERSATION_CONTEXT_SUMMARY_STORAGE_STATEMENTS,
   dropInvalidEmbeddingIndexes,
   EMBEDDING_COLUMNS,
@@ -3455,5 +3456,10 @@ export const PG_MIGRATIONS: PgMigration[] = [
     description:
       "quarantine legacy OIM provenance and journal release operations, lifecycle, and uninstall",
     up: applyStatements(OIM_RELEASE_LIFECYCLE_STORAGE_STATEMENTS),
+  },
+  {
+    version: 120,
+    description: "persist typed OIM Connection verification evidence",
+    up: applyStatements(CONNECTION_VERIFICATION_EVIDENCE_STORAGE_STATEMENTS),
   },
 ];

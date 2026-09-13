@@ -7,6 +7,7 @@ import type { AuthorizationCheck, RequireAuthorization } from "../authz/route-ga
 import { registerIntegrationAuthRoutes } from "../integrations/auth-routes";
 import { ensureGitHubInstallation } from "../integrations/github-install";
 import { registerIntegrationMarketplaceRoutes } from "../integrations/marketplace-routes";
+import { registerOimReleaseRoutes } from "../integrations/releases/routes";
 import { registerIntegrationRoutes } from "../integrations/routes";
 import {
   ensureDefaultSlackRoute,
@@ -39,6 +40,34 @@ export function registerSoulRouteFamily(
   let integrationAuthCallbackRegistered = false;
   const publicOrigins = opts.publicOrigins;
   if (opts.gitSync && opts.soulWriter) {
+    if (opts.oimReleases) {
+      const authorized =
+        (
+          action: "integration.read" | "integration.connect" | "integration.remove",
+          fallback: "authenticated" | "admin"
+        ): PreHandler =>
+        async (request, reply) => {
+          await requireAuth(request, reply);
+          if (reply.sent) return;
+          await requireAuthorization({
+            action,
+            resourceType: "integration",
+            fallback,
+          })(request, reply);
+        };
+      registerOimReleaseRoutes(
+        app,
+        opts.oimReleases.controlPlane,
+        {
+          read: authorized("integration.read", "authenticated"),
+          install: authorized("integration.connect", "admin"),
+          uninstall: authorized("integration.remove", "admin"),
+          trust: authorized("integration.remove", "admin"),
+          maintenance: authorized("integration.remove", "admin"),
+        },
+        opts.oimReleases.businessId
+      );
+    }
     registerSoulRoutes(
       app,
       opts.gitSync,
@@ -128,7 +157,8 @@ export function registerSoulRouteFamily(
             : undefined,
           opts.declarativeTools,
           opts.auditService,
-          opts.integrationAuth?.tokens
+          opts.integrationAuth?.tokens,
+          opts.oimCatalog
         );
         registerIntegrationMarketplaceRoutes(
           app,

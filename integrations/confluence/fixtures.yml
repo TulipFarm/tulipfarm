@@ -1,5 +1,31 @@
 version: 1
 cases:
+  - name: identifies-current-user
+    operationId: current-user
+    configuration:
+      site: example.atlassian.net
+    request: {}
+    response:
+      status: 200
+      body:
+        type: known
+        accountId: user-123
+        accountType: atlassian
+        publicName: Muskan Vijayvargiya
+        displayName: Muskan Vijayvargiya
+    expect:
+      request:
+        method: GET
+        url: https://example.atlassian.net/wiki/rest/api/user/current
+        headers:
+          Authorization: Basic b2ltLWZpeHR1cmUtY3JlZGVudGlhbA==
+      result:
+        type: known
+        accountId: user-123
+        accountType: atlassian
+        publicName: Muskan Vijayvargiya
+        displayName: Muskan Vijayvargiya
+
   - name: lists-first-space-page
     operationId: list-spaces
     configuration:

@@ -1,5 +1,39 @@
 version: 1
 cases:
+  - name: identifies-token-user
+    operationId: get-self
+    request: {}
+    response:
+      status: 200
+      body:
+        object: user
+        id: bot-redacted
+        type: bot
+        name: TulipFarm
+        bot:
+          owner:
+            type: user
+            user:
+              object: user
+              id: user-redacted
+              type: person
+              name: Muskan Vijayvargiya
+          workspace_name: Acme
+    expect:
+      request:
+        method: GET
+        url: https://api.notion.com/v1/users/me
+      result:
+        object: user
+        id: bot-redacted
+        type: bot
+        name: TulipFarm
+        bot:
+          owner:
+            type: user
+            user:
+              id: user-redacted
+          workspace_name: Acme
   - name: reads-page-blocks
     operationId: get-block-children
     request:

@@ -1,7 +1,10 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import type { AppOptions } from "../app";
 import { registerChannelInternalRoutes } from "./channel-routes";
+import { registerInternalOimConnectionRoutes } from "./oim-connection-routes";
+import { registerInternalOimWorkerRoutes } from "./oim-worker-routes";
 import { registerInternalTurnRoutes } from "./routes";
+import { registerRoutineOimToolRoutes } from "./routine-oim-tool-routes";
 import { registerSlackEventRoutes } from "./slack-event-routes";
 import { registerSlackHomeRoutes } from "./slack-home-routes";
 import { registerSurfaceInternalRoutes } from "./surfaces-routes";
@@ -20,6 +23,20 @@ export function registerInternalRouteFamily(
 ): void {
   if (opts.internalTurns) {
     registerInternalTurnRoutes(app, opts.internalTurns, requireAuth);
+  }
+  if (opts.internalOimConnections) {
+    registerInternalOimConnectionRoutes(app, opts.internalOimConnections, requireAuth);
+  }
+  if (opts.internalOimWorker) {
+    registerInternalOimWorkerRoutes(app, opts.internalOimWorker, requireAuth);
+  }
+  if (opts.internalRoutineOim) {
+    const requireService: PreHandler = async (request, reply) => {
+      if (request.principal?.kind !== "service") {
+        await reply.code(403).send({ error: "Routine OIM routes are service-only" });
+      }
+    };
+    registerRoutineOimToolRoutes(app, opts.internalRoutineOim, [requireAuth, requireService]);
   }
   if (opts.channels) {
     const channelDeps = opts.channels(app.log);

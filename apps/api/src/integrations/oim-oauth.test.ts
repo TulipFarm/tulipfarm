@@ -255,6 +255,64 @@ describe("refreshOimOAuthStep", () => {
       },
     });
   });
+
+  it("defers Auth 1.1 identity to the revision-bound verification host", async () => {
+    const source = manifest();
+    const auth = source.auth;
+    const step = auth?.steps[0];
+    if (auth === undefined || step?.type !== "oauth2") throw new Error("expected oauth2");
+    const verified = {
+      ...source,
+      profiles: { ...source.profiles, auth: "1.1" as const },
+      auth: {
+        ...auth,
+        verification: {
+          issuer: { source: "package" as const, value: "https://acme.test" },
+          checks: [
+            {
+              id: "current-user",
+              operationId: "read",
+              credentialSlots: ["access_token"],
+              success: [{ kind: "present" as const, path: "/id" }],
+            },
+          ],
+          evidence: { assurance: "validity_only" as const },
+        },
+      },
+    };
+
+    await expect(
+      refreshOimOAuthStep(
+        {
+          manifest: verified,
+          step,
+          connection: {
+            integration: { id: "acme", majorVersion: 1 },
+            configuration: {},
+          } as PersistedConnection,
+          credentials: {
+            client_id: "client",
+            client_secret: "secret",
+            refresh_token: "refresh",
+          },
+        },
+        {
+          now: new Date("2026-09-12T12:00:00.000Z"),
+          fetchImpl: async () =>
+            new Response(JSON.stringify({ access_token: "new-access", expires_in: 3600 }), {
+              status: 200,
+              headers: { "content-type": "application/json" },
+            }),
+        }
+      )
+    ).resolves.toEqual({
+      credentialValues: {
+        access_token: "new-access",
+        refresh_token: "refresh",
+      },
+      expiresAt: "2026-09-12T13:00:00.000Z",
+    });
+  });
 });
 
 describe("oimAuthLegacyManifest", () => {

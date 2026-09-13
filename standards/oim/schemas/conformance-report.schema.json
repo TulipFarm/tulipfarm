@@ -51,7 +51,7 @@
         },
         "auth": {
           "type": "string",
-          "enum": ["1.0"]
+          "enum": ["1.0", "1.1"]
         },
         "events": {
           "type": "string",
@@ -124,7 +124,7 @@
             },
             "auth": {
               "type": "string",
-              "enum": ["1.0"]
+              "enum": ["1.0", "1.1"]
             },
             "events": {
               "type": "string",

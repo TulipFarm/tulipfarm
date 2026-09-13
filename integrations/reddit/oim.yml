@@ -4,7 +4,7 @@ kind: Integration
 metadata:
   id: reddit
   name: Reddit
-  version: 1.0.0
+  version: 1.0.1
   description: >-
     Read Reddit identity, subreddit posts and submission comments, and create comments or posts
     through an approved Reddit OAuth app.
@@ -15,7 +15,7 @@ metadata:
 
 profiles:
   core: "1.1"
-  auth: "1.0"
+  auth: "1.1"
 
 files:
   - path: setup-guide.md
@@ -109,6 +109,26 @@ auth:
             type: credential
             slot: refresh_token
   healthCheckOperationId: get-identity
+  verification:
+    issuer:
+      source: package
+      value: https://www.reddit.com
+    checks:
+      - id: current-user
+        operationId: get-identity
+        credentialSlots: [access_token]
+        success:
+          - kind: present
+            path: /id
+          - kind: present
+            path: /name
+    evidence:
+      assurance: identified
+      subject:
+        kind: human
+        checkId: current-user
+        path: /id
+        namespace: issuer
 
 operations:
   - id: get-identity

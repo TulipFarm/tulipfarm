@@ -1,35 +1,27 @@
 ---
 title: Bundled skills
-description: The seven skills every TulipFarm instance ships with, what each one lets agents do, and where they live.
+description: How bundled skills give agents everyday abilities and guided build paths, and how to find the set shipped by your release.
 ---
 
-A skill is a capability package an agent can use. Every instance ships with seven of them, already
-installed. You do not have to add these, and you can ask an agent to build more.
+A skill is a capability package an agent can use. Every instance ships with a set of bundled
+skills, already installed. You do not have to add these, and you can ask an agent to build more.
 
-They arrive in two groups.
+Open **Skills** to see the exact set shipped by your release. The screen is the source of truth
+because new bundled skills can arrive in an upgrade.
 
 ## Core skills
 
-The everyday abilities. These are what an agent reaches for when someone asks an ordinary question
-about the business.
-
-| Skill | What it lets an agent do |
-| --- | --- |
-| `knowledge-research` | Research stored knowledge, reconcile sources, and cite the pages it used. |
-| `onboarding` | Run guided first-time setup and generate a starter soul for a new business. |
+Core skills provide everyday abilities such as researching stored knowledge, creating documents,
+and guiding first-time setup. An agent loads one when it matches the current request.
 
 ## Forge skills
 
-The building abilities. These are how the product builds itself: when you ask for a new resource
-type, agent, routine, skill, or component, a forge skill is what does the work.
+Forge skills are the guided build paths. They create or update resource types, agents, routines,
+skills, surface components, and integrations.
 
-| Skill | What it builds |
-| --- | --- |
-| `resource-forge` | A resource type: its fields, links, transforms, and hooks. |
-| `agent-forge` | An agent: its persona, model, autonomy, and interface guidance. |
-| `routine-forge` | A routine: its triggers, states, retries, and approvals. |
-| `skill-forge` | A new skill, or an improvement to an existing one. |
-| `surface-component-forge` | A business component that agents can render in a reply. |
+The integration forge reads a provider's public documentation, prepares a declarative package,
+runs its offline checks, and presents the exact destinations, credentials, and actions for review.
+It publishes only after approval of those exact reviewed files.
 
 ## Where they live
 

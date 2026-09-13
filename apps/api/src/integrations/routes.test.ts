@@ -1,4 +1,5 @@
 import { InMemoryAuditEventRepo } from "@tulipfarm/audit";
+import type { OimManifest } from "@tulipfarm/schema";
 import type {
   BundledIntegration,
   GitSyncService,
@@ -21,6 +22,48 @@ import type { SlackAuthTestResult } from "./slack-binding";
 
 const TEST_CSRF = "a".repeat(64);
 const AUDIT_BUSINESS = "deployment";
+const OIM_MANIFEST = {
+  oimVersion: "1.0",
+  kind: "Integration",
+  metadata: {
+    id: "notion",
+    name: "Notion",
+    version: "1.0.0",
+    description: "Read Notion pages.",
+    license: "Apache-2.0",
+    maintainers: [{ name: "TulipFarm" }],
+  },
+  profiles: { core: "1.0", auth: "1.0" },
+  auth: {
+    credentialSlots: [{ id: "token", label: "Token", kind: "api_key" }],
+    steps: [
+      {
+        id: "token",
+        type: "fields",
+        title: "Add token",
+        fields: [
+          {
+            id: "token",
+            label: "Token",
+            input: "password",
+            target: { type: "credential", slot: "token" },
+          },
+        ],
+      },
+    ],
+  },
+  operations: [
+    {
+      id: "list-pages",
+      name: "notion_list_pages",
+      description: "List pages.",
+      effect: "read",
+      identityMode: "shared_or_personal",
+      source: { type: "http", method: "GET", baseUrl: "https://api.notion.com", path: "/pages" },
+      response: { schema: { type: "object" }, maxBytes: 16384 },
+    },
+  ],
+} as OimManifest;
 
 class FakeUserRepo implements UserRepo {
   private users: UserDoc[] = [];
@@ -241,6 +284,14 @@ describe("integrations routes", () => {
       soulLoader,
       secretsService: secretsService as never,
       bundledIntegrations,
+      oimCatalog: {
+        async packages() {
+          return [{ key: "notion", manifest: OIM_MANIFEST }];
+        },
+        async status() {
+          return { connected: true, personalConnected: true };
+        },
+      },
       slackBind: {
         integrations: integrationStore as never,
         businessId: "biz-1",
@@ -324,6 +375,28 @@ describe("integrations routes", () => {
         expect.arrayContaining([expect.objectContaining({ name: "github", status: "connected" })])
       );
     });
+
+    it("lists a verified OIM package with live Connection status", async () => {
+      const res = await app.inject({
+        method: "GET",
+        url: "/api/v1/integrations",
+        cookies: auth(),
+        headers,
+      });
+      expect(res.statusCode).toBe(200);
+      expect(res.json().integrations).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            name: "notion",
+            title: "Notion",
+            type: "oim",
+            installed: true,
+            setupSteps: 1,
+            status: "connected",
+          }),
+        ])
+      );
+    });
   });
 
   describe("GET /api/v1/integrations/:name", () => {
@@ -367,9 +440,40 @@ describe("integrations routes", () => {
       const { capabilities } = await detail("github");
       expect(capabilities.join(" ")).toMatch(/pull request/i);
     });
+
+    it("projects an OIM package into the shared detail route", async () => {
+      expect(await detail("notion")).toMatchObject({
+        name: "notion",
+        title: "Notion",
+        type: "oim",
+        connected: true,
+        personalConnected: true,
+        grants: [
+          {
+            label: "notion_list_pages",
+            access: "read",
+            description: "List pages.",
+          },
+        ],
+      });
+    });
   });
 
   describe("POST /api/v1/integrations/:name/connect", () => {
+    it("keeps OIM packages on the versioned Connection lifecycle", async () => {
+      const res = await app.inject({
+        method: "POST",
+        url: "/api/v1/integrations/notion/connect",
+        cookies: auth(),
+        headers,
+        payload: { env: { token: "secret" } },
+      });
+      expect(res.statusCode).toBe(400);
+      expect(res.json()).toEqual({
+        error: 'integration "notion" is connected through /connections',
+      });
+    });
+
     it("refuses a member, who could otherwise re-point the deployment credential", async () => {
       const res = await app.inject({
         method: "POST",

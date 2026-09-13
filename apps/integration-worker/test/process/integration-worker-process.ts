@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import { createServer, type Server } from "node:http";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { build } from "esbuild";
@@ -36,12 +37,14 @@ export interface IntegrationWorkerHandle {
 export interface StartIntegrationWorkerOptions {
   readonly databaseUrl: string;
   readonly env?: Record<string, string>;
+  readonly internalApiMode?: "ready" | "missing-oim-contract";
 }
 
 export async function startIntegrationWorker(
   options: StartIntegrationWorkerOptions
 ): Promise<IntegrationWorkerHandle> {
   const port = await freePort();
+  const internalApi = await startInternalApi(options.internalApiMode ?? "ready");
   const child = spawn(process.execPath, [BUNDLE], {
     cwd: APP_ROOT,
     env: {
@@ -49,10 +52,7 @@ export async function startIntegrationWorker(
       NODE_ENV: "test",
       DATABASE_URL: options.databaseUrl,
       INTEGRATION_WORKER_PORT: String(port),
-      // Unreachable on purpose in these process tests — the Slack credential lease is expected to
-      // fail closed (`createSlackChannelLoops` catches it and boots with zero Channel loops), so
-      // no test here needs a real `apps/api` behind this URL.
-      INTERNAL_API_URL: "http://127.0.0.1:1",
+      INTERNAL_API_URL: internalApi.url,
       INTEGRATION_WORKER_API_CREDENTIAL: "tfc_test.test",
       ...options.env,
     },
@@ -101,11 +101,66 @@ export async function startIntegrationWorker(
       throw new Error(`integration worker did not become ready within ${timeoutMs}ms:\n${output}`);
     },
     stop: async () => {
-      if (child.exitCode !== null || child.signalCode !== null) return;
-      child.kill("SIGKILL");
-      await exited;
+      if (child.exitCode === null && child.signalCode === null) {
+        child.kill("SIGKILL");
+        await exited;
+      }
+      await closeServer(internalApi.server);
     },
   };
+}
+
+async function startInternalApi(
+  mode: "ready" | "missing-oim-contract"
+): Promise<{ readonly server: Server; readonly url: string }> {
+  const server = createServer((request, response) => {
+    if (request.url === "/api/v1/internal/oim/worker-contract") {
+      if (mode === "missing-oim-contract") {
+        response.writeHead(404).end();
+        return;
+      }
+      response.writeHead(200, { "content-type": "application/json" }).end(
+        JSON.stringify({
+          version: 1,
+          capabilities: [
+            "connection-bound-operations",
+            "exact-manifest-resolution",
+            "hooks",
+            "knowledge-registrations",
+            "payload-crypto",
+            "verified-provider-identity",
+            "webhook-registration",
+          ],
+        })
+      );
+      return;
+    }
+    if (
+      request.url === "/api/v1/internal/oim/polling-registrations" ||
+      request.url === "/api/v1/internal/oim/knowledge-registrations"
+    ) {
+      response.writeHead(200, { "content-type": "application/json" }).end("[]");
+      return;
+    }
+    response.writeHead(404).end();
+  });
+  await new Promise<void>((resolveListen) => server.listen(0, "127.0.0.1", resolveListen));
+  const address = server.address();
+  if (typeof address === "string" || address === null) {
+    await closeServer(server);
+    throw new Error("Internal API test server did not bind a TCP port");
+  }
+  return { server, url: `http://127.0.0.1:${address.port}` };
+}
+
+async function closeServer(server: Server): Promise<void> {
+  if (!server.listening) return;
+  await new Promise<void>((resolveClose, rejectClose) => {
+    server.close((error) => {
+      if (error) rejectClose(error);
+      else resolveClose();
+    });
+  });
 }
 
 function sleep(ms: number): Promise<void> {

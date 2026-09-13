@@ -25,6 +25,7 @@ reconciliation, turn execution, delivery classification, projections, and outbox
 | `src/memory-curation/` | The hourly Curator: `run.ts` scans users with new Turns, calls the fast `memory_curator` agent and writes the rewritten Memory Document; `guards.ts` holds the pure output guards (budget classification, standing-instruction check). |
 | `src/subagent/` | Ad-hoc sub-agent Run executor: the chat executor with its Conversation swapped for an answer Artifact. |
 | `src/internal/` | HTTP ports back to `/api/v1/internal/*`; Run identity is re-derived by API. |
+| `src/job-consumers.ts` | API-scheduled pg-boss work, including OIM Connection refresh. |
 | `src/tools/` | In-process Tool host for co-locatable families, and the routing dispatcher. |
 | `src/files/`, `src/knowledge/` | The worker's own `FileService` and `KnowledgeService`, and the `file-index` job that extracts a File's text into Knowledge. |
 | `src/hooks/` | Sandbox worker bundle for Integration delivery classification. |
@@ -60,6 +61,8 @@ reconciliation, turn execution, delivery classification, projections, and outbox
 - `maintenance-sweep` (*/5, bare pg-boss, scheduled by the API) is deterministic maintenance only:
   it reconciles Tasks and calls no model. Its queue name is a plain string shared with
   `apps/api/src/schedule/maintenance-schedule.ts` — rename both or neither.
+- The API schedules OIM Connection refresh; the Worker only consumes the shared queue and calls
+  its authenticated internal endpoint. A partial-failure result is reported, not retried.
 - `memory-curation` (hourly, same arrangement, shared with `apps/api/src/memory/curation-schedule.ts`)
   is the only model-calling maintenance. It calls a model only for users who gained a Turn since
   their watermark, so an idle hour costs nothing. An over-budget rewrite is retried exactly once and
@@ -120,8 +123,9 @@ reconciliation, turn execution, delivery classification, projections, and outbox
 - Worker process tests can leak dev env through `apps/worker/.env.local`; check before blaming code.
 - May import listed `@tulipfarm/*` packages, never another app; see dependency rules below.
 - Soul access is only signed-bundle reads; never load live Soul, alias, publish, or git sync.
-- `BrokerRoutineToolPort` gets a `MutationKillSwitchGuard` reading the same table as the API, so an
-  operator's stop covers Worker-dispatched effects too. Its audit port only logs: the API owns the
-  audit ledger, and the denial's durable evidence is the Run's own event ledger.
+- Production Routine Tools use `createRoutineToolPort` with the authenticated `InternalApiClient`
+  and the shared `DurableWaitManager`; OIM preparation/dispatch stays API-side, while retries park
+  durably. Its `MutationKillSwitchGuard` reads the same table as the API, so an operator's stop
+  covers Worker-dispatched effects too.
 
 See [`../../docs/architecture/dependency-rules.md`](../../docs/architecture/dependency-rules.md).

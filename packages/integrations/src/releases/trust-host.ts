@@ -17,6 +17,7 @@ import type {
 import type { OimReleasePackage } from "./package-verifier";
 import { type SignedOimRevocationList, validateTrustedOimPublicKey } from "./signatures";
 import {
+  type AuthorizeCommunityOimReleaseInput,
   type AuthorizedOimRelease,
   assertAuthorizedOimRelease,
   createOimReleaseTrustService,
@@ -215,6 +216,10 @@ export function createOimReleaseTrustHost(
     return (await service()).authorizeSelectedOfficialRelease(input);
   }
 
+  async function authorizeCommunityRelease(input: AuthorizeCommunityOimReleaseInput) {
+    return (await service()).authorizeCommunityRelease(input);
+  }
+
   async function recordKnownSignedReleases(inputs: readonly unknown[]): Promise<void> {
     const trust = await service();
     for (const input of inputs) await trust.recordKnownSignedRelease(input);
@@ -303,6 +308,7 @@ export function createOimReleaseTrustHost(
 
   return Object.freeze({
     addTrustRoot,
+    authorizeCommunityRelease,
     authorizeInstalledRelease,
     authorizeSelectedOfficialRelease,
     recordKnownSignedReleases,

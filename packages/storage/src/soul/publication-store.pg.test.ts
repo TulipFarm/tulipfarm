@@ -266,6 +266,118 @@ describe("PgSoulPublicationStore", () => {
     });
   });
 
+  it("rejects stale rollback intents after newer and ABA activations", async () => {
+    for (const digest of ["digest-1", "digest-2", "digest-3"]) {
+      await insertBundle(database, digest);
+    }
+    await store.withTransaction(async (transaction) => {
+      for (const [index, digest] of ["digest-1", "digest-2", "digest-3"].entries()) {
+        await transaction.putPublication(record({ changesetId: `changeset-${index + 1}`, digest }));
+      }
+      await transaction.replaceProjection(BUSINESS, [
+        {
+          businessId: BUSINESS,
+          digest: "digest-2",
+          kind: "Routine",
+          id: "routine-1",
+          slug: "daily",
+          authoredVersion: 2,
+          hash: "hash-2",
+        },
+      ]);
+      await transaction.setActiveDigest(activation("digest-2"));
+    });
+    const intent = await store.withTransaction((transaction) =>
+      transaction.getActiveActivation(BUSINESS)
+    );
+    if (intent === undefined) throw new Error("active activation missing");
+
+    await store.withTransaction((transaction) =>
+      transaction.setActiveDigest(activation("digest-3"))
+    );
+    await expect(
+      store.withTransaction(async (transaction) => {
+        await transaction.replaceProjection(BUSINESS, [
+          {
+            businessId: BUSINESS,
+            digest: "digest-1",
+            kind: "Routine",
+            id: "routine-1",
+            slug: "daily",
+            authoredVersion: 1,
+            hash: "hash-1",
+          },
+        ]);
+        await transaction.forceActivateDigestIfCurrent({
+          ...activation("digest-1"),
+          expectedActivationSequence: intent.activationSequence,
+        });
+      })
+    ).rejects.toBeInstanceOf(StaleActivationError);
+
+    await store.withTransaction((transaction) =>
+      transaction.forceActivateDigest(activation("digest-2"))
+    );
+    await expect(
+      store.withTransaction(async (transaction) => {
+        await transaction.replaceProjection(BUSINESS, []);
+        await transaction.forceActivateDigestIfCurrent({
+          ...activation("digest-1"),
+          expectedActivationSequence: intent.activationSequence,
+        });
+      })
+    ).rejects.toBeInstanceOf(StaleActivationError);
+
+    await store.withTransaction(async (transaction) => {
+      const active = await transaction.getActiveActivation(BUSINESS);
+      expect(active?.digest).toBe("digest-2");
+      expect(active?.activationSequence).toBeGreaterThan(intent.activationSequence);
+      expect(await transaction.listProjection(BUSINESS)).toEqual([
+        expect.objectContaining({ digest: "digest-2", hash: "hash-2" }),
+      ]);
+    });
+  });
+
+  it("accepts duplicate rollback intents without another activation", async () => {
+    await insertBundle(database, "digest-1");
+    await insertBundle(database, "digest-2");
+    await store.withTransaction(async (transaction) => {
+      await transaction.putPublication(record({ changesetId: "changeset-1", digest: "digest-1" }));
+      await transaction.putPublication(record({ changesetId: "changeset-2", digest: "digest-2" }));
+      await transaction.setActiveDigest(activation("digest-2"));
+    });
+    const intent = await store.withTransaction((transaction) =>
+      transaction.getActiveActivation(BUSINESS)
+    );
+    if (intent === undefined) throw new Error("active activation missing");
+    const rollback = {
+      ...activation("digest-1"),
+      expectedActivationSequence: intent.activationSequence,
+    };
+
+    await store.withTransaction((transaction) =>
+      transaction.forceActivateDigestIfCurrent(rollback)
+    );
+    const activated = await store.withTransaction((transaction) =>
+      transaction.getActiveActivation(BUSINESS)
+    );
+    if (activated === undefined) throw new Error("rollback activation missing");
+    await store.withTransaction((transaction) =>
+      transaction.forceActivateDigestIfCurrent(rollback)
+    );
+    await store.withTransaction((transaction) =>
+      transaction.forceActivateDigestIfCurrent({
+        ...rollback,
+        expectedActivationSequence: activated.activationSequence,
+      })
+    );
+
+    await store.withTransaction(async (transaction) => {
+      expect(await transaction.getActiveActivation(BUSINESS)).toEqual(activated);
+      expect(await transaction.listActivationHistory(BUSINESS, 10)).toHaveLength(2);
+    });
+  });
+
   it("records retry timing and dead letters without changing stage", async () => {
     await store.withTransaction(async (transaction) => {
       await transaction.putPublication(record());

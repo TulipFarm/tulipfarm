@@ -49,6 +49,10 @@ Changing the soul, the git-backed definitions of what your instance is and what 
 | `create_resource_type` | Yes | Create a new resource type by writing its JSON Schema (as YAML) to the soul repo. |
 | `get_business_profile` | No | Read the business you work for: its name, what it does, and its website. |
 | `get_current_agent` | No | Find out which Agent you are: your name, your configured domain, and your description. |
+| `integration_draft_create` | Yes | Install the exact reviewed OIM package in the soul repo under integrations/&#60;slug&#62;. |
+| `integration_draft_review` | No | Validate and test a complete drafted OIM package, including setup-guide.md, digest-covered OpenAPI or GraphQL contracts, and passing offline fixture coverage for every operation. |
+| `integration_get` | No | Read one installed integration package and, for an OIM package, the capability review derived from it. |
+| `integration_list` | No | List the integration packages installed in the soul repo. |
 | `list_resource_types` | No | List all resource types defined in the soul repo. |
 | `resource_hooks_delete` | Yes | Remove the hooks.ts file for a resource type. |
 | `resource_hooks_get` | No | Get the hooks.ts source for a resource type, or null if none exists. |
@@ -93,7 +97,7 @@ The single document an agent carries between chats with you.
 
 | Tool | Changes things | What it does |
 | --- | --- | --- |
-| `get_memory` | No | Read everything durable you have recorded about this user: who they are, how they want you to reply, and standing rules they have given you. |
+| `get_memory` | No | Fallback read of this user's durable memory document. |
 | `update_memory` | Yes | Edit the user's durable memory document, carried across every future chat with this user. |
 
 ## Saved values

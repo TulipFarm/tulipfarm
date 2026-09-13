@@ -3,7 +3,7 @@ export type OimKnowledgeProfileVersion = "1.0" | "1.1" | "1.2";
 export type OimOptionalProfile = "auth" | "events" | "knowledge" | "hooks";
 export type OimProfiles = {
   readonly core: OimCoreProfileVersion;
-  readonly auth?: "1.0";
+  readonly auth?: "1.0" | "1.1";
   readonly events?: "1.0";
   readonly knowledge?: OimKnowledgeProfileVersion;
   readonly hooks?: "1.0";
@@ -50,7 +50,7 @@ export declare const OIM_VERSION: "1.0";
 export declare const OIM_CORE_PROFILE_VERSIONS: readonly ["1.0", "1.1", "1.2"];
 export declare const OIM_PROFILE_VERSIONS: Readonly<{
   core: "1.2";
-  auth: "1.0";
+  auth: "1.1";
   events: "1.0";
   knowledge: "1.2";
   hooks: "1.0";

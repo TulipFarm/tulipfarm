@@ -1,6 +1,8 @@
+import { OIM_CONNECTION_REFRESH_QUEUE } from "@tulipfarm/integrations";
 import type { PgBoss } from "pg-boss";
 import { describe, expect, it, vi } from "vitest";
 import type { Queryable } from "./db";
+import type { InternalApiClient } from "./internal/client";
 
 import {
   jobBossOptions,
@@ -205,6 +207,43 @@ describe("startJobConsumers", () => {
 
     expect(boss.send).not.toHaveBeenCalled();
     expect(boss.createQueue).not.toHaveBeenCalledWith(MAINTENANCE_SWEEP_QUEUE);
+  });
+
+  it("refreshes due OIM Connections and fails only when the API request fails", async () => {
+    const require = vi
+      .fn()
+      .mockResolvedValueOnce({ examined: 5, refreshed: 2, failed: 3 })
+      .mockRejectedValueOnce(new Error("POST failed with 503"));
+    const error = vi.fn();
+    const info = vi.fn();
+    const boss = {
+      start: vi.fn(async () => {}),
+      createQueue: vi.fn(async () => {}),
+      work: vi.fn(
+        async (_name: string, _handler: (jobs: unknown[]) => Promise<void>) => "worker-id"
+      ),
+    };
+
+    await startJobConsumers({
+      databaseUrl: "postgres://database/tulipfarm",
+      database: { query: vi.fn(async () => ({ rows: [] })) } as Queryable,
+      boss: boss as unknown as PgBoss,
+      internalApi: { require } as unknown as InternalApiClient,
+      log: { error, info },
+    });
+
+    expect(boss.createQueue).toHaveBeenCalledWith(OIM_CONNECTION_REFRESH_QUEUE);
+    const handler = boss.work.mock.calls.find(
+      ([queue]) => queue === OIM_CONNECTION_REFRESH_QUEUE
+    )?.[1];
+    await expect(handler?.([])).resolves.toBeUndefined();
+    expect(require).toHaveBeenCalledWith("POST", "/api/v1/internal/oim/connections/refresh-due");
+    expect(error).toHaveBeenCalledWith("oim-connection-refresh examined=5 refreshed=2 failed=3");
+
+    await expect(handler?.([])).rejects.toThrow("POST failed with 503");
+    expect(error).toHaveBeenCalledWith(
+      expect.stringContaining(`queue handler threw queue=${OIM_CONNECTION_REFRESH_QUEUE}`)
+    );
   });
 });
 

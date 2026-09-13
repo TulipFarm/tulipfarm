@@ -151,7 +151,14 @@ export class SoulPublicationCoordinator {
     // The re-activation below needs bundle-store reads, which own their own transactions. Deciding
     // inside this transaction and acting after it keeps those reads from taking a second connection
     // while this one is still held — the nesting that deadlocks a single-connection database.
-    let reactivation: { businessId: string; changesetId: string; digest: string } | undefined;
+    let reactivation:
+      | {
+          businessId: string;
+          changesetId: string;
+          digest: string;
+          expectedActivationSequence: number | undefined;
+        }
+      | undefined;
 
     await this.store.withTransaction(async (tx) => {
       const existing = await tx.getPublication(changesetId);
@@ -187,6 +194,16 @@ export class SoulPublicationCoordinator {
           this.logger.info(
             `Soul publication: changeset ${changesetId} re-published after dead-letter (resuming at ${existing.stage})`
           );
+          return;
+        }
+        const active = await tx.getActiveActivation(businessId);
+        if (existing.stage === "active" && active?.digest !== digest) {
+          reactivation = {
+            businessId,
+            changesetId,
+            digest,
+            expectedActivationSequence: active?.activationSequence,
+          };
         }
         return;
       }
@@ -198,7 +215,15 @@ export class SoulPublicationCoordinator {
       // (the reverted-to digest is older, so the monotonic activation guard would refuse it).
       const priorForDigest = await tx.findPublicationByDigest(businessId, digest);
       if (priorForDigest) {
-        reactivation = { businessId, changesetId, digest };
+        const active = await tx.getActiveActivation(businessId);
+        if (active?.digest !== digest) {
+          reactivation = {
+            businessId,
+            changesetId,
+            digest,
+            expectedActivationSequence: active?.activationSequence,
+          };
+        }
         return;
       }
 
@@ -221,16 +246,18 @@ export class SoulPublicationCoordinator {
     });
 
     if (reactivation) {
-      await this.ensureNonDestructiveActivation(reactivation);
+      const target = reactivation;
+      await this.ensureNonDestructiveActivation(target);
       await this.store.withTransaction(async (tx) => {
         await tx.replaceProjection(
           businessId,
           projectionOf(businessId, digest, record.bundle.definitions)
         );
-        await tx.forceActivateDigest({
+        await tx.forceActivateDigestIfCurrent({
           businessId,
           digest,
           activatedByPrincipalId: actorPrincipalId,
+          expectedActivationSequence: target.expectedActivationSequence,
         });
       });
       this.logger.info(

@@ -122,6 +122,16 @@ describe("loadCorpus", () => {
     { kind: "run_status", status: "succeeded" },
     { kind: "run_event_text_omits", text: "hello" },
     { kind: "persisted_message_metadata_equals", path: "turnAttempt.outcome", value: "failed" },
+    {
+      kind: "tool_result_field_equals",
+      name: "integration_get",
+      argumentPath: "slug",
+      argumentValue: "acme",
+      status: "succeeded",
+      turnIndex: 2,
+      outputPath: "oimManifest.metadata.name",
+      value: "Acme",
+    },
   ])("rejects a persisted expectation on an L2 Case: $kind", async (expectation) => {
     const dir = corpusDir({
       "a.json": {
@@ -322,6 +332,17 @@ describe("loadCorpus", () => {
       { kind: "persisted_message_metadata_equals", value: "failed" },
       { kind: "prompt_contains" },
       { kind: "tool_argument_equals", name: "t", path: "a" },
+      { kind: "tool_result_field_equals", name: "t" },
+      {
+        kind: "tool_result_field_equals",
+        name: "t",
+        argumentPath: "slug",
+        argumentValue: "acme",
+        status: "succeeded",
+        turnIndex: 0,
+        outputPath: "name",
+        value: "Acme",
+      },
       { kind: "output_field_equals", value: 1 },
       { kind: "tool_call_count" },
       { kind: "tool_calls_batched" },

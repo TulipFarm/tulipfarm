@@ -1,5 +1,9 @@
 import { PGlite } from "@electric-sql/pglite";
-import type { OimConnection } from "@tulipfarm/schema";
+import {
+  canonicalHash,
+  type OimConnection,
+  type OimConnectionVerificationEvidence,
+} from "@tulipfarm/schema";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { transactionPort } from "../pg/test-support";
 import type { Queryable, TransactionPort } from "../ports";
@@ -13,6 +17,10 @@ import {
   ConnectionExternalIdentityStore,
 } from "./connection-external-identity-store";
 import { CONNECTION_STORAGE_STATEMENTS, ConnectionStore } from "./connection-store";
+import {
+  CONNECTION_VERIFICATION_EVIDENCE_STORAGE_STATEMENTS,
+  ConnectionVerificationEvidenceStore,
+} from "./connection-verification-evidence-store";
 import {
   INGRESS_TEARDOWN_STORAGE_STATEMENTS,
   IngressTeardownStore,
@@ -68,6 +76,7 @@ describe("OIM persistence foundations", () => {
       ...CONNECTION_STORAGE_STATEMENTS,
       ...CONNECTION_AUTH_STEP_STORAGE_STATEMENTS,
       ...CONNECTION_EXTERNAL_IDENTITY_STORAGE_STATEMENTS,
+      ...CONNECTION_VERIFICATION_EVIDENCE_STORAGE_STATEMENTS,
       ...INGRESS_TEARDOWN_STORAGE_STATEMENTS,
       ...WEBHOOK_INBOX_STORAGE_STATEMENTS,
       ...OIM_INGRESS_EMISSION_STORAGE_STATEMENTS,
@@ -86,6 +95,7 @@ describe("OIM persistence foundations", () => {
   beforeEach(async () => {
     await database.query(`
       TRUNCATE TABLE
+        connection_verification_evidence,
         connection_auth_steps,
         connection_external_identities,
         connections,
@@ -190,6 +200,140 @@ describe("OIM persistence foundations", () => {
       accessSecretRef: "secret://00000000-0000-4000-8000-000000000012",
       refreshSlot: "refresh_token",
       expiresAt: "2026-09-12T10:00:00.000Z",
+    });
+  });
+
+  it("returns verification evidence only while every bound revision is current", async () => {
+    const transactions = transactionPort(database);
+    const connections = new ConnectionStore(transactions);
+    const authSteps = new ConnectionAuthStepStore(transactions);
+    const evidenceStore = new ConnectionVerificationEvidenceStore(transactions);
+    const secretReference = "secret://00000000-0000-4000-8000-000000000001";
+    await connections.put(
+      BUSINESS_ID,
+      connection(CONNECTION_ID, {
+        health: { status: "healthy", checkedAt: "2026-09-12T12:00:00.000Z" },
+      })
+    );
+    await authSteps.put({
+      businessId: BUSINESS_ID,
+      connectionId: CONNECTION_ID,
+      stepId: "credentials",
+      status: "active",
+      accessSlot: "access",
+      accessSecretRef: secretReference,
+      refreshSlot: null,
+      refreshSecretRef: null,
+      externalIdentity: null,
+      expiresAt: null,
+      healthCheckedAt: "2026-09-12T12:00:00.000Z",
+    });
+    const binding = {
+      businessId: BUSINESS_ID,
+      connectionId: CONNECTION_ID,
+      integrationId: "calendar",
+      integrationMajorVersion: 2,
+      packageDigest: "a".repeat(64),
+      configurationDigest: canonicalHash({ region: "us" }),
+      authSteps: [
+        {
+          stepId: "credentials",
+          revision: 1,
+          credentials: [
+            {
+              slot: "access",
+              referenceDigest: canonicalHash(secretReference),
+            },
+          ],
+        },
+      ],
+    };
+    const evidence: OimConnectionVerificationEvidence = {
+      assurance: "validity_only",
+      issuer: "https://calendar.example",
+      subject: null,
+      tenant: null,
+      binding,
+      proofDigest: "d".repeat(64),
+      verifiedAt: "2026-09-12T12:00:00.000Z",
+      verifiedBy: "oim-auth-1.1",
+    };
+
+    await evidenceStore.publish(evidence);
+    await expect(evidenceStore.findCurrent(binding)).resolves.toEqual(evidence);
+    await expect(
+      evidenceStore.findCurrentForConnection(
+        binding.businessId,
+        binding.connectionId,
+        binding.packageDigest
+      )
+    ).resolves.toEqual(evidence);
+    await expect(
+      evidenceStore.findCurrentForConnection(
+        binding.businessId,
+        binding.connectionId,
+        "f".repeat(64)
+      )
+    ).resolves.toBeNull();
+
+    await authSteps.updateHealth({
+      businessId: BUSINESS_ID,
+      connectionId: CONNECTION_ID,
+      stepId: "credentials",
+      expectedRevision: 1,
+      status: "active",
+      expiresAt: null,
+      healthCheckedAt: "2026-09-12T12:05:00.000Z",
+    });
+
+    await expect(evidenceStore.findCurrent(binding)).resolves.toBeNull();
+    await expect(evidenceStore.publish(evidence)).rejects.toThrow(
+      "stale_connection_verification_binding"
+    );
+  });
+
+  it("initializes a missing auth step once without overwriting an existing row", async () => {
+    const store = new ConnectionAuthStepStore(transactionPort(database));
+    const pending = {
+      businessId: BUSINESS_ID,
+      connectionId: CONNECTION_ID,
+      stepId: "account",
+      status: "pending" as const,
+      accessSlot: null,
+      accessSecretRef: null,
+      refreshSlot: null,
+      refreshSecretRef: null,
+      externalIdentity: null,
+      expiresAt: null,
+      healthCheckedAt: "2026-09-12T09:00:00.000Z",
+    };
+
+    const [first, second] = await Promise.all([
+      store.initialize(pending),
+      store.initialize(pending),
+    ]);
+    expect(first).toMatchObject({ status: "pending", revision: 1 });
+    expect(second).toMatchObject({ status: "pending", revision: 1 });
+
+    await store.put({
+      ...pending,
+      status: "active",
+      accessSlot: "access_token",
+      accessSecretRef: "secret://00000000-0000-4000-8000-000000000011",
+      refreshSlot: "refresh_token",
+      refreshSecretRef: "secret://00000000-0000-4000-8000-000000000012",
+      externalIdentity: { subject: "account-1" },
+    });
+    const preserved = await store.initialize(pending);
+
+    expect(preserved).toMatchObject({
+      status: "active",
+      accessSlot: "access_token",
+      accessSecretRef: "secret://00000000-0000-4000-8000-000000000011",
+      refreshSlot: "refresh_token",
+      refreshSecretRef: "secret://00000000-0000-4000-8000-000000000012",
+      externalIdentity: { subject: "account-1" },
+      revision: 2,
     });
   });
 

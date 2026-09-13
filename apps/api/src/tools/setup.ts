@@ -19,6 +19,10 @@ import { PLATFORM_TOOLS, type PlatformToolContext } from "../platform/tools";
 import { readCustomInstructions } from "../preferences/custom-instructions";
 import { RESOURCE_TOOLS, type ResourceServices } from "../resources/tools.js";
 import { AGENT_TOOLS, type AgentToolContext } from "../soul/agents/tools.js";
+import {
+  INTEGRATION_AUTHORING_TOOLS,
+  type IntegrationAuthoringToolContext,
+} from "../soul/integrations/tools.js";
 import { RESOURCE_TYPE_TOOLS, type ResourceTypeToolContext } from "../soul/resource-types/tools.js";
 import { SKILL_TOOLS, type SkillToolContext } from "../soul/skills/tools.js";
 import {
@@ -43,6 +47,7 @@ export function buildToolRegistry(services: {
   resources?: ResourceServices;
   resourceTypes?: ResourceTypeToolContext;
   agentTools?: AgentToolContext;
+  integrationAuthoring?: Omit<IntegrationAuthoringToolContext, "requestContext">;
   skillTools?: SkillToolContext;
   surfaceComponents?: SurfaceComponentToolContext;
   platform?: PlatformToolContext;
@@ -144,6 +149,14 @@ export function buildToolRegistry(services: {
       ...ctx,
       requestContext,
       agentId: requestContext.agentId,
+    }));
+  }
+
+  if (services.integrationAuthoring) {
+    const ctx = services.integrationAuthoring;
+    registerFamily(INTEGRATION_AUTHORING_TOOLS, (requestContext) => ({
+      ...ctx,
+      requestContext,
     }));
   }
 

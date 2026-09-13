@@ -4,7 +4,7 @@ kind: Integration
 metadata:
   id: openweather
   name: OpenWeather
-  version: 1.0.0
+  version: 1.0.1
   description: Current conditions and forecasts from OpenWeather, using one organization API key.
   license: Apache-2.0
   maintainers:
@@ -13,7 +13,7 @@ metadata:
 
 profiles:
   core: "1.1"
-  auth: "1.0"
+  auth: "1.1"
 
 files:
   - path: setup-guide.md
@@ -45,6 +45,20 @@ auth:
             type: credential
             slot: api_key
   healthCheckOperationId: check-connection
+  verification:
+    issuer:
+      source: package
+      value: https://api.openweathermap.org
+    checks:
+      - id: credential-validity
+        operationId: check-connection
+        credentialSlots: [api_key]
+        success:
+          - kind: equals
+            path: /cod
+            value: 200
+    evidence:
+      assurance: validity_only
 
 operations:
   - id: current-weather

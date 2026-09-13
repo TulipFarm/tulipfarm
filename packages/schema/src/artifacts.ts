@@ -29,7 +29,10 @@ export const CONTENT_MODES = [
 ] as const;
 export type ContentMode = (typeof CONTENT_MODES)[number];
 
-/** Definition companion; `match` is an exact name, directory prefix, extension glob, or `**`. */
+/**
+ * Definition companion; `match` is an exact name, directory prefix, flat or recursive extension
+ * glob, or `**`.
+ */
 export interface ArtifactCompanion {
   readonly match: string;
   readonly modes: readonly ContentMode[];
@@ -171,10 +174,16 @@ const ARTIFACT_LAYOUT_ENTRIES = [
     companions: [
       { match: "connection.yaml", modes: ["managed"] },
       { match: "setup-guide.md", modes: ["prose"] },
-      { match: "*.yaml", modes: ["prose"] },
-      { match: "*.yml", modes: ["prose"] },
-      { match: "*.json", modes: ["prose"] },
+      { match: "**/*.yaml", modes: ["prose"] },
+      { match: "**/*.yml", modes: ["prose"] },
+      { match: "**/*.json", modes: ["prose"] },
+      { match: "**/*.gql", modes: ["prose"] },
+      { match: "**/*.graphql", modes: ["prose"] },
+      { match: "**/*.md", modes: ["prose"] },
+      { match: "**/*.txt", modes: ["prose"] },
       { match: "*.ts", modes: ["executable"] },
+      { match: "**/*.js", modes: ["executable"] },
+      { match: "**/*.mjs", modes: ["executable"] },
     ],
   },
   {
@@ -376,6 +385,9 @@ export interface ClassifiedSoulPath {
 function matchesCompanion(companion: ArtifactCompanion, relative: string): boolean {
   if (companion.match === "**") return true;
   if (companion.match.endsWith("/")) return relative.startsWith(companion.match);
+  if (companion.match.startsWith("**/*.")) {
+    return relative.endsWith(companion.match.slice(4));
+  }
   if (companion.match.startsWith("*.")) {
     return !relative.includes("/") && relative.endsWith(companion.match.slice(1));
   }

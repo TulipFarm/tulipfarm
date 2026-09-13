@@ -263,7 +263,7 @@ describe("runPgMigrations", () => {
 
     await runPgMigrations(db, undefined, NOOP_LOG);
 
-    expect(await schemaVersion(db)).toBe(119);
+    expect(await schemaVersion(db)).toBe(120);
     expect(await tableExists(db, "oim_ingress_teardowns")).toBe(true);
     expect(await tableExists(db, "oim_webhook_registrations")).toBe(true);
     expect(await tableExists(db, "oim_webhook_registration_attempts")).toBe(true);
@@ -363,7 +363,7 @@ describe("runPgMigrations", () => {
          AND trigger_name = 'oim_knowledge_connection_lifecycle_fence'
     `);
     expect(trigger.rows).toEqual([{ trigger_name: "oim_knowledge_connection_lifecycle_fence" }]);
-    expect(await schemaVersion(db)).toBe(119);
+    expect(await schemaVersion(db)).toBe(120);
 
     const { queryable, statements } = watch(db);
     await runPgMigrations(queryable, undefined, NOOP_LOG);
@@ -373,6 +373,14 @@ describe("runPgMigrations", () => {
   it("upgrades OIM release lifecycle storage from version 118 and is then repeat-safe", async () => {
     await seedOimReleaseProvenanceAlterTarget(db);
     await db.exec(`
+      CREATE TABLE connections (
+        business_id text NOT NULL,
+        id text NOT NULL,
+        integration_id text NOT NULL,
+        integration_major_version integer NOT NULL,
+        PRIMARY KEY (business_id, id),
+        UNIQUE (business_id, id, integration_id, integration_major_version)
+      );
       INSERT INTO oim_installed_release_provenance (
         business_id, integration_id, major_version, version, package_digest, source,
         trust_class, signed_release, original_requirements, auto_patch_opt_in
@@ -391,7 +399,7 @@ describe("runPgMigrations", () => {
 
     await runPgMigrations(db, undefined, NOOP_LOG);
 
-    expect(await schemaVersion(db)).toBe(119);
+    expect(await schemaVersion(db)).toBe(120);
     expect(await tableExists(db, "oim_release_lifecycle_state")).toBe(true);
     expect(await tableExists(db, "oim_release_uninstall_journals")).toBe(true);
     expect(await tableExists(db, "oim_release_dispatch_leases")).toBe(true);
@@ -550,6 +558,47 @@ describe("runPgMigrations", () => {
       { indexname: "oim_installed_release_slug_idx" },
       { indexname: "oim_release_dispatch_unresolved_idx" },
     ]);
+
+    const { queryable, statements } = watch(db);
+    await runPgMigrations(queryable, undefined, NOOP_LOG);
+    expect(statements.filter((statement) => statement === "BEGIN")).toHaveLength(0);
+  });
+
+  it("adds typed OIM Connection verification evidence from version 119 without backfill", async () => {
+    await db.exec(`
+      CREATE TABLE connections (
+        business_id text NOT NULL,
+        id text NOT NULL,
+        integration_id text NOT NULL,
+        integration_major_version integer NOT NULL,
+        configuration jsonb NOT NULL DEFAULT '{}'::jsonb,
+        secret_bindings jsonb NOT NULL DEFAULT '{}'::jsonb,
+        status text NOT NULL,
+        health_status text NOT NULL,
+        PRIMARY KEY (business_id, id),
+        UNIQUE (business_id, id, integration_id, integration_major_version)
+      );
+      INSERT INTO connections (
+        business_id, id, integration_id, integration_major_version, status, health_status
+      ) VALUES (
+        'business-1', 'connection-1', 'calendar', 2, 'active', 'healthy'
+      );
+      CREATE TABLE schema_version (
+        id boolean PRIMARY KEY DEFAULT true,
+        version integer NOT NULL,
+        CONSTRAINT schema_version_single_row CHECK (id)
+      );
+      INSERT INTO schema_version (id, version) VALUES (true, 119);
+    `);
+
+    await runPgMigrations(db, undefined, NOOP_LOG);
+
+    expect(await schemaVersion(db)).toBe(120);
+    expect(await tableExists(db, "connection_verification_evidence")).toBe(true);
+    const evidence = await db.query<{ count: number }>(
+      "SELECT count(*)::integer AS count FROM connection_verification_evidence"
+    );
+    expect(evidence.rows).toEqual([{ count: 0 }]);
 
     const { queryable, statements } = watch(db);
     await runPgMigrations(queryable, undefined, NOOP_LOG);

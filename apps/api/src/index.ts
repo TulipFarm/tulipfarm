@@ -15,7 +15,19 @@ import {
 } from "@tulipfarm/authz";
 import { DEPLOYMENT_BUSINESS_ID } from "@tulipfarm/constants";
 import { FileService, PgFileRepo } from "@tulipfarm/files";
-import { FetchEgressHttp, GuardedEgressHttp, PublicOriginsService } from "@tulipfarm/integrations";
+import {
+  ConnectionResolver,
+  FetchEgressHttp,
+  GuardedEgressHttp,
+  IntegrationDraftStore,
+  inspectOimReleasePackages,
+  OimIngressTeardownService,
+  oimManifestMajor,
+  PublicOriginsService,
+  resolveOimPackage,
+  splitGitSourceRef,
+  withGitSourceClone,
+} from "@tulipfarm/integrations";
 import {
   buildDefaultRegistry,
   CONNECTOR_SYNC_QUEUE,
@@ -44,6 +56,7 @@ import { EmbeddingService, LlmService } from "@tulipfarm/llm";
 import { MutationKillSwitchGuard } from "@tulipfarm/observability";
 import {
   ArtifactService,
+  DurableEffectRetryWaitHost,
   DurableInvocationGateway,
   DurableWaitManager,
   PgDurableInvocationStore,
@@ -52,7 +65,7 @@ import {
   RunResumeGateway,
   TypedOutputValidator,
 } from "@tulipfarm/run-kernel";
-import { RUN_ARTIFACT_SCHEMAS } from "@tulipfarm/schema";
+import { canonicalHash, type OimManifest, RUN_ARTIFACT_SCHEMAS } from "@tulipfarm/schema";
 import {
   loadEncryptionKeys,
   loadOrProvisionActiveDek,
@@ -64,6 +77,7 @@ import { SkillBashRunner, SkillCommandRunner } from "@tulipfarm/skill-sandbox";
 import type { AuthOAuth2Step } from "@tulipfarm/soul";
 import {
   ActiveRoutineCatalog,
+  bundledIntegrationsDir,
   type CommitActor,
   type CredentialProvider,
   compileExecutionBundle,
@@ -80,6 +94,7 @@ import {
   resolveAuthSteps,
   resolveSoulPath,
   runSoulMigrations,
+  SoulGitStore,
   SoulLoader,
   SoulPublicationCoordinator,
   SoulPublisher,
@@ -92,13 +107,22 @@ import {
   ChannelRunDeliveryStore,
   ChildLinkAncestryStore,
   ChildLinkStore,
+  ConnectionAuthStepStore,
+  ConnectionExternalIdentityStore,
+  ConnectionStore,
+  ConnectionVerificationEvidenceStore,
   ConversationContextSummaryStore,
   createBlobPort,
   EventStore,
   ensureBundledBucket,
   ensureEmbeddingIndexes,
+  IngressTeardownStore,
   IntegrationStore,
   KillSwitchRepo,
+  OimKnowledgeCheckpointStore,
+  OimKnowledgePublicationStore,
+  OimReleaseTrustStore,
+  type PersistedConnection,
   PgApprovalGrantRepo,
   PgAssetOwnershipRepo,
   PgGroupRepo,
@@ -108,6 +132,7 @@ import {
   PgSoulPublicationStore,
   PgTeamNotificationRepo,
   PgTeamRepo,
+  PollingIngressStore,
   ProviderFileUploadStore,
   ProviderObjectOwnershipStore,
   PublicOriginStore,
@@ -116,6 +141,7 @@ import {
   SoulRepositoryStore,
   TaskRepo,
   WaitStore,
+  WebhookRegistrationStore,
   writeBucketSecrets,
 } from "@tulipfarm/storage";
 import { PgEffectStore } from "@tulipfarm/tool-broker";
@@ -199,14 +225,44 @@ import {
   IntegrationConversationsRepo,
   IntegrationEventsRepo,
 } from "./ingress/repo";
+import { CatalogBoundOimOperationConnectionResolver } from "./integrations/catalog-bound-oim-operation-resolver";
 import { resolveSecretRef } from "./integrations/connection-env";
-import { OimRateRetryWaitHost } from "./integrations/oim-rate-retry";
+import {
+  refreshExpiringOimConnections,
+  registerOimConnectionRefreshSchedule,
+} from "./integrations/connections/refresh-schedule";
+import { OimConnectionService } from "./integrations/connections/service";
+import { createBundledOimBundleContributionProvider } from "./integrations/oim-bundle-contributions";
+import { loadBundledOimCatalog, type OimPackageCatalogReader } from "./integrations/oim-catalog";
+import { oimCatalogStatus } from "./integrations/oim-catalog-status";
+import { createOimAvailableConnectionReader } from "./integrations/oim-connection-reader";
+import { createOimPaginationRuntime } from "./integrations/oim-continuation-host";
+import { createOimCredentialVault } from "./integrations/oim-credential-vault";
+import { createOimFileHost } from "./integrations/oim-file-host";
+import { refreshOimOAuthStep } from "./integrations/oim-oauth";
+import { createOimVerificationHost } from "./integrations/oim-verification-host";
 import { PgPrincipalProviderTokenRepo } from "./integrations/principal-tokens";
+import {
+  liveOimPackageCatalog,
+  synchronizeOimReleaseControlPlane,
+  synchronizeReviewedCommunityInstaller,
+} from "./integrations/releases/composition";
+import { createOimReleaseFeature, type OimReleaseFeature } from "./integrations/releases/feature";
 import { InternalChildRoutineHost } from "./internal/child-routine-host";
 import { IngressDeliveryHost } from "./internal/delivery-host";
 import { InternalEmitHost } from "./internal/emit-host";
 import { ModelSelectorGate, modelGateModeFromEnv } from "./internal/model-authz";
+import { BundleRoutineOimRegistrationReader } from "./internal/oim-registration-reader";
+import { createOimWorkerCleanupServices } from "./internal/oim-worker-cleanup";
+import { InternalOimWorkerHost } from "./internal/oim-worker-host";
 import { InternalRoutineApprovalHost } from "./internal/routine-approval-host";
+import {
+  InternalRoutineOimToolHost,
+  LiveRoutineOimAuthorizer,
+  LiveRoutineOimFileAuthorizer,
+  LiveRoutineOimRunAuthority,
+  VerifiedRoutineOimBundleReader,
+} from "./internal/routine-oim-tool-host";
 import {
   SlackCommandResponseService,
   SlackCommandResponseStore,
@@ -227,6 +283,7 @@ import {
   CompositeLiveSourceAuthorization,
   SlackTenantLiveAuthorization,
 } from "./knowledge-sources/live-authorization";
+import { PgOimKnowledgeRegistrationReader } from "./knowledge-sources/oim-registration-reader";
 import { retireSlackKnowledgeSyncSchedule } from "./knowledge-sources/slack-sync-schedule";
 import { PgKnowledgeSourceStore } from "./knowledge-sources/source-store";
 import { registerLlmReload } from "./llm-reload";
@@ -373,6 +430,11 @@ const SOUL_SYNC_COMMIT_ACTOR: CommitActor = {
   name: "TulipFarm Soul Sync",
   email: "",
 };
+const OIM_RELEASE_MAINTENANCE_ACTOR: CommitActor = {
+  principalId: "service:tulipfarm-oim-release-maintenance",
+  name: "TulipFarm OIM Release Maintenance",
+  email: "",
+};
 const SOUL_BUNDLE_KEY_PROVISIONING_LOCK = "tulipfarm:soul-bundle-key-provisioning";
 
 function soulBundleKeyStore(
@@ -477,6 +539,7 @@ async function boot() {
     const bundleKeys = soulBundleKeyStore(secretsService, pool);
     const soulBundleSigner = await resolveSoulBundleSigner(bundleKeys);
     const soulBundleVerifier = await resolveSoulBundleVerifier(secretsService);
+    const soulCommitSigner = await resolveSoulCommitSigner(secretsService);
     const soulPublications = new SoulPublicationCoordinator(
       new PgSoulPublicationStore(runTransactions),
       new PgBundleStore(runTransactions),
@@ -506,6 +569,8 @@ async function boot() {
         hasCommit: (sha) => gitSync.hasCommit(sha),
       },
       activeCommitSha: activeSoulCommitSha,
+      activeBundleDigest: (businessId) => soulPublications.activeDigest(businessId),
+      contributions: createBundledOimBundleContributionProvider(bundledIntegrationsDir()),
     });
     gitSync = new GitSyncService(soulPath, gitRemoteUrl, gitCredentialProvider, console, {
       committedTreePublisher: soulPublisher,
@@ -538,15 +603,21 @@ async function boot() {
 
     const soulLoader = new SoulLoader(soulPath, console, surfaceRendererRegistry);
     await soulLoader.load();
+    let refreshOimAfterSoulReload = async (): Promise<void> => {};
+    let syncDeclarativeToolsAfterSoulReload = (): void => {};
     // The single ADR-007 write gateway. Every authoring surface writes through this instance, so
     // path building, validation, atomic commit, push, catalog reload and bundle publication happen
     // in exactly one place instead of being re-implemented at each call site.
     const soulWriter = createSoulWriter({
       soulPath,
-      signer: await resolveSoulCommitSigner(secretsService),
+      signer: soulCommitSigner,
       logger: console,
       gitSync,
-      reload: () => soulLoader.load(),
+      reload: async () => {
+        await soulLoader.load();
+        await refreshOimAfterSoulReload();
+        syncDeclarativeToolsAfterSoulReload();
+      },
       publisher: soulPublisher,
       treeReader: soulTreeReader,
     });
@@ -579,6 +650,13 @@ async function boot() {
       );
     }
     const bundledIntegrations = await loadBundledIntegrations(console);
+    const bundledOimCatalog = await loadBundledOimCatalog(bundledIntegrationsDir(), {
+      requireVerification: true,
+    });
+    let oimReleaseFeature: OimReleaseFeature | undefined;
+    const oimPackageCatalog: OimPackageCatalogReader = () =>
+      oimReleaseFeature?.packages() ?? bundledOimCatalog;
+    const liveOimCatalog = liveOimPackageCatalog(oimPackageCatalog);
 
     // Per-type resource tables can't be created lazily (no `db.collection(type)`):
     await reconcileResourceTables(pool, soulLoader, console);
@@ -987,10 +1065,212 @@ async function boot() {
         },
       }),
     });
+    const oimConnectionsStore = new ConnectionStore(runTransactions);
+    const oimAuthSteps = new ConnectionAuthStepStore(runTransactions);
+    const oimIngressTeardowns = new IngressTeardownStore(runTransactions);
+    const oimPolling = new PollingIngressStore(runTransactions);
+    const oimWebhooks = new WebhookRegistrationStore(runTransactions);
+    const oimConnectionIdentities = new ConnectionExternalIdentityStore(runTransactions);
+    const oimCredentials = createOimCredentialVault(secretsService);
+    const oimPaginationRuntime = createOimPaginationRuntime({ dek: activeDek });
+    const oimHttp = new GuardedEgressHttp(new FetchEgressHttp());
+    const oimVerificationEvidence = new ConnectionVerificationEvidenceStore(runTransactions);
+    const oimVerification = createOimVerificationHost({
+      authSteps: oimAuthSteps,
+      credentials: oimCredentials,
+      http: oimHttp,
+      paginationRuntime: oimPaginationRuntime,
+    });
+    const oimAuthRequests = new PgIntegrationAuthRequestRepo(pool);
+    const integrationDrafts = new IntegrationDraftStore();
+    const installedOimReleases = new OimReleaseTrustStore(runTransactions);
+    oimReleaseFeature = createOimReleaseFeature({
+      businessId: DEPLOYMENT_BUSINESS_ID,
+      database: pool,
+      bundled: bundledOimCatalog,
+      soulIntegrations: () => soulLoader.integrations,
+      soulPackageWriter: {
+        soulWriter,
+        soulStore: new SoulGitStore(soulPath, soulCommitSigner, console),
+        publisher: soulPublisher,
+        actor: OIM_RELEASE_MAINTENANCE_ACTOR,
+      },
+      trustedCatalog: { logger: console },
+      uninstall: {
+        connections: oimConnectionsStore,
+        credentials: oimCredentials,
+        ingressTeardowns: oimIngressTeardowns,
+        polling: oimPolling,
+        webhooks: oimWebhooks,
+        knowledgePublications: new OimKnowledgePublicationStore(runTransactions),
+        knowledgeCheckpoints: new OimKnowledgeCheckpointStore(runTransactions),
+      },
+      reviewedDrafts: integrationDrafts,
+      http: oimHttp,
+      pinnedSources: {
+        inspect: (source, ref, actorId) => {
+          const { base } = splitGitSourceRef(source);
+          return withGitSourceClone(
+            `${base}#${ref}`,
+            { prefix: "oim-release-pinned-", actorId },
+            async ({ dir, ref: resolvedRef }) => ({
+              ref: resolvedRef,
+              candidates: await inspectOimReleasePackages(dir),
+            })
+          );
+        },
+      },
+      maintenanceActor: OIM_RELEASE_MAINTENANCE_ACTOR,
+    });
+    const activeOimReleases = oimReleaseFeature;
+    await activeOimReleases.refresh.boot();
+    refreshOimAfterSoulReload = activeOimReleases.refresh.soulReloaded;
+    const publicOimReleaseControlPlane = synchronizeOimReleaseControlPlane(
+      activeOimReleases.controlPlane,
+      () => syncDeclarativeToolsAfterSoulReload()
+    );
+    const reviewedCommunityInstaller = synchronizeReviewedCommunityInstaller(
+      activeOimReleases.reviewedCommunityInstaller,
+      () => syncDeclarativeToolsAfterSoulReload()
+    );
+    const oimWorkerCleanup = createOimWorkerCleanupServices({
+      database: pool,
+      connections: oimConnectionsStore,
+      authSteps: oimAuthSteps,
+      verifiedIntegrations: () => activeOimReleases.integrations().entries(),
+    });
+    const oimConnections = new OimConnectionService({
+      businessId: DEPLOYMENT_BUSINESS_ID,
+      catalog: liveOimCatalog,
+      registrationPackages: oimWorkerCleanup.registrationPackages,
+      connections: oimConnectionsStore,
+      authSteps: oimAuthSteps,
+      credentials: oimCredentials,
+      authRequests: oimAuthRequests,
+      endpoints: await publicOrigins.authEndpoints(),
+      ingress: {
+        isDisabled: (businessId, connectionId) =>
+          oimIngressTeardowns.isDisabled(businessId, connectionId),
+        requestWebhookRegistration: (key, target, now) =>
+          oimWebhooks.requestRegistration(key, target, now),
+        teardown: (key, now) =>
+          new OimIngressTeardownService(oimIngressTeardowns, oimPolling, {
+            remove: (registrationKey) => oimWebhooks.requestRemoval(registrationKey),
+          }).remove(key, now),
+      },
+      refreshOAuth: (request) => refreshOimOAuthStep(request, {}),
+      verification: {
+        verify: (input) => oimVerification.verify(input),
+        verifyCandidate: (input) => oimVerification.verifyCandidate(input),
+        publish: (evidence, identity) =>
+          oimConnectionsStore.publishVerification(
+            evidence,
+            identity === undefined
+              ? undefined
+              : {
+                  businessId: evidence.binding.businessId,
+                  connectionId: evidence.binding.connectionId,
+                  integrationId: evidence.binding.integrationId,
+                  integrationMajorVersion: evidence.binding.integrationMajorVersion,
+                  ...identity,
+                  proofKind: "auth",
+                }
+          ),
+      },
+      verifyAuthorization: async (request) =>
+        request.manifest.auth?.verification === undefined
+          ? null
+          : {
+              credentialValues: request.candidateCredentialValues,
+              configuration: request.candidateConfiguration,
+              expiresAt: request.candidateExpiresAt,
+            },
+    });
+    const refreshDueOimConnections = () =>
+      refreshExpiringOimConnections({
+        businessId: DEPLOYMENT_BUSINESS_ID,
+        connections: oimConnectionsStore,
+        refresh: async (connection) => {
+          const catalog = oimPackageCatalog();
+          const entry = catalog.find((candidate) => {
+            const pkg = resolveOimPackage(catalog, candidate.key);
+            return (
+              pkg?.identity.id === connection.integration.id &&
+              pkg.identity.majorVersion === connection.integration.majorVersion
+            );
+          });
+          if (entry === undefined) {
+            throw new Error(
+              `no OIM package for ${connection.integration.id}@${connection.integration.majorVersion}`
+            );
+          }
+          await oimConnections.refresh(entry.key, connection.id, {
+            principalId:
+              connection.owner.scope === "personal"
+                ? connection.owner.principalId
+                : "oim-refresh-scheduler",
+            mayManageShared: true,
+          });
+        },
+      });
+    const availableOimConnections = createOimAvailableConnectionReader(
+      oimConnectionsStore,
+      oimIngressTeardowns,
+      oimPackageCatalog,
+      oimVerificationEvidence
+    );
+    const oimConnectionAccess = {
+      async canUse(
+        principal: { readonly kind: string; readonly id: string },
+        connection: PersistedConnection
+      ) {
+        if (connection.owner.scope === "organization") return true;
+        if (connection.owner.scope === "personal") {
+          return principal.kind === "user" && principal.id === connection.owner.principalId;
+        }
+        return (
+          await teamDomain.resolveMembers(connection.businessId, connection.owner.teamId)
+        ).some(
+          (member) => member.principalKind === principal.kind && member.principalId === principal.id
+        );
+      },
+    };
+    const oimOperationConnections = new CatalogBoundOimOperationConnectionResolver(
+      new ConnectionResolver(availableOimConnections, oimConnectionAccess),
+      oimAuthSteps,
+      oimPackageCatalog
+    );
+    const oimWorkerOperationConnections = new CatalogBoundOimOperationConnectionResolver(
+      new ConnectionResolver(availableOimConnections, {
+        async canUse(principal) {
+          return principal.kind === "service" && principal.id === "integration-worker";
+        },
+      }),
+      oimAuthSteps,
+      oimPackageCatalog
+    );
+    const oimFileHost = createOimFileHost({
+      files: fileService,
+      runAuthority: {
+        async authority(businessId, runId) {
+          const run = await runStore.find(businessId, runId);
+          if (
+            run === null ||
+            run.status === "succeeded" ||
+            run.status === "failed" ||
+            run.status === "cancelled"
+          ) {
+            throw new Error("run_not_active");
+          }
+          return { businessId, runId, subject: run.identity.initiator };
+        },
+      },
+      authorityLayers: authorityLayerResolver,
+    });
     // registered here rather than in the Worker because its one-use resume token must never leave
     const runResume = new RunResumeGateway(runStore);
     const runWaits = new DurableWaitManager(new WaitStore(runTransactions), runResume);
-    const oimRateRetryWaits = new OimRateRetryWaitHost(runWaits);
+    const effectRetryWaits = new DurableEffectRetryWaitHost(runWaits);
     const toolApprovals = new ToolApprovalService({ transactions: runTransactions });
     const routineApprovals = new RoutineApprovalService({ transactions: runTransactions });
     const ingressDeliveries = new IngressDeliveriesRepo(pool);
@@ -1187,6 +1467,13 @@ async function boot() {
             }
           ),
       },
+      integrationAuthoring: {
+        businessId: DEPLOYMENT_BUSINESS_ID,
+        drafts: integrationDrafts,
+        integrations: activeOimReleases.integrations,
+        installedGenerations: installedOimReleases,
+        installer: reviewedCommunityInstaller,
+      },
       skillTools: { ...skillTools, hiddenSkillNames, teamAssets },
       github: githubTools,
       slack: slackTools,
@@ -1231,20 +1518,48 @@ async function boot() {
       },
     });
 
-    // who connects a provider expects its Tools without an API restart.
+    const declarativeIntegrations = () => activeOimReleases.integrations().values();
+    const internalOimWorker = new InternalOimWorkerHost({
+      integrations: () => activeOimReleases.integrations().entries(),
+      releaseDispatch: activeOimReleases.dispatch,
+      connections: Object.assign(availableOimConnections, {
+        listPollingFallbacks: () => oimConnectionsStore.listPollingFallbacks(),
+      }),
+      connectionOperations: oimWorkerOperationConnections,
+      verificationEvidence: oimVerificationEvidence,
+      secrets: secretsService,
+      http: oimHttp,
+      paginationRuntime: oimPaginationRuntime,
+      payloadKey: activeDek.key,
+      ...(hookExecutor === undefined ? {} : { hookExecutor }),
+      knowledgeRegistrations: new PgOimKnowledgeRegistrationReader(pool),
+      externalIdentities: externalIdentityRepo,
+      cleanupAuthorization: oimWorkerCleanup.cleanupAuthorization,
+      cleanupConnectionOperations: oimWorkerCleanup.cleanupConnectionOperations,
+      cleanupPackages: oimWorkerCleanup.cleanupPackages,
+    });
     const declarativeTools = new DeclarativeToolSync({
       registry: toolRegistry,
-      integrations: () => soulLoader.integrations.values(),
+      integrations: declarativeIntegrations,
       businessId: DEPLOYMENT_BUSINESS_ID,
       effects: slackEffects,
       secrets: async () => secretsService,
       // Manifests are authored from chat, so the destination is untrusted right up to the socket.
-      http: new GuardedEgressHttp(new FetchEgressHttp()),
+      http: oimHttp,
+      connections: oimOperationConnections,
+      files: oimFileHost.files,
+      fileReadAuthorization: oimFileHost.fileReadAuthorization,
+      paginationRuntime: oimPaginationRuntime,
+      authorizeFiles: oimFileHost.authorizeFiles,
       mutationGuard,
-      parkRetry: oimRateRetryWaits.parkRetry,
-      retryWaitStatus: oimRateRetryWaits.status,
+      parkRetry: effectRetryWaits.parkRetry,
+      retryWaitStatus: effectRetryWaits.status,
+      releaseDispatch: activeOimReleases.dispatch,
       logger: () => app.log,
     });
+    syncDeclarativeToolsAfterSoulReload = () => {
+      declarativeTools.sync();
+    };
 
     // with, so a worker credential is a key to a Run rather than a principal of its own.
     const internalTurns = {
@@ -1421,6 +1736,35 @@ async function boot() {
         dispatch: (event) => eventTriggers.dispatchInternalEvent(event),
       }),
     };
+    const routineOimBundleStore = new PgBundleStore(runTransactions);
+    const internalRoutineOim = new InternalRoutineOimToolHost({
+      businessId: DEPLOYMENT_BUSINESS_ID,
+      releaseIntegration: (manifest: OimManifest) =>
+        [...activeOimReleases.integrations().values()].find(
+          (integration) =>
+            integration.oimManifest?.metadata.id === manifest.metadata.id &&
+            oimManifestMajor(integration.oimManifest) === oimManifestMajor(manifest) &&
+            canonicalHash(integration.oimManifest) === canonicalHash(manifest)
+        ),
+      releaseDispatch: activeOimReleases.dispatch,
+      runs: new LiveRoutineOimRunAuthority(internalTurns.host, runStore),
+      bundles: new VerifiedRoutineOimBundleReader(routineOimBundleStore, soulBundleVerifier),
+      registrations: new BundleRoutineOimRegistrationReader(
+        routineOimBundleStore,
+        soulBundleVerifier
+      ),
+      connections: oimOperationConnections,
+      effects: recoveryEffects,
+      secrets: async () => secretsService,
+      http: oimHttp,
+      authorize: new LiveRoutineOimAuthorizer(authorityLayerResolver),
+      files: oimFileHost.files,
+      fileAuthorizer: new LiveRoutineOimFileAuthorizer({
+        assertAuthorized: oimFileHost.authorizeFiles,
+      }),
+      paginationRuntime: oimPaginationRuntime,
+      ...(hookExecutor === undefined ? {} : { hookExecutor }),
+    });
 
     const app = await buildApp({
       publicOrigins,
@@ -1459,7 +1803,41 @@ async function boot() {
         soulRepositories: soulRepositoryStore,
       },
       githubStatus: { integrations: channelIntegrations, businessId: DEPLOYMENT_BUSINESS_ID },
-      integrationAuth: { repo: new PgIntegrationAuthRequestRepo(pool), tokens: principalTokens },
+      integrationAuth: {
+        repo: oimAuthRequests,
+        tokens: principalTokens,
+      },
+      oimConnections,
+      internalOimConnections: {
+        refreshDue: refreshDueOimConnections,
+      },
+      internalOimWorker,
+      internalRoutineOim,
+      oimReleases: {
+        controlPlane: publicOimReleaseControlPlane,
+        businessId: DEPLOYMENT_BUSINESS_ID,
+      },
+      oimCatalog: {
+        async packages() {
+          return activeOimReleases.packages();
+        },
+        async status(entry, principal) {
+          const pkg = resolveOimPackage([entry], entry.key);
+          if (pkg === undefined) return { connected: false, personalConnected: false };
+          const connections = await availableOimConnections.listForIntegration(
+            DEPLOYMENT_BUSINESS_ID,
+            pkg.identity
+          );
+          return oimCatalogStatus(
+            connections,
+            (pkg.manifest.auth?.credentialSlots ?? [])
+              .filter((slot) => slot.required !== false)
+              .map((slot) => slot.id),
+            principal,
+            oimConnectionAccess
+          );
+        },
+      },
       hookExecutor,
       resourceRepoFactory,
       counterStore,
@@ -1734,6 +2112,20 @@ async function boot() {
       makeRequireAuthorization(routeAuthorizer, gateOptions)
     );
 
+    gitSync.on("soul.synced", () => {
+      void (async () => {
+        await soulLoader.reload();
+        await activeOimReleases.refresh.remoteSynced();
+        declarativeTools.sync();
+      })().catch((err: unknown) => {
+        app.log.error(
+          `[oim] catalog refresh after soul.synced failed — ${
+            err instanceof Error ? err.message : String(err)
+          }`
+        );
+      });
+    });
+
     // Init after buildApp so fallback events log through Fastify's Pino logger.
     declarativeTools.sync();
     // A malformed `soul.yaml#llm` must not take down authentication, the UI and every unrelated
@@ -1810,6 +2202,7 @@ async function boot() {
       },
     });
     await registerScheduleDispatch(boss, scheduleDispatcher, { log: app.log });
+    await registerOimConnectionRefreshSchedule(boss);
     await registerMaintenanceSweepSchedule(boss);
     await registerMemoryCurationSchedule(boss);
     await registerSoulDoctorSchedule(boss, soulDoctor, { log: app.log });

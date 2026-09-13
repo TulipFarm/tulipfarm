@@ -1,16 +1,59 @@
 ---
 title: Integrations
-description: The bundled integrations, what they enable, and current limits.
+description: Learn how integrations connect TulipFarm to external services, limit agent actions, verify credentials, and protect secrets.
 ---
 
-Integrations connect TulipFarm to external systems. Five ship bundled: **GitHub**, **Slack**,
-**Google Workspace**, **Jira**, and **Linear**. All appear in the integrations UI and store their
-configuration through the soul and secrets store.
+Integrations connect TulipFarm to external systems. TulipFarm includes a catalog of bundled
+integrations. Each one appears in the integrations UI with the setup and provider actions declared
+by its package. Secrets stay in the secrets store; the integration definition stays in the soul.
 
-You are not limited to those. An integration is a data file (a manifest describing how to
-connect and which provider API calls agents may make) so one can be installed from any git
-repository, and nothing that installs runs code. See
-[Connect an integration](/docs/administration/connect-an-integration#install-from-a-git-repository).
+You are not limited to those. Ask in chat to build an integration from a provider's public
+documentation. TulipFarm reviews the exact manifest and companion files before publishing them,
+and an integration package cannot run code. See
+[Connect an integration](/docs/administration/connect-an-integration#add-a-missing-provider).
+
+## Package trust
+
+Installing from a source begins with inspection. TulipFarm resolves the source to an exact ref,
+calculates the package digest, and shows the capabilities, effects, provider destinations,
+authorization requirements, and incoming data before installation.
+
+An **Official** package has a signature that the server verified with an active public release
+trust root configured on this TulipFarm instance. The label describes local signature trust. It is
+not a global endorsement by TulipFarm.
+
+A **Community** package is installed only after someone approves the exact reviewed digest and the
+capabilities, destinations, and effects shown for it. If the source changes after review, that
+approval does not cover the new bytes.
+
+## Package maintenance
+
+Package security settings hold public keys for release and revocation signatures. They can also
+point to a signed, credential-free HTTPS revocation feed. Maintenance reads that feed, records
+valid revocations, and checks for eligible updates.
+
+Automatic updates are limited to patch releases of Official packages that have opted in. Each
+candidate still has to match the signed identity, source, ref, version, and digest and pass the
+package checks. Community packages always require a new review and approval.
+
+## Connection verification
+
+A **Connection** is one configured provider account or workspace for an integration. Some packages
+declare a provider verification step and some do not. When verification is required, the
+Connection cannot be used until successful evidence is saved.
+
+**Retry verification** repeats the package's declared check. It does not turn a network failure
+into proof that the credentials work: an unavailable provider leaves verification incomplete, and
+a provider rejection requires corrected or reconnected credentials.
+
+## Removal
+
+Removing a source-installed package targets its exact installed generation. TulipFarm fences new
+traffic, drains active work, removes remote subscriptions and Connections, clears package-owned
+state, and then removes the package.
+
+If provider cleanup is still pending, the package stays unavailable and the UI offers **Retry
+removal** for that same installation. Cleanup from an older generation cannot remove a newer one.
 
 ## GitHub
 

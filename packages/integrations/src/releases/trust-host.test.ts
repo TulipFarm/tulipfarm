@@ -137,6 +137,59 @@ class MemoryTrustStore {
 }
 
 describe("createOimReleaseTrustHost", () => {
+  it("authorizes Community packages only for the exact approved digest", async () => {
+    const revocationKey = signingKey("revocations-2026");
+    const store = new MemoryTrustStore();
+    store.roots = [
+      {
+        purpose: "revocation",
+        keyId: revocationKey.keyId,
+        publicKeyPem: revocationKey.publicKeyPem,
+        createdAt: "2026-09-13T09:00:00.000Z",
+        createdBy: "operator",
+      },
+    ];
+    store.revocations = signOimRevocationList(
+      {
+        sequence: 1,
+        issuedAt: "2026-09-13T09:00:00.000Z",
+        expiresAt: "2026-09-14T09:00:00.000Z",
+        revocations: [],
+      },
+      createEd25519OimReleaseSigner(revocationKey.keyId, revocationKey.privateKeyPem)
+    );
+    const host = createOimReleaseTrustHost(store, {
+      now: () => new Date("2026-09-13T12:00:00.000Z"),
+    });
+    const package_ = releasePackageFixture();
+    const packageDigest = oimPackageDigest(package_.manifest);
+
+    await expect(
+      host.authorizeCommunityRelease({
+        package: package_,
+        approvedPackageDigest: packageDigest,
+      })
+    ).resolves.toMatchObject({
+      trustClass: "community",
+      packageDigest,
+      approvedCommunityDigest: packageDigest,
+    });
+    await expect(
+      host.authorizeCommunityRelease({
+        package: package_,
+        approvedPackageDigest: "f".repeat(64),
+      })
+    ).rejects.toMatchObject({ code: "COMMUNITY_DIGEST_REQUIRED" });
+
+    store.knownSignedReleases.add(`weather\n1.2.3\n${packageDigest}`);
+    await expect(
+      host.authorizeCommunityRelease({
+        package: package_,
+        approvedPackageDigest: packageDigest,
+      })
+    ).rejects.toMatchObject({ code: "COMMUNITY_OFFICIAL_RELEASE" });
+  });
+
   it("records verified provenance and rejects later package substitution", async () => {
     const releaseKey = signingKey("release-2026");
     const revocationKey = signingKey("revocations-2026");

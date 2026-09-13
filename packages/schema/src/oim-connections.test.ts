@@ -116,7 +116,7 @@ describe("OIM Auth profile", () => {
     const missingProfile = manifest();
     delete missingProfile.profiles.auth;
     expect(oimManifestIssues(missingProfile)).toContain(
-      'profiles: auth "1.0" is required when auth is declared'
+      'profiles: auth "1.0" or "1.1" is required when auth is declared'
     );
 
     const unknownSlot = manifest();

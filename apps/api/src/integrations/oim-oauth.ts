@@ -369,7 +369,7 @@ export function oimConnectionPatchFromEnv(
 export async function refreshOimOAuthStep(
   request: OimOAuthRefreshRequest,
   options: {
-    readonly verifyIdentity: (input: {
+    readonly verifyIdentity?: (input: {
       readonly request: OimOAuthRefreshRequest;
       readonly credentialValues: Readonly<Record<string, string>>;
       readonly configuration: Readonly<Record<string, string>>;
@@ -398,17 +398,17 @@ export async function refreshOimOAuthStep(
   const credentialValues = Object.fromEntries(
     Object.entries(patch.slots).filter(([slot]) => outputSlots.has(slot))
   );
-  const verifiedIdentity = await options.verifyIdentity({
+  const verifiedIdentity = await options.verifyIdentity?.({
     request,
     credentialValues,
     configuration: patch.configuration,
   });
-  if (verifiedIdentity === null) {
+  if (request.manifest.auth?.verification === undefined && verifiedIdentity == null) {
     throw new AuthBrokerError("exchange_failed", "provider identity could not be verified");
   }
   return {
     credentialValues,
     expiresAt: patch.expiresAt,
-    verifiedIdentity,
+    ...(verifiedIdentity == null ? {} : { verifiedIdentity }),
   };
 }

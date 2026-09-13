@@ -32,6 +32,21 @@ export interface WebhookRegistrationTarget {
   readonly operationId: string;
   readonly unregisterOperationId: string;
   readonly secretSlot: string;
+  readonly packageSnapshot: OimWebhookCleanupPackageSnapshot;
+}
+
+export interface OimWebhookCleanupPackageSnapshot {
+  readonly integrationId: string;
+  readonly version: string;
+  readonly majorVersion: number;
+  readonly packageDigest: string;
+  readonly manifestText: string;
+  readonly files: readonly {
+    readonly path: string;
+    readonly role: NonNullable<import("@tulipfarm/schema").OimManifest["files"]>[number]["role"];
+    readonly sha256: string;
+    readonly contentBase64: string;
+  }[];
 }
 
 export interface ActiveWebhookRegistration extends WebhookRegistrationTarget {

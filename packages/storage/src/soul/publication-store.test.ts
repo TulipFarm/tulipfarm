@@ -227,6 +227,66 @@ describe("InMemorySoulPublicationStore", () => {
     });
   });
 
+  it("fences forced activation by the exact active generation", async () => {
+    const store = new InMemorySoulPublicationStore();
+
+    await store.withTransaction(async (tx) => {
+      await tx.putPublication(record({ changesetId: "cs-1", digest: "digest-1" }));
+      await tx.putPublication(record({ changesetId: "cs-2", digest: "digest-2" }));
+      await tx.putPublication(record({ changesetId: "cs-3", digest: "digest-3" }));
+      await tx.setActiveDigest(activation("digest-2"));
+    });
+    const intent = await store.withTransaction((tx) => tx.getActiveActivation(BUSINESS));
+    if (intent === undefined) throw new Error("active activation missing");
+
+    await store.withTransaction((tx) => tx.setActiveDigest(activation("digest-3")));
+    await store.withTransaction((tx) => tx.forceActivateDigest(activation("digest-2")));
+
+    await expect(
+      store.withTransaction((tx) =>
+        tx.forceActivateDigestIfCurrent({
+          ...activation("digest-1"),
+          expectedActivationSequence: intent.activationSequence,
+        })
+      )
+    ).rejects.toBeInstanceOf(StaleActivationError);
+    expect(await store.withTransaction((tx) => tx.getActiveActivation(BUSINESS))).toMatchObject({
+      digest: "digest-2",
+      activationSequence: 3,
+    });
+  });
+
+  it("accepts duplicate rollback intents without another activation", async () => {
+    const store = new InMemorySoulPublicationStore();
+    await store.withTransaction(async (tx) => {
+      await tx.putPublication(record({ changesetId: "cs-1", digest: "digest-1" }));
+      await tx.putPublication(record({ changesetId: "cs-2", digest: "digest-2" }));
+      await tx.setActiveDigest(activation("digest-2"));
+    });
+    const intent = await store.withTransaction((tx) => tx.getActiveActivation(BUSINESS));
+    if (intent === undefined) throw new Error("active activation missing");
+    const rollback = {
+      ...activation("digest-1"),
+      expectedActivationSequence: intent.activationSequence,
+    };
+
+    await store.withTransaction((tx) => tx.forceActivateDigestIfCurrent(rollback));
+    const activated = await store.withTransaction((tx) => tx.getActiveActivation(BUSINESS));
+    if (activated === undefined) throw new Error("rollback activation missing");
+    await store.withTransaction((tx) => tx.forceActivateDigestIfCurrent(rollback));
+    await store.withTransaction((tx) =>
+      tx.forceActivateDigestIfCurrent({
+        ...rollback,
+        expectedActivationSequence: activated.activationSequence,
+      })
+    );
+
+    await store.withTransaction(async (tx) => {
+      expect(await tx.getActiveActivation(BUSINESS)).toEqual(activated);
+      expect(await tx.listActivationHistory(BUSINESS, 10)).toHaveLength(2);
+    });
+  });
+
   it("keeps dead-letter as a terminal flag instead of a stage", async () => {
     const store = new InMemorySoulPublicationStore();
 

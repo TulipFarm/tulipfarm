@@ -4,7 +4,7 @@ kind: Integration
 metadata:
   id: asana
   name: Asana
-  version: 1.0.0
+  version: 1.0.1
   description: Read, create, update and comment on Asana tasks with a personal access token.
   license: Apache-2.0
   maintainers:
@@ -13,7 +13,7 @@ metadata:
 
 profiles:
   core: "1.0"
-  auth: "1.0"
+  auth: "1.1"
 
 files:
   - path: fixtures.yml
@@ -47,6 +47,24 @@ auth:
             type: credential
             slot: access_token
   healthCheckOperationId: current-user
+  verification:
+    issuer:
+      source: package
+      value: https://app.asana.com
+    checks:
+      - id: current-user
+        operationId: current-user
+        credentialSlots: [access_token]
+        success:
+          - kind: present
+            path: /data/gid
+    evidence:
+      assurance: identified
+      subject:
+        kind: human
+        checkId: current-user
+        path: /data/gid
+        namespace: issuer
 
 operations:
   - id: current-user

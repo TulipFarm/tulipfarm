@@ -22,7 +22,7 @@ documents.
 oim conformance \
   --adapter ./oim-adapter.mjs \
   --runtime 'Example Runtime@2.0.0' \
-  --profiles 'core=1.2,auth=1.0' \
+  --profiles 'core=1.2,auth=1.1' \
   --output ./oim-conformance-report.json
 ```
 

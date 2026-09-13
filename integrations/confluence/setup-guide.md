@@ -40,11 +40,14 @@ connect a personal Connection instead — it can safely check only the account t
 
 | Tool | What it answers |
 | --- | --- |
+| `confluence_current_user` | Which Atlassian account the credential authenticates |
 | `confluence_list_spaces` | Which spaces this Connection can read |
 | `confluence_list_pages` | Pages in one space, with revisions |
 | `confluence_get_page` | One page's title and body |
 
 The restriction and user operations support Knowledge synchronization and identity linking.
+The current-user check uses the account's stable Atlassian `accountId`; the site host only selects
+the Confluence installation and is not treated as an Atlassian organization identifier.
 
 ## Indexing into Knowledge
 

@@ -225,6 +225,7 @@ export function planWebhookRegistration(input: {
   readonly integrationKey: string;
   readonly connectionId: string;
   readonly manifest: OimManifest;
+  readonly packageSnapshot: WebhookRegistrationTarget["packageSnapshot"];
   readonly publicApiUrl: string;
 }): { readonly key: WebhookRegistrationKey; readonly target: WebhookRegistrationTarget } {
   const step = webhookStep(input.manifest);
@@ -253,6 +254,7 @@ export function planWebhookRegistration(input: {
       operationId: step.operationId,
       unregisterOperationId: step.unregisterOperationId,
       secretSlot: step.secretSlot,
+      packageSnapshot: input.packageSnapshot,
     },
   };
 }

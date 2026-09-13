@@ -155,6 +155,36 @@ cases:
         }
         return { compatible: oimCompatibilityIssues(previous, next).length === 0 };
       }
+      case "auth.fields.secure-submit":
+        return {
+          storedInManifest: false,
+          submittedToSecretBroker: input.value === "redacted",
+        };
+      case "auth.oauth2.authorization-code":
+        return {
+          stateVerified: input.state === "state-1",
+          accessTokenBound: input.code === "code-1",
+        };
+      case "auth.secret.prompt-omission":
+        return { promptContainsSecret: false };
+      case "auth.verification.identified":
+        return {
+          accepted:
+            typeof input.response?.user?.id === "string" && input.response.user.id.length > 0,
+          subject: { id: input.response.user.id, kind: input.subject.kind },
+          callerIdentityAccepted: false,
+        };
+      case "auth.verification.validity-only":
+        return {
+          accepted: input.response?.ok === true,
+          subject: null,
+          tenant: null,
+        };
+      case "auth.verification.revision-bound":
+        return input.evidenceRevision === input.currentRevision &&
+          input.credentialReferenceMatches === true
+          ? { accepted: true }
+          : { accepted: false, reason: "stale_binding" };
       case "knowledge.operations.roles":
         return { roles: ["list", "content", "acl"], writes: 0 };
       case "knowledge.acl.preserve":
@@ -415,6 +445,30 @@ test("a runtime cannot claim an untested optional profile", async () => {
   );
   claim.profiles.auth = "1.0";
   assert.throws(() => validateConformanceClaim(claim), /missing auth\.fields\.secure-submit/);
+});
+
+test("Auth 1.0 does not require Auth 1.1 verification cases", async () => {
+  const report = await runConformance({
+    runtime: { name: "Example Runtime", version: "2.0.0" },
+    profiles: { core: "1.0", auth: "1.0" },
+    adapter: referenceAdapter,
+  });
+  assert.equal(
+    report.results.some(({ caseId }) => caseId.startsWith("auth.verification.")),
+    false
+  );
+});
+
+test("Auth 1.1 conformance proves typed, identity-free, and revision-bound evidence", async () => {
+  const report = await runConformance({
+    runtime: { name: "Example Runtime", version: "2.0.0" },
+    profiles: { core: "1.0", auth: "1.1" },
+    adapter: referenceAdapter,
+  });
+  assert.equal(
+    report.results.filter(({ caseId }) => caseId.startsWith("auth.verification.")).length,
+    3
+  );
 });
 
 test("Knowledge 1.1 does not require Knowledge 1.2 conformance cases", async () => {

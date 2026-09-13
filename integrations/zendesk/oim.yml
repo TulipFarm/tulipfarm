@@ -4,7 +4,7 @@ kind: Integration
 metadata:
   id: zendesk
   name: Zendesk
-  version: 1.0.0
+  version: 1.1.0
   description: Read users and search, create, update, and comment on Zendesk Support tickets.
   license: Apache-2.0
   maintainers:
@@ -13,7 +13,7 @@ metadata:
 
 profiles:
   core: "1.0"
-  auth: "1.0"
+  auth: "1.1"
 
 files:
   - path: fixtures.yml
@@ -21,7 +21,7 @@ files:
     sha256: "eb78567b70458fb4394c1656d7b50b8e97dbd540dc0d5d3eae51b1c324678508"
   - path: setup-guide.md
     role: guide
-    sha256: "fe6d01b88e8bcbff64dd163ca8b0a5ad594131985c620697a261025b37e876b2"
+    sha256: "fa1e1777126d32012b42fdd9f263db4baefb7558998793104ef66b5dedaf8418"
 
 auth:
   allowedOriginHosts:
@@ -68,6 +68,36 @@ auth:
           target:
             type: credential
             slot: api_credential
+  verification:
+    issuer:
+      source: configuration_origin
+      field: zendesk_host
+    checks:
+      - id: current-user
+        operationId: current-user
+        credentialSlots: [api_credential]
+        success:
+          - kind: present
+            path: /user/id
+          - kind: equals
+            path: /user/active
+            value: true
+          - kind: equals
+            path: /user/suspended
+            value: false
+          - kind: one_of
+            path: /user/role
+            values: [agent, admin]
+    evidence:
+      assurance: identified
+      subject:
+        kind: human
+        checkId: current-user
+        path: /user/id
+        namespace: issuer
+      tenant:
+        kind: site
+        source: issuer
   healthCheckOperationId: current-user
 
 operations:

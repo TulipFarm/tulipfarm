@@ -39,6 +39,7 @@ const ConnectionSchema = {
     "isDefault",
     "configuration",
     "availableCredentialSlots",
+    "disconnectPending",
     "health",
     "expiresAt",
   ],
@@ -55,6 +56,7 @@ const ConnectionSchema = {
     isDefault: { type: "boolean" },
     configuration: { type: "object", additionalProperties: true },
     availableCredentialSlots: { type: "array", items: { type: "string" } },
+    disconnectPending: { type: "boolean" },
     health: { type: "object", additionalProperties: true },
     expiresAt: { type: ["string", "null"] },
   },
@@ -64,14 +66,110 @@ const StartActionSchema = {
   type: "object",
   required: ["action"],
   properties: {
-    action: { type: "string", enum: ["redirect", "form_post", "completed"] },
+    action: { type: "string", enum: ["redirect", "form_post", "completed", "pending"] },
     url: { type: "string" },
     field: { type: "string" },
     value: { type: "string" },
   },
 };
 
-function safeConnection(connection: Awaited<ReturnType<OimConnectionService["get"]>>) {
+const ConnectionSetupSchema = {
+  type: "object",
+  additionalProperties: false,
+  required: [
+    "integration",
+    "allowedOwnerScopes",
+    "configurationFields",
+    "fieldSteps",
+    "initialAuthorizationSteps",
+  ],
+  properties: {
+    integration: {
+      type: "object",
+      additionalProperties: false,
+      required: ["id", "majorVersion"],
+      properties: {
+        id: { type: "string" },
+        majorVersion: { type: "integer" },
+      },
+    },
+    connectionHealth: {
+      type: "string",
+      enum: ["unknown", "healthy", "expiring", "action_required"],
+    },
+    allowedOwnerScopes: {
+      type: "array",
+      items: { type: "string", enum: ["personal", "team", "organization"] },
+    },
+    configurationFields: {
+      type: "array",
+      items: {
+        type: "object",
+        additionalProperties: false,
+        required: ["id", "label", "type", "required", "agentVisible"],
+        properties: {
+          id: { type: "string" },
+          label: { type: "string" },
+          type: { type: "string", enum: ["string", "url", "boolean", "integer"] },
+          required: { type: "boolean" },
+          agentVisible: { type: "boolean" },
+        },
+      },
+    },
+    fieldSteps: {
+      type: "array",
+      items: {
+        type: "object",
+        additionalProperties: false,
+        required: ["id", "title", "fields"],
+        properties: {
+          id: { type: "string" },
+          title: { type: "string" },
+          description: { type: "string" },
+          fields: {
+            type: "array",
+            items: {
+              type: "object",
+              additionalProperties: false,
+              required: ["id", "label", "input", "required", "secret"],
+              properties: {
+                id: { type: "string" },
+                label: { type: "string" },
+                description: { type: "string" },
+                input: { type: "string", enum: ["text", "password", "url"] },
+                required: { type: "boolean" },
+                secret: { type: "boolean" },
+              },
+            },
+          },
+        },
+      },
+    },
+    initialAuthorizationSteps: {
+      type: "array",
+      items: {
+        type: "object",
+        additionalProperties: false,
+        required: ["id", "title", "type"],
+        properties: {
+          id: { type: "string" },
+          title: { type: "string" },
+          description: { type: "string" },
+          type: { type: "string", enum: ["oauth2", "app_manifest", "install", "webhook"] },
+        },
+      },
+    },
+    pendingAuthorizationStepIds: {
+      type: "array",
+      items: { type: "string" },
+    },
+  },
+};
+
+function safeConnection(
+  connection: Awaited<ReturnType<OimConnectionService["get"]>>,
+  disconnectPending: boolean
+) {
   return {
     id: connection.id,
     integration: connection.integration,
@@ -81,6 +179,7 @@ function safeConnection(connection: Awaited<ReturnType<OimConnectionService["get
     isDefault: connection.isDefault,
     configuration: connection.configuration,
     availableCredentialSlots: Object.keys(connection.secretBindings).sort(),
+    disconnectPending,
     health: connection.health,
     expiresAt: connection.expiresAt,
   };
@@ -139,6 +238,47 @@ export function registerOimConnectionRoutes(
   };
 
   app.get(
+    "/api/v1/integrations/:key/connection-setup",
+    {
+      ...protectedRoute,
+      schema: {
+        description:
+          "Read reviewed non-secret setup metadata for one exact versioned Integration package.",
+        tags: ["integrations"],
+        security: [{ sessionCookie: [] }, { bearerToken: [] }],
+        params: ParamsSchema,
+        querystring: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            connectionId: { type: "string", minLength: 1, maxLength: 256 },
+          },
+        },
+        response: {
+          200: ConnectionSetupSchema,
+          401: ErrorSchema,
+          403: ErrorSchema,
+          404: ErrorSchema,
+          500: ErrorSchema,
+        },
+      },
+    },
+    async (req, reply) => {
+      try {
+        const { key } = req.params as { key: string };
+        const { connectionId } = req.query as { connectionId?: string };
+        return await deps.service.setup(
+          key,
+          await actorFor(req, deps.authorizationCheck),
+          connectionId
+        );
+      } catch (error) {
+        return sendError(reply, error);
+      }
+    }
+  );
+
+  app.get(
     "/api/v1/integrations/:key/connections",
     {
       ...protectedRoute,
@@ -164,7 +304,13 @@ export function registerOimConnectionRoutes(
       try {
         const { key } = req.params as { key: string };
         const rows = await deps.service.list(key, await actorFor(req, deps.authorizationCheck));
-        return { connections: rows.map(safeConnection) };
+        return {
+          connections: await Promise.all(
+            rows.map(async (connection) =>
+              safeConnection(connection, await deps.service.isDisconnecting(connection.id))
+            )
+          ),
+        };
       } catch (error) {
         return sendError(reply, error);
       }
@@ -192,9 +338,12 @@ export function registerOimConnectionRoutes(
     async (req, reply) => {
       try {
         const { key, connectionId } = req.params as { key: string; connectionId: string };
-        return safeConnection(
-          await deps.service.get(key, connectionId, await actorFor(req, deps.authorizationCheck))
+        const connection = await deps.service.get(
+          key,
+          connectionId,
+          await actorFor(req, deps.authorizationCheck)
         );
+        return safeConnection(connection, await deps.service.isDisconnecting(connection.id));
       } catch (error) {
         return sendError(reply, error);
       }
@@ -229,8 +378,28 @@ export function registerOimConnectionRoutes(
         response: {
           201: {
             type: "object",
-            required: ["connectionId"],
-            properties: { connectionId: { type: "string" } },
+            required: ["connectionId", "verification"],
+            properties: {
+              connectionId: { type: "string" },
+              verification: {
+                type: "object",
+                required: ["status"],
+                properties: {
+                  status: {
+                    type: "string",
+                    enum: ["not_required", "pending", "verified", "action_required"],
+                  },
+                  error: {
+                    type: "string",
+                    enum: [
+                      "provider_proof_failed",
+                      "verification_unavailable",
+                      "verification_persistence_failed",
+                    ],
+                  },
+                },
+              },
+            },
           },
           400: ErrorSchema,
           401: ErrorSchema,
@@ -370,6 +539,11 @@ export function registerOimConnectionRoutes(
             required: ["status"],
             properties: { status: { type: "string", enum: ["revoked"] } },
           },
+          202: {
+            type: "object",
+            required: ["status"],
+            properties: { status: { type: "string", enum: ["disconnect_pending"] } },
+          },
           401: ErrorSchema,
           403: ErrorSchema,
           404: ErrorSchema,
@@ -381,8 +555,12 @@ export function registerOimConnectionRoutes(
     async (req, reply) => {
       try {
         const { key, connectionId } = req.params as { key: string; connectionId: string };
-        await deps.service.revoke(key, connectionId, await actorFor(req, deps.authorizationCheck));
-        return { status: "revoked" };
+        const result = await deps.service.revoke(
+          key,
+          connectionId,
+          await actorFor(req, deps.authorizationCheck)
+        );
+        return result.status === "disconnect_pending" ? reply.code(202).send(result) : result;
       } catch (error) {
         return sendError(reply, error);
       }
@@ -409,6 +587,11 @@ export function registerOimConnectionRoutes(
             required: ["status"],
             properties: { status: { type: "string", enum: ["revoked"] } },
           },
+          202: {
+            type: "object",
+            required: ["status"],
+            properties: { status: { type: "string", enum: ["disconnect_pending"] } },
+          },
           401: ErrorSchema,
           403: ErrorSchema,
           404: ErrorSchema,
@@ -420,8 +603,11 @@ export function registerOimConnectionRoutes(
     async (req, reply) => {
       try {
         const { connectionId } = req.params as { connectionId: string };
-        await deps.service.revokeById(connectionId, await actorFor(req, deps.authorizationCheck));
-        return { status: "revoked" };
+        const result = await deps.service.revokeById(
+          connectionId,
+          await actorFor(req, deps.authorizationCheck)
+        );
+        return result.status === "disconnect_pending" ? reply.code(202).send(result) : result;
       } catch (error) {
         return sendError(reply, error);
       }

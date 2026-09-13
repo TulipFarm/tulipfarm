@@ -4,7 +4,7 @@ kind: Integration
 metadata:
   id: discord
   name: Discord
-  version: 1.0.0
+  version: 1.0.1
   description: Read and send Discord channel messages through an installed bot.
   license: Apache-2.0
   maintainers:
@@ -13,7 +13,7 @@ metadata:
 
 profiles:
   core: "1.0"
-  auth: "1.0"
+  auth: "1.1"
 
 files:
   - path: fixtures.yml
@@ -48,6 +48,27 @@ auth:
             type: credential
             slot: bot_token
   healthCheckOperationId: current-user
+  verification:
+    issuer:
+      source: package
+      value: https://discord.com
+    checks:
+      - id: current-bot
+        operationId: current-user
+        credentialSlots: [bot_token]
+        success:
+          - kind: present
+            path: /id
+          - kind: equals
+            path: /bot
+            value: true
+    evidence:
+      assurance: identified
+      subject:
+        kind: bot
+        checkId: current-bot
+        path: /id
+        namespace: issuer
 
 operations:
   - id: current-user

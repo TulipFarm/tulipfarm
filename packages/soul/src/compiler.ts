@@ -37,11 +37,19 @@ export interface BundleCompileRequest {
   readonly documents: readonly VersionedSchemaDocument[];
   /** Exact UTF-8 companion files read from the same committed tree as `documents`. */
   readonly files?: readonly BundleSourceFile[];
+  /** Code-owned definitions and files added at publication time, never written into the Soul. */
+  readonly contributions?: readonly BundleCompileContribution[];
 }
 
 export interface BundleSourceFile {
   readonly path: string;
   readonly content: string;
+}
+
+export interface BundleCompileContribution {
+  readonly source: string;
+  readonly documents: readonly VersionedSchemaDocument[];
+  readonly files: readonly BundleSourceFile[];
 }
 
 // ── Secret exclusion (SPEC §8.1: Soul stores only opaque secret identifiers) ─────
@@ -419,7 +427,70 @@ function compileAssets(
  * payload-safe — on the first deterministic failure; nothing partial is ever returned.
  */
 export function compileExecutionBundle(request: BundleCompileRequest): ExecutionBundle {
-  const authored = request.documents.map((document) => {
+  const documents = [...request.documents];
+  const files = [...(request.files ?? [])];
+  const ids = new Set<string>();
+  const kindSlugs = new Set<string>();
+  const toolIds = new Set<string>();
+  const filePaths = new Set<string>();
+  const documentIdentity = (document: VersionedSchemaDocument) => {
+    const definition = asAuthored(document);
+    if (definition === undefined) return undefined;
+    const kindSlug = `${definition.kind}\u0000${definition.slug}`;
+    const toolId =
+      definition.kind === "ToolContract" && typeof definition.spec.toolId === "string"
+        ? definition.spec.toolId
+        : undefined;
+    return { definition, kindSlug, toolId };
+  };
+  for (const document of documents) {
+    const identity = documentIdentity(document);
+    if (identity === undefined) continue;
+    ids.add(identity.definition.id);
+    kindSlugs.add(identity.kindSlug);
+    if (identity.toolId !== undefined) toolIds.add(identity.toolId);
+  }
+  const registerContributionDocument = (document: VersionedSchemaDocument, source: string) => {
+    const identity = documentIdentity(document);
+    if (identity === undefined) return;
+    const { definition, kindSlug, toolId } = identity;
+    if (
+      ids.has(definition.id) ||
+      kindSlugs.has(kindSlug) ||
+      (toolId !== undefined && toolIds.has(toolId))
+    ) {
+      throw new BundleError(
+        "INVALID_DEFINITION",
+        `Execution bundle: ${source} collides with an existing ${definition.kind} identity`,
+        { subject: definition.subject }
+      );
+    }
+    ids.add(definition.id);
+    kindSlugs.add(kindSlug);
+    if (toolId !== undefined) toolIds.add(toolId);
+  };
+  for (const file of files) filePaths.add(file.path);
+  for (const contribution of [...(request.contributions ?? [])].sort((a, b) =>
+    a.source.localeCompare(b.source)
+  )) {
+    for (const document of contribution.documents) {
+      registerContributionDocument(document, contribution.source);
+      documents.push(document);
+    }
+    for (const file of contribution.files) {
+      if (filePaths.has(file.path)) {
+        throw new BundleError(
+          "INVALID_DEFINITION",
+          `Execution bundle: ${contribution.source} collides with authored file ${file.path}`,
+          { subject: contribution.source, field: file.path }
+        );
+      }
+      filePaths.add(file.path);
+      files.push(file);
+    }
+  }
+
+  const authored = documents.map((document) => {
     const def = asAuthored(document);
     if (!def) {
       throw new BundleError(
@@ -430,7 +501,7 @@ export function compileExecutionBundle(request: BundleCompileRequest): Execution
     return { def, document };
   });
 
-  const { index } = DefinitionIndex.build(request.documents);
+  const { index } = DefinitionIndex.build(documents);
   const definitions = authored
     .map(({ def, document }) => compileDefinition(index, def, document))
     .sort((left, right) =>
@@ -440,7 +511,7 @@ export function compileExecutionBundle(request: BundleCompileRequest): Execution
     );
   const assets = compileAssets(
     authored.map(({ def }) => def),
-    request.files
+    files
   );
 
   return Object.freeze({

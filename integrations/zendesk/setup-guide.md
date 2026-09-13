@@ -21,6 +21,10 @@ credential. For example, enter `https://acme.zendesk.com`. TulipFarm stores only
 host, applies HTTP Basic encoding, and sends the credential only to that account's
 `*.zendesk.com` host.
 
+TulipFarm verifies the credential with Zendesk's current-user endpoint. The Connection activates
+only when Zendesk returns a real user ID for an active, nonsuspended agent or admin. An end-user
+credential remains action-required.
+
 ## Operations
 
 | Tool | Access |

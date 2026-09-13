@@ -43,6 +43,21 @@ export type Expectation =
       readonly path: string;
       readonly value: unknown;
     }
+  /**
+   * L3 only. A real Tool dispatch with the exact argument completed with this status and returned
+   * this value. This reads the Tool result, never the assistant's later description of it.
+   */
+  | {
+      readonly kind: "tool_result_field_equals";
+      readonly name: string;
+      readonly argumentPath: string;
+      readonly argumentValue: unknown;
+      readonly status: string;
+      /** One-based journey position: the initial Turn is 1, its first follow-up is 2. */
+      readonly turnIndex?: number;
+      readonly outputPath: string;
+      readonly value: unknown;
+    }
   /** The named Tool was denied on a call carrying this exact argument value. */
   | {
       readonly kind: "tool_denied";
@@ -173,6 +188,7 @@ const PERSISTED_KINDS: ReadonlySet<string> = new Set([
   "run_event_emitted",
   "run_event_text_omits",
   "persisted_message_metadata_equals",
+  "tool_result_field_equals",
   "soul_committed",
   "soul_published",
   "generated_file_readable_by",

@@ -19,6 +19,8 @@ reconciliation, and rate limits for channel workers.
 | `src/config.ts`, `src/data-dir.ts` | Env/defaults and volume-backed worker credential loading. |
 | `src/channels/` | Channel loop registration; add `DrainableLoop`s here. |
 | `src/oim-ingress/` | OIM registration recovery, polling, and durable inbox cycle. |
+| `src/oim-knowledge/` | OIM Knowledge sync registration and drainable polling loop. |
+| `src/oim-runtime.ts`, `src/oim-worker-host.ts` | Production OIM composition and internal host. |
 | `src/slack/` | Transport scaffolds exported by `src/index.ts`. |
 | `src/github/` | Provider-specific Integration worker code. |
 | `src/internal/` | Internal API client/host ports. |
@@ -30,6 +32,8 @@ reconciliation, and rate limits for channel workers.
 - Requires `DATABASE_URL`, `INTERNAL_API_URL`, and `INTEGRATION_WORKER_API_CREDENTIAL`.
 - In containers, `data-dir.ts` may read `integration-worker.env`; env wins, nothing is invented.
 - This app never migrates; wait for the schema floor and fail closed like `apps/worker`.
+- OIM operation hosts recheck the expected canonical manifest digest, package companions, current
+  Connection, and credential lease immediately before each provider request.
 - Serve `/livez` and `/readyz`; drain cleanly on `SIGTERM`/`SIGINT`.
 - Slack Socket Mode ingress and delivery polling register loops through `src/channels/`.
 - Every Slack `events_api` envelope passes `channels/mention-gate.ts` before the adapter; the gate

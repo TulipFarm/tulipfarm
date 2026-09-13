@@ -474,6 +474,14 @@ describe("OimWebhookRegistrationService", () => {
       integrationKey: "acme-v2",
       connectionId: "connection-1",
       manifest,
+      packageSnapshot: {
+        integrationId: "acme",
+        version: "2.1.0",
+        majorVersion: 2,
+        packageDigest: "a".repeat(64),
+        manifestText: "{}",
+        files: [],
+      },
       publicApiUrl: "https://api.example.test/base/",
     });
 

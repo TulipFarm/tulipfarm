@@ -1,6 +1,7 @@
+import { canonicalHash } from "@tulipfarm/schema";
 import type { ExecutionBundle } from "./bundle";
 import type { CommitActor } from "./commit-signing";
-import type { BundleCompileRequest } from "./compiler";
+import type { BundleCompileContribution, BundleCompileRequest } from "./compiler";
 import type { SoulPublicationCoordinator, SoulTreeReader } from "./publication";
 import { type BundleSigner, signExecutionBundle } from "./signatures";
 import type { Logger } from "./types";
@@ -29,6 +30,10 @@ export interface SoulPublisherOptions {
   readonly gitState?: SoulPublisherGitState;
   /** The commit the active bundle pins, or `undefined` when nothing is active or it is unreadable. */
   readonly activeCommitSha?: (businessId: string) => Promise<string | undefined>;
+  /** Code-owned artifacts included in every publication without mutating the authored Soul. */
+  readonly contributions?: () => Promise<readonly BundleCompileContribution[]>;
+  /** Active signed bundle digest, used to detect contribution changes at an unchanged Git HEAD. */
+  readonly activeBundleDigest?: (businessId: string) => Promise<string | undefined>;
 }
 
 export interface PublishCommittedTreeRequest {
@@ -40,19 +45,47 @@ export interface PublishCommittedTreeRequest {
 export class SoulPublisher {
   constructor(private readonly options: SoulPublisherOptions) {}
 
-  async publishCommittedTree(request: PublishCommittedTreeRequest): Promise<void> {
-    const startedAt = Date.now();
-    const documents = await this.options.treeReader.readDefinitions(request.commitSha);
-    const files = await this.options.treeReader.readFiles?.(request.commitSha);
+  private changesetId(
+    commitSha: string,
+    contributions: readonly BundleCompileContribution[] | undefined
+  ): string {
+    if (contributions === undefined || contributions.length === 0) return commitSha;
+    const contributionRevision = canonicalHash(
+      contributions
+        .map((contribution) => ({
+          source: contribution.source,
+          documents: contribution.documents.map((document) => canonicalHash(document)).sort(),
+          files: contribution.files
+            .map((file) => ({ path: file.path, digest: canonicalHash(file.content) }))
+            .sort((left, right) => left.path.localeCompare(right.path)),
+        }))
+        .sort((left, right) => left.source.localeCompare(right.source))
+    );
+    return `${commitSha}:contribution:${contributionRevision}`;
+  }
+
+  private async compileCommittedTree(commitSha: string) {
+    const documents = await this.options.treeReader.readDefinitions(commitSha);
+    const files = await this.options.treeReader.readFiles?.(commitSha);
+    const contributions = await this.options.contributions?.();
     const bundle = this.options.compiler({
       businessId: this.options.businessId,
-      changesetId: request.commitSha,
-      commitSha: request.commitSha,
+      changesetId: this.changesetId(commitSha, contributions),
+      commitSha,
       documents,
       ...(files === undefined ? {} : { files }),
+      ...(contributions === undefined ? {} : { contributions }),
     });
-    const signed = signExecutionBundle(bundle, this.options.signer);
-    await this.options.coordinator.publish({ bundle: signed, actor: request.actor });
+    return signExecutionBundle(bundle, this.options.signer);
+  }
+
+  private async publishSigned(
+    signed: ReturnType<typeof signExecutionBundle>,
+    actor: CommitActor,
+    startedAt: number
+  ): Promise<void> {
+    const bundle = signed.bundle;
+    await this.options.coordinator.publish({ bundle: signed, actor });
     // Enqueueing is not publishing. Every surface reads the *active* digest, so returning here
     // would let a caller announce an artifact the Runtime has not started serving — and if the
     // publication then dead-letters, never will.
@@ -62,12 +95,18 @@ export class SoulPublisher {
     );
     if (stage !== "active") {
       throw new Error(
-        `Soul publisher: committed tree ${request.commitSha} was enqueued as ${signed.digest} but publication stopped at stage ${stage}; the Runtime keeps serving the previous bundle until a drain completes it`
+        `Soul publisher: committed tree ${bundle.commitSha} was enqueued as ${signed.digest} but publication stopped at stage ${stage}; the Runtime keeps serving the previous bundle until a drain completes it`
       );
     }
     this.options.logger.info(
-      `Soul publisher: committed tree ${request.commitSha} activated as ${signed.digest} in ${Date.now() - startedAt}ms`
+      `Soul publisher: committed tree ${bundle.commitSha} activated as ${signed.digest} in ${Date.now() - startedAt}ms`
     );
+  }
+
+  async publishCommittedTree(request: PublishCommittedTreeRequest): Promise<void> {
+    const startedAt = Date.now();
+    const signed = await this.compileCommittedTree(request.commitSha);
+    await this.publishSigned(signed, request.actor, startedAt);
   }
 
   /** Reconcile active bundles with git HEAD; first boot may run before migrations finish. */
@@ -94,7 +133,14 @@ export class SoulPublisher {
       await this.publishCommittedTree({ commitSha: head, actor });
       return;
     }
-    if (activeCommitSha === head) return;
+    if (activeCommitSha === head) {
+      if (this.options.contributions === undefined) return;
+      const startedAt = Date.now();
+      const signed = await this.compileCommittedTree(head);
+      if ((await this.options.activeBundleDigest?.(businessId)) === signed.digest) return;
+      await this.publishSigned(signed, actor, startedAt);
+      return;
+    }
     if (await gitState.hasCommit(activeCommitSha)) {
       this.options.logger.info(
         `Soul publisher: active bundle pins ${activeCommitSha} but HEAD is ${head} — publishing HEAD`

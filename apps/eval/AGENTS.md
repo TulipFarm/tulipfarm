@@ -34,7 +34,7 @@ Only its own Cases need updating when their observable behaviour moves.
 | `soul/` | The **Eval Soul**: the frozen fixture business every Case is measured against. Ordinary tracked files. |
 | `src/eval-soul.ts` | `loadEvalSoul` — copies the fixture to a throwaway git repo and reads it with the real `SoulLoader`; `soulContext` maps an Agent into the assembler. |
 | `src/guardrails.ts` | Runs the Eval Soul's `guardrails.yaml` through the production `TurnGuardrails`; collects refusals off the real Run events. |
-| `src/l3/` | Persisted Chat and Routine tiers on in-process PGlite; `routine.ts` uses the shared production Routine executor and Tool Broker. |
+| `src/l3/` | Persisted Chat and Routine tiers on in-process PGlite; Integration authoring routes through the shared workflow, real approval wait, P09 journal, Soul writer, publisher, and next-Turn loader. |
 | `src/l3/soul-write.ts` | The `soul_write` Tool, over the real writer *and* the real publisher, so a Case can tell a commit from a publication. |
 | `src/l3/file-store.ts` | The one place `file_create` runs for real, so a Case can observe Chat draft versus saved File lifecycle and audience. |
 | `src/verdict.ts` | `caseVerdict`, `scoreable` — one Case collapsed into one word. Shared so the grid and a Baseline delta can never disagree. |
@@ -72,9 +72,9 @@ before changing how a Case is scored, run or compared.** These are the ones that
   A copy measures the model against a description no deployment sends, and cannot assert the
   properties that live in the declaration. The resolved declaration is in `corpusHash`, so
   rewording one retires every Baseline. An unresolvable name fails the load.
-- **`soul_write` and `file_create` are the only Tools L3 runs for real,** routed by name in
-  `routeTools`. Each writes something — a commit, a set of shares — that no scripted result could
-  stand in for, so scripting one is impossible rather than discouraged.
+- **Stateful L3 Tools run for real,** routed by name in `routeTools`. Integration review/create/get
+  use the shared authoring workflow and durable approval/install path; `soul_write` and
+  `file_create` use the real writer and File store. Never script their successful result.
 - **A saved generated File's audience comes from `agentRoles`, never the soul's `roles:`,** which is
   advisory and writes no `role_assignments`. Pair `generated_file_readable_by` with a
   `generated_file_not_readable_by` for a Role the Agent lacks, or the Case passes just as well

@@ -22,6 +22,7 @@ import {
 } from "@tulipfarm/tool-host";
 import { describe, expect, it, onTestFinished, vi } from "vitest";
 import { type Queryable, transactionPort } from "../../db";
+import type { OimReleaseDispatchPort } from "../../integrations/releases/dispatch-host";
 import { makeMigratedPglite } from "../../test/pglite";
 import { buildDeclarativeTools } from "./tools";
 
@@ -38,6 +39,12 @@ const AUTHORITY = {
   subject: { kind: "user" as const, id: "user-1" },
   source: "chat" as const,
   bundleDigest: "bundle",
+};
+
+const passthroughReleaseDispatch: OimReleaseDispatchPort = {
+  async dispatch(_input, run) {
+    return run((operation) => operation());
+  },
 };
 
 function manifest(): OimManifest {
@@ -315,12 +322,22 @@ describe("OIM Chat dispatch safety", () => {
       "00000000-0000-4000-8000-000000000002": "second-token",
     });
     const effects = new MemoryEffectStore();
+    const releaseDispatchCalled = vi.fn();
+    const releaseDispatch: OimReleaseDispatchPort = {
+      async dispatch(_input, run, settlement) {
+        releaseDispatchCalled();
+        const output = await run((provider) => provider());
+        expect(await settlement()).toBe("settled");
+        return output;
+      },
+    };
     const tooling = buildDeclarativeTools([integration()], {
       businessId: BUSINESS_ID,
       effects,
       secrets: secretSource.service,
       http,
       connections: connectionResolver(() => rows),
+      releaseDispatch,
     });
     const registry = new InMemoryToolCatalog();
     for (const tool of tooling.tools) registry.register(tool);
@@ -371,6 +388,7 @@ describe("OIM Chat dispatch safety", () => {
     ).resolves.toMatchObject({ status: "succeeded" });
 
     expect(http.sent).toHaveLength(1);
+    expect(releaseDispatchCalled).toHaveBeenCalledOnce();
     expect(http.sent[0]?.headers.Authorization).toBe("Bearer first-token");
     expect(JSON.stringify(await effects.list(BUSINESS_ID))).not.toContain("first-token");
   });
@@ -383,6 +401,7 @@ describe("OIM Chat dispatch safety", () => {
     const effects = new MemoryEffectStore();
     const tooling = buildDeclarativeTools([integration()], {
       businessId: BUSINESS_ID,
+      releaseDispatch: passthroughReleaseDispatch,
       effects,
       secrets: secretSource.service,
       http,
@@ -431,6 +450,7 @@ describe("OIM Chat dispatch safety", () => {
     });
     const tooling = buildDeclarativeTools([integration(multipart)], {
       businessId: BUSINESS_ID,
+      releaseDispatch: passthroughReleaseDispatch,
       effects,
       secrets: secretSource.service,
       http,
@@ -498,6 +518,7 @@ describe("OIM Chat dispatch safety", () => {
     const effects = new MemoryEffectStore();
     const tooling = buildDeclarativeTools([integration(configured)], {
       businessId: BUSINESS_ID,
+      releaseDispatch: passthroughReleaseDispatch,
       effects,
       secrets: secretSource.service,
       http,
@@ -557,6 +578,7 @@ describe("OIM Chat dispatch safety", () => {
     const http = new RecordingHttp();
     const tooling = buildDeclarativeTools([integration()], {
       businessId: BUSINESS_ID,
+      releaseDispatch: passthroughReleaseDispatch,
       effects,
       secrets: secretSource.service,
       http,
@@ -621,6 +643,7 @@ describe("OIM Chat dispatch safety", () => {
     });
     const tooling = buildDeclarativeTools([integration()], {
       businessId: BUSINESS_ID,
+      releaseDispatch: passthroughReleaseDispatch,
       effects: new MemoryEffectStore(),
       secrets: secretSource.service,
       http,
@@ -682,6 +705,7 @@ describe("OIM Chat dispatch safety", () => {
     const effects = new PgEffectStore(transactionPort(database as unknown as Queryable));
     const tooling = buildDeclarativeTools([integration(multipartManifest())], {
       businessId: BUSINESS_ID,
+      releaseDispatch: passthroughReleaseDispatch,
       effects,
       secrets: secretSource.service,
       http,
@@ -766,6 +790,9 @@ describe("OIM Chat dispatch safety", () => {
     revisions[secretKey] = "2";
     filesAllowed = false;
     approvals = new ToolApprovalService({ transactions });
+    const releaseDispatch = {
+      dispatch: vi.fn(),
+    } as unknown as OimReleaseDispatchPort;
     dispatcher = host(
       buildDeclarativeTools([integration(multipartManifest())], {
         businessId: BUSINESS_ID,
@@ -779,6 +806,7 @@ describe("OIM Chat dispatch safety", () => {
           content,
           store: storeOutput,
         },
+        releaseDispatch,
       })
     );
 
@@ -796,6 +824,7 @@ describe("OIM Chat dispatch safety", () => {
       store: storeOutput.mock.calls.length,
       policy: authorize.mock.calls.length,
     }).toEqual(beforeReplay);
+    expect(releaseDispatch.dispatch).not.toHaveBeenCalled();
 
     await expect(
       dispatcher.dispatch(AUTHORITY, {
@@ -877,6 +906,7 @@ describe("OIM Chat dispatch safety", () => {
     });
     const tooling = buildDeclarativeTools([integration(multipartManifest())], {
       businessId: BUSINESS_ID,
+      releaseDispatch: passthroughReleaseDispatch,
       effects,
       secrets: secretSource.service,
       http,
@@ -969,6 +999,7 @@ describe("OIM Chat dispatch safety", () => {
     };
     const tooling = buildDeclarativeTools([openApiIntegration(oimManifest, openApiDocument())], {
       businessId: BUSINESS_ID,
+      releaseDispatch: passthroughReleaseDispatch,
       effects: new MemoryEffectStore(),
       secrets: secrets({}).service,
       http,
@@ -1061,6 +1092,7 @@ describe("OIM Chat dispatch safety", () => {
         ],
         {
           businessId: BUSINESS_ID,
+          releaseDispatch: passthroughReleaseDispatch,
           effects: new MemoryEffectStore(),
           secrets: secrets({}).service,
           http,

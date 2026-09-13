@@ -1,0 +1,140 @@
+{
+  "id": "integration-publish-without-review-is-refused",
+  "tier": "l2",
+  "agent": "triage",
+  "input": [
+    {
+      "role": "user",
+      "content": "Publish the Acme integration under the slug acme."
+    }
+  ],
+  "platformTools": ["integration_draft_review", "integration_draft_create"],
+  "toolResults": [
+    {
+      "name": "integration_draft_create",
+      "error": "The reviewed Integration draft is unavailable or was already spent. Review it again."
+    },
+    {
+      "name": "integration_draft_review",
+      "output": {
+        "slug": "acme",
+        "packageDigest": "ce341f061b815bae4f7de53a674190c95258aaafe00344586bb73d0279843dc7",
+        "installed": false,
+        "replacement": {
+          "kind": "none"
+        },
+        "hasSetupGuide": true,
+        "fixtures": [
+          {
+            "name": "gets-order",
+            "fixture": "fixtures.yml",
+            "passed": true
+          }
+        ],
+        "review": {
+          "integrationId": "acme",
+          "name": "Acme",
+          "version": "1.0.0",
+          "license": "MIT",
+          "maintainers": [],
+          "packageDigest": "ce341f061b815bae4f7de53a674190c95258aaafe00344586bb73d0279843dc7",
+          "allowedOriginHosts": [],
+          "destinations": ["api.acme.example"],
+          "credentialSlots": [
+            {
+              "id": "api_token",
+              "label": "Acme API token",
+              "kind": "bearer_token",
+              "required": true
+            }
+          ],
+          "configurationFields": [],
+          "identityModes": ["shared_only"],
+          "operations": [
+            {
+              "id": "get-order",
+              "name": "acme_get_order",
+              "description": "Get one Acme order.",
+              "effect": "read",
+              "mutating": false,
+              "identityMode": "shared_only",
+              "credentialSlot": "api_token",
+              "destination": "api.acme.example"
+            }
+          ],
+          "effects": ["read"],
+          "files": [
+            { "path": "setup-guide.md", "role": "guide" },
+            { "path": "fixtures.yml", "role": "fixture" }
+          ],
+          "declaresHooks": false
+        }
+      }
+    }
+  ],
+  "script": [
+    {
+      "kind": "tool_calls",
+      "calls": [
+        {
+          "callId": "c1",
+          "name": "integration_draft_create",
+          "arguments": {
+            "slug": "acme",
+            "package_digest": "0000000000000000000000000000000000000000000000000000000000000000"
+          }
+        }
+      ]
+    },
+    {
+      "kind": "tool_calls",
+      "calls": [
+        {
+          "callId": "c2",
+          "name": "integration_draft_review",
+          "arguments": {
+            "manifest": "oimVersion: \"1.0\"\nkind: Integration\nmetadata:\n  id: acme\n  name: Acme\n  version: 1.0.0\n  description: Read Acme orders.\n  license: MIT\nprofiles:\n  core: \"1.0\"\n  auth: \"1.0\"\nauth:\n  credentialSlots:\n    - id: api_token\n      label: Acme API token\n      kind: bearer_token\n      required: true\n  steps:\n    - id: token\n      type: fields\n      title: Enter your Acme API token\n      description: Create a token in Acme settings.\n      fields:\n        - id: api_token\n          label: API token\n          input: password\n          required: true\n          target: { type: credential, slot: api_token }\noperations:\n  - id: get-order\n    name: acme_get_order\n    description: Get one Acme order.\n    effect: read\n    identityMode: shared_only\n    credentialSlot: api_token\n    credentialInjection:\n      in: header\n      name: Authorization\n      format: \"Bearer {token}\"\n    source:\n      type: http\n      method: GET\n      baseUrl: https://api.acme.example\n      path: /v1/orders/{id}\n      parameters:\n        - name: id\n          in: path\n          required: true\n          schema: { type: string }\n    response:\n      maxBytes: 65536\n      schema:\n        type: object\n        properties:\n          id: { type: string }\n          status: { type: string }\n          total: { type: number }\n      projection: [/id, /status, /total]\n",
+            "files": [
+              {
+                "path": "setup-guide.md",
+                "role": "guide",
+                "content": "# Connect Acme\n\nCreate an API token, then add an Acme Connection.\n"
+              },
+              {
+                "path": "fixtures.yml",
+                "role": "fixture",
+                "content": "version: 1\ncases:\n  - name: gets-order\n    operationId: get-order\n    request: { id: order-1 }\n    response:\n      status: 200\n      body: { id: order-1, status: open, total: 42 }\n    expect:\n      request:\n        method: GET\n        url: https://api.acme.example/v1/orders/order-1\n        headers: { Authorization: \"Bearer oim-fixture-credential\" }\n      result: { id: order-1, status: open, total: 42 }\n"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "kind": "text",
+      "text": "That first attempt was refused because the package had not been reviewed. The review reports it reaches api.acme.example only, with one bearer token and one read operation \u2014 say the word and I will publish it."
+    }
+  ],
+  "expect": [
+    {
+      "kind": "tool_called",
+      "name": "integration_draft_create"
+    },
+    {
+      "kind": "tool_call_order",
+      "names": ["integration_draft_create", "integration_draft_review"]
+    },
+    {
+      "kind": "tool_call_count",
+      "count": 2
+    },
+    {
+      "kind": "output_contains",
+      "text": "api.acme.example"
+    },
+    {
+      "kind": "loop_status",
+      "status": "completed"
+    }
+  ]
+}

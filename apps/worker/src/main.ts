@@ -15,6 +15,7 @@ import {
 import {
   ArtifactService,
   ChildCompletionSweeper,
+  DurableEffectRetryWaitHost,
   DurableWaitManager,
   RoutineStateScheduler,
   RunLeaseManager,
@@ -101,7 +102,7 @@ import { HttpEmitPort } from "./routine/emit-port";
 import { createRoutineExecutor } from "./routine/executor";
 import { WorkerPinnedDefinitionReader } from "./routine/pinned-definitions";
 import { SandboxRoutineScriptPort } from "./routine/script-port";
-import { BrokerRoutineToolPort } from "./routine/tool-port";
+import { createRoutineToolPort } from "./routine/tool-factory";
 import { RunDispatcher } from "./run-dispatcher";
 import { GuardedWorkerSecretsService } from "./secrets-guard";
 import { type DrainableLoop, drain } from "./shutdown";
@@ -264,6 +265,7 @@ export async function main(): Promise<void> {
   const sweeper = new WaitTimerSweeper(waitStore, resume);
   // Routine timers open here; the same sweeper resolves them.
   const waits = new DurableWaitManager(waitStore, resume);
+  const effectRetryWaits = new DurableEffectRetryWaitHost(waits);
   const childSweeper = new ChildCompletionSweeper(childAncestry, {
     ancestry: childAncestry,
     waits,
@@ -528,7 +530,8 @@ export async function main(): Promise<void> {
       // Routine Tools must pass the Broker: pinned authority, ledger reservation, then adapter.
       // No `authority` callback: the bundle layer is the Run's only authority.
       tools: observeRoutineToolPort(
-        new BrokerRoutineToolPort({
+        createRoutineToolPort({
+          internalApi,
           effects: new PgEffectStore(transactions),
           approvals: new ToolApprovalService({ transactions }),
           adapters: githubTooling.adapters,
@@ -539,6 +542,8 @@ export async function main(): Promise<void> {
             }),
           credentials: githubTooling.credentials,
           mutationGuard,
+          parkRetry: effectRetryWaits.parkRetry,
+          retryWaitStatus: effectRetryWaits.status,
         }),
         spendSink
       ),
