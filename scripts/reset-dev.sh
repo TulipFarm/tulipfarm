@@ -66,14 +66,25 @@ SOUL_PATH="$(read_env SOUL_PATH)"
 SOUL_PATH="${SOUL_PATH:-$HOME/.tulipfarm/soul}"
 SOUL_PATH="${SOUL_PATH/#\~/$HOME}" # expand a leading ~ (dotenv stores it literally)
 
+# Same per-checkout resolution as SOUL_PATH above: a worktree's own .env.local (or the process
+# env) sets TF_DATA_DIR to a worktree-local dir (see setup-dev.sh), so falling back to the shared
+# $HOME/.tulipfarm/data here would wipe another checkout's live worker/integration-worker
+# credentials instead of this checkout's own.
+DATA_DIR="${TF_DATA_DIR:-$(read_env TF_DATA_DIR)}"
+DATA_DIR="${DATA_DIR:-$HOME/.tulipfarm/data}"
+DATA_DIR="${DATA_DIR/#\~/$HOME}" # expand a leading ~ (dotenv stores it literally)
+
 # Safety: never rm a dangerous path.
 case "$SOUL_PATH" in
   "" | "/" | "$HOME" | "$HOME/") echo "❌ refusing to delete unsafe SOUL_PATH '$SOUL_PATH'"; exit 1 ;;
 esac
+case "$DATA_DIR" in
+  "" | "/" | "$HOME" | "$HOME/") echo "❌ refusing to delete unsafe TF_DATA_DIR '$DATA_DIR'"; exit 1 ;;
+esac
 
 echo "🧹 TulipFarm local reset — this will DELETE:"
 echo "   • Postgres database: $DB_NAME  (users, secrets, encryption keys, chats, jobs — all gone)"
-echo "   • Data dir:          $HOME/.tulipfarm/data  (auto-minted worker credentials)"
+echo "   • Data dir:          $DATA_DIR  (auto-minted worker credentials)"
 if ! $DB_ONLY; then
   echo "   • Soul repo:         $SOUL_PATH"
   $KEEP_ENV || echo "   • Env file:          $REPO_ROOT/.env.local  (+ app symlinks)"
@@ -112,11 +123,11 @@ fi
 
 # 1b) Data dir — worker/integration-worker credentials the API auto-mints on first boot
 # (apps/api/src/setup/worker-credential.ts) and persists here for local dev
-# (TF_DATA_DIR, set by setup-dev.sh). These name API client rows in the database just dropped
-# above, so leaving the files behind after ANY database reset (including --db-only) hands the next
-# `pnpm dev` a credential that reads back as "present" but no longer authenticates — the API
-# re-mints a fresh one on its own next boot, but only after this stale file is gone.
-DATA_DIR="$HOME/.tulipfarm/data"
+# (TF_DATA_DIR, resolved above from .env.local — same as setup-dev.sh). These name API client rows
+# in the database just dropped above, so leaving the files behind after ANY database reset
+# (including --db-only) hands the next `pnpm dev` a credential that reads back as "present" but no
+# longer authenticates — the API re-mints a fresh one on its own next boot, but only after this
+# stale file is gone.
 if [ -d "$DATA_DIR" ]; then
   echo "🔑 Removing stale worker credentials at $DATA_DIR..."
   rm -rf "$DATA_DIR"
