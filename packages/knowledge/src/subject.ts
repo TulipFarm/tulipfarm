@@ -43,6 +43,7 @@ export interface KnowledgeSubject {
   readonly provider: string;
   readonly externalId: string;
   readonly externalTenantId?: string;
+  readonly sourceLocator?: KnowledgeSourceRecord["sourceLocator"];
   readonly revision: string;
   readonly status: KnowledgeSourceStatus;
   readonly verification: KnowledgeSourceVerification;
@@ -155,6 +156,7 @@ export function sourceSubject(
     provider: source.provider,
     externalId: source.externalId,
     externalTenantId: source.externalTenantId,
+    ...(source.sourceLocator === undefined ? {} : { sourceLocator: source.sourceLocator }),
     revision: source.revision,
     status: source.status,
     verification: source.verification,

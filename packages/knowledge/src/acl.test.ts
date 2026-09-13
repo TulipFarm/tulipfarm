@@ -108,13 +108,33 @@ describe("decideSourceAccess", () => {
     });
 
     it("allows when the provider confirms access at read time", async () => {
+      const locator = {
+        kind: "oim" as const,
+        integrationSlug: "wiki-install",
+        integrationId: "wiki",
+        integrationMajorVersion: 2,
+        connectionId: "connection-1",
+        externalTenantId: "tenant-1",
+        externalAccountId: "account-1",
+        sourceKindId: "page",
+        scope: "space-1",
+        itemId: "file-1",
+      };
+      let checkedLocator: unknown;
       const port: LiveSourceAuthorizationPort = {
-        async check() {
+        async check(input) {
+          checkedLocator = input.sourceLocator;
           return { allowed: true, aclRevision: "live-7" };
         },
       };
-      const decision = await decideSourceAccess(live, member, { live: port }, NOW);
+      const decision = await decideSourceAccess(
+        { ...live, sourceLocator: locator },
+        member,
+        { live: port },
+        NOW
+      );
       expect(decision).toEqual({ allowed: true, aclRevision: "live-7", mode: "live" });
+      expect(checkedLocator).toEqual(locator);
     });
 
     it("denies when the provider says no", async () => {

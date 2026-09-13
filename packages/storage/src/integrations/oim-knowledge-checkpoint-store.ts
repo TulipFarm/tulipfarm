@@ -15,6 +15,9 @@ export interface OimKnowledgeCheckpoint extends OimKnowledgeCheckpointKey {
   readonly continuation: string | null;
   readonly accumulatedSeenItemIds: readonly string[];
   readonly pendingDeletionItemIds: readonly string[];
+  readonly cursorWatermark: string | null;
+  readonly pendingCursorWatermark: string | null;
+  readonly requiresFullRebuild: boolean;
   readonly revision: number;
   readonly leaseToken: string | null;
   readonly leaseExpiresAt: string | null;
@@ -72,6 +75,15 @@ export const OIM_KNOWLEDGE_CHECKPOINT_STORAGE_STATEMENTS: readonly string[] = [
      WHERE lease_token IS NOT NULL`,
 ];
 
+export const OIM_KNOWLEDGE_CHECKPOINT_WATERMARK_STORAGE_STATEMENTS: readonly string[] = [
+  `ALTER TABLE oim_knowledge_scan_checkpoints
+     ADD COLUMN cursor_watermark text,
+     ADD COLUMN pending_cursor_watermark text,
+     ADD COLUMN requires_full_rebuild boolean NOT NULL DEFAULT false,
+     ADD CONSTRAINT oim_knowledge_scan_pending_watermark_check
+       CHECK (pending_cursor_watermark IS NULL OR scan_id IS NOT NULL)`,
+];
+
 interface CheckpointRow {
   business_id: string;
   integration_id: string;
@@ -84,6 +96,9 @@ interface CheckpointRow {
   continuation: string | null;
   accumulated_seen_item_ids: unknown;
   pending_deletion_item_ids: unknown;
+  cursor_watermark: string | null;
+  pending_cursor_watermark: string | null;
+  requires_full_rebuild: boolean;
   revision: number | string;
   lease_token: string | null;
   lease_expires_at: Date | string | null;
@@ -114,6 +129,9 @@ function fromRow(row: CheckpointRow): OimKnowledgeCheckpoint {
     continuation: row.continuation,
     accumulatedSeenItemIds: strings(row.accumulated_seen_item_ids),
     pendingDeletionItemIds: strings(row.pending_deletion_item_ids),
+    cursorWatermark: row.cursor_watermark,
+    pendingCursorWatermark: row.pending_cursor_watermark,
+    requiresFullRebuild: row.requires_full_rebuild,
     revision: Number(row.revision),
     leaseToken: row.lease_token,
     leaseExpiresAt: row.lease_expires_at === null ? null : timestamp(row.lease_expires_at),
@@ -152,6 +170,38 @@ export class OimKnowledgeCheckpointStore {
         keyParams(key)
       );
       return result.rows[0] === undefined ? null : fromRow(result.rows[0]);
+    });
+  }
+
+  async clearConnection(
+    scope: Pick<
+      OimKnowledgeCheckpointKey,
+      "businessId" | "integrationId" | "integrationMajorVersion" | "connectionId"
+    >
+  ): Promise<number> {
+    return this.transactions.withTransaction(async (transaction) => {
+      const result = await transaction.query(
+        `UPDATE oim_knowledge_scan_checkpoints
+            SET baseline_item_ids = '[]'::jsonb,
+                scan_id = NULL,
+                continuation = NULL,
+                accumulated_seen_item_ids = '[]'::jsonb,
+                pending_deletion_item_ids = '[]'::jsonb,
+                cursor_watermark = NULL,
+                pending_cursor_watermark = NULL,
+                requires_full_rebuild = false,
+                lease_token = NULL,
+                lease_expires_at = NULL,
+                revision = revision + 1,
+                updated_at = now()
+          WHERE business_id = $1
+            AND integration_id = $2
+            AND integration_major_version = $3
+            AND connection_id = $4
+          RETURNING scope_key`,
+        [scope.businessId, scope.integrationId, scope.integrationMajorVersion, scope.connectionId]
+      );
+      return result.rows.length;
     });
   }
 
@@ -201,9 +251,12 @@ export class OimKnowledgeCheckpointStore {
     expectedRevision: number,
     continuation: string | null,
     seenItemIds: readonly string[],
-    now = new Date()
+    now = new Date(),
+    pendingCursorWatermark?: string
   ): Promise<OimKnowledgeCheckpoint | null> {
     const page = unique(seenItemIds);
+    const watermarkAssignment =
+      pendingCursorWatermark === undefined ? "" : ", pending_cursor_watermark = $12";
     return this.update(
       key,
       leaseToken,
@@ -216,8 +269,12 @@ export class OimKnowledgeCheckpointStore {
                accumulated_seen_item_ids || $11::jsonb
              ) AS item
            ) seen
-       )`,
-      [continuation, JSON.stringify(page)],
+       )${watermarkAssignment}`,
+      [
+        continuation,
+        JSON.stringify(page),
+        ...(pendingCursorWatermark === undefined ? [] : [pendingCursorWatermark]),
+      ],
       now
     );
   }
@@ -264,12 +321,23 @@ export class OimKnowledgeCheckpointStore {
     key: OimKnowledgeCheckpointKey,
     leaseToken: string,
     expectedRevision: number,
-    now = new Date()
+    now = new Date(),
+    listingMode: "full" | "incremental" = "full",
+    rebuild = false
   ): Promise<OimKnowledgeCheckpoint | null> {
     return this.transactions.withTransaction(async (transaction) => {
       const result = await transaction.query<CheckpointRow>(
         `UPDATE oim_knowledge_scan_checkpoints
-            SET baseline_item_ids = accumulated_seen_item_ids,
+            SET baseline_item_ids = CASE
+              WHEN $10 = 'full' OR $11 THEN accumulated_seen_item_ids
+                  ELSE baseline_item_ids
+                END,
+                cursor_watermark = CASE
+                  WHEN $10 = 'incremental' THEN pending_cursor_watermark
+                  ELSE cursor_watermark
+                END,
+                pending_cursor_watermark = NULL,
+                requires_full_rebuild = false,
                 scan_id = NULL,
                 continuation = NULL,
                 accumulated_seen_item_ids = '[]'::jsonb,
@@ -290,8 +358,9 @@ export class OimKnowledgeCheckpointStore {
             AND scan_id IS NOT NULL
             AND continuation IS NULL
             AND pending_deletion_item_ids = '[]'::jsonb
+            AND ($10 = 'full' OR pending_cursor_watermark IS NOT NULL)
           RETURNING *`,
-        [...keyParams(key), leaseToken, expectedRevision, now]
+        [...keyParams(key), leaseToken, expectedRevision, now, listingMode, rebuild]
       );
       return result.rows[0] === undefined ? null : fromRow(result.rows[0]);
     });
