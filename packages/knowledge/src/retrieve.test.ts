@@ -194,6 +194,31 @@ describe("retrieve", () => {
     expect(JSON.stringify(result)).not.toContain("jane doe");
   });
 
+  it("drops a stale chunk whose revision does not match the authorized source", async () => {
+    const { sources } = fixture();
+    const stale: KnowledgeIndexPort = {
+      async search() {
+        return [
+          {
+            sourceId: "public-handbook",
+            chunkId: "public-handbook#stale",
+            revision: "r0",
+            score: 9,
+            classification: ["restricted"],
+            digest: "d".repeat(64),
+            snippet: "content from before the ACL revision",
+          },
+        ];
+      },
+    };
+
+    const result = await retrieve({ sources, index: stale, now }, request);
+
+    expect(result.candidates).toEqual([]);
+    expect(result.exclusions).toContainEqual({ reason: "index_filter_violation", count: 1 });
+    expect(JSON.stringify(result)).not.toContain("before the ACL revision");
+  });
+
   it("denies every source when authorization cannot be established", async () => {
     const sources = new InMemoryKnowledgeSourceStore([
       source("public-handbook", ["user-1"], { verification: "unverifiable" }),

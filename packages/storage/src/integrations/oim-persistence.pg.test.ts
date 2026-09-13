@@ -20,6 +20,7 @@ import {
 import { OIM_INGRESS_EMISSION_STORAGE_STATEMENTS } from "./oim-ingress-emission-store";
 import {
   OIM_KNOWLEDGE_CHECKPOINT_STORAGE_STATEMENTS,
+  OIM_KNOWLEDGE_CHECKPOINT_WATERMARK_STORAGE_STATEMENTS,
   OimKnowledgeCheckpointStore,
 } from "./oim-knowledge-checkpoint-store";
 import { POLLING_INGRESS_STORAGE_STATEMENTS, PollingIngressStore } from "./polling-ingress-store";
@@ -72,6 +73,7 @@ describe("OIM persistence foundations", () => {
       ...OIM_INGRESS_EMISSION_STORAGE_STATEMENTS,
       ...POLLING_INGRESS_STORAGE_STATEMENTS,
       ...OIM_KNOWLEDGE_CHECKPOINT_STORAGE_STATEMENTS,
+      ...OIM_KNOWLEDGE_CHECKPOINT_WATERMARK_STORAGE_STATEMENTS,
     ]) {
       await database.exec(statement);
     }
@@ -970,6 +972,7 @@ describe("OIM persistence foundations", () => {
       continuation: null,
       accumulatedSeenItemIds: ["a", "b", "c"],
     });
+
     await expect(
       store.appendPage(
         key,
@@ -1008,6 +1011,312 @@ describe("OIM persistence foundations", () => {
     });
   });
 
+  it("durably resets Connection checkpoints without removing their stale-writer fence", async () => {
+    const store = new OimKnowledgeCheckpointStore(transactionPort(database));
+    const key = {
+      businessId: BUSINESS_ID,
+      integrationId: "calendar",
+      integrationMajorVersion: 2,
+      connectionId: CONNECTION_ID,
+      sourceKind: "events",
+      scope: "team-1",
+    };
+    const started = await store.claim(
+      key,
+      "scan-1",
+      "lease-1",
+      300,
+      new Date("2026-09-12T09:00:00Z")
+    );
+    const page = await store.appendPage(
+      key,
+      "lease-1",
+      started?.revision ?? 0,
+      "page-2",
+      ["event-1"],
+      new Date("2026-09-12T09:00:01Z"),
+      "watermark-1"
+    );
+
+    await expect(
+      store.clearConnection({
+        businessId: BUSINESS_ID,
+        integrationId: "calendar",
+        integrationMajorVersion: 2,
+        connectionId: CONNECTION_ID,
+      })
+    ).resolves.toBe(1);
+    await expect(store.load(key)).resolves.toMatchObject({
+      baselineItemIds: [],
+      scanId: null,
+      continuation: null,
+      accumulatedSeenItemIds: [],
+      pendingDeletionItemIds: [],
+      cursorWatermark: null,
+      pendingCursorWatermark: null,
+      leaseToken: null,
+      revision: (page?.revision ?? 0) + 1,
+    });
+    await expect(
+      store.appendPage(
+        key,
+        "lease-1",
+        page?.revision ?? 0,
+        null,
+        ["stale"],
+        new Date("2026-09-12T09:00:02Z")
+      )
+    ).resolves.toBeNull();
+  });
+
+  it("promotes an incremental watermark only after pending deletions are acknowledged", async () => {
+    const store = new OimKnowledgeCheckpointStore(transactionPort(database));
+    const key = {
+      businessId: BUSINESS_ID,
+      integrationId: "calendar",
+      integrationMajorVersion: 2,
+      connectionId: CONNECTION_ID,
+      sourceKind: "events",
+      scope: "incremental",
+    };
+    const bootstrap = await store.claim(
+      key,
+      "bootstrap",
+      "lease-0",
+      10,
+      new Date("2026-09-12T08:59:57Z")
+    );
+    const bootstrapPage = await store.appendPage(
+      key,
+      "lease-0",
+      bootstrap?.revision ?? 0,
+      null,
+      [],
+      new Date("2026-09-12T08:59:58Z"),
+      "watermark-0"
+    );
+    await expect(
+      store.complete(
+        key,
+        "lease-0",
+        bootstrapPage?.revision ?? 0,
+        new Date("2026-09-12T08:59:59Z"),
+        "incremental"
+      )
+    ).resolves.toMatchObject({
+      cursorWatermark: "watermark-0",
+      pendingCursorWatermark: null,
+    });
+
+    const started = await store.claim(
+      key,
+      "scan-1",
+      "lease-1",
+      10,
+      new Date("2026-09-12T09:00:00Z")
+    );
+    await expect(
+      store.complete(
+        key,
+        "lease-1",
+        started?.revision ?? 0,
+        new Date("2026-09-12T09:00:00.500Z"),
+        "incremental"
+      )
+    ).resolves.toBeNull();
+    const firstPage = await store.appendPage(
+      key,
+      "lease-1",
+      started?.revision ?? 0,
+      "page-2",
+      ["changed-a"],
+      new Date("2026-09-12T09:00:01Z"),
+      "watermark-1"
+    );
+    await expect(
+      store.release(key, "lease-1", firstPage?.revision ?? 0, new Date("2026-09-12T09:00:10Z"))
+    ).resolves.toBeNull();
+    await expect(store.load(key)).resolves.toMatchObject({
+      cursorWatermark: "watermark-0",
+      pendingCursorWatermark: "watermark-1",
+      continuation: "page-2",
+      accumulatedSeenItemIds: ["changed-a"],
+    });
+
+    const resumed = await store.claim(
+      key,
+      "scan-1",
+      "lease-2",
+      10,
+      new Date("2026-09-12T09:00:11Z")
+    );
+    const finalPage = await store.appendPage(
+      key,
+      "lease-2",
+      resumed?.revision ?? 0,
+      null,
+      ["changed-b"],
+      new Date("2026-09-12T09:00:12Z"),
+      "watermark-2"
+    );
+    const staged = await store.stageCompletion(
+      key,
+      "lease-2",
+      finalPage?.revision ?? 0,
+      ["removed"],
+      new Date("2026-09-12T09:00:13Z")
+    );
+    const failedDeletion = await store.release(
+      key,
+      "lease-2",
+      staged?.revision ?? 0,
+      new Date("2026-09-12T09:00:14Z")
+    );
+    expect(failedDeletion).toMatchObject({
+      baselineItemIds: [],
+      cursorWatermark: "watermark-0",
+      pendingCursorWatermark: "watermark-2",
+      pendingDeletionItemIds: ["removed"],
+    });
+
+    const retry = await store.claim(key, "scan-1", "lease-3", 10, new Date("2026-09-12T09:00:15Z"));
+    const acknowledged = await store.acknowledgeDeletions(
+      key,
+      "lease-3",
+      retry?.revision ?? 0,
+      ["removed"],
+      new Date("2026-09-12T09:00:16Z")
+    );
+    const completed = await store.complete(
+      key,
+      "lease-3",
+      acknowledged?.revision ?? 0,
+      new Date("2026-09-12T09:00:17Z"),
+      "incremental"
+    );
+    expect(completed).toMatchObject({
+      baselineItemIds: [],
+      cursorWatermark: "watermark-2",
+      pendingCursorWatermark: null,
+      scanId: null,
+      continuation: null,
+      accumulatedSeenItemIds: [],
+      pendingDeletionItemIds: [],
+    });
+
+    const fullScan = await store.claim(
+      key,
+      "scan-2",
+      "lease-4",
+      10,
+      new Date("2026-09-12T09:00:18Z")
+    );
+    const fullPage = await store.appendPage(
+      key,
+      "lease-4",
+      fullScan?.revision ?? 0,
+      null,
+      ["full-a"],
+      new Date("2026-09-12T09:00:19Z")
+    );
+    await expect(
+      store.complete(key, "lease-4", fullPage?.revision ?? 0, new Date("2026-09-12T09:00:20Z"))
+    ).resolves.toMatchObject({
+      baselineItemIds: ["full-a"],
+      cursorWatermark: "watermark-2",
+      pendingCursorWatermark: null,
+      scanId: null,
+      continuation: null,
+      accumulatedSeenItemIds: [],
+      pendingDeletionItemIds: [],
+    });
+  });
+
+  it("keeps a full rebuild durable across a page-boundary restart", async () => {
+    const store = new OimKnowledgeCheckpointStore(transactionPort(database));
+    const key = {
+      businessId: BUSINESS_ID,
+      integrationId: "calendar",
+      integrationMajorVersion: 2,
+      connectionId: CONNECTION_ID,
+      sourceKind: "events",
+      scope: "rebuild-team",
+    };
+    const started = await store.claim(
+      key,
+      "rebuild-scan",
+      "lease-1",
+      300,
+      new Date("2026-09-12T09:00:00Z")
+    );
+    await database.query(
+      `UPDATE oim_knowledge_scan_checkpoints
+          SET requires_full_rebuild = true
+        WHERE business_id = $1
+          AND integration_id = $2
+          AND integration_major_version = $3
+          AND connection_id = $4
+          AND source_kind = $5
+          AND scope_key = $6`,
+      [
+        key.businessId,
+        key.integrationId,
+        key.integrationMajorVersion,
+        key.connectionId,
+        key.sourceKind,
+        key.scope,
+      ]
+    );
+    const firstPage = await store.appendPage(
+      key,
+      "lease-1",
+      started?.revision ?? 0,
+      "page-2",
+      ["a"],
+      new Date("2026-09-12T09:00:01Z"),
+      "watermark-1"
+    );
+    await store.release(key, "lease-1", firstPage?.revision ?? 0, new Date("2026-09-12T09:00:02Z"));
+    const resumed = await store.claim(
+      key,
+      "rebuild-scan",
+      "lease-2",
+      300,
+      new Date("2026-09-12T09:00:03Z")
+    );
+    expect(resumed).toMatchObject({
+      requiresFullRebuild: true,
+      continuation: "page-2",
+      accumulatedSeenItemIds: ["a"],
+      pendingCursorWatermark: "watermark-1",
+    });
+    const finalPage = await store.appendPage(
+      key,
+      "lease-2",
+      resumed?.revision ?? 0,
+      null,
+      ["b"],
+      new Date("2026-09-12T09:00:04Z"),
+      "watermark-2"
+    );
+    await expect(
+      store.complete(
+        key,
+        "lease-2",
+        finalPage?.revision ?? 0,
+        new Date("2026-09-12T09:00:05Z"),
+        "incremental",
+        true
+      )
+    ).resolves.toMatchObject({
+      baselineItemIds: ["a", "b"],
+      cursorWatermark: "watermark-2",
+      pendingCursorWatermark: null,
+      requiresFullRebuild: false,
+      scanId: null,
+    });
+  });
+
   it.each(["append", "stage", "acknowledge", "complete", "release"] as const)(
     "refuses expired %s mutations without losing scan state",
     async (operation) => {
@@ -1042,7 +1351,15 @@ describe("OIM persistence foundations", () => {
       const expiredAt = new Date("2026-09-12T09:00:10Z");
       const result =
         operation === "append"
-          ? await store.appendPage(key, "lease-1", revision, null, ["late"], expiredAt)
+          ? await store.appendPage(
+              key,
+              "lease-1",
+              revision,
+              null,
+              ["late"],
+              expiredAt,
+              "late-watermark"
+            )
           : operation === "stage"
             ? await store.stageCompletion(key, "lease-1", revision, ["late"], expiredAt)
             : operation === "acknowledge"

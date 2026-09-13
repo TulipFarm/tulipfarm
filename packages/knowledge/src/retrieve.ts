@@ -301,7 +301,7 @@ async function expandCandidates(
   for (const candidate of neighbours) {
     if (merged.has(candidate.chunkId)) continue;
     const grant = allowed.get(candidate.sourceId);
-    if (grant === undefined) {
+    if (grant === undefined || candidate.revision !== grant.citation.revision) {
       reasons.push("index_filter_violation");
       continue;
     }
@@ -404,7 +404,7 @@ export async function retrieve(
     // Defence in depth: an index adapter that ignores `allowedSourceIds` (a bug, or a swapped
     // implementation) cannot turn into a disclosure. The candidate is dropped whole — its id is
     // not echoed back in the exclusion list either.
-    if (authorized === undefined) {
+    if (authorized === undefined || candidate.revision !== authorized.citation.revision) {
       reasons.push("index_filter_violation");
       continue;
     }

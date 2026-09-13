@@ -4,6 +4,7 @@ import type {
   KnowledgePrincipalRef,
   KnowledgeSourceRecord,
   MutableKnowledgeSourceStore,
+  OimKnowledgeSourceLocator,
 } from "@tulipfarm/knowledge";
 import type { Queryable } from "../db";
 
@@ -15,6 +16,7 @@ interface KnowledgeSourceRow {
   external_id: string;
   external_tenant_id: string;
   owner_external_id: string;
+  source_locator: unknown;
   revision: string;
   classification: string[];
   status: string;
@@ -28,6 +30,26 @@ interface KnowledgeSourceRow {
   provenance_content_hash: string;
   provenance_checkpoint: string | null;
   last_synced_at: Date;
+}
+
+function sourceLocatorFromRow(value: unknown): OimKnowledgeSourceLocator | undefined {
+  if (typeof value !== "object" || value === null) return undefined;
+  const locator = value as Record<string, unknown>;
+  if (
+    locator.kind !== "oim" ||
+    typeof locator.integrationSlug !== "string" ||
+    typeof locator.integrationId !== "string" ||
+    !Number.isSafeInteger(locator.integrationMajorVersion) ||
+    typeof locator.connectionId !== "string" ||
+    typeof locator.externalTenantId !== "string" ||
+    typeof locator.externalAccountId !== "string" ||
+    typeof locator.sourceKindId !== "string" ||
+    typeof locator.scope !== "string" ||
+    typeof locator.itemId !== "string"
+  ) {
+    return undefined;
+  }
+  return locator as unknown as OimKnowledgeSourceLocator;
 }
 
 function accessControlFromRow(row: KnowledgeSourceRow): KnowledgeAccessControl {
@@ -55,6 +77,7 @@ function aclFromRow(row: KnowledgeSourceRow): KnowledgeAclSnapshot | undefined {
 
 function rowToRecord(row: KnowledgeSourceRow): KnowledgeSourceRecord {
   const acl = aclFromRow(row);
+  const sourceLocator = sourceLocatorFromRow(row.source_locator);
   return {
     sourceId: row.source_id,
     businessId: row.business_id,
@@ -63,6 +86,7 @@ function rowToRecord(row: KnowledgeSourceRow): KnowledgeSourceRecord {
     externalId: row.external_id,
     externalTenantId: row.external_tenant_id,
     ownerExternalId: row.owner_external_id,
+    ...(sourceLocator === undefined ? {} : { sourceLocator }),
     revision: row.revision,
     classification: row.classification,
     status: row.status as KnowledgeSourceRecord["status"],
@@ -117,22 +141,26 @@ export class PgKnowledgeSourceStore implements MutableKnowledgeSourceStore {
   }
 
   async put(record: KnowledgeSourceRecord): Promise<void> {
+    if (record.sourceLocator !== undefined) {
+      throw new Error("oim_knowledge_requires_atomic_publication");
+    }
     const acl = record.accessControl.mode === "snapshot" ? record.acl : undefined;
-    await this.q.query(
+    const result = await this.q.query(
       `INSERT INTO knowledge_source_records
          (source_id, business_id, integration_id, provider, external_id, external_tenant_id,
-          owner_external_id, revision, classification, status, verification,
+          owner_external_id, source_locator, revision, classification, status, verification,
           access_control_mode, access_control_max_age_seconds, acl_revision, acl_captured_at,
           acl_principals, provenance_captured_at, provenance_content_hash, provenance_checkpoint,
           last_synced_at, created_at, updated_at)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9::text[],$10,$11,$12,$13,$14,$15,$16::jsonb,$17,$18,$19,
-               $20,now(),now())
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8::jsonb,$9,$10::text[],$11,$12,$13,$14,$15,$16,$17::jsonb,
+               $18,$19,$20,$21,now(),now())
        ON CONFLICT (business_id, source_id) DO UPDATE SET
          integration_id = EXCLUDED.integration_id,
          provider = EXCLUDED.provider,
          external_id = EXCLUDED.external_id,
          external_tenant_id = EXCLUDED.external_tenant_id,
          owner_external_id = EXCLUDED.owner_external_id,
+         source_locator = EXCLUDED.source_locator,
          revision = EXCLUDED.revision,
          classification = EXCLUDED.classification,
          status = EXCLUDED.status,
@@ -146,7 +174,9 @@ export class PgKnowledgeSourceStore implements MutableKnowledgeSourceStore {
          provenance_content_hash = EXCLUDED.provenance_content_hash,
          provenance_checkpoint = EXCLUDED.provenance_checkpoint,
          last_synced_at = EXCLUDED.last_synced_at,
-         updated_at = now()`,
+         updated_at = now()
+       WHERE knowledge_source_records.source_locator IS NULL
+       RETURNING source_id`,
       [
         record.sourceId,
         record.businessId,
@@ -155,6 +185,7 @@ export class PgKnowledgeSourceStore implements MutableKnowledgeSourceStore {
         record.externalId,
         record.externalTenantId,
         record.ownerExternalId,
+        record.sourceLocator === undefined ? null : JSON.stringify(record.sourceLocator),
         record.revision,
         record.classification,
         record.status,
@@ -170,5 +201,6 @@ export class PgKnowledgeSourceStore implements MutableKnowledgeSourceStore {
         record.lastSyncedAt,
       ]
     );
+    if (result.rows.length !== 1) throw new Error("oim_knowledge_requires_atomic_publication");
   }
 }

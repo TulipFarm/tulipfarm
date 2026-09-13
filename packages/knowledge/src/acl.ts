@@ -3,7 +3,11 @@
  * contains stable reason codes only, never provider errors, names, ACLs, principals, or content.
  */
 
-import type { KnowledgePrincipalRef, KnowledgeSourceRecord } from "./source";
+import type {
+  KnowledgePrincipalRef,
+  KnowledgeSourceLocator,
+  KnowledgeSourceRecord,
+} from "./source";
 import { type KnowledgeAclEntry, type KnowledgeSubject, sourceSubject } from "./subject";
 
 export type SourceAccessDenialReason =
@@ -37,6 +41,7 @@ export interface LiveSourceAuthorizationPort {
     readonly provider: string;
     readonly externalId: string;
     readonly externalTenantId?: string;
+    readonly sourceLocator?: KnowledgeSourceLocator;
     readonly principals: readonly KnowledgePrincipalRef[];
   }): Promise<{ readonly allowed: boolean; readonly aclRevision?: string } | undefined>;
 }
@@ -127,6 +132,7 @@ export async function decideKnowledgeAccess(
         ...(subject.externalTenantId === undefined
           ? {}
           : { externalTenantId: subject.externalTenantId }),
+        ...(subject.sourceLocator === undefined ? {} : { sourceLocator: subject.sourceLocator }),
         principals: request.principals,
       });
     } catch {

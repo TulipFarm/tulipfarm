@@ -46,6 +46,23 @@ export interface KnowledgeProvenance {
   readonly checkpoint?: string;
 }
 
+export interface OimKnowledgeSourceLocator {
+  readonly kind: "oim";
+  readonly integrationSlug: string;
+  readonly integrationId: string;
+  readonly integrationMajorVersion: number;
+  readonly connectionId: string;
+  readonly externalTenantId: string;
+  readonly externalAccountId: string;
+  readonly sourceKindId: string;
+  readonly scope: string;
+  readonly itemId: string;
+  readonly fields?: Readonly<Record<string, string | number | boolean>>;
+  readonly sourceUrl?: string;
+}
+
+export type KnowledgeSourceLocator = OimKnowledgeSourceLocator;
+
 export interface KnowledgeSourceRecord {
   readonly sourceId: string;
   readonly businessId: string;
@@ -54,6 +71,7 @@ export interface KnowledgeSourceRecord {
   readonly externalId: string;
   readonly externalTenantId: string;
   readonly ownerExternalId: string;
+  readonly sourceLocator?: KnowledgeSourceLocator;
   /** Provider revision of the content. A new revision invalidates derived artifacts. */
   readonly revision: string;
   readonly classification: readonly string[];

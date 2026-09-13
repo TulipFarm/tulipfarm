@@ -1,7 +1,10 @@
 import type { PGlite } from "@electric-sql/pglite";
 import type { OimConnection } from "@tulipfarm/schema";
 import {
+  ConnectionExternalIdentityStore,
   ConnectionStore,
+  OimKnowledgeCheckpointStore,
+  type OimKnowledgePublicationClaim,
   OimKnowledgePublicationStore,
   type OimKnowledgeSourcePublication,
   PgIntegrationAuthRequestRepo,
@@ -33,7 +36,7 @@ function connection(id: string, majorVersion: number): OimConnection {
 function knowledgeSource(
   overrides: Partial<OimKnowledgeSourcePublication> = {}
 ): OimKnowledgeSourcePublication {
-  return {
+  const source = {
     businessId: BUSINESS_ID,
     sourceId: "calendar:event-1",
     integrationId: "calendar",
@@ -42,11 +45,11 @@ function knowledgeSource(
     externalId: "event-1",
     externalTenantId: "tenant-1",
     ownerExternalId: "account-1",
-    sourceLocator: { kind: "events", scope: "primary" },
+    sourceLocator: {},
     revision: "1",
     classification: ["internal"],
-    verification: "verified",
-    accessControlMode: "snapshot",
+    verification: "verified" as const,
+    accessControlMode: "snapshot" as const,
     accessControlMaximumAgeSeconds: 300,
     aclRevision: "acl-1",
     aclCapturedAt: "2026-09-12T09:00:00.000Z",
@@ -57,6 +60,76 @@ function knowledgeSource(
     provenanceConnectionId: "connection-1",
     lastSyncedAt: "2026-09-12T09:00:00.000Z",
     ...overrides,
+  };
+  return {
+    ...source,
+    sourceLocator:
+      overrides.sourceLocator ??
+      ({
+        kind: "oim",
+        integrationSlug: "calendar-install",
+        integrationId: source.integrationId,
+        integrationMajorVersion: source.integrationMajorVersion,
+        connectionId: source.provenanceConnectionId,
+        externalTenantId: source.externalTenantId,
+        externalAccountId: source.ownerExternalId,
+        sourceKindId: "events",
+        scope: "primary",
+        itemId: source.externalId,
+      } satisfies OimKnowledgeSourcePublication["sourceLocator"]),
+  };
+}
+
+async function publicationClaim(
+  database: PGlite,
+  connectionId = "connection-1"
+): Promise<OimKnowledgePublicationClaim> {
+  const transactions = transactionPort(database);
+  await new ConnectionExternalIdentityStore(transactions).bindVerified({
+    businessId: BUSINESS_ID,
+    connectionId,
+    integrationId: "calendar",
+    integrationMajorVersion: 2,
+    externalTenantId: "tenant-1",
+    externalAccountId: "account-1",
+    proofKind: "auth",
+    proofDigest: "a".repeat(64),
+    verifiedAt: "2026-09-12T09:00:00.000Z",
+    verifiedBy: "provider-auth",
+  });
+  const checkpoint = await new OimKnowledgeCheckpointStore(transactions).claim(
+    {
+      businessId: BUSINESS_ID,
+      integrationId: "calendar",
+      integrationMajorVersion: 2,
+      connectionId,
+      sourceKind: "events",
+      scope: "primary",
+    },
+    "scan-1",
+    "lease-1",
+    300,
+    new Date(Date.now() + 60_000)
+  );
+  if (checkpoint === null || checkpoint.scanId === null || checkpoint.leaseToken === null) {
+    throw new Error("expected Knowledge publication checkpoint");
+  }
+  const connectionClaim = await new OimKnowledgePublicationStore(transactions).claimConnection({
+    businessId: BUSINESS_ID,
+    integrationId: "calendar",
+    integrationMajorVersion: 2,
+    connectionId,
+    externalTenantId: "tenant-1",
+    externalAccountId: "account-1",
+  });
+  if (connectionClaim === null) throw new Error("expected Knowledge Connection claim");
+  return {
+    ...connectionClaim,
+    sourceKindId: "events",
+    scope: "primary",
+    scanId: checkpoint.scanId,
+    leaseToken: checkpoint.leaseToken,
+    checkpointRevision: checkpoint.revision,
   };
 }
 
@@ -74,6 +147,7 @@ describe("OIM persistence migrations", () => {
         .slice(0, 5)
         .map(({ version }) => version)
     ).toEqual([110, 111, 112, 113, 114]);
+    expect(PG_MIGRATIONS.at(-1)?.version).toBe(118);
   });
 
   it("builds every OIM persistence table on a fresh database", async () => {
@@ -97,12 +171,13 @@ describe("OIM persistence migrations", () => {
            'oim_release_revocation_state',
            'oim_installed_release_provenance',
            'oim_release_maintenance_config',
-           'oim_knowledge_scan_checkpoints'
+           'oim_knowledge_scan_checkpoints',
+           'oim_knowledge_connection_fences'
          )
        ORDER BY table_name
     `);
 
-    expect(result.rows.map(({ table_name }) => table_name)).toHaveLength(14);
+    expect(result.rows.map(({ table_name }) => table_name)).toHaveLength(15);
 
     const registrationGeneration = await database.query<{ column_name: string }>(`
       SELECT column_name
@@ -145,6 +220,23 @@ describe("OIM persistence migrations", () => {
     expect(registrationIndexes.rows).toEqual([
       { indexname: "oim_webhook_registration_attempts_due_idx" },
       { indexname: "oim_webhook_registrations_due_idx" },
+    ]);
+
+    const checkpointColumns = await database.query<{ column_name: string }>(`
+      SELECT column_name
+        FROM information_schema.columns
+       WHERE table_name = 'oim_knowledge_scan_checkpoints'
+         AND column_name IN (
+           'cursor_watermark',
+           'pending_cursor_watermark',
+           'requires_full_rebuild'
+         )
+       ORDER BY column_name
+    `);
+    expect(checkpointColumns.rows.map(({ column_name }) => column_name)).toEqual([
+      "cursor_watermark",
+      "pending_cursor_watermark",
+      "requires_full_rebuild",
     ]);
   });
 
@@ -227,8 +319,10 @@ describe("OIM persistence migrations", () => {
     const transactions = transactionPort(database);
     const store = new OimKnowledgePublicationStore(transactions);
     await new ConnectionStore(transactions).put(BUSINESS_ID, connection("connection-1", 2));
+    const claim = await publicationClaim(database);
     const source = knowledgeSource();
     await store.publish({
+      claim,
       source,
       chunks: [
         {
@@ -241,10 +335,15 @@ describe("OIM persistence migrations", () => {
       ],
     });
     await store.publish({
+      claim,
       source: {
         ...source,
         sourceId: "calendar:event-2",
         externalId: "event-2",
+        sourceLocator: {
+          ...source.sourceLocator,
+          itemId: "event-2",
+        },
         revision: "1",
       },
       chunks: [
@@ -260,6 +359,7 @@ describe("OIM persistence migrations", () => {
     await expect(
       store.publish({
         expectedRevision: "1",
+        claim,
         source: {
           ...source,
           revision: "2",
@@ -298,6 +398,7 @@ describe("OIM persistence migrations", () => {
     await expect(
       store.publish({
         expectedRevision: "stale",
+        claim,
         source: {
           ...source,
           revision: "2",
@@ -318,6 +419,7 @@ describe("OIM persistence migrations", () => {
     await expect(
       store.publish({
         expectedRevision: "1",
+        claim,
         source: {
           ...source,
           revision: "2",
@@ -362,6 +464,7 @@ describe("OIM persistence migrations", () => {
 
     await expect(
       store.markDeleted({
+        claim,
         businessId: BUSINESS_ID,
         sourceId: "calendar:event-1",
         expectedRevision: "2",
@@ -371,6 +474,7 @@ describe("OIM persistence migrations", () => {
     ).rejects.toThrow("invalid_oim_knowledge_deletion");
     await expect(
       store.markDeleted({
+        claim,
         businessId: BUSINESS_ID,
         sourceId: "calendar:event-1",
         expectedRevision: "2",
@@ -407,6 +511,7 @@ describe("OIM persistence migrations", () => {
       integration: { id: "mail", majorVersion: 2 },
     });
     await connections.put("other-business", connection("other-business-connection", 2));
+    const claim = await publicationClaim(database);
     const chunk = {
       chunkId: "chunk-1",
       revision: "1",
@@ -417,33 +522,39 @@ describe("OIM persistence migrations", () => {
 
     await expect(
       store.publish({
+        claim,
         source: knowledgeSource({ provenanceConnectionId: "missing" }),
         chunks: [chunk],
       })
     ).rejects.toThrow();
     await expect(
       store.publish({
+        claim,
         source: knowledgeSource({ provenanceConnectionId: "other-business-connection" }),
         chunks: [chunk],
       })
     ).rejects.toThrow();
     await expect(
       store.publish({
+        claim,
         source: knowledgeSource({ provenanceConnectionId: "wrong-integration" }),
         chunks: [chunk],
       })
     ).rejects.toThrow();
 
-    await expect(store.publish({ source: knowledgeSource(), chunks: [chunk] })).resolves.toBe(true);
+    await expect(
+      store.publish({ claim, source: knowledgeSource(), chunks: [chunk] })
+    ).resolves.toBe(true);
     await expect(
       store.publish({
         expectedRevision: "1",
+        claim,
         source: knowledgeSource({
           revision: "2",
           provenanceConnectionId: "connection-2",
         }),
         chunks: [{ ...chunk, revision: "2" }],
       })
-    ).resolves.toBe(false);
+    ).rejects.toThrow("invalid_oim_knowledge_publication");
   });
 });

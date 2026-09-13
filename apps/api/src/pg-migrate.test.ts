@@ -219,11 +219,17 @@ describe("runPgMigrations", () => {
         id text NOT NULL,
         integration_id text NOT NULL,
         integration_major_version integer NOT NULL,
+        status text NOT NULL,
+        health_status text NOT NULL,
+        expires_at timestamptz,
         PRIMARY KEY (business_id, id),
         UNIQUE (business_id, id, integration_id, integration_major_version)
       );
       CREATE TABLE webhook_deliveries (
          business_id text NOT NULL
+      );
+      CREATE TABLE oim_knowledge_scan_checkpoints (
+        scan_id text
       );
       CREATE TABLE schema_version (
         id boolean PRIMARY KEY DEFAULT true,
@@ -235,7 +241,7 @@ describe("runPgMigrations", () => {
 
     await runPgMigrations(db, undefined, NOOP_LOG);
 
-    expect(await schemaVersion(db)).toBe(117);
+    expect(await schemaVersion(db)).toBe(118);
     expect(await tableExists(db, "oim_ingress_teardowns")).toBe(true);
     expect(await tableExists(db, "oim_webhook_registrations")).toBe(true);
     expect(await tableExists(db, "oim_webhook_registration_attempts")).toBe(true);
@@ -278,6 +284,63 @@ describe("runPgMigrations", () => {
       { indexname: "oim_webhook_registration_attempts_due_idx" },
       { indexname: "oim_webhook_registrations_due_idx" },
     ]);
+
+    const { queryable, statements } = watch(db);
+    await runPgMigrations(queryable, undefined, NOOP_LOG);
+    expect(statements.filter((statement) => statement === "BEGIN")).toHaveLength(0);
+  });
+
+  it("upgrades OIM Knowledge publication fencing from version 117 and is then repeat-safe", async () => {
+    await db.exec(`
+      CREATE TABLE connections (
+        business_id text NOT NULL,
+        id text NOT NULL,
+        integration_id text NOT NULL,
+        integration_major_version integer NOT NULL,
+        status text NOT NULL,
+        health_status text NOT NULL,
+        expires_at timestamptz,
+        PRIMARY KEY (business_id, id)
+      );
+      CREATE TABLE oim_knowledge_scan_checkpoints (
+        scan_id text
+      );
+      CREATE TABLE schema_version (
+        id boolean PRIMARY KEY DEFAULT true,
+        version integer NOT NULL,
+        CONSTRAINT schema_version_single_row CHECK (id)
+      );
+      INSERT INTO schema_version (id, version) VALUES (true, 117);
+    `);
+
+    await runPgMigrations(db, undefined, () => {});
+
+    const columns = await db.query<{ column_name: string }>(`
+      SELECT column_name
+        FROM information_schema.columns
+       WHERE table_name = 'oim_knowledge_scan_checkpoints'
+         AND column_name IN (
+           'cursor_watermark',
+           'pending_cursor_watermark',
+           'requires_full_rebuild'
+         )
+       ORDER BY column_name
+    `);
+    expect(columns.rows).toEqual([
+      { column_name: "cursor_watermark" },
+      { column_name: "pending_cursor_watermark" },
+      { column_name: "requires_full_rebuild" },
+    ]);
+    expect(await tableExists(db, "oim_knowledge_connection_fences")).toBe(true);
+
+    const trigger = await db.query<{ trigger_name: string }>(`
+      SELECT trigger_name
+        FROM information_schema.triggers
+       WHERE event_object_table = 'connections'
+         AND trigger_name = 'oim_knowledge_connection_lifecycle_fence'
+    `);
+    expect(trigger.rows).toEqual([{ trigger_name: "oim_knowledge_connection_lifecycle_fence" }]);
+    expect(await schemaVersion(db)).toBe(118);
 
     const { queryable, statements } = watch(db);
     await runPgMigrations(queryable, undefined, NOOP_LOG);

@@ -44,6 +44,8 @@ import {
   MEMORY_CURATION_STORAGE_STATEMENTS,
   OIM_INGRESS_EMISSION_STORAGE_STATEMENTS,
   OIM_KNOWLEDGE_CHECKPOINT_STORAGE_STATEMENTS,
+  OIM_KNOWLEDGE_CHECKPOINT_WATERMARK_STORAGE_STATEMENTS,
+  OIM_KNOWLEDGE_PUBLICATION_FENCE_STORAGE_STATEMENTS,
   OIM_RATE_LIMIT_STORAGE_STATEMENTS,
   OIM_RELEASE_MAINTENANCE_STORAGE_STATEMENTS,
   OIM_RELEASE_TRUST_STORAGE_STATEMENTS,
@@ -3403,5 +3405,48 @@ export const PG_MIGRATIONS: PgMigration[] = [
       WEBHOOK_REGISTRATION_STORAGE_STATEMENTS,
       OIM_INGRESS_EMISSION_STORAGE_STATEMENTS
     ),
+  },
+  {
+    version: 118,
+    description: "fence OIM Knowledge publication and cursor progress",
+    up: async (q) => {
+      const watermark = await q.query<{ complete: boolean }>(
+        `SELECT
+           (
+             SELECT count(*) = 3
+               FROM information_schema.columns
+              WHERE table_name = 'oim_knowledge_scan_checkpoints'
+                AND column_name IN (
+                  'cursor_watermark',
+                  'pending_cursor_watermark',
+                  'requires_full_rebuild'
+                )
+           )
+           AND EXISTS (
+             SELECT 1
+               FROM pg_constraint
+              WHERE conrelid = 'oim_knowledge_scan_checkpoints'::regclass
+                AND conname = 'oim_knowledge_scan_pending_watermark_check'
+           ) AS complete`
+      );
+      if (!watermark.rows[0]?.complete) {
+        await applyStatements(OIM_KNOWLEDGE_CHECKPOINT_WATERMARK_STORAGE_STATEMENTS)(q);
+      }
+
+      const fence = await q.query<{ complete: boolean }>(
+        `SELECT
+           to_regclass('oim_knowledge_connection_fences') IS NOT NULL
+           AND EXISTS (
+             SELECT 1
+               FROM pg_trigger
+              WHERE tgrelid = 'connections'::regclass
+                AND tgname = 'oim_knowledge_connection_lifecycle_fence'
+                AND NOT tgisinternal
+           ) AS complete`
+      );
+      if (!fence.rows[0]?.complete) {
+        await applyStatements(OIM_KNOWLEDGE_PUBLICATION_FENCE_STORAGE_STATEMENTS)(q);
+      }
+    },
   },
 ];

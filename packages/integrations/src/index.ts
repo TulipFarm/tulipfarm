@@ -478,6 +478,12 @@ export type {
 } from "./knowledge";
 export { knowledgeSourceId } from "./knowledge";
 export type {
+  KnowledgeProfilePlan,
+  OimKnowledgeSyncDeps,
+  OimKnowledgeSyncOptions,
+} from "./knowledge/index";
+export { syncOimKnowledge } from "./knowledge/index";
+export type {
   ChannelApp,
   ChannelIntegration,
   ChannelProjectionStatus,

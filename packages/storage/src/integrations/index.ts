@@ -115,15 +115,23 @@ export type {
 } from "./oim-knowledge-checkpoint-store";
 export {
   OIM_KNOWLEDGE_CHECKPOINT_STORAGE_STATEMENTS,
+  OIM_KNOWLEDGE_CHECKPOINT_WATERMARK_STORAGE_STATEMENTS,
   OimKnowledgeCheckpointStore,
 } from "./oim-knowledge-checkpoint-store";
 export type {
   DeleteOimKnowledgeSource,
   OimKnowledgeChunkPublication,
+  OimKnowledgeConnectionFenceClaim,
+  OimKnowledgeConnectionFenceScope,
+  OimKnowledgePublicationClaim,
   OimKnowledgeSourcePublication,
   PublishOimKnowledgeRevision,
+  QuarantineInvalidOimKnowledgeConnection,
 } from "./oim-knowledge-publication-store";
-export { OimKnowledgePublicationStore } from "./oim-knowledge-publication-store";
+export {
+  OIM_KNOWLEDGE_PUBLICATION_FENCE_STORAGE_STATEMENTS,
+  OimKnowledgePublicationStore,
+} from "./oim-knowledge-publication-store";
 export type {
   AdmitOimRateLimitInput,
   ImposeOimRateLimitCooldownInput,

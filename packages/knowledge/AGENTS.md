@@ -56,7 +56,8 @@ propagation. This is the sole accountable owner for source ACL enforcement.
   is silently invisible wherever no embedding provider is configured. Files land in one unrestricted
   `Files` Space: grants intersect down the chain, so an unrestricted Space imposes no ceiling and
   each File's own grants stay the whole of its authorization.
-- Retrieval cache keys bind principal plus Guardrail/Context epochs; reauthorize cache hits.
+- Retrieval cache keys bind principal plus Guardrail/Context epochs; reauthorize cache hits and
+  reject every candidate whose chunk revision differs from its authorized Source revision.
 - An edge is not a grant. `graph-expand` admits a neighbour only if the authorization pass already
   passed it, walks *out of* readable pages only, and caps **admitted** pages rather than walked
   ones — capping the walk would let a withheld page displace a visible one. Hop decay keeps
