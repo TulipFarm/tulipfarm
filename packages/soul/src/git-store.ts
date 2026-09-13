@@ -130,6 +130,17 @@ export class SoulGitStore {
     }
   }
 
+  /** Last commit that changed a Soul-relative path, or null when the path has no history. */
+  async lastCommitForPath(path: string): Promise<string | null> {
+    if (this.resolvePath(path) === null) return null;
+    try {
+      const revision = (await this.git().raw(["log", "-1", "--format=%H", "--", path])).trim();
+      return revision.length === 0 ? null : revision;
+    } catch {
+      return null;
+    }
+  }
+
   /**
    * The base a changeset should declare to build on the current tip. Unlike `head()`, an unborn
    * branch is reported as the zero-OID sentinel so the value is always a valid changeset field.

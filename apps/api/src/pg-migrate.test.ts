@@ -1,5 +1,7 @@
 import type { PGlite } from "@electric-sql/pglite";
 import { DEPLOYMENT_BUSINESS_ID } from "@tulipfarm/constants";
+import { recoverQuarantinedOimRelease } from "@tulipfarm/integrations";
+import { OimReleaseTrustStore, transactionPort } from "@tulipfarm/storage";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Queryable } from "./db";
 import { runPgMigrations } from "./pg-migrate";
@@ -86,6 +88,25 @@ async function seedTurnCompletionsAlterTarget(db: PGlite): Promise<void> {
     cursor     bigint NOT NULL DEFAULT 0,
     created_at timestamptz NOT NULL,
     PRIMARY KEY (turn_id, attempt)
+  )`);
+}
+
+async function seedOimReleaseProvenanceAlterTarget(db: PGlite): Promise<void> {
+  await db.query(`CREATE TABLE oim_installed_release_provenance (
+    business_id text NOT NULL,
+    integration_id text NOT NULL,
+    major_version integer NOT NULL,
+    version text NOT NULL,
+    package_digest text NOT NULL,
+    source text NOT NULL,
+    trust_class text NOT NULL,
+    signed_release jsonb,
+    approved_community_digest text,
+    original_requirements jsonb NOT NULL,
+    auto_patch_opt_in boolean NOT NULL DEFAULT false,
+    installed_at timestamptz NOT NULL DEFAULT now(),
+    updated_at timestamptz NOT NULL DEFAULT now(),
+    PRIMARY KEY (business_id, integration_id, major_version)
   )`);
 }
 
@@ -213,6 +234,7 @@ describe("runPgMigrations", () => {
   });
 
   it("upgrades ingress lifecycle storage from version 116 and is then repeat-safe", async () => {
+    await seedOimReleaseProvenanceAlterTarget(db);
     await db.exec(`
       CREATE TABLE connections (
         business_id text NOT NULL,
@@ -241,7 +263,7 @@ describe("runPgMigrations", () => {
 
     await runPgMigrations(db, undefined, NOOP_LOG);
 
-    expect(await schemaVersion(db)).toBe(118);
+    expect(await schemaVersion(db)).toBe(119);
     expect(await tableExists(db, "oim_ingress_teardowns")).toBe(true);
     expect(await tableExists(db, "oim_webhook_registrations")).toBe(true);
     expect(await tableExists(db, "oim_webhook_registration_attempts")).toBe(true);
@@ -291,6 +313,7 @@ describe("runPgMigrations", () => {
   });
 
   it("upgrades OIM Knowledge publication fencing from version 117 and is then repeat-safe", async () => {
+    await seedOimReleaseProvenanceAlterTarget(db);
     await db.exec(`
       CREATE TABLE connections (
         business_id text NOT NULL,
@@ -340,7 +363,193 @@ describe("runPgMigrations", () => {
          AND trigger_name = 'oim_knowledge_connection_lifecycle_fence'
     `);
     expect(trigger.rows).toEqual([{ trigger_name: "oim_knowledge_connection_lifecycle_fence" }]);
-    expect(await schemaVersion(db)).toBe(118);
+    expect(await schemaVersion(db)).toBe(119);
+
+    const { queryable, statements } = watch(db);
+    await runPgMigrations(queryable, undefined, NOOP_LOG);
+    expect(statements.filter((statement) => statement === "BEGIN")).toHaveLength(0);
+  });
+
+  it("upgrades OIM release lifecycle storage from version 118 and is then repeat-safe", async () => {
+    await seedOimReleaseProvenanceAlterTarget(db);
+    await db.exec(`
+      INSERT INTO oim_installed_release_provenance (
+        business_id, integration_id, major_version, version, package_digest, source,
+        trust_class, signed_release, original_requirements, auto_patch_opt_in
+      ) VALUES (
+        'business-1', 'calendar', 2, '2.1.0', '${"a".repeat(64)}',
+        'https://catalog.example/calendar', 'official', '{"envelopeVersion":1}'::jsonb,
+        '{"metadata":{"id":"calendar","version":"2.1.0"}}'::jsonb, true
+      );
+      CREATE TABLE schema_version (
+        id boolean PRIMARY KEY DEFAULT true,
+        version integer NOT NULL,
+        CONSTRAINT schema_version_single_row CHECK (id)
+      );
+      INSERT INTO schema_version (id, version) VALUES (true, 118);
+    `);
+
+    await runPgMigrations(db, undefined, NOOP_LOG);
+
+    expect(await schemaVersion(db)).toBe(119);
+    expect(await tableExists(db, "oim_release_lifecycle_state")).toBe(true);
+    expect(await tableExists(db, "oim_release_uninstall_journals")).toBe(true);
+    expect(await tableExists(db, "oim_release_dispatch_leases")).toBe(true);
+    expect(await tableExists(db, "oim_release_install_operations")).toBe(true);
+    expect(await tableExists(db, "oim_release_slug_reservations")).toBe(true);
+
+    const provenanceColumns = await db.query<{ column_name: string }>(`
+      SELECT column_name
+        FROM information_schema.columns
+       WHERE table_name = 'oim_installed_release_provenance'
+         AND column_name IN (
+           'installation_id',
+           'slug',
+           'source_kind',
+           'source_ref',
+           'candidate_path',
+           'authored_draft',
+           'soul_revision',
+           'recovery_state'
+         )
+       ORDER BY column_name
+    `);
+    expect(provenanceColumns.rows).toEqual([
+      { column_name: "authored_draft" },
+      { column_name: "candidate_path" },
+      { column_name: "installation_id" },
+      { column_name: "recovery_state" },
+      { column_name: "slug" },
+      { column_name: "soul_revision" },
+      { column_name: "source_kind" },
+      { column_name: "source_ref" },
+    ]);
+    const operationColumns = await db.query<{ column_name: string }>(`
+      SELECT column_name
+        FROM information_schema.columns
+       WHERE table_name = 'oim_release_install_operations'
+         AND column_name IN ('authored_draft', 'expected_authored_draft', 'package_snapshot')
+       ORDER BY column_name
+    `);
+    expect(operationColumns.rows).toEqual([
+      { column_name: "authored_draft" },
+      { column_name: "expected_authored_draft" },
+      { column_name: "package_snapshot" },
+    ]);
+
+    const quarantined = await db.query<{
+      recovery_state: string;
+      installation_id: string | null;
+      slug: string | null;
+      source_ref: string | null;
+      candidate_path: string | null;
+      soul_revision: string | null;
+      auto_patch_opt_in: boolean;
+    }>(`
+      SELECT recovery_state, installation_id, slug, source_ref, candidate_path, soul_revision,
+             auto_patch_opt_in
+        FROM oim_installed_release_provenance
+       WHERE business_id = 'business-1'
+         AND integration_id = 'calendar'
+         AND major_version = 2
+    `);
+    expect(quarantined.rows).toEqual([
+      {
+        recovery_state: "quarantined",
+        installation_id: null,
+        slug: null,
+        source_ref: null,
+        candidate_path: null,
+        soul_revision: null,
+        auto_patch_opt_in: false,
+      },
+    ]);
+    const lifecycle = await db.query(`
+      SELECT 1
+        FROM oim_release_lifecycle_state
+       WHERE business_id = 'business-1'
+         AND integration_id = 'calendar'
+         AND major_version = 2
+    `);
+    expect(lifecycle.rows).toEqual([]);
+
+    const trustStore = new OimReleaseTrustStore(transactionPort(db));
+    await expect(
+      recoverQuarantinedOimRelease(
+        {
+          businessId: "business-1",
+          integrationId: "calendar",
+          majorVersion: 2,
+          source: "https://catalog.example/calendar",
+          sourceRef: "commit-calendar",
+          candidatePath: "packages/calendar",
+          slug: "calendar-v2",
+        },
+        {
+          provenance: {
+            findQuarantined: (businessId, integrationId, majorVersion) =>
+              trustStore.findQuarantinedProvenance(businessId, integrationId, majorVersion),
+            recover: (input) => trustStore.recoverQuarantinedProvenance(input),
+          },
+          inspectSource: async () => ({
+            integrationId: "calendar",
+            version: "2.1.0",
+            majorVersion: 2,
+            packageDigest: "a".repeat(64),
+            resolvedRef: "commit-calendar",
+          }),
+          inspectSoulArtifact: async () => ({
+            integrationId: "calendar",
+            version: "2.1.0",
+            majorVersion: 2,
+            packageDigest: "a".repeat(64),
+            soulRevision: "soul-calendar",
+          }),
+        }
+      )
+    ).resolves.toMatchObject({ installationId: expect.any(String) });
+    await expect(
+      db.query(
+        `SELECT recovery_state, slug, source_ref, candidate_path, soul_revision
+           FROM oim_installed_release_provenance
+          WHERE business_id = 'business-1'
+            AND integration_id = 'calendar'
+            AND major_version = 2`
+      )
+    ).resolves.toMatchObject({
+      rows: [
+        {
+          recovery_state: "verified",
+          slug: "calendar-v2",
+          source_ref: "commit-calendar",
+          candidate_path: "packages/calendar",
+          soul_revision: "soul-calendar",
+        },
+      ],
+    });
+
+    const journalSlug = await db.query<{ column_name: string }>(`
+      SELECT column_name
+        FROM information_schema.columns
+       WHERE table_name = 'oim_release_uninstall_journals'
+         AND column_name = 'slug'
+    `);
+    expect(journalSlug.rows).toEqual([{ column_name: "slug" }]);
+
+    const indexes = await db.query<{ indexname: string }>(`
+      SELECT indexname
+        FROM pg_indexes
+       WHERE schemaname = 'public'
+         AND indexname IN (
+           'oim_installed_release_slug_idx',
+           'oim_release_dispatch_unresolved_idx'
+         )
+       ORDER BY indexname
+    `);
+    expect(indexes.rows).toEqual([
+      { indexname: "oim_installed_release_slug_idx" },
+      { indexname: "oim_release_dispatch_unresolved_idx" },
+    ]);
 
     const { queryable, statements } = watch(db);
     await runPgMigrations(queryable, undefined, NOOP_LOG);
