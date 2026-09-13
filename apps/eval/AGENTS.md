@@ -87,10 +87,11 @@ before changing how a Case is scored, run or compared.** These are the ones that
   stage-specific `guardrail_blocked` so safe model refusals can be reported as unexercised.
 - **Two models are a control, not a contest,** and they never run at once.
 - **A Judge failure errors the Trial; it never scores low.**
-- **A `fault` is L3-only and breaks a dependency before or during a Turn.** The output-limit fault
-  sends scripted partial text through the production model completion guard, not a synthetic error.
+- **A `fault` is L3-only and breaks a dependency before or during a Turn.** The checkpoint fault
+  resumes a real approval checkpoint before failing; the output-limit fault uses the production
+  model completion guard, not a synthetic error.
 - **Persisted Message Expectations read `eval_messages`, never Run events or recomputed history.**
-  `attemptHistory` is L3-only and seeds participant-safe history recovered by the real executor.
+  Failure Cases must create their evidence through scripted model and Tool rounds before the fault.
 - **Provider File Expectations read `splitPrompt` binary parts against immutable Case Files.**
 - **Checkpoint replay is one L2 fault seam.** It crashes after the first Tool result and retries the
   same input; do not turn it into a general workflow fixture.

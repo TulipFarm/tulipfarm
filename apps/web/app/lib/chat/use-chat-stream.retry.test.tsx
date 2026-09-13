@@ -42,6 +42,16 @@ function Harness() {
       <button type="button" onClick={() => void chat.regenerate()}>
         Retry
       </button>
+      <button
+        type="button"
+        onClick={() => {
+          void chat.regenerate();
+          void chat.regenerate();
+        }}
+      >
+        Retry twice
+      </button>
+      <p data-testid="chat-status">{chat.status}</p>
       <p data-testid="tool-count">{tools.length}</p>
       <p data-testid="message-count">{chat.messages.length}</p>
       {chat.messages.map((message) => (
@@ -94,6 +104,33 @@ test("Retry keeps the failed attempt's Tools separate from the new answer", asyn
   expect(messages[2]).toHaveTextContent("the routine is ready");
 
   expect(String(fetchMock.mock.calls[1]?.[0])).toMatch(/\/api\/v1\/chat\/turns\/t1\/retry$/);
+});
+
+test("Regenerate admits only one request before React renders the busy state", async () => {
+  const user = userEvent.setup();
+  const headers = {
+    "X-Conversation-Id": "c1",
+    "X-Run-Id": "r2",
+    "X-Turn-Id": "t1",
+  };
+  const fetchMock = vi
+    .fn()
+    .mockImplementation(async () => streamResponse(RESUMED_ANSWER, headers))
+    .mockResolvedValueOnce(streamResponse(TOOLS_THEN_PROVIDER_FAILURE, headers));
+  vi.stubGlobal("fetch", fetchMock);
+  const App = createRemixStub([{ path: "/", Component: Harness }]);
+  render(<App />);
+
+  await user.click(screen.getByRole("button", { name: "Send" }));
+  await waitFor(() => expect(screen.getByTestId("chat-status")).toHaveTextContent("error"));
+  await user.click(screen.getByRole("button", { name: "Retry twice" }));
+  await screen.findByText("the routine is ready");
+
+  expect(fetchMock).toHaveBeenCalledTimes(2);
+  expect(String(fetchMock.mock.calls[1]?.[0])).toMatch(/\/api\/v1\/chat\/turns\/t1\/retry$/);
+
+  await user.click(screen.getByRole("button", { name: "Retry" }));
+  await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3));
 });
 
 test("Retry re-asks the question when no Turn was named, and drops the dead attempt", async () => {

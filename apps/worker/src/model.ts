@@ -151,6 +151,7 @@ export type { ModelCallReceipt, ModelCallReceiptSource } from "@tulipfarm/turn-e
 
 export class LlmModelPort implements ModelPort, ModelCallReceiptSource {
   private receipt: ModelCallReceipt | undefined;
+  private totalReceiptUsage: ModelCallReceipt["usage"];
   /** Cumulative across every model call this port makes; a turn shape can call the model twice. */
   private totalModelCallLatencyMs = 0;
   private modelCallCount = 0;
@@ -712,7 +713,9 @@ export class LlmModelPort implements ModelPort, ModelCallReceiptSource {
       this.reportSpend(request, resolution, "error", respondingUsage, finishedAt - startedAt);
       throw error;
     }
-    this.receipt = receiptFromRouting(resolution.routing, latencyMs) ?? this.receipt;
+    this.totalReceiptUsage = mergeReceiptUsage(this.totalReceiptUsage, receiptUsage(finalUsage));
+    this.receipt =
+      receiptFromResolution(resolution, latencyMs, this.totalReceiptUsage) ?? this.receipt;
     this.reportSpend(request, resolution, "ok", respondingUsage, finishedAt - startedAt);
     const output: ModelOutput =
       calls.length > 0
@@ -984,11 +987,6 @@ function routedModelId(routing: RunEventPayloads["model.routed"]): string | unde
   return undefined;
 }
 
-function pricingModelId(routing: RunEventPayloads["model.routed"]): string | undefined {
-  if (routing.outcome === "selected") return routing.chain[0]?.modelId;
-  return undefined;
-}
-
 /** Effort rung to `reasoning_effort` value; only providers exposing that OpenAI-shaped knob use it. */
 const REASONING_EFFORT_BY_RUNG: Readonly<Record<EffortRung, string>> = {
   fast: "low",
@@ -1031,12 +1029,19 @@ function appliedRung(
   return isEffortRung(routing.profileId) ? routing.profileId : undefined;
 }
 
-function receiptFromRouting(
-  routing: RunEventPayloads["model.routed"],
-  modelCallLatencyMs: number
+function receiptFromResolution(
+  resolution: Extract<LlmModelResolution, { kind: "available" }>,
+  modelCallLatencyMs: number,
+  usage: ModelCallReceipt["usage"]
 ): ModelCallReceipt | undefined {
-  const modelId = pricingModelId(routing);
+  const routing = resolution.routing;
+  const respondingModel = resolution.respondingConfiguredModel?.();
+  const modelId =
+    respondingModel?.modelId ?? resolution.attemptedModelId?.() ?? routedModelId(routing);
   if (modelId === undefined) return undefined;
+  const provider =
+    resolution.providerForModel?.(respondingModel ?? modelId) ??
+    (respondingModel === undefined ? resolution.provider : undefined);
   // Preserve `auto` as the participant's selector; the inferred rung is not what they picked.
   const byEffort =
     routing.outcome === "selected" &&
@@ -1048,9 +1053,42 @@ function receiptFromRouting(
   const effortApplied = byEffort === undefined ? undefined : appliedRung(byEffort);
   return {
     modelId,
+    ...(provider === undefined ? {} : { provider }),
     ...(effortPreset === undefined ? {} : { effortPreset }),
     ...(effortApplied === undefined ? {} : { effortApplied }),
     modelCallLatencyMs,
+    ...(usage === undefined ? {} : { usage }),
+  };
+}
+
+function receiptUsage(usage: ModelUsage): NonNullable<ModelCallReceipt["usage"]> {
+  return {
+    inputTokens: usage.inputTokens,
+    outputTokens: usage.outputTokens,
+    ...(usage.cacheReadTokens === undefined ? {} : { cacheReadTokens: usage.cacheReadTokens }),
+    ...(usage.cacheWriteTokens === undefined ? {} : { cacheWriteTokens: usage.cacheWriteTokens }),
+    ...(usage.reasoningTokens === undefined ? {} : { reasoningTokens: usage.reasoningTokens }),
+  };
+}
+
+function mergeReceiptUsage(
+  prior: ModelCallReceipt["usage"],
+  current: NonNullable<ModelCallReceipt["usage"]>
+): NonNullable<ModelCallReceipt["usage"]> {
+  if (prior === undefined) return current;
+  const sum = (left: number | undefined, right: number | undefined) =>
+    left === undefined || right === undefined ? undefined : left + right;
+  const inputTokens = sum(prior.inputTokens, current.inputTokens);
+  const outputTokens = sum(prior.outputTokens, current.outputTokens);
+  const cacheReadTokens = sum(prior.cacheReadTokens, current.cacheReadTokens);
+  const cacheWriteTokens = sum(prior.cacheWriteTokens, current.cacheWriteTokens);
+  const reasoningTokens = sum(prior.reasoningTokens, current.reasoningTokens);
+  return {
+    ...(inputTokens === undefined ? {} : { inputTokens }),
+    ...(outputTokens === undefined ? {} : { outputTokens }),
+    ...(cacheReadTokens === undefined ? {} : { cacheReadTokens }),
+    ...(cacheWriteTokens === undefined ? {} : { cacheWriteTokens }),
+    ...(reasoningTokens === undefined ? {} : { reasoningTokens }),
   };
 }
 

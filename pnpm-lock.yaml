@@ -385,6 +385,9 @@ importers:
       '@tulipfarm/model-adapter':
         specifier: workspace:*
         version: link:../../packages/model-adapter
+      '@tulipfarm/platform-tools':
+        specifier: workspace:*
+        version: link:../../packages/platform-tools
       '@tulipfarm/run-kernel':
         specifier: workspace:*
         version: link:../../packages/run-kernel

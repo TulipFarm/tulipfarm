@@ -201,6 +201,78 @@ describe("Transcript renders each part from its SSE event", () => {
 });
 
 describe("Transcript message actions", () => {
+  it("offers regenerate and feedback for a completed Surface-only reply without a copy action", async () => {
+    const user = userEvent.setup();
+    const onRegenerate = vi.fn();
+    const onFeedback = vi.fn();
+    const state = fold(
+      [
+        { type: "surface", data: { artifactId: "summary-card", revision: 2 } },
+        { type: "finish", data: { reason: "stop", messageId: "message-1" } },
+      ],
+      "show the summary"
+    );
+
+    render(
+      <Transcript
+        messages={state.messages}
+        status={state.status}
+        onApprove={vi.fn()}
+        onRegenerate={onRegenerate}
+        onFeedback={onFeedback}
+      />
+    );
+
+    const response = screen.getByLabelText("Assistant response");
+    expect(within(response).queryByRole("button", { name: "copy" })).toBeNull();
+    await user.click(within(response).getByRole("button", { name: "regenerate" }));
+    await user.click(within(response).getByRole("button", { name: "Good response" }));
+    expect(onRegenerate).toHaveBeenCalledOnce();
+    expect(onFeedback).toHaveBeenCalledWith("message-1", "up");
+  });
+
+  it.each([
+    {
+      name: "active",
+      state: fold([{ type: "surface", data: { artifactId: "summary-card", revision: 1 } }], "show"),
+    },
+    {
+      name: "cancelled",
+      state: fold(
+        [
+          { type: "surface", data: { artifactId: "summary-card", revision: 1 } },
+          { type: "finish", data: { reason: "cancelled", messageId: "message-1" } },
+        ],
+        "show"
+      ),
+    },
+    {
+      name: "failed",
+      state: fold(
+        [
+          { type: "surface", data: { artifactId: "summary-card", revision: 1 } },
+          { type: "error", data: { message: "The turn failed.", terminal: true } },
+        ],
+        "show"
+      ),
+    },
+  ])("does not offer reply actions for a $name Surface-only attempt", ({ state }) => {
+    render(
+      <Transcript
+        messages={state.messages}
+        status={state.status}
+        onApprove={vi.fn()}
+        onRegenerate={vi.fn()}
+        onFeedback={vi.fn()}
+      />
+    );
+
+    const response = screen.getByLabelText("Assistant response");
+    expect(within(response).queryByRole("button", { name: "regenerate" })).toBeNull();
+    expect(within(response).queryByRole("button", { name: "Good response" })).toBeNull();
+    expect(within(response).queryByRole("button", { name: "copy" })).toBeNull();
+  });
+
   it("offers copy + regenerate under the last sealed assistant message", async () => {
     const user = userEvent.setup();
     const onRegenerate = vi.fn();

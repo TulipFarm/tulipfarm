@@ -39,6 +39,21 @@ export const RUN_EVENT_TYPES = [
 
 export type RunEventType = (typeof RUN_EVENT_TYPES)[number];
 
+export const PARTICIPANT_RUN_EVENT_TYPES = [
+  "turn.started",
+  "text.delta",
+  "tool.call",
+  "tool.result",
+  "surface.emitted",
+  "plan.declared",
+  "approval.requested",
+  "child.started",
+  "guardrail.blocked",
+  "turn.finished",
+] as const;
+
+export type ParticipantRunEventType = (typeof PARTICIPANT_RUN_EVENT_TYPES)[number];
+
 /** The reference an event payload is validated under, e.g. `tulip.run-event.text-delta.v1`. */
 export function runEventSchemaRef(type: RunEventType): string {
   return `tulip.run-event.${type.replace(".", "-")}.v1`;
@@ -104,6 +119,44 @@ export const MESSAGE_METADATA_SCHEMA = {
   additionalProperties: true,
   properties: {
     toolCalls: { type: "array", items: PARTICIPANT_TOOL_CALL_SCHEMA },
+    events: {
+      type: "array",
+      items: {
+        type: "object",
+        required: ["sequence", "eventType", "payload"],
+        additionalProperties: false,
+        properties: {
+          sequence: { type: "integer", minimum: 1 },
+          eventType: { type: "string", enum: PARTICIPANT_RUN_EVENT_TYPES },
+          payload: { type: "object", additionalProperties: true },
+        },
+      },
+    },
+    receipt: {
+      type: "object",
+      required: ["modelId", "modelCallLatencyMs"],
+      additionalProperties: false,
+      properties: {
+        modelId: { type: "string", minLength: 1 },
+        provider: { type: "string", minLength: 1 },
+        effortPreset: { type: "string", enum: EFFORT_PRESETS },
+        effortApplied: { type: "string", enum: EFFORT_RUNGS },
+        modelCallLatencyMs: { type: "integer", minimum: 0 },
+        totalModelCallLatencyMs: { type: "integer", minimum: 0 },
+        modelCallCount: { type: "integer", minimum: 1 },
+        usage: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            inputTokens: { type: "integer", minimum: 0 },
+            outputTokens: { type: "integer", minimum: 0 },
+            cacheReadTokens: { type: "integer", minimum: 0 },
+            cacheWriteTokens: { type: "integer", minimum: 0 },
+            reasoningTokens: { type: "integer", minimum: 0 },
+          },
+        },
+      },
+    },
   },
 } as const;
 
@@ -272,6 +325,7 @@ const TURN_FINISHED_SCHEMA = {
       },
     },
     modelId: { type: "string", minLength: 1 },
+    provider: { type: "string", minLength: 1 },
     effortPreset: { type: "string", enum: EFFORT_PRESETS },
     effortApplied: { type: "string", enum: EFFORT_RUNGS },
     modelCallLatencyMs: { type: "integer", minimum: 0 },
@@ -283,6 +337,9 @@ const TURN_FINISHED_SCHEMA = {
       properties: {
         inputTokens: { type: "integer", minimum: 0 },
         outputTokens: { type: "integer", minimum: 0 },
+        cacheReadTokens: { type: "integer", minimum: 0 },
+        cacheWriteTokens: { type: "integer", minimum: 0 },
+        reasoningTokens: { type: "integer", minimum: 0 },
       },
     },
   },
@@ -608,12 +665,19 @@ export interface RunEventPayloads {
     /** Present only for a `tool_call_limit` failure, so a reader can say "N of M calls used". */
     readonly toolCallBudget?: { readonly used: number; readonly max: number };
     readonly modelId?: string;
+    readonly provider?: string;
     readonly effortPreset?: EffortPreset;
     readonly effortApplied?: EffortRung;
     readonly modelCallLatencyMs?: number;
     readonly totalModelCallLatencyMs?: number;
     readonly modelCallCount?: number;
-    readonly usage?: { readonly inputTokens?: number; readonly outputTokens?: number };
+    readonly usage?: {
+      readonly inputTokens?: number;
+      readonly outputTokens?: number;
+      readonly cacheReadTokens?: number;
+      readonly cacheWriteTokens?: number;
+      readonly reasoningTokens?: number;
+    };
   };
   readonly "context.assembled": {
     readonly contextDigest: string;

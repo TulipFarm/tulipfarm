@@ -137,7 +137,12 @@ export type ChatEvent =
     }
   | {
       type: "error";
-      data: { message: string; details?: ChatFailureDetails; terminal?: true };
+      data: {
+        message: string;
+        details?: ChatFailureDetails;
+        terminal?: true;
+        receipt?: ModelReceipt;
+      };
     };
 
 export type ParsedFrame = { seq: number; type: string; data: unknown };
@@ -174,6 +179,7 @@ export type ApprovalState = {
 
 export type ModelReceipt = {
   modelId: string;
+  provider?: string;
   effortPreset?: EffortPreset;
   effortApplied?: EffortRung;
   /** The last model call's own duration. */
@@ -181,6 +187,13 @@ export type ModelReceipt = {
   /** Summed across every model call the turn made; absent on a legacy event. */
   totalModelCallLatencyMs?: number;
   modelCallCount?: number;
+  usage?: {
+    inputTokens?: number;
+    outputTokens?: number;
+    cacheReadTokens?: number;
+    cacheWriteTokens?: number;
+    reasoningTokens?: number;
+  };
 };
 
 export type TimelinePart =

@@ -298,11 +298,11 @@ which is the shape the Routines browser hit when a forged Routine stayed invisib
 History is deliberately re-read from `eval_messages` rather than accumulated in a variable: holding
 it in memory would let a journey pass while the Turn persisted nothing at all.
 
-`attemptHistory` is the narrow fault seam for a prior executor pass of the same Turn attempt. It is
-handed to `createChatExecutor` as recovered participant-safe history, then
-`persisted_message_metadata_equals` reads the assistant Message back from `eval_messages`. This
-proves that a later failure does not erase prose, Tool metadata or exact Surface revisions without
-asking a model to choose a failure path. Run events are not accepted as a proxy for the Message.
+Failure Cases create their safe history through real scripted model and Tool rounds before the
+fault fires. `persisted_message_metadata_equals` then reads the assistant Message back from
+`eval_messages`. A Case cannot seed the expected events or receipt directly, so removing event
+generation, receipt collection or the failure checkpoint turns it red. Run events are not accepted
+as a proxy for the Message.
 
 Keep journeys rare. Anything a journey appears to test other than that seam — ordering, wording,
 refusal — is carried far more cheaply by an L2 Case.

@@ -77,6 +77,30 @@ describe("InternalTurnHost", () => {
       metadata: {
         toolCalls: [{ callId: "call-1", name: "record_list", argsDigest: "sha256:args" }],
         surfaces: [{ artifactId: "artifact-1", revision: 6 }],
+        events: [
+          {
+            sequence: 1,
+            eventType: "text.delta",
+            payload: { text: "Already checked. ", index: 0 },
+          },
+          {
+            sequence: 2,
+            eventType: "tool.call",
+            payload: {
+              callId: "call-1",
+              name: "record_list",
+              argsDigest: "sha256:args",
+            },
+          },
+        ],
+        receipt: {
+          modelId: "primary-model",
+          provider: "anthropic",
+          modelCallLatencyMs: 25,
+          totalModelCallLatencyMs: 25,
+          modelCallCount: 1,
+          usage: { inputTokens: 10, outputTokens: 2 },
+        },
         turnAttempt: {
           runId: RUN_ID,
           attempt: 1,
@@ -158,6 +182,24 @@ describe("InternalTurnHost", () => {
                   },
                   occurredAt: NOW.toISOString(),
                 },
+                {
+                  businessId: BUSINESS_ID,
+                  runId: RUN_ID,
+                  sequence: 9,
+                  eventType: "turn.finished",
+                  audience: "participant",
+                  payload: {
+                    status: "failed",
+                    messageId: "reply-1",
+                    modelId: "backup-model",
+                    provider: "openai",
+                    modelCallLatencyMs: 40,
+                    totalModelCallLatencyMs: 65,
+                    modelCallCount: 2,
+                    usage: { inputTokens: 31, outputTokens: 8 },
+                  },
+                  occurredAt: NOW.toISOString(),
+                },
               ]
             : [],
       },
@@ -166,7 +208,7 @@ describe("InternalTurnHost", () => {
     await expect(host.describeTurn(BUSINESS_ID, RUN_ID)).resolves.toMatchObject({
       history: {
         text: "Already checked. Done.",
-        cursor: 8,
+        cursor: 9,
         toolCalls: [
           {
             callId: "call-1",
@@ -184,6 +226,25 @@ describe("InternalTurnHost", () => {
           },
         ],
         surfaces: [{ artifactId: "artifact-1", revision: 7 }],
+        events: [
+          { sequence: 1, eventType: "text.delta" },
+          { sequence: 2, eventType: "tool.call" },
+          { sequence: 3, eventType: "tool.result" },
+          { sequence: 4, eventType: "text.delta" },
+          { sequence: 5, eventType: "approval.requested" },
+          { sequence: 6, eventType: "surface.emitted" },
+          { sequence: 7, eventType: "surface.emitted" },
+          { sequence: 8, eventType: "tool.result" },
+          { sequence: 9, eventType: "turn.finished" },
+        ],
+        receipt: {
+          modelId: "backup-model",
+          provider: "openai",
+          modelCallLatencyMs: 40,
+          totalModelCallLatencyMs: 65,
+          modelCallCount: 2,
+          usage: { inputTokens: 31, outputTokens: 8 },
+        },
         wait: {
           kind: "approval",
           waitId: "wait-1",

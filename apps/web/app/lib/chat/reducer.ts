@@ -413,13 +413,18 @@ export function chatReducer(state: ChatState, event: ChatEvent): ChatState {
 
     case "error": {
       const active = state.messages.at(-1);
-      const messages =
-        event.data.terminal === true && active?.role === "assistant" && !active.sealed
-          ? [
-              ...state.messages.slice(0, -1),
-              { ...active, parts: interruptRunningTools(active.parts), sealed: true },
-            ]
-          : state.messages;
+      let messages = state.messages;
+      if (
+        event.data.terminal === true &&
+        (event.data.receipt !== undefined || (active?.role === "assistant" && !active.sealed))
+      ) {
+        const { messages: current, target } = ensureAssistant(messages);
+        messages = withParts(current, target, interruptRunningTools(target.parts)).map((message) =>
+          message.id === target.id
+            ? { ...message, sealed: true, receipt: event.data.receipt ?? message.receipt }
+            : message
+        );
+      }
       return {
         ...state,
         status: "error",

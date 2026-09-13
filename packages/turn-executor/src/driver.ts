@@ -277,6 +277,7 @@ export class TurnDriver {
     };
     const result = await this.options.states.execute(stateRequest, input);
     assertRunActive(request.signal);
+    events.recordReceipt(this.options.modelReceipt?.());
 
     if (result.status === "terminal_event_pending") {
       return { status: "needs_reconciliation" };
@@ -421,6 +422,13 @@ export class TurnDriver {
       outcome.status === "succeeded" || outcome.status === "input_required"
         ? completedText(events.text, outcome.text)
         : events.text;
+    if (text.length > events.text.length) {
+      await events.emit(
+        "text.delta",
+        { text: text.slice(events.text.length), index: events.cursor + 1 },
+        "completion:text"
+      );
+    }
     const historyOutcome = outcome.status === "input_required" ? "succeeded" : outcome.status;
     const completion = await this.options.completer.complete({
       businessId: request.businessId,
@@ -480,7 +488,7 @@ export class TurnDriver {
     }
 
     if (completion.status === "succeeded") {
-      const receipt = this.options.modelReceipt?.();
+      const receipt = events.receipt;
       try {
         await events.emit(
           "turn.finished",
@@ -496,6 +504,7 @@ export class TurnDriver {
     }
 
     if (completion.status === "failed") {
+      const receipt = events.receipt;
       try {
         await events.emit(
           "turn.finished",
@@ -509,6 +518,7 @@ export class TurnDriver {
             ...(completion.toolCallBudget === undefined
               ? {}
               : { toolCallBudget: completion.toolCallBudget }),
+            ...(receipt ?? {}),
           },
           "finished"
         );

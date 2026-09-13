@@ -221,47 +221,10 @@ function validate(raw: unknown, file: string): EvalCase {
         t.input.length > 0, `${file}: every "journey" Turn needs a non-empty "input"`);
     }
   }
-  if (c.attemptHistory !== undefined) {
-    require(c.tier ===
-      "l3", `${file}: "attemptHistory" needs tier "l3"; this Case is tier ${JSON.stringify(c.tier)}`);
-    require(typeof c.attemptHistory === "object" &&
-      c.attemptHistory !== null, `${file}: "attemptHistory" must be an object`);
-    const history = c.attemptHistory as Record<string, unknown>;
-    require(typeof history.text === "string", `${file}: "attemptHistory.text" must be a string`);
-    require(history.cursor === undefined ||
-      (typeof history.cursor === "number" &&
-        Number.isInteger(history.cursor) &&
-        history.cursor >= 0), `${file}: "attemptHistory.cursor" must be a non-negative integer`);
-    require(history.toolCalls === undefined ||
-      (Array.isArray(history.toolCalls) &&
-        history.toolCalls.every((call) => {
-          if (typeof call !== "object" || call === null) return false;
-          const value = call as Record<string, unknown>;
-          return (
-            typeof value.callId === "string" &&
-            value.callId.length > 0 &&
-            typeof value.name === "string" &&
-            value.name.length > 0 &&
-            (value.outcome === undefined || value.outcome === "ok" || value.outcome === "error")
-          );
-        })), `${file}: "attemptHistory.toolCalls" must contain valid participant Tool calls`);
-    require(history.surfaces === undefined ||
-      (Array.isArray(history.surfaces) &&
-        history.surfaces.every((surface) => {
-          if (typeof surface !== "object" || surface === null) return false;
-          const value = surface as Record<string, unknown>;
-          return (
-            typeof value.artifactId === "string" &&
-            value.artifactId.length > 0 &&
-            typeof value.revision === "number" &&
-            Number.isInteger(value.revision) &&
-            value.revision > 0
-          );
-        })), `${file}: "attemptHistory.surfaces" must contain exact positive revisions`);
-  }
   if (c.fault !== undefined) {
     require(c.fault === "context" ||
       c.fault === "model" ||
+      c.fault === "model_after_checkpoint" ||
       c.fault === "model_output_limit", `${file}: unknown fault ${JSON.stringify(c.fault)}`);
     // Only the L3 tier builds the dependency a fault breaks. On an L2 Case the field would be read
     // by nothing and the Case would quietly measure an ordinary Turn.

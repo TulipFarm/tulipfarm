@@ -247,6 +247,24 @@ describe("run event vocabulary", () => {
     expect(accepts("turn.finished", { status: "cancelled", messageId: null })).toBe(true);
   });
 
+  it("accepts the responding provider and cumulative receipt usage", () => {
+    expect(
+      accepts("turn.finished", {
+        status: "succeeded",
+        messageId: "m1",
+        modelId: "backup-model",
+        provider: "openai",
+        modelCallLatencyMs: 40,
+        usage: {
+          inputTokens: 101,
+          outputTokens: 14,
+          cacheReadTokens: 8,
+          reasoningTokens: 2,
+        },
+      })
+    ).toBe(true);
+  });
+
   it("carries a UI-only connect link on a denied tool.result, and rejects it once trimmed", () => {
     // A person behind a denied call gets a deep link to fix it; the field must survive validation.
     expect(

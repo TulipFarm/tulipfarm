@@ -1,7 +1,178 @@
 import { describe, expect, it } from "vitest";
+import type { ConversationMessage } from "~/lib/conversations";
 import { messagesToTimeline } from "./hydrate";
 
 describe("messagesToTimeline", () => {
+  it("replays the persisted participant event order, plan, citations, Surface revision, and receipt", () => {
+    const timeline = messagesToTimeline([
+      {
+        _id: "user",
+        conversationId: "conversation",
+        role: "user",
+        content: "Check the account.",
+        metadata: {
+          turnRequest: {
+            version: 1,
+            message: { role: "user", content: "Check the account." },
+            conversationId: "conversation",
+            model: "balanced",
+          },
+        },
+        createdAt: "2026-01-01T00:00:00.000Z",
+      },
+      {
+        _id: "assistant",
+        conversationId: "conversation",
+        role: "assistant",
+        content: "First. Last.",
+        metadata: {
+          events: [
+            {
+              sequence: 1,
+              eventType: "text.delta",
+              payload: { text: "First. ", index: 0 },
+            },
+            {
+              sequence: 2,
+              eventType: "tool.call",
+              payload: {
+                callId: "lookup-1",
+                name: "knowledge_search",
+                argsDigest: "sha256:lookup",
+              },
+            },
+            {
+              sequence: 3,
+              eventType: "plan.declared",
+              payload: {
+                revision: 1,
+                rounds: [
+                  { calls: [{ tool: "knowledge_search", label: "Find an account" }] },
+                  { calls: [{ tool: "record_get", label: "Check a record" }] },
+                ],
+              },
+            },
+            {
+              sequence: 4,
+              eventType: "plan.declared",
+              payload: {
+                revision: 2,
+                rounds: [
+                  { calls: [{ tool: "knowledge_search", label: "Find the account" }] },
+                  { calls: [{ tool: "record_get", label: "Check the record" }] },
+                ],
+              },
+            },
+            {
+              sequence: 5,
+              eventType: "tool.result",
+              payload: {
+                callId: "lookup-1",
+                status: "ok",
+                resultPreview: {
+                  json: JSON.stringify({
+                    data: {
+                      sources: [
+                        { ref: 1, title: "Account guide", url: "https://example.com/guide" },
+                      ],
+                    },
+                  }),
+                },
+              },
+            },
+            {
+              sequence: 6,
+              eventType: "surface.emitted",
+              payload: { artifactId: "account-card", revision: 1 },
+            },
+            {
+              sequence: 7,
+              eventType: "text.delta",
+              payload: { text: "Last.", index: 1 },
+            },
+            {
+              sequence: 8,
+              eventType: "surface.emitted",
+              payload: { artifactId: "account-card", revision: 3 },
+            },
+            {
+              sequence: 9,
+              eventType: "tool.call",
+              payload: {
+                callId: "lookup-2",
+                name: "knowledge_search",
+                argsDigest: "sha256:second",
+              },
+            },
+            {
+              sequence: 10,
+              eventType: "approval.requested",
+              payload: { waitId: "wait-1", intentId: "approval-1", callId: "lookup-2" },
+            },
+            {
+              sequence: 11,
+              eventType: "child.started",
+              payload: { waitId: "wait-2", childRunId: "child-1", callId: "lookup-2" },
+            },
+            {
+              sequence: 12,
+              eventType: "tool.result",
+              payload: { callId: "lookup-2", status: "ok" },
+            },
+          ],
+          toolCalls: [{ callId: "lookup-1", name: "knowledge_search", outcome: "ok" }],
+          surfaces: [{ artifactId: "account-card", revision: 3 }],
+          receipt: {
+            modelId: "claude-sonnet-5",
+            provider: "anthropic",
+            effortPreset: "balanced",
+            modelCallLatencyMs: 1200,
+            usage: { inputTokens: 120, outputTokens: 30 },
+          },
+          turnAttempt: {
+            runId: "run-1",
+            attempt: 1,
+            cursor: 12,
+            outcome: "succeeded",
+            complete: true,
+          },
+        },
+        createdAt: "2026-01-01T00:00:01.000Z",
+      },
+    ]);
+
+    expect(timeline[1]).toMatchObject({
+      receipt: {
+        modelId: "claude-sonnet-5",
+        provider: "anthropic",
+        effortPreset: "balanced",
+        modelCallLatencyMs: 1200,
+        usage: { inputTokens: 120, outputTokens: 30 },
+      },
+      sourceTurn: {
+        text: "Check the account.",
+        options: { model: "balanced" },
+      },
+      parts: [
+        { kind: "text", text: "First. " },
+        { kind: "plan", revision: 2 },
+        { kind: "tool", toolCallId: "lookup-1", toolName: "knowledge_search" },
+        {
+          kind: "sources",
+          sources: [{ ref: 1, title: "Account guide", url: "https://example.com/guide" }],
+        },
+        { kind: "surface", artifactId: "account-card", revision: 3 },
+        { kind: "text", text: "Last." },
+        {
+          kind: "tool",
+          toolCallId: "lookup-2",
+          toolName: "knowledge_search",
+          approval: { approvalId: "approval-1", status: "approved" },
+        },
+      ],
+    });
+  });
+
   it("restores persisted Tool metadata before the assistant text", () => {
     const timeline = messagesToTimeline([
       {
@@ -179,6 +350,57 @@ describe("messagesToTimeline", () => {
     });
 
     expect(timeline[1]?.parts).toEqual([{ kind: "text", text: "The retry finished." }]);
+  });
+
+  it("keeps repeated Tool identities isolated to their retry attempt", () => {
+    const attempt = (
+      id: string,
+      runId: string,
+      attemptNumber: number,
+      name: string,
+      outcome: "failed" | "succeeded"
+    ): ConversationMessage => ({
+      _id: id,
+      conversationId: "conversation",
+      role: "assistant",
+      content: "",
+      metadata: {
+        events: [
+          {
+            sequence: 1,
+            eventType: "tool.call",
+            payload: { callId: "call-1", name, argsDigest: `sha256:${attemptNumber}` },
+          },
+          ...(outcome === "failed"
+            ? []
+            : [
+                {
+                  sequence: 2,
+                  eventType: "tool.result",
+                  payload: { callId: "call-1", status: "ok" },
+                },
+              ]),
+        ],
+        turnAttempt: {
+          runId,
+          attempt: attemptNumber,
+          cursor: 2,
+          outcome,
+          complete: true,
+        },
+      },
+      createdAt: `2026-01-01T00:00:0${attemptNumber}.000Z`,
+    });
+
+    const timeline = messagesToTimeline([
+      attempt("attempt-1", "run-1", 1, "record_list", "failed"),
+      attempt("attempt-2", "run-2", 2, "record_get", "succeeded"),
+    ]);
+
+    expect(timeline.map((message) => message.parts[0])).toMatchObject([
+      { kind: "tool", toolCallId: "call-1", toolName: "record_list", status: "interrupted" },
+      { kind: "tool", toolCallId: "call-1", toolName: "record_get" },
+    ]);
   });
 
   it("restores only the latest Surface revision within one attempt", () => {

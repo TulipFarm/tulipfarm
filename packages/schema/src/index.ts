@@ -316,6 +316,7 @@ export {
   validateRoutineDefinition,
 } from "./routine";
 export type {
+  ParticipantRunEventType,
   ParticipantToolCall,
   RunEventAudience,
   RunEventDefinition,
@@ -330,6 +331,7 @@ export type {
 } from "./run-events";
 export {
   MESSAGE_METADATA_SCHEMA,
+  PARTICIPANT_RUN_EVENT_TYPES,
   PARTICIPANT_TOOL_CALL_SCHEMA,
   RUN_EVENT_DEFINITIONS,
   RUN_EVENT_SCHEMAS,

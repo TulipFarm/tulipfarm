@@ -107,6 +107,67 @@ describe("restoring messages after a missed terminal callback", () => {
       expect.objectContaining({ _id: "assistant-1", content: "Recovered answer." }),
     ]);
   });
+
+  it("serializes ordered participant events and model receipts through the HTTP history boundary", async () => {
+    const messageRepo = {
+      listByConversation: vi.fn(async () => ({
+        items: [
+          {
+            _id: "assistant-1",
+            conversationId: "chat-1",
+            role: "assistant" as const,
+            content: "Done.",
+            metadata: {
+              events: [
+                {
+                  sequence: 4,
+                  eventType: "text.delta",
+                  payload: { text: "Done.", index: 1 },
+                },
+              ],
+              receipt: {
+                modelId: "claude-sonnet-5",
+                provider: "anthropic",
+                effortPreset: "balanced",
+                modelCallLatencyMs: 900,
+                usage: { inputTokens: 120, outputTokens: 30 },
+              },
+            },
+            createdAt: new Date("2026-08-21T00:00:02.000Z"),
+          },
+        ],
+        nextCursor: null,
+      })),
+    } as unknown as MessageRepo;
+    const repo = {
+      findById: async () => ({ _id: "chat-1", userId: "user-1" }),
+    } as unknown as ConversationRepo;
+    app = Fastify();
+    registerConversationRoutes(app, { repo, messageRepo }, async (request) => {
+      request.user = { _id: "user-1" } as UserDoc;
+    });
+    await app.ready();
+
+    const response = await app.inject({ method: "GET", url: "/api/v1/chats/chat-1/messages" });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json().messages[0].metadata).toEqual({
+      events: [
+        {
+          sequence: 4,
+          eventType: "text.delta",
+          payload: { text: "Done.", index: 1 },
+        },
+      ],
+      receipt: {
+        modelId: "claude-sonnet-5",
+        provider: "anthropic",
+        effortPreset: "balanced",
+        modelCallLatencyMs: 900,
+        usage: { inputTokens: 120, outputTokens: 30 },
+      },
+    });
+  });
 });
 
 describe("conversation rename route", () => {

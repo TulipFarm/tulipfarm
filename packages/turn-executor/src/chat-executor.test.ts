@@ -339,8 +339,10 @@ describe("createChatExecutor", () => {
     expect(recorded.events.map((event) => event.eventType)).toEqual([
       "turn.started",
       "context.assembled",
+      "text.delta",
       "turn.finished",
     ]);
+    expect(recorded.events[2]?.payload).toMatchObject({ text: "three" });
     expect(recorded.events.at(-1)?.payload).toEqual({
       status: "succeeded",
       messageId: "message-1",
