@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.18.27](https://github.com/TulipFarm/tulipfarm/compare/v0.18.26...v0.18.27) (2026-09-13)
+
+### Features
+
+* **agent-runtime:** require sequential one-question-at-a-time elicitation ([#824](https://github.com/TulipFarm/tulipfarm/issues/824)) ([3c04c12](https://github.com/TulipFarm/tulipfarm/commit/3c04c125a38bbe26d892651f84e6fc04557db64f)), closes [#818](https://github.com/TulipFarm/tulipfarm/issues/818)
+* **integrations:** add durable OIM distribution and trust ([#828](https://github.com/TulipFarm/tulipfarm/issues/828)) ([6ff1918](https://github.com/TulipFarm/tulipfarm/commit/6ff1918b218e5d9f4127e4a576e8a9bc04707964))
+* **web:** pin plan progress to a sidebar while a Turn runs ([#823](https://github.com/TulipFarm/tulipfarm/issues/823)) ([84d67f7](https://github.com/TulipFarm/tulipfarm/commit/84d67f7812544c294bb3762be0cd1edbe0fb8e94))
+
+### Bug Fixes
+
+* **agent-runtime:** restore citation instruction in platform prompt ([#825](https://github.com/TulipFarm/tulipfarm/issues/825)) ([6f2585e](https://github.com/TulipFarm/tulipfarm/commit/6f2585ed7b9eb917c3b97acf590e33bb2527686b)), references [#591](https://github.com/TulipFarm/tulipfarm/issues/591) [#787](https://github.com/TulipFarm/tulipfarm/issues/787)
+* **api:** default omitted Routine/Agent/Skill ownership to Everyone Team ([#832](https://github.com/TulipFarm/tulipfarm/issues/832)) ([22b6177](https://github.com/TulipFarm/tulipfarm/commit/22b6177012e3e535da37a0a4beca8c0aafa7e5a3)), closes [#827](https://github.com/TulipFarm/tulipfarm/issues/827)
+* **surface-web:** replace native select with themed listbox component ([#826](https://github.com/TulipFarm/tulipfarm/issues/826)) ([280762f](https://github.com/TulipFarm/tulipfarm/commit/280762fc2c70ccad88573928ea381810f974a5f7)), references [#819](https://github.com/TulipFarm/tulipfarm/issues/819) [#820](https://github.com/TulipFarm/tulipfarm/issues/820)
+* **web:** normalize functions. prefix and hide presentation tools in plan trace ([#830](https://github.com/TulipFarm/tulipfarm/issues/830)) ([4bbf666](https://github.com/TulipFarm/tulipfarm/commit/4bbf666c53429a473629ce353ba033c91e227603)), closes [#821](https://github.com/TulipFarm/tulipfarm/issues/821)
+* **web:** stop logo and expand toggle colliding in collapsed sidebar ([#822](https://github.com/TulipFarm/tulipfarm/issues/822)) ([7f71216](https://github.com/TulipFarm/tulipfarm/commit/7f71216b930bdbda121d2dfc1c56743760d1b849))
+
 ## [0.18.26](https://github.com/TulipFarm/tulipfarm/compare/v0.18.25...v0.18.26) (2026-09-13)
 
 ### Features
