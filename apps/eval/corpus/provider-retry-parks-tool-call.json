@@ -1,0 +1,43 @@
+{
+  "id": "provider-retry-parks-tool-call",
+  "tier": "l2",
+  "agent": "support",
+  "input": [
+    {
+      "role": "user",
+      "content": "Send the message \"hello\" once. If the provider asks us to wait, do not send it again yet."
+    }
+  ],
+  "tools": [
+    {
+      "name": "send_message",
+      "description": "Send one message to the configured provider.",
+      "inputSchema": {
+        "type": "object",
+        "required": ["text"],
+        "additionalProperties": false,
+        "properties": { "text": { "type": "string" } }
+      },
+      "mutating": true,
+      "sideEffecting": true
+    }
+  ],
+  "toolResults": [{ "name": "send_message", "retryWaitId": "wait-retry-1" }],
+  "script": [
+    {
+      "kind": "tool_calls",
+      "calls": [
+        {
+          "callId": "send-1",
+          "name": "send_message",
+          "arguments": { "text": "hello" }
+        }
+      ]
+    }
+  ],
+  "expect": [
+    { "kind": "tool_called", "name": "send_message" },
+    { "kind": "tool_call_count", "count": 1 },
+    { "kind": "loop_status", "status": "awaiting_retry" }
+  ]
+}

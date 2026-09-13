@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { type ApprovalBinding, bindingsMatch, computeApprovalBinding } from "@tulipfarm/authz";
 import {
   DurableWaitManager,
   type InvocationPrincipal,
@@ -11,6 +12,7 @@ import {
   type TransactionPort,
   WaitStore,
 } from "@tulipfarm/storage";
+import { normalizeToolIntent, type ToolIntent } from "@tulipfarm/tool-broker";
 import type { ToolApprovalDecision, ToolApprovalPort } from "../ports";
 import {
   type ApprovalDemand,
@@ -40,10 +42,14 @@ export type ApprovalSignalOutcome = "resumed" | "already_settled" | "forbidden" 
 
 export interface ToolApprovalPayload {
   readonly runId: string;
+  /** Raw model-call lookup key, kept separate from the exact prepared intent digest. */
+  readonly requestDigest?: string;
   readonly intentDigest: string;
   readonly toolCallId: string;
   readonly toolName: string;
   readonly args: unknown;
+  readonly intent?: ToolIntent;
+  readonly approvalBindingSuperseded?: boolean;
   /** Present once the Run actually parked; absent while the loop is still deciding to. */
   readonly waitId?: string;
 }
@@ -83,6 +89,57 @@ function payloadOf(row: ApprovalRow): Partial<ToolApprovalPayload> {
     : {};
 }
 
+function demandEvidenceHash(toolName: string, demand: ApprovalDemand): string {
+  return canonicalHash({
+    demandedBy: demand.demandedBy,
+    reason: demand.reason,
+    ruleId: demand.ruleId ?? null,
+    toolName,
+  });
+}
+
+function approvalBinding(input: {
+  requestDigest: string;
+  toolName: string;
+  demand: ApprovalDemand;
+  intent?: ToolIntent;
+}): ApprovalBinding {
+  const evidenceHashes = [demandEvidenceHash(input.toolName, input.demand)];
+  if (input.intent !== undefined) {
+    return computeApprovalBinding({
+      intent: input.intent,
+      evidenceHashes,
+      guardrailRevision: input.demand.guardrailRevision,
+    });
+  }
+  return {
+    intentDigest: input.requestDigest,
+    evidenceDigest: canonicalHash(evidenceHashes),
+    guardrailRevision: input.demand.guardrailRevision,
+  };
+}
+
+function persistedApprovalBinding(row: ApprovalRow): ApprovalBinding | null {
+  const payload = payloadOf(row);
+  const evidence = readApprovalEvidence(row.guardrailEvidence);
+  if (
+    typeof payload.intentDigest !== "string" ||
+    typeof payload.toolName !== "string" ||
+    evidence === null ||
+    row.guardrailEvidenceDigest === null ||
+    approvalEvidenceDigest(evidence) !== row.guardrailEvidenceDigest ||
+    evidence.intentDigest !== payload.intentDigest ||
+    evidence.toolName !== payload.toolName
+  ) {
+    return null;
+  }
+  return {
+    intentDigest: payload.intentDigest,
+    evidenceDigest: canonicalHash([demandEvidenceHash(evidence.toolName, evidence)]),
+    guardrailRevision: evidence.guardrailRevision,
+  };
+}
+
 export class ToolApprovalService implements ToolApprovalPort {
   private readonly newId: () => string;
   private readonly now: () => Date;
@@ -92,6 +149,29 @@ export class ToolApprovalService implements ToolApprovalPort {
     this.newId = options.newId ?? randomUUID;
     this.now = options.now ?? (() => new Date());
     this.ttlMs = options.ttlMs ?? APPROVAL_WAIT_TTL_MS;
+  }
+
+  async findIntent(input: {
+    runId: string;
+    toolCallId: string;
+    toolName: string;
+    args: unknown;
+  }): Promise<ToolIntent | undefined> {
+    return await this.transact(async ({ repo }) => {
+      const row = await repo.findByIntent(
+        input.runId,
+        intentOf(input.runId, input.toolName, input.args),
+        input.toolCallId
+      );
+      if (row === null) return undefined;
+      const intent = payloadOf(row).intent;
+      if (intent === undefined) return undefined;
+      try {
+        return normalizeToolIntent(intent);
+      } catch {
+        return undefined;
+      }
+    });
   }
 
   /** Returns or requests the standing decision for one Tool intent. */
@@ -105,30 +185,62 @@ export class ToolApprovalService implements ToolApprovalPort {
     requesterPrincipalId: string;
     /** What demanded a human, from the evaluation that demanded it. */
     demand: ApprovalDemand;
+    intent?: ToolIntent;
   }): Promise<ToolApprovalDecision> {
     return await this.transact(async ({ repo }) => {
-      const intentDigest = intentOf(input.runId, input.toolName, input.args);
-      const existing = await repo.findByIntent(input.runId, intentDigest, input.toolCallId);
+      const requestDigest = intentOf(input.runId, input.toolName, input.args);
+      const binding = approvalBinding({
+        requestDigest,
+        toolName: input.toolName,
+        demand: input.demand,
+        ...(input.intent === undefined ? {} : { intent: input.intent }),
+      });
+      const intentDigest = binding.intentDigest;
+      await repo.lockToolCall(input.runId, requestDigest);
+      const existing = await repo.findByIntent(input.runId, requestDigest, input.toolCallId);
       if (existing !== null) {
-        if (existing.status !== "pending" || existing.expiresAt > this.now()) {
-          return decisionFor(existing);
+        const persistedBinding = persistedApprovalBinding(existing);
+        if (persistedBinding === null || !bindingsMatch(persistedBinding, binding)) {
+          if (!(await repo.supersedeToolCall(existing.id))) {
+            const replacement = await repo.findByIntent(
+              input.runId,
+              requestDigest,
+              input.toolCallId
+            );
+            const replacementBinding =
+              replacement === null ? null : persistedApprovalBinding(replacement);
+            if (
+              replacement === null ||
+              replacementBinding === null ||
+              !bindingsMatch(replacementBinding, binding)
+            ) {
+              throw new Error("Approval binding changed while replacing a stale decision");
+            }
+            return decisionFor(replacement);
+          }
+        } else {
+          if (existing.status !== "pending" || existing.expiresAt > this.now()) {
+            return decisionFor(existing);
+          }
+          if (await repo.settlePending(existing.id, "timeout")) {
+            return { status: "denied", reason: "approval request timed out" };
+          }
+          const settled = await repo.findByIntent(input.runId, requestDigest, input.toolCallId);
+          return settled === null
+            ? { status: "denied", reason: "approval request timed out" }
+            : decisionFor(settled);
         }
-        if (await repo.settlePending(existing.id, "timeout")) {
-          return { status: "denied", reason: "approval request timed out" };
-        }
-        const settled = await repo.findByIntent(input.runId, intentDigest, input.toolCallId);
-        return settled === null
-          ? { status: "denied", reason: "approval request timed out" }
-          : decisionFor(settled);
       }
 
       const approvalId = this.newId();
       const payload: ToolApprovalPayload = {
         runId: input.runId,
+        requestDigest,
         intentDigest,
         toolCallId: input.toolCallId,
         toolName: input.toolName,
         args: input.args,
+        ...(input.intent === undefined ? {} : { intent: input.intent }),
       };
       const evidence: ApprovalGuardrailEvidence = {
         ...input.demand,
@@ -311,7 +423,14 @@ export class ToolApprovalService implements ToolApprovalPort {
     const { waitId, runId, resumeToken } = payloadOf(row) as ToolApprovalPayload & {
       resumeToken?: string;
     };
-    if (waitId === undefined || runId === undefined || resumeToken === undefined) return null;
+    if (
+      waitId === undefined ||
+      runId === undefined ||
+      resumeToken === undefined ||
+      payloadOf(row).approvalBindingSuperseded === true
+    ) {
+      return null;
+    }
     const wait = await waits.find(businessId, waitId);
     if (wait === null) return null;
 

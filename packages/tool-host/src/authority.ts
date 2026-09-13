@@ -112,6 +112,10 @@ export type HostedToolResult =
       readonly status: "awaiting_child";
       readonly childRunId: string;
       readonly waitId: string;
+    }
+  | {
+      readonly status: "awaiting_retry";
+      readonly waitId: string;
     };
 
 export interface TurnToolDispatcher {

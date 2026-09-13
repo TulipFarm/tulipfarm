@@ -1,6 +1,7 @@
 import { KillSwitchDeniedError, type MutationGuard } from "@tulipfarm/observability";
 import { ajv, canonicalHash, type ToolAdapterKind } from "@tulipfarm/schema";
 import type { ToolCatalog } from "../catalog";
+import type { PublishedToolContract } from "../contract";
 import type { CredentialDispatcher } from "../credential-dispatch";
 import type { ToolIntent } from "../intent";
 import { mayRetry, nextRetryDelayMs } from "./retry";
@@ -19,6 +20,45 @@ export class AdapterDispatchError extends Error {
   ) {
     super(code);
     this.name = "AdapterDispatchError";
+  }
+}
+
+export interface EffectRetryParkInput {
+  readonly businessId: string;
+  readonly effectId: string;
+  readonly runId: string;
+  readonly stateId: string;
+  readonly attempt: number;
+  readonly reason: string;
+  readonly delayMs: number;
+  readonly notBefore: string;
+}
+
+export interface EffectRetryParkResult {
+  readonly waitId: string;
+}
+
+export type EffectRetryParker = (input: EffectRetryParkInput) => Promise<EffectRetryParkResult>;
+
+export type EffectRetryWaitStatus =
+  | { readonly status: "none" }
+  | {
+      readonly status: "pending" | "ready" | "unavailable";
+      readonly waitId: string;
+      readonly notBefore: string;
+    };
+
+export type EffectRetryWaitReader = (
+  businessId: string,
+  effectId: string,
+  attempt: number
+) => Promise<EffectRetryWaitStatus>;
+
+export class EffectDispatchDeferredError extends Error {
+  readonly name = "EffectDispatchDeferredError";
+
+  constructor(readonly deferred: EffectRetryParkInput & { readonly waitId: string }) {
+    super(`retry_deferred:${deferred.effectId}:${deferred.waitId}`);
   }
 }
 
@@ -55,9 +95,11 @@ export type ToolDispatchErrorCode =
   | "adapter_not_found"
   | "adapter_kind_mismatch"
   | "dispatch_failed"
+  | "dispatch_in_progress"
   | "ambiguous"
   | "invalid_output"
-  | "kill_switch_denied";
+  | "kill_switch_denied"
+  | "retry_wait_unavailable";
 
 export class ToolDispatchError extends Error {
   constructor(
@@ -89,9 +131,16 @@ export interface EffectDispatcherDeps {
   readonly mutationGuard?: MutationGuard;
   /** Identity the effect ledger does not carry, supplied by whoever composed the dispatcher. */
   readonly mutationIdentity?: MutationIdentity;
+  /** Registers a durable Run timer for provider retries instead of sleeping in-process. */
+  readonly parkRetry?: EffectRetryParker;
+  /** Reads the durable timer before a restarted dispatcher may begin the next attempt. */
+  readonly retryWaitStatus?: EffectRetryWaitReader;
   readonly wait?: (delayMs: number, abortSignal?: AbortSignal) => Promise<void>;
   readonly now?: () => string;
 }
+
+const MIN_DISPATCH_STALE_MS = 60_000;
+const DISPATCH_SETTLEMENT_GRACE_MS = 10_000;
 
 function classifyError(error: unknown, mutating: boolean): AdapterDispatchError {
   if (error instanceof AdapterDispatchError) return error;
@@ -162,10 +211,19 @@ export class EffectDispatcher {
     effectId: string,
     abortSignal?: AbortSignal
   ): Promise<unknown> {
-    const effect = await this.deps.store.get(businessId, effectId);
+    let effect = await this.deps.store.get(businessId, effectId);
     if (effect === undefined) throw new ToolDispatchError("effect_not_found", effectId);
+    if (effect.state === "confirmed") {
+      if (!effect.outputStored) {
+        throw new ToolDispatchError("invalid_output", effectId, "confirmed_output_unavailable");
+      }
+      return effect.output;
+    }
     if (effect.state === "ambiguous" || effect.state === "reconciliation_required") {
       throw new ToolDispatchError("ambiguous", effectId);
+    }
+    if (effect.state !== "authorized" && effect.state !== "dispatched") {
+      throw new ToolDispatchError("dispatch_failed", effectId, `effect_${effect.state}`);
     }
     const contract = this.deps.catalog.get(effect.intent.toolId, effect.intent.toolVersion);
     if (contract === undefined) throw new ToolDispatchError("contract_not_found", effectId);
@@ -181,6 +239,8 @@ export class EffectDispatcher {
         `${contract.adapter.kind}!=${adapter.kind}`
       );
     }
+    effect = await this.recoverInterruptedDispatch(businessId, effect, contract);
+    await this.assertRetryReady(businessId, effect);
     const validateOutput = ajv.compile(contract.outputSchema);
 
     if (this.deps.mutationGuard !== undefined) {
@@ -189,7 +249,7 @@ export class EffectDispatcher {
           businessId,
           mutation: contract.mutating,
           runId: effect.runId,
-          stateId: effect.stateId,
+          stateId: effect.intent.runStateId ?? effect.stateId,
           effectId,
           toolId: effect.intent.toolId,
           provider: contract.adapter.ref,
@@ -262,20 +322,76 @@ export class EffectDispatcher {
         const ambiguous = error.phase === "after_dispatch" && contract.mutating;
         const retry =
           error.retryable && mayRetry(contract, attemptNumber, error.phase) && !ambiguous;
+        if (ambiguous || !retry) {
+          await this.deps.store.finishAttempt({
+            businessId,
+            effectId,
+            attempt: attemptNumber,
+            attemptState: ambiguous ? "ambiguous" : "failed",
+            effectState: ambiguous ? "ambiguous" : "failed",
+            providerRequestId: error.providerRequestId,
+            errorCode: error.code,
+            finishedAt: this.now(),
+          });
+          if (ambiguous) throw new ToolDispatchError("ambiguous", effectId);
+          throw new ToolDispatchError("dispatch_failed", effectId, error.code);
+        }
+        const delayMs = nextRetryDelayMs(attemptNumber, error.retryAfterMs);
+        if (this.deps.parkRetry !== undefined) {
+          const notBefore = new Date(Date.parse(this.now()) + delayMs).toISOString();
+          const input = {
+            businessId,
+            effectId,
+            runId: effect.runId,
+            stateId: effect.intent.runStateId ?? effect.stateId,
+            attempt: attemptNumber,
+            reason: error.code,
+            delayMs,
+            notBefore,
+          };
+          let waitId: string;
+          try {
+            ({ waitId } = await this.deps.parkRetry(input));
+          } catch {
+            throw new ToolDispatchError("retry_wait_unavailable", effectId, error.code);
+          }
+          await this.deps.store.finishAttempt({
+            businessId,
+            effectId,
+            attempt: attemptNumber,
+            attemptState: "failed",
+            effectState: "authorized",
+            providerRequestId: error.providerRequestId,
+            errorCode: error.code,
+            finishedAt: this.now(),
+          });
+          throw new EffectDispatchDeferredError({ ...input, waitId });
+        }
+        if (error.retryAfterMs !== undefined) {
+          await this.deps.store.finishAttempt({
+            businessId,
+            effectId,
+            attempt: attemptNumber,
+            attemptState: "failed",
+            effectState: "failed",
+            providerRequestId: error.providerRequestId,
+            errorCode: error.code,
+            finishedAt: this.now(),
+          });
+          throw new ToolDispatchError("retry_wait_unavailable", effectId, error.code);
+        }
         await this.deps.store.finishAttempt({
           businessId,
           effectId,
           attempt: attemptNumber,
-          attemptState: ambiguous ? "ambiguous" : "failed",
-          effectState: ambiguous ? "ambiguous" : retry ? "authorized" : "failed",
+          attemptState: "failed",
+          effectState: "authorized",
           providerRequestId: error.providerRequestId,
           errorCode: error.code,
           finishedAt: this.now(),
         });
-        if (ambiguous) throw new ToolDispatchError("ambiguous", effectId);
-        if (!retry) throw new ToolDispatchError("dispatch_failed", effectId, error.code);
         try {
-          await this.wait(nextRetryDelayMs(attemptNumber, error.retryAfterMs), abortSignal);
+          await this.wait(delayMs, abortSignal);
         } catch (waitError) {
           if (waitError instanceof RetryWaitAbortedError || abortSignal?.aborted) {
             throw new ToolDispatchError("dispatch_failed", effectId, "dispatch_cancelled");
@@ -287,5 +403,90 @@ export class EffectDispatcher {
         }
       }
     }
+  }
+
+  private async recoverInterruptedDispatch(
+    businessId: string,
+    effect: NonNullable<Awaited<ReturnType<EffectStore["get"]>>>,
+    contract: PublishedToolContract
+  ): Promise<NonNullable<Awaited<ReturnType<EffectStore["get"]>>>> {
+    if (effect.state !== "dispatched") return effect;
+    const attempts = await this.deps.store.listAttempts(businessId, effect.effectId);
+    const attempt = attempts.at(-1);
+    if (attempt === undefined || attempt.state !== "dispatched") {
+      throw new ToolDispatchError("ambiguous", effect.effectId, "dispatch_evidence_missing");
+    }
+
+    const retry = await this.retryWait(businessId, effect.effectId, attempt.attempt);
+    if (retry.status !== "none") {
+      await this.deps.store.finishAttempt({
+        businessId,
+        effectId: effect.effectId,
+        attempt: attempt.attempt,
+        attemptState: "failed",
+        effectState: "authorized",
+        errorCode: "provider_retry_wait",
+        finishedAt: this.now(),
+      });
+      const recovered = await this.deps.store.get(businessId, effect.effectId);
+      if (recovered === undefined) {
+        throw new ToolDispatchError("effect_not_found", effect.effectId);
+      }
+      return recovered;
+    }
+
+    const staleAfterMs = Math.max(
+      MIN_DISPATCH_STALE_MS,
+      (contract.timeout?.wallClockMs ?? 0) + DISPATCH_SETTLEMENT_GRACE_MS
+    );
+    if (Date.parse(this.now()) < Date.parse(attempt.startedAt) + staleAfterMs) {
+      throw new ToolDispatchError("dispatch_in_progress", effect.effectId);
+    }
+    await this.deps.store.transition({
+      businessId,
+      effectId: effect.effectId,
+      expectedStates: ["dispatched"],
+      state: "reconciliation_required",
+      updatedAt: this.now(),
+    });
+    throw new ToolDispatchError("ambiguous", effect.effectId);
+  }
+
+  private async assertRetryReady(
+    businessId: string,
+    effect: NonNullable<Awaited<ReturnType<EffectStore["get"]>>>
+  ): Promise<void> {
+    if (effect.state !== "authorized" || this.deps.retryWaitStatus === undefined) return;
+    const attempts = await this.deps.store.listAttempts(businessId, effect.effectId);
+    const attempt = attempts.at(-1);
+    if (attempt === undefined || attempt.state !== "failed") return;
+    const retry = await this.retryWait(businessId, effect.effectId, attempt.attempt);
+    if (retry.status === "ready") return;
+    if (retry.status === "none" || retry.status === "unavailable") {
+      throw new ToolDispatchError("retry_wait_unavailable", effect.effectId);
+    }
+    throw new EffectDispatchDeferredError({
+      businessId,
+      effectId: effect.effectId,
+      runId: effect.runId,
+      stateId: effect.intent.runStateId ?? effect.stateId,
+      attempt: attempt.attempt,
+      reason: attempt.errorCode ?? "provider_retry_wait",
+      delayMs: Math.max(1, Date.parse(retry.notBefore) - Date.parse(this.now())),
+      notBefore: retry.notBefore,
+      waitId: retry.waitId,
+    });
+  }
+
+  private async retryWait(
+    businessId: string,
+    effectId: string,
+    attempt: number
+  ): Promise<EffectRetryWaitStatus> {
+    return (
+      (await this.deps.retryWaitStatus?.(businessId, effectId, attempt)) ?? {
+        status: "none",
+      }
+    );
   }
 }

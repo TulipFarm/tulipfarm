@@ -73,7 +73,10 @@ export type {
   OimOperationConnectionRequest,
   ToolConnectionBinding,
 } from "./connections/operation";
-export { OimOperationConnectionResolver } from "./connections/operation";
+export {
+  OIM_CONNECTION_ID_ARGUMENT,
+  OimOperationConnectionResolver,
+} from "./connections/operation";
 export type {
   ConnectionPrincipal,
   ConnectionReader,

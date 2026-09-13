@@ -64,6 +64,13 @@ export function toolDispatcher(evalCase: EvalCase) {
             reason: `the Eval Case scripts no result for Tool "${request.name}"`,
           };
         }
+        if (result.retryWaitId !== undefined) {
+          return {
+            status: "awaiting_retry",
+            callId: request.callId,
+            waitId: result.retryWaitId,
+          };
+        }
         if (result.invalidArguments !== undefined) {
           return {
             status: "invalid_arguments",

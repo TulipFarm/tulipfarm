@@ -3,6 +3,13 @@
 import { canonicalHash } from "@tulipfarm/schema";
 import type { ApprovalDemandEvidence } from "@tulipfarm/tool-broker";
 
+const APPROVAL_DEMAND_SOURCES = new Set([
+  "autonomy_policy",
+  "guardrail_rule",
+  "sandbox_contract",
+  "tool_contract",
+]);
+
 /**
  * Why an approval was asked for, as the policy evaluation that asked stated it (I-13).
  *
@@ -64,15 +71,41 @@ export function approvalEvidenceDigest(evidence: ApprovalGuardrailEvidence): str
 
 /** Reads a stored evidence value back, or `null` when the row holds nothing usable. */
 export function readApprovalEvidence(value: unknown): ApprovalGuardrailEvidence | null {
-  if (typeof value !== "object" || value === null) return null;
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return null;
+  const keys = Object.keys(value);
+  if (
+    keys.some(
+      (key) =>
+        ![
+          "demandedBy",
+          "guardrailRevision",
+          "reason",
+          "ruleId",
+          "toolName",
+          "intentDigest",
+          "demandedAt",
+        ].includes(key)
+    )
+  ) {
+    return null;
+  }
   const candidate = value as Partial<ApprovalGuardrailEvidence>;
   if (
     typeof candidate.demandedBy !== "string" ||
+    !APPROVAL_DEMAND_SOURCES.has(candidate.demandedBy) ||
     typeof candidate.guardrailRevision !== "string" ||
+    candidate.guardrailRevision.length === 0 ||
     typeof candidate.reason !== "string" ||
+    candidate.reason.length === 0 ||
+    (candidate.ruleId !== undefined &&
+      (typeof candidate.ruleId !== "string" || candidate.ruleId.length === 0)) ||
     typeof candidate.toolName !== "string" ||
+    candidate.toolName.length === 0 ||
     typeof candidate.intentDigest !== "string" ||
-    typeof candidate.demandedAt !== "string"
+    candidate.intentDigest.length === 0 ||
+    typeof candidate.demandedAt !== "string" ||
+    !Number.isFinite(Date.parse(candidate.demandedAt)) ||
+    new Date(candidate.demandedAt).toISOString() !== candidate.demandedAt
   ) {
     return null;
   }

@@ -711,6 +711,10 @@ class RoutineExecution {
       return stateOutcome(state);
     }
     if (result.kind === "cancelled") return "cancelled";
+    if (result.kind === "awaiting_retry") {
+      await this.transition(key, "running", "waiting");
+      return "waiting";
+    }
     if (result.kind !== "failed") {
       await this.park(key, `routine:${result.reason}`);
       return "needs_reconciliation";

@@ -224,6 +224,11 @@ export interface HostedTurnHistory {
         readonly waitId: string;
         readonly childRunId: string;
         readonly callId: string;
+      }
+    | {
+        readonly kind: "retry";
+        readonly waitId: string;
+        readonly callId: string;
       };
 }
 
@@ -251,6 +256,11 @@ export type HostedToolResult =
       /** The Tool spawned a child Run and registered the wait that resumes this Turn. */
       readonly status: "awaiting_child";
       readonly childRunId: string;
+      readonly waitId: string;
+    }
+  | {
+      /** The Tool registered a durable provider retry timer that resumes this Turn. */
+      readonly status: "awaiting_retry";
       readonly waitId: string;
     };
 
@@ -944,6 +954,17 @@ function waitFrom(value: unknown): HostedTurnHistory["wait"] {
       kind: "child",
       waitId: wait.waitId,
       childRunId: wait.childRunId,
+      callId: wait.callId,
+    };
+  }
+  if (
+    wait?.kind === "retry" &&
+    typeof wait.waitId === "string" &&
+    typeof wait.callId === "string"
+  ) {
+    return {
+      kind: "retry",
+      waitId: wait.waitId,
       callId: wait.callId,
     };
   }

@@ -100,6 +100,12 @@ export const APPROVAL_EVIDENCE_STORAGE_STATEMENTS: readonly string[] = [
 export class ApprovalsRepo {
   constructor(private readonly db: ApprovalsQueryable) {}
 
+  async lockToolCall(runId: string, requestDigest: string): Promise<void> {
+    await this.db.query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))", [
+      JSON.stringify([runId, requestDigest]),
+    ]);
+  }
+
   /**
    * A `tool_call` approval cannot be created without the evidence that demanded it or the
    * principal that requested it — both are required arguments, and the row constraint rejects the
@@ -147,6 +153,24 @@ export class ApprovalsRepo {
        WHERE id = $1 AND status = 'pending'
        RETURNING id`,
       [id, status, approverPrincipalId ?? null]
+    );
+    return rows.length === 1;
+  }
+
+  async supersedeToolCall(id: string): Promise<boolean> {
+    const { rows } = await this.db.query(
+      `UPDATE approvals
+       SET payload = payload || '{"approvalBindingSuperseded":true}'::jsonb,
+           status = CASE WHEN status = 'pending' THEN 'denied' ELSE status END,
+           resolved_at = CASE
+             WHEN status = 'pending' THEN COALESCE(resolved_at, now())
+             ELSE resolved_at
+           END
+       WHERE id = $1
+         AND kind = 'tool_call'
+         AND payload->>'approvalBindingSuperseded' IS DISTINCT FROM 'true'
+       RETURNING id`,
+      [id]
     );
     return rows.length === 1;
   }
@@ -202,7 +226,8 @@ export class ApprovalsRepo {
        FROM approvals
        WHERE kind = 'tool_call'
          AND payload->>'runId' = $1
-         AND payload->>'intentDigest' = $2
+         AND COALESCE(payload->>'requestDigest', payload->>'intentDigest') = $2
+         AND payload->>'approvalBindingSuperseded' IS DISTINCT FROM 'true'
          AND (consumed_by_call_id IS NULL OR consumed_by_call_id = $3)
        ORDER BY (consumed_by_call_id IS NOT NULL) DESC, created_at DESC
        LIMIT 1`,
@@ -225,6 +250,7 @@ export class ApprovalsRepo {
        SET consumed_at = COALESCE(consumed_at, $3), consumed_by_call_id = $2
        WHERE id = $1
          AND status = 'approved'
+         AND payload->>'approvalBindingSuperseded' IS DISTINCT FROM 'true'
          AND (consumed_by_call_id IS NULL OR consumed_by_call_id = $2)
        RETURNING id`,
       [id, toolCallId, now]

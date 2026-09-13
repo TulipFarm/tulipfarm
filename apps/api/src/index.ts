@@ -199,6 +199,7 @@ import {
   IntegrationEventsRepo,
 } from "./ingress/repo";
 import { resolveSecretRef } from "./integrations/connection-env";
+import { OimRateRetryWaitHost } from "./integrations/oim-rate-retry";
 import { PgPrincipalProviderTokenRepo } from "./integrations/principal-tokens";
 import { InternalChildRoutineHost } from "./internal/child-routine-host";
 import { IngressDeliveryHost } from "./internal/delivery-host";
@@ -988,6 +989,7 @@ async function boot() {
     // registered here rather than in the Worker because its one-use resume token must never leave
     const runResume = new RunResumeGateway(runStore);
     const runWaits = new DurableWaitManager(new WaitStore(runTransactions), runResume);
+    const oimRateRetryWaits = new OimRateRetryWaitHost(runWaits);
     const toolApprovals = new ToolApprovalService({ transactions: runTransactions });
     const routineApprovals = new RoutineApprovalService({ transactions: runTransactions });
     const ingressDeliveries = new IngressDeliveriesRepo(pool);
@@ -1238,6 +1240,8 @@ async function boot() {
       // Manifests are authored from chat, so the destination is untrusted right up to the socket.
       http: new GuardedEgressHttp(new FetchEgressHttp()),
       mutationGuard,
+      parkRetry: oimRateRetryWaits.parkRetry,
+      retryWaitStatus: oimRateRetryWaits.status,
       logger: () => app.log,
     });
 
@@ -1326,6 +1330,7 @@ async function boot() {
           surfaceActionStore,
           guardrails: guardrailsService,
           authorityLayers: authorityLayerResolver,
+          preparation: declarativeTools,
           integrations: integrationStore,
           tokens: principalTokens,
           identities: externalIdentityRepo,

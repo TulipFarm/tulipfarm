@@ -69,6 +69,10 @@ type RemoteToolResult =
       readonly status: "awaiting_child";
       readonly childRunId: string;
       readonly waitId: string;
+    }
+  | {
+      readonly status: "awaiting_retry";
+      readonly waitId: string;
     };
 
 // A Tool may consume its full server budget; transport keeps 15s to deliver and read the response.
@@ -94,6 +98,8 @@ function withCallId(callId: string, result: RemoteToolResult): ToolDispatchResul
         childRunId: result.childRunId,
         waitId: result.waitId,
       };
+    case "awaiting_retry":
+      return { status: "awaiting_retry", callId, waitId: result.waitId };
     case "denied":
       return { status: "denied", callId, reason: result.reason, connectUrl: result.connectUrl };
     default:

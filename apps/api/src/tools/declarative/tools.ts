@@ -2,41 +2,68 @@ import { createHash } from "node:crypto";
 import {
   type CompiledEgressTool,
   type CompiledGraphqlTool,
+  type CompiledOimGraphqlTool,
+  type CompiledOimHttpTool,
+  type CompiledOimOpenApiTool,
   compileGraphqlEgress,
+  compileOimGraphqlOperations,
+  compileOimHttpOperations,
+  compileOimOpenApiOperations,
   compileOpenApiEgress,
   type EgressHttpPort,
+  extractOimMultipartFileIds,
   GraphqlToolAdapter,
+  OIM_CONNECTION_ID_ARGUMENT,
+  type OimFilePort,
+  type OimFileReadAuthorizationPort,
+  OimGraphqlToolAdapter,
+  OimHttpToolAdapter,
+  type OimOperationConnection,
+  type OimOperationConnectionResolver,
+  type OimPaginationRuntime,
   OpenApiToolAdapter,
+  oimManifestMajor,
 } from "@tulipfarm/integrations";
 import type { MutationGuard } from "@tulipfarm/observability";
+import { canonicalHash, type OimManifest, type OimOperation } from "@tulipfarm/schema";
 import {
   type SecretAuthorizer,
   SecretBroker,
   type SecretProvider,
   type SecretsService,
+  secretsServiceProvider,
 } from "@tulipfarm/secrets";
 import type { Logger, SoulIntegration } from "@tulipfarm/soul";
 import { isPersonalCredentialStep, resolveAuthSteps } from "@tulipfarm/soul";
 import {
   CredentialDispatcher,
+  EffectDispatchDeferredError,
   EffectDispatcher,
   type EffectRecord,
+  type EffectRetryParker,
+  type EffectRetryWaitReader,
   type EffectStore,
   intentDigest,
   normalizeToolIntent,
   type ToolAdapter,
   ToolCatalog,
+  type ToolConnectionBinding,
   type ToolCredentialMode,
   ToolDispatchError,
+  type ToolIntent,
   type ToolTargetRef,
 } from "@tulipfarm/tool-broker";
 import {
-  defineApiTool,
+  defineParkableApiTool,
   err,
   ok,
+  type ParkableToolCallResult,
+  type ParkableToolDef,
+  parked,
   type RequestContext,
+  type ToolCallPreparationPort,
   type ToolCallResult,
-  type ToolDef,
+  ToolPreparationDeniedError,
   toToolDef,
 } from "@tulipfarm/tool-host";
 import { integrationSecretKey, isSecretRef } from "../../integrations/connection-env";
@@ -149,6 +176,13 @@ function integrationResource(slug: string): string {
 
 /** Resolve auth steps before credential mode so legacy `oauth` keeps personal credentials. */
 function credentialModeFor(integration: SoulIntegration): ToolCredentialMode {
+  if (integration.oimManifest !== undefined) {
+    return integration.oimManifest.operations.some(
+      (operation) => operation.identityMode !== "shared_only"
+    )
+      ? "user_preferred"
+      : "service";
+  }
   if (integration.manifest === undefined) return "service";
   const personal = resolveAuthSteps(integration.manifest).some(isPersonalCredentialStep);
   return personal ? "user_preferred" : "service";
@@ -230,7 +264,12 @@ function appendTarget(
   targets.push({ type, id });
 }
 
-type CompiledDeclarativeTool = CompiledEgressTool | CompiledGraphqlTool;
+type CompiledDeclarativeTool =
+  | CompiledEgressTool
+  | CompiledGraphqlTool
+  | CompiledOimHttpTool
+  | CompiledOimOpenApiTool
+  | CompiledOimGraphqlTool;
 
 function declarativeTargets(
   compiled: CompiledDeclarativeTool,
@@ -295,12 +334,30 @@ export interface DeclarativeToolingDeps {
   /** Injected so tests never reach the network. */
   readonly http: EgressHttpPort;
   readonly mutationGuard?: MutationGuard;
+  readonly connections?: OimOperationConnectionResolver;
+  readonly files?: OimFilePort;
+  readonly fileReadAuthorization?: OimFileReadAuthorizationPort;
+  readonly paginationRuntime?: OimPaginationRuntime;
+  readonly parkRetry?: EffectRetryParker;
+  readonly retryWaitStatus?: EffectRetryWaitReader;
+  /** Initial caller + Agent File authority check, before approval or effect reservation. */
+  readonly authorizeFiles?: (input: {
+    businessId: string;
+    runId: string;
+    stateId: string;
+    caller: { readonly kind: string; readonly id: string };
+    agentPrincipalId?: string;
+    fileIds: readonly string[];
+  }) => Promise<void>;
 }
 
 interface CompiledIntegration {
   readonly slug: string;
   readonly tools: readonly CompiledDeclarativeTool[];
   readonly credentialMode: ToolCredentialMode;
+  readonly oimManifest?: OimManifest;
+  readonly oimDocuments?: Readonly<Record<string, string>>;
+  readonly oimOpenApiDocuments?: Readonly<Record<string, unknown>>;
   /** Absent for a genuinely public API that declares no credential. */
   readonly credential?: {
     readonly ref: string;
@@ -311,8 +368,32 @@ interface CompiledIntegration {
 }
 
 function compileIntegration(integration: SoulIntegration): CompiledIntegration {
-  const { manifest, slug } = integration;
+  const { manifest, oimManifest, slug } = integration;
   const credentialMode = credentialModeFor(integration);
+  if (oimManifest !== undefined) {
+    return {
+      slug,
+      credentialMode,
+      oimManifest,
+      oimDocuments: integration.oimDocuments,
+      oimOpenApiDocuments: integration.oimOpenApiDocuments,
+      tools: [
+        ...compileOimHttpOperations(oimManifest, {}, { deferConfiguration: true }),
+        ...compileOimOpenApiOperations(
+          oimManifest,
+          new Map(Object.entries(integration.oimOpenApiDocuments ?? {})),
+          {},
+          { deferConfiguration: true }
+        ),
+        ...compileOimGraphqlOperations(
+          oimManifest,
+          new Map(Object.entries(integration.oimDocuments ?? {})),
+          {},
+          { deferConfiguration: true }
+        ),
+      ],
+    };
+  }
   // Callers filter out manifest-less (bundled) integrations before reaching here.
   if (
     manifest === undefined ||
@@ -350,22 +431,436 @@ function compileIntegration(integration: SoulIntegration): CompiledIntegration {
   };
 }
 
+function splitOimArguments(args: unknown): {
+  readonly connectionId?: string;
+  readonly providerArguments: unknown;
+} {
+  const input = record(args);
+  if (input === undefined) return { providerArguments: args };
+  const { [OIM_CONNECTION_ID_ARGUMENT]: connectionId, ...providerArguments } = input;
+  return {
+    ...(typeof connectionId === "string" ? { connectionId } : {}),
+    providerArguments,
+  };
+}
+
+function withOimConnectionChoice(compiled: CompiledDeclarativeTool): Record<string, unknown> {
+  const schema = compiled.contract.spec.inputSchema;
+  if (!("operation" in compiled)) return schema;
+  const properties = record(schema.properties) ?? {};
+  return {
+    ...schema,
+    properties: {
+      ...properties,
+      [OIM_CONNECTION_ID_ARGUMENT]: {
+        type: "string",
+        minLength: 1,
+        maxLength: 256,
+        description: "Connection to use. The host removes this before provider dispatch.",
+      },
+    },
+  };
+}
+
+function compileOimRuntimeTool(
+  compiled: CompiledDeclarativeTool,
+  integration: CompiledIntegration,
+  configuration: Readonly<Record<string, string | number | boolean>>
+): CompiledDeclarativeTool {
+  const manifest = integration.oimManifest;
+  if (manifest === undefined || !("operation" in compiled)) return compiled;
+  const one = { ...manifest, operations: [compiled.operation] };
+  switch (compiled.operation.source.type) {
+    case "http":
+      return compileOimHttpOperations(one, configuration)[0] ?? compiled;
+    case "openapi":
+      return (
+        compileOimOpenApiOperations(
+          one,
+          new Map(Object.entries(integration.oimOpenApiDocuments ?? {})),
+          configuration
+        )[0] ?? compiled
+      );
+    case "graphql":
+      return (
+        compileOimGraphqlOperations(
+          one,
+          new Map(Object.entries(integration.oimDocuments ?? {})),
+          configuration
+        )[0] ?? compiled
+      );
+  }
+}
+
+function oimDestination(compiled: CompiledDeclarativeTool): string | undefined {
+  if (!("operation" in compiled)) return undefined;
+  return new URL("baseUrl" in compiled.binding ? compiled.binding.baseUrl : compiled.binding.url)
+    .origin;
+}
+
+function configuredBinding(
+  manifest: OimManifest,
+  operation: OimOperation,
+  connection: Extract<OimOperationConnection, { kind: "configured" }>["connection"],
+  principal: { readonly kind: string; readonly id: string }
+): ToolConnectionBinding {
+  return {
+    connectionId: connection.id,
+    integrationId: manifest.metadata.id,
+    integrationMajorVersion: oimManifestMajor(manifest),
+    operationId: operation.id,
+    identityMode: operation.identityMode,
+    principalKind: principal.kind,
+    principalId: principal.id,
+    manifestDigest: canonicalHash(manifest),
+    configurationDigest: canonicalHash(connection.configuration),
+  };
+}
+
+function oimConnectionDenial(resolution: OimOperationConnection, slug: string): never {
+  const connectUrl = `/business/integrations/${encodeURIComponent(slug)}/connections`;
+  switch (resolution.kind) {
+    case "connection_required":
+    case "connection_ambiguous":
+      throw new ToolPreparationDeniedError(
+        resolution.candidates.length === 0
+          ? `No usable Connection exists for "${slug}". Connect one first.`
+          : `More than one Connection can run "${slug}". Choose one with connection_id.`,
+        connectUrl
+      );
+    case "connection_unhealthy":
+      throw new ToolPreparationDeniedError(
+        `Connection "${resolution.connectionId}" is ${resolution.status} and must be reconnected.`,
+        connectUrl
+      );
+    case "credential_required":
+      throw new ToolPreparationDeniedError(
+        `Connection "${resolution.connectionId}" is missing Credential "${resolution.credentialSlot}".`,
+        connectUrl
+      );
+    case "connection_denied":
+      throw new ToolPreparationDeniedError(
+        `The selected Connection cannot be used here (${resolution.reason}).`,
+        connectUrl
+      );
+    default:
+      throw new ToolPreparationDeniedError(`Could not resolve a safe Connection for "${slug}".`);
+  }
+}
+
+type OimPreparer = ToolCallPreparationPort["prepare"];
+type OimConfirmedReplayer = NonNullable<ToolCallPreparationPort["replayConfirmed"]>;
+
+function oimConfirmedReplayer(
+  compiled: CompiledDeclarativeTool,
+  deps: DeclarativeToolingDeps
+): OimConfirmedReplayer {
+  return async (input) => {
+    if (!("operation" in compiled)) return undefined;
+    const effectId = derivedId(
+      "egress-effect",
+      input.runId,
+      `chat:${input.toolCallId}`,
+      compiled.toolId
+    );
+    const effect = await deps.effects.get(input.businessId, effectId);
+    if (effect === undefined) return undefined;
+    const deny = (reason: string) => ({ outcome: "denied" as const, reason });
+    if (effect.state === "ambiguous" || effect.state === "reconciliation_required") {
+      return deny(`tool "${input.tool.name}" requires effect reconciliation`);
+    }
+    if (effect.state !== "confirmed") return undefined;
+    const reconcile = async (reason: string) => {
+      await deps.effects.transition({
+        businessId: effect.businessId,
+        effectId: effect.effectId,
+        expectedStates: ["confirmed", "reconciliation_required"],
+        state: "reconciliation_required",
+        updatedAt: new Date().toISOString(),
+      });
+      return deny(reason);
+    };
+    if (!effect.outputStored) {
+      return await reconcile(
+        `tool "${input.tool.name}" already completed, but its output is unavailable`
+      );
+    }
+
+    let intent: ToolIntent;
+    try {
+      intent = normalizeToolIntent(effect.intent);
+    } catch {
+      return await reconcile(`tool "${input.tool.name}" has invalid durable replay evidence`);
+    }
+    const storedCallId = effect.stateId.startsWith("chat:")
+      ? effect.stateId.slice("chat:".length)
+      : undefined;
+    if (
+      storedCallId === undefined ||
+      storedCallId.length === 0 ||
+      intentDigest(intent) !== effect.intentDigest ||
+      intent.businessId !== effect.businessId ||
+      intent.runId !== effect.runId ||
+      intent.stateId !== effect.stateId ||
+      intent.idempotencyKey !== effect.idempotencyKey ||
+      intent.intentId !== derivedId("egress-intent", effect.runId, storedCallId, intent.toolId) ||
+      effect.idempotencyKey !==
+        derivedId("egress-idempotency", effect.runId, storedCallId, intent.toolId) ||
+      effect.effectId !== derivedId("egress-effect", effect.runId, effect.stateId, intent.toolId)
+    ) {
+      return await reconcile(`tool "${input.tool.name}" has invalid durable replay evidence`);
+    }
+    const { connectionId, providerArguments } = splitOimArguments(input.arguments);
+    const expectedStateId = `chat:${input.toolCallId}`;
+    const expectedIntentId = derivedId(
+      "egress-intent",
+      input.runId,
+      input.toolCallId,
+      compiled.toolId
+    );
+    const expectedIdempotencyKey = derivedId(
+      "egress-idempotency",
+      input.runId,
+      input.toolCallId,
+      compiled.toolId
+    );
+    if (
+      input.pinnedIntent === undefined ||
+      intentDigest(input.pinnedIntent) !== effect.intentDigest ||
+      effect.businessId !== input.businessId ||
+      effect.runId !== input.runId ||
+      effect.stateId !== expectedStateId ||
+      effect.idempotencyKey !== expectedIdempotencyKey ||
+      intent.intentId !== expectedIntentId ||
+      intent.businessId !== input.businessId ||
+      intent.runId !== input.runId ||
+      intent.stateId !== expectedStateId ||
+      intent.runStateId !== input.stateId ||
+      intent.toolId !== compiled.toolId ||
+      intent.toolVersion !== compiled.contract.spec.toolVersion ||
+      intent.action !== compiled.contract.spec.action ||
+      intent.idempotencyKey !== expectedIdempotencyKey ||
+      canonicalHash(intent.arguments) !== canonicalHash(providerArguments) ||
+      intent.principalKind !== input.subject.kind ||
+      intent.principalId !== input.subject.id ||
+      intent.agentPrincipalId !== input.agent.principalId ||
+      intent.activeSkillName !== input.activeSkillName ||
+      (connectionId !== undefined && connectionId !== intent.connection?.connectionId)
+    ) {
+      return deny(`tool "${input.tool.name}" confirmed replay binding does not match this call`);
+    }
+    return { outcome: "confirmed", output: effect.output };
+  };
+}
+
+function oimPreparer(
+  compiled: CompiledDeclarativeTool,
+  integration: CompiledIntegration,
+  deps: DeclarativeToolingDeps,
+  definition: NonNullable<ParkableToolDef["definition"]>
+): OimPreparer {
+  return async (input) => {
+    const manifest = integration.oimManifest;
+    if (manifest === undefined || !("operation" in compiled) || deps.connections === undefined) {
+      return undefined;
+    }
+    const { connectionId: requestedConnectionId, providerArguments } = splitOimArguments(
+      input.arguments
+    );
+    const pinnedConnectionId = input.pinnedIntent?.connection?.connectionId;
+    if (
+      pinnedConnectionId !== undefined &&
+      requestedConnectionId !== undefined &&
+      requestedConnectionId !== pinnedConnectionId
+    ) {
+      throw new ToolPreparationDeniedError("The approved Connection binding no longer matches.");
+    }
+    const principal = input.subject;
+    const resolution = await deps.connections.resolve({
+      businessId: input.businessId,
+      manifest,
+      operation: compiled.operation,
+      principal,
+      ...(principal.kind === "user" ? { personalOwnerId: principal.id } : {}),
+      ...((pinnedConnectionId ?? requestedConnectionId) === undefined
+        ? {}
+        : { connectionId: pinnedConnectionId ?? requestedConnectionId }),
+    });
+    if (
+      resolution.kind !== "public" &&
+      resolution.kind !== "configured" &&
+      resolution.kind !== "ready"
+    ) {
+      return oimConnectionDenial(resolution, integration.slug);
+    }
+
+    const configuration = resolution.kind === "public" ? {} : resolution.connection.configuration;
+    let runtime: CompiledDeclarativeTool;
+    try {
+      runtime = compileOimRuntimeTool(compiled, integration, configuration);
+    } catch {
+      throw new ToolPreparationDeniedError(
+        `The selected "${integration.slug}" Connection configuration is not permitted.`
+      );
+    }
+    if (
+      "pagination" in runtime &&
+      runtime.pagination !== undefined &&
+      deps.paginationRuntime === undefined
+    ) {
+      throw new ToolPreparationDeniedError(
+        "Secure continuation storage is not configured for this paginated Tool."
+      );
+    }
+    const destination = oimDestination(runtime);
+    const fileIds =
+      "multipart" in runtime.binding
+        ? extractOimMultipartFileIds(runtime.binding, providerArguments)
+        : [];
+    const producesBinaryFile =
+      "binaryResponse" in runtime.binding && runtime.binding.binaryResponse === true;
+    if (fileIds.length > 0) {
+      if (deps.authorizeFiles === undefined) {
+        throw new ToolPreparationDeniedError("File access cannot be authorized by this host.");
+      }
+      await deps.authorizeFiles({
+        businessId: input.businessId,
+        runId: input.runId,
+        stateId: input.stateId,
+        caller: principal,
+        ...(input.agent.principalId === undefined
+          ? {}
+          : { agentPrincipalId: input.agent.principalId }),
+        fileIds,
+      });
+    }
+
+    let connection: ToolConnectionBinding | undefined;
+    let credentialRef: `secret://${string}` | undefined;
+    let secondaryConnection: ToolConnectionBinding | undefined;
+    let secondaryCredentialRef: `secret://${string}` | undefined;
+    if (resolution.kind === "configured") {
+      connection = configuredBinding(
+        manifest,
+        compiled.operation,
+        resolution.connection,
+        principal
+      );
+    } else if (resolution.kind === "ready") {
+      const provider = secretsServiceProvider(await deps.secrets());
+      const revision = await provider.currentVersion?.(resolution.credentialRef);
+      if (revision == null) {
+        throw new ToolPreparationDeniedError("The selected Connection Credential was revoked.");
+      }
+      connection = { ...resolution.binding, credentialRevision: revision };
+      credentialRef = resolution.credentialRef;
+      if (
+        resolution.secondaryBinding !== undefined &&
+        resolution.secondaryCredentialRef !== undefined
+      ) {
+        const secondaryRevision = await provider.currentVersion?.(
+          resolution.secondaryCredentialRef
+        );
+        if (secondaryRevision == null) {
+          throw new ToolPreparationDeniedError(
+            "The selected Connection secondary Credential was revoked."
+          );
+        }
+        secondaryConnection = {
+          ...resolution.secondaryBinding,
+          credentialRevision: secondaryRevision,
+        };
+        secondaryCredentialRef = resolution.secondaryCredentialRef;
+      }
+    }
+
+    const targetRefs = [
+      ...declarativeTargets(runtime, integration.slug, providerArguments),
+      ...fileIds.map((id) => ({ type: "platform.file", id })),
+    ];
+    const intent = normalizeToolIntent({
+      intentId: derivedId("egress-intent", input.runId, input.toolCallId, runtime.toolId),
+      businessId: input.businessId,
+      runId: input.runId,
+      stateId: `chat:${input.toolCallId}`,
+      runStateId: input.stateId,
+      toolId: runtime.toolId,
+      toolVersion: runtime.contract.spec.toolVersion,
+      action: runtime.contract.spec.action,
+      targetRefs,
+      arguments: providerArguments,
+      ...(!producesBinaryFile && fileIds.length === 0
+        ? {}
+        : {
+            filePrincipalId: principal.id,
+            ...(fileIds.length === 0 ? {} : { fileIds }),
+          }),
+      principalKind: principal.kind,
+      principalId: principal.id,
+      ...(input.agent.principalId === undefined
+        ? {}
+        : { agentPrincipalId: input.agent.principalId }),
+      ...(input.activeSkillName === undefined ? {} : { activeSkillName: input.activeSkillName }),
+      integrationId: manifest.metadata.id,
+      integrationMajorVersion: oimManifestMajor(manifest),
+      operationId: compiled.operation.id,
+      manifestDigest: canonicalHash(manifest),
+      configurationDigest: canonicalHash(configuration),
+      ...(destination === undefined ? {} : { destination }),
+      ...(connection === undefined ? {} : { connection }),
+      ...(credentialRef === undefined ? {} : { credentialRef }),
+      ...(secondaryConnection === undefined ? {} : { secondaryConnection }),
+      ...(secondaryCredentialRef === undefined ? {} : { secondaryCredentialRef }),
+      idempotencyKey: derivedId(
+        "egress-idempotency",
+        input.runId,
+        input.toolCallId,
+        runtime.toolId
+      ),
+    });
+    if (
+      input.pinnedIntent !== undefined &&
+      intentDigest(input.pinnedIntent) !== intentDigest(intent)
+    ) {
+      throw new ToolPreparationDeniedError(
+        "The approved Connection, configuration, destination, File, or authority binding changed."
+      );
+    }
+    return {
+      intent,
+      definition: {
+        ...definition,
+        mutating: runtime.mutating,
+        riskClass: runtime.contract.spec.riskClass,
+        idempotency: runtime.contract.spec.idempotency.strategy,
+        effectiveDestination: destination,
+        authorization: {
+          ...definition.authorization,
+          action: runtime.contract.spec.action,
+          ...(destination === undefined ? {} : { allowedDestinations: [destination] }),
+        },
+        targetsFor: () => targetRefs,
+      },
+    };
+  };
+}
+
 function buildToolDef(
   compiled: CompiledDeclarativeTool,
   integration: CompiledIntegration,
   deps: DeclarativeToolingDeps,
   dispatcher: EffectDispatcher
-): ToolDef {
+): ParkableToolDef {
   const { slug, credential, credentialMode } = integration;
   const toolName = declarativeToolName(slug, compiled.name);
   const action = compiled.contract.spec.action;
 
-  const definition = defineApiTool<RequestContext>({
+  const definition = defineParkableApiTool<RequestContext>({
     name: toolName,
     tier: "integration",
     mutating: compiled.mutating,
     description: compiled.description,
-    inputSchema: compiled.contract.spec.inputSchema,
+    inputSchema: withOimConnectionChoice(compiled),
     outputSchema: compiled.contract.spec.outputSchema,
     authorization: {
       action,
@@ -380,18 +875,104 @@ function buildToolDef(
     idempotency: compiled.contract.spec.idempotency.strategy,
     retry: compiled.contract.spec.retry,
     version: compiled.contract.spec.toolVersion,
-    async handler(args, ctx): Promise<ToolCallResult> {
+    async handler(args, ctx): Promise<ParkableToolCallResult> {
       const runId = ctx.runId;
       if (runId === undefined) return err("internal_error", "no run context for this tool call");
       const callId = ctx.toolCallId ?? crypto.randomUUID();
       const stateId = `invoke:${callId}`;
       const toolId = compiled.toolId;
 
-      const intent = normalizeToolIntent({
+      let activeDispatcher = dispatcher;
+      let intent =
+        integration.oimManifest === undefined
+          ? undefined
+          : ctx.toolIntent === undefined
+            ? undefined
+            : normalizeToolIntent(ctx.toolIntent);
+      if (integration.oimManifest !== undefined) {
+        if (intent === undefined || !("operation" in compiled) || deps.connections === undefined) {
+          return err("internal_error", "safe Connection dispatch is not available");
+        }
+        const connection = intent.connection;
+        let configuration: Readonly<Record<string, string | number | boolean>> = {};
+        if (connection !== undefined) {
+          const live = await deps.connections.reauthorizeConnection(
+            deps.businessId,
+            integration.oimManifest,
+            compiled.operation,
+            connection,
+            intent.credentialRef as `secret://${string}` | undefined
+          );
+          if (live === null) {
+            return err("internal_error", "the approved Connection binding is no longer valid");
+          }
+          configuration = live.configuration;
+        }
+        const runtime = compileOimRuntimeTool(compiled, integration, configuration);
+        if (
+          oimDestination(runtime) !== intent.destination ||
+          canonicalHash(configuration) !== intent.configurationDigest ||
+          canonicalHash(integration.oimManifest) !== intent.manifestDigest ||
+          canonicalHash(
+            "multipart" in runtime.binding
+              ? extractOimMultipartFileIds(runtime.binding, intent.arguments)
+              : []
+          ) !== canonicalHash(intent.fileIds ?? [])
+        ) {
+          return err("internal_error", "the approved provider binding changed");
+        }
+        if (connection?.credentialSlot !== undefined) {
+          const provider = secretsServiceProvider(await deps.secrets());
+          const revision =
+            intent.credentialRef === undefined
+              ? null
+              : await provider.currentVersion?.(intent.credentialRef);
+          if (revision !== connection.credentialRevision) {
+            return err("write_denied", "the approved Connection Credential changed");
+          }
+          if (intent.secondaryConnection !== undefined) {
+            const secondaryRevision =
+              intent.secondaryCredentialRef === undefined
+                ? null
+                : await provider.currentVersion?.(intent.secondaryCredentialRef);
+            if (secondaryRevision !== intent.secondaryConnection.credentialRevision) {
+              return err("write_denied", "the approved secondary Connection Credential changed");
+            }
+          }
+        }
+        const fileIds = intent.fileIds;
+        if (fileIds !== undefined && fileIds.length > 0) {
+          if (
+            deps.authorizeFiles === undefined ||
+            intent.principalKind === undefined ||
+            intent.principalId === undefined
+          ) {
+            return err("write_denied", "File access cannot be reauthorized");
+          }
+          try {
+            await deps.authorizeFiles({
+              businessId: intent.businessId,
+              runId: intent.runId,
+              stateId: intent.runStateId ?? intent.stateId,
+              caller: { kind: intent.principalKind, id: intent.principalId },
+              ...(intent.agentPrincipalId === undefined
+                ? {}
+                : { agentPrincipalId: intent.agentPrincipalId }),
+              fileIds,
+            });
+          } catch {
+            return err("write_denied", "File access was revoked");
+          }
+        }
+        activeDispatcher = dispatcherFor({ ...integration, tools: [runtime] }, deps);
+      }
+
+      intent ??= normalizeToolIntent({
         intentId: derivedId("egress-intent", runId, stateId, toolId),
         businessId: deps.businessId,
         runId,
         stateId,
+        ...(ctx.stateKey === undefined ? {} : { runStateId: ctx.stateKey }),
         toolId,
         toolVersion: compiled.contract.spec.toolVersion,
         action,
@@ -414,10 +995,10 @@ function buildToolDef(
       });
 
       const reserved = await deps.effects.reserve({
-        effectId: derivedId("egress-effect", runId, stateId, toolId),
+        effectId: derivedId("egress-effect", runId, intent.stateId, intent.toolId),
         businessId: deps.businessId,
         runId,
-        stateId,
+        stateId: intent.stateId,
         logicalEffectOrdinal: 0,
         idempotencyKey: intent.idempotencyKey,
         intentDigest: intentDigest(intent),
@@ -425,13 +1006,22 @@ function buildToolDef(
         guardrailRevision: ctx.guardrailRevision ?? "none",
         createdAt: new Date().toISOString(),
       });
-      if (reserved.outcome === "duplicate") return replayed(reserved.effect);
+      if (reserved.outcome === "duplicate" && reserved.effect.state === "confirmed") {
+        return replayed(reserved.effect);
+      }
 
       try {
         return ok(
-          await dispatcher.dispatch(deps.businessId, reserved.effect.effectId, ctx.abortSignal)
+          await activeDispatcher.dispatch(
+            deps.businessId,
+            reserved.effect.effectId,
+            ctx.abortSignal
+          )
         );
       } catch (error) {
+        if (error instanceof EffectDispatchDeferredError) {
+          return parked({ kind: "retry_wait", waitId: error.deferred.waitId });
+        }
         if (error instanceof ToolDispatchError) return mapDispatchError(error, slug);
         throw error;
       }
@@ -448,15 +1038,60 @@ function buildToolDef(
  */
 function adapterFor(
   tool: CompiledDeclarativeTool,
-  deps: DeclarativeToolingDeps
+  deps: DeclarativeToolingDeps,
+  integration: CompiledIntegration
 ): ToolAdapter | undefined {
+  if (
+    "operation" in tool &&
+    integration.oimManifest !== undefined &&
+    (tool.operation.source.type === "http" || tool.operation.source.type === "openapi") &&
+    "pathTemplate" in tool.binding
+  ) {
+    return new OimHttpToolAdapter({
+      binding: tool.binding,
+      http: deps.http,
+      toolId: tool.toolId,
+      manifest: integration.oimManifest,
+      ...(tool.projection === undefined ? {} : { projection: tool.projection }),
+      ...(deps.files === undefined ? {} : { files: deps.files }),
+      ...(deps.fileReadAuthorization === undefined
+        ? {}
+        : { fileReadAuthorization: deps.fileReadAuthorization }),
+      ...("pagination" in tool && tool.pagination !== undefined
+        ? {
+            pagination: tool.pagination,
+            ...(deps.paginationRuntime === undefined
+              ? {}
+              : { paginationRuntime: deps.paginationRuntime }),
+          }
+        : {}),
+    });
+  }
   switch (tool.contract.spec.adapter.kind) {
     case "openapi":
       if (!("pathTemplate" in tool.binding)) return undefined;
       return new OpenApiToolAdapter({ binding: tool.binding, http: deps.http });
     case "graphql":
       if (!("document" in tool.binding)) return undefined;
-      return new GraphqlToolAdapter({ binding: tool.binding, http: deps.http });
+      return "operation" in tool && integration.oimManifest !== undefined
+        ? new OimGraphqlToolAdapter({
+            binding: tool.binding,
+            http: deps.http,
+            manifest: integration.oimManifest,
+            toolId: tool.toolId,
+            ...(tool.projection === undefined ? {} : { projection: tool.projection }),
+            ...("pagination" in tool && tool.pagination !== undefined
+              ? {
+                  pagination: tool.pagination,
+                  ...(deps.paginationRuntime === undefined
+                    ? {}
+                    : { paginationRuntime: deps.paginationRuntime }),
+                }
+              : {}),
+          })
+        : new GraphqlToolAdapter({ binding: tool.binding, http: deps.http });
+    case "native":
+      return undefined;
     default:
       return undefined;
   }
@@ -469,7 +1104,7 @@ function dispatcherFor(
   const catalog = ToolCatalog.load(integration.tools.map((tool) => tool.contract));
   const adapters = new Map<string, ToolAdapter>();
   for (const tool of integration.tools) {
-    const adapter = adapterFor(tool, deps);
+    const adapter = adapterFor(tool, deps, integration);
     // A kind with no implementation is left unregistered rather than handed the OpenAPI adapter:
     // the compiler emits the kind, so binding it to a backend it did not declare would let the
     // contract and the runtime disagree in silence. Dispatch then fails `adapter_not_found`,
@@ -478,35 +1113,170 @@ function dispatcherFor(
   }
 
   const { credential } = integration;
-  // Default-deny, scoped to this integration's own ref: a careless or hostile manifest can never
-  // lease another integration's credential, let alone an unrelated platform secret.
   const authorizer: SecretAuthorizer = {
-    authorize(scope) {
-      if (
-        credential === undefined ||
-        (scope.secretRef !== credential.ref &&
-          principalOfRef(credential.ref, scope.secretRef) === null)
-      ) {
-        return { allowed: false, reason: "not_authorized" };
+    async authorize(scope) {
+      if (credential !== undefined) {
+        if (
+          scope.secretRef === credential.ref ||
+          principalOfRef(credential.ref, scope.secretRef) !== null
+        ) {
+          return { allowed: true, maxTtlMs: 5 * 60 * 1000, maxUses: 1 };
+        }
       }
-      return { allowed: true, maxTtlMs: 5 * 60 * 1000, maxUses: 1 };
+      if (
+        integration.oimManifest !== undefined &&
+        deps.connections !== undefined &&
+        scope.businessId !== undefined &&
+        scope.connectionId !== undefined &&
+        scope.credentialSlot !== undefined &&
+        scope.credentialRevision !== undefined &&
+        scope.integrationId === integration.oimManifest.metadata.id &&
+        scope.integrationMajorVersion !== undefined &&
+        scope.operationId !== undefined &&
+        scope.identityMode !== undefined &&
+        scope.manifestDigest !== undefined &&
+        scope.configurationDigest !== undefined &&
+        scope.principalKind !== undefined &&
+        scope.principalId !== undefined &&
+        scope.secretRef.startsWith("secret://")
+      ) {
+        const runtimeTool = integration.tools.find(
+          (candidate) =>
+            "operation" in candidate &&
+            candidate.operation.id === scope.operationId &&
+            candidate.contract.spec.toolId === scope.toolId
+        );
+        if (runtimeTool !== undefined && "operation" in runtimeTool) {
+          const live = await deps.connections.reauthorizeConnection(
+            scope.businessId,
+            integration.oimManifest,
+            runtimeTool.operation,
+            {
+              connectionId: scope.connectionId,
+              integrationId: scope.integrationId,
+              integrationMajorVersion: scope.integrationMajorVersion,
+              operationId: scope.operationId,
+              credentialSlot: scope.credentialSlot,
+              identityMode: scope.identityMode,
+              principalKind: scope.principalKind,
+              principalId: scope.principalId,
+              manifestDigest: scope.manifestDigest,
+              configurationDigest: scope.configurationDigest,
+            },
+            scope.secretRef
+          );
+          if (
+            live !== null &&
+            oimDestination(compileOimRuntimeTool(runtimeTool, integration, live.configuration)) ===
+              scope.destination
+          ) {
+            return { allowed: true, maxTtlMs: 5 * 60 * 1000, maxUses: 1 };
+          }
+        }
+      }
+      return { allowed: false, reason: "not_authorized" };
     },
   };
+  const provider: SecretProvider =
+    integration.oimManifest === undefined
+      ? credential === undefined
+        ? { resolveCurrent: async () => null }
+        : new EgressSecretProvider(
+            credential.ref,
+            credential.storageKey,
+            deps.secrets,
+            integration.slug,
+            credential.tokenEnv
+          )
+      : {
+          async resolveCurrent(secretRef) {
+            return await secretsServiceProvider(await deps.secrets()).resolveCurrent(secretRef);
+          },
+          async resolveUncached(secretRef) {
+            return (
+              (await secretsServiceProvider(await deps.secrets()).resolveUncached?.(secretRef)) ??
+              null
+            );
+          },
+          async currentVersion(secretRef) {
+            return (
+              (await secretsServiceProvider(await deps.secrets()).currentVersion?.(secretRef)) ??
+              null
+            );
+          },
+        };
   const credentials = new CredentialDispatcher({
     secrets: new SecretBroker({
-      provider:
-        credential === undefined
-          ? { resolveCurrent: async () => null }
-          : new EgressSecretProvider(
-              credential.ref,
-              credential.storageKey,
-              deps.secrets,
-              integration.slug,
-              credential.tokenEnv
-            ),
+      provider,
       authorizer,
     }),
-    reauthorize: () => true,
+    reauthorize: async (effect) => {
+      const manifest = integration.oimManifest;
+      if (manifest === undefined) return true;
+      const intent = effect.intent;
+      if (
+        deps.connections === undefined ||
+        intent.integrationId !== manifest.metadata.id ||
+        intent.integrationMajorVersion !== oimManifestMajor(manifest) ||
+        intent.manifestDigest !== canonicalHash(manifest) ||
+        intent.operationId === undefined ||
+        intent.principalKind === undefined ||
+        intent.principalId === undefined
+      ) {
+        return false;
+      }
+      const runtimeTool = integration.tools.find(
+        (candidate) => "operation" in candidate && candidate.operation.id === intent.operationId
+      );
+      if (runtimeTool === undefined || !("operation" in runtimeTool)) return false;
+      const principal = { kind: intent.principalKind, id: intent.principalId };
+      let configuration: Readonly<Record<string, string | number | boolean>>;
+      if (intent.connection === undefined) {
+        const resolution = await deps.connections.resolve({
+          businessId: effect.businessId,
+          manifest,
+          operation: runtimeTool.operation,
+          principal,
+          ...(principal.kind === "user" ? { personalOwnerId: principal.id } : {}),
+        });
+        if (resolution.kind !== "public") return false;
+        configuration = {};
+      } else {
+        const credentialRef = intent.credentialRef as `secret://${string}` | undefined;
+        const live = await deps.connections.reauthorizeConnection(
+          effect.businessId,
+          manifest,
+          runtimeTool.operation,
+          intent.connection,
+          credentialRef
+        );
+        if (live === null) return false;
+        configuration = live.configuration;
+        if (
+          intent.secondaryConnection !== undefined &&
+          (intent.secondaryCredentialRef === undefined ||
+            (await deps.connections.reauthorizeConnection(
+              effect.businessId,
+              manifest,
+              runtimeTool.operation,
+              intent.secondaryConnection,
+              intent.secondaryCredentialRef as `secret://${string}`
+            )) === null)
+        ) {
+          return false;
+        }
+      }
+      const current = compileOimRuntimeTool(runtimeTool, integration, configuration);
+      const currentFiles =
+        "multipart" in current.binding
+          ? extractOimMultipartFileIds(current.binding, intent.arguments)
+          : [];
+      return (
+        canonicalHash(configuration) === intent.configurationDigest &&
+        oimDestination(current) === intent.destination &&
+        canonicalHash(currentFiles) === canonicalHash(intent.fileIds ?? [])
+      );
+    },
   });
 
   return new EffectDispatcher({
@@ -514,6 +1284,8 @@ function dispatcherFor(
     catalog,
     adapters,
     credentialDispatcher: credentials,
+    ...(deps.parkRetry === undefined ? {} : { parkRetry: deps.parkRetry }),
+    ...(deps.retryWaitStatus === undefined ? {} : { retryWaitStatus: deps.retryWaitStatus }),
     ...(deps.mutationGuard === undefined
       ? {}
       : {
@@ -524,7 +1296,8 @@ function dispatcherFor(
 }
 
 export interface DeclarativeTooling {
-  readonly tools: readonly ToolDef[];
+  readonly tools: readonly ParkableToolDef[];
+  readonly preparation: ToolCallPreparationPort;
   /** Why an integration published nothing, for the operator-facing log. */
   readonly problems: readonly string[];
 }
@@ -535,21 +1308,22 @@ export function buildDeclarativeTools(
   deps: DeclarativeToolingDeps,
   logger?: Logger
 ): DeclarativeTooling {
-  const tools: ToolDef[] = [];
+  const tools: ParkableToolDef[] = [];
   const problems: string[] = [];
   const toolOwners = new Map<string, string>();
+  const preparers = new Map<string, OimPreparer>();
+  const replayers = new Map<string, OimConfirmedReplayer>();
 
   for (const integration of integrations) {
-    // No manifest means a bundled, code-owned integration (Soul holds only connection state);
-    // its Tools are handwritten, not declarative.
-    if (integration.manifest === undefined) continue;
+    if (integration.manifest === undefined && integration.oimManifest === undefined) continue;
+    if (integration.oimManifest !== undefined && deps.connections === undefined) continue;
     try {
       const compiled = compileIntegration(integration);
       if (compiled.tools.length === 0) continue;
 
       const dispatcher = dispatcherFor(compiled, deps);
       const built = compiled.tools.map((tool) => buildToolDef(tool, compiled, deps, dispatcher));
-      for (const tool of built) {
+      for (const [index, tool] of built.entries()) {
         const owner = toolOwners.get(tool.name);
         if (owner !== undefined && owner !== integration.slug) {
           const problem = `Integration "${integration.slug}" skipped Tool "${tool.name}": tool name collides with integration "${owner}"`;
@@ -559,6 +1333,15 @@ export function buildDeclarativeTools(
         }
         toolOwners.set(tool.name, integration.slug);
         tools.push(tool);
+        const compiledTool = compiled.tools[index];
+        if (
+          compiledTool !== undefined &&
+          integration.oimManifest !== undefined &&
+          tool.definition !== undefined
+        ) {
+          preparers.set(tool.name, oimPreparer(compiledTool, compiled, deps, tool.definition));
+          replayers.set(tool.name, oimConfirmedReplayer(compiledTool, deps));
+        }
       }
     } catch (error) {
       const problem = `Integration "${integration.slug}" published no Tools: ${
@@ -569,5 +1352,12 @@ export function buildDeclarativeTools(
     }
   }
 
-  return { tools, problems };
+  return {
+    tools,
+    problems,
+    preparation: {
+      replayConfirmed: async (input) => await replayers.get(input.tool.name)?.(input),
+      prepare: async (input) => await preparers.get(input.tool.name)?.(input),
+    },
+  };
 }

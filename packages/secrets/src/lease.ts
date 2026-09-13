@@ -30,16 +30,31 @@ interface SecretScopeBase {
 
 /** Legacy Secret authority for platform-owned credentials that are not Connection-backed. */
 export interface LegacySecretScope extends SecretScopeBase {
+  readonly businessId?: never;
   readonly connectionId?: never;
   readonly credentialSlot?: never;
+  readonly credentialRevision?: never;
+  readonly integrationMajorVersion?: never;
+  readonly operationId?: never;
+  readonly identityMode?: never;
+  readonly manifestDigest?: never;
+  readonly configurationDigest?: never;
 }
 
 /** Exact authority for one credential slot on one product Connection. */
 export interface ConnectionSecretScope extends SecretScopeBase {
   readonly secretRef: `secret://${string}`;
+  readonly businessId: string;
   readonly connectionId: string;
   readonly credentialSlot: string;
+  /** Secret revision approved for this exact Tool occurrence. */
+  readonly credentialRevision: string;
   readonly integrationId: string;
+  readonly integrationMajorVersion: number;
+  readonly operationId: string;
+  readonly identityMode: "shared_only" | "personal_required" | "shared_or_personal";
+  readonly manifestDigest: string;
+  readonly configurationDigest: string;
 }
 
 /** Exact lease authority; every field narrows use and `secretRef` is never the value. */

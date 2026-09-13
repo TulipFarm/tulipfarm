@@ -1,4 +1,4 @@
-import { type OimConnection, validateOimManifest } from "@tulipfarm/schema";
+import { type OimConnection, type OimManifest, validateOimManifest } from "@tulipfarm/schema";
 import type { ConnectionAuthStep, PersistedConnection } from "@tulipfarm/storage";
 import { describe, expect, it } from "vitest";
 import { OimOperationConnectionResolver } from "./operation";
@@ -244,5 +244,43 @@ describe("OimOperationConnectionResolver", () => {
         )
       ).resolves.toBe(false);
     }
+  });
+
+  it("reauthorizes the secondary slot through the same operation-bound resolver", async () => {
+    const primary = manifest.operations[0];
+    if (primary === undefined) throw new Error("expected operation");
+    const operation = {
+      ...primary,
+      secondaryCredential: {
+        slot: "refresh",
+        injection: { in: "header" as const, name: "x-refresh", format: "******" },
+      },
+    };
+    const secondaryManifest = { ...manifest, operations: [operation] } as OimManifest;
+    const operationResolver = resolver("active");
+    const selected = await operationResolver.resolve({
+      businessId: "business-1",
+      manifest: secondaryManifest,
+      operation,
+      principal: { kind: "user", id: "user-1" },
+      personalOwnerId: "user-1",
+    });
+    if (
+      selected.kind !== "ready" ||
+      selected.secondaryBinding === undefined ||
+      selected.secondaryCredentialRef === undefined
+    ) {
+      throw new Error("expected secondary Connection binding");
+    }
+
+    await expect(
+      operationResolver.reauthorizeConnection(
+        "business-1",
+        secondaryManifest,
+        operation,
+        selected.secondaryBinding,
+        selected.secondaryCredentialRef
+      )
+    ).resolves.toMatchObject({ id: "connection-1" });
   });
 });

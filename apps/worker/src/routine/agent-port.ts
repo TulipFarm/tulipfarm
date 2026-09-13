@@ -59,6 +59,8 @@ export type RoutineAgentOutcome =
   | { readonly kind: "failed"; readonly reason: string; readonly retryable: boolean }
   /** The loop held a Tool call for a human; this port cannot open that Approval. */
   | { readonly kind: "awaiting_approval"; readonly reason: string }
+  /** The Tool already registered the timer that will resume this State. */
+  | { readonly kind: "awaiting_retry"; readonly reason: string; readonly waitId: string }
   /** The Run is being cancelled; the executor leaves the State to the cancellation manager. */
   | { readonly kind: "cancelled" }
   /** Nothing decided the question. The State parks for reconciliation rather than guessing. */
@@ -545,6 +547,13 @@ export class BundleRoutineAgentPort implements RoutineAgentPort {
         },
         request.signal
       );
+    }
+    if (outcome.status === "awaiting_retry") {
+      return {
+        kind: "awaiting_retry",
+        reason: "provider_retry_wait",
+        waitId: outcome.waitId,
+      };
     }
 
     // Last zero-cost refusal point: no State is settled and no downstream effect has run.

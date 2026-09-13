@@ -318,6 +318,15 @@ export class TurnDriver {
         });
         return current ? { status: "waiting" } : { status: "succeeded" };
       }
+      if (result.reason === "provider_retry_wait") {
+        assertRunActive(request.signal);
+        const current = await this.checkpoint(request, events, "waiting", {
+          kind: "retry",
+          waitId: result.waitId,
+          callId: result.callId,
+        });
+        return current ? { status: "waiting" } : { status: "succeeded" };
+      }
       assertRunActive(request.signal);
       await events.emit(
         "approval.requested",

@@ -4,6 +4,7 @@ import { type ApprovalBindingInput, bindingsMatch, computeApprovalBinding } from
 function input(overrides: Partial<ApprovalBindingInput> = {}): ApprovalBindingInput {
   return {
     intent: {
+      businessId: "business-1",
       toolId: "crm.contact",
       toolVersion: "2.1.0",
       action: "contact.update",
@@ -44,6 +45,7 @@ describe("computeApprovalBinding", () => {
     ["toolVersion", { toolVersion: "2.1.1" }],
     ["action", { action: "contact.delete" }],
     ["targetRefs", { targetRefs: [{ type: "contact", id: "c-2" }] }],
+    ["target domain", { targetRefs: [{ type: "contact", id: "c-1", domain: "sales" }] }],
     [
       "target order",
       {
@@ -56,6 +58,26 @@ describe("computeApprovalBinding", () => {
     ["destination", { destination: "other.example.com" }],
     ["credentialRef", { credentialRef: "secret://crm/admin" }],
     ["filePrincipalId", { filePrincipalId: "principal-2" }],
+    ["businessId", { businessId: "business-2" }],
+    ["fileIds", { fileIds: ["file-2"] }],
+    ["agentPrincipalId", { agentPrincipalId: "agent-2" }],
+    [
+      "Connection",
+      {
+        connection: {
+          connectionId: "connection-2",
+          integrationId: "crm",
+          integrationMajorVersion: 2,
+          operationId: "update-contact",
+          credentialSlot: "writer",
+          identityMode: "personal_or_shared",
+          principalKind: "user",
+          principalId: "principal-1",
+          manifestDigest: "sha256:manifest",
+          configurationDigest: "sha256:configuration",
+        },
+      },
+    ],
   ])("changes the intent digest when %s changes", (_label, patch) => {
     const base = computeApprovalBinding(input());
     const changed = computeApprovalBinding(

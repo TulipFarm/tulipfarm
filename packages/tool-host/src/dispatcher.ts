@@ -7,7 +7,9 @@ import {
   definitionForToolCall,
   type EffectStore,
   NOT_APPLICABLE,
+  normalizeToolIntent,
   type ToolAuthorizationDenialReason,
+  type ToolIntent,
   type ToolTargetRef,
 } from "@tulipfarm/tool-broker";
 import {
@@ -43,8 +45,10 @@ import type {
   HostedAgent,
   SurfacePresentationPort,
   ToolApprovalPort,
+  ToolCallPreparationPort,
   ToolVisibilityPort,
 } from "./ports";
+import { ToolPreparationDeniedError } from "./ports";
 import { type AuthorityPrincipal, principalKindOf } from "./principal";
 import { findChatRequest, presentationContextForAuthority } from "./request";
 import type { SurfaceActionStore, SurfaceArtifactStore } from "./surface-ports";
@@ -93,6 +97,8 @@ export interface RegistryToolDispatcherOptions {
     resolveAgentLayer?(businessId: string, agentId: string): Promise<AuthorityLayer>;
   };
   readonly credentials?: CredentialResolver;
+  /** Resolves account-bound provider calls before policy, approval, and effect reservation. */
+  readonly preparation?: ToolCallPreparationPort;
   /** Authority layer L5 (D7); absence preserves pre-D7 bot reach. */
   readonly entitlements?: CompositeToolEntitlement;
   /** Effect ledger for mutating Tools; production deployments with a database should supply it. */
@@ -408,6 +414,84 @@ export class RegistryToolDispatcher implements TurnToolDispatcher {
       }
     }
 
+    const stateId = call.stateId ?? `chat:${call.callId}`;
+    let preparedIntent: ToolIntent | undefined;
+    let pinnedIntent: ToolIntent | undefined;
+    if (this.options.preparation !== undefined) {
+      try {
+        pinnedIntent = await this.options.approvals?.findIntent?.({
+          runId: authority.runId,
+          toolCallId: call.callId,
+          toolName: call.name,
+          args: call.arguments,
+        });
+        const replay = await this.options.preparation.replayConfirmed?.({
+          businessId: authority.businessId,
+          runId: authority.runId,
+          stateId,
+          toolCallId: call.callId,
+          tool: definition,
+          arguments: call.arguments,
+          subject: authority.subject,
+          agent,
+          ...(call.activeSkillName === undefined ? {} : { activeSkillName: call.activeSkillName }),
+          ...(pinnedIntent === undefined ? {} : { pinnedIntent }),
+        });
+        if (replay?.outcome === "confirmed") {
+          return { status: "succeeded", replayed: true, output: replay.output };
+        }
+        if (replay?.outcome === "denied") {
+          return { status: "denied", reason: replay.reason };
+        }
+        const prepared = await this.options.preparation.prepare({
+          businessId: authority.businessId,
+          runId: authority.runId,
+          stateId,
+          toolCallId: call.callId,
+          tool: definition,
+          arguments: call.arguments,
+          subject: authority.subject,
+          agent,
+          ...(call.activeSkillName === undefined ? {} : { activeSkillName: call.activeSkillName }),
+          ...(pinnedIntent === undefined ? {} : { pinnedIntent }),
+        });
+        if (prepared !== undefined) {
+          preparedIntent = normalizeToolIntent(prepared.intent);
+          if (
+            preparedIntent.businessId !== authority.businessId ||
+            preparedIntent.runId !== authority.runId ||
+            preparedIntent.stateId !== `chat:${call.callId}` ||
+            preparedIntent.runStateId !== stateId ||
+            preparedIntent.toolVersion !== prepared.definition.version ||
+            preparedIntent.action !== prepared.definition.authorization.action
+          ) {
+            return {
+              status: "denied",
+              reason: `tool "${call.name}" could not establish a safe dispatch binding`,
+            };
+          }
+          definition = {
+            ...definition,
+            mutating: prepared.definition.mutating,
+            requiresApproval: prepared.definition.requiresApproval,
+            definition: prepared.definition,
+          };
+        }
+      } catch (error) {
+        if (error instanceof ToolPreparationDeniedError) {
+          return {
+            status: "denied",
+            reason: error.reason,
+            ...(error.connectUrl === undefined ? {} : { connectUrl: error.connectUrl }),
+          };
+        }
+        return {
+          status: "denied",
+          reason: `tool "${call.name}" could not establish a safe dispatch binding`,
+        };
+      }
+    }
+
     const capabilityDenial = agentCapabilityDenial(
       agent.capabilityRestrictions,
       definition,
@@ -428,7 +512,10 @@ export class RegistryToolDispatcher implements TurnToolDispatcher {
     if (verdict.decision === "denied") return verdict.result;
 
     // Resolve credentials before approval; do not ask humans to approve calls that cannot run.
-    const credential = await this.resolveCredential(authority, definition);
+    const credential =
+      preparedIntent === undefined
+        ? await this.resolveCredential(authority, definition)
+        : ({ use: "service" } as const);
     if (credential.use === "denied") {
       return {
         status: "denied",
@@ -514,6 +601,7 @@ export class RegistryToolDispatcher implements TurnToolDispatcher {
                   ...AUTONOMY_APPROVAL_DEMAND,
                   guardrailRevision: this.options.guardrails?.revision ?? "none",
                 },
+        ...(preparedIntent === undefined ? {} : { intent: preparedIntent }),
       });
       if (decision.status === "pending") {
         return { status: "awaiting_approval", approvalId: decision.approvalId };
@@ -577,6 +665,7 @@ export class RegistryToolDispatcher implements TurnToolDispatcher {
       ...surfaceFields,
       ...(abortSignal === undefined ? {} : { abortSignal }),
       ...(credential.use === "principal" ? { credentialPrincipal: credential.principal } : {}),
+      ...(preparedIntent === undefined ? {} : { toolIntent: preparedIntent }),
     };
     // Reserve only after refusals and approval; denied calls leave no effect row.
     let reservation: { readonly effectId: string; readonly attempt: number } | undefined;

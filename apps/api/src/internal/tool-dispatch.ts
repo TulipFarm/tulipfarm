@@ -24,6 +24,7 @@ export type DelegatedToolDispatchDeps = Pick<
   | "surfaceActionStore"
   | "guardrails"
   | "authorityLayers"
+  | "preparation"
   | "logger"
 > & {
   readonly links: DelegatedAuthorityGuardDeps["links"];
