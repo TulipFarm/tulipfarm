@@ -244,6 +244,29 @@ describe("derivePlanProgress", () => {
     expect(statuses(derivePlanProgress(rounds, parts))).toEqual(["done", "skipped", "skipped"]);
   });
 
+  it("strips a provider's `functions.` namespace so a declared step matches its real call", () => {
+    const namespaced = [{ calls: [{ tool: "functions.skill" }] }];
+    const result = derivePlanProgress(namespaced, [tool({ toolName: "skill" })], {
+      streaming: true,
+    });
+
+    expect(result[0]?.calls[0]?.tool).toBe("skill");
+    expect(result[0]?.calls[0]?.status).toBe("done");
+    expect(result[0]?.calls[0]?.part).toBeDefined();
+  });
+
+  it("drops a declared presentation-Tool step instead of leaving it stuck pending", () => {
+    const withPresentation = [
+      { calls: [{ tool: "get_memory" }, { tool: "functions.request_input" }] },
+    ];
+    const result = derivePlanProgress(withPresentation, [tool({ toolName: "get_memory" })], {
+      streaming: true,
+    });
+
+    expect(result[0]?.calls).toHaveLength(1);
+    expect(result[0]?.calls[0]?.tool).toBe("get_memory");
+  });
+
   it("gives a plan part its own node, carrying the derived progress", () => {
     const nodes = groupTimelineParts(
       [{ kind: "plan", revision: 1, rounds }, tool({ toolName: "get_memory" })],
