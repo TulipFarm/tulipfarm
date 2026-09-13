@@ -27,7 +27,18 @@ export interface RunStateReadModel {
   readonly attempts: number;
   readonly input?: unknown;
   readonly output?: unknown;
+  readonly resultArtifactId?: string;
   readonly errorEvidenceRef?: string;
+}
+
+export interface RunContextReadModel {
+  readonly sourceChat?: { readonly id: string; readonly title?: string };
+  readonly agent?: { readonly id: string; readonly name: string };
+  readonly routine?: { readonly id: string; readonly name: string };
+  readonly relatedRuns: readonly {
+    readonly id: string;
+    readonly relation: "parent" | "child" | "replayed_from" | "replay";
+  }[];
 }
 
 export interface RunReadModel {
@@ -46,6 +57,7 @@ export interface RunReadModel {
   readonly guardrailDecisions: readonly Record<string, unknown>[];
   readonly lineage: readonly Record<string, unknown>[];
   readonly costs: { readonly amountUsd: number; readonly modelTokens: number };
+  readonly context?: RunContextReadModel;
 }
 
 /**
@@ -165,6 +177,7 @@ export interface OperationalApiDeps {
     options: { cursor?: string; limit: number }
   ): Promise<{ items: readonly RunReadModel[]; nextCursor: string | null }>;
   getRun(grant: OperationalGrant, runId: string): Promise<RunReadModel | null>;
+  getRunContext?(request: FastifyRequest, runId: string): Promise<RunContextReadModel | undefined>;
   /**
    * The write-once budget ledger for one Run. `null` denies existence (unknown Run, or a Run owned
    * by another business — the two are indistinguishable), which the route answers as `404`.

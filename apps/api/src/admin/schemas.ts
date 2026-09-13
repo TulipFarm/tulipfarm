@@ -30,6 +30,41 @@ export const AdminErrorSchema = {
   },
 } as const;
 
+const NamedRunContextRefSchema = {
+  type: "object",
+  additionalProperties: false,
+  required: ["id", "name"],
+  properties: { id: { type: "string" }, name: { type: "string" } },
+} as const;
+
+export const AdminRunContextSchema = {
+  type: "object",
+  additionalProperties: false,
+  required: ["relatedRuns"],
+  properties: {
+    sourceChat: {
+      type: "object",
+      additionalProperties: false,
+      required: ["id"],
+      properties: { id: { type: "string" }, title: { type: "string" } },
+    },
+    agent: NamedRunContextRefSchema,
+    routine: NamedRunContextRefSchema,
+    relatedRuns: {
+      type: "array",
+      items: {
+        type: "object",
+        additionalProperties: false,
+        required: ["id", "relation"],
+        properties: {
+          id: { type: "string" },
+          relation: { type: "string", enum: ["parent", "child", "replayed_from", "replay"] },
+        },
+      },
+    },
+  },
+} as const;
+
 export const AdminRunSchema = {
   type: "object",
   additionalProperties: true,
@@ -63,7 +98,23 @@ export const AdminRunSchema = {
     createdAt: { type: "string" },
     startedAt: { type: ["string", "null"] },
     finishedAt: { type: ["string", "null"] },
-    states: { type: "array", items: { type: "object", additionalProperties: true } },
+    states: {
+      type: "array",
+      items: {
+        type: "object",
+        additionalProperties: true,
+        required: ["key", "status", "attempts"],
+        properties: {
+          key: { type: "string" },
+          status: { type: "string" },
+          attempts: { type: "integer" },
+          input: {},
+          output: {},
+          resultArtifactId: { type: "string" },
+          errorEvidenceRef: { type: "string" },
+        },
+      },
+    },
     effects: { type: "array", items: { type: "object", additionalProperties: true } },
     waits: { type: "array", items: { type: "object", additionalProperties: true } },
     guardrailDecisions: {
@@ -76,6 +127,7 @@ export const AdminRunSchema = {
       required: ["amountUsd", "modelTokens"],
       properties: { amountUsd: { type: "number" }, modelTokens: { type: "number" } },
     },
+    context: AdminRunContextSchema,
   },
 } as const;
 

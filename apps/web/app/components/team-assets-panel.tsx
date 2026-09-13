@@ -819,8 +819,8 @@ function assetNoun(type: TeamAssetCatalogItem["assetType"]): string {
 }
 
 function createPromptHref(type: TeamAssetCatalogItem["assetType"], team: Team): string {
-  return `/?prompt=${encodeURIComponent(
-    `Create a ${assetNoun(type)} owned by ${team.displayName}. Preselect ${team.displayName} as owner and ask whether to add more owning Teams.`
+  return `/?draft=${encodeURIComponent(
+    `Create a new ${assetNoun(type)} owned by ${team.displayName} (Team ID: ${team.id}). Use this Team as owner and ask whether to add more owning Teams.`
   )}`;
 }
 

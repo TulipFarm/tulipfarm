@@ -145,6 +145,63 @@ async function harness(
 }
 
 describe("operational API", () => {
+  it("serializes typed authorized context only on Run detail", async () => {
+    const context = {
+      sourceChat: { id: "chat-1", title: "Customer research" },
+      agent: { id: "agent-1", name: "researcher" },
+      routine: { id: "routine-1", name: "daily-review" },
+      relatedRuns: [{ id: "parent-1", relation: "parent" as const }],
+    };
+    const getRunContext = vi.fn(async () => context);
+    const app = await harness({ getRunContext });
+    try {
+      const list = await app.inject({ method: "GET", url: "/api/v1/runs" });
+      expect(list.statusCode).toBe(200);
+      expect(getRunContext).not.toHaveBeenCalled();
+      const detail = await app.inject({ method: "GET", url: "/api/v1/runs/run-1" });
+      expect(detail.statusCode).toBe(200);
+      expect(detail.json().run.context).toEqual(context);
+      expect(getRunContext).toHaveBeenCalledWith(
+        expect.objectContaining({ principal: adminPrincipal }),
+        "run-1"
+      );
+    } finally {
+      await app.close();
+    }
+  });
+
+  it("does not advertise lifecycle commands without runs:control", async () => {
+    const app = await harness({
+      authorize: async () => ({
+        businessId: "business-1",
+        principalId: "user-1",
+        permissions: ["runs:read"],
+      }),
+    });
+    try {
+      const list = await app.inject({ method: "GET", url: "/api/v1/runs" });
+      const detail = await app.inject({ method: "GET", url: "/api/v1/runs/run-1" });
+      expect(list.json().items[0].availableCommands).toEqual([]);
+      expect(detail.json().run.availableCommands).toEqual([]);
+    } finally {
+      await app.close();
+    }
+  });
+
+  it("does not resolve context for a missing or forbidden Run", async () => {
+    const getRunContext = vi.fn();
+    const missing = await harness({ getRun: async () => null, getRunContext });
+    const forbidden = await harness({ authorize: async () => null, getRunContext });
+    try {
+      expect((await missing.inject("/api/v1/runs/run-1")).statusCode).toBe(404);
+      expect((await forbidden.inject("/api/v1/runs/run-1")).statusCode).toBe(403);
+      expect(getRunContext).not.toHaveBeenCalled();
+    } finally {
+      await missing.close();
+      await forbidden.close();
+    }
+  });
+
   it("returns an authorized Run read model and documents the browser endpoints", async () => {
     const app = await harness();
     const response = await app.inject({ method: "GET", url: "/api/v1/runs/run-1" });

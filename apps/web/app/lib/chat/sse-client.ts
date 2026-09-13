@@ -635,8 +635,10 @@ async function consumeSse(
     buffer = rest;
 
     for (const frame of frames) {
-      if (frame.seq <= lastSequence) continue;
-      lastSequence = frame.seq;
+      // Transport control frames reuse the persisted cursor; they are not replayed Run events.
+      const isStreamControl = frame.type === "stream.closed" || frame.type === "stream.revoked";
+      if (!isStreamControl && frame.seq <= lastSequence) continue;
+      if (!isStreamControl) lastSequence = frame.seq;
       for (const event of map(frame)) {
         handlers.onEvent(event);
         if (TERMINAL_EVENT_TYPES.has(event.type)) {

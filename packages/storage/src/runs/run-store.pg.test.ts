@@ -851,6 +851,30 @@ describe("RunStore (PostgreSQL)", () => {
         createdAt: CREATED_AT,
       },
     ]);
+    await store.start(
+      run({
+        id: "00000000-0000-4000-8000-000000000003",
+        parentRunId: run().id,
+        lineage: "replay",
+      })
+    );
+    expect(await store.listLineage("business-1", run().id)).toEqual([]);
+    expect(await store.listRelatedLineage("business-1", run().id)).toEqual([
+      expect.objectContaining({
+        sourceRunId: run().id,
+        targetRunId: "00000000-0000-4000-8000-000000000002",
+        relation: "child",
+      }),
+      expect.objectContaining({
+        sourceRunId: run().id,
+        targetRunId: "00000000-0000-4000-8000-000000000003",
+        relation: "replay",
+      }),
+    ]);
+    expect(
+      await store.listRelatedLineage("business-1", "00000000-0000-4000-8000-000000000003")
+    ).toEqual([expect.objectContaining({ sourceRunId: run().id, relation: "replay" })]);
+    expect(await store.listRelatedLineage("business-2", run().id)).toEqual([]);
     await expect(database.query("UPDATE run_lineage SET relation = 'replay'")).rejects.toThrow();
     await expect(database.query("DELETE FROM run_lineage")).rejects.toThrow();
   });

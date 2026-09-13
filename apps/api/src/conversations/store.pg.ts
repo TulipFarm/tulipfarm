@@ -245,6 +245,21 @@ export class PgConversationStore implements ConversationStore {
     return row ? toTurn(row) : undefined;
   }
 
+  /** Read-only history lookup; never use a superseded Run to authorize an executor write. */
+  async findTurnByAttemptRunId(
+    businessId: string,
+    runId: string
+  ): Promise<PersistedTurn | undefined> {
+    if (businessId !== DEPLOYMENT_BUSINESS_ID) return undefined;
+    const { rows } = await this.q.query(
+      `SELECT ${TURN_COLUMNS} FROM conversation_turns
+       WHERE run_id = $1 OR $1::uuid = ANY(superseded_run_ids)`,
+      [runId]
+    );
+    const row = rows[0] as unknown as TurnRow | undefined;
+    return row ? toTurn(row) : undefined;
+  }
+
   async appendMessage(message: PersistedMessage): Promise<void> {
     assertDeploymentBusiness(message.businessId);
     await this.q.query(

@@ -25,6 +25,7 @@ export type {
   RunBudgetReadModel,
   RunCommandAction,
   RunCommandInput,
+  RunContextReadModel,
   RunReadModel,
   RunStateReadModel,
   TeamMigrationReportReadModel,
@@ -174,7 +175,16 @@ export function registerOperationalRoutes(
       const grant = await requireGrant(request, reply, deps, "runs:read");
       if (!grant) return;
       const query = request.query as { cursor?: string; limit?: number };
-      return deps.listRuns(grant, { cursor: query.cursor, limit: query.limit ?? 50 });
+      const page = await deps.listRuns(grant, { cursor: query.cursor, limit: query.limit ?? 50 });
+      return {
+        ...page,
+        items: page.items.map((run) => ({
+          ...run,
+          availableCommands: grant.permissions.includes("runs:control")
+            ? run.availableCommands
+            : [],
+        })),
+      };
     }
   );
 
@@ -198,7 +208,16 @@ export function registerOperationalRoutes(
       const { id } = request.params as { id: string };
       const run = await deps.getRun(grant, id);
       if (!run) return fail(reply, request, 404, "run_not_found", "Run not found.");
-      return { run };
+      const context = await deps.getRunContext?.(request, id);
+      return {
+        run: {
+          ...run,
+          availableCommands: grant.permissions.includes("runs:control")
+            ? run.availableCommands
+            : [],
+          ...(context === undefined ? {} : { context }),
+        },
+      };
     }
   );
 

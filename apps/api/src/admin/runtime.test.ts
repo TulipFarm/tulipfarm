@@ -2,6 +2,7 @@ import type { FastifyRequest } from "fastify";
 import { describe, expect, it, vi } from "vitest";
 import type { AuthorizationCheck } from "../authz/route-gate";
 import { OperationalNotImplementedError } from "./routes";
+import type { RunContextReader } from "./run-context";
 import type { RunReader } from "./run-reader";
 import { createRuntimeOperationalApi } from "./runtime";
 
@@ -25,7 +26,8 @@ function runtime(
   toolSignalResult: "resumed" | "not_found" | "already_settled" = "resumed",
   routineSignalResult: "resumed" | "already_settled" = "resumed",
   settledDecision?: "approved" | "denied",
-  authorizationCheck?: AuthorizationCheck
+  authorizationCheck?: AuthorizationCheck,
+  runContext?: RunContextReader
 ) {
   const signal = vi.fn(async () => toolSignalResult);
   const routineSignal = vi.fn(async () => routineSignalResult);
@@ -154,6 +156,7 @@ function runtime(
         }
       : {}),
     runs,
+    runContext,
     healthProbes: [
       { component: "postgres", check: async () => ({ status: "ok" as const }) },
       {
@@ -200,6 +203,17 @@ function runtime(
 }
 
 describe("runtime operational API", () => {
+  it("resolves optional detail context with the authenticated principal, never a synthetic grant", async () => {
+    const get = vi.fn(async () => ({ relatedRuns: [] }));
+    const { api } = runtime(false, "resumed", "resumed", undefined, undefined, { get });
+    await expect(api.getRunContext?.(request(), "run-1")).resolves.toEqual({ relatedRuns: [] });
+    expect(get).toHaveBeenCalledWith(principal, "run-1");
+    get.mockClear();
+    await expect(api.getRunContext?.({} as FastifyRequest, "run-1")).resolves.toBeUndefined();
+    expect(get).not.toHaveBeenCalled();
+    await expect(runtime().api.getRunContext?.(request(), "run-1")).resolves.toBeUndefined();
+  });
+
   it.each([false, true])(
     "requires a separate Run control grant for an operator (control: %s)",
     async (control) => {

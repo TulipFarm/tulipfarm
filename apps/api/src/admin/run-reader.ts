@@ -50,7 +50,8 @@ function stateReadModel(state: PersistedState, attempts: number): RunStateReadMo
     status: state.status,
     attempts,
     input: state.resolvedInput,
-    ...(state.resultArtifactId ? { output: { artifactId: state.resultArtifactId } } : {}),
+    ...(state.output == null ? {} : { output: state.output }),
+    ...(state.resultArtifactId ? { resultArtifactId: state.resultArtifactId } : {}),
     ...(state.errorEvidenceRef ? { errorEvidenceRef: state.errorEvidenceRef } : {}),
   };
 }
@@ -101,7 +102,7 @@ function runReadModel(
 
 /** List pages omit per-Run detail to stay one round trip. */
 export function createRunReader(
-  runs: RunStore,
+  runs: Pick<RunStore, "list" | "find" | "listStates" | "countStateAttempts" | "listLineage">,
   budgets: Pick<BudgetStore, "usage">,
   /**
    * The spend ledger. Optional so a deployment or test without observability still serves Runs;
