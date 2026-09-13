@@ -14,6 +14,11 @@ import {
 } from "./connection-external-identity-store";
 import { CONNECTION_STORAGE_STATEMENTS, ConnectionStore } from "./connection-store";
 import {
+  INGRESS_TEARDOWN_STORAGE_STATEMENTS,
+  IngressTeardownStore,
+} from "./ingress-teardown-store";
+import { OIM_INGRESS_EMISSION_STORAGE_STATEMENTS } from "./oim-ingress-emission-store";
+import {
   OIM_KNOWLEDGE_CHECKPOINT_STORAGE_STATEMENTS,
   OimKnowledgeCheckpointStore,
 } from "./oim-knowledge-checkpoint-store";
@@ -27,6 +32,14 @@ import {
 const BUSINESS_ID = "business-1";
 const CONNECTION_ID = "connection-1";
 const OTHER_CONNECTION_ID = "connection-2";
+
+function deferred() {
+  let resolve = () => {};
+  const promise = new Promise<void>((done) => {
+    resolve = done;
+  });
+  return { promise, resolve };
+}
 
 function connection(id: string, overrides: Partial<OimConnection> = {}): OimConnection {
   return {
@@ -54,7 +67,9 @@ describe("OIM persistence foundations", () => {
       ...CONNECTION_STORAGE_STATEMENTS,
       ...CONNECTION_AUTH_STEP_STORAGE_STATEMENTS,
       ...CONNECTION_EXTERNAL_IDENTITY_STORAGE_STATEMENTS,
+      ...INGRESS_TEARDOWN_STORAGE_STATEMENTS,
       ...WEBHOOK_INBOX_STORAGE_STATEMENTS,
+      ...OIM_INGRESS_EMISSION_STORAGE_STATEMENTS,
       ...POLLING_INGRESS_STORAGE_STATEMENTS,
       ...OIM_KNOWLEDGE_CHECKPOINT_STORAGE_STATEMENTS,
     ]) {
@@ -72,6 +87,7 @@ describe("OIM persistence foundations", () => {
         connection_auth_steps,
         connection_external_identities,
         connections,
+        oim_ingress_teardowns,
         webhook_deliveries,
         polling_ingress_state,
         oim_knowledge_scan_checkpoints
@@ -372,33 +388,41 @@ describe("OIM persistence foundations", () => {
       integrationId: "calendar",
       integrationMajorVersion: 2,
       connectionId: CONNECTION_ID,
+      externalTenantId: "tenant-1",
+      externalAccountId: "account-1",
       deduplicationKey: "provider-event-1",
       bodySha256: "body",
       safeHeaders: {},
       encryptedBody: "ciphertext",
       eventType: null,
-      verification: "verified",
+      verification: "verified" as const,
+      authenticatedEvidenceDigest: "a".repeat(64),
     };
 
-    await expect(store.record(BUSINESS_ID, { ...input, id: "delivery-1" })).resolves.toMatchObject({
-      accepted: true,
-    });
+    await expect(
+      store.recordVerified(BUSINESS_ID, { ...input, id: "delivery-1" })
+    ).resolves.toMatchObject({ accepted: true });
 
     await expect(
-      store.record(BUSINESS_ID, { ...input, id: "delivery-2", connectionId: OTHER_CONNECTION_ID })
+      store.recordVerified(BUSINESS_ID, {
+        ...input,
+        id: "delivery-2",
+        connectionId: OTHER_CONNECTION_ID,
+        authenticatedEvidenceDigest: "b".repeat(64),
+      })
     ).resolves.toMatchObject({ accepted: true });
     await expect(
-      store.record(BUSINESS_ID, {
+      store.recordVerified(BUSINESS_ID, {
         ...input,
         id: "delivery-3",
         integrationMajorVersion: 3,
         connectionId: "connection-3",
+        authenticatedEvidenceDigest: "c".repeat(64),
       })
     ).resolves.toMatchObject({ accepted: true });
-    await expect(store.record(BUSINESS_ID, { ...input, id: "delivery-4" })).resolves.toMatchObject({
-      accepted: false,
-      delivery: { id: "delivery-1" },
-    });
+    await expect(
+      store.recordVerified(BUSINESS_ID, { ...input, id: "delivery-4" })
+    ).resolves.toMatchObject({ accepted: false, delivery: { id: "delivery-1" } });
   });
 
   it("deduplicates verified webhook evidence independently of unsigned delivery ids", async () => {
@@ -415,6 +439,8 @@ describe("OIM persistence foundations", () => {
       integrationId: "calendar",
       integrationMajorVersion: 2,
       connectionId: CONNECTION_ID,
+      externalTenantId: "tenant-1",
+      externalAccountId: "account-1",
       authenticatedEvidenceDigest: "b".repeat(64),
       bodySha256: "body",
       safeHeaders: {},
@@ -470,6 +496,8 @@ describe("OIM persistence foundations", () => {
       integrationId: "calendar",
       integrationMajorVersion: 2,
       connectionId: CONNECTION_ID,
+      externalTenantId: "tenant-1",
+      externalAccountId: "account-1",
       deduplicationKey: "provider-event-1",
       bodySha256: "same-body",
       safeHeaders: {},
@@ -511,6 +539,8 @@ describe("OIM persistence foundations", () => {
       integrationId: "calendar",
       integrationMajorVersion: 2,
       connectionId: CONNECTION_ID,
+      externalTenantId: "tenant-1",
+      externalAccountId: "account-1",
       deduplicationKey: "provider-event-1",
       bodySha256: "same-body",
       safeHeaders: {},
@@ -622,6 +652,275 @@ describe("OIM persistence foundations", () => {
     await expect(
       store.complete(BUSINESS_ID, CONNECTION_ID, "lease-1", "stale", 60, now)
     ).resolves.toBe(false);
+  });
+
+  it("removes polling state and rejects new claims after Connection revoke", async () => {
+    const transactions = transactionPort(database);
+    const polling = new PollingIngressStore(transactions);
+    const connections = new ConnectionStore(transactions);
+    const now = new Date(Date.now() + 1_000);
+
+    await expect(polling.claim(BUSINESS_ID, CONNECTION_ID, "lease-1", 10, now)).resolves.toEqual({
+      cursor: null,
+    });
+    await expect(polling.remove(BUSINESS_ID, CONNECTION_ID)).resolves.toBe(true);
+    await connections.markRevoked(BUSINESS_ID, CONNECTION_ID);
+
+    await expect(polling.claim(BUSINESS_ID, CONNECTION_ID, "lease-2", 10, now)).resolves.toBeNull();
+    await expect(polling.remove(BUSINESS_ID, CONNECTION_ID)).resolves.toBe(false);
+  });
+
+  it("durably disables polling before Connection revoke", async () => {
+    const transactions = transactionPort(database);
+    const polling = new PollingIngressStore(transactions);
+    const teardowns = new IngressTeardownStore(transactions);
+    const now = new Date(Date.now() + 1_000);
+
+    await expect(
+      teardowns.disable(
+        {
+          businessId: BUSINESS_ID,
+          connectionId: CONNECTION_ID,
+          integrationId: "calendar",
+          integrationMajorVersion: 3,
+        },
+        now
+      )
+    ).resolves.toBe(false);
+    await expect(teardowns.isDisabled(BUSINESS_ID, CONNECTION_ID)).resolves.toBe(false);
+    await expect(
+      teardowns.disable(
+        {
+          businessId: BUSINESS_ID,
+          connectionId: CONNECTION_ID,
+          integrationId: "calendar",
+          integrationMajorVersion: 2,
+        },
+        now
+      )
+    ).resolves.toBe(true);
+    await expect(teardowns.isDisabled(BUSINESS_ID, CONNECTION_ID)).resolves.toBe(true);
+    await expect(polling.claim(BUSINESS_ID, CONNECTION_ID, "lease-1", 10, now)).resolves.toBeNull();
+  });
+
+  it("rechecks polling admission after waiting for a teardown-first Connection lock", async () => {
+    const transactions = transactionPort(database);
+    const polling = new PollingIngressStore(transactions);
+    const now = new Date("2026-09-13T12:00:00.000Z");
+    const inserted = deferred();
+    const release = deferred();
+    const hooked: TransactionPort = {
+      withTransaction: (operation) =>
+        transactions.withTransaction((transaction) =>
+          operation({
+            query: async <Row>(text: string, params?: readonly unknown[]) => {
+              const result = await transaction.query<Row>(text, params);
+              if (text.includes("INSERT INTO oim_ingress_teardowns")) {
+                inserted.resolve();
+                await release.promise;
+              }
+              return result;
+            },
+          } satisfies Queryable)
+        ),
+    };
+    const teardown = new IngressTeardownStore(hooked).disable({
+      businessId: BUSINESS_ID,
+      connectionId: CONNECTION_ID,
+      integrationId: "calendar",
+      integrationMajorVersion: 2,
+    });
+    await inserted.promise;
+    const claiming = polling.claim(BUSINESS_ID, CONNECTION_ID, "lease-1", 10, now);
+    let claimSettled = false;
+    void claiming.then(() => {
+      claimSettled = true;
+    });
+    await Promise.resolve();
+    expect(claimSettled).toBe(false);
+
+    release.resolve();
+    await expect(teardown).resolves.toBe(true);
+    await expect(claiming).resolves.toBeNull();
+  });
+
+  it("rejects polling delivery persistence after a teardown-first Connection lock", async () => {
+    const transactions = transactionPort(database);
+    const connections = new ConnectionStore(transactions);
+    await connections.put(
+      BUSINESS_ID,
+      connection(CONNECTION_ID, {
+        health: { status: "healthy", checkedAt: "2026-09-13T12:00:00.000Z" },
+      })
+    );
+    await new ConnectionExternalIdentityStore(transactions).bindVerified({
+      businessId: BUSINESS_ID,
+      connectionId: CONNECTION_ID,
+      integrationId: "calendar",
+      integrationMajorVersion: 2,
+      externalTenantId: "tenant-1",
+      externalAccountId: "account-1",
+      proofKind: "auth",
+      proofDigest: "a".repeat(64),
+      verifiedAt: "2026-09-13T12:00:00.000Z",
+      verifiedBy: "calendar-account-api",
+    });
+    const inserted = deferred();
+    const release = deferred();
+    const hooked: TransactionPort = {
+      withTransaction: (operation) =>
+        transactions.withTransaction((transaction) =>
+          operation({
+            query: async <Row>(text: string, params?: readonly unknown[]) => {
+              const result = await transaction.query<Row>(text, params);
+              if (text.includes("INSERT INTO oim_ingress_teardowns")) {
+                inserted.resolve();
+                await release.promise;
+              }
+              return result;
+            },
+          } satisfies Queryable)
+        ),
+    };
+    const teardown = new IngressTeardownStore(hooked).disable({
+      businessId: BUSINESS_ID,
+      connectionId: CONNECTION_ID,
+      integrationId: "calendar",
+      integrationMajorVersion: 2,
+    });
+    await inserted.promise;
+    const recording = new PollingIngressStore(transactions).recordVerifiedIfActive(
+      {
+        businessId: BUSINESS_ID,
+        connectionId: CONNECTION_ID,
+        integrationId: "calendar",
+        integrationMajorVersion: 2,
+        externalTenantId: "tenant-1",
+        externalAccountId: "account-1",
+      },
+      {
+        id: "poll-after-teardown",
+        integrationId: "calendar",
+        integrationMajorVersion: 2,
+        connectionId: CONNECTION_ID,
+        externalTenantId: "tenant-1",
+        externalAccountId: "account-1",
+        deduplicationKey: "provider-event-1",
+        bodySha256: "b".repeat(64),
+        safeHeaders: {},
+        encryptedBody: "ciphertext",
+        eventType: "calendar.changed",
+        verification: "verified_polling",
+        authenticatedEvidenceDigest: "c".repeat(64),
+      }
+    );
+    let recordingSettled = false;
+    void recording.then(
+      () => {
+        recordingSettled = true;
+      },
+      () => {
+        recordingSettled = true;
+      }
+    );
+    await Promise.resolve();
+    expect(recordingSettled).toBe(false);
+
+    release.resolve();
+    await expect(teardown).resolves.toBe(true);
+    await expect(recording).rejects.toThrow("polling_ingress_inactive");
+    const deliveries = await database.query<{ count: number }>(
+      "SELECT count(*)::int AS count FROM webhook_deliveries"
+    );
+    expect(deliveries.rows[0]?.count).toBe(0);
+  });
+
+  it("rejects direct inbox persistence after a teardown-first Connection lock", async () => {
+    const transactions = transactionPort(database);
+    const connections = new ConnectionStore(transactions);
+    await connections.put(
+      BUSINESS_ID,
+      connection(CONNECTION_ID, {
+        health: { status: "healthy", checkedAt: "2026-09-13T12:00:00.000Z" },
+      })
+    );
+    const inserted = deferred();
+    const release = deferred();
+    const teardownCommitted = deferred();
+    const hookedTeardown: TransactionPort = {
+      withTransaction: (operation) =>
+        transactions.withTransaction((transaction) =>
+          operation({
+            query: async <Row>(text: string, params?: readonly unknown[]) => {
+              const result = await transaction.query<Row>(text, params);
+              if (text.includes("INSERT INTO oim_ingress_teardowns")) {
+                inserted.resolve();
+                await release.promise;
+              }
+              return result;
+            },
+          } satisfies Queryable)
+        ),
+    };
+    const hookedInbox: TransactionPort = {
+      withTransaction: (operation) =>
+        transactions.withTransaction((transaction) =>
+          operation({
+            query: async <Row>(text: string, params?: readonly unknown[]) => {
+              if (text.includes("NOT EXISTS") && text.includes("FOR SHARE")) {
+                await teardownCommitted.promise;
+                return { rows: [{ id: CONNECTION_ID } as Row] };
+              }
+              return transaction.query<Row>(text, params);
+            },
+          } satisfies Queryable)
+        ),
+    };
+    const teardown = new IngressTeardownStore(hookedTeardown).disable({
+      businessId: BUSINESS_ID,
+      connectionId: CONNECTION_ID,
+      integrationId: "calendar",
+      integrationMajorVersion: 2,
+    });
+    await inserted.promise;
+    const recording = new WebhookInboxStore(hookedInbox).recordVerifiedForActiveConnection(
+      BUSINESS_ID,
+      {
+        id: "direct-poll-after-teardown",
+        integrationId: "calendar",
+        integrationMajorVersion: 2,
+        connectionId: CONNECTION_ID,
+        externalTenantId: "tenant-1",
+        externalAccountId: "account-1",
+        deduplicationKey: "provider-event-direct",
+        bodySha256: "d".repeat(64),
+        safeHeaders: {},
+        encryptedBody: "ciphertext",
+        eventType: "calendar.changed",
+        verification: "verified_polling",
+        authenticatedEvidenceDigest: "e".repeat(64),
+      }
+    );
+    let recordingSettled = false;
+    void recording.then(
+      () => {
+        recordingSettled = true;
+      },
+      () => {
+        recordingSettled = true;
+      }
+    );
+    await Promise.resolve();
+    expect(recordingSettled).toBe(false);
+
+    release.resolve();
+    await expect(teardown).resolves.toBe(true);
+    teardownCommitted.resolve();
+    await expect(recording).rejects.toThrow("polling_connection_inactive");
+    const deliveries = await database.query<{ count: number }>(
+      "SELECT count(*)::int AS count FROM webhook_deliveries"
+    );
+    expect(deliveries.rows[0]?.count).toBe(0);
   });
 
   it("resumes scans, fences stale writers, and advances the baseline only after completion", async () => {

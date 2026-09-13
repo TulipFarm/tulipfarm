@@ -89,6 +89,9 @@ describe("OIM persistence migrations", () => {
            'connection_external_identities',
            'webhook_deliveries',
            'polling_ingress_state',
+           'oim_ingress_teardowns',
+           'oim_webhook_registrations',
+           'oim_webhook_registration_attempts',
            'oim_rate_limits',
            'oim_release_trust_roots',
            'oim_release_revocation_state',
@@ -99,7 +102,50 @@ describe("OIM persistence migrations", () => {
        ORDER BY table_name
     `);
 
-    expect(result.rows.map(({ table_name }) => table_name)).toHaveLength(11);
+    expect(result.rows.map(({ table_name }) => table_name)).toHaveLength(14);
+
+    const registrationGeneration = await database.query<{ column_name: string }>(`
+      SELECT column_name
+        FROM information_schema.columns
+       WHERE table_name = 'oim_webhook_registrations'
+         AND column_name = 'generation'
+    `);
+    expect(registrationGeneration.rows).toEqual([{ column_name: "generation" }]);
+
+    const settledAbsenceEvidence = await database.query<{ column_name: string }>(`
+      SELECT column_name
+        FROM information_schema.columns
+       WHERE table_name = 'oim_webhook_registration_attempts'
+         AND column_name = 'settled_absence_evidence'
+    `);
+    expect(settledAbsenceEvidence.rows).toEqual([{ column_name: "settled_absence_evidence" }]);
+
+    const deliveryIdentityColumns = await database.query<{ column_name: string }>(`
+      SELECT column_name
+        FROM information_schema.columns
+       WHERE table_name = 'webhook_deliveries'
+         AND column_name IN ('external_tenant_id', 'external_account_id')
+       ORDER BY column_name
+    `);
+    expect(deliveryIdentityColumns.rows).toEqual([
+      { column_name: "external_account_id" },
+      { column_name: "external_tenant_id" },
+    ]);
+
+    const registrationIndexes = await database.query<{ indexname: string }>(`
+      SELECT indexname
+        FROM pg_indexes
+       WHERE schemaname = 'public'
+         AND indexname IN (
+           'oim_webhook_registrations_due_idx',
+           'oim_webhook_registration_attempts_due_idx'
+         )
+       ORDER BY indexname
+    `);
+    expect(registrationIndexes.rows).toEqual([
+      { indexname: "oim_webhook_registration_attempts_due_idx" },
+      { indexname: "oim_webhook_registrations_due_idx" },
+    ]);
   });
 
   it("allows one provider key on separate Connections and majors, but not the same route", async () => {

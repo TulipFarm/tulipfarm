@@ -1,4 +1,4 @@
-import type { TransactionPort } from "../ports";
+import type { Queryable, TransactionPort } from "../ports";
 
 export type WebhookDeliveryState = "accepted" | "normalized" | "dispatched" | "dead_letter";
 
@@ -24,8 +24,10 @@ export interface WebhookDeliveryInput {
 
 export interface VerifiedWebhookDeliveryInput extends WebhookDeliveryInput {
   readonly connectionId: string;
+  readonly externalTenantId: string;
+  readonly externalAccountId: string;
   readonly authenticatedEvidenceDigest: string;
-  readonly verification: "verified";
+  readonly verification: "verified" | "verified_polling";
 }
 
 export interface PersistedWebhookDelivery {
@@ -34,6 +36,8 @@ export interface PersistedWebhookDelivery {
   readonly integrationId: string;
   readonly integrationMajorVersion: number;
   readonly connectionId: string | null;
+  readonly externalTenantId: string | null;
+  readonly externalAccountId: string | null;
   readonly deduplicationKey: string | null;
   readonly bodySha256: string;
   readonly safeHeaders: Record<string, string>;
@@ -139,6 +143,8 @@ interface DeliveryRow {
   integration_id: string;
   integration_major_version: number;
   connection_id: string | null;
+  external_tenant_id: string | null;
+  external_account_id: string | null;
   deduplication_key: string | null;
   body_sha256: string;
   safe_headers: Record<string, string>;
@@ -164,6 +170,8 @@ function fromRow(row: DeliveryRow): PersistedWebhookDelivery {
     integrationId: row.integration_id,
     integrationMajorVersion: row.integration_major_version,
     connectionId: row.connection_id,
+    externalTenantId: row.external_tenant_id,
+    externalAccountId: row.external_account_id,
     deduplicationKey: row.deduplication_key,
     bodySha256: row.body_sha256,
     safeHeaders: row.safe_headers,
@@ -184,6 +192,156 @@ function fromRow(row: DeliveryRow): PersistedWebhookDelivery {
 }
 
 const SELECT = "SELECT * FROM webhook_deliveries";
+
+export async function recordVerifiedWebhookDelivery(
+  transaction: Queryable,
+  businessId: string,
+  input: VerifiedWebhookDeliveryInput
+): Promise<RecordedDelivery> {
+  if (
+    input.connectionId.length === 0 ||
+    !/^[0-9a-f]{64}$/.test(input.authenticatedEvidenceDigest)
+  ) {
+    throw new Error("invalid_authenticated_webhook_evidence_digest");
+  }
+  const inserted = await transaction.query<DeliveryRow>(
+    `INSERT INTO webhook_deliveries (
+       business_id, id, integration_id, integration_major_version, connection_id,
+       external_tenant_id, external_account_id,
+       deduplication_key, body_sha256, safe_headers, encrypted_body, event_type,
+       verification, authenticated_evidence_digest, state, replay_of_id
+     ) VALUES (
+       $1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb, $11, $12, $13, $14, 'accepted', $15
+     )
+     ON CONFLICT DO NOTHING
+     RETURNING *`,
+    [
+      businessId,
+      input.id,
+      input.integrationId,
+      input.integrationMajorVersion,
+      input.connectionId,
+      input.externalTenantId,
+      input.externalAccountId,
+      input.deduplicationKey,
+      input.bodySha256,
+      JSON.stringify(input.safeHeaders),
+      input.encryptedBody,
+      input.eventType,
+      input.verification,
+      input.authenticatedEvidenceDigest,
+      input.replayOfId ?? null,
+    ]
+  );
+  const row = inserted.rows[0];
+  if (row !== undefined) return { accepted: true, delivery: fromRow(row) };
+
+  const authenticated = await transaction.query<DeliveryRow>(
+    `${SELECT}
+      WHERE business_id = $1
+        AND integration_id = $2
+        AND integration_major_version = $3
+        AND connection_id IS NOT DISTINCT FROM $4
+        AND authenticated_evidence_digest = $5`,
+    [
+      businessId,
+      input.integrationId,
+      input.integrationMajorVersion,
+      input.connectionId,
+      input.authenticatedEvidenceDigest,
+    ]
+  );
+  const authenticatedWinner = authenticated.rows[0];
+  if (authenticatedWinner !== undefined) {
+    if (authenticatedWinner.body_sha256 !== input.bodySha256) {
+      throw new WebhookDeduplicationConflictError();
+    }
+    return { accepted: false, delivery: fromRow(authenticatedWinner) };
+  }
+
+  if (input.deduplicationKey === null) {
+    throw new Error("verified_webhook_conflict_without_matching_authenticated_evidence");
+  }
+  const providerIdentity = await transaction.query<DeliveryRow>(
+    `${SELECT}
+      WHERE business_id = $1
+        AND integration_id = $2
+        AND integration_major_version = $3
+        AND connection_id IS NOT DISTINCT FROM $4
+        AND deduplication_key = $5`,
+    [
+      businessId,
+      input.integrationId,
+      input.integrationMajorVersion,
+      input.connectionId,
+      input.deduplicationKey,
+    ]
+  );
+  const providerWinner = providerIdentity.rows[0];
+  if (providerWinner === undefined) {
+    throw new Error("verified_webhook_conflict_without_matching_authenticated_evidence");
+  }
+  if (providerWinner.body_sha256 !== input.bodySha256) {
+    throw new WebhookDeduplicationConflictError();
+  }
+  if (providerWinner.authenticated_evidence_digest !== null) {
+    return { accepted: false, delivery: fromRow(providerWinner) };
+  }
+
+  const upgraded = await transaction.query<DeliveryRow>(
+    `UPDATE webhook_deliveries
+        SET authenticated_evidence_digest = $3,
+            verification = 'verified'
+      WHERE business_id = $1
+        AND id = $2
+        AND authenticated_evidence_digest IS NULL
+      RETURNING *`,
+    [businessId, providerWinner.id, input.authenticatedEvidenceDigest]
+  );
+  const winner = upgraded.rows[0];
+  if (winner !== undefined) {
+    return { accepted: false, delivery: fromRow(winner) };
+  }
+
+  const concurrentEvidence = await transaction.query<DeliveryRow>(
+    `${SELECT}
+      WHERE business_id = $1
+        AND integration_id = $2
+        AND integration_major_version = $3
+        AND connection_id IS NOT DISTINCT FROM $4
+        AND authenticated_evidence_digest = $5`,
+    [
+      businessId,
+      input.integrationId,
+      input.integrationMajorVersion,
+      input.connectionId,
+      input.authenticatedEvidenceDigest,
+    ]
+  );
+  const concurrentProvider = await transaction.query<DeliveryRow>(
+    `${SELECT}
+      WHERE business_id = $1
+        AND integration_id = $2
+        AND integration_major_version = $3
+        AND connection_id IS NOT DISTINCT FROM $4
+        AND deduplication_key = $5`,
+    [
+      businessId,
+      input.integrationId,
+      input.integrationMajorVersion,
+      input.connectionId,
+      input.deduplicationKey,
+    ]
+  );
+  const concurrentWinner = concurrentEvidence.rows[0] ?? concurrentProvider.rows[0];
+  if (concurrentWinner === undefined || concurrentWinner.authenticated_evidence_digest === null) {
+    throw new Error("verified_webhook_legacy_upgrade_lost");
+  }
+  if (concurrentWinner.body_sha256 !== input.bodySha256) {
+    throw new WebhookDeduplicationConflictError();
+  }
+  return { accepted: false, delivery: fromRow(concurrentWinner) };
+}
 
 export class WebhookInboxStore {
   constructor(private readonly transactions: TransactionPort) {}
@@ -250,150 +408,40 @@ export class WebhookInboxStore {
     businessId: string,
     input: VerifiedWebhookDeliveryInput
   ): Promise<RecordedDelivery> {
-    if (
-      input.connectionId.length === 0 ||
-      !/^[0-9a-f]{64}$/.test(input.authenticatedEvidenceDigest)
-    ) {
-      throw new Error("invalid_authenticated_webhook_evidence_digest");
-    }
+    return this.transactions.withTransaction((transaction) =>
+      recordVerifiedWebhookDelivery(transaction, businessId, input)
+    );
+  }
+
+  async recordVerifiedForActiveConnection(
+    businessId: string,
+    input: VerifiedWebhookDeliveryInput
+  ): Promise<RecordedDelivery> {
     return this.transactions.withTransaction(async (transaction) => {
-      const inserted = await transaction.query<DeliveryRow>(
-        `INSERT INTO webhook_deliveries (
-           business_id, id, integration_id, integration_major_version, connection_id,
-           deduplication_key, body_sha256, safe_headers, encrypted_body, event_type,
-           verification, authenticated_evidence_digest, state, replay_of_id
-         ) VALUES (
-           $1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9, $10, $11, $12, 'accepted', $13
-         )
-         ON CONFLICT DO NOTHING
-         RETURNING *`,
-        [
-          businessId,
-          input.id,
-          input.integrationId,
-          input.integrationMajorVersion,
-          input.connectionId,
-          input.deduplicationKey,
-          input.bodySha256,
-          JSON.stringify(input.safeHeaders),
-          input.encryptedBody,
-          input.eventType,
-          input.verification,
-          input.authenticatedEvidenceDigest,
-          input.replayOfId ?? null,
-        ]
+      const connection = await transaction.query(
+        `SELECT id FROM connections
+          WHERE business_id = $1 AND id = $2
+            AND integration_id = $3 AND integration_major_version = $4
+          FOR SHARE`,
+        [businessId, input.connectionId, input.integrationId, input.integrationMajorVersion]
       );
-      const row = inserted.rows[0];
-      if (row !== undefined) return { accepted: true, delivery: fromRow(row) };
-
-      const authenticated = await transaction.query<DeliveryRow>(
-        `${SELECT}
-          WHERE business_id = $1
-            AND integration_id = $2
-            AND integration_major_version = $3
-            AND connection_id IS NOT DISTINCT FROM $4
-            AND authenticated_evidence_digest = $5`,
-        [
-          businessId,
-          input.integrationId,
-          input.integrationMajorVersion,
-          input.connectionId,
-          input.authenticatedEvidenceDigest,
-        ]
+      if (connection.rows.length !== 1) throw new Error("polling_connection_inactive");
+      const active = await transaction.query(
+        `SELECT 1 FROM connections
+          WHERE business_id = $1 AND id = $2
+            AND integration_id = $3 AND integration_major_version = $4
+            AND status = 'active'
+            AND health_status IN ('healthy', 'expiring')
+            AND (expires_at IS NULL OR expires_at > now())
+            AND webhook_registration IS NULL
+            AND NOT EXISTS (
+              SELECT 1 FROM oim_ingress_teardowns
+               WHERE business_id = $1 AND connection_id = $2
+            )`,
+        [businessId, input.connectionId, input.integrationId, input.integrationMajorVersion]
       );
-      const authenticatedWinner = authenticated.rows[0];
-      if (authenticatedWinner !== undefined) {
-        if (authenticatedWinner.body_sha256 !== input.bodySha256) {
-          throw new WebhookDeduplicationConflictError();
-        }
-        return { accepted: false, delivery: fromRow(authenticatedWinner) };
-      }
-
-      if (input.deduplicationKey === null) {
-        throw new Error("verified_webhook_conflict_without_matching_authenticated_evidence");
-      }
-      const providerIdentity = await transaction.query<DeliveryRow>(
-        `${SELECT}
-          WHERE business_id = $1
-            AND integration_id = $2
-            AND integration_major_version = $3
-            AND connection_id IS NOT DISTINCT FROM $4
-            AND deduplication_key = $5`,
-        [
-          businessId,
-          input.integrationId,
-          input.integrationMajorVersion,
-          input.connectionId,
-          input.deduplicationKey,
-        ]
-      );
-      const providerWinner = providerIdentity.rows[0];
-      if (providerWinner === undefined) {
-        throw new Error("verified_webhook_conflict_without_matching_authenticated_evidence");
-      }
-      if (providerWinner.body_sha256 !== input.bodySha256) {
-        throw new WebhookDeduplicationConflictError();
-      }
-      if (providerWinner.authenticated_evidence_digest !== null) {
-        return { accepted: false, delivery: fromRow(providerWinner) };
-      }
-
-      const upgraded = await transaction.query<DeliveryRow>(
-        `UPDATE webhook_deliveries
-            SET authenticated_evidence_digest = $3,
-                verification = 'verified'
-          WHERE business_id = $1
-            AND id = $2
-            AND authenticated_evidence_digest IS NULL
-          RETURNING *`,
-        [businessId, providerWinner.id, input.authenticatedEvidenceDigest]
-      );
-      const winner = upgraded.rows[0];
-      if (winner !== undefined) {
-        return { accepted: false, delivery: fromRow(winner) };
-      }
-
-      const concurrentEvidence = await transaction.query<DeliveryRow>(
-        `${SELECT}
-          WHERE business_id = $1
-            AND integration_id = $2
-            AND integration_major_version = $3
-            AND connection_id IS NOT DISTINCT FROM $4
-            AND authenticated_evidence_digest = $5`,
-        [
-          businessId,
-          input.integrationId,
-          input.integrationMajorVersion,
-          input.connectionId,
-          input.authenticatedEvidenceDigest,
-        ]
-      );
-      const concurrentProvider = await transaction.query<DeliveryRow>(
-        `${SELECT}
-          WHERE business_id = $1
-            AND integration_id = $2
-            AND integration_major_version = $3
-            AND connection_id IS NOT DISTINCT FROM $4
-            AND deduplication_key = $5`,
-        [
-          businessId,
-          input.integrationId,
-          input.integrationMajorVersion,
-          input.connectionId,
-          input.deduplicationKey,
-        ]
-      );
-      const concurrentWinner = concurrentEvidence.rows[0] ?? concurrentProvider.rows[0];
-      if (
-        concurrentWinner === undefined ||
-        concurrentWinner.authenticated_evidence_digest === null
-      ) {
-        throw new Error("verified_webhook_legacy_upgrade_lost");
-      }
-      if (concurrentWinner.body_sha256 !== input.bodySha256) {
-        throw new WebhookDeduplicationConflictError();
-      }
-      return { accepted: false, delivery: fromRow(concurrentWinner) };
+      if (active.rows.length !== 1) throw new Error("polling_connection_inactive");
+      return recordVerifiedWebhookDelivery(transaction, businessId, input);
     });
   }
 
