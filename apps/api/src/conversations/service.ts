@@ -228,6 +228,8 @@ export interface StartTurnInput {
   readonly idempotencyKey: string;
   /** Hash of the normalized submission. Reusing a client key for a different request conflicts. */
   readonly requestFingerprint?: string;
+  /** Participant-safe original request options used to reconstruct same-Turn retries. */
+  readonly requestMetadata?: Record<string, unknown>;
   /** New Chat Conversation to commit only if this request wins the idempotency claim. */
   readonly newConversation?: NewConversation;
   /** Existing Chat Conversation update to commit only if this request wins the claim. */
@@ -305,9 +307,18 @@ export class ConversationService {
       turnId,
       role: "user",
       content: [...textContent(input.content), ...(input.files ?? [])],
-      ...(input.requestFingerprint === undefined
+      ...(input.requestFingerprint === undefined && input.requestMetadata === undefined
         ? {}
-        : { metadata: { submissionFingerprint: input.requestFingerprint } }),
+        : {
+            metadata: {
+              ...(input.requestFingerprint === undefined
+                ? {}
+                : { submissionFingerprint: input.requestFingerprint }),
+              ...(input.requestMetadata === undefined
+                ? {}
+                : { turnRequest: input.requestMetadata }),
+            },
+          }),
       createdAt: now,
     };
 

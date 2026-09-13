@@ -7,7 +7,8 @@ import {
 } from "@tulipfarm/surface/client";
 import { SurfaceCodeView } from "@tulipfarm/surface-web/code-view";
 import { SurfaceCompositionView, SurfaceView } from "@tulipfarm/surface-web/view";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { Button } from "~/components/ui/button";
 import { apiGet } from "~/lib/api";
 
 export interface SurfaceArtifactProps {
@@ -24,6 +25,19 @@ export interface SurfaceArtifactProps {
   ) => void | Promise<void>;
 }
 
+type SurfaceState = {
+  key: string;
+  artifact?: SurfaceArtifactValue;
+  actionHandles: Readonly<Record<string, string>>;
+  resolvedView?: ResolvedSurfaceViewNode;
+  codeView?: SurfaceCodeViewPayload;
+  status: "idle" | "loading" | "ready" | "error";
+};
+
+function surfaceKey(artifactId: string, revision: number | undefined): string {
+  return `${artifactId}:${revision ?? "latest"}`;
+}
+
 export function SurfaceArtifact({
   artifact: initialArtifact,
   artifactId,
@@ -33,78 +47,129 @@ export function SurfaceArtifact({
   actionHandles: initialActionHandles,
   onInteraction,
 }: SurfaceArtifactProps) {
-  const [artifact, setArtifact] = useState(initialArtifact);
-  const [actionHandles, setActionHandles] = useState(initialActionHandles ?? {});
-  const [resolvedView, setResolvedView] = useState(initialResolvedView);
-  const [codeView, setCodeView] = useState(initialCodeView);
-  // A code view and a resolved tree are two shapes of the same answer, so one flag covers both;
-  // tracking only the tree would refetch a code-backed artifact forever.
-  const [presentationLoaded, setPresentationLoaded] = useState(
-    initialResolvedView !== undefined || initialCodeView !== undefined
+  const key = surfaceKey(artifactId, revision);
+  const [retry, setRetry] = useState(0);
+  const initialState = useMemo<SurfaceState>(
+    () => ({
+      key,
+      artifact: initialArtifact,
+      actionHandles: initialActionHandles ?? {},
+      resolvedView: initialResolvedView,
+      codeView: initialCodeView,
+      status: "idle",
+    }),
+    [key, initialArtifact, initialActionHandles, initialResolvedView, initialCodeView]
   );
-  const [handlesLoaded, setHandlesLoaded] = useState(initialActionHandles !== undefined);
-  useEffect(() => {
-    if (!initialArtifact) return;
-    setArtifact(initialArtifact);
-    setActionHandles(initialActionHandles ?? {});
-    setResolvedView(initialResolvedView);
-    setCodeView(initialCodeView);
-    setPresentationLoaded(initialResolvedView !== undefined || initialCodeView !== undefined);
-    setHandlesLoaded(initialActionHandles !== undefined);
-  }, [initialArtifact, initialActionHandles, initialResolvedView, initialCodeView]);
+  const [state, setState] = useState(initialState);
+  const requestIdentity = `${key}:${retry}`;
+  const latestRequest = useRef(requestIdentity);
+  latestRequest.current = requestIdentity;
+
   useEffect(() => {
     const needsHandles =
-      artifact && surfaceActionsForArtifact(artifact).some((action) => !action.disabled);
+      initialArtifact !== undefined &&
+      surfaceActionsForArtifact(initialArtifact).some((action) => !action.disabled) &&
+      initialActionHandles === undefined;
     const needsPresentation =
-      artifact?.component.name.startsWith("business.") && !presentationLoaded;
-    if (artifact && (!needsHandles || handlesLoaded) && !needsPresentation) return;
-    let active = true;
+      initialArtifact?.component.name.startsWith("business.") === true &&
+      initialResolvedView === undefined &&
+      initialCodeView === undefined;
+    if (initialArtifact !== undefined && !needsHandles && !needsPresentation) {
+      setState({ ...initialState, status: "ready" });
+      return;
+    }
+
+    const controller = new AbortController();
+    setState({ ...initialState, status: "loading" });
     void apiGet<{
       artifact: SurfaceArtifactValue;
       actionHandles: Readonly<Record<string, string>>;
       resolvedView?: ResolvedSurfaceViewNode;
       codeView?: SurfaceCodeViewPayload;
     }>(
-      `/api/v1/surfaces/${encodeURIComponent(artifactId)}${revision === undefined ? "" : `?revision=${revision}`}`
-    ).then((value) => {
-      if (active) {
-        setArtifact(value.artifact);
-        setActionHandles(value.actionHandles);
-        setResolvedView(value.resolvedView);
-        setCodeView(value.codeView);
-        setPresentationLoaded(true);
-        setHandlesLoaded(true);
-      }
-    });
-    return () => {
-      active = false;
-    };
-  }, [artifact, artifactId, handlesLoaded, presentationLoaded, revision]);
+      `/api/v1/surfaces/${encodeURIComponent(artifactId)}${revision === undefined ? "" : `?revision=${revision}`}`,
+      { signal: controller.signal }
+    )
+      .then((value) => {
+        if (controller.signal.aborted || latestRequest.current !== requestIdentity) return;
+        setState({
+          key: initialState.key,
+          artifact: value.artifact,
+          actionHandles: value.actionHandles,
+          resolvedView: value.resolvedView,
+          codeView: value.codeView,
+          status: "ready",
+        });
+      })
+      .catch(() => {
+        if (!controller.signal.aborted && latestRequest.current === requestIdentity) {
+          setState({ ...initialState, status: "error" });
+        }
+      });
+    return () => controller.abort();
+  }, [
+    artifactId,
+    initialActionHandles,
+    initialArtifact,
+    initialCodeView,
+    initialResolvedView,
+    initialState,
+    requestIdentity,
+    revision,
+  ]);
+
+  const current = state.key === key ? state : { ...initialState, status: "loading" as const };
   const actionHandleFor = (action: Parameters<typeof surfaceActionKey>[0]) =>
-    actionHandles[surfaceActionKey(action)];
-  return artifact && codeView ? (
-    <SurfaceCodeView
-      artifact={artifact}
-      module={codeView.compiled}
-      onInteraction={onInteraction}
-      actionHandleFor={actionHandleFor}
-    />
-  ) : artifact && resolvedView ? (
-    <SurfaceCompositionView
-      artifact={artifact}
-      view={resolvedView}
-      onInteraction={onInteraction}
-      actionHandleFor={actionHandleFor}
-    />
-  ) : artifact && !artifact.component.name.startsWith("business.") ? (
-    <SurfaceView
-      artifact={artifact}
-      onInteraction={onInteraction}
-      actionHandleFor={actionHandleFor}
-    />
-  ) : artifact && presentationLoaded ? (
-    <div role="alert">Published presentation component unavailable.</div>
-  ) : (
-    <div role="status">Loading presentation…</div>
-  );
+    current.actionHandles[surfaceActionKey(action)];
+
+  if (current.status === "error") {
+    return (
+      <div className="space-y-2">
+        <p role="alert" className="text-sm text-run-error">
+          Presentation could not be loaded.
+        </p>
+        <Button
+          type="button"
+          size="sm"
+          variant="outline"
+          onClick={() => setRetry((value) => value + 1)}
+        >
+          Retry presentation
+        </Button>
+      </div>
+    );
+  }
+  if (current.artifact && current.codeView) {
+    return (
+      <SurfaceCodeView
+        artifact={current.artifact}
+        module={current.codeView.compiled}
+        onInteraction={onInteraction}
+        actionHandleFor={actionHandleFor}
+      />
+    );
+  }
+  if (current.artifact && current.resolvedView) {
+    return (
+      <SurfaceCompositionView
+        artifact={current.artifact}
+        view={current.resolvedView}
+        onInteraction={onInteraction}
+        actionHandleFor={actionHandleFor}
+      />
+    );
+  }
+  if (current.artifact && !current.artifact.component.name.startsWith("business.")) {
+    return (
+      <SurfaceView
+        artifact={current.artifact}
+        onInteraction={onInteraction}
+        actionHandleFor={actionHandleFor}
+      />
+    );
+  }
+  if (current.artifact && current.status === "ready") {
+    return <div role="alert">Published presentation component unavailable.</div>;
+  }
+  return <div role="status">Loading presentation…</div>;
 }

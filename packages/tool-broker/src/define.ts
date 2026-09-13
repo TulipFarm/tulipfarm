@@ -51,6 +51,9 @@ export type ToolDefinitionRisk = "low" | "medium" | "high";
 
 export type ToolDefinitionIdempotency = "provider" | "reconcile" | "none";
 
+/** Whether Chat shows the Tool as activity or lets its participant-facing output represent it. */
+export type ToolParticipantActivity = "visible" | "represented";
+
 export interface ToolRetryPolicy {
   readonly maxAttempts: number;
   /** False when a repeated failed attempt would be observable and not provider-deduped. */
@@ -90,6 +93,11 @@ export interface DefineToolInput<Ctx, Result> {
   readonly credentialMode?: ToolCredentialMode;
   readonly provider?: string;
   readonly availableTo?: ToolAvailability;
+  /**
+   * `represented` means the Tool produces a participant-facing Surface, plan, or citations that
+   * replaces its machinery row. Failures remain visible. Absent means ordinary visible activity.
+   */
+  readonly participantActivity?: ToolParticipantActivity;
   /** Ambient context the handler reads; a process lacking any of these must not execute it. */
   readonly requiresAmbient?: readonly ToolAmbientCapability[];
   readonly idempotency?: ToolDefinitionIdempotency;

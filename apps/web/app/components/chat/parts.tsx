@@ -58,7 +58,7 @@ function SourcesPart({ sources }: { sources: SourceRef[] }) {
                 // A knowledge path is more use than its host, which is always this instance.
                 host={source.path ?? sourceHost(source.url)}
                 ref={source.ref}
-                icon={internal ? BookOpen : ExternalLink}
+                icon={source.url === undefined ? undefined : internal ? BookOpen : ExternalLink}
                 as={internal ? Link : undefined}
               />
             </li>
@@ -82,7 +82,7 @@ export function MessagePartView({
   streaming?: boolean;
   /** The message's cited-source links, so `[n]` markers in a text part become clickable. */
   citations?: { ref: number; url: string }[];
-  onApprove: (approvalId: string, decision: "approve" | "deny") => void;
+  onApprove: (approvalId: string, decision: "approve" | "deny") => void | Promise<void>;
   onSurfaceInteraction?: (
     handle: string,
     input: Readonly<Record<string, unknown>>
@@ -154,6 +154,12 @@ export function MessagePartView({
         <div role="status" className="rounded-sm border border-border px-3 py-2 text-sm">
           {part.message}
         </div>
+      );
+    case "turn-status":
+      return (
+        <p role="status" className="tf-trace-row py-1 text-sm text-muted-foreground">
+          Response stopped
+        </p>
       );
   }
 }

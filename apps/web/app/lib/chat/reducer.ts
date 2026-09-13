@@ -4,6 +4,7 @@
  * first non-user event arrives).
  */
 
+import { sourcesFromToolPreview, sourcesFromToolResult } from "~/lib/chat/citations";
 import type {
   ApprovalState,
   ChatEvent,
@@ -72,8 +73,28 @@ export function appendUserMessage(
 
 export function rewindLastTurn(state: ChatState): ChatState {
   const messages = state.messages.slice();
-  while (messages.length > 0 && messages[messages.length - 1].role === "assistant") messages.pop();
-  if (messages.length > 0 && messages[messages.length - 1].role === "user") messages.pop();
+  const last = messages[messages.length - 1];
+  if (last?.role === "assistant") {
+    const hasCancelled = last.parts.some(
+      (part) => part.kind === "turn-status" && part.status === "cancelled"
+    );
+    messages[messages.length - 1] = {
+      ...last,
+      sealed: true,
+      parts: [
+        ...interruptRunningTools(last.parts),
+        ...(hasCancelled ? [] : [{ kind: "turn-status" as const, status: "cancelled" as const }]),
+      ],
+    };
+  } else {
+    messages.push({
+      id: newId(),
+      role: "assistant",
+      parts: [{ kind: "turn-status", status: "cancelled" }],
+      sealed: true,
+      ...(last?.sourceTurn === undefined ? {} : { sourceTurn: last.sourceTurn }),
+    });
+  }
   return { ...state, messages, status: "idle", error: undefined, errorDetails: undefined };
 }
 
@@ -118,14 +139,6 @@ function appendText(
   return [...parts, { kind, text: delta }];
 }
 
-function isSurface(
-  part: TimelinePart,
-  artifactId: string,
-  revision: number | undefined
-): part is Extract<TimelinePart, { kind: "surface" }> {
-  return part.kind === "surface" && part.artifactId === artifactId && part.revision === revision;
-}
-
 function mapTool(
   parts: TimelinePart[],
   toolCallId: string,
@@ -135,9 +148,13 @@ function mapTool(
 }
 
 function interruptRunningTools(parts: TimelinePart[]): TimelinePart[] {
-  return parts.map((part) =>
-    part.kind === "tool" && part.status === "running" ? { ...part, status: "interrupted" } : part
-  );
+  return parts.map((part) => {
+    if (part.kind !== "tool") return part;
+    const next = part.status === "running" ? { ...part, status: "interrupted" as const } : part;
+    if (next.approval?.status !== "pending") return next;
+    const { approval: _approval, ...withoutPendingApproval } = next;
+    return withoutPendingApproval;
+  });
 }
 
 export function chatReducer(state: ChatState, event: ChatEvent): ChatState {
@@ -170,7 +187,23 @@ export function chatReducer(state: ChatState, event: ChatEvent): ChatState {
     case "tool-result": {
       const { messages, target } = ensureAssistant(state.messages);
       const resultMeta = event.data.meta;
-      const parts = mapTool(target.parts, event.data.toolCallId, (p) => ({
+      const exists = target.parts.some(
+        (part) => part.kind === "tool" && part.toolCallId === event.data.toolCallId
+      );
+      const base = exists
+        ? target.parts
+        : [
+            ...target.parts,
+            {
+              kind: "tool" as const,
+              toolCallId: event.data.toolCallId,
+              toolName: event.data.toolName,
+              args: undefined,
+              status: "running" as const,
+              ...(resultMeta === undefined ? {} : { meta: resultMeta }),
+            },
+          ];
+      let parts = mapTool(base, event.data.toolCallId, (p) => ({
         ...p,
         result: event.data.result,
         status: "done",
@@ -178,6 +211,30 @@ export function chatReducer(state: ChatState, event: ChatEvent): ChatState {
         ...(resultMeta === undefined ? {} : { meta: { ...p.meta, ...resultMeta } }),
         ...(resultMeta?.errorCode === undefined ? {} : { outcome: "error" as const }),
       }));
+      const sources = [
+        ...sourcesFromToolResult(event.data.result),
+        ...sourcesFromToolPreview(event.data.preview),
+      ];
+      if (sources.length > 0) {
+        const at = parts.findIndex((part) => part.kind === "sources");
+        const existing =
+          at === -1 ? [] : (parts[at] as Extract<TimelinePart, { kind: "sources" }>).sources;
+        const merged = [...existing, ...sources].filter(
+          (source, index, all) =>
+            all.findIndex(
+              (candidate) =>
+                candidate.ref === source.ref &&
+                candidate.url === source.url &&
+                candidate.title === source.title
+            ) === index
+        );
+        parts =
+          at === -1
+            ? [...parts, { kind: "sources", sources: merged }]
+            : parts.map((part, index) =>
+                index === at ? { kind: "sources", sources: merged } : part
+              );
+      }
       return { ...state, status: "streaming", messages: withParts(messages, target, parts) };
     }
 
@@ -289,10 +346,20 @@ export function chatReducer(state: ChatState, event: ChatEvent): ChatState {
         ...(event.data.resolvedView === undefined ? {} : { resolvedView: event.data.resolvedView }),
         ...(event.data.codeView === undefined ? {} : { codeView: event.data.codeView }),
       };
-      const exists = target.parts.some((part) => isSurface(part, artifactId, revision));
-      const parts = exists
-        ? target.parts.map((part) => (isSurface(part, artifactId, revision) ? surface : part))
-        : [...target.parts, surface];
+      const existing = target.parts.findIndex(
+        (part) => part.kind === "surface" && part.artifactId === artifactId
+      );
+      const current = existing < 0 ? undefined : target.parts[existing];
+      const stale =
+        current?.kind === "surface" &&
+        current.revision !== undefined &&
+        (revision === undefined || revision < current.revision);
+      const parts =
+        existing < 0
+          ? [...target.parts, surface]
+          : stale
+            ? target.parts
+            : target.parts.map((part, index) => (index === existing ? surface : part));
       return {
         ...state,
         status: "streaming",
@@ -317,8 +384,21 @@ export function chatReducer(state: ChatState, event: ChatEvent): ChatState {
     }
 
     case "finish": {
+      const last = state.messages.at(-1);
+      if (last?.role === "assistant" && last.sealed) {
+        return { ...state, status: "idle", pendingApprovals: {} };
+      }
       const { messages, target } = ensureAssistant(state.messages);
-      const sealed = withParts(messages, target, interruptRunningTools(target.parts)).map((m) =>
+      const hasCancelled = target.parts.some(
+        (part) => part.kind === "turn-status" && part.status === "cancelled"
+      );
+      const parts = [
+        ...interruptRunningTools(target.parts),
+        ...(event.data.reason === "cancelled" && !hasCancelled
+          ? [{ kind: "turn-status" as const, status: "cancelled" as const }]
+          : []),
+      ];
+      const sealed = withParts(messages, target, parts).map((m) =>
         m.id === target.id
           ? {
               ...m,

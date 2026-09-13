@@ -129,16 +129,29 @@ function recordingModel(...results: readonly ModelInvocationResult[]): ModelPort
 }
 
 function dispatcher(...results: readonly ToolDispatchResult[]): ToolDispatchPort & {
-  calls: { name: string; arguments: unknown; activeSkillName?: string }[];
+  calls: {
+    name: string;
+    arguments: unknown;
+    activeSkillName?: string;
+    participantActivity?: "visible" | "represented";
+  }[];
 } {
   const queue = [...results];
   const port = {
-    calls: [] as { name: string; arguments: unknown; activeSkillName?: string }[],
+    calls: [] as {
+      name: string;
+      arguments: unknown;
+      activeSkillName?: string;
+      participantActivity?: "visible" | "represented";
+    }[],
     dispatch: async (call: ToolDispatchRequest) => {
       port.calls.push({
         name: call.name,
         arguments: call.arguments,
         ...(call.activeSkillName === undefined ? {} : { activeSkillName: call.activeSkillName }),
+        ...(call.participantActivity === undefined
+          ? {}
+          : { participantActivity: call.participantActivity }),
       });
 
       return queue.shift() ?? { status: "succeeded" as const, callId: "call-1", output: {} };
@@ -321,6 +334,31 @@ describe("AgentLoop", () => {
 
     expect(tools.calls).toEqual([{ name: "github.issue.comment", arguments: { body: "hi" } }]);
     expect(outcome).toMatchObject({ status: "completed", toolCalls: 1, iterations: 2 });
+  });
+
+  it("carries participant activity from the exposed Tool to its dispatch", async () => {
+    const tools = dispatcher({ status: "succeeded", callId: "call-1", output: { ok: true } });
+    await loop({
+      model: scriptedModel(
+        toolCallResult([
+          { callId: "call-1", name: "github.issue.comment", arguments: { body: "hi" } },
+        ]),
+        textResult("commented")
+      ),
+      tools,
+    }).run(
+      input({
+        tools: [
+          {
+            name: "github.issue.comment",
+            inputSchema: { type: "object", required: ["body"] },
+            participantActivity: "represented",
+          },
+        ],
+      })
+    );
+
+    expect(tools.calls[0]).toMatchObject({ participantActivity: "represented" });
   });
 
   it("feeds a denial back as data and never retries the denied call itself", async () => {

@@ -69,6 +69,15 @@ export function seedState(opts?: UseChatStreamOptions): ChatState {
       error: "The response could not be started. Try again.",
     };
   }
+  const lastAssistant = messages.at(-1);
+  if (
+    turn.status === "failed" &&
+    lastAssistant?.role === "assistant" &&
+    lastAssistant?.turnAttempt?.runId === turn.runId &&
+    lastAssistant.turnAttempt.outcome === "cancelled"
+  ) {
+    return base;
+  }
   if (turn.status === "failed") {
     return {
       ...base,
@@ -448,7 +457,7 @@ export function useChatStream(opts?: UseChatStreamOptions) {
   const regenerate = useCallback(async () => {
     const source = lastUserSource(stateRef.current.messages);
     const text = source?.text ?? "";
-    if (text.length === 0) return;
+    if (text.length === 0 && (source?.options?.files?.length ?? 0) === 0) return;
     const options = source?.options ?? lastOptsRef.current;
     const turnId = turnIdRef.current;
     dispatch({ type: "regenerate", resume: turnId !== undefined });
@@ -479,9 +488,7 @@ export function useChatStream(opts?: UseChatStreamOptions) {
   }, [requestStop]);
 
   const approve = useCallback(async (approvalId: string, decision: "approve" | "deny") => {
-    try {
-      await sendApprovalDecision(approvalId, decision);
-    } catch {}
+    await sendApprovalDecision(approvalId, decision);
   }, []);
 
   const sendFeedback = useCallback(

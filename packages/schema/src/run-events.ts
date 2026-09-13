@@ -95,6 +95,7 @@ export const PARTICIPANT_TOOL_CALL_SCHEMA = {
     errorCode: { type: "string", minLength: 1 },
     /** Carried into the Message so a Turn re-read months later still shows what ran together. */
     batchId: { type: "string", minLength: 1 },
+    participantActivity: { type: "string", enum: ["visible", "represented"] },
   },
 } as const;
 
@@ -123,6 +124,7 @@ const TOOL_CALL_SCHEMA = {
     /** The concurrent dispatch this call belonged to; absent when it was dispatched alone. */
     batchId: { type: "string", minLength: 1 },
     startedAt: { type: "string", minLength: 1 },
+    participantActivity: { type: "string", enum: ["visible", "represented"] },
   },
 } as const;
 
@@ -138,6 +140,9 @@ const TOOL_RESULT_SCHEMA = {
     resultPreview: TOOL_PREVIEW_SCHEMA,
     durationMs: { type: "integer", minimum: 0 },
     connectUrl: { type: "string", minLength: 1 },
+    /** Present for a rejection emitted before `tool.call`, so it can be restored durably. */
+    name: { type: "string", minLength: 1 },
+    participantActivity: { type: "string", enum: ["visible", "represented"] },
   },
 } as const;
 
@@ -529,6 +534,7 @@ export interface ParticipantToolCall {
   readonly outcome?: "ok" | "error";
   readonly errorCode?: string;
   readonly batchId?: string;
+  readonly participantActivity?: "visible" | "represented";
 }
 
 /** Payloads mirror schemas; optional fields must be omitted, never set to `undefined`. */
@@ -551,6 +557,7 @@ export interface RunEventPayloads {
     readonly stepId?: string;
     readonly batchId?: string;
     readonly startedAt?: string;
+    readonly participantActivity?: "visible" | "represented";
   };
   readonly "tool.result": {
     readonly callId: string;
@@ -561,6 +568,8 @@ export interface RunEventPayloads {
     readonly durationMs?: number;
     /** UI-only deep link to a connect page; never surfaced to the model. */
     readonly connectUrl?: string;
+    readonly name?: string;
+    readonly participantActivity?: "visible" | "represented";
   };
   readonly "surface.emitted": {
     readonly artifactId: string;

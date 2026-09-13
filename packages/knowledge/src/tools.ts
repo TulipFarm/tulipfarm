@@ -156,6 +156,7 @@ const citeSources = defineApiTool<KnowledgeToolContext>({
   description:
     "Declare the knowledge pages you used to answer. Pass the pageId of each page (the `pageId` field from a query_knowledge result) with the inline [n] ref number you wrote in your answer. The UI shows these as clickable source citations. Call once, after writing the answer; only include pages you actually used.",
   tier: "platform",
+  participantActivity: "represented",
   mutating: false,
   inputSchema: CITE_SOURCES_SCHEMA,
   authorization: {

@@ -34,7 +34,7 @@ test("finish stores the model receipt when present", () => {
   });
 });
 
-test("live and restored Surface revisions remain separate exact presentations", () => {
+test("live and restored Surface revisions keep only the latest revision per attempt", () => {
   const first = createSurfaceArtifact({
     id: "status",
     component: { name: "Status", version: "1.0" },
@@ -52,6 +52,10 @@ test("live and restored Surface revisions remain separate exact presentations", 
     type: "surface",
     data: { artifactId: second.id, revision: 2, artifact: second },
   });
+  state = chatReducer(state, {
+    type: "surface",
+    data: { artifactId: first.id, revision: 1, artifact: first },
+  });
   const liveParts = state.messages[0]?.parts;
   const restoredParts = messagesToTimeline([
     {
@@ -63,6 +67,7 @@ test("live and restored Surface revisions remain separate exact presentations", 
         surfaces: [
           { artifactId: "status", revision: 1 },
           { artifactId: "status", revision: 2 },
+          { artifactId: "status", revision: 1 },
         ],
       },
       createdAt: "2026-01-01T00:00:00.000Z",
@@ -70,12 +75,6 @@ test("live and restored Surface revisions remain separate exact presentations", 
   ])[0]?.parts;
 
   expect(liveParts).toEqual([
-    {
-      kind: "surface",
-      artifactId: "status",
-      revision: 1,
-      artifact: first,
-    },
     {
       kind: "surface",
       artifactId: "status",
@@ -144,9 +143,13 @@ describe("terminal Tool closure", () => {
       data: { reason: "cancelled" },
     });
 
-    expect(state.messages[0]).toMatchObject({
-      sealed: true,
-      parts: [{ kind: "tool", toolCallId: "call-1", status: "interrupted" }],
+    expect(state.messages[0]?.sealed).toBe(true);
+    expect(state.messages[0]?.parts).toContainEqual(
+      expect.objectContaining({ kind: "tool", toolCallId: "call-1", status: "interrupted" })
+    );
+    expect(state.messages[0]?.parts).toContainEqual({
+      kind: "turn-status",
+      status: "cancelled",
     });
   });
 
@@ -239,14 +242,164 @@ describe("terminal Tool closure", () => {
       parts: [{ kind: "tool", toolCallId: "call-1", status: "running" }],
     });
   });
+
+  test("keeps an unmatched rejected Tool result as a stable visible failure", () => {
+    let state = chatReducer(initialChatState, {
+      type: "tool-result",
+      data: {
+        toolCallId: "rejected-1",
+        toolName: "unknown_tool",
+        result: { status: "error", errorCode: "tool_not_available" },
+        meta: { errorCode: "tool_not_available" },
+      },
+    });
+    state = chatReducer(state, {
+      type: "tool-result",
+      data: {
+        toolCallId: "rejected-1",
+        toolName: "unknown_tool",
+        result: { status: "error", errorCode: "tool_not_available" },
+        meta: { errorCode: "tool_not_available" },
+      },
+    });
+
+    expect(state.messages[0]?.parts).toEqual([
+      expect.objectContaining({
+        kind: "tool",
+        toolCallId: "rejected-1",
+        toolName: "unknown_tool",
+        status: "done",
+        outcome: "error",
+      }),
+    ]);
+  });
 });
 
 describe("rewindLastTurn", () => {
-  test("removes the trailing user and assistant messages", () => {
+  test("keeps the question and Tool evidence and marks the active reply cancelled", () => {
     let state = appendUserMessage(initialChatState, "hello");
-    state = chatReducer(state, { type: "text", data: { delta: "hi" } });
-    expect(rewindLastTurn(state).messages).toEqual([]);
+    state = chatReducer(state, {
+      type: "tool-call",
+      data: { toolCallId: "call-1", toolName: "record_create", args: {} },
+    });
+
+    expect(rewindLastTurn(state)).toMatchObject({
+      status: "idle",
+      messages: [
+        { role: "user", parts: [{ kind: "text", text: "hello" }] },
+        {
+          role: "assistant",
+          sealed: true,
+          parts: [
+            { kind: "tool", toolCallId: "call-1", status: "interrupted" },
+            { kind: "turn-status", status: "cancelled" },
+          ],
+        },
+      ],
+    });
   });
+});
+
+test("a cancelled finish keeps the reply and adds one cancellation marker", () => {
+  let state = appendUserMessage(initialChatState, "hello");
+  state = chatReducer(state, { type: "text", data: { delta: "partial" } });
+  state = chatReducer(state, { type: "finish", data: { reason: "cancelled" } });
+  state = chatReducer(state, { type: "finish", data: { reason: "cancelled" } });
+
+  expect(state.messages).toHaveLength(2);
+  expect(state.messages[1]?.parts).toEqual([
+    { kind: "text", text: "partial" },
+    { kind: "turn-status", status: "cancelled" },
+  ]);
+});
+
+test("a cancelled finish removes pending approval controls but keeps resolved decisions", () => {
+  let state = chatReducer(initialChatState, {
+    type: "tool-call",
+    data: { toolCallId: "pending", toolName: "record_create", args: {} },
+  });
+  state = chatReducer(state, {
+    type: "approval-request",
+    data: { approvalId: "approval-pending", toolCallId: "pending" },
+  });
+  state = chatReducer(state, {
+    type: "tool-call",
+    data: { toolCallId: "resolved", toolName: "record_update", args: {} },
+  });
+  state = chatReducer(state, {
+    type: "approval-request",
+    data: { approvalId: "approval-resolved", toolCallId: "resolved" },
+  });
+  state = chatReducer(state, {
+    type: "approval-resolved",
+    data: {
+      approvalId: "approval-resolved",
+      toolCallId: "resolved",
+      outcome: "approved",
+    },
+  });
+  state = chatReducer(state, { type: "finish", data: { reason: "cancelled" } });
+
+  const tools = state.messages[0]?.parts.filter((part) => part.kind === "tool");
+  expect(tools?.[0]).toMatchObject({ toolCallId: "pending", status: "interrupted" });
+  expect(tools?.[0]).not.toHaveProperty("approval");
+  expect(tools?.[1]).toMatchObject({
+    toolCallId: "resolved",
+    status: "interrupted",
+    approval: { approvalId: "approval-resolved", status: "approved" },
+  });
+});
+
+test("normalizes citations without making unsafe or missing URLs clickable", () => {
+  let state = chatReducer(initialChatState, {
+    type: "tool-call",
+    data: {
+      toolCallId: "cite-1",
+      toolName: "knowledge_citation",
+      args: {},
+      meta: { participantActivity: "represented" },
+    },
+  });
+  const result = {
+    type: "tool-result",
+    data: {
+      toolCallId: "cite-1",
+      toolName: "knowledge_citation",
+      result: {
+        data: {
+          sources: [
+            { ref: 1, title: "Runbook", url: "/knowledge/pages/p1" },
+            { ref: 2, title: "Bad", url: "javascript:alert(1)" },
+            { ref: 3, id: "flat-1", title: "Flat page" },
+            { ref: 4, title: "Backslash URL", url: "/\\outside.example" },
+            { ref: 5, title: "Control character URL", url: "/\t/outside.example" },
+            { ref: 6, title: "External source", url: "https://docs.example/guide" },
+            { ref: 7, title: "Normalized local source", url: "/\t/citation.invalid/guide" },
+            { ref: 8, title: "Normalized authority", url: "/local/..//outside.example" },
+          ],
+        },
+      },
+    },
+  } as const;
+  state = chatReducer(state, result);
+  state = chatReducer(state, result);
+
+  expect(state.messages[0]?.parts).toEqual([
+    expect.objectContaining({ kind: "tool", toolCallId: "cite-1" }),
+    {
+      kind: "sources",
+      sources: [
+        { ref: 1, title: "Runbook", url: "/knowledge/pages/p1" },
+        { ref: 2, title: "Bad" },
+        { ref: 3, id: "flat-1", title: "Flat page" },
+        { ref: 4, title: "Backslash URL" },
+        { ref: 5, title: "Control character URL" },
+        { ref: 6, title: "External source", url: "https://docs.example/guide" },
+        { ref: 7, title: "Normalized local source", url: "/guide" },
+        { ref: 8, title: "Normalized authority" },
+      ],
+    },
+  ]);
 });
 
 describe("a declared plan", () => {

@@ -2,6 +2,7 @@ import { createRemixStub } from "@remix-run/testing";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, expect, test, vi } from "vitest";
+import type { ChatMessage } from "./types";
 import { useChatStream } from "./use-chat-stream";
 
 afterEach(() => {
@@ -122,4 +123,69 @@ test("Retry re-asks the question when no Turn was named, and drops the dead atte
   // has not done. Keeping them would credit this answer with calls it never made.
   expect(screen.getByTestId("tool-count")).toHaveTextContent("0");
   expect(String(fetchMock.mock.calls[1]?.[0])).toMatch(/\/api\/v1\/chat$/);
+});
+
+test("Retry reuses a reopened attachment-only Turn with its original options", async () => {
+  const user = userEvent.setup();
+  const fetchMock = vi.fn().mockResolvedValue(
+    streamResponse(RESUMED_ANSWER, {
+      "X-Conversation-Id": "c1",
+      "X-Run-Id": "r2",
+      "X-Turn-Id": "t1",
+    })
+  );
+  vi.stubGlobal("fetch", fetchMock);
+  const initialMessages: ChatMessage[] = [
+    {
+      id: "u1",
+      role: "user",
+      sealed: true,
+      parts: [{ kind: "file", fileId: "f1", mediaType: "image/png", name: "chart.png" }],
+      sourceTurn: {
+        text: "",
+        options: {
+          model: "thorough",
+          autonomy: "supervised",
+          agentId: "analyst",
+          skills: ["forecast"],
+          resources: ["customer"],
+          knowledgePages: ["page-1"],
+          files: [{ fileId: "f1", mediaType: "image/png", name: "chart.png" }],
+        },
+      },
+    },
+  ];
+  function RestoredHarness() {
+    const chat = useChatStream({
+      initialConversationId: "c1",
+      initialMessages,
+      initialTurn: {
+        id: "t1",
+        status: "failed",
+        runId: "r1",
+      },
+    });
+    return (
+      <button type="button" onClick={() => void chat.regenerate()}>
+        Retry attachment
+      </button>
+    );
+  }
+  const App = createRemixStub([{ path: "/", Component: RestoredHarness }]);
+  render(<App />);
+
+  await user.click(screen.getByRole("button", { name: "Retry attachment" }));
+  await waitFor(() => expect(fetchMock).toHaveBeenCalledOnce());
+  expect(String(fetchMock.mock.calls[0]?.[0])).toMatch(/\/api\/v1\/chat\/turns\/t1\/retry$/);
+  const request = fetchMock.mock.calls[0]?.[1] as RequestInit;
+  expect(JSON.parse(String(request.body))).toMatchObject({
+    conversationId: "c1",
+    message: { content: "", fileIds: ["f1"] },
+    model: "thorough",
+    autonomy: "supervised",
+    agentId: "analyst",
+    skills: ["forecast"],
+    resources: ["customer"],
+    knowledgePages: ["page-1"],
+  });
 });

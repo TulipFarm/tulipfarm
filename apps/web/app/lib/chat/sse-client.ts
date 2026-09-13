@@ -114,6 +114,7 @@ type RunEventData = {
   agentId?: string;
   stepId?: string;
   batchId?: string;
+  participantActivity?: "visible" | "represented";
   startedAt?: string;
   durationMs?: number;
   status?: string;
@@ -246,6 +247,7 @@ export function createRunEventMapper(): (frame: ParsedFrame) => ChatEvent[] {
                 stepId: data.stepId,
                 batchId: data.batchId,
                 startedAt: data.startedAt,
+                participantActivity: data.participantActivity,
               }),
             }),
           },
@@ -259,7 +261,7 @@ export function createRunEventMapper(): (frame: ParsedFrame) => ChatEvent[] {
             type: "tool-result",
             data: compact({
               toolCallId: callId,
-              toolName: "",
+              toolName: data.name ?? "tool",
               result: compact({
                 status: data.status,
                 summary: data.summary,
@@ -271,6 +273,7 @@ export function createRunEventMapper(): (frame: ParsedFrame) => ChatEvent[] {
                 errorCode: data.errorCode,
                 summary: data.summary,
                 connectUrl: data.connectUrl,
+                participantActivity: data.participantActivity,
               }),
             }),
           },

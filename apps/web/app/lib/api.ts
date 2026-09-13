@@ -104,11 +104,15 @@ export function shareInFlight<T>(
   return read;
 }
 
-export async function apiGet<T>(path: string): Promise<T> {
+export async function apiGet<T>(path: string, init?: Pick<RequestInit, "signal">): Promise<T> {
   const headers: Record<string, string> = { Accept: "application/json" };
   applyAuth(headers);
 
-  const res = await fetch(`${API_BASE}${path}`, { credentials: "include", headers });
+  const res = await fetch(`${API_BASE}${path}`, {
+    credentials: "include",
+    headers,
+    signal: init?.signal,
+  });
   if (!res.ok) throw await readError(res);
   return (await res.json()) as T;
 }

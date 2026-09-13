@@ -175,6 +175,29 @@ describe("Transcript renders each part from its SSE event", () => {
     expect(screen.getByText("Denied")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Approve" })).toBeNull();
   });
+
+  it("removes pending approval controls when the Turn is stopped", () => {
+    renderTranscript(
+      fold([
+        { type: "tool-call", data: { toolCallId: "c1", toolName: "write_thing", args: {} } },
+        {
+          type: "approval-request",
+          data: {
+            approvalId: "ap1",
+            toolCallId: "c1",
+            toolName: "write_thing",
+            args: {},
+            expiresAt: future(),
+          },
+        },
+        { type: "finish", data: { reason: "cancelled" } },
+      ])
+    );
+
+    expect(screen.queryByRole("button", { name: "Approve" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Deny" })).toBeNull();
+    expect(screen.getByText("Response stopped")).toBeInTheDocument();
+  });
 });
 
 describe("Transcript message actions", () => {
@@ -261,7 +284,17 @@ describe("Transcript message actions", () => {
     // `present` draws the answer; naming it as a step would tell the reader the assistant had
     // called a tool to do the one thing they can already see it doing.
     const state = fold(
-      [{ type: "tool-call", data: { toolCallId: "p1", toolName: "present", args: {} } }],
+      [
+        {
+          type: "tool-call",
+          data: {
+            toolCallId: "p1",
+            toolName: "present",
+            args: {},
+            meta: { participantActivity: "represented" },
+          },
+        },
+      ],
       "hi"
     );
     const { container } = render(
@@ -747,7 +780,7 @@ describe("Transcript auto-scroll stays inside its own scroll container", () => {
     }
   });
 
-  it("anchors a block taller than the viewport to its own top instead of the tail", async () => {
+  it("follows the newest content to the bottom even when the reply is taller than the viewport", async () => {
     // A block taller than the container would land the reader mid-card under a bare
     // `scrollTop = scrollHeight` jump. Give every element the same generous rect except the
     // scroll container itself, so the last block reads as "taller than the viewport" and its
@@ -769,6 +802,16 @@ describe("Transcript auto-scroll stays inside its own scroll container", () => {
         return this.classList.contains("overflow-y-auto") ? 200 : 0;
       },
     });
+    const scrollHeightDescriptor = Object.getOwnPropertyDescriptor(
+      HTMLElement.prototype,
+      "scrollHeight"
+    );
+    Object.defineProperty(HTMLElement.prototype, "scrollHeight", {
+      configurable: true,
+      get(this: HTMLElement) {
+        return this.classList.contains("overflow-y-auto") ? 900 : 0;
+      },
+    });
     const scrolled: number[] = [];
     const scrollTopDescriptor = Object.getOwnPropertyDescriptor(Element.prototype, "scrollTop");
     Object.defineProperty(Element.prototype, "scrollTop", {
@@ -788,13 +831,14 @@ describe("Transcript auto-scroll stays inside its own scroll container", () => {
         await new Promise((resolve) => requestAnimationFrame(() => resolve(null)));
       });
 
-      // The container starts at top 0; the block starts 50px lower, so the anchor write is 50,
-      // never the tail-jump `scrollHeight` value a plain bottom-pin would have produced.
-      expect(scrolled).toContain(50);
+      expect(scrolled).toContain(900);
     } finally {
       HTMLElement.prototype.getBoundingClientRect = rectDescriptor;
       if (clientHeightDescriptor) {
         Object.defineProperty(HTMLElement.prototype, "clientHeight", clientHeightDescriptor);
+      }
+      if (scrollHeightDescriptor) {
+        Object.defineProperty(HTMLElement.prototype, "scrollHeight", scrollHeightDescriptor);
       }
       if (scrollTopDescriptor) {
         Object.defineProperty(Element.prototype, "scrollTop", scrollTopDescriptor);
@@ -869,6 +913,144 @@ describe("Transcript auto-scroll stays inside its own scroll container", () => {
       if (scrollTopDescriptor) {
         Object.defineProperty(Element.prototype, "scrollTop", scrollTopDescriptor);
       }
+    }
+  });
+
+  it.each(["PageUp", "Home", "ArrowUp"])(
+    "stops following after the reader scrolls with %s",
+    async (key) => {
+      const scrolled: number[] = [];
+      let scrollTopValue = 0;
+      const scrollTopDescriptor = Object.getOwnPropertyDescriptor(Element.prototype, "scrollTop");
+      Object.defineProperty(Element.prototype, "scrollTop", {
+        configurable: true,
+        get: () => scrollTopValue,
+        set: (value: number) => {
+          scrollTopValue = value;
+          scrolled.push(value);
+        },
+      });
+      try {
+        const first = fold([{ type: "text", data: { delta: "hello" } }], "hi");
+        const { rerender, container } = render(
+          <Transcript messages={first.messages} status="streaming" onApprove={vi.fn()} />
+        );
+        await flushFrames();
+        const scrollEl = container.querySelector(".overflow-y-auto") as HTMLElement;
+        scrollEl.dispatchEvent(new Event("scroll", { bubbles: true }));
+        Object.defineProperty(scrollEl, "scrollHeight", { configurable: true, value: 1000 });
+        Object.defineProperty(scrollEl, "clientHeight", { configurable: true, value: 200 });
+        scrollTopValue = 200;
+        scrollEl.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, key }));
+        scrollEl.dispatchEvent(new Event("scroll", { bubbles: true }));
+        const before = scrolled.length;
+
+        const second = chatReducer(first, { type: "text", data: { delta: " world" } });
+        rerender(<Transcript messages={second.messages} status="streaming" onApprove={vi.fn()} />);
+        await flushFrames();
+
+        expect(scrolled).toHaveLength(before);
+      } finally {
+        if (scrollTopDescriptor) {
+          Object.defineProperty(Element.prototype, "scrollTop", scrollTopDescriptor);
+        }
+      }
+    }
+  );
+
+  it("stops following while the reader drags the scrollbar", async () => {
+    const scrolled: number[] = [];
+    let scrollTopValue = 0;
+    const scrollTopDescriptor = Object.getOwnPropertyDescriptor(Element.prototype, "scrollTop");
+    Object.defineProperty(Element.prototype, "scrollTop", {
+      configurable: true,
+      get: () => scrollTopValue,
+      set: (value: number) => {
+        scrollTopValue = value;
+        scrolled.push(value);
+      },
+    });
+    try {
+      const first = fold([{ type: "text", data: { delta: "hello" } }], "hi");
+      const { rerender, container } = render(
+        <Transcript messages={first.messages} status="streaming" onApprove={vi.fn()} />
+      );
+      await flushFrames();
+      const scrollEl = container.querySelector(".overflow-y-auto") as HTMLElement;
+      scrollEl.dispatchEvent(new Event("scroll", { bubbles: true }));
+      Object.defineProperty(scrollEl, "scrollHeight", { configurable: true, value: 1000 });
+      Object.defineProperty(scrollEl, "clientHeight", { configurable: true, value: 200 });
+      scrollTopValue = 200;
+      scrollEl.dispatchEvent(new MouseEvent("pointerdown", { bubbles: true }));
+      scrollEl.dispatchEvent(new Event("scroll", { bubbles: true }));
+      scrollEl.dispatchEvent(new MouseEvent("pointerup", { bubbles: true }));
+      const before = scrolled.length;
+
+      const second = chatReducer(first, { type: "text", data: { delta: " world" } });
+      rerender(<Transcript messages={second.messages} status="streaming" onApprove={vi.fn()} />);
+      await flushFrames();
+
+      expect(scrolled).toHaveLength(before);
+    } finally {
+      if (scrollTopDescriptor) {
+        Object.defineProperty(Element.prototype, "scrollTop", scrollTopDescriptor);
+      }
+    }
+  });
+
+  it("does not hijack scrolling while the reader is selecting transcript text", async () => {
+    const tracked = trackScrolling();
+    let state = fold([{ type: "text", data: { delta: "select this" } }], "hi");
+    const { rerender } = render(
+      <Transcript messages={state.messages} status="streaming" onApprove={vi.fn()} />
+    );
+    await flushFrames();
+    const before = tracked.scrolled.length;
+    const textNode = screen.getByLabelText("Assistant response");
+    const selection = vi.spyOn(window, "getSelection").mockReturnValue({
+      isCollapsed: false,
+      anchorNode: textNode,
+    } as unknown as Selection);
+
+    state = chatReducer(state, { type: "text", data: { delta: " longer" } });
+    rerender(<Transcript messages={state.messages} status="streaming" onApprove={vi.fn()} />);
+    await flushFrames();
+
+    expect(tracked.scrolled).toHaveLength(before);
+    selection.mockRestore();
+    tracked.restore();
+  });
+
+  it("follows Surface and Tool growth that does not change the message array", async () => {
+    const tracked = trackScrolling();
+    let notifyResize: (() => void) | undefined;
+    const OriginalResizeObserver = globalThis.ResizeObserver;
+    class TestResizeObserver {
+      constructor(callback: ResizeObserverCallback) {
+        notifyResize = () => callback([], this as unknown as ResizeObserver);
+      }
+      observe() {}
+      disconnect() {}
+      unobserve() {}
+    }
+    globalThis.ResizeObserver = TestResizeObserver as unknown as typeof ResizeObserver;
+    try {
+      const state = fold([{ type: "text", data: { delta: "growing" } }], "hi");
+      const { container } = render(
+        <Transcript messages={state.messages} status="streaming" onApprove={vi.fn()} />
+      );
+      await flushFrames();
+      const scrollEl = container.querySelector(".overflow-y-auto") as HTMLElement;
+      Object.defineProperty(scrollEl, "scrollHeight", { configurable: true, value: 1200 });
+      const before = tracked.scrolled.length;
+
+      notifyResize?.();
+      await flushFrames();
+
+      expect(tracked.scrolled.slice(before)).toContain(1200);
+    } finally {
+      globalThis.ResizeObserver = OriginalResizeObserver;
+      tracked.restore();
     }
   });
 });

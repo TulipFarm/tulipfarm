@@ -74,7 +74,12 @@ describe("groupTimelineParts", () => {
   });
 
   it("does not let a hidden tool row split a run", () => {
-    const nodes = groupTimelineParts([tool(), tool({ toolName: "cite_sources" }), tool(), tool()]);
+    const nodes = groupTimelineParts([
+      tool(),
+      tool({ toolName: "knowledge_citation", meta: { participantActivity: "represented" } }),
+      tool(),
+      tool(),
+    ]);
 
     expect(nodes).toHaveLength(1);
     expect(run(nodes[0]).parts).toHaveLength(3);
@@ -393,12 +398,20 @@ describe("derivePlanProgress", () => {
 
 describe("a plan_declare row", () => {
   it("is hidden when it succeeded, because the plan itself is the same fact", () => {
-    const nodes = groupTimelineParts([tool({ toolName: "plan_declare" })]);
+    const nodes = groupTimelineParts([
+      tool({ toolName: "plan_declare", meta: { participantActivity: "represented" } }),
+    ]);
     expect(nodes).toEqual([]);
   });
 
   it("keeps its row when it failed, because a refused plan renders as nothing at all", () => {
-    const nodes = groupTimelineParts([tool({ toolName: "plan_declare", outcome: "error" })]);
+    const nodes = groupTimelineParts([
+      tool({
+        toolName: "plan_declare",
+        outcome: "error",
+        meta: { participantActivity: "represented" },
+      }),
+    ]);
     expect(nodes).toHaveLength(1);
   });
 });

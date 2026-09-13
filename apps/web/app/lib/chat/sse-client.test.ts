@@ -571,6 +571,52 @@ test("releases a held Tool call when the decision lets it report", () => {
   );
 });
 
+test("keeps participant Tool policy and orphan rejection identity on the live wire", () => {
+  const map = createRunEventMapper();
+  expect(
+    map({
+      seq: 1,
+      type: "tool.call",
+      data: {
+        callId: "surface-1",
+        name: "custom_renderer",
+        argsDigest: "d1",
+        participantActivity: "represented",
+      },
+    })
+  ).toEqual([
+    expect.objectContaining({
+      type: "tool-call",
+      data: expect.objectContaining({
+        toolName: "custom_renderer",
+        meta: expect.objectContaining({ participantActivity: "represented" }),
+      }),
+    }),
+  ]);
+  expect(
+    map({
+      seq: 2,
+      type: "tool.result",
+      data: {
+        callId: "rejected-1",
+        name: "unknown_tool",
+        status: "error",
+        errorCode: "tool_not_available",
+        participantActivity: "visible",
+      },
+    })
+  ).toEqual([
+    expect.objectContaining({
+      type: "tool-result",
+      data: expect.objectContaining({
+        toolCallId: "rejected-1",
+        toolName: "unknown_tool",
+        meta: expect.objectContaining({ participantActivity: "visible" }),
+      }),
+    }),
+  ]);
+});
+
 test("shows a guardrail refusal without naming the guard, and only for the stages a reader sees", () => {
   const map = createRunEventMapper();
 

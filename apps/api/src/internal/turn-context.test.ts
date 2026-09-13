@@ -421,6 +421,7 @@ describe("ChatTurnContextResolver", () => {
 
     expect(context.tools[0]).toMatchObject({
       name: "present",
+      participantActivity: "represented",
       inputSchema: {
         properties: { component: { oneOf: [{ const: "dynamic" }] } },
       },

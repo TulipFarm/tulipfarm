@@ -272,7 +272,7 @@ describe("durable chat submission over HTTP", () => {
   function postChat(
     session = sid,
     options: {
-      body?: typeof BODY;
+      body?: Record<string, unknown>;
       idempotencyKey?: string;
     } = {}
   ) {
@@ -374,7 +374,11 @@ describe("durable chat submission over HTTP", () => {
     expect(artifact.rows).toHaveLength(1);
     expect(artifact.rows[0]?.id).toBe(`${runId}:request`);
     // The request Artifact records the Agent's permanent id, not the name the composer sent.
-    const resolvedBody = { ...BODY, agentId: DEFAULT_ASSISTANT_ID };
+    const resolvedBody = {
+      ...BODY,
+      conversationId: response.headers["x-conversation-id"],
+      agentId: DEFAULT_ASSISTANT_ID,
+    };
     expect(artifact.rows[0]?.content).toEqual(resolvedBody);
     expect(artifact.rows[0]?.content_hash).toBe(canonicalHash(resolvedBody));
 
@@ -685,6 +689,125 @@ describe("durable chat submission over HTTP", () => {
     expect(await count("messages", "WHERE role = 'user'")).toBe(1);
     expect(await count("conversation_turns")).toBe(1);
     expect(await count("runs")).toBe(2);
+  });
+
+  it("retries with the original request options instead of a changed retry body", async () => {
+    const original = {
+      message: { role: "user", content: "analyze this" },
+      model: "thorough",
+      agentId: "support-triage",
+      autonomy: "supervised",
+      hasTools: true,
+      llmDecision: false,
+      skills: ["forecast"],
+      resources: ["customer"],
+      knowledgePages: ["page-1"],
+      clientContext: { route: "/customers/alpha", title: "Alpha customer" },
+    };
+    const firstPending = postChat(sid, { body: original, idempotencyKey: "original-options" });
+    const firstRun = await awaitRun();
+    await db.query("UPDATE runs SET status = 'succeeded' WHERE id = $1", [firstRun.id]);
+    const first = await firstPending;
+    const conversationId = String(first.headers["x-conversation-id"]);
+    await conversationRepo.setAgent(conversationId, "private-agent-id");
+
+    const retryPending = app.inject({
+      method: "POST",
+      url: `/api/v1/chat/turns/${first.headers["x-turn-id"]}/retry`,
+      cookies: { [SESSION_COOKIE]: sid, [CSRF_COOKIE]: CSRF },
+      headers: { "x-csrf-token": CSRF },
+      payload: BODY,
+    });
+    const retriedRun = await awaitRun();
+    await db.query("UPDATE runs SET status = 'succeeded' WHERE id = $1", [retriedRun.id]);
+    const retried = await retryPending;
+
+    const artifact = await db.query<{ content: Record<string, unknown> }>(
+      "SELECT content FROM artifacts WHERE id = $1",
+      [`${retried.headers["x-run-id"]}:request`]
+    );
+    expect(artifact.rows[0]?.content).toMatchObject({
+      message: { role: "user", content: "analyze this" },
+      model: "thorough",
+      autonomy: "supervised",
+      hasTools: true,
+      llmDecision: false,
+      skills: ["forecast"],
+      resources: ["customer"],
+      knowledgePages: ["page-1"],
+      clientContext: { route: "/customers/alpha", title: "Alpha customer" },
+      conversationId,
+      agentId: "support-triage",
+    });
+  });
+
+  it("uses the complete retry body for a legacy request without a versioned envelope", async () => {
+    const first = await chat();
+    const turnId = String(first.headers["x-turn-id"]);
+    await db.query(
+      `UPDATE messages
+       SET metadata = jsonb_set(metadata, '{turnRequest}', $1::jsonb)
+       WHERE turn_id = $2 AND role = 'user'`,
+      [JSON.stringify({ model: "stale-model" }), turnId]
+    );
+    const fallback = {
+      message: { role: "user" as const, content: "legacy retry body" },
+      model: "fallback-model",
+      autonomy: "manual" as const,
+      hasTools: false,
+      llmDecision: true,
+      clientContext: { route: "/legacy", title: "Legacy page" },
+    };
+    const retryPending = app.inject({
+      method: "POST",
+      url: `/api/v1/chat/turns/${turnId}/retry`,
+      cookies: { [SESSION_COOKIE]: sid, [CSRF_COOKIE]: CSRF },
+      headers: { "x-csrf-token": CSRF },
+      payload: fallback,
+    });
+    const retriedRun = await awaitRun();
+    await db.query("UPDATE runs SET status = 'succeeded' WHERE id = $1", [retriedRun.id]);
+    const retried = await retryPending;
+    const artifact = await db.query<{ content: Record<string, unknown> }>(
+      "SELECT content FROM artifacts WHERE id = $1",
+      [`${retried.headers["x-run-id"]}:request`]
+    );
+
+    expect(artifact.rows[0]?.content).toEqual({
+      ...fallback,
+      conversationId: first.headers["x-conversation-id"],
+      agentId: DEFAULT_ASSISTANT_ID,
+    });
+  });
+
+  it.each([
+    { version: 2 },
+    { version: 1, message: null },
+    { version: 1, agentId: null },
+    { version: 1, conversationId: "another-conversation" },
+  ])("refuses an invalid versioned retry envelope: %j", async (invalid) => {
+    const first = await chat();
+    const turnId = String(first.headers["x-turn-id"]);
+    await db.query(
+      `UPDATE messages
+       SET metadata = jsonb_set(metadata, '{turnRequest}', (metadata->'turnRequest') || $1::jsonb)
+       WHERE turn_id = $2 AND role = 'user'`,
+      [JSON.stringify(invalid), turnId]
+    );
+    autoCompleteRuns = true;
+
+    const retried = await app.inject({
+      method: "POST",
+      url: `/api/v1/chat/turns/${turnId}/retry`,
+      cookies: { [SESSION_COOKIE]: sid, [CSRF_COOKIE]: CSRF },
+      headers: { "x-csrf-token": CSRF },
+      payload: BODY,
+    });
+
+    expect(retried.statusCode).toBe(409);
+    expect(retried.json()).toEqual({ error: "Stored request cannot be retried" });
+    expect(await count("runs")).toBe(1);
+    expect(await count("conversation_turns")).toBe(1);
   });
 
   it("records the superseded Run, so the retry can read what the failed attempt did", async () => {

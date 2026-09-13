@@ -37,6 +37,8 @@ export interface ExposedTool {
    * field existed. Opt-in per Tool; the loop never infers it from `mutating`.
    */
   readonly cacheable?: boolean;
+  /** Whether participant-facing output represents this Tool instead of a machinery row. */
+  readonly participantActivity?: "visible" | "represented";
 }
 
 export interface AgentLoopInput {
@@ -87,6 +89,7 @@ export interface ToolDispatchRequest {
   readonly callId: string;
   readonly name: string;
   readonly arguments: unknown;
+  readonly participantActivity?: "visible" | "represented";
   /** Aborts this hosted call when the Run stops while the Tool is in flight. */
   readonly signal?: AbortSignal;
   /** Skill currently narrowing the loop; absent means the call came directly from Chat. */
@@ -213,6 +216,7 @@ export interface AgentLoopEvent {
    */
   readonly answeredFromCallId?: string;
   readonly outcome?: string;
+  readonly participantActivity?: "visible" | "represented";
   /** Model text released this chunk. Present only on `text_delta`. */
   readonly text?: string;
   readonly textIndex?: number;

@@ -1,4 +1,4 @@
-import { lazy, type ReactNode, Suspense, useEffect, useRef, useState } from "react";
+import { lazy, type ReactNode, Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { AgentGlyph } from "~/components/agent-glyph";
 import { ConnectionStatus } from "~/components/shell/states";
 import { Link } from "~/components/ui/link";
@@ -160,6 +160,14 @@ export function ChatPanel({
   });
   const busy = status === "submitted" || status === "streaming";
   const [revisionDraft, setRevisionDraft] = useState<{ key: string; text: string } | null>(null);
+  const reviseDraft = useCallback(
+    (draft: { draftId: string; filename: string }) =>
+      setRevisionDraft({
+        key: draft.draftId,
+        text: `Please revise ${draft.filename}: `,
+      }),
+    []
+  );
   const homeDraftNonce = useRef(0);
   // Composer only re-seeds its draft on remount (see composer.tsx), so a Companion "chat" action
   // rides the same key-forced-remount mechanism as a revision draft, keyed on its nonce rather
@@ -250,12 +258,7 @@ export function ChatPanel({
             onTryHarder={tryHarder}
             onFeedback={sendFeedback}
             onSurfaceInteraction={sendSurfaceInteraction}
-            onReviseDraft={(draft) =>
-              setRevisionDraft({
-                key: draft.draftId,
-                text: `Please revise ${draft.filename}: `,
-              })
-            }
+            onReviseDraft={reviseDraft}
           />
         </Suspense>
       ) : (

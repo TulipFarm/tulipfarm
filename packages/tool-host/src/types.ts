@@ -208,6 +208,7 @@ export interface ToolDef<Result extends ParkableToolCallResult = ToolCallResult>
    * Turn. Absent means false. See `ExposedTool.cacheable` in `@tulipfarm/agent-runtime`.
    */
   cacheable?: boolean;
+  participantActivity?: "visible" | "represented";
   description: string;
   inputSchema: Record<string, unknown>;
   /** Builds a target-scoped schema without exposing cross-channel component vocabulary. */

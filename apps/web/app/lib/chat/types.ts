@@ -66,6 +66,7 @@ export type ToolMeta = {
   summary?: string;
   /** UI-only deep link to a connect page; never sent to the model. */
   connectUrl?: string;
+  participantActivity?: "visible" | "represented";
 };
 
 export type SourceRef = { id?: string; title?: string; url?: string; ref?: number; path?: string };
@@ -227,6 +228,7 @@ export type TimelinePart =
       codeView?: SurfaceCodeViewPayload;
     }
   | { kind: "surface-unavailable"; message: "Legacy presentation unavailable" }
+  | { kind: "turn-status"; status: "cancelled" }
   | {
       kind: "guardrail";
       stage: "input" | "output";

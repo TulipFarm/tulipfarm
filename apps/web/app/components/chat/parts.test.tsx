@@ -77,6 +77,16 @@ test("an internal source routes in-app while an external one opens away", () => 
   expect(screen.getByRole("link", { name: /Supplier terms/ })).toHaveAttribute("target", "_blank");
 });
 
+test("a URL-less source stays visible without becoming a link", () => {
+  renderPart({
+    kind: "sources",
+    sources: [{ id: "flat-1", title: "Flat page", ref: 2 }],
+  });
+
+  expect(screen.getByText("Flat page")).toBeInTheDocument();
+  expect(screen.queryByRole("link", { name: /Flat page/ })).not.toBeInTheDocument();
+});
+
 test("a Surface part renders the native React renderer", () => {
   const artifact = createSurfaceArtifact({
     id: "status",
@@ -121,6 +131,7 @@ test("a successful presentation Tool is hidden once its Surface is available", (
         args: {},
         result: { success: true, data: { artifactId: "decision", revision: 1 } },
         status: "done",
+        meta: { participantActivity: "represented" },
       }}
       onApprove={() => undefined}
     />
@@ -129,27 +140,22 @@ test("a successful presentation Tool is hidden once its Surface is available", (
   expect(screen.queryByText("request_input")).toBeNull();
 });
 
-test("a presentation Tool never draws a row, even when it failed", () => {
-  const { container } = render(
-    <MessagePartView
-      part={{
-        kind: "tool",
-        toolCallId: "request-1",
-        toolName: "request_input",
-        args: {},
-        result: {
-          success: false,
-          error: { code: "internal_error", message: "Presentation unavailable" },
-        },
-        status: "done",
-      }}
-      onApprove={() => undefined}
-    />
-  );
+test("a failed represented Tool stays visible because no participant-facing output replaced it", () => {
+  renderPart({
+    kind: "tool",
+    toolCallId: "request-1",
+    toolName: "request_input",
+    args: {},
+    result: {
+      success: false,
+      error: { code: "internal_error", message: "Presentation unavailable" },
+    },
+    status: "done",
+    outcome: "error",
+    meta: { participantActivity: "represented", errorCode: "internal_error" },
+  });
 
-  // The agent retries presentation failures itself. Surfacing one puts a red row above a reply
-  // that rendered perfectly well, describing plumbing the reader did not ask about.
-  expect(container).toBeEmptyDOMElement();
+  expect(screen.getByText("request_input")).toBeInTheDocument();
 });
 
 test("an interrupted Tool says that no result was recorded", () => {
