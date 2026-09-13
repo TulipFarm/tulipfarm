@@ -85,6 +85,10 @@ export {
   ConnectionIdentityConflictError,
   ConnectionStore,
 } from "./connection-store";
+export {
+  INGRESS_TEARDOWN_STORAGE_STATEMENTS,
+  IngressTeardownStore,
+} from "./ingress-teardown-store";
 export type {
   IntegrationProjectionStatus,
   PersistedChannelRoute,
@@ -97,6 +101,14 @@ export {
   INTEGRATION_STORAGE_STATEMENTS,
   IntegrationStore,
 } from "./integration-store";
+export type {
+  OimIngressEmissionInput,
+  OimIngressEmissionResult,
+} from "./oim-ingress-emission-store";
+export {
+  OIM_INGRESS_EMISSION_STORAGE_STATEMENTS,
+  OimIngressEmissionStore,
+} from "./oim-ingress-emission-store";
 export type {
   OimKnowledgeCheckpoint,
   OimKnowledgeCheckpointKey,
@@ -179,3 +191,19 @@ export {
   WebhookDeduplicationConflictError,
   WebhookInboxStore,
 } from "./webhook-inbox-store";
+export type {
+  ActiveWebhookRegistration,
+  CompleteWebhookRegistrationResult,
+  PersistedWebhookRegistration,
+  PersistedWebhookRegistrationAttempt,
+  WebhookRegistrationAttemptClaim,
+  WebhookRegistrationAttemptState,
+  WebhookRegistrationClaim,
+  WebhookRegistrationKey,
+  WebhookRegistrationState,
+  WebhookRegistrationTarget,
+} from "./webhook-registration-store";
+export {
+  WEBHOOK_REGISTRATION_STORAGE_STATEMENTS,
+  WebhookRegistrationStore,
+} from "./webhook-registration-store";

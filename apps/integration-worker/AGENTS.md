@@ -18,6 +18,7 @@ reconciliation, and rate limits for channel workers.
 | `src/main.ts` | Composition root: schema preflight, probes, loops, shutdown. |
 | `src/config.ts`, `src/data-dir.ts` | Env/defaults and volume-backed worker credential loading. |
 | `src/channels/` | Channel loop registration; add `DrainableLoop`s here. |
+| `src/oim-ingress/` | OIM registration recovery, polling, and durable inbox cycle. |
 | `src/slack/` | Transport scaffolds exported by `src/index.ts`. |
 | `src/github/` | Provider-specific Integration worker code. |
 | `src/internal/` | Internal API client/host ports. |

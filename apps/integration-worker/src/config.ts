@@ -1,5 +1,5 @@
 /** Minimum DB schema version this read-only worker will run against. */
-export const REQUIRED_SCHEMA_VERSION = 24;
+export const REQUIRED_SCHEMA_VERSION = 117;
 
 export interface IntegrationWorkerConfig {
   readonly databaseUrl: string;

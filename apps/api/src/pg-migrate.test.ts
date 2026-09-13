@@ -212,6 +212,78 @@ describe("runPgMigrations", () => {
     ]);
   });
 
+  it("upgrades ingress lifecycle storage from version 116 and is then repeat-safe", async () => {
+    await db.exec(`
+      CREATE TABLE connections (
+        business_id text NOT NULL,
+        id text NOT NULL,
+        integration_id text NOT NULL,
+        integration_major_version integer NOT NULL,
+        PRIMARY KEY (business_id, id),
+        UNIQUE (business_id, id, integration_id, integration_major_version)
+      );
+      CREATE TABLE webhook_deliveries (
+         business_id text NOT NULL
+      );
+      CREATE TABLE schema_version (
+        id boolean PRIMARY KEY DEFAULT true,
+        version integer NOT NULL,
+        CONSTRAINT schema_version_single_row CHECK (id)
+      );
+      INSERT INTO schema_version (id, version) VALUES (true, 116);
+    `);
+
+    await runPgMigrations(db, undefined, NOOP_LOG);
+
+    expect(await schemaVersion(db)).toBe(117);
+    expect(await tableExists(db, "oim_ingress_teardowns")).toBe(true);
+    expect(await tableExists(db, "oim_webhook_registrations")).toBe(true);
+    expect(await tableExists(db, "oim_webhook_registration_attempts")).toBe(true);
+    const generation = await db.query<{ column_name: string }>(`
+      SELECT column_name
+        FROM information_schema.columns
+       WHERE table_name = 'oim_webhook_registrations'
+         AND column_name = 'generation'
+    `);
+    expect(generation.rows).toEqual([{ column_name: "generation" }]);
+    const settledAbsenceEvidence = await db.query<{ column_name: string }>(`
+      SELECT column_name
+        FROM information_schema.columns
+       WHERE table_name = 'oim_webhook_registration_attempts'
+         AND column_name = 'settled_absence_evidence'
+    `);
+    expect(settledAbsenceEvidence.rows).toEqual([{ column_name: "settled_absence_evidence" }]);
+    const deliveryIdentityColumns = await db.query<{ column_name: string }>(`
+      SELECT column_name
+        FROM information_schema.columns
+       WHERE table_name = 'webhook_deliveries'
+         AND column_name IN ('external_tenant_id', 'external_account_id')
+       ORDER BY column_name
+    `);
+    expect(deliveryIdentityColumns.rows).toEqual([
+      { column_name: "external_account_id" },
+      { column_name: "external_tenant_id" },
+    ]);
+    const registrationIndexes = await db.query<{ indexname: string }>(`
+      SELECT indexname
+        FROM pg_indexes
+       WHERE schemaname = 'public'
+         AND indexname IN (
+           'oim_webhook_registrations_due_idx',
+           'oim_webhook_registration_attempts_due_idx'
+         )
+       ORDER BY indexname
+    `);
+    expect(registrationIndexes.rows).toEqual([
+      { indexname: "oim_webhook_registration_attempts_due_idx" },
+      { indexname: "oim_webhook_registrations_due_idx" },
+    ]);
+
+    const { queryable, statements } = watch(db);
+    await runPgMigrations(queryable, undefined, NOOP_LOG);
+    expect(statements.filter((statement) => statement === "BEGIN")).toHaveLength(0);
+  });
+
   it("repairs Surface storage for databases that already recorded schema version 14", async () => {
     // Stand-in for a database stopped at v14; v27 needs pgvector.
     await db.query("CREATE EXTENSION IF NOT EXISTS vector");

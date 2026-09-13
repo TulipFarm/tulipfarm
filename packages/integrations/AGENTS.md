@@ -19,7 +19,8 @@ Owns adapter contracts, event normalization, source ACLs, sync checkpoints, and 
 | `src/egress/` | Manifest-to-ToolContract compiler, adapter, fetch transport, destination cage. `web-content.ts` renders a fetched response to Markdown deterministically via turndown — no model, so the same bytes always give the same text. |
 | `src/catalog/`, `src/oim-hooks.ts` | Pure OIM capability review and trusted, declared Hook phase dispatch. |
 | `src/git-source/` | Pre-clone Git source cage and the bounded, sanitised clone helper. |
-| `src/import/`, `src/ingress/`, `src/external-protocol/` | Import and ingress protocols. |
+| `src/import/`, `src/external-protocol/` | Import and external Integration protocols. |
+| `src/ingress/` | Exact-Connection verification, registration lifecycle, polling, normalization, and dispatch. |
 | `src/github/` | GitHub Tool adapters and provider contracts. |
 | `src/slack/`, `src/slack/knowledge/` | Slack messaging Tool adapters, contracts, and Knowledge sync. |
 | `src/google/` | Google Workspace (Gmail/Drive/Docs/Calendar) Tool adapters and contracts. |
