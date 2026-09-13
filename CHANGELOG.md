@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.18.25](https://github.com/TulipFarm/tulipfarm/compare/v0.18.24...v0.18.25) (2026-09-13)
+
+### Features
+
+* **integrations:** add durable OIM ingress ([#811](https://github.com/TulipFarm/tulipfarm/issues/811)) ([85e37d2](https://github.com/TulipFarm/tulipfarm/commit/85e37d212267b63e40aff3351850d1f7284fd4a5))
+* **knowledge:** add durable OIM sync ([#812](https://github.com/TulipFarm/tulipfarm/issues/812)) ([825dd0c](https://github.com/TulipFarm/tulipfarm/commit/825dd0c6559d96c88ab4376cc35f0bcc4eedab05))
+* **web:** derive resource identifiers from readable names ([#806](https://github.com/TulipFarm/tulipfarm/issues/806)) ([b4f0bc7](https://github.com/TulipFarm/tulipfarm/commit/b4f0bc7ba7ea3849891e4fa234bd741de636e2d6))
+* **web:** link confirmed resource changes from chat replies ([#810](https://github.com/TulipFarm/tulipfarm/issues/810)) ([c3c8354](https://github.com/TulipFarm/tulipfarm/commit/c3c83547d8d2c1bc560246ae5416f7a0b049d73e))
+* **web:** show setup first and recent runs on chat home ([#807](https://github.com/TulipFarm/tulipfarm/issues/807)) ([ad0246b](https://github.com/TulipFarm/tulipfarm/commit/ad0246b435b70b78c3c73c0166ea92b22b9f68bd))
+
+### Bug Fixes
+
+* **chat:** preserve activity and stabilize the chat experience ([#805](https://github.com/TulipFarm/tulipfarm/issues/805)) ([5c4df21](https://github.com/TulipFarm/tulipfarm/commit/5c4df21689fe216de3726d604d0c3caf22ed4194))
+* **chat:** restore ordered history and complete reply actions ([#808](https://github.com/TulipFarm/tulipfarm/issues/808)) ([2c8963a](https://github.com/TulipFarm/tulipfarm/commit/2c8963ae8039cbfb68077774ea2009ddaf9c0588))
+* **integrations:** secure OIM chat dispatch ([#809](https://github.com/TulipFarm/tulipfarm/issues/809)) ([6e7c3ee](https://github.com/TulipFarm/tulipfarm/commit/6e7c3eebac9e335c303d81044e53c4012a3c0608))
+
 ## [0.18.24](https://github.com/TulipFarm/tulipfarm/compare/v0.18.23...v0.18.24) (2026-09-13)
 
 ### Features
