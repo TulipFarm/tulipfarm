@@ -219,9 +219,8 @@ const agentCreate = defineApiTool<AgentToolContext>({
 
     const fmError = frontmatterError(frontmatter);
     if (fmError) return fmError;
-    if (ctx.teamAssets && ownershipOf(frontmatter) === undefined) {
-      return err("validation_error", "Agent ownership must name at least one owning Team");
-    }
+    // Omitted ownership is not an error: ctx.teamAssets.ensure() below defaults an unowned Agent
+    // to the business's "Everyone" Team, so workspace-wide agents need no team setup.
 
     const plan = resolveAgentName(ctx.soulLoader.agents, name, frontmatter, onExisting);
     if (plan.outcome === "refuse") return err("validation_error", plan.message);

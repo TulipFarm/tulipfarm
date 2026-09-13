@@ -151,6 +151,24 @@ describe("routine_forge", () => {
     expect(onRoutinesChanged).toHaveBeenCalledOnce();
   });
 
+  it("defaults an unowned Routine to the Everyone Team instead of rejecting it", async () => {
+    const ensure = vi.fn().mockResolvedValue(undefined);
+    const context: PlatformToolContext = {
+      ...ctx(),
+      teamAssets: { ensure } as unknown as NonNullable<PlatformToolContext["teamAssets"]>,
+    };
+
+    const result = await routineForgeTool.handler(
+      { name: "daily-report", definition: VALID_ROUTINE },
+      context
+    );
+
+    expect(result).toMatchObject({ success: true });
+    // ensure() itself resolves an omitted ownership to the business's Everyone Team; the forge
+    // Tool must pass the undefined through rather than rejecting it up front.
+    expect(ensure).toHaveBeenCalledWith("routine", VALID_ROUTINE.metadata.id, undefined);
+  });
+
   it("stamps the authoring principal onto every Trigger, replacing whatever the model wrote", async () => {
     const result = await routineForgeTool.handler(
       { name: "daily-report", definition: routineWithTriggers(trigger()) },

@@ -650,9 +650,8 @@ export const routineForgeTool = defineApiTool<PlatformToolContext>({
     const validation = validateRoutineForgeDefinitions({ name, definition });
     if (!validation.ok) return err("validation_error", validation.message);
     const { routine, triggers: triggerDefinitions } = validation;
-    if (ctx.teamAssets && routine.spec.ownership === undefined) {
-      return err("validation_error", "Routine ownership must name at least one owning Team");
-    }
+    // Omitted ownership is not an error: ctx.teamAssets.ensure() below defaults an unowned
+    // Routine to the business's "Everyone" Team, so workspace-wide automations need no team setup.
     const existing = ctx.soulLoader?.routines?.get(name);
     const principal = assetPrincipal(ctx);
     if (existing && ctx.teamAssets && !principal) {
