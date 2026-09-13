@@ -17,6 +17,45 @@ export function isHiddenToolPart(part: ToolPart): boolean {
   return isPresentationToolPart(part) && part.outcome !== "error";
 }
 
+/**
+ * Tools whose participant-facing output is always the represented UI, by name rather than by the
+ * `part.meta.participantActivity` a real call carries.
+ *
+ * A plan declares a Tool by name before any call has run, so there is no Tool part yet to ask
+ * `isPresentationToolPart`. These are the platform's own fixed presentation Tools — never a
+ * Skill's or Integration's, whose `requiresPresentation` is only known once a call lands — so a
+ * declared step naming one of them can be recognised, and hidden from the plan trace, on the name
+ * alone.
+ */
+const PRESENTATION_TOOL_NAMES = new Set([
+  "present",
+  "update_presentation",
+  "request_input",
+  "cite_sources",
+]);
+
+/** Whether a Tool name (not a call) is always presented rather than shown as a plan step. */
+export function isPresentationToolName(toolName: string): boolean {
+  return PRESENTATION_TOOL_NAMES.has(toolName);
+}
+
+/** The provider namespace a model sometimes prefixes a declared Tool name with. */
+const FUNCTION_NAMESPACE_PREFIX = "functions.";
+
+/**
+ * Strips the `functions.` namespace some providers prepend to a declared Tool name.
+ *
+ * A plan's `call.tool` comes straight from the model's own `plan_declare` arguments, unlike
+ * `part.toolName`, which the runtime already normalizes before it reaches the wire. Left
+ * unstripped, `functions.skill` never matches the real `skill` call it describes, so the step
+ * stays stuck pending and the real call is reported a second time as unplanned.
+ */
+export function normalizeToolName(toolName: string): string {
+  return toolName.startsWith(FUNCTION_NAMESPACE_PREFIX)
+    ? toolName.slice(FUNCTION_NAMESPACE_PREFIX.length)
+    : toolName;
+}
+
 export type ToolFamily =
   | "knowledge"
   | "memory"

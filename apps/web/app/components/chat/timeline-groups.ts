@@ -1,5 +1,11 @@
 import type { ChatMessage, PlanRound, TimelinePart } from "~/lib/chat/types";
-import { isHiddenToolPart, isPresentationToolPart, PLAN_TOOL_NAME } from "./tool-summary";
+import {
+  isHiddenToolPart,
+  isPresentationToolName,
+  isPresentationToolPart,
+  normalizeToolName,
+  PLAN_TOOL_NAME,
+} from "./tool-summary";
 
 type ToolPart = Extract<TimelinePart, { kind: "tool" }>;
 
@@ -92,6 +98,14 @@ export type TimelineNode =
  * underneath it. Without it, an Agent that departed from its own plan left a half-ticked list
  * frozen at Round 1 while a pile of unexplained calls accumulated below — the reader could see
  * both, and could not see that they were the same Turn.
+ *
+ * A declared `call.tool` is normalized before it is matched or shown: some providers hand the
+ * model back a `functions.`-prefixed name for its own declaration, which the runtime never uses
+ * for `part.toolName`. Left as-is it never matches, so the step never leaves `pending`/`skipped`
+ * and the real call underneath shows up again as unplanned. A declared step for a presentation
+ * Tool (`request_input` and the like) is dropped outright, by name rather than by
+ * `isPresentationToolPart`, since a step still pending has no Tool part to ask that of — its
+ * output already renders as the dedicated UI it produces, so it earns no row of its own.
  */
 export function derivePlanProgress(
   rounds: readonly PlanRound[],
@@ -103,14 +117,17 @@ export function derivePlanProgress(
   const unstarted: PlannedCallStatus = options?.streaming === true ? "pending" : "skipped";
 
   const declared = rounds.map((round) =>
-    round.calls.map((call): PlannedCall => {
-      const at = tools.findIndex((part, i) => !claimed.has(i) && part.toolName === call.tool);
-      const label = call.label === undefined ? {} : { label: call.label };
-      const part = at === -1 ? undefined : tools[at];
-      if (part === undefined) return { tool: call.tool, ...label, status: unstarted };
-      claimed.add(at);
-      return { tool: call.tool, ...label, status: statusOf(part), part };
-    })
+    round.calls
+      .map((call) => ({ ...call, tool: normalizeToolName(call.tool) }))
+      .filter((call) => !isPresentationToolName(call.tool))
+      .map((call): PlannedCall => {
+        const at = tools.findIndex((part, i) => !claimed.has(i) && part.toolName === call.tool);
+        const label = call.label === undefined ? {} : { label: call.label };
+        const part = at === -1 ? undefined : tools[at];
+        if (part === undefined) return { tool: call.tool, ...label, status: unstarted };
+        claimed.add(at);
+        return { tool: call.tool, ...label, status: statusOf(part), part };
+      })
   );
 
   const waves = toolWaves(tools);
