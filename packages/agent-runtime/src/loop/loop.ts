@@ -186,7 +186,13 @@ export class AgentLoop {
       extra: Partial<
         Pick<
           AgentLoopEvent,
-          "toolName" | "callId" | "outcome" | "text" | "textIndex" | "answeredFromCallId"
+          | "toolName"
+          | "callId"
+          | "outcome"
+          | "text"
+          | "textIndex"
+          | "answeredFromCallId"
+          | "participantActivity"
         >
       > = {}
     ): AgentLoopEvent => ({
@@ -204,7 +210,13 @@ export class AgentLoop {
       extra: Partial<
         Pick<
           AgentLoopEvent,
-          "toolName" | "callId" | "outcome" | "text" | "textIndex" | "answeredFromCallId"
+          | "toolName"
+          | "callId"
+          | "outcome"
+          | "text"
+          | "textIndex"
+          | "answeredFromCallId"
+          | "participantActivity"
         >
       > = {}
     ): Promise<void> => {
@@ -326,7 +338,12 @@ export class AgentLoop {
     /** A refusal read off a call's identity: it never dispatches, and no repair path follows. */
     const barrier = async (call: NormalizedToolCall, reason: AgentLoopFailureReason) => {
       const { name: toolName, callId } = call;
-      await emit("tool_call_rejected", { toolName, callId, outcome: reason });
+      await emit("tool_call_rejected", {
+        toolName,
+        callId,
+        outcome: reason,
+        participantActivity: exposed.get(toolName)?.participantActivity,
+      });
       return finish({ status: "failed", reason, ...counters }, "failed");
     };
 
@@ -700,6 +717,7 @@ export class AgentLoop {
                 toolName: call.name,
                 callId: call.callId,
                 outcome: "repeated_side_effect",
+                participantActivity: tool.participantActivity,
               });
               await advance(index + 1);
               continue;
@@ -729,6 +747,9 @@ export class AgentLoop {
               callId: call.callId,
               name: call.name,
               arguments: call.arguments,
+              ...(tool.participantActivity === undefined
+                ? {}
+                : { participantActivity: tool.participantActivity }),
               ...(activeSkillName === undefined ? {} : { activeSkillName }),
             },
           ]);
@@ -840,6 +861,9 @@ export class AgentLoop {
             callId: batched.callId,
             name: batched.name,
             arguments: batched.arguments,
+            ...(exposed.get(batched.name)?.participantActivity === undefined
+              ? {}
+              : { participantActivity: exposed.get(batched.name)?.participantActivity }),
             ...(activeSkillName === undefined ? {} : { activeSkillName }),
             ...(batchId === undefined ? {} : { batchId }),
           }))

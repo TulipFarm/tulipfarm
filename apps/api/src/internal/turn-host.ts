@@ -147,6 +147,7 @@ export interface HostedTurnContext {
      * crosses the wire.
      */
     readonly cacheable?: boolean;
+    readonly participantActivity?: "visible" | "represented";
   }[];
   readonly limits: {
     readonly maxIterations: number;
@@ -623,6 +624,9 @@ export function foldParticipantEvent(
       ...(typeof payload.argsDigest === "string" ? { argsDigest: payload.argsDigest } : {}),
       ...(argsPreview === undefined ? {} : { argsPreview }),
       ...(typeof payload.batchId === "string" ? { batchId: payload.batchId } : {}),
+      ...(payload.participantActivity === "visible" || payload.participantActivity === "represented"
+        ? { participantActivity: payload.participantActivity }
+        : {}),
     };
     if (existing < 0) toolCalls.push(next);
     else toolCalls[existing] = next;
@@ -633,16 +637,21 @@ export function foldParticipantEvent(
     (payload.status === "ok" || payload.status === "error")
   ) {
     const existing = toolCalls.findIndex((call) => call.callId === payload.callId);
-    if (existing >= 0) {
-      const resultPreview = preview(payload.resultPreview);
-      toolCalls[existing] = {
-        ...toolCalls[existing],
-        outcome: payload.status,
-        ...(resultPreview === undefined ? {} : { resultPreview }),
-        ...(typeof payload.durationMs === "number" ? { durationMs: payload.durationMs } : {}),
-        ...(typeof payload.errorCode === "string" ? { errorCode: payload.errorCode } : {}),
-      };
-    }
+    const resultPreview = preview(payload.resultPreview);
+    const next: ParticipantToolCall = {
+      ...(existing < 0
+        ? { callId: payload.callId, name: typeof payload.name === "string" ? payload.name : "" }
+        : toolCalls[existing]),
+      outcome: payload.status,
+      ...(resultPreview === undefined ? {} : { resultPreview }),
+      ...(typeof payload.durationMs === "number" ? { durationMs: payload.durationMs } : {}),
+      ...(typeof payload.errorCode === "string" ? { errorCode: payload.errorCode } : {}),
+      ...(payload.participantActivity === "visible" || payload.participantActivity === "represented"
+        ? { participantActivity: payload.participantActivity }
+        : {}),
+    };
+    if (existing >= 0) toolCalls[existing] = next;
+    else if (next.name.length > 0) toolCalls.push(next);
   }
   if (
     event.eventType === "approval.requested" &&
@@ -675,13 +684,14 @@ export function foldParticipantEvent(
     typeof payload.artifactId === "string" &&
     typeof payload.revision === "number" &&
     Number.isInteger(payload.revision) &&
-    payload.revision > 0 &&
-    !surfaces.some(
-      (surface) =>
-        surface.artifactId === payload.artifactId && surface.revision === payload.revision
-    )
+    payload.revision > 0
   ) {
-    surfaces.push({ artifactId: payload.artifactId, revision: payload.revision });
+    const existing = surfaces.findIndex((surface) => surface.artifactId === payload.artifactId);
+    if (existing < 0) {
+      surfaces.push({ artifactId: payload.artifactId, revision: payload.revision });
+    } else if (surfaces[existing].revision <= payload.revision) {
+      surfaces[existing] = { artifactId: payload.artifactId, revision: payload.revision };
+    }
   }
   return {
     ...history,
@@ -711,6 +721,9 @@ function participantToolCalls(value: unknown): ParticipantToolCall[] {
         ...(call.outcome === "ok" || call.outcome === "error" ? { outcome: call.outcome } : {}),
         ...(typeof call.errorCode === "string" ? { errorCode: call.errorCode } : {}),
         ...(typeof call.batchId === "string" ? { batchId: call.batchId } : {}),
+        ...(call.participantActivity === "visible" || call.participantActivity === "represented"
+          ? { participantActivity: call.participantActivity }
+          : {}),
       },
     ];
   });
@@ -718,15 +731,25 @@ function participantToolCalls(value: unknown): ParticipantToolCall[] {
 
 function surfaceRefs(value: unknown): { artifactId: string; revision: number }[] {
   if (!Array.isArray(value)) return [];
-  return value.flatMap((item) => {
+  const surfaces = new Map<string, { artifactId: string; revision: number }>();
+  for (const item of value) {
     const surface = record(item);
-    return typeof surface?.artifactId === "string" &&
+    if (
+      typeof surface?.artifactId === "string" &&
       typeof surface.revision === "number" &&
       Number.isInteger(surface.revision) &&
       surface.revision > 0
-      ? [{ artifactId: surface.artifactId, revision: surface.revision }]
-      : [];
-  });
+    ) {
+      const existing = surfaces.get(surface.artifactId);
+      if (existing === undefined || existing.revision <= surface.revision) {
+        surfaces.set(surface.artifactId, {
+          artifactId: surface.artifactId,
+          revision: surface.revision,
+        });
+      }
+    }
+  }
+  return [...surfaces.values()];
 }
 
 function preview(value: unknown): ParticipantToolCall["argsPreview"] {

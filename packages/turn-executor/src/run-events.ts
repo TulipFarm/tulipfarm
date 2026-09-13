@@ -150,12 +150,8 @@ export class TurnEventWriter implements AgentLoopEventSink {
     this.toolCallsById = new Map(
       initial?.toolCalls.map((call) => [call.callId, { ...call }]) ?? []
     );
-    this.surfacesById = new Map(
-      initial?.surfaces.map((surface) => [
-        `${surface.artifactId}:${surface.revision}`,
-        { ...surface },
-      ]) ?? []
-    );
+    this.surfacesById = new Map();
+    for (const surface of initial?.surfaces ?? []) this.recordSurface(surface);
   }
 
   /** Highest Run event sequence this writer appended; readers resume strictly after it. */
@@ -177,7 +173,7 @@ export class TurnEventWriter implements AgentLoopEventSink {
   }
 
   /**
-   * Surfaces this Turn presented, in the order they were emitted.
+   * Latest Surface revisions this Turn presented, in first-emission order.
    *
    * The reference is recorded here before publication so a checkpoint and the event both preserve
    * the exact revision the reader saw, not whichever revision the Artifact later reaches.
@@ -188,7 +184,9 @@ export class TurnEventWriter implements AgentLoopEventSink {
 
   /** Records a presented Surface so a completed Turn can link it into the transcript. */
   recordSurface(surface: TurnSurfaceRef): void {
-    this.surfacesById.set(`${surface.artifactId}:${surface.revision}`, surface);
+    const existing = this.surfacesById.get(surface.artifactId);
+    if (existing !== undefined && existing.revision > surface.revision) return;
+    this.surfacesById.set(surface.artifactId, surface);
   }
 
   /** Immutable participant-safe snapshot suitable for durable attempt history. */
@@ -293,6 +291,9 @@ export class TurnEventWriter implements AgentLoopEventSink {
           ...(answeredFrom.argsPreview === undefined
             ? {}
             : { argsPreview: answeredFrom.argsPreview }),
+          ...(answeredFrom.participantActivity === undefined
+            ? {}
+            : { participantActivity: answeredFrom.participantActivity }),
           // Deliberately not the sibling's `batchId`: no Tool ran for this call, so counting it
           // towards "N at the same time" would overstate what the Run actually did in parallel.
         },
@@ -318,8 +319,12 @@ export class TurnEventWriter implements AgentLoopEventSink {
         "tool.result",
         {
           callId: event.callId ?? "",
+          ...(event.toolName === undefined ? {} : { name: event.toolName }),
           status: "error",
           ...(event.outcome === undefined ? {} : { errorCode: event.outcome }),
+          ...(event.participantActivity === undefined
+            ? {}
+            : { participantActivity: event.participantActivity }),
         },
         key
       );
@@ -338,6 +343,9 @@ export class TurnEventWriter implements AgentLoopEventSink {
         ...(call.argsDigest === undefined ? {} : { argsDigest: call.argsDigest }),
         ...(call.argsPreview === undefined ? {} : { argsPreview: call.argsPreview }),
         ...(call.batchId === undefined ? {} : { batchId: call.batchId }),
+        ...(call.participantActivity === undefined
+          ? {}
+          : { participantActivity: call.participantActivity }),
       });
       return;
     }
@@ -345,13 +353,29 @@ export class TurnEventWriter implements AgentLoopEventSink {
     if (type === "tool.result") {
       const result = payload as RunEventPayloads["tool.result"];
       const existing = this.toolCallsById.get(result.callId);
-      if (existing === undefined) return;
+      if (existing === undefined) {
+        if (result.name === undefined) return;
+        this.toolCallOrder.push(result.callId);
+        this.toolCallsById.set(result.callId, {
+          callId: result.callId,
+          name: result.name,
+          outcome: result.status,
+          ...(result.errorCode === undefined ? {} : { errorCode: result.errorCode }),
+          ...(result.participantActivity === undefined
+            ? {}
+            : { participantActivity: result.participantActivity }),
+        });
+        return;
+      }
       this.toolCallsById.set(result.callId, {
         ...existing,
         outcome: result.status,
         ...(result.resultPreview === undefined ? {} : { resultPreview: result.resultPreview }),
         ...(result.durationMs === undefined ? {} : { durationMs: result.durationMs }),
         ...(result.errorCode === undefined ? {} : { errorCode: result.errorCode }),
+        ...(result.participantActivity === undefined
+          ? {}
+          : { participantActivity: result.participantActivity }),
       });
     }
   }

@@ -97,7 +97,8 @@ export class TerminalTurnSettler {
     if (
       settled.text.length === 0 &&
       settled.toolCalls.length === 0 &&
-      settled.surfaces.length === 0
+      settled.surfaces.length === 0 &&
+      outcome !== "cancelled"
     ) {
       return;
     }

@@ -2,6 +2,7 @@ import type { EventEmitter } from "node:events";
 import { type FileService, isAttachmentRefusal, resolveAttachments } from "@tulipfarm/files";
 import type { LlmService } from "@tulipfarm/llm";
 import type { DurableInvocationGateway } from "@tulipfarm/run-kernel";
+import { ajv } from "@tulipfarm/schema";
 import type { SoulLoader } from "@tulipfarm/soul";
 import { DEFAULT_ASSISTANT_ID, resolveAgent } from "@tulipfarm/soul";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
@@ -28,6 +29,7 @@ import { type ChatBody, ChatBodySchema, corsPassthrough } from "./turn-helpers";
 import { type ChatSubmission, durableTurnSubmitter } from "./turn-submit";
 
 type PreHandler = (req: FastifyRequest, reply: FastifyReply) => Promise<void>;
+const validateStoredChatBody = ajv.compile(ChatBodySchema);
 
 /**
  * The Agent name a client should see, from the id the Conversation stores.
@@ -51,6 +53,44 @@ function scopedIdempotencyKey(
   clientKey: string
 ): string {
   return `${principal.businessId}:${principal.kind}:${principal.id}:${conversationId ?? "new"}:${clientKey}`;
+}
+
+function turnRequestMetadata(
+  body: ChatBody,
+  conversationId: string,
+  agentId: string
+): Record<string, unknown> {
+  return {
+    version: 1,
+    ...body,
+    conversationId,
+    agentId,
+    message: {
+      ...body.message,
+      ...(body.message.fileIds === undefined ? {} : { fileIds: [...body.message.fileIds] }),
+    },
+  };
+}
+
+function storedRetryBody(
+  request: { content: unknown; metadata?: Record<string, unknown> },
+  conversationId: string
+): ChatBody | null | undefined {
+  const stored = request.metadata?.turnRequest;
+  if (stored === undefined) return undefined;
+  if (typeof stored !== "object" || stored === null || Array.isArray(stored)) return null;
+  const { version, ...candidate } = stored as Record<string, unknown>;
+  if (version === undefined) return undefined;
+  if (
+    version !== 1 ||
+    typeof candidate.agentId !== "string" ||
+    candidate.agentId.length === 0 ||
+    candidate.conversationId !== conversationId ||
+    !validateStoredChatBody(candidate)
+  ) {
+    return null;
+  }
+  return { ...(candidate as ChatBody), conversationId };
 }
 
 /** 409 body when a client key is reused for a different normalized request. */
@@ -184,12 +224,18 @@ export function registerChatRoutes(
         return reply.code(entry.status).send({ error: entry.error });
       }
 
+      const resolvedBody = {
+        ...body,
+        conversationId: entry.conversation._id,
+        agentId: entry.agentId,
+      };
       const resolvedSubmitter = durableTurnSubmitter({
         store: options.conversationStore,
         invocations: options.invocations,
         principal: { kind: principal.kind, id: principal.id, businessId: principal.businessId },
-        payload: { ...body, agentId: entry.agentId },
+        payload: resolvedBody,
         requestFingerprintPayload: body,
+        requestMetadata: turnRequestMetadata(body, entry.conversation._id, entry.agentId),
         agentId: entry.agentId,
         idempotencyKey,
         log: req.log,
@@ -298,6 +344,7 @@ export function registerChatRoutes(
           401: ErrorSchema,
           403: ErrorSchema,
           404: ErrorSchema,
+          409: ErrorSchema,
           429: ErrorSchema,
           503: ErrorSchema,
         },
@@ -320,19 +367,31 @@ export function registerChatRoutes(
         return reply.code(404).send({ error: "turn not found" });
       }
 
-      // The Agent is the Conversation's, never the body's: a retry re-runs the question that was
-      // asked, and letting the client re-target it here would be an edit wearing a retry's name.
-      const agentId = conversation.agentId ?? DEFAULT_ASSISTANT_ID;
+      const messages = await options.conversationStore.listMessages(
+        principal.businessId,
+        turn.conversationId
+      );
+      const request = messages.find((message) => message.id === turn.requestMessageId);
+      if (request === undefined) return reply.code(404).send({ error: "turn not found" });
+      const persistedBody = storedRetryBody(request, turn.conversationId);
+      if (persistedBody === null) {
+        return reply.code(409).send({ error: "Stored request cannot be retried" });
+      }
+      const agentId = persistedBody?.agentId ?? conversation.agentId ?? DEFAULT_ASSISTANT_ID;
       const agent = resolveAgent(options.soulLoader, agentId);
       if (!agent) return reply.code(404).send({ error: "agent not found" });
       if (!(await mayUseAgent(agent, principal, options.teamAssets))) {
         return reply.code(403).send({ error: "Agent use access is required" });
       }
+      const retryBody =
+        persistedBody === undefined
+          ? { ...body, conversationId: turn.conversationId, agentId }
+          : persistedBody;
       const conversations = chatConversationService(
         { store: options.conversationStore, invocations: options.invocations },
         {
           principal: { kind: principal.kind, id: principal.id, businessId: principal.businessId },
-          payload: { ...body, conversationId: turn.conversationId, agentId },
+          payload: retryBody,
           agentId,
         }
       );

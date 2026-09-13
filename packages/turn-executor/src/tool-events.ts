@@ -114,6 +114,9 @@ export function announceToolCalls(
           // never turn two adjacent calls into two concurrent ones.
           ...(request.batchId === undefined ? {} : { batchId: request.batchId }),
           startedAt: new Date(startedAt).toISOString(),
+          ...(request.participantActivity === undefined
+            ? {}
+            : { participantActivity: request.participantActivity }),
         },
         `tool:call:${request.callId}`
       );

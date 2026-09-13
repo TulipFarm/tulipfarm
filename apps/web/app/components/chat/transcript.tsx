@@ -1,4 +1,4 @@
-import { memo, type ReactNode, useEffect, useMemo, useRef, useState } from "react";
+import { memo, type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Check, ChevronsUp, Copy, RotateCcw, ThumbsDown, ThumbsUp } from "~/components/icons";
 import { MarkdownView } from "~/components/markdown-view";
 import { LoadingState } from "~/components/ui/loading-state";
@@ -19,6 +19,8 @@ function partKey(part: TimelinePart, i: number): string {
   switch (part.kind) {
     case "tool":
       return `tool-${part.toolCallId}`;
+    case "surface":
+      return `surface-${part.artifactId}-${part.revision ?? "latest"}`;
     default:
       return `${part.kind}-${i}`;
   }
@@ -326,7 +328,7 @@ function MessageRow({
   status: ChatStatus;
   isLast: boolean;
   mentions?: MentionEntry[];
-  onApprove: (approvalId: string, decision: "approve" | "deny") => void;
+  onApprove: (approvalId: string, decision: "approve" | "deny") => void | Promise<void>;
   onRegenerate?: () => void;
   onTryHarder?: (messageId: string, model: NonNullable<ModelReceipt["effortPreset"]>) => void;
   onFeedback?: (messageId: string, rating: "up" | "down" | null, note?: string) => void;
@@ -452,7 +454,7 @@ export function Transcript({
   messages: ChatMessage[];
   status: ChatStatus;
   mentions?: MentionEntry[];
-  onApprove: (approvalId: string, decision: "approve" | "deny") => void;
+  onApprove: (approvalId: string, decision: "approve" | "deny") => void | Promise<void>;
   onRegenerate?: () => void;
   onTryHarder?: (messageId: string, model: NonNullable<ModelReceipt["effortPreset"]>) => void;
   onFeedback?: (messageId: string, rating: "up" | "down" | null, note?: string) => void;
@@ -463,70 +465,61 @@ export function Transcript({
   onReviseDraft?: (draft: FileDraftResult) => void;
 }) {
   const scrollRef = useRef<HTMLDivElement>(null);
-  const lastBlockRef = useRef<HTMLDivElement>(null);
-  // Whether the reader is following the stream at the bottom. Only a deliberate user gesture
-  // (wheel/touch) may unstick it; a scroll event with no such gesture behind it is an incidental
-  // jump — a collapsing trace, a layout shift — and must not be read as "the reader scrolled up",
-  // or the tail of a finished turn silently stops reaching the viewport (#728).
+  const contentRef = useRef<HTMLDivElement>(null);
   const stick = useRef(true);
-  const userGesture = useRef(false);
-
-  function onWheelOrTouch() {
-    userGesture.current = true;
-  }
+  const programmaticScrollTop = useRef<number | null>(null);
 
   function onScroll() {
     const el = scrollRef.current;
     if (!el) return;
     const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 48;
+    const programmatic =
+      programmaticScrollTop.current !== null &&
+      Math.abs(el.scrollTop - programmaticScrollTop.current) < 1;
+    programmaticScrollTop.current = null;
     // Reaching the bottom re-arms sticking regardless of what caused it — including our own
     // programmatic jump — so a stale "unstuck" state from an earlier incidental scroll cannot
     // outlive the moment the reader is actually back at the tail.
     if (atBottom) {
       stick.current = true;
-    } else if (userGesture.current) {
+    } else if (!programmatic) {
       stick.current = false;
     }
   }
 
-  // Auto-scroll is layout-forcing, so coalesce bursts of stream updates into one write per frame.
-  // Writing scrollTop instead of scrolling a sentinel into view keeps the movement inside this
-  // container: scrollIntoView also scrolls every scrollable ancestor, which dragged the shell's
-  // <main> and the document down whenever a response started loading (#69).
-  // biome-ignore lint/correctness/useExhaustiveDependencies: re-pin on any transcript change
-  useEffect(() => {
+  const followBottom = useCallback(() => {
     if (!stick.current) return;
     const frame = requestAnimationFrame(() => {
       const el = scrollRef.current;
       if (!el) return;
-      const block = lastBlockRef.current;
-      // A block taller than the viewport lands the reader mid-card if the container is simply
-      // pinned to `scrollHeight` — the tail shows, not the start of what just appeared. Anchor to
-      // the block's own top instead, so a large delta always opens on its beginning.
-      if (block && block.getBoundingClientRect().height > el.clientHeight) {
-        const withinEl =
-          el.scrollTop + (block.getBoundingClientRect().top - el.getBoundingClientRect().top);
-        el.scrollTop = Math.max(0, withinEl);
-      } else {
-        el.scrollTop = el.scrollHeight;
-      }
+      const selection = window.getSelection();
+      if (selection && !selection.isCollapsed && el.contains(selection.anchorNode)) return;
+      programmaticScrollTop.current = el.scrollHeight;
+      el.scrollTop = el.scrollHeight;
     });
     return () => cancelAnimationFrame(frame);
-  }, [messages, status]);
+  }, []);
+
+  // biome-ignore lint/correctness/useExhaustiveDependencies: transcript changes are the trigger
+  useEffect(() => followBottom(), [followBottom, messages, status]);
+  useEffect(() => {
+    const content = contentRef.current;
+    if (content === null || typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(() => followBottom());
+    observer.observe(content);
+    return () => observer.disconnect();
+  }, [followBottom]);
 
   return (
-    <div
-      ref={scrollRef}
-      onScroll={onScroll}
-      onWheel={onWheelOrTouch}
-      onTouchMove={onWheelOrTouch}
-      className="flex-1 min-h-0 overflow-y-auto"
-    >
-      <div className="mx-auto flex w-full max-w-4xl flex-col gap-7 px-4 py-7 sm:px-6 sm:py-9">
+    <div ref={scrollRef} onScroll={onScroll} className="flex-1 min-h-0 overflow-y-auto">
+      <div
+        ref={contentRef}
+        className="mx-auto flex w-full max-w-4xl flex-col gap-7 px-4 py-7 sm:px-6 sm:py-9"
+      >
         {messages.map((m, i) => {
           const isLast = i === messages.length - 1;
           return (
-            <div key={m.id} ref={isLast ? lastBlockRef : undefined}>
+            <div key={m.id}>
               <Message
                 message={m}
                 status={status}

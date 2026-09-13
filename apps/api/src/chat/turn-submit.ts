@@ -55,6 +55,7 @@ export interface DurableTurnSubmitterDeps {
   readonly payload: unknown;
   /** Raw normalized request used for idempotency; excludes mutable Conversation defaults. */
   readonly requestFingerprintPayload?: unknown;
+  readonly requestMetadata?: Record<string, unknown>;
   readonly agentId: string;
   readonly idempotencyKey: string;
   readonly log: FastifyBaseLogger;
@@ -103,6 +104,7 @@ export function durableTurnSubmitter(deps: DurableTurnSubmitterDeps): ChatTurnSu
           ...(files === undefined ? {} : { files }),
           idempotencyKey: deps.idempotencyKey,
           requestFingerprint,
+          ...(deps.requestMetadata === undefined ? {} : { requestMetadata: deps.requestMetadata }),
           ...(conversationToCreate === undefined ? {} : { newConversation: conversationToCreate }),
           ...(conversationUpdate === undefined ? {} : { conversationUpdate }),
         });

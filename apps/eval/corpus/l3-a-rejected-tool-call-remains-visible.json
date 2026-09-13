@@ -1,0 +1,104 @@
+{
+  "id": "l3-a-rejected-tool-call-remains-visible",
+  "tier": "l3",
+  "agent": "support",
+  "input": [
+    {
+      "role": "user",
+      "content": "Send the same shipment notice twice."
+    }
+  ],
+  "tools": [
+    {
+      "name": "send_shipment_notice",
+      "description": "Send one shipment notice.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "orderId": {
+            "type": "string"
+          }
+        },
+        "required": ["orderId"]
+      },
+      "mutating": true,
+      "sideEffecting": true,
+      "participantActivity": "visible"
+    }
+  ],
+  "toolResults": [
+    {
+      "name": "send_shipment_notice",
+      "when": {
+        "orderId": "order-104"
+      },
+      "output": {
+        "sent": true
+      }
+    }
+  ],
+  "script": [
+    {
+      "kind": "tool_calls",
+      "calls": [
+        {
+          "callId": "notice-1",
+          "name": "send_shipment_notice",
+          "arguments": {
+            "orderId": "order-104"
+          }
+        }
+      ]
+    },
+    {
+      "kind": "tool_calls",
+      "calls": [
+        {
+          "callId": "notice-2",
+          "name": "send_shipment_notice",
+          "arguments": {
+            "orderId": "order-104"
+          }
+        }
+      ]
+    },
+    {
+      "kind": "text",
+      "text": "I sent one shipment notice and did not send a duplicate."
+    }
+  ],
+  "expect": [
+    {
+      "kind": "tool_called",
+      "name": "send_shipment_notice"
+    },
+    {
+      "kind": "persisted_message_metadata_equals",
+      "path": "toolCalls.1.name",
+      "value": "send_shipment_notice"
+    },
+    {
+      "kind": "persisted_message_metadata_equals",
+      "path": "toolCalls.1.outcome",
+      "value": "error"
+    },
+    {
+      "kind": "persisted_message_metadata_equals",
+      "path": "toolCalls.1.errorCode",
+      "value": "repeated_side_effect"
+    },
+    {
+      "kind": "persisted_message_metadata_equals",
+      "path": "toolCalls.1.participantActivity",
+      "value": "visible"
+    },
+    {
+      "kind": "run_status",
+      "status": "succeeded"
+    },
+    {
+      "kind": "turn_status",
+      "status": "succeeded"
+    }
+  ]
+}

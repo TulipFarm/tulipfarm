@@ -4,32 +4,17 @@ import type { TimelinePart, ToolTier } from "~/lib/chat/types";
 
 type ToolPart = Extract<TimelinePart, { kind: "tool" }>;
 
-/** Hide plumbing/presentation rows: their output already renders as the thing they produced. */
-const PRESENTATION_TOOL_NAMES = new Set(["present", "update_presentation", "request_input"]);
-
-/**
- * Whether this Tool builds the reply's own UI rather than doing work the reader follows.
- *
- * These never earn a Tool row, in any outcome. A reader watching an answer take shape does not
- * think of the rendering as a step the agent took, and a failed `present` that the agent
- * immediately retries is machinery, not evidence — showing it puts a red row above a table that
- * rendered perfectly well.
- */
-export function isPresentationToolPart(part: ToolPart): boolean {
-  return PRESENTATION_TOOL_NAMES.has(part.toolName);
-}
-
 /** The Tool an Agent calls to declare its plan for a Turn. */
 export const PLAN_TOOL_NAME = "plan_declare";
 
+/** Whether the Tool's own participant-facing output represents its successful activity. */
+export function isPresentationToolPart(part: ToolPart): boolean {
+  return part.meta?.participantActivity === "represented";
+}
+
 /** Whether this Tool row is suppressed because its output already renders as something else. */
 export function isHiddenToolPart(part: ToolPart): boolean {
-  if (part.toolName === "cite_sources") return true;
-  // A declared plan renders as the plan, so a row saying the Agent declared one is the same fact
-  // told twice. A *failed* declaration renders as nothing at all, so it keeps its row: the reader
-  // is owed the reason the plan they were about to see never arrived.
-  if (part.toolName === PLAN_TOOL_NAME) return part.status !== "done" || part.outcome !== "error";
-  return isPresentationToolPart(part);
+  return isPresentationToolPart(part) && part.outcome !== "error";
 }
 
 export type ToolFamily =

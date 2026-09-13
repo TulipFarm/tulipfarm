@@ -1,5 +1,12 @@
 import { isRecord } from "@tulipfarm/schema/guards";
-import type { ChatMessage, SourceRef, TimelinePart, ToolPreview } from "~/lib/chat/types";
+import { sourcesFromToolPreview, sourcesFromToolResult } from "~/lib/chat/citations";
+import type {
+  ChatMessage,
+  ChatTurnOptions,
+  ChatTurnSource,
+  TimelinePart,
+  ToolPreview,
+} from "~/lib/chat/types";
 import type { ConversationMessage, WireMessagePart } from "~/lib/conversations";
 import { randomUUID } from "~/lib/uuid";
 
@@ -43,6 +50,7 @@ type PersistedToolCall = {
   outcome?: "ok" | "error";
   errorCode?: string;
   batchId?: string;
+  participantActivity?: "visible" | "represented";
 };
 
 function previewFrom(value: unknown): ToolPreview | undefined {
@@ -73,6 +81,9 @@ function persistedToolCallFrom(value: unknown): PersistedToolCall | undefined {
     ...(value.outcome === "ok" || value.outcome === "error" ? { outcome: value.outcome } : {}),
     ...(typeof value.errorCode === "string" ? { errorCode: value.errorCode } : {}),
     ...(typeof value.batchId === "string" ? { batchId: value.batchId } : {}),
+    ...(value.participantActivity === "visible" || value.participantActivity === "represented"
+      ? { participantActivity: value.participantActivity }
+      : {}),
   };
 }
 
@@ -90,6 +101,9 @@ function toolPartsFromMetadata(
       ...(tool.durationMs === undefined ? {} : { durationMs: tool.durationMs }),
       ...(tool.errorCode === undefined ? {} : { errorCode: tool.errorCode }),
       ...(tool.batchId === undefined ? {} : { batchId: tool.batchId }),
+      ...(tool.participantActivity === undefined
+        ? {}
+        : { participantActivity: tool.participantActivity }),
     };
     const interrupted =
       tool.outcome === undefined &&
@@ -100,7 +114,7 @@ function toolPartsFromMetadata(
         kind: "tool",
         toolCallId: tool.callId,
         toolName: tool.name,
-        args: tool.argsDigest === undefined ? {} : { argsDigest: tool.argsDigest },
+        args: tool.argsDigest === undefined ? undefined : { argsDigest: tool.argsDigest },
         status: interrupted ? "interrupted" : "done",
         ...(tool.argsPreview === undefined ? {} : { argsPreview: tool.argsPreview }),
         ...(tool.resultPreview === undefined ? {} : { resultPreview: tool.resultPreview }),
@@ -122,7 +136,8 @@ function toolPartsFromMetadata(
 function surfacePartsFromMetadata(metadata: Record<string, unknown> | undefined): TimelinePart[] {
   const rawSurfaces = metadata?.surfaces;
   if (!Array.isArray(rawSurfaces)) return [];
-  return rawSurfaces.flatMap((raw): TimelinePart[] => {
+  const surfaces = new Map<string, Extract<TimelinePart, { kind: "surface" }>>();
+  for (const raw of rawSurfaces) {
     if (
       !isRecord(raw) ||
       typeof raw.artifactId !== "string" ||
@@ -130,10 +145,18 @@ function surfacePartsFromMetadata(metadata: Record<string, unknown> | undefined)
       !Number.isInteger(raw.revision) ||
       raw.revision < 1
     ) {
-      return [];
+      continue;
     }
-    return [{ kind: "surface", artifactId: raw.artifactId, revision: raw.revision }];
-  });
+    const existing = surfaces.get(raw.artifactId);
+    if (existing === undefined || (existing.revision ?? 0) <= raw.revision) {
+      surfaces.set(raw.artifactId, {
+        kind: "surface",
+        artifactId: raw.artifactId,
+        revision: raw.revision,
+      });
+    }
+  }
+  return [...surfaces.values()];
 }
 
 function turnAttemptFrom(
@@ -189,32 +212,31 @@ function turnAttemptFrom(
   };
 }
 
-// Pull the SourceRef[] out of a persisted cite_sources tool-result (`{ data: { sources } }`), so a
-// restored transcript can rebuild its citation chips. Defensive — unknown/legacy shapes yield [].
-function sourcesFromResult(result: unknown): SourceRef[] {
-  const sources = (result as { data?: { sources?: unknown } })?.data?.sources;
-  return Array.isArray(sources) ? (sources as SourceRef[]) : [];
-}
-
 // Fold a `tool` turn's results into the matching tool parts of the assistant turn it answers. A
 // cite_sources result also reconstructs the `sources` part the live reducer would have appended, so
 // citations (and inline [n] links) survive a page refresh.
 function mergeToolResults(assistant: ChatMessage, content: WireMessagePart[]): void {
   for (const part of content) {
     if (part.type === "surface") {
-      if (
-        !assistant.parts.some(
-          (existing) =>
-            existing.kind === "surface" &&
-            existing.artifactId === part.artifactId &&
-            existing.revision === part.revision
-        )
-      ) {
+      const existing = assistant.parts.findIndex(
+        (candidate) => candidate.kind === "surface" && candidate.artifactId === part.artifactId
+      );
+      const current = existing < 0 ? undefined : assistant.parts[existing];
+      if (existing < 0) {
         assistant.parts.push({
           kind: "surface",
           artifactId: part.artifactId,
           revision: part.revision,
         });
+      } else if (
+        current?.kind === "surface" &&
+        (current.revision === undefined || current.revision <= part.revision)
+      ) {
+        assistant.parts[existing] = {
+          kind: "surface",
+          artifactId: part.artifactId,
+          revision: part.revision,
+        };
       }
       continue;
     }
@@ -230,10 +252,8 @@ function mergeToolResults(assistant: ChatMessage, content: WireMessagePart[]): v
       if (p.kind === "tool" && p.toolCallId === part.toolCallId) {
         p.result = part.result;
         p.status = "done";
-        if (p.toolName === "cite_sources") {
-          const sources = sourcesFromResult(part.result);
-          if (sources.length > 0) assistant.parts.push({ kind: "sources", sources });
-        }
+        const sources = sourcesFromToolResult(part.result);
+        if (sources.length > 0) assistant.parts.push({ kind: "sources", sources });
       }
     }
   }
@@ -268,6 +288,44 @@ function userParts(content: ConversationMessage["content"]): TimelinePart[] {
   return parts.length > 0 ? parts : [{ kind: "text", text: "" }];
 }
 
+function stringArray(value: unknown): string[] | undefined {
+  return Array.isArray(value) && value.every((item) => typeof item === "string")
+    ? [...value]
+    : undefined;
+}
+
+function turnSourceFrom(
+  doc: ConversationMessage,
+  parts: TimelinePart[]
+): ChatTurnSource | undefined {
+  const raw = doc.metadata?.turnRequest;
+  if (!isRecord(raw)) return undefined;
+  const text = parts
+    .filter((part): part is Extract<TimelinePart, { kind: "text" }> => part.kind === "text")
+    .map((part) => part.text)
+    .join("");
+  const files = parts.flatMap((part) =>
+    part.kind === "file"
+      ? [{ fileId: part.fileId, mediaType: part.mediaType, name: part.name }]
+      : []
+  );
+  const skills = stringArray(raw.skills);
+  const resources = stringArray(raw.resources);
+  const knowledgePages = stringArray(raw.knowledgePages);
+  const options: ChatTurnOptions = {
+    ...(typeof raw.model === "string" ? { model: raw.model as ChatTurnOptions["model"] } : {}),
+    ...(typeof raw.autonomy === "string"
+      ? { autonomy: raw.autonomy as ChatTurnOptions["autonomy"] }
+      : {}),
+    ...(typeof raw.agentId === "string" ? { agentId: raw.agentId } : {}),
+    ...(skills === undefined ? {} : { skills }),
+    ...(resources === undefined ? {} : { resources }),
+    ...(knowledgePages === undefined ? {} : { knowledgePages }),
+    ...(files.length === 0 ? {} : { files }),
+  };
+  return Object.keys(options).length === 0 && text.length === 0 ? undefined : { text, options };
+}
+
 export function messagesToTimeline(
   docs: ConversationMessage[],
   votes?: Map<string, "up" | "down">
@@ -276,7 +334,15 @@ export function messagesToTimeline(
   let lastAssistant: ChatMessage | undefined;
   for (const doc of docs) {
     if (doc.role === "user") {
-      out.push({ id: newId(), role: "user", parts: userParts(doc.content), sealed: true });
+      const parts = userParts(doc.content);
+      const sourceTurn = turnSourceFrom(doc, parts);
+      out.push({
+        id: newId(),
+        role: "user",
+        parts,
+        sealed: true,
+        ...(sourceTurn === undefined ? {} : { sourceTurn }),
+      });
       lastAssistant = undefined;
     } else if (doc.role === "assistant") {
       const turnAttempt = turnAttemptFrom(doc.metadata);
@@ -293,6 +359,9 @@ export function messagesToTimeline(
           ...toolPartsFromMetadata(doc.metadata, turnAttempt),
           ...assistantParts(doc.content),
           ...surfacePartsFromMetadata(doc.metadata),
+          ...(turnAttempt?.outcome === "cancelled"
+            ? [{ kind: "turn-status" as const, status: "cancelled" as const }]
+            : []),
         ],
         sealed: turnAttempt?.complete ?? true,
         feedback: votes?.get(doc._id),
@@ -303,7 +372,14 @@ export function messagesToTimeline(
           if (part.kind === "tool" && part.outcome === undefined) part.status = "running";
         }
       }
-      const pendingApproval = turnAttempt?.wait?.kind === "approval" ? turnAttempt.wait : undefined;
+      const sources = message.parts.flatMap((part) =>
+        part.kind === "tool" ? sourcesFromToolPreview(part.resultPreview) : []
+      );
+      if (sources.length > 0) message.parts.push({ kind: "sources", sources });
+      const pendingApproval =
+        turnAttempt?.complete === false && turnAttempt.wait?.kind === "approval"
+          ? turnAttempt.wait
+          : undefined;
       if (pendingApproval !== undefined) {
         const tool = message.parts.find(
           (part) => part.kind === "tool" && part.toolCallId === pendingApproval.callId

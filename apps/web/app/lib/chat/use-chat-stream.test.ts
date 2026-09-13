@@ -65,4 +65,30 @@ describe("seedState", () => {
     expect(state.status).toBe("idle");
     expect(state).not.toHaveProperty("runId");
   });
+
+  it("restores a cancelled empty attempt without reporting a model failure", () => {
+    const state = seedState({
+      initialConversationId: "conversation",
+      initialMessages: [
+        {
+          id: "reply",
+          role: "assistant",
+          parts: [{ kind: "turn-status", status: "cancelled" }],
+          sealed: true,
+          turnAttempt: {
+            runId: "run-1",
+            attempt: 1,
+            cursor: 2,
+            outcome: "cancelled",
+            complete: true,
+          },
+        },
+      ],
+      initialTurn: { id: "turn-1", runId: "run-1", status: "failed" },
+    });
+
+    expect(state.status).toBe("idle");
+    expect(state.error).toBeUndefined();
+    expect(state.messages[0]?.parts).toEqual([{ kind: "turn-status", status: "cancelled" }]);
+  });
 });

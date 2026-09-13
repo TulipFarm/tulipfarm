@@ -5,10 +5,40 @@ import {
   describeToolResult,
   formatBytes,
   formatDuration,
+  isHiddenToolPart,
   toolFamily,
   toolSubject,
   toolTierLabel,
 } from "./tool-summary";
+
+describe("participant Tool visibility", () => {
+  const tool = (over: Partial<Extract<TimelinePart, { kind: "tool" }>> = {}) =>
+    ({
+      kind: "tool",
+      toolCallId: "call-1",
+      toolName: "custom_tool",
+      args: {},
+      status: "done",
+      ...over,
+    }) as Extract<TimelinePart, { kind: "tool" }>;
+
+  it("uses declared participant metadata instead of Tool names", () => {
+    expect(isHiddenToolPart(tool({ meta: { participantActivity: "represented" } }))).toBe(true);
+    expect(isHiddenToolPart(tool({ toolName: "present" }))).toBe(false);
+    expect(isHiddenToolPart(tool({ toolName: "custom_tool" }))).toBe(false);
+  });
+
+  it("keeps a represented Tool visible when it failed", () => {
+    expect(
+      isHiddenToolPart(
+        tool({
+          meta: { participantActivity: "represented" },
+          outcome: "error",
+        })
+      )
+    ).toBe(false);
+  });
+});
 
 describe("toolFamily", () => {
   it("matches the real tool names the product registers", () => {

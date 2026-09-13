@@ -280,6 +280,7 @@ export const planDeclareTool = defineApiTool<PlatformRuntimeContext>({
     "runs anything.",
   mutating: false,
   tier: "platform",
+  participantActivity: "represented",
   inputSchema: PLAN_DECLARE_SCHEMA,
   authorization: {
     action: "platform.plan.declare",

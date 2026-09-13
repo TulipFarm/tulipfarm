@@ -131,7 +131,31 @@ describe("InternalTurnHost", () => {
                   sequence: 6,
                   eventType: "surface.emitted",
                   audience: "participant",
-                  payload: { artifactId: "artifact-2", revision: 3 },
+                  payload: { artifactId: "artifact-1", revision: 7 },
+                  occurredAt: NOW.toISOString(),
+                },
+                {
+                  businessId: BUSINESS_ID,
+                  runId: RUN_ID,
+                  sequence: 7,
+                  eventType: "surface.emitted",
+                  audience: "participant",
+                  payload: { artifactId: "artifact-1", revision: 5 },
+                  occurredAt: NOW.toISOString(),
+                },
+                {
+                  businessId: BUSINESS_ID,
+                  runId: RUN_ID,
+                  sequence: 8,
+                  eventType: "tool.result",
+                  audience: "participant",
+                  payload: {
+                    callId: "call-2",
+                    name: "record_create",
+                    status: "error",
+                    errorCode: "repeated_side_effect",
+                    participantActivity: "visible",
+                  },
                   occurredAt: NOW.toISOString(),
                 },
               ]
@@ -142,7 +166,7 @@ describe("InternalTurnHost", () => {
     await expect(host.describeTurn(BUSINESS_ID, RUN_ID)).resolves.toMatchObject({
       history: {
         text: "Already checked. Done.",
-        cursor: 6,
+        cursor: 8,
         toolCalls: [
           {
             callId: "call-1",
@@ -151,11 +175,15 @@ describe("InternalTurnHost", () => {
             outcome: "ok",
             resultPreview: { json: '{"count":2}', bytes: 11 },
           },
+          {
+            callId: "call-2",
+            name: "record_create",
+            outcome: "error",
+            errorCode: "repeated_side_effect",
+            participantActivity: "visible",
+          },
         ],
-        surfaces: [
-          { artifactId: "artifact-1", revision: 6 },
-          { artifactId: "artifact-2", revision: 3 },
-        ],
+        surfaces: [{ artifactId: "artifact-1", revision: 7 }],
         wait: {
           kind: "approval",
           waitId: "wait-1",

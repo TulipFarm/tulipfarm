@@ -39,7 +39,7 @@ export function ToolStepRow({
   part: ToolPart;
   label?: string;
   className?: string;
-  onApprove?: (approvalId: string, decision: "approve" | "deny") => void;
+  onApprove?: (approvalId: string, decision: "approve" | "deny") => void | Promise<void>;
   onReviseDraft?: (draft: FileDraftResult) => void;
 }) {
   const ran = summarizeToolCall(part);

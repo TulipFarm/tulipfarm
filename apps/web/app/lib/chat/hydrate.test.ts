@@ -147,7 +147,7 @@ describe("messagesToTimeline", () => {
         _id: "surface-link",
         conversationId: "conversation",
         role: "tool",
-        content: [{ type: "surface", artifactId: "artifact", revision: 4 }],
+        content: [{ type: "surface", artifactId: "artifact", revision: 5 }],
         createdAt: "2026-01-01T00:00:01.000Z",
       },
       {
@@ -174,10 +174,32 @@ describe("messagesToTimeline", () => {
       turnAttempt: { runId: "run-1", attempt: 1, cursor: 8, complete: true },
       parts: [
         { kind: "text", text: "Safe progress from attempt one." },
-        { kind: "surface", artifactId: "artifact", revision: 4 },
+        { kind: "surface", artifactId: "artifact", revision: 5 },
       ],
     });
+
     expect(timeline[1]?.parts).toEqual([{ kind: "text", text: "The retry finished." }]);
+  });
+
+  it("restores only the latest Surface revision within one attempt", () => {
+    const timeline = messagesToTimeline([
+      {
+        _id: "attempt",
+        conversationId: "conversation",
+        role: "assistant",
+        content: "",
+        metadata: {
+          surfaces: [
+            { artifactId: "artifact", revision: 2 },
+            { artifactId: "artifact", revision: 4 },
+            { artifactId: "artifact", revision: 3 },
+          ],
+        },
+        createdAt: "2026-01-01T00:00:00.000Z",
+      },
+    ]);
+
+    expect(timeline[0]?.parts).toEqual([{ kind: "surface", artifactId: "artifact", revision: 4 }]);
   });
 
   it("leaves an incomplete attempt open for live events to continue", () => {
@@ -245,15 +267,53 @@ describe("messagesToTimeline", () => {
         },
       ]);
 
-      expect(timeline[0]?.parts).toEqual([
+      expect(timeline[0]?.parts).toContainEqual(
         expect.objectContaining({
           kind: "tool",
           toolCallId: "call-1",
           status: "interrupted",
-        }),
-      ]);
+        })
+      );
     }
   );
+
+  it("does not restore pending approval controls on a completed cancelled attempt", () => {
+    const timeline = messagesToTimeline([
+      {
+        _id: "attempt",
+        conversationId: "conversation",
+        role: "assistant",
+        content: "",
+        metadata: {
+          toolCalls: [{ callId: "call-1", name: "record_create" }],
+          turnAttempt: {
+            runId: "run-1",
+            attempt: 1,
+            cursor: 6,
+            outcome: "cancelled",
+            complete: true,
+            wait: {
+              kind: "approval",
+              waitId: "wait-1",
+              approvalId: "approval-1",
+              callId: "call-1",
+            },
+          },
+        },
+        createdAt: "2026-01-01T00:00:00.000Z",
+      },
+    ]);
+
+    expect(timeline[0]?.parts).toEqual([
+      expect.objectContaining({
+        kind: "tool",
+        toolCallId: "call-1",
+        status: "interrupted",
+      }),
+      { kind: "turn-status", status: "cancelled" },
+    ]);
+    expect(timeline[0]?.parts[0]).not.toHaveProperty("approval");
+  });
 
   it("keeps a Tool with a recorded successful result done after terminal reconciliation", () => {
     const timeline = messagesToTimeline([
@@ -284,6 +344,139 @@ describe("messagesToTimeline", () => {
         outcome: "ok",
       }),
     ]);
+  });
+
+  it("restores an orphan rejection with its real identity and no invented arguments", () => {
+    const timeline = messagesToTimeline([
+      {
+        _id: "attempt",
+        conversationId: "conversation",
+        role: "assistant",
+        content: "",
+        metadata: {
+          toolCalls: [
+            {
+              callId: "rejected-1",
+              name: "unknown_tool",
+              outcome: "error",
+              errorCode: "tool_not_available",
+              participantActivity: "visible",
+            },
+          ],
+        },
+        createdAt: "2026-01-01T00:00:00.000Z",
+      },
+    ]);
+
+    expect(timeline[0]?.parts).toEqual([
+      expect.objectContaining({
+        kind: "tool",
+        toolCallId: "rejected-1",
+        toolName: "unknown_tool",
+        args: undefined,
+        outcome: "error",
+      }),
+    ]);
+  });
+
+  it("restores the original request options and attachment-only input for retry", () => {
+    const timeline = messagesToTimeline([
+      {
+        _id: "user",
+        conversationId: "conversation",
+        role: "user",
+        content: [{ type: "file", fileId: "file-1", mediaType: "image/png", name: "chart.png" }],
+        metadata: {
+          turnRequest: {
+            model: "thorough",
+            autonomy: "supervised",
+            agentId: "analyst",
+            skills: ["forecast"],
+            resources: ["customer"],
+            knowledgePages: ["page-1"],
+          },
+        },
+        createdAt: "2026-01-01T00:00:00.000Z",
+      },
+    ]);
+
+    expect(timeline[0]?.sourceTurn).toEqual({
+      text: "",
+      options: {
+        model: "thorough",
+        autonomy: "supervised",
+        agentId: "analyst",
+        skills: ["forecast"],
+        resources: ["customer"],
+        knowledgePages: ["page-1"],
+        files: [{ fileId: "file-1", mediaType: "image/png", name: "chart.png" }],
+      },
+    });
+  });
+
+  it("restores only safe citation links and hides the represented Tool row", () => {
+    const timeline = messagesToTimeline([
+      {
+        _id: "assistant",
+        conversationId: "conversation",
+        role: "assistant",
+        content: "See [1] and [2].",
+        metadata: {
+          toolCalls: [
+            {
+              callId: "cite-1",
+              name: "knowledge_citation",
+              participantActivity: "represented",
+              outcome: "ok",
+              resultPreview: {
+                json: JSON.stringify({
+                  data: {
+                    sources: [
+                      { ref: 1, title: "Runbook", url: "https://example.com/runbook" },
+                      { ref: 2, title: "Unsafe", url: "data:text/html,bad" },
+                      { ref: 3, id: "flat-1", title: "Flat page" },
+                    ],
+                  },
+                }),
+              },
+            },
+          ],
+        },
+        createdAt: "2026-01-01T00:00:00.000Z",
+      },
+    ]);
+
+    expect(timeline[0]?.parts).toContainEqual({
+      kind: "sources",
+      sources: [
+        { ref: 1, title: "Runbook", url: "https://example.com/runbook" },
+        { ref: 2, title: "Unsafe" },
+        { ref: 3, id: "flat-1", title: "Flat page" },
+      ],
+    });
+  });
+
+  it("marks a restored cancelled attempt visibly", () => {
+    const timeline = messagesToTimeline([
+      {
+        _id: "assistant",
+        conversationId: "conversation",
+        role: "assistant",
+        content: "Partial",
+        metadata: {
+          turnAttempt: {
+            runId: "run-1",
+            attempt: 1,
+            cursor: 3,
+            outcome: "cancelled",
+            complete: true,
+          },
+        },
+        createdAt: "2026-01-01T00:00:00.000Z",
+      },
+    ]);
+
+    expect(timeline[0]?.parts).toContainEqual({ kind: "turn-status", status: "cancelled" });
   });
 });
 

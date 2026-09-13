@@ -177,6 +177,9 @@ export class SubagentTurnContextResolver implements SubagentContextResolver {
         mutating: tool.mutating,
         sideEffecting: tool.sideEffecting,
         cacheable: tool.cacheable,
+        participantActivity:
+          tool.participantActivity ??
+          (tool.definition?.availableTo?.requiresPresentation === true ? "represented" : "visible"),
       }));
   }
 

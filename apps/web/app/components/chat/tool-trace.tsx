@@ -35,7 +35,7 @@ export function ToolTrace({
   parts: readonly ToolPart[];
   pending: boolean;
   foldable: boolean;
-  onApprove: (approvalId: string, decision: "approve" | "deny") => void;
+  onApprove: (approvalId: string, decision: "approve" | "deny") => void | Promise<void>;
   onReviseDraft?: (draft: FileDraftResult) => void;
 }) {
   const [betweenCallsLabel] = useState(() => pick(LOADER_LABELS));

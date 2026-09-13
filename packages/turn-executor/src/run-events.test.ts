@@ -167,6 +167,8 @@ describe("TurnEventWriter", () => {
       { callId: "call-2", name: "record_get", argsDigest: "sha256:second" },
       "tool:call:call-2"
     );
+    resumed.recordSurface({ artifactId: "surface-1", revision: 5 });
+    resumed.recordSurface({ artifactId: "surface-1", revision: 4 });
     resumed.recordSurface({ artifactId: "surface-2", revision: 7 });
 
     expect(resumed.history("succeeded", true)).toMatchObject({
@@ -176,7 +178,7 @@ describe("TurnEventWriter", () => {
         { callId: "call-2", name: "record_get" },
       ],
       surfaces: [
-        { artifactId: "surface-1", revision: 3 },
+        { artifactId: "surface-1", revision: 5 },
         { artifactId: "surface-2", revision: 7 },
       ],
       outcome: "succeeded",
@@ -270,6 +272,17 @@ describe("TurnEventWriter", () => {
           callId: "call-1",
           toolName: "wire_money",
           outcome: "tool_not_available",
+          participantActivity: "visible",
+        })
+      );
+      await writer.append(
+        loopEvent({
+          sequence: 2,
+          type: "tool_call_rejected",
+          callId: "call-1",
+          toolName: "wire_money",
+          outcome: "tool_not_available",
+          participantActivity: "visible",
         })
       );
 
@@ -277,8 +290,24 @@ describe("TurnEventWriter", () => {
         {
           eventType: "tool.result",
           audience: "participant",
-          payload: { callId: "call-1", status: "error", errorCode: "tool_not_available" },
+          payload: {
+            callId: "call-1",
+            name: "wire_money",
+            status: "error",
+            errorCode: "tool_not_available",
+            participantActivity: "visible",
+          },
           idempotencyKey: "turn-1:1:loop:1",
+        },
+        expect.objectContaining({ idempotencyKey: "turn-1:1:loop:2" }),
+      ]);
+      expect(writer.toolCalls).toEqual([
+        {
+          callId: "call-1",
+          name: "wire_money",
+          outcome: "error",
+          errorCode: "tool_not_available",
+          participantActivity: "visible",
         },
       ]);
     });

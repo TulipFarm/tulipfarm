@@ -121,6 +121,28 @@ describe("announceToolCalls", () => {
     ]);
   });
 
+  it("carries the declared participant activity into live and durable Tool evidence", async () => {
+    const events = new FakeAppendPort();
+    const eventWriter = writer(events);
+    const broker = port((request) => ({
+      status: "succeeded",
+      callId: request.callId,
+      output: {},
+    }));
+
+    await announceToolCalls(broker.port, eventWriter, { now: clock() }).dispatch({
+      ...REQUEST,
+      participantActivity: "represented",
+    });
+
+    expect(events.appended[0]?.payload).toMatchObject({
+      participantActivity: "represented",
+    });
+    expect(eventWriter.toolCalls[0]).toMatchObject({
+      participantActivity: "represented",
+    });
+  });
+
   it("redacts credential material out of the preview while the digest still covers it", async () => {
     const events = new FakeAppendPort();
     const broker = port((request) => ({

@@ -1,4 +1,4 @@
-import { type ComponentType, useEffect, useState } from "react";
+import { type ComponentType, useEffect, useRef, useState } from "react";
 import { Check, Clock, ShieldAlert, X } from "~/components/icons";
 import { Button } from "~/components/ui/button";
 import { ToolChip } from "~/components/ui/tool-chip";
@@ -43,11 +43,14 @@ export function ApprovalCard({
 }: {
   toolName: string;
   approval: ApprovalState;
-  onDecide: (decision: "approve" | "deny") => void;
+  onDecide: (decision: "approve" | "deny") => void | Promise<void>;
 }) {
   const status = approval.status;
   const pending = status === "pending";
   const [left, setLeft] = useState<number | null>(() => secondsLeft(approval.expiresAt));
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState(false);
+  const submittingRef = useRef(false);
 
   useEffect(() => {
     if (!pending) return;
@@ -69,6 +72,19 @@ export function ApprovalCard({
 
   // Under ten seconds the number stops being context and starts being pressure.
   const urgent = left !== null && left <= 10;
+  const decide = async (decision: "approve" | "deny") => {
+    if (submittingRef.current) return;
+    submittingRef.current = true;
+    setSubmitting(true);
+    setError(false);
+    try {
+      await onDecide(decision);
+    } catch {
+      submittingRef.current = false;
+      setSubmitting(false);
+      setError(true);
+    }
+  };
 
   return (
     <div className="py-0.5">
@@ -94,19 +110,36 @@ export function ApprovalCard({
       </div>
 
       <div className={cn(LABEL_INSET, "mt-1 flex items-center gap-2")}>
-        <Button type="button" size="sm" onClick={() => onDecide("approve")}>
+        <Button
+          type="button"
+          size="sm"
+          disabled={submitting}
+          onClick={() => void decide("approve")}
+        >
           Approve
         </Button>
-        <Button type="button" size="sm" variant="outline" onClick={() => onDecide("deny")}>
+        <Button
+          type="button"
+          size="sm"
+          variant="outline"
+          disabled={submitting}
+          onClick={() => void decide("deny")}
+        >
           Deny
         </Button>
       </div>
 
-      {/*
-       * Assertive on purpose. Every other announcement in a Trace is `status` — narration the
-       * reader may ignore — but this one blocks the Turn until they act.
-       */}
-      <span role="alert" className="sr-only">{`${toolName} needs your approval`}</span>
+      {submitting ? (
+        <span role="status" className={cn(LABEL_INSET, "mt-1 block text-xs text-muted-foreground")}>
+          Submitting approval…
+        </span>
+      ) : null}
+      {error ? (
+        <span role="alert" className={cn(LABEL_INSET, "mt-1 block text-xs text-run-error")}>
+          Approval could not be submitted. Try again.
+        </span>
+      ) : null}
+      <span className="sr-only">{`${toolName} needs your approval`}</span>
     </div>
   );
 }

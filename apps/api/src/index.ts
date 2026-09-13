@@ -1265,6 +1265,11 @@ async function boot() {
               ...(tool.mutating === undefined ? {} : { mutating: tool.mutating }),
               ...(tool.sideEffecting === undefined ? {} : { sideEffecting: tool.sideEffecting }),
               ...(tool.cacheable === undefined ? {} : { cacheable: tool.cacheable }),
+              participantActivity:
+                tool.participantActivity ??
+                (tool.definition?.availableTo?.requiresPresentation === true
+                  ? "represented"
+                  : "visible"),
             }));
         },
         subagentContext: new SubagentTurnContextResolver({

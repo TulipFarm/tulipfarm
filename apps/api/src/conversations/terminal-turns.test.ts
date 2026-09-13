@@ -83,9 +83,30 @@ function harness(
 
 describe("TerminalTurnSettler", () => {
   it("settles a cancelled Run from durable state with the current attempt fence", async () => {
-    const { settler, settleTerminalTurn } = harness("cancelled");
+    const { settler, appendAssistantMessage, settleTerminalTurn } = harness("cancelled");
 
     await expect(settler.reconcileRun("business-1", "run-2")).resolves.toBe(true);
+    expect(appendAssistantMessage).toHaveBeenCalledWith({
+      message: expect.objectContaining({
+        businessId: "business-1",
+        conversationId: "conversation-1",
+        turnId: "turn-1",
+        role: "assistant",
+        content: [{ type: "text", text: "" }],
+        metadata: {
+          turnAttempt: {
+            runId: "run-2",
+            attempt: 2,
+            cursor: 12,
+            outcome: "cancelled",
+            complete: true,
+          },
+        },
+        attempt: 2,
+      }),
+      runId: "run-2",
+      attempt: 2,
+    });
     expect(settleTerminalTurn).toHaveBeenCalledWith({
       businessId: "business-1",
       turnId: "turn-1",

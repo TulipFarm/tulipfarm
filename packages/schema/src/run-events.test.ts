@@ -107,6 +107,7 @@ describe("run event vocabulary", () => {
         agentId: "assistant",
         stepId: "state-1",
         startedAt: "2026-01-01T00:00:00.000Z",
+        participantActivity: "represented",
       })
     ).toBe(true);
 
@@ -117,8 +118,18 @@ describe("run event vocabulary", () => {
         summary: "posted to #ops",
         resultPreview: { json: '{"ts":"1730.4"}' },
         durationMs: 412,
+        name: "send_slack_message",
+        participantActivity: "represented",
       })
     ).toBe(true);
+    expect(
+      accepts("tool.call", {
+        callId: "c1",
+        name: "n",
+        argsDigest: "d",
+        participantActivity: "hidden",
+      })
+    ).toBe(false);
   });
 
   it("accepts the name of the concurrent dispatch a Tool call belonged to", () => {

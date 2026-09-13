@@ -446,6 +446,9 @@ export class ChatTurnContextResolver implements TurnContextResolver {
         mutating: tool.mutating,
         sideEffecting: tool.sideEffecting,
         cacheable: tool.cacheable,
+        participantActivity:
+          tool.participantActivity ??
+          (tool.definition?.availableTo?.requiresPresentation === true ? "represented" : "visible"),
       }));
 
     // A deployment that composed no guardrails service still ships the default policy rather than
