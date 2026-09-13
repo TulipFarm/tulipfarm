@@ -41,12 +41,16 @@ async function currentArtifactRevision(slug: string): Promise<string | null> {
   }
 }
 
-function packageWriter() {
+function packageWriter(
+  publication: { ensurePublished(revision: string): Promise<void> } = {
+    ensurePublished: async () => {},
+  }
+) {
   return createOimSoulReleasePackageWriter({
     soulWriter: writer,
     soulStore: store,
     currentArtifactRevision,
-    publication: { ensurePublished: async () => {} },
+    publication,
     actor: ACTOR,
   });
 }
@@ -153,6 +157,44 @@ describe("OIM Soul release package writer", () => {
       revision: expect.any(String),
     });
     expect(store.listFiles("integrations/weather-v1")).toEqual([]);
+  });
+
+  it("publishes an already committed package before replay reports success", async () => {
+    const plan = await packageWriter().prepare({
+      businessId: "business-1",
+      slug: "weather-v1",
+      snapshot: snapshot({ "setup-guide.md": "# Setup\n" }),
+    });
+    const committed = await packageWriter().apply(plan);
+    writeFileSync(join(root, "unrelated.txt"), "other change\n");
+    execFileSync("git", ["add", "unrelated.txt"], { cwd: root });
+    execFileSync("git", ["commit", "--quiet", "-m", "soul: unrelated change"], { cwd: root });
+    const currentTreeRevision = execFileSync("git", ["rev-parse", "HEAD"], {
+      cwd: root,
+      encoding: "utf8",
+    }).trim();
+    expect(currentTreeRevision).not.toBe(committed.revision);
+    let publicationFails = true;
+    let activeRevision: string | null = null;
+    const ensurePublished = vi.fn(async (revision: string) => {
+      if (publicationFails) throw new Error("publication unavailable");
+      activeRevision = revision;
+    });
+    const restarted = packageWriter({ ensurePublished });
+
+    await expect(restarted.apply(JSON.parse(JSON.stringify(plan)))).rejects.toMatchObject({
+      code: "PUBLICATION_FAILED",
+    });
+    expect(activeRevision).toBeNull();
+
+    publicationFails = false;
+    await expect(restarted.apply(JSON.parse(JSON.stringify(plan)))).resolves.toMatchObject({
+      revision: committed.revision,
+    });
+    expect(activeRevision).toBe(currentTreeRevision);
+    expect(ensurePublished).toHaveBeenCalledTimes(2);
+    expect(ensurePublished).toHaveBeenNthCalledWith(1, currentTreeRevision);
+    expect(ensurePublished).toHaveBeenNthCalledWith(2, currentTreeRevision);
   });
 
   it("revalidates and atomically writes only the reviewed package bytes", async () => {

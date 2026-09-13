@@ -518,6 +518,14 @@ export function createOimSoulReleasePackageWriter(input: {
             "Installed OIM package has no artifact revision"
           );
         }
+        try {
+          await input.publication.ensurePublished(current.baseCommit);
+        } catch (error) {
+          throw new OimSoulReleasePackageError(
+            "PUBLICATION_FAILED",
+            error instanceof Error ? error.message : "OIM package publication failed"
+          );
+        }
         return Object.freeze({
           revision,
           rollbackToken: Object.freeze({

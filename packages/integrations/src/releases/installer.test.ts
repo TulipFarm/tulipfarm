@@ -83,6 +83,7 @@ function reviewedDraft(
     slug: "weather-v1",
     package: package_,
     source: authoredDraftSource(),
+    replacementIssues: [],
     ...overrides,
   };
 }
@@ -240,7 +241,7 @@ describe("installSelectedOimRelease", () => {
     const { service } = trustService();
     const package_ = releasePackageFixture();
     const recorded: unknown[] = [];
-    const consume = vi.fn(async () =>
+    const claim = vi.fn(async () =>
       reviewedDraft(package_, {
         source: {
           ...authoredDraftSource(),
@@ -249,6 +250,7 @@ describe("installSelectedOimRelease", () => {
         },
       })
     );
+    const acknowledge = vi.fn(async () => {});
 
     await expect(
       installReviewedCommunityOimRelease(
@@ -278,7 +280,7 @@ describe("installSelectedOimRelease", () => {
               async recordRestoredSoulRevision() {},
             },
           }),
-          reviewedDrafts: { consume },
+          reviewedDrafts: { claim, acknowledge },
         }
       )
     ).resolves.toMatchObject({
@@ -301,18 +303,25 @@ describe("installSelectedOimRelease", () => {
         },
       }),
     ]);
-    expect(consume).toHaveBeenCalledWith({
+    expect(claim).toHaveBeenCalledWith({
       businessId: "business-1",
       approvedPackageDigest: oimPackageDigest(package_.manifest),
       principal: { kind: "user", id: "user-1" },
       runId: "run-1",
     });
+    expect(acknowledge).toHaveBeenCalledWith(
+      expect.objectContaining({
+        reviewId: "review-1",
+        operationId: "11111111-1111-4111-8111-111111111111",
+      })
+    );
   });
 
-  it("recovers a consumed reviewed draft from the durable package snapshot", async () => {
+  it("recovers an acknowledged reviewed draft from the durable package snapshot", async () => {
     const { service } = trustService();
     const package_ = releasePackageFixture();
-    const consume = vi.fn(async () => reviewedDraft(package_));
+    const claim = vi.fn(async () => reviewedDraft(package_));
+    const acknowledge = vi.fn(async () => {});
     const install = vi.fn(async () => ({
       revision: "soul-1",
       rollbackToken: "rollback-1",
@@ -343,7 +352,7 @@ describe("installSelectedOimRelease", () => {
           return input;
         },
       },
-      reviewedDrafts: { consume },
+      reviewedDrafts: { claim, acknowledge },
     };
 
     await expect(
@@ -362,7 +371,8 @@ describe("installSelectedOimRelease", () => {
 
     await reconcileOimReleaseOperations(deps);
 
-    expect(consume).toHaveBeenCalledTimes(1);
+    expect(claim).toHaveBeenCalledTimes(1);
+    expect(acknowledge).toHaveBeenCalledTimes(1);
     expect(install).toHaveBeenCalledTimes(1);
     expect(install).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -371,6 +381,61 @@ describe("installSelectedOimRelease", () => {
         }),
       })
     );
+  });
+
+  it("does not write Soul when draft acknowledgement fails after the durable begin", async () => {
+    const { service } = trustService();
+    const package_ = releasePackageFixture();
+    const install = vi.fn();
+    const deps = durableDeps({
+      trust: service,
+      packageWriter: {
+        async install(input) {
+          install(input);
+          return { revision: "unexpected", rollbackToken: "unexpected" };
+        },
+        async rollback() {
+          return { revision: "rollback" };
+        },
+      },
+      provenance: {
+        async recordInstalledProvenance() {},
+        async recordRestoredSoulRevision() {},
+      },
+    });
+
+    await expect(
+      installReviewedCommunityOimRelease(
+        {
+          businessId: "business-1",
+          slug: "weather-v1",
+          approvedPackageDigest: oimPackageDigest(package_.manifest),
+          principal: { kind: "user", id: "user-1" },
+          runId: "run-1",
+          replace: false,
+        },
+        {
+          ...deps,
+          reviewedDrafts: {
+            async claim() {
+              return reviewedDraft(package_);
+            },
+            async acknowledge() {
+              throw new Error("draft acknowledgement unavailable");
+            },
+          },
+        }
+      )
+    ).rejects.toThrow("draft acknowledgement unavailable");
+    expect(install).not.toHaveBeenCalled();
+    await expect(deps.operations.listPending()).resolves.toEqual([
+      expect.objectContaining({
+        phase: "prepared",
+        packageSnapshot: expect.objectContaining({
+          packageDigest: oimPackageDigest(package_.manifest),
+        }),
+      }),
+    ]);
   });
 
   it("rejects an unavailable reviewed draft before starting an operation", async () => {
@@ -406,9 +471,10 @@ describe("installSelectedOimRelease", () => {
         {
           ...deps,
           reviewedDrafts: {
-            async consume() {
+            async claim() {
               return null;
             },
+            async acknowledge() {},
           },
         }
       )
@@ -420,6 +486,7 @@ describe("installSelectedOimRelease", () => {
     const { service } = trustService();
     const package_ = releasePackageFixture();
     const write = vi.fn();
+    const acknowledge = vi.fn(async () => {});
 
     await expect(
       installReviewedCommunityOimRelease(
@@ -449,20 +516,32 @@ describe("installSelectedOimRelease", () => {
             },
           }),
           reviewedDrafts: {
-            async consume() {
+            async claim() {
               return reviewedDraft(package_);
             },
+            acknowledge,
           },
         }
       )
     ).rejects.toMatchObject({ code: "COMMUNITY_DIGEST_REQUIRED" });
+    expect(acknowledge).not.toHaveBeenCalled();
     expect(write).not.toHaveBeenCalled();
   });
 
-  it("rejects draft review provenance owned by another business before writing", async () => {
+  it.each([
+    {
+      name: "slug",
+      input: { businessId: "business-1", slug: "calendar-v1" },
+    },
+    {
+      name: "provenance",
+      input: { businessId: "business-2", slug: "weather-v1" },
+    },
+  ])("rejects mismatched draft $name without acknowledging it", async ({ input }) => {
     const { service } = trustService();
     const package_ = releasePackageFixture();
     const write = vi.fn();
+    const acknowledge = vi.fn(async () => {});
     const deps = durableDeps({
       trust: service,
       packageWriter: {
@@ -484,8 +563,8 @@ describe("installSelectedOimRelease", () => {
     await expect(
       installReviewedCommunityOimRelease(
         {
-          businessId: "business-2",
-          slug: "weather-v1",
+          businessId: input.businessId,
+          slug: input.slug,
           approvedPackageDigest: oimPackageDigest(package_.manifest),
           principal: { kind: "user", id: "user-1" },
           runId: "run-1",
@@ -494,14 +573,16 @@ describe("installSelectedOimRelease", () => {
         {
           ...deps,
           reviewedDrafts: {
-            async consume() {
+            async claim() {
               return reviewedDraft(package_);
             },
+            acknowledge,
           },
         }
       )
     ).rejects.toMatchObject({ code: "INVALID_AUTHORED_RELEASE_SOURCE" });
     expect(begin).not.toHaveBeenCalled();
+    expect(acknowledge).not.toHaveBeenCalled();
     expect(write).not.toHaveBeenCalled();
   });
 
@@ -538,7 +619,7 @@ describe("installSelectedOimRelease", () => {
       {
         ...deps,
         reviewedDrafts: {
-          async consume() {
+          async claim() {
             return reviewedDraft(package_, {
               replace: {
                 businessId: "business-1",
@@ -561,6 +642,7 @@ describe("installSelectedOimRelease", () => {
               },
             });
           },
+          async acknowledge() {},
         },
       }
     );
@@ -594,6 +676,7 @@ describe("installSelectedOimRelease", () => {
       },
     });
     const begin = vi.spyOn(deps.operations, "beginAuthorized");
+    const acknowledge = vi.fn(async () => {});
 
     await expect(
       installReviewedCommunityOimRelease(
@@ -608,14 +691,64 @@ describe("installSelectedOimRelease", () => {
         {
           ...deps,
           reviewedDrafts: {
-            async consume() {
+            async claim() {
               return reviewedDraft(package_);
             },
+            acknowledge,
           },
         }
       )
     ).rejects.toMatchObject({ code: "REPLACE_PRECONDITION_MISMATCH" });
     expect(begin).not.toHaveBeenCalled();
+    expect(acknowledge).not.toHaveBeenCalled();
+  });
+
+  it("rejects reviewed replacement issues without acknowledging or starting an operation", async () => {
+    const { service } = trustService();
+    const package_ = releasePackageFixture();
+    const deps = durableDeps({
+      trust: service,
+      packageWriter: {
+        async install() {
+          return { revision: "unexpected", rollbackToken: "unexpected" };
+        },
+        async rollback() {
+          return { revision: "rollback" };
+        },
+      },
+      provenance: {
+        async recordInstalledProvenance() {},
+        async recordRestoredSoulRevision() {},
+      },
+    });
+    const begin = vi.spyOn(deps.operations, "beginAuthorized");
+    const acknowledge = vi.fn(async () => {});
+
+    await expect(
+      installReviewedCommunityOimRelease(
+        {
+          businessId: "business-1",
+          slug: "weather-v1",
+          approvedPackageDigest: oimPackageDigest(package_.manifest),
+          principal: { kind: "user", id: "user-1" },
+          runId: "run-1",
+          replace: true,
+        },
+        {
+          ...deps,
+          reviewedDrafts: {
+            async claim() {
+              return reviewedDraft(package_, {
+                replacementIssues: ["the reviewed replacement changes its Integration ID"],
+              });
+            },
+            acknowledge,
+          },
+        }
+      )
+    ).rejects.toMatchObject({ code: "REVIEWED_COMMUNITY_REPLACEMENT_INVALID" });
+    expect(begin).not.toHaveBeenCalled();
+    expect(acknowledge).not.toHaveBeenCalled();
   });
 
   it("rejects a replacement precondition for another installed identity before writing", async () => {
@@ -651,7 +784,7 @@ describe("installSelectedOimRelease", () => {
             },
           }),
           reviewedDrafts: {
-            async consume() {
+            async claim() {
               return reviewedDraft(package_, {
                 replace: {
                   businessId: "business-1",
@@ -674,6 +807,7 @@ describe("installSelectedOimRelease", () => {
                 },
               });
             },
+            async acknowledge() {},
           },
         }
       )

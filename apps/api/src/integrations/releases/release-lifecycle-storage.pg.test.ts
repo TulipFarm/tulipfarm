@@ -1,5 +1,14 @@
+import { generateKeyPairSync } from "node:crypto";
 import type { PGlite } from "@electric-sql/pglite";
-import { uninstallOimRelease } from "@tulipfarm/integrations";
+import {
+  createEd25519OimReleaseSigner,
+  createOimReleaseInstallOperationHost,
+  createOimReleaseTrustService,
+  installReviewedCommunityOimRelease,
+  signOimRevocationList,
+  uninstallOimRelease,
+} from "@tulipfarm/integrations";
+import { type OimManifest, oimFileDigest, oimPackageDigest } from "@tulipfarm/schema";
 import {
   ConnectionStore,
   createOimReleaseStorage,
@@ -22,6 +31,46 @@ const SCOPE = {
   majorVersion: 2,
 } as const;
 const INSTALL_SCOPE = { ...SCOPE, slug: "calendar-v2" } as const;
+
+function reviewedCommunityPackage() {
+  const guide = "# Setup\n";
+  const manifest: OimManifest = {
+    oimVersion: "1.0",
+    kind: "Integration",
+    metadata: {
+      id: "weather",
+      name: "Weather",
+      version: "1.2.3",
+      description: "Read current weather.",
+      license: "Apache-2.0",
+    },
+    profiles: { core: "1.0" },
+    files: [
+      {
+        path: "setup-guide.md",
+        role: "guide",
+        sha256: oimFileDigest(guide),
+      },
+    ],
+    operations: [
+      {
+        id: "current-weather",
+        name: "current_weather",
+        description: "Read current weather.",
+        effect: "read",
+        identityMode: "shared_only",
+        source: {
+          type: "http",
+          method: "GET",
+          baseUrl: "https://api.weather.example",
+          path: "/v1/current",
+        },
+        response: { schema: { type: "object" }, maxBytes: 16_384 },
+      },
+    ],
+  };
+  return { manifest, files: new Map([["setup-guide.md", guide]]) };
+}
 
 function officialProvenance(version = "2.1.0", packageDigest = "a".repeat(64)) {
   return {
@@ -137,6 +186,141 @@ describe("OIM release lifecycle PostgreSQL storage", () => {
 
   afterEach(async () => {
     await database.close();
+  });
+
+  it("retries a reviewed draft after the first durable operation response is lost", async () => {
+    const package_ = reviewedCommunityPackage();
+    const packageDigest = oimPackageDigest(package_.manifest);
+    const { privateKey, publicKey } = generateKeyPairSync("ed25519");
+    const revocationKey = {
+      keyId: "revocations-2026",
+      privateKeyPem: privateKey.export({ format: "pem", type: "pkcs8" }).toString(),
+      publicKeyPem: publicKey.export({ format: "pem", type: "spki" }).toString(),
+    };
+    const revocations = signOimRevocationList(
+      {
+        sequence: 1,
+        issuedAt: "2026-09-13T00:00:00.000Z",
+        expiresAt: "2026-09-15T00:00:00.000Z",
+        revocations: [],
+      },
+      createEd25519OimReleaseSigner(revocationKey.keyId, revocationKey.privateKeyPem)
+    );
+    const trustService = createOimReleaseTrustService({
+      trustedReleaseKeys: [],
+      trustedRevocationKeys: [
+        { keyId: revocationKey.keyId, publicKeyPem: revocationKey.publicKeyPem },
+      ],
+      revocationStore: {
+        async load() {
+          return revocations;
+        },
+        async compareAndSwap() {
+          return false;
+        },
+      },
+      knownSignedReleaseStore: {
+        async isKnownSignedRelease() {
+          return false;
+        },
+        async recordKnownSignedRelease() {},
+      },
+      now: () => new Date("2026-09-14T00:00:00.000Z"),
+    });
+    const stores = createOimReleaseStorage(sessions);
+    const operationHost = createOimReleaseInstallOperationHost(stores.operations);
+    let loseFirstResponse = true;
+    const claim = vi.fn(async () => ({
+      slug: "weather-v1",
+      package: package_,
+      source: {
+        kind: "authored_draft" as const,
+        reviewId: "review-1",
+        reviewedAt: "2026-09-13T08:00:00.000Z",
+        reviewedBy: {
+          businessId: "business-1",
+          principal: { kind: "user", id: "user-1" },
+        },
+        runId: "run-1",
+        toolCallId: "call-1",
+      },
+      replacementIssues: [],
+    }));
+    const acknowledge = vi.fn(async ({ operationId }: { readonly operationId: string }) => {
+      await expect(stores.operations.get(operationId)).resolves.toMatchObject({
+        packageSnapshot: {
+          integrationId: "weather",
+          packageDigest,
+          files: [expect.objectContaining({ path: "setup-guide.md" })],
+        },
+      });
+    });
+    const packageWriter = {
+      async prepare(input: unknown) {
+        return input;
+      },
+      async apply() {
+        return { revision: "soul-1", rollbackToken: "rollback-1" };
+      },
+      async install() {
+        return { revision: "soul-1", rollbackToken: "rollback-1" };
+      },
+      async rollback() {
+        return { revision: "rollback-1" };
+      },
+    };
+    const provenance = {
+      async recordInstalledProvenance() {},
+      async recordRestoredSoulRevision() {},
+    };
+    const input = {
+      businessId: "business-1",
+      slug: "weather-v1",
+      approvedPackageDigest: packageDigest,
+      principal: { kind: "user", id: "user-1" },
+      runId: "run-1",
+      replace: false,
+    };
+
+    await expect(
+      installReviewedCommunityOimRelease(input, {
+        trust: trustService,
+        packageWriter,
+        provenance,
+        reviewedDrafts: { claim, acknowledge },
+        operations: {
+          ...operationHost,
+          async beginAuthorized(beginInput) {
+            const operation = await operationHost.beginAuthorized(beginInput);
+            if (loseFirstResponse) {
+              loseFirstResponse = false;
+              throw new Error("operation response lost");
+            }
+            return operation;
+          },
+        },
+      })
+    ).rejects.toThrow("operation response lost");
+    await expect(stores.operations.listPending()).resolves.toHaveLength(1);
+    expect(acknowledge).not.toHaveBeenCalled();
+
+    const restarted = createOimReleaseStorage(sessions);
+    await expect(
+      installReviewedCommunityOimRelease(input, {
+        trust: trustService,
+        packageWriter,
+        provenance,
+        reviewedDrafts: { claim, acknowledge },
+        operations: createOimReleaseInstallOperationHost(restarted.operations),
+      })
+    ).resolves.toMatchObject({
+      integrationId: "weather",
+      packageDigest,
+      trustClass: "community",
+    });
+    expect(claim).toHaveBeenCalledTimes(2);
+    expect(acknowledge).toHaveBeenCalledTimes(1);
+    await expect(restarted.operations.listPending()).resolves.toHaveLength(0);
   });
 
   it("persists partial uninstall progress across service restart without assuming cleanup", async () => {

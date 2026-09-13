@@ -214,6 +214,7 @@ export class OimReleaseInstallError extends Error {
       | "INVALID_AUTHORED_RELEASE_SOURCE"
       | "INVALID_RELEASE_VERSION"
       | "REVIEWED_COMMUNITY_DRAFT_UNAVAILABLE"
+      | "REVIEWED_COMMUNITY_REPLACEMENT_INVALID"
       | "REPLACE_PRECONDITION_MISMATCH",
     message: string,
     options?: { cause?: unknown }
@@ -506,11 +507,15 @@ export interface OimReviewedCommunityDraft {
   readonly package: OimReleasePackage;
   readonly source: OimAuthoredDraftReleaseSourceProvenance;
   readonly replace?: PersistedInstalledOimReleaseProvenance;
+  readonly replacementIssues: readonly string[];
 }
 
-/** Consumes exact reviewed bytes from a server-owned store scoped to the invoking principal. */
+/**
+ * Holds reviewed bytes until `acknowledge` binds them to a durable install operation.
+ * Claims and acknowledgements must be retry-safe and scoped to the exact invoking principal.
+ */
 export interface OimReviewedCommunityDraftPort {
-  consume(input: {
+  claim(input: {
     readonly businessId: string;
     readonly approvedPackageDigest: string;
     readonly principal: {
@@ -519,6 +524,17 @@ export interface OimReviewedCommunityDraftPort {
     };
     readonly runId: string;
   }): Promise<OimReviewedCommunityDraft | null>;
+  acknowledge(input: {
+    readonly businessId: string;
+    readonly approvedPackageDigest: string;
+    readonly principal: {
+      readonly kind: string;
+      readonly id: string;
+    };
+    readonly runId: string;
+    readonly reviewId: string;
+    readonly operationId: string;
+  }): Promise<void>;
 }
 
 export interface InstallReviewedCommunityOimReleaseDeps extends InstallSelectedOimReleaseDeps {
@@ -570,12 +586,13 @@ export async function installReviewedCommunityOimRelease(
   input: InstallReviewedCommunityOimReleaseInput,
   deps: InstallReviewedCommunityOimReleaseDeps
 ): Promise<InstalledOimRelease> {
-  const draft = await deps.reviewedDrafts.consume({
+  const claim = {
     businessId: input.businessId,
     approvedPackageDigest: input.approvedPackageDigest,
     principal: input.principal,
     runId: input.runId,
-  });
+  };
+  const draft = await deps.reviewedDrafts.claim(claim);
   if (draft === null) {
     throw new OimReleaseInstallError(
       "REVIEWED_COMMUNITY_DRAFT_UNAVAILABLE",
@@ -592,6 +609,12 @@ export async function installReviewedCommunityOimRelease(
     throw new OimReleaseInstallError(
       "INVALID_AUTHORED_RELEASE_SOURCE",
       "Reviewed Community OIM releases require matching draft review provenance"
+    );
+  }
+  if (draft.replacementIssues.length > 0) {
+    throw new OimReleaseInstallError(
+      "REVIEWED_COMMUNITY_REPLACEMENT_INVALID",
+      `The reviewed Community OIM replacement is incompatible: ${draft.replacementIssues.join("; ")}`
     );
   }
   if (input.replace !== (draft.replace !== undefined)) {
@@ -629,6 +652,11 @@ export async function installReviewedCommunityOimRelease(
     packageSnapshot: captured.snapshot,
     ...(draft.replace === undefined ? {} : { expected: draft.replace }),
     startedAt: now().toISOString(),
+  });
+  await deps.reviewedDrafts.acknowledge({
+    ...claim,
+    reviewId: draft.source.reviewId,
+    operationId: operation.operationId,
   });
   const completed = await continueInstallOperation(input, deps, operation);
   return installedResult(completed, "community");
