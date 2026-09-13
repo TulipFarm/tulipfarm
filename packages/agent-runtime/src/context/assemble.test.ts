@@ -22,6 +22,13 @@ describe("assembleSystemPrompt — blocks", () => {
     expect(assembleSystemPrompt(baseCtx())).toContain(PLATFORM_INSTRUCTIONS_TEXT);
   });
 
+  it("instructs the agent to gather requirements one question at a time, never a multi-field form", () => {
+    const out = assembleSystemPrompt(baseCtx());
+
+    expect(out).toContain("ask one question at a time in your reply");
+    expect(out).toContain("Never send a multi-field Form or a wall of questions");
+  });
+
   it("uses a supplied override in place of the built-in law", () => {
     const out = assembleSystemPrompt(baseCtx({ platformInstructions: "obey the operator" }));
 
