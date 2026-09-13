@@ -4,6 +4,7 @@ import type {
   ModelMessage,
   ModelOutput,
 } from "@tulipfarm/agent-runtime";
+import type { GuardrailDefinition, routine, ToolContractDefinition } from "@tulipfarm/schema";
 import type { RedTeam } from "./red-team.ts";
 
 /**
@@ -112,6 +113,8 @@ export type Expectation =
   /** L3 only. The `invoke` State's terminal status — a Turn that answered but left its State
    *  parked is a Run the reconciler will pick up, not a finished turn. */
   | { readonly kind: "state_status"; readonly status: string }
+  /** L3 Routine only. A persisted Tool State output contains this exact value at the path. */
+  | { readonly kind: "state_output_equals"; readonly path: string; readonly value: unknown }
   /** L3 only. The Turn was completed, and with this verdict. */
   | { readonly kind: "turn_status"; readonly status: string }
   /** L3 only. This Run event type was appended durably. L2 stubs the event port, so this is the
@@ -165,6 +168,7 @@ export type Expectation =
 const PERSISTED_KINDS: ReadonlySet<string> = new Set([
   "run_status",
   "state_status",
+  "state_output_equals",
   "turn_status",
   "run_event_emitted",
   "run_event_text_omits",
@@ -234,6 +238,36 @@ export interface JourneyTurn {
   readonly input: readonly ModelMessage[];
   readonly toolResults?: readonly ScriptedToolResult[];
   readonly script?: readonly ScriptedModelOutput[];
+}
+
+export type RoutineProviderStep =
+  | {
+      readonly kind: "success";
+      readonly output: unknown;
+      /** Adds deterministic payload bulk without committing a 128 KiB Corpus literal. */
+      readonly paddingBytes?: number;
+    }
+  | {
+      readonly kind: "retry";
+      readonly retryAfterMs: number;
+      readonly code?: string;
+    };
+
+/**
+ * One deterministic Routine Tool State driven through the production executor and Broker.
+ *
+ * Deliberately limited to one Tool State plus ordinary successor States. This fixture exercises
+ * durable approval, provider retry, confirmed-effect replay, and persisted output mapping rather
+ * than becoming a second workflow language.
+ */
+export interface L3RoutineFixture {
+  readonly definition: routine.RoutineDefinition;
+  readonly toolContract: ToolContractDefinition;
+  readonly guardrail?: GuardrailDefinition;
+  readonly inputs?: Readonly<Record<string, unknown>>;
+  readonly providerSteps: readonly RoutineProviderStep[];
+  readonly approval?: "approved";
+  readonly crashAfter?: "effect_confirmed" | "state_succeeded";
 }
 
 /**
@@ -335,6 +369,8 @@ export interface EvalCase {
    */
   readonly tier: "l2" | "l3";
   readonly agent: string;
+  /** L3-only deterministic Routine Tool-State execution; bypasses the model and Chat Turn path. */
+  readonly routine?: L3RoutineFixture;
   /**
    * What feeds the real Context assembler, beyond what the Eval Soul already supplies.
    *

@@ -28,6 +28,7 @@
     "@tulipfarm/soul": "workspace:*",
     "@tulipfarm/soul-doctor": "workspace:*",
     "@tulipfarm/storage": "workspace:*",
+    "@tulipfarm/tool-broker": "workspace:*",
     "@tulipfarm/tool-host": "workspace:*",
     "@tulipfarm/turn-executor": "workspace:*",
     "ai": "^7.0.77"

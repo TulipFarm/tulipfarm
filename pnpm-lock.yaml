@@ -406,6 +406,9 @@ importers:
       '@tulipfarm/storage':
         specifier: workspace:*
         version: link:../../packages/storage
+      '@tulipfarm/tool-broker':
+        specifier: workspace:*
+        version: link:../../packages/tool-broker
       '@tulipfarm/tool-host':
         specifier: workspace:*
         version: link:../../packages/tool-host

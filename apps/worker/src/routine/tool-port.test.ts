@@ -1,13 +1,19 @@
 import { PGlite } from "@electric-sql/pglite";
 import type { AuthorityLayer } from "@tulipfarm/authz";
 import type { ToolDispatchPlan } from "@tulipfarm/run-kernel";
-import type { GuardrailDefinition, ToolContractDefinition } from "@tulipfarm/schema";
+import {
+  canonicalHash,
+  type GuardrailDefinition,
+  type ToolContractDefinition,
+} from "@tulipfarm/schema";
 import type { BundleDefinition, RuntimeBundle } from "@tulipfarm/soul";
 import type { TransactionPort } from "@tulipfarm/storage";
 import {
   AdapterDispatchError,
   EFFECT_STORAGE_STATEMENTS,
+  intentDigest,
   MemoryEffectStore,
+  normalizeToolIntent,
   PgEffectStore,
   type ToolAdapter,
   type ToolAdapterRequest,
@@ -119,6 +125,7 @@ function request(overrides: Partial<RoutineToolRequest> = {}): RoutineToolReques
     businessId: BUSINESS_ID,
     runId: RUN_ID,
     stateKey: STATE_KEY,
+    claim: { leaseOwner: "worker-1", leaseGeneration: 1 },
     plan: PLAN,
     requesterPrincipalId: REQUESTER_PRINCIPAL_ID,
     bundle: bundle([
@@ -135,6 +142,7 @@ let dispatch: Mock<ToolAdapter["dispatch"]>;
 let adapters: Map<string, ToolAdapter>;
 let decide: Mock<ToolApprovalPort["decide"]>;
 let consume: Mock<ToolApprovalPort["consume"]>;
+let findIntent: Mock<NonNullable<ToolApprovalPort["findIntent"]>>;
 
 beforeEach(() => {
   effects = new MemoryEffectStore();
@@ -144,10 +152,15 @@ beforeEach(() => {
   adapters = new Map<string, ToolAdapter>([["github", { kind: "integration" as const, dispatch }]]);
   decide = vi.fn<ToolApprovalPort["decide"]>();
   consume = vi.fn<ToolApprovalPort["consume"]>();
+  findIntent = vi.fn(async () => (await effects.get(BUSINESS_ID, PLAN.effectId))?.intent);
 });
 
 function port(): BrokerRoutineToolPort {
-  return new BrokerRoutineToolPort({ effects, adapters, approvals: { decide, consume } });
+  return new BrokerRoutineToolPort({
+    effects,
+    adapters,
+    approvals: { decide, consume, findIntent },
+  });
 }
 
 describe("BrokerRoutineToolPort", () => {
@@ -290,13 +303,18 @@ describe("BrokerRoutineToolPort", () => {
         reason: "approval_required",
         ruleId: "approve-comment",
       },
+      intent: expect.objectContaining({
+        businessId: BUSINESS_ID,
+        runId: RUN_ID,
+        stateId: STATE_KEY,
+      }),
     });
     expect(dispatch).not.toHaveBeenCalled();
   });
 
   it("consumes the approval and executes a replayed State effect exactly once", async () => {
     decide.mockResolvedValue({ status: "approved", approvalId: "approval-1" });
-    consume.mockResolvedValue(true);
+    consume.mockResolvedValueOnce(true);
     const gated = request({
       bundle: bundle([
         { kind: "ToolContract", document: contract() },
@@ -331,11 +349,206 @@ describe("BrokerRoutineToolPort", () => {
       approvalId: "approval-1",
       toolCallId: PLAN.effectId,
     });
+    expect(consume).toHaveBeenCalledTimes(1);
+    expect(decide.mock.calls[0]?.[0]).toMatchObject({
+      intent: {
+        businessId: BUSINESS_ID,
+        runId: RUN_ID,
+        stateId: STATE_KEY,
+        idempotencyKey: PLAN.idempotencyKey,
+      },
+    });
     expect(dispatch).toHaveBeenCalledTimes(1);
     expect(await effects.get(BUSINESS_ID, PLAN.effectId)).toMatchObject({
       state: "confirmed",
       approvalId: "approval-1",
     });
+  });
+
+  it("fails closed when the exact approval cannot be consumed", async () => {
+    decide.mockResolvedValue({ status: "approved", approvalId: "approval-1" });
+    consume.mockResolvedValue(false);
+    findIntent.mockImplementation(async () => decide.mock.calls[0]?.[0].intent);
+    const gated = request({
+      bundle: bundle([
+        { kind: "ToolContract", document: contract() },
+        {
+          kind: "Guardrail",
+          document: guardrail([
+            ALLOW_COMMENT,
+            {
+              id: "approve-comment",
+              type: "approval",
+              actions: ["issue.comment"],
+              category: "highRiskAction",
+              minimumApprovers: 1,
+              separationOfDuties: false,
+            },
+          ]),
+        },
+      ]),
+    });
+
+    await expect(port().execute(gated)).resolves.toEqual({
+      kind: "failed",
+      reason: "approval_not_consumable",
+    });
+    expect(dispatch).not.toHaveBeenCalled();
+  });
+
+  it("binds the prepared OIM Connection, destination, and Files before approval", async () => {
+    decide.mockResolvedValue({ status: "pending", approvalId: "approval-oim" });
+    const remoteDispatch = vi.fn(async () => ({ messageId: "msg-1" }));
+    const oim = {
+      prepare: vi.fn(async () => ({
+        kind: "ready" as const,
+        arguments: { body: { upload: "file-1" } },
+        adapterRef: "oim-acme",
+        adapter: { kind: "native" as const, dispatch: remoteDispatch },
+        hostCredentials: true as const,
+        filePrincipalId: REQUESTER_PRINCIPAL_ID.slice("user:".length),
+        fileIds: ["file-1"],
+        integrationId: "acme",
+        integrationMajorVersion: 2,
+        operationId: "send_message",
+        manifestDigest: "m".repeat(64),
+        configurationDigest: "f".repeat(64),
+        destination: "https://api.acme.test",
+        credentialRef: "secret://connections/connection-1/token",
+        connection: {
+          connectionId: "connection-1",
+          integrationId: "acme",
+          integrationMajorVersion: 2,
+          operationId: "send_message",
+          credentialSlot: "token",
+          credentialRevision: "revision-1",
+          identityMode: "shared_only" as const,
+          principalKind: "user",
+          principalId: REQUESTER_PRINCIPAL_ID.slice("user:".length),
+          manifestDigest: "m".repeat(64),
+          configurationDigest: "f".repeat(64),
+        },
+      })),
+    };
+    const oimPlan = {
+      ...PLAN,
+      toolRef: { name: "oim.acme.v2.send_message", version: "2.0.0" },
+      action: "message.send",
+      destination: undefined,
+      arguments: {
+        connection_id: "connection-1",
+        body: { upload: "file-1" },
+      },
+    };
+    const gated = request({
+      plan: oimPlan,
+      bundle: bundle([
+        {
+          kind: "ToolContract",
+          document: contract({
+            toolId: oimPlan.toolRef.name,
+            toolVersion: oimPlan.toolRef.version,
+            action: oimPlan.action,
+            adapter: { kind: "native", ref: "oim-acme" },
+            allowedDestinations: ["https://api.acme.test"],
+            inputSchema: { type: "object" },
+          }),
+        },
+        {
+          kind: "Guardrail",
+          document: guardrail([
+            {
+              ...ALLOW_COMMENT,
+              actions: [oimPlan.action],
+              destinations: ["https://api.acme.test"],
+            },
+            {
+              id: "approve-message",
+              type: "approval",
+              actions: [oimPlan.action],
+              category: "highRiskAction",
+              minimumApprovers: 1,
+              separationOfDuties: false,
+            },
+          ]),
+        },
+      ]),
+    });
+
+    await expect(
+      new BrokerRoutineToolPort({
+        effects,
+        adapters: new Map(),
+        approvals: { decide, consume, findIntent },
+        oim,
+      }).execute(gated)
+    ).resolves.toMatchObject({ kind: "awaiting_approval", approvalId: "approval-oim" });
+
+    expect(decide.mock.calls[0]?.[0].intent).toMatchObject({
+      arguments: { body: { upload: "file-1" } },
+      fileIds: ["file-1"],
+      destination: "https://api.acme.test",
+      integrationId: "acme",
+      operationId: "send_message",
+      connection: {
+        connectionId: "connection-1",
+        credentialRevision: "revision-1",
+      },
+    });
+    expect(await effects.get(BUSINESS_ID, PLAN.effectId)).toBeUndefined();
+    expect(remoteDispatch).not.toHaveBeenCalled();
+  });
+
+  it("parks provider retries durably and resumes the same effect only after the wait", async () => {
+    const retryingDispatch = vi
+      .fn<ToolAdapter["dispatch"]>()
+      .mockRejectedValueOnce(
+        new AdapterDispatchError("before_dispatch", "rate_limited", true, undefined, 30_000)
+      )
+      .mockResolvedValueOnce({ commentId: 12 });
+    let waitStatus: "pending" | "ready" = "pending";
+    const parkRetry = vi.fn(async () => ({ waitId: "retry-wait-1" }));
+    const subject = new BrokerRoutineToolPort({
+      effects,
+      adapters: new Map([["github", { kind: "integration" as const, dispatch: retryingDispatch }]]),
+      approvals: { decide, consume, findIntent },
+      parkRetry,
+      retryWaitStatus: async () => ({
+        status: waitStatus,
+        waitId: "retry-wait-1",
+        notBefore: "2026-09-07T06:30:30.000Z",
+      }),
+      now: () => new Date("2026-09-07T06:30:00.000Z"),
+    });
+    const retrying = request({
+      bundle: bundle([
+        {
+          kind: "ToolContract",
+          document: contract({ retry: { maxAttempts: 2, safeToRetry: true } }),
+        },
+        { kind: "Guardrail", document: guardrail([ALLOW_COMMENT]) },
+      ]),
+    });
+
+    await expect(subject.execute(retrying)).resolves.toMatchObject({
+      kind: "waiting",
+      waitId: "retry-wait-1",
+      attempt: 1,
+    });
+    await expect(subject.execute(retrying)).resolves.toMatchObject({
+      kind: "waiting",
+      waitId: "retry-wait-1",
+      attempt: 1,
+    });
+    expect(retryingDispatch).toHaveBeenCalledTimes(1);
+
+    waitStatus = "ready";
+    await expect(subject.execute(retrying)).resolves.toEqual({
+      kind: "succeeded",
+      output: { commentId: 12 },
+    });
+    expect(retryingDispatch).toHaveBeenCalledTimes(2);
+    expect(parkRetry).toHaveBeenCalledTimes(1);
   });
 
   it("fails closed after a denied or expired approval without reserving an effect", async () => {
@@ -412,6 +625,85 @@ describe("BrokerRoutineToolPort", () => {
     }
   });
 
+  it("validates a settled Tool against the confirmed effect without dispatching", async () => {
+    const largeOutput = { payload: "x".repeat(129 * 1024) };
+    dispatch.mockResolvedValueOnce(largeOutput);
+    const first = port();
+    await expect(first.execute(request())).resolves.toEqual({
+      kind: "succeeded",
+      output: largeOutput,
+    });
+
+    await expect(port().replaySettled(request())).resolves.toEqual({
+      kind: "succeeded",
+      output: largeOutput,
+    });
+    expect(dispatch).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not reserve or dispatch when settled effect evidence is absent", async () => {
+    await expect(port().replaySettled(request())).resolves.toEqual({
+      kind: "unavailable",
+      reason: "effect_not_found",
+    });
+    expect(await effects.list(BUSINESS_ID)).toEqual([]);
+    expect(dispatch).not.toHaveBeenCalled();
+  });
+
+  it("quarantines an unconfirmed effect found behind a settled Tool State", async () => {
+    await effects.reserve({
+      effectId: PLAN.effectId,
+      businessId: BUSINESS_ID,
+      runId: RUN_ID,
+      stateId: STATE_KEY,
+      logicalEffectOrdinal: PLAN.logicalEffectOrdinal,
+      idempotencyKey: PLAN.idempotencyKey,
+      intentDigest: intentDigest(
+        normalizeToolIntent({
+          intentId: PLAN.effectId,
+          businessId: BUSINESS_ID,
+          runId: RUN_ID,
+          stateId: STATE_KEY,
+          toolId: PLAN.toolRef.name,
+          toolVersion: PLAN.toolRef.version,
+          action: PLAN.action,
+          targetRefs: [],
+          arguments: PLAN.arguments,
+          principalKind: "user",
+          principalId: REQUESTER_PRINCIPAL_ID.slice("user:".length),
+          destination: PLAN.destination,
+          idempotencyKey: PLAN.idempotencyKey,
+        })
+      ),
+      intent: normalizeToolIntent({
+        intentId: PLAN.effectId,
+        businessId: BUSINESS_ID,
+        runId: RUN_ID,
+        stateId: STATE_KEY,
+        toolId: PLAN.toolRef.name,
+        toolVersion: PLAN.toolRef.version,
+        action: PLAN.action,
+        targetRefs: [],
+        arguments: PLAN.arguments,
+        principalKind: "user",
+        principalId: REQUESTER_PRINCIPAL_ID.slice("user:".length),
+        destination: PLAN.destination,
+        idempotencyKey: PLAN.idempotencyKey,
+      }),
+      guardrailRevision: request().bundle.digest,
+      createdAt: "2026-09-13T00:00:00.000Z",
+    });
+
+    await expect(port().replaySettled(request())).resolves.toEqual({
+      kind: "unavailable",
+      reason: "effect_not_confirmed",
+    });
+    expect(await effects.get(BUSINESS_ID, PLAN.effectId)).toMatchObject({
+      state: "reconciliation_required",
+    });
+    expect(dispatch).not.toHaveBeenCalled();
+  });
+
   it("replays an explicit null output after a database-backed port restart", async () => {
     const database = new PGlite();
     try {
@@ -477,10 +769,139 @@ describe("BrokerRoutineToolPort", () => {
         kind: "unavailable",
         reason: "confirmed_effect_output_unavailable",
       });
+      expect(await new PgEffectStore(transactions).get(BUSINESS_ID, PLAN.effectId)).toMatchObject({
+        state: "reconciliation_required",
+        outputStored: false,
+      });
       expect(dispatch).toHaveBeenCalledTimes(1);
     } finally {
       await database.close();
     }
+  });
+
+  it.each([
+    {
+      name: "stored output no longer matches the confirmed attempt digest",
+      corrupt: async (database: PGlite) => {
+        await database.query(
+          `UPDATE effect_records
+              SET output = '{"commentId":13}'::jsonb
+            WHERE effect_id = $1`,
+          [PLAN.effectId]
+        );
+      },
+    },
+    {
+      name: "the confirmed attempt is missing",
+      corrupt: async (database: PGlite) => {
+        await database.query("DELETE FROM effect_attempts WHERE effect_id = $1", [PLAN.effectId]);
+      },
+    },
+    {
+      name: "the confirmed attempt digest is missing",
+      corrupt: async (database: PGlite) => {
+        await database.query(
+          "UPDATE effect_attempts SET output_digest = NULL WHERE effect_id = $1",
+          [PLAN.effectId]
+        );
+      },
+    },
+    {
+      name: "the stored output violates the pinned contract schema",
+      corrupt: async (database: PGlite) => {
+        const output = "not-a-comment";
+        await database.query("UPDATE effect_records SET output = $2::jsonb WHERE effect_id = $1", [
+          PLAN.effectId,
+          JSON.stringify(output),
+        ]);
+        await database.query("UPDATE effect_attempts SET output_digest = $2 WHERE effect_id = $1", [
+          PLAN.effectId,
+          canonicalHash(output),
+        ]);
+      },
+    },
+  ])("quarantines confirmed evidence when $name", async ({ corrupt }) => {
+    const database = new PGlite();
+    try {
+      for (const statement of EFFECT_STORAGE_STATEMENTS) await database.query(statement);
+      const transactions: TransactionPort = {
+        withTransaction: (operation) => database.transaction(operation),
+      };
+      const effects = new PgEffectStore(transactions);
+      const subject = new BrokerRoutineToolPort({
+        effects,
+        adapters,
+        approvals: { decide, consume },
+      });
+      await subject.execute(request());
+      await corrupt(database);
+
+      await expect(subject.replaySettled(request())).resolves.toEqual({
+        kind: "unavailable",
+        reason: "effect_evidence_invalid",
+      });
+      expect(await effects.get(BUSINESS_ID, PLAN.effectId)).toMatchObject({
+        state: "reconciliation_required",
+      });
+      expect(dispatch).toHaveBeenCalledTimes(1);
+    } finally {
+      await database.close();
+    }
+  });
+
+  it("queues corrupt confirmed effect evidence for reconciliation without redispatching", async () => {
+    const database = new PGlite();
+    try {
+      for (const statement of EFFECT_STORAGE_STATEMENTS) await database.query(statement);
+      const transactions: TransactionPort = {
+        withTransaction: (operation) => database.transaction(operation),
+      };
+      const stored = new BrokerRoutineToolPort({
+        effects: new PgEffectStore(transactions),
+        adapters,
+        approvals: { decide, consume },
+      });
+      await stored.execute(request());
+      await database.query(
+        "UPDATE tool_intents SET normalized_intent = normalized_intent - 'toolId' WHERE intent_id = $1",
+        [PLAN.effectId]
+      );
+
+      await expect(stored.execute(request())).resolves.toEqual({
+        kind: "unavailable",
+        reason: "effect_evidence_invalid",
+      });
+      expect(await new PgEffectStore(transactions).get(BUSINESS_ID, PLAN.effectId)).toMatchObject({
+        state: "reconciliation_required",
+      });
+      expect(dispatch).toHaveBeenCalledTimes(1);
+    } finally {
+      await database.close();
+    }
+  });
+
+  it("does not quarantine a valid confirmed effect when another call changes arguments", async () => {
+    const subject = port();
+    await subject.execute(request());
+
+    await expect(
+      subject.execute(
+        request({
+          plan: {
+            ...PLAN,
+            arguments: { body: "different" },
+          },
+        })
+      )
+    ).resolves.toEqual({
+      kind: "unavailable",
+      reason: "effect_binding_mismatch",
+    });
+    expect(await effects.get(BUSINESS_ID, PLAN.effectId)).toMatchObject({
+      state: "confirmed",
+      output: { commentId: 12 },
+    });
+    expect(dispatch).toHaveBeenCalledTimes(1);
   });
 
   it("parks an ambiguous effect, which only reconciliation may resolve", async () => {

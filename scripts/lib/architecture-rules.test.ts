@@ -108,7 +108,7 @@ describe("formatViolations", () => {
 });
 
 describe("ARCHITECTURE_CONFIG", () => {
-  it("governs all 15 target packages and 4 apps", () => {
+  it("governs all 15 target packages and 5 apps", () => {
     const governed = Object.keys(ARCHITECTURE_CONFIG.allowlist);
     for (const pkg of [
       "schema",
@@ -129,9 +129,13 @@ describe("ARCHITECTURE_CONFIG", () => {
     ]) {
       expect(governed).toContain(pkg);
     }
-    for (const app of ["api", "worker", "integration-worker", "web"]) {
+    for (const app of ["api", "worker", "integration-worker", "web", "eval"]) {
       expect(governed).toContain(app);
     }
+  });
+
+  it("allows Eval to exercise the production Tool Broker", () => {
+    expect(ARCHITECTURE_CONFIG.allowlist.eval).toContain("tool-broker");
   });
 
   it("keeps foundation packages import-free", () => {

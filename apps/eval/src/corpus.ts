@@ -141,6 +141,73 @@ function validate(raw: unknown, file: string): EvalCase {
   require(c.tier === "l2" ||
     c.tier ===
       "l3", `${file}: tier ${JSON.stringify(c.tier)} is not runnable; expected "l2" or "l3"`);
+  if (c.routine !== undefined) {
+    require(c.tier ===
+      "l3", `${file}: "routine" needs tier "l3"; this Case is tier ${JSON.stringify(c.tier)}`);
+    require(typeof c.routine === "object" &&
+      c.routine !== null, `${file}: "routine" must be an object`);
+    const fixture = c.routine as Record<string, unknown>;
+    require(typeof fixture.definition === "object" &&
+      fixture.definition !== null, `${file}: "routine.definition" must be an object`);
+    const definition = fixture.definition as {
+      spec?: { states?: unknown };
+    };
+    const states = definition.spec?.states;
+    require(Array.isArray(states), `${file}: "routine.definition.spec.states" must be an array`);
+    require(states.filter(
+      (state) =>
+        typeof state === "object" && state !== null && (state as { type?: unknown }).type === "tool"
+    ).length === 1, `${file}: "routine" must contain exactly one Tool State`);
+    require(typeof fixture.toolContract === "object" &&
+      fixture.toolContract !== null, `${file}: "routine.toolContract" must be an object`);
+    require(Array.isArray(fixture.providerSteps) &&
+      fixture.providerSteps.length > 0, `${file}: "routine.providerSteps" must be non-empty`);
+    for (const [index, step] of (fixture.providerSteps as unknown[]).entries()) {
+      require(typeof step === "object" &&
+        step !== null, `${file}: "routine.providerSteps[${index}]" must be an object`);
+      const fields = step as Record<string, unknown>;
+      require(fields.kind === "success" ||
+        fields.kind ===
+          "retry", `${file}: "routine.providerSteps[${index}].kind" must be "success" or "retry"`);
+      if (fields.kind === "success") {
+        require(Object.hasOwn(
+          fields,
+          "output"
+        ), `${file}: "routine.providerSteps[${index}].output" is required`);
+        require(fields.paddingBytes === undefined ||
+          (typeof fields.paddingBytes === "number" &&
+            Number.isSafeInteger(fields.paddingBytes) &&
+            fields.paddingBytes > 0 &&
+            fields.paddingBytes <=
+              256 *
+                1024), `${file}: "routine.providerSteps[${index}].paddingBytes" must be 1..262144`);
+      } else {
+        require(typeof fields.retryAfterMs === "number" &&
+          Number.isFinite(fields.retryAfterMs) &&
+          fields.retryAfterMs >
+            0, `${file}: "routine.providerSteps[${index}].retryAfterMs" must be positive`);
+        require(fields.code === undefined ||
+          typeof fields.code ===
+            "string", `${file}: "routine.providerSteps[${index}].code" must be a string`);
+      }
+    }
+    require(fixture.guardrail === undefined ||
+      (typeof fixture.guardrail === "object" &&
+        fixture.guardrail !== null), `${file}: "routine.guardrail" must be an object`);
+    require(fixture.inputs === undefined ||
+      (typeof fixture.inputs === "object" &&
+        fixture.inputs !== null &&
+        !Array.isArray(fixture.inputs)), `${file}: "routine.inputs" must be an object`);
+    require(fixture.approval === undefined ||
+      fixture.approval === "approved", `${file}: "routine.approval" must be "approved"`);
+    require(fixture.crashAfter === undefined ||
+      fixture.crashAfter === "effect_confirmed" ||
+      fixture.crashAfter === "state_succeeded", `${file}: unknown "routine.crashAfter" value`);
+    require(c.journey === undefined &&
+      c.fault === undefined &&
+      c.checkpointCrash === undefined &&
+      c.doctor === undefined, `${file}: "routine" cannot be combined with Chat lifecycle fixtures`);
+  }
   if (c.doctor !== undefined) {
     require(c.tier ===
       "l3", `${file}: "doctor" needs tier "l3"; this Case is tier ${JSON.stringify(c.tier)}`);
@@ -209,6 +276,8 @@ function validate(raw: unknown, file: string): EvalCase {
       "l3", `${file}: "agentRoles" needs tier "l3"; this Case is tier ${JSON.stringify(c.tier)}`);
   }
   if (c.journey !== undefined) {
+    require(c.routine ===
+      undefined, `${file}: "routine" and "journey" cannot be combined in one Case`);
     require(Array.isArray(c.journey) &&
       c.journey.length > 0, `${file}: "journey" must be a non-empty array of further Turns`);
     // A journey needs a database and a Conversation to span, and only L3 has either. On an L2

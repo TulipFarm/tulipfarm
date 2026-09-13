@@ -48,6 +48,7 @@ import {
   type GeneratedFile,
   seedAgentRoles,
 } from "./file-store.ts";
+import { runL3Routine } from "./routine.ts";
 import {
   SOUL_WRITE_TOOL,
   type SoulCommit,
@@ -123,6 +124,8 @@ export interface PersistedTurn {
    * bound the most expensive tier in the framework.
    */
   readonly spend: Spend;
+  /** Exact immutable output for the bounded L3 Routine Tool State fixture. */
+  readonly stateOutput?: unknown;
 }
 
 export interface L3Options {
@@ -580,6 +583,27 @@ export function foldJourney(turns: readonly PersistedTurn[]): PersistedTurn {
  * Runs a Case's Turn, then each Turn of its journey, against one Conversation and one database.
  */
 export async function runPersistedTurn(options: L3Options): Promise<PersistedTurn> {
+  if (options.evalCase.routine !== undefined) {
+    const result = await runL3Routine(options.evalCase.routine);
+    return {
+      runStatus: result.runStatus,
+      stateStatus: result.stateStatus,
+      turnStatus: "succeeded",
+      answer: null,
+      assistantMessages: [],
+      events: [],
+      participantText: "",
+      guardrails: [],
+      toolCalls: result.toolCalls,
+      soulCommits: [],
+      publishedArtifacts: [],
+      generatedFiles: [],
+      toolDenials: [],
+      systemPrompt: "",
+      spend: NO_SPEND,
+      stateOutput: result.stateOutput,
+    };
+  }
   const database = options.database ?? (await openEvalDatabase());
   const owned = options.database === undefined;
   const conversationId = randomUUID();

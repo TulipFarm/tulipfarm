@@ -76,6 +76,7 @@ export interface Observation {
 export interface PersistedState {
   readonly runStatus: string;
   readonly stateStatus: string;
+  readonly stateOutput?: unknown;
   readonly turnStatus: string | null;
   readonly events: readonly string[];
   /** Concatenated durable participant text.delta payloads; absent means not observed. */
@@ -254,6 +255,20 @@ function evaluate(a: Expectation, obs: Observation): { passed: boolean; detail: 
       return actual === a.status
         ? { passed: true, detail: `${a.kind} is ${actual}` }
         : { passed: false, detail: `${a.kind} is ${actual}, expected ${a.status}` };
+    }
+
+    case "state_output_equals": {
+      const persisted = obs.persisted;
+      if (persisted === undefined) return notPersisted(a.kind);
+      const actual = readPath(persisted.stateOutput, a.path);
+      return actual.found && equal(actual.value, a.value)
+        ? { passed: true, detail: `State output ${a.path} equals the expected value` }
+        : {
+            passed: false,
+            detail: `State output ${a.path} was ${
+              actual.found ? JSON.stringify(actual.value) : "<missing>"
+            }, expected ${JSON.stringify(a.value)}`,
+          };
     }
 
     case "run_event_emitted": {

@@ -56,6 +56,21 @@ const APPROVAL_COLUMNS =
   "id, kind, status, payload, expires_at, created_at, resolved_at, consumed_at, consumed_by_call_id, " +
   "requester_principal_id, guardrail_evidence, guardrail_evidence_digest, approver_principal_id";
 
+const APPROVAL_BASE_STORAGE_STATEMENTS: readonly string[] = [
+  `CREATE TABLE IF NOT EXISTS approvals (
+    id          uuid PRIMARY KEY,
+    kind        text NOT NULL,
+    status      text NOT NULL DEFAULT 'pending',
+    payload     jsonb NOT NULL,
+    expires_at  timestamptz NOT NULL,
+    created_at  timestamptz NOT NULL,
+    resolved_at timestamptz
+  )`,
+  "CREATE INDEX IF NOT EXISTS approvals_status_expires_idx ON approvals (status, expires_at)",
+  "ALTER TABLE approvals ADD COLUMN IF NOT EXISTS consumed_at timestamptz",
+  "ALTER TABLE approvals ADD COLUMN IF NOT EXISTS consumed_by_call_id text",
+];
+
 /**
  * Migration v60. Guardrail evidence and the requesting principal are stored on the approval row
  * itself, not referenced: an approval that points at a row someone can still edit proves nothing
@@ -94,6 +109,11 @@ export const APPROVAL_EVIDENCE_STORAGE_STATEMENTS: readonly string[] = [
   "DROP TRIGGER IF EXISTS approvals_evidence_immutable ON approvals",
   `CREATE TRIGGER approvals_evidence_immutable BEFORE UPDATE ON approvals
      FOR EACH ROW EXECUTE FUNCTION approvals_reject_evidence_change()`,
+];
+
+export const TOOL_APPROVAL_STORAGE_STATEMENTS: readonly string[] = [
+  ...APPROVAL_BASE_STORAGE_STATEMENTS,
+  ...APPROVAL_EVIDENCE_STORAGE_STATEMENTS,
 ];
 
 /** DB-backed approvals settle pending rows atomically to prevent replayed decisions. */

@@ -436,6 +436,7 @@ describe("Routine observability adapters", () => {
     const observed = observeRoutineToolPort(
       {
         execute: async () => ({ kind: "succeeded", output: { private: "result" } }),
+        replaySettled: async () => ({ kind: "succeeded", output: { private: "result" } }),
       },
       recorded.sink,
       () => 100
@@ -445,6 +446,7 @@ describe("Routine observability adapters", () => {
       businessId: "business-1",
       runId: "run-1",
       stateKey: "tool-state",
+      claim: { leaseOwner: "worker-1", leaseGeneration: 1 },
       requesterPrincipalId: "user:user-1",
       plan: {
         toolRef: { name: "send_message", version: "1" },
@@ -481,6 +483,7 @@ describe("Routine observability adapters", () => {
             kind === "awaiting_approval"
               ? { kind, reason: "not_terminal", approvalId: "approval-1" }
               : { kind, reason: "not_terminal" },
+          replaySettled: async () => ({ kind: "unavailable", reason: "not_terminal" }),
         },
         recorded.sink
       );
@@ -489,6 +492,7 @@ describe("Routine observability adapters", () => {
         businessId: "business-1",
         runId: "run-1",
         stateKey: "tool-state",
+        claim: { leaseOwner: "worker-1", leaseGeneration: 1 },
         requesterPrincipalId: "user:user-1",
         plan: {
           toolRef: { name: "send_message", version: "1" },

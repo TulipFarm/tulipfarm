@@ -49,7 +49,7 @@ import type { LoadedRoutineDefinition } from "./definition-loader";
 import type { EmitEventInput, EmitPort, EmitRecord } from "./emit-port";
 import { createRoutineExecutor } from "./executor";
 import { SandboxRoutineScriptPort } from "./script-port";
-import type { RoutineToolOutcome, RoutineToolRequest } from "./tool-port";
+import type { RoutineToolOutcome, RoutineToolPort, RoutineToolRequest } from "./tool-port";
 
 const STARTED_AT = "2026-08-02T00:00:00.000Z";
 const INPUT_REGION_EXPRESSION = `\${ input.region }`;
@@ -711,6 +711,9 @@ describe("createRoutineExecutor — tool States", () => {
           if (next === undefined) throw new Error("no Tool outcome scripted");
           return next;
         },
+        replaySettled: async () => {
+          throw new Error("no settled Tool replay scripted");
+        },
       },
       toolApprovalWaits: {
         register: async (input) => {
@@ -755,6 +758,147 @@ describe("createRoutineExecutor — tool States", () => {
     expect(calls[0]?.plan.effectId).toBe(routineEffectId(run().id, "Start"));
     expect(calls[0]?.authorityLayers).toEqual([{ name: "routine", grants: [] }]);
     expect(calls[0]?.requesterPrincipalId).toBe("agent:assistant");
+  });
+
+  it("replays a settled Tool only through immutable effect evidence", async () => {
+    const largePayload = "x".repeat(129 * 1024);
+    const harness = new StateHarness([
+      {
+        ...state("Start", "succeeded"),
+        output: { truncated: true, reason: "too_large", bytes: largePayload.length },
+      },
+      state("Route"),
+    ]);
+    const replaySettled = vi.fn(async () => ({
+      kind: "succeeded" as const,
+      output: { route: "matched", payload: largePayload },
+    }));
+    const executeTool = vi.fn(async () => {
+      throw new Error("a settled Tool State must never dispatch");
+    });
+    const execute = createRoutineExecutor({
+      definitions: {
+        load: async () =>
+          ({
+            document: definition([
+              { ...commentState, transition: "Route", end: undefined },
+              {
+                type: "branch",
+                name: "Route",
+                conditions: [
+                  { condition: "states.Start.output.route == 'matched'", transition: "Matched" },
+                ],
+                default: { transition: "Missed" },
+              },
+              {
+                type: "compute",
+                name: "Matched",
+                input: { payload: "${ states.Start.output.payload }" },
+                end: true,
+              },
+              { type: "compute", name: "Missed", input: { payload: "wrong" }, end: true },
+            ] as unknown as routine.RoutineState[]),
+            bundle,
+          }) as LoadedRoutineDefinition,
+      },
+      artifacts: { read: async () => requestArtifact },
+      runs: { listStates: async () => [...harness.states.values()] },
+      scheduler: harness.scheduler,
+      transitions: harness,
+      waits: harness.waitPort,
+      tools: { execute: executeTool, replaySettled } as RoutineToolPort,
+      authority: () => [{ name: "routine", grants: [] }],
+      now: () => new Date(STARTED_AT),
+    });
+
+    await expect(execute(run())).resolves.toEqual({ status: "succeeded" });
+    expect(replaySettled).toHaveBeenCalledOnce();
+    expect(executeTool).not.toHaveBeenCalled();
+    expect(harness.states.get("Matched")?.resolvedInput).toEqual({ payload: largePayload });
+    expect(harness.states.has("Missed")).toBe(false);
+  });
+
+  it("uses the same large confirmed output before and after a State checkpoint restart", async () => {
+    const largePayload = "x".repeat(129 * 1024);
+    const providerOutput = { route: "matched", payload: largePayload };
+    const harness = new StateHarness([state("Start")]);
+    const executeTool = vi.fn(async () => ({
+      kind: "succeeded" as const,
+      output: providerOutput,
+    }));
+    const replaySettled = vi.fn(async () => ({
+      kind: "succeeded" as const,
+      output: providerOutput,
+    }));
+    const document = definition([
+      { ...commentState, transition: "Route", end: undefined },
+      {
+        type: "branch",
+        name: "Route",
+        conditions: [
+          { condition: "states.Start.output.route == 'matched'", transition: "Matched" },
+        ],
+        default: { transition: "Missed" },
+      },
+      {
+        type: "compute",
+        name: "Matched",
+        input: { payload: "${ states.Start.output.payload }" },
+        end: true,
+      },
+      { type: "compute", name: "Missed", input: { payload: "wrong" }, end: true },
+    ] as unknown as routine.RoutineState[]);
+    const makeExecutor = () =>
+      createRoutineExecutor({
+        definitions: {
+          load: async () => ({ document, bundle }) as LoadedRoutineDefinition,
+        },
+        artifacts: { read: async () => requestArtifact },
+        runs: { listStates: async () => [...harness.states.values()] },
+        scheduler: harness.scheduler,
+        transitions: harness,
+        waits: harness.waitPort,
+        tools: { execute: executeTool, replaySettled },
+        authority: () => [{ name: "routine", grants: [] }],
+        now: () => new Date(STARTED_AT),
+      });
+
+    await expect(makeExecutor()(run())).resolves.toEqual({ status: "succeeded" });
+    expect(harness.states.get("Start")?.output).toBeNull();
+    expect(harness.states.get("Matched")?.resolvedInput).toEqual({ payload: largePayload });
+
+    await expect(makeExecutor()(run())).resolves.toEqual({ status: "succeeded" });
+    expect(executeTool).toHaveBeenCalledOnce();
+    expect(replaySettled).toHaveBeenCalledOnce();
+    expect(harness.states.has("Missed")).toBe(false);
+  });
+
+  it("parks when a settled Tool has no confirmed replay evidence", async () => {
+    const harness = new StateHarness([state("Start", "succeeded")]);
+    const executeTool = vi.fn(async () => ({ kind: "succeeded" as const, output: "new mutation" }));
+    const execute = createRoutineExecutor({
+      definitions: {
+        load: async () =>
+          ({ document: definition([commentState]), bundle }) as LoadedRoutineDefinition,
+      },
+      artifacts: { read: async () => requestArtifact },
+      runs: { listStates: async () => [...harness.states.values()] },
+      scheduler: harness.scheduler,
+      transitions: harness,
+      waits: harness.waitPort,
+      tools: {
+        execute: executeTool,
+        replaySettled: async () => ({
+          kind: "unavailable" as const,
+          reason: "confirmed_effect_output_unavailable",
+        }),
+      } as RoutineToolPort,
+      authority: () => [{ name: "routine", grants: [] }],
+      now: () => new Date(STARTED_AT),
+    });
+
+    await expect(execute(run())).resolves.toEqual({ status: "needs_reconciliation" });
+    expect(executeTool).not.toHaveBeenCalled();
   });
 
   it("unwinds a lost lease without settling or starting a successor, then reclaims safely", async () => {
@@ -805,6 +949,10 @@ describe("createRoutineExecutor — tool States", () => {
           stored.add(request.plan.effectId);
           return { kind: "succeeded", output: { replayed: false } };
         },
+        replaySettled: async (request) =>
+          stored.has(request.plan.effectId)
+            ? { kind: "succeeded", output: { replayed: true } }
+            : { kind: "unavailable", reason: "effect_not_found" },
       },
       authority: () => [{ name: "routine", grants: [] }],
       now: () => new Date(STARTED_AT),
@@ -878,6 +1026,40 @@ describe("createRoutineExecutor — tool States", () => {
     expect(harness.transitions).toContain("Start:waiting->ready");
     expect(harness.states.get("Start")).toMatchObject({ status: "succeeded" });
     expect(approvalWaits).toHaveLength(1);
+  });
+
+  it("parks and resumes the same Tool State occurrence after provider backoff", async () => {
+    const harness = new StateHarness([state("Start")]);
+    const calls: RoutineToolRequest[] = [];
+    const execute = toolExecutor(
+      definition([commentState]),
+      harness,
+      [
+        {
+          kind: "waiting",
+          waitId: "retry-wait-1",
+          effectId: routineEffectId(run().id, "Start"),
+          attempt: 1,
+          notBefore: "2026-08-02T00:00:30.000Z",
+          reason: "rate_limited",
+          delayMs: 30_000,
+        },
+        { kind: "succeeded", output: { commentId: 12 } },
+      ],
+      calls
+    );
+
+    await expect(execute(run())).resolves.toEqual({ status: "waiting" });
+    expect(harness.states.get("Start")).toMatchObject({
+      status: "waiting",
+      errorEvidenceRef: "routine:rate_limited",
+    });
+
+    await expect(execute(run())).resolves.toEqual({ status: "succeeded" });
+    expect(calls.map((call) => call.plan.effectId)).toEqual([
+      routineEffectId(run().id, "Start"),
+      routineEffectId(run().id, "Start"),
+    ]);
   });
 
   it("parks an effect only reconciliation can resolve, naming what stopped it", async () => {

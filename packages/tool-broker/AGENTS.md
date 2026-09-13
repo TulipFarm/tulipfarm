@@ -3,10 +3,8 @@ Tool catalog, typed intent, authorization/risk/approval pipeline, effect ledger,
 credential dispatch, sandbox adaptation, and reconciliation.
 
 ## Read on / Skip
-- **Read on if** you touch Tool definitions, catalog/search, intent contracts, risk, approvals,
-  entitlement, credential leases, sandbox Tool execution, or effects.
-- **Skip if** you implement integrations (`../integrations/AGENTS.md`), sandbox backends
-  (`../sandbox/AGENTS.md`), Agent loops (`../agent-runtime/AGENTS.md`), or auth policy.
+- **Read on if** you touch Tool definitions, catalog/search, intent, risk, approvals, entitlement, credential leases, sandbox Tool execution, or effects.
+- **Skip if** you implement integrations, sandbox backends, Agent loops, or auth policy.
 
 ## Map
 | Path | Owns |
@@ -15,15 +13,14 @@ credential dispatch, sandbox adaptation, and reconciliation.
 | `src/{intent,risk,authorize,entitlement}.ts` | Intent, risk, authorization, entitlement. |
 | `src/targets.ts` | Contract-declared target derivation for hosts that hold documents, not code. |
 | `src/{approval-gate,broker,credential-dispatch}.ts` | Approval, orchestration, credentials. |
+| `src/routine-tool-port.ts` | Durable Routine Tool Broker dispatch, approval, retry, and replay. |
 | `src/sandbox-adapter.ts`, `src/effects/` | Sandbox-backed Tools and effect ledger. |
 | `test/security/` | Security matrices for Tool execution. |
 
 ## Rules
-- May import only `@tulipfarm/schema`, `authz`, `audit`, `secrets`, `sandbox`, `storage`, and
-  `observability`; see [dependency rules](../../docs/architecture/dependency-rules.md).
+- May import only `@tulipfarm/schema`, `authz`, `audit`, `secrets`, `sandbox`, `storage`, and `observability`; see [dependency rules](../../docs/architecture/dependency-rules.md).
 - Consume policy, DLP decisions, and credential leases; never reimplement or broaden them.
-- Expose the Tool adapter interface that `@tulipfarm/integrations` implements; never import
-  Integration implementations.
+- Expose the Tool adapter interface that `@tulipfarm/integrations` implements; never import Integration implementations.
 - `EffectDispatcher` consults the mutation kill switch before recording an attempt, so a denied
   mutation leaves no attempt in the ledger. A dispatcher constructed without `mutationGuard` is
   outside the emergency stop; `scripts/mutation-kill-switch.test.ts` fails the build on one.
