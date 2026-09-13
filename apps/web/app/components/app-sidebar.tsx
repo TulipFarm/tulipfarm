@@ -167,27 +167,27 @@ function SidebarHeader({
 }) {
   return (
     <div className={cn(HEADER_ROW, "gap-1", collapsed ? "justify-center px-2" : "px-4")}>
-      <Link
-        to="/"
-        aria-label="TulipFarm home"
-        className={cn(
-          "flex min-w-0 flex-1 items-center gap-2 rounded-md transition-colors",
-          collapsed ? "justify-center" : "px-1 py-1 hover:bg-sidebar-accent"
-        )}
-      >
-        <img src="/logo-128.png" alt="" width={20} height={20} className="size-5 shrink-0" />
-        {collapsed ? null : (
+      {collapsed ? null : (
+        <Link
+          to="/"
+          aria-label="TulipFarm home"
+          className="flex min-w-0 flex-1 items-center gap-2 rounded-md px-1 py-1 transition-colors hover:bg-sidebar-accent"
+        >
+          <img src="/logo-128.png" alt="" width={20} height={20} className="size-5 shrink-0" />
           <span className="truncate text-sm font-semibold tracking-tight text-foreground">
             tulipfarm
           </span>
-        )}
-      </Link>
+        </Link>
+      )}
       {collapsed ? null : (
         <>
           <SidebarCommand visibility={visibility} collapsed={false} compact />
           <NewChatButton collapsed={false} compact onNavigate={onNavigate} />
         </>
       )}
+      {/* Collapsed, the toggle is the header's only control, centered on the same spine as every
+       * other collapsed row (ROW_NARROW) — the brand mark stays reachable via the always-visible
+       * "Chats" destination rather than fighting the toggle for the rail's 40px usable width. */}
       <Tooltip content={collapsed ? "Expand sidebar" : "Collapse sidebar"}>
         <button
           type="button"

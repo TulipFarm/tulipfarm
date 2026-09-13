@@ -1,8 +1,9 @@
 import { describe, expect, it } from "vitest";
-import type { TimelinePart } from "~/lib/chat/types";
+import type { ChatMessage, TimelinePart } from "~/lib/chat/types";
 import {
   concurrentRuns,
   derivePlanProgress,
+  findActivePlan,
   groupTimelineParts,
   largestConcurrentRun,
   MIN_CLUSTER_SIZE,
@@ -413,5 +414,45 @@ describe("a plan_declare row", () => {
       }),
     ]);
     expect(nodes).toHaveLength(1);
+  });
+});
+
+describe("findActivePlan", () => {
+  const rounds = [{ calls: [{ tool: "get_memory" }] }];
+  const message = (overrides: Partial<ChatMessage> = {}): ChatMessage => ({
+    id: "m1",
+    role: "assistant",
+    parts: [{ kind: "plan", revision: 1, rounds }],
+    sealed: false,
+    ...overrides,
+  });
+
+  it("reads the plan off the last Message while it is still streaming", () => {
+    const result = findActivePlan([message()], true);
+
+    expect(result?.pending).toBe(true);
+    expect(result?.rounds.flatMap((round) => round.calls.map((call) => call.tool))).toEqual([
+      "get_memory",
+    ]);
+  });
+
+  it("returns undefined once the Turn has sealed", () => {
+    expect(findActivePlan([message({ sealed: true })], true)).toBeUndefined();
+  });
+
+  it("returns undefined when nothing is streaming", () => {
+    expect(findActivePlan([message()], false)).toBeUndefined();
+  });
+
+  it("returns undefined when the last Message never declared a plan", () => {
+    expect(
+      findActivePlan([message({ parts: [{ kind: "text", text: "hi" }] })], true)
+    ).toBeUndefined();
+  });
+
+  it("returns undefined when the last Message is from the user", () => {
+    expect(
+      findActivePlan([message({ role: "user", parts: [{ kind: "text", text: "hi" }] })], true)
+    ).toBeUndefined();
   });
 });

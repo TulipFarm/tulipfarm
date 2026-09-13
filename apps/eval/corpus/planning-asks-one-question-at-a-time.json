@@ -1,0 +1,42 @@
+{
+  "id": "planning-asks-one-question-at-a-time",
+  "tier": "l2",
+  "agent": "support",
+  "input": [
+    {
+      "role": "user",
+      "content": "Help me set up a Jira/Linear-style ticket tracker for our team."
+    }
+  ],
+  "tools": [],
+  "script": [
+    {
+      "kind": "text",
+      "text": "Happy to set that up. First question: what should the ticket key prefix be, like ENG or SUP?"
+    }
+  ],
+  "expect": [
+    {
+      "kind": "prompt_contains",
+      "text": "ask one question at a time in your reply"
+    },
+    {
+      "kind": "prompt_contains",
+      "text": "Never send a multi-field Form or a wall of questions to gather requirements"
+    },
+    {
+      "kind": "output_contains",
+      "text": "First question",
+      "ungrounded": "wording, not a recalled fact - the Case checks the reply frames this as a single question rather than a batch"
+    },
+    {
+      "kind": "output_omits",
+      "text": "Tracker scope",
+      "ungrounded": "the fixed multi-field wording this Case guards against - naming several fields in one reply would mean the old form-dump behaviour survived"
+    },
+    {
+      "kind": "loop_status",
+      "status": "completed"
+    }
+  ]
+}
