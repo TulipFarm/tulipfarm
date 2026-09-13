@@ -298,7 +298,8 @@ export const ARCHITECTURE_CONFIG: ArchitectureConfig = {
     // `tool-host` is the autonomy ceiling. A Case measuring whether an Agent's configured autonomy
     // still bounds its Tool loop has to ask production's own predicate; a copy here would go on
     // passing after the product's ceiling was loosened, which is the regression the Case exists
-    // to catch.
+    // to catch. `tool-broker` likewise keeps effect, Approval, retry, and replay behavior on the
+    // production path instead of copying it into the L3 harness.
     eval: [
       "agent-runtime",
       "turn-executor",
@@ -309,6 +310,7 @@ export const ARCHITECTURE_CONFIG: ArchitectureConfig = {
       "soul",
       "storage",
       "run-kernel",
+      "tool-broker",
       "tool-host",
       // `files` so a Case can name a shipped platform Tool instead of copying its declaration. A
       // copy would measure the model against a description no deployment sends.

@@ -1,22 +1,23 @@
+import type { PersistedState } from "@tulipfarm/storage";
+import type { CompiledState } from "./compiler";
+import { type ChainOutcome, RoutineExecutionRefusal, type StateOutputs } from "./execution-support";
 import {
-  type CompiledState,
   type ForeachProgress,
   initForeachProgress,
-  initParallelProgress,
   joinForeach,
+  planForeach,
+  resolveForeachItems,
+  settleForeachItem,
+} from "./states/foreach";
+import {
+  initParallelProgress,
   joinParallel,
   type ParallelProgress,
-  planForeach,
   planParallel,
-  RoutineStepError,
-  resolveForeachItems,
-  type StepOutcome,
-  settleForeachItem,
   settleParallelBranch,
-  stepRepeat,
-} from "@tulipfarm/run-kernel";
-import type { PersistedState } from "@tulipfarm/storage";
-import { type ChainOutcome, RoutineExecutionRefusal, type StateOutputs } from "./execution-support";
+} from "./states/parallel";
+import { stepRepeat } from "./states/repeat";
+import { RoutineStepError, type StepOutcome } from "./states/step";
 
 /**
  * The three State kinds that run a body more than once: `parallel`, `foreach`, `repeat_until`.

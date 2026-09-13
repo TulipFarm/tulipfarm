@@ -21,7 +21,7 @@ reconciliation, turn execution, delivery classification, projections, and outbox
 | `src/observability.ts`, `src/observability-config.ts` | Durable AI telemetry and boot-time OTLP setup. |
 | `src/executors.ts`, `src/delivery.ts` | Run source and delivery target registries. |
 | `src/turn/` | Integration turn executor. Chat Turn execution moved to [`packages/turn-executor`](../../packages/turn-executor/AGENTS.md). |
-| `src/routine/` | Routine executor plus Tool, Agent, approval, child-Routine, and emission ports. |
+| `src/routine/` | Worker adapters for the shared `run-kernel` Routine executor. |
 | `src/memory-curation/` | The hourly Curator: `run.ts` scans users with new Turns, calls the fast `memory_curator` agent and writes the rewritten Memory Document; `guards.ts` holds the pure output guards (budget classification, standing-instruction check). |
 | `src/subagent/` | Ad-hoc sub-agent Run executor: the chat executor with its Conversation swapped for an answer Artifact. |
 | `src/internal/` | HTTP ports back to `/api/v1/internal/*`; Run identity is re-derived by API. |
@@ -99,8 +99,8 @@ reconciliation, turn execution, delivery classification, projections, and outbox
   idempotency key. Never infer either from Tool arguments.
 - Authority for a co-located Tool is still read from the API per Run, never derived here, and is
   cached for one dispatch attempt only; `main.ts` evicts it when the attempt settles.
-- A State's `concurrencyKey` is held by a durable expiry-bounded lease; a contender queues on a
-  durable backoff timer in `routine/concurrency-guard.ts` and parks only at the bounded ceiling.
+- A State's `concurrencyKey` is held by a durable expiry-bounded lease; the shared `run-kernel`
+  Routine executor queues contention on a durable timer and parks only at the bounded ceiling.
 - A fired concurrency backoff resumes *into* the State body; only `wait`/`approval` States resume
   past themselves, so never route a `waiting` row through `resumeWait` without checking.
 - Approval role authority only knows recorded `admin`/`member`; other roles fail closed.

@@ -1,0 +1,112 @@
+{
+  "id": "l3-routine-tool-approval-resumes-once",
+  "tier": "l3",
+  "agent": "support",
+  "input": [{ "role": "user", "content": "Run the approved deterministic Routine Tool State." }],
+  "expect": [
+    { "kind": "run_status", "status": "succeeded" },
+    { "kind": "state_status", "status": "succeeded" },
+    { "kind": "tool_call_count", "count": 1 },
+    { "kind": "state_output_equals", "path": "receiptId", "value": "approved-receipt" }
+  ],
+  "routine": {
+    "definition": {
+      "apiVersion": "tulipfarm.ai/v1",
+      "kind": "Routine",
+      "metadata": {
+        "id": "81000000-0000-4000-8000-000000000001",
+        "slug": "eval-approved-send",
+        "schemaVersion": 1,
+        "authoredVersion": 1,
+        "lifecycle": "published"
+      },
+      "spec": {
+        "owner": "agent:eval",
+        "start": "Send",
+        "states": [
+          {
+            "type": "tool",
+            "name": "Send",
+            "toolRef": { "name": "eval.message.send", "version": "1.0.0" },
+            "action": "message.send",
+            "destination": "eval",
+            "input": { "text": "${ input.text }" },
+            "transition": "Capture"
+          },
+          {
+            "type": "compute",
+            "name": "Capture",
+            "input": { "output": "${ states.Send.output }" },
+            "end": true
+          }
+        ]
+      }
+    },
+    "toolContract": {
+      "apiVersion": "tulipfarm.ai/v1",
+      "kind": "ToolContract",
+      "metadata": {
+        "id": "81000000-0000-4000-8000-000000000002",
+        "slug": "eval-message-send",
+        "schemaVersion": 1,
+        "authoredVersion": 1,
+        "lifecycle": "published",
+        "publishedDigest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      },
+      "spec": {
+        "toolId": "eval.message.send",
+        "toolVersion": "1.0.0",
+        "action": "message.send",
+        "inputSchema": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": { "text": { "type": "string" } },
+          "required": ["text"]
+        },
+        "outputSchema": { "type": "object" },
+        "riskClass": "medium",
+        "mutating": true,
+        "dataClasses": ["source-content"],
+        "allowedDestinations": ["eval"],
+        "idempotency": { "strategy": "provider" },
+        "retry": { "maxAttempts": 2, "safeToRetry": true },
+        "dryRun": false,
+        "adapter": { "kind": "integration", "ref": "eval-routine-provider" }
+      }
+    },
+    "guardrail": {
+      "apiVersion": "tulipfarm.ai/v1",
+      "kind": "Guardrail",
+      "metadata": {
+        "id": "81000000-0000-4000-8000-000000000003",
+        "slug": "eval-message-approval",
+        "schemaVersion": 1,
+        "authoredVersion": 1,
+        "lifecycle": "published"
+      },
+      "spec": {
+        "defaultDecision": "deny",
+        "rules": [
+          {
+            "id": "allow-approved-send",
+            "type": "allow",
+            "actions": ["message.send"],
+            "dataClasses": ["source-content"],
+            "destinations": ["eval"]
+          },
+          {
+            "id": "approve-send",
+            "type": "approval",
+            "actions": ["message.send"],
+            "category": "highRiskAction",
+            "minimumApprovers": 1,
+            "separationOfDuties": true
+          }
+        ]
+      }
+    },
+    "inputs": { "text": "hello" },
+    "providerSteps": [{ "kind": "success", "output": { "receiptId": "approved-receipt" } }],
+    "approval": "approved"
+  }
+}

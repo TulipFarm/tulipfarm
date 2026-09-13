@@ -1,27 +1,54 @@
-import {
-  type ChildRunResult,
-  type CompiledState,
-  planApprovalWait,
-  planChildRoutineCall,
-  planTimerWait,
-  type RegisterWaitInput,
-  resolveApproval,
-  resolveChildRun,
-  resolveErrorPath,
-  routineWaitId,
-  type StateStatus,
-  type StepOutcome,
-  stateOutcome,
-} from "@tulipfarm/run-kernel";
 import type { PersistedRun, PersistedState, PersistedWait } from "@tulipfarm/storage";
-import type { RoutineApprovalPort } from "./approval-port";
-import type { ChildRoutinePort } from "./child-routine-port";
+import type { StateStatus } from "../model/run";
+import type { RegisterWaitInput } from "../waits";
+import type { CompiledState } from "./compiler";
 import {
   type ChainOutcome,
   CLAIM_PATH,
   RoutineExecutionRefusal,
   WAIT_TIMED_OUT,
 } from "./execution-support";
+import { routineWaitId } from "./scheduling";
+import { planApprovalWait, resolveApproval } from "./states/approval";
+import { type ChildRunResult, planChildRoutineCall, resolveChildRun } from "./states/child";
+import { type StepOutcome, stateOutcome } from "./states/step";
+import { planTimerWait } from "./states/wait";
+import { resolveErrorPath } from "./states/wait-plan";
+
+export interface RoutineApprovalPort {
+  open(input: {
+    businessId: string;
+    runId: string;
+    stateKey: string;
+    stateName: string;
+    wait: RegisterWaitInput;
+  }): Promise<{ readonly decision: "pending" | "approved" | "denied" | "expired" }>;
+  find(input: {
+    businessId: string;
+    runId: string;
+    stateKey: string;
+  }): Promise<{ readonly decision: "pending" | "approved" | "denied" | "expired" } | undefined>;
+}
+
+export interface ChildRoutinePort {
+  start(input: {
+    businessId: string;
+    runId: string;
+    stateKey: string;
+    stateName: string;
+    routineRef: { readonly name: string; readonly version: string };
+    mode: "wait" | "detach";
+    input: Record<string, unknown>;
+    deadlineMs?: number;
+  }): Promise<{ readonly status: "pending" | "succeeded" | "failed" | "cancelled" | "expired" }>;
+  find(input: {
+    businessId: string;
+    runId: string;
+    stateKey: string;
+  }): Promise<
+    { readonly status: "pending" | "succeeded" | "failed" | "cancelled" | "expired" } | undefined
+  >;
+}
 
 /**
  * The two ways a Routine State stops being this process's problem and later becomes it again:

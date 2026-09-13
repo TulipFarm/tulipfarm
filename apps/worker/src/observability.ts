@@ -367,6 +367,7 @@ export function observeRoutineToolPort(
   now: () => number = Date.now
 ): RoutineToolPort {
   return {
+    replaySettled: (request) => inner.replaySettled(request),
     async execute(request: RoutineToolRequest) {
       const startedAt = now();
       const record = (status: "ok" | "error", errorCode?: string): void => {

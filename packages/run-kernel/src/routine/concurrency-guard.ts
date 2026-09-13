@@ -1,16 +1,16 @@
+import type { PersistedRun, PersistedWait } from "@tulipfarm/storage";
+import type { StateStatus } from "../model/run";
+import type { RegisterWaitInput } from "../waits";
+import type { CompiledState } from "./compiler";
 import {
   acquireStateConcurrencyKey,
-  type CompiledState,
   planStateConcurrencyBackoffWait,
-  type RegisterWaitInput,
-  routineConcurrencyWaitId,
   STATE_CONCURRENCY_MAX_WAITS,
   type StateConcurrencyStore,
   type StateContentionStore,
-  type StateStatus,
   stateConcurrencyBackoffMs,
-} from "@tulipfarm/run-kernel";
-import type { PersistedRun, PersistedWait } from "@tulipfarm/storage";
+} from "./concurrency-lease";
+import { routineConcurrencyWaitId } from "./scheduling";
 
 /**
  * Mutual exclusion for a Routine State's authored `concurrencyKey`, and the queue in front of it.

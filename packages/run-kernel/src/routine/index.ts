@@ -1,5 +1,7 @@
 export * from "./compiler";
 export * from "./concurrency-lease";
+export * from "./execution-support";
+export * from "./executor";
 export * from "./expressions";
 export * from "./input";
 export { routineBudgetScopedLimits } from "./limit-enforcement";

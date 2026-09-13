@@ -336,6 +336,7 @@ async function runL3Trial(
         generatedFiles: turn.generatedFiles,
         doctorEvents: turn.doctorEvents,
         toolDenials: turn.toolDenials,
+        stateOutput: turn.stateOutput,
       },
     });
   } catch (cause) {

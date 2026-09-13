@@ -114,6 +114,18 @@ export { intentDigest, normalizeToolIntent, ToolIntentError } from "./intent";
 export type { ToolRiskAssessment, ToolRiskContext, ToolRiskLevel } from "./risk";
 export { assessToolRisk } from "./risk";
 export type {
+  BrokerRoutineToolPortOptions,
+  RoutineOimPreparation,
+  RoutineOimPreparationPort,
+  RoutineToolApprovalPort,
+  RoutineToolBundle,
+  RoutineToolDispatchPlan,
+  RoutineToolOutcome,
+  RoutineToolPort,
+  RoutineToolRequest,
+} from "./routine-tool-port";
+export { BrokerRoutineToolPort } from "./routine-tool-port";
+export type {
   PublishedSandboxCommand,
   SandboxCommandResolver,
   SandboxCredentialLeaseHandle,

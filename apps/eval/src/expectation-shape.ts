@@ -83,6 +83,10 @@ const EXPECTATION_FIELDS: Record<string, readonly [string, FieldType][]> = {
   rubric_denies: [["question", "string"]],
   run_status: [["status", "string"]],
   state_status: [["status", "string"]],
+  state_output_equals: [
+    ["path", "string"],
+    ["value", "any"],
+  ],
   turn_status: [["status", "string"]],
   run_event_emitted: [["eventType", "string"]],
   run_event_text_omits: [["text", "string"]],

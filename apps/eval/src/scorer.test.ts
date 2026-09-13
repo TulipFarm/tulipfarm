@@ -630,6 +630,51 @@ describe("persisted_message_metadata_equals", () => {
     },
   });
 
+  describe("state_output_equals", () => {
+    const observation: Observation = {
+      ...base,
+      persisted: {
+        runStatus: "succeeded",
+        stateStatus: "succeeded",
+        stateOutput: { receipt: { id: "provider-42" } },
+        turnStatus: null,
+        events: [],
+        soulCommits: [],
+        publishedArtifacts: [],
+        generatedFiles: [],
+      },
+    };
+
+    it("reads the persisted Routine Tool State output", () => {
+      expect(
+        only(
+          {
+            kind: "state_output_equals",
+            path: "receipt.id",
+            value: "provider-42",
+          } as Expectation,
+          observation
+        )
+      ).toMatchObject({ passed: true });
+    });
+
+    it("fails when the persisted output path is absent", () => {
+      expect(
+        only(
+          {
+            kind: "state_output_equals",
+            path: "receipt.missing",
+            value: "provider-42",
+          } as Expectation,
+          observation
+        )
+      ).toMatchObject({
+        passed: false,
+        detail: expect.stringContaining("receipt.missing"),
+      });
+    });
+  });
+
   it("reads nested durable Message metadata", () => {
     const observation = observed([
       {

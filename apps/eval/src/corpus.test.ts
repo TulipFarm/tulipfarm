@@ -251,6 +251,59 @@ describe("loadCorpus", () => {
     expect(corpus.cases[0]?.tier).toBe("l3");
   });
 
+  it("rejects a Routine fixture outside L3", async () => {
+    const dir = corpusDir({
+      "a.json": {
+        ...valid("alpha"),
+        routine: {
+          definition: { kind: "Routine", spec: { states: [{ type: "tool" }] } },
+          toolContract: { kind: "ToolContract" },
+          providerSteps: [{ kind: "success", output: { receiptId: "receipt-1" } }],
+        },
+      },
+    });
+    await expect(load(dir)).rejects.toThrow(/"routine" needs tier "l3"/);
+  });
+
+  it("rejects a Routine fixture without a provider outcome", async () => {
+    const dir = corpusDir({
+      "a.json": {
+        ...valid("alpha"),
+        tier: "l3",
+        routine: {
+          definition: { kind: "Routine", spec: { states: [{ type: "tool" }] } },
+          toolContract: { kind: "ToolContract" },
+          providerSteps: [],
+        },
+      },
+    });
+    await expect(load(dir)).rejects.toThrow(/"routine.providerSteps" must be non-empty/);
+  });
+
+  it("accepts a bounded L3 Routine Tool-State fixture and persisted output Expectation", async () => {
+    const dir = corpusDir({
+      "a.json": {
+        ...valid("alpha"),
+        tier: "l3",
+        routine: {
+          definition: { kind: "Routine", spec: { states: [{ type: "tool" }] } },
+          toolContract: { kind: "ToolContract" },
+          providerSteps: [{ kind: "success", output: { receiptId: "receipt-1" } }],
+          approval: "approved",
+          crashAfter: "effect_confirmed",
+        },
+        expect: [
+          {
+            kind: "state_output_equals",
+            path: "receiptId",
+            value: "receipt-1",
+          },
+        ],
+      },
+    });
+    await expect(load(dir)).resolves.toBeDefined();
+  });
+
   it("fails loudly on an empty directory rather than reporting a vacuous pass", async () => {
     const dir = corpusDir({});
     await expect(load(dir)).rejects.toThrow(/no Eval Cases/);

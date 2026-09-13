@@ -33,6 +33,8 @@ import {
   type TransactionPort,
   WAIT_STORAGE_STATEMENTS,
 } from "@tulipfarm/storage";
+import { EFFECT_STORAGE_STATEMENTS } from "@tulipfarm/tool-broker";
+import { TOOL_APPROVAL_STORAGE_STATEMENTS } from "@tulipfarm/tool-host";
 
 /**
  * The Conversation half of a Turn, which `apps/api` owns and this app may not import.
@@ -43,6 +45,11 @@ import {
  * does not have here, which is a green Case measuring a fiction.
  */
 const CONVERSATION_STATEMENTS: readonly string[] = [
+  `CREATE TABLE IF NOT EXISTS users (
+     id      text PRIMARY KEY,
+     status  text NOT NULL,
+     role    text NOT NULL
+   )`,
   `CREATE TABLE IF NOT EXISTS eval_turns (
      business_id      text    NOT NULL,
      run_id           text    NOT NULL,
@@ -104,6 +111,8 @@ async function migratedSnapshot(): Promise<Blob | File> {
       ...RUN_EVENT_STORAGE_STATEMENTS,
       ...BUDGET_STORAGE_STATEMENTS,
       ...TASK_STORAGE_STATEMENTS,
+      ...EFFECT_STORAGE_STATEMENTS,
+      ...TOOL_APPROVAL_STORAGE_STATEMENTS,
       ...CONVERSATION_STATEMENTS,
       // A generated File's audience is decided by the Roles its authoring Agent holds, and those
       // are rows: `role_assignments` against a registered Principal. Seeding the answer instead

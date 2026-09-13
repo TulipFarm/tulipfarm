@@ -1,7 +1,13 @@
 import { execFileSync } from "node:child_process";
 import path from "node:path";
 import type { ModelInvocationResult, ModelStreamChunk } from "@tulipfarm/agent-runtime";
-import { contentText, textContent } from "@tulipfarm/schema";
+import {
+  contentText,
+  type GuardrailDefinition,
+  type routine,
+  type ToolContractDefinition,
+  textContent,
+} from "@tulipfarm/schema";
 import { TurnGuardrails } from "@tulipfarm/turn-executor";
 import { describe, expect, it, vi } from "vitest";
 import type { EvalCase } from "../case.ts";
@@ -28,6 +34,143 @@ const answering = (text: string): EvalCase => ({
   expect: [],
   script: [{ kind: "text", text }],
 });
+
+const ROUTINE_TOOL_CONTRACT: ToolContractDefinition = {
+  apiVersion: "tulipfarm.ai/v1",
+  kind: "ToolContract",
+  metadata: {
+    id: "11111111-1111-4111-8111-111111111111",
+    slug: "eval-send",
+    schemaVersion: 1,
+    authoredVersion: 1,
+    lifecycle: "published",
+    publishedDigest: "a".repeat(64),
+  },
+  spec: {
+    toolId: "eval.message.send",
+    toolVersion: "1.0.0",
+    action: "message.send",
+    inputSchema: {
+      type: "object",
+      additionalProperties: false,
+      properties: { text: { type: "string" } },
+      required: ["text"],
+    },
+    outputSchema: { type: "object" },
+    riskClass: "medium",
+    mutating: true,
+    dataClasses: ["source-content"],
+    allowedDestinations: ["eval"],
+    idempotency: { strategy: "provider" },
+    retry: { maxAttempts: 2, safeToRetry: true },
+    dryRun: false,
+    adapter: { kind: "integration", ref: "eval-routine-provider" },
+  },
+} as ToolContractDefinition;
+
+const ROUTINE_DEFINITION: routine.RoutineDefinition = {
+  apiVersion: "tulipfarm.ai/v1",
+  kind: "Routine",
+  metadata: {
+    id: "22222222-2222-4222-8222-222222222222",
+    slug: "eval-send",
+    schemaVersion: 1,
+    authoredVersion: 1,
+    lifecycle: "published",
+  },
+  spec: {
+    owner: "agent:eval",
+    start: "Send",
+    states: [
+      {
+        type: "tool",
+        name: "Send",
+        toolRef: { name: "eval.message.send", version: "1.0.0" },
+        action: "message.send",
+        destination: "eval",
+        input: { text: `${"${"} input.text }` },
+        transition: "Capture",
+      },
+      {
+        type: "compute",
+        name: "Capture",
+        input: { output: `${"${"} states.Send.output }` },
+        end: true,
+      },
+    ],
+  },
+} as routine.RoutineDefinition;
+
+const APPROVAL_GUARDRAIL: GuardrailDefinition = {
+  apiVersion: "tulipfarm.ai/v1",
+  kind: "Guardrail",
+  metadata: {
+    id: "33333333-3333-4333-8333-333333333333",
+    slug: "eval-approval",
+    schemaVersion: 1,
+    authoredVersion: 1,
+    lifecycle: "published",
+  },
+  spec: {
+    defaultDecision: "deny",
+    rules: [
+      {
+        id: "allow-approved-send",
+        type: "allow",
+        actions: ["message.send"],
+        dataClasses: ["source-content"],
+        destinations: ["eval"],
+      },
+      {
+        id: "approve-send",
+        type: "approval",
+        actions: ["message.send"],
+        category: "highRiskAction",
+        minimumApprovers: 1,
+        separationOfDuties: true,
+      },
+    ],
+  },
+} as GuardrailDefinition;
+
+const ALLOW_GUARDRAIL: GuardrailDefinition = {
+  ...APPROVAL_GUARDRAIL,
+  metadata: { ...APPROVAL_GUARDRAIL.metadata, slug: "eval-allow" },
+  spec: {
+    defaultDecision: "deny",
+    rules: [
+      {
+        id: "allow-send",
+        type: "allow",
+        actions: ["message.send"],
+        dataClasses: ["source-content"],
+        destinations: ["eval"],
+      },
+    ],
+  },
+} as GuardrailDefinition;
+
+function routineCase(
+  id: string,
+  overrides: Partial<NonNullable<EvalCase["routine"]>> = {}
+): EvalCase {
+  return {
+    id,
+    tier: "l3",
+    agent: "support",
+    context: {},
+    input: [{ role: "user", content: textContent("Send the message.") }],
+    expect: [],
+    routine: {
+      definition: ROUTINE_DEFINITION,
+      toolContract: ROUTINE_TOOL_CONTRACT,
+      guardrail: ALLOW_GUARDRAIL,
+      inputs: { text: "hello" },
+      providerSteps: [{ kind: "success", output: { receiptId: "receipt-1" } }],
+      ...overrides,
+    },
+  };
+}
 
 describe("the L3 tier", () => {
   it(
@@ -98,6 +241,97 @@ describe("the L3 tier", () => {
 
       expect(first.answer).toBe("first");
       expect(second.answer).toBe("second");
+    },
+    TIMEOUT
+  );
+});
+
+describe("the L3 Routine Tool-State tier", () => {
+  it(
+    "persists an Approval decision once and resumes the exact Tool occurrence",
+    async () => {
+      soul ??= await loadEvalSoul();
+      const turn = await runPersistedTurn({
+        evalCase: routineCase("l3-routine-approval", {
+          guardrail: APPROVAL_GUARDRAIL,
+          approval: "approved",
+        }),
+        soul,
+        binding: scriptedBinding(),
+      });
+
+      expect(turn.runStatus).toBe("succeeded");
+      expect(turn.stateStatus).toBe("succeeded");
+      expect(turn.stateOutput).toEqual({ receiptId: "receipt-1" });
+      expect(turn.toolCalls).toHaveLength(1);
+    },
+    TIMEOUT
+  );
+
+  it(
+    "replays a large confirmed output after the State checkpoint without another provider call",
+    async () => {
+      soul ??= await loadEvalSoul();
+      const turn = await runPersistedTurn({
+        evalCase: routineCase("l3-routine-confirmed-replay", {
+          crashAfter: "state_succeeded",
+          providerSteps: [
+            {
+              kind: "success",
+              output: { receiptId: "receipt-large" },
+              paddingBytes: 129 * 1024,
+            },
+          ],
+        }),
+        soul,
+        binding: scriptedBinding(),
+      });
+
+      expect(turn.runStatus).toBe("succeeded");
+      expect(turn.stateOutput).toMatchObject({ receiptId: "receipt-large" });
+      expect(turn.toolCalls).toHaveLength(1);
+    },
+    TIMEOUT
+  );
+
+  it(
+    "recovers a confirmed effect after a crash before the Tool State checkpoint",
+    async () => {
+      soul ??= await loadEvalSoul();
+      const turn = await runPersistedTurn({
+        evalCase: routineCase("l3-routine-confirmed-before-state", {
+          crashAfter: "effect_confirmed",
+        }),
+        soul,
+        binding: scriptedBinding(),
+      });
+
+      expect(turn.runStatus).toBe("succeeded");
+      expect(turn.stateStatus).toBe("succeeded");
+      expect(turn.stateOutput).toEqual({ receiptId: "receipt-1" });
+      expect(turn.toolCalls).toHaveLength(1);
+    },
+    TIMEOUT
+  );
+
+  it(
+    "persists a provider retry wait and resumes the same Tool occurrence",
+    async () => {
+      soul ??= await loadEvalSoul();
+      const turn = await runPersistedTurn({
+        evalCase: routineCase("l3-routine-retry", {
+          providerSteps: [
+            { kind: "retry", retryAfterMs: 1_000, code: "rate_limited" },
+            { kind: "success", output: { receiptId: "receipt-after-retry" } },
+          ],
+        }),
+        soul,
+        binding: scriptedBinding(),
+      });
+
+      expect(turn.runStatus).toBe("succeeded");
+      expect(turn.stateOutput).toEqual({ receiptId: "receipt-after-retry" });
+      expect(turn.toolCalls).toHaveLength(2);
     },
     TIMEOUT
   );

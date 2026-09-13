@@ -18,6 +18,7 @@ export {
   type ApprovalStatus,
   type ApprovalsQueryable,
   ApprovalsRepo,
+  TOOL_APPROVAL_STORAGE_STATEMENTS,
 } from "./approvals/repo";
 export {
   APPROVAL_DECIDER_ROLES,
