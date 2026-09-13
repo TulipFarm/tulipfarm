@@ -9,6 +9,25 @@ import { isSetupTask } from "./task-presentation";
 
 const MAX_ROWS = 3;
 
+export function SetupTasksPreview({ tasks }: { tasks: Task[] }) {
+  const { refresh, dismiss } = useCompanion();
+  const setup = tasks.filter(
+    (task) => (task.status === "open" || task.status === "claimed") && isSetupTask(task)
+  );
+  if (setup.length === 0) return null;
+  return (
+    <div className="mt-6 w-full border-t border-border">
+      <CompanionPanel
+        tasks={setup}
+        loading={false}
+        onDismiss={dismiss}
+        onAnswered={refresh}
+        onClose={() => {}}
+      />
+    </div>
+  );
+}
+
 function statusFor(task: Task): { label: string; tone: StatusTone } {
   if (task.blocking && task.status === "open") return { label: "Urgent", tone: "danger" };
   if (task.status === "claimed") return { label: "In progress", tone: "info" };
@@ -32,12 +51,12 @@ export function TasksPreviewCard({
   tasks: Task[];
   onPick: (text: string) => void;
 }) {
-  const { setOpen, loading, error, refresh, dismiss } = useCompanion();
-  const activeTasks = tasks.filter((task) => task.status === "open" || task.status === "claimed");
-  const setup = activeTasks.filter(isSetupTask);
-  const nextSteps = activeTasks.filter((task) => !isSetupTask(task));
+  const { setOpen, loading, error, refresh } = useCompanion();
+  const activeTasks = tasks.filter(
+    (task) => (task.status === "open" || task.status === "claimed") && !isSetupTask(task)
+  );
   if (activeTasks.length === 0 && !loading && !error) return null;
-  const rows = nextSteps.slice(0, MAX_ROWS);
+  const rows = activeTasks.slice(0, MAX_ROWS);
 
   return (
     <div className="mt-6 w-full border-t border-border">
@@ -56,15 +75,6 @@ export function TasksPreviewCard({
             Try again
           </Button>
         </div>
-      ) : null}
-      {setup.length > 0 ? (
-        <CompanionPanel
-          tasks={setup}
-          loading={false}
-          onDismiss={dismiss}
-          onAnswered={refresh}
-          onClose={() => {}}
-        />
       ) : null}
       {rows.length > 0 ? (
         <section aria-label="Next steps" className="py-3">
