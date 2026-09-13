@@ -1,5 +1,6 @@
 import { lazy, type ReactNode, Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { AgentGlyph } from "~/components/agent-glyph";
+import { Waypoints } from "~/components/icons";
 import { ConnectionStatus } from "~/components/shell/states";
 import { Link } from "~/components/ui/link";
 import type { ChatMessage, ChatModelSelector } from "~/lib/chat/types";
@@ -13,7 +14,9 @@ import { ChatDebugDrawer } from "./chat-debug-drawer";
 import { Composer } from "./composer";
 import { ChatHomeWork } from "./home-work";
 import { asPickerPreset, DEFAULT_CHAT_MODEL_SELECTOR } from "./model-selector";
+import { PlanSidebar } from "./plan-sidebar";
 import { SetupTasksPreview } from "./tasks-preview-card";
+import { findActivePlan } from "./timeline-groups";
 import { useMentionCatalog } from "./use-mention-catalog";
 
 /*
@@ -103,6 +106,18 @@ function EmptyState({
   );
 }
 
+function PlanModeBar() {
+  return (
+    <div
+      role="status"
+      className="flex h-6 shrink-0 items-center gap-1.5 border-b border-run-active/30 bg-run-active/10 px-4 text-xs font-medium text-run-active sm:px-6"
+    >
+      <Waypoints aria-hidden className="size-3 shrink-0" />
+      Working through a plan
+    </div>
+  );
+}
+
 /** Layer-1 Chat surface: centered first prompt → live transcript with a docked composer. */
 export function ChatPanel({
   agentId,
@@ -161,6 +176,7 @@ export function ChatPanel({
     onConversationChange,
   });
   const busy = status === "submitted" || status === "streaming";
+  const activePlan = findActivePlan(messages, busy);
   const [revisionDraft, setRevisionDraft] = useState<{ key: string; text: string } | null>(null);
   const reviseDraft = useCallback(
     (draft: { draftId: string; filename: string }) =>
@@ -226,101 +242,109 @@ export function ChatPanel({
 
   return (
     <div className="flex h-full min-h-0 flex-col overflow-hidden">
-      {/* The restored route supplies its heading only once Messages exist. */}
-      {!hasMessages && initialConversationId ? <h1 className="sr-only">Chat</h1> : null}
-      {/* The top bar names the conversation, so this strip only says what it can't: which Agent is
+      {activePlan ? <PlanModeBar /> : null}
+      <div className="flex min-h-0 flex-1 overflow-hidden">
+        {activePlan ? (
+          <PlanSidebar rounds={activePlan.rounds} pending={activePlan.pending} />
+        ) : null}
+        <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+          {/* The restored route supplies its heading only once Messages exist. */}
+          {!hasMessages && initialConversationId ? <h1 className="sr-only">Chat</h1> : null}
+          {/* The top bar names the conversation, so this strip only says what it can't: which Agent is
           driving the chat. Without an Agent there is nothing left to show and it collapses away. */}
-      {hasMessages && activeAgentName ? (
-        <header className="flex shrink-0 items-center gap-2 border-b border-border px-4 py-2 sm:px-6">
-          <AgentGlyph
-            name={activeAgentName}
-            domain={agentInfo?.domain}
-            autonomy={agentInfo?.autonomy}
-            size="sm"
-            active
-            state={busy ? "thinking" : "idle"}
-            decorative
-          />
-          <p className="min-w-0 truncate text-xs text-muted-foreground">
-            Agent ·{" "}
-            <span className="font-medium text-foreground">
-              {agentInfo?.label ?? activeAgentName}
-            </span>
-          </p>
-        </header>
-      ) : null}
-      {hasMessages ? (
-        <Suspense fallback={<div className="min-h-0 flex-1" />}>
-          <Transcript
-            messages={messages}
-            status={status}
-            mentions={entries}
-            onApprove={approve}
-            onRegenerate={regenerate}
-            onTryHarder={tryHarder}
-            onFeedback={sendFeedback}
-            onSurfaceInteraction={sendSurfaceInteraction}
-            onReviseDraft={reviseDraft}
-          />
-        </Suspense>
-      ) : (
-        <EmptyState
-          businessName={businessName}
-          userName={userName}
-          greetingIndex={greetingIndex}
-          agent={activeAgentName}
-          label={agentInfo?.label}
-          tasks={tasks}
-          onPick={(text) => {
-            homeDraftNonce.current += 1;
-            setRevisionDraft({ key: `home-${homeDraftNonce.current}`, text });
-          }}
-          composer={composer}
-        />
-      )}
-      {status === "error" ? (
-        <div
-          role="alert"
-          className="mx-auto mb-2 w-[calc(100%-2rem)] max-w-4xl rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-destructive sm:w-[calc(100%-3rem)]"
-        >
-          <span className="font-medium">Response failed.</span>{" "}
-          {error ?? "The stream ended unexpectedly. Try again."}
-          {errorCta ? (
-            <>
-              {" "}
-              <Link
-                to={errorCta.to}
-                className="font-medium underline underline-offset-2 hover:text-foreground"
-              >
-                {errorCta.label}
-              </Link>
-            </>
+          {hasMessages && activeAgentName ? (
+            <header className="flex shrink-0 items-center gap-2 border-b border-border px-4 py-2 sm:px-6">
+              <AgentGlyph
+                name={activeAgentName}
+                domain={agentInfo?.domain}
+                autonomy={agentInfo?.autonomy}
+                size="sm"
+                active
+                state={busy ? "thinking" : "idle"}
+                decorative
+              />
+              <p className="min-w-0 truncate text-xs text-muted-foreground">
+                Agent ·{" "}
+                <span className="font-medium text-foreground">
+                  {agentInfo?.label ?? activeAgentName}
+                </span>
+              </p>
+            </header>
           ) : null}
-          {retryableFailure ? (
-            <button
-              type="button"
-              onClick={() => void regenerate()}
-              className="ml-2 min-h-11 font-medium underline underline-offset-2 hover:text-foreground"
+          {hasMessages ? (
+            <Suspense fallback={<div className="min-h-0 flex-1" />}>
+              <Transcript
+                messages={messages}
+                status={status}
+                mentions={entries}
+                onApprove={approve}
+                onRegenerate={regenerate}
+                onTryHarder={tryHarder}
+                onFeedback={sendFeedback}
+                onSurfaceInteraction={sendSurfaceInteraction}
+                onReviseDraft={reviseDraft}
+              />
+            </Suspense>
+          ) : (
+            <EmptyState
+              businessName={businessName}
+              userName={userName}
+              greetingIndex={greetingIndex}
+              agent={activeAgentName}
+              label={agentInfo?.label}
+              tasks={tasks}
+              onPick={(text) => {
+                homeDraftNonce.current += 1;
+                setRevisionDraft({ key: `home-${homeDraftNonce.current}`, text });
+              }}
+              composer={composer}
+            />
+          )}
+          {status === "error" ? (
+            <div
+              role="alert"
+              className="mx-auto mb-2 w-[calc(100%-2rem)] max-w-4xl rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-destructive sm:w-[calc(100%-3rem)]"
             >
-              Retry
-            </button>
+              <span className="font-medium">Response failed.</span>{" "}
+              {error ?? "The stream ended unexpectedly. Try again."}
+              {errorCta ? (
+                <>
+                  {" "}
+                  <Link
+                    to={errorCta.to}
+                    className="font-medium underline underline-offset-2 hover:text-foreground"
+                  >
+                    {errorCta.label}
+                  </Link>
+                </>
+              ) : null}
+              {retryableFailure ? (
+                <button
+                  type="button"
+                  onClick={() => void regenerate()}
+                  className="ml-2 min-h-11 font-medium underline underline-offset-2 hover:text-foreground"
+                >
+                  Retry
+                </button>
+              ) : null}
+              {errorDetails ? (
+                <p className="mt-1 font-mono text-xs text-muted-foreground">
+                  Class: {errorDetails.reason ?? "unknown"}
+                  {errorDetails.modelId ? ` · Model: ${errorDetails.modelId}` : ""}
+                  {errorDetails.requestId ? ` · Reference: ${errorDetails.requestId}` : ""}
+                </p>
+              ) : null}
+            </div>
           ) : null}
-          {errorDetails ? (
-            <p className="mt-1 font-mono text-xs text-muted-foreground">
-              Class: {errorDetails.reason ?? "unknown"}
-              {errorDetails.modelId ? ` · Model: ${errorDetails.modelId}` : ""}
-              {errorDetails.requestId ? ` · Reference: ${errorDetails.requestId}` : ""}
-            </p>
+          {connectionState === "reconnecting" ? (
+            <div className="mx-auto w-full max-w-4xl px-4 pb-2 sm:px-6">
+              <ConnectionStatus state="reconnecting" />
+            </div>
           ) : null}
+          {hasMessages ? composer : null}
+          <ChatDebugDrawer conversationId={conversationId} />
         </div>
-      ) : null}
-      {connectionState === "reconnecting" ? (
-        <div className="mx-auto w-full max-w-4xl px-4 pb-2 sm:px-6">
-          <ConnectionStatus state="reconnecting" />
-        </div>
-      ) : null}
-      {hasMessages ? composer : null}
-      <ChatDebugDrawer conversationId={conversationId} />
+      </div>
     </div>
   );
 }

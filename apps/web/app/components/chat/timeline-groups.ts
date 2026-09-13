@@ -1,4 +1,4 @@
-import type { PlanRound, TimelinePart } from "~/lib/chat/types";
+import type { ChatMessage, PlanRound, TimelinePart } from "~/lib/chat/types";
 import { isHiddenToolPart, isPresentationToolPart, PLAN_TOOL_NAME } from "./tool-summary";
 
 type ToolPart = Extract<TimelinePart, { kind: "tool" }>;
@@ -159,6 +159,31 @@ export function derivePlanProgress(
     roundOf([...calls, ...(extra.get(index) ?? []).map(asUnplanned)], true)
   );
   return beyond.length === 0 ? built : [...built, roundOf(beyond.map(asUnplanned), false)];
+}
+
+/**
+ * The plan a Turn is currently working through, for a sidebar pinned above the transcript.
+ *
+ * Only the last Message can be mid-plan — anything earlier has already sealed — so this never
+ * scans the whole Conversation. Once the Turn seals, the caller stops asking and the finished plan
+ * stays visible only where it already renders inline, so it is never shown twice at once.
+ */
+export function findActivePlan(
+  messages: readonly ChatMessage[],
+  streaming: boolean
+): { rounds: PlannedRound[]; pending: boolean } | undefined {
+  const message = messages.at(-1);
+  if (message === undefined || message.role !== "assistant" || message.sealed || !streaming) {
+    return undefined;
+  }
+  const plan = message.parts.find(
+    (part): part is Extract<TimelinePart, { kind: "plan" }> => part.kind === "plan"
+  );
+  if (plan === undefined) return undefined;
+  return {
+    rounds: derivePlanProgress(plan.rounds, message.parts, { streaming }),
+    pending: streaming,
+  };
 }
 
 /**
