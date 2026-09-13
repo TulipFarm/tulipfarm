@@ -9,6 +9,7 @@ import {
   interactionErrorMessage,
   type SurfaceWebProps,
 } from "../primitives";
+import { SurfaceMultiSelect, SurfaceSelect } from "./select";
 
 type Choice = {
   label: string;
@@ -436,6 +437,9 @@ export function SurfaceForm({
           }
 
           if (input === "multiselect") {
+            const selectedValues = Array.isArray(values[name])
+              ? values[name].filter((value): value is string => typeof value === "string")
+              : [];
             return (
               <label key={name} htmlFor={fieldId} data-surface-field>
                 <span data-surface-field-label>
@@ -443,25 +447,14 @@ export function SurfaceForm({
                   {required ? <small data-surface-required>required</small> : null}
                   {description ? <small data-surface-field-description>{description}</small> : null}
                 </span>
-                <select
+                <SurfaceMultiSelect
                   id={fieldId}
                   name={name}
+                  options={options}
+                  values={selectedValues}
                   required={required}
-                  multiple
-                  data-surface-input={input}
-                  onChange={(event: ChangeEvent<HTMLSelectElement>) =>
-                    update(
-                      name,
-                      Array.from(event.target.selectedOptions, (option) => option.value)
-                    )
-                  }
-                >
-                  {options.map((option) => (
-                    <option key={option} value={option}>
-                      {option}
-                    </option>
-                  ))}
-                </select>
+                  onChange={(next) => update(name, next)}
+                />
               </label>
             );
           }
@@ -488,26 +481,17 @@ export function SurfaceForm({
             input === "channel" ||
             input === "conversation"
           ) {
+            const selectedValue = typeof values[name] === "string" ? values[name] : undefined;
             control = (
-              <select
+              <SurfaceSelect
                 id={fieldId}
                 name={name}
+                options={options}
+                value={selectedValue}
                 required={required}
-                defaultValue=""
-                data-surface-input={input}
-                onChange={(event: ChangeEvent<HTMLSelectElement>) =>
-                  update(name, event.target.value)
-                }
-              >
-                <option value="" disabled>
-                  Select an option
-                </option>
-                {options.map((option) => (
-                  <option key={option} value={option}>
-                    {option}
-                  </option>
-                ))}
-              </select>
+                dataInput={input}
+                onChange={(next) => update(name, next)}
+              />
             );
           } else {
             control = (

@@ -926,6 +926,103 @@ ol[data-surface-list] li::before {
   line-height: 1.45;
 }
 
+/*
+ * The themed replacement for a native `<select>`/`<select multiple>`. Positioned relative so its
+ * popup can anchor to the trigger; the popup is `position: absolute` rather than a portal, which
+ * is enough here because a Form is never inside an `overflow: hidden` ancestor.
+ */
+[data-surface-select] {
+  position: relative;
+  width: 100%;
+}
+
+[data-surface-select-trigger] {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  width: 100%;
+  min-height: 2.5rem;
+  padding: 0.5rem 0.625rem;
+  border: 1px solid var(--input);
+  border-radius: var(--radius-sm, 0.25rem);
+  color: var(--foreground);
+  background: var(--background);
+  font: inherit;
+  font-size: 0.8125rem;
+  text-align: left;
+  cursor: pointer;
+}
+
+[data-surface-select-trigger]:focus-visible {
+  border-color: var(--ring);
+  outline: 2px solid color-mix(in oklab, var(--ring) 25%, transparent);
+  outline-offset: 0;
+}
+
+[data-surface-select-value] {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+[data-surface-select-value][data-placeholder="true"] {
+  color: var(--muted-foreground);
+}
+
+[data-surface-select-icon] {
+  width: 0.875rem;
+  height: 0.875rem;
+  flex-shrink: 0;
+  color: var(--muted-foreground);
+}
+
+[data-surface-select-popup] {
+  position: absolute;
+  z-index: 20;
+  top: calc(100% + 0.25rem);
+  left: 0;
+  right: 0;
+  max-height: 14rem;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 0.25rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm, 0.25rem);
+  background: var(--popover, var(--background));
+  box-shadow: var(--shadow-md, 0 4px 12px color-mix(in oklab, var(--foreground) 12%, transparent));
+}
+
+[data-surface-select-option] {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 0.375rem 0.5rem;
+  border-radius: var(--radius-sm, 0.25rem);
+  color: var(--foreground);
+  font-size: 0.8125rem;
+  line-height: 1.45;
+  cursor: pointer;
+}
+
+[data-surface-select-option][data-active="true"],
+[data-surface-select-option]:hover {
+  background: color-mix(in oklab, var(--muted) 55%, transparent);
+}
+
+[data-surface-select-option][aria-selected="true"] {
+  color: var(--primary);
+  font-weight: 600;
+}
+
+[data-surface-select-check] {
+  width: 0.875rem;
+  height: 0.875rem;
+  flex-shrink: 0;
+  color: var(--primary);
+}
+
 [data-surface-form-footer] {
   display: flex;
   justify-content: flex-end;
