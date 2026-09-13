@@ -275,8 +275,8 @@ describe("TurnDriver", () => {
     ]);
   });
 
-  it("attaches the model receipt to the finished assistant reply", async () => {
-    const { driver, events } = harness(
+  it("attaches the model receipt to the persisted and streamed assistant reply", async () => {
+    const { driver, events, store } = harness(
       {
         status: "completed",
         output: "the answer",
@@ -285,23 +285,60 @@ describe("TurnDriver", () => {
       {
         receipt: {
           modelId: "claude-sonnet-5",
+          provider: "anthropic",
           effortPreset: "auto",
           modelCallLatencyMs: 60,
+          usage: { inputTokens: 120, outputTokens: 30 },
         },
       }
     );
 
     await driver.run(request());
 
+    expect(store.messages[0]?.metadata).toMatchObject({
+      receipt: {
+        modelId: "claude-sonnet-5",
+        provider: "anthropic",
+        effortPreset: "auto",
+        modelCallLatencyMs: 60,
+        usage: { inputTokens: 120, outputTokens: 30 },
+      },
+    });
     expect(events.appended.at(-1)).toEqual({
       eventType: "turn.finished",
       payload: {
         status: "succeeded",
         messageId: "msg-1",
         modelId: "claude-sonnet-5",
+        provider: "anthropic",
         effortPreset: "auto",
         modelCallLatencyMs: 60,
+        usage: { inputTokens: 120, outputTokens: 30 },
       },
+    });
+  });
+
+  it("keeps an observed model receipt when cancellation checkpoints the attempt", async () => {
+    const { driver, store } = harness(
+      { status: "cancelled", ...counters },
+      {
+        receipt: {
+          modelId: "claude-sonnet-5",
+          effortPreset: "balanced",
+          modelCallLatencyMs: 45,
+        },
+      }
+    );
+
+    await driver.run(request());
+
+    expect(store.messages[0]?.metadata).toMatchObject({
+      receipt: {
+        modelId: "claude-sonnet-5",
+        effortPreset: "balanced",
+        modelCallLatencyMs: 45,
+      },
+      turnAttempt: { outcome: "cancelled" },
     });
   });
 
@@ -354,8 +391,8 @@ describe("TurnDriver", () => {
     const { driver, store } = harness({ status: "completed", output: "hi", ...counters });
     await driver.run(request());
 
-    // turn.started + context.assembled were written before completion.
-    expect(store.completed).toEqual([{ status: "succeeded", cursor: 2, messageId: "msg-1" }]);
+    // The completed output becomes its own durable participant text event.
+    expect(store.completed).toEqual([{ status: "succeeded", cursor: 3, messageId: "msg-1" }]);
   });
 
   it("parks on the wait and writes no Message when a Tool needs approval", async () => {
@@ -412,7 +449,7 @@ describe("TurnDriver", () => {
 
     expect(outcome).toEqual({ status: "succeeded" });
     expect(store.messages).toMatchObject([{ attempt: 1, content: "Two things before I start." }]);
-    expect(store.completed).toEqual([{ status: "succeeded", cursor: 2, messageId: "msg-1" }]);
+    expect(store.completed).toEqual([{ status: "succeeded", cursor: 3, messageId: "msg-1" }]);
     expect(events.appended.at(-1)).toEqual({
       eventType: "turn.finished",
       payload: { status: "succeeded", messageId: "msg-1" },
@@ -508,6 +545,29 @@ describe("TurnDriver", () => {
         reason: "model_error",
         modelFailure: { requestId: "run-without-model:invoke:1", modelId: "gpt-5.6-terra" },
       },
+    });
+  });
+
+  it("persists model evidence when a model-backed attempt fails", async () => {
+    const { driver, events, store } = harness(
+      { status: "failed", reason: "iteration_limit", ...counters },
+      {
+        receipt: {
+          modelId: "claude-sonnet-5",
+          modelCallLatencyMs: 80,
+        },
+      }
+    );
+
+    await driver.run(request());
+
+    expect(store.messages[0]?.metadata).toMatchObject({
+      receipt: { modelId: "claude-sonnet-5", modelCallLatencyMs: 80 },
+      turnAttempt: { outcome: "failed" },
+    });
+    expect(events.appended.at(-1)).toMatchObject({
+      eventType: "turn.finished",
+      payload: { status: "failed", modelId: "claude-sonnet-5", modelCallLatencyMs: 80 },
     });
   });
 
@@ -617,6 +677,7 @@ describe("TurnDriver", () => {
       "context.assembled",
       "guardrail.decision",
       "guardrail.blocked",
+      "text.delta",
       "turn.finished",
     ]);
     expect(events.appended[3]).toEqual({
@@ -638,7 +699,7 @@ describe("TurnDriver", () => {
     expect(store.messages).toMatchObject([
       { content: "The response was blocked by a content guardrail.", attempt: 1 },
     ]);
-    expect(events.appended.at(-2)).toEqual({
+    expect(events.appended.at(-3)).toEqual({
       eventType: "guardrail.blocked",
       payload: { stage: "output", reason: "content_filter:email" },
     });

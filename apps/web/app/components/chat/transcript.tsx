@@ -226,7 +226,7 @@ function AssistantActions({
     <div className="flex flex-col gap-1.5">
       {/* A recorded vote keeps the row visible; otherwise it stays hover-gated like the rest. */}
       <div className={`${toolbarBase} ${reaction ? "opacity-100" : "opacity-0"}`}>
-        <CopyButton text={text} />
+        {text ? <CopyButton text={text} /> : null}
         {onRegenerate ? (
           <IconAction label="regenerate" onClick={onRegenerate}>
             <RotateCcw className="size-3.5" />
@@ -357,10 +357,17 @@ function MessageRow({
   const lastIndex = message.parts.length - 1;
   const nodes = groupTimelineParts(message.parts, { streaming });
   const text = messageText(message);
+  const successful =
+    message.sealed &&
+    !(isLast && status === "error") &&
+    message.turnAttempt?.outcome !== "failed" &&
+    message.turnAttempt?.outcome !== "cancelled" &&
+    !message.parts.some((part) => part.kind === "turn-status");
+  const hasAnswer = text.length > 0 || message.parts.some((part) => part.kind === "surface");
   // Regenerate re-runs the last turn — only offer it on the latest, finished assistant reply.
-  const canRegenerate = isLast && status === "idle" ? onRegenerate : undefined;
+  const canRegenerate = successful && isLast && status === "idle" ? onRegenerate : undefined;
   const nextPreset =
-    message.sealed && status === "idle" && message.sourceTurn && message.receipt
+    successful && status === "idle" && message.sourceTurn && message.receipt
       ? nextEffortPreset(
           message.sourceTurn.options?.model ?? message.receipt.effortPreset,
           message.receipt.effortApplied
@@ -416,7 +423,7 @@ function MessageRow({
           }
         />
       ) : null}
-      {message.sealed && text ? (
+      {successful && hasAnswer ? (
         <AssistantActions
           text={text}
           messageId={message.serverId}

@@ -104,6 +104,8 @@ export interface SpendSink {
 
 export interface ModelCallReceipt {
   readonly modelId: string;
+  /** Provider that committed the answer, when the resolved route can name it safely. */
+  readonly provider?: string;
   /** What the participant asked for — including `auto`, which is a request, not an outcome. */
   readonly effortPreset?: EffortPreset;
   /** Actual rung, when knowable, so clients can escalate `auto` without guessing. */
@@ -117,6 +119,19 @@ export interface ModelCallReceipt {
    */
   readonly totalModelCallLatencyMs?: number;
   readonly modelCallCount?: number;
+  /**
+   * Cumulative provider-reported usage for this Turn attempt.
+   *
+   * Optional fields stay absent when any contributing call did not report them. Unknown usage is
+   * not zero.
+   */
+  readonly usage?: {
+    readonly inputTokens?: number;
+    readonly outputTokens?: number;
+    readonly cacheReadTokens?: number;
+    readonly cacheWriteTokens?: number;
+    readonly reasoningTokens?: number;
+  };
 }
 
 /** Latest-call receipt is scoped to this Turn-attempt port, not a process registry. */

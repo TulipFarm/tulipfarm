@@ -173,6 +173,28 @@ describe("TurnEventWriter", () => {
 
     expect(resumed.history("succeeded", true)).toMatchObject({
       text: "First. ",
+      events: [
+        {
+          sequence: 1,
+          eventType: "text.delta",
+          payload: { text: "First. ", index: 0 },
+        },
+        {
+          sequence: 2,
+          eventType: "tool.call",
+          payload: { callId: "call-1", name: "record_list", argsDigest: "sha256:first" },
+        },
+        {
+          sequence: 3,
+          eventType: "tool.result",
+          payload: { callId: "call-1", status: "ok" },
+        },
+        {
+          sequence: 4,
+          eventType: "tool.call",
+          payload: { callId: "call-2", name: "record_get", argsDigest: "sha256:second" },
+        },
+      ],
       toolCalls: [
         { callId: "call-1", name: "record_list", outcome: "ok" },
         { callId: "call-2", name: "record_get" },
@@ -184,6 +206,82 @@ describe("TurnEventWriter", () => {
       outcome: "succeeded",
       complete: true,
     });
+  });
+
+  it("keeps operator events out of participant attempt history", async () => {
+    const events = new FakeAppendPort();
+    const writer = makeWriter(events);
+
+    await writer.emit(
+      "context.assembled",
+      { contextDigest: "ctx", guardrailDigest: "guard" },
+      "context"
+    );
+    await writer.emit("text.delta", { text: "Safe", index: 0 }, "text");
+
+    expect(writer.history().events).toEqual([
+      {
+        sequence: 2,
+        eventType: "text.delta",
+        payload: { text: "Safe", index: 0 },
+      },
+    ]);
+  });
+
+  it("merges model receipts when an attempt resumes", () => {
+    const events = new FakeAppendPort();
+    const first = makeWriter(events);
+    first.recordReceipt({
+      modelId: "claude-sonnet-5",
+      provider: "anthropic",
+      modelCallLatencyMs: 30,
+      totalModelCallLatencyMs: 50,
+      modelCallCount: 2,
+      usage: { inputTokens: 20, outputTokens: 5 },
+    });
+    const resumed = makeWriter(events, 1, first.history("waiting"));
+
+    resumed.recordReceipt({
+      modelId: "claude-sonnet-5",
+      provider: "anthropic",
+      effortPreset: "thorough",
+      modelCallLatencyMs: 40,
+      usage: { inputTokens: 7, outputTokens: 3 },
+    });
+
+    expect(resumed.receipt).toEqual({
+      modelId: "claude-sonnet-5",
+      provider: "anthropic",
+      effortPreset: "thorough",
+      modelCallLatencyMs: 40,
+      totalModelCallLatencyMs: 90,
+      modelCallCount: 3,
+      usage: { inputTokens: 27, outputTokens: 8 },
+    });
+  });
+
+  it("keeps cumulative usage unknown when a resumed legacy receipt had no usage", () => {
+    const events = new FakeAppendPort();
+    const first = makeWriter(events);
+    first.recordReceipt({
+      modelId: "legacy-model",
+      modelCallLatencyMs: 30,
+    });
+    const resumed = makeWriter(events, 1, first.history("waiting"));
+
+    resumed.recordReceipt({
+      modelId: "current-model",
+      provider: "openai",
+      modelCallLatencyMs: 40,
+      usage: { inputTokens: 7, outputTokens: 3 },
+    });
+
+    expect(resumed.receipt).toMatchObject({
+      modelId: "current-model",
+      provider: "openai",
+      modelCallLatencyMs: 40,
+    });
+    expect(resumed.receipt).not.toHaveProperty("usage");
   });
 
   it("projects the immutable durable delta after a crash, not the replayed model text", async () => {

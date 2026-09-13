@@ -2,23 +2,14 @@
   "id": "l3-a-failed-turn-retains-safe-history",
   "tier": "l3",
   "agent": "support",
-  "fault": "model",
-  "attemptHistory": {
-    "text": "Order 104 is ready for pickup.",
-    "toolCalls": [
-      {
-        "callId": "lookup-104",
-        "name": "lookup_order",
-        "outcome": "ok"
-      }
-    ]
-  },
+  "fault": "model_after_checkpoint",
   "input": [
     {
       "role": "user",
-      "content": "Earlier in this attempt you already told me: Order 104 is ready for pickup. Continue checking order 104."
+      "content": "Check order 104. The expected safe status is: Order 104 is ready for pickup."
     }
   ],
+  "platformTools": ["plan_declare"],
   "tools": [
     {
       "name": "lookup_order",
@@ -32,6 +23,103 @@
         },
         "required": ["orderNumber"]
       }
+    },
+    {
+      "name": "confirm_order",
+      "description": "Confirm an order after approval.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "orderNumber": {
+            "type": "number"
+          }
+        },
+        "required": ["orderNumber"]
+      },
+      "mutating": true
+    }
+  ],
+  "toolResults": [
+    {
+      "name": "plan_declare",
+      "output": {
+        "accepted": true
+      }
+    },
+    {
+      "name": "lookup_order",
+      "when": {
+        "orderNumber": 104
+      },
+      "output": {
+        "status": "Order 104 is ready for pickup."
+      }
+    },
+    {
+      "name": "confirm_order",
+      "when": {
+        "orderNumber": 104
+      },
+      "approvalId": "approval-104",
+      "output": {
+        "confirmed": true
+      }
+    }
+  ],
+  "script": [
+    {
+      "kind": "tool_calls",
+      "text": "Order 104 is ready for pickup.",
+      "calls": [
+        {
+          "callId": "plan-104",
+          "name": "plan_declare",
+          "arguments": {
+            "rounds": [
+              {
+                "calls": [
+                  {
+                    "tool": "lookup_order",
+                    "label": "Check order 104"
+                  }
+                ]
+              },
+              {
+                "calls": [
+                  {
+                    "tool": "lookup_order",
+                    "label": "Confirm pickup status"
+                  }
+                ]
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "kind": "tool_calls",
+      "calls": [
+        {
+          "callId": "lookup-104",
+          "name": "lookup_order",
+          "arguments": {
+            "orderNumber": 104
+          }
+        }
+      ]
+    },
+    {
+      "kind": "tool_calls",
+      "calls": [
+        {
+          "callId": "confirm-104",
+          "name": "confirm_order",
+          "arguments": {
+            "orderNumber": 104
+          }
+        }
+      ]
     }
   ],
   "expect": [
@@ -41,13 +129,73 @@
     },
     {
       "kind": "persisted_message_metadata_equals",
+      "path": "events.0.eventType",
+      "value": "turn.started"
+    },
+    {
+      "kind": "persisted_message_metadata_equals",
+      "path": "events.1.eventType",
+      "value": "text.delta"
+    },
+    {
+      "kind": "persisted_message_metadata_equals",
+      "path": "events.2.eventType",
+      "value": "tool.call"
+    },
+    {
+      "kind": "persisted_message_metadata_equals",
+      "path": "events.3.eventType",
+      "value": "plan.declared"
+    },
+    {
+      "kind": "persisted_message_metadata_equals",
+      "path": "events.4.eventType",
+      "value": "tool.result"
+    },
+    {
+      "kind": "persisted_message_metadata_equals",
+      "path": "events.5.payload.callId",
+      "value": "lookup-104"
+    },
+    {
+      "kind": "persisted_message_metadata_equals",
+      "path": "events.6.eventType",
+      "value": "tool.result"
+    },
+    {
+      "kind": "persisted_message_metadata_equals",
+      "path": "events.7.payload.callId",
+      "value": "confirm-104"
+    },
+    {
+      "kind": "persisted_message_metadata_equals",
+      "path": "events.8.eventType",
+      "value": "approval.requested"
+    },
+    {
+      "kind": "persisted_message_metadata_equals",
       "path": "toolCalls.0.name",
+      "value": "plan_declare"
+    },
+    {
+      "kind": "persisted_message_metadata_equals",
+      "path": "toolCalls.1.name",
       "value": "lookup_order"
     },
     {
       "kind": "persisted_message_metadata_equals",
-      "path": "toolCalls.0.outcome",
-      "value": "ok"
+      "path": "receipt.modelId",
+      "value": "scripted"
+    },
+    {
+      "kind": "persisted_message_metadata_equals",
+      "path": "receipt.modelCallCount",
+      "value": 3
+    },
+    {
+      "kind": "persisted_message_metadata_equals",
+      "path": "receipt.usage.inputTokens",
+      "value": 0
     },
     {
       "kind": "persisted_message_metadata_equals",

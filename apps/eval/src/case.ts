@@ -203,6 +203,8 @@ export interface ScriptedToolResult {
   readonly output?: unknown;
   /** Present to script an authorization denial rather than a Tool execution failure. */
   readonly denied?: string;
+  /** First dispatch parks for approval; the resumed dispatch returns `output`. */
+  readonly approvalId?: string;
   /** Present to script a Tool that fails, so refusal and recovery behaviour can be measured. */
   readonly error?: string;
   /**
@@ -213,6 +215,13 @@ export interface ScriptedToolResult {
   readonly invalidArguments?: string;
 }
 
+export type ScriptedModelOutput =
+  | Exclude<ModelOutput, { readonly kind: "tool_calls" }>
+  | (Extract<ModelOutput, { readonly kind: "tool_calls" }> & {
+      /** Text streamed before the Tool calls, matching providers that narrate their next action. */
+      readonly text?: string;
+    });
+
 /**
  * One Turn of a multi-Turn journey, in the same vocabulary a single-Turn Case already uses.
  *
@@ -222,7 +231,7 @@ export interface ScriptedToolResult {
 export interface JourneyTurn {
   readonly input: readonly ModelMessage[];
   readonly toolResults?: readonly ScriptedToolResult[];
-  readonly script?: readonly ModelOutput[];
+  readonly script?: readonly ScriptedModelOutput[];
 }
 
 /**
@@ -375,7 +384,7 @@ export interface EvalCase {
    * free and deterministically in ordinary CI, which is what lets a contributor without
    * credentials develop the framework.
    */
-  readonly script?: readonly ModelOutput[];
+  readonly script?: readonly ScriptedModelOutput[];
   /**
    * L3 only. Further Turns run against the same Conversation, database and Soul as `input`.
    *
@@ -385,22 +394,6 @@ export interface EvalCase {
    */
   readonly journey?: readonly JourneyTurn[];
   /**
-   * L3 only. Participant-safe history recovered from an earlier executor pass of this attempt.
-   *
-   * This is a narrow dependency seam for proving that later failure, cancellation or resumption
-   * does not erase prose, Tool metadata or exact Surface revisions already shown to the person.
-   */
-  readonly attemptHistory?: {
-    readonly text: string;
-    readonly toolCalls?: readonly {
-      readonly callId: string;
-      readonly name: string;
-      readonly outcome?: "ok" | "error";
-    }[];
-    readonly surfaces?: readonly { readonly artifactId: string; readonly revision: number }[];
-    readonly cursor?: number;
-  };
-  /**
    * L3 only. Breaks one of the executor's dependencies, so a Case can measure what the Turn does
    * when its surroundings fail rather than when the model does.
    *
@@ -408,10 +401,11 @@ export interface EvalCase {
    * a Turn that got as far as the loop. A Turn abandoned *before* the loop — Context unreadable,
    * Soul unreachable — is the one failure a participant can neither see nor retry, so it is worth
    * the one knob it takes to reach it. `"context"` fails Context resolution; `"model"` fails the
-   * Model Port before output; `"model_output_limit"` lets the scripted model produce partial text,
-   * then passes the SDK's `length` finish reason through the shared production completion guard.
+   * Model Port before output; `"model_after_checkpoint"` resumes one approval checkpoint and then
+   * fails the Model Port; `"model_output_limit"` passes a scripted text response through the
+   * shared production completion guard with the SDK's `length` finish reason.
    */
-  readonly fault?: "context" | "model" | "model_output_limit";
+  readonly fault?: "context" | "model" | "model_after_checkpoint" | "model_output_limit";
   /**
    * L2 only. Crashes the checkpoint write immediately after the first Tool result in a
    * model-produced batch, then retries the same loop input against the saved checkpoint.

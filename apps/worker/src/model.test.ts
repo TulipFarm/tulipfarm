@@ -1384,6 +1384,7 @@ describe("LlmModelPort", () => {
       modelCallLatencyMs: 42,
       totalModelCallLatencyMs: 42,
       modelCallCount: 1,
+      usage: { inputTokens: 11, outputTokens: 4 },
     });
   });
 
@@ -1424,6 +1425,7 @@ describe("LlmModelPort", () => {
       modelCallLatencyMs: 50,
       totalModelCallLatencyMs: 150,
       modelCallCount: 2,
+      usage: { inputTokens: 22, outputTokens: 8 },
     });
   });
 
@@ -2499,6 +2501,11 @@ describe("LlmModelPort — reporting spend", () => {
     const result = await port.invoke(request());
 
     expect(result.usage.costUsd).toBe(3);
+    expect(port.latestModelCallReceipt()).toMatchObject({
+      modelId: "backup-model",
+      provider: "openai",
+      usage: { inputTokens: 101, outputTokens: 14 },
+    });
     expect(calls).toEqual([
       expect.objectContaining({
         requestId: "request-1:attempt:0",

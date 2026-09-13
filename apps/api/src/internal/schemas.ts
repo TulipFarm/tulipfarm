@@ -241,6 +241,8 @@ export const InternalTurnLookupResponseSchema = {
             },
           },
         },
+        events: MESSAGE_METADATA_SCHEMA.properties.events,
+        receipt: MESSAGE_METADATA_SCHEMA.properties.receipt,
         cursor: { type: "integer", minimum: 0 },
         outcome: {
           type: "string",

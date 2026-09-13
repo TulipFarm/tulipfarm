@@ -1,4 +1,6 @@
 import { afterEach, expect, test, vi } from "vitest";
+import { messagesToTimeline } from "~/lib/chat/hydrate";
+import { appendUserMessage, chatReducer, initialChatState } from "~/lib/chat/reducer";
 import {
   createRunEventMapper,
   modelFailureMessage,
@@ -418,8 +420,10 @@ test("projects a turn receipt from the participant-visible finish event", () => 
         status: "succeeded",
         messageId: "msg-1",
         modelId: "claude-sonnet-5",
+        provider: "anthropic",
         effortPreset: "auto",
         modelCallLatencyMs: 1234,
+        usage: { inputTokens: 120, outputTokens: 30 },
       },
     })
   ).toEqual([
@@ -430,13 +434,66 @@ test("projects a turn receipt from the participant-visible finish event", () => 
         messageId: "msg-1",
         receipt: {
           modelId: "claude-sonnet-5",
+          provider: "anthropic",
           effortPreset: "auto",
           modelCallLatencyMs: 1234,
+          usage: { inputTokens: 120, outputTokens: 30 },
         },
       },
     },
   ]);
 });
+
+test.each([
+  { status: "failed", withText: true },
+  { status: "failed", withText: false },
+  { status: "cancelled", withText: true },
+  { status: "cancelled", withText: false },
+])(
+  "keeps live and restored receipts equal for $status (text: $withText)",
+  ({ status, withText }) => {
+    const map = createRunEventMapper();
+    const receipt = {
+      modelId: "backup-model",
+      provider: "backup-provider",
+      modelCallLatencyMs: 123,
+      usage: { inputTokens: 120, outputTokens: 30 },
+    };
+    const text = withText ? "Partial reply" : "";
+    let state = appendUserMessage(initialChatState, "Check this");
+    if (withText) {
+      for (const event of map({ seq: 1, type: "text.delta", data: { text } })) {
+        state = chatReducer(state, event);
+      }
+    }
+    for (const event of map({
+      seq: 2,
+      type: "turn.finished",
+      data: { status, reason: "model_timeout", ...receipt },
+    })) {
+      state = chatReducer(state, event);
+    }
+    const restored = messagesToTimeline([
+      {
+        _id: "assistant",
+        conversationId: "conversation",
+        role: "assistant",
+        content: text,
+        metadata: {
+          events: withText
+            ? [{ sequence: 1, eventType: "text.delta", payload: { text, index: 0 } }]
+            : [],
+          receipt,
+          turnAttempt: { runId: "run", attempt: 1, cursor: 2, outcome: status, complete: true },
+        },
+        createdAt: "2026-01-01T00:00:00.000Z",
+      },
+    ]);
+
+    expect(state.messages.at(-1)).toMatchObject({ role: "assistant", sealed: true, receipt });
+    expect(state.messages.at(-1)?.receipt).toEqual(restored[0]?.receipt);
+  }
+);
 
 test("accepts older turn.finished events without receipt fields", () => {
   const map = createRunEventMapper();

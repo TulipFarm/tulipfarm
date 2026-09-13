@@ -455,6 +455,7 @@ export function useChatStream(opts?: UseChatStreamOptions) {
   );
 
   const regenerate = useCallback(async () => {
+    if (activeStreamRef.current !== null || isChatBusy(stateRef.current.status)) return;
     const source = lastUserSource(stateRef.current.messages);
     const text = source?.text ?? "";
     if (text.length === 0 && (source?.options?.files?.length ?? 0) === 0) return;

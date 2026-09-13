@@ -1,5 +1,7 @@
 import { isRecord } from "@tulipfarm/schema/guards";
 import { sourcesFromToolPreview, sourcesFromToolResult } from "~/lib/chat/citations";
+import { chatReducer, initialChatState } from "~/lib/chat/reducer";
+import { createRunEventMapper } from "~/lib/chat/sse-client";
 import type {
   ChatMessage,
   ChatTurnOptions,
@@ -157,6 +159,99 @@ function surfacePartsFromMetadata(metadata: Record<string, unknown> | undefined)
     }
   }
   return [...surfaces.values()];
+}
+
+function orderedPartsFromMetadata(
+  metadata: Record<string, unknown> | undefined
+): TimelinePart[] | undefined {
+  const rawEvents = metadata?.events;
+  if (!Array.isArray(rawEvents)) return undefined;
+  const mapEvent = createRunEventMapper();
+  let state = initialChatState;
+  for (const raw of rawEvents) {
+    if (
+      !isRecord(raw) ||
+      typeof raw.sequence !== "number" ||
+      typeof raw.eventType !== "string" ||
+      !isRecord(raw.payload)
+    ) {
+      continue;
+    }
+    for (const event of mapEvent({
+      seq: raw.sequence,
+      type: raw.eventType,
+      data: raw.payload,
+    })) {
+      state = chatReducer(state, event);
+    }
+  }
+  return state.messages.at(-1)?.parts ?? [];
+}
+
+function receiptFromMetadata(
+  metadata: Record<string, unknown> | undefined
+): ChatMessage["receipt"] {
+  const value = metadata?.receipt;
+  if (
+    !isRecord(value) ||
+    typeof value.modelId !== "string" ||
+    typeof value.modelCallLatencyMs !== "number"
+  ) {
+    return undefined;
+  }
+  const usage = receiptUsage(value.usage);
+  return {
+    modelId: value.modelId,
+    ...(typeof value.provider === "string" && value.provider.length > 0
+      ? { provider: value.provider }
+      : {}),
+    ...(value.effortPreset === "auto" ||
+    value.effortPreset === "fast" ||
+    value.effortPreset === "balanced" ||
+    value.effortPreset === "thorough"
+      ? { effortPreset: value.effortPreset }
+      : {}),
+    ...(value.effortApplied === "fast" ||
+    value.effortApplied === "balanced" ||
+    value.effortApplied === "thorough"
+      ? { effortApplied: value.effortApplied }
+      : {}),
+    modelCallLatencyMs: value.modelCallLatencyMs,
+    ...(typeof value.totalModelCallLatencyMs === "number"
+      ? { totalModelCallLatencyMs: value.totalModelCallLatencyMs }
+      : {}),
+    ...(typeof value.modelCallCount === "number" ? { modelCallCount: value.modelCallCount } : {}),
+    ...(usage === undefined ? {} : { usage }),
+  };
+}
+
+function receiptUsage(value: unknown): NonNullable<ChatMessage["receipt"]>["usage"] {
+  if (!isRecord(value)) return undefined;
+  const token = (candidate: unknown) =>
+    typeof candidate === "number" && Number.isInteger(candidate) && candidate >= 0
+      ? candidate
+      : undefined;
+  const inputTokens = token(value.inputTokens);
+  const outputTokens = token(value.outputTokens);
+  const cacheReadTokens = token(value.cacheReadTokens);
+  const cacheWriteTokens = token(value.cacheWriteTokens);
+  const reasoningTokens = token(value.reasoningTokens);
+  if (
+    inputTokens === undefined &&
+    outputTokens === undefined &&
+    cacheReadTokens === undefined &&
+    cacheWriteTokens === undefined &&
+    reasoningTokens === undefined
+  ) {
+    return undefined;
+  }
+  return {
+    ...(inputTokens === undefined ? {} : { inputTokens }),
+    ...(outputTokens === undefined ? {} : { outputTokens }),
+    ...(cacheReadTokens === undefined ? {} : { cacheReadTokens }),
+    ...(cacheWriteTokens === undefined ? {} : { cacheWriteTokens }),
+    ...(reasoningTokens === undefined ? {} : { reasoningTokens }),
+  };
 }
 
 function turnAttemptFrom(
@@ -332,10 +427,11 @@ export function messagesToTimeline(
 ): ChatMessage[] {
   const out: ChatMessage[] = [];
   let lastAssistant: ChatMessage | undefined;
+  let sourceTurn: ChatTurnSource | undefined;
   for (const doc of docs) {
     if (doc.role === "user") {
       const parts = userParts(doc.content);
-      const sourceTurn = turnSourceFrom(doc, parts);
+      sourceTurn = turnSourceFrom(doc, parts);
       out.push({
         id: newId(),
         role: "user",
@@ -346,36 +442,46 @@ export function messagesToTimeline(
       lastAssistant = undefined;
     } else if (doc.role === "assistant") {
       const turnAttempt = turnAttemptFrom(doc.metadata);
+      const orderedParts = orderedPartsFromMetadata(doc.metadata);
+      const receipt = receiptFromMetadata(doc.metadata);
       const message: ChatMessage = {
         id: newId(),
         serverId: doc._id,
         role: "assistant",
-        // Tools first, then text: a persisted reply stores its text as one string and its calls as
-        // a flat `metadata.toolCalls` with no positions, so where the text sat between the calls is
-        // not on the wire. A restored transcript therefore groups the whole run as one block even
-        // when the live one split it around a preamble. Accepted — restoring the interleaving means
-        // persisting ordered parts instead of a string, which the LLM history rebuild also reads.
         parts: [
-          ...toolPartsFromMetadata(doc.metadata, turnAttempt),
-          ...assistantParts(doc.content),
-          ...surfacePartsFromMetadata(doc.metadata),
-          ...(turnAttempt?.outcome === "cancelled"
+          ...(orderedParts ?? [
+            ...toolPartsFromMetadata(doc.metadata, turnAttempt),
+            ...assistantParts(doc.content),
+            ...surfacePartsFromMetadata(doc.metadata),
+          ]),
+          ...(turnAttempt?.outcome === "cancelled" &&
+          !orderedParts?.some((part) => part.kind === "turn-status")
             ? [{ kind: "turn-status" as const, status: "cancelled" as const }]
             : []),
         ],
         sealed: turnAttempt?.complete ?? true,
         feedback: votes?.get(doc._id),
+        ...(receipt === undefined ? {} : { receipt }),
+        ...(sourceTurn === undefined ? {} : { sourceTurn }),
         ...(turnAttempt === undefined ? {} : { turnAttempt }),
       };
-      if (turnAttempt !== undefined && !turnAttempt.complete) {
+      if (turnAttempt?.complete) {
+        for (const part of message.parts) {
+          if (part.kind !== "tool") continue;
+          if (part.status === "running") part.status = "interrupted";
+          if (part.approval?.status === "pending") delete part.approval;
+        }
+      } else if (turnAttempt !== undefined) {
         for (const part of message.parts) {
           if (part.kind === "tool" && part.outcome === undefined) part.status = "running";
         }
       }
-      const sources = message.parts.flatMap((part) =>
-        part.kind === "tool" ? sourcesFromToolPreview(part.resultPreview) : []
-      );
-      if (sources.length > 0) message.parts.push({ kind: "sources", sources });
+      if (orderedParts === undefined) {
+        const sources = message.parts.flatMap((part) =>
+          part.kind === "tool" ? sourcesFromToolPreview(part.resultPreview) : []
+        );
+        if (sources.length > 0) message.parts.push({ kind: "sources", sources });
+      }
       const pendingApproval =
         turnAttempt?.complete === false && turnAttempt.wait?.kind === "approval"
           ? turnAttempt.wait

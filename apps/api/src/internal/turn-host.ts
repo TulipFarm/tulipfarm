@@ -4,8 +4,13 @@ import { readTurnAttachment, type TurnAttachmentStore } from "@tulipfarm/files";
 import { type InvocationPrincipal, SUBAGENT_RUN_SOURCE } from "@tulipfarm/run-kernel";
 import {
   contentText,
+  type EffortPreset,
+  type EffortRung,
   type MessageContent,
+  type ParticipantRunEventType,
   type ParticipantToolCall,
+  type RunEventType,
+  runEventDefinition,
   textContent,
 } from "@tulipfarm/schema";
 import type { PersistedRunEvent } from "@tulipfarm/storage";
@@ -183,6 +188,27 @@ export interface HostedTurnHistory {
   readonly text: string;
   readonly toolCalls: readonly ParticipantToolCall[];
   readonly surfaces: readonly { readonly artifactId: string; readonly revision: number }[];
+  readonly events?: readonly {
+    readonly sequence: number;
+    readonly eventType: ParticipantRunEventType;
+    readonly payload: Readonly<Record<string, unknown>>;
+  }[];
+  readonly receipt?: {
+    readonly modelId: string;
+    readonly provider?: string;
+    readonly effortPreset?: EffortPreset;
+    readonly effortApplied?: EffortRung;
+    readonly modelCallLatencyMs: number;
+    readonly totalModelCallLatencyMs?: number;
+    readonly modelCallCount?: number;
+    readonly usage?: {
+      readonly inputTokens?: number;
+      readonly outputTokens?: number;
+      readonly cacheReadTokens?: number;
+      readonly cacheWriteTokens?: number;
+      readonly reasoningTokens?: number;
+    };
+  };
   readonly cursor: number;
   readonly outcome: "active" | "waiting" | "succeeded" | "failed" | "cancelled";
   readonly complete: boolean;
@@ -582,16 +608,21 @@ export function historyFromMessage(
       text: "",
       toolCalls: [],
       surfaces: [],
+      events: [],
       cursor: 0,
       outcome: "active",
       complete: false,
     };
   }
   const wait = waitFrom(attemptMeta.wait);
+  const events = participantHistoryEvents(metadata?.events);
+  const receipt = modelReceipt(metadata?.receipt);
   return {
     text: content === undefined ? "" : contentText(content),
     toolCalls: participantToolCalls(metadata?.toolCalls),
     surfaces: surfaceRefs(metadata?.surfaces),
+    ...(events === undefined ? {} : { events }),
+    ...(receipt === undefined ? {} : { receipt }),
     cursor,
     outcome: historyOutcome(attemptMeta.outcome),
     complete: attemptMeta.complete === true,
@@ -603,8 +634,13 @@ export function foldParticipantEvent(
   history: HostedTurnHistory,
   event: PersistedRunEvent
 ): HostedTurnHistory {
+  const definition = runEventDefinition(event.eventType as RunEventType);
+  if (event.audience !== "participant" || definition?.audience !== "participant") {
+    return { ...history, cursor: Math.max(history.cursor, event.sequence) };
+  }
   let text = history.text;
   let wait = history.wait;
+  let receipt = history.receipt;
   const toolCalls = history.toolCalls.map((call) => ({ ...call }));
   const surfaces = history.surfaces.map((surface) => ({ ...surface }));
   const payload = event.payload;
@@ -693,13 +729,124 @@ export function foldParticipantEvent(
       surfaces[existing] = { artifactId: payload.artifactId, revision: payload.revision };
     }
   }
+  if (event.eventType === "turn.finished") {
+    const finishedReceipt = modelReceipt(payload);
+    if (finishedReceipt !== undefined) receipt = finishedReceipt;
+  }
+  const events =
+    history.events === undefined
+      ? undefined
+      : [
+          ...history.events,
+          {
+            sequence: event.sequence,
+            eventType: event.eventType as ParticipantRunEventType,
+            payload: { ...event.payload },
+          },
+        ];
   return {
     ...history,
     text,
     toolCalls,
     surfaces,
+    ...(events === undefined ? {} : { events }),
+    ...(receipt === undefined ? {} : { receipt }),
     cursor: Math.max(history.cursor, event.sequence),
     ...(wait === undefined ? {} : { wait }),
+  };
+}
+
+function participantHistoryEvents(value: unknown): HostedTurnHistory["events"] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  return value.flatMap((item) => {
+    const event = record(item);
+    if (
+      typeof event?.sequence !== "number" ||
+      !Number.isInteger(event.sequence) ||
+      event.sequence < 1 ||
+      typeof event.eventType !== "string" ||
+      record(event.payload) === undefined
+    ) {
+      return [];
+    }
+    const definition = runEventDefinition(event.eventType as RunEventType);
+    if (definition?.audience !== "participant") return [];
+    return [
+      {
+        sequence: event.sequence,
+        eventType: event.eventType as ParticipantRunEventType,
+        payload: event.payload as Record<string, unknown>,
+      },
+    ];
+  });
+}
+
+function modelReceipt(value: unknown): HostedTurnHistory["receipt"] | undefined {
+  const receipt = record(value);
+  if (
+    typeof receipt?.modelId !== "string" ||
+    typeof receipt.modelCallLatencyMs !== "number" ||
+    receipt.modelCallLatencyMs < 0
+  ) {
+    return undefined;
+  }
+  const usage = modelUsage(receipt.usage);
+  return {
+    modelId: receipt.modelId,
+    ...(typeof receipt.provider === "string" && receipt.provider.length > 0
+      ? { provider: receipt.provider }
+      : {}),
+    ...(receipt.effortPreset === "auto" ||
+    receipt.effortPreset === "fast" ||
+    receipt.effortPreset === "balanced" ||
+    receipt.effortPreset === "thorough"
+      ? { effortPreset: receipt.effortPreset }
+      : {}),
+    ...(receipt.effortApplied === "fast" ||
+    receipt.effortApplied === "balanced" ||
+    receipt.effortApplied === "thorough"
+      ? { effortApplied: receipt.effortApplied }
+      : {}),
+    modelCallLatencyMs: receipt.modelCallLatencyMs,
+    ...(typeof receipt.totalModelCallLatencyMs === "number"
+      ? { totalModelCallLatencyMs: receipt.totalModelCallLatencyMs }
+      : {}),
+    ...(typeof receipt.modelCallCount === "number"
+      ? { modelCallCount: receipt.modelCallCount }
+      : {}),
+    ...(usage === undefined ? {} : { usage }),
+  };
+}
+
+function modelUsage(
+  value: unknown
+): NonNullable<NonNullable<HostedTurnHistory["receipt"]>["usage"]> | undefined {
+  const usage = record(value);
+  if (usage === undefined) return undefined;
+  const token = (candidate: unknown) =>
+    typeof candidate === "number" && Number.isInteger(candidate) && candidate >= 0
+      ? candidate
+      : undefined;
+  const inputTokens = token(usage.inputTokens);
+  const outputTokens = token(usage.outputTokens);
+  const cacheReadTokens = token(usage.cacheReadTokens);
+  const cacheWriteTokens = token(usage.cacheWriteTokens);
+  const reasoningTokens = token(usage.reasoningTokens);
+  if (
+    inputTokens === undefined &&
+    outputTokens === undefined &&
+    cacheReadTokens === undefined &&
+    cacheWriteTokens === undefined &&
+    reasoningTokens === undefined
+  ) {
+    return undefined;
+  }
+  return {
+    ...(inputTokens === undefined ? {} : { inputTokens }),
+    ...(outputTokens === undefined ? {} : { outputTokens }),
+    ...(cacheReadTokens === undefined ? {} : { cacheReadTokens }),
+    ...(cacheWriteTokens === undefined ? {} : { cacheWriteTokens }),
+    ...(reasoningTokens === undefined ? {} : { reasoningTokens }),
   };
 }
 

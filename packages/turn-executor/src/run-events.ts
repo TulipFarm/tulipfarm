@@ -1,6 +1,7 @@
 import type { AgentLoopEvent, AgentLoopEventSink } from "@tulipfarm/agent-runtime";
 import {
   ajv,
+  type ParticipantRunEventType,
   type ParticipantToolCall,
   type RunEventAudience,
   type RunEventPayloads,
@@ -8,6 +9,7 @@ import {
   runEventDefinition,
   runEventSchemaRef,
 } from "@tulipfarm/schema";
+import type { ModelCallReceipt } from "./ports";
 
 /** Durable event writer; event type fixes audience and payload schema before append. */
 
@@ -108,11 +110,23 @@ export interface TurnSurfaceRef {
 
 export type TurnAttemptHistoryOutcome = "active" | "waiting" | "succeeded" | "failed" | "cancelled";
 
+export interface ParticipantHistoryEvent {
+  readonly sequence: number;
+  readonly eventType: ParticipantRunEventType;
+  readonly payload: Record<string, unknown>;
+}
+
 /** Participant-safe history for one Turn attempt. Raw model/Tool data never enters this shape. */
 export interface TurnAttemptHistory {
   readonly text: string;
   readonly toolCalls: readonly ParticipantToolCall[];
   readonly surfaces: readonly TurnSurfaceRef[];
+  /**
+   * Complete causal order for new histories. Absent means a legacy checkpoint whose missing
+   * prefix must not be guessed from flattened projections.
+   */
+  readonly events?: readonly ParticipantHistoryEvent[];
+  readonly receipt?: ModelCallReceipt;
   readonly cursor: number;
   readonly outcome: TurnAttemptHistoryOutcome;
   readonly complete: boolean;
@@ -138,6 +152,8 @@ export class TurnEventWriter implements AgentLoopEventSink {
   private readonly toolCallOrder: string[];
   private readonly toolCallsById: Map<string, ParticipantToolCall>;
   private readonly surfacesById: Map<string, TurnSurfaceRef>;
+  private historyEvents: ParticipantHistoryEvent[] | undefined;
+  private receiptValue: ModelCallReceipt | undefined;
   private textValue: string;
   private plansDeclared = 0;
   private emitQueue: Promise<void> = Promise.resolve();
@@ -150,6 +166,16 @@ export class TurnEventWriter implements AgentLoopEventSink {
     this.toolCallsById = new Map(
       initial?.toolCalls.map((call) => [call.callId, { ...call }]) ?? []
     );
+    const initialEvents = initial?.events;
+    this.historyEvents =
+      initial === undefined || initialEvents !== undefined
+        ? (initialEvents?.map((event) => ({
+            sequence: event.sequence,
+            eventType: event.eventType,
+            payload: { ...event.payload },
+          })) ?? [])
+        : undefined;
+    this.receiptValue = initial?.receipt;
     this.surfacesById = new Map();
     for (const surface of initial?.surfaces ?? []) this.recordSurface(surface);
   }
@@ -182,6 +208,33 @@ export class TurnEventWriter implements AgentLoopEventSink {
     return [...this.surfacesById.values()].map((surface) => ({ ...surface }));
   }
 
+  get receipt(): ModelCallReceipt | undefined {
+    return this.receiptValue === undefined ? undefined : { ...this.receiptValue };
+  }
+
+  /** Captures the model evidence observed by this executor pass and merges it across a resume. */
+  recordReceipt(receipt: ModelCallReceipt | undefined): void {
+    if (receipt === undefined) return;
+    const prior = this.receiptValue;
+    if (prior === undefined) {
+      this.receiptValue = { ...receipt };
+      return;
+    }
+    const { usage: _usage, ...current } = receipt;
+    const usage =
+      prior.usage === undefined || receipt.usage === undefined
+        ? undefined
+        : mergeReceiptUsage(prior.usage, receipt.usage);
+    this.receiptValue = {
+      ...current,
+      totalModelCallLatencyMs:
+        (prior.totalModelCallLatencyMs ?? prior.modelCallLatencyMs) +
+        (receipt.totalModelCallLatencyMs ?? receipt.modelCallLatencyMs),
+      modelCallCount: (prior.modelCallCount ?? 1) + (receipt.modelCallCount ?? 1),
+      ...(usage === undefined ? {} : { usage }),
+    };
+  }
+
   /** Records a presented Surface so a completed Turn can link it into the transcript. */
   recordSurface(surface: TurnSurfaceRef): void {
     const existing = this.surfacesById.get(surface.artifactId);
@@ -195,6 +248,16 @@ export class TurnEventWriter implements AgentLoopEventSink {
       text: this.text,
       toolCalls: this.toolCalls,
       surfaces: this.surfaces,
+      ...(this.historyEvents === undefined
+        ? {}
+        : {
+            events: this.historyEvents.map((event) => ({
+              sequence: event.sequence,
+              eventType: event.eventType,
+              payload: { ...event.payload },
+            })),
+          }),
+      ...(this.receiptValue === undefined ? {} : { receipt: { ...this.receiptValue } }),
       cursor: this.cursor,
       outcome,
       complete,
@@ -254,6 +317,13 @@ export class TurnEventWriter implements AgentLoopEventSink {
       appended.eventType === type && appended.payload !== undefined
         ? (appended.payload as RunEventPayloads[T])
         : payload;
+    if (definition.audience === "participant" && this.historyEvents !== undefined) {
+      this.historyEvents.push({
+        sequence: appended.sequence,
+        eventType: type as ParticipantRunEventType,
+        payload: { ...(recordedPayload as unknown as Record<string, unknown>) },
+      });
+    }
     this.recordToolEvent(type, recordedPayload);
     if (type === "text.delta") {
       this.textValue += (recordedPayload as RunEventPayloads["text.delta"]).text;
@@ -379,6 +449,26 @@ export class TurnEventWriter implements AgentLoopEventSink {
       });
     }
   }
+}
+
+function mergeReceiptUsage(
+  prior: NonNullable<ModelCallReceipt["usage"]>,
+  current: NonNullable<ModelCallReceipt["usage"]>
+): NonNullable<ModelCallReceipt["usage"]> {
+  const sum = (left: number | undefined, right: number | undefined) =>
+    left === undefined || right === undefined ? undefined : left + right;
+  const inputTokens = sum(prior.inputTokens, current.inputTokens);
+  const outputTokens = sum(prior.outputTokens, current.outputTokens);
+  const cacheReadTokens = sum(prior.cacheReadTokens, current.cacheReadTokens);
+  const cacheWriteTokens = sum(prior.cacheWriteTokens, current.cacheWriteTokens);
+  const reasoningTokens = sum(prior.reasoningTokens, current.reasoningTokens);
+  return {
+    ...(inputTokens === undefined ? {} : { inputTokens }),
+    ...(outputTokens === undefined ? {} : { outputTokens }),
+    ...(cacheReadTokens === undefined ? {} : { cacheReadTokens }),
+    ...(cacheWriteTokens === undefined ? {} : { cacheWriteTokens }),
+    ...(reasoningTokens === undefined ? {} : { reasoningTokens }),
+  };
 }
 
 function errorText(validate: CompiledValidator): string {

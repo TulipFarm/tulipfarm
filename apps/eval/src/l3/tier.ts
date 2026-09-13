@@ -16,6 +16,7 @@ import { contentText, type MessageContent, normalizeMessageContent } from "@tuli
 
 import { randomUUID } from "node:crypto";
 import {
+  InMemoryLoopCheckpointStore,
   ModelInvocationError,
   type ModelMessage,
   type ModelPort,
@@ -26,6 +27,8 @@ import { assertModelOutputComplete } from "@tulipfarm/model-adapter";
 import { INVOKE_STATE_KEY } from "@tulipfarm/run-kernel";
 import {
   createChatExecutor,
+  type ModelCallReceipt,
+  type ModelCallReceiptSource,
   RunStoreStateTransitions,
   type TurnWaitPort,
 } from "@tulipfarm/turn-executor";
@@ -64,11 +67,11 @@ export interface ToolCall {
 }
 
 /**
- * No Case waits on an approval, and one that did would hang rather than fail.
+ * Ordinary Cases cannot wait on an approval.
  *
  * Registering a wait the tier never signals would leave the Run parked and the Trial would time
- * out with no verdict, so this refuses loudly instead. Approvals are a Tool-broker concern the L2
- * tier already covers through the guard path.
+ * out with no verdict, so this refuses loudly instead. The one checkpoint-resume fault supplies
+ * its own deterministic wait and resumes it inside the same Trial.
  */
 const NO_APPROVALS: TurnWaitPort = {
   register: async () => {
@@ -340,8 +343,12 @@ async function runOneTurn(
     let spend = NO_SPEND;
     const port = options.binding.create(options.evalCase);
     const stream = port.stream?.bind(port);
+    let resumed = false;
     const checkModelFault = () => {
-      if (options.evalCase.fault === "model") {
+      if (
+        options.evalCase.fault === "model" ||
+        (options.evalCase.fault === "model_after_checkpoint" && resumed)
+      ) {
         throw new ModelInvocationError(
           "model_not_configured",
           new Error(`eval fault: Model is unavailable for Case ${options.evalCase.id}`)
@@ -352,8 +359,8 @@ async function runOneTurn(
       spend = addSpend(spend, usage);
       options.onUsage?.(usage);
     };
-    const checkOutputLimit = (usage: ModelUsage) => {
-      if (options.evalCase.fault === "model_output_limit") {
+    const checkOutputLimit = (usage: ModelUsage, output: { readonly kind: string }) => {
+      if (options.evalCase.fault === "model_output_limit" && output.kind === "text") {
         assertModelOutputComplete({
           finishReason: "length",
           rawFinishReason: "max_tokens",
@@ -361,12 +368,27 @@ async function runOneTurn(
         });
       }
     };
-    const metered: ModelPort = {
+    let receipt: ModelCallReceipt | undefined;
+    const recordReceipt = (usage: ModelUsage) => {
+      receipt = {
+        modelId: options.binding.id,
+        modelCallLatencyMs: 0,
+        totalModelCallLatencyMs: 0,
+        modelCallCount: (receipt?.modelCallCount ?? 0) + 1,
+        usage: {
+          inputTokens: (receipt?.usage?.inputTokens ?? 0) + usage.inputTokens,
+          outputTokens: (receipt?.usage?.outputTokens ?? 0) + usage.outputTokens,
+        },
+      };
+    };
+    const metered: ModelPort & ModelCallReceiptSource = {
+      latestModelCallReceipt: () => receipt,
       invoke: async (request) => {
         checkModelFault();
         const result = await port.invoke(request);
         recordUsage(result.usage);
-        checkOutputLimit(result.usage);
+        recordReceipt(result.usage);
+        checkOutputLimit(result.usage, result.output);
         return result;
       },
       ...(stream === undefined
@@ -377,7 +399,8 @@ async function runOneTurn(
               for await (const chunk of stream(request)) {
                 if (chunk.kind === "completed") {
                   recordUsage(chunk.result.usage);
-                  checkOutputLimit(chunk.result.usage);
+                  recordReceipt(chunk.result.usage);
+                  checkOutputLimit(chunk.result.usage, chunk.result.output);
                 }
                 yield chunk;
               }
@@ -385,8 +408,9 @@ async function runOneTurn(
           }),
     };
 
-    const host = evalTurnHost(database, options.evalCase.attemptHistory);
+    const host = evalTurnHost(database);
     const context = evalTurnContext({ evalCase: options.evalCase, soul });
+    const checkpoints = new InMemoryLoopCheckpointStore();
     const executor = createChatExecutor({
       host: { ...host, dispatch: tools.dispatch },
       context,
@@ -394,43 +418,71 @@ async function runOneTurn(
       events: database.events,
       budgets: database.budgets,
       transitions: new RunStoreStateTransitions(database.runs),
-      waits: NO_APPROVALS,
+      waits:
+        options.evalCase.fault === "model_after_checkpoint"
+          ? { register: async ({ approvalId }) => ({ waitId: `eval:${approvalId}` }) }
+          : NO_APPROVALS,
+      checkpoints,
       model: metered,
       log: { warn: () => {} },
     });
 
-    const [claimed] = await database.runs.claimNextQueued(BUSINESS_ID, "eval", {
-      now: new Date().toISOString(),
-      leaseDurationMs: 60_000,
-      limit: 1,
-    });
-    if (claimed?.id !== runId) throw new Error(`L3 could not claim minted Run ${runId}`);
-    const started = await database.runs.transitionRun(BUSINESS_ID, runId, {
-      expectedVersion: claimed.version,
-      expectedStatus: "claimed",
-      status: "running",
-      startedAt: new Date().toISOString(),
-      leaseOwner: claimed.leaseOwner,
-      leaseExpiresAt: claimed.leaseExpiresAt,
-    });
-    if (!started) throw new Error(`L3 could not start claimed Run ${runId}`);
-    const run = await database.runs.find(BUSINESS_ID, runId);
-    if (run === null) throw new Error(`L3 could not read running Run ${runId}`);
-    const outcome = await executor(run);
-    // The Worker records the executor's verdict on the Run; without it every L3 Trial would read
-    // back `running` and the Run-status Expectation would measure the tier's own omission.
-    const settled = await database.runs.find(BUSINESS_ID, runId);
-    await database.runs.transitionRun(BUSINESS_ID, runId, {
-      expectedVersion: settled?.version ?? run.version,
-      expectedStatus: settled?.status ?? run.status,
-      status: outcome.status,
-      finishedAt: new Date().toISOString(),
-      leaseOwner: null,
-      leaseExpiresAt: null,
-      ...(outcome.errorEvidenceRef === undefined
-        ? {}
-        : { errorEvidenceRef: outcome.errorEvidenceRef }),
-    });
+    const claimRun = async () => {
+      const [claimed] = await database.runs.claimNextQueued(BUSINESS_ID, "eval", {
+        now: new Date().toISOString(),
+        leaseDurationMs: 60_000,
+        limit: 1,
+      });
+      if (claimed?.id !== runId) throw new Error(`L3 could not claim minted Run ${runId}`);
+      const started = await database.runs.transitionRun(BUSINESS_ID, runId, {
+        expectedVersion: claimed.version,
+        expectedStatus: "claimed",
+        status: "running",
+        startedAt: new Date().toISOString(),
+        leaseOwner: claimed.leaseOwner,
+        leaseExpiresAt: claimed.leaseExpiresAt,
+      });
+      if (!started) throw new Error(`L3 could not start claimed Run ${runId}`);
+      const run = await database.runs.find(BUSINESS_ID, runId);
+      if (run === null) throw new Error(`L3 could not read running Run ${runId}`);
+      return run;
+    };
+    const settleRun = async (
+      run: Awaited<ReturnType<typeof claimRun>>,
+      outcome: Awaited<ReturnType<typeof executor>>
+    ) => {
+      // The Worker records the executor's verdict on the Run; without it every L3 Trial would read
+      // back `running` and the Run-status Expectation would measure the tier's own omission.
+      const settled = await database.runs.find(BUSINESS_ID, runId);
+      await database.runs.transitionRun(BUSINESS_ID, runId, {
+        expectedVersion: settled?.version ?? run.version,
+        expectedStatus: settled?.status ?? run.status,
+        status: outcome.status,
+        ...(outcome.status === "waiting" ? {} : { finishedAt: new Date().toISOString() }),
+        leaseOwner: null,
+        leaseExpiresAt: null,
+        ...(outcome.errorEvidenceRef === undefined
+          ? {}
+          : { errorEvidenceRef: outcome.errorEvidenceRef }),
+      });
+    };
+
+    let run = await claimRun();
+    let outcome = await executor(run);
+    await settleRun(run, outcome);
+    if (options.evalCase.fault === "model_after_checkpoint") {
+      if (outcome.status !== "waiting") {
+        throw new Error("model_after_checkpoint needs the scripted pass to park on approval");
+      }
+      if (!(await database.runs.requeueWaitingRun(BUSINESS_ID, runId))) {
+        throw new Error("model_after_checkpoint could not requeue the waiting Run");
+      }
+      resumed = true;
+      receipt = undefined;
+      run = await claimRun();
+      outcome = await executor(run);
+      await settleRun(run, outcome);
+    }
 
     const doctorEvents =
       options.evalCase.doctor === undefined

@@ -94,6 +94,7 @@ describe("TerminalTurnSettler", () => {
         role: "assistant",
         content: [{ type: "text", text: "" }],
         metadata: {
+          events: [],
           turnAttempt: {
             runId: "run-2",
             attempt: 2,
@@ -169,6 +170,19 @@ describe("TerminalTurnSettler", () => {
         payload: { rawPrompt: "never persist this" },
         occurredAt: "2026-01-01T00:00:01.200Z",
       },
+      {
+        businessId: "business-1",
+        runId: "run-2",
+        sequence: 4,
+        eventType: "turn.finished",
+        audience: "participant",
+        payload: {
+          status: "failed",
+          modelId: "claude-sonnet-5",
+          modelCallLatencyMs: 75,
+        },
+        occurredAt: "2026-01-01T00:00:01.300Z",
+      },
     ];
     const { settler, appendAssistantMessage } = harness("failed", TURN, events);
 
@@ -186,6 +200,33 @@ describe("TerminalTurnSettler", () => {
           argsPreview: { json: '{"query":"[redacted]"}' },
         },
       ],
+      events: [
+        {
+          sequence: 1,
+          eventType: "text.delta",
+          payload: { text: "Safe answer", index: 0 },
+        },
+        {
+          sequence: 2,
+          eventType: "tool.call",
+          payload: {
+            callId: "call-1",
+            name: "records_list",
+            argsDigest: "sha256:safe",
+            argsPreview: { json: '{"query":"[redacted]"}' },
+          },
+        },
+        {
+          sequence: 4,
+          eventType: "turn.finished",
+          payload: {
+            status: "failed",
+            modelId: "claude-sonnet-5",
+            modelCallLatencyMs: 75,
+          },
+        },
+      ],
+      receipt: { modelId: "claude-sonnet-5", modelCallLatencyMs: 75 },
       turnAttempt: {
         runId: "run-2",
         attempt: 2,

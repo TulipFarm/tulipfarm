@@ -126,11 +126,19 @@ type RunEventData = {
   reason?: string;
   messageId?: string | null;
   modelId?: string;
+  provider?: string;
   effortPreset?: ChatModelSelector;
   effortApplied?: EffortRung;
   modelCallLatencyMs?: number;
   totalModelCallLatencyMs?: number;
   modelCallCount?: number;
+  usage?: {
+    inputTokens?: number;
+    outputTokens?: number;
+    cacheReadTokens?: number;
+    cacheWriteTokens?: number;
+    reasoningTokens?: number;
+  };
   artifactId?: string;
   revision?: number;
   rounds?: PlanRound[];
@@ -320,6 +328,7 @@ export function createRunEventMapper(): (frame: ParsedFrame) => ChatEvent[] {
           typeof data.modelId === "string" && typeof data.modelCallLatencyMs === "number"
             ? {
                 modelId: data.modelId,
+                ...(data.provider === undefined ? {} : { provider: data.provider }),
                 ...(data.effortPreset === undefined ? {} : { effortPreset: data.effortPreset }),
                 ...(data.effortApplied === undefined ? {} : { effortApplied: data.effortApplied }),
                 modelCallLatencyMs: data.modelCallLatencyMs,
@@ -329,6 +338,7 @@ export function createRunEventMapper(): (frame: ParsedFrame) => ChatEvent[] {
                 ...(data.modelCallCount === undefined
                   ? {}
                   : { modelCallCount: data.modelCallCount }),
+                ...(data.usage === undefined ? {} : { usage: data.usage }),
               }
             : undefined;
         if (data.status === "succeeded") {
@@ -343,7 +353,18 @@ export function createRunEventMapper(): (frame: ParsedFrame) => ChatEvent[] {
             },
           ];
         }
-        if (data.status === "cancelled") return [{ type: "finish", data: { reason: "cancelled" } }];
+        if (data.status === "cancelled") {
+          return [
+            {
+              type: "finish",
+              data: {
+                reason: "cancelled",
+                ...(data.messageId ? { messageId: data.messageId } : {}),
+                ...(receipt === undefined ? {} : { receipt }),
+              },
+            },
+          ];
+        }
         const details = modelFailureDetails(data);
         return [
           {
@@ -352,6 +373,7 @@ export function createRunEventMapper(): (frame: ParsedFrame) => ChatEvent[] {
               message: modelFailureMessage(data.reason, data.toolCallBudget),
               ...(details === undefined ? {} : { details }),
               terminal: true,
+              ...(receipt === undefined ? {} : { receipt }),
             },
           },
         ];

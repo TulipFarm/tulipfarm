@@ -73,6 +73,8 @@ export interface TurnSurfaceLink {
 export interface TurnAttemptMessageMetadata extends Record<string, unknown> {
   readonly toolCalls?: readonly ParticipantToolCall[];
   readonly surfaces?: readonly TurnSurfaceRef[];
+  readonly events?: TurnAttemptHistory["events"];
+  readonly receipt?: TurnAttemptHistory["receipt"];
   readonly turnAttempt: {
     readonly runId: string;
     readonly attempt: number;
@@ -154,7 +156,8 @@ export class ConversationTurnCompleter {
     if (
       input.history.text.length === 0 &&
       input.history.toolCalls.length === 0 &&
-      input.history.surfaces.length === 0
+      input.history.surfaces.length === 0 &&
+      input.history.receipt === undefined
     ) {
       return { status: "empty", messageId: null };
     }
@@ -292,6 +295,8 @@ function historyMetadata(
   return {
     ...(history.toolCalls.length === 0 ? {} : { toolCalls: history.toolCalls }),
     ...(history.surfaces.length === 0 ? {} : { surfaces: history.surfaces }),
+    ...(history.events === undefined ? {} : { events: history.events }),
+    ...(history.receipt === undefined ? {} : { receipt: history.receipt }),
     turnAttempt: {
       runId: ref.runId,
       attempt: ref.attempt,

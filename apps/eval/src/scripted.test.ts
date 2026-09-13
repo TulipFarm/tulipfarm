@@ -6,6 +6,7 @@ import type {
 } from "@tulipfarm/agent-runtime";
 import { textContent } from "@tulipfarm/schema";
 import { describe, expect, it } from "vitest";
+import type { ScriptedModelOutput } from "./case.ts";
 import { ScriptExhaustedError, scriptedBinding } from "./scripted.ts";
 
 const request: ModelInvocationRequest = {
@@ -15,7 +16,7 @@ const request: ModelInvocationRequest = {
   tools: [],
 };
 
-const model = (script: readonly ModelOutput[]) =>
+const model = (script: readonly ScriptedModelOutput[]) =>
   scriptedBinding().create({
     id: "scripted-stream",
     tier: "l3",
@@ -64,5 +65,20 @@ describe("scripted streaming", () => {
     const streamed = await chunks(model([output]));
     expect(streamed).toHaveLength(1);
     expect(streamed[0]).toMatchObject({ kind: "completed", result: { output } });
+  });
+
+  it("streams safe prose before completing a scripted Tool-call response", async () => {
+    const output: ScriptedModelOutput = {
+      kind: "tool_calls",
+      text: "I will check that now.",
+      calls: [{ callId: "c1", name: "lookup_order", arguments: { orderNumber: 104 } }],
+    };
+
+    const streamed = await chunks(model([output]));
+
+    expect(
+      streamed.flatMap((chunk) => (chunk.kind === "text_delta" ? [chunk.text] : [])).join("")
+    ).toBe("I will check that now.");
+    expect(streamed.at(-1)).toMatchObject({ kind: "completed", result: { output } });
   });
 });

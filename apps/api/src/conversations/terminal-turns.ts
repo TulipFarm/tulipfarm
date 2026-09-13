@@ -90,6 +90,8 @@ export class TerminalTurnSettler {
       text: history.text,
       toolCalls: history.toolCalls,
       surfaces: history.surfaces,
+      ...(history.events === undefined ? {} : { events: history.events }),
+      ...(history.receipt === undefined ? {} : { receipt: history.receipt }),
       cursor,
       outcome,
       complete: true,
@@ -113,6 +115,8 @@ export class TerminalTurnSettler {
         metadata: {
           ...(settled.toolCalls.length === 0 ? {} : { toolCalls: settled.toolCalls }),
           ...(settled.surfaces.length === 0 ? {} : { surfaces: settled.surfaces }),
+          ...(settled.events === undefined ? {} : { events: settled.events }),
+          ...(settled.receipt === undefined ? {} : { receipt: settled.receipt }),
           turnAttempt: {
             runId,
             attempt: turn.attempt,

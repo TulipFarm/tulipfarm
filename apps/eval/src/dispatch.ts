@@ -32,6 +32,7 @@ export function toolDispatcher(evalCase: EvalCase) {
   type Scripted = NonNullable<EvalCase["toolResults"]>[number];
   const pending: Scripted[] = [...(evalCase.toolResults ?? [])];
   const served: Scripted[] = [];
+  const awaitingApproval = new Set<Scripted>();
   const calls: { name: string; arguments: unknown }[] = [];
   const denials: { name: string; arguments: unknown; reason: string }[] = [];
   const matches = (result: Scripted, name: string, arguments_: unknown) =>
@@ -77,6 +78,14 @@ export function toolDispatcher(evalCase: EvalCase) {
             reason: result.denied,
           });
           return { status: "denied", callId: request.callId, reason: result.denied };
+        }
+        if (result.approvalId !== undefined && !awaitingApproval.has(result)) {
+          awaitingApproval.add(result);
+          return {
+            status: "awaiting_approval",
+            callId: request.callId,
+            approvalId: result.approvalId,
+          };
         }
         return result.error === undefined
           ? { status: "succeeded", callId: request.callId, output: result.output ?? {} }
