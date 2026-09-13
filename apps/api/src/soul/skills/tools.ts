@@ -240,9 +240,8 @@ const skillCreate = defineApiTool<SkillToolContext>({
     if (body === undefined || frontmatter === undefined) {
       return err("validation_error", "body and frontmatter are required when confirm is not set");
     }
-    if (ctx.teamAssets && ownershipOf(frontmatter) === undefined) {
-      return err("validation_error", "Skill ownership must name at least one owning Team");
-    }
+    // Omitted ownership is not an error: ctx.teamAssets.ensure() below defaults an unowned Skill
+    // to the business's "Everyone" Team, so workspace-wide skills need no team setup.
 
     // A Skill is versioned from birth so the lock records something meaningful for every entry.
     const version = skillVersion(frontmatter);
