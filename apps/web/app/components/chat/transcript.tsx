@@ -11,6 +11,7 @@ import { FileAttachment, RemovedAttachment } from "./file-attachment";
 import type { FileDraftResult } from "./file-draft-card";
 import { MessagePartView } from "./parts";
 import { PlanTrace } from "./plan-trace";
+import { ResourceChanges } from "./resource-changes";
 import { groupTimelineParts } from "./timeline-groups";
 import { ToolTrace } from "./tool-trace";
 import type { MentionEntry } from "./use-mention-catalog";
@@ -414,6 +415,7 @@ function MessageRow({
           />
         );
       })}
+      {message.sealed ? <ResourceChanges parts={message.parts} /> : null}
       {message.sealed ? (
         <AssistantMetaRow
           receipt={message.receipt}

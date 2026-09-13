@@ -103,7 +103,7 @@ function Meta({ label, value, mono }: { label: string; value: string; mono?: boo
 }
 
 /** Live `args` may be only `{ argsDigest }`; show it as metadata, not arguments. */
-function parsedArgs(part: ToolPart): unknown {
+export function parsedArgs(part: ToolPart): unknown {
   if (part.argsPreview !== undefined) {
     try {
       return JSON.parse(part.argsPreview.json);
@@ -130,7 +130,7 @@ function digestOf(part: ToolPart): string | undefined {
 }
 
 /** The result to show. Same rule as the arguments: preview first, verbatim second. */
-function parsedResult(part: ToolPart): unknown {
+export function parsedResult(part: ToolPart): unknown {
   if (part.resultPreview !== undefined) {
     try {
       return JSON.parse(part.resultPreview.json);

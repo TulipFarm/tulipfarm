@@ -137,6 +137,7 @@ A rename issued from the top bar can race the async titler, so `buildAndStoreTit
 | `parts.tsx` Response (text) | `text` (live) |
 | `tool-inspector.tsx` + `json-view.tsx` + `approval-card.tsx` | `tool-call`/`tool-result` + `approval-request`/`approval-resolved` (live) |
 | `file-draft-card.tsx` | A successful Chat `file_create` result; authenticated Download, explicit Save File, and a Revise handoff back to the composer |
+| `resource-changes.tsx` | Settled replies expose confirmed Resource type and Record writes as compact links outside the collapsed trace; no new reads or inferred references |
 | `tool-trace.tsx` `<ToolTrace>` via `timeline-groups.ts` | groups consecutive Tool rows into one `tool-run` node and draws it — live and sealed alike; emits no events of its own |
 | `parts.tsx` sources | `sources` (live) and restored conversations via `lib/chat/hydrate.ts` |
 | `parts.tsx` reasoning / plan / task / agent-handoff / surface (`<SurfaceFrame>`) | **contract-only** — typed + rendered now, light up when the backend emits. No participant-audience event in `RUN_EVENT_TYPES` produces them today; `/design-guide` tags these specimens `contract-only` so they are not mistaken for shipped behaviour. |
@@ -144,6 +145,14 @@ A rename issued from the top bar can race the async titler, so `buildAndStoreTit
 | `autonomy-control.tsx` | sets POST `autonomy`; `approval-required` arms the live tool-approval gate |
 
 ## Tool calls (`tool-trace.tsx`, `tool-inspector.tsx`, `json-view.tsx`, `tool-summary.ts`)
+
+`resource-changes.tsx` uses the same preview-first parsing as the inspector. Only successful
+`create_resource_type`, `update_resource_type`, `record_create`, `record_update` and `record_delete`
+results contribute. Incomplete or redacted previews remain in the trace, not in a fabricated link.
+The latest confirmed write per target wins; a deletion leaves a named, non-linked entry.
+Record labels reuse `recordLabel`, and a create says **Saved record** because an idempotent replay
+can return an existing Record. This is a record of these Tool writes, not a claim that the whole
+Turn succeeded, that every effect is listed, or that access to the destination is granted.
 
 **A run of Tool calls has one presentation: the Trace.** `ToolTrace` draws it — a rail, no border,
 a present-tense header while the work is live, a `Ran N tools` header once it is over. It replaced
