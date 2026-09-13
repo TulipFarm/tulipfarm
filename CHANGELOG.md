@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.18.26](https://github.com/TulipFarm/tulipfarm/compare/v0.18.25...v0.18.26) (2026-09-13)
+
+### Features
+
+* **integrations:** add durable OIM Routine execution ([#814](https://github.com/TulipFarm/tulipfarm/issues/814)) ([88dfd15](https://github.com/TulipFarm/tulipfarm/commit/88dfd151324eef821b609341ce35f6a8a5e289d6))
+* **workspace:** connect Run results and improve Chat recovery ([#815](https://github.com/TulipFarm/tulipfarm/issues/815)) ([76e9e6c](https://github.com/TulipFarm/tulipfarm/commit/76e9e6c7cc1ce5dae161117a309257dd93a74b31))
+
 ## [0.18.25](https://github.com/TulipFarm/tulipfarm/compare/v0.18.24...v0.18.25) (2026-09-13)
 
 ### Features
