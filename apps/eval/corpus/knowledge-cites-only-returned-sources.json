@@ -123,6 +123,10 @@
       "text": "Tulip Supply Co"
     },
     {
+      "kind": "prompt_contains",
+      "text": "A marker with no matching citation is a broken link the user cannot follow"
+    },
+    {
       "kind": "tool_call_order",
       "names": ["query_knowledge", "cite_sources"]
     },
