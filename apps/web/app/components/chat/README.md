@@ -44,11 +44,20 @@ pending approval review, next steps and up to three recent Chats, without fetchi
 claiming completed work. Loading and failed reads stay distinct from empty lists and offer retry.
 These sections leave with the first Message and do not appear when an Agent is explicitly selected.
 
-`tasks-preview-card.tsx` reuses `CompanionPanel` for the reconciler's two setup actions: an answer
-to `business_profile.businessName` and a link to `/business/models`. `task-presentation.ts`
+`home-runs.tsx` adds the three newest Runs only when the session's server-provided navigation
+allows `/runs`, matching Activity's operational read gate. It shows actual states, creation dates
+and inspector links, with explicit refresh and separate loading, empty and error states. It is a
+recent snapshot, not a count of all running work or a participant-only Run feed. Revoked access or
+a changed user unmounts the read and discards its pending response.
+
+`tasks-preview-card.tsx` exports `SetupTasksPreview`, which reuses `CompanionPanel` for the
+reconciler's two setup actions: an answer to `business_profile.businessName` and a link to
+`/business/models`. `task-presentation.ts`
 recognizes those actions rather than their display text. They appear under **Get set up**, with the
-existing inline Save and Connect model actions. Other blocking and overdue Tasks retain their
-urgency. The server ranks and scopes Tasks; the home does not widen or reconstruct that queue.
+existing inline Save and Connect model actions, before the composer. Completed, dismissed and
+snoozed setup stays hidden. Other next steps remain below the composer without duplicating setup.
+Other blocking and overdue Tasks retain their urgency. The server ranks and scopes Tasks; the home
+does not widen or reconstruct that queue.
 
 Task Chat actions draft editable text and never send it. Other pages can link to
 `/?draft=${encodeURIComponent(prompt)}`; optional `agent` selects an Agent and `attach` stages an

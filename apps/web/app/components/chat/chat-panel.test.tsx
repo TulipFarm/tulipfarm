@@ -7,6 +7,7 @@ import type { PendingApproval } from "~/lib/approvals";
 import type { ChatMessage } from "~/lib/chat/types";
 import type { ConversationSummary } from "~/lib/conversations";
 import type { Suggestion } from "~/lib/onboarding";
+import type { Task } from "~/lib/tasks";
 
 let approvals: PendingApproval[] = [];
 let approvalsLoading = false;
@@ -16,6 +17,7 @@ let conversationsLoading = false;
 let conversationsError: string | null = null;
 const refreshApprovals = vi.fn();
 const refreshConversations = vi.fn();
+vi.mock("~/lib/use-session-user", () => ({ useSessionUser: () => undefined }));
 vi.mock("~/lib/approvals-context", () => ({
   useApprovals: () => ({
     approvals,
@@ -95,6 +97,34 @@ function renderHome(props: React.ComponentProps<typeof ChatPanel> = {}) {
   return render(<Stub />);
 }
 
+const SETUP_TASK: Task = {
+  id: "connect-model",
+  title: "Connect a model provider",
+  action: { kind: "link", href: "/business/models" },
+  blocking: true,
+  status: "open",
+  createdAt: "2026-09-01T00:00:00Z",
+};
+
+test("required setup appears once before the composer without hiding it", async () => {
+  renderHome({ tasks: [SETUP_TASK] });
+  const setup = screen.getByRole("region", { name: "Get set up" });
+  const composer = await screen.findByRole("textbox", { name: "Message" });
+  expect(setup.compareDocumentPosition(composer) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  expect(screen.getAllByRole("link", { name: "Connect model" })).toHaveLength(1);
+  expect(screen.queryByText("Urgent")).not.toBeInTheDocument();
+  expect(send).not.toHaveBeenCalled();
+});
+
+test.each(["done", "dismissed", "snoozed"] as const)(
+  "%s setup does not displace the composer",
+  (status) => {
+    renderHome({ tasks: [{ ...SETUP_TASK, status }] });
+    expect(screen.queryByRole("region", { name: "Get set up" })).not.toBeInTheDocument();
+    expect(screen.getByLabelText("Message")).toBeInTheDocument();
+  }
+);
+
 test("shows waiting approvals and the three newest authorized chats without inventing activity", () => {
   approvals = [
     { approvalId: "a1", createdAt: "2026-09-10T00:00:00Z", expiresAt: "2027-01-01T00:00:00Z" },
@@ -173,8 +203,9 @@ test("selected Agents do not show the general work-home sections", () => {
   approvals = [
     { approvalId: "a1", createdAt: "2026-09-10T00:00:00Z", expiresAt: "2027-01-01T00:00:00Z" },
   ];
-  renderHome({ agentId: "InventoryPlanner" });
+  renderHome({ agentId: "InventoryPlanner", tasks: [SETUP_TASK] });
   expect(screen.queryByRole("link", { name: /approvals waiting/ })).not.toBeInTheDocument();
+  expect(screen.queryByRole("region", { name: "Get set up" })).not.toBeInTheDocument();
 });
 
 test("an empty restored Chat keeps a screen-reader page heading", () => {

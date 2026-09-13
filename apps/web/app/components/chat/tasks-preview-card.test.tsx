@@ -2,7 +2,7 @@ import { createRemixStub } from "@remix-run/testing";
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, expect, test, vi } from "vitest";
 import type { Task } from "~/lib/tasks";
-import { TasksPreviewCard } from "./tasks-preview-card";
+import { SetupTasksPreview, TasksPreviewCard } from "./tasks-preview-card";
 
 afterEach(cleanup);
 
@@ -55,7 +55,7 @@ test("known setup tasks offer their existing actions without an Urgent badge", (
     {
       path: "/",
       Component: () => (
-        <TasksPreviewCard
+        <SetupTasksPreview
           tasks={[
             task({
               title: "What's your business called?",
@@ -69,7 +69,6 @@ test("known setup tasks offer their existing actions without an Urgent badge", (
               action: { kind: "link", href: "/business/models" },
             }),
           ]}
-          onPick={() => {}}
         />
       ),
     },

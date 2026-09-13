@@ -4,9 +4,9 @@ import { Link } from "~/components/ui/link";
 import { useApprovals } from "~/lib/approvals-context";
 import { useConversations } from "~/lib/conversations-context";
 import type { Task } from "~/lib/tasks";
+import { ChatHomeRuns } from "./home-runs";
 import { TasksPreviewCard } from "./tasks-preview-card";
 
-/** Reuses the shell's authorized lists; this view starts no requests of its own. */
 export function ChatHomeWork({ tasks, onPick }: { tasks: Task[]; onPick: (text: string) => void }) {
   const approvals = useApprovals();
   const chats = useConversations();
@@ -47,6 +47,7 @@ export function ChatHomeWork({ tasks, onPick }: { tasks: Task[]; onPick: (text: 
       ) : null}
 
       <TasksPreviewCard tasks={tasks} onPick={onPick} />
+      <ChatHomeRuns />
 
       {chats.loading || chats.error || recent.length > 0 ? (
         <section aria-label="Recent chats" className="mt-6 border-t border-border pt-3">

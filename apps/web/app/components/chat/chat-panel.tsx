@@ -13,6 +13,7 @@ import { ChatDebugDrawer } from "./chat-debug-drawer";
 import { Composer } from "./composer";
 import { ChatHomeWork } from "./home-work";
 import { asPickerPreset, DEFAULT_CHAT_MODEL_SELECTOR } from "./model-selector";
+import { SetupTasksPreview } from "./tasks-preview-card";
 import { useMentionCatalog } from "./use-mention-catalog";
 
 /*
@@ -94,6 +95,7 @@ function EmptyState({
             </p>
           ) : null}
         </div>
+        {!agent ? <SetupTasksPreview tasks={tasks} /> : null}
         <div className="mt-5">{composer}</div>
         {!agent ? <ChatHomeWork tasks={tasks} onPick={onPick} /> : null}
       </section>
