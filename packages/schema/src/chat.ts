@@ -15,10 +15,18 @@ const ConversationTurnStatusSchema = Type.Unsafe<(typeof CONVERSATION_TURN_STATU
   enum: [...CONVERSATION_TURN_STATUSES],
 });
 
+const ModelFailureDiagnosticSchema = Type.Object({
+  requestId: Type.Optional(Type.String()),
+  modelId: Type.Optional(Type.String()),
+});
+
 export const ConversationTurnSchema = Type.Object({
   id: Type.String(),
   runId: Type.Union([Type.String(), Type.Null()]),
   status: ConversationTurnStatusSchema,
+  /** Bounded, participant-safe failure evidence for a `failed` Turn; absent otherwise. */
+  reason: Type.Optional(Type.String()),
+  modelFailure: Type.Optional(ModelFailureDiagnosticSchema),
 });
 
 export const ConversationDetailSchema = Type.Object({

@@ -1,5 +1,5 @@
 import { DEPLOYMENT_BUSINESS_ID } from "@tulipfarm/constants";
-import { CHAT_TITLE_MAX_LENGTH } from "@tulipfarm/schema";
+import { CHAT_TITLE_MAX_LENGTH, type ConversationTurn } from "@tulipfarm/schema";
 import Fastify, { type FastifyInstance } from "fastify";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { UserDoc } from "../auth/users";
@@ -64,6 +64,54 @@ describe("restoring the latest Turn", () => {
       id: "turn-1",
       runId: "run-1",
       status: "running",
+    });
+  });
+});
+
+describe("restoring a failed Turn's Retry evidence", () => {
+  let app: FastifyInstance;
+
+  afterEach(async () => {
+    await app.close();
+  });
+
+  it("passes through the failure reason and model diagnostic so Retry survives a reload", async () => {
+    const findLatestTurn = vi.fn(
+      async (): Promise<ConversationTurn> => ({
+        id: "turn-1",
+        runId: "run-1",
+        status: "failed",
+        reason: "model_provider_unavailable",
+        modelFailure: { requestId: "req-1", modelId: "gpt-x" },
+      })
+    );
+    app = Fastify();
+    const repo = {
+      findById: async () => ({
+        _id: "chat-1",
+        userId: "user-1",
+        createdAt: new Date("2026-08-21T00:00:00.000Z"),
+        updatedAt: new Date("2026-08-21T00:00:01.000Z"),
+      }),
+    } as unknown as ConversationRepo;
+    registerConversationRoutes(
+      app,
+      { repo, messageRepo: {} as MessageRepo, turnStore: { findLatestTurn } },
+      async (request) => {
+        request.user = { _id: "user-1" } as UserDoc;
+      }
+    );
+    await app.ready();
+
+    const response = await app.inject({ method: "GET", url: "/api/v1/chats/chat-1" });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json().latestTurn).toEqual({
+      id: "turn-1",
+      runId: "run-1",
+      status: "failed",
+      reason: "model_provider_unavailable",
+      modelFailure: { requestId: "req-1", modelId: "gpt-x" },
     });
   });
 });
