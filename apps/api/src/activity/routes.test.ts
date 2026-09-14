@@ -56,6 +56,7 @@ describe("activity routes", () => {
   let db: PGlite;
   let service: ActivityService;
   let memberSid: string;
+  let adminSid: string;
 
   beforeEach(async () => {
     db = await makeMigratedPglite();
@@ -66,6 +67,8 @@ describe("activity routes", () => {
     const tokenRepo = new FakeTokenRepo();
     const member = await createUser(userRepo, "member@example.com", "pass", "member");
     memberSid = await store.create(member._id);
+    const admin = await createUser(userRepo, "admin@example.com", "pass", "admin");
+    adminSid = await store.create(admin._id);
 
     app = await buildApp({ sessionStore: store, userRepo, tokenRepo, activityService: service });
   });
@@ -97,13 +100,25 @@ describe("activity routes", () => {
     expect(res.statusCode).toBe(401);
   });
 
-  it("lists newest-first for an authenticated user", async () => {
+  // Security regression (#856): a signed-in user with no roles, teams, or grants could still
+  // read the entire workspace activity/audit feed. Only operational authorization should pass.
+  it("returns 403 for an authenticated user with no operational authorization", async () => {
+    await seed("resource", "secret", new Date("2024-01-01T00:00:00Z"));
+    const res = await app.inject({
+      method: "GET",
+      url: "/api/v1/activities",
+      cookies: { [SESSION_COOKIE]: memberSid },
+    });
+    expect(res.statusCode).toBe(403);
+  });
+
+  it("lists newest-first for an operationally-authorized user", async () => {
     await seed("resource", "old", new Date("2024-01-01T00:00:00Z"));
     await seed("chat", "new", new Date("2024-02-01T00:00:00Z"));
     const res = await app.inject({
       method: "GET",
       url: "/api/v1/activities",
-      cookies: { [SESSION_COOKIE]: memberSid },
+      cookies: { [SESSION_COOKIE]: adminSid },
     });
     expect(res.statusCode).toBe(200);
     const body = res.json() as { items: { summary: string }[]; nextCursor: string | null };
@@ -118,7 +133,7 @@ describe("activity routes", () => {
     const first = await app.inject({
       method: "GET",
       url: "/api/v1/activities?limit=2",
-      cookies: { [SESSION_COOKIE]: memberSid },
+      cookies: { [SESSION_COOKIE]: adminSid },
     });
     const firstBody = first.json() as { items: { summary: string }[]; nextCursor: string | null };
     expect(firstBody.items.map((i) => i.summary)).toEqual(["a2", "a1"]);
@@ -127,7 +142,7 @@ describe("activity routes", () => {
     const second = await app.inject({
       method: "GET",
       url: `/api/v1/activities?limit=2&cursor=${encodeURIComponent(firstBody.nextCursor as string)}`,
-      cookies: { [SESSION_COOKIE]: memberSid },
+      cookies: { [SESSION_COOKIE]: adminSid },
     });
     const secondBody = second.json() as { items: { summary: string }[] };
     expect(secondBody.items.map((i) => i.summary)).toEqual(["a0"]);
@@ -139,7 +154,7 @@ describe("activity routes", () => {
     const res = await app.inject({
       method: "GET",
       url: "/api/v1/activities?category=chat",
-      cookies: { [SESSION_COOKIE]: memberSid },
+      cookies: { [SESSION_COOKIE]: adminSid },
     });
     const body = res.json() as { items: { summary: string }[] };
     expect(body.items.map((i) => i.summary)).toEqual(["c"]);

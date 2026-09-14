@@ -403,7 +403,7 @@ export async function buildApp(opts: AppOptions = {}) {
       requireAuthorization
     );
     if (opts.activityService) {
-      registerActivityRoutes(app, opts.activityService, requireAuth);
+      registerActivityRoutes(app, opts.activityService, requireAuth, requireAuthorization);
     }
     if (opts.auditReadService) {
       registerAuditRoutes(app, opts.auditReadService, requireAuth, requireAuthorization);

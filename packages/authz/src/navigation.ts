@@ -53,7 +53,7 @@ export const NAVIGATION_REQUIREMENTS: readonly NavigationRequirement[] = [
   // No longer a sidebar item: /runs redirects to Activity, which reads this entry to decide
   // whether to show the Runs lane at all. Removing it would hide Runs from every session.
   { path: "/runs", authorizations: [OPERATIONS_READ] },
-  { path: "/business/activities", authorizations: [AUTHENTICATED_NAVIGATION] },
+  { path: "/business/activities", authorizations: [OPERATIONS_READ] },
   { path: "/teams", authorizations: [TEAM_DIRECTORY_READ] },
   { path: "/operations", authorizations: [OPERATIONS_READ] },
   {
