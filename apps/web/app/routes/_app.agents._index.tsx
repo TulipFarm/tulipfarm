@@ -5,8 +5,10 @@ import { PageShell } from "~/components/page-shell";
 import { ErrorState } from "~/components/states";
 import { Button } from "~/components/ui/button";
 import { Link } from "~/components/ui/link";
-import { listAgents } from "~/lib/agents";
+import { listAgents, listBuiltInAgents } from "~/lib/agents";
 import { ApiError } from "~/lib/api";
+import { listRoutines } from "~/lib/routines";
+import { routineUsageByAgent } from "~/lib/routines/facts";
 
 export const meta: MetaFunction = () => [{ title: "Agents · tulipfarm" }];
 
@@ -15,31 +17,17 @@ const createAgentHref = `/?draft=${encodeURIComponent(
 )}`;
 
 export async function clientLoader() {
-  const agents = await listAgents();
-  return { agents };
+  const [agents, builtIn, routines] = await Promise.all([
+    listAgents(),
+    listBuiltInAgents(),
+    // Routine usage is a supplementary cross-reference, not a reason to fail the whole roster.
+    listRoutines().catch(() => []),
+  ]);
+  return { agents, builtIn, usageByAgent: routineUsageByAgent(routines) };
 }
 
 export default function AgentsIndex() {
-  const { agents } = useLoaderData<typeof clientLoader>();
-
-  if (agents.length === 0) {
-    return (
-      <PageShell crumbs={[{ label: "Agents" }]} title="Agents">
-        <EmptyState
-          section="agents"
-          title="No agents yet"
-          hint="Give recurring work to an agent with its own instructions and limits. Describe the job in chat, and build its brief together."
-        >
-          <Button asChild>
-            <Link to={createAgentHref}>Create an agent in chat</Link>
-          </Button>
-          <Button asChild variant="outline">
-            <Link to="/skills">Browse skills</Link>
-          </Button>
-        </EmptyState>
-      </PageShell>
-    );
-  }
+  const { agents, builtIn, usageByAgent } = useLoaderData<typeof clientLoader>();
 
   return (
     <PageShell
@@ -59,7 +47,18 @@ export default function AgentsIndex() {
         </Link>{" "}
         are the procedures an agent loads for one task.
       </p>
-      <AgentRoster agents={agents} />
+      {agents.length === 0 ? (
+        <EmptyState
+          section="agents"
+          title="No custom agents yet"
+          hint="Give recurring work to an agent with its own instructions and limits. Describe the job in chat, and build its brief together. Every instance also ships the built-in agents below, which the platform runs on its own behalf."
+        >
+          <Button asChild variant="outline">
+            <Link to="/skills">Browse skills</Link>
+          </Button>
+        </EmptyState>
+      ) : null}
+      <AgentRoster agents={agents} builtIn={builtIn} usageByAgent={usageByAgent} />
     </PageShell>
   );
 }

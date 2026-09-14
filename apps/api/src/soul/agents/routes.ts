@@ -1,3 +1,4 @@
+import { BUILT_IN_AGENTS } from "@tulipfarm/built-in-agents";
 import type { TeamBusinessAssetOwnership } from "@tulipfarm/schema";
 import type { SoulAgent, SoulLoader } from "@tulipfarm/soul";
 import { getAgent, listAgents } from "@tulipfarm/soul";
@@ -260,6 +261,48 @@ export function registerAgentRoutes(
       const agents = visible.map(toSummary);
       return { agents };
     }
+  );
+
+  app.get(
+    "/api/v1/agents/built-in",
+    {
+      preHandler: requireAuth,
+      schema: {
+        description:
+          "List the runtime's own built-in agents — single-shot prompts with no persona, no Soul " +
+          "entry, and no way for a user to address one directly.",
+        tags: ["agents"],
+        security: [{ sessionCookie: [] }, { bearerToken: [] }],
+        response: {
+          200: {
+            type: "object",
+            required: ["agents"],
+            properties: {
+              agents: {
+                type: "array",
+                items: {
+                  type: "object",
+                  required: ["id", "purpose", "rung"],
+                  properties: {
+                    id: { type: "string" },
+                    purpose: { type: "string" },
+                    rung: { type: "string", enum: ["fast", "balanced"] },
+                  },
+                },
+              },
+            },
+          },
+          401: ErrorSchema,
+        },
+      },
+    },
+    async () => ({
+      agents: BUILT_IN_AGENTS.map((spec) => ({
+        id: spec.id,
+        purpose: spec.purpose,
+        rung: spec.rung,
+      })),
+    })
   );
 
   app.get(

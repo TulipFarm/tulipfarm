@@ -53,6 +53,8 @@ export interface RoutineCatalogSummary {
   effects: RoutineEffectKind[];
   /** `spec.requiredToolAbilities`, verbatim — the abilities a Run must be granted to execute. */
   toolAbilities: string[];
+  /** Agent Definition names named by this Routine's `agent` States, sorted and deduplicated. */
+  agentRefs: string[];
   /**
    * The highest `permissionCeiling.maxRiskClass` any State declares, or `null` when none does.
    *
@@ -176,6 +178,7 @@ function routineSummary(document: Record<string, unknown>): RoutineCatalogSummar
   const states = Array.isArray(spec.states) ? spec.states.filter(isRecord) : [];
   const stateTypes = new Set<string>();
   const effects = new Set<RoutineEffectKind>();
+  const agentRefs = new Set<string>();
   let maxRiskClass: RiskClass | null = null;
   let requiresApproval = false;
 
@@ -185,6 +188,13 @@ function routineSummary(document: Record<string, unknown>): RoutineCatalogSummar
     const effect = EFFECT_BY_STATE_TYPE[state.type];
     if (effect) effects.add(effect);
     if (state.type === "approval" || state.type === "human_task") requiresApproval = true;
+    if (
+      state.type === "agent" &&
+      isRecord(state.agentRef) &&
+      typeof state.agentRef.name === "string"
+    ) {
+      agentRefs.add(state.agentRef.name);
+    }
     const ceiling = isRecord(state.permissionCeiling) ? state.permissionCeiling : undefined;
     const risk = ceiling?.maxRiskClass;
     if (
@@ -207,6 +217,7 @@ function routineSummary(document: Record<string, unknown>): RoutineCatalogSummar
     stateTypes: [...stateTypes].sort(),
     effects: [...effects].sort(),
     toolAbilities: stringList(spec.requiredToolAbilities).sort(),
+    agentRefs: [...agentRefs].sort(),
     maxRiskClass,
     requiresApproval,
     concurrencyPolicy: typeof concurrency?.policy === "string" ? concurrency.policy : null,
