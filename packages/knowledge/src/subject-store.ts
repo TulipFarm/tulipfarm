@@ -142,7 +142,7 @@ function effectiveEntries(
     // Checked before the baseline is taken, not after: an *open* ancestor reaching this first would
     // otherwise become the list every descendant is intersected against, and `{everyone}` ∩
     // `{alice}` is empty — locking out the very Principal a restriction names.
-    if (grants.size === 1 && grants.has(BLANKET_KEY)) {
+    if (grants.has(BLANKET_KEY)) {
       blanket ??= grants.get(BLANKET_KEY);
       continue;
     }
