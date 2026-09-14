@@ -62,6 +62,9 @@ function row(
     active: null,
     stagedSecretRef: null,
     attempts: 0,
+    consecutiveFailures: 0,
+    renewalCycle: 0,
+    renewalCycleComplete: true,
     nextAttemptAt: NOW,
     leaseToken: null,
     leaseExpiresAt: null,
@@ -111,6 +114,14 @@ class MemoryRegistrations implements WebhookRegistrationRepository {
             : this.current.active === null
               ? "registration_uncertain"
               : "pending_removal",
+      leaseToken:
+        this.current.state === "registering" || this.current.state === "removing"
+          ? this.current.leaseToken
+          : null,
+      leaseExpiresAt:
+        this.current.state === "registering" || this.current.state === "removing"
+          ? this.current.leaseExpiresAt
+          : null,
       revision: this.current.revision + 1,
     };
     return this.current;
@@ -120,6 +131,7 @@ class MemoryRegistrations implements WebhookRegistrationRepository {
     if (
       this.current === null ||
       this.current.connectionId !== key.connectionId ||
+      (this.current.state === "active" && this.current.nextAttemptAt > NOW) ||
       (this.current.leaseToken !== null &&
         (this.current.leaseExpiresAt === null || this.current.leaseExpiresAt > NOW)) ||
       (this.current.active === null && this.hasPendingAttempt()) ||
@@ -129,6 +141,9 @@ class MemoryRegistrations implements WebhookRegistrationRepository {
         "cleanup_failed",
         "registering",
         "removing",
+        ...(this.current.state === "active" && this.current.target.renewal === undefined
+          ? []
+          : ["active"]),
       ].includes(this.current.state)
     ) {
       return null;
@@ -234,6 +249,7 @@ class MemoryRegistrations implements WebhookRegistrationRepository {
       lastError: error,
       leaseToken: null,
       leaseExpiresAt: null,
+      consecutiveFailures: this.current.consecutiveFailures + 1,
     };
     return true;
   }
@@ -245,6 +261,7 @@ class MemoryRegistrations implements WebhookRegistrationRepository {
       subscriptionId: string;
       secretRef: `secret://${string}`;
       verifiedIdentity: BindVerifiedConnectionExternalIdentity;
+      expiresAt?: string;
     }
   ) {
     const attempt = this.attempts.get(output.attemptId);
@@ -267,6 +284,16 @@ class MemoryRegistrations implements WebhookRegistrationRepository {
           stagedSecretRef: null,
           leaseToken: null,
           leaseExpiresAt: null,
+          consecutiveFailures: 0,
+          renewalCycle: 0,
+          renewalCycleComplete: true,
+          nextAttemptAt:
+            this.current.target.renewal === undefined || output.expiresAt === undefined
+              ? NOW
+              : new Date(
+                  Date.parse(output.expiresAt) -
+                    this.current.target.renewal.renewBeforeSeconds * 1_000
+                ),
         };
       }
       return { kind: "cleanup_required" as const, attempt };
@@ -284,6 +311,7 @@ class MemoryRegistrations implements WebhookRegistrationRepository {
       ...this.current.target,
       subscriptionId: output.subscriptionId,
       secretRef: output.secretRef,
+      expiresAt: output.expiresAt ?? null,
     };
     this.current = {
       ...this.current,
@@ -292,20 +320,62 @@ class MemoryRegistrations implements WebhookRegistrationRepository {
       stagedSecretRef: null,
       leaseToken: null,
       leaseExpiresAt: null,
+      consecutiveFailures: 0,
+      renewalCycle: 0,
+      renewalCycleComplete: true,
+      nextAttemptAt:
+        this.current.target.renewal === undefined || output.expiresAt === undefined
+          ? NOW
+          : new Date(
+              Date.parse(output.expiresAt) - this.current.target.renewal.renewBeforeSeconds * 1_000
+            ),
     };
     return { kind: "active" as const, registration: this.current };
   }
 
-  async failClaim(claim: WebhookRegistrationClaim, error: string) {
+  async failClaim(claim: WebhookRegistrationClaim, error: string, retryAfterSeconds: number) {
     if (this.current?.leaseToken !== claim.leaseToken) return false;
     this.current = {
       ...this.current,
-      state: claim.action === "remove" ? "cleanup_failed" : "pending_registration",
+      state:
+        claim.action === "remove"
+          ? "cleanup_failed"
+          : claim.action === "renew"
+            ? "active"
+            : "pending_registration",
       lastError: error,
       leaseToken: null,
       leaseExpiresAt: null,
+      nextAttemptAt: new Date(NOW.getTime() + retryAfterSeconds * 1_000),
+      consecutiveFailures: this.current.consecutiveFailures + 1,
     };
     return true;
+  }
+
+  async settleRenewalAbsence(claim: WebhookRegistrationClaim) {
+    const current = this.current;
+    if (
+      current === null ||
+      current.active === null ||
+      current.renewalCycle !== claim.renewalCycle ||
+      current.renewalCycleComplete
+    ) {
+      return null;
+    }
+    this.current = {
+      ...current,
+      state: current.desiredState === "active" ? "pending_registration" : "removed",
+      active: null,
+      stagedSecretRef: null,
+      leaseToken: null,
+      leaseExpiresAt: null,
+      consecutiveFailures: 0,
+      renewalCycle: 0,
+      renewalCycleComplete: true,
+      nextAttemptAt: NOW,
+      generation: current.generation + 1,
+    };
+    return this.current;
   }
 
   async completeRemoval(claim: WebhookRegistrationClaim) {
@@ -395,14 +465,21 @@ class MemoryRegistrations implements WebhookRegistrationRepository {
   private claimCurrent(leaseToken: string): WebhookRegistrationClaim {
     if (this.current === null) throw new Error("missing row");
     const action =
-      this.current.desiredState === "removed" || this.current.active !== null
+      this.current.desiredState === "removed"
         ? "remove"
-        : "register";
+        : this.current.active !== null
+          ? "renew"
+          : "register";
     this.current = {
       ...this.current,
-      state: action === "register" ? "registering" : "removing",
+      state: action === "register" ? "registering" : action === "remove" ? "removing" : "active",
       leaseToken,
       leaseExpiresAt: new Date(NOW.getTime() + 120_000),
+      renewalCycle:
+        action === "renew" && this.current.renewalCycleComplete
+          ? this.current.renewalCycle + 1
+          : this.current.renewalCycle,
+      renewalCycleComplete: action === "renew" ? false : this.current.renewalCycleComplete,
       attempts: this.current.attempts + 1,
     };
     return { ...this.current, action, authStepRevision: action === "register" ? 1 : null };
@@ -447,6 +524,27 @@ class MemoryRegistrations implements WebhookRegistrationRepository {
     }
     return true;
   }
+
+  async completeRenewal(claim: WebhookRegistrationClaim, expiresAt: string) {
+    if (
+      this.current?.leaseToken !== claim.leaseToken ||
+      this.current.active === null ||
+      this.current.desiredState !== "active"
+    ) {
+      return null;
+    }
+    this.current = {
+      ...this.current,
+      active: { ...this.current.active, expiresAt },
+      consecutiveFailures: 0,
+      renewalCycleComplete: true,
+      leaseToken: null,
+      leaseExpiresAt: null,
+      lastError: null,
+      nextAttemptAt: new Date(Date.parse(expiresAt) - 300_000),
+    };
+    return this.current;
+  }
 }
 
 function deferred<T>() {
@@ -462,18 +560,19 @@ describe("OimWebhookRegistrationService", () => {
   let provider: {
     register: Mock<WebhookRegistrationProvider["register"]>;
     reconcile: Mock<WebhookRegistrationProvider["reconcile"]>;
+    renew: Mock<WebhookRegistrationProvider["renew"]>;
     unregister: Mock<WebhookRegistrationProvider["unregister"]>;
   };
   let revoked: string[];
   let revokedAttempts: string[];
   let availableManifest: OimManifest | null;
 
-  const planned = () =>
+  const planned = (source = manifest) =>
     planWebhookRegistration({
       businessId: "business-1",
       integrationKey: "acme-v2",
       connectionId: "connection-1",
-      manifest,
+      manifest: source,
       packageSnapshot: {
         integrationId: "acme",
         version: "2.1.0",
@@ -513,6 +612,7 @@ describe("OimWebhookRegistrationService", () => {
     provider = {
       register: vi.fn(async () => ({
         subscriptionId: "sub-1",
+        expiresAt: new Date(NOW.getTime() + 3_600_000).toISOString(),
         verifiedIdentity: {
           externalTenantId: "tenant-1",
           externalAccountId: "account-1",
@@ -527,6 +627,20 @@ describe("OimWebhookRegistrationService", () => {
         proofDigest: "e".repeat(64),
         verifiedAt: NOW.toISOString(),
         verifiedBy: "acme-registration-status",
+      })),
+      renew: vi.fn(async () => ({
+        kind: "renewed" as const,
+        result: {
+          subscriptionId: "sub-1",
+          expiresAt: new Date(NOW.getTime() + 3_600_000).toISOString(),
+          verifiedIdentity: {
+            externalTenantId: "tenant-1",
+            externalAccountId: "account-1",
+            proofDigest: "a".repeat(64),
+            verifiedAt: NOW.toISOString(),
+            verifiedBy: "acme-account-api",
+          },
+        },
       })),
       unregister: vi.fn(async () => undefined),
     };
@@ -549,6 +663,161 @@ describe("OimWebhookRegistrationService", () => {
         callbackUrl: "https://api.example.test/base/api/v1/hooks/oim/acme-v2/connection-1",
       },
     });
+  });
+
+  it("renews before expiry with the same subscription and retains ingress during a failed renewal", async () => {
+    const renewal = {
+      operationId: "renew_hook",
+      subscriptionId: { in: "body" as const, pointer: "/id" },
+      expiresAtPath: "/expiresAt",
+      renewBeforeSeconds: 300,
+    };
+    const auth = manifest.auth;
+    if (auth === undefined) throw new Error("missing auth");
+    const renewable: OimManifest = {
+      ...manifest,
+      auth: {
+        ...auth,
+        steps: auth.steps.map((step) => (step.type === "webhook" ? { ...step, renewal } : step)),
+      },
+    };
+    availableManifest = renewable;
+    const { key, target } = planned(renewable);
+    const lifecycle = service();
+    const registered = await lifecycle.register(key, target);
+    await expect(lifecycle.register(key, target)).resolves.toMatchObject({ state: "active" });
+    expect(provider.register).toHaveBeenCalledOnce();
+    if (registrations.current === null) throw new Error("registration disappeared");
+    registrations.current = {
+      ...registrations.current,
+      nextAttemptAt: NOW,
+    };
+
+    await expect(lifecycle.recover()).resolves.toBe(1);
+    expect(provider.renew).toHaveBeenCalledWith(
+      expect.objectContaining({
+        registration: expect.objectContaining({
+          subscriptionId: registered.active?.subscriptionId,
+        }),
+      })
+    );
+    expect(registrations.current?.active?.expiresAt).toBe(
+      new Date(NOW.getTime() + 3_600_000).toISOString()
+    );
+    const firstCycleKey = provider.renew.mock.calls[0]?.[0].idempotencyKey;
+
+    if (registrations.current === null) throw new Error("registration disappeared");
+    registrations.current = { ...registrations.current, nextAttemptAt: NOW };
+    provider.renew.mockRejectedValueOnce(new Error("provider unavailable"));
+    await expect(lifecycle.recover()).rejects.toEqual(
+      new OimWebhookRegistrationError("registration_failed")
+    );
+    expect(registrations.current).toMatchObject({
+      state: "active",
+      active: { subscriptionId: registered.active?.subscriptionId },
+      lastError: "provider unavailable",
+    });
+    const retryKey = provider.renew.mock.calls[1]?.[0].idempotencyKey;
+    expect(retryKey).not.toBe(firstCycleKey);
+    expect(registrations.current?.nextAttemptAt).toEqual(new Date(NOW.getTime() + 60_000));
+
+    if (registrations.current === null) throw new Error("registration disappeared");
+    registrations.current = { ...registrations.current, nextAttemptAt: NOW };
+    provider.renew.mockRejectedValueOnce(new Error("provider unavailable"));
+    await expect(lifecycle.recover()).rejects.toEqual(
+      new OimWebhookRegistrationError("registration_failed")
+    );
+    expect(provider.renew.mock.calls[2]?.[0].idempotencyKey).toBe(retryKey);
+    expect(registrations.current?.nextAttemptAt).toEqual(new Date(NOW.getTime() + 2 * 60_000));
+
+    if (registrations.current === null) throw new Error("registration disappeared");
+    registrations.current = { ...registrations.current, nextAttemptAt: NOW };
+    await expect(lifecycle.recover()).resolves.toBe(1);
+    expect(provider.renew.mock.calls[3]?.[0].idempotencyKey).toBe(retryKey);
+
+    if (registrations.current === null) throw new Error("registration disappeared");
+    registrations.current = { ...registrations.current, nextAttemptAt: NOW };
+    await expect(lifecycle.recover()).resolves.toBe(1);
+    expect(provider.renew.mock.calls[4]?.[0].idempotencyKey).not.toBe(retryKey);
+  });
+
+  it("re-registers a subscription that the provider has permanently removed", async () => {
+    const renewal = {
+      operationId: "renew_hook",
+      subscriptionId: { in: "body" as const, pointer: "/id" },
+      expiresAtPath: "/expiresAt",
+      renewBeforeSeconds: 300,
+    };
+    const auth = manifest.auth;
+    if (auth === undefined) throw new Error("missing auth");
+    const renewable: OimManifest = {
+      ...manifest,
+      auth: {
+        ...auth,
+        steps: auth.steps.map((step) => (step.type === "webhook" ? { ...step, renewal } : step)),
+      },
+    };
+    availableManifest = renewable;
+    const { key, target } = planned(renewable);
+    const lifecycle = service();
+    await lifecycle.register(key, target);
+    if (registrations.current === null) throw new Error("registration disappeared");
+    registrations.current = { ...registrations.current, nextAttemptAt: NOW };
+    provider.renew.mockResolvedValueOnce({ kind: "settled_absent" });
+
+    await expect(lifecycle.recover()).resolves.toBe(2);
+    expect(provider.register).toHaveBeenCalledTimes(2);
+    expect(revoked).toEqual(["secret://webhook-1"]);
+    expect(registrations.current).toMatchObject({ state: "active", generation: 2 });
+  });
+
+  it("tears down a registration renewed concurrently without restoring ingress", async () => {
+    const renewal = {
+      operationId: "renew_hook",
+      subscriptionId: { in: "body" as const, pointer: "/id" },
+      expiresAtPath: "/expiresAt",
+      renewBeforeSeconds: 300,
+    };
+    const auth = manifest.auth;
+    if (auth === undefined) throw new Error("missing auth");
+    const renewable: OimManifest = {
+      ...manifest,
+      auth: {
+        ...auth,
+        steps: auth.steps.map((step) => (step.type === "webhook" ? { ...step, renewal } : step)),
+      },
+    };
+    availableManifest = renewable;
+    const { key, target } = planned(renewable);
+    const lifecycle = service();
+    await lifecycle.register(key, target);
+    if (registrations.current === null) throw new Error("registration disappeared");
+    registrations.current = { ...registrations.current, nextAttemptAt: NOW };
+    const pending = deferred<Awaited<ReturnType<WebhookRegistrationProvider["renew"]>>>();
+    provider.renew.mockImplementationOnce(async () => pending.promise);
+
+    const recovering = lifecycle.recover();
+    await vi.waitFor(() => expect(provider.renew).toHaveBeenCalledOnce());
+    await registrations.requestRemoval(key);
+    pending.resolve({
+      kind: "renewed",
+      result: {
+        subscriptionId: "sub-1",
+        expiresAt: new Date(NOW.getTime() + 3_600_000).toISOString(),
+        verifiedIdentity: {
+          externalTenantId: "tenant-1",
+          externalAccountId: "account-1",
+          proofDigest: "a".repeat(64),
+          verifiedAt: NOW.toISOString(),
+          verifiedBy: "acme-account-api",
+        },
+      },
+    });
+
+    await expect(recovering).rejects.toEqual(new OimWebhookRegistrationError("registration_stale"));
+    await expect(lifecycle.remove(key)).resolves.toMatchObject({ state: "removed" });
+    expect(provider.unregister).toHaveBeenCalledOnce();
+    expect(registrations.current?.state).toBe("removed");
   });
 
   it("fences ingress and cleans up when removal races remote registration", async () => {

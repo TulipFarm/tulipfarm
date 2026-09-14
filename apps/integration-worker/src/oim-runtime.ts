@@ -158,6 +158,7 @@ function createOimRuntimeCycle(
     provider: {
       register: (input) => host.registerWebhook(input),
       reconcile: (input) => host.reconcileWebhook(input),
+      renew: (input) => host.renewWebhook(input),
       unregister: (input) => host.unregisterWebhook(input),
     },
     manifestFor: (integrationKey) => host.resolveRegistrationManifest(integrationKey),

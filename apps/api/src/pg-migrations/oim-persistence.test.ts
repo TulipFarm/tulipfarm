@@ -147,7 +147,7 @@ describe("OIM persistence migrations", () => {
         .slice(0, 5)
         .map(({ version }) => version)
     ).toEqual([110, 111, 112, 113, 114]);
-    expect(PG_MIGRATIONS.at(-1)?.version).toBe(121);
+    expect(PG_MIGRATIONS.at(-1)?.version).toBe(122);
   });
 
   it("builds every OIM persistence table on a fresh database", async () => {
@@ -238,6 +238,19 @@ describe("OIM persistence migrations", () => {
          AND column_name = 'generation'
     `);
     expect(registrationGeneration.rows).toEqual([{ column_name: "generation" }]);
+
+    const registrationRenewalColumns = await database.query<{ column_name: string }>(`
+      SELECT column_name
+        FROM information_schema.columns
+       WHERE table_name = 'oim_webhook_registrations'
+         AND column_name IN ('consecutive_failures', 'renewal_cycle', 'renewal_cycle_complete')
+       ORDER BY column_name
+    `);
+    expect(registrationRenewalColumns.rows).toEqual([
+      { column_name: "consecutive_failures" },
+      { column_name: "renewal_cycle" },
+      { column_name: "renewal_cycle_complete" },
+    ]);
 
     const settledAbsenceEvidence = await database.query<{ column_name: string }>(`
       SELECT column_name

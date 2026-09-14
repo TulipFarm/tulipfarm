@@ -32,7 +32,19 @@ export interface WebhookRegistrationTarget {
   readonly operationId: string;
   readonly unregisterOperationId: string;
   readonly secretSlot: string;
+  readonly renewal?: WebhookRegistrationRenewal;
   readonly packageSnapshot: OimWebhookCleanupPackageSnapshot;
+}
+
+export interface WebhookRegistrationRenewal {
+  readonly operationId: string;
+  readonly subscriptionId: {
+    readonly in: "body" | "parameter";
+    readonly pointer?: string;
+    readonly name?: string;
+  };
+  readonly expiresAtPath: string;
+  readonly renewBeforeSeconds: number;
 }
 
 export interface OimWebhookCleanupPackageSnapshot {
@@ -52,6 +64,7 @@ export interface OimWebhookCleanupPackageSnapshot {
 export interface ActiveWebhookRegistration extends WebhookRegistrationTarget {
   readonly subscriptionId: string;
   readonly secretRef: `secret://${string}`;
+  readonly expiresAt?: string | null;
 }
 
 export interface PersistedWebhookRegistration extends WebhookRegistrationKey {
@@ -61,6 +74,9 @@ export interface PersistedWebhookRegistration extends WebhookRegistrationKey {
   readonly active: ActiveWebhookRegistration | null;
   readonly stagedSecretRef: `secret://${string}` | null;
   readonly attempts: number;
+  readonly consecutiveFailures: number;
+  readonly renewalCycle: number;
+  readonly renewalCycleComplete: boolean;
   readonly nextAttemptAt: Date;
   readonly leaseToken: string | null;
   readonly leaseExpiresAt: Date | null;
@@ -109,7 +125,7 @@ export interface WebhookRegistrationAttemptClaim extends PersistedWebhookRegistr
 }
 
 export interface WebhookRegistrationClaim extends PersistedWebhookRegistration {
-  readonly action: "register" | "remove";
+  readonly action: "register" | "renew" | "remove";
   readonly authStepRevision: number | null;
 }
 
@@ -141,6 +157,9 @@ export const WEBHOOK_REGISTRATION_STORAGE_STATEMENTS: readonly string[] = [
       staged_secret_ref IS NULL OR staged_secret_ref LIKE 'secret://%'
     ),
     attempts                     integer NOT NULL DEFAULT 0 CHECK (attempts >= 0),
+    consecutive_failures         integer NOT NULL DEFAULT 0 CHECK (consecutive_failures >= 0),
+    renewal_cycle                bigint NOT NULL DEFAULT 0 CHECK (renewal_cycle >= 0),
+    renewal_cycle_complete       boolean NOT NULL DEFAULT true,
     next_attempt_at              timestamptz NOT NULL DEFAULT now(),
     lease_token                  text,
     lease_expires_at             timestamptz,
@@ -225,6 +244,9 @@ interface RegistrationRow {
   active_registration: ActiveWebhookRegistration | null;
   staged_secret_ref: `secret://${string}` | null;
   attempts: number;
+  consecutive_failures: number;
+  renewal_cycle: number;
+  renewal_cycle_complete: boolean;
   next_attempt_at: Date;
   lease_token: string | null;
   lease_expires_at: Date | null;
@@ -272,6 +294,9 @@ function fromRow(row: RegistrationRow): PersistedWebhookRegistration {
     active: row.active_registration,
     stagedSecretRef: row.staged_secret_ref,
     attempts: row.attempts,
+    consecutiveFailures: row.consecutive_failures,
+    renewalCycle: row.renewal_cycle,
+    renewalCycleComplete: row.renewal_cycle_complete,
     nextAttemptAt: row.next_attempt_at,
     leaseToken: row.lease_token,
     leaseExpiresAt: row.lease_expires_at,
@@ -319,7 +344,8 @@ function targetMatches(
     active.callbackUrl === target.callbackUrl &&
     active.operationId === target.operationId &&
     active.unregisterOperationId === target.unregisterOperationId &&
-    active.secretSlot === target.secretSlot
+    active.secretSlot === target.secretSlot &&
+    JSON.stringify(active.renewal) === JSON.stringify(target.renewal)
   );
 }
 
@@ -331,7 +357,8 @@ function sameTarget(left: WebhookRegistrationTarget, right: WebhookRegistrationT
     left.callbackUrl === right.callbackUrl &&
     left.operationId === right.operationId &&
     left.unregisterOperationId === right.unregisterOperationId &&
-    left.secretSlot === right.secretSlot
+    left.secretSlot === right.secretSlot &&
+    JSON.stringify(left.renewal) === JSON.stringify(right.renewal)
   );
 }
 
@@ -345,6 +372,19 @@ function assertKey(key: WebhookRegistrationKey): void {
   ) {
     throw new Error("invalid_webhook_registration_key");
   }
+}
+
+function nextRenewalAt(
+  target: WebhookRegistrationTarget,
+  expiresAt: string | undefined,
+  now: Date
+): Date {
+  if (target.renewal === undefined || expiresAt === undefined) return now;
+  const expiresAtMs = Date.parse(expiresAt);
+  if (!Number.isFinite(expiresAtMs) || expiresAtMs <= now.getTime()) {
+    throw new Error("webhook_registration_expiration_invalid");
+  }
+  return new Date(Math.max(now.getTime(), expiresAtMs - target.renewal.renewBeforeSeconds * 1_000));
 }
 
 export class WebhookRegistrationStore {
@@ -427,7 +467,11 @@ export class WebhookRegistrationStore {
       const updated = await transaction.query<RegistrationRow>(
         `UPDATE oim_webhook_registrations
             SET desired_state = 'active', state = $3, target = $4::jsonb,
-                next_attempt_at = $5, last_error = NULL,
+                next_attempt_at = CASE
+                  WHEN $6 OR active_registration IS NULL THEN $5
+                  ELSE next_attempt_at
+                END,
+                last_error = CASE WHEN $6 OR active_registration IS NULL THEN NULL ELSE last_error END,
                 generation = generation + CASE
                   WHEN desired_state = 'removed' OR $6 THEN 1 ELSE 0
                 END,
@@ -564,7 +608,15 @@ export class WebhookRegistrationStore {
         WHERE ${predicate}
           AND state IN (
             'pending_registration', 'pending_removal', 'cleanup_failed',
-            'registering', 'removing'
+            'registering', 'removing', 'active'
+          )
+          AND (
+            state <> 'active'
+            OR (
+              desired_state = 'active'
+              AND active_registration IS NOT NULL
+              AND target ? 'renewal'
+            )
           )
           AND NOT (
             active_registration IS NULL
@@ -577,31 +629,38 @@ export class WebhookRegistrationStore {
           )
           AND next_attempt_at <= $${offset + 1}
           AND (lease_expires_at IS NULL OR lease_expires_at <= $${offset + 1})
+          AND (
+            desired_state = 'removed'
+            OR EXISTS (
+              SELECT 1 FROM connections connection
+               WHERE connection.business_id = oim_webhook_registrations.business_id
+                 AND connection.id = oim_webhook_registrations.connection_id
+                 AND connection.integration_id = oim_webhook_registrations.integration_id
+                 AND connection.integration_major_version =
+                     oim_webhook_registrations.integration_major_version
+                 AND connection.status = 'active'
+            )
+          )
         ORDER BY next_attempt_at, updated_at
         LIMIT 1`,
       [...parameters, now]
     );
     const candidateRow = candidate.rows[0];
     if (candidateRow === undefined) return null;
-    const connection = await transaction.query(
-      `SELECT id FROM connections
-        WHERE business_id = $1 AND id = $2
-          AND integration_id = $3 AND integration_major_version = $4
-        FOR SHARE`,
-      [
-        candidateRow.business_id,
-        candidateRow.connection_id,
-        candidateRow.integration_id,
-        candidateRow.integration_major_version,
-      ]
-    );
-    if (connection.rows.length !== 1) return null;
     const selected = await transaction.query<RegistrationRow>(
       `${SELECT_REGISTRATION}
         WHERE business_id = $1 AND connection_id = $2
           AND state IN (
             'pending_registration', 'pending_removal', 'cleanup_failed',
-            'registering', 'removing'
+            'registering', 'removing', 'active'
+          )
+          AND (
+            state <> 'active'
+            OR (
+              desired_state = 'active'
+              AND active_registration IS NOT NULL
+              AND target ? 'renewal'
+            )
           )
           AND NOT (
             active_registration IS NULL
@@ -621,22 +680,44 @@ export class WebhookRegistrationStore {
                WHERE business_id = $1 AND connection_id = $2
             )
           )
+          AND (
+            desired_state = 'removed'
+            OR EXISTS (
+              SELECT 1 FROM connections connection
+               WHERE connection.business_id = oim_webhook_registrations.business_id
+                 AND connection.id = oim_webhook_registrations.connection_id
+                 AND connection.integration_id = oim_webhook_registrations.integration_id
+                 AND connection.integration_major_version =
+                     oim_webhook_registrations.integration_major_version
+                 AND connection.status = 'active'
+            )
+          )
         FOR UPDATE SKIP LOCKED`,
       [candidateRow.business_id, candidateRow.connection_id, now]
     );
     const row = selected.rows[0];
     if (row === undefined) return null;
     const action =
-      row.desired_state === "removed" || row.active_registration !== null ? "remove" : "register";
-    const state = action === "register" ? "registering" : "removing";
+      row.desired_state === "removed"
+        ? "remove"
+        : row.active_registration !== null
+          ? "renew"
+          : "register";
+    const state =
+      action === "register" ? "registering" : action === "remove" ? "removing" : "active";
     const updated = await transaction.query<RegistrationRow>(
       `UPDATE oim_webhook_registrations
           SET state = $3, lease_token = $4,
               lease_expires_at = $5::timestamptz + make_interval(secs => $6),
+              renewal_cycle = CASE
+                WHEN $7 THEN CASE WHEN renewal_cycle_complete THEN renewal_cycle + 1 ELSE renewal_cycle END
+                ELSE renewal_cycle
+              END,
+              renewal_cycle_complete = CASE WHEN $7 THEN false ELSE renewal_cycle_complete END,
               attempts = attempts + 1, updated_at = now()
         WHERE business_id = $1 AND connection_id = $2
         RETURNING *`,
-      [row.business_id, row.connection_id, state, leaseToken, now, leaseSeconds]
+      [row.business_id, row.connection_id, state, leaseToken, now, leaseSeconds, action === "renew"]
     );
     const claimed = updated.rows[0];
     if (claimed === undefined) return null;
@@ -773,6 +854,7 @@ export class WebhookRegistrationStore {
             SET state = 'registration_uncertain', last_error = $4,
                 next_attempt_at = $5::timestamptz + make_interval(secs => $6),
                 lease_token = NULL, lease_expires_at = NULL,
+                consecutive_failures = consecutive_failures + 1,
                 revision = revision + 1, updated_at = now()
           WHERE business_id = $1 AND connection_id = $2 AND lease_token = $3
             AND state = 'registering'
@@ -797,6 +879,7 @@ export class WebhookRegistrationStore {
       readonly subscriptionId: string;
       readonly secretRef: `secret://${string}`;
       readonly verifiedIdentity: BindVerifiedConnectionExternalIdentity;
+      readonly expiresAt?: string;
       readonly now?: Date;
     }
   ): Promise<CompleteWebhookRegistrationResult> {
@@ -843,6 +926,7 @@ export class WebhookRegistrationStore {
         ...row.target,
         subscriptionId: output.subscriptionId,
         secretRef: output.secretRef,
+        expiresAt: output.expiresAt ?? null,
       };
       if (
         row.generation !== claim.generation ||
@@ -966,16 +1050,142 @@ export class WebhookRegistrationStore {
         `UPDATE oim_webhook_registrations
             SET state = 'active', active_registration = $4::jsonb,
                 staged_secret_ref = NULL, lease_token = NULL, lease_expires_at = NULL,
-                last_error = NULL, next_attempt_at = $5,
+                last_error = NULL, consecutive_failures = 0, renewal_cycle = 0,
+                renewal_cycle_complete = true, next_attempt_at = $5,
                 revision = revision + 1, updated_at = now()
           WHERE business_id = $1 AND connection_id = $2 AND lease_token = $3
           RETURNING *`,
-        [row.business_id, row.connection_id, claim.leaseToken, JSON.stringify(active), now]
+        [
+          row.business_id,
+          row.connection_id,
+          claim.leaseToken,
+          JSON.stringify(active),
+          nextRenewalAt(row.target, output.expiresAt, now),
+        ]
       );
       const completedRow = completed.rows[0];
       return completedRow === undefined
         ? { kind: "stale" }
         : { kind: "active", registration: fromRow(completedRow) };
+    });
+  }
+
+  async completeRenewal(
+    claim: WebhookRegistrationClaim,
+    expiresAt: string,
+    now = new Date()
+  ): Promise<PersistedWebhookRegistration | null> {
+    if (claim.action !== "renew" || claim.active === null) return null;
+    const activeClaim = claim.active;
+    return this.transactions.withTransaction(async (transaction) => {
+      const current = await transaction.query<RegistrationRow>(
+        `${SELECT_REGISTRATION}
+          WHERE business_id = $1 AND connection_id = $2
+          FOR UPDATE`,
+        [claim.businessId, claim.connectionId]
+      );
+      const row = current.rows[0];
+      if (
+        row === undefined ||
+        row.lease_token !== claim.leaseToken ||
+        row.desired_state !== "active" ||
+        row.state !== "active" ||
+        row.active_registration?.subscriptionId !== activeClaim.subscriptionId ||
+        !sameTarget(row.target, claim.target)
+      ) {
+        return null;
+      }
+      const active = { ...row.active_registration, expiresAt };
+      const completed = await transaction.query<RegistrationRow>(
+        `UPDATE oim_webhook_registrations
+            SET active_registration = $4::jsonb, lease_token = NULL, lease_expires_at = NULL,
+                last_error = NULL, consecutive_failures = 0, renewal_cycle_complete = true,
+                next_attempt_at = $5, revision = revision + 1, updated_at = now()
+          WHERE business_id = $1 AND connection_id = $2 AND lease_token = $3
+          RETURNING *`,
+        [
+          row.business_id,
+          row.connection_id,
+          claim.leaseToken,
+          JSON.stringify(active),
+          nextRenewalAt(row.target, expiresAt, now),
+        ]
+      );
+      return completed.rows[0] === undefined ? null : fromRow(completed.rows[0]);
+    });
+  }
+
+  async settleRenewalAbsence(
+    claim: WebhookRegistrationClaim,
+    now = new Date()
+  ): Promise<PersistedWebhookRegistration | null> {
+    if (claim.action !== "renew" || claim.active === null) return null;
+    const activeClaim = claim.active;
+    return this.transactions.withTransaction(async (transaction) => {
+      const current = await transaction.query<RegistrationRow>(
+        `${SELECT_REGISTRATION}
+          WHERE business_id = $1 AND connection_id = $2
+          FOR UPDATE`,
+        [claim.businessId, claim.connectionId]
+      );
+      const row = current.rows[0];
+      if (
+        row === undefined ||
+        row.renewal_cycle !== claim.renewalCycle ||
+        row.renewal_cycle_complete ||
+        (row.desired_state === "active" &&
+          (row.state !== "active" || row.lease_token !== claim.leaseToken)) ||
+        row.active_registration?.subscriptionId !== activeClaim.subscriptionId ||
+        !sameTarget(row.target, claim.target)
+      ) {
+        return null;
+      }
+      await transaction.query(
+        `UPDATE connections
+            SET secret_bindings = secret_bindings - $5,
+                webhook_registration = NULL,
+                health_status = CASE
+                  WHEN status = 'active' THEN 'action_required'
+                  ELSE health_status
+                END,
+                health_checked_at = $6, updated_at = now()
+          WHERE business_id = $1 AND id = $2
+            AND integration_id = $3 AND integration_major_version = $4
+            AND secret_bindings ->> $5 = $7`,
+        [
+          row.business_id,
+          row.connection_id,
+          row.integration_id,
+          row.integration_major_version,
+          activeClaim.secretSlot,
+          now,
+          activeClaim.secretRef,
+        ]
+      );
+      await transaction.query(
+        `UPDATE connection_auth_steps
+            SET status = CASE WHEN status = 'revoked' THEN status ELSE 'action_required' END,
+                access_slot = CASE WHEN access_secret_ref = $4 THEN NULL ELSE access_slot END,
+                access_secret_ref = CASE WHEN access_secret_ref = $4 THEN NULL ELSE access_secret_ref END,
+                revision = revision + 1, health_checked_at = $5, updated_at = now()
+          WHERE business_id = $1 AND connection_id = $2 AND step_id = $3`,
+        [row.business_id, row.connection_id, row.target.stepId, activeClaim.secretRef, now]
+      );
+      const completed = await transaction.query<RegistrationRow>(
+        `UPDATE oim_webhook_registrations
+            SET state = CASE WHEN desired_state = 'active' THEN 'pending_registration' ELSE 'removed' END,
+                active_registration = NULL, staged_secret_ref = NULL,
+                lease_token = NULL, lease_expires_at = NULL,
+                consecutive_failures = 0, renewal_cycle = 0, renewal_cycle_complete = true,
+                last_error = NULL, next_attempt_at = $4,
+                generation = generation + 1, revision = revision + 1, updated_at = now()
+          WHERE business_id = $1 AND connection_id = $2
+            AND renewal_cycle = $3 AND renewal_cycle_complete = false
+            AND active_registration->>'subscriptionId' = $5
+          RETURNING *`,
+        [row.business_id, row.connection_id, claim.renewalCycle, now, activeClaim.subscriptionId]
+      );
+      return completed.rows[0] === undefined ? null : fromRow(completed.rows[0]);
     });
   }
 
@@ -1019,15 +1229,18 @@ export class WebhookRegistrationStore {
     const state =
       claim.action === "remove"
         ? "cleanup_failed"
-        : claim.desiredState === "removed"
-          ? "removed"
-          : "pending_registration";
+        : claim.action === "renew"
+          ? "active"
+          : claim.desiredState === "removed"
+            ? "removed"
+            : "pending_registration";
     return this.transactions.withTransaction(async (transaction) => {
       const result = await transaction.query(
         `UPDATE oim_webhook_registrations
             SET state = $4, last_error = $5,
                 next_attempt_at = $6::timestamptz + make_interval(secs => $7),
                 lease_token = NULL, lease_expires_at = NULL,
+                consecutive_failures = consecutive_failures + 1,
                 revision = revision + 1, updated_at = now()
           WHERE business_id = $1 AND connection_id = $2 AND lease_token = $3
             AND state = $8
@@ -1040,7 +1253,11 @@ export class WebhookRegistrationStore {
           error.slice(0, 1_024),
           now,
           retryAfterSeconds,
-          claim.action === "remove" ? "removing" : "registering",
+          claim.action === "remove"
+            ? "removing"
+            : claim.action === "renew"
+              ? "active"
+              : "registering",
         ]
       );
       return result.rows.length === 1;

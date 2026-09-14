@@ -70,9 +70,19 @@ export interface WebhookRegistrationRepository {
       readonly subscriptionId: string;
       readonly secretRef: `secret://${string}`;
       readonly verifiedIdentity: BindVerifiedConnectionExternalIdentity;
+      readonly expiresAt?: string;
       readonly now?: Date;
     }
   ): Promise<CompleteWebhookRegistrationResult>;
+  completeRenewal(
+    claim: WebhookRegistrationClaim,
+    expiresAt: string,
+    now?: Date
+  ): Promise<PersistedWebhookRegistration | null>;
+  settleRenewalAbsence(
+    claim: WebhookRegistrationClaim,
+    now?: Date
+  ): Promise<PersistedWebhookRegistration | null>;
   failClaim(
     claim: WebhookRegistrationClaim,
     error: string,
@@ -133,6 +143,7 @@ export interface WebhookRegistrationCredentialPort {
 
 export interface WebhookRegistrationProviderResult {
   readonly subscriptionId: string;
+  readonly expiresAt?: string;
   /** Identity proven by the authenticated registration response or a trusted provider lookup. */
   readonly verifiedIdentity: {
     readonly externalTenantId: string;
@@ -142,6 +153,10 @@ export interface WebhookRegistrationProviderResult {
     readonly verifiedBy: string;
   };
 }
+
+export type WebhookRenewalResult =
+  | { readonly kind: "renewed"; readonly result: WebhookRegistrationProviderResult }
+  | { readonly kind: "settled_absent" };
 
 export type WebhookRegistrationReconciliation =
   | { readonly kind: "active"; readonly result: WebhookRegistrationProviderResult }
@@ -168,6 +183,13 @@ export interface WebhookRegistrationProvider {
     readonly attempt: PersistedWebhookRegistrationAttempt;
     readonly idempotencyKey: string;
   }): Promise<WebhookRegistrationReconciliation>;
+  renew(input: {
+    readonly claim: WebhookRegistrationClaim;
+    readonly manifest: OimManifest;
+    readonly step: WebhookStep;
+    readonly registration: ActiveWebhookRegistration;
+    readonly idempotencyKey: string;
+  }): Promise<WebhookRenewalResult>;
   unregister(input: {
     readonly key: WebhookRegistrationKey;
     readonly target: WebhookRegistrationTarget;
@@ -254,6 +276,16 @@ export function planWebhookRegistration(input: {
       operationId: step.operationId,
       unregisterOperationId: step.unregisterOperationId,
       secretSlot: step.secretSlot,
+      ...(step.renewal === undefined
+        ? {}
+        : {
+            renewal: {
+              operationId: step.renewal.operationId,
+              subscriptionId: step.renewal.subscriptionId,
+              expiresAtPath: step.renewal.expiresAtPath,
+              renewBeforeSeconds: step.renewal.renewBeforeSeconds,
+            },
+          }),
       packageSnapshot: input.packageSnapshot,
     },
   };
@@ -263,7 +295,9 @@ function claimAttemptId(claim: WebhookRegistrationClaim): string {
   const remoteIdentity =
     claim.action === "register"
       ? claim.generation
-      : (claim.active?.subscriptionId ?? claim.generation);
+      : claim.action === "renew"
+        ? claim.renewalCycle
+        : (claim.active?.subscriptionId ?? claim.generation);
   return [claim.businessId, claim.connectionId, claim.action, remoteIdentity].join(":");
 }
 
@@ -275,7 +309,11 @@ function failureMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-function assertProviderResult(result: WebhookRegistrationProviderResult): void {
+function assertProviderResult(
+  result: WebhookRegistrationProviderResult,
+  requireExpiration = false,
+  now = new Date()
+): void {
   if (
     result.subscriptionId.length === 0 ||
     result.verifiedIdentity.externalTenantId.length === 0 ||
@@ -285,6 +323,14 @@ function assertProviderResult(result: WebhookRegistrationProviderResult): void {
     !Number.isFinite(Date.parse(result.verifiedIdentity.verifiedAt))
   ) {
     throw new Error("provider_registration_evidence_invalid");
+  }
+  if (
+    requireExpiration &&
+    (result.expiresAt === undefined ||
+      !Number.isFinite(Date.parse(result.expiresAt)) ||
+      Date.parse(result.expiresAt) <= now.getTime())
+  ) {
+    throw new Error("provider_registration_expiration_invalid");
   }
 }
 
@@ -428,6 +474,7 @@ export class OimWebhookRegistrationService {
       throw new OimWebhookRegistrationError("manifest_changed");
     }
 
+    if (claim.action === "renew") return this.renewClaim(claim, manifest, step);
     return this.registerClaim(claim, manifest, step);
   }
 
@@ -471,7 +518,7 @@ export class OimWebhookRegistrationService {
           idempotencyKey: attemptId,
         })
       );
-      assertProviderResult(result);
+      assertProviderResult(result, claim.target.renewal !== undefined, this.now());
       const recordedAttempt = await this.deps.registrations.recordAttemptSuccess(attemptId, {
         subscriptionId: result.subscriptionId,
         verifiedIdentity: verifiedIdentity(claim, result),
@@ -485,6 +532,7 @@ export class OimWebhookRegistrationService {
         subscriptionId: result.subscriptionId,
         secretRef: staged.ref,
         verifiedIdentity: verifiedIdentity(claim, result),
+        expiresAt: result.expiresAt,
         now: this.now(),
       });
       if (completed.kind === "stale") {
@@ -514,7 +562,7 @@ export class OimWebhookRegistrationService {
         await this.deps.registrations.markRegistrationUncertain(
           claim,
           failureMessage(error),
-          this.retryAfterSeconds,
+          this.retryAfter(claim.consecutiveFailures),
           this.now()
         );
         throw error instanceof OimWebhookRegistrationError
@@ -545,6 +593,7 @@ export class OimWebhookRegistrationService {
         } else {
           await this.deps.credentials.revoke(claim.stagedSecretRef);
         }
+
         return await this.deps.registrations.completeRemoval(claim, this.now());
       } catch (error) {
         await this.fail(claim, failureMessage(error));
@@ -571,8 +620,71 @@ export class OimWebhookRegistrationService {
     }
   }
 
+  private async renewClaim(
+    claim: WebhookRegistrationClaim,
+    manifest: OimManifest,
+    step: WebhookStep
+  ): Promise<PersistedWebhookRegistration> {
+    if (claim.active === null || claim.target.renewal === undefined || step.renewal === undefined) {
+      throw new OimWebhookRegistrationError("registration_stale");
+    }
+    if (
+      step.renewal.operationId !== claim.target.renewal.operationId ||
+      JSON.stringify(step.renewal.subscriptionId) !==
+        JSON.stringify(claim.target.renewal.subscriptionId) ||
+      step.renewal.expiresAtPath !== claim.target.renewal.expiresAtPath ||
+      step.renewal.renewBeforeSeconds !== claim.target.renewal.renewBeforeSeconds
+    ) {
+      await this.fail(claim, "manifest_changed");
+      throw new OimWebhookRegistrationError("manifest_changed");
+    }
+    try {
+      const renewal = await this.deps.provider.renew({
+        claim,
+        manifest,
+        step,
+        registration: claim.active,
+        idempotencyKey: claimAttemptId(claim),
+      });
+      if (renewal.kind === "settled_absent") {
+        const restarted = await this.deps.registrations.settleRenewalAbsence(claim, this.now());
+        if (restarted === null) throw new OimWebhookRegistrationError("registration_stale");
+        await this.deps.credentials.revoke(claim.active.secretRef);
+        return restarted;
+      }
+      const { result } = renewal;
+      assertProviderResult(result, true, this.now());
+      if (result.subscriptionId !== claim.active.subscriptionId) {
+        throw new Error("provider_renewal_subscription_mismatch");
+      }
+      const renewed = await this.deps.registrations.completeRenewal(
+        claim,
+        result.expiresAt ?? "",
+        this.now()
+      );
+      if (renewed === null) throw new OimWebhookRegistrationError("registration_stale");
+      return renewed;
+    } catch (error) {
+      if (!(error instanceof OimWebhookRegistrationError)) {
+        await this.fail(claim, failureMessage(error));
+      }
+      throw error instanceof OimWebhookRegistrationError
+        ? error
+        : new OimWebhookRegistrationError("registration_failed");
+    }
+  }
+
   private async fail(claim: WebhookRegistrationClaim, error: string): Promise<void> {
-    await this.deps.registrations.failClaim(claim, error, this.retryAfterSeconds, this.now());
+    await this.deps.registrations.failClaim(
+      claim,
+      error,
+      this.retryAfter(claim.consecutiveFailures),
+      this.now()
+    );
+  }
+
+  private retryAfter(consecutiveFailures: number): number {
+    return Math.min(this.retryAfterSeconds * 2 ** Math.min(consecutiveFailures, 6), 3_600);
   }
 
   private async processAttempt(claim: WebhookRegistrationAttemptClaim): Promise<void> {
@@ -589,7 +701,7 @@ export class OimWebhookRegistrationService {
             reconciled.kind === "unknown"
               ? reconciled.reason
               : "provider_registration_absence_unsettled",
-            this.retryAfterSeconds,
+            this.retryAfter(claim.attempts),
             this.now()
           );
           throw new OimWebhookRegistrationError("cleanup_failed");
@@ -634,6 +746,7 @@ export class OimWebhookRegistrationService {
           ...attempt.target,
           subscriptionId: attempt.subscriptionId,
           secretRef: attempt.secretRef,
+          expiresAt: null,
         },
         idempotencyKey: `${attempt.idempotencyKey}:remove`,
       });
@@ -646,7 +759,7 @@ export class OimWebhookRegistrationService {
         await this.deps.registrations.failAttempt(
           claim,
           failureMessage(error),
-          this.retryAfterSeconds,
+          this.retryAfter(claim.attempts),
           this.now()
         );
       }

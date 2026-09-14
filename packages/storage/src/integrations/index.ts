@@ -258,6 +258,7 @@ export type {
   WebhookRegistrationAttemptState,
   WebhookRegistrationClaim,
   WebhookRegistrationKey,
+  WebhookRegistrationRenewal,
   WebhookRegistrationState,
   WebhookRegistrationTarget,
 } from "./webhook-registration-store";
