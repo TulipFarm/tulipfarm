@@ -55,6 +55,15 @@ describe("triggers", () => {
       "Started by hand"
     );
   });
+
+  test("an internal_event trigger names the actual event, not the mechanism", () => {
+    const trigger: RoutineTrigger = {
+      slug: "on-ticket-created",
+      type: "internal_event",
+      summary: "resource.ticket.created",
+    };
+    expect(triggerPhrase(trigger)).toBe("Runs on resource.ticket.created");
+  });
 });
 
 describe("effects", () => {

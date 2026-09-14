@@ -142,6 +142,11 @@ function triggerSummary(spec: Record<string, unknown>): string {
   if (spec.type === "datetime" && typeof spec.at === "string") {
     return `at ${formatInstant(spec.at)}`;
   }
+  if (spec.type === "internal_event") {
+    return typeof spec.matchEventType === "string" && spec.matchEventType.length > 0
+      ? spec.matchEventType
+      : "internal event";
+  }
   return typeof spec.type === "string" ? spec.type.replaceAll("_", " ") : "unknown";
 }
 

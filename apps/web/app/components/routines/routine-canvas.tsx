@@ -20,6 +20,7 @@ import {
 import { Button } from "~/components/ui/button";
 import {
   layoutRoutineGraph,
+  type RoutineActionSummary,
   type RoutineEdgeKind,
   type RoutineGraph,
   type RoutineGraphNode,
@@ -146,6 +147,27 @@ function edgeName(edge: RoutineGraph["edges"][number], graph: RoutineGraph): str
 
 const json = (value: unknown) => JSON.stringify(value).replaceAll(":", ": ");
 
+/** `send_slack_message` → `Send Slack message`; only the first word is capitalized, like a sentence. */
+function humanizeActionFunction(fn: string): string {
+  const name = fn.includes(".") ? (fn.split(".").at(-1) ?? fn) : fn;
+  const words = name.split("_").filter(Boolean);
+  return words
+    .map((word, index) => (index === 0 ? `${word.charAt(0).toUpperCase()}${word.slice(1)}` : word))
+    .join(" ");
+}
+
+/**
+ * A node's action, as a sentence rather than a call: `send_slack_message(channel, text)` tells a
+ * reader what argument names exist, not what the step does. The first argument is kept when
+ * present, since it is most often the destination (a channel, a record type) that identifies the
+ * call at a glance.
+ */
+function actionSummary(action: RoutineActionSummary): string {
+  const summary = humanizeActionFunction(action.function);
+  const [firstArgument] = action.arguments;
+  return firstArgument ? `${summary} · ${firstArgument}` : summary;
+}
+
 /** Only the path kinds this graph actually contains, so the key never explains an absent line. */
 function Legend({ kinds }: { kinds: readonly RoutineEdgeKind[] }) {
   if (kinds.length < 2) return null;
@@ -185,11 +207,7 @@ export function RoutineCanvas({ graph, mode, overlay, caption }: Props) {
   const nodes: FlowNode[] = laidOut.nodes.map((node) => {
     const run = overlay?.nodes[node.id];
     const { width, height } = routineNodeDimensions(node.kind);
-    const actionSummary = node.actions
-      // `function` already contains `name` in both the `tool` and `action` shapes; printing
-      // both renders `send_slack_message: send_slack_message(...)`.
-      ?.map((action) => `${action.function}(${action.arguments.join(", ")})`)
-      .join(" · ");
+    const nodeActionSummary = node.actions?.map(actionSummary).join(" · ");
     const tone =
       node.kind === "trigger"
         ? "border-primary/40 bg-primary/5"
@@ -213,7 +231,7 @@ export function RoutineCanvas({ graph, mode, overlay, caption }: Props) {
           <button
             type="button"
             aria-label={nodeName(node, run?.status, run?.inferred)}
-            aria-describedby={actionSummary ? `${node.id}-actions` : undefined}
+            aria-describedby={nodeActionSummary ? `${node.id}-actions` : undefined}
             aria-pressed={selected === node.id}
             title={run?.inferred ? "Inferred from legacy Run" : undefined}
             onMouseDown={(event) => event.stopPropagation()}
@@ -231,12 +249,12 @@ export function RoutineCanvas({ graph, mode, overlay, caption }: Props) {
                   ? `${node.stateType}${run?.status ? ` · ${statusText(run.status)}` : ""}`
                   : node.kind}
               </span>
-              {actionSummary && (
+              {nodeActionSummary && (
                 <span
                   id={`${node.id}-actions`}
-                  className="mt-1 block truncate font-mono text-[0.625rem] text-muted-foreground"
+                  className="mt-1 block truncate text-[0.625rem] text-muted-foreground"
                 >
-                  {actionSummary}
+                  {nodeActionSummary}
                 </span>
               )}
             </span>
