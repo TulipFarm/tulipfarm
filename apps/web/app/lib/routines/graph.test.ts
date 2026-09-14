@@ -106,6 +106,28 @@ describe("projectRoutineGraph", () => {
     ]);
   });
 
+  it("labels a trigger with the catalog's own summary rather than the raw type", () => {
+    const graph = projectRoutineGraph(definition, [
+      { slug: "on-ticket-created", type: "internal_event", summary: "resource.ticket.created" },
+    ]);
+
+    expect(graph.nodes[0]).toMatchObject({
+      kind: "trigger",
+      label: "resource.ticket.created",
+    });
+  });
+
+  it("humanizes a raw snake_case type when no summary is available", () => {
+    const graph = projectRoutineGraph(definition, [
+      { slug: "on-ticket-created", type: "internal_event" },
+    ]);
+
+    expect(graph.nodes[0]).toMatchObject({
+      kind: "trigger",
+      label: "Internal Event Trigger",
+    });
+  });
+
   it("names a compute State by the fields it assigns, since it has no ref to show", () => {
     const graph = projectRoutineGraph({
       ...definition,

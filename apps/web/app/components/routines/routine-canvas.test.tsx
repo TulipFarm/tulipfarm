@@ -58,7 +58,7 @@ describe("RoutineCanvas", () => {
     expect(screen.getByRole("button", { name: /State Start/ })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /Trigger 0, Manual/ })).toBeInTheDocument();
     expect(screen.getByLabelText(/Condition 1 from Start to End/)).toBeInTheDocument();
-    expect(screen.getByText("send(count)")).toBeInTheDocument();
+    expect(screen.getByText("Send · count")).toBeInTheDocument();
     // The canvas toolbar precedes the graph, so keyboard focus meets it first.
     await user.tab();
     expect(screen.getByRole("button", { name: /expand canvas/i })).toHaveFocus();
