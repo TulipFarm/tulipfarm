@@ -690,11 +690,44 @@ onError:
 transition: NextState
 ```
 
+### Bounded Manual-Only Compute Routine (with declared input)
+
+Runs on demand only without any Trigger. States read declared inputs via `${input.<key>}`. Note that input requirements are declared under `spec.input` (**singular**, JSON Schema object) — never `inputs` or `parameters`.
+
+```yaml
+apiVersion: tulipfarm.ai/v1
+kind: Routine
+metadata:
+  id: 01ARZ3NDEKTSV4RRFFQ69G5FC9
+  slug: review-rehearsal
+  displayName: Review Rehearsal
+  schemaVersion: 1
+  authoredVersion: 1
+  lifecycle: published
+spec:
+  owner: architects
+  input:
+    type: object
+    properties:
+      requestCode:
+        type: string
+    required:
+      - requestCode
+  start: PrepareReview
+  states:
+    - type: compute
+      name: PrepareReview
+      input:
+        requestCode: "${ input.requestCode }"
+        reviewStatus: draft
+      end: true
+```
+
 ---
 
 ## 6. How to Invoke `routine_forge`
 
-Pass the routine `name`, the canonical Routine as `definition`, and all Triggers in the `triggers` array:
+Call `routine_forge` with exactly two arguments: `name` and `definition`. Never pass `triggers` as a top-level argument; embed any triggers under `definition.spec.triggers`, or omit `triggers` entirely for on-demand routines:
 
 ```json
 {
@@ -723,33 +756,6 @@ Pass the routine `name`, the canonical Routine as `definition`, and all Triggers
         }
       ]
     }
-  },
-  "triggers": [
-    {
-      "apiVersion": "tulipfarm.ai/v1",
-      "kind": "Trigger",
-      "metadata": {
-        "id": "22222222-2222-4222-8222-222222222222",
-        "slug": "daily-report-manual",
-        "displayName": "Manual Trigger",
-        "schemaVersion": 1,
-        "authoredVersion": 1,
-        "lifecycle": "published"
-      },
-      "spec": {
-        "type": "manual",
-        "routineRef": { "name": "daily-report", "version": "1" },
-        "eventType": "routine.manual",
-        "eventVersion": 1,
-        "backgroundIdentity": {
-          "principalKind": "service",
-          "principalId": "routine-runner"
-        },
-        "deduplication": {
-          "key": "daily-report-manual"
-        }
-      }
-    }
-  ]
+  }
 }
 ```
