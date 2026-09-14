@@ -43,6 +43,6 @@ pnpm exec tsx scripts/oim-standard-check.ts
 The generated runtime has no import from a private TulipFarm package. Its ordinary npm
 dependencies are declared in this directory's `package.json`.
 
-This checkout is a distribution candidate. Publishing an npm package, creating a separate
-repository, signing releases, and assigning official support status require explicit maintainer
-authority.
+This checkout contains the accepted OIM 1.0 specification and reference conformance distribution.
+Publishing an npm package, creating a separate repository, signing releases, and assigning
+official support status remain separate maintainer actions.
