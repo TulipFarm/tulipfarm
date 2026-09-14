@@ -31,6 +31,7 @@ export {
 } from "./agents/memory-curator";
 export {
   generatePersonalized,
+  ONBOARDING_FALLBACK,
   ONBOARDING_PERSONALIZER,
   ONBOARDING_SYSTEM_PROMPT,
   type OnboardingSoulState,

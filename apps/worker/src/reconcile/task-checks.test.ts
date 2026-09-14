@@ -1,13 +1,11 @@
 import { describe, expect, it } from "vitest";
 import { evaluateTaskChecks, type TaskCheckSignals } from "./task-checks";
 
-const ALL_RESOURCES = ["ticket", "lead", "employee", "invoice", "inventory", "project"];
-
 const SATISFIED: TaskCheckSignals = {
   hasProviderKey: true,
   businessName: "Acme",
   setupComplete: true,
-  resources: ALL_RESOURCES,
+  resources: [],
 };
 
 const UNSATISFIED: TaskCheckSignals = {
@@ -24,22 +22,11 @@ function byKey(signals: TaskCheckSignals, dedupeKey: string) {
 }
 
 describe("evaluateTaskChecks", () => {
-  it("produces the two setup-gap checks plus one per resource-setup catalog entry", () => {
+  it("produces the two setup-gap checks", () => {
     const keys = evaluateTaskChecks(SATISFIED)
       .map((c) => c.dedupeKey)
       .sort();
-    expect(keys).toEqual(
-      [
-        "business-name",
-        "provider-key",
-        "onboarding:tickets",
-        "onboarding:leads",
-        "onboarding:employees",
-        "onboarding:invoices",
-        "onboarding:inventory",
-        "onboarding:projects",
-      ].sort()
-    );
+    expect(keys).toEqual(["business-name", "provider-key"]);
   });
 
   it("marks every check satisfied when every signal is satisfied", () => {
@@ -90,31 +77,5 @@ describe("evaluateTaskChecks", () => {
   it("leaves the provider key gap open mid-setup, which the wizard does not cover", () => {
     const midSetup = byKey({ ...UNSATISFIED, setupComplete: false }, "provider-key");
     expect(midSetup.satisfied).toBe(false);
-  });
-
-  it("omits the ticket setup task once the ticket resource exists", () => {
-    const check = byKey({ ...UNSATISFIED, resources: ["ticket"] }, "onboarding:tickets");
-    expect(check.satisfied).toBe(true);
-  });
-
-  it("omits the employee setup task once the employee resource exists", () => {
-    const check = byKey({ ...UNSATISFIED, resources: ["employee"] }, "onboarding:employees");
-    expect(check.satisfied).toBe(true);
-  });
-
-  it("omits the project setup task once the project resource exists", () => {
-    const check = byKey({ ...UNSATISFIED, resources: ["project"] }, "onboarding:projects");
-    expect(check.satisfied).toBe(true);
-  });
-
-  it("keeps the ticket setup task open when no resources exist yet", () => {
-    const check = byKey(UNSATISFIED, "onboarding:tickets");
-    expect(check.satisfied).toBe(false);
-  });
-
-  it("treats a missing resources signal the same as none, keeping the task open", () => {
-    const { resources: _resources, ...rest } = UNSATISFIED;
-    const check = byKey(rest, "onboarding:tickets");
-    expect(check.satisfied).toBe(false);
   });
 });

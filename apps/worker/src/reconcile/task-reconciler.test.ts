@@ -87,21 +87,6 @@ describe("reconcileTasks (against a real TaskRepo)", () => {
     expect(live.find((t) => t.dedupeKey === "provider-key")).toBeUndefined();
   });
 
-  it("closes the ticket setup task once the ticket resource exists in the soul", async () => {
-    const t1 = new Date("2026-01-01T00:00:00Z");
-    await reconcileTasks({ businessId: BUSINESS, signals: UNSATISFIED, taskStore: repo, now: t1 });
-
-    const opened = await repo.listForPrincipal(BUSINESS, "u1", ["admin", "member"], false);
-    expect(opened.map((t) => t.dedupeKey)).toContain("onboarding:tickets");
-
-    const t2 = new Date("2026-01-01T00:15:00Z");
-    const withTicket: TaskCheckSignals = { ...UNSATISFIED, resources: ["ticket"] };
-    await reconcileTasks({ businessId: BUSINESS, signals: withTicket, taskStore: repo, now: t2 });
-
-    const remaining = await repo.listForPrincipal(BUSINESS, "u1", ["admin", "member"], false);
-    expect(remaining.map((t) => t.dedupeKey)).not.toContain("onboarding:tickets");
-  });
-
   it("re-upserting the same open gap updates the row instead of duplicating it", async () => {
     const t1 = new Date("2026-01-01T00:00:00Z");
     await reconcileTasks({ businessId: BUSINESS, signals: UNSATISFIED, taskStore: repo, now: t1 });

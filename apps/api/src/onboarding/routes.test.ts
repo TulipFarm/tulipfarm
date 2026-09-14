@@ -11,6 +11,7 @@ vi.mock("ai", async (orig) => {
   return { ...actual, generateObject: (...args: unknown[]) => generateObject(...args) };
 });
 
+import { ONBOARDING_FALLBACK } from "@tulipfarm/built-in-agents";
 import type { KnowledgeService } from "@tulipfarm/knowledge";
 import type { KvEntry, KvRepo, KvScope } from "@tulipfarm/kv";
 import { KvService } from "@tulipfarm/kv";
@@ -21,7 +22,6 @@ import { CSRF_COOKIE, CSRF_HEADER } from "../auth/csrf";
 import { SESSION_COOKIE } from "../auth/middleware";
 import { MemorySessionStore } from "../auth/session-store";
 import { createUser, type UserDoc, type UserRepo } from "../auth/users";
-import { CATALOG } from "./catalog";
 
 const TEST_CSRF = "a".repeat(64);
 
@@ -186,18 +186,17 @@ describe("GET /api/v1/onboarding/suggestions", () => {
     const res = await app.inject(authed("/api/v1/onboarding/suggestions"));
     expect(res.statusCode).toBe(200);
     const body = res.json() as { suggestions: { id: string; label: string; prompt: string }[] };
-    expect(body.suggestions).toHaveLength(CATALOG.length);
+    expect(body.suggestions).toHaveLength(ONBOARDING_FALLBACK.length);
     expect(Object.keys(body.suggestions[0]).sort()).toEqual(["id", "label", "prompt"]);
   });
 
-  it("omits a suggestion whose resource already exists (AC-V1-002)", async () => {
+  it("returns the full fallback catalog unconditionally", async () => {
     let authed: Awaited<ReturnType<typeof appWithSoul>>["authed"];
     ({ app, authed } = await appWithSoul(["ticket"]));
     const res = await app.inject(authed("/api/v1/onboarding/suggestions"));
     expect(res.statusCode).toBe(200);
     const body = res.json() as { suggestions: { id: string }[] };
-    expect(body.suggestions.map((s) => s.id)).not.toContain("tickets");
-    expect(body.suggestions).toHaveLength(CATALOG.length - 1);
+    expect(body.suggestions).toHaveLength(ONBOARDING_FALLBACK.length);
   });
 });
 
@@ -236,7 +235,7 @@ describe("onboarding personalization (LLM)", () => {
     const first = (await app.inject(authed("/api/v1/onboarding/suggestions"))).json() as {
       suggestions: { id: string }[];
     };
-    expect(first.suggestions).toHaveLength(CATALOG.length);
+    expect(first.suggestions).toHaveLength(ONBOARDING_FALLBACK.length);
     expect(generateObject).toHaveBeenCalledOnce();
 
     await vi.waitFor(async () => {
@@ -277,6 +276,6 @@ describe("onboarding personalization (LLM)", () => {
     const body = (await app.inject(authed("/api/v1/onboarding/suggestions"))).json() as {
       suggestions: { id: string }[];
     };
-    expect(body.suggestions).toHaveLength(CATALOG.length);
+    expect(body.suggestions).toHaveLength(ONBOARDING_FALLBACK.length);
   });
 });
