@@ -1,3 +1,19 @@
+import { ConversationModeSchema } from "@tulipfarm/schema";
+
+export const ConversationSummarySchema = {
+  type: "object",
+  properties: {
+    id: { type: "string" },
+    title: { type: ["string", "null"] },
+    mode: { anyOf: [ConversationModeSchema, { type: "null" }] },
+    agentId: { type: ["string", "null"] },
+    starred: { type: "boolean" },
+    createdAt: { type: "string" },
+    updatedAt: { type: "string" },
+  },
+  required: ["id", "title", "mode", "agentId", "starred", "createdAt", "updatedAt"],
+} as const;
+
 export const MessageSchema = {
   type: "object",
   properties: {

@@ -1,3 +1,4 @@
+import type { ConversationMode } from "@tulipfarm/schema";
 import { lazy, type ReactNode, Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { AgentGlyph } from "~/components/agent-glyph";
 import { Waypoints } from "~/components/icons";
@@ -6,7 +7,7 @@ import { Link } from "~/components/ui/link";
 import type { ChatMessage, ChatModelSelector } from "~/lib/chat/types";
 import { useChatStream } from "~/lib/chat/use-chat-stream";
 import type { PendingChatDraft } from "~/lib/companion-context";
-import type { ConversationTurn } from "~/lib/conversations";
+import { type ConversationTurn, setConversationMode } from "~/lib/conversations";
 import { errorAction } from "~/lib/error-actions";
 import type { Suggestion } from "~/lib/onboarding";
 import type { Task } from "~/lib/tasks";
@@ -14,6 +15,7 @@ import { CapabilityCards } from "./capability-cards";
 import { ChatDebugDrawer } from "./chat-debug-drawer";
 import { Composer } from "./composer";
 import { ChatHomeWork } from "./home-work";
+import { ModeBanner } from "./mode-banner";
 import { asPickerPreset, DEFAULT_CHAT_MODEL_SELECTOR } from "./model-selector";
 import { PlanSidebar } from "./plan-sidebar";
 import { SetupTasksPreview } from "./tasks-preview-card";
@@ -133,6 +135,7 @@ export function ChatPanel({
   initialMessages,
   initialTurn,
   onConversationChange,
+  initialMode,
   initialDraft,
   pendingChatDraft,
   attachFileId,
@@ -147,6 +150,7 @@ export function ChatPanel({
   initialConversationId?: string;
   initialMessages?: ChatMessage[];
   initialTurn?: ConversationTurn | null;
+  initialMode?: ConversationMode | null;
   onConversationChange?: (conversationId: string | undefined) => void;
   /** A prompt to draft into the composer once, seeded by a `?draft=` link. */
   initialDraft?: string;
@@ -178,6 +182,21 @@ export function ChatPanel({
     onConversationChange,
   });
   const busy = status === "submitted" || status === "streaming";
+
+  const [mode, setMode] = useState<ConversationMode | null>(initialMode ?? null);
+
+  const handleModeChange = useCallback(
+    (newMode: ConversationMode | null) => {
+      setMode(newMode);
+      if (conversationId) {
+        void setConversationMode(conversationId, newMode).catch(() => {
+          // Failure to update mode in background does not block local UI state
+        });
+      }
+    },
+    [conversationId]
+  );
+
   const activePlan = findActivePlan(messages, busy);
   const [revisionDraft, setRevisionDraft] = useState<{ key: string; text: string } | null>(null);
   const reviseDraft = useCallback(
@@ -238,12 +257,15 @@ export function ChatPanel({
       suggestions={hasMessages ? [] : suggestions}
       initialDraft={revisionDraft?.text ?? initialDraft}
       attachFileId={attachFileId}
+      mode={mode}
+      onModeChange={handleModeChange}
       onSend={(text, opts) => send(text, { ...opts, agentId: opts.agentId ?? agentId })}
     />
   );
 
   return (
     <div className="flex h-full min-h-0 flex-col overflow-hidden">
+      {mode ? <ModeBanner mode={mode} onClose={() => handleModeChange(null)} /> : null}
       {activePlan ? <PlanModeBar /> : null}
       <div className="flex min-h-0 flex-1 overflow-hidden">
         {activePlan ? (

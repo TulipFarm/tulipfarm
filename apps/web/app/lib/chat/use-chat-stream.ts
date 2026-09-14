@@ -452,6 +452,7 @@ export function useChatStream(opts?: UseChatStreamOptions) {
           skills: opts?.skills,
           resources: opts?.resources,
           knowledgePages: opts?.knowledgePages,
+          mode: opts?.mode,
           clientContext: captureClientContext(),
         };
         const handlers = {

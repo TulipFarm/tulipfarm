@@ -24,6 +24,7 @@ import {
 } from "@tulipfarm/run-kernel";
 import type {
   AgentCapabilityRestrictions,
+  ConversationMode,
   DerivedModelProfile,
   LlmConfig,
 } from "@tulipfarm/schema";
@@ -188,6 +189,7 @@ function contextMessageBudget(input: {
 export interface ChatRequestPayload {
   readonly agentId?: string;
   readonly model?: string;
+  readonly mode?: ConversationMode;
   readonly autonomy?: string;
   readonly hasTools?: boolean;
   readonly llmDecision?: boolean;
@@ -405,7 +407,7 @@ export class ChatTurnContextResolver implements TurnContextResolver {
             },
             ...history,
           ];
-    const system = assembleAgentSystemPrompt({ agent });
+    const system = assembleAgentSystemPrompt({ agent, mode: request.mode });
     const soulReminder = await this.soulReminder(authority, toolAgent?.capabilityRestrictions, {
       ...(request.skills === undefined ? {} : { skills: request.skills }),
       ...(request.resources === undefined ? {} : { resourceTypes: request.resources }),

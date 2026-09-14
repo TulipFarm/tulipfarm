@@ -471,9 +471,19 @@ function RecentChats({ onNavigate }: { onNavigate: () => void }) {
                   to={`/chat/${chat.id}`}
                   onClick={onNavigate}
                   aria-current={chat.id === activeChatId ? "page" : undefined}
-                  className="min-w-0 flex-1 truncate"
+                  className="min-w-0 flex-1 truncate flex items-center gap-2"
                 >
-                  {chat.title ?? "New chat"}
+                  <span className="truncate">{chat.title ?? "New chat"}</span>
+                  {chat.mode ? (
+                    <>
+                      <span
+                        className="size-1.5 rounded-full shrink-0"
+                        style={{ backgroundColor: `var(--mode-${chat.mode})` }}
+                        aria-hidden="true"
+                      />
+                      <span className="sr-only">Mode: {chat.mode}</span>
+                    </>
+                  ) : null}
                 </Link>
                 <ChatActionsMenu
                   onStartRename={() => actions.startRename(chat.id)}

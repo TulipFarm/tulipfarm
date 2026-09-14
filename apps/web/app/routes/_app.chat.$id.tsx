@@ -64,6 +64,7 @@ export async function clientLoader({ params }: ClientLoaderFunctionArgs) {
   return {
     id,
     title: convo.title,
+    mode: convo.mode,
     agentId,
     defaultModel,
     messages: messagesToTimeline(messages, votes),
@@ -72,7 +73,7 @@ export async function clientLoader({ params }: ClientLoaderFunctionArgs) {
 }
 
 export default function ChatConversationRoute() {
-  const { id, title, agentId, defaultModel, messages, latestTurn } =
+  const { id, title, mode, agentId, defaultModel, messages, latestTurn } =
     useLoaderData<typeof clientLoader>();
   const { refresh, setActiveChatTitle } = useConversations();
   const user = useSessionUser();
@@ -92,6 +93,7 @@ export default function ChatConversationRoute() {
         initialConversationId={id}
         initialMessages={messages}
         initialTurn={latestTurn}
+        initialMode={mode}
         onConversationChange={refresh}
       />
     </>

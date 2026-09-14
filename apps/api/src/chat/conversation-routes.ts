@@ -1,6 +1,11 @@
 import { DEPLOYMENT_BUSINESS_ID } from "@tulipfarm/constants";
 import type { FileService } from "@tulipfarm/files";
-import { CHAT_TITLE_MAX_LENGTH, ConversationDetailSchema } from "@tulipfarm/schema";
+import {
+  CHAT_TITLE_MAX_LENGTH,
+  ConversationDetailSchema,
+  type ConversationMode,
+  ConversationModeSchema,
+} from "@tulipfarm/schema";
 import type { SoulLoader } from "@tulipfarm/soul";
 import { getDefaultAssistant, resolveAgent } from "@tulipfarm/soul";
 import { parsePaginationQuery } from "@tulipfarm/storage";
@@ -27,7 +32,7 @@ import {
   decodeConversationCursor,
 } from "./conversations";
 import { type MessageRepo, referencedFileIds, withUnavailableFiles } from "./messages";
-import { MessageSchema } from "./schemas";
+import { ConversationSummarySchema, MessageSchema } from "./schemas";
 import { assembleAgentSystemPrompt } from "./system-prompt";
 import { allowedToolNamesFor, toolAgentFor } from "./turn-helpers";
 
@@ -135,18 +140,7 @@ export function registerConversationRoutes(
             properties: {
               conversations: {
                 type: "array",
-                items: {
-                  type: "object",
-                  properties: {
-                    id: { type: "string" },
-                    title: { type: ["string", "null"] },
-                    agentId: { type: ["string", "null"] },
-                    starred: { type: "boolean" },
-                    createdAt: { type: "string" },
-                    updatedAt: { type: "string" },
-                  },
-                  required: ["id", "title", "agentId", "starred", "createdAt", "updatedAt"],
-                },
+                items: ConversationSummarySchema,
               },
               nextCursor: { type: ["string", "null"] },
             },
@@ -168,6 +162,7 @@ export function registerConversationRoutes(
         conversations: page.items.map((c) => ({
           id: c._id,
           title: c.title ?? null,
+          mode: c.mode ?? null,
           agentId: agentHandle(soulLoader, c.agentId),
           starred: c.starred ?? false,
           createdAt: c.createdAt,
@@ -199,22 +194,12 @@ export function registerConversationRoutes(
           minProperties: 1,
           properties: {
             title: { type: "string", minLength: 1, maxLength: CHAT_TITLE_MAX_LENGTH },
+            mode: { anyOf: [ConversationModeSchema, { type: "null" }] },
             starred: { type: "boolean" },
           },
         },
         response: {
-          200: {
-            type: "object",
-            properties: {
-              id: { type: "string" },
-              title: { type: ["string", "null"] },
-              agentId: { type: ["string", "null"] },
-              starred: { type: "boolean" },
-              createdAt: { type: "string" },
-              updatedAt: { type: "string" },
-            },
-            required: ["id", "title", "agentId", "starred", "createdAt", "updatedAt"],
-          },
+          200: ConversationSummarySchema,
           400: ErrorSchema,
           401: ErrorSchema,
           404: ErrorSchema,
@@ -224,7 +209,11 @@ export function registerConversationRoutes(
     async (req, reply) => {
       const user = req.user as UserDoc;
       const { id } = req.params as { id: string };
-      const body = req.body as { title?: string; starred?: boolean };
+      const body = req.body as {
+        title?: string;
+        starred?: boolean;
+        mode?: ConversationMode | null;
+      };
 
       const convo = await findOwnedConversation(repo, id, user._id);
       if (!convo) {
@@ -236,6 +225,7 @@ export function registerConversationRoutes(
         if (title === "") return reply.code(400).send({ error: "title must not be blank" });
         await repo.setTitle(id, title);
       }
+      if (body.mode !== undefined) await repo.setMode(id, body.mode);
       if (body.starred !== undefined) await repo.setStarred(id, body.starred);
 
       const updated = await repo.findById(id);
@@ -245,6 +235,7 @@ export function registerConversationRoutes(
       return reply.send({
         id: updated._id,
         title: updated.title ?? null,
+        mode: updated.mode ?? null,
         agentId: agentHandle(soulLoader, updated.agentId),
         starred: updated.starred ?? false,
         createdAt: updated.createdAt,
@@ -327,6 +318,7 @@ export function registerConversationRoutes(
         agentId: agentHandle(soulLoader, convo.agentId),
         model: convo.model ?? null,
         title: convo.title ?? null,
+        mode: convo.mode ?? null,
         starred: convo.starred ?? false,
         createdAt: convo.createdAt,
         updatedAt: convo.updatedAt,
@@ -468,7 +460,7 @@ export function registerConversationRoutes(
         // The Conversation names an Agent this Soul no longer has. Previewing the default
         // assistant's prompt under that Agent's name would misreport what the turn would run as.
         if (agent === undefined) return reply.code(404).send({ error: "agent not found" });
-        const systemPrompt = assembleAgentSystemPrompt({ agent });
+        const systemPrompt = assembleAgentSystemPrompt({ agent, mode: convo.mode });
         const soulReminder = await resolveSoulReminder({
           ...(authorityLayers === undefined ? {} : { authorityLayers }),
           ...(soulLoader === undefined ? {} : { soulLoader }),
