@@ -249,7 +249,7 @@ export function registerAgentRoutes(
                   agent,
                   access: await teamAssets.access(
                     "agent",
-                    agent.name,
+                    agent.id,
                     request.principal as NonNullable<typeof request.principal>,
                     ownership(agent)
                   ),
@@ -341,7 +341,7 @@ export function registerAgentRoutes(
       if (!agent) return reply.code(404).send({ error: `agent not found: ${name}` });
       if (teamAssets && req.principal) {
         try {
-          await teamAssets.require("agent", name, req.principal, "view", ownership(agent));
+          await teamAssets.require("agent", agent.id, req.principal, "view", ownership(agent));
         } catch {
           return reply.code(404).send({ error: `agent not found: ${name}` });
         }
