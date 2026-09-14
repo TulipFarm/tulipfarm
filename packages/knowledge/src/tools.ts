@@ -213,7 +213,7 @@ const citeSources = defineApiTool<KnowledgeToolContext>({
 const createKnowledgePage = defineApiTool<KnowledgeToolContext>({
   name: "create_knowledge_page",
   description:
-    "Author a new knowledge page (markdown). Use for durable, page-sized content that exceeds Memory. The page lands in the shared 'Notes' space, readable by everyone in the business. Returns the new page id, its space and its path.",
+    "Author a new knowledge page (markdown) for people to read as wiki content. Use for durable, page-sized content that exceeds Memory. The page lands in the shared 'Notes' space, readable by everyone in the business. Returns the new page id, its space and its path. Never use this for connector sync status, vector/GraphRAG indexing coverage, chunk counts, or other automated run telemetry — record that as Routine/Run events or integration run history instead, not as a knowledge page.",
   tier: "platform",
   mutating: true,
   inputSchema: CREATE_PAGE_SCHEMA,
@@ -226,7 +226,11 @@ const createKnowledgePage = defineApiTool<KnowledgeToolContext>({
     if (!validateCreatePage(args)) return err("validation_error", firstError(validateCreatePage));
     const a = args as { title: string; content: string; domain?: string; tags?: string[] };
     try {
-      const page = await ctx.service.createPage({ ...a, ownerPrincipalId: ctx.userId });
+      const page = await ctx.service.createPage({
+        ...a,
+        ownerPrincipalId: ctx.userId,
+        author: ctx.agentId ? { kind: "agent", id: ctx.agentId } : { kind: "user", id: ctx.userId },
+      });
       // The writer verifies through the reader's own paths before reporting success. A Page that
       // is unplaced or ungranted is one an Agent will later cite and be refused, so an unusable
       // Page is a failed write here rather than a success the next turn discovers.

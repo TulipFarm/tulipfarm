@@ -76,3 +76,9 @@ propagation. This is the sole accountable owner for source ACL enforcement.
 - Connected-source content still denies on missing or stale ACL evidence. Slack is not
   automatically indexed; user-configured Routines may write reviewed public-channel content as
   Knowledge pages through the normal Tool and Page authorization paths.
+- `create_knowledge_page`/`write_page` are for durable content a person or an Agent collaborator
+  means someone to read. Never use them to record connector sync status, vector/GraphRAG indexing
+  coverage, or other automated run telemetry — that belongs in Routine/Run events or integration
+  run history, not `knowledge_pages`. Every authored Page now carries `authorKind`/`authorId`
+  (migration 72) so a reader — and any future audit — can tell a person's page from an Agent's
+  without guessing from the title.

@@ -75,6 +75,7 @@ import type {
   KnowledgePage,
   KnowledgeRevision,
   KnowledgeSpace,
+  PageAuthor,
   QueryKnowledgeHit,
   RecentPage,
   SearchFilters,
@@ -104,6 +105,8 @@ export interface CreatePageInput {
   tags?: string[];
   alwaysLoadForAgents?: boolean;
   ownerPrincipalId?: string;
+  /** Who wrote this Page, `writePage`'s own field. Absent leaves `authorKind`/`authorId` null. */
+  author?: PageAuthor | null;
 }
 
 export interface UpdatePageInput {
