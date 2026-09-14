@@ -3,9 +3,35 @@ import { createRemixStub } from "@remix-run/testing";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { CHAT_TITLE_MAX_LENGTH } from "@tulipfarm/schema/chat-limits";
 import type { ReactElement } from "react";
-import { expect, test, vi } from "vitest";
+import { beforeEach, expect, test, vi } from "vitest";
 import type { ConversationSummary } from "~/lib/conversations";
 import ChatsRoute from "./_app.chats";
+
+// Replaces the global inert IntersectionObserver (vitest.setup.ts) with one that captures every
+// instance and its callback, so a test can trigger the "scrolled near the bottom" behavior on
+// demand instead of depending on jsdom's absent real layout/intersection engine.
+let capturedObservers: Array<{ trigger: () => void }> = [];
+beforeEach(() => {
+  capturedObservers = [];
+  Object.defineProperty(window, "IntersectionObserver", {
+    writable: true,
+    configurable: true,
+    value: class {
+      constructor(private readonly callback: IntersectionObserverCallback) {
+        capturedObservers.push({
+          trigger: () =>
+            this.callback(
+              [{ isIntersecting: true } as IntersectionObserverEntry],
+              this as unknown as IntersectionObserver
+            ),
+        });
+      }
+      observe = () => {};
+      unobserve = () => {};
+      disconnect = () => {};
+    },
+  });
+});
 
 vi.mock("@remix-run/react", async () => {
   const actual = await vi.importActual<typeof import("@remix-run/react")>("@remix-run/react");
@@ -14,7 +40,7 @@ vi.mock("@remix-run/react", async () => {
 
 vi.mock("~/lib/conversations", () => ({
   deleteConversation: vi.fn(),
-  listConversations: vi.fn(),
+  listConversationsPage: vi.fn(),
   renameConversation: vi.fn(),
   setConversationStarred: vi.fn(),
 }));
@@ -37,7 +63,7 @@ vi.mock("~/lib/conversations-context", async () => {
 
 import {
   deleteConversation,
-  listConversations,
+  listConversationsPage,
   renameConversation,
   setConversationStarred,
 } from "~/lib/conversations";
@@ -52,8 +78,12 @@ const convo = (over: Partial<ConversationSummary> = {}): ConversationSummary => 
   ...over,
 });
 
-function renderWithItems(node: ReactElement, items: ConversationSummary[]) {
-  vi.mocked(remix.useLoaderData).mockReturnValue({ items });
+function renderWithItems(
+  node: ReactElement,
+  items: ConversationSummary[],
+  nextCursor: string | null = null
+) {
+  vi.mocked(remix.useLoaderData).mockReturnValue({ items, nextCursor });
   const Stub = createRemixStub([{ path: "/", Component: () => node }]);
   render(<Stub initialEntries={["/"]} />);
 }
@@ -88,10 +118,27 @@ test("pins starred chats above the rest", () => {
 });
 
 test("typing in the search box refetches server-side with the query", async () => {
-  vi.mocked(listConversations).mockResolvedValue([]);
+  vi.mocked(listConversationsPage).mockResolvedValue({ items: [], nextCursor: null });
   renderWithItems(<ChatsRoute />, [convo()]);
   fireEvent.change(screen.getByLabelText("search chats"), { target: { value: "budget" } });
-  await waitFor(() => expect(listConversations).toHaveBeenCalledWith({ q: "budget", limit: 200 }));
+  await waitFor(() =>
+    expect(listConversationsPage).toHaveBeenCalledWith({ q: "budget", limit: 20 })
+  );
+});
+
+test("loading the next batch appends past the initial 20 and stops once nextCursor is null", async () => {
+  vi.mocked(listConversationsPage).mockResolvedValue({
+    items: [convo({ id: "c2", title: "Second" })],
+    nextCursor: null,
+  });
+  renderWithItems(<ChatsRoute />, [convo()], "cursor-1");
+
+  const [observer] = capturedObservers;
+  observer.trigger();
+
+  await screen.findByRole("link", { name: /Second/ });
+  expect(listConversationsPage).toHaveBeenCalledWith({ limit: 20, cursor: "cursor-1" });
+  expect(screen.getByRole("link", { name: /Inventory Planning/ })).toBeInTheDocument();
 });
 
 test("the three-dots menu stars a chat", async () => {

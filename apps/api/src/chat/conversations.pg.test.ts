@@ -5,6 +5,7 @@ import { makeMigratedPglite } from "../test/pglite";
 import {
   type ConversationDoc,
   ConversationOwnerlessError,
+  decodeConversationCursor,
   PgConversationRepo,
 } from "./conversations";
 
@@ -95,15 +96,37 @@ describe("PgConversationRepo", () => {
     await repo.create(other);
 
     const list = await repo.list(userId, 10);
-    expect(list.map((c) => c._id)).toEqual([newer._id, older._id]);
+    expect(list.items.map((c) => c._id)).toEqual([newer._id, older._id]);
+    expect(list.nextCursor).toBeNull();
   });
 
-  it("list honors the limit", async () => {
+  it("list honors the limit and reports a cursor when more remain", async () => {
     const userId = randomUUID();
     for (let i = 0; i < 3; i++) {
       await repo.create(makeConv({ userId, updatedAt: new Date(2020 + i, 0, 1) }));
     }
-    expect(await repo.list(userId, 2)).toHaveLength(2);
+    const page = await repo.list(userId, 2);
+    expect(page.items).toHaveLength(2);
+    expect(page.nextCursor).not.toBeNull();
+  });
+
+  it("list keyset-paginates via `after`, newest-first, with no gaps or repeats", async () => {
+    const userId = randomUUID();
+    for (let i = 0; i < 5; i++) {
+      await repo.create(makeConv({ userId, updatedAt: new Date(2020 + i, 0, 1) }));
+    }
+    const all = await repo.list(userId, 10);
+    const seen: string[] = [];
+    let cursor: { updatedAt: Date; _id: string } | undefined;
+    for (;;) {
+      const page = await repo.list(userId, 2, { after: cursor });
+      seen.push(...page.items.map((c) => c._id));
+      if (page.nextCursor === null) break;
+      const decoded = decodeConversationCursor(page.nextCursor);
+      expect(decoded).not.toBeNull();
+      cursor = decoded ?? undefined;
+    }
+    expect(seen).toEqual(all.items.map((c) => c._id));
   });
 
   it("defaults starred to false and setStarred toggles it without bumping updated_at", async () => {
@@ -133,8 +156,8 @@ describe("PgConversationRepo", () => {
     await repo.setTitle(noMatch._id, "Inventory Planning");
     // `untitled` keeps a null title.
 
-    const list = await repo.list(userId, 10, "budget");
-    expect(list.map((c) => c._id)).toEqual([match._id]);
+    const list = await repo.list(userId, 10, { q: "budget" });
+    expect(list.items.map((c) => c._id)).toEqual([match._id]);
   });
 
   it("deletes an owned settled conversation and cascades its persisted Chat data", async () => {

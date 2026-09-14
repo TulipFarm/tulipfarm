@@ -21,7 +21,11 @@ import {
   surfaceCatalogRevisionFor,
   surfaceRendererRegistry,
 } from "../surfaces/renderer-registry";
-import type { ConversationDoc, ConversationRepo } from "./conversations";
+import {
+  type ConversationDoc,
+  type ConversationRepo,
+  decodeConversationCursor,
+} from "./conversations";
 import { type MessageRepo, referencedFileIds, withUnavailableFiles } from "./messages";
 import { MessageSchema } from "./schemas";
 import { assembleAgentSystemPrompt } from "./system-prompt";
@@ -112,7 +116,9 @@ export function registerConversationRoutes(
       schema: {
         description:
           "List the authenticated user's conversations, newest-first (Recent chats + Chats page). " +
-          "`q` filters by title (case-insensitive substring); `limit` defaults to 50 (max 200).",
+          "`q` filters by title (case-insensitive substring) across all of the caller's " +
+          "conversations, not just the loaded page. `limit` defaults to 20 (max 200). `cursor` " +
+          "(from a previous response's `nextCursor`) fetches the next page.",
         tags: ["chat"],
         security: [{ sessionCookie: [] }, { bearerToken: [] }],
         querystring: {
@@ -120,6 +126,7 @@ export function registerConversationRoutes(
           properties: {
             q: { type: "string" },
             limit: { type: "integer", minimum: 1, maximum: 200 },
+            cursor: { type: "string" },
           },
         },
         response: {
@@ -141,8 +148,9 @@ export function registerConversationRoutes(
                   required: ["id", "title", "agentId", "starred", "createdAt", "updatedAt"],
                 },
               },
+              nextCursor: { type: ["string", "null"] },
             },
-            required: ["conversations"],
+            required: ["conversations", "nextCursor"],
           },
           401: ErrorSchema,
         },
@@ -150,10 +158,14 @@ export function registerConversationRoutes(
     },
     async (req, reply) => {
       const user = req.user as UserDoc;
-      const { q, limit } = req.query as { q?: string; limit?: number };
-      const convos = await repo.list(user._id, Math.min(limit ?? 50, 200), q?.trim() || undefined);
+      const { q, limit, cursor } = req.query as { q?: string; limit?: number; cursor?: string };
+      const after = cursor ? (decodeConversationCursor(cursor) ?? undefined) : undefined;
+      const page = await repo.list(user._id, Math.min(limit ?? 20, 200), {
+        q: q?.trim() || undefined,
+        after,
+      });
       return reply.send({
-        conversations: convos.map((c) => ({
+        conversations: page.items.map((c) => ({
           id: c._id,
           title: c.title ?? null,
           agentId: agentHandle(soulLoader, c.agentId),
@@ -161,6 +173,7 @@ export function registerConversationRoutes(
           createdAt: c.createdAt,
           updatedAt: c.updatedAt,
         })),
+        nextCursor: page.nextCursor,
       });
     }
   );

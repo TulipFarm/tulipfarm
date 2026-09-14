@@ -307,6 +307,27 @@ test("renders recent chats and highlights the active one", () => {
   expect(screen.getAllByRole("button", { name: "Chat actions" })[0]).toHaveClass("size-7");
 });
 
+test("caps Recent chats at 20 and links to /chats for the rest", () => {
+  const conversations = Array.from({ length: 25 }, (_, i) => ({
+    id: `c${i}`,
+    title: `Chat ${i}`,
+    agentId: null,
+    starred: false,
+    createdAt: "t",
+    updatedAt: "t",
+  }));
+  useConversations.mockReturnValue({ ...CONVERSATIONS, conversations });
+  render(<SidebarStub initialEntries={["/inbox"]} />);
+
+  for (let i = 0; i < 20; i++) {
+    expect(screen.getByRole("link", { name: `Chat ${i}` })).toBeInTheDocument();
+  }
+  for (let i = 20; i < 25; i++) {
+    expect(screen.queryByRole("link", { name: `Chat ${i}` })).not.toBeInTheDocument();
+  }
+  expect(screen.getByRole("link", { name: "View all chats →" })).toHaveAttribute("href", "/chats");
+});
+
 /* Three group headings, one behaviour: the word is the disclosure, in every group. */
 test("collapses every group by its own heading, Recent included", async () => {
   const user = userEvent.setup();

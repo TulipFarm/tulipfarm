@@ -57,6 +57,19 @@ Object.defineProperty(window, "ResizeObserver", {
   },
 });
 
+// jsdom does not implement IntersectionObserver; the inert mock keeps infinite-scroll components
+// (the Chats page) testable. A test exercising the scroll trigger itself overrides this locally
+// with a controllable mock that captures and invokes the callback.
+Object.defineProperty(window, "IntersectionObserver", {
+  writable: true,
+  configurable: true,
+  value: class {
+    observe = () => {};
+    unobserve = () => {};
+    disconnect = () => {};
+  },
+});
+
 // jsdom does not implement elementFromPoint; ProseMirror's posAtCoords (reached by Tiptap's
 // Placeholder viewport tracking when the rich-text composer mounts) calls it. Return null — callers
 // treat "no element at point" as a no-op. The editor's interactive behavior is covered in Playwright.
