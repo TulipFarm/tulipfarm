@@ -4,6 +4,7 @@ import { access, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:f
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
+import type { LlmService } from "@tulipfarm/llm";
 import { LlmNotConfiguredError } from "@tulipfarm/schema";
 import type { BundledSkill } from "@tulipfarm/soul";
 import {
@@ -24,6 +25,7 @@ import { CSRF_COOKIE, CSRF_HEADER } from "../../auth/csrf";
 import { SESSION_COOKIE } from "../../auth/middleware";
 import { MemorySessionStore } from "../../auth/session-store";
 import { createUser, type UserDoc, type UserRepo } from "../../auth/users";
+import type { TeamAssetService } from "../../team-assets/service";
 
 // Keep the report schema real (used in the route's response schema); mock only the LLM call.
 const buildAudit = vi.fn();
@@ -123,8 +125,12 @@ describe("skills routes", () => {
   let app: FastifyInstance;
   let store: MemorySessionStore;
   let sid: string;
+  let userRepo: FakeUserRepo;
+  let tokenRepo: FakeTokenRepo;
   let soulPath: string;
   let soulWriter: SoulWriter;
+  let gitSync: GitSyncService;
+  let llmService: LlmService;
   let commitPaths: ReturnType<typeof vi.fn>;
   let lastCommitDates: ReturnType<typeof vi.fn>;
   /** Commit subjects the gateway accepted, in order. */
@@ -140,8 +146,8 @@ describe("skills routes", () => {
     // the deployment opted in. The policy itself is exercised in "clone source policy" below.
     process.env.GIT_SOURCE_ALLOW_LOCAL_PATHS = "1";
     store = new MemorySessionStore();
-    const userRepo = new FakeUserRepo();
-    const tokenRepo = new FakeTokenRepo();
+    userRepo = new FakeUserRepo();
+    tokenRepo = new FakeTokenRepo();
     const user = await createUser(userRepo, "user@example.com", "pass", "member");
     sid = await store.create(user._id);
 
@@ -182,7 +188,7 @@ describe("skills routes", () => {
 
     commitPaths = vi.fn().mockResolvedValue({ sha: "abc1234", filesChanged: 1 });
     lastCommitDates = vi.fn().mockResolvedValue(new Map());
-    const gitSync = {
+    gitSync = {
       path: soulPath,
       commitPaths,
       lastCommitDates,
@@ -218,7 +224,7 @@ describe("skills routes", () => {
       },
     } as SoulWriter;
 
-    const llmService = { effortModel: vi.fn().mockReturnValue({}) } as never;
+    llmService = { effortModel: vi.fn().mockReturnValue({}) } as never;
     app = await buildApp({
       sessionStore: store,
       userRepo,
@@ -337,6 +343,67 @@ describe("skills routes", () => {
           .skills.filter((entry: { name: string }) => entry.name !== "resource-forge")
           .every((entry: { provenance: string }) => entry.provenance === "curated")
       ).toBe(true);
+    });
+  });
+
+  describe("GET /api/v1/skills — Team ownership gate", () => {
+    // A marketplace install writes no `ownership` frontmatter and never proposes an owning Team, so
+    // "installed-skill" here stands in for a freshly-installed Skill: no metadata, no ownership row.
+    it("lists a Skill with no ownership metadata and no ownership row (regression for #913)", async () => {
+      const isGoverned = vi.fn().mockResolvedValue(false);
+      const access = vi.fn();
+      const solo = await buildApp({
+        sessionStore: store,
+        userRepo,
+        tokenRepo,
+        gitSync,
+        soulLoader,
+        llmService,
+        bundledSkills,
+        disabledBundledSkills,
+        soulWriter,
+        teamAssets: { isGoverned, access } as unknown as TeamAssetService,
+      });
+      const res = await solo.inject({
+        method: "GET",
+        url: "/api/v1/skills",
+        cookies: auth(),
+        headers,
+      });
+      expect(res.statusCode).toBe(200);
+      expect(res.json().skills.map((s: { name: string }) => s.name)).toContain("installed-skill");
+      expect(isGoverned).toHaveBeenCalledWith("skill", "installed-skill", undefined);
+      expect(access).not.toHaveBeenCalled();
+      await solo.close();
+    });
+
+    it("still gates a Skill an ownership row governs (anti-laundering)", async () => {
+      const isGoverned = vi.fn().mockResolvedValue(true);
+      const access = vi.fn().mockResolvedValue({ levels: [] });
+      const solo = await buildApp({
+        sessionStore: store,
+        userRepo,
+        tokenRepo,
+        gitSync,
+        soulLoader,
+        llmService,
+        bundledSkills,
+        disabledBundledSkills,
+        soulWriter,
+        teamAssets: { isGoverned, access } as unknown as TeamAssetService,
+      });
+      const res = await solo.inject({
+        method: "GET",
+        url: "/api/v1/skills",
+        cookies: auth(),
+        headers,
+      });
+      expect(res.statusCode).toBe(200);
+      expect(res.json().skills.map((s: { name: string }) => s.name)).not.toContain(
+        "installed-skill"
+      );
+      expect(access).toHaveBeenCalledWith("skill", "installed-skill", expect.anything(), undefined);
+      await solo.close();
     });
   });
 
