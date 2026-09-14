@@ -42,8 +42,9 @@ export function commandEntries(
   actions: CommandActions
 ): CommandEntry[] {
   const groups = visibleSidebarGroups(visibility);
+  const settingsGroups = visibleSettingsGroups(visibility);
   const settingsItem = visibleSettingsItem(visibility);
-  const creatable = groups.flatMap((group) =>
+  const creatable = [...groups, ...settingsGroups].flatMap((group) =>
     group.items.flatMap((item) => (item.create ? [{ item, create: item.create }] : []))
   );
   return [
