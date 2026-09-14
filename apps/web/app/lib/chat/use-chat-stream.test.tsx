@@ -1,8 +1,8 @@
 import { createRemixStub } from "@remix-run/testing";
-import { act, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { useState } from "react";
-import { beforeEach, expect, test, vi } from "vitest";
+import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import {
   postChat,
   postSurfaceInteraction,
@@ -23,6 +23,10 @@ vi.mock("~/lib/chat/sse-client", () => ({
 
 const mockPostChat = vi.mocked(postChat);
 const mockPostSurfaceInteraction = vi.mocked(postSurfaceInteraction);
+
+afterEach(() => {
+  cleanup();
+});
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -58,7 +62,7 @@ function Harness() {
 
   return (
     <>
-      <p>{chat.status}</p>
+      <p data-testid="status">{chat.status}</p>
       <p>{chat.error ?? ""}</p>
       <p data-testid="outcome">{outcome}</p>
       <button type="button" onClick={() => void chat.send("start")}>
@@ -207,4 +211,67 @@ test("a stale live stream failure cannot overwrite a newer submission", async ()
   expect(screen.queryByText("old stream failed")).not.toBeInTheDocument();
   expect(screen.getByText("submitted")).toBeInTheDocument();
   expect(screen.getAllByText("start")).toHaveLength(2);
+  currentStream.resolve();
+});
+
+test("recovers a rendered answer when the stream closes without a terminal frame", async () => {
+  const user = userEvent.setup();
+  mockPostChat.mockImplementationOnce(async (_body, handlers) => {
+    handlers.onMeta?.({ runId: "run-1", turnId: "turn-1" });
+    handlers.onEvent({ type: "text", data: { delta: "Rendered answer" } });
+  });
+  renderHarness();
+
+  await user.click(screen.getByRole("button", { name: "Start" }));
+  await waitFor(() => expect(screen.getByText("Rendered answer")).toBeInTheDocument());
+  await waitFor(() => expect(screen.getByTestId("status")).toHaveTextContent("idle"));
+});
+
+test("recovers a rendered answer when the stream fails after emitting content", async () => {
+  const user = userEvent.setup();
+  mockPostChat.mockImplementationOnce(async (_body, handlers) => {
+    handlers.onMeta?.({ runId: "run-1", turnId: "turn-1" });
+    handlers.onEvent({ type: "text", data: { delta: "Complete looking answer" } });
+    throw new Error("connection dropped by proxy");
+  });
+  renderHarness();
+
+  await user.click(screen.getByRole("button", { name: "Start" }));
+  await waitFor(() => expect(screen.getByText("Complete looking answer")).toBeInTheDocument());
+  await waitFor(() => expect(screen.getByTestId("status")).toHaveTextContent("idle"));
+});
+
+test("Stop response immediately clears busy state when invoked again while stopping", async () => {
+  const user = userEvent.setup();
+  const hangingStream = deferred();
+  let pendingHandlers: Parameters<typeof postChat>[1] | undefined;
+  mockPostChat.mockImplementationOnce(
+    (_body, handlers) =>
+      new Promise<void>((_resolve, reject) => {
+        pendingHandlers = handlers;
+        handlers.signal?.addEventListener("abort", () => {
+          reject(new DOMException("Aborted", "AbortError"));
+        });
+      })
+  );
+  vi.mocked(stopChatRun).mockReturnValue(
+    hangingStream.promise.then(() => ({ status: "cancelled" }))
+  );
+  renderHarness();
+
+  await user.click(screen.getByRole("button", { name: "Start" }));
+  await screen.findByText("submitted");
+  act(() => {
+    pendingHandlers?.onMeta?.({ runId: "run-hang", turnId: "turn-hang" });
+  });
+
+  // First stop request calls stopChatRun
+  await user.click(screen.getByRole("button", { name: "Stop" }));
+  expect(stopChatRun).toHaveBeenCalledWith("run-hang");
+  expect(screen.getByText("submitted")).toBeInTheDocument();
+
+  // Second stop request forces immediate abort and recovery
+  await user.click(screen.getByRole("button", { name: "Stop" }));
+  await waitFor(() => expect(screen.getByTestId("status")).toHaveTextContent("idle"));
+  hangingStream.resolve();
 });
