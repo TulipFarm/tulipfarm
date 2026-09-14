@@ -12,7 +12,7 @@ export async function mayUseAgent(
   const ownership = agent.frontmatter.ownership;
   const access = await teamAssets.access(
     "agent",
-    agent.name,
+    agent.id,
     principal,
     typeof ownership === "object" && ownership !== null
       ? (ownership as TeamBusinessAssetOwnership)
