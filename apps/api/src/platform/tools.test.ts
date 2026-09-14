@@ -1103,6 +1103,7 @@ describe("PLATFORM_TOOLS registry", () => {
       "routine_delete",
       "guardrail_forge",
       "soul_repo_push",
+      "user_resolve",
       "validate_artifact",
       "complete_state",
       "complete_task",

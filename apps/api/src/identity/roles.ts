@@ -272,6 +272,11 @@ export const MEMBER_ALLOWED_SURFACES: readonly {
     enforcedIn: "authz/team-routes.ts",
   },
   {
+    type: "user",
+    actions: ["user.directory.read"],
+    enforcedIn: "platform/tools.ts",
+  },
+  {
     type: "team_asset",
     actions: [
       "team_asset.access.read",
