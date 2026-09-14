@@ -51,7 +51,10 @@ function renderStep(part: ToolPart, options?: { pending?: boolean }) {
   return render(<Stub />);
 }
 
-const step = () => screen.getByRole("button", { name: /github_issue_comment/i });
+// The Trace header above it is also a button (folds the whole run), so the step row is
+// distinguished by its own row class rather than by a name — its accessible name is now the
+// human summary, which varies per test, not the raw Tool identifier.
+const step = () => document.querySelector("button.tf-trace-row") as HTMLElement;
 
 describe("A Tool step on the trace", () => {
   beforeEach(() => {
@@ -215,17 +218,26 @@ describe("A Tool step on the trace", () => {
     expect(screen.getByText("Ask an administrator to add this Credential.")).toBeInTheDocument();
   });
 
-  it("shows the raw Tool name to an admin, as a debug aid", () => {
+  it("keeps the raw Tool name off the row face, even for an admin", () => {
     useIsAdmin.mockReturnValue(true);
-    renderStep(toolPart());
+    renderStep(toolPart({ resultPreview: { json: '{"ok":true}' } }));
 
+    expect(screen.queryByRole("button", { name: /github_issue_comment/i })).toBeNull();
+  });
+
+  it("shows the raw Tool name to an admin in the expanded inspect panel, as a debug aid", async () => {
+    useIsAdmin.mockReturnValue(true);
+    renderStep(toolPart({ resultPreview: { json: '{"ok":true}' } }));
+
+    await userEvent.click(step());
     expect(screen.getByText("github_issue_comment")).toBeInTheDocument();
   });
 
-  it("hides the raw Tool name from a non-admin, since it is debug chrome not a participant fact", () => {
+  it("hides the raw Tool name from a non-admin even in the expanded inspect panel", async () => {
     useIsAdmin.mockReturnValue(false);
-    renderStep(toolPart());
+    renderStep(toolPart({ resultPreview: { json: '{"ok":true}' } }));
 
+    await userEvent.click(step());
     expect(screen.queryByText("github_issue_comment")).toBeNull();
   });
 

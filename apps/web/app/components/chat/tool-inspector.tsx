@@ -61,13 +61,16 @@ function InspectPane({
  * that let an operator find it again. Lives behind a step on the trace, so a reader who opens a
  * step gets the verbatim evidence and not a summary of it.
  */
-export function ToolInspector({ part }: { part: ToolPart }) {
+export function ToolInspector({ part, isAdmin }: { part: ToolPart; isAdmin?: boolean }) {
   const tier = toolTierLabel(part.meta?.tier, toolFamily(part.toolName));
   return (
     <div className="space-y-2">
       <InspectPane label="Input" preview={part.argsPreview} fallback={parsedArgs(part)} />
       <InspectPane label="Output" preview={part.resultPreview} fallback={parsedResult(part)} />
       <dl className="flex flex-wrap items-center gap-x-4 gap-y-1 px-0.5 text-[11px] text-muted-foreground">
+        {/* The raw Tool identifier is debug chrome, not a participant-facing fact — an admin gets
+        it as a diagnostic aid here, the same gate the Credential link below uses. */}
+        {isAdmin ? <Meta label="Tool" value={part.toolName} mono /> : null}
         <Meta label="Tier" value={tier} />
         {part.meta?.agentId === undefined ? null : <Meta label="Agent" value={part.meta.agentId} />}
         <Meta label="Call" value={part.toolCallId} mono />

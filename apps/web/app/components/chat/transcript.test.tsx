@@ -61,8 +61,9 @@ describe("Transcript renders each part from its SSE event", () => {
         { type: "finish", data: { reason: "stop" } },
       ])
     );
-    expect(screen.getByText("write_thing")).toBeInTheDocument();
-    const step = screen.getByRole("button", { name: /write_thing/i });
+    // The Trace header above it is also a button, so the step row is picked out by its own row
+    // class rather than by a name — its accessible name is the human summary, not the raw name.
+    const step = document.querySelector("button.tf-trace-row") as HTMLElement;
     // Nothing is disclosed until it is asked for; the panes live behind the step's own toggle.
     expect(step).toHaveAttribute("aria-expanded", "false");
 
@@ -102,7 +103,7 @@ describe("Transcript renders each part from its SSE event", () => {
       ])
     );
 
-    await user.click(screen.getByRole("button", { name: /github_issue_comment/i }));
+    await user.click(document.querySelector("button.tf-trace-row") as HTMLElement);
 
     expect(screen.getByText('"maddhruv/tulipfarm"')).toBeInTheDocument();
     // A withheld field is shown as an explicit gap, never silently dropped.
