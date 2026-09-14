@@ -1108,6 +1108,61 @@ const PollingIngressSchema = Type.Object(
 );
 
 /**
+ * The single frame the runtime sends back once an incoming frame is durable.
+ *
+ * The template is a JSON object literal carrying exactly one `{correlation}` placeholder, replaced
+ * by the JSON-escaped value read from the frame at `correlationPointer`. A placeholder rather than
+ * an interpolated fragment is what keeps a provider-supplied value from reshaping the acknowledged
+ * frame: the escaped string can only ever land where the author already put a string.
+ */
+const WebsocketAcknowledgementSchema = Type.Object(
+  {
+    correlationPointer: JsonPointerSchema,
+    template: Type.String({ minLength: 1, maxLength: 512 }),
+  },
+  { additionalProperties: false }
+);
+
+/**
+ * How a dropped socket is re-established, bounded so a manifest cannot describe an unbounded
+ * reconnect storm. Delay grows from `initialDelaySeconds` and is capped at `maxDelaySeconds`.
+ */
+const WebsocketReconnectSchema = Type.Object(
+  {
+    maxAttempts: Type.Integer({ minimum: 1, maximum: 100 }),
+    initialDelaySeconds: Type.Integer({ minimum: 1, maximum: 300 }),
+    maxDelaySeconds: Type.Integer({ minimum: 1, maximum: 3_600 }),
+  },
+  { additionalProperties: false }
+);
+
+/**
+ * A push-based ingress over a provider WebSocket for providers that stream JSON frames.
+ *
+ * A read operation returns a short-lived public `wss://` URL read at `urlPointer`; only a shared
+ * application identity may open it. Each accepted JSON frame is typed against `eventTypes`, keyed
+ * for deduplication, and made durable in the same inbox as polling and webhook deliveries before
+ * the declarative `acknowledgement` frame is sent, so nothing is acknowledged that was not stored.
+ */
+const WebsocketIngressSchema = Type.Object(
+  {
+    kind: Type.Literal("websocket"),
+    /** The read operation whose response carries the public `wss://` connection URL. */
+    operationId: Type.String({ pattern: OPERATION_ID_PATTERN, maxLength: 96 }),
+    /** Selects the `wss://` URL string from that operation's response. */
+    urlPointer: JsonPointerSchema,
+    /** Typed events selected from each durably persisted JSON frame. */
+    eventTypes: Type.Array(EventTypeSchema, { minItems: 1 }),
+    deduplication: DeduplicationSchema,
+    acknowledgement: Type.Optional(WebsocketAcknowledgementSchema),
+    reconnect: WebsocketReconnectSchema,
+  },
+  { additionalProperties: false }
+);
+
+const IngressSchema = Type.Union([PollingIngressSchema, WebsocketIngressSchema]);
+
+/**
  * How an indexed item's readers are established.
  *
  * `item` asks the provider per item; `scope` captures one ACL for the whole selected scope, for
@@ -1438,7 +1493,7 @@ export const OimManifestSchema = Type.Object(
     auth: Type.Optional(AuthSchema),
     operations: Type.Array(OperationSchema, { minItems: 1 }),
     events: Type.Optional(EventsSchema),
-    ingress: Type.Optional(PollingIngressSchema),
+    ingress: Type.Optional(IngressSchema),
     knowledge: Type.Optional(KnowledgeSchema),
     hooks: Type.Optional(Type.Array(HookSchema, { minItems: 1 })),
     extensions: Type.Optional(
@@ -1667,6 +1722,8 @@ export type OimFixtureCase = Static<typeof FixtureCaseSchema>;
 export type OimHook = Static<typeof HookSchema>;
 export type OimEvents = Static<typeof EventsSchema>;
 export type OimPollingIngress = Static<typeof PollingIngressSchema>;
+export type OimWebsocketIngress = Static<typeof WebsocketIngressSchema>;
+export type OimIngress = Static<typeof IngressSchema>;
 export type OimVerification = Static<typeof VerificationSchema>;
 export type OimEventType = Static<typeof EventTypeSchema>;
 export type OimDeduplication = Static<typeof DeduplicationSchema>;
@@ -2619,6 +2676,7 @@ export function oimManifestIssues(manifest: OimManifest): string[] {
   issues.push(...oimCoreExtensionIssues(manifest));
   issues.push(...oimEventsIssues(manifest));
   issues.push(...oimPollingIngressIssues(manifest));
+  issues.push(...oimWebsocketIngressIssues(manifest));
   issues.push(...oimKnowledgeIssues(manifest));
 
   return issues;
@@ -3565,7 +3623,7 @@ function oimEventsIssues(manifest: OimManifest): string[] {
 /** Coherence rules for pull ingress, which uses the Events profile's normalized event contract. */
 function oimPollingIngressIssues(manifest: OimManifest): string[] {
   const ingress = manifest.ingress;
-  if (ingress === undefined) return [];
+  if (ingress === undefined || ingress.kind !== "polling") return [];
   const issues: string[] = [];
   if (manifest.profiles.events !== OIM_PROFILE_VERSIONS.events) {
     issues.push('profiles: events "1.0" is required when polling ingress is declared');
@@ -3591,6 +3649,48 @@ function oimPollingIngressIssues(manifest: OimManifest): string[] {
     issues.push(
       `ingress: polling operation ${operation.id} declares no parameter ${ingress.cursor.requestParameter}`
     );
+  }
+  return issues;
+}
+
+/** Coherence rules for WebSocket ingress, which streams typed frames over one supervised socket. */
+function oimWebsocketIngressIssues(manifest: OimManifest): string[] {
+  const ingress = manifest.ingress;
+  if (ingress === undefined || ingress.kind !== "websocket") return [];
+  const issues: string[] = [];
+  if (manifest.profiles.events !== OIM_PROFILE_VERSIONS.events) {
+    issues.push('profiles: events "1.0" is required when websocket ingress is declared');
+  }
+  issues.push(...oimEventTypeIssues(manifest, ingress.eventTypes, "ingress"));
+  if (ingress.reconnect.initialDelaySeconds > ingress.reconnect.maxDelaySeconds) {
+    issues.push("ingress: websocket reconnect initialDelaySeconds exceeds maxDelaySeconds");
+  }
+  if (ingress.acknowledgement !== undefined) {
+    const template = ingress.acknowledgement.template;
+    const occurrences = template.split("{correlation}").length - 1;
+    if (occurrences !== 1) {
+      issues.push("ingress: websocket acknowledgement template needs exactly one {correlation}");
+    } else {
+      try {
+        JSON.parse(template.replace("{correlation}", "sample"));
+      } catch {
+        issues.push("ingress: websocket acknowledgement template is not a JSON object literal");
+      }
+    }
+  }
+  const operation = manifest.operations.find((candidate) => candidate.id === ingress.operationId);
+  if (operation === undefined) {
+    issues.push(`ingress: websocket references undeclared operation ${ingress.operationId}`);
+    return issues;
+  }
+  if (
+    operation.source.type !== "http" ||
+    (operation.effect !== "read" && operation.effect !== "sensitive_read")
+  ) {
+    issues.push(`ingress: websocket operation ${operation.id} must be a read HTTP operation`);
+  }
+  if (operation.identityMode !== "shared_only") {
+    issues.push(`ingress: websocket operation ${operation.id} must open with shared identity only`);
   }
   return issues;
 }

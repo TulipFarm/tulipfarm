@@ -156,11 +156,12 @@ async function processOne(
   if (manifest === null) {
     return fail(`no Integration ${delivery.integrationId} v${delivery.integrationMajorVersion}`);
   }
-  const pollingIngress =
-    delivery.verification === "verified_polling" && manifest.ingress?.kind === "polling"
+  const preTypedIngress =
+    (delivery.verification === "verified_polling" && manifest.ingress?.kind === "polling") ||
+    (delivery.verification === "verified_websocket" && manifest.ingress?.kind === "websocket")
       ? manifest.ingress
       : undefined;
-  const eventTypes = pollingIngress?.eventTypes ?? manifest.events?.eventTypes;
+  const eventTypes = preTypedIngress?.eventTypes ?? manifest.events?.eventTypes;
   if (eventTypes === undefined) {
     return fail(
       `no event contract for Integration ${delivery.integrationId} v${delivery.integrationMajorVersion}`
@@ -171,7 +172,7 @@ async function processOne(
   try {
     body = parseDeliveryBody(
       await deps.decryptPayload(delivery.encryptedBody),
-      pollingIngress === undefined && manifest.events?.verification.scheme === "twilio_hmac_sha1"
+      preTypedIngress === undefined && manifest.events?.verification.scheme === "twilio_hmac_sha1"
         ? "form"
         : "json"
     );
@@ -193,7 +194,7 @@ async function processOne(
   }
 
   let classified: OimEventType | null | undefined;
-  if (pollingIngress === undefined) {
+  if (preTypedIngress === undefined) {
     try {
       classified = await classifyWebhookDelivery(
         manifest,

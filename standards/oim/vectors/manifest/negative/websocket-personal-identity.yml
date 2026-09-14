@@ -1,0 +1,41 @@
+oimVersion: "1.0"
+kind: Integration
+metadata:
+  id: realtime
+  name: Realtime
+  version: 1.0.0
+  description: Stream events over a provider WebSocket.
+  license: Apache-2.0
+profiles:
+  core: "1.0"
+  events: "1.0"
+operations:
+  - id: open-socket
+    name: open_socket
+    description: Open a realtime socket and read its public URL.
+    effect: read
+    identityMode: personal_required
+    source:
+      type: http
+      method: POST
+      baseUrl: https://api.example.test
+      path: /socket/open
+    response:
+      schema: { type: object }
+      maxBytes: 4096
+ingress:
+  kind: websocket
+  operationId: open-socket
+  urlPointer: /url
+  eventTypes:
+    - type: message.created
+      selector:
+        pointer: /type
+        equals: message.created
+      schema: { type: object }
+  deduplication:
+    kind: none
+  reconnect:
+    maxAttempts: 5
+    initialDelaySeconds: 1
+    maxDelaySeconds: 30

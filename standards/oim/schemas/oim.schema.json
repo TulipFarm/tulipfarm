@@ -2065,126 +2065,274 @@
       }
     },
     "ingress": {
-      "additionalProperties": false,
-      "type": "object",
-      "required": ["kind", "operationId", "intervalSeconds", "cursor"],
-      "properties": {
-        "kind": {
-          "const": "polling",
-          "type": "string"
-        },
-        "operationId": {
-          "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$",
-          "maxLength": 96,
-          "type": "string"
-        },
-        "intervalSeconds": {
-          "minimum": 60,
-          "maximum": 86400,
-          "type": "integer"
-        },
-        "eventTypes": {
-          "minItems": 1,
-          "type": "array",
-          "items": {
-            "additionalProperties": false,
-            "type": "object",
-            "required": ["type", "selector", "schema"],
-            "properties": {
-              "type": {
-                "pattern": "^[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*$",
-                "maxLength": 128,
-                "type": "string"
-              },
-              "selector": {
+      "anyOf": [
+        {
+          "additionalProperties": false,
+          "type": "object",
+          "required": ["kind", "operationId", "intervalSeconds", "cursor"],
+          "properties": {
+            "kind": {
+              "const": "polling",
+              "type": "string"
+            },
+            "operationId": {
+              "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$",
+              "maxLength": 96,
+              "type": "string"
+            },
+            "intervalSeconds": {
+              "minimum": 60,
+              "maximum": 86400,
+              "type": "integer"
+            },
+            "eventTypes": {
+              "minItems": 1,
+              "type": "array",
+              "items": {
                 "additionalProperties": false,
                 "type": "object",
-                "required": ["pointer"],
+                "required": ["type", "selector", "schema"],
                 "properties": {
-                  "pointer": {
-                    "pattern": "^(?:/(?:[^/~]|~[01])*)+$",
-                    "maxLength": 512,
+                  "type": {
+                    "pattern": "^[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*$",
+                    "maxLength": 128,
                     "type": "string"
                   },
-                  "equals": {
-                    "maxLength": 256,
+                  "selector": {
+                    "additionalProperties": false,
+                    "type": "object",
+                    "required": ["pointer"],
+                    "properties": {
+                      "pointer": {
+                        "pattern": "^(?:/(?:[^/~]|~[01])*)+$",
+                        "maxLength": 512,
+                        "type": "string"
+                      },
+                      "equals": {
+                        "maxLength": 256,
+                        "type": "string"
+                      },
+                      "matches": {
+                        "minLength": 1,
+                        "maxLength": 256,
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "schema": {
+                    "type": "object",
+                    "patternProperties": {
+                      "^(.*)$": {}
+                    }
+                  },
+                  "normalize": {
+                    "pattern": "^[A-Za-z_$][A-Za-z0-9_$]*$",
                     "type": "string"
                   },
-                  "matches": {
-                    "minLength": 1,
-                    "maxLength": 256,
-                    "type": "string"
+                  "safeHeaders": {
+                    "uniqueItems": true,
+                    "type": "array",
+                    "items": {
+                      "pattern": "^[A-Za-z0-9!#$%&'*+.^_`|~-]+$",
+                      "maxLength": 128,
+                      "type": "string"
+                    }
                   }
                 }
-              },
-              "schema": {
-                "type": "object",
-                "patternProperties": {
-                  "^(.*)$": {}
-                }
-              },
-              "normalize": {
-                "pattern": "^[A-Za-z_$][A-Za-z0-9_$]*$",
-                "type": "string"
-              },
-              "safeHeaders": {
-                "uniqueItems": true,
-                "type": "array",
-                "items": {
-                  "pattern": "^[A-Za-z0-9!#$%&'*+.^_`|~-]+$",
-                  "maxLength": 128,
-                  "type": "string"
-                }
               }
+            },
+            "cursor": {
+              "anyOf": [
+                {
+                  "additionalProperties": false,
+                  "type": "object",
+                  "required": ["responsePointer", "requestParameter"],
+                  "properties": {
+                    "responsePointer": {
+                      "pattern": "^(?:/(?:[^/~]|~[01])*)+$",
+                      "maxLength": 512,
+                      "type": "string"
+                    },
+                    "requestParameter": {
+                      "minLength": 1,
+                      "type": "string"
+                    }
+                  }
+                },
+                {
+                  "additionalProperties": false,
+                  "type": "object",
+                  "required": ["mode", "responsePointer", "itemPointer", "requestParameter"],
+                  "properties": {
+                    "mode": {
+                      "const": "max_integer_plus_one",
+                      "type": "string"
+                    },
+                    "responsePointer": {
+                      "pattern": "^(?:/(?:[^/~]|~[01])*)+$",
+                      "maxLength": 512,
+                      "type": "string"
+                    },
+                    "itemPointer": {
+                      "pattern": "^(?:/(?:[^/~]|~[01])*)+$",
+                      "maxLength": 512,
+                      "type": "string"
+                    },
+                    "requestParameter": {
+                      "minLength": 1,
+                      "type": "string"
+                    }
+                  }
+                }
+              ]
             }
           }
         },
-        "cursor": {
-          "anyOf": [
-            {
+        {
+          "additionalProperties": false,
+          "type": "object",
+          "required": [
+            "kind",
+            "operationId",
+            "urlPointer",
+            "eventTypes",
+            "deduplication",
+            "reconnect"
+          ],
+          "properties": {
+            "kind": {
+              "const": "websocket",
+              "type": "string"
+            },
+            "operationId": {
+              "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$",
+              "maxLength": 96,
+              "type": "string"
+            },
+            "urlPointer": {
+              "pattern": "^(?:/(?:[^/~]|~[01])*)+$",
+              "maxLength": 512,
+              "type": "string"
+            },
+            "eventTypes": {
+              "minItems": 1,
+              "type": "array",
+              "items": {
+                "additionalProperties": false,
+                "type": "object",
+                "required": ["type", "selector", "schema"],
+                "properties": {
+                  "type": {
+                    "pattern": "^[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*$",
+                    "maxLength": 128,
+                    "type": "string"
+                  },
+                  "selector": {
+                    "additionalProperties": false,
+                    "type": "object",
+                    "required": ["pointer"],
+                    "properties": {
+                      "pointer": {
+                        "pattern": "^(?:/(?:[^/~]|~[01])*)+$",
+                        "maxLength": 512,
+                        "type": "string"
+                      },
+                      "equals": {
+                        "maxLength": 256,
+                        "type": "string"
+                      },
+                      "matches": {
+                        "minLength": 1,
+                        "maxLength": 256,
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "schema": {
+                    "type": "object",
+                    "patternProperties": {
+                      "^(.*)$": {}
+                    }
+                  },
+                  "normalize": {
+                    "pattern": "^[A-Za-z_$][A-Za-z0-9_$]*$",
+                    "type": "string"
+                  },
+                  "safeHeaders": {
+                    "uniqueItems": true,
+                    "type": "array",
+                    "items": {
+                      "pattern": "^[A-Za-z0-9!#$%&'*+.^_`|~-]+$",
+                      "maxLength": 128,
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            },
+            "deduplication": {
               "additionalProperties": false,
               "type": "object",
-              "required": ["responsePointer", "requestParameter"],
+              "required": ["kind"],
               "properties": {
-                "responsePointer": {
-                  "pattern": "^(?:/(?:[^/~]|~[01])*)+$",
-                  "maxLength": 512,
+                "kind": {
+                  "type": "string",
+                  "enum": ["delivery_id_header", "body_pointer", "none"]
+                },
+                "header": {
+                  "pattern": "^[A-Za-z0-9!#$%&'*+.^_`|~-]+$",
+                  "maxLength": 128,
                   "type": "string"
                 },
-                "requestParameter": {
-                  "minLength": 1,
+                "bodyPointer": {
+                  "pattern": "^(?:/(?:[^/~]|~[01])*)+$",
+                  "maxLength": 512,
                   "type": "string"
                 }
               }
             },
-            {
+            "acknowledgement": {
               "additionalProperties": false,
               "type": "object",
-              "required": ["mode", "responsePointer", "itemPointer", "requestParameter"],
+              "required": ["correlationPointer", "template"],
               "properties": {
-                "mode": {
-                  "const": "max_integer_plus_one",
-                  "type": "string"
-                },
-                "responsePointer": {
+                "correlationPointer": {
                   "pattern": "^(?:/(?:[^/~]|~[01])*)+$",
                   "maxLength": 512,
                   "type": "string"
                 },
-                "itemPointer": {
-                  "pattern": "^(?:/(?:[^/~]|~[01])*)+$",
-                  "maxLength": 512,
-                  "type": "string"
-                },
-                "requestParameter": {
+                "template": {
                   "minLength": 1,
+                  "maxLength": 512,
                   "type": "string"
                 }
               }
+            },
+            "reconnect": {
+              "additionalProperties": false,
+              "type": "object",
+              "required": ["maxAttempts", "initialDelaySeconds", "maxDelaySeconds"],
+              "properties": {
+                "maxAttempts": {
+                  "minimum": 1,
+                  "maximum": 100,
+                  "type": "integer"
+                },
+                "initialDelaySeconds": {
+                  "minimum": 1,
+                  "maximum": 300,
+                  "type": "integer"
+                },
+                "maxDelaySeconds": {
+                  "minimum": 1,
+                  "maximum": 3600,
+                  "type": "integer"
+                }
+              }
             }
-          ]
+          }
         }
-      }
+      ]
     },
     "knowledge": {
       "additionalProperties": false,

@@ -154,4 +154,56 @@ describe("drainInbox", () => {
     expect(result).toMatchObject({ dispatched: 0, retrying: 0, undispatched: 0 });
     expect(markFailed).not.toHaveBeenCalled();
   });
+
+  it("normalizes a websocket-sourced delivery through its ingress event types", async () => {
+    const websocketManifest = {
+      metadata: { id: "acme", version: "2.0.0" },
+      profiles: { core: "1.0", events: "1.0" },
+      ingress: {
+        kind: "websocket",
+        operationId: "open-socket",
+        urlPointer: "/url",
+        deduplication: { kind: "body_pointer", bodyPointer: "/envelope_id" },
+        reconnect: { maxAttempts: 5, initialDelaySeconds: 1, maxDelaySeconds: 30 },
+        eventTypes: [
+          {
+            type: "message.created",
+            selector: { pointer: "/type", equals: "message_created" },
+            schema: {
+              type: "object",
+              required: ["type"],
+              properties: { type: { type: "string" } },
+            },
+          },
+        ],
+      },
+    } as unknown as OimManifest;
+    const markNormalized = vi.fn(async () => true);
+
+    const result = await drainInbox({
+      inbox: {
+        claim: async () => [
+          delivery("accepted", {
+            verification: "verified_websocket",
+            eventType: "message.created",
+            encryptedBody: 'enc:{"type":"message_created"}',
+          }),
+        ],
+        markNormalized,
+        markFailed: vi.fn(),
+      } as unknown as InboxProcessor,
+      manifestFor: async () => websocketManifest,
+      decryptPayload: async (encrypted) => Buffer.from(encrypted.replace(/^enc:/, "")),
+      emitIfAuthorized: vi.fn(),
+    });
+
+    expect(result).toMatchObject({ normalized: 1, dispatched: 0 });
+    expect(markNormalized).toHaveBeenCalledWith(
+      "business-1",
+      "delivery-1",
+      "message.created",
+      { type: "message_created" },
+      expect.any(Object)
+    );
+  });
 });

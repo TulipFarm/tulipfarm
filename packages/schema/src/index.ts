@@ -237,6 +237,7 @@ export type {
   OimFixtureSuite,
   OimHandshake,
   OimHook,
+  OimIngress,
   OimKnowledge,
   OimKnowledgeAcl,
   OimKnowledgeAclEntry,
@@ -258,6 +259,7 @@ export type {
   OimVerifiedCredentialBinding,
   OimVerifiedSubject,
   OimVerifiedTenant,
+  OimWebsocketIngress,
 } from "./oim";
 export {
   OIM_AUTH_PROFILE_VERSIONS,

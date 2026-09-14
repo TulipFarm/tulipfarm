@@ -38,7 +38,7 @@ function candidateReview(candidate: Candidate): OimReleaseCandidateReview {
     })),
     ingress: {
       events: manifest.events !== undefined,
-      polling: manifest.ingress !== undefined,
+      polling: manifest.ingress?.kind === "polling",
       knowledge: manifest.knowledge !== undefined,
     },
   };
