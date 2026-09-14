@@ -9,12 +9,16 @@ import { Link } from "~/components/ui/link";
 import * as approvalsContext from "~/lib/approvals-context";
 import * as conversationsContext from "~/lib/conversations-context";
 import { PageChromeProvider } from "~/lib/page-chrome-context";
+import * as scheduledTasksContext from "~/lib/scheduled-tasks-context";
 
 vi.mock("~/lib/approvals-context", () => ({ useApprovals: vi.fn() }));
 const useApprovals = vi.mocked(approvalsContext.useApprovals);
 
 vi.mock("~/lib/conversations-context", () => ({ useConversations: vi.fn() }));
 const useConversations = vi.mocked(conversationsContext.useConversations);
+
+vi.mock("~/lib/scheduled-tasks-context", () => ({ useScheduledTasks: vi.fn() }));
+const useScheduledTasks = vi.mocked(scheduledTasksContext.useScheduledTasks);
 
 const USER = {
   id: "u1",
@@ -74,6 +78,12 @@ beforeEach(() => {
     refresh: vi.fn(),
   });
   useConversations.mockReturnValue(CONVERSATIONS);
+  useScheduledTasks.mockReturnValue({
+    tasks: [],
+    loading: false,
+    error: null,
+    refresh: vi.fn(),
+  });
 });
 
 test("maps deep routes to stable top-bar titles", () => {
@@ -326,6 +336,50 @@ test("caps Recent chats at 20 and links to /chats for the rest", () => {
     expect(screen.queryByRole("link", { name: `Chat ${i}` })).not.toBeInTheDocument();
   }
   expect(screen.getByRole("link", { name: "View all chats →" })).toHaveAttribute("href", "/chats");
+});
+
+test("hides the Scheduled section entirely when there are no scheduled tasks", () => {
+  render(<SidebarStub initialEntries={["/inbox"]} />);
+  expect(screen.queryByRole("heading", { level: 2, name: "Scheduled" })).not.toBeInTheDocument();
+});
+
+test("pins the Scheduled section above Recent, with status and badge", () => {
+  useScheduledTasks.mockReturnValue({
+    tasks: [
+      {
+        id: "r1",
+        slug: "nightly-sync",
+        displayName: "Nightly sync",
+        status: "running",
+        recentRunCount: 0,
+      },
+      {
+        id: "r2",
+        slug: "weekly-report",
+        displayName: "Weekly report",
+        status: "attention",
+        recentRunCount: 9,
+      },
+    ],
+    loading: false,
+    error: null,
+    refresh: vi.fn(),
+  });
+  render(<SidebarStub initialEntries={["/inbox"]} />);
+  const nav = screen.getByRole("navigation", { name: "Main" });
+
+  const heading = within(nav).getByRole("heading", { level: 2, name: "Scheduled" });
+  expect(heading).toBeInTheDocument();
+
+  const link = within(nav).getByRole("link", { name: /Weekly report/ });
+  expect(link).toHaveAttribute("href", "/routines/weekly-report");
+  expect(within(link).getByText("9 new")).toBeInTheDocument();
+  expect(within(link).getByText("Needs attention")).toBeInTheDocument();
+
+  expect(within(nav).getByRole("link", { name: /Nightly sync/ })).toHaveAttribute(
+    "href",
+    "/routines/nightly-sync"
+  );
 });
 
 /* Three group headings, one behaviour: the word is the disclosure, in every group. */
