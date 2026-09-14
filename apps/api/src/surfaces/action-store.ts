@@ -182,7 +182,10 @@ function validateResolution(
   }
   if (handle.stepUp && !input.stepUpSatisfied) return { ok: false, code: "step_up_required" };
   const value = object(input.value);
-  if (!value || surfaceSchemaIssues(handle.inputSchema, value).length > 0) {
+  if (
+    !value ||
+    surfaceSchemaIssues(handle.inputSchema, interactionInput(handle, value)).length > 0
+  ) {
     return { ok: false, code: "invalid_input" };
   }
   return {

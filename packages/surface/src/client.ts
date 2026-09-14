@@ -31,6 +31,9 @@ export * from "./sandbox";
 
 import type { ResolvedSurfaceViewNode } from "./soul";
 
+export type { SurfaceTextAction, SurfaceTextRender } from "./render-text";
+export { renderSurfaceText, truncateSurfaceText } from "./render-text";
+
 export type {
   FormSubmissionResult,
   GovernedForm,

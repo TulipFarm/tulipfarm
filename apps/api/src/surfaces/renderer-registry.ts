@@ -8,12 +8,16 @@ import {
   type SurfaceTarget,
   validateSoulSurfaceComponent,
 } from "@tulipfarm/surface";
+import { discordMessageManifest } from "@tulipfarm/surface-discord/manifest";
 import { githubCheckRunManifest, githubCommentManifest } from "@tulipfarm/surface-github/manifest";
+import { googleChatMessageManifest } from "@tulipfarm/surface-google-chat/manifest";
 import {
   slackHomeManifest,
   slackMessageManifest,
   slackModalManifest,
 } from "@tulipfarm/surface-slack/manifest";
+import { teamsMessageManifest } from "@tulipfarm/surface-teams/manifest";
+import { telegramMessageManifest } from "@tulipfarm/surface-telegram/manifest";
 import { surfaceWebManifest } from "@tulipfarm/surface-web/manifest";
 import type { SurfacePresentationPort } from "@tulipfarm/tool-host";
 
@@ -24,6 +28,10 @@ export const SURFACE_RENDERER_MANIFESTS: readonly SurfaceRendererManifest[] = Ob
   slackHomeManifest,
   githubCommentManifest,
   githubCheckRunManifest,
+  discordMessageManifest,
+  teamsMessageManifest,
+  googleChatMessageManifest,
+  telegramMessageManifest,
 ]);
 
 export const surfaceRendererRegistry = createSurfaceRegistry(SURFACE_RENDERER_MANIFESTS);

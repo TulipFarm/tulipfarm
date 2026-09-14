@@ -21,6 +21,7 @@ renderer interfaces, and declarative Soul component validation.
 | `src/contracts.ts` | Renderer and interaction contracts. |
 | `src/forms.ts` | Form component contracts. |
 | `src/registry.ts` | Component registry helpers. |
+| `src/render-text.ts` | Deterministic plain-text degradation shared by channel renderers. |
 | `src/schema.ts` | Shared schema helpers. |
 | `src/soul.ts` | Declarative Soul component validation; Code-view gates and presentation resolution. |
 | `src/sandbox.ts` | The host-to-frame contract for Code views: path, `sandbox` grant, CSP, messages. |

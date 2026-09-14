@@ -122,4 +122,45 @@ describe("MemorySurfaceActionStore", () => {
       })
     ).resolves.toEqual({ ok: false, code: "invalid_input" });
   });
+
+  it("validates input after merging the value bound to the handle", async () => {
+    const store = new MemorySurfaceActionStore();
+    const handle = await store.create({
+      artifactId: "preference",
+      revision: 1,
+      action: { event: "preference.selected", payload: { value: "bangalore_city" } },
+      inputSchema: Type.Object(
+        {
+          value: Type.Union([
+            Type.Literal("coffee_aroma"),
+            Type.Literal("bangalore_city"),
+            Type.Literal("morning_sunrise"),
+          ]),
+        },
+        { additionalProperties: false }
+      ),
+      audience: ["user:1"],
+      target: { channel: "discord", surface: "message" },
+      destination: "channel:1",
+      conversationId: "conversation:1",
+      runId: null,
+      waitId: null,
+      guardrailRevision: "g1",
+      expiresAt: new Date("2030-01-01T00:00:00.000Z"),
+    });
+
+    await expect(
+      store.resolve({
+        handle: handle.handle,
+        principal: "user:1",
+        value: {},
+        currentGuardrailRevision: "g1",
+        stepUpSatisfied: true,
+        now: new Date("2029-01-01T00:00:00.000Z"),
+      })
+    ).resolves.toMatchObject({
+      ok: true,
+      interaction: { input: { value: "bangalore_city" } },
+    });
+  });
 });

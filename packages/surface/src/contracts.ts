@@ -29,6 +29,22 @@ export const SurfaceTargetSchema = Type.Union([
     },
     { additionalProperties: false }
   ),
+  Type.Object(
+    { channel: Type.Literal("discord"), surface: Type.Literal("message") },
+    { additionalProperties: false }
+  ),
+  Type.Object(
+    { channel: Type.Literal("teams"), surface: Type.Literal("message") },
+    { additionalProperties: false }
+  ),
+  Type.Object(
+    { channel: Type.Literal("google-chat"), surface: Type.Literal("message") },
+    { additionalProperties: false }
+  ),
+  Type.Object(
+    { channel: Type.Literal("telegram"), surface: Type.Literal("message") },
+    { additionalProperties: false }
+  ),
 ]);
 
 export type SurfaceTarget = Static<typeof SurfaceTargetSchema>;
