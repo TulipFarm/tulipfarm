@@ -276,6 +276,7 @@ export function ChatPanel({
               <Transcript
                 messages={messages}
                 status={status}
+                planInSidebar={activePlan !== undefined}
                 mentions={entries}
                 onApprove={approve}
                 onRegenerate={regenerate}

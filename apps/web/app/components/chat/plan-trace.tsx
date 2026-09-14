@@ -154,8 +154,6 @@ function PlanCallRow({ call, position }: { call: PlannedCall; position: number }
         <TraceStep
           status="pending"
           label={call.label ?? call.tool}
-          value={call.tool}
-          mono
           // A step that was planned and then never ran is spent, not waiting; dimming it says so
           // without spending a fifth glyph on a state the reader meets once in a while.
           className={call.status === "skipped" ? "opacity-50" : undefined}

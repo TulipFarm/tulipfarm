@@ -395,6 +395,7 @@ function MessageRow({
   message,
   status,
   isLast,
+  planInSidebar,
   mentions,
   onApprove,
   onRegenerate,
@@ -406,6 +407,9 @@ function MessageRow({
   message: ChatMessage;
   status: ChatStatus;
   isLast: boolean;
+  /** Whether `PlanSidebar` is already showing this Turn's plan, so the inline copy defers to it
+      on desktop and only remains the fallback below the `md` breakpoint. */
+  planInSidebar?: boolean;
   mentions?: MentionEntry[];
   onApprove: (approvalId: string, decision: "approve" | "deny") => void | Promise<void>;
   onRegenerate?: () => void;
@@ -461,12 +465,17 @@ function MessageRow({
           return <LoadingState key="surface-building" label="Rendering" />;
         }
         if (node.kind === "plan") {
+          // Only the last, still-open message can be the plan `PlanSidebar` is currently showing
+          // (see `findActivePlan`) — anything sealed or earlier in the transcript is a finished
+          // plan with no sidebar copy to defer to, so it always renders inline.
+          const ownedBySidebar = planInSidebar === true && isLast && !message.sealed;
           return (
-            <PlanTrace
-              key={`plan-${node.index}`}
-              rounds={node.rounds}
-              pending={streaming && nodeIndex === nodes.length - 1}
-            />
+            <div key={`plan-${node.index}`} className={ownedBySidebar ? "md:hidden" : undefined}>
+              <PlanTrace
+                rounds={node.rounds}
+                pending={streaming && nodeIndex === nodes.length - 1}
+              />
+            </div>
           );
         }
         if (node.kind === "tool-run") {
@@ -530,6 +539,7 @@ function Loader() {
 export function Transcript({
   messages,
   status,
+  planInSidebar,
   mentions,
   onApprove,
   onRegenerate,
@@ -540,6 +550,9 @@ export function Transcript({
 }: {
   messages: ChatMessage[];
   status: ChatStatus;
+  /** Whether `PlanSidebar` is currently mounted for this Chat, so the last message's inline plan
+      can defer to it on desktop (see `MessageRow`). */
+  planInSidebar?: boolean;
   mentions?: MentionEntry[];
   onApprove: (approvalId: string, decision: "approve" | "deny") => void | Promise<void>;
   onRegenerate?: () => void;
@@ -611,6 +624,7 @@ export function Transcript({
                 message={m}
                 status={status}
                 isLast={isLast}
+                planInSidebar={planInSidebar}
                 mentions={mentions}
                 onApprove={onApprove}
                 onRegenerate={onRegenerate}

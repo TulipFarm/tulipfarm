@@ -63,11 +63,6 @@ export function ToolStepRow({
         // Only a row labelled by the call itself can restate that label in the present tense. A
         // planned step's label is a promise, and promises do not have a running form.
         activeLabel={label === undefined ? describeToolCallActive(ran) : undefined}
-        // The raw Tool identifier is debug chrome, not a participant-facing fact — an admin gets
-        // it as a diagnostic aid (the same gate that unlocks the Credential link below), and
-        // everyone else sees only the human summary the row already leads with.
-        value={isAdmin ? part.toolName : undefined}
-        mono
         holdOpenOnError={holdOpenOnError}
         className={className}
         marker={
@@ -172,7 +167,7 @@ function detailOf(
        * to find out what ran on their behalf.
        */}
       {subagent === undefined ? null : <SubagentPanel part={part} />}
-      {inspectable ? <ToolInspector part={part} /> : null}
+      {inspectable ? <ToolInspector part={part} isAdmin={isAdmin} /> : null}
     </div>
   );
 }
