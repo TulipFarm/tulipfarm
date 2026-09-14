@@ -36,6 +36,27 @@ describe("discordMessageRenderer", () => {
       discordMessageRenderer.render(artifact, { destination: "channel:1" }).content
     ).toHaveLength(2_000);
   });
+
+  it("splits ten actions into rows of five buttons", () => {
+    const artifact = createSurfaceArtifact({
+      id: "actions",
+      component: { name: "Actions", version: "1.0" },
+      props: {
+        actions: Array.from({ length: 10 }, (_, index) => ({
+          label: `Action ${index + 1}`,
+          action: { event: `action.${index + 1}` },
+        })),
+      },
+      target: { channel: "discord", surface: "message" },
+      audience: ["user:1"],
+      classification: "internal",
+    });
+    const payload = discordMessageRenderer.render(artifact, {
+      destination: "channel:1",
+      actionHandleFor: () => "opaque",
+    });
+    expect(payload.components?.map((row) => row.components.length)).toEqual([5, 5]);
+  });
 });
 
 function actionHandleFor(

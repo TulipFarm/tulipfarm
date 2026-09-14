@@ -26,4 +26,17 @@ describe("teamsMessageRenderer", () => {
       data: { action: "opaque", value: "yes" },
     });
   });
+
+  it("keeps multi-byte card payloads below the declared byte limit", () => {
+    const artifact = createSurfaceArtifact({
+      id: "text",
+      component: { name: "Text", version: "1.0" },
+      props: { text: "界".repeat(8_000) },
+      target: { channel: "teams", surface: "message" },
+      audience: ["user:1"],
+      classification: "internal",
+    });
+    const payload = teamsMessageRenderer.render(artifact, { destination: "chat:1" });
+    expect(Buffer.byteLength(JSON.stringify(payload), "utf8")).toBeLessThanOrEqual(28_000);
+  });
 });

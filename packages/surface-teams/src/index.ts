@@ -7,8 +7,14 @@ import {
 import { teamsMessageManifest } from "./manifest";
 
 function truncateUtf8(value: string, maxBytes: number): string {
-  let output = value;
-  while (Buffer.byteLength(output, "utf8") > maxBytes) output = output.slice(0, -1);
+  let output = "";
+  let bytes = 0;
+  for (const character of value) {
+    const characterBytes = Buffer.byteLength(character, "utf8");
+    if (bytes + characterBytes > maxBytes) break;
+    output += character;
+    bytes += characterBytes;
+  }
   return output;
 }
 
