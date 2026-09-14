@@ -1,4 +1,4 @@
-import { type MetaFunction, useNavigate } from "@remix-run/react";
+import { type MetaFunction, useLocation, useNavigate } from "@remix-run/react";
 import { type FormEvent, useEffect, useState } from "react";
 import { Button } from "~/components/ui/button";
 import { ApiError, acceptInvite, previewInvite } from "~/lib/api";
@@ -9,8 +9,15 @@ const inputClass =
   "w-full rounded-sm border border-border bg-background px-3 py-2 text-sm outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:opacity-60";
 
 /** The invite token stays in the URL fragment, so browsers never send it to servers. */
-function tokenFromHash(): string {
-  const hash = window.location.hash.startsWith("#") ? window.location.hash.slice(1) : "";
+function tokenFromHash(rawHash?: string): string {
+  const hash =
+    rawHash !== undefined
+      ? rawHash.startsWith("#")
+        ? rawHash.slice(1)
+        : rawHash
+      : typeof window !== "undefined" && window.location.hash.startsWith("#")
+        ? window.location.hash.slice(1)
+        : "";
   return new URLSearchParams(hash).get("token") ?? "";
 }
 
@@ -24,7 +31,8 @@ function isDeadLink(err: unknown): boolean {
  */
 export default function AcceptInvite() {
   const navigate = useNavigate();
-  const [token] = useState(tokenFromHash);
+  const location = useLocation();
+  const [token, setToken] = useState(() => tokenFromHash(location.hash));
   const [email, setEmail] = useState<string | null>(null);
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
@@ -34,12 +42,35 @@ export default function AcceptInvite() {
   const [dead, setDead] = useState(false);
 
   useEffect(() => {
+    function onHashChange() {
+      setToken(tokenFromHash(window.location.hash));
+    }
+    window.addEventListener("hashchange", onHashChange);
+    return () => {
+      window.removeEventListener("hashchange", onHashChange);
+    };
+  }, []);
+
+  useEffect(() => {
+    setToken(tokenFromHash(location.hash));
+  }, [location.hash]);
+
+  useEffect(() => {
+    setEmail(null);
+    setPassword("");
+    setConfirmPassword("");
+    setError(null);
+    setDead(false);
+    setBusy(false);
+
     if (!token) {
       setError("this link is missing its invite token");
       setDead(true);
       setLoading(false);
       return;
     }
+
+    setLoading(true);
     let cancelled = false;
     previewInvite(token)
       .then((offer) => {

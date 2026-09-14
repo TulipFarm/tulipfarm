@@ -1,5 +1,5 @@
 import { createRemixStub } from "@remix-run/testing";
-import { render, screen, waitFor } from "@testing-library/react";
+import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, expect, test, vi } from "vitest";
 import * as apiLib from "~/lib/api";
@@ -92,6 +92,66 @@ test("mismatched passwords are caught before the API is called", async () => {
 
   expect(await screen.findByRole("alert")).toHaveTextContent("do not match");
   expect(acceptInvite).not.toHaveBeenCalled();
+});
+
+test("navigating from a missing-token invite page to a valid fragment runs preview and shows form", async () => {
+  previewInvite.mockResolvedValue({ email: "fresh@example.com", expiresAt: EXPIRES });
+
+  renderAccept();
+  expect(await screen.findByRole("alert")).toHaveTextContent("missing its invite token");
+  expect(previewInvite).not.toHaveBeenCalled();
+
+  act(() => {
+    window.location.hash = "#token=tok-new";
+    window.dispatchEvent(new HashChangeEvent("hashchange"));
+  });
+
+  expect(await screen.findByText("fresh@example.com")).toBeTruthy();
+  expect(screen.queryByRole("alert")).toBeNull();
+  expect(screen.getByLabelText("password")).toBeTruthy();
+  expect(previewInvite).toHaveBeenCalledWith("tok-new");
+});
+
+test("replacing an invalid or expired token with a valid token updates the mounted page", async () => {
+  window.location.hash = "#token=tok-dead";
+  previewInvite.mockRejectedValueOnce(new ApiError(404, "this invite link is no longer valid"));
+
+  renderAccept();
+  expect(await screen.findByRole("alert")).toHaveTextContent("no longer valid");
+
+  previewInvite.mockResolvedValueOnce({ email: "recovered@example.com", expiresAt: EXPIRES });
+  act(() => {
+    window.location.hash = "#token=tok-valid";
+    window.dispatchEvent(new HashChangeEvent("hashchange"));
+  });
+
+  expect(await screen.findByText("recovered@example.com")).toBeTruthy();
+  expect(screen.queryByRole("alert")).toBeNull();
+  expect(screen.getByLabelText("password")).toBeTruthy();
+});
+
+test("replacing a valid token clears stale identity, form, and error state", async () => {
+  window.location.hash = "#token=tok-1";
+  previewInvite.mockResolvedValueOnce({ email: "first@example.com", expiresAt: EXPIRES });
+
+  renderAccept();
+  expect(await screen.findByText("first@example.com")).toBeTruthy();
+
+  await userEvent.type(screen.getByLabelText("password"), "initial-pass");
+  await userEvent.type(screen.getByLabelText("confirm password"), "mismatched-pass");
+  await userEvent.click(screen.getByRole("button", { name: /set password/i }));
+  expect(await screen.findByRole("alert")).toHaveTextContent("do not match");
+
+  previewInvite.mockResolvedValueOnce({ email: "second@example.com", expiresAt: EXPIRES });
+  act(() => {
+    window.location.hash = "#token=tok-2";
+    window.dispatchEvent(new HashChangeEvent("hashchange"));
+  });
+
+  expect(await screen.findByText("second@example.com")).toBeTruthy();
+  expect(screen.queryByRole("alert")).toBeNull();
+  expect((screen.getByLabelText("password") as HTMLInputElement).value).toBe("");
+  expect((screen.getByLabelText("confirm password") as HTMLInputElement).value).toBe("");
 });
 
 test("changing a password sends the current one alongside the new", async () => {
