@@ -77,6 +77,13 @@ test("saves only after an edit, and trims what it sends", async () => {
   );
 });
 
+test("exposes an accessible name for the currency conversion rate input", () => {
+  renderPage();
+  const rateInput = screen.getByLabelText(/conversion rate per 1 usd/i);
+  expect(rateInput).toBeInTheDocument();
+  expect(rateInput).toHaveAttribute("type", "number");
+});
+
 test("a non-admin reads the profile but cannot edit it", () => {
   admin = false;
   renderPage();
