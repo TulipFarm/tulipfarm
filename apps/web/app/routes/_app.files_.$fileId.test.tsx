@@ -3,7 +3,7 @@ import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { FileVersion, LibraryFile } from "~/lib/files";
-import FileDetailRoute from "./_app.files.$fileId";
+import FileDetailRoute from "./_app.files_.$fileId";
 
 const replaceFile = vi.fn();
 const restoreFileVersion = vi.fn();
