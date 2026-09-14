@@ -9,7 +9,7 @@ import { AppShell } from "~/components/app-sidebar";
 import { OnboardingCompanion } from "~/components/onboarding/companion";
 import { GlobalPending } from "~/components/shell/global-pending";
 import { GlobalConnectionStatus } from "~/components/shell/states";
-import { ErrorState } from "~/components/states";
+import { ErrorState, NotFoundState } from "~/components/states";
 import { ApiError, getSession } from "~/lib/api";
 import { ApprovalsProvider } from "~/lib/approvals-context";
 import { CompanionProvider } from "~/lib/companion-context";
@@ -86,6 +86,13 @@ export default function AppLayout() {
 
 export function ErrorBoundary() {
   const error = useRouteError();
+  // A child route's clientLoader can throw a bare Response (e.g. the dev-only /design-guide
+  // gate's 404) rather than an ApiError, since it never called the API. Treating that as an
+  // untyped Error left the boundary reporting a transport failure and :4010 troubleshooting
+  // instead of the not-found state the child route deliberately chose.
+  if (error instanceof Response && error.status === 404) {
+    return <NotFoundState section="TulipFarm" />;
+  }
   const status = error instanceof ApiError ? error.status : undefined;
   const message = error instanceof Error ? error.message : undefined;
   return <ErrorState section="TulipFarm" status={status} message={message} />;
