@@ -218,6 +218,7 @@ export default function BusinessProfilePage() {
               type="number"
               min={0}
               step="any"
+              aria-label="Conversion rate per 1 USD"
               value={draft.businessCurrency === "USD" ? 1 : draft.businessCurrencyRate}
               disabled={draft.businessCurrency === "USD"}
               onChange={(e) => set("businessCurrencyRate", Number(e.target.value))}
