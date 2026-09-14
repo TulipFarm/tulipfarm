@@ -68,6 +68,7 @@ export async function generatePersonalized(
   return object;
 }
 
+export { ONBOARDING_FALLBACK } from "./fallback";
 export { ONBOARDING_SYSTEM_PROMPT } from "./prompt";
 export {
   type OnboardingSoulState,

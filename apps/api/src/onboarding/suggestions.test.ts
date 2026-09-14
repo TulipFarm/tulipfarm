@@ -1,6 +1,6 @@
+import { ONBOARDING_FALLBACK } from "@tulipfarm/built-in-agents";
 import type { SoulLoader } from "@tulipfarm/soul";
 import { describe, expect, it } from "vitest";
-import { CATALOG } from "./catalog";
 import { deriveSuggestions } from "./suggestions";
 
 /** Minimal SoulLoader slice: deriveSuggestions only reads `.resources`. */
@@ -10,51 +10,14 @@ function soul(resourceNames: string[]): Pick<SoulLoader, "resources"> {
 }
 
 describe("deriveSuggestions", () => {
-  it("returns the full catalog when the soul has no resources (empty soul)", () => {
-    const out = deriveSuggestions(soul([]));
-    expect(out).toHaveLength(CATALOG.length);
-    expect(out.map((s) => s.id)).toEqual(CATALOG.map((e) => e.id));
-  });
-
-  it("hides an entry whose resource already exists (soul keys are singular)", () => {
+  it("returns the full fallback catalog unconditionally", () => {
     const out = deriveSuggestions(soul(["ticket"]));
-    expect(out.map((s) => s.id)).not.toContain("tickets");
-    expect(out).toHaveLength(CATALOG.length - 1);
+    expect(out).toHaveLength(ONBOARDING_FALLBACK.length);
+    expect(out.map((s) => s.id)).toEqual(ONBOARDING_FALLBACK.map((e) => e.id));
   });
 
-  it("hides the employee suggestion once the employee resource exists", () => {
-    const out = deriveSuggestions(soul(["employee"]));
-    expect(out.map((s) => s.id)).not.toContain("employees");
-  });
-
-  it("hides the project suggestion once the project resource exists", () => {
-    const out = deriveSuggestions(soul(["project"]));
-    expect(out.map((s) => s.id)).not.toContain("projects");
-  });
-
-  it("keeps entries whose resources are absent", () => {
-    const out = deriveSuggestions(soul(["ticket"]));
-    expect(out.map((s) => s.id)).toContain("leads");
-    expect(out.map((s) => s.id)).toContain("projects");
-  });
-
-  it("hides multiple entries when several matching resources exist", () => {
-    const out = deriveSuggestions(soul(["ticket", "lead", "invoice"]));
-    const ids = out.map((s) => s.id);
-    expect(ids).not.toContain("tickets");
-    expect(ids).not.toContain("leads");
-    expect(ids).not.toContain("invoices");
-    expect(out).toHaveLength(CATALOG.length - 3);
-  });
-
-  it("does not hide an entry for the old, buggy plural resource key", () => {
-    const out = deriveSuggestions(soul(["tickets"]));
-    expect(out.map((s) => s.id)).toContain("tickets");
-  });
-
-  it("projects to { id, label, prompt } and omits the resources match key", () => {
+  it("projects to { id, label, prompt } and has expected shape", () => {
     const [first] = deriveSuggestions(soul([]));
     expect(Object.keys(first).sort()).toEqual(["id", "label", "prompt"]);
-    expect(first).not.toHaveProperty("resources");
   });
 });
