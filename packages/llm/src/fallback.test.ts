@@ -540,6 +540,46 @@ describe("FallbackModel.doStream", () => {
     expect(outcomes).toEqual(["cancelled", "released"]);
   });
 
+  it("settles cancellation, not a failure, when the abort reason is not an Error", async () => {
+    // A caller may abort with any reason (`AbortController.abort(reason)`); a non-Error reason
+    // (e.g. a plain string) reaches the model as the literal rejection once it round-trips through
+    // `fetch`, never wrapped in a DOMException named "AbortError". Issue #917: this used to trip
+    // the provider breaker on every participant Stop, starving the very next Turn.
+    const controller = new AbortController();
+    const reason = "agent_loop_cancelled";
+    const m1 = makeModel({
+      doStream: vi.fn().mockImplementation(() => {
+        controller.abort(reason);
+        return Promise.reject(reason);
+      }),
+    });
+    const outcomes: string[] = [];
+    const gate: FallbackCallGate = {
+      async acquire() {
+        return {
+          succeeded() {
+            outcomes.push("succeeded");
+          },
+          failed(reason) {
+            outcomes.push(`failed:${reason}`);
+          },
+          cancelled() {
+            outcomes.push("cancelled");
+          },
+          release() {
+            outcomes.push("released");
+          },
+        };
+      },
+    };
+    const fallback = new FallbackModel([m1], undefined, undefined, gate);
+
+    await expect(
+      fallback.doStream({ ...opts, abortSignal: controller.signal } as LanguageModelV4CallOptions)
+    ).rejects.toBe(reason);
+    expect(outcomes).toEqual(["cancelled", "released"]);
+  });
+
   it("falls back on a non-retryable 401 error before any chunk", async () => {
     const err = apiError(401, false);
     const m1 = makeModel({ doStream: vi.fn().mockRejectedValue(err) });
@@ -775,6 +815,14 @@ describe("isHardFailure", () => {
     expect(isHardFailure(apiError(401, false))).toBe(false);
     expect(isHardFailure(apiError(404, false))).toBe(false);
     expect(isHardFailure(apiError(400, false))).toBe(false);
+  });
+
+  it("trusts an aborted signal over a non-Error rejection value", () => {
+    const controller = new AbortController();
+    controller.abort("agent_loop_cancelled");
+    expect(isHardFailure("agent_loop_cancelled", controller.signal)).toBe(true);
+    expect(isHardFailure("agent_loop_cancelled")).toBe(false);
+    expect(isHardFailure("agent_loop_cancelled", new AbortController().signal)).toBe(false);
   });
 
   it("classifies retryable API errors, network and unknown errors as transient", () => {

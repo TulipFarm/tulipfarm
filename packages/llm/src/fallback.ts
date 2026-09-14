@@ -125,10 +125,20 @@ function isAbortError(err: unknown): boolean {
   return err instanceof Error && err.name === "AbortError";
 }
 
-/** Caller cancellation and budget-store faults end the request; provider failures may fall back. */
-export function isHardFailure(err: unknown): boolean {
+/**
+ * Caller cancellation and budget-store faults end the request; provider failures may fall back.
+ *
+ * `signal` is checked independently of `err`'s shape: `AbortController.abort(reason)` lets a
+ * caller pass any `reason`, and a non-`Error` reason (e.g. a plain string, as the agent loop's
+ * stop button uses) reaches here as the literal rejection value once it round-trips through
+ * `fetch`, never wrapped in a `DOMException` named `"AbortError"`. Trusting only the error's shape
+ * misreads that stop as a provider failure and trips the breaker for every other caller of the
+ * same link.
+ */
+export function isHardFailure(err: unknown, signal?: AbortSignal): boolean {
   return (
     isAbortError(err) ||
+    signal?.aborted === true ||
     err instanceof FallbackBudgetInfrastructureError ||
     (typeof err === "object" &&
       err !== null &&
@@ -318,8 +328,11 @@ export class FallbackModel implements LanguageModelV4 {
         lease = settleOnce(
           await this.gate?.acquire(this.providerKey(index, model), options.abortSignal)
         );
-        const admitted = await this.callWithRateLimitRetry(index, model, () =>
-          model.doGenerate(options)
+        const admitted = await this.callWithRateLimitRetry(
+          index,
+          model,
+          () => model.doGenerate(options),
+          options.abortSignal
         );
         const generated = admitted.value;
         await admitted.budget?.settle({
@@ -330,7 +343,7 @@ export class FallbackModel implements LanguageModelV4 {
         this.commit(index, model, admitted.attemptId);
         return generated;
       } catch (err) {
-        if (isHardFailure(err)) {
+        if (isHardFailure(err, options.abortSignal)) {
           lease?.cancelled();
           throw err;
         }
@@ -353,7 +366,8 @@ export class FallbackModel implements LanguageModelV4 {
   private async callWithRateLimitRetry<T>(
     index: number,
     model: LanguageModelV4,
-    call: () => PromiseLike<T>
+    call: () => PromiseLike<T>,
+    signal?: AbortSignal
   ): Promise<{
     readonly value: T;
     readonly budget: FallbackAttemptBudgetLease | undefined;
@@ -376,7 +390,7 @@ export class FallbackModel implements LanguageModelV4 {
       } catch (err) {
         this.recordAttemptUsage(attemptId, index, model, [], startedAt);
         await budget?.settle(undefined);
-        if (isHardFailure(err)) throw err;
+        if (isHardFailure(err, signal)) throw err;
         if (
           classifyProviderError(err) !== "model_rate_limited" ||
           attempt >= RATE_LIMIT_MAX_RETRIES
@@ -404,15 +418,18 @@ export class FallbackModel implements LanguageModelV4 {
         lease = settleOnce(
           await this.gate?.acquire(this.providerKey(index, model), options.abortSignal)
         );
-        const admitted = await this.callWithRateLimitRetry(index, model, () =>
-          model.doStream(options)
+        const admitted = await this.callWithRateLimitRetry(
+          index,
+          model,
+          () => model.doStream(options),
+          options.abortSignal
         );
         result = admitted.value;
         budget = admitted.budget;
         attemptId = admitted.attemptId;
         startedAt = admitted.startedAt;
       } catch (err) {
-        if (isHardFailure(err)) {
+        if (isHardFailure(err, options.abortSignal)) {
           lease?.cancelled();
           lease?.release();
           throw err;
@@ -453,7 +470,7 @@ export class FallbackModel implements LanguageModelV4 {
         reader.cancel().catch(() => {});
         const usage = attemptUsage(head);
         this.recordAttemptUsage(attemptId, index, model, head, startedAt);
-        if (isHardFailure(err)) {
+        if (isHardFailure(err, options.abortSignal)) {
           lease?.cancelled();
           lease?.release();
           await budget?.settle(usage);
@@ -554,7 +571,7 @@ export class FallbackModel implements LanguageModelV4 {
           chunk = await reader.read();
         } catch (err) {
           detachAbort();
-          if (isHardFailure(err)) {
+          if (isHardFailure(err, signal)) {
             lease?.cancelled();
           } else {
             lease?.failed(classifyProviderError(err));
