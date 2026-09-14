@@ -1,0 +1,126 @@
+{
+  "id": "routine-forge-resolves-named-team-not-uuid",
+  "tier": "l2",
+  "agent": "triage",
+  "input": [
+    {
+      "role": "user",
+      "content": "Every morning send a summary report. This automation should belong to the Marketing team."
+    }
+  ],
+  "tools": [
+    {
+      "name": "team_list",
+      "description": "List the business's Teams by human-readable name, with `recommendedTeamId` naming the Team an owned asset (Agent, Skill, Routine) would be auto-assigned to if you forged one right now. Call this to resolve a Team the user named in conversation, or to offer them a choice by name. Never ask a user to type, paste, or confirm a raw Team id/UUID — resolve it with this Tool instead, and when no Team is named at all, just omit `ownership` on the forging Tool and let it default.",
+      "mutating": false,
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {}
+      }
+    },
+    {
+      "name": "routine_forge",
+      "description": "Create or update a ROUTINE (a scheduled/triggered automation) in the soul repo. Use this, not skill_create, whenever the user asks to 'create a routine' / 'automate X' / 'every morning do Y' / 'when X happens do Y'. Updating an existing Routine replaces its whole document, so call `routine_get` first and forge the full definition back, or every State and Trigger you did not restate is deleted. `definition` MUST be a canonical published Routine document: apiVersion `tulipfarm.ai/v1`, kind `Routine`, and metadata with id, slug (matching name), schemaVersion, authoredVersion, and lifecycle `published`. `definition.spec.states` MUST be an array of State objects with name and type (not an object/map). Triggers belong to `definition.spec.triggers`, each an object with a slug-shaped `name` and a `type`; there is no separate Trigger document and no `triggers` argument. cron, interval, and datetime Triggers schedule themselves once published, and the Routines UI can already start a Run without any Trigger, so omit `spec.triggers` entirely for a Routine that only runs on demand. Load the routine-forge Skill for complete canonical examples before calling this. The Tool validates the document and commits it to the Soul repo. `spec.ownership` is OPTIONAL: omit it entirely and the Routine is auto-assigned to your own Team, falling back to the workspace's Everyone Team if you have none — never ask the user for a Team id. If the user names a specific Team by name, call `team_list` to resolve it to an id first; never ask a user to type or paste a Team UUID.",
+      "mutating": true,
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["name", "definition"],
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Routine slug (directory under soul/routines/): lowercase, digits, hyphens."
+          },
+          "definition": {
+            "type": "object",
+            "description": "Canonical published Routine definition. metadata.slug must match name. spec.states must be an array of State objects [{ name, type, ... }]. Triggers live in spec.triggers on this same document."
+          }
+        }
+      }
+    }
+  ],
+  "toolResults": [
+    {
+      "name": "team_list",
+      "output": {
+        "teams": [
+          {
+            "id": "team-everyone",
+            "name": "Everyone",
+            "slug": "everyone",
+            "isEveryone": true,
+            "isMember": true
+          },
+          {
+            "id": "team-marketing",
+            "name": "Marketing",
+            "slug": "marketing",
+            "isEveryone": false,
+            "isMember": false
+          }
+        ],
+        "recommendedTeamId": "team-everyone"
+      }
+    },
+    {
+      "name": "routine_forge",
+      "output": {
+        "name": "morning-summary",
+        "committed": true,
+        "triggerSlugs": ["morning-summary-cron"]
+      }
+    }
+  ],
+  "script": [
+    {
+      "kind": "tool_calls",
+      "calls": [{ "callId": "list-teams", "name": "team_list", "arguments": {} }]
+    },
+    {
+      "kind": "tool_calls",
+      "calls": [
+        {
+          "callId": "forge-routine",
+          "name": "routine_forge",
+          "arguments": {
+            "name": "morning-summary",
+            "definition": {
+              "apiVersion": "tulipfarm.ai/v1",
+              "kind": "Routine",
+              "metadata": {
+                "id": "morning-summary",
+                "slug": "morning-summary",
+                "schemaVersion": 1,
+                "authoredVersion": 1,
+                "lifecycle": "published"
+              },
+              "spec": {
+                "ownership": { "owners": [{ "teamId": "team-marketing" }] },
+                "states": [{ "name": "send-summary", "type": "agent" }],
+                "triggers": [{ "name": "morning-summary-cron", "type": "cron" }]
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "kind": "text",
+      "text": "Created the daily automation, owned by the Marketing team."
+    }
+  ],
+  "expect": [
+    { "kind": "tool_called", "name": "team_list" },
+    { "kind": "tool_called", "name": "routine_forge" },
+    { "kind": "tool_call_order", "names": ["team_list", "routine_forge"] },
+    {
+      "kind": "tool_argument_equals",
+      "name": "routine_forge",
+      "path": "definition.spec.ownership.owners.0.teamId",
+      "value": "team-marketing"
+    },
+    { "kind": "loop_status", "status": "completed" }
+  ]
+}

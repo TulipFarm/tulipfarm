@@ -1095,6 +1095,7 @@ describe("PLATFORM_TOOLS registry", () => {
       "spawn_subagent",
       "trigger_routine",
       "routine_forge",
+      "team_list",
       "routine_picker",
       "routine_get",
       "routine_run_get",
