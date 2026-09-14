@@ -3,30 +3,32 @@
 This integration connects one Jira Cloud site to TulipFarm. Its agents can search and read issues,
 then create, update, prioritize, estimate, or move issues only after the required approval.
 
-## 1. Create an Atlassian OAuth integration
+## 1. Create an Atlassian API token
 
-1. Open the [Atlassian developer console](https://developer.atlassian.com/console/myapps/) and
-   create an **OAuth 2.0 integration** for this TulipFarm deployment.
-2. Under **Permissions**, add Jira API read and write scopes. The token needs read access to search
-   issues and their history, and write access to create, edit, and transition issues.
-3. Authorize the integration for the Jira Cloud site you want TulipFarm to use, then copy a current
-   OAuth access token.
+1. Sign in to the Atlassian account whose Jira access this Connection should use.
+2. Open [API tokens](https://id.atlassian.com/manage-profile/security/api-tokens).
+3. Create and copy an API token **without scopes**.
 
-## 2. Find the Cloud ID
+This Integration calls your Jira site's REST API directly. Scoped Atlassian API tokens use the
+`api.atlassian.com` gateway and a Cloud ID, so they are not interchangeable with the token this
+Integration expects.
 
-While signed in to Jira, open:
+## 2. Find the site host
 
-```
-https://<your-site>.atlassian.net/_edge/tenant_info
-```
-
-Copy the `cloudId` value. TulipFarm uses it with Atlassian's fixed API gateway, so the connection
-cannot be redirected to another host.
+Copy the exact host from the Jira URL you sign in to, for example `acme.atlassian.net`. Do not
+include `https://`, a path, or a trailing slash. Only `*.atlassian.net` hosts are accepted.
 
 ## 3. Connect in TulipFarm
 
-Open **Integrations → Jira** and paste the Cloud ID and OAuth access token. TulipFarm seals the
-token in its Secrets store. The Cloud ID is not secret; it only selects your Jira Cloud site.
+Open **Integrations → Jira**. Enter the site host, then enter the Atlassian account email and API
+token as one value separated by a colon:
+
+```text
+your.email@example.com:api-token
+```
+
+TulipFarm encodes this value as HTTP Basic credentials and seals it in its Secrets store. Do not
+base64-encode it yourself.
 
 ## What agents can do
 

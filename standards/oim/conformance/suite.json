@@ -191,6 +191,53 @@
       ]
     },
     {
+      "id": "auth.verification.identified",
+      "profile": "auth",
+      "vectors": [
+        {
+          "id": "auth-verification-requires-typed-subject",
+          "since": "1.1",
+          "input": {
+            "response": { "user": { "id": "user-42", "active": true } },
+            "subject": { "kind": "human", "pointer": "/user/id" }
+          },
+          "expect": {
+            "accepted": true,
+            "subject": { "id": "user-42", "kind": "human" },
+            "callerIdentityAccepted": false
+          }
+        }
+      ]
+    },
+    {
+      "id": "auth.verification.validity-only",
+      "profile": "auth",
+      "vectors": [
+        {
+          "id": "auth-verification-validity-does-not-invent-identity",
+          "since": "1.1",
+          "input": { "response": { "ok": true }, "assurance": "validity_only" },
+          "expect": { "accepted": true, "subject": null, "tenant": null }
+        }
+      ]
+    },
+    {
+      "id": "auth.verification.revision-bound",
+      "profile": "auth",
+      "vectors": [
+        {
+          "id": "auth-verification-rejects-stale-binding",
+          "since": "1.1",
+          "input": {
+            "evidenceRevision": 4,
+            "currentRevision": 5,
+            "credentialReferenceMatches": true
+          },
+          "expect": { "accepted": false, "reason": "stale_binding" }
+        }
+      ]
+    },
+    {
       "id": "events.delivery.verify",
       "profile": "events",
       "vectors": [

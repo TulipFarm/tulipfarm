@@ -6,24 +6,25 @@ cases:
     response:
       status: 200
       body:
-        id: AbCdEf123
-        localizedFirstName: Muskan
-        localizedLastName: Vijayvargiya
-        localizedHeadline: Operations lead
-        vanityName: muskan-example
-        profilePicture:
-          displayImage: urn:li:digitalmediaAsset:C4D00REDACTED
+        sub: AbCdEf123
+        name: Muskan Vijayvargiya
+        given_name: Muskan
+        family_name: Vijayvargiya
+        picture: https://media.licdn.com/redacted.jpg
+        locale:
+          country: US
+          language: en
     expect:
       request:
         method: GET
-        url: https://api.linkedin.com/v2/me
+        url: https://api.linkedin.com/v2/userinfo
         headers:
           Authorization: Bearer oim-fixture-credential
-          X-Restli-Protocol-Version: 2.0.0
       result:
-        id: AbCdEf123
-        localizedFirstName: Muskan
-        localizedLastName: Vijayvargiya
+        sub: AbCdEf123
+        name: Muskan Vijayvargiya
+        given_name: Muskan
+        family_name: Vijayvargiya
 
   - name: reads-organization-post
     operationId: read-post
@@ -129,10 +130,9 @@ cases:
     expect:
       request:
         method: GET
-        url: https://api.linkedin.com/v2/me
+        url: https://api.linkedin.com/v2/userinfo
         headers:
           Authorization: Bearer oim-fixture-credential
-          X-Restli-Protocol-Version: 2.0.0
       expectedError:
         phase: before_dispatch
         code: provider_unauthorized

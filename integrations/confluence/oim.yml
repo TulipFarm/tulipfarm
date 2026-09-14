@@ -4,7 +4,7 @@ kind: Integration
 metadata:
   id: confluence
   name: Confluence
-  version: 1.0.0
+  version: 1.0.1
   description: >-
     Read Confluence Cloud spaces and pages, and index them into Knowledge with the page
     restrictions the source enforces.
@@ -15,16 +15,16 @@ metadata:
 
 profiles:
   core: "1.1"
-  auth: "1.0"
+  auth: "1.1"
   knowledge: "1.2"
 
 files:
   - path: setup-guide.md
     role: guide
-    sha256: "79f4388c323b3ad3d5b1bf1f3338fdabe68c0ea87c65374a67242b39341330be"
+    sha256: "da8cccec4d6f895465f31fe256af3f5c18d78b3912e08a00c20aebecc7ee25bc"
   - path: fixtures.yml
     role: fixture
-    sha256: "3e6659d2731cc7f19adeb9ea3f20bd8333fa5d7d5e381a4c796903bbfb8c0f9f"
+    sha256: "cbceab22b133ae33e7467669c047d6ebad57c8dc1d194ebe14f52acde98ded49"
 
 auth:
   # The site is the installation's own Atlassian tenant, so the base URL is templated rather than
@@ -74,9 +74,67 @@ auth:
           target:
             type: credential
             slot: api_credential
-  healthCheckOperationId: list-spaces
+  healthCheckOperationId: current-user
+  verification:
+    issuer:
+      source: package
+      value: https://api.atlassian.com
+    checks:
+      - id: current-user
+        operationId: current-user
+        credentialSlots: [api_credential]
+        success:
+          - kind: present
+            path: /accountId
+    evidence:
+      assurance: identified
+      subject:
+        kind: human
+        checkId: current-user
+        path: /accountId
+        namespace: issuer
+      tenant:
+        kind: site
+        source: configuration
+        field: site
 
 operations:
+  - id: current-user
+    name: confluence_current_user
+    description: Identify the Atlassian account whose access this Connection carries.
+    effect: read
+    identityMode: shared_or_personal
+    credentialSlot: api_credential
+    credentialInjection:
+      in: header
+      name: Authorization
+      format: "Basic {token}"
+      encoding: basic
+    source:
+      type: http
+      method: GET
+      baseUrl: https://{site}
+      path: /wiki/rest/api/user/current
+    response:
+      maxBytes: 131072
+      schema:
+        type: object
+        properties:
+          type: { type: string }
+          accountId: { type: string, minLength: 1 }
+          accountType: { type: string }
+          publicName: { type: string }
+          displayName: { type: string }
+          email: { type: string }
+        required: [accountId]
+      projection:
+        - /type
+        - /accountId
+        - /accountType
+        - /publicName
+        - /displayName
+        - /email
+
   - id: list-spaces
     name: confluence_list_spaces
     description: List the spaces this Connection can read.

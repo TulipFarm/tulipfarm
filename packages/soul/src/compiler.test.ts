@@ -103,6 +103,92 @@ describe("compileExecutionBundle", () => {
     expect(bundle.bundleVersion).toBe(2);
   });
 
+  it("rejects contribution collisions with authored Tool identities and files", () => {
+    const toolSpec = {
+      toolId: "weather.read",
+      toolVersion: "1",
+      action: "read",
+      inputSchema: {},
+      outputSchema: {},
+      riskClass: "read",
+      idempotency: "none",
+      timeoutMs: 1_000,
+      adapter: { kind: "http", ref: "weather.read" },
+    };
+    const authoredTool = def("ToolContract", "weather-read", toolSpec);
+    expect(() =>
+      compileExecutionBundle({
+        ...request([authoredTool]),
+        files: [{ path: "integrations/weather/oim.yml", content: "user owned" }],
+        contributions: [
+          {
+            source: "bundled OIM packages",
+            documents: [
+              def("ToolContract", "bundled-weather-read", {
+                ...toolSpec,
+                toolId: "weather.read",
+              }),
+            ],
+            files: [{ path: "integrations/weather/oim.yml", content: "bundled" }],
+          },
+        ],
+      })
+    ).toThrow("collides with an existing ToolContract identity");
+  });
+
+  it("keeps a legacy Integration beside a reserved bundled OIM package", () => {
+    const bundle = compileExecutionBundle({
+      ...request([
+        def("Integration", "slack", {
+          appId: "slack",
+          externalAccount: { tenantId: "workspace-1" },
+        }),
+      ]),
+      files: [{ path: "integrations/slack/integration.yaml", content: "legacy: true\n" }],
+      contributions: [
+        {
+          source: "bundled OIM packages",
+          documents: [
+            def("ToolContract", "slack-oim-read", {
+              toolId: "slack-oim.read",
+              toolVersion: "1",
+              action: "read",
+              inputSchema: {},
+              outputSchema: {},
+              riskClass: "read",
+              idempotency: "none",
+              timeoutMs: 1_000,
+              adapter: { kind: "http", ref: "slack-oim.read" },
+            }),
+          ],
+          files: [{ path: "integrations/slack-oim/oim.yml", content: "oimVersion: '1.0'\n" }],
+        },
+      ],
+    });
+
+    expect(
+      bundle.definitions.some(
+        (definition) => definition.kind === "Integration" && definition.slug === "slack"
+      )
+    ).toBe(true);
+    expect(
+      bundle.definitions.some(
+        (definition) => definition.kind === "ToolContract" && definition.slug === "slack-oim-read"
+      )
+    ).toBe(true);
+    expect(
+      bundle.assets.some(
+        (asset) =>
+          asset.ownerDefinitionId === "id-Integration-slack" && asset.path === "integration.yaml"
+      )
+    ).toBe(true);
+    expect(
+      bundle.assets.some(
+        (asset) => asset.ownerDefinitionId === "Integration:slack-oim" && asset.path === "oim.yml"
+      )
+    ).toBe(true);
+  });
+
   it("keeps live authority definitions in the signed bundle distribution", () => {
     const bundle = compileExecutionBundle(
       request([

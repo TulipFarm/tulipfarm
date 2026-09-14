@@ -23,6 +23,7 @@ import { type Queryable, transactionPort } from "../db";
 import { makeMigratedPglite } from "../test/pglite";
 import { buildDeclarativeTools } from "../tools/declarative/tools";
 import { OimRateRetryWaitHost, oimRateRetryWaitId } from "./oim-rate-retry";
+import { createOimReleaseDispatchHost } from "./releases/dispatch-host";
 
 const BUSINESS_ID = "business-1";
 const RUN_ID = "11111111-1111-4111-8111-111111111111";
@@ -333,8 +334,37 @@ describe("OimRateRetryWaitHost", () => {
       effectStore: PgEffectStore,
       host: OimRateRetryWaitHost
     ): RegistryToolDispatcher => {
-      const tooling = buildDeclarativeTools([rateLimitedIntegration()], {
+      const integration = rateLimitedIntegration();
+      const releaseDispatch = createOimReleaseDispatchHost({
+        bundled: [{ manifest: integration.oimManifest as OimManifest }],
+        activation: {
+          async uninstallStatus() {
+            throw new Error("bundled release must not read uninstall state");
+          },
+          trust: {
+            async authorizeInstalledRelease() {
+              throw new Error("bundled release must not read installed provenance");
+            },
+          },
+          dispatchLeases: {
+            async acquire() {
+              throw new Error("bundled release must not acquire a dispatch lease");
+            },
+            async complete() {
+              throw new Error("bundled release must not complete a dispatch lease");
+            },
+            async releaseNotDispatched() {
+              throw new Error("bundled release must not release a dispatch lease");
+            },
+            async markReconciliationRequired() {
+              throw new Error("bundled release must not reconcile a dispatch lease");
+            },
+          },
+        },
+      });
+      const tooling = buildDeclarativeTools([integration], {
         businessId: BUSINESS_ID,
+        releaseDispatch,
         effects: effectStore,
         secrets: async () => {
           throw new Error("public Tool must not read Secrets");

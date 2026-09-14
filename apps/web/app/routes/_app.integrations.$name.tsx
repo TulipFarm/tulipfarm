@@ -12,6 +12,8 @@ import { IntegrationAuthFlow, startHandoff } from "~/components/integrations/aut
 import { ComingSoonState } from "~/components/integrations/coming-soon-state";
 import { GitHubPersonalAccount } from "~/components/integrations/github-personal-account";
 import { IntegrationIcon } from "~/components/integrations/integration-icon";
+import { OimConnectionSetup } from "~/components/integrations/oim-connection-setup";
+import { OimConnections } from "~/components/integrations/oim-connections";
 import { MarkdownView } from "~/components/markdown-view";
 import { ErrorState, NotFoundState } from "~/components/states";
 import { StatusBadge } from "~/components/status-badge";
@@ -27,10 +29,20 @@ import {
   disconnectIntegration,
   type GitHubInstallation,
   getGitHubStatus,
+  getInstalledOimRelease,
   getIntegration,
+  getOimConnectionSetup,
+  getOimReleaseUninstallStatus,
+  type InstalledOimReleaseGeneration,
   type IntegrationDetail,
   type IntegrationGrant,
+  listOimConnections,
   listSlackRoutes,
+  type OimConnectionSetup as OimConnectionSetupModel,
+  type OimConnectionSummary,
+  type OimReleaseUninstallStatus,
+  setOimAutoPatchPreference,
+  uninstallOimRelease,
   updateIntegration,
 } from "~/lib/integrations";
 import { useIsAdmin } from "~/lib/use-session-user";
@@ -47,9 +59,18 @@ class ComingSoonError extends Error {
   }
 }
 
-export async function clientLoader({ params }: ClientLoaderFunctionArgs) {
+function isRecoverableSetupLookupError(error: unknown): boolean {
+  return (
+    error instanceof TypeError ||
+    (error instanceof ApiError &&
+      (error.status === 408 || error.status === 429 || error.status >= 500))
+  );
+}
+
+export async function clientLoader({ params, request }: ClientLoaderFunctionArgs) {
   const name = params.name;
   if (!name) throw new ApiError(404, "missing integration name");
+  const callbackConnectionId = new URL(request.url).searchParams.get("connection") || undefined;
   const integration = await getIntegration(name);
   if (integration.availability === "coming_soon") {
     throw new ComingSoonError(integration.title ?? integration.name);
@@ -76,7 +97,115 @@ export async function clientLoader({ params }: ClientLoaderFunctionArgs) {
       routesError = errMessage(err);
     }
   }
-  return { integration, routesError, githubInstallations };
+  let oimConnections: OimConnectionSummary[] | undefined;
+  let oimConnectionsError: string | undefined;
+  let oimConnectionSetup: OimConnectionSetupModel | undefined;
+  let oimConnectionSetupError: string | undefined;
+  let oimRelease: InstalledOimReleaseGeneration | undefined;
+  let oimReleaseError: string | undefined;
+  let oimUninstallStatus: OimReleaseUninstallStatus | undefined;
+  try {
+    oimConnections = await listOimConnections(name);
+  } catch (error) {
+    if (isRecoverableSetupLookupError(error)) {
+      oimConnectionsError = errMessage(error);
+    } else if (
+      callbackConnectionId !== undefined ||
+      !(error instanceof ApiError) ||
+      error.status !== 404
+    ) {
+      throw error;
+    }
+  }
+  if (
+    callbackConnectionId !== undefined ||
+    oimConnections !== undefined ||
+    oimConnectionsError !== undefined
+  ) {
+    try {
+      oimConnectionSetup = await getOimConnectionSetup(name, callbackConnectionId);
+    } catch (error) {
+      if (isRecoverableSetupLookupError(error)) {
+        oimConnectionSetupError = errMessage(error);
+      } else if (
+        callbackConnectionId === undefined &&
+        oimConnectionsError === undefined &&
+        error instanceof ApiError &&
+        error.status === 404
+      ) {
+        oimConnections = undefined;
+      } else {
+        throw error;
+      }
+    }
+  }
+  if (oimConnectionSetup !== undefined) {
+    const generation = {
+      integrationId: oimConnectionSetup.integration.id,
+      majorVersion: oimConnectionSetup.integration.majorVersion,
+    };
+    const pinnedInstallationId = new URL(request.url).searchParams.get("installation") || undefined;
+    if (pinnedInstallationId !== undefined) {
+      oimRelease = {
+        ...generation,
+        installationId: pinnedInstallationId,
+        slug: name,
+      };
+    } else {
+      try {
+        const installed = await getInstalledOimRelease(
+          generation.integrationId,
+          generation.majorVersion
+        );
+        if (
+          installed !== null &&
+          installed.integrationId === generation.integrationId &&
+          installed.majorVersion === generation.majorVersion &&
+          installed.slug === name
+        ) {
+          oimRelease = installed;
+        }
+      } catch (error) {
+        if (error instanceof ApiError && error.status === 404) {
+          oimRelease = undefined;
+        } else if (isRecoverableSetupLookupError(error)) {
+          oimReleaseError = errMessage(error);
+        } else {
+          throw error;
+        }
+      }
+    }
+    if (oimRelease !== undefined) {
+      try {
+        oimUninstallStatus = await getOimReleaseUninstallStatus(oimRelease);
+      } catch (error) {
+        if (isRecoverableSetupLookupError(error)) {
+          oimReleaseError = errMessage(error);
+        } else {
+          throw error;
+        }
+      }
+    }
+  }
+  const usesOimConnections =
+    oimConnections !== undefined ||
+    oimConnectionsError !== undefined ||
+    oimConnectionSetup !== undefined ||
+    oimConnectionSetupError !== undefined;
+  return {
+    integration,
+    routesError,
+    githubInstallations,
+    usesOimConnections,
+    oimConnections,
+    oimConnectionsError,
+    oimConnectionSetup,
+    oimConnectionSetupError,
+    oimConnectionId: callbackConnectionId,
+    oimRelease,
+    oimReleaseError,
+    oimUninstallStatus,
+  };
 }
 
 /* Redirect error codes are the closed set in `AuthBrokerError`. */
@@ -244,7 +373,20 @@ function MoreMenu({ onDelete, deleting }: { onDelete: () => void; deleting: bool
 }
 
 export default function IntegrationDetailPage() {
-  const { integration, routesError, githubInstallations } = useLoaderData<typeof clientLoader>();
+  const {
+    integration,
+    routesError,
+    githubInstallations,
+    usesOimConnections,
+    oimConnections,
+    oimConnectionsError,
+    oimConnectionSetup,
+    oimConnectionSetupError,
+    oimConnectionId,
+    oimRelease,
+    oimReleaseError,
+    oimUninstallStatus: loadedOimUninstallStatus,
+  } = useLoaderData<typeof clientLoader>();
   const revalidator = useRevalidator();
   const [searchParams, setSearchParams] = useSearchParams();
 
@@ -252,6 +394,11 @@ export default function IntegrationDetailPage() {
   const [disconnectingInstallId, setDisconnectingInstallId] = useState<string>();
   const [addingInstall, setAddingInstall] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [oimUninstallStatus, setOimUninstallStatus] = useState(loadedOimUninstallStatus);
+  const [autoPatchEnabled, setAutoPatchEnabled] = useState(oimRelease?.autoPatchOptIn ?? false);
+  const [savingAutoPatch, setSavingAutoPatch] = useState(false);
+  const [autoPatchStatus, setAutoPatchStatus] = useState("");
+  const autoPatchGeneration = useRef(0);
   const [updating, setUpdating] = useState(false);
   const [actionError, setActionError] = useState<string>();
   const [callbackError, setCallbackError] = useState<string>();
@@ -259,7 +406,8 @@ export default function IntegrationDetailPage() {
 
   const isAdmin = useIsAdmin();
   const authSteps = (integration.auth ?? []).filter((step) => !step.personal);
-  const isConnected = integration.connected;
+  const isConnected =
+    oimConnections?.some((connection) => connection.status === "active") ?? integration.connected;
   const installStep = authSteps.find((step) => step.kind === "install");
   const personalStep = integration.auth?.find((step) => step.personal);
   const personalStepReady =
@@ -268,6 +416,11 @@ export default function IntegrationDetailPage() {
       .filter((step) => step.index < personalStep.index && !step.personal)
       .every((step) => step.satisfied);
   const name = displayName(integration);
+  const autoPatchScope = oimRelease
+    ? `${oimRelease.integrationId}:${oimRelease.majorVersion}:${oimRelease.installationId}`
+    : undefined;
+  const autoPatchScopeRef = useRef(autoPatchScope);
+  autoPatchScopeRef.current = autoPatchScope;
 
   // The single auth callback returns here with the outcome of the step the operator just left for.
   useEffect(() => {
@@ -280,8 +433,53 @@ export default function IntegrationDetailPage() {
       setCallbackError(undefined);
       revalidator.revalidate();
     }
-    setSearchParams({}, { replace: true });
+    const nextParams = new URLSearchParams(searchParams);
+    nextParams.delete("status");
+    nextParams.delete("reason");
+    setSearchParams(nextParams, { replace: true });
   }, [searchParams, setSearchParams, revalidator]);
+
+  useEffect(() => {
+    setOimUninstallStatus(loadedOimUninstallStatus);
+  }, [loadedOimUninstallStatus]);
+
+  useEffect(() => {
+    autoPatchGeneration.current += 1;
+    autoPatchScopeRef.current = autoPatchScope;
+    setAutoPatchEnabled(oimRelease?.autoPatchOptIn ?? false);
+    setSavingAutoPatch(false);
+    setAutoPatchStatus("");
+  }, [autoPatchScope, oimRelease?.autoPatchOptIn]);
+
+  async function handleAutoPatch(enabled: boolean) {
+    if (oimRelease?.trustClass !== "official") return;
+    const release = oimRelease;
+    const scope = autoPatchScope;
+    const request = ++autoPatchGeneration.current;
+    setSavingAutoPatch(true);
+    setActionError(undefined);
+    try {
+      const updated = await setOimAutoPatchPreference(
+        release.integrationId,
+        release.majorVersion,
+        enabled
+      );
+      if (request !== autoPatchGeneration.current || scope !== autoPatchScopeRef.current) return;
+      setAutoPatchEnabled(updated.autoPatchOptIn ?? enabled);
+      setAutoPatchStatus(
+        enabled
+          ? "Automatic patch updates enabled for this Official package."
+          : "Automatic patch updates disabled."
+      );
+    } catch (err) {
+      if (request !== autoPatchGeneration.current || scope !== autoPatchScopeRef.current) return;
+      setActionError(errMessage(err));
+    } finally {
+      if (request === autoPatchGeneration.current && scope === autoPatchScopeRef.current) {
+        setSavingAutoPatch(false);
+      }
+    }
+  }
 
   async function handleDisconnect() {
     setDisconnecting(true);
@@ -341,10 +539,37 @@ export default function IntegrationDetailPage() {
   async function handleDelete() {
     setDeleting(true);
     setActionError(undefined);
+    const release = oimRelease;
     try {
-      await deleteIntegration(integration.name);
+      if (release === undefined) {
+        await deleteIntegration(integration.name);
+      } else {
+        if (searchParams.get("installation") !== release.installationId) {
+          const nextParams = new URLSearchParams(searchParams);
+          nextParams.set("installation", release.installationId);
+          window.history.replaceState(
+            window.history.state,
+            "",
+            `${window.location.pathname}?${nextParams.toString()}${window.location.hash}`
+          );
+        }
+        await uninstallOimRelease(release);
+      }
       window.location.href = "/integrations";
     } catch (err) {
+      if (release !== undefined) {
+        try {
+          const status = await getOimReleaseUninstallStatus(release);
+          setOimUninstallStatus(status);
+          if (status.status === "pending") {
+            setActionError(undefined);
+            setDeleting(false);
+            return;
+          }
+        } catch {
+          // Keep the original uninstall error when its durable status is temporarily unavailable.
+        }
+      }
       setActionError(errMessage(err));
       setDeleting(false);
     }
@@ -414,7 +639,7 @@ export default function IntegrationDetailPage() {
           </div>
 
           <div className="flex shrink-0 items-center gap-2">
-            {integration.updateAvailable && isAdmin && (
+            {integration.updateAvailable && isAdmin && !usesOimConnections && (
               <Button size="sm" disabled={updating} onClick={handleUpdate}>
                 {updating ? "Updating…" : "Update"}
               </Button>
@@ -423,11 +648,13 @@ export default function IntegrationDetailPage() {
               label={isConnected ? "Connected" : "Not connected"}
               tone={isConnected ? "success" : "neutral"}
             />
-            {isAdmin && <MoreMenu onDelete={handleDelete} deleting={deleting} />}
+            {isAdmin && (!usesOimConnections || oimRelease !== undefined) && (
+              <MoreMenu onDelete={handleDelete} deleting={deleting} />
+            )}
           </div>
         </header>
 
-        {integration.updateAvailable && (
+        {integration.updateAvailable && !usesOimConnections && (
           <div className="flex flex-col gap-3 rounded-sm border border-primary/30 bg-primary/5 p-4 sm:flex-row sm:items-center sm:justify-between">
             <div className="flex flex-col gap-0.5">
               <span className="text-sm font-medium text-foreground">Update available</span>
@@ -457,7 +684,7 @@ export default function IntegrationDetailPage() {
         )}
 
         {/* Connect, every step comes from the manifest, so there is nothing per-integration here. */}
-        {!isConnected && (
+        {!usesOimConnections && !isConnected && (
           <section className="flex flex-col gap-3">
             <div className="flex items-center gap-2">
               <SectionHeading>Connect</SectionHeading>
@@ -490,6 +717,125 @@ export default function IntegrationDetailPage() {
               />
             )}
           </section>
+        )}
+
+        {usesOimConnections && (
+          <>
+            {oimRelease?.trustClass === "official" ? (
+              <section
+                aria-labelledby="oim-auto-patch-heading"
+                className="flex flex-col gap-2 rounded-md border border-border p-3"
+              >
+                <h2 id="oim-auto-patch-heading" className="text-sm font-medium text-foreground">
+                  Official package updates
+                </h2>
+                <p className="text-xs text-muted-foreground">
+                  Eligible patch releases must pass server-side signature verification against an
+                  active public release trust root.
+                </p>
+                {isAdmin ? (
+                  <label className="flex items-center gap-2">
+                    <input
+                      type="checkbox"
+                      checked={autoPatchEnabled}
+                      disabled={savingAutoPatch}
+                      onChange={(event) => void handleAutoPatch(event.target.checked)}
+                    />
+                    Automatically install verified patch releases
+                  </label>
+                ) : (
+                  <p className="text-xs text-muted-foreground">
+                    An admin can change this package update preference.
+                  </p>
+                )}
+                <p role="status" className="text-xs text-muted-foreground">
+                  {savingAutoPatch ? "Saving package update preference…" : autoPatchStatus}
+                </p>
+              </section>
+            ) : oimRelease?.trustClass === "community" ? (
+              <section
+                aria-labelledby="oim-community-updates-heading"
+                className="rounded-md border border-border p-3"
+              >
+                <h2
+                  id="oim-community-updates-heading"
+                  className="text-sm font-medium text-foreground"
+                >
+                  Community package updates
+                </h2>
+                <p className="text-xs text-muted-foreground">
+                  Automatic patches are disabled. Each Community package digest must be reviewed and
+                  approved explicitly.
+                </p>
+              </section>
+            ) : null}
+            {oimUninstallStatus?.status === "pending" ? (
+              <section
+                aria-labelledby="oim-uninstall-heading"
+                className="flex flex-col items-start gap-2 rounded-md border border-border p-3"
+              >
+                <h2 id="oim-uninstall-heading" className="text-sm font-medium text-foreground">
+                  Removal needs another try
+                </h2>
+                <p role="status" className="text-xs text-muted-foreground">
+                  {oimUninstallStatus.retryRequired
+                    ? "Provider cleanup did not finish. Retry this exact installation."
+                    : "Removal is waiting for provider cleanup. Retry this exact installation."}
+                </p>
+                <Button
+                  type="button"
+                  variant="outline"
+                  disabled={deleting}
+                  onClick={() => void handleDelete()}
+                >
+                  {deleting ? "Retrying removal…" : "Retry removal"}
+                </Button>
+              </section>
+            ) : null}
+            {oimReleaseError ? (
+              <p role="alert" className="text-sm text-destructive">
+                {oimReleaseError}
+              </p>
+            ) : null}
+            {callbackError ? (
+              <p role="alert" className="text-sm text-destructive">
+                {callbackError}
+              </p>
+            ) : null}
+            {oimConnectionSetup !== undefined || oimConnectionSetupError !== undefined ? (
+              <OimConnectionSetup
+                key={integration.name}
+                integrationKey={integration.name}
+                setup={oimConnectionSetup}
+                setupError={oimConnectionSetupError}
+                connectionId={oimConnectionId}
+                onConnectionSelected={(connectionId) => {
+                  const nextParams = new URLSearchParams(searchParams);
+                  nextParams.set("connection", connectionId);
+                  nextParams.delete("status");
+                  nextParams.delete("reason");
+                  setSearchParams(nextParams, { replace: true });
+                }}
+                onChanged={() => revalidator.revalidate()}
+              />
+            ) : null}
+            {oimConnections ? (
+              <OimConnections
+                integrationKey={integration.name}
+                connections={oimConnections}
+                onChanged={() => revalidator.revalidate()}
+              />
+            ) : oimConnectionsError ? (
+              <section className="flex flex-col items-start gap-2">
+                <p role="alert" className="text-sm text-destructive">
+                  {oimConnectionsError}
+                </p>
+                <Button type="button" variant="outline" onClick={() => revalidator.revalidate()}>
+                  Retry Connections
+                </Button>
+              </section>
+            ) : null}
+          </>
         )}
 
         {integration.capabilities && integration.capabilities.length > 0 && (
@@ -550,7 +896,7 @@ export default function IntegrationDetailPage() {
           </section>
         )}
 
-        {integration.name === "github" && personalStepReady && (
+        {!usesOimConnections && integration.name === "github" && personalStepReady && (
           <GitHubPersonalAccount
             integration={integration}
             callbackError={callbackError}
@@ -559,7 +905,7 @@ export default function IntegrationDetailPage() {
         )}
 
         {/* Where the GitHub App currently reaches. Provider-shaped state, not part of connecting. */}
-        {integration.name === "github" && isConnected && (
+        {!usesOimConnections && integration.name === "github" && isConnected && (
           <section className="flex flex-col gap-2">
             <SectionHeading>Installations</SectionHeading>
             {routesError && <p className="text-sm text-destructive">{routesError}</p>}
@@ -621,7 +967,7 @@ export default function IntegrationDetailPage() {
         )}
 
         {/* Slack routing status */}
-        {integration.name === "slack" && isConnected && (
+        {!usesOimConnections && integration.name === "slack" && isConnected && (
           <section className="flex flex-col gap-2">
             <SectionHeading>Routing</SectionHeading>
             {routesError ? (
@@ -657,7 +1003,7 @@ export default function IntegrationDetailPage() {
 
         {actionError && <p className="text-sm text-destructive">{actionError}</p>}
 
-        {isConnected && isAdmin && (
+        {!usesOimConnections && isConnected && isAdmin && (
           <section className="flex flex-col gap-2 border-t border-border pt-5">
             <SectionHeading>Connection</SectionHeading>
             <p className="max-w-prose text-xs text-muted-foreground">

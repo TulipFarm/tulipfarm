@@ -45,6 +45,41 @@ cases:
         code: invalid_output
         retryable: false
 
+  - name: identifies-page-token
+    operationId: current-page
+    request: {}
+    response:
+      status: 200
+      body:
+        id: "100000000000001"
+        name: Muskan Studio
+        category: Business service
+    expect:
+      request:
+        method: GET
+        url: https://graph.facebook.com/v25.0/me?fields=id%2Cname%2Ccategory&access_token=oim-fixture-credential
+      result:
+        id: "100000000000001"
+        name: Muskan Studio
+        category: Business service
+
+  - name: rejects-user-token-shaped-page-response
+    operationId: current-page
+    request: {}
+    response:
+      status: 200
+      body:
+        id: "200000000000002"
+        name: Muskan Vijayvargiya
+    expect:
+      request:
+        method: GET
+        url: https://graph.facebook.com/v25.0/me?fields=id%2Cname%2Ccategory&access_token=oim-fixture-credential
+      expectedError:
+        phase: after_dispatch
+        code: invalid_output
+        retryable: false
+
   - name: lists-page-posts
     operationId: list-page-posts
     request:

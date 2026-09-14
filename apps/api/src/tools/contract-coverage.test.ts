@@ -110,6 +110,15 @@ const EXPECTED_FAMILY_TOOL_NAMES = [
     ],
   },
   {
+    family: "integration-authoring",
+    names: [
+      "integration_draft_create",
+      "integration_draft_review",
+      "integration_get",
+      "integration_list",
+    ],
+  },
+  {
     family: "skills",
     names: [
       "skill_create",
@@ -270,6 +279,7 @@ function stubbedCoreServices(): RegistryServices {
     resources: stub,
     resourceTypes: stub,
     agentTools: stub,
+    integrationAuthoring: stub,
     skillTools: stub,
     surfaceComponents: stub,
     platform: stub,

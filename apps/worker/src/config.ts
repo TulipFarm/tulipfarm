@@ -10,8 +10,12 @@ import { DEPLOYMENT_BUSINESS_ID } from "@tulipfarm/constants";
  * 110: Parked child Tool effects carry a replayable, non-terminal ledger state.
  * 111: Agent loop checkpoints are fenced by the active Run claim generation.
  * 116: Model calls reserve configured Run budgets and persist bounded Conversation Context.
+ * 117: OIM ingress registration and teardown are durable.
+ * 118: OIM Knowledge publication and cursor progress are fenced.
+ * 119: OIM release provenance, lifecycle, and operation journals are durable.
+ * 120: OIM Connection verification evidence is persisted for safe dispatch.
  */
-export const REQUIRED_SCHEMA_VERSION = 116;
+export const REQUIRED_SCHEMA_VERSION = 120;
 
 export interface WorkerConfig {
   readonly databaseUrl: string;

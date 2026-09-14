@@ -25,6 +25,32 @@ export {
   renderTemplate,
 } from "./auth/template";
 export type {
+  AuthoredIntegrationView,
+  ClaimedIntegrationDraft,
+  InstalledIntegrationGeneration,
+  IntegrationAuthoringActor,
+  IntegrationAuthoringInvocation,
+  IntegrationAuthoringPorts,
+  IntegrationAuthoringPrincipal,
+  IntegrationAuthoringResult,
+  IntegrationAuthoringWorkflow,
+  IntegrationDraft,
+  IntegrationDraftConnectionTestResult,
+  IntegrationDraftFile,
+  IntegrationDraftReplacement,
+  IntegrationDraftSource,
+  IntegrationDraftStoreOptions,
+  PutIntegrationDraft,
+  ReviewedCommunityIntegrationInstaller,
+  ReviewedCommunityIntegrationInstallerDependencies,
+} from "./authoring";
+export {
+  createIntegrationAuthoringWorkflow,
+  createReviewedCommunityIntegrationInstaller,
+  INTEGRATION_AUTHORING_TOOL_POLICIES,
+  IntegrationDraftStore,
+} from "./authoring";
+export type {
   OimCapabilityReview,
   OimOperationReview,
 } from "./catalog";
@@ -77,6 +103,11 @@ export {
   OIM_CONNECTION_ID_ARGUMENT,
   OimOperationConnectionResolver,
 } from "./connections/operation";
+export type { OimConnectionRefreshSweepResult } from "./connections/refresh-schedule";
+export {
+  OIM_CONNECTION_REFRESH_CRON,
+  OIM_CONNECTION_REFRESH_QUEUE,
+} from "./connections/refresh-schedule";
 export type {
   ConnectionPrincipal,
   ConnectionReader,
@@ -86,6 +117,20 @@ export type {
   ConnectionUseAuthorizer,
 } from "./connections/resolver";
 export { ConnectionResolver } from "./connections/resolver";
+export type {
+  OimConnectionVerificationEvidence,
+  OimVerificationBinding,
+  OimVerifiedAuthStepBinding,
+  OimVerifiedCredentialBinding,
+  OimVerifiedSubject,
+  OimVerifiedTenant,
+  ProjectedConnectionIdentityEvidence,
+} from "./connections/verification-evidence";
+export {
+  evaluateOimAuthVerification,
+  OimAuthVerificationError,
+  projectVerifiedConnectionIdentity,
+} from "./connections/verification-evidence";
 export type {
   CompiledEgressTool,
   CompiledGraphqlTool,
@@ -149,6 +194,7 @@ export {
   compileOimOpenApiOperations,
   compileOpenApiEgress,
   createOimFixturePaginationRuntime,
+  DEFAULT_OIM_PAGINATION_BOUNDS,
   EGRESS_DENIAL_REASONS,
   EgressCompileError,
   EgressDestinationError,
@@ -478,11 +524,53 @@ export type {
 } from "./knowledge";
 export { knowledgeSourceId } from "./knowledge";
 export type {
+  AclReadResult,
+  KnowledgeItemFieldValue,
+  KnowledgeProfileDescription,
   KnowledgeProfilePlan,
+  ListedItem,
+  MappedContent,
+  OimKnowledgeApiPort,
+  OimKnowledgeCheckpointPort,
+  OimKnowledgeCompileErrorCode,
+  OimKnowledgeConnectionScope,
+  OimKnowledgeExecutionScope,
+  OimKnowledgeIdentityPolicy,
+  OimKnowledgeIdentityPort,
+  OimKnowledgePrincipalRef,
+  OimKnowledgePublicationPort,
   OimKnowledgeSyncDeps,
   OimKnowledgeSyncOptions,
+  OimKnowledgeSyncResult,
+  OimKnowledgeTeardownDeps,
+  OimKnowledgeTeardownPhase,
+  OimKnowledgeTeardownResult,
+  OimSyncFailure,
+  OimSyncFailureCode,
+  ProviderAccountPort,
+  ProviderAclEntry,
+  ResolveOimKnowledgePrincipalsDeps,
+  ResolveOimKnowledgePrincipalsInput,
+  TrustedProviderIdentityLinkPort,
+  VerifiedEmailPrincipalPort,
 } from "./knowledge/index";
-export { syncOimKnowledge } from "./knowledge/index";
+export {
+  checkOimProviderAccess,
+  compileKnowledgeProfile,
+  createOimKnowledgeIdentityPort,
+  createOimProviderAccountPort,
+  DEFAULT_KNOWLEDGE_PAGES_PER_RUN,
+  describeKnowledgeProfile,
+  mapAclEntries,
+  mapContent,
+  mapListItems,
+  OimKnowledgeCompileError,
+  OimKnowledgeMappingError,
+  OimKnowledgeTeardownError,
+  resolveOimKnowledgePrincipals,
+  syncOimKnowledge,
+  teardownOimKnowledge,
+} from "./knowledge/index";
 export type {
   ChannelApp,
   ChannelIntegration,

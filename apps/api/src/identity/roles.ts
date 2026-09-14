@@ -114,6 +114,11 @@ export const ADMIN_ONLY_SURFACES: readonly {
     enforcedIn: "soul/skills/tools.ts",
   },
   {
+    type: "soul.integration",
+    actions: ["soul.integration.author"],
+    enforcedIn: "soul/integrations/tools.ts",
+  },
+  {
     type: "authz",
     actions: [
       "authz.role.read",
@@ -185,6 +190,11 @@ export const MEMBER_ALLOWED_SURFACES: readonly {
   { type: "form", actions: ["*"], enforcedIn: "forms/routes.ts" },
   { type: "platform.frontend", actions: ["*"], enforcedIn: "platform/frontend-tools.ts" },
   {
+    type: "platform.file",
+    actions: ["file.list", "file.read", "file.create"],
+    enforcedIn: "packages/files/src/tools.ts; integrations/oim-file-host.ts",
+  },
+  {
     type: "identity",
     actions: [
       "identity.external_link.create",
@@ -249,6 +259,11 @@ export const MEMBER_ALLOWED_SURFACES: readonly {
     type: "soul.skill",
     actions: ["soul.skill.list", "platform.skill.load", "platform.skill.run"],
     enforcedIn: "soul/skills/tools.ts; platform/tools.ts",
+  },
+  {
+    type: "soul.integration",
+    actions: ["soul.integration.read"],
+    enforcedIn: "soul/integrations/tools.ts",
   },
   { type: "surface", actions: ["*"], enforcedIn: "surfaces/routes.ts" },
   {

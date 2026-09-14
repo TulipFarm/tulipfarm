@@ -6,7 +6,11 @@ import {
   SLACK_TOOL_DECLARATIONS,
 } from "@tulipfarm/integrations";
 import { PLATFORM_RUNTIME_TOOLS } from "@tulipfarm/platform-tools";
-import { NETWORK_TOOL_DECLARATIONS, SKILL_MARKETPLACE_TOOL_DECLARATIONS } from "@tulipfarm/schema";
+import {
+  INTEGRATION_AUTHORING_TOOL_DECLARATIONS,
+  NETWORK_TOOL_DECLARATIONS,
+  SKILL_MARKETPLACE_TOOL_DECLARATIONS,
+} from "@tulipfarm/schema";
 import { SKILL_TOOL_DECLARATION } from "@tulipfarm/soul";
 import type { EvalCase } from "./case.ts";
 
@@ -26,6 +30,7 @@ import type { EvalCase } from "./case.ts";
 const SHIPPED: readonly ExposedTool[] = [
   ...PLATFORM_RUNTIME_TOOLS,
   ...FILE_TOOLS,
+  ...INTEGRATION_AUTHORING_TOOL_DECLARATIONS,
   ...SKILL_MARKETPLACE_TOOL_DECLARATIONS,
   SKILL_TOOL_DECLARATION,
   GITHUB_REPOSITORY_LIST_DECLARATION,

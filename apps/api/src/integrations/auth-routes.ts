@@ -42,7 +42,10 @@ export interface AuthRoutesDeps {
   /** Versioned OIM Connection callback handler. Production wiring is composed separately. */
   oimConnections?: Pick<
     OimConnectionService,
-    "authorizationWebUrl" | "completeAuthorization" | "hasPendingAuthorization"
+    | "authorizationContext"
+    | "authorizationWebUrl"
+    | "completeAuthorization"
+    | "hasPendingAuthorization"
   >;
 }
 
@@ -100,17 +103,25 @@ function redirectOimCallback(
 async function handleOimCallback(
   service: NonNullable<AuthRoutesDeps["oimConnections"]>,
   query: Record<string, string>,
-  reply: FastifyReply
+  reply: FastifyReply,
+  context?: { readonly key: string; readonly connectionId: string } | null
 ) {
+  const recoveryContext =
+    context ?? (query.state === undefined ? null : await service.authorizationContext(query.state));
   try {
     const outcome = await service.completeAuthorization(query);
     return redirectOimCallback(reply, service.authorizationWebUrl(), outcome);
   } catch (err) {
     if (err instanceof AuthBrokerError) {
+      const slug = recoveryContext?.key ?? err.slug ?? "";
+      const connection =
+        recoveryContext === null
+          ? ""
+          : `&connection=${encodeURIComponent(recoveryContext.connectionId)}`;
       return reply.redirect(
-        `${err.webUrl ?? service.authorizationWebUrl()}/integrations/${
-          err.slug ?? ""
-        }?status=error&reason=${err.reason}`,
+        `${err.webUrl ?? service.authorizationWebUrl()}/integrations/${slug}?status=error&reason=${
+          err.reason
+        }${connection}`,
         302
       );
     }

@@ -475,16 +475,31 @@ describe("OIM Soul release package writer", () => {
     ).toThrow();
   });
 
-  it("fails closed when the Soul layout cannot address a portable nested path", async () => {
+  it("stores portable nested paths inside the Integration package", async () => {
+    const packages = packageWriter();
+
+    await packages.install({
+      businessId: "business-1",
+      slug: "weather-v1",
+      snapshot: snapshot({ "guides/setup.md": "# Nested\n" }),
+    });
+
+    expect(readFileSync(join(root, "integrations/weather-v1/guides/setup.md"), "utf8")).toBe(
+      "# Nested\n"
+    );
+  });
+
+  it("rejects a companion path that escapes the Integration package", async () => {
     const packages = packageWriter();
 
     await expect(
       packages.install({
         businessId: "business-1",
         slug: "weather-v1",
-        snapshot: snapshot({ "guides/setup.md": "# Nested\n" }),
+        snapshot: snapshot({ "../escape.md": "# Escape\n" }),
       })
-    ).rejects.toMatchObject({ code: "UNSTORABLE_PACKAGE_PATH" });
+    ).rejects.toMatchObject({ code: "INVALID_INSTALL_SNAPSHOT" });
+    expect(() => readFileSync(join(root, "integrations/escape.md"), "utf8")).toThrow();
   });
 
   it("removes only a Soul package matching the exact Integration major", async () => {

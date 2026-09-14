@@ -5,8 +5,8 @@ description: How TulipFarm turns plain-language requests into live Soul-backed s
 
 {/* tf-page: track: using-tulipfarm  requires: ["chat:*", "soul:*"] */}
 
-TulipFarm is built by chatting. You describe the business object, agent, skill, routine, or surface
-you need; the assistant gathers the missing details, writes the right definition into
+TulipFarm is built by chatting. You describe the business object, agent, skill, routine,
+integration, or surface you need; the assistant gathers the missing details, writes the right definition into
 [the soul](/docs/using-tulipfarm/what-a-soul-is), records the change, and reloads the running
 system. The files are the result of the chat, not the interface most users edit.
 
@@ -23,19 +23,14 @@ specialized build workflow is now guiding the turn.
 
 ## Forges are the build paths
 
-A forge is a bundled skill with a focused authoring workflow. The shipped forge skills are:
-
-| Forge skill | Builds |
-| --- | --- |
-| `resource-forge` | Resource type schemas and optional Resource hooks |
-| `agent-forge` | User-created agents |
-| `skill-forge` | skills and their references |
-| `routine-forge` | routines and their states |
-| `surface-component-forge` | Business surface components |
-| `onboarding` | Guided first-run business setup |
+A forge is a bundled skill with a focused authoring workflow. Forges build resource types, agents,
+skills, routines, integrations, and surface components. The **Skills** screen shows the exact
+bundled set in your release.
 
 Forges build one thing at a time and in dependency order: resource types before agents that use
-them, skills before agents that load them, and agents before routines that call them.
+them, skills before agents that load them, and agents before routines that call them. An integration
+forge also reviews provider destinations, credentials, and operations before asking you to approve
+publication.
 
 ## Soul writes go live immediately
 

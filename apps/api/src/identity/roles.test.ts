@@ -146,6 +146,25 @@ describe("describeDeploymentRoles", () => {
     ).toBe(true);
   });
 
+  it("lets members read Integrations but requires an explicit grant to author one", () => {
+    const memberRole = DEPLOYMENT_ROLES.find((role) => role.id === "member");
+    if (!memberRole) throw new Error("member role missing from the deployment catalog");
+    const layers = [{ name: "member", grants: memberRole.grants }];
+
+    expect(
+      decideEffectivePermission(layers, {
+        action: "soul.integration.read",
+        resourceType: "soul.integration",
+      }).allowed
+    ).toBe(true);
+    expect(
+      decideEffectivePermission(layers, {
+        action: "soul.integration.author",
+        resourceType: "soul.integration",
+      }).allowed
+    ).toBe(false);
+  });
+
   it("keeps member record access for resource types with no domain", () => {
     const memberRole = DEPLOYMENT_ROLES.find((role) => role.id === "member");
     if (!memberRole) throw new Error("member role missing from the deployment catalog");

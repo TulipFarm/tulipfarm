@@ -39,6 +39,14 @@ const { key, target } = planWebhookRegistration({
   integrationKey: "acme-v2",
   connectionId: "connection-1",
   manifest,
+  packageSnapshot: {
+    integrationId: "acme",
+    version: "2.0.0",
+    majorVersion: 2,
+    packageDigest: "a".repeat(64),
+    manifestText: "{}",
+    files: [],
+  },
   publicApiUrl: "https://api.example.test",
 });
 

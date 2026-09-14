@@ -68,6 +68,14 @@ function target(connectionId: string): WebhookRegistrationTarget {
     operationId: "register_hook",
     unregisterOperationId: "remove_hook",
     secretSlot: "webhook_secret",
+    packageSnapshot: {
+      integrationId: "acme",
+      version: "2.0.0",
+      majorVersion: 2,
+      packageDigest: "a".repeat(64),
+      manifestText: "{}",
+      files: [],
+    },
   };
 }
 

@@ -68,6 +68,255 @@ describe("validateOimManifest", () => {
     expect(validateOimManifest(valid())).toEqual(valid());
   });
 
+  it("accepts bounded identified Auth verification checks", () => {
+    const manifest = valid();
+    manifest.profiles.auth = "1.1";
+    manifest.auth = {
+      credentialSlots: [{ id: "api_token", label: "API token", kind: "api_key", required: true }],
+      configurationFields: [{ id: "site", label: "Site", type: "url", required: true }],
+      steps: [
+        {
+          id: "credentials",
+          title: "Connect",
+          type: "fields",
+          fields: [
+            {
+              id: "api_token",
+              label: "API token",
+              input: "password",
+              required: true,
+              target: { type: "credential", slot: "api_token" },
+            },
+            {
+              id: "site",
+              label: "Site",
+              input: "url",
+              required: true,
+              target: { type: "configuration", field: "site" },
+            },
+          ],
+        },
+      ],
+      verification: {
+        issuer: { source: "configuration_origin", field: "site" },
+        checks: [
+          {
+            id: "current-user",
+            operationId: "current-weather",
+            credentialSlots: ["api_token"],
+            success: [
+              { kind: "present", path: "/id" },
+              { kind: "equals", path: "/active", value: true },
+              { kind: "equals", path: "/suspended", value: false },
+              { kind: "one_of", path: "/role", values: ["agent", "admin"] },
+            ],
+          },
+        ],
+        evidence: {
+          assurance: "identified",
+          subject: {
+            kind: "human",
+            checkId: "current-user",
+            path: "/id",
+            namespace: "issuer",
+          },
+        },
+      },
+    };
+    manifest.operations[0] = {
+      ...manifest.operations[0],
+      credentialSlot: "api_token",
+      credentialInjection: {
+        in: "header",
+        name: "Authorization",
+        format: "Bearer {token}",
+      },
+    };
+
+    expect(validateOimManifest(manifest)).toEqual(manifest);
+    expect(oimManifestIssues(manifest)).toEqual([]);
+  });
+
+  it("accepts validity-only evidence and bounded cross-checks", () => {
+    const manifest = valid();
+    manifest.profiles.auth = "1.1";
+    manifest.auth = {
+      credentialSlots: [
+        { id: "user_token", label: "User token", kind: "bearer_token", required: true },
+        { id: "page_token", label: "Page token", kind: "bearer_token", required: true },
+      ],
+      configurationFields: [{ id: "page_id", label: "Page ID", type: "string", required: true }],
+      steps: [
+        {
+          id: "credentials",
+          title: "Connect",
+          type: "fields",
+          fields: [
+            {
+              id: "user_token",
+              label: "User token",
+              input: "password",
+              required: true,
+              target: { type: "credential", slot: "user_token" },
+            },
+            {
+              id: "page_token",
+              label: "Page token",
+              input: "password",
+              required: true,
+              target: { type: "credential", slot: "page_token" },
+            },
+            {
+              id: "page_id",
+              label: "Page ID",
+              input: "text",
+              required: true,
+              target: { type: "configuration", field: "page_id" },
+            },
+          ],
+        },
+      ],
+      verification: {
+        issuer: { source: "package", value: "https://facebook.com" },
+        checks: [
+          {
+            id: "authorized-pages",
+            operationId: "current-weather",
+            credentialSlots: ["user_token"],
+            success: [{ kind: "present", path: "/data" }],
+          },
+          {
+            id: "current-page",
+            operationId: "current-page",
+            credentialSlots: ["page_token"],
+            success: [{ kind: "present", path: "/id" }],
+          },
+        ],
+        comparisons: [
+          {
+            kind: "equals",
+            left: { source: "response", checkId: "current-page", path: "/id" },
+            right: { source: "configuration", field: "page_id" },
+          },
+          {
+            kind: "array_contains",
+            array: { source: "response", checkId: "authorized-pages", path: "/data" },
+            itemPath: "/id",
+            value: { source: "configuration", field: "page_id" },
+          },
+        ],
+        evidence: { assurance: "validity_only" },
+      },
+    };
+    manifest.operations = [
+      {
+        ...manifest.operations[0],
+        credentialSlot: "user_token",
+        credentialInjection: {
+          in: "header",
+          name: "Authorization",
+          format: "Bearer {token}",
+        },
+      },
+      {
+        ...manifest.operations[0],
+        id: "current-page",
+        name: "current_page",
+        credentialSlot: "page_token",
+        credentialInjection: {
+          in: "header",
+          name: "Authorization",
+          format: "Bearer {token}",
+        },
+      },
+    ];
+
+    expect(validateOimManifest(manifest)).toEqual(manifest);
+    expect(oimManifestIssues(manifest)).toEqual([]);
+  });
+
+  it("fails closed for incomplete Auth verification declarations", () => {
+    const manifest = valid();
+    manifest.profiles.auth = "1.0";
+    manifest.auth = {
+      credentialSlots: [{ id: "api_token", label: "API token", kind: "api_key", required: true }],
+      steps: [
+        {
+          id: "credentials",
+          title: "Connect",
+          type: "fields",
+          fields: [
+            {
+              id: "api_token",
+              label: "API token",
+              input: "password",
+              required: true,
+              target: { type: "credential", slot: "api_token" },
+            },
+          ],
+        },
+      ],
+      verification: {
+        issuer: { source: "package", value: "https://127.0.0.1" },
+        checks: [
+          {
+            id: "current-user",
+            operationId: "current-weather",
+            credentialSlots: ["api_token"],
+            success: [{ kind: "present", path: "/id" }],
+          },
+        ],
+        evidence: {
+          assurance: "identified",
+          subject: {
+            kind: "human",
+            checkId: "missing",
+            path: "/id",
+            namespace: "issuer_client",
+          },
+        },
+      },
+    };
+
+    expect(oimManifestIssues(manifest)).toEqual(
+      expect.arrayContaining([
+        'profiles: auth "1.1" is required for auth.verification',
+        "auth: verification check current-user credentialSlots must exactly match operation current-weather",
+        "auth: verification package issuer must use a public HTTPS origin",
+        "auth: verification subject references unknown check missing",
+        "auth: verification issuer_client subject requires clientIdSlot",
+      ])
+    );
+  });
+
+  it("requires verification when advertising Auth 1.1", () => {
+    const manifest = valid();
+    manifest.profiles.auth = "1.1";
+    manifest.auth = {
+      credentialSlots: [{ id: "api_token", label: "API token", kind: "api_key", required: true }],
+      steps: [
+        {
+          id: "credentials",
+          title: "Connect",
+          type: "fields",
+          fields: [
+            {
+              id: "api_token",
+              label: "API token",
+              input: "password",
+              required: true,
+              target: { type: "credential", slot: "api_token" },
+            },
+          ],
+        },
+      ],
+    };
+
+    expect(oimManifestIssues(manifest)).toContain(
+      'auth: verification is required for auth profile "1.1"'
+    );
+  });
+
   it("accepts constant OAuth authorization parameters but reserves protocol parameters", () => {
     const manifest = valid();
     manifest.profiles.auth = "1.0";

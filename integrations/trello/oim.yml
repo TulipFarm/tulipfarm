@@ -4,7 +4,7 @@ kind: Integration
 metadata:
   id: trello
   name: Trello
-  version: 1.0.0
+  version: 1.0.1
   description: Read Trello boards, lists, and cards, and create or update cards.
   license: Apache-2.0
   maintainers:
@@ -13,7 +13,7 @@ metadata:
 
 profiles:
   core: "1.1"
-  auth: "1.0"
+  auth: "1.1"
 
 files:
   - path: setup-guide.md
@@ -55,6 +55,26 @@ auth:
             type: credential
             slot: token
   healthCheckOperationId: get-member
+  verification:
+    issuer:
+      source: package
+      value: https://api.trello.com
+    checks:
+      - id: current-member
+        operationId: get-member
+        credentialSlots: [api_key, token]
+        success:
+          - kind: present
+            path: /id
+          - kind: present
+            path: /username
+    evidence:
+      assurance: identified
+      subject:
+        kind: human
+        checkId: current-member
+        path: /id
+        namespace: issuer
 
 operations:
   - id: get-member

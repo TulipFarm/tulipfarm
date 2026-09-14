@@ -11,6 +11,7 @@ cases:
         team: Acme
         user: tulipfarm
         team_id: T01234567
+        enterprise_id: E01234567
         user_id: U01234567
         bot_id: B01234567
     expect:
@@ -23,6 +24,7 @@ cases:
         ok: true
         team: Acme
         team_id: T01234567
+        enterprise_id: E01234567
         bot_id: B01234567
 
   - name: lists-bot-conversations

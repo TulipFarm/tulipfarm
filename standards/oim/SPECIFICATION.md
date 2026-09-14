@@ -4,7 +4,7 @@
 
 Open Integration Manifest (OIM) is a vendor-neutral package format for declarative third-party
 Integrations. This text defines OIM specification version 1.0 and the Core 1.0, Core 1.1,
-Core 1.2, Auth 1.0, Events 1.0, Knowledge 1.0, Knowledge 1.1, Knowledge 1.2, and
+Core 1.2, Auth 1.0, Auth 1.1, Events 1.0, Knowledge 1.0, Knowledge 1.1, Knowledge 1.2, and
 Hooks 1.0 profiles.
 
 The key words MUST, MUST NOT, REQUIRED, SHOULD, SHOULD NOT, and MAY are normative.
@@ -58,6 +58,29 @@ step's token endpoint authentication method applies to both code exchange and re
 clients (`none`) MUST omit `clientSecret` and use PKCE. Secret methods MUST declare
 `clientSecret`; omission defaults to `client_secret_post` when that Secret exists and `none`
 otherwise.
+
+## Auth 1.1
+
+Auth 1.1 adds provider verification before a Connection becomes usable. A package claiming Auth
+1.1 MUST declare `auth.verification`. The declaration MUST use named read-only HTTP GET operations,
+the exact Credential slots each operation needs, and only the bounded `present`, `equals`, and
+`one_of` predicates. Cross-checks MAY compare two present trusted values for equality or require a
+present trusted value in an array at a declared item pointer.
+
+The issuer MUST come from a package-owned public HTTPS origin or the normalized origin of a
+required URL configuration field. It MUST NOT come from a browser callback, Tool input, or an
+untrusted caller assertion.
+
+Identified evidence MUST contain a nonempty typed subject read from a successful verification
+response. Its namespace is the verified issuer or the verified issuer plus a digest of the actual
+OAuth client ID value. A tenant MAY come from a successful response, required configuration, or
+the verified issuer. Validity-only evidence MUST contain no subject or tenant.
+
+Evidence MUST bind the exact Connection, Integration major version, package digest, configuration
+digest, auth-step revisions, and Credential references used by the checks. A host MUST invalidate
+or stop accepting evidence after any bound value changes, after reauthorization or refresh, or
+after disconnect. A failed refresh MUST leave the last published Credential bindings unchanged and
+mark the exact failed auth step for reauthorization.
 
 ## Events 1.0
 

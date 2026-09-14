@@ -1,5 +1,5 @@
-/** Minimum DB schema version this read-only worker will run against. */
-export const REQUIRED_SCHEMA_VERSION = 117;
+/** Migration 120 adds the durable OIM verification evidence required by this worker. */
+export const REQUIRED_SCHEMA_VERSION = 120;
 
 export interface IntegrationWorkerConfig {
   readonly databaseUrl: string;

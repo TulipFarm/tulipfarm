@@ -4,7 +4,7 @@ kind: Integration
 metadata:
   id: x
   name: X
-  version: 1.0.0
+  version: 1.0.1
   description: Identify one X user, read posts by id, and create text posts with OAuth 2.0 user context.
   license: Apache-2.0
   maintainers:
@@ -13,7 +13,7 @@ metadata:
 
 profiles:
   core: "1.1"
-  auth: "1.0"
+  auth: "1.1"
 
 files:
   - path: fixtures.yml
@@ -90,6 +90,26 @@ auth:
             type: credential
             slot: refresh_token
   healthCheckOperationId: current-user
+  verification:
+    issuer:
+      source: package
+      value: https://api.x.com
+    checks:
+      - id: current-user
+        operationId: current-user
+        credentialSlots: [access_token]
+        success:
+          - kind: present
+            path: /data/id
+          - kind: present
+            path: /data/username
+    evidence:
+      assurance: identified
+      subject:
+        kind: human
+        checkId: current-user
+        path: /data/id
+        namespace: issuer
 
 operations:
   - id: current-user

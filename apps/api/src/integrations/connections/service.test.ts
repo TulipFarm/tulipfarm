@@ -1,4 +1,9 @@
-import type { ConnectionCredentialVault, OimPackageCatalogEntry } from "@tulipfarm/integrations";
+import {
+  type ConnectionCredentialVault,
+  OimAuthVerificationError,
+  type OimConnectionVerificationEvidence,
+  type OimPackageCatalogEntry,
+} from "@tulipfarm/integrations";
 import type { OimConnection, OimManifest } from "@tulipfarm/schema";
 import type {
   ConnectionAuthStep,
@@ -117,6 +122,16 @@ class AuthSteps {
     createdAt: NOW.toISOString(),
     updatedAt: NOW.toISOString(),
   };
+  async initialize(input: Omit<ConnectionAuthStep, "revision" | "createdAt" | "updatedAt">) {
+    if (
+      this.row.businessId === input.businessId &&
+      this.row.connectionId === input.connectionId &&
+      this.row.stepId === input.stepId
+    ) {
+      return this.row;
+    }
+    return this.put(input);
+  }
   async put(input: Omit<ConnectionAuthStep, "revision" | "createdAt" | "updatedAt">) {
     this.row = {
       ...input,
@@ -167,6 +182,265 @@ describe("OimConnectionService authorization", () => {
       values.set(reference, plaintext);
       return reference;
     });
+
+    {
+      const run = async (_name: string, test: () => Promise<void>) => test();
+
+      function verificationService(options: {
+        verify: () => Promise<OimConnectionVerificationEvidence>;
+        publish?: "success" | "throw";
+      }) {
+        const rows: ConnectionAuthStep[] = [];
+        let stored: PersistedConnection | null = null;
+        let puts = 0;
+        const publishAuthStep = vi.fn(async () => {
+          if (options.publish === "throw") throw new Error("persistence unavailable");
+          if (stored !== null) {
+            stored = { ...stored, health: { status: "healthy", checkedAt: NOW.toISOString() } };
+          }
+          return true;
+        });
+        const service = new OimConnectionService({
+          businessId: "business-1",
+          catalog: [
+            {
+              key: "acme-v2",
+              manifest: {
+                ...manifest(),
+                profiles: { core: "1.0", auth: "1.1" },
+                auth: {
+                  credentialSlots: [{ id: "api_token", label: "API token", kind: "api_key" }],
+                  steps: [
+                    {
+                      id: "credentials",
+                      title: "Credentials",
+                      type: "fields",
+                      fields: [
+                        {
+                          id: "api_token",
+                          label: "API token",
+                          input: "password",
+                          required: true,
+                          target: { type: "credential", slot: "api_token" },
+                        },
+                      ],
+                    },
+                  ],
+                  verification: {},
+                },
+              } as OimManifest,
+            },
+          ],
+          connections: {
+            async put(businessId, value) {
+              puts += 1;
+              stored = {
+                ...value,
+                businessId,
+                createdAt: NOW,
+                updatedAt: NOW,
+              };
+            },
+            async findById() {
+              return stored;
+            },
+            async listForIntegration() {
+              return stored === null ? [] : [stored];
+            },
+            async claimAuthStep() {
+              return true;
+            },
+            publishAuthStep,
+            async markActionRequired() {
+              return true;
+            },
+            async fenceRevocation() {
+              return stored;
+            },
+          },
+          authSteps: {
+            async initialize(input) {
+              return this.put(input);
+            },
+            async put(input) {
+              const row = {
+                ...input,
+                revision: 1,
+                createdAt: NOW.toISOString(),
+                updatedAt: NOW.toISOString(),
+              };
+              rows.push(row);
+              return row;
+            },
+            async find(_businessId, _connectionId, stepId) {
+              return rows.find((row) => row.stepId === stepId) ?? null;
+            },
+            async list() {
+              return rows;
+            },
+          },
+          credentials: {
+            async create() {
+              return "secret://00000000-0000-4000-8000-000000000010";
+            },
+            async read() {
+              return "token";
+            },
+            async rotate() {},
+            async revokeReferences() {},
+            async revokeConnection(_connectionId, _bindings, persistRevocation) {
+              await persistRevocation();
+            },
+          },
+          authRequests: new Requests(),
+          endpoints: {
+            callbackUrl: "https://api.example.test/api/v1/integrations/auth/callback",
+            webUrl: "https://app.example.test",
+            apiUrl: "https://api.example.test",
+          },
+          ingress: {
+            async isDisabled() {
+              return false;
+            },
+            async requestWebhookRegistration() {
+              throw new Error("unexpected webhook registration");
+            },
+            async teardown() {
+              return {
+                ingressDisabled: true,
+                pollingStateRemoved: false,
+                webhook: null,
+                remoteCleanupComplete: true,
+              };
+            },
+          },
+          refreshOAuth: async () => ({ credentialValues: {}, expiresAt: null }),
+          verification: {
+            verify: options.verify,
+            verifyCandidate: async () => options.verify(),
+            async publish() {},
+          },
+          verifyAuthorization: async () => null,
+          now: () => NOW,
+        });
+        return {
+          service,
+          publishAuthStep,
+          puts: () => puts,
+          stored: () => stored,
+        };
+      }
+
+      const evidence = {
+        assurance: "authenticated",
+        proofDigest: "a".repeat(64),
+        verifiedAt: NOW.toISOString(),
+        verifiedBy: "provider-profile",
+        subject: { id: "account-1", kind: "account", namespace: "provider" },
+        tenant: null,
+        binding: {
+          businessId: "business-1",
+          connectionId: "connection-1",
+          integrationId: "acme",
+          integrationMajorVersion: 2,
+          packageDigest: "b".repeat(64),
+          authSteps: [],
+        },
+      } as unknown as OimConnectionVerificationEvidence;
+
+      const actor = { principalId: "user-1", mayManageShared: false };
+      const input = {
+        label: "Acme",
+        owner: {
+          scope: "personal" as const,
+          principalKind: "user" as const,
+          principalId: "user-1",
+        },
+        values: { api_token: "token" },
+      };
+
+      for (const { error, expected } of [
+        {
+          name: "rejects invalid provider proof",
+          error: new OimAuthVerificationError("predicate_failed"),
+          expected: "provider_proof_failed",
+        },
+        {
+          name: "surfaces provider unavailability",
+          error: new Error("provider unavailable"),
+          expected: "verification_unavailable",
+        },
+      ]) {
+        const fixture = verificationService({ verify: async () => Promise.reject(error) });
+
+        const result = await fixture.service.create("acme-v2", actor, input);
+
+        expect(result).toMatchObject({
+          verification: { status: "action_required", error: expected },
+        });
+        expect(fixture.stored()?.health.status).toBe("action_required");
+        expect(fixture.publishAuthStep).not.toHaveBeenCalled();
+      }
+
+      await run(
+        "surfaces verification persistence failure with the created opaque ID",
+        async () => {
+          const fixture = verificationService({
+            verify: async () => evidence,
+            publish: "throw",
+          });
+
+          const result = await fixture.service.create("acme-v2", actor, input);
+
+          expect(result).toMatchObject({
+            connectionId: expect.any(String),
+            verification: {
+              status: "action_required",
+              error: "verification_persistence_failed",
+            },
+          });
+          expect(fixture.stored()?.health.status).toBe("action_required");
+        }
+      );
+
+      await run(
+        "retries verification on the existing Connection without creating a duplicate",
+        async () => {
+          let available = false;
+          const fixture = verificationService({
+            verify: async () =>
+              available ? evidence : Promise.reject(new Error("provider unavailable")),
+          });
+          const created = await fixture.service.create("acme-v2", actor, input);
+          const failedRefresh = await fixture.service.refresh(
+            "acme-v2",
+            created.connectionId,
+            actor
+          );
+          available = true;
+
+          const refreshed = await fixture.service.refresh("acme-v2", created.connectionId, actor);
+
+          expect(created.verification).toEqual({
+            status: "action_required",
+            error: "verification_unavailable",
+          });
+          expect(failedRefresh.steps).toEqual([
+            {
+              stepId: "verification",
+              status: "action_required",
+              error: "verification_unavailable",
+            },
+          ]);
+          expect(refreshed).toMatchObject({
+            connectionId: created.connectionId,
+            health: "healthy",
+          });
+          expect(fixture.puts()).toBe(1);
+          expect(fixture.stored()?.health.status).toBe("healthy");
+        }
+      );
+    }
     const revokeReferences = vi.fn(async (_references: readonly string[]) => {});
     const credentials: ConnectionCredentialVault = {
       create,
@@ -279,6 +553,22 @@ describe("OimConnectionService authorization", () => {
         callbackUrl: "https://api.example.test/api/v1/integrations/auth/callback",
         webUrl: "https://app.example.test",
         apiUrl: "https://api.example.test",
+      },
+      ingress: {
+        async isDisabled() {
+          return false;
+        },
+        async requestWebhookRegistration() {
+          throw new Error("unexpected webhook registration");
+        },
+        async teardown() {
+          return {
+            ingressDisabled: true,
+            pollingStateRemoved: false,
+            webhook: null,
+            remoteCleanupComplete: true,
+          };
+        },
       },
       refreshOAuth: async () => ({
         credentialValues: {},

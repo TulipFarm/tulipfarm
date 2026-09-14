@@ -4,7 +4,7 @@ kind: Integration
 metadata:
   id: google-workspace
   name: Google Workspace
-  version: 1.0.0
+  version: 2.0.0
   description: >-
     Read and write Docs, Sheets, Slides, Drive files, Calendar events, and Gmail messages through
     one Google user OAuth Connection.
@@ -15,15 +15,15 @@ metadata:
 
 profiles:
   core: "1.2"
-  auth: "1.0"
+  auth: "1.1"
 
 files:
   - path: setup-guide.md
     role: guide
-    sha256: "cb24f110ae490c525dde7bb130015a055541078e5a286d24d085af8ed3a995d7"
+    sha256: "7b01451d65155ff28c6d88d342a8e33a35eec4ccc246d2732576119878dc655b"
   - path: fixtures.yml
     role: fixture
-    sha256: "d84e6f7e2943c4d75bd1412c4cb10c868f00f2bebb2432fbcea2d63e3e704ba6"
+    sha256: "afdc52386b1ffc7d15ab85791f104b91d5be641dfc63f28db0c61494aca7cc50"
 
 auth:
   # Fixed operation origins are also compiled into each Tool contract. Drive and Calendar share
@@ -34,6 +34,7 @@ auth:
     - slides.googleapis.com
     - www.googleapis.com
     - gmail.googleapis.com
+    - openidconnect.googleapis.com
   credentialSlots:
     - id: client_id
       label: Google OAuth client ID
@@ -90,6 +91,9 @@ auth:
         prompt: consent
         include_granted_scopes: "true"
       scopes:
+        - openid
+        - profile
+        - email
         - https://www.googleapis.com/auth/documents
         - https://www.googleapis.com/auth/spreadsheets
         - https://www.googleapis.com/auth/presentations
@@ -113,8 +117,69 @@ auth:
           target:
             type: credential
             slot: refresh_token
+  healthCheckOperationId: current-user
+  verification:
+    issuer:
+      source: package
+      value: https://accounts.google.com
+    checks:
+      - id: current-user
+        operationId: current-user
+        credentialSlots: [access_token]
+        success:
+          - kind: present
+            path: /sub
+    evidence:
+      assurance: identified
+      subject:
+        kind: human
+        checkId: current-user
+        path: /sub
+        namespace: issuer_client
+        clientIdSlot: client_id
 
 operations:
+  - id: current-user
+    name: google_workspace_current_user
+    description: Identify the Google user who authorized this personal Connection.
+    effect: read
+    identityMode: personal_required
+    credentialSlot: access_token
+    credentialInjection:
+      in: header
+      name: Authorization
+      format: "Bearer {token}"
+    source:
+      type: http
+      method: GET
+      baseUrl: https://openidconnect.googleapis.com
+      path: /v1/userinfo
+    response:
+      maxBytes: 131072
+      schema:
+        type: object
+        properties:
+          sub: { type: string, minLength: 1 }
+          name: { type: string }
+          given_name: { type: string }
+          family_name: { type: string }
+          picture: { type: string }
+          email: { type: string }
+          email_verified: { type: boolean }
+          locale: { type: string }
+          hd: { type: string }
+        required: [sub]
+      projection:
+        - /sub
+        - /name
+        - /given_name
+        - /family_name
+        - /picture
+        - /email
+        - /email_verified
+        - /locale
+        - /hd
+
   - id: docs-get
     name: google_workspace_docs_get
     description: >-

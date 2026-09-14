@@ -27,6 +27,7 @@ when Google does not rotate it.
 
 The package requests:
 
+- `openid`, `profile`, and `email` to identify the exact Google account behind the OAuth grant.
 - `documents` for Docs reads, creation, and batch edits.
 - `spreadsheets` for Sheets reads, creation, and value edits.
 - `presentations` for Slides reads, creation, and batch edits.
@@ -41,6 +42,9 @@ restricted-scope requirements. An external production app can require Google ver
 server that stores or transmits restricted-scope data can require an annual assessment by a
 Google-approved assessor. A Google Workspace administrator can also block or limit the app.
 
+The identity check uses the OpenID Connect `sub` value. The optional `hd` value is only a hosted
+domain hint; it is not treated as an organization or tenant identifier.
+
 An external app in **Testing** is limited to configured test users. Google states that test-user
 authorizations, including refresh tokens obtained for offline access, expire after seven days for
 requests beyond basic identity scopes. An **Internal** app is limited to users in its Google Cloud
@@ -54,6 +58,7 @@ Workspace administrator policy, and any Google verification or security assessme
 
 | Service | Read operations | Write operations |
 | --- | --- | --- |
+| Identity | `google_workspace_current_user` | — |
 | Docs | `google_workspace_docs_get` | `google_workspace_docs_create`, `google_workspace_docs_batch_update` |
 | Sheets | `google_workspace_sheets_get`, `google_workspace_sheets_get_values` | `google_workspace_sheets_create`, `google_workspace_sheets_update_values` |
 | Slides | `google_workspace_slides_get` | `google_workspace_slides_create`, `google_workspace_slides_batch_update` |
@@ -86,6 +91,7 @@ credentials or network access.
 OAuth and policy:
 
 - [OAuth 2.0 for web server applications](https://developers.google.com/identity/protocols/oauth2/web-server)
+- [OpenID Connect](https://developers.google.com/identity/openid-connect/openid-connect)
 - [Google OAuth scope catalog](https://developers.google.com/identity/protocols/oauth2/scopes)
 - [Restricted-scope verification](https://developers.google.com/identity/protocols/oauth2/production-readiness/restricted-scope-verification)
 - [OAuth audience and publishing status](https://support.google.com/cloud/answer/15549945)

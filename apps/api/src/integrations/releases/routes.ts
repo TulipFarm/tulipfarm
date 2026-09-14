@@ -44,8 +44,125 @@ const GenerationParamsSchema = {
   },
 } as const;
 
-const AnyResponse = {
-  type: ["array", "boolean", "null", "number", "object", "string"],
+const InspectionResponseSchema = {
+  type: "object",
+  additionalProperties: false,
+  required: ["source", "ref", "candidates"],
+  properties: {
+    source: { type: "string" },
+    ref: { type: "string" },
+    candidates: {
+      type: "array",
+      items: {
+        type: "object",
+        additionalProperties: false,
+        required: ["sourcePath", "integrationId", "version", "packageDigest", "issues"],
+        properties: {
+          sourcePath: { type: "string" },
+          integrationId: { type: "string" },
+          version: { type: "string" },
+          packageDigest: { type: "string" },
+          issues: { type: "array", items: { type: "string" } },
+          review: {
+            type: "object",
+            additionalProperties: true,
+            required: ["name", "description", "auth", "operations", "ingress"],
+            properties: {
+              name: { type: "string" },
+              description: { type: "string" },
+              auth: { type: "object" },
+              operations: { type: "array" },
+              ingress: { type: "object" },
+            },
+          },
+        },
+      },
+    },
+  },
+} as const;
+
+const InstalledReleasePreferenceSchema = {
+  anyOf: [
+    { type: "null" },
+    {
+      type: "object",
+      additionalProperties: true,
+      required: [
+        "autoPatchOptIn",
+        "installationId",
+        "integrationId",
+        "majorVersion",
+        "slug",
+        "trustClass",
+      ],
+      properties: {
+        integrationId: { type: "string" },
+        majorVersion: { type: "integer", minimum: 0 },
+        installationId: { type: "string", format: "uuid" },
+        slug: { type: "string" },
+        trustClass: { type: "string", enum: ["official", "community"] },
+        autoPatchOptIn: { type: "boolean" },
+      },
+    },
+  ],
+} as const;
+
+const TrustRootSchema = {
+  type: "object",
+  additionalProperties: false,
+  required: ["purpose", "keyId", "publicKeyPem", "createdAt", "createdBy"],
+  properties: {
+    purpose: { type: "string", enum: ["release", "revocation"] },
+    keyId: { type: "string" },
+    publicKeyPem: { type: "string" },
+    createdAt: { type: "string", format: "date-time" },
+    createdBy: { type: "string" },
+    disabledAt: { type: "string", format: "date-time" },
+    disabledBy: { type: "string" },
+  },
+} as const;
+const TrustRootOrNullSchema = { anyOf: [{ type: "null" }, TrustRootSchema] } as const;
+
+const RevocationFeedSchema = {
+  anyOf: [
+    { type: "null" },
+    {
+      type: "object",
+      additionalProperties: false,
+      required: ["url", "updatedAt", "updatedBy"],
+      properties: {
+        url: { type: "string", format: "uri" },
+        updatedAt: { type: "string", format: "date-time" },
+        updatedBy: { type: "string" },
+        disabledAt: { type: "string", format: "date-time" },
+        disabledBy: { type: "string" },
+      },
+    },
+  ],
+} as const;
+
+const MaintenanceResultSchema = {
+  type: "object",
+  additionalProperties: false,
+  required: ["feed", "patches"],
+  properties: {
+    feed: { type: "string", enum: ["disabled", "unchanged", "updated"] },
+    patches: {
+      type: "array",
+      items: {
+        type: "object",
+        additionalProperties: false,
+        required: ["integrationId", "majorVersion", "status"],
+        properties: {
+          integrationId: { type: "string" },
+          majorVersion: { type: "integer", minimum: 0 },
+          status: { type: "string", enum: ["failed", "skipped", "updated"] },
+          version: { type: "string" },
+          reason: { type: "string" },
+        },
+      },
+    },
+  },
 } as const;
 
 const UninstallResultSchema = {
@@ -186,7 +303,12 @@ export function registerOimReleaseRoutes(
           required: ["source"],
           properties: { source: { type: "string", minLength: 1 } },
         },
-        response: { 200: AnyResponse, 400: ErrorSchema, 401: ErrorSchema, 403: ErrorSchema },
+        response: {
+          200: InspectionResponseSchema,
+          400: ErrorSchema,
+          401: ErrorSchema,
+          403: ErrorSchema,
+        },
       },
     },
     async (request) => {
@@ -206,9 +328,10 @@ export function registerOimReleaseRoutes(
         body: {
           type: "object",
           additionalProperties: false,
-          required: ["autoPatchOptIn", "selection", "slug", "source", "trustClass"],
+          required: ["autoPatchOptIn", "selection", "slug", "source", "sourceRef", "trustClass"],
           properties: {
             source: { type: "string", minLength: 1 },
+            sourceRef: { type: "string", minLength: 1 },
             slug: { type: "string", minLength: 1 },
             selection: SelectionSchema,
             trustClass: { type: "string", enum: ["official", "community"] },
@@ -229,6 +352,7 @@ export function registerOimReleaseRoutes(
     async (request) => {
       const body = request.body as {
         source: string;
+        sourceRef: string;
         slug: string;
         selection: OimReleaseSelectionRequest;
         trustClass: "community" | "official";
@@ -354,7 +478,12 @@ export function registerOimReleaseRoutes(
         tags: ["integrations"],
         security: [{ sessionCookie: [] }, { bearerToken: [] }],
         params: ScopeParamsSchema,
-        response: { 200: AnyResponse, 401: ErrorSchema, 403: ErrorSchema, 404: ErrorSchema },
+        response: {
+          200: InstalledReleasePreferenceSchema,
+          401: ErrorSchema,
+          403: ErrorSchema,
+          404: ErrorSchema,
+        },
       },
     },
     async (request) => {
@@ -379,7 +508,7 @@ export function registerOimReleaseRoutes(
           properties: { enabled: { type: "boolean" } },
         },
         response: {
-          200: AnyResponse,
+          200: InstalledReleasePreferenceSchema,
           400: ErrorSchema,
           401: ErrorSchema,
           403: ErrorSchema,
@@ -408,7 +537,11 @@ export function registerOimReleaseRoutes(
           additionalProperties: false,
           properties: { includeDisabled: { type: "boolean", default: false } },
         },
-        response: { 200: AnyResponse, 401: ErrorSchema, 403: ErrorSchema },
+        response: {
+          200: { type: "array", items: TrustRootSchema },
+          401: ErrorSchema,
+          403: ErrorSchema,
+        },
       },
     },
     (request) => {
@@ -436,7 +569,7 @@ export function registerOimReleaseRoutes(
           },
         },
         response: {
-          200: AnyResponse,
+          200: TrustRootSchema,
           400: ErrorSchema,
           401: ErrorSchema,
           403: ErrorSchema,
@@ -474,7 +607,12 @@ export function registerOimReleaseRoutes(
             keyId: { type: "string", minLength: 1 },
           },
         },
-        response: { 200: AnyResponse, 401: ErrorSchema, 403: ErrorSchema, 404: ErrorSchema },
+        response: {
+          200: TrustRootOrNullSchema,
+          401: ErrorSchema,
+          403: ErrorSchema,
+          404: ErrorSchema,
+        },
       },
     },
     async (request) => {
@@ -497,7 +635,7 @@ export function registerOimReleaseRoutes(
         description: "Read the configured OIM revocation and maintenance feed.",
         tags: ["integrations"],
         security: [{ sessionCookie: [] }, { bearerToken: [] }],
-        response: { 200: AnyResponse, 401: ErrorSchema, 403: ErrorSchema },
+        response: { 200: RevocationFeedSchema, 401: ErrorSchema, 403: ErrorSchema },
       },
     },
     () => control.getRevocationFeed()
@@ -517,7 +655,12 @@ export function registerOimReleaseRoutes(
           required: ["url"],
           properties: { url: { type: "string", minLength: 1, maxLength: 2048 } },
         },
-        response: { 200: AnyResponse, 400: ErrorSchema, 401: ErrorSchema, 403: ErrorSchema },
+        response: {
+          200: RevocationFeedSchema,
+          400: ErrorSchema,
+          401: ErrorSchema,
+          403: ErrorSchema,
+        },
       },
     },
     async (request) => {
@@ -537,7 +680,12 @@ export function registerOimReleaseRoutes(
         description: "Disable OIM release maintenance without deleting its history.",
         tags: ["integrations"],
         security: [{ sessionCookie: [] }, { bearerToken: [] }],
-        response: { 200: AnyResponse, 401: ErrorSchema, 403: ErrorSchema, 404: ErrorSchema },
+        response: {
+          200: { type: "boolean" },
+          401: ErrorSchema,
+          403: ErrorSchema,
+          404: ErrorSchema,
+        },
       },
     },
     (request) => control.disableRevocationFeed(commitActorFromRequest(request).principalId)
@@ -587,7 +735,12 @@ export function registerOimReleaseRoutes(
         description: "Run one bounded OIM revocation and patch maintenance cycle.",
         tags: ["integrations"],
         security: [{ sessionCookie: [] }, { bearerToken: [] }],
-        response: { 200: AnyResponse, 401: ErrorSchema, 403: ErrorSchema, 409: ErrorSchema },
+        response: {
+          200: MaintenanceResultSchema,
+          401: ErrorSchema,
+          403: ErrorSchema,
+          409: ErrorSchema,
+        },
       },
     },
     () => control.runMaintenance(businessId)

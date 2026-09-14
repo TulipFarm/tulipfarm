@@ -4,7 +4,7 @@ kind: Integration
 metadata:
   id: jira
   name: Jira
-  version: 1.0.0
+  version: 1.0.1
   description: >-
     Search, read, create, update and transition Jira Cloud issues with an Atlassian API token
     scoped to one site.
@@ -15,12 +15,12 @@ metadata:
 
 profiles:
   core: "1.1"
-  auth: "1.0"
+  auth: "1.1"
 
 files:
   - path: setup-guide.md
     role: guide
-    sha256: "7c1e8e1ba16fe3326953bb8945dea3ccc6271ceaf9e42aab4bcd764fa089fd6b"
+    sha256: "2d5e347aaca79870291eddbc5faad994b0e1eb518a8f0d3f1bb203721eea4dab"
   - path: fixtures.yml
     role: fixture
     sha256: "292e89acad04bb1edfdf456ea13c71a8d6c8f5159be0ff545d13f4d424e30e93"
@@ -76,6 +76,27 @@ auth:
             type: credential
             slot: api_credential
   healthCheckOperationId: current-user
+  verification:
+    issuer:
+      source: package
+      value: https://api.atlassian.com
+    checks:
+      - id: current-user
+        operationId: current-user
+        credentialSlots: [api_credential]
+        success:
+          - kind: present
+            path: /accountId
+          - kind: equals
+            path: /active
+            value: true
+    evidence:
+      assurance: identified
+      subject:
+        kind: human
+        checkId: current-user
+        path: /accountId
+        namespace: issuer
 
 operations:
   - id: current-user

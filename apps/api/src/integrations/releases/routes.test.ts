@@ -40,7 +40,14 @@ describe("OIM release routes", () => {
     retryRequired: false,
   }));
   const recover = vi.fn(async () => ({ installationId: INSTALLATION_ID }));
-  const setAutoPatchPreference = vi.fn(async () => ({ autoPatchOptIn: false }));
+  const setAutoPatchPreference = vi.fn(async () => ({
+    integrationId: "weather",
+    majorVersion: 2,
+    installationId: INSTALLATION_ID,
+    slug: "weather-v2",
+    trustClass: "official" as const,
+    autoPatchOptIn: false,
+  }));
   const acceptRevocationList = vi.fn(async () => ({
     sequence: 2,
     expiresAt: "2026-09-14T09:00:00.000Z",
@@ -64,7 +71,14 @@ describe("OIM release routes", () => {
       uninstall,
       uninstallStatus,
       recover,
-      getAutoPatchPreference: async () => ({ autoPatchOptIn: true }),
+      getAutoPatchPreference: async () => ({
+        integrationId: "weather",
+        majorVersion: 2,
+        installationId: INSTALLATION_ID,
+        slug: "weather-v2",
+        trustClass: "official" as const,
+        autoPatchOptIn: true,
+      }),
       setAutoPatchPreference,
       listTrustRoots: async () => [],
       addTrustRoot: async () => ({}),
@@ -101,6 +115,7 @@ describe("OIM release routes", () => {
       url: "/api/v1/integrations/oim/releases/install",
       payload: {
         source: "https://example.test/releases.git",
+        sourceRef: "commit-a1b2c3",
         slug: "weather-v1",
         selection: {
           integrationId: "weather",
@@ -118,6 +133,7 @@ describe("OIM release routes", () => {
       businessId: "business-1",
       actorId: "user:operator-1",
       source: "https://example.test/releases.git",
+      sourceRef: "commit-a1b2c3",
       slug: "weather-v1",
       selection: {
         integrationId: "weather",
@@ -135,6 +151,7 @@ describe("OIM release routes", () => {
       url: "/api/v1/integrations/oim/releases/install",
       payload: {
         source: "https://example.test/releases.git",
+        sourceRef: "commit-a1b2c3",
         slug: "weather-v1",
         selection: {
           integrationId: "weather",

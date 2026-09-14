@@ -4,7 +4,7 @@ kind: Integration
 metadata:
   id: telegram
   name: Telegram
-  version: 1.0.0
+  version: 1.0.1
   description: >-
     Send and read messages through a Telegram bot, using the token BotFather issues.
   license: Apache-2.0
@@ -14,7 +14,7 @@ metadata:
 
 profiles:
   core: "1.1"
-  auth: "1.0"
+  auth: "1.1"
   events: "1.0"
 
 files:
@@ -49,6 +49,32 @@ auth:
             type: credential
             slot: bot_token
   healthCheckOperationId: get-me
+  verification:
+    issuer:
+      source: package
+      value: https://api.telegram.org
+    checks:
+      - id: current-bot
+        operationId: get-me
+        credentialSlots: [bot_token]
+        success:
+          - kind: equals
+            path: /ok
+            value: true
+          - kind: present
+            path: /result/id
+    evidence:
+      assurance: identified
+      subject:
+        kind: bot
+        checkId: current-bot
+        path: /result/id
+        namespace: issuer
+      tenant:
+        kind: account
+        source: response
+        checkId: current-bot
+        path: /result/id
 
 operations:
   - id: get-me

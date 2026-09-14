@@ -92,7 +92,11 @@ export {
   createHmacCommitSigner,
   verifyCommitSignature,
 } from "./commit-signing";
-export type { BundleCompileRequest, BundleSourceFile } from "./compiler";
+export type {
+  BundleCompileContribution,
+  BundleCompileRequest,
+  BundleSourceFile,
+} from "./compiler";
 export { compileExecutionBundle } from "./compiler";
 export type {
   ConversionResult,

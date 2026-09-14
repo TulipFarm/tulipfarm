@@ -1,3 +1,4 @@
+import type { OimConnection } from "@tulipfarm/schema";
 import { apiDelete, apiGet, apiWrite } from "./api";
 
 /* Catalog rows include shipped, installed, and curated-not-yet-installed integrations. */
@@ -214,6 +215,354 @@ export async function updateIntegration(
 
 export async function deleteIntegration(name: string): Promise<void> {
   return apiDelete(`/api/v1/integrations/${encodeURIComponent(name)}`);
+}
+
+export interface OimReleaseCandidateReview {
+  readonly name: string;
+  readonly description: string;
+  readonly auth: {
+    readonly credentialLabels: readonly string[];
+    readonly configurationLabels: readonly string[];
+    readonly steps: readonly { readonly title: string; readonly type: string }[];
+  };
+  readonly operations: readonly {
+    readonly name: string;
+    readonly description: string;
+    readonly effect: string;
+    readonly destination: string;
+  }[];
+  readonly ingress: {
+    readonly events: boolean;
+    readonly polling: boolean;
+    readonly knowledge: boolean;
+  };
+}
+
+export interface OimReleaseInspection {
+  readonly source: string;
+  readonly ref: string;
+  readonly candidates: readonly {
+    readonly sourcePath: string;
+    readonly integrationId: string;
+    readonly version: string;
+    readonly packageDigest: string;
+    readonly issues: readonly string[];
+    readonly review?: OimReleaseCandidateReview;
+  }[];
+}
+
+export interface InstallOimReleaseInput {
+  readonly source: string;
+  readonly sourceRef: string;
+  readonly slug: string;
+  readonly selection: {
+    readonly integrationId: string;
+    readonly version: string;
+    readonly packageDigest: string;
+  };
+  readonly trustClass: "official" | "community";
+  readonly approvedCommunityDigest?: string;
+  readonly autoPatchOptIn: boolean;
+}
+
+export interface InstallOimReleaseResult extends OimReleaseGeneration {
+  readonly version: string;
+  readonly packageDigest: string;
+  readonly trustClass: "official" | "community";
+  readonly revision: string;
+}
+
+export function inspectOimReleaseSource(source: string): Promise<OimReleaseInspection> {
+  return apiWrite("POST", "/api/v1/integrations/oim/releases/inspect", { source });
+}
+
+export function installOimRelease(input: InstallOimReleaseInput): Promise<InstallOimReleaseResult> {
+  return apiWrite("POST", "/api/v1/integrations/oim/releases/install", input);
+}
+
+export interface OimReleaseGeneration {
+  readonly integrationId: string;
+  readonly majorVersion: number;
+  readonly installationId: string;
+}
+
+export interface InstalledOimReleaseGeneration extends OimReleaseGeneration {
+  readonly slug: string;
+  readonly trustClass?: "official" | "community";
+  readonly autoPatchOptIn?: boolean;
+}
+
+export interface OimReleaseUninstallStatus {
+  readonly scope: OimReleaseGeneration;
+  readonly status: "not_started" | "pending" | "complete";
+  readonly activationAllowed: boolean;
+  readonly retryRequired: boolean;
+}
+
+function oimReleasePath(generation: OimReleaseGeneration): string {
+  return `/api/v1/integrations/oim/${encodeURIComponent(
+    generation.integrationId
+  )}/majors/${generation.majorVersion}/installations/${encodeURIComponent(
+    generation.installationId
+  )}`;
+}
+
+export function getInstalledOimRelease(
+  integrationId: string,
+  majorVersion: number
+): Promise<InstalledOimReleaseGeneration | null> {
+  return apiGet(
+    `/api/v1/integrations/oim/${encodeURIComponent(
+      integrationId
+    )}/majors/${majorVersion}/auto-patch`
+  );
+}
+
+export function getOimReleaseUninstallStatus(
+  generation: OimReleaseGeneration
+): Promise<OimReleaseUninstallStatus> {
+  return apiGet(`${oimReleasePath(generation)}/uninstall`);
+}
+
+export function uninstallOimRelease(
+  generation: OimReleaseGeneration
+): Promise<{ readonly status: "complete" }> {
+  return apiWrite("DELETE", oimReleasePath(generation), {});
+}
+
+export interface OimTrustRoot {
+  readonly purpose: "release" | "revocation";
+  readonly keyId: string;
+  readonly publicKeyPem: string;
+  readonly createdAt: string;
+  readonly createdBy: string;
+  readonly disabledAt?: string;
+  readonly disabledBy?: string;
+}
+
+export interface OimRevocationFeed {
+  readonly url: string;
+  readonly updatedAt: string;
+  readonly updatedBy: string;
+  readonly disabledAt?: string;
+  readonly disabledBy?: string;
+}
+
+export interface OimReleaseMaintenanceResult {
+  readonly feed: "disabled" | "unchanged" | "updated";
+  readonly patches: readonly {
+    readonly integrationId: string;
+    readonly majorVersion: number;
+    readonly status: "failed" | "skipped" | "updated";
+    readonly version?: string;
+    readonly reason?: string;
+  }[];
+}
+
+export function listOimTrustRoots(includeDisabled = true): Promise<readonly OimTrustRoot[]> {
+  return apiGet(
+    `/api/v1/integrations/oim/release-trust/roots?includeDisabled=${includeDisabled ? "true" : "false"}`
+  );
+}
+
+export function addOimTrustRoot(input: {
+  purpose: OimTrustRoot["purpose"];
+  keyId: string;
+  publicKeyPem: string;
+}): Promise<OimTrustRoot> {
+  return apiWrite("POST", "/api/v1/integrations/oim/release-trust/roots", input);
+}
+
+export function disableOimTrustRoot(
+  purpose: OimTrustRoot["purpose"],
+  keyId: string
+): Promise<OimTrustRoot | null> {
+  return apiWrite(
+    "DELETE",
+    `/api/v1/integrations/oim/release-trust/roots/${purpose}/${encodeURIComponent(keyId)}`,
+    {}
+  );
+}
+
+export function getOimRevocationFeed(): Promise<OimRevocationFeed | null> {
+  return apiGet("/api/v1/integrations/oim/release-trust/feed");
+}
+
+export function setOimRevocationFeed(url: string): Promise<OimRevocationFeed> {
+  return apiWrite("PUT", "/api/v1/integrations/oim/release-trust/feed", { url });
+}
+
+export function disableOimRevocationFeed(): Promise<boolean> {
+  return apiWrite("DELETE", "/api/v1/integrations/oim/release-trust/feed", {});
+}
+
+export function runOimReleaseMaintenance(): Promise<OimReleaseMaintenanceResult> {
+  return apiWrite("POST", "/api/v1/integrations/oim/release-trust/maintenance", {});
+}
+
+export function setOimAutoPatchPreference(
+  integrationId: string,
+  majorVersion: number,
+  enabled: boolean
+): Promise<InstalledOimReleaseGeneration> {
+  return apiWrite(
+    "PATCH",
+    `/api/v1/integrations/oim/${encodeURIComponent(
+      integrationId
+    )}/majors/${majorVersion}/auto-patch`,
+    { enabled }
+  );
+}
+
+export type OimConnectionSummary = Pick<
+  OimConnection,
+  | "id"
+  | "integration"
+  | "label"
+  | "owner"
+  | "status"
+  | "isDefault"
+  | "configuration"
+  | "health"
+  | "expiresAt"
+> & {
+  availableCredentialSlots: string[];
+  disconnectPending: boolean;
+};
+
+export type OimConnectionRefreshStep = {
+  stepId: string;
+  status: "renewed" | "skipped" | "in_progress" | "action_required" | "conflict";
+  error?:
+    | "missing_step"
+    | "missing_credential"
+    | "refresh_failed"
+    | "revision_conflict"
+    | OimConnectionVerificationError;
+};
+
+export type OimConnectionRefreshResult = {
+  connectionId: string;
+  health: OimConnection["health"]["status"];
+  steps: OimConnectionRefreshStep[];
+};
+
+export interface OimConnectionSetup {
+  integration: OimConnection["integration"];
+  connectionHealth?: OimConnection["health"]["status"];
+  allowedOwnerScopes: readonly OimConnection["owner"]["scope"][];
+  configurationFields: readonly {
+    id: string;
+    label: string;
+    type: "string" | "url" | "boolean" | "integer";
+    required: boolean;
+    agentVisible: boolean;
+  }[];
+  fieldSteps: readonly {
+    id: string;
+    title: string;
+    description?: string;
+    fields: readonly {
+      id: string;
+      label: string;
+      description?: string;
+      input: "text" | "password" | "url";
+      required: boolean;
+      secret: boolean;
+    }[];
+  }[];
+  initialAuthorizationSteps: readonly {
+    id: string;
+    title: string;
+    description?: string;
+    type: "oauth2" | "app_manifest" | "install" | "webhook";
+  }[];
+  pendingAuthorizationStepIds?: readonly string[];
+}
+
+export interface CreateOimConnectionInput {
+  label: string;
+  ownerScope: OimConnection["owner"]["scope"];
+  ownerId?: string;
+  values: Record<string, string>;
+  isDefault?: boolean;
+}
+
+export type OimConnectionVerificationError =
+  | "provider_proof_failed"
+  | "verification_unavailable"
+  | "verification_persistence_failed";
+
+export type OimConnectionVerification =
+  | { status: "not_required" | "pending" | "verified" }
+  | { status: "action_required"; error: OimConnectionVerificationError };
+
+export interface CreateOimConnectionResult {
+  connectionId: string;
+  verification: OimConnectionVerification;
+}
+
+export type OimConnectionAuthorizationAction =
+  | { action: "redirect"; url: string }
+  | { action: "form_post"; url: string; field: string; value: string }
+  | { action: "completed" }
+  | { action: "pending" };
+
+export async function listOimConnections(name: string): Promise<OimConnectionSummary[]> {
+  const result = await apiGet<{ connections: OimConnectionSummary[] }>(
+    `/api/v1/integrations/${encodeURIComponent(name)}/connections`
+  );
+  return result.connections;
+}
+
+export function getOimConnectionSetup(
+  name: string,
+  connectionId?: string
+): Promise<OimConnectionSetup> {
+  const query = connectionId ? `?connectionId=${encodeURIComponent(connectionId)}` : "";
+  return apiGet(`/api/v1/integrations/${encodeURIComponent(name)}/connection-setup${query}`);
+}
+
+export function createOimConnection(
+  name: string,
+  input: CreateOimConnectionInput
+): Promise<CreateOimConnectionResult> {
+  return apiWrite("POST", `/api/v1/integrations/${encodeURIComponent(name)}/connections`, input);
+}
+
+export function refreshOimConnection(
+  name: string,
+  connectionId: string
+): Promise<OimConnectionRefreshResult> {
+  return apiWrite(
+    "POST",
+    `/api/v1/integrations/${encodeURIComponent(name)}/connections/${encodeURIComponent(connectionId)}/refresh`,
+    {}
+  );
+}
+
+export function startOimConnectionAuthorization(
+  name: string,
+  connectionId: string,
+  stepId: string,
+  org?: string
+): Promise<OimConnectionAuthorizationAction> {
+  return apiWrite(
+    "POST",
+    `/api/v1/integrations/${encodeURIComponent(name)}/connections/${encodeURIComponent(connectionId)}/auth/${encodeURIComponent(stepId)}`,
+    org ? { org } : {}
+  );
+}
+
+export async function revokeOimConnection(
+  name: string,
+  connectionId: string
+): Promise<{ status: "revoked" | "disconnect_pending" }> {
+  return apiWrite(
+    "DELETE",
+    `/api/v1/integrations/${encodeURIComponent(name)}/connections/${encodeURIComponent(connectionId)}`,
+    undefined
+  );
 }
 
 export type SlackRoute = {

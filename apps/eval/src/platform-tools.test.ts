@@ -4,7 +4,12 @@ import {
   GITHUB_TOOL_DECLARATIONS,
   SLACK_TOOL_DECLARATIONS,
 } from "@tulipfarm/integrations";
-import { NETWORK_TOOL_DECLARATIONS, SKILL_MARKETPLACE_TOOL_DECLARATIONS } from "@tulipfarm/schema";
+import { PLATFORM_RUNTIME_TOOLS } from "@tulipfarm/platform-tools";
+import {
+  INTEGRATION_AUTHORING_TOOL_DECLARATIONS,
+  NETWORK_TOOL_DECLARATIONS,
+  SKILL_MARKETPLACE_TOOL_DECLARATIONS,
+} from "@tulipfarm/schema";
 import { SKILL_TOOL_DECLARATION } from "@tulipfarm/soul";
 import { describe, expect, it } from "vitest";
 import { platformToolNames, resolvePlatformTool } from "./platform-tools.ts";
@@ -12,7 +17,9 @@ import { platformToolNames, resolvePlatformTool } from "./platform-tools.ts";
 describe("platform Tools a Case may name", () => {
   it("exposes every shipped declaration exactly as the product declares it", () => {
     const shippedDeclarations = [
+      ...PLATFORM_RUNTIME_TOOLS,
       ...FILE_TOOLS,
+      ...INTEGRATION_AUTHORING_TOOL_DECLARATIONS,
       ...SKILL_MARKETPLACE_TOOL_DECLARATIONS,
       SKILL_TOOL_DECLARATION,
       GITHUB_REPOSITORY_LIST_DECLARATION,

@@ -11,6 +11,8 @@ import { Search } from "~/components/icons";
 import { displayName, IntegrationCard } from "~/components/integrations/integration-card";
 import { IntegrationOverview } from "~/components/integrations/integration-overview";
 import { IntegrationPanel } from "~/components/integrations/integration-panel";
+import { OimReleaseInstallDialog } from "~/components/integrations/oim-release-install-dialog";
+import { OimReleaseSecurityDialog } from "~/components/integrations/oim-release-security-dialog";
 import { ErrorState } from "~/components/states";
 import { Button } from "~/components/ui/button";
 import { Input } from "~/components/ui/input";
@@ -48,6 +50,8 @@ export default function IntegrationsIndex() {
   const isAdmin = useIsAdmin();
   const [updatingName, setUpdatingName] = useState<string>();
   const [updateError, setUpdateError] = useState<string>();
+  const [installOpen, setInstallOpen] = useState(false);
+  const [securityOpen, setSecurityOpen] = useState(false);
 
   async function handleUpdate(name: string, source?: string) {
     setUpdatingName(name);
@@ -124,6 +128,16 @@ export default function IntegrationsIndex() {
     >
       <div className="min-w-0 lg:col-start-2">
         <IntegrationOverview integrations={integrations} />
+        {isAdmin ? (
+          <div className="mt-3 flex flex-wrap gap-2">
+            <Button type="button" variant="outline" onClick={() => setInstallOpen(true)}>
+              Install from source
+            </Button>
+            <Button type="button" variant="outline" onClick={() => setSecurityOpen(true)}>
+              Package security
+            </Button>
+          </div>
+        ) : null}
       </div>
       {integrations.length > 0 ? (
         <div className="flex min-w-0 flex-col gap-5 lg:sticky lg:top-0 lg:col-start-1 lg:row-span-2 lg:row-start-1 lg:self-start">
@@ -240,6 +254,15 @@ export default function IntegrationsIndex() {
         )}
         <IntegrationPanel name={viewing} onClose={closePanel} />
       </div>
+      <OimReleaseInstallDialog
+        open={installOpen}
+        onClose={() => setInstallOpen(false)}
+        onInstalled={(integrationId) => {
+          setInstallOpen(false);
+          window.location.assign(`/integrations/${encodeURIComponent(integrationId)}`);
+        }}
+      />
+      <OimReleaseSecurityDialog open={securityOpen} onClose={() => setSecurityOpen(false)} />
     </div>
   );
 }

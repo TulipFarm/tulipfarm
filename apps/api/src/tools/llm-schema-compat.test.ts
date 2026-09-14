@@ -6,6 +6,7 @@ import { FRONTEND_TOOLS } from "../platform/frontend-tools";
 import { PLATFORM_TOOLS } from "../platform/tools";
 import { RESOURCE_TOOLS } from "../resources/tools.js";
 import { AGENT_TOOLS } from "../soul/agents/tools.js";
+import { INTEGRATION_AUTHORING_TOOLS } from "../soul/integrations/tools.js";
 import { RESOURCE_TYPE_TOOLS } from "../soul/resource-types/tools.js";
 import { SKILL_TOOLS } from "../soul/skills/tools.js";
 
@@ -18,6 +19,7 @@ const ALL_TOOL_SETS: Array<[string, ReadonlyArray<{ name: string; inputSchema: u
   ["RESOURCE_TOOLS", RESOURCE_TOOLS],
   ["RESOURCE_TYPE_TOOLS", RESOURCE_TYPE_TOOLS],
   ["AGENT_TOOLS", AGENT_TOOLS],
+  ["INTEGRATION_AUTHORING_TOOLS", INTEGRATION_AUTHORING_TOOLS],
   ["SKILL_TOOLS", SKILL_TOOLS],
   ["PLATFORM_TOOLS", PLATFORM_TOOLS],
   ["FRONTEND_TOOLS", FRONTEND_TOOLS],

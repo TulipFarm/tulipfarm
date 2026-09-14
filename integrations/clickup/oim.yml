@@ -4,7 +4,7 @@ kind: Integration
 metadata:
   id: clickup
   name: ClickUp
-  version: 1.0.0
+  version: 1.0.1
   description: Read and manage ClickUp Workspace tasks with a personal API token.
   license: Apache-2.0
   maintainers:
@@ -13,7 +13,7 @@ metadata:
 
 profiles:
   core: "1.0"
-  auth: "1.0"
+  auth: "1.1"
 
 files:
   - path: fixtures.yml
@@ -47,6 +47,24 @@ auth:
             type: credential
             slot: api_token
   healthCheckOperationId: current-user
+  verification:
+    issuer:
+      source: package
+      value: https://api.clickup.com
+    checks:
+      - id: current-user
+        operationId: current-user
+        credentialSlots: [api_token]
+        success:
+          - kind: present
+            path: /user/id
+    evidence:
+      assurance: identified
+      subject:
+        kind: human
+        checkId: current-user
+        path: /user/id
+        namespace: issuer
 
 operations:
   - id: current-user

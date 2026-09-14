@@ -6,6 +6,10 @@ import { describe, expect, it } from "vitest";
 
 const appSource = readFileSync(join(__dirname, "app.ts"), "utf8");
 const indexSource = readFileSync(join(__dirname, "index.ts"), "utf8");
+const internalRouteFamilySource = readFileSync(
+  join(__dirname, "internal", "route-family.ts"),
+  "utf8"
+);
 
 /**
  * Options deliberately not composed yet. Each entry must name the PR that lands it — deferral is a
@@ -18,7 +22,6 @@ const DEFERRED_OPTIONS: Readonly<Record<string, string>> = {
   routineAuthoring: "PR 4 — jobs and tool effects to their owners",
   // PR 6: no form storage exists, and GovernedFormView is rendered by no route.
   forms: "PR 6 — compose the governed packages",
-  oimConnections: "P12 — final OIM product composition and activation",
 };
 
 /** Option keys in `app.ts` that gate at least one `registerXxxRoutes` call. */
@@ -133,5 +136,30 @@ describe("production app composition", () => {
       "these options are listed as deferred but are already composed (or no longer gate routes) — " +
         "remove them from DEFERRED_OPTIONS"
     ).toEqual([]);
+  });
+
+  it("composes Routine OIM from the signed Run bundle", () => {
+    expect(indexSource).toContain("const internalRoutineOim = new InternalRoutineOimToolHost({");
+    expect(indexSource).toContain("new LiveRoutineOimRunAuthority(internalTurns.host, runStore)");
+    expect(indexSource).toContain("new VerifiedRoutineOimBundleReader(");
+    expect(indexSource).toContain("new BundleRoutineOimRegistrationReader(");
+    expect(indexSource).toContain("connections: oimOperationConnections");
+    expect(indexSource).toContain("effects: recoveryEffects");
+    expect(indexSource).toContain("new LiveRoutineOimFileAuthorizer(");
+    expect(indexSource).toContain("...(hookExecutor === undefined ? {} : { hookExecutor })");
+    expect(composed).toContain("internalRoutineOim");
+    expect(internalRouteFamilySource).toContain(
+      "registerRoutineOimToolRoutes(app, opts.internalRoutineOim, [requireAuth, requireService])"
+    );
+  });
+
+  it("binds Chat, Routine, and Worker Connection resolution to the live OIM catalog", () => {
+    expect(indexSource).toContain("oimReleaseFeature?.packages() ?? bundledOimCatalog");
+    expect(indexSource).toContain(
+      "const liveOimCatalog = liveOimPackageCatalog(oimPackageCatalog)"
+    );
+    expect(indexSource.match(/new CatalogBoundOimOperationConnectionResolver\(/g)).toHaveLength(2);
+    expect(indexSource).toContain("connections: oimOperationConnections");
+    expect(indexSource).toContain("connectionOperations: oimWorkerOperationConnections");
   });
 });

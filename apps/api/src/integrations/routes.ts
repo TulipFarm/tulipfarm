@@ -1,4 +1,6 @@
 import { DEPLOYMENT_BUSINESS_ID } from "@tulipfarm/constants";
+import type { ConnectionPrincipal, OimPackageCatalogEntry } from "@tulipfarm/integrations";
+import type { OimManifest } from "@tulipfarm/schema";
 import type { SecretsService } from "@tulipfarm/secrets";
 import type { BundledIntegration } from "@tulipfarm/soul";
 import {
@@ -44,16 +46,52 @@ const NAME_RE = /^[a-z0-9][a-z0-9._-]{0,63}$/;
 
 interface MergedIntegration {
   slug: string;
-  manifest: IntegrationManifest;
+  manifest?: IntegrationManifest;
+  oimManifest?: OimManifest;
   connected: boolean;
   connectionEnv?: Record<string, string>;
   setupGuide?: string;
 }
 
+export interface OimIntegrationCatalogRoutes {
+  packages(): Promise<readonly OimPackageCatalogEntry[]>;
+  status(
+    entry: OimPackageCatalogEntry,
+    principal: ConnectionPrincipal
+  ): Promise<{ readonly connected: boolean; readonly personalConnected: boolean }>;
+}
+
+function describe(entry: MergedIntegration) {
+  if (entry.oimManifest !== undefined) {
+    return {
+      type: "oim",
+      description: entry.oimManifest.metadata.description,
+      version: entry.oimManifest.metadata.version,
+      maintainer: entry.oimManifest.metadata.maintainers?.[0]?.name,
+      icon: entry.oimManifest.metadata.id,
+      title: entry.oimManifest.metadata.name,
+    };
+  }
+  return {
+    type: entry.manifest?.egress?.type ?? "none",
+    description: entry.manifest?.description,
+    version: entry.manifest?.version,
+    maintainer: entry.manifest?.maintainer,
+    icon: entry.manifest?.icon,
+    title: undefined,
+  };
+}
+
+function setupStepCount(entry: MergedIntegration): number {
+  if (entry.oimManifest !== undefined) return entry.oimManifest.auth?.steps.length ?? 0;
+  return entry.manifest === undefined ? 0 : resolveAuthSteps(entry.manifest).length;
+}
+
 // Bundled manifests stay code-owned after install; Soul owns only connection state.
 export function mergeIntegrations(
   soulLoader: SoulLoader,
-  bundled: ReadonlyMap<string, BundledIntegration>
+  bundled: ReadonlyMap<string, BundledIntegration>,
+  oimPackages: readonly OimPackageCatalogEntry[] = []
 ): Map<string, MergedIntegration> {
   const merged = new Map<string, MergedIntegration>();
   for (const [slug, bundledEntry] of bundled) {
@@ -64,7 +102,15 @@ export function mergeIntegrations(
       setupGuide: bundledEntry.setupGuide,
     });
   }
+  for (const entry of oimPackages) {
+    merged.set(entry.key, {
+      slug: entry.key,
+      oimManifest: entry.manifest,
+      connected: false,
+    });
+  }
   for (const [slug, soulEntry] of soulLoader.integrations) {
+    if (merged.get(slug)?.oimManifest !== undefined) continue;
     const bundledEntry = bundled.get(slug);
     const manifest = bundledEntry?.manifest ?? soulEntry.manifest;
     // Soul entry has no manifest of its own (bundled, code-owned) and no bundled entry either —
@@ -82,12 +128,14 @@ export function mergeIntegrations(
 }
 
 function toSummary(entry: MergedIntegration) {
+  const details = describe(entry);
   return {
     name: entry.slug,
-    type: entry.manifest.egress?.type ?? "none",
-    description: entry.manifest.description,
-    version: entry.manifest.version,
-    maintainer: entry.manifest.maintainer,
+    title: details.title,
+    type: details.type,
+    description: details.description,
+    version: details.version,
+    maintainer: details.maintainer,
     installed: true,
     status: (entry.connected ? "connected" : "disconnected") as ConnectionStatus,
   };
@@ -113,17 +161,18 @@ async function toCatalog(
             description: undefined as string | undefined,
             version: undefined as string | undefined,
             maintainer: undefined as string | undefined,
+            title: undefined as string | undefined,
             installed: false,
             status: "disconnected" as ConnectionStatus,
           };
-      const slug = entry?.manifest.icon ?? listing?.icon;
+      const slug = (entry === undefined ? undefined : describe(entry).icon) ?? listing?.icon;
       const mark = await brandIcon(slug);
       return {
         ...base,
         // How much work connecting is, answered on the card rather than one click later. Absent for
         // an entry with no manifest yet, where the honest answer is that nobody knows.
-        setupSteps: entry ? resolveAuthSteps(entry.manifest).length : undefined,
-        title: listing?.title,
+        setupSteps: entry ? setupStepCount(entry) : undefined,
+        title: listing?.title ?? base.title,
         // An entry the registry has not opened yet is listed but not offered. Absent listing means
         // an uncurated local install, which nobody is holding back.
         availability: listing?.availability ?? "available",
@@ -148,32 +197,58 @@ async function toDetail(
   listing?: RegistryEntry,
   personalConnected = false
 ) {
-  const steps = resolveAuthSteps(entry.manifest);
-  const slug = entry.manifest.icon ?? listing?.icon;
+  const slug = describe(entry).icon ?? listing?.icon;
   const mark = await brandIcon(slug);
-  return {
+  const base = {
     ...toSummary(entry),
     // The same brand identity the catalog row showed. Landing on a detail page that drops back to
     // a bare slug reads as a different product than the one that was clicked.
-    title: listing?.title,
+    title: listing?.title ?? describe(entry).title,
     availability: listing?.availability ?? "available",
     category: listing?.category,
     homepage: listing?.homepage,
     iconSlug: slug,
     iconPath: mark?.path,
     iconColor: mark?.hex ?? listing?.color,
-    capabilities: entry.manifest.capabilities,
-    grants: resolveGrants(entry.manifest),
-    knowledge: entry.manifest.knowledge,
+  };
+  if (entry.oimManifest !== undefined) {
+    return {
+      ...base,
+      grants: entry.oimManifest.operations.map((operation) => ({
+        label: operation.name,
+        access: operation.effect,
+        description: operation.description,
+      })),
+      manifest: {},
+      auth: (entry.oimManifest.auth?.steps ?? []).map((step, index) => ({
+        index,
+        kind: step.type,
+        title: step.title,
+        description: step.description,
+        satisfied: false,
+        producesEnv: true,
+      })),
+      connected: entry.connected,
+      personalConnected,
+    };
+  }
+  const manifest = entry.manifest;
+  if (manifest === undefined) throw new Error(`integration ${entry.slug} declares no manifest`);
+  const steps = resolveAuthSteps(manifest);
+  return {
+    ...base,
+    capabilities: manifest.capabilities,
+    grants: resolveGrants(manifest),
+    knowledge: manifest.knowledge,
     manifest: {
       // Derived from the resolved flow, not read from the manifest: a manifest that declares
       // `auth` has no `required_env`, and every consumer must see one shape.
       required_env: steps.flatMap((step) => (step.kind === "fields" ? step.fields : [])),
-      egress: entry.manifest.egress,
-      setup_guide_path: entry.manifest.setup_guide_path,
-      oauth: entry.manifest.oauth,
-      install_manifest: entry.manifest.install_manifest
-        ? JSON.stringify(entry.manifest.install_manifest, null, 2)
+      egress: manifest.egress,
+      setup_guide_path: manifest.setup_guide_path,
+      oauth: manifest.oauth,
+      install_manifest: manifest.install_manifest
+        ? JSON.stringify(manifest.install_manifest, null, 2)
         : undefined,
     },
     auth: steps.map((step, index) => ({
@@ -235,7 +310,8 @@ export function registerIntegrationRoutes(
   // Optional: record connect/disconnect/remove as audit evidence. Connecting an integration grants
   // Agents a new external reach, which is exactly the kind of change an auditor asks about.
   audit?: AuditService,
-  personalTokens?: PrincipalProviderTokenRepo
+  personalTokens?: PrincipalProviderTokenRepo,
+  oimCatalog?: OimIntegrationCatalogRoutes
 ): void {
   const auditWrite = makeSoulAuditWriter(audit);
   // Materialize a bundled-only integration into the soul repo so its connection state has a home.
@@ -293,6 +369,10 @@ export function registerIntegrationRoutes(
     return mergeIntegrations(soulLoader, bundled).get(slug);
   }
 
+  async function isOimPackage(slug: string): Promise<boolean> {
+    return ((await oimCatalog?.packages()) ?? []).some((entry) => entry.key === slug);
+  }
+
   app.get(
     "/api/v1/integrations",
     {
@@ -314,8 +394,18 @@ export function registerIntegrationRoutes(
         },
       },
     },
-    async () => {
-      const merged = mergeIntegrations(soulLoader, bundled);
+    async (req) => {
+      const packages = (await oimCatalog?.packages()) ?? [];
+      const merged = mergeIntegrations(soulLoader, bundled, packages);
+      if (oimCatalog !== undefined && req.principal !== undefined) {
+        await Promise.all(
+          packages.map(async (entry) => {
+            const status = await oimCatalog.status(entry, req.principal as ConnectionPrincipal);
+            const mergedEntry = merged.get(entry.key);
+            if (mergedEntry !== undefined) mergedEntry.connected = status.connected;
+          })
+        );
+      }
       const githubEntry = merged.get("github");
       if (githubEntry && githubStatus) {
         githubEntry.connected = await isGitHubInstalled(githubStatus);
@@ -342,16 +432,25 @@ export function registerIntegrationRoutes(
     },
     async (req, reply) => {
       const { name } = req.params as { name: string };
-      const entry = resolve(name);
+      const packages = (await oimCatalog?.packages()) ?? [];
+      const entry = mergeIntegrations(soulLoader, bundled, packages).get(name);
       if (!entry) return reply.code(404).send({ error: `integration not found: ${name}` });
       if (name === "github" && githubStatus) {
         entry.connected = await isGitHubInstalled(githubStatus);
       }
       const principal = req.principal;
+      const oimPackage = packages.find((pkg) => pkg.key === name);
+      const oimStatus =
+        oimPackage !== undefined && oimCatalog !== undefined && principal !== undefined
+          ? await oimCatalog.status(oimPackage, principal as ConnectionPrincipal)
+          : undefined;
+      if (oimStatus !== undefined) entry.connected = oimStatus.connected;
       const personalConnected =
-        principal?.kind === "user" && personalTokens !== undefined
-          ? (await personalTokens.find(principal, name)) !== null
-          : false;
+        oimStatus !== undefined
+          ? oimStatus.personalConnected
+          : principal?.kind === "user" && personalTokens !== undefined
+            ? (await personalTokens.find(principal, name)) !== null
+            : false;
       return await toDetail(
         entry,
         (await loadIntegrationRegistry(app.log)).get(name),
@@ -402,10 +501,21 @@ export function registerIntegrationRoutes(
       if (!NAME_RE.test(name)) {
         return reply.code(404).send({ error: `integration not found: ${name}` });
       }
+      if (await isOimPackage(name)) {
+        return reply
+          .code(400)
+          .send({ error: `integration "${name}" is connected through /connections` });
+      }
       const { env } = req.body as { env: Record<string, string> };
       const entry = resolve(name);
       if (!entry) {
         return reply.code(404).send({ error: `integration not found: ${name}` });
+      }
+      const manifest = entry.manifest;
+      if (manifest === undefined) {
+        return reply
+          .code(400)
+          .send({ error: `integration "${name}" is connected through /connections` });
       }
 
       // Connect completes exactly one fields step: the first one not already satisfied. All of
@@ -413,7 +523,7 @@ export function registerIntegrationRoutes(
       // demanded, which is what lets a multi-step flow be filled in one step at a time.
       const existingEnv = soulLoader.integrations.get(name)?.connection?.env ?? {};
       const merged = { ...existingEnv, ...env };
-      const target = resolveAuthSteps(entry.manifest).find(
+      const target = resolveAuthSteps(manifest).find(
         (step) => step.kind === "fields" && !authStepSatisfied(step, merged)
       );
       const missing =
@@ -433,7 +543,7 @@ export function registerIntegrationRoutes(
           { soulWriter, soulLoader, secrets: secretsService },
           {
             slug: name,
-            manifest: entry.manifest,
+            manifest,
             patch: env,
             commitMessage: `soul: connect integration ${name}`,
             actor,
@@ -498,6 +608,11 @@ export function registerIntegrationRoutes(
       const { name } = req.params as { name: string };
       if (!NAME_RE.test(name)) {
         return reply.code(404).send({ error: `integration not connected: ${name}` });
+      }
+      if (await isOimPackage(name)) {
+        return reply
+          .code(400)
+          .send({ error: `integration "${name}" is disconnected through /connections` });
       }
       const soulEntry: SoulIntegration | undefined = soulLoader.integrations.get(name);
       if (!soulEntry) return reply.code(404).send({ error: `integration not connected: ${name}` });
@@ -565,6 +680,11 @@ export function registerIntegrationRoutes(
       const { name } = req.params as { name: string };
       if (!NAME_RE.test(name) || !soulLoader.integrations.has(name)) {
         return reply.code(404).send({ error: `integration not found: ${name}` });
+      }
+      if (await isOimPackage(name)) {
+        return reply
+          .code(400)
+          .send({ error: `integration "${name}" is removed through its installed release` });
       }
       await deleteConnectionSecrets(name, secretsService);
       // Drop the provenance record too, so a later reinstall from a different source is not

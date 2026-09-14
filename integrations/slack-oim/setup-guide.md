@@ -75,6 +75,11 @@ Then:
    Request URL with that Connection ID. Slack's URL challenge and signed deliveries use the OIM
    Events profile.
 
+The Connection check uses Slack's `auth.test` method. `team_id` identifies the workspace,
+`enterprise_id` identifies an Enterprise Grid organization when present, `user_id` identifies the
+bot user, and `bot_id` identifies the bot application actor. Human user IDs used by Knowledge ACLs
+remain separate.
+
 For Socket Mode channel conversations, install the separate `slack` Integration. A `slack-oim`
 Connection is not attached to that legacy channel path, and installing this package does not
 replace or reconfigure an existing Slack connector.

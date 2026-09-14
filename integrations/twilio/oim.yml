@@ -4,7 +4,7 @@ kind: Integration
 metadata:
   id: twilio
   name: Twilio
-  version: 1.0.0
+  version: 1.0.1
   description: Send SMS, read message history, and receive signed messaging webhooks.
   license: Apache-2.0
   maintainers:
@@ -13,7 +13,7 @@ metadata:
 
 profiles:
   core: "1.1"
-  auth: "1.0"
+  auth: "1.1"
   events: "1.0"
 
 files:
@@ -89,6 +89,41 @@ auth:
             type: credential
             slot: webhook_auth_token
   healthCheckOperationId: get-account
+  verification:
+    issuer:
+      source: package
+      value: https://api.twilio.com
+    checks:
+      - id: account
+        operationId: get-account
+        credentialSlots: [api_credential]
+        success:
+          - kind: present
+            path: /sid
+          - kind: equals
+            path: /status
+            value: active
+    comparisons:
+      - kind: equals
+        left:
+          source: response
+          checkId: account
+          path: /sid
+        right:
+          source: configuration
+          field: account_sid
+    evidence:
+      assurance: identified
+      subject:
+        kind: account
+        checkId: account
+        path: /sid
+        namespace: issuer
+      tenant:
+        kind: account
+        source: response
+        checkId: account
+        path: /sid
 
 operations:
   - id: get-account

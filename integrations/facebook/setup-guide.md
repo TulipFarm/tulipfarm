@@ -18,10 +18,15 @@ an approved app has issued both documented tokens.
    access; creating content requires `CREATE_CONTENT` or `MANAGE`.
 6. Obtain a User access token through Facebook Login for Business.
 7. Exchange it through `GET /me/accounts` and copy the Page access token for the target Page.
-8. Paste both tokens into this Connection.
+8. Paste both tokens and the numeric Page ID into this Connection.
 
 The `facebook_list_pages` Tool deliberately requests only `id`, `name`, `category`,
 `category_list`, and `tasks`; it never returns Page access tokens to an Agent.
+The `facebook_current_page` Tool checks the separately stored Page token and requires the
+Page-specific `category` field, so a User token returning only `id` and `name` fails closed.
+TulipFarm also requires the returned Page ID to equal the configured Page ID and requires that Page
+to appear in the User token's complete `/me/accounts` result. A Page ID is not a human account ID or
+a Meta Business identifier.
 
 If an app user does not own or manage a Page, reading public posts requires the separately reviewed
 **Page Public Content Access** feature. This package is designed for Pages the user manages and
@@ -39,6 +44,7 @@ not expose either token to an Agent.
 | Tool | Access |
 | --- | --- |
 | `facebook_list_pages` | List Pages and Tasks available to the User token |
+| `facebook_current_page` | Identify the Page represented by the Page token |
 | `facebook_list_page_posts` | Read posts for a Page authorized by the Page token |
 | `facebook_create_page_post` | Publish an immediate text or link post as that Page |
 
@@ -49,6 +55,7 @@ comments, or operate on Pages the token cannot manage.
 ## Official references
 
 - [Pages API overview](https://developers.facebook.com/documentation/pages-api/overview)
+- [Graph API Page fields](https://developers.facebook.com/docs/graph-api/reference/page/)
 - [Manage a Page](https://developers.facebook.com/documentation/pages-api/manage-pages)
 - [Page posts](https://developers.facebook.com/documentation/pages-api/posts)
 - [Meta access-token types and Page-token exchange](https://developers.facebook.com/documentation/facebook-login/guides/access-tokens)

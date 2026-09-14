@@ -68,6 +68,11 @@ import {
 } from "@tulipfarm/tool-host";
 import { integrationSecretKey, isSecretRef } from "../../integrations/connection-env";
 import { principalSecretKey } from "../../integrations/principal-tokens";
+import type {
+  OimDispatchSettlement,
+  OimProviderDispatch,
+  OimReleaseDispatchPort,
+} from "../../integrations/releases/dispatch-host";
 
 /** Compiles manifest egress into governed chat Tools with the ledgered dispatch path. */
 
@@ -340,6 +345,7 @@ export interface DeclarativeToolingDeps {
   readonly paginationRuntime?: OimPaginationRuntime;
   readonly parkRetry?: EffectRetryParker;
   readonly retryWaitStatus?: EffectRetryWaitReader;
+  readonly releaseDispatch?: OimReleaseDispatchPort;
   /** Initial caller + Agent File authority check, before approval or effect reservation. */
   readonly authorizeFiles?: (input: {
     businessId: string;
@@ -358,6 +364,7 @@ interface CompiledIntegration {
   readonly oimManifest?: OimManifest;
   readonly oimDocuments?: Readonly<Record<string, string>>;
   readonly oimOpenApiDocuments?: Readonly<Record<string, unknown>>;
+  readonly oimPackageFiles?: SoulIntegration["oimPackageFiles"];
   /** Absent for a genuinely public API that declares no credential. */
   readonly credential?: {
     readonly ref: string;
@@ -377,6 +384,7 @@ function compileIntegration(integration: SoulIntegration): CompiledIntegration {
       oimManifest,
       oimDocuments: integration.oimDocuments,
       oimOpenApiDocuments: integration.oimOpenApiDocuments,
+      oimPackageFiles: integration.oimPackageFiles,
       tools: [
         ...compileOimHttpOperations(oimManifest, {}, { deferConfiguration: true }),
         ...compileOimOpenApiOperations(
@@ -883,6 +891,7 @@ function buildToolDef(
       const toolId = compiled.toolId;
 
       let activeDispatcher = dispatcher;
+      let activeIntegration = integration;
       let intent =
         integration.oimManifest === undefined
           ? undefined
@@ -964,7 +973,8 @@ function buildToolDef(
             return err("write_denied", "File access was revoked");
           }
         }
-        activeDispatcher = dispatcherFor({ ...integration, tools: [runtime] }, deps);
+        activeIntegration = { ...integration, tools: [runtime] };
+        activeDispatcher = dispatcherFor(activeIntegration, deps);
       }
 
       intent ??= normalizeToolIntent({
@@ -1011,13 +1021,47 @@ function buildToolDef(
       }
 
       try {
-        return ok(
-          await activeDispatcher.dispatch(
-            deps.businessId,
-            reserved.effect.effectId,
-            ctx.abortSignal
-          )
-        );
+        const dispatch = () =>
+          activeDispatcher.dispatch(deps.businessId, reserved.effect.effectId, ctx.abortSignal);
+        const releaseDispatch = deps.releaseDispatch;
+        let output: unknown;
+        if (activeIntegration.oimManifest === undefined) {
+          output = await dispatch();
+        } else {
+          if (releaseDispatch === undefined) {
+            throw new Error("oim_release_dispatch_unavailable");
+          }
+          output = await releaseDispatch.dispatch(
+            {
+              businessId: deps.businessId,
+              integration: {
+                slug: activeIntegration.slug,
+                sourceIntegration: activeIntegration.oimManifest.metadata.id,
+                oimManifest: activeIntegration.oimManifest,
+                ...(activeIntegration.oimPackageFiles === undefined
+                  ? {}
+                  : { oimPackageFiles: activeIntegration.oimPackageFiles }),
+              },
+            },
+            (providerDispatch) =>
+              dispatcherFor(activeIntegration, deps, providerDispatch).dispatch(
+                deps.businessId,
+                reserved.effect.effectId,
+                ctx.abortSignal
+              ),
+            async (): Promise<OimDispatchSettlement> => {
+              const effect = await deps.effects.get(deps.businessId, reserved.effect.effectId);
+              if (effect?.state === "confirmed" || effect?.state === "failed") {
+                return "settled";
+              }
+              if (effect?.state === "ambiguous" || effect?.state === "reconciliation_required") {
+                return "ambiguous";
+              }
+              return "not_dispatched";
+            }
+          );
+        }
+        return ok(output);
       } catch (error) {
         if (error instanceof EffectDispatchDeferredError) {
           return parked({ kind: "retry_wait", waitId: error.deferred.waitId });
@@ -1099,7 +1143,8 @@ function adapterFor(
 
 function dispatcherFor(
   integration: CompiledIntegration,
-  deps: DeclarativeToolingDeps
+  deps: DeclarativeToolingDeps,
+  providerDispatch?: OimProviderDispatch
 ): EffectDispatcher {
   const catalog = ToolCatalog.load(integration.tools.map((tool) => tool.contract));
   const adapters = new Map<string, ToolAdapter>();
@@ -1109,7 +1154,18 @@ function dispatcherFor(
     // the compiler emits the kind, so binding it to a backend it did not declare would let the
     // contract and the runtime disagree in silence. Dispatch then fails `adapter_not_found`,
     // which parks that one Tool instead of failing the whole integration's registration.
-    if (adapter !== undefined) adapters.set(tool.adapterRef, adapter);
+    if (adapter !== undefined) {
+      adapters.set(
+        tool.adapterRef,
+        providerDispatch === undefined
+          ? adapter
+          : {
+              kind: adapter.kind,
+              dispatch: (request, credential, credentials) =>
+                providerDispatch(() => adapter.dispatch(request, credential, credentials)),
+            }
+      );
+    }
   }
 
   const { credential } = integration;

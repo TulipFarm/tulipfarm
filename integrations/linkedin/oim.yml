@@ -4,7 +4,7 @@ kind: Integration
 metadata:
   id: linkedin
   name: LinkedIn
-  version: 1.0.0
+  version: 2.0.0
   description: Identify a LinkedIn member and read or create approved Community Management posts.
   license: Apache-2.0
   maintainers:
@@ -13,15 +13,15 @@ metadata:
 
 profiles:
   core: "1.1"
-  auth: "1.0"
+  auth: "1.1"
 
 files:
   - path: fixtures.yml
     role: fixture
-    sha256: "75de9489f184ab6bb0716f1e4dc7e6b606b049ab6b7317d751b69d569cf4b5a7"
+    sha256: "4801b5bde8dc03e8576c71ac46dd4608c2a8572c3a2dcabe021995bfbc5df2e9"
   - path: setup-guide.md
     role: guide
-    sha256: "3e3fc6b6553d05a4e6cc7b337a0b7b8d0756a10b0eca9beab71fda3305cf61ba"
+    sha256: "cf211691dd231e726b41c084e18b723c9afeb36fb3cf7141585f97abb5b51d9d"
 
 auth:
   allowedOriginHosts:
@@ -70,7 +70,8 @@ auth:
       authorizationUrl: https://www.linkedin.com/oauth/v2/authorization
       tokenUrl: https://www.linkedin.com/oauth/v2/accessToken
       scopes:
-        - r_basicprofile
+        - openid
+        - profile
         - r_organization_social
         - w_organization_social
         - w_member_social
@@ -86,6 +87,25 @@ auth:
             type: credential
             slot: access_token
   healthCheckOperationId: current-member
+  verification:
+    issuer:
+      source: package
+      value: https://www.linkedin.com
+    checks:
+      - id: current-member
+        operationId: current-member
+        credentialSlots: [access_token]
+        success:
+          - kind: present
+            path: /sub
+    evidence:
+      assurance: identified
+      subject:
+        kind: human
+        checkId: current-member
+        path: /sub
+        namespace: issuer_client
+        clientIdSlot: client_id
 
 operations:
   - id: current-member
@@ -102,30 +122,30 @@ operations:
       type: http
       method: GET
       baseUrl: https://api.linkedin.com
-      path: /v2/me
-      parameters:
-        - name: X-Restli-Protocol-Version
-          in: header
-          value: 2.0.0
-          schema: { type: string }
+      path: /v2/userinfo
     response:
       maxBytes: 131072
       schema:
         type: object
         properties:
-          id: { type: string }
-          localizedFirstName: { type: string }
-          localizedLastName: { type: string }
-          localizedHeadline: { type: string }
-          vanityName: { type: string }
-          profilePicture: { type: object }
-        required: [id]
+          sub: { type: string, minLength: 1 }
+          name: { type: string }
+          given_name: { type: string }
+          family_name: { type: string }
+          picture: { type: string }
+          locale:
+            type: object
+            properties:
+              country: { type: string }
+              language: { type: string }
+        required: [sub]
       projection:
-        - /id
-        - /localizedFirstName
-        - /localizedLastName
-        - /localizedHeadline
-        - /vanityName
+        - /sub
+        - /name
+        - /given_name
+        - /family_name
+        - /picture
+        - /locale
 
   - id: read-post
     name: linkedin_read_post

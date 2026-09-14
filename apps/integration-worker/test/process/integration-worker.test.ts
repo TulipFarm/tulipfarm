@@ -26,9 +26,13 @@ afterEach(async () => {
 
 async function bootIntegrationWorker(options: {
   schemaVersion?: number;
+  internalApiMode?: "ready" | "missing-oim-contract";
 }): Promise<IntegrationWorkerHandle> {
   scratch = await startScratchDatabase(options.schemaVersion ?? REQUIRED_SCHEMA_VERSION);
-  const handle = await startIntegrationWorker({ databaseUrl: scratch.url });
+  const handle = await startIntegrationWorker({
+    databaseUrl: scratch.url,
+    internalApiMode: options.internalApiMode,
+  });
   worker = handle;
   return handle;
 }
@@ -63,6 +67,17 @@ describe("integration worker process", () => {
         `schema_version is ${REQUIRED_SCHEMA_VERSION - 1}, but this worker requires ` +
           `${REQUIRED_SCHEMA_VERSION}`
       );
+    },
+    TIMEOUT
+  );
+
+  it(
+    "fails startup when the required OIM worker contract is unavailable",
+    async () => {
+      const handle = await bootIntegrationWorker({ internalApiMode: "missing-oim-contract" });
+
+      await expect(handle.exited).resolves.toBe(1);
+      expect(handle.output()).toContain("GET /api/v1/internal/oim/worker-contract failed with 404");
     },
     TIMEOUT
   );

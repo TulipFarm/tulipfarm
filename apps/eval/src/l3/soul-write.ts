@@ -14,14 +14,18 @@
 import { execFileSync } from "node:child_process";
 import { generateKeyPairSync } from "node:crypto";
 import type { ToolDispatchPort } from "@tulipfarm/agent-runtime";
+import type { OimReleasePackageWriter } from "@tulipfarm/integrations";
+import { artifactDirectory } from "@tulipfarm/schema";
 import {
   compileExecutionBundle,
   createEd25519BundleSigner,
   createEd25519BundleVerifier,
+  createGitBackedOimSoulReleasePackageWriter,
   createHmacCommitSigner,
   GitSoulTreeReader,
   hermeticGitEnv,
   InMemoryBundleStore,
+  type OimSoulReleasePackageWritePlan,
   SoulGitStore,
   SoulPublicationCoordinator,
   SoulPublisher,
@@ -42,6 +46,7 @@ export interface SoulCommit {
 
 export interface SoulWriterTool {
   readonly port: ToolDispatchPort;
+  readonly releasePackages: OimReleasePackageWriter;
   /** Commits this Trial landed, in order. Empty means the Turn changed no configuration. */
   readonly commits: readonly SoulCommit[];
   /**
@@ -147,13 +152,58 @@ export function soulWriterTool(soul: EvalSoul): SoulWriterTool {
     publisher,
     treeReader
   );
+  const actor = { principalId: "agent:eval", name: "Eval", email: "eval@tulipfarm.local" };
+  const releasePackageWriter = createGitBackedOimSoulReleasePackageWriter({
+    soulWriter: writer,
+    soulStore: store,
+    publisher,
+    actor,
+  });
+  const recordReleaseCommit = (
+    plan: OimSoulReleasePackageWritePlan,
+    receipt: { readonly revision: string }
+  ) => {
+    const directory = artifactDirectory("Integration", plan.slug);
+    commits.push({
+      sha: receipt.revision,
+      message: `Integration ${plan.slug}`,
+      paths: [
+        `${directory}/oim.yml`,
+        ...plan.snapshot.files.map((file) => `${directory}/${file.path}`),
+      ],
+    });
+  };
+  const releasePackages: OimReleasePackageWriter = {
+    prepare: (input) => releasePackageWriter.prepare(input),
+    apply: async (plan) => {
+      const typedPlan = plan as OimSoulReleasePackageWritePlan;
+      const receipt = await releasePackageWriter.apply(typedPlan);
+      recordReleaseCommit(typedPlan, receipt);
+      return receipt;
+    },
+    install: async (input) => {
+      const plan = await releasePackageWriter.prepare(input);
+      const receipt = await releasePackageWriter.apply(plan);
+      recordReleaseCommit(plan, receipt);
+      return receipt;
+    },
+    rollback: (receipt) => releasePackageWriter.rollback(receipt),
+  };
 
   return {
     commits,
     denials,
+    releasePackages,
     published: async () => {
       const bundle = await publications.activeBundle(EVAL_BUSINESS, verifier);
-      return bundle?.definitions.map((definition) => `${definition.kind}:${definition.slug}`) ?? [];
+      if (bundle === undefined) return [];
+      const artifacts = bundle.definitions.map(
+        (definition) => `${definition.kind}:${definition.slug}`
+      );
+      if (bundle.commitSha !== git("rev-parse", "HEAD").trim()) return artifacts;
+      const loaded = await soul.reload();
+      for (const slug of loaded.loader.integrations.keys()) artifacts.push(`Integration:${slug}`);
+      return [...new Set(artifacts)].sort();
     },
     reset: () => {
       git("reset", "--hard", base);
@@ -188,7 +238,7 @@ export function soulWriterTool(soul: EvalSoul): SoulWriterTool {
                 ? args.subject
                 : `soul: update ${kind} ${slug}`,
             source: "agent",
-            actor: { principalId: "agent:eval", name: "Eval", email: "eval@tulipfarm.local" },
+            actor,
             businessId: EVAL_BUSINESS,
             changes: [
               {

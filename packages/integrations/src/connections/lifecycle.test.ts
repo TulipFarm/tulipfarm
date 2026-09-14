@@ -333,7 +333,7 @@ function lifecycleConnections(
 }
 
 describe("OIM Connection lifecycle", () => {
-  it("creates a personal Connection and durable pending rows for every browser step", async () => {
+  it("creates a personal Connection with durable state for every auth step", async () => {
     const authSteps = new MemoryAuthSteps();
     authSteps.rows.clear();
     const credentials = vault();
@@ -367,6 +367,7 @@ describe("OIM Connection lifecycle", () => {
       })
     );
     expect([...authSteps.rows.values()]).toMatchObject([
+      { stepId: "client", status: "active" },
       { stepId: "account", status: "pending" },
       { stepId: "admin", status: "pending" },
     ]);

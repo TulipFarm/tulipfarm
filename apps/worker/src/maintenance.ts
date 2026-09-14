@@ -52,6 +52,7 @@ export function startMaintenanceConsumers(o: MaintenanceConsumerOptions): Promis
     businessId: o.businessId,
     taskStore: new TaskRepo(o.transactions),
     taskSignals: new TaskSignalsGatherer(o.turnHost),
+    internalApi: o.internalApi,
     memoryCuration: () =>
       runMemoryCuration({
         businessId: o.businessId,

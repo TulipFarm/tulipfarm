@@ -47,6 +47,14 @@ const EXPECTATION_FIELDS: Record<string, readonly [string, FieldType][]> = {
     ["path", "string"],
     ["value", "any"],
   ],
+  tool_result_field_equals: [
+    ["name", "string"],
+    ["argumentPath", "string"],
+    ["argumentValue", "any"],
+    ["status", "string"],
+    ["outputPath", "string"],
+    ["value", "any"],
+  ],
   tool_denied: [
     ["name", "string"],
     ["path", "string"],
@@ -163,6 +171,13 @@ export function expectationShapeError(kind: string, record: Record<string, unkno
   }
   if (kind === "tool_batch_replayed" && record.callIds !== undefined) {
     return `expectation "tool_batch_replayed" derives call ids from the model-produced batch`;
+  }
+  if (
+    kind === "tool_result_field_equals" &&
+    record.turnIndex !== undefined &&
+    (!Number.isInteger(record.turnIndex) || Number(record.turnIndex) < 1)
+  ) {
+    return `expectation "tool_result_field_equals" needs "turnIndex" to be a positive integer`;
   }
   return "";
 }

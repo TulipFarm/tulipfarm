@@ -42,7 +42,7 @@ integrations:
     description: Read and write repositories, issues, and pull requests.
 
   - name: jira
-    availability: coming_soon
+    packageDigest: d6eccc8f4d30c9309ceed0c700182d1ff7dafadc3b014f9ca38ed7a7c19b5ef9
     title: Jira
     icon: jira
     category: productivity
@@ -64,3 +64,19 @@ integrations:
     homepage: https://workspace.google.com
     description: One Google sign-in for Gmail, Calendar, Drive, and Docs — read and write across all
       of them from a single connection.
+
+  - name: confluence
+    packageDigest: c48ea1eab65b20a706f56fd8b1c7e3874dbab25688958d32fdcee8235c8d4f35
+    title: Confluence
+    icon: confluence
+    category: productivity
+    homepage: https://www.atlassian.com/software/confluence
+    description: Read Confluence Cloud spaces and pages and index them into Knowledge.
+
+  - name: telegram
+    packageDigest: cca87004f554f356b3fd91e0210643216c715f1c2079c023b58f1dc666bf597e
+    title: Telegram
+    icon: telegram
+    category: chat
+    homepage: https://telegram.org
+    description: Send messages and receive updates through a Telegram bot.

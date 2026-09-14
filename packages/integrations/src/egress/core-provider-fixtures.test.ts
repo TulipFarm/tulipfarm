@@ -26,6 +26,7 @@ const coreProviderOperations = {
     "update-customer",
   ],
   confluence: [
+    "current-user",
     "list-spaces",
     "list-pages",
     "get-page",

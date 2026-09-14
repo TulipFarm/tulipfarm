@@ -1,58 +1,57 @@
 ---
 title: Bundled integrations
-description: The five providers TulipFarm ships manifests for, what agents can do with each, and how you connect them.
+description: How bundled integrations appear in the catalog, verify provider access, and limit the actions available to agents.
 ---
 
-An integration is a connected third party. Five arrive with every instance, ready to connect. You
-do not install them. You connect them, which means giving TulipFarm the credentials it needs.
+An integration is a connected third party. Bundled integrations arrive with every instance, ready
+to connect. You do not install them. You connect one by giving TulipFarm the credentials and setup
+values its provider requires.
 
 None of them are connected by default. Nothing leaves your instance until you connect one.
 
-{/* tf-claim kind=integration-slugs value="github,google,jira,linear,slack" */}
-{/* tf-claim kind=integration-count value="5" */}
+## Find what is bundled
 
-## What each one is for
+Open **Integrations** to see the catalog shipped by your release. Each card describes the provider
+and opens its current setup steps. The catalog is the source of truth because providers and their
+available operations can change between releases.
 
-| Integration | What agents can do with it |
-| --- | --- |
-| `github` | Triage issues, review and merge pull requests, commit code, and read repositories. |
-| `slack` | Talk to your agents from Slack: direct message them, or mention them in a channel. |
-| `jira` | Search, create, estimate, prioritize, and transition Jira Cloud issues. |
-| `linear` | List and read issues, then create, update, or comment on them after approval. |
-| `google` | One Google sign-in for Gmail (search, read, draft), Calendar (list, create, update, delete events), Drive (search), and Docs (read, create, append). |
+Some integrations expose provider actions to agents. Others also receive provider events, publish
+provider content into knowledge, or let people talk to agents from another service. The detail page
+shows the capabilities of that exact package.
 
-## Two different jobs
+## Connect one
 
-The list above mixes two things that are worth separating, because they answer different questions.
+The setup screen walks you through the steps declared by the integration. A step can ask for
+non-secret settings, encrypted credentials, or an OAuth sign-in.
 
-**Places you talk to agents.** Slack is a surface. Connecting it means your agents become reachable
-somewhere other than the TulipFarm web app. Your team can ask a question without opening a new tab.
+When a bundled package declares provider verification, the Connection remains unavailable until
+TulipFarm saves successful verification evidence. **Retry verification** repeats that declared
+check. An unavailable provider leaves the result incomplete; it is not proof that the credentials
+work. A provider rejection requires corrected or reconnected credentials.
 
-**Places agents reach into.** GitHub, Google Workspace, Jira, and Linear are sources and
-destinations. Connecting one means agents can read from it, and in some cases write back to it.
+Credentials are stored encrypted in the secrets store. They are not written to the soul or shown
+to an agent.
 
-GitHub is both. You can work pull requests from it, and agents can act on them.
+## What agents can do
 
-## How you connect them
+Every integration is defined by a manifest. The manifest declares **egress**, what agents may do to
+the provider, and **ingress**, what the provider may send to TulipFarm.
 
-The steps differ because the providers differ, and the setup screen walks you through whichever one
-applies.
+Each provider action becomes a separate tool with a fixed destination, input shape, output shape,
+and effect such as read, create, update, or delete. An agent cannot choose an undeclared provider
+address or call an operation that is absent from the manifest. Actions that require approval still
+pause for approval.
 
-| How it works | integrations | What you do |
-| --- | --- | --- |
-| Guided app creation | `github`, `slack` | TulipFarm hands the provider a pre-filled form. You approve it, and the credentials come back automatically. |
-| Paste credentials | `jira`, `linear` | You create a token or API key on the provider's side and paste it in. |
-| OAuth sign-in | `google` | You create a Google Cloud OAuth client, paste its ID and secret, then authorize the scopes in Google's consent screen. |
+## Add a provider that is missing
 
-Whichever path you take, credentials are stored encrypted in your instance's secret store, not in
-the soul and not in environment variables.
+Ask in chat to build an integration from the provider's public documentation. TulipFarm reviews
+and tests the exact package before asking you to approve publication. Published packages appear in
+the same catalog as bundled integrations.
 
-## What an integration is allowed to do
-
-Every integration is defined by a manifest, and the manifest is the whole story. It declares
-**egress**, what your agents may do to the provider, and **ingress**, what the provider may send
-you. An agent cannot call something the manifest does not declare, so the manifest is a boundary
-rather than a suggestion.
+Existing reviewed packages can also be installed from **Integrations → Install from source**.
+Before installation, the screen shows the resolved ref, exact digest, capabilities, effects,
+destinations, authorization requirements, and incoming data. See
+[Connect an integration](/docs/administration/connect-an-integration#install-from-a-source).
 
 <Cards>
   <Card title="Connect an integration" href="/docs/administration/connect-an-integration" description="The step-by-step for connecting one." />

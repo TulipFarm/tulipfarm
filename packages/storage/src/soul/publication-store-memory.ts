@@ -221,6 +221,25 @@ export class InMemorySoulPublicationStore implements SoulPublicationStore {
         await requireStoredBundle(input.businessId, input.digest);
         activateInMemory(state, publication, input.activatedByPrincipalId);
       },
+      async forceActivateDigestIfCurrent(input) {
+        const publication = [...state.publications.values()].find(
+          (record) => record.businessId === input.businessId && record.digest === input.digest
+        );
+        if (!publication) throw new Error("publication_not_found_for_activation");
+        await requireStoredBundle(input.businessId, input.digest);
+        const current = state.active.get(input.businessId);
+        if (current?.digest === input.digest) return;
+        if (current?.activationSequence !== input.expectedActivationSequence) {
+          throw new StaleActivationError(input.digest);
+        }
+        activateInMemory(state, publication, input.activatedByPrincipalId);
+      },
+      async getActiveActivation(businessId) {
+        const current = state.active.get(businessId);
+        return current
+          ? { digest: current.digest, activationSequence: current.activationSequence }
+          : undefined;
+      },
       async getActiveDigest(businessId) {
         return state.active.get(businessId)?.digest;
       },

@@ -4,7 +4,7 @@ kind: Integration
 metadata:
   id: slack-oim
   name: Slack OIM API Reference
-  version: 1.0.0
+  version: 1.0.1
   description: >-
     Portable Slack Web API, ACL-preserving Knowledge, and signed Events reference. The separate
     legacy Slack connector remains the Socket Mode channel host.
@@ -15,17 +15,17 @@ metadata:
 
 profiles:
   core: "1.1"
-  auth: "1.0"
+  auth: "1.1"
   events: "1.0"
   knowledge: "1.1"
 
 files:
   - path: setup-guide.md
     role: guide
-    sha256: 0493f942cc1d7bcb868297aa9551efab9fe47e765101534b826983b8431799d1
+    sha256: 4f1698ba3b41c238ec3c1c97427370ae50be89a0dfd258a04c6a94f987ee9fb7
   - path: fixtures.yml
     role: fixture
-    sha256: 95e449f454f6b500625923d2f89323e3c0b5ff1f368d25193a87706fb08eb5d4
+    sha256: 068f7e5d0794e5fe3800689ff62abd1474d809e6a51eacbeb247e476daf92a40
 
 auth:
   allowedOriginHosts:
@@ -130,6 +130,35 @@ auth:
           target:
             type: configuration
             field: team_id
+  healthCheckOperationId: bot-auth-test
+  verification:
+    issuer:
+      source: package
+      value: https://slack.com
+    checks:
+      - id: bot-auth
+        operationId: bot-auth-test
+        credentialSlots: [bot_access_token]
+        success:
+          - kind: equals
+            path: /ok
+            value: true
+          - kind: present
+            path: /team_id
+          - kind: present
+            path: /user_id
+    evidence:
+      assurance: identified
+      subject:
+        kind: bot
+        checkId: bot-auth
+        path: /user_id
+        namespace: issuer
+      tenant:
+        kind: workspace
+        source: response
+        checkId: bot-auth
+        path: /team_id
 
 operations:
   - id: bot-auth-test
@@ -157,10 +186,11 @@ operations:
           team: { type: string }
           user: { type: string }
           team_id: { type: string }
+          enterprise_id: { type: ["string", "null"] }
           user_id: { type: string }
           bot_id: { type: string }
         required: [ok, team_id, user_id]
-      projection: [/ok, /url, /team, /user, /team_id, /user_id, /bot_id]
+      projection: [/ok, /url, /team, /user, /team_id, /enterprise_id, /user_id, /bot_id]
     rateLimit:
       requests: 100
       perSeconds: 60

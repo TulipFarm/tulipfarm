@@ -1,3 +1,4 @@
+import { OIM_CONNECTION_REFRESH_QUEUE } from "@tulipfarm/integrations";
 import {
   OBS_RETENTION_MS,
   PgLogPruner,
@@ -14,6 +15,7 @@ import {
 import type { TaskStore } from "@tulipfarm/storage";
 import { type ConstructorOptions, PgBoss } from "pg-boss";
 import type { Queryable } from "./db";
+import type { InternalApiClient } from "./internal/client";
 import {
   FILE_INDEX_QUEUE,
   type FileIndexDeps,
@@ -35,6 +37,8 @@ export const MAINTENANCE_SWEEP_QUEUE = "maintenance-sweep";
 
 /** Must match `MEMORY_CURATION_QUEUE` in `apps/api/src/memory/curation-schedule.ts`. */
 export const MEMORY_CURATION_QUEUE = "memory-curation";
+
+const OIM_CONNECTION_REFRESH_PATH = "/api/v1/internal/oim/connections/refresh-due";
 
 /**
  * Debounce window for the boot reconcile below. `tsx watch` restarts the Worker on every save, so
@@ -74,6 +78,8 @@ export interface JobConsumerOptions {
    * for a composition with no blob store: jobs then wait rather than being consumed and dropped.
    */
   readonly fileIndex?: FileIndexDeps;
+  /** Authenticated control-plane client for API-owned Connection lifecycle work. */
+  readonly internalApi?: InternalApiClient;
 }
 
 interface ObservabilityPruneJob {
@@ -248,6 +254,32 @@ export async function startJobConsumers(options: JobConsumerOptions): Promise<Pg
       }
     });
     logSubscribed(options.log, FILE_INDEX_QUEUE);
+  }
+
+  if (options.internalApi) {
+    const internalApi = options.internalApi;
+    await boss.createQueue(OIM_CONNECTION_REFRESH_QUEUE);
+    await boss.work(OIM_CONNECTION_REFRESH_QUEUE, async () => {
+      try {
+        const result = await internalApi.require<{
+          examined: number;
+          refreshed: number;
+          failed: number;
+        }>("POST", OIM_CONNECTION_REFRESH_PATH);
+        const summary =
+          `${OIM_CONNECTION_REFRESH_QUEUE} examined=${result.examined} ` +
+          `refreshed=${result.refreshed} failed=${result.failed}`;
+        if (result.failed > 0) {
+          options.log?.error(summary);
+        } else {
+          options.log?.info?.(summary);
+        }
+      } catch (error) {
+        logHandlerThrew(options.log, OIM_CONNECTION_REFRESH_QUEUE, error);
+        throw error;
+      }
+    });
+    logSubscribed(options.log, OIM_CONNECTION_REFRESH_QUEUE);
   }
 
   return boss;

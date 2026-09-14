@@ -1,8 +1,16 @@
 import { PGlite } from "@electric-sql/pglite";
 import { PGLiteSocketServer } from "@electric-sql/pglite-socket";
+import {
+  CONNECTION_STORAGE_STATEMENTS,
+  OIM_INGRESS_EMISSION_STORAGE_STATEMENTS,
+  WEBHOOK_INBOX_STORAGE_STATEMENTS,
+  WEBHOOK_REGISTRATION_STORAGE_STATEMENTS,
+} from "@tulipfarm/storage";
 import { freePort } from "./free-port";
 
-/** Wire-protocol PGlite DB for child-process tests, isolated and Docker-free. */
+/** Socket-backed PGlite for child-process tests; needs >1 connection for worker loops. */
+const MAX_CONNECTIONS = 20;
+
 export interface ScratchDatabase {
   /** `DATABASE_URL` for the integration worker process. */
   readonly url: string;
@@ -14,6 +22,14 @@ export interface ScratchDatabase {
 export async function startScratchDatabase(schemaVersion: number): Promise<ScratchDatabase> {
   const database = await PGlite.create();
 
+  for (const statement of [
+    ...CONNECTION_STORAGE_STATEMENTS,
+    ...WEBHOOK_INBOX_STORAGE_STATEMENTS,
+    ...OIM_INGRESS_EMISSION_STORAGE_STATEMENTS,
+    ...WEBHOOK_REGISTRATION_STORAGE_STATEMENTS,
+  ]) {
+    await database.exec(statement);
+  }
   await database.exec(`CREATE TABLE schema_version (
     id      boolean PRIMARY KEY DEFAULT true,
     version integer NOT NULL,
@@ -30,6 +46,7 @@ export async function startScratchDatabase(schemaVersion: number): Promise<Scrat
     db: database,
     host: "127.0.0.1",
     port,
+    maxConnections: MAX_CONNECTIONS,
   });
   await server.start();
 

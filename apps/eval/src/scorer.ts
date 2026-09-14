@@ -89,6 +89,16 @@ export interface PersistedState {
   readonly soulCommits: readonly { readonly message: string; readonly paths: readonly string[] }[];
   /** Artifacts the active Soul publication serves, written `Kind:slug`. */
   readonly publishedArtifacts: readonly string[];
+  /** Results returned by real L3 Tool dispatches, including retries after an approval wait. */
+  readonly toolResults?: readonly {
+    readonly name: string;
+    readonly arguments: unknown;
+    readonly turnIndex: number;
+    readonly status: string;
+    readonly output?: unknown;
+    readonly code?: string;
+    readonly reason?: string;
+  }[];
   /** Files the Turn generated, each with the audience the product actually gave it. */
   readonly generatedFiles: readonly {
     readonly filename: string;
@@ -580,6 +590,59 @@ function evaluate(a: Expectation, obs: Observation): { passed: boolean; detail: 
             passed: false,
             detail: `${a.name}.${a.path} was ${reads.map((r) => show(r.value)).join(", ")}, expected ${show(a.value)}`,
           };
+    }
+
+    case "tool_result_field_equals": {
+      const results = obs.persisted?.toolResults;
+      if (results === undefined) {
+        return { passed: false, detail: "this tier does not observe real Tool results" };
+      }
+      const named = results.filter(
+        (result) =>
+          result.name === a.name && (a.turnIndex === undefined || result.turnIndex === a.turnIndex)
+      );
+      if (named.length === 0) {
+        return {
+          passed: false,
+          detail:
+            a.turnIndex === undefined
+              ? `${a.name} returned no observed result`
+              : `${a.name} returned no observed result on Turn ${a.turnIndex}`,
+        };
+      }
+      const targeted = named.filter((result) => {
+        const argument = readPath(result.arguments, a.argumentPath);
+        return argument.found && equal(argument.value, a.argumentValue);
+      });
+      if (targeted.length === 0) {
+        return {
+          passed: false,
+          detail: `${a.name} returned no result for ${a.argumentPath} = ${show(a.argumentValue)}`,
+        };
+      }
+      const completed = targeted.filter((result) => result.status === a.status);
+      if (completed.length === 0) {
+        return {
+          passed: false,
+          detail: `${a.name} returned status ${targeted.map((result) => result.status).join(", ")}, expected ${a.status}`,
+        };
+      }
+      const values = completed.map((result) => readPath(result.output, a.outputPath));
+      const hit = values.find((result) => result.found && equal(result.value, a.value));
+      if (hit !== undefined) {
+        return {
+          passed: true,
+          detail: `${a.name} ${a.status} result ${a.outputPath} = ${show(a.value)}`,
+        };
+      }
+      const observed = values.filter((result) => result.found).map((result) => show(result.value));
+      return {
+        passed: false,
+        detail:
+          observed.length === 0
+            ? `${a.name} ${a.status} result has no path ${a.outputPath}`
+            : `${a.name} ${a.status} result ${a.outputPath} was ${observed.join(", ")}, expected ${show(a.value)}`,
+      };
     }
 
     case "tool_denied": {

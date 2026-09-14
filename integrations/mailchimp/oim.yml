@@ -4,7 +4,7 @@ kind: Integration
 metadata:
   id: mailchimp
   name: Mailchimp
-  version: 1.0.0
+  version: 1.0.1
   description: >-
     Read Mailchimp audiences, members and campaigns, and create or update members and campaign
     drafts through Marketing API 3.0.
@@ -15,7 +15,7 @@ metadata:
 
 profiles:
   core: "1.1"
-  auth: "1.0"
+  auth: "1.1"
 
 files:
   - path: setup-guide.md
@@ -70,6 +70,24 @@ auth:
             type: credential
             slot: api_credential
   healthCheckOperationId: get-account
+  verification:
+    issuer:
+      source: package
+      value: https://api.mailchimp.com
+    checks:
+      - id: account
+        operationId: get-account
+        credentialSlots: [api_credential]
+        success:
+          - kind: present
+            path: /account_id
+    evidence:
+      assurance: identified
+      subject:
+        kind: account
+        checkId: account
+        path: /account_id
+        namespace: issuer
 
 operations:
   - id: get-account

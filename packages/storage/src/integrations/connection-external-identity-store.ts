@@ -111,6 +111,18 @@ export async function bindVerifiedConnectionExternalIdentity(
   return fromRow(row);
 }
 
+export async function clearVerifiedConnectionExternalIdentity(
+  transaction: Queryable,
+  businessId: string,
+  connectionId: string
+): Promise<void> {
+  await transaction.query(
+    `DELETE FROM connection_external_identities
+      WHERE business_id = $1 AND connection_id = $2`,
+    [businessId, connectionId]
+  );
+}
+
 interface IdentityRow {
   business_id: string;
   connection_id: string;

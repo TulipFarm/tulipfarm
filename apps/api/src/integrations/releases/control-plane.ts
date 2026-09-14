@@ -13,12 +13,35 @@ export interface OimReleaseInspectionResult {
     readonly version: string;
     readonly packageDigest: string;
     readonly issues: readonly string[];
+    readonly review?: OimReleaseCandidateReview;
   }[];
+}
+
+export interface OimReleaseCandidateReview {
+  readonly name: string;
+  readonly description: string;
+  readonly auth: {
+    readonly credentialLabels: readonly string[];
+    readonly configurationLabels: readonly string[];
+    readonly steps: readonly { readonly title: string; readonly type: string }[];
+  };
+  readonly operations: readonly {
+    readonly name: string;
+    readonly description: string;
+    readonly effect: string;
+    readonly destination: string;
+  }[];
+  readonly ingress: {
+    readonly events: boolean;
+    readonly polling: boolean;
+    readonly knowledge: boolean;
+  };
 }
 
 export interface OimReleaseInstallRequest {
   readonly businessId: string;
   readonly source: string;
+  readonly sourceRef: string;
   readonly slug: string;
   readonly selection: OimReleaseSelectionRequest;
   readonly trustClass: "community" | "official";

@@ -111,6 +111,14 @@ export {
   validateGuardrailsConfig,
 } from "./guardrails";
 export { isRecord } from "./guards";
+export {
+  INTEGRATION_AUTHORING_TOOL_DECLARATIONS,
+  INTEGRATION_DRAFT_CREATE_TOOL_DECLARATION,
+  INTEGRATION_DRAFT_REVIEW_TOOL_DECLARATION,
+  INTEGRATION_GET_TOOL_DECLARATION,
+  INTEGRATION_LIST_TOOL_DECLARATION,
+  OIM_MANIFEST_ARGUMENT_MAX_BYTES,
+} from "./integration-authoring-tools";
 export type { LegacyIntegrationManifest } from "./integration-manifest";
 export {
   LegacyIntegrationManifestSchema,
@@ -215,9 +223,13 @@ export {
 } from "./network-tools";
 export type {
   OimAuth,
+  OimAuthVerification,
+  OimAuthVerificationCheck,
+  OimAuthVerificationComparison,
   OimCompanionFile,
   OimConformanceClaim,
   OimConnection,
+  OimConnectionVerificationEvidence,
   OimDeduplication,
   OimEvents,
   OimEventType,
@@ -241,8 +253,14 @@ export type {
   OimPagination,
   OimPollingIngress,
   OimVerification,
+  OimVerificationBinding,
+  OimVerifiedAuthStepBinding,
+  OimVerifiedCredentialBinding,
+  OimVerifiedSubject,
+  OimVerifiedTenant,
 } from "./oim";
 export {
+  OIM_AUTH_PROFILE_VERSIONS,
   OIM_CONFORMANCE_CASE_SINCE,
   OIM_CONFORMANCE_CASES,
   OIM_CONNECTION_HEALTH_STATES,
@@ -267,9 +285,11 @@ export {
   OIM_VERSION,
   OimConformanceClaimSchema,
   OimConnectionSchema,
+  OimConnectionVerificationEvidenceSchema,
   OimFixtureSuiteSchema,
   OimManifestSchema,
   type OimMultipartPart,
+  OimVerificationBindingSchema,
   oimCompatibilityIssues,
   oimConformanceIssues,
   oimConnectionIssues,

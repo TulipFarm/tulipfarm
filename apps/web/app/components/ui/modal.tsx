@@ -13,12 +13,14 @@ export function Modal({
   children,
   className,
   bodyClassName,
+  dismissible = true,
 }: {
   open: boolean;
   onClose: () => void;
   title: string;
   children: React.ReactNode;
   className?: string;
+  dismissible?: boolean;
   /** Overrides the body's padding and flow, for a modal whose content fills its own height. */
   bodyClassName?: string;
 }) {
@@ -61,14 +63,17 @@ export function Modal({
   useEffect(() => {
     const d = ref.current;
     if (!d) return;
-    const swallowDescendantCancel = (event: Event) => {
-      if (event.target === d) return;
+    const handleCancel = (event: Event) => {
+      if (event.target === d) {
+        if (!dismissible) event.preventDefault();
+        return;
+      }
       event.preventDefault();
       event.stopPropagation();
     };
-    d.addEventListener("cancel", swallowDescendantCancel);
-    return () => d.removeEventListener("cancel", swallowDescendantCancel);
-  }, []);
+    d.addEventListener("cancel", handleCancel);
+    return () => d.removeEventListener("cancel", handleCancel);
+  }, [dismissible]);
 
   // Close when the user clicks the ::backdrop (click lands on <dialog> itself,
   // outside its layout rect).
@@ -83,7 +88,7 @@ export function Modal({
       e.clientX > rect.right ||
       e.clientY < rect.top ||
       e.clientY > rect.bottom;
-    if (outside) onClose();
+    if (outside && dismissible) onClose();
   }
 
   if (!open) return null;
@@ -107,6 +112,7 @@ export function Modal({
         <button
           type="button"
           aria-label="Close"
+          disabled={!dismissible}
           onClick={onClose}
           className="rounded-md p-1 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
         >

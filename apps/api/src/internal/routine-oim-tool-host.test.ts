@@ -7,17 +7,28 @@ import {
   OimOperationConnectionResolver,
 } from "@tulipfarm/integrations";
 import { routineStateDefinitionRef } from "@tulipfarm/run-kernel";
-import type { OimManifest, routine, ToolContractDefinition } from "@tulipfarm/schema";
+import {
+  type OimManifest,
+  oimFileDigest,
+  type routine,
+  type ToolContractDefinition,
+} from "@tulipfarm/schema";
 import type { SecretsService } from "@tulipfarm/secrets";
-import type { BundleDefinition, RuntimeBundle } from "@tulipfarm/soul";
+import type { BundleDefinition, RuntimeBundle, SoulIntegration } from "@tulipfarm/soul";
 import type {
   PersistedConnection,
   PersistedRun,
   PersistedState,
   RunBundle,
 } from "@tulipfarm/storage";
-import { intentDigest, MemoryEffectStore, normalizeToolIntent } from "@tulipfarm/tool-broker";
+import {
+  AdapterDispatchError,
+  intentDigest,
+  MemoryEffectStore,
+  normalizeToolIntent,
+} from "@tulipfarm/tool-broker";
 import { describe, expect, it, vi } from "vitest";
+import type { OimReleaseDispatchPort } from "../integrations/releases/dispatch-host";
 import {
   InternalRoutineOimToolHost,
   LiveRoutineOimAuthorizer,
@@ -40,7 +51,19 @@ const CLAIM: RoutineOimClaimEvidence = {
   leaseGeneration: 1,
 };
 
+const releaseDispatch: OimReleaseDispatchPort = {
+  async dispatch(_input, run) {
+    return run((operation) => operation());
+  },
+};
+
+function releaseIntegration(manifest: OimManifest): SoulIntegration {
+  return { slug: "acme", sourceIntegration: manifest.metadata.id, oimManifest: manifest };
+}
+
 const GRAPHQL_DOCUMENT = "query ReadIssue($id: String!) { issue(id: $id) { id title } }";
+const INPUT_VALIDATE_HOOK =
+  "export function validate(input) { return { valid: input.arguments.id === 'issue-1' }; }\n";
 
 function graphqlManifest(): OimManifest {
   return {
@@ -325,8 +348,11 @@ function runAuthority(
 class RecordingHttp implements EgressHttpPort {
   readonly sent: EgressHttpRequest[] = [];
 
+  constructor(private readonly failure?: Error) {}
+
   async send(request: EgressHttpRequest) {
     this.sent.push(request);
+    if (this.failure !== undefined) throw this.failure;
     return {
       status: 200,
       headers: {},
@@ -597,12 +623,184 @@ function secretService(secretRef: string, value: string) {
 
 function registration(
   manifest: OimManifest,
-  documents: Readonly<Record<string, string>> = {}
+  documents: Readonly<Record<string, string>> = {},
+  hookFiles?: Readonly<Record<string, string>>
 ): RoutineOimRegistration {
-  return { manifest, documents };
+  return { manifest, documents, ...(hookFiles === undefined ? {} : { hookFiles }) };
 }
 
 describe("InternalRoutineOimToolHost", () => {
+  async function hookDispatchFixture(
+    hookFiles?: Readonly<Record<string, string>>,
+    options: {
+      readonly mutating?: boolean;
+      readonly failure?: Error;
+      readonly releaseDispatch?: OimReleaseDispatchPort;
+    } = {}
+  ) {
+    const manifest = graphqlManifest();
+    if (options.mutating) {
+      manifest.operations = manifest.operations.map((operation) => ({
+        ...operation,
+        effect: "send" as const,
+      }));
+    }
+    const document = options.mutating
+      ? "mutation ReadIssue($id: String!) { issue(id: $id) { id title } }"
+      : GRAPHQL_DOCUMENT;
+    manifest.files = [
+      ...(manifest.files ?? []),
+      {
+        path: "hooks/validate.mjs",
+        role: "hook",
+        sha256: oimFileDigest(INPUT_VALIDATE_HOOK),
+      },
+    ];
+    manifest.profiles.hooks = "1.0";
+    manifest.hooks = [
+      {
+        kind: "input_validate",
+        file: "hooks/validate.mjs",
+        export: "validate",
+      },
+    ];
+    const compiled = compileOimGraphqlOperations(manifest, new Map([["read.graphql", document]]), {
+      tenant: "muskan.acme.test",
+    })[0];
+    if (compiled === undefined) throw new Error("GraphQL fixture did not compile");
+    const runtimeBundle = bundle(compiled.contract);
+    const effects = new MemoryEffectStore();
+    const http = new RecordingHttp(options.failure);
+    const runPureHook = vi.fn(async () => ({ valid: true }));
+    const host = new InternalRoutineOimToolHost({
+      businessId: BUSINESS_ID,
+      releaseDispatch: options.releaseDispatch ?? releaseDispatch,
+      releaseIntegration,
+      runs: runAuthority(runtimeBundle),
+      bundles: { load: async () => runtimeBundle },
+      registrations: {
+        find: async () => registration(manifest, { "read.graphql": document }, hookFiles),
+      },
+      connections: resolver(connection({ tenant: "muskan.acme.test" })),
+      effects,
+      secrets: noSecrets,
+      http,
+      authorize: { authorize: async () => true },
+      hookExecutor: { runPureHook },
+    });
+    const prepared = await host.prepare(RUN_ID, {
+      stateKey: STATE_KEY,
+      claim: CLAIM,
+      connectionId: "connection-1",
+      arguments: { id: "issue-1" },
+    });
+    if (prepared.kind !== "ready") throw new Error("expected ready preparation");
+    const intent = normalizeToolIntent({
+      intentId: EFFECT_ID,
+      businessId: BUSINESS_ID,
+      runId: RUN_ID,
+      stateId: STATE_KEY,
+      toolId: compiled.contract.spec.toolId,
+      toolVersion: compiled.contract.spec.toolVersion,
+      action: compiled.contract.spec.action,
+      targetRefs: [],
+      arguments: { id: "issue-1" },
+      principalKind: "user",
+      principalId: USER_ID,
+      integrationId: prepared.integrationId,
+      integrationMajorVersion: prepared.integrationMajorVersion,
+      operationId: prepared.operationId,
+      manifestDigest: prepared.manifestDigest,
+      configurationDigest: prepared.configurationDigest,
+      destination: prepared.destination,
+      connection: prepared.connection,
+      idempotencyKey: `routine:${RUN_ID}:${STATE_KEY}`,
+    });
+    await effects.reserve({
+      effectId: EFFECT_ID,
+      businessId: BUSINESS_ID,
+      runId: RUN_ID,
+      stateId: STATE_KEY,
+      logicalEffectOrdinal: 1,
+      idempotencyKey: intent.idempotencyKey,
+      intentDigest: intentDigest(intent),
+      intent,
+      guardrailRevision: runtimeBundle.digest,
+      createdAt: "2026-09-12T00:00:00.000Z",
+    });
+    await effects.beginAttempt(BUSINESS_ID, EFFECT_ID, "2026-09-12T00:00:01.000Z");
+    return { host, http, runPureHook, runtimeBundle };
+  }
+
+  it("runs a declared hook from the pinned registration bytes", async () => {
+    const { host, http, runPureHook, runtimeBundle } = await hookDispatchFixture({
+      "hooks/validate.mjs": INPUT_VALIDATE_HOOK,
+    });
+
+    await expect(host.dispatch(RUN_ID, EFFECT_ID, { attempt: 1, claim: CLAIM })).resolves.toEqual({
+      kind: "succeeded",
+      output: { data: { issue: { id: "issue-1", title: "Fixed" } } },
+    });
+    expect(runPureHook).toHaveBeenCalledWith({
+      source: INPUT_VALIDATE_HOOK,
+      sourceSha256: oimFileDigest(INPUT_VALIDATE_HOOK),
+      exportName: "validate",
+      input: { operationId: "read-issue", arguments: { id: "issue-1" } },
+      breakerKey: expect.stringMatching(
+        new RegExp(
+          `^oim-routine:${BUSINESS_ID}:${runtimeBundle.digest}:[0-9a-f]{64}:input_validate:validate$`
+        )
+      ),
+    });
+    expect(http.sent).toHaveLength(1);
+  });
+
+  it("keeps a mutating after-dispatch timeout under reconciliation", async () => {
+    let settlement: string | undefined;
+    const { host } = await hookDispatchFixture(
+      { "hooks/validate.mjs": INPUT_VALIDATE_HOOK },
+      {
+        mutating: true,
+        failure: new AdapterDispatchError("after_dispatch", "timeout", true),
+        releaseDispatch: {
+          async dispatch(_input, run, readSettlement) {
+            try {
+              return await run((operation) => operation());
+            } finally {
+              settlement = await readSettlement();
+            }
+          },
+        },
+      }
+    );
+
+    await expect(
+      host.dispatch(RUN_ID, EFFECT_ID, { attempt: 1, claim: CLAIM })
+    ).resolves.toMatchObject({
+      kind: "failed",
+      error: { phase: "after_dispatch", code: "transport_error" },
+    });
+    expect(settlement).toBe("ambiguous");
+  });
+
+  it.each([
+    ["missing", undefined, "hook_source_unavailable"],
+    [
+      "tampered",
+      { "hooks/validate.mjs": `${INPUT_VALIDATE_HOOK}\nexport const changed = true;\n` },
+      "hook_source_mismatch",
+    ],
+  ] as const)("fails closed when pinned hook bytes are %s", async (_label, hookFiles, code) => {
+    const { host, http, runPureHook } = await hookDispatchFixture(hookFiles);
+
+    await expect(host.dispatch(RUN_ID, EFFECT_ID, { attempt: 1, claim: CLAIM })).resolves.toEqual({
+      kind: "failed",
+      error: { phase: "before_dispatch", code, retryable: false },
+    });
+    expect(runPureHook).not.toHaveBeenCalled();
+    expect(http.sent).toHaveLength(0);
+  });
+
   it("rejects a persisted occurrence bound to a different authored State", async () => {
     const manifest = graphqlManifest();
     const compiled = compileOimGraphqlOperations(
@@ -615,6 +813,8 @@ describe("InternalRoutineOimToolHost", () => {
     const http = new RecordingHttp();
     const host = new InternalRoutineOimToolHost({
       businessId: BUSINESS_ID,
+      releaseDispatch,
+      releaseIntegration,
       runs: runAuthority(runtimeBundle, { definitionStateName: "DifferentState" }),
       bundles: { load: async () => runtimeBundle },
       registrations: {
@@ -651,6 +851,8 @@ describe("InternalRoutineOimToolHost", () => {
     const http = new RecordingHttp();
     const host = new InternalRoutineOimToolHost({
       businessId: BUSINESS_ID,
+      releaseDispatch,
+      releaseIntegration,
       runs: runAuthority(runtimeBundle),
       bundles: { load: async () => runtimeBundle },
       registrations: {
@@ -737,6 +939,8 @@ describe("InternalRoutineOimToolHost", () => {
     const claims = runAuthority(runtimeBundle);
     const host = new InternalRoutineOimToolHost({
       businessId: BUSINESS_ID,
+      releaseDispatch,
+      releaseIntegration,
       runs: {
         claim: async (input) => (claimCurrent ? claims.claim(input) : undefined),
       },
@@ -823,6 +1027,8 @@ describe("InternalRoutineOimToolHost", () => {
     const http = new RecordingHttp();
     const host = new InternalRoutineOimToolHost({
       businessId: BUSINESS_ID,
+      releaseDispatch,
+      releaseIntegration,
       runs: runAuthority(runtimeBundle),
       bundles: { load: async () => runtimeBundle },
       registrations: {
@@ -899,6 +1105,8 @@ describe("InternalRoutineOimToolHost", () => {
     const http = new RecordingHttp();
     const host = new InternalRoutineOimToolHost({
       businessId: BUSINESS_ID,
+      releaseDispatch,
+      releaseIntegration,
       runs: runAuthority(runtimeBundle),
       bundles: { load: async () => runtimeBundle },
       registrations: { find: async () => registration(manifest) },
@@ -988,6 +1196,8 @@ describe("InternalRoutineOimToolHost", () => {
     const claims = runAuthority(runtimeBundle);
     const host = new InternalRoutineOimToolHost({
       businessId: BUSINESS_ID,
+      releaseDispatch,
+      releaseIntegration,
       runs: {
         claim: async (input) => (claimCurrent ? claims.claim(input) : undefined),
       },
@@ -1064,6 +1274,8 @@ describe("InternalRoutineOimToolHost", () => {
     const http = new RecordingHttp();
     const host = new InternalRoutineOimToolHost({
       businessId: BUSINESS_ID,
+      releaseDispatch,
+      releaseIntegration,
       runs: runAuthority(runtimeBundle),
       bundles: { load: async () => runtimeBundle },
       registrations: { find: async () => registration(manifest) },
@@ -1096,6 +1308,8 @@ describe("InternalRoutineOimToolHost", () => {
     const http = new RecordingHttp();
     const host = new InternalRoutineOimToolHost({
       businessId: BUSINESS_ID,
+      releaseDispatch,
+      releaseIntegration,
       runs: runAuthority(runtimeBundle),
       bundles: { load: async () => runtimeBundle },
       registrations: { find: async () => registration(manifest) },
@@ -1164,6 +1378,8 @@ describe("InternalRoutineOimToolHost", () => {
     const assertAuthorized = vi.fn(async () => undefined);
     const host = new InternalRoutineOimToolHost({
       businessId: BUSINESS_ID,
+      releaseDispatch,
+      releaseIntegration,
       runs: runAuthority(runtimeBundle),
       bundles: { load: async () => runtimeBundle },
       registrations: { find: async () => registration(manifest) },
@@ -1209,6 +1425,8 @@ describe("InternalRoutineOimToolHost", () => {
     const secrets = vi.fn(noSecrets);
     const host = new InternalRoutineOimToolHost({
       businessId: BUSINESS_ID,
+      releaseDispatch,
+      releaseIntegration,
       runs: runAuthority(runtimeBundle),
       bundles: { load: async () => runtimeBundle },
       registrations: { find: async () => registration(manifest) },
@@ -1264,6 +1482,8 @@ describe("InternalRoutineOimToolHost", () => {
       .mockRejectedValueOnce(new Error("grant revoked"));
     const host = new InternalRoutineOimToolHost({
       businessId: BUSINESS_ID,
+      releaseDispatch,
+      releaseIntegration,
       runs: runAuthority(runtimeBundle),
       bundles: { load: async () => runtimeBundle },
       registrations: { find: async () => registration(manifest) },

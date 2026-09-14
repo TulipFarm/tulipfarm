@@ -1,5 +1,10 @@
 import { randomUUID } from "node:crypto";
-import type { OimAuth, OimConnection, OimManifest } from "@tulipfarm/schema";
+import type {
+  OimAuth,
+  OimConnection,
+  OimConnectionVerificationEvidence,
+  OimManifest,
+} from "@tulipfarm/schema";
 import type {
   ConnectionAuthStep,
   ConnectionAuthStepFence,
@@ -7,6 +12,7 @@ import type {
   PublishConnectionAuthStep,
 } from "@tulipfarm/storage";
 import { oimManifestMajor } from "./catalog";
+import { projectVerifiedConnectionIdentity } from "./verification-evidence";
 
 type OAuthStep = Extract<OimAuth["steps"][number], { type: "oauth2" }>;
 
@@ -62,7 +68,8 @@ export interface VerifiedConnectionIdentityEvidence {
 export interface OimOAuthRefresh {
   readonly credentialValues: Readonly<Record<string, string>>;
   readonly expiresAt: string | null;
-  readonly verifiedIdentity: VerifiedConnectionIdentityEvidence;
+  readonly verifiedIdentity?: VerifiedConnectionIdentityEvidence;
+  readonly verificationEvidence?: OimConnectionVerificationEvidence;
 }
 
 export interface OimOAuthRefreshRequest {
@@ -89,6 +96,14 @@ export interface RefreshOimConnectionDeps {
   readonly connections: ConnectionLifecycleRepository;
   readonly credentials: ConnectionCredentialVault;
   readonly refreshOAuth: (request: OimOAuthRefreshRequest) => Promise<OimOAuthRefresh>;
+  readonly packageDigest?: string;
+  readonly verifyConnectionCandidate?: (input: {
+    readonly manifest: OimManifest;
+    readonly packageDigest: string;
+    readonly connection: PersistedConnection;
+    readonly authSteps: readonly ConnectionAuthStep[];
+    readonly credentialValues: Readonly<Record<string, string>>;
+  }) => Promise<OimConnectionVerificationEvidence>;
   readonly now?: () => Date;
   readonly renewalWindowSeconds?: number;
   readonly claimLeaseSeconds?: number;
@@ -122,7 +137,8 @@ export async function createOimConnection(
   const now = (deps.now ?? (() => new Date()))().toISOString();
   const configuration: Record<string, string | number | boolean> = {};
   const secretBindings: Record<string, `secret://${string}`> = {};
-  const browserSteps = (input.manifest.auth?.steps ?? []).filter((step) => step.type !== "fields");
+  const authSteps = input.manifest.auth?.steps ?? [];
+  const browserSteps = authSteps.filter((step) => step.type !== "fields");
 
   for (const step of input.manifest.auth?.steps ?? []) {
     if (step.type !== "fields") continue;
@@ -157,18 +173,21 @@ export async function createOimConnection(
       .map((field) => field.id),
     secretBindings,
     health: {
-      status: browserSteps.length === 0 ? "healthy" : "action_required",
+      status:
+        browserSteps.length === 0 && input.manifest.auth?.verification === undefined
+          ? "healthy"
+          : "action_required",
       checkedAt: now,
     },
     expiresAt: null,
   });
 
-  for (const step of browserSteps) {
+  for (const step of authSteps) {
     await deps.authSteps.put({
       businessId: input.businessId,
       connectionId,
       stepId: step.id,
-      status: "pending",
+      status: step.type === "fields" ? "active" : "pending",
       accessSlot: null,
       accessSecretRef: null,
       refreshSlot: null,
@@ -220,6 +239,7 @@ function publication(
     readonly expiresAt: string | null;
     readonly secretBindings?: Readonly<Record<string, `secret://${string}`>>;
     readonly verifiedIdentity?: VerifiedConnectionIdentityEvidence;
+    readonly verificationEvidence?: OimConnectionVerificationEvidence;
   }
 ): PublishConnectionAuthStep {
   const verifiedIdentity = input.verifiedIdentity;
@@ -242,19 +262,24 @@ function publication(
         ? null
         : (input.secretBindings?.[row.refreshSlot] ?? row.refreshSecretRef),
     externalIdentity:
-      verifiedIdentity === undefined
-        ? row.externalIdentity
-        : {
+      verifiedIdentity !== undefined
+        ? {
             externalTenantId: verifiedIdentity.externalTenantId,
             externalAccountId: verifiedIdentity.externalAccountId,
             proofDigest: verifiedIdentity.proofDigest,
             verifiedAt: verifiedIdentity.verifiedAt,
             verifiedBy: verifiedIdentity.verifiedBy,
-          },
+          }
+        : input.verificationEvidence === undefined
+          ? row.externalIdentity
+          : null,
     expiresAt: input.expiresAt,
     healthCheckedAt: now.toISOString(),
     configuration: {},
     secretBindings: input.secretBindings ?? {},
+    ...(input.verificationEvidence === undefined
+      ? {}
+      : { verificationEvidence: input.verificationEvidence }),
     ...(verifiedIdentity === undefined
       ? {}
       : {
@@ -370,6 +395,56 @@ async function refreshStep(
     await deps.credentials.revokeReferences(staged);
     return markFailed(deps.connections, connection, row, claimRevision, now, "refresh_failed");
   }
+  let verificationEvidence = refreshed.verificationEvidence;
+  let verifiedIdentity = refreshed.verifiedIdentity;
+  try {
+    if (manifest.auth?.verification !== undefined) {
+      if (deps.verifyConnectionCandidate === undefined || deps.packageDigest === undefined) {
+        await deps.credentials.revokeReferences(staged);
+        return markFailed(deps.connections, connection, row, claimRevision, now, "refresh_failed");
+      }
+      const proposedConnection: PersistedConnection = {
+        ...connection,
+        secretBindings: { ...connection.secretBindings, ...bindingPatch },
+        expiresAt: refreshed.expiresAt,
+      };
+      const proposedRows = (await deps.authSteps.list(connection.businessId, connection.id)).map(
+        (candidate) =>
+          candidate.stepId === row.stepId
+            ? {
+                ...candidate,
+                status: "active" as const,
+                revision: claimRevision + 1,
+                accessSecretRef:
+                  candidate.accessSlot === null
+                    ? null
+                    : (bindingPatch[candidate.accessSlot] ?? candidate.accessSecretRef),
+                refreshSecretRef:
+                  candidate.refreshSlot === null
+                    ? null
+                    : (bindingPatch[candidate.refreshSlot] ?? candidate.refreshSecretRef),
+              }
+            : candidate
+      );
+      const verificationCredentials: Record<string, string> = {};
+      for (const [slot, reference] of Object.entries(proposedConnection.secretBindings)) {
+        verificationCredentials[slot] =
+          refreshed.credentialValues[slot] ?? (await deps.credentials.read(reference));
+      }
+      verificationEvidence = await deps.verifyConnectionCandidate({
+        manifest,
+        packageDigest: deps.packageDigest,
+        connection: proposedConnection,
+        authSteps: proposedRows,
+        credentialValues: verificationCredentials,
+      });
+      verifiedIdentity = projectVerifiedConnectionIdentity(verificationEvidence) ?? undefined;
+    }
+  } catch {
+    await deps.credentials.revokeReferences(staged);
+    return markFailed(deps.connections, connection, row, claimRevision, now, "refresh_failed");
+  }
+
   let published: boolean;
   try {
     published = await deps.connections.publishAuthStep(
@@ -377,7 +452,8 @@ async function refreshStep(
         status: "active",
         expiresAt: refreshed.expiresAt,
         secretBindings: bindingPatch,
-        verifiedIdentity: refreshed.verifiedIdentity,
+        verifiedIdentity,
+        verificationEvidence,
       })
     );
   } catch (error) {

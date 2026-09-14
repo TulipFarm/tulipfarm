@@ -17,6 +17,7 @@ import type { ModelBinding } from "../runner.ts";
 import { scoreCase } from "../scorer.ts";
 import { scriptedBinding } from "../scripted.ts";
 import { NO_SPEND } from "../spend.ts";
+import { openEvalDatabase } from "./database.ts";
 import { FILE_CREATE_TOOL } from "./file-store.ts";
 import { SOUL_WRITE_TOOL } from "./soul-write.ts";
 import { foldJourney, type PersistedTurn, runPersistedTurn } from "./tier.ts";
@@ -612,6 +613,63 @@ describe("a journey", () => {
     },
     TIMEOUT
   );
+
+  it(
+    "parks publication for approval before installing and reading it on the next Turn",
+    async () => {
+      soul ??= await loadEvalSoul();
+      const corpus = await loadCorpus(path.join(__dirname, "../../corpus"), soul);
+      const evalCase = corpus.cases.find(
+        (candidate) => candidate.id === "l3-a-published-integration-is-visible-next-turn"
+      );
+      if (evalCase === undefined) throw new Error("Integration authoring journey Case is missing");
+      const database = await openEvalDatabase();
+
+      try {
+        const turn = await runPersistedTurn({
+          evalCase,
+          soul,
+          binding: scriptedBinding(),
+          database,
+        });
+        const waits = await database.query(
+          "SELECT kind, status FROM run_waits WHERE kind = 'approval'"
+        );
+        const operations = await database.query(
+          "SELECT phase, package_snapshot FROM oim_release_install_operations"
+        );
+
+        expect(waits.rows).toEqual([{ kind: "approval", status: "satisfied" }]);
+        expect(operations.rows).toHaveLength(1);
+        expect(operations.rows[0]?.phase).toBe("completed");
+        expect(operations.rows[0]?.package_snapshot).toBeDefined();
+        expect(turn.soulCommits.flatMap((commit) => commit.paths)).toContain(
+          "integrations/journey-acme/oim.yml"
+        );
+        expect(turn.publishedArtifacts).toContain("Integration:journey-acme");
+        expect(
+          turn.toolResults.find(
+            (result) =>
+              result.name === "integration_get" &&
+              result.turnIndex === 2 &&
+              result.status === "succeeded" &&
+              (result.arguments as { slug?: unknown }).slug === "journey-acme"
+          )?.output
+        ).toMatchObject({
+          oimManifest: { metadata: { name: "Journey Acme" } },
+        });
+        expect(turn.toolCalls.map((call) => call.name)).toEqual([
+          "integration_draft_review",
+          "integration_draft_create",
+          "integration_draft_create",
+          "integration_get",
+        ]);
+      } finally {
+        await database.close();
+      }
+    },
+    TIMEOUT
+  );
 });
 
 describe("folding a journey into one result", () => {
@@ -626,6 +684,7 @@ describe("folding a journey into one result", () => {
     assistantMessages: [],
     guardrails: [],
     toolCalls: [],
+    toolResults: [],
     soulCommits: [],
     publishedArtifacts: [],
     generatedFiles: [],
@@ -655,11 +714,20 @@ describe("folding a journey into one result", () => {
 
   it("accumulates what a Case asks about across the whole journey", () => {
     const folded = foldJourney([
-      turn({ events: ["turn.started"], toolCalls: [{ name: "a", arguments: {} }] }),
-      turn({ events: ["turn.finished"], toolCalls: [{ name: "b", arguments: {} }] }),
+      turn({
+        events: ["turn.started"],
+        toolCalls: [{ name: "a", arguments: {} }],
+        toolResults: [{ name: "a", arguments: {}, turnIndex: 1, status: "succeeded" }],
+      }),
+      turn({
+        events: ["turn.finished"],
+        toolCalls: [{ name: "b", arguments: {} }],
+        toolResults: [{ name: "b", arguments: {}, turnIndex: 2, status: "failed" }],
+      }),
     ]);
     expect(folded.events).toEqual(["turn.started", "turn.finished"]);
     expect(folded.toolCalls.map((c) => c.name)).toEqual(["a", "b"]);
+    expect(folded.toolResults.map((result) => result.turnIndex)).toEqual([1, 2]);
   });
 
   it("retains participant text from every Turn, including an earlier leak", () => {

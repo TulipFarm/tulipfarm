@@ -174,6 +174,53 @@ describe("SoulPublisher", () => {
     expect("files" in compiler.mock.calls[0][0]).toBe(false);
   });
 
+  it("publishes contributions into a fresh Soul and changes the bundle when they change", async () => {
+    const { signer } = ed25519();
+    const published: SoulPublishRequest[] = [];
+    const coordinator = {
+      publish: vi.fn(async (request: SoulPublishRequest) => {
+        published.push(request);
+      }),
+      settle: vi.fn(async () => "active" as const),
+    };
+    let manifest = "version: one\n";
+    const publisher = new SoulPublisher({
+      treeReader: {
+        readDefinitions: vi.fn(async () => []),
+        readFiles: vi.fn(async () => []),
+      },
+      compiler: compileExecutionBundle,
+      signer,
+      coordinator,
+      logger: logger(),
+      businessId: BUSINESS,
+      contributions: async () => [
+        {
+          source: "bundled OIM packages",
+          documents: [],
+          files: [{ path: "integrations/weather/oim.yml", content: manifest }],
+        },
+      ],
+    });
+
+    await publisher.publishCommittedTree({ commitSha: COMMIT_SHA, actor: ACTOR });
+    manifest = "version: two\n";
+    await publisher.publishCommittedTree({ commitSha: COMMIT_SHA, actor: ACTOR });
+
+    const first = published[0]?.bundle;
+    const second = published[1]?.bundle;
+    if (first === undefined || second === undefined)
+      throw new Error("publications were not recorded");
+    expect(first.bundle.assets).toEqual([
+      expect.objectContaining({ path: "oim.yml", content: "version: one\n" }),
+    ]);
+    expect(second.bundle.assets).toEqual([
+      expect.objectContaining({ path: "oim.yml", content: "version: two\n" }),
+    ]);
+    expect(second.digest).not.toBe(first.digest);
+    expect(second.bundle.commitSha).toBe(first.bundle.commitSha);
+  });
+
   it("propagates tree reader, compiler, and signer failures", async () => {
     const { signer } = ed25519();
     const base = {
@@ -355,6 +402,59 @@ describe("SoulPublisher.reconcile", () => {
     const { publisher, publish } = withFakes({ head: COMMIT_SHA, active: COMMIT_SHA });
     await publisher.reconcile(BUSINESS, ACTOR);
     expect(publish).not.toHaveBeenCalled();
+  });
+
+  it("publishes and rolls back contributions at the same HEAD without replacing old bundles", async () => {
+    const { signer, verifier } = ed25519();
+    const store = new InMemorySoulPublicationStore();
+    const bundles = new InMemoryBundleStore();
+    const coordinator = new SoulPublicationCoordinator(store, bundles, logger());
+    const publish = vi.spyOn(coordinator, "publish");
+    let content = "version: one\n";
+    const publisher = new SoulPublisher({
+      treeReader: {
+        readDefinitions: vi.fn(async () => []),
+        readFiles: vi.fn(async () => []),
+      },
+      compiler: compileExecutionBundle,
+      signer,
+      coordinator,
+      logger: logger(),
+      businessId: BUSINESS,
+      contributions: async () => [
+        {
+          source: "bundled OIM packages",
+          documents: [],
+          files: [{ path: "integrations/weather/oim.yml", content }],
+        },
+      ],
+      gitState: {
+        headSha: vi.fn(async () => COMMIT_SHA),
+        hasCommit: vi.fn(async () => true),
+      },
+      activeCommitSha: async (businessId) =>
+        (await coordinator.activeBundle(businessId, verifier))?.commitSha,
+      activeBundleDigest: (businessId) => coordinator.activeDigest(businessId),
+    });
+
+    await publisher.reconcile(BUSINESS, ACTOR);
+    const first = await coordinator.activeBundle(BUSINESS, verifier);
+    content = "version: two\n";
+    await publisher.reconcile(BUSINESS, ACTOR);
+    const second = await coordinator.activeBundle(BUSINESS, verifier);
+    content = "version: one\n";
+    await publisher.reconcile(BUSINESS, ACTOR);
+    const rolledBack = await coordinator.activeBundle(BUSINESS, verifier);
+    await publisher.reconcile(BUSINESS, ACTOR);
+
+    expect(first?.commitSha).toBe(COMMIT_SHA);
+    expect(second?.commitSha).toBe(COMMIT_SHA);
+    expect(second?.changesetId).not.toBe(first?.changesetId);
+    expect(second?.digest).not.toBe(first?.digest);
+    expect(rolledBack?.digest).toBe(first?.digest);
+    expect(first === undefined ? undefined : await bundles.get(first.digest)).toBeDefined();
+    expect(second === undefined ? undefined : await bundles.get(second.digest)).toBeDefined();
+    expect(publish).toHaveBeenCalledTimes(3);
   });
 
   it("publishes HEAD when the active bundle pins an older, still-present commit", async () => {

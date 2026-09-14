@@ -4,7 +4,7 @@ kind: Integration
 metadata:
   id: notion
   name: Notion
-  version: 1.0.0
+  version: 1.0.1
   description: Search, read, query, and add content shared with a Notion integration.
   license: Apache-2.0
   maintainers:
@@ -13,15 +13,15 @@ metadata:
 
 profiles:
   core: "1.1"
-  auth: "1.0"
+  auth: "1.1"
 
 files:
   - path: setup-guide.md
     role: guide
-    sha256: "0b5867c6dd662c22967650d3f5fc7cc497877fb7fea3a5fab92e9ac861cbab1d"
+    sha256: "604d347a9f00b25618349fa6c010fb007f4ca0af1346084ad93e4564b26140cb"
   - path: fixtures.yml
     role: fixture
-    sha256: "149b21b88f42718831729425a68f2de1577c45e811e91245b291f2061e5024db"
+    sha256: "ab7b984cad69978c1735dc0e234046d4f8f85043ac7fb66ba15a79ff2cdc1b67"
 
 auth:
   allowedOriginHosts:
@@ -48,9 +48,89 @@ auth:
           target:
             type: credential
             slot: integration_token
-  healthCheckOperationId: list-users
+  healthCheckOperationId: get-self
+  verification:
+    issuer:
+      source: package
+      value: https://api.notion.com
+    checks:
+      - id: integration-bot
+        operationId: get-self
+        credentialSlots: [integration_token]
+        success:
+          - kind: present
+            path: /id
+          - kind: equals
+            path: /object
+            value: user
+          - kind: equals
+            path: /type
+            value: bot
+    evidence:
+      assurance: identified
+      subject:
+        kind: bot
+        checkId: integration-bot
+        path: /id
+        namespace: issuer
 
 operations:
+  - id: get-self
+    name: notion_get_self
+    description: Identify the user or bot represented by this integration token.
+    effect: read
+    identityMode: shared_only
+    credentialSlot: integration_token
+    credentialInjection:
+      in: header
+      name: Authorization
+      format: "Bearer {token}"
+    source:
+      type: http
+      method: GET
+      baseUrl: https://api.notion.com
+      path: /v1/users/me
+      parameters:
+        - name: Notion-Version
+          in: header
+          value: "2022-06-28"
+          schema: { type: string }
+    response:
+      maxBytes: 131072
+      schema:
+        type: object
+        properties:
+          object: { type: string }
+          id: { type: string, minLength: 1 }
+          type: { type: string, minLength: 1 }
+          name: { type: ["string", "null"] }
+          avatar_url: { type: ["string", "null"] }
+          person: { type: object }
+          bot:
+            type: object
+            properties:
+              owner:
+                type: object
+                properties:
+                  type: { type: string }
+                  workspace: { type: boolean }
+                  user:
+                    type: object
+                    properties:
+                      id: { type: string }
+                      name: { type: ["string", "null"] }
+                      type: { type: string }
+              workspace_name: { type: ["string", "null"] }
+        required: [id, type]
+      projection:
+        - /object
+        - /id
+        - /type
+        - /name
+        - /avatar_url
+        - /person
+        - /bot
+
   - id: search
     name: notion_search
     description: Search pages and databases shared with this integration.

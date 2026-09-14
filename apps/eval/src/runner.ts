@@ -331,6 +331,7 @@ async function runL3Trial(
         events: turn.events,
         participantText: turn.participantText,
         assistantMessages: turn.assistantMessages,
+        toolResults: turn.toolResults,
         soulCommits: turn.soulCommits,
         publishedArtifacts: turn.publishedArtifacts,
         generatedFiles: turn.generatedFiles,

@@ -4,7 +4,7 @@ kind: Integration
 metadata:
   id: facebook
   name: Facebook Pages
-  version: 1.0.0
+  version: 2.0.0
   description: List managed Facebook Pages and read or create posts on one authorized Page.
   license: Apache-2.0
   maintainers:
@@ -13,15 +13,15 @@ metadata:
 
 profiles:
   core: "1.1"
-  auth: "1.0"
+  auth: "1.1"
 
 files:
   - path: fixtures.yml
     role: fixture
-    sha256: "b3779eddf2660719d36f1340281442187efd99830e23f34b8e5cf65755cf19f7"
+    sha256: "0629195d3e9b956deea9eeb30b720b387bd52c0ea6ae12d5b2d0cdd7e1f93079"
   - path: setup-guide.md
     role: guide
-    sha256: "307956943c25b54c7167028a1eaf0242db4defcb02ee99955a074a9ea70c3807"
+    sha256: "68c5090a4d888821ea8c6fcf775112e4e59fbda31b86578e8fdffcacdbcbb35e"
 
 auth:
   allowedOriginHosts:
@@ -35,6 +35,12 @@ auth:
       label: Facebook Page access token
       kind: oauth2_access_token
       required: true
+  configurationFields:
+    - id: page_id
+      label: Facebook Page ID
+      type: string
+      required: true
+      agentVisible: true
   steps:
     - id: tokens
       type: fields
@@ -57,6 +63,65 @@ auth:
           target:
             type: credential
             slot: page_access_token
+        - id: page_id
+          label: Page ID
+          description: The numeric ID of the Page authorized by the Page token.
+          input: text
+          required: true
+          target:
+            type: configuration
+            field: page_id
+  verification:
+    issuer:
+      source: package
+      value: https://facebook.com
+    checks:
+      - id: authorized-pages
+        operationId: list-pages
+        credentialSlots: [user_access_token]
+        success:
+          - kind: present
+            path: /data
+      - id: current-page
+        operationId: current-page
+        credentialSlots: [page_access_token]
+        success:
+          - kind: present
+            path: /id
+          - kind: present
+            path: /name
+          - kind: present
+            path: /category
+    comparisons:
+      - kind: equals
+        left:
+          source: response
+          checkId: current-page
+          path: /id
+        right:
+          source: configuration
+          field: page_id
+      - kind: array_contains
+        array:
+          source: response
+          checkId: authorized-pages
+          path: /data
+        itemPath: /id
+        value:
+          source: configuration
+          field: page_id
+    evidence:
+      assurance: identified
+      subject:
+        kind: account
+        checkId: current-page
+        path: /id
+        namespace: issuer
+      tenant:
+        kind: account
+        source: response
+        checkId: current-page
+        path: /id
   healthCheckOperationId: list-pages
 
 operations:
@@ -120,6 +185,40 @@ operations:
         required: [data]
       projection:
         - /data
+
+  - id: current-page
+    name: facebook_current_page
+    description: Confirm the selected credential resolves to a Facebook Page and return its ID.
+    effect: read
+    identityMode: shared_only
+    credentialSlot: page_access_token
+    credentialInjection:
+      in: query
+      name: access_token
+      format: "{token}"
+    source:
+      type: http
+      method: GET
+      baseUrl: https://graph.facebook.com
+      path: /v25.0/me
+      parameters:
+        - name: fields
+          in: query
+          value: id,name,category
+          schema: { type: string }
+    response:
+      maxBytes: 131072
+      schema:
+        type: object
+        properties:
+          id: { type: string, minLength: 1 }
+          name: { type: string, minLength: 1 }
+          category: { type: string, minLength: 1 }
+        required: [id, name, category]
+      projection:
+        - /id
+        - /name
+        - /category
 
   - id: list-page-posts
     name: facebook_list_page_posts

@@ -25,6 +25,7 @@ Open **Integrations → Notion → Connect** and paste the secret.
 
 | Tool | What it does |
 | --- | --- |
+| `notion_get_self` | Identifies the user or bot represented by the integration token |
 | `notion_search` | Searches shared pages and databases by title |
 | `notion_get_page` | Reads one page's properties by id |
 | `notion_list_users` | Lists workspace members |
@@ -35,6 +36,11 @@ Open **Integrations → Notion → Connect** and paste the secret.
 
 Search, database queries, page blocks, and users are paginated by the runtime: an agent receives an
 opaque `page_token` and hands it back, never Notion's own cursor.
+
+TulipFarm checks the token with Notion's retrieve-token-user endpoint. It does not use the
+workspace member list as a credential check because that operation is unavailable to some token
+types. The returned `id` and `type` identify the token's user or bot actor. A bot owner's user ID
+is separate and is not substituted for the bot ID.
 
 This package pins `Notion-Version: 2022-06-28`. At that version, the query endpoint is called
 **Query a database**. Notion renamed that operation to **Query a data source** in the

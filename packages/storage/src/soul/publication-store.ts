@@ -203,6 +203,16 @@ export interface SoulBundleActivationInput {
   readonly activatedByPrincipalId: string;
 }
 
+export interface SoulActiveActivation {
+  readonly digest: string;
+  readonly activationSequence: number;
+}
+
+export interface SoulFencedActivationInput extends SoulBundleActivationInput {
+  /** Exact active generation observed when the rollback intent was created. */
+  readonly expectedActivationSequence?: number;
+}
+
 /** Transaction-scoped writes. Every method here commits or rolls back with its enclosing unit. */
 export interface SoulPublicationTx {
   putPublication(record: SoulPublicationRecord): Promise<void>;
@@ -231,6 +241,12 @@ export interface SoulPublicationTx {
   setActiveDigest(input: SoulBundleActivationInput): Promise<void>;
   /** Rollback activation bypasses stale protection but still requires a published/stored digest. */
   forceActivateDigest(input: SoulBundleActivationInput): Promise<void>;
+  /**
+   * Rollback activation succeeds only while the exact observed generation is current, or is an
+   * idempotent no-op when the requested digest is already active.
+   */
+  forceActivateDigestIfCurrent(input: SoulFencedActivationInput): Promise<void>;
+  getActiveActivation(businessId: string): Promise<SoulActiveActivation | undefined>;
   getActiveDigest(businessId: string): Promise<string | undefined>;
   listActivationHistory(
     businessId: string,
@@ -486,12 +502,102 @@ function pgTransaction(transaction: Queryable): SoulPublicationTx {
       );
       if (result.rows.length === 0) throw new Error("missing_bundle_activation");
     },
-    async getActiveDigest(businessId) {
-      const result = await transaction.query<{ digest: string }>(
-        "SELECT digest FROM soul_active_bundles WHERE business_id = $1",
+    async forceActivateDigestIfCurrent(input) {
+      const result = await transaction.query<{
+        candidates: string | number;
+        activated: string | number;
+        already_active: string | number;
+      }>(
+        `WITH candidate AS MATERIALIZED (
+           SELECT p.business_id, p.digest, p.changeset_id,
+                  $3::text AS activated_by_principal_id
+             FROM soul_publications p
+             JOIN soul_execution_bundles b
+               ON b.business_id = p.business_id AND b.digest = p.digest
+            WHERE p.business_id = $1 AND p.digest = $2
+         ), current AS MATERIALIZED (
+           SELECT business_id, digest, activation_sequence
+             FROM soul_active_bundles
+            WHERE business_id = $1
+            FOR UPDATE
+         ), updated AS (
+           UPDATE soul_active_bundles a
+              SET digest = c.digest,
+                  activation_sequence = nextval('soul_activation_sequence'),
+                  activated_at = now(),
+                  activated_by_principal_id = c.activated_by_principal_id
+             FROM candidate c, current active
+            WHERE a.business_id = c.business_id
+              AND a.business_id = active.business_id
+              AND $4::bigint IS NOT NULL
+              AND active.activation_sequence = $4::bigint
+              AND a.activation_sequence = active.activation_sequence
+              AND active.digest <> c.digest
+           RETURNING a.business_id, a.digest, a.activation_sequence, a.activated_at,
+                     a.activated_by_principal_id
+         ), inserted AS (
+           INSERT INTO soul_active_bundles (
+             business_id, digest, activation_sequence, activated_at, activated_by_principal_id
+           )
+           SELECT business_id, digest, nextval('soul_activation_sequence'), now(),
+                  activated_by_principal_id
+             FROM candidate
+            WHERE $4::bigint IS NULL
+              AND NOT EXISTS (SELECT 1 FROM current)
+           ON CONFLICT (business_id) DO NOTHING
+           RETURNING business_id, digest, activation_sequence, activated_at,
+                     activated_by_principal_id
+         ), activated AS (
+           SELECT * FROM updated
+           UNION ALL
+           SELECT * FROM inserted
+         ), history AS (
+           INSERT INTO soul_bundle_activations (
+             business_id, activation_sequence, digest, changeset_id, activated_at,
+             activated_by_principal_id
+           )
+           SELECT a.business_id, a.activation_sequence, a.digest, c.changeset_id, a.activated_at,
+                  a.activated_by_principal_id
+             FROM activated a
+             JOIN candidate c USING (business_id, digest)
+         )
+         SELECT
+           (SELECT count(*) FROM candidate) AS candidates,
+           (SELECT count(*) FROM activated) AS activated,
+           (SELECT count(*)
+              FROM current active
+              JOIN candidate c USING (business_id)
+             WHERE active.digest = c.digest) AS already_active`,
+        [
+          input.businessId,
+          input.digest,
+          input.activatedByPrincipalId,
+          input.expectedActivationSequence ?? null,
+        ]
+      );
+      const row = result.rows[0];
+      if (Number(row?.candidates ?? 0) === 0) throw new Error("missing_bundle_activation");
+      if (Number(row?.activated ?? 0) + Number(row?.already_active ?? 0) === 0) {
+        throw new StaleActivationError(input.digest);
+      }
+    },
+    async getActiveActivation(businessId) {
+      const result = await transaction.query<{
+        digest: string;
+        activation_sequence: string | number;
+      }>(
+        `SELECT digest, activation_sequence
+           FROM soul_active_bundles
+          WHERE business_id = $1`,
         [businessId]
       );
-      return result.rows[0]?.digest;
+      const row = result.rows[0];
+      return row
+        ? { digest: row.digest, activationSequence: Number(row.activation_sequence) }
+        : undefined;
+    },
+    async getActiveDigest(businessId) {
+      return (await this.getActiveActivation(businessId))?.digest;
     },
     async listActivationHistory(businessId, max) {
       const result = await transaction.query<ActivationRow>(

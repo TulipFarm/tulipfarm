@@ -73,7 +73,7 @@
         },
         "auth": {
           "type": "string",
-          "enum": ["1.0"]
+          "enum": ["1.0", "1.1"]
         },
         "events": {
           "type": "string",
@@ -803,6 +803,473 @@
           "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$",
           "maxLength": 96,
           "type": "string"
+        },
+        "verification": {
+          "additionalProperties": false,
+          "type": "object",
+          "required": ["issuer", "checks", "evidence"],
+          "properties": {
+            "issuer": {
+              "anyOf": [
+                {
+                  "additionalProperties": false,
+                  "type": "object",
+                  "required": ["source", "value"],
+                  "properties": {
+                    "source": {
+                      "const": "package",
+                      "type": "string"
+                    },
+                    "value": {
+                      "pattern": "^https://[A-Za-z0-9](?:[A-Za-z0-9.-]*[A-Za-z0-9])?(?::[1-9][0-9]{0,4})?(?:/[^\\s]*)?$",
+                      "maxLength": 2048,
+                      "type": "string"
+                    }
+                  }
+                },
+                {
+                  "additionalProperties": false,
+                  "type": "object",
+                  "required": ["source", "field"],
+                  "properties": {
+                    "source": {
+                      "const": "configuration_origin",
+                      "type": "string"
+                    },
+                    "field": {
+                      "pattern": "^[a-z][a-z0-9_]{1,63}$",
+                      "maxLength": 64,
+                      "type": "string"
+                    }
+                  }
+                }
+              ]
+            },
+            "checks": {
+              "minItems": 1,
+              "maxItems": 4,
+              "type": "array",
+              "items": {
+                "additionalProperties": false,
+                "type": "object",
+                "required": ["id", "operationId", "credentialSlots", "success"],
+                "properties": {
+                  "id": {
+                    "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$",
+                    "maxLength": 64,
+                    "type": "string"
+                  },
+                  "operationId": {
+                    "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$",
+                    "maxLength": 96,
+                    "type": "string"
+                  },
+                  "credentialSlots": {
+                    "minItems": 1,
+                    "maxItems": 2,
+                    "uniqueItems": true,
+                    "type": "array",
+                    "items": {
+                      "pattern": "^[a-z][a-z0-9_]{1,63}$",
+                      "maxLength": 64,
+                      "type": "string"
+                    }
+                  },
+                  "success": {
+                    "minItems": 1,
+                    "maxItems": 16,
+                    "type": "array",
+                    "items": {
+                      "anyOf": [
+                        {
+                          "additionalProperties": false,
+                          "type": "object",
+                          "required": ["kind", "path"],
+                          "properties": {
+                            "kind": {
+                              "const": "present",
+                              "type": "string"
+                            },
+                            "path": {
+                              "pattern": "^(?:/(?:[^/~]|~[01])*)+$",
+                              "maxLength": 512,
+                              "type": "string"
+                            }
+                          }
+                        },
+                        {
+                          "additionalProperties": false,
+                          "type": "object",
+                          "required": ["kind", "path", "value"],
+                          "properties": {
+                            "kind": {
+                              "const": "equals",
+                              "type": "string"
+                            },
+                            "path": {
+                              "pattern": "^(?:/(?:[^/~]|~[01])*)+$",
+                              "maxLength": 512,
+                              "type": "string"
+                            },
+                            "value": {
+                              "anyOf": [
+                                {
+                                  "maxLength": 512,
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "number"
+                                },
+                                {
+                                  "type": "boolean"
+                                }
+                              ]
+                            }
+                          }
+                        },
+                        {
+                          "additionalProperties": false,
+                          "type": "object",
+                          "required": ["kind", "path", "values"],
+                          "properties": {
+                            "kind": {
+                              "const": "one_of",
+                              "type": "string"
+                            },
+                            "path": {
+                              "pattern": "^(?:/(?:[^/~]|~[01])*)+$",
+                              "maxLength": 512,
+                              "type": "string"
+                            },
+                            "values": {
+                              "minItems": 1,
+                              "maxItems": 32,
+                              "uniqueItems": true,
+                              "type": "array",
+                              "items": {
+                                "anyOf": [
+                                  {
+                                    "maxLength": 512,
+                                    "type": "string"
+                                  },
+                                  {
+                                    "type": "number"
+                                  },
+                                  {
+                                    "type": "boolean"
+                                  }
+                                ]
+                              }
+                            }
+                          }
+                        }
+                      ]
+                    }
+                  }
+                }
+              }
+            },
+            "comparisons": {
+              "minItems": 1,
+              "maxItems": 8,
+              "type": "array",
+              "items": {
+                "anyOf": [
+                  {
+                    "additionalProperties": false,
+                    "type": "object",
+                    "required": ["kind", "left", "right"],
+                    "properties": {
+                      "kind": {
+                        "const": "equals",
+                        "type": "string"
+                      },
+                      "left": {
+                        "anyOf": [
+                          {
+                            "additionalProperties": false,
+                            "type": "object",
+                            "required": ["source", "checkId", "path"],
+                            "properties": {
+                              "source": {
+                                "const": "response",
+                                "type": "string"
+                              },
+                              "checkId": {
+                                "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$",
+                                "maxLength": 64,
+                                "type": "string"
+                              },
+                              "path": {
+                                "pattern": "^(?:/(?:[^/~]|~[01])*)+$",
+                                "maxLength": 512,
+                                "type": "string"
+                              }
+                            }
+                          },
+                          {
+                            "additionalProperties": false,
+                            "type": "object",
+                            "required": ["source", "field"],
+                            "properties": {
+                              "source": {
+                                "const": "configuration",
+                                "type": "string"
+                              },
+                              "field": {
+                                "pattern": "^[a-z][a-z0-9_]{1,63}$",
+                                "maxLength": 64,
+                                "type": "string"
+                              }
+                            }
+                          }
+                        ]
+                      },
+                      "right": {
+                        "anyOf": [
+                          {
+                            "additionalProperties": false,
+                            "type": "object",
+                            "required": ["source", "checkId", "path"],
+                            "properties": {
+                              "source": {
+                                "const": "response",
+                                "type": "string"
+                              },
+                              "checkId": {
+                                "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$",
+                                "maxLength": 64,
+                                "type": "string"
+                              },
+                              "path": {
+                                "pattern": "^(?:/(?:[^/~]|~[01])*)+$",
+                                "maxLength": 512,
+                                "type": "string"
+                              }
+                            }
+                          },
+                          {
+                            "additionalProperties": false,
+                            "type": "object",
+                            "required": ["source", "field"],
+                            "properties": {
+                              "source": {
+                                "const": "configuration",
+                                "type": "string"
+                              },
+                              "field": {
+                                "pattern": "^[a-z][a-z0-9_]{1,63}$",
+                                "maxLength": 64,
+                                "type": "string"
+                              }
+                            }
+                          }
+                        ]
+                      }
+                    }
+                  },
+                  {
+                    "additionalProperties": false,
+                    "type": "object",
+                    "required": ["kind", "array", "itemPath", "value"],
+                    "properties": {
+                      "kind": {
+                        "const": "array_contains",
+                        "type": "string"
+                      },
+                      "array": {
+                        "additionalProperties": false,
+                        "type": "object",
+                        "required": ["source", "checkId", "path"],
+                        "properties": {
+                          "source": {
+                            "const": "response",
+                            "type": "string"
+                          },
+                          "checkId": {
+                            "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$",
+                            "maxLength": 64,
+                            "type": "string"
+                          },
+                          "path": {
+                            "pattern": "^(?:/(?:[^/~]|~[01])*)+$",
+                            "maxLength": 512,
+                            "type": "string"
+                          }
+                        }
+                      },
+                      "itemPath": {
+                        "pattern": "^(?:/(?:[^/~]|~[01])*)+$",
+                        "maxLength": 512,
+                        "type": "string"
+                      },
+                      "value": {
+                        "anyOf": [
+                          {
+                            "additionalProperties": false,
+                            "type": "object",
+                            "required": ["source", "checkId", "path"],
+                            "properties": {
+                              "source": {
+                                "const": "response",
+                                "type": "string"
+                              },
+                              "checkId": {
+                                "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$",
+                                "maxLength": 64,
+                                "type": "string"
+                              },
+                              "path": {
+                                "pattern": "^(?:/(?:[^/~]|~[01])*)+$",
+                                "maxLength": 512,
+                                "type": "string"
+                              }
+                            }
+                          },
+                          {
+                            "additionalProperties": false,
+                            "type": "object",
+                            "required": ["source", "field"],
+                            "properties": {
+                              "source": {
+                                "const": "configuration",
+                                "type": "string"
+                              },
+                              "field": {
+                                "pattern": "^[a-z][a-z0-9_]{1,63}$",
+                                "maxLength": 64,
+                                "type": "string"
+                              }
+                            }
+                          }
+                        ]
+                      }
+                    }
+                  }
+                ]
+              }
+            },
+            "evidence": {
+              "anyOf": [
+                {
+                  "additionalProperties": false,
+                  "type": "object",
+                  "required": ["assurance"],
+                  "properties": {
+                    "assurance": {
+                      "const": "validity_only",
+                      "type": "string"
+                    }
+                  }
+                },
+                {
+                  "additionalProperties": false,
+                  "type": "object",
+                  "required": ["assurance", "subject"],
+                  "properties": {
+                    "assurance": {
+                      "const": "identified",
+                      "type": "string"
+                    },
+                    "subject": {
+                      "additionalProperties": false,
+                      "type": "object",
+                      "required": ["kind", "checkId", "path", "namespace"],
+                      "properties": {
+                        "kind": {
+                          "type": "string",
+                          "enum": ["human", "bot", "service", "account"]
+                        },
+                        "checkId": {
+                          "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$",
+                          "maxLength": 64,
+                          "type": "string"
+                        },
+                        "path": {
+                          "pattern": "^(?:/(?:[^/~]|~[01])*)+$",
+                          "maxLength": 512,
+                          "type": "string"
+                        },
+                        "namespace": {
+                          "type": "string",
+                          "enum": ["issuer", "issuer_client"]
+                        },
+                        "clientIdSlot": {
+                          "pattern": "^[a-z][a-z0-9_]{1,63}$",
+                          "maxLength": 64,
+                          "type": "string"
+                        }
+                      }
+                    },
+                    "tenant": {
+                      "anyOf": [
+                        {
+                          "additionalProperties": false,
+                          "type": "object",
+                          "required": ["kind", "source", "checkId", "path"],
+                          "properties": {
+                            "kind": {
+                              "type": "string",
+                              "enum": ["account", "workspace", "organization", "site", "instance"]
+                            },
+                            "source": {
+                              "const": "response",
+                              "type": "string"
+                            },
+                            "checkId": {
+                              "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$",
+                              "maxLength": 64,
+                              "type": "string"
+                            },
+                            "path": {
+                              "pattern": "^(?:/(?:[^/~]|~[01])*)+$",
+                              "maxLength": 512,
+                              "type": "string"
+                            }
+                          }
+                        },
+                        {
+                          "additionalProperties": false,
+                          "type": "object",
+                          "required": ["kind", "source", "field"],
+                          "properties": {
+                            "kind": {
+                              "type": "string",
+                              "enum": ["account", "workspace", "organization", "site", "instance"]
+                            },
+                            "source": {
+                              "const": "configuration",
+                              "type": "string"
+                            },
+                            "field": {
+                              "pattern": "^[a-z][a-z0-9_]{1,63}$",
+                              "maxLength": 64,
+                              "type": "string"
+                            }
+                          }
+                        },
+                        {
+                          "additionalProperties": false,
+                          "type": "object",
+                          "required": ["kind", "source"],
+                          "properties": {
+                            "kind": {
+                              "type": "string",
+                              "enum": ["account", "workspace", "organization", "site", "instance"]
+                            },
+                            "source": {
+                              "const": "issuer",
+                              "type": "string"
+                            }
+                          }
+                        }
+                      ]
+                    }
+                  }
+                }
+              ]
+            }
+          }
         },
         "allowedOriginHosts": {
           "minItems": 1,

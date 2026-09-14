@@ -14,7 +14,7 @@ export const OIM_VERSION = "1.0" as const;
 
 export const OIM_PROFILE_VERSIONS = {
   core: "1.2",
-  auth: "1.0",
+  auth: "1.1",
   events: "1.0",
   knowledge: "1.2",
   hooks: "1.0",
@@ -29,6 +29,7 @@ export const OIM_PROFILE_VERSIONS = {
  * version number worth reading on a runtime that only implements `1.0`.
  */
 export const OIM_CORE_PROFILE_VERSIONS = ["1.0", "1.1", "1.2"] as const;
+export const OIM_AUTH_PROFILE_VERSIONS = ["1.0", "1.1"] as const;
 const OIM_KNOWLEDGE_PROFILE_VERSIONS = ["1.0", "1.1", "1.2"] as const;
 
 /** Constructs added in Core 1.1, named as they appear in a refusal message. */
@@ -136,6 +137,9 @@ export const OIM_CONFORMANCE_CASES = {
     "auth.fields.secure-submit",
     "auth.oauth2.authorization-code",
     "auth.secret.prompt-omission",
+    "auth.verification.identified",
+    "auth.verification.validity-only",
+    "auth.verification.revision-bound",
   ],
   events: ["events.delivery.verify", "events.delivery.durable", "events.normalize.typed"],
   knowledge: [
@@ -149,6 +153,9 @@ export const OIM_CONFORMANCE_CASES = {
 } as const;
 
 export const OIM_CONFORMANCE_CASE_SINCE: Readonly<Record<string, string>> = {
+  "auth.verification.identified": "1.1",
+  "auth.verification.validity-only": "1.1",
+  "auth.verification.revision-bound": "1.1",
   "knowledge.live-authorization.principal-body": "1.2",
   "knowledge.live-authorization.fail-closed": "1.2",
 };
@@ -188,7 +195,7 @@ function stringEnum<const T extends readonly string[]>(values: T) {
 const ProfilesSchema = Type.Object(
   {
     core: stringEnum(OIM_CORE_PROFILE_VERSIONS),
-    auth: Type.Optional(stringEnum([OIM_PROFILE_VERSIONS.auth] as const)),
+    auth: Type.Optional(stringEnum(OIM_AUTH_PROFILE_VERSIONS)),
     events: Type.Optional(stringEnum([OIM_PROFILE_VERSIONS.events] as const)),
     knowledge: Type.Optional(stringEnum(OIM_KNOWLEDGE_PROFILE_VERSIONS)),
     hooks: Type.Optional(stringEnum([OIM_PROFILE_VERSIONS.hooks] as const)),
@@ -753,6 +760,176 @@ const AuthStepSchema = Type.Union([
   ),
 ]);
 
+const AuthVerificationCheckSchema = Type.Object(
+  {
+    id: Type.String({ pattern: OPERATION_ID_PATTERN, maxLength: 64 }),
+    operationId: Type.String({ pattern: OPERATION_ID_PATTERN, maxLength: 96 }),
+    credentialSlots: Type.Array(Type.String({ pattern: SLOT_PATTERN, maxLength: 64 }), {
+      minItems: 1,
+      maxItems: 2,
+      uniqueItems: true,
+    }),
+    success: Type.Array(
+      Type.Union([
+        Type.Object(
+          {
+            kind: Type.Literal("present"),
+            path: JsonPointerSchema,
+          },
+          { additionalProperties: false }
+        ),
+        Type.Object(
+          {
+            kind: Type.Literal("equals"),
+            path: JsonPointerSchema,
+            value: Type.Union([Type.String({ maxLength: 512 }), Type.Number(), Type.Boolean()]),
+          },
+          { additionalProperties: false }
+        ),
+        Type.Object(
+          {
+            kind: Type.Literal("one_of"),
+            path: JsonPointerSchema,
+            values: Type.Array(
+              Type.Union([Type.String({ maxLength: 512 }), Type.Number(), Type.Boolean()]),
+              { minItems: 1, maxItems: 32, uniqueItems: true }
+            ),
+          },
+          { additionalProperties: false }
+        ),
+      ]),
+      { minItems: 1, maxItems: 16 }
+    ),
+  },
+  { additionalProperties: false }
+);
+
+const AuthVerificationResponseValueSchema = Type.Object(
+  {
+    source: Type.Literal("response"),
+    checkId: Type.String({ pattern: OPERATION_ID_PATTERN, maxLength: 64 }),
+    path: JsonPointerSchema,
+  },
+  { additionalProperties: false }
+);
+
+const AuthVerificationConfigurationValueSchema = Type.Object(
+  {
+    source: Type.Literal("configuration"),
+    field: Type.String({ pattern: SLOT_PATTERN, maxLength: 64 }),
+  },
+  { additionalProperties: false }
+);
+
+const AuthVerificationValueSchema = Type.Union([
+  AuthVerificationResponseValueSchema,
+  AuthVerificationConfigurationValueSchema,
+]);
+
+const AuthVerificationComparisonSchema = Type.Union([
+  Type.Object(
+    {
+      kind: Type.Literal("equals"),
+      left: AuthVerificationValueSchema,
+      right: AuthVerificationValueSchema,
+    },
+    { additionalProperties: false }
+  ),
+  Type.Object(
+    {
+      kind: Type.Literal("array_contains"),
+      array: AuthVerificationResponseValueSchema,
+      itemPath: JsonPointerSchema,
+      value: AuthVerificationValueSchema,
+    },
+    { additionalProperties: false }
+  ),
+]);
+
+const AuthVerificationIssuerSchema = Type.Union([
+  Type.Object(
+    {
+      source: Type.Literal("package"),
+      value: Type.String({ pattern: HTTPS_URL_PATTERN, maxLength: 2_048 }),
+    },
+    { additionalProperties: false }
+  ),
+  Type.Object(
+    {
+      source: Type.Literal("configuration_origin"),
+      field: Type.String({ pattern: SLOT_PATTERN, maxLength: 64 }),
+    },
+    { additionalProperties: false }
+  ),
+]);
+
+const AuthVerificationSubjectSchema = Type.Object(
+  {
+    kind: stringEnum(["human", "bot", "service", "account"] as const),
+    checkId: Type.String({ pattern: OPERATION_ID_PATTERN, maxLength: 64 }),
+    path: JsonPointerSchema,
+    namespace: stringEnum(["issuer", "issuer_client"] as const),
+    clientIdSlot: Type.Optional(Type.String({ pattern: SLOT_PATTERN, maxLength: 64 })),
+  },
+  { additionalProperties: false }
+);
+
+const AuthVerificationTenantSchema = Type.Union([
+  Type.Object(
+    {
+      kind: stringEnum(["account", "workspace", "organization", "site", "instance"] as const),
+      source: Type.Literal("response"),
+      checkId: Type.String({ pattern: OPERATION_ID_PATTERN, maxLength: 64 }),
+      path: JsonPointerSchema,
+    },
+    { additionalProperties: false }
+  ),
+  Type.Object(
+    {
+      kind: stringEnum(["account", "workspace", "organization", "site", "instance"] as const),
+      source: Type.Literal("configuration"),
+      field: Type.String({ pattern: SLOT_PATTERN, maxLength: 64 }),
+    },
+    { additionalProperties: false }
+  ),
+  Type.Object(
+    {
+      kind: stringEnum(["account", "workspace", "organization", "site", "instance"] as const),
+      source: Type.Literal("issuer"),
+    },
+    { additionalProperties: false }
+  ),
+]);
+
+const AuthVerificationEvidenceSchema = Type.Union([
+  Type.Object(
+    {
+      assurance: Type.Literal("validity_only"),
+    },
+    { additionalProperties: false }
+  ),
+  Type.Object(
+    {
+      assurance: Type.Literal("identified"),
+      subject: AuthVerificationSubjectSchema,
+      tenant: Type.Optional(AuthVerificationTenantSchema),
+    },
+    { additionalProperties: false }
+  ),
+]);
+
+const AuthVerificationSchema = Type.Object(
+  {
+    issuer: AuthVerificationIssuerSchema,
+    checks: Type.Array(AuthVerificationCheckSchema, { minItems: 1, maxItems: 4 }),
+    comparisons: Type.Optional(
+      Type.Array(AuthVerificationComparisonSchema, { minItems: 1, maxItems: 8 })
+    ),
+    evidence: AuthVerificationEvidenceSchema,
+  },
+  { additionalProperties: false }
+);
+
 const AuthSchema = Type.Object(
   {
     credentialSlots: Type.Array(CredentialSlotSchema, { minItems: 1 }),
@@ -761,6 +938,7 @@ const AuthSchema = Type.Object(
     healthCheckOperationId: Type.Optional(
       Type.String({ pattern: OPERATION_ID_PATTERN, maxLength: 96 })
     ),
+    verification: Type.Optional(AuthVerificationSchema),
     /**
      * The hosts an installation may resolve a templated `baseUrl` to. Required as soon as any
      * operation uses a placeholder, and checked again at compile time against the resolved host.
@@ -1359,6 +1537,88 @@ export const OimConnectionSchema = Type.Object(
   { additionalProperties: false }
 );
 
+const OimVerifiedCredentialBindingSchema = Type.Object(
+  {
+    slot: Type.String({ pattern: SLOT_PATTERN, maxLength: 64 }),
+    referenceDigest: Type.String({ pattern: SHA256_PATTERN }),
+    valueDigest: Type.Optional(Type.String({ pattern: SHA256_PATTERN })),
+  },
+  { additionalProperties: false }
+);
+
+const OimVerifiedAuthStepBindingSchema = Type.Object(
+  {
+    stepId: Type.String({ pattern: SLOT_PATTERN, maxLength: 64 }),
+    revision: Type.Integer({ minimum: 1 }),
+    credentials: Type.Array(OimVerifiedCredentialBindingSchema, {
+      minItems: 1,
+      uniqueItems: true,
+    }),
+  },
+  { additionalProperties: false }
+);
+
+export const OimVerificationBindingSchema = Type.Object(
+  {
+    businessId: Type.String({ minLength: 1, maxLength: 256 }),
+    connectionId: Type.String({ minLength: 1, maxLength: 256 }),
+    integrationId: Type.String({ pattern: SLUG_PATTERN, maxLength: 96 }),
+    integrationMajorVersion: Type.Integer({ minimum: 0 }),
+    packageDigest: Type.String({ pattern: SHA256_PATTERN }),
+    configurationDigest: Type.String({ pattern: SHA256_PATTERN }),
+    authSteps: Type.Array(OimVerifiedAuthStepBindingSchema, {
+      minItems: 1,
+      uniqueItems: true,
+    }),
+  },
+  { additionalProperties: false }
+);
+
+const OimVerificationEvidenceBase = {
+  issuer: Type.String({ pattern: HTTPS_URL_PATTERN, maxLength: 2_048 }),
+  binding: OimVerificationBindingSchema,
+  proofDigest: Type.String({ pattern: SHA256_PATTERN }),
+  verifiedAt: Type.String({ format: "date-time" }),
+  verifiedBy: Type.Literal("oim-auth-1.1"),
+};
+
+export const OimConnectionVerificationEvidenceSchema = Type.Union([
+  Type.Object(
+    {
+      ...OimVerificationEvidenceBase,
+      assurance: Type.Literal("validity_only"),
+      subject: Type.Null(),
+      tenant: Type.Null(),
+    },
+    { additionalProperties: false }
+  ),
+  Type.Object(
+    {
+      ...OimVerificationEvidenceBase,
+      assurance: Type.Literal("identified"),
+      subject: Type.Object(
+        {
+          id: Type.String({ minLength: 1, maxLength: 1_024 }),
+          kind: stringEnum(["human", "bot", "service", "account"] as const),
+          namespace: Type.String({ minLength: 1, maxLength: 2_048 }),
+        },
+        { additionalProperties: false }
+      ),
+      tenant: Type.Union([
+        Type.Object(
+          {
+            id: Type.String({ minLength: 1, maxLength: 1_024 }),
+            kind: stringEnum(["account", "workspace", "organization", "site", "instance"] as const),
+          },
+          { additionalProperties: false }
+        ),
+        Type.Null(),
+      ]),
+    },
+    { additionalProperties: false }
+  ),
+]);
+
 export const OimConformanceClaimSchema = Type.Object(
   {
     oimVersion: Type.Literal(OIM_VERSION),
@@ -1384,7 +1644,23 @@ export type OimMultipartPart = Static<
   typeof MultipartFieldPartSchema | typeof MultipartFilePartSchema
 >;
 export type OimAuth = Static<typeof AuthSchema>;
+export type OimAuthVerification = Static<typeof AuthVerificationSchema>;
+export type OimAuthVerificationCheck = Static<typeof AuthVerificationCheckSchema>;
+export type OimAuthVerificationComparison = Static<typeof AuthVerificationComparisonSchema>;
 export type OimConnection = Static<typeof OimConnectionSchema>;
+export type OimConnectionVerificationEvidence = Static<
+  typeof OimConnectionVerificationEvidenceSchema
+>;
+export type OimVerificationBinding = Static<typeof OimVerificationBindingSchema>;
+export type OimVerifiedAuthStepBinding = Static<typeof OimVerifiedAuthStepBindingSchema>;
+export type OimVerifiedCredentialBinding = Static<typeof OimVerifiedCredentialBindingSchema>;
+export type OimVerifiedSubject = Extract<
+  OimConnectionVerificationEvidence,
+  { assurance: "identified" }
+>["subject"];
+export type OimVerifiedTenant = NonNullable<
+  Extract<OimConnectionVerificationEvidence, { assurance: "identified" }>["tenant"]
+>;
 export type OimCompanionFile = Static<typeof CompanionFileSchema>;
 export type OimFixtureSuite = Static<typeof OimFixtureSuiteSchema>;
 export type OimFixtureCase = Static<typeof FixtureCaseSchema>;
@@ -1931,8 +2207,17 @@ export function oimManifestIssues(manifest: OimManifest): string[] {
   const credentialSlots = new Set<string>();
   const configurationFields = new Map<string, boolean>();
   if (manifest.auth) {
-    if (manifest.profiles.auth !== OIM_PROFILE_VERSIONS.auth) {
-      issues.push('profiles: auth "1.0" is required when auth is declared');
+    if (
+      manifest.profiles.auth === undefined ||
+      !OIM_AUTH_PROFILE_VERSIONS.includes(manifest.profiles.auth)
+    ) {
+      issues.push('profiles: auth "1.0" or "1.1" is required when auth is declared');
+    }
+    if (manifest.auth.verification !== undefined && manifest.profiles.auth !== "1.1") {
+      issues.push('profiles: auth "1.1" is required for auth.verification');
+    }
+    if (manifest.profiles.auth === "1.1" && manifest.auth.verification === undefined) {
+      issues.push('auth: verification is required for auth profile "1.1"');
     }
     for (const slot of manifest.auth.credentialSlots) {
       if (credentialSlots.has(slot.id)) {
@@ -2316,6 +2601,8 @@ export function oimManifestIssues(manifest: OimManifest): string[] {
     }
   }
 
+  issues.push(...oimAuthVerificationIssues(manifest));
+
   if (manifest.hooks && manifest.profiles.hooks !== OIM_PROFILE_VERSIONS.hooks) {
     issues.push('profiles: hooks "1.0" is required when hooks are declared');
   }
@@ -2333,6 +2620,145 @@ export function oimManifestIssues(manifest: OimManifest): string[] {
   issues.push(...oimEventsIssues(manifest));
   issues.push(...oimPollingIngressIssues(manifest));
   issues.push(...oimKnowledgeIssues(manifest));
+
+  return issues;
+}
+
+function oimAuthVerificationIssues(manifest: OimManifest): string[] {
+  const verification = manifest.auth?.verification;
+  if (verification === undefined) return [];
+
+  const issues: string[] = [];
+  const operations = new Map(manifest.operations.map((operation) => [operation.id, operation]));
+  const credentialSlots = new Set(
+    (manifest.auth?.credentialSlots ?? []).map((credential) => credential.id)
+  );
+  const configurationFields = new Map(
+    (manifest.auth?.configurationFields ?? []).map((field) => [field.id, field])
+  );
+  const checkIds = new Set<string>();
+
+  const checkReference = (checkId: string, context: string) => {
+    if (!checkIds.has(checkId)) {
+      issues.push(`auth: verification ${context} references unknown check ${checkId}`);
+    }
+  };
+  const valueReference = (value: Static<typeof AuthVerificationValueSchema>, context: string) => {
+    if (value.source === "response") {
+      checkReference(value.checkId, context);
+      return;
+    }
+    const field = configurationFields.get(value.field);
+    if (field === undefined) {
+      issues.push(`auth: verification ${context} references unknown configuration ${value.field}`);
+    } else if (field.required !== true) {
+      issues.push(`auth: verification ${context} configuration ${value.field} must be required`);
+    }
+  };
+
+  for (const check of verification.checks) {
+    if (checkIds.has(check.id)) {
+      issues.push(`auth: verification check ${check.id} is declared more than once`);
+    }
+    checkIds.add(check.id);
+
+    for (const slot of check.credentialSlots) {
+      if (!credentialSlots.has(slot)) {
+        issues.push(`auth: verification check ${check.id} references unknown credential ${slot}`);
+      }
+    }
+
+    const operation = operations.get(check.operationId);
+    if (operation === undefined) {
+      issues.push(
+        `auth: verification check ${check.id} references unknown operation ${check.operationId}`
+      );
+      continue;
+    }
+    if (
+      operation.effect !== "read" ||
+      operation.source.type !== "http" ||
+      operation.source.method !== "GET"
+    ) {
+      issues.push(`auth: verification check ${check.id} operation must be a read-only HTTP GET`);
+    }
+    const operationSlots = [
+      ...(operation.credentialSlot === undefined ? [] : [operation.credentialSlot]),
+      ...(operation.secondaryCredential === undefined ? [] : [operation.secondaryCredential.slot]),
+    ].sort();
+    const checkSlots = [...check.credentialSlots].sort();
+    if (
+      operationSlots.length !== checkSlots.length ||
+      operationSlots.some((slot, index) => slot !== checkSlots[index])
+    ) {
+      issues.push(
+        `auth: verification check ${check.id} credentialSlots must exactly match operation ${check.operationId}`
+      );
+    }
+    const requiredInput = operation.requestSchema?.required;
+    if (Array.isArray(requiredInput) && requiredInput.length > 0) {
+      issues.push(`auth: verification check ${check.id} operation cannot require caller input`);
+    }
+    if (
+      operation.source.type === "http" &&
+      (operation.source.parameters ?? []).some(
+        (parameter) =>
+          parameter.required === true &&
+          parameter.value === undefined &&
+          parameter.configurationField === undefined
+      )
+    ) {
+      issues.push(`auth: verification check ${check.id} operation cannot require caller input`);
+    }
+  }
+
+  if (verification.issuer.source === "package") {
+    if (!publicHttpsUrl(verification.issuer.value)) {
+      issues.push("auth: verification package issuer must use a public HTTPS origin");
+    }
+  } else {
+    const field = configurationFields.get(verification.issuer.field);
+    if (field === undefined) {
+      issues.push(
+        `auth: verification issuer references unknown configuration ${verification.issuer.field}`
+      );
+    } else if (field.required !== true || field.type !== "url") {
+      issues.push(
+        `auth: verification issuer configuration ${verification.issuer.field} must be a required URL`
+      );
+    }
+  }
+
+  for (const comparison of verification.comparisons ?? []) {
+    if (comparison.kind === "equals") {
+      valueReference(comparison.left, "comparison");
+      valueReference(comparison.right, "comparison");
+    } else {
+      checkReference(comparison.array.checkId, "array comparison");
+      valueReference(comparison.value, "array comparison");
+    }
+  }
+
+  if (verification.evidence.assurance === "identified") {
+    const { subject, tenant } = verification.evidence;
+    checkReference(subject.checkId, "subject");
+    if (subject.namespace === "issuer_client") {
+      if (subject.clientIdSlot === undefined) {
+        issues.push("auth: verification issuer_client subject requires clientIdSlot");
+      } else if (!credentialSlots.has(subject.clientIdSlot)) {
+        issues.push(
+          `auth: verification subject references unknown client credential ${subject.clientIdSlot}`
+        );
+      }
+    } else if (subject.clientIdSlot !== undefined) {
+      issues.push("auth: verification issuer subject cannot declare clientIdSlot");
+    }
+    if (tenant?.source === "response") {
+      checkReference(tenant.checkId, "tenant");
+    } else if (tenant?.source === "configuration") {
+      valueReference({ source: "configuration", field: tenant.field }, "tenant");
+    }
+  }
 
   return issues;
 }

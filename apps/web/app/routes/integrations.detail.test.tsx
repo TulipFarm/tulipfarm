@@ -1,7 +1,9 @@
+import { useLocation, useNavigate } from "@remix-run/react";
 import { createRemixStub } from "@remix-run/testing";
-import { render, screen, within } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, expect, test, vi } from "vitest";
+import { ApiError } from "~/lib/api";
 
 let admin = true;
 
@@ -17,20 +19,62 @@ vi.mock("~/lib/use-session-user", () => ({
 
 beforeEach(() => {
   admin = true;
+  vi.clearAllMocks();
+  vi.mocked(getInstalledOimRelease).mockResolvedValue(null);
 });
 
 vi.mock("~/lib/integrations", async (importOriginal) => ({
   ...(await importOriginal<typeof import("~/lib/integrations")>()),
+  createOimConnection: vi.fn(),
   deleteIntegration: vi.fn(),
   disconnectIntegration: vi.fn(),
   disconnectGitHubInstallation: vi.fn(),
   disconnectPersonalIntegration: vi.fn(),
+  getIntegration: vi.fn(),
+  getInstalledOimRelease: vi.fn(),
+  getOimConnectionSetup: vi.fn(),
+  getOimReleaseUninstallStatus: vi.fn(),
+  listOimConnections: vi.fn(),
+  revokeOimConnection: vi.fn(),
+  setOimAutoPatchPreference: vi.fn(),
+  uninstallOimRelease: vi.fn(),
   updateIntegration: vi.fn(),
 }));
 
-import type { IntegrationDetail } from "~/lib/integrations";
-import { deleteIntegration, disconnectIntegration, updateIntegration } from "~/lib/integrations";
-import IntegrationDetailPage from "./_app.integrations.$name";
+import type {
+  IntegrationDetail,
+  OimConnectionSetup,
+  OimConnectionSummary,
+} from "~/lib/integrations";
+import {
+  createOimConnection,
+  deleteIntegration,
+  disconnectIntegration,
+  getInstalledOimRelease,
+  getIntegration,
+  getOimConnectionSetup,
+  getOimReleaseUninstallStatus,
+  listOimConnections,
+  revokeOimConnection,
+  setOimAutoPatchPreference,
+  uninstallOimRelease,
+  updateIntegration,
+} from "~/lib/integrations";
+import IntegrationDetailPage, { clientLoader } from "./_app.integrations.$name";
+
+function IntegrationDetailWithLocation() {
+  const location = useLocation();
+  const navigate = useNavigate();
+  return (
+    <>
+      <IntegrationDetailPage />
+      <span data-testid="location-search">{location.search}</span>
+      <button type="button" onClick={() => navigate("/integrations/other")}>
+        Switch test integration
+      </button>
+    </>
+  );
+}
 
 function detail(over: Partial<IntegrationDetail> = {}): IntegrationDetail {
   return {
@@ -47,16 +91,50 @@ function detail(over: Partial<IntegrationDetail> = {}): IntegrationDetail {
   };
 }
 
-function renderDetail(integration: IntegrationDetail) {
+function renderDetail(
+  integration: IntegrationDetail,
+  oimConnections?: OimConnectionSummary[],
+  initialEntry = "/integrations/github",
+  oimConnectionSetup?: OimConnectionSetup,
+  oimConnectionId?: string
+) {
   const Stub = createRemixStub([
     {
       path: "/integrations/:name",
-      Component: () => <IntegrationDetailPage />,
-      loader: () => ({ integration, routesError: undefined, githubInstallations: [] }),
+      Component: IntegrationDetailWithLocation,
+      loader: () => ({
+        integration,
+        routesError: undefined,
+        githubInstallations: [],
+        usesOimConnections: oimConnections !== undefined || oimConnectionSetup !== undefined,
+        oimConnections,
+        oimConnectionsError: undefined,
+        oimConnectionSetup,
+        oimConnectionSetupError: undefined,
+        oimConnectionId,
+      }),
     },
     { path: "/integrations", Component: () => <p>catalog</p> },
   ]);
-  render(<Stub initialEntries={["/integrations/github"]} />);
+  render(<Stub initialEntries={[initialEntry]} />);
+}
+
+function renderDetailWithClientLoader(initialEntry: string) {
+  const Stub = createRemixStub([
+    {
+      path: "/integrations/:name",
+      Component: IntegrationDetailWithLocation,
+      loader: (args) => clientLoader(args as never),
+    },
+  ]);
+  render(<Stub initialEntries={[initialEntry]} />);
+}
+
+function createdConnection() {
+  return {
+    connectionId: "connection-1",
+    verification: { status: "not_required" as const },
+  };
 }
 
 test("leads with the brand name but keeps the slug visible", async () => {
@@ -162,6 +240,392 @@ test("disconnects through the API without removing the integration", async () =>
   expect(deleteIntegration).not.toHaveBeenCalled();
 });
 
+test("uses exact Connection revoke instead of legacy disconnect for OIM", async () => {
+  const user = userEvent.setup();
+  vi.mocked(revokeOimConnection).mockResolvedValue({ status: "revoked" });
+  renderDetail(detail({ connected: true, status: "connected" }), [
+    {
+      id: "connection-1",
+      integration: { id: "github", majorVersion: 2 },
+      label: "Engineering",
+      owner: { scope: "organization" },
+      status: "active",
+      isDefault: true,
+      configuration: {},
+      availableCredentialSlots: ["access_token"],
+      disconnectPending: false,
+      health: { status: "healthy", checkedAt: "2026-09-13T10:00:00.000Z" },
+      expiresAt: null,
+    },
+  ]);
+
+  await user.click(await screen.findByRole("button", { name: "Disconnect Engineering" }));
+  await user.click(screen.getByRole("button", { name: "Disconnect Connection" }));
+
+  expect(revokeOimConnection).toHaveBeenCalledWith("github", "connection-1");
+  expect(disconnectIntegration).not.toHaveBeenCalled();
+});
+
+test("keeps an OIM callback failure visible after clearing the callback URL", async () => {
+  renderDetail(
+    detail({ name: "github", title: "GitHub" }),
+    [],
+    "/integrations/github?status=error&reason=invalid_state"
+  );
+
+  expect(await screen.findByRole("alert")).toHaveTextContent(
+    "This setup link expired or was already used. Start the step again."
+  );
+  expect(screen.getByTestId("location-search")).toHaveTextContent("");
+});
+
+test("keeps the exact callback Connection through a successful two-step redirect", async () => {
+  const callbackSetup: OimConnectionSetup = {
+    integration: { id: "github", majorVersion: 2 },
+    allowedOwnerScopes: ["personal"],
+    configurationFields: [],
+    fieldSteps: [],
+    initialAuthorizationSteps: [
+      { id: "install", title: "Install app", type: "install" },
+      { id: "webhook", title: "Register webhook", type: "webhook" },
+    ],
+    pendingAuthorizationStepIds: ["install", "webhook"],
+  };
+  renderDetail(
+    detail({ name: "github", title: "GitHub" }),
+    [],
+    "/integrations/github?connection=connection-1&status=ok&tab=setup",
+    callbackSetup,
+    "connection-1"
+  );
+
+  expect(
+    await screen.findByRole("button", { name: "Continue with Install app" })
+  ).toBeInTheDocument();
+  expect(
+    screen.getByRole("button", { name: "Continue with Register webhook" })
+  ).toBeInTheDocument();
+  await waitFor(() =>
+    expect(screen.getByTestId("location-search")).toHaveTextContent(
+      "?connection=connection-1&tab=setup"
+    )
+  );
+});
+
+test("keeps a known Connection after a callback error", async () => {
+  const callbackSetup: OimConnectionSetup = {
+    integration: { id: "github", majorVersion: 2 },
+    allowedOwnerScopes: ["personal"],
+    configurationFields: [],
+    fieldSteps: [],
+    initialAuthorizationSteps: [{ id: "install", title: "Install app", type: "install" }],
+    pendingAuthorizationStepIds: ["install"],
+  };
+  renderDetail(
+    detail({ name: "github", title: "GitHub" }),
+    [],
+    "/integrations/github?connection=connection-1&status=error&reason=invalid_state",
+    callbackSetup,
+    "connection-1"
+  );
+
+  expect(await screen.findByRole("alert")).toHaveTextContent(
+    "This setup link expired or was already used. Start the step again."
+  );
+  expect(screen.getByRole("button", { name: "Continue with Install app" })).toBeInTheDocument();
+  await waitFor(() =>
+    expect(screen.getByTestId("location-search")).toHaveTextContent("?connection=connection-1")
+  );
+});
+
+test("validates the callback Connection through the exact setup endpoint", async () => {
+  vi.mocked(getIntegration).mockResolvedValue(detail({ name: "acme-v2" }));
+  vi.mocked(listOimConnections).mockResolvedValue([]);
+  vi.mocked(getOimConnectionSetup).mockResolvedValue({
+    integration: { id: "acme", majorVersion: 2 },
+    allowedOwnerScopes: ["personal"],
+    configurationFields: [],
+    fieldSteps: [],
+    initialAuthorizationSteps: [],
+    pendingAuthorizationStepIds: [],
+  });
+
+  const result = await clientLoader({
+    params: { name: "acme-v2" },
+    request: new Request(
+      "https://app.example.test/integrations/acme-v2?connection=connection-1&status=ok"
+    ),
+    context: {},
+  } as never);
+
+  expect(getOimConnectionSetup).toHaveBeenCalledWith("acme-v2", "connection-1");
+  expect(result.oimConnectionId).toBe("connection-1");
+});
+
+test("rejects a callback Connection that the exact setup endpoint does not authorize", async () => {
+  const rejection = new ApiError(404, "Connection not found");
+  vi.mocked(getIntegration).mockResolvedValue(detail({ name: "acme-v2" }));
+  vi.mocked(listOimConnections).mockResolvedValue([]);
+  vi.mocked(getOimConnectionSetup).mockRejectedValue(rejection);
+
+  await expect(
+    clientLoader({
+      params: { name: "acme-v2" },
+      request: new Request(
+        "https://app.example.test/integrations/acme-v2?connection=other-owner-or-major"
+      ),
+      context: {},
+    } as never)
+  ).rejects.toBe(rejection);
+
+  expect(getOimConnectionSetup).toHaveBeenCalledWith("acme-v2", "other-owner-or-major");
+});
+
+test("keeps exact setup usable when the Connection list is temporarily unavailable", async () => {
+  vi.mocked(getIntegration).mockResolvedValue(detail({ name: "acme-v2", title: "Acme" }));
+  vi.mocked(listOimConnections).mockRejectedValue(
+    new ApiError(503, "Connections are temporarily unavailable.")
+  );
+  vi.mocked(getOimConnectionSetup).mockResolvedValue({
+    integration: { id: "acme", majorVersion: 2 },
+    allowedOwnerScopes: ["personal"],
+    configurationFields: [],
+    fieldSteps: [],
+    initialAuthorizationSteps: [{ id: "account", title: "Authorize account", type: "oauth2" }],
+    pendingAuthorizationStepIds: ["account"],
+  });
+
+  renderDetailWithClientLoader("/integrations/acme-v2?connection=connection-1");
+
+  expect(
+    await screen.findByRole("button", { name: "Continue with Authorize account" })
+  ).toBeInTheDocument();
+  expect(screen.getByRole("alert")).toHaveTextContent("Connections are temporarily unavailable.");
+  expect(screen.queryByLabelText("Connection name")).not.toBeInTheDocument();
+});
+
+test("renders ID-bound retries when both OIM reads are temporarily unavailable", async () => {
+  vi.mocked(getIntegration).mockResolvedValue(detail({ name: "acme-v2", title: "Acme" }));
+  vi.mocked(listOimConnections).mockRejectedValue(
+    new ApiError(503, "Connections are temporarily unavailable.")
+  );
+  vi.mocked(getOimConnectionSetup).mockRejectedValue(
+    new ApiError(503, "Setup is temporarily unavailable.")
+  );
+
+  renderDetailWithClientLoader("/integrations/acme-v2?connection=connection-1");
+
+  expect(await screen.findByRole("button", { name: "Retry setup" })).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Retry Connections" })).toBeInTheDocument();
+  expect(screen.queryByLabelText("Connection name")).not.toBeInTheDocument();
+  expect(screen.queryByText("No Connections are available.")).not.toBeInTheDocument();
+  expect(screen.getByTestId("location-search")).toHaveTextContent("?connection=connection-1");
+  expect(getOimConnectionSetup).toHaveBeenCalledTimes(1);
+  expect(getOimConnectionSetup).toHaveBeenCalledWith("acme-v2", "connection-1");
+});
+
+test("does not require a generic setup lookup after an exact transient failure", async () => {
+  vi.mocked(getIntegration).mockResolvedValue(detail({ name: "acme-v2", title: "Acme" }));
+  vi.mocked(listOimConnections).mockResolvedValue([]);
+  vi.mocked(getOimConnectionSetup).mockRejectedValue(
+    new ApiError(503, "Setup is temporarily unavailable.")
+  );
+
+  renderDetailWithClientLoader("/integrations/acme-v2?connection=connection-1");
+
+  expect(await screen.findByRole("button", { name: "Retry setup" })).toBeInTheDocument();
+  expect(screen.queryByLabelText("Connection name")).not.toBeInTheDocument();
+  expect(getOimConnectionSetup).toHaveBeenCalledTimes(1);
+  expect(getOimConnectionSetup).not.toHaveBeenCalledWith("acme-v2", undefined);
+});
+
+test("renders an exact Connection verification repair after reload", async () => {
+  vi.mocked(getIntegration).mockResolvedValue(detail({ name: "acme-v2", title: "Acme" }));
+  vi.mocked(listOimConnections).mockResolvedValue([
+    {
+      id: "connection-1",
+      integration: { id: "acme", majorVersion: 2 },
+      label: "Support",
+      owner: { scope: "personal", principalKind: "user", principalId: "u1" },
+      status: "active",
+      isDefault: true,
+      configuration: {},
+      availableCredentialSlots: ["api_token"],
+      disconnectPending: false,
+      health: { status: "action_required", checkedAt: "2026-09-13T10:00:00.000Z" },
+      expiresAt: null,
+    },
+  ]);
+  vi.mocked(getOimConnectionSetup).mockResolvedValue({
+    integration: { id: "acme", majorVersion: 2 },
+    connectionHealth: "action_required",
+    allowedOwnerScopes: ["personal"],
+    configurationFields: [],
+    fieldSteps: [],
+    initialAuthorizationSteps: [],
+    pendingAuthorizationStepIds: [],
+  });
+
+  renderDetailWithClientLoader("/integrations/acme-v2?connection=connection-1");
+
+  const heading = await screen.findByRole("heading", { name: "Connection needs verification" });
+  expect(screen.getByRole("button", { name: "Retry verification" })).toBeInTheDocument();
+  expect(screen.getByRole("status")).toHaveTextContent("verification needs another try");
+  expect(heading).toHaveFocus();
+});
+
+test("recovers missing generic setup with a valid scope, announcement, and focus", async () => {
+  const user = userEvent.setup();
+  const organizationSetup: OimConnectionSetup = {
+    integration: { id: "acme", majorVersion: 2 },
+    allowedOwnerScopes: ["organization"],
+    configurationFields: [],
+    fieldSteps: [],
+    initialAuthorizationSteps: [],
+    pendingAuthorizationStepIds: [],
+  };
+  let genericAttempts = 0;
+  vi.mocked(getIntegration).mockResolvedValue(detail({ name: "acme-v2", title: "Acme" }));
+  vi.mocked(listOimConnections).mockResolvedValue([]);
+  vi.mocked(getOimConnectionSetup).mockImplementation((_name, connectionId) => {
+    if (connectionId !== undefined) return Promise.resolve(organizationSetup);
+    genericAttempts += 1;
+    return genericAttempts === 1
+      ? Promise.reject(new ApiError(503, "Setup is temporarily unavailable."))
+      : Promise.resolve(organizationSetup);
+  });
+  vi.mocked(createOimConnection).mockResolvedValue(createdConnection());
+
+  renderDetailWithClientLoader("/integrations/acme-v2");
+
+  await user.click(await screen.findByRole("button", { name: "Retry setup" }));
+
+  const heading = await screen.findByRole("heading", { name: "Add Connection" });
+  expect(screen.getByRole("status")).toHaveTextContent(
+    "Connection setup loaded. Add Connection details."
+  );
+  expect(heading).toHaveFocus();
+  expect(screen.getByLabelText("Owner")).toHaveValue("organization");
+
+  await user.type(screen.getByLabelText("Connection name"), "Support");
+  await user.click(screen.getByRole("button", { name: "Create Connection" }));
+
+  expect(createOimConnection).toHaveBeenCalledWith("acme-v2", {
+    label: "Support",
+    ownerScope: "organization",
+    values: {},
+  });
+  expect(createOimConnection).toHaveBeenCalledTimes(1);
+});
+
+test("preserves local exact setup when route revalidation cannot reload it", async () => {
+  const user = userEvent.setup();
+  const completedSetup: OimConnectionSetup = {
+    integration: { id: "acme", majorVersion: 2 },
+    allowedOwnerScopes: ["personal"],
+    configurationFields: [],
+    fieldSteps: [],
+    initialAuthorizationSteps: [],
+    pendingAuthorizationStepIds: [],
+  };
+  let exactSetupAttempts = 0;
+  vi.mocked(getIntegration).mockResolvedValue(detail({ name: "acme-v2", title: "Acme" }));
+  vi.mocked(listOimConnections).mockResolvedValue([]);
+  vi.mocked(getOimConnectionSetup).mockImplementation((_name, connectionId) => {
+    if (connectionId === undefined) return Promise.resolve(completedSetup);
+    exactSetupAttempts += 1;
+    return exactSetupAttempts === 1
+      ? Promise.resolve(completedSetup)
+      : Promise.reject(new ApiError(503, "Setup is temporarily unavailable."));
+  });
+  vi.mocked(createOimConnection).mockResolvedValue(createdConnection());
+
+  renderDetailWithClientLoader("/integrations/acme-v2");
+
+  await user.type(await screen.findByLabelText("Connection name"), "Support");
+  await user.click(screen.getByRole("button", { name: "Create Connection" }));
+
+  const completion = await screen.findByRole("heading", { name: "Connection added" });
+  await waitFor(() => expect(exactSetupAttempts).toBeGreaterThan(1));
+  expect(screen.getByTestId("location-search")).toHaveTextContent("?connection=connection-1");
+  expect(screen.queryByRole("button", { name: "Retry setup" })).not.toBeInTheDocument();
+  expect(screen.getByRole("status")).toHaveTextContent("Connection added.");
+  expect(completion).toHaveFocus();
+  expect(createOimConnection).toHaveBeenCalledTimes(1);
+});
+
+test.each([401, 403, 404])("fails closed when exact setup returns %i", async (status) => {
+  const rejection = new ApiError(status, "Exact setup is not authorized.");
+  vi.mocked(getIntegration).mockResolvedValue(detail({ name: "acme-v2" }));
+  vi.mocked(listOimConnections).mockResolvedValue([]);
+  vi.mocked(getOimConnectionSetup).mockRejectedValue(rejection);
+
+  await expect(
+    clientLoader({
+      params: { name: "acme-v2" },
+      request: new Request("https://app.example.test/integrations/acme-v2?connection=connection-1"),
+      context: {},
+    } as never)
+  ).rejects.toBe(rejection);
+});
+
+test.each([401, 403, 404])("fails closed when Connection listing returns %i", async (status) => {
+  const rejection = new ApiError(status, "Connection listing is not authorized.");
+  vi.mocked(getIntegration).mockResolvedValue(detail({ name: "acme-v2" }));
+  vi.mocked(listOimConnections).mockRejectedValue(rejection);
+
+  await expect(
+    clientLoader({
+      params: { name: "acme-v2" },
+      request: new Request("https://app.example.test/integrations/acme-v2?connection=connection-1"),
+      context: {},
+    } as never)
+  ).rejects.toBe(rejection);
+  expect(getOimConnectionSetup).not.toHaveBeenCalled();
+});
+
+test("keeps creation focus and status through the Connection query revalidation", async () => {
+  const user = userEvent.setup();
+  const completedSetup: OimConnectionSetup = {
+    integration: { id: "acme", majorVersion: 2 },
+    allowedOwnerScopes: ["personal"],
+    configurationFields: [],
+    fieldSteps: [],
+    initialAuthorizationSteps: [],
+    pendingAuthorizationStepIds: [],
+  };
+  let exactSetupAttempts = 0;
+  vi.mocked(getIntegration).mockResolvedValue(detail({ name: "acme-v2", title: "Acme" }));
+  vi.mocked(listOimConnections).mockResolvedValue([]);
+  vi.mocked(getOimConnectionSetup).mockImplementation((_name, connectionId) => {
+    if (connectionId === undefined) return Promise.resolve(completedSetup);
+    exactSetupAttempts += 1;
+    if (exactSetupAttempts <= 2) {
+      return Promise.reject(new ApiError(503, "Setup is temporarily unavailable."));
+    }
+    return Promise.resolve(completedSetup);
+  });
+  vi.mocked(createOimConnection).mockResolvedValue(createdConnection());
+
+  renderDetailWithClientLoader("/integrations/acme-v2");
+
+  await user.type(await screen.findByLabelText("Connection name"), "Support");
+  await user.click(screen.getByRole("button", { name: "Create Connection" }));
+
+  expect(await screen.findByRole("button", { name: "Retry setup" })).toBeInTheDocument();
+  expect(createOimConnection).toHaveBeenCalledTimes(1);
+  await user.click(screen.getByRole("button", { name: "Retry setup" }));
+
+  const completion = await screen.findByRole("heading", { name: "Connection added" });
+  await waitFor(() =>
+    expect(screen.getByTestId("location-search")).toHaveTextContent("?connection=connection-1")
+  );
+  await waitFor(() => expect(vi.mocked(listOimConnections).mock.calls.length).toBeGreaterThan(1));
+  expect(screen.getByRole("status")).toHaveTextContent("Connection added.");
+  expect(completion).toHaveFocus();
+  expect(createOimConnection).toHaveBeenCalledTimes(1);
+});
+
 test("keeps removal behind an overflow menu and a confirm step", async () => {
   const user = userEvent.setup();
   renderDetail(detail());
@@ -175,6 +639,255 @@ test("keeps removal behind an overflow menu and a confirm step", async () => {
 
   await user.click(screen.getByRole("menuitem", { name: /confirm remove/i }));
   expect(deleteIntegration).toHaveBeenCalledWith("github");
+});
+
+test("retries a pending uninstall against the same installed generation", async () => {
+  const user = userEvent.setup();
+  const release = {
+    integrationId: "acme",
+    majorVersion: 2,
+    installationId: "11111111-1111-4111-8111-111111111111",
+    slug: "acme-v2",
+  };
+  const setup: OimConnectionSetup = {
+    integration: { id: "acme", majorVersion: 2 },
+    allowedOwnerScopes: ["personal"],
+    configurationFields: [],
+    fieldSteps: [],
+    initialAuthorizationSteps: [],
+  };
+  vi.mocked(getIntegration).mockResolvedValue(detail({ name: "acme-v2", title: "Acme" }));
+  vi.mocked(listOimConnections).mockResolvedValue([]);
+  vi.mocked(getOimConnectionSetup).mockResolvedValue(setup);
+  vi.mocked(getInstalledOimRelease).mockResolvedValue(release);
+  vi.mocked(getOimReleaseUninstallStatus)
+    .mockResolvedValueOnce({
+      scope: release,
+      status: "not_started",
+      activationAllowed: true,
+      retryRequired: false,
+    })
+    .mockResolvedValue({
+      scope: release,
+      status: "pending",
+      activationAllowed: false,
+      retryRequired: true,
+    });
+  vi.mocked(uninstallOimRelease).mockRejectedValue(new Error("remote cleanup failed"));
+
+  renderDetailWithClientLoader("/integrations/acme-v2");
+
+  await user.click(await screen.findByRole("button", { name: "More actions" }));
+  await user.click(screen.getByRole("menuitem", { name: "Remove integration" }));
+  await user.click(screen.getByRole("menuitem", { name: "Confirm remove" }));
+
+  expect(
+    await screen.findByRole("heading", { name: "Removal needs another try" })
+  ).toBeInTheDocument();
+  expect(
+    screen.getByText("Provider cleanup did not finish. Retry this exact installation.")
+  ).toBeInTheDocument();
+  expect(window.location.search).toContain(`installation=${release.installationId}`);
+  expect(uninstallOimRelease).toHaveBeenCalledWith(release);
+  expect(deleteIntegration).not.toHaveBeenCalled();
+
+  await user.click(screen.getByRole("button", { name: "Retry removal" }));
+
+  expect(uninstallOimRelease).toHaveBeenCalledTimes(2);
+  expect(vi.mocked(uninstallOimRelease).mock.calls).toEqual([[release], [release]]);
+});
+
+test("keeps a pinned uninstall generation without resolving the latest installation", async () => {
+  const installationId = "11111111-1111-4111-8111-111111111111";
+  vi.mocked(getIntegration).mockResolvedValue(detail({ name: "acme-v2", title: "Acme" }));
+  vi.mocked(listOimConnections).mockResolvedValue([]);
+  vi.mocked(getOimConnectionSetup).mockResolvedValue({
+    integration: { id: "acme", majorVersion: 2 },
+    allowedOwnerScopes: ["personal"],
+    configurationFields: [],
+    fieldSteps: [],
+    initialAuthorizationSteps: [],
+  });
+  vi.mocked(getOimReleaseUninstallStatus).mockResolvedValue({
+    scope: { integrationId: "acme", majorVersion: 2, installationId },
+    status: "pending",
+    activationAllowed: false,
+    retryRequired: true,
+  });
+
+  const result = await clientLoader({
+    params: { name: "acme-v2" },
+    request: new Request(
+      `https://app.example.test/integrations/acme-v2?installation=${installationId}`
+    ),
+    context: {},
+  } as never);
+
+  expect(result.oimRelease).toEqual({
+    integrationId: "acme",
+    majorVersion: 2,
+    installationId,
+    slug: "acme-v2",
+  });
+  expect(getInstalledOimRelease).not.toHaveBeenCalled();
+  expect(getOimReleaseUninstallStatus).toHaveBeenCalledWith(result.oimRelease);
+});
+
+test("does not offer package uninstall for a bundled OIM provider", async () => {
+  vi.mocked(getIntegration).mockResolvedValue(detail({ name: "acme-v2", title: "Acme" }));
+  vi.mocked(listOimConnections).mockResolvedValue([]);
+  vi.mocked(getOimConnectionSetup).mockResolvedValue({
+    integration: { id: "acme", majorVersion: 2 },
+    allowedOwnerScopes: ["personal"],
+    configurationFields: [],
+    fieldSteps: [],
+    initialAuthorizationSteps: [],
+  });
+
+  renderDetailWithClientLoader("/integrations/acme-v2");
+
+  await screen.findByRole("heading", { name: "Add Connection" });
+  expect(screen.queryByRole("button", { name: "More actions" })).not.toBeInTheDocument();
+  expect(getInstalledOimRelease).toHaveBeenCalledWith("acme", 2);
+});
+
+test("changes auto-patch only for the installed Official package major", async () => {
+  const user = userEvent.setup();
+  const release = {
+    integrationId: "acme",
+    majorVersion: 2,
+    installationId: "11111111-1111-4111-8111-111111111111",
+    slug: "acme-v2",
+    trustClass: "official" as const,
+    autoPatchOptIn: false,
+  };
+  vi.mocked(getIntegration).mockResolvedValue(detail({ name: "acme-v2", title: "Acme" }));
+  vi.mocked(listOimConnections).mockResolvedValue([]);
+  vi.mocked(getOimConnectionSetup).mockResolvedValue({
+    integration: { id: "acme", majorVersion: 2 },
+    allowedOwnerScopes: ["personal"],
+    configurationFields: [],
+    fieldSteps: [],
+    initialAuthorizationSteps: [],
+  });
+  vi.mocked(getInstalledOimRelease).mockResolvedValue(release);
+  vi.mocked(getOimReleaseUninstallStatus).mockResolvedValue({
+    scope: release,
+    status: "not_started",
+    activationAllowed: true,
+    retryRequired: false,
+  });
+  vi.mocked(setOimAutoPatchPreference).mockResolvedValue({
+    ...release,
+    autoPatchOptIn: true,
+  });
+
+  renderDetailWithClientLoader("/integrations/acme-v2");
+  const heading = await screen.findByRole("heading", { name: "Official package updates" });
+  const section = heading.closest("section") as HTMLElement;
+  const toggle = within(section).getByRole("checkbox", {
+    name: "Automatically install verified patch releases",
+  });
+  await user.click(toggle);
+
+  expect(setOimAutoPatchPreference).toHaveBeenCalledWith("acme", 2, true);
+  await waitFor(() =>
+    expect(within(section).getByRole("status")).toHaveTextContent(
+      "Automatic patch updates enabled for this Official package."
+    )
+  );
+});
+
+test("never offers auto-patch for a Community package", async () => {
+  const release = {
+    integrationId: "acme",
+    majorVersion: 2,
+    installationId: "11111111-1111-4111-8111-111111111111",
+    slug: "acme-v2",
+    trustClass: "community" as const,
+    autoPatchOptIn: false,
+  };
+  vi.mocked(getIntegration).mockResolvedValue(detail({ name: "acme-v2", title: "Acme" }));
+  vi.mocked(listOimConnections).mockResolvedValue([]);
+  vi.mocked(getOimConnectionSetup).mockResolvedValue({
+    integration: { id: "acme", majorVersion: 2 },
+    allowedOwnerScopes: ["personal"],
+    configurationFields: [],
+    fieldSteps: [],
+    initialAuthorizationSteps: [],
+  });
+  vi.mocked(getInstalledOimRelease).mockResolvedValue(release);
+  vi.mocked(getOimReleaseUninstallStatus).mockResolvedValue({
+    scope: release,
+    status: "not_started",
+    activationAllowed: true,
+    retryRequired: false,
+  });
+
+  renderDetailWithClientLoader("/integrations/acme-v2");
+
+  expect(await screen.findByText(/Each Community package digest must be reviewed/)).toBeVisible();
+  expect(
+    screen.queryByRole("checkbox", { name: /Automatically install verified patch releases/ })
+  ).not.toBeInTheDocument();
+});
+
+test("ignores late auto-patch failure after navigation to another installation", async () => {
+  let rejectUpdate: (reason: unknown) => void = () => {};
+  vi.mocked(setOimAutoPatchPreference).mockReturnValue(
+    new Promise((_, reject) => {
+      rejectUpdate = reject;
+    })
+  );
+  vi.mocked(getIntegration).mockImplementation(async (name) =>
+    detail({ name, title: name === "acme-v2" ? "Acme" : "Other" })
+  );
+  vi.mocked(listOimConnections).mockResolvedValue([]);
+  vi.mocked(getOimConnectionSetup).mockImplementation(async (name) => ({
+    integration:
+      name === "acme-v2" ? { id: "acme", majorVersion: 2 } : { id: "other", majorVersion: 2 },
+    allowedOwnerScopes: ["personal"],
+    configurationFields: [],
+    fieldSteps: [],
+    initialAuthorizationSteps: [],
+  }));
+  vi.mocked(getInstalledOimRelease).mockImplementation(async (integrationId) => ({
+    integrationId,
+    majorVersion: 2,
+    installationId:
+      integrationId === "acme"
+        ? "11111111-1111-4111-8111-111111111111"
+        : "22222222-2222-4222-8222-222222222222",
+    slug: integrationId === "acme" ? "acme-v2" : "other",
+    trustClass: "official",
+    autoPatchOptIn: false,
+  }));
+  vi.mocked(getOimReleaseUninstallStatus).mockImplementation(async (scope) => ({
+    scope,
+    status: "not_started",
+    activationAllowed: true,
+    retryRequired: false,
+  }));
+  const user = userEvent.setup();
+
+  renderDetailWithClientLoader("/integrations/acme-v2");
+  await user.click(
+    await screen.findByRole("checkbox", {
+      name: "Automatically install verified patch releases",
+    })
+  );
+  await user.click(screen.getByRole("button", { name: "Switch test integration" }));
+  await screen.findByRole("heading", { level: 1, name: "Other" });
+  rejectUpdate(new Error("late update failure"));
+
+  await waitFor(() => {
+    expect(screen.queryByText("late update failure")).not.toBeInTheDocument();
+    expect(
+      screen.getByRole("checkbox", {
+        name: "Automatically install verified patch releases",
+      })
+    ).not.toBeDisabled();
+  });
 });
 
 test("shows the connect flow only while disconnected", async () => {

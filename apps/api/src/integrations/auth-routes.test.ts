@@ -1,3 +1,4 @@
+import { AuthBrokerError } from "@tulipfarm/integrations";
 import type {
   BundledIntegration,
   GitSyncService,
@@ -210,6 +211,8 @@ describe("integration auth routes", () => {
       oimConnections: {
         completeAuthorization: completeOimAuthorization,
         hasPendingAuthorization: async (state: string) => oimStates.has(state),
+        authorizationContext: async (state: string) =>
+          oimStates.has(state) ? { key: "acme-v2", connectionId: "connection-1" } : null,
         authorizationWebUrl: () => "https://app.example.test",
       } as never,
     });
@@ -351,6 +354,23 @@ describe("integration auth routes", () => {
       });
       expect(response.headers.location).toBe(
         "https://app.example.test/integrations/acme-v2?connection=connection-1&status=ok"
+      );
+    });
+
+    it("preserves the server-resolved Connection when an OIM callback fails", async () => {
+      oimStates.add("oim-state");
+      completeOimAuthorization.mockRejectedValueOnce(
+        new AuthBrokerError("exchange_failed", "provider rejected the code")
+      );
+
+      const response = await app.inject({
+        method: "GET",
+        url: "/api/v1/integrations/auth/callback?state=oim-state&connectionId=forged",
+      });
+
+      expect(response.statusCode).toBe(302);
+      expect(response.headers.location).toBe(
+        "https://app.example.test/integrations/acme-v2?status=error&reason=exchange_failed&connection=connection-1"
       );
     });
 

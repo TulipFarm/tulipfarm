@@ -161,6 +161,88 @@ describe("tool expectations", () => {
   });
 });
 
+describe("real Tool result expectations", () => {
+  const expectation: Expectation = {
+    kind: "tool_result_field_equals",
+    name: "integration_get",
+    argumentPath: "slug",
+    argumentValue: "journey-acme",
+    status: "succeeded",
+    turnIndex: 2,
+    outputPath: "oimManifest.metadata.name",
+    value: "Journey Acme",
+  };
+  const observed = (
+    toolResults: NonNullable<NonNullable<Observation["persisted"]>["toolResults"]>
+  ): Observation => ({
+    ...base,
+    output: { kind: "text", text: "The installed Integration is Journey Acme." },
+    persisted: {
+      runStatus: "succeeded",
+      stateStatus: "succeeded",
+      turnStatus: "succeeded",
+      events: ["turn.finished"],
+      soulCommits: [
+        {
+          message: "Integration journey-acme",
+          paths: ["integrations/journey-acme/oim.yml"],
+        },
+      ],
+      publishedArtifacts: ["Integration:journey-acme"],
+      generatedFiles: [],
+      toolResults,
+    },
+  });
+  const result = (
+    turnIndex: number,
+    over: {
+      readonly status: string;
+      readonly output?: unknown;
+      readonly code?: string;
+    }
+  ) => [
+    {
+      name: "integration_get",
+      arguments: { slug: "journey-acme" },
+      turnIndex,
+      ...over,
+    },
+  ];
+  const successful = (turnIndex: number) =>
+    result(turnIndex, {
+      status: "succeeded",
+      output: {
+        oimManifest: { metadata: { name: "Journey Acme" } },
+      },
+    });
+
+  it("reads the successful real Tool output instead of assistant text", () => {
+    expect(only(expectation, observed(successful(2))).passed).toBe(true);
+  });
+
+  it.each([
+    ["missing", successful(1)],
+    ["failed", [...successful(1), ...result(2, { status: "failed", code: "not_found" })]],
+    [
+      "stale",
+      [
+        ...successful(1),
+        ...result(2, {
+          status: "succeeded",
+          output: {
+            oimManifest: { metadata: { name: "Old Journey Acme" } },
+          },
+        }),
+      ],
+    ],
+  ])(
+    "fails when the second-Turn read is %s despite an earlier success and identical prose/publication",
+    (_name, results) => {
+      expect(only(expectation, observed(results)).passed).toBe(false);
+    }
+  );
+});
+
 describe("how the model grouped its Tool calls", () => {
   const batched = (sizes: number[]): Observation => ({ ...base, toolCallBatches: sizes });
 

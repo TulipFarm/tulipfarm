@@ -30,7 +30,6 @@ import {
   type ModelCallReceipt,
   type ModelCallReceiptSource,
   RunStoreStateTransitions,
-  type TurnWaitPort,
 } from "@tulipfarm/turn-executor";
 import type { EvalCase, JourneyTurn } from "../case.ts";
 import { toolDispatcher } from "../dispatch.ts";
@@ -48,6 +47,11 @@ import {
   type GeneratedFile,
   seedAgentRoles,
 } from "./file-store.ts";
+import {
+  createEvalIntegrationAuthoringState,
+  type EvalIntegrationAuthoringState,
+  evalIntegrationAuthoring,
+} from "./integration-authoring.ts";
 import { runL3Routine } from "./routine.ts";
 import {
   SOUL_WRITE_TOOL,
@@ -67,19 +71,16 @@ export interface ToolCall {
   readonly arguments: unknown;
 }
 
-/**
- * Ordinary Cases cannot wait on an approval.
- *
- * Registering a wait the tier never signals would leave the Run parked and the Trial would time
- * out with no verdict, so this refuses loudly instead. The one checkpoint-resume fault supplies
- * its own deterministic wait and resumes it inside the same Trial.
- */
-const NO_APPROVALS: TurnWaitPort = {
-  register: async () => {
-    throw new Error("the L3 tier does not run approval waits; use an L2 guardrail Case");
-  },
-  // No Run here ever parks on a child, so there is never a resolution to claim.
-};
+export interface ToolResult {
+  readonly name: string;
+  readonly arguments: unknown;
+  /** One-based journey position: the initial Turn is 1, its first follow-up is 2. */
+  readonly turnIndex: number;
+  readonly status: string;
+  readonly output?: unknown;
+  readonly code?: string;
+  readonly reason?: string;
+}
 
 /** What one L3 Trial persisted, as a Case may assert on it. */
 export interface PersistedTurn {
@@ -103,6 +104,8 @@ export interface PersistedTurn {
   readonly guardrails: readonly GuardrailDecision[];
   /** Every Tool the Turn dispatched, in order, with the arguments it was called with. */
   readonly toolCalls: readonly ToolCall[];
+  /** Results returned by real Tool implementations, including approval-resume redispatches. */
+  readonly toolResults: readonly ToolResult[];
   /** Commits the Turn landed in the Eval Soul's real git repository. */
   readonly soulCommits: readonly SoulCommit[];
   /** Artifacts the active Soul publication serves once the Turn settled, written `Kind:slug`. */
@@ -178,17 +181,31 @@ async function mintRun(database: EvalDatabase, runId: string, turnId: string): P
  */
 function routeTools(
   scripted: { port: ToolDispatchPort; calls: ToolCall[] },
-  real: Readonly<Record<string, ToolDispatchPort>>
+  real: Readonly<Record<string, ToolDispatchPort>>,
+  results: ToolResult[],
+  turnIndex: number
 ): ToolDispatchPort {
   return {
-    dispatch: (request) => {
+    dispatch: async (request) => {
       const port = real[request.name];
       if (port === undefined) return scripted.port.dispatch(request);
       // Recorded into the same log the scripted dispatcher keeps. Without this a Soul write is
       // invisible to the scorer, and `tool_not_called soul_write` — the natural way to assert an
       // agent must not reconfigure the business — passes even as the commit lands.
       scripted.calls.push({ name: request.name, arguments: request.arguments });
-      return port.dispatch(request);
+      const result = await port.dispatch(request);
+      results.push({
+        name: request.name,
+        arguments: request.arguments,
+        turnIndex,
+        status: result.status,
+        ...("output" in result ? { output: result.output } : {}),
+        ...("code" in result && typeof result.code === "string" ? { code: result.code } : {}),
+        ...("reason" in result && typeof result.reason === "string"
+          ? { reason: result.reason }
+          : {}),
+      });
+      return result;
     },
   };
 }
@@ -199,6 +216,7 @@ async function readBack(
   turnId: string,
   observed: {
     toolCalls: readonly ToolCall[];
+    toolResults: readonly ToolResult[];
     soulCommits: readonly SoulCommit[];
     publishedArtifacts: readonly string[];
     generatedFiles: readonly GeneratedFile[];
@@ -264,6 +282,7 @@ async function readBack(
       }),
     spend: observed.spend,
     toolCalls: observed.toolCalls,
+    toolResults: observed.toolResults,
     soulCommits: observed.soulCommits,
     publishedArtifacts: observed.publishedArtifacts,
     generatedFiles: observed.generatedFiles,
@@ -288,6 +307,7 @@ async function runOneTurn(
     soul: EvalSoul;
     soulWrites: SoulWriterTool;
     files: EvalFileStore;
+    integrationAuthoring: EvalIntegrationAuthoringState;
     /**
      * The Run the File store should stamp on what this Turn generates.
      *
@@ -296,6 +316,8 @@ async function runOneTurn(
      * every later Turn's File as having come from a Run that did not write it.
      */
     activeRun: { id: string };
+    /** One-based journey position, preserved on every real Tool result. */
+    turnIndex: number;
     /** What this Turn newly submits, as distinct from the history it was handed. */
     submit: readonly ModelMessage[];
   }
@@ -337,10 +359,29 @@ async function runOneTurn(
     // The File store is shared across a journey for the same reason, so its `generated` accumulate
     // and only this Turn's slice belongs to this Turn.
     const generatedBefore = files.generated.length;
-    const tools = routeTools(scripted, {
-      [SOUL_WRITE_TOOL]: soulWrites.port,
-      [FILE_CREATE_TOOL]: files.port,
+    const integrationAuthoring = evalIntegrationAuthoring({
+      database,
+      soul,
+      soulWrites,
+      state: shared.integrationAuthoring,
+      runId,
+      turnId,
+      conversationId,
+      agentId: options.evalCase.agent,
     });
+    const toolResults: ToolResult[] = [];
+    const tools = routeTools(
+      scripted,
+      {
+        [SOUL_WRITE_TOOL]: soulWrites.port,
+        [FILE_CREATE_TOOL]: files.port,
+        integration_draft_review: integrationAuthoring.port,
+        integration_draft_create: integrationAuthoring.port,
+        integration_get: integrationAuthoring.port,
+      },
+      toolResults,
+      shared.turnIndex
+    );
     // Wrapped rather than passed straight through: the executor owns the call loop, so this is the
     // only seam where an L3 Turn's usage can be observed at all.
     let spend = NO_SPEND;
@@ -424,7 +465,7 @@ async function runOneTurn(
       waits:
         options.evalCase.fault === "model_after_checkpoint"
           ? { register: async ({ approvalId }) => ({ waitId: `eval:${approvalId}` }) }
-          : NO_APPROVALS,
+          : integrationAuthoring.waits,
       checkpoints,
       model: metered,
       log: { warn: () => {} },
@@ -485,6 +526,11 @@ async function runOneTurn(
       run = await claimRun();
       outcome = await executor(run);
       await settleRun(run, outcome);
+    } else if (outcome.status === "waiting" && (await integrationAuthoring.approvePending(runId))) {
+      receipt = undefined;
+      run = await claimRun();
+      outcome = await executor(run);
+      await settleRun(run, outcome);
     }
 
     const doctorEvents =
@@ -494,6 +540,7 @@ async function runOneTurn(
 
     return await readBack(database, runId, turnId, {
       toolCalls: [...scripted.calls],
+      toolResults,
       soulCommits: soulWrites.commits.slice(committedBefore),
       publishedArtifacts: await soulWrites.published(),
       generatedFiles: files.generated.slice(generatedBefore),
@@ -571,6 +618,7 @@ export function foldJourney(turns: readonly PersistedTurn[]): PersistedTurn {
     participantText: turns.map((turn) => turn.participantText).join(""),
     guardrails: turns.flatMap((turn) => turn.guardrails),
     toolCalls: turns.flatMap((turn) => turn.toolCalls),
+    toolResults: turns.flatMap((turn) => turn.toolResults),
     soulCommits: turns.flatMap((turn) => turn.soulCommits),
     generatedFiles: turns.flatMap((turn) => turn.generatedFiles),
     toolDenials: turns.flatMap((turn) => turn.toolDenials),
@@ -595,6 +643,7 @@ export async function runPersistedTurn(options: L3Options): Promise<PersistedTur
       participantText: "",
       guardrails: [],
       toolCalls: result.toolCalls,
+      toolResults: [],
       soulCommits: [],
       publishedArtifacts: [],
       generatedFiles: [],
@@ -630,20 +679,23 @@ export async function runPersistedTurn(options: L3Options): Promise<PersistedTur
       agentId: options.evalCase.agent,
       runId: () => activeRun.id,
     });
+    const integrationAuthoring = await createEvalIntegrationAuthoringState(database);
     const first = await runOneTurn(options, {
       database,
       conversationId,
       soul: options.soul,
       soulWrites,
       files,
+      integrationAuthoring,
       activeRun,
+      turnIndex: 1,
       submit: options.evalCase.input,
     });
     const journey = options.evalCase.journey ?? [];
     if (journey.length === 0) return first;
 
     const turns: PersistedTurn[] = [first];
-    for (const turn of journey) {
+    for (const [index, turn] of journey.entries()) {
       // Reloaded per Turn so an artifact the previous Turn committed is visible to this one, and
       // history is re-read so this Turn is handed what was actually persisted.
       const soul = await options.soul.reload();
@@ -651,7 +703,17 @@ export async function runPersistedTurn(options: L3Options): Promise<PersistedTur
       turns.push(
         await runOneTurn(
           { ...options, evalCase: journeyCase(options.evalCase, turn, history) },
-          { database, conversationId, soul, soulWrites, files, activeRun, submit: turn.input }
+          {
+            database,
+            conversationId,
+            soul,
+            soulWrites,
+            files,
+            integrationAuthoring,
+            activeRun,
+            turnIndex: index + 2,
+            submit: turn.input,
+          }
         )
       );
     }

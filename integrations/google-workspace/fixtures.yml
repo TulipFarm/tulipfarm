@@ -1,5 +1,32 @@
 version: 1
 cases:
+  - name: identifies-connected-user
+    operationId: current-user
+    request: {}
+    response:
+      status: 200
+      body:
+        sub: "100000000000000000001"
+        name: Muskan Vijayvargiya
+        given_name: Muskan
+        family_name: Vijayvargiya
+        picture: https://lh3.googleusercontent.com/redacted
+        email: muskan@example.com
+        email_verified: true
+        hd: example.com
+    expect:
+      request:
+        method: GET
+        url: https://openidconnect.googleapis.com/v1/userinfo
+        headers:
+          Authorization: Bearer oim-fixture-credential
+      result:
+        sub: "100000000000000000001"
+        name: Muskan Vijayvargiya
+        email: muskan@example.com
+        email_verified: true
+        hd: example.com
+
   - name: docs-gets-document
     operationId: docs-get
     request:

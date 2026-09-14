@@ -1,9 +1,15 @@
-import { type OimConnection, validateOimConnection } from "@tulipfarm/schema";
+import {
+  type OimConnection,
+  type OimConnectionVerificationEvidence,
+  validateOimConnection,
+} from "@tulipfarm/schema";
 import type { TransactionPort } from "../ports";
 import {
   type BindVerifiedConnectionExternalIdentity,
   bindVerifiedConnectionExternalIdentity,
+  clearVerifiedConnectionExternalIdentity,
 } from "./connection-external-identity-store";
+import { publishConnectionVerificationEvidence } from "./connection-verification-evidence-store";
 
 export interface PersistedConnection extends OimConnection {
   readonly businessId: string;
@@ -39,6 +45,7 @@ export interface PublishConnectionAuthStep extends ConnectionAuthStepFence {
   readonly configuration: Readonly<Record<string, string | number | boolean>>;
   readonly secretBindings: Readonly<Record<string, `secret://${string}`>>;
   readonly verifiedIdentity?: BindVerifiedConnectionExternalIdentity;
+  readonly verificationEvidence?: OimConnectionVerificationEvidence;
 }
 
 export const CONNECTION_STORAGE_STATEMENTS: readonly string[] = [
@@ -362,6 +369,12 @@ export class ConnectionStore {
 
       if (input.verifiedIdentity !== undefined) {
         await bindVerifiedConnectionExternalIdentity(transaction, input.verifiedIdentity);
+      } else if (input.verificationEvidence !== undefined) {
+        await clearVerifiedConnectionExternalIdentity(
+          transaction,
+          input.businessId,
+          input.connectionId
+        );
       }
       const aggregate = await transaction.query<{
         healthy: boolean;
@@ -395,7 +408,28 @@ export class ConnectionStore {
         ]
       );
       if (updated.rows.length !== 1) throw new Error("connection_auth_publication_lost");
+      if (input.verificationEvidence !== undefined) {
+        await publishConnectionVerificationEvidence(transaction, input.verificationEvidence);
+      }
       return true;
+    });
+  }
+
+  async publishVerification(
+    evidence: OimConnectionVerificationEvidence,
+    verifiedIdentity?: BindVerifiedConnectionExternalIdentity
+  ): Promise<void> {
+    await this.transactions.withTransaction(async (transaction) => {
+      if (verifiedIdentity === undefined) {
+        await clearVerifiedConnectionExternalIdentity(
+          transaction,
+          evidence.binding.businessId,
+          evidence.binding.connectionId
+        );
+      } else {
+        await bindVerifiedConnectionExternalIdentity(transaction, verifiedIdentity);
+      }
+      await publishConnectionVerificationEvidence(transaction, evidence);
     });
   }
 
