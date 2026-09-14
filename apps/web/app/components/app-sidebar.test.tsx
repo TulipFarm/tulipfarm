@@ -33,9 +33,7 @@ const RestrictedSidebarStub = createRemixStub([
   {
     path: "*",
     Component: () => (
-      <AppSidebar
-        user={{ ...USER, navigation: { visiblePaths: ["/resources", "/business/activities"] } }}
-      />
+      <AppSidebar user={{ ...USER, navigation: { visiblePaths: ["/inbox", "/agents"] } }} />
     ),
   },
 ]);
@@ -218,36 +216,27 @@ test("still announces the approval count when the sidebar is collapsed", async (
 });
 
 test("hides denied destinations and the groups they empty", () => {
-  render(<RestrictedSidebarStub initialEntries={["/business/activities"]} />);
+  render(<RestrictedSidebarStub initialEntries={["/inbox"]} />);
   const nav = screen.getByRole("navigation", { name: "Main" });
 
-  expect(within(nav).getByRole("link", { name: "Activity" })).toBeInTheDocument();
-  expect(within(nav).getByRole("link", { name: "Resources" })).toBeInTheDocument();
-  for (const label of ["Inbox", "Farm", "Knowledge", "Teams"]) {
+  expect(within(nav).getByRole("link", { name: "Inbox" })).toBeInTheDocument();
+  expect(within(nav).getByRole("link", { name: "Agents" })).toBeInTheDocument();
+  for (const label of ["Files", "Scheduled Tasks"]) {
     expect(within(nav).queryByRole("link", { name: label })).not.toBeInTheDocument();
   }
-  expect(within(nav).queryByRole("heading", { name: "Build" })).toBeInTheDocument();
-  expect(screen.queryByRole("link", { name: "Settings" })).not.toBeInTheDocument();
+  expect(within(nav).queryByRole("heading", { name: "Build" })).not.toBeInTheDocument();
+  expect(screen.queryByRole("link", { name: "Settings & more" })).not.toBeInTheDocument();
 });
 
-test("shows Teams once its path is granted, like any other visiblePaths-gated destination", () => {
-  const GrantedTeamsSidebarStub = createRemixStub([
-    {
-      path: "*",
-      Component: () => (
-        <AppSidebar
-          user={{
-            ...USER,
-            navigation: { visiblePaths: ["/resources", "/business/activities", "/teams"] },
-          }}
-        />
-      ),
-    },
-  ]);
-  render(<GrantedTeamsSidebarStub initialEntries={["/business/activities"]} />);
-  const nav = screen.getByRole("navigation", { name: "Main" });
+test("shows Files once its path is granted, like any other visiblePaths-gated destination", () => {
+  const { unmount } = render(<RestrictedSidebarStub initialEntries={["/inbox"]} />);
+  let nav = screen.getByRole("navigation", { name: "Main" });
+  expect(within(nav).queryByRole("link", { name: "Files" })).not.toBeInTheDocument();
 
-  expect(within(nav).getByRole("link", { name: "Teams" })).toBeInTheDocument();
+  unmount();
+  render(<SidebarStub initialEntries={["/inbox"]} />);
+  nav = screen.getByRole("navigation", { name: "Main" });
+  expect(within(nav).getByRole("link", { name: "Files" })).toBeInTheDocument();
 });
 
 test("replaces the app destinations with Settings navigation on a Settings-owned route", () => {
@@ -335,7 +324,7 @@ test("collapses every group by its own heading, Recent included", async () => {
   });
   render(<SidebarStub initialEntries={["/chats"]} />);
 
-  for (const heading of ["Work", "Build", "Recent"]) {
+  for (const heading of ["Work", "Recent"]) {
     const button = within(screen.getByRole("heading", { level: 2, name: heading })).getByRole(
       "button"
     );
@@ -459,14 +448,9 @@ test("collapses to icons without losing a destination, and persists the choice",
   await user.click(screen.getByRole("button", { name: "Collapse sidebar" }));
   const nav = screen.getByRole("navigation", { name: "Main" });
 
-  for (const label of ["Chats", "Inbox", "Resources", "Agents"]) {
+  for (const label of ["Chats", "Inbox", "Files", "Agents"]) {
     expect(within(nav).getByRole("link", { name: label })).toBeInTheDocument();
   }
-  expect(
-    within(screen.getByRole("navigation", { name: "Utilities" })).getByRole("link", {
-      name: "Farm",
-    })
-  ).toBeInTheDocument();
   expect(within(nav).queryByRole("heading", { name: "Work" })).not.toBeInTheDocument();
   expect(screen.getByRole("complementary", { name: "Application navigation" }).className).toContain(
     "lg:w-14"
@@ -708,7 +692,7 @@ test("marks the active destination with weight on a neutral ground, never colour
   render(<SidebarStub initialEntries={["/agents"]} />);
 
   const active = screen.getByRole("link", { name: "Agents" });
-  const idle = screen.getByRole("link", { name: "Skills" });
+  const idle = screen.getByRole("link", { name: "Files" });
 
   expect(active).toHaveAttribute("aria-current", "page");
   expect(active.className).toContain("font-medium");
