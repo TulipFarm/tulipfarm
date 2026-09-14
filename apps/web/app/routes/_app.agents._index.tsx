@@ -53,8 +53,8 @@ export default function AgentsIndex() {
           title="No custom agents yet"
           hint="Give recurring work to an agent with its own instructions and limits. Describe the job in chat, and build its brief together. Every instance also ships the built-in agents below, which the platform runs on its own behalf."
         >
-          <Button asChild variant="outline">
-            <Link to="/skills">Browse skills</Link>
+          <Button asChild>
+            <Link to={createAgentHref}>Create an agent in chat</Link>
           </Button>
         </EmptyState>
       ) : null}
