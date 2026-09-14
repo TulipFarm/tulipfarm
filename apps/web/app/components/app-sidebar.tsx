@@ -665,6 +665,7 @@ function SettingsNavigation({
                   to={item.to}
                   label={item.label}
                   icon={item.icon}
+                  create={item.create}
                   collapsed={false}
                   onNavigate={onNavigate}
                 />

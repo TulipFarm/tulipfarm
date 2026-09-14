@@ -100,27 +100,18 @@ test("renders every destination in one flat list, with no rail or second panel",
   render(<SidebarStub initialEntries={["/inbox"]} />);
   const nav = screen.getByRole("navigation", { name: "Main" });
 
-  for (const heading of ["Work", "Build"]) {
+  for (const heading of ["Work"]) {
     expect(within(nav).getByRole("heading", { level: 2, name: heading })).toBeInTheDocument();
   }
-  for (const label of [
-    "Chats",
-    "Inbox",
-    "Activity",
-    "Teams",
-    "Resources",
-    "Agents",
-    "Files",
-    "Knowledge",
-  ]) {
+  for (const label of ["Chats", "Inbox", "Agents", "Files", "Scheduled Tasks"]) {
     expect(within(nav).getByRole("link", { name: new RegExp(label, "i") })).toBeInTheDocument();
   }
   const utilities = screen.getByRole("navigation", { name: "Utilities" });
-  expect(within(utilities).getByRole("link", { name: "Farm" })).toBeInTheDocument();
-  expect(within(utilities).getByRole("link", { name: "Settings" })).toBeInTheDocument();
+  expect(within(utilities).getByRole("link", { name: "Settings & more" })).toBeInTheDocument();
+  expect(within(utilities).queryByRole("link", { name: "Farm" })).not.toBeInTheDocument();
 
   expect(screen.queryByRole("navigation", { name: "Product modes" })).not.toBeInTheDocument();
-  expect(within(nav).queryByRole("heading", { name: "Knowledge" })).not.toBeInTheDocument();
+  expect(within(nav).queryByRole("heading", { name: "Build" })).not.toBeInTheDocument();
 });
 
 test("marks the destination matching the current page, and only that one", () => {
@@ -759,7 +750,7 @@ test("closes a group, hides its rows, and remembers the choice", async () => {
 
 /* A `+` that opens nothing teaches a reader to distrust every other `+`. */
 test("offers quick create only on the rows that own a create route", () => {
-  render(<SidebarStub initialEntries={["/agents"]} />);
+  render(<SidebarStub initialEntries={["/resources"]} />);
 
   expect(screen.getByRole("link", { name: "New resource type" })).toHaveAttribute(
     "href",
