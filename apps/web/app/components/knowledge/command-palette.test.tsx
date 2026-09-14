@@ -32,6 +32,28 @@ function renderPalette(spaceId: string | null = null) {
   return render(<Stub />);
 }
 
+function renderPaletteWithTrigger(spaceId: string | null = null) {
+  const Stub = createRemixStub([
+    {
+      path: "/",
+      Component: () => (
+        <>
+          <button
+            type="button"
+            aria-label="Search knowledge"
+            onClick={() => window.dispatchEvent(new Event(OPEN_SEARCH_EVENT))}
+          >
+            Search…
+          </button>
+          <CommandPalette spaceId={spaceId} />
+        </>
+      ),
+    },
+    { path: "/knowledge/pages/:id/*", Component: () => <div>NAVIGATED</div> },
+  ]);
+  return render(<Stub />);
+}
+
 describe("CommandPalette", () => {
   beforeEach(() => {
     searchPages.mockReset();
@@ -48,6 +70,23 @@ describe("CommandPalette", () => {
 
     fireEvent(window, new Event(OPEN_SEARCH_EVENT));
     expect(await screen.findByPlaceholderText("Search knowledge…")).toBeInTheDocument();
+  });
+
+  it("restores focus to the trigger button after Escape closes the dialog", async () => {
+    renderPaletteWithTrigger();
+    const trigger = screen.getByRole("button", { name: "Search knowledge" });
+    trigger.focus();
+    expect(trigger).toHaveFocus();
+
+    await userEvent.click(trigger);
+    const input = await screen.findByPlaceholderText("Search knowledge…");
+    expect(input).toHaveFocus();
+
+    await userEvent.keyboard("{Escape}");
+    await waitFor(() =>
+      expect(screen.queryByPlaceholderText("Search knowledge…")).not.toBeInTheDocument()
+    );
+    await waitFor(() => expect(trigger).toHaveFocus());
   });
 
   it("opens on ⌘K", async () => {
