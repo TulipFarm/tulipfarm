@@ -157,7 +157,12 @@ function catalog(): readonly OimPackageCatalogEntry[] {
             type: "app_manifest",
             createUrl: "https://provider.test/apps/new",
             manifest: { callback_url: "{callback_url}", state: "{state}" },
-            bindings: [],
+            bindings: [
+              {
+                sourcePath: "/client_id",
+                target: { type: "credential", slot: "client_id" },
+              },
+            ],
           },
           {
             id: "account",
@@ -204,7 +209,7 @@ function catalog(): readonly OimPackageCatalogEntry[] {
       operations: [
         {
           id: "read",
-          name: "Health",
+          name: "health",
           description: "Read health.",
           effect: "read",
           identityMode: "shared_or_personal",

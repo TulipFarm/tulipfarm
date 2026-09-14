@@ -1077,6 +1077,9 @@ importers:
       undici:
         specifier: ^8.10.0
         version: 8.10.0
+      yaml:
+        specifier: ^2.9.0
+        version: 2.9.0
     devDependencies:
       '@tulipfarm/tsconfig':
         specifier: workspace:*

@@ -4,7 +4,9 @@ import {
   oimFileDigest,
   oimPackageDigest,
   oimPackageIssues,
+  validateOimManifest,
 } from "@tulipfarm/schema";
+import { oimProviderContractIssues } from "./provider-validation";
 
 export interface OimReleasePackage {
   readonly manifest: OimManifest;
@@ -46,6 +48,15 @@ function inputPathIssue(path: string): string | undefined {
 export function verifyOimReleasePackage(
   packageInput: OimReleasePackage
 ): VerifiedOimReleasePackage {
+  let manifest: OimManifest;
+  try {
+    manifest = validateOimManifest(packageInput.manifest);
+  } catch (error) {
+    throw new OimPackageVerificationError([
+      `manifest: ${error instanceof Error ? error.message : String(error)}`,
+    ]);
+  }
+
   const inputIssues: string[] = [];
   for (const [path, content] of packageInput.files) {
     const pathIssue = inputPathIssue(path);
@@ -56,15 +67,18 @@ export function verifyOimReleasePackage(
   }
   if (inputIssues.length > 0) throw new OimPackageVerificationError(inputIssues);
 
-  const issues = oimPackageIssues(packageInput.manifest, packageInput.files);
+  const issues = oimPackageIssues(manifest, packageInput.files);
   if (issues.length > 0) throw new OimPackageVerificationError(issues);
 
+  const providerIssues = oimProviderContractIssues(manifest, packageInput.files);
+  if (providerIssues.length > 0) throw new OimPackageVerificationError(providerIssues);
+
   return Object.freeze({
-    integrationId: packageInput.manifest.metadata.id,
-    version: packageInput.manifest.metadata.version,
-    packageDigest: oimPackageDigest(packageInput.manifest),
+    integrationId: manifest.metadata.id,
+    version: manifest.metadata.version,
+    packageDigest: oimPackageDigest(manifest),
     files: Object.freeze(
-      (packageInput.manifest.files ?? []).map((file) => {
+      (manifest.files ?? []).map((file) => {
         const content = packageInput.files.get(file.path);
         if (content === undefined) {
           throw new OimPackageVerificationError([`files: ${file.path} is declared but missing`]);
