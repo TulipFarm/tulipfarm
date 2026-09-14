@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.18.30](https://github.com/TulipFarm/tulipfarm/compare/v0.18.29...v0.18.30) (2026-09-14)
+
+### Features
+
+* **platform:** allow agents to resolve users via user_resolve tool ([#871](https://github.com/TulipFarm/tulipfarm/issues/871)) ([072b550](https://github.com/TulipFarm/tulipfarm/commit/072b550f31420f8428389881302644718826f671))
+* **web:** streamline primary sidebar and consolidate settings ([#874](https://github.com/TulipFarm/tulipfarm/issues/874)) ([05102c5](https://github.com/TulipFarm/tulipfarm/commit/05102c5538b0f89d8b6662e420bfbda4b939b92e)), closes [#872](https://github.com/TulipFarm/tulipfarm/issues/872), references [#872](https://github.com/TulipFarm/tulipfarm/issues/872)
+
+### Bug Fixes
+
+* **web:** show create-agent CTA in agents empty state ([#880](https://github.com/TulipFarm/tulipfarm/issues/880)) ([31c5d9f](https://github.com/TulipFarm/tulipfarm/commit/31c5d9f3915cbcd3ddcca8676d0c9d079800e38b))
+
+### Code Refactoring
+
+* **onboarding:** unify setup suggestions ([#870](https://github.com/TulipFarm/tulipfarm/issues/870)) ([201c512](https://github.com/TulipFarm/tulipfarm/commit/201c512faad44b61ea94b483f391c3e906d96bab)), closes [#868](https://github.com/TulipFarm/tulipfarm/issues/868)
+
 ## [0.18.29](https://github.com/TulipFarm/tulipfarm/compare/v0.18.28...v0.18.29) (2026-09-14)
 
 ### Features
