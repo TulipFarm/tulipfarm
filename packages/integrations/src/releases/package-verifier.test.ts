@@ -3,7 +3,74 @@ import { describe, expect, it } from "vitest";
 import { verifyOimReleasePackage } from "./package-verifier";
 import { releasePackageFixture } from "./test-fixtures";
 
+function graphqlPackage(effect: "read" | "create") {
+  const document = `query ListTeams {
+  teams { id }
+}`;
+  const package_ = releasePackageFixture({
+    files: { "operations/list-teams.graphql": document },
+  });
+  package_.manifest.files = [
+    {
+      path: "operations/list-teams.graphql",
+      role: "graphql",
+      sha256: oimFileDigest(document),
+    },
+  ];
+  package_.manifest.operations = [
+    {
+      id: "list-teams",
+      name: "list_teams",
+      description: "List teams.",
+      effect,
+      identityMode: "shared_only",
+      source: {
+        type: "graphql",
+        url: "https://api.tasks.example/graphql",
+        operation: "ListTeams",
+        documentFile: "operations/list-teams.graphql",
+      },
+      requestSchema: {
+        type: "object",
+        properties: {},
+        additionalProperties: false,
+      },
+      response: { schema: { type: "object" }, maxBytes: 16_384 },
+    },
+  ];
+  return package_;
+}
+
 describe("verifyOimReleasePackage", () => {
+  it("accepts a provider package whose GraphQL operation compiles offline", () => {
+    const package_ = graphqlPackage("read");
+
+    expect(verifyOimReleasePackage(package_)).toMatchObject({
+      integrationId: "weather",
+      version: "1.2.3",
+    });
+  });
+
+  it("rejects a GraphQL mutation declaration that conflicts with its provider contract", () => {
+    expect(() => verifyOimReleasePackage(graphqlPackage("create"))).toThrow(
+      "operations: list-teams cannot compile graphql provider contract (oim_graphql_compile:effect_mismatch:list-teams)"
+    );
+  });
+
+  it("rejects a structurally malformed manifest before compiling its provider contracts", () => {
+    const package_ = releasePackageFixture();
+
+    expect(() =>
+      verifyOimReleasePackage({
+        ...package_,
+        manifest: {
+          ...package_.manifest,
+          metadata: undefined,
+        } as unknown as typeof package_.manifest,
+      })
+    ).toThrow("manifest: must have required property 'metadata'");
+  });
+
   it("records the exact validated companion byte digests", () => {
     const package_ = releasePackageFixture({
       files: {
