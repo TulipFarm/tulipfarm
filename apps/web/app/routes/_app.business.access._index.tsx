@@ -151,7 +151,7 @@ export default function AccessPeople() {
     }
   }
 
-  /** Invite links are shown once, so store them above both modals. */
+  /** Invite links are shown once, kept in state so either issuing flow can display them. */
   function show(email: string, invite: Invite | null) {
     if (invite) setIssued({ email, invite });
   }
@@ -164,7 +164,12 @@ export default function AccessPeople() {
 
       {error ? <FormStatus tone="error">{error}</FormStatus> : null}
 
-      {issued ? <IssuedLink issued={issued} onDismiss={() => setIssued(null)} /> : null}
+      {/* The reissue flow (inside the Sheet below) leaves the Sheet's native <dialog> modal open, which
+          makes everything outside it inert — so a link issued while the Sheet is open must render inside
+          it, not here, or Copy/Dismiss are unreachable by keyboard. */}
+      {issued && !data.selectedId ? (
+        <IssuedLink issued={issued} onDismiss={() => setIssued(null)} />
+      ) : null}
 
       <Panel
         title="Who can do what"
@@ -268,6 +273,11 @@ export default function AccessPeople() {
         }
         className="sm:max-w-xl"
       >
+        {issued && data.selectedId ? (
+          <div className="mb-4">
+            <IssuedLink issued={issued} onDismiss={() => setIssued(null)} />
+          </div>
+        ) : null}
         {loadingSelection ? (
           <p className="py-6 text-sm text-muted-foreground">Loading…</p>
         ) : (

@@ -697,6 +697,32 @@ test("issues a fresh sign-in link and surfaces it for sharing", async () => {
   expect(await screen.findByText(/#token=tok-fresh$/)).toBeInTheDocument();
 });
 
+/*
+ * The Sheet stays open across a reissue (the person is still selected), and its native <dialog>
+ * makes everything outside it inert. Copy/Dismiss must live inside that same <dialog>, or a
+ * keyboard user tabbing through the sheet can never reach them.
+ */
+test("keeps the reissued invite link's Copy and Dismiss reachable inside the open sheet", async () => {
+  const user = userEvent.setup();
+  vi.mocked(reissueInvite).mockResolvedValue({
+    token: "tok-fresh",
+    expiresAt: new Date(Date.now() + 86_400_000).toISOString(),
+  });
+  renderPage(loaderData({ selectedId: PRIYA_ID }));
+
+  await user.click(screen.getByRole("button", { name: "Send a password reset link" }));
+  await waitFor(() => expect(reissueInvite).toHaveBeenCalledWith(PRIYA_ID));
+  await screen.findByText(/#token=tok-fresh$/);
+
+  const sheetDialog = Array.from(document.querySelectorAll("dialog")).find((dialog) =>
+    within(dialog).queryByLabelText(/Access level/)
+  );
+  expect(sheetDialog).not.toBeUndefined();
+  const scoped = within(sheetDialog as HTMLElement);
+  expect(scoped.getByRole("button", { name: "Copy invite link" })).toBeInTheDocument();
+  expect(scoped.getByRole("button", { name: "Dismiss" })).toBeInTheDocument();
+});
+
 test("explains each access level in the same words as the rest of the page", () => {
   renderPage();
 
