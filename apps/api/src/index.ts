@@ -1713,7 +1713,8 @@ async function boot() {
         const setupComplete = soulLoader.manifest?.setupComplete === true;
         const allUsers = await userRepo.listAll();
         const memberCount = allUsers.filter((u) => u.status !== "disabled").length;
-        return { businessName, businessDescription, setupComplete, memberCount };
+        const resources = [...soulLoader.resources.keys()];
+        return { businessName, businessDescription, setupComplete, memberCount, resources };
       },
       // reason: the resume token stays in the process that redeems it.
       routineApprovals: new InternalRoutineApprovalHost({

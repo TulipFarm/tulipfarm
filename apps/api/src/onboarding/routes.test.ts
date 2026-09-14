@@ -192,7 +192,7 @@ describe("GET /api/v1/onboarding/suggestions", () => {
 
   it("omits a suggestion whose resource already exists (AC-V1-002)", async () => {
     let authed: Awaited<ReturnType<typeof appWithSoul>>["authed"];
-    ({ app, authed } = await appWithSoul(["tickets"]));
+    ({ app, authed } = await appWithSoul(["ticket"]));
     const res = await app.inject(authed("/api/v1/onboarding/suggestions"));
     expect(res.statusCode).toBe(200);
     const body = res.json() as { suggestions: { id: string }[] };
