@@ -8,6 +8,7 @@ import {
   validateSurfaceArtifact,
 } from "@tulipfarm/surface";
 import { slackHomeManifest, slackMessageManifest, slackModalManifest } from "./manifest";
+import { toSlackMrkdwn } from "./markdown";
 
 export interface SlackBlock extends Block {
   readonly text?: { readonly type: "mrkdwn" | "plain_text"; readonly text: string };
@@ -57,7 +58,9 @@ function blocksFor(
     case "Heading":
       return [{ type: "header", text: { type: "plain_text", text: String(props.text) } }];
     case "Text":
-      return [{ type: "section", text: { type: "mrkdwn", text: String(props.text) } }];
+      return [
+        { type: "section", text: { type: "mrkdwn", text: toSlackMrkdwn(String(props.text)) } },
+      ];
     case "Section":
     case "Card":
       return [
@@ -65,7 +68,7 @@ function blocksFor(
           type: "section",
           text: {
             type: "mrkdwn",
-            text: `${(props.heading ?? props.title) ? `*${String(props.heading ?? props.title)}*\n` : ""}${String(props.body)}`,
+            text: `${(props.heading ?? props.title) ? `*${toSlackMrkdwn(String(props.heading ?? props.title))}*\n` : ""}${toSlackMrkdwn(String(props.body))}`,
           },
         },
       ];
@@ -79,7 +82,7 @@ function blocksFor(
           type: "section",
           text: {
             type: "mrkdwn",
-            text: `${props.title ? `*${String(props.title)}*\n` : ""}${String(props.message)}`,
+            text: `${props.title ? `*${String(props.title)}*\n` : ""}${toSlackMrkdwn(String(props.message))}`,
           },
         },
       ];
@@ -90,7 +93,9 @@ function blocksFor(
           text: {
             type: "mrkdwn",
             text: (props.items as string[])
-              .map((item, index) => `${props.ordered ? `${index + 1}.` : "•"} ${item}`)
+              .map(
+                (item, index) => `${props.ordered ? `${index + 1}.` : "•"} ${toSlackMrkdwn(item)}`
+              )
               .join("\n"),
           },
         },
@@ -101,7 +106,7 @@ function blocksFor(
           type: "section",
           fields: Object.entries(props.record as Record<string, unknown>).map(([key, value]) => ({
             type: "mrkdwn",
-            text: `*${key}*\n${String(value)}`,
+            text: `*${key}*\n${toSlackMrkdwn(String(value))}`,
           })),
         },
       ];
@@ -115,7 +120,9 @@ function blocksFor(
             type: "mrkdwn",
             text: records
               .map((record) =>
-                columns.map((column) => `*${column}:* ${String(record[column])}`).join(" · ")
+                columns
+                  .map((column) => `*${column}:* ${toSlackMrkdwn(String(record[column]))}`)
+                  .join(" · ")
               )
               .join("\n"),
           },
@@ -142,7 +149,7 @@ function blocksFor(
       return [
         {
           type: "section",
-          text: { type: "mrkdwn", text: String(props.question) },
+          text: { type: "mrkdwn", text: toSlackMrkdwn(String(props.question)) },
           accessory: {
             type: "static_select",
             action_id: actionHandle(action, context),
@@ -170,7 +177,7 @@ function blocksFor(
       return [
         {
           type: "section",
-          text: { type: "mrkdwn", text: String(props.question) },
+          text: { type: "mrkdwn", text: toSlackMrkdwn(String(props.question)) },
           accessory: {
             type: "multi_static_select",
             action_id: actionHandle(action, context),
@@ -226,7 +233,7 @@ function blocksFor(
               .map((entry) =>
                 [
                   `*${entry.label}*${entry.timestamp ? ` — ${entry.timestamp}` : ""}`,
-                  entry.description,
+                  entry.description ? toSlackMrkdwn(entry.description) : undefined,
                   entry.status ? `_${entry.status}_` : undefined,
                 ]
                   .filter((line): line is string => typeof line === "string" && line.length > 0)

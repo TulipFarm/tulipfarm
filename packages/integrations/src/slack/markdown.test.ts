@@ -37,4 +37,10 @@ describe("toSlackMrkdwn", () => {
   it("passes plain text through unchanged", () => {
     expect(toSlackMrkdwn("All systems green.")).toBe("All systems green.");
   });
+
+  it("does not drop digits adjacent to bold text", () => {
+    expect(toSlackMrkdwn("**Question 1 — cadence:** What default cadence?")).toBe(
+      "*Question 1 — cadence:* What default cadence?"
+    );
+  });
 });

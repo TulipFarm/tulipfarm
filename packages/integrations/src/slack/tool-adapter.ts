@@ -15,6 +15,7 @@ import {
 } from "../http";
 import { SLACK_RECONCILIATION_OPERATIONS, SLACK_TOOL_IDS } from "./contracts";
 import { normalizeEmojiName, SlackEmojiDirectory, type SlackEmojiDirectoryPort } from "./emoji";
+import { toSlackMrkdwn } from "./markdown";
 import { encodeMentionsInText, encodeRawIdsInText, type SlackUserLookupPort } from "./mentions";
 
 type DeliveryPort = Pick<ChannelRunDeliveryStore, "find"> & {
@@ -713,7 +714,7 @@ export class SlackToolAdapter implements ToolAdapter, ToolReconciliationAdapter 
     const raw = record(request.intent.arguments);
     const channelId = await this.resolveJoinedChannel(textArg(raw, "channel"), credential);
     const text = await encodeMentionsInText(
-      encodeRawIdsInText(textArg(raw, "text")),
+      encodeRawIdsInText(toSlackMrkdwn(textArg(raw, "text"))),
       this.userLookup(credential)
     );
     const threadTs = await this.originatingThreadTs(request, channelId, credential);

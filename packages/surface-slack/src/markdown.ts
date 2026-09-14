@@ -1,0 +1,35 @@
+// A control character, never legal in agent-authored prose, so the restore pass below can't
+// mistake an ordinary digit in the message (e.g. "Question 1") for a placeholder index.
+const CODE_MARKER = "\uE000";
+const CODE_PLACEHOLDER = new RegExp(`${CODE_MARKER}(\\d+)${CODE_MARKER}`, "g");
+const SLACK_TOKEN =
+  /<(?:https?:\/\/[^\s>]+|@[A-Za-z0-9_.-]+|#[A-Za-z0-9_.-]+|![A-Za-z0-9_.-]+)(?:\|[^>]+)?>/g;
+
+/**
+ * Converts CommonMark (the format agent-authored Artifact prop text arrives in) into Slack
+ * mrkdwn for a block's `text` field. Kept local to this renderer rather than shared with
+ * `@tulipfarm/integrations` — `packages/surface-slack` may depend only on `packages/surface`
+ * per the dependency rules.
+ */
+export function toSlackMrkdwn(markdown: string): string {
+  const code: string[] = [];
+  const protect = (match: string): string => {
+    code.push(match);
+    return `${CODE_MARKER}${code.length - 1}${CODE_MARKER}`;
+  };
+
+  let text = markdown
+    .replace(/```[\s\S]*?```/g, protect)
+    .replace(/`[^`\n]+`/g, protect)
+    .replace(SLACK_TOKEN, protect);
+
+  text = text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  text = text.replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g, "<$2|$1>");
+  text = text.replace(/^(\s*)[-*]\s+/gm, "$1• ");
+  text = text.replace(/^#{1,6}\s+(.+)$/gm, "*$1*");
+  text = text.replace(/\*\*(.+?)\*\*/g, "*$1*");
+  text = text.replace(/__(.+?)__/g, "*$1*");
+  text = text.replace(/~~(.+?)~~/g, "~$1~");
+
+  return text.replace(CODE_PLACEHOLDER, (_, i: string) => code[Number(i)] ?? "");
+}
