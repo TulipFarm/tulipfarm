@@ -161,6 +161,7 @@ const EXPECTED_FAMILY_TOOL_NAMES = [
       "spawn_subagent",
       "team_list",
       "trigger_routine",
+      "user_resolve",
       "validate_artifact",
     ],
   },

@@ -59,7 +59,7 @@ export const ADMIN_ONLY_SURFACES: readonly {
     ],
     enforcedIn: "identity/routes.ts",
   },
-  { type: "user", actions: ["*"], enforcedIn: "auth/routes/users.ts" },
+  { type: "user", actions: ["user.manage"], enforcedIn: "auth/routes/users.ts" },
   {
     type: "task",
     actions: ["task.answer.business_profile"],
@@ -270,6 +270,11 @@ export const MEMBER_ALLOWED_SURFACES: readonly {
     type: "team",
     actions: ["team.directory.read", "team.read"],
     enforcedIn: "authz/team-routes.ts",
+  },
+  {
+    type: "user",
+    actions: ["user.directory.read"],
+    enforcedIn: "platform/tools.ts",
   },
   {
     type: "team_asset",
