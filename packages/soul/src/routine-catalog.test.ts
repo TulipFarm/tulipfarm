@@ -80,6 +80,7 @@ describe("ActiveRoutineCatalog", () => {
           stateTypes: [],
           effects: [],
           toolAbilities: [],
+          agentRefs: [],
           maxRiskClass: null,
           requiresApproval: false,
           concurrencyPolicy: null,
@@ -204,5 +205,15 @@ describe("triggerSummary — schedules read as a person would say them", () => {
     await expect(summaryOf({ name: "t", type: "datetime", at: "whenever" })).resolves.toBe(
       "at whenever"
     );
+  });
+
+  it("names the actual event type on an internal_event trigger, not a generic label", async () => {
+    await expect(
+      summaryOf({ name: "t", type: "internal_event", matchEventType: "resource.ticket.created" })
+    ).resolves.toBe("resource.ticket.created");
+  });
+
+  it("falls back sensibly when an internal_event trigger carries no event type", async () => {
+    await expect(summaryOf({ name: "t", type: "internal_event" })).resolves.toBe("internal event");
   });
 });

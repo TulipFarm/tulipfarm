@@ -190,6 +190,26 @@ test("Model Selector sets the per-message effort preset override on send", async
   expect(clearContent).toHaveBeenCalled();
 });
 
+test("the effort preset sits beside the Send button in the actions cluster", () => {
+  render(
+    <LlmModeProvider mode="advanced">
+      <ComposerEditor onSend={vi.fn()} />
+    </LlmModeProvider>
+  );
+
+  const effortButton = screen.getByRole("button", { name: /^Effort preset:/ });
+  const sendButton = screen.getByRole("button", { name: "Send prompt" });
+  const cluster = sendButton.closest(".ml-auto");
+  expect(cluster).not.toBeNull();
+  expect(cluster?.contains(effortButton)).toBe(true);
+
+  // Adjacent, not just co-located: no other control sits between the two.
+  const children = Array.from(cluster?.children ?? []);
+  const effortIndex = children.findIndex((child) => child.contains(effortButton));
+  const sendIndex = children.findIndex((child) => child.contains(sendButton));
+  expect(sendIndex).toBe(effortIndex + 1);
+});
+
 test("the effort preset defaults to Auto when nothing is chosen", async () => {
   const user = userEvent.setup();
   const onSend = vi.fn();

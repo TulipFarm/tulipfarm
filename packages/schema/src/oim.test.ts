@@ -595,6 +595,124 @@ describe("validateOimManifest", () => {
     expect(() => validateOimManifest(manifest)).toThrow(TulipFarmValidationError);
   });
 
+  it("accepts websocket ingress that streams typed frames over a shared-identity socket", () => {
+    const manifest = valid();
+    manifest.profiles = { core: "1.0", events: "1.0" };
+    manifest.ingress = {
+      kind: "websocket",
+      operationId: "current-weather",
+      urlPointer: "/url",
+      eventTypes: [
+        {
+          type: "updated",
+          selector: { pointer: "/type", equals: "updated" },
+          schema: { type: "object" },
+        },
+      ],
+      deduplication: { kind: "body_pointer", bodyPointer: "/envelope_id" },
+      acknowledgement: {
+        correlationPointer: "/envelope_id",
+        template: '{"envelope_id":"{correlation}"}',
+      },
+      reconnect: { maxAttempts: 5, initialDelaySeconds: 1, maxDelaySeconds: 30 },
+    };
+
+    expect(validateOimManifest(manifest)).toEqual(manifest);
+    expect(oimManifestIssues(manifest)).toEqual([]);
+  });
+
+  it("rejects websocket ingress whose operation is not shared-identity only", () => {
+    const manifest = valid();
+    manifest.profiles = { core: "1.0", events: "1.0" };
+    manifest.operations[0].identityMode = "personal_required";
+    manifest.ingress = {
+      kind: "websocket",
+      operationId: "current-weather",
+      urlPointer: "/url",
+      eventTypes: [
+        {
+          type: "updated",
+          selector: { pointer: "/type", equals: "updated" },
+          schema: { type: "object" },
+        },
+      ],
+      deduplication: { kind: "none" },
+      reconnect: { maxAttempts: 5, initialDelaySeconds: 1, maxDelaySeconds: 30 },
+    };
+
+    expect(oimManifestIssues(manifest)).toContain(
+      "ingress: websocket operation current-weather must open with shared identity only"
+    );
+  });
+
+  it("rejects websocket reconnect whose initial delay exceeds its cap", () => {
+    const manifest = valid();
+    manifest.profiles = { core: "1.0", events: "1.0" };
+    manifest.ingress = {
+      kind: "websocket",
+      operationId: "current-weather",
+      urlPointer: "/url",
+      eventTypes: [
+        {
+          type: "updated",
+          selector: { pointer: "/type", equals: "updated" },
+          schema: { type: "object" },
+        },
+      ],
+      deduplication: { kind: "none" },
+      reconnect: { maxAttempts: 5, initialDelaySeconds: 60, maxDelaySeconds: 30 },
+    };
+
+    expect(oimManifestIssues(manifest)).toContain(
+      "ingress: websocket reconnect initialDelaySeconds exceeds maxDelaySeconds"
+    );
+  });
+
+  it("rejects a websocket acknowledgement template that is not a JSON object literal", () => {
+    const manifest = valid();
+    manifest.profiles = { core: "1.0", events: "1.0" };
+    manifest.ingress = {
+      kind: "websocket",
+      operationId: "current-weather",
+      urlPointer: "/url",
+      eventTypes: [
+        {
+          type: "updated",
+          selector: { pointer: "/type", equals: "updated" },
+          schema: { type: "object" },
+        },
+      ],
+      deduplication: { kind: "none" },
+      acknowledgement: { correlationPointer: "/envelope_id", template: "ack {correlation}" },
+      reconnect: { maxAttempts: 5, initialDelaySeconds: 1, maxDelaySeconds: 30 },
+    };
+
+    expect(oimManifestIssues(manifest)).toContain(
+      "ingress: websocket acknowledgement template is not a JSON object literal"
+    );
+  });
+
+  it("rejects a websocket ingress with an unbounded reconnect attempt count", () => {
+    const manifest = valid() as OimManifest & { ingress: unknown };
+    manifest.profiles = { core: "1.0", events: "1.0" };
+    manifest.ingress = {
+      kind: "websocket",
+      operationId: "current-weather",
+      urlPointer: "/url",
+      eventTypes: [
+        {
+          type: "updated",
+          selector: { pointer: "/type", equals: "updated" },
+          schema: { type: "object" },
+        },
+      ],
+      deduplication: { kind: "none" },
+      reconnect: { maxAttempts: 0, initialDelaySeconds: 1, maxDelaySeconds: 30 },
+    };
+
+    expect(() => validateOimManifest(manifest)).toThrow(TulipFarmValidationError);
+  });
+
   it("rejects unknown fields instead of silently ignoring them", () => {
     expect(() =>
       validateOimManifest({

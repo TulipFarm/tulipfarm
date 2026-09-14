@@ -172,6 +172,12 @@ function createOimRuntimeCycle(
     pollConnections: async () => {
       await pollOimIngress(createOimPollingDeps(stores, host, identifiers));
     },
+    superviseWebsockets: async () => {
+      // Dormant until a manifest declares websocket ingress and a Connection source is resolved.
+      // The provider-neutral supervisor and its single-holder lease store are wired and tested;
+      // no provider migration ships in this change, so there is nothing to supervise yet.
+      return { supervised: 0 };
+    },
     drainInbox: async () => {
       await drainInbox(createDeliveryDeps(stores, host, identifiers));
     },

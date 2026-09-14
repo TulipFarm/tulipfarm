@@ -10,6 +10,7 @@
     { "file": "positive/events-1.0.yml", "valid": true },
     { "file": "positive/knowledge-1.0.yml", "valid": true },
     { "file": "positive/hooks-1.0.yml", "valid": true },
+    { "file": "positive/websocket-ingress.yml", "valid": true },
     { "file": "negative/unknown-field.yml", "valid": false },
     { "file": "negative/auth-without-profile.yml", "valid": false },
     { "file": "negative/auth-profile-without-section.yml", "valid": false },
@@ -20,6 +21,7 @@
     { "file": "negative/core-1.0-uses-1.1.yml", "valid": false },
     { "file": "negative/core-1.0-uses-configured-graphql.yml", "valid": false },
     { "file": "negative/core-1.1-uses-1.2.yml", "valid": false },
-    { "file": "negative/dependency-file.yml", "valid": false }
+    { "file": "negative/dependency-file.yml", "valid": false },
+    { "file": "negative/websocket-personal-identity.yml", "valid": false }
   ]
 }

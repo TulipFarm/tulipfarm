@@ -18,7 +18,7 @@ reconciliation, and rate limits for channel workers.
 | `src/main.ts` | Composition root: schema preflight, probes, loops, shutdown. |
 | `src/config.ts`, `src/data-dir.ts` | Env/defaults and volume-backed worker credential loading. |
 | `src/channels/` | Channel loop registration; add `DrainableLoop`s here. |
-| `src/oim-ingress/` | OIM registration recovery, polling, and durable inbox cycle. |
+| `src/oim-ingress/` | OIM registration recovery, polling, websocket supervision, and durable inbox cycle. |
 | `src/oim-knowledge/` | OIM Knowledge sync registration and drainable polling loop. |
 | `src/oim-runtime.ts`, `src/oim-worker-host.ts` | Production OIM composition and internal host. |
 | `src/slack/` | Transport scaffolds exported by `src/index.ts`. |

@@ -31,6 +31,7 @@ const NO_EFFECTS: RoutineCatalogSummary = {
   stateTypes: ["compute"],
   effects: [],
   toolAbilities: [],
+  agentRefs: [],
   maxRiskClass: null,
   requiresApproval: false,
   concurrencyPolicy: null,

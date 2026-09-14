@@ -43,14 +43,33 @@ export interface LaidOutRoutineGraph extends RoutineGraph {
 export interface RoutineGraphTrigger {
   slug: string;
   type: string;
+  /** The catalog's own reading of the spec, e.g. an event type or a schedule — never re-derived. */
+  summary?: string;
 }
 
 type RoutineState = routine.RoutineState;
 
 const stateId = (name: string) => `state:${encodeURIComponent(name)}`;
 
-function triggerLabel(type: string): string {
-  return `${type.charAt(0).toUpperCase()}${type.slice(1)} Trigger`;
+function humanizeSnakeCase(value: string): string {
+  return value
+    .split("_")
+    .filter(Boolean)
+    .map((word) => `${word.charAt(0).toUpperCase()}${word.slice(1)}`)
+    .join(" ");
+}
+
+/**
+ * The trigger node's title.
+ *
+ * Prefers the catalog's own `triggerSummary` (an event type, a schedule) over the raw `type`,
+ * because "Runs on resource.ticket.created" tells an author what actually starts the Routine where
+ * "Internal Event Trigger" only names the mechanism.
+ */
+function triggerLabel(trigger: RoutineGraphTrigger): string {
+  const summary = trigger.summary?.trim();
+  if (summary) return summary;
+  return `${humanizeSnakeCase(trigger.type)} Trigger`;
 }
 
 /**
@@ -173,7 +192,7 @@ export function projectRoutineGraph(
   const nodes: RoutineGraphNode[] = triggers.map((trigger) => ({
     id: `trigger:${trigger.slug}`,
     kind: "trigger",
-    label: triggerLabel(trigger.type),
+    label: triggerLabel(trigger),
     triggerType: trigger.type,
   }));
   nodes.push(

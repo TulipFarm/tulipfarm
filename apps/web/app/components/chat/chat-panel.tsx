@@ -10,6 +10,7 @@ import type { ConversationTurn } from "~/lib/conversations";
 import { errorAction } from "~/lib/error-actions";
 import type { Suggestion } from "~/lib/onboarding";
 import type { Task } from "~/lib/tasks";
+import { CapabilityCards } from "./capability-cards";
 import { ChatDebugDrawer } from "./chat-debug-drawer";
 import { Composer } from "./composer";
 import { ChatHomeWork } from "./home-work";
@@ -100,6 +101,7 @@ function EmptyState({
         </div>
         {!agent ? <SetupTasksPreview tasks={tasks} /> : null}
         <div className="mt-5">{composer}</div>
+        {!agent ? <CapabilityCards onPick={onPick} /> : null}
         {!agent ? <ChatHomeWork tasks={tasks} onPick={onPick} /> : null}
       </section>
     </div>

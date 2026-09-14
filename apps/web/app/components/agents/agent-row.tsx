@@ -1,10 +1,11 @@
-import { AgentGlyph } from "~/components/agent-glyph";
 import { AutonomyChip } from "~/components/autonomy-chip";
+import { Avatar } from "~/components/ui/avatar";
 import { Button } from "~/components/ui/button";
 import { Link } from "~/components/ui/link";
 import { agentDisplayName, capabilityFacts } from "~/lib/agent-capabilities";
 import type { AgentSummary } from "~/lib/agents";
 import { ReachBadge } from "./reach-badge";
+import { RoutineUsageBadge } from "./routine-usage-badge";
 
 /**
  * One agent in the roster, as a row.
@@ -23,10 +24,13 @@ import { ReachBadge } from "./reach-badge";
 export function AgentRow({
   agent,
   headingLevel = 3,
+  routineUsageCount = 0,
 }: {
   agent: AgentSummary;
   /** 2 in an ungrouped list, 3 under a domain's `h2`, so the outline never skips a level. */
   headingLevel?: 2 | 3;
+  /** Published Routines whose `agent` State points at this Agent. See `routineUsageByAgent`. */
+  routineUsageCount?: number;
 }) {
   const display = agentDisplayName(agent);
   const facts = capabilityFacts(agent.capabilityRestrictions);
@@ -36,14 +40,7 @@ export function AgentRow({
   return (
     <article className="flex flex-col gap-2 px-3 py-2.5 transition-colors focus-within:bg-muted/50 hover:bg-muted/40 sm:flex-row sm:items-center sm:gap-4">
       <div className="flex min-w-0 items-center gap-2.5 sm:w-48 sm:shrink-0 lg:w-56">
-        <AgentGlyph
-          name={agent.name}
-          domain={agent.domain}
-          autonomy={agent.autonomy}
-          size="sm"
-          decorative
-          className="shrink-0"
-        />
+        <Avatar identity={agent.name} className="shrink-0" />
         <div className="min-w-0">
           <Heading className="truncate text-sm font-medium leading-tight text-foreground">
             <Link
@@ -66,6 +63,11 @@ export function AgentRow({
         {context.length > 0 ? (
           <p className="truncate font-mono text-[11px] leading-tight text-muted-foreground">
             {context.join(" · ")}
+          </p>
+        ) : null}
+        {routineUsageCount > 0 ? (
+          <p className="mt-1">
+            <RoutineUsageBadge count={routineUsageCount} />
           </p>
         ) : null}
       </div>

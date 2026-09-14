@@ -7,6 +7,7 @@ function cycle(overrides: Partial<StartOimRuntimeDeps> = {}): StartOimRuntimeDep
     assertReady: vi.fn(async () => undefined),
     recoverRegistrations: vi.fn(async () => undefined),
     pollConnections: vi.fn(async () => undefined),
+    superviseWebsockets: vi.fn(async () => undefined),
     drainInbox: vi.fn(async () => undefined),
     loadKnowledgeRegistrations: vi.fn(async () => []),
     log: { info: vi.fn(), error: vi.fn(), warn: vi.fn() },
@@ -25,6 +26,7 @@ describe("startOimRuntime", () => {
     await vi.waitFor(() => {
       expect(deps.recoverRegistrations).toHaveBeenCalledOnce();
       expect(deps.pollConnections).toHaveBeenCalledOnce();
+      expect(deps.superviseWebsockets).toHaveBeenCalledOnce();
       expect(deps.drainInbox).toHaveBeenCalledOnce();
       expect(deps.loadKnowledgeRegistrations).toHaveBeenCalledOnce();
     });
@@ -32,6 +34,7 @@ describe("startOimRuntime", () => {
     expect(loops.map((loop) => loop.name)).toEqual([
       "oim-registration-recovery",
       "oim-polling-ingress",
+      "oim-websocket-ingress",
       "oim-delivery",
       "oim-knowledge-sync",
     ]);
@@ -52,6 +55,7 @@ describe("startOimRuntime", () => {
     );
     expect(deps.recoverRegistrations).not.toHaveBeenCalled();
     expect(deps.pollConnections).not.toHaveBeenCalled();
+    expect(deps.superviseWebsockets).not.toHaveBeenCalled();
     expect(deps.drainInbox).not.toHaveBeenCalled();
     expect(deps.loadKnowledgeRegistrations).not.toHaveBeenCalled();
   });

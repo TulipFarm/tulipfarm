@@ -67,6 +67,25 @@ export const listAgents = shareInFlight(async (): Promise<AgentSummary[]> => {
   return body.agents;
 }, CATALOG_TTL_MS);
 
+export type BuiltInAgentRung = "fast" | "balanced";
+
+/**
+ * A platform-owned single-shot prompt the runtime calls on its own behalf — chat titling, tool
+ * result distillation, and the like (see `packages/built-in-agents`). It has no persona, no Soul
+ * entry, and no user or Agent can address it directly; `/agents` lists it anyway so every
+ * capability the instance ships is discoverable, even with zero custom Soul agents.
+ */
+export type BuiltInAgentSummary = {
+  id: string;
+  purpose: string;
+  rung: BuiltInAgentRung;
+};
+
+export const listBuiltInAgents = shareInFlight(async (): Promise<BuiltInAgentSummary[]> => {
+  const body = await apiGet<{ agents: BuiltInAgentSummary[] }>("/api/v1/agents/built-in");
+  return body.agents;
+}, CATALOG_TTL_MS);
+
 export async function getAgent(name: string): Promise<AgentDetail> {
   return apiGet<AgentDetail>(`/api/v1/agents/${encodeURIComponent(name)}`);
 }

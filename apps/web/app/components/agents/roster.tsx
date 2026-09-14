@@ -9,8 +9,9 @@ import {
   type Reach,
   shouldGroupByDomain,
 } from "~/lib/agent-capabilities";
-import type { AgentSummary, Autonomy } from "~/lib/agents";
+import type { AgentSummary, Autonomy, BuiltInAgentSummary } from "~/lib/agents";
 import { AgentRow } from "./agent-row";
+import { BuiltInAgentRow } from "./built-in-agent-row";
 
 const AUTONOMY_OPTIONS: readonly Autonomy[] = ["manual", "approval-required", "supervised", "full"];
 const REACH_OPTIONS: readonly Reach[] = ["read-only", "changes-data", "unrestricted"];
@@ -18,15 +19,39 @@ const REACH_OPTIONS: readonly Reach[] = ["read-only", "changes-data", "unrestric
 function AgentList({
   agents,
   headingLevel,
+  usageByAgent,
 }: {
   agents: readonly AgentSummary[];
   headingLevel?: 2 | 3;
+  usageByAgent: Readonly<Record<string, number>>;
 }) {
   return (
     <ul className="divide-y divide-border overflow-hidden rounded-md border border-border">
       {agents.map((agent) => (
         <li key={agent.name} className="min-w-0">
-          <AgentRow agent={agent} headingLevel={headingLevel} />
+          <AgentRow
+            agent={agent}
+            headingLevel={headingLevel}
+            routineUsageCount={usageByAgent[agent.name] ?? 0}
+          />
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+function BuiltInAgentList({
+  agents,
+  headingLevel,
+}: {
+  agents: readonly BuiltInAgentSummary[];
+  headingLevel?: 2 | 3;
+}) {
+  return (
+    <ul className="divide-y divide-border overflow-hidden rounded-md border border-border">
+      {agents.map((agent) => (
+        <li key={agent.id} className="min-w-0">
+          <BuiltInAgentRow agent={agent} headingLevel={headingLevel} />
         </li>
       ))}
     </ul>
@@ -41,7 +66,17 @@ function AgentList({
  * domain heading is the answer to "what kinds of agent exist here" and dropping it under a query
  * would flatten exactly the structure the page exists to show.
  */
-export function AgentRoster({ agents }: { agents: readonly AgentSummary[] }) {
+export function AgentRoster({
+  agents,
+  builtIn = [],
+  usageByAgent = {},
+}: {
+  agents: readonly AgentSummary[];
+  /** The runtime's own agents — no persona, no Soul entry. Always shown, filters or not. */
+  builtIn?: readonly BuiltInAgentSummary[];
+  /** Agent name → published Routines whose `agent` State points at it. See `routineUsageByAgent`. */
+  usageByAgent?: Readonly<Record<string, number>>;
+}) {
   const searchId = useId();
   const autonomyId = useId();
   const reachId = useId();
@@ -63,6 +98,23 @@ export function AgentRoster({ agents }: { agents: readonly AgentSummary[] }) {
   const groups = useMemo(() => groupByDomain(visible), [visible]);
   const grouped = useMemo(() => shouldGroupByDomain(groups), [groups]);
   const filtered = visible.length !== agents.length;
+
+  /*
+   * A built-in agent has no authority or reach — it's a fixed platform prompt — so an
+   * authority/reach filter can never match one honestly and the section hides rather than
+   * pretending "any authority" was a match.
+   */
+  const visibleBuiltIn = useMemo(() => {
+    if (autonomy !== "" || reach !== "") return [];
+    const needle = query.trim().toLowerCase();
+    if (needle === "") return builtIn;
+    return builtIn.filter(
+      (agent) =>
+        agent.id.toLowerCase().includes(needle) || agent.purpose.toLowerCase().includes(needle)
+    );
+  }, [builtIn, query, autonomy, reach]);
+
+  const nothingVisible = visible.length === 0 && visibleBuiltIn.length === 0;
 
   return (
     <div className="flex flex-col gap-5">
@@ -119,34 +171,56 @@ export function AgentRoster({ agents }: { agents: readonly AgentSummary[] }) {
         {filtered ? `${visible.length} of ${agents.length} agents match` : ""}
       </p>
 
-      {visible.length === 0 ? (
+      {nothingVisible ? (
         <p className="rounded-md border border-dashed border-border px-4 py-10 text-center text-sm text-muted-foreground">
           No agent matches those filters. Clear the search or widen the authority and reach.
         </p>
-      ) : grouped ? (
-        groups.map(([domain, members], index) => (
-          <section
-            key={domain}
-            aria-labelledby={`${searchId}-domain-${index}`}
-            className="flex flex-col gap-3"
-          >
-            <div className="flex items-baseline gap-2">
-              <h2
-                id={`${searchId}-domain-${index}`}
-                className="text-xs font-medium text-muted-foreground"
-              >
-                {domain}
-              </h2>
-              <span className="font-mono text-[11px] tabular-nums text-muted-foreground/70">
-                {members.length}
-              </span>
-              <span aria-hidden className="h-px flex-1 bg-border" />
-            </div>
-            <AgentList agents={members} />
-          </section>
-        ))
       ) : (
-        <AgentList agents={visible} headingLevel={2} />
+        <>
+          {visible.length === 0 ? null : grouped ? (
+            groups.map(([domain, members], index) => (
+              <section
+                key={domain}
+                aria-labelledby={`${searchId}-domain-${index}`}
+                className="flex flex-col gap-3"
+              >
+                <div className="flex items-baseline gap-2">
+                  <h2
+                    id={`${searchId}-domain-${index}`}
+                    className="text-xs font-medium text-muted-foreground"
+                  >
+                    {domain}
+                  </h2>
+                  <span className="font-mono text-[11px] tabular-nums text-muted-foreground/70">
+                    {members.length}
+                  </span>
+                  <span aria-hidden className="h-px flex-1 bg-border" />
+                </div>
+                <AgentList agents={members} usageByAgent={usageByAgent} />
+              </section>
+            ))
+          ) : (
+            <AgentList agents={visible} headingLevel={2} usageByAgent={usageByAgent} />
+          )}
+
+          {visibleBuiltIn.length > 0 ? (
+            <section aria-labelledby={`${searchId}-built-in`} className="flex flex-col gap-3">
+              <div className="flex items-baseline gap-2">
+                <h2
+                  id={`${searchId}-built-in`}
+                  className="text-xs font-medium text-muted-foreground"
+                >
+                  Built-in
+                </h2>
+                <span className="font-mono text-[11px] tabular-nums text-muted-foreground/70">
+                  {visibleBuiltIn.length}
+                </span>
+                <span aria-hidden className="h-px flex-1 bg-border" />
+              </div>
+              <BuiltInAgentList agents={visibleBuiltIn} />
+            </section>
+          ) : null}
+        </>
       )}
     </div>
   );

@@ -15,7 +15,7 @@ import { DEPLOYMENT_BUSINESS_ID } from "@tulipfarm/constants";
 import type { KnowledgeServiceDeps } from "./service";
 import { afterWrite } from "./service-indexing";
 import { createSpace, grantBlanketRead } from "./service-spaces";
-import type { KnowledgePage } from "./types";
+import type { KnowledgePage, PageAuthor } from "./types";
 
 /** The Space a Page authored without one of its own lands in. Made on first use; never restricted. */
 export const NOTES_SPACE_NAME = "Notes";
@@ -28,6 +28,7 @@ interface AuthoredPageInput {
   tags?: string[];
   alwaysLoadForAgents?: boolean;
   ownerPrincipalId?: string;
+  author?: PageAuthor | null;
 }
 
 /**
@@ -103,6 +104,8 @@ export async function createAuthoredPage(
     alwaysLoadForAgents: input.alwaysLoadForAgents ?? false,
     version: 1,
     ...(spaceId === null ? {} : { spaceId, path: await freePath(deps, spaceId, input.title) }),
+    authorKind: input.author?.kind ?? null,
+    authorId: input.author?.id ?? null,
     createdAt: now,
     updatedAt: now,
   };

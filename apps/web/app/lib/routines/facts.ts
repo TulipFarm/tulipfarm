@@ -348,6 +348,30 @@ export function runHealth(latest: { status: RunStatus } | undefined): RunHealth 
   return "healthy";
 }
 
+/**
+ * The newest Run per Routine, from one page of the global Run feed.
+ *
+ * One request rather than one per Routine: the feed is already newest-first, so the first Run seen
+ * for a Routine is its newest, and a catalog of fifty Routines would otherwise cost fifty round
+ * trips to answer a question worth one. A Routine whose newest Run fell outside this page reads as
+ * "never run" — wrong only for a Routine idle longer than the last hundred Runs, and corrected by
+ * opening it.
+ */
+export function latestByRoutine(
+  runs: readonly { id: string; routineId: string; status: string; createdAt: string }[]
+): Record<string, { id: string; status: RunStatus; createdAt: string }> {
+  const latest: Record<string, { id: string; status: RunStatus; createdAt: string }> = {};
+  for (const run of runs) {
+    if (latest[run.routineId]) continue;
+    latest[run.routineId] = {
+      id: run.id,
+      status: run.status as RunStatus,
+      createdAt: run.createdAt,
+    };
+  }
+  return latest;
+}
+
 /* -------------------------------------------------------------------------- */
 /* Catalog search and grouping                                                */
 /* -------------------------------------------------------------------------- */
@@ -405,6 +429,23 @@ export function groupByTriggerKind(
   return [...groups.entries()].sort(
     (a, b) => groupRank(a[0]) - groupRank(b[0]) || a[0].localeCompare(b[0])
   );
+}
+
+/**
+ * How many published Routines point an `agent` State at each Agent name.
+ *
+ * Keyed by `summary.agentRefs`, not by walking the full definition — the catalog already derives
+ * that list per Routine, so an Agent roster can answer "is this used" without fetching every
+ * Routine's document.
+ */
+export function routineUsageByAgent(routines: readonly RoutineSummary[]): Record<string, number> {
+  const usage: Record<string, number> = {};
+  for (const routine of routines) {
+    for (const name of routine.summary.agentRefs) {
+      usage[name] = (usage[name] ?? 0) + 1;
+    }
+  }
+  return usage;
 }
 
 function groupRank(key: TriggerKind | "untriggered"): number {

@@ -1,6 +1,7 @@
 import { useId, useMemo, useState } from "react";
 import { Input } from "~/components/ui/input";
 import { Select } from "~/components/ui/select";
+import { Tabs, TabsList, TabsTrigger } from "~/components/ui/tabs";
 import type { RoutineSummary, RunStatus } from "~/lib/routines";
 import {
   GROUP_LABEL,
@@ -15,6 +16,26 @@ import {
 import { RoutineRow } from "./routine-row";
 
 const KIND_OPTIONS: readonly TriggerKind[] = ["schedule", "event", "request", "human"];
+
+/**
+ * The top-level split business operators reach for first: what runs on its own clock versus
+ * what reacts to something else. Narrower than the "Starts" filter below it, which still answers
+ * the finer question once a reader has picked a side.
+ */
+type Scope = "all" | "scheduled" | "event-driven";
+
+const SCOPE_LABEL: Record<Scope, string> = {
+  all: "All Routines",
+  scheduled: "Scheduled Tasks",
+  "event-driven": "Event-driven",
+};
+
+function matchesScope(routine: RoutineSummary, scope: Scope): boolean {
+  if (scope === "all") return true;
+  const scheduled = routineTriggerKinds(routine).includes("schedule");
+  return scope === "scheduled" ? scheduled : !scheduled;
+}
+
 const HEALTH_OPTIONS: readonly RunHealth[] = ["healthy", "attention", "failing", "never-run"];
 const HEALTH_LABEL: Record<RunHealth, string> = {
   healthy: "Last run fine",
@@ -74,26 +95,42 @@ export function RoutineCatalog({
   const searchId = useId();
   const kindId = useId();
   const healthId = useId();
+  const [scope, setScope] = useState<Scope>("all");
   const [query, setQuery] = useState("");
   const [kind, setKind] = useState<TriggerKind | "">("");
   const [health, setHealth] = useState<RunHealth | "">("");
 
+  const scoped = useMemo(
+    () => routines.filter((routine) => matchesScope(routine, scope)),
+    [routines, scope]
+  );
+
   const visible = useMemo(
     () =>
-      routines.filter(
+      scoped.filter(
         (routine) =>
           matchesRoutineQuery(routine, query) &&
           (kind === "" || routineTriggerKinds(routine).includes(kind)) &&
           (health === "" || runHealth(latest[routine.id]) === health)
       ),
-    [routines, query, kind, health, latest]
+    [scoped, query, kind, health, latest]
   );
 
   const groups = useMemo(() => groupByTriggerKind(visible), [visible]);
-  const filtered = visible.length !== routines.length;
+  const filtered = visible.length !== scoped.length;
 
   return (
     <div className="flex flex-col gap-5">
+      <Tabs value={scope} onValueChange={(value) => setScope(value as Scope)}>
+        <TabsList aria-label="Routine scope">
+          {(Object.keys(SCOPE_LABEL) as Scope[]).map((value) => (
+            <TabsTrigger key={value} value={value}>
+              {SCOPE_LABEL[value]}
+            </TabsTrigger>
+          ))}
+        </TabsList>
+      </Tabs>
+
       <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
         <div className="min-w-0 flex-1">
           <label htmlFor={searchId} className="mb-1 block text-xs text-muted-foreground">
@@ -144,7 +181,7 @@ export function RoutineCatalog({
       </div>
 
       <p role="status" className="text-xs text-muted-foreground">
-        {filtered ? `${visible.length} of ${routines.length} routines match` : ""}
+        {filtered ? `${visible.length} of ${scoped.length} routines match` : ""}
       </p>
 
       {visible.length === 0 ? (

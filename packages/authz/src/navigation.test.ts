@@ -13,10 +13,23 @@ test("navigation capabilities omit every path whose authority is denied", async 
   );
 
   expect(capabilities.visiblePaths).toEqual(
-    expect.not.arrayContaining(["/inbox", "/business/soul", "/business/models"])
+    expect.not.arrayContaining([
+      "/inbox",
+      "/business/soul",
+      "/business/models",
+      "/business/activities",
+    ])
   );
-  expect(capabilities.visiblePaths).toContain("/business/activities");
   expect(capabilities.visiblePaths).toContain("/files");
+});
+
+test("business/activities is gated by operations.read, not mere authentication (#856)", async () => {
+  const capabilities = await sessionNavigationCapabilities(
+    "u1",
+    async (_principal, authorization) => Promise.resolve(authorization.action === "operations.read")
+  );
+
+  expect(capabilities.visiblePaths).toContain("/business/activities");
 });
 
 test("secret.read declares the same fallback everywhere it gates navigation (#754)", () => {
@@ -31,6 +44,17 @@ test("secret.read declares the same fallback everywhere it gates navigation (#75
   for (const fallback of secretReadFallbacks) {
     expect(fallback).toBe("admin");
   }
+});
+
+test("Scheduled Tasks requires the same authority as Routines (#857)", () => {
+  const requirementFor = (path: string) =>
+    NAVIGATION_REQUIREMENTS.find((requirement) => requirement.path === path);
+
+  const routines = requirementFor("/routines");
+  const scheduled = requirementFor("/routines/scheduled");
+
+  expect(scheduled).toBeDefined();
+  expect(scheduled?.authorizations).toEqual(routines?.authorizations);
 });
 
 test("navigation capabilities evaluate each repeated authorization once", async () => {

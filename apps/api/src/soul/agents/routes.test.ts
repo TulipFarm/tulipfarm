@@ -185,6 +185,28 @@ describe("agents routes", () => {
     });
   });
 
+  describe("GET /api/v1/agents/built-in", () => {
+    it("returns 401 without auth", async () => {
+      const res = await app.inject({ method: "GET", url: "/api/v1/agents/built-in" });
+      expect(res.statusCode).toBe(401);
+    });
+
+    it("lists every registered BuiltInAgent by id, purpose and rung", async () => {
+      const res = await app.inject(authed("/api/v1/agents/built-in"));
+      expect(res.statusCode).toBe(200);
+      const { agents } = res.json();
+      expect(agents.length).toBeGreaterThan(0);
+      for (const entry of agents) {
+        expect(entry).toEqual({
+          id: expect.any(String),
+          purpose: expect.any(String),
+          rung: expect.stringMatching(/^(fast|balanced)$/),
+        });
+      }
+      expect(agents.map((a: { id: string }) => a.id)).toContain("chat_title");
+    });
+  });
+
   describe("GET /api/v1/agents/:name", () => {
     it("does not expose the normal chat harness as an agent", async () => {
       const res = await app.inject(authed("/api/v1/agents/GeneralAssistant"));
