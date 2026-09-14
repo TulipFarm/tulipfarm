@@ -59,6 +59,7 @@ import { routineRunGetTool, routineRunListTool } from "./routine-run-tools";
 import { spawnSubagentTool } from "./spawn-tool";
 import { firstError, SOUL_ROUTINE_TARGET, SOUL_SKILL_TARGET, soulTarget } from "./tool-args";
 import { err, ok } from "./tool-result";
+import { userDirectoryTool } from "./user-directory-tool";
 
 export interface PlatformToolContext {
   soulLoader?: {
@@ -136,6 +137,7 @@ export interface PlatformToolContext {
   requestContext?: RequestContext;
   events?: EventEmitter;
   teamAssets?: TeamAssetService;
+  users?: import("../auth/users").UserAdminRepo;
 }
 
 function assetPrincipal(ctx: PlatformToolContext) {
@@ -1081,6 +1083,7 @@ export const PLATFORM_TOOLS: ParkableApiToolDefinition<PlatformToolContext>[] = 
   routineDeleteTool,
   guardrailForgeTool,
   soulRepoPushTool,
+  userDirectoryTool,
   // Context-free Tools the durable runtime also hosts; `PlatformRuntimeContext` is a subset of
   // `PlatformToolContext`, so the control plane registers the same definitions.
   ...(PLATFORM_RUNTIME_TOOLS as ApiToolDefinition<PlatformToolContext>[]),

@@ -1515,6 +1515,7 @@ async function boot() {
         onGuardrailsChanged: async () => {
           guardrailsService.init(soulLoader.guardrailsConfig, app.log);
         },
+        users: userRepo,
       },
     });
 
