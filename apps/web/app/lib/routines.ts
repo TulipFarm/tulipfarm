@@ -29,6 +29,8 @@ export type RoutineCatalogSummary = {
   stateTypes: string[];
   effects: RoutineEffectKind[];
   toolAbilities: string[];
+  /** Agent Definition names named by this Routine's `agent` States. */
+  agentRefs: string[];
   /** `null` is "no ceiling declared", which is less constrained than `high` — never "low". */
   maxRiskClass: RiskClass | null;
   requiresApproval: boolean;

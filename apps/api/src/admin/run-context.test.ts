@@ -230,6 +230,7 @@ describe("Run detail context", () => {
           stateTypes: ["compute"],
           effects: [],
           toolAbilities: [],
+          agentRefs: [],
           maxRiskClass: null,
           requiresApproval: false,
           concurrencyPolicy: null,

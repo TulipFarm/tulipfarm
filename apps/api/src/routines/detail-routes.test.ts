@@ -10,6 +10,7 @@ const SUMMARY: RoutineCatalogSummary = {
   stateTypes: ["wait"],
   effects: ["wait"],
   toolAbilities: [],
+  agentRefs: [],
   maxRiskClass: null,
   requiresApproval: false,
   concurrencyPolicy: null,

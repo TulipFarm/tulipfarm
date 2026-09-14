@@ -431,6 +431,23 @@ export function groupByTriggerKind(
   );
 }
 
+/**
+ * How many published Routines point an `agent` State at each Agent name.
+ *
+ * Keyed by `summary.agentRefs`, not by walking the full definition — the catalog already derives
+ * that list per Routine, so an Agent roster can answer "is this used" without fetching every
+ * Routine's document.
+ */
+export function routineUsageByAgent(routines: readonly RoutineSummary[]): Record<string, number> {
+  const usage: Record<string, number> = {};
+  for (const routine of routines) {
+    for (const name of routine.summary.agentRefs) {
+      usage[name] = (usage[name] ?? 0) + 1;
+    }
+  }
+  return usage;
+}
+
 function groupRank(key: TriggerKind | "untriggered"): number {
   const index = GROUP_ORDER.indexOf(key as TriggerKind);
   return index === -1 ? GROUP_ORDER.length : index;

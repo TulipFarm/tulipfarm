@@ -203,6 +203,7 @@ describe("catalog", () => {
       stateTypes: ["compute"],
       effects: [],
       toolAbilities: [],
+      agentRefs: [],
       maxRiskClass: null,
       requiresApproval: false,
       concurrencyPolicy: null,

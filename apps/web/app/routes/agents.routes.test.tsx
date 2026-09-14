@@ -4,7 +4,7 @@ import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ReactElement } from "react";
 import { expect, test, vi } from "vitest";
-import type { AgentSummary } from "~/lib/agents";
+import type { AgentSummary, BuiltInAgentSummary } from "~/lib/agents";
 import { ApiError } from "~/lib/api";
 import AgentsIndex, { ErrorBoundary as IndexErrorBoundary } from "./_app.agents._index";
 import AgentDetail, { ErrorBoundary as DetailErrorBoundary } from "./_app.agents.$name";
@@ -56,6 +56,12 @@ function renderError(node: ReactElement, error: unknown) {
   vi.mocked(remix.useRouteError).mockReturnValue(error);
   render(node);
 }
+
+const chatTitle: BuiltInAgentSummary = {
+  id: "chat_title",
+  purpose: "Write a short, specific title for a chat from its first user message.",
+  rung: "fast",
+};
 
 function cardFor(label: string): HTMLElement {
   const card = screen.getByRole("link", { name: label }).closest("article");
@@ -137,6 +143,31 @@ test("index with no agents offers a useful draft and Skills as a secondary path"
   expect(draft).toMatch(/instructions|limits/i);
   expect(screen.getByRole("link", { name: "Browse skills" })).toHaveAttribute("href", "/skills");
   expect(document.querySelectorAll(".bg-primary")).toHaveLength(1);
+});
+
+test("index shows built-in agents even when no custom agent exists", () => {
+  renderWithData(<AgentsIndex />, { agents: [], builtIn: [chatTitle] });
+  expect(screen.getByText("No custom agents yet")).toBeInTheDocument();
+  expect(screen.getByRole("heading", { name: "Chat Title" })).toBeInTheDocument();
+  expect(screen.getByText(chatTitle.purpose)).toBeInTheDocument();
+  expect(screen.getAllByText("Built-in").length).toBeGreaterThan(0);
+});
+
+test("index does not link a built-in agent's name — it has no detail page", () => {
+  renderWithData(<AgentsIndex />, { agents: [], builtIn: [chatTitle] });
+  expect(screen.queryByRole("link", { name: "Chat Title" })).not.toBeInTheDocument();
+  expect(
+    screen.queryByRole("link", { name: /Start a chat with Chat Title/ })
+  ).not.toBeInTheDocument();
+});
+
+test("index shows how many published Routines use each custom agent", () => {
+  renderWithData(<AgentsIndex />, {
+    agents: [agent, stargazer],
+    usageByAgent: { "sprint-planner": 2 },
+  });
+  expect(within(cardFor("Sprint Planner")).getByText("Used by 2 routines")).toBeInTheDocument();
+  expect(within(cardFor("GitHub Stargazer Sync")).queryByText(/Used by/)).not.toBeInTheDocument();
 });
 
 test("index distinguishes an agent from a Skill and links to Skills", () => {

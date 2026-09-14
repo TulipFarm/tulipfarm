@@ -202,6 +202,15 @@ export function agentDisplayName(agent: Pick<AgentSummary, "name" | "label">): s
   return agent.label ?? agent.name;
 }
 
+/** A BuiltInAgent's snake_case `id`, read out: `"tool_result_distiller"` → `"Tool Result Distiller"`. */
+export function builtInAgentDisplayName(id: string): string {
+  return id
+    .split("_")
+    .filter(Boolean)
+    .map((word) => `${word[0]?.toUpperCase() ?? ""}${word.slice(1)}`)
+    .join(" ");
+}
+
 /**
  * Free-text match across the fields someone would actually type: what it is called, what it does,
  * and what it is pointed at. Matching resource types is what lets "stars" find the sync agent.
