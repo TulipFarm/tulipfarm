@@ -51,3 +51,18 @@ export function NotFoundState({ section }: { section: string }) {
     </Frame>
   );
 }
+
+/**
+ * A 404 from an action that advertised itself as available, distinct from {@link NotFoundState}:
+ * the record exists, but this deployment (or this reader) cannot reach that capability for it.
+ * The message stays this generic on purpose — it must read the same whether the capability is
+ * simply unwired here or the request was denied, so neither case leaks the other.
+ */
+export function UnavailableActionState({ section, message }: { section: string; message: string }) {
+  return (
+    <Frame section={section}>
+      <p className="text-destructive">error: 404 unavailable</p>
+      <p className="text-muted-foreground">{message}</p>
+    </Frame>
+  );
+}
