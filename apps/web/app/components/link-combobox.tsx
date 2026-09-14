@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { listRecords } from "~/lib/api";
 import { recordLabel } from "~/lib/schema";
 
@@ -6,6 +6,10 @@ import { recordLabel } from "~/lib/schema";
  * Loads the first page of the target type's records and filters client-side by label as the
  * user types. The stored value is the target `record.id` — exactly what the API's link
  * validation (findById) consumes and what the read-side detail link points at.
+ *
+ * Keyboard navigation follows the aria-activedescendant listbox pattern from `ui/combobox.tsx`:
+ * options are non-focusable `role="option"` rows and focus stays on the input throughout, so Tab
+ * always leaves the whole widget in one step instead of walking through option buttons first.
  */
 
 type Option = { id: string; label: string };
@@ -25,23 +29,24 @@ export function LinkCombobox({
   const [loadError, setLoadError] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   const [open, setOpen] = useState(false);
-  const blurTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const [active, setActive] = useState(0);
+  const rootRef = useRef<HTMLDivElement>(null);
+  const listRef = useRef<HTMLDivElement>(null);
+  const generatedId = useId();
 
   useEffect(() => {
-    let active = true;
+    let isActive = true;
     listRecords(target)
       .then((page) => {
-        if (active) setOptions(page.items.map((r) => ({ id: r.id, label: recordLabel(r) })));
+        if (isActive) setOptions(page.items.map((r) => ({ id: r.id, label: recordLabel(r) })));
       })
       .catch((err) => {
-        if (active) setLoadError(err instanceof Error ? err.message : "failed to load options");
+        if (isActive) setLoadError(err instanceof Error ? err.message : "failed to load options");
       });
     return () => {
-      active = false;
+      isActive = false;
     };
   }, [target]);
-
-  useEffect(() => () => clearTimeout(blurTimer.current), []);
 
   const selectedLabel = useMemo(
     () => options.find((o) => o.id === value)?.label ?? value,
@@ -56,16 +61,22 @@ export function LinkCombobox({
       .slice(0, 50);
   }, [options, query]);
 
+  useEffect(() => {
+    if (!open) return;
+    const row = listRef.current?.children[active];
+    if (row instanceof HTMLElement) row.scrollIntoView?.({ block: "nearest" });
+  }, [open, active]);
+
   function select(option: Option) {
     onChange(option.id);
     setQuery("");
     setOpen(false);
   }
 
-  const listId = id ? `${id}-list` : undefined;
+  const listId = `${id ?? generatedId}-list`;
 
   return (
-    <div className="relative">
+    <div ref={rootRef} className="relative">
       <input
         id={id}
         type="text"
@@ -73,49 +84,73 @@ export function LinkCombobox({
         aria-expanded={open}
         aria-controls={listId}
         aria-autocomplete="list"
+        aria-activedescendant={open && filtered[active] ? `${listId}-${active}` : undefined}
         autoComplete="off"
         className="w-full rounded-sm border border-border bg-background px-3 py-2 text-sm outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50"
         placeholder={value ? selectedLabel : `search ${target}…`}
         value={open ? query : value ? selectedLabel : ""}
         onChange={(e) => {
           setQuery(e.target.value);
+          setActive(0);
           setOpen(true);
         }}
         onFocus={() => setOpen(true)}
-        onBlur={() => {
-          blurTimer.current = setTimeout(() => setOpen(false), 120);
+        onBlur={(e) => {
+          if (rootRef.current?.contains(e.relatedTarget as Node | null)) return;
+          setOpen(false);
+        }}
+        onKeyDown={(e) => {
+          if (e.key === "ArrowDown") {
+            e.preventDefault();
+            if (!open) setOpen(true);
+            else setActive((i) => (i + 1) % Math.max(filtered.length, 1));
+          } else if (e.key === "ArrowUp") {
+            e.preventDefault();
+            if (!open) setOpen(true);
+            else setActive((i) => (i - 1 + filtered.length) % Math.max(filtered.length, 1));
+          } else if (e.key === "Enter" && open && filtered[active]) {
+            e.preventDefault();
+            select(filtered[active]);
+          } else if (e.key === "Escape" && open) {
+            e.preventDefault();
+            e.stopPropagation();
+            setOpen(false);
+          }
         }}
       />
       {loadError ? <p className="mt-1 text-xs text-destructive">error: {loadError}</p> : null}
       {open ? (
-        <ul
+        <div
+          ref={listRef}
           id={listId}
+          role="listbox"
           className="absolute z-10 mt-1 max-h-60 w-full overflow-y-auto rounded-sm border border-border bg-card text-sm"
         >
           {filtered.length === 0 ? (
-            <li className="px-3 py-2 text-muted-foreground">no {target} records</li>
+            <p className="px-3 py-2 text-muted-foreground">no {target} records</p>
           ) : (
-            filtered.map((option) => (
-              <li key={option.id}>
-                <button
-                  type="button"
-                  aria-pressed={option.id === value}
-                  className="flex w-full items-baseline gap-2 px-3 py-2 text-left hover:bg-accent"
-                  onMouseDown={(e) => {
-                    e.preventDefault();
-                    if (blurTimer.current) clearTimeout(blurTimer.current);
-                    select(option);
-                  }}
-                >
-                  <span className="truncate">{option.label}</span>
-                  <span className="ml-auto shrink-0 text-xs text-muted-foreground">
-                    {option.id}
-                  </span>
-                </button>
-              </li>
+            filtered.map((option, i) => (
+              // biome-ignore lint/a11y/useFocusableInteractive: an aria-activedescendant listbox deliberately leaves options unfocusable and keeps focus on the input; that is what makes the pattern work.
+              <div
+                key={option.id}
+                id={`${listId}-${i}`}
+                role="option"
+                aria-selected={option.id === value}
+                className={`flex w-full cursor-pointer items-baseline gap-2 px-3 py-2 text-left hover:bg-accent ${
+                  i === active ? "bg-accent" : ""
+                }`}
+                onPointerDown={(e) => {
+                  e.preventDefault();
+                  select(option);
+                }}
+                onMouseEnter={() => setActive(i)}
+              >
+                <span className="truncate">{option.label}</span>
+                <span className="ml-auto shrink-0 text-xs text-muted-foreground">{option.id}</span>
+              </div>
             ))
           )}
-        </ul>
+        </div>
       ) : null}
     </div>
   );
