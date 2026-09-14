@@ -4,7 +4,7 @@ import { cn } from "~/lib/utils";
 /**
  * Shape is what separates a who from a what, and it is binding across the whole product:
  *
- * - **A circle is somebody** — a person or an Agent. Use `Avatar`.
+ * - **A circle is somebody** — a person or an Agent. Use `Avatar` or `AgentAvatar`.
  * - **A square is a Team** — an organizational unit, never an individual. Use `TeamAvatar`.
  *
  * A reader scanning a list should be able to tell "this file belongs to a group" from "this file
@@ -37,6 +37,22 @@ const TEAM_BACKGROUNDS = [
   "linear-gradient(145deg, #fde68a 0%, #fef3c7 40%, #fb7185 42%, #be185d 100%)",
   "radial-gradient(circle at 76% 20%, #fef08a 0%, #86efac 30%, transparent 52%), linear-gradient(145deg, #0f172a 0%, #2563eb 42%, #10b981 100%)",
   "linear-gradient(145deg, #fecdd3 0%, #fda4af 38%, #fb7185 58%, #fdba74 100%)",
+] as const;
+
+/**
+ * An Agent's mark: a full-bleed, multi-stop gradient disc, one palette entry per hash bucket —
+ * the same construction as `TEAM_BACKGROUNDS`, kept as its own set because shape already tells an
+ * Agent from a Team and the two should never land on the same hue by coincidence. **Round,
+ * always** — an Agent is somebody, not a place.
+ */
+const AGENT_BACKGROUNDS = [
+  "radial-gradient(circle at 30% 25%, #93c5fd 0%, transparent 45%), linear-gradient(135deg, #0ea5e9 0%, #6366f1 55%, #7c3aed 100%)",
+  "radial-gradient(circle at 70% 25%, #5eead4 0%, transparent 42%), linear-gradient(135deg, #14b8a6 0%, #0891b2 55%, #1d4ed8 100%)",
+  "radial-gradient(circle at 25% 70%, #fde68a 0%, transparent 40%), linear-gradient(135deg, #f59e0b 0%, #ea580c 55%, #be123c 100%)",
+  "radial-gradient(circle at 75% 30%, #fda4af 0%, transparent 42%), linear-gradient(135deg, #f43f5e 0%, #db2777 55%, #7e22ce 100%)",
+  "radial-gradient(circle at 30% 30%, #bbf7d0 0%, transparent 42%), linear-gradient(135deg, #22c55e 0%, #0d9488 55%, #0369a1 100%)",
+  "radial-gradient(circle at 70% 70%, #ddd6fe 0%, transparent 42%), linear-gradient(135deg, #8b5cf6 0%, #6d28d9 55%, #1e1b4b 100%)",
+  "linear-gradient(135deg, #fb923c 0%, #f43f5e 40%, #a21caf 70%, #312e81 100%)",
 ] as const;
 
 /** FNV-1a, same construction as `lib/farm.ts`, so identity colour is a fact and never random. */
@@ -112,6 +128,29 @@ export function Avatar({
     >
       {fallback ?? initialsFor(identity)}
     </span>
+  );
+}
+
+/**
+ * An Agent's mark: a pure circular gradient disc, no initials — an Agent's name is never a person's
+ * name with letters worth abbreviating, so `Avatar`'s initials fallback would either misread it or
+ * sit there unexplained. `identity` must be one stable key per Agent (its `name`, or
+ * `built-in-agent:<id>` for a platform agent) so the same Agent wears the same mark everywhere.
+ */
+export function AgentAvatar({
+  identity,
+  className,
+  ...props
+}: Omit<React.ComponentProps<"span">, "children"> & { identity: string }) {
+  const index = hashOf(identity) % AGENT_BACKGROUNDS.length;
+
+  return (
+    <span
+      aria-hidden
+      className={cn("size-8 shrink-0 rounded-full", className)}
+      style={{ backgroundImage: AGENT_BACKGROUNDS[index] ?? AGENT_BACKGROUNDS[0] }}
+      {...props}
+    />
   );
 }
 
