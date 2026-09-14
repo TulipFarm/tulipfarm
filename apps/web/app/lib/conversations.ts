@@ -37,18 +37,36 @@ export type ConversationMessage = {
   createdAt: string;
 };
 
+export type ConversationPage = {
+  items: ConversationSummary[];
+  nextCursor: string | null;
+};
+
 export async function listConversations(opts?: {
   q?: string;
   limit?: number;
 }): Promise<ConversationSummary[]> {
+  return (await listConversationsPage(opts)).items;
+}
+
+/**
+ * Cursor-paginated variant for `/chats`' infinite scroll: `cursor` (from a previous page's
+ * `nextCursor`) fetches the next 20 (or `limit`), rather than the sidebar's single unbounded read.
+ */
+export async function listConversationsPage(opts?: {
+  q?: string;
+  limit?: number;
+  cursor?: string;
+}): Promise<ConversationPage> {
   const params = new URLSearchParams();
   if (opts?.q) params.set("q", opts.q);
   if (opts?.limit != null) params.set("limit", String(opts.limit));
+  if (opts?.cursor) params.set("cursor", opts.cursor);
   const query = params.toString();
-  const body = await apiGet<{ conversations: ConversationSummary[] }>(
+  const body = await apiGet<{ conversations: ConversationSummary[]; nextCursor: string | null }>(
     `/api/v1/chats${query ? `?${query}` : ""}`
   );
-  return body.conversations;
+  return { items: body.conversations, nextCursor: body.nextCursor };
 }
 
 export function renameConversation(id: string, title: string): Promise<ConversationSummary> {

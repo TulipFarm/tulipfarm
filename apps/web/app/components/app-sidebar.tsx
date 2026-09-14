@@ -380,11 +380,15 @@ function NavRow({
   );
 }
 
+/** Sidebar Recent chats shows only the newest chats; the rest live on the full `/chats` page. */
+const RECENT_CHATS_CAP = 20;
+
 function RecentChats({ onNavigate }: { onNavigate: () => void }) {
   const { conversations, activeChatId } = useConversations();
   const actions = useChatTitleActions();
   const [open, toggle] = useGroupOpen("recent");
   if (conversations.length === 0) return null;
+  const recent = conversations.slice(0, RECENT_CHATS_CAP);
   return (
     <div className="flex flex-col gap-1">
       <GroupHeading heading="Recent" open={open} onToggle={toggle} />
@@ -395,7 +399,7 @@ function RecentChats({ onNavigate }: { onNavigate: () => void }) {
               {actions.error}
             </p>
           ) : null}
-          {conversations.map((chat) =>
+          {recent.map((chat) =>
             actions.renamingId === chat.id ? (
               <div key={chat.id} className="px-1 py-0.5">
                 <ChatTitleInput
@@ -431,6 +435,13 @@ function RecentChats({ onNavigate }: { onNavigate: () => void }) {
               </div>
             )
           )}
+          <Link
+            to="/chats"
+            onClick={onNavigate}
+            className={cn(ROW_BASE, ROW_IDLE, "text-muted-foreground")}
+          >
+            View all chats →
+          </Link>
         </>
       ) : null}
       <DeleteChatModal

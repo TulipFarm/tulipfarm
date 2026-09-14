@@ -1,5 +1,5 @@
 import { type MetaFunction, useLoaderData, useRouteError } from "@remix-run/react";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   ChatActionsMenu,
   ChatTitleInput,
@@ -14,7 +14,7 @@ import { Link } from "~/components/ui/link";
 import { ApiError } from "~/lib/api";
 import {
   type ConversationSummary,
-  listConversations,
+  listConversationsPage,
   setConversationStarred,
 } from "~/lib/conversations";
 import { useConversations } from "~/lib/conversations-context";
@@ -24,22 +24,27 @@ export const meta: MetaFunction = () => [{ title: "Chats · tulipfarm" }];
 const inputClass =
   "h-8 w-full rounded-md border border-input bg-background pl-9 pr-3 text-sm text-foreground placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/25";
 
+const PAGE_SIZE = 20;
+
 // Browse + search every persisted chat (UUID-chat persistence). The sidebar "Chats" header links
-// here. Search is server-side across all the caller's chats by title (debounced); each row's three-dots
-// menu stars (pins) or renames the chat inline. The fetch limit is generous so the list is "all" chats
-// in practice; the API caps it at 200.
+// here. The initial batch loads 20 chats; scrolling near the bottom fetches the next 20 via a
+// keyset cursor. Search is server-side across ALL the caller's chats by title (debounced), not
+// just the batches already loaded. Each row's three-dots menu stars (pins) or renames the chat
+// inline.
 export async function clientLoader() {
-  const items = await listConversations({ limit: 200 });
-  return { items };
+  const page = await listConversationsPage({ limit: PAGE_SIZE });
+  return page;
 }
 
 export default function ChatsRoute() {
-  const { items: initial } = useLoaderData<typeof clientLoader>();
+  const { items: initialItems, nextCursor: initialCursor } = useLoaderData<typeof clientLoader>();
   const { refresh } = useConversations();
-  const [items, setItems] = useState<ConversationSummary[]>(initial);
+  const [items, setItems] = useState<ConversationSummary[]>(initialItems);
+  const [nextCursor, setNextCursor] = useState<string | null>(initialCursor);
   const [query, setQuery] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [searching, setSearching] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
   const actions = useChatTitleActions({
     onRenamed: (updated) =>
       setItems((prev) => prev.map((c) => (c.id === updated.id ? updated : c))),
@@ -47,7 +52,7 @@ export default function ChatsRoute() {
   });
 
   // Server-side search, debounced. The loader already seeded the first render, so skip the initial
-  // (empty-query) run; subsequent changes — including clearing the box back to "" — refetch.
+  // (empty-query) run; subsequent changes — including clearing the box back to "" — refetch page 1.
   const didMount = useRef(false);
   useEffect(() => {
     if (!didMount.current) {
@@ -58,10 +63,11 @@ export default function ChatsRoute() {
     const q = query.trim();
     setSearching(true);
     const handle = setTimeout(() => {
-      listConversations(q ? { q, limit: 200 } : { limit: 200 })
-        .then((next) => {
+      listConversationsPage(q ? { q, limit: PAGE_SIZE } : { limit: PAGE_SIZE })
+        .then((page) => {
           if (!ignore) {
-            setItems(next);
+            setItems(page.items);
+            setNextCursor(page.nextCursor);
             setError(null);
           }
         })
@@ -77,6 +83,45 @@ export default function ChatsRoute() {
       clearTimeout(handle);
     };
   }, [query]);
+
+  // Infinite scroll: fetch the next batch of PAGE_SIZE once the sentinel below the list scrolls
+  // into view. `loadingMoreRef` (not state) guards re-entrancy, since the observer can fire again
+  // before `setLoadingMore(true)` has committed.
+  const loadingMoreRef = useRef(false);
+  const loadMore = useCallback(async () => {
+    if (loadingMoreRef.current || nextCursor === null) return;
+    loadingMoreRef.current = true;
+    setLoadingMore(true);
+    try {
+      const q = query.trim();
+      const page = await listConversationsPage({
+        ...(q ? { q } : {}),
+        limit: PAGE_SIZE,
+        cursor: nextCursor,
+      });
+      setItems((prev) => [...prev, ...page.items]);
+      setNextCursor(page.nextCursor);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "could not load more chats");
+    } finally {
+      loadingMoreRef.current = false;
+      setLoadingMore(false);
+    }
+  }, [nextCursor, query]);
+
+  const sentinelRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const node = sentinelRef.current;
+    if (!node) return;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((entry) => entry.isIntersecting)) void loadMore();
+      },
+      { rootMargin: "200px" }
+    );
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, [loadMore]);
 
   // Replace one chat in place after a star/rename, and refresh the sidebar list so it reflects the
   // change too. No refetch — the PUT returns the updated summary.
@@ -97,8 +142,9 @@ export default function ChatsRoute() {
   // delete failure renders inside its own dialog rather than behind the backdrop.
   const pageError = error ?? (actions.pendingDelete ? null : actions.error);
 
-  // Starred chats pinned to the top; recency order (server-sorted) preserved within each group by the
-  // stable sort.
+  // Starred chats pinned to the top within what's loaded so far; recency order (server-sorted)
+  // preserved within each group by the stable sort. A starred chat past the loaded batches surfaces
+  // once scrolling reaches it, same as any other chat.
   const sorted = [...items].sort((a, b) => Number(b.starred) - Number(a.starred));
   const starred = sorted.filter((chat) => chat.starred);
   const recent = sorted.filter((chat) => !chat.starred);
@@ -134,9 +180,7 @@ export default function ChatsRoute() {
             />
           </label>
           <p aria-live="polite" className="shrink-0 text-xs text-muted-foreground tabular-nums">
-            {searching
-              ? "Searching…"
-              : `${sorted.length} ${sorted.length === 1 ? "chat" : "chats"}`}
+            {searching ? "Searching…" : `${sorted.length} loaded`}
           </p>
         </div>
 
@@ -186,6 +230,10 @@ export default function ChatsRoute() {
                 actions={actions}
                 onToggleStar={onToggleStar}
               />
+            ) : null}
+            <div ref={sentinelRef} aria-hidden className="h-1" />
+            {loadingMore ? (
+              <p className="text-center text-xs text-muted-foreground">Loading more…</p>
             ) : null}
           </div>
         )}
