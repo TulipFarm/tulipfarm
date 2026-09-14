@@ -1,5 +1,26 @@
 # Changelog
 
+## [0.18.32](https://github.com/TulipFarm/tulipfarm/compare/v0.18.31...v0.18.32) (2026-09-14)
+
+### Features
+
+* **integrations:** add OIM composite tools ([#911](https://github.com/TulipFarm/tulipfarm/issues/911)) ([ad85f2d](https://github.com/TulipFarm/tulipfarm/commit/ad85f2d10a2f334a8ca8ae932de6f08ce3dd8a22))
+* **integrations:** add webhook lifecycle recovery ([#919](https://github.com/TulipFarm/tulipfarm/issues/919)) ([1bccdb2](https://github.com/TulipFarm/tulipfarm/commit/1bccdb286bb203b86a19cbc619b224b8f49a8d89))
+* **integrations:** validate provider contracts ([#909](https://github.com/TulipFarm/tulipfarm/issues/909)) ([334aaa4](https://github.com/TulipFarm/tulipfarm/commit/334aaa4f910277914419780f49a2cf1cbf4ea6be))
+* **telemetry:** add instance reporting and sharing controls ([#910](https://github.com/TulipFarm/tulipfarm/issues/910)) ([a224be7](https://github.com/TulipFarm/tulipfarm/commit/a224be705f4fd1cabb75c477d0128564558de1f4))
+
+### Bug Fixes
+
+* **integrations:** harden external package installation ([#907](https://github.com/TulipFarm/tulipfarm/issues/907)) ([d33fc45](https://github.com/TulipFarm/tulipfarm/commit/d33fc454c219090c37fe4998803b1de01d1727a7))
+
+### Documentation
+
+* **oim:** accept specification version 1.0 ([#924](https://github.com/TulipFarm/tulipfarm/issues/924)) ([4a3703a](https://github.com/TulipFarm/tulipfarm/commit/4a3703afc8a398e1d9d3c8e6b8a7a8421b73363c))
+
+### Tests
+
+* **integrations:** add live provider smoke tests ([#908](https://github.com/TulipFarm/tulipfarm/issues/908)) ([bb00617](https://github.com/TulipFarm/tulipfarm/commit/bb0061799d2d43a4041019880abfaf973639df90))
+
 ## [0.18.31](https://github.com/TulipFarm/tulipfarm/compare/v0.18.30...v0.18.31) (2026-09-14)
 
 ### Features
