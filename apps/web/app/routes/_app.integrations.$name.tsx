@@ -104,17 +104,23 @@ export async function clientLoader({ params, request }: ClientLoaderFunctionArgs
   let oimRelease: InstalledOimReleaseGeneration | undefined;
   let oimReleaseError: string | undefined;
   let oimUninstallStatus: OimReleaseUninstallStatus | undefined;
-  try {
-    oimConnections = await listOimConnections(name);
-  } catch (error) {
-    if (isRecoverableSetupLookupError(error)) {
-      oimConnectionsError = errMessage(error);
-    } else if (
-      callbackConnectionId !== undefined ||
-      !(error instanceof ApiError) ||
-      error.status !== 404
-    ) {
-      throw error;
+  // Only an "oim" catalog entry has a Connection record to read — a legacy manifest-driven
+  // Integration (Slack, GitHub) is not in the OIM package catalog and this route 404s for it
+  // unconditionally, so sending it for every Integration just logs a background failure no UI
+  // surfaces.
+  if (integration.type === "oim") {
+    try {
+      oimConnections = await listOimConnections(name);
+    } catch (error) {
+      if (isRecoverableSetupLookupError(error)) {
+        oimConnectionsError = errMessage(error);
+      } else if (
+        callbackConnectionId !== undefined ||
+        !(error instanceof ApiError) ||
+        error.status !== 404
+      ) {
+        throw error;
+      }
     }
   }
   if (

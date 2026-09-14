@@ -339,7 +339,7 @@ test("keeps a known Connection after a callback error", async () => {
 });
 
 test("validates the callback Connection through the exact setup endpoint", async () => {
-  vi.mocked(getIntegration).mockResolvedValue(detail({ name: "acme-v2" }));
+  vi.mocked(getIntegration).mockResolvedValue(detail({ name: "acme-v2", type: "oim" }));
   vi.mocked(listOimConnections).mockResolvedValue([]);
   vi.mocked(getOimConnectionSetup).mockResolvedValue({
     integration: { id: "acme", majorVersion: 2 },
@@ -364,7 +364,7 @@ test("validates the callback Connection through the exact setup endpoint", async
 
 test("rejects a callback Connection that the exact setup endpoint does not authorize", async () => {
   const rejection = new ApiError(404, "Connection not found");
-  vi.mocked(getIntegration).mockResolvedValue(detail({ name: "acme-v2" }));
+  vi.mocked(getIntegration).mockResolvedValue(detail({ name: "acme-v2", type: "oim" }));
   vi.mocked(listOimConnections).mockResolvedValue([]);
   vi.mocked(getOimConnectionSetup).mockRejectedValue(rejection);
 
@@ -381,8 +381,27 @@ test("rejects a callback Connection that the exact setup endpoint does not autho
   expect(getOimConnectionSetup).toHaveBeenCalledWith("acme-v2", "other-owner-or-major");
 });
 
+test("never sends the Connection list read for a non-OIM Integration", async () => {
+  vi.mocked(getIntegration).mockResolvedValue(detail({ name: "slack", type: "slack" }));
+  vi.mocked(listOimConnections).mockRejectedValue(new ApiError(404, "integration_not_found"));
+
+  const result = await clientLoader({
+    params: { name: "slack" },
+    request: new Request("https://app.example.test/integrations/slack"),
+    context: {},
+  } as never);
+
+  expect(listOimConnections).not.toHaveBeenCalled();
+  expect(getOimConnectionSetup).not.toHaveBeenCalled();
+  expect(result.usesOimConnections).toBe(false);
+  expect(result.oimConnections).toBeUndefined();
+  expect(result.oimConnectionsError).toBeUndefined();
+});
+
 test("keeps exact setup usable when the Connection list is temporarily unavailable", async () => {
-  vi.mocked(getIntegration).mockResolvedValue(detail({ name: "acme-v2", title: "Acme" }));
+  vi.mocked(getIntegration).mockResolvedValue(
+    detail({ name: "acme-v2", type: "oim", title: "Acme" })
+  );
   vi.mocked(listOimConnections).mockRejectedValue(
     new ApiError(503, "Connections are temporarily unavailable.")
   );
@@ -405,7 +424,9 @@ test("keeps exact setup usable when the Connection list is temporarily unavailab
 });
 
 test("renders ID-bound retries when both OIM reads are temporarily unavailable", async () => {
-  vi.mocked(getIntegration).mockResolvedValue(detail({ name: "acme-v2", title: "Acme" }));
+  vi.mocked(getIntegration).mockResolvedValue(
+    detail({ name: "acme-v2", type: "oim", title: "Acme" })
+  );
   vi.mocked(listOimConnections).mockRejectedValue(
     new ApiError(503, "Connections are temporarily unavailable.")
   );
@@ -425,7 +446,9 @@ test("renders ID-bound retries when both OIM reads are temporarily unavailable",
 });
 
 test("does not require a generic setup lookup after an exact transient failure", async () => {
-  vi.mocked(getIntegration).mockResolvedValue(detail({ name: "acme-v2", title: "Acme" }));
+  vi.mocked(getIntegration).mockResolvedValue(
+    detail({ name: "acme-v2", type: "oim", title: "Acme" })
+  );
   vi.mocked(listOimConnections).mockResolvedValue([]);
   vi.mocked(getOimConnectionSetup).mockRejectedValue(
     new ApiError(503, "Setup is temporarily unavailable.")
@@ -440,7 +463,9 @@ test("does not require a generic setup lookup after an exact transient failure",
 });
 
 test("renders an exact Connection verification repair after reload", async () => {
-  vi.mocked(getIntegration).mockResolvedValue(detail({ name: "acme-v2", title: "Acme" }));
+  vi.mocked(getIntegration).mockResolvedValue(
+    detail({ name: "acme-v2", type: "oim", title: "Acme" })
+  );
   vi.mocked(listOimConnections).mockResolvedValue([
     {
       id: "connection-1",
@@ -485,7 +510,9 @@ test("recovers missing generic setup with a valid scope, announcement, and focus
     pendingAuthorizationStepIds: [],
   };
   let genericAttempts = 0;
-  vi.mocked(getIntegration).mockResolvedValue(detail({ name: "acme-v2", title: "Acme" }));
+  vi.mocked(getIntegration).mockResolvedValue(
+    detail({ name: "acme-v2", type: "oim", title: "Acme" })
+  );
   vi.mocked(listOimConnections).mockResolvedValue([]);
   vi.mocked(getOimConnectionSetup).mockImplementation((_name, connectionId) => {
     if (connectionId !== undefined) return Promise.resolve(organizationSetup);
@@ -529,7 +556,9 @@ test("preserves local exact setup when route revalidation cannot reload it", asy
     pendingAuthorizationStepIds: [],
   };
   let exactSetupAttempts = 0;
-  vi.mocked(getIntegration).mockResolvedValue(detail({ name: "acme-v2", title: "Acme" }));
+  vi.mocked(getIntegration).mockResolvedValue(
+    detail({ name: "acme-v2", type: "oim", title: "Acme" })
+  );
   vi.mocked(listOimConnections).mockResolvedValue([]);
   vi.mocked(getOimConnectionSetup).mockImplementation((_name, connectionId) => {
     if (connectionId === undefined) return Promise.resolve(completedSetup);
@@ -556,7 +585,7 @@ test("preserves local exact setup when route revalidation cannot reload it", asy
 
 test.each([401, 403, 404])("fails closed when exact setup returns %i", async (status) => {
   const rejection = new ApiError(status, "Exact setup is not authorized.");
-  vi.mocked(getIntegration).mockResolvedValue(detail({ name: "acme-v2" }));
+  vi.mocked(getIntegration).mockResolvedValue(detail({ name: "acme-v2", type: "oim" }));
   vi.mocked(listOimConnections).mockResolvedValue([]);
   vi.mocked(getOimConnectionSetup).mockRejectedValue(rejection);
 
@@ -571,7 +600,7 @@ test.each([401, 403, 404])("fails closed when exact setup returns %i", async (st
 
 test.each([401, 403, 404])("fails closed when Connection listing returns %i", async (status) => {
   const rejection = new ApiError(status, "Connection listing is not authorized.");
-  vi.mocked(getIntegration).mockResolvedValue(detail({ name: "acme-v2" }));
+  vi.mocked(getIntegration).mockResolvedValue(detail({ name: "acme-v2", type: "oim" }));
   vi.mocked(listOimConnections).mockRejectedValue(rejection);
 
   await expect(
@@ -595,7 +624,9 @@ test("keeps creation focus and status through the Connection query revalidation"
     pendingAuthorizationStepIds: [],
   };
   let exactSetupAttempts = 0;
-  vi.mocked(getIntegration).mockResolvedValue(detail({ name: "acme-v2", title: "Acme" }));
+  vi.mocked(getIntegration).mockResolvedValue(
+    detail({ name: "acme-v2", type: "oim", title: "Acme" })
+  );
   vi.mocked(listOimConnections).mockResolvedValue([]);
   vi.mocked(getOimConnectionSetup).mockImplementation((_name, connectionId) => {
     if (connectionId === undefined) return Promise.resolve(completedSetup);
@@ -656,7 +687,9 @@ test("retries a pending uninstall against the same installed generation", async 
     fieldSteps: [],
     initialAuthorizationSteps: [],
   };
-  vi.mocked(getIntegration).mockResolvedValue(detail({ name: "acme-v2", title: "Acme" }));
+  vi.mocked(getIntegration).mockResolvedValue(
+    detail({ name: "acme-v2", type: "oim", title: "Acme" })
+  );
   vi.mocked(listOimConnections).mockResolvedValue([]);
   vi.mocked(getOimConnectionSetup).mockResolvedValue(setup);
   vi.mocked(getInstalledOimRelease).mockResolvedValue(release);
@@ -699,7 +732,9 @@ test("retries a pending uninstall against the same installed generation", async 
 
 test("keeps a pinned uninstall generation without resolving the latest installation", async () => {
   const installationId = "11111111-1111-4111-8111-111111111111";
-  vi.mocked(getIntegration).mockResolvedValue(detail({ name: "acme-v2", title: "Acme" }));
+  vi.mocked(getIntegration).mockResolvedValue(
+    detail({ name: "acme-v2", type: "oim", title: "Acme" })
+  );
   vi.mocked(listOimConnections).mockResolvedValue([]);
   vi.mocked(getOimConnectionSetup).mockResolvedValue({
     integration: { id: "acme", majorVersion: 2 },
@@ -734,7 +769,9 @@ test("keeps a pinned uninstall generation without resolving the latest installat
 });
 
 test("does not offer package uninstall for a bundled OIM provider", async () => {
-  vi.mocked(getIntegration).mockResolvedValue(detail({ name: "acme-v2", title: "Acme" }));
+  vi.mocked(getIntegration).mockResolvedValue(
+    detail({ name: "acme-v2", type: "oim", title: "Acme" })
+  );
   vi.mocked(listOimConnections).mockResolvedValue([]);
   vi.mocked(getOimConnectionSetup).mockResolvedValue({
     integration: { id: "acme", majorVersion: 2 },
@@ -761,7 +798,9 @@ test("changes auto-patch only for the installed Official package major", async (
     trustClass: "official" as const,
     autoPatchOptIn: false,
   };
-  vi.mocked(getIntegration).mockResolvedValue(detail({ name: "acme-v2", title: "Acme" }));
+  vi.mocked(getIntegration).mockResolvedValue(
+    detail({ name: "acme-v2", type: "oim", title: "Acme" })
+  );
   vi.mocked(listOimConnections).mockResolvedValue([]);
   vi.mocked(getOimConnectionSetup).mockResolvedValue({
     integration: { id: "acme", majorVersion: 2 },
@@ -807,7 +846,9 @@ test("never offers auto-patch for a Community package", async () => {
     trustClass: "community" as const,
     autoPatchOptIn: false,
   };
-  vi.mocked(getIntegration).mockResolvedValue(detail({ name: "acme-v2", title: "Acme" }));
+  vi.mocked(getIntegration).mockResolvedValue(
+    detail({ name: "acme-v2", type: "oim", title: "Acme" })
+  );
   vi.mocked(listOimConnections).mockResolvedValue([]);
   vi.mocked(getOimConnectionSetup).mockResolvedValue({
     integration: { id: "acme", majorVersion: 2 },
@@ -840,7 +881,7 @@ test("ignores late auto-patch failure after navigation to another installation",
     })
   );
   vi.mocked(getIntegration).mockImplementation(async (name) =>
-    detail({ name, title: name === "acme-v2" ? "Acme" : "Other" })
+    detail({ name, type: "oim", title: name === "acme-v2" ? "Acme" : "Other" })
   );
   vi.mocked(listOimConnections).mockResolvedValue([]);
   vi.mocked(getOimConnectionSetup).mockImplementation(async (name) => ({
