@@ -154,6 +154,7 @@ function CommandDialog({ entries, onClose }: { entries: CommandEntry[]; onClose:
   const inputId = useId();
   const listId = useId();
   const inputRef = useRef<HTMLInputElement>(null);
+  const dialogRef = useRef<HTMLDivElement>(null);
   const results = useMemo(() => filterEntries(entries, query), [entries, query]);
   const starts = useMemo(() => sectionStarts(results), [results]);
 
@@ -186,6 +187,27 @@ function CommandDialog({ entries, onClose }: { entries: CommandEntry[]; onClose:
     } else if (event.key === "Escape") {
       event.preventDefault();
       onClose();
+    } else if (event.key === "Tab") {
+      // The APG modal-dialog pattern requires Tab to cycle within the dialog rather than
+      // escape it: https://www.w3.org/WAI/ARIA/apg/patterns/dialog-modal/
+      const container = dialogRef.current;
+      if (!container) return;
+      const focusable = container.querySelectorAll<HTMLElement>(
+        'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
+      );
+      if (focusable.length === 0) return;
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      const active = document.activeElement;
+      if (event.shiftKey) {
+        if (active === first || !container.contains(active)) {
+          event.preventDefault();
+          last.focus();
+        }
+      } else if (active === last || !container.contains(active)) {
+        event.preventDefault();
+        first.focus();
+      }
     }
   }
 
@@ -202,6 +224,7 @@ function CommandDialog({ entries, onClose }: { entries: CommandEntry[]; onClose:
         onClick={onClose}
       />
       <div
+        ref={dialogRef}
         role="dialog"
         aria-modal="true"
         aria-label="Command menu"
