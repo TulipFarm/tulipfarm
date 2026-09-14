@@ -326,11 +326,20 @@ export function registerKnowledgeRoutes(
       const { id } = req.params as { id: string };
       const ifMatch = parseIfMatch(req);
       if (ifMatch === null) return reply.code(400).send({ error: "If-Match header required" });
-      // Before the version check, not after: 409-against-404 would confirm the Page exists, and
-      // an empty body is a legal no-op update whose 200 carries the whole Page back.
-      if (!(await (gate.canEdit?.(req.user?._id, "page", id) ?? gate.canRead(req.user?._id, id))))
+      // Read first, so a stranger gets the same 404 whether the Page is absent or merely hidden.
+      // File-managed comes next, ahead of the edit check, so a reader who was shared read-only
+      // access to a File-backed Page is told it's File-managed (409), not that they lack edit
+      // rights (404) — the true reason is the operation doesn't exist on this surface at all.
+      if (!(await gate.canRead(req.user?._id, id)))
         return refuseWrite(req, reply, "knowledge.page.update", "page");
       if (await refusedAsFileManaged(service, id, reply)) return reply;
+      // Before the version check, not after: 409-against-404 would confirm the Page exists, and
+      // an empty body is a legal no-op update whose 200 carries the whole Page back.
+      // `?? true`, not `?? gate.canRead(...)`: canRead was already required above, and a
+      // permissive test double with no canEdit method at all should still pass here — only a
+      // *defined* canEdit that resolves false should block (that's the precision-edit authority).
+      if (!(await (gate.canEdit?.(req.user?._id, "page", id) ?? true)))
+        return refuseWrite(req, reply, "knowledge.page.update", "page");
       const outcome = await service.updatePage(id, req.body as Record<string, unknown>, ifMatch);
       if (!outcome.ok) {
         return outcome.reason === "not_found"
@@ -361,7 +370,13 @@ export function registerKnowledgeRoutes(
     }),
     async (req, reply) => {
       const { id } = req.params as { id: string };
-      if (!(await (gate.canEdit?.(req.user?._id, "page", id) ?? gate.canRead(req.user?._id, id))))
+      if (!(await gate.canRead(req.user?._id, id)))
+        return refuseWrite(req, reply, "knowledge.page.delete", "page");
+      if (await refusedAsFileManaged(service, id, reply)) return reply;
+      // `?? true`, not `?? gate.canRead(...)`: canRead was already required above, and a
+      // permissive test double with no canEdit method at all should still pass here — only a
+      // *defined* canEdit that resolves false should block (that's the precision-edit authority).
+      if (!(await (gate.canEdit?.(req.user?._id, "page", id) ?? true)))
         return refuseWrite(req, reply, "knowledge.page.delete", "page");
       const { ownershipOperationId } = req.query as { ownershipOperationId?: string };
       try {
@@ -369,7 +384,6 @@ export function registerKnowledgeRoutes(
       } catch {
         return reply.code(409).send({ error: "joint owner Approval is required" });
       }
-      if (await refusedAsFileManaged(service, id, reply)) return reply;
       return (await service.deletePage(id))
         ? reply.code(204).send()
         : reply.code(404).send({ error: "not found" });
@@ -391,9 +405,14 @@ export function registerKnowledgeRoutes(
     async (req, reply) => {
       const { id } = req.params as { id: string };
       const b = req.body as { content: string; reason?: string | null };
-      if (!(await (gate.canEdit?.(req.user?._id, "page", id) ?? gate.canRead(req.user?._id, id))))
+      if (!(await gate.canRead(req.user?._id, id)))
         return refuseWrite(req, reply, "knowledge.page.revise", "page");
       if (await refusedAsFileManaged(service, id, reply)) return reply;
+      // `?? true`, not `?? gate.canRead(...)`: canRead was already required above, and a
+      // permissive test double with no canEdit method at all should still pass here — only a
+      // *defined* canEdit that resolves false should block (that's the precision-edit authority).
+      if (!(await (gate.canEdit?.(req.user?._id, "page", id) ?? true)))
+        return refuseWrite(req, reply, "knowledge.page.revise", "page");
       const n = await service.createRevision(id, b.content, b.content.trim(), b.reason ?? null);
       return n === null
         ? reply.code(404).send({ error: "not found" })
@@ -409,8 +428,9 @@ export function registerKnowledgeRoutes(
     }),
     async (req, reply) => {
       const { id } = req.params as { id: string };
-      // History is the Page. Denial and absence share one 404 so neither confirms the other.
-      if (!(await (gate.canEdit?.(req.user?._id, "page", id) ?? gate.canRead(req.user?._id, id))))
+      // History is the Page: viewing it needs only read access, same as the Page itself. Denial
+      // and absence share one 404 so neither confirms the other.
+      if (!(await gate.canRead(req.user?._id, id)))
         return reply.code(404).send({ error: "not found" });
       const revs = await service.listRevisions(id);
       return reply.send({ items: revs.map(toApiRevision) });

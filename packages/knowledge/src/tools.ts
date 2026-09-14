@@ -377,12 +377,11 @@ const writePage = defineApiTool<KnowledgeToolContext>({
       ) {
         return refuse("space");
       }
+      // This collaborative upsert is deliberately read-gated, not edit-gated: `pageGate.canEdit`
+      // governs the precision `PUT /pages/:id` edit surface, which is a different, stricter
+      // authority than overwriting-by-path here.
       const existing = await ctx.service.getPageByPath(a.spaceId, a.path);
-      if (
-        existing &&
-        !(await (ctx.pageGate.canEdit?.(ctx.userId, "page", existing._id) ??
-          mayReadPage(ctx, existing._id)))
-      ) {
+      if (existing && !(await mayReadPage(ctx, existing._id))) {
         return refuse("page");
       }
       // An Agent-written Page is weighed differently by a reader, so the write records which.
