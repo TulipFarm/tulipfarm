@@ -6,6 +6,7 @@
   "scripts": {
     "lint": "biome check --no-errors-on-unmatched .",
     "test": "vitest run --passWithNoTests",
+    "test:live-providers": "vitest run src/egress/oim-live-provider-smoke.test.ts",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
