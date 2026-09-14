@@ -147,7 +147,7 @@ describe("OIM persistence migrations", () => {
         .slice(0, 5)
         .map(({ version }) => version)
     ).toEqual([110, 111, 112, 113, 114]);
-    expect(PG_MIGRATIONS.at(-1)?.version).toBe(120);
+    expect(PG_MIGRATIONS.at(-1)?.version).toBe(121);
   });
 
   it("builds every OIM persistence table on a fresh database", async () => {
