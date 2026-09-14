@@ -794,7 +794,7 @@ describe("delegateToAgentTool", () => {
 
     expect(requireAccess).toHaveBeenCalledWith(
       "agent",
-      "worker",
+      makeAgent("worker", "Worker").id,
       { id: "u1", kind: "user" },
       "use",
       undefined
