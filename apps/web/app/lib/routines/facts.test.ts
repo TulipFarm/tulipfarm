@@ -9,6 +9,7 @@ import {
   routineEffects,
   routineFacts,
   runHealth,
+  scheduledTaskRows,
   triggerKind,
   triggerPhrase,
 } from "./facts";
@@ -238,5 +239,59 @@ describe("catalog", () => {
     ]);
     expect(groups).toHaveLength(1);
     expect(groups[0][0]).toBe("schedule");
+  });
+
+  const scheduled = (id: string, slug: string) =>
+    routine({
+      id,
+      slug,
+      displayName: slug,
+      triggers: [{ slug: "nightly", type: "cron", summary: "0 9 * * 1" }],
+    });
+
+  describe("scheduledTaskRows", () => {
+    test("drops routines with no schedule trigger", () => {
+      const notScheduled = routine({ id: "m", slug: "manual-only", triggers: [] });
+      expect(scheduledTaskRows([notScheduled], [])).toHaveLength(0);
+    });
+
+    test("orders by newest Run first, never-run routines last", () => {
+      const rows = scheduledTaskRows(
+        [scheduled("a", "alpha"), scheduled("b", "beta"), scheduled("c", "gamma")],
+        [
+          { id: "r1", routineId: "a", status: "succeeded", createdAt: "2026-01-01T00:00:00Z" },
+          { id: "r2", routineId: "b", status: "running", createdAt: "2026-02-01T00:00:00Z" },
+        ]
+      );
+      expect(rows.map((row) => row.slug)).toEqual(["beta", "alpha", "gamma"]);
+      expect(rows[0].status).toBe("running");
+      expect(rows[1].status).toBe("active");
+      expect(rows[2].status).toBe("idle");
+    });
+
+    test("caps at the requested limit", () => {
+      const routines = ["a", "b", "c", "d", "e", "f"].map((id) => scheduled(id, id));
+      expect(scheduledTaskRows(routines, [], 5)).toHaveLength(5);
+    });
+
+    test("counts every Run for a routine inside the fetched page as its badge", () => {
+      const rows = scheduledTaskRows(
+        [scheduled("a", "alpha")],
+        [
+          { id: "r1", routineId: "a", status: "succeeded", createdAt: "2026-01-03T00:00:00Z" },
+          { id: "r2", routineId: "a", status: "failed", createdAt: "2026-01-02T00:00:00Z" },
+        ]
+      );
+      expect(rows[0].recentRunCount).toBe(2);
+      expect(rows[0].status).toBe("active"); // newest Run wins, not the failing older one
+    });
+
+    test("a failing or attention-needed newest Run reads as attention", () => {
+      const rows = scheduledTaskRows(
+        [scheduled("a", "alpha")],
+        [{ id: "r1", routineId: "a", status: "failed", createdAt: "2026-01-01T00:00:00Z" }]
+      );
+      expect(rows[0].status).toBe("attention");
+    });
   });
 });

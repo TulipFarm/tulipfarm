@@ -373,6 +373,80 @@ export function latestByRoutine(
 }
 
 /* -------------------------------------------------------------------------- */
+/* Scheduled Task rows (sidebar)                                              */
+/* -------------------------------------------------------------------------- */
+
+/** The current state of a scheduled Routine, at the grain a status dot can show. */
+export type ScheduledTaskStatus = "running" | "active" | "attention" | "idle";
+
+const IN_FLIGHT: ReadonlySet<RunStatus> = new Set([
+  "queued",
+  "claimed",
+  "running",
+  "waiting",
+  "cancelling",
+]);
+
+export const SCHEDULED_TASK_STATUS_LABEL: Readonly<Record<ScheduledTaskStatus, string>> = {
+  running: "Running",
+  active: "Active",
+  attention: "Needs attention",
+  idle: "Idle",
+};
+
+function scheduledTaskStatus(latest: { status: RunStatus } | undefined): ScheduledTaskStatus {
+  if (!latest) return "idle";
+  if (IN_FLIGHT.has(latest.status)) return "running";
+  if (FAILING.has(latest.status) || latest.status === "attention_required") return "attention";
+  return "active";
+}
+
+/** One scheduled Routine, as the sidebar's pinned "Scheduled" section shows it. */
+export interface ScheduledTaskRow {
+  id: string;
+  slug: string;
+  displayName: string;
+  status: ScheduledTaskStatus;
+  /** Runs for this Routine inside the fetched Run page — the sidebar's "N new" badge. */
+  recentRunCount: number;
+}
+
+/**
+ * The top scheduled Routines for the sidebar, newest-Run-first.
+ *
+ * Reuses the one global Run page a caller already fetched for `latestByRoutine`, so the sidebar
+ * costs no extra round trip beyond the catalog and Run feed it would load anyway. A Routine with no
+ * Run in that page sorts last, alongside the other never-run Routines.
+ */
+export function scheduledTaskRows(
+  routines: readonly RoutineSummary[],
+  runs: readonly { id: string; routineId: string; status: string; createdAt: string }[],
+  limit = 5
+): ScheduledTaskRow[] {
+  const scheduled = routines.filter((routine) => routineTriggerKinds(routine).includes("schedule"));
+  const latest = latestByRoutine(runs);
+  const recentCounts = new Map<string, number>();
+  for (const run of runs) {
+    recentCounts.set(run.routineId, (recentCounts.get(run.routineId) ?? 0) + 1);
+  }
+  const latestTimestamp = (routineId: string) => {
+    const createdAt = latest[routineId]?.createdAt;
+    return createdAt ? Date.parse(createdAt) : 0;
+  };
+  return scheduled
+    .slice()
+    .sort((a, b) => latestTimestamp(b.id) - latestTimestamp(a.id))
+    .slice(0, limit)
+    .map((routine) => ({
+      id: routine.id,
+      slug: routine.slug,
+      displayName: routineDisplayName(routine),
+      status: scheduledTaskStatus(latest[routine.id]),
+      recentRunCount: recentCounts.get(routine.id) ?? 0,
+    }));
+}
+
+/* -------------------------------------------------------------------------- */
 /* Catalog search and grouping                                                */
 /* -------------------------------------------------------------------------- */
 

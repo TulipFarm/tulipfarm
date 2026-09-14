@@ -44,6 +44,8 @@ import {
   visibleSidebarGroups,
 } from "~/lib/nav";
 import { usePageChromeTitle, useSetActionSlot } from "~/lib/page-chrome-context";
+import { SCHEDULED_TASK_STATUS_LABEL, type ScheduledTaskStatus } from "~/lib/routines/facts";
+import { useScheduledTasks } from "~/lib/scheduled-tasks-context";
 import { isBusinessAdmin } from "~/lib/use-session-user";
 import { cn } from "~/lib/utils";
 
@@ -382,6 +384,53 @@ function NavRow({
 
 /** Sidebar Recent chats shows only the newest chats; the rest live on the full `/chats` page. */
 const RECENT_CHATS_CAP = 20;
+
+const SCHEDULED_STATUS_DOT: Record<ScheduledTaskStatus, string> = {
+  running: "bg-status-info",
+  active: "bg-status-success",
+  attention: "bg-status-danger",
+  idle: "bg-status-neutral",
+};
+
+/**
+ * Pinned above Recent: the scheduled Routines an operator is most likely checking on right now,
+ * newest-Run-first. Hidden entirely with no scheduled Routines, same as Recent hides with no chats —
+ * an empty section is clutter, not information.
+ */
+function ScheduledTasksSection({ onNavigate }: { onNavigate: () => void }) {
+  const { tasks } = useScheduledTasks();
+  const [open, toggle] = useGroupOpen("scheduled");
+  if (tasks.length === 0) return null;
+  return (
+    <div className="flex flex-col gap-1">
+      <GroupHeading heading="Scheduled" open={open} onToggle={toggle} />
+      {open ? (
+        <>
+          {tasks.map((task) => (
+            <Link
+              key={task.id}
+              to={`/routines/${encodeURIComponent(task.slug)}`}
+              onClick={onNavigate}
+              className={cn(ROW_BASE, ROW_IDLE)}
+            >
+              <span
+                aria-hidden
+                className={cn("size-1.5 shrink-0 rounded-full", SCHEDULED_STATUS_DOT[task.status])}
+              />
+              <span className="min-w-0 flex-1 truncate">{task.displayName}</span>
+              <span className="sr-only">{SCHEDULED_TASK_STATUS_LABEL[task.status]}</span>
+              {task.recentRunCount > 0 ? (
+                <span className="ms-auto shrink-0 text-xs tabular-nums text-muted-foreground/70">
+                  {task.recentRunCount} new
+                </span>
+              ) : null}
+            </Link>
+          ))}
+        </>
+      ) : null}
+    </div>
+  );
+}
 
 function RecentChats({ onNavigate }: { onNavigate: () => void }) {
   const { conversations, activeChatId } = useConversations();
@@ -781,6 +830,7 @@ export function AppSidebar({
                   onNavigate={onClose}
                 />
               ))}
+              {narrow ? null : <ScheduledTasksSection onNavigate={onClose} />}
               {narrow ? null : <RecentChats onNavigate={onClose} />}
             </nav>
           </div>
