@@ -435,6 +435,18 @@ describe("BundleRoutineAgentPort", () => {
     expect(invoked.tools).toEqual([]);
   });
 
+  it("fails the State when the Agent finishes without calling a declared required Tool", async () => {
+    const result = await port().execute(
+      request({ plan: { ...PLAN, requiredToolCalls: ["send_slack_message"] } })
+    );
+
+    expect(result).toEqual({
+      kind: "failed",
+      reason: "required_tool_not_called:send_slack_message",
+      retryable: false,
+    });
+  });
+
   it("keys its events by the State occurrence and the attempt that claimed it", async () => {
     await port().execute(request());
 

@@ -388,6 +388,14 @@
                     },
                     "type": "object"
                   },
+                  "requiredToolCalls": {
+                    "items": {
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "minItems": 1,
+                    "type": "array"
+                  },
                   "retry": {
                     "additionalProperties": false,
                     "properties": {
