@@ -434,6 +434,8 @@ export {
   requireExplicitSelection,
 } from "./import";
 export type {
+  AcceptWebsocketFrameDeps,
+  AcceptWebsocketFrameResult,
   DeliveryRequest,
   DrainDeps,
   DrainOptions,
@@ -460,7 +462,10 @@ export type {
   ReceiveOimDeliveryRequest,
   ReceiveOimDeliveryResult,
   ResolvedPollingIngress,
+  ResolvedWebsocketIngress,
   StagedWebhookSecret,
+  SuperviseWebsocketConnectionDeps,
+  SuperviseWebsocketConnectionSummary,
   VerificationFailure,
   VerificationOutcome,
   VerifiedProviderIdentity,
@@ -473,8 +478,14 @@ export type {
   WebhookRegistrationRepository,
   WebhookRegistrationSettledAbsenceEvidence,
   WebhookTeardownPort,
+  WebsocketConnectionOpen,
+  WebsocketIngressKey,
+  WebsocketSocket,
+  WebsocketSupervisorStatePort,
+  WebsocketTransportPort,
 } from "./ingress";
 export {
+  acceptWebsocketFrame,
   advancePollingCursor,
   bodyDigest,
   canonicalSigningInput,
@@ -505,8 +516,12 @@ export {
   safeHeadersFor,
   safeHeadersForClassifier,
   selectEventType,
+  superviseWebsocketConnection,
   verifyDelivery,
   WebhookClassificationError,
+  WebsocketFrameError,
+  websocketAcknowledgement,
+  websocketReconnectDelaySeconds,
 } from "./ingress";
 export type {
   EmittedAccessControl,

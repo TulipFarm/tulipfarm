@@ -88,3 +88,20 @@ export {
   type VerificationOutcome,
   verifyDelivery,
 } from "./verify";
+export {
+  type AcceptWebsocketFrameDeps,
+  type AcceptWebsocketFrameResult,
+  acceptWebsocketFrame,
+  type ResolvedWebsocketIngress,
+  type SuperviseWebsocketConnectionDeps,
+  type SuperviseWebsocketConnectionSummary,
+  superviseWebsocketConnection,
+  type WebsocketConnectionOpen,
+  WebsocketFrameError,
+  type WebsocketIngressKey,
+  type WebsocketSocket,
+  type WebsocketSupervisorStatePort,
+  type WebsocketTransportPort,
+  websocketAcknowledgement,
+  websocketReconnectDelaySeconds,
+} from "./websocket-service";

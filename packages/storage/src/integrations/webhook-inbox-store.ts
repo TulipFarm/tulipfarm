@@ -27,7 +27,7 @@ export interface VerifiedWebhookDeliveryInput extends WebhookDeliveryInput {
   readonly externalTenantId: string;
   readonly externalAccountId: string;
   readonly authenticatedEvidenceDigest: string;
-  readonly verification: "verified" | "verified_polling";
+  readonly verification: "verified" | "verified_polling" | "verified_websocket";
 }
 
 export interface PersistedWebhookDelivery {

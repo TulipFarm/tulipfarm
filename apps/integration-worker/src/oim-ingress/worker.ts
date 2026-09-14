@@ -4,6 +4,7 @@ export interface OimIngressWorkerCycle {
   readonly drainInbox: () => Promise<unknown>;
   readonly pollConnections: () => Promise<unknown>;
   readonly recoverRegistrations: () => Promise<unknown>;
+  readonly superviseWebsockets: () => Promise<unknown>;
 }
 
 export interface OimIngressWorkerLogger {
@@ -21,6 +22,7 @@ export interface OimIngressCycleResult {
   readonly inbox: unknown;
   readonly polling: unknown;
   readonly registrations: unknown;
+  readonly websockets: unknown;
 }
 
 function errorMessage(error: unknown): string {
@@ -50,8 +52,9 @@ export class OimIngressWorker {
   async runOnce(): Promise<OimIngressCycleResult> {
     const registrations = await this.options.cycle.recoverRegistrations();
     const polling = await this.options.cycle.pollConnections();
+    const websockets = await this.options.cycle.superviseWebsockets();
     const inbox = await this.options.cycle.drainInbox();
-    return { inbox, polling, registrations };
+    return { inbox, polling, registrations, websockets };
   }
 
   async run(signal: AbortSignal): Promise<void> {
@@ -110,6 +113,16 @@ export function startOimIngressLoops(
         signal,
         "OIM polling ingress",
         options.cycle.pollConnections,
+        options.log,
+        intervalMs
+      ),
+    },
+    {
+      name: "oim-websocket-ingress",
+      settled: runTaskLoop(
+        signal,
+        "OIM websocket ingress",
+        options.cycle.superviseWebsockets,
         options.log,
         intervalMs
       ),

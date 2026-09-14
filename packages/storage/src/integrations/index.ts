@@ -265,3 +265,7 @@ export {
   WEBHOOK_REGISTRATION_STORAGE_STATEMENTS,
   WebhookRegistrationStore,
 } from "./webhook-registration-store";
+export {
+  WEBSOCKET_INGRESS_SUPERVISOR_STORAGE_STATEMENTS,
+  WebsocketIngressSupervisorStore,
+} from "./websocket-ingress-supervisor-store";

@@ -75,6 +75,7 @@ import {
   WAIT_STORAGE_STATEMENTS,
   WEBHOOK_INBOX_STORAGE_STATEMENTS,
   WEBHOOK_REGISTRATION_STORAGE_STATEMENTS,
+  WEBSOCKET_INGRESS_SUPERVISOR_STORAGE_STATEMENTS,
 } from "@tulipfarm/storage";
 import {
   EFFECT_AWAITING_CHILD_STORAGE_STATEMENTS,
@@ -3461,5 +3462,10 @@ export const PG_MIGRATIONS: PgMigration[] = [
     version: 120,
     description: "persist typed OIM Connection verification evidence",
     up: applyStatements(CONNECTION_VERIFICATION_EVIDENCE_STORAGE_STATEMENTS),
+  },
+  {
+    version: 121,
+    description: "single-holder OIM WebSocket ingress supervisor leases",
+    up: applyStatements(WEBSOCKET_INGRESS_SUPERVISOR_STORAGE_STATEMENTS),
   },
 ];
