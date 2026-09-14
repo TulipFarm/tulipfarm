@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.18.28](https://github.com/TulipFarm/tulipfarm/compare/v0.18.27...v0.18.28) (2026-09-14)
+
+### Features
+
+* **integrations:** activate and harden the OIM framework ([#837](https://github.com/TulipFarm/tulipfarm/issues/837)) ([11b5df9](https://github.com/TulipFarm/tulipfarm/commit/11b5df9689c057abf254762572df785bee95c192))
+* **web:** tuck away model receipt and hide raw tool-call chrome in chat ([#838](https://github.com/TulipFarm/tulipfarm/issues/838)) ([2d2d10b](https://github.com/TulipFarm/tulipfarm/commit/2d2d10bac05a79f339722bbff8e9a69fe3c37fb8)), closes [#831](https://github.com/TulipFarm/tulipfarm/issues/831) [#833](https://github.com/TulipFarm/tulipfarm/issues/833)
+
+### Bug Fixes
+
+* **platform:** auto-resolve Team ownership instead of prompting for a UUID ([#839](https://github.com/TulipFarm/tulipfarm/issues/839)) ([d636ff7](https://github.com/TulipFarm/tulipfarm/commit/d636ff7ac34e320eef35e332a4a569f23fffc1b6)), references [#832](https://github.com/TulipFarm/tulipfarm/issues/832)
+* **scripts:** honor per-checkout TF_DATA_DIR in reset-dev.sh ([#835](https://github.com/TulipFarm/tulipfarm/issues/835)) ([7565704](https://github.com/TulipFarm/tulipfarm/commit/7565704fc00ce25dc66a5731a31411d99a50051e))
+
 ## [0.18.27](https://github.com/TulipFarm/tulipfarm/compare/v0.18.26...v0.18.27) (2026-09-13)
 
 ### Features
