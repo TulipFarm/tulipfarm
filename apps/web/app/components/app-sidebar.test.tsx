@@ -128,7 +128,7 @@ test("shows pending feedback on a nav row while its destination is still loading
   const PendingSidebarStub = createRemixStub([
     { path: "/chats", Component: AppSidebar },
     {
-      path: "/routines",
+      path: "/routines/scheduled",
       Component: AppSidebar,
       // Never resolves, so the row stays in the pending state for the assertion below.
       loader: () => new Promise(() => {}),
@@ -136,11 +136,11 @@ test("shows pending feedback on a nav row while its destination is still loading
   ]);
   render(<PendingSidebarStub initialEntries={["/chats"]} />);
   const nav = screen.getByRole("navigation", { name: "Main" });
-  const routinesLink = within(nav).getByRole("link", { name: /Routines/i });
+  const scheduledLink = within(nav).getByRole("link", { name: /Scheduled Tasks/i });
 
-  expect(routinesLink.className).not.toMatch(/animate-pulse/);
-  await userEvent.click(routinesLink);
-  expect(routinesLink.className).toMatch(/animate-pulse/);
+  expect(scheduledLink.className).not.toMatch(/animate-pulse/);
+  await userEvent.click(scheduledLink);
+  expect(scheduledLink.className).toMatch(/animate-pulse/);
 });
 
 test("carries the live approval count on Inbox", () => {
@@ -243,7 +243,7 @@ test("replaces the app destinations with Settings navigation on a Settings-owned
   render(<SidebarStub initialEntries={["/business/models"]} />);
   const nav = screen.getByRole("navigation", { name: "Settings" });
 
-  for (const heading of ["You", "Business", "Operate", "Developer"]) {
+  for (const heading of ["You", "Business", "More", "Developer"]) {
     expect(within(nav).getByRole("heading", { name: heading })).toBeInTheDocument();
   }
   expect(within(nav).getByRole("link", { name: "Models" })).toHaveAttribute("aria-current", "page");
@@ -272,11 +272,12 @@ test("filters Settings destinations without leaving the current page", async () 
   expect(within(nav).queryByRole("link", { name: "Profile" })).not.toBeInTheDocument();
 });
 
-test("keeps Teams in the main sidebar instead of Settings navigation", () => {
+test("moves Teams into Settings navigation, consolidated under More", () => {
   render(<SidebarStub initialEntries={["/teams"]} />);
+  const nav = screen.getByRole("navigation", { name: "Settings" });
 
-  expect(screen.getByRole("navigation", { name: "Main" })).toBeInTheDocument();
-  expect(screen.getByRole("link", { name: "Teams" })).toHaveAttribute("aria-current", "page");
+  expect(within(nav).getByRole("link", { name: "Teams" })).toHaveAttribute("aria-current", "page");
+  expect(screen.queryByRole("navigation", { name: "Main" })).not.toBeInTheDocument();
 });
 
 test("renders recent chats and highlights the active one", () => {
