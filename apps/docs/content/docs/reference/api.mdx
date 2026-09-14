@@ -69,7 +69,7 @@ instance.** It is generated from the running server, so it is never out of date.
 | --- | --- | --- |
 | `resources` | `/resources/{type}` | Reading and writing records. |
 | `knowledge` | `/knowledge` | Spaces, pages, revisions, search, and reindexing. |
-| `memory` | `/memory` | Scoped agent memory entries. |
+| `memory` | `/memory/document` | Reading the current user's memory document. |
 | `kv` | `/kv` | The agent key-value store. |
 | `kv-admin` | `/admin/kv` | The same store, across every namespace, for admins. |
 
@@ -112,7 +112,6 @@ instance.** It is generated from the running server, so it is never out of date.
 | `kill-switches` | `/kill-switches` | Arming and standing down emergency stops. |
 | `admin` | `/admin/operations` | Maintenance operations. |
 | `onboarding` | `/onboarding` | The getting-started checklist and suggestions. |
-| `curator` | `/curator` | Curator shadow-mode output. |
 
 Two tags are visible in the document but are not for you to call. `internal` is machinery the
 worker calls on itself, and `forms` is not reachable on a running instance.

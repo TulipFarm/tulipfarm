@@ -190,6 +190,11 @@ export const MEMBER_ALLOWED_SURFACES: readonly {
   { type: "form", actions: ["*"], enforcedIn: "forms/routes.ts" },
   { type: "platform.frontend", actions: ["*"], enforcedIn: "platform/frontend-tools.ts" },
   {
+    type: "platform.file",
+    actions: ["file.list", "file.read", "file.create"],
+    enforcedIn: "packages/files/src/tools.ts; integrations/oim-file-host.ts",
+  },
+  {
     type: "identity",
     actions: [
       "identity.external_link.create",

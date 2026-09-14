@@ -1,4 +1,5 @@
 import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import {
   type OimKnowledgeSyncOptions,
   pollOimIngress,
@@ -15,7 +16,7 @@ import {
 } from "./oim-runtime";
 
 const manifest = parseOimManifest(
-  readFileSync(new URL("../../../integrations/telegram/oim.yml", import.meta.url), "utf8")
+  readFileSync(join(__dirname, "../../../integrations/telegram/oim.yml"), "utf8")
 );
 const now = new Date("2026-09-13T12:00:00.000Z");
 

@@ -1,5 +1,6 @@
 import type { AuthorityLayer } from "@tulipfarm/authz";
 import { describe, expect, it, vi } from "vitest";
+import { DEPLOYMENT_ROLES } from "../identity/roles";
 import { createOimFileHost } from "./oim-file-host";
 
 vi.mock("@tulipfarm/soul", () => ({}));
@@ -77,6 +78,14 @@ function request(
 }
 
 describe("OIM File authorization host", () => {
+  it("allows a member to read the exact Files bound to an OIM dispatch", async () => {
+    const member = DEPLOYMENT_ROLES.find((role) => role.id === "member");
+    if (member === undefined) throw new Error("member role is missing");
+    const host = hostWith(undefined, { name: member.id, grants: member.grants }, ALLOW);
+
+    await expect(host.authorizeFiles(INPUT)).resolves.toBeUndefined();
+  });
+
   it("refuses a File read when the live Run subject differs from the bound caller", async () => {
     const host = hostWith({ kind: "user", id: "another-user" });
 

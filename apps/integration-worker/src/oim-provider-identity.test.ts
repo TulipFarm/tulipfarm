@@ -1,4 +1,5 @@
 import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import {
   compileKnowledgeProfile,
   evaluateOimAuthVerification,
@@ -22,9 +23,9 @@ import { createOimKnowledgeApi, createOimPollingDeps, type OimPollingStores } fr
 const NOW = new Date("2026-09-13T12:00:00.000Z");
 
 function loadProvider(name: "confluence" | "telegram") {
-  const root = new URL(`../../../integrations/${name}/`, import.meta.url);
-  const manifest = parseOimManifest(readFileSync(new URL("oim.yml", root), "utf8"));
-  const fixtures = parseOimFixtureSuite(readFileSync(new URL("fixtures.yml", root), "utf8"));
+  const root = join(__dirname, "../../../integrations", name);
+  const manifest = parseOimManifest(readFileSync(join(root, "oim.yml"), "utf8"));
+  const fixtures = parseOimFixtureSuite(readFileSync(join(root, "fixtures.yml"), "utf8"));
   return { manifest, fixtures };
 }
 
