@@ -1,5 +1,51 @@
 import type { Queryable } from "../db";
 
+interface ConversationCursorState {
+  updatedAt: string;
+  _id: string;
+}
+
+export interface ConversationCursor {
+  updatedAt: Date;
+  _id: string;
+}
+
+export interface ConversationPage {
+  items: ConversationDoc[];
+  nextCursor: string | null;
+}
+
+/**
+ * Opaque keyset cursor over the `list` newest-first order (`updated_at DESC, id DESC`). Distinct
+ * from `pg/pagination.ts`'s `createdAt`-keyed cursor: the Recent chats / Chats page order is
+ * `updated_at`, which that helper does not encode.
+ */
+export function encodeConversationCursor(doc: ConversationCursor): string {
+  const state: ConversationCursorState = { updatedAt: doc.updatedAt.toISOString(), _id: doc._id };
+  return Buffer.from(JSON.stringify(state)).toString("base64");
+}
+
+export function decodeConversationCursor(cursor: string): ConversationCursor | null {
+  try {
+    const state = JSON.parse(Buffer.from(cursor, "base64").toString("utf8")) as unknown;
+    if (
+      typeof state !== "object" ||
+      state === null ||
+      typeof (state as ConversationCursorState).updatedAt !== "string" ||
+      typeof (state as ConversationCursorState)._id !== "string"
+    ) {
+      return null;
+    }
+    const parsed = state as ConversationCursorState;
+    const updatedAt = new Date(parsed.updatedAt);
+    if (Number.isNaN(updatedAt.getTime())) return null;
+    return { updatedAt, _id: parsed._id };
+  } catch {
+    // An unparseable cursor is treated as absent; pagination restarts from the newest chat.
+    return null;
+  }
+}
+
 export interface ConversationDoc {
   _id: string;
   userId?: string;
@@ -39,9 +85,15 @@ export interface ConversationRepo {
   setStarred(id: string, starred: boolean): Promise<void>;
   /**
    * A user's conversations, newest-first, for the Recent chats sidebar and the Chats page. An
-   * optional `q` filters by title (case-insensitive substring); rows with no title are excluded.
+   * optional `q` filters by title (case-insensitive substring, across all matching conversations
+   * rather than just the loaded page); rows with no title are excluded from a `q` search. `after`
+   * keyset-paginates past a previously returned page's cursor.
    */
-  list(userId: string, limit: number, q?: string): Promise<ConversationDoc[]>;
+  list(
+    userId: string,
+    limit: number,
+    opts?: { q?: string; after?: ConversationCursor }
+  ): Promise<ConversationPage>;
   /** Owner-scoped hard delete. Active Turns reject deletion until they settle. */
   deleteOwned(id: string, userId: string): Promise<ConversationDeleteOutcome>;
 }
@@ -127,16 +179,30 @@ export class PgConversationRepo implements ConversationRepo {
     await this.q.query("UPDATE conversations SET starred = $2 WHERE id = $1", [id, starred]);
   }
 
-  async list(userId: string, limit: number, q?: string): Promise<ConversationDoc[]> {
+  async list(
+    userId: string,
+    limit: number,
+    opts?: { q?: string; after?: ConversationCursor }
+  ): Promise<ConversationPage> {
     // `$3::text IS NULL` short-circuits to the unfiltered list; otherwise a case-insensitive
-    // substring match on the title (null-title rows are excluded by the ILIKE).
+    // substring match on the title (null-title rows are excluded by the ILIKE). `$4::timestamptz
+    // IS NULL` likewise short-circuits the keyset filter for the first page. `updated_at DESC, id
+    // DESC` keeps the tuple comparison below (row values, not per-column) consistent with the
+    // sort so `<` always names "the next page", including ties on `updated_at`.
     const { rows } = await this.q.query(
       `SELECT * FROM conversations
-       WHERE user_id = $1 AND ($3::text IS NULL OR title ILIKE '%' || $3 || '%')
-       ORDER BY updated_at DESC LIMIT $2`,
-      [userId, limit, q ?? null]
+       WHERE user_id = $1
+         AND ($3::text IS NULL OR title ILIKE '%' || $3 || '%')
+         AND ($4::timestamptz IS NULL OR (updated_at, id) < ($4, $5))
+       ORDER BY updated_at DESC, id DESC LIMIT $2`,
+      [userId, limit + 1, opts?.q ?? null, opts?.after?.updatedAt ?? null, opts?.after?._id ?? null]
     );
-    return rows.map(rowToConversation);
+    const items = rows.map(rowToConversation);
+    const hasMore = items.length > limit;
+    const page = hasMore ? items.slice(0, limit) : items;
+    const last = page[page.length - 1];
+    const nextCursor = hasMore && last ? encodeConversationCursor(last) : null;
+    return { items: page, nextCursor };
   }
 
   async deleteOwned(id: string, userId: string): Promise<ConversationDeleteOutcome> {

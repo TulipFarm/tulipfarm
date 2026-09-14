@@ -62,7 +62,7 @@ describe("SlackHomeProjectionService", () => {
           }))
         ),
       },
-      conversations: { list: vi.fn().mockResolvedValue(conversations) },
+      conversations: { list: vi.fn().mockResolvedValue({ items: conversations }) },
       conversationTurns: {
         findLatestTurn: vi.fn(async (_businessId, conversationId) => ({
           id: `turn-${conversationId}`,
@@ -119,7 +119,7 @@ describe("SlackHomeProjectionService", () => {
   it("returns explicit empty sections when optional safe read seams are unavailable", async () => {
     const service = new SlackHomeProjectionService({
       webOrigin: "https://tulipfarm.example",
-      conversations: { list: async () => [] },
+      conversations: { list: async () => ({ items: [] }) },
       conversationTurns: { findLatestTurn: async () => undefined },
       agents: { list: () => [], mayInvoke: async () => false },
     });

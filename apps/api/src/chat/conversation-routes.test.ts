@@ -5,7 +5,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { UserDoc } from "../auth/users";
 import type { PersistedTurn } from "../conversations/service";
 import { registerConversationRoutes } from "./conversation-routes";
-import type { ConversationDeleteOutcome, ConversationRepo } from "./conversations";
+import {
+  type ConversationDeleteOutcome,
+  type ConversationRepo,
+  encodeConversationCursor,
+} from "./conversations";
 import type { MessageRepo } from "./messages";
 
 describe("restoring the latest Turn", () => {
@@ -382,5 +386,73 @@ describe("listing messages that carry an attachment", () => {
     } finally {
       await bare.close();
     }
+  });
+});
+
+describe("GET /api/v1/chats", () => {
+  let app: FastifyInstance;
+  const list = vi.fn(
+    async (): Promise<{ items: never[]; nextCursor: string | null }> => ({
+      items: [],
+      nextCursor: null,
+    })
+  );
+
+  beforeEach(async () => {
+    app = Fastify();
+    const repo = { list } as unknown as ConversationRepo;
+    registerConversationRoutes(app, { repo, messageRepo: {} as MessageRepo }, async (request) => {
+      request.user = { _id: "user-1" } as UserDoc;
+    });
+    await app.ready();
+  });
+
+  afterEach(async () => {
+    list.mockClear();
+    await app.close();
+  });
+
+  it("defaults to a page of 20 with no cursor", async () => {
+    const response = await app.inject({ method: "GET", url: "/api/v1/chats" });
+
+    expect(response.statusCode).toBe(200);
+    expect(list).toHaveBeenCalledWith("user-1", 20, { q: undefined, after: undefined });
+  });
+
+  it("decodes a `cursor` query param into the repo's `after` keyset", async () => {
+    const cursor = encodeConversationCursor({
+      updatedAt: new Date("2026-01-01T00:00:00.000Z"),
+      _id: "chat-9",
+    });
+
+    const response = await app.inject({ method: "GET", url: `/api/v1/chats?cursor=${cursor}` });
+
+    expect(response.statusCode).toBe(200);
+    expect(list).toHaveBeenCalledWith("user-1", 20, {
+      q: undefined,
+      after: { updatedAt: new Date("2026-01-01T00:00:00.000Z"), _id: "chat-9" },
+    });
+  });
+
+  it("ignores an unparseable cursor rather than failing the request", async () => {
+    const response = await app.inject({
+      method: "GET",
+      url: "/api/v1/chats?cursor=not-base64json",
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(list).toHaveBeenCalledWith("user-1", 20, { q: undefined, after: undefined });
+  });
+
+  it("passes `q` through and echoes the repo's `nextCursor`", async () => {
+    list.mockResolvedValueOnce({
+      items: [],
+      nextCursor: "next-page-cursor",
+    });
+
+    const response = await app.inject({ method: "GET", url: "/api/v1/chats?q=budget" });
+
+    expect(list).toHaveBeenCalledWith("user-1", 20, { q: "budget", after: undefined });
+    expect(response.json().nextCursor).toBe("next-page-cursor");
   });
 });

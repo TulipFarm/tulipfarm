@@ -35,7 +35,7 @@ export interface SlackHomeProjectionDeps {
     ): Promise<readonly TaskRecord[]>;
   };
   readonly conversations: {
-    list(userId: string, limit: number): Promise<readonly ConversationDoc[]>;
+    list(userId: string, limit: number): Promise<{ items: readonly ConversationDoc[] }>;
   };
   readonly conversationTurns: {
     findLatestTurn(
@@ -92,7 +92,7 @@ export class SlackHomeProjectionService {
   constructor(private readonly deps: SlackHomeProjectionDeps) {}
 
   async load(input: SlackHomeProjectionInput): Promise<SlackHomeProjection> {
-    const [toolApprovals, routineApprovals, tasks, conversations] = await Promise.all([
+    const [toolApprovals, routineApprovals, tasks, conversationPage] = await Promise.all([
       this.deps.toolApprovals?.listPendingFor({
         businessId: input.businessId,
         principal: input.principalRef,
@@ -105,6 +105,7 @@ export class SlackHomeProjectionService {
         [],
       this.deps.conversations.list(input.principalId, CONVERSATION_CANDIDATE_LIMIT),
     ]);
+    const conversations = conversationPage.items;
 
     const needsYou = [
       ...toolApprovals.map((approval) => `Approval: ${slackText(approval.toolName)}`),
