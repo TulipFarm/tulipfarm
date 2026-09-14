@@ -46,13 +46,16 @@ test("identifies every route that swaps the app sidebar into Settings mode", () 
     "/integrations/github",
     "/operations",
     "/design-guide",
+    "/resources",
+    "/business/activities",
+    "/farm",
+    "/teams",
   ]) {
     expect(isSettingsPath(path)).toBe(true);
   }
-  for (const path of ["/", "/resources", "/business/activities", "/farm"]) {
+  for (const path of ["/"]) {
     expect(isSettingsPath(path)).toBe(false);
   }
-  expect(isSettingsPath("/teams")).toBe(false);
 });
 
 /* `/business/people` redirects in-shell, so its transient label must stay explicit. */
@@ -61,15 +64,13 @@ test("a retired page still names its destination while it redirects", () => {
 });
 
 test("hides every denied destination and collapses its empty groups", () => {
-  expect(
-    visibleSidebarGroups({ isDev: false, visiblePaths: ["/business/activities", "/teams"] })
-  ).toEqual([
+  expect(visibleSidebarGroups({ isDev: false, visiblePaths: ["/inbox", "/agents"] })).toEqual([
     expect.objectContaining({
       heading: "Work",
       items: [
         expect.objectContaining({ label: "Chats" }),
-        expect.objectContaining({ label: "Activity" }),
-        expect.objectContaining({ label: "Teams" }),
+        expect.objectContaining({ label: "Inbox" }),
+        expect.objectContaining({ label: "Agents" }),
       ],
     }),
   ]);
@@ -84,8 +85,8 @@ test("keeps Chat reachable for an account granted nothing", () => {
 
 /* Teams is server-sourced like everything else now — no more client-side `authenticated` guess. */
 test("shows Teams only when the server includes it in visiblePaths", () => {
-  const withTeams = visibleSidebarGroups({ isDev: false, visiblePaths: ["/teams"] });
-  const withoutTeams = visibleSidebarGroups({ isDev: false, visiblePaths: [] });
+  const withTeams = visibleSettingsGroups({ isDev: false, visiblePaths: ["/teams"] });
+  const withoutTeams = visibleSettingsGroups({ isDev: false, visiblePaths: [] });
 
   expect(withTeams.flatMap((group) => group.items.map((item) => item.to))).toContain("/teams");
   expect(withoutTeams.flatMap((group) => group.items.map((item) => item.to))).not.toContain(
@@ -100,8 +101,8 @@ test("shows Teams only when the server includes it in visiblePaths", () => {
 test("hides Settings when nothing behind it is reachable", () => {
   const item = (paths: string[]) => visibleSettingsItem({ isDev: false, visiblePaths: paths });
 
-  expect(item(["/farm"])).toBeUndefined();
-  expect(item(["/farm", "/settings/profile"])?.to).toBe("/settings");
+  expect(item(["/chats"])).toBeUndefined();
+  expect(item(["/chats", "/settings/profile"])?.to).toBe("/settings");
 });
 
 /* Settings is pinned, so it must not also appear as a row inside a group. */
@@ -144,9 +145,9 @@ test("resolves a path to the most specific nav item that owns it", () => {
   expect(sectionForPath("/chat/c1")).toBeUndefined();
 });
 
-/* Scheduled Tasks is a sibling of Routines in the sidebar, not a settings destination. */
-test("lists Scheduled Tasks beside Routines in Build", () => {
-  const build = SIDEBAR_GROUPS.find((group) => group.heading === "Build");
-  expect(build?.items.map((item) => item.to)).toContain("/routines/scheduled");
+/* Scheduled Tasks is a top-level sidebar destination, while Routines is in Settings. */
+test("lists Scheduled Tasks in the main sidebar", () => {
+  const work = SIDEBAR_GROUPS.find((group) => group.heading === "Work");
+  expect(work?.items.map((item) => item.to)).toContain("/routines/scheduled");
   expect(titleForPath("/routines/scheduled")).toBe("Scheduled Tasks");
 });

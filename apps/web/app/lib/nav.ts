@@ -63,56 +63,18 @@ export type NavigationVisibility = {
 export const FARM_ITEM: NavItem = { to: "/farm", label: "Farm", icon: Flower2 };
 
 /**
- * The grouped working destinations, in render order. Farm and Settings stay in the fixed utility
- * area below these groups; there is no second navigation layer to open.
- *
- * The split is by verb, not by subject: this list is what you *do and watch*. Anything you
- * *configure* lives in `SETTINGS_GROUPS`, because a sidebar carrying every configuration page
- * stops being scannable at exactly the size this product reaches.
+ * The grouped working destinations, in render order. Settings stays in the fixed utility
+ * area below this group.
  */
 export const SIDEBAR_GROUPS: NavGroup[] = [
   {
     heading: "Work",
     items: [
-      // The sole item still bypassing visiblePaths — see the `always` field doc above. Every
-      // other destination, /teams included, sources its visibility from the server.
       { to: "/chats", label: "Chats", icon: MessageSquare, always: true },
       { to: "/inbox", label: "Inbox", icon: Inbox, badge: true },
-      {
-        to: "/business/activities",
-        label: "Activity",
-        icon: History,
-        description:
-          "One timeline of everything that happened here: Runs, Records, Chats, and Jobs.",
-      },
-      {
-        to: "/teams",
-        label: "Teams",
-        icon: Users,
-        description: "Browse the Teams and people that make up this business.",
-      },
-    ],
-  },
-  {
-    heading: "Build",
-    items: [
-      {
-        to: "/resources",
-        label: "Resources",
-        icon: Boxes,
-        create: { to: "/resources/new", label: "New resource type" },
-      },
       { to: "/agents", label: "Agents", icon: Bot },
-      { to: "/skills", label: "Skills", icon: Puzzle },
-      { to: "/routines", label: "Routines", icon: Workflow },
       { to: "/routines/scheduled", label: "Scheduled Tasks", icon: Calendar },
       { to: "/files", label: "Files", icon: FileText },
-      {
-        to: "/knowledge",
-        label: "Knowledge",
-        icon: BookOpen,
-        create: { to: "/knowledge/spaces/new", label: "New space" },
-      },
     ],
   },
 ];
@@ -121,7 +83,7 @@ export const SIDEBAR_GROUPS: NavGroup[] = [
  * Pinned below the scrolling list rather than ending it, so the door to every configuration page
  * sits at a fixed spot next to the account it belongs beside, instead of drifting with the list.
  */
-export const SETTINGS_ITEM: NavItem = { to: "/settings", label: "Settings", icon: Settings };
+export const SETTINGS_ITEM: NavItem = { to: "/settings", label: "Settings & more", icon: Settings };
 
 /**
  * Everything reached through Settings. Configuration surfaces are visited rarely and
@@ -215,8 +177,35 @@ export const SETTINGS_GROUPS: NavGroup[] = [
     ],
   },
   {
-    heading: "Operate",
+    heading: "More",
     items: [
+      {
+        to: "/resources",
+        label: "Resources",
+        icon: Boxes,
+        create: { to: "/resources/new", label: "New resource type" },
+      },
+      { to: "/skills", label: "Skills", icon: Puzzle },
+      { to: "/routines", label: "Routines", icon: Workflow },
+      {
+        to: "/knowledge",
+        label: "Knowledge",
+        icon: BookOpen,
+        create: { to: "/knowledge/spaces/new", label: "New space" },
+      },
+      {
+        to: "/teams",
+        label: "Teams",
+        icon: Users,
+        description: "Browse the Teams and people that make up this business.",
+      },
+      {
+        to: "/business/activities",
+        label: "Activity",
+        icon: History,
+        description:
+          "One timeline of everything that happened here: Runs, Records, Chats, and Jobs.",
+      },
       {
         to: "/operations",
         label: "Operations",
@@ -236,6 +225,7 @@ export const SETTINGS_GROUPS: NavGroup[] = [
         icon: Gauge,
         description: "What your agents are doing: tokens, turns, and reliability.",
       },
+      { to: "/farm", label: "Farm", icon: Flower2 },
     ],
   },
   {
@@ -264,9 +254,6 @@ export function visibleSettingsGroups(visibility: NavigationVisibility): NavGrou
 }
 
 export function isSettingsPath(pathname: string): boolean {
-  if (pathname === "/teams" || pathname.startsWith("/teams/")) {
-    return false;
-  }
   return (
     pathname === "/settings" ||
     SETTINGS_GROUPS.some((group) =>
@@ -284,10 +271,6 @@ export function visibleSidebarGroups(visibility: NavigationVisibility): NavGroup
  */
 export function visibleSettingsItem(visibility: NavigationVisibility): NavItem | undefined {
   return visibleSettingsGroups(visibility).length > 0 ? SETTINGS_ITEM : undefined;
-}
-
-export function visibleFarmItem(visibility: NavigationVisibility): NavItem | undefined {
-  return isVisible(FARM_ITEM, visibility) ? FARM_ITEM : undefined;
 }
 
 const PAGE_META: Array<{ prefix: string; label: string; icon: Icon }> = [

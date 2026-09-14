@@ -39,7 +39,6 @@ import {
   type NavGroup,
   type NavigationVisibility,
   titleForPath,
-  visibleFarmItem,
   visibleSettingsGroups,
   visibleSettingsItem,
   visibleSidebarGroups,
@@ -666,6 +665,7 @@ function SettingsNavigation({
                   to={item.to}
                   label={item.label}
                   icon={item.icon}
+                  create={item.create}
                   collapsed={false}
                   onNavigate={onNavigate}
                 />
@@ -700,7 +700,6 @@ export function AppSidebar({
   };
   const groups = visibleSidebarGroups(visibility);
   const settingsGroups = visibleSettingsGroups(visibility);
-  const farmItem = visibleFarmItem(visibility);
   const settingsItem = visibleSettingsItem(visibility);
   const { count } = useApprovals();
   const [persistent, setPersistent] = useState(true);
@@ -775,26 +774,15 @@ export function AppSidebar({
             </nav>
           </div>
         )}
-        {!settingsMode && (farmItem || settingsItem) ? (
+        {!settingsMode && settingsItem ? (
           <nav aria-label="Utilities" className="flex shrink-0 flex-col gap-0.5 px-3 py-1">
-            {farmItem ? (
-              <NavRow
-                to={farmItem.to}
-                label={farmItem.label}
-                icon={farmItem.icon}
-                collapsed={narrow}
-                onNavigate={onClose}
-              />
-            ) : null}
-            {settingsItem ? (
-              <NavRow
-                to={settingsItem.to}
-                label={settingsItem.label}
-                icon={settingsItem.icon}
-                collapsed={narrow}
-                onNavigate={onClose}
-              />
-            ) : null}
+            <NavRow
+              to={settingsItem.to}
+              label={settingsItem.label}
+              icon={settingsItem.icon}
+              collapsed={narrow}
+              onNavigate={onClose}
+            />
           </nav>
         ) : null}
         <UserCard user={user} collapsed={narrow} onNavigate={onClose} />

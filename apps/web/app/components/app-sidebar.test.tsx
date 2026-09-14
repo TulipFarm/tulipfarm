@@ -33,9 +33,7 @@ const RestrictedSidebarStub = createRemixStub([
   {
     path: "*",
     Component: () => (
-      <AppSidebar
-        user={{ ...USER, navigation: { visiblePaths: ["/resources", "/business/activities"] } }}
-      />
+      <AppSidebar user={{ ...USER, navigation: { visiblePaths: ["/inbox", "/agents"] } }} />
     ),
   },
 ]);
@@ -100,27 +98,18 @@ test("renders every destination in one flat list, with no rail or second panel",
   render(<SidebarStub initialEntries={["/inbox"]} />);
   const nav = screen.getByRole("navigation", { name: "Main" });
 
-  for (const heading of ["Work", "Build"]) {
+  for (const heading of ["Work"]) {
     expect(within(nav).getByRole("heading", { level: 2, name: heading })).toBeInTheDocument();
   }
-  for (const label of [
-    "Chats",
-    "Inbox",
-    "Activity",
-    "Teams",
-    "Resources",
-    "Agents",
-    "Files",
-    "Knowledge",
-  ]) {
+  for (const label of ["Chats", "Inbox", "Agents", "Files", "Scheduled Tasks"]) {
     expect(within(nav).getByRole("link", { name: new RegExp(label, "i") })).toBeInTheDocument();
   }
   const utilities = screen.getByRole("navigation", { name: "Utilities" });
-  expect(within(utilities).getByRole("link", { name: "Farm" })).toBeInTheDocument();
-  expect(within(utilities).getByRole("link", { name: "Settings" })).toBeInTheDocument();
+  expect(within(utilities).getByRole("link", { name: "Settings & more" })).toBeInTheDocument();
+  expect(within(utilities).queryByRole("link", { name: "Farm" })).not.toBeInTheDocument();
 
   expect(screen.queryByRole("navigation", { name: "Product modes" })).not.toBeInTheDocument();
-  expect(within(nav).queryByRole("heading", { name: "Knowledge" })).not.toBeInTheDocument();
+  expect(within(nav).queryByRole("heading", { name: "Build" })).not.toBeInTheDocument();
 });
 
 test("marks the destination matching the current page, and only that one", () => {
@@ -139,7 +128,7 @@ test("shows pending feedback on a nav row while its destination is still loading
   const PendingSidebarStub = createRemixStub([
     { path: "/chats", Component: AppSidebar },
     {
-      path: "/routines",
+      path: "/routines/scheduled",
       Component: AppSidebar,
       // Never resolves, so the row stays in the pending state for the assertion below.
       loader: () => new Promise(() => {}),
@@ -147,11 +136,11 @@ test("shows pending feedback on a nav row while its destination is still loading
   ]);
   render(<PendingSidebarStub initialEntries={["/chats"]} />);
   const nav = screen.getByRole("navigation", { name: "Main" });
-  const routinesLink = within(nav).getByRole("link", { name: /Routines/i });
+  const scheduledLink = within(nav).getByRole("link", { name: /Scheduled Tasks/i });
 
-  expect(routinesLink.className).not.toMatch(/animate-pulse/);
-  await userEvent.click(routinesLink);
-  expect(routinesLink.className).toMatch(/animate-pulse/);
+  expect(scheduledLink.className).not.toMatch(/animate-pulse/);
+  await userEvent.click(scheduledLink);
+  expect(scheduledLink.className).toMatch(/animate-pulse/);
 });
 
 test("carries the live approval count on Inbox", () => {
@@ -227,43 +216,34 @@ test("still announces the approval count when the sidebar is collapsed", async (
 });
 
 test("hides denied destinations and the groups they empty", () => {
-  render(<RestrictedSidebarStub initialEntries={["/business/activities"]} />);
+  render(<RestrictedSidebarStub initialEntries={["/inbox"]} />);
   const nav = screen.getByRole("navigation", { name: "Main" });
 
-  expect(within(nav).getByRole("link", { name: "Activity" })).toBeInTheDocument();
-  expect(within(nav).getByRole("link", { name: "Resources" })).toBeInTheDocument();
-  for (const label of ["Inbox", "Farm", "Knowledge", "Teams"]) {
+  expect(within(nav).getByRole("link", { name: "Inbox" })).toBeInTheDocument();
+  expect(within(nav).getByRole("link", { name: "Agents" })).toBeInTheDocument();
+  for (const label of ["Files", "Scheduled Tasks"]) {
     expect(within(nav).queryByRole("link", { name: label })).not.toBeInTheDocument();
   }
-  expect(within(nav).queryByRole("heading", { name: "Build" })).toBeInTheDocument();
-  expect(screen.queryByRole("link", { name: "Settings" })).not.toBeInTheDocument();
+  expect(within(nav).queryByRole("heading", { name: "Build" })).not.toBeInTheDocument();
+  expect(screen.queryByRole("link", { name: "Settings & more" })).not.toBeInTheDocument();
 });
 
-test("shows Teams once its path is granted, like any other visiblePaths-gated destination", () => {
-  const GrantedTeamsSidebarStub = createRemixStub([
-    {
-      path: "*",
-      Component: () => (
-        <AppSidebar
-          user={{
-            ...USER,
-            navigation: { visiblePaths: ["/resources", "/business/activities", "/teams"] },
-          }}
-        />
-      ),
-    },
-  ]);
-  render(<GrantedTeamsSidebarStub initialEntries={["/business/activities"]} />);
-  const nav = screen.getByRole("navigation", { name: "Main" });
+test("shows Files once its path is granted, like any other visiblePaths-gated destination", () => {
+  const { unmount } = render(<RestrictedSidebarStub initialEntries={["/inbox"]} />);
+  let nav = screen.getByRole("navigation", { name: "Main" });
+  expect(within(nav).queryByRole("link", { name: "Files" })).not.toBeInTheDocument();
 
-  expect(within(nav).getByRole("link", { name: "Teams" })).toBeInTheDocument();
+  unmount();
+  render(<SidebarStub initialEntries={["/inbox"]} />);
+  nav = screen.getByRole("navigation", { name: "Main" });
+  expect(within(nav).getByRole("link", { name: "Files" })).toBeInTheDocument();
 });
 
 test("replaces the app destinations with Settings navigation on a Settings-owned route", () => {
   render(<SidebarStub initialEntries={["/business/models"]} />);
   const nav = screen.getByRole("navigation", { name: "Settings" });
 
-  for (const heading of ["You", "Business", "Operate", "Developer"]) {
+  for (const heading of ["You", "Business", "More", "Developer"]) {
     expect(within(nav).getByRole("heading", { name: heading })).toBeInTheDocument();
   }
   expect(within(nav).getByRole("link", { name: "Models" })).toHaveAttribute("aria-current", "page");
@@ -292,11 +272,12 @@ test("filters Settings destinations without leaving the current page", async () 
   expect(within(nav).queryByRole("link", { name: "Profile" })).not.toBeInTheDocument();
 });
 
-test("keeps Teams in the main sidebar instead of Settings navigation", () => {
+test("moves Teams into Settings navigation, consolidated under More", () => {
   render(<SidebarStub initialEntries={["/teams"]} />);
+  const nav = screen.getByRole("navigation", { name: "Settings" });
 
-  expect(screen.getByRole("navigation", { name: "Main" })).toBeInTheDocument();
-  expect(screen.getByRole("link", { name: "Teams" })).toHaveAttribute("aria-current", "page");
+  expect(within(nav).getByRole("link", { name: "Teams" })).toHaveAttribute("aria-current", "page");
+  expect(screen.queryByRole("navigation", { name: "Main" })).not.toBeInTheDocument();
 });
 
 test("renders recent chats and highlights the active one", () => {
@@ -344,7 +325,7 @@ test("collapses every group by its own heading, Recent included", async () => {
   });
   render(<SidebarStub initialEntries={["/chats"]} />);
 
-  for (const heading of ["Work", "Build", "Recent"]) {
+  for (const heading of ["Work", "Recent"]) {
     const button = within(screen.getByRole("heading", { level: 2, name: heading })).getByRole(
       "button"
     );
@@ -468,14 +449,9 @@ test("collapses to icons without losing a destination, and persists the choice",
   await user.click(screen.getByRole("button", { name: "Collapse sidebar" }));
   const nav = screen.getByRole("navigation", { name: "Main" });
 
-  for (const label of ["Chats", "Inbox", "Resources", "Agents"]) {
+  for (const label of ["Chats", "Inbox", "Files", "Agents"]) {
     expect(within(nav).getByRole("link", { name: label })).toBeInTheDocument();
   }
-  expect(
-    within(screen.getByRole("navigation", { name: "Utilities" })).getByRole("link", {
-      name: "Farm",
-    })
-  ).toBeInTheDocument();
   expect(within(nav).queryByRole("heading", { name: "Work" })).not.toBeInTheDocument();
   expect(screen.getByRole("complementary", { name: "Application navigation" }).className).toContain(
     "lg:w-14"
@@ -717,7 +693,7 @@ test("marks the active destination with weight on a neutral ground, never colour
   render(<SidebarStub initialEntries={["/agents"]} />);
 
   const active = screen.getByRole("link", { name: "Agents" });
-  const idle = screen.getByRole("link", { name: "Skills" });
+  const idle = screen.getByRole("link", { name: "Files" });
 
   expect(active).toHaveAttribute("aria-current", "page");
   expect(active.className).toContain("font-medium");
@@ -734,9 +710,9 @@ test("marks the active destination with weight on a neutral ground, never colour
 });
 
 test("gives every row the same box model as the bordered New chat button", () => {
-  render(<SidebarStub initialEntries={["/agents"]} />);
+  render(<SidebarStub initialEntries={["/inbox"]} />);
 
-  for (const name of ["Agents", "Skills", "Inbox"]) {
+  for (const name of ["Agents", "Files", "Inbox"]) {
     expect(screen.getByRole("link", { name }).className).toContain("border border-transparent");
   }
 });
@@ -744,22 +720,22 @@ test("gives every row the same box model as the bordered New chat button", () =>
 /* A closed group is a preference, so it has to survive the next render of the sidebar. */
 test("closes a group, hides its rows, and remembers the choice", async () => {
   const user = userEvent.setup();
-  const { unmount } = render(<SidebarStub initialEntries={["/agents"]} />);
+  const { unmount } = render(<SidebarStub initialEntries={["/inbox"]} />);
 
-  expect(screen.getByRole("link", { name: "Agents" })).toBeInTheDocument();
-  await user.click(screen.getByRole("button", { name: "Build" }));
-  expect(screen.queryByRole("link", { name: "Agents" })).not.toBeInTheDocument();
-  expect(screen.getByRole("heading", { level: 2, name: "Build" })).toBeInTheDocument();
+  expect(screen.getByRole("link", { name: "Files" })).toBeInTheDocument();
+  await user.click(screen.getByRole("button", { name: "Work" }));
+  expect(screen.queryByRole("link", { name: "Files" })).not.toBeInTheDocument();
+  expect(screen.getByRole("heading", { level: 2, name: "Work" })).toBeInTheDocument();
 
   unmount();
-  render(<SidebarStub initialEntries={["/agents"]} />);
-  expect(screen.queryByRole("link", { name: "Agents" })).not.toBeInTheDocument();
-  expect(screen.getByRole("button", { name: "Build" })).toHaveAttribute("aria-expanded", "false");
+  render(<SidebarStub initialEntries={["/inbox"]} />);
+  expect(screen.queryByRole("link", { name: "Files" })).not.toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Work" })).toHaveAttribute("aria-expanded", "false");
 });
 
 /* A `+` that opens nothing teaches a reader to distrust every other `+`. */
 test("offers quick create only on the rows that own a create route", () => {
-  render(<SidebarStub initialEntries={["/agents"]} />);
+  render(<SidebarStub initialEntries={["/resources"]} />);
 
   expect(screen.getByRole("link", { name: "New resource type" })).toHaveAttribute(
     "href",

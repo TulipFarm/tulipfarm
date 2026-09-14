@@ -5,7 +5,6 @@ import { type Icon, MessageSquare, Plus, Search } from "~/components/icons";
 import { useConversations } from "~/lib/conversations-context";
 import {
   type NavigationVisibility,
-  visibleFarmItem,
   visibleSettingsGroups,
   visibleSettingsItem,
   visibleSidebarGroups,
@@ -43,9 +42,9 @@ export function commandEntries(
   actions: CommandActions
 ): CommandEntry[] {
   const groups = visibleSidebarGroups(visibility);
-  const farmItem = visibleFarmItem(visibility);
+  const settingsGroups = visibleSettingsGroups(visibility);
   const settingsItem = visibleSettingsItem(visibility);
-  const creatable = groups.flatMap((group) =>
+  const creatable = [...groups, ...settingsGroups].flatMap((group) =>
     group.items.flatMap((item) => (item.create ? [{ item, create: item.create }] : []))
   );
   return [
@@ -76,18 +75,6 @@ export function commandEntries(
         to: item.to,
       }))
     ),
-    ...(farmItem
-      ? [
-          {
-            id: farmItem.to,
-            label: farmItem.label,
-            hint: "Workspace",
-            section: "Pages" as const,
-            icon: farmItem.icon,
-            to: farmItem.to,
-          },
-        ]
-      : []),
     ...chats.map((chat) => ({
       id: `chat:${chat.id}`,
       label: chat.title ?? "New chat",
