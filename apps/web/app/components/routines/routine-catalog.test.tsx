@@ -95,3 +95,31 @@ test("a routine that has never run says so instead of reading as healthy", () =>
   const row = screen.getByText("Manual cleanup").closest("li");
   expect(row).toHaveTextContent(/never run/i);
 });
+
+test("the Scheduled Tasks tab narrows to cron, interval and datetime routines", async () => {
+  renderCatalog();
+  await userEvent.click(screen.getByRole("tab", { name: "Scheduled Tasks" }));
+
+  expect(screen.getByText("Expense report")).toBeInTheDocument();
+  expect(screen.queryByText("Issue triage")).not.toBeInTheDocument();
+  expect(screen.queryByText("Manual cleanup")).not.toBeInTheDocument();
+});
+
+test("the Event-driven tab is everything a schedule does not start", async () => {
+  renderCatalog();
+  await userEvent.click(screen.getByRole("tab", { name: "Event-driven" }));
+
+  expect(screen.queryByText("Expense report")).not.toBeInTheDocument();
+  expect(screen.getByText("Issue triage")).toBeInTheDocument();
+  expect(screen.getByText("Manual cleanup")).toBeInTheDocument();
+});
+
+test("All Routines keeps every routine regardless of how it starts", async () => {
+  renderCatalog();
+  await userEvent.click(screen.getByRole("tab", { name: "Scheduled Tasks" }));
+  await userEvent.click(screen.getByRole("tab", { name: "All Routines" }));
+
+  expect(screen.getByText("Expense report")).toBeInTheDocument();
+  expect(screen.getByText("Issue triage")).toBeInTheDocument();
+  expect(screen.getByText("Manual cleanup")).toBeInTheDocument();
+});

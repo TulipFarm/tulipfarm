@@ -46,6 +46,17 @@ test("secret.read declares the same fallback everywhere it gates navigation (#75
   }
 });
 
+test("Scheduled Tasks requires the same authority as Routines (#857)", () => {
+  const requirementFor = (path: string) =>
+    NAVIGATION_REQUIREMENTS.find((requirement) => requirement.path === path);
+
+  const routines = requirementFor("/routines");
+  const scheduled = requirementFor("/routines/scheduled");
+
+  expect(scheduled).toBeDefined();
+  expect(scheduled?.authorizations).toEqual(routines?.authorizations);
+});
+
 test("navigation capabilities evaluate each repeated authorization once", async () => {
   const check = vi.fn(async (_principal: string, _authorization: NavigationAuthorization) => true);
 

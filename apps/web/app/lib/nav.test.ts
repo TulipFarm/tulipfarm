@@ -143,3 +143,10 @@ test("resolves a path to the most specific nav item that owns it", () => {
   expect(sectionForPath("/knowledge/spaces/ops")?.label).toBe("Knowledge");
   expect(sectionForPath("/chat/c1")).toBeUndefined();
 });
+
+/* Scheduled Tasks is a sibling of Routines in the sidebar, not a settings destination. */
+test("lists Scheduled Tasks beside Routines in Build", () => {
+  const build = SIDEBAR_GROUPS.find((group) => group.heading === "Build");
+  expect(build?.items.map((item) => item.to)).toContain("/routines/scheduled");
+  expect(titleForPath("/routines/scheduled")).toBe("Scheduled Tasks");
+});
