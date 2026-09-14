@@ -396,8 +396,12 @@ async function refreshStep(
   } catch {
     return markFailed(deps.connections, connection, row, claimRevision, now, "refresh_failed");
   }
-  const declaredSlots = new Set((manifest.auth?.credentialSlots ?? []).map((slot) => slot.id));
-  if (Object.keys(refreshed.credentialValues).some((slot) => !declaredSlots.has(slot))) {
+  const outputSlots = new Set(
+    step.bindings.flatMap((binding) =>
+      binding.target.type === "credential" ? [binding.target.slot] : []
+    )
+  );
+  if (Object.keys(refreshed.credentialValues).some((slot) => !outputSlots.has(slot))) {
     return markFailed(deps.connections, connection, row, claimRevision, now, "missing_credential");
   }
 
