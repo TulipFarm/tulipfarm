@@ -162,6 +162,12 @@ const stateVariants = [
   state("agent", {
     agentRef: definitionRef,
     maxRepairAttempts: Type.Optional(Type.Integer({ minimum: 0, maximum: 10 })),
+    /**
+     * Tool names the Agent must have called at least once for this State to settle as
+     * `succeeded`. The model can end a turn without erroring and without doing anything —
+     * this is how an author declares the side effect the State exists for.
+     */
+    requiredToolCalls: Type.Optional(Type.Array(nonEmptyString, { minItems: 1 })),
   }),
   state("tool", {
     toolRef: definitionRef,

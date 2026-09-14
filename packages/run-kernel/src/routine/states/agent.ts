@@ -19,6 +19,8 @@ export interface AgentInvocationPlan {
   readonly outputSchemaRef: string | null;
   /** How many malformed answers the loop may ask the Agent to repair; authored, never invented. */
   readonly maxRepairAttempts?: number;
+  /** Tool names the Agent must call at least once for the State to settle as `succeeded`. */
+  readonly requiredToolCalls?: readonly string[];
 }
 
 function authored(state: CompiledState): Record<string, unknown> {
@@ -45,12 +47,14 @@ export function planAgentInvocation(
 ): AgentInvocationPlan {
   if (state.type !== "agent") throw new RoutineStepError("state_cannot_progress", state.name);
   const maxRepairAttempts = authored(state).maxRepairAttempts;
+  const requiredToolCalls = authored(state).requiredToolCalls;
 
   return {
     agentRef: agentRefOf(state),
     input: resolveRoutineStateInput(state, scope),
     outputSchemaRef: state.outputSchemaRef,
     ...(typeof maxRepairAttempts === "number" ? { maxRepairAttempts } : {}),
+    ...(Array.isArray(requiredToolCalls) ? { requiredToolCalls } : {}),
   };
 }
 

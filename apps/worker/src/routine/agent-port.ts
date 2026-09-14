@@ -462,6 +462,7 @@ export class BundleRoutineAgentPort implements RoutineAgentPort {
 
     const exposed = await this.exposedTools(request, plan.agentRef.name);
     assertRunActive(request.signal);
+    const calledToolNames = new Set<string>();
     const loop = new AgentLoop({
       model: this.options.model({
         models: selection.chain.map(configuredModelRef),
@@ -471,7 +472,10 @@ export class BundleRoutineAgentPort implements RoutineAgentPort {
         runId: request.runId,
         turnId: `${request.stateKey}:${request.attempt}`,
       }),
-      tools: exposed.length === 0 ? NO_TOOLS : this.toolPort(plan.agentRef.name, events),
+      tools:
+        exposed.length === 0
+          ? NO_TOOLS
+          : this.toolPort(plan.agentRef.name, events, calledToolNames),
       checkpoints,
       events,
       budget: this.budget(request),
@@ -571,6 +575,21 @@ export class BundleRoutineAgentPort implements RoutineAgentPort {
       );
     }
 
+    const missingRequiredTool = (plan.requiredToolCalls ?? []).find(
+      (name) => !calledToolNames.has(name)
+    );
+    if (missingRequiredTool !== undefined) {
+      return this.finished(
+        events,
+        {
+          kind: "failed",
+          reason: `required_tool_not_called:${missingRequiredTool}`,
+          retryable: false,
+        },
+        request.signal
+      );
+    }
+
     return this.finished(events, { kind: "succeeded", output: outcome.output }, request.signal);
   }
 
@@ -643,10 +662,19 @@ export class BundleRoutineAgentPort implements RoutineAgentPort {
    * Tool calls leave no `tool.call`/`tool.result` Run events, so a denied call is invisible to the
    * Runs view and the only record of it is whatever the model chose to say in prose.
    */
-  private toolPort(agentName: string, events: TurnEventWriter): ToolDispatchPort {
+  private toolPort(
+    agentName: string,
+    events: TurnEventWriter,
+    calledToolNames: Set<string>
+  ): ToolDispatchPort {
     const tools = this.options.tools ?? NO_TOOLS;
     return announceToolCalls(
-      { dispatch: (call) => tools.dispatch({ ...call, agentName }) },
+      {
+        dispatch: (call) => {
+          calledToolNames.add(call.name);
+          return tools.dispatch({ ...call, agentName });
+        },
+      },
       events
     );
   }
