@@ -304,3 +304,25 @@ describe("published bundle retention consumer", () => {
     expect(boss.createQueue).not.toHaveBeenCalledWith(SOUL_BUNDLE_PRUNE_QUEUE);
   });
 });
+
+it("registers product telemetry in the worker and calls only the authenticated API dispatcher", async () => {
+  const boss = {
+    start: vi.fn(async () => {}),
+    createQueue: vi.fn(async () => {}),
+    work: vi.fn(async (_name: string, _handler: (jobs: unknown[]) => Promise<void>) => "worker-id"),
+  };
+  const require = vi.fn(async () => ({ sent: true }));
+  await startJobConsumers({
+    databaseUrl: "postgres://database/tulipfarm",
+    database: { query: async () => ({ rows: [] }) },
+    boss: boss as unknown as PgBoss,
+    internalApi: { require } as unknown as InternalApiClient,
+  });
+  const handler = boss.work.mock.calls.find(([name]) => name === "product-telemetry")?.[1];
+  expect(handler).toBeDefined();
+  await handler?.([]);
+  expect(require).toHaveBeenCalledExactlyOnceWith(
+    "POST",
+    "/api/v1/internal/system/telemetry/dispatch"
+  );
+});

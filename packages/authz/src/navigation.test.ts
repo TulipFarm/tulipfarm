@@ -67,3 +67,19 @@ test("navigation capabilities evaluate each repeated authorization once", async 
   );
   expect(evaluated).toHaveLength(new Set(evaluated).size);
 });
+
+test("telemetry navigation requires admin telemetry read authority", async () => {
+  const path = NAVIGATION_REQUIREMENTS.find(
+    (requirement) => requirement.path === "/settings/telemetry"
+  );
+  expect(path?.authorizations).toEqual([
+    { action: "telemetry.read", resourceType: "telemetry", fallback: "admin" },
+  ]);
+  const member = await sessionNavigationCapabilities(
+    "member",
+    async (_principal, auth) => auth.fallback === "authenticated"
+  );
+  expect(member.visiblePaths).not.toContain("/settings/telemetry");
+  const admin = await sessionNavigationCapabilities("admin", async () => true);
+  expect(admin.visiblePaths).toContain("/settings/telemetry");
+});

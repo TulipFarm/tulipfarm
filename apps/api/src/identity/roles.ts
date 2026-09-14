@@ -73,6 +73,11 @@ export const ADMIN_ONLY_SURFACES: readonly {
   },
   { type: "knowledge_source", actions: ["*"], enforcedIn: "knowledge/routes.ts" },
   { type: "kv_system", actions: ["*"], enforcedIn: "kv/routes.ts" },
+  {
+    type: "telemetry",
+    actions: ["telemetry.read", "telemetry.write"],
+    enforcedIn: "system/telemetry/routes.ts",
+  },
   { type: "setup", actions: ["*"], enforcedIn: "setup/routes.ts" },
   {
     type: "deployment.public_origins",

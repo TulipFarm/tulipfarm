@@ -73,6 +73,12 @@ properties:
             value: ""
           - name: PUBLIC_ORIGINS_LOCKED
             value: ""
+          - name: TULIPFARM_TELEMETRY_LEVEL
+            value: ""
+          - name: TULIPFARM_TELEMETRY_URL
+            value: ""
+          - name: TULIPFARM_DEPLOYMENT_METHOD
+            value: ""
           - name: CORS_ORIGIN
             value: ""
           - name: VITE_PORT

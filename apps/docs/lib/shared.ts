@@ -1,5 +1,5 @@
-/** Canonical site URL and install-asset host; keep import-free for fumadocs-mdx bundling. */
-export const SITE_URL = "https://tulipfarm.site";
+/** Relative static leaf keeps this module usable during Fumadocs bundling. */
+export { SITE_URL } from "../../../packages/constants/src/site";
 
 export const appName = "tulipfarm docs";
 /** Fallback meta description for routes that set none. */

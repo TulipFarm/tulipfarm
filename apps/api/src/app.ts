@@ -58,6 +58,7 @@ import { MemorySurfaceActionStore } from "./surfaces/action-store";
 import { MemorySurfaceArtifactStore } from "./surfaces/artifact-store";
 import { registerSurfaceRoutes } from "./surfaces/routes";
 import { registerSystemRoutes } from "./system/routes";
+import { registerProductTelemetryRoutes } from "./system/telemetry/routes";
 import { registerTaskRoutes } from "./tasks/routes";
 import { registerTeamAssetRoutes } from "./team-assets/routes";
 import { buildToolRegistry } from "./tools/setup";
@@ -324,6 +325,7 @@ export async function buildApp(opts: AppOptions = {}) {
     if (!isHeadlessBoot() && opts.secretsService && opts.gitSync && soulPath) {
       registerSetupRoutes(app, {
         requireAuthorization,
+        productTelemetry: opts.productTelemetry,
         userRepo: opts.userRepo,
         sessionStore: opts.sessionStore,
         secretsService: opts.secretsService,
@@ -391,6 +393,8 @@ export async function buildApp(opts: AppOptions = {}) {
       registerKvRoutes(app, opts.kvService, requireAuth, requireAuthorization);
       registerPreferenceRoutes(app, opts.kvService, requireAuth);
     }
+    if (opts.productTelemetry)
+      registerProductTelemetryRoutes(app, opts.productTelemetry, requireAuth, requireAuthorization);
     registerSystemRoutes(
       app,
       {

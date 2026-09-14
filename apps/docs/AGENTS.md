@@ -66,8 +66,9 @@ it needs, never the one whose topic it resembles.
 - Frontmatter needs `title` and a 110–160 character `description` — it is the search snippet.
 - The canonical site URL is `https://tulipfarm.site`, set once in `lib/shared.ts`. Never write
   the domain in MDX/TS/TSX — use `{{SITE_URL}}` or import `SITE_URL`.
-- Imports in `source.config.ts` must be relative, and `lib/shared.ts` must stay import-free, so
-  Fumadocs can evaluate bundled config under plain Node. Restart dev after editing it.
+- Imports in `source.config.ts` must be relative. `lib/shared.ts` may re-export the relative,
+  import-free `packages/constants/src/site.ts` leaf; keep runtime imports out so Fumadocs can
+  evaluate bundled config under plain Node. Restart dev after editing it.
 - Design: Instrument Sans for prose and UI, JetBrains Mono for code and technical surfaces,
   hairline borders, warm cream/near-black, ruby accent, no gradients except the prompt block
   underline; clickable elements need cursor.

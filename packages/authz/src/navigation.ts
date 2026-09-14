@@ -121,6 +121,10 @@ export const NAVIGATION_REQUIREMENTS: readonly NavigationRequirement[] = [
   { path: "/business/guardrails", authorizations: [OPERATIONS_READ] },
   { path: "/business/access", authorizations: [OPERATIONS_READ] },
   { path: "/business/about", authorizations: [AUTHENTICATED_NAVIGATION] },
+  {
+    path: "/settings/telemetry",
+    authorizations: [{ action: "telemetry.read", resourceType: "telemetry", fallback: "admin" }],
+  },
   { path: "/settings/profile", authorizations: [AUTHENTICATED_NAVIGATION] },
   { path: "/settings/appearance", authorizations: [AUTHENTICATED_NAVIGATION] },
   {

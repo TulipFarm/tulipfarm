@@ -71,6 +71,11 @@ const SECTIONS: readonly Section[] = [
     intro: "How work is handed to another agent, automated, and reported on while it runs.",
   },
   {
+    area: "user",
+    heading: "People",
+    intro: "Finding the people in your business when an agent needs to identify a user.",
+  },
+  {
     area: "team",
     heading: "Teams",
     intro:

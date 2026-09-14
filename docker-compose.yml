@@ -97,6 +97,9 @@ services:
       PUBLIC_URL: ${PUBLIC_URL:-http://localhost:${HOST_PORT:-8080}}
       PUBLIC_API_URL: ${PUBLIC_API_URL:-${PUBLIC_URL:-http://localhost:${HOST_PORT:-8080}}}
       PUBLIC_ORIGINS_LOCKED: ${PUBLIC_ORIGINS_LOCKED:-false}
+      TULIPFARM_DEPLOYMENT_METHOD: compose
+      TULIPFARM_TELEMETRY_LEVEL: ${TULIPFARM_TELEMETRY_LEVEL:-2}
+      TULIPFARM_TELEMETRY_URL: ${TULIPFARM_TELEMETRY_URL:-https://telemetry.tulipfarm.site/v1/events}
       # Bundled mode wires this from POSTGRES_PASSWORD; override it for managed Postgres.
       DATABASE_URL: ${DATABASE_URL:-postgresql://tulipfarm:${POSTGRES_PASSWORD:-tulipfarm}@postgres:5432/tulipfarm}
       # Empty means "generate and persist to /data on first boot" — see the header.

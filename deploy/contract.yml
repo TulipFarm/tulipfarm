@@ -159,6 +159,30 @@ env:
       Business then About.
     consequence: Left false, an in-app value silently overrides the environment, so the deployed
       configuration is not the effective one.
+  - name: TULIPFARM_TELEMETRY_LEVEL
+    group: Product telemetry
+    zone: set-these
+    consumers: [app]
+    default: "2"
+    description: Maximum product telemetry level selectable in Settings then Telemetry; 0 is
+      mandatory bootstrap only, 1 adds daily counts, and 2 adds named inventory.
+    consequence: Bootstrap includes business identity and sanitized URLs at every level.
+      Lowering this cap stops future reports above it; it does not erase received data.
+  - name: TULIPFARM_TELEMETRY_URL
+    group: Product telemetry
+    zone: set-these
+    consumers: [app]
+    default: TulipFarm HTTPS telemetry collector
+    description: HTTPS endpoint receiving versioned product telemetry reports.
+    consequence: An unreachable collector leaves reports pending for bounded retries and never
+      blocks startup. Only production instances transmit.
+  - name: TULIPFARM_DEPLOYMENT_METHOD
+    group: Product telemetry
+    zone: installer-sets
+    consumers: [app]
+    default: unknown
+    description: Deployment method included in the one-time bootstrap report; Compose sets compose.
+    consequence: Leave unknown when the deployment method cannot be identified reliably.
   - name: CORS_ORIGIN
     group: Networking and URLs
     zone: set-these

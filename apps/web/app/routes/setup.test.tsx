@@ -21,9 +21,11 @@ afterEach(() => {
   vi.clearAllMocks();
 });
 
-function renderRoute() {
-  const Stub = createRemixStub([{ path: "/", Component: () => <SetupRoute /> }]);
-  render(<Stub initialEntries={["/"]} />);
+function renderRoute(telemetry = { maxLevel: 2, enabled: true }) {
+  const Stub = createRemixStub([
+    { path: "/", Component: () => <SetupRoute />, loader: () => ({ telemetry }) },
+  ]);
+  render(<Stub initialEntries={["/"]} hydrationData={{ loaderData: { "0": { telemetry } } }} />);
 }
 
 async function answerAll(user: ReturnType<typeof userEvent.setup>) {
@@ -129,4 +131,27 @@ test("rewinds to the question named by a 422's field path", async () => {
 
   expect(await screen.findByText("email is already taken")).toBeInTheDocument();
   expect(screen.getByLabelText(/^email/i)).toBeInTheDocument();
+});
+
+test("discloses mandatory bootstrap and submits the selected telemetry level", async () => {
+  setupAdmin.mockResolvedValue(undefined);
+  setupBusiness.mockResolvedValue(undefined);
+  completeSetup.mockResolvedValue(undefined);
+  const user = userEvent.setup();
+  renderRoute();
+  await answerAll(user);
+  expect(screen.getByText(/mandatory one-time bootstrap report/i)).toBeInTheDocument();
+  expect(screen.getByRole("radio", { name: /Level 2/ })).toBeChecked();
+  await user.click(screen.getByRole("radio", { name: /Level 0/ }));
+  await user.click(screen.getByRole("button", { name: "Finish" }));
+  await waitFor(() => expect(completeSetup).toHaveBeenCalledWith(0));
+});
+
+test("setup respects the deployment cap and discloses disabled delivery", async () => {
+  const user = userEvent.setup();
+  renderRoute({ maxLevel: 1, enabled: false });
+  await answerAll(user);
+  expect(screen.getByRole("radio", { name: /Level 1/ })).toBeChecked();
+  expect(screen.getByRole("radio", { name: /Level 2/ })).toBeDisabled();
+  expect(screen.getByText(/disabled in development and tests/i)).toBeInTheDocument();
 });

@@ -1,20 +1,22 @@
-import { type MetaFunction, redirect, useNavigate } from "@remix-run/react";
+import { type MetaFunction, redirect, useLoaderData, useNavigate } from "@remix-run/react";
 import { type FormEvent, useRef, useState } from "react";
 import { AlertCircle, ArrowLeft, Loader2 } from "~/components/icons";
 import { PromptField } from "~/components/onboarding/prompt-field";
 import { TulipGrowth, type TulipStage } from "~/components/onboarding/tulip-growth";
+import { TelemetryDisclosure, TelemetryLevelPicker } from "~/components/settings/telemetry-level";
 import { Button } from "~/components/ui/button";
 import { ApiError } from "~/lib/api";
 import { completeSetup, getSetupStatus, setupAdmin, setupBusiness } from "~/lib/setup";
+import type { TelemetryLevel } from "~/lib/telemetry";
 import { cn } from "~/lib/utils";
 
 export const meta: MetaFunction = () => [{ title: "Setup · tulipfarm" }];
 
 // Redirect to / if setup is already complete (both headless and wizard paths).
 export async function clientLoader() {
-  const { needsSetup } = await getSetupStatus();
+  const { needsSetup, telemetry } = await getSetupStatus();
   if (!needsSetup) throw redirect("/");
-  return null;
+  return { telemetry };
 }
 
 // Mobile keeps a 44px target and 16px text (below 16px iOS zooms the page on focus); desktop
@@ -80,6 +82,8 @@ function ErrorAlert({ message }: { message: string }) {
 
 export default function SetupRoute() {
   const navigate = useNavigate();
+  const { telemetry } = useLoaderData<typeof clientLoader>();
+  const [telemetryLevel, setTelemetryLevel] = useState<TelemetryLevel>(telemetry.maxLevel);
   const [question, setQuestion] = useState<Question>(0);
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
@@ -125,7 +129,7 @@ export default function SetupRoute() {
       // The admin call issues the session cookie that this step's `wizardStep` guard requires,
       // so it can only run second.
       await setupBusiness(businessName.trim(), "", "");
-      await completeSetup();
+      await completeSetup(telemetryLevel);
       navigate("/", { replace: true });
     } catch (err) {
       setBusy(false);
@@ -182,6 +186,23 @@ export default function SetupRoute() {
               value={values[question] ?? ""}
               onChange={setValue}
             />
+            {question === LAST_QUESTION ? (
+              <div className="space-y-4">
+                <TelemetryDisclosure />
+                {!telemetry.enabled ? (
+                  <p className="text-sm text-muted-foreground">
+                    Telemetry delivery is disabled in development and tests. Your preference is
+                    still saved.
+                  </p>
+                ) : null}
+                <TelemetryLevelPicker
+                  value={telemetryLevel}
+                  maxLevel={telemetry.maxLevel}
+                  onChange={setTelemetryLevel}
+                  disabled={busy}
+                />
+              </div>
+            ) : null}
             <div className={cn("flex gap-2", question === 0 && "justify-end")}>
               {question > 0 ? (
                 <Button
