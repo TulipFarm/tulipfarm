@@ -181,6 +181,45 @@ From the repository root:
 pnpm exec oim validate ./integrations/acme
 ```
 
+## Live provider smoke tests
+
+The OIM live provider smoke suite verifies the production HTTP adapter against a real provider
+connection, then performs one bounded read-only operation. It is opt-in: normal local tests and CI
+make no provider request, even if a credential happens to be in the environment.
+
+Set `OIM_LIVE_PROVIDER_SMOKE=1` and only the credentials for the provider you want to check. The
+suite does not print credential values or provider responses.
+
+```bash
+# OpenWeather: verifies the API key, then reads current weather for London, GB.
+OIM_LIVE_PROVIDER_SMOKE=1 \
+OIM_LIVE_OPENWEATHER_API_KEY=... \
+pnpm test:oim-live-providers
+
+# Trello: verifies the connected member, then lists accessible open boards.
+OIM_LIVE_PROVIDER_SMOKE=1 \
+OIM_LIVE_TRELLO_API_KEY=... \
+OIM_LIVE_TRELLO_TOKEN=... \
+pnpm test:oim-live-providers
+
+# GitLab.com: reads the token owner, which is its authentication check.
+OIM_LIVE_PROVIDER_SMOKE=1 \
+OIM_LIVE_GITLAB_ACCESS_TOKEN=... \
+pnpm test:oim-live-providers
+```
+
+The supported provider credentials are:
+
+| Provider | Required environment variables |
+| --- | --- |
+| OpenWeather | `OIM_LIVE_OPENWEATHER_API_KEY` |
+| Trello | `OIM_LIVE_TRELLO_API_KEY`, `OIM_LIVE_TRELLO_TOKEN` |
+| GitLab.com | `OIM_LIVE_GITLAB_ACCESS_TOKEN` |
+
+Leave the opt-in variable unset for ordinary development and CI. Store values in your shell or
+secret manager, not in tracked files. The GitLab smoke check intentionally targets `gitlab.com`;
+self-managed origins need their normal explicit Connection approval.
+
 For a release:
 
 1. Run package validation and every offline fixture through the production runtime adapter.
