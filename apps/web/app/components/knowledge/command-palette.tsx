@@ -1,6 +1,6 @@
 import { useNavigate } from "@remix-run/react";
 import { Command } from "cmdk";
-import { type ReactNode, useEffect, useState } from "react";
+import { type ReactNode, useEffect, useRef, useState } from "react";
 import { type KnowledgeSpace, listSpaces, type PageSearchHit } from "~/lib/knowledge-api";
 import { pageHref } from "~/lib/page-href";
 import { cn } from "~/lib/utils";
@@ -73,6 +73,10 @@ export function CommandPalette({
   const [spaceNames, setSpaceNames] = useState<Map<string, string>>(new Map());
   const { query, setQuery, scope, setScope, results, loading, isZeroQuery } =
     usePageSearch(spaceId);
+  /* cmdk's Command.Dialog never renders a Radix Dialog.Trigger, so Radix's own
+   * onCloseAutoFocus finds context.triggerRef empty and focus falls through to
+   * document.body. Track and restore the opener ourselves, as sidebar-command.tsx does. */
+  const triggerRef = useRef<HTMLElement | null>(null);
 
   useEffect(() => {
     onOpenChange?.(open);
@@ -83,16 +87,27 @@ export function CommandPalette({
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
         e.preventDefault();
         if (open) e.stopPropagation();
+        else triggerRef.current = document.activeElement as HTMLElement | null;
         setOpen((o) => !o);
       }
     };
-    const onOpen = () => setOpen(true);
+    const onOpen = () => {
+      triggerRef.current = document.activeElement as HTMLElement | null;
+      setOpen(true);
+    };
     window.addEventListener("keydown", onKey, { capture: open });
     window.addEventListener(OPEN_SEARCH_EVENT, onOpen);
     return () => {
       window.removeEventListener("keydown", onKey, { capture: open });
       window.removeEventListener(OPEN_SEARCH_EVENT, onOpen);
     };
+  }, [open]);
+
+  useEffect(() => {
+    if (open) return;
+    const trigger = triggerRef.current;
+    if (!trigger || !document.contains(trigger)) return;
+    queueMicrotask(() => trigger.focus());
   }, [open]);
 
   useEffect(() => {
