@@ -1,10 +1,18 @@
 import { parsePaginationQuery } from "@tulipfarm/storage";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { ErrorSchema } from "../auth/schemas";
+import type { RequireAuthorization } from "../authz/route-gate";
 import type { ActivityRow } from "./repo";
 import type { ActivityService } from "./service";
 
 type PreHandler = (req: FastifyRequest, reply: FastifyReply) => Promise<void>;
+
+/** Activity is a workspace-wide operational feed (Runs, Record changes, sync, Soul Doctor). */
+const OPERATIONS_READ = {
+  action: "operations.read",
+  resourceType: "operations",
+  fallback: "admin",
+} as const;
 
 const ActivityItemSchema = {
   type: "object",
@@ -44,15 +52,17 @@ function toApiActivity(r: ActivityRow): Record<string, unknown> {
 export function registerActivityRoutes(
   app: FastifyInstance,
   service: ActivityService,
-  requireAuth: PreHandler
+  requireAuth: PreHandler,
+  requireAuthorization: RequireAuthorization
 ): void {
   app.get(
     "/api/v1/activities",
     {
-      preHandler: requireAuth,
+      preHandler: [requireAuth, requireAuthorization(OPERATIONS_READ)],
       schema: {
         description:
-          "List workspace activity (newest-first, cursor paginated; filter by category).",
+          "List workspace activity (newest-first, cursor paginated; filter by category). " +
+          "Requires operational authorization.",
         tags: ["activity"],
         security: [{ sessionCookie: [] }, { bearerToken: [] }],
         querystring: {
@@ -73,6 +83,7 @@ export function registerActivityRoutes(
             },
           },
           401: ErrorSchema,
+          403: ErrorSchema,
         },
       },
     },

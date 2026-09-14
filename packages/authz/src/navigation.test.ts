@@ -13,10 +13,23 @@ test("navigation capabilities omit every path whose authority is denied", async 
   );
 
   expect(capabilities.visiblePaths).toEqual(
-    expect.not.arrayContaining(["/inbox", "/business/soul", "/business/models"])
+    expect.not.arrayContaining([
+      "/inbox",
+      "/business/soul",
+      "/business/models",
+      "/business/activities",
+    ])
   );
-  expect(capabilities.visiblePaths).toContain("/business/activities");
   expect(capabilities.visiblePaths).toContain("/files");
+});
+
+test("business/activities is gated by operations.read, not mere authentication (#856)", async () => {
+  const capabilities = await sessionNavigationCapabilities(
+    "u1",
+    async (_principal, authorization) => Promise.resolve(authorization.action === "operations.read")
+  );
+
+  expect(capabilities.visiblePaths).toContain("/business/activities");
 });
 
 test("secret.read declares the same fallback everywhere it gates navigation (#754)", () => {
