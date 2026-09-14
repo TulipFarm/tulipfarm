@@ -97,7 +97,7 @@ function requiredCaseIds(profiles) {
 
 function validateProfileSelection(profiles) {
   if (!profiles || !OIM_PROFILE_VERSION_MATRIX.core.includes(profiles.core)) {
-    throw new OimValidationError("profiles.core must be one of 1.0, 1.1, or 1.2");
+    throw new OimValidationError("profiles.core must be one of 1.0, 1.1, 1.2, or 1.3");
   }
   for (const [profile, version] of Object.entries(profiles)) {
     if (profile === "core") continue;

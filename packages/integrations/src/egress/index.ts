@@ -54,6 +54,19 @@ export {
   sendGovernedRequest,
 } from "./network-request";
 export {
+  OimCompositeToolAdapter,
+  type OimCompositeToolAdapterDeps,
+} from "./oim-composite-adapter";
+export {
+  type CompiledOimCompositeStep,
+  type CompiledOimCompositeTool,
+  type CompiledOimLeafTool,
+  type CompiledOimTool,
+  compileOimCompositeOperations,
+  OimCompositeCompileError,
+  type OimCompositeCompileErrorCode,
+} from "./oim-composite-compile";
+export {
   extractOimMultipartFileIds,
   type OimFilePort,
   type OimFileReadAuthorizationPort,

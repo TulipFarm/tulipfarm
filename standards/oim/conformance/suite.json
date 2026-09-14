@@ -115,6 +115,27 @@
       ]
     },
     {
+      "id": "core.operation.composite",
+      "profile": "core",
+      "vectors": [
+        {
+          "id": "core-composite-bounded-redacted-sequence",
+          "since": "1.3",
+          "input": {
+            "steps": ["lookup", "read-profile"],
+            "result": { "name": "Muskan Vijayvargiya" }
+          },
+          "expect": {
+            "steps": ["lookup", "read-profile"],
+            "result": { "name": "Muskan Vijayvargiya" },
+            "intermediatesExposed": false,
+            "componentActionsAuthorized": true,
+            "effect": "read"
+          }
+        }
+      ]
+    },
+    {
       "id": "core.fixtures.hermetic",
       "profile": "core",
       "vectors": [

@@ -1,6 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import {
+  compileOimCompositeOperations,
   compileOimGraphqlOperations,
   compileOimHttpOperations,
   compileOimOpenApiOperations,
@@ -24,6 +25,13 @@ export function createBundledOimBundleContributionProvider(
         ),
         ...compileOimOpenApiOperations(
           entry.manifest,
+          new Map(Object.entries(entry.integration.oimOpenApiDocuments ?? {})),
+          {},
+          { deferConfiguration: true }
+        ),
+        ...compileOimCompositeOperations(
+          entry.manifest,
+          new Map(Object.entries(entry.integration.oimDocuments ?? {})),
           new Map(Object.entries(entry.integration.oimOpenApiDocuments ?? {})),
           {},
           { deferConfiguration: true }

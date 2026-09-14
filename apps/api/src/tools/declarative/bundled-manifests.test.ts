@@ -1,6 +1,7 @@
 import { readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import {
+  compileOimCompositeOperations,
   compileOimGraphqlOperations,
   compileOimHttpOperations,
   compileOimOpenApiOperations,
@@ -150,6 +151,13 @@ describe("bundled integrations", () => {
       }
       const compiled = [
         ...compileOimHttpOperations(manifest, {}, { deferConfiguration: true }),
+        ...compileOimCompositeOperations(
+          manifest,
+          companions,
+          documents,
+          {},
+          { deferConfiguration: true }
+        ),
         ...compileOimGraphqlOperations(manifest, companions, {}, { deferConfiguration: true }),
         ...compileOimOpenApiOperations(manifest, documents, {}, { deferConfiguration: true }),
       ];

@@ -1,4 +1,5 @@
 import {
+  compileOimCompositeOperations,
   compileOimGraphqlOperations,
   compileOimHttpOperations,
   compileOimOpenApiOperations,
@@ -79,6 +80,13 @@ function registrationFor(
     ),
     ...compileOimOpenApiOperations(
       manifest,
+      new Map(Object.entries(openApiDocuments)),
+      {},
+      { deferConfiguration: true }
+    ),
+    ...compileOimCompositeOperations(
+      manifest,
+      new Map(Object.entries(documents)),
       new Map(Object.entries(openApiDocuments)),
       {},
       { deferConfiguration: true }

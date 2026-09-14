@@ -34,6 +34,8 @@ export interface ToolAvailability {
 
 export interface ToolAuthorization<Ctx = unknown> {
   readonly action: string;
+  /** All actions an atomic composite Tool must be authorized to perform. */
+  readonly requiredActions?: readonly string[];
   /** Resource names required regardless of arguments. */
   readonly resources?: readonly string[];
   /**
@@ -382,7 +384,7 @@ export function toolContractSpecOf<Ctx, Result>(
     outputSchema: definition.outputSchema ?? { type: "object", additionalProperties: true },
     riskClass: definition.riskClass,
     mutating: definition.mutating,
-    requiredActions: [auth.action],
+    requiredActions: [...(auth.requiredActions ?? [auth.action])],
     requiredResources: [...(auth.resources ?? [])],
     dataClasses: [...(auth.dataClasses ?? [])],
     allowedDestinations: [...(auth.allowedDestinations ?? [])],

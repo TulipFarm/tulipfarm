@@ -1,13 +1,16 @@
 import { createHash, createHmac, randomBytes } from "node:crypto";
 import {
+  type CompiledOimCompositeTool,
   type CompiledOimGraphqlTool,
   type CompiledOimHttpTool,
   type CompiledOimOpenApiTool,
   type ConnectionReader,
+  compileOimCompositeOperations,
   compileOimGraphqlOperations,
   compileOimHttpOperations,
   compileOimOpenApiOperations,
   NEXT_PAGE_TOKEN_PROPERTY,
+  OimCompositeToolAdapter,
   OimGraphqlToolAdapter,
   type OimHookPhaseRunner,
   OimHttpToolAdapter,
@@ -206,7 +209,11 @@ interface WebhookUseClaims {
   readonly reference: `secret://${string}`;
 }
 
-type CompiledOimTool = CompiledOimHttpTool | CompiledOimGraphqlTool | CompiledOimOpenApiTool;
+type CompiledOimTool =
+  | CompiledOimHttpTool
+  | CompiledOimGraphqlTool
+  | CompiledOimOpenApiTool
+  | CompiledOimCompositeTool;
 
 function manifestMajor(manifest: OimManifest): number {
   return Number.parseInt(manifest.metadata.version.split(".", 1)[0] ?? "", 10);
@@ -259,6 +266,7 @@ function compiledOperation(
     ...compileOimHttpOperations(pkg.manifest, configuration),
     ...compileOimGraphqlOperations(pkg.manifest, documents, configuration),
     ...compileOimOpenApiOperations(pkg.manifest, openApiDocuments, configuration),
+    ...compileOimCompositeOperations(pkg.manifest, documents, openApiDocuments, configuration),
   ];
   const operation = compiled.find((candidate) => candidate.operation.id === operationId);
   if (operation === undefined) {
@@ -268,9 +276,9 @@ function compiledOperation(
 }
 
 function destinationOf(tool: CompiledOimTool): string {
-  return tool.operation.source.type === "graphql"
-    ? (tool.binding as CompiledOimGraphqlTool["binding"]).url
-    : (tool.binding as CompiledOimHttpTool["binding"]).baseUrl;
+  if ("url" in tool.binding) return tool.binding.url;
+  if ("baseUrl" in tool.binding) return tool.binding.baseUrl;
+  throw new InternalOimWorkerRouteError(409, "oim_operation_binding_mismatch");
 }
 
 function adapterOf(
@@ -279,6 +287,16 @@ function adapterOf(
   manifest: OimManifest,
   hookRunner: OimHookPhaseRunner
 ): ToolAdapter {
+  if (tool.operation.source.type === "composite") {
+    const composite = tool as CompiledOimCompositeTool;
+    return new OimCompositeToolAdapter({
+      steps: composite.steps.map((step) => ({
+        ...step,
+        adapter: adapterOf(step.tool, deps, manifest, hookRunner),
+        contract: step.tool.contract,
+      })),
+    });
+  }
   if (tool.operation.source.type === "graphql") {
     const graphqlTool = tool as CompiledOimGraphqlTool;
     if (!("document" in graphqlTool.binding)) {

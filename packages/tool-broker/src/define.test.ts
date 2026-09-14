@@ -130,6 +130,27 @@ describe("toolContractSpecOf", () => {
     const spec = toolContractSpecOf(defineTool({ ...base, mutating: false }));
     expect(spec.adapter).toEqual({ kind: "native", ref: "record_create" });
   });
+
+  it("preserves each declared composite action in the authorization contract", () => {
+    const spec = toolContractSpecOf(
+      defineTool({
+        ...base,
+        mutating: true,
+        authorization: {
+          action: "integration.directory.lookup_profile",
+          requiredActions: [
+            "integration.directory.lookup_person",
+            "integration.directory.read_profile",
+          ],
+        },
+      })
+    );
+
+    expect(spec.requiredActions).toEqual([
+      "integration.directory.lookup_person",
+      "integration.directory.read_profile",
+    ]);
+  });
 });
 
 describe("targetsFor robustness", () => {
