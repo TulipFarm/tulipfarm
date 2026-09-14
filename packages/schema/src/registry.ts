@@ -136,11 +136,20 @@ function assertDiscriminatorSchema(
 
 function validationIssues(errors: ErrorObject[] | null | undefined): SchemaValidationIssue[] {
   return (errors ?? [])
-    .map((error) => ({
-      keyword: error.keyword,
-      message: error.message ?? "validation failed",
-      path: error.instancePath,
-    }))
+    .map((error) => {
+      let message = error.message ?? "validation failed";
+      if (
+        error.keyword === "additionalProperties" &&
+        typeof error.params?.additionalProperty === "string"
+      ) {
+        message = `${message} '${error.params.additionalProperty}'`;
+      }
+      return {
+        keyword: error.keyword,
+        message,
+        path: error.instancePath,
+      };
+    })
     .sort((left, right) => {
       const leftKey = `${left.path}\u0000${left.keyword}\u0000${left.message}`;
       const rightKey = `${right.path}\u0000${right.keyword}\u0000${right.message}`;

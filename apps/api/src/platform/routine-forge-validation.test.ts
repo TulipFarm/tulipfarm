@@ -69,4 +69,39 @@ describe("validateRoutineForgeDefinitions", () => {
     expect(result).toMatchObject({ ok: false });
     expect(result.ok === false && result.message).toContain("subtotal");
   });
+
+  it("reports the unexpected additional property name when spec has additional properties", () => {
+    const def = definition([{ type: "compute", name: "Start", input: { ok: true }, end: true }]);
+    (def.spec as Record<string, unknown>).inputs = { requestCode: { type: "string" } };
+    const result = validateRoutineForgeDefinitions({
+      name: "quotes",
+      definition: def,
+    });
+    expect(result.ok).toBe(false);
+    expect(result.ok === false && result.message).toContain(
+      "must NOT have additional properties 'inputs'"
+    );
+  });
+
+  it("accepts a bounded compute Routine with declared spec.input", () => {
+    const def = definition([
+      {
+        type: "compute",
+        name: "Start",
+        // biome-ignore lint/suspicious/noTemplateCurlyInString: routine expression syntax
+        input: { requestCode: "${input.requestCode}", reviewStatus: "draft" },
+        end: true,
+      },
+    ]);
+    (def.spec as Record<string, unknown>).input = {
+      type: "object",
+      properties: { requestCode: { type: "string" } },
+      required: ["requestCode"],
+    };
+    const result = validateRoutineForgeDefinitions({
+      name: "quotes",
+      definition: def,
+    });
+    expect(result.ok).toBe(true);
+  });
 });

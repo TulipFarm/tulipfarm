@@ -115,13 +115,11 @@ no `triggers` argument. `interval` counts in **milliseconds**, so every 2 minute
   should keep history ends in `record_create`. Only use `record_search` + `record_update` when you
   actually mean to mutate one row.
 
-- `agentRef` names an **Agent** that already exists in the Soul. Check with `agent_list`; if it is
-  missing, create it with `agent_create` **before** calling `routine_forge`. A Routine referencing
-  an Agent that does not exist is refused.
+- `agentRef` names an **Agent** that already exists in the Soul. Check with `agent_list`; if
+  missing, create it with `agent_create` **before** calling `routine_forge`.
 - `agent_create` frontmatter accepts **only** `label`, `domain`, `description`, `model`, `autonomy`,
-  `modelPolicy`, `capabilityRestrictions`, `placeholder`, `suggestions`. Anything else is rejected
-  with `must NOT have additional properties`. To limit which Tools the Agent may call, use
-  `capabilityRestrictions.tools.allow` — there is no `allowedTools` key on an Agent's frontmatter.
+  `modelPolicy`, `capabilityRestrictions`, `placeholder`, `suggestions`. To limit Tools, use
+  `capabilityRestrictions.tools.allow` — there is no `allowedTools` key.
 - `toolRef` names a Soul **ToolContract** definition — an artifact under `tools/` in the Soul repo.
   It is **not** the name of a Tool you can call in Chat. `delegate_to_agent`, `record_create`,
   `record_search`, `kv_set`, `send_slack_message` and every other Tool you invoke during a Turn are
@@ -160,13 +158,17 @@ reached** — so never author one and never promise a user it will work.
    - `schemaVersion`: integer `1`.
    - `authoredVersion`: **integer**, starts at `1` — never a semver string like `"1.0.0"`.
    - `lifecycle`: `published`.
-   Its `spec` needs `owner`, `start` (the name of the first State to run), and `states` — a **JSON
-   array** of State objects (`[{ name: "...", type: "...", ... }]`), never a map/object keyed by name.
+   Its `spec` needs `owner`, `start` (first State to run), and `states` — a **JSON array** of State
+   objects (`[{ name: "...", type: "...", ... }]`), never a map. `spec` accepts only canonical keys
+   (`owner`, `ownership`, `maintainers`, `input`, `output`, `start`, `states`, `triggers`,
+   `requiredToolAbilities`, `limits`, `concurrency`, `compensation`). Keys like `inputs`, `parameters`,
+   `description`, `name`, `timeout` fail with `must NOT have additional properties`. Routine inputs
+   are declared under `spec.input` (**singular**, JSON Schema object, read via `${input.<key>}`).
+   A Routine has no `description` field in `metadata` or `spec`.
    Every State key — `start`, each State's own `name`, and every `transition`/`branches`/`body`/`forState`
    reference to another State — must match `^[A-Za-z][A-Za-z0-9_]*$`: letters, digits, underscore only,
-   **no hyphens**. Use PascalCase or snake_case (e.g. `ReadIssue`, `send_reply`), never the hyphenated
-   style used for the Routine's own `slug`/`name`. An `agent` State's `agentRef` and a `tool` State's
-   `toolRef` are always an **object** `{ name, version }` (both strings; `id` optional) — never a bare
+   **no hyphens**. Use PascalCase or snake_case (e.g. `ReadIssue`), never hyphenated. An `agent` State's
+   `agentRef` and a `tool` State's `toolRef` are always an **object** `{ name, version }` — never a bare
    string like `"joke-bot"`.
 4. Add the Triggers the Routine needs to `spec.triggers` on that same document — an array of
    objects, each with a slug-shaped `name` (lowercase kebab-case, unique across the whole Soul,
