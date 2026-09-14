@@ -43,6 +43,7 @@ export interface TaskReconcileSignals {
   readonly businessDescription?: string;
   readonly setupComplete?: boolean;
   readonly memberCount?: number;
+  readonly resources?: readonly string[];
 }
 
 export interface RemoteObservabilityConfig {

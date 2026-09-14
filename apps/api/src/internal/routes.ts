@@ -91,6 +91,9 @@ export interface TaskReconcileSignals {
    * `disabled` and so cannot tell an invite in flight from a deliberately deactivated account.
    */
   readonly memberCount?: number;
+  /** Soul resource type keys (singular, e.g. `"ticket"`), so the reconciler can close a
+   * resource-setup Task once its target already exists. */
+  readonly resources?: readonly string[];
 }
 
 export function registerInternalTurnRoutes(

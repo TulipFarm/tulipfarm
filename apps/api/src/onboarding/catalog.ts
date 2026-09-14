@@ -16,25 +16,25 @@ export const CATALOG: SuggestionEntry[] = [
     id: "tickets",
     label: "Set up ticket management?",
     prompt: "Help me set up ticket management.",
-    resources: ["tickets"],
+    resources: ["ticket"],
   },
   {
     id: "leads",
     label: "Track sales leads?",
     prompt: "Help me track sales leads.",
-    resources: ["leads"],
+    resources: ["lead"],
   },
   {
     id: "employees",
     label: "Manage employees?",
     prompt: "Help me set up employee management.",
-    resources: ["employees"],
+    resources: ["employee"],
   },
   {
     id: "invoices",
     label: "Track invoices & billing?",
     prompt: "Help me set up invoices and billing.",
-    resources: ["invoices"],
+    resources: ["invoice"],
   },
   {
     id: "inventory",
@@ -46,6 +46,6 @@ export const CATALOG: SuggestionEntry[] = [
     id: "projects",
     label: "Organize projects & tasks?",
     prompt: "Help me organize projects and tasks.",
-    resources: ["projects"],
+    resources: ["project"],
   },
 ];

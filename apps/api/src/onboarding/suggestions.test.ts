@@ -16,25 +16,40 @@ describe("deriveSuggestions", () => {
     expect(out.map((s) => s.id)).toEqual(CATALOG.map((e) => e.id));
   });
 
-  it("hides an entry whose resource already exists", () => {
-    const out = deriveSuggestions(soul(["tickets"]));
+  it("hides an entry whose resource already exists (soul keys are singular)", () => {
+    const out = deriveSuggestions(soul(["ticket"]));
     expect(out.map((s) => s.id)).not.toContain("tickets");
     expect(out).toHaveLength(CATALOG.length - 1);
   });
 
+  it("hides the employee suggestion once the employee resource exists", () => {
+    const out = deriveSuggestions(soul(["employee"]));
+    expect(out.map((s) => s.id)).not.toContain("employees");
+  });
+
+  it("hides the project suggestion once the project resource exists", () => {
+    const out = deriveSuggestions(soul(["project"]));
+    expect(out.map((s) => s.id)).not.toContain("projects");
+  });
+
   it("keeps entries whose resources are absent", () => {
-    const out = deriveSuggestions(soul(["tickets"]));
+    const out = deriveSuggestions(soul(["ticket"]));
     expect(out.map((s) => s.id)).toContain("leads");
     expect(out.map((s) => s.id)).toContain("projects");
   });
 
   it("hides multiple entries when several matching resources exist", () => {
-    const out = deriveSuggestions(soul(["tickets", "leads", "invoices"]));
+    const out = deriveSuggestions(soul(["ticket", "lead", "invoice"]));
     const ids = out.map((s) => s.id);
     expect(ids).not.toContain("tickets");
     expect(ids).not.toContain("leads");
     expect(ids).not.toContain("invoices");
     expect(out).toHaveLength(CATALOG.length - 3);
+  });
+
+  it("does not hide an entry for the old, buggy plural resource key", () => {
+    const out = deriveSuggestions(soul(["tickets"]));
+    expect(out.map((s) => s.id)).toContain("tickets");
   });
 
   it("projects to { id, label, prompt } and omits the resources match key", () => {
