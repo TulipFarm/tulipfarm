@@ -133,16 +133,17 @@ test("index groups by domain only once a domain holds more than one agent", asyn
   expect(await screen.findByRole("heading", { name: "github" })).toBeInTheDocument();
 });
 
-test("index with no agents offers a useful draft and Skills as a secondary path", () => {
+test("index with no agents offers a useful draft to create an agent", () => {
   renderWithData(<AgentsIndex />, { agents: [] });
-  const create = screen.getByRole("link", { name: "Create an agent in chat" });
-  const draft = new URL(create.getAttribute("href") ?? "", "http://localhost").searchParams.get(
-    "draft"
-  );
-  expect(draft).toMatch(/create an agent/i);
-  expect(draft).toMatch(/instructions|limits/i);
-  expect(screen.getByRole("link", { name: "Browse skills" })).toHaveAttribute("href", "/skills");
-  expect(document.querySelectorAll(".bg-primary")).toHaveLength(1);
+  const creates = screen.getAllByRole("link", { name: "Create an agent in chat" });
+  expect(creates).toHaveLength(2);
+  for (const create of creates) {
+    const draft = new URL(create.getAttribute("href") ?? "", "http://localhost").searchParams.get(
+      "draft"
+    );
+    expect(draft).toMatch(/create an agent/i);
+    expect(draft).toMatch(/instructions|limits/i);
+  }
 });
 
 test("index shows built-in agents even when no custom agent exists", () => {
