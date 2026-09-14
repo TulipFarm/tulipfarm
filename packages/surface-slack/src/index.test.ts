@@ -54,6 +54,44 @@ describe("slackMessageRenderer", () => {
     });
   });
 
+  it("converts CommonMark bold in Text/Section/Card blocks to Slack mrkdwn", () => {
+    const samples = [
+      {
+        id: "text",
+        component: { name: "Text", version: "1.0" },
+        props: { text: "**Question 1 — cadence:** What default cadence?" },
+        expected: "*Question 1 — cadence:* What default cadence?",
+      },
+      {
+        id: "section",
+        component: { name: "Section", version: "1.0" },
+        props: { heading: "Summary", body: "**Status:** on track" },
+        expected: "*Status:* on track",
+      },
+      {
+        id: "card",
+        component: { name: "Card", version: "1.0" },
+        props: { title: "Deal", body: "**Value:** $5,000" },
+        expected: "*Value:* $5,000",
+      },
+    ] as const;
+
+    for (const sample of samples) {
+      const artifact = createSurfaceArtifact({
+        id: sample.id,
+        component: sample.component,
+        props: sample.props,
+        target: { channel: "slack", surface: "message" },
+        audience: ["user:1"],
+        classification: "internal",
+      });
+      const payload = slackMessageRenderer.render(artifact, { destination: "C1" });
+      const text = JSON.stringify(payload.blocks);
+      expect(text).not.toContain("**");
+      expect(text).toContain(sample.expected);
+    }
+  });
+
   it("renders MultiChoice as a multi_static_select", () => {
     const artifact = createSurfaceArtifact({
       id: "regions",

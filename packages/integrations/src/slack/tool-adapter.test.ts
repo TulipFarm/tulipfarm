@@ -402,6 +402,29 @@ describe("SlackToolAdapter mention encoding", () => {
   });
 });
 
+describe("SlackToolAdapter markdown conversion", () => {
+  it("converts CommonMark bold to Slack mrkdwn before sending", async () => {
+    const http = fakeHttp([]);
+    const adapter = new SlackToolAdapter({ http });
+
+    await adapter.dispatch(
+      sendRequest("C0123456789", "**Question 1 — cadence:** What default cadence?"),
+      CREDENTIAL
+    );
+
+    expect(postedText(http.calls)).toBe("*Question 1 — cadence:* What default cadence?");
+  });
+
+  it("converts bold text without mangling an encoded mention", async () => {
+    const http = fakeHttp([{ id: "U0AMFGRAKLY", name: "mohit" }]);
+    const adapter = new SlackToolAdapter({ http });
+
+    await adapter.dispatch(sendRequest("C0123456789", "**hi** @mohit!"), CREDENTIAL);
+
+    expect(postedText(http.calls)).toBe("*hi* <@U0AMFGRAKLY>!");
+  });
+});
+
 function threadTs(calls: readonly IntegrationHttpRequest[]): string | undefined {
   const call = calls.find((c) => c.path === "/chat.postMessage");
   const body = call?.body as { thread_ts?: string } | undefined;
