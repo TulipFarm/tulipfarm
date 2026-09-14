@@ -2,6 +2,8 @@
 
 ## Status and language
 
+Status: Accepted
+
 Open Integration Manifest (OIM) is a vendor-neutral package format for declarative third-party
 Integrations. This text defines OIM specification version 1.0 and the Core 1.0, Core 1.1, Core 1.2, Core 1.3,
 Auth 1.0, Auth 1.1, Events 1.0, Knowledge 1.0, Knowledge 1.1, Knowledge 1.2, and Hooks 1.0
