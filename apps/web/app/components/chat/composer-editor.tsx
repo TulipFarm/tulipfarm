@@ -298,9 +298,6 @@ export function ComposerEditor({
         }
       >
         <div className="mb-1.5 flex min-h-8 items-center gap-2 px-1 text-xs text-muted-foreground">
-          {llmMode === "advanced" && (
-            <ModelSelector value={model} onChange={setModel} disabled={busy} />
-          )}
           {activeAgent ? (
             <>
               <span aria-hidden className="h-4 w-px bg-border" />
@@ -425,8 +422,11 @@ export function ComposerEditor({
             >
               <BookOpen aria-hidden className="size-4" />
             </ContextTrigger>
-            {busy ? (
-              <span className="ml-auto inline-flex">
+            <span className="ml-auto inline-flex items-center gap-1.5">
+              {llmMode === "advanced" && (
+                <ModelSelector value={model} onChange={setModel} disabled={busy} />
+              )}
+              {busy ? (
                 <Tooltip content="Stop response">
                   <button
                     type="button"
@@ -437,9 +437,7 @@ export function ComposerEditor({
                     <Square aria-hidden className="size-3.5 fill-current" />
                   </button>
                 </Tooltip>
-              </span>
-            ) : (
-              <span className="ml-auto inline-flex">
+              ) : (
                 <Tooltip content="Send prompt">
                   <button
                     type="button"
@@ -451,8 +449,8 @@ export function ComposerEditor({
                     <ArrowUp aria-hidden className="size-4" strokeWidth={2.25} />
                   </button>
                 </Tooltip>
-              </span>
-            )}
+              )}
+            </span>
           </div>
         </div>
         {suggestions.length > 0 ? (

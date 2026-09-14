@@ -165,13 +165,32 @@ test("choosing a home task drafts its prompt without starting a Turn", async () 
   expect(send).not.toHaveBeenCalled();
 });
 
-test("selected Agents do not show the general work-home sections", () => {
+test("shows capability-discovery cards near the composer", () => {
+  renderHome();
+  expect(screen.getByRole("button", { name: "Tasks" })).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Records" })).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Integrations" })).toBeInTheDocument();
+});
+
+test("choosing a capability card drafts its template prompt without starting a Turn", async () => {
+  renderHome();
+  await userEvent.click(screen.getByRole("button", { name: "Web" }));
+  await waitFor(() =>
+    expect(screen.getByRole("textbox", { name: "Message" })).toHaveTextContent(
+      "Research on the web about"
+    )
+  );
+  expect(send).not.toHaveBeenCalled();
+});
+
+test("selected Agents do not show capability cards or the general work-home sections", () => {
   approvals = [
     { approvalId: "a1", createdAt: "2026-09-10T00:00:00Z", expiresAt: "2027-01-01T00:00:00Z" },
   ];
   renderHome({ agentId: "InventoryPlanner", tasks: [SETUP_TASK] });
   expect(screen.queryByRole("link", { name: /approvals waiting/ })).not.toBeInTheDocument();
   expect(screen.queryByRole("region", { name: "Get set up" })).not.toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: "Tasks" })).not.toBeInTheDocument();
 });
 
 test("an empty restored Chat keeps a screen-reader page heading", () => {
