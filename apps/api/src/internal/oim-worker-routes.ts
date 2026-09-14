@@ -72,6 +72,7 @@ export interface InternalOimWorkerRouteDeps {
   revokeWebhookCredentialAttempt: WebhookRegistrationCredentialPort["revokeAttempt"];
   registerWebhook: WebhookRegistrationProvider["register"];
   reconcileWebhook: WebhookRegistrationProvider["reconcile"];
+  renewWebhook: WebhookRegistrationProvider["renew"];
   unregisterWebhook: WebhookRegistrationProvider["unregister"];
   encryptPayload(payload: Buffer): Promise<string>;
   decryptPayload(encryptedPayload: string): Promise<Buffer>;
@@ -556,6 +557,7 @@ export function registerInternalOimWorkerRoutes(
   for (const [path, operation] of [
     ["/api/v1/internal/oim/webhooks/register", deps.registerWebhook],
     ["/api/v1/internal/oim/webhooks/reconcile", deps.reconcileWebhook],
+    ["/api/v1/internal/oim/webhooks/renew", deps.renewWebhook],
     ["/api/v1/internal/oim/webhooks/unregister", deps.unregisterWebhook],
   ] as const) {
     app.post(

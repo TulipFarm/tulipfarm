@@ -75,6 +75,7 @@ export interface OimWorkerHost {
   revokeWebhookCredentialAttempt: WebhookRegistrationCredentialPort["revokeAttempt"];
   registerWebhook: WebhookRegistrationProvider["register"];
   reconcileWebhook: WebhookRegistrationProvider["reconcile"];
+  renewWebhook: WebhookRegistrationProvider["renew"];
   unregisterWebhook: WebhookRegistrationProvider["unregister"];
   encryptPayload(payload: Buffer): Promise<string>;
   decryptPayload(encryptedPayload: string): Promise<Buffer>;
@@ -326,6 +327,12 @@ export class InternalOimWorkerHost implements OimWorkerHost {
     ...parameters: Parameters<WebhookRegistrationProvider["reconcile"]>
   ): ReturnType<WebhookRegistrationProvider["reconcile"]> {
     return this.client.require("POST", "/api/v1/internal/oim/webhooks/reconcile", parameters[0]);
+  }
+
+  async renewWebhook(
+    ...parameters: Parameters<WebhookRegistrationProvider["renew"]>
+  ): ReturnType<WebhookRegistrationProvider["renew"]> {
+    return this.client.require("POST", "/api/v1/internal/oim/webhooks/renew", parameters[0]);
   }
 
   async unregisterWebhook(

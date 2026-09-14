@@ -526,6 +526,12 @@ describe("validateOimManifest", () => {
             secret: { in: "body", pointer: "/secret" },
           },
           unregistration: { subscriptionId: { in: "body", pointer: "/subscription_id" } },
+          renewal: {
+            operationId: "renew-webhook",
+            subscriptionId: { in: "body", pointer: "/subscription_id" },
+            expiresAtPath: "/expires_at",
+            renewBeforeSeconds: 300,
+          },
         },
       ],
     };
@@ -558,6 +564,23 @@ describe("validateOimManifest", () => {
         source: {
           type: "http",
           method: "DELETE",
+          baseUrl: "https://api.weather.example",
+          path: "/webhooks",
+        },
+        requestSchema: { type: "object" },
+        response: { schema: { type: "object" }, maxBytes: 4_096 },
+      },
+      {
+        id: "renew-webhook",
+        name: "renew_webhook",
+        description: "Renew a webhook.",
+        effect: "update",
+        identityMode: "shared_only",
+        credentialSlot: "token",
+        credentialInjection: { in: "header", name: "Authorization", format: "Bearer {token}" },
+        source: {
+          type: "http",
+          method: "PATCH",
           baseUrl: "https://api.weather.example",
           path: "/webhooks",
         },
@@ -1759,6 +1782,34 @@ describe("OIM Events profile", () => {
       expect(oimManifestIssues({ ...manifest, events } as OimManifest)).toEqual([]);
     }
   );
+
+  it("requires the fixed HubSpot v3 signing inputs", () => {
+    const manifest = withEvents();
+    const events = {
+      ...manifest.events,
+      verification: {
+        scheme: "hubspot_v3",
+        secretSlot: "webhook_secret",
+        signatureHeader: "X-HubSpot-Signature-v3",
+        signatureEncoding: "base64",
+        timestampHeader: "X-HubSpot-Request-Timestamp",
+        toleranceSeconds: 300,
+      },
+    };
+
+    expect(oimManifestIssues({ ...manifest, events } as OimManifest)).toEqual([]);
+    expect(
+      oimManifestIssues({
+        ...manifest,
+        events: {
+          ...events,
+          verification: { ...events.verification, signingInput: "{body}" },
+        },
+      } as OimManifest)
+    ).toContain(
+      "events: hubspot_v3 signs POST, the callback URL, the raw body, and X-HubSpot-Request-Timestamp"
+    );
+  });
 
   it.each([
     ["hmac_sha256", undefined],

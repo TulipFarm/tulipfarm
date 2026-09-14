@@ -197,7 +197,8 @@ function sameWebhookTarget(
     target.callbackUrl === registration.callbackUrl &&
     target.operationId === registration.operationId &&
     target.unregisterOperationId === registration.unregisterOperationId &&
-    target.secretSlot === registration.secretSlot
+    target.secretSlot === registration.secretSlot &&
+    JSON.stringify(target.renewal) === JSON.stringify(registration.renewal)
   );
 }
 
@@ -402,6 +403,21 @@ function webhookStep(
     throw new InternalOimWorkerRouteError(404, "oim_webhook_step_not_found");
   }
   return step;
+}
+
+function webhookExpiration(
+  step: Extract<NonNullable<OimManifest["auth"]>["steps"][number], { type: "webhook" }>,
+  response: unknown
+): string | undefined {
+  if (step.renewal === undefined) return undefined;
+  const expiresAt = requiredString(
+    readPointer(response, step.renewal.expiresAtPath),
+    "oim_webhook_expiration_invalid"
+  );
+  if (!Number.isFinite(Date.parse(expiresAt))) {
+    throw new InternalOimWorkerRouteError(409, "oim_webhook_expiration_invalid");
+  }
+  return expiresAt;
 }
 
 function webhookReference(attemptId: string): `secret://${string}` {
@@ -641,7 +657,14 @@ export class InternalOimWorkerHost implements InternalOimWorkerRouteDeps {
       "oim_webhook_subscription_id_invalid"
     );
     await this.assertIdentityCurrent(input.claim, pkg, identity.proofDigest);
-    return this.webhookResult(pkg, step.operationId, subscriptionId, identity, response);
+    return this.webhookResult(
+      pkg,
+      step.operationId,
+      subscriptionId,
+      identity,
+      response,
+      webhookExpiration(step, response)
+    );
   };
 
   reconcileWebhook: WebhookRegistrationProvider["reconcile"] = async (input) => {
@@ -675,7 +698,14 @@ export class InternalOimWorkerHost implements InternalOimWorkerRouteDeps {
       await this.assertIdentityCurrent(input.attempt, pkg, identity.proofDigest);
       return {
         kind: "active",
-        result: this.webhookResult(pkg, step.operationId, subscriptionId, identity, response),
+        result: this.webhookResult(
+          pkg,
+          step.operationId,
+          subscriptionId,
+          identity,
+          response,
+          webhookExpiration(step, response)
+        ),
       };
     } catch (error) {
       return {
@@ -685,6 +715,62 @@ export class InternalOimWorkerHost implements InternalOimWorkerRouteDeps {
             ? error.code
             : "oim_webhook_reconciliation_failed",
       };
+    }
+  };
+
+  renewWebhook: WebhookRegistrationProvider["renew"] = async (input) => {
+    const pkg = this.registrationPackage(input.claim.target);
+    if (canonicalHash(input.manifest) !== canonicalHash(pkg.manifest)) {
+      throw new InternalOimWorkerRouteError(409, "oim_webhook_manifest_mismatch");
+    }
+    const step = webhookStep(pkg.manifest, input.claim.target.stepId);
+    const renewal = step.renewal;
+    if (
+      renewal === undefined ||
+      input.claim.target.renewal === undefined ||
+      !sameWebhookTarget(input.claim.target, input.registration) ||
+      renewal.operationId !== input.claim.target.renewal.operationId ||
+      JSON.stringify(renewal.subscriptionId) !==
+        JSON.stringify(input.claim.target.renewal.subscriptionId) ||
+      renewal.expiresAtPath !== input.claim.target.renewal.expiresAtPath ||
+      renewal.renewBeforeSeconds !== input.claim.target.renewal.renewBeforeSeconds
+    ) {
+      throw new InternalOimWorkerRouteError(409, "oim_webhook_target_mismatch");
+    }
+    const arguments_: Record<string, unknown> = {};
+    bindWebhookValue(arguments_, renewal.subscriptionId, input.registration.subscriptionId);
+    const identity = await this.verifiedIdentity(input.claim, pkg);
+    try {
+      const response = await this.executeOperation(
+        pkg,
+        {
+          businessId: input.claim.businessId,
+          connectionId: input.claim.connectionId,
+          integrationId: input.claim.integrationId,
+          integrationMajorVersion: input.claim.integrationMajorVersion,
+          operationId: renewal.operationId,
+          expectedManifestDigest: input.claim.target.manifestDigest,
+        },
+        arguments_,
+        input.idempotencyKey
+      );
+      await this.assertIdentityCurrent(input.claim, pkg, identity.proofDigest);
+      return {
+        kind: "renewed" as const,
+        result: this.webhookResult(
+          pkg,
+          renewal.operationId,
+          input.registration.subscriptionId,
+          identity,
+          response,
+          webhookExpiration(step, response)
+        ),
+      };
+    } catch (error) {
+      if (error instanceof AdapterDispatchError && error.code === "provider_not_found") {
+        return { kind: "settled_absent" as const };
+      }
+      throw error;
     }
   };
 
@@ -1276,10 +1362,12 @@ export class InternalOimWorkerHost implements InternalOimWorkerRouteDeps {
     operationId: string,
     subscriptionId: string,
     identity: Awaited<ReturnType<InternalOimWorkerHost["verifiedIdentity"]>>,
-    response: unknown
+    response: unknown,
+    expiresAt: string | undefined
   ) {
     return {
       subscriptionId,
+      ...(expiresAt === undefined ? {} : { expiresAt }),
       verifiedIdentity: {
         externalTenantId: identity.externalTenantId,
         externalAccountId: identity.externalAccountId,

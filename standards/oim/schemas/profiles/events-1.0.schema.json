@@ -20,6 +20,7 @@
           "type": "string",
           "enum": [
             "shared_secret",
+            "hubspot_v3",
             "twilio_hmac_sha1",
             "hmac_sha256",
             "hmac_sha512",

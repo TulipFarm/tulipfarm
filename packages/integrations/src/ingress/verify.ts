@@ -97,9 +97,19 @@ function checkTimestamp(
   if (verification.timestampHeader === undefined) return {};
   const raw = headerValue(request, verification.timestampHeader);
   if (raw === undefined) return { failure: "missing_timestamp" };
+  const tolerance = verification.toleranceSeconds ?? DEFAULT_TOLERANCE_SECONDS;
+  if (verification.scheme === "hubspot_v3") {
+    const milliseconds = Number(raw);
+    if (
+      !Number.isFinite(milliseconds) ||
+      Math.abs(nowSeconds * 1_000 - milliseconds) > tolerance * 1_000
+    ) {
+      return { failure: "stale_timestamp" };
+    }
+    return { value: raw };
+  }
   const seconds = Number(raw);
   if (!Number.isFinite(seconds)) return { failure: "stale_timestamp" };
-  const tolerance = verification.toleranceSeconds ?? DEFAULT_TOLERANCE_SECONDS;
   if (Math.abs(nowSeconds - seconds) > tolerance) return { failure: "stale_timestamp" };
   return { value: raw };
 }
@@ -178,6 +188,29 @@ export function verifyDelivery(
     const expected = Uint8Array.from(
       createHmac("sha1", secret)
         .update(Buffer.from(twilioSigningInput(request.callbackUrl, body)))
+        .digest()
+    );
+    return constantTimeEquals(signature, expected)
+      ? accept(signature)
+      : { ok: false, reason: "mismatch" };
+  }
+
+  if (verification.scheme === "hubspot_v3") {
+    if (signature.length !== 32) return { ok: false, reason: "malformed_signature" };
+    if (request.callbackUrl === undefined) return { ok: false, reason: "missing_callback_url" };
+    if (timestamp.value === undefined) return { ok: false, reason: "missing_timestamp" };
+    let callbackUrl: string;
+    try {
+      callbackUrl = decodeURIComponent(request.callbackUrl);
+    } catch {
+      return { ok: false, reason: "missing_callback_url" };
+    }
+    const expected = Uint8Array.from(
+      createHmac("sha256", secret)
+        .update(Buffer.from("POST"))
+        .update(Buffer.from(callbackUrl))
+        .update(Buffer.from(request.rawBody))
+        .update(Buffer.from(timestamp.value))
         .digest()
     );
     return constantTimeEquals(signature, expected)

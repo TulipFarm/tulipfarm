@@ -3468,4 +3468,18 @@ export const PG_MIGRATIONS: PgMigration[] = [
     description: "single-holder OIM WebSocket ingress supervisor leases",
     up: applyStatements(WEBSOCKET_INGRESS_SUPERVISOR_STORAGE_STATEMENTS),
   },
+  {
+    version: 122,
+    description: "persist OIM webhook renewal cycles and consecutive failure backoff",
+    up: applyStatements([
+      `ALTER TABLE IF EXISTS oim_webhook_registrations
+         ADD COLUMN IF NOT EXISTS consecutive_failures integer NOT NULL DEFAULT 0
+         CHECK (consecutive_failures >= 0)`,
+      `ALTER TABLE IF EXISTS oim_webhook_registrations
+         ADD COLUMN IF NOT EXISTS renewal_cycle bigint NOT NULL DEFAULT 0
+         CHECK (renewal_cycle >= 0)`,
+      `ALTER TABLE IF EXISTS oim_webhook_registrations
+         ADD COLUMN IF NOT EXISTS renewal_cycle_complete boolean NOT NULL DEFAULT true`,
+    ]),
+  },
 ];

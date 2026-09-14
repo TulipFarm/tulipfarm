@@ -161,14 +161,18 @@ describe("WebhookRegistrationStore", () => {
     }
   });
 
-  async function activate(connectionId: string) {
+  async function activate(
+    connectionId: string,
+    registrationTarget = target(connectionId),
+    expiresAt?: string
+  ) {
     const key = {
       businessId: BUSINESS_ID,
       connectionId,
       integrationId: "acme",
       integrationMajorVersion: 2,
     };
-    await registrations.requestRegistration(key, target(connectionId), NOW);
+    await registrations.requestRegistration(key, registrationTarget, NOW);
     const claim = await registrations.claim(key, `lease-${connectionId}`, 120, NOW);
     if (claim === null) throw new Error("registration was not claimed");
     const secretRef = `secret://${connectionId}-webhook` as const;
@@ -199,6 +203,7 @@ describe("WebhookRegistrationStore", () => {
       subscriptionId: `subscription-${connectionId}`,
       secretRef,
       verifiedIdentity,
+      expiresAt,
       now: NOW,
     });
     expect(completed.kind).toBe("active");
@@ -236,6 +241,74 @@ describe("WebhookRegistrationStore", () => {
       externalTenantId: "tenant-1",
       externalAccountId: "account-1",
     });
+  });
+
+  it("keeps a live registration while backing off and renewing it before expiry", async () => {
+    const initialExpiry = new Date(NOW.getTime() + 3_600_000).toISOString();
+    const registrationTarget = {
+      ...target("connection-1"),
+      renewal: {
+        operationId: "renew_hook",
+        subscriptionId: { in: "body" as const, pointer: "/id" },
+        expiresAtPath: "/expiresAt",
+        renewBeforeSeconds: 300,
+      },
+    };
+    const { key, active } = await activate("connection-1", registrationTarget, initialExpiry);
+    const due = new Date(NOW.getTime() + 3_300_000);
+    expect(active.nextAttemptAt).toEqual(due);
+
+    const firstRenewal = await registrations.claim(key, "renewal-1", 120, due);
+    expect(firstRenewal).toMatchObject({ action: "renew", state: "active", renewalCycle: 1 });
+    if (firstRenewal === null) throw new Error("renewal was not claimed");
+    await registrations.failClaim(firstRenewal, "provider unavailable", 60, due);
+
+    const delayed = await registrations.claim(
+      key,
+      "renewal-2",
+      120,
+      new Date(due.getTime() + 59_000)
+    );
+    expect(delayed).toBeNull();
+    const retryAt = new Date(due.getTime() + 60_000);
+    const retry = await registrations.claim(key, "renewal-2", 120, retryAt);
+    if (retry === null) throw new Error("renewal retry was not claimed");
+    expect(retry.renewalCycle).toBe(1);
+    const renewedExpiry = new Date(NOW.getTime() + 7_200_000).toISOString();
+    const renewed = await registrations.completeRenewal(retry, renewedExpiry, retryAt);
+
+    expect(renewed).toMatchObject({
+      state: "active",
+      lastError: null,
+      active: { subscriptionId: "subscription-connection-1", expiresAt: renewedExpiry },
+    });
+    expect(renewed?.nextAttemptAt).toEqual(new Date(NOW.getTime() + 6_900_000));
+    const nextCycle = await registrations.claim(
+      key,
+      "renewal-3",
+      120,
+      new Date(NOW.getTime() + 6_900_000)
+    );
+    expect(nextCycle).toMatchObject({ action: "renew", renewalCycle: 2 });
+  });
+
+  it("skips an ineligible Connection when selecting the next due registration", async () => {
+    const firstKey = {
+      businessId: BUSINESS_ID,
+      connectionId: "connection-1",
+      integrationId: "acme",
+      integrationMajorVersion: 2,
+    };
+    const secondKey = { ...firstKey, connectionId: "connection-2" };
+    await registrations.requestRegistration(firstKey, target("connection-1"), NOW);
+    await registrations.requestRegistration(secondKey, target("connection-2"), NOW);
+    await connections.put(BUSINESS_ID, {
+      ...connection("connection-1"),
+      status: "revoked",
+    });
+
+    const claim = await registrations.claimNext("lease-eligible", 120, NOW);
+    expect(claim).toMatchObject({ connectionId: "connection-2", action: "register" });
   });
 
   it("rejects registration after waiting for a teardown-first Connection lock", async () => {

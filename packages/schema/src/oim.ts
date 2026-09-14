@@ -93,6 +93,7 @@ export const OIM_CONNECTION_HEALTH_STATES = [
  */
 export const OIM_VERIFICATION_SCHEMES = [
   "shared_secret",
+  "hubspot_v3",
   "twilio_hmac_sha1",
   "hmac_sha256",
   "hmac_sha512",
@@ -831,6 +832,17 @@ const AuthStepSchema = Type.Union([
       unregistration: Type.Object(
         { subscriptionId: WebhookValueBindingSchema },
         { additionalProperties: false }
+      ),
+      renewal: Type.Optional(
+        Type.Object(
+          {
+            operationId: Type.String({ pattern: OPERATION_ID_PATTERN, maxLength: 96 }),
+            subscriptionId: WebhookValueBindingSchema,
+            expiresAtPath: JsonPointerSchema,
+            renewBeforeSeconds: Type.Integer({ minimum: 1, maximum: 31 * 24 * 60 * 60 }),
+          },
+          { additionalProperties: false }
+        )
       ),
     },
     { additionalProperties: false }
@@ -2774,6 +2786,21 @@ export function oimManifestIssues(manifest: OimManifest): string[] {
         `auth: step ${step.id} unregistration operation must be a mutating HTTP operation`
       );
     }
+    if (step.renewal !== undefined) {
+      const renewal = manifest.operations.find(
+        (operation) => operation.id === step.renewal?.operationId
+      );
+      if (renewal === undefined) {
+        issues.push(
+          `auth: step ${step.id} references undeclared renewal operation ${step.renewal.operationId}`
+        );
+      } else if (
+        renewal.source.type !== "http" ||
+        !["create", "update", "delete", "send", "admin"].includes(renewal.effect)
+      ) {
+        issues.push(`auth: step ${step.id} renewal operation must be a mutating HTTP operation`);
+      }
+    }
     if (manifest.events?.verification.secretSlot !== step.secretSlot) {
       issues.push(
         `auth: step ${step.id} secretSlot must match events verification secretSlot ${manifest.events?.verification.secretSlot ?? "none"}`
@@ -3727,6 +3754,7 @@ function oimKnowledgeIssues(manifest: OimManifest): string[] {
 
 /** Which verification schemes read a signature header, and therefore require one. */
 const SIGNED_SCHEMES = new Set([
+  "hubspot_v3",
   "twilio_hmac_sha1",
   "hmac_sha256",
   "hmac_sha512",
@@ -3736,7 +3764,13 @@ const SIGNED_SCHEMES = new Set([
 ]);
 
 /** Schemes whose signature input is the declared template rather than a protocol-defined value. */
-const TIMESTAMP_SIGNING_SCHEMES = new Set(["hmac_sha256", "hmac_sha512", "ed25519", "rsa_sha256"]);
+const TIMESTAMP_SIGNING_SCHEMES = new Set([
+  "hmac_sha256",
+  "hmac_sha512",
+  "ed25519",
+  "rsa_sha256",
+  "hubspot_v3",
+]);
 
 function oimEventTypeIssues(
   manifest: OimManifest,
@@ -3828,10 +3862,31 @@ function oimEventsIssues(manifest: OimManifest): string[] {
       );
     }
   }
+  if (check.scheme === "hubspot_v3") {
+    if (check.signatureHeader?.toLowerCase() !== "x-hubspot-signature-v3") {
+      issues.push("events: hubspot_v3 requires X-HubSpot-Signature-v3");
+    }
+    if (check.signatureEncoding !== "base64") {
+      issues.push("events: hubspot_v3 requires base64 signatureEncoding");
+    }
+    if (
+      check.signaturePrefix !== undefined ||
+      check.signingInput !== undefined ||
+      check.timestampHeader?.toLowerCase() !== "x-hubspot-request-timestamp" ||
+      check.toleranceSeconds === undefined
+    ) {
+      issues.push(
+        "events: hubspot_v3 signs POST, the callback URL, the raw body, and X-HubSpot-Request-Timestamp"
+      );
+    }
+  }
   if (check.timestampHeader !== undefined) {
     if (!TIMESTAMP_SIGNING_SCHEMES.has(check.scheme)) {
       issues.push(`events: ${check.scheme} cannot authenticate timestampHeader`);
-    } else if (!(check.signingInput ?? "{body}").includes("{timestamp}")) {
+    } else if (
+      check.scheme !== "hubspot_v3" &&
+      !(check.signingInput ?? "{body}").includes("{timestamp}")
+    ) {
       issues.push("events: timestampHeader requires signingInput to include {timestamp}");
     }
   }

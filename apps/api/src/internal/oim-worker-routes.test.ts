@@ -60,6 +60,20 @@ function deps(): InternalOimWorkerRouteDeps {
       },
     })),
     reconcileWebhook: vi.fn(async () => reconciliation),
+    renewWebhook: vi.fn(async () => ({
+      kind: "renewed" as const,
+      result: {
+        subscriptionId: "subscription-1",
+        expiresAt: "2026-09-12T01:00:00.000Z",
+        verifiedIdentity: {
+          externalTenantId: "tenant-1",
+          externalAccountId: "account-1",
+          proofDigest: "b".repeat(64),
+          verifiedAt: "2026-09-12T00:00:00.000Z",
+          verifiedBy: "test",
+        },
+      },
+    })),
     unregisterWebhook: vi.fn(async () => {}),
     encryptPayload: vi.fn(async () => "encrypted"),
     decryptPayload: vi.fn(async () => Buffer.from("plain")),
@@ -108,6 +122,21 @@ describe("registerInternalOimWorkerRoutes", () => {
         "webhook-registration",
       ],
     });
+    await app.close();
+  });
+
+  it("forwards a renewal request only through the service-only webhook host", async () => {
+    const routeDeps = deps();
+    const app = await serviceApp(routeDeps);
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/v1/internal/oim/webhooks/renew",
+      payload: { registration: "opaque" },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(routeDeps.renewWebhook).toHaveBeenCalledWith({ registration: "opaque" });
     await app.close();
   });
 
