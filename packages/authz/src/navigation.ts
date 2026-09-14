@@ -40,16 +40,41 @@ const TEAM_DIRECTORY_READ: NavigationAuthorization = {
   fallback: "authenticated",
 };
 
+/**
+ * The baseline `member` role holds these (`identity/roles.ts` `MEMBER_ALLOWED_SURFACES`), so
+ * `authenticated` is not a widened fallback here — it matches what every ordinary account already
+ * has. A Guest with no explicit grants (`guests.ts`) holds none of them, so the nav entry now
+ * actually prunes for the "no roles, teams, or grants" principal the sidebar previously showed
+ * every destination to.
+ */
+const SOUL_RESOURCE_TYPE_LIST: NavigationAuthorization = {
+  action: "soul.resource_type.list",
+  resourceType: "soul.resource_type",
+  fallback: "authenticated",
+};
+const SOUL_SKILL_LIST: NavigationAuthorization = {
+  action: "soul.skill.list",
+  resourceType: "soul.skill",
+  fallback: "authenticated",
+};
+const ROUTINE_READ: NavigationAuthorization = {
+  action: "routine.read",
+  resourceType: "routine",
+  fallback: "authenticated",
+};
+
 /** Server-owned visibility requirements for every static destination in the product shell. */
 export const NAVIGATION_REQUIREMENTS: readonly NavigationRequirement[] = [
   { path: "/farm", authorizations: [AUTHENTICATED_NAVIGATION] },
-  { path: "/resources", authorizations: [AUTHENTICATED_NAVIGATION] },
+  { path: "/resources", authorizations: [SOUL_RESOURCE_TYPE_LIST] },
+  // Agent-level read authority is owned by a concurrent change (#847); left on the
+  // authentication-only gate until that lands a permission this entry can adopt.
   { path: "/agents", authorizations: [AUTHENTICATED_NAVIGATION] },
-  { path: "/skills", authorizations: [AUTHENTICATED_NAVIGATION] },
-  { path: "/routines", authorizations: [AUTHENTICATED_NAVIGATION] },
+  { path: "/skills", authorizations: [SOUL_SKILL_LIST] },
+  { path: "/routines", authorizations: [ROUTINE_READ] },
   // Scheduled Tasks is a filtered view of the same Routine data /routines already serves, so it
   // carries the identical authorization rather than a stricter or looser one.
-  { path: "/routines/scheduled", authorizations: [AUTHENTICATED_NAVIGATION] },
+  { path: "/routines/scheduled", authorizations: [ROUTINE_READ] },
   { path: "/files", authorizations: [AUTHENTICATED_NAVIGATION] },
   { path: "/knowledge", authorizations: [AUTHENTICATED_NAVIGATION] },
   { path: "/inbox", authorizations: [OPERATIONS_READ] },

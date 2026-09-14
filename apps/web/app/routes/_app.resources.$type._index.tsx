@@ -39,6 +39,7 @@ import {
   sortRecords,
   timeAgo,
 } from "~/lib/schema";
+import { useIsAdmin } from "~/lib/use-session-user";
 import { cn } from "~/lib/utils";
 
 const PAGE_SIZE = 25;
@@ -107,6 +108,12 @@ function ResourceListView() {
   const data = useLoaderData<typeof clientLoader>();
   const { type, columns, defaultColumns, schemaError, items, nextCursor } = data;
   const navigate = useNavigate();
+  const isAdmin = useIsAdmin();
+  // Mirrors the server's domain wall (apps/api/src/soul/resource-types/routes.ts,
+  // apps/api/src/resources/authorize.ts): a member gets full CRUD on a domainless type, but
+  // reaching a domained one needs an explicit Team grant this page cannot see, so the
+  // conservative default is admin-only once a domain is set.
+  const canManageType = isAdmin || !data.domain;
 
   const [records, setRecords] = useState<ResourceRecord[]>(items);
   const [cursor, setCursor] = useState<string | null>(nextCursor);
@@ -222,27 +229,31 @@ function ResourceListView() {
       }
       actions={
         <>
-          <Button asChild size="sm">
-            <Link to={`/resources/${encodeURIComponent(type)}/new`}>
-              <Plus aria-hidden className="size-4" />
-              New record
-            </Link>
-          </Button>
+          {canManageType ? (
+            <Button asChild size="sm">
+              <Link to={`/resources/${encodeURIComponent(type)}/new`}>
+                <Plus aria-hidden className="size-4" />
+                New record
+              </Link>
+            </Button>
+          ) : null}
           <Button asChild variant="outline" size="sm">
             <Link to={`/resources/${encodeURIComponent(type)}/schema`}>
               <Pencil aria-hidden className="size-4" />
               Edit schema
             </Link>
           </Button>
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={() => setConfirmingDeleteType(true)}
-            className="text-destructive hover:bg-destructive/10 hover:text-destructive"
-          >
-            <Trash2 aria-hidden className="size-4" />
-            Delete type
-          </Button>
+          {canManageType ? (
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => setConfirmingDeleteType(true)}
+              className="text-destructive hover:bg-destructive/10 hover:text-destructive"
+            >
+              <Trash2 aria-hidden className="size-4" />
+              Delete type
+            </Button>
+          ) : null}
         </>
       }
     >
@@ -408,12 +419,14 @@ function ResourceListView() {
                   Records land here when you add one, when an agent writes one, or when a routine
                   creates one.
                 </p>
-                <Button asChild variant="outline" size="sm" className="mt-4">
-                  <Link to={`/resources/${encodeURIComponent(type)}/new`}>
-                    <Plus aria-hidden className="size-4" />
-                    New record
-                  </Link>
-                </Button>
+                {canManageType ? (
+                  <Button asChild variant="outline" size="sm" className="mt-4">
+                    <Link to={`/resources/${encodeURIComponent(type)}/new`}>
+                      <Plus aria-hidden className="size-4" />
+                      New record
+                    </Link>
+                  </Button>
+                ) : null}
               </div>
             ) : shown.length === 0 ? (
               <div className="rounded-md border border-dashed border-border px-6 py-10 text-center text-sm text-muted-foreground">
