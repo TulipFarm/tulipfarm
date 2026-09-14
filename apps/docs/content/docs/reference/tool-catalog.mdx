@@ -79,7 +79,7 @@ Searching, reading and writing the cited pages agents answer from.
 | Tool | Changes things | What it does |
 | --- | --- | --- |
 | `cite_sources` | No | Declare the knowledge pages you used to answer. |
-| `create_knowledge_page` | Yes | Author a new knowledge page (markdown). |
+| `create_knowledge_page` | Yes | Author a new knowledge page (markdown) for people to read as wiki content. |
 | `create_space` | Yes | Create an Open Knowledge Format space, a navigable, cross-linked tree of pages (a wiki). |
 | `get_backlinks` | No | List the pages that link to a page (its inbound 'linked from' references, same- or cross-space). |
 | `get_page` | No | Fetch a knowledge page's full content by its pageId. |
@@ -152,6 +152,14 @@ A Team is a business unit that can own Agents, Skills and Routines. This tool li
 | Tool | Changes things | What it does |
 | --- | --- | --- |
 | `team_list` | No | List the business's Teams by human-readable name, with `recommendedTeamId` naming the Team an owned asset (Agent, Skill, Routine) would be auto-assigned to if you forged one right now. |
+
+## Users
+
+Looking up people who have accounts on this instance to assign work or link records.
+
+| Tool | Changes things | What it does |
+| --- | --- | --- |
+| `user_resolve` | No | Search and resolve TulipFarm instance users by display name, email, or handle. |
 
 ## Work handed back to a person
 

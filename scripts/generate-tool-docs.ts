@@ -77,6 +77,11 @@ const SECTIONS: readonly Section[] = [
       "A Team is a business unit that can own Agents, Skills and Routines. This tool lists the Teams available for that ownership.",
   },
   {
+    area: "user",
+    heading: "Users",
+    intro: "Looking up people who have accounts on this instance to assign work or link records.",
+  },
+  {
     area: "task",
     heading: "Work handed back to a person",
     intro: "Raising, and closing, work the runtime needs a human to do.",
