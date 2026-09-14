@@ -1027,7 +1027,7 @@ describe("durable chat submission over HTTP", () => {
     expect(selected.statusCode).toBe(200);
     expect(agentAccess).toHaveBeenCalledWith(
       "agent",
-      "private-agent",
+      "private-agent-id",
       expect.objectContaining({ id: userId, kind: "user" }),
       agents.get("private-agent")?.frontmatter.ownership
     );

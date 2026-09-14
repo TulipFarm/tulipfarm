@@ -55,7 +55,7 @@ export const delegateToAgentTool = defineParkableApiTool<PlatformToolContext>({
       try {
         await ctx.teamAssets.require(
           "agent",
-          agentId,
+          agent.id,
           { id: principal.id, kind: principal.kind },
           "use",
           typeof agent.frontmatter.ownership === "object" && agent.frontmatter.ownership !== null

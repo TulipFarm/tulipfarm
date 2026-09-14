@@ -215,7 +215,12 @@ describe("ChatTurnContextResolver", () => {
     const history = vi.spyOn(store, "listMessages");
     await expect(resolver.resolve(AUTHORITY)).rejects.toMatchObject({ code: "agent_use_denied" });
     expect(history).not.toHaveBeenCalled();
-    expect(access).toHaveBeenLastCalledWith("agent", "private-agent", AUTHORITY.subject, ownership);
+    expect(access).toHaveBeenLastCalledWith(
+      "agent",
+      "private-agent-id",
+      AUTHORITY.subject,
+      ownership
+    );
   });
 
   it("does not run a selected Agent when its access service is absent", async () => {
