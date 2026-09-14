@@ -373,6 +373,98 @@ describe("OIM Connection lifecycle", () => {
     ]);
   });
 
+  it("mints a pending JWT assertion step without requiring an existing access token", async () => {
+    const source = manifest();
+    const jwtManifest = validateOimManifest({
+      ...source,
+      auth: {
+        credentialSlots: [
+          { id: "client_id", label: "Client id", kind: "client_secret" },
+          { id: "private_key", label: "Private key", kind: "private_key" },
+          { id: "account_access", label: "Account access", kind: "oauth2_access_token" },
+        ],
+        steps: [
+          {
+            id: "assertion",
+            title: "Exchange assertion",
+            type: "jwt_assertion",
+            exchange: "oauth_jwt_bearer",
+            tokenUrl: "https://acme.test/token",
+            issuer: { type: "credential", slot: "client_id" },
+            privateKey: { type: "credential", slot: "private_key" },
+            bindings: [
+              {
+                sourcePath: "/access_token",
+                target: { type: "credential", slot: "account_access" },
+              },
+            ],
+          },
+        ],
+      },
+      operations: [
+        {
+          ...source.operations[0],
+          credentialSlot: "account_access",
+        },
+      ],
+    });
+    const initial: PersistedConnection = {
+      ...connection(),
+      secretBindings: {
+        client_id: "secret://00000000-0000-4000-8000-000000000001",
+        private_key: "secret://00000000-0000-4000-8000-000000000002",
+      },
+      expiresAt: null,
+    };
+    const authSteps = new MemoryAuthSteps();
+    authSteps.rows.clear();
+    await authSteps.put({
+      businessId: initial.businessId,
+      connectionId: initial.id,
+      stepId: "assertion",
+      status: "pending",
+      accessSlot: null,
+      accessSecretRef: null,
+      refreshSlot: null,
+      refreshSecretRef: null,
+      externalIdentity: null,
+      expiresAt: null,
+      healthCheckedAt: NOW.toISOString(),
+    });
+    const credentials = vault();
+    credentials.values.set(initial.secretBindings.client_id, "client");
+    credentials.values.set(initial.secretBindings.private_key, "private-key");
+    const connections = lifecycleConnections(authSteps, initial);
+
+    const result = await refreshOimConnection(
+      {
+        authSteps,
+        connections,
+        credentials,
+        refreshOAuth: vi.fn(),
+        refreshJwtAssertion: async ({ credentials: values }) => {
+          expect(values).toEqual({ client_id: "client", private_key: "private-key" });
+          return {
+            credentialValues: { account_access: "minted-token" },
+            expiresAt: "2026-09-12T13:00:00.000Z",
+          };
+        },
+        now: () => NOW,
+      },
+      jwtManifest,
+      initial
+    );
+
+    expect(result).toMatchObject({
+      health: "healthy",
+      steps: [{ stepId: "assertion", status: "renewed" }],
+    });
+    expect(authSteps.rows.get("assertion")).toMatchObject({
+      accessSlot: "account_access",
+      status: "active",
+    });
+  });
+
   it("refreshes every independently expiring OAuth step and aggregates healthy state", async () => {
     const authSteps = new MemoryAuthSteps();
     const credentials = vault();

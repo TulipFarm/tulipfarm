@@ -68,6 +68,73 @@ describe("validateOimManifest", () => {
     expect(validateOimManifest(valid())).toEqual(valid());
   });
 
+  it("accepts a bounded JWT bearer assertion step", () => {
+    const manifest = valid();
+    manifest.profiles.auth = "1.0";
+    manifest.auth = {
+      credentialSlots: [
+        { id: "issuer", label: "Issuer", kind: "client_secret" },
+        { id: "private_key", label: "Private key", kind: "private_key" },
+        { id: "access_token", label: "Access token", kind: "oauth2_access_token" },
+      ],
+      steps: [
+        {
+          id: "assertion",
+          title: "Exchange assertion",
+          type: "jwt_assertion",
+          exchange: "oauth_jwt_bearer",
+          tokenUrl: "https://oauth.example.test/token",
+          issuer: { type: "credential", slot: "issuer" },
+          privateKey: { type: "credential", slot: "private_key" },
+          scopes: ["calendar.read"],
+          ttlSeconds: 300,
+          bindings: [
+            {
+              sourcePath: "/access_token",
+              target: { type: "credential", slot: "access_token" },
+            },
+          ],
+        },
+      ],
+    };
+
+    expect(validateOimManifest(manifest)).toEqual(manifest);
+    expect(oimManifestIssues(manifest)).toEqual([]);
+  });
+
+  it("rejects GitHub App assertions without an installation id", () => {
+    const manifest = valid();
+    manifest.profiles.auth = "1.0";
+    manifest.auth = {
+      credentialSlots: [
+        { id: "app_id", label: "App ID", kind: "client_secret" },
+        { id: "private_key", label: "Private key", kind: "private_key" },
+        { id: "access_token", label: "Access token", kind: "oauth2_access_token" },
+      ],
+      steps: [
+        {
+          id: "assertion",
+          title: "Exchange assertion",
+          type: "jwt_assertion",
+          exchange: "github_app",
+          tokenUrl: "https://api.github.com/app/installations/{installationId}/access_tokens",
+          issuer: { type: "credential", slot: "app_id" },
+          privateKey: { type: "credential", slot: "private_key" },
+          bindings: [
+            {
+              sourcePath: "/access_token",
+              target: { type: "credential", slot: "access_token" },
+            },
+          ],
+        },
+      ],
+    };
+
+    expect(oimManifestIssues(manifest)).toContain(
+      "auth: step assertion github_app requires installationId"
+    );
+  });
+
   it("accepts bounded identified Auth verification checks", () => {
     const manifest = valid();
     manifest.profiles.auth = "1.1";

@@ -6,6 +6,7 @@ import {
   type IngressTeardownResult,
   OimAuthVerificationError,
   type OimConnectionVerificationEvidence,
+  type OimJwtAssertionRefreshRequest,
   type OimOAuthRefresh,
   type OimOAuthRefreshRequest,
   type OimPackageCatalogEntry,
@@ -114,6 +115,9 @@ export interface OimConnectionServiceDeps {
     teardown(key: WebhookRegistrationKey, now?: Date): Promise<IngressTeardownResult>;
   };
   readonly refreshOAuth: (request: OimOAuthRefreshRequest) => Promise<OimOAuthRefresh>;
+  readonly refreshJwtAssertion?: (
+    request: OimJwtAssertionRefreshRequest
+  ) => Promise<OimOAuthRefresh>;
   readonly verification?: {
     verify(input: {
       readonly package: ResolvedOimPackage;
@@ -379,7 +383,7 @@ export class OimConnectionService {
           })),
         })),
       initialAuthorizationSteps: (auth?.steps ?? [])
-        .filter((step) => step.type !== "fields")
+        .filter((step) => step.type !== "fields" && step.type !== "jwt_assertion")
         .map((step) => ({
           id: step.id,
           title: step.title,
@@ -672,7 +676,9 @@ export class OimConnectionService {
     await this.requireOperational(connection);
     if (
       pkg.manifest.auth?.verification !== undefined &&
-      !(pkg.manifest.auth.steps ?? []).some((step) => step.type === "oauth2")
+      !(pkg.manifest.auth.steps ?? []).some(
+        (step) => step.type === "oauth2" || step.type === "jwt_assertion"
+      )
     ) {
       const verification = await this.verifyFieldConnection(pkg, connection.id);
       return {
@@ -699,6 +705,9 @@ export class OimConnectionService {
           connections: this.deps.connections,
           credentials: this.deps.credentials,
           refreshOAuth: this.deps.refreshOAuth,
+          ...(this.deps.refreshJwtAssertion === undefined
+            ? {}
+            : { refreshJwtAssertion: this.deps.refreshJwtAssertion }),
           packageDigest: pkg.packageDigest,
           ...(verification === undefined
             ? {}

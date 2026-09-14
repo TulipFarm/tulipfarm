@@ -720,6 +720,25 @@ const AuthStepSchema = Type.Union([
   Type.Object(
     {
       ...AuthStepBase,
+      type: Type.Literal("jwt_assertion"),
+      exchange: stringEnum(["oauth_jwt_bearer", "github_app"] as const),
+      tokenUrl: Type.String({ pattern: HTTPS_URL_PATTERN }),
+      issuer: Type.Union([CredentialTargetSchema, ConfigurationTargetSchema]),
+      subject: Type.Optional(Type.Union([CredentialTargetSchema, ConfigurationTargetSchema])),
+      audience: Type.Optional(Type.String({ minLength: 1, maxLength: 2_048 })),
+      privateKey: CredentialTargetSchema,
+      installationId: Type.Optional(
+        Type.Union([CredentialTargetSchema, ConfigurationTargetSchema])
+      ),
+      scopes: Type.Optional(Type.Array(NonEmptyStringSchema, { minItems: 1, uniqueItems: true })),
+      ttlSeconds: Type.Optional(Type.Integer({ minimum: 60, maximum: 600 })),
+      bindings: Type.Array(AuthBindingSchema, { minItems: 1 }),
+    },
+    { additionalProperties: false }
+  ),
+  Type.Object(
+    {
+      ...AuthStepBase,
       type: Type.Literal("app_manifest"),
       createUrl: Type.String({ pattern: HTTPS_URL_PATTERN }),
       manifest: Type.Record(Type.String({ minLength: 1 }), Type.Unknown()),
@@ -2295,10 +2314,21 @@ export function oimManifestIssues(manifest: OimManifest): string[] {
       const targets =
         step.type === "fields"
           ? step.fields.map((field) => field.target)
-          : step.type === "oauth2" || step.type === "app_manifest" || step.type === "install"
+          : step.type === "oauth2" ||
+              step.type === "jwt_assertion" ||
+              step.type === "app_manifest" ||
+              step.type === "install"
             ? [
                 ...(step.type === "oauth2"
                   ? [step.clientId, ...(step.clientSecret ? [step.clientSecret] : [])]
+                  : []),
+                ...(step.type === "jwt_assertion"
+                  ? [
+                      step.issuer,
+                      step.privateKey,
+                      ...(step.subject ? [step.subject] : []),
+                      ...(step.installationId ? [step.installationId] : []),
+                    ]
                   : []),
                 ...step.bindings.map((binding) => binding.target),
               ]
@@ -2352,8 +2382,37 @@ export function oimManifestIssues(manifest: OimManifest): string[] {
           }
         }
       }
+      if (step.type === "jwt_assertion") {
+        const accessBindings = step.bindings.filter(
+          (binding) =>
+            binding.sourcePath === "/access_token" && binding.target.type === "credential"
+        );
+        if (accessBindings.length !== 1 || step.bindings.length !== 1) {
+          issues.push(
+            `auth: step ${step.id} jwt_assertion requires exactly one credential binding from /access_token`
+          );
+        }
+        if (step.exchange === "oauth_jwt_bearer" && step.installationId !== undefined) {
+          issues.push(`auth: step ${step.id} oauth_jwt_bearer cannot declare installationId`);
+        }
+        if (step.exchange === "github_app") {
+          if (step.installationId === undefined) {
+            issues.push(`auth: step ${step.id} github_app requires installationId`);
+          }
+          if (
+            step.subject !== undefined ||
+            step.audience !== undefined ||
+            step.scopes !== undefined
+          ) {
+            issues.push(
+              `auth: step ${step.id} github_app cannot declare subject, audience, or scopes`
+            );
+          }
+        }
+      }
       for (const url of [
         ...(step.type === "oauth2" ? [step.authorizationUrl, step.tokenUrl] : []),
+        ...(step.type === "jwt_assertion" ? [step.tokenUrl] : []),
         ...(step.type === "app_manifest" ? [step.createUrl] : []),
         ...(step.type === "install" ? [step.url] : []),
       ]) {

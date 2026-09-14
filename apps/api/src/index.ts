@@ -239,6 +239,7 @@ import { createOimAvailableConnectionReader } from "./integrations/oim-connectio
 import { createOimPaginationRuntime } from "./integrations/oim-continuation-host";
 import { createOimCredentialVault } from "./integrations/oim-credential-vault";
 import { createOimFileHost } from "./integrations/oim-file-host";
+import { refreshOimJwtAssertionStep } from "./integrations/oim-jwt";
 import { refreshOimOAuthStep } from "./integrations/oim-oauth";
 import { createOimVerificationHost } from "./integrations/oim-verification-host";
 import { PgPrincipalProviderTokenRepo } from "./integrations/principal-tokens";
@@ -1159,6 +1160,7 @@ async function boot() {
           }).remove(key, now),
       },
       refreshOAuth: (request) => refreshOimOAuthStep(request, {}),
+      refreshJwtAssertion: (request) => refreshOimJwtAssertionStep(request, { http: oimHttp }),
       verification: {
         verify: (input) => oimVerification.verify(input),
         verifyCandidate: (input) => oimVerification.verifyCandidate(input),

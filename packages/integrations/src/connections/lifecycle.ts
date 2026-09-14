@@ -15,6 +15,8 @@ import { oimManifestMajor } from "./catalog";
 import { projectVerifiedConnectionIdentity } from "./verification-evidence";
 
 type OAuthStep = Extract<OimAuth["steps"][number], { type: "oauth2" }>;
+type JwtAssertionStep = Extract<OimAuth["steps"][number], { type: "jwt_assertion" }>;
+type RenewableAuthStep = OAuthStep | JwtAssertionStep;
 
 export interface ConnectionCredentialVault {
   create(
@@ -79,6 +81,13 @@ export interface OimOAuthRefreshRequest {
   readonly credentials: Readonly<Record<string, string>>;
 }
 
+export interface OimJwtAssertionRefreshRequest {
+  readonly manifest: OimManifest;
+  readonly step: JwtAssertionStep;
+  readonly connection: PersistedConnection;
+  readonly credentials: Readonly<Record<string, string>>;
+}
+
 export interface OimOAuthRefreshStepResult {
   readonly stepId: string;
   readonly status: "renewed" | "skipped" | "in_progress" | "action_required" | "conflict";
@@ -96,6 +105,9 @@ export interface RefreshOimConnectionDeps {
   readonly connections: ConnectionLifecycleRepository;
   readonly credentials: ConnectionCredentialVault;
   readonly refreshOAuth: (request: OimOAuthRefreshRequest) => Promise<OimOAuthRefresh>;
+  readonly refreshJwtAssertion?: (
+    request: OimJwtAssertionRefreshRequest
+  ) => Promise<OimOAuthRefresh>;
   readonly packageDigest?: string;
   readonly verifyConnectionCandidate?: (input: {
     readonly manifest: OimManifest;
@@ -201,8 +213,10 @@ export async function createOimConnection(
   return { connectionId };
 }
 
-function oauthSteps(manifest: OimManifest): readonly OAuthStep[] {
-  return (manifest.auth?.steps ?? []).filter((step): step is OAuthStep => step.type === "oauth2");
+function renewableSteps(manifest: OimManifest): readonly RenewableAuthStep[] {
+  return (manifest.auth?.steps ?? []).filter(
+    (step): step is RenewableAuthStep => step.type === "oauth2" || step.type === "jwt_assertion"
+  );
 }
 
 function expiringWithin(expiresAt: string | null, now: Date, seconds: number): boolean {
@@ -238,11 +252,13 @@ function publication(
     readonly status: PublishConnectionAuthStep["status"];
     readonly expiresAt: string | null;
     readonly secretBindings?: Readonly<Record<string, `secret://${string}`>>;
+    readonly accessSlot?: string;
     readonly verifiedIdentity?: VerifiedConnectionIdentityEvidence;
     readonly verificationEvidence?: OimConnectionVerificationEvidence;
   }
 ): PublishConnectionAuthStep {
   const verifiedIdentity = input.verifiedIdentity;
+  const accessSlot = input.accessSlot ?? row.accessSlot;
   return {
     businessId: row.businessId,
     connectionId: row.connectionId,
@@ -251,11 +267,9 @@ function publication(
     stepId: row.stepId,
     expectedRevision,
     status: input.status,
-    accessSlot: row.accessSlot,
+    accessSlot,
     accessSecretRef:
-      row.accessSlot === null
-        ? null
-        : (input.secretBindings?.[row.accessSlot] ?? row.accessSecretRef),
+      accessSlot === null ? null : (input.secretBindings?.[accessSlot] ?? row.accessSecretRef),
     refreshSlot: row.refreshSlot,
     refreshSecretRef:
       row.refreshSlot === null
@@ -318,15 +332,22 @@ async function refreshStep(
   deps: RefreshOimConnectionDeps,
   manifest: OimManifest,
   connection: PersistedConnection,
-  step: OAuthStep,
+  step: RenewableAuthStep,
   row: ConnectionAuthStep,
   now: Date,
   renewalWindowSeconds: number
 ): Promise<OimOAuthRefreshStepResult> {
-  if (activeClaim(row, now, deps.claimLeaseSeconds ?? DEFAULT_CLAIM_LEASE_SECONDS)) {
+  if (
+    (step.type === "oauth2" || row.expiresAt !== null) &&
+    activeClaim(row, now, deps.claimLeaseSeconds ?? DEFAULT_CLAIM_LEASE_SECONDS)
+  ) {
     return { stepId: step.id, status: "in_progress" };
   }
-  if (!expiringWithin(row.expiresAt, now, renewalWindowSeconds)) {
+  if (
+    step.type === "oauth2"
+      ? !expiringWithin(row.expiresAt, now, renewalWindowSeconds)
+      : row.status === "active" && !expiringWithin(row.expiresAt, now, renewalWindowSeconds)
+  ) {
     return { stepId: step.id, status: "skipped" };
   }
   const claimed = await deps.connections.claimAuthStep({
@@ -342,35 +363,41 @@ async function refreshStep(
     return { stepId: step.id, status: "conflict", error: "revision_conflict" };
   }
   const claimRevision = row.revision + 1;
-  if (row.refreshSlot === null || row.refreshSecretRef === null) {
+  if (step.type === "oauth2" && (row.refreshSlot === null || row.refreshSecretRef === null)) {
     return markFailed(deps.connections, connection, row, claimRevision, now, "missing_credential");
   }
 
-  const stepSlots = new Set([
-    step.clientId.slot,
-    ...(step.clientSecret === undefined ? [] : [step.clientSecret.slot]),
-    ...step.bindings.flatMap((binding) =>
-      binding.target.type === "credential" ? [binding.target.slot] : []
-    ),
-  ]);
+  const stepSlots =
+    step.type === "oauth2"
+      ? new Set([
+          step.clientId.slot,
+          ...(step.clientSecret === undefined ? [] : [step.clientSecret.slot]),
+          ...step.bindings.flatMap((binding) =>
+            binding.target.type === "credential" ? [binding.target.slot] : []
+          ),
+        ])
+      : new Set([
+          step.privateKey.slot,
+          ...(step.issuer.type === "credential" ? [step.issuer.slot] : []),
+          ...(step.subject?.type === "credential" ? [step.subject.slot] : []),
+          ...(step.installationId?.type === "credential" ? [step.installationId.slot] : []),
+        ]);
   let current: Record<string, string>;
   let refreshed: OimOAuthRefresh;
   try {
     current = await credentialValues(deps.credentials, connection, stepSlots);
-    refreshed = await deps.refreshOAuth({
-      manifest,
-      step,
-      connection,
-      credentials: current,
-    });
+    if (step.type === "oauth2") {
+      refreshed = await deps.refreshOAuth({ manifest, step, connection, credentials: current });
+    } else {
+      const refreshJwtAssertion = deps.refreshJwtAssertion;
+      if (refreshJwtAssertion === undefined) throw new Error("jwt_assertion_refresh_unavailable");
+      refreshed = await refreshJwtAssertion({ manifest, step, connection, credentials: current });
+    }
   } catch {
     return markFailed(deps.connections, connection, row, claimRevision, now, "refresh_failed");
   }
-  if (
-    Object.keys(refreshed.credentialValues).some(
-      (slot) => connection.secretBindings[slot] === undefined
-    )
-  ) {
+  const declaredSlots = new Set((manifest.auth?.credentialSlots ?? []).map((slot) => slot.id));
+  if (Object.keys(refreshed.credentialValues).some((slot) => !declaredSlots.has(slot))) {
     return markFailed(deps.connections, connection, row, claimRevision, now, "missing_credential");
   }
 
@@ -380,7 +407,6 @@ async function refreshStep(
   try {
     for (const [slot, plaintext] of Object.entries(refreshed.credentialValues)) {
       const reference = connection.secretBindings[slot];
-      if (reference === undefined) continue;
       if (current[slot] === plaintext) continue;
       const stagedReference = await deps.credentials.create(
         connection.integration.id,
@@ -389,7 +415,7 @@ async function refreshStep(
       );
       staged.push(stagedReference);
       bindingPatch[slot] = stagedReference;
-      replaced.push(reference);
+      if (reference !== undefined) replaced.push(reference);
     }
   } catch {
     await deps.credentials.revokeReferences(staged);
@@ -447,11 +473,15 @@ async function refreshStep(
 
   let published: boolean;
   try {
+    const accessBinding = step.bindings.find((binding) => binding.sourcePath === "/access_token");
     published = await deps.connections.publishAuthStep(
       publication(connection, row, claimRevision, now, {
         status: "active",
         expiresAt: refreshed.expiresAt,
         secretBindings: bindingPatch,
+        ...(accessBinding?.target.type === "credential"
+          ? { accessSlot: accessBinding.target.slot }
+          : {}),
         verifiedIdentity,
         verificationEvidence,
       })
@@ -477,7 +507,7 @@ export async function refreshOimConnection(
   const now = (deps.now ?? (() => new Date()))();
   const rows = await deps.authSteps.list(connection.businessId, connection.id);
   const byId = new Map(rows.map((row) => [row.stepId, row]));
-  const steps = oauthSteps(manifest);
+  const steps = renewableSteps(manifest);
 
   const results: OimOAuthRefreshStepResult[] = [];
   for (const step of steps) {
