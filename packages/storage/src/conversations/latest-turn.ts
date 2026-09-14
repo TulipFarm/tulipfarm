@@ -9,14 +9,24 @@ export async function findLatestConversationTurn(
     id: string;
     run_id: string | null;
     status: ConversationTurn["status"];
+    reason: string | null;
+    model_failure: { requestId?: string; modelId?: string } | null;
   }>(
-    `SELECT id, run_id, status
-       FROM conversation_turns
-      WHERE conversation_id = $1
-      ORDER BY created_at DESC, id DESC
+    `SELECT t.id, t.run_id, t.status, c.reason, c.model_failure
+       FROM conversation_turns t
+       LEFT JOIN turn_completions c ON c.turn_id = t.id AND c.attempt = t.attempt
+      WHERE t.conversation_id = $1
+      ORDER BY t.created_at DESC, t.id DESC
       LIMIT 1`,
     [conversationId]
   );
   const row = rows[0];
-  return row ? { id: row.id, runId: row.run_id, status: row.status } : undefined;
+  if (!row) return undefined;
+  return {
+    id: row.id,
+    runId: row.run_id,
+    status: row.status,
+    ...(row.reason === null ? {} : { reason: row.reason }),
+    ...(row.model_failure === null ? {} : { modelFailure: row.model_failure }),
+  };
 }

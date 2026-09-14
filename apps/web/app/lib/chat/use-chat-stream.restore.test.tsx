@@ -5,7 +5,7 @@ import { useState } from "react";
 import { afterEach, expect, test, vi } from "vitest";
 import type { ConversationTurn } from "~/lib/conversations";
 import type { ChatMessage } from "./types";
-import { useChatStream } from "./use-chat-stream";
+import { seedState, useChatStream } from "./use-chat-stream";
 
 afterEach(() => {
   cleanup();
@@ -317,6 +317,40 @@ test("does not replay a failed Turn whose attempt history is already persisted",
   expect(screen.getByText("Already saved.")).toBeInTheDocument();
   expect(screen.getByText("The model request failed. Try again.")).toBeInTheDocument();
   expect(fetchMock).not.toHaveBeenCalled();
+});
+
+test("rehydrates the Retry reason and diagnostic details for a failed Turn restored on reload", () => {
+  const state = seedState({
+    initialConversationId: "conversation-1",
+    initialMessages,
+    initialTurn: {
+      id: "turn-1",
+      runId: "run-1",
+      status: "failed",
+      reason: "model_provider_unavailable",
+      modelFailure: { requestId: "req-1", modelId: "gpt-5" },
+    },
+  });
+
+  expect(state.status).toBe("error");
+  expect(state.error).toBe("The model provider is temporarily unavailable. Try again shortly.");
+  expect(state.errorDetails).toEqual({
+    reason: "model_provider_unavailable",
+    requestId: "req-1",
+    modelId: "gpt-5",
+  });
+});
+
+test("falls back to the generic failure message when no failure reason was persisted", () => {
+  const state = seedState({
+    initialConversationId: "conversation-1",
+    initialMessages,
+    initialTurn: { id: "turn-1", runId: "run-1", status: "failed" },
+  });
+
+  expect(state.status).toBe("error");
+  expect(state.error).toBe("The model request failed. Try again.");
+  expect(state.errorDetails).toBeUndefined();
 });
 
 test("never adopts another Turn while polling a pending submission", async () => {

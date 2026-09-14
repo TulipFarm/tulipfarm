@@ -395,6 +395,32 @@ describe("PgConversationStore", () => {
     });
   });
 
+  it("carries a failed Turn's failure reason and model diagnostic so a reload can restore Retry", async () => {
+    await store.saveTurn(turn({ status: "failed", runId: RUN_ID }));
+    await store.completeTurn({
+      completion: {
+        businessId: DEPLOYMENT_BUSINESS_ID,
+        turnId: TURN_ID,
+        attempt: 1,
+        status: "failed",
+        messageId: null,
+        cursor: 4,
+        createdAt: CREATED_AT,
+        reason: "model_provider_unavailable",
+        modelFailure: { requestId: "req-1", modelId: "gpt-x" },
+      },
+      runId: RUN_ID,
+    });
+
+    await expect(store.findLatestTurn(DEPLOYMENT_BUSINESS_ID, CONVERSATION_ID)).resolves.toEqual({
+      id: TURN_ID,
+      runId: RUN_ID,
+      status: "failed",
+      reason: "model_provider_unavailable",
+      modelFailure: { requestId: "req-1", modelId: "gpt-x" },
+    });
+  });
+
   it("keeps the first outcome an attempt recorded", async () => {
     await store.saveTurn(turn({ runId: RUN_ID }));
     const completion = {

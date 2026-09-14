@@ -331,7 +331,15 @@ export function registerConversationRoutes(
         createdAt: convo.createdAt,
         updatedAt: convo.updatedAt,
         latestTurn: latestTurn
-          ? { id: latestTurn.id, runId: latestTurn.runId, status: latestTurn.status }
+          ? {
+              id: latestTurn.id,
+              runId: latestTurn.runId,
+              status: latestTurn.status,
+              ...(latestTurn.reason === undefined ? {} : { reason: latestTurn.reason }),
+              ...(latestTurn.modelFailure === undefined
+                ? {}
+                : { modelFailure: latestTurn.modelFailure }),
+            }
           : null,
       });
     }

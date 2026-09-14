@@ -15,6 +15,7 @@ import {
 } from "~/lib/chat/reducer";
 import type { ChatStreamMeta } from "~/lib/chat/sse-client";
 import {
+  modelFailureMessage,
   postChat,
   postChatRetry,
   postSurfaceInteraction,
@@ -24,6 +25,7 @@ import {
 } from "~/lib/chat/sse-client";
 import type {
   ChatEvent,
+  ChatFailureDetails,
   ChatMessage,
   ChatModelSelector,
   ChatState,
@@ -79,10 +81,23 @@ export function seedState(opts?: UseChatStreamOptions): ChatState {
     return base;
   }
   if (turn.status === "failed") {
+    const errorDetails: ChatFailureDetails | undefined =
+      turn.reason === undefined && turn.modelFailure === undefined
+        ? undefined
+        : {
+            ...(turn.reason === undefined ? {} : { reason: turn.reason }),
+            ...(turn.modelFailure?.requestId === undefined
+              ? {}
+              : { requestId: turn.modelFailure.requestId }),
+            ...(turn.modelFailure?.modelId === undefined
+              ? {}
+              : { modelId: turn.modelFailure.modelId }),
+          };
     return {
       ...base,
       status: "error",
-      error: "The model request failed. Try again.",
+      error: modelFailureMessage(turn.reason),
+      ...(errorDetails ? { errorDetails } : {}),
     };
   }
   if (!needsRunReplay(opts)) return base;
