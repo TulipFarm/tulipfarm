@@ -28,7 +28,6 @@ const summary = (over: Partial<RoutineSummary["summary"]> = {}): RoutineSummary[
   agentRefs: [],
   effects: [],
   toolAbilities: [],
-  agentRefs: [],
   maxRiskClass: null,
   requiresApproval: false,
   concurrencyPolicy: null,
