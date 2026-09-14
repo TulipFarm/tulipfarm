@@ -14,7 +14,6 @@ import {
   Code,
   CornerDownRight,
   Database,
-  FileText,
   Italic,
   Link as LinkIcon,
   Paperclip,
@@ -31,6 +30,7 @@ import { AttachmentStrip } from "./attachment-strip";
 import { buildMentionExtensions, MENTION_PLUGIN_KEYS } from "./editor/mentions";
 import { firstAgentMentionId, type PMNode, serializeDoc } from "./editor/serialize";
 import { useMentionData } from "./editor/use-mention-data";
+import { FilePickerModal } from "./file-picker-modal";
 import {
   DEFAULT_CHAT_MODEL_SELECTOR,
   effectiveEffortPreset,
@@ -185,6 +185,7 @@ export function ComposerEditor({
   // `add` the file input and paste already call, so there is no second upload path to keep in sync.
   const [dragActive, setDragActive] = useState(false);
   const [fileMentionError, setFileMentionError] = useState<string | null>(null);
+  const [filePickerOpen, setFilePickerOpen] = useState(false);
 
   // A File the Files library handed over, staged without re-uploading its bytes. The id arrives as
   // a prop rather than being read from the URL here: the composer is rendered outside a router in
@@ -388,15 +389,13 @@ export function ComposerEditor({
               onChange={(event) => {
                 add(Array.from(event.target.files ?? []));
                 event.target.value = "";
+                setFilePickerOpen(false);
               }}
               ref={fileInputRef}
               type="file"
             />
-            <ContextTrigger label="Attach file" onClick={() => fileInputRef.current?.click()}>
+            <ContextTrigger label="Add files" onClick={() => setFilePickerOpen(true)}>
               <Paperclip aria-hidden className="size-4" />
-            </ContextTrigger>
-            <ContextTrigger label="Add File" shortcut="+" onClick={() => insertContextTrigger("+")}>
-              <FileText aria-hidden className="size-4" />
             </ContextTrigger>
             <ContextTrigger
               label="Mention Agent"
@@ -477,6 +476,13 @@ export function ComposerEditor({
         ) : null}
         <p className="sr-only">Enter to send · Shift+Enter for a new line</p>
       </div>
+      <FilePickerModal
+        open={filePickerOpen}
+        onClose={() => setFilePickerOpen(false)}
+        onAttachExisting={addExisting}
+        onFilesDropped={add}
+        onBrowse={() => fileInputRef.current?.click()}
+      />
     </div>
   );
 }

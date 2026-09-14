@@ -293,17 +293,24 @@ test("send attaches a stored File selected with +File", async () => {
   });
 });
 
-test("the context toolbar offers the +File trigger", async () => {
+// The toolbar's "+" button is gone (#846), but typing "+" still opens the inline Files mention
+// menu — that trigger is wired at the mention-extension level and stays covered by
+// `editor/mention-menu.test.tsx`, unaffected by this toolbar change.
+
+test("the composer offers a single unified files button instead of two", async () => {
   const user = userEvent.setup();
   render(<ComposerEditor onSend={vi.fn()} />);
 
-  await user.click(screen.getByRole("button", { name: "Add File (+)" }));
+  expect(screen.queryByRole("button", { name: "Attach file" })).toBeNull();
+  expect(screen.queryByRole("button", { name: "Add File (+)" })).toBeNull();
+  const trigger = screen.getByRole("button", { name: "Add files" });
+  expect(trigger).toBeTruthy();
 
-  expect(insertContent).toHaveBeenCalledWith("+");
-  expect(viewFocus).toHaveBeenCalled();
+  await user.click(trigger);
+  expect(screen.getByRole("dialog", { name: "Add files" })).toBeTruthy();
 });
 
-test("the composer offers an attach control that accepts only supported types", () => {
+test("the composer's hidden attach control accepts only supported types", () => {
   const { container } = render(<ComposerEditor onSend={vi.fn()} />);
   const input = container.querySelector('input[type="file"]') as HTMLInputElement;
   expect(input).not.toBeNull();
@@ -313,7 +320,7 @@ test("the composer offers an attach control that accepts only supported types", 
   expect(input.accept).toContain("image/png");
   expect(input.accept).toContain("application/pdf");
   expect(input.accept).not.toContain("image/svg+xml");
-  expect(screen.getByLabelText("Attach file")).toBeTruthy();
+  expect(screen.getByLabelText("Attach files")).toBeTruthy();
 });
 
 test("choosing a file shows a removable chip and sends its id once uploaded", async () => {
