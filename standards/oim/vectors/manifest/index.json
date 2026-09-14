@@ -5,6 +5,7 @@
     { "file": "positive/core-1.1-configuration-parameter.yml", "valid": true },
     { "file": "positive/core-1.1-graphql-configuration-url.yml", "valid": true },
     { "file": "positive/core-1.2.yml", "valid": true },
+    { "file": "positive/core-1.3-composite.yml", "valid": true },
     { "file": "positive/auth-1.0.yml", "valid": true },
     { "file": "positive/auth-1.1.yml", "valid": true },
     { "file": "positive/events-1.0.yml", "valid": true },
@@ -21,6 +22,7 @@
     { "file": "negative/core-1.0-uses-1.1.yml", "valid": false },
     { "file": "negative/core-1.0-uses-configured-graphql.yml", "valid": false },
     { "file": "negative/core-1.1-uses-1.2.yml", "valid": false },
+    { "file": "negative/core-1.2-uses-composite.yml", "valid": false },
     { "file": "negative/dependency-file.yml", "valid": false },
     { "file": "negative/websocket-personal-identity.yml", "valid": false }
   ]

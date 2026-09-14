@@ -102,6 +102,14 @@ const referenceAdapter = {
           variables: input.variables,
           result: input.response,
         };
+      case "core.operation.composite":
+        return {
+          steps: input.steps,
+          result: input.result,
+          intermediatesExposed: false,
+          componentActionsAuthorized: true,
+          effect: "read",
+        };
       case "core.fixtures.hermetic": {
         const suite = `version: 1
 cases:
@@ -525,11 +533,11 @@ test("a runtime cannot report cases for an unclaimed profile", async () => {
 test("capability advertisements require an executed conformance report", async () => {
   const report = await runConformance({
     runtime: { name: "Example Runtime", version: "2.0.0" },
-    profiles: { core: "1.2" },
+    profiles: { core: "1.3" },
     adapter: referenceAdapter,
   });
   const advertisement = createRuntimeCapabilityAdvertisement(report);
-  assert.deepEqual(advertisement.profiles.core, ["1.0", "1.1", "1.2"]);
+  assert.deepEqual(advertisement.profiles.core, ["1.0", "1.1", "1.2", "1.3"]);
   assert.equal(advertisement.packageEntrypoint, "oim.yml");
 
   const incomplete = structuredClone(report);

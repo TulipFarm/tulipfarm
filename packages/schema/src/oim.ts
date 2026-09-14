@@ -13,7 +13,7 @@ import { TeamIdSchema } from "./teams";
 export const OIM_VERSION = "1.0" as const;
 
 export const OIM_PROFILE_VERSIONS = {
-  core: "1.2",
+  core: "1.3",
   auth: "1.1",
   events: "1.0",
   knowledge: "1.2",
@@ -28,7 +28,7 @@ export const OIM_PROFILE_VERSIONS = {
  * promise: a `1.0` package reaching for a `1.1` construct is refused, which is what keeps a
  * version number worth reading on a runtime that only implements `1.0`.
  */
-export const OIM_CORE_PROFILE_VERSIONS = ["1.0", "1.1", "1.2"] as const;
+export const OIM_CORE_PROFILE_VERSIONS = ["1.0", "1.1", "1.2", "1.3"] as const;
 export const OIM_AUTH_PROFILE_VERSIONS = ["1.0", "1.1"] as const;
 const OIM_KNOWLEDGE_PROFILE_VERSIONS = ["1.0", "1.1", "1.2"] as const;
 
@@ -50,6 +50,9 @@ export const OIM_CORE_1_2_FEATURES = [
   "source.multipart",
   "response.mode: binary",
 ] as const;
+
+/** Constructs added in Core 1.3. */
+export const OIM_CORE_1_3_FEATURES = ["source.type: composite"] as const;
 
 export const OIM_FILE_ROLES = ["openapi", "graphql", "guide", "hook", "fixture"] as const;
 export const OIM_EFFECT_CLASSES = [
@@ -130,6 +133,7 @@ export const OIM_CONFORMANCE_CASES = {
     "core.operation.http",
     "core.operation.openapi",
     "core.operation.graphql",
+    "core.operation.composite",
     "core.fixtures.hermetic",
     "core.compatibility.same-major",
   ],
@@ -153,6 +157,7 @@ export const OIM_CONFORMANCE_CASES = {
 } as const;
 
 export const OIM_CONFORMANCE_CASE_SINCE: Readonly<Record<string, string>> = {
+  "core.operation.composite": "1.3",
   "auth.verification.identified": "1.1",
   "auth.verification.validity-only": "1.1",
   "auth.verification.revision-bound": "1.1",
@@ -416,6 +421,54 @@ const GraphqlSourceSchema = Type.Object(
   { additionalProperties: false }
 );
 
+const CompositeJsonPointerSchema = Type.String({
+  pattern: "^(?:/(?:[^/~]|~[01])*)+$",
+  maxLength: 512,
+});
+
+const CompositeBindingSourceSchema = Type.Union([
+  Type.Object(
+    {
+      type: Type.Literal("input"),
+      pointer: CompositeJsonPointerSchema,
+    },
+    { additionalProperties: false }
+  ),
+  Type.Object(
+    {
+      type: Type.Literal("step"),
+      stepId: Type.String({ pattern: SLOT_PATTERN, maxLength: 64 }),
+      pointer: CompositeJsonPointerSchema,
+    },
+    { additionalProperties: false }
+  ),
+]);
+
+const CompositeBindingSchema = Type.Object(
+  {
+    target: CompositeJsonPointerSchema,
+    source: CompositeBindingSourceSchema,
+  },
+  { additionalProperties: false }
+);
+
+const CompositeStepSchema = Type.Object(
+  {
+    id: Type.String({ pattern: SLOT_PATTERN, maxLength: 64 }),
+    operationId: Type.String({ pattern: OPERATION_ID_PATTERN, maxLength: 96 }),
+    bindings: Type.Optional(Type.Array(CompositeBindingSchema, { maxItems: 64 })),
+  },
+  { additionalProperties: false }
+);
+
+const CompositeSourceSchema = Type.Object(
+  {
+    type: Type.Literal("composite"),
+    steps: Type.Array(CompositeStepSchema, { minItems: 1, maxItems: 16 }),
+  },
+  { additionalProperties: false }
+);
+
 const CursorPaginationSchema = Type.Object(
   {
     type: Type.Literal("cursor"),
@@ -570,7 +623,12 @@ const OperationSchema = Type.Object(
     credentialSlot: Type.Optional(Type.String({ pattern: SLOT_PATTERN })),
     credentialInjection: Type.Optional(CredentialInjectionSchema),
     secondaryCredential: Type.Optional(SecondaryCredentialSchema),
-    source: Type.Union([HttpSourceSchema, OpenApiSourceSchema, GraphqlSourceSchema]),
+    source: Type.Union([
+      HttpSourceSchema,
+      OpenApiSourceSchema,
+      GraphqlSourceSchema,
+      CompositeSourceSchema,
+    ]),
     requestSchema: Type.Optional(JsonSchemaObject),
     response: ResponseSchema,
     pagination: Type.Optional(
@@ -2485,7 +2543,11 @@ export function oimManifestIssues(manifest: OimManifest): string[] {
       issues.push(`operations: ${operation.id} credential injection is required for native HTTP`);
     }
     const baseUrl =
-      operation.source.type === "graphql" ? operation.source.url : operation.source.baseUrl;
+      operation.source.type === "graphql"
+        ? operation.source.url
+        : operation.source.type === "composite"
+          ? undefined
+          : operation.source.baseUrl;
     const originField = baseUrl === undefined ? undefined : oimOriginPlaceholder(baseUrl);
     if (originField !== undefined) {
       const declared = (manifest.auth?.configurationFields ?? []).find(
@@ -2683,6 +2745,8 @@ export function oimManifestIssues(manifest: OimManifest): string[] {
       }
     }
   }
+
+  issues.push(...oimCompositeIssues(manifest));
 
   for (const step of manifest.auth?.steps ?? []) {
     if (step.type !== "webhook") continue;
@@ -2889,6 +2953,118 @@ function sameCredentialLocation(
   return primary.name === secondary.name;
 }
 
+function oimCompositeIssues(manifest: OimManifest): string[] {
+  const issues: string[] = [];
+  const operations = new Map(manifest.operations.map((operation) => [operation.id, operation]));
+  const visiting = new Set<string>();
+  const visited = new Set<string>();
+  const sameOptional = (left: unknown, right: unknown): boolean =>
+    left === undefined || right === undefined
+      ? left === right
+      : canonicalHash(left) === canonicalHash(right);
+  const effectRank: Record<(typeof OIM_EFFECT_CLASSES)[number], number> = {
+    read: 0,
+    sensitive_read: 1,
+    create: 2,
+    update: 2,
+    delete: 3,
+    send: 3,
+    admin: 4,
+  };
+
+  const compareOperation = (composite: OimOperation, component: OimOperation, context: string) => {
+    for (const field of ["identityMode", "credentialSlot"] as const) {
+      if (composite[field] !== component[field]) {
+        issues.push(
+          `operations: ${composite.id} ${context} must match component ${component.id} ${field}`
+        );
+      }
+    }
+    if (!sameOptional(composite.credentialInjection, component.credentialInjection)) {
+      issues.push(
+        `operations: ${composite.id} ${context} must match component ${component.id} credentialInjection`
+      );
+    }
+    if (!sameOptional(composite.secondaryCredential, component.secondaryCredential)) {
+      issues.push(
+        `operations: ${composite.id} ${context} must match component ${component.id} secondaryCredential`
+      );
+    }
+  };
+
+  const visit = (operation: OimOperation): void => {
+    if (operation.source.type !== "composite" || visited.has(operation.id)) return;
+    if (visiting.has(operation.id)) {
+      issues.push(`operations: composite cycle includes ${operation.id}`);
+      return;
+    }
+    visiting.add(operation.id);
+    if (operation.requestSchema === undefined) {
+      issues.push(`operations: ${operation.id} composite source requires a request schema`);
+    }
+    if (operation.pagination !== undefined) {
+      issues.push(`operations: ${operation.id} composite source does not support pagination`);
+    }
+
+    const stepIds = new Set<string>();
+    let finalOperation: OimOperation | undefined;
+    for (const step of operation.source.steps) {
+      if (stepIds.has(step.id)) {
+        issues.push(
+          `operations: ${operation.id} composite step ${step.id} is declared more than once`
+        );
+      }
+      const component = operations.get(step.operationId);
+      if (component === undefined) {
+        issues.push(
+          `operations: ${operation.id} composite step ${step.id} references undeclared operation ${step.operationId}`
+        );
+        stepIds.add(step.id);
+        continue;
+      }
+      if (component.id === operation.id) {
+        issues.push(`operations: ${operation.id} composite step ${step.id} references itself`);
+      }
+      compareOperation(operation, component, `composite step ${step.id}`);
+      if (effectRank[operation.effect] < effectRank[component.effect]) {
+        issues.push(
+          `operations: ${operation.id} composite effect ${operation.effect} is weaker than component ${component.id} ${component.effect}`
+        );
+      }
+      const bindingTargets = new Set<string>();
+      for (const binding of step.bindings ?? []) {
+        if (binding.source.type === "step" && !stepIds.has(binding.source.stepId)) {
+          issues.push(
+            `operations: ${operation.id} composite step ${step.id} binding references a later or unknown step ${binding.source.stepId}`
+          );
+        }
+        if (bindingTargets.has(binding.target)) {
+          issues.push(
+            `operations: ${operation.id} composite step ${step.id} binds target ${binding.target} more than once`
+          );
+        }
+        bindingTargets.add(binding.target);
+      }
+      stepIds.add(step.id);
+      finalOperation = component;
+      visit(component);
+    }
+    if (
+      finalOperation !== undefined &&
+      canonicalHash(operation.response) !== canonicalHash(finalOperation.response)
+    ) {
+      issues.push(
+        `operations: ${operation.id} composite response must exactly match final component ${finalOperation.id}`
+      );
+    }
+    visiting.delete(operation.id);
+    visited.add(operation.id);
+  };
+
+  for (const operation of manifest.operations) visit(operation);
+  return issues;
+}
+
 /** The `path` placeholder a path-injected credential fills. Reserved; never a parameter name. */
 export const PATH_CREDENTIAL_PLACEHOLDER = "credential";
 
@@ -2912,6 +3088,8 @@ function formEncodableSchema(schema: unknown): boolean {
 function oimCoreExtensionIssues(manifest: OimManifest): string[] {
   const issues: string[] = [];
   const used = new Set<string>();
+  const core12 = new Set(OIM_CORE_1_2_FEATURES);
+  const core13 = new Set(OIM_CORE_1_3_FEATURES);
   const configured = new Map(
     (manifest.auth?.configurationFields ?? []).map((field) => [field.id, field])
   );
@@ -3070,20 +3248,32 @@ function oimCoreExtensionIssues(manifest: OimManifest): string[] {
         issues.push(`operations: ${operation.id} binary response mode does not support pagination`);
       }
     }
+    if (source.type === "composite") {
+      used.add("source.type: composite");
+    }
   }
 
-  const core12 = new Set(OIM_CORE_1_2_FEATURES);
-  const needs12 = [...used].filter((feature) =>
-    core12.has(feature as (typeof OIM_CORE_1_2_FEATURES)[number])
+  const needs13 = [...used].filter((feature) =>
+    core13.has(feature as (typeof OIM_CORE_1_3_FEATURES)[number])
+  );
+  const needs12 = [...used].filter(
+    (feature) =>
+      !core13.has(feature as (typeof OIM_CORE_1_3_FEATURES)[number]) &&
+      core12.has(feature as (typeof OIM_CORE_1_2_FEATURES)[number])
   );
   const needs11 = [...used].filter(
-    (feature) => !core12.has(feature as (typeof OIM_CORE_1_2_FEATURES)[number])
+    (feature) =>
+      !core13.has(feature as (typeof OIM_CORE_1_3_FEATURES)[number]) &&
+      !core12.has(feature as (typeof OIM_CORE_1_2_FEATURES)[number])
   );
   if (needs11.length > 0 && manifest.profiles.core === "1.0") {
     issues.push(`profiles: core "1.1" is required for ${needs11.sort().join(", ")}`);
   }
-  if (needs12.length > 0 && manifest.profiles.core !== "1.2") {
+  if (needs12.length > 0 && !["1.2", "1.3"].includes(manifest.profiles.core)) {
     issues.push(`profiles: core "1.2" is required for ${needs12.sort().join(", ")}`);
+  }
+  if (needs13.length > 0 && manifest.profiles.core !== "1.3") {
+    issues.push(`profiles: core "1.3" is required for ${needs13.sort().join(", ")}`);
   }
   return issues;
 }

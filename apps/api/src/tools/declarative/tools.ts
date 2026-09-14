@@ -2,10 +2,12 @@ import { createHash } from "node:crypto";
 import {
   type CompiledEgressTool,
   type CompiledGraphqlTool,
+  type CompiledOimCompositeTool,
   type CompiledOimGraphqlTool,
   type CompiledOimHttpTool,
   type CompiledOimOpenApiTool,
   compileGraphqlEgress,
+  compileOimCompositeOperations,
   compileOimGraphqlOperations,
   compileOimHttpOperations,
   compileOimOpenApiOperations,
@@ -14,6 +16,7 @@ import {
   extractOimMultipartFileIds,
   GraphqlToolAdapter,
   OIM_CONNECTION_ID_ARGUMENT,
+  OimCompositeToolAdapter,
   type OimFilePort,
   type OimFileReadAuthorizationPort,
   OimGraphqlToolAdapter,
@@ -274,7 +277,8 @@ type CompiledDeclarativeTool =
   | CompiledGraphqlTool
   | CompiledOimHttpTool
   | CompiledOimOpenApiTool
-  | CompiledOimGraphqlTool;
+  | CompiledOimGraphqlTool
+  | CompiledOimCompositeTool;
 
 function declarativeTargets(
   compiled: CompiledDeclarativeTool,
@@ -399,6 +403,13 @@ function compileIntegration(integration: SoulIntegration): CompiledIntegration {
           {},
           { deferConfiguration: true }
         ),
+        ...compileOimCompositeOperations(
+          oimManifest,
+          new Map(Object.entries(integration.oimDocuments ?? {})),
+          new Map(Object.entries(integration.oimOpenApiDocuments ?? {})),
+          {},
+          { deferConfiguration: true }
+        ),
       ],
     };
   }
@@ -477,33 +488,34 @@ function compileOimRuntimeTool(
 ): CompiledDeclarativeTool {
   const manifest = integration.oimManifest;
   if (manifest === undefined || !("operation" in compiled)) return compiled;
-  const one = { ...manifest, operations: [compiled.operation] };
-  switch (compiled.operation.source.type) {
-    case "http":
-      return compileOimHttpOperations(one, configuration)[0] ?? compiled;
-    case "openapi":
-      return (
-        compileOimOpenApiOperations(
-          one,
-          new Map(Object.entries(integration.oimOpenApiDocuments ?? {})),
-          configuration
-        )[0] ?? compiled
-      );
-    case "graphql":
-      return (
-        compileOimGraphqlOperations(
-          one,
-          new Map(Object.entries(integration.oimDocuments ?? {})),
-          configuration
-        )[0] ?? compiled
-      );
-  }
+  return (
+    [
+      ...compileOimHttpOperations(manifest, configuration),
+      ...compileOimOpenApiOperations(
+        manifest,
+        new Map(Object.entries(integration.oimOpenApiDocuments ?? {})),
+        configuration
+      ),
+      ...compileOimGraphqlOperations(
+        manifest,
+        new Map(Object.entries(integration.oimDocuments ?? {})),
+        configuration
+      ),
+      ...compileOimCompositeOperations(
+        manifest,
+        new Map(Object.entries(integration.oimDocuments ?? {})),
+        new Map(Object.entries(integration.oimOpenApiDocuments ?? {})),
+        configuration
+      ),
+    ].find((candidate) => candidate.operation.id === compiled.operation.id) ?? compiled
+  );
 }
 
 function oimDestination(compiled: CompiledDeclarativeTool): string | undefined {
   if (!("operation" in compiled)) return undefined;
-  return new URL("baseUrl" in compiled.binding ? compiled.binding.baseUrl : compiled.binding.url)
-    .origin;
+  if (compiled.operation.source.type === "composite") return undefined;
+  if ("baseUrl" in compiled.binding) return new URL(compiled.binding.baseUrl).origin;
+  return "url" in compiled.binding ? new URL(compiled.binding.url).origin : undefined;
 }
 
 function configuredBinding(
@@ -872,6 +884,9 @@ function buildToolDef(
     outputSchema: compiled.contract.spec.outputSchema,
     authorization: {
       action,
+      ...(compiled.contract.spec.requiredActions === undefined
+        ? {}
+        : { requiredActions: compiled.contract.spec.requiredActions }),
       resources: [integrationResource(slug)],
       targets: (args) => declarativeTargets(compiled, slug, args),
       dataClasses: compiled.contract.spec.dataClasses,
@@ -1085,6 +1100,22 @@ function adapterFor(
   deps: DeclarativeToolingDeps,
   integration: CompiledIntegration
 ): ToolAdapter | undefined {
+  if (
+    "operation" in tool &&
+    tool.operation.source.type === "composite" &&
+    integration.oimManifest !== undefined
+  ) {
+    const composite = tool as CompiledOimCompositeTool;
+    return new OimCompositeToolAdapter({
+      steps: composite.steps.map((step) => {
+        const adapter = adapterFor(step.tool, deps, integration);
+        if (adapter === undefined) {
+          throw new Error(`OIM composite component ${step.tool.operation.id} is unavailable`);
+        }
+        return { ...step, adapter, contract: step.tool.contract };
+      }),
+    });
+  }
   if (
     "operation" in tool &&
     integration.oimManifest !== undefined &&

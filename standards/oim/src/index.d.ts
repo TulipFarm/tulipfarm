@@ -1,4 +1,4 @@
-export type OimCoreProfileVersion = "1.0" | "1.1" | "1.2";
+export type OimCoreProfileVersion = "1.0" | "1.1" | "1.2" | "1.3";
 export type OimKnowledgeProfileVersion = "1.0" | "1.1" | "1.2";
 export type OimOptionalProfile = "auth" | "events" | "knowledge" | "hooks";
 export type OimProfiles = {
@@ -47,9 +47,9 @@ export interface OimManifest {
 
 export declare const OIM_ENTRYPOINT: "oim.yml";
 export declare const OIM_VERSION: "1.0";
-export declare const OIM_CORE_PROFILE_VERSIONS: readonly ["1.0", "1.1", "1.2"];
+export declare const OIM_CORE_PROFILE_VERSIONS: readonly ["1.0", "1.1", "1.2", "1.3"];
 export declare const OIM_PROFILE_VERSIONS: Readonly<{
-  core: "1.2";
+  core: "1.3";
   auth: "1.1";
   events: "1.0";
   knowledge: "1.2";

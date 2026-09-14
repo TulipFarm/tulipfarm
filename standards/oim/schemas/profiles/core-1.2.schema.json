@@ -1887,6 +1887,96 @@
                     "type": "string"
                   }
                 }
+              },
+              {
+                "additionalProperties": false,
+                "type": "object",
+                "required": ["type", "steps"],
+                "properties": {
+                  "type": {
+                    "const": "composite",
+                    "type": "string"
+                  },
+                  "steps": {
+                    "minItems": 1,
+                    "maxItems": 16,
+                    "type": "array",
+                    "items": {
+                      "additionalProperties": false,
+                      "type": "object",
+                      "required": ["id", "operationId"],
+                      "properties": {
+                        "id": {
+                          "pattern": "^[a-z][a-z0-9_]{1,63}$",
+                          "maxLength": 64,
+                          "type": "string"
+                        },
+                        "operationId": {
+                          "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$",
+                          "maxLength": 96,
+                          "type": "string"
+                        },
+                        "bindings": {
+                          "maxItems": 64,
+                          "type": "array",
+                          "items": {
+                            "additionalProperties": false,
+                            "type": "object",
+                            "required": ["target", "source"],
+                            "properties": {
+                              "target": {
+                                "pattern": "^(?:/(?:[^/~]|~[01])*)+$",
+                                "maxLength": 512,
+                                "type": "string"
+                              },
+                              "source": {
+                                "anyOf": [
+                                  {
+                                    "additionalProperties": false,
+                                    "type": "object",
+                                    "required": ["type", "pointer"],
+                                    "properties": {
+                                      "type": {
+                                        "const": "input",
+                                        "type": "string"
+                                      },
+                                      "pointer": {
+                                        "pattern": "^(?:/(?:[^/~]|~[01])*)+$",
+                                        "maxLength": 512,
+                                        "type": "string"
+                                      }
+                                    }
+                                  },
+                                  {
+                                    "additionalProperties": false,
+                                    "type": "object",
+                                    "required": ["type", "stepId", "pointer"],
+                                    "properties": {
+                                      "type": {
+                                        "const": "step",
+                                        "type": "string"
+                                      },
+                                      "stepId": {
+                                        "pattern": "^[a-z][a-z0-9_]{1,63}$",
+                                        "maxLength": 64,
+                                        "type": "string"
+                                      },
+                                      "pointer": {
+                                        "pattern": "^(?:/(?:[^/~]|~[01])*)+$",
+                                        "maxLength": 512,
+                                        "type": "string"
+                                      }
+                                    }
+                                  }
+                                ]
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
               }
             ]
           },

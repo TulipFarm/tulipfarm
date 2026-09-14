@@ -4,14 +4,17 @@ import {
   decideEffectivePermission,
 } from "@tulipfarm/authz";
 import {
+  type CompiledOimCompositeTool,
   type CompiledOimGraphqlTool,
   type CompiledOimHttpTool,
   type CompiledOimOpenApiTool,
+  compileOimCompositeOperations,
   compileOimGraphqlOperations,
   compileOimHttpOperations,
   compileOimOpenApiOperations,
   type EgressHttpPort,
   extractOimMultipartFileIds,
+  OimCompositeToolAdapter,
   type OimFilePort,
   type OimFileReadAuthorizationPort,
   OimGraphqlToolAdapter,
@@ -387,7 +390,11 @@ export type RoutineOimDispatchResult =
       };
     };
 
-type CompiledRoutineOimTool = CompiledOimHttpTool | CompiledOimOpenApiTool | CompiledOimGraphqlTool;
+type CompiledRoutineOimTool =
+  | CompiledOimHttpTool
+  | CompiledOimOpenApiTool
+  | CompiledOimGraphqlTool
+  | CompiledOimCompositeTool;
 
 export interface InternalRoutineOimToolHostOptions {
   readonly businessId: string;
@@ -542,27 +549,30 @@ function compileTool(
   configuration: Readonly<Record<string, string | number | boolean>>,
   manifest: OimManifest = registration.manifest
 ): CompiledRoutineOimTool | undefined {
-  const operationManifest = { ...manifest, operations: [operation] };
-  switch (operation.source.type) {
-    case "http":
-      return compileOimHttpOperations(operationManifest, configuration)[0];
-    case "openapi":
-      return compileOimOpenApiOperations(
-        operationManifest,
-        new Map(Object.entries(registration.openApiDocuments ?? {})),
-        configuration
-      )[0];
-    case "graphql":
-      return compileOimGraphqlOperations(
-        operationManifest,
-        new Map(Object.entries(registration.documents ?? {})),
-        configuration
-      )[0];
-  }
+  return [
+    ...compileOimHttpOperations(manifest, configuration),
+    ...compileOimOpenApiOperations(
+      manifest,
+      new Map(Object.entries(registration.openApiDocuments ?? {})),
+      configuration
+    ),
+    ...compileOimGraphqlOperations(
+      manifest,
+      new Map(Object.entries(registration.documents ?? {})),
+      configuration
+    ),
+    ...compileOimCompositeOperations(
+      manifest,
+      new Map(Object.entries(registration.documents ?? {})),
+      new Map(Object.entries(registration.openApiDocuments ?? {})),
+      configuration
+    ),
+  ].find((candidate) => candidate.operation.id === operation.id);
 }
 
-function destinationOf(tool: CompiledRoutineOimTool): string {
-  return new URL("baseUrl" in tool.binding ? tool.binding.baseUrl : tool.binding.url).origin;
+function destinationOf(tool: CompiledRoutineOimTool): string | undefined {
+  if ("baseUrl" in tool.binding) return new URL(tool.binding.baseUrl).origin;
+  return "url" in tool.binding ? new URL(tool.binding.url).origin : undefined;
 }
 
 function hookRunnerFor(
@@ -688,6 +698,16 @@ function adapterOf(
   runner: OimHookPhaseRunner | undefined,
   fileReadAuthorization: OimFileReadAuthorizationPort | undefined
 ): ToolAdapter {
+  if (tool.operation.source.type === "composite") {
+    const composite = tool as CompiledOimCompositeTool;
+    return new OimCompositeToolAdapter({
+      steps: composite.steps.map((step) => ({
+        ...step,
+        adapter: adapterOf(step.tool, options, manifest, runner, fileReadAuthorization),
+        contract: step.tool.contract,
+      })),
+    });
+  }
   let adapter: ToolAdapter;
   if (tool.operation.source.type === "graphql") {
     if (!("document" in tool.binding)) {

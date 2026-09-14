@@ -68,6 +68,24 @@ describe("validateOimManifest", () => {
     expect(validateOimManifest(valid())).toEqual(valid());
   });
 
+  it("requires Core 1.3 for composite operations", () => {
+    const manifest = valid();
+    manifest.operations.push({
+      ...manifest.operations[0],
+      id: "combined-weather",
+      name: "combined_weather",
+      requestSchema: { type: "object", additionalProperties: false },
+      source: {
+        type: "composite",
+        steps: [{ id: "weather", operationId: "current-weather" }],
+      },
+    });
+
+    expect(oimManifestIssues(manifest)).toContain(
+      'profiles: core "1.3" is required for source.type: composite'
+    );
+  });
+
   it("accepts a bounded JWT bearer assertion step", () => {
     const manifest = valid();
     manifest.profiles.auth = "1.0";

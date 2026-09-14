@@ -13,6 +13,8 @@ function operationDestination(source: OperationSource): string {
       return source.url;
     case "openapi":
       return source.baseUrl ?? `OpenAPI document: ${source.file}`;
+    case "composite":
+      return "Declared operation composition";
   }
 }
 

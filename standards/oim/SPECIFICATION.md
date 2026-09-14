@@ -3,9 +3,9 @@
 ## Status and language
 
 Open Integration Manifest (OIM) is a vendor-neutral package format for declarative third-party
-Integrations. This text defines OIM specification version 1.0 and the Core 1.0, Core 1.1,
-Core 1.2, Auth 1.0, Auth 1.1, Events 1.0, Knowledge 1.0, Knowledge 1.1, Knowledge 1.2, and
-Hooks 1.0 profiles.
+Integrations. This text defines OIM specification version 1.0 and the Core 1.0, Core 1.1, Core 1.2, Core 1.3,
+Auth 1.0, Auth 1.1, Events 1.0, Knowledge 1.0, Knowledge 1.1, Knowledge 1.2, and Hooks 1.0
+profiles.
 
 The key words MUST, MUST NOT, REQUIRED, SHOULD, SHOULD NOT, and MAY are normative.
 
@@ -45,8 +45,16 @@ A GraphQL URL placeholder MUST occupy the complete host and resolve within `allo
 
 Core 1.2 adds multipart HTTP requests and binary responses represented by host-managed File ids.
 
+Core 1.3 adds Composite Tools. A Composite Tool is a manifest-bounded ordered sequence of declared
+operations. Each binding copies a JSON-pointer value from the Composite Tool input or an earlier
+step's redacted output into a named argument of the next step. A Composite Tool MUST declare at
+most 16 steps, MUST NOT contain a cycle or forward step reference, and MUST return only its final
+step's declared output. Every component MUST use the Composite Tool's identity and Credential
+bindings. A runtime MUST authorize every component action, use the strongest component effect, and
+MUST NOT expose intermediate values or Credentials in Tool output, logs, or errors.
+
 A package claiming an older Core version MUST NOT use a feature added by a later version. A runtime
-claiming Core 1.2 MUST also accept valid Core 1.0 and Core 1.1 packages.
+claiming Core 1.3 MUST also accept valid Core 1.0, Core 1.1, and Core 1.2 packages.
 
 ## Auth 1.0
 
