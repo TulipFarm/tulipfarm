@@ -451,6 +451,244 @@
               {
                 "additionalProperties": false,
                 "type": "object",
+                "required": [
+                  "id",
+                  "title",
+                  "type",
+                  "exchange",
+                  "tokenUrl",
+                  "issuer",
+                  "privateKey",
+                  "bindings"
+                ],
+                "properties": {
+                  "id": {
+                    "pattern": "^[a-z][a-z0-9_]{1,63}$",
+                    "maxLength": 64,
+                    "type": "string"
+                  },
+                  "title": {
+                    "minLength": 1,
+                    "maxLength": 128,
+                    "type": "string"
+                  },
+                  "description": {
+                    "minLength": 1,
+                    "maxLength": 2048,
+                    "type": "string"
+                  },
+                  "type": {
+                    "const": "jwt_assertion",
+                    "type": "string"
+                  },
+                  "exchange": {
+                    "type": "string",
+                    "enum": ["oauth_jwt_bearer", "github_app"]
+                  },
+                  "tokenUrl": {
+                    "pattern": "^https://[A-Za-z0-9](?:[A-Za-z0-9.-]*[A-Za-z0-9])?(?::[1-9][0-9]{0,4})?(?:/[^\\s]*)?$",
+                    "type": "string"
+                  },
+                  "issuer": {
+                    "anyOf": [
+                      {
+                        "additionalProperties": false,
+                        "type": "object",
+                        "required": ["type", "slot"],
+                        "properties": {
+                          "type": {
+                            "const": "credential",
+                            "type": "string"
+                          },
+                          "slot": {
+                            "pattern": "^[a-z][a-z0-9_]{1,63}$",
+                            "maxLength": 64,
+                            "type": "string"
+                          }
+                        }
+                      },
+                      {
+                        "additionalProperties": false,
+                        "type": "object",
+                        "required": ["type", "field"],
+                        "properties": {
+                          "type": {
+                            "const": "configuration",
+                            "type": "string"
+                          },
+                          "field": {
+                            "pattern": "^[a-z][a-z0-9_]{1,63}$",
+                            "maxLength": 64,
+                            "type": "string"
+                          }
+                        }
+                      }
+                    ]
+                  },
+                  "subject": {
+                    "anyOf": [
+                      {
+                        "additionalProperties": false,
+                        "type": "object",
+                        "required": ["type", "slot"],
+                        "properties": {
+                          "type": {
+                            "const": "credential",
+                            "type": "string"
+                          },
+                          "slot": {
+                            "pattern": "^[a-z][a-z0-9_]{1,63}$",
+                            "maxLength": 64,
+                            "type": "string"
+                          }
+                        }
+                      },
+                      {
+                        "additionalProperties": false,
+                        "type": "object",
+                        "required": ["type", "field"],
+                        "properties": {
+                          "type": {
+                            "const": "configuration",
+                            "type": "string"
+                          },
+                          "field": {
+                            "pattern": "^[a-z][a-z0-9_]{1,63}$",
+                            "maxLength": 64,
+                            "type": "string"
+                          }
+                        }
+                      }
+                    ]
+                  },
+                  "audience": {
+                    "minLength": 1,
+                    "maxLength": 2048,
+                    "type": "string"
+                  },
+                  "privateKey": {
+                    "additionalProperties": false,
+                    "type": "object",
+                    "required": ["type", "slot"],
+                    "properties": {
+                      "type": {
+                        "const": "credential",
+                        "type": "string"
+                      },
+                      "slot": {
+                        "pattern": "^[a-z][a-z0-9_]{1,63}$",
+                        "maxLength": 64,
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "installationId": {
+                    "anyOf": [
+                      {
+                        "additionalProperties": false,
+                        "type": "object",
+                        "required": ["type", "slot"],
+                        "properties": {
+                          "type": {
+                            "const": "credential",
+                            "type": "string"
+                          },
+                          "slot": {
+                            "pattern": "^[a-z][a-z0-9_]{1,63}$",
+                            "maxLength": 64,
+                            "type": "string"
+                          }
+                        }
+                      },
+                      {
+                        "additionalProperties": false,
+                        "type": "object",
+                        "required": ["type", "field"],
+                        "properties": {
+                          "type": {
+                            "const": "configuration",
+                            "type": "string"
+                          },
+                          "field": {
+                            "pattern": "^[a-z][a-z0-9_]{1,63}$",
+                            "maxLength": 64,
+                            "type": "string"
+                          }
+                        }
+                      }
+                    ]
+                  },
+                  "scopes": {
+                    "minItems": 1,
+                    "uniqueItems": true,
+                    "type": "array",
+                    "items": {
+                      "minLength": 1,
+                      "type": "string"
+                    }
+                  },
+                  "ttlSeconds": {
+                    "minimum": 60,
+                    "maximum": 600,
+                    "type": "integer"
+                  },
+                  "bindings": {
+                    "minItems": 1,
+                    "type": "array",
+                    "items": {
+                      "additionalProperties": false,
+                      "type": "object",
+                      "required": ["sourcePath", "target"],
+                      "properties": {
+                        "sourcePath": {
+                          "pattern": "^/",
+                          "maxLength": 512,
+                          "type": "string"
+                        },
+                        "target": {
+                          "anyOf": [
+                            {
+                              "additionalProperties": false,
+                              "type": "object",
+                              "required": ["type", "slot"],
+                              "properties": {
+                                "type": {
+                                  "const": "credential",
+                                  "type": "string"
+                                },
+                                "slot": {
+                                  "pattern": "^[a-z][a-z0-9_]{1,63}$",
+                                  "maxLength": 64,
+                                  "type": "string"
+                                }
+                              }
+                            },
+                            {
+                              "additionalProperties": false,
+                              "type": "object",
+                              "required": ["type", "field"],
+                              "properties": {
+                                "type": {
+                                  "const": "configuration",
+                                  "type": "string"
+                                },
+                                "field": {
+                                  "pattern": "^[a-z][a-z0-9_]{1,63}$",
+                                  "maxLength": 64,
+                                  "type": "string"
+                                }
+                              }
+                            }
+                          ]
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "additionalProperties": false,
+                "type": "object",
                 "required": ["id", "title", "type", "createUrl", "manifest", "bindings"],
                 "properties": {
                   "id": {

@@ -1,5 +1,11 @@
 export type { AuthBrokerDenialReason } from "./auth/errors";
 export { AuthBrokerError } from "./auth/errors";
+export type { JwtAssertionClaims, JwtAssertionExchange } from "./auth/jwt-assertion";
+export {
+  exchangeGitHubAppJwt,
+  exchangeOAuthJwtBearer,
+  signRs256Assertion,
+} from "./auth/jwt-assertion";
 export type {
   AuthEndpoints,
   PublicOriginRepository,
@@ -81,6 +87,7 @@ export type {
   ConnectionCredentialVault,
   CreateOimConnectionDeps,
   CreateOimConnectionInput,
+  OimJwtAssertionRefreshRequest,
   OimOAuthRefresh,
   OimOAuthRefreshRequest,
   OimOAuthRefreshResult,
