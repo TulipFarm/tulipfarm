@@ -276,14 +276,10 @@ function defaultIdentityCeiling(run: PersistedRun): IdentityCeiling {
 /**
  * The value a settled State publishes to `states.<name>.output`.
  *
- * Only `compute` publishes one today: it is derived from the scope, so it can be recomputed
- * identically on every read and never has to be persisted. Every other State type reports `null`
- * rather than a value this process cannot rebuild, because a State whose output silently became
- * `null` after a resume would be worse than one that never had an output at all.
- */
-/**
- * A `compute` State re-derives its value from scope on replay, so it is never stored. Every other
- * State publishes something a replay cannot reproduce — a model answer, a provider response, an
+ * A `compute` State re-derives its value from scope on every replay, so `runChain` never has to
+ * trust a stored copy — but `settle` still persists it (evaluated once more from the settling
+ * scope) so the Run API can display it without re-running the chain. Every other State type
+ * publishes something a replay cannot reproduce — a model answer, a provider response, an
  * isolate's return value — and reads it back from `run_states.output` instead.
  */
 function recomputes(state: CompiledState): boolean {
@@ -607,7 +603,7 @@ class RoutineExecution<TBundle, TAuthorityLayer> {
     if (outcome.kind === "transition") {
       await this.scheduleSuccessor(state, outcome.target, key, scope, outputs);
     }
-    await this.settle(key, state);
+    await this.settle(key, state, scope);
     return { kind: "outcome", outcome };
   }
 
@@ -1089,8 +1085,21 @@ class RoutineExecution<TBundle, TAuthorityLayer> {
   }
 
   /** Succeed a State, storing what it published so a replay republishes the same value. */
-  private async settle(key: string, state: CompiledState): Promise<void> {
+  private async settle(
+    key: string,
+    state: CompiledState,
+    scope: Readonly<Record<string, unknown>>
+  ): Promise<void> {
     this.assertActive();
+    // `computeStateOutput` is total and side-effect free, so re-evaluating it here costs nothing
+    // and — unlike the row's own `resolvedInput`, which for a start State is only a payload
+    // pointer — always matches what a replay would recompute for `states.<name>.output`. Storing
+    // it makes the value readable by the Run API without walking the chain again.
+    const output = recomputes(state)
+      ? { value: boundedOutput(computeStateOutput(state, scope)) }
+      : state.type === "tool" || !this.produced.has(key)
+        ? undefined
+        : { value: boundedOutput(this.produced.get(key)) };
     await this.ctx.options.transitions.transition({
       businessId: this.ctx.run.businessId,
       runId: this.ctx.run.id,
@@ -1098,9 +1107,7 @@ class RoutineExecution<TBundle, TAuthorityLayer> {
       leaseGeneration: this.ctx.run.leaseGeneration,
       from: "running",
       to: "succeeded",
-      ...(recomputes(state) || state.type === "tool" || !this.produced.has(key)
-        ? {}
-        : { output: { value: boundedOutput(this.produced.get(key)) } }),
+      ...(output === undefined ? {} : { output }),
     });
     this.assertActive();
   }
