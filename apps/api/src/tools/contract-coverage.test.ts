@@ -159,6 +159,7 @@ const EXPECTED_FAMILY_TOOL_NAMES = [
       "skill",
       "soul_repo_push",
       "spawn_subagent",
+      "team_list",
       "trigger_routine",
       "validate_artifact",
     ],

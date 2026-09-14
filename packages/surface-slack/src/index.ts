@@ -370,6 +370,8 @@ function formFieldElement(field: Record<string, unknown>): InputBlockElement {
       return { type: "channels_select", action_id: actionId };
     case "conversation":
       return { type: "conversations_select", action_id: actionId };
+    case "team":
+      return { type: "static_select", action_id: actionId, options };
     default:
       return {
         type: "plain_text_input",

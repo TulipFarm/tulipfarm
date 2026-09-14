@@ -628,7 +628,11 @@ export const routineForgeTool = defineApiTool<PlatformToolContext>({
     "schedule themselves once published, and the Routines UI can already start a Run without any " +
     "Trigger, so omit `spec.triggers` entirely for a Routine that only runs on demand. Load the " +
     "routine-forge Skill for complete canonical examples before calling this. The Tool validates the " +
-    "document and commits it to the Soul repo.",
+    "document and commits it to the Soul repo. `spec.ownership` is OPTIONAL: omit it entirely and " +
+    "the Routine is auto-assigned to your own Team, falling back to the workspace's Everyone Team " +
+    "if you have none — never ask the user for a Team id. If the user names a specific Team by " +
+    "name, call `team_list` to resolve it to an id first; never ask a user to type or paste a Team " +
+    "UUID.",
   mutating: true,
   tier: "platform",
   inputSchema: ROUTINE_FORGE_SCHEMA,
@@ -651,7 +655,8 @@ export const routineForgeTool = defineApiTool<PlatformToolContext>({
     if (!validation.ok) return err("validation_error", validation.message);
     const { routine, triggers: triggerDefinitions } = validation;
     // Omitted ownership is not an error: ctx.teamAssets.ensure() below defaults an unowned
-    // Routine to the business's "Everyone" Team, so workspace-wide automations need no team setup.
+    // Routine to the caller's own Team, falling back to the business's "Everyone" Team, so
+    // workspace-wide automations need no team setup.
     const existing = ctx.soulLoader?.routines?.get(name);
     const principal = assetPrincipal(ctx);
     if (existing && ctx.teamAssets && !principal) {
@@ -724,7 +729,12 @@ export const routineForgeTool = defineApiTool<PlatformToolContext>({
       );
     }
     if (ctx.teamAssets) {
-      await ctx.teamAssets.ensure("routine", routine.metadata.id, routine.spec.ownership);
+      await ctx.teamAssets.ensure(
+        "routine",
+        routine.metadata.id,
+        routine.spec.ownership,
+        principal
+      );
     }
 
     // The gateway reloads the catalog but does not reschedule cron triggers.
@@ -742,6 +752,40 @@ export const routineForgeTool = defineApiTool<PlatformToolContext>({
       committed: true,
       triggerSlugs: triggerDefinitions.map((trigger) => trigger.metadata.slug),
     });
+  },
+});
+
+const TEAM_LIST_SCHEMA: Record<string, unknown> = {
+  type: "object",
+  additionalProperties: false,
+  properties: {},
+};
+const validateTeamList = ajv.compile(TEAM_LIST_SCHEMA);
+
+export const teamListTool = defineApiTool<PlatformToolContext>({
+  name: "team_list",
+  description:
+    "List the business's Teams by human-readable name, with `recommendedTeamId` naming the Team " +
+    "an owned asset (Agent, Skill, Routine) would be auto-assigned to if you forged one right now. " +
+    "Call this to resolve a Team the user named in conversation, or to offer them a choice by name. " +
+    "Never ask a user to type, paste, or confirm a raw Team id/UUID — resolve it with this Tool " +
+    "instead, and when no Team is named at all, just omit `ownership` on the forging Tool and let " +
+    "it default.",
+  mutating: false,
+  tier: "platform",
+  requiresApproval: false,
+  inputSchema: TEAM_LIST_SCHEMA,
+  authorization: {
+    action: "team.directory.read",
+    resources: ["team"],
+    dataClasses: ["operational"],
+  },
+  handler: async (args, ctx) => {
+    if (!validateTeamList(args))
+      return err("validation_error", firstError(validateTeamList.errors));
+    if (!ctx.teamAssets) return err("internal_error", "Team directory is unavailable");
+    const { teams, recommendedTeamId } = await ctx.teamAssets.listForOwnership(assetPrincipal(ctx));
+    return ok({ teams, recommendedTeamId });
   },
 });
 
@@ -1029,6 +1073,7 @@ export const PLATFORM_TOOLS: ParkableApiToolDefinition<PlatformToolContext>[] = 
   spawnSubagentTool,
   triggerRoutineTool,
   routineForgeTool,
+  teamListTool,
   routinePickerTool,
   routineGetTool,
   routineRunGetTool,

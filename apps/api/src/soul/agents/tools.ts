@@ -220,7 +220,8 @@ const agentCreate = defineApiTool<AgentToolContext>({
     const fmError = frontmatterError(frontmatter);
     if (fmError) return fmError;
     // Omitted ownership is not an error: ctx.teamAssets.ensure() below defaults an unowned Agent
-    // to the business's "Everyone" Team, so workspace-wide agents need no team setup.
+    // to the caller's own Team, falling back to the business's "Everyone" Team, so workspace-wide
+    // agents need no team setup.
 
     const plan = resolveAgentName(ctx.soulLoader.agents, name, frontmatter, onExisting);
     if (plan.outcome === "refuse") return err("validation_error", plan.message);
@@ -256,7 +257,8 @@ const agentCreate = defineApiTool<AgentToolContext>({
       () => err("validation_error", "agent already exists")
     );
     if (!failure && created) {
-      if (ctx.teamAssets) await ctx.teamAssets.ensure("agent", id, ownershipOf(frontmatter));
+      if (ctx.teamAssets)
+        await ctx.teamAssets.ensure("agent", id, ownershipOf(frontmatter), principal);
       await ctx.ensurePrincipal?.(id);
     }
     return failure ?? ok({ name: target, created, changed: true, frontmatter, body });

@@ -71,6 +71,12 @@ const SECTIONS: readonly Section[] = [
     intro: "How work is handed to another agent, automated, and reported on while it runs.",
   },
   {
+    area: "team",
+    heading: "Teams",
+    intro:
+      "A Team is a business unit that can own Agents, Skills and Routines. This tool lists the Teams available for that ownership.",
+  },
+  {
     area: "task",
     heading: "Work handed back to a person",
     intro: "Raising, and closing, work the runtime needs a human to do.",

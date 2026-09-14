@@ -1,5 +1,5 @@
 import { memo, type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Check, ChevronsUp, Copy, RotateCcw, ThumbsDown, ThumbsUp } from "~/components/icons";
+import { Check, ChevronsUp, Copy, Info, RotateCcw, ThumbsDown, ThumbsUp } from "~/components/icons";
 import { MarkdownView } from "~/components/markdown-view";
 import { LoadingState } from "~/components/ui/loading-state";
 import { nextEffortPreset } from "~/lib/chat/effort-escalation";
@@ -86,19 +86,28 @@ function ModelReceiptView({ receipt }: { receipt: ModelReceipt }) {
   );
 }
 
-function AssistantMetaRow({
+/**
+ * Model receipt and the "Try harder" escalation, tucked behind a toggle rather than shown on
+ * every completed reply. An always-visible model id, routing rung and latency reads like a
+ * benchmark harness, not a business control panel — so the details stay a click away, and the
+ * toggle itself only appears once there is something behind it to show.
+ */
+function AssistantMetaDetails({
   receipt,
   tryHarderTarget,
   onTryHarder,
+  open,
 }: {
   receipt?: ModelReceipt;
   tryHarderTarget?: NonNullable<ModelReceipt["effortPreset"]>;
   onTryHarder?: () => void;
+  open: boolean;
 }) {
   const llmMode = useLlmMode();
   // In Basic, every effort tier is the same model — "try harder" would re-run the identical
   // request, so the escalation offer is meaningless there.
   const canTryHarder = llmMode === "advanced";
+  if (!open) return null;
   if (!receipt && !(canTryHarder && tryHarderTarget)) return null;
   return (
     <div className="flex flex-wrap items-center gap-x-2 gap-y-1.5">
@@ -114,6 +123,46 @@ function AssistantMetaRow({
           <span>Try harder: {requiredEffortLabel(tryHarderTarget)}</span>
         </button>
       ) : null}
+    </div>
+  );
+}
+
+/** Whether there is anything an `AssistantMetaDetails` toggle would reveal. */
+function useHasMetaDetails(
+  receipt: ModelReceipt | undefined,
+  tryHarderTarget: NonNullable<ModelReceipt["effortPreset"]> | undefined
+): boolean {
+  const llmMode = useLlmMode();
+  const canTryHarder = llmMode === "advanced";
+  return receipt !== undefined || (canTryHarder && tryHarderTarget !== undefined);
+}
+
+/**
+ * The bare toggle, for a reply with no copy/vote toolbar of its own (a failed or cancelled turn
+ * still made a model call worth disclosing, but there is no answer here to act on).
+ */
+function MetaOnlyFooter({
+  receipt,
+  tryHarderTarget,
+}: {
+  receipt?: ModelReceipt;
+  tryHarderTarget?: NonNullable<ModelReceipt["effortPreset"]>;
+}) {
+  const [open, setOpen] = useState(false);
+  const hasMetaDetails = useHasMetaDetails(receipt, tryHarderTarget);
+  if (!hasMetaDetails) return null;
+  return (
+    <div className="flex flex-col gap-1.5">
+      <div className={`${toolbarBase} ${open ? "opacity-100" : "opacity-0"}`}>
+        <IconAction
+          label={open ? "Hide model details" : "Show model details"}
+          onClick={() => setOpen((value) => !value)}
+          active={open}
+        >
+          <Info className="size-3.5" />
+        </IconAction>
+      </div>
+      <AssistantMetaDetails receipt={receipt} tryHarderTarget={tryHarderTarget} open={open} />
     </div>
   );
 }
@@ -187,20 +236,28 @@ function AssistantActions({
   initialFeedback,
   onRegenerate,
   onFeedback,
+  receipt,
+  tryHarderTarget,
+  onTryHarder,
 }: {
   text: string;
   messageId?: string;
   initialFeedback?: "up" | "down";
   onRegenerate?: () => void;
   onFeedback?: (messageId: string, rating: "up" | "down" | null, note?: string) => void;
+  receipt?: ModelReceipt;
+  tryHarderTarget?: NonNullable<ModelReceipt["effortPreset"]>;
+  onTryHarder?: () => void;
 }) {
   const [reaction, setReaction] = useState<"up" | "down" | null>(initialFeedback ?? null);
   const [noteOpen, setNoteOpen] = useState(false);
   const [note, setNote] = useState("");
+  const [metaOpen, setMetaOpen] = useState(false);
   const noteRef = useRef<HTMLInputElement>(null);
   // Enter both submits and (on the resulting unmount) can fire onBlur — guard so the note posts once.
   const noteSubmitted = useRef(false);
   const canVote = messageId !== undefined && onFeedback !== undefined;
+  const hasMetaDetails = useHasMetaDetails(receipt, tryHarderTarget);
 
   useEffect(() => {
     if (noteOpen) noteRef.current?.focus();
@@ -225,8 +282,9 @@ function AssistantActions({
 
   return (
     <div className="flex flex-col gap-1.5">
-      {/* A recorded vote keeps the row visible; otherwise it stays hover-gated like the rest. */}
-      <div className={`${toolbarBase} ${reaction ? "opacity-100" : "opacity-0"}`}>
+      {/* A recorded vote or an opened details panel keeps the row visible; otherwise it stays
+       * hover-gated like the rest. */}
+      <div className={`${toolbarBase} ${reaction || metaOpen ? "opacity-100" : "opacity-0"}`}>
         {text ? <CopyButton text={text} /> : null}
         {onRegenerate ? (
           <IconAction label="regenerate" onClick={onRegenerate}>
@@ -250,7 +308,27 @@ function AssistantActions({
             </IconAction>
           </>
         ) : null}
+        {hasMetaDetails ? (
+          <>
+            <span aria-hidden className="px-0.5 text-border">
+              ·
+            </span>
+            <IconAction
+              label={metaOpen ? "Hide model details" : "Show model details"}
+              onClick={() => setMetaOpen((value) => !value)}
+              active={metaOpen}
+            >
+              <Info className="size-3.5" />
+            </IconAction>
+          </>
+        ) : null}
       </div>
+      <AssistantMetaDetails
+        receipt={receipt}
+        tryHarderTarget={tryHarderTarget}
+        onTryHarder={onTryHarder}
+        open={metaOpen}
+      />
       {noteOpen ? (
         <input
           ref={noteRef}
@@ -416,15 +494,6 @@ function MessageRow({
         );
       })}
       {message.sealed ? <ResourceChanges parts={message.parts} /> : null}
-      {message.sealed ? (
-        <AssistantMetaRow
-          receipt={message.receipt}
-          tryHarderTarget={nextPreset}
-          onTryHarder={
-            nextPreset && onTryHarder ? () => onTryHarder(message.id, nextPreset) : undefined
-          }
-        />
-      ) : null}
       {successful && hasAnswer ? (
         <AssistantActions
           text={text}
@@ -432,7 +501,16 @@ function MessageRow({
           initialFeedback={message.feedback}
           onRegenerate={canRegenerate}
           onFeedback={onFeedback}
+          receipt={message.receipt}
+          tryHarderTarget={nextPreset}
+          onTryHarder={
+            nextPreset && onTryHarder ? () => onTryHarder(message.id, nextPreset) : undefined
+          }
         />
+      ) : message.sealed ? (
+        // A reply with nothing to copy or vote on (a failed or cancelled turn) still tucks its
+        // model receipt behind the same toggle, rather than reviving the always-visible row here.
+        <MetaOnlyFooter receipt={message.receipt} tryHarderTarget={nextPreset} />
       ) : null}
     </article>
   );

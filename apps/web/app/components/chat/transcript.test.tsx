@@ -489,7 +489,8 @@ describe("Transcript message actions", () => {
     expect(screen.queryByRole("button", { name: "Bad response" })).toBeNull();
   });
 
-  it("shows a quiet model receipt on a sealed assistant reply", () => {
+  it("tucks the model receipt behind a details toggle on a sealed assistant reply", async () => {
+    const user = userEvent.setup();
     const state = fold(
       [
         { type: "text", data: { delta: "Hello there" } },
@@ -510,13 +511,19 @@ describe("Transcript message actions", () => {
 
     renderTranscript(state);
 
+    // Hidden until the reader asks for it — an always-visible model id/latency line is exactly
+    // the noise this toggle exists to tuck away.
+    expect(screen.queryByText("Answered by")).toBeNull();
+
+    await user.click(screen.getByRole("button", { name: "Show model details" }));
+
     expect(screen.getByText("Answered by")).toBeInTheDocument();
     expect(screen.getByText("claude-sonnet-5")).toBeInTheDocument();
     expect(screen.getByText("· Auto effort")).toBeInTheDocument();
     expect(screen.getByText("· model call 1.2 s")).toBeInTheDocument();
   });
 
-  it("renders no receipt for older sealed replies without receipt fields", () => {
+  it("renders no receipt, and no details toggle, for older sealed replies without receipt fields", () => {
     const state = fold(
       [
         { type: "text", data: { delta: "Hello there" } },
@@ -528,6 +535,7 @@ describe("Transcript message actions", () => {
     renderTranscript(state);
 
     expect(screen.queryByText("Answered by")).toBeNull();
+    expect(screen.queryByRole("button", { name: /model details/i })).toBeNull();
   });
 
   it("offers Try harder with the next effort preset on a completed assistant reply", async () => {
@@ -571,11 +579,13 @@ describe("Transcript message actions", () => {
       </LlmModeProvider>
     );
 
+    await user.click(screen.getByRole("button", { name: "Show model details" }));
     await user.click(screen.getByRole("button", { name: "Try harder with Thorough effort" }));
     expect(onTryHarder).toHaveBeenCalledWith(assistantId, "thorough");
   });
 
-  it("shows what Auto resolved to, so the participant sees the choice made for them", () => {
+  it("shows what Auto resolved to, so the participant sees the choice made for them", async () => {
+    const user = userEvent.setup();
     const state = fold(
       [
         { type: "text", data: { delta: "Hello there" } },
@@ -597,6 +607,8 @@ describe("Transcript message actions", () => {
     );
 
     render(<Transcript messages={state.messages} status={state.status} onApprove={vi.fn()} />);
+
+    await user.click(screen.getByRole("button", { name: "Show model details" }));
 
     expect(screen.getByText("· Auto → Fast effort")).toBeInTheDocument();
   });
