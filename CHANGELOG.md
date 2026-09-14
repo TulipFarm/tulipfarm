@@ -1,5 +1,25 @@
 # Changelog
 
+## [0.18.29](https://github.com/TulipFarm/tulipfarm/compare/v0.18.28...v0.18.29) (2026-09-14)
+
+### Features
+
+* **integrations:** add OIM WebSocket ingress ([#845](https://github.com/TulipFarm/tulipfarm/issues/845)) ([54a00b6](https://github.com/TulipFarm/tulipfarm/commit/54a00b64c3e26765e780a2513f947e5a3c17ad69))
+* **web:** add dedicated Scheduled Tasks view for cron routines ([#863](https://github.com/TulipFarm/tulipfarm/issues/863)) ([5ee34ad](https://github.com/TulipFarm/tulipfarm/commit/5ee34ad836383c8176df8cba5936ec21256a9c4f)), closes [#857](https://github.com/TulipFarm/tulipfarm/issues/857)
+* **web:** display built-in agents and routine usage on /agents ([#865](https://github.com/TulipFarm/tulipfarm/issues/865)) ([461e185](https://github.com/TulipFarm/tulipfarm/commit/461e1853e310e8bcbb9c13462a93d56c87ebc6d0)), closes [#847](https://github.com/TulipFarm/tulipfarm/issues/847)
+* **web:** merge attach-file and add-file into unified picker modal ([#849](https://github.com/TulipFarm/tulipfarm/issues/849)) ([814c769](https://github.com/TulipFarm/tulipfarm/commit/814c76913b192dd056c62dcc6ae91c2d85047512)), closes [#846](https://github.com/TulipFarm/tulipfarm/issues/846)
+* **web:** move effort selector beside send button and add capability cards to chat home ([#854](https://github.com/TulipFarm/tulipfarm/issues/854)) ([3941483](https://github.com/TulipFarm/tulipfarm/commit/3941483504373a6a6497267a8ccd0fb70d95c688)), closes [#848](https://github.com/TulipFarm/tulipfarm/issues/848)
+
+### Bug Fixes
+
+* **authz:** prune sidebar nav and gate schema-mutation UI for unprivileged users ([#867](https://github.com/TulipFarm/tulipfarm/issues/867)) ([c68bf77](https://github.com/TulipFarm/tulipfarm/commit/c68bf778d5412e19792150876a695034943f37fc)), closes [#864](https://github.com/TulipFarm/tulipfarm/issues/864), references [#847](https://github.com/TulipFarm/tulipfarm/issues/847)
+* **authz:** require operational authorization for workspace activity feed ([#859](https://github.com/TulipFarm/tulipfarm/issues/859)) ([91c69ea](https://github.com/TulipFarm/tulipfarm/commit/91c69eaa8be68c004863f2861df64ef214c85412)), closes [#856](https://github.com/TulipFarm/tulipfarm/issues/856)
+* **knowledge:** record page authorship and steer index logs away from Notes ([#866](https://github.com/TulipFarm/tulipfarm/issues/866)) ([87d436f](https://github.com/TulipFarm/tulipfarm/commit/87d436fff6c067c4ac9643e8e8261afaff51d17a))
+* **onboarding:** match singular resource keys and close setup tasks when resource exists ([#858](https://github.com/TulipFarm/tulipfarm/issues/858)) ([9dcfadb](https://github.com/TulipFarm/tulipfarm/commit/9dcfadb56879a8eafff63746ab7fbb82bdc444da)), closes [#852](https://github.com/TulipFarm/tulipfarm/issues/852)
+* **routines:** show meaningful trigger and action labels on canvas ([#860](https://github.com/TulipFarm/tulipfarm/issues/860)) ([a17aefc](https://github.com/TulipFarm/tulipfarm/commit/a17aefcf9dd567ac696a3e992e79e1a23f239990)), closes [#855](https://github.com/TulipFarm/tulipfarm/issues/855)
+* **web:** clean up chat home recent lists to show only routine runs ([#853](https://github.com/TulipFarm/tulipfarm/issues/853)) ([806ebcb](https://github.com/TulipFarm/tulipfarm/commit/806ebcbfa4211ab1ea968203edf29ac727787ca7)), closes [#850](https://github.com/TulipFarm/tulipfarm/issues/850) [#851](https://github.com/TulipFarm/tulipfarm/issues/851)
+* **web:** dedupe plan trace and hide internal tool names ([#844](https://github.com/TulipFarm/tulipfarm/issues/844)) ([6722d88](https://github.com/TulipFarm/tulipfarm/commit/6722d88463e6a0c7cd3d0a937c88b5dc404b1729)), closes [#841](https://github.com/TulipFarm/tulipfarm/issues/841) [#842](https://github.com/TulipFarm/tulipfarm/issues/842)
+
 ## [0.18.28](https://github.com/TulipFarm/tulipfarm/compare/v0.18.27...v0.18.28) (2026-09-14)
 
 ### Features
