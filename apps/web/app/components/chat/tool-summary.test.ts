@@ -38,6 +38,18 @@ describe("participant Tool visibility", () => {
       )
     ).toBe(false);
   });
+
+  it("hides a skill call that only loaded instructions, not one that ran a command", () => {
+    expect(isHiddenToolPart(tool({ toolName: "skill", args: {} }))).toBe(true);
+    expect(isHiddenToolPart(tool({ toolName: "skill", args: { mode: "load" } }))).toBe(true);
+    expect(isHiddenToolPart(tool({ toolName: "skill", args: { mode: "inspect" } }))).toBe(true);
+    expect(isHiddenToolPart(tool({ toolName: "skill", args: { mode: "run" } }))).toBe(false);
+    expect(isHiddenToolPart(tool({ toolName: "skill", args: { mode: "shell" } }))).toBe(false);
+  });
+
+  it("keeps a failed skill load visible, since a hidden step must never hide a failure", () => {
+    expect(isHiddenToolPart(tool({ toolName: "skill", args: {}, outcome: "error" }))).toBe(false);
+  });
 });
 
 describe("toolFamily", () => {

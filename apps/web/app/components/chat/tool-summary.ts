@@ -12,9 +12,25 @@ export function isPresentationToolPart(part: ToolPart): boolean {
   return part.meta?.participantActivity === "represented";
 }
 
-/** Whether this Tool row is suppressed because its output already renders as something else. */
+/**
+ * Whether this Tool row is suppressed from the participant-facing trace — because its output
+ * already renders as something else, or because it is internal housekeeping (a Skill reading its
+ * own instructions or a reference file) a participant has no reason to see. Either way, a call
+ * that failed still gets its row: a hidden step must never be where a silent failure hides.
+ */
 export function isHiddenToolPart(part: ToolPart): boolean {
-  return isPresentationToolPart(part) && part.outcome !== "error";
+  if (part.outcome === "error") return false;
+  return isPresentationToolPart(part) || isInternalSkillLoad(part);
+}
+
+/**
+ * A `skill` Tool call that only loaded the Skill's own instructions or a reference file — no
+ * command ran. That is setup work an Agent does on its own behalf, not a participant-facing
+ * activity, so it never earns a row of its own (see `skillRunVerb`, which is the same mode check
+ * read the other way: it names the verb for the modes this function excludes).
+ */
+export function isInternalSkillLoad(part: ToolPart): boolean {
+  return part.toolName === "skill" && skillRunVerb(part.toolName, toolCallArgs(part)) === undefined;
 }
 
 export type ToolFamily =

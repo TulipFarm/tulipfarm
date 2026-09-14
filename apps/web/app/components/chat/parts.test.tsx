@@ -7,6 +7,10 @@ import { expect, test, vi } from "vitest";
 import type { TimelinePart } from "~/lib/chat/types";
 import { MessagePartView } from "./parts";
 
+// This suite is about which Tool rows survive at all, not about the admin-only raw-name badge
+// covered in tool-step.test.tsx — so mock admin true to keep asserting on the row's own identity.
+vi.mock("~/lib/use-session-user", () => ({ useIsAdmin: () => true }));
+
 /** Every narration part is chrome-free: the Trace rail is the only presentation interior work gets. */
 const NARRATION_PARTS: { name: string; part: TimelinePart }[] = [
   {

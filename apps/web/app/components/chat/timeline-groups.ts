@@ -191,14 +191,18 @@ export function findActivePlan(
  *
  * An approval stays out. A settled plan folds to its one-line header, and a question the reader
  * has to unfold is a question they will miss — so an ask keeps a row of its own that no fold
- * policy can swallow. Hidden and presentation Tools have no row to absorb in the first place:
- * their output already renders as the thing they produced. The plan's own `plan_declare` call is
- * never absorbed either, since a plan cannot list the act of declaring itself.
+ * policy can swallow. Presentation Tools have no row to absorb in the first place: their output
+ * already renders as the thing they produced. The plan's own `plan_declare` call is never
+ * absorbed either, since a plan cannot list the act of declaring itself.
+ *
+ * Deliberately narrower than `isHiddenToolPart`: an internal Skill load is hidden from the
+ * transcript (no row of its own), but it is still the real call a plan round named, so it must
+ * stay eligible to satisfy that round and count toward wave concurrency — only its row disappears.
  */
 function isAbsorbable(part: ToolPart): boolean {
   if (part.approval !== undefined) return false;
   if (part.toolName === PLAN_TOOL_NAME) return false;
-  return !isHiddenToolPart(part) && !isPresentationToolPart(part);
+  return !isPresentationToolPart(part);
 }
 
 /**

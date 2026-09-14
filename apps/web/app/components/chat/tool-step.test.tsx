@@ -215,6 +215,20 @@ describe("A Tool step on the trace", () => {
     expect(screen.getByText("Ask an administrator to add this Credential.")).toBeInTheDocument();
   });
 
+  it("shows the raw Tool name to an admin, as a debug aid", () => {
+    useIsAdmin.mockReturnValue(true);
+    renderStep(toolPart());
+
+    expect(screen.getByText("github_issue_comment")).toBeInTheDocument();
+  });
+
+  it("hides the raw Tool name from a non-admin, since it is debug chrome not a participant fact", () => {
+    useIsAdmin.mockReturnValue(false);
+    renderStep(toolPart());
+
+    expect(screen.queryByText("github_issue_comment")).toBeNull();
+  });
+
   it("settles an automatic authorization denial collapsed instead of flashing it open", () => {
     // No `approval` field: an automatic denial never entered the human-approval flow, so it
     // never had anything asking the reader to act on it — it should read as an already-resolved,
