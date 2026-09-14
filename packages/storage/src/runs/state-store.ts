@@ -46,12 +46,13 @@ export interface PersistedState {
   readonly resultArtifactId: string | null;
   readonly errorEvidenceRef: string | null;
   /**
-   * What the settled State published, for States whose result cannot be recomputed.
+   * What the settled State published.
    *
-   * A replayed Run rebuilds `states.*` by walking the chain again, so a pure `compute` State can
-   * re-derive its own value from the scope. An `agent`, `action` or `script` State cannot: its
-   * result came from a model, a provider or an isolate, and re-running it is either impossible or
-   * a second side effect. Those States record the value here instead.
+   * A replayed Run rebuilds `states.*` by walking the chain again, so a pure `compute` State
+   * re-derives its own value from the scope rather than trusting this column — but it is still
+   * written here so the value is readable outside a replay, e.g. by the Run API. An `agent`,
+   * `action` or `script` State has no such recomputation: its result came from a model, a
+   * provider or an isolate, so this column is its only record.
    */
   readonly output: unknown;
 }

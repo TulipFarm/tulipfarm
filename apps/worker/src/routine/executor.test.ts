@@ -356,6 +356,24 @@ describe("createRoutineExecutor", () => {
     expect(harness.states.has("Missed")).toBe(false);
   });
 
+  it("persists a succeeded compute State's output so it is readable without a replay", async () => {
+    const harness = new StateHarness([state("Start")]);
+    const execute = executor(
+      definition([
+        {
+          type: "compute",
+          name: "Start",
+          input: { label: "need-triage", region: INPUT_REGION_EXPRESSION },
+          end: true,
+        },
+      ] as unknown as routine.RoutineState[]),
+      harness
+    );
+
+    await expect(execute(run())).resolves.toEqual({ status: "succeeded" });
+    expect(harness.states.get("Start")?.output).toEqual({ label: "need-triage", region: "west" });
+  });
+
   it("republishes a settled compute State's value on replay", async () => {
     const harness = new StateHarness([state("Start", "succeeded"), state("Route")]);
     const execute = executor(
