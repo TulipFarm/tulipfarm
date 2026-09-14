@@ -45,7 +45,7 @@ export function oimProviderContractIssues(
           {},
           { deferConfiguration: true }
         );
-      } else {
+      } else if (operation.source.type === "openapi") {
         const content = files.get(operation.source.file);
         if (content === undefined) continue;
         compileOimOpenApiOperations(
