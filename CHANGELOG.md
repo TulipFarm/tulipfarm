@@ -1,5 +1,29 @@
 # Changelog
 
+## [0.18.31](https://github.com/TulipFarm/tulipfarm/compare/v0.18.30...v0.18.31) (2026-09-14)
+
+### Features
+
+* **chat:** restrict plan mode to complex work and highlight trigger words ([#902](https://github.com/TulipFarm/tulipfarm/issues/902)) ([aba67be](https://github.com/TulipFarm/tulipfarm/commit/aba67be602b8206fa756a9b9c5666fa1f94e9146))
+* **integrations:** add OIM JWT assertion auth ([#896](https://github.com/TulipFarm/tulipfarm/issues/896)) ([3afca08](https://github.com/TulipFarm/tulipfarm/commit/3afca085f1d742690c7cb8cf0eb5c61cf8ecd90b))
+* **surface:** add channel renderers ([#897](https://github.com/TulipFarm/tulipfarm/issues/897)) ([93ed942](https://github.com/TulipFarm/tulipfarm/commit/93ed942c2a48eabfcad26a8619b88449ccd710dc))
+* **web:** pin recent scheduled tasks above Recent in the sidebar ([#888](https://github.com/TulipFarm/tulipfarm/issues/888)) ([94e8e52](https://github.com/TulipFarm/tulipfarm/commit/94e8e52de49c40edb7b9adb19e428a4b2dd77b5a))
+* **web:** show recent files in the file picker when search is empty ([#885](https://github.com/TulipFarm/tulipfarm/issues/885)) ([cd3becc](https://github.com/TulipFarm/tulipfarm/commit/cd3becc7a938f111bf9a85f13b5db1ea7e73d92e)), closes [#881](https://github.com/TulipFarm/tulipfarm/issues/881)
+* **web:** unify agent roster with gradient avatars and type badges ([#886](https://github.com/TulipFarm/tulipfarm/issues/886)) ([2f3e842](https://github.com/TulipFarm/tulipfarm/commit/2f3e84200ea10ffc33a7e86f7d8e809447961deb)), closes [#877](https://github.com/TulipFarm/tulipfarm/issues/877) [#878](https://github.com/TulipFarm/tulipfarm/issues/878) [#879](https://github.com/TulipFarm/tulipfarm/issues/879)
+
+### Bug Fixes
+
+* **agents:** query teamAssets authorization by agent id instead of name ([#903](https://github.com/TulipFarm/tulipfarm/issues/903)) ([196fc31](https://github.com/TulipFarm/tulipfarm/commit/196fc3197d4c665cbd6cb5ee203361aef96b9859)), closes [#901](https://github.com/TulipFarm/tulipfarm/issues/901)
+* **chat:** recover a rendered answer stuck in streaming state ([#899](https://github.com/TulipFarm/tulipfarm/issues/899)) ([76c09b4](https://github.com/TulipFarm/tulipfarm/commit/76c09b46d767e9510d492b312480f3389f1958ce))
+* **knowledge:** restrict access to slack knowledge pages and fix edit fallback ([#873](https://github.com/TulipFarm/tulipfarm/issues/873)) ([9ec7bab](https://github.com/TulipFarm/tulipfarm/commit/9ec7babd3e8e7b3abb4115840b32726a64ef5bb3)), closes [#861](https://github.com/TulipFarm/tulipfarm/issues/861), references [#861](https://github.com/TulipFarm/tulipfarm/issues/861)
+* **routines:** report unexpected properties and clarify routine input declaration ([#904](https://github.com/TulipFarm/tulipfarm/issues/904)) ([d6f7e4a](https://github.com/TulipFarm/tulipfarm/commit/d6f7e4a2d442229361703157049a1cc42ff45d21)), closes [#895](https://github.com/TulipFarm/tulipfarm/issues/895)
+* **slack:** convert markdown bold to Slack mrkdwn in messages and blocks ([#889](https://github.com/TulipFarm/tulipfarm/issues/889)) ([3c96574](https://github.com/TulipFarm/tulipfarm/commit/3c96574b96a173f79947cd90e6fc351392dc100d))
+* **web:** cap sidebar chats, add infinite scroll and search to /chats ([#883](https://github.com/TulipFarm/tulipfarm/issues/883)) ([5b9a38e](https://github.com/TulipFarm/tulipfarm/commit/5b9a38e31f236718df7cd697a7ef04eaa48e47b8))
+
+### Documentation
+
+* synchronize the generated get_memory Tool description ([#900](https://github.com/TulipFarm/tulipfarm/issues/900)) ([b7bfbd4](https://github.com/TulipFarm/tulipfarm/commit/b7bfbd4f06be5d59411c114357ceb7eaea8046d0))
+
 ## [0.18.30](https://github.com/TulipFarm/tulipfarm/compare/v0.18.29...v0.18.30) (2026-09-14)
 
 ### Features
