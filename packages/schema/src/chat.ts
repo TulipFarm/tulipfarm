@@ -29,12 +29,20 @@ export const ConversationTurnSchema = Type.Object({
   modelFailure: Type.Optional(ModelFailureDiagnosticSchema),
 });
 
+export const CONVERSATION_MODES = ["plan", "brainstorm", "research", "learn"] as const;
+export type ConversationMode = (typeof CONVERSATION_MODES)[number];
+export const ConversationModeSchema = Type.Unsafe<ConversationMode>({
+  type: "string",
+  enum: [...CONVERSATION_MODES],
+});
+
 export const ConversationDetailSchema = Type.Object({
   id: Type.String(),
   userId: Type.Union([Type.String(), Type.Null()]),
   agentId: Type.Union([Type.String(), Type.Null()]),
   model: Type.Union([Type.String(), Type.Null()]),
   title: Type.Union([Type.String(), Type.Null()]),
+  mode: Type.Union([ConversationModeSchema, Type.Null()]),
   starred: Type.Boolean(),
   createdAt: Type.String(),
   updatedAt: Type.String(),

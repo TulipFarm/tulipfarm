@@ -5,7 +5,12 @@
  * `ChatState`) is the immutable shape components render.
  */
 
-import type { EffortPreset, EffortRung, RunEventToolPreview } from "@tulipfarm/schema";
+import type {
+  ConversationMode,
+  EffortPreset,
+  EffortRung,
+  RunEventToolPreview,
+} from "@tulipfarm/schema";
 import type { SurfaceCodeViewPayload } from "@tulipfarm/surface/client";
 
 export type ChatEventType =
@@ -161,6 +166,7 @@ export type ChatTurnOptions = {
   resources?: string[];
   knowledgePages?: string[];
   files?: AttachedFile[];
+  mode?: ConversationMode | null;
 };
 
 export type ChatTurnSource = {

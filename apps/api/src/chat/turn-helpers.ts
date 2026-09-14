@@ -1,6 +1,10 @@
 import type { KnowledgeService } from "@tulipfarm/knowledge";
 import { CITE_SOURCES_TOOL } from "@tulipfarm/knowledge";
-import { type AgentCapabilityRestrictions, CHAT_REQUEST_SCHEMA } from "@tulipfarm/schema";
+import {
+  type AgentCapabilityRestrictions,
+  CHAT_REQUEST_SCHEMA,
+  type ConversationMode,
+} from "@tulipfarm/schema";
 import type { PlatformAgent } from "@tulipfarm/soul";
 import type { PresentationContext } from "@tulipfarm/surface";
 import type { ToolAvailability } from "@tulipfarm/tool-broker";
@@ -12,6 +16,7 @@ export interface ChatBody {
   conversationId?: string;
   message: { role: "user"; content: string; fileIds?: string[] };
   model?: string;
+  mode?: ConversationMode;
   agentId?: string;
   autonomy?: "full" | "supervised" | "approval-required" | "manual";
   hasTools?: boolean;

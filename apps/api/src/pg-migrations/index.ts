@@ -3488,4 +3488,11 @@ export const PG_MIGRATIONS: PgMigration[] = [
     description: "deployment-local product telemetry state",
     up: applyStatements(PRODUCT_TELEMETRY_STORAGE_STATEMENTS),
   },
+  {
+    version: 124,
+    description: "add conversation mode",
+    up: async (q) => {
+      await q.query("ALTER TABLE IF EXISTS conversations ADD COLUMN IF NOT EXISTS mode text");
+    },
+  },
 ];

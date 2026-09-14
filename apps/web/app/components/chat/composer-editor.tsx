@@ -4,6 +4,7 @@ import { EditorContent, useEditor, useEditorState } from "@tiptap/react";
 import { BubbleMenu } from "@tiptap/react/menus";
 import StarterKit from "@tiptap/starter-kit";
 import { ALLOWED_MEDIA_TYPES, MAX_FILES_PER_MESSAGE } from "@tulipfarm/files/limits";
+import type { ConversationMode } from "@tulipfarm/schema";
 import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { AgentGlyph } from "~/components/agent-glyph";
 import {
@@ -32,6 +33,7 @@ import { PlanKeywordHighlight } from "./editor/plan-keyword";
 import { firstAgentMentionId, type PMNode, serializeDoc } from "./editor/serialize";
 import { useMentionData } from "./editor/use-mention-data";
 import { FilePickerModal } from "./file-picker-modal";
+import { ModeSelector } from "./mode-selector";
 import {
   DEFAULT_CHAT_MODEL_SELECTOR,
   effectiveEffortPreset,
@@ -56,6 +58,7 @@ export type ComposerSendOptions = {
   resources: string[];
   knowledgePages: string[];
   files: AttachedFile[];
+  mode?: ConversationMode | null;
 };
 
 export type ComposerAgent = {
@@ -79,6 +82,8 @@ export type ComposerProps = {
   initialDraft?: string;
   /** An already-stored File to stage, handed over by the Files library. */
   attachFileId?: string | null;
+  mode?: ConversationMode | null;
+  onModeChange?: (mode: ConversationMode | null) => void;
 };
 
 /** Enter sends unless a suggestion menu owns it; Shift+Enter inserts a newline. */
@@ -94,6 +99,8 @@ export function ComposerEditor({
   suggestions = [],
   initialDraft,
   attachFileId,
+  mode,
+  onModeChange,
 }: ComposerProps) {
   const [model, setModel] = useState<ChatModelSelector>(defaultModel);
   const llmMode = useLlmMode();
@@ -237,7 +244,7 @@ export function ComposerEditor({
       return;
     }
     setFileMentionError(null);
-    onSend(text, { model, agentId, skills, resources, knowledgePages: knowledge, files });
+    onSend(text, { model, agentId, skills, resources, knowledgePages: knowledge, files, mode });
     lastSentDocRef.current = doc;
     clear();
     editor.commands.clearContent();
@@ -300,6 +307,7 @@ export function ComposerEditor({
         }
       >
         <div className="mb-1.5 flex min-h-8 items-center gap-2 px-1 text-xs text-muted-foreground">
+          {onModeChange ? <ModeSelector value={mode ?? null} onChange={onModeChange} /> : null}
           {activeAgent ? (
             <>
               <span aria-hidden className="h-4 w-px bg-border" />

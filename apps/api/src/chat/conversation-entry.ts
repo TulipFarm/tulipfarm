@@ -126,6 +126,7 @@ function prepareConversation(
     userId: input.userId,
     agentId,
     model: undefined,
+    mode: input.body.mode,
     createdAt: now,
     updatedAt: now,
   };

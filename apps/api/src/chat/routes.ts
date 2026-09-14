@@ -1,8 +1,9 @@
 import type { EventEmitter } from "node:events";
+import { Type } from "@sinclair/typebox";
 import { type FileService, isAttachmentRefusal, resolveAttachments } from "@tulipfarm/files";
 import type { LlmService } from "@tulipfarm/llm";
 import type { DurableInvocationGateway } from "@tulipfarm/run-kernel";
-import { ajv } from "@tulipfarm/schema";
+import { ajv, ConversationModeSchema } from "@tulipfarm/schema";
 import type { SoulLoader } from "@tulipfarm/soul";
 import { DEFAULT_ASSISTANT_ID, resolveAgent } from "@tulipfarm/soul";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
@@ -168,7 +169,12 @@ export function registerChatRoutes(
           type: "object",
           properties: { "idempotency-key": { type: "string", minLength: 1, maxLength: 200 } },
         },
-        body: ChatBodySchema,
+        body: Type.Intersect([
+          Type.Unsafe(ChatBodySchema),
+          Type.Object({
+            mode: Type.Optional(Type.Union([ConversationModeSchema, Type.Null()])),
+          }),
+        ]),
         response: {
           400: ErrorSchema,
           401: ErrorSchema,

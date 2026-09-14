@@ -61,6 +61,38 @@ describe("assembleSystemPrompt — blocks", () => {
   it("renders nothing at all when both blocks are absent", () => {
     expect(assembleSystemPrompt(baseCtx({ skipPlatformPrompt: true }))).toBe("");
   });
+
+  it("renders conversation-mode between platform instructions and personality", () => {
+    const out = assembleSystemPrompt(
+      baseCtx({
+        mode: "plan",
+        personality: "You are helpful.",
+      })
+    );
+
+    const platformIdx = out.indexOf("<platform-instructions>\n");
+    const modeIdx = out.indexOf("<conversation-mode>\n");
+    const personalityIdx = out.indexOf("<agent-personality>\n");
+
+    expect(platformIdx).toBeGreaterThanOrEqual(0);
+    expect(modeIdx).toBeGreaterThan(platformIdx);
+    expect(personalityIdx).toBeGreaterThan(modeIdx);
+    expect(out).toContain("Plan mode");
+  });
+
+  it("omits conversation-mode block when mode is undefined", () => {
+    const out = assembleSystemPrompt(baseCtx({ personality: "You are helpful." }));
+    expect(out).not.toContain("<conversation-mode>");
+  });
+
+  it("renders tailored instructions for each mode", () => {
+    expect(assembleSystemPrompt(baseCtx({ mode: "plan" }))).toContain("dependency-ordered Rounds");
+    expect(assembleSystemPrompt(baseCtx({ mode: "brainstorm" }))).toContain(
+      "directed decision tree"
+    );
+    expect(assembleSystemPrompt(baseCtx({ mode: "research" }))).toContain("primary sources");
+    expect(assembleSystemPrompt(baseCtx({ mode: "learn" }))).toContain("3-pillar pedagogy");
+  });
 });
 
 describe("assembleSystemPrompt — blocks that no longer exist", () => {

@@ -1,4 +1,4 @@
-import type { ConversationDetail, ConversationTurn } from "@tulipfarm/schema";
+import type { ConversationDetail, ConversationMode, ConversationTurn } from "@tulipfarm/schema";
 import { apiDelete, apiGet, apiWrite } from "./api";
 
 /*
@@ -11,6 +11,7 @@ export type ConversationSummary = {
   id: string;
   title: string | null;
   agentId: string | null;
+  mode?: ConversationMode | null;
   starred: boolean;
   createdAt: string;
   updatedAt: string;
@@ -78,6 +79,15 @@ export function renameConversation(id: string, title: string): Promise<Conversat
 export function setConversationStarred(id: string, starred: boolean): Promise<ConversationSummary> {
   return apiWrite<ConversationSummary>("PUT", `/api/v1/chats/${encodeURIComponent(id)}`, {
     starred,
+  });
+}
+
+export function setConversationMode(
+  id: string,
+  mode: ConversationMode | null
+): Promise<ConversationSummary> {
+  return apiWrite<ConversationSummary>("PUT", `/api/v1/chats/${encodeURIComponent(id)}`, {
+    mode,
   });
 }
 

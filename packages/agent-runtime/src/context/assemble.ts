@@ -12,11 +12,15 @@ export interface TemporalContext {
  * Skills, Memory, Knowledge, the clock — is reached through a Tool, so it is fetched when needed
  * and cannot go stale between assembly and use.
  */
+import type { ConversationMode } from "@tulipfarm/schema";
+import { getModeInstructions } from "./mode-instructions";
+
 export interface AssembleContext {
   skipPlatformPrompt?: boolean;
   /** Overrides the built-in platform law; `skipPlatformPrompt` is the only way to drop it. */
   platformInstructions?: string;
   personality?: string;
+  mode?: ConversationMode;
 }
 
 function block(tag: string, body: string): string {
@@ -88,6 +92,11 @@ function renderAgentPersonality(ctx: AssembleContext): string {
   return body ? block("agent-personality", body) : "";
 }
 
+function renderConversationMode(ctx: AssembleContext): string {
+  if (!ctx.mode) return "";
+  return block("conversation-mode", getModeInstructions(ctx.mode));
+}
+
 /** Storage cap for user-authored standing instructions, enforced by the API and the web form. */
 export const MAX_CUSTOM_INSTRUCTIONS_CHARS = 4_000;
 
@@ -132,7 +141,7 @@ export function formatTemporalContext(temporal: TemporalContext): string {
 
 /** Pure prompt assembly; empty blocks are omitted whole in fixed order. */
 export function assembleSystemPrompt(ctx: AssembleContext): string {
-  return [renderPlatformInstructions(ctx), renderAgentPersonality(ctx)]
+  return [renderPlatformInstructions(ctx), renderConversationMode(ctx), renderAgentPersonality(ctx)]
     .filter((b) => b.length > 0)
     .join("\n");
 }

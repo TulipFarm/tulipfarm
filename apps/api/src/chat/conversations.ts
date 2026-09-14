@@ -1,3 +1,4 @@
+import type { ConversationMode } from "@tulipfarm/schema";
 import type { Queryable } from "../db";
 
 interface ConversationCursorState {
@@ -56,6 +57,7 @@ export interface ConversationDoc {
   model?: string;
   // Quick-model title derived from the first message; null until the async generator fills it in.
   title?: string;
+  mode?: ConversationMode | null;
   // User-pinned flag (Chats page). Defaults to false; the Chats page sorts starred chats first.
   starred?: boolean;
   createdAt: Date;
@@ -81,6 +83,7 @@ export interface ConversationRepo {
    * overwrite a title the user had just typed.
    */
   setTitleIfUnset(id: string, title: string): Promise<void>;
+  setMode(id: string, mode: ConversationMode | null): Promise<void>;
   /** Persist the user-pinned flag (Chats page star toggle). Does not bump `updated_at`. */
   setStarred(id: string, starred: boolean): Promise<void>;
   /**
@@ -114,6 +117,7 @@ function rowToConversation(row: Record<string, unknown>): ConversationDoc {
     agentId: (row.agent_id as string | null) ?? undefined,
     model: (row.model as string | null) ?? undefined,
     title: (row.title as string | null) ?? undefined,
+    mode: (row.mode as ConversationMode | null) ?? undefined,
     starred: (row.starred as boolean | null) ?? false,
     createdAt: row.created_at as Date,
     updatedAt: row.updated_at as Date,
@@ -129,12 +133,13 @@ export class PgConversationRepo implements ConversationRepo {
     }
     try {
       await this.q.query(
-        "INSERT INTO conversations (id, user_id, agent_id, model, created_at, updated_at) VALUES ($1, $2, $3, $4, $5, $6)",
+        "INSERT INTO conversations (id, user_id, agent_id, model, mode, created_at, updated_at) VALUES ($1, $2, $3, $4, $5, $6, $7)",
         [
           doc._id,
           doc.userId ?? null,
           doc.agentId ?? null,
           doc.model ?? null,
+          doc.mode ?? null,
           doc.createdAt,
           doc.updatedAt,
         ]
@@ -172,6 +177,13 @@ export class PgConversationRepo implements ConversationRepo {
     await this.q.query("UPDATE conversations SET title = $2 WHERE id = $1 AND title IS NULL", [
       id,
       title,
+    ]);
+  }
+
+  async setMode(id: string, mode: ConversationMode | null): Promise<void> {
+    await this.q.query("UPDATE conversations SET mode = $2, updated_at = now() WHERE id = $1", [
+      id,
+      mode,
     ]);
   }
 
