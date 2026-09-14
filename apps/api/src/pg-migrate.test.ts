@@ -263,7 +263,7 @@ describe("runPgMigrations", () => {
 
     await runPgMigrations(db, undefined, NOOP_LOG);
 
-    expect(await schemaVersion(db)).toBe(121);
+    expect(await schemaVersion(db)).toBe(122);
     expect(await tableExists(db, "oim_ingress_teardowns")).toBe(true);
     expect(await tableExists(db, "oim_webhook_registrations")).toBe(true);
     expect(await tableExists(db, "oim_webhook_registration_attempts")).toBe(true);
@@ -363,7 +363,7 @@ describe("runPgMigrations", () => {
          AND trigger_name = 'oim_knowledge_connection_lifecycle_fence'
     `);
     expect(trigger.rows).toEqual([{ trigger_name: "oim_knowledge_connection_lifecycle_fence" }]);
-    expect(await schemaVersion(db)).toBe(121);
+    expect(await schemaVersion(db)).toBe(122);
 
     const { queryable, statements } = watch(db);
     await runPgMigrations(queryable, undefined, NOOP_LOG);
@@ -399,7 +399,7 @@ describe("runPgMigrations", () => {
 
     await runPgMigrations(db, undefined, NOOP_LOG);
 
-    expect(await schemaVersion(db)).toBe(121);
+    expect(await schemaVersion(db)).toBe(122);
     expect(await tableExists(db, "oim_release_lifecycle_state")).toBe(true);
     expect(await tableExists(db, "oim_release_uninstall_journals")).toBe(true);
     expect(await tableExists(db, "oim_release_dispatch_leases")).toBe(true);
@@ -593,7 +593,7 @@ describe("runPgMigrations", () => {
 
     await runPgMigrations(db, undefined, NOOP_LOG);
 
-    expect(await schemaVersion(db)).toBe(121);
+    expect(await schemaVersion(db)).toBe(122);
     expect(await tableExists(db, "connection_verification_evidence")).toBe(true);
     const evidence = await db.query<{ count: number }>(
       "SELECT count(*)::integer AS count FROM connection_verification_evidence"
