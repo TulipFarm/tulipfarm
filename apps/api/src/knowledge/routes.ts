@@ -203,7 +203,9 @@ export function registerKnowledgeRoutes(
           tags?: string[];
           alwaysLoadForAgents?: boolean;
         }),
-        ...(req.user?._id === undefined ? {} : { ownerPrincipalId: req.user._id }),
+        ...(req.user?._id === undefined
+          ? {}
+          : { ownerPrincipalId: req.user._id, author: { kind: "user", id: req.user._id } }),
       });
       await activity?.record({
         category: "knowledge",
