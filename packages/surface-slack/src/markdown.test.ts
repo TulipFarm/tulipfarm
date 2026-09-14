@@ -20,4 +20,17 @@ describe("toSlackMrkdwn", () => {
       "*Question 1 — cadence:* What default cadence?"
     );
   });
+
+  it("preserves pre-formatted Slack links and mentions", () => {
+    expect(toSlackMrkdwn("<http://localhost:4000/runs/run-1|Quarterly review>")).toBe(
+      "<http://localhost:4000/runs/run-1|Quarterly review>"
+    );
+    expect(toSlackMrkdwn("<http://localhost:4000/runs/run-1>")).toBe(
+      "<http://localhost:4000/runs/run-1>"
+    );
+    expect(toSlackMrkdwn("<@U12345> and <#C12345|general>")).toBe(
+      "<@U12345> and <#C12345|general>"
+    );
+    expect(toSlackMrkdwn("a < b & c > d")).toBe("a &lt; b &amp; c &gt; d");
+  });
 });
