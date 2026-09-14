@@ -1,5 +1,32 @@
 # Changelog
 
+## [0.18.33](https://github.com/TulipFarm/tulipfarm/compare/v0.18.32...v0.18.33) (2026-09-14)
+
+### Features
+
+* **chat:** introduce 4 first-class conversation modes ([#950](https://github.com/TulipFarm/tulipfarm/issues/950)) ([db79af1](https://github.com/TulipFarm/tulipfarm/commit/db79af123339ae947b8abb97a3f71ff186888f73)), closes [#893](https://github.com/TulipFarm/tulipfarm/issues/893)
+
+### Bug Fixes
+
+* **access:** keep reissued invite controls inside the open sheet ([#945](https://github.com/TulipFarm/tulipfarm/issues/945)) ([2571887](https://github.com/TulipFarm/tulipfarm/commit/2571887fe47491ebc3595350e4f11150b016e57f))
+* **agents:** authorize chat turns by agent id instead of name ([#928](https://github.com/TulipFarm/tulipfarm/issues/928)) ([a6c8816](https://github.com/TulipFarm/tulipfarm/commit/a6c88164572ffdeab12503213975cff7cc54fd2a))
+* **auth:** refresh invite preview when URL fragment changes ([#931](https://github.com/TulipFarm/tulipfarm/issues/931)) ([7a1608f](https://github.com/TulipFarm/tulipfarm/commit/7a1608f766e1b29c32c8365fae8ca32615a12fb5))
+* **chat:** preserve Retry and failure details after reload ([#944](https://github.com/TulipFarm/tulipfarm/issues/944)) ([68ac234](https://github.com/TulipFarm/tulipfarm/commit/68ac23434efd7796e33c4821cf694bad700023c2))
+* **files:** render File detail route instead of the library ([#937](https://github.com/TulipFarm/tulipfarm/issues/937)) ([bf15330](https://github.com/TulipFarm/tulipfarm/commit/bf153306bcc8e633ec89abb967bd0d8a6327542f))
+* **knowledge:** restore focus to opener after closing search ([#939](https://github.com/TulipFarm/tulipfarm/issues/939)) ([e388c42](https://github.com/TulipFarm/tulipfarm/commit/e388c42f539e2bb746bc5569f54880f1e5644ce6))
+* **llm:** treat any aborted-signal error as cancellation, not a provider failure ([#942](https://github.com/TulipFarm/tulipfarm/issues/942)) ([630088f](https://github.com/TulipFarm/tulipfarm/commit/630088fce63a72f54127e2b76f4e151a9fb5f4a0)), closes [#917](https://github.com/TulipFarm/tulipfarm/issues/917)
+* **resources:** support keyboard selection in linked Record picker ([#936](https://github.com/TulipFarm/tulipfarm/issues/936)) ([bd3e83e](https://github.com/TulipFarm/tulipfarm/commit/bd3e83e17c84c28baf3a249ca275f286c19840e6))
+* **routine:** fail Agent States that skip a declared required Tool call ([#951](https://github.com/TulipFarm/tulipfarm/issues/951)) ([422eb45](https://github.com/TulipFarm/tulipfarm/commit/422eb454bac41acb6d50e5f1c468d297f3fc2653))
+* **routines:** explain unavailable Routine authoring instead of a 404 dead end ([#949](https://github.com/TulipFarm/tulipfarm/issues/949)) ([27e48ae](https://github.com/TulipFarm/tulipfarm/commit/27e48ae7de6b4bed8b7fd8d0c354044ae4eae3cd))
+* **runs:** persist a compute State's output so it can be read back ([#941](https://github.com/TulipFarm/tulipfarm/issues/941)) ([af63aee](https://github.com/TulipFarm/tulipfarm/commit/af63aee0457eb39a201dd413191a292f06f815f8))
+* **runs:** render one page heading for an unknown Run ([#938](https://github.com/TulipFarm/tulipfarm/issues/938)) ([6f5d8ab](https://github.com/TulipFarm/tulipfarm/commit/6f5d8abd09e080eed4915370052e59fbbce3af51)), closes [#915](https://github.com/TulipFarm/tulipfarm/issues/915)
+* **settings:** label the business currency-rate field ([#934](https://github.com/TulipFarm/tulipfarm/issues/934)) ([e70e8ca](https://github.com/TulipFarm/tulipfarm/commit/e70e8ca41145085127c509c66faffc6854ab233a))
+* **skills:** treat an ungoverned Skill as visible over HTTP ([#940](https://github.com/TulipFarm/tulipfarm/issues/940)) ([4b2aa94](https://github.com/TulipFarm/tulipfarm/commit/4b2aa94374e31e6f443a849d6771e30ffec5c3e9)), closes [#913](https://github.com/TulipFarm/tulipfarm/issues/913)
+* **web:** contain keyboard focus in the command menu ([#947](https://github.com/TulipFarm/tulipfarm/issues/947)) ([88c9bfc](https://github.com/TulipFarm/tulipfarm/commit/88c9bfcccc23779385aa55de9bf73a50d6092903))
+* **web:** preserve not-found state for the design-guide gate ([#946](https://github.com/TulipFarm/tulipfarm/issues/946)) ([cb3feb9](https://github.com/TulipFarm/tulipfarm/commit/cb3feb9fb8c256bd032015d289695b039d802813)), closes [#929](https://github.com/TulipFarm/tulipfarm/issues/929)
+* **web:** restore opener focus when closing Modal via Close button ([#943](https://github.com/TulipFarm/tulipfarm/issues/943)) ([0846095](https://github.com/TulipFarm/tulipfarm/commit/08460952ad77fafec5b76033188e7e2984d67ef0)), closes [#925](https://github.com/TulipFarm/tulipfarm/issues/925)
+* **web:** skip the Connection list read for non-OIM Integrations ([#948](https://github.com/TulipFarm/tulipfarm/issues/948)) ([77e6c01](https://github.com/TulipFarm/tulipfarm/commit/77e6c01f7f55b092a39dcbe3e5f0aed8edc98777)), closes [#926](https://github.com/TulipFarm/tulipfarm/issues/926)
+
 ## [0.18.32](https://github.com/TulipFarm/tulipfarm/compare/v0.18.31...v0.18.32) (2026-09-14)
 
 ### Features
