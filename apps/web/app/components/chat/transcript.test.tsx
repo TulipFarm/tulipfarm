@@ -1138,4 +1138,18 @@ describe("Transcript auto-scroll stays inside its own scroll container", () => {
       tracked.restore();
     }
   });
+
+  it("highlights plan mode trigger keywords in user message bubbles", () => {
+    const state = fold([], "Let's plan the release and start planning.");
+    const { container } = render(
+      <Transcript messages={state.messages} status="idle" onApprove={vi.fn()} />
+    );
+
+    const userMessage = container.querySelector('[aria-label="Your message"]');
+    expect(userMessage).not.toBeNull();
+    const keywords = userMessage?.querySelectorAll(".tf-plan-keyword");
+    expect(keywords).toHaveLength(2);
+    expect(keywords?.[0]?.textContent).toBe("plan");
+    expect(keywords?.[1]?.textContent).toBe("planning");
+  });
 });

@@ -8,6 +8,7 @@ import { rehypeStreamWords, type StreamWordCounter } from "~/lib/rehype-stream-w
 import { rehypeTags } from "~/lib/rehype-tags";
 import { mentionComponents } from "./chat/mention-chip";
 import { rehypeMentions } from "./chat/mention-highlight";
+import { rehypePlanKeywords } from "./chat/plan-highlight";
 import type { MentionEntry } from "./chat/use-mention-catalog";
 
 const TAG_BASE = "/knowledge/tags/";
@@ -198,6 +199,7 @@ export function MarkdownView({
   wikiLinks,
   citations,
   streamWords,
+  highlightPlanKeywords,
 }: {
   children: string;
   mentions?: MentionEntry[];
@@ -206,6 +208,8 @@ export function MarkdownView({
   citations?: { ref: number; url: string }[];
   /** While a Turn streams: blur-reveal words past `from`, and report this pass's count via `counter`. */
   streamWords?: { from: number; counter: StreamWordCounter };
+  /** Highlight plan mode trigger keywords ('plan', 'planning', '/plan'). */
+  highlightPlanKeywords?: boolean;
 }) {
   const list = mentions ?? NO_MENTIONS;
   const active = list.length > 0;
@@ -224,11 +228,12 @@ export function MarkdownView({
   const rehypePlugins = useMemo<Options["rehypePlugins"]>(() => {
     const plugins: NonNullable<Options["rehypePlugins"]> = [rehypeCallouts];
     if (active) plugins.push([rehypeMentions, { phrases: list.map((m) => m.phrase) }]);
+    if (highlightPlanKeywords) plugins.push(rehypePlanKeywords);
     if (wikiLinks) plugins.push([rehypeTags, { tagBase: TAG_BASE }]);
     if (citationsOn) plugins.push([rehypeCitations, { refs }]);
     if (streamWords) plugins.push([rehypeStreamWords, streamWords]);
     return plugins;
-  }, [active, list, wikiLinks, citationsOn, refs, streamWords]);
+  }, [active, list, highlightPlanKeywords, wikiLinks, citationsOn, refs, streamWords]);
   const resolvedComponents = useMemo<Components>(() => {
     let resolved: Components = components;
     if (active) resolved = { ...resolved, ...mentionComponents(byPhrase) };

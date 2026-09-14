@@ -267,17 +267,20 @@ const validatePlanDeclare = ajv.compile(PLAN_DECLARE_SCHEMA);
 export const planDeclareTool = defineApiTool<PlatformRuntimeContext>({
   name: PLAN_DECLARE_TOOL_NAME,
   description:
-    "Show the person the shape of the work before you do it. Call it whenever the request needs " +
-    "three or more Tool calls across two or more Rounds — creating a Routine, an Agent or a " +
-    "Resource type usually does. Skip it for anything you can finish in one Round; a plan for " +
-    "trivial work is noise. NEVER call it on its own: put it in the same message as Round 1's " +
-    "calls. A message carrying only this Tool spends a whole model round-trip declaring work it " +
-    "then has to come back to start, so the person watches a plan in which nothing is running for " +
-    "as long as it takes you to think again. Round 1 must therefore list the calls you are making " +
-    "in THAT SAME message. Group calls that can run at the same time into one Round, and put a " +
-    "call in a later Round only when it needs an earlier Round's result. Call this again, with " +
-    "the whole plan, whenever what you learned changes it. Declaring a plan neither reserves nor " +
-    "runs anything.",
+    "Show the person the shape of the work before you do it. Reserved strictly for complex, " +
+    "multi-stage tasks (e.g. creating multi-state routines, building complex schemas, multi-step " +
+    "migrations, cross-service orchestrations) or when the user explicitly requested a plan (e.g. " +
+    "using keywords 'plan', 'planning', or '/plan'). NEVER declare a plan for single-entity CRUD " +
+    "operations, single record creation or updates, status queries, or simple tasks: execute those " +
+    "directly without a plan declaration. Skip it for anything you can finish in one Round; a " +
+    "plan for trivial work is noise. NEVER call it on its own: put it in the same message as " +
+    "Round 1's calls. A message carrying only this Tool spends a whole model round-trip declaring " +
+    "work it then has to come back to start, so the person watches a plan in which nothing is " +
+    "running for as long as it takes you to think again. Round 1 must therefore list the calls you " +
+    "are making in THAT SAME message. Group calls that can run at the same time into one Round, " +
+    "and put a call in a later Round only when it needs an earlier Round's result. Call this again, " +
+    "with the whole plan, whenever what you learned changes it. Declaring a plan neither reserves " +
+    "nor runs anything.",
   mutating: false,
   tier: "platform",
   participantActivity: "represented",

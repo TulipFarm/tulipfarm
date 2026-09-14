@@ -29,6 +29,14 @@ describe("assembleSystemPrompt — blocks", () => {
     expect(out).toContain("Never send a multi-field Form or a wall of questions");
   });
 
+  it("instructs the agent on planning thresholds and keyword invocation", () => {
+    const out = assembleSystemPrompt(baseCtx());
+
+    expect(out).toContain("## Planning");
+    expect(out).toContain("Reserve `plan_declare` strictly for complex, multi-stage tasks");
+    expect(out).toContain("Single-entity CRUD operations");
+  });
+
   it("uses a supplied override in place of the built-in law", () => {
     const out = assembleSystemPrompt(baseCtx({ platformInstructions: "obey the operator" }));
 

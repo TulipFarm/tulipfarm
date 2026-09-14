@@ -28,6 +28,7 @@ import { useLlmMode } from "~/lib/llm-mode-context";
 import type { Suggestion } from "~/lib/onboarding";
 import { AttachmentStrip } from "./attachment-strip";
 import { buildMentionExtensions, MENTION_PLUGIN_KEYS } from "./editor/mentions";
+import { PlanKeywordHighlight } from "./editor/plan-keyword";
 import { firstAgentMentionId, type PMNode, serializeDoc } from "./editor/serialize";
 import { useMentionData } from "./editor/use-mention-data";
 import { FilePickerModal } from "./file-picker-modal";
@@ -119,6 +120,7 @@ export function ComposerEditor({
         HTMLAttributes: { class: "tf-editor-link" },
       }),
       Placeholder.configure({ placeholder: "Ask anything…" }),
+      PlanKeywordHighlight,
       ...mentionExtensions,
     ],
     editorProps: {
