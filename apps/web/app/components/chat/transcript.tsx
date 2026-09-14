@@ -381,7 +381,9 @@ function UserMessage({ message, mentions }: { message: ChatMessage; mentions?: M
       ) : null}
       {text.length > 0 ? (
         <div className="max-w-[90%] rounded-lg bg-secondary px-3 py-2 text-base text-foreground sm:max-w-[78%] [&_:first-child]:mt-0 [&_:last-child]:mb-0">
-          <MarkdownView mentions={mentions}>{text}</MarkdownView>
+          <MarkdownView mentions={mentions} highlightPlanKeywords>
+            {text}
+          </MarkdownView>
         </div>
       ) : null}
       <div className={`${toolbar} justify-end`}>
