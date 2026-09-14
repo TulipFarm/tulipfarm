@@ -9,6 +9,7 @@ import { CSRF_COOKIE, CSRF_HEADER } from "../../auth/csrf";
 import { SESSION_COOKIE } from "../../auth/middleware";
 import { MemorySessionStore } from "../../auth/session-store";
 import { createUser, type UserDoc, type UserRepo } from "../../auth/users";
+import type { TeamAssetService } from "../../team-assets/service";
 
 const TEST_CSRF = "a".repeat(64);
 
@@ -183,6 +184,24 @@ describe("agents routes", () => {
       expect(res.json().agents[0]).not.toHaveProperty("capabilityRestrictions");
       await solo.close();
     });
+
+    it("checks teamAssets.access using agent.id rather than name", async () => {
+      const access = vi.fn().mockResolvedValue({ levels: ["view", "edit"] });
+      const solo = await buildApp({
+        sessionStore: store,
+        userRepo,
+        tokenRepo,
+        gitSync: makeFakeGitSync(),
+        soulLoader: makeSoulLoader([PLANNER]),
+        soulWriter: makeSoulWriterDouble().writer,
+        teamAssets: { access } as unknown as TeamAssetService,
+      });
+      const res = await solo.inject(authed("/api/v1/agents"));
+      expect(res.statusCode).toBe(200);
+      expect(res.json().agents).toHaveLength(1);
+      expect(access).toHaveBeenCalledWith("agent", PLANNER.id, expect.anything(), undefined);
+      await solo.close();
+    });
   });
 
   describe("GET /api/v1/agents/built-in", () => {
@@ -227,6 +246,29 @@ describe("agents routes", () => {
     it("returns 404 for an unknown agent", async () => {
       const res = await app.inject(authed("/api/v1/agents/ghost"));
       expect(res.statusCode).toBe(404);
+    });
+
+    it("checks teamAssets.require using agent.id rather than name", async () => {
+      const require = vi.fn().mockResolvedValue({});
+      const solo = await buildApp({
+        sessionStore: store,
+        userRepo,
+        tokenRepo,
+        gitSync: makeFakeGitSync(),
+        soulLoader: makeSoulLoader([PLANNER]),
+        soulWriter: makeSoulWriterDouble().writer,
+        teamAssets: { require } as unknown as TeamAssetService,
+      });
+      const res = await solo.inject(authed("/api/v1/agents/sprint-planner"));
+      expect(res.statusCode).toBe(200);
+      expect(require).toHaveBeenCalledWith(
+        "agent",
+        PLANNER.id,
+        expect.anything(),
+        "view",
+        undefined
+      );
+      await solo.close();
     });
   });
 });
