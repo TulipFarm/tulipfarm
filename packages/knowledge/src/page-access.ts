@@ -70,7 +70,7 @@ export class PageReadGate implements PageReadAuthorizer {
     if (userId === undefined) return false;
     const access = await this.ownership?.accessFor?.(this.businessId, subjectKind, id, userId);
     if (access !== undefined) return access.levels.includes("edit");
-    return false;
+    return subjectKind === "page" ? false : await this.canReadSpace(userId, id);
   }
 
   async assertDeleteApproved(

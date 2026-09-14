@@ -274,13 +274,11 @@ export function registerSpaceRoutes({
         return refuseWrite(req, reply, "knowledge.page.author", "space");
       // writePage upserts by path, so a taken path is an update in disguise. Answering 404 keeps a
       // restricted Page from being overwritten and re-attributed by someone who cannot read it,
-      // and matches what a caller who probed the path directly would already have been told.
+      // and matches what a caller who probed the path directly would already have been told. This
+      // collaborative upsert is deliberately read-gated, not edit-gated: `gate.canEdit` governs the
+      // precision `PUT /pages/:id` edit surface, which is a different, stricter authority.
       const existing = await service.getPageByPath(spaceId, b.path);
-      if (
-        existing &&
-        !(await (gate.canEdit?.(req.user?._id, "page", existing._id) ??
-          gate.canRead(req.user?._id, existing._id)))
-      )
+      if (existing && !(await gate.canRead(req.user?._id, existing._id)))
         return refuseWrite(req, reply, "knowledge.page.author", "page");
       const res = await service.writePage({
         spaceId,

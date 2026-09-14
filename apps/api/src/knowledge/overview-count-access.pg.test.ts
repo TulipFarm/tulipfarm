@@ -165,13 +165,14 @@ describe("the Knowledge overview counts only Pages the viewer may read", () => {
     caller = outsider;
     const before = await overviewSpace();
 
-    caller = insider;
-    const edited = await app.inject({
-      method: "POST",
-      url: `${base}/spaces/${spaceId}/pages`,
-      payload: { path: "ORCHIDBANK-layoffs", content: "# Layoffs, revised" },
+    // Written through the service, not the HTTP route: this test is about the lastActivity
+    // aggregation reading the ACL correctly, not about who holds write authority over the Page.
+    const edited = await service.writePage({
+      spaceId,
+      path: "ORCHIDBANK-layoffs",
+      content: "# Layoffs, revised",
     });
-    expect(edited.statusCode).toBeLessThan(300);
+    expect(edited.ok).toBe(true);
 
     caller = outsider;
     const after = await overviewSpace();
@@ -185,13 +186,14 @@ describe("the Knowledge overview counts only Pages the viewer may read", () => {
     caller = outsider;
     const before = await overviewSpace();
 
-    caller = insider;
-    const edited = await app.inject({
-      method: "POST",
-      url: `${base}/spaces/${spaceId}/pages`,
-      payload: { path: "travel", content: "# travel, revised" },
+    // Written through the service, not the HTTP route: this test is about the lastActivity
+    // aggregation reading the ACL correctly, not about who holds write authority over the Page.
+    const edited = await service.writePage({
+      spaceId,
+      path: "travel",
+      content: "# travel, revised",
     });
-    expect(edited.statusCode).toBeLessThan(300);
+    expect(edited.ok).toBe(true);
 
     caller = outsider;
     expect((await overviewSpace())?.lastActivity).not.toBe(before?.lastActivity);

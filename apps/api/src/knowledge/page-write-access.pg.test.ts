@@ -211,7 +211,7 @@ describe("authored Page write routes consult the gate", () => {
       expect(res.json().content).toContain(SECRET);
     });
 
-    it("still lets a member update a Page they can read", async () => {
+    it("refuses a member trying to update a Page they can read but not edit", async () => {
       caller = author;
       const pageId = await writePage("onboarding", "# Onboarding\n\nStart here.");
 
@@ -223,7 +223,7 @@ describe("authored Page write routes consult the gate", () => {
         payload: { content: "# Onboarding\n\nRevised." },
       });
 
-      expect(res.statusCode).toBe(200);
+      expect(res.statusCode).toBe(404);
     });
   });
 
@@ -240,13 +240,13 @@ describe("authored Page write routes consult the gate", () => {
       );
     });
 
-    it("still lets a member delete a Page they can read", async () => {
+    it("refuses a member trying to delete a Page they can read but not edit", async () => {
       caller = author;
       const pageId = await writePage("onboarding", "# Onboarding");
 
       caller = outsider;
       const res = await app.inject({ method: "DELETE", url: `${base}/pages/${pageId}` });
-      expect(res.statusCode).toBe(204);
+      expect(res.statusCode).toBe(404);
     });
   });
 
@@ -269,7 +269,7 @@ describe("authored Page write routes consult the gate", () => {
       expect(revisions.json().items).toHaveLength(0);
     });
 
-    it("still lets a member snapshot a Page they can read", async () => {
+    it("refuses a member trying to snapshot a Page they can read but not edit", async () => {
       caller = author;
       const pageId = await writePage("onboarding", "# Onboarding");
 
@@ -279,7 +279,7 @@ describe("authored Page write routes consult the gate", () => {
         url: `${base}/pages/${pageId}/revisions`,
         payload: { content: "# Onboarding\n\nsnapshot", reason: null },
       });
-      expect(res.statusCode).toBe(201);
+      expect(res.statusCode).toBe(404);
     });
   });
 
