@@ -74,3 +74,22 @@ it("still lets its own cancel close it, so Escape keeps working", () => {
 
   expect(event.defaultPrevented).toBe(false);
 });
+
+it("closes via the dialog's native close(), so the opener regains focus like Escape does", async () => {
+  const onClose = vi.fn();
+  const dialog = render(
+    <Modal open onClose={onClose} title="Add File">
+      <p>body</p>
+    </Modal>
+  ).container.querySelector("dialog") as HTMLDialogElement;
+  // jsdom doesn't implement HTMLDialogElement.close; stub one so the Close button's real-browser
+  // path (native close() firing a 'close' event, which is what restores focus to the opener) is
+  // exercised here instead of falling back to calling onClose directly.
+  const closeSpy = vi.fn(() => dialog.dispatchEvent(new Event("close")));
+  dialog.close = closeSpy;
+
+  await userEvent.click(screen.getByRole("button", { name: "Close" }));
+
+  expect(closeSpy).toHaveBeenCalledTimes(1);
+  expect(onClose).toHaveBeenCalledTimes(1);
+});

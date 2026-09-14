@@ -27,6 +27,19 @@ export function Modal({
   const ref = useRef<HTMLDialogElement>(null);
   const titleId = useId();
 
+  // Native close() is what restores focus to the opener, the same way Escape does; calling
+  // onClose directly would unmount the dialog via `if (!open) return null` before that
+  // restoration can happen, leaving focus on <body> (issue #925). Falls back to onClose directly
+  // in environments that don't implement HTMLDialogElement.close (e.g. jsdom in tests).
+  function closeDialog() {
+    const d = ref.current;
+    if (d && typeof d.close === "function") {
+      d.close();
+    } else {
+      onClose();
+    }
+  }
+
   // Drive open/close from props. Guard against calling when already in the
   // desired state to prevent spurious 'close' events triggering onClose.
   // Falls back to toggling the `open` attribute directly in environments that
@@ -113,7 +126,7 @@ export function Modal({
           type="button"
           aria-label="Close"
           disabled={!dismissible}
-          onClick={onClose}
+          onClick={closeDialog}
           className="rounded-md p-1 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
         >
           <X className="size-4" />
