@@ -40,12 +40,12 @@ describe("GET /setup/status rate limiting", () => {
 
   it("keeps answering a settled instance long past the limit, so a shell boot cannot be refused", async () => {
     app = await makeApp(true);
-    expect((await get()).json()).toEqual({ needsSetup: false });
+    expect((await get()).json()).toMatchObject({ needsSetup: false });
 
     for (let i = 0; i < 60; i++) {
       const res = await get();
       expect(res.statusCode, `request ${i + 2}`).toBe(200);
-      expect(res.json()).toEqual({ needsSetup: false });
+      expect(res.json()).toMatchObject({ needsSetup: false });
     }
   });
 

@@ -15,7 +15,7 @@ The Worker consumes the scheduled tick and calls the authenticated dispatcher.
 
 The event contract and reporter live in `@tulipfarm/observability`.
 `ProductTelemetryStore` in `@tulipfarm/storage` owns the singleton database row.
-Migration 122 creates that table.
+Migration 123 creates that table.
 No telemetry settings or identity files are written into the runtime Soul.
 
 ## Reporting policy
