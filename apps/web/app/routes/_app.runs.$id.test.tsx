@@ -10,7 +10,7 @@ import {
   getRunBudgets,
   type OperationalRun,
 } from "~/lib/operations";
-import OperationalRunRoute, { clientLoader } from "./_app.runs.$id";
+import OperationalRunRoute, { clientLoader, ErrorBoundary } from "./_app.runs.$id";
 
 vi.mock("~/lib/operations", () => ({
   commandRun: vi.fn(),
@@ -49,6 +49,7 @@ function renderRoute() {
           <OperationalRunRoute />
         </>
       ),
+      ErrorBoundary,
     },
   ]);
   return render(<Stub initialEntries={["/runs/run-1"]} />);
@@ -103,6 +104,16 @@ describe("Run results route", () => {
     expect(
       await screen.findByText("No budget ceilings recorded. This Run is unbounded.")
     ).toBeInTheDocument();
+  });
+
+  it("renders exactly one page heading for an unknown Run", async () => {
+    vi.mocked(getOperationalRun).mockRejectedValue(new ApiError(404, "Run not found."));
+    renderRoute();
+    expect(await screen.findByText("error: 404 Run not found.")).toBeInTheDocument();
+    expect(screen.getAllByRole("heading", { level: 1 })).toHaveLength(1);
+    expect(
+      screen.queryByRole("heading", { level: 1, name: "Run results" })
+    ).not.toBeInTheDocument();
   });
 
   it.each([403, 409, 500])(
