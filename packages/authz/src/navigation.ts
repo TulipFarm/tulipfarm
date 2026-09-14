@@ -47,6 +47,9 @@ export const NAVIGATION_REQUIREMENTS: readonly NavigationRequirement[] = [
   { path: "/agents", authorizations: [AUTHENTICATED_NAVIGATION] },
   { path: "/skills", authorizations: [AUTHENTICATED_NAVIGATION] },
   { path: "/routines", authorizations: [AUTHENTICATED_NAVIGATION] },
+  // Scheduled Tasks is a filtered view of the same Routine data /routines already serves, so it
+  // carries the identical authorization rather than a stricter or looser one.
+  { path: "/routines/scheduled", authorizations: [AUTHENTICATED_NAVIGATION] },
   { path: "/files", authorizations: [AUTHENTICATED_NAVIGATION] },
   { path: "/knowledge", authorizations: [AUTHENTICATED_NAVIGATION] },
   { path: "/inbox", authorizations: [OPERATIONS_READ] },

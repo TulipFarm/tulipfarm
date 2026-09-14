@@ -5,6 +5,7 @@ import {
   Boxes,
   Brain,
   Building2,
+  Calendar,
   Cpu,
   DollarSign,
   FileText,
@@ -104,6 +105,7 @@ export const SIDEBAR_GROUPS: NavGroup[] = [
       { to: "/agents", label: "Agents", icon: Bot },
       { to: "/skills", label: "Skills", icon: Puzzle },
       { to: "/routines", label: "Routines", icon: Workflow },
+      { to: "/routines/scheduled", label: "Scheduled Tasks", icon: Calendar },
       { to: "/files", label: "Files", icon: FileText },
       {
         to: "/knowledge",
@@ -309,6 +311,8 @@ const PAGE_META: Array<{ prefix: string; label: string; icon: Icon }> = [
   { prefix: "/resources", label: "Resources", icon: Boxes },
   { prefix: "/agents", label: "Agents", icon: Bot },
   { prefix: "/skills", label: "Skills", icon: Puzzle },
+  // Must precede "/routines" — pageForPath takes the first matching prefix.
+  { prefix: "/routines/scheduled", label: "Scheduled Tasks", icon: Calendar },
   { prefix: "/routines", label: "Routines", icon: Workflow },
   { prefix: "/runs", label: "Runs", icon: Activity },
   { prefix: "/inbox", label: "Inbox", icon: Inbox },
