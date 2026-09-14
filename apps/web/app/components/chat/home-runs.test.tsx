@@ -11,10 +11,10 @@ let user: SessionUser | undefined;
 vi.mock("~/lib/use-session-user", () => ({ useSessionUser: () => user }));
 vi.mock("~/lib/operations", () => ({ listOperationalRuns: vi.fn() }));
 
-function run(id: string, status: string): OperationalRun {
+function run(id: string, status: string, routineId = "weekly-report"): OperationalRun {
   return {
     id,
-    routineId: "weekly-report",
+    routineId,
     routineVersion: "1",
     version: 1,
     status,
@@ -81,7 +81,7 @@ test("shows actual Run states and links for granted users without admin role che
   expect(await screen.findByText("running")).toBeInTheDocument();
   expect(screen.getByText("succeeded")).toBeInTheDocument();
   expect(screen.getByText("attention required")).toBeInTheDocument();
-  expect(listOperationalRuns).toHaveBeenCalledWith(undefined, 3);
+  expect(listOperationalRuns).toHaveBeenCalledWith(undefined, 25);
   expect(screen.getByRole("link", { name: /weekly-report.*running/ })).toHaveAttribute(
     "href",
     "/runs/run-1"
@@ -102,18 +102,43 @@ test("distinguishes loading and an empty result", async () => {
   );
   renderRuns();
   expect(screen.getByRole("status")).toHaveTextContent("Loading recent runs");
-  expect(screen.queryByText("No runs yet.")).not.toBeInTheDocument();
+  expect(screen.queryByText("No routine runs yet.")).not.toBeInTheDocument();
   await act(async () => resolve({ items: [], nextCursor: null }));
-  expect(screen.getByText("No runs yet.")).toBeInTheDocument();
+  expect(screen.getByText("No routine runs yet.")).toBeInTheDocument();
+});
+
+test("filters out internal chat runs and only shows routine runs", async () => {
+  vi.mocked(listOperationalRuns).mockResolvedValue({
+    items: [
+      run("chat-run-1", "succeeded", "chat"),
+      run("run-1", "running", "weekly-report"),
+      run("chat-run-2", "succeeded", "chat"),
+    ],
+    nextCursor: null,
+  });
+  renderRuns();
+  expect(await screen.findByText("running")).toBeInTheDocument();
+  expect(screen.getByRole("link", { name: /weekly-report.*running/ })).toBeInTheDocument();
+  expect(screen.queryByText("chat-run-1")).not.toBeInTheDocument();
+  expect(screen.queryByText("chat-run-2")).not.toBeInTheDocument();
+});
+
+test("shows the empty state when only internal chat runs exist", async () => {
+  vi.mocked(listOperationalRuns).mockResolvedValue({
+    items: [run("chat-run-1", "succeeded", "chat")],
+    nextCursor: null,
+  });
+  renderRuns();
+  expect(await screen.findByText("No routine runs yet.")).toBeInTheDocument();
 });
 
 test("failed reads offer retry instead of claiming that no work exists", async () => {
   vi.mocked(listOperationalRuns).mockRejectedValueOnce(new Error("offline"));
   renderRuns();
   expect(await screen.findByRole("alert")).toHaveTextContent("Couldn't load recent runs.");
-  expect(screen.queryByText("No runs yet.")).not.toBeInTheDocument();
+  expect(screen.queryByText("No routine runs yet.")).not.toBeInTheDocument();
   await userEvent.click(screen.getByRole("button", { name: "Refresh runs" }));
-  expect(await screen.findByText("No runs yet.")).toBeInTheDocument();
+  expect(await screen.findByText("No routine runs yet.")).toBeInTheDocument();
   expect(listOperationalRuns).toHaveBeenCalledTimes(2);
 });
 

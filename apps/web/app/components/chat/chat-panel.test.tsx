@@ -5,18 +5,13 @@ import { beforeEach, expect, test, vi } from "vitest";
 import { ChatPanel } from "~/components/chat/chat-panel";
 import type { PendingApproval } from "~/lib/approvals";
 import type { ChatMessage } from "~/lib/chat/types";
-import type { ConversationSummary } from "~/lib/conversations";
 import type { Suggestion } from "~/lib/onboarding";
 import type { Task } from "~/lib/tasks";
 
 let approvals: PendingApproval[] = [];
 let approvalsLoading = false;
 let approvalsError: string | null = null;
-let conversations: ConversationSummary[] = [];
-let conversationsLoading = false;
-let conversationsError: string | null = null;
 const refreshApprovals = vi.fn();
-const refreshConversations = vi.fn();
 vi.mock("~/lib/use-session-user", () => ({ useSessionUser: () => undefined }));
 vi.mock("~/lib/approvals-context", () => ({
   useApprovals: () => ({
@@ -24,14 +19,6 @@ vi.mock("~/lib/approvals-context", () => ({
     loading: approvalsLoading,
     error: approvalsError,
     refresh: refreshApprovals,
-  }),
-}));
-vi.mock("~/lib/conversations-context", () => ({
-  useConversations: () => ({
-    conversations,
-    loading: conversationsLoading,
-    error: conversationsError,
-    refresh: refreshConversations,
   }),
 }));
 
@@ -72,11 +59,7 @@ beforeEach(() => {
   approvals = [];
   approvalsLoading = false;
   approvalsError = null;
-  conversations = [];
-  conversationsLoading = false;
-  conversationsError = null;
   refreshApprovals.mockClear();
-  refreshConversations.mockClear();
   send.mockClear();
   regenerate.mockClear();
   stream = {
@@ -125,19 +108,11 @@ test.each(["done", "dismissed", "snoozed"] as const)(
   }
 );
 
-test("shows waiting approvals and the three newest authorized chats without inventing activity", () => {
+test("shows waiting approvals without inventing activity", () => {
   approvals = [
     { approvalId: "a1", createdAt: "2026-09-10T00:00:00Z", expiresAt: "2027-01-01T00:00:00Z" },
     { approvalId: "a2", createdAt: "2026-09-11T00:00:00Z", expiresAt: "2027-01-01T00:00:00Z" },
   ];
-  conversations = [1, 4, 2, 3].map((index) => ({
-    id: `chat-${index}`,
-    title: `Work ${index}`,
-    agentId: null,
-    starred: false,
-    createdAt: `2026-09-0${index}T00:00:00Z`,
-    updatedAt: `2026-09-0${index}T00:00:00Z`,
-  }));
   renderHome();
 
   expect(screen.getByRole("link", { name: /2 approvals waiting for review/ })).toHaveAttribute(
@@ -145,36 +120,27 @@ test("shows waiting approvals and the three newest authorized chats without inve
     "/inbox"
   );
   expect(
-    screen.getAllByRole("link", { name: /Work \d/ }).map((link) => link.getAttribute("href"))
-  ).toEqual(["/chat/chat-4", "/chat/chat-3", "/chat/chat-2"]);
-  expect(
     screen.queryByText(/completed today|hours saved|tasks completed/i)
   ).not.toBeInTheDocument();
 });
 
 test("keeps the composer ready while real work context loads", () => {
   approvalsLoading = true;
-  conversationsLoading = true;
   renderHome();
 
   expect(screen.getByLabelText("Message")).toBeInTheDocument();
   expect(screen.getByText("Checking pending approvals…")).toBeInTheDocument();
-  expect(screen.getByText("Loading recent chats…")).toBeInTheDocument();
   expect(screen.queryByText(/all caught up|0 approvals/i)).not.toBeInTheDocument();
 });
 
 test("shows recovery instead of false zero counts when work context fails", async () => {
   approvalsError = "offline";
-  conversationsError = "offline";
   renderHome();
 
   expect(screen.getByText("Couldn't check pending approvals.")).toBeInTheDocument();
-  expect(screen.getByText("Couldn't load recent chats.")).toBeInTheDocument();
   expect(screen.queryByText(/all caught up|0 approvals/i)).not.toBeInTheDocument();
   await userEvent.click(screen.getByRole("button", { name: "Retry approvals" }));
-  await userEvent.click(screen.getByRole("button", { name: "Retry recent chats" }));
   expect(refreshApprovals).toHaveBeenCalledOnce();
-  expect(refreshConversations).toHaveBeenCalledOnce();
 });
 
 test("choosing a home task drafts its prompt without starting a Turn", async () => {

@@ -9,6 +9,11 @@ type RunsState =
   | { status: "error" }
   | { status: "ready"; runs: OperationalRun[] };
 
+const DISPLAY_LIMIT = 3;
+// Chat Turns execute through the run kernel under routineId "chat", so the operational feed is
+// overfetched and filtered client-side to surface only actual Routine executions.
+const FETCH_LIMIT = 25;
+
 function RecentRuns() {
   const [state, setState] = useState<RunsState>({ status: "loading" });
   const [revision, setRevision] = useState(0);
@@ -17,9 +22,10 @@ function RecentRuns() {
   useEffect(() => {
     let active = true;
     setState({ status: "loading" });
-    void listOperationalRuns(undefined, 3).then(
+    void listOperationalRuns(undefined, FETCH_LIMIT).then(
       ({ items }) => {
-        if (active) setState({ status: "ready", runs: items });
+        const routineRuns = items.filter((run) => run.routineId !== "chat").slice(0, DISPLAY_LIMIT);
+        if (active) setState({ status: "ready", runs: routineRuns });
       },
       () => {
         if (active) setState({ status: "error" });
@@ -60,7 +66,7 @@ function RecentRuns() {
           Couldn't load recent runs.
         </p>
       ) : state.runs.length === 0 ? (
-        <p className="py-2 text-sm text-muted-foreground">No runs yet.</p>
+        <p className="py-2 text-sm text-muted-foreground">No routine runs yet.</p>
       ) : (
         <ul className="flex flex-col">
           {state.runs.map((run) => (
