@@ -108,6 +108,8 @@ type ActiveStream = {
   runId?: string;
   stopRequested: boolean;
   stopPromise?: Promise<void>;
+  terminalReceived?: boolean;
+  hasAssistantContent?: boolean;
 };
 
 function captureClientContext(): { route: string; title?: string } | undefined {
@@ -192,6 +194,30 @@ function lastUserSource(messages: ChatMessage[]): ChatTurnSource | undefined {
 
 function sourceForMessage(messages: ChatMessage[], messageId: string): ChatTurnSource | undefined {
   return messages.find((message) => message.id === messageId)?.sourceTurn;
+}
+
+function finalizeActiveStream(
+  active: ActiveStream,
+  dispatch: (action: ChatAction) => void,
+  onConversationChange?: (id: string | undefined) => void,
+  conversationId?: string,
+  errorFallback?: string
+): void {
+  if (active.terminalReceived) return;
+  if (active.hasAssistantContent) {
+    active.terminalReceived = true;
+    dispatch({ type: "finish", data: { reason: "closed" } });
+    onConversationChange?.(conversationId);
+  } else {
+    active.terminalReceived = true;
+    dispatch({
+      type: "error",
+      data: {
+        message: errorFallback ?? "The turn stopped before it could answer. Try again.",
+        terminal: true,
+      },
+    });
+  }
 }
 
 export function useChatStream(opts?: UseChatStreamOptions) {
@@ -327,6 +353,12 @@ export function useChatStream(opts?: UseChatStreamOptions) {
               handleClientAction(event.data, navigateRef.current);
               return;
             }
+            if (event.type === "text" || event.type === "tool-call" || event.type === "surface") {
+              active.hasAssistantContent = true;
+            }
+            if (event.type === "finish" || event.type === "error") {
+              active.terminalReceived = true;
+            }
             dispatch(event);
             if (event.type === "finish") {
               onConversationChangeRef.current?.(conversationIdRef.current);
@@ -341,16 +373,28 @@ export function useChatStream(opts?: UseChatStreamOptions) {
     }
 
     void restore()
+      .then(() => {
+        if (!ownsStream()) return;
+        finalizeActiveStream(
+          active,
+          dispatch,
+          onConversationChangeRef.current,
+          conversationIdRef.current
+        );
+      })
       .catch((error) => {
         if (!ownsStream()) return;
         if (controller.signal.aborted) {
           if (active.stopRequested) dispatch({ type: "stopped" });
           return;
         }
-        dispatch({
-          type: "error",
-          data: { message: error instanceof Error ? error.message : "stream failed" },
-        });
+        finalizeActiveStream(
+          active,
+          dispatch,
+          onConversationChangeRef.current,
+          conversationIdRef.current,
+          error instanceof Error ? error.message : "stream failed"
+        );
       })
       .finally(() => {
         if (activeStreamRef.current === active) activeStreamRef.current = null;
@@ -414,6 +458,12 @@ export function useChatStream(opts?: UseChatStreamOptions) {
               handleClientAction(event.data, navigateRef.current);
               return;
             }
+            if (event.type === "text" || event.type === "tool-call" || event.type === "surface") {
+              active.hasAssistantContent = true;
+            }
+            if (event.type === "finish" || event.type === "error") {
+              active.terminalReceived = true;
+            }
             dispatch(event);
             if (event.type === "finish")
               onConversationChangeRef.current?.(conversationIdRef.current);
@@ -428,16 +478,27 @@ export function useChatStream(opts?: UseChatStreamOptions) {
         await (retryTurnId === undefined
           ? postChat(body, handlers, idempotencyKey)
           : postChatRetry(retryTurnId, body, handlers));
+        if (activeStreamRef.current === active) {
+          finalizeActiveStream(
+            active,
+            dispatch,
+            onConversationChangeRef.current,
+            conversationIdRef.current
+          );
+        }
       } catch (err) {
         if (activeStreamRef.current !== active) return;
         if (controller.signal.aborted) {
           if (active.stopRequested) dispatch({ type: "stopped" });
           return;
         }
-        dispatch({
-          type: "error",
-          data: { message: err instanceof Error ? err.message : "stream failed" },
-        });
+        finalizeActiveStream(
+          active,
+          dispatch,
+          onConversationChangeRef.current,
+          conversationIdRef.current,
+          err instanceof Error ? err.message : "stream failed"
+        );
       } finally {
         if (activeStreamRef.current === active) activeStreamRef.current = null;
       }
@@ -483,7 +544,17 @@ export function useChatStream(opts?: UseChatStreamOptions) {
 
   const stop = useCallback(() => {
     const active = activeStreamRef.current;
-    if (!active) return;
+    if (!active) {
+      if (isChatBusy(stateRef.current.status)) {
+        dispatch({ type: "stopped" });
+      }
+      return;
+    }
+    if (active.stopRequested) {
+      active.controller.abort();
+      dispatch({ type: "stopped" });
+      return;
+    }
     active.stopRequested = true;
     if (active.runId) void requestStop(active);
   }, [requestStop]);
