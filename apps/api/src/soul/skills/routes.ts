@@ -292,6 +292,30 @@ function toSkillSummary(
         : undefined,
   };
 }
+function skillOwnership(skill: SoulSkill): TeamBusinessAssetOwnership | undefined {
+  return typeof skill.frontmatter.ownership === "object" && skill.frontmatter.ownership !== null
+    ? (skill.frontmatter.ownership as TeamBusinessAssetOwnership)
+    : undefined;
+}
+
+/**
+ * Whether `principal` may view `skill`, gated the same way `skill_list` gates it for Chat: a Skill
+ * with no ownership frontmatter and no ownership row was never authored as a business asset, so it
+ * stays visible to everyone rather than falling into `TeamAssetService.access()`'s "no access"
+ * default for an asset it has never seen. A marketplace install writes no ownership frontmatter, so
+ * without this check the installed Skill would 404/disappear until someone proposes it a Team.
+ */
+async function canViewSkill(
+  teamAssets: TeamAssetService,
+  skill: SoulSkill,
+  principal: NonNullable<FastifyRequest["principal"]>
+): Promise<boolean> {
+  const metadata = skillOwnership(skill);
+  if (!(await teamAssets.isGoverned("skill", skill.name, metadata))) return true;
+  const access = await teamAssets.access("skill", skill.name, principal, metadata);
+  return access.levels.includes("view");
+}
+
 // The operator sees that the catalog is unreachable, never git's stderr or a server temp path.
 function sendMarketplaceUnavailable(reply: FastifyReply, error: unknown) {
   const denial = gitSourceHttpError(error);
@@ -351,19 +375,15 @@ export function registerSkillRoutes(
               await Promise.all(
                 merged.map(async (skill) => ({
                   skill,
-                  access: await teamAssets.access(
-                    "skill",
-                    skill.name,
-                    request.principal as NonNullable<typeof request.principal>,
-                    typeof skill.frontmatter.ownership === "object" &&
-                      skill.frontmatter.ownership !== null
-                      ? (skill.frontmatter.ownership as TeamBusinessAssetOwnership)
-                      : undefined
+                  visible: await canViewSkill(
+                    teamAssets,
+                    skill,
+                    request.principal as NonNullable<typeof request.principal>
                   ),
                 }))
               )
             )
-              .filter(({ access }) => access.levels.includes("view"))
+              .filter(({ visible }) => visible)
               .map(({ skill }) => skill);
       const paths = visible
         .filter((skill) => soulLoader.skills.has(skill.name))
@@ -440,20 +460,8 @@ export function registerSkillRoutes(
       const { name } = req.params as { name: string };
       const skill = resolveSkill(name, soulLoader, bundledSkills, disabledBundledSkills);
       if (!skill) return reply.code(404).send({ error: `skill not found: ${name}` });
-      if (teamAssets && req.principal) {
-        try {
-          await teamAssets.require(
-            "skill",
-            name,
-            req.principal,
-            "view",
-            typeof skill.frontmatter.ownership === "object" && skill.frontmatter.ownership !== null
-              ? (skill.frontmatter.ownership as TeamBusinessAssetOwnership)
-              : undefined
-          );
-        } catch {
-          return reply.code(404).send({ error: `skill not found: ${name}` });
-        }
+      if (teamAssets && req.principal && !(await canViewSkill(teamAssets, skill, req.principal))) {
+        return reply.code(404).send({ error: `skill not found: ${name}` });
       }
       const lock = await readSkillsLock(gitSync.path);
       const bundled = bundledSkills.get(name);
@@ -488,20 +496,8 @@ export function registerSkillRoutes(
       if (!NAME_RE.test(name)) return reply.code(404).send({ error: `skill not found: ${name}` });
       const skill = resolveSkill(name, soulLoader, bundledSkills, disabledBundledSkills);
       if (!skill) return reply.code(404).send({ error: `skill not found: ${name}` });
-      if (teamAssets && req.principal) {
-        try {
-          await teamAssets.require(
-            "skill",
-            name,
-            req.principal,
-            "view",
-            typeof skill.frontmatter.ownership === "object" && skill.frontmatter.ownership !== null
-              ? (skill.frontmatter.ownership as TeamBusinessAssetOwnership)
-              : undefined
-          );
-        } catch {
-          return reply.code(404).send({ error: `skill not found: ${name}` });
-        }
+      if (teamAssets && req.principal && !(await canViewSkill(teamAssets, skill, req.principal))) {
+        return reply.code(404).send({ error: `skill not found: ${name}` });
       }
       const directory = soulLoader.skills.has(name)
         ? join(gitSync.path, "skills", name)
