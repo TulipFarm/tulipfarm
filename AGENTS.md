@@ -13,7 +13,8 @@ TulipFarm is a **self-hosted control panel where autonomous agents run a busines
 operations**. The user describes what they want in chat — "track our customers", "create a
 support agent", "review this pull request" — and agents build and run it. Users never edit
 files or write code to configure it. It runs on the operator's own infrastructure and model
-provider keys; business data leaves the instance only when an agent was authorized to send it.
+provider keys; business data leaves through authorized agent actions and the disclosed product telemetry policy
+([telemetry](apps/docs/content/docs/security/telemetry.mdx)).
 
 **That product promise is a constraint on you**: if a capability cannot be reached from chat or
 the UI, it does not exist for users. Never close a gap by hand-editing the runtime `soul/` repo.

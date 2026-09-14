@@ -28,7 +28,7 @@ publication, approvals, integrations, events, and blob/vector/cache/queue ports.
 | `src/asset-ownership/` | Shared asset ownership records, Team shares, and ownership operations. |
 | `src/kill-switches/` | Durable mutation kill switches backing the effect-plane emergency stop. |
 | `src/memory-curation/` | The Curator's read side: which users gained a Turn since their watermark, the window of what those users typed (`role='user'` messages only), and the watermark itself. |
-| `src/system/` | Deployment-local public origin settings that must not travel with Soul. |
+| `src/system/` | Deployment-local public origins and durable product telemetry identity/preferences/report state; neither travels with Soul. |
 | `src/pagination.ts`, `src/vector-search.ts` | Cursor paging and pgvector index/distance SQL shared by every repository. |
 
 ## Rules

@@ -1,5 +1,6 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import type { AppOptions } from "../app";
+import { registerInternalProductTelemetryRoutes } from "../system/telemetry/routes";
 import { registerChannelInternalRoutes } from "./channel-routes";
 import { registerInternalOimConnectionRoutes } from "./oim-connection-routes";
 import { registerInternalOimWorkerRoutes } from "./oim-worker-routes";
@@ -21,6 +22,8 @@ export function registerInternalRouteFamily(
   opts: AppOptions,
   requireAuth: PreHandler
 ): void {
+  if (opts.productTelemetry)
+    registerInternalProductTelemetryRoutes(app, opts.productTelemetry, requireAuth);
   if (opts.internalTurns) {
     registerInternalTurnRoutes(app, opts.internalTurns, requireAuth);
   }

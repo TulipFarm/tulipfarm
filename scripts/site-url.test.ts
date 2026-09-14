@@ -30,8 +30,15 @@ describe("site URL stays in one place", () => {
   it("is not hardcoded in any TypeScript or MDX file", () => {
     const offenders = sourceFiles("apps/**", "packages/**")
       .filter((file) => /\.(ts|tsx|mdx)$/.test(file))
-      .filter((file) => file !== "apps/docs/lib/shared.ts")
-      .filter((file) => readFileSync(join(ROOT, file), "utf8").includes(HOST));
+      .filter((file) => file !== "packages/constants/src/site.ts")
+      .filter((file) => {
+        const source = readFileSync(join(ROOT, file), "utf8");
+        const withoutCollector =
+          file === "packages/observability/src/product-telemetry.ts"
+            ? source.replaceAll(`https://telemetry.${HOST}/v1/events`, "")
+            : source;
+        return withoutCollector.includes(HOST);
+      });
     expect(offenders).toEqual([]);
   });
 

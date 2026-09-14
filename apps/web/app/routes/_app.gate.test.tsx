@@ -22,7 +22,10 @@ const getSetupStatus = vi.mocked(setup.getSetupStatus);
 const getSession = vi.mocked(api.getSession);
 
 beforeEach(() => {
-  getSetupStatus.mockResolvedValue({ needsSetup: false });
+  getSetupStatus.mockResolvedValue({
+    needsSetup: false,
+    telemetry: { maxLevel: 2, enabled: false },
+  });
   getSession.mockRejectedValue(new ApiError(401, "unauthenticated"));
 });
 
@@ -66,7 +69,10 @@ test("captures the destination being loaded, not the URL the browser is still sh
 });
 
 test("sends a never-provisioned instance to the wizard before it considers auth", async () => {
-  getSetupStatus.mockResolvedValue({ needsSetup: true });
+  getSetupStatus.mockResolvedValue({
+    needsSetup: true,
+    telemetry: { maxLevel: 2, enabled: false },
+  });
 
   const response = await runGate("/chats", "/chats");
 

@@ -69,6 +69,10 @@ config:
   VITE_API_URL: ""
   WEB_DIST: ""
   INTERNAL_API_URL: ""
+  # Product telemetry
+  TULIPFARM_TELEMETRY_LEVEL: ""
+  TULIPFARM_TELEMETRY_URL: ""
+  TULIPFARM_DEPLOYMENT_METHOD: ""
   # Headless seeding
   ADMIN_EMAIL: ""
   SKIP_ADMIN_BOOTSTRAP: ""

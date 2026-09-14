@@ -169,6 +169,13 @@ export const SETTINGS_GROUPS: NavGroup[] = [
         description: "Invite people, turn accounts off, and review each person's Team memberships.",
       },
       {
+        to: "/settings/telemetry",
+        label: "Telemetry",
+        icon: Activity,
+        description:
+          "Review what this instance shares with TulipFarm and choose a reporting level.",
+      },
+      {
         to: "/business/about",
         label: "About",
         icon: Info,
@@ -289,6 +296,7 @@ const PAGE_META: Array<{ prefix: string; label: string; icon: Icon }> = [
   { prefix: "/business/about", label: "About", icon: Info },
   { prefix: "/settings/profile", label: "Profile", icon: UserRound },
   { prefix: "/settings/appearance", label: "Appearance", icon: Palette },
+  { prefix: "/settings/telemetry", label: "Telemetry", icon: Activity },
   { prefix: "/settings/auth", label: "Auth", icon: ShieldCheck },
   { prefix: "/settings/instructions", label: "Custom instructions", icon: Brain },
   { prefix: "/resources", label: "Resources", icon: Boxes },

@@ -3,6 +3,8 @@ export * from "./backpressure";
 export * from "./job-run";
 export * from "./logs";
 export * from "./ports";
+export * from "./product-telemetry";
+export * from "./product-telemetry-reporter";
 export * from "./prune";
 export * from "./resilience";
 export * from "./resources";

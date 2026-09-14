@@ -18,7 +18,7 @@ data loading, schema-driven resource UI, and browser rendering of Surface Artifa
 | `app/routes/` | Remix SPA routes under `_app`; Chat is `/`. |
 | `app/components/activity/` | Filters, timeline, detail panel for the merged Activity feed. |
 | `app/components/runs/` | Run outcomes, persisted State results, authorized related-work links, server-granted controls, and expandable evidence. |
-| `app/components/settings/` | Panels for `_app.settings.*`; the Memory panel is read-only by contract. |
+| `app/components/settings/` | Panels for `_app.settings.*`; the Memory panel is read-only; `telemetry-level.tsx` shares setup/settings reporting choices. |
 | `app/components/farm/`, `app/lib/farm.ts` | `/farm` tulip canvas, season/legend strips, crop metadata, its parallel Soul read. |
 | `app/components/page-shell.tsx`, `app/lib/page-chrome-context.tsx` | The one page frame; publishes its title and portals actions into the shell's single chrome bar. |
 | `app/components/app-sidebar.tsx`, `app/components/sidebar-command.tsx` | The shell's one nav column and its ⌘K/`/` destination finder. |
@@ -36,6 +36,7 @@ data loading, schema-driven resource UI, and browser rendering of Surface Artifa
 | `app/lib/agents.ts`, `app/lib/skills.ts` | Typed API wrappers; `agent-capabilities.ts` and `skill-facts.ts` derive reach, capability facts, and grouping from declared frontmatter. |
 | `app/lib/activity-feed.ts` | Interleaves the Activity log and Runs feeds into one newest-first timeline. |
 | `app/lib/nav.ts`, `app/lib/badges.ts` | Flat sidebar/settings destinations, page titles, and mocked V1 badge counts. |
+| `app/lib/telemetry.ts`, `app/routes/_app.settings.telemetry.tsx` | Admin telemetry preference, environment cap, delivery history, and server-generated candidate payload previews. |
 | `app/lib/kill-switches.ts` | Emergency-stop client; scope picker comes from the API's enforceable list. |
 | `vite.config.ts`, `vitest.config.ts`, `components.json` | SPA Remix/Vite, jsdom Vitest, shadcn. |
 | `scripts/` | Post-build steps, in order: app-shell modulepreload injection, CSP hashing, precompression. |

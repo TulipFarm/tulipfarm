@@ -1,4 +1,4 @@
 {
   "title": "Security",
-  "pages": ["index", "encryption", "hashing", "privacy", "control-evidence"]
+  "pages": ["index", "encryption", "hashing", "privacy", "telemetry", "control-evidence"]
 }

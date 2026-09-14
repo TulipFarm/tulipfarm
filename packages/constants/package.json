@@ -12,5 +12,9 @@
     "@tulipfarm/tsconfig": "workspace:*",
     "@types/node": "^26.2.0",
     "typescript": "^7.0.2"
+  },
+  "exports": {
+    ".": "./src/index.ts",
+    "./site": "./src/site.ts"
   }
 }

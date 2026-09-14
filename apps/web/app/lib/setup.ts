@@ -1,6 +1,10 @@
 import { apiGet, apiSend, apiWrite } from "./api";
+import type { TelemetryLevel } from "./telemetry";
 
-export type SetupStatus = { needsSetup: boolean };
+export type SetupStatus = {
+  needsSetup: boolean;
+  telemetry: { maxLevel: TelemetryLevel; enabled: boolean };
+};
 
 export async function getSetupStatus(): Promise<SetupStatus> {
   return apiGet<SetupStatus>("/api/v1/setup/status");
@@ -23,6 +27,6 @@ export async function setupGit(remoteUrl: string, credentials?: string): Promise
   await apiSend("POST", "/api/v1/setup/git", { remoteUrl, credentials });
 }
 
-export async function completeSetup(): Promise<void> {
-  await apiSend("POST", "/api/v1/setup/complete", {});
+export async function completeSetup(telemetryLevel: TelemetryLevel = 2): Promise<void> {
+  await apiSend("POST", "/api/v1/setup/complete", { telemetryLevel });
 }

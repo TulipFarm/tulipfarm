@@ -49,7 +49,7 @@ Durable state: every path must survive restart and upgrade:
   - postgres data directory: holds Every Record, Run, Turn, audit event, and vector index
       if lost: Losing it loses all business data. Restoring it without TF_DATA_DIR leaves every stored Secret undecryptable.
 
-ENVIRONMENT VARIABLES (full surface: 100 variables)
+ENVIRONMENT VARIABLES (full surface: 103 variables)
 ------------------------------------------------------------
 Zone tells you whether you may change a variable:
   set-these       normal configuration; change it to suit the deployment
@@ -150,6 +150,23 @@ honour it is already a mistake.
     does: Base URL workers use for service-only internal API calls.
     default: none
     if set wrong: Without it workers cannot reach the API, so Runs are claimed and never progress.
+
+[Group: Product telemetry]
+  TULIPFARM_TELEMETRY_LEVEL
+    zone: set-these | required: no | consumers: app
+    does: Maximum product telemetry level selectable in Settings then Telemetry; 0 is mandatory bootstrap only, 1 adds daily counts, and 2 adds named inventory.
+    default: 2
+    if set wrong: Bootstrap includes business identity and sanitized URLs at every level. Lowering this cap stops future reports above it; it does not erase received data.
+  TULIPFARM_TELEMETRY_URL
+    zone: set-these | required: no | consumers: app
+    does: HTTPS endpoint receiving versioned product telemetry reports.
+    default: TulipFarm HTTPS telemetry collector
+    if set wrong: An unreachable collector leaves reports pending for bounded retries and never blocks startup. Only production instances transmit.
+  TULIPFARM_DEPLOYMENT_METHOD
+    zone: installer-sets | required: no | consumers: app
+    does: Deployment method included in the one-time bootstrap report; Compose sets compose.
+    default: unknown
+    if set wrong: Leave unknown when the deployment method cannot be identified reliably.
 
 [Group: Headless seeding]
   ADMIN_EMAIL

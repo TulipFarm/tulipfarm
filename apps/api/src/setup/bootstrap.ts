@@ -1,4 +1,5 @@
 import { DEPLOYMENT_BUSINESS_ID } from "@tulipfarm/constants";
+import type { ProductTelemetryLevel, ProductTelemetryReporter } from "@tulipfarm/observability";
 import { validateSoulConfig } from "@tulipfarm/schema";
 import type { SecretsService } from "@tulipfarm/secrets";
 import { mergeLlmConfigIntoSoulYaml, type SoulWriter } from "@tulipfarm/soul";
@@ -10,6 +11,8 @@ import { isProductionMode } from "./service";
 import { mergeSoulConfig } from "./soul-config";
 
 export interface BootstrapDeps {
+  productTelemetry?: ProductTelemetryReporter;
+  telemetryDefault?: ProductTelemetryLevel;
   userRepo: UserRepo;
   setupAdminCreator?: SetupAdminCreator;
   secretsService: SecretsService;
@@ -132,5 +135,8 @@ export async function bootstrapFromEnv(deps: BootstrapDeps): Promise<void> {
     setupBootstrap: true,
     ...(insert ? { insert } : {}),
   });
+  await deps.productTelemetry
+    ?.completeSetup(deps.telemetryDefault ?? 2)
+    .catch(() => deps.log?.error("Product telemetry initialization deferred"));
   deps.log?.info(`Bootstrapped admin user ${normalizeEmail(adminEmail)}`);
 }

@@ -16,5 +16,9 @@ export * from "./ports";
 export * from "./runs";
 export * from "./soul";
 export * from "./soul-doctor";
+export {
+  PRODUCT_TELEMETRY_STORAGE_STATEMENTS,
+  ProductTelemetryStore,
+} from "./system/product-telemetry-store";
 export * from "./system/public-origin-store";
 export * from "./tasks";

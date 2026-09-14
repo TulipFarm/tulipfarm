@@ -39,6 +39,7 @@ PostgreSQL persistence composition, auth, Soul Git writes, and Worker callback p
 | `src/surfaces/`, `src/forms/` | Tulip Surface Protocol and form APIs. |
 | `src/ingress/`, `src/triggers/`, `src/schedule/` | Ingress, triggers, schedules. `triggers/event-dispatch.ts` is the only place an internally raised event (Record CRUD, Integration event, Routine `emit`) becomes a Run; a webhook binds in its own route instead, because its URL already names the Trigger — but that route must still run `passesTriggerContentGate`, since the URL says which Trigger, not whether the author wanted this event. |
 | `src/admin/`, `src/setup/`, `src/onboarding/`, `src/system/` | Admin, setup, health. `admin/run-context.ts` projects authorized, typed related work for Run detail only. |
+| `src/system/telemetry/` | Deployment telemetry collection, admin preview/preferences, and service-only dispatch; reporter and durable state live in observability/storage. |
 | `src/pg-migrations/` | Boot-applied PostgreSQL schema migrations. |
 | `src/test/` | API test helpers. |
 

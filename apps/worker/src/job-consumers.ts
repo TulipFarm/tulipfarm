@@ -4,6 +4,7 @@ import {
   PgLogPruner,
   PgObservabilityPruner,
   PgResourceSamplePruner,
+  PRODUCT_TELEMETRY_QUEUE,
   RESOURCE_RETENTION_MS,
 } from "@tulipfarm/observability";
 import {
@@ -258,6 +259,10 @@ export async function startJobConsumers(options: JobConsumerOptions): Promise<Pg
 
   if (options.internalApi) {
     const internalApi = options.internalApi;
+    await boss.createQueue(PRODUCT_TELEMETRY_QUEUE);
+    await boss.work(PRODUCT_TELEMETRY_QUEUE, async () => {
+      await internalApi.require("POST", "/api/v1/internal/system/telemetry/dispatch");
+    });
     await boss.createQueue(OIM_CONNECTION_REFRESH_QUEUE);
     await boss.work(OIM_CONNECTION_REFRESH_QUEUE, async () => {
       try {

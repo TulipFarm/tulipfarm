@@ -1,3 +1,4 @@
+import type { ProductTelemetryReporter } from "@tulipfarm/observability";
 /** The full dependency surface `buildApp` accepts; every field is optional so partial assemblies boot. */
 
 import type { EventEmitter } from "node:events";
@@ -265,6 +266,7 @@ export interface AppOptions {
   ingress?: IngressRoutesDeps;
   hookIngress?: HookIngressDeps;
   systemRoutes?: SystemRoutesDeps;
+  productTelemetry?: ProductTelemetryReporter;
   /** Durable public web/API origins with environment fallbacks. */
   publicOrigins?: PublicOriginsService;
   operationalApi?: OperationalApiDeps;

@@ -25,7 +25,7 @@ reconciliation, turn execution, delivery classification, projections, and outbox
 | `src/memory-curation/` | The hourly Curator: `run.ts` scans users with new Turns, calls the fast `memory_curator` agent and writes the rewritten Memory Document; `guards.ts` holds the pure output guards (budget classification, standing-instruction check). |
 | `src/subagent/` | Ad-hoc sub-agent Run executor: the chat executor with its Conversation swapped for an answer Artifact. |
 | `src/internal/` | HTTP ports back to `/api/v1/internal/*`; Run identity is re-derived by API. |
-| `src/job-consumers.ts` | API-scheduled pg-boss work, including OIM Connection refresh. |
+| `src/job-consumers.ts` | API-scheduled pg-boss work, including OIM Connection refresh and product telemetry dispatch. |
 | `src/tools/` | In-process Tool host for co-locatable families, and the routing dispatcher. |
 | `src/files/`, `src/knowledge/` | The worker's own `FileService` and `KnowledgeService`, and the `file-index` job that extracts a File's text into Knowledge. |
 | `src/hooks/` | Sandbox worker bundle for Integration delivery classification. |

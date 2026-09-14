@@ -1,0 +1,68 @@
+---
+title: Product telemetry
+description: Understand TulipFarm's mandatory bootstrap report, optional inventory reporting, sharing controls, and the business data each level includes.
+---
+
+TulipFarm sends a bootstrap report after setup and can send a daily report about the instance.
+These reports help TulipFarm understand installations and feature adoption. They identify your
+business; they are not anonymous.
+
+## What each level shares
+
+| Level | Data | When |
+| --- | --- | --- |
+| **0 — Bootstrap only** | Installation ID, software version, operating system, CPU architecture, deployment method, first-observed time, business name, business website, instance URL, and Soul repository URL when configured. | Once after setup, with retries if delivery fails. |
+| **1 — Counts** | Current user, Resource type, connected Integration, Skill, Agent, and Routine counts. Available bundled Skills are counted separately. | Daily, plus the bootstrap report. |
+| **2 — Inventory** | Counts plus Resource type names, connected Integration providers, non-bundled Skill names, and Agent names. Lists are bounded; a report indicates when they are shortened. | Daily, plus the bootstrap report. |
+
+A **Resource type** is a schema such as Customer or Ticket; the report counts those types,
+not database tables or individual Records. A **Soul** is the instance's configuration repository.
+An **Integration** connects the instance to a third-party provider. A **Skill** is an installable
+capability, an **Agent** is a configured persona, and a **Routine** is an automation.
+
+The installation ID persists across restarts and upgrades. A new database creates a new ID;
+a database copy keeps the existing ID. For an installation upgraded into telemetry, the
+first-observed time records when telemetry was introduced, not the original installation date.
+
+Bootstrap metadata is a snapshot. Later business renames or repository URL changes do not
+refresh that report. Missing fields are omitted. Website and repository URLs have credentials,
+query strings, and fragments removed; the instance URL includes only its origin.
+
+## Choose a sharing level
+
+During setup, choose a telemetry level before completing setup. **Inventory** is selected by
+default, subject to the deployment's configured maximum. Headless setup uses that maximum.
+
+Open **Settings → Telemetry** to change the level and preview the report contents. This setting
+requires administrative access. Existing installations upgraded into telemetry send only the
+bootstrap report until an administrator saves a sharing preference.
+
+Selecting **Bootstrap only** stops future optional reports and removes unsent optional inventory.
+It does not retract reports already received. The mandatory bootstrap report has no application
+opt-out. A blocked collector connection never prevents TulipFarm from starting or operating.
+
+The preview shows the allowed data. Delivery timestamps and event IDs may differ for a report
+that has not been queued yet. Development and test instances do not transmit telemetry.
+
+## Data excluded from reports
+
+Reports exclude Record contents, schema fields, prompts, chat messages, Knowledge content,
+source files, passwords, API keys, and Integration credentials. Custom names and private
+repository paths can still identify business activities.
+
+Product telemetry is separate from the logs and traces available in
+[observability](/docs/administration/observability). It does not forward those logs or traces.
+
+## Deployment controls
+
+`TULIPFARM_TELEMETRY_LEVEL` sets the maximum sharing level allowed by the deployment. A value of
+`0` permits only bootstrap reporting; settings cannot raise the level above this maximum.
+`TULIPFARM_TELEMETRY_URL` selects the HTTPS collector endpoint. See the
+[environment variable reference](/docs/reference/environment-variables).
+
+Reporting runs through the maintenance Worker. Custom deployments need at least one Worker
+with `WORKER_MAINTENANCE=true`; the provided Compose deployment enables it.
+
+Collector storage and any exported analytics copies have their own retention and deletion
+processes. Lowering the instance's level controls future collection; it is not a remote data
+erasure request.

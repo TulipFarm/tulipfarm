@@ -158,6 +158,7 @@ async function makeApp(
   extra: {
     triggerMaintenanceSweep?: () => Promise<void>;
     soulLoader?: AppOptions["soulLoader"];
+    productTelemetry?: AppOptions["productTelemetry"];
   } = {}
 ): Promise<FastifyInstance> {
   const soulPath = path.join(dir, "soul");
@@ -236,7 +237,7 @@ function authHeaders(cookies: { name: string; value: string }[]) {
 describe("setup routes", () => {
   it("status reports needsSetup=true before any admin", async () => {
     const res = await app.inject({ method: "GET", url: "/api/v1/setup/status" });
-    expect(res.json()).toEqual({ needsSetup: true });
+    expect(res.json()).toEqual({ needsSetup: true, telemetry: { maxLevel: 2, enabled: false } });
   });
 
   it("status reports needsSetup=false when setupComplete is set in soul.yaml", async () => {
@@ -247,7 +248,7 @@ describe("setup routes", () => {
     await app.close();
     app = await makeApp(dir);
     const res = await app.inject({ method: "GET", url: "/api/v1/setup/status" });
-    expect(res.json()).toEqual({ needsSetup: false });
+    expect(res.json()).toEqual({ needsSetup: false, telemetry: { maxLevel: 2, enabled: false } });
   });
 
   it("creates the first admin, auto-logs in, then locks (403)", async () => {
@@ -256,7 +257,10 @@ describe("setup routes", () => {
     expect(ownerPrincipalIds).toHaveLength(1);
     const status = await app.inject({ method: "GET", url: "/api/v1/setup/status" });
     // admin exists but setupComplete not set yet
-    expect(status.json()).toEqual({ needsSetup: false });
+    expect(status.json()).toEqual({
+      needsSetup: false,
+      telemetry: { maxLevel: 2, enabled: false },
+    });
     const again = await app.inject({
       method: "POST",
       url: "/api/v1/setup/admin",
@@ -475,7 +479,10 @@ describe("setup routes", () => {
     });
     expect(res.statusCode).toBe(204);
     const status = await app.inject({ method: "GET", url: "/api/v1/setup/status" });
-    expect(status.json()).toEqual({ needsSetup: false });
+    expect(status.json()).toEqual({
+      needsSetup: false,
+      telemetry: { maxLevel: 2, enabled: false },
+    });
   });
 
   it("complete marks setupComplete=true in soul.yaml", async () => {
@@ -492,7 +499,10 @@ describe("setup routes", () => {
     };
     expect(cfg.setupComplete).toBe(true);
     const status = await app.inject({ method: "GET", url: "/api/v1/setup/status" });
-    expect(status.json()).toEqual({ needsSetup: false });
+    expect(status.json()).toEqual({
+      needsSetup: false,
+      telemetry: { maxLevel: 2, enabled: false },
+    });
   });
 
   it("complete kicks the maintenance sweep so setup gaps show at minute 0, not minute 5", async () => {
@@ -586,9 +596,67 @@ describe("setup routes", () => {
     app = await makeApp(dir);
     const res = await app.inject({ method: "GET", url: "/api/v1/setup/status" });
     expect(res.statusCode).toBe(200);
-    expect(res.json()).toEqual({ needsSetup: false });
+    expect(res.json()).toEqual({ needsSetup: false, telemetry: { maxLevel: 2, enabled: false } });
     // Wizard step routes remain absent in headless mode
     const adminRes = await app.inject({ method: "POST", url: "/api/v1/setup/admin", payload: {} });
     expect(adminRes.statusCode).toBe(404);
+  });
+});
+
+it("saves setup sharing atomically after completion and rejects out-of-range choices", async () => {
+  await app.close();
+  const save = vi.fn(async () => ({}));
+  const completeSetup = vi.fn(async () => {
+    expect(parse(await fs.readFile(path.join(dir, "soul", "soul.yaml"), "utf8"))).toMatchObject({
+      setupComplete: true,
+    });
+  });
+  app = await makeApp(dir, {
+    productTelemetry: {
+      configure: save,
+      completeSetup,
+    } as unknown as AppOptions["productTelemetry"],
+  });
+  const cookies = await createAdmin();
+  const invalid = await app.inject({
+    method: "POST",
+    url: "/api/v1/setup/complete",
+    headers: authHeaders(cookies),
+    payload: { telemetryLevel: 3 },
+  });
+  expect(invalid.statusCode).toBe(400);
+  expect(save).not.toHaveBeenCalled();
+  const accepted = await app.inject({
+    method: "POST",
+    url: "/api/v1/setup/complete",
+    headers: authHeaders(cookies),
+    payload: { telemetryLevel: 0 },
+  });
+  expect(accepted.statusCode).toBe(204);
+  expect(save).not.toHaveBeenCalled();
+  expect(completeSetup).toHaveBeenCalledExactlyOnceWith(0);
+});
+
+it("completes setup when telemetry storage is unavailable", async () => {
+  await app.close();
+  const configure = vi.fn(async () => {
+    throw Error("database unavailable");
+  });
+  const completeSetup = vi.fn(async () => {
+    throw Error("database unavailable");
+  });
+  app = await makeApp(dir, {
+    productTelemetry: { configure, completeSetup } as unknown as AppOptions["productTelemetry"],
+  });
+  const cookies = await createAdmin();
+  const response = await app.inject({
+    method: "POST",
+    url: "/api/v1/setup/complete",
+    headers: authHeaders(cookies),
+    payload: { telemetryLevel: 0 },
+  });
+  expect(response.statusCode).toBe(204);
+  expect(parse(await fs.readFile(path.join(dir, "soul", "soul.yaml"), "utf8"))).toMatchObject({
+    setupComplete: true,
   });
 });

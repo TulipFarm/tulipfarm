@@ -42,6 +42,14 @@ Most people arrive here holding one variable name and one question: **am I allow
 | `WEB_DIST` | Installer sets | No | - | Directory of built web assets for the API to serve in combined image mode. | Wrong here and the API serves no UI while still answering on its API routes. |
 | `INTERNAL_API_URL` | Installer sets | Yes for worker processes | - | Base URL workers use for service-only internal API calls. | Without it workers cannot reach the API, so Runs are claimed and never progress. |
 
+## Product telemetry
+
+| Variable | Zone | Required | Default | What it does | If set wrong |
+| --- | --- | --- | --- | --- | --- |
+| `TULIPFARM_TELEMETRY_LEVEL` | Set these | No | 2 | Maximum product telemetry level selectable in Settings then Telemetry; 0 is mandatory bootstrap only, 1 adds daily counts, and 2 adds named inventory. | Bootstrap includes business identity and sanitized URLs at every level. Lowering this cap stops future reports above it; it does not erase received data. |
+| `TULIPFARM_TELEMETRY_URL` | Set these | No | TulipFarm HTTPS telemetry collector | HTTPS endpoint receiving versioned product telemetry reports. | An unreachable collector leaves reports pending for bounded retries and never blocks startup. Only production instances transmit. |
+| `TULIPFARM_DEPLOYMENT_METHOD` | Installer sets | No | unknown | Deployment method included in the one-time bootstrap report; Compose sets compose. | Leave unknown when the deployment method cannot be identified reliably. |
+
 ## Headless seeding
 
 | Variable | Zone | Required | Default | What it does | If set wrong |

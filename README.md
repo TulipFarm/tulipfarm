@@ -31,9 +31,10 @@ operations. You **describe what you want in chat** — "track our customers", "c
 support agent", "review this pull request" — and agents build and run it for you. You do
 not configure it by editing files or writing code.
 
-It runs entirely on your own infrastructure, against your own model provider keys. Nothing
-about your business data leaves your instance unless an agent's job is to send it somewhere
-you've authorized.
+It runs entirely on your own infrastructure, against your own model provider keys. Agents send business data only through authorized actions. The instance also sends a one-time
+bootstrap report and optional daily product telemetry. Choose the sharing level during setup
+or in Settings → Telemetry; Level 0 keeps only the mandatory bootstrap report. See
+[product telemetry](https://tulipfarm.site/docs/security/telemetry) for the exact categories.
 
 ## Features
 

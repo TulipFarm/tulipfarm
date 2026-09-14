@@ -262,3 +262,29 @@ describe("bootstrapFromEnv", () => {
     expect(await d.userRepo.count()).toBe(0);
   });
 });
+
+it("new headless setup persists the operator telemetry default only after creating admin", async () => {
+  vi.stubEnv("NODE_ENV", "development");
+  vi.stubEnv("ADMIN_EMAIL", "admin@tulipfarm.dev");
+  vi.stubEnv("ADMIN_PASSWORD", "supersecret");
+  const d = deps();
+  const completeSetup = vi.fn(async () => {
+    expect(await d.userRepo.count()).toBe(1);
+  });
+  await bootstrapFromEnv({
+    ...d,
+    telemetryDefault: 0,
+    productTelemetry: {
+      completeSetup,
+    } as unknown as import("@tulipfarm/observability").ProductTelemetryReporter,
+  });
+  expect(completeSetup).toHaveBeenCalledExactlyOnceWith(0);
+  await bootstrapFromEnv({
+    ...d,
+    telemetryDefault: 2,
+    productTelemetry: {
+      completeSetup,
+    } as unknown as import("@tulipfarm/observability").ProductTelemetryReporter,
+  });
+  expect(completeSetup).toHaveBeenCalledTimes(1);
+});

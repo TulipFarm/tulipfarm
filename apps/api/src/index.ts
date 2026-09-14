@@ -53,7 +53,7 @@ import {
 } from "@tulipfarm/knowledge";
 import { KvService, PgKvRepo } from "@tulipfarm/kv";
 import { EmbeddingService, LlmService } from "@tulipfarm/llm";
-import { MutationKillSwitchGuard } from "@tulipfarm/observability";
+import { MutationKillSwitchGuard, productTelemetryPolicy } from "@tulipfarm/observability";
 import {
   ArtifactService,
   DurableEffectRetryWaitHost,
@@ -378,6 +378,8 @@ import { registerSoulSync } from "./soul-sync";
 import { PgSurfaceActionStore } from "./surfaces/action-store";
 import { PgSurfaceArtifactStore } from "./surfaces/artifact-store";
 import { apiSurfacePresentation, surfaceRendererRegistry } from "./surfaces/renderer-registry";
+import { composeProductTelemetry } from "./system/telemetry/compose";
+import { scheduleProductTelemetry } from "./system/telemetry/schedule";
 import { TeamAssetCatalogProvider } from "./team-assets/catalog-provider";
 import { TeamAssetService } from "./team-assets/service";
 import { TeamAssetLifecycle } from "./team-assets/team-lifecycle";
@@ -624,7 +626,25 @@ async function boot() {
     });
     const userRepo = new PgUserRepo(pool);
     const setupAdminCreator = new PgSetupAdminCreator(pool, DEPLOYMENT_BUSINESS_ID);
+    const productTelemetry = composeProductTelemetry({
+      database: pool,
+      integrations: integrationStore,
+      transactions: transactionPort(pool),
+      businessId: DEPLOYMENT_BUSINESS_ID,
+      soulLoader,
+      soulPath,
+      userRepo,
+      publicOrigins,
+      soulRepositoryUrl: () => gitRemoteUrl,
+      bundledSkillNames: () =>
+        new Set([...bundledSkills.keys()].filter((name) => !disabledBundledSkills.has(name))),
+    });
+    await productTelemetry
+      .initialize()
+      .catch(() => console.warn("Product telemetry initialization deferred"));
     await bootstrapFromEnv({
+      productTelemetry,
+      telemetryDefault: productTelemetryPolicy(process.env).maxLevel,
       userRepo,
       setupAdminCreator,
       secretsService,
@@ -1771,6 +1791,7 @@ async function boot() {
     });
 
     const app = await buildApp({
+      productTelemetry,
       publicOrigins,
       readiness: pool,
       logSink,
@@ -2208,6 +2229,9 @@ async function boot() {
     await registerScheduleDispatch(boss, scheduleDispatcher, { log: app.log });
     await registerOimConnectionRefreshSchedule(boss);
     await registerMaintenanceSweepSchedule(boss);
+    await scheduleProductTelemetry(boss).catch(() =>
+      app.log.warn("Product telemetry scheduling deferred")
+    );
     await registerMemoryCurationSchedule(boss);
     await registerSoulDoctorSchedule(boss, soulDoctor, { log: app.log });
     await registerObsPruneSchedule(boss, obsConfig.retentionDays * 24 * 60 * 60 * 1000);

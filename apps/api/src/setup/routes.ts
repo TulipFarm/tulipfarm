@@ -1,4 +1,9 @@
 import { createModel, LlmProviderError, parseCodexAuth } from "@tulipfarm/llm";
+import {
+  type ProductTelemetryLevel,
+  type ProductTelemetryReporter,
+  productTelemetryPolicy,
+} from "@tulipfarm/observability";
 import { LlmCredentialError } from "@tulipfarm/schema";
 import { llmProviderById, providerField, type SecretsService } from "@tulipfarm/secrets";
 import type { GitSyncService } from "@tulipfarm/soul";
@@ -36,6 +41,7 @@ const PROBE_TIMEOUT_MS = 30_000;
 type PreHandler = (req: FastifyRequest, reply: FastifyReply) => Promise<void>;
 
 export interface SetupDeps {
+  productTelemetry?: ProductTelemetryReporter;
   userRepo: UserRepo;
   sessionStore: SessionStore;
   secretsService: SecretsService;
@@ -98,29 +104,39 @@ export function registerSetupStatusRoute(
         response: {
           200: {
             type: "object",
-            properties: { needsSetup: { type: "boolean" } },
+            properties: {
+              needsSetup: { type: "boolean" },
+              telemetry: {
+                type: "object",
+                required: ["maxLevel", "enabled"],
+                properties: {
+                  maxLevel: { type: "integer", minimum: 0, maximum: 2 },
+                  enabled: { type: "boolean" },
+                },
+              },
+            },
             required: ["needsSetup"],
           },
         },
       },
     },
     async () => {
-      if (done) return { needsSetup: false };
+      if (done) return { needsSetup: false, telemetry: productTelemetryPolicy(process.env) };
       if (isHeadlessBoot()) {
         done = true;
-        return { needsSetup: false };
+        return { needsSetup: false, telemetry: productTelemetryPolicy(process.env) };
       }
       const cfg = await readSoulConfig(soulPath);
       if (cfg.setupComplete === true) {
         done = true;
-        return { needsSetup: false };
+        return { needsSetup: false, telemetry: productTelemetryPolicy(process.env) };
       }
       const hasUsers = (await userRepo.count()) > 0;
       if (hasUsers) {
         done = true;
-        return { needsSetup: false };
+        return { needsSetup: false, telemetry: productTelemetryPolicy(process.env) };
       }
-      return { needsSetup: true };
+      return { needsSetup: true, telemetry: productTelemetryPolicy(process.env) };
     }
   );
 }
@@ -415,13 +431,22 @@ export function registerSetupRoutes(app: FastifyInstance, deps: SetupDeps): void
   app.post(
     "/api/v1/setup/complete",
     {
+      preValidation: async (req) => {
+        req.body ??= {};
+      },
       preHandler: [requireAuth, requireSetupAdmin],
       schema: {
         description: "Mark first-run setup as complete.",
+        body: {
+          type: "object",
+          additionalProperties: false,
+          properties: { telemetryLevel: { type: "integer", minimum: 0, maximum: 2 } },
+        },
         tags: ["setup"],
         security: [{ sessionCookie: [] }],
         response: {
           204: { type: "null" },
+          400: ErrorSchema,
           401: ErrorSchema,
           403: ErrorSchema,
         },
@@ -429,6 +454,11 @@ export function registerSetupRoutes(app: FastifyInstance, deps: SetupDeps): void
     },
     async (req, reply) => {
       await writeSoulConfig({ setupComplete: true }, "chore: complete first-run setup", req);
+      await deps.productTelemetry
+        ?.completeSetup(
+          (req.body as { telemetryLevel?: ProductTelemetryLevel } | undefined)?.telemetryLevel ?? 2
+        )
+        .catch(() => app.log.warn("Product telemetry setup completion deferred"));
       await kickMaintenanceSweep(triggerMaintenanceSweep, app.log, "first-run setup");
       return reply.code(204).send();
     }
