@@ -1,3 +1,4 @@
+import { gitSourceHttpError } from "@tulipfarm/integrations";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { ErrorSchema } from "../../auth/schemas";
 import { commitActorFromRequest } from "../../soul/commit-actor";
@@ -308,12 +309,19 @@ export function registerOimReleaseRoutes(
           400: ErrorSchema,
           401: ErrorSchema,
           403: ErrorSchema,
+          429: ErrorSchema,
         },
       },
     },
-    async (request) => {
+    async (request, reply) => {
       const { source } = request.body as { source: string };
-      return control.inspect(source, commitActorFromRequest(request).principalId);
+      try {
+        return await control.inspect(source, commitActorFromRequest(request).principalId);
+      } catch (error) {
+        const denial = gitSourceHttpError(error);
+        if (denial !== undefined) return reply.code(denial.status).send(denial.body);
+        throw error;
+      }
     }
   );
 
@@ -345,11 +353,12 @@ export function registerOimReleaseRoutes(
           401: ErrorSchema,
           403: ErrorSchema,
           409: ErrorSchema,
+          429: ErrorSchema,
           422: ErrorSchema,
         },
       },
     },
-    async (request) => {
+    async (request, reply) => {
       const body = request.body as {
         source: string;
         sourceRef: string;
@@ -359,11 +368,17 @@ export function registerOimReleaseRoutes(
         approvedCommunityDigest?: string;
         autoPatchOptIn: boolean;
       };
-      return control.install({
-        businessId,
-        actorId: commitActorFromRequest(request).principalId,
-        ...body,
-      });
+      try {
+        return await control.install({
+          businessId,
+          actorId: commitActorFromRequest(request).principalId,
+          ...body,
+        });
+      } catch (error) {
+        const denial = gitSourceHttpError(error);
+        if (denial !== undefined) return reply.code(denial.status).send(denial.body);
+        throw error;
+      }
     }
   );
 

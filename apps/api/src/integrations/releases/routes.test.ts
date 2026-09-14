@@ -1,4 +1,5 @@
 import {
+  GitSourceError,
   type OimUninstallGeneration,
   uninstallOimReleaseGeneration,
 } from "@tulipfarm/integrations";
@@ -52,6 +53,7 @@ describe("OIM release routes", () => {
     sequence: 2,
     expiresAt: "2026-09-14T09:00:00.000Z",
   }));
+  const inspect = vi.fn(async () => ({ source: "safe", ref: "ref-1", candidates: [] }));
 
   beforeEach(async () => {
     app = Fastify();
@@ -66,7 +68,7 @@ describe("OIM release routes", () => {
       };
     };
     const control = new OimReleaseControlPlane({
-      inspect: async () => ({ source: "safe", ref: "ref-1", candidates: [] }),
+      inspect,
       install,
       uninstall,
       uninstallStatus,
@@ -168,6 +170,43 @@ describe("OIM release routes", () => {
     expect(install).toHaveBeenCalledWith(
       expect.not.objectContaining({ signedRelease: expect.anything() })
     );
+  });
+
+  it("returns a safe client error when source inspection rejects an unapproved host", async () => {
+    inspect.mockRejectedValueOnce(new GitSourceError("host_not_allowed"));
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/v1/integrations/oim/releases/inspect",
+      payload: { source: "https://unapproved.example/releases.git" },
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(response.json()).toEqual({ error: "That host is not an approved git source." });
+  });
+
+  it("returns a safe client error when the install source is no longer approved", async () => {
+    install.mockRejectedValueOnce(new GitSourceError("host_not_allowed"));
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/v1/integrations/oim/releases/install",
+      payload: {
+        source: "https://unapproved.example/releases.git",
+        sourceRef: "commit-a1b2c3",
+        slug: "weather-v1",
+        selection: {
+          integrationId: "weather",
+          version: "1.2.3",
+          packageDigest: DIGEST,
+        },
+        trustClass: "official",
+        autoPatchOptIn: true,
+      },
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(response.json()).toEqual({ error: "That host is not an approved git source." });
   });
 
   it("keeps uninstall scoped to the exact installation generation", async () => {
