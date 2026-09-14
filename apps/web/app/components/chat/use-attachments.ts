@@ -7,6 +7,7 @@ import {
   type UploadedFile,
   uploadFile,
 } from "~/lib/files";
+import { recordRecentFile } from "~/lib/recent-files";
 
 /**
  * The files staged on the composer for the next message.
@@ -153,6 +154,7 @@ export function useAttachments() {
               fileId: uploaded.id,
               mediaType: uploaded.mediaType,
             });
+            recordRecentFile(uploaded);
           })
           .catch((error: unknown) => {
             // A cancel already removed the chip; reporting an error for it would resurrect one.
@@ -191,6 +193,7 @@ export function useAttachments() {
         },
       ];
     });
+    recordRecentFile(file);
   }, []);
 
   const remove = useCallback((localId: string) => {
