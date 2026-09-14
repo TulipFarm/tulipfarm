@@ -59,7 +59,7 @@ export const ADMIN_ONLY_SURFACES: readonly {
     ],
     enforcedIn: "identity/routes.ts",
   },
-  { type: "user", actions: ["*"], enforcedIn: "auth/routes/users.ts" },
+  { type: "user", actions: ["user.manage"], enforcedIn: "auth/routes/users.ts" },
   {
     type: "task",
     actions: ["task.answer.business_profile"],
