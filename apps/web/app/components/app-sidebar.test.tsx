@@ -725,9 +725,9 @@ test("marks the active destination with weight on a neutral ground, never colour
 });
 
 test("gives every row the same box model as the bordered New chat button", () => {
-  render(<SidebarStub initialEntries={["/agents"]} />);
+  render(<SidebarStub initialEntries={["/inbox"]} />);
 
-  for (const name of ["Agents", "Skills", "Inbox"]) {
+  for (const name of ["Agents", "Files", "Inbox"]) {
     expect(screen.getByRole("link", { name }).className).toContain("border border-transparent");
   }
 });
@@ -735,17 +735,17 @@ test("gives every row the same box model as the bordered New chat button", () =>
 /* A closed group is a preference, so it has to survive the next render of the sidebar. */
 test("closes a group, hides its rows, and remembers the choice", async () => {
   const user = userEvent.setup();
-  const { unmount } = render(<SidebarStub initialEntries={["/agents"]} />);
+  const { unmount } = render(<SidebarStub initialEntries={["/inbox"]} />);
 
-  expect(screen.getByRole("link", { name: "Agents" })).toBeInTheDocument();
-  await user.click(screen.getByRole("button", { name: "Build" }));
-  expect(screen.queryByRole("link", { name: "Agents" })).not.toBeInTheDocument();
-  expect(screen.getByRole("heading", { level: 2, name: "Build" })).toBeInTheDocument();
+  expect(screen.getByRole("link", { name: "Files" })).toBeInTheDocument();
+  await user.click(screen.getByRole("button", { name: "Work" }));
+  expect(screen.queryByRole("link", { name: "Files" })).not.toBeInTheDocument();
+  expect(screen.getByRole("heading", { level: 2, name: "Work" })).toBeInTheDocument();
 
   unmount();
-  render(<SidebarStub initialEntries={["/agents"]} />);
-  expect(screen.queryByRole("link", { name: "Agents" })).not.toBeInTheDocument();
-  expect(screen.getByRole("button", { name: "Build" })).toHaveAttribute("aria-expanded", "false");
+  render(<SidebarStub initialEntries={["/inbox"]} />);
+  expect(screen.queryByRole("link", { name: "Files" })).not.toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Work" })).toHaveAttribute("aria-expanded", "false");
 });
 
 /* A `+` that opens nothing teaches a reader to distrust every other `+`. */
