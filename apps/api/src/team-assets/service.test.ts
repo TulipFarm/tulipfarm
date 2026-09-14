@@ -10,6 +10,7 @@ import { describe, expect, it, vi } from "vitest";
 import { TeamAssetService } from "./service";
 
 const TEAM_ID = "123e4567-e89b-42d3-a456-426614174000";
+const OWN_TEAM_ID = "223e4567-e89b-42d3-a456-426614174000";
 
 function service(
   memberships: TeamMembershipRecord[] = [],
@@ -35,6 +36,10 @@ function service(
       id,
       status: "active",
     })),
+    listTeams: vi.fn(async () => [
+      { id: TEAM_ID, slug: "everyone", displayName: "Everyone", status: "active" },
+      { id: OWN_TEAM_ID, slug: "own-team", displayName: "Own Team", status: "active" },
+    ]),
     listPrincipalMemberships: vi.fn(async (_businessId, principalId) =>
       memberships.filter((membership) => membership.principalId === principalId)
     ),
@@ -133,6 +138,67 @@ describe("TeamAssetService", () => {
       const access = await assets.access("skill", "shared", principal);
       expect(access.levels).not.toContain("edit");
       await expect(assets.require("skill", "shared", principal, "edit")).rejects.toThrow();
+    });
+  });
+
+  describe("defaulting an unowned asset's Team", () => {
+    it("prefers the acting principal's own Team over Everyone", async () => {
+      const principal = { id: "user-1", kind: "user" };
+      const { service: assets } = service([
+        { teamId: OWN_TEAM_ID, principalId: "user-1", principalKind: "user", level: "member" },
+      ] as unknown as TeamMembershipRecord[]);
+
+      const record = await assets.ensure("agent", "agent-own-team", undefined, principal);
+
+      expect(
+        record.owners.filter((owner) => owner.kind === "team").map((owner) => owner.teamId)
+      ).toEqual([OWN_TEAM_ID]);
+    });
+
+    it("falls back to Everyone when the principal has no Team of their own", async () => {
+      const principal = { id: "user-1", kind: "user" };
+      const { service: assets } = service();
+
+      const record = await assets.ensure("agent", "agent-no-team", undefined, principal);
+
+      expect(
+        record.owners.filter((owner) => owner.kind === "team").map((owner) => owner.teamId)
+      ).toEqual([TEAM_ID]);
+    });
+
+    it("falls back to Everyone when no principal is supplied", async () => {
+      const { service: assets } = service();
+
+      const record = await assets.ensure("agent", "agent-no-principal");
+
+      expect(
+        record.owners.filter((owner) => owner.kind === "team").map((owner) => owner.teamId)
+      ).toEqual([TEAM_ID]);
+    });
+  });
+
+  describe("listForOwnership", () => {
+    it("names the same Team ensure() would pick, and flags membership and Everyone", async () => {
+      const principal = { id: "user-1", kind: "user" };
+      const { service: assets } = service([
+        { teamId: OWN_TEAM_ID, principalId: "user-1", principalKind: "user", level: "member" },
+      ] as unknown as TeamMembershipRecord[]);
+
+      const result = await assets.listForOwnership(principal);
+
+      expect(result.recommendedTeamId).toBe(OWN_TEAM_ID);
+      expect(result.teams).toEqual([
+        expect.objectContaining({ id: TEAM_ID, isEveryone: true, isMember: false }),
+        expect.objectContaining({ id: OWN_TEAM_ID, isEveryone: false, isMember: true }),
+      ]);
+    });
+
+    it("recommends Everyone when no principal is supplied", async () => {
+      const { service: assets } = service();
+
+      const result = await assets.listForOwnership();
+
+      expect(result.recommendedTeamId).toBe(TEAM_ID);
     });
   });
 

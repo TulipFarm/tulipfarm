@@ -166,7 +166,7 @@ describe("routine_forge", () => {
     expect(result).toMatchObject({ success: true });
     // ensure() itself resolves an omitted ownership to the business's Everyone Team; the forge
     // Tool must pass the undefined through rather than rejecting it up front.
-    expect(ensure).toHaveBeenCalledWith("routine", VALID_ROUTINE.metadata.id, undefined);
+    expect(ensure).toHaveBeenCalledWith("routine", VALID_ROUTINE.metadata.id, undefined, undefined);
   });
 
   it("stamps the authoring principal onto every Trigger, replacing whatever the model wrote", async () => {

@@ -54,6 +54,7 @@ describe("SHIPPED_SURFACE_COMPONENTS", () => {
       "user",
       "channel",
       "conversation",
+      "team",
     ]);
   });
 

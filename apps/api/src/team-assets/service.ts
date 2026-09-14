@@ -149,12 +149,13 @@ export class TeamAssetService {
   async ensure(
     assetType: Extract<TeamAssetType, "agent" | "skill" | "routine">,
     assetId: string,
-    metadata?: TeamBusinessAssetOwnership
+    metadata?: TeamBusinessAssetOwnership,
+    principal?: AssetPrincipal
   ): Promise<AssetOwnershipRecord> {
     const current = await this.deps.ownershipRepo.get(this.businessId, assetType, assetId);
     if (current) return current;
     const ownerTeamIds = metadata?.owners.map((owner) => owner.teamId) ?? [
-      (await this.deps.teams.ensureEveryone(this.businessId)).id,
+      await this.defaultOwnerTeamId(principal),
     ];
     if (new Set(ownerTeamIds).size !== ownerTeamIds.length) {
       throw new AssetOwnershipError("invalid_ownership", "An owning Team may be listed only once");
@@ -185,6 +186,74 @@ export class TeamAssetService {
       if (raced) return raced;
       throw error;
     }
+  }
+
+  /**
+   * The Team an unowned asset should be assigned to when its author named none.
+   *
+   * Preferring the acting principal's own Team over Everyone matters because an agent forging a
+   * Routine on someone's behalf should land it where that person already works, not in the
+   * workspace-wide default every unscoped asset falls back to. A principal with no Team of their
+   * own, or none supplied, still gets Everyone so the asset is never left ownerless.
+   */
+  private async defaultOwnerTeamId(principal?: AssetPrincipal): Promise<string> {
+    const everyone = await this.deps.teams.ensureEveryone(this.businessId);
+    if (!principal) return everyone.id;
+    const now = this.now();
+    const memberships = await this.deps.teams.listPrincipalMemberships(
+      this.businessId,
+      principal.id,
+      now
+    );
+    for (const membership of memberships) {
+      if (membership.teamId === everyone.id) continue;
+      if (membership.expiresAt && membership.expiresAt <= now) continue;
+      const team = await this.deps.teams.getTeam(this.businessId, membership.teamId);
+      if (team?.status === "active") return team.id;
+    }
+    return everyone.id;
+  }
+
+  /**
+   * Teams an agent may offer the caller when it must ask which one should own an asset, instead
+   * of ever surfacing a raw Team id. `recommendedTeamId` names the same Team {@link ensure} would
+   * pick automatically, so a Tool can tell the user what it is about to do before doing it.
+   */
+  async listForOwnership(principal?: AssetPrincipal): Promise<{
+    readonly teams: readonly {
+      readonly id: string;
+      readonly name: string;
+      readonly slug: string;
+      readonly isEveryone: boolean;
+      readonly isMember: boolean;
+    }[];
+    readonly recommendedTeamId: string;
+  }> {
+    const now = this.now();
+    const [teams, everyone, memberships] = await Promise.all([
+      this.deps.teams.listTeams(this.businessId),
+      this.deps.teams.ensureEveryone(this.businessId),
+      principal
+        ? this.deps.teams.listPrincipalMemberships(this.businessId, principal.id, now)
+        : Promise.resolve([]),
+    ]);
+    const memberTeamIds = new Set(
+      memberships
+        .filter((membership) => !membership.expiresAt || membership.expiresAt > now)
+        .map((membership) => membership.teamId)
+    );
+    return {
+      teams: teams
+        .filter((team) => team.status === "active")
+        .map((team) => ({
+          id: team.id,
+          name: team.displayName,
+          slug: team.slug,
+          isEveryone: team.id === everyone.id,
+          isMember: memberTeamIds.has(team.id),
+        })),
+      recommendedTeamId: await this.defaultOwnerTeamId(principal),
+    };
   }
 
   /**

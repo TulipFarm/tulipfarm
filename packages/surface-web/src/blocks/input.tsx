@@ -479,7 +479,8 @@ export function SurfaceForm({
             input === "select" ||
             input === "user" ||
             input === "channel" ||
-            input === "conversation"
+            input === "conversation" ||
+            input === "team"
           ) {
             const selectedValue = typeof values[name] === "string" ? values[name] : undefined;
             control = (

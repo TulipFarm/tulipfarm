@@ -17,6 +17,7 @@ export const SurfaceFormInputSchema = Type.Union([
   Type.Literal("user"),
   Type.Literal("channel"),
   Type.Literal("conversation"),
+  Type.Literal("team"),
 ]);
 
 export type SurfaceFormInput = Static<typeof SurfaceFormInputSchema>;
@@ -43,7 +44,7 @@ export type SurfaceFormValue =
   | { readonly kind: "time"; readonly value: string }
   | { readonly kind: "datetime"; readonly value: string }
   | {
-      readonly kind: "select" | "radio" | "user" | "channel" | "conversation";
+      readonly kind: "select" | "radio" | "user" | "channel" | "conversation" | "team";
       readonly value: string;
     }
   | { readonly kind: "multiselect" | "checkbox"; readonly values: readonly string[] };

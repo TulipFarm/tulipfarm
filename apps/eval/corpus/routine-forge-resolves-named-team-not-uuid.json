@@ -1,0 +1,94 @@
+{
+  "id": "routine-forge-resolves-named-team-not-uuid",
+  "tier": "l2",
+  "agent": "triage",
+  "input": [
+    {
+      "role": "user",
+      "content": "Every morning send a summary report. This automation should belong to the Marketing team."
+    }
+  ],
+  "platformTools": ["team_list", "routine_forge"],
+  "toolResults": [
+    {
+      "name": "team_list",
+      "output": {
+        "teams": [
+          {
+            "id": "team-everyone",
+            "name": "Everyone",
+            "slug": "everyone",
+            "isEveryone": true,
+            "isMember": true
+          },
+          {
+            "id": "team-marketing",
+            "name": "Marketing",
+            "slug": "marketing",
+            "isEveryone": false,
+            "isMember": false
+          }
+        ],
+        "recommendedTeamId": "team-everyone"
+      }
+    },
+    {
+      "name": "routine_forge",
+      "output": {
+        "name": "morning-summary",
+        "committed": true,
+        "triggerSlugs": ["morning-summary-cron"]
+      }
+    }
+  ],
+  "script": [
+    {
+      "kind": "tool_calls",
+      "calls": [{ "callId": "list-teams", "name": "team_list", "arguments": {} }]
+    },
+    {
+      "kind": "tool_calls",
+      "calls": [
+        {
+          "callId": "forge-routine",
+          "name": "routine_forge",
+          "arguments": {
+            "name": "morning-summary",
+            "definition": {
+              "apiVersion": "tulipfarm.ai/v1",
+              "kind": "Routine",
+              "metadata": {
+                "id": "morning-summary",
+                "slug": "morning-summary",
+                "schemaVersion": 1,
+                "authoredVersion": 1,
+                "lifecycle": "published"
+              },
+              "spec": {
+                "ownership": { "owners": [{ "teamId": "team-marketing" }] },
+                "states": [{ "name": "send-summary", "type": "agent" }],
+                "triggers": [{ "name": "morning-summary-cron", "type": "cron" }]
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "kind": "text",
+      "text": "Created the daily automation, owned by the Marketing team."
+    }
+  ],
+  "expect": [
+    { "kind": "tool_called", "name": "team_list" },
+    { "kind": "tool_called", "name": "routine_forge" },
+    { "kind": "tool_call_order", "names": ["team_list", "routine_forge"] },
+    {
+      "kind": "tool_argument_equals",
+      "name": "routine_forge",
+      "path": "definition.spec.ownership.owners.0.teamId",
+      "value": "team-marketing"
+    },
+    { "kind": "loop_status", "status": "completed" }
+  ]
+}
