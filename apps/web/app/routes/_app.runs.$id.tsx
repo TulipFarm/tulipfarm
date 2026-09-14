@@ -134,12 +134,10 @@ function RunDetail({ run }: { run: OperationalRun }) {
 export function ErrorBoundary() {
   const error = useRouteError();
   return (
-    <PageShell title="Run results">
-      <ErrorState
-        section="runs"
-        status={error instanceof ApiError ? error.status : undefined}
-        message={error instanceof Error ? error.message : undefined}
-      />
-    </PageShell>
+    <ErrorState
+      section="runs"
+      status={error instanceof ApiError ? error.status : undefined}
+      message={error instanceof Error ? error.message : undefined}
+    />
   );
 }
