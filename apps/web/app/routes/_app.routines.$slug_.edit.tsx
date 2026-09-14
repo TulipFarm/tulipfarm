@@ -1,7 +1,7 @@
 import { useLoaderData, useRouteError } from "@remix-run/react";
 import { PageShell } from "~/components/page-shell";
 import { RoutineAuthoringStudio } from "~/components/routines/routine-authoring-studio";
-import { ErrorState } from "~/components/states";
+import { ErrorState, UnavailableActionState } from "~/components/states";
 import { ApiError } from "~/lib/api";
 import { getRoutineAuthoringBase } from "~/lib/routines/authoring";
 
@@ -32,6 +32,14 @@ export default function RoutineAuthoringRoute() {
 export function ErrorBoundary() {
   const error = useRouteError();
   const status = error instanceof ApiError ? error.status : undefined;
+  if (status === 404) {
+    return (
+      <UnavailableActionState
+        section="Routine authoring"
+        message="Authoring is not available for this Routine right now. Run or dry run it from its detail page instead."
+      />
+    );
+  }
   const message = error instanceof Error ? error.message : undefined;
   return <ErrorState section="Routine authoring" status={status} message={message} />;
 }
