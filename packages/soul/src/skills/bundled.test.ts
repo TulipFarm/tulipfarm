@@ -190,6 +190,18 @@ describe("loadBundledSkills", () => {
     expect(resourceForge?.body).toContain('x-links: { target: "customer" }');
   });
 
+  it("keeps exact Resource type requests on the single-write fast path", async () => {
+    const resourceForge = (await loadBundledSkills(makeLogger())).get("resource-forge");
+    const body = resourceForge?.body ?? "";
+
+    expect(body).toContain("## Direct specification fast path");
+    expect(body).toMatch(/Do not call\s+`list_resource_types`/);
+    expect(body).toMatch(/Do not call\s+`validate_artifact`/);
+    expect(body).toMatch(/Do not call\s+`resource_type_schema`/);
+    expect(body).toContain("one `create_resource_type` call");
+    expect(body).toContain("authoritative saved artifact after activation is verification");
+  });
+
   it("ships Agent Forge with the guidance that makes capability restrictions reachable", async () => {
     const agentForge = (await loadBundledSkills(makeLogger())).get("agent-forge");
     const body = agentForge?.body ?? "";

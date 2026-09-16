@@ -8,8 +8,9 @@ export const FORGE_EXECUTION_CONTRACT = `## Execution Contract
 
 - Inspect relevant existing Soul artifacts before writing, then use the creation or update tool that
   actually performs the requested change. Do not stop at a plan, draft, or preview.
-- Treat a write as incomplete until it has a real tool result. Verify it with the relevant read,
-  list, schema, status, or smoke-test tool when one is available.
+- Treat a write as incomplete until it has a real Tool result. A result that returns the
+  authoritative saved artifact after activation is verification; otherwise use the relevant read,
+  list, schema, status, or smoke-test Tool when one is available.
 - If validation or a tool call fails, use the returned error to correct the artifact and retry when
   the path is clear. If the request is genuinely blocked, report the specific blocker; never claim
   an artifact was created, activated, or tested when it was not.

@@ -12,7 +12,7 @@ describe("default chat harness", () => {
     expect(DEFAULT_ASSISTANT.body).toContain("## Building the system");
     expect(DEFAULT_ASSISTANT.body).toContain("## Acting");
     expect(DEFAULT_ASSISTANT.body).toContain("Never describe a call you could make");
-    expect(DEFAULT_ASSISTANT.body).toContain("confirm it with the matching read, list, or status");
+    expect(DEFAULT_ASSISTANT.body).toMatch(/confirm it with the\s+matching read, list, or status/);
     expect(DEFAULT_ASSISTANT.body).toContain(
       "Issue every independent Tool call in the same response"
     );
@@ -42,6 +42,13 @@ describe("default chat harness", () => {
       expect(DEFAULT_ASSISTANT.body).toContain(tag);
     }
     expect(DEFAULT_ASSISTANT.body).not.toContain("list_resource_types");
+  });
+
+  it("keeps a complete Resource type specification to one write round trip", () => {
+    expect(DEFAULT_ASSISTANT.body).toContain("One exception avoids needless model round trips");
+    expect(DEFAULT_ASSISTANT.body).toContain("call `create_resource_type` directly");
+    expect(DEFAULT_ASSISTANT.body).toContain("do not\n  list, pre-validate, or re-read it");
+    expect(DEFAULT_ASSISTANT.body).toContain("returns the saved Schema");
   });
 
   // The two-phase write made "Soul writes are ungated ... never ask for approval" false, and a

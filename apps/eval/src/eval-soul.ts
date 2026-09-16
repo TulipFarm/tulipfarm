@@ -7,6 +7,7 @@ import { join, relative, resolve, sep } from "node:path";
 import type { AssembleContext } from "@tulipfarm/agent-runtime";
 import {
   buildSoulCatalogue,
+  getDefaultAssistant,
   hermeticGitEnv,
   type SoulCatalogue,
   SoulLoader,
@@ -184,9 +185,9 @@ type SoulOwnedContext = Pick<AssembleContext, (typeof SOUL_OWNED_CONTEXT_KEYS)[n
  * @throws when the Case names an Agent the Eval Soul does not define.
  */
 export function soulContext(soul: EvalSoul, agentName: string): SoulOwnedContext {
-  const agent = soul.loader.agents.get(agentName);
+  const agent = getDefaultAssistant(agentName) ?? soul.loader.agents.get(agentName);
   if (agent === undefined) {
-    const known = [...soul.loader.agents.keys()].sort().join(", ");
+    const known = [...soul.loader.agents.keys(), "__tulipfarm_default__"].sort().join(", ");
     throw new Error(`Eval Soul defines no Agent "${agentName}" — it defines: ${known}`);
   }
   return { personality: agent.body };
