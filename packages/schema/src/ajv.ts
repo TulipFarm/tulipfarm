@@ -35,3 +35,11 @@ ajv.addFormat("date-time", {
   type: "string",
   validate: isValidIsoDateTime,
 });
+
+const EMAIL =
+  /^[a-z0-9.!#$%&'*+/=?^_`{|}~-]+@[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)*$/i;
+
+ajv.addFormat("email", {
+  type: "string",
+  validate: EMAIL,
+});

@@ -412,6 +412,45 @@ describe("record_create", () => {
     expect(result).toMatchObject({ success: false, error: { code: "validation_error" } });
   });
 
+  it("rejects a malformed email without persisting the Record", async () => {
+    const factory = new FakeRepoFactory();
+    const soulLoader = makeSoulLoader({
+      customer: {
+        type: "object",
+        properties: { email: { type: "string", format: "email" } },
+        required: ["email"],
+      },
+    });
+    const tool = getTool("record_create");
+    const result = await tool.handler(
+      { type: "customer", data: { email: "not-an-email" } },
+      makeCtx(factory, soulLoader)
+    );
+
+    expect(result).toMatchObject({ success: false, error: { code: "validation_error" } });
+    expect((factory.forType("customer") as FakeRepo).docs.size).toBe(0);
+  });
+
+  it("accepts a valid email", async () => {
+    const soulLoader = makeSoulLoader({
+      customer: {
+        type: "object",
+        properties: { email: { type: "string", format: "email" } },
+        required: ["email"],
+      },
+    });
+    const tool = getTool("record_create");
+    const result = await tool.handler(
+      { type: "customer", data: { email: "muskan@example.com" } },
+      makeCtx(undefined, soulLoader)
+    );
+
+    expect(result).toMatchObject({
+      success: true,
+      data: { email: "muskan@example.com" },
+    });
+  });
+
   // The Agent path has to refuse the same blank the HTTP route refuses, or a Record an operator
   // could not create by hand is one `record_create` call away (#434).
   it("returns validation_error and writes nothing when a required field is only whitespace", async () => {
