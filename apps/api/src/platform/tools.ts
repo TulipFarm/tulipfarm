@@ -572,7 +572,6 @@ const ROUTINE_FORGE_SCHEMA: Record<string, unknown> = {
   type: "object",
   additionalProperties: false,
   required: ["name"],
-  oneOf: [{ required: ["definition"] }, { required: ["planYaml"] }],
   properties: {
     name: {
       type: "string",
@@ -596,7 +595,11 @@ const ROUTINE_FORGE_SCHEMA: Record<string, unknown> = {
 type RoutineForgeArgs =
   | { name: string; definition: Record<string, unknown>; planYaml?: never }
   | { name: string; planYaml: string; definition?: never };
-const validateRoutineForge = ajv.compile<RoutineForgeArgs>(ROUTINE_FORGE_SCHEMA);
+// OpenAI rejects top-level Tool-schema combinators; exclusivity is enforced on the host.
+const validateRoutineForge = ajv.compile<RoutineForgeArgs>({
+  ...ROUTINE_FORGE_SCHEMA,
+  oneOf: [{ required: ["definition"] }, { required: ["planYaml"] }],
+});
 
 /**
  * Stamps the authoring principal onto a Trigger's `backgroundIdentity`, replacing whatever the

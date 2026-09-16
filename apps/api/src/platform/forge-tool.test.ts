@@ -167,6 +167,7 @@ steps:
 
   it("refuses ambiguous, invalid, and mismatched YAML Plans before writing", async () => {
     for (const args of [
+      { name: "daily-report" },
       { name: "daily-report", definition: VALID_ROUTINE, planYaml },
       { name: "another-report", planYaml },
       { name: "daily-report", planYaml: planYaml.replace("needs: [Read]", "needs: [Missing]") },
