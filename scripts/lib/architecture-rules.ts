@@ -157,7 +157,7 @@ export const ARCHITECTURE_CONFIG: ArchitectureConfig = {
       "observability",
     ],
     kv: ["schema", "storage", "tool-host"],
-    "platform-tools": ["schema", "tool-host", "agent-runtime"],
+    "platform-tools": ["schema", "tool-host", "agent-runtime", "run-kernel"],
     // The internal single-shot prompts the runtime owns. It imports `agent-runtime` for the
     // ports it satisfies and never the reverse, so no cycle exists. It deliberately does not
     // import `llm`: every model arrives injected, which is what keeps the edge one-way.

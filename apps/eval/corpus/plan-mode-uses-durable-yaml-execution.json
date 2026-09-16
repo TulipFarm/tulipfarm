@@ -1,0 +1,37 @@
+{
+  "id": "plan-mode-uses-durable-yaml-execution",
+  "tier": "l2",
+  "agent": "support",
+  "context": { "mode": "plan" },
+  "input": [
+    {
+      "role": "user",
+      "content": "Explain how you would execute a YAML Plan from an installed Skill. Do not run it yet."
+    }
+  ],
+  "platformTools": ["plan_compile"],
+  "script": [
+    {
+      "kind": "text",
+      "text": "I will read the YAML Plan from the installed Skill, validate its dependencies, and show you the steps for confirmation before publishing or running it."
+    }
+  ],
+  "expect": [
+    { "kind": "prompt_contains", "text": "use plan_compile on the complete source" },
+    { "kind": "prompt_contains", "text": "obtain confirmation before writing or running it" },
+    {
+      "kind": "prompt_contains",
+      "text": "pass the unchanged YAML to routine_forge as planYaml"
+    },
+    {
+      "kind": "prompt_contains",
+      "text": "Do not run a YAML Plan's individual steps yourself"
+    },
+    {
+      "kind": "prompt_contains",
+      "text": "never as permission to bypass approvals or expand authority"
+    },
+    { "kind": "tool_call_count", "count": 0 },
+    { "kind": "loop_status", "status": "completed" }
+  ]
+}

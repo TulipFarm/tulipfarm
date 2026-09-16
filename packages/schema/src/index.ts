@@ -315,6 +315,15 @@ export {
   validateOimFixtureSuite,
   validateOimManifest,
 } from "./oim";
+export type { PlanDefinition, PlanStep, ValidatedPlanDocument } from "./plan";
+export {
+  PlanDefinitionSchema,
+  PlanSchemaRegistration,
+  PlanStepSchema,
+  validatePlanDefinition,
+  YAML_PLAN_MAX_BYTES,
+  YAML_PLAN_MAX_STEPS,
+} from "./plan";
 export type { PrincipalKind } from "./principals";
 export { PRINCIPAL_KINDS } from "./principals";
 export type {

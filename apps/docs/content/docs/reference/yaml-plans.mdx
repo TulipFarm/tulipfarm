@@ -1,0 +1,146 @@
+---
+title: YAML plans
+description: Understand the YAML format for reusable dependency plans, including exact tool calls, agent instructions, validation, and durable execution.
+---
+
+A YAML plan describes work and the prerequisites of each step. Its dependency graph must be
+acyclic: no step can depend, directly or indirectly, on itself. Plan mode can read this format
+from chat or from a supporting file in an installed skill, an installable package of agent
+instructions and supporting files.
+
+A validated plan becomes a **routine**, a saved automation. Starting it creates a **run**, one
+durable execution with recorded step outcomes. Compilation and publication do not start a run.
+
+## Reading a plan
+
+This example checks the current time, then validates the returned value. It illustrates the
+format; there is no need to edit the instance's configuration files.
+
+```yaml
+# yaml-language-server: $schema={{SITE_URL}}/schemas/plan/v1.schema.json
+apiVersion: tulipfarm.ai/v1
+kind: Plan
+name: check-time
+version: 1
+steps:
+  - id: Read
+    label: Read the current time
+    tool: get_current_time
+    input:
+      timezone: UTC
+  - id: Check
+    label: Check the returned time
+    needs: [Read]
+    tool: validate_artifact
+    input:
+      artifact: "${states.Read.output.current}"
+      schema:
+        type: string
+```
+
+`name` is the routine's lowercase, hyphenated name. `version` is its authored revision.
+Each step has a unique `id`, beginning with a letter and containing letters, digits, or
+underscores. `label` is optional display text. `needs` lists prerequisite step IDs; omitting it
+makes the step independent.
+
+Each step chooses exactly one execution kind: `tool`, `agent`, or `routine`. `input` supplies its
+arguments. Unknown fields, duplicate IDs, missing prerequisites, cycles, and invalid references
+are rejected before publication.
+
+## Editor validation
+
+The [standalone JSON Schema]({{SITE_URL}}/schemas/plan/v1.schema.json) is generated from the
+same definition used by the runtime. The first-line comment in the example associates a YAML
+file with that schema in editors using YAML Language Server, providing field completion and
+structural validation.
+
+Keep the directive as a comment, not a top-level `$schema` field: the plan format rejects
+unknown fields. When working offline, download the schema and replace the URL in that comment
+with the path to your local copy.
+
+The `v1` in the schema URL identifies the format used by `apiVersion: tulipfarm.ai/v1`.
+A plan's numeric `version` is its authored revision, not the schema version.
+Editor validation checks the document's structure; `plan_compile` still checks dependency
+cycles, references, and execution semantics before publication.
+
+## Exact calls and agent instructions
+
+A `tool` step calls a tool by its runtime name with the declared arguments. Tools are the
+operations agents can invoke, such as reading records or installing a skill. The plan does not
+replace each exact call with a model's interpretation.
+
+An `agent` step names an existing, versioned agent, a configured actor with its own instructions
+and permissions. Its `prompt` gives that agent a task:
+
+```yaml
+id: Describe
+needs: [Read]
+agent:
+  name: operations-assistant
+  version: "1"
+prompt: Explain the supplied time in one sentence.
+input:
+  current: "${states.Read.output.current}"
+```
+
+The named agent must already exist at that version. A sub-prompt is task input: it cannot
+replace the agent's instructions or grant permissions. Unlike an exact tool call, the agent
+chooses how to carry out its task.
+
+A `routine` step calls an existing, versioned routine and waits for it to finish:
+
+```yaml
+id: Report
+needs: [Describe]
+routine:
+  name: daily-report
+  version: "1"
+input:
+  requestedBy: Muskan Vijayvargiya
+```
+
+{/* tf-claim kind=path-exists value="packages/run-kernel/src/routine/dag-plan.ts" */}
+
+Child routine calls have a 24-hour wait deadline. They gate later steps on successful completion; they
+do not expose a child routine result for later input expressions.
+
+## Dependencies, rounds, and outputs
+
+References such as `${states.Read.output.current}` read an earlier step's actual stored output.
+The referenced step must be a prerequisite, either directly in `needs` or through another
+prerequisite. `${input.field}` reads an input supplied when starting the run. References also work
+inside nested argument objects and arrays.
+
+Rounds group steps by dependency depth. Execution currently visits these rounds in a stable,
+serial order, preserving declaration order among ready steps. A round is not a promise of
+simultaneous execution. This conservative ordering also stops independent later steps when
+one step fails.
+
+Completed steps retain their outcomes when the same run resumes. Starting a new run executes
+the plan again; it is not a resume or an automatic rollback of an earlier run.
+
+## Validation and execution
+
+Plan mode uses `plan_compile` to validate and preview the complete source. After confirmation,
+`routine_forge` receives the unchanged source in `planYaml` and publishes the compiled routine
+through the normal permission and publication checks. It accepts either `planYaml` or a
+canonical routine `definition`, not both.
+
+`trigger_routine` starts the published routine. The routine's graph shows its executable order;
+run detail shows recorded outcomes. `routine_run_get` lets the agent read that progress rather
+than guessing from its chat plan.
+
+Ordinary Markdown plans and chat tool forecasts still work. They are not executable YAML graphs,
+and their progress is not evidence that a saved routine has completed.
+
+## Plans distributed with skills
+
+An installed skill can carry a plan as a supporting YAML file. Plan mode reads that file through
+the skill's normal file-reading tool. A plan can compose the existing resource, skill, and
+integration installation tools, but it does not import arbitrary host code or install a Git
+repository merely because its URL appears in the file.
+
+Existing audits, permissions, approvals, and sandbox restrictions still apply. A plan that needs
+an unavailable tool, agent, routine, credential, or permission cannot manufacture it through
+sub-prompt text. Agent and child routine references must resolve before publication; installation
+instructions alone do not satisfy a versioned reference.

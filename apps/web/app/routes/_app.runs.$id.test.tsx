@@ -87,13 +87,15 @@ describe("Run results route", () => {
   it("closes the previous stream and resets its reconnect warning on navigation", async () => {
     renderRoute();
     await screen.findByText("Run in progress");
+    await waitFor(() => expect(connections[0]).toBeDefined());
     const previous = connections[0];
-    expect(previous).toBeDefined();
     act(() => previous?.onerror?.());
     expect(screen.getByText("Reconnecting")).toBeInTheDocument();
     await userEvent.click(screen.getByRole("link", { name: "Next Run" }));
-    await waitFor(() => expect(screen.queryByText("Reconnecting")).not.toBeInTheDocument());
-    expect(previous?.close).toHaveBeenCalled();
+    await waitFor(() => {
+      expect(screen.queryByText("Reconnecting")).not.toBeInTheDocument();
+      expect(previous?.close).toHaveBeenCalled();
+    });
   });
   it("uses one page title and retains the budget ledger", async () => {
     renderRoute();

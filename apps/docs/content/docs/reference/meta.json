@@ -9,6 +9,7 @@
     "---Settings---",
     "environment-variables",
     "routine-triggers",
+    "yaml-plans",
     "model-specs",
     "roles-and-permissions",
     "---For developers---",

@@ -60,6 +60,23 @@ the level the receipt says was actually applied. It is always the participant's 
 never silently upgrades a turn. See [Model routing](/docs/administration/how-model-routing-works) for how presets resolve,
 and [Configure LLM providers](/docs/administration/configure-llm-providers) for the admin side.
 
+## Planning work
+
+Plan mode organizes work into rounds and asks for confirmation before execution. It also
+understands reusable YAML plans, structured files that give each step its prerequisites.
+
+```prompt
+Review this YAML plan, explain the steps and their dependencies, and wait for my confirmation
+before running it.
+```
+
+Paste the plan with your message, or name its supporting file in an installed skill, a package
+of agent instructions and files. After confirmation, an executable plan is saved as a
+**routine**, an automation you can run again. Its **run** records what actually happened;
+the chat forecast is not a completion receipt. Ordinary written plans continue to work too.
+
+The [YAML plan reference](/docs/reference/yaml-plans) explains the format and its execution limits.
+
 ## Feedback and suggestions
 
 Assistant messages support thumbs up and thumbs down feedback. Feedback is stored per user and

@@ -9,6 +9,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@tulipfarm/run-kernel": "workspace:*",
     "@tulipfarm/schema": "workspace:*",
     "@tulipfarm/tool-host": "workspace:*",
     "ajv": "^8.17.1",

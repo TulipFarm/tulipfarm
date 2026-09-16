@@ -109,6 +109,8 @@ PostgreSQL persistence composition, auth, Soul Git writes, and Worker callback p
 - Operator Run commands require `operations.runs.control` as well as `operations.read`.
 - Routine invocations resolve only through `runtime/invocation-definitions.ts`; never fall back to
   the live Soul checkout, legacy registry, or `bundle.routineId`.
+- `routine_forge` accepts either a canonical `definition` or a confirmed YAML `planYaml`, never both.
+  YAML compiles through `run-kernel` and uses the same authorization, publication, and Run path.
 - Schedule checkpoints follow embedded Trigger identity, never list position. Legacy checkpoints
   transfer only when their saved deduplication key identifies one schedule.
 - Integration connect flows are manifest-declared. Adding an integration must not add a bespoke
