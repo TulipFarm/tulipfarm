@@ -1,0 +1,39 @@
+{
+  "id": "default-assistant-direct-resource-type-create",
+  "tier": "l2",
+  "agent": "__tulipfarm_default__",
+  "input": [
+    {
+      "role": "user",
+      "content": "Acknowledge this request with Ready."
+    }
+  ],
+  "script": [
+    {
+      "kind": "text",
+      "text": "Ready."
+    }
+  ],
+  "expect": [
+    {
+      "kind": "prompt_contains",
+      "text": "One exception avoids needless model round trips"
+    },
+    {
+      "kind": "prompt_contains",
+      "text": "call `create_resource_type` directly"
+    },
+    {
+      "kind": "prompt_contains",
+      "text": "returns the saved Schema"
+    },
+    {
+      "kind": "output_contains",
+      "text": "Ready"
+    },
+    {
+      "kind": "loop_status",
+      "status": "completed"
+    }
+  ]
+}
