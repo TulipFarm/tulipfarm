@@ -42,8 +42,9 @@ function initialValue(field: FieldDescriptor, initial?: Record<string, unknown>)
   return field.kind === "boolean" ? false : "";
 }
 
-// Maps a thrown write error into form state: a 422 with a `path` highlights the offending field; a
-// 409 becomes a concurrency banner; anything else becomes a generic banner. Shared by both routes.
+// Maps a thrown write error into form state: a 422 with a `path` highlights the offending field;
+// the version-conflict code becomes concurrency advice; anything else keeps the server message.
+// Shared by both routes.
 export function writeErrorState(err: unknown): {
   fieldErrors: Record<string, string>;
   formError: string;
@@ -53,7 +54,7 @@ export function writeErrorState(err: unknown): {
       const name = err.path.replace(/^\//, "").split("/")[0];
       return { fieldErrors: { [name]: err.message }, formError: "" };
     }
-    if (err.status === 409) {
+    if (err.status === 409 && err.code === "version conflict") {
       return {
         fieldErrors: {},
         formError: "this record changed since you loaded it: reload and retry",

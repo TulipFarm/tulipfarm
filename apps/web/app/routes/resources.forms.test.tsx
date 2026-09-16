@@ -84,10 +84,29 @@ test("create: a 422 maps the error path onto the offending field", async () => {
   expect(await screen.findByText("must be a string")).toBeInTheDocument();
 });
 
+test("create: a uniqueness conflict keeps the server advice and the draft", async () => {
+  vi.mocked(remix.useNavigate).mockReturnValue(vi.fn());
+  vi.mocked(createRecord).mockRejectedValue(
+    new ApiError(409, "duplicate value violates a unique constraint")
+  );
+  renderRoute(<ResourceCreate />, { type: "ticket", fields, schemaError: undefined });
+
+  const title = document.querySelector("input#title") as HTMLInputElement;
+  fireEvent.change(title, { target: { value: "Duplicate" } });
+  fireEvent.click(screen.getByRole("button", { name: "Create" }));
+
+  expect(
+    await screen.findByText(/duplicate value violates a unique constraint/)
+  ).toBeInTheDocument();
+  expect(title.value).toBe("Duplicate");
+});
+
 test("edit: a 409 surfaces the version-conflict banner and does not navigate", async () => {
   const navigate = vi.fn();
   vi.mocked(remix.useNavigate).mockReturnValue(navigate);
-  vi.mocked(updateRecord).mockRejectedValue(new ApiError(409, "version conflict"));
+  vi.mocked(updateRecord).mockRejectedValue(
+    new ApiError(409, "version conflict", undefined, "version conflict")
+  );
   renderRoute(<ResourceEdit />, {
     type: "ticket",
     id: "TICK-1",
@@ -100,6 +119,29 @@ test("edit: a 409 surfaces the version-conflict banner and does not navigate", a
 
   expect(await screen.findByText(/changed since you loaded it/)).toBeInTheDocument();
   expect(navigate).not.toHaveBeenCalled();
+});
+
+test("edit: a uniqueness conflict keeps the server advice and the draft", async () => {
+  vi.mocked(remix.useNavigate).mockReturnValue(vi.fn());
+  vi.mocked(updateRecord).mockRejectedValue(
+    new ApiError(409, "duplicate value violates a unique constraint")
+  );
+  renderRoute(<ResourceEdit />, {
+    type: "ticket",
+    id: "TICK-1",
+    record: { id: "TICK-1", title: "Old", open: false, version: 2, createdAt: "", updatedAt: "" },
+    fields,
+    schemaError: undefined,
+  });
+
+  const title = document.querySelector("input#title") as HTMLInputElement;
+  fireEvent.change(title, { target: { value: "Duplicate" } });
+  fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+  expect(
+    await screen.findByText(/duplicate value violates a unique constraint/)
+  ).toBeInTheDocument();
+  expect(title.value).toBe("Duplicate");
 });
 
 const datedParsed = parseSchema(`
