@@ -17,6 +17,7 @@ This example checks the current time, then validates the returned value. It illu
 format; there is no need to edit the instance's configuration files.
 
 ```yaml
+# yaml-language-server: $schema={{SITE_URL}}/schemas/plan/v1.schema.json
 apiVersion: tulipfarm.ai/v1
 kind: Plan
 name: check-time
@@ -45,6 +46,22 @@ makes the step independent.
 Each step chooses exactly one execution kind: `tool`, `agent`, or `routine`. `input` supplies its
 arguments. Unknown fields, duplicate IDs, missing prerequisites, cycles, and invalid references
 are rejected before publication.
+
+## Editor validation
+
+The [standalone JSON Schema]({{SITE_URL}}/schemas/plan/v1.schema.json) is generated from the
+same definition used by the runtime. The first-line comment in the example associates a YAML
+file with that schema in editors using YAML Language Server, providing field completion and
+structural validation.
+
+Keep the directive as a comment, not a top-level `$schema` field: the plan format rejects
+unknown fields. When working offline, download the schema and replace the URL in that comment
+with the path to your local copy.
+
+The `v1` in the schema URL identifies the format used by `apiVersion: tulipfarm.ai/v1`.
+A plan's numeric `version` is its authored revision, not the schema version.
+Editor validation checks the document's structure; `plan_compile` still checks dependency
+cycles, references, and execution semantics before publication.
 
 ## Exact calls and agent instructions
 

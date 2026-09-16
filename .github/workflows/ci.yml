@@ -63,6 +63,11 @@ jobs:
               apps/docs/*)
                 docs=true
                 ;;
+              packages/schema/src/*.ts|packages/constants/src/site.ts|scripts/docs-plan-schema.test.ts)
+                docs=true
+                non_docs=true
+                code=true
+                ;;
               *)
                 non_docs=true
                 case "$f" in
