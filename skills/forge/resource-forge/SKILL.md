@@ -24,6 +24,28 @@ Skill reports its outcome directly.
 
 {{FORGE_EXECUTION_CONTRACT}}
 
+## Direct specification fast path
+
+When the user gives an exact Resource type name, a complete field list with constraints, and asks
+you to create it now, the request itself settles the design and authorizes the write. Do not turn
+that case into the exploratory flow below:
+
+- Use the `<available-resources>` Context block for overlap awareness. Do not call
+  `list_resource_types`; `create_resource_type` rejects an existing name atomically.
+- Do not load an archetype reference when the user already supplied the complete shape.
+- Do not call `validate_artifact`; `create_resource_type` runs the same Schema validation before
+  writing and returns actionable validation errors for a repair.
+- Make one `create_resource_type` call with the complete Schema. Its successful result is emitted
+  only after the Soul reload and database reconciliation finish, and includes the saved Schema.
+- Treat that successful result as the requested readback. Do not call `resource_type_schema`
+  unless the result omitted the Schema or the user asks for a separate second read.
+- Report only after the write result arrives. Never claim success from the proposed arguments.
+
+This fast path does not bypass active approval controls: if the Tool host requires Approval, let it
+park normally. Use the full flow below when the name or fields are materially incomplete, the user
+asked for recommendations, an overlap is visible, relationships need discovery, or hooks are part
+of the request.
+
 ## Start from an archetype, never from a blank page
 
 Asking "what fields would you like?" is the worst outcome this Skill can produce. The user asked for

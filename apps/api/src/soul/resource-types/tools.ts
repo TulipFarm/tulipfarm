@@ -167,7 +167,7 @@ const validateUpdate = ajv.compile(UPDATE_SCHEMA);
 const createResourceType = defineApiTool<ResourceTypeToolContext>({
   name: "create_resource_type",
   description:
-    "Create a new resource type by writing its JSON Schema (as YAML) to the soul repo. The write is validated and committed atomically through the Soul write gateway.",
+    "Create a new resource type from a JSON Schema YAML string. Use standard JSON Schema constraints; declare unique fields with root x-unique as an array of field-name arrays, for example [[email]]. The Tool validates and commits atomically, reloads the Soul, reconciles the database, and returns the saved Schema, so a successful result needs no separate validation or readback call.",
   mutating: true,
   tier: "system",
   inputSchema: CREATE_SCHEMA,
