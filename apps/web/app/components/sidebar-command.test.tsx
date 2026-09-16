@@ -2,7 +2,7 @@ import { createRemixStub } from "@remix-run/testing";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { expect, test, vi } from "vitest";
-import { SidebarCommand } from "~/components/sidebar-command";
+import { commandEntries, SidebarCommand } from "~/components/sidebar-command";
 import * as conversationsContext from "~/lib/conversations-context";
 
 vi.mock("~/lib/conversations-context", () => ({ useConversations: vi.fn() }));
@@ -31,6 +31,18 @@ const Stub = createRemixStub([
     ),
   },
 ]);
+
+test("finder exposes Packs and Import Pack only when the server permits the catalog", () => {
+  const entries = (visiblePaths: string[]) =>
+    commandEntries({ isDev: false, visiblePaths }, [], { startNewChat: vi.fn() });
+  expect(entries(["/packs"])).toEqual(
+    expect.arrayContaining([
+      expect.objectContaining({ label: "Packs", to: "/packs" }),
+      expect.objectContaining({ label: "Import Pack", to: "/packs/import" }),
+    ])
+  );
+  expect(entries([]).some((entry) => entry.to?.startsWith("/packs"))).toBe(false);
+});
 
 test("traps Tab focus inside the open command menu", async () => {
   const user = userEvent.setup();

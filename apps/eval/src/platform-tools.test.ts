@@ -8,6 +8,7 @@ import { PLATFORM_RUNTIME_TOOLS } from "@tulipfarm/platform-tools";
 import {
   INTEGRATION_AUTHORING_TOOL_DECLARATIONS,
   NETWORK_TOOL_DECLARATIONS,
+  PACK_READ_TOOL_DECLARATION,
   SKILL_MARKETPLACE_TOOL_DECLARATIONS,
 } from "@tulipfarm/schema";
 import { SKILL_TOOL_DECLARATION } from "@tulipfarm/soul";
@@ -26,6 +27,7 @@ describe("platform Tools a Case may name", () => {
       ...GITHUB_TOOL_DECLARATIONS,
       ...SLACK_TOOL_DECLARATIONS,
       ...NETWORK_TOOL_DECLARATIONS,
+      PACK_READ_TOOL_DECLARATION,
     ];
 
     expect(platformToolNames()).toEqual(shippedDeclarations.map((tool) => tool.name).sort());

@@ -71,6 +71,12 @@ export const NAVIGATION_REQUIREMENTS: readonly NavigationRequirement[] = [
   // authentication-only gate until that lands a permission this entry can adopt.
   { path: "/agents", authorizations: [AUTHENTICATED_NAVIGATION] },
   { path: "/skills", authorizations: [SOUL_SKILL_LIST] },
+  {
+    path: "/packs",
+    authorizations: [
+      { action: "platform.plan.declare", resourceType: "platform.plan", fallback: "authenticated" },
+    ],
+  },
   { path: "/routines", authorizations: [ROUTINE_READ] },
   // Scheduled Tasks is a filtered view of the same Routine data /routines already serves, so it
   // carries the identical authorization rather than a stricter or looser one.

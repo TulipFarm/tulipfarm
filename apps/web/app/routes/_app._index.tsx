@@ -1,8 +1,14 @@
-import { type ClientLoaderFunctionArgs, type MetaFunction, useLoaderData } from "@remix-run/react";
+import {
+  type ClientLoaderFunctionArgs,
+  type MetaFunction,
+  useLoaderData,
+  useLocation,
+} from "@remix-run/react";
 import { useCallback, useEffect, useState } from "react";
 import { ChatPanel } from "~/components/chat/chat-panel";
 import { DEFAULT_CHAT_MODEL_SELECTOR } from "~/components/chat/model-selector";
 import { PageShell } from "~/components/page-shell";
+import { chatLaunchFromState } from "~/lib/chat/launch";
 import type { ChatModelSelector } from "~/lib/chat/types";
 import { useCompanion } from "~/lib/companion-context";
 import { useConversations } from "~/lib/conversations-context";
@@ -55,6 +61,15 @@ function useOnboardingSuggestions(newChatNonce: number) {
 
 export default function ChatRoute() {
   const { agentId, defaultModel, draft, attach } = useLoaderData<typeof clientLoader>();
+  const location = useLocation();
+  const [launch, setLaunch] = useState(() => chatLaunchFromState(location.state));
+  const clearLaunch = useCallback(() => {
+    setLaunch(undefined);
+    const state = window.history.state;
+    if (!state?.usr?.chatLaunch) return;
+    const { chatLaunch: _launch, ...usr } = state.usr;
+    window.history.replaceState({ ...state, usr }, "");
+  }, []);
   // Strip both once applied so a reload or Back doesn't redraft, or re-stage, over what was sent.
   useEffect(() => {
     if (!draft && !attach) return;
@@ -87,7 +102,7 @@ export default function ChatRoute() {
     <PageShell title="Chat" contentClassName="h-full gap-0 p-0 sm:p-0 md:p-0">
       <ChatPanel
         key={newChatNonce}
-        agentId={agentId}
+        agentId={launch ? undefined : agentId}
         defaultModel={defaultModel}
         suggestions={suggestions}
         tasks={tasks}
@@ -97,6 +112,9 @@ export default function ChatRoute() {
         initialDraft={draft}
         pendingChatDraft={pendingChatDraft}
         attachFileId={attach}
+        initialMode={launch?.mode}
+        initialLaunch={launch}
+        onLaunch={clearLaunch}
       />
     </PageShell>
   );

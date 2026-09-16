@@ -3,9 +3,10 @@
   "version": "0.0.0",
   "private": true,
   "scripts": {
-    "build": "tsx scripts/generate-deploy-docs.ts && tsx ../../scripts/generate-tool-docs.ts && pnpm generate:plan-schema && node scripts/sync-public-assets.mjs && next build && node scripts/sync-public-assets.mjs --out",
-    "dev": "tsx scripts/generate-deploy-docs.ts && tsx ../../scripts/generate-tool-docs.ts && pnpm generate:plan-schema && node scripts/sync-public-assets.mjs && next dev -p 5000",
+    "build": "tsx scripts/generate-deploy-docs.ts && tsx ../../scripts/generate-tool-docs.ts && pnpm generate:plan-schema && pnpm generate:pack-schema && node scripts/sync-public-assets.mjs && next build && node scripts/sync-public-assets.mjs --out",
+    "dev": "tsx scripts/generate-deploy-docs.ts && tsx ../../scripts/generate-tool-docs.ts && pnpm generate:plan-schema && pnpm generate:pack-schema && node scripts/sync-public-assets.mjs && next dev -p 5000",
     "generate:plan-schema": "tsx scripts/generate-plan-schema.ts && biome format --write public/schemas/plan/v1.schema.json",
+    "generate:pack-schema": "tsx scripts/generate-pack-schema.ts && biome format --write public/schemas/pack/v1.schema.json",
     "start": "serve out",
     "typecheck": "fumadocs-mdx && next typegen && tsc --noEmit",
     "postinstall": "fumadocs-mdx",

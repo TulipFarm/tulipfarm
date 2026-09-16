@@ -1,0 +1,277 @@
+{
+  "$id": "https://tulipfarm.site/schemas/pack/v1.schema.json",
+  "additionalProperties": false,
+  "type": "object",
+  "required": [
+    "apiVersion",
+    "kind",
+    "name",
+    "title",
+    "description",
+    "category",
+    "version",
+    "artifacts",
+    "plan"
+  ],
+  "properties": {
+    "apiVersion": {
+      "const": "tulipfarm.ai/v1",
+      "type": "string"
+    },
+    "kind": {
+      "const": "Pack",
+      "type": "string"
+    },
+    "name": {
+      "pattern": "^[a-z][a-z0-9]*(-[a-z0-9]+)*$",
+      "minLength": 1,
+      "maxLength": 128,
+      "type": "string"
+    },
+    "title": {
+      "minLength": 1,
+      "maxLength": 200,
+      "type": "string"
+    },
+    "description": {
+      "minLength": 1,
+      "maxLength": 4000,
+      "type": "string"
+    },
+    "category": {
+      "type": "string",
+      "enum": ["Sales", "IT Ops", "Marketing", "Document Ops", "Support", "Engineering"]
+    },
+    "version": {
+      "minimum": 1,
+      "maximum": 9007199254740991,
+      "type": "integer"
+    },
+    "requirements": {
+      "maxItems": 64,
+      "uniqueItems": true,
+      "type": "array",
+      "items": {
+        "minLength": 1,
+        "maxLength": 1000,
+        "type": "string"
+      }
+    },
+    "artifacts": {
+      "minItems": 1,
+      "maxItems": 64,
+      "type": "array",
+      "items": {
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["kind", "name", "description", "template"],
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": ["resource", "skill", "agent", "surface", "routine"]
+          },
+          "name": {
+            "pattern": "^[a-z][a-z0-9]*(-[a-z0-9]+)*$",
+            "minLength": 1,
+            "maxLength": 128,
+            "type": "string"
+          },
+          "description": {
+            "minLength": 1,
+            "maxLength": 4000,
+            "type": "string"
+          },
+          "template": {
+            "additionalProperties": false,
+            "type": "object",
+            "patternProperties": {
+              "^(.*)$": {}
+            }
+          }
+        }
+      }
+    },
+    "plan": {
+      "$id": "tulipfarm.ai/v1/Plan",
+      "additionalProperties": false,
+      "type": "object",
+      "required": ["apiVersion", "kind", "name", "version", "steps"],
+      "properties": {
+        "apiVersion": {
+          "const": "tulipfarm.ai/v1",
+          "type": "string"
+        },
+        "kind": {
+          "const": "Plan",
+          "type": "string"
+        },
+        "name": {
+          "pattern": "^[a-z][a-z0-9]*(-[a-z0-9]+)*$",
+          "maxLength": 128,
+          "type": "string"
+        },
+        "version": {
+          "minimum": 1,
+          "maximum": 9007199254740991,
+          "type": "integer"
+        },
+        "steps": {
+          "minItems": 1,
+          "maxItems": 64,
+          "type": "array",
+          "items": {
+            "anyOf": [
+              {
+                "additionalProperties": false,
+                "type": "object",
+                "required": ["id", "tool"],
+                "properties": {
+                  "id": {
+                    "pattern": "^[A-Za-z][A-Za-z0-9_]*$",
+                    "type": "string"
+                  },
+                  "label": {
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "needs": {
+                    "uniqueItems": true,
+                    "maxItems": 64,
+                    "type": "array",
+                    "items": {
+                      "pattern": "^[A-Za-z][A-Za-z0-9_]*$",
+                      "type": "string"
+                    }
+                  },
+                  "input": {
+                    "additionalProperties": false,
+                    "type": "object",
+                    "patternProperties": {
+                      "^(.*)$": {}
+                    }
+                  },
+                  "tool": {
+                    "minLength": 1,
+                    "type": "string"
+                  }
+                }
+              },
+              {
+                "additionalProperties": false,
+                "type": "object",
+                "required": ["id", "agent", "prompt"],
+                "properties": {
+                  "id": {
+                    "pattern": "^[A-Za-z][A-Za-z0-9_]*$",
+                    "type": "string"
+                  },
+                  "label": {
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "needs": {
+                    "uniqueItems": true,
+                    "maxItems": 64,
+                    "type": "array",
+                    "items": {
+                      "pattern": "^[A-Za-z][A-Za-z0-9_]*$",
+                      "type": "string"
+                    }
+                  },
+                  "input": {
+                    "additionalProperties": false,
+                    "type": "object",
+                    "patternProperties": {
+                      "^(.*)$": {}
+                    }
+                  },
+                  "agent": {
+                    "additionalProperties": false,
+                    "type": "object",
+                    "required": ["name", "version"],
+                    "properties": {
+                      "name": {
+                        "minLength": 1,
+                        "type": "string"
+                      },
+                      "version": {
+                        "minLength": 1,
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "prompt": {
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "requiredToolCalls": {
+                    "minItems": 1,
+                    "type": "array",
+                    "items": {
+                      "minLength": 1,
+                      "type": "string"
+                    }
+                  },
+                  "output": {
+                    "type": "object",
+                    "additionalProperties": true
+                  }
+                }
+              },
+              {
+                "additionalProperties": false,
+                "type": "object",
+                "required": ["id", "routine"],
+                "properties": {
+                  "id": {
+                    "pattern": "^[A-Za-z][A-Za-z0-9_]*$",
+                    "type": "string"
+                  },
+                  "label": {
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "needs": {
+                    "uniqueItems": true,
+                    "maxItems": 64,
+                    "type": "array",
+                    "items": {
+                      "pattern": "^[A-Za-z][A-Za-z0-9_]*$",
+                      "type": "string"
+                    }
+                  },
+                  "input": {
+                    "additionalProperties": false,
+                    "type": "object",
+                    "patternProperties": {
+                      "^(.*)$": {}
+                    }
+                  },
+                  "routine": {
+                    "additionalProperties": false,
+                    "type": "object",
+                    "required": ["name", "version"],
+                    "properties": {
+                      "name": {
+                        "minLength": 1,
+                        "type": "string"
+                      },
+                      "version": {
+                        "minLength": 1,
+                        "type": "string"
+                      }
+                    }
+                  }
+                }
+              }
+            ]
+          }
+        }
+      }
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "TulipFarm Pack v1",
+  "description": "An adaptable collection of asset templates and a dependency Plan. Importing previews the Pack; installation requires an adapted plan and confirmation.",
+  "$comment": "Generated from packages/schema/src/pack.ts. Do not edit this file; run pnpm --filter @tulipfarm/docs generate:pack-schema."
+}

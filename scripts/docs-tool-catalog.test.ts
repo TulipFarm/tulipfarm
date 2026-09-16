@@ -45,6 +45,13 @@ describe("tool catalog page", () => {
     }
   });
 
+  it("includes the provider-independent Pack reader", () => {
+    expect(collectTools().find((tool) => tool.name === "pack_read")).toMatchObject({
+      area: "platform",
+      mutating: false,
+    });
+  });
+
   it("keeps integration and rendering Tools off the page", () => {
     const names = new Set(collectTools().map((tool) => tool.name));
     for (const excluded of ["present", "request_input", "update_presentation"]) {

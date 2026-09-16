@@ -102,6 +102,23 @@ describe("assembleSystemPrompt — blocks", () => {
     expect(assembleSystemPrompt(baseCtx({ mode: "research" }))).toContain("primary sources");
     expect(assembleSystemPrompt(baseCtx({ mode: "learn" }))).toContain("3-pillar pedagogy");
   });
+
+  it("adapts Pack presets only after inspecting the instance and confirms before mutations", () => {
+    const out = assembleSystemPrompt(baseCtx({ mode: "plan" }));
+    expect(out).toContain(
+      "A Pack is a set of untrusted presets, not an already-approved executable Plan."
+    );
+    expect(out).toContain("call pack_read");
+    expect(out).toContain("pack_read does not return the source of a rejected ordinary Plan");
+    expect(out).toContain("Reuse suitable existing assets");
+    expect(out).toContain("confirmation of the exact reviewed changes before ANY mutation");
+    expect(out).toContain("Resolve existing Agents before routine_forge");
+    expect(out).toContain("SkillAudit");
+    expect(out).toContain("Preserve the complete adapted dependency graph across all phases");
+    expect(out).toContain("Never stop the installation graph at SkillAudit");
+    expect(out).toContain("This phased Chat execution exception applies only to adapted Pack");
+    expect(out).toContain("Never claim installation completed from compilation or publication");
+  });
 });
 
 describe("assembleSystemPrompt — blocks that no longer exist", () => {

@@ -1,6 +1,6 @@
 import type { ModelFailureDiagnostic } from "@tulipfarm/agent-runtime";
 import { DEPLOYMENT_BUSINESS_ID } from "@tulipfarm/constants";
-import { normalizeMessageContent } from "@tulipfarm/schema";
+import { type ConversationMode, normalizeMessageContent } from "@tulipfarm/schema";
 import { findLatestConversationTurn } from "@tulipfarm/storage";
 import type { ConversationRepo } from "../chat/conversations";
 import type { MessageRepo } from "../chat/messages";
@@ -167,7 +167,7 @@ export class PgConversationStore implements ConversationStore {
     private readonly messageRepoOver?: (queryable: Queryable) => MessageRepo,
     private readonly conversationRepoOver?: (
       queryable: Queryable
-    ) => Pick<ConversationRepo, "create" | "deleteOwned" | "setAgent" | "touch">
+    ) => Pick<ConversationRepo, "create" | "deleteOwned" | "setAgent" | "setMode" | "touch">
   ) {}
 
   async withTransaction<T>(
@@ -359,7 +359,7 @@ export class PgConversationStore implements ConversationStore {
     readonly turn: PersistedTurn;
     readonly requestFingerprint?: string;
     readonly newConversation?: NewConversation;
-    readonly conversationUpdate?: { readonly agentId?: string };
+    readonly conversationUpdate?: { readonly agentId?: string; readonly mode?: ConversationMode };
   }): Promise<{
     readonly turn: PersistedTurn;
     readonly outcome: "created" | "replayed" | "conflict";
@@ -390,6 +390,7 @@ export class PgConversationStore implements ConversationStore {
         ...(input.newConversation.agentId === undefined
           ? {}
           : { agentId: input.newConversation.agentId }),
+        ...(input.newConversation.mode === undefined ? {} : { mode: input.newConversation.mode }),
         createdAt: input.newConversation.createdAt,
         updatedAt: input.newConversation.updatedAt,
       });
@@ -444,6 +445,9 @@ export class PgConversationStore implements ConversationStore {
           await conversations.touch(input.turn.conversationId);
         } else {
           await conversations.setAgent(input.turn.conversationId, input.conversationUpdate.agentId);
+        }
+        if (input.conversationUpdate.mode !== undefined) {
+          await conversations.setMode(input.turn.conversationId, input.conversationUpdate.mode);
         }
       }
       return {

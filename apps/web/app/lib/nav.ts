@@ -193,6 +193,13 @@ export const SETTINGS_GROUPS: NavGroup[] = [
         create: { to: "/resources/new", label: "New resource type" },
       },
       { to: "/skills", label: "Skills", icon: Puzzle },
+      {
+        to: "/packs",
+        label: "Packs",
+        icon: Boxes,
+        create: { to: "/packs/import", label: "Import Pack" },
+        description: "Preview reusable assets and adapt an installation plan to your business.",
+      },
       { to: "/routines", label: "Routines", icon: Workflow },
       {
         to: "/knowledge",
@@ -302,6 +309,7 @@ const PAGE_META: Array<{ prefix: string; label: string; icon: Icon }> = [
   { prefix: "/resources", label: "Resources", icon: Boxes },
   { prefix: "/agents", label: "Agents", icon: Bot },
   { prefix: "/skills", label: "Skills", icon: Puzzle },
+  { prefix: "/packs", label: "Packs", icon: Boxes },
   // Must precede "/routines" — pageForPath takes the first matching prefix.
   { prefix: "/routines/scheduled", label: "Scheduled Tasks", icon: Calendar },
   { prefix: "/routines", label: "Routines", icon: Workflow },

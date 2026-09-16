@@ -16,6 +16,7 @@ import type { SoulLoader } from "@tulipfarm/soul";
 import { type CachePort, MemoryCache } from "@tulipfarm/storage";
 import { type ToolDef, toToolDef } from "@tulipfarm/tool-host";
 import type { AuthorityPrincipal } from "../../identity/authority-layers";
+import { packReadTool } from "../../packs/tool";
 import { createNetworkBudget } from "./budget";
 import { NETWORK_TOOLS } from "./tools";
 
@@ -84,7 +85,7 @@ export function composeNetworkTools(deps: NetworkToolingDeps): readonly ToolDef[
     },
   });
 
-  return NETWORK_TOOLS.map((definition) =>
+  return [...NETWORK_TOOLS, packReadTool].map((definition) =>
     toToolDef(definition, (context) => ({
       userId: context.userId,
       runId: context.runId ?? "",

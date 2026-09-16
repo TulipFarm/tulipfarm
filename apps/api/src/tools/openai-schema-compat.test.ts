@@ -1,6 +1,7 @@
 import { KNOWLEDGE_TOOLS } from "@tulipfarm/knowledge";
 import { MEMORY_DOCUMENT_TOOLS } from "@tulipfarm/memory";
 import { describe, expect, it } from "vitest";
+import { packReadTool } from "../packs/tool";
 import { PLATFORM_TOOLS } from "../platform/tools";
 import { RESOURCE_TOOLS } from "../resources/tools";
 import { AGENT_TOOLS } from "../soul/agents/tools";
@@ -9,6 +10,7 @@ import { RESOURCE_TYPE_TOOLS } from "../soul/resource-types/tools";
 import { SKILL_TOOLS } from "../soul/skills/tools";
 
 const ALL_TOOLS = [
+  packReadTool,
   ...MEMORY_DOCUMENT_TOOLS,
   ...KNOWLEDGE_TOOLS,
   ...RESOURCE_TOOLS,

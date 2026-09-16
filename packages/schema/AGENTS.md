@@ -19,6 +19,7 @@ Run event/request vocabularies, canonical hashes, Secret references, and resourc
 | `src/artifacts.ts` | `ARTIFACT_LAYOUTS`: Soul paths, companions, temporal class. |
 | `src/registry.ts` | Strict `apiVersion`/`kind` dispatch and fail-closed YAML parsing. |
 | `src/plan.ts` | Closed YAML Plan shape and limits; dependency semantics belong to Run kernel. |
+| `src/pack.ts` | Closed, bounded Pack presets, catalog and read-only preview contracts; templates convey no authority. |
 | `src/run-events.ts` | Channel-neutral Run event types, audiences, payload schemas. |
 | `src/invocation.ts` | JSON Schemas for requests that mint Runs. |
 | `src/llm.ts`, `src/model-catalog.ts` | LLM config schema and ModelProfile derivation. |

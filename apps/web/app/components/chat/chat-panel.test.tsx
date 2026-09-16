@@ -1,6 +1,7 @@
 import { createRemixStub } from "@remix-run/testing";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { StrictMode } from "react";
 import { beforeEach, expect, test, vi } from "vitest";
 import { ChatPanel } from "~/components/chat/chat-panel";
 import type { PendingApproval } from "~/lib/approvals";
@@ -79,6 +80,25 @@ function renderHome(props: React.ComponentProps<typeof ChatPanel> = {}) {
   const Stub = createRemixStub([{ path: "/", Component: () => <ChatPanel {...props} /> }]);
   return render(<Stub />);
 }
+
+test("a Pack launch sends once in Plan mode under StrictMode, without routing to a custom Agent", async () => {
+  const onLaunch = vi.fn();
+  const launch = { id: "pack-1", prompt: "Complete pinned Pack source", mode: "plan" as const };
+  const Stub = createRemixStub([
+    {
+      path: "/",
+      Component: () => <ChatPanel initialMode="plan" initialLaunch={launch} onLaunch={onLaunch} />,
+    },
+  ]);
+  render(
+    <StrictMode>
+      <Stub />
+    </StrictMode>
+  );
+  await waitFor(() => expect(send).toHaveBeenCalledTimes(1));
+  expect(send).toHaveBeenCalledWith(launch.prompt, { mode: "plan" });
+  expect(onLaunch).toHaveBeenCalledTimes(1);
+});
 
 const SETUP_TASK: Task = {
   id: "connect-model",

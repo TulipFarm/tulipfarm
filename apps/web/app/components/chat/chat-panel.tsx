@@ -4,6 +4,7 @@ import { AgentGlyph } from "~/components/agent-glyph";
 import { Waypoints } from "~/components/icons";
 import { ConnectionStatus } from "~/components/shell/states";
 import { Link } from "~/components/ui/link";
+import type { ChatLaunch } from "~/lib/chat/launch";
 import type { ChatMessage, ChatModelSelector } from "~/lib/chat/types";
 import { useChatStream } from "~/lib/chat/use-chat-stream";
 import type { PendingChatDraft } from "~/lib/companion-context";
@@ -139,6 +140,8 @@ export function ChatPanel({
   initialDraft,
   pendingChatDraft,
   attachFileId,
+  initialLaunch,
+  onLaunch,
 }: {
   agentId?: string;
   defaultModel?: ChatModelSelector;
@@ -159,6 +162,8 @@ export function ChatPanel({
   pendingChatDraft?: PendingChatDraft | null;
   /** An already-stored File to stage on the composer, handed over by the Files library. */
   attachFileId?: string | null;
+  initialLaunch?: ChatLaunch;
+  onLaunch?: () => void;
 }) {
   const {
     messages,
@@ -184,6 +189,21 @@ export function ChatPanel({
   const busy = status === "submitted" || status === "streaming";
 
   const [mode, setMode] = useState<ConversationMode | null>(initialMode ?? null);
+  const launched = useRef(false);
+  useEffect(() => {
+    if (!initialLaunch || launched.current) return;
+    let cancelled = false;
+    // Defer past StrictMode's cleanup so it cannot abort the first request then send it again.
+    queueMicrotask(() => {
+      if (cancelled || launched.current) return;
+      launched.current = true;
+      void send(initialLaunch.prompt, { mode: initialLaunch.mode });
+      onLaunch?.();
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [initialLaunch, onLaunch, send]);
 
   const handleModeChange = useCallback(
     (newMode: ConversationMode | null) => {

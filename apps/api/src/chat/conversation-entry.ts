@@ -8,6 +8,7 @@ import type { FastifyBaseLogger } from "fastify";
 import type { AssetPrincipal, TeamAssetService } from "../team-assets/service";
 import { mayUseAgent } from "./agent-access";
 import type { ConversationDoc, ConversationRepo } from "./conversations";
+import { chatRequestMode } from "./request-mode";
 import { buildAndStoreTitle } from "./title";
 import type { ChatBody } from "./turn-helpers";
 
@@ -126,7 +127,7 @@ function prepareConversation(
     userId: input.userId,
     agentId,
     model: undefined,
-    mode: input.body.mode,
+    mode: chatRequestMode(input.body.message.content, input.body.mode),
     createdAt: now,
     updatedAt: now,
   };

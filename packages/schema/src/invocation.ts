@@ -1,6 +1,7 @@
 /** Persist-first invocation request schemas; gateways must deny unregistered refs. */
 
 import { type Static, Type } from "@sinclair/typebox";
+import { ConversationModeSchema } from "./chat";
 
 /** A schema paired with the stable reference stored on the Artifact. */
 export interface InvocationRequestSchema {
@@ -49,6 +50,7 @@ export const CHAT_REQUEST_SCHEMA = {
       },
     },
     model: { type: "string", minLength: 1, pattern: "^\\S+$" },
+    mode: ConversationModeSchema,
     agentId: { type: "string", minLength: 1 },
     autonomy: { type: "string", enum: ["full", "supervised", "approval-required", "manual"] },
     hasTools: { type: "boolean" },
