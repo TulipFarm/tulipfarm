@@ -79,6 +79,52 @@ describe("Record write service", () => {
     expect(tickets.effects).toHaveLength(1);
   });
 
+  it("rejects a malformed email without persisting the Record", async () => {
+    const customers = new MemoryRepo();
+    const result = await createRecord(
+      {
+        type: "customer",
+        resource: {
+          schema: {
+            type: "object",
+            properties: { email: { type: "string", format: "email" } },
+            required: ["email"],
+          },
+        },
+        data: { email: "not-an-email" },
+      },
+      ports({ customer: customers })
+    );
+
+    expect(result).toMatchObject({
+      ok: false,
+      err: { code: 422, body: { path: "/email", boundary: "resource" } },
+    });
+    expect(customers.records).toHaveLength(0);
+    expect(customers.effects).toHaveLength(0);
+  });
+
+  it("accepts a valid email", async () => {
+    const customers = new MemoryRepo();
+    const result = await createRecord(
+      {
+        type: "customer",
+        resource: {
+          schema: {
+            type: "object",
+            properties: { email: { type: "string", format: "email" } },
+            required: ["email"],
+          },
+        },
+        data: { email: "muskan@example.com" },
+      },
+      ports({ customer: customers })
+    );
+
+    expect(result).toMatchObject({ ok: true, doc: { email: "muskan@example.com" } });
+    expect(customers.records).toHaveLength(1);
+  });
+
   it("revalidates a before-hook output and leaves immutable fields unchanged", async () => {
     const tickets = new MemoryRepo();
     tickets.records.set("ticket-1", {

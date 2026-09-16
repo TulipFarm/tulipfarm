@@ -161,6 +161,7 @@ const TICKET_SCHEMA = {
   properties: {
     title: { type: "string" },
     priority: { type: "string", enum: ["low", "high"] },
+    email: { type: "string", format: "email" },
   },
   required: ["title"],
 };
@@ -264,6 +265,36 @@ describe("resource routes", () => {
       });
       expect(res.statusCode).toBe(422);
       expect(res.json<{ path: string }>().path).toBe("/title");
+    });
+
+    it("returns 422 for a malformed email and does not persist the Record", async () => {
+      const res = await app.inject({
+        method: "POST",
+        url: "/api/v1/resources/ticket",
+        cookies: { [SESSION_COOKIE]: sid, [CSRF_COOKIE]: TEST_CSRF },
+        headers: { [CSRF_HEADER]: TEST_CSRF },
+        payload: { title: "Customer follow-up", email: "not-an-email" },
+      });
+
+      expect(res.statusCode).toBe(422);
+      expect(res.json<{ path: string; boundary: string }>()).toMatchObject({
+        path: "/email",
+        boundary: "resource",
+      });
+      expect(fakeRepo.docs.size).toBe(0);
+    });
+
+    it("accepts a valid email", async () => {
+      const res = await app.inject({
+        method: "POST",
+        url: "/api/v1/resources/ticket",
+        cookies: { [SESSION_COOKIE]: sid, [CSRF_COOKIE]: TEST_CSRF },
+        headers: { [CSRF_HEADER]: TEST_CSRF },
+        payload: { title: "Customer follow-up", email: "muskan@example.com" },
+      });
+
+      expect(res.statusCode).toBe(201);
+      expect(res.json<{ email: string }>().email).toBe("muskan@example.com");
     });
 
     it("returns 422 when a required field is present but empty", async () => {
