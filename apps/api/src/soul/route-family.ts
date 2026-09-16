@@ -86,6 +86,7 @@ export function registerSoulRouteFamily(
         requireAuth,
         authorizationCheck,
         opts.reconcileResources,
+        opts.resourceSchemaCompatibility,
         opts.rateLimiter,
         opts.auditService
       );

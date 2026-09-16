@@ -312,6 +312,7 @@ import { LiveRecordAuthorizer } from "./resources/authorize";
 import { startDelivery } from "./resources/outbox";
 import { reconcileResourceTables, registerResourceReconcile } from "./resources/reconcile";
 import { PgCounterStore, PgResourceRepoFactory } from "./resources/repo";
+import { ResourceSchemaCompatibilityService } from "./resources/schema-compatibility";
 import { runAuthorizers } from "./runs/authorization";
 import { runCanceller } from "./runs/cancel";
 import { RunEventNotifyListener } from "./runs/notify-listener";
@@ -959,6 +960,7 @@ async function boot() {
     const auditReadService = new AuditReadService(auditRepo);
     const obsConfig = parseObservabilityConfig(soulLoader.observabilityConfig);
     const resourceRepoFactory = new PgResourceRepoFactory(pool);
+    const resourceSchemaCompatibility = new ResourceSchemaCompatibilityService(pool);
     const counterStore = new PgCounterStore(pool);
     const reconcileResources = () => reconcileResourceTables(pool, soulLoader, console);
 
@@ -1462,7 +1464,13 @@ async function boot() {
         hookExecutor,
         events: domainEventEmitter,
       },
-      resourceTypes: { gitSync, soulWriter, soulLoader, reconcile: reconcileResources },
+      resourceTypes: {
+        gitSync,
+        soulWriter,
+        soulLoader,
+        reconcile: reconcileResources,
+        schemaCompatibility: resourceSchemaCompatibility,
+      },
       agentTools: {
         gitSync,
         soulWriter,
@@ -1871,6 +1879,7 @@ async function boot() {
       routeAuthorizer,
       authorizationGate: gateOptions,
       reconcileResources,
+      resourceSchemaCompatibility,
       reconcileSoulRoles: async () => {
         await soulLoader.reload();
         await reconcileSoulRoles(

@@ -10,6 +10,7 @@ import { CSRF_COOKIE, CSRF_HEADER } from "../../auth/csrf";
 import { SESSION_COOKIE } from "../../auth/middleware";
 import { MemorySessionStore } from "../../auth/session-store";
 import { createUser, type UserDoc, type UserRepo } from "../../auth/users";
+import type { ResourceSchemaCompatibility } from "../../resources/schema-compatibility";
 
 vi.mock("node:fs", () => ({ existsSync: vi.fn() }));
 
@@ -85,6 +86,13 @@ function makeFakeSoulLoader(resources: SoulResource[] = []): SoulLoader {
   } as unknown as SoulLoader;
 }
 
+const compatibleSchemas: ResourceSchemaCompatibility = {
+  publishIfCompatible: async (_type, _schema, publish) => ({
+    ok: true,
+    value: await publish(),
+  }),
+};
+
 describe("resource-type routes", () => {
   let app: FastifyInstance;
   let store: MemorySessionStore;
@@ -119,6 +127,7 @@ describe("resource-type routes", () => {
       gitSync,
       soulLoader,
       soulWriter: soulWriterDouble.writer,
+      resourceSchemaCompatibility: compatibleSchemas,
     });
   });
 
@@ -360,6 +369,7 @@ x-computed:
         gitSync,
         soulLoader,
         soulWriter: soulWriterDouble.writer,
+        resourceSchemaCompatibility: compatibleSchemas,
       });
 
       const res = await app.inject({
@@ -430,6 +440,52 @@ x-computed:
       vi.mocked(existsSync).mockReturnValue(true);
       const res = await app.inject(put({ schema: "- a\n- b\n" }));
       expect(res.statusCode).toBe(422);
+    });
+
+    it("returns affected Record IDs without publishing an incompatible schema", async () => {
+      vi.mocked(existsSync).mockReturnValue(true);
+      await app.close();
+      const originalSchema = {
+        type: "object",
+        properties: { title: { type: "string" }, amount: { type: "number" } },
+        required: ["title", "amount"],
+      };
+      soulLoader = makeFakeSoulLoader([
+        {
+          name: "ticket",
+          schema: originalSchema,
+          hasHooks: false,
+          hooksEnabled: true,
+        },
+      ]);
+      app = await buildApp({
+        sessionStore: store,
+        userRepo,
+        tokenRepo,
+        gitSync,
+        soulLoader,
+        soulWriter: soulWriterDouble.writer,
+        resourceSchemaCompatibility: {
+          publishIfCompatible: vi.fn().mockResolvedValue({
+            ok: false,
+            affectedRecordIds: ["89ad9fca-7048-41eb-a352-e353c9847940"],
+            affectedRecordCount: 1,
+          }),
+        },
+      });
+
+      const res = await app.inject(put({ schema: VALID_SCHEMA_YAML }));
+
+      expect(res.statusCode).toBe(422);
+      expect(res.json()).toEqual({
+        error: "proposed schema is incompatible with 1 existing record(s)",
+        boundary: "resource",
+        affectedRecordIds: ["89ad9fca-7048-41eb-a352-e353c9847940"],
+        affectedRecordCount: 1,
+      });
+      expect(soulWriterDouble.applied).toEqual([]);
+      expect(soulLoader.reload).not.toHaveBeenCalled();
+      expect(soulLoader.resources.get("ticket")?.schema).toEqual(originalSchema);
     });
   });
 
@@ -646,6 +702,7 @@ x-computed:
         gitSync,
         soulLoader,
         soulWriter: soulWriterDouble.writer,
+        resourceSchemaCompatibility: compatibleSchemas,
       });
 
       const res = await app.inject({
@@ -670,6 +727,7 @@ x-computed:
         gitSync,
         soulLoader,
         soulWriter: soulWriterDouble.writer,
+        resourceSchemaCompatibility: compatibleSchemas,
       });
 
       const res = await app.inject({
@@ -707,6 +765,7 @@ x-computed:
         gitSync,
         soulLoader,
         soulWriter: soulWriterDouble.writer,
+        resourceSchemaCompatibility: compatibleSchemas,
       });
     });
 
@@ -787,6 +846,7 @@ x-computed:
         gitSync,
         soulLoader,
         soulWriter: soulWriterDouble.writer,
+        resourceSchemaCompatibility: compatibleSchemas,
       });
     });
 
@@ -833,6 +893,7 @@ x-computed:
         gitSync,
         soulLoader,
         soulWriter: soulWriterDouble.writer,
+        resourceSchemaCompatibility: compatibleSchemas,
       });
 
       const res = await app.inject({

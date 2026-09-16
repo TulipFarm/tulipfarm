@@ -20,6 +20,7 @@ import {
 } from "@tulipfarm/tool-host";
 import { parse as parseYaml } from "yaml";
 import { firstError } from "../../platform/tool-args";
+import type { ResourceSchemaCompatibility } from "../../resources/schema-compatibility";
 import { SYSTEM_SOUL_COMMIT_ACTOR } from "../../runtime/soul-writer";
 import { soulCommitError } from "../../tools/soul-faults";
 
@@ -31,6 +32,7 @@ export interface ResourceTypeToolContext {
   soulLoader: SoulLoader;
   readonly soulWriter: SoulWriter;
   reconcile?: () => Promise<void>;
+  schemaCompatibility?: ResourceSchemaCompatibility;
   requestContext?: RequestContext;
 }
 
@@ -269,7 +271,7 @@ const resourceTypeSchema = defineApiTool<ResourceTypeToolContext>({
 const resourceTypeUpdate = defineApiTool<ResourceTypeToolContext>({
   name: "resource_type_update",
   description:
-    "Replace the schema of an existing resource type. The write is validated and committed atomically through the Soul write gateway.",
+    "Replace the schema of an existing resource type. Every live Record is checked before publication; an incompatible change is rejected with affected Record IDs. Compatible writes are committed atomically through the Soul write gateway.",
   mutating: true,
   tier: "system",
   inputSchema: UPDATE_SCHEMA,
@@ -306,36 +308,52 @@ const resourceTypeUpdate = defineApiTool<ResourceTypeToolContext>({
       if (envelopeError !== undefined) return err("validation_error", envelopeError);
     }
 
+    if (ctx.schemaCompatibility === undefined) {
+      return err("internal_error", "resource schema compatibility check unavailable");
+    }
+
     try {
-      await ctx.soulWriter.apply({
-        subject: `soul: update resource type ${name}`,
-        source: "agent",
-        actor: ctx.requestContext?.actor ?? SYSTEM_SOUL_COMMIT_ACTOR,
-        businessId: DEPLOYMENT_BUSINESS_ID,
-        changes:
-          envelopeBody === undefined
-            ? [
-                {
-                  op: "put",
-                  target: { kind: "Resource", slug: name, definitionMode: "legacy" },
-                  content: schemaYaml,
-                },
-              ]
-            : [
-                { op: "put", target: { kind: "Resource", slug: name }, content: envelopeBody },
-                {
-                  op: "delete",
-                  target: { kind: "Resource", slug: name, definitionMode: "legacy" },
-                },
-              ],
-      });
+      const publication = await ctx.schemaCompatibility.publishIfCompatible(
+        name,
+        validated.parsed,
+        async () => {
+          await ctx.soulWriter.apply({
+            subject: `soul: update resource type ${name}`,
+            source: "agent",
+            actor: ctx.requestContext?.actor ?? SYSTEM_SOUL_COMMIT_ACTOR,
+            businessId: DEPLOYMENT_BUSINESS_ID,
+            changes:
+              envelopeBody === undefined
+                ? [
+                    {
+                      op: "put",
+                      target: { kind: "Resource", slug: name, definitionMode: "legacy" },
+                      content: schemaYaml,
+                    },
+                  ]
+                : [
+                    { op: "put", target: { kind: "Resource", slug: name }, content: envelopeBody },
+                    {
+                      op: "delete",
+                      target: { kind: "Resource", slug: name, definitionMode: "legacy" },
+                    },
+                  ],
+          });
+          await ctx.soulLoader.reload();
+        }
+      );
+      if (!publication.ok) {
+        return err(
+          "validation_error",
+          `proposed schema is incompatible with ${publication.affectedRecordCount} existing record(s): ${publication.affectedRecordIds.join(", ")}`
+        );
+      }
     } catch (e) {
       if (e instanceof SoulWriteError) return soulWriteFault(e);
       return err("internal_error", reason(e));
     }
 
     try {
-      await ctx.soulLoader.reload();
       await ctx.reconcile?.();
     } catch (e) {
       return err("internal_error", reason(e));

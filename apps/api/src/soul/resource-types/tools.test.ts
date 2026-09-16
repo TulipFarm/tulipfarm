@@ -1,5 +1,6 @@
 import type { GitSyncService, SoulLoader, SoulResource, SoulWriter } from "@tulipfarm/soul";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import type { ResourceSchemaCompatibility } from "../../resources/schema-compatibility";
 import { RESOURCE_TYPE_TOOLS, type ResourceTypeToolContext } from "./tools";
 
 vi.mock("node:fs", () => ({ existsSync: vi.fn() }));
@@ -38,6 +39,13 @@ function makeSoulWriter(): SoulWriter {
   } as unknown as SoulWriter;
 }
 
+const compatibleSchemas: ResourceSchemaCompatibility = {
+  publishIfCompatible: async (_type, _schema, publish) => ({
+    ok: true,
+    value: await publish(),
+  }),
+};
+
 function makeCtx(resources: SoulResource[] = []): ResourceTypeToolContext & {
   gitSync: ReturnType<typeof makeGitSync>;
   soulLoader: ReturnType<typeof makeSoulLoader>;
@@ -54,6 +62,7 @@ function makeCtx(resources: SoulResource[] = []): ResourceTypeToolContext & {
       apply: ReturnType<typeof vi.fn>;
       readCompanion: ReturnType<typeof vi.fn>;
     },
+    schemaCompatibility: compatibleSchemas,
     reconcile: vi.fn().mockResolvedValue(undefined),
   };
 }
@@ -437,6 +446,32 @@ describe("resource_type_update", () => {
     const res = await updateTool.handler({ name: "ticket", schema: "type: 123\n" }, ctx);
     expect(res).toMatchObject({ success: false, error: { code: "validation_error" } });
     expect(ctx.soulWriter.apply).not.toHaveBeenCalled();
+  });
+
+  it("rejects an incompatible schema before writing the Soul", async () => {
+    const ctx = makeCtx([
+      { name: "ticket", schema: { type: "object" }, hasHooks: false, hooksEnabled: true },
+    ]);
+    ctx.schemaCompatibility = {
+      publishIfCompatible: vi.fn().mockResolvedValue({
+        ok: false,
+        affectedRecordIds: ["89ad9fca-7048-41eb-a352-e353c9847940"],
+        affectedRecordCount: 1,
+      }),
+    };
+
+    const res = await updateTool.handler({ name: "ticket", schema: UPDATED_YAML }, ctx);
+
+    expect(res).toMatchObject({
+      success: false,
+      error: {
+        code: "validation_error",
+        message: expect.stringContaining("89ad9fca-7048-41eb-a352-e353c9847940"),
+      },
+    });
+    expect(ctx.soulWriter.apply).not.toHaveBeenCalled();
+    expect(ctx.soulLoader.reload).not.toHaveBeenCalled();
+    expect(ctx.reconcile).not.toHaveBeenCalled();
   });
 
   it("returns validation_error for missing args", async () => {
