@@ -8,6 +8,7 @@ import type {
 } from "@tulipfarm/agent-runtime";
 import { DEPLOYMENT_BUSINESS_ID } from "@tulipfarm/constants";
 import { PLATFORM_RUNTIME_TOOLS } from "@tulipfarm/platform-tools";
+import { compileYamlPlan, YamlPlanError } from "@tulipfarm/run-kernel";
 import { ajv, type definitions } from "@tulipfarm/schema";
 import {
   type CommandRefusalReason,
@@ -570,7 +571,8 @@ const ROUTINE_NAME_RE = /^[a-z][a-z0-9-]*$/;
 const ROUTINE_FORGE_SCHEMA: Record<string, unknown> = {
   type: "object",
   additionalProperties: false,
-  required: ["name", "definition"],
+  required: ["name"],
+  oneOf: [{ required: ["definition"] }, { required: ["planYaml"] }],
   properties: {
     name: {
       type: "string",
@@ -582,9 +584,19 @@ const ROUTINE_FORGE_SCHEMA: Record<string, unknown> = {
       description:
         "Canonical published Routine definition. metadata.slug must match name. spec.states must be an array of State objects [{ name, type, ... }]. Triggers live in spec.triggers on this same document.",
     },
+    planYaml: {
+      type: "string",
+      minLength: 1,
+      maxLength: 131_072,
+      description:
+        "Alternatively, the complete YAML Plan previously previewed with plan_compile and confirmed by the user. Its name must match name. Compiled deterministically into an on-demand Routine; do not also supply definition.",
+    },
   },
 };
-const validateRoutineForge = ajv.compile(ROUTINE_FORGE_SCHEMA);
+type RoutineForgeArgs =
+  | { name: string; definition: Record<string, unknown>; planYaml?: never }
+  | { name: string; planYaml: string; definition?: never };
+const validateRoutineForge = ajv.compile<RoutineForgeArgs>(ROUTINE_FORGE_SCHEMA);
 
 /**
  * Stamps the authoring principal onto a Trigger's `backgroundIdentity`, replacing whatever the
@@ -634,7 +646,11 @@ export const routineForgeTool = defineApiTool<PlatformToolContext>({
     "the Routine is auto-assigned to your own Team, falling back to the workspace's Everyone Team " +
     "if you have none — never ask the user for a Team id. If the user names a specific Team by " +
     "name, call `team_list` to resolve it to an id first; never ask a user to type or paste a Team " +
-    "UUID.",
+    "UUID. For a YAML Plan, preview it with plan_compile and obtain confirmation, then pass " +
+    "the unchanged source as planYaml INSTEAD OF definition. The plan's name must match name. " +
+    "It becomes an on-demand Routine with dependency-ordered States, not a second executor. " +
+    "Forging never starts that Plan: call trigger_routine after publication and use " +
+    "routine_run_get to report actual progress.",
   mutating: true,
   tier: "platform",
   inputSchema: ROUTINE_FORGE_SCHEMA,
@@ -647,12 +663,17 @@ export const routineForgeTool = defineApiTool<PlatformToolContext>({
   handler: async (args, ctx) => {
     if (!validateRoutineForge(args))
       return err("validation_error", firstError(validateRoutineForge.errors));
-    const { name, definition } = args as {
-      name: string;
-      definition: Record<string, unknown>;
-    };
+    const { name } = args;
     if (!ROUTINE_NAME_RE.test(name)) return err("validation_error", "invalid routine name");
 
+    let definition: Record<string, unknown>;
+    try {
+      definition =
+        args.planYaml === undefined ? args.definition : compileYamlPlan(args.planYaml).definition;
+    } catch (error) {
+      if (error instanceof YamlPlanError) return err("validation_error", error.message);
+      throw error;
+    }
     const validation = validateRoutineForgeDefinitions({ name, definition });
     if (!validation.ok) return err("validation_error", validation.message);
     const { routine, triggers: triggerDefinitions } = validation;

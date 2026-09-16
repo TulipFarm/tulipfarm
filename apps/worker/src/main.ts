@@ -551,7 +551,11 @@ export async function main(): Promise<void> {
       scripts: new SandboxRoutineScriptPort(),
       // Runtime Tools called with no model in the loop. The dispatch names no Agent, so the
       // control plane authorizes it as the Run's own recorded subject.
-      actions: new DispatchRoutineActionPort(observedToolDispatch),
+      actions: new DispatchRoutineActionPort(observedToolDispatch, {
+        links: childAncestry,
+        runs: runStore,
+        waits,
+      }),
       // Approval resume tokens stay API-side; Worker gets only wait id and later decision.
       approvals: new HttpRoutineApprovalPort(internalApi),
       childRoutines: new HttpChildRoutinePort(internalApi),

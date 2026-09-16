@@ -122,6 +122,73 @@ describe("routine_forge", () => {
     return { soulWriter, onRoutinesChanged };
   }
 
+  const planYaml = `apiVersion: tulipfarm.ai/v1
+kind: Plan
+name: daily-report
+version: 1
+steps:
+  - id: Read
+    tool: get_current_time
+  - id: Check
+    needs: [Read]
+    tool: validate_artifact
+    input:
+      artifact: "\${states.Read.output.current}"
+      schema:
+        type: string
+`;
+
+  it("compiles a YAML Plan through the normal Routine publication path", async () => {
+    const result = await routineForgeTool.handler(
+      { name: "daily-report", planYaml },
+      { ...ctx(), runtimeToolNames: () => new Set(["get_current_time", "validate_artifact"]) }
+    );
+
+    expect(result).toMatchObject({ success: true, data: { committed: true, triggerSlugs: [] } });
+    expect(soulWriter.apply).toHaveBeenCalledOnce();
+    const request = soulWriter.apply.mock.calls[0]?.[0];
+    expect(request.changes[0].target).toEqual({ kind: "Routine", slug: "daily-report" });
+    expect(parseYaml(request.changes[0].content)).toMatchObject({
+      kind: "Routine",
+      metadata: { slug: "daily-report", lifecycle: "published" },
+      spec: {
+        states: expect.arrayContaining([
+          expect.objectContaining({ name: "Read", type: "action", action: "get_current_time" }),
+          expect.objectContaining({
+            name: "Check",
+            type: "action",
+            input: expect.objectContaining({ artifact: "${states.Read.output.current}" }),
+          }),
+        ]),
+      },
+    });
+    expect(onRoutinesChanged).toHaveBeenCalledOnce();
+  });
+
+  it("refuses ambiguous, invalid, and mismatched YAML Plans before writing", async () => {
+    for (const args of [
+      { name: "daily-report", definition: VALID_ROUTINE, planYaml },
+      { name: "another-report", planYaml },
+      { name: "daily-report", planYaml: planYaml.replace("needs: [Read]", "needs: [Missing]") },
+      { name: "daily-report", planYaml: "steps: [" },
+    ]) {
+      expect(await routineForgeTool.handler(args, ctx())).toMatchObject({
+        success: false,
+        error: { code: "validation_error" },
+      });
+    }
+    expect(soulWriter.apply).not.toHaveBeenCalled();
+  });
+
+  it("does not claim a YAML Plan is usable when publication fails", async () => {
+    soulWriter.apply.mockResolvedValueOnce({ published: false });
+    const result = await routineForgeTool.handler(
+      { name: "daily-report", planYaml },
+      { ...ctx(), runtimeToolNames: () => new Set(["get_current_time", "validate_artifact"]) }
+    );
+    expect(result).toMatchObject({ success: false, error: { code: "internal_error" } });
+  });
+
   it("commits the Routine and the Triggers it owns as one document", async () => {
     const result = await routineForgeTool.handler(
       { name: "daily-report", definition: routineWithTriggers(trigger()) },

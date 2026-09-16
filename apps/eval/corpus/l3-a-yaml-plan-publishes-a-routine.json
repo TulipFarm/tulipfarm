@@ -1,0 +1,63 @@
+{
+  "id": "l3-a-yaml-plan-publishes-a-routine",
+  "tier": "l3",
+  "agent": "support",
+  "input": [
+    {
+      "role": "user",
+      "content": "Publish this confirmed YAML Plan as the Routine check-time using soul_write with definitionMode plan. Do not execute it.\napiVersion: tulipfarm.ai/v1\nkind: Plan\nname: check-time\nversion: 1\nsteps:\n  - id: Read\n    tool: get_current_time\n  - id: Check\n    needs: [Read]\n    tool: validate_artifact\n    input:\n      artifact: \"${states.Read.output.current}\"\n      schema:\n        type: string\n"
+    }
+  ],
+  "tools": [
+    {
+      "name": "soul_write",
+      "description": "Publish one Soul definition. definitionMode plan compiles YAML Plan source into a Routine through the production compiler and writer.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "kind": { "type": "string" },
+          "slug": { "type": "string" },
+          "content": { "type": "string" },
+          "definitionMode": { "type": "string" }
+        },
+        "required": ["kind", "slug", "content", "definitionMode"]
+      }
+    }
+  ],
+  "script": [
+    {
+      "kind": "tool_calls",
+      "calls": [
+        {
+          "callId": "publish-plan",
+          "name": "soul_write",
+          "arguments": {
+            "kind": "Routine",
+            "slug": "check-time",
+            "definitionMode": "plan",
+            "content": "apiVersion: tulipfarm.ai/v1\nkind: Plan\nname: check-time\nversion: 1\nsteps:\n  - id: Read\n    tool: get_current_time\n  - id: Check\n    needs: [Read]\n    tool: validate_artifact\n    input:\n      artifact: \"${states.Read.output.current}\"\n      schema:\n        type: string\n"
+          }
+        }
+      ]
+    },
+    { "kind": "text", "text": "Published check-time. I have not executed it." }
+  ],
+  "journey": [
+    {
+      "input": [{ "role": "user", "content": "Is check-time available as a Routine now?" }],
+      "script": [{ "kind": "text", "text": "check-time is available as a Routine." }]
+    }
+  ],
+  "expect": [
+    { "kind": "soul_committed", "path": "routines/check-time/routine.yaml" },
+    { "kind": "soul_published", "artifact": "Routine:check-time" },
+    { "kind": "tool_call_count", "count": 1 },
+    {
+      "kind": "tool_argument_equals",
+      "name": "soul_write",
+      "path": "definitionMode",
+      "value": "plan"
+    },
+    { "kind": "run_status", "status": "succeeded" }
+  ]
+}

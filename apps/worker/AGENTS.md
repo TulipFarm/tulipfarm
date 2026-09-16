@@ -77,6 +77,9 @@ reconciliation, turn execution, delivery classification, projections, and outbox
 - Routine execution reads only the Run's exact signed bundle and immutable request Artifact.
 - Routine replay safety depends on durable occurrence keys and immutable Tool outputs. Confirmed
   legacy effects without output park; `awaiting_child` re-enters only its bound child lookup.
+- Routine `action` States register Tool approvals through `toolApprovalWaits` and resume the same
+  call id; child links and waits must match the occurrence, and only a successful child releases
+  downstream States. The action adapter requires durable child-link, Run, and wait readers.
 - Wait ids derive from `(runId, occurrence key)`; `event` waits are refused as `unsupported_wait`.
 - Routine `tool` States are the only Routine Tool authority: authorize, reserve, then dispatch.
 - A Routine Tool intent carries the objects the pinned ToolContract's `spec.targets` declares, so a

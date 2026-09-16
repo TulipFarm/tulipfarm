@@ -6,6 +6,7 @@
 import { formatTemporalContext } from "@tulipfarm/agent-runtime";
 import { ajv } from "@tulipfarm/schema";
 import { type ApiToolDefinition, defineApiTool } from "@tulipfarm/tool-host";
+import { planCompileTool } from "./plan-compile";
 import { err, ok } from "./tool-result";
 
 /** The whole context these Tools need: a Run reference when one is in scope. */
@@ -318,4 +319,5 @@ export const PLATFORM_RUNTIME_TOOLS: ApiToolDefinition<PlatformRuntimeContext>[]
   completeTaskTool,
   getCurrentTimeTool,
   planDeclareTool,
+  planCompileTool,
 ];

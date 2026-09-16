@@ -131,6 +131,13 @@ export interface RoutineActionExecutionPort {
     plan: ReturnType<typeof planActionDispatch>;
   }): Promise<
     | { readonly kind: "succeeded"; readonly output: unknown }
+    | { readonly kind: "awaiting_approval"; readonly approvalId: string }
+    | {
+        readonly kind: "awaiting_child";
+        readonly childRunId: string;
+        readonly waitId: string;
+      }
+    | { readonly kind: "awaiting_retry"; readonly waitId: string }
     | { readonly kind: "failed"; readonly reason: string }
     | { readonly kind: "unavailable"; readonly reason: string }
   >;
@@ -537,11 +544,12 @@ class RoutineExecution<TBundle, TAuthorityLayer> {
     this.assertActive();
     let outcome: StepOutcome | ChainOutcome | null;
 
-    // A Tool approval resumes by replaying the same deterministic effect plan. Other waiting
+    // Tool and action waits resume by replaying the same deterministic effect plan. Other waiting
     // States are resolved by their wait, unless it is a concurrency backoff that re-enters work.
     if (
       row.status === "waiting" &&
       state.type !== "tool" &&
+      state.type !== "action" &&
       !(await this.backoffElapsed(state, key))
     ) {
       this.assertActive();
@@ -715,6 +723,24 @@ class RoutineExecution<TBundle, TAuthorityLayer> {
     if (result.kind === "succeeded") {
       this.produced.set(key, result.output);
       return stateOutcome(state);
+    }
+    if (result.kind === "awaiting_approval") {
+      const waits = this.ctx.options.toolApprovalWaits;
+      if (waits === undefined) {
+        throw new RoutineExecutionRefusal("unsupported_state", state.name);
+      }
+      await waits.register({
+        runId: this.ctx.run.id,
+        stateKey: key,
+        approvalId: result.approvalId,
+      });
+      this.assertActive();
+      await this.transition(key, "running", "waiting");
+      return "waiting";
+    }
+    if (result.kind === "awaiting_child" || result.kind === "awaiting_retry") {
+      await this.transition(key, "running", "waiting");
+      return "waiting";
     }
     if (result.kind !== "failed") {
       await this.park(key, `routine:${result.reason}`);

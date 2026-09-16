@@ -35,7 +35,7 @@ Only its own Cases need updating when their observable behaviour moves.
 | `src/eval-soul.ts` | `loadEvalSoul` — copies the fixture to a throwaway git repo and reads it with the real `SoulLoader`; `soulContext` maps an Agent into the assembler. |
 | `src/guardrails.ts` | Runs the Eval Soul's `guardrails.yaml` through the production `TurnGuardrails`; collects refusals off the real Run events. |
 | `src/l3/` | Persisted Chat and Routine tiers on in-process PGlite; Integration authoring routes through the shared workflow, real approval wait, P09 journal, Soul writer, publisher, and next-Turn loader. |
-| `src/l3/soul-write.ts` | The `soul_write` Tool, over the real writer *and* the real publisher, so a Case can tell a commit from a publication. |
+| `src/l3/soul-write.ts` | The `soul_write` Tool, over the real writer *and* the real publisher; `definitionMode: plan` first uses the production YAML Plan compiler. |
 | `src/l3/file-store.ts` | The one place `file_create` runs for real, so a Case can observe Chat draft versus saved File lifecycle and audience. |
 | `src/verdict.ts` | `caseVerdict`, `scoreable` — one Case collapsed into one word. Shared so the grid and a Baseline delta can never disagree. |
 | `src/baseline.ts` | `compareToBaseline` — pure. Refuses a delta across two Corpora or two models. |

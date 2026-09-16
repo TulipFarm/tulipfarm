@@ -6,6 +6,7 @@ import {
 } from "@tulipfarm/agent-runtime";
 import {
   type ArtifactContent,
+  type ChildLink,
   InMemoryStateConcurrencyStore,
   InMemoryStateContentionStore,
   InMemoryStateRetryStore,
@@ -28,6 +29,7 @@ import type { BundleDefinition, RuntimeBundle } from "@tulipfarm/soul";
 import type { PersistedRun, PersistedState, PersistedWait } from "@tulipfarm/storage";
 import type { RunEventAppendPort, StateTransitionPort } from "@tulipfarm/turn-executor";
 import { describe, expect, it, vi } from "vitest";
+import { DispatchRoutineActionPort, type RoutineActionPort } from "./action-port";
 import {
   BundleRoutineAgentPort,
   type RoutineAgentOutcome,
@@ -2654,6 +2656,251 @@ describe("createRoutineExecutor — emit States", () => {
       errorEvidenceRef: "routine:input_not_evaluable:Start",
     });
     expect(emissions.announced).toHaveLength(0);
+  });
+});
+
+describe("createRoutineExecutor — action waits", () => {
+  const document = definition([
+    {
+      type: "action",
+      name: "Start",
+      action: "spawn_subagent",
+      input: { task: "Inspect the request" },
+      transition: "Finish",
+    },
+    {
+      type: "compute",
+      name: "Finish",
+      input: { result: `\${states.Start.output.answer}` },
+      end: true,
+    },
+  ]);
+
+  function actionExecutor(
+    harness: StateHarness,
+    actions: RoutineActionPort,
+    register?: (input: {
+      runId: string;
+      stateKey: string;
+      approvalId: string;
+    }) => Promise<{ waitId: string }>
+  ) {
+    return createRoutineExecutor({
+      definitions: { load: async () => ({ document, bundle: {} }) },
+      artifacts: { read: async () => requestArtifact },
+      runs: { listStates: async () => [...harness.states.values()] },
+      scheduler: harness.scheduler,
+      transitions: harness,
+      waits: harness.waitPort,
+      actions,
+      ...(register === undefined ? {} : { toolApprovalWaits: { register } }),
+      now: () => new Date(STARTED_AT),
+    });
+  }
+
+  const noChildren = {
+    links: { callLink: async () => null },
+    runs: { find: async () => null },
+    waits: { find: async () => null },
+  };
+
+  it("re-enters an approval with the same call id and replays a committed effect only once", async () => {
+    const harness = new StateHarness([state("Start")]);
+    let approved = false;
+    const confirmed = new Map<string, unknown>();
+    const effects = vi.fn();
+    const dispatch = vi.fn<ToolDispatchPort["dispatch"]>(async (call) => {
+      if (confirmed.has(call.callId)) {
+        return {
+          status: "succeeded",
+          callId: call.callId,
+          replayed: true,
+          output: confirmed.get(call.callId),
+        };
+      }
+      if (!approved) {
+        return { status: "awaiting_approval", callId: call.callId, approvalId: "approval" };
+      }
+      effects();
+      const output = { answer: "approved work" };
+      confirmed.set(call.callId, output);
+      return { status: "succeeded", callId: call.callId, output };
+    });
+    const register = vi.fn(async () => ({ waitId: "approval-wait" }));
+    const execute = actionExecutor(
+      harness,
+      new DispatchRoutineActionPort({ dispatch }, noChildren),
+      register
+    );
+
+    await expect(execute(run())).resolves.toEqual({ status: "waiting" });
+    await expect(execute(run())).resolves.toEqual({ status: "waiting" });
+    expect(harness.states.get("Start")?.status).toBe("waiting");
+    expect(harness.states.has("Finish")).toBe(false);
+    expect(effects).not.toHaveBeenCalled();
+    expect(register).toHaveBeenCalledWith({
+      runId: run().id,
+      stateKey: "Start",
+      approvalId: "approval",
+    });
+
+    approved = true;
+    harness.failAfterSchedule = true;
+    await expect(execute(run())).rejects.toThrow("injected crash");
+    expect(harness.states.get("Finish")?.status).toBe("pending");
+    await expect(execute(run())).resolves.toEqual({ status: "succeeded" });
+    expect(effects).toHaveBeenCalledTimes(1);
+    expect(dispatch.mock.calls.map(([call]) => call.callId)).toEqual(
+      Array(4).fill(routineEffectId(run().id, "Start"))
+    );
+    expect(harness.states.get("Finish")?.output).toEqual({ result: "approved work" });
+    await expect(execute(run())).resolves.toEqual({ status: "succeeded" });
+    expect(dispatch).toHaveBeenCalledTimes(4);
+  });
+
+  it("refuses to park for an approval without the control-plane registrar", async () => {
+    const harness = new StateHarness([state("Start")]);
+    const execute = actionExecutor(harness, {
+      execute: async () => ({ kind: "awaiting_approval", approvalId: "approval" }),
+    });
+    await expect(execute(run())).resolves.toEqual({ status: "needs_reconciliation" });
+    expect(harness.states.has("Finish")).toBe(false);
+  });
+
+  it("does not release the State after ownership is lost during approval registration", async () => {
+    const harness = new StateHarness([state("Start")]);
+    const controller = new AbortController();
+    const execute = actionExecutor(
+      harness,
+      { execute: async () => ({ kind: "awaiting_approval", approvalId: "approval" }) },
+      async () => {
+        controller.abort("run_lease_lost");
+        return { waitId: "approval-wait" };
+      }
+    );
+    await expect(execute(run(), controller.signal)).rejects.toBeInstanceOf(RunInterruptedError);
+    expect(harness.states.get("Start")?.status).toBe("running");
+    expect(harness.states.has("Finish")).toBe(false);
+  });
+
+  it.each(["succeeded", "failed", "cancelled"] as const)(
+    "re-enters only the bound child and blocks later States until it is %s",
+    async (terminal) => {
+      const harness = new StateHarness([state("Start")]);
+      let link: ChildLink | null = null;
+      let childStatus: PersistedRun["status"] = "running";
+      const spawn = vi.fn();
+      const dispatch = vi.fn<ToolDispatchPort["dispatch"]>(async (call) => {
+        if (link === null) {
+          spawn();
+          link = {
+            parentRunId: run().id,
+            childRunId: "child",
+            callId: call.callId,
+            resume: { waitId: "child-wait", token: "server-only" },
+            authority: { tools: [], classifications: [], limits: {} },
+            authorityBinding: "delegated",
+            detachedAt: null,
+            createdAt: STARTED_AT,
+          };
+          await harness.waitPort.register({
+            id: "child-wait",
+            businessId: run().businessId,
+            runId: run().id,
+            stateKey: "Start",
+            kind: "child_run",
+            aggregation: "first",
+            schemaRef: "tulipfarm.run.child_completion.v1",
+            allowedPrincipals: ["run:child"],
+            expectedSignals: 1,
+            quorum: null,
+            deadlineAt: "2026-08-03T00:00:00.000Z",
+            createdAt: STARTED_AT,
+          });
+          return {
+            status: "awaiting_child",
+            callId: call.callId,
+            childRunId: "child",
+            waitId: "child-wait",
+          };
+        }
+        return { status: "succeeded", callId: call.callId, output: { answer: "child answer" } };
+      });
+      const actions = new DispatchRoutineActionPort(
+        { dispatch },
+        {
+          links: { callLink: async () => link },
+          runs: { find: async () => ({ ...run(), id: "child", status: childStatus }) },
+          waits: harness.waitPort,
+        }
+      );
+      const execute = actionExecutor(harness, actions);
+      await expect(execute(run())).resolves.toEqual({ status: "waiting" });
+      await expect(execute(run())).resolves.toEqual({ status: "waiting" });
+      expect(harness.states.get("Start")?.status).toBe("waiting");
+      expect(harness.states.has("Finish")).toBe(false);
+      expect(dispatch).toHaveBeenCalledTimes(1);
+
+      childStatus = terminal;
+      const wait = harness.waits.get("child-wait");
+      if (wait === undefined) throw new Error("child wait missing");
+      harness.waits.set("child-wait", { ...wait, status: "satisfied" });
+      await expect(execute(run())).resolves.toEqual(
+        terminal === "succeeded"
+          ? { status: "succeeded" }
+          : { status: "failed", errorEvidenceRef: `routine:action_child_${terminal}` }
+      );
+      expect(spawn).toHaveBeenCalledTimes(1);
+      expect(dispatch.mock.calls.map(([call]) => call.callId)).toEqual(
+        Array(2).fill(routineEffectId(run().id, "Start"))
+      );
+      expect(harness.states.has("Finish")).toBe(terminal === "succeeded");
+      if (terminal === "succeeded") {
+        expect(harness.states.get("Finish")?.output).toEqual({ result: "child answer" });
+      }
+    }
+  );
+
+  it("fails a denied approval without running the next State", async () => {
+    const harness = new StateHarness([state("Start", "waiting")]);
+    const execute = actionExecutor(
+      harness,
+      new DispatchRoutineActionPort(
+        {
+          dispatch: async (call) => ({
+            status: "denied",
+            callId: call.callId,
+            reason: "approval_rejected",
+          }),
+        },
+        noChildren
+      )
+    );
+    await expect(execute(run())).resolves.toEqual({
+      status: "failed",
+      errorEvidenceRef: "routine:action_denied_approval_rejected",
+    });
+    expect(harness.states.has("Finish")).toBe(false);
+  });
+
+  it("replays a provider retry instead of skipping the action", async () => {
+    const harness = new StateHarness([state("Start")]);
+    const calls: string[] = [];
+    let retryElapsed = false;
+    const execute = actionExecutor(harness, {
+      execute: async (request) => {
+        calls.push(request.plan.effectId);
+        return retryElapsed
+          ? { kind: "succeeded", output: { answer: "retried" } }
+          : { kind: "awaiting_retry", waitId: "retry-wait" };
+      },
+    });
+    await expect(execute(run())).resolves.toEqual({ status: "waiting" });
+    expect(harness.states.has("Finish")).toBe(false);
+    retryElapsed = true;
+    await expect(execute(run())).resolves.toEqual({ status: "succeeded" });
+    expect(calls).toEqual(Array(2).fill(routineEffectId(run().id, "Start")));
+    expect(harness.states.get("Finish")?.output).toEqual({ result: "retried" });
   });
 });
 

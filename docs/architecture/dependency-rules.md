@@ -44,7 +44,7 @@ An omitted edge is forbidden.
 | `packages/tool-host` | `packages/schema`, `packages/authz`, `packages/soul`, `packages/run-kernel`, `packages/tool-broker`, `packages/surface`, `packages/storage`, `packages/observability` |
 | `packages/kv` | `packages/schema`, `packages/storage`, `packages/tool-host` |
 | `packages/files` | `packages/constants`, `packages/schema`, `packages/storage`, `packages/tool-host` |
-| `packages/platform-tools` | `packages/schema`, `packages/tool-host`, `packages/agent-runtime` |
+| `packages/platform-tools` | `packages/schema`, `packages/tool-host`, `packages/agent-runtime`, `packages/run-kernel` |
 | `packages/built-in-agents` | `packages/schema`, `packages/soul`, `packages/agent-runtime` |
 | `packages/surface` | `packages/schema` |
 | `packages/surface-web` | `packages/surface` |
@@ -60,6 +60,9 @@ An omitted edge is forbidden.
 `packages/tool-broker`; the broker does not import Integration implementations. `packages/agent-runtime`
 may submit child-Run commands through the public `packages/run-kernel` port; the kernel never imports
 the Agent runtime. Applications register implementations during composition.
+
+`packages/platform-tools` uses the public Run kernel compiler to preview YAML plans. The preview
+performs no writes or execution; the API publishes the compiled Routine through the Soul writer.
 
 ## Application import allowlist
 

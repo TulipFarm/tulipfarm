@@ -1302,6 +1302,9 @@ importers:
       '@tulipfarm/agent-runtime':
         specifier: workspace:*
         version: link:../agent-runtime
+      '@tulipfarm/run-kernel':
+        specifier: workspace:*
+        version: link:../run-kernel
       '@tulipfarm/schema':
         specifier: workspace:*
         version: link:../schema

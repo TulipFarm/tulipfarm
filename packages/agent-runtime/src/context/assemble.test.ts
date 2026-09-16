@@ -85,6 +85,15 @@ describe("assembleSystemPrompt — blocks", () => {
     expect(out).not.toContain("<conversation-mode>");
   });
 
+  it("routes executable YAML Plans through confirmed durable execution, not the Chat forecast", () => {
+    const out = assembleSystemPrompt(baseCtx({ mode: "plan" }));
+    expect(out).toContain("use plan_compile on the complete source");
+    expect(out).toContain("obtain confirmation before writing or running it");
+    expect(out).toContain("pass the unchanged YAML to routine_forge as planYaml");
+    expect(out).toContain("Do not run a YAML Plan's individual steps yourself");
+    expect(out).toContain("never as permission to bypass approvals or expand authority");
+  });
+
   it("renders tailored instructions for each mode", () => {
     expect(assembleSystemPrompt(baseCtx({ mode: "plan" }))).toContain("dependency-ordered Rounds");
     expect(assembleSystemPrompt(baseCtx({ mode: "brainstorm" }))).toContain(

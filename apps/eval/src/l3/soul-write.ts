@@ -15,6 +15,7 @@ import { execFileSync } from "node:child_process";
 import { generateKeyPairSync } from "node:crypto";
 import type { ToolDispatchPort } from "@tulipfarm/agent-runtime";
 import type { OimReleasePackageWriter } from "@tulipfarm/integrations";
+import { compileYamlPlan, YamlPlanError } from "@tulipfarm/run-kernel";
 import { artifactDirectory } from "@tulipfarm/schema";
 import {
   compileExecutionBundle,
@@ -33,6 +34,7 @@ import {
   SoulWriter,
 } from "@tulipfarm/soul";
 import { InMemorySoulPublicationStore } from "@tulipfarm/storage";
+import { stringify } from "yaml";
 import type { EvalSoul } from "../eval-soul.ts";
 
 export const SOUL_WRITE_TOOL = "soul_write";
@@ -217,9 +219,9 @@ export function soulWriterTool(soul: EvalSoul): SoulWriterTool {
         const args = (call.arguments ?? {}) as WriteArguments;
         const kind = typeof args.kind === "string" ? args.kind : undefined;
         const slug = typeof args.slug === "string" ? args.slug : undefined;
-        const content = typeof args.content === "string" ? args.content : undefined;
+        let content = typeof args.content === "string" ? args.content : undefined;
         const companion = typeof args.companion === "string" ? args.companion : undefined;
-        const definitionMode =
+        let definitionMode: "canonical" | "legacy" =
           args.definitionMode === "canonical" || args.definitionMode === "legacy"
             ? args.definitionMode
             : "legacy";
@@ -232,6 +234,25 @@ export function soulWriterTool(soul: EvalSoul): SoulWriterTool {
         }
 
         try {
+          if (args.definitionMode === "plan") {
+            if (kind !== "Routine" || companion !== undefined) {
+              return {
+                status: "invalid_arguments",
+                callId: call.callId,
+                reason: "A YAML Plan must publish a Routine definition, not a companion.",
+              };
+            }
+            const { definition } = compileYamlPlan(content);
+            if (definition.metadata.slug !== slug) {
+              return {
+                status: "invalid_arguments",
+                callId: call.callId,
+                reason: "Plan name must match the Routine slug.",
+              };
+            }
+            content = stringify(definition);
+            definitionMode = "canonical";
+          }
           const result = await writer.apply({
             subject:
               typeof args.subject === "string" && args.subject.length > 0
@@ -258,6 +279,10 @@ export function soulWriterTool(soul: EvalSoul): SoulWriterTool {
             output: { commit: result.commitSha, paths: result.paths },
           };
         } catch (cause) {
+          if (cause instanceof YamlPlanError) {
+            denials.push(cause.message);
+            return { status: "denied", callId: call.callId, reason: cause.message };
+          }
           // A rejected write is a legitimate result the model must handle, not a tier failure: the
           // writer refusing an invalid artifact is exactly the behaviour a Case may be asserting.
           if (cause instanceof SoulWriteError) {

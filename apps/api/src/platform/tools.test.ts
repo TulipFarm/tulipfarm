@@ -1109,6 +1109,7 @@ describe("PLATFORM_TOOLS registry", () => {
       "complete_task",
       "get_current_time",
       "plan_declare",
+      "plan_compile",
     ]);
   });
 
