@@ -108,6 +108,12 @@ describe("soulContext", () => {
     expect(ctx.personality).toContain("Never guess a status.");
   });
 
+  it("loads the code-defined default Chat assistant exactly as production does", async () => {
+    const ctx = soulContext(soul, "__tulipfarm_default__");
+
+    expect(ctx.personality).toContain("## Building the system");
+  });
+
   it("contributes the Agent body and nothing else", async () => {
     // Everything a Soul used to push into the prompt — the business, the catalogue, the Skill
     // index — is now reached through a Tool. A field reappearing here is a prompt block returning.
@@ -116,6 +122,7 @@ describe("soulContext", () => {
 
   it("refuses an Agent the Eval Soul does not define", async () => {
     expect(() => soulContext(soul, "nonexistent")).toThrow(/nonexistent/);
+    expect(() => soulContext(soul, "nonexistent")).toThrow(/__tulipfarm_default__/);
     expect(() => soulContext(soul, "nonexistent")).toThrow(/support, triage/);
   });
 
