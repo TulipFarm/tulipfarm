@@ -55,4 +55,17 @@ describe("shared ajv instance", () => {
     expect(validate({ remindAt: "not-a-date" })).toBe(false);
     expect(validate({ remindAt: "2026-02-31T12:00:00Z" })).toBe(false);
   });
+
+  it("validates email format on compiled schemas", () => {
+    const validate = ajv.compile({
+      type: "object",
+      properties: {
+        email: { type: "string", format: "email" },
+      },
+      required: ["email"],
+    });
+
+    expect(validate({ email: "muskan@example.com" })).toBe(true);
+    expect(validate({ email: "not-an-email" })).toBe(false);
+  });
 });
