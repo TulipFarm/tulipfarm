@@ -88,12 +88,15 @@ const EXPECTED_FAMILY_TOOL_NAMES = [
   {
     family: "resource-types",
     names: [
+      "create_private_resource_type",
       "create_resource_hooks",
       "create_resource_type",
       "list_resource_types",
       "resource_hooks_delete",
       "resource_hooks_get",
+      "resource_type_clear_domain",
       "resource_type_schema",
+      "resource_type_set_domain",
       "resource_type_update",
     ],
   },

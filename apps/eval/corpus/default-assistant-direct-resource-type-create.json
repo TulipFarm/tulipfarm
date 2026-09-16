@@ -25,6 +25,10 @@
     },
     {
       "kind": "prompt_contains",
+      "text": "`create_private_resource_type` instead so the type is protected from its first write"
+    },
+    {
+      "kind": "prompt_contains",
       "text": "returns the saved Schema"
     },
     {

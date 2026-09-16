@@ -1,4 +1,9 @@
 import type { GitSyncService, SoulLoader, SoulResource, SoulWriter } from "@tulipfarm/soul";
+import {
+  authorizeToolIntent,
+  type PublishedToolContract,
+  toolContractSpecOf,
+} from "@tulipfarm/tool-broker";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { RESOURCE_TYPE_TOOLS, type ResourceTypeToolContext } from "./tools";
 
@@ -64,9 +69,26 @@ function getTool(name: string) {
   return tool;
 }
 
+function publishedContract(toolName: string): PublishedToolContract {
+  const spec = toolContractSpecOf(getTool(toolName));
+  return {
+    ...spec,
+    definitionId: `definition:${toolName}`,
+    authoredVersion: 1,
+    publishedDigest: "a".repeat(64),
+    requiredActions: spec.requiredActions ?? [],
+    requiredResources: spec.requiredResources ?? [],
+    dataClasses: spec.dataClasses ?? [],
+    allowedDestinations: spec.allowedDestinations ?? [],
+  };
+}
+
 const createTool = getTool("create_resource_type");
+const createPrivateTool = getTool("create_private_resource_type");
 const listTool = getTool("list_resource_types");
 const schemaTool = getTool("resource_type_schema");
+const setDomainTool = getTool("resource_type_set_domain");
+const clearDomainTool = getTool("resource_type_clear_domain");
 const updateTool = getTool("resource_type_update");
 const createHooksTool = getTool("create_resource_hooks");
 const getHooksTool = getTool("resource_hooks_get");
@@ -80,7 +102,13 @@ describe("RESOURCE_TYPE_TOOLS targetsFor", () => {
   it("derives the resource type slug from name arguments", () => {
     const cases = [
       { name: "create_resource_type", args: { name: "ticket", schema: VALID_SCHEMA_YAML } },
+      {
+        name: "create_private_resource_type",
+        args: { name: "ticket", schema: VALID_SCHEMA_YAML, domain: "engineering" },
+      },
       { name: "resource_type_schema", args: { name: "ticket" } },
+      { name: "resource_type_set_domain", args: { name: "ticket", domain: "engineering" } },
+      { name: "resource_type_clear_domain", args: { name: "ticket" } },
       { name: "resource_type_update", args: { name: "ticket", schema: VALID_SCHEMA_YAML } },
       { name: "create_resource_hooks", args: { name: "ticket", source: VALID_HOOK } },
       { name: "resource_hooks_get", args: { name: "ticket" } },
@@ -102,7 +130,10 @@ describe("RESOURCE_TYPE_TOOLS targetsFor", () => {
     const rawInputs: unknown[] = [{}, { unexpected: true }, { name: 7 }, null, []];
     for (const tool of [
       createTool,
+      createPrivateTool,
       schemaTool,
+      setDomainTool,
+      clearDomainTool,
       updateTool,
       createHooksTool,
       getHooksTool,
@@ -123,10 +154,116 @@ describe("RESOURCE_TYPE_TOOLS targetsFor", () => {
     expect(deleteHooksTool.authorization.action).toBe("soul.resource_type.hooks.delete");
   });
 
+  it("requires both create and admin domain authority to create a private Resource type", () => {
+    expect(createPrivateTool.authorization.action).toBe("soul.resource_type.create");
+    expect(createPrivateTool.authorization.requiredActions).toEqual([
+      "soul.resource_type.create",
+      "soul.resource_type.set_domain",
+    ]);
+    expect(setDomainTool.authorization.action).toBe("soul.resource_type.set_domain");
+    expect(clearDomainTool.authorization.action).toBe("soul.resource_type.set_domain");
+  });
+
+  it("denies private creation unless the caller also has domain authority", () => {
+    const contract = publishedContract("create_private_resource_type");
+    const intent = {
+      intentId: "intent-private",
+      businessId: "business-1",
+      runId: "run-1",
+      stateId: "state-1",
+      toolId: "create_private_resource_type",
+      toolVersion: "1",
+      action: "soul.resource_type.create",
+      targetRefs: createPrivateTool.targetsFor({
+        name: "salary-review",
+        schema: VALID_SCHEMA_YAML,
+        domain: "hr",
+      }),
+      arguments: {},
+      idempotencyKey: "private",
+    };
+    const policy = (actions: readonly string[]) => ({
+      authorityLayers: [
+        {
+          name: "principal",
+          grants: actions.map((action) => ({
+            action,
+            resourceType: "soul.resource_type",
+            effect: "allow" as const,
+          })),
+        },
+      ],
+      guardrailRules: [{ id: "allow", effect: "allow" as const, action: "*", resourceType: "*" }],
+      dlpRules: [{ dataClass: "soul_definition" }],
+      guardrailRevision: "test",
+    });
+
+    expect(
+      authorizeToolIntent(intent, contract, policy(["soul.resource_type.create"]))
+    ).toMatchObject({ outcome: "denied", reason: "authorization_denied" });
+    expect(
+      authorizeToolIntent(
+        intent,
+        contract,
+        policy(["soul.resource_type.create", "soul.resource_type.set_domain"])
+      )
+    ).toMatchObject({ outcome: "authorized" });
+  });
+
   it("keeps list_resource_types at the coarse resource-type catalog scope", () => {
     expect(listTool.authorization.resources).toEqual(["soul.resource_type"]);
     expect(listTool.targetsFor({})).toEqual([]);
     expect(listTool.targetsFor(null)).toEqual([]);
+  });
+
+  describe("create_private_resource_type", () => {
+    beforeEach(() => {
+      vi.clearAllMocks();
+      vi.mocked(existsSync).mockReturnValue(false);
+    });
+
+    it("creates a private Resource type as one canonical write", async () => {
+      const ctx = makeCtx();
+      const res = await createPrivateTool.handler(
+        { name: "salary-review", schema: VALID_SCHEMA_YAML, domain: "hr" },
+        ctx
+      );
+
+      expect(res).toEqual({
+        success: true,
+        data: {
+          name: "salary-review",
+          schema: VALID_SCHEMA_YAML,
+          hasHooks: false,
+          domain: "hr",
+        },
+      });
+      expect(ctx.soulWriter.apply).toHaveBeenCalledWith(
+        expect.objectContaining({
+          subject: "soul: add private resource type salary-review",
+          changes: [
+            {
+              op: "put",
+              target: { kind: "Resource", slug: "salary-review" },
+              content: expect.stringContaining("domain: hr"),
+            },
+          ],
+        })
+      );
+      expect(ctx.soulLoader.reload).toHaveBeenCalledOnce();
+      expect(ctx.reconcile).toHaveBeenCalledOnce();
+    });
+
+    it("rejects an invalid domain before writing", async () => {
+      const ctx = makeCtx();
+      const res = await createPrivateTool.handler(
+        { name: "salary-review", schema: VALID_SCHEMA_YAML, domain: "HR private" },
+        ctx
+      );
+
+      expect(res).toMatchObject({ success: false, error: { code: "validation_error" } });
+      expect(ctx.soulWriter.apply).not.toHaveBeenCalled();
+    });
   });
 });
 
@@ -352,6 +489,100 @@ describe("resource_type_update", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+  });
+
+  describe("resource type domain administration", () => {
+    beforeEach(() => {
+      vi.clearAllMocks();
+    });
+
+    it("sets or changes a domain without changing the schema", async () => {
+      const ctx = makeCtx([
+        {
+          name: "salary-review",
+          domain: "hr",
+          schema: { type: "object", properties: { title: { type: "string" } } },
+          hasHooks: false,
+          hooksEnabled: true,
+        },
+      ]);
+      const res = await setDomainTool.handler({ name: "salary-review", domain: "finance" }, ctx);
+
+      expect(res).toMatchObject({
+        success: true,
+        data: { name: "salary-review", domain: "finance" },
+      });
+      expect(ctx.soulWriter.apply).toHaveBeenCalledWith(
+        expect.objectContaining({
+          subject: "soul: set resource type salary-review domain to finance",
+          changes: [
+            {
+              op: "put",
+              target: { kind: "Resource", slug: "salary-review" },
+              content: expect.stringMatching(/domain: finance[\s\S]*title:/),
+            },
+            {
+              op: "delete",
+              target: { kind: "Resource", slug: "salary-review", definitionMode: "legacy" },
+            },
+          ],
+        })
+      );
+      expect(ctx.soulLoader.reload).toHaveBeenCalledOnce();
+    });
+
+    it("clears a domain without changing the schema", async () => {
+      const ctx = makeCtx([
+        {
+          name: "salary-review",
+          domain: "hr",
+          schema: { type: "object", properties: { title: { type: "string" } } },
+          hasHooks: false,
+          hooksEnabled: true,
+        },
+      ]);
+      const res = await clearDomainTool.handler({ name: "salary-review" }, ctx);
+
+      expect(res).toMatchObject({
+        success: true,
+        data: { name: "salary-review" },
+      });
+      expect(res).not.toMatchObject({ data: { domain: expect.anything() } });
+      expect(ctx.soulWriter.apply).toHaveBeenCalledWith(
+        expect.objectContaining({
+          subject: "soul: clear resource type salary-review domain",
+          changes: [
+            {
+              op: "put",
+              target: {
+                kind: "Resource",
+                slug: "salary-review",
+                definitionMode: "legacy",
+              },
+              content: expect.stringContaining("title:"),
+            },
+            {
+              op: "delete",
+              target: { kind: "Resource", slug: "salary-review" },
+            },
+          ],
+        })
+      );
+      expect(ctx.soulLoader.reload).toHaveBeenCalledOnce();
+    });
+
+    it("rejects setting or clearing a domain for an unknown Resource type", async () => {
+      const ctx = makeCtx();
+
+      await expect(
+        setDomainTool.handler({ name: "missing", domain: "hr" }, ctx)
+      ).resolves.toMatchObject({ success: false, error: { code: "not_found" } });
+      await expect(clearDomainTool.handler({ name: "missing" }, ctx)).resolves.toMatchObject({
+        success: false,
+        error: { code: "not_found" },
+      });
+      expect(ctx.soulWriter.apply).not.toHaveBeenCalled();
+    });
   });
 
   it("replaces the legacy schema definition through the write gateway, reloads, reconciles", async () => {
@@ -631,12 +862,15 @@ describe("RESOURCE_TYPE_TOOLS", () => {
     expect(inputSchema.properties.schema.description).toContain('x-links: { target: "customer" }');
   });
 
-  it("exports 7 tools with correct mutating flags", () => {
-    expect(RESOURCE_TYPE_TOOLS).toHaveLength(7);
+  it("exports 10 tools with correct mutating flags", () => {
+    expect(RESOURCE_TYPE_TOOLS).toHaveLength(10);
     const byName = Object.fromEntries(RESOURCE_TYPE_TOOLS.map((t) => [t.name, t]));
     expect(byName.create_resource_type.mutating).toBe(true);
+    expect(byName.create_private_resource_type.mutating).toBe(true);
     expect(byName.list_resource_types.mutating).toBe(false);
     expect(byName.resource_type_schema.mutating).toBe(false);
+    expect(byName.resource_type_set_domain.mutating).toBe(true);
+    expect(byName.resource_type_clear_domain.mutating).toBe(true);
     expect(byName.resource_type_update.mutating).toBe(true);
     expect(byName.create_resource_hooks.mutating).toBe(true);
     expect(byName.resource_hooks_get.mutating).toBe(false);

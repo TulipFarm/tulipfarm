@@ -47,6 +47,9 @@ describe("default chat harness", () => {
   it("keeps a complete Resource type specification to one write round trip", () => {
     expect(DEFAULT_ASSISTANT.body).toContain("One exception avoids needless model round trips");
     expect(DEFAULT_ASSISTANT.body).toContain("call `create_resource_type` directly");
+    expect(DEFAULT_ASSISTANT.body).toContain(
+      "access-control domain, call\n  `create_private_resource_type` instead"
+    );
     expect(DEFAULT_ASSISTANT.body).toContain("do not\n  list, pre-validate, or re-read it");
     expect(DEFAULT_ASSISTANT.body).toContain("returns the saved Schema");
   });
