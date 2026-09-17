@@ -1,5 +1,42 @@
 # Changelog
 
+## [0.18.34](https://github.com/TulipFarm/tulipfarm/compare/v0.18.33...v0.18.34) (2026-09-17)
+
+### Features
+
+* **packs:** add preview-first catalog and Chat installation ([#970](https://github.com/TulipFarm/tulipfarm/issues/970)) ([1e4ef56](https://github.com/TulipFarm/tulipfarm/commit/1e4ef5642d7f7e344ec1dc92e8915686f96d5d10))
+* **plan:** execute YAML dependency plans as durable routines ([#953](https://github.com/TulipFarm/tulipfarm/issues/953)) ([fadc7d7](https://github.com/TulipFarm/tulipfarm/commit/fadc7d77eb76c2b797b5de3ed4c498cf958a95d4))
+* **resources:** add delete dependency policies ([#997](https://github.com/TulipFarm/tulipfarm/issues/997)) ([937eb41](https://github.com/TulipFarm/tulipfarm/commit/937eb411e0d9629028d8170eef4868b70810fa05))
+
+### Bug Fixes
+
+* **guardrails:** make blocked Tool feedback truthful ([#979](https://github.com/TulipFarm/tulipfarm/issues/979)) ([058add2](https://github.com/TulipFarm/tulipfarm/commit/058add256acc84b0698af6bb52e44eace29d4eee))
+* **guardrails:** show effective policy and safe write status ([#973](https://github.com/TulipFarm/tulipfarm/issues/973)) ([297f051](https://github.com/TulipFarm/tulipfarm/commit/297f0517d0bf8181fa6a401048d90f82ab187bbc))
+* **resources:** enforce email format on record writes ([#960](https://github.com/TulipFarm/tulipfarm/issues/960)) ([ee5fb35](https://github.com/TulipFarm/tulipfarm/commit/ee5fb35c16bf9ba18e79fb2813598182cb6de6f2))
+* **resources:** expose private domain authoring in chat ([#969](https://github.com/TulipFarm/tulipfarm/issues/969)) ([d81962e](https://github.com/TulipFarm/tulipfarm/commit/d81962e34f3b266b3e3962aeff62dd149755110b))
+* **resources:** match generated ID summary prefix ([#976](https://github.com/TulipFarm/tulipfarm/issues/976)) ([6284af7](https://github.com/TulipFarm/tulipfarm/commit/6284af761f1faad00e59a325cc1952a540aa3b7c))
+* **resources:** reject duplicate wizard fields ([#974](https://github.com/TulipFarm/tulipfarm/issues/974)) ([f66851b](https://github.com/TulipFarm/tulipfarm/commit/f66851bbe57da71f9a44fabc290c2981384eff23))
+* **resources:** reject incompatible schema updates ([#971](https://github.com/TulipFarm/tulipfarm/issues/971)) ([b338c43](https://github.com/TulipFarm/tulipfarm/commit/b338c43bc1c23d554a94d51e1d37d544d60ee1b5))
+* **resources:** reject stale schema replacements ([#995](https://github.com/TulipFarm/tulipfarm/issues/995)) ([f85b324](https://github.com/TulipFarm/tulipfarm/commit/f85b3248f92d04e6c04af15196f0547c57c72b51))
+* **resources:** serialize dependency link writes ([#1006](https://github.com/TulipFarm/tulipfarm/issues/1006)) ([349bf6c](https://github.com/TulipFarm/tulipfarm/commit/349bf6c42dfaf096047117848a9d5e6d4cc75434))
+* **resources:** show nested validation paths ([#985](https://github.com/TulipFarm/tulipfarm/issues/985)) ([ec66c58](https://github.com/TulipFarm/tulipfarm/commit/ec66c58be64cbed30f3af121acf66f9cc3e2d0ef))
+* **resources:** streamline exact type creation ([#958](https://github.com/TulipFarm/tulipfarm/issues/958)) ([803cf1a](https://github.com/TulipFarm/tulipfarm/commit/803cf1add28794350670967de2e2bf8d6a2da24c))
+* **resources:** validate calendar dates ([#977](https://github.com/TulipFarm/tulipfarm/issues/977)) ([e3c0159](https://github.com/TulipFarm/tulipfarm/commit/e3c015932a4911d4eab54a8edd425b4962311303))
+* **web:** add Resource error recovery ([#1002](https://github.com/TulipFarm/tulipfarm/issues/1002)) ([dd9b63e](https://github.com/TulipFarm/tulipfarm/commit/dd9b63ec30f339ab1aad8078bb35c907a8697e3a))
+* **web:** clear optional Record relationships ([#992](https://github.com/TulipFarm/tulipfarm/issues/992)) ([4025d09](https://github.com/TulipFarm/tulipfarm/commit/4025d0928483b9e66300538b651fecb6fab87dbd))
+* **web:** distinguish resource write conflicts ([#959](https://github.com/TulipFarm/tulipfarm/issues/959)) ([c3b04d0](https://github.com/TulipFarm/tulipfarm/commit/c3b04d036b4a3cb4134f23db09efc960cd327650))
+* **web:** make resource validation errors accessible ([#1000](https://github.com/TulipFarm/tulipfarm/issues/1000)) ([88acf06](https://github.com/TulipFarm/tulipfarm/commit/88acf06b4ba7c72fe9052c88b5a745bab3a7987c))
+* **web:** preserve definition list semantics ([#1001](https://github.com/TulipFarm/tulipfarm/issues/1001)) ([227cb44](https://github.com/TulipFarm/tulipfarm/commit/227cb4490cbd07cc443f1f8d7f7fc7f19d9d1f8a))
+* **web:** preserve mixed enum values ([#986](https://github.com/TulipFarm/tulipfarm/issues/986)) ([be19a7a](https://github.com/TulipFarm/tulipfarm/commit/be19a7a802b8b87311928b237f35ea7516b2210f))
+* **web:** preserve multiline record fields ([#972](https://github.com/TulipFarm/tulipfarm/issues/972)) ([1b1f52b](https://github.com/TulipFarm/tulipfarm/commit/1b1f52b45fd2f8c4d6916ee3a8aed79f031dcffc))
+* **web:** preserve optional Boolean absence ([#987](https://github.com/TulipFarm/tulipfarm/issues/987)) ([f4fab4f](https://github.com/TulipFarm/tulipfarm/commit/f4fab4f3e52be857022603f7fc9e351137edfa70))
+* **web:** reject invalid native date drafts ([#989](https://github.com/TulipFarm/tulipfarm/issues/989)) ([7391179](https://github.com/TulipFarm/tulipfarm/commit/7391179fd7342e1bc4ee7752caf0db530abbc8d4))
+* **web:** reject lossy numeric record values ([#984](https://github.com/TulipFarm/tulipfarm/issues/984)) ([7cbea5e](https://github.com/TulipFarm/tulipfarm/commit/7cbea5e2609a59c43c07836231d3024042700179))
+* **web:** reset record form when edit target changes ([#990](https://github.com/TulipFarm/tulipfarm/issues/990)) ([f530b1d](https://github.com/TulipFarm/tulipfarm/commit/f530b1d51be5f8af75fd3463d8000f7911fb8ae7))
+* **web:** restore focus after dialog cancellation ([#1005](https://github.com/TulipFarm/tulipfarm/issues/1005)) ([082726c](https://github.com/TulipFarm/tulipfarm/commit/082726c094632d527baa694f9e2edd68bf8e7e38))
+* **web:** search all declared resource fields ([#975](https://github.com/TulipFarm/tulipfarm/issues/975)) ([d49a103](https://github.com/TulipFarm/tulipfarm/commit/d49a10368062a87ef7826b00bac0c52c215c89b2))
+* **web:** warn before discarding resource drafts ([#978](https://github.com/TulipFarm/tulipfarm/issues/978)) ([29ea1e4](https://github.com/TulipFarm/tulipfarm/commit/29ea1e41ed2dc86f4b2c38796ce9f778f5ef13d9))
+
 ## [0.18.33](https://github.com/TulipFarm/tulipfarm/compare/v0.18.32...v0.18.33) (2026-09-14)
 
 ### Features
