@@ -69,6 +69,7 @@ export default function ResourceEdit() {
         <p className="text-destructive">error: schema parse failed, {schemaError}</p>
       ) : (
         <ResourceForm
+          key={`${type}:${id}`}
           fields={fields}
           mode="edit"
           initial={record}
