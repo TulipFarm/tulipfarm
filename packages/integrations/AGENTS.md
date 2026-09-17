@@ -53,6 +53,7 @@ Owns adapter contracts, event normalization, source ACLs, sync checkpoints, and 
   fixture-only process-local handles must never be wired into a running deployment.
 - Integration events must resolve external principals; never borrow Conversation owner identity.
 - Knowledge sync: preserve ACLs, explicit domain identity mappings, live-authorize sensitive data.
+- Snapshot ACL and deletion reads consume all continuation pages within `maxPagesPerRun`; an incomplete read fails closed rather than publishing a partial ACL or completing deletion checkpoints.
 - Unreadable/unverifiable permissions remove or suppress content; never leak it.
 - Advance checkpoints only after full commit; one source failure must not stall others.
 - This package may not import `@tulipfarm/knowledge`; `src/knowledge/` mirrors store records.

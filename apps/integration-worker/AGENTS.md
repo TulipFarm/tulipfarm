@@ -19,7 +19,8 @@ reconciliation, and rate limits for channel workers.
 | `src/config.ts`, `src/data-dir.ts` | Env/defaults and volume-backed worker credential loading. |
 | `src/channels/` | Channel loop registration; add `DrainableLoop`s here. |
 | `src/oim-ingress/` | OIM registration recovery, polling, websocket supervision, and durable inbox cycle. |
-| `src/oim-knowledge/` | OIM Knowledge sync registration and drainable polling loop. |
+| `src/oim-knowledge/` | Durable selected-scope Knowledge subscription checks, completed-sync evidence, and drainable polling loop. |
+| `src/consumer-readiness.ts` | Readiness from recent successful OIM consumer cycles, not provider-health claims. |
 | `src/oim-runtime.ts`, `src/oim-worker-host.ts` | Production OIM composition and internal host. |
 | `src/slack/` | Transport scaffolds exported by `src/index.ts`. |
 | `src/github/` | Provider-specific Integration worker code. |
@@ -35,6 +36,7 @@ reconciliation, and rate limits for channel workers.
 - OIM operation hosts recheck the expected canonical manifest digest, package companions, current
   Connection, and credential lease immediately before each provider request.
 - Serve `/livez` and `/readyz`; drain cleanly on `SIGTERM`/`SIGINT`.
+- Declared OIM WebSocket ingress is unsupported and rejected; do not imply the dormant supervisor is live.
 - Slack Socket Mode ingress and delivery polling register loops through `src/channels/`.
 - Every Slack `events_api` envelope passes `channels/mention-gate.ts` before the adapter; the gate
   is a required dispatch dependency, never an option.

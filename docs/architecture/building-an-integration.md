@@ -161,6 +161,28 @@ A `knowledge` block declares provider objects that can be synchronized into know
 must preserve provider ACLs, ownership, source locators, and fenced checkpoints. A package removal
 tombstones or quarantines its published content before durable cleanup completes.
 
+OIM Knowledge scheduling reads durable `oim_knowledge_subscriptions`, not the content it emits.
+The authenticated operations API exposes declared source kinds, selected scopes, and enable,
+update, and disable controls for an exact authorized Connection. The integration worker discovers
+enabled subscriptions even before the first source exists and after the last source is deleted.
+Updating selected scopes preserves classification and ACL freshness limits; disabling sync does
+not erase content or grant access. Provider ACLs and live authorization still govern retrieval.
+Migration 132 carries prior OIM source scopes forward without tying their lifetime to content.
+
+Operational evidence is read-only at `GET /api/v1/integrations/:key/operations`; the subscription
+write is `PUT /api/v1/integrations/:key/connections/:connectionId/knowledge-subscription`.
+The `IntegrationOperations({ integrationKey })` web component consumes these routes. Counts
+describe durable ingress handoff, not outbound reply success or completed Runs. Unrecorded
+timestamps are unknown, and error payloads never include provider responses or credentials.
+Worker readiness requires recent successful consumer cycles; it is not provider certification.
+
+OIM WebSocket ingress is not supported by the production transport. Creating a Connection for
+such a declaration is rejected explicitly; existing active socket declarations fail polling
+discovery rather than being reported as supervised. Legacy Slack Socket Mode is a separate path.
+Snapshot ACL and deletion continuations are consumed within the Knowledge page bound; reaching
+that bound fails closed and leaves completion pending. This is distinct from live authorization,
+whose membership pagination remains in its dedicated adapter.
+
 Use the bundled packages as examples, but validate against the current profile schemas rather than
 copying an older package.
 
