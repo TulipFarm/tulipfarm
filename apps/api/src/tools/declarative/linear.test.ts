@@ -48,6 +48,8 @@ describe("linear bundled integration", () => {
       "linear_create_comment",
       "linear_create_issue",
       "linear_list_issues",
+      "linear_list_team_members",
+      "linear_list_team_states",
       "linear_list_teams",
       "linear_read_issue",
       "linear_update_issue",
@@ -63,6 +65,8 @@ describe("linear bundled integration", () => {
   it("gates GraphQL mutations while keeping GraphQL queries readable", () => {
     const mutating = Object.fromEntries(build().tools.map((tool) => [tool.name, tool.mutating]));
     expect(mutating.linear_list_teams).toBe(false);
+    expect(mutating.linear_list_team_states).toBe(false);
+    expect(mutating.linear_list_team_members).toBe(false);
     expect(mutating.linear_list_issues).toBe(false);
     expect(mutating.linear_read_issue).toBe(false);
     expect(mutating.linear_create_issue).toBe(true);
