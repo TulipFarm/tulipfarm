@@ -68,4 +68,29 @@ describe("shared ajv instance", () => {
     expect(validate({ email: "muskan@example.com" })).toBe(true);
     expect(validate({ email: "not-an-email" })).toBe(false);
   });
+
+  it("validates calendar dates without normalizing impossible days", () => {
+    const validate = ajv.compile({
+      type: "object",
+      properties: {
+        joinedOn: { type: "string", format: "date" },
+      },
+      required: ["joinedOn"],
+    });
+
+    expect(validate({ joinedOn: "2024-02-29" })).toBe(true);
+    expect(validate({ joinedOn: "2026-02-29" })).toBe(false);
+    expect(validate({ joinedOn: "2026-02-30" })).toBe(false);
+    expect(validate({ joinedOn: "2026-04-31" })).toBe(false);
+    expect(validate({ joinedOn: "2026-13-01" })).toBe(false);
+    expect(validate({ joinedOn: "2026-2-03" })).toBe(false);
+    expect(validate({ joinedOn: "not-a-date" })).toBe(false);
+
+    const plainString = ajv.compile({
+      type: "object",
+      properties: { joinedOn: { type: "string" } },
+      required: ["joinedOn"],
+    });
+    expect(plainString({ joinedOn: "2026-02-30" })).toBe(true);
+  });
 });

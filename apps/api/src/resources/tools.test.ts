@@ -451,6 +451,25 @@ describe("record_create", () => {
     });
   });
 
+  it("rejects an impossible calendar date without persisting the Record", async () => {
+    const factory = new FakeRepoFactory();
+    const soulLoader = makeSoulLoader({
+      customer: {
+        type: "object",
+        properties: { joinedOn: { type: "string", format: "date" } },
+        required: ["joinedOn"],
+      },
+    });
+    const tool = getTool("record_create");
+    const result = await tool.handler(
+      { type: "customer", data: { joinedOn: "2026-02-30" } },
+      makeCtx(factory, soulLoader)
+    );
+
+    expect(result).toMatchObject({ success: false, error: { code: "validation_error" } });
+    expect((factory.forType("customer") as FakeRepo).docs.size).toBe(0);
+  });
+
   // The Agent path has to refuse the same blank the HTTP route refuses, or a Record an operator
   // could not create by hand is one `record_create` call away (#434).
   it("returns validation_error and writes nothing when a required field is only whitespace", async () => {
@@ -565,6 +584,35 @@ describe("record_update", () => {
       makeCtx(factory)
     );
     expect(result).toMatchObject({ success: false, error: { code: "not_found" } });
+  });
+
+  it("rejects an impossible calendar date without changing the Record or version", async () => {
+    const factory = new FakeRepoFactory();
+    const repo = factory.forType("customer") as FakeRepo;
+    const id = randomUUID();
+    const now = new Date();
+    await repo.insert({
+      _id: id,
+      version: 1,
+      createdAt: now,
+      updatedAt: now,
+      joinedOn: "2024-02-29",
+    });
+    const soulLoader = makeSoulLoader({
+      customer: {
+        type: "object",
+        properties: { joinedOn: { type: "string", format: "date" } },
+        required: ["joinedOn"],
+      },
+    });
+    const tool = getTool("record_update");
+    const result = await tool.handler(
+      { type: "customer", id, version: 1, data: { joinedOn: "2026-02-30" } },
+      makeCtx(factory, soulLoader)
+    );
+
+    expect(result).toMatchObject({ success: false, error: { code: "validation_error" } });
+    expect(repo.docs.get(id)).toMatchObject({ joinedOn: "2024-02-29", version: 1 });
   });
 });
 

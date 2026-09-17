@@ -67,4 +67,6 @@ test("filter text for a format: date field matches the day the user sees", () =>
 
 test("a malformed date-only value passes through unchanged", () => {
   expect(text(fields().due, "not-a-date")).toBe("not-a-date");
+  expect(text(fields().due, "2026-02-30")).toBe("2026-02-30");
+  expect(text(fields().due, " 2026-03-15 ")).toBe(" 2026-03-15 ");
 });
