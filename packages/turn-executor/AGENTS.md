@@ -21,6 +21,7 @@ Run event emission, Tool-call announcement or preview, or the ports a Turn host 
 | --- | --- |
 | `src/ports.ts` | What the executor requires of its host: `RunExecutor`, `RunOutcome`, `SpendSink`, `ModelCallReceiptSource`, spend records. |
 | `src/chat-executor.ts` | `createChatExecutor` — the Chat Run executor. Resolves Turn facts from the Run and rebuilds per-Run state. |
+| `src/integration-reply.ts` | Settles a completed Turn's Run only after the provider reply verdict; preserves retry waits and reconciliation. |
 | `src/driver.ts` | `TurnDriver` — one Turn attempt, from Context through model to completion. |
 | `src/agent-state.ts` | `AgentStateRunner`, approval waits, State transitions. |
 | `src/conversation-turn.ts` | `ConversationTurnCompleter` — durable Turn completion. |
