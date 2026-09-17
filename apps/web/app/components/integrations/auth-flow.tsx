@@ -410,9 +410,12 @@ export function IntegrationAuthFlow({
    * do.
    */
   const lastProven = steps.reduce((acc, s, i) => (s.satisfied && s.producesEnv ? i : acc), -1);
-  const floor = lastProven + 1;
-  const [localCursor, setLocalCursor] = useState(floor);
-  const cursor = Math.max(localCursor, floor);
+  const [completedLocally, setCompletedLocally] = useState<number[]>([]);
+  const cursor = steps.findIndex((step, index) =>
+    step.producesEnv
+      ? !step.satisfied
+      : index > lastProven && !completedLocally.includes(step.index)
+  );
   const active = steps[cursor];
   if (!active) return null;
 
@@ -428,7 +431,7 @@ export function IntegrationAuthFlow({
           providerLabel={providerLabel}
           step={active}
           onAdvance={onAdvance}
-          onLocalAdvance={() => setLocalCursor(cursor + 1)}
+          onLocalAdvance={() => setCompletedLocally((current) => [...current, active.index])}
           calloutError={calloutError}
         />
       </div>
