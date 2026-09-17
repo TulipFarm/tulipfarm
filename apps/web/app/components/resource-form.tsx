@@ -2,6 +2,7 @@ import { type FormEvent, useRef, useState } from "react";
 import { LinkCombobox } from "~/components/link-combobox";
 import { Button } from "~/components/ui/button";
 import { Link } from "~/components/ui/link";
+import { Textarea } from "~/components/ui/textarea";
 import { ApiError } from "~/lib/api";
 import type { FieldDescriptor } from "~/lib/schema";
 
@@ -32,6 +33,10 @@ function toLocalInputValue(value: unknown): string {
 
 function isJsonKind(field: FieldDescriptor): boolean {
   return field.kind === "array" || field.kind === "object";
+}
+
+function isStoredMultilineString(field: FieldDescriptor, value: unknown): boolean {
+  return field.kind === "string" && typeof value === "string" && /[\r\n]/.test(value);
 }
 
 // Initial scalar value for a field, from the record (edit) or a kind-appropriate empty (create).
@@ -189,6 +194,7 @@ export function ResourceForm({
               field={field}
               value={values[field.name]}
               jsonValue={jsonText[field.name]}
+              multiline={isStoredMultilineString(field, initial?.[field.name])}
               readOnly={readOnly}
               onValue={(v) => set(field.name, v)}
               onJson={(v) => setJsonText((prev) => ({ ...prev, [field.name]: v }))}
@@ -214,6 +220,7 @@ function Field({
   field,
   value,
   jsonValue,
+  multiline,
   readOnly,
   onValue,
   onJson,
@@ -221,13 +228,28 @@ function Field({
   field: FieldDescriptor;
   value: unknown;
   jsonValue?: string;
+  multiline: boolean;
   readOnly: boolean;
   onValue: (v: unknown) => void;
   onJson: (v: string) => void;
 }) {
   if (readOnly) {
     const display = isJsonKind(field) ? (jsonValue ?? "") : String(value ?? "-");
+    if (multiline) {
+      return <Textarea id={field.name} value={display} disabled readOnly />;
+    }
     return <input id={field.name} className={inputClass} value={display} disabled readOnly />;
+  }
+
+  if (multiline) {
+    return (
+      <Textarea
+        id={field.name}
+        required={field.required}
+        value={String(value ?? "")}
+        onChange={(e) => onValue(e.target.value)}
+      />
+    );
   }
 
   switch (field.kind) {

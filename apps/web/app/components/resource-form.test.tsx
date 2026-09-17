@@ -20,6 +20,7 @@ x-id-strategy: { sequence: true, field: id }
 properties:
   id: { type: string }
   title: { type: string, x-immutable: true }
+  email: { type: string, format: email }
   customerId: { type: string, x-links: { target: customer } }
   priority: { type: string, enum: [low, high] }
   count: { type: integer }
@@ -46,6 +47,7 @@ test("renders one control per kind following the Tulip Surface Protocol mapping"
     />
   );
   expect(container.querySelector("input#title[type=text]")).toBeTruthy();
+  expect(container.querySelector("input#email[type=text]")).toBeTruthy();
   expect(container.querySelector("input#customerId[role=combobox]")).toBeTruthy(); // x-links
   expect(container.querySelector("select#priority")).toBeTruthy(); // enum
   expect(container.querySelector("input#count[type=number]")).toBeTruthy();

@@ -42,7 +42,10 @@ const fields = formFields(parsed.schema);
 
 function renderRoute(node: ReactElement, data: unknown) {
   vi.mocked(remix.useLoaderData).mockReturnValue(data);
-  const Stub = createRemixStub([{ path: "/", Component: () => node }]);
+  const Stub = createRemixStub([
+    { path: "/", Component: () => node },
+    { path: "/resources/:type/:id", Component: () => null },
+  ]);
   render(<Stub initialEntries={["/"]} />);
 }
 
@@ -154,6 +157,111 @@ required: [syncedAt]
 `);
 if (!datedParsed.ok) throw new Error(datedParsed.error);
 const datedFields = formFields(datedParsed.schema);
+
+const multilineParsed = parseSchema(`
+type: object
+x-id-strategy: { sequence: true, field: id }
+properties:
+  id: { type: string }
+  notes: { type: string }
+`);
+if (!multilineParsed.ok) throw new Error(multilineParsed.error);
+const multilineFields = formFields(multilineParsed.schema);
+const storedMultilineNotes = "  first\nsecond\tlast  ";
+
+test("edit: a stored multiline string keeps its exact DOM value and update payload", async () => {
+  const navigate = vi.fn();
+  vi.mocked(remix.useNavigate).mockReturnValue(navigate);
+  vi.mocked(updateRecord).mockResolvedValue({
+    id: "NOTE-1",
+    notes: storedMultilineNotes,
+    version: 2,
+    createdAt: "",
+    updatedAt: "",
+  });
+  renderRoute(<ResourceEdit />, {
+    type: "note",
+    id: "NOTE-1",
+    record: {
+      id: "NOTE-1",
+      notes: storedMultilineNotes,
+      version: 1,
+      createdAt: "",
+      updatedAt: "",
+    },
+    fields: multilineFields,
+    schemaError: undefined,
+  });
+
+  const notes = document.querySelector("textarea#notes") as HTMLTextAreaElement | null;
+  expect(notes).not.toBeNull();
+  expect(notes?.value).toBe(storedMultilineNotes);
+  fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+  await waitFor(() =>
+    expect(updateRecord).toHaveBeenCalledWith("note", "NOTE-1", 1, {
+      notes: storedMultilineNotes,
+    })
+  );
+});
+
+test("edit: multiline user edits stay controlled and preserve DOM-normalized CRLF", async () => {
+  vi.mocked(remix.useNavigate).mockReturnValue(vi.fn());
+  vi.mocked(updateRecord).mockResolvedValue({
+    id: "NOTE-1",
+    notes: "  revised\nnext\tlast  ",
+    version: 2,
+    createdAt: "",
+    updatedAt: "",
+  });
+  renderRoute(<ResourceEdit />, {
+    type: "note",
+    id: "NOTE-1",
+    record: {
+      id: "NOTE-1",
+      notes: storedMultilineNotes,
+      version: 1,
+      createdAt: "",
+      updatedAt: "",
+    },
+    fields: multilineFields,
+    schemaError: undefined,
+  });
+
+  const notes = document.querySelector("textarea#notes") as HTMLTextAreaElement;
+  fireEvent.change(notes, { target: { value: "  revised\r\nnext\tlast  " } });
+  expect(notes.value).toBe("  revised\nnext\tlast  ");
+  fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+  await waitFor(() =>
+    expect(updateRecord).toHaveBeenCalledWith("note", "NOTE-1", 1, {
+      notes: "  revised\nnext\tlast  ",
+    })
+  );
+});
+
+test("edit: cancelling a multiline edit makes no update request", () => {
+  vi.mocked(remix.useNavigate).mockReturnValue(vi.fn());
+  renderRoute(<ResourceEdit />, {
+    type: "note",
+    id: "NOTE-1",
+    record: {
+      id: "NOTE-1",
+      notes: storedMultilineNotes,
+      version: 1,
+      createdAt: "",
+      updatedAt: "",
+    },
+    fields: multilineFields,
+    schemaError: undefined,
+  });
+
+  const notes = document.querySelector("textarea#notes") as HTMLTextAreaElement;
+  fireEvent.change(notes, { target: { value: "changed\nnotes" } });
+  fireEvent.click(screen.getByRole("link", { name: "Cancel" }));
+
+  expect(updateRecord).not.toHaveBeenCalled();
+});
 
 test("create: a datetime-local field is submitted as RFC 3339, not the browser's local string", async () => {
   const navigate = vi.fn();
