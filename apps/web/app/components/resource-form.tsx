@@ -93,20 +93,30 @@ export function parseNumberInput(
   return { ok: true, value: parsed };
 }
 
-// Initial scalar value for a field, from the record (edit) or a kind-appropriate empty (create).
-function initialValue(field: FieldDescriptor, initial?: Record<string, unknown>): unknown {
-  const v = initial?.[field.name];
-  if (v !== undefined && (v !== null || field.kind === "enum")) return v;
+function initialValue(
+  field: FieldDescriptor,
+  mode: "create" | "edit",
+  initial?: Record<string, unknown>
+): unknown {
+  if (initial !== undefined && Object.hasOwn(initial, field.name)) return initial[field.name];
   if (field.kind === "enum") return undefined;
-  return field.kind === "boolean" ? false : "";
+  if (field.kind === "boolean") {
+    if (mode === "create" && typeof field.defaultValue === "boolean") return field.defaultValue;
+    return field.required ? false : undefined;
+  }
+  return "";
 }
 
-function initialDraft(fields: FieldDescriptor[], initial?: Record<string, unknown>) {
+function initialDraft(
+  fields: FieldDescriptor[],
+  mode: "create" | "edit",
+  initial?: Record<string, unknown>
+) {
   return {
     values: Object.fromEntries(
       fields
         .filter((field) => !isJsonKind(field))
-        .map((field) => [field.name, initialValue(field, initial)])
+        .map((field) => [field.name, initialValue(field, mode, initial)])
     ),
     jsonText: Object.fromEntries(
       fields
@@ -176,7 +186,7 @@ export function ResourceForm({
   formError,
   cancelTo,
 }: ResourceFormProps) {
-  const startingDraft = useRef(initialDraft(fields, initial));
+  const startingDraft = useRef(initialDraft(fields, mode, initial));
   const [values, setValues] = useState<Record<string, unknown>>(startingDraft.current.values);
   const [jsonText, setJsonText] = useState<Record<string, string>>(startingDraft.current.jsonText);
   const [savedDraft, setSavedDraft] = useState(() =>
@@ -238,7 +248,8 @@ export function ResourceForm({
         if (value === undefined) continue;
         payload[field.name] = value;
       } else if (field.kind === "boolean") {
-        payload[field.name] = Boolean(value);
+        if (value === undefined) continue;
+        payload[field.name] = value === null ? null : value === true;
       } else if (field.kind === "number") {
         if (value === "" || value === undefined) continue;
         const parsed = parseNumberInput(String(value));
@@ -281,14 +292,26 @@ export function ResourceForm({
 
       {fields.map((field) => {
         const readOnly = mode === "edit" && field.immutable === true;
+        const optionalBoolean = field.kind === "boolean" && !field.required && !readOnly;
         const error = fieldErrors[field.name] ?? clientErrors[field.name];
+        const label = (
+          <>
+            {field.name}
+            {field.required ? <span className="text-primary"> *</span> : null}
+            {readOnly ? <span className="opacity-60"> (immutable)</span> : null}
+          </>
+        );
         return (
           <div key={field.name} className="flex flex-col gap-1">
-            <label htmlFor={field.name} className="text-xs text-muted-foreground">
-              {field.name}
-              {field.required ? <span className="text-primary"> *</span> : null}
-              {readOnly ? <span className="opacity-60"> (immutable)</span> : null}
-            </label>
+            {optionalBoolean ? (
+              <span id={`${field.name}-label`} className="text-xs text-muted-foreground">
+                {label}
+              </span>
+            ) : (
+              <label htmlFor={field.name} className="text-xs text-muted-foreground">
+                {label}
+              </label>
+            )}
             <Field
               field={field}
               value={values[field.name]}
@@ -369,7 +392,38 @@ function Field({
   }
 
   switch (field.kind) {
-    case "boolean":
+    case "boolean": {
+      if (!field.required) {
+        const choices = [
+          { label: "Unset", value: undefined },
+          { label: "True", value: true },
+          { label: "False", value: false },
+        ] as const;
+        return (
+          <div
+            role="radiogroup"
+            aria-labelledby={`${field.name}-label`}
+            className="flex w-fit items-center gap-3 rounded-sm border border-border px-3 py-2"
+          >
+            {choices.map((choice) => (
+              <label
+                key={choice.label}
+                className="flex cursor-pointer items-center gap-1.5 text-sm text-foreground"
+              >
+                <input
+                  type="radio"
+                  name={field.name}
+                  value={choice.label.toLowerCase()}
+                  checked={Object.is(value, choice.value)}
+                  onChange={() => onValue(choice.value)}
+                  className="size-4 accent-primary"
+                />
+                {choice.label}
+              </label>
+            ))}
+          </div>
+        );
+      }
       return (
         <input
           id={field.name}
@@ -379,6 +433,7 @@ function Field({
           onChange={(e) => onValue(e.target.checked)}
         />
       );
+    }
     case "number":
       return (
         <input
