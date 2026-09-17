@@ -20,5 +20,5 @@ Deep domain module for Record write policy and mutation orchestration.
 - Dynamic Record-table SQL remains in the API adapter after resource-type validation.
 - Side effects travel with the mutation port so persistence can enqueue them atomically.
 - Dependency deletion previews are exact versioned graphs; execution recomputes them inside the
-  repository transaction and refuses stale or partial work.
+  repository transaction while every Resource table is locked, then refuses stale or partial work.
 - A schema-generated human ID is create-only; replace and patch preserve the existing value.

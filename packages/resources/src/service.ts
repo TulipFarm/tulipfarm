@@ -207,14 +207,14 @@ export async function deleteRecord(
   },
   ports: ResourceWritePorts
 ): Promise<ResourceWriteResult> {
-  const policyTypes = deletionPolicyTypes(ports.catalog);
-  if (policyTypes.length > 0) {
+  const deletionCatalog = deletionPolicyCatalog(ports.catalog);
+  if (deletionCatalog.hasPolicies) {
     if (!ports.repositories.withTransaction) {
       throw new Error("resource repository does not support dependency-safe deletion");
     }
     try {
       return await ports.repositories.withTransaction(
-        Array.from(new Set([input.type, ...policyTypes])).sort(),
+        Array.from(new Set([input.type, ...deletionCatalog.types])).sort(),
         async (repositories) =>
           deleteWithDependencies(input, {
             ...ports,
@@ -445,10 +445,17 @@ async function buildDeletePlan(
   };
 }
 
-function deletionPolicyTypes(catalog: ResourceCatalog): string[] {
-  return Array.from(catalog.entries()).flatMap(([type, resource]) =>
-    extractLinks(resource.schema).some((link) => link.onDelete !== undefined) ? [type] : []
-  );
+function deletionPolicyCatalog(catalog: ResourceCatalog): {
+  hasPolicies: boolean;
+  types: string[];
+} {
+  const entries = Array.from(catalog.entries());
+  return {
+    hasPolicies: entries.some(([, resource]) =>
+      extractLinks(resource.schema).some((link) => link.onDelete !== undefined)
+    ),
+    types: entries.map(([type]) => type),
+  };
 }
 
 function planRecord(type: string, doc: ResourceDoc): ResourceDeletePlanRecord {

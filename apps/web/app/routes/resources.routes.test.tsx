@@ -23,6 +23,7 @@ vi.mock("@remix-run/react", async () => {
   return {
     ...actual,
     useLoaderData: vi.fn(),
+    useNavigate: vi.fn(() => vi.fn()),
     useRouteError: vi.fn(),
     useParams: vi.fn(() => ({})),
   };
