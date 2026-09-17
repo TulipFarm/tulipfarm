@@ -142,13 +142,13 @@ required: [score, visible, label]
   );
 
   fireEvent.change(container.querySelector("select#score") as HTMLSelectElement, {
-    target: { value: "1" },
+    target: { value: "enum:1" },
   });
   fireEvent.change(container.querySelector("select#visible") as HTMLSelectElement, {
-    target: { value: "1" },
+    target: { value: "enum:1" },
   });
   fireEvent.change(container.querySelector("select#label") as HTMLSelectElement, {
-    target: { value: "0" },
+    target: { value: "enum:0" },
   });
   fireEvent.click(screen.getByRole("button", { name: "Create" }));
 
@@ -156,6 +156,149 @@ required: [score, visible, label]
     { score: 2, visible: false, label: "low" },
     expect.any(Function)
   );
+});
+
+test("mixed enum choices preserve native values and keep null distinct from omission", () => {
+  const enumSchema = parseSchema(`
+type: object
+properties:
+  choice:
+    type: [string, integer, "null"]
+    enum: ["1", 1, null]
+`);
+  if (!enumSchema.ok) throw new Error(enumSchema.error);
+  const optionForm = renderForm(
+    <ResourceForm
+      fields={formFields(enumSchema.schema)}
+      mode="create"
+      onSubmit={vi.fn()}
+      submitting={false}
+      cancelTo="/"
+    />
+  );
+  const select = optionForm.container.querySelector("select#choice") as HTMLSelectElement;
+
+  expect(Array.from(select.options).map((option) => option.text)).toEqual([
+    "Not set",
+    "1 (string)",
+    "1 (number)",
+    "Null",
+  ]);
+  optionForm.unmount();
+
+  for (const [selection, expected] of [
+    ["", {}],
+    ["enum:0", { choice: "1" }],
+    ["enum:1", { choice: 1 }],
+    ["enum:2", { choice: null }],
+  ] as const) {
+    const onSubmit = vi.fn();
+    const form = renderForm(
+      <ResourceForm
+        fields={formFields(enumSchema.schema)}
+        mode="create"
+        onSubmit={onSubmit}
+        submitting={false}
+        cancelTo="/"
+      />
+    );
+    const choice = form.container.querySelector("select#choice") as HTMLSelectElement;
+    if (selection !== "") fireEvent.change(choice, { target: { value: selection } });
+    fireEvent.click(screen.getByRole("button", { name: "Create" }));
+    expect(onSubmit).toHaveBeenCalledWith(expected, expect.any(Function));
+    form.unmount();
+  }
+});
+
+test("edit selects explicit null and preserves an invalid current enum value", () => {
+  const enumSchema = parseSchema(`
+type: object
+properties:
+  choice:
+    type: [string, integer, "null"]
+    enum: ["1", 1, null]
+`);
+  if (!enumSchema.ok) throw new Error(enumSchema.error);
+  const enumFields = formFields(enumSchema.schema);
+  const nullSubmit = vi.fn();
+  const nullForm = renderForm(
+    <ResourceForm
+      fields={enumFields}
+      mode="edit"
+      initial={{ choice: null }}
+      onSubmit={nullSubmit}
+      submitting={false}
+      cancelTo="/"
+    />
+  );
+  const nullSelect = nullForm.container.querySelector("select#choice") as HTMLSelectElement;
+  expect(nullSelect.value).toBe("enum:2");
+  fireEvent.click(screen.getByRole("button", { name: "Save" }));
+  expect(nullSubmit).toHaveBeenCalledWith({ choice: null }, expect.any(Function));
+  nullForm.unmount();
+
+  const invalidSubmit = vi.fn();
+  const invalidForm = renderForm(
+    <ResourceForm
+      fields={enumFields}
+      mode="edit"
+      initial={{ choice: "legacy" }}
+      onSubmit={invalidSubmit}
+      submitting={false}
+      cancelTo="/"
+    />
+  );
+  const invalidSelect = invalidForm.container.querySelector("select#choice") as HTMLSelectElement;
+  expect(invalidSelect.value).toBe("current");
+  expect(invalidSelect.selectedOptions[0]?.text).toBe("legacy (current value, not allowed)");
+  fireEvent.click(screen.getByRole("button", { name: "Save" }));
+  expect(invalidSubmit).toHaveBeenCalledWith({ choice: "legacy" }, expect.any(Function));
+});
+
+test("ordinary string enums keep their concise labels", () => {
+  const { container } = renderForm(
+    <ResourceForm
+      fields={fields}
+      mode="create"
+      onSubmit={vi.fn()}
+      submitting={false}
+      cancelTo="/"
+    />
+  );
+
+  const priority = container.querySelector("select#priority") as HTMLSelectElement;
+  expect(Array.from(priority.options).map((option) => option.text)).toEqual([
+    "Not set",
+    "low",
+    "high",
+  ]);
+});
+
+test("structured enum choices are disclosed and an existing value is preserved", () => {
+  const enumSchema = parseSchema(`
+type: object
+properties:
+  choice:
+    enum: [one, { label: two }]
+`);
+  if (!enumSchema.ok) throw new Error(enumSchema.error);
+  const onSubmit = vi.fn();
+  const { container } = renderForm(
+    <ResourceForm
+      fields={formFields(enumSchema.schema)}
+      mode="edit"
+      initial={{ choice: { label: "two" } }}
+      onSubmit={onSubmit}
+      submitting={false}
+      cancelTo="/"
+    />
+  );
+
+  expect(screen.getByText("Structured enum choices are not supported by this form.")).toBeVisible();
+  const choice = container.querySelector("select#choice") as HTMLSelectElement;
+  expect(choice.selectedOptions[0]?.text).toBe('{"label":"two"} (current value, not allowed)');
+  fireEvent.click(screen.getByRole("button", { name: "Save" }));
+  expect(onSubmit).toHaveBeenCalledWith({ choice: { label: "two" } }, expect.any(Function));
 });
 
 test("invalid JSON in an array/object field blocks submit and shows an inline error", () => {

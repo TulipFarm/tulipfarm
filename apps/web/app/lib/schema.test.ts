@@ -80,6 +80,33 @@ properties:
   expect(byName.visible.enumValues).toEqual([true, false]);
 });
 
+test("deriveFields preserves null in mixed primitive enums", () => {
+  const parsed = parseSchema(`
+type: object
+properties:
+  choice:
+    type: [string, integer, "null"]
+    enum: ["1", 1, null]
+`);
+  if (!parsed.ok) throw new Error(parsed.error);
+
+  expect(deriveFields(parsed.schema)[0]?.enumValues).toEqual(["1", 1, null]);
+});
+
+test("deriveFields flags structured enum choices instead of silently presenting them as primitives", () => {
+  const parsed = parseSchema(`
+type: object
+properties:
+  choice:
+    enum: [one, { label: two }]
+`);
+  if (!parsed.ok) throw new Error(parsed.error);
+  const field = deriveFields(parsed.schema)[0];
+
+  expect(field?.enumValues).toEqual(["one"]);
+  expect(field?.hasUnsupportedEnumValues).toBe(true);
+});
+
 test("listColumns promotes id first, drops object/array, appends updatedAt", () => {
   const schema = ticketSchema();
   const cols = listColumns(deriveFields(schema), schema).map((c) => c.name);
@@ -166,6 +193,40 @@ test("renderValue maps every kind to a presentational primitive", () => {
   expect(renderValue(fields.meta, { a: 1 })).toEqual({ kind: "json", text: '{"a":1}' });
 });
 
+test("renderValue distinguishes colliding mixed enum values and explicit null from absence", () => {
+  const parsed = parseSchema(`
+type: object
+properties:
+  choice:
+    type: [string, integer, "null"]
+    enum: ["1", 1, null]
+`);
+  if (!parsed.ok) throw new Error(parsed.error);
+  const field = deriveFields(parsed.schema)[0];
+  if (field === undefined) throw new Error("choice field missing");
+
+  expect(renderValue(field, "1")).toEqual({ kind: "text", text: "1 (string)" });
+  expect(renderValue(field, 1)).toEqual({ kind: "text", text: "1 (number)" });
+  expect(renderValue(field, null)).toEqual({ kind: "text", text: "Null" });
+  expect(renderValue(field, undefined)).toEqual({ kind: "muted", text: "-" });
+});
+
+test("mixed boolean and string enum values are labeled by native type only when ambiguous", () => {
+  const parsed = parseSchema(`
+type: object
+properties:
+  choice:
+    enum: ["true", true, false]
+`);
+  if (!parsed.ok) throw new Error(parsed.error);
+  const field = deriveFields(parsed.schema)[0];
+  if (field === undefined) throw new Error("choice field missing");
+
+  expect(renderValue(field, "true")).toEqual({ kind: "text", text: "true (string)" });
+  expect(renderValue(field, true)).toEqual({ kind: "text", text: "true (boolean)" });
+  expect(renderValue(field, false)).toEqual({ kind: "text", text: "false" });
+});
+
 test("deriveFields populates write-side flags (required, immutable, readOnly, format)", () => {
   const byName = Object.fromEntries(deriveFields(ticketSchema()).map((f) => [f.name, f]));
   expect(byName.title.immutable).toBe(true); // x-immutable: true
@@ -241,6 +302,23 @@ test("cellText derives lowercased searchable text per kind", () => {
   expect(cellText(f.due, "2026-01-02")).toContain("2026");
   expect(cellText(f.name, null)).toBe(""); // nullish → empty
   expect(cellText(f.name, "")).toBe("");
+});
+
+test("cellText uses the displayed label for explicit null and mixed enum values", () => {
+  const parsed = parseSchema(`
+type: object
+properties:
+  choice:
+    enum: ["1", 1, null]
+`);
+  if (!parsed.ok) throw new Error(parsed.error);
+  const field = deriveFields(parsed.schema)[0];
+  if (field === undefined) throw new Error("choice field missing");
+
+  expect(cellText(field, "1")).toBe("1 (string)");
+  expect(cellText(field, 1)).toBe("1 (number)");
+  expect(cellText(field, null)).toBe("null");
+  expect(cellText(field, undefined)).toBe("");
 });
 
 test("compareValues orders by kind: numeric, chronological, boolean, lexical", () => {
