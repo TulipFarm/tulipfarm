@@ -1,0 +1,17 @@
+{
+  "id": "l3-a-provider-reply-failure-is-not-success",
+  "tier": "l3",
+  "agent": "support",
+  "integrationReply": {
+    "delivered": false,
+    "outcome": "failed",
+    "code": "credential_required"
+  },
+  "input": [{ "role": "user", "content": "Reply with: Your request is recorded." }],
+  "script": [{ "kind": "text", "text": "Your request is recorded." }],
+  "expect": [
+    { "kind": "run_status", "status": "failed" },
+    { "kind": "state_status", "status": "succeeded" },
+    { "kind": "run_event_emitted", "eventType": "turn.finished" }
+  ]
+}

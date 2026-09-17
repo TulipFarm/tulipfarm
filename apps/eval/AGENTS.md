@@ -35,6 +35,7 @@ Only its own Cases need updating when their observable behaviour moves.
 | `src/eval-soul.ts` | `loadEvalSoul` — copies the fixture to a throwaway git repo and reads it with the real `SoulLoader`; `soulContext` maps an Agent into the assembler. |
 | `src/guardrails.ts` | Runs the Eval Soul's `guardrails.yaml` through the production `TurnGuardrails`; collects refusals off the real Run events. |
 | `src/l3/` | Persisted Chat and Routine tiers on in-process PGlite; Integration authoring routes through the shared workflow, real approval wait, P09 journal, Soul writer, publisher, and next-Turn loader. |
+| `src/l3/tier.ts` | `integrationReply` Cases apply production reply settlement after a real completed Chat Turn; provider transports remain API test scope. |
 | `src/l3/soul-write.ts` | The `soul_write` Tool, over the real writer *and* the real publisher; `definitionMode: plan` first uses the production YAML Plan compiler. |
 | `src/l3/resource-records.ts` | Journey-persistent in-memory Record repositories; Resource authoring reloads through the real loader and mutations use `@tulipfarm/resources`. |
 | `src/l3/file-store.ts` | The one place `file_create` runs for real, so a Case can observe Chat draft versus saved File lifecycle and audience. |

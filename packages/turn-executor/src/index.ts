@@ -33,6 +33,7 @@ export type {
 export { TurnDriver } from "./driver";
 export type { GuardedContent, GuardedText, TurnGuardrailPolicy } from "./guardrails";
 export { GuardrailDigestMismatchError, TurnGuardrails } from "./guardrails";
+export { type IngressReplyResult, settleIntegrationReply } from "./integration-reply";
 export {
   MissingStateError,
   RECLAIM_PATH,

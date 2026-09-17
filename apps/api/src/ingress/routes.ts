@@ -3,7 +3,6 @@ import type { FastifyInstance } from "fastify";
 import { ErrorSchema } from "../auth/schemas";
 import { isSecretRef } from "../integrations/connection-env";
 import { resolveIngressIntegration } from "../integrations/ingress-integration";
-import type { IngressDeliveriesRepo } from "./repo";
 import { verifyWebhookRequest } from "./signature";
 import { dotPath, matchesBody, renderBodyTemplate } from "./template";
 
@@ -11,13 +10,13 @@ export interface IngressJobPayload {
   slug: string;
   body: Record<string, unknown>;
   headers?: Record<string, string>;
+  deduplicationKey?: string;
 }
 
 export interface IngressRoutesDeps {
   soulLoader: SoulLoader;
   /** Bundled (code-owned) integrations, merged with live Soul connection state per delivery. */
   bundled: ReadonlyMap<string, BundledIntegration>;
-  deliveries: IngressDeliveriesRepo;
   invoke: (job: IngressJobPayload) => Promise<void>;
   /** Resolves a `secret://` env value to plaintext; plaintext values need no resolver. */
   resolveSecret?: (value: string) => Promise<string | undefined>;
@@ -63,6 +62,7 @@ export async function registerIngressRoutes(
             200: { type: "object", additionalProperties: true },
             401: ErrorSchema,
             404: ErrorSchema,
+            500: ErrorSchema,
           },
         },
       },
@@ -131,10 +131,6 @@ export async function registerIngressRoutes(
           : ingress.webhook.dedup_key
             ? dotPath(body, ingress.webhook.dedup_key)
             : undefined;
-        if (typeof dedupValue === "string" && dedupValue) {
-          const first = await deps.deliveries.recordDelivery(name, dedupValue);
-          if (!first) return reply.code(200).send({});
-        }
 
         let headers: Record<string, string> | undefined;
         if (ingress.webhook.context_headers?.length) {
@@ -145,7 +141,12 @@ export async function registerIngressRoutes(
           }
         }
 
-        await deps.invoke({ slug: name, body, headers });
+        await deps.invoke({
+          slug: name,
+          body,
+          headers,
+          ...(typeof dedupValue === "string" && dedupValue ? { deduplicationKey: dedupValue } : {}),
+        });
         return reply.code(200).send({});
       }
     );

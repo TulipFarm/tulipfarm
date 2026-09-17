@@ -7,6 +7,7 @@ import type { RequestContext } from "@tulipfarm/tool-host";
 import { describe, expect, it } from "vitest";
 import type { ToolRegistry } from "../../broker/tool-adapter";
 import { executeToolBinding } from "../../ingress/bindings";
+import { postReply } from "../../ingress/responder";
 import {
   buildDeclarativeTools,
   declarativeToolName,
@@ -455,6 +456,54 @@ describe("buildDeclarativeTools", () => {
 
 /** Reply bindings must use the same manifest Tool names egress registers. */
 describe("egress tools resolve through ingress reply bindings", () => {
+  it("does not report a failed production provider binding as delivered", async () => {
+    const http = new RecordingHttp();
+    http.status = 403;
+    const shared = deps(http, CONNECTED_SECRETS);
+    const { tools } = buildDeclarativeTools([integration(openApiEgress())], shared);
+    const result = await postReply(
+      {
+        registry: { getAll: () => tools } as unknown as ToolRegistry,
+        log: { warn() {}, error() {} },
+      },
+      {
+        slug: "acme",
+        reply: { default: { tool: "search_docs", args: { query: "{text}" } } },
+        binding: "default",
+        vars: {},
+        text: "reply",
+        run: { runId: "run-1", toolCallId: "ingress-reply:1:default", autonomy: undefined },
+      }
+    );
+    expect(result.delivered).toBe(false);
+    expect(http.sent).toHaveLength(1);
+  });
+
+  it("replays a confirmed reply effect after rebuilding the production Tool registry", async () => {
+    const http = new RecordingHttp();
+    const shared = deps(http, CONNECTED_SECRETS);
+    for (let retry = 0; retry < 2; retry++) {
+      const { tools } = buildDeclarativeTools([integration(openApiEgress())], shared);
+      await expect(
+        postReply(
+          {
+            registry: { getAll: () => tools } as unknown as ToolRegistry,
+            log: { warn() {}, error() {} },
+          },
+          {
+            slug: "acme",
+            reply: { default: { tool: "search_docs", args: { query: "{text}" } } },
+            binding: "default",
+            vars: {},
+            text: "reply",
+            run: { runId: "run-1", toolCallId: "ingress-reply:1:default", autonomy: undefined },
+          }
+        )
+      ).resolves.toEqual({ delivered: true });
+    }
+    expect(http.sent).toHaveLength(1);
+  });
+
   it("an ingress binding executes the tool the manifest's egress published", async () => {
     const http = new RecordingHttp();
     const { tools } = buildDeclarativeTools(

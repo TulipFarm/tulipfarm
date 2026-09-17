@@ -53,7 +53,6 @@ function makeSoulLoader(integrations: SoulIntegration[]): SoulLoader {
 describe("POST /api/v1/hooks/integrations/:name", () => {
   let app: FastifyInstance;
   let enqueue: ReturnType<typeof vi.fn>;
-  let seen: Set<string>;
 
   async function build(
     integrations: SoulIntegration[] = [makeIntegration()],
@@ -61,19 +60,10 @@ describe("POST /api/v1/hooks/integrations/:name", () => {
     bundled: ReadonlyMap<string, BundledIntegration> = new Map()
   ) {
     enqueue = vi.fn(async (_job: IngressJobPayload) => {});
-    seen = new Set();
     app = await buildApp({
       ingress: {
         soulLoader: makeSoulLoader(integrations),
         bundled,
-        deliveries: {
-          recordDelivery: async (slug: string, key: string) => {
-            const composite = `${slug}:${key}`;
-            if (seen.has(composite)) return false;
-            seen.add(composite);
-            return true;
-          },
-        } as never,
         invoke: enqueue as (job: IngressJobPayload) => Promise<void>,
         resolveSecret,
       },
@@ -134,7 +124,11 @@ describe("POST /api/v1/hooks/integrations/:name", () => {
     const res = await inject(EVENT);
     expect(res.statusCode).toBe(200);
     expect(enqueue).toHaveBeenCalledTimes(1);
-    expect(enqueue.mock.calls[0][0]).toEqual({ slug: "chatapp", body: EVENT });
+    expect(enqueue.mock.calls[0][0]).toEqual({
+      slug: "chatapp",
+      body: EVENT,
+      deduplicationKey: "D123",
+    });
   });
 
   it("rejects a bad signature and a missing signature with 401", async () => {
@@ -151,12 +145,20 @@ describe("POST /api/v1/hooks/integrations/:name", () => {
     expect(res.statusCode).toBe(401);
   });
 
-  it("dedups a retried delivery (same dedup key acked, enqueued once)", async () => {
+  it("passes retries to atomic Run submission under the same provider delivery key", async () => {
     const first = await inject(EVENT);
     const retry = await inject(EVENT);
     expect(first.statusCode).toBe(200);
     expect(retry.statusCode).toBe(200);
-    expect(enqueue).toHaveBeenCalledTimes(1);
+    expect(enqueue).toHaveBeenCalledTimes(2);
+    expect(enqueue.mock.calls[0][0]).toEqual(enqueue.mock.calls[1][0]);
+  });
+
+  it("retries Run submission after a transient failure instead of acknowledging a lost delivery", async () => {
+    enqueue.mockRejectedValueOnce(new Error("database unavailable"));
+    expect((await inject(EVENT)).statusCode).toBe(500);
+    expect((await inject(EVENT)).statusCode).toBe(200);
+    expect(enqueue).toHaveBeenCalledTimes(2);
   });
 
   it("dedups on a declared header and forwards context headers into the job", async () => {
@@ -175,11 +177,12 @@ describe("POST /api/v1/hooks/integrations/:name", () => {
     await inject(EVENT, { extraHeaders }); // same delivery guid → deduped
     await inject(EVENT, { extraHeaders: { ...extraHeaders, "x-provider-delivery": "guid-2" } });
 
-    expect(enqueue).toHaveBeenCalledTimes(2);
+    expect(enqueue).toHaveBeenCalledTimes(3);
     expect(enqueue.mock.calls[0][0]).toEqual({
       slug: "chatapp",
       body: EVENT,
       headers: { "x-provider-event": "issues" },
+      deduplicationKey: "guid-1",
     });
   });
 
@@ -359,7 +362,6 @@ describe("bundled (code-owned) integrations", () => {
       ingress: {
         soulLoader: makeSoulLoader([soulOnlyConnection]),
         bundled: new Map([["github", bundledManifest]]),
-        deliveries: { recordDelivery: async () => true } as never,
         invoke: enqueue as (job: IngressJobPayload) => Promise<void>,
       },
     });
@@ -387,7 +389,6 @@ describe("bundled (code-owned) integrations", () => {
       ingress: {
         soulLoader: makeSoulLoader([]),
         bundled: new Map(),
-        deliveries: { recordDelivery: async () => true } as never,
         invoke: enqueue as (job: IngressJobPayload) => Promise<void>,
       },
     });
