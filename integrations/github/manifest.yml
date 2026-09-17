@@ -8,7 +8,7 @@ capabilities:
   - Triage issues — read, search, comment, label, assign, and close
   - Review pull requests, leave reviews, and merge them
   - Read repository files and push commits
-  - Report check run results back onto a commit
+  - Read check run results to see whether CI passed
 # Mirrors the app_manifest step's `default_permissions` below. Kept by hand because that block is
 # GitHub's own schema, which TulipFarm does not parse — `bundled-auth.test.ts` fails if the two
 # drift, so an added permission cannot ship without appearing here first.

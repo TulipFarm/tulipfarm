@@ -22,7 +22,7 @@ Owns adapter contracts, event normalization, source ACLs, sync checkpoints, and 
 | `src/git-source/` | Pre-clone Git source cage and the bounded, sanitised clone helper. |
 | `src/import/`, `src/external-protocol/` | Import and external Integration protocols. |
 | `src/ingress/` | Exact-Connection verification, registration lifecycle, polling, websocket supervision, normalization, and dispatch. |
-| `src/github/` | GitHub Tool adapters and provider contracts. |
+| `src/github/` | GitHub Tool adapters and provider contracts; `operations/pagination.ts` refuses incomplete absence proofs. Content operations encode literal path segments; HTTP hosts must not re-encode them. |
 | `src/slack/`, `src/slack/knowledge/` | Slack messaging Tool adapters, contracts, and Knowledge sync. |
 | `src/google/` | Google Workspace (Gmail/Drive/Docs/Calendar) Tool adapters and contracts. |
 | `src/knowledge/` | Provider-neutral Knowledge emission and identity-map contracts. |

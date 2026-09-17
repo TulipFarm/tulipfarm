@@ -1,7 +1,7 @@
 import type { ToolReconciliationOutcome, ToolReconciliationRequest } from "@tulipfarm/tool-broker";
 import { GITHUB_RECONCILIATION_OPERATIONS } from "../contracts";
 import { findMarkedComment, findMarkedIssue, issueState } from "./issues";
-import { findMarkedReview, findOpenPullRequestByHead, pullRequestState } from "./pull-requests";
+import { findMarkedReview, findPullRequest, pullRequestState } from "./pull-requests";
 import { findCommitByMarker, lookupRepository } from "./repository";
 import {
   type Arguments,
@@ -114,11 +114,20 @@ async function reconcilePullRequestCreate(
   api: GitHubApi,
   repository: string,
   source: Arguments,
+  request: ToolReconciliationRequest,
   credential: string
 ): Promise<ToolReconciliationOutcome> {
   const head = stringArg(source, "head");
-  const existing = await findOpenPullRequestByHead(api, repository, head, credential);
-  const evidenceRef = `github:pull_request:${repository}:head:${head}`;
+  const base = stringArg(source, "base");
+  const existing = await findPullRequest(
+    api,
+    repository,
+    head,
+    base,
+    credential,
+    githubEffectMarker(request.idempotencyKey)
+  );
+  const evidenceRef = `github:pull_request:${repository}:head:${head}:base:${base}`;
   return existing === undefined
     ? { outcome: "not_applied", evidenceRef }
     : { outcome: "confirmed", evidenceRef: `github:pull_request:${String(existing.number)}` };
@@ -234,7 +243,7 @@ export async function reconcileGitHubEffect(
           credential
         );
       case GITHUB_RECONCILIATION_OPERATIONS.pullRequestCreate:
-        return await reconcilePullRequestCreate(api, repository, source, credential);
+        return await reconcilePullRequestCreate(api, repository, source, request, credential);
       case GITHUB_RECONCILIATION_OPERATIONS.pullRequestComment:
         return await reconcileComment(
           api,
