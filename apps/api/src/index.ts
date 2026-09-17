@@ -300,7 +300,6 @@ import { registerSpendAlertSchedule, SPEND_ALERT_QUEUE } from "./observability/s
 import { createObservabilityTelemetryPort } from "./observability/telemetry-port";
 import { OtlpTracesExporter } from "./observability/traces";
 import { PackService } from "./packs/service";
-import { runPgMigrations } from "./pg-migrate";
 import { createAgentDelegation, startChildConversation } from "./platform/delegation";
 import { subagentAnswers } from "./platform/subagent-answers";
 import { startSubagentRun } from "./platform/subagent-run";
@@ -314,6 +313,7 @@ import { ResourceSchemaCompatibilityService } from "./resources/schema-compatibi
 import { runAuthorizers } from "./runs/authorization";
 import { runCanceller } from "./runs/cancel";
 import { RunEventNotifyListener } from "./runs/notify-listener";
+import { initializeApiDeployment } from "./runtime/deployment";
 import {
   childRoutineTrigger,
   integrationInvoker,
@@ -463,7 +463,13 @@ async function boot() {
     // a deployment whose file store never came up should say so, not serve requests that fail.
     await ensureBundledBucket({ dataDir: resolveDataDir() ?? process.cwd() });
     const migrationPool = await connectPg();
-    await runPgMigrations(migrationPool);
+    const deployment = await initializeApiDeployment(migrationPool, {
+      businessId: DEPLOYMENT_BUSINESS_ID,
+      installationId: process.env.RUNTIME_INSTALLATION_ID || undefined,
+    });
+    console.info(
+      `Runtime installation ${deployment.installationId} (${deployment.hostingAuthority})`
+    );
     // After migrations, on the owner pool (which has no statement timeout): an ANN index left
     // invalid by an interrupted build is invisible to the planner but still costs every write.
     await ensureEmbeddingIndexes(migrationPool, (msg) => console.log(msg));
@@ -481,7 +487,7 @@ async function boot() {
       );
     const publicOrigins = new PublicOriginsService(
       new PublicOriginStore(pool),
-      DEPLOYMENT_BUSINESS_ID
+      deployment.businessId
     );
     await publicOrigins.initialize();
     /**

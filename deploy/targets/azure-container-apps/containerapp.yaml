@@ -111,6 +111,8 @@ properties:
             value: ""
           - name: BUSINESS_ID
             value: ""
+          - name: RUNTIME_INSTALLATION_ID
+            value: ""
           - name: SOUL_BUNDLE_RETENTION_DAYS
             value: ""
           - name: TF_DATA_DIR
@@ -232,6 +234,8 @@ properties:
             value: ""
           - name: BUSINESS_ID
             value: ""
+          - name: RUNTIME_INSTALLATION_ID
+            value: ""
           - name: TF_DATA_DIR
             value: ""
           - name: WORKER_API_CREDENTIAL
@@ -345,6 +349,8 @@ properties:
           - name: NODE_ENV
             value: ""
           - name: BUSINESS_ID
+            value: ""
+          - name: RUNTIME_INSTALLATION_ID
             value: ""
           - name: TF_DATA_DIR
             value: ""

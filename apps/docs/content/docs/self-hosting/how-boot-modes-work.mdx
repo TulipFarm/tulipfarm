@@ -88,6 +88,30 @@ configuration, not your data.
 This is the single most important thing to understand before you design a backup:
 [back up and restore](/docs/self-hosting/back-up-and-restore) covers what to actually copy.
 
+## Installation identity
+
+Before either setup path opens, TulipFarm records a runtime-installation identity in PostgreSQL.
+It identifies this installation, not the business's users or their permissions. The API and both
+workers read the same identity on every start; restarting or upgrading does not replace it.
+
+The local business identifier, `BUSINESS_ID`, remains separate. Existing installations keep
+their business identifier, accounts, memberships, and history. Two installations using the
+default `tulipfarm-local` business identifier still receive different installation identities.
+Neither identifier proves global customer ownership or grants access to managed services.
+
+Independent hosting remains the default. This identity adds no cloud login or managed-service
+dependency to startup, local login, or supported direct-provider credentials. It does not enroll
+the installation in a service, grant remote administration, or provide a migration feature.
+
+Normally, leave `RUNTIME_INSTALLATION_ID` unset or empty. If supplied to the API and workers, it
+must be a UUID matching the stored identity; on an uninitialized database it establishes that identity.
+A conflicting installation or business identifier stops startup rather than replacing the
+stored association. Restore the matching configuration and database instead of deleting the
+identity row.
+
+Runtime identity is separate from the anonymous identifier used for product telemetry. This
+does not change the [telemetry policy](/docs/security/telemetry).
+
 ## Where to go next
 
 <Cards>

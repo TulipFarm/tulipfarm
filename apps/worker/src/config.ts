@@ -14,8 +14,9 @@ import { DEPLOYMENT_BUSINESS_ID } from "@tulipfarm/constants";
  * 118: OIM Knowledge publication and cursor progress are fenced.
  * 119: OIM release provenance, lifecycle, and operation journals are durable.
  * 120: OIM Connection verification evidence is persisted for safe dispatch.
+ * 125: Runtime installation identity is shared with the API and integration worker.
  */
-export const REQUIRED_SCHEMA_VERSION = 120;
+export const REQUIRED_SCHEMA_VERSION = 125;
 
 export interface WorkerConfig {
   readonly databaseUrl: string;
@@ -82,7 +83,7 @@ function booleanValue(env: Env, key: string, fallback: boolean): boolean {
 export function loadConfig(env: Env = process.env): WorkerConfig {
   const config: WorkerConfig = {
     databaseUrl: requireString(env, "DATABASE_URL"),
-    businessId: DEPLOYMENT_BUSINESS_ID,
+    businessId: env.BUSINESS_ID ?? DEPLOYMENT_BUSINESS_ID,
     internalApiUrl: stripTrailingSlashes(requireString(env, "INTERNAL_API_URL")),
     internalApiCredential: requireString(env, "WORKER_API_CREDENTIAL"),
     owner: env.WORKER_OWNER ?? `${hostname()}:${process.pid}`,

@@ -3,6 +3,7 @@ import { PGLiteSocketServer } from "@electric-sql/pglite-socket";
 import {
   CONNECTION_STORAGE_STATEMENTS,
   OIM_INGRESS_EMISSION_STORAGE_STATEMENTS,
+  RUNTIME_IDENTITY_STORAGE_STATEMENTS,
   WEBHOOK_INBOX_STORAGE_STATEMENTS,
   WEBHOOK_REGISTRATION_STORAGE_STATEMENTS,
 } from "@tulipfarm/storage";
@@ -27,6 +28,7 @@ export async function startScratchDatabase(schemaVersion: number): Promise<Scrat
     ...WEBHOOK_INBOX_STORAGE_STATEMENTS,
     ...OIM_INGRESS_EMISSION_STORAGE_STATEMENTS,
     ...WEBHOOK_REGISTRATION_STORAGE_STATEMENTS,
+    ...RUNTIME_IDENTITY_STORAGE_STATEMENTS,
   ]) {
     await database.exec(statement);
   }

@@ -45,6 +45,7 @@ import {
   createBlobPort,
   EventStore,
   IntegrationStore,
+  initializeRuntimeDeployment,
   KillSwitchRepo,
   RunEventStore,
   RunLoopCheckpointStore,
@@ -198,6 +199,12 @@ export async function main(): Promise<void> {
     },
   });
 
+  const deployment = await initializeRuntimeDeployment(pool, {
+    businessId: config.businessId,
+    installationId: process.env.RUNTIME_INSTALLATION_ID || undefined,
+  });
+  logger.info(`Runtime installation ${deployment.installationId} (${deployment.hostingAuthority})`);
+
   // Telemetry is not load-bearing: missing log tables degrade to stdout, not boot failure.
   logSink = new BatchingLogSink({ service: "worker", writer: new PgLogWriter(pool) });
   logSink.start();
@@ -300,7 +307,7 @@ export async function main(): Promise<void> {
         databaseUrl: config.databaseUrl,
         pool,
         transactions,
-        businessId: config.businessId,
+        businessId: deployment.businessId,
         log: logger,
         turnHost,
         internalApi,
@@ -331,7 +338,7 @@ export async function main(): Promise<void> {
 
   // Installation scope only; GitHubAdapter narrows until Soul-authored AccessGrants exist.
   const githubTooling = buildGitHubTooling({
-    businessId: config.businessId,
+    businessId: deployment.businessId,
     integrations: new IntegrationStore(transactions),
     secrets,
     log: logger,
@@ -596,7 +603,7 @@ export async function main(): Promise<void> {
   const runDispatcher = new RunDispatcher({
     leases,
     recovery: new RunRecoveryManager(runStore, recoveryEffects),
-    businessId: config.businessId,
+    businessId: deployment.businessId,
     owner: config.owner,
     maxLifetimeMs: config.runMaxLifetimeMs,
     // Every co-located Tool call this process makes happens inside this handler and is awaited
@@ -625,7 +632,7 @@ export async function main(): Promise<void> {
         signalChildCompletion(
           { ancestry: childAncestry, waits },
           {
-            businessId: config.businessId,
+            businessId: deployment.businessId,
             childRunId: run.id,
             status,
             completedAt: new Date().toISOString(),
@@ -641,14 +648,14 @@ export async function main(): Promise<void> {
     onWaiting: async (run) => {
       // A wait that resolved while this Run was still `running` requeued nothing, because a
       // requeue is guarded on `runs.status = 'waiting'`. This is the first moment it can land.
-      if (await waits.resumeIfUnblocked(config.businessId, run.id)) {
+      if (await waits.resumeIfUnblocked(deployment.businessId, run.id)) {
         logger.info(`parked run requeued on an already-resolved wait run=${run.id}`);
       }
     },
   });
   const outboxDispatcher = new EventOutboxDispatcher({
     outbox: eventStore,
-    businessId: config.businessId,
+    businessId: deployment.businessId,
     owner: config.owner,
     consumer: OUTBOX_CONSUMER,
     handler: (message) => deliveryTargets.deliver(message),
@@ -675,7 +682,7 @@ export async function main(): Promise<void> {
         intervalMs: config.waitSweepMs,
         tick: async () => {
           await sweeper.sweep({
-            businessId: config.businessId,
+            businessId: deployment.businessId,
             now: new Date(),
             limit: config.batchSize,
           });
@@ -691,7 +698,7 @@ export async function main(): Promise<void> {
         intervalMs: config.waitSweepMs,
         tick: async () => {
           await childSweeper.sweep({
-            businessId: config.businessId,
+            businessId: deployment.businessId,
             limit: config.batchSize,
           });
         },
@@ -735,7 +742,7 @@ export async function main(): Promise<void> {
   });
 
   logger.info(
-    `worker ready: owner=${config.owner} business=${config.businessId} ` +
+    `worker ready: owner=${config.owner} business=${deployment.businessId} ` +
       `schema=${schemaVersion} port=${config.port} ` +
       `executors=${executors.size} deliveryTargets=${deliveryTargets.size} ` +
       `maintenance=${config.maintenance}`

@@ -47,6 +47,45 @@ async function bootWorker(options: {
 
 describe("worker process", () => {
   it(
+    "reuses the API installation identity across worker restarts and refuses a mismatch",
+    async () => {
+      scratch = await startScratchDatabase(REQUIRED_SCHEMA_VERSION);
+      const installationId = randomUUID();
+      await scratch.query(
+        `INSERT INTO deployment_runtime_identity (installation_id, business_id) VALUES ($1, $2)`,
+        [installationId, DEPLOYMENT_BUSINESS_ID]
+      );
+      for (const owner of ["first-boot", "restart"]) {
+        worker = await startWorker({
+          databaseUrl: scratch.url,
+          owner,
+          env: owner === "restart" ? { RUNTIME_INSTALLATION_ID: "" } : undefined,
+        });
+        await worker.waitForReady();
+        expect(worker.output()).toContain(`Runtime installation ${installationId} (independent)`);
+        await worker.stop();
+      }
+      const runId = randomUUID();
+      await insertQueuedRun(scratch, { businessId: DEPLOYMENT_BUSINESS_ID, runId });
+      worker = await startWorker({
+        databaseUrl: scratch.url,
+        owner: "conflicting-identity",
+        env: { RUNTIME_INSTALLATION_ID: randomUUID() },
+      });
+      expect(await worker.exited).toBe(1);
+      expect(worker.output()).toContain("RUNTIME_INSTALLATION_ID conflicts");
+      expect(await scratch.findRun(DEPLOYMENT_BUSINESS_ID, runId)).toMatchObject({
+        status: "queued",
+        leaseOwner: null,
+      });
+      expect(
+        (await scratch.query("SELECT installation_id FROM deployment_runtime_identity")).rows
+      ).toEqual([{ installation_id: installationId }]);
+    },
+    TIMEOUT
+  );
+
+  it(
     "boots against a migrated database and serves both probes",
     async () => {
       const handle = await bootWorker({});

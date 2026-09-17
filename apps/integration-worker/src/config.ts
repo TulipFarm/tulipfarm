@@ -1,5 +1,5 @@
-/** Migration 120 adds the durable OIM verification evidence required by this worker. */
-export const REQUIRED_SCHEMA_VERSION = 120;
+/** Migration 125 adds the runtime installation identity shared by all entrypoints. */
+export const REQUIRED_SCHEMA_VERSION = 125;
 
 export interface IntegrationWorkerConfig {
   readonly databaseUrl: string;
@@ -49,7 +49,7 @@ export function loadConfig(env: Env = process.env): IntegrationWorkerConfig {
     databaseUrl: requireString(env, "DATABASE_URL"),
     port: positiveInt(env, "INTEGRATION_WORKER_PORT", 4030),
     drainTimeoutMs: positiveInt(env, "INTEGRATION_WORKER_DRAIN_TIMEOUT_MS", 15_000),
-    businessId: env.BUSINESS_ID?.trim() || "tulipfarm-local",
+    businessId: env.BUSINESS_ID ?? "tulipfarm-local",
     internalApiUrl: stripTrailingSlashes(requireString(env, "INTERNAL_API_URL")),
     internalApiCredential: requireString(env, "INTEGRATION_WORKER_API_CREDENTIAL"),
   };

@@ -64,6 +64,7 @@ import {
   RUN_RECOVERY_CURSOR_CYCLE_STORAGE_STATEMENTS,
   RUN_RECOVERY_CURSOR_STORAGE_STATEMENTS,
   RUN_STORAGE_STATEMENTS,
+  RUNTIME_IDENTITY_STORAGE_STATEMENTS,
   SOUL_DOCTOR_STORAGE_STATEMENTS,
   SOUL_PUBLICATION_STORAGE_STATEMENTS,
   SOUL_REPOSITORY_STORAGE_STATEMENTS,
@@ -3494,5 +3495,10 @@ export const PG_MIGRATIONS: PgMigration[] = [
     up: async (q) => {
       await q.query("ALTER TABLE IF EXISTS conversations ADD COLUMN IF NOT EXISTS mode text");
     },
+  },
+  {
+    version: 125,
+    description: "durable runtime installation identity distinct from local business identity",
+    up: applyStatements(RUNTIME_IDENTITY_STORAGE_STATEMENTS),
   },
 ];

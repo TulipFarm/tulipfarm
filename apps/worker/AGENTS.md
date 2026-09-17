@@ -43,6 +43,8 @@ reconciliation, turn execution, delivery classification, projections, and outbox
 - `needs_reconciliation` with `invoke` still `pending` usually means bad credential or bad reclaim.
 - Three loops share one `pg.Pool`; one failing loop must back off without stopping the others.
 - Never migrate here; API owns `schema_version`; raise `REQUIRED_SCHEMA_VERSION` when needed.
+- Validate shared persisted runtime identity before loops/probes; use its business scope, never its
+  installation ID, to claim Runs. A configured identity mismatch is a startup failure.
 - Boot fails closed with `process.exit(1)`; unsafe drain timeout exits non-zero.
 - Leases/CAS are the only claim; recover expired leases, never force statuses.
 - Run admission starts each claimed Run independently, without a fixed active-Run cap. Database

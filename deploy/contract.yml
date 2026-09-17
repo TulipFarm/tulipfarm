@@ -335,8 +335,18 @@ env:
     zone: installer-sets
     consumers: [app, worker, integration-worker]
     default: tulipfarm-local
-    description: Deployment business id, used in constants and per-business soul paths.
-    consequence: Changing it on an existing install orphans that install's soul checkout.
+    description: Local business identifier, distinct from the durable runtime-installation identity.
+    consequence: Keep the existing value across upgrades and use it in all three runtime processes.
+      A mismatch with the persisted runtime association refuses startup.
+  - name: RUNTIME_INSTALLATION_ID
+    group: Soul and git
+    zone: installer-sets
+    consumers: [app, worker, integration-worker]
+    description: Optional UUID assertion for this runtime installation. Normally omitted or empty;
+      PostgreSQL generates and persists an identity shared by the API and both workers.
+    consequence: Must match the stored identity once initialized; conflicts refuse startup without
+      overwriting it. On a new database it establishes the identity. It grants no service access
+      or customer ownership and is separate from the anonymous product telemetry identifier.
   - name: SOUL_BUNDLE_RETENTION_DAYS
     group: Soul and git
     zone: set-these

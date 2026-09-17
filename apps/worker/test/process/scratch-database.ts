@@ -7,6 +7,7 @@ import {
   type PersistedRun,
   type Queryable,
   RUN_STORAGE_STATEMENTS,
+  RUNTIME_IDENTITY_STORAGE_STATEMENTS,
   RunStore,
   type TransactionPort,
   WAIT_STORAGE_STATEMENTS,
@@ -45,6 +46,7 @@ export async function startScratchDatabase(schemaVersion: number): Promise<Scrat
     ...EVENT_STORAGE_STATEMENTS,
     ...LOOP_CHECKPOINT_STORAGE_STATEMENTS,
     ...EFFECT_STORAGE_STATEMENTS,
+    ...RUNTIME_IDENTITY_STORAGE_STATEMENTS,
   ]) {
     await database.exec(statement);
   }

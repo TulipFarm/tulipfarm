@@ -49,7 +49,7 @@ Durable state: every path must survive restart and upgrade:
   - postgres data directory: holds Every Record, Run, Turn, audit event, and vector index
       if lost: Losing it loses all business data. Restoring it without TF_DATA_DIR leaves every stored Secret undecryptable.
 
-ENVIRONMENT VARIABLES (full surface: 103 variables)
+ENVIRONMENT VARIABLES (full surface: 104 variables)
 ------------------------------------------------------------
 Zone tells you whether you may change a variable:
   set-these       normal configuration; change it to suit the deployment
@@ -238,9 +238,14 @@ honour it is already a mistake.
     if set wrong: Allowing a prompt makes a failed sync hang forever instead of failing, because nothing is attached to answer it.
   BUSINESS_ID
     zone: installer-sets | required: no | consumers: app, worker, integration-worker
-    does: Deployment business id, used in constants and per-business soul paths.
+    does: Local business identifier, distinct from the durable runtime-installation identity.
     default: tulipfarm-local
-    if set wrong: Changing it on an existing install orphans that install's soul checkout.
+    if set wrong: Keep the existing value across upgrades and use it in all three runtime processes. A mismatch with the persisted runtime association refuses startup.
+  RUNTIME_INSTALLATION_ID
+    zone: installer-sets | required: no | consumers: app, worker, integration-worker
+    does: Optional UUID assertion for this runtime installation. Normally omitted or empty; PostgreSQL generates and persists an identity shared by the API and both workers.
+    default: none
+    if set wrong: Must match the stored identity once initialized; conflicts refuse startup without overwriting it. On a new database it establishes the identity. It grants no service access or customer ownership and is separate from the anonymous product telemetry identifier.
   SOUL_BUNDLE_RETENTION_DAYS
     zone: set-these | required: no | consumers: app
     does: How long an unreferenced published execution bundle is kept before the nightly sweep may delete it. The floor is 7.
