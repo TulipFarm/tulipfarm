@@ -522,6 +522,7 @@ function Field({
           target={field.linkTarget ?? ""}
           value={String(value ?? "")}
           onChange={onValue}
+          clearable={!field.required}
         />
       );
     case "array":

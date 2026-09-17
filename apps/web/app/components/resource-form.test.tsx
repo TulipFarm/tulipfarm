@@ -55,6 +55,17 @@ required: [title, active]
 if (!booleanParsed.ok) throw new Error(booleanParsed.error);
 const booleanFields = formFields(booleanParsed.schema);
 
+const relationshipParsed = parseSchema(`
+type: object
+properties:
+  title: { type: string }
+  customerId: { type: string, x-links: { target: customer } }
+  ownerId: { type: string, x-links: { target: customer } }
+required: [title, ownerId]
+`);
+if (!relationshipParsed.ok) throw new Error(relationshipParsed.error);
+const relationshipFields = formFields(relationshipParsed.schema);
+
 function renderForm(node: ReactElement) {
   const Stub = createRemixStub([{ path: "/", Component: () => node }]);
   return render(<Stub initialEntries={["/"]} />);
@@ -340,6 +351,29 @@ test("title-only edit preserves an omitted optional boolean", () => {
   fireEvent.click(screen.getByRole("button", { name: "Save" }));
 
   expect(onSubmit).toHaveBeenCalledWith({ title: "After", active: false }, expect.any(Function));
+});
+
+test("clearing an optional relationship omits it from the full-replace payload", () => {
+  const onSubmit = vi.fn();
+  renderForm(
+    <ResourceForm
+      fields={relationshipFields}
+      mode="edit"
+      initial={{ title: "Ticket", customerId: "CUST-1", ownerId: "CUST-2" }}
+      onSubmit={onSubmit}
+      submitting={false}
+      cancelTo="/"
+    />
+  );
+
+  fireEvent.click(screen.getByRole("button", { name: "Clear customerId selection" }));
+  fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+  expect(onSubmit).toHaveBeenCalledWith(
+    { title: "Ticket", ownerId: "CUST-2" },
+    expect.any(Function)
+  );
+  expect(screen.queryByRole("button", { name: "Clear ownerId selection" })).not.toBeInTheDocument();
 });
 
 test("optional booleans expose unset, true, and false as distinct payload states", async () => {

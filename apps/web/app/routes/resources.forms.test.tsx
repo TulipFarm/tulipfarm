@@ -97,6 +97,18 @@ required: [title]
 if (!calendarParsed.ok) throw new Error(calendarParsed.error);
 const calendarFields = formFields(calendarParsed.schema);
 
+const relationshipParsed = parseSchema(`
+type: object
+x-id-strategy: { sequence: true, field: id }
+properties:
+  id: { type: string }
+  title: { type: string }
+  customerId: { type: string, x-links: { target: customer } }
+required: [title]
+`);
+if (!relationshipParsed.ok) throw new Error(relationshipParsed.error);
+const relationshipFields = formFields(relationshipParsed.schema);
+
 function renderRoute(node: ReactElement, data: unknown) {
   vi.mocked(remix.useLoaderData).mockReturnValue(data);
   const Stub = createRemixStub([
@@ -159,6 +171,28 @@ test("create: an untouched optional Boolean is absent from the API payload", asy
   await waitFor(() =>
     expect(createRecord).toHaveBeenCalledWith("sample", { title: "Sample", active: false })
   );
+});
+
+test("create: an untouched optional relationship is absent from the API payload", async () => {
+  vi.mocked(createRecord).mockResolvedValue({
+    id: "TICK-1",
+    title: "Unassigned",
+    version: 1,
+    createdAt: "",
+    updatedAt: "",
+  });
+  renderRoute(<ResourceCreate />, {
+    type: "ticket",
+    fields: relationshipFields,
+    schemaError: undefined,
+  });
+
+  fireEvent.change(document.querySelector("input#title") as HTMLInputElement, {
+    target: { value: "Unassigned" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Create" }));
+
+  await waitFor(() => expect(createRecord).toHaveBeenCalledWith("ticket", { title: "Unassigned" }));
 });
 
 test("create: a lossy integer stays exact in the input and is not written", async () => {
@@ -508,6 +542,39 @@ test("edit: changing only the title keeps an omitted optional Boolean absent", a
     expect(updateRecord).toHaveBeenCalledWith("sample", "SAMPLE-1", 1, {
       title: "After",
       active: false,
+    })
+  );
+});
+
+test("edit: clearing an optional relationship removes it from the full-replace API payload", async () => {
+  vi.mocked(updateRecord).mockResolvedValue({
+    id: "TICK-1",
+    title: "Assigned",
+    version: 2,
+    createdAt: "",
+    updatedAt: "",
+  });
+  renderRoute(<ResourceEdit />, {
+    type: "ticket",
+    id: "TICK-1",
+    record: {
+      id: "TICK-1",
+      title: "Assigned",
+      customerId: "CUST-1",
+      version: 1,
+      createdAt: "",
+      updatedAt: "",
+    },
+    fields: relationshipFields,
+    schemaError: undefined,
+  });
+
+  fireEvent.click(screen.getByRole("button", { name: "Clear customerId selection" }));
+  fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+  await waitFor(() =>
+    expect(updateRecord).toHaveBeenCalledWith("ticket", "TICK-1", 1, {
+      title: "Assigned",
     })
   );
 });

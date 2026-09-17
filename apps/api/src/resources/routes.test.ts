@@ -1058,6 +1058,43 @@ describe("x-links validate-on-write", () => {
     expect(res.statusCode).toBe(201);
   });
 
+  it("clears an optional link when PUT omits the field", async () => {
+    const custId = randomUUID();
+    customerRepo.docs.set(custId, {
+      _id: custId,
+      version: 1,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+      name: "Acme",
+    });
+
+    const create = await app.inject({
+      method: "POST",
+      url: "/api/v1/resources/ticket",
+      cookies: { [SESSION_COOKIE]: sid, [CSRF_COOKIE]: TEST_CSRF },
+      headers: { [CSRF_HEADER]: TEST_CSRF },
+      payload: { title: "Bug", customerId: custId },
+    });
+    expect(create.statusCode).toBe(201);
+    const ticket = create.json<{ id: string; version: number }>();
+
+    const update = await app.inject({
+      method: "PUT",
+      url: `/api/v1/resources/ticket/${ticket.id}`,
+      cookies: { [SESSION_COOKIE]: sid, [CSRF_COOKIE]: TEST_CSRF },
+      headers: { [CSRF_HEADER]: TEST_CSRF, "if-match": String(ticket.version) },
+      payload: { title: "Unassigned bug" },
+    });
+
+    expect(update.statusCode).toBe(200);
+    expect(update.json<Record<string, unknown>>()).toMatchObject({
+      title: "Unassigned bug",
+      version: 2,
+    });
+    expect(update.json<Record<string, unknown>>()).not.toHaveProperty("customerId");
+    expect(ticketRepo.docs.get(ticket.id)).not.toHaveProperty("customerId");
+  });
+
   it("soft-deleting linked customer succeeds; ticket customerId unchanged", async () => {
     const custId = randomUUID();
     customerRepo.docs.set(custId, {

@@ -19,11 +19,13 @@ export function LinkCombobox({
   value,
   onChange,
   id,
+  clearable = false,
 }: {
   target: string;
   value: string;
   onChange: (id: string) => void;
   id?: string;
+  clearable?: boolean;
 }) {
   const [options, setOptions] = useState<Option[]>([]);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -73,7 +75,15 @@ export function LinkCombobox({
     setOpen(false);
   }
 
+  function clear() {
+    onChange("");
+    setQuery("");
+    setOpen(false);
+    setActive(0);
+  }
+
   const listId = `${id ?? generatedId}-list`;
+  const clearLabel = id ?? target;
 
   return (
     <div ref={rootRef} className="relative">
@@ -86,7 +96,9 @@ export function LinkCombobox({
         aria-autocomplete="list"
         aria-activedescendant={open && filtered[active] ? `${listId}-${active}` : undefined}
         autoComplete="off"
-        className="w-full rounded-sm border border-border bg-background px-3 py-2 text-sm outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50"
+        className={`w-full rounded-sm border border-border bg-background px-3 py-2 text-sm outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50 ${
+          clearable && value ? "pr-16" : ""
+        }`}
         placeholder={value ? selectedLabel : `search ${target}…`}
         value={open ? query : value ? selectedLabel : ""}
         onChange={(e) => {
@@ -118,6 +130,16 @@ export function LinkCombobox({
           }
         }}
       />
+      {clearable && value ? (
+        <button
+          type="button"
+          aria-label={`Clear ${clearLabel} selection`}
+          className="absolute top-1 right-2 rounded-sm px-1.5 py-1 text-xs text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:outline-none"
+          onClick={clear}
+        >
+          Clear
+        </button>
+      ) : null}
       {loadError ? <p className="mt-1 text-xs text-destructive">error: {loadError}</p> : null}
       {open ? (
         <div
