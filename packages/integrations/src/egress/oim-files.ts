@@ -1,4 +1,4 @@
-import type { OimMultipartPart } from "@tulipfarm/schema";
+import type { OimMultipartPart, OimOperation } from "@tulipfarm/schema";
 import type { ToolAdapterRequest } from "@tulipfarm/tool-broker";
 
 interface OimFile {
@@ -10,19 +10,20 @@ interface OimFile {
 
 export interface OimMultipartBinding {
   readonly multipart?: readonly OimMultipartPart[];
+  readonly mime?: Extract<OimOperation["source"], { type: "http" }>["mime"];
 }
 
 export class OimMultipartFileInputError extends Error {
   readonly name = "OimMultipartFileInputError";
 
   constructor(readonly pointer: string) {
-    super(`invalid multipart File ID at ${pointer}`);
+    super(`invalid declared File ID at ${pointer}`);
   }
 }
 
 export interface OimFileReadAuthorizationRequest {
   readonly request: ToolAdapterRequest;
-  /** Sorted, unique IDs extracted only from the compiled multipart File pointers. */
+  /** Sorted, unique IDs extracted only from declared multipart or MIME File inputs. */
   readonly fileIds: readonly string[];
 }
 
@@ -86,13 +87,13 @@ function validFileId(value: unknown): value is string {
   );
 }
 
-/** Returns the exact declared multipart File targets, independent of argument property names. */
+/** Returns the exact declared File targets for multipart and composed MIME requests. */
 export function extractOimMultipartFileIds(
   binding: OimMultipartBinding,
   argumentsValue: unknown
 ): readonly string[] {
   const fileParts = binding.multipart?.filter((part) => part.kind === "file") ?? [];
-  if (fileParts.length === 0) return [];
+  if (fileParts.length === 0 && binding.mime === undefined) return [];
   if (
     argumentsValue === null ||
     typeof argumentsValue !== "object" ||
@@ -102,6 +103,18 @@ export function extractOimMultipartFileIds(
   }
   const body = (argumentsValue as Record<string, unknown>).body;
   const ids = new Set<string>();
+  if (binding.mime !== undefined) {
+    const attachments = oimMultipartPointerValue(body, "/attachments");
+    if (attachments !== undefined) {
+      if (!Array.isArray(attachments) || attachments.length > 10) {
+        throw new OimMultipartFileInputError("/attachments");
+      }
+      for (const id of attachments) {
+        if (!validFileId(id)) throw new OimMultipartFileInputError("/attachments");
+        ids.add(id);
+      }
+    }
+  }
   for (const part of fileParts) {
     const value = oimMultipartPointerValue(body, part.pointer);
     if (!validFileId(value)) throw new OimMultipartFileInputError(part.pointer);

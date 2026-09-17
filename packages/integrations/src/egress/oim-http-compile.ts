@@ -477,6 +477,13 @@ export function compileOimHttpOperations(
           ...(source.multipart === undefined
             ? {}
             : { multipart: source.multipart.parts as readonly OimMultipartPart[] }),
+          ...(source.multipart?.subtype === undefined
+            ? {}
+            : { multipartSubtype: source.multipart.subtype }),
+          ...(source.multipart?.maxBytes === undefined
+            ? {}
+            : { maxRequestBytes: source.multipart.maxBytes }),
+          ...(source.mime === undefined ? {} : { mime: source.mime }),
           ...(operation.response.mode === "binary" ? { binaryResponse: true } : {}),
           ...(operation.response.mode === "binary"
             ? {}

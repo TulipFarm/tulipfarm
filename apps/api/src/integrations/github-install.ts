@@ -101,7 +101,7 @@ export async function listInstalledRepositories(
   );
 }
 
-/** Fail soft after credential storage; reconnects upsert installation grants. */
+/** Idempotently upsert installation grants; failures must not be reported as connected. */
 export async function ensureGitHubInstallation(
   deps: EnsureGitHubInstallationDeps,
   installationId: string
@@ -111,7 +111,7 @@ export async function ensureGitHubInstallation(
   const privateKeyPem = await readAppSecret(deps.secretsService, "private_key");
   if (!appId || !privateKeyPem) {
     deps.log?.warn({ event: "integrations.github.record.skipped", reason: "app_not_configured" });
-    return;
+    throw new Error("GitHub App credentials are not configured");
   }
 
   try {
@@ -170,5 +170,6 @@ export async function ensureGitHubInstallation(
       reason: err instanceof GitHubCredentialError ? err.reason : "unexpected",
       message: err instanceof Error ? err.message : String(err),
     });
+    throw err;
   }
 }

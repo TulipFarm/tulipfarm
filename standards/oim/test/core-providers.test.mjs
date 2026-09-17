@@ -43,12 +43,14 @@ test("core provider packages pass portable package and fixture validation", asyn
   }
 });
 
-test("Linear preserves its legacy guide beside the OIM package guide", async () => {
+test("Linear pins both the catalog setup guide and the detailed OIM package guide", async () => {
   const { manifest, files } = await loadPackage("linear");
   assert(files.has("setup-guide-oim.md"));
-  assert.equal(files.has("setup-guide.md"), false);
+  assert(files.has("setup-guide.md"));
   const legacyGuide = await readFile(resolve(root, "integrations/linear/setup-guide.md"), "utf8");
   assert.match(legacyGuide, /TulipFarm uses a Linear personal API key/);
+  assert.equal(files.get("setup-guide.md").toString("utf8"), legacyGuide);
+  assert.match(legacyGuide, /Coming soon/);
   assert.equal(manifest.files?.find(({ role }) => role === "guide")?.path, "setup-guide-oim.md");
 });
 

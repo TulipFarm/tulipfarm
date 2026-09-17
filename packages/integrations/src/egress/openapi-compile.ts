@@ -1,6 +1,7 @@
 import {
   canonicalHash,
   type OimMultipartPart,
+  type OimOperation,
   type ToolContractDefinition,
   type ToolContractSpec,
 } from "@tulipfarm/schema";
@@ -160,6 +161,9 @@ export interface OpenApiOperationBinding {
   readonly contentType?: "json" | "form" | "multipart";
   /** OIM-only declared multipart parts. */
   readonly multipart?: readonly OimMultipartPart[];
+  readonly multipartSubtype?: "related";
+  readonly maxRequestBytes?: number;
+  readonly mime?: Extract<OimOperation["source"], { type: "http" }>["mime"];
   /** OIM-only signal that a successful response is a File, not JSON. */
   readonly binaryResponse?: boolean;
   /** Provider response schema, validated before OIM Hooks, projection, or result normalization. */

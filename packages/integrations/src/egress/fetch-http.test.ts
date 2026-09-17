@@ -132,4 +132,66 @@ describe("FetchEgressHttp", () => {
       await new Promise((resolve) => server.close(resolve));
     }
   });
+
+  it("sends bounded multipart/related over the real socket with exact Content-Length", async () => {
+    const server = createServer(async (req, res) => {
+      const chunks: Buffer[] = [];
+      for await (const chunk of req) chunks.push(Buffer.from(chunk));
+      const bytes = Buffer.concat(chunks);
+      res.setHeader("Content-Type", "application/json");
+      res.end(
+        JSON.stringify({
+          length: bytes.length,
+          declaredLength: req.headers["content-length"],
+          chunked: req.headers["transfer-encoding"] !== undefined,
+          contentType: req.headers["content-type"],
+          body: bytes.toString(),
+        })
+      );
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const port = (server.address() as AddressInfo).port;
+    const fileBytes = Buffer.from("计划\r\n");
+    try {
+      const response = await new FetchEgressHttp().send({
+        url: `http://pinned.invalid:${port}/upload`,
+        method: "POST",
+        headers: {},
+        pinnedAddresses: ["127.0.0.1"],
+        multipartSubtype: "related",
+        multipart: [
+          {
+            name: "metadata",
+            mediaType: "application/json; charset=UTF-8",
+            body: '{"name":"计划.txt"}',
+          },
+          {
+            name: "file",
+            mediaType: "text/plain",
+            byteLength: fileBytes.length,
+            body: (async function* () {
+              yield fileBytes;
+            })(),
+          },
+        ],
+      });
+      expect(response.status).toBe(200);
+      const body = response.body as {
+        length: number;
+        declaredLength: string;
+        chunked: boolean;
+        contentType: string;
+        body: string;
+      };
+      expect(body.declaredLength).toBe(String(body.length));
+      expect(body.chunked).toBe(false);
+      expect(body.contentType).toMatch(/^multipart\/related; boundary=tulipfarm-/);
+      expect(body.body).toContain(
+        'Content-Type: application/json; charset=UTF-8\r\n\r\n{"name":"计划.txt"}'
+      );
+      expect(body.body).toContain("Content-Type: text/plain\r\n\r\n计划\r\n");
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
 });
