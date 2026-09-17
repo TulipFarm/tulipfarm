@@ -32,7 +32,7 @@ describe("postReply", () => {
   it("executes the named binding with decision vars + injected {text}", async () => {
     const execute = vi.fn(async () => ({ success: true as const, data: {} }));
     const log = makeLog();
-    await postReply(
+    const outcome = await postReply(
       { registry: makeRegistry({ reply_in_thread: execute }), log },
       {
         slug: "chatapp",
@@ -48,6 +48,7 @@ describe("postReply", () => {
       expect.anything()
     );
     expect(log.error).not.toHaveBeenCalled();
+    expect(outcome).toEqual({ delivered: true });
   });
 
   it("falls back to the `default` binding when the named one is not declared", async () => {
@@ -75,9 +76,9 @@ describe("postReply", () => {
     expect(log.error).toHaveBeenCalledWith(expect.anything(), expect.stringContaining("dropped"));
   });
 
-  it("never throws: tool failure and tool throw both only log", async () => {
+  it("reports provider refusal and ambiguous exceptions instead of delivered success", async () => {
     const log = makeLog();
-    await postReply(
+    const result = await postReply(
       {
         registry: makeRegistry({
           send_message: async () => ({
@@ -97,6 +98,7 @@ describe("postReply", () => {
       }
     );
     expect(log.error).toHaveBeenCalledTimes(1);
+    expect(result).toEqual({ delivered: false, outcome: "failed", code: "internal_error" });
 
     await expect(
       postReply(
@@ -117,7 +119,7 @@ describe("postReply", () => {
           run: RUN,
         }
       )
-    ).resolves.toBeUndefined();
+    ).resolves.toEqual({ delivered: false, outcome: "ambiguous", code: "reply_outcome_unknown" });
   });
 
   it("logs and drops when no registry is available", async () => {

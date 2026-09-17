@@ -552,9 +552,11 @@ export const InternalDeliveryChatAttachmentResponseSchema = {
   type: "object",
   required: ["outcome"],
   properties: {
-    outcome: { type: "string", enum: ["attached", "unlinked", "ignored"] },
+    outcome: { type: "string", enum: ["attached", "unlinked", "ignored", "reply_failed"] },
+    reply: IngressReplyResultSchema,
     turnId: { type: "string" },
     attempt: { type: "integer" },
+    completedOutcome: { type: "string", enum: ["answered", "failed"] },
     reason: { type: "string" },
   },
 } as const;
@@ -591,11 +593,7 @@ export const InternalDeliveryReplyBodySchema = {
   },
 } as const;
 
-export const InternalDeliveryReplyResponseSchema = {
-  type: "object",
-  required: ["delivered"],
-  properties: { delivered: { type: "boolean" } },
-} as const;
+export const InternalDeliveryReplyResponseSchema = IngressReplyResultSchema;
 
 export const InternalRoutineApprovalOpenBodySchema = {
   type: "object",
@@ -692,3 +690,5 @@ export const InternalEmitResponseSchema = {
     runId: { type: "string" },
   },
 } as const;
+
+import { IngressReplyResultSchema } from "@tulipfarm/schema";

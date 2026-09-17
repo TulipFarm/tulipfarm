@@ -69,7 +69,7 @@ import { resolveDataDir, waitForDataDirEnv } from "./data-dir";
 import { connectPg, transactionPort } from "./db";
 import { DeliveryTargetRegistry } from "./delivery";
 import { createEffortInference, runEventEffortPin } from "./effort-inference";
-import { EventOutboxDispatcher } from "./event-dispatcher";
+import { acceptedEventHandler, EventOutboxDispatcher } from "./event-dispatcher";
 import { RunExecutorRegistry } from "./executors";
 import { buildWorkerFileService } from "./files/service";
 import { createHookExecutor } from "./hooks/executor";
@@ -327,12 +327,7 @@ export async function main(): Promise<void> {
 
   const executors = new RunExecutorRegistry();
   const deliveryTargets = new DeliveryTargetRegistry();
-  deliveryTargets.register("event.accepted", async (message) => {
-    await internalApi.require(
-      "POST",
-      `/api/v1/internal/slack/events/${encodeURIComponent(message.inboxId)}/dispatch`
-    );
-  });
+  deliveryTargets.register("event.accepted", acceptedEventHandler(internalApi));
 
   // Installation scope only; GitHubAdapter narrows until Soul-authored AccessGrants exist.
   const githubTooling = buildGitHubTooling({
