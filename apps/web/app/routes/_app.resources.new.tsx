@@ -135,17 +135,24 @@ export default function ResourceTypeNew() {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [invalidName, setInvalidName] = useState(false);
+  const [invalidFieldIds, setInvalidFieldIds] = useState<ReadonlySet<string>>(new Set());
   const nameRef = useRef<HTMLInputElement>(null);
+  const fieldNameRefs = useRef(new Map<string, HTMLInputElement>());
   const savedName = resourceTypeName(name);
 
   function setField(id: string, patch: Partial<FieldRow>) {
     setFields((prev) => prev.map((f) => (f.id === id ? { ...f, ...patch } : f)));
+    if (patch.name !== undefined && invalidFieldIds.has(id)) {
+      setInvalidFieldIds(new Set());
+      setError(null);
+    }
   }
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
     setError(null);
     setInvalidName(false);
+    setInvalidFieldIds(new Set());
     if (!NAME_RE.test(savedName)) {
       setError(
         "Enter a name such as Support tickets. Start with a letter from A to Z; spaces and capitals are fine."
@@ -154,17 +161,34 @@ export default function ResourceTypeNew() {
       nameRef.current?.focus();
       return;
     }
-    const named = fields.filter((f) => f.name.trim());
-    if (named.length === 0) {
-      setError("Add at least one field.");
+    const normalizedFields = fields.map((field) => ({ ...field, name: field.name.trim() }));
+    const unnamedFieldIds = normalizedFields
+      .filter((field) => field.name.length === 0)
+      .map((field) => field.id);
+    if (unnamedFieldIds.length > 0) {
+      setError("Every field needs a name. Name or remove the highlighted field.");
+      setInvalidFieldIds(new Set(unnamedFieldIds));
+      fieldNameRefs.current.get(unnamedFieldIds[0] ?? "")?.focus();
+      return;
+    }
+    const fieldNameCounts = new Map<string, number>();
+    for (const field of normalizedFields) {
+      fieldNameCounts.set(field.name, (fieldNameCounts.get(field.name) ?? 0) + 1);
+    }
+    const duplicateFieldIds = normalizedFields
+      .filter((field) => (fieldNameCounts.get(field.name) ?? 0) > 1)
+      .map((field) => field.id);
+    if (duplicateFieldIds.length > 0) {
+      setError("Field names must be unique. Rename or remove duplicate fields.");
+      setInvalidFieldIds(new Set(duplicateFieldIds));
+      fieldNameRefs.current.get(duplicateFieldIds[0] ?? "")?.focus();
       return;
     }
     const properties: Record<string, unknown> = {};
     const required: string[] = [];
-    for (const f of named) {
-      const fname = f.name.trim();
-      properties[fname] = propFor(f);
-      if (f.required) required.push(fname);
+    for (const field of normalizedFields) {
+      properties[field.name] = propFor(field);
+      if (field.required) required.push(field.name);
     }
     const schema = {
       $schema: "https://json-schema.org/draft/2020-12/schema",
@@ -266,8 +290,14 @@ export default function ResourceTypeNew() {
                   Name
                 </label>
                 <Input
+                  ref={(node) => {
+                    if (node) fieldNameRefs.current.set(f.id, node);
+                    else fieldNameRefs.current.delete(f.id);
+                  }}
                   id={`field-${f.id}-name`}
                   aria-label={`field ${i + 1} name`}
+                  aria-invalid={invalidFieldIds.has(f.id) || undefined}
+                  aria-describedby={invalidFieldIds.has(f.id) ? "type-create-error" : undefined}
                   value={f.name}
                   onChange={(e) => setField(f.id, { name: e.target.value })}
                   placeholder="subject"
