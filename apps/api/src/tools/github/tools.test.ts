@@ -1,5 +1,9 @@
 import { generateKeyPairSync } from "node:crypto";
-import { GITHUB_TOOL_CONTRACTS, type IntegrationHttpRequest } from "@tulipfarm/integrations";
+import {
+  GITHUB_TOOL_CONTRACTS,
+  type IntegrationHttpRequest,
+  type IntegrationHttpResponse,
+} from "@tulipfarm/integrations";
 import type { ArtifactService } from "@tulipfarm/run-kernel";
 import { principalSecretKey, type SecretsService } from "@tulipfarm/secrets";
 import type { IntegrationStore, PersistedRoutingSnapshot } from "@tulipfarm/storage";
@@ -228,6 +232,48 @@ function expectNoNullishTargetText(targets: unknown): void {
 }
 
 describe("buildGitHubTools", () => {
+  it("refuses an incomplete marker scan through the hosted Tool without posting", async () => {
+    let pages = 0;
+    let posts = 0;
+    const tooling = buildGitHubTooling({
+      businessId: BUSINESS_ID,
+      integrations: fakeIntegrationStore(),
+      secrets: fakeSecretsService(),
+      now: () => new Date("2026-08-06T00:00:00.000Z"),
+      http: {
+        async send(request: IntegrationHttpRequest): Promise<IntegrationHttpResponse> {
+          if (request.path.endsWith("/access_tokens")) {
+            return {
+              status: 201,
+              headers: {},
+              body: {
+                token: "ghs_minted",
+                expires_at: "2026-08-06T01:00:00.000Z",
+              },
+            };
+          }
+          if (request.method === "POST") posts += 1;
+          else pages += 1;
+          return {
+            status: 200,
+            headers: {
+              link: '<https://api.github.com/repos/tulip/farm/issues/41/comments?page=2>; rel="next"',
+            },
+            body: [{ id: 1, body: "other" }],
+          };
+        },
+      },
+    });
+    const tools = buildGitHubTools(BUSINESS_ID, { ...tooling, effects: new MemoryEffectStore() });
+    const tool = tools.find((candidate) => candidate.name === "github_issue_comment");
+    if (tool === undefined) throw new Error("github_issue_comment not registered");
+    const args = { repository: "tulip/farm", issueNumber: 41, body: "hello" };
+    expect((await tool.execute(args, context())).success).toBe(false);
+    expect((await tool.execute(args, context())).success).toBe(false);
+    expect(pages).toBeGreaterThanOrEqual(10);
+    expect(posts).toBe(0);
+  });
+
   it("derives egress destinations from the published GitHub contracts", () => {
     const tooling = buildGitHubTooling({
       businessId: BUSINESS_ID,

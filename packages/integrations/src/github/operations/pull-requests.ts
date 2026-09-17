@@ -1,9 +1,9 @@
 import { commentOutput, findMarkedComment } from "./issues";
+import { findGitHubEntry } from "./pagination";
 import {
   type Arguments,
   type GitHubApi,
   githubEffectMarker,
-  list,
   numberArg,
   optionalStringArg,
   record,
@@ -88,24 +88,40 @@ export async function searchPullRequests(
   return searchOutput(record(response.body));
 }
 
-export async function findOpenPullRequestByHead(
+export async function findPullRequest(
   api: GitHubApi,
   repository: string,
   head: string,
-  credential: string
+  base: string,
+  credential: string,
+  marker?: string
 ): Promise<Record<string, unknown> | undefined> {
-  const owner = repository.split("/")[0];
-  const response = await api.call(
+  const separator = head.indexOf(":");
+  const owner = separator < 0 ? repository.split("/")[0] : head.slice(0, separator);
+  const branch = separator < 0 ? head : head.slice(separator + 1);
+  return findGitHubEntry(
+    api,
+    `/repos/${repository}/pulls`,
     {
-      method: "GET",
-      path: `/repos/${repository}/pulls`,
-      query: { head: `${owner}:${head}`, state: "open" },
+      head: `${owner}:${branch}`,
+      base,
+      state: marker === undefined ? "open" : "all",
+      sort: "created",
+      direction: "asc",
     },
     credential,
-    false
+    (pr) => {
+      const prHead = record(pr.head);
+      const prOwner = record(prHead.user).login;
+      return (
+        typeof prOwner === "string" &&
+        prOwner.toLowerCase() === owner?.toLowerCase() &&
+        prHead.ref === branch &&
+        record(pr.base).ref === base &&
+        (marker === undefined ? pr.state === "open" : String(pr.body ?? "").includes(marker))
+      );
+    }
   );
-  const [first] = list(response.body).map((entry) => record(entry));
-  return first;
 }
 
 export async function createPullRequest(
@@ -119,8 +135,10 @@ export async function createPullRequest(
   const base = stringArg(source, "base");
   const marker = githubEffectMarker(idempotencyKey);
 
-  // Read before write: a redelivered effect must return the PR it already opened.
-  const existing = await findOpenPullRequestByHead(api, repository, head, credential);
+  // A lost response may be reconciled after the original PR was closed or merged.
+  const existing =
+    (await findPullRequest(api, repository, head, base, credential, marker)) ??
+    (await findPullRequest(api, repository, head, base, credential));
   if (existing !== undefined) return pullRequestOutput(repository, existing);
 
   const body = typeof source.body === "string" ? source.body : "";
@@ -175,14 +193,13 @@ export async function findMarkedReview(
   marker: string,
   credential: string
 ): Promise<Record<string, unknown> | undefined> {
-  const response = await api.call(
-    { method: "GET", path: `/repos/${repository}/pulls/${pullNumber}/reviews` },
+  return findGitHubEntry(
+    api,
+    `/repos/${repository}/pulls/${pullNumber}/reviews`,
+    {},
     credential,
-    false
+    (review) => String(review.body ?? "").includes(marker)
   );
-  return list(response.body)
-    .map((entry) => record(entry))
-    .find((review) => String(review.body ?? "").includes(marker));
 }
 
 export async function review(
