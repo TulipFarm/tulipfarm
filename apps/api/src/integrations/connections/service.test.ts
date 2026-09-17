@@ -318,7 +318,9 @@ describe("OimConnectionService authorization", () => {
           verification: {
             verify: options.verify,
             verifyCandidate: async () => options.verify(),
-            async publish() {},
+            publish: async () => {
+              await publishAuthStep();
+            },
           },
           verifyAuthorization: async () => null,
           now: () => NOW,

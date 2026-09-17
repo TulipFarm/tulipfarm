@@ -73,6 +73,32 @@ const StartActionSchema = {
   },
 };
 
+const CredentialUpdateResponseSchema = {
+  type: "object",
+  required: ["connectionId", "verification"],
+  properties: {
+    connectionId: { type: "string" },
+    verification: {
+      type: "object",
+      required: ["status"],
+      properties: {
+        status: {
+          type: "string",
+          enum: ["not_required", "pending", "verified", "action_required"],
+        },
+        error: {
+          type: "string",
+          enum: [
+            "provider_proof_failed",
+            "verification_unavailable",
+            "verification_persistence_failed",
+          ],
+        },
+      },
+    },
+  },
+};
+
 const ConnectionSetupSchema = {
   type: "object",
   additionalProperties: false,
@@ -376,31 +402,7 @@ export function registerOimConnectionRoutes(
           },
         },
         response: {
-          201: {
-            type: "object",
-            required: ["connectionId", "verification"],
-            properties: {
-              connectionId: { type: "string" },
-              verification: {
-                type: "object",
-                required: ["status"],
-                properties: {
-                  status: {
-                    type: "string",
-                    enum: ["not_required", "pending", "verified", "action_required"],
-                  },
-                  error: {
-                    type: "string",
-                    enum: [
-                      "provider_proof_failed",
-                      "verification_unavailable",
-                      "verification_persistence_failed",
-                    ],
-                  },
-                },
-              },
-            },
-          },
+          201: CredentialUpdateResponseSchema,
           400: ErrorSchema,
           401: ErrorSchema,
           403: ErrorSchema,
@@ -482,6 +484,56 @@ export function registerOimConnectionRoutes(
           stepId,
           await actorFor(req, deps.authorizationCheck),
           body?.org?.trim() || undefined
+        );
+      } catch (error) {
+        return sendError(reply, error);
+      }
+    }
+  );
+
+  app.patch(
+    "/api/v1/integrations/:key/connections/:connectionId/credentials",
+    {
+      ...authorizationRoute,
+      schema: {
+        description:
+          "Replace declared fields on an exact Connection and reverify without returning secrets.",
+        tags: ["integrations"],
+        security: [{ sessionCookie: [] }, { bearerToken: [] }],
+        params: { ...ParamsSchema, required: ["key", "connectionId"] },
+        body: {
+          type: "object",
+          additionalProperties: false,
+          required: ["values"],
+          properties: {
+            values: {
+              type: "object",
+              minProperties: 1,
+              maxProperties: 128,
+              additionalProperties: { type: "string", minLength: 1, maxLength: 65536 },
+            },
+          },
+        },
+        response: {
+          200: CredentialUpdateResponseSchema,
+          400: ErrorSchema,
+          401: ErrorSchema,
+          403: ErrorSchema,
+          404: ErrorSchema,
+          409: ErrorSchema,
+          500: ErrorSchema,
+          502: ErrorSchema,
+        },
+      },
+    },
+    async (req, reply) => {
+      try {
+        const { key, connectionId } = req.params as { key: string; connectionId: string };
+        return await deps.service.updateCredentials(
+          key,
+          connectionId,
+          await actorFor(req, deps.authorizationCheck),
+          (req.body as { values: Record<string, string> }).values
         );
       } catch (error) {
         return sendError(reply, error);

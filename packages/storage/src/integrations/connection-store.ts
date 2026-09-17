@@ -5,6 +5,10 @@ import {
 } from "@tulipfarm/schema";
 import type { TransactionPort } from "../ports";
 import {
+  type ReplaceConnectionCredentials,
+  replaceConnectionCredentials,
+} from "./connection-credential-update";
+import {
   type BindVerifiedConnectionExternalIdentity,
   bindVerifiedConnectionExternalIdentity,
   clearVerifiedConnectionExternalIdentity,
@@ -500,8 +504,25 @@ export class ConnectionStore {
           owner.scope === "team" ? owner.teamId : null,
         ]
       );
+      if (result.rows.length === 1) {
+        await transaction.query(
+          `UPDATE connection_auth_steps SET revision = revision + 1, updated_at = now()
+            WHERE business_id = $1 AND connection_id = $2 AND status = 'active'`,
+          [businessId, connectionId]
+        );
+        await transaction.query(
+          `UPDATE connection_verification_evidence
+              SET invalidated_at = $3, invalidation_reason = 'action_required'
+            WHERE business_id = $1 AND connection_id = $2 AND invalidated_at IS NULL`,
+          [businessId, connectionId, checkedAt]
+        );
+      }
       return result.rows.length === 1;
     });
+  }
+
+  replaceCredentials(input: ReplaceConnectionCredentials): Promise<boolean> {
+    return replaceConnectionCredentials(this.transactions, input);
   }
 
   async findById(businessId: string, id: string): Promise<PersistedConnection | null> {

@@ -32,6 +32,13 @@ function configuredManifest() {
               required: true,
               target: { type: "credential", slot: "api_token" },
             },
+            {
+              id: "user_agent",
+              label: "User-Agent",
+              input: "text",
+              required: true,
+              target: { type: "configuration", field: "user_agent" },
+            },
           ],
         },
       ],
@@ -69,6 +76,15 @@ function configuredHttpOrigin(baseUrl: string) {
     { id: "site", label: "Site", type: "url", required: true },
     { id: "account", label: "Account", type: "string", required: true }
   );
+  for (const id of ["site", "account"]) {
+    manifest.auth.steps[0].fields.push({
+      id,
+      label: id,
+      input: "text",
+      required: true,
+      target: { type: "configuration", field: id },
+    });
+  }
   Object.assign(manifest.auth, { allowedOriginHosts: ["*.example.com"] });
   manifest.operations[0].source.baseUrl = baseUrl;
   return manifest;
@@ -167,6 +183,16 @@ describe("Connection-bound HTTP parameters", () => {
 
 function configuredGraphql() {
   const base = configuredManifest();
+  base.auth.steps[0].fields = base.auth.steps[0].fields.filter(
+    (field) => field.id !== "user_agent"
+  );
+  base.auth.steps[0].fields.push({
+    id: "site",
+    label: "Site",
+    input: "text",
+    required: true,
+    target: { type: "configuration", field: "site" },
+  });
   return {
     ...base,
     auth: {
