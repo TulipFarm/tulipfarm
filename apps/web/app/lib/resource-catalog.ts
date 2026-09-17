@@ -33,6 +33,8 @@ export type CatalogType = {
   readonly linkedBy: readonly string[];
   /** A short preview of what a Record actually holds, for the catalog row. */
   readonly keyFields: readonly string[];
+  /** Every declared field name, retained separately so search is not limited by the preview. */
+  readonly fieldNames: readonly string[];
   readonly schemaError: string | null;
 };
 
@@ -69,13 +71,21 @@ type Derived = {
   idStrategy: IdStrategy | null;
   links: string[];
   keyFields: string[];
+  fieldNames: string[];
   schemaError: string | null;
 };
 
 function derive(summary: ResourceTypeSummary): Derived {
   const parsed = parseSchema(summary.schema);
   if (!parsed.ok) {
-    return { fields: [], idStrategy: null, links: [], keyFields: [], schemaError: parsed.error };
+    return {
+      fields: [],
+      idStrategy: null,
+      links: [],
+      keyFields: [],
+      fieldNames: [],
+      schemaError: parsed.error,
+    };
   }
   const fields = deriveFields(parsed.schema);
   return {
@@ -83,6 +93,7 @@ function derive(summary: ResourceTypeSummary): Derived {
     idStrategy: idStrategyOf(parsed.schema),
     links: linkTargetsOf(fields),
     keyFields: keyFieldsOf(fields),
+    fieldNames: fields.map((field) => field.name),
     schemaError: null,
   };
 }
@@ -122,6 +133,7 @@ export function buildCatalog(
       links: d.links,
       linkedBy: [...(inbound.get(summary.name) ?? [])].sort(),
       keyFields: d.keyFields,
+      fieldNames: d.fieldNames,
       schemaError: d.schemaError,
     };
   });
@@ -145,7 +157,7 @@ export function filterCatalog(
     return (
       row.name.toLowerCase().includes(q) ||
       (row.domain?.toLowerCase().includes(q) ?? false) ||
-      row.keyFields.some((f) => f.toLowerCase().includes(q)) ||
+      row.fieldNames.some((f) => f.toLowerCase().includes(q)) ||
       row.links.some((l) => l.toLowerCase().includes(q))
     );
   });
