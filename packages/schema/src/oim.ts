@@ -366,7 +366,9 @@ const MultipartFieldPartSchema = Type.Object(
     kind: Type.Literal("field"),
     pointer: Type.String({ pattern: "^(?:/(?:[^/~]|~[01])*)+$", maxLength: 512 }),
     maxBytes: Type.Integer({ minimum: 1, maximum: 1024 * 1024 }),
-    mediaType: Type.Optional(Type.String({ pattern: "^[\\w.+-]+/[\\w.+-]+$", maxLength: 128 })),
+    mediaType: Type.Optional(
+      Type.String({ pattern: "^[\\w.+-]+/[\\w.+-]+(?:; charset=UTF-8)?$", maxLength: 128 })
+    ),
   },
   { additionalProperties: false }
 );

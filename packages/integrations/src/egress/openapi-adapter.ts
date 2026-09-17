@@ -18,6 +18,8 @@ import {
 } from "./openapi-compile";
 
 export interface EgressMultipartPart {
+  /** Exact buffered length, when the host bounded a File before dispatch. */
+  readonly byteLength?: number;
   readonly name: string;
   readonly body: string | AsyncIterable<Uint8Array>;
   readonly filename?: string;

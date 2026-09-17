@@ -1576,7 +1576,7 @@ operations:
           - name: metadata
             kind: field
             pointer: /metadata
-            mediaType: application/json
+            mediaType: application/json; charset=UTF-8
             maxBytes: 65536
           - name: file
             kind: file

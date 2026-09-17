@@ -168,10 +168,11 @@ the source File. Legacy pre-encoded APIs may continue to declare ordinary JSON o
 
 For metadata plus bytes, use `source.contentType: multipart` with
 `source.multipart.subtype: related`, `maxBytes` (at most 10 MiB), and ordered `parts`. A field
-part may declare `mediaType: application/json`; its `pointer` selects metadata in the input body
+part may declare `mediaType: application/json; charset=UTF-8`; its `pointer` selects metadata in the input body
 and its `maxBytes` bounds that field. File parts select existing File IDs. The host buffers and
 bounds combined part content before network dispatch, sends a generated boundary and typed parts,
-and omits form-data disposition headers for `related`. The cap covers part content, not the small
+and omits form-data disposition headers for `related`. Buffered parts supply the exact transport
+`Content-Length`, including framing. The cap covers part content, not the small
 host-generated framing. Ordinary multipart/form-data declarations retain their existing behavior.
 
 Both encodings use the same exact File-ID extraction for Chat and Routine approval bindings.

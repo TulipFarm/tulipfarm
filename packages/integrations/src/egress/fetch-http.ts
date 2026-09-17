@@ -88,6 +88,9 @@ export class FetchEgressHttp implements EgressHttpPort {
             ? {}
             : {
                 "content-type": `multipart/${request.multipartSubtype ?? "form-data"}; boundary=${multipart.boundary}`,
+                ...(request.multipartSubtype === "related" && multipart.byteLength !== undefined
+                  ? { "content-length": String(multipart.byteLength) }
+                  : {}),
               }),
           ...request.headers,
         },
@@ -170,13 +173,39 @@ function encodeMultipart(
 ): {
   readonly boundary: string;
   readonly body: AsyncIterable<Uint8Array>;
+  readonly byteLength: number | undefined;
 } {
   const boundary = `tulipfarm-${randomUUID()}`;
-  return { boundary, body: multipartBody(boundary, parts, subtype) };
+  let byteLength: number | undefined = Buffer.byteLength(`--${boundary}--\r\n`);
+  for (const part of parts) {
+    const length = typeof part.body === "string" ? Buffer.byteLength(part.body) : part.byteLength;
+    if (length === undefined || !Number.isSafeInteger(length) || length < 0) {
+      byteLength = undefined;
+      break;
+    }
+    byteLength += Buffer.byteLength(multipartPrefix(boundary, part, subtype)) + length + 2;
+  }
+  return { boundary, body: multipartBody(boundary, parts, subtype), byteLength };
 }
 
 function quoted(value: string): string {
   return value.replace(/[\\"]/g, "\\$&").replace(/[\r\n]/g, "");
+}
+
+function multipartPrefix(boundary: string, part: EgressMultipartPart, subtype?: "related"): string {
+  return [
+    `--${boundary}`,
+    ...(subtype === "related"
+      ? []
+      : [
+          `Content-Disposition: form-data; name="${quoted(part.name)}"${
+            part.filename === undefined ? "" : `; filename="${quoted(part.filename)}"`
+          }`,
+        ]),
+    ...(part.mediaType === undefined ? [] : [`Content-Type: ${part.mediaType}`]),
+    "",
+    "",
+  ].join("\r\n");
 }
 
 async function* multipartBody(
@@ -186,20 +215,7 @@ async function* multipartBody(
 ): AsyncIterable<Uint8Array> {
   const encode = new TextEncoder();
   for (const part of parts) {
-    const disposition = [
-      `--${boundary}`,
-      ...(subtype === "related"
-        ? []
-        : [
-            `Content-Disposition: form-data; name="${quoted(part.name)}"${
-              part.filename === undefined ? "" : `; filename="${quoted(part.filename)}"`
-            }`,
-          ]),
-      ...(part.mediaType === undefined ? [] : [`Content-Type: ${part.mediaType}`]),
-      "",
-      "",
-    ].join("\r\n");
-    yield encode.encode(disposition);
+    yield encode.encode(multipartPrefix(boundary, part, subtype));
     if (typeof part.body === "string") {
       yield encode.encode(part.body);
     } else {

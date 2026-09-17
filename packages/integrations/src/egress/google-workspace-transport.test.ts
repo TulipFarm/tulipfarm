@@ -335,9 +335,10 @@ describe("Google Workspace production declarations", () => {
     expect(sent[0]?.headers.get("content-type")).toMatch(
       /^multipart\/related; boundary=tulipfarm-/
     );
+    expect(sent[0]?.headers.get("content-length")).toBe(String(sent[0]?.bytes.length));
     const bytes = sent[0]?.bytes.toString() ?? "";
     expect(bytes).toContain(
-      'Content-Type: application/json\r\n\r\n{"name":"plan.txt","parents":["shared-folder"]}'
+      'Content-Type: application/json; charset=UTF-8\r\n\r\n{"name":"plan.txt","parents":["shared-folder"]}'
     );
     expect(bytes).toContain("Content-Type: text/plain\r\n\r\nPlan\r\n");
     expect(bytes).not.toContain("Content-Disposition: form-data");

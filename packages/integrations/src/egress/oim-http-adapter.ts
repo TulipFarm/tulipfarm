@@ -144,6 +144,7 @@ async function multipartParts(
         name: part.name,
         filename: content.filename,
         mediaType: content.mediaType,
+        byteLength: content.bytes.byteLength,
         body: (async function* () {
           yield content.bytes;
         })(),
