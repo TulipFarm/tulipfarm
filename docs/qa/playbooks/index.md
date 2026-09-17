@@ -7,12 +7,18 @@ decide what a given invocation executes.
 
 | Suite | Contents | Duration |
 | --- | --- | --- |
-| `smoke` | Preflight + the `smoke_scenarios` of every smoke playbook | ~10–15 min |
-| `<area>` | Preflight + that one playbook in full | 5–15 min |
-| `full` | Preflight + every playbook in full, serially | ~60–90 min |
+| `smoke` | Preflight + the `smoke_scenarios` of every smoke playbook | Resources alone adds 15–25 min; the combined suite is not a 10–15 min run |
+| `<area>` | Preflight + that one playbook in full | See each row; Resources: 6–10h on shared staging, plus separately authorized 2–3h clone extension |
+| `full` | Preflight + every playbook in full, serially | Resources adds 6–10h shared-staging coverage; budget roughly 10–14h combined, excluding clone work and issue filing |
 | `journeys` | Preflight + every `journey-*` playbook in full, serially | ~150–180 min |
 
 Preflight always runs. It is the only playbook that aborts the run on failure.
+
+Resources has 132 cases: 12 smoke, 72 core, 126 shared-staging extended, and six isolated-clone
+cases. Its documented staging override uses UI health and a Chat round trip, not localhost
+server checks. A full Resources run on shared staging records S22 as blocked; it never performs
+infrastructure migrations there. Core-only coverage requires an explicit scope choice and must
+not be reported as a full run. Duration estimates exclude provisioning delays and issue filing.
 
 ## Playbooks
 
@@ -21,7 +27,7 @@ Preflight always runs. It is the only playbook that aborts the run on failure.
 | 00 | Preflight | [`00-preflight.md`](00-preflight.md) | all | always | all | dev servers up, signed in | 3m |
 | 01 | Auth | [`auth.md`](auth.md) | `/login`, `/setup`, `/accept-invite`, `/settings/auth`, `/business/people` | smoke, full | S1, S2 | fresh incognito context available | 8m |
 | 02 | Chat | [`chat.md`](chat.md) | `/`, `/chats`, `/chat/:id` | smoke, full | S1, S2, S7 | model provider configured | 12m |
-| 03 | Resources | [`resources.md`](resources.md) | `/resources`, `/resources/:type`, `/resources/:type/:id`, `/resources/new` | smoke, full | S1, S3 | — | 12m |
+| 03 | Resources | [`resources.md`](resources.md) | `/`, `/chat/:id`, `/resources`, `/resources/new`, `/resources/:type`, `/resources/:type/new`, `/resources/:type/:id`, `/resources/:type/:id/edit`, `/resources/:type/schema`, `/business/people`, `/teams` | smoke, full | S1, S2 (R001–R012) | staging UI + Chat preflight; operator-provided admin identity; authorized isolated subordinate setup; S22 requires isolated clone | smoke 15–25m; core 3–5h; shared-staging extended 6–10h; clone +2–3h |
 | 04 | Agents | [`agents.md`](agents.md) | `/agents`, `/agents/:name` | full | — | at least one agent, or empty state | 8m |
 | 05 | Skills | [`skills.md`](skills.md) | `/skills`, `/skills/:name`, `/skills/marketplace`, `/skills/install` | full | — | marketplace reachable | 12m |
 | 06 | Routines | [`routines.md`](routines.md) | `/routines`, `/routines/:slug`, `/routines/:slug/edit`, `/routines/:slug/runs/:runId` | full | — | worker running | 15m |
