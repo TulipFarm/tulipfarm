@@ -131,6 +131,11 @@ PostgreSQL persistence composition, auth, Soul Git writes, and Worker callback p
   web redirect origin only.
 - `integrations/connection-writer.ts` is the only `connection.yaml` writer; it must merge, seal
   secret env values to `secret://` refs, commit, and reload Soul.
+- Legacy activation reruns idempotent registration even when already enabled; its errors are not
+  success. Disconnect retains secrets but denies Google leases and Slack admission/credentials and
+  revokes Slack routing projections. Remove publishes Soul deletion before retryable secret cleanup.
+- `internal/channel-availability.ts` gates Slack message and Surface admission, recovery, and
+  approval continuation from the live Soul; all hosts must preserve that gate.
 - Third-party integration installs copy only regular `manifest.yml` and `setup-guide.md`; manifests
   must stay declarative, https-only for provider URLs, and non-executable.
 - Clone every caller-supplied Git source through `withGitSourceClone` from `@tulipfarm/integrations`
