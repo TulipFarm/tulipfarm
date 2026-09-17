@@ -13,6 +13,7 @@ const DEFAULT_REFRESH_SKEW_MS = 2 * 60 * 1000;
 
 /** The Google OAuth2 auth step plus its connection env (secret refs unresolved). */
 export interface GoogleConnection {
+  readonly enabled?: boolean | undefined;
   readonly step: AuthOAuth2Step;
   readonly env: Record<string, string>;
 }
@@ -38,13 +39,19 @@ export class GoogleAccessTokenProvider implements SecretProvider {
 
   async resolveCurrent(secretRef: string): Promise<{ value: string } | null> {
     if (secretRef !== GOOGLE_ACCESS_TOKEN_SECRET_REF) return null;
-    // Collapse concurrent leases so a burst of Tool calls triggers at most one refresh round-trip.
-    if (this.inFlight !== null) return this.inFlight;
-    const pending = this.resolveFresh().finally(() => {
-      this.inFlight = null;
-    });
-    this.inFlight = pending;
-    return pending;
+    if (this.inFlight === null) {
+      this.inFlight = this.resolveFresh().finally(() => {
+        this.inFlight = null;
+      });
+    }
+    const lease = await this.inFlight;
+    // Disconnect can complete while a shared refresh is in flight.
+    if (
+      this.deps.connection &&
+      (await this.deps.connection().catch(() => undefined))?.enabled !== true
+    )
+      return null;
+    return lease;
   }
 
   private async resolveFresh(): Promise<{ value: string } | null> {
@@ -60,6 +67,7 @@ export class GoogleAccessTokenProvider implements SecretProvider {
     const connection = this.deps.connection
       ? await this.deps.connection().catch(() => undefined)
       : undefined;
+    if (this.deps.connection && connection?.enabled !== true) return null;
     if (connection === undefined) return this.storedToken(secrets);
 
     const { step } = connection;
