@@ -45,6 +45,8 @@ Owns adapter contracts, event normalization, source ACLs, sync checkpoints, and 
   and a `<p hidden>` would reach the prompt. Unhardened turndown also emits `<script>`/`<style>`
   text verbatim.
 - `collectPages` must throw `PaginationBoundError` rather than silently truncate a paged read.
+- OIM HTTP `response.schema: { type: "null" }` explicitly maps only a bodyless 204 to JSON null;
+  validate the result normally. Offline fixtures represent that absent 204 body with YAML null.
 - OIM multipart File reads require both exact declared-pointer extraction and an explicit host
   authorization port before the effective user's File ACL may open content.
 - OIM pagination requires a host-owned confidential, authenticated continuation codec and clock;
