@@ -36,13 +36,17 @@ export default function ResourceCreate() {
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [formError, setFormError] = useState<string | null>(null);
 
-  async function onSubmit(values: Record<string, unknown>) {
+  async function onSubmit(values: Record<string, unknown>, confirmSaved: () => boolean) {
     setSubmitting(true);
     setFieldErrors({});
     setFormError(null);
     try {
       const record = await createRecord(type, values);
-      navigate(`/resources/${encodeURIComponent(type)}/${encodeURIComponent(record.id)}`);
+      if (confirmSaved()) {
+        navigate(`/resources/${encodeURIComponent(type)}/${encodeURIComponent(record.id)}`);
+      } else {
+        setSubmitting(false);
+      }
     } catch (err) {
       const next = writeErrorState(err);
       setFieldErrors(next.fieldErrors);

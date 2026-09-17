@@ -1,6 +1,7 @@
 import * as remix from "@remix-run/react";
 import { createRemixStub } from "@remix-run/testing";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import type { ReactElement } from "react";
 import { afterEach, expect, test, vi } from "vitest";
 import { ApiError, createRecord, updateRecord } from "~/lib/api";
@@ -13,7 +14,6 @@ vi.mock("@remix-run/react", async () => {
   return {
     ...actual,
     useLoaderData: vi.fn(),
-    useNavigate: vi.fn(),
     useParams: vi.fn(() => ({})),
   };
 });
@@ -44,7 +44,14 @@ function renderRoute(node: ReactElement, data: unknown) {
   vi.mocked(remix.useLoaderData).mockReturnValue(data);
   const Stub = createRemixStub([
     { path: "/", Component: () => node },
-    { path: "/resources/:type/:id", Component: () => null },
+    {
+      path: "/resources/:type/:id",
+      Component: () => <p>destination: {remix.useLocation().pathname}</p>,
+    },
+    {
+      path: "/resources/:type",
+      Component: () => <p>destination: {remix.useLocation().pathname}</p>,
+    },
   ]);
   render(<Stub initialEntries={["/"]} />);
 }
@@ -52,8 +59,6 @@ function renderRoute(node: ReactElement, data: unknown) {
 afterEach(() => vi.clearAllMocks());
 
 test("create: a successful POST navigates to the new record's detail page", async () => {
-  const navigate = vi.fn();
-  vi.mocked(remix.useNavigate).mockReturnValue(navigate);
   vi.mocked(createRecord).mockResolvedValue({
     id: "TICK-9",
     version: 1,
@@ -67,7 +72,7 @@ test("create: a successful POST navigates to the new record's detail page", asyn
   });
   fireEvent.click(screen.getByRole("button", { name: "Create" }));
 
-  await waitFor(() => expect(navigate).toHaveBeenCalledWith("/resources/ticket/TICK-9"));
+  expect(await screen.findByText("destination: /resources/ticket/TICK-9")).toBeInTheDocument();
   expect(createRecord).toHaveBeenCalledWith(
     "ticket",
     expect.objectContaining({ title: "New bug" })
@@ -75,7 +80,6 @@ test("create: a successful POST navigates to the new record's detail page", asyn
 });
 
 test("create: a 422 maps the error path onto the offending field", async () => {
-  vi.mocked(remix.useNavigate).mockReturnValue(vi.fn());
   vi.mocked(createRecord).mockRejectedValue(new ApiError(422, "must be a string", "/title"));
   renderRoute(<ResourceCreate />, { type: "ticket", fields, schemaError: undefined });
 
@@ -88,7 +92,6 @@ test("create: a 422 maps the error path onto the offending field", async () => {
 });
 
 test("create: a uniqueness conflict keeps the server advice and the draft", async () => {
-  vi.mocked(remix.useNavigate).mockReturnValue(vi.fn());
   vi.mocked(createRecord).mockRejectedValue(
     new ApiError(409, "duplicate value violates a unique constraint")
   );
@@ -102,11 +105,11 @@ test("create: a uniqueness conflict keeps the server advice and the draft", asyn
     await screen.findByText(/duplicate value violates a unique constraint/)
   ).toBeInTheDocument();
   expect(title.value).toBe("Duplicate");
+  fireEvent.click(screen.getByRole("link", { name: "Cancel" }));
+  expect(await screen.findByRole("alertdialog")).toBeInTheDocument();
 });
 
 test("edit: a 409 surfaces the version-conflict banner and does not navigate", async () => {
-  const navigate = vi.fn();
-  vi.mocked(remix.useNavigate).mockReturnValue(navigate);
   vi.mocked(updateRecord).mockRejectedValue(
     new ApiError(409, "version conflict", undefined, "version conflict")
   );
@@ -121,11 +124,10 @@ test("edit: a 409 surfaces the version-conflict banner and does not navigate", a
   fireEvent.click(screen.getByRole("button", { name: "Save" }));
 
   expect(await screen.findByText(/changed since you loaded it/)).toBeInTheDocument();
-  expect(navigate).not.toHaveBeenCalled();
+  expect(screen.queryByText(/^destination:/)).not.toBeInTheDocument();
 });
 
 test("edit: a uniqueness conflict keeps the server advice and the draft", async () => {
-  vi.mocked(remix.useNavigate).mockReturnValue(vi.fn());
   vi.mocked(updateRecord).mockRejectedValue(
     new ApiError(409, "duplicate value violates a unique constraint")
   );
@@ -170,8 +172,6 @@ const multilineFields = formFields(multilineParsed.schema);
 const storedMultilineNotes = "  first\nsecond\tlast  ";
 
 test("edit: a stored multiline string keeps its exact DOM value and update payload", async () => {
-  const navigate = vi.fn();
-  vi.mocked(remix.useNavigate).mockReturnValue(navigate);
   vi.mocked(updateRecord).mockResolvedValue({
     id: "NOTE-1",
     notes: storedMultilineNotes,
@@ -206,7 +206,6 @@ test("edit: a stored multiline string keeps its exact DOM value and update paylo
 });
 
 test("edit: multiline user edits stay controlled and preserve DOM-normalized CRLF", async () => {
-  vi.mocked(remix.useNavigate).mockReturnValue(vi.fn());
   vi.mocked(updateRecord).mockResolvedValue({
     id: "NOTE-1",
     notes: "  revised\nnext\tlast  ",
@@ -240,8 +239,8 @@ test("edit: multiline user edits stay controlled and preserve DOM-normalized CRL
   );
 });
 
-test("edit: cancelling a multiline edit makes no update request", () => {
-  vi.mocked(remix.useNavigate).mockReturnValue(vi.fn());
+test("edit: cancelling a multiline edit can keep the draft or discard without writing", async () => {
+  const user = userEvent.setup();
   renderRoute(<ResourceEdit />, {
     type: "note",
     id: "NOTE-1",
@@ -257,15 +256,67 @@ test("edit: cancelling a multiline edit makes no update request", () => {
   });
 
   const notes = document.querySelector("textarea#notes") as HTMLTextAreaElement;
-  fireEvent.change(notes, { target: { value: "changed\nnotes" } });
+  await user.clear(notes);
+  await user.type(notes, "changed\nnotes");
   fireEvent.click(screen.getByRole("link", { name: "Cancel" }));
 
+  expect(await screen.findByRole("alertdialog")).toBeInTheDocument();
+  expect(screen.queryByText(/^destination:/)).not.toBeInTheDocument();
+  expect(updateRecord).not.toHaveBeenCalled();
+
+  await user.click(screen.getByRole("button", { name: "Keep editing" }));
+  await waitFor(() => expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument());
+  expect(notes).toHaveValue("changed\nnotes");
+
+  fireEvent.click(screen.getByRole("link", { name: "Cancel" }));
+  await user.click(await screen.findByRole("button", { name: "Discard changes" }));
+  expect(await screen.findByText("destination: /resources/note/NOTE-1")).toBeInTheDocument();
   expect(updateRecord).not.toHaveBeenCalled();
 });
 
+test("edit: untouched and reset drafts navigate without a warning", async () => {
+  const user = userEvent.setup();
+  renderRoute(<ResourceEdit />, {
+    type: "ticket",
+    id: "TICK-1",
+    record: { id: "TICK-1", title: "Old", open: false, version: 2, createdAt: "", updatedAt: "" },
+    fields,
+    schemaError: undefined,
+  });
+
+  const title = screen.getByLabelText(/^title/);
+  await user.clear(title);
+  await user.type(title, "Changed");
+  expect(dispatchUnload()).toBe(true);
+  await user.clear(title);
+  await user.type(title, "Old");
+  expect(dispatchUnload()).toBe(false);
+  fireEvent.click(screen.getByRole("link", { name: "Cancel" }));
+
+  expect(await screen.findByText("destination: /resources/ticket/TICK-1")).toBeInTheDocument();
+  expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument();
+  expect(updateRecord).not.toHaveBeenCalled();
+});
+
+test("create: checkbox changes are guarded and resetting them restores fast navigation", async () => {
+  const user = userEvent.setup();
+  renderRoute(<ResourceCreate />, { type: "ticket", fields, schemaError: undefined });
+
+  const checkbox = screen.getByLabelText("open");
+  await user.click(checkbox);
+  expect(dispatchUnload()).toBe(true);
+  fireEvent.click(screen.getByRole("link", { name: "Cancel" }));
+  expect(await screen.findByRole("alertdialog")).toBeInTheDocument();
+  await user.click(screen.getByRole("button", { name: "Keep editing" }));
+  await user.click(checkbox);
+  expect(dispatchUnload()).toBe(false);
+  await user.click(screen.getByRole("link", { name: "Cancel" }));
+
+  expect(await screen.findByText("destination: /resources/ticket")).toBeInTheDocument();
+  expect(createRecord).not.toHaveBeenCalled();
+});
+
 test("create: a datetime-local field is submitted as RFC 3339, not the browser's local string", async () => {
-  const navigate = vi.fn();
-  vi.mocked(remix.useNavigate).mockReturnValue(navigate);
   vi.mocked(createRecord).mockResolvedValue({
     id: "S-1",
     version: 1,
@@ -287,7 +338,6 @@ test("create: a datetime-local field is submitted as RFC 3339, not the browser's
 });
 
 test("create: an existing RFC 3339 value round-trips back into the local control", () => {
-  vi.mocked(remix.useNavigate).mockReturnValue(vi.fn());
   const iso = new Date("2026-08-29T10:15").toISOString();
   renderRoute(<ResourceEdit />, {
     type: "sync",
@@ -301,3 +351,9 @@ test("create: an existing RFC 3339 value round-trips back into the local control
     "2026-08-29T10:15"
   );
 });
+
+function dispatchUnload(): boolean {
+  const event = new Event("beforeunload", { cancelable: true });
+  window.dispatchEvent(event);
+  return event.defaultPrevented;
+}

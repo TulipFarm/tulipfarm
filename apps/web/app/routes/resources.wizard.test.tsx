@@ -17,6 +17,7 @@ function renderWizard() {
   vi.mocked(createResourceType).mockResolvedValue({ name: "ticket", schema: "", hasHooks: false });
   const Stub = createRemixStub([
     { path: "/", Component: () => <ResourceTypeNew /> },
+    { path: "/resources", Component: () => <p>{useLocation().pathname}</p> },
     { path: "/resources/:type", Component: () => <p>{useLocation().pathname}</p> },
   ]);
   render(<Stub initialEntries={["/"]} />);
@@ -103,6 +104,10 @@ test("wizard blocks normalized duplicate field names and preserves the draft", a
   expect(screen.getByLabelText("field 2 name")).toHaveValue(" title ");
   expect(screen.getByLabelText("field 2 name")).toHaveAttribute("aria-invalid", "true");
   expect(createResourceType).not.toHaveBeenCalled();
+
+  fireEvent.click(screen.getByRole("link", { name: "Cancel" }));
+  expect(await screen.findByRole("alertdialog")).toBeInTheDocument();
+  await userEvent.click(screen.getByRole("button", { name: "Keep editing" }));
 
   await userEvent.clear(screen.getByLabelText("field 2 name"));
   await userEvent.type(screen.getByLabelText("field 2 name"), "summary");
@@ -230,6 +235,47 @@ test("a saved-name conflict keeps the draft and lets the user choose another nam
   expect(createResourceType).toHaveBeenLastCalledWith("customer-tickets", expect.any(String));
 });
 
+test("wizard warns before discarding changed name and field drafts", async () => {
+  const user = userEvent.setup();
+  renderWizard();
+
+  await user.type(screen.getByLabelText("Resource type name"), "Support tickets");
+  await user.type(screen.getByLabelText("field 1 name"), "subject");
+  fireEvent.click(screen.getByRole("link", { name: "Cancel" }));
+
+  expect(await screen.findByRole("alertdialog")).toBeInTheDocument();
+  expect(screen.queryByText("/resources")).not.toBeInTheDocument();
+  expect(createResourceType).not.toHaveBeenCalled();
+
+  await user.click(screen.getByRole("button", { name: "Keep editing" }));
+  expect(screen.getByLabelText("Resource type name")).toHaveValue("Support tickets");
+  expect(screen.getByLabelText("field 1 name")).toHaveValue("subject");
+
+  fireEvent.click(screen.getByRole("link", { name: "Cancel" }));
+  await user.click(await screen.findByRole("button", { name: "Discard changes" }));
+  expect(await screen.findByText("/resources")).toBeInTheDocument();
+  expect(createResourceType).not.toHaveBeenCalled();
+});
+
+test("wizard keeps untouched and reset drafts on the fast navigation path", async () => {
+  const user = userEvent.setup();
+  renderWizard();
+
+  await user.click(requiredBox(1));
+  expect(dispatchUnload()).toBe(true);
+  await user.click(requiredBox(1));
+  expect(dispatchUnload()).toBe(false);
+
+  addField();
+  expect(dispatchUnload()).toBe(true);
+  fireEvent.click(screen.getByLabelText("remove field 2"));
+  expect(dispatchUnload()).toBe(false);
+
+  fireEvent.click(screen.getByRole("link", { name: "Cancel" }));
+  expect(await screen.findByText("/resources")).toBeInTheDocument();
+  expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument();
+});
+
 test.each([
   ["Text", "Number", "string"],
   ["Number", "Yes or no", "number"],
@@ -295,3 +341,9 @@ test.each([
     property
   );
 });
+
+function dispatchUnload(): boolean {
+  const event = new Event("beforeunload", { cancelable: true });
+  window.dispatchEvent(event);
+  return event.defaultPrevented;
+}

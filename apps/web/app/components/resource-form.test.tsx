@@ -87,7 +87,8 @@ test("x-immutable field is read-only on edit and its value is carried into the p
 
   fireEvent.click(screen.getByRole("button", { name: "Save" }));
   expect(onSubmit).toHaveBeenCalledWith(
-    expect.objectContaining({ title: "Locked", count: 3, open: true })
+    expect.objectContaining({ title: "Locked", count: 3, open: true }),
+    expect.any(Function)
   );
 });
 
@@ -112,7 +113,10 @@ test("submit coerces typed values and omits empty optional fields", () => {
 
   fireEvent.click(screen.getByRole("button", { name: "Create" }));
   expect(onSubmit).toHaveBeenCalledTimes(1);
-  expect(onSubmit).toHaveBeenCalledWith({ title: "Hello", count: 5, open: true });
+  expect(onSubmit).toHaveBeenCalledWith(
+    { title: "Hello", count: 5, open: true },
+    expect.any(Function)
+  );
 });
 
 test("submits enum values with their schema primitive types", () => {
@@ -148,7 +152,10 @@ required: [score, visible, label]
   });
   fireEvent.click(screen.getByRole("button", { name: "Create" }));
 
-  expect(onSubmit).toHaveBeenCalledWith({ score: 2, visible: false, label: "low" });
+  expect(onSubmit).toHaveBeenCalledWith(
+    { score: 2, visible: false, label: "low" },
+    expect.any(Function)
+  );
 });
 
 test("invalid JSON in an array/object field blocks submit and shows an inline error", () => {

@@ -40,13 +40,14 @@ export default function ResourceEdit() {
 
   const detailPath = `/resources/${encodeURIComponent(type)}/${encodeURIComponent(id)}`;
 
-  async function onSubmit(values: Record<string, unknown>) {
+  async function onSubmit(values: Record<string, unknown>, confirmSaved: () => boolean) {
     setSubmitting(true);
     setFieldErrors({});
     setFormError(null);
     try {
       await updateRecord(type, id, record.version, values);
-      navigate(detailPath);
+      if (confirmSaved()) navigate(detailPath);
+      else setSubmitting(false);
     } catch (err) {
       const next = writeErrorState(err);
       setFieldErrors(next.fieldErrors);
