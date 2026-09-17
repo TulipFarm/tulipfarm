@@ -3,15 +3,14 @@ import {
   type MetaFunction,
   useLoaderData,
   useNavigate,
-  useRouteError,
 } from "@remix-run/react";
 import { useMemo, useState } from "react";
 import { ChevronRight, Columns3, Pencil, Plus, Search, Trash2, Zap } from "~/components/icons";
 import { PageShell } from "~/components/page-shell";
+import { ResourceRouteError } from "~/components/resources/resource-route-error";
 import { SchemaSummary } from "~/components/resources/schema-summary";
 import { StatStrip } from "~/components/resources/stat-strip";
 import { SchemaTable } from "~/components/schema-table";
-import { ErrorState } from "~/components/states";
 import { Badge } from "~/components/ui/badge";
 import { Button } from "~/components/ui/button";
 import { Input } from "~/components/ui/input";
@@ -506,8 +505,5 @@ function ResourceListView() {
 }
 
 export function ErrorBoundary() {
-  const error = useRouteError();
-  const status = error instanceof ApiError ? error.status : undefined;
-  const message = error instanceof Error ? error.message : undefined;
-  return <ErrorState section="resources" status={status} message={message} />;
+  return <ResourceRouteError subject="resource-type" />;
 }
