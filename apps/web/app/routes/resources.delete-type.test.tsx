@@ -114,7 +114,7 @@ test("keyboard Cancel closes natively and restores focus to Delete type", async 
   opener.focus();
   await userEvent.keyboard("{Enter}");
 
-  const dialog = await screen.findByRole("dialog");
+  const dialog = (await screen.findByRole("dialog")) as HTMLDialogElement;
   const closeDialog = vi.fn(() => {
     opener.focus();
     dialog.dispatchEvent(new Event("close"));
@@ -138,7 +138,7 @@ test("Escape keeps the native focus-restoration path", async () => {
   opener.focus();
   await userEvent.keyboard("{Enter}");
 
-  const dialog = await screen.findByRole("dialog");
+  const dialog = (await screen.findByRole("dialog")) as HTMLDialogElement;
   const closeDialog = vi.fn(() => {
     opener.focus();
     dialog.dispatchEvent(new Event("close"));
