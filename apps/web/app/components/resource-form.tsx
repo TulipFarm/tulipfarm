@@ -40,6 +40,59 @@ function isStoredMultilineString(field: FieldDescriptor, value: unknown): boolea
   return field.kind === "string" && typeof value === "string" && /[\r\n]/.test(value);
 }
 
+type NormalizedDecimal = {
+  negative: boolean;
+  coefficient: string;
+  exponent: bigint;
+};
+
+function normalizeDecimal(value: string): NormalizedDecimal | null {
+  const match = /^([+-]?)(?:(\d+)(?:\.(\d*))?|\.(\d+))(?:[eE]([+-]?\d+))?$/.exec(value);
+  if (!match) return null;
+
+  const integer = match[2] ?? "";
+  const fraction = match[3] ?? match[4] ?? "";
+  let coefficient = `${integer}${fraction}`.replace(/^0+/, "");
+  if (coefficient === "") {
+    return { negative: match[1] === "-", coefficient: "0", exponent: 0n };
+  }
+
+  let trailingZeros = 0;
+  while (coefficient.endsWith("0")) {
+    coefficient = coefficient.slice(0, -1);
+    trailingZeros += 1;
+  }
+
+  return {
+    negative: match[1] === "-",
+    coefficient,
+    exponent: BigInt(match[5] ?? "0") - BigInt(fraction.length) + BigInt(trailingZeros),
+  };
+}
+
+export function parseNumberInput(
+  value: string
+): { ok: true; value: number } | { ok: false; error: string } {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) {
+    return { ok: false, error: "must be a finite number" };
+  }
+
+  const entered = normalizeDecimal(value);
+  const serialized = normalizeDecimal(String(parsed));
+  if (
+    !entered ||
+    !serialized ||
+    entered.negative !== serialized.negative ||
+    entered.coefficient !== serialized.coefficient ||
+    entered.exponent !== serialized.exponent
+  ) {
+    return { ok: false, error: "cannot be represented without changing its value" };
+  }
+
+  return { ok: true, value: parsed };
+}
+
 // Initial scalar value for a field, from the record (edit) or a kind-appropriate empty (create).
 function initialValue(field: FieldDescriptor, initial?: Record<string, unknown>): unknown {
   const v = initial?.[field.name];
@@ -145,7 +198,7 @@ export function ResourceForm({
   const [savedDraft, setSavedDraft] = useState(() =>
     draftSignature(fields, startingDraft.current.values, startingDraft.current.jsonText)
   );
-  const [jsonErrors, setJsonErrors] = useState<Record<string, string>>({});
+  const [clientErrors, setClientErrors] = useState<Record<string, string>>({});
   const currentDraft = draftSignature(fields, values, jsonText);
   const currentDraftRef = useRef(currentDraft);
   currentDraftRef.current = currentDraft;
@@ -162,7 +215,7 @@ export function ResourceForm({
     e.preventDefault();
     if (inFlight.current || submitting) return;
     const payload: Record<string, unknown> = {};
-    const nextJsonErrors: Record<string, string> = {};
+    const nextClientErrors: Record<string, string> = {};
 
     for (const field of fields) {
       const readonlyImmutable = mode === "edit" && field.immutable;
@@ -177,7 +230,7 @@ export function ResourceForm({
         try {
           payload[field.name] = JSON.parse(raw);
         } catch {
-          nextJsonErrors[field.name] = "invalid JSON";
+          nextClientErrors[field.name] = "invalid JSON";
         }
         continue;
       }
@@ -195,18 +248,20 @@ export function ResourceForm({
         payload[field.name] = Boolean(value);
       } else if (field.kind === "number") {
         if (value === "" || value === undefined) continue;
-        payload[field.name] = Number(value);
+        const parsed = parseNumberInput(String(value));
+        if (parsed.ok) payload[field.name] = parsed.value;
+        else nextClientErrors[field.name] = parsed.error;
       } else {
         if (value === "" || value === undefined) continue; // omit empty optional strings
         payload[field.name] = value;
       }
     }
 
-    if (Object.keys(nextJsonErrors).length > 0) {
-      setJsonErrors(nextJsonErrors);
+    if (Object.keys(nextClientErrors).length > 0) {
+      setClientErrors(nextClientErrors);
       return;
     }
-    setJsonErrors({});
+    setClientErrors({});
     const submittedDraft = currentDraftRef.current;
     const confirmSaved = () => {
       if (currentDraftRef.current !== submittedDraft) return false;
@@ -233,7 +288,7 @@ export function ResourceForm({
 
       {fields.map((field) => {
         const readOnly = mode === "edit" && field.immutable === true;
-        const error = fieldErrors[field.name] ?? jsonErrors[field.name];
+        const error = fieldErrors[field.name] ?? clientErrors[field.name];
         return (
           <div key={field.name} className="flex flex-col gap-1">
             <label htmlFor={field.name} className="text-xs text-muted-foreground">
