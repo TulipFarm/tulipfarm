@@ -2901,10 +2901,12 @@ function oimAuthVerificationIssues(manifest: OimManifest): string[] {
     }
     if (
       operation.effect !== "read" ||
-      operation.source.type !== "http" ||
-      operation.source.method !== "GET"
+      (operation.source.type !== "graphql" &&
+        (operation.source.type !== "http" || operation.source.method !== "GET"))
     ) {
-      issues.push(`auth: verification check ${check.id} operation must be a read-only HTTP GET`);
+      issues.push(
+        `auth: verification check ${check.id} operation must be a read-only HTTP GET or GraphQL query`
+      );
     }
     const operationSlots = [
       ...(operation.credentialSlot === undefined ? [] : [operation.credentialSlot]),

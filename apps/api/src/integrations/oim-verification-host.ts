@@ -1,17 +1,25 @@
 import {
+  compileOimGraphqlOperations,
   compileOimHttpOperations,
   DEFAULT_OIM_PAGINATION_BOUNDS,
   type EgressHttpPort,
   evaluateOimAuthVerification,
   NEXT_PAGE_TOKEN_PROPERTY,
   type OimConnectionVerificationEvidence,
+  OimGraphqlToolAdapter,
   type OimHookPhaseRunner,
   OimHttpToolAdapter,
   type OimPaginationRuntime,
   PAGE_TOKEN_ARGUMENT,
   type ResolvedOimPackage,
 } from "@tulipfarm/integrations";
-import { canonicalHash, type OimAuth, type OimManifest } from "@tulipfarm/schema";
+import {
+  canonicalHash,
+  type OimAuth,
+  type OimManifest,
+  oimFileDigest,
+  oimPackageDigest,
+} from "@tulipfarm/schema";
 import type { ConnectionAuthStep, PersistedConnection } from "@tulipfarm/storage";
 import type { ToolAdapterRequest } from "@tulipfarm/tool-broker";
 
@@ -130,16 +138,38 @@ async function dispatchVerificationOperation(input: {
   const operation = input.pkg.manifest.operations.find(
     (candidate) => candidate.id === input.operationId
   );
-  if (operation === undefined || operation.source.type !== "http") {
+  if (
+    operation === undefined ||
+    operation.effect !== "read" ||
+    (operation.source.type !== "graphql" &&
+      (operation.source.type !== "http" || operation.source.method !== "GET"))
+  ) {
     throw new Error(`verification_operation_unavailable:${input.operationId}`);
   }
-  const compiled = compileOimHttpOperations(
-    { ...input.pkg.manifest, operations: [operation] },
-    input.connection.configuration
-  )[0];
+  const manifest = { ...input.pkg.manifest, operations: [operation] };
+  if (operation.source.type === "graphql") {
+    const path = operation.source.documentFile;
+    const file = input.pkg.manifest.files?.find((candidate) => candidate.path === path);
+    const document = input.pkg.documents?.[path];
+    if (
+      file?.role !== "graphql" ||
+      document === undefined ||
+      oimFileDigest(document) !== file.sha256 ||
+      oimPackageDigest(input.pkg.manifest) !== input.pkg.packageDigest
+    ) {
+      throw new Error(`verification_document_invalid:${operation.id}`);
+    }
+  }
+  const compiled =
+    operation.source.type === "graphql"
+      ? compileOimGraphqlOperations(
+          manifest,
+          new Map(Object.entries(input.pkg.documents ?? {})),
+          input.connection.configuration
+        )[0]
+      : compileOimHttpOperations(manifest, input.connection.configuration)[0];
   if (compiled === undefined) throw new Error(`verification_operation_unavailable:${operation.id}`);
-  const adapter = new OimHttpToolAdapter({
-    binding: compiled.binding,
+  const adapterDeps = {
     http: input.deps.http,
     manifest: input.pkg.manifest,
     ...(input.deps.hookRunner === undefined ? {} : { hookRunner: input.deps.hookRunner }),
@@ -150,7 +180,17 @@ async function dispatchVerificationOperation(input: {
           paginationRuntime: input.deps.paginationRuntime,
           toolId: compiled.contract.metadata.id,
         }),
-  });
+  };
+  const adapter =
+    "document" in compiled.binding
+      ? new OimGraphqlToolAdapter({
+          ...adapterDeps,
+          binding: compiled.binding,
+          ...("projection" in operation.response && operation.response.projection !== undefined
+            ? { projection: operation.response.projection }
+            : {}),
+        })
+      : new OimHttpToolAdapter({ ...adapterDeps, binding: compiled.binding });
   const primaryRef =
     operation.credentialSlot === undefined
       ? undefined
@@ -247,7 +287,13 @@ export function createOimVerificationHost(deps: OimVerificationHostDeps): OimVer
       const stepId = owningStep.get(slot);
       const row = stepId === undefined ? undefined : byStep.get(stepId);
       const reference = connection.secretBindings[slot];
-      if (stepId === undefined || row === undefined || row.status !== "active") {
+      if (
+        stepId === undefined ||
+        row === undefined ||
+        row.status !== "active" ||
+        row.businessId !== connection.businessId ||
+        row.connectionId !== connection.id
+      ) {
         throw new Error(`verification_auth_step_inactive:${slot}`);
       }
       if (reference === undefined) throw new Error(`verification_credential_missing:${slot}`);
@@ -285,6 +331,16 @@ export function createOimVerificationHost(deps: OimVerificationHostDeps): OimVer
 
     const responses: Record<string, unknown> = {};
     for (const check of verification.checks) {
+      const operation = pkg.manifest.operations.find(({ id }) => id === check.operationId);
+      const slots = [
+        ...(operation?.credentialSlot === undefined ? [] : [operation.credentialSlot]),
+        ...(operation?.secondaryCredential === undefined
+          ? []
+          : [operation.secondaryCredential.slot]),
+      ].sort();
+      if (canonicalHash(slots) !== canonicalHash([...check.credentialSlots].sort())) {
+        throw new Error(`verification_credential_slots_mismatch:${check.id}`);
+      }
       responses[check.id] = await dispatchVerificationOperation({
         deps,
         pkg,

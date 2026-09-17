@@ -159,6 +159,7 @@ describe("loadBundledOimCatalog", () => {
       "google-workspace",
       "instagram",
       "jira",
+      "linear",
       "linkedin",
       "mailchimp",
       "notion",

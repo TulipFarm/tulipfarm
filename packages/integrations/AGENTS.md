@@ -32,6 +32,8 @@ Owns adapter contracts, event normalization, source ACLs, sync checkpoints, and 
 
 - Concrete transports live in `apps/integration-worker`; the broker must not import impls.
 - Prefer `src/egress/` over `src/<provider>/` when a manifest can express the provider.
+- Connection catalog entries carry fixed GraphQL `documents`; verification must check their byte
+  digests and compile them as read-only queries before dispatch.
 - Manifest hosts are chat-authored: compile through `assertPublicEgressUrl`, send through
   `GuardedEgressHttp`. Neither subsumes the other — a public name can hold an inward A record.
 - `GuardedEgressHttp` passes validated DNS answers to `FetchEgressHttp`, which pins the connection;

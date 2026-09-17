@@ -50,7 +50,7 @@ integrations:
     description: Search, create, estimate, prioritize, and transition Jira Cloud issues.
 
   - name: linear
-    availability: coming_soon
+    availability: available
     title: Linear
     icon: linear
     category: productivity

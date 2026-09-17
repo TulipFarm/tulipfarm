@@ -64,6 +64,83 @@ function jsonResponse(manifest: OimManifest) {
 }
 
 describe("validateOimManifest", () => {
+  it("permits fixed GraphQL identity queries without widening verification's read and input rules", () => {
+    const manifest = valid();
+    manifest.profiles.auth = "1.1";
+    manifest.files = [
+      { path: "viewer.graphql", role: "graphql", sha256: oimFileDigest("query Viewer { id }") },
+    ];
+    manifest.auth = {
+      credentialSlots: [{ id: "token", label: "API key", kind: "api_key", required: true }],
+      steps: [
+        {
+          id: "key",
+          title: "API key",
+          type: "fields",
+          fields: [
+            {
+              id: "token",
+              label: "API key",
+              input: "password",
+              target: { type: "credential", slot: "token" },
+            },
+          ],
+        },
+      ],
+      verification: {
+        issuer: { source: "package", value: "https://api.weather.example" },
+        checks: [
+          {
+            id: "viewer",
+            operationId: "current-weather",
+            credentialSlots: ["token"],
+            success: [{ kind: "present", path: "/id" }],
+          },
+        ],
+        evidence: {
+          assurance: "identified",
+          subject: { kind: "human", checkId: "viewer", path: "/id", namespace: "issuer" },
+        },
+      },
+    };
+    const operation = manifest.operations[0];
+    operation.credentialSlot = "token";
+    operation.credentialInjection = { in: "header", name: "Authorization", format: "{token}" };
+    operation.source = {
+      type: "graphql",
+      url: "https://api.weather.example/graphql",
+      operation: "Viewer",
+      documentFile: "viewer.graphql",
+    };
+    expect(oimManifestIssues(manifest)).toEqual([]);
+    operation.effect = "update";
+    expect(oimManifestIssues(manifest)).toContain(
+      "auth: verification check viewer operation must be a read-only HTTP GET or GraphQL query"
+    );
+    operation.effect = "read";
+    operation.requestSchema = {
+      type: "object",
+      properties: { id: { type: "string" } },
+      required: ["id"],
+      additionalProperties: false,
+    };
+    expect(oimManifestIssues(manifest)).toContain(
+      "auth: verification check viewer operation cannot require caller input"
+    );
+    delete operation.requestSchema;
+    operation.source = {
+      type: "http",
+      method: "POST",
+      baseUrl: "https://api.weather.example",
+      path: "/viewer",
+    };
+    expect(oimManifestIssues(manifest)).toContain(
+      "auth: verification check viewer operation must be a read-only HTTP GET or GraphQL query"
+    );
+    operation.source.method = "GET";
+    expect(oimManifestIssues(manifest)).toEqual([]);
+  });
+
   it("accepts a minimal Core profile Integration", () => {
     expect(validateOimManifest(valid())).toEqual(valid());
   });

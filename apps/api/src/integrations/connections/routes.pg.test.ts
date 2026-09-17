@@ -9,6 +9,7 @@ import {
   OimWebhookRegistrationError,
 } from "@tulipfarm/integrations";
 import { canonicalHash, type OimConnection, type OimManifest } from "@tulipfarm/schema";
+import { bundledIntegrationsDir } from "@tulipfarm/soul";
 import {
   ConnectionAuthStepStore,
   ConnectionStore,
@@ -32,6 +33,7 @@ import { MemorySessionStore } from "../../auth/session-store";
 import { createUser, type UserDoc, type UserRepo } from "../../auth/users";
 import { captureOimWebhookCleanupPackage } from "../../internal/oim-webhook-cleanup-package";
 import { makeMigratedPglite } from "../../test/pglite";
+import { loadBundledOimCatalog } from "../oim-catalog";
 import { createOimVerificationHost } from "../oim-verification-host";
 import { OimConnectionService, type OimConnectionServiceDeps } from "./service";
 
@@ -450,6 +452,107 @@ describe("OIM Connection routes", () => {
     catalogEntries.push({ key, manifest });
     return manifest;
   }
+
+  it("starts Linear setup from the production catalog and publishes only exact verified credentials", async () => {
+    const catalog = await loadBundledOimCatalog(bundledIntegrationsDir(), {
+      requireVerification: true,
+    });
+    const entry = catalog.find(({ key }) => key === "linear");
+    if (entry === undefined) throw new Error("Linear is unavailable");
+    catalogEntries.push(entry);
+    let denied = false;
+    const sentCredentials: string[] = [];
+    http = {
+      async send(request) {
+        expect(request.method).toBe("POST");
+        expect(request.url).toBe("https://api.linear.app/graphql");
+        expect(request.body).toEqual({
+          query: entry.documents?.["operations/viewer.graphql"],
+          operationName: "Viewer",
+          variables: {},
+        });
+        sentCredentials.push(request.headers.Authorization ?? "");
+        return {
+          status: 200,
+          headers: {},
+          body: {
+            data: { viewer: { id: "linear-user" } },
+            ...(denied ? { errors: [{ message: "Access denied" }] } : {}),
+          },
+        };
+      },
+    };
+    const setup = await app.inject({
+      method: "GET",
+      url: "/api/v1/integrations/linear/connection-setup",
+      ...auth(memberSid),
+    });
+    expect(setup.statusCode).toBe(200);
+    expect(setup.json()).toMatchObject({
+      integration: { id: "linear", majorVersion: 1 },
+      allowedOwnerScopes: ["personal"],
+      fieldSteps: [
+        {
+          id: "key",
+          fields: [{ id: "api_key", input: "password", required: true, secret: true }],
+        },
+      ],
+      initialAuthorizationSteps: [],
+    });
+    const created = await app.inject({
+      method: "POST",
+      url: "/api/v1/integrations/linear/connections",
+      ...auth(memberSid),
+      payload: {
+        label: "Linear",
+        ownerScope: "personal",
+        values: { api_key: "offline-original-key" },
+      },
+    });
+    expect(created.statusCode).toBe(201);
+    expect(created.json().verification.status).toBe("verified");
+    const id = created.json().connectionId;
+    const evidence = new ConnectionVerificationEvidenceStore(transactionPort(db));
+    const currentEvidence = () =>
+      evidence.findCurrentForConnection(BUSINESS_ID, id, entry.packageDigest ?? "");
+    const original = await currentEvidence();
+    expect(original).not.toBeNull();
+    const originalConnection = await connections.findById(BUSINESS_ID, id);
+    denied = true;
+    const failed = await app.inject({
+      method: "POST",
+      url: `/api/v1/integrations/linear/connections/${id}/refresh`,
+      ...auth(memberSid),
+    });
+    expect(failed.json().health).toBe("action_required");
+    expect(await currentEvidence()).toBeNull();
+    denied = false;
+    const repaired = await app.inject({
+      method: "PATCH",
+      url: `/api/v1/integrations/linear/connections/${id}/credentials`,
+      ...auth(memberSid),
+      payload: { values: { api_key: "offline-replacement-key" } },
+    });
+    expect(repaired.statusCode).toBe(200);
+    expect(repaired.json()).toMatchObject({
+      connectionId: id,
+      verification: { status: "verified" },
+    });
+    const replacement = await currentEvidence();
+    expect(replacement).not.toBeNull();
+    expect(replacement).not.toEqual(original);
+    const repairedConnection = await connections.findById(BUSINESS_ID, id);
+    expect(repairedConnection?.owner).toEqual(originalConnection?.owner);
+    expect(repairedConnection?.secretBindings.api_key).not.toBe(
+      originalConnection?.secretBindings.api_key
+    );
+    expect(sentCredentials).toEqual([
+      "offline-original-key",
+      "offline-original-key",
+      "offline-replacement-key",
+    ]);
+    expect(repaired.body).not.toContain("offline-replacement-key");
+  });
 
   it.each(["google-workspace", "slack-oim", "linkedin", "reddit", "x"])(
     "completes shipped %s OAuth through the production verification host",

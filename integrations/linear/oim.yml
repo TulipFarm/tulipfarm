@@ -15,7 +15,7 @@ metadata:
 
 profiles:
   core: "1.0"
-  auth: "1.0"
+  auth: "1.1"
 
 # Every GraphQL document this Integration can send is shipped here and digest-pinned. An Agent
 # supplies variables and nothing else, so no argument can widen what a call selects or mutates.
@@ -49,10 +49,10 @@ files:
     sha256: "31792eca74828cb5ab1f16c34ca96f3a343bfdef57d88c32e858c5f2ff84bd1b"
   - path: setup-guide-oim.md
     role: guide
-    sha256: "597a65e8e77dbfbad470dc69eeabbf21dad77cc96ec483db179421a18d493899"
+    sha256: "ee64ec37d771f602ef4c23c51f7336e86498388cb8723ca4a35d0fb0a6962120"
   - path: setup-guide.md
     role: guide
-    sha256: "5de2219c7ad5c0d21450b2d6eb2eb8d2c76c7e9a21749d94112ca60db53d0e06"
+    sha256: "a36e9cb0be9176f688ff9ddadc090ff7073e0cd4632fa827f8e7fa920e1fbbc5"
   - path: fixtures.yml
     role: fixture
     sha256: "bbe9b6af8c6198bb05436ab909c78c7060b234a9b22b0f1874b1753bc2af0d9a"
@@ -84,6 +84,24 @@ auth:
             type: credential
             slot: api_key
   healthCheckOperationId: viewer
+  verification:
+    issuer:
+      source: package
+      value: https://api.linear.app
+    checks:
+      - id: viewer
+        operationId: viewer
+        credentialSlots: [api_key]
+        success:
+          - kind: present
+            path: /data/viewer/id
+    evidence:
+      assurance: identified
+      subject:
+        kind: human
+        checkId: viewer
+        path: /data/viewer/id
+        namespace: issuer
 
 operations:
   - id: viewer

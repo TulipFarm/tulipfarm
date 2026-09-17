@@ -1,8 +1,8 @@
 # Connect Linear
 
-**Coming soon:** production activation is blocked on fixed GraphQL provider verification.
-See [the package guide](setup-guide-oim.md) for the tested operations and exact activation,
-polling and Knowledge boundaries. The steps below apply once the verification gate is supported.
+Open **Integrations → Linear** to add a connection: saved credentials and the account they
+identify. See [the package guide](setup-guide-oim.md) for operation details and the polling
+and Knowledge boundaries.
 
 TulipFarm uses a Linear personal API key. The key is encrypted in the secrets store and is sent only
 to Linear's API for the fixed operations this integration publishes.
@@ -11,7 +11,8 @@ to Linear's API for the fixed operations this integration publishes.
 2. Create a key for TulipFarm and restrict it to the teams and permissions it needs. Read access is
    enough to list and read issues; enable write, issue creation, or comment creation only when agents
    should perform those actions.
-3. In TulipFarm, open **Integrations → Linear**, paste the key, and choose **Connect**.
+3. In TulipFarm, open **Integrations → Linear**, enter a **Connection name** and **API key**, and
+   choose **Create Connection**. TulipFarm verifies the key with Linear's fixed `Viewer` query.
 4. Ask in chat to list Linear teams, then read an issue. Creating, updating, and commenting require
    approval before TulipFarm sends the request.
 
@@ -23,3 +24,6 @@ Before changing status or assignee, discover workflow states and active members 
 team. Updates accept `stateId`, `assigneeId`, `priority` (0 none, 1 urgent, 2 high, 3 normal, 4 low),
 and `estimate`, as well as title and description. Omit unchanged fields; `null` clears an assignee
 or estimate. Automatic event polling and Knowledge indexing are not available.
+
+To replace a key, use **Save credentials and verify** on the saved Connection. A failed identity check
+needs a valid replacement key before the Connection is healthy again.

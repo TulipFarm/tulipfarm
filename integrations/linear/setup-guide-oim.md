@@ -1,9 +1,7 @@
 # Connect Linear
 
-**Availability:** Linear remains **Coming soon** in the production catalog. The issue operations
-below are packaged and fixture-tested, but connecting them is blocked on the shared verification
-host accepting a fixed GraphQL identity query. These instructions describe the intended setup
-after that gate is implemented; they are not a claim that a production Connection can activate.
+Open **Integrations → Linear** to create a connection: saved credentials and the account they
+identify. TulipFarm checks the key with Linear's fixed `Viewer` query before marking it healthy.
 
 This Integration talks to Linear's GraphQL API through documents that ship inside the package. An
 agent supplies variables — a team id, a title, a comment body — and never the query text, so no
@@ -20,8 +18,9 @@ argument can widen what a call reads or changes.
 
 ## Connect it
 
-Open **Integrations → Linear → Connect** and paste the key. It is stored as a Secret, leased only
-while a declared Linear Tool is running, and never shown to an agent.
+Open **Integrations → Linear**, enter a **Connection name** and **API key**, then choose
+**Create Connection**. The key is stored as an encrypted secret, used for verification and declared
+Linear operations, and never shown to an agent.
 
 For a team-wide Connection use a key belonging to a service account. For issues filed under your
 own name, connect a personal Connection instead — every operation accepts either.
@@ -74,13 +73,15 @@ an HTTP 200 GraphQL response with errors is not treated as success.
 
 ## Activation and background capability boundaries
 
-The production loader uses `requireVerification: true`; a health-check operation alone does not
-qualify. The shared schema currently requires verification checks to be read-only HTTP GETs, and
-`createOimVerificationHost` dispatches HTTP operations only. Linear's fixed `Viewer` GraphQL query
-cannot satisfy that contract. Activation needs shared GraphQL verification dispatch with the
-package's digest-checked documents, body-level error rejection, exact Credential binding and
-provider subject evidence from `/data/viewer/id` (issuer `https://api.linear.app`). Do not substitute
-an invented REST endpoint, accept HTTP status alone, or relax the production verification gate.
+The production loader still uses `requireVerification: true`; a health-check operation alone does
+not qualify. Verification compiles the digest-checked `Viewer` query, rejects GraphQL errors even
+with HTTP 200, and requires a nonempty provider subject from `/data/viewer/id` under issuer
+`https://api.linear.app`. Evidence belongs to the exact Connection, package, configuration,
+auth-step revision and credential reference. A failed check removes its current proof.
+
+Verification proves the key's identity, not permission to perform every listed operation.
+Provider permissions still apply to each request. Offline tests cover setup and verification;
+they do not certify a live Linear account.
 
 No automatic issue polling, event-driven routines or Knowledge indexing is declared:
 
@@ -97,6 +98,6 @@ No automatic issue polling, event-driven routines or Knowledge indexing is decla
 
 ## Rotating the key
 
-When activation is available, use the supported Connection credential-repair flow to replace the
-key and reverify the same Connection before revoking the old key in Linear. Do not edit the Soul
-or paste credentials into chat.
+Use **Save credentials and verify** on the saved Connection to replace the key and reverify that same
+Connection before revoking the old key in Linear. Do not edit the Soul or paste credentials
+into chat.

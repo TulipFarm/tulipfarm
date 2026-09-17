@@ -5,6 +5,8 @@ export interface OimPackageCatalogEntry {
   readonly manifest: OimManifest;
   /** Digest of the reviewed package, including companion files when the host has them. */
   readonly packageDigest?: string;
+  /** Fixed GraphQL companions; the verifier checks their declared byte digests before dispatch. */
+  readonly documents?: Readonly<Record<string, string>>;
 }
 
 export interface ResolvedOimPackage extends OimPackageCatalogEntry {

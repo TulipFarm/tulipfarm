@@ -37,6 +37,7 @@ Run event/request vocabularies, canonical hashes, Secret references, and resourc
 - Every schema is TypeBox; every validated type is derived with `Static<>`. Never hand-write both.
 - `definitionSchema()` rejects plain JSON Schema literals. Do not defeat that with casts.
 - Optional fields use `Type.Optional(...)`; never hand-write `required` arrays.
+- Auth verification permits read-only HTTP GETs or fixed GraphQL queries, never mutations.
 - Use `Type.Unsafe<T>` only for shapes TypeBox cannot express; derive `T` from the same constants.
 - For enum wire shape, prefer `Type.Unsafe<T>({ type: "string", enum: [...] })`; `Type.Union`
   emits `anyOf`, which is a different contract.

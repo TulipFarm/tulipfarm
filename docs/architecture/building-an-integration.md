@@ -108,7 +108,11 @@ auth:
         namespace: issuer
 ```
 
-A verification check is a fixed native HTTP `GET` with no required agent input. Identified evidence
+A verification check is a fixed native HTTP `GET` or a digest-pinned GraphQL `query`, with read
+effect and no required agent input. The catalog carries the fixed GraphQL companion bytes into
+the verifier; it checks their declared digest and the package digest before compiling. Mutations
+and subscriptions cannot verify credentials. GraphQL body errors reject even partial HTTP 200
+responses; no provider-specific host is needed. Identified evidence
 requires a real, nonempty provider subject. Use `validity_only` when a provider can prove only that
 a credential works; do not invent identity from configuration or a browser callback.
 

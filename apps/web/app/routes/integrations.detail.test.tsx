@@ -1,7 +1,9 @@
+import { readFile } from "node:fs/promises";
 import { useLocation, useNavigate } from "@remix-run/react";
 import { createRemixStub } from "@remix-run/testing";
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { parseOimManifest } from "@tulipfarm/schema";
 import { beforeEach, expect, test, vi } from "vitest";
 import { ApiError } from "~/lib/api";
 
@@ -136,6 +138,59 @@ function createdConnection() {
     verification: { status: "not_required" as const },
   };
 }
+
+test("starts Linear key setup from the shipped verified manifest", async () => {
+  const manifest = parseOimManifest(await readFile("../../integrations/linear/oim.yml", "utf8"));
+  expect(manifest.auth?.verification?.evidence.assurance).toBe("identified");
+  const fields = manifest.auth?.steps.find((step) => step.type === "fields");
+  if (fields?.type !== "fields") throw new Error("Linear must declare key setup");
+  vi.mocked(getIntegration).mockResolvedValue(
+    detail({
+      name: manifest.metadata.id,
+      title: manifest.metadata.name,
+      type: "oim",
+    })
+  );
+  vi.mocked(listOimConnections).mockResolvedValue([]);
+  vi.mocked(getOimConnectionSetup).mockResolvedValue({
+    integration: { id: manifest.metadata.id, majorVersion: 1 },
+    allowedOwnerScopes: ["personal"],
+    configurationFields: [],
+    fieldSteps: [
+      {
+        id: fields.id,
+        title: fields.title,
+        fields: fields.fields.map((field) => ({
+          id: field.id,
+          label: field.label,
+          input: field.input,
+          required: field.required === true,
+          secret: field.target.type === "credential",
+        })),
+      },
+    ],
+    initialAuthorizationSteps: [],
+  });
+  vi.mocked(createOimConnection).mockResolvedValue({
+    connectionId: "linear-connection",
+    verification: { status: "verified" },
+  });
+  const user = userEvent.setup();
+  renderDetailWithClientLoader("/integrations/linear");
+  await user.type(await screen.findByLabelText("Connection name"), "My Linear");
+  const key = screen.getByLabelText("API key");
+  expect(key).toHaveAttribute("type", "password");
+  await user.type(key, "offline-linear-key");
+  await user.click(screen.getByRole("button", { name: "Create Connection" }));
+  await waitFor(() =>
+    expect(createOimConnection).toHaveBeenCalledWith("linear", {
+      label: "My Linear",
+      ownerScope: "personal",
+      values: { api_key: "offline-linear-key" },
+    })
+  );
+  expect(await screen.findByRole("heading", { name: "Connection added" })).toBeInTheDocument();
+});
 
 test("leads with the brand name but keeps the slug visible", async () => {
   renderDetail(detail({ name: "github", title: "GitHub" }));

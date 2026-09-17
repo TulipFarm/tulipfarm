@@ -26,6 +26,7 @@ export function unifiedOimPackageCatalog(
       key,
       manifest: integration.oimManifest,
       packageDigest: oimPackageDigest(integration.oimManifest),
+      ...(integration.oimDocuments === undefined ? {} : { documents: integration.oimDocuments }),
     });
   }
   const owners = new Map<string, string>();
@@ -108,6 +109,7 @@ export async function loadBundledOimCatalog(
       key: directory,
       manifest,
       packageDigest: oimPackageDigest(manifest),
+      ...(Object.keys(documents).length === 0 ? {} : { documents }),
       integration: {
         slug: directory,
         sourceIntegration: manifest.metadata.id,

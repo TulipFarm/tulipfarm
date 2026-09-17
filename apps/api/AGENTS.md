@@ -122,6 +122,8 @@ PostgreSQL persistence composition, auth, Soul Git writes, and Worker callback p
   YAML compiles through `run-kernel` and uses the same authorization, publication, and Run path.
 - Schedule checkpoints follow embedded Trigger identity, never list position. Legacy checkpoints
   transfer only when their saved deduplication key identifies one schedule.
+- The OIM verification host supports read-only HTTP GET and digest-checked GraphQL queries, with
+  exact Connection/auth-step/Credential evidence; catalog composition must preserve `documents`.
 - Integration connect flows are manifest-declared. Adding an integration must not add a bespoke
   route; extend `packages/soul/src/types.ts` if auth step kinds are insufficient.
 - Integration callback origin comes from `PUBLIC_API_URL`, never request `Host`; `PUBLIC_URL` is the

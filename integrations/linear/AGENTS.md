@@ -17,8 +17,8 @@ Fixed, digest-pinned GraphQL operations for Linear issues and team metadata.
 
 ## Rules
 
-- Never mark available without production `requireVerification: true` activation and real
-  GraphQL provider verification. HTTP GET-only verification is not compatible with `Viewer`.
+- Availability requires production `requireVerification: true` activation and the generic
+  digest-checked GraphQL verifier. `Viewer` proves `/data/viewer/id`, not every Tool permission.
 - Keep matching legacy/OIM variables and selections consistent; update companion SHA-256 pins.
 - Every connection read is paged; never describe one page as a complete list.
 - Status and assignee ids come from the issue's own Linear team metadata.
