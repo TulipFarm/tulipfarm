@@ -6,7 +6,7 @@ import type {
   SoulIntegration,
   SoulLoader,
 } from "@tulipfarm/soul";
-import { agentIdOf, makeSoulWriterDouble } from "@tulipfarm/soul";
+import { agentIdOf, makeSoulWriterDouble, SoulWriteError } from "@tulipfarm/soul";
 import type { PaginatedResult } from "@tulipfarm/storage";
 import type { FastifyInstance } from "fastify";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -130,7 +130,7 @@ class FakeSecretsService {
 class FakeIntegrationStore {
   calls: string[] = [];
   private appsById = new Map<string, { id: string }>();
-  private integrationsById = new Map<string, { id: string }>();
+  private integrationsById = new Map<string, { id: string; status: string }>();
   private routesById = new Map<string, { id: string }>();
   get apps() {
     return [...this.appsById.values()];
@@ -145,7 +145,7 @@ class FakeIntegrationStore {
     this.calls.push("putApp");
     this.appsById.set(app.id, app);
   }
-  async putIntegration(integration: { id: string }) {
+  async putIntegration(integration: { id: string; status: string }) {
     this.calls.push("putIntegration");
     this.integrationsById.set(integration.id, integration);
   }
@@ -159,8 +159,16 @@ class FakeIntegrationStore {
   }
   async loadProviderSnapshot(businessId: string, provider: string) {
     void businessId;
-    void provider;
-    return { apps: [], integrations: this.githubIntegrations, accessGrants: [], routes: [] };
+    return {
+      apps: [],
+      integrations: provider === "slack" ? this.integrations : this.githubIntegrations,
+      accessGrants: [],
+      routes: [],
+    };
+  }
+  async revokeIntegration(_businessId: string, id: string) {
+    const integration = this.integrationsById.get(id);
+    if (integration) integration.status = "revoked";
   }
   githubIntegrations: Array<{ id: string; status: string }> = [];
 }
@@ -624,6 +632,20 @@ describe("integrations routes", () => {
       );
       expect(written.enabled).toBe(false);
       expect(written.env.SLACK_BOT_TOKEN).toMatch(/^secret:\/\//);
+      expect(integrationStore.integrations).toEqual([
+        expect.objectContaining({ status: "revoked" }),
+      ]);
+      const reconnected = await app.inject({
+        method: "POST",
+        url: "/api/v1/integrations/slack/connect",
+        cookies: auth(),
+        headers,
+        payload: { env: {} },
+      });
+      expect(reconnected.statusCode).toBe(200);
+      expect(integrationStore.integrations).toEqual([
+        expect.objectContaining({ status: "active" }),
+      ]);
     });
   });
 
@@ -691,6 +713,57 @@ describe("integrations routes", () => {
   });
 
   describe("DELETE /api/v1/integrations/:name", () => {
+    it("retries secret cleanup after a published removal", async () => {
+      await app.inject({
+        method: "POST",
+        url: "/api/v1/integrations/slack/connect",
+        cookies: auth(),
+        headers,
+        payload: { env: { SLACK_BOT_TOKEN: "xoxb-secret", SLACK_TEAM_ID: "T123" } },
+      });
+      vi.spyOn(secretsService, "delete").mockRejectedValueOnce(
+        new Error("secret store unavailable")
+      );
+      const remove = () =>
+        app.inject({
+          method: "DELETE",
+          url: "/api/v1/integrations/slack",
+          cookies: auth(),
+          headers,
+        });
+      expect((await remove()).statusCode).toBe(500);
+      expect(soulLoader.integrations.has("slack")).toBe(false);
+      expect((await remove()).statusCode).toBe(204);
+      expect(await secretsService.list()).toEqual([]);
+    });
+
+    it.each([
+      [new Error("publication failed"), 500],
+      [new SoulWriteError("CONFLICT", "stale Soul"), 409],
+      [new SoulWriteError("VALIDATION_FAILED", "invalid deletion"), 422],
+    ])("keeps live credentials when Soul deletion fails with %s", async (error, status) => {
+      await app.inject({
+        method: "POST",
+        url: "/api/v1/integrations/slack/connect",
+        cookies: auth(),
+        headers,
+        payload: { env: { SLACK_BOT_TOKEN: "xoxb-secret", SLACK_TEAM_ID: "T123" } },
+      });
+      soul.failNextWith(error as Error);
+      const remove = () =>
+        app.inject({
+          method: "DELETE",
+          url: "/api/v1/integrations/slack",
+          cookies: auth(),
+          headers,
+        });
+      expect((await remove()).statusCode).toBe(status);
+      expect(soulLoader.integrations.get("slack")?.connection?.enabled).toBe(true);
+      expect(await secretsService.get("integration.slack.SLACK_BOT_TOKEN")).toBe("xoxb-secret");
+      expect((await remove()).statusCode).toBe(204);
+      await expect(secretsService.get("integration.slack.SLACK_BOT_TOKEN")).rejects.toThrow();
+    });
+
     it("removes the soul dir and deletes secrets", async () => {
       await app.inject({
         method: "POST",

@@ -48,6 +48,7 @@ export function registerInternalRouteFamily(
       registerSurfaceInternalRoutes(
         app,
         {
+          ...(channelDeps.soulLoader ? { soulLoader: channelDeps.soulLoader } : {}),
           identity: channelDeps.identity,
           actions: channelDeps.surfaceActionStore,
           store: channelDeps.store,
