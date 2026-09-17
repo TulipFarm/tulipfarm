@@ -1,5 +1,5 @@
 {
-  "id": "successful-write-survives-output-redaction",
+  "id": "successful-tool-result-survives-output-redaction",
   "tier": "l3",
   "agent": "support",
   "input": [
@@ -66,8 +66,8 @@
     },
     {
       "kind": "output_contains",
-      "text": "A write operation completed successfully.",
-      "ungrounded": "This is deterministic runtime confirmation derived from a successful mutating Tool result."
+      "text": "The record_create Tool completed successfully.",
+      "ungrounded": "This is deterministic runtime confirmation derived from the Tool's successful result status, not a claim of independently verified persistence."
     },
     {
       "kind": "output_omits",
