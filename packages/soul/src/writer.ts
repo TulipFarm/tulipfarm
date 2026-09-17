@@ -78,6 +78,12 @@ export type SoulPrecondition =
   | { readonly kind: ArtifactKind; readonly slug: string; readonly state: "absent" }
   | { readonly kind: ArtifactKind; readonly slug: string; readonly state: "present" };
 
+/** Artifact revision observed before a caller computed a replacement write. */
+export interface SoulRevisionPrecondition {
+  readonly target: SoulWriteTarget;
+  readonly revision: string;
+}
+
 export interface SoulWriteRequest {
   /** Commit subject. Conventional prefix (`soul: add agent x`) — the body is generated. */
   readonly subject: string;
@@ -86,6 +92,7 @@ export interface SoulWriteRequest {
   readonly businessId: string;
   readonly changes: readonly SoulWrite[];
   readonly preconditions?: readonly SoulPrecondition[];
+  readonly expectedRevisions?: readonly SoulRevisionPrecondition[];
   /** Base revision observed by a caller's read before it computed this write. */
   readonly expectedBaseCommit?: string;
   /** The Approval decision that authorized this write, when the change required one. */
@@ -211,6 +218,11 @@ export class SoulWriter {
     return this.readPathWithBase(definitionPath(kind, slug));
   }
 
+  /** Last commit that changed the addressed artifact file, or null when it has no history. */
+  async revision(target: SoulWriteTarget): Promise<string | null> {
+    return this.store.lastCommitForPath(this.targetPath(target, "put"));
+  }
+
   /** Read a companion file beside an artifact's definition, or null when absent. */
   readCompanion(kind: ArtifactKind, slug: string, name: string): string | null {
     try {
@@ -248,6 +260,7 @@ export class SoulWriter {
     this.checkPreconditions(request.preconditions ?? []);
 
     const currentBaseCommit = await this.store.baseCommit();
+    await this.checkExpectedRevisions(request.expectedRevisions ?? []);
     await this.checkReferences(files, currentBaseCommit);
     const expectedBaseCommit = request.expectedBaseCommit ?? currentBaseCommit;
     const changeset: SoulChangeset = {
@@ -420,10 +433,25 @@ export class SoulWriter {
           `Soul write: ${precondition.kind} "${precondition.slug}" already exists`
         );
       }
+
       if (precondition.state === "present" && !present) {
         throw new SoulWriteError(
           "PRECONDITION_FAILED",
           `Soul write: ${precondition.kind} "${precondition.slug}" does not exist`
+        );
+      }
+    }
+  }
+
+  private async checkExpectedRevisions(
+    preconditions: readonly SoulRevisionPrecondition[]
+  ): Promise<void> {
+    for (const precondition of preconditions) {
+      const current = await this.revision(precondition.target);
+      if (current !== precondition.revision) {
+        throw new SoulWriteError(
+          "CONFLICT",
+          `Soul write: ${precondition.target.kind} "${precondition.target.slug ?? ""}" changed since it was read`
         );
       }
     }

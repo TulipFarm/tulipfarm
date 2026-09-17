@@ -64,6 +64,8 @@ Loader, compiler, publisher, and git-sync engine for Soul artifacts. Root `soul/
   which digest to read, not whether the artifact is bundled.
 - `SoulWriter.apply()` is the only authored-tree write path: validate, commit atomically, publish,
   push, reload. Add no other commit helper.
+- Full-artifact replacement surfaces carry the revision they read in `expectedRevisions`; use the
+  exact definition target so unrelated artifact commits do not make a valid draft stale.
 - `GitSyncService` stages only the paths given (`commitPaths`/`withSyncPaths`); there is no ambient
   `commit`/`withSync`, and `git add -A` is confined to scaffolding an empty repo.
 - Every commit helper must call the post-commit publication hook; publication activates one signed

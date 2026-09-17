@@ -16,9 +16,10 @@ export const ResourceTypeResponseSchema = {
     name: { type: "string" },
     schema: { type: "string" },
     hasHooks: { type: "boolean" },
+    revision: { type: "string", pattern: "^[0-9a-f]{40}$" },
     domain: { type: "string" },
   },
-  required: ["name", "schema", "hasHooks"],
+  required: ["name", "schema", "hasHooks", "revision"],
 } as const;
 
 export const CreateResourceTypeBodySchema = {
@@ -49,9 +50,10 @@ export const ResourceTypeNameParamsSchema = {
 
 export const UpdateResourceTypeBodySchema = {
   type: "object",
-  required: ["schema"],
+  required: ["schema", "revision"],
   properties: {
     schema: { type: "string" },
+    revision: { type: "string", pattern: "^[0-9a-f]{40}$" },
     domain: { type: "string" },
   },
 } as const;
