@@ -10,6 +10,7 @@ import {
   INTEGRATION_AUTHORING_TOOL_DECLARATIONS,
   NETWORK_TOOL_DECLARATIONS,
   PACK_READ_TOOL_DECLARATION,
+  RECORD_DELETE_TOOL_DECLARATIONS,
   SKILL_MARKETPLACE_TOOL_DECLARATIONS,
 } from "@tulipfarm/schema";
 import { SKILL_TOOL_DECLARATION } from "@tulipfarm/soul";
@@ -39,6 +40,7 @@ const SHIPPED: readonly ExposedTool[] = [
   ...SLACK_TOOL_DECLARATIONS,
   ...NETWORK_TOOL_DECLARATIONS,
   PACK_READ_TOOL_DECLARATION,
+  ...RECORD_DELETE_TOOL_DECLARATIONS,
 ].map((tool) => ({
   name: tool.name,
   description: tool.description,

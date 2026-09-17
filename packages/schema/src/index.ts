@@ -350,6 +350,12 @@ export {
 } from "./plan";
 export type { PrincipalKind } from "./principals";
 export { PRINCIPAL_KINDS } from "./principals";
+export {
+  RECORD_DELETE_PLAN_SCHEMA,
+  RECORD_DELETE_PREVIEW_TOOL_DECLARATION,
+  RECORD_DELETE_TOOL_DECLARATION,
+  RECORD_DELETE_TOOL_DECLARATIONS,
+} from "./record-delete-tools";
 export type {
   SchemaRegistration,
   ValidatedSchemaDocument,

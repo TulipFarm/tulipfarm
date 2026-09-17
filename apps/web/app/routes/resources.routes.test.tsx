@@ -1,9 +1,9 @@
 import * as remix from "@remix-run/react";
 import { createRemixStub } from "@remix-run/testing";
-import { fireEvent, render, screen, within } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import type { ReactElement } from "react";
 import { expect, test, vi } from "vitest";
-import { ApiError } from "~/lib/api";
+import { ApiError, deleteRecord, previewRecordDelete } from "~/lib/api";
 import { buildCatalog } from "~/lib/resource-catalog";
 import {
   availableColumns,
@@ -25,6 +25,15 @@ vi.mock("@remix-run/react", async () => {
     useLoaderData: vi.fn(),
     useRouteError: vi.fn(),
     useParams: vi.fn(() => ({})),
+  };
+});
+
+vi.mock("~/lib/api", async () => {
+  const actual = await vi.importActual<typeof import("~/lib/api")>("~/lib/api");
+  return {
+    ...actual,
+    deleteRecord: vi.fn(),
+    previewRecordDelete: vi.fn(),
   };
 });
 
@@ -303,6 +312,37 @@ test("detail names the record in its heading and still lists every field", () =>
   // The heading is a label for the record; the field list stays complete regardless.
   expect(screen.getAllByText("Login 500")).toHaveLength(2);
   expect(screen.getByText("System")).toBeInTheDocument();
+});
+
+test("detail previews and submits the exact cascade plan before deleting", async () => {
+  const plan = {
+    id: "plan-1",
+    root: { type: "ticket", id: "TICK-1", version: 4 },
+    records: [
+      { type: "ticket", id: "TICK-1", version: 4 },
+      { type: "comment", id: "COMMENT-2", version: 1 },
+    ],
+    restrictedBy: [],
+  };
+  vi.mocked(previewRecordDelete).mockResolvedValue(plan);
+  vi.mocked(deleteRecord).mockResolvedValue();
+  const confirm = vi.spyOn(window, "confirm").mockReturnValue(true);
+  renderWithData(<ResourceDetail />, {
+    type: "ticket",
+    record,
+    fields,
+    schemaError: undefined,
+    linkLabels: {},
+  });
+
+  fireEvent.click(screen.getByRole("button", { name: "Delete" }));
+
+  await waitFor(() => {
+    expect(confirm).toHaveBeenCalledWith(
+      "Delete these 2 records?\n\nticket/TICK-1\ncomment/COMMENT-2\n\nThis cannot be undone from the UI."
+    );
+    expect(deleteRecord).toHaveBeenCalledWith("ticket", "TICK-1", 4, plan);
+  });
 });
 
 test("detail ErrorBoundary renders 404 not found for a missing record", () => {

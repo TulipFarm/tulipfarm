@@ -58,14 +58,23 @@ These five are validated. Getting the shape wrong fails the write.
 ```yaml
 customerId:
   type: string
-  x-links: { target: customer }
+  x-links: { target: customer, onDelete: restrict }
 ```
 
 `target` must be a non-empty string naming an existing Resource type. Not an object, not an array,
 not blank. The value stored in the field is the target Record's `_id`.
 
-Checked on write — the target must exist. **Not cascaded on delete**: deleting the target leaves the
-link pointing at nothing, and nothing cleans it up.
+Checked on write — the target must exist. `onDelete` is optional:
+
+- Omit it to preserve the existing behavior: deleting the target leaves the link pointing at
+  nothing.
+- `restrict` refuses target deletion while a live Record still links to it.
+- `cascade` requires an exact dependency preview, then deletes the target and every Record reached
+  through explicitly cascading links in one operation.
+
+Use `cascade` only when the linked Record cannot have a useful life without its target. Deletion
+stops rather than partially succeeding when a preview is stale, a restricted dependency is found,
+or the dependency graph exceeds the platform limit.
 
 Only a **string** value is checked. A field holding an array of ids passes validation untouched, so
 an array of references is unvalidated in practice — use a join Resource type instead.
@@ -156,6 +165,8 @@ The hook source itself is written by `create_resource_hooks`, never inside the s
 ## Before you write
 
 - Field names are camelCase; the Resource type name is singular kebab-case.
-- Every `x-links` target must already exist — build linked types first.
+- Every `x-links` target must already exist — build linked types first. Choose `onDelete: restrict`
+  or `onDelete: cascade` only when the business rule requires it; omission intentionally preserves
+  dangling links.
 - Call `validate_artifact` if it is available. It runs the same checks, so a failure there is a
   failure the user would otherwise have seen after approving.

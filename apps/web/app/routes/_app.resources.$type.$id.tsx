@@ -11,7 +11,13 @@ import { PageShell } from "~/components/page-shell";
 import { ErrorState, NotFoundState } from "~/components/states";
 import { Button } from "~/components/ui/button";
 import { Link } from "~/components/ui/link";
-import { ApiError, deleteRecord, getRecord, listResourceTypes } from "~/lib/api";
+import {
+  ApiError,
+  deleteRecord,
+  getRecord,
+  listResourceTypes,
+  previewRecordDelete,
+} from "~/lib/api";
 import { deriveFields, detailFields, parseSchema, recordLabel } from "~/lib/schema";
 
 export const meta: MetaFunction = () => [{ title: "Resources · tulipfarm" }];
@@ -61,11 +67,30 @@ export default function ResourceDetail() {
   const listPath = `/resources/${encodeURIComponent(type)}`;
 
   async function onDelete() {
-    if (!window.confirm(`Delete this ${type} record? This cannot be undone from the UI.`)) return;
     setDeleting(true);
     setDeleteError(null);
     try {
-      await deleteRecord(type, record.id, record.version);
+      const plan = await previewRecordDelete(type, record.id, record.version);
+      if (plan.restrictedBy.length > 0) {
+        const dependencies = plan.restrictedBy
+          .map((dependent) => `${dependent.type}/${dependent.id}`)
+          .join(", ");
+        setDeleteError(`deletion is restricted by: ${dependencies}`);
+        setDeleting(false);
+        return;
+      }
+      const affected = plan.records.map(
+        (affectedRecord) => `${affectedRecord.type}/${affectedRecord.id}`
+      );
+      const prompt =
+        affected.length === 1
+          ? `Delete this ${type} record? This cannot be undone from the UI.`
+          : `Delete these ${affected.length} records?\n\n${affected.join("\n")}\n\nThis cannot be undone from the UI.`;
+      if (!window.confirm(prompt)) {
+        setDeleting(false);
+        return;
+      }
+      await deleteRecord(type, record.id, record.version, plan);
       navigate(listPath);
     } catch (err) {
       setDeleteError(err instanceof ApiError ? err.message : "delete failed");

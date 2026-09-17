@@ -45,6 +45,16 @@ class FakeResourceRepo implements ResourceRepo {
     return this.docs.get(id) ?? null;
   }
 
+  async findDependents(
+    field: string,
+    targetId: string,
+    limit: number
+  ): Promise<readonly ResourceDoc[]> {
+    return Array.from(this.docs.values())
+      .filter((doc) => doc.deletedAt === undefined && doc[field] === targetId)
+      .slice(0, limit);
+  }
+
   async stats(): Promise<{ count: number; lastUpdatedAt: Date | null }> {
     const live = Array.from(this.docs.values()).filter((d) => d.deletedAt == null);
     const latest = live.reduce<Date | null>(
@@ -98,6 +108,13 @@ class FakeResourceRepoFactory implements ResourceRepoFactory {
       this.repos.set(type, repo);
     }
     return repo;
+  }
+
+  async withTransaction<T>(
+    _lockedTypes: readonly string[],
+    operation: (repositories: ResourceRepoFactory) => Promise<T>
+  ): Promise<T> {
+    return operation(this);
   }
 }
 
@@ -163,6 +180,10 @@ const TICKET_SCHEMA = {
     priority: { type: "string", enum: ["low", "high"] },
     email: { type: "string", format: "email" },
     joinedOn: { type: "string", format: "date" },
+    customerId: {
+      type: "string",
+      "x-links": { target: "customer", onDelete: "cascade" },
+    },
   },
   required: ["title"],
 };
@@ -176,6 +197,7 @@ describe("resource routes", () => {
   let tokenRepo: FakeTokenRepo;
   let soulLoader: SoulLoader;
   let fakeRepo: FakeResourceRepo;
+  let customerRepo: FakeResourceRepo;
   let sid: string;
 
   beforeEach(async () => {
@@ -183,14 +205,26 @@ describe("resource routes", () => {
     userRepo = new FakeUserRepo();
     tokenRepo = new FakeTokenRepo();
     fakeRepo = new FakeResourceRepo();
+    customerRepo = new FakeResourceRepo();
     soulLoader = makeFakeSoulLoader([
       { name: "ticket", schema: TICKET_SCHEMA, hasHooks: false, hooksEnabled: true },
+      {
+        name: "customer",
+        schema: { type: "object", properties: { name: { type: "string" } } },
+        hasHooks: false,
+        hooksEnabled: true,
+      },
     ]);
 
     const user = await createUser(userRepo, "user@example.com", "pass", "member");
     sid = await store.create(user._id);
 
-    const factory = new FakeResourceRepoFactory(new Map([["ticket", fakeRepo]]));
+    const factory = new FakeResourceRepoFactory(
+      new Map([
+        ["ticket", fakeRepo],
+        ["customer", customerRepo],
+      ])
+    );
     app = await buildApp({
       sessionStore: store,
       userRepo,
@@ -549,6 +583,7 @@ describe("resource routes", () => {
       expect(res.statusCode).toBe(200);
       expect(res.json<{ types: unknown[] }>().types).toEqual([
         { name: "ticket", count: 1, lastUpdatedAt: updatedAt.toISOString() },
+        { name: "customer", count: 0, lastUpdatedAt: null },
       ]);
     });
 
@@ -572,6 +607,7 @@ describe("resource routes", () => {
 
       expect(res.json<{ types: unknown[] }>().types).toEqual([
         { name: "ticket", count: 0, lastUpdatedAt: null },
+        { name: "customer", count: 0, lastUpdatedAt: null },
       ]);
     });
   });
@@ -949,6 +985,68 @@ describe("resource routes", () => {
         headers: { [CSRF_HEADER]: TEST_CSRF },
       });
       expect(list.json<{ items: unknown[] }>().items).toHaveLength(0);
+    });
+
+    it("previews and executes the exact cascade set", async () => {
+      const customerId = randomUUID();
+      const ticketId = randomUUID();
+      const sentinelId = randomUUID();
+      const now = new Date();
+      customerRepo.docs.set(customerId, {
+        _id: customerId,
+        version: 1,
+        createdAt: now,
+        updatedAt: now,
+        name: "Customer",
+      });
+      fakeRepo.docs.set(ticketId, {
+        _id: ticketId,
+        version: 1,
+        createdAt: now,
+        updatedAt: now,
+        title: "Dependent",
+        customerId,
+      });
+      fakeRepo.docs.set(sentinelId, {
+        _id: sentinelId,
+        version: 1,
+        createdAt: now,
+        updatedAt: now,
+        title: "Sentinel",
+      });
+
+      const previewResponse = await app.inject({
+        method: "POST",
+        url: `/api/v1/resources/customer/${customerId}/delete-preview`,
+        cookies: { [SESSION_COOKIE]: sid, [CSRF_COOKIE]: TEST_CSRF },
+        headers: { [CSRF_HEADER]: TEST_CSRF },
+        payload: { version: 1 },
+      });
+      expect(previewResponse.statusCode).toBe(200);
+      const plan = previewResponse.json<{
+        records: Array<{ type: string; id: string; version: number }>;
+      }>();
+      expect(plan.records).toEqual([
+        { type: "customer", id: customerId, version: 1 },
+        { type: "ticket", id: ticketId, version: 1 },
+      ]);
+
+      const deleted = await app.inject({
+        method: "POST",
+        url: `/api/v1/resources/customer/${customerId}/delete`,
+        cookies: { [SESSION_COOKIE]: sid, [CSRF_COOKIE]: TEST_CSRF },
+        headers: {
+          [CSRF_HEADER]: TEST_CSRF,
+          "content-type": "application/json",
+          "if-match": "1",
+        },
+        payload: plan,
+      });
+
+      expect(deleted.statusCode).toBe(204);
+      expect(customerRepo.docs.get(customerId)?.deletedAt).toBeDefined();
+      expect(fakeRepo.docs.get(ticketId)?.deletedAt).toBeDefined();
+      expect(fakeRepo.docs.get(sentinelId)?.deletedAt).toBeUndefined();
     });
   });
 });

@@ -1450,6 +1450,7 @@ async function boot() {
         integrations: integrationStore,
         businessId: DEPLOYMENT_BUSINESS_ID,
       });
+    const recordAuthorizer = new LiveRecordAuthorizer(soulLoader, authorityLayerResolver);
     const toolRegistry = buildToolRegistry({
       memoryDocuments,
       kv: kvService,
@@ -1464,6 +1465,13 @@ async function boot() {
         soulLoader,
         hookExecutor,
         events: domainEventEmitter,
+        authorizeRecord: (userId, action, type, id) =>
+          recordAuthorizer.authorize({
+            principal: { id: userId, businessId: DEPLOYMENT_BUSINESS_ID, kind: "user" },
+            action,
+            type,
+            id,
+          }),
       },
       resourceTypes: {
         gitSync,
@@ -1876,7 +1884,7 @@ async function boot() {
       hookExecutor,
       resourceRepoFactory,
       counterStore,
-      recordAuthorizer: new LiveRecordAuthorizer(soulLoader, authorityLayerResolver),
+      recordAuthorizer,
       authorityLayers: authorityLayerResolver,
       routeAuthorizer,
       authorizationGate: gateOptions,

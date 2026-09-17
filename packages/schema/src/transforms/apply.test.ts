@@ -176,6 +176,29 @@ describe("validateResourceSchema", () => {
     ).toThrow(TulipFarmValidationError);
   });
 
+  it.each(["restrict", "cascade"])("accepts x-links.onDelete %s", (onDelete) => {
+    expect(() =>
+      validateResourceSchema({
+        properties: {
+          customerId: { type: "string", "x-links": { target: "customer", onDelete } },
+        },
+      })
+    ).not.toThrow();
+  });
+
+  it("rejects an unknown x-links.onDelete policy", () => {
+    expect(() =>
+      validateResourceSchema({
+        properties: {
+          customerId: {
+            type: "string",
+            "x-links": { target: "customer", onDelete: "set-null" },
+          },
+        },
+      })
+    ).toThrow('x-links.onDelete must be "restrict" or "cascade"');
+  });
+
   it("accepts x-unique naming declared fields, single and combined", () => {
     expect(() =>
       validateResourceSchema({
