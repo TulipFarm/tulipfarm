@@ -18,7 +18,7 @@ export function Modal({
   open: boolean;
   onClose: () => void;
   title: string;
-  children: React.ReactNode;
+  children: React.ReactNode | ((close: () => void) => React.ReactNode);
   className?: string;
   dismissible?: boolean;
   /** Overrides the body's padding and flow, for a modal whose content fills its own height. */
@@ -101,7 +101,7 @@ export function Modal({
       e.clientX > rect.right ||
       e.clientY < rect.top ||
       e.clientY > rect.bottom;
-    if (outside && dismissible) onClose();
+    if (outside && dismissible) closeDialog();
   }
 
   if (!open) return null;
@@ -133,7 +133,7 @@ export function Modal({
         </button>
       </div>
       <div className={cn("min-h-0 overflow-y-auto px-4 py-4 text-sm", bodyClassName)}>
-        {children}
+        {typeof children === "function" ? children(closeDialog) : children}
       </div>
     </dialog>
   );
@@ -163,34 +163,38 @@ export function ConfirmModal({
 }) {
   return (
     <Modal open={open} onClose={onClose} title={title}>
-      <p className="text-muted-foreground">{description}</p>
-      {error ? (
-        <p role="alert" className="mt-3 text-destructive">
-          {error}
-        </p>
-      ) : null}
-      <div className="mt-4 flex justify-end gap-2">
-        <Button
-          type="button"
-          variant="ghost"
-          size="sm"
-          className="rounded-sm"
-          onClick={onClose}
-          disabled={busy}
-        >
-          Cancel
-        </Button>
-        <Button
-          type="button"
-          variant="destructive"
-          size="sm"
-          className="rounded-sm"
-          onClick={onConfirm}
-          disabled={busy}
-        >
-          {busy ? busyLabel : confirmLabel}
-        </Button>
-      </div>
+      {(close) => (
+        <>
+          <p className="text-muted-foreground">{description}</p>
+          {error ? (
+            <p role="alert" className="mt-3 text-destructive">
+              {error}
+            </p>
+          ) : null}
+          <div className="mt-4 flex justify-end gap-2">
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="rounded-sm"
+              onClick={close}
+              disabled={busy}
+            >
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              variant="destructive"
+              size="sm"
+              className="rounded-sm"
+              onClick={onConfirm}
+              disabled={busy}
+            >
+              {busy ? busyLabel : confirmLabel}
+            </Button>
+          </div>
+        </>
+      )}
     </Modal>
   );
 }
