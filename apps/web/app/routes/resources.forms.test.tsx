@@ -379,12 +379,17 @@ test("create: a 422 maps the error path onto the offending field", async () => {
   vi.mocked(createRecord).mockRejectedValue(new ApiError(422, "must be a string", "/title"));
   renderRoute(<ResourceCreate />, { type: "ticket", fields, schemaError: undefined });
 
-  fireEvent.change(document.querySelector("input#title") as HTMLInputElement, {
-    target: { value: "x" },
-  });
+  const title = document.querySelector("input#title") as HTMLInputElement;
   fireEvent.click(screen.getByRole("button", { name: "Create" }));
 
-  expect(await screen.findByText("must be a string")).toBeInTheDocument();
+  const error = await screen.findByText("must be a string");
+  expect(error).toHaveAttribute("id");
+  expect(title).toHaveAttribute("aria-invalid", "true");
+  expect(title).toHaveAttribute("aria-describedby", error.id);
+  expect(title).toHaveFocus();
+  expect(screen.getAllByRole("alert")).toHaveLength(1);
+  expect(screen.getByRole("alert")).toHaveTextContent(/1 field needs attention/i);
+  expect(createRecord).toHaveBeenCalledOnce();
 });
 
 test.each([
@@ -411,7 +416,12 @@ test.each([
   });
   fireEvent.click(screen.getByRole("button", { name: "Create" }));
 
-  expect(await screen.findByText(message)).toBeInTheDocument();
+  const error = await screen.findByText(message);
+  expect(error).toHaveAttribute("id");
+  expect(metadata).toHaveAttribute("aria-invalid", "true");
+  expect(metadata).toHaveAttribute("aria-describedby", error.id);
+  expect(metadata).toHaveFocus();
+  expect(screen.getAllByRole("alert")).toHaveLength(1);
   expect(metadata.value).toBe('{"address":{"city":"London","postcode":123}}');
   expect(screen.queryByText(/^destination:/)).not.toBeInTheDocument();
 });
@@ -483,7 +493,9 @@ test("edit: a 409 surfaces the version-conflict banner and does not navigate", a
 
   fireEvent.click(screen.getByRole("button", { name: "Save" }));
 
-  expect(await screen.findByText(/changed since you loaded it/)).toBeInTheDocument();
+  const alert = await screen.findByRole("alert");
+  expect(alert).toHaveTextContent(/changed since you loaded it/);
+  expect(alert).toHaveFocus();
   expect(screen.queryByText(/^destination:/)).not.toBeInTheDocument();
 });
 

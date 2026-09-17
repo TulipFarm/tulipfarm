@@ -180,9 +180,11 @@ test("invalid native calendar drafts block submit and remain available for corre
   fireEvent.click(screen.getByRole("button", { name: "Create" }));
 
   expect(onSubmit).not.toHaveBeenCalled();
-  expect(screen.getByText("enter a valid calendar date")).toBeVisible();
+  const dateError = screen.getByText("enter a valid calendar date");
+  expect(dateError).toBeVisible();
   expect(dueDate).toHaveAttribute("aria-invalid", "true");
-  expect(dueDate).toHaveAttribute("aria-describedby", "dueDate-error");
+  expect(dueDate).toHaveAttribute("aria-describedby", dateError.id);
+  expect(dueDate).toHaveFocus();
   expect(container.querySelector("input#dueDate")).toBe(dueDate);
   expect(dueDate.dataset.nativeDraft).toBe("29/02/2027");
   expect(title.value).toBe("Invalid draft");
@@ -291,7 +293,11 @@ test.each([
   fireEvent.click(screen.getByRole("button", { name: "Create" }));
 
   expect(onSubmit).not.toHaveBeenCalled();
-  expect(screen.getByText(expectedError)).toBeVisible();
+  const error = screen.getByText(expectedError);
+  expect(error).toBeVisible();
+  expect(ratio).toHaveAttribute("aria-invalid", "true");
+  expect(ratio).toHaveAttribute("aria-describedby", error.id);
+  expect(ratio).toHaveFocus();
   expect(ratio.value).toBe(raw);
 });
 
@@ -639,7 +645,7 @@ properties:
   expect(onSubmit).toHaveBeenCalledWith({ choice: { label: "two" } }, expect.any(Function));
 });
 
-test("invalid JSON in an array/object field blocks submit and shows an inline error", () => {
+test("invalid JSON in an array/object field blocks submit and exposes an accessible error", () => {
   const onSubmit = vi.fn();
   const { container } = renderForm(
     <ResourceForm
@@ -659,23 +665,140 @@ test("invalid JSON in an array/object field blocks submit and shows an inline er
   fireEvent.click(screen.getByRole("button", { name: "Create" }));
 
   expect(onSubmit).not.toHaveBeenCalled();
-  expect(screen.getByText("invalid JSON")).toBeInTheDocument();
+  const tags = container.querySelector("textarea#tags") as HTMLTextAreaElement;
+  const error = screen.getByText("invalid JSON");
+  expect(error).toHaveAttribute("id");
+  expect(tags).toHaveAttribute("aria-invalid", "true");
+  expect(tags).toHaveAttribute("aria-describedby", error.id);
+  expect(tags).toHaveFocus();
+  expect(screen.getByRole("alert")).toHaveTextContent(/1 field needs attention/i);
+
+  fireEvent.change(tags, { target: { value: '["fixed"]' } });
+  fireEvent.click(screen.getByRole("button", { name: "Create" }));
+
+  expect(onSubmit).toHaveBeenCalledOnce();
+  expect(screen.queryByText("invalid JSON")).not.toBeInTheDocument();
+  expect(tags).not.toHaveAttribute("aria-invalid");
+  expect(tags).not.toHaveAttribute("aria-describedby");
 });
 
-test("surfaces the form-level banner and per-field server errors", () => {
+test("associates server errors with every Resource field control kind", async () => {
+  const { container } = renderForm(
+    <ResourceForm
+      fields={fields}
+      mode="create"
+      onSubmit={vi.fn()}
+      submitting={false}
+      fieldErrors={{
+        email: "must be an email",
+        customerId: "linked Record not found",
+        priority: "must be low or high",
+        count: "must be an integer",
+        open: "must be a Boolean",
+        tags: "must be an array",
+      }}
+      cancelTo="/"
+    />
+  );
+
+  const controls = [
+    container.querySelector("input#email"),
+    container.querySelector("input#customerId"),
+    container.querySelector("select#priority"),
+    container.querySelector("input#count"),
+    container.querySelector("input#open"),
+    container.querySelector("textarea#tags"),
+  ];
+  for (const control of controls) {
+    expect(control).toHaveAttribute("aria-invalid", "true");
+    expect(control).toHaveAttribute("aria-describedby");
+  }
+  const ids = [...container.querySelectorAll("[id]")].map((element) => element.id);
+  expect(new Set(ids).size).toBe(ids.length);
+  await waitFor(() => expect(container.querySelector("input#email")).toHaveFocus());
+  expect(screen.getAllByRole("alert")).toHaveLength(1);
+  expect(screen.getByRole("alert")).toHaveTextContent(/6 fields need attention/i);
+});
+
+test("associates an optional Boolean group error with its inline message", async () => {
+  renderForm(
+    <ResourceForm
+      fields={booleanFields}
+      mode="create"
+      onSubmit={vi.fn()}
+      submitting={false}
+      fieldErrors={{ reviewed: "choose a valid value" }}
+      cancelTo="/"
+    />
+  );
+
+  const reviewed = screen.getByRole("radiogroup", { name: "reviewed" });
+  const error = screen.getByText("choose a valid value");
+  expect(reviewed).toHaveAttribute("aria-invalid", "true");
+  expect(reviewed).toHaveAttribute("aria-describedby", error.id);
+  await waitFor(() => expect(reviewed).toHaveFocus());
+});
+
+test("associates a multiline string error with its textarea", async () => {
+  const multilineParsed = parseSchema(`
+type: object
+properties:
+  notes: { type: string }
+`);
+  if (!multilineParsed.ok) throw new Error(multilineParsed.error);
+  renderForm(
+    <ResourceForm
+      fields={formFields(multilineParsed.schema)}
+      mode="edit"
+      initial={{ notes: "first line\nsecond line" }}
+      onSubmit={vi.fn()}
+      submitting={false}
+      fieldErrors={{ notes: "must be shorter" }}
+      cancelTo="/"
+    />
+  );
+
+  const notes = screen.getByRole("textbox", { name: "notes" });
+  const error = screen.getByText("must be shorter");
+  expect(notes.tagName).toBe("TEXTAREA");
+  expect(notes).toHaveAttribute("aria-invalid", "true");
+  expect(notes).toHaveAttribute("aria-describedby", error.id);
+  await waitFor(() => expect(notes).toHaveFocus());
+});
+
+test("focuses and announces a form-level error without marking a field invalid", async () => {
+  const { container } = renderForm(
+    <ResourceForm
+      fields={fields}
+      mode="create"
+      onSubmit={vi.fn()}
+      submitting={false}
+      formError="service unavailable"
+      cancelTo="/"
+    />
+  );
+
+  const alert = screen.getByRole("alert");
+  expect(alert).toHaveTextContent("service unavailable");
+  await waitFor(() => expect(alert).toHaveFocus());
+  expect(container.querySelector("[aria-invalid=true]")).toBeNull();
+});
+
+test("announces an unmapped server error instead of leaving it inaccessible", async () => {
   renderForm(
     <ResourceForm
       fields={fields}
       mode="create"
       onSubmit={vi.fn()}
       submitting={false}
-      formError="boom"
-      fieldErrors={{ priority: "must be low or high" }}
+      fieldErrors={{ unknown: "could not validate this value" }}
       cancelTo="/"
     />
   );
-  expect(screen.getByText(/boom/)).toBeInTheDocument();
-  expect(screen.getByText("must be low or high")).toBeInTheDocument();
+
+  const alert = screen.getByRole("alert");
+  expect(alert).toHaveTextContent("unknown: could not validate this value");
+  await waitFor(() => expect(alert).toHaveFocus());
 });
 
 function dispatchUnload(): boolean {
