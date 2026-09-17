@@ -72,10 +72,15 @@ otherwise.
 ## Auth 1.1
 
 Auth 1.1 adds provider verification before a Connection becomes usable. A package claiming Auth
-1.1 MUST declare `auth.verification`. The declaration MUST use named read-only HTTP GET operations,
+1.1 MUST declare `auth.verification`. The declaration MUST use named read-only HTTP GET operations
+or fixed, digest-checked GraphQL queries, with no required caller input,
 the exact Credential slots each operation needs, and only the bounded `present`, `equals`, and
 `one_of` predicates. Cross-checks MAY compare two present trusted values for equality or require a
 present trusted value in an array at a declared item pointer.
+
+GraphQL verification MUST compile the declared companion document as a query, MUST reject
+mutations and subscriptions, and MUST reject nonempty GraphQL errors even with HTTP 200 or
+partial data. The document bytes and package digest MUST match the package bound to the evidence.
 
 The issuer MUST come from a package-owned public HTTPS origin or the normalized origin of a
 required URL configuration field. It MUST NOT come from a browser callback, Tool input, or an

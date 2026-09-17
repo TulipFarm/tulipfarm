@@ -50,7 +50,9 @@ test("Linear pins both the catalog setup guide and the detailed OIM package guid
   const legacyGuide = await readFile(resolve(root, "integrations/linear/setup-guide.md"), "utf8");
   assert.match(legacyGuide, /TulipFarm uses a Linear personal API key/);
   assert.equal(files.get("setup-guide.md").toString("utf8"), legacyGuide);
-  assert.match(legacyGuide, /Coming soon/);
+  assert.match(legacyGuide, /Create Connection/);
+  assert.equal(manifest.auth.verification.issuer.value, "https://api.linear.app");
+  assert.equal(manifest.auth.verification.evidence.subject.path, "/data/viewer/id");
   assert.equal(manifest.files?.find(({ role }) => role === "guide")?.path, "setup-guide-oim.md");
 });
 
