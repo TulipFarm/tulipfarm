@@ -8,8 +8,10 @@ const SYSTEM_FIELDS = ["id", "version", "createdAt", "updatedAt", "deletedAt"] a
 const SYSTEM_DATE_NAMES = new Set(["createdAt", "updatedAt", "deletedAt"]);
 const MAX_LIST_COLUMNS = 6;
 
+type JsonSchemaType = "string" | "number" | "integer" | "boolean" | "array" | "object" | "null";
+
 export type JsonSchemaProperty = {
-  type?: "string" | "number" | "integer" | "boolean" | "array" | "object";
+  type?: JsonSchemaType | JsonSchemaType[];
   format?: string;
   enum?: unknown[];
   default?: unknown;
@@ -38,13 +40,14 @@ export type FieldKind =
   | "date"
   | "unknown";
 
-export type SchemaEnumValue = string | number | boolean;
+export type SchemaEnumValue = string | number | boolean | null;
 
 export type FieldDescriptor = {
   name: string;
   kind: FieldKind;
   linkTarget?: string;
   enumValues?: SchemaEnumValue[];
+  hasUnsupportedEnumValues?: boolean;
   isSystem: boolean;
   isIdField: boolean;
   required?: boolean;
@@ -65,6 +68,15 @@ export type RenderedCell =
 
 function isObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function isSchemaEnumValue(value: unknown): value is SchemaEnumValue {
+  return (
+    value === null ||
+    typeof value === "string" ||
+    typeof value === "number" ||
+    typeof value === "boolean"
+  );
 }
 
 // Wraps yaml.parse so a malformed or non-object schema never throws — callers render a contained
@@ -118,13 +130,9 @@ function describe(
     name,
     kind,
     linkTarget: kind === "link" ? prop["x-links"]?.target : undefined,
-    enumValues:
-      kind === "enum"
-        ? (prop.enum ?? []).filter(
-            (value): value is SchemaEnumValue =>
-              typeof value === "string" || typeof value === "number" || typeof value === "boolean"
-          )
-        : undefined,
+    enumValues: kind === "enum" ? (prop.enum ?? []).filter(isSchemaEnumValue) : undefined,
+    hasUnsupportedEnumValues:
+      kind === "enum" ? (prop.enum ?? []).some((value) => !isSchemaEnumValue(value)) : undefined,
     isSystem: (SYSTEM_FIELDS as readonly string[]).includes(name),
     isIdField: name === idField,
     required: required.has(name),
@@ -271,6 +279,27 @@ function formatDateField(field: FieldDescriptor, value: string): string {
   return field.format === "date" ? formatIsoDate(value) : formatIso(value);
 }
 
+function enumValueText(value: unknown): string {
+  if (value === null) return "Null";
+  if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
+    return String(value);
+  }
+  return JSON.stringify(value) ?? String(value);
+}
+
+function enumValueType(value: SchemaEnumValue): string {
+  return value === null ? "null" : typeof value;
+}
+
+export function enumValueLabel(field: FieldDescriptor, value: unknown): string {
+  const text = enumValueText(value);
+  if (!isSchemaEnumValue(value)) return text;
+  const collides = (field.enumValues ?? []).filter(
+    (candidate) => enumValueText(candidate) === text
+  ).length;
+  return collides > 1 ? `${text} (${enumValueType(value)})` : text;
+}
+
 // Best human label for a target record: a hinted field, else the first non-system string, else id.
 // Shared by the x-links combobox (picker) and the detail link (so both show "Acme Corp", not a UUID).
 const LABEL_HINTS = ["name", "title", "label", "summary"];
@@ -293,6 +322,9 @@ export function renderValue(
   value: unknown,
   linkLabels?: Record<string, string>
 ): RenderedCell {
+  if (field.kind === "enum" && value !== undefined) {
+    return { kind: "text", text: enumValueLabel(field, value) };
+  }
   if (value === null || value === undefined || value === "") return { kind: "muted", text: "-" };
 
   switch (field.kind) {
@@ -335,6 +367,9 @@ function isBlank(value: unknown): boolean {
 // Lowercased text used for substring filtering. Mirrors renderValue's per-kind formatting so the
 // filter matches what the user sees (date → formatted, link → label, bool → true/false).
 export function cellText(field: FieldDescriptor, value: unknown): string {
+  if (field.kind === "enum" && value !== undefined) {
+    return enumValueLabel(field, value).toLowerCase();
+  }
   if (isBlank(value)) return "";
   switch (field.kind) {
     case "boolean":
@@ -375,6 +410,8 @@ export function compareValues(field: FieldDescriptor, a: unknown, b: unknown): n
       return new Date(String(a)).getTime() - new Date(String(b)).getTime();
     case "boolean":
       return (a === true ? 1 : 0) - (b === true ? 1 : 0);
+    case "enum":
+      return enumValueLabel(field, a).localeCompare(enumValueLabel(field, b));
     default:
       return String(a).localeCompare(String(b));
   }
