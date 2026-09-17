@@ -125,6 +125,60 @@ describe("Record write service", () => {
     expect(customers.records).toHaveLength(1);
   });
 
+  it.each([
+    [{ metadata: { address: { city: "London", postcode: 123 } } }, "/metadata/address/postcode"],
+    [{ metadata: { address: { postcode: "00123" } } }, "/metadata/address/city"],
+    [
+      { metadata: { address: { city: "London", postcode: "00123", "legacy/code": true } } },
+      "/metadata/address/legacy~1code",
+    ],
+    [
+      { metadata: { contacts: [{ city: "London", postcode: 123 }] } },
+      "/metadata/contacts/0/postcode",
+    ],
+  ])("returns the complete nested validation path without persisting", async (data, path) => {
+    const customers = new MemoryRepo();
+    const address = {
+      type: "object",
+      properties: {
+        city: { type: "string" },
+        postcode: { type: "string" },
+      },
+      required: ["city", "postcode"],
+      additionalProperties: false,
+    };
+    const result = await createRecord(
+      {
+        type: "customer",
+        resource: {
+          schema: {
+            type: "object",
+            properties: {
+              metadata: {
+                type: "object",
+                properties: {
+                  address,
+                  contacts: { type: "array", items: address },
+                },
+                additionalProperties: false,
+              },
+            },
+            required: ["metadata"],
+          },
+        },
+        data,
+      },
+      ports({ customer: customers })
+    );
+
+    expect(result).toMatchObject({
+      ok: false,
+      err: { code: 422, body: { path, boundary: "resource" } },
+    });
+    expect(customers.records).toHaveLength(0);
+    expect(customers.effects).toHaveLength(0);
+  });
+
   it("rejects an impossible calendar date and accepts a valid leap day", async () => {
     const customers = new MemoryRepo();
     const resource = {

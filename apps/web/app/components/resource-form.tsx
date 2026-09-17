@@ -88,8 +88,24 @@ export function writeErrorState(err: unknown): {
 } {
   if (err instanceof ApiError) {
     if (err.status === 422 && err.path) {
-      const name = err.path.replace(/^\//, "").split("/")[0];
-      return { fieldErrors: { [name]: err.message }, formError: "" };
+      const segments = err.path
+        .replace(/^\//, "")
+        .split("/")
+        .map((segment) => segment.replace(/~1/g, "/").replace(/~0/g, "~"));
+      const [name] = segments;
+      if (name) {
+        const path = segments
+          .map((segment, index) => {
+            if (/^(0|[1-9]\d*)$/.test(segment)) return `[${segment}]`;
+            if (/^[A-Za-z_$][A-Za-z0-9_$]*$/.test(segment)) {
+              return index === 0 ? segment : `.${segment}`;
+            }
+            return `[${JSON.stringify(segment)}]`;
+          })
+          .join("");
+        const message = segments.length > 1 ? `${path}: ${err.message}` : err.message;
+        return { fieldErrors: { [name]: message }, formError: "" };
+      }
     }
     if (err.status === 409 && err.code === "version conflict") {
       return {
@@ -234,7 +250,11 @@ export function ResourceForm({
               onValue={(v) => set(field.name, v)}
               onJson={(v) => setJsonText((prev) => ({ ...prev, [field.name]: v }))}
             />
-            {error ? <p className="text-xs text-destructive">{error}</p> : null}
+            {error ? (
+              <p className="text-xs text-destructive" role="alert">
+                {error}
+              </p>
+            ) : null}
           </div>
         );
       })}

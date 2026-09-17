@@ -388,9 +388,19 @@ function ajvErrorPath(error: AjvError): string {
   if (error.keyword === "required") {
     const missing = (error.params as { missingProperty?: unknown }).missingProperty;
     if (typeof missing === "string" && missing.length > 0)
-      return `${error.instancePath}/${missing}`;
+      return `${error.instancePath}/${jsonPointerSegment(missing)}`;
+  }
+  if (error.keyword === "additionalProperties") {
+    const additional = (error.params as { additionalProperty?: unknown }).additionalProperty;
+    if (typeof additional === "string" && additional.length > 0) {
+      return `${error.instancePath}/${jsonPointerSegment(additional)}`;
+    }
   }
   return error.instancePath ?? "";
+}
+
+function jsonPointerSegment(value: string): string {
+  return value.replace(/~/g, "~0").replace(/\//g, "~1");
 }
 
 function emptyRequiredField(
