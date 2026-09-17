@@ -84,6 +84,7 @@ export interface EgressHttpRequest {
   readonly bodyText?: string;
   /** Parts whose bodies are streamed directly to the provider. */
   readonly multipart?: readonly EgressMultipartPart[];
+  readonly multipartSubtype?: "related";
   /** Public DNS answers validated by the destination cage and pinned to this connection. */
   readonly pinnedAddresses?: readonly string[];
   /** Per-operation response bound. A transport may impose a stricter deployment-wide ceiling. */
@@ -112,8 +113,9 @@ export interface EgressHttpPort {
   send(request: EgressHttpRequest): Promise<IntegrationHttpResponse>;
 }
 
-/** Trusted-host-only request overrides used by host-managed pagination. */
+/** Trusted-host-only overrides for pagination and declared content encoding. */
 export interface OpenApiDispatchOptions {
+  readonly preparedBody?: unknown;
   /** Absolute URL replacing the compiled one. The caller must have proved its origin. */
   readonly overrideUrl?: string;
   /** Query parameters added after model arguments, so an Agent cannot shadow them. */
@@ -369,7 +371,7 @@ export class OpenApiToolAdapter implements ToolAdapter {
       query.set(name, value);
     }
 
-    let body = binding.hasBody ? args.body : undefined;
+    let body = options?.preparedBody ?? (binding.hasBody ? args.body : undefined);
     if (body !== undefined && options?.extraBody !== undefined) {
       body = withPointer(body, options.extraBody.pointer, options.extraBody.value);
     }
@@ -414,6 +416,9 @@ export class OpenApiToolAdapter implements ToolAdapter {
         ...(body === undefined ? {} : { body }),
         ...(bodyText === undefined ? {} : { bodyText }),
         ...(options?.multipart === undefined ? {} : { multipart: options.multipart }),
+        ...(binding.multipartSubtype === undefined
+          ? {}
+          : { multipartSubtype: binding.multipartSubtype }),
         ...(options?.binaryResponse === undefined
           ? {}
           : { acceptBinary: true, binaryResponse: options.binaryResponse }),

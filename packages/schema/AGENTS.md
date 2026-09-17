@@ -25,7 +25,7 @@ Run event/request vocabularies, canonical hashes, Secret references, and resourc
 | `src/llm.ts`, `src/model-catalog.ts` | LLM config schema and ModelProfile derivation. |
 | `src/guardrails.ts` | Guardrail policy schema with strict per-stage guard unions. |
 | `src/integration-manifest.ts` | Integration manifest and egress authoring schemas. |
-| `src/oim.ts` | Portable OIM Core/Auth/Ingress and offline fixture schemas, Connection contract, package integrity, and stable Tool identity. |
+| `src/oim.ts` | Portable OIM profiles, fixtures, Connection contract, package integrity, stable Tool identity. Core 1.4 gates bounded MIME JSON and typed multipart/related requests. |
 | `src/network-tools.ts` | Model-visible declarations for governed web and API Tools. |
 | `src/record-delete-tools.ts` | Shared declarations for dependency-aware Record deletion Tools. |
 | `src/canonicalize.ts` | Deterministic canonical JSON and lowercase SHA-256 hashing. |

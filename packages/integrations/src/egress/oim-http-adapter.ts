@@ -12,6 +12,7 @@ import {
   type ToolAdapterRequest,
 } from "@tulipfarm/tool-broker";
 import { type OimHookPhaseRunner, runOimHookPhase } from "../oim-hooks";
+import { boundedFileContent, prepareMimeBody } from "./oim-content";
 import {
   extractOimMultipartFileIds,
   type OimFilePort,
@@ -67,7 +68,8 @@ async function multipartParts(
   businessId: string,
   principalId: string,
   parts: readonly OimMultipartPart[],
-  files: OimFilePort | undefined
+  files: OimFilePort | undefined,
+  maxBytes?: number
 ): Promise<readonly EgressMultipartPart[]> {
   if (
     argumentsValue === null ||
@@ -78,7 +80,12 @@ async function multipartParts(
   }
   const body = (argumentsValue as Record<string, unknown>).body;
   const prepared: (
-    | { readonly name: string; readonly kind: "field"; readonly body: string }
+    | {
+        readonly name: string;
+        readonly kind: "field";
+        readonly body: string;
+        readonly mediaType?: string;
+      }
     | { readonly name: string; readonly kind: "file"; readonly fileId: string }
   )[] = [];
   for (const part of parts) {
@@ -91,7 +98,12 @@ async function multipartParts(
       if (text === undefined || new TextEncoder().encode(text).byteLength > part.maxBytes) {
         throw new AdapterDispatchError("before_dispatch", "invalid_arguments", false);
       }
-      prepared.push({ name: part.name, kind: "field", body: text });
+      prepared.push({
+        name: part.name,
+        kind: "field",
+        body: text,
+        ...(part.mediaType === undefined ? {} : { mediaType: part.mediaType }),
+      });
       continue;
     }
     if (
@@ -106,9 +118,36 @@ async function multipartParts(
   }
 
   const output: EgressMultipartPart[] = [];
+  let remaining = maxBytes;
   for (const part of prepared) {
     if (part.kind === "field") {
-      output.push({ name: part.name, body: part.body });
+      if (remaining !== undefined) {
+        remaining -= Buffer.byteLength(part.body);
+        if (remaining < 0)
+          throw new AdapterDispatchError("before_dispatch", "request_too_large", false);
+      }
+      output.push({
+        name: part.name,
+        body: part.body,
+        ...(part.mediaType === undefined ? {} : { mediaType: part.mediaType }),
+      });
+      continue;
+    }
+    if (remaining !== undefined) {
+      const content = await boundedFileContent(
+        files,
+        { businessId, principalId, fileId: part.fileId },
+        remaining
+      );
+      remaining -= content.bytes.byteLength;
+      output.push({
+        name: part.name,
+        filename: content.filename,
+        mediaType: content.mediaType,
+        body: (async function* () {
+          yield content.bytes;
+        })(),
+      });
       continue;
     }
     if (files === undefined) {
@@ -240,7 +279,7 @@ export class OimHttpToolAdapter implements ToolAdapter {
 
     const multipartBinding = binding.multipart;
     const multipart =
-      multipartBinding === undefined
+      multipartBinding === undefined && binding.mime === undefined
         ? undefined
         : await (async () => {
             let argumentsSnapshot: unknown;
@@ -277,12 +316,26 @@ export class OimHttpToolAdapter implements ToolAdapter {
                 );
               }
             }
+            if (binding.mime !== undefined) {
+              options = {
+                ...options,
+                preparedBody: await prepareMimeBody({
+                  body: (argumentsSnapshot as Record<string, unknown>)?.body,
+                  request,
+                  principalId,
+                  files: this.deps.files,
+                  ...binding.mime,
+                }),
+              };
+              return undefined;
+            }
             return multipartParts(
               argumentsSnapshot,
               request.intent.businessId,
               principalId,
-              multipartBinding,
-              this.deps.files
+              multipartBinding ?? [],
+              this.deps.files,
+              binding.maxRequestBytes
             );
           })();
     if (multipart !== undefined) {

@@ -73,7 +73,9 @@ export class FetchEgressHttp implements EgressHttpPort {
           });
     try {
       const multipart =
-        request.multipart === undefined ? undefined : encodeMultipart(request.multipart);
+        request.multipart === undefined
+          ? undefined
+          : encodeMultipart(request.multipart, request.multipartSubtype);
       response = await this.fetchImpl(request.url, {
         method: request.method,
         headers: {
@@ -84,7 +86,9 @@ export class FetchEgressHttp implements EgressHttpPort {
             : {}),
           ...(multipart === undefined
             ? {}
-            : { "content-type": `multipart/form-data; boundary=${multipart.boundary}` }),
+            : {
+                "content-type": `multipart/${request.multipartSubtype ?? "form-data"}; boundary=${multipart.boundary}`,
+              }),
           ...request.headers,
         },
         ...(multipart !== undefined
@@ -160,12 +164,15 @@ export class FetchEgressHttp implements EgressHttpPort {
   }
 }
 
-function encodeMultipart(parts: readonly EgressMultipartPart[]): {
+function encodeMultipart(
+  parts: readonly EgressMultipartPart[],
+  subtype?: "related"
+): {
   readonly boundary: string;
   readonly body: AsyncIterable<Uint8Array>;
 } {
   const boundary = `tulipfarm-${randomUUID()}`;
-  return { boundary, body: multipartBody(boundary, parts) };
+  return { boundary, body: multipartBody(boundary, parts, subtype) };
 }
 
 function quoted(value: string): string {
@@ -174,15 +181,20 @@ function quoted(value: string): string {
 
 async function* multipartBody(
   boundary: string,
-  parts: readonly EgressMultipartPart[]
+  parts: readonly EgressMultipartPart[],
+  subtype?: "related"
 ): AsyncIterable<Uint8Array> {
   const encode = new TextEncoder();
   for (const part of parts) {
     const disposition = [
       `--${boundary}`,
-      `Content-Disposition: form-data; name="${quoted(part.name)}"${
-        part.filename === undefined ? "" : `; filename="${quoted(part.filename)}"`
-      }`,
+      ...(subtype === "related"
+        ? []
+        : [
+            `Content-Disposition: form-data; name="${quoted(part.name)}"${
+              part.filename === undefined ? "" : `; filename="${quoted(part.filename)}"`
+            }`,
+          ]),
       ...(part.mediaType === undefined ? [] : [`Content-Type: ${part.mediaType}`]),
       "",
       "",

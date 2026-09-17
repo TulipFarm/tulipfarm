@@ -284,6 +284,7 @@ export async function nextPageToken(
     runtimeNow(runtime)
   );
   const mint = async (cursor: string): Promise<string> => {
+    if (!canContinue) throw new OimPaginationError("pagination_bound_exceeded");
     let token: string;
     try {
       token = await runtime.codec.seal({
@@ -316,16 +317,14 @@ export async function nextPageToken(
       neutralTarget === undefined
         ? undefined
         : sameOriginUrl(neutralTarget, currentUrl, context.baseUrl);
-    return resolved === undefined || !canContinue ? undefined : await mint(resolved);
+    return resolved === undefined ? undefined : await mint(resolved);
   }
   if (pagination.type === "page") {
     const start = pagination.start ?? 1;
     const current = session.previousCursor === undefined ? start : Number(session.previousCursor);
     if (!Number.isFinite(current)) return undefined;
     // A page-number provider has no "last page" signal, so an empty page is the only honest stop.
-    return isEmptyPage(body, pagination.itemsPath) || !canContinue
-      ? undefined
-      : await mint(String(current + 1));
+    return isEmptyPage(body, pagination.itemsPath) ? undefined : await mint(String(current + 1));
   }
   const cursor = readPointer(body, pagination.responsePath);
   const next =
@@ -334,7 +333,7 @@ export async function nextPageToken(
       : typeof cursor === "number" && Number.isFinite(cursor)
         ? String(cursor)
         : undefined;
-  if (next === undefined || next.length > MAX_CURSOR_LENGTH || !canContinue) return undefined;
+  if (next === undefined || next.length > MAX_CURSOR_LENGTH) return undefined;
   // Some providers echo the cursor they were given on the last page instead of omitting it. Minting
   // it again would hand the caller a token that fetches the same page forever, and the page cap
   // would be the only thing that ever stopped it.
@@ -392,8 +391,8 @@ export function newProgress(now = Date.now()): OimPaginationProgress {
 /**
  * Records one fetched page and reports whether the iterator may fetch another.
  *
- * Bounds are checked after recording rather than before, so a caller always keeps the page it
- * already paid for and stops cleanly with a continuation token instead of discarding work.
+ * Records the received page before deciding whether another page fits. A provider continuation
+ * after this returns false must be reported as a bound failure, not as a complete result.
  */
 export function recordPage(
   progress: OimPaginationProgress,

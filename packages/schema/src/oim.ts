@@ -13,7 +13,7 @@ import { TeamIdSchema } from "./teams";
 export const OIM_VERSION = "1.0" as const;
 
 export const OIM_PROFILE_VERSIONS = {
-  core: "1.3",
+  core: "1.4",
   auth: "1.1",
   events: "1.0",
   knowledge: "1.2",
@@ -28,7 +28,7 @@ export const OIM_PROFILE_VERSIONS = {
  * promise: a `1.0` package reaching for a `1.1` construct is refused, which is what keeps a
  * version number worth reading on a runtime that only implements `1.0`.
  */
-export const OIM_CORE_PROFILE_VERSIONS = ["1.0", "1.1", "1.2", "1.3"] as const;
+export const OIM_CORE_PROFILE_VERSIONS = ["1.0", "1.1", "1.2", "1.3", "1.4"] as const;
 export const OIM_AUTH_PROFILE_VERSIONS = ["1.0", "1.1"] as const;
 const OIM_KNOWLEDGE_PROFILE_VERSIONS = ["1.0", "1.1", "1.2"] as const;
 
@@ -53,6 +53,8 @@ export const OIM_CORE_1_2_FEATURES = [
 
 /** Constructs added in Core 1.3. */
 export const OIM_CORE_1_3_FEATURES = ["source.type: composite"] as const;
+
+const OIM_CORE_1_4_FEATURES = ["source.mime", "source.multipart.related"] as const;
 
 export const OIM_FILE_ROLES = ["openapi", "graphql", "guide", "hook", "fixture"] as const;
 export const OIM_EFFECT_CLASSES = [
@@ -364,6 +366,7 @@ const MultipartFieldPartSchema = Type.Object(
     kind: Type.Literal("field"),
     pointer: Type.String({ pattern: "^(?:/(?:[^/~]|~[01])*)+$", maxLength: 512 }),
     maxBytes: Type.Integer({ minimum: 1, maximum: 1024 * 1024 }),
+    mediaType: Type.Optional(Type.String({ pattern: "^[\\w.+-]+/[\\w.+-]+$", maxLength: 128 })),
   },
   { additionalProperties: false }
 );
@@ -379,6 +382,8 @@ const MultipartFilePartSchema = Type.Object(
 
 const MultipartSchema = Type.Object(
   {
+    subtype: Type.Optional(Type.Literal("related")),
+    maxBytes: Type.Optional(Type.Integer({ minimum: 1, maximum: 10 * 1024 * 1024 })),
     parts: Type.Array(Type.Union([MultipartFieldPartSchema, MultipartFilePartSchema]), {
       minItems: 1,
       maxItems: 16,
@@ -389,6 +394,14 @@ const MultipartSchema = Type.Object(
 
 const HttpContentTypeSchema = Type.Optional(stringEnum(["json", "form", "multipart"] as const));
 
+const MimeSchema = Type.Object(
+  {
+    outputPointer: Type.String({ pattern: "^(?:/[A-Za-z][A-Za-z0-9_]{0,63}){1,8}$" }),
+    maxBytes: Type.Integer({ minimum: 1, maximum: 10 * 1024 * 1024 }),
+  },
+  { additionalProperties: false }
+);
+
 const HttpSourceSchema = Type.Object(
   {
     type: Type.Literal("http"),
@@ -398,6 +411,7 @@ const HttpSourceSchema = Type.Object(
     parameters: Type.Optional(Type.Array(HttpParameterSchema, { maxItems: 64 })),
     contentType: HttpContentTypeSchema,
     multipart: Type.Optional(MultipartSchema),
+    mime: Type.Optional(MimeSchema),
   },
   { additionalProperties: false }
 );
@@ -3117,6 +3131,7 @@ function oimCoreExtensionIssues(manifest: OimManifest): string[] {
   const used = new Set<string>();
   const core12 = new Set(OIM_CORE_1_2_FEATURES);
   const core13 = new Set(OIM_CORE_1_3_FEATURES);
+  const core14 = new Set<string>(OIM_CORE_1_4_FEATURES);
   const configured = new Map(
     (manifest.auth?.configurationFields ?? []).map((field) => [field.id, field])
   );
@@ -3154,6 +3169,33 @@ function oimCoreExtensionIssues(manifest: OimManifest): string[] {
     }
 
     if (source.type === "http") {
+      if (source.mime !== undefined) {
+        used.add("source.mime");
+        if (
+          operation.requestSchema === undefined ||
+          (source.contentType !== undefined && source.contentType !== "json") ||
+          source.multipart !== undefined ||
+          source.mime.outputPointer
+            .split("/")
+            .some((key) => ["__proto__", "constructor", "prototype"].includes(key))
+        ) {
+          issues.push(
+            `operations: ${operation.id} MIME requires a JSON request schema and a safe output pointer`
+          );
+        }
+      }
+      if (
+        source.multipart?.subtype !== undefined ||
+        source.multipart?.maxBytes !== undefined ||
+        source.multipart?.parts.some(
+          (part) => part.kind === "field" && part.mediaType !== undefined
+        )
+      ) {
+        used.add("source.multipart.related");
+        if (source.multipart.maxBytes === undefined) {
+          issues.push(`operations: ${operation.id} typed multipart requires maxBytes`);
+        }
+      }
       if (source.contentType !== undefined) used.add("source.contentType");
       if (source.contentType === "form") {
         if (operation.requestSchema === undefined) {
@@ -3290,17 +3332,22 @@ function oimCoreExtensionIssues(manifest: OimManifest): string[] {
   );
   const needs11 = [...used].filter(
     (feature) =>
+      !core14.has(feature) &&
       !core13.has(feature as (typeof OIM_CORE_1_3_FEATURES)[number]) &&
       !core12.has(feature as (typeof OIM_CORE_1_2_FEATURES)[number])
   );
   if (needs11.length > 0 && manifest.profiles.core === "1.0") {
     issues.push(`profiles: core "1.1" is required for ${needs11.sort().join(", ")}`);
   }
-  if (needs12.length > 0 && !["1.2", "1.3"].includes(manifest.profiles.core)) {
+  if (needs12.length > 0 && !["1.2", "1.3", "1.4"].includes(manifest.profiles.core)) {
     issues.push(`profiles: core "1.2" is required for ${needs12.sort().join(", ")}`);
   }
-  if (needs13.length > 0 && manifest.profiles.core !== "1.3") {
+  if (needs13.length > 0 && !["1.3", "1.4"].includes(manifest.profiles.core)) {
     issues.push(`profiles: core "1.3" is required for ${needs13.sort().join(", ")}`);
+  }
+  const needs14 = [...used].filter((feature) => core14.has(feature));
+  if (needs14.length > 0 && manifest.profiles.core !== "1.4") {
+    issues.push(`profiles: core "1.4" is required for ${needs14.sort().join(", ")}`);
   }
   return issues;
 }

@@ -118,9 +118,9 @@ beforeAll(async () => {
 describe("P11 catalog provider fixtures", () => {
   it("executes every declared operation fixture through the production adapters", () => {
     expect(providers).toHaveLength(17);
-    expect(caseCount).toBe(140);
-    expect(operationCount).toBe(118);
-    expect(coveredOperationCount).toBe(118);
+    expect(caseCount).toBe(154);
+    expect(operationCount).toBe(130);
+    expect(coveredOperationCount).toBe(130);
 
     expect(failures).toEqual([]);
   });

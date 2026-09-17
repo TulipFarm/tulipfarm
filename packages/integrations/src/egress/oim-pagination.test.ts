@@ -242,7 +242,7 @@ describe("bounds", () => {
     const resumed = await prepareOimPagination(bounded, first, runtime);
     await expect(
       nextPageToken(bounded, resumed, { values: [2], nextCursor: "page-3" }, {}, runtime)
-    ).resolves.toBeUndefined();
+    ).rejects.toMatchObject({ code: "pagination_bound_exceeded" });
   });
 
   it("keeps the page it fetched and reports that iteration must stop", () => {
