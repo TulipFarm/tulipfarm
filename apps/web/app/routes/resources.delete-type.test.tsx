@@ -1,6 +1,7 @@
 import * as remix from "@remix-run/react";
 import { createRemixStub } from "@remix-run/testing";
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import {
   availableColumns,
@@ -105,4 +106,50 @@ test("cancelling the Delete type dialog leaves the type alone", async () => {
   fireEvent.click(within(dialog).getByRole("button", { name: /cancel/i }));
   expect(api.deleteResourceType).not.toHaveBeenCalled();
   expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+});
+
+test("keyboard Cancel closes natively and restores focus to Delete type", async () => {
+  renderList();
+  const opener = screen.getByRole("button", { name: /delete type/i });
+  opener.focus();
+  await userEvent.keyboard("{Enter}");
+
+  const dialog = await screen.findByRole("dialog");
+  const closeDialog = vi.fn(() => {
+    opener.focus();
+    dialog.dispatchEvent(new Event("close"));
+  });
+  dialog.close = closeDialog;
+
+  within(dialog).getByRole("button", { name: "Close" }).focus();
+  await userEvent.tab();
+  expect(within(dialog).getByRole("button", { name: "Cancel" })).toHaveFocus();
+  await userEvent.keyboard("{Enter}");
+
+  expect(closeDialog).toHaveBeenCalledOnce();
+  expect(opener).toHaveFocus();
+  expect(api.deleteResourceType).not.toHaveBeenCalled();
+  expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+});
+
+test("Escape keeps the native focus-restoration path", async () => {
+  renderList();
+  const opener = screen.getByRole("button", { name: /delete type/i });
+  opener.focus();
+  await userEvent.keyboard("{Enter}");
+
+  const dialog = await screen.findByRole("dialog");
+  const closeDialog = vi.fn(() => {
+    opener.focus();
+    dialog.dispatchEvent(new Event("close"));
+  });
+  dialog.close = closeDialog;
+
+  const cancel = new Event("cancel", { cancelable: true });
+  dialog.dispatchEvent(cancel);
+  if (!cancel.defaultPrevented) act(() => dialog.close());
+
+  expect(closeDialog).toHaveBeenCalledOnce();
+  expect(opener).toHaveFocus();
+  expect(api.deleteResourceType).not.toHaveBeenCalled();
 });
