@@ -537,6 +537,7 @@ test("does not require a generic setup lookup after an exact transient failure",
 });
 
 test("renders an exact Connection verification repair after reload", async () => {
+  vi.mocked(getIntegrationOperations).mockReturnValueOnce(new Promise(() => {}));
   vi.mocked(getIntegration).mockResolvedValue(
     detail({ name: "acme-v2", type: "oim", title: "Acme" })
   );
@@ -569,7 +570,9 @@ test("renders an exact Connection verification repair after reload", async () =>
 
   const heading = await screen.findByRole("heading", { name: "Connection needs verification" });
   expect(screen.getByRole("button", { name: "Retry verification" })).toBeInTheDocument();
-  expect(screen.getByRole("status")).toHaveTextContent("verification needs another try");
+  expect(
+    screen.getByText("Connection verification needs another try.", { selector: '[role="status"]' })
+  ).toBeInTheDocument();
   expect(heading).toHaveFocus();
 });
 
@@ -602,9 +605,11 @@ test("recovers missing generic setup with a valid scope, announcement, and focus
   await user.click(await screen.findByRole("button", { name: "Retry setup" }));
 
   const heading = await screen.findByRole("heading", { name: "Add Connection" });
-  expect(screen.getByRole("status")).toHaveTextContent(
-    "Connection setup loaded. Add Connection details."
-  );
+  expect(
+    screen.getByText("Connection setup loaded. Add Connection details.", {
+      selector: '[role="status"]',
+    })
+  ).toBeInTheDocument();
   expect(heading).toHaveFocus();
   expect(screen.getByLabelText("Owner")).toHaveValue("Business");
 
@@ -652,7 +657,9 @@ test("preserves local exact setup when route revalidation cannot reload it", asy
   await waitFor(() => expect(exactSetupAttempts).toBeGreaterThan(1));
   expect(screen.getByTestId("location-search")).toHaveTextContent("?connection=connection-1");
   expect(screen.queryByRole("button", { name: "Retry setup" })).not.toBeInTheDocument();
-  expect(screen.getByRole("status")).toHaveTextContent("Connection added.");
+  expect(
+    screen.getByText("Connection added.", { selector: '[role="status"]' })
+  ).toBeInTheDocument();
   expect(completion).toHaveFocus();
   expect(createOimConnection).toHaveBeenCalledTimes(1);
 });
@@ -723,7 +730,9 @@ test("keeps creation focus and status through the Connection query revalidation"
     expect(screen.getByTestId("location-search")).toHaveTextContent("?connection=connection-1")
   );
   await waitFor(() => expect(vi.mocked(listOimConnections).mock.calls.length).toBeGreaterThan(1));
-  expect(screen.getByRole("status")).toHaveTextContent("Connection added.");
+  expect(
+    screen.getByText("Connection added.", { selector: '[role="status"]' })
+  ).toBeInTheDocument();
   expect(completion).toHaveFocus();
   expect(createOimConnection).toHaveBeenCalledTimes(1);
 });
