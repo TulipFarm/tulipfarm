@@ -3,7 +3,7 @@ import type { PGlite } from "@electric-sql/pglite";
 import { decodeCursor } from "@tulipfarm/storage";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { makeMigratedPglite } from "../test/pglite";
-import { PgResourceRepo, type ResourceDoc } from "./repo";
+import { PgResourceRepo, PgResourceRepoFactory, type ResourceDoc } from "./repo";
 import { createHistoryTableSql, createResourceTableSql } from "./schema";
 
 const TYPE = "ticket";
@@ -63,6 +63,48 @@ describe("PgResourceRepo", () => {
 
   it("returns null for a malformed id without querying the UUID column", async () => {
     expect(await repo.findById("qa-does-not-exist-id")).toBeNull();
+  });
+
+  it("finds only live Records whose link field exactly matches the target id", async () => {
+    const targetId = randomUUID();
+    const match = doc({ customerId: targetId });
+    await repo.insert(match);
+    await repo.insert(doc({ customerId: randomUUID() }));
+    await repo.insert(doc({ customerId: targetId, deletedAt: new Date() }));
+
+    const dependents = await repo.findDependents("customerId", targetId, 10);
+
+    expect(dependents.map((dependent) => dependent._id)).toEqual([match._id]);
+  });
+
+  it("rolls back all ambient repository writes when a dependency transaction fails", async () => {
+    const first = doc({ title: "first" });
+    const second = doc({ title: "second" });
+    await repo.insert(first);
+    await repo.insert(second);
+    const factory = new PgResourceRepoFactory(db);
+
+    await expect(
+      factory.withTransaction([TYPE], async (repositories) => {
+        const ambient = repositories.forType(TYPE);
+        await ambient.replaceOne(
+          first._id,
+          1,
+          { ...first, version: 2, title: "changed" },
+          "update"
+        );
+        await ambient.replaceOne(
+          second._id,
+          99,
+          { ...second, version: 2, title: "not changed" },
+          "update"
+        );
+        throw new Error("stale dependency plan");
+      })
+    ).rejects.toThrow("stale dependency plan");
+
+    expect((await repo.findById(first._id))?.title).toBe("first");
+    expect((await repo.findById(second._id))?.title).toBe("second");
   });
 
   it("list excludes soft-deleted by default and includes them on demand", async () => {

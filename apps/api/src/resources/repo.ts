@@ -55,6 +55,7 @@ export interface ResourceRepo {
     sideEffect: ResourceSideEffect
   ): Promise<{ readonly created: boolean; readonly doc: ResourceDoc }>;
   findById(id: string): Promise<ResourceDoc | null>;
+  findDependents?(field: string, targetId: string, limit: number): Promise<readonly ResourceDoc[]>;
   list(opts: ListOpts): Promise<PaginatedResult<ResourceDoc>>;
   search(opts: SearchOpts): Promise<PaginatedResult<ResourceDoc>>;
   replaceOne(
@@ -82,6 +83,10 @@ export interface ResourceRepo {
 /** Builds a `ResourceRepo` bound to a resource type's table (per-request, dynamic type). */
 export interface ResourceRepoFactory {
   forType(type: string): ResourceRepo;
+  withTransaction?<T>(
+    lockedTypes: readonly string[],
+    operation: (repositories: ResourceRepoFactory) => Promise<T>
+  ): Promise<T>;
 }
 
 /** Display-id counter source (yields a `@tulipfarm/schema` `CounterFn`). */
@@ -97,7 +102,8 @@ export class PgResourceRepo implements ResourceRepo {
 
   constructor(
     private readonly q: Queryable,
-    private readonly type: string
+    private readonly type: string,
+    private readonly ambient = false
   ) {
     this.table = tableName(type);
     this.historyTable = historyTableName(type);
@@ -106,7 +112,7 @@ export class PgResourceRepo implements ResourceRepo {
   async insert(doc: ResourceDoc, sideEffect?: ResourceSideEffect): Promise<void> {
     const { _id, version, createdAt, updatedAt, deletedAt, ...data } = doc;
     await withUniqueTranslation(() =>
-      withTransaction(this.q, async (tx) => {
+      this.inTransaction(async (tx) => {
         await tx.query(
           `INSERT INTO ${this.table} (id, version, created_at, updated_at, deleted_at, data)
            VALUES ($1, $2, $3, $4, $5, $6::jsonb)`,
@@ -124,7 +130,7 @@ export class PgResourceRepo implements ResourceRepo {
     sideEffect: ResourceSideEffect
   ): Promise<{ readonly created: boolean; readonly doc: ResourceDoc }> {
     return withUniqueTranslation(() =>
-      withTransaction(this.q, async (tx) => {
+      this.inTransaction(async (tx) => {
         const claimed = await tx.query<{ resource_id: string }>(
           `INSERT INTO resource_create_requests (resource_type, caller_id, idempotency_key, resource_id)
          VALUES ($1, $2, $3, $4)
@@ -167,6 +173,22 @@ export class PgResourceRepo implements ResourceRepo {
       [id]
     );
     return rows[0] ? rowToResourceDoc(rows[0]) : null;
+  }
+
+  async findDependents(
+    field: string,
+    targetId: string,
+    limit: number
+  ): Promise<readonly ResourceDoc[]> {
+    const { rows } = await this.q.query(
+      `SELECT id, version, created_at, updated_at, deleted_at, data
+         FROM ${this.table}
+        WHERE deleted_at IS NULL AND data->>$1 = $2
+        ORDER BY id
+        LIMIT $3`,
+      [field, targetId, limit]
+    );
+    return rows.map(rowToResourceDoc);
   }
 
   async list(opts: ListOpts): Promise<PaginatedResult<ResourceDoc>> {
@@ -219,7 +241,7 @@ export class PgResourceRepo implements ResourceRepo {
     if (!UUID_RE.test(id)) return false;
     const { _id, version, createdAt, updatedAt, deletedAt, ...data } = doc;
     return withUniqueTranslation(() =>
-      withTransaction(this.q, async (tx) => {
+      this.inTransaction(async (tx) => {
         const { rows } = await tx.query(
           `UPDATE ${this.table}
            SET version = $1, created_at = $2, updated_at = $3, deleted_at = $4, data = $5::jsonb
@@ -277,13 +299,34 @@ export class PgResourceRepo implements ResourceRepo {
       [entry._id, entry.resourceId, entry.operation, JSON.stringify(entry.snapshot), entry.at]
     );
   }
+
+  private inTransaction<T>(operation: (tx: Queryable) => Promise<T>): Promise<T> {
+    return this.ambient ? operation(this.q) : withTransaction(this.q, operation);
+  }
 }
 
 export class PgResourceRepoFactory implements ResourceRepoFactory {
-  constructor(private readonly q: Queryable) {}
+  constructor(
+    private readonly q: Queryable,
+    private readonly ambient = false
+  ) {}
 
   forType(type: string): ResourceRepo {
-    return new PgResourceRepo(this.q, type);
+    return new PgResourceRepo(this.q, type, this.ambient);
+  }
+
+  withTransaction<T>(
+    lockedTypes: readonly string[],
+    operation: (repositories: ResourceRepoFactory) => Promise<T>
+  ): Promise<T> {
+    if (this.ambient) return operation(this);
+    return withTransaction(this.q, async (tx) => {
+      const tables = Array.from(new Set(lockedTypes)).sort().map(tableName);
+      if (tables.length > 0) {
+        await tx.query(`LOCK TABLE ${tables.join(", ")} IN SHARE ROW EXCLUSIVE MODE`);
+      }
+      return operation(new PgResourceRepoFactory(tx, true));
+    });
   }
 }
 

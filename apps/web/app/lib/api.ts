@@ -51,6 +51,19 @@ export type RecordPage = {
   nextCursor: string | null;
 };
 
+export type ResourceDeletePlanRecord = {
+  type: string;
+  id: string;
+  version: number;
+};
+
+export type ResourceDeletePlan = {
+  id: string;
+  root: ResourceDeletePlanRecord;
+  records: ResourceDeletePlanRecord[];
+  restrictedBy: ResourceDeletePlanRecord[];
+};
+
 /**
  * How long a settled catalog read stays reusable. Long enough to cover consumers that mount a few
  * hundred milliseconds apart during one page load, short enough that a catalog changed by an agent
@@ -475,7 +488,32 @@ export async function updateRecord(
 
 // Soft-delete a record with optimistic concurrency. `version` is sent as `If-Match`; a stale version
 // yields ApiError(409). The API soft-deletes (history preserved); returns 204 (void).
-export async function deleteRecord(type: string, id: string, version: number): Promise<void> {
+export async function previewRecordDelete(
+  type: string,
+  id: string,
+  version: number
+): Promise<ResourceDeletePlan> {
+  return apiWrite<ResourceDeletePlan>(
+    "POST",
+    `/api/v1/resources/${encodeURIComponent(type)}/${encodeURIComponent(id)}/delete-preview`,
+    { version }
+  );
+}
+
+export async function deleteRecord(
+  type: string,
+  id: string,
+  version: number,
+  plan?: ResourceDeletePlan
+): Promise<void> {
+  if (plan !== undefined) {
+    return apiSend(
+      "POST",
+      `/api/v1/resources/${encodeURIComponent(type)}/${encodeURIComponent(id)}/delete`,
+      plan,
+      version
+    );
+  }
   return apiDelete(
     `/api/v1/resources/${encodeURIComponent(type)}/${encodeURIComponent(id)}`,
     version

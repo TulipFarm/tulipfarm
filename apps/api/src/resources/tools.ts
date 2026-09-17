@@ -2,12 +2,19 @@ import type { EventEmitter } from "node:events";
 import {
   createRecord,
   deleteRecord,
+  previewRecordDelete,
   ResourceBeforeHookError,
+  type ResourceDeletePlan,
+  ResourceDeletePlanLimitError,
   type ResourceWritePorts,
   updateRecord,
 } from "@tulipfarm/resources";
 import { HookError, type HookExecutor } from "@tulipfarm/sandbox";
-import { ajv } from "@tulipfarm/schema";
+import {
+  ajv,
+  RECORD_DELETE_PREVIEW_TOOL_DECLARATION,
+  RECORD_DELETE_TOOL_DECLARATION,
+} from "@tulipfarm/schema";
 import type { SoulLoader } from "@tulipfarm/soul";
 import { parsePaginationQuery } from "@tulipfarm/storage";
 import { type ApiToolDefinition, defineApiTool, err, ok } from "@tulipfarm/tool-host";
@@ -23,6 +30,12 @@ export interface ResourceToolContext {
   soulLoader: SoulLoader;
   hookExecutor?: HookExecutor;
   events?: EventEmitter;
+  authorizeRecord?: (
+    userId: string,
+    action: "record.read" | "record.delete",
+    type: string,
+    id: string
+  ) => Promise<boolean>;
 }
 
 export interface ResourceServices {
@@ -31,6 +44,7 @@ export interface ResourceServices {
   soulLoader: SoulLoader;
   hookExecutor?: HookExecutor;
   events?: EventEmitter;
+  authorizeRecord?: ResourceToolContext["authorizeRecord"];
 }
 
 function resourceWritePorts(ctx: ResourceToolContext): ResourceWritePorts {
@@ -102,6 +116,24 @@ function recordAndRecordIdTargets(args: unknown, ctx?: ResourceToolContext): Tar
   return targets;
 }
 
+function deletePlanTargets(args: unknown, ctx?: ResourceToolContext): TargetRef[] {
+  const targets = recordAndRecordIdTargets(args, ctx);
+  const plan = objectArg(args).plan;
+  if (typeof plan !== "object" || plan === null) return targets;
+  const records = (plan as { records?: unknown }).records;
+  if (!Array.isArray(records)) return targets;
+  for (const record of records) {
+    if (typeof record !== "object" || record === null) continue;
+    const type = stringArg(record, "type");
+    const id = stringArg(record, "id");
+    if (type === undefined || id === undefined) continue;
+    const domain = resourceDomain(ctx, type);
+    targets.push({ type: "record", id: type, ...(domain === undefined ? {} : { domain }) });
+    targets.push({ type: `record.${type}`, id, ...(domain === undefined ? {} : { domain }) });
+  }
+  return targets;
+}
+
 const CREATE_SCHEMA = {
   type: "object",
   required: ["type", "data"],
@@ -154,16 +186,7 @@ const UPDATE_SCHEMA = {
   },
 } as const;
 
-const DELETE_SCHEMA = {
-  type: "object",
-  required: ["type", "id", "version"],
-  additionalProperties: false,
-  properties: {
-    type: { type: "string", minLength: 1 },
-    id: { type: "string", minLength: 1 },
-    version: { type: "number", description: "Current record version (optimistic concurrency)." },
-  },
-} as const;
+const DELETE_SCHEMA = RECORD_DELETE_TOOL_DECLARATION.inputSchema;
 
 const SEARCH_SCHEMA = {
   type: "object",
@@ -213,6 +236,7 @@ const validateList = ajv.compile(LIST_SCHEMA);
 const validateGet = ajv.compile(GET_SCHEMA);
 const validateUpdate = ajv.compile(UPDATE_SCHEMA);
 const validateDelete = ajv.compile(DELETE_SCHEMA);
+const validateDeletePreview = ajv.compile(RECORD_DELETE_PREVIEW_TOOL_DECLARATION.inputSchema);
 const validateSearch = ajv.compile(SEARCH_SCHEMA);
 const validateSimilar = ajv.compile(SIMILAR_SCHEMA);
 
@@ -386,33 +410,43 @@ const resourceUpdate = defineApiTool<ResourceToolContext>({
 });
 
 const resourceDelete = defineApiTool<ResourceToolContext>({
-  name: "record_delete",
-  description:
-    "Soft-delete a record. Requires version for optimistic concurrency. Record remains in history.",
-  mutating: true,
+  ...RECORD_DELETE_TOOL_DECLARATION,
   tier: "system",
-  inputSchema: DELETE_SCHEMA,
   authorization: {
     action: "record.delete",
     resources: ["record"],
-    targets: recordAndRecordIdTargets,
+    targets: deletePlanTargets,
     dataClasses: ["business_record"],
   },
   handler: async (args, ctx) => {
     if (!validateDelete(args)) return err("validation_error", firstError(validateDelete.errors));
-    const { type, id, version } = args as { type: string; id: string; version: number };
+    const { type, id, version, plan } = args as {
+      type: string;
+      id: string;
+      version: number;
+      plan?: ResourceDeletePlan;
+    };
 
     const resourceDef = ctx.soulLoader.resources.get(type);
     if (!resourceDef) return err("not_found", `resource type not found: ${type}`);
 
     try {
       const deleted = await deleteRecord(
-        { type, resource: resourceDef, id, expectedVersion: version },
+        {
+          type,
+          resource: resourceDef,
+          id,
+          expectedVersion: version,
+          ...(plan === undefined ? {} : { plan }),
+        },
         resourceWritePorts(ctx)
       );
       if (!deleted.ok)
         return err(
-          deleted.err.code === 422 ? "validation_error" : "not_found",
+          deleted.err.code === 422 ||
+            (deleted.err.code === 409 && deleted.err.body.error !== "version conflict")
+            ? "validation_error"
+            : "not_found",
           deleted.err.body.error
         );
       await deliverImmediatelyWhenUndurable(
@@ -421,9 +455,58 @@ const resourceDelete = defineApiTool<ResourceToolContext>({
         ctx.hookExecutor,
         ctx.events
       );
+      for (const write of deleted.additionalWrites ?? []) {
+        await deliverImmediatelyWhenUndurable(
+          write.repo,
+          write.sideEffect,
+          ctx.hookExecutor,
+          ctx.events
+        );
+      }
       return ok({ id });
     } catch (e) {
       return err("internal_error", reason(e));
+    }
+  },
+});
+
+const resourceDeletePreview = defineApiTool<ResourceToolContext>({
+  ...RECORD_DELETE_PREVIEW_TOOL_DECLARATION,
+  tier: "system",
+  authorization: {
+    action: "record.read",
+    resources: ["record"],
+    targets: recordAndRecordIdTargets,
+    dataClasses: ["business_record"],
+  },
+  handler: async (args, ctx) => {
+    if (!validateDeletePreview(args)) {
+      return err("validation_error", firstError(validateDeletePreview.errors));
+    }
+    const { type, id, version } = args as { type: string; id: string; version: number };
+    if (!ctx.soulLoader.resources.has(type)) {
+      return err("not_found", `resource type not found: ${type}`);
+    }
+    if (ctx.authorizeRecord === undefined) {
+      return err("internal_error", "record dependency preview authorization is unavailable");
+    }
+    try {
+      const preview = await previewRecordDelete(
+        { type, id, expectedVersion: version },
+        resourceWritePorts(ctx)
+      );
+      if (!preview.ok) return err("not_found", preview.err.body.error);
+      for (const record of [...preview.plan.records, ...preview.plan.restrictedBy]) {
+        if (!(await ctx.authorizeRecord(ctx.userId, "record.read", record.type, record.id))) {
+          return err("write_denied", "record dependency preview is not authorized");
+        }
+      }
+      return ok(preview.plan);
+    } catch (error) {
+      if (error instanceof ResourceDeletePlanLimitError) {
+        return err("validation_error", error.message);
+      }
+      return err("internal_error", reason(error));
     }
   },
 });
@@ -520,6 +603,7 @@ export const RESOURCE_TOOLS: ApiToolDefinition<ResourceToolContext>[] = [
   resourceGet,
   resourceUpdate,
   resourceDelete,
+  resourceDeletePreview,
   resourceSearch,
   resourceFindSimilar,
 ];

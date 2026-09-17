@@ -127,7 +127,7 @@ const CREATE_SCHEMA = {
       type: "string",
       minLength: 1,
       description:
-        'JSON Schema as a YAML string. For a link field, use exactly x-links: { target: "customer" }, where "customer" is an existing Resource type name.',
+        'JSON Schema as a YAML string. A link uses x-links: { target: "customer" }. Add onDelete: "restrict" to block target deletion or onDelete: "cascade" to require an exact dependency preview before cascading.',
     },
   },
 } as const;
@@ -193,7 +193,8 @@ const UPDATE_SCHEMA = {
     schema: {
       type: "string",
       minLength: 1,
-      description: "New JSON Schema as a YAML string (replaces existing).",
+      description:
+        'New JSON Schema as a YAML string (replaces existing). Link fields may declare x-links.onDelete as "restrict" or "cascade"; omission preserves dangling links.',
     },
   },
 } as const;

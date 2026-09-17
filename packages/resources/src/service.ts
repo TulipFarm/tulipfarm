@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import type { CounterFn } from "@tulipfarm/schema";
 import { ajv, applyTransforms, TulipFarmValidationError } from "@tulipfarm/schema";
 import type { ResourceMutationKind, ResourceSideEffect } from "@tulipfarm/storage";
@@ -21,6 +21,8 @@ export interface ResourceDefinition {
 
 export interface ResourceCatalog {
   has(type: string): boolean;
+  get(type: string): ResourceDefinition | undefined;
+  entries(): IterableIterator<[string, ResourceDefinition]>;
 }
 
 export interface ResourceRepo {
@@ -31,6 +33,7 @@ export interface ResourceRepo {
     sideEffect: ResourceSideEffect
   ): Promise<{ readonly created: boolean; readonly doc: ResourceDoc }>;
   findById(id: string): Promise<ResourceDoc | null>;
+  findDependents?(field: string, targetId: string, limit: number): Promise<readonly ResourceDoc[]>;
   replaceOne(
     id: string,
     expected: number,
@@ -43,6 +46,10 @@ export interface ResourceRepo {
 
 export interface ResourceRepoFactory {
   forType(type: string): ResourceRepo;
+  withTransaction?<T>(
+    lockedTypes: readonly string[],
+    operation: (repositories: ResourceRepoFactory) => Promise<T>
+  ): Promise<T>;
 }
 
 export interface ResourceBeforeHook {
@@ -81,6 +88,11 @@ export type ResourceWriteResult =
       sideEffect: ResourceSideEffect;
       replayed: boolean;
       repo: ResourceRepo;
+      additionalWrites?: readonly {
+        doc: ResourceDoc;
+        sideEffect: ResourceSideEffect;
+        repo: ResourceRepo;
+      }[];
     }
   | { ok: false; err: ResourceWriteError<404 | 409 | 422> };
 
@@ -93,6 +105,22 @@ type CreateRecordResult =
       repo: ResourceRepo;
     }
   | { ok: false; err: ResourceWriteError<409 | 422> };
+
+export interface ResourceDeletePlanRecord {
+  readonly type: string;
+  readonly id: string;
+  readonly version: number;
+}
+
+export interface ResourceDeletePlan {
+  readonly id: string;
+  readonly root: ResourceDeletePlanRecord;
+  readonly records: readonly ResourceDeletePlanRecord[];
+  readonly restrictedBy: readonly ResourceDeletePlanRecord[];
+}
+
+export class ResourceDeletePlanLimitError extends Error {}
+class ResourceDeleteStaleError extends Error {}
 
 export async function createRecord(
   input: {
@@ -174,10 +202,36 @@ export async function deleteRecord(
     resource: ResourceDefinition;
     id: string;
     expectedVersion: number;
+    plan?: ResourceDeletePlan;
     actorId?: string;
   },
   ports: ResourceWritePorts
 ): Promise<ResourceWriteResult> {
+  const deletionCatalog = deletionPolicyCatalog(ports.catalog);
+  if (deletionCatalog.hasPolicies) {
+    if (!ports.repositories.withTransaction) {
+      throw new Error("resource repository does not support dependency-safe deletion");
+    }
+    try {
+      return await ports.repositories.withTransaction(
+        Array.from(new Set([input.type, ...deletionCatalog.types])).sort(),
+        async (repositories) =>
+          deleteWithDependencies(input, {
+            ...ports,
+            repositories,
+          })
+      );
+    } catch (error) {
+      if (error instanceof ResourceDeleteStaleError) {
+        return {
+          ok: false,
+          err: { code: 409, body: { error: "delete dependency preview is stale" } },
+        };
+      }
+      throw error;
+    }
+  }
+
   const repo = ports.repositories.forType(input.type);
   const existing = await loadForWrite(repo, input.id, input.expectedVersion);
   if (!existing.ok) return existing;
@@ -199,6 +253,240 @@ export async function deleteRecord(
   const deleted = await repo.replaceOne(input.id, existing.doc.version, doc, "delete", sideEffect);
   if (!deleted) return conflict();
   return { ok: true, doc, sideEffect, replayed: false, repo };
+}
+
+export async function previewRecordDelete(
+  input: {
+    type: string;
+    id: string;
+    expectedVersion: number;
+  },
+  ports: ResourceWritePorts
+): Promise<
+  { ok: true; plan: ResourceDeletePlan } | { ok: false; err: ResourceWriteError<404 | 409> }
+> {
+  const root = await loadForWrite(
+    ports.repositories.forType(input.type),
+    input.id,
+    input.expectedVersion
+  );
+  if (!root.ok) return root;
+  return {
+    ok: true,
+    plan: await buildDeletePlan(
+      { type: input.type, doc: root.doc },
+      ports.catalog,
+      ports.repositories
+    ),
+  };
+}
+
+async function deleteWithDependencies(
+  input: {
+    type: string;
+    resource: ResourceDefinition;
+    id: string;
+    expectedVersion: number;
+    plan?: ResourceDeletePlan;
+    actorId?: string;
+  },
+  ports: ResourceWritePorts
+): Promise<ResourceWriteResult> {
+  const preview = await previewRecordDelete(input, ports);
+  if (!preview.ok) return preview;
+  const plan = preview.plan;
+  if (plan.restrictedBy.length > 0) {
+    return {
+      ok: false,
+      err: { code: 409, body: { error: "record has restricted delete dependencies" } },
+    };
+  }
+  if (plan.records.length > 1 && input.plan === undefined) {
+    return {
+      ok: false,
+      err: { code: 409, body: { error: "delete dependency preview required" } },
+    };
+  }
+  if (input.plan !== undefined && !sameDeletePlan(input.plan, plan)) {
+    return {
+      ok: false,
+      err: { code: 409, body: { error: "delete dependency preview is stale" } },
+    };
+  }
+
+  const now = ports.now?.() ?? new Date();
+  const writes: Array<{ doc: ResourceDoc; sideEffect: ResourceSideEffect; repo: ResourceRepo }> =
+    [];
+  for (const record of plan.records) {
+    const resource = ports.catalog.get(record.type);
+    if (!resource) {
+      return {
+        ok: false,
+        err: { code: 409, body: { error: "delete dependency preview is stale" } },
+      };
+    }
+    const repo = ports.repositories.forType(record.type);
+    const existing = await loadForWrite(repo, record.id, record.version);
+    if (!existing.ok) {
+      return {
+        ok: false,
+        err: { code: 409, body: { error: "delete dependency preview is stale" } },
+      };
+    }
+    const hook = await runBeforeHook(
+      resource,
+      record.type,
+      toRecord(existing.doc),
+      ports.beforeHook
+    );
+    if (!hook.ok) return hook;
+    const doc = {
+      ...existing.doc,
+      version: existing.doc.version + 1,
+      updatedAt: now,
+      deletedAt: now,
+    };
+    writes.push({
+      doc,
+      sideEffect: resourceSideEffect("delete", resource, record.type, doc, input.actorId),
+      repo,
+    });
+  }
+
+  for (const [index, write] of writes.entries()) {
+    const expected = plan.records[index];
+    if (!expected) throw new Error("delete plan/write mismatch");
+    const deleted = await write.repo.replaceOne(
+      expected.id,
+      expected.version,
+      write.doc,
+      "delete",
+      write.sideEffect
+    );
+    if (!deleted) {
+      throw new ResourceDeleteStaleError();
+    }
+  }
+
+  const rootWrite = writes.find((write) => write.doc._id === plan.root.id);
+  if (!rootWrite) throw new Error("delete plan omitted root record");
+  return {
+    ok: true,
+    doc: rootWrite.doc,
+    sideEffect: rootWrite.sideEffect,
+    repo: rootWrite.repo,
+    replayed: false,
+    additionalWrites: writes.filter((write) => write !== rootWrite),
+  };
+}
+
+async function buildDeletePlan(
+  root: { type: string; doc: ResourceDoc },
+  catalog: ResourceCatalog,
+  repositories: ResourceRepoFactory
+): Promise<ResourceDeletePlan> {
+  const policies = Array.from(catalog.entries()).flatMap(([sourceType, resource]) =>
+    extractLinks(resource.schema).flatMap((link) =>
+      link.onDelete === undefined ? [] : [{ sourceType, ...link, onDelete: link.onDelete }]
+    )
+  );
+  const records = new Map<string, ResourceDeletePlanRecord>();
+  const restricted = new Map<string, ResourceDeletePlanRecord>();
+  const queue: Array<{ type: string; doc: ResourceDoc; depth: number }> = [
+    { type: root.type, doc: root.doc, depth: 0 },
+  ];
+  records.set(recordKey(root.type, root.doc._id), planRecord(root.type, root.doc));
+
+  while (queue.length > 0) {
+    const current = queue.shift();
+    if (!current) break;
+    for (const policy of policies) {
+      if (policy.target !== current.type) continue;
+      const repo = repositories.forType(policy.sourceType);
+      if (!repo.findDependents) {
+        throw new Error("resource repository does not support dependency lookup");
+      }
+      const dependents = await repo.findDependents(policy.field, current.doc._id, 102);
+      for (const dependent of dependents) {
+        if (dependent.deletedAt !== undefined) continue;
+        const key = recordKey(policy.sourceType, dependent._id);
+        const record = planRecord(policy.sourceType, dependent);
+        if (policy.onDelete === "restrict") {
+          restricted.set(key, record);
+          continue;
+        }
+        if (records.has(key)) continue;
+        if (records.size >= 100) {
+          throw new ResourceDeletePlanLimitError("delete dependency plan exceeds 100 records");
+        }
+        if (current.depth >= 20) {
+          throw new ResourceDeletePlanLimitError("delete dependency plan exceeds 20 levels");
+        }
+        records.set(key, record);
+        queue.push({ type: policy.sourceType, doc: dependent, depth: current.depth + 1 });
+      }
+    }
+  }
+
+  for (const key of records.keys()) restricted.delete(key);
+  const rootRecord = planRecord(root.type, root.doc);
+  const planned = [
+    rootRecord,
+    ...Array.from(records.values())
+      .filter((record) => recordKey(record.type, record.id) !== recordKey(root.type, root.doc._id))
+      .sort(comparePlanRecords),
+  ];
+  const restrictedBy = Array.from(restricted.values()).sort(comparePlanRecords);
+  return {
+    id: deletePlanId(rootRecord, planned, restrictedBy),
+    root: rootRecord,
+    records: planned,
+    restrictedBy,
+  };
+}
+
+function deletionPolicyCatalog(catalog: ResourceCatalog): {
+  hasPolicies: boolean;
+  types: string[];
+} {
+  const entries = Array.from(catalog.entries());
+  return {
+    hasPolicies: entries.some(([, resource]) =>
+      extractLinks(resource.schema).some((link) => link.onDelete !== undefined)
+    ),
+    types: entries.map(([type]) => type),
+  };
+}
+
+function planRecord(type: string, doc: ResourceDoc): ResourceDeletePlanRecord {
+  return { type, id: doc._id, version: doc.version };
+}
+
+function recordKey(type: string, id: string): string {
+  return `${type}\u0000${id}`;
+}
+
+function comparePlanRecords(a: ResourceDeletePlanRecord, b: ResourceDeletePlanRecord): number {
+  return a.type.localeCompare(b.type) || a.id.localeCompare(b.id);
+}
+
+function deletePlanId(
+  root: ResourceDeletePlanRecord,
+  records: readonly ResourceDeletePlanRecord[],
+  restrictedBy: readonly ResourceDeletePlanRecord[]
+): string {
+  return createHash("sha256").update(JSON.stringify({ root, records, restrictedBy })).digest("hex");
+}
+
+function sameDeletePlan(
+  expected: ResourceDeletePlan | undefined,
+  actual: ResourceDeletePlan
+): boolean {
+  return (
+    expected !== undefined &&
+    expected.id === actual.id &&
+    deletePlanId(expected.root, expected.records, expected.restrictedBy) === expected.id
+  );
 }
 
 async function prepareData(
@@ -369,7 +657,9 @@ function stripImmutable(
   return out;
 }
 
-function extractLinks(schema: Record<string, unknown>): Array<{ field: string; target: string }> {
+function extractLinks(
+  schema: Record<string, unknown>
+): Array<{ field: string; target: string; onDelete?: "restrict" | "cascade" }> {
   const properties = (schema.properties ?? {}) as Record<string, Record<string, unknown>>;
   return Object.entries(properties).flatMap(([field, property]) => {
     const links = property["x-links"];
@@ -377,7 +667,16 @@ function extractLinks(schema: Record<string, unknown>): Array<{ field: string; t
       typeof links === "object" &&
       !Array.isArray(links) &&
       typeof (links as { target?: unknown }).target === "string"
-      ? [{ field, target: (links as { target: string }).target }]
+      ? [
+          {
+            field,
+            target: (links as { target: string }).target,
+            ...((links as { onDelete?: unknown }).onDelete === "restrict" ||
+            (links as { onDelete?: unknown }).onDelete === "cascade"
+              ? { onDelete: (links as { onDelete: "restrict" | "cascade" }).onDelete }
+              : {}),
+          },
+        ]
       : [];
   });
 }
