@@ -125,6 +125,72 @@ describe("Record write service", () => {
     expect(customers.records).toHaveLength(1);
   });
 
+  it("rejects an impossible calendar date and accepts a valid leap day", async () => {
+    const customers = new MemoryRepo();
+    const resource = {
+      schema: {
+        type: "object",
+        properties: { joinedOn: { type: "string", format: "date" } },
+        required: ["joinedOn"],
+      },
+    };
+    const writePorts = ports({ customer: customers });
+
+    const invalid = await createRecord(
+      { type: "customer", resource, data: { joinedOn: "2026-02-30" } },
+      writePorts
+    );
+    expect(invalid).toMatchObject({
+      ok: false,
+      err: { code: 422, body: { path: "/joinedOn", boundary: "resource" } },
+    });
+    expect(customers.records).toHaveLength(0);
+
+    const valid = await createRecord(
+      { type: "customer", resource, data: { joinedOn: "2024-02-29" } },
+      writePorts
+    );
+    expect(valid).toMatchObject({ ok: true, doc: { joinedOn: "2024-02-29", version: 1 } });
+  });
+
+  it("rejects an impossible calendar date update without changing the Record", async () => {
+    const customers = new MemoryRepo();
+    customers.records.set("customer-1", {
+      _id: "customer-1",
+      version: 1,
+      createdAt: new Date("2025-01-01T00:00:00.000Z"),
+      updatedAt: new Date("2025-01-01T00:00:00.000Z"),
+      joinedOn: "2024-02-29",
+    });
+
+    const result = await updateRecord(
+      {
+        type: "customer",
+        resource: {
+          schema: {
+            type: "object",
+            properties: { joinedOn: { type: "string", format: "date" } },
+            required: ["joinedOn"],
+          },
+        },
+        id: "customer-1",
+        expectedVersion: 1,
+        data: { joinedOn: "2026-02-30" },
+        mode: "patch",
+      },
+      ports({ customer: customers })
+    );
+
+    expect(result).toMatchObject({
+      ok: false,
+      err: { code: 422, body: { path: "/joinedOn", boundary: "resource" } },
+    });
+    expect(customers.records.get("customer-1")).toMatchObject({
+      joinedOn: "2024-02-29",
+      version: 1,
+    });
+  });
+
   it("revalidates a before-hook output and leaves immutable fields unchanged", async () => {
     const tickets = new MemoryRepo();
     tickets.records.set("ticket-1", {

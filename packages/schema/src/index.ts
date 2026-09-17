@@ -5,7 +5,7 @@ export {
   AUTONOMY_VALUES,
   validateAgentFrontmatter,
 } from "./agent";
-export { ajv } from "./ajv";
+export { ajv, isValidCalendarDate } from "./ajv";
 export type {
   ArtifactCompanion,
   ArtifactKind,

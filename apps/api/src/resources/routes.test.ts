@@ -162,6 +162,7 @@ const TICKET_SCHEMA = {
     title: { type: "string" },
     priority: { type: "string", enum: ["low", "high"] },
     email: { type: "string", format: "email" },
+    joinedOn: { type: "string", format: "date" },
   },
   required: ["title"],
 };
@@ -295,6 +296,33 @@ describe("resource routes", () => {
 
       expect(res.statusCode).toBe(201);
       expect(res.json<{ email: string }>().email).toBe("muskan@example.com");
+    });
+
+    it("validates calendar dates and does not persist an impossible date", async () => {
+      const invalid = await app.inject({
+        method: "POST",
+        url: "/api/v1/resources/ticket",
+        cookies: { [SESSION_COOKIE]: sid, [CSRF_COOKIE]: TEST_CSRF },
+        headers: { [CSRF_HEADER]: TEST_CSRF },
+        payload: { title: "Customer follow-up", joinedOn: "2026-02-30" },
+      });
+
+      expect(invalid.statusCode).toBe(422);
+      expect(invalid.json<{ path: string; boundary: string }>()).toMatchObject({
+        path: "/joinedOn",
+        boundary: "resource",
+      });
+      expect(fakeRepo.docs.size).toBe(0);
+
+      const valid = await app.inject({
+        method: "POST",
+        url: "/api/v1/resources/ticket",
+        cookies: { [SESSION_COOKIE]: sid, [CSRF_COOKIE]: TEST_CSRF },
+        headers: { [CSRF_HEADER]: TEST_CSRF },
+        payload: { title: "Customer follow-up", joinedOn: "2024-02-29" },
+      });
+      expect(valid.statusCode).toBe(201);
+      expect(valid.json<{ joinedOn: string }>().joinedOn).toBe("2024-02-29");
     });
 
     it("returns 422 when a required field is present but empty", async () => {
@@ -771,6 +799,34 @@ describe("resource routes", () => {
       expect(res.json<{ path: string }>().path).toBe("/title");
       expect(fakeRepo.docs.get(id)?.title).toBe("Bug");
       expect(fakeRepo.docs.get(id)?.version).toBe(1);
+    });
+
+    it("rejects an impossible calendar date without changing the Record or version", async () => {
+      const id = randomUUID();
+      fakeRepo.docs.set(id, {
+        _id: id,
+        version: 1,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+        title: "Bug",
+        joinedOn: "2024-02-29",
+      });
+
+      const res = await app.inject({
+        method: "PUT",
+        url: `/api/v1/resources/ticket/${id}`,
+        cookies: { [SESSION_COOKIE]: sid, [CSRF_COOKIE]: TEST_CSRF },
+        headers: { [CSRF_HEADER]: TEST_CSRF, "if-match": "1" },
+        payload: { title: "Changed", joinedOn: "2026-02-30" },
+      });
+
+      expect(res.statusCode).toBe(422);
+      expect(res.json<{ path: string }>().path).toBe("/joinedOn");
+      expect(fakeRepo.docs.get(id)).toMatchObject({
+        title: "Bug",
+        joinedOn: "2024-02-29",
+        version: 1,
+      });
     });
   });
 

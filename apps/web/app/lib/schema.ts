@@ -1,5 +1,6 @@
 /* Schema transforms already ran server-side; this module only derives presentation fields. */
 
+import { isValidCalendarDate } from "@tulipfarm/schema";
 import { parse as parseYaml } from "yaml";
 
 // Names the API attaches to every record on top of the schema's own properties.
@@ -256,11 +257,9 @@ const DATE_ONLY = /^(\d{4})-(\d{2})-(\d{2})$/;
  * it as UTC midnight and so renders the previous day everywhere west of Greenwich.
  */
 export function formatIsoDate(value: string): string {
-  const parts = DATE_ONLY.exec(value.trim());
-  const date = parts
-    ? new Date(Number(parts[1]), Number(parts[2]) - 1, Number(parts[3]))
-    : new Date(value);
-  if (Number.isNaN(date.getTime())) return value;
+  const parts = DATE_ONLY.exec(value);
+  if (!parts || !isValidCalendarDate(value)) return value;
+  const date = new Date(Number(parts[1]), Number(parts[2]) - 1, Number(parts[3]));
   return date.toLocaleDateString(undefined, { year: "numeric", month: "short", day: "2-digit" });
 }
 

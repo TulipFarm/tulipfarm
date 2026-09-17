@@ -15,25 +15,38 @@ ajv.addMetaSchema(draft07MetaSchema);
 // ISO 8601 date-time format support
 const ISO_DATE_TIME =
   /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/;
+const ISO_DATE = /^(\d{4})-(\d{2})-(\d{2})$/;
+
+export function isValidCalendarDate(value: string): boolean {
+  const match = value.match(ISO_DATE);
+  if (!match) return false;
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  if (month < 1 || month > 12 || day < 1) return false;
+  const leapYear = year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0);
+  const days = [31, leapYear ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+  return day <= (days[month - 1] ?? 0);
+}
 
 function isValidIsoDateTime(str: string): boolean {
   const match = str.match(ISO_DATE_TIME);
   if (!match) return false;
   const [, yStr, mStr, dStr, hStr, minStr, sStr] = match;
-  const y = Number(yStr);
-  const m = Number(mStr);
-  const d = Number(dStr);
   const h = Number(hStr);
   const min = Number(minStr);
   const s = Number(sStr);
-  if (m < 1 || m > 12 || d < 1 || d > 31 || h > 23 || min > 59 || s > 59) return false;
-  const daysInMonth = new Date(Date.UTC(y, m, 0)).getUTCDate();
-  return d <= daysInMonth;
+  return isValidCalendarDate(`${yStr}-${mStr}-${dStr}`) && h <= 23 && min <= 59 && s <= 59;
 }
 
 ajv.addFormat("date-time", {
   type: "string",
   validate: isValidIsoDateTime,
+});
+
+ajv.addFormat("date", {
+  type: "string",
+  validate: isValidCalendarDate,
 });
 
 const EMAIL =
