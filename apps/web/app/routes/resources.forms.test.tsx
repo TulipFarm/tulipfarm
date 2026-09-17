@@ -1,6 +1,6 @@
 import * as remix from "@remix-run/react";
 import { createRemixStub } from "@remix-run/testing";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ReactElement } from "react";
 import { afterEach, expect, test, vi } from "vitest";
@@ -39,6 +39,19 @@ required: [title]
 `);
 if (!parsed.ok) throw new Error(parsed.error);
 const fields = formFields(parsed.schema);
+
+const booleanParsed = parseSchema(`
+type: object
+x-id-strategy: { sequence: true, field: id }
+properties:
+  id: { type: string }
+  title: { type: string }
+  active: { type: boolean }
+  reviewed: { type: boolean }
+required: [title, active]
+`);
+if (!booleanParsed.ok) throw new Error(booleanParsed.error);
+const booleanFields = formFields(booleanParsed.schema);
 
 const numericParsed = parseSchema(`
 type: object
@@ -88,6 +101,31 @@ test("create: a successful POST navigates to the new record's detail page", asyn
   expect(createRecord).toHaveBeenCalledWith(
     "ticket",
     expect.objectContaining({ title: "New bug" })
+  );
+});
+
+test("create: an untouched optional Boolean is absent from the API payload", async () => {
+  vi.mocked(createRecord).mockResolvedValue({
+    id: "SAMPLE-1",
+    title: "Sample",
+    active: false,
+    version: 1,
+    createdAt: "",
+    updatedAt: "",
+  });
+  renderRoute(<ResourceCreate />, {
+    type: "sample",
+    fields: booleanFields,
+    schemaError: undefined,
+  });
+
+  fireEvent.change(document.querySelector("input#title") as HTMLInputElement, {
+    target: { value: "Sample" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Create" }));
+
+  await waitFor(() =>
+    expect(createRecord).toHaveBeenCalledWith("sample", { title: "Sample", active: false })
   );
 });
 
@@ -247,6 +285,43 @@ test("edit: a uniqueness conflict keeps the server advice and the draft", async 
   expect(title.value).toBe("Duplicate");
 });
 
+test("edit: changing only the title keeps an omitted optional Boolean absent", async () => {
+  vi.mocked(updateRecord).mockResolvedValue({
+    id: "SAMPLE-1",
+    title: "After",
+    active: false,
+    version: 2,
+    createdAt: "",
+    updatedAt: "",
+  });
+  renderRoute(<ResourceEdit />, {
+    type: "sample",
+    id: "SAMPLE-1",
+    record: {
+      id: "SAMPLE-1",
+      title: "Before",
+      active: false,
+      version: 1,
+      createdAt: "",
+      updatedAt: "",
+    },
+    fields: booleanFields,
+    schemaError: undefined,
+  });
+
+  fireEvent.change(document.querySelector("input#title") as HTMLInputElement, {
+    target: { value: "After" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+  await waitFor(() =>
+    expect(updateRecord).toHaveBeenCalledWith("sample", "SAMPLE-1", 1, {
+      title: "After",
+      active: false,
+    })
+  );
+});
+
 const datedParsed = parseSchema(`
 type: object
 x-id-strategy: { sequence: true, field: id }
@@ -396,17 +471,18 @@ test("edit: untouched and reset drafts navigate without a warning", async () => 
   expect(updateRecord).not.toHaveBeenCalled();
 });
 
-test("create: checkbox changes are guarded and resetting them restores fast navigation", async () => {
+test("create: optional Boolean changes are guarded and resetting them restores fast navigation", async () => {
   const user = userEvent.setup();
   renderRoute(<ResourceCreate />, { type: "ticket", fields, schemaError: undefined });
 
-  const checkbox = screen.getByLabelText("open");
-  await user.click(checkbox);
+  const open = screen.getByRole("radiogroup", { name: "open" });
+  await user.click(within(open).getByRole("radio", { name: "True" }));
   expect(dispatchUnload()).toBe(true);
   fireEvent.click(screen.getByRole("link", { name: "Cancel" }));
   expect(await screen.findByRole("alertdialog")).toBeInTheDocument();
+
   await user.click(screen.getByRole("button", { name: "Keep editing" }));
-  await user.click(checkbox);
+  await user.click(within(open).getByRole("radio", { name: "Unset" }));
   expect(dispatchUnload()).toBe(false);
   await user.click(screen.getByRole("link", { name: "Cancel" }));
 

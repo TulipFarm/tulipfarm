@@ -14,6 +14,7 @@ export type JsonSchemaProperty = {
   type?: JsonSchemaType | JsonSchemaType[];
   format?: string;
   enum?: unknown[];
+  default?: unknown;
   "x-links"?: { target: string };
   // Write-side flags: surfaced on the descriptor so create/edit forms can honor them. The read
   // projections (list/detail) ignore them; only `formFields` + the form components consume them.
@@ -50,6 +51,7 @@ export type FieldDescriptor = {
   isSystem: boolean;
   isIdField: boolean;
   required?: boolean;
+  defaultValue?: unknown;
   immutable?: boolean;
   readOnly?: boolean;
   format?: string;
@@ -134,6 +136,7 @@ function describe(
     isSystem: (SYSTEM_FIELDS as readonly string[]).includes(name),
     isIdField: name === idField,
     required: required.has(name),
+    defaultValue: prop.default,
     immutable: prop["x-immutable"] === true,
     readOnly: prop["x-readOnly"] === true,
     format: prop.format,
