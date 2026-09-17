@@ -1,8 +1,8 @@
-import { type MetaFunction, useNavigate, useRouteError } from "@remix-run/react";
+import { type MetaFunction, useNavigate } from "@remix-run/react";
 import { type FormEvent, useRef, useState } from "react";
 import { Plus } from "~/components/icons";
 import { PageShell } from "~/components/page-shell";
-import { ErrorState } from "~/components/states";
+import { ResourceRouteError } from "~/components/resources/resource-route-error";
 import { Button } from "~/components/ui/button";
 import { Combobox } from "~/components/ui/combobox";
 import { Input } from "~/components/ui/input";
@@ -407,8 +407,5 @@ export default function ResourceTypeNew() {
 }
 
 export function ErrorBoundary() {
-  const error = useRouteError();
-  const status = error instanceof ApiError ? error.status : undefined;
-  const message = error instanceof Error ? error.message : undefined;
-  return <ErrorState section="resources" status={status} message={message} />;
+  return <ResourceRouteError subject="catalog" />;
 }

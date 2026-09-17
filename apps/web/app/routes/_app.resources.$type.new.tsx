@@ -3,12 +3,11 @@ import {
   type MetaFunction,
   useLoaderData,
   useNavigate,
-  useRouteError,
 } from "@remix-run/react";
 import { useState } from "react";
 import { PageShell } from "~/components/page-shell";
 import { ResourceForm, writeErrorState } from "~/components/resource-form";
-import { ErrorState } from "~/components/states";
+import { ResourceRouteError } from "~/components/resources/resource-route-error";
 import { ApiError, createRecord, listResourceTypes } from "~/lib/api";
 import { type FieldDescriptor, formFields, parseSchema } from "~/lib/schema";
 
@@ -81,8 +80,5 @@ export default function ResourceCreate() {
 }
 
 export function ErrorBoundary() {
-  const error = useRouteError();
-  const status = error instanceof ApiError ? error.status : undefined;
-  const message = error instanceof Error ? error.message : undefined;
-  return <ErrorState section="resources" status={status} message={message} />;
+  return <ResourceRouteError subject="resource-type" />;
 }

@@ -13,12 +13,14 @@ function giveTheDialogARect() {
 
 it("closes when the click lands on the backdrop", async () => {
   const onClose = vi.fn();
-  render(
+  const dialog = render(
     <Modal open onClose={onClose} title="Add File">
       <p>body</p>
     </Modal>
-  );
-  const dialog = giveTheDialogARect();
+  ).container.querySelector("dialog") as HTMLDialogElement;
+  giveTheDialogARect();
+  const closeSpy = vi.fn(() => dialog.dispatchEvent(new Event("close")));
+  dialog.close = closeSpy;
 
   await userEvent.pointer({
     target: dialog,
@@ -26,6 +28,7 @@ it("closes when the click lands on the backdrop", async () => {
     keys: "[MouseLeft]",
   });
 
+  expect(closeSpy).toHaveBeenCalledTimes(1);
   expect(onClose).toHaveBeenCalledTimes(1);
 });
 

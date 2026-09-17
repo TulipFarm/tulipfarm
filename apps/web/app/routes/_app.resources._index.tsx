@@ -1,16 +1,16 @@
-import { type MetaFunction, useLoaderData, useRouteError } from "@remix-run/react";
+import { type MetaFunction, useLoaderData } from "@remix-run/react";
 import { useMemo, useState } from "react";
 import { EmptyState } from "~/components/empty-state";
 import { Plus, Search } from "~/components/icons";
 import { PageShell } from "~/components/page-shell";
 import { CatalogTable } from "~/components/resources/catalog-table";
+import { ResourceRouteError } from "~/components/resources/resource-route-error";
 import { StatStrip } from "~/components/resources/stat-strip";
-import { ErrorState } from "~/components/states";
 import { Button } from "~/components/ui/button";
 import { Input } from "~/components/ui/input";
 import { Link } from "~/components/ui/link";
 import { Select } from "~/components/ui/select";
-import { ApiError, listResourceCatalog, listResourceTypes } from "~/lib/api";
+import { listResourceCatalog, listResourceTypes } from "~/lib/api";
 import {
   buildCatalog,
   type CatalogSort,
@@ -197,8 +197,5 @@ export default function ResourcesIndex() {
 }
 
 export function ErrorBoundary() {
-  const error = useRouteError();
-  const status = error instanceof ApiError ? error.status : undefined;
-  const message = error instanceof Error ? error.message : undefined;
-  return <ErrorState section="resources" status={status} message={message} />;
+  return <ResourceRouteError subject="catalog" />;
 }
