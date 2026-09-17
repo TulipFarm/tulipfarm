@@ -84,6 +84,59 @@ test("wizard: every checked field lands in the submitted schema's required array
   expect(JSON.parse(schemaJson)).toMatchObject({ required: ["subject", "status"] });
 });
 
+test("wizard blocks normalized duplicate field names and preserves the draft", async () => {
+  renderWizard();
+
+  fireEvent.change(screen.getByLabelText("Resource type name"), {
+    target: { value: "ticket" },
+  });
+  fireEvent.change(screen.getByLabelText("field 1 name"), { target: { value: "title" } });
+  addField();
+  fireEvent.change(screen.getByLabelText("field 2 name"), { target: { value: " title " } });
+
+  await userEvent.click(screen.getByRole("button", { name: "Create type" }));
+
+  expect(screen.getByRole("alert")).toHaveTextContent(/field names must be unique/i);
+  expect(screen.getByLabelText("field 1 name")).toHaveValue("title");
+  expect(screen.getByLabelText("field 1 name")).toHaveAttribute("aria-invalid", "true");
+  expect(screen.getByLabelText("field 1 name")).toHaveFocus();
+  expect(screen.getByLabelText("field 2 name")).toHaveValue(" title ");
+  expect(screen.getByLabelText("field 2 name")).toHaveAttribute("aria-invalid", "true");
+  expect(createResourceType).not.toHaveBeenCalled();
+
+  await userEvent.clear(screen.getByLabelText("field 2 name"));
+  await userEvent.type(screen.getByLabelText("field 2 name"), "summary");
+  await userEvent.click(screen.getByRole("button", { name: "Create type" }));
+
+  await waitFor(() => expect(createResourceType).toHaveBeenCalledOnce());
+  const [, schemaJson] = vi.mocked(createResourceType).mock.calls[0];
+  expect(JSON.parse(schemaJson)).toMatchObject({
+    properties: {
+      title: { type: "string" },
+      summary: { type: "string" },
+    },
+  });
+});
+
+test("wizard does not silently discard an unnamed field row", async () => {
+  renderWizard();
+
+  fireEvent.change(screen.getByLabelText("Resource type name"), {
+    target: { value: "ticket" },
+  });
+  fireEvent.change(screen.getByLabelText("field 1 name"), { target: { value: "title" } });
+  addField();
+
+  await userEvent.click(screen.getByRole("button", { name: "Create type" }));
+
+  expect(screen.getByRole("alert")).toHaveTextContent(/every field needs a name/i);
+  expect(screen.getByLabelText("field 1 name")).toHaveValue("title");
+  expect(screen.getByLabelText("field 2 name")).toHaveValue("");
+  expect(screen.getByLabelText("field 2 name")).toHaveFocus();
+  expect(screen.getByLabelText("field 2 name")).toHaveAttribute("aria-invalid", "true");
+  expect(createResourceType).not.toHaveBeenCalled();
+});
+
 test("wizard explains field types without exposing schema jargon", async () => {
   renderWizard();
   expect(screen.getByLabelText("Resource type name")).toHaveAccessibleDescription(
