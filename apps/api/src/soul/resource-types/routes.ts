@@ -20,6 +20,7 @@ import { ErrorSchema } from "../../auth/schemas";
 import type { AuthorizationCheck, RouteAuthorization } from "../../authz/route-gate";
 import type { RateLimiter } from "../../rate-limit";
 import { makeRateLimitHook } from "../../rate-limit";
+import type { ResourceSchemaCompatibility } from "../../resources/schema-compatibility";
 import { commitActorFromRequest } from "../commit-actor";
 import {
   CreateResourceTypeBodySchema,
@@ -108,6 +109,7 @@ export function registerResourceTypeRoutes(
   requireAuth: PreHandler,
   authorizationCheck: AuthorizationCheck,
   reconcile?: () => Promise<void>,
+  schemaCompatibility?: ResourceSchemaCompatibility,
   rateLimiter?: RateLimiter,
   audit?: AuditService
 ): void {
@@ -248,7 +250,8 @@ export function registerResourceTypeRoutes(
       preHandler: writeHandlers,
       schema: {
         description:
-          "Replace an existing resource type's schema. `schema` is a YAML string (JSON Schema).",
+          "Replace an existing resource type's schema after validating every live Record. " +
+          "`schema` is a YAML string (JSON Schema).",
         tags: ["soul"],
         security: [{ sessionCookie: [] }, { bearerToken: [] }],
         params: ResourceTypeNameParamsSchema,
@@ -320,14 +323,33 @@ export function registerResourceTypeRoutes(
         ];
       }
 
+      if (schemaCompatibility === undefined) {
+        return reply.code(500).send({ error: "resource schema compatibility check unavailable" });
+      }
+
       try {
-        await soulWriter.apply({
-          subject: `soul: update resource type ${name}`,
-          source: "api",
-          actor: commitActorFromRequest(req),
-          businessId: DEPLOYMENT_BUSINESS_ID,
-          changes,
-        });
+        const publication = await schemaCompatibility.publishIfCompatible(
+          name,
+          check.parsed,
+          async () => {
+            await soulWriter.apply({
+              subject: `soul: update resource type ${name}`,
+              source: "api",
+              actor: commitActorFromRequest(req),
+              businessId: DEPLOYMENT_BUSINESS_ID,
+              changes,
+            });
+            await soulLoader.reload();
+          }
+        );
+        if (!publication.ok) {
+          return reply.code(422).send({
+            error: `proposed schema is incompatible with ${publication.affectedRecordCount} existing record(s)`,
+            boundary: "resource",
+            affectedRecordIds: publication.affectedRecordIds,
+            affectedRecordCount: publication.affectedRecordCount,
+          });
+        }
       } catch (e) {
         if (isSoulWriteError(e)) {
           const mapped = soulWriteHttpError(e);
@@ -335,8 +357,6 @@ export function registerResourceTypeRoutes(
         }
         throw e;
       }
-      await soulLoader.reload();
-      // New columns may have been added — materialise them before records reference them.
       await reconcile?.();
       await auditWrite(req, "resource-type.update", `resource-type:${name}`);
 

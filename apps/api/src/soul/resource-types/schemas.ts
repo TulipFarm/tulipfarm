@@ -4,6 +4,8 @@ export const ResourceTypeValidationErrorSchema = {
     error: { type: "string" },
     boundary: { type: "string" },
     path: { type: "string" },
+    affectedRecordIds: { type: "array", items: { type: "string" } },
+    affectedRecordCount: { type: "number" },
   },
   required: ["error"],
 } as const;
