@@ -31,12 +31,19 @@ export function validateResourceSchema(schema: Record<string, unknown>): void {
         "x-links must be an object"
       );
     }
-    const { target } = xl as { target?: unknown };
+    const { target, onDelete } = xl as { target?: unknown; onDelete?: unknown };
     if (typeof target !== "string" || target.length === 0) {
       throw new TulipFarmValidationError(
         "resource",
         `/properties/${field}/x-links/target`,
         "x-links.target must be a non-empty string"
+      );
+    }
+    if (onDelete !== undefined && onDelete !== "restrict" && onDelete !== "cascade") {
+      throw new TulipFarmValidationError(
+        "resource",
+        `/properties/${field}/x-links/onDelete`,
+        'x-links.onDelete must be "restrict" or "cascade"'
       );
     }
   }

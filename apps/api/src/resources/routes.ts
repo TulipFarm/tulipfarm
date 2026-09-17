@@ -2,11 +2,15 @@ import type { EventEmitter } from "node:events";
 import {
   createRecord,
   deleteRecord,
+  previewRecordDelete,
   ResourceBeforeHookError,
+  type ResourceDeletePlan,
+  ResourceDeletePlanLimitError,
   type ResourceWritePorts,
   updateRecord,
 } from "@tulipfarm/resources";
 import { HookError, type HookExecutor } from "@tulipfarm/sandbox";
+import { RECORD_DELETE_PLAN_SCHEMA } from "@tulipfarm/schema";
 import type { SoulLoader } from "@tulipfarm/soul";
 import { parsePaginationQuery } from "@tulipfarm/storage";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
@@ -136,6 +140,55 @@ export function registerResourceRoutes(
       type,
       ...(id === undefined ? {} : { id }),
     });
+  }
+
+  async function executeDelete(
+    req: FastifyRequest,
+    reply: FastifyReply,
+    plan?: ResourceDeletePlan
+  ): Promise<FastifyReply> {
+    const { type, id } = req.params as { type: string; id: string };
+    const resourceDef = soulLoader.resources.get(type);
+    if (!resourceDef) {
+      return reply.code(404).send({ error: `resource type not found: ${type}` });
+    }
+    if (await denyUnauthorized(req, reply, "record.delete", type, id)) return reply;
+
+    const ifMatch = parseIfMatch(req);
+    if (ifMatch === null) return reply.code(400).send({ error: "If-Match header required" });
+    if (plan !== undefined) {
+      for (const record of plan.records) {
+        if (!(await isAuthorized(req, "record.delete", record.type, record.id))) {
+          return reply.code(403).send({ error: "not authorized for delete dependency plan" });
+        }
+      }
+    }
+
+    let deleted: Awaited<ReturnType<typeof deleteRecord>>;
+    try {
+      deleted = await deleteRecord(
+        {
+          type,
+          resource: resourceDef,
+          id,
+          expectedVersion: ifMatch,
+          ...(plan === undefined ? {} : { plan }),
+          actorId: (req.user as { _id: string } | undefined)?._id,
+        },
+        writePorts
+      );
+    } catch (error) {
+      if (error instanceof ResourceDeletePlanLimitError) {
+        return reply.code(422).send({ error: error.message });
+      }
+      throw error;
+    }
+    if (!deleted.ok) return reply.code(deleted.err.code).send(deleted.err.body);
+    await deliverImmediatelyWhenUndurable(deleted.repo, deleted.sideEffect, hookExecutor, events);
+    for (const write of deleted.additionalWrites ?? []) {
+      await deliverImmediatelyWhenUndurable(write.repo, write.sideEffect, hookExecutor, events);
+    }
+    return reply.code(204).send();
   }
 
   // ── GET /api/v1/resources ───────────────────────────────────────────────────
@@ -436,12 +489,75 @@ export function registerResourceRoutes(
   );
 
   // ── DELETE /api/v1/resources/:type/:id ──────────────────────────────────────
+  app.post(
+    "/api/v1/resources/:type/:id/delete-preview",
+    {
+      preHandler: requireAuth,
+      schema: {
+        description:
+          "Preview the exact versioned Record set affected by dependency-aware deletion. The returned plan must be submitted unchanged when a cascade is executed.",
+        tags: ["resources"],
+        security: [{ sessionCookie: [] }, { bearerToken: [] }],
+        params: {
+          type: "object",
+          properties: { type: { type: "string" }, id: { type: "string" } },
+          required: ["type", "id"],
+        },
+        body: {
+          type: "object",
+          additionalProperties: false,
+          properties: { version: { type: "number" } },
+          required: ["version"],
+        },
+        response: {
+          200: RECORD_DELETE_PLAN_SCHEMA,
+          403: ErrorSchema,
+          404: ErrorSchema,
+          409: ErrorSchema,
+          422: ErrorSchema,
+          401: ErrorSchema,
+        },
+      },
+    },
+    async (req, reply) => {
+      const { type, id } = req.params as { type: string; id: string };
+      if (!soulLoader.resources.has(type)) {
+        return reply.code(404).send({ error: `resource type not found: ${type}` });
+      }
+      if (await denyUnauthorized(req, reply, "record.read", type, id)) return reply;
+
+      try {
+        const preview = await previewRecordDelete(
+          {
+            type,
+            id,
+            expectedVersion: (req.body as { version: number }).version,
+          },
+          writePorts
+        );
+        if (!preview.ok) return reply.code(preview.err.code).send(preview.err.body);
+        for (const record of [...preview.plan.records, ...preview.plan.restrictedBy]) {
+          if (!(await isAuthorized(req, "record.read", record.type, record.id))) {
+            return reply.code(403).send({ error: "not authorized for delete dependency preview" });
+          }
+        }
+        return reply.send(preview.plan);
+      } catch (error) {
+        if (error instanceof ResourceDeletePlanLimitError) {
+          return reply.code(422).send({ error: error.message });
+        }
+        throw error;
+      }
+    }
+  );
+
   app.delete(
     "/api/v1/resources/:type/:id",
     {
       preHandler: requireAuth,
       schema: {
-        description: "Soft delete. Requires If-Match header with current version.",
+        description:
+          "Soft delete. Requires If-Match with the current version. An explicit dependency preview is required when the configured policy cascades to other Records.",
         tags: ["resources"],
         security: [{ sessionCookie: [] }, { bearerToken: [] }],
         params: {
@@ -460,30 +576,35 @@ export function registerResourceRoutes(
         },
       },
     },
-    async (req, reply) => {
-      const { type, id } = req.params as { type: string; id: string };
-      const resourceDef = soulLoader.resources.get(type);
-      if (!resourceDef) {
-        return reply.code(404).send({ error: `resource type not found: ${type}` });
-      }
-      if (await denyUnauthorized(req, reply, "record.delete", type, id)) return reply;
+    (req, reply) => executeDelete(req, reply)
+  );
 
-      const ifMatch = parseIfMatch(req);
-      if (ifMatch === null) return reply.code(400).send({ error: "If-Match header required" });
-
-      const deleted = await deleteRecord(
-        {
-          type,
-          resource: resourceDef,
-          id,
-          expectedVersion: ifMatch,
-          actorId: (req.user as { _id: string } | undefined)?._id,
+  app.post(
+    "/api/v1/resources/:type/:id/delete",
+    {
+      preHandler: requireAuth,
+      schema: {
+        description:
+          "Execute a dependency-aware soft deletion using the exact unchanged preview returned by the delete-preview endpoint.",
+        tags: ["resources"],
+        security: [{ sessionCookie: [] }, { bearerToken: [] }],
+        params: {
+          type: "object",
+          properties: { type: { type: "string" }, id: { type: "string" } },
+          required: ["type", "id"],
         },
-        writePorts
-      );
-      if (!deleted.ok) return reply.code(deleted.err.code).send(deleted.err.body);
-      await deliverImmediatelyWhenUndurable(deleted.repo, deleted.sideEffect, hookExecutor, events);
-      return reply.code(204).send();
-    }
+        body: RECORD_DELETE_PLAN_SCHEMA,
+        response: {
+          204: { type: "null" },
+          400: ErrorSchema,
+          403: ErrorSchema,
+          404: ErrorSchema,
+          409: ErrorSchema,
+          401: ErrorSchema,
+          422: ErrorSchema,
+        },
+      },
+    },
+    (req, reply) => executeDelete(req, reply, req.body as ResourceDeletePlan)
   );
 }

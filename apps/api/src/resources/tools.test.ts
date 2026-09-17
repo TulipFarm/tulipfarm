@@ -37,6 +37,16 @@ class FakeRepo implements ResourceRepo {
     return this.docs.get(id) ?? null;
   }
 
+  async findDependents(
+    field: string,
+    targetId: string,
+    limit: number
+  ): Promise<readonly ResourceDoc[]> {
+    return Array.from(this.docs.values())
+      .filter((doc) => doc.deletedAt === undefined && doc[field] === targetId)
+      .slice(0, limit);
+  }
+
   async list(opts: ListOpts): Promise<PaginatedResult<ResourceDoc>> {
     let items = [...this.docs.values()];
     if (!opts.includeDeleted) items = items.filter((d) => d.deletedAt == null);
@@ -75,6 +85,13 @@ class FakeRepoFactory implements ResourceRepoFactory {
     if (!repo) throw new Error(`repo not found: ${type}`);
     return repo;
   }
+
+  async withTransaction<T>(
+    _lockedTypes: readonly string[],
+    operation: (repositories: ResourceRepoFactory) => Promise<T>
+  ): Promise<T> {
+    return operation(this);
+  }
 }
 
 const stubCounterStore: CounterStore = { makeCounterFn: () => async () => 1 };
@@ -83,22 +100,29 @@ function makeSoulLoader(
   types: Record<string, Record<string, unknown>>,
   domains: Readonly<Record<string, string>> = {}
 ): {
-  resources: { get: (type: string) => SoulResource | undefined; has: (type: string) => boolean };
+  resources: {
+    get: (type: string) => SoulResource | undefined;
+    has: (type: string) => boolean;
+    entries: () => IterableIterator<[string, SoulResource]>;
+  };
 } {
+  const resources = Object.fromEntries(
+    Object.entries(types).map(([name, schema]) => [
+      name,
+      {
+        name,
+        ...(domains[name] === undefined ? {} : { domain: domains[name] }),
+        schema,
+        hasHooks: false,
+        hooksEnabled: false,
+      } satisfies SoulResource,
+    ])
+  );
   return {
     resources: {
-      get: (type: string) => {
-        const schema = types[type];
-        if (!schema) return undefined;
-        return {
-          ...(domains[type] === undefined ? {} : { domain: domains[type] }),
-          schema,
-          hooksEnabled: false,
-          hookSource: undefined,
-          hookHash: undefined,
-        } as unknown as SoulResource;
-      },
-      has: (type: string) => type in types,
+      get: (type: string) => resources[type],
+      has: (type: string) => type in resources,
+      entries: () => Object.entries(resources)[Symbol.iterator](),
     },
   };
 }
@@ -151,6 +175,7 @@ function makeCtx(factory?: FakeRepoFactory, soulLoader?: ReturnType<typeof makeS
       })) as unknown as SoulLoader,
     hookExecutor: undefined,
     events: undefined,
+    authorizeRecord: async () => true,
   };
 }
 
@@ -641,6 +666,124 @@ describe("record_delete", () => {
     expect(result).toMatchObject({ success: false, error: { code: "not_found" } });
   });
 
+  it("previews and executes the exact authorized cascade set", async () => {
+    const factory = new FakeRepoFactory();
+    const customers = factory.forType("customer") as FakeRepo;
+    const tickets = factory.forType("ticket") as FakeRepo;
+    const customerId = randomUUID();
+    const ticketId = randomUUID();
+    const sentinelId = randomUUID();
+    const now = new Date();
+    await customers.insert({
+      _id: customerId,
+      version: 1,
+      createdAt: now,
+      updatedAt: now,
+      name: "Customer",
+    });
+    await tickets.insert({
+      _id: ticketId,
+      version: 1,
+      createdAt: now,
+      updatedAt: now,
+      customerId,
+    });
+    await tickets.insert({
+      _id: sentinelId,
+      version: 1,
+      createdAt: now,
+      updatedAt: now,
+      customerId: randomUUID(),
+    });
+    const soulLoader = makeSoulLoader({
+      customer: { type: "object", properties: { name: { type: "string" } } },
+      ticket: {
+        type: "object",
+        properties: {
+          customerId: {
+            type: "string",
+            "x-links": { target: "customer", onDelete: "cascade" },
+          },
+        },
+      },
+    });
+    const authorizeRecord = vi.fn().mockResolvedValue(true);
+    const ctx = { ...makeCtx(factory, soulLoader), authorizeRecord };
+
+    const preview = await getTool("record_delete_preview").handler(
+      { type: "customer", id: customerId, version: 1 },
+      ctx
+    );
+    expect(preview).toMatchObject({
+      success: true,
+      data: {
+        records: [
+          { type: "customer", id: customerId, version: 1 },
+          { type: "ticket", id: ticketId, version: 1 },
+        ],
+      },
+    });
+    if (!preview.success) return;
+
+    const result = await getTool("record_delete").handler(
+      { type: "customer", id: customerId, version: 1, plan: preview.data },
+      ctx
+    );
+
+    expect(result).toMatchObject({ success: true, data: { id: customerId } });
+    expect(customers.docs.get(customerId)?.deletedAt).toBeDefined();
+    expect(tickets.docs.get(ticketId)?.deletedAt).toBeDefined();
+    expect(tickets.docs.get(sentinelId)?.deletedAt).toBeUndefined();
+    expect(authorizeRecord).toHaveBeenCalledWith("u1", "record.read", "ticket", ticketId);
+  });
+
+  it("does not disclose a dependency preview when any affected Record is unauthorized", async () => {
+    const factory = new FakeRepoFactory();
+    const customers = factory.forType("customer") as FakeRepo;
+    const tickets = factory.forType("ticket") as FakeRepo;
+    const customerId = randomUUID();
+    const ticketId = randomUUID();
+    const now = new Date();
+    await customers.insert({
+      _id: customerId,
+      version: 1,
+      createdAt: now,
+      updatedAt: now,
+    });
+    await tickets.insert({
+      _id: ticketId,
+      version: 1,
+      createdAt: now,
+      updatedAt: now,
+      customerId,
+    });
+    const soulLoader = makeSoulLoader({
+      customer: { type: "object" },
+      ticket: {
+        type: "object",
+        properties: {
+          customerId: {
+            type: "string",
+            "x-links": { target: "customer", onDelete: "cascade" },
+          },
+        },
+      },
+    });
+    const ctx = {
+      ...makeCtx(factory, soulLoader),
+      authorizeRecord: async (_userId: string, _action: string, type: string, id: string) =>
+        type !== "ticket" || id !== ticketId,
+    };
+
+    const preview = await getTool("record_delete_preview").handler(
+      { type: "customer", id: customerId, version: 1 },
+      ctx
+    );
+
+    expect(preview).toMatchObject({ success: false, error: { code: "write_denied" } });
+    expect(JSON.stringify(preview)).not.toContain(ticketId);
+  });
+
   it("runs before and after hooks on delete", async () => {
     const factory = new FakeRepoFactory();
     const repo = factory.forType("ticket") as FakeRepo;
@@ -664,6 +807,7 @@ describe("record_delete", () => {
       resources: {
         get: (t: string) => (t === "ticket" ? hookRes : undefined),
         has: (t: string) => t === "ticket",
+        entries: () => [["ticket", hookRes] as [string, SoulResource]][Symbol.iterator](),
       },
     } as unknown as SoulLoader;
 
@@ -698,6 +842,7 @@ describe("record_delete", () => {
       resources: {
         get: (t: string) => (t === "ticket" ? hookRes : undefined),
         has: (t: string) => t === "ticket",
+        entries: () => [["ticket", hookRes] as [string, SoulResource]][Symbol.iterator](),
       },
     } as unknown as SoulLoader;
 

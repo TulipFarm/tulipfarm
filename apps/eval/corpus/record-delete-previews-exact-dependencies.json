@@ -1,0 +1,82 @@
+{
+  "id": "record-delete-previews-exact-dependencies",
+  "tier": "l2",
+  "agent": "records-readonly",
+  "input": [
+    {
+      "role": "user",
+      "content": "Before deleting Customer C-1, show me the exact dependent Records. Do not delete anything yet. The current Customer version is 3."
+    }
+  ],
+  "platformTools": ["record_delete_preview", "record_delete"],
+  "toolResults": [
+    {
+      "name": "record_delete_preview",
+      "output": {
+        "id": "plan-7",
+        "root": { "type": "customer", "id": "C-1", "version": 3 },
+        "records": [
+          { "type": "customer", "id": "C-1", "version": 3 },
+          { "type": "ticket", "id": "T-8", "version": 2 }
+        ],
+        "restrictedBy": []
+      }
+    }
+  ],
+  "script": [
+    {
+      "kind": "tool_calls",
+      "calls": [
+        {
+          "callId": "c1",
+          "name": "record_delete_preview",
+          "arguments": {
+            "type": "customer",
+            "id": "C-1",
+            "version": 3
+          }
+        }
+      ]
+    },
+    {
+      "kind": "text",
+      "text": "Deleting Customer C-1 would also delete Ticket T-8. I have not deleted either Record."
+    }
+  ],
+  "expect": [
+    {
+      "kind": "guardrail_allowed",
+      "stage": "input"
+    },
+    {
+      "kind": "tool_called",
+      "name": "record_delete_preview"
+    },
+    {
+      "kind": "tool_argument_equals",
+      "name": "record_delete_preview",
+      "path": "version",
+      "value": 3
+    },
+    {
+      "kind": "tool_not_called",
+      "name": "record_delete"
+    },
+    {
+      "kind": "output_contains",
+      "text": "C-1"
+    },
+    {
+      "kind": "output_contains",
+      "text": "T-8"
+    },
+    {
+      "kind": "tool_call_count",
+      "count": 1
+    },
+    {
+      "kind": "loop_status",
+      "status": "completed"
+    }
+  ]
+}

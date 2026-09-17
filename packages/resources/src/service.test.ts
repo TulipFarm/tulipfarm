@@ -2,6 +2,8 @@ import type { ResourceSideEffect } from "@tulipfarm/storage";
 import { describe, expect, it, vi } from "vitest";
 import {
   createRecord,
+  deleteRecord,
+  previewRecordDelete,
   type ResourceDoc,
   type ResourceRepo,
   type ResourceWritePorts,
@@ -34,6 +36,16 @@ class MemoryRepo implements ResourceRepo {
     return this.records.get(id) ?? null;
   }
 
+  async findDependents(
+    field: string,
+    targetId: string,
+    limit: number
+  ): Promise<readonly ResourceDoc[]> {
+    return Array.from(this.records.values())
+      .filter((record) => record.deletedAt === undefined && record[field] === targetId)
+      .slice(0, limit);
+  }
+
   async replaceOne(
     id: string,
     expected: number,
@@ -49,10 +61,23 @@ class MemoryRepo implements ResourceRepo {
   }
 }
 
-function ports(repos: Record<string, MemoryRepo>): ResourceWritePorts {
+function ports(
+  repos: Record<string, MemoryRepo>,
+  definitions: Record<string, { schema: Record<string, unknown> }> = Object.fromEntries(
+    Object.keys(repos).map((type) => [type, { schema: { type: "object" } }])
+  )
+): ResourceWritePorts {
   return {
-    catalog: { has: (type) => repos[type] !== undefined },
-    repositories: { forType: (type) => repos[type] as MemoryRepo },
+    catalog: {
+      has: (type) => definitions[type] !== undefined,
+      get: (type) => definitions[type],
+      entries: () => Object.entries(definitions)[Symbol.iterator](),
+    },
+    repositories: {
+      forType: (type) => repos[type] as MemoryRepo,
+      withTransaction: async (_types, operation) =>
+        operation({ forType: (type) => repos[type] as MemoryRepo }),
+    },
     counter: async () => 1,
     now: () => new Date("2026-01-01T00:00:00.000Z"),
     newRecordId: () => "00000000-0000-4000-8000-000000000001",
@@ -77,6 +102,284 @@ describe("Record write service", () => {
     expect(replay).toMatchObject({ ok: true, replayed: true });
     expect(tickets.records).toHaveLength(1);
     expect(tickets.effects).toHaveLength(1);
+  });
+
+  describe("Record delete dependency policies", () => {
+    const customerDefinition = {
+      schema: {
+        type: "object",
+        properties: { name: { type: "string" } },
+      },
+    };
+
+    function ticketDefinition(onDelete?: "restrict" | "cascade") {
+      return {
+        schema: {
+          type: "object",
+          properties: {
+            title: { type: "string" },
+            customerId: {
+              type: "string",
+              "x-links": {
+                target: "customer",
+                ...(onDelete === undefined ? {} : { onDelete }),
+              },
+            },
+          },
+        },
+      };
+    }
+
+    function record(id: string, fields: Record<string, unknown> = {}): ResourceDoc {
+      return {
+        _id: id,
+        version: 1,
+        createdAt: new Date("2026-01-01T00:00:00.000Z"),
+        updatedAt: new Date("2026-01-01T00:00:00.000Z"),
+        ...fields,
+      };
+    }
+
+    it("preserves the existing dangling-link behavior when no delete policy is configured", async () => {
+      const customers = new MemoryRepo();
+      const tickets = new MemoryRepo();
+      const customer = record("customer-1");
+      const ticket = record("ticket-1", { customerId: customer._id });
+      customers.records.set(customer._id, customer);
+      tickets.records.set(ticket._id, ticket);
+      const writePorts = ports(
+        { customer: customers, ticket: tickets },
+        { customer: customerDefinition, ticket: ticketDefinition() }
+      );
+
+      const result = await deleteRecord(
+        {
+          type: "customer",
+          resource: customerDefinition,
+          id: customer._id,
+          expectedVersion: 1,
+        },
+        writePorts
+      );
+
+      expect(result.ok).toBe(true);
+      expect(customers.records.get(customer._id)?.deletedAt).toBeInstanceOf(Date);
+      expect(tickets.records.get(ticket._id)?.deletedAt).toBeUndefined();
+    });
+
+    it("restricts deletion before writes and identifies the exact dependent Record", async () => {
+      const customers = new MemoryRepo();
+      const tickets = new MemoryRepo();
+      const customer = record("customer-1");
+      const ticket = record("ticket-1", { customerId: customer._id });
+      customers.records.set(customer._id, customer);
+      tickets.records.set(ticket._id, ticket);
+      const writePorts = ports(
+        { customer: customers, ticket: tickets },
+        { customer: customerDefinition, ticket: ticketDefinition("restrict") }
+      );
+
+      const preview = await previewRecordDelete(
+        { type: "customer", id: customer._id, expectedVersion: 1 },
+        writePorts
+      );
+      const result = await deleteRecord(
+        {
+          type: "customer",
+          resource: customerDefinition,
+          id: customer._id,
+          expectedVersion: 1,
+        },
+        writePorts
+      );
+
+      expect(preview).toMatchObject({
+        ok: true,
+        plan: {
+          records: [{ type: "customer", id: "customer-1", version: 1 }],
+          restrictedBy: [{ type: "ticket", id: "ticket-1", version: 1 }],
+        },
+      });
+      expect(result).toMatchObject({
+        ok: false,
+        err: { code: 409, body: { error: "record has restricted delete dependencies" } },
+      });
+      expect(customers.records.get(customer._id)?.deletedAt).toBeUndefined();
+      expect(tickets.records.get(ticket._id)?.deletedAt).toBeUndefined();
+    });
+
+    it("requires and executes an exact cascade preview while retaining unrelated Records", async () => {
+      const customers = new MemoryRepo();
+      const tickets = new MemoryRepo();
+      const customer = record("customer-1");
+      const ticket = record("ticket-1", { customerId: customer._id });
+      const sentinel = record("ticket-2", { customerId: "another-customer" });
+      customers.records.set(customer._id, customer);
+      tickets.records.set(ticket._id, ticket);
+      tickets.records.set(sentinel._id, sentinel);
+      const writePorts = ports(
+        { customer: customers, ticket: tickets },
+        { customer: customerDefinition, ticket: ticketDefinition("cascade") }
+      );
+      const preview = await previewRecordDelete(
+        { type: "customer", id: customer._id, expectedVersion: 1 },
+        writePorts
+      );
+      expect(preview.ok).toBe(true);
+      if (!preview.ok) return;
+
+      const withoutPreview = await deleteRecord(
+        {
+          type: "customer",
+          resource: customerDefinition,
+          id: customer._id,
+          expectedVersion: 1,
+        },
+        writePorts
+      );
+      expect(withoutPreview).toMatchObject({
+        ok: false,
+        err: { code: 409, body: { error: "delete dependency preview required" } },
+      });
+
+      const result = await deleteRecord(
+        {
+          type: "customer",
+          resource: customerDefinition,
+          id: customer._id,
+          expectedVersion: 1,
+          plan: preview.plan,
+        },
+        writePorts
+      );
+
+      expect(preview.plan.records).toEqual([
+        { type: "customer", id: "customer-1", version: 1 },
+        { type: "ticket", id: "ticket-1", version: 1 },
+      ]);
+      expect(result.ok).toBe(true);
+      expect(customers.records.get(customer._id)?.deletedAt).toBeInstanceOf(Date);
+      expect(tickets.records.get(ticket._id)?.deletedAt).toBeInstanceOf(Date);
+      expect(tickets.records.get(sentinel._id)?.deletedAt).toBeUndefined();
+    });
+
+    it("rejects an injected preview without deleting any Record", async () => {
+      const customers = new MemoryRepo();
+      const tickets = new MemoryRepo();
+      const customer = record("customer-1");
+      const ticket = record("ticket-1", { customerId: customer._id });
+      customers.records.set(customer._id, customer);
+      tickets.records.set(ticket._id, ticket);
+      const writePorts = ports(
+        { customer: customers, ticket: tickets },
+        { customer: customerDefinition, ticket: ticketDefinition("cascade") }
+      );
+      const preview = await previewRecordDelete(
+        { type: "customer", id: customer._id, expectedVersion: 1 },
+        writePorts
+      );
+      expect(preview.ok).toBe(true);
+      if (!preview.ok) return;
+
+      const result = await deleteRecord(
+        {
+          type: "customer",
+          resource: customerDefinition,
+          id: customer._id,
+          expectedVersion: 1,
+          plan: {
+            ...preview.plan,
+            records: [...preview.plan.records, { type: "ticket", id: "ticket-2", version: 1 }],
+          },
+        },
+        writePorts
+      );
+
+      expect(result).toMatchObject({
+        ok: false,
+        err: { code: 409, body: { error: "delete dependency preview is stale" } },
+      });
+      expect(customers.records.get(customer._id)?.deletedAt).toBeUndefined();
+      expect(tickets.records.get(ticket._id)?.deletedAt).toBeUndefined();
+    });
+
+    it("rejects a stale preview when a concurrent dependent appears", async () => {
+      const customers = new MemoryRepo();
+      const tickets = new MemoryRepo();
+      const customer = record("customer-1");
+      const first = record("ticket-1", { customerId: customer._id });
+      customers.records.set(customer._id, customer);
+      tickets.records.set(first._id, first);
+      const writePorts = ports(
+        { customer: customers, ticket: tickets },
+        { customer: customerDefinition, ticket: ticketDefinition("cascade") }
+      );
+      const preview = await previewRecordDelete(
+        { type: "customer", id: customer._id, expectedVersion: 1 },
+        writePorts
+      );
+      expect(preview.ok).toBe(true);
+      if (!preview.ok) return;
+      tickets.records.set("ticket-2", record("ticket-2", { customerId: customer._id }));
+
+      const result = await deleteRecord(
+        {
+          type: "customer",
+          resource: customerDefinition,
+          id: customer._id,
+          expectedVersion: 1,
+          plan: preview.plan,
+        },
+        writePorts
+      );
+
+      expect(result).toMatchObject({
+        ok: false,
+        err: { code: 409, body: { error: "delete dependency preview is stale" } },
+      });
+      expect(customers.records.get(customer._id)?.deletedAt).toBeUndefined();
+      expect(tickets.records.get(first._id)?.deletedAt).toBeUndefined();
+      expect(tickets.records.get("ticket-2")?.deletedAt).toBeUndefined();
+    });
+
+    it("deduplicates an explicitly cascading cycle", async () => {
+      const customers = new MemoryRepo();
+      const tickets = new MemoryRepo();
+      const customer = record("customer-1", { primaryTicketId: "ticket-1" });
+      const ticket = record("ticket-1", { customerId: customer._id });
+      customers.records.set(customer._id, customer);
+      tickets.records.set(ticket._id, ticket);
+      const cycleCustomerDefinition = {
+        schema: {
+          type: "object",
+          properties: {
+            primaryTicketId: {
+              type: "string",
+              "x-links": { target: "ticket", onDelete: "cascade" },
+            },
+          },
+        },
+      };
+      const writePorts = ports(
+        { customer: customers, ticket: tickets },
+        { customer: cycleCustomerDefinition, ticket: ticketDefinition("cascade") }
+      );
+
+      const preview = await previewRecordDelete(
+        { type: "customer", id: customer._id, expectedVersion: 1 },
+        writePorts
+      );
+
+      expect(preview).toMatchObject({
+        ok: true,
+        plan: {
+          records: [
+            { type: "customer", id: "customer-1", version: 1 },
+            { type: "ticket", id: "ticket-1", version: 1 },
+          ],
+        },
+      });
+    });
   });
 
   it("rejects a malformed email without persisting the Record", async () => {

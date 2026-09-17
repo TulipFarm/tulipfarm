@@ -49,6 +49,18 @@ zero-code UI and the agent tools.
 `x-links` declares a relationship to another resource type. TulipFarm verifies linked records exist
 on write, rejects invented ids, and shows unresolved links when a target has been soft-deleted.
 
+You can also choose what happens when a linked target is deleted. A **restrict policy** keeps the
+target in place while live Records depend on it. An explicit **cascade policy** first shows the
+exact Record ids that would be deleted, then deletes that unchanged set together after
+confirmation. If the dependency set changes before confirmation, TulipFarm refuses the deletion
+and asks for a fresh preview. Without either policy, the existing behavior remains: the target can
+be deleted and the unresolved link stays visible.
+
+```prompt
+Update tickets so customerId links to customer. Restrict customer deletion while any live ticket
+still points to it.
+```
+
 Common data-shaping extensions include `x-normalize` for canonical forms, `x-computed` for derived
 values, and `x-id-strategy` for human-friendly references such as `TICK-123`. The system UUID
 remains the stable primary id.
