@@ -9,6 +9,7 @@ import {
   availableColumns,
   deriveFields,
   detailFields,
+  formatIsoDate,
   listColumns,
   parseSchema,
 } from "~/lib/schema";
@@ -325,12 +326,53 @@ test("list surfaces an unparseable schema instead of rendering an empty table", 
   expect(screen.queryByRole("table")).not.toBeInTheDocument();
 });
 
-test("detail names the record in its heading and still lists every field", () => {
-  renderWithData(<ResourceDetail />, { type: "ticket", record, fields, schemaError: undefined });
-  expect(screen.getByRole("heading", { level: 1, name: "Login 500" })).toBeInTheDocument();
-  // The heading is a label for the record; the field list stays complete regardless.
-  expect(screen.getAllByText("Login 500")).toHaveLength(2);
-  expect(screen.getByText("System")).toBeInTheDocument();
+test("detail uses valid definition-list groups without dropping field or system values", () => {
+  const detailSchema = parseSchema(`
+type: object
+properties:
+  title: { type: string }
+  status: { type: string, enum: [open, closed] }
+  notes: { type: [string, "null"] }
+  dueDate: { type: string, format: date }
+`);
+  if (!detailSchema.ok) throw new Error(detailSchema.error);
+  const detailRecord = {
+    id: "REC-1",
+    title: "September stock",
+    status: "open",
+    notes: null,
+    dueDate: "2026-09-17",
+    version: 3,
+    createdAt: "2026-09-16T08:30:00Z",
+    updatedAt: "2026-09-17T09:45:00Z",
+  };
+  renderWithData(<ResourceDetail />, {
+    type: "stock",
+    record: detailRecord,
+    fields: detailFields(deriveFields(detailSchema.schema), detailSchema.schema),
+    schemaError: undefined,
+  });
+
+  expect(screen.getByRole("heading", { level: 1, name: "September stock" })).toBeInTheDocument();
+  expect(screen.getAllByText("September stock")).toHaveLength(2);
+  expect(screen.getAllByText("REC-1")).toHaveLength(2);
+  for (const value of ["open", "-", formatIsoDate("2026-09-17"), "3"]) {
+    expect(screen.getByText(value)).toBeInTheDocument();
+  }
+
+  const systemLabel = screen.getByText("System");
+  expect(systemLabel.closest("dl")).toBeNull();
+  const definitionLists = Array.from(document.querySelectorAll("dl")).filter((list) =>
+    list.querySelector("dt")
+  );
+  expect(definitionLists).toHaveLength(2);
+  for (const list of definitionLists) {
+    for (const group of list.children) {
+      expect(group.tagName).toBe("DIV");
+      expect(group.querySelectorAll(":scope > dt")).toHaveLength(1);
+      expect(group.querySelectorAll(":scope > dd")).toHaveLength(1);
+    }
+  }
 });
 
 test("detail ErrorBoundary renders 404 not found for a missing record", () => {

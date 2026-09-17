@@ -42,18 +42,22 @@ export function DetailView({
   const systemFields = fields.filter((f) => f.isSystem);
 
   return (
-    <dl className="flex flex-col">
-      {schemaFields.map((field) => (
-        <Row key={field.name} field={field} record={record} linkLabels={linkLabels} />
-      ))}
+    <div className="flex flex-col">
+      <dl className="flex flex-col">
+        {schemaFields.map((field) => (
+          <Row key={field.name} field={field} record={record} linkLabels={linkLabels} />
+        ))}
+      </dl>
       {systemFields.length > 0 ? (
         <>
           <p className="mt-4 px-3 pb-1 text-xs text-muted-foreground">System</p>
-          {systemFields.map((field) => (
-            <Row key={field.name} field={field} record={record} linkLabels={linkLabels} />
-          ))}
+          <dl className="flex flex-col">
+            {systemFields.map((field) => (
+              <Row key={field.name} field={field} record={record} linkLabels={linkLabels} />
+            ))}
+          </dl>
         </>
       ) : null}
-    </dl>
+    </div>
   );
 }
