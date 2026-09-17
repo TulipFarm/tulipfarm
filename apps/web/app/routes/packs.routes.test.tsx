@@ -1,7 +1,8 @@
 import { useLocation } from "@remix-run/react";
 import { createRemixStub } from "@remix-run/testing";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { PACK_CATALOG_URL } from "@tulipfarm/constants/site";
 import { PACK_MAX_BYTES, PACK_READ_MAX_RESULT_CHARS } from "@tulipfarm/schema";
 import { beforeEach, expect, test, vi } from "vitest";
 import { ApiError } from "~/lib/api";
@@ -103,6 +104,69 @@ test("catalog filters by category and search, with a no-match state", async () =
   await user.type(screen.getByRole("textbox", { name: "Search Packs" }), "tickets");
   expect(screen.getByText("Support essentials")).toBeInTheDocument();
   expect(screen.queryByText("Sales essentials")).not.toBeInTheDocument();
+});
+
+test("the gallery clears filters and lets a selected category toggle back to all Packs", async () => {
+  const user = userEvent.setup();
+  renderPage();
+  await screen.findByText("Sales essentials");
+  const sales = screen.getByRole("button", { name: "Sales" });
+  await user.click(sales);
+  expect(sales).toHaveAttribute("aria-pressed", "true");
+  await user.click(sales);
+  expect(screen.getByRole("button", { name: "All" })).toHaveAttribute("aria-pressed", "true");
+  expect(screen.getByText("Support essentials")).toBeVisible();
+  await user.type(screen.getByRole("textbox", { name: "Search Packs" }), "missing");
+  await user.click(screen.getByRole("button", { name: "Clear filters" }));
+  expect(screen.getByRole("textbox", { name: "Search Packs" })).toHaveValue("");
+  expect(screen.getByText("Sales essentials")).toBeVisible();
+});
+
+test("a focused preview preserves gallery filters and restores focus to its card", async () => {
+  const user = userEvent.setup();
+  renderPage();
+  await screen.findByText("Sales essentials");
+  await user.type(screen.getByRole("textbox", { name: "Search Packs" }), "sales");
+  const trigger = screen.getByRole("button", { name: "Preview installation of Sales essentials" });
+  await user.click(trigger);
+  expect(await screen.findByRole("region", { name: "Pack preview" })).toBeVisible();
+  expect(screen.queryByRole("list", { name: "Available Packs" })).not.toBeInTheDocument();
+  await user.click(screen.getByRole("button", { name: "Back to Packs" }));
+  expect(screen.getByRole("textbox", { name: "Search Packs" })).toHaveValue("sales");
+  expect(screen.getByRole("list", { name: "Available Packs" })).toBeVisible();
+  expect(screen.queryByText("Support essentials")).not.toBeInTheDocument();
+  await waitFor(() => expect(trigger).toHaveFocus());
+});
+
+test("starter integration logos are optional ideas, separate from actual Pack requirements", async () => {
+  const url = new URL("support-triage.yaml", PACK_CATALOG_URL).href;
+  const pack = { ...preview.pack, name: "support-triage", title: "Support triage desk" };
+  vi.mocked(listPacks).mockResolvedValue([{ ...pack, url }]);
+  vi.mocked(previewPack).mockResolvedValue({ ...preview, pack, url });
+  renderPage();
+  const ideas = await screen.findByRole("list", { name: "Optional integration ideas" });
+  expect(within(ideas).getByText("Gmail")).toBeInTheDocument();
+  expect(within(ideas).getByText("Slack")).toBeInTheDocument();
+  await userEvent.click(
+    screen.getByRole("button", { name: "Preview installation of Support triage desk" })
+  );
+  const panel = await screen.findByRole("region", { name: "Pack preview" });
+  expect(within(panel).getByText("Gmail")).toBeVisible();
+  expect(
+    within(panel).getByText(/Optional starting points, not required or connected/)
+  ).toBeVisible();
+  expect(within(panel).getByText("A connected email Integration")).toBeVisible();
+});
+
+test("third-party Packs do not inherit integration suggestions by reusing a starter name", async () => {
+  vi.mocked(listPacks).mockResolvedValue([
+    { ...preview.pack, name: "support-triage", url: "https://example.com/support-triage.yaml" },
+  ]);
+  renderPage();
+  await screen.findByText("Sales essentials");
+  expect(
+    screen.queryByRole("list", { name: "Optional integration ideas" })
+  ).not.toBeInTheDocument();
 });
 
 test("catalog loading, error retry and empty states are distinct", async () => {
