@@ -109,7 +109,14 @@ export interface TeamMigrationReportReadModel {
 
 export interface GuardrailsReadModel {
   readonly revision: string;
-  readonly items: readonly Record<string, unknown>[];
+  readonly source: "custom" | "default";
+  readonly items: readonly {
+    readonly id: string;
+    readonly name: string;
+    readonly scope: string;
+    readonly source: "custom" | "default";
+    readonly policy: Record<string, unknown>;
+  }[];
 }
 
 export interface GuardrailChangesetInput {

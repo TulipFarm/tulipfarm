@@ -21,8 +21,8 @@ Every scenario stands alone — a failure in one does not block the next.
 | # | Action | Expected |
 | --- | --- | --- |
 | 1 | `navigate /business/guardrails` | Page loads within 5s; heading `Guardrails` |
-| 2 | `expect` list of configured guardrails renders, or empty state `No guardrails configured.` | Policy rules visible |
-| 3 | `expect` each row displays guardrail name, configured/effect text, an `On`/`Off` badge, and a `Turn on` or `Turn off` button | Rule attributes present |
+| 2 | `expect` the page identifies either `Built-in defaults are active` or `Custom Soul policy is active` and lists the effective guardrails | Effective policy source and rules visible |
+| 3 | `expect` each row displays the guardrail name, stage, active state, source, and configured details such as the `content_filter` pattern labels | Rule attributes present |
 | 4 | If non-admin session, reads still render; clicking a write action should surface `You do not have permission to change guardrails.` and leave state unchanged | Non-admin blocked |
 | 5 | `capture` screenshot, console delta, failed requests | — |
 

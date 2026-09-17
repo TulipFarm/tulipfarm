@@ -45,10 +45,20 @@ function urlScreeningText(url: string): string {
 /** What a refused turn says when the guard named no message of its own. */
 const DEFAULT_BLOCK_MESSAGE = "I can't help with that request.";
 
+function outputBlockMessage(reason: string, fallback: string): string {
+  if (reason === "content_filter:email") {
+    return (
+      "The content_filter:email guardrail hid the response details. " +
+      "Check the relevant page, or ask again without email addresses."
+    );
+  }
+  return fallback;
+}
+
 /** A guard's verdict, as the caller needs to act on it. */
 export type GuardedText =
   | { readonly blocked: false; readonly text: string }
-  | { readonly blocked: true; readonly message: string };
+  | { readonly blocked: true; readonly message: string; readonly reason: string };
 
 export type GuardedContent =
   | { readonly blocked: false; readonly content: MessageContent }
@@ -83,6 +93,7 @@ type GuardLogger = { warn: (obj: unknown, msg?: string) => void };
 export class TurnGuardrails {
   private service: GuardrailsService | undefined;
   private settings: TurnGuardrailPolicy | undefined;
+  private outputBlockValue: { readonly message: string; readonly reason: string } | undefined;
 
   constructor(private readonly log: GuardLogger) {}
 
@@ -94,6 +105,13 @@ export class TurnGuardrails {
     }
     this.service = service;
     this.settings = settings;
+    this.outputBlockValue = undefined;
+  }
+
+  takeOutputBlock(): { readonly message: string; readonly reason: string } | undefined {
+    const block = this.outputBlockValue;
+    this.outputBlockValue = undefined;
+    return block;
   }
 
   /**
@@ -163,7 +181,9 @@ export class TurnGuardrails {
     const result = await service.runOutput(text, ctx);
     if (!result.blocked) return { blocked: false, text: result.value };
     await this.record(events, "output", result.guard, result.reason, "output");
-    return { blocked: true, message: result.message ?? DEFAULT_BLOCK_MESSAGE };
+    const message = outputBlockMessage(result.reason, result.message ?? DEFAULT_BLOCK_MESSAGE);
+    this.outputBlockValue = { message, reason: result.reason };
+    return { blocked: true, message, reason: result.reason };
   }
 
   /** Buffer a model response until its output guard allows publication, including split matches. */

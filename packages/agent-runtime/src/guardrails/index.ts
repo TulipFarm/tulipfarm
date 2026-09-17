@@ -11,4 +11,8 @@ export {
 } from "./guards/untrusted-content";
 export type { FailMode, Guard, GuardContext, StageResult, Verdict } from "./pipeline";
 export { GUARD_TIMEOUT_MS, runStage } from "./pipeline";
-export { GuardrailsService } from "./service";
+export {
+  GuardrailsService,
+  type ResolvedGuardrailsConfig,
+  resolveGuardrailsConfig,
+} from "./service";

@@ -1,4 +1,6 @@
 import { createHash } from "node:crypto";
+import { resolveGuardrailsConfig } from "@tulipfarm/agent-runtime";
+import { canonicalHash, type GuardrailsConfig } from "@tulipfarm/schema";
 import {
   type ApprovalsRepo,
   listPendingToolApprovals,
@@ -55,6 +57,29 @@ const RUN_CONTROL: RouteAuthorization = {
   resourceType: "operations",
   fallback: "admin",
 };
+
+const GUARDRAIL_STAGES = ["input", "tool-call", "tool-result", "output"] as const;
+
+function guardrailItems(
+  config: GuardrailsConfig,
+  source: "custom" | "default"
+): {
+  id: string;
+  name: string;
+  scope: string;
+  source: "custom" | "default";
+  policy: Record<string, unknown>;
+}[] {
+  return GUARDRAIL_STAGES.flatMap((scope) =>
+    (config[scope] ?? []).map((policy, index) => ({
+      id: `${scope}:${index}:${policy.guard}`,
+      name: policy.guard,
+      scope,
+      source,
+      policy: { ...policy } as Record<string, unknown>,
+    }))
+  );
+}
 
 /** Admins get every defined operational permission; missing capabilities still return 501. */
 const ADMIN_PERMISSIONS: readonly OperationalPermission[] = [
@@ -258,12 +283,11 @@ export function createRuntimeOperationalApi(deps: RuntimeOperationalDeps): Opera
     },
 
     async getGuardrails() {
-      const config = deps.guardrailsConfig();
-      const items =
-        typeof config === "object" && config !== null
-          ? Object.entries(config).map(([name, policy]) => ({ name, policy }))
-          : [];
-      return { revision: digest(config), items };
+      const raw = deps.guardrailsConfig();
+      const { config, source } = resolveGuardrailsConfig(
+        typeof raw === "object" && raw !== null ? (raw as Record<string, unknown>) : null
+      );
+      return { revision: canonicalHash(config), source, items: guardrailItems(config, source) };
     },
 
     async proposeGuardrailChangeset() {
