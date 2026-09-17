@@ -143,7 +143,9 @@ test("countsFor tallies each kind and leaves absent kinds at zero", () => {
 
 describe("fetchFarm", () => {
   test("turns every crop into a planting with a stable id and a reachable href", async () => {
-    mocks.resourceTypes.mockResolvedValue([{ name: "ticket", schema: "{}", hasHooks: false }]);
+    mocks.resourceTypes.mockResolvedValue([
+      { name: "ticket", schema: "{}", hasHooks: false, revision: "a".repeat(40) },
+    ]);
     mocks.agents.mockResolvedValue([{ name: "triage", label: "Triage", domain: "support" }]);
     mocks.skills.mockResolvedValue([{ name: "forecasting", provenance: "curated" }]);
     mocks.spaces.mockResolvedValue({

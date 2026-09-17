@@ -28,6 +28,7 @@ export type ResourceTypeSummary = {
   // A YAML string of a JSON Schema; parse with `parseSchema` in lib/schema.ts.
   schema: string;
   hasHooks: boolean;
+  revision: string;
   domain?: string;
 };
 
@@ -403,12 +404,13 @@ export async function createResourceType(
 // Replace a resource type's schema (full schema string, JSON or YAML). 404 if the type is gone.
 export async function updateResourceType(
   name: string,
-  schema: string
+  schema: string,
+  revision: string
 ): Promise<ResourceTypeSummary> {
   const updated = await apiWrite<ResourceTypeSummary>(
     "PUT",
     `/api/v1/resource-types/${encodeURIComponent(name)}`,
-    { schema }
+    { schema, revision }
   );
   listResourceTypes.invalidate();
   return updated;

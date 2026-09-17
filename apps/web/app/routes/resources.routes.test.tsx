@@ -74,8 +74,20 @@ properties:
 function catalogRows() {
   return buildCatalog(
     [
-      { name: "ticket", schema: TICKET_YAML, hasHooks: false, domain: "support" },
-      { name: "customer", schema: CUSTOMER_YAML, hasHooks: true, domain: "sales" },
+      {
+        name: "ticket",
+        schema: TICKET_YAML,
+        hasHooks: false,
+        revision: "a".repeat(40),
+        domain: "support",
+      },
+      {
+        name: "customer",
+        schema: CUSTOMER_YAML,
+        hasHooks: true,
+        revision: "b".repeat(40),
+        domain: "sales",
+      },
     ],
     [
       { name: "ticket", count: 41, lastUpdatedAt: "2026-06-08T14:03:00Z" },

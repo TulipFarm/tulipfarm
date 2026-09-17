@@ -17,6 +17,7 @@ vi.mock("node:fs", () => ({ existsSync: vi.fn() }));
 import { existsSync } from "node:fs";
 
 const TEST_CSRF = "a".repeat(64);
+const RESOURCE_REVISION = "b".repeat(40);
 
 const VALID_SCHEMA_YAML = `type: object
 properties:
@@ -113,7 +114,7 @@ describe("resource-type routes", () => {
     tokenRepo = new FakeTokenRepo();
     gitSync = makeFakeGitSync();
     soulLoader = makeFakeSoulLoader();
-    soulWriterDouble = makeSoulWriterDouble();
+    soulWriterDouble = makeSoulWriterDouble(RESOURCE_REVISION);
 
     const user = await createUser(userRepo, "user@example.com", "pass", "member");
     sid = await store.create(user._id);
@@ -154,7 +155,12 @@ describe("resource-type routes", () => {
         payload: { name: "ticket", schema: VALID_SCHEMA_YAML },
       });
       expect(res.statusCode).toBe(201);
-      expect(res.json()).toEqual({ name: "ticket", schema: VALID_SCHEMA_YAML, hasHooks: false });
+      expect(res.json()).toEqual({
+        name: "ticket",
+        schema: VALID_SCHEMA_YAML,
+        hasHooks: false,
+        revision: `${"0".repeat(39)}1`,
+      });
       expect(soulWriterDouble.applied).toHaveLength(1);
       expect(soulWriterDouble.applied[0]).toMatchObject({
         subject: "soul: add resource type ticket",
@@ -380,20 +386,22 @@ x-computed:
       });
       expect(res.statusCode).toBe(200);
       const { types } = res.json<{
-        types: { name: string; schema: string; hasHooks: boolean }[];
+        types: { name: string; schema: string; hasHooks: boolean; revision: string }[];
       }>();
       expect(types).toHaveLength(2);
       const ticket = types.find((t) => t.name === "ticket");
       const customer = types.find((t) => t.name === "customer");
       expect(ticket?.hasHooks).toBe(false);
       expect(ticket?.schema).toContain("type: object");
+      expect(ticket?.revision).toBe(RESOURCE_REVISION);
       expect(customer?.hasHooks).toBe(true);
       expect(customer?.schema).toContain("type: object");
+      expect(customer?.revision).toBe(RESOURCE_REVISION);
     });
   });
 
   describe("PUT /api/v1/resource-types/:name", () => {
-    const put = (payload: { schema: string }) => ({
+    const put = (payload: { schema: string; revision?: string }) => ({
       method: "PUT" as const,
       url: "/api/v1/resource-types/ticket",
       cookies: { [SESSION_COOKIE]: sid, [CSRF_COOKIE]: TEST_CSRF },
@@ -405,26 +413,43 @@ x-computed:
       const res = await app.inject({
         method: "PUT",
         url: "/api/v1/resource-types/ticket",
-        payload: { schema: VALID_SCHEMA_YAML },
+        payload: { schema: VALID_SCHEMA_YAML, revision: RESOURCE_REVISION },
       });
       expect(res.statusCode).toBe(401);
     });
 
     it("returns 404 when the type does not exist", async () => {
       vi.mocked(existsSync).mockReturnValue(false);
-      const res = await app.inject(put({ schema: VALID_SCHEMA_YAML }));
+      const res = await app.inject(put({ schema: VALID_SCHEMA_YAML, revision: RESOURCE_REVISION }));
       expect(res.statusCode).toBe(404);
+    });
+
+    it("requires the revision that the editor loaded", async () => {
+      vi.mocked(existsSync).mockReturnValue(true);
+      const res = await app.inject(put({ schema: VALID_SCHEMA_YAML }));
+      expect(res.statusCode).toBe(400);
+      expect(soulWriterDouble.applied).toEqual([]);
     });
 
     it("updates the schema — writes YAML, commits, reloads", async () => {
       vi.mocked(existsSync).mockReturnValue(true);
-      const res = await app.inject(put({ schema: VALID_SCHEMA_YAML }));
+      const res = await app.inject(put({ schema: VALID_SCHEMA_YAML, revision: RESOURCE_REVISION }));
       expect(res.statusCode).toBe(200);
-      expect(res.json()).toMatchObject({ name: "ticket", schema: VALID_SCHEMA_YAML });
+      expect(res.json()).toMatchObject({
+        name: "ticket",
+        schema: VALID_SCHEMA_YAML,
+        revision: expect.stringMatching(/^[0-9a-f]{40}$/),
+      });
       expect(soulWriterDouble.applied).toHaveLength(1);
       expect(soulWriterDouble.applied[0]).toMatchObject({
         subject: "soul: update resource type ticket",
         actor: { email: "user@example.com" },
+        expectedRevisions: [
+          {
+            target: { kind: "Resource", slug: "ticket", definitionMode: "legacy" },
+            revision: RESOURCE_REVISION,
+          },
+        ],
         changes: [
           {
             op: "put",
@@ -436,9 +461,71 @@ x-computed:
       expect(soulLoader.reload).toHaveBeenCalledOnce();
     });
 
+    it("keeps a concurrent field when a stale editor tries to replace the schema", async () => {
+      vi.mocked(existsSync).mockReturnValue(true);
+      const fiveFieldSchema = `type: object
+properties:
+  title:
+    type: string
+  status:
+    type: string
+  owner:
+    type: string
+  amount:
+    type: number
+  dueAt:
+    type: string
+`;
+      const concurrentSchema = `${fiveFieldSchema.trimEnd()}
+  auditTag:
+    type: string
+`;
+      const staleDraft = `description: stale editor description
+${fiveFieldSchema}`;
+      await soulWriterDouble.writer.apply({
+        subject: "soul: add audit tag",
+        source: "agent",
+        actor: {
+          principalId: "agent-1",
+          name: "Resource author",
+          email: "agent@tulipfarm.dev",
+        },
+        businessId: "deployment",
+        changes: [
+          {
+            op: "put",
+            target: { kind: "Resource", slug: "ticket", definitionMode: "legacy" },
+            content: concurrentSchema,
+          },
+        ],
+      });
+
+      const stale = await app.inject(put({ schema: staleDraft, revision: RESOURCE_REVISION }));
+
+      expect(stale.statusCode).toBe(409);
+      expect(stale.json()).toMatchObject({
+        error: "another change landed first; reload and try again",
+      });
+      expect(soulWriterDouble.writer.read("Resource", "ticket")).toBe(concurrentSchema);
+      expect(soulLoader.reload).not.toHaveBeenCalled();
+
+      const currentRevision = await soulWriterDouble.writer.revision({
+        kind: "Resource",
+        slug: "ticket",
+        definitionMode: "legacy",
+      });
+      const correctedDraft = `description: stale editor description
+${concurrentSchema}`;
+      const corrected = await app.inject(
+        put({ schema: correctedDraft, revision: currentRevision ?? "" })
+      );
+      expect(corrected.statusCode).toBe(200);
+      expect(soulWriterDouble.writer.read("Resource", "ticket")).toBe(correctedDraft);
+    });
+
     it("returns 422 for a schema that is not a YAML object", async () => {
       vi.mocked(existsSync).mockReturnValue(true);
-      const res = await app.inject(put({ schema: "- a\n- b\n" }));
+      const res = await app.inject(put({ schema: "- a\n- b\n", revision: RESOURCE_REVISION }));
       expect(res.statusCode).toBe(422);
     });
 
@@ -474,7 +561,7 @@ x-computed:
         },
       });
 
-      const res = await app.inject(put({ schema: VALID_SCHEMA_YAML }));
+      const res = await app.inject(put({ schema: VALID_SCHEMA_YAML, revision: RESOURCE_REVISION }));
 
       expect(res.statusCode).toBe(422);
       expect(res.json()).toEqual({
@@ -583,7 +670,11 @@ x-computed:
         method: "PUT",
         url: "/api/v1/resource-types/salary-review",
         ...auth(sid),
-        payload: { schema: VALID_SCHEMA_YAML, domain: "engineering" },
+        payload: {
+          schema: VALID_SCHEMA_YAML,
+          revision: RESOURCE_REVISION,
+          domain: "engineering",
+        },
       });
       expect(res.statusCode).toBe(403);
       expect(soulWriterDouble.applied).toEqual([]);
@@ -603,7 +694,7 @@ x-computed:
         method: "PUT",
         url: "/api/v1/resource-types/salary-review",
         ...auth(sid),
-        payload: { schema: VALID_SCHEMA_YAML },
+        payload: { schema: VALID_SCHEMA_YAML, revision: RESOURCE_REVISION },
       });
       expect(res.statusCode).toBe(200);
 

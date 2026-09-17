@@ -7,7 +7,7 @@ function type(
   schema: string,
   extra: Partial<ResourceTypeSummary> = {}
 ): ResourceTypeSummary {
-  return { name, schema, hasHooks: false, ...extra };
+  return { name, schema, hasHooks: false, revision: "a".repeat(40), ...extra };
 }
 
 const CUSTOMER = `

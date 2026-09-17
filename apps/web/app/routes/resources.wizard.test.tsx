@@ -14,7 +14,12 @@ vi.mock("~/lib/api", async () => {
 afterEach(() => vi.clearAllMocks());
 
 function renderWizard() {
-  vi.mocked(createResourceType).mockResolvedValue({ name: "ticket", schema: "", hasHooks: false });
+  vi.mocked(createResourceType).mockResolvedValue({
+    name: "ticket",
+    schema: "",
+    hasHooks: false,
+    revision: "a".repeat(40),
+  });
   const Stub = createRemixStub([
     { path: "/", Component: () => <ResourceTypeNew /> },
     { path: "/resources", Component: () => <p>{useLocation().pathname}</p> },

@@ -76,7 +76,8 @@ PostgreSQL persistence composition, auth, Soul Git writes, and Worker callback p
 - Dependency-aware Record deletion locks every policy-participating Resource table, recomputes the
   submitted preview, and commits all Record/history/outbox writes in that one transaction.
 - A resource type schema replacement locks that type's Record table, validates every live Record
-  in bounded pages, and publishes the Soul change before releasing the lock.
+  in bounded pages, verifies the loaded artifact revision, and publishes the Soul change before
+  releasing the lock.
 - Tools return `ok(data)` or `err(code, message)`, never throw; ToolRegistry validates
   JSON Schema before execution. Read batches run in parallel; mutating batches are serial.
 - Every write to the authored Soul tree goes through `SoulWriter.apply()` (ADR-007) — routes, Tools
