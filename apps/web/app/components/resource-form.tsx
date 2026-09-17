@@ -1,4 +1,4 @@
-import { type FormEvent, useRef, useState } from "react";
+import { type FormEvent, useEffect, useId, useRef, useState } from "react";
 import { LinkCombobox } from "~/components/link-combobox";
 import { Button } from "~/components/ui/button";
 import { Link } from "~/components/ui/link";
@@ -202,6 +202,7 @@ export function ResourceForm({
   formError,
   cancelTo,
 }: ResourceFormProps) {
+  const formId = useId();
   const startingDraft = useRef(initialDraft(fields, mode, initial));
   const [values, setValues] = useState<Record<string, unknown>>(startingDraft.current.values);
   const [jsonText, setJsonText] = useState<Record<string, string>>(startingDraft.current.jsonText);
@@ -210,6 +211,8 @@ export function ResourceForm({
   );
   const [clientErrors, setClientErrors] = useState<Record<string, string>>({});
   const nativeDateInputs = useRef<Record<string, HTMLInputElement | null>>({});
+  const fieldControls = useRef(new Map<string, HTMLElement>());
+  const errorSummary = useRef<HTMLParagraphElement>(null);
   const currentDraft = draftSignature(fields, values, jsonText);
   const currentDraftRef = useRef(currentDraft);
   currentDraftRef.current = currentDraft;
@@ -217,6 +220,30 @@ export function ResourceForm({
   // A ref, not state: the `submitting` prop only disables the button one commit after the parent
   // reacts, so two submit events landing in the same task both pass an is-it-disabled check.
   const inFlight = useRef(false);
+  const displayedFieldErrors = Object.fromEntries(
+    fields.flatMap((field) => {
+      const error = fieldErrors[field.name] ?? clientErrors[field.name];
+      return error ? [[field.name, error]] : [];
+    })
+  );
+  const invalidFieldNames = fields
+    .map((field) => field.name)
+    .filter((name) => displayedFieldErrors[name] !== undefined);
+  const firstInvalidField = invalidFieldNames[0];
+  const firstInvalidError = firstInvalidField ? displayedFieldErrors[firstInvalidField] : undefined;
+  const fieldNames = new Set(fields.map((field) => field.name));
+  const unmappedErrors = Object.entries(fieldErrors).filter(([name]) => !fieldNames.has(name));
+  const unmappedErrorText = unmappedErrors.map(([name, error]) => `${name}: ${error}`).join(". ");
+  const hasErrorSummary =
+    invalidFieldNames.length > 0 || Boolean(formError) || unmappedErrors.length > 0;
+
+  useEffect(() => {
+    if (firstInvalidField && firstInvalidError) {
+      fieldControls.current.get(firstInvalidField)?.focus();
+      return;
+    }
+    if (formError || unmappedErrorText) errorSummary.current?.focus();
+  }, [firstInvalidField, firstInvalidError, formError, unmappedErrorText]);
 
   function set(name: string, value: unknown) {
     setValues((prev) => ({ ...prev, [name]: value }));
@@ -300,16 +327,30 @@ export function ResourceForm({
   return (
     <form onSubmit={(e) => void handleSubmit(e)} className="flex flex-col gap-4" noValidate>
       <UnsavedChangesDialog {...unsavedChanges} />
-      {formError ? (
-        <p className="rounded-sm border border-destructive/40 bg-destructive/5 px-3 py-2 text-destructive">
-          error: {formError}
+      {hasErrorSummary ? (
+        <p
+          ref={errorSummary}
+          role="alert"
+          tabIndex={-1}
+          className="rounded-sm border border-destructive/40 bg-destructive/5 px-3 py-2 text-destructive"
+        >
+          {formError ? `error: ${formError}. ` : null}
+          {unmappedErrors.map(([name, error]) => `${name}: ${error}. `)}
+          {invalidFieldNames.length > 0
+            ? `${invalidFieldNames.length} ${
+                invalidFieldNames.length === 1 ? "field needs" : "fields need"
+              } attention. Review the highlighted ${
+                invalidFieldNames.length === 1 ? "field" : "fields"
+              }.`
+            : null}
         </p>
       ) : null}
 
       {fields.map((field) => {
         const readOnly = mode === "edit" && field.immutable === true;
         const optionalBoolean = field.kind === "boolean" && !field.required && !readOnly;
-        const error = fieldErrors[field.name] ?? clientErrors[field.name];
+        const error = displayedFieldErrors[field.name];
+        const errorId = error ? `${formId}-${field.name}-error` : undefined;
         const label = (
           <>
             {field.name}
@@ -334,7 +375,11 @@ export function ResourceForm({
               jsonValue={jsonText[field.name]}
               multiline={isStoredMultilineString(field, initial?.[field.name])}
               readOnly={readOnly}
-              errorId={error ? `${field.name}-error` : undefined}
+              errorId={errorId}
+              controlRef={(node) => {
+                if (node) fieldControls.current.set(field.name, node);
+                else fieldControls.current.delete(field.name);
+              }}
               nativeInputRef={(node) => {
                 nativeDateInputs.current[field.name] = node;
               }}
@@ -347,7 +392,7 @@ export function ResourceForm({
               </p>
             ) : null}
             {error ? (
-              <p id={`${field.name}-error`} className="text-xs text-destructive" role="alert">
+              <p id={errorId} className="text-xs text-destructive">
                 {error}
               </p>
             ) : null}
@@ -374,6 +419,7 @@ function Field({
   multiline,
   readOnly,
   errorId,
+  controlRef,
   nativeInputRef,
   onValue,
   onJson,
@@ -384,6 +430,7 @@ function Field({
   multiline: boolean;
   readOnly: boolean;
   errorId?: string;
+  controlRef: (node: HTMLElement | null) => void;
   nativeInputRef: (node: HTMLInputElement | null) => void;
   onValue: (v: unknown) => void;
   onJson: (v: string) => void;
@@ -391,16 +438,28 @@ function Field({
   if (readOnly) {
     const display = isJsonKind(field) ? (jsonValue ?? "") : String(value ?? "-");
     if (multiline) {
-      return <Textarea id={field.name} value={display} disabled readOnly />;
+      return <Textarea ref={controlRef} id={field.name} value={display} disabled readOnly />;
     }
-    return <input id={field.name} className={inputClass} value={display} disabled readOnly />;
+    return (
+      <input
+        ref={controlRef}
+        id={field.name}
+        className={inputClass}
+        value={display}
+        disabled
+        readOnly
+      />
+    );
   }
 
   if (multiline) {
     return (
       <Textarea
+        ref={controlRef}
         id={field.name}
         required={field.required}
+        aria-invalid={errorId ? true : undefined}
+        aria-describedby={errorId}
         value={String(value ?? "")}
         onChange={(e) => onValue(e.target.value)}
       />
@@ -417,8 +476,12 @@ function Field({
         ] as const;
         return (
           <div
+            ref={controlRef}
             role="radiogroup"
             aria-labelledby={`${field.name}-label`}
+            aria-invalid={errorId ? true : undefined}
+            aria-describedby={errorId}
+            tabIndex={-1}
             className="flex w-fit items-center gap-3 rounded-sm border border-border px-3 py-2"
           >
             {choices.map((choice) => (
@@ -442,9 +505,12 @@ function Field({
       }
       return (
         <input
+          ref={controlRef}
           id={field.name}
           type="checkbox"
           className="size-4 accent-primary"
+          aria-invalid={errorId ? true : undefined}
+          aria-describedby={errorId}
           checked={Boolean(value)}
           onChange={(e) => onValue(e.target.checked)}
         />
@@ -453,10 +519,13 @@ function Field({
     case "number":
       return (
         <input
+          ref={controlRef}
           id={field.name}
           type="number"
           className={inputClass}
           required={field.required}
+          aria-invalid={errorId ? true : undefined}
+          aria-describedby={errorId}
           value={value === undefined ? "" : String(value)}
           onChange={(e) => onValue(e.target.value)}
         />
@@ -467,9 +536,12 @@ function Field({
       const hasInvalidCurrentValue = value !== undefined && selectedIndex === -1;
       return (
         <select
+          ref={controlRef}
           id={field.name}
           className={inputClass}
           required={field.required}
+          aria-invalid={errorId ? true : undefined}
+          aria-describedby={errorId}
           value={
             selectedIndex >= 0 ? `enum:${selectedIndex}` : hasInvalidCurrentValue ? "current" : ""
           }
@@ -500,7 +572,10 @@ function Field({
     case "date":
       return (
         <input
-          ref={nativeInputRef}
+          ref={(node) => {
+            nativeInputRef(node);
+            controlRef(node);
+          }}
           id={field.name}
           type={field.format === "date-time" ? "datetime-local" : "date"}
           className={inputClass}
@@ -523,15 +598,21 @@ function Field({
           value={String(value ?? "")}
           onChange={onValue}
           clearable={!field.required}
+          inputRef={controlRef}
+          aria-invalid={errorId ? true : undefined}
+          aria-describedby={errorId}
         />
       );
     case "array":
     case "object":
       return (
         <textarea
+          ref={controlRef}
           id={field.name}
           className={`${inputClass} min-h-24 font-mono`}
           placeholder={field.kind === "array" ? "[ ... ]" : "{ ... }"}
+          aria-invalid={errorId ? true : undefined}
+          aria-describedby={errorId}
           value={jsonValue ?? ""}
           onChange={(e) => onJson(e.target.value)}
         />
@@ -539,10 +620,13 @@ function Field({
     default:
       return (
         <input
+          ref={controlRef}
           id={field.name}
           type="text"
           className={inputClass}
           required={field.required}
+          aria-invalid={errorId ? true : undefined}
+          aria-describedby={errorId}
           value={String(value ?? "")}
           onChange={(e) => onValue(e.target.value)}
         />

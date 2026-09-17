@@ -1,4 +1,4 @@
-import { useEffect, useId, useMemo, useRef, useState } from "react";
+import { type Ref, useEffect, useId, useMemo, useRef, useState } from "react";
 import { listRecords } from "~/lib/api";
 import { recordLabel } from "~/lib/schema";
 
@@ -20,12 +20,18 @@ export function LinkCombobox({
   onChange,
   id,
   clearable = false,
+  inputRef,
+  "aria-invalid": ariaInvalid,
+  "aria-describedby": ariaDescribedBy,
 }: {
   target: string;
   value: string;
   onChange: (id: string) => void;
   id?: string;
   clearable?: boolean;
+  inputRef?: Ref<HTMLInputElement>;
+  "aria-invalid"?: boolean;
+  "aria-describedby"?: string;
 }) {
   const [options, setOptions] = useState<Option[]>([]);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -88,6 +94,7 @@ export function LinkCombobox({
   return (
     <div ref={rootRef} className="relative">
       <input
+        ref={inputRef}
         id={id}
         type="text"
         role="combobox"
@@ -95,6 +102,8 @@ export function LinkCombobox({
         aria-controls={listId}
         aria-autocomplete="list"
         aria-activedescendant={open && filtered[active] ? `${listId}-${active}` : undefined}
+        aria-invalid={ariaInvalid}
+        aria-describedby={ariaDescribedBy}
         autoComplete="off"
         className={`w-full rounded-sm border border-border bg-background px-3 py-2 text-sm outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50 ${
           clearable && value ? "pr-16" : ""
