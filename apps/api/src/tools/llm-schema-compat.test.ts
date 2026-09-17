@@ -2,6 +2,7 @@ import { KNOWLEDGE_TOOLS } from "@tulipfarm/knowledge";
 import { KV_TOOLS } from "@tulipfarm/kv";
 import { MEMORY_DOCUMENT_TOOLS } from "@tulipfarm/memory";
 import { describe, expect, it } from "vitest";
+import { packReadTool } from "../packs/tool";
 import { FRONTEND_TOOLS } from "../platform/frontend-tools";
 import { PLATFORM_TOOLS } from "../platform/tools";
 import { RESOURCE_TOOLS } from "../resources/tools.js";
@@ -13,6 +14,7 @@ import { SKILL_TOOLS } from "../soul/skills/tools.js";
 /* Provider schema sweep: statically registered Tool patterns must stay lookaround-free. */
 
 const ALL_TOOL_SETS: Array<[string, ReadonlyArray<{ name: string; inputSchema: unknown }>]> = [
+  ["PACK_TOOLS", [packReadTool]],
   ["MEMORY_DOCUMENT_TOOLS", MEMORY_DOCUMENT_TOOLS],
   ["KV_TOOLS", KV_TOOLS],
   ["KNOWLEDGE_TOOLS", KNOWLEDGE_TOOLS],

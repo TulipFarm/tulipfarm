@@ -315,6 +315,30 @@ export {
   validateOimFixtureSuite,
   validateOimManifest,
 } from "./oim";
+export type {
+  PackCatalogEntry,
+  PackDefinition,
+  PackPreview,
+  PackReadInput,
+  PackSource,
+  ValidatedPackDocument,
+} from "./pack";
+export {
+  PACK_CATALOG_MAX_ENTRIES,
+  PACK_CATEGORIES,
+  PACK_MAX_ARTIFACTS,
+  PACK_MAX_BYTES,
+  PACK_READ_MAX_RESULT_CHARS,
+  PACK_READ_TOOL_DECLARATION,
+  PackArtifactSchema,
+  PackCatalogEntrySchema,
+  PackCatalogSchema,
+  PackDefinitionSchema,
+  PackPreviewSchema,
+  PackSchemaRegistration,
+  PackSourceSchema,
+  validatePackDefinition,
+} from "./pack";
 export type { PlanDefinition, PlanStep, ValidatedPlanDocument } from "./plan";
 export {
   PlanDefinitionSchema,

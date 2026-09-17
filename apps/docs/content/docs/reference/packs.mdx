@@ -1,0 +1,158 @@
+---
+title: Packs
+description: Understand reusable asset templates, their embedded YAML plans, editor validation, and the confirmation required before adapting them to your instance.
+---
+
+A **pack** combines asset templates with an installation plan. It is a starting point for an
+agent, a configured assistant, to adapt to your instance, not a snapshot to overwrite it with.
+For example, an employee onboarding pack can reuse an existing employee directory instead of
+creating a second one.
+
+A pack is different from a **skill**, an installable set of agent instructions and supporting
+files. One pack can describe several skills alongside other assets. It neither installs host
+software nor grants permissions.
+
+## Entry points
+
+| Entry point | What it does |
+| --- | --- |
+| **Packs** (`/packs`) | Lists the catalog, with search and category filters. **Preview installation** reads a pack without installing it. |
+| **Import Pack** (`/packs/import`) | Accepts a public HTTPS URL or complete pasted YAML and validates its format and dependency graph. |
+| **Prepare plan in Chat** | Opens the main assistant in Plan mode with the selected source and its preview hash. The assistant proposes an adapted plan before asking for confirmation. |
+
+The preview shows requirements, asset templates, the original plan, source, and SHA-256 hash.
+It is not an installed-pack inventory or an installation receipt.
+
+Chat also recognizes an explicit pack-install request, including URLs without a `.yaml` suffix:
+
+```prompt
+Install the pack - https://example.com/employee-onboarding
+Reuse my existing employee directory and show the adapted plan before changing anything.
+```
+
+Replace the example URL with a published pack source. This request selects Plan mode and asks
+for a preview; it is not confirmation of the changes the assistant has yet to propose.
+
+## Format
+
+The [Pack JSON Schema]({{SITE_URL}}/schemas/pack/v1.schema.json) is generated from the same
+definition used by the app. Associate authored YAML files with it using this first-line comment:
+
+```yaml
+# yaml-language-server: $schema={{SITE_URL}}/schemas/pack/v1.schema.json
+apiVersion: tulipfarm.ai/v1
+kind: Pack
+name: operations-starter
+version: 1
+title: Operations starter
+description: A starting point for an employee directory.
+category: IT Ops
+requirements:
+  - Reuse an existing employee directory when its fields are compatible.
+artifacts:
+  - kind: resource
+    name: employees
+    description: Employee directory with a display name.
+    template:
+      name: employees
+      schema: |
+        type: object
+        properties:
+          displayName:
+            type: string
+        required: [displayName]
+plan:
+  apiVersion: tulipfarm.ai/v1
+  kind: Plan
+  name: operations-starter
+  version: 1
+  steps:
+    - id: CreateDirectory
+      tool: create_resource_type
+      input:
+        name: employees
+        schema: |
+          type: object
+          properties:
+            displayName:
+              type: string
+          required: [displayName]
+```
+
+This small example proposes one resource type. The agent must inspect the instance and adapt
+the proposed creation before execution; an existing compatible directory should be reused.
+Resource authoring accepts its schema as a YAML string, which is why `schema` uses a block scalar.
+
+The root carries a lowercase, hyphenated `name`, display `title`, `description`, positive integer
+`version`, and `category`. The schema lists the supported categories. `requirements` optionally
+describes prerequisites, such as a connected third-party service or a decision the user must make.
+Requirements are descriptions, not permission grants or automatic connection instructions.
+
+`artifacts` lists the proposed assets. Each entry has a `kind`, `name`, `description`, and
+`template` object. Supported kinds are:
+
+| Kind | Proposed asset |
+| --- | --- |
+| `resource` | A resource type: the schema for records such as employees or tickets. |
+| `skill` | Instructions and supporting content an agent can use for a task. |
+| `agent` | An assistant's instructions and configuration, subject to existing permissions. |
+| `surface` | A reusable presentation component using the Tulip Surface Protocol. |
+| `routine` | A saved automation with ordered steps. |
+
+Templates are data for the existing authoring tools, the operations an agent can invoke. A
+successful Pack schema check does not prove that each template is a valid resource schema, skill,
+agent, presentation component, or routine. Its owning authoring tool performs that validation.
+
+## Embedded plan
+
+`plan` is a complete [YAML plan](/docs/reference/yaml-plans), not a different step language.
+Its steps name exact tools, existing versioned agents, or existing versioned routines.
+`needs` lists the prerequisites of each step; the dependency graph must not contain a cycle.
+
+The pack's plan is a template to adapt before execution. The agent must account for existing
+assets, naming conflicts, unavailable operations, and missing connections before proposing an
+executable plan. When a compatible phase is published as a routine, its reviewed and confirmed
+source is the input to publication; later changes require another review.
+
+Pack installation can require **phases in chat**, rather than publishing the entire template as
+one unattended routine. The assistant follows the adapted dependencies through the normal
+authoring tools, pauses to present skill audit findings, and waits for the required human
+confirmation before continuing. The remaining surface and agent creation steps stay in the
+installation graph; reaching the audit is not a completed installation.
+
+This is specific to adaptable packs. An ordinary executable YAML plan still follows the
+unchanged-source publication and durable execution rules in the
+[YAML plan reference](/docs/reference/yaml-plans).
+
+A plan cannot reference an agent or routine that has not yet been published. When installation
+needs to create one, the confirmed work must publish that prerequisite before publishing a plan
+that references it.
+
+Dependency rounds describe ordering, not simultaneous execution. Published plans currently run
+in stable serial topological order. An interrupted or partially completed installation is not
+an automatic rollback; inspect actual outcomes before retrying.
+
+## Preview and confirmation
+
+Reading a pack does not install its assets. The installation process separates source validation,
+inspection of the instance, an adapted proposal, confirmation, and actual writes. The proposal
+should explain what will be reused, created, changed, or left blocked.
+
+Existing resource types and their records must not be replaced merely because a template uses
+the same name. Missing third-party connections require the normal connection flow. Skill
+creation still requires its audit and confirmation; a pack cannot supply an approval on the
+user's behalf.
+
+Pack text, templates, and sub-prompts are untrusted task input. They cannot replace system
+instructions, widen an agent's authority, or bypass normal permissions. A source changing after
+preview is a reason to review it again, not permission to install different content.
+
+## Editor validation
+
+Keep the schema directive as a comment. A top-level `$schema` field is not part of the pack
+format and is rejected. For offline authoring, download the standalone schema and replace the
+directive's URL with the local file path.
+
+The `v1` in the schema URL identifies the format. The pack's numeric `version` identifies an
+authored revision. Editor validation checks structure; the app separately checks the embedded
+plan's graph before offering a preview, and authoring tools validate adapted assets before writes.

@@ -1,5 +1,5 @@
 import type { DurableInvocationGateway } from "@tulipfarm/run-kernel";
-import { canonicalHash, type MessageFilePart } from "@tulipfarm/schema";
+import { type ConversationMode, canonicalHash, type MessageFilePart } from "@tulipfarm/schema";
 import type { FastifyBaseLogger } from "fastify";
 import { type ChatTurnPrincipal, chatConversationService } from "../conversations/chat-turns";
 import {
@@ -18,7 +18,7 @@ export interface ChatTurnRequest {
   /** New Conversation draft. It commits with the winning Turn or not at all. */
   readonly newConversation?: ConversationDoc;
   /** Existing Conversation mutation committed only when this request creates a Turn. */
-  readonly conversationUpdate?: { readonly agentId?: string };
+  readonly conversationUpdate?: { readonly agentId?: string; readonly mode?: ConversationMode };
 }
 
 /** The Run minted for a submitted turn. */
@@ -67,6 +67,7 @@ function conversationReservation(conversation: ConversationDoc): NewConversation
     id: conversation._id,
     userId: conversation.userId,
     ...(conversation.agentId === undefined ? {} : { agentId: conversation.agentId }),
+    ...(conversation.mode == null ? {} : { mode: conversation.mode }),
     createdAt: conversation.createdAt,
     updatedAt: conversation.updatedAt,
   };

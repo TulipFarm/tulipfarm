@@ -40,6 +40,8 @@ import { registerKvRoutes } from "./kv/routes";
 import { registerMemoryDocumentRoute } from "./memory/document-routes";
 import { createLogTeeStream } from "./observability/log-stream";
 import { registerObservabilityRoutes } from "./observability/routes";
+import { registerPackRoutes } from "./packs/routes";
+import { PackService } from "./packs/service";
 import { readCustomInstructions } from "./preferences/custom-instructions";
 import { registerPreferenceRoutes } from "./preferences/routes";
 import { registerResourceRoutes } from "./resources/routes";
@@ -313,6 +315,7 @@ export async function buildApp(opts: AppOptions = {}) {
       tokenRepo: opts.tokenRepo,
       ...(opts.identity?.apiClientRepo && { apiClientRepo: opts.identity.apiClientRepo }),
     });
+    registerPackRoutes(app, opts.packs ?? new PackService(), requireAuth, requireAuthorization);
     // Headless boot omits wizard routes (404), but status stays reachable.
     const soulPath = opts.gitSync?.path;
     if (soulPath) {

@@ -25,6 +25,7 @@ import {
   resolveConversationEntry,
 } from "./conversation-entry";
 import type { ConversationRepo } from "./conversations";
+import { chatRequestMode } from "./request-mode";
 import { SSE_KEEPALIVE_MS, writeSseHeaders } from "./sse";
 import { type ChatBody, ChatBodySchema, corsPassthrough } from "./turn-helpers";
 import { type ChatSubmission, durableTurnSubmitter } from "./turn-submit";
@@ -230,8 +231,10 @@ export function registerChatRoutes(
         return reply.code(entry.status).send({ error: entry.error });
       }
 
+      const mode = chatRequestMode(body.message.content, body.mode, entry.conversation.mode);
       const resolvedBody = {
         ...body,
+        ...(mode === undefined ? {} : { mode }),
         conversationId: entry.conversation._id,
         agentId: entry.agentId,
       };
@@ -241,7 +244,7 @@ export function registerChatRoutes(
         principal: { kind: principal.kind, id: principal.id, businessId: principal.businessId },
         payload: resolvedBody,
         requestFingerprintPayload: body,
-        requestMetadata: turnRequestMetadata(body, entry.conversation._id, entry.agentId),
+        requestMetadata: turnRequestMetadata(resolvedBody, entry.conversation._id, entry.agentId),
         agentId: entry.agentId,
         idempotencyKey,
         log: req.log,
@@ -256,8 +259,12 @@ export function registerChatRoutes(
           ...(entry.isNew
             ? {}
             : {
-                conversationUpdate:
-                  entry.agentIdToPersist === undefined ? {} : { agentId: entry.agentIdToPersist },
+                conversationUpdate: {
+                  ...(entry.agentIdToPersist === undefined
+                    ? {}
+                    : { agentId: entry.agentIdToPersist }),
+                  ...(mode === undefined ? {} : { mode }),
+                },
               }),
         });
       } catch (error) {

@@ -10,6 +10,7 @@
     "environment-variables",
     "routine-triggers",
     "yaml-plans",
+    "packs",
     "model-specs",
     "roles-and-permissions",
     "---For developers---",

@@ -2,6 +2,7 @@
 
 import type { ModelFailureDiagnostic } from "@tulipfarm/agent-runtime";
 import {
+  type ConversationMode,
   type ConversationTurn,
   contentText,
   type MessageContent,
@@ -105,7 +106,7 @@ export interface ConversationStore {
     readonly turn: PersistedTurn;
     readonly requestFingerprint?: string;
     readonly newConversation?: NewConversation;
-    readonly conversationUpdate?: { readonly agentId?: string };
+    readonly conversationUpdate?: { readonly agentId?: string; readonly mode?: ConversationMode };
   }): Promise<{
     readonly turn: PersistedTurn;
     readonly outcome: "created" | "replayed" | "conflict";
@@ -233,13 +234,14 @@ export interface StartTurnInput {
   /** New Chat Conversation to commit only if this request wins the idempotency claim. */
   readonly newConversation?: NewConversation;
   /** Existing Chat Conversation update to commit only if this request wins the claim. */
-  readonly conversationUpdate?: { readonly agentId?: string };
+  readonly conversationUpdate?: { readonly agentId?: string; readonly mode?: ConversationMode };
 }
 
 export interface NewConversation {
   readonly id: string;
   readonly userId: string;
   readonly agentId?: string;
+  readonly mode?: ConversationMode;
   readonly createdAt: Date;
   readonly updatedAt: Date;
 }

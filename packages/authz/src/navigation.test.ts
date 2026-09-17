@@ -68,6 +68,23 @@ test("navigation capabilities evaluate each repeated authorization once", async 
   expect(evaluated).toHaveLength(new Set(evaluated).size);
 });
 
+test("Packs navigation requires the same authority as previewing a Plan", async () => {
+  const requirement = NAVIGATION_REQUIREMENTS.find((entry) => entry.path === "/packs");
+  expect(requirement?.authorizations).toEqual([
+    { action: "platform.plan.declare", resourceType: "platform.plan", fallback: "authenticated" },
+  ]);
+  const allowed = await sessionNavigationCapabilities(
+    "member",
+    async (_principal, authorization) => authorization.action === "platform.plan.declare"
+  );
+  expect(allowed.visiblePaths).toContain("/packs");
+  const denied = await sessionNavigationCapabilities(
+    "member",
+    async (_principal, authorization) => authorization.action !== "platform.plan.declare"
+  );
+  expect(denied.visiblePaths).not.toContain("/packs");
+});
+
 test("telemetry navigation requires admin telemetry read authority", async () => {
   const path = NAVIGATION_REQUIREMENTS.find(
     (requirement) => requirement.path === "/settings/telemetry"

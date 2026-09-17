@@ -195,6 +195,37 @@ describe("PgConversationStore", () => {
     ).resolves.toMatchObject({ rows: [{ count: 0 }] });
   });
 
+  it("persists Pack Plan mode only with a winning Turn reservation", async () => {
+    const conversations = new PgConversationRepo(database as unknown as Queryable);
+    const modeStore = new PgConversationStore(
+      database as unknown as Queryable,
+      (query) => new PgMessageRepo(query),
+      (query) => new PgConversationRepo(query)
+    );
+    const request = {
+      message: {
+        id: MESSAGE_ID,
+        businessId: DEPLOYMENT_BUSINESS_ID,
+        conversationId: CONVERSATION_ID,
+        turnId: TURN_ID,
+        role: "user" as const,
+        content: textContent("Install the pack - https://example.com/support"),
+        createdAt: CREATED_AT,
+      },
+      turn: turn(),
+      conversationUpdate: { mode: "plan" as const },
+    };
+    await expect(
+      modeStore.withTransaction(async (transaction) => {
+        await transaction.reserveTurn(request);
+        throw new Error("rollback");
+      })
+    ).rejects.toThrow("rollback");
+    expect((await conversations.findById(CONVERSATION_ID))?.mode).toBeUndefined();
+    await modeStore.withTransaction((transaction) => transaction.reserveTurn(request));
+    expect((await conversations.findById(CONVERSATION_ID))?.mode).toBe("plan");
+  });
+
   it("deduplicates competing reservations before either can append twice", async () => {
     const reserve = () => {
       const turnId = randomUUID();

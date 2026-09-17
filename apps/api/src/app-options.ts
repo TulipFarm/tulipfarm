@@ -77,6 +77,7 @@ import type { ObservabilityConfig } from "./observability/config";
 import type { LogRepo } from "./observability/log-repo";
 import type { ResourceRepo } from "./observability/resource-repo";
 import type { ObservabilityService } from "./observability/service";
+import type { PackService } from "./packs/service";
 import type { RateLimiter } from "./rate-limit";
 import type { RecordAuthorizer } from "./resources/authorize";
 import type { CounterStore, ResourceRepoFactory } from "./resources/repo";
@@ -94,6 +95,7 @@ import type { TeamAssetService } from "./team-assets/service";
 import type { TriggerInvokeDeps } from "./triggers/routes";
 
 export interface AppOptions {
+  packs?: PackService;
   /** Backs the read-only Memory panel on `/settings/profile`. */
   readonly memoryDocuments?: MemoryDocumentRepo;
   /**

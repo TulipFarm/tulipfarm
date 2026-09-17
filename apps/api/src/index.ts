@@ -302,6 +302,7 @@ import { ObservabilityService } from "./observability/service";
 import { registerSpendAlertSchedule, SPEND_ALERT_QUEUE } from "./observability/spend-alert";
 import { createObservabilityTelemetryPort } from "./observability/telemetry-port";
 import { OtlpTracesExporter } from "./observability/traces";
+import { PackService } from "./packs/service";
 import { runPgMigrations } from "./pg-migrate";
 import { createAgentDelegation, startChildConversation } from "./platform/delegation";
 import { subagentAnswers } from "./platform/subagent-answers";
@@ -1821,6 +1822,7 @@ async function boot() {
         channelBindSecrets: secretsService,
       },
       rateLimiter,
+      packs: new PackService(),
       secretsService,
       gitSync,
       soulWriter,

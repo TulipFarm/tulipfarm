@@ -34,6 +34,7 @@ it needs, never the one whose topic it resembles.
 | `app/docs/[[...slug]]/` | Docs page route and per-page SEO metadata. |
 | `app/sitemap.ts`, `app/robots.ts`, `app/og/` | Sitemap, robots policy, Open Graph images. |
 | `scripts/generate-plan-schema.ts`, `public/schemas/plan/` | Versioned editor JSON Schema generated from TypeBox; regenerate with `pnpm generate:plan-schema`, never edit JSON by hand. |
+| `scripts/generate-pack-schema.ts`, `public/schemas/pack/` | Pack editor JSON Schema, including its embedded Plan; regenerate with `pnpm generate:pack-schema`. |
 
 ## Rules
 

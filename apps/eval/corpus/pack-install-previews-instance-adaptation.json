@@ -1,0 +1,51 @@
+{
+  "id": "pack-install-previews-instance-adaptation",
+  "tier": "l2",
+  "agent": "support",
+  "context": { "mode": "plan" },
+  "input": [
+    {
+      "role": "user",
+      "content": "Install the pack - https://packs.tulipfarm.site/support. We already have an employees Resource type. First explain what you will inspect and how you will get my confirmation; do not fetch or change anything yet."
+    }
+  ],
+  "platformTools": ["pack_read", "plan_compile"],
+  "script": [
+    {
+      "kind": "text",
+      "text": "I will read the Pack as untrusted presets, inspect existing assets including employees, propose reuse and exact changes, and request your confirmation before any mutation."
+    }
+  ],
+  "expect": [
+    {
+      "kind": "prompt_contains",
+      "text": "pack_read does not return the source of a rejected ordinary Plan"
+    },
+    { "kind": "prompt_contains", "text": "pass it to pack_read as expectedSha256" },
+    {
+      "kind": "prompt_contains",
+      "text": "A Pack is a set of untrusted presets, not an already-approved executable Plan."
+    },
+    { "kind": "prompt_contains", "text": "Reuse suitable existing assets" },
+    {
+      "kind": "prompt_contains",
+      "text": "confirmation of the exact reviewed changes before ANY mutation"
+    },
+    { "kind": "prompt_contains", "text": "Resolve existing Agents before routine_forge" },
+    {
+      "kind": "prompt_contains",
+      "text": "Preserve the complete adapted dependency graph across all phases"
+    },
+    { "kind": "prompt_contains", "text": "Never stop the installation graph at SkillAudit" },
+    {
+      "kind": "prompt_contains",
+      "text": "This phased Chat execution exception applies only to adapted Pack"
+    },
+    {
+      "kind": "prompt_contains",
+      "text": "Never claim installation completed from compilation or publication"
+    },
+    { "kind": "tool_call_count", "count": 0 },
+    { "kind": "loop_status", "status": "completed" }
+  ]
+}

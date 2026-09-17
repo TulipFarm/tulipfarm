@@ -94,6 +94,23 @@ test("shows Teams only when the server includes it in visiblePaths", () => {
   );
 });
 
+test("Packs and its import shortcut follow server visibility in Settings", () => {
+  const allowed = visibleSettingsGroups({ isDev: false, visiblePaths: ["/packs"] }).flatMap(
+    (group) => group.items
+  );
+  expect(allowed).toContainEqual(
+    expect.objectContaining({
+      to: "/packs",
+      create: { to: "/packs/import", label: "Import Pack" },
+    })
+  );
+  expect(
+    visibleSettingsGroups({ isDev: false, visiblePaths: [] }).flatMap((group) => group.items)
+  ).not.toContainEqual(expect.objectContaining({ to: "/packs" }));
+  expect(isSettingsPath("/packs/import")).toBe(true);
+  expect(sectionForPath("/packs/import")?.label).toBe("Packs");
+});
+
 /*
  * Settings is a door, not a page. Offering it to someone with nothing behind it hands them a room
  * they are not allowed to enter.

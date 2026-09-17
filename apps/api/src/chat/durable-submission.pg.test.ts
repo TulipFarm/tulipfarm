@@ -18,6 +18,7 @@ import {
   CHAT_REQUEST_SCHEMA_REF,
   canonicalHash,
   INVOCATION_REQUEST_SCHEMAS,
+  PACK_MAX_BYTES,
 } from "@tulipfarm/schema";
 import { DEFAULT_ASSISTANT_ID, type SoulAgent, type SoulLoader } from "@tulipfarm/soul";
 import type { PaginatedResult } from "@tulipfarm/storage";
@@ -386,6 +387,52 @@ describe("durable chat submission over HTTP", () => {
       "SELECT resolved_input FROM run_states"
     );
     expect(states.rows[0]?.resolved_input.payloadRef).toBe(`artifact:${runId}:request`);
+  });
+
+  it("carries Pack Plan mode through the durable request and confirmation follow-up", async () => {
+    autoCompleteRuns = true;
+    const response = await postChat(sid, {
+      body: {
+        message: { role: "user", content: "Install the pack - https://example.com/support" },
+      },
+    });
+    expect(response.statusCode).toBe(200);
+    const conversationId = String(response.headers["x-conversation-id"]);
+    expect((await conversationRepo.findById(conversationId))?.mode).toBe("plan");
+    const followup = await postChat(sid, {
+      idempotencyKey: "pack-confirmation",
+      body: { conversationId, message: { role: "user", content: "Confirm the reviewed changes" } },
+    });
+    expect(followup.statusCode).toBe(200);
+    const artifacts = await db.query<{ content: { mode?: string } }>(
+      "SELECT content FROM artifacts"
+    );
+    expect(artifacts.rows).toHaveLength(2);
+    expect(artifacts.rows.every((artifact) => artifact.content.mode === "plan")).toBe(true);
+  });
+
+  it("persists a complete Pack-sized pasted source without truncation", async () => {
+    autoCompleteRuns = true;
+    const prefix = "Preview this pack:\napiVersion: tulipfarm.ai/v1\nkind: Pack\n# ";
+    const source = "x".repeat(PACK_MAX_BYTES - prefix.length);
+    const content = `${prefix}${source}`;
+    const response = await postChat(sid, { body: { message: { role: "user", content } } });
+    expect(response.statusCode).toBe(200);
+    const artifacts = await db.query<{ content: { message: { content: string } } }>(
+      "SELECT content FROM artifacts"
+    );
+    expect(artifacts.rows[0]?.content.message.content).toBe(content);
+    expect(Buffer.byteLength(artifacts.rows[0]?.content.message.content ?? "")).toBe(
+      PACK_MAX_BYTES
+    );
+  });
+
+  it("refuses a Chat payload beyond the transport limit rather than truncating it", async () => {
+    const response = await postChat(sid, {
+      body: { message: { role: "user", content: "x".repeat(1024 * 1024) } },
+    });
+    expect(response.statusCode).toBe(413);
+    expect(await count("runs")).toBe(0);
   });
 
   it("rolls back Message, Turn, Run, and Artifact when submission fails after Run persistence", async () => {

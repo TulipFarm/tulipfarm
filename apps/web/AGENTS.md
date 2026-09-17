@@ -25,6 +25,7 @@ data loading, schema-driven resource UI, and browser rendering of Surface Artifa
 | `app/components/agents/` | Roster list, row, capability panel, and starters for `/agents`. |
 | `app/components/skills/` | Catalog, reach badge, capability/package/audience panels, marketplace browser. |
 | `app/components/resources/` | Stat strip, catalog table, schema summary for `/resources`. |
+| `app/routes/_app.packs*`, `app/components/packs/`, `app/lib/packs.ts` | Pack catalog/import and Plan-mode handoff: URL + expected hash, or complete YAML within the explicit message-byte cap; never truncates or installs directly. |
 | `app/components/routines/` | Catalog, row, canvas, run/dry-run, effects and bounds panels for `/routines`. |
 | `app/components/integrations/` | Compact provider rows, the blue capability banner, connection states, and the `?view=` preview sheet. `integration-card.tsx` renders a row, not a boxed card. |
 | `app/components/ui/` | Vendored shadcn primitives for this app only, plus `combobox.tsx` — hand-rolled, because `cmdk` forces its own input `id` and breaks `<label htmlFor>`. `select.tsx` is a thin native `<select>` wrapper; deprecated (see Rules), kept only until its 16 existing callers migrate. |
@@ -33,6 +34,7 @@ data loading, schema-driven resource UI, and browser rendering of Surface Artifa
 | `app/lib/resource-catalog.ts` | Joins types with record totals; derives the two-way link graph. |
 | `app/lib/routines/` | `graph.ts` projects the canvas, `facts.ts` derives every stated fact, `dry-run.ts` drives `analyze`. |
 | `app/lib/chat/`, `app/lib/surface/` | Chat SSE types/parser/reducer; Surface Protocol browser integration. |
+| `app/lib/chat/launch.ts` | Typed history-state handoff for a one-shot first Chat message; no source bodies in query strings. |
 | `app/lib/agents.ts`, `app/lib/skills.ts` | Typed API wrappers; `agent-capabilities.ts` and `skill-facts.ts` derive reach, capability facts, and grouping from declared frontmatter. |
 | `app/lib/activity-feed.ts` | Interleaves the Activity log and Runs feeds into one newest-first timeline. |
 | `app/lib/nav.ts`, `app/lib/badges.ts` | Flat sidebar/settings destinations, page titles, and mocked V1 badge counts. |

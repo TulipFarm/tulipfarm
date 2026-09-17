@@ -9,14 +9,17 @@
  *
  * Integration Tools (GitHub, Slack, Google, network) are excluded by construction — they are
  * arguments to `buildToolRegistry` and are simply not passed here — because they exist only once an
- * operator connects that provider, so no fixed list is true of every instance.
+ * operator connects that provider, so no fixed list is true of every instance. The Pack reader
+ * is included separately: it is network-hosted but does not need a provider connection.
  */
 
 import { writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { packReadTool } from "../apps/api/src/packs/tool";
 import { SURFACE_TOOLS } from "../apps/api/src/surfaces/tools";
 import { buildToolRegistry } from "../apps/api/src/tools/setup";
+import { toToolDef } from "../packages/tool-host/src";
 
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const PAGE = join(REPO_ROOT, "apps/docs/content/docs/reference/tool-catalog.mdx");
@@ -169,6 +172,7 @@ export function collectTools(): CatalogTool[] {
     surfaceComponents: present,
     platform: present,
     tasks: present,
+    network: [toToolDef(packReadTool, () => present)],
   });
 
   const known = new Set(SECTIONS.map((section) => section.area));
