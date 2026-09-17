@@ -5,6 +5,7 @@ import { analyzeHook, HookAnalysisError } from "@tulipfarm/sandbox";
 import { ajv, TulipFarmValidationError, validateResourceSchema } from "@tulipfarm/schema";
 import type { GitSyncService, SoulLoader, SoulWriter } from "@tulipfarm/soul";
 import {
+  RESOURCE_DOMAIN_RE,
   resourceDefinitionYaml,
   resourceEnvelopeError,
   resourceTypePayload,
@@ -112,7 +113,6 @@ function validateSchemaYaml(
   return { ok: true, parsed: parsed as Record<string, unknown>, yaml: schemaYaml };
 }
 
-/** These Tools never accept `domain`; Resource domain changes are admin-only. */
 const CREATE_SCHEMA = {
   type: "object",
   required: ["name", "schema"],
@@ -132,6 +132,24 @@ const CREATE_SCHEMA = {
   },
 } as const;
 
+const DOMAIN_PROPERTY = {
+  type: "string",
+  minLength: 1,
+  pattern: RESOURCE_DOMAIN_RE.source,
+  description:
+    "Access-control domain for this Resource type. Only callers with resource-domain administration authority can use this Tool.",
+} as const;
+
+const CREATE_PRIVATE_SCHEMA = {
+  type: "object",
+  required: ["name", "schema", "domain"],
+  additionalProperties: false,
+  properties: {
+    ...CREATE_SCHEMA.properties,
+    domain: DOMAIN_PROPERTY,
+  },
+} as const;
+
 const LIST_SCHEMA = {
   type: "object",
   additionalProperties: false,
@@ -139,6 +157,25 @@ const LIST_SCHEMA = {
 } as const;
 
 const SCHEMA_GET_SCHEMA = {
+  type: "object",
+  required: ["name"],
+  additionalProperties: false,
+  properties: {
+    name: { type: "string", minLength: 1, description: "Resource type name." },
+  },
+} as const;
+
+const SET_DOMAIN_SCHEMA = {
+  type: "object",
+  required: ["name", "domain"],
+  additionalProperties: false,
+  properties: {
+    name: { type: "string", minLength: 1, description: "Resource type name." },
+    domain: DOMAIN_PROPERTY,
+  },
+} as const;
+
+const CLEAR_DOMAIN_SCHEMA = {
   type: "object",
   required: ["name"],
   additionalProperties: false,
@@ -162,8 +199,11 @@ const UPDATE_SCHEMA = {
 } as const;
 
 const validateCreate = ajv.compile(CREATE_SCHEMA);
+const validateCreatePrivate = ajv.compile(CREATE_PRIVATE_SCHEMA);
 const validateList = ajv.compile(LIST_SCHEMA);
 const validateSchemaGet = ajv.compile(SCHEMA_GET_SCHEMA);
+const validateSetDomain = ajv.compile(SET_DOMAIN_SCHEMA);
+const validateClearDomain = ajv.compile(CLEAR_DOMAIN_SCHEMA);
 const validateUpdate = ajv.compile(UPDATE_SCHEMA);
 
 const createResourceType = defineApiTool<ResourceTypeToolContext>({
@@ -222,6 +262,75 @@ const createResourceType = defineApiTool<ResourceTypeToolContext>({
   },
 });
 
+const createPrivateResourceType = defineApiTool<ResourceTypeToolContext>({
+  name: "create_private_resource_type",
+  description:
+    "Create a new Resource type inside an access-control domain. Use this instead of create_resource_type when the user requires restricted records from the moment the type is created. The caller must have both Resource type creation and domain-administration authority.",
+  mutating: true,
+  tier: "system",
+  inputSchema: CREATE_PRIVATE_SCHEMA,
+  requiresApproval: false,
+  authorization: {
+    action: "soul.resource_type.create",
+    requiredActions: ["soul.resource_type.create", "soul.resource_type.set_domain"],
+    resources: ["soul.resource_type"],
+    targets: resourceTypeTargets,
+    dataClasses: ["soul_definition"],
+  },
+  handler: async (args, ctx) => {
+    if (!validateCreatePrivate(args)) {
+      return err("validation_error", firstError(validateCreatePrivate.errors));
+    }
+    const {
+      name,
+      schema: schemaYaml,
+      domain,
+    } = args as { name: string; schema: string; domain: string };
+
+    if (!NAME_RE.test(name)) return err("validation_error", "invalid resource type name");
+    if (!RESOURCE_DOMAIN_RE.test(domain)) {
+      return err("validation_error", "invalid resource type domain");
+    }
+
+    const typeDir = join(ctx.gitSync.path, "resources", name);
+    if (existsSync(typeDir)) return err("validation_error", "resource type already exists");
+
+    const validated = validateSchemaYaml(schemaYaml);
+    if (!validated.ok) return validated.result;
+    const body = resourceDefinitionYaml({ name, schema: validated.parsed, domain });
+    const envelopeError = resourceEnvelopeError(body);
+    if (envelopeError !== undefined) return err("validation_error", envelopeError);
+
+    try {
+      await ctx.soulWriter.apply({
+        subject: `soul: add private resource type ${name}`,
+        source: "agent",
+        actor: ctx.requestContext?.actor ?? SYSTEM_SOUL_COMMIT_ACTOR,
+        businessId: DEPLOYMENT_BUSINESS_ID,
+        changes: [
+          {
+            op: "put",
+            target: { kind: "Resource", slug: name },
+            content: body,
+          },
+        ],
+      });
+    } catch (e) {
+      if (e instanceof SoulWriteError) return soulWriteFault(e);
+      return err("internal_error", reason(e));
+    }
+
+    try {
+      await ctx.soulLoader.reload();
+      await ctx.reconcile?.();
+    } catch (e) {
+      return err("internal_error", reason(e));
+    }
+
+    return ok({ name, schema: schemaYaml, hasHooks: false, domain });
+  },
+});
+
 const listResourceTypes = defineApiTool<ResourceTypeToolContext>({
   name: "list_resource_types",
   description: "List all resource types defined in the soul repo.",
@@ -265,6 +374,126 @@ const resourceTypeSchema = defineApiTool<ResourceTypeToolContext>({
     if (!rt) return err("not_found", `resource type not found: ${name}`);
 
     return ok(resourceTypePayload(rt));
+  },
+});
+
+const resourceTypeSetDomain = defineApiTool<ResourceTypeToolContext>({
+  name: "resource_type_set_domain",
+  description:
+    "Set or change the access-control domain of an existing Resource type without changing its schema. This is an administrator-authorized operation.",
+  mutating: true,
+  tier: "system",
+  inputSchema: SET_DOMAIN_SCHEMA,
+  requiresApproval: false,
+  authorization: {
+    action: "soul.resource_type.set_domain",
+    resources: ["soul.resource_type"],
+    targets: resourceTypeTargets,
+    dataClasses: ["soul_definition"],
+  },
+  handler: async (args, ctx) => {
+    if (!validateSetDomain(args)) {
+      return err("validation_error", firstError(validateSetDomain.errors));
+    }
+    const { name, domain } = args as { name: string; domain: string };
+    const existing = ctx.soulLoader.resources.get(name);
+    if (!existing) return err("not_found", `resource type not found: ${name}`);
+    if (existing.domain === domain) return ok(resourceTypePayload(existing));
+
+    const body = resourceDefinitionYaml({
+      name,
+      schema: existing.schema,
+      domain,
+      hooksEnabled: existing.hooksEnabled,
+    });
+    const envelopeError = resourceEnvelopeError(body);
+    if (envelopeError !== undefined) return err("validation_error", envelopeError);
+
+    try {
+      await ctx.soulWriter.apply({
+        subject: `soul: set resource type ${name} domain to ${domain}`,
+        source: "agent",
+        actor: ctx.requestContext?.actor ?? SYSTEM_SOUL_COMMIT_ACTOR,
+        businessId: DEPLOYMENT_BUSINESS_ID,
+        changes: [
+          { op: "put", target: { kind: "Resource", slug: name }, content: body },
+          {
+            op: "delete",
+            target: { kind: "Resource", slug: name, definitionMode: "legacy" },
+          },
+        ],
+      });
+    } catch (e) {
+      if (e instanceof SoulWriteError) return soulWriteFault(e);
+      return err("internal_error", reason(e));
+    }
+
+    try {
+      await ctx.soulLoader.reload();
+    } catch (e) {
+      return err("internal_error", reason(e));
+    }
+
+    return ok({
+      name,
+      schema: resourceTypePayload(existing).schema,
+      hasHooks: existing.hasHooks,
+      domain,
+    });
+  },
+});
+
+const resourceTypeClearDomain = defineApiTool<ResourceTypeToolContext>({
+  name: "resource_type_clear_domain",
+  description:
+    "Remove the access-control domain from an existing Resource type without changing its schema, making its Records use ordinary domainless access. This is an administrator-authorized operation.",
+  mutating: true,
+  tier: "system",
+  inputSchema: CLEAR_DOMAIN_SCHEMA,
+  requiresApproval: false,
+  authorization: {
+    action: "soul.resource_type.set_domain",
+    resources: ["soul.resource_type"],
+    targets: resourceTypeTargets,
+    dataClasses: ["soul_definition"],
+  },
+  handler: async (args, ctx) => {
+    if (!validateClearDomain(args)) {
+      return err("validation_error", firstError(validateClearDomain.errors));
+    }
+    const { name } = args as { name: string };
+    const existing = ctx.soulLoader.resources.get(name);
+    if (!existing) return err("not_found", `resource type not found: ${name}`);
+    if (existing.domain === undefined) return ok(resourceTypePayload(existing));
+
+    const schemaYaml = resourceTypePayload(existing).schema;
+    try {
+      await ctx.soulWriter.apply({
+        subject: `soul: clear resource type ${name} domain`,
+        source: "agent",
+        actor: ctx.requestContext?.actor ?? SYSTEM_SOUL_COMMIT_ACTOR,
+        businessId: DEPLOYMENT_BUSINESS_ID,
+        changes: [
+          {
+            op: "put",
+            target: { kind: "Resource", slug: name, definitionMode: "legacy" },
+            content: schemaYaml,
+          },
+          { op: "delete", target: { kind: "Resource", slug: name } },
+        ],
+      });
+    } catch (e) {
+      if (e instanceof SoulWriteError) return soulWriteFault(e);
+      return err("internal_error", reason(e));
+    }
+
+    try {
+      await ctx.soulLoader.reload();
+    } catch (e) {
+      return err("internal_error", reason(e));
+    }
+
+    return ok({ name, schema: schemaYaml, hasHooks: existing.hasHooks });
   },
 });
 
@@ -567,8 +796,11 @@ const deleteResourceHooks = defineApiTool<ResourceTypeToolContext>({
 
 export const RESOURCE_TYPE_TOOLS: ApiToolDefinition<ResourceTypeToolContext>[] = [
   createResourceType,
+  createPrivateResourceType,
   listResourceTypes,
   resourceTypeSchema,
+  resourceTypeSetDomain,
+  resourceTypeClearDomain,
   resourceTypeUpdate,
   createResourceHooks,
   getResourceHooks,

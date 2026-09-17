@@ -70,7 +70,9 @@ Asked for a Resource type, Agent, Skill, Routine, Surface component, or first-ti
 - Load the forge Skill first and follow it: \`skill\` with resource-forge, skill-forge, agent-forge, routine-forge, surface-component-forge, or onboarding. Load each one once — a Skill you have loaded stays in front of you for the rest of the Turn, so loading it again returns the same text and buys nothing.
 - One exception avoids needless model round trips: when the user gives an exact Resource type name,
   a complete field list with constraints, asks to create it now, and requests no links or hooks,
-  call \`create_resource_type\` directly. Use \`<available-resources>\` for overlap awareness; do not
+  call \`create_resource_type\` directly. If the request names an access-control domain, call
+  \`create_private_resource_type\` instead so the type is protected from its first write. Use
+  \`<available-resources>\` for overlap awareness; do not
   list, pre-validate, or re-read it. The write validates atomically and returns the saved Schema
   after reload and reconciliation, so that result is the requested verification.
 - One artifact at a time, in dependency order: Resource types, then Skills, then Agents, then Routines. A schema must exist before an Agent references it; a Tool or Agent must exist before a Routine calls it.

@@ -257,12 +257,13 @@ describe("published contract projection", () => {
     expect(rejected).toEqual([]);
   });
 
-  it("projects the declared authorization action as the only required action", () => {
+  it("projects each Tool's declared authorization actions", () => {
     const incoherent: string[] = [];
     const declarativeActions: string[] = [];
 
     for (const { family, definition } of allDefinitions()) {
       const declared = definition.authorization.action;
+      const declaredRequired = definition.authorization.requiredActions ?? [declared];
       const projected = toolContractSpecOf(definition);
       const requiredActions = projected.requiredActions ?? [];
       if (family === "declarative") declarativeActions.push(declared);
@@ -271,11 +272,11 @@ describe("published contract projection", () => {
         incoherent.push(`${family}/${definition.name}: action ${projected.action} !== ${declared}`);
       }
 
-      if (!sameStrings(requiredActions, [declared])) {
+      if (!sameStrings(requiredActions, declaredRequired)) {
         incoherent.push(
           `${family}/${definition.name}: requiredActions ${JSON.stringify(
             requiredActions
-          )} !== ${declared}`
+          )} !== ${JSON.stringify(declaredRequired)}`
         );
       }
     }

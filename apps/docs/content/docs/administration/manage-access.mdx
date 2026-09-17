@@ -78,6 +78,23 @@ in it changes with it.
 A team can sit under one parent team, and access from the parent flows down. A team membership can
 be given an expiry, which is useful for contractors and for temporary access during an incident.
 
+## Keep a resource type inside one domain
+
+A **domain** is an access boundary around a resource type and all of its records. People without a
+matching domain grant cannot read, create, change, or search those records.
+
+Open **Chat** and name the domain when you ask for the resource type:
+
+```prompt
+Create a salary-review resource type with a required title and optional notes.
+Put it in the hr domain so people without that domain grant cannot read or write
+its records. Do not create a domainless substitute.
+```
+
+TulipFarm creates the protected definition in one step. Only Admin and Owner accounts can create a
+resource type this way, move an existing type to another domain, or remove its domain. Creating a
+domainless resource type remains ordinary shared behavior.
+
 ## Deprecated API names
 
 Older automation may still call the old `group` API names for one release after the Team API

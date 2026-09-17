@@ -110,7 +110,7 @@ export const ADMIN_ONLY_SURFACES: readonly {
       "soul.resource_type.hooks.update",
       "soul.resource_type.hooks.delete",
     ],
-    enforcedIn: "soul/resource-types/routes.ts",
+    enforcedIn: "soul/resource-types/routes.ts; soul/resource-types/tools.ts",
   },
   /** Skill authoring requires an explicit Team-level grant; members keep read-only listing. */
   {

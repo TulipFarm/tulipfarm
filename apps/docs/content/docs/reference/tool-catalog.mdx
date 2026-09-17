@@ -45,6 +45,7 @@ Changing the soul, the git-backed definitions of what your instance is and what 
 | `agent_get` | No | Get an agent's frontmatter and markdown body from the soul. |
 | `agent_list` | No | List all agents defined in the soul repo. |
 | `agent_update` | Yes | Update an existing agent's body and/or frontmatter. |
+| `create_private_resource_type` | Yes | Create a new Resource type inside an access-control domain. |
 | `create_resource_hooks` | Yes | Create or replace a hooks.ts file for a resource type. |
 | `create_resource_type` | Yes | Create a new resource type from a JSON Schema YAML string. |
 | `get_business_profile` | No | Read the business you work for: its name, what it does, and its website. |
@@ -56,7 +57,9 @@ Changing the soul, the git-backed definitions of what your instance is and what 
 | `list_resource_types` | No | List all resource types defined in the soul repo. |
 | `resource_hooks_delete` | Yes | Remove the hooks.ts file for a resource type. |
 | `resource_hooks_get` | No | Get the hooks.ts source for a resource type, or null if none exists. |
+| `resource_type_clear_domain` | Yes | Remove the access-control domain from an existing Resource type without changing its schema, making its Records use ordinary domainless access. |
 | `resource_type_schema` | No | Get the JSON Schema (as a YAML string) for a single resource type. |
+| `resource_type_set_domain` | Yes | Set or change the access-control domain of an existing Resource type without changing its schema. |
 | `resource_type_update` | Yes | Replace the schema of an existing resource type. |
 | `skill_create` | Yes | Create a new Skill. |
 | `skill_delete` | Yes | Delete a Skill from the merged view. |
