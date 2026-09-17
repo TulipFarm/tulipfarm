@@ -40,6 +40,26 @@ required: [title]
 if (!parsed.ok) throw new Error(parsed.error);
 const fields = formFields(parsed.schema);
 
+const nestedParsed = parseSchema(`
+type: object
+x-id-strategy: { sequence: true, field: id }
+properties:
+  id: { type: string }
+  metadata:
+    type: object
+    properties:
+      address:
+        type: object
+        properties:
+          city: { type: string }
+          postcode: { type: string }
+        additionalProperties: false
+    required: [address]
+required: [metadata]
+`);
+if (!nestedParsed.ok) throw new Error(nestedParsed.error);
+const nestedFields = formFields(nestedParsed.schema);
+
 const booleanParsed = parseSchema(`
 type: object
 x-id-strategy: { sequence: true, field: id }
@@ -331,6 +351,70 @@ test("create: a 422 maps the error path onto the offending field", async () => {
   fireEvent.click(screen.getByRole("button", { name: "Create" }));
 
   expect(await screen.findByText("must be a string")).toBeInTheDocument();
+});
+
+test.each([
+  ["/metadata/address/postcode", "metadata.address.postcode: must be string"],
+  ["/metadata/address/city", "metadata.address.city: must have required property 'city'"],
+  [
+    "/metadata/address/legacy~1code",
+    'metadata.address["legacy/code"]: must NOT have additional properties',
+  ],
+  ["/metadata/contacts/0/postcode", "metadata.contacts[0].postcode: must be string"],
+])("create: a nested 422 shows the full path under its top-level field", async (path, message) => {
+  vi.mocked(createRecord).mockRejectedValue(
+    new ApiError(422, message.split(": ").at(-1) ?? "", path)
+  );
+  renderRoute(<ResourceCreate />, {
+    type: "customer",
+    fields: nestedFields,
+    schemaError: undefined,
+  });
+
+  const metadata = document.querySelector("textarea#metadata") as HTMLTextAreaElement;
+  fireEvent.change(metadata, {
+    target: { value: '{"address":{"city":"London","postcode":123}}' },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Create" }));
+
+  expect(await screen.findByText(message)).toBeInTheDocument();
+  expect(metadata.value).toBe('{"address":{"city":"London","postcode":123}}');
+  expect(screen.queryByText(/^destination:/)).not.toBeInTheDocument();
+});
+
+test("create: correcting nested data after a 422 creates the Record normally", async () => {
+  vi.mocked(createRecord)
+    .mockRejectedValueOnce(new ApiError(422, "must be string", "/metadata/address/postcode"))
+    .mockResolvedValueOnce({
+      id: "CUSTOMER-1",
+      version: 1,
+      createdAt: "",
+      updatedAt: "",
+    });
+  renderRoute(<ResourceCreate />, {
+    type: "customer",
+    fields: nestedFields,
+    schemaError: undefined,
+  });
+
+  const metadata = document.querySelector("textarea#metadata") as HTMLTextAreaElement;
+  fireEvent.change(metadata, {
+    target: { value: '{"address":{"city":"London","postcode":123}}' },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Create" }));
+  expect(await screen.findByText("metadata.address.postcode: must be string")).toBeInTheDocument();
+
+  fireEvent.change(metadata, {
+    target: { value: '{"address":{"city":"London","postcode":"00123"}}' },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Create" }));
+
+  expect(
+    await screen.findByText("destination: /resources/customer/CUSTOMER-1")
+  ).toBeInTheDocument();
+  expect(createRecord).toHaveBeenLastCalledWith("customer", {
+    metadata: { address: { city: "London", postcode: "00123" } },
+  });
 });
 
 test("create: a uniqueness conflict keeps the server advice and the draft", async () => {
