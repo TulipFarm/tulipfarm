@@ -80,6 +80,7 @@ import type { ObservabilityService } from "./observability/service";
 import type { RateLimiter } from "./rate-limit";
 import type { RecordAuthorizer } from "./resources/authorize";
 import type { CounterStore, ResourceRepoFactory } from "./resources/repo";
+import type { ResourceSchemaCompatibility } from "./resources/schema-compatibility";
 import type { CanonicalRoutineAuthoringService } from "./routines/authoring";
 import type { RoutineDetailDeps } from "./routines/detail-routes";
 import type { RunEventRouteDeps } from "./runs/events";
@@ -186,6 +187,7 @@ export interface AppOptions {
    */
   authorizationGate?: AuthorizationGateOptions;
   reconcileResources?: () => Promise<void>;
+  resourceSchemaCompatibility?: ResourceSchemaCompatibility;
   /**
    * Projects authored Soul Roles into durable rows. Wired alongside `gitSync` + `toolRegistry` to
    * enable the access-level authoring routes; absent leaves them unregistered, so a deployment
