@@ -1,0 +1,89 @@
+{
+  "id": "successful-write-survives-output-redaction",
+  "tier": "l3",
+  "agent": "support",
+  "input": [
+    {
+      "role": "user",
+      "content": "Create one Customer Record and confirm whether the change completed."
+    }
+  ],
+  "tools": [
+    {
+      "name": "record_create",
+      "description": "Create one Customer Record.",
+      "mutating": true,
+      "inputSchema": {
+        "type": "object",
+        "required": ["type", "fields"],
+        "properties": {
+          "type": { "type": "string" },
+          "fields": { "type": "object" }
+        }
+      }
+    }
+  ],
+  "toolResults": [
+    {
+      "name": "record_create",
+      "output": {
+        "id": "customer-1",
+        "version": 1,
+        "card": "4111 1111 1111 1111"
+      }
+    }
+  ],
+  "script": [
+    {
+      "kind": "tool_calls",
+      "calls": [
+        {
+          "callId": "c1",
+          "name": "record_create",
+          "arguments": {
+            "type": "customer",
+            "fields": {
+              "name": "Example Customer"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "kind": "text",
+      "text": "Saved customer-1 with card 4111 1111 1111 1111."
+    }
+  ],
+  "expect": [
+    {
+      "kind": "tool_called",
+      "name": "record_create"
+    },
+    {
+      "kind": "guardrail_blocked",
+      "stage": "output",
+      "guard": "content_filter"
+    },
+    {
+      "kind": "output_contains",
+      "text": "A write operation completed successfully.",
+      "ungrounded": "This is deterministic runtime confirmation derived from a successful mutating Tool result."
+    },
+    {
+      "kind": "output_omits",
+      "text": "4111 1111 1111 1111"
+    },
+    {
+      "kind": "run_event_text_omits",
+      "text": "4111 1111 1111 1111"
+    },
+    {
+      "kind": "loop_status",
+      "status": "completed"
+    },
+    {
+      "kind": "run_status",
+      "status": "succeeded"
+    }
+  ]
+}

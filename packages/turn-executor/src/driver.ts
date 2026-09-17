@@ -235,7 +235,8 @@ export class TurnDriver {
         request,
         events,
         await this.options.states.settle(stateRequest, guarded.message),
-        spend
+        spend,
+        context.tools
       );
     }
 
@@ -343,7 +344,7 @@ export class TurnDriver {
       return current ? { status: "waiting" } : { status: "succeeded" };
     }
 
-    return this.complete(request, events, result, spend);
+    return this.complete(request, events, result, spend, context.tools);
   }
 
   /**
@@ -422,10 +423,11 @@ export class TurnDriver {
     request: TurnRequest,
     events: TurnEventWriter,
     result: Extract<AgentStateResult, { status: "succeeded" | "failed" | "input_required" }>,
-    spend: TurnSpendScope
+    spend: TurnSpendScope,
+    tools: ResolvedTurnContext["tools"]
   ): Promise<RunOutcome> {
     assertRunActive(request.signal);
-    const outcome = await this.guardOutput(turnOutcome(result), events);
+    const outcome = await this.guardOutput(turnOutcome(result), events, tools);
     assertRunActive(request.signal);
     const text =
       outcome.status === "succeeded" || outcome.status === "input_required"
@@ -478,10 +480,28 @@ export class TurnDriver {
   }
 
   /** Guard output before it is durable; blocked answers are replaced, not dropped. */
-  private async guardOutput(outcome: TurnOutcome, events: TurnEventWriter): Promise<TurnOutcome> {
+  private async guardOutput(
+    outcome: TurnOutcome,
+    events: TurnEventWriter,
+    tools: ResolvedTurnContext["tools"]
+  ): Promise<TurnOutcome> {
     if (outcome.status !== "succeeded" && outcome.status !== "input_required") return outcome;
     const guarded = await this.options.guardrails.output(outcome.text, events);
-    return { ...outcome, text: guarded.blocked ? guarded.message : guarded.text };
+    const screened = { ...outcome, text: guarded.blocked ? guarded.message : guarded.text };
+    const block = this.options.guardrails.takeOutputBlock();
+    if (block === undefined || screened.text !== block.message) return screened;
+    const mutating = new Set(
+      tools.filter((tool) => tool.mutating === true).map((tool) => tool.name)
+    );
+    const completedChange = events.toolCalls.some(
+      (call) => call.outcome === "ok" && mutating.has(call.name)
+    );
+    return {
+      ...screened,
+      text: completedChange
+        ? `A write operation completed successfully. ${block.message}`
+        : block.message,
+    };
   }
 
   private async finish(

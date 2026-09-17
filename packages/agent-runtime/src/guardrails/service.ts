@@ -11,6 +11,25 @@ type ServiceLogger = { warn: (obj: unknown, msg?: string) => void };
 
 const NOOP_LOGGER: ServiceLogger = { warn() {} };
 
+export interface ResolvedGuardrailsConfig {
+  readonly config: GuardrailsConfig;
+  readonly source: "custom" | "default";
+}
+
+/** Resolves the exact effective policy used by the runtime, including its fail-safe fallback. */
+export function resolveGuardrailsConfig(
+  raw: Record<string, unknown> | null,
+  log: ServiceLogger = NOOP_LOGGER
+): ResolvedGuardrailsConfig {
+  if (raw == null) return { config: DEFAULT_GUARDRAILS, source: "default" };
+  try {
+    return { config: validateGuardrailsConfig(raw), source: "custom" };
+  } catch (err) {
+    log.warn({ err }, "guardrails config invalid — using default policy");
+    return { config: DEFAULT_GUARDRAILS, source: "default" };
+  }
+}
+
 /** Owns the four guard stages; invalid or absent config falls back to defaults. */
 export class GuardrailsService {
   private log: ServiceLogger = NOOP_LOGGER;
@@ -32,18 +51,7 @@ export class GuardrailsService {
 
   init(raw: Record<string, unknown> | null, log: ServiceLogger): void {
     this.log = log;
-
-    let cfg: GuardrailsConfig;
-    if (raw == null) {
-      cfg = DEFAULT_GUARDRAILS;
-    } else {
-      try {
-        cfg = validateGuardrailsConfig(raw);
-      } catch (err) {
-        log.warn({ err }, "guardrails config invalid — using default policy");
-        cfg = DEFAULT_GUARDRAILS;
-      }
-    }
+    const { config: cfg } = resolveGuardrailsConfig(raw, log);
 
     const input = (cfg.input ?? []).map((c) => makePromptInjectionGuard(c));
     const toolCall = (cfg["tool-call"] ?? []).map((c) => makeToolBlocklistGuard(c));

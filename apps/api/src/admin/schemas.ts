@@ -279,10 +279,26 @@ export const AdminTeamMigrationReportResponsesSchema = {
 
 export const AdminGuardrailsResponseSchema = {
   type: "object",
-  required: ["revision", "items"],
+  additionalProperties: false,
+  required: ["revision", "source", "items"],
   properties: {
     revision: { type: "string" },
-    items: { type: "array", items: { type: "object", additionalProperties: true } },
+    source: { type: "string", enum: ["custom", "default"] },
+    items: {
+      type: "array",
+      items: {
+        type: "object",
+        additionalProperties: false,
+        required: ["id", "name", "scope", "source", "policy"],
+        properties: {
+          id: { type: "string" },
+          name: { type: "string" },
+          scope: { type: "string", enum: ["input", "tool-call", "tool-result", "output"] },
+          source: { type: "string", enum: ["custom", "default"] },
+          policy: { type: "object", additionalProperties: true },
+        },
+      },
+    },
   },
 } as const;
 

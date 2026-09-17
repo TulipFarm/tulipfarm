@@ -2,14 +2,17 @@ import { apiCommand, apiGet } from "./api";
 
 export type GuardrailItem = {
   id: string;
-  name?: string;
+  name: string;
+  source: "custom" | "default";
+  policy: Record<string, unknown>;
   enabled?: boolean;
   effect?: string;
-  scope?: string;
+  scope: string;
 };
 
 export type GuardrailsModel = {
   revision: string;
+  source: "custom" | "default";
   items: GuardrailItem[];
 };
 

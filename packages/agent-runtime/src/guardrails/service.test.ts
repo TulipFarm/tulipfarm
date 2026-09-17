@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, type Mock, vi } from "vitest";
 import { DEFAULT_GUARDRAILS } from "./default-policy";
 import type { GuardContext } from "./pipeline";
-import { GuardrailsService } from "./service";
+import { GuardrailsService, resolveGuardrailsConfig } from "./service";
 
 const ctx: GuardContext = {
   userId: "u1",
@@ -15,6 +15,13 @@ beforeEach(() => {
 });
 
 describe("GuardrailsService.init(null) — default policy", () => {
+  it("identifies the default policy as the effective source", () => {
+    expect(resolveGuardrailsConfig(null)).toEqual({
+      config: DEFAULT_GUARDRAILS,
+      source: "default",
+    });
+  });
+
   it("exposes the documented default policy", () => {
     expect(DEFAULT_GUARDRAILS).toEqual({
       input: [{ guard: "prompt_injection", sensitivity: "medium" }],
@@ -63,6 +70,11 @@ describe("GuardrailsService.init(null) — default policy", () => {
 });
 
 describe("GuardrailsService.init(valid partial) — built from config", () => {
+  it("identifies a valid supplied policy as custom", () => {
+    const config = { output: [{ guard: "content_filter" as const, patterns: ["ssn" as const] }] };
+    expect(resolveGuardrailsConfig(config)).toEqual({ config, source: "custom" });
+  });
+
   it("only wires the stages present in the config", async () => {
     const svc = new GuardrailsService();
     svc.init({ output: [{ guard: "content_filter", patterns: ["ssn"] }] }, log);
@@ -80,6 +92,13 @@ describe("GuardrailsService.init(valid partial) — built from config", () => {
 });
 
 describe("GuardrailsService.init(invalid) — fail-safe to default", () => {
+  it("identifies the fallback policy as the effective source", () => {
+    expect(resolveGuardrailsConfig({ input: [{ guard: "nope" }] }, log)).toEqual({
+      config: DEFAULT_GUARDRAILS,
+      source: "default",
+    });
+  });
+
   it("warns once and falls back to the default policy", async () => {
     const svc = new GuardrailsService();
     svc.init({ input: [{ guard: "nope" }] }, log);

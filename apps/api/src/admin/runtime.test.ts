@@ -27,7 +27,8 @@ function runtime(
   routineSignalResult: "resumed" | "already_settled" = "resumed",
   settledDecision?: "approved" | "denied",
   authorizationCheck?: AuthorizationCheck,
-  runContext?: RunContextReader
+  runContext?: RunContextReader,
+  guardrailsConfig: unknown = { input: [{ guard: "prompt_injection", sensitivity: "high" }] }
 ) {
   const signal = vi.fn(async () => toolSignalResult);
   const routineSignal = vi.fn(async () => routineSignalResult);
@@ -166,7 +167,7 @@ function runtime(
         },
       },
     ],
-    guardrailsConfig: () => ({ input: { enabled: true } }),
+    guardrailsConfig: () => guardrailsConfig,
     teamMigrationReport: vi.fn(async () => ({
       items: [
         {
@@ -203,6 +204,29 @@ function runtime(
 }
 
 describe("runtime operational API", () => {
+  it("reports effective built-in Guardrails when the Soul has no custom policy", async () => {
+    const { api } = runtime(false, "resumed", "resumed", undefined, undefined, undefined, null);
+
+    await expect(
+      api.getGuardrails({
+        businessId: "tulipfarm-local",
+        principalId: "user-1",
+        permissions: ["guardrails:read"],
+      })
+    ).resolves.toMatchObject({
+      source: "default",
+      items: expect.arrayContaining([
+        expect.objectContaining({
+          name: "content_filter",
+          scope: "output",
+          policy: expect.objectContaining({
+            patterns: expect.arrayContaining(["email"]),
+          }),
+        }),
+      ]),
+    });
+  });
+
   it("resolves optional detail context with the authenticated principal, never a synthetic grant", async () => {
     const get = vi.fn(async () => ({ relatedRuns: [] }));
     const { api } = runtime(false, "resumed", "resumed", undefined, undefined, { get });

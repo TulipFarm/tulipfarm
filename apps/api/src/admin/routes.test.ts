@@ -96,7 +96,7 @@ function deps(overrides: Partial<OperationalApiDeps> = {}): OperationalApiDeps {
         },
       ],
     }),
-    getGuardrails: async () => ({ revision: "guardrail-7", items: [] }),
+    getGuardrails: async () => ({ revision: "guardrail-7", source: "custom", items: [] }),
     proposeGuardrailChangeset: async () => ({
       changesetId: "changeset-1",
       status: "validated" as const,

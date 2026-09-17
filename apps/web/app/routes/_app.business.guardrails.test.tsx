@@ -17,12 +17,29 @@ function renderPage() {
   return render(<Stub initialEntries={["/business/guardrails"]} />);
 }
 
-test("offers a create path even when no guardrail is configured yet", async () => {
-  vi.mocked(getGuardrails).mockResolvedValue({ revision: "abc1234def", items: [] });
+test("shows effective defaults and keeps the create path available", async () => {
+  vi.mocked(getGuardrails).mockResolvedValue({
+    revision: "abc1234def",
+    source: "default",
+    items: [
+      {
+        id: "output:0:content_filter",
+        name: "content_filter",
+        scope: "output",
+        source: "default",
+        policy: {
+          guard: "content_filter",
+          patterns: ["credit_card", "ssn", "api_key", "email"],
+        },
+      },
+    ],
+  });
 
   renderPage();
 
-  expect(await screen.findByText("No guardrails configured.")).toBeInTheDocument();
+  expect(await screen.findByText(/Built-in defaults are active/)).toBeInTheDocument();
+  expect(screen.getByText("Email addresses")).toBeInTheDocument();
+  expect(screen.getByText("Built-in")).toBeInTheDocument();
   const add = screen.getByRole("link", { name: "Add guardrail" });
   // The composer is the authoring surface; the page never posts a policy of its own.
   expect(add).toHaveAttribute("href", expect.stringContaining("/?draft="));
@@ -32,11 +49,21 @@ test("offers a create path even when no guardrail is configured yet", async () =
 test("keeps the create path available beside configured guardrails", async () => {
   vi.mocked(getGuardrails).mockResolvedValue({
     revision: "abc1234def",
-    items: [{ id: "tool-call", name: "tool-call" }],
+    source: "custom",
+    items: [
+      {
+        id: "tool-call:0:tool_blocklist",
+        name: "tool_blocklist",
+        scope: "tool-call",
+        source: "custom",
+        policy: { guard: "tool_blocklist", block: ["run_command"] },
+      },
+    ],
   });
 
   renderPage();
 
-  expect(await screen.findByText("tool-call")).toBeInTheDocument();
+  expect(await screen.findByText("tool_blocklist")).toBeInTheDocument();
+  expect(screen.getByText(/Custom Soul policy is active/)).toBeInTheDocument();
   expect(screen.getByRole("link", { name: "Add guardrail" })).toBeInTheDocument();
 });

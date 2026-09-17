@@ -697,12 +697,110 @@ describe("TurnDriver", () => {
 
     expect(await driver.run(request())).toEqual({ status: "succeeded" });
     expect(store.messages).toMatchObject([
-      { content: "The response was blocked by a content guardrail.", attempt: 1 },
+      {
+        content:
+          "The content_filter:email guardrail hid the response details. " +
+          "Check the relevant page, or ask again without email addresses.",
+        attempt: 1,
+      },
     ]);
     expect(events.appended.at(-3)).toEqual({
       eventType: "guardrail.blocked",
       payload: { stage: "output", reason: "content_filter:email" },
     });
+  });
+
+  it("confirms a successful mutation when its response details are blocked", async () => {
+    let writer: TurnEventWriter | undefined;
+    const { driver, events, store } = harness(
+      async () => {
+        if (writer === undefined) throw new Error("writer was not built before the loop ran");
+        await writer.emit(
+          "tool.call",
+          { callId: "call-1", name: "record_create", argsDigest: "sha256:args" },
+          "tool:call:call-1"
+        );
+        await writer.emit("tool.result", { callId: "call-1", status: "ok" }, "tool:result:call-1");
+        return {
+          status: "completed",
+          output: "Saved the Record for leak@example.com.",
+          ...counters,
+        };
+      },
+      {
+        context: {
+          tools: [
+            {
+              name: "record_create",
+              inputSchema: { type: "object" },
+              mutating: true,
+              tier: "write",
+            },
+          ],
+        },
+        onWriter: (built) => (writer = built),
+      }
+    );
+
+    await expect(driver.run(request())).resolves.toEqual({ status: "succeeded" });
+    expect(store.messages).toMatchObject([
+      {
+        content:
+          "A write operation completed successfully. The content_filter:email guardrail hid " +
+          "the response details. Check the relevant page, or ask again without email addresses.",
+      },
+    ]);
+    expect(store.messages[0]?.content).not.toContain("leak@example.com");
+    expect(events.appended).toContainEqual({
+      eventType: "guardrail.blocked",
+      payload: { stage: "output", reason: "content_filter:email" },
+    });
+  });
+
+  it("does not confirm a mutation whose Tool result failed", async () => {
+    let writer: TurnEventWriter | undefined;
+    const { driver, store } = harness(
+      async () => {
+        if (writer === undefined) throw new Error("writer was not built before the loop ran");
+        await writer.emit(
+          "tool.call",
+          { callId: "call-1", name: "record_create", argsDigest: "sha256:args" },
+          "tool:call:call-1"
+        );
+        await writer.emit(
+          "tool.result",
+          { callId: "call-1", status: "error", errorCode: "validation_error" },
+          "tool:result:call-1"
+        );
+        return {
+          status: "completed",
+          output: "Could not save the Record for leak@example.com.",
+          ...counters,
+        };
+      },
+      {
+        context: {
+          tools: [
+            {
+              name: "record_create",
+              inputSchema: { type: "object" },
+              mutating: true,
+              tier: "write",
+            },
+          ],
+        },
+        onWriter: (built) => (writer = built),
+      }
+    );
+
+    await expect(driver.run(request())).resolves.toEqual({ status: "succeeded" });
+    expect(store.messages).toMatchObject([
+      {
+        content:
+          "The content_filter:email guardrail hid the response details. " +
+          "Check the relevant page, or ask again without email addresses.",
+      },
+    ]);
   });
 
   it("refuses to run a turn whose evidence names a policy it is not enforcing", async () => {
