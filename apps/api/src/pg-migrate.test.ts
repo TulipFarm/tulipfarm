@@ -1,7 +1,11 @@
 import type { PGlite } from "@electric-sql/pglite";
 import { DEPLOYMENT_BUSINESS_ID } from "@tulipfarm/constants";
 import { recoverQuarantinedOimRelease } from "@tulipfarm/integrations";
-import { OimReleaseTrustStore, transactionPort } from "@tulipfarm/storage";
+import {
+  CHANNEL_RUN_DELIVERY_STORAGE_STATEMENTS,
+  OimReleaseTrustStore,
+  transactionPort,
+} from "@tulipfarm/storage";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Queryable } from "./db";
 import { runPgMigrations } from "./pg-migrate";
@@ -110,6 +114,29 @@ async function seedOimReleaseProvenanceAlterTarget(db: PGlite): Promise<void> {
   )`);
 }
 
+async function seedChannelRunDeliveryAlterTarget(db: PGlite): Promise<void> {
+  for (const statement of CHANNEL_RUN_DELIVERY_STORAGE_STATEMENTS) {
+    await db.query(statement);
+  }
+}
+
+async function seedKnowledgeSubscriptionSourceTarget(db: PGlite, version: number): Promise<void> {
+  await db.query(`CREATE TABLE IF NOT EXISTS knowledge_source_records (
+    business_id text NOT NULL,
+    source_id text NOT NULL,
+    integration_id text,
+    PRIMARY KEY (business_id, source_id)
+  )`);
+  await db.query(`ALTER TABLE knowledge_source_records
+    ADD COLUMN IF NOT EXISTS classification text[] NOT NULL DEFAULT '{}',
+    ADD COLUMN IF NOT EXISTS access_control_mode text,
+    ADD COLUMN IF NOT EXISTS access_control_max_age_seconds integer`);
+  if (version >= 112) {
+    await db.query(`ALTER TABLE knowledge_source_records
+      ADD COLUMN IF NOT EXISTS source_locator jsonb`);
+  }
+}
+
 describe("the migration ledger is append-only", () => {
   it("assigns every migration a distinct version", () => {
     const seen = new Map<number, string[]>();
@@ -139,6 +166,7 @@ describe("runPgMigrations", () => {
 
   beforeEach(async () => {
     db = await makePglite();
+    await seedChannelRunDeliveryAlterTarget(db);
   });
 
   afterEach(async () => {
@@ -171,6 +199,7 @@ describe("runPgMigrations", () => {
       );
       INSERT INTO schema_version (id, version) VALUES (true, 111);
     `);
+    await seedKnowledgeSubscriptionSourceTarget(db, 111);
 
     await runPgMigrations(db, undefined, () => {});
     await expect(runPgMigrations(db, undefined, () => {})).resolves.toBeUndefined();
@@ -236,6 +265,7 @@ describe("runPgMigrations", () => {
 
   it("upgrades ingress lifecycle storage from version 116 and is then repeat-safe", async () => {
     await seedOimReleaseProvenanceAlterTarget(db);
+    await seedKnowledgeSubscriptionSourceTarget(db, 116);
     await db.exec(`
       CREATE TABLE connections (
         business_id text NOT NULL,
@@ -315,6 +345,7 @@ describe("runPgMigrations", () => {
 
   it("upgrades OIM Knowledge publication fencing from version 117 and is then repeat-safe", async () => {
     await seedOimReleaseProvenanceAlterTarget(db);
+    await seedKnowledgeSubscriptionSourceTarget(db, 117);
     await db.exec(`
       CREATE TABLE connections (
         business_id text NOT NULL,
@@ -324,7 +355,8 @@ describe("runPgMigrations", () => {
         status text NOT NULL,
         health_status text NOT NULL,
         expires_at timestamptz,
-        PRIMARY KEY (business_id, id)
+        PRIMARY KEY (business_id, id),
+        UNIQUE (business_id, id, integration_id, integration_major_version)
       );
       CREATE TABLE oim_knowledge_scan_checkpoints (
         scan_id text
@@ -373,6 +405,7 @@ describe("runPgMigrations", () => {
 
   it("upgrades OIM release lifecycle storage from version 118 and is then repeat-safe", async () => {
     await seedOimReleaseProvenanceAlterTarget(db);
+    await seedKnowledgeSubscriptionSourceTarget(db, 118);
     await db.exec(`
       CREATE TABLE connections (
         business_id text NOT NULL,
@@ -566,6 +599,7 @@ describe("runPgMigrations", () => {
   });
 
   it("adds typed OIM Connection verification evidence from version 119 without backfill", async () => {
+    await seedKnowledgeSubscriptionSourceTarget(db, 119);
     await db.exec(`
       CREATE TABLE connections (
         business_id text NOT NULL,
@@ -1679,6 +1713,7 @@ describe("runPgMigrations concurrency and atomicity", () => {
 
   beforeEach(async () => {
     db = await makePglite();
+    await seedChannelRunDeliveryAlterTarget(db);
   });
 
   afterEach(async () => {
@@ -1796,6 +1831,7 @@ describe("runPgMigrations concurrency and atomicity", () => {
       );
       await db.query("UPDATE schema_version SET version = 64 WHERE id = true");
       await db.query("DELETE FROM schema_migrations WHERE version >= 65");
+      await db.query("DROP TABLE IF EXISTS oim_knowledge_subscriptions");
 
       await runPgMigrations(db, undefined, NOOP_LOG);
 
@@ -1811,6 +1847,7 @@ describe("runPgMigrations concurrency and atomicity", () => {
       await runPgMigrations(db, undefined, NOOP_LOG);
       await db.query("UPDATE schema_version SET version = 64 WHERE id = true");
       await db.query("DELETE FROM schema_migrations WHERE version >= 65");
+      await db.query("DROP TABLE IF EXISTS oim_knowledge_subscriptions");
 
       await expect(runPgMigrations(db, undefined, NOOP_LOG)).resolves.toBeUndefined();
 
@@ -1917,10 +1954,12 @@ describe("runPgMigrations concurrency and atomicity", () => {
       await db.query("DELETE FROM asset_ownership WHERE asset_type IN ('file', 'knowledge')");
       await db.query("UPDATE schema_version SET version = 90 WHERE id = true");
       await db.query("DELETE FROM schema_migrations WHERE version >= 91");
+      await db.query("DROP TABLE IF EXISTS oim_knowledge_subscriptions");
 
       await runPgMigrations(db, undefined, NOOP_LOG);
       await db.query("UPDATE schema_version SET version = 90 WHERE id = true");
       await db.query("DELETE FROM schema_migrations WHERE version >= 91");
+      await db.query("DROP TABLE IF EXISTS oim_knowledge_subscriptions");
       await expect(runPgMigrations(db, undefined, NOOP_LOG)).resolves.toBeUndefined();
 
       const owners = await db.query<{

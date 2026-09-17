@@ -1474,6 +1474,7 @@ describe("Team API", () => {
     });
     await db.query("UPDATE schema_version SET version = 87 WHERE id = true");
     await db.query("DELETE FROM schema_migrations WHERE version >= 88");
+    await db.query("DROP TABLE IF EXISTS oim_knowledge_subscriptions");
     await runPgMigrations(
       db,
       (code) => {
