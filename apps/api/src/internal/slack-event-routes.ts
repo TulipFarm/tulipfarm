@@ -40,6 +40,10 @@ export interface SlackEventRouteDeps {
   };
   readonly events: Pick<EventStore, "accept" | "find">;
   readonly eventTriggers: Pick<EventTriggerGateway, "dispatchIntegrationEvent">;
+  readonly canonicalEvents?: {
+    authorize(event: StoreEventInput): Promise<boolean>;
+    dispatch(event: StoreEventInput): Promise<unknown>;
+  };
   readonly domainEvents?: EventEmitter;
   readonly now?: () => string;
 }
@@ -172,6 +176,7 @@ export function registerSlackEventRoutes(
           401: ErrorSchema,
           403: ErrorSchema,
           404: ErrorSchema,
+          500: ErrorSchema,
         },
       },
     },
@@ -248,89 +253,107 @@ export function registerSlackEventRoutes(
     }
   );
 
-  app.post(
+  for (const path of [
+    "/api/v1/internal/events/:eventId/dispatch",
     "/api/v1/internal/slack/events/:eventId/dispatch",
-    {
-      preHandler: [requireAuth, requireService],
-      schema: {
-        description: "Dispatch one durable Slack event inbox record through the Trigger gateway.",
-        tags: ["internal"],
-        security: [{ bearerToken: [] }],
-        params: SlackEventDispatchParamsSchema,
-        response: {
-          200: SlackEventDispatchResponseSchema,
-          401: ErrorSchema,
-          403: ErrorSchema,
-          404: ErrorSchema,
+  ])
+    app.post(
+      path,
+      {
+        preHandler: [requireAuth, requireService],
+        schema: {
+          description:
+            "Dispatch one durable Integration event inbox record through the Trigger gateway.",
+          tags: ["internal"],
+          security: [{ bearerToken: [] }],
+          params: SlackEventDispatchParamsSchema,
+          response: {
+            200: SlackEventDispatchResponseSchema,
+            401: ErrorSchema,
+            403: ErrorSchema,
+            404: ErrorSchema,
+            500: ErrorSchema,
+          },
         },
       },
-    },
-    async (req, reply) => {
-      const { eventId } = req.params as { eventId: string };
-      const stored = await deps.events.find(deps.businessId, eventId);
-      if (stored === null) return reply.code(404).send({ error: "Slack event not found" });
+      async (req, reply) => {
+        const { eventId } = req.params as { eventId: string };
+        const stored = await deps.events.find(deps.businessId, eventId);
+        if (stored === null) return reply.code(404).send({ error: "Integration event not found" });
 
-      const envelope = stored.canonicalEvent;
-      if (
-        envelope.source.provider !== "slack" ||
-        envelope.verification.status !== "verified" ||
-        envelope.type === "slack.inbound.validation_failed.v1"
-      ) {
-        return reply.send({ outcome: "ignored" });
-      }
+        const envelope = stored.canonicalEvent;
+        if (envelope.source.provider !== "slack") {
+          if (envelope.verification.status !== "verified")
+            return reply.send({ outcome: "ignored" });
+          if (!deps.canonicalEvents) throw new Error("canonical_event_dispatch_unavailable");
+          if (!(await deps.canonicalEvents.authorize(envelope))) {
+            return reply.send({ outcome: "ignored" });
+          }
+          await deps.canonicalEvents.dispatch({
+            ...envelope,
+            deduplicationKey: stored.id,
+          });
+          return reply.send({ outcome: "dispatched" });
+        }
+        if (
+          envelope.verification.status !== "verified" ||
+          envelope.type === "slack.inbound.validation_failed.v1"
+        ) {
+          return reply.send({ outcome: "ignored" });
+        }
 
-      const principalKind = envelope.principal.kind;
-      const actor: ClassifiedIntegrationEventPayload["actor"] =
-        (principalKind === "user" || principalKind === "guest") &&
-        envelope.principal.internalId !== undefined &&
-        envelope.principal.externalId !== undefined
-          ? {
-              kind: principalKind,
-              id: envelope.principal.internalId,
-              externalId: envelope.principal.externalId,
-            }
-          : undefined;
-      const emitted: ClassifiedIntegrationEventPayload = {
-        integration: "slack",
-        protocol: "slack_socket_mode",
-        event: envelope.type,
-        eventId: stored.id,
-        payload: envelope.data,
-        occurredAt: envelope.occurredAt,
-        ...(envelope.source.integrationId === undefined
-          ? {}
-          : { integrationId: envelope.source.integrationId }),
-        ...(envelope.source.externalTenantId === undefined
-          ? {}
-          : { externalTenantId: envelope.source.externalTenantId }),
-        ...(actor === undefined ? {} : { actor }),
-        record: envelope.record,
-        classification: envelope.classification,
-        verification: envelope.verification,
-      };
-      if (emitted.integrationId === undefined || emitted.externalTenantId === undefined) {
-        return reply.send({ outcome: "ignored" });
-      }
-      const snapshot = await deps.integrations.loadRoutingSnapshot(
-        deps.businessId,
-        "slack",
-        emitted.externalTenantId
-      );
-      if (
-        !activeDispatchBinding(
-          snapshot,
+        const principalKind = envelope.principal.kind;
+        const actor: ClassifiedIntegrationEventPayload["actor"] =
+          (principalKind === "user" || principalKind === "guest") &&
+          envelope.principal.internalId !== undefined &&
+          envelope.principal.externalId !== undefined
+            ? {
+                kind: principalKind,
+                id: envelope.principal.internalId,
+                externalId: envelope.principal.externalId,
+              }
+            : undefined;
+        const emitted: ClassifiedIntegrationEventPayload = {
+          integration: "slack",
+          protocol: "slack_socket_mode",
+          event: envelope.type,
+          eventId: stored.id,
+          payload: envelope.data,
+          occurredAt: envelope.occurredAt,
+          ...(envelope.source.integrationId === undefined
+            ? {}
+            : { integrationId: envelope.source.integrationId }),
+          ...(envelope.source.externalTenantId === undefined
+            ? {}
+            : { externalTenantId: envelope.source.externalTenantId }),
+          ...(actor === undefined ? {} : { actor }),
+          record: envelope.record,
+          classification: envelope.classification,
+          verification: envelope.verification,
+        };
+        if (emitted.integrationId === undefined || emitted.externalTenantId === undefined) {
+          return reply.send({ outcome: "ignored" });
+        }
+        const snapshot = await deps.integrations.loadRoutingSnapshot(
           deps.businessId,
-          emitted.integrationId,
+          "slack",
           emitted.externalTenantId
-        )
-      ) {
-        return reply.send({ outcome: "ignored" });
+        );
+        if (
+          !activeDispatchBinding(
+            snapshot,
+            deps.businessId,
+            emitted.integrationId,
+            emitted.externalTenantId
+          )
+        ) {
+          return reply.send({ outcome: "ignored" });
+        }
+        deps.domainEvents?.emit(DOMAIN_EVENTS.INTEGRATION_EVENT, emitted);
+        if (!HOST_SIGNAL_EVENTS.has(envelope.type)) {
+          await deps.eventTriggers.dispatchIntegrationEvent(emitted);
+        }
+        return reply.send({ outcome: "dispatched" });
       }
-      deps.domainEvents?.emit(DOMAIN_EVENTS.INTEGRATION_EVENT, emitted);
-      if (!HOST_SIGNAL_EVENTS.has(envelope.type)) {
-        await deps.eventTriggers.dispatchIntegrationEvent(emitted);
-      }
-      return reply.send({ outcome: "dispatched" });
-    }
-  );
+    );
 }

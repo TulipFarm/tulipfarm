@@ -56,8 +56,11 @@ export function integrationInvoker(invocations: DurableInvocationGateway) {
     // `undefined`, and canonicalization rejects a key JSON would erase rather than hash something
     // the payload does not say. Omit the key: delivery is unchanged, and a manifest with
     // no context headers cannot fail its Artifact.
-    const payload: IngressJobPayload =
-      job.headers === undefined ? { slug: job.slug, body: job.body } : job;
+    const payload = {
+      slug: job.slug,
+      body: job.body,
+      ...(job.headers === undefined ? {} : { headers: job.headers }),
+    };
     await invocations.start({
       source: "integration",
       runSource: "integration",
@@ -67,7 +70,10 @@ export function integrationInvoker(invocations: DurableInvocationGateway) {
       definitionRef: `published:integration:${job.slug}`,
       payload,
       payloadSchemaRef: INTEGRATION_REQUEST_SCHEMA_REF,
-      idempotencyKey: digest(payload),
+      idempotencyKey:
+        job.deduplicationKey === undefined
+          ? digest(payload)
+          : digest({ slug: job.slug, delivery: job.deduplicationKey }),
     });
   };
 }

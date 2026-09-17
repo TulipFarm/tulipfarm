@@ -1,5 +1,5 @@
 import type { PersistedRun } from "@tulipfarm/storage";
-import type { RunEventAppendPort } from "@tulipfarm/turn-executor";
+import type { IngressReplyResult, RunEventAppendPort } from "@tulipfarm/turn-executor";
 import { describe, expect, it } from "vitest";
 import type {
   RemoteAttachResult,
@@ -66,6 +66,7 @@ function harness(
     attach?: RemoteAttachResult;
     event?: RemoteEventResult;
     outcome?: RunOutcomeStatus;
+    replyResult?: IngressReplyResult;
   } = {}
 ): { execute: () => Promise<RunOutcome>; recorded: Recorded } {
   const events: Recorded["events"] = [];
@@ -88,7 +89,7 @@ function harness(
     },
     postReply: async (_runId, reply) => {
       replies.push(reply);
-      return { delivered: true };
+      return over.replyResult ?? { delivered: true };
     },
   };
 
@@ -135,6 +136,35 @@ function harness(
 }
 
 describe("createIntegrationExecutor", () => {
+  it.each([
+    ["failed", undefined, "failed"],
+    ["retryable", "durable-wait-1", "waiting"],
+    ["retryable", undefined, "needs_reconciliation"],
+    ["ambiguous", undefined, "needs_reconciliation"],
+  ] as const)("does not succeed after a %s reply", async (outcome, waitId, status) => {
+    const { execute } = harness({
+      replyResult: {
+        delivered: false,
+        outcome,
+        code: "provider_failure",
+        ...(waitId ? { waitId } : {}),
+      },
+    });
+    await expect(execute()).resolves.toEqual({
+      status,
+      errorEvidenceRef: `delivery:${outcome}`,
+    });
+  });
+
+  it("retries only the reply after an already completed Turn", async () => {
+    const { execute, recorded } = harness({
+      attach: { outcome: "attached", turnId: "turn-1", attempt: 1, completedOutcome: "answered" },
+    });
+    await expect(execute()).resolves.toEqual({ status: "succeeded" });
+    expect(recorded.turns).toBe(0);
+    expect(recorded.replies).toHaveLength(1);
+  });
+
   it("classifies the stored envelope against the hash the manifest recorded", async () => {
     const { execute, recorded } = harness();
 

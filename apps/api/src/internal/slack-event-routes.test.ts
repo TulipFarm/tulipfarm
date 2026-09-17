@@ -100,6 +100,10 @@ describe("POST /api/v1/internal/slack/events", () => {
       identity: { resolve },
       events: { accept, find },
       eventTriggers: { dispatchIntegrationEvent },
+      canonicalEvents: {
+        authorize: async () => true,
+        dispatch: dispatchIntegrationEvent,
+      },
       now: () => "2026-09-07T10:00:00.000Z",
     };
     registerSlackEventRoutes(app, deps, async (req) => {
@@ -269,18 +273,50 @@ describe("POST /api/v1/internal/slack/events", () => {
       status: "pending",
       canonicalEvent,
     });
-    status = "revoked";
 
+    status = "revoked";
     const response = await app.inject({
       method: "POST",
       url: "/api/v1/internal/slack/events/event-1/dispatch",
     });
-
     expect(response.statusCode).toBe(200);
     expect(response.json()).toEqual({ outcome: "ignored" });
     expect(dispatchIntegrationEvent).not.toHaveBeenCalled();
   });
 
+  it("routes a verified non-Slack event to canonical Trigger dispatch", async () => {
+    find.mockResolvedValue({
+      id: "event-1",
+      canonicalEvent: {
+        eventId: "provider-event",
+        type: "telegram.message.received",
+        version: 1,
+        businessId: "business-1",
+        occurredAt: "2026-09-07T10:00:00.000Z",
+        receivedAt: "2026-09-07T10:00:00.000Z",
+        source: { provider: "telegram", integrationId: "telegram", externalTenantId: "T1" },
+        principal: { kind: "integration_account", externalId: "bot-1" },
+        record: { type: "connection", id: "connection-1", version: "1" },
+        deduplicationKey: "delivery-1",
+        classification: [],
+        data: { text: "hello" },
+        verification: { status: "verified", method: "oim_ingress" },
+      },
+    });
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/v1/internal/events/event-1/dispatch",
+    });
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual({ outcome: "dispatched" });
+    expect(dispatchIntegrationEvent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        source: expect.objectContaining({ provider: "telegram" }),
+        principal: { kind: "integration_account", externalId: "bot-1" },
+        deduplicationKey: "event-1",
+      })
+    );
+  });
   it("does not dispatch when the Integration binding no longer matches the event tenant", async () => {
     await request();
     const canonicalEvent = accept.mock.calls[0]?.[0];

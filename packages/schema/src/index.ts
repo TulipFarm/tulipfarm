@@ -126,6 +126,7 @@ export {
   LegacyIntegrationManifestSchema,
   validateLegacyIntegrationManifest,
 } from "./integration-manifest";
+export { type IngressReplyResult, IngressReplyResultSchema } from "./integration-reply";
 export type {
   InvocationRequestSchema,
   SubagentAnswer,

@@ -15,6 +15,7 @@ reconciliation, turn execution, delivery classification, projections, and outbox
 | Path | Owns |
 | --- | --- |
 | `src/main.ts` | Composition root: run dispatch, wait sweep, outbox loops, probes, shutdown. |
+| `src/event-dispatcher.ts` | Recoverable accepted-event outbox dispatch to the provider-neutral API callback. |
 | `src/tool-result-distiller.ts` | Implements `ToolResultDistillerPort` on the `fast` rung. Drops any citation whose quote is not verbatim in the Tool's own result, so the summary cannot invent a source. |
 | `src/config.ts`, `src/data-dir.ts` | Env/defaults, schema floor, worker credentials/secrets. |
 | `src/db.ts`, `src/preflight.ts`, `src/loop.ts` | Local `pg`, schema check, backing-off loops. |
@@ -118,7 +119,8 @@ reconciliation, turn execution, delivery classification, projections, and outbox
 - Blocked input/output settles with a guard reply; blocked Tool calls return denied to the model.
 - Delivery classification emits exactly one `delivery.classified` event per Run.
 - Delivery classifier isolate gets no grants; keep API and worker hook bundle basenames distinct.
-- Bind links and reply text never cross from API to worker; replies are at-least-once.
+- Bind links and reply text never cross from API to worker. Reply retries reuse completed Turns
+  and stable Effects; broker timers park the Run, and ambiguous outcomes require reconciliation.
 - Effort inference happens once per Run for `auto`; classifier tokens are unmetered.
 - Gate each fallback link under its own provider key. Any failed link opens immediately; an open
   primary must be skipped inside the chain, never reject before its fallback can run.

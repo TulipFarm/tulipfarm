@@ -30,6 +30,7 @@ import {
   type ModelCallReceipt,
   type ModelCallReceiptSource,
   RunStoreStateTransitions,
+  settleIntegrationReply,
 } from "@tulipfarm/turn-executor";
 import type { EvalCase, JourneyTurn } from "../case.ts";
 import { toolDispatcher } from "../dispatch.ts";
@@ -533,6 +534,9 @@ async function runOneTurn(
 
     let run = await claimRun();
     let outcome = await executor(run);
+    if (options.evalCase.integrationReply !== undefined) {
+      outcome = settleIntegrationReply(outcome, options.evalCase.integrationReply);
+    }
     await settleRun(run, outcome);
     if (options.evalCase.fault === "model_after_checkpoint") {
       if (outcome.status !== "waiting") {

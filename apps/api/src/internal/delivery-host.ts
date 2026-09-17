@@ -7,6 +7,7 @@ import {
   RUN_EXECUTOR_PRINCIPAL_REF,
   requestArtifactId,
 } from "@tulipfarm/run-kernel";
+import type { IngressReplyResult } from "@tulipfarm/schema";
 import { CHAT_REQUEST_SCHEMA_REF, contentText, textContent } from "@tulipfarm/schema";
 import {
   type BundledIntegration,
@@ -87,7 +88,13 @@ export interface DeliveryDescription {
 }
 
 export type AttachChatResult =
-  | { readonly outcome: "attached"; readonly turnId: string; readonly attempt: number }
+  | { readonly outcome: "reply_failed"; readonly reply: IngressReplyResult }
+  | {
+      readonly outcome: "attached";
+      readonly turnId: string;
+      readonly attempt: number;
+      readonly completedOutcome?: "answered" | "failed";
+    }
   | { readonly outcome: "unlinked" }
   | { readonly outcome: "ignored"; readonly reason: string };
 
@@ -193,7 +200,14 @@ export class IngressDeliveryHost {
       ...(routed.autonomy === undefined ? {} : { autonomy: routed.autonomy }),
     });
     if (resolution.outcome === "unlinked") {
-      await this.offerBind(delivery, chat, decision, resolution.bindOffer, routed.autonomy);
+      const reply = await this.offerBind(
+        delivery,
+        chat,
+        decision,
+        resolution.bindOffer,
+        routed.autonomy
+      );
+      if (reply !== undefined && !reply.delivered) return { outcome: "reply_failed", reply };
       return { outcome: "unlinked" };
     }
     // Routing identity, deliberately not authority. This Turn attaches to the Integration's own
@@ -230,7 +244,17 @@ export class IngressDeliveryHost {
           establishedAgent,
           existing.createdAt
         );
-        return { outcome: "attached", turnId: existing.id, attempt: existing.attempt };
+        const completion = await store.findCompletion(businessId, existing.id, existing.attempt);
+        return {
+          outcome: "attached",
+          turnId: existing.id,
+          attempt: existing.attempt,
+          ...(completion === undefined
+            ? {}
+            : {
+                completedOutcome: completion.status === "succeeded" ? "answered" : "failed",
+              }),
+        };
       }
 
       const now = this.now();
@@ -365,16 +389,17 @@ export class IngressDeliveryHost {
       binding: string;
       vars?: Record<string, string>;
     }
-  ): Promise<{ delivered: boolean }> {
+  ): Promise<IngressReplyResult> {
     const delivery = await this.authority(businessId, runId);
     const chat = delivery.chat;
-    if (chat === undefined) return { delivered: false };
+    if (chat === undefined)
+      return { delivered: false, outcome: "failed", code: "chat_not_declared" };
 
     const turn = await this.options.store.findTurnByRunId(businessId, runId);
-    if (turn === undefined) return { delivered: false };
+    if (turn === undefined) return { delivered: false, outcome: "failed", code: "turn_not_found" };
     const { autonomy } = await this.routedAgent(turn.conversationId);
 
-    await postReply(
+    return postReply(
       {
         ...(this.options.toolRegistry === undefined ? {} : { registry: this.options.toolRegistry }),
         log: this.options.log,
@@ -390,7 +415,6 @@ export class IngressDeliveryHost {
         run: { runId, toolCallId: `ingress-reply:${input.attempt}:${input.binding}`, autonomy },
       }
     );
-    return { delivered: true };
   }
 
   /** The recorded answer, or the fixed reply that stands in when there is none. */
@@ -449,7 +473,7 @@ export class IngressDeliveryHost {
     decision: { reply: { binding: string; vars?: Record<string, string> } },
     offer: { token: string; expiresAt: Date } | null,
     autonomy: ChatAutonomy | undefined
-  ): Promise<void> {
+  ): Promise<IngressReplyResult | undefined> {
     if (offer === null) {
       this.options.log.warn(
         { slug: delivery.slug, runId: delivery.runId },
@@ -458,7 +482,7 @@ export class IngressDeliveryHost {
       return;
     }
     const toolCallId = `ingress-bind-offer:${decision.reply.binding}`;
-    await postReply(
+    return postReply(
       {
         ...(this.options.toolRegistry === undefined ? {} : { registry: this.options.toolRegistry }),
         log: this.options.log,

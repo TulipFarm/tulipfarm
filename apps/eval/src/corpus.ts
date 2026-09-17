@@ -141,6 +141,19 @@ function validate(raw: unknown, file: string): EvalCase {
   require(c.tier === "l2" ||
     c.tier ===
       "l3", `${file}: tier ${JSON.stringify(c.tier)} is not runnable; expected "l2" or "l3"`);
+  if (c.integrationReply !== undefined) {
+    require(c.tier === "l3" &&
+      c.routine === undefined &&
+      c.journey === undefined, `${file}: integrationReply needs a single L3 Chat Turn`);
+    const reply = c.integrationReply as Record<string, unknown>;
+    require(reply !== null &&
+      typeof reply === "object" &&
+      reply.delivered === false &&
+      ["failed", "retryable", "ambiguous"].includes(String(reply.outcome)) &&
+      typeof reply.code === "string" &&
+      reply.waitId ===
+        undefined, `${file}: integrationReply must declare a failed, retryable, or ambiguous result without a synthetic wait`);
+  }
   if (c.routine !== undefined) {
     require(c.tier ===
       "l3", `${file}: "routine" needs tier "l3"; this Case is tier ${JSON.stringify(c.tier)}`);

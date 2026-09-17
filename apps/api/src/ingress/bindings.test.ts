@@ -27,7 +27,7 @@ describe("executeToolBinding", () => {
     expect(result.success).toBe(true);
     expect(execute).toHaveBeenCalledWith(
       { channel_id: "C1", text: "hello" },
-      { userId: INGRESS_ACTOR, runId: RUN.runId, toolCallId: RUN.toolCallId }
+      { userId: INGRESS_ACTOR, runId: RUN.runId, toolCallId: RUN.toolCallId, stateKey: "invoke" }
     );
   });
 
