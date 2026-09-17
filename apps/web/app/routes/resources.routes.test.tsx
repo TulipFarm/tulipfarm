@@ -223,6 +223,23 @@ test("list shows the server-side total, not just how many rows are loaded", () =
   expect(screen.getByText("4,211")).toBeInTheDocument();
 });
 
+test.each([
+  ["QA-", "QA-n"],
+  ["QA", "QAn"],
+  ["", "n"],
+  [undefined, "n"],
+])("list shows generated Record IDs with the configured %s prefix", (prefix, expected) => {
+  renderWithData(
+    <ResourceList />,
+    listData({
+      idStrategy: { field: "invoiceNumber", prefix, sequence: true },
+      idField: "invoiceNumber",
+    })
+  );
+
+  expect(screen.getByText(expected)).toBeInTheDocument();
+});
+
 test("list can show a column the default view had to drop", () => {
   renderWithData(<ResourceList />, listData({ items: [record], recordCount: 1 }));
 
