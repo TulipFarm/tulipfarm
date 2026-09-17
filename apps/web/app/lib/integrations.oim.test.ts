@@ -19,9 +19,30 @@ import {
   setOimRevocationFeed,
   startOimConnectionAuthorization,
   uninstallOimRelease,
+  updateOimConnectionCredentials,
 } from "./integrations";
 
 afterEach(() => vi.unstubAllGlobals());
+
+test("PATCHes only replacement values on the exact encoded Connection credential route", async () => {
+  const result = { connectionId: "connection/1", verification: { status: "verified" } };
+  const fetchMock = vi.fn().mockResolvedValue(
+    new Response(JSON.stringify(result), {
+      status: 200,
+      headers: { "content-type": "application/json" },
+    })
+  );
+  vi.stubGlobal("fetch", fetchMock);
+  await expect(
+    updateOimConnectionCredentials("acme v2", "connection/1", {
+      token: "replacement",
+    })
+  ).resolves.toEqual(result);
+  expect(fetchMock).toHaveBeenCalledWith(
+    "http://localhost:4010/api/v1/integrations/acme%20v2/connections/connection%2F1/credentials",
+    expect.objectContaining({ method: "PATCH", body: '{"values":{"token":"replacement"}}' })
+  );
+});
 
 test("uses the exact P04 Connection routes and request bodies", async () => {
   const fetchMock = vi.fn().mockImplementation(async () => {

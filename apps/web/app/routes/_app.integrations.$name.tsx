@@ -23,7 +23,9 @@ import { CopyField } from "~/components/ui/copy-field";
 import { Link } from "~/components/ui/link";
 import { Modal } from "~/components/ui/modal";
 import { ApiError } from "~/lib/api";
+import { connectionsPresentation, resolveConnectionSetupStates } from "~/lib/integration-status";
 import {
+  connectIntegration,
   deleteIntegration,
   disconnectGitHubInstallation,
   disconnectIntegration,
@@ -45,6 +47,7 @@ import {
   uninstallOimRelease,
   updateIntegration,
 } from "~/lib/integrations";
+import { listTeams } from "~/lib/teams";
 import { useIsAdmin } from "~/lib/use-session-user";
 
 export const meta: MetaFunction = () => [{ title: "Integration · tulipfarm" }];
@@ -198,6 +201,23 @@ export async function clientLoader({ params, request }: ClientLoaderFunctionArgs
     oimConnectionsError !== undefined ||
     oimConnectionSetup !== undefined ||
     oimConnectionSetupError !== undefined;
+  let teams: { id: string; name: string }[] = [];
+  let teamsError: string | undefined;
+  if (usesOimConnections) {
+    if (oimConnections) oimConnections = await resolveConnectionSetupStates(name, oimConnections);
+    if (
+      oimConnectionSetup?.allowedOwnerScopes.includes("team") ||
+      oimConnections?.some((connection) => connection.owner.scope === "team")
+    ) {
+      try {
+        teams = (await listTeams()).teams
+          .filter((team) => team.status === "active")
+          .map((team) => ({ id: team.id, name: `${team.displayName} — ${team.slug}` }));
+      } catch (error) {
+        teamsError = errMessage(error);
+      }
+    }
+  }
   return {
     integration,
     routesError,
@@ -211,6 +231,8 @@ export async function clientLoader({ params, request }: ClientLoaderFunctionArgs
     oimRelease,
     oimReleaseError,
     oimUninstallStatus,
+    teams,
+    teamsError,
   };
 }
 
@@ -392,6 +414,8 @@ export default function IntegrationDetailPage() {
     oimRelease,
     oimReleaseError,
     oimUninstallStatus: loadedOimUninstallStatus,
+    teams,
+    teamsError,
   } = useLoaderData<typeof clientLoader>();
   const revalidator = useRevalidator();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -409,11 +433,18 @@ export default function IntegrationDetailPage() {
   const [actionError, setActionError] = useState<string>();
   const [callbackError, setCallbackError] = useState<string>();
   const [guideOpen, setGuideOpen] = useState(false);
+  const [reconnecting, setReconnecting] = useState(false);
+  const [reconnectStatus, setReconnectStatus] = useState("");
 
   const isAdmin = useIsAdmin();
+  const selectedConnection = oimConnections?.find(
+    (connection) => connection.id === oimConnectionId
+  );
   const authSteps = (integration.auth ?? []).filter((step) => !step.personal);
+  const connectionState = usesOimConnections ? connectionsPresentation(oimConnections) : undefined;
   const isConnected =
-    oimConnections?.some((connection) => connection.status === "active") ?? integration.connected;
+    connectionState?.usable ??
+    (integration.connected && authSteps.every((step) => !step.producesEnv || step.satisfied));
   const installStep = authSteps.find((step) => step.kind === "install");
   const personalStep = integration.auth?.find((step) => step.personal);
   const personalStepReady =
@@ -651,8 +682,8 @@ export default function IntegrationDetailPage() {
               </Button>
             )}
             <StatusBadge
-              label={isConnected ? "Connected" : "Not connected"}
-              tone={isConnected ? "success" : "neutral"}
+              label={connectionState?.label ?? (isConnected ? "Connected" : "Not connected")}
+              tone={connectionState?.tone ?? (isConnected ? "success" : "neutral")}
             />
             {isAdmin && (!usesOimConnections || oimRelease !== undefined) && (
               <MoreMenu onDelete={handleDelete} deleting={deleting} />
@@ -686,7 +717,9 @@ export default function IntegrationDetailPage() {
         )}
 
         {integration.errorMessage && (
-          <p className="text-sm text-destructive">{integration.errorMessage}</p>
+          <p role="alert" className="text-sm text-destructive">
+            {integration.errorMessage}
+          </p>
         )}
 
         {/* Connect, every step comes from the manifest, so there is nothing per-integration here. */}
@@ -713,6 +746,37 @@ export default function IntegrationDetailPage() {
                 Connecting seals the credential every agent in this workspace spends, so an admin
                 has to do it. Ask one to connect {name}.
               </p>
+            ) : authSteps.some((step) => step.producesEnv) &&
+              authSteps.every((step) => step.satisfied) ? (
+              <div className="space-y-2">
+                <p className="text-xs text-muted-foreground">
+                  Credentials are saved. Reconnect to activate this integration.
+                </p>
+                <Button
+                  type="button"
+                  disabled={reconnecting}
+                  onClick={async () => {
+                    setReconnecting(true);
+                    setActionError(undefined);
+                    setReconnectStatus("Reconnecting…");
+                    try {
+                      await connectIntegration(integration.name, {});
+                      setReconnectStatus("Reconnect requested. Checking connection status.");
+                      revalidator.revalidate();
+                    } catch (error) {
+                      setActionError(errMessage(error));
+                      setReconnectStatus("Reconnect failed.");
+                    } finally {
+                      setReconnecting(false);
+                    }
+                  }}
+                >
+                  {reconnecting ? "Reconnecting…" : "Reconnect"}
+                </Button>
+                <p role="status" className="text-xs text-muted-foreground">
+                  {reconnectStatus}
+                </p>
+              </div>
             ) : (
               <IntegrationAuthFlow
                 slug={integration.name}
@@ -815,6 +879,27 @@ export default function IntegrationDetailPage() {
                 setup={oimConnectionSetup}
                 setupError={oimConnectionSetupError}
                 connectionId={oimConnectionId}
+                connectionLabel={selectedConnection?.label}
+                unavailable={
+                  selectedConnection?.disconnectPending
+                    ? "This Connection is disconnecting and cannot be used or edited."
+                    : selectedConnection?.status === "revoked"
+                      ? "This Connection is revoked."
+                      : undefined
+                }
+                teams={teams}
+                teamsError={teamsError}
+                onAddAnother={
+                  oimConnectionId
+                    ? () => {
+                        const nextParams = new URLSearchParams(searchParams);
+                        nextParams.delete("connection");
+                        nextParams.delete("status");
+                        nextParams.delete("reason");
+                        setSearchParams(nextParams);
+                      }
+                    : undefined
+                }
                 onConnectionSelected={(connectionId) => {
                   const nextParams = new URLSearchParams(searchParams);
                   nextParams.set("connection", connectionId);
@@ -825,10 +910,28 @@ export default function IntegrationDetailPage() {
                 onChanged={() => revalidator.revalidate()}
               />
             ) : null}
+            {teamsError ? (
+              <div className="space-y-2">
+                <p role="alert" className="text-sm text-destructive">
+                  Teams could not load: {teamsError}
+                </p>
+                <Button type="button" variant="outline" onClick={() => revalidator.revalidate()}>
+                  Retry Teams
+                </Button>
+              </div>
+            ) : null}
             {oimConnections ? (
               <OimConnections
                 integrationKey={integration.name}
                 connections={oimConnections}
+                teams={teams}
+                onResume={(connectionId) => {
+                  const nextParams = new URLSearchParams(searchParams);
+                  nextParams.set("connection", connectionId);
+                  nextParams.delete("status");
+                  nextParams.delete("reason");
+                  setSearchParams(nextParams);
+                }}
                 onChanged={() => revalidator.revalidate()}
               />
             ) : oimConnectionsError ? (
@@ -978,7 +1081,7 @@ export default function IntegrationDetailPage() {
             <SectionHeading>Routing</SectionHeading>
             {routesError ? (
               <>
-                <p className="text-sm text-destructive">
+                <p role="alert" className="text-sm text-destructive">
                   Couldn't confirm channel routing: {routesError}
                 </p>
                 <p className="max-w-prose text-xs text-muted-foreground">
@@ -988,7 +1091,10 @@ export default function IntegrationDetailPage() {
               </>
             ) : (
               <p className="max-w-prose text-xs text-muted-foreground">
-                All Slack DMs and channel messages go to the default TulipFarm assistant.
+                Linked senders can use 1:1 DMs, app mentions, and replies in threads where the app
+                was mentioned. Ordinary channel messages and bot or metadata events are ignored. The
+                highest-priority matching route selects the Agent; otherwise the default assistant
+                handles the message.
               </p>
             )}
           </section>
@@ -1007,7 +1113,11 @@ export default function IntegrationDetailPage() {
           </section>
         )}
 
-        {actionError && <p className="text-sm text-destructive">{actionError}</p>}
+        {actionError && (
+          <p role="alert" className="text-sm text-destructive">
+            {actionError}
+          </p>
+        )}
 
         {!usesOimConnections && isConnected && isAdmin && (
           <section className="flex flex-col gap-2 border-t border-border pt-5">

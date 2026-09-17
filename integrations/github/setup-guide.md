@@ -55,6 +55,17 @@ The App requests only what the agents need — see
 | Checks | Read-only | Read CI status for PR gating |
 | Metadata | Read-only | Required for every GitHub App |
 
+Check runs are **read-only**: agents can inspect CI results, but cannot create or update check
+runs or publish their own results onto commits. No permission upgrade or reauthorization is
+needed for this clarification.
+
+GitHub filenames are literal paths; do not URL-encode them before asking an agent to read a file.
+For a pull request from a fork, use `owner:branch` as the head and specify the destination base.
+
+After an uncertain write, TulipFarm searches up to 10 pages of 100 entries for its effect marker.
+If that search cannot establish whether the write landed, the result stays ambiguous instead
+of automatically posting a duplicate. Inspect the provider result before starting a new action.
+
 Repository administration is deliberately **not** requested. TulipFarm asks for it separately, as
 an incremental permission update, only if you choose "create the Soul repo for me".
 

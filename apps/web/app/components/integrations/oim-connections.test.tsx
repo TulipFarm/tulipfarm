@@ -40,6 +40,21 @@ beforeEach(() => {
   vi.clearAllMocks();
 });
 
+test("uses the authorized Team name, never the internal owner ID", () => {
+  render(
+    <OimConnections
+      integrationKey="acme-v2"
+      connections={[
+        connection("connection-1", { owner: { scope: "team", teamId: "internal-team-id" } }),
+      ]}
+      teams={[{ id: "internal-team-id", name: "Customer support" }]}
+      onChanged={vi.fn()}
+    />
+  );
+  expect(screen.getByText(/Customer support · version/)).toBeInTheDocument();
+  expect(screen.queryByText(/internal-team-id/)).not.toBeInTheDocument();
+});
+
 test("revokes the exact selected Connection after confirmation", async () => {
   const user = userEvent.setup();
   const onChanged = vi.fn();

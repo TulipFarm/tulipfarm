@@ -2,8 +2,10 @@ import { useEffect, useState } from "react";
 import { ArrowUpRight, Check, Loader2 } from "~/components/icons";
 import { StatusBadge } from "~/components/status-badge";
 import { Badge } from "~/components/ui/badge";
+import { Button } from "~/components/ui/button";
 import { Link } from "~/components/ui/link";
 import { Sheet } from "~/components/ui/sheet";
+import { resolveIntegrationStatus } from "~/lib/integration-status";
 import { getIntegration, type IntegrationDetail } from "~/lib/integrations";
 import { cn } from "~/lib/utils";
 import { CONNECTION, displayName, providerHost } from "./integration-card";
@@ -20,19 +22,22 @@ import { IntegrationIcon } from "./integration-icon";
 export function IntegrationPanel({ name, onClose }: { name?: string; onClose: () => void }) {
   const [detail, setDetail] = useState<IntegrationDetail>();
   const [error, setError] = useState<string>();
+  const [attempt, setAttempt] = useState(0);
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: Retry must restart the same failed read.
   useEffect(() => {
     if (!name) return;
     let live = true;
     setDetail(undefined);
     setError(undefined);
     getIntegration(name)
+      .then(async (detail) => ({ ...detail, ...(await resolveIntegrationStatus(detail)) }))
       .then((d) => live && setDetail(d))
       .catch((e) => live && setError(e instanceof Error ? e.message : "Could not load."));
     return () => {
       live = false;
     };
-  }, [name]);
+  }, [name, attempt]);
 
   const title = detail ? displayName(detail) : (name ?? "");
   const soon = detail?.availability === "coming_soon";
@@ -56,9 +61,20 @@ export function IntegrationPanel({ name, onClose }: { name?: string; onClose: ()
       }
     >
       {!name ? null : error ? (
-        <p className="text-sm text-destructive">{error}</p>
+        <div className="space-y-2">
+          <p role="alert" className="text-sm text-destructive">
+            {error}
+          </p>
+          <Button
+            type="button"
+            variant="outline"
+            onClick={() => setAttempt((current) => current + 1)}
+          >
+            Retry details
+          </Button>
+        </div>
       ) : !detail ? (
-        <p className="flex items-center gap-2 text-sm text-muted-foreground">
+        <p role="status" className="flex items-center gap-2 text-sm text-muted-foreground">
           <Loader2 aria-hidden className="size-4 animate-spin" />
           Loading {title}…
         </p>
@@ -116,7 +132,7 @@ function Body({ detail }: { detail: IntegrationDetail }) {
         {soon ? (
           <StatusBadge label="Not available yet" tone="info" />
         ) : (
-          <StatusBadge {...CONNECTION[detail.status]} />
+          <StatusBadge {...(detail.connectionState ?? CONNECTION[detail.status])} />
         )}
       </div>
 

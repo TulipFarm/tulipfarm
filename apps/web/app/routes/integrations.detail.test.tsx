@@ -532,7 +532,7 @@ test("recovers missing generic setup with a valid scope, announcement, and focus
     "Connection setup loaded. Add Connection details."
   );
   expect(heading).toHaveFocus();
-  expect(screen.getByLabelText("Owner")).toHaveValue("organization");
+  expect(screen.getByLabelText("Owner")).toHaveValue("Business");
 
   await user.type(screen.getByLabelText("Connection name"), "Support");
   await user.click(screen.getByRole("button", { name: "Create Connection" }));
@@ -636,17 +636,14 @@ test("keeps creation focus and status through the Connection query revalidation"
     }
     return Promise.resolve(completedSetup);
   });
+
   vi.mocked(createOimConnection).mockResolvedValue(createdConnection());
-
   renderDetailWithClientLoader("/integrations/acme-v2");
-
   await user.type(await screen.findByLabelText("Connection name"), "Support");
   await user.click(screen.getByRole("button", { name: "Create Connection" }));
-
   expect(await screen.findByRole("button", { name: "Retry setup" })).toBeInTheDocument();
   expect(createOimConnection).toHaveBeenCalledTimes(1);
   await user.click(screen.getByRole("button", { name: "Retry setup" }));
-
   const completion = await screen.findByRole("heading", { name: "Connection added" });
   await waitFor(() =>
     expect(screen.getByTestId("location-search")).toHaveTextContent("?connection=connection-1")
@@ -655,6 +652,91 @@ test("keeps creation focus and status through the Connection query revalidation"
   expect(screen.getByRole("status")).toHaveTextContent("Connection added.");
   expect(completion).toHaveFocus();
   expect(createOimConnection).toHaveBeenCalledTimes(1);
+});
+
+test("resumes the listed exact Connection and resets to a blank add-another form", async () => {
+  const user = userEvent.setup();
+  const setup: OimConnectionSetup = {
+    integration: { id: "acme", majorVersion: 2 },
+    allowedOwnerScopes: ["personal"],
+    configurationFields: [],
+    fieldSteps: [
+      {
+        id: "fields",
+        title: "Credentials",
+        fields: [
+          { id: "token", label: "API token", input: "password", required: true, secret: true },
+        ],
+      },
+    ],
+    initialAuthorizationSteps: [{ id: "oauth", title: "Authorize", type: "oauth2" }],
+    pendingAuthorizationStepIds: ["oauth"],
+  };
+  vi.mocked(getIntegration).mockResolvedValue(detail({ name: "acme-v2", type: "oim" }));
+  vi.mocked(listOimConnections).mockResolvedValue([
+    {
+      id: "saved-connection",
+      integration: setup.integration,
+      label: "Support",
+      owner: { scope: "organization" },
+      status: "active",
+      isDefault: false,
+      configuration: {},
+      availableCredentialSlots: [],
+      disconnectPending: false,
+      health: { status: "unknown", checkedAt: null },
+      expiresAt: null,
+    },
+  ]);
+  vi.mocked(getOimConnectionSetup).mockResolvedValue(setup);
+  renderDetailWithClientLoader("/integrations/acme-v2");
+  await user.click(await screen.findByRole("button", { name: "Resume setup for Support" }));
+  expect(
+    await screen.findByRole("button", { name: "Continue with Authorize" })
+  ).toBeInTheDocument();
+  expect(getOimConnectionSetup).toHaveBeenCalledWith("acme-v2", "saved-connection");
+  expect(screen.getByTestId("location-search")).toHaveTextContent("?connection=saved-connection");
+  expect(screen.queryByLabelText("Connection name")).not.toBeInTheDocument();
+  await user.type(screen.getByLabelText("API token"), "unsaved-replacement");
+  await user.click(screen.getByRole("button", { name: "Add another Connection" }));
+  expect(await screen.findByLabelText("Connection name")).toHaveValue("");
+  expect(screen.getByLabelText("API token")).toHaveValue("");
+  expect(screen.getByTestId("location-search")).toHaveTextContent("");
+  expect(screen.getByRole("heading", { name: "Add Connection" })).toHaveFocus();
+  expect(createOimConnection).not.toHaveBeenCalled();
+});
+
+test("shows the earlier required upgrade field even when legacy activation and later OAuth are saved", async () => {
+  renderDetail(
+    detail({
+      connected: true,
+      status: "connected",
+      auth: [
+        {
+          index: 0,
+          kind: "fields",
+          producesEnv: true,
+          satisfied: false,
+          fields: [{ name: "tenant", label: "Tenant" }],
+        },
+        { index: 1, kind: "oauth2", producesEnv: true, satisfied: true },
+      ],
+    })
+  );
+  expect(await screen.findByLabelText("Tenant")).toBeInTheDocument();
+  expect(screen.queryByText("Connected")).not.toBeInTheDocument();
+});
+
+test("describes Slack's sender, mention gate and route selection rather than all messages", async () => {
+  renderDetail(
+    detail({ name: "slack", title: "Slack", connected: true, status: "connected" }),
+    undefined,
+    "/integrations/slack"
+  );
+  expect(await screen.findByText(/Linked senders can use 1:1 DMs/)).toHaveTextContent(
+    /highest-priority matching route selects the Agent/
+  );
+  expect(screen.queryByText(/All Slack DMs and channel messages/)).not.toBeInTheDocument();
 });
 
 test("keeps removal behind an overflow menu and a confirm step", async () => {

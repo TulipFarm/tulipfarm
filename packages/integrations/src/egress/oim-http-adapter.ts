@@ -378,12 +378,17 @@ export class OimHttpToolAdapter implements ToolAdapter {
 
     const raw = await this.delegate.dispatchDetailed(request, credential, options, credentials);
     if (binding.binaryResponse === true) return raw.body;
-    if (this.validateResponse !== undefined && !this.validateResponse(raw.body)) {
+    // JSON Schema has no undefined value. Only an explicit null contract opts a bodyless 204
+    // into JSON null; other empty or malformed responses must still fail validation.
+    const body =
+      raw.status === 204 && raw.body === undefined && binding.responseSchema?.type === "null"
+        ? null
+        : raw.body;
+    if (this.validateResponse !== undefined && !this.validateResponse(body)) {
       throw new AdapterDispatchError("after_dispatch", "invalid_output", false);
     }
-    // Redaction precedes projection so a manifest cannot name a credential field as a pointer,
-    // and precedes validation so a response schema cannot legitimise one.
-    const redacted = redactCredentialFields(raw.body);
+    // Redact before Hooks and projection so neither can expose credential-shaped fields.
+    const redacted = redactCredentialFields(body);
     let normalized: unknown = redacted;
     if (this.deps.manifest !== undefined) {
       try {
