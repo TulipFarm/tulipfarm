@@ -367,6 +367,29 @@ describe("Google Workspace production declarations", () => {
     ).rejects.toMatchObject({ code: "file_size_mismatch", phase: "before_dispatch" });
     expect(fetch).not.toHaveBeenCalled();
   });
+
+  it("sanitizes a failed File stream before any provider dispatch", async () => {
+    const id = "drive-upload-file";
+    const { adapter, content, fetch } = setup(id, []);
+    content.mockResolvedValueOnce({
+      file: { id: "file-a", filename: "plan.txt", mediaType: "text/plain", sizeBytes: 4 },
+      body: (async function* () {
+        yield Buffer.from("Pl");
+        throw new Error("private storage failure");
+      })(),
+    });
+    await expect(
+      adapter.dispatch(
+        request(id, { body: { metadata: { name: "plan.txt" }, fileId: "file-a" } }),
+        "credential"
+      )
+    ).rejects.toMatchObject({
+      code: "file_read_failed",
+      message: "file_read_failed",
+      phase: "before_dispatch",
+    });
+    expect(fetch).not.toHaveBeenCalled();
+  });
   it.each([0, 1])(
     "rejects large File bytes before upload, including a lying declared size %s",
     async (declaredSize) => {

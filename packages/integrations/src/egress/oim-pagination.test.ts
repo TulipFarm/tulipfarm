@@ -126,7 +126,7 @@ describe("cursor and continuation pagination", () => {
         {},
         runtime
       )
-    ).resolves.toBeUndefined();
+    ).rejects.toMatchObject({ code: "pagination_bound_exceeded" });
   });
 
   it("refuses a token that the host codec did not issue", async () => {

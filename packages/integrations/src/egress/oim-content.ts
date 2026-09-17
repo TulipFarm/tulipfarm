@@ -30,11 +30,16 @@ export async function boundedFileContent(
   }
   const chunks: Uint8Array[] = [];
   let size = 0;
-  for await (const chunk of content.body) {
-    size += chunk.byteLength;
-    if (size > maxBytes)
-      throw new AdapterDispatchError("before_dispatch", "request_too_large", false);
-    chunks.push(Uint8Array.from(chunk));
+  try {
+    for await (const chunk of content.body) {
+      size += chunk.byteLength;
+      if (size > maxBytes)
+        throw new AdapterDispatchError("before_dispatch", "request_too_large", false);
+      chunks.push(Uint8Array.from(chunk));
+    }
+  } catch (error) {
+    if (error instanceof AdapterDispatchError) throw error;
+    throw new AdapterDispatchError("before_dispatch", "file_read_failed", false);
   }
   if (size !== content.file.sizeBytes) {
     throw new AdapterDispatchError("before_dispatch", "file_size_mismatch", false);

@@ -333,7 +333,8 @@ export async function nextPageToken(
       : typeof cursor === "number" && Number.isFinite(cursor)
         ? String(cursor)
         : undefined;
-  if (next === undefined || next.length > MAX_CURSOR_LENGTH) return undefined;
+  if (next === undefined) return undefined;
+  if (next.length > MAX_CURSOR_LENGTH) throw new OimPaginationError("pagination_bound_exceeded");
   // Some providers echo the cursor they were given on the last page instead of omitting it. Minting
   // it again would hand the caller a token that fetches the same page forever, and the page cap
   // would be the only thing that ever stopped it.
