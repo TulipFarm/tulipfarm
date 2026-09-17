@@ -107,6 +107,41 @@ function connection(): OimConnection {
   };
 }
 
+describe("required configuration producers", () => {
+  it("rejects required configuration that no field or callback can supply", () => {
+    const next = manifest();
+    next.auth?.configurationFields?.push({
+      id: "uncollectable",
+      label: "Uncollectable",
+      type: "string",
+      required: true,
+    });
+    expect(oimManifestIssues(next)).toContain(
+      "auth: required configuration field uncollectable has no producer"
+    );
+  });
+
+  it("accepts required configuration produced by a callback", () => {
+    const next = manifest();
+    next.auth?.configurationFields?.push({
+      id: "tenant",
+      label: "Tenant",
+      type: "string",
+      required: true,
+    });
+    next.auth?.steps.push({
+      id: "install",
+      title: "Install",
+      type: "install",
+      url: "https://provider.example/install",
+      bindings: [{ sourcePath: "/tenant", target: { type: "configuration", field: "tenant" } }],
+    });
+    expect(oimManifestIssues(next)).not.toContain(
+      "auth: required configuration field tenant has no producer"
+    );
+  });
+});
+
 describe("OIM Auth profile", () => {
   it("accepts declarative credential slots, safe configuration, and secure field setup", () => {
     expect(oimManifestIssues(manifest())).toEqual([]);

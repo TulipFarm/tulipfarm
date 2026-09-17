@@ -83,6 +83,10 @@ export {
   oimManifestMajor,
   resolveOimPackage,
 } from "./connections/catalog";
+export {
+  oimCredentialFieldIssue,
+  replaceOimCredentialFields,
+} from "./connections/credential-fields";
 export type {
   ConnectionCredentialVault,
   CreateOimConnectionDeps,
