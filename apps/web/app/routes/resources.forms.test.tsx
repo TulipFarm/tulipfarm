@@ -53,6 +53,18 @@ required: [title, active]
 if (!booleanParsed.ok) throw new Error(booleanParsed.error);
 const booleanFields = formFields(booleanParsed.schema);
 
+const numericParsed = parseSchema(`
+type: object
+x-id-strategy: { sequence: true, field: id }
+properties:
+  id: { type: string }
+  title: { type: string }
+  value: { type: number }
+required: [title]
+`);
+if (!numericParsed.ok) throw new Error(numericParsed.error);
+const numericFields = formFields(numericParsed.schema);
+
 function renderRoute(node: ReactElement, data: unknown) {
   vi.mocked(remix.useLoaderData).mockReturnValue(data);
   const Stub = createRemixStub([
@@ -115,6 +127,92 @@ test("create: an untouched optional Boolean is absent from the API payload", asy
   await waitFor(() =>
     expect(createRecord).toHaveBeenCalledWith("sample", { title: "Sample", active: false })
   );
+});
+
+test("create: a lossy integer stays exact in the input and is not written", async () => {
+  vi.mocked(createRecord).mockResolvedValue({
+    id: "MEASURE-1",
+    version: 1,
+    createdAt: "",
+    updatedAt: "",
+  });
+  renderRoute(<ResourceCreate />, {
+    type: "measure",
+    fields: numericFields,
+    schemaError: undefined,
+  });
+
+  const title = document.querySelector("input#title") as HTMLInputElement;
+  const value = document.querySelector("input#value") as HTMLInputElement;
+  fireEvent.change(title, { target: { value: "Exact integer" } });
+  fireEvent.change(value, { target: { value: "9007199254740993" } });
+  expect(value.value).toBe("9007199254740993");
+
+  fireEvent.click(screen.getByRole("button", { name: "Create" }));
+
+  expect(createRecord).not.toHaveBeenCalled();
+  expect(
+    await screen.findByText(/cannot be represented without changing its value/i)
+  ).toBeVisible();
+  expect(value.value).toBe("9007199254740993");
+  expect(screen.queryByText(/^destination:/)).not.toBeInTheDocument();
+
+  fireEvent.change(value, { target: { value: "9007199254740992" } });
+  fireEvent.click(screen.getByRole("button", { name: "Create" }));
+
+  await waitFor(() =>
+    expect(createRecord).toHaveBeenCalledWith("measure", {
+      title: "Exact integer",
+      value: 9007199254740992,
+    })
+  );
+  expect(await screen.findByText("destination: /resources/measure/MEASURE-1")).toBeInTheDocument();
+});
+
+test("edit: rejecting a lossy integer preserves the Record version and corrected save", async () => {
+  vi.mocked(updateRecord).mockResolvedValue({
+    id: "MEASURE-1",
+    title: "Exact integer",
+    value: 9007199254740991,
+    version: 3,
+    createdAt: "",
+    updatedAt: "",
+  });
+  renderRoute(<ResourceEdit />, {
+    type: "measure",
+    id: "MEASURE-1",
+    record: {
+      id: "MEASURE-1",
+      title: "Exact integer",
+      value: 1,
+      version: 2,
+      createdAt: "",
+      updatedAt: "",
+    },
+    fields: numericFields,
+    schemaError: undefined,
+  });
+
+  const value = document.querySelector("input#value") as HTMLInputElement;
+  fireEvent.change(value, { target: { value: "9007199254740993" } });
+  fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+  expect(updateRecord).not.toHaveBeenCalled();
+  expect(
+    await screen.findByText(/cannot be represented without changing its value/i)
+  ).toBeVisible();
+  expect(value.value).toBe("9007199254740993");
+
+  fireEvent.change(value, { target: { value: "9007199254740991" } });
+  fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+  await waitFor(() =>
+    expect(updateRecord).toHaveBeenCalledWith("measure", "MEASURE-1", 2, {
+      title: "Exact integer",
+      value: 9007199254740991,
+    })
+  );
+  expect(await screen.findByText("destination: /resources/measure/MEASURE-1")).toBeInTheDocument();
 });
 
 test("create: a 422 maps the error path onto the offending field", async () => {

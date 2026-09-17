@@ -2,7 +2,7 @@ import { createRemixStub } from "@remix-run/testing";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import type { ReactElement } from "react";
 import { expect, test, vi } from "vitest";
-import { ResourceForm } from "~/components/resource-form";
+import { parseNumberInput, ResourceForm } from "~/components/resource-form";
 import { formFields, parseSchema } from "~/lib/schema";
 
 // LinkCombobox (rendered for the customerId field) calls listRecords on mount — mock it, keep the
@@ -24,6 +24,7 @@ properties:
   customerId: { type: string, x-links: { target: customer } }
   priority: { type: string, enum: [low, high] }
   count: { type: integer }
+  ratio: { type: number }
   open: { type: boolean }
   tags: { type: array }
 required: [title, open]
@@ -64,6 +65,7 @@ test("renders one control per kind following the Tulip Surface Protocol mapping"
   expect(container.querySelector("input#customerId[role=combobox]")).toBeTruthy(); // x-links
   expect(container.querySelector("select#priority")).toBeTruthy(); // enum
   expect(container.querySelector("input#count[type=number]")).toBeTruthy();
+  expect(container.querySelector("input#ratio[type=number]")).toBeTruthy();
   expect(container.querySelector("input#open[type=checkbox]")).toBeTruthy();
   expect(container.querySelector("textarea#tags")).toBeTruthy(); // array as JSON
 });
@@ -130,6 +132,93 @@ test("submit coerces typed values and omits empty optional fields", () => {
     { title: "Hello", count: 5, open: true },
     expect.any(Function)
   );
+});
+
+test("numeric fields accept exact large integers, scientific notation, and ordinary decimals", () => {
+  const onSubmit = vi.fn();
+  const { container } = renderForm(
+    <ResourceForm
+      fields={fields}
+      mode="create"
+      onSubmit={onSubmit}
+      submitting={false}
+      cancelTo="/"
+    />
+  );
+  const count = container.querySelector("input#count") as HTMLInputElement;
+  const ratio = container.querySelector("input#ratio") as HTMLInputElement;
+
+  fireEvent.change(count, { target: { value: "9007199254740992" } });
+  fireEvent.change(ratio, { target: { value: "-9.007199254740992e15" } });
+  expect(count.value).toBe("9007199254740992");
+  expect(ratio.value).toBe("-9.007199254740992e15");
+  fireEvent.click(screen.getByRole("button", { name: "Create" }));
+
+  expect(onSubmit).toHaveBeenCalledWith(
+    { count: 9007199254740992, ratio: -9007199254740992, open: false },
+    expect.any(Function)
+  );
+});
+
+test("numeric fields accept decimal text whose JSON representation keeps the same value", () => {
+  const onSubmit = vi.fn();
+  const { container } = renderForm(
+    <ResourceForm
+      fields={fields}
+      mode="create"
+      onSubmit={onSubmit}
+      submitting={false}
+      cancelTo="/"
+    />
+  );
+  const ratio = container.querySelector("input#ratio") as HTMLInputElement;
+
+  fireEvent.change(ratio, { target: { value: "0.1" } });
+  expect(ratio.value).toBe("0.1");
+  fireEvent.click(screen.getByRole("button", { name: "Create" }));
+
+  expect(onSubmit).toHaveBeenCalledWith({ ratio: 0.1, open: false }, expect.any(Function));
+});
+
+test.each([
+  ["9007199254740993", /cannot be represented without changing its value/i],
+  ["-9007199254740993", /cannot be represented without changing its value/i],
+  ["9.007199254740993e15", /cannot be represented without changing its value/i],
+  ["0.10000000000000001", /cannot be represented without changing its value/i],
+])("numeric field blocks lossy input %s", (raw, expectedError) => {
+  const onSubmit = vi.fn();
+  const { container } = renderForm(
+    <ResourceForm
+      fields={fields}
+      mode="create"
+      onSubmit={onSubmit}
+      submitting={false}
+      cancelTo="/"
+    />
+  );
+  const ratio = container.querySelector("input#ratio") as HTMLInputElement;
+
+  fireEvent.change(ratio, { target: { value: raw } });
+  expect(ratio.value).toBe(raw);
+  fireEvent.click(screen.getByRole("button", { name: "Create" }));
+
+  expect(onSubmit).not.toHaveBeenCalled();
+  expect(screen.getByText(expectedError)).toBeVisible();
+  expect(ratio.value).toBe(raw);
+});
+
+test.each(["NaN", "Infinity", "-Infinity", "1e309", "-1e309"])(
+  "numeric parsing rejects non-finite value %s",
+  (raw) => {
+    expect(parseNumberInput(raw)).toEqual({ ok: false, error: "must be a finite number" });
+  }
+);
+
+test("numeric parsing rejects negative zero because JSON serialization changes it", () => {
+  expect(parseNumberInput("-0")).toEqual({
+    ok: false,
+    error: "cannot be represented without changing its value",
+  });
 });
 
 test("create omits untouched optional booleans and honors required and defaulted values", () => {
