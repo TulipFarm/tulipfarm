@@ -4,6 +4,7 @@ import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, expect, test, vi } from "vitest";
 import { ApiError } from "~/lib/api";
+import { getIntegrationOperations, saveKnowledgeSubscription } from "~/lib/integration-operations";
 
 let admin = true;
 
@@ -21,7 +22,19 @@ beforeEach(() => {
   admin = true;
   vi.clearAllMocks();
   vi.mocked(getInstalledOimRelease).mockResolvedValue(null);
+  vi.mocked(getIntegrationOperations).mockResolvedValue({
+    sourceKinds: [],
+    liveAuthorization: false,
+    ingress: null,
+    observedAt: "2026-09-17T12:00:00Z",
+    connections: [],
+  });
 });
+
+vi.mock("~/lib/integration-operations", () => ({
+  getIntegrationOperations: vi.fn(),
+  saveKnowledgeSubscription: vi.fn(),
+}));
 
 vi.mock("~/lib/integrations", async (importOriginal) => ({
   ...(await importOriginal<typeof import("~/lib/integrations")>()),
@@ -136,6 +149,67 @@ function createdConnection() {
     verification: { status: "not_required" as const },
   };
 }
+
+test("makes Knowledge subscription setup reachable from the exact provider detail", async () => {
+  const user = userEvent.setup();
+  vi.mocked(getIntegrationOperations).mockResolvedValue({
+    sourceKinds: [{ id: "space", label: "Space" }],
+    liveAuthorization: true,
+    ingress: null,
+    observedAt: "2026-09-17T12:00:00Z",
+    connections: [
+      {
+        connectionId: "selected",
+        label: "Support",
+        authorization: "healthy",
+        disconnectPending: false,
+        subscriptions: [],
+        operations: {
+          webhook: null,
+          polling: null,
+          sync: [],
+          delivery: {
+            pending: 0,
+            retrying: 0,
+            deadLetter: 0,
+            dispatched: 0,
+            nextAttemptAt: null,
+            hasError: false,
+          },
+        },
+      },
+    ],
+  });
+  vi.mocked(saveKnowledgeSubscription).mockResolvedValue({
+    sourceKindId: "space",
+    scopes: ["support"],
+    enabled: true,
+    lastAttemptAt: null,
+    lastSuccessAt: null,
+    lastErrorCodes: [],
+  });
+  renderDetail(detail({ name: "wiki", type: "oim" }), [], "/integrations/wiki");
+  await screen.findByRole("heading", { level: 1 });
+  await waitFor(() =>
+    expect(getIntegrationOperations).toHaveBeenCalledWith("wiki", expect.any(AbortSignal))
+  );
+  await user.type(await screen.findByLabelText("Space scopes"), "support");
+  await user.click(screen.getByRole("button", { name: "Enable Knowledge sync" }));
+  await waitFor(() =>
+    expect(saveKnowledgeSubscription).toHaveBeenCalledWith("wiki", "selected", {
+      sourceKindId: "space",
+      scopes: ["support"],
+      enabled: true,
+    })
+  );
+});
+
+test("does not request OIM operational evidence for a legacy integration", async () => {
+  renderDetail(detail({ name: "github", type: "github" }));
+  await screen.findByRole("heading", { level: 1, name: "GitHub" });
+  expect(getIntegrationOperations).not.toHaveBeenCalled();
+  expect(screen.queryByRole("region", { name: "Integration operations" })).not.toBeInTheDocument();
+});
 
 test("leads with the brand name but keeps the slug visible", async () => {
   renderDetail(detail({ name: "github", title: "GitHub" }));
