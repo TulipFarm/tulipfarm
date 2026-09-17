@@ -4,6 +4,7 @@ import {
   createRecord,
   deleteRecord,
   previewRecordDelete,
+  ResourceDeletePlanLimitError,
   type ResourceDoc,
   type ResourceRepo,
   type ResourceWritePorts,
@@ -124,6 +125,20 @@ describe("Record write service", () => {
                 target: "customer",
                 ...(onDelete === undefined ? {} : { onDelete }),
               },
+            },
+          },
+        },
+      };
+    }
+
+    function nodeDefinition() {
+      return {
+        schema: {
+          type: "object",
+          properties: {
+            parentId: {
+              type: "string",
+              "x-links": { target: "node", onDelete: "cascade" },
             },
           },
         },
@@ -379,6 +394,127 @@ describe("Record write service", () => {
           ],
         },
       });
+    });
+
+    it("allows exactly 100 Records in a cascade and deletes that exact set", async () => {
+      const nodes = new MemoryRepo();
+      const root = record("node-000");
+      nodes.records.set(root._id, root);
+      for (let index = 1; index < 100; index += 1) {
+        const child = record(`node-${String(index).padStart(3, "0")}`, {
+          parentId: root._id,
+        });
+        nodes.records.set(child._id, child);
+      }
+      const definition = nodeDefinition();
+      const writePorts = ports({ node: nodes }, { node: definition });
+
+      const preview = await previewRecordDelete(
+        { type: "node", id: root._id, expectedVersion: 1 },
+        writePorts
+      );
+      expect(preview.ok).toBe(true);
+      if (!preview.ok) return;
+      expect(preview.plan.records).toHaveLength(100);
+
+      const result = await deleteRecord(
+        {
+          type: "node",
+          resource: definition,
+          id: root._id,
+          expectedVersion: 1,
+          plan: preview.plan,
+        },
+        writePorts
+      );
+
+      expect(result.ok).toBe(true);
+      expect(Array.from(nodes.records.values()).every((doc) => doc.deletedAt instanceof Date)).toBe(
+        true
+      );
+    });
+
+    it("rejects a 101-Record cascade without writing anything", async () => {
+      const nodes = new MemoryRepo();
+      const root = record("node-000");
+      nodes.records.set(root._id, root);
+      for (let index = 1; index <= 100; index += 1) {
+        const child = record(`node-${String(index).padStart(3, "0")}`, {
+          parentId: root._id,
+        });
+        nodes.records.set(child._id, child);
+      }
+      const definition = nodeDefinition();
+      const writePorts = ports({ node: nodes }, { node: definition });
+
+      await expect(
+        previewRecordDelete({ type: "node", id: root._id, expectedVersion: 1 }, writePorts)
+      ).rejects.toThrow(ResourceDeletePlanLimitError);
+      expect(Array.from(nodes.records.values()).every((doc) => doc.deletedAt === undefined)).toBe(
+        true
+      );
+      expect(nodes.effects).toHaveLength(0);
+    });
+
+    it("allows exactly 20 cascade levels and deletes the complete chain", async () => {
+      const nodes = new MemoryRepo();
+      let parent = record("node-00");
+      nodes.records.set(parent._id, parent);
+      for (let depth = 1; depth <= 20; depth += 1) {
+        const child = record(`node-${String(depth).padStart(2, "0")}`, {
+          parentId: parent._id,
+        });
+        nodes.records.set(child._id, child);
+        parent = child;
+      }
+      const definition = nodeDefinition();
+      const writePorts = ports({ node: nodes }, { node: definition });
+
+      const preview = await previewRecordDelete(
+        { type: "node", id: "node-00", expectedVersion: 1 },
+        writePorts
+      );
+      expect(preview.ok).toBe(true);
+      if (!preview.ok) return;
+      expect(preview.plan.records).toHaveLength(21);
+
+      const result = await deleteRecord(
+        {
+          type: "node",
+          resource: definition,
+          id: "node-00",
+          expectedVersion: 1,
+          plan: preview.plan,
+        },
+        writePorts
+      );
+      expect(result.ok).toBe(true);
+      expect(Array.from(nodes.records.values()).every((doc) => doc.deletedAt instanceof Date)).toBe(
+        true
+      );
+    });
+
+    it("rejects 21 cascade levels without writing anything", async () => {
+      const nodes = new MemoryRepo();
+      let parent = record("node-00");
+      nodes.records.set(parent._id, parent);
+      for (let depth = 1; depth <= 21; depth += 1) {
+        const child = record(`node-${String(depth).padStart(2, "0")}`, {
+          parentId: parent._id,
+        });
+        nodes.records.set(child._id, child);
+        parent = child;
+      }
+      const definition = nodeDefinition();
+      const writePorts = ports({ node: nodes }, { node: definition });
+
+      await expect(
+        previewRecordDelete({ type: "node", id: "node-00", expectedVersion: 1 }, writePorts)
+      ).rejects.toThrow(ResourceDeletePlanLimitError);
+      expect(Array.from(nodes.records.values()).every((doc) => doc.deletedAt === undefined)).toBe(
+        true
+      );
+      expect(nodes.effects).toHaveLength(0);
     });
   });
 

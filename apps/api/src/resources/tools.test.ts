@@ -7,6 +7,14 @@ import {
   type PublishedToolContract,
   toolContractSpecOf,
 } from "@tulipfarm/tool-broker";
+import {
+  InMemoryToolCatalog,
+  RegistryToolDispatcher,
+  type ToolApprovalPort,
+  type ToolGateRequest,
+  type TurnAuthority,
+  toToolDef,
+} from "@tulipfarm/tool-host";
 import { describe, expect, it, vi } from "vitest";
 import type {
   CounterStore,
@@ -409,6 +417,94 @@ describe("RESOURCE_TOOLS targetsFor", () => {
 
     expect(outcome).toMatchObject({ outcome: "authorized" });
   });
+
+  it("requires delete authority for every Record in the submitted cascade plan", () => {
+    const customerId = randomUUID();
+    const ticketId = randomUUID();
+    const ctx = makeCtx(
+      new FakeRepoFactory(),
+      makeSoulLoader({
+        customer: { type: "object" },
+        ticket: { type: "object" },
+      })
+    );
+    const tool = getTool("record_delete");
+    const args = {
+      type: "customer",
+      id: customerId,
+      version: 1,
+      plan: {
+        id: "a".repeat(64),
+        root: { type: "customer", id: customerId, version: 1 },
+        records: [
+          { type: "customer", id: customerId, version: 1 },
+          { type: "ticket", id: ticketId, version: 1 },
+        ],
+        restrictedBy: [],
+      },
+    };
+    const contract = { ...publishedContract("record_delete"), dataClasses: ["internal"] };
+    const policy = {
+      authorityLayers: [
+        {
+          name: "principal",
+          grants: [
+            {
+              action: "record.delete",
+              resourceType: "record",
+              recordSelector: "*",
+              effect: "allow" as const,
+            },
+            {
+              action: "record.delete",
+              resourceType: "record.customer",
+              recordSelector: customerId,
+              effect: "allow" as const,
+            },
+          ],
+        },
+      ],
+      guardrailRules: [{ id: "allow", effect: "allow" as const, action: "*", resourceType: "*" }],
+      dlpRules: [{ dataClass: "internal" }],
+      guardrailRevision: "test",
+    };
+    const intent = {
+      intentId: "intent-delete",
+      businessId: "business-1",
+      runId: "run-1",
+      stateId: "state-1",
+      toolId: "record_delete",
+      toolVersion: "1",
+      action: "record.delete",
+      targetRefs: tool.targetsFor(args, ctx),
+      arguments: args,
+      idempotencyKey: "delete",
+    };
+
+    expect(authorizeToolIntent(intent, contract, policy)).toMatchObject({
+      outcome: "denied",
+      reason: "authorization_denied",
+    });
+    expect(
+      authorizeToolIntent(intent, contract, {
+        ...policy,
+        authorityLayers: [
+          {
+            ...policy.authorityLayers[0],
+            grants: [
+              ...policy.authorityLayers[0].grants,
+              {
+                action: "record.delete",
+                resourceType: "record.ticket",
+                recordSelector: ticketId,
+                effect: "allow" as const,
+              },
+            ],
+          },
+        ],
+      })
+    ).toMatchObject({ outcome: "authorized" });
+  });
 });
 
 describe("record_create", () => {
@@ -782,6 +878,132 @@ describe("record_delete", () => {
 
     expect(preview).toMatchObject({ success: false, error: { code: "write_denied" } });
     expect(JSON.stringify(preview)).not.toContain(ticketId);
+  });
+
+  it("binds approval to the exact cascade plan and rejects a stale approved replay", async () => {
+    const factory = new FakeRepoFactory();
+    const customers = factory.forType("customer") as FakeRepo;
+    const tickets = factory.forType("ticket") as FakeRepo;
+    const customerId = randomUUID();
+    const ticketId = randomUUID();
+    const laterTicketId = randomUUID();
+    const now = new Date();
+    await customers.insert({
+      _id: customerId,
+      version: 1,
+      createdAt: now,
+      updatedAt: now,
+    });
+    await tickets.insert({
+      _id: ticketId,
+      version: 1,
+      createdAt: now,
+      updatedAt: now,
+      customerId,
+    });
+    const soulLoader = makeSoulLoader({
+      customer: { type: "object" },
+      ticket: {
+        type: "object",
+        properties: {
+          customerId: {
+            type: "string",
+            "x-links": { target: "customer", onDelete: "cascade" },
+          },
+        },
+      },
+    });
+    const ctx = { ...makeCtx(factory, soulLoader), authorizeRecord: async () => true };
+    const preview = await getTool("record_delete_preview").handler(
+      { type: "customer", id: customerId, version: 1 },
+      ctx
+    );
+    expect(preview.success).toBe(true);
+    if (!preview.success) return;
+
+    const registry = new InMemoryToolCatalog();
+    registry.register(toToolDef(getTool("record_delete"), () => ctx));
+    let authorizationRequest: ToolGateRequest | undefined;
+    let approvedArgs: unknown;
+    let approvalPending = true;
+    const approvals: ToolApprovalPort = {
+      decide: async (input) => {
+        approvedArgs = input.args;
+        return approvalPending
+          ? { status: "pending", approvalId: "approval-delete" }
+          : { status: "approved", approvalId: "approval-delete" };
+      },
+      consume: async () => true,
+    };
+    const dispatcher = new RegistryToolDispatcher({
+      registry,
+      approvals,
+      artifacts: {
+        read: async () => ({ content: { autonomy: "approval-required" } }),
+      } as never,
+      authorityLayers: {
+        resolvePrincipalLayer: async () => ({ name: "user", grants: [] }),
+      },
+      gate: {
+        authorize: (request) => {
+          authorizationRequest = request;
+          return { outcome: "awaiting_approval" };
+        },
+      },
+    });
+    const authority: TurnAuthority = {
+      businessId: "tulipfarm-local",
+      runId: "run-delete",
+      turn: { id: "turn-delete", conversationId: "conversation-delete", attempt: 1 },
+      subject: { kind: "user", id: "u1" },
+      source: "chat",
+      bundleDigest: "bundle-delete",
+    };
+    const call = {
+      callId: "call-delete",
+      name: "record_delete",
+      arguments: {
+        type: "customer",
+        id: customerId,
+        version: 1,
+        plan: preview.data,
+      },
+    };
+
+    await expect(dispatcher.dispatch(authority, call)).resolves.toEqual({
+      status: "awaiting_approval",
+      approvalId: "approval-delete",
+    });
+    expect(approvedArgs).toEqual(call.arguments);
+    expect(authorizationRequest?.arguments).toEqual(call.arguments);
+    expect(
+      authorizationRequest?.definition.targetsFor?.(
+        authorizationRequest.arguments,
+        authorizationRequest.context
+      )
+    ).toEqual(
+      expect.arrayContaining([
+        { type: "record.customer", id: customerId },
+        { type: "record.ticket", id: ticketId },
+      ])
+    );
+
+    await tickets.insert({
+      _id: laterTicketId,
+      version: 1,
+      createdAt: now,
+      updatedAt: now,
+      customerId,
+    });
+    approvalPending = false;
+
+    await expect(dispatcher.dispatch(authority, call)).resolves.toEqual({
+      status: "invalid_arguments",
+      reason: "delete dependency preview is stale",
+    });
+    expect(customers.docs.get(customerId)?.deletedAt).toBeUndefined();
+    expect(tickets.docs.get(ticketId)?.deletedAt).toBeUndefined();
+    expect(tickets.docs.get(laterTicketId)?.deletedAt).toBeUndefined();
   });
 
   it("runs before and after hooks on delete", async () => {

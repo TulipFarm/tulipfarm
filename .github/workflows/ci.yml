@@ -447,6 +447,21 @@ jobs:
     timeout-minutes: 25
     needs: changes
     if: ${{ needs.changes.outputs.code == 'true' }}
+    env:
+      RESOURCE_ATOMIC_TEST_DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/tulipfarm_atomic
+    services:
+      postgres:
+        image: postgres:18-alpine
+        env:
+          POSTGRES_DB: tulipfarm_atomic
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d tulipfarm_atomic"
+          --health-interval 2s
+          --health-timeout 5s
+          --health-retries 10
     # Four shards, not five. The org is on the Free plan, whose hard ceiling is 20
     # concurrent jobs; one push used to start 23, so runs queued for hours. Every shard
     # removed is a slot returned to the rest of the pipeline, and the extra ~40s of wall
