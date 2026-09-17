@@ -1,4 +1,8 @@
-import type { IntegrationHttpPort, SlackDeliveryAdapter } from "@tulipfarm/integrations";
+import {
+  type IntegrationHttpPort,
+  type SlackDeliveryAdapter,
+  SlackDeliveryError,
+} from "@tulipfarm/integrations";
 import type {
   ChannelRunDeliveryStore,
   PersistedChannelRunDeliveryRecord,
@@ -81,15 +85,13 @@ export interface DeliveryPollLoopDeps {
 export function defaultWait(delayMs: number, signal: AbortSignal): Promise<void> {
   if (signal.aborted) return Promise.resolve();
   return new Promise((resolve) => {
-    const timer = setTimeout(resolve, delayMs);
-    signal.addEventListener(
-      "abort",
-      () => {
-        clearTimeout(timer);
-        resolve();
-      },
-      { once: true }
-    );
+    const finish = () => {
+      clearTimeout(timer);
+      signal.removeEventListener("abort", finish);
+      resolve();
+    };
+    const timer = setTimeout(finish, delayMs);
+    signal.addEventListener("abort", finish, { once: true });
   });
 }
 
@@ -132,8 +134,27 @@ async function markFailed(
     );
   } catch (error) {
     deps.log.warn("slack failure message delivery failed", error);
+    await handleDeliveryError(row, error, deps);
+    return;
   }
-  await deps.runDeliveries.markStatus(deps.businessId, row.runId, "failed");
+  await deps.runDeliveries.markStatus(deps.businessId, row.runId, "failed", row.leaseGeneration);
+}
+
+async function handleDeliveryError(
+  row: PersistedChannelRunDeliveryRecord,
+  error: unknown,
+  deps: DeliveryPollLoopDeps
+): Promise<void> {
+  if (!(error instanceof SlackDeliveryError) || error.retryable) {
+    await deps.runDeliveries.retry(
+      deps.businessId,
+      row.runId,
+      row.leaseGeneration ?? 0,
+      error instanceof SlackDeliveryError ? error.retryAfterMs : 5000
+    );
+    return;
+  }
+  await deps.runDeliveries.markStatus(deps.businessId, row.runId, "failed", row.leaseGeneration);
 }
 
 async function deliverReply(
@@ -150,7 +171,7 @@ async function deliverReply(
   // all fails as `empty_model_output` (`packages/turn-executor/src/driver.ts:420`), so an
   // acknowledging Agent must still say something, and that something is not for the user.
   if (row.acknowledgedEmoji !== undefined) {
-    await deps.runDeliveries.markStatus(deps.businessId, row.runId, "done");
+    await deps.runDeliveries.markStatus(deps.businessId, row.runId, "done", row.leaseGeneration);
     return;
   }
   const agentDisplayName =
@@ -178,10 +199,10 @@ async function deliverReply(
     );
   } catch (error) {
     deps.log.warn(`slack reply delivery failed for run ${row.runId}`, error);
-    await markFailed(row, deps);
+    await handleDeliveryError(row, error, deps);
     return;
   }
-  await deps.runDeliveries.markStatus(deps.businessId, row.runId, "done");
+  await deps.runDeliveries.markStatus(deps.businessId, row.runId, "done", row.leaseGeneration);
 }
 
 async function handleRow(
@@ -210,8 +231,9 @@ async function handleRow(
     const reply = await deps.internalApi
       .find<ReplyResponse>("GET", `/api/v1/internal/channels/runs/${row.runId}/reply`, [404])
       .catch(() => undefined);
-    if ((await deps.runDeliveries.claim(deps.businessId, row.runId)) === null) return;
-    await markFailed(row, deps, reply?.reason);
+    const claimed = await deps.runDeliveries.claim(deps.businessId, row.runId);
+    if (claimed === null) return;
+    await markFailed(claimed, deps, reply?.reason);
     return;
   }
 
@@ -232,9 +254,10 @@ async function handleRow(
   await deliverReply(claimed, reply, deps);
 }
 
-async function pollOnce(deps: DeliveryPollLoopDeps): Promise<void> {
+async function pollOnce(deps: DeliveryPollLoopDeps, signal: AbortSignal): Promise<void> {
   const pending = await deps.runDeliveries.listPending(deps.businessId);
   for (const row of pending) {
+    if (signal.aborted) return;
     try {
       await handleRow(row, deps);
     } catch (error) {
@@ -247,7 +270,7 @@ async function pollLoop(signal: AbortSignal, deps: DeliveryPollLoopDeps): Promis
   const intervalMs = deps.pollIntervalMs ?? 2000;
   const wait = deps.wait ?? defaultWait;
   while (!signal.aborted) {
-    await pollOnce(deps);
+    await pollOnce(deps, signal);
     await wait(intervalMs, signal);
   }
 }

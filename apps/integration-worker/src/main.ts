@@ -8,7 +8,7 @@ import {
   ResourceSampler,
 } from "@tulipfarm/observability";
 import { config as loadEnv } from "dotenv";
-import { createSlackChannelLoops, watchForSlackChannelCredential } from "./channels";
+import { watchForSlackChannelCredential } from "./channels";
 import { loadConfig, REQUIRED_SCHEMA_VERSION } from "./config";
 import { ConsumerReadiness } from "./consumer-readiness";
 import { waitForDataDirEnv } from "./data-dir";
@@ -132,16 +132,7 @@ export async function main(): Promise<void> {
     signal: controller.signal,
     log: logger,
   };
-  const slackLoops = await createSlackChannelLoops(slackDeps);
-  if (slackLoops.length > 0) {
-    loops.push(...slackLoops);
-  } else {
-    // Slack isn't connected yet: keep polling in the background so connecting it later via the
-    // web UI doesn't require restarting this process.
-    loops.push(
-      watchForSlackChannelCredential(slackDeps, (readyLoops) => loops.push(...readyLoops))
-    );
-  }
+  loops.push(watchForSlackChannelCredential(slackDeps, () => {}));
 
   const probeServer = await startProbeServer({
     port: config.port,

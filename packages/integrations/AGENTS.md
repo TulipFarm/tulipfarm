@@ -31,6 +31,8 @@ Owns adapter contracts, event normalization, source ACLs, sync checkpoints, and 
 ## Rules
 
 - Concrete transports live in `apps/integration-worker`; the broker must not import impls.
+- Slack `chat.postMessage` has no guaranteed idempotency key: reconcile uncertain writes against
+  the authenticated bot's message metadata; only confirmed receipts or safe retries advance delivery.
 - Prefer `src/egress/` over `src/<provider>/` when a manifest can express the provider.
 - Manifest hosts are chat-authored: compile through `assertPublicEgressUrl`, send through
   `GuardedEgressHttp`. Neither subsumes the other — a public name can hold an inward A record.
