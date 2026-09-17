@@ -316,6 +316,8 @@ export async function buildApp(opts: AppOptions = {}) {
       userRepo: opts.userRepo,
       tokenRepo: opts.tokenRepo,
       ...(opts.identity?.apiClientRepo && { apiClientRepo: opts.identity.apiClientRepo }),
+      deployment: opts.identity?.deployment,
+      routeAuthorizer: opts.routeAuthorizer,
     });
     registerPackRoutes(app, opts.packs ?? new PackService(), requireAuth, requireAuthorization);
     // Headless boot omits wizard routes (404), but status stays reachable.

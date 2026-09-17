@@ -51,6 +51,8 @@ Individual Tool families (`packages/kv`, `apps/api/src/tools/**`), the model-fac
 - **`eligibility.ts` fails closed.** A process without a live Soul, a renderer registry or
   provider credential leases must not authorize a Tool that needs them. Widening the rule needs a
   reason why the weaker check is still the same check.
+- Live Principal resolution retains an operational client's immutable non-content ceiling, so
+  role assignment, Team inheritance and Tool dispatch cannot widen it (ADR-032).
 - **`ToolApprovalPort` exposes `decide` and `consume` only.** `consume` spends the one-use decision
   at the dispatch that executes it (I-13); `registerWait` mints a one-use resume token and must
   stay in the control plane — see `apps/worker/AGENTS.md`.

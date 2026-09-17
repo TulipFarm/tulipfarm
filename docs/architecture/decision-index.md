@@ -44,6 +44,7 @@ Detailed contracts:
 | ADR-029 | A whole-document Memory write carries the document it was derived from and replays any concurrent Tool delta on top | A Tool write is always a delta, so the difference between two versions is a known set of lines; overwriting it would drop a fact the user was told was remembered | `packages/memory` |
 | ADR-030 | Generic web and API access runs as governed first-party Tools with pure call-level read/write classification | One structured path keeps SSRF controls, exact destination and Secret authority, Approval, and effect recovery intact while allowing REST and GraphQL calls whose risk varies by operation | `packages/tool-host`, `packages/integrations`, `apps/api` |
 | ADR-031 | A Surface component may carry Agent-authored code, executed in an opaque-origin `sandbox="allow-scripts"` frame with `connect-src 'none'` | The shipped catalog cannot anticipate every visual a user asks for, and an Agent that can only re-compose it substitutes and narrates; the boundary is the missing origin and the missing network, never source inspection | `packages/surface`, `packages/surface-web`, `apps/web` |
+| ADR-032 | [Operational API clients have an immutable installation-scoped ceiling and explicit non-content grants](adr-032-operational-authority.md) | Operating a runtime must not confer Worker, business, support or user authority; HTTP and Tools retain the shared live authorization decision | `packages/authz`, `packages/tool-host`, `apps/api` |
 
 ## Superseded decisions
 

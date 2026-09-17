@@ -1829,6 +1829,7 @@ async function boot() {
       tokenRepo,
       identity: {
         apiClientRepo,
+        deployment,
         externalIdentityRepo,
         externalIdentityUnlinker,
         channelBind,

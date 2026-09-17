@@ -15,6 +15,7 @@ authority-intersection decision evidence.
 | --- | --- |
 | `src/principals.ts`, `src/roles.ts`, `src/grants.ts` | Principal, role, and grant primitives. |
 | `src/effective.ts` | Authority-intersection permission decisions. |
+| `src/operational.ts` | Exact installation-scoped non-content grants; operational scope only narrows. |
 | `src/navigation.ts` | Server-owned session navigation visibility, including Pack preview authority. |
 | `src/teams.ts` | Team lifecycle, membership, leave, and actor-capability invariants. |
 | `src/team-authority.ts` | Live Team inheritance, evidence, and delegated assignment bounds. |

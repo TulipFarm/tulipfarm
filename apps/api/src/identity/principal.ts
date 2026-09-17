@@ -1,4 +1,8 @@
-import { assertPrincipalAuthenticatable, type Principal } from "@tulipfarm/authz";
+import {
+  assertPrincipalAuthenticatable,
+  type OperationalScope,
+  type Principal,
+} from "@tulipfarm/authz";
 import { DEPLOYMENT_BUSINESS_ID } from "@tulipfarm/constants";
 import type { AuthMethod } from "../auth/session-store";
 import type { UserDoc } from "../auth/users";
@@ -19,6 +23,7 @@ export interface RequestPrincipal {
   readonly userId?: string;
   readonly clientId?: string;
   readonly role?: UserDoc["role"];
+  readonly operationalScope?: OperationalScope;
 }
 
 declare module "fastify" {
@@ -40,7 +45,7 @@ export function userAsAuthzPrincipal(user: UserDoc): Principal {
 export function apiClientAsAuthzPrincipal(client: ApiClientDoc): Principal {
   return {
     id: client._id,
-    businessId: DEPLOYMENT_BUSINESS_ID,
+    businessId: client.operationalScope?.businessId ?? DEPLOYMENT_BUSINESS_ID,
     kind: "service",
     status: client.status === "disabled" ? "disabled" : "active",
     ...(client.expiresAt ? { expiresAt: client.expiresAt } : {}),
@@ -79,10 +84,11 @@ export function apiClientPrincipal(client: ApiClientDoc): RequestPrincipal {
   return {
     id: client._id,
     kind: "service",
-    businessId: DEPLOYMENT_BUSINESS_ID,
+    businessId: client.operationalScope?.businessId ?? DEPLOYMENT_BUSINESS_ID,
     credential: "client_secret",
     authMethods: [],
     authenticatedAt: new Date(),
     clientId: client.clientId,
+    ...(client.operationalScope ? { operationalScope: client.operationalScope } : {}),
   };
 }

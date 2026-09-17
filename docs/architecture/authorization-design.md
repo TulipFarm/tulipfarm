@@ -10,6 +10,9 @@ retained as written; read [§2.1](#21-what-has-changed-since) first for what has
 Scope: the authorization model for human users, Agents, Routines, and service identities across
 Soul artifacts, Secrets, business settings, Integrations, and Resource Records.
 
+[ADR-032](adr-032-operational-authority.md) extends this model with an immutable operational
+credential ceiling and exact installation-scoped grants. It adds no support-content authority.
+
 This document exists because the [decision index](decision-index.md) change-control clause requires
 a reviewed ADR before any change that "adds an authority/write/effect path". It extends ADR-009
 (effective authority is an intersection), ADR-010 (Skills never grant Tools), and ADR-011 (one

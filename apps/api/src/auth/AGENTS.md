@@ -28,6 +28,8 @@ and legacy `req.user` compatibility.
   every success sets `req.principal`, and legacy routes also get `req.user`.
 - Auth denials return the same opaque `401 { error: "unauthorized" }`; disabled, expired, and
   unknown credentials must not be distinguishable to callers.
+- Operational credentials additionally require a declared non-content surface, matching runtime
+  identity and the live authorizer; absent dependencies and shadow mode never widen this ceiling.
 - Store passwords, invite tokens, and API tokens hash-only; look tokens up by hash.
 - Login and step-up rotate the session id; product code must use bound-CSRF sessions.
 - Admin-created users start as `invited` with `password_hash = null`; admins never mint, see, or

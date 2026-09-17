@@ -52,6 +52,19 @@ describe("PgPrincipalRepo", () => {
     });
   });
 
+  it("round-trips operational scope without letting principal registration replace its lifecycle", async () => {
+    const operational = record({
+      kind: "service",
+      status: "disabled",
+      expiresAt: new Date(0),
+      operationalScope: { businessId: "business-1", installationId: "installation-1" },
+    });
+    await repo.put(operational);
+    await repo.put(record({ kind: "service", status: "active" }));
+    await expect(repo.get("business-1", "principal-1")).resolves.toEqual(operational);
+    await expect(repo.list("business-1")).resolves.toEqual([operational]);
+  });
+
   it("isolates the same principal id by business", async () => {
     await repo.put(record({ businessId: "business-1", status: "active" }));
     await repo.put(record({ businessId: "business-2", status: "disabled" }));

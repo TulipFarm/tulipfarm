@@ -89,6 +89,7 @@ import { APPROVAL_EVIDENCE_STORAGE_STATEMENTS } from "@tulipfarm/tool-host";
 import type { Queryable } from "../db";
 import { AGENT_ROLE_ID } from "../identity/roles";
 import { resourceSideEffectMigration } from "../resources/outbox";
+import { OPERATIONAL_PRINCIPAL_STATEMENTS } from "./operational-principals";
 
 export interface PgMigration {
   version: number;
@@ -3506,5 +3507,10 @@ export const PG_MIGRATIONS: PgMigration[] = [
     version: 126,
     description: "pin runtime hosting authority independently of process configuration",
     up: applyStatements(RUNTIME_HOSTING_STORAGE_STATEMENTS),
+  },
+  {
+    version: 127,
+    description: "immutable operational API client scope and live principal lifecycle",
+    up: applyStatements(OPERATIONAL_PRINCIPAL_STATEMENTS),
   },
 ];

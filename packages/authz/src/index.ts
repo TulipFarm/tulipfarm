@@ -99,6 +99,13 @@ export {
   sessionNavigationCapabilities,
   withSessionNav,
 } from "./navigation";
+export type { OperationalScope } from "./operational";
+export {
+  narrowOperationalGrants,
+  OPERATIONAL_UPDATE_READ,
+  operationalScopeMatches,
+  operationalUpdateRequest,
+} from "./operational";
 export type {
   IdentityPort,
   IdentityResolution,

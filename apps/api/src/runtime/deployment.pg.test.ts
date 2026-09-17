@@ -25,9 +25,10 @@ import { LiveRouteAuthorizer } from "../authz/route-gate";
 import { transactionPort } from "../db";
 import { buildApiAuthorityLayerResolver } from "../identity/authority-layers";
 import { syncDeploymentRoles } from "../identity/roles";
+import { PG_MIGRATIONS } from "../pg-migrations";
 import { bootstrapFromEnv } from "../setup/bootstrap";
 import { PgSetupAdminCreator } from "../setup/first-admin";
-import { makeMigratedPglite } from "../test/pglite";
+import { makeMigratedPglite, makePglite } from "../test/pglite";
 import { initializeApiDeployment } from "./deployment";
 
 const businessId = DEPLOYMENT_BUSINESS_ID;
@@ -200,12 +201,30 @@ describe("durable runtime deployment startup", () => {
   });
 
   it("upgrades legacy state, preserves login and BYOK, and restarts with the same identity", async () => {
-    const db = await database();
+    const db = await makePglite();
+    databases.push(db);
+    for (const migration of PG_MIGRATIONS.filter(({ version }) => version <= 124)) {
+      if (migration.concurrent) await migration.up(db);
+      else await db.transaction((tx) => migration.up(tx));
+    }
     await db.exec(`
-      DROP TABLE deployment_runtime_identity;
-      UPDATE schema_version SET version = 124;
-      DELETE FROM schema_migrations WHERE version >= 125;
+      CREATE TABLE schema_version (
+        id boolean PRIMARY KEY DEFAULT true CHECK (id),
+        version integer NOT NULL
+      );
+      INSERT INTO schema_version (id, version) VALUES (true, 124);
     `);
+    expect(
+      (
+        await db.query(
+          `SELECT to_regclass('deployment_runtime_identity') AS runtime_identity,
+                  EXISTS (
+                    SELECT 1 FROM information_schema.columns
+                    WHERE table_name = 'api_clients' AND column_name = 'operational_scope'
+                  ) AS operational_scope`
+        )
+      ).rows
+    ).toEqual([{ runtime_identity: null, operational_scope: false }]);
     const users = new PgUserRepo(db);
     const adminCreator = new PgSetupAdminCreator(db, businessId);
     const admin = await createUser(users, "muskan@example.com", "test-password", "admin", {

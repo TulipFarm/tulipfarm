@@ -101,6 +101,21 @@ API clients are machine identities, not user API tokens.
 | Rotation | `POST /api/v1/identity/api-clients/:id/rotate` returns a new secret once and immediately invalidates the old one. |
 | Disable | `POST /api/v1/identity/api-clients/:id/disable` prevents the next request from authenticating. |
 | Built-in use | The API auto-mints separate worker and integration-worker clients into `TF_DATA_DIR` when container boot needs them. |
+| Operational scope | Creating a client with `operational: true` binds it to the current business and runtime installation. Rotation and disable preserve the binding. |
+
+An operational binding is a ceiling, not a permission. The existing release update check
+(`GET /api/v1/system/update-check`) accepts an operational client only when its assigned role
+explicitly allows `deployment.update.read` on `deployment`, with `conditions.businessId` and
+`conditions.installationId` matching the returned `operationalScope`. Wildcard grants do not
+substitute for that permission. Expired grants, denied layers, and missing runtime identity still
+deny the request, including in authorization shadow mode.
+
+The check returns version metadata, not business content or provider errors. Operational clients
+cannot read chats or records, manage business settings, export secrets, invoke tools, or use
+internal worker callbacks. A hosting flag, staff designation or paid account grants no support
+access. This release includes no support grant, lifecycle command or remote entitlement protocol.
+An infrastructure host can still inspect storage and process memory outside these application
+permissions.
 
 ## Invites and user status
 

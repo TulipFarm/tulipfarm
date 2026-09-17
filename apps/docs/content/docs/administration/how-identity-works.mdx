@@ -66,6 +66,21 @@ remember to remove it.
 
 This is how you give temporary access without leaving a permanent hole behind.
 
+## Operating the server without business access
+
+An **operational API client** is a machine identity restricted to non-content server checks.
+Creating a client with `operational: true` binds it to the current business and server
+installation. That binding grants nothing by itself: a matching, explicitly scoped permission
+is still required. See the [API client reference](/docs/reference/roles-and-permissions#api-clients).
+
+Operational credentials cannot become a user session, use internal worker callbacks, read chats
+or records, export credentials, or invoke business actions. Ordinary workers keep their separate
+execution access. Hosting the server, being staff, or buying a managed service grants no support
+access to business content. This release does not provide a support-access grant mechanism.
+
+These are application permissions, not a promise that an infrastructure host cannot inspect the
+database, process memory or disks it controls.
+
 ## Guests
 
 A guest is not a separate kind of principal. It is a relationship: a **sponsor** plus an **expiry**

@@ -166,7 +166,8 @@ export function makeAuthorizationCheck(
   const observe = options?.observe;
   return async (principal, authorization) => {
     const fallbackAllowed =
-      authorization.fallback === "authenticated" || isDeploymentAdmin(principal);
+      !principal.operationalScope &&
+      (authorization.fallback === "authenticated" || isDeploymentAdmin(principal));
     if (authorizer === undefined) {
       return fallbackAllowed;
     }
@@ -202,6 +203,6 @@ export function makeAuthorizationCheck(
     if (engineAllowed !== fallbackAllowed) {
       record(engineAllowed);
     }
-    return mode === "shadow" ? fallbackAllowed : engineAllowed;
+    return mode === "shadow" && !principal.operationalScope ? fallbackAllowed : engineAllowed;
   };
 }

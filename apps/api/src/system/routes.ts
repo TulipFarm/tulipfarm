@@ -1,3 +1,4 @@
+import { OPERATIONAL_UPDATE_READ } from "@tulipfarm/authz";
 import { PublicOriginError, type PublicOriginsService } from "@tulipfarm/integrations";
 import type { KvService } from "@tulipfarm/kv";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
@@ -53,6 +54,7 @@ export function registerSystemRoutes(
     "/api/v1/system/update-check",
     {
       preHandler: requireAuth,
+      config: { operationalAction: OPERATIONAL_UPDATE_READ.action },
       schema: {
         description:
           "Report the running TulipFarm version and whether a newer stable release exists " +
@@ -71,11 +73,13 @@ export function registerSystemRoutes(
             },
           },
           401: ErrorSchema,
+          403: ErrorSchema,
         },
       },
     },
     async (req) => {
-      const version = runningVersion();
+      const running = runningVersion();
+      const version = releaseVersion(running) ?? (running === "latest" ? "latest" : "dev");
       const cached = await readCache(deps);
       if (cached) {
         return {
@@ -94,10 +98,10 @@ export function registerSystemRoutes(
         });
         if (res.ok) {
           const data = (await res.json()) as { tag_name?: unknown };
-          latest = typeof data.tag_name === "string" ? data.tag_name.replace(/^v/, "") : null;
+          latest = releaseVersion(data?.tag_name);
         }
-      } catch (err) {
-        req.log.warn({ err }, "update check: GitHub releases lookup failed");
+      } catch {
+        req.log.warn({ event: "system.update_check.unavailable" }, "release lookup unavailable");
       }
       const checkedAt = new Date().toISOString();
       await writeCache(deps, { latest, checkedAt });
@@ -231,19 +235,36 @@ async function auditPublicOriginChange(
 
 async function readCache(deps: SystemRoutesDeps): Promise<CachedRelease | null> {
   if (!deps.kv) return null;
-  const entry = await deps.kv.get("system", undefined, KV_NAMESPACE, KV_KEY);
-  const value = entry?.value as CachedRelease | undefined;
-  return value && typeof value.checkedAt === "string" ? value : null;
+  try {
+    const entry = await deps.kv.get("system", undefined, KV_NAMESPACE, KV_KEY);
+    const value = entry?.value as CachedRelease | undefined;
+    if (!value || typeof value.checkedAt !== "string") return null;
+    const checkedAt = new Date(value.checkedAt);
+    if (!Number.isFinite(checkedAt.getTime())) return null;
+    return { latest: releaseVersion(value.latest), checkedAt: checkedAt.toISOString() };
+  } catch {
+    return null;
+  }
 }
 
 async function writeCache(deps: SystemRoutesDeps, value: CachedRelease): Promise<void> {
   if (!deps.kv) return;
-  await deps.kv.set(
-    "system",
-    undefined,
-    KV_NAMESPACE,
-    KV_KEY,
-    value,
-    new Date(Date.now() + CACHE_TTL_MS)
-  );
+  try {
+    await deps.kv.set(
+      "system",
+      undefined,
+      KV_NAMESPACE,
+      KV_KEY,
+      value,
+      new Date(Date.now() + CACHE_TTL_MS)
+    );
+  } catch {
+    // An optional update-notice cache must not expose storage errors or fail the request.
+  }
+}
+
+function releaseVersion(value: unknown): string | null {
+  return typeof value === "string" && /^v?\d{1,9}\.\d{1,9}\.\d{1,9}$/.test(value)
+    ? value.replace(/^v/, "")
+    : null;
 }

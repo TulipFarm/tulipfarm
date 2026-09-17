@@ -1,4 +1,5 @@
 import { randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
+import type { OperationalScope } from "@tulipfarm/authz";
 import { hashToken } from "../auth/api-tokens";
 import type { Queryable } from "../db";
 
@@ -23,6 +24,7 @@ export interface ApiClientDoc {
   expiresAt: Date | null;
   createdAt: Date;
   rotatedAt: Date | null;
+  operationalScope?: OperationalScope;
 }
 
 export interface PublicApiClient {
@@ -34,6 +36,7 @@ export interface PublicApiClient {
   expiresAt: string | null;
   createdAt: string;
   rotatedAt: string | null;
+  operationalScope?: OperationalScope;
 }
 
 /** Never exposes `secretHash` — the secret is returned exactly once, at mint/rotate time. */
@@ -47,6 +50,7 @@ export function toPublicApiClient(client: ApiClientDoc): PublicApiClient {
     expiresAt: client.expiresAt ? client.expiresAt.toISOString() : null,
     createdAt: client.createdAt.toISOString(),
     rotatedAt: client.rotatedAt ? client.rotatedAt.toISOString() : null,
+    ...(client.operationalScope ? { operationalScope: client.operationalScope } : {}),
   };
 }
 
@@ -70,6 +74,9 @@ function rowToClient(row: Record<string, unknown>): ApiClientDoc {
     expiresAt: (row.expires_at as Date | null) ?? null,
     createdAt: row.created_at as Date,
     rotatedAt: (row.rotated_at as Date | null) ?? null,
+    ...(row.operational_scope
+      ? { operationalScope: row.operational_scope as OperationalScope }
+      : {}),
   };
 }
 
@@ -78,8 +85,8 @@ export class PgApiClientRepo implements ApiClientRepo {
 
   async create(client: ApiClientDoc): Promise<void> {
     await this.q.query(
-      `INSERT INTO api_clients (id, client_id, name, secret_hash, owner_user_id, status, expires_at, created_at, rotated_at)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+      `INSERT INTO api_clients (id, client_id, name, secret_hash, owner_user_id, status, expires_at, created_at, rotated_at, operational_scope)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
       [
         client._id,
         client.clientId,
@@ -90,6 +97,7 @@ export class PgApiClientRepo implements ApiClientRepo {
         client.expiresAt,
         client.createdAt,
         client.rotatedAt,
+        client.operationalScope ? JSON.stringify(client.operationalScope) : null,
       ]
     );
   }
@@ -154,7 +162,12 @@ function hashesMatch(a: string, b: string): boolean {
 
 export async function createApiClient(
   repo: ApiClientRepo,
-  input: { name: string; ownerUserId: string | null; expiresAt?: Date | null }
+  input: {
+    name: string;
+    ownerUserId: string | null;
+    expiresAt?: Date | null;
+    operationalScope?: OperationalScope;
+  }
 ): Promise<{ doc: ApiClientDoc; secret: string }> {
   const secret = newSecret();
   const doc: ApiClientDoc = {
@@ -167,6 +180,7 @@ export async function createApiClient(
     expiresAt: input.expiresAt ?? null,
     createdAt: new Date(),
     rotatedAt: null,
+    ...(input.operationalScope ? { operationalScope: input.operationalScope } : {}),
   };
   await repo.create(doc);
   return { doc, secret };

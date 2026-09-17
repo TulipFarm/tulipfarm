@@ -51,6 +51,7 @@ publication, approvals, integrations, events, and blob/vector/cache/queue ports.
 - `initializeRuntimeDeployment` runs after migration 126 in all three runtime entrypoints. Its
   singleton identity/hosting association is immutable; configuration is not authority. Hosted
   trust injection is test-only; production hosted startup remains unavailable.
+- Principal updates preserve existing operational scope; API-client lifecycle owns its projection.
 - Team lifecycle and Team-linked asset writes share the locked `teams` row; keep checks and the
   lifecycle mutation in one transaction.
 - If a storage rule repeats schema/Soul contracts, derive or reference the owner instead of copying.

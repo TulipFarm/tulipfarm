@@ -27,6 +27,8 @@ API clients, external identity mappings, and channel bind links.
 - New request code should read `req.principal`; `req.user` exists only for legacy auth routes.
 - Default deny: no verifier, mapping, or valid active principal means the same opaque `401`.
 - API client secrets and link tokens are hash-only and compared with `timingSafeEqual`.
+- Operational API clients bind immutably to a business/installation and project live lifecycle to
+  Principals; neither their scope nor their owner's role grants access (ADR-032).
 - OIDC `state` and link tokens are consumed atomically so replay fails.
 - OIDC/link errors expose only coarse reasons; provider detail must not reach responses or logs.
 - Channel senders live in `external_identity_mappings` with the Integration slug as provider.

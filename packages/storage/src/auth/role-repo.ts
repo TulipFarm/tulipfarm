@@ -68,6 +68,7 @@ export const AUTHORIZATION_STORAGE_STATEMENTS: readonly string[] = [
     ),
     status      text NOT NULL CHECK (status IN ('active', 'disabled', 'expired')),
     expires_at  timestamptz,
+    operational_scope jsonb,
     created_at  timestamptz NOT NULL DEFAULT now(),
     updated_at  timestamptz NOT NULL DEFAULT now(),
     PRIMARY KEY (business_id, id)

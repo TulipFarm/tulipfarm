@@ -1,3 +1,4 @@
+import type { OperationalScope } from "@tulipfarm/authz";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { sessionCookieOptions } from "../auth/cookie-security";
 import { setCsrfCookie } from "../auth/csrf";
@@ -61,6 +62,7 @@ export interface IdentityRouteDeps {
   sessionStore: SessionStore;
   userRepo: UserRepo;
   apiClientRepo?: ApiClientRepo;
+  deployment?: OperationalScope;
   externalIdentityRepo?: ExternalIdentityRepo;
   externalIdentityUnlinker?: ExternalIdentityUnlinker;
   channelBind?: ChannelBindDeps;
@@ -362,7 +364,11 @@ function registerApiClientRoutes(
       },
     },
     async (req, reply) => {
-      const body = (req.body ?? {}) as { name?: unknown; expiresAt?: unknown };
+      const body = (req.body ?? {}) as {
+        name?: unknown;
+        expiresAt?: unknown;
+        operational?: boolean;
+      };
       if (typeof body.name !== "string" || body.name.trim() === "") {
         return reply.code(400).send({ error: "name is required" });
       }
@@ -375,10 +381,21 @@ function registerApiClientRoutes(
         expiresAt = parsed;
       }
       const ownerUserId = req.principal?.id as string;
+      if (body.operational && !deps.deployment) {
+        return reply.code(503).send({ error: "runtime identity unavailable" });
+      }
       const { doc, secret } = await createApiClient(repo, {
         name: body.name.trim(),
         ownerUserId,
         expiresAt,
+        ...(body.operational && deps.deployment
+          ? {
+              operationalScope: {
+                businessId: deps.deployment.businessId,
+                installationId: deps.deployment.installationId,
+              },
+            }
+          : {}),
       });
       return reply.code(201).send({
         client: toPublicApiClient(doc),
