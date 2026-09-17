@@ -1,7 +1,11 @@
 import { type IngressDecision, parseDecision } from "@tulipfarm/integrations";
 import type { HookExecutor } from "@tulipfarm/sandbox";
 import type { PersistedRun } from "@tulipfarm/storage";
-import { type RunEventAppendPort, TurnEventWriter } from "@tulipfarm/turn-executor";
+import {
+  type RunEventAppendPort,
+  settleIntegrationReply,
+  TurnEventWriter,
+} from "@tulipfarm/turn-executor";
 import type { RunExecutor } from "../executors";
 import type {
   HttpDeliveryHost,
@@ -103,7 +107,7 @@ async function classify(
   return { status: "succeeded" };
 }
 
-/** Chat replies are at-least-once; durable Turn inputs are idempotent, but posts can repeat. */
+/** Delivery retries reuse the completed Turn and the binding's stable provider Effect identity. */
 async function runChat(
   run: PersistedRun,
   decision: Extract<IngressDecision, { kind: "chat" }>,
@@ -124,6 +128,9 @@ async function runChat(
       : { requireExistingThread: decision.requireExistingThread }),
     reply: decision.reply,
   });
+  if (attached.outcome === "reply_failed") {
+    return settleIntegrationReply({ status: "succeeded" }, attached.reply);
+  }
   if (attached.outcome === "unlinked") {
     // API owns bind links; worker only learns no Turn may run.
     return classify(writer, { decision: "ignore", reason: "sender_unlinked" });
@@ -134,20 +141,23 @@ async function runChat(
 
   await writer.emit("delivery.classified", { decision: "chat" }, "classified");
 
-  const outcome = await options.turn(run, signal);
+  const outcome: RunOutcome =
+    attached.completedOutcome === undefined
+      ? await options.turn(run, signal)
+      : { status: attached.completedOutcome === "answered" ? "succeeded" : "failed" };
   const reply = replyOutcome(outcome);
   if (reply === null) {
     // Turn is still open; do not post a channel reply yet.
     return outcome;
   }
 
-  await options.deliveries.postReply(run.id, {
+  const delivered = await options.deliveries.postReply(run.id, {
     attempt: attached.attempt,
     outcome: reply,
     binding: decision.reply.binding,
     ...(decision.reply.vars === undefined ? {} : { vars: decision.reply.vars }),
   });
-  return outcome;
+  return settleIntegrationReply(outcome, delivered);
 }
 
 /** How the turn ended, as the channel should hear it. `null` means it has not ended. */

@@ -124,6 +124,9 @@ function derivedId(...parts: readonly string[]): string {
 }
 
 function mapDispatchError(error: ToolDispatchError, slug: string): ToolCallResult {
+  if (error.code === "ambiguous" || error.code === "dispatch_in_progress") {
+    return err("indeterminate", "The provider effect requires reconciliation before retrying.");
+  }
   switch (error.detail) {
     case "provider_unauthorized":
       return err(

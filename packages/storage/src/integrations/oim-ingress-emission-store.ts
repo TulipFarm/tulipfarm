@@ -59,6 +59,62 @@ export class OimIngressEmissionStore {
     private readonly nextId: () => string
   ) {}
 
+  async authorizeEvent(event: StoreEventInput): Promise<boolean> {
+    if (
+      event.verification.method !== "oim_ingress" ||
+      event.verification.status !== "verified" ||
+      event.record.type !== "connection" ||
+      event.principal.kind !== "integration_account" ||
+      event.principal.internalId !== undefined ||
+      event.source.provider !== event.source.integrationId
+    )
+      return false;
+    return this.transactions.withTransaction(async (transaction) => {
+      const result = await transaction.query<{ usable: boolean }>(
+        `SELECT (
+           connection.health_status IN ('healthy', 'expiring')
+           AND (connection.expires_at IS NULL OR connection.expires_at > now())
+         ) AS usable FROM webhook_deliveries delivery
+           JOIN connections connection
+             ON connection.business_id = delivery.business_id
+            AND connection.id = delivery.connection_id
+            AND connection.integration_id = delivery.integration_id
+            AND connection.integration_major_version = delivery.integration_major_version
+           JOIN connection_external_identities identity
+             ON identity.business_id = connection.business_id
+            AND identity.connection_id = connection.id
+            AND identity.integration_id = connection.integration_id
+            AND identity.integration_major_version = connection.integration_major_version
+            AND identity.external_tenant_id = delivery.external_tenant_id
+            AND identity.external_account_id = delivery.external_account_id
+          WHERE delivery.business_id = $1 AND delivery.id = $2
+            AND delivery.connection_id = $3 AND delivery.integration_id = $4
+            AND delivery.external_tenant_id = $5 AND delivery.state = 'dispatched'
+            AND delivery.external_account_id = $6
+            AND delivery.integration_major_version::text = $7
+            AND connection.status = 'active'
+            AND NOT EXISTS (
+              SELECT 1 FROM oim_ingress_teardowns teardown
+               WHERE teardown.business_id = connection.business_id
+                 AND teardown.connection_id = connection.id
+            )`,
+        [
+          event.businessId,
+          event.source.deliveryId,
+          event.record.id,
+          event.source.integrationId,
+          event.source.externalTenantId,
+          event.principal.externalId,
+          event.record.version,
+        ]
+      );
+      const connection = result.rows[0];
+      if (connection === undefined) return false;
+      if (!connection.usable) throw new Error("ingress_connection_temporarily_unavailable");
+      return true;
+    });
+  }
+
   async emitIfAuthorized(input: OimIngressEmissionInput): Promise<OimIngressEmissionResult> {
     if (
       input.event.businessId !== input.businessId ||

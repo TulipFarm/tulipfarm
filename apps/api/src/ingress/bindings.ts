@@ -1,5 +1,5 @@
 import type { ToolBinding } from "@tulipfarm/soul";
-import type { ChatAutonomy, ToolCallResult } from "@tulipfarm/tool-host";
+import type { ChatAutonomy, ParkableToolCallResult, ToolCallResult } from "@tulipfarm/tool-host";
 import { autonomyDemandsApproval, refuseParkedResult } from "@tulipfarm/tool-host";
 import type { ToolRegistry } from "../broker/tool-adapter";
 import { declarativeToolName } from "../tools/declarative/tools";
@@ -24,6 +24,19 @@ export async function executeToolBinding(
   vars: Record<string, string>,
   context: IngressRunContext
 ): Promise<ToolCallResult> {
+  return refuseParkedResult(
+    await executeReplyBinding(registry, slug, binding, vars, context),
+    declarativeToolName(slug, binding.tool)
+  );
+}
+
+export async function executeReplyBinding(
+  registry: ToolRegistry,
+  slug: string,
+  binding: ToolBinding,
+  vars: Record<string, string>,
+  context: IngressRunContext
+): Promise<ParkableToolCallResult> {
   const name = declarativeToolName(slug, binding.tool);
   const tool = registry.getAll().find((t) => t.tier === "integration" && t.name === name);
   if (!tool) {
@@ -44,8 +57,9 @@ export async function executeToolBinding(
     ...(context.autonomy === undefined ? {} : { autonomy: context.autonomy }),
     runId: context.runId,
     toolCallId: context.toolCallId,
+    stateKey: "invoke",
   });
-  return refuseParkedResult(result, name);
+  return result;
 }
 
 /** Reads dot-paths from data, `structuredContent`, then parseable JSON text blocks. */
