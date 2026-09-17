@@ -1,4 +1,14 @@
 import type { EventOutboxPort } from "@tulipfarm/storage";
+import type { InternalApiClient } from "./internal/client";
+
+export function acceptedEventHandler(client: Pick<InternalApiClient, "require">) {
+  return async (message: Awaited<ReturnType<EventOutboxPort["claim"]>>[number]): Promise<void> => {
+    await client.require(
+      "POST",
+      `/api/v1/internal/events/${encodeURIComponent(message.inboxId)}/dispatch`
+    );
+  };
+}
 
 export interface EventOutboxDispatcherOptions {
   outbox: EventOutboxPort;

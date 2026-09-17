@@ -72,6 +72,12 @@ export interface InternalEventInput {
 export class EventTriggerGateway {
   constructor(private readonly deps: EventTriggerGatewayDeps) {}
 
+  dispatchCanonicalEvent(
+    envelope: eventSchema.EventEnvelope<Record<string, unknown>>
+  ): Promise<EventTriggerDispatch> {
+    return this.dispatch(eventSchema.validateEventEnvelope(envelope));
+  }
+
   private timestamp(): string {
     return (this.deps.now ?? (() => new Date().toISOString()))();
   }

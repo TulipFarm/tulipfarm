@@ -22,7 +22,7 @@ publication, approvals, integrations, events, and blob/vector/cache/queue ports.
 | `src/artifacts/` | Append-only Artifacts, State Output Bindings, lineage. |
 | `src/runs/` | Runs, States, Attempts, waits/signals, budgets, concurrency, children, events. |
 | `src/auth/` | Principals, Teams, roles, sessions, guests, JIT users, recertification, identities. |
-| `src/integrations/` | Integration install/state, scoped Connections, revision-bound verification evidence, OIM sync/ingress/trust state, and channel stores. |
+| `src/integrations/` | Integration install/state, scoped Connections, revision-bound verification evidence, OIM sync/ingress/trust state, accepted-event reauthorization, and channel stores. |
 | `src/conversations/` | Conversation Turn read models used to restore Chat state. |
 | `src/approvals/`, `src/events/`, `src/notifications/` | Approval persistence, generic events, and recipient-scoped Team notifications. |
 | `src/asset-ownership/` | Shared asset ownership records, Team shares, and ownership operations. |

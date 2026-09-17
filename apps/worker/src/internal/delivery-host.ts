@@ -18,7 +18,13 @@ export interface RemoteDelivery {
 }
 
 export type RemoteAttachResult =
-  | { readonly outcome: "attached"; readonly turnId: string; readonly attempt: number }
+  | { readonly outcome: "reply_failed"; readonly reply: IngressReplyResult }
+  | {
+      readonly outcome: "attached";
+      readonly turnId: string;
+      readonly attempt: number;
+      readonly completedOutcome?: "answered" | "failed";
+    }
   | { readonly outcome: "unlinked" }
   | { readonly outcome: "ignored"; readonly reason: string };
 
@@ -71,11 +77,9 @@ export class HttpDeliveryHost {
       binding: string;
       vars?: Record<string, string>;
     }
-  ): Promise<{ delivered: boolean }> {
-    return this.client.require<{ delivered: boolean }>(
-      "POST",
-      deliveryPath(runId, "/reply"),
-      input
-    );
+  ): Promise<IngressReplyResult> {
+    return this.client.require<IngressReplyResult>("POST", deliveryPath(runId, "/reply"), input);
   }
 }
+
+import type { IngressReplyResult } from "@tulipfarm/turn-executor";
