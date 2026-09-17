@@ -6,6 +6,12 @@ query ReadIssue($id: String!) {
     description
     url
     updatedAt
+    priority
+    estimate
+    assignee {
+      id
+      name
+    }
     state {
       id
       name
