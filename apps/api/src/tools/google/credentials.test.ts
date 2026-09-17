@@ -68,6 +68,51 @@ function tokenResponse(status: number, payload: unknown): Response {
 const NOW = new Date("2026-03-01T12:00:00Z");
 
 describe("GoogleAccessTokenProvider", () => {
+  it("does not issue an in-flight refreshed lease after disconnect", async () => {
+    let enabled = true;
+    const { service } = fakeSecrets(SEALED);
+    const provider = new GoogleAccessTokenProvider({
+      secrets: async () => service,
+      connection: async () => ({
+        enabled,
+        step: STEP,
+        env: connectionEnv("2026-03-01T11:00:00Z"),
+      }),
+      now: () => NOW,
+      fetchImpl: async () => {
+        enabled = false;
+        return tokenResponse(200, { access_token: "new-token", expires_in: 3600 });
+      },
+    });
+    expect(await provider.resolveCurrent(GOOGLE_ACCESS_TOKEN_SECRET_REF)).toBeNull();
+  });
+
+  it.each([false, undefined])("denies retained credentials when enabled is %s", async (enabled) => {
+    const { service } = fakeSecrets(SEALED);
+    const fetchImpl = vi.fn();
+    const provider = new GoogleAccessTokenProvider({
+      secrets: async () => service,
+      connection: async () => ({
+        enabled,
+        step: STEP,
+        env: connectionEnv("2026-03-01T11:00:00Z"),
+      }),
+      now: () => NOW,
+      fetchImpl,
+    });
+    expect(await provider.resolveCurrent(GOOGLE_ACCESS_TOKEN_SECRET_REF)).toBeNull();
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  it("denies retained credentials when the live connection was removed", async () => {
+    const { service } = fakeSecrets(SEALED);
+    const provider = new GoogleAccessTokenProvider({
+      secrets: async () => service,
+      connection: async () => undefined,
+    });
+    expect(await provider.resolveCurrent(GOOGLE_ACCESS_TOKEN_SECRET_REF)).toBeNull();
+  });
+
   it("ignores any secret ref other than the Google access token", async () => {
     const { service } = fakeSecrets({});
     const provider = new GoogleAccessTokenProvider({ secrets: async () => service });
@@ -80,6 +125,7 @@ describe("GoogleAccessTokenProvider", () => {
     const provider = new GoogleAccessTokenProvider({
       secrets: async () => service,
       connection: async (): Promise<GoogleConnection> => ({
+        enabled: true,
         step: STEP,
         env: connectionEnv("2026-03-01T13:00:00Z"),
       }),
@@ -100,6 +146,7 @@ describe("GoogleAccessTokenProvider", () => {
     const provider = new GoogleAccessTokenProvider({
       secrets: async () => service,
       connection: async (): Promise<GoogleConnection> => ({
+        enabled: true,
         step: STEP,
         env: connectionEnv("2026-03-01T12:01:00Z"),
       }),
@@ -122,6 +169,7 @@ describe("GoogleAccessTokenProvider", () => {
     const provider = new GoogleAccessTokenProvider({
       secrets: async () => service,
       connection: async (): Promise<GoogleConnection> => ({
+        enabled: true,
         step: STEP,
         env: connectionEnv("2026-03-01T11:00:00Z"),
       }),

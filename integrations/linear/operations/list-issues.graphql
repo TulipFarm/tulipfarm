@@ -1,5 +1,5 @@
 query ListIssues($first: Int!, $after: String) {
-  issues(first: $first, after: $after) {
+  issues(first: $first, after: $after, orderBy: updatedAt) {
     nodes {
       id
       identifier

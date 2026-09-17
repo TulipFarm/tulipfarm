@@ -40,7 +40,7 @@ export interface MergeConnectionEnvInput {
 
 export interface MergeConnectionEnvResult {
   enabled: boolean;
-  /** True only when this write completed the flow, so post-connect wiring runs once. */
+  /** Enablement transition only; activation retries must use `enabled`, not this flag. */
   connectedNow: boolean;
 }
 

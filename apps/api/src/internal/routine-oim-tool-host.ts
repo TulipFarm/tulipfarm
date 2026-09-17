@@ -806,7 +806,7 @@ export class InternalRoutineOimToolHost {
       return { kind: "unavailable", reason: "pagination_runtime_missing" };
     }
     const fileIds =
-      "multipart" in compiled.binding
+      "multipart" in compiled.binding || "mime" in compiled.binding
         ? extractOimMultipartFileIds(compiled.binding, input.arguments)
         : [];
     let targetRefs: readonly ToolTargetRef[];
@@ -1039,7 +1039,7 @@ export class InternalRoutineOimToolHost {
       return this.failed("before_dispatch", "oim_compile_failed", false);
     }
     const fileIds =
-      "multipart" in compiled.binding
+      "multipart" in compiled.binding || "mime" in compiled.binding
         ? extractOimMultipartFileIds(compiled.binding, intent.arguments)
         : [];
     const prepared = this.prepared(

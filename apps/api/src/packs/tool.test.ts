@@ -44,6 +44,43 @@ function context(): NetworkToolContext {
   };
 }
 describe("pack_read", () => {
+  it.each(["", " ", "\t\r\n"])("reads a pinned URL with blank YAML %j", async (yaml) => {
+    const ctx = context();
+    const expectedSha256 = createHash("sha256").update(stringify(pack())).digest("hex");
+    expect(
+      await packReadTool.handler(
+        { url: "https://example.com/support-triage.yaml", yaml, expectedSha256 },
+        ctx
+      )
+    ).toMatchObject({
+      success: true,
+      data: { pack: pack(), sha256: expectedSha256 },
+    });
+    expect(ctx.http.send).toHaveBeenCalledTimes(1);
+  });
+  it.each(["", " ", "\t\r\n"])("reads exact pasted YAML with blank URL %j", async (url) => {
+    const ctx = context();
+    const yaml = `\uFEFF\n${stringify(pack())}\n\n`;
+    const expectedSha256 = createHash("sha256").update(yaml).digest("hex");
+    expect(await packReadTool.handler({ url, yaml, expectedSha256 }, ctx)).toMatchObject({
+      success: true,
+      data: { pack: pack(), sha256: expectedSha256 },
+    });
+    expect(ctx.http.send).not.toHaveBeenCalled();
+  });
+  it("still refuses changed pinned source with an unused blank source field", async () => {
+    const ctx = context();
+    expect(
+      await packReadTool.handler(
+        { url: "https://example.com/pack", yaml: " ", expectedSha256: "0".repeat(64) },
+        ctx
+      )
+    ).toMatchObject({
+      success: false,
+      error: { code: "validation_error", message: expect.stringContaining("source_changed") },
+    });
+    expect(ctx.http.send).toHaveBeenCalledTimes(1);
+  });
   it("pins a read to exact reviewed source bytes and refuses a changed source", async () => {
     const yaml = stringify(pack());
     const expectedSha256 = createHash("sha256").update(yaml).digest("hex");
@@ -108,15 +145,24 @@ describe("pack_read", () => {
     });
     expect(ctx.http.send).not.toHaveBeenCalled();
   });
-  it.each([{}, { yaml: "x", url: "https://example.com" }, { yaml: "x", confirm: true }])(
-    "refuses invalid arguments",
-    async (args) => {
-      expect(await packReadTool.handler(args, context())).toMatchObject({
-        success: false,
-        error: { code: "validation_error" },
-      });
-    }
-  );
+  it.each([
+    {},
+    { url: "", yaml: " " },
+    { url: " " },
+    { yaml: "\n" },
+    { url: "https://example.com", yaml: stringify(pack()) },
+    { url: "https://example.com", yaml: "# Not a blank source" },
+    { url: "https://example.com", yaml: null },
+    { url: "https://example.com", yaml: 0 },
+    { yaml: "x", confirm: true },
+  ])("refuses invalid arguments", async (args) => {
+    const ctx = context();
+    expect(await packReadTool.handler(args, ctx)).toMatchObject({
+      success: false,
+      error: { code: "validation_error" },
+    });
+    expect(ctx.http.send).not.toHaveBeenCalled();
+  });
   it("refuses oversize model results rather than returning truncated executable content", async () => {
     expect(
       await packReadTool.handler({ yaml: stringify(pack("x".repeat(40_000))) }, context())

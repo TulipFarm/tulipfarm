@@ -311,7 +311,8 @@ export function registerIntegrationRoutes(
   // Agents a new external reach, which is exactly the kind of change an auditor asks about.
   audit?: AuditService,
   personalTokens?: PrincipalProviderTokenRepo,
-  oimCatalog?: OimIntegrationCatalogRoutes
+  oimCatalog?: OimIntegrationCatalogRoutes,
+  onDisconnected?: (name: string) => Promise<void>
 ): void {
   const auditWrite = makeSoulAuditWriter(audit);
   // Materialize a bundled-only integration into the soul repo so its connection state has a home.
@@ -536,10 +537,9 @@ export function registerIntegrationRoutes(
 
       const actor = commitActorFromRequest(req);
       let enabled: boolean;
-      let connectedNow: boolean;
       try {
         await materializeIfBundledOnly(name, actor);
-        ({ enabled, connectedNow } = await mergeConnectionEnv(
+        ({ enabled } = await mergeConnectionEnv(
           { soulWriter, soulLoader, secrets: secretsService },
           {
             slug: name,
@@ -559,7 +559,13 @@ export function registerIntegrationRoutes(
         }
         throw error;
       }
-      if (connectedNow) await onConnected?.(name);
+      if (enabled) {
+        try {
+          await onConnected?.(name);
+        } catch {
+          return reply.code(500).send({ error: "Integration activation failed. Retry connect." });
+        }
+      }
       // Field *names* only. Values are credentials, and `safeMetadata` would reject them anyway.
       await auditWrite(req, "integration.connect", `integration:${name}`, {
         status: enabled ? "connected" : "pending",
@@ -641,6 +647,7 @@ export function registerIntegrationRoutes(
       await soulLoader.reload();
       // An agent must not keep calling a provider whose credential the operator just revoked.
       const revoked = declarativeTools?.sync();
+      await onDisconnected?.(name);
       await auditWrite(req, "integration.disconnect", `integration:${name}`, {
         ...(revoked === undefined ? {} : { toolsResynced: revoked }),
       });
@@ -678,7 +685,7 @@ export function registerIntegrationRoutes(
     },
     async (req, reply) => {
       const { name } = req.params as { name: string };
-      if (!NAME_RE.test(name) || !soulLoader.integrations.has(name)) {
+      if (!NAME_RE.test(name)) {
         return reply.code(404).send({ error: `integration not found: ${name}` });
       }
       if (await isOimPackage(name)) {
@@ -686,7 +693,21 @@ export function registerIntegrationRoutes(
           .code(400)
           .send({ error: `integration "${name}" is removed through its installed release` });
       }
-      await deleteConnectionSecrets(name, secretsService);
+      if (!soulLoader.integrations.has(name)) {
+        // A prior removal may have published but failed during secret cleanup.
+        const remaining = (await secretsService.list()).some((secret) =>
+          secret.key.startsWith(`integration.${name}.`)
+        );
+        if (!remaining) {
+          return reply.code(404).send({ error: `integration not found: ${name}` });
+        }
+        await onDisconnected?.(name);
+        await deleteConnectionSecrets(name, secretsService);
+        await auditWrite(req, "integration.remove", `integration:${name}`, {
+          secretsDeleted: true,
+        });
+        return reply.code(204).send();
+      }
       // Drop the provenance record too, so a later reinstall from a different source is not
       // reported against the old one. The lock is a root singleton, so it never overlaps the
       // integration directory this changeset also deletes.
@@ -717,6 +738,8 @@ export function registerIntegrationRoutes(
       }
       await soulLoader.reload();
       declarativeTools?.sync();
+      await onDisconnected?.(name);
+      await deleteConnectionSecrets(name, secretsService);
       await auditWrite(req, "integration.remove", `integration:${name}`, { secretsDeleted: true });
       return reply.code(204).send();
     }

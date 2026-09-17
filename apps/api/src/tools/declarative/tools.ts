@@ -737,7 +737,7 @@ function oimPreparer(
     }
     const destination = oimDestination(runtime);
     const fileIds =
-      "multipart" in runtime.binding
+      "multipart" in runtime.binding || "mime" in runtime.binding
         ? extractOimMultipartFileIds(runtime.binding, providerArguments)
         : [];
     const producesBinaryFile =
@@ -941,7 +941,7 @@ function buildToolDef(
           canonicalHash(configuration) !== intent.configurationDigest ||
           canonicalHash(integration.oimManifest) !== intent.manifestDigest ||
           canonicalHash(
-            "multipart" in runtime.binding
+            "multipart" in runtime.binding || "mime" in runtime.binding
               ? extractOimMultipartFileIds(runtime.binding, intent.arguments)
               : []
           ) !== canonicalHash(intent.fileIds ?? [])
@@ -1358,7 +1358,7 @@ function dispatcherFor(
       }
       const current = compileOimRuntimeTool(runtimeTool, integration, configuration);
       const currentFiles =
-        "multipart" in current.binding
+        "multipart" in current.binding || "mime" in current.binding
           ? extractOimMultipartFileIds(current.binding, intent.arguments)
           : [];
       return (
