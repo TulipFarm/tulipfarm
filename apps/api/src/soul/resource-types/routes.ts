@@ -39,6 +39,12 @@ type PreHandler = (req: FastifyRequest, reply: FastifyReply) => Promise<void>;
 
 const NAME_RE = /^[a-z][a-z0-9-]*$/;
 
+function resourceTarget(name: string, domain?: string) {
+  return domain === undefined
+    ? ({ kind: "Resource", slug: name, definitionMode: "legacy" } as const)
+    : ({ kind: "Resource", slug: name } as const);
+}
+
 type SchemaCheck =
   | { ok: true; parsed: Record<string, unknown> }
   | { ok: false; status: 422; body: { error: string; boundary?: string; path?: string } };
@@ -185,7 +191,7 @@ export function registerResourceTypeRoutes(
       }
 
       try {
-        await soulWriter.apply({
+        const result = await soulWriter.apply({
           subject: `soul: add resource type ${name}`,
           source: "api",
           actor: commitActorFromRequest(req),
@@ -195,13 +201,22 @@ export function registerResourceTypeRoutes(
               op: "put",
               // A domainless type keeps the superseded `schema.yml` spelling; only a domained one
               // needs the canonical envelope that carries the wall.
-              target:
-                domain === undefined
-                  ? { kind: "Resource", slug: name, definitionMode: "legacy" }
-                  : { kind: "Resource", slug: name },
+              target: resourceTarget(name, domain),
               content: body,
             },
           ],
+        });
+        await soulLoader.reload();
+        // Materialise the new type's Postgres table before the client can POST records to it.
+        await reconcile?.();
+        await auditWrite(req, "resource-type.create", `resource-type:${name}`);
+
+        return reply.code(201).send({
+          name,
+          schema: schemaYaml,
+          hasHooks: false,
+          revision: result.commitSha,
+          ...(domain === undefined ? {} : { domain }),
         });
       } catch (e) {
         if (isSoulWriteError(e)) {
@@ -210,17 +225,6 @@ export function registerResourceTypeRoutes(
         }
         throw e;
       }
-      await soulLoader.reload();
-      // Materialise the new type's Postgres table before the client can POST records to it.
-      await reconcile?.();
-      await auditWrite(req, "resource-type.create", `resource-type:${name}`);
-
-      return reply.code(201).send({
-        name,
-        schema: schemaYaml,
-        hasHooks: false,
-        ...(domain === undefined ? {} : { domain }),
-      });
     }
   );
 
@@ -235,11 +239,27 @@ export function registerResourceTypeRoutes(
         response: {
           200: ListResourceTypesResponseSchema,
           401: ErrorSchema,
+          500: ErrorSchema,
         },
       },
     },
     async (_req, reply) => {
-      const types = Array.from(soulLoader.resources.values()).map(resourceTypePayload);
+      const resourcesWithRevisions = await Promise.all(
+        Array.from(soulLoader.resources.values()).map(async (resource) => ({
+          resource,
+          revision: await soulWriter.revision(resourceTarget(resource.name, resource.domain)),
+        }))
+      );
+      const missing = resourcesWithRevisions.find(({ revision }) => revision === null);
+      if (missing !== undefined) {
+        return reply
+          .code(500)
+          .send({ error: `resource type ${missing.resource.name} has no readable revision` });
+      }
+      const types = resourcesWithRevisions.map(({ resource, revision }) => ({
+        ...resourceTypePayload(resource),
+        revision,
+      }));
       return reply.send({ types });
     }
   );
@@ -270,7 +290,11 @@ export function registerResourceTypeRoutes(
     },
     async (req, reply) => {
       const { name } = req.params as { name: string };
-      const { schema: schemaYaml, domain } = req.body as { schema: string; domain?: string };
+      const {
+        schema: schemaYaml,
+        revision,
+        domain,
+      } = req.body as { schema: string; revision: string; domain?: string };
 
       if (!name || !NAME_RE.test(name)) {
         return reply.code(400).send({ error: "invalid resource type name" });
@@ -283,6 +307,7 @@ export function registerResourceTypeRoutes(
         return reply.code(404).send({ error: "resource type not found" });
       }
       const existingDomain = soulLoader.resources.get(name)?.domain;
+      const revisionTarget = resourceTarget(name, existingDomain);
       // Only a *change* of domain needs admin — a member editing the schema of a domained Resource
       // omits `domain` and keeps the existing wall, which is the ordinary case.
       if (
@@ -332,14 +357,16 @@ export function registerResourceTypeRoutes(
           name,
           check.parsed,
           async () => {
-            await soulWriter.apply({
+            const result = await soulWriter.apply({
               subject: `soul: update resource type ${name}`,
               source: "api",
               actor: commitActorFromRequest(req),
               businessId: DEPLOYMENT_BUSINESS_ID,
+              expectedRevisions: [{ target: revisionTarget, revision }],
               changes,
             });
             await soulLoader.reload();
+            return result;
           }
         );
         if (!publication.ok) {
@@ -350,6 +377,17 @@ export function registerResourceTypeRoutes(
             affectedRecordCount: publication.affectedRecordCount,
           });
         }
+        await reconcile?.();
+        await auditWrite(req, "resource-type.update", `resource-type:${name}`);
+
+        const reloaded = soulLoader.resources.get(name);
+        return reply.code(200).send({
+          name,
+          schema: schemaYaml,
+          hasHooks: reloaded?.hasHooks ?? false,
+          revision: publication.value.commitSha,
+          ...(reloaded?.domain === undefined ? {} : { domain: reloaded.domain }),
+        });
       } catch (e) {
         if (isSoulWriteError(e)) {
           const mapped = soulWriteHttpError(e);
@@ -357,16 +395,6 @@ export function registerResourceTypeRoutes(
         }
         throw e;
       }
-      await reconcile?.();
-      await auditWrite(req, "resource-type.update", `resource-type:${name}`);
-
-      const reloaded = soulLoader.resources.get(name);
-      return reply.code(200).send({
-        name,
-        schema: schemaYaml,
-        hasHooks: reloaded?.hasHooks ?? false,
-        ...(reloaded?.domain === undefined ? {} : { domain: reloaded.domain }),
-      });
     }
   );
 

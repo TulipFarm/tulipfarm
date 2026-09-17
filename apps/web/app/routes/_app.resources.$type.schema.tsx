@@ -20,11 +20,11 @@ export async function clientLoader({ params }: ClientLoaderFunctionArgs) {
   const types = await listResourceTypes();
   const summary = types.find((t) => t.name === type);
   if (!summary) throw new ApiError(404, `resource type not found: ${type}`);
-  return { type, schema: summary.schema };
+  return { type, schema: summary.schema, revision: summary.revision };
 }
 
 export default function ResourceTypeEdit() {
-  const { type, schema } = useLoaderData<typeof clientLoader>();
+  const { type, schema, revision } = useLoaderData<typeof clientLoader>();
   const navigate = useNavigate();
   const [value, setValue] = useState(schema);
   const [submitting, setSubmitting] = useState(false);
@@ -37,10 +37,16 @@ export default function ResourceTypeEdit() {
     setError(null);
     setSubmitting(true);
     try {
-      await updateResourceType(type, value);
+      await updateResourceType(type, value, revision);
       navigate(listPath);
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "failed to update resource type");
+      setError(
+        err instanceof ApiError && err.status === 409
+          ? "This schema changed after you opened the editor. Your draft is still here. Reload to review the current schema before saving again."
+          : err instanceof ApiError
+            ? err.message
+            : "failed to update resource type"
+      );
       setSubmitting(false);
     }
   }
@@ -59,7 +65,11 @@ export default function ResourceTypeEdit() {
           strategy, and other extensions are preserved. id/createdAt/updatedAt/version are managed
           by the platform.
         </p>
-        {error ? <p className="text-destructive">error: {error}</p> : null}
+        {error ? (
+          <p role="alert" className="text-destructive">
+            error: {error}
+          </p>
+        ) : null}
         <textarea
           aria-label="schema"
           spellCheck={false}

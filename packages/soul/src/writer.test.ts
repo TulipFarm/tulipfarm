@@ -589,6 +589,120 @@ describe("SoulWriter.apply — atomicity", () => {
 });
 
 describe("SoulWriter.apply — conflict detection", () => {
+  const resourceTarget = {
+    kind: "Resource" as const,
+    slug: "ticket",
+    definitionMode: "legacy" as const,
+  };
+  const schema = (properties: string) =>
+    `type: object\nproperties:\n${properties}\nadditionalProperties: false\n`;
+
+  it("rejects a stale artifact revision without losing a concurrent schema field", async () => {
+    await apply([
+      {
+        op: "put",
+        target: resourceTarget,
+        content: schema("  title:\n    type: string"),
+      },
+    ]);
+    const staleRevision = await writer.revision(resourceTarget);
+    if (staleRevision === null) throw new Error("expected Resource revision");
+
+    await apply([
+      {
+        op: "put",
+        target: resourceTarget,
+        content: schema("  title:\n    type: string\n  auditTag:\n    type: string"),
+      },
+    ]);
+
+    await expect(
+      writer.apply({
+        subject: "soul: update resource type ticket",
+        source: "api",
+        actor: ACTOR,
+        businessId: "biz-1",
+        expectedRevisions: [{ target: resourceTarget, revision: staleRevision }],
+        changes: [
+          {
+            op: "put",
+            target: resourceTarget,
+            content: schema("  title:\n    type: string\n  description:\n    type: string"),
+          },
+        ],
+      })
+    ).rejects.toMatchObject({ code: "CONFLICT" });
+
+    expect(readFileSync(join(soulPath, "resources/ticket/schema.yml"), "utf8")).toContain(
+      "auditTag:"
+    );
+  });
+
+  it("accepts the target revision after an unrelated artifact changes", async () => {
+    await apply([
+      {
+        op: "put",
+        target: resourceTarget,
+        content: schema("  title:\n    type: string"),
+      },
+    ]);
+    const revision = await writer.revision(resourceTarget);
+    if (revision === null) throw new Error("expected Resource revision");
+    await apply([put("triage")]);
+
+    await writer.apply({
+      subject: "soul: update resource type ticket",
+      source: "api",
+      actor: ACTOR,
+      businessId: "biz-1",
+      expectedRevisions: [{ target: resourceTarget, revision }],
+      changes: [
+        {
+          op: "put",
+          target: resourceTarget,
+          content: schema("  title:\n    type: string\n  description:\n    type: string"),
+        },
+      ],
+    });
+
+    expect(readFileSync(join(soulPath, "resources/ticket/schema.yml"), "utf8")).toContain(
+      "description:"
+    );
+  });
+
+  it("allows only one simultaneous update from the same artifact revision", async () => {
+    await apply([
+      {
+        op: "put",
+        target: resourceTarget,
+        content: schema("  title:\n    type: string"),
+      },
+    ]);
+    const revision = await writer.revision(resourceTarget);
+    if (revision === null) throw new Error("expected Resource revision");
+    const update = (field: string) =>
+      new SoulWriter(new SoulGitStore(soulPath, signer, logger), logger).apply({
+        subject: `soul: update resource type ticket with ${field}`,
+        source: "api",
+        actor: ACTOR,
+        businessId: "biz-1",
+        expectedRevisions: [{ target: resourceTarget, revision }],
+        changes: [
+          {
+            op: "put",
+            target: resourceTarget,
+            content: schema(`  title:\n    type: string\n  ${field}:\n    type: string`),
+          },
+        ],
+      });
+
+    const results = await Promise.allSettled([update("auditTag"), update("description")]);
+
+    expect(results.filter((result) => result.status === "fulfilled")).toHaveLength(1);
+    const rejected = results.find((result) => result.status === "rejected");
+    expect(rejected).toMatchObject({ reason: { code: "CONFLICT" } });
+  });
+
   it("rejects a write whose base moved under it instead of overwriting", async () => {
     await apply([put("first")]);
 

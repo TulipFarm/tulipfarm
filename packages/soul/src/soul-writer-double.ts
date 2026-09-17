@@ -1,5 +1,12 @@
 import type { ArtifactKind } from "@tulipfarm/schema";
-import type { SoulReadResult, SoulWriteRequest, SoulWriteResult, SoulWriter } from "./writer";
+import type {
+  SoulReadResult,
+  SoulWriteRequest,
+  SoulWriteResult,
+  SoulWriter,
+  SoulWriteTarget,
+} from "./writer";
+import { SoulWriteError } from "./writer";
 
 /**
  * An in-memory stand-in for the Soul write gateway.
@@ -30,6 +37,7 @@ const keyFor = (kind: ArtifactKind, slug?: string, companion?: string): string =
 
 export function makeSoulWriterDouble(baseCommit = "0".repeat(40)): SoulWriterDouble {
   const tree = new Map<string, string>();
+  const revisions = new Map<string, string>();
   const applied: SoulWriteRequest[] = [];
   let nextFailure: Error | undefined;
 
@@ -43,6 +51,8 @@ export function makeSoulWriterDouble(baseCommit = "0".repeat(40)): SoulWriterDou
       content: read(kind, slug),
       baseCommit,
     }),
+    revision: async (target: SoulWriteTarget) =>
+      revisions.get(keyFor(target.kind, target.slug, target.companion)) ?? baseCommit,
     readCompanion: (kind: ArtifactKind, slug: string, name: string) =>
       tree.get(keyFor(kind, slug, name)) ?? null,
     readCompanionWithBase: async (
@@ -59,24 +69,46 @@ export function makeSoulWriterDouble(baseCommit = "0".repeat(40)): SoulWriterDou
         nextFailure = undefined;
         throw failure;
       }
+      for (const precondition of request.expectedRevisions ?? []) {
+        const current =
+          revisions.get(
+            keyFor(
+              precondition.target.kind,
+              precondition.target.slug,
+              precondition.target.companion
+            )
+          ) ?? baseCommit;
+        if (current !== precondition.revision) {
+          throw new SoulWriteError("CONFLICT", "Soul write: artifact changed since it was read");
+        }
+      }
+      const commitSha = (applied.length + 1).toString(16).padStart(40, "0");
       const paths: string[] = [];
       for (const change of request.changes) {
         if (change.op === "deleteArtifact") {
           const prefix = keyFor(change.kind, change.slug);
           for (const key of [...tree.keys()]) {
-            if (key === prefix || key.startsWith(`${prefix}/`)) tree.delete(key);
+            if (key === prefix || key.startsWith(`${prefix}/`)) {
+              tree.delete(key);
+              revisions.delete(key);
+            }
           }
           paths.push(prefix);
           continue;
         }
         const key = keyFor(change.target.kind, change.target.slug, change.target.companion);
-        if (change.op === "put") tree.set(key, change.content);
-        else tree.delete(key);
+        if (change.op === "put") {
+          tree.set(key, change.content);
+          revisions.set(key, commitSha);
+        } else {
+          tree.delete(key);
+          revisions.delete(key);
+        }
         paths.push(key);
       }
       applied.push(request);
       return {
-        commitSha: `sha-${applied.length}`,
+        commitSha,
         filesChanged: paths.length,
         paths,
         pushed: true,
@@ -88,8 +120,16 @@ export function makeSoulWriterDouble(baseCommit = "0".repeat(40)): SoulWriterDou
   return {
     writer: writer as unknown as SoulWriter,
     applied,
-    put: (kind, slug, content) => tree.set(keyFor(kind, slug), content),
-    putCompanion: (kind, slug, name, content) => tree.set(keyFor(kind, slug, name), content),
+    put: (kind, slug, content) => {
+      const key = keyFor(kind, slug);
+      tree.set(key, content);
+      revisions.set(key, baseCommit);
+    },
+    putCompanion: (kind, slug, name, content) => {
+      const key = keyFor(kind, slug, name);
+      tree.set(key, content);
+      revisions.set(key, baseCommit);
+    },
     failNextWith: (error) => {
       nextFailure = error;
     },
