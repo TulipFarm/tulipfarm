@@ -24,8 +24,8 @@ export const packReadTool = defineApiTool<NetworkToolContext>({
   handler: async (args, context) => {
     if (!validate(args)) return err("validation_error", "Invalid Pack read arguments.");
     const source = {
-      ...(args.url === undefined ? {} : { url: args.url }),
-      ...(args.yaml === undefined ? {} : { yaml: args.yaml }),
+      ...(args.url?.trim() ? { url: args.url } : {}),
+      ...(args.yaml?.trim() ? { yaml: args.yaml } : {}),
     };
     if (!validateSource(source))
       return err("validation_error", "Provide exactly one of url or yaml.");

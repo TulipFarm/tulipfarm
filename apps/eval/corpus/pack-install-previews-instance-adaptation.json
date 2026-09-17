@@ -19,6 +19,10 @@
   "expect": [
     {
       "kind": "prompt_contains",
+      "text": "Omit the unused source field when calling pack_read; do not fill it with a placeholder."
+    },
+    {
+      "kind": "prompt_contains",
       "text": "pack_read does not return the source of a rejected ordinary Plan"
     },
     { "kind": "prompt_contains", "text": "pass it to pack_read as expectedSha256" },
