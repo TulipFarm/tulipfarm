@@ -106,8 +106,20 @@ export const PACK_READ_TOOL_DECLARATION = {
   mutating: false,
   inputSchema: Type.Object(
     {
-      url: Type.Optional(Type.String({ minLength: 1, maxLength: 2000 })),
-      yaml: Type.Optional(Type.String({ minLength: 1, maxLength: PACK_MAX_BYTES })),
+      url: Type.Optional(
+        Type.String({
+          maxLength: 2000,
+          description:
+            "Public HTTPS Pack URL. Supply url or yaml, not both. Omit this field for pasted YAML; empty or whitespace-only strings are treated as absent.",
+        })
+      ),
+      yaml: Type.Optional(
+        Type.String({
+          maxLength: PACK_MAX_BYTES,
+          description:
+            "Complete original Pack YAML. Supply yaml or url, not both. Omit this field for a URL read; empty or whitespace-only strings are treated as absent. Nonblank source bytes are preserved exactly.",
+        })
+      ),
       expectedSha256: Type.Optional(
         Type.String({
           pattern: "^[a-f0-9]{64}$",

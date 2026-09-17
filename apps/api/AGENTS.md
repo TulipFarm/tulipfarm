@@ -25,7 +25,7 @@ PostgreSQL persistence composition, auth, Soul Git writes, and Worker callback p
 | `src/internal/` | Service-only Worker callbacks for Context, Tools, delivery, completion, and due OIM Connection refresh. `slack-event-routes.ts` also hosts provider-neutral canonical event dispatch with exact-Connection reauthorization. `route-family.ts` registers internal families; `turn-host.ts` separates Run and Turn authority. |
 | `src/tools/` | ToolRegistry, batch execution, truncation, declarative egress sync. |
 | `src/platform/` | Platform Tools that need the API's own services. `delegate-tool.ts` hands work to a Soul Agent (which gets a Conversation); `spawn-tool.ts` + `subagent-{run,answers}.ts` spawn an ad-hoc helper the caller defines inline, which gets none. Both park the calling Turn on a child-Run wait. |
-| `src/packs/` | Bounded, guarded Pack/catalog reads and preview-only routes; `pack_read` is API-hosted through network composition. No installer or Soul writer. |
+| `src/packs/` | Bounded, guarded Pack/catalog reads and preview-only routes; API-hosted `pack_read` ignores blank model source placeholders, never rewrites selected source bytes. HTTP source validation stays strict. No installer or Soul writer. |
 | `src/resources/`, `src/soul/` | Resource CRUD and Soul HTTP routes/Tools; domain logic lives in `@tulipfarm/soul`. |
 | `src/integrations/` | Manifest catalog, connect auth, install, post-connect hooks. `connections/` adapts versioned OIM Connection lifecycle and refresh scheduling to HTTP; OIM verification, continuation, Credential, and File hosts remain provider-neutral. |
 | `src/integrations/oim-ingress/` | Injectable exact-Connection webhook and registration routes. |
