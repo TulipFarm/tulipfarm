@@ -1,8 +1,9 @@
 import { useState } from "react";
-import { StatusBadge, type StatusTone } from "~/components/status-badge";
+import { StatusBadge } from "~/components/status-badge";
 import { Button } from "~/components/ui/button";
 import { ConfirmModal } from "~/components/ui/modal";
 import { ApiError } from "~/lib/api";
+import { connectionPresentation } from "~/lib/integration-status";
 import {
   type OimConnectionRefreshResult,
   type OimConnectionSummary,
@@ -17,25 +18,13 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : "Request failed.";
 }
 
-function healthPresentation(health: OimConnectionSummary["health"]["status"]): {
-  label: string;
-  tone: StatusTone;
-} {
-  switch (health) {
-    case "healthy":
-      return { label: "Working", tone: "success" };
-    case "expiring":
-      return { label: "Expires soon", tone: "warning" };
-    case "action_required":
-      return { label: "Action required", tone: "danger" };
-    default:
-      return { label: "Not checked", tone: "neutral" };
-  }
-}
-
-function ownerLabel(owner: OimConnectionSummary["owner"]): string {
+function ownerLabel(
+  owner: OimConnectionSummary["owner"],
+  teams: readonly { id: string; name: string }[]
+): string {
   if (owner.scope === "personal") return "Personal";
-  if (owner.scope === "team") return `Team ${owner.teamId}`;
+  if (owner.scope === "team")
+    return teams.find((team) => team.id === owner.teamId)?.name ?? "Team unavailable";
   return "Business";
 }
 
@@ -60,11 +49,15 @@ function ConnectionRow({
   connection,
   actionName,
   onChanged,
+  onResume,
+  teams,
 }: {
   integrationKey: string;
   connection: OimConnectionSummary;
   actionName: string;
   onChanged: () => void;
+  onResume?: (connectionId: string) => void;
+  teams: readonly { id: string; name: string }[];
 }) {
   const [refreshing, setRefreshing] = useState(false);
   const [revoking, setRevoking] = useState(false);
@@ -73,7 +66,7 @@ function ConnectionRow({
   const [refreshResult, setRefreshResult] = useState<OimConnectionRefreshResult>();
   const [notice, setNotice] = useState<string>();
   const [error, setError] = useState<string>();
-  const health = healthPresentation(connection.health.status);
+  const health = connectionPresentation(connection);
   const failedSteps =
     refreshResult?.steps.filter((step) => step.status === "action_required") ?? [];
 
@@ -141,24 +134,11 @@ function ConnectionRow({
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2">
             <h3 className="truncate text-sm font-medium text-foreground">{connection.label}</h3>
-            <StatusBadge
-              label={
-                connection.status === "revoked"
-                  ? "Revoked"
-                  : connection.disconnectPending
-                    ? "Disconnecting"
-                    : health.label
-              }
-              tone={
-                connection.status === "revoked" || connection.disconnectPending
-                  ? "neutral"
-                  : health.tone
-              }
-            />
+            <StatusBadge label={health.label} tone={health.tone} />
             {connection.isDefault ? <StatusBadge label="Default" tone="info" /> : null}
           </div>
           <p className="mt-1 text-xs text-muted-foreground">
-            {ownerLabel(connection.owner)} · version {connection.integration.majorVersion}
+            {ownerLabel(connection.owner, teams)} · version {connection.integration.majorVersion}
           </p>
           {connection.availableCredentialSlots.length > 0 ? (
             <p className="mt-1 text-xs text-muted-foreground">
@@ -170,6 +150,17 @@ function ConnectionRow({
 
         {connection.status === "active" && !connection.disconnectPending ? (
           <div className="flex flex-wrap gap-2">
+            {onResume ? (
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                aria-label={`Resume setup for ${actionName}`}
+                onClick={() => onResume(connection.id)}
+              >
+                Resume setup
+              </Button>
+            ) : null}
             <Button
               type="button"
               size="sm"
@@ -251,10 +242,14 @@ export function OimConnections({
   integrationKey,
   connections,
   onChanged,
+  onResume,
+  teams = [],
 }: {
   integrationKey: string;
   connections: OimConnectionSummary[];
   onChanged: () => void;
+  onResume?: (connectionId: string) => void;
+  teams?: readonly { id: string; name: string }[];
 }) {
   const labelCounts = new Map<string, number>();
   for (const connection of connections) {
@@ -289,6 +284,8 @@ export function OimConnections({
                   : `${connection.label}, Connection ${connection.id}`
               }
               onChanged={onChanged}
+              onResume={onResume}
+              teams={teams}
             />
           ))}
         </ul>

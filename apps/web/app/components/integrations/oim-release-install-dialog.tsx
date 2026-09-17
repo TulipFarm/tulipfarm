@@ -7,6 +7,7 @@ import {
   installOimRelease,
   type OimReleaseInspection,
 } from "~/lib/integrations";
+import { IntegrationChoice } from "./integration-choice";
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : "The request could not be completed.";
@@ -16,12 +17,14 @@ export function OimReleaseInstallDialog({
   open,
   onClose,
   onInstalled,
+  initialSource = "",
 }: {
   open: boolean;
   onClose: () => void;
   onInstalled: (integrationId: string) => void;
+  initialSource?: string;
 }) {
-  const [source, setSource] = useState("");
+  const [source, setSource] = useState(initialSource);
   const [inspection, setInspection] = useState<OimReleaseInspection>();
   const [candidateIndex, setCandidateIndex] = useState(0);
   const [trustClass, setTrustClass] = useState<"official" | "community">("official");
@@ -172,27 +175,25 @@ export function OimReleaseInstallDialog({
             <label htmlFor="oim-release-candidate" className="block font-medium">
               Release candidate
             </label>
-            <select
+            <IntegrationChoice
               id="oim-release-candidate"
-              value={candidateIndex}
+              label="Release candidate"
+              value={String(candidateIndex)}
+              options={inspection.candidates.map((item, index) => ({
+                value: String(index),
+                label: `${item.integrationId} ${item.version} — ${item.sourcePath}`,
+              }))}
               disabled={activity === "install"}
-              onChange={(event) => {
+              onChange={(value) => {
                 generation.current += 1;
                 setActivity("idle");
-                setCandidateIndex(Number(event.target.value));
+                setCandidateIndex(Number(value));
                 setApproved(false);
                 setRetryInput(undefined);
                 setError("");
                 setStatus("Review the selected release candidate.");
               }}
-              className="w-full rounded-md border border-input bg-background px-3 py-2"
-            >
-              {inspection.candidates.map((item, index) => (
-                <option key={`${item.sourcePath}:${item.packageDigest}`} value={index}>
-                  {item.integrationId} {item.version}
-                </option>
-              ))}
-            </select>
+            />
           </div>
         ) : null}
 
