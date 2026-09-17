@@ -7,6 +7,7 @@ import { Button } from "~/components/ui/button";
 import { Combobox } from "~/components/ui/combobox";
 import { Input } from "~/components/ui/input";
 import { Link } from "~/components/ui/link";
+import { UnsavedChangesDialog, useUnsavedChangesGuard } from "~/components/unsaved-changes-guard";
 import { ApiError, createResourceType } from "~/lib/api";
 import { randomUUID } from "~/lib/uuid";
 
@@ -100,6 +101,19 @@ const newRow = (): FieldRow => ({
   enumValues: "",
 });
 
+function draftSignature(name: string, description: string, fields: FieldRow[]): string {
+  return JSON.stringify({
+    name,
+    description,
+    fields: fields.map(({ name: fieldName, type, required, enumValues }) => ({
+      name: fieldName,
+      type,
+      required,
+      enumValues,
+    })),
+  });
+}
+
 // One field → its JSON Schema property. System fields (id/createdAt/updatedAt/version) are managed by
 // the platform and never declared here.
 function propFor(row: FieldRow): Record<string, unknown> {
@@ -139,6 +153,11 @@ export default function ResourceTypeNew() {
   const nameRef = useRef<HTMLInputElement>(null);
   const fieldNameRefs = useRef(new Map<string, HTMLInputElement>());
   const savedName = resourceTypeName(name);
+  const currentDraft = draftSignature(name, description, fields);
+  const currentDraftRef = useRef(currentDraft);
+  currentDraftRef.current = currentDraft;
+  const [savedDraft, setSavedDraft] = useState(currentDraft);
+  const unsavedChanges = useUnsavedChangesGuard(currentDraft !== savedDraft);
 
   function setField(id: string, patch: Partial<FieldRow>) {
     setFields((prev) => prev.map((f) => (f.id === id ? { ...f, ...patch } : f)));
@@ -199,10 +218,17 @@ export default function ResourceTypeNew() {
       additionalProperties: false,
     };
 
+    const submittedDraft = currentDraftRef.current;
     setSubmitting(true);
     try {
       await createResourceType(savedName, JSON.stringify(schema, null, 2));
-      navigate(`/resources/${encodeURIComponent(savedName)}`);
+      if (currentDraftRef.current === submittedDraft) {
+        unsavedChanges.clear();
+        setSavedDraft(submittedDraft);
+        navigate(`/resources/${encodeURIComponent(savedName)}`);
+      } else {
+        setSubmitting(false);
+      }
     } catch (err) {
       if (err instanceof ApiError && err.status === 409) {
         setError(`The saved name "${savedName}" already exists. Choose a different name.`);
@@ -220,6 +246,7 @@ export default function ResourceTypeNew() {
   return (
     <PageShell crumbs={crumbs} title="New resource type">
       <form onSubmit={onSubmit} className="flex max-w-2xl flex-col gap-4">
+        <UnsavedChangesDialog {...unsavedChanges} />
         <p className="text-sm text-muted-foreground">
           Choose the details each record will hold. You can also{" "}
           <Link

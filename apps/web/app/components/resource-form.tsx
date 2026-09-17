@@ -3,6 +3,7 @@ import { LinkCombobox } from "~/components/link-combobox";
 import { Button } from "~/components/ui/button";
 import { Link } from "~/components/ui/link";
 import { Textarea } from "~/components/ui/textarea";
+import { UnsavedChangesDialog, useUnsavedChangesGuard } from "~/components/unsaved-changes-guard";
 import { ApiError } from "~/lib/api";
 import type { FieldDescriptor } from "~/lib/schema";
 
@@ -47,6 +48,37 @@ function initialValue(field: FieldDescriptor, initial?: Record<string, unknown>)
   return field.kind === "boolean" ? false : "";
 }
 
+function initialDraft(fields: FieldDescriptor[], initial?: Record<string, unknown>) {
+  return {
+    values: Object.fromEntries(
+      fields
+        .filter((field) => !isJsonKind(field))
+        .map((field) => [field.name, initialValue(field, initial)])
+    ),
+    jsonText: Object.fromEntries(
+      fields
+        .filter(isJsonKind)
+        .map((field) => [
+          field.name,
+          initial?.[field.name] !== undefined ? JSON.stringify(initial[field.name], null, 2) : "",
+        ])
+    ),
+  };
+}
+
+function draftSignature(
+  fields: FieldDescriptor[],
+  values: Record<string, unknown>,
+  jsonText: Record<string, string>
+): string {
+  return JSON.stringify(
+    fields.map((field) => [
+      field.name,
+      isJsonKind(field) ? (jsonText[field.name] ?? "") : values[field.name],
+    ])
+  );
+}
+
 // Maps a thrown write error into form state: a 422 with a `path` highlights the offending field;
 // the version-conflict code becomes concurrency advice; anything else keeps the server message.
 // Shared by both routes.
@@ -74,7 +106,7 @@ export type ResourceFormProps = {
   fields: FieldDescriptor[];
   mode: "create" | "edit";
   initial?: Record<string, unknown>;
-  onSubmit: (values: Record<string, unknown>) => void | Promise<void>;
+  onSubmit: (values: Record<string, unknown>, confirmSaved: () => boolean) => void | Promise<void>;
   submitting: boolean;
   fieldErrors?: Record<string, string>;
   formError?: string | null;
@@ -91,22 +123,17 @@ export function ResourceForm({
   formError,
   cancelTo,
 }: ResourceFormProps) {
-  const [values, setValues] = useState<Record<string, unknown>>(() =>
-    Object.fromEntries(
-      fields.filter((f) => !isJsonKind(f)).map((f) => [f.name, initialValue(f, initial)])
-    )
-  );
-  const [jsonText, setJsonText] = useState<Record<string, string>>(() =>
-    Object.fromEntries(
-      fields
-        .filter(isJsonKind)
-        .map((f) => [
-          f.name,
-          initial?.[f.name] !== undefined ? JSON.stringify(initial[f.name], null, 2) : "",
-        ])
-    )
+  const startingDraft = useRef(initialDraft(fields, initial));
+  const [values, setValues] = useState<Record<string, unknown>>(startingDraft.current.values);
+  const [jsonText, setJsonText] = useState<Record<string, string>>(startingDraft.current.jsonText);
+  const [savedDraft, setSavedDraft] = useState(() =>
+    draftSignature(fields, startingDraft.current.values, startingDraft.current.jsonText)
   );
   const [jsonErrors, setJsonErrors] = useState<Record<string, string>>({});
+  const currentDraft = draftSignature(fields, values, jsonText);
+  const currentDraftRef = useRef(currentDraft);
+  currentDraftRef.current = currentDraft;
+  const unsavedChanges = useUnsavedChangesGuard(currentDraft !== savedDraft);
   // A ref, not state: the `submitting` prop only disables the button one commit after the parent
   // reacts, so two submit events landing in the same task both pass an is-it-disabled check.
   const inFlight = useRef(false);
@@ -164,9 +191,16 @@ export function ResourceForm({
       return;
     }
     setJsonErrors({});
+    const submittedDraft = currentDraftRef.current;
+    const confirmSaved = () => {
+      if (currentDraftRef.current !== submittedDraft) return false;
+      unsavedChanges.clear();
+      setSavedDraft(submittedDraft);
+      return true;
+    };
     inFlight.current = true;
     try {
-      await onSubmit(payload);
+      await onSubmit(payload, confirmSaved);
     } finally {
       inFlight.current = false;
     }
@@ -174,6 +208,7 @@ export function ResourceForm({
 
   return (
     <form onSubmit={(e) => void handleSubmit(e)} className="flex flex-col gap-4" noValidate>
+      <UnsavedChangesDialog {...unsavedChanges} />
       {formError ? (
         <p className="rounded-sm border border-destructive/40 bg-destructive/5 px-3 py-2 text-destructive">
           error: {formError}
