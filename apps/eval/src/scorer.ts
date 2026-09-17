@@ -645,6 +645,37 @@ function evaluate(a: Expectation, obs: Observation): { passed: boolean; detail: 
       };
     }
 
+    case "tool_result_reason_contains": {
+      const results = obs.persisted?.toolResults;
+      if (results === undefined) {
+        return { passed: false, detail: "this tier does not observe real Tool results" };
+      }
+      const targeted = results.filter((result) => {
+        if (
+          result.name !== a.name ||
+          (a.turnIndex !== undefined && result.turnIndex !== a.turnIndex) ||
+          result.status !== a.status
+        ) {
+          return false;
+        }
+        const argument = readPath(result.arguments, a.argumentPath);
+        return argument.found && equal(argument.value, a.argumentValue);
+      });
+      if (targeted.length === 0) {
+        return {
+          passed: false,
+          detail: `${a.name} returned no ${a.status} result for ${a.argumentPath} = ${show(a.argumentValue)}`,
+        };
+      }
+      const hit = targeted.find((result) => result.reason?.includes(a.text));
+      return hit !== undefined
+        ? { passed: true, detail: `${a.name} ${a.status} reason contained ${show(a.text)}` }
+        : {
+            passed: false,
+            detail: `${a.name} ${a.status} reason omitted ${show(a.text)}`,
+          };
+    }
+
     case "tool_denied": {
       const denials = obs.toolDenials;
       if (denials === undefined) {

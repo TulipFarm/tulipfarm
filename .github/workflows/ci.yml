@@ -469,6 +469,27 @@ jobs:
             --reporter=blob \
             --outputFile="${{ github.workspace }}/coverage-blobs/api-${{ matrix.shard }}.json" \
             2>&1 | tee test-api-${{ matrix.shard }}.log
+      - name: Test dependency write atomicity
+        if: ${{ matrix.shard == 1 }}
+        run: |
+          set -o pipefail
+          docker run --detach --rm \
+            --name resource-atomic-postgres \
+            --publish 5432:5432 \
+            --env POSTGRES_DB=tulipfarm_atomic \
+            --env POSTGRES_PASSWORD=postgres \
+            postgres:18-alpine
+          until docker exec resource-atomic-postgres \
+            pg_isready -U postgres -d tulipfarm_atomic; do
+            sleep 1
+          done
+          RESOURCE_ATOMIC_TEST_DATABASE_URL=postgres://postgres:postgres@127.0.0.1:5432/tulipfarm_atomic \
+            pnpm --filter @tulipfarm/api test \
+              src/resources/dependency-write-atomicity.postgres.test.ts \
+              2>&1 | tee -a test-api-${{ matrix.shard }}.log
+      - name: Stop dependency write database
+        if: ${{ always() && matrix.shard == 1 }}
+        run: docker stop resource-atomic-postgres || true
       - name: Job summary
         if: always()
         env:

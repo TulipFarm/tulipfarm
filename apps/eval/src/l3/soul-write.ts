@@ -18,6 +18,7 @@ import type { OimReleasePackageWriter } from "@tulipfarm/integrations";
 import { compileYamlPlan, YamlPlanError } from "@tulipfarm/run-kernel";
 import { artifactDirectory } from "@tulipfarm/schema";
 import {
+  authorLegacyResourceType,
   compileExecutionBundle,
   createEd25519BundleSigner,
   createEd25519BundleVerifier,
@@ -38,6 +39,7 @@ import { stringify } from "yaml";
 import type { EvalSoul } from "../eval-soul.ts";
 
 export const SOUL_WRITE_TOOL = "soul_write";
+export const CREATE_RESOURCE_TYPE_TOOL = "create_resource_type";
 
 /** What one accepted write committed, as a Case can assert on it. */
 export interface SoulCommit {
@@ -48,6 +50,7 @@ export interface SoulCommit {
 
 export interface SoulWriterTool {
   readonly port: ToolDispatchPort;
+  readonly resourceTypes: ToolDispatchPort;
   readonly releasePackages: OimReleasePackageWriter;
   /** Commits this Trial landed, in order. Empty means the Turn changed no configuration. */
   readonly commits: readonly SoulCommit[];
@@ -210,6 +213,46 @@ export function soulWriterTool(soul: EvalSoul): SoulWriterTool {
     reset: () => {
       git("reset", "--hard", base);
       git("clean", "-fd");
+    },
+    resourceTypes: {
+      dispatch: async (call) => {
+        if (call.name !== CREATE_RESOURCE_TYPE_TOOL) {
+          return { status: "failed", callId: call.callId, reason: `unknown Tool ${call.name}` };
+        }
+        const args = (call.arguments ?? {}) as { name?: unknown; schema?: unknown };
+        if (typeof args.name !== "string" || typeof args.schema !== "string") {
+          return {
+            status: "invalid_arguments",
+            callId: call.callId,
+            reason: "create_resource_type needs string name and schema",
+          };
+        }
+        try {
+          const result = await authorLegacyResourceType({
+            name: args.name,
+            schemaYaml: args.schema,
+            soulRoot: soul.path,
+            writer,
+            actor,
+            businessId: EVAL_BUSINESS,
+            reload: () => soul.loader.load(),
+          });
+          commits.push({
+            sha: result.write.commitSha,
+            message: `Resource ${args.name}`,
+            paths: result.write.paths,
+          });
+          return {
+            status: "succeeded",
+            callId: call.callId,
+            output: { name: args.name, schema: result.schema },
+          };
+        } catch (error) {
+          const reason = error instanceof Error ? error.message : String(error);
+          denials.push(reason);
+          return { status: "invalid_arguments", callId: call.callId, reason };
+        }
+      },
     },
     port: {
       dispatch: async (call) => {

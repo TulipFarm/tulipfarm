@@ -2,14 +2,17 @@ import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { DEPLOYMENT_BUSINESS_ID } from "@tulipfarm/constants";
 import { analyzeHook, HookAnalysisError } from "@tulipfarm/sandbox";
-import { ajv, TulipFarmValidationError, validateResourceSchema } from "@tulipfarm/schema";
+import { ajv } from "@tulipfarm/schema";
 import type { GitSyncService, SoulLoader, SoulWriter } from "@tulipfarm/soul";
 import {
+  authorLegacyResourceType,
   RESOURCE_DOMAIN_RE,
+  ResourceSchemaAuthoringError,
   resourceDefinitionYaml,
   resourceEnvelopeError,
   resourceTypePayload,
   SoulWriteError,
+  validateResourceSchemaYaml,
 } from "@tulipfarm/soul";
 import {
   type ApiToolDefinition,
@@ -19,7 +22,6 @@ import {
   type RequestContext,
   type ToolCallResult,
 } from "@tulipfarm/tool-host";
-import { parse as parseYaml } from "yaml";
 import { firstError } from "../../platform/tool-args";
 import type { ResourceSchemaCompatibility } from "../../resources/schema-compatibility";
 import { SYSTEM_SOUL_COMMIT_ACTOR } from "../../runtime/soul-writer";
@@ -79,38 +81,14 @@ function validateSchemaYaml(
 ):
   | { ok: true; parsed: Record<string, unknown>; yaml: string }
   | { ok: false; result: ToolCallResult } {
-  let parsed: unknown;
   try {
-    parsed = parseYaml(schemaYaml);
-  } catch (e) {
-    return { ok: false, result: err("validation_error", `invalid YAML: ${reason(e)}`) };
-  }
-  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
-    return {
-      ok: false,
-      result: err("validation_error", "schema must be a YAML object (JSON Schema)"),
-    };
-  }
-  const validMeta = ajv.validateSchema(parsed);
-  if (!validMeta) {
-    const e = ajv.errors?.[0];
-    return {
-      ok: false,
-      result: err(
-        "validation_error",
-        `${e?.instancePath || "(root)"} ${e?.message ?? "invalid JSON Schema"}`.trim()
-      ),
-    };
-  }
-  try {
-    validateResourceSchema(parsed as Record<string, unknown>);
-  } catch (e) {
-    if (e instanceof TulipFarmValidationError) {
-      return { ok: false, result: err("validation_error", e.message) };
+    return { ok: true, parsed: validateResourceSchemaYaml(schemaYaml), yaml: schemaYaml };
+  } catch (error) {
+    if (error instanceof ResourceSchemaAuthoringError) {
+      return { ok: false, result: err("validation_error", error.message) };
     }
-    throw e;
+    throw error;
   }
-  return { ok: true, parsed: parsed as Record<string, unknown>, yaml: schemaYaml };
 }
 
 const CREATE_SCHEMA = {
@@ -225,37 +203,22 @@ const createResourceType = defineApiTool<ResourceTypeToolContext>({
     if (!validateCreate(args)) return err("validation_error", firstError(validateCreate.errors));
     const { name, schema: schemaYaml } = args as { name: string; schema: string };
 
-    if (!NAME_RE.test(name)) return err("validation_error", "invalid resource type name");
-
-    const typeDir = join(ctx.gitSync.path, "resources", name);
-    if (existsSync(typeDir)) return err("validation_error", "resource type already exists");
-
-    const validated = validateSchemaYaml(schemaYaml);
-    if (!validated.ok) return validated.result;
-
     try {
-      await ctx.soulWriter.apply({
-        subject: `soul: add resource type ${name}`,
-        source: "agent",
+      await authorLegacyResourceType({
+        name,
+        schemaYaml,
+        soulRoot: ctx.gitSync.path,
+        writer: ctx.soulWriter,
         actor: ctx.requestContext?.actor ?? SYSTEM_SOUL_COMMIT_ACTOR,
         businessId: DEPLOYMENT_BUSINESS_ID,
-        changes: [
-          {
-            op: "put",
-            target: { kind: "Resource", slug: name, definitionMode: "legacy" },
-            content: schemaYaml,
-          },
-        ],
+        reload: () => ctx.soulLoader.reload(),
+        reconcile: ctx.reconcile,
       });
     } catch (e) {
+      if (e instanceof ResourceSchemaAuthoringError) {
+        return err("validation_error", e.message);
+      }
       if (e instanceof SoulWriteError) return soulWriteFault(e);
-      return err("internal_error", reason(e));
-    }
-
-    try {
-      await ctx.soulLoader.reload();
-      await ctx.reconcile?.();
-    } catch (e) {
       return err("internal_error", reason(e));
     }
 

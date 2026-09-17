@@ -52,8 +52,16 @@ import {
   type EvalIntegrationAuthoringState,
   evalIntegrationAuthoring,
 } from "./integration-authoring.ts";
+import {
+  createEvalResourceRecordState,
+  type EvalResourceRecordState,
+  evalResourceRecords,
+  RECORD_CREATE_TOOL,
+  RECORD_DELETE_TOOL,
+} from "./resource-records.ts";
 import { runL3Routine } from "./routine.ts";
 import {
+  CREATE_RESOURCE_TYPE_TOOL,
   SOUL_WRITE_TOOL,
   type SoulCommit,
   type SoulWriterTool,
@@ -308,6 +316,7 @@ async function runOneTurn(
     soulWrites: SoulWriterTool;
     files: EvalFileStore;
     integrationAuthoring: EvalIntegrationAuthoringState;
+    resourceRecords: EvalResourceRecordState;
     /**
      * The Run the File store should stamp on what this Turn generates.
      *
@@ -369,12 +378,23 @@ async function runOneTurn(
       conversationId,
       agentId: options.evalCase.agent,
     });
+    const resourceRecords = evalResourceRecords(shared.resourceRecords, soul);
+    const usesResourceFixture = options.evalCase.tools?.some(
+      (tool) => tool.name === CREATE_RESOURCE_TYPE_TOOL
+    );
     const toolResults: ToolResult[] = [];
     const tools = routeTools(
       scripted,
       {
+        [CREATE_RESOURCE_TYPE_TOOL]: soulWrites.resourceTypes,
         [SOUL_WRITE_TOOL]: soulWrites.port,
         [FILE_CREATE_TOOL]: files.port,
+        ...(usesResourceFixture
+          ? {
+              [RECORD_CREATE_TOOL]: resourceRecords,
+              [RECORD_DELETE_TOOL]: resourceRecords,
+            }
+          : {}),
         integration_draft_review: integrationAuthoring.port,
         integration_draft_create: integrationAuthoring.port,
         integration_get: integrationAuthoring.port,
@@ -680,6 +700,7 @@ export async function runPersistedTurn(options: L3Options): Promise<PersistedTur
       runId: () => activeRun.id,
     });
     const integrationAuthoring = await createEvalIntegrationAuthoringState(database);
+    const resourceRecords = createEvalResourceRecordState();
     const first = await runOneTurn(options, {
       database,
       conversationId,
@@ -687,6 +708,7 @@ export async function runPersistedTurn(options: L3Options): Promise<PersistedTur
       soulWrites,
       files,
       integrationAuthoring,
+      resourceRecords,
       activeRun,
       turnIndex: 1,
       submit: options.evalCase.input,
@@ -710,6 +732,7 @@ export async function runPersistedTurn(options: L3Options): Promise<PersistedTur
             soulWrites,
             files,
             integrationAuthoring,
+            resourceRecords,
             activeRun,
             turnIndex: index + 2,
             submit: turn.input,

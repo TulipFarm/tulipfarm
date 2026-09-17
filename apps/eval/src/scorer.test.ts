@@ -220,6 +220,27 @@ describe("real Tool result expectations", () => {
     expect(only(expectation, observed(successful(2))).passed).toBe(true);
   });
 
+  it("reads a targeted real Tool failure reason", () => {
+    const reasonExpectation: Expectation = {
+      kind: "tool_result_reason_contains",
+      name: "record_delete",
+      argumentPath: "id",
+      argumentValue: "parent",
+      status: "invalid_arguments",
+      turnIndex: 3,
+      text: "blocked by",
+    };
+    const result = {
+      name: "record_delete",
+      arguments: { id: "parent" },
+      turnIndex: 3,
+      status: "invalid_arguments",
+      reason: "deletion blocked by 1 dependent Record",
+    };
+    expect(only(reasonExpectation, observed([result])).passed).toBe(true);
+    expect(only({ ...reasonExpectation, text: "deleted" }, observed([result])).passed).toBe(false);
+  });
+
   it.each([
     ["missing", successful(1)],
     ["failed", [...successful(1), ...result(2, { status: "failed", code: "not_found" })]],

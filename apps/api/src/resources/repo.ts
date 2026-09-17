@@ -83,6 +83,7 @@ export interface ResourceRepo {
 /** Builds a `ResourceRepo` bound to a resource type's table (per-request, dynamic type). */
 export interface ResourceRepoFactory {
   forType(type: string): ResourceRepo;
+  readonly serializedResourceWrites?: true;
   withTransaction?<T>(
     lockedTypes: readonly string[],
     operation: (repositories: ResourceRepoFactory) => Promise<T>
@@ -306,6 +307,8 @@ export class PgResourceRepo implements ResourceRepo {
 }
 
 export class PgResourceRepoFactory implements ResourceRepoFactory {
+  readonly serializedResourceWrites = true as const;
+
   constructor(
     private readonly q: Queryable,
     private readonly ambient = false

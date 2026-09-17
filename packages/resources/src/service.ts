@@ -46,6 +46,7 @@ export interface ResourceRepo {
 
 export interface ResourceRepoFactory {
   forType(type: string): ResourceRepo;
+  readonly serializedResourceWrites?: true;
   withTransaction?<T>(
     lockedTypes: readonly string[],
     operation: (repositories: ResourceRepoFactory) => Promise<T>
@@ -132,7 +133,33 @@ export async function createRecord(
   },
   ports: ResourceWritePorts
 ): Promise<CreateRecordResult> {
-  const prepared = await prepareData(input.type, input.resource, input.data, ports);
+  if (ports.repositories.serializedResourceWrites && ports.repositories.withTransaction) {
+    return ports.repositories.withTransaction([input.type], async (repositories) =>
+      createRecordInTransaction(
+        input,
+        {
+          ...ports,
+          repositories,
+        },
+        ports.catalog.get(input.type) ?? input.resource
+      )
+    );
+  }
+  return createRecordInTransaction(input, ports, input.resource);
+}
+
+async function createRecordInTransaction(
+  input: {
+    type: string;
+    resource: ResourceDefinition;
+    data: Record<string, unknown>;
+    actorId?: string;
+    idempotencyKey?: string;
+  },
+  ports: ResourceWritePorts,
+  resource: ResourceDefinition
+): Promise<CreateRecordResult> {
+  const prepared = await prepareData(input.type, resource, input.data, ports);
   if (!prepared.ok) return prepared;
   const now = ports.now?.() ?? new Date();
   const doc = {
@@ -143,7 +170,7 @@ export async function createRecord(
     ...prepared.data,
   };
   const repo = ports.repositories.forType(input.type);
-  const sideEffect = resourceSideEffect("create", input.resource, input.type, doc, input.actorId);
+  const sideEffect = resourceSideEffect("create", resource, input.type, doc, input.actorId);
   try {
     if (input.idempotencyKey !== undefined && repo.createIdempotently) {
       const outcome = await repo.createIdempotently(doc, input.idempotencyKey, sideEffect);
@@ -169,12 +196,40 @@ export async function updateRecord(
   },
   ports: ResourceWritePorts
 ): Promise<ResourceWriteResult> {
+  if (ports.repositories.serializedResourceWrites && ports.repositories.withTransaction) {
+    return ports.repositories.withTransaction([input.type], async (repositories) =>
+      updateRecordInTransaction(
+        input,
+        {
+          ...ports,
+          repositories,
+        },
+        ports.catalog.get(input.type) ?? input.resource
+      )
+    );
+  }
+  return updateRecordInTransaction(input, ports, input.resource);
+}
+
+async function updateRecordInTransaction(
+  input: {
+    type: string;
+    resource: ResourceDefinition;
+    id: string;
+    expectedVersion: number;
+    data: Record<string, unknown>;
+    mode: "replace" | "patch";
+    actorId?: string;
+  },
+  ports: ResourceWritePorts,
+  resource: ResourceDefinition
+): Promise<ResourceWriteResult> {
   const repo = ports.repositories.forType(input.type);
   const existing = await loadForWrite(repo, input.id, input.expectedVersion);
   if (!existing.ok) return existing;
   const existingData = recordData(existing.doc);
   const incoming = input.mode === "patch" ? { ...existingData, ...input.data } : input.data;
-  const prepared = await prepareData(input.type, input.resource, incoming, ports, existingData);
+  const prepared = await prepareData(input.type, resource, incoming, ports, existingData);
   if (!prepared.ok) return prepared;
   const now = ports.now?.() ?? new Date();
   const doc = {
@@ -184,7 +239,7 @@ export async function updateRecord(
     updatedAt: now,
     ...prepared.data,
   };
-  const sideEffect = resourceSideEffect("update", input.resource, input.type, doc, input.actorId);
+  const sideEffect = resourceSideEffect("update", resource, input.type, doc, input.actorId);
   let updated: boolean;
   try {
     updated = await repo.replaceOne(input.id, existing.doc.version, doc, "update", sideEffect);

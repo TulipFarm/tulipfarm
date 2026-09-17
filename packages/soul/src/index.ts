@@ -199,6 +199,12 @@ export type {
 export { SoulPublisher } from "./publisher";
 export type { SoulSemanticIssue, SoulSemanticIssueCode } from "./refs";
 export { MAX_REF_SUGGESTIONS, SoulSemanticValidationError } from "./refs";
+export type { AuthorLegacyResourceTypeInput } from "./resource-schema-authoring";
+export {
+  authorLegacyResourceType,
+  ResourceSchemaAuthoringError,
+  validateResourceSchemaYaml,
+} from "./resource-schema-authoring";
 export type { ResourceTypePayload } from "./resource-types/definition";
 export {
   RESOURCE_DOMAIN_RE,
