@@ -29,10 +29,17 @@ vi.mock("~/lib/integrations", async (importOriginal) => ({
   listIntegrations: vi.fn(),
   getIntegration: vi.fn(),
   updateIntegration: vi.fn(),
+  inspectOimReleaseSource: vi.fn(),
+  installOimRelease: vi.fn(),
 }));
 
 import type { IntegrationSummary } from "~/lib/integrations";
-import { getIntegration, updateIntegration } from "~/lib/integrations";
+import {
+  getIntegration,
+  inspectOimReleaseSource,
+  installOimRelease,
+  updateIntegration,
+} from "~/lib/integrations";
 import IntegrationsIndex from "./_app.integrations._index";
 
 function integration(over: Partial<IntegrationSummary> = {}): IntegrationSummary {
@@ -57,6 +64,35 @@ function renderCatalog(integrations: IntegrationSummary[], initialEntry = "/") {
   ]);
   render(<Stub initialEntries={[initialEntry]} />);
 }
+
+test("opens a source-backed uninstalled entry in the reviewed installer without granting trust", async () => {
+  const user = userEvent.setup();
+  const source = "https://example.test/reviewed-provider.git";
+  renderCatalog([integration({ installed: false, source })]);
+  await user.click(await screen.findByRole("button", { name: "Review installation for GitHub" }));
+  expect(screen.getByLabelText("Package source")).toHaveValue(source);
+  expect(screen.getByLabelText("Package source")).toHaveFocus();
+  expect(inspectOimReleaseSource).not.toHaveBeenCalled();
+  expect(installOimRelease).not.toHaveBeenCalled();
+  expect(
+    screen.queryByRole("button", { name: /^Install (Official|Community)/ })
+  ).not.toBeInTheDocument();
+  vi.mocked(inspectOimReleaseSource).mockResolvedValue({
+    source,
+    ref: "reviewed-ref",
+    candidates: [],
+  });
+  await user.click(screen.getByRole("button", { name: "Inspect source" }));
+  expect(inspectOimReleaseSource).toHaveBeenCalledWith(source);
+  expect(installOimRelease).not.toHaveBeenCalled();
+});
+
+test("does not offer package installation to a non-admin", async () => {
+  admin = false;
+  renderCatalog([integration({ installed: false, source: "https://example.test/provider.git" })]);
+  await screen.findByText("GitHub");
+  expect(screen.queryByRole("button", { name: /Review installation/ })).not.toBeInTheDocument();
+});
 
 test("shows the registry's brand name rather than the slug", async () => {
   renderCatalog([integration({ name: "github", title: "GitHub", homepage: "https://github.com" })]);
