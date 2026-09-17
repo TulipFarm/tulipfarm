@@ -9,7 +9,9 @@ import {
   initializeRuntimeDeployment,
   PgRoleRepo,
   RuntimeDeploymentConfigError,
+  RuntimeDeploymentTrustUnavailableError,
   RuntimeIdentityMismatchError,
+  runtimeDeploymentConfigFromEnv,
 } from "@tulipfarm/storage";
 import type { FastifyInstance } from "fastify";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -23,6 +25,7 @@ import { LiveRouteAuthorizer } from "../authz/route-gate";
 import { transactionPort } from "../db";
 import { buildApiAuthorityLayerResolver } from "../identity/authority-layers";
 import { syncDeploymentRoles } from "../identity/roles";
+import { bootstrapFromEnv } from "../setup/bootstrap";
 import { PgSetupAdminCreator } from "../setup/first-admin";
 import { makeMigratedPglite } from "../test/pglite";
 import { initializeApiDeployment } from "./deployment";
@@ -41,14 +44,21 @@ afterEach(async () => {
   for (const app of apps.splice(0)) await app.close();
   for (const db of databases.splice(0)) await db.close();
   vi.unstubAllGlobals();
+  vi.unstubAllEnvs();
 });
 
 describe("durable runtime deployment startup", () => {
   it("preserves independent setup on a new store without creating users or service links", async () => {
     const db = await database();
-    const deployment = await initializeApiDeployment(db, { businessId });
+    vi.stubEnv("RUNTIME_HOSTING_AUTHORITY", "");
+    const deployment = await initializeApiDeployment(
+      db,
+      runtimeDeploymentConfigFromEnv(businessId)
+    );
     const users = new PgUserRepo(db);
     const app = await buildApp({
+      deployment,
+      readiness: db,
       userRepo: users,
       sessionStore: new PgSessionStore(db, 3600),
       tokenRepo: new PgTokenRepo(db),
@@ -65,6 +75,128 @@ describe("durable runtime deployment startup", () => {
     const response = await app.inject({ url: "/api/v1/setup/status" });
     expect(response.statusCode).toBe(200);
     expect(response.json()).toMatchObject({ needsSetup: true });
+    expect((await app.inject({ url: "/readyz" })).statusCode).toBe(200);
+  });
+
+  it("composes test-hosted readiness but never exposes independent setup or seeds a local admin", async () => {
+    const db = await database();
+    vi.stubEnv("RUNTIME_HOSTING_AUTHORITY", "tulipfarm");
+    vi.stubEnv("RUNTIME_INSTALLATION_ID", randomUUID());
+    vi.stubEnv("ADMIN_EMAIL", "muskan@example.com");
+    vi.stubEnv("ADMIN_PASSWORD", "test-password");
+    const config = runtimeDeploymentConfigFromEnv(businessId);
+    const verifyIdentity = vi.fn(async () => undefined);
+    const deployment = await initializeApiDeployment(db, config, { verifyIdentity });
+    expect(Object.isFrozen(deployment)).toBe(true);
+    expect(verifyIdentity).toHaveBeenCalledWith({
+      businessId,
+      installationId: deployment.installationId,
+    });
+    const users = new PgUserRepo(db);
+    const secretsService = new SecretsService(new PgSecretRepo(db), {
+      dekId: randomUUID(),
+      key: randomBytes(32),
+    });
+    const gitSync = new GitSyncService(
+      resolve(__dirname, `../test/fixtures/uninitialized-${randomUUID()}`),
+      undefined,
+      async () => undefined,
+      { info() {}, warn() {}, error() {} }
+    );
+    const app = await buildApp({
+      deployment,
+      readiness: db,
+      userRepo: users,
+      sessionStore: new PgSessionStore(db, 3600),
+      tokenRepo: new PgTokenRepo(db),
+      secretsService,
+      gitSync,
+    });
+    apps.push(app);
+    expect((await app.inject({ url: "/readyz" })).statusCode).toBe(200);
+    expect((await app.inject({ url: "/health" })).statusCode).toBe(200);
+    expect((await app.inject({ url: "/api/v1/setup/status" })).json()).toMatchObject({
+      needsSetup: false,
+    });
+    for (const step of ["admin", "business", "llm", "git", "complete"]) {
+      const response = await app.inject({
+        method: "POST",
+        url: `/api/v1/setup/${step}`,
+        payload: {},
+      });
+      expect(response.statusCode).toBe(404);
+    }
+    const bootstrap = { deployment, userRepo: users, secretsService };
+    await bootstrapFromEnv({
+      ...bootstrap,
+      get soulWriter(): never {
+        throw new Error("Hosted startup must not touch the independent Soul seed");
+      },
+    });
+    expect(await users.count()).toBe(0);
+    expect(await initializeRuntimeDeployment(db, config, { verifyIdentity })).toEqual(deployment);
+    await expect(initializeRuntimeDeployment(db, { businessId })).rejects.toThrow(
+      "RUNTIME_HOSTING_AUTHORITY conflicts"
+    );
+    await expect(
+      initializeApiDeployment(db, { ...config, installationId: randomUUID() }, { verifyIdentity })
+    ).rejects.toThrow("RUNTIME_INSTALLATION_ID conflicts");
+    await expect(
+      initializeApiDeployment(db, { ...config, businessId: "another-business" }, { verifyIdentity })
+    ).rejects.toThrow("BUSINESS_ID conflicts");
+    const unavailableApp = await buildApp({
+      deployment,
+      readiness: {
+        query: async () => {
+          throw new Error("datastore unavailable");
+        },
+      },
+    });
+    apps.push(unavailableApp);
+    expect((await unavailableApp.inject({ url: "/readyz" })).statusCode).toBe(503);
+  });
+
+  it("rejects invalid hosted composition before serving readiness or independent setup", async () => {
+    const db = await database();
+    for (const authority of ["hosted-secret-sentinel", "tulipfarm"]) {
+      vi.stubEnv("RUNTIME_HOSTING_AUTHORITY", authority);
+      await expect(buildApp({ readiness: db })).rejects.toBeInstanceOf(
+        RuntimeDeploymentConfigError
+      );
+    }
+    const installationId = randomUUID();
+    const hosted = { businessId, installationId, hostingAuthority: "tulipfarm" };
+    for (const config of [
+      { ...hosted, hostingAuthority: "malformed-secret-sentinel" },
+      { ...hosted, installationId: undefined },
+      { ...hosted, installationId: "malformed-secret-sentinel" },
+      { ...hosted, businessId: "" },
+      hosted,
+    ]) {
+      await expect(initializeApiDeployment(db, config)).rejects.toBeInstanceOf(
+        RuntimeDeploymentConfigError
+      );
+    }
+    await expect(
+      buildApp({
+        deployment: { hostingAuthority: "tulipfarm", businessId, installationId },
+      })
+    ).rejects.toThrow("context has not been initialized");
+    const trust = { verifyIdentity: vi.fn(async () => undefined) };
+    vi.stubEnv("NODE_ENV", "production");
+    await expect(initializeApiDeployment(db, hosted, trust)).rejects.toThrow(
+      "no production hosted identity protocol"
+    );
+    expect(trust.verifyIdentity).not.toHaveBeenCalled();
+    vi.stubEnv("NODE_ENV", "test");
+    await expect(
+      initializeApiDeployment(db, hosted, {
+        verifyIdentity: async () => {
+          throw new Error("upstream-credential-sentinel");
+        },
+      })
+    ).rejects.toEqual(new RuntimeDeploymentTrustUnavailableError());
+    expect((await db.query("SELECT * FROM deployment_runtime_identity")).rows).toHaveLength(0);
   });
 
   it("upgrades legacy state, preserves login and BYOK, and restarts with the same identity", async () => {
@@ -72,7 +204,7 @@ describe("durable runtime deployment startup", () => {
     await db.exec(`
       DROP TABLE deployment_runtime_identity;
       UPDATE schema_version SET version = 124;
-      DELETE FROM schema_migrations WHERE version = 125;
+      DELETE FROM schema_migrations WHERE version >= 125;
     `);
     const users = new PgUserRepo(db);
     const adminCreator = new PgSetupAdminCreator(db, businessId);

@@ -2,6 +2,7 @@ import { PGlite } from "@electric-sql/pglite";
 import { expect, it } from "vitest";
 import {
   initializeRuntimeDeployment,
+  RUNTIME_HOSTING_STORAGE_STATEMENTS,
   RUNTIME_IDENTITY_STORAGE_STATEMENTS,
 } from "./runtime-deployment";
 
@@ -10,7 +11,11 @@ it("retains the installation and legacy business identity after closing and reop
   const businessId = "legacy-business";
   const snapshot = await (async () => {
     try {
-      for (const statement of RUNTIME_IDENTITY_STORAGE_STATEMENTS) await first.exec(statement);
+      for (const statement of [
+        ...RUNTIME_IDENTITY_STORAGE_STATEMENTS,
+        ...RUNTIME_HOSTING_STORAGE_STATEMENTS,
+      ])
+        await first.exec(statement);
       const deployment = await initializeRuntimeDeployment(first, { businessId });
       return { deployment, data: await first.dumpDataDir("none") };
     } finally {

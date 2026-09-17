@@ -9,6 +9,7 @@ import swagger from "@fastify/swagger";
 import scalar from "@scalar/fastify-api-reference";
 import { BUSINESS_PRINCIPAL_ID } from "@tulipfarm/files";
 import { acceptedInputModalities, type LlmConfig } from "@tulipfarm/schema";
+import { runtimeDeploymentAllowsIndependentSetup } from "@tulipfarm/storage";
 import { SURFACE_SANDBOX_CSP, SURFACE_SANDBOX_PATH } from "@tulipfarm/surface";
 import Fastify, { type FastifyReply, type FastifyRequest } from "fastify";
 import { registerActivityRoutes } from "./activity/routes";
@@ -69,6 +70,7 @@ import { registerTriggerRoutes } from "./triggers/routes";
 export type { AppOptions } from "./app-options";
 
 export async function buildApp(opts: AppOptions = {}) {
+  const independentSetup = runtimeDeploymentAllowsIndependentSetup(opts.deployment);
   const app = Fastify({
     // enabling it never costs the operator output they had before.
     logger: opts.logSink ? { stream: createLogTeeStream(opts.logSink) } : true,
@@ -323,9 +325,10 @@ export async function buildApp(opts: AppOptions = {}) {
         userRepo: opts.userRepo,
         soulPath,
         rateLimiter: opts.rateLimiter,
+        independentSetup,
       });
     }
-    if (!isHeadlessBoot() && opts.secretsService && opts.gitSync && soulPath) {
+    if (independentSetup && !isHeadlessBoot() && opts.secretsService && opts.gitSync && soulPath) {
       registerSetupRoutes(app, {
         requireAuthorization,
         productTelemetry: opts.productTelemetry,

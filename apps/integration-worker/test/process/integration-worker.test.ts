@@ -40,6 +40,50 @@ async function bootIntegrationWorker(options: {
 
 describe("integration worker process", () => {
   it(
+    "fails closed for hosted configuration before probes or Integration loops",
+    async () => {
+      scratch = await startScratchDatabase(REQUIRED_SCHEMA_VERSION);
+      for (const [env, error] of [
+        [
+          { RUNTIME_HOSTING_AUTHORITY: "malformed-private-sentinel" },
+          "RUNTIME_HOSTING_AUTHORITY must",
+        ],
+        [{ RUNTIME_HOSTING_AUTHORITY: "tulipfarm" }, "RUNTIME_INSTALLATION_ID is required"],
+        [
+          { RUNTIME_HOSTING_AUTHORITY: "tulipfarm", RUNTIME_INSTALLATION_ID: "private-sentinel" },
+          "must be a UUID",
+        ],
+        [
+          { RUNTIME_HOSTING_AUTHORITY: "tulipfarm", RUNTIME_INSTALLATION_ID: randomUUID() },
+          "no production hosted identity protocol",
+        ],
+      ] as const) {
+        worker = await startIntegrationWorker({ databaseUrl: scratch.url, env });
+        expect(await worker.exited).toBe(1);
+        expect(worker.output()).toContain(error);
+        expect(worker.output()).not.toContain("private-sentinel");
+        await expect(worker.probe("/readyz")).rejects.toThrow();
+        await worker.stop();
+      }
+      expect((await scratch.query("SELECT * FROM deployment_runtime_identity")).rows).toHaveLength(
+        0
+      );
+      await scratch.query(
+        `INSERT INTO deployment_runtime_identity (installation_id, business_id, hosting_authority)
+       VALUES ($1, $2, 'tulipfarm')`,
+        [randomUUID(), "legacy-business"]
+      );
+      worker = await startIntegrationWorker({
+        databaseUrl: scratch.url,
+        env: { BUSINESS_ID: "legacy-business" },
+      });
+      expect(await worker.exited).toBe(1);
+      expect(worker.output()).toContain("RUNTIME_HOSTING_AUTHORITY conflicts");
+    },
+    TIMEOUT
+  );
+
+  it(
     "reuses the API installation identity across restarts and refuses a mismatch",
     async () => {
       scratch = await startScratchDatabase(REQUIRED_SCHEMA_VERSION);

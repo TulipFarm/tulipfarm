@@ -26,7 +26,7 @@ import type {
   SoulLoader,
   SoulWriter,
 } from "@tulipfarm/soul";
-import type { IntegrationStore, TaskStore } from "@tulipfarm/storage";
+import type { IntegrationStore, RuntimeDeploymentContext, TaskStore } from "@tulipfarm/storage";
 import type { ApprovalsRepo, ToolApprovalService } from "@tulipfarm/tool-host";
 import type { FastifyBaseLogger, FastifyRequest } from "fastify";
 import type { ActivityService } from "./activity/service";
@@ -304,6 +304,7 @@ export interface AppOptions {
    * ok on process liveness alone.
    */
   readiness?: QueryableProbeTarget;
+  deployment?: RuntimeDeploymentContext;
   /**
    * Tees `error`/`fatal` log records into `log_event` so the observability UI can show them. Absent
    * (tests, partial assemblies) leaves logging on stdout exactly as it was.

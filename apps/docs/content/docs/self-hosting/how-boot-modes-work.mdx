@@ -3,11 +3,14 @@ title: How boot modes work
 description: How a fresh TulipFarm instance decides whether to open the setup wizard, seed itself from the environment, or do neither.
 ---
 
-When TulipFarm starts for the very first time, it has to answer one question: **does an admin
+On an independently hosted installation, TulipFarm first asks: **does an admin
 already exist?**
 
 Everything on this page follows from that. There are two ways an instance gets its first admin, and
 the instance chooses between them by itself.
+
+Independent hosting is the default. Explicit TulipFarm-hosted configuration is checked before
+either setup path can open, as described below.
 
 ## The decision
 
@@ -111,6 +114,38 @@ identity row.
 
 Runtime identity is separate from the anonymous identifier used for product telemetry. This
 does not change the [telemetry policy](/docs/security/telemetry).
+
+## Explicit hosted configuration
+
+`RUNTIME_HOSTING_AUTHORITY` identifies who hosts the installation. Leave it unset or empty, or
+use `independent`, for supported self-hosting. The value `tulipfarm` explicitly requests TulipFarm
+hosting; it does not enroll a business, establish customer ownership, or grant service access.
+Any other non-empty value is a configuration error, not a request for the default.
+
+**Production TulipFarm-hosted startup is unavailable in this release.** The authenticated
+enrollment and login protocol has not shipped. Selecting `tulipfarm` therefore stops startup,
+even with a valid installation UUID. There is no environment switch that supplies trusted
+identity verification.
+
+The API and both workers validate the same stored installation, business, and hosting
+association before serving requests or starting work. Existing databases retain independent
+hosting when upgraded. A conflicting hosting setting cannot change that association. Failed
+startup exits without a ready HTTP listener; it does not expose the first-admin wizard, seed
+an independent admin account, or start worker loops.
+
+For supported self-hosting, correct an accidental hosted setting to `independent` consistently
+on all three processes. For a stored-identity conflict, restore the matching configuration and
+database. Do not delete the identity row or change identifiers to bypass the refusal.
+
+Conformance tests can explicitly inject test-only identity verification. A successful
+test-hosted assembly keeps independent setup closed, while readiness still checks its database.
+That result proves the startup contract, not production hosting, enrollment, login, or outage
+recovery. Tests distinguish invalid local configuration from unavailable identity verification;
+this release defines no remote-outage or cached-login policy.
+
+Hosting configuration does not relax production execution safeguards. A missing or failing
+execution backend does not trigger local or development execution. Existing isolation evidence,
+compute and network limits, and controlled credential delivery remain required.
 
 ## Where to go next
 

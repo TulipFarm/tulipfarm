@@ -139,6 +139,7 @@ import {
   PublicOriginStore,
   RunEventStore,
   RunStore,
+  runtimeDeploymentConfigFromEnv,
   SoulRepositoryStore,
   TaskRepo,
   WaitStore,
@@ -463,10 +464,10 @@ async function boot() {
     // a deployment whose file store never came up should say so, not serve requests that fail.
     await ensureBundledBucket({ dataDir: resolveDataDir() ?? process.cwd() });
     const migrationPool = await connectPg();
-    const deployment = await initializeApiDeployment(migrationPool, {
-      businessId: DEPLOYMENT_BUSINESS_ID,
-      installationId: process.env.RUNTIME_INSTALLATION_ID || undefined,
-    });
+    const deployment = await initializeApiDeployment(
+      migrationPool,
+      runtimeDeploymentConfigFromEnv(DEPLOYMENT_BUSINESS_ID)
+    );
     console.info(
       `Runtime installation ${deployment.installationId} (${deployment.hostingAuthority})`
     );
@@ -648,6 +649,7 @@ async function boot() {
       .initialize()
       .catch(() => console.warn("Product telemetry initialization deferred"));
     await bootstrapFromEnv({
+      deployment,
       productTelemetry,
       telemetryDefault: productTelemetryPolicy(process.env).maxLevel,
       userRepo,
@@ -1813,6 +1815,7 @@ async function boot() {
       productTelemetry,
       publicOrigins,
       readiness: pool,
+      deployment,
       logSink,
       logRepo,
       resourceRepo: new PgResourceRepo(pool),

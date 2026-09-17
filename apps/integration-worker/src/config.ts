@@ -1,5 +1,5 @@
-/** Migration 125 adds the runtime installation identity shared by all entrypoints. */
-export const REQUIRED_SCHEMA_VERSION = 125;
+/** Migration 126 pins hosting authority alongside the shared runtime identity. */
+export const REQUIRED_SCHEMA_VERSION = 126;
 
 export interface IntegrationWorkerConfig {
   readonly databaseUrl: string;

@@ -53,6 +53,7 @@ import {
   RunStateContentionStore,
   RunStateRetryStore,
   RunStore,
+  runtimeDeploymentConfigFromEnv,
   TaskRepo,
   WaitStore,
 } from "@tulipfarm/storage";
@@ -199,10 +200,10 @@ export async function main(): Promise<void> {
     },
   });
 
-  const deployment = await initializeRuntimeDeployment(pool, {
-    businessId: config.businessId,
-    installationId: process.env.RUNTIME_INSTALLATION_ID || undefined,
-  });
+  const deployment = await initializeRuntimeDeployment(
+    pool,
+    runtimeDeploymentConfigFromEnv(config.businessId)
+  );
   logger.info(`Runtime installation ${deployment.installationId} (${deployment.hostingAuthority})`);
 
   // Telemetry is not load-bearing: missing log tables degrade to stdout, not boot failure.

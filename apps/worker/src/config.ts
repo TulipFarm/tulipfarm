@@ -14,9 +14,9 @@ import { DEPLOYMENT_BUSINESS_ID } from "@tulipfarm/constants";
  * 118: OIM Knowledge publication and cursor progress are fenced.
  * 119: OIM release provenance, lifecycle, and operation journals are durable.
  * 120: OIM Connection verification evidence is persisted for safe dispatch.
- * 125: Runtime installation identity is shared with the API and integration worker.
+ * 126: Persisted hosting authority prevents a worker silently reverting to independent hosting.
  */
-export const REQUIRED_SCHEMA_VERSION = 125;
+export const REQUIRED_SCHEMA_VERSION = 126;
 
 export interface WorkerConfig {
   readonly databaseUrl: string;

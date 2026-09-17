@@ -47,6 +47,53 @@ async function bootWorker(options: {
 
 describe("worker process", () => {
   it(
+    "fails closed for hosted configuration before probes or Run claims",
+    async () => {
+      scratch = await startScratchDatabase(REQUIRED_SCHEMA_VERSION);
+      const runId = randomUUID();
+      await insertQueuedRun(scratch, { businessId: DEPLOYMENT_BUSINESS_ID, runId });
+      for (const [env, error] of [
+        [
+          { RUNTIME_HOSTING_AUTHORITY: "malformed-private-sentinel" },
+          "RUNTIME_HOSTING_AUTHORITY must",
+        ],
+        [{ RUNTIME_HOSTING_AUTHORITY: "tulipfarm" }, "RUNTIME_INSTALLATION_ID is required"],
+        [
+          { RUNTIME_HOSTING_AUTHORITY: "tulipfarm", RUNTIME_INSTALLATION_ID: "private-sentinel" },
+          "must be a UUID",
+        ],
+        [
+          { RUNTIME_HOSTING_AUTHORITY: "tulipfarm", RUNTIME_INSTALLATION_ID: randomUUID() },
+          "no production hosted identity protocol",
+        ],
+      ] as const) {
+        worker = await startWorker({ databaseUrl: scratch.url, owner: "invalid-hosted", env });
+        expect(await worker.exited).toBe(1);
+        expect(worker.output()).toContain(error);
+        expect(worker.output()).not.toContain("private-sentinel");
+        await expect(worker.probe("/readyz")).rejects.toThrow();
+        await worker.stop();
+      }
+      expect((await scratch.query("SELECT * FROM deployment_runtime_identity")).rows).toHaveLength(
+        0
+      );
+      await scratch.query(
+        `INSERT INTO deployment_runtime_identity (installation_id, business_id, hosting_authority)
+       VALUES ($1, $2, 'tulipfarm')`,
+        [randomUUID(), DEPLOYMENT_BUSINESS_ID]
+      );
+      worker = await startWorker({ databaseUrl: scratch.url, owner: "missing-hosting-flag" });
+      expect(await worker.exited).toBe(1);
+      expect(worker.output()).toContain("RUNTIME_HOSTING_AUTHORITY conflicts");
+      expect(await scratch.findRun(DEPLOYMENT_BUSINESS_ID, runId)).toMatchObject({
+        status: "queued",
+        leaseOwner: null,
+      });
+    },
+    TIMEOUT
+  );
+
+  it(
     "reuses the API installation identity across worker restarts and refuses a mismatch",
     async () => {
       scratch = await startScratchDatabase(REQUIRED_SCHEMA_VERSION);

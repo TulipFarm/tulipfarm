@@ -48,8 +48,9 @@ publication, approvals, integrations, events, and blob/vector/cache/queue ports.
 - `bundled-bucket.ts` is the one place that knows a bucket vendor, and the driver must never learn
   it: the server it provisions has no shell, so a host writes its secrets before it can boot.
 - Domain packages use repository/transaction ports; they never read another owner's tables directly.
-- `initializeRuntimeDeployment` runs after migration 125 in all three runtime entrypoints. Its
-  singleton association never changes on initialization; identity/configuration is not authority.
+- `initializeRuntimeDeployment` runs after migration 126 in all three runtime entrypoints. Its
+  singleton identity/hosting association is immutable; configuration is not authority. Hosted
+  trust injection is test-only; production hosted startup remains unavailable.
 - Team lifecycle and Team-linked asset writes share the locked `teams` row; keep checks and the
   lifecycle mutation in one transaction.
 - If a storage rule repeats schema/Soul contracts, derive or reference the owner instead of copying.

@@ -7,7 +7,7 @@ import {
   processResourceProbe,
   ResourceSampler,
 } from "@tulipfarm/observability";
-import { initializeRuntimeDeployment } from "@tulipfarm/storage";
+import { initializeRuntimeDeployment, runtimeDeploymentConfigFromEnv } from "@tulipfarm/storage";
 import { config as loadEnv } from "dotenv";
 import { createSlackChannelLoops, watchForSlackChannelCredential } from "./channels";
 import { loadConfig, REQUIRED_SCHEMA_VERSION } from "./config";
@@ -86,10 +86,10 @@ export async function main(): Promise<void> {
     },
   });
 
-  const deployment = await initializeRuntimeDeployment(pool, {
-    businessId: config.businessId,
-    installationId: process.env.RUNTIME_INSTALLATION_ID || undefined,
-  });
+  const deployment = await initializeRuntimeDeployment(
+    pool,
+    runtimeDeploymentConfigFromEnv(config.businessId)
+  );
   logger.info(`Runtime installation ${deployment.installationId} (${deployment.hostingAuthority})`);
 
   // Do not gate on `log_event`: missing telemetry degrades to stderr, not boot failure.

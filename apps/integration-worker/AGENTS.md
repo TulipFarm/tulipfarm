@@ -32,8 +32,8 @@ reconciliation, and rate limits for channel workers.
 - Requires `DATABASE_URL`, `INTERNAL_API_URL`, and `INTEGRATION_WORKER_API_CREDENTIAL`.
 - In containers, `data-dir.ts` may read `integration-worker.env`; env wins, nothing is invented.
 - This app never migrates; wait for the schema floor and fail closed like `apps/worker`.
-- Validate the shared persisted runtime identity before loops/probes; configured installation or
-  business mismatches fail startup without replacing the association.
+- Validate shared persisted identity and hosting authority before loops/probes; mismatches and
+  unsupported hosted trust fail startup without replacing the association.
 - OIM operation hosts recheck the expected canonical manifest digest, package companions, current
   Connection, and credential lease immediately before each provider request.
 - Serve `/livez` and `/readyz`; drain cleanly on `SIGTERM`/`SIGINT`.

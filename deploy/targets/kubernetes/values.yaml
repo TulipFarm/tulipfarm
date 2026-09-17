@@ -86,6 +86,7 @@ config:
   BOT_GIT_EMAIL: ""
   BUSINESS_ID: ""
   RUNTIME_INSTALLATION_ID: ""
+  RUNTIME_HOSTING_AUTHORITY: ""
   SOUL_BUNDLE_RETENTION_DAYS: ""
   # Workers and service credentials
   TF_DATA_DIR: ""

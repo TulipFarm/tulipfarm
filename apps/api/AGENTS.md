@@ -21,7 +21,7 @@ PostgreSQL persistence composition, auth, Soul Git writes, and Worker callback p
 | [`src/identity/`](src/identity/AGENTS.md) | Principals, OIDC, step-up, API clients. |
 | `src/chat/`, `src/conversations/` | Chat routes, Turn persistence, durable stream handoff. |
 | `src/runs/` | Persisted Run event SSE, cursor resume, cancellation. `authorization.ts` separates participant ownership from operator event reads; Chat cancellation never inherits a read grant. |
-| `src/runtime/` | Durable invocation callers, Routine invocation resolution, Soul write gateway composition. `deployment.ts` migrates and validates durable installation identity before business-facing boot. |
+| `src/runtime/` | Durable invocation callers, Routine invocation resolution, Soul write gateway composition. `deployment.ts` migrates and validates shared identity/hosting context before boot; that context gates setup and headless seeding. |
 | `src/internal/` | Service-only Worker callbacks for Context, Tools, delivery, completion, and due OIM Connection refresh. `slack-event-routes.ts` also hosts provider-neutral canonical event dispatch with exact-Connection reauthorization. `route-family.ts` registers internal families; `turn-host.ts` separates Run and Turn authority. |
 | `src/tools/` | ToolRegistry, batch execution, truncation, declarative egress sync. |
 | `src/platform/` | Platform Tools that need the API's own services. `delegate-tool.ts` hands work to a Soul Agent (which gets a Conversation); `spawn-tool.ts` + `subagent-{run,answers}.ts` spawn an ad-hoc helper the caller defines inline, which gets none. Both park the calling Turn on a child-Run wait. |
