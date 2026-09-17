@@ -133,9 +133,9 @@ cases:
             id: user-123
             name: Muskan Vijayvargiya
 
-  - name: lists-teams
+  - name: teams-first-page
     operationId: list-teams
-    request: {}
+    request: { first: 1 }
     response:
       status: 200
       body:
@@ -145,19 +145,186 @@ cases:
               - id: team-123
                 name: Engineering
                 key: ENG
+            pageInfo:
+              hasNextPage: true
+              endCursor: team-123
     expect:
       request:
         method: POST
         url: https://api.linear.app/graphql
         body:
           operationName: ListTeams
-          variables: {}
+          variables: { first: 1 }
       result:
         data:
           teams:
             nodes:
               - id: team-123
                 key: ENG
+            pageInfo: { hasNextPage: true, endCursor: team-123 }
+
+  - name: teams-last-page
+    operationId: list-teams
+    request: { first: 1, after: team-123 }
+    response:
+      status: 200
+      body:
+        data:
+          teams:
+            nodes: [{ id: team-456, name: Support, key: SUP }]
+            pageInfo: { hasNextPage: false, endCursor: team-456 }
+    expect:
+      request:
+        method: POST
+        url: https://api.linear.app/graphql
+        body:
+          operationName: ListTeams
+          variables: { first: 1, after: team-123 }
+      result:
+        data:
+          teams:
+            nodes: [{ id: team-456, name: Support, key: SUP }]
+            pageInfo: { hasNextPage: false, endCursor: team-456 }
+
+  - name: team-workflow-states
+    operationId: list-team-states
+    request: { teamId: team-123, first: 1, after: state-previous }
+    response:
+      status: 200
+      body:
+        data:
+          team:
+            id: team-123
+            states:
+              nodes: [{ id: state-done, name: Done, type: completed, position: 4 }]
+              pageInfo: { hasNextPage: false, endCursor: state-done }
+    expect:
+      request:
+        method: POST
+        url: https://api.linear.app/graphql
+        body:
+          operationName: ListTeamStates
+          variables: { teamId: team-123, first: 1, after: state-previous }
+      result:
+        data:
+          team:
+            states:
+              nodes: [{ id: state-done, name: Done, type: completed, position: 4 }]
+              pageInfo: { hasNextPage: false, endCursor: state-done }
+
+  - name: team-members
+    operationId: list-team-members
+    request: { teamId: team-123, first: 1, after: user-previous }
+    response:
+      status: 200
+      body:
+        data:
+          team:
+            id: team-123
+            members:
+              nodes:
+                - { id: user-123, name: Muskan Vijayvargiya, displayName: Muskan, active: true }
+              pageInfo: { hasNextPage: false, endCursor: user-123 }
+    expect:
+      request:
+        method: POST
+        url: https://api.linear.app/graphql
+        body:
+          operationName: ListTeamMembers
+          variables: { teamId: team-123, first: 1, after: user-previous }
+      result:
+        data:
+          team:
+            members:
+              nodes: [{ id: user-123, active: true }]
+              pageInfo: { hasNextPage: false, endCursor: user-123 }
+
+  - name: updates-workflow-fields
+    operationId: update-issue
+    request: { id: issue-123, stateId: state-done, assigneeId: user-123, priority: 2, estimate: 3 }
+    response:
+      status: 200
+      body:
+        data:
+          issueUpdate:
+            success: true
+            issue:
+              id: issue-123
+              identifier: ENG-42
+              title: Review the launch checklist
+              priority: 2
+              estimate: 3
+              state: { id: state-done, name: Done }
+              assignee: { id: user-123, name: Muskan Vijayvargiya }
+    expect:
+      request:
+        method: POST
+        url: https://api.linear.app/graphql
+        body:
+          operationName: UpdateIssue
+          variables:
+            { id: issue-123, stateId: state-done, assigneeId: user-123, priority: 2, estimate: 3 }
+      result:
+        data:
+          issueUpdate:
+            success: true
+            issue:
+              priority: 2
+              estimate: 3
+              state: { id: state-done }
+              assignee: { id: user-123 }
+
+  - name: clears-assignee-and-estimate
+    operationId: update-issue
+    request: { id: issue-123, assigneeId: null, estimate: null, priority: 0 }
+    response:
+      status: 200
+      body:
+        data:
+          issueUpdate:
+            success: true
+            issue:
+              id: issue-123
+              identifier: ENG-42
+              title: Review the launch checklist
+              assignee: null
+              estimate: null
+              priority: 0
+    expect:
+      request:
+        method: POST
+        url: https://api.linear.app/graphql
+        body:
+          operationName: UpdateIssue
+          variables: { id: issue-123, assigneeId: null, estimate: null, priority: 0 }
+      result:
+        data:
+          issueUpdate:
+            success: true
+            issue: { assignee: null, estimate: null, priority: 0 }
+
+  - name: rejects-partial-mutation-error
+    operationId: update-issue
+    request: { id: issue-123, stateId: wrong-team-state }
+    response:
+      status: 200
+      body:
+        data: { issueUpdate: null }
+        errors:
+          - message: Invalid state
+            path: [issueUpdate]
+            extensions: { code: BAD_USER_INPUT }
+    expect:
+      request:
+        method: POST
+        url: https://api.linear.app/graphql
+        body:
+          operationName: UpdateIssue
+          variables: { id: issue-123, stateId: wrong-team-state }
+      expectedError:
+        phase: after_dispatch
+        code: provider_rejected
+        retryable: false
 
   - name: reads-issue
     operationId: read-issue

@@ -1,0 +1,17 @@
+query ListTeamMembers($teamId: String!, $first: Int!, $after: String) {
+  team(id: $teamId) {
+    id
+    members(first: $first, after: $after) {
+      nodes {
+        id
+        name
+        displayName
+        active
+      }
+      pageInfo {
+        hasNextPage
+        endCursor
+      }
+    }
+  }
+}
