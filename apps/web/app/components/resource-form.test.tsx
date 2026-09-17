@@ -32,6 +32,16 @@ required: [title, open]
 if (!parsed.ok) throw new Error(parsed.error);
 const fields = formFields(parsed.schema);
 
+const calendarParsed = parseSchema(`
+type: object
+properties:
+  title: { type: string }
+  dueDate: { type: string, format: date }
+required: [title]
+`);
+if (!calendarParsed.ok) throw new Error(calendarParsed.error);
+const calendarFields = formFields(calendarParsed.schema);
+
 const booleanParsed = parseSchema(`
 type: object
 properties:
@@ -132,6 +142,73 @@ test("submit coerces typed values and omits empty optional fields", () => {
     { title: "Hello", count: 5, open: true },
     expect.any(Function)
   );
+});
+
+test("invalid native calendar drafts block submit and remain available for correction", () => {
+  const onSubmit = vi.fn();
+  const { container } = renderForm(
+    <ResourceForm
+      fields={calendarFields}
+      mode="create"
+      onSubmit={onSubmit}
+      submitting={false}
+      cancelTo="/"
+    />
+  );
+  const title = container.querySelector("input#title") as HTMLInputElement;
+  const dueDate = container.querySelector("input#dueDate") as HTMLInputElement;
+  let invalidDraft = true;
+  Object.defineProperty(dueDate, "validity", {
+    configurable: true,
+    get: () => ({ badInput: invalidDraft, valid: !invalidDraft }),
+  });
+  dueDate.dataset.nativeDraft = "29/02/2027";
+
+  fireEvent.change(title, { target: { value: "Invalid draft" } });
+  fireEvent.change(dueDate, { target: { value: "" } });
+  fireEvent.click(screen.getByRole("button", { name: "Create" }));
+
+  expect(onSubmit).not.toHaveBeenCalled();
+  expect(screen.getByText("enter a valid calendar date")).toBeVisible();
+  expect(dueDate).toHaveAttribute("aria-invalid", "true");
+  expect(dueDate).toHaveAttribute("aria-describedby", "dueDate-error");
+  expect(container.querySelector("input#dueDate")).toBe(dueDate);
+  expect(dueDate.dataset.nativeDraft).toBe("29/02/2027");
+  expect(title.value).toBe("Invalid draft");
+
+  invalidDraft = false;
+  fireEvent.change(dueDate, { target: { value: "2028-02-29" } });
+  fireEvent.click(screen.getByRole("button", { name: "Create" }));
+
+  expect(onSubmit).toHaveBeenCalledWith(
+    { title: "Invalid draft", dueDate: "2028-02-29" },
+    expect.any(Function)
+  );
+});
+
+test("an intentionally cleared optional calendar field remains omittable", () => {
+  const onSubmit = vi.fn();
+  const { container } = renderForm(
+    <ResourceForm
+      fields={calendarFields}
+      mode="create"
+      onSubmit={onSubmit}
+      submitting={false}
+      cancelTo="/"
+    />
+  );
+  const dueDate = container.querySelector("input#dueDate") as HTMLInputElement;
+  Object.defineProperty(dueDate, "validity", {
+    configurable: true,
+    get: () => ({ badInput: false, valid: true }),
+  });
+
+  fireEvent.change(container.querySelector("input#title") as HTMLInputElement, {
+    target: { value: "No due date" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Create" }));
+
+  expect(onSubmit).toHaveBeenCalledWith({ title: "No due date" }, expect.any(Function));
 });
 
 test("numeric fields accept exact large integers, scientific notation, and ordinary decimals", () => {
