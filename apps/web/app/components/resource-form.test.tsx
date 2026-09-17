@@ -1,5 +1,5 @@
 import { createRemixStub } from "@remix-run/testing";
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import type { ReactElement } from "react";
 import { expect, test, vi } from "vitest";
 import { ResourceForm } from "~/components/resource-form";
@@ -26,10 +26,23 @@ properties:
   count: { type: integer }
   open: { type: boolean }
   tags: { type: array }
-required: [title]
+required: [title, open]
 `);
 if (!parsed.ok) throw new Error(parsed.error);
 const fields = formFields(parsed.schema);
+
+const booleanParsed = parseSchema(`
+type: object
+properties:
+  title: { type: string }
+  active: { type: boolean }
+  reviewed: { type: boolean }
+  subscribed: { type: boolean, default: true }
+  archived: { type: boolean, default: false }
+required: [title, active]
+`);
+if (!booleanParsed.ok) throw new Error(booleanParsed.error);
+const booleanFields = formFields(booleanParsed.schema);
 
 function renderForm(node: ReactElement) {
   const Stub = createRemixStub([{ path: "/", Component: () => node }]);
@@ -66,7 +79,7 @@ test("marks required fields and excludes the sequence-generated id", () => {
     />
   );
   expect(container.querySelector("input#id")).toBeNull();
-  expect(screen.getByText("*")).toBeInTheDocument(); // required marker on title
+  expect(screen.getAllByText("*")).toHaveLength(2);
 });
 
 test("x-immutable field is read-only on edit and its value is carried into the payload", () => {
@@ -117,6 +130,131 @@ test("submit coerces typed values and omits empty optional fields", () => {
     { title: "Hello", count: 5, open: true },
     expect.any(Function)
   );
+});
+
+test("create omits untouched optional booleans and honors required and defaulted values", () => {
+  const onSubmit = vi.fn();
+  const { container } = renderForm(
+    <ResourceForm
+      fields={booleanFields}
+      mode="create"
+      onSubmit={onSubmit}
+      submitting={false}
+      cancelTo="/"
+    />
+  );
+  fireEvent.change(container.querySelector("input#title") as HTMLInputElement, {
+    target: { value: "Sample" },
+  });
+
+  fireEvent.click(screen.getByRole("button", { name: "Create" }));
+
+  expect(onSubmit).toHaveBeenCalledWith(
+    { title: "Sample", active: false, subscribed: true, archived: false },
+    expect.any(Function)
+  );
+});
+
+test("title-only edit preserves an omitted optional boolean", () => {
+  const onSubmit = vi.fn();
+  const { container } = renderForm(
+    <ResourceForm
+      fields={booleanFields}
+      mode="edit"
+      initial={{ title: "Before", active: false }}
+      onSubmit={onSubmit}
+      submitting={false}
+      cancelTo="/"
+    />
+  );
+  fireEvent.change(container.querySelector("input#title") as HTMLInputElement, {
+    target: { value: "After" },
+  });
+
+  fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+  expect(onSubmit).toHaveBeenCalledWith({ title: "After", active: false }, expect.any(Function));
+});
+
+test("optional booleans expose unset, true, and false as distinct payload states", async () => {
+  const onSubmit = vi.fn();
+  renderForm(
+    <ResourceForm
+      fields={booleanFields}
+      mode="create"
+      onSubmit={onSubmit}
+      submitting={false}
+      cancelTo="/"
+    />
+  );
+
+  const reviewed = screen.getByRole("radiogroup", { name: "reviewed" });
+  expect(within(reviewed).getByRole("radio", { name: "Unset" })).toBeChecked();
+
+  fireEvent.click(within(reviewed).getByRole("radio", { name: "True" }));
+  fireEvent.click(screen.getByRole("button", { name: "Create" }));
+  await waitFor(() =>
+    expect(onSubmit).toHaveBeenLastCalledWith(
+      expect.objectContaining({ reviewed: true }),
+      expect.any(Function)
+    )
+  );
+
+  fireEvent.click(within(reviewed).getByRole("radio", { name: "False" }));
+  fireEvent.click(screen.getByRole("button", { name: "Create" }));
+  await waitFor(() =>
+    expect(onSubmit).toHaveBeenLastCalledWith(
+      expect.objectContaining({ reviewed: false }),
+      expect.any(Function)
+    )
+  );
+
+  fireEvent.click(within(reviewed).getByRole("radio", { name: "Unset" }));
+  fireEvent.click(screen.getByRole("button", { name: "Create" }));
+  await waitFor(() => expect(onSubmit.mock.calls.at(-1)?.[0]).not.toHaveProperty("reviewed"));
+});
+
+test("edit preserves an explicit optional false", () => {
+  const onSubmit = vi.fn();
+  renderForm(
+    <ResourceForm
+      fields={booleanFields}
+      mode="edit"
+      initial={{ title: "Sample", active: true, reviewed: false }}
+      onSubmit={onSubmit}
+      submitting={false}
+      cancelTo="/"
+    />
+  );
+
+  const reviewed = screen.getByRole("radiogroup", { name: "reviewed" });
+  expect(within(reviewed).getByRole("radio", { name: "False" })).toBeChecked();
+  fireEvent.click(screen.getByRole("button", { name: "Save" }));
+  expect(onSubmit).toHaveBeenCalledWith(
+    { title: "Sample", active: true, reviewed: false },
+    expect.any(Function)
+  );
+});
+
+test("resetting an optional boolean to its original absence clears dirty state", () => {
+  const onSubmit = vi.fn();
+  renderForm(
+    <ResourceForm
+      fields={booleanFields}
+      mode="create"
+      onSubmit={onSubmit}
+      submitting={false}
+      cancelTo="/"
+    />
+  );
+  const reviewed = screen.getByRole("radiogroup", { name: "reviewed" });
+
+  fireEvent.click(within(reviewed).getByRole("radio", { name: "True" }));
+  expect(dispatchUnload()).toBe(true);
+
+  fireEvent.click(within(reviewed).getByRole("radio", { name: "Unset" }));
+  expect(dispatchUnload()).toBe(false);
+  expect(onSubmit).not.toHaveBeenCalled();
 });
 
 test("submits enum values with their schema primitive types", () => {
@@ -196,3 +334,9 @@ test("surfaces the form-level banner and per-field server errors", () => {
   expect(screen.getByText(/boom/)).toBeInTheDocument();
   expect(screen.getByText("must be low or high")).toBeInTheDocument();
 });
+
+function dispatchUnload(): boolean {
+  const event = new Event("beforeunload", { cancelable: true });
+  window.dispatchEvent(event);
+  return event.defaultPrevented;
+}
