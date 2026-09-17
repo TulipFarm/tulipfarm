@@ -3,12 +3,11 @@ import {
   type MetaFunction,
   useLoaderData,
   useNavigate,
-  useRouteError,
 } from "@remix-run/react";
 import { useState } from "react";
 import { PageShell } from "~/components/page-shell";
 import { ResourceForm, writeErrorState } from "~/components/resource-form";
-import { ErrorState, NotFoundState } from "~/components/states";
+import { ResourceRouteError } from "~/components/resources/resource-route-error";
 import { ApiError, getRecord, listResourceTypes, updateRecord } from "~/lib/api";
 import { type FieldDescriptor, formFields, parseSchema } from "~/lib/schema";
 
@@ -85,11 +84,5 @@ export default function ResourceEdit() {
 }
 
 export function ErrorBoundary() {
-  const error = useRouteError();
-  if (error instanceof ApiError && error.status === 404) {
-    return <NotFoundState section="resources" />;
-  }
-  const status = error instanceof ApiError ? error.status : undefined;
-  const message = error instanceof Error ? error.message : undefined;
-  return <ErrorState section="resources" status={status} message={message} />;
+  return <ResourceRouteError subject="record" />;
 }

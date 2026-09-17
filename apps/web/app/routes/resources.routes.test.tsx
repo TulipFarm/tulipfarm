@@ -15,8 +15,11 @@ import {
 import ResourcesIndex, { ErrorBoundary as IndexErrorBoundary } from "./_app.resources._index";
 import ResourceList, { ErrorBoundary as ListErrorBoundary } from "./_app.resources.$type._index";
 import ResourceDetail, { ErrorBoundary as DetailErrorBoundary } from "./_app.resources.$type.$id";
+import { ErrorBoundary as SchemaErrorBoundary } from "./_app.resources.$type.schema";
 
 /* Render routes directly because real data navigation creates jsdom-undici AbortSignal issues. */
+
+const { revalidate } = vi.hoisted(() => ({ revalidate: vi.fn() }));
 
 vi.mock("@remix-run/react", async () => {
   const actual = await vi.importActual<typeof import("@remix-run/react")>("@remix-run/react");
@@ -25,6 +28,7 @@ vi.mock("@remix-run/react", async () => {
     useLoaderData: vi.fn(),
     useRouteError: vi.fn(),
     useParams: vi.fn(() => ({})),
+    useRevalidator: vi.fn(() => ({ state: "idle", revalidate })),
   };
 });
 
@@ -125,10 +129,11 @@ function renderWithData(node: ReactElement, data: unknown) {
   render(<Stub initialEntries={["/"]} />);
 }
 
-// Render an ErrorBoundary with a given routed error (the states have no <Link>, so no router).
-function renderError(node: ReactElement, error: unknown) {
+function renderError(node: ReactElement, error: unknown, params: Record<string, string> = {}) {
   vi.mocked(remix.useRouteError).mockReturnValue(error);
-  render(node);
+  vi.mocked(remix.useParams).mockReturnValue(params);
+  const Stub = createRemixStub([{ path: "/", Component: () => node }]);
+  render(<Stub initialEntries={["/"]} />);
 }
 
 test("index lists every type with its record count, domain and relationships", () => {
@@ -219,6 +224,17 @@ test("index with no types drafts a resource type and keeps manual creation secon
 test("index ErrorBoundary surfaces 401 as authentication required", () => {
   renderError(<IndexErrorBoundary />, new ApiError(401, "unauthorized"));
   expect(screen.getByText(/authentication required/i)).toBeInTheDocument();
+});
+
+test("index ErrorBoundary gives hosted-safe connection recovery and retries the loader", () => {
+  renderError(<IndexErrorBoundary />, new TypeError("Failed to fetch"));
+
+  expect(screen.getByText("Resources could not be loaded.")).toBeVisible();
+  expect(screen.getByText(/check your connection, then try again/i)).toBeVisible();
+  expect(screen.queryByText(/:4010|API could not be reached/i)).not.toBeInTheDocument();
+
+  fireEvent.click(screen.getByRole("button", { name: "Try again" }));
+  expect(revalidate).toHaveBeenCalledTimes(1);
 });
 
 test("list renders the schema-driven table and a Load more button when paginated", () => {
@@ -318,11 +334,46 @@ test("detail names the record in its heading and still lists every field", () =>
 });
 
 test("detail ErrorBoundary renders 404 not found for a missing record", () => {
-  renderError(<DetailErrorBoundary />, new ApiError(404, "not found"));
-  expect(screen.getByText(/404 not found/i)).toBeInTheDocument();
+  renderError(<DetailErrorBoundary />, new ApiError(404, "not found"), { type: "ticket" });
+
+  expect(screen.getByText("Record not found.")).toBeVisible();
+  expect(screen.getByText(/no Record matches this ID/i)).toBeVisible();
+  expect(screen.getByRole("link", { name: "Back to ticket" })).toHaveAttribute(
+    "href",
+    "/resources/ticket"
+  );
 });
 
-test("list ErrorBoundary surfaces a non-auth API failure generically", () => {
-  renderError(<ListErrorBoundary />, new ApiError(500, "boom"));
-  expect(screen.getByText(/error: 500/i)).toBeInTheDocument();
+test("detail ErrorBoundary distinguishes a missing Resource type from a missing Record", () => {
+  renderError(
+    <DetailErrorBoundary />,
+    new ApiError(404, "resource type not found: never-created"),
+    { type: "never-created" }
+  );
+
+  expect(screen.getByText("Resource type not found.")).toBeVisible();
+  expect(screen.queryByText(/no Record matches/i)).not.toBeInTheDocument();
+  expect(screen.getByRole("link", { name: "Back to Resources" })).toHaveAttribute(
+    "href",
+    "/resources"
+  );
+});
+
+test("schema ErrorBoundary identifies its missing entity as a Resource type", () => {
+  renderError(
+    <SchemaErrorBoundary />,
+    new ApiError(404, "resource type not found: never-created"),
+    { type: "never-created" }
+  );
+
+  expect(screen.getByText("Resource type not found.")).toBeVisible();
+  expect(screen.queryByText(/Record matches/i)).not.toBeInTheDocument();
+});
+
+test("list ErrorBoundary keeps server failures distinct without leaking internals", () => {
+  renderError(<ListErrorBoundary />, new ApiError(500, "database exploded"), { type: "ticket" });
+
+  expect(screen.getByText("Resources could not be loaded.")).toBeVisible();
+  expect(screen.getByRole("button", { name: "Try again" })).toBeVisible();
+  expect(screen.queryByText(/database exploded|check your connection/i)).not.toBeInTheDocument();
 });
