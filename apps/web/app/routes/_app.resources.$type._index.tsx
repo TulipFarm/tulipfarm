@@ -199,7 +199,7 @@ function ResourceListView() {
   }
 
   const idLabel = data.idStrategy?.sequence
-    ? `${data.idStrategy.prefix ?? "auto"}-n`
+    ? `${data.idStrategy.prefix ?? ""}n`
     : (data.idStrategy?.field ?? "id");
 
   return (
