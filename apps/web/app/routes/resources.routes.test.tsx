@@ -47,6 +47,12 @@ const TICKET_YAML = `
 type: object
 properties:
   title: { type: string }
+  status: { type: string }
+  quantity: { type: number }
+  active: { type: boolean }
+  notes: { type: string }
+  dueDate: { type: string, format: date }
+  startsAt: { type: string, format: date-time }
   customerId: { type: string, x-links: { target: customer } }
 `;
 const CUSTOMER_YAML = `
@@ -150,6 +156,26 @@ test("index search narrows the catalog and reports how much it hid", () => {
 
   expect(screen.getByText("1 of 2 types")).toBeInTheDocument();
   expect(screen.queryByRole("link", { name: /^ticket$/ })).not.toBeInTheDocument();
+});
+
+test("index search includes declared fields beyond the catalog preview", () => {
+  renderWithData(<ResourcesIndex />, { rows: catalogRows() });
+  const search = screen.getByRole("searchbox", { name: /search resource types/i });
+
+  expect(screen.getByText("title · status · quantity")).toBeInTheDocument();
+  fireEvent.change(search, { target: { value: "CUSTOMERID" } });
+  expect(screen.getByText("1 of 2 types")).toBeInTheDocument();
+  expect(screen.getByRole("link", { name: /^ticket$/ })).toBeInTheDocument();
+  expect(screen.queryByRole("link", { name: /^customer$/ })).not.toBeInTheDocument();
+
+  fireEvent.change(search, { target: { value: "customer" } });
+  expect(screen.getByText("2 of 2 types")).toBeInTheDocument();
+
+  fireEvent.change(search, { target: { value: "title" } });
+  expect(screen.getByText("1 of 2 types")).toBeInTheDocument();
+
+  fireEvent.change(search, { target: { value: "" } });
+  expect(screen.getByText("2 types")).toBeInTheDocument();
 });
 
 test("index empty search state names the query that found nothing", () => {
