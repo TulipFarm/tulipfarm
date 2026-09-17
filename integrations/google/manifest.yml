@@ -1,8 +1,7 @@
 name: google
 version: "1.0.0"
-description: One Google sign-in for your agents — Gmail, Calendar, Drive, and Docs on a single
-  connection. The tools that use this login are code-backed (like Slack), so they can span every
-  Google service and compose email, which a declarative integration cannot.
+description: Legacy Google adapter, marked Coming soon in the curated catalog. This is not the
+  google-workspace OIM package, which declares its own personal OAuth Connection and Tools.
 maintainer: TulipFarm
 icon: google
 capabilities:
@@ -20,10 +19,7 @@ grants:
   - label: docs
     description: Read documents and edit them.
 
-# Code-backed: the Google Tools are hand-written (see apps/api/src/tools/google and
-# packages/integrations/src/google), so egress is `none` here. A code adapter is not pinned to one
-# host the way declarative OpenAPI egress is, which is exactly why a single login can reach Gmail,
-# Calendar, Drive, and Docs at once — and why email composition (MIME assembly) is possible.
+# Legacy code-backed adapter; availability and setup are distinct from google-workspace.
 egress:
   type: none
 

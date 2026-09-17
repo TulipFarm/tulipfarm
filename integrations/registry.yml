@@ -62,8 +62,8 @@ integrations:
     icon: google
     category: productivity
     homepage: https://workspace.google.com
-    description: One Google sign-in for Gmail, Calendar, Drive, and Docs — read and write across all
-      of them from a single connection.
+    description: Legacy Google adapter, not yet available from this catalog entry. Distinct from
+      the google-workspace OIM package and its personal OAuth Connection.
 
   - name: confluence
     packageDigest: c48ea1eab65b20a706f56fd8b1c7e3874dbab25688958d32fdcee8235c8d4f35

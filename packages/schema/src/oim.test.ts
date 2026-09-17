@@ -145,6 +145,59 @@ describe("validateOimManifest", () => {
     expect(validateOimManifest(valid())).toEqual(valid());
   });
 
+  it("requires Core 1.4 for bounded MIME composition and rejects conflicting encodings", () => {
+    const manifest = valid();
+    const operation = manifest.operations[0];
+    if (operation.source.type !== "http") throw new Error("fixture");
+    operation.source.method = "POST";
+    operation.source.mime = { outputPointer: "/message/raw", maxBytes: 1048576 };
+    operation.requestSchema = { type: "object", additionalProperties: false };
+    expect(oimManifestIssues(manifest)).toContain(
+      'profiles: core "1.4" is required for source.mime'
+    );
+    manifest.profiles.core = "1.4";
+    expect(validateOimManifest(manifest)).toEqual(manifest);
+    operation.source.contentType = "form";
+    expect(oimManifestIssues(manifest)).toContain(
+      "operations: current-weather MIME requires a JSON request schema and a safe output pointer"
+    );
+    delete operation.source.contentType;
+    operation.source.mime.outputPointer = "/constructor/raw";
+    expect(oimManifestIssues(manifest)).toContain(
+      "operations: current-weather MIME requires a JSON request schema and a safe output pointer"
+    );
+  });
+
+  it("requires a bounded Core 1.4 declaration for typed multipart/related", () => {
+    const manifest = valid();
+    const operation = manifest.operations[0];
+    if (operation.source.type !== "http") throw new Error("fixture");
+    operation.source.method = "POST";
+    operation.requestSchema = { type: "object" };
+    operation.source.contentType = "multipart";
+    operation.source.multipart = {
+      subtype: "related",
+      parts: [
+        {
+          name: "metadata",
+          kind: "field",
+          pointer: "/metadata",
+          maxBytes: 1024,
+          mediaType: "application/json",
+        },
+      ],
+    };
+    expect(oimManifestIssues(manifest)).toContain(
+      'profiles: core "1.4" is required for source.multipart.related'
+    );
+    manifest.profiles.core = "1.4";
+    expect(oimManifestIssues(manifest)).toContain(
+      "operations: current-weather typed multipart requires maxBytes"
+    );
+    operation.source.multipart.maxBytes = 1048576;
+    expect(validateOimManifest(manifest)).toEqual(manifest);
+  });
+
   it("requires Core 1.3 for composite operations", () => {
     const manifest = valid();
     manifest.operations.push({

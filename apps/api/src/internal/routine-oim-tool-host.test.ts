@@ -1370,50 +1370,70 @@ describe("InternalRoutineOimToolHost", () => {
     expect(http.sent[0]?.headers).toMatchObject({ Authorization: "Bearer provider-token" });
   });
 
-  it("authorizes every declared multipart File before returning approval bindings", async () => {
-    const manifest = multipartManifest();
-    const compiled = compileOimHttpOperations(manifest, {})[0];
-    if (compiled === undefined) throw new Error("multipart fixture did not compile");
-    const runtimeBundle = bundle(compiled.contract);
-    const assertAuthorized = vi.fn(async () => undefined);
-    const host = new InternalRoutineOimToolHost({
-      businessId: BUSINESS_ID,
-      releaseDispatch,
-      releaseIntegration,
-      runs: runAuthority(runtimeBundle),
-      bundles: { load: async () => runtimeBundle },
-      registrations: { find: async () => registration(manifest) },
-      connections: resolver(connection({})),
-      effects: new MemoryEffectStore(),
-      secrets: noSecrets,
-      http: new RecordingHttp(),
-      authorize: { authorize: async () => true },
-      fileAuthorizer: { assertAuthorized },
-    });
+  it.each(["multipart", "mime"] as const)(
+    "authorizes every declared %s File before returning approval bindings",
+    async (encoding) => {
+      const manifest = multipartManifest();
+      if (encoding === "mime") {
+        manifest.profiles.core = "1.4";
+        const operation = manifest.operations[0];
+        if (operation?.source.type !== "http") throw new Error("invalid fixture");
+        delete operation.source.multipart;
+        delete operation.source.contentType;
+        operation.source.mime = { outputPointer: "/raw", maxBytes: 1024 };
+        operation.requestSchema = {
+          type: "object",
+          required: ["attachments"],
+          properties: { attachments: { type: "array", items: { type: "string" } } },
+          additionalProperties: false,
+        };
+      }
+      const compiled = compileOimHttpOperations(manifest, {})[0];
+      if (compiled === undefined) throw new Error("multipart fixture did not compile");
+      const runtimeBundle = bundle(compiled.contract);
+      const assertAuthorized = vi.fn(async () => undefined);
+      const host = new InternalRoutineOimToolHost({
+        businessId: BUSINESS_ID,
+        releaseDispatch,
+        releaseIntegration,
+        runs: runAuthority(runtimeBundle),
+        bundles: { load: async () => runtimeBundle },
+        registrations: { find: async () => registration(manifest) },
+        connections: resolver(connection({})),
+        effects: new MemoryEffectStore(),
+        secrets: noSecrets,
+        http: new RecordingHttp(),
+        authorize: { authorize: async () => true },
+        fileAuthorizer: { assertAuthorized },
+      });
 
-    await expect(
-      host.prepare(RUN_ID, {
-        stateKey: STATE_KEY,
-        claim: CLAIM,
-        arguments: {
-          body: {
-            uploads: [{ fileId: "file-b" }, { fileId: "file-a" }],
+      await expect(
+        host.prepare(RUN_ID, {
+          stateKey: STATE_KEY,
+          claim: CLAIM,
+          arguments: {
+            body:
+              encoding === "mime"
+                ? { attachments: ["file-b", "file-a"] }
+                : {
+                    uploads: [{ fileId: "file-b" }, { fileId: "file-a" }],
+                  },
           },
-        },
-      })
-    ).resolves.toMatchObject({
-      kind: "ready",
-      filePrincipalId: USER_ID,
-      fileIds: ["file-a", "file-b"],
-    });
-    expect(assertAuthorized).toHaveBeenCalledWith({
-      authority: authority(runtimeBundle.digest),
-      bundle: runtimeBundle,
-      contract: compiled.contract,
-      stateKey: STATE_KEY,
-      fileIds: ["file-a", "file-b"],
-    });
-  });
+        })
+      ).resolves.toMatchObject({
+        kind: "ready",
+        filePrincipalId: USER_ID,
+        fileIds: ["file-a", "file-b"],
+      });
+      expect(assertAuthorized).toHaveBeenCalledWith({
+        authority: authority(runtimeBundle.digest),
+        bundle: runtimeBundle,
+        contract: compiled.contract,
+        stateKey: STATE_KEY,
+        fileIds: ["file-a", "file-b"],
+      });
+    }
+  );
 
   it("denies multipart File authority before effect, Secret, or provider work", async () => {
     const manifest = multipartManifest();

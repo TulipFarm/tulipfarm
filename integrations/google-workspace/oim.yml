@@ -4,7 +4,7 @@ kind: Integration
 metadata:
   id: google-workspace
   name: Google Workspace
-  version: 2.0.0
+  version: 2.1.0
   description: >-
     Read and write Docs, Sheets, Slides, Drive files, Calendar events, and Gmail messages through
     one Google user OAuth Connection.
@@ -14,16 +14,16 @@ metadata:
       url: https://tulipfarm.dev
 
 profiles:
-  core: "1.2"
+  core: "1.4"
   auth: "1.1"
 
 files:
   - path: setup-guide.md
     role: guide
-    sha256: "7b01451d65155ff28c6d88d342a8e33a35eec4ccc246d2732576119878dc655b"
+    sha256: "23fb2370355b0301a33f0501a1a2a9e44f01d90de398cd2e36d806ffca31b82f"
   - path: fixtures.yml
     role: fixture
-    sha256: "afdc52386b1ffc7d15ab85791f104b91d5be641dfc63f28db0c61494aca7cc50"
+    sha256: "2c696e7d94c995c7215e91988a488895af4cd32d3a8875899fa464223c45c16d"
 
 auth:
   # Fixed operation origins are also compiled into each Tool contract. Drive and Calendar share
@@ -99,8 +99,10 @@ auth:
         - https://www.googleapis.com/auth/presentations
         - https://www.googleapis.com/auth/drive
         - https://www.googleapis.com/auth/calendar.events
+        - https://www.googleapis.com/auth/calendar.calendarlist.readonly
         - https://www.googleapis.com/auth/gmail.readonly
         - https://www.googleapis.com/auth/gmail.send
+        - https://www.googleapis.com/auth/gmail.compose
       pkce: true
       clientId:
         type: credential
@@ -674,7 +676,9 @@ operations:
     name: google_workspace_drive_list_files
     description: >-
       Search and list Drive files visible to the connected user. Use the returned IDs before
-      reading metadata, updating, or downloading a file.
+      reading metadata, updating, or downloading a file. This lists the user corpus, including
+      Shared Drive files the user has accessed. For complete discovery within one Shared Drive,
+      use drive_list_shared_drive_files with its driveId. This is a bounded page, not a full scan.
     effect: sensitive_read
     identityMode: personal_required
     credentialSlot: access_token
@@ -688,6 +692,18 @@ operations:
       baseUrl: https://www.googleapis.com
       path: /drive/v3/files
       parameters:
+        - name: supportsAllDrives
+          in: query
+          value: "true"
+          schema: { type: boolean }
+        - name: includeItemsFromAllDrives
+          in: query
+          value: "true"
+          schema: { type: boolean }
+        - name: corpora
+          in: query
+          value: user
+          schema: { type: string }
         - name: q
           in: query
           schema:
@@ -708,10 +724,10 @@ operations:
           in: query
           schema:
             type: string
-            enum: [drive, appDataFolder, photos]
+            enum: [drive]
         - name: fields
           in: query
-          value: "nextPageToken,files(id,name,mimeType,modifiedTime,size,webViewLink,capabilities(canDownload))"
+          value: "nextPageToken,incompleteSearch,files(id,name,mimeType,modifiedTime,size,webViewLink,driveId,capabilities(canDownload))"
           schema: { type: string }
     pagination:
       type: cursor
@@ -724,6 +740,7 @@ operations:
         type: object
         properties:
           nextPageToken: { type: string }
+          incompleteSearch: { type: boolean, const: false }
           files:
             type: array
             items:
@@ -756,6 +773,10 @@ operations:
       baseUrl: https://www.googleapis.com
       path: /drive/v3/files/{file_id}
       parameters:
+        - name: supportsAllDrives
+          in: query
+          value: "true"
+          schema: { type: boolean }
         - name: file_id
           in: path
           required: true
@@ -803,6 +824,10 @@ operations:
       baseUrl: https://www.googleapis.com
       path: /drive/v3/files
       parameters:
+        - name: supportsAllDrives
+          in: query
+          value: "true"
+          schema: { type: boolean }
         - name: fields
           in: query
           value: "id,name,mimeType,description,parents,webViewLink"
@@ -861,6 +886,10 @@ operations:
       baseUrl: https://www.googleapis.com
       path: /drive/v3/files/{file_id}
       parameters:
+        - name: supportsAllDrives
+          in: query
+          value: "true"
+          schema: { type: boolean }
         - name: file_id
           in: path
           required: true
@@ -919,6 +948,10 @@ operations:
       baseUrl: https://www.googleapis.com
       path: /drive/v3/files/{file_id}
       parameters:
+        - name: supportsAllDrives
+          in: query
+          value: "true"
+          schema: { type: boolean }
         - name: file_id
           in: path
           required: true
@@ -1376,7 +1409,8 @@ operations:
     name: google_workspace_gmail_send_message
     description: >-
       Send one Gmail message for the connected user. Supply a complete RFC 2822 message encoded as
-      base64url in raw; optionally supply threadId to add it to an existing thread.
+      base64url in raw; optionally supply threadId to add it to an existing thread. Prefer
+      google_workspace_gmail_compose_send_message for text, HTML, and TulipFarm File attachments.
     effect: send
     identityMode: personal_required
     credentialSlot: access_token
@@ -1418,3 +1452,471 @@ operations:
           labelIds:
             type: array
             items: { type: string }
+
+  - id: drive-list-drives
+    name: google_workspace_drive_list_drives
+    description: List Shared Drives accessible to the connected user, one bounded page at a time.
+    effect: sensitive_read
+    identityMode: personal_required
+    credentialSlot: access_token
+    credentialInjection: &bearer
+      in: header
+      name: Authorization
+      format: "Bearer {token}"
+    source:
+      type: http
+      method: GET
+      baseUrl: https://www.googleapis.com
+      path: /drive/v3/drives
+      parameters:
+        - name: pageSize
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 100 }
+        - name: fields
+          in: query
+          value: "nextPageToken,drives(id,name)"
+          schema: { type: string }
+    pagination:
+      type: cursor
+      requestParameter: pageToken
+      responsePath: /nextPageToken
+      itemsPath: /drives
+    response:
+      maxBytes: 1048576
+      schema:
+        type: object
+        properties:
+          nextPageToken: { type: string }
+          drives:
+            type: array
+            items:
+              type: object
+              properties:
+                id: { type: string }
+                name: { type: string }
+
+  - id: drive-list-shared-drive-files
+    name: google_workspace_drive_list_shared_drive_files
+    description: >-
+      Search a single Shared Drive by driveId from drive_list_drives. The corpus is pinned to
+      drive, so there is no ambiguous allDrives search. Follow the host next_page_token until absent.
+      A provider incompleteSearch=true response is rejected, never reported as complete.
+    effect: sensitive_read
+    identityMode: personal_required
+    credentialSlot: access_token
+    credentialInjection: *bearer
+    source:
+      type: http
+      method: GET
+      baseUrl: https://www.googleapis.com
+      path: /drive/v3/files
+      parameters:
+        - name: supportsAllDrives
+          in: query
+          value: "true"
+          schema: { type: boolean }
+        - name: includeItemsFromAllDrives
+          in: query
+          value: "true"
+          schema: { type: boolean }
+        - name: corpora
+          in: query
+          value: drive
+          schema: { type: string }
+        - name: driveId
+          in: query
+          required: true
+          schema: { type: string, minLength: 1, maxLength: 256 }
+        - name: q
+          in: query
+          schema: { type: string, maxLength: 4096 }
+        - name: pageSize
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 1000 }
+        - name: fields
+          in: query
+          value: "nextPageToken,incompleteSearch,files(id,name,mimeType,modifiedTime,size,parents,driveId,webViewLink,capabilities(canDownload))"
+          schema: { type: string }
+    pagination:
+      type: cursor
+      requestParameter: pageToken
+      responsePath: /nextPageToken
+      itemsPath: /files
+    response:
+      maxBytes: 4194304
+      schema:
+        type: object
+        properties:
+          nextPageToken: { type: string }
+          incompleteSearch: { type: boolean, const: false }
+          files:
+            type: array
+            items: { type: object }
+
+  - id: drive-upload-file
+    name: google_workspace_drive_upload_file
+    description: >-
+      Upload the bytes of an authorized TulipFarm File with Drive metadata in one bounded
+      multipart/related request. Supply a parent folder ID to upload into a Shared Drive.
+      Combined metadata and file bytes must not exceed 5 MiB; larger/resumable uploads are unsupported.
+    effect: create
+    identityMode: personal_required
+    credentialSlot: access_token
+    credentialInjection: *bearer
+    source:
+      type: http
+      method: POST
+      baseUrl: https://www.googleapis.com
+      path: /upload/drive/v3/files
+      contentType: multipart
+      multipart:
+        subtype: related
+        maxBytes: 5242880
+        parts:
+          - name: metadata
+            kind: field
+            pointer: /metadata
+            mediaType: application/json; charset=UTF-8
+            maxBytes: 65536
+          - name: file
+            kind: file
+            pointer: /fileId
+      parameters:
+        - name: uploadType
+          in: query
+          value: multipart
+          schema: { type: string }
+        - name: supportsAllDrives
+          in: query
+          value: "true"
+          schema: { type: boolean }
+        - name: fields
+          in: query
+          value: "id,name,mimeType,size,parents,driveId,webViewLink"
+          schema: { type: string }
+    requestSchema:
+      type: object
+      required: [metadata, fileId]
+      additionalProperties: false
+      properties:
+        fileId:
+          type: string
+          minLength: 1
+          maxLength: 128
+          description: TulipFarm File ID; never a local path, URL, Drive ID, or base64 payload.
+        metadata:
+          type: object
+          required: [name]
+          additionalProperties: false
+          properties:
+            name: { type: string, minLength: 1, maxLength: 1024 }
+            description: { type: string, maxLength: 32768 }
+            parents:
+              type: array
+              maxItems: 1
+              items: { type: string, minLength: 1, maxLength: 256 }
+    response:
+      maxBytes: 1048576
+      schema:
+        type: object
+        properties:
+          id: { type: string }
+          name: { type: string }
+          mimeType: { type: string }
+          size: { type: string }
+          parents: { type: array, items: { type: string } }
+          driveId: { type: string }
+          webViewLink: { type: string }
+
+  - id: drive-export-file
+    name: google_workspace_drive_export_file
+    description: >-
+      Export a Google Workspace-native file into an authorized TulipFarm File, at most 10 MiB.
+      Choose a MIME type supported by the source: Docs text/plain or application/pdf; Sheets
+      text/csv (first sheet only) or application/pdf; Slides application/pdf. The provider enforces
+      canDownload and export compatibility. Files.export has no supportsAllDrives parameter.
+    effect: sensitive_read
+    identityMode: personal_required
+    credentialSlot: access_token
+    credentialInjection: *bearer
+    source:
+      type: http
+      method: GET
+      baseUrl: https://www.googleapis.com
+      path: /drive/v3/files/{file_id}/export
+      parameters:
+        - name: file_id
+          in: path
+          required: true
+          schema: { type: string, minLength: 1, maxLength: 256 }
+        - name: mimeType
+          in: query
+          required: true
+          schema: { type: string, enum: [text/plain, text/csv, application/pdf] }
+    response:
+      mode: binary
+      maxBytes: 10485760
+
+  - id: calendar-list-calendars
+    name: google_workspace_calendar_list_calendars
+    description: >-
+      Discover calendars in the connected user's calendar list, including IDs, names, time zones,
+      and access roles. Follow the bounded continuation to discover more calendars.
+    effect: sensitive_read
+    identityMode: personal_required
+    credentialSlot: access_token
+    credentialInjection: *bearer
+    source:
+      type: http
+      method: GET
+      baseUrl: https://www.googleapis.com
+      path: /calendar/v3/users/me/calendarList
+      parameters:
+        - name: maxResults
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 250 }
+    pagination:
+      type: cursor
+      requestParameter: pageToken
+      responsePath: /nextPageToken
+      itemsPath: /items
+    response:
+      maxBytes: 4194304
+      schema:
+        type: object
+        properties:
+          nextPageToken: { type: string }
+          items:
+            type: array
+            items:
+              type: object
+              properties:
+                id: { type: string }
+                summary: { type: string }
+                description: { type: string }
+                timeZone: { type: string }
+                primary: { type: boolean }
+                accessRole: { type: string }
+
+  - id: calendar-get-event
+    name: google_workspace_calendar_get_event
+    description: >-
+      Read a Calendar event by calendar_id and event_id, including readable summary, description,
+      location, all-day or timed start/end, recurrence, attendees, status, and conference details.
+      A cancelled event can contain only id and status.
+    effect: sensitive_read
+    identityMode: personal_required
+    credentialSlot: access_token
+    credentialInjection: *bearer
+    source:
+      type: http
+      method: GET
+      baseUrl: https://www.googleapis.com
+      path: /calendar/v3/calendars/{calendar_id}/events/{event_id}
+      parameters:
+        - name: calendar_id
+          in: path
+          required: true
+          schema: { type: string, minLength: 1, maxLength: 1024 }
+        - name: event_id
+          in: path
+          required: true
+          schema: { type: string, minLength: 1, maxLength: 1024 }
+    response:
+      maxBytes: 4194304
+      schema:
+        type: object
+        properties:
+          id: { type: string }
+          status: { type: string }
+          summary: { type: string }
+          description: { type: string }
+          location: { type: string }
+          start: { type: object }
+          end: { type: object }
+          recurrence: { type: array, items: { type: string } }
+          attendees: { type: array, items: { type: object } }
+          conferenceData: { type: object }
+          htmlLink: { type: string }
+
+  - id: gmail-compose-send-message
+    name: google_workspace_gmail_compose_send_message
+    description: >-
+      Compose and send UTF-8 text, HTML, or multipart alternative email. Recipients are ASCII mailbox
+      lists; subject may be Unicode. Attach up to ten authorized TulipFarm File IDs. The host builds
+      MIME and base64url; do not encode body text. Complete encoded request is limited to 10 MiB.
+      This sends a new message, not a reply; use the raw send operation for RFC-compliant threading.
+    effect: send
+    identityMode: personal_required
+    credentialSlot: access_token
+    credentialInjection: *bearer
+    source:
+      type: http
+      method: POST
+      baseUrl: https://gmail.googleapis.com
+      path: /gmail/v1/users/me/messages/send
+      mime: { outputPointer: /raw, maxBytes: 10485760 }
+    requestSchema: &composedMessage
+      type: object
+      required: [to, subject]
+      anyOf:
+        - required: [text]
+        - required: [html]
+      additionalProperties: false
+      properties:
+        to: { type: string, minLength: 1, maxLength: 900, pattern: '^[ -~]+$' }
+        cc: { type: string, maxLength: 900, pattern: '^[ -~]*$' }
+        bcc: { type: string, maxLength: 900, pattern: '^[ -~]*$' }
+        subject: { type: string, maxLength: 900, pattern: '^[^\u0000-\u001f\u007f]*$' }
+        text: { type: string, maxLength: 2000000 }
+        html: { type: string, maxLength: 2000000 }
+        attachments:
+          type: array
+          maxItems: 10
+          uniqueItems: true
+          items: { type: string, minLength: 1, maxLength: 128 }
+    response: &messageResponse
+      maxBytes: 1048576
+      schema:
+        type: object
+        required: [id]
+        properties:
+          id: { type: string }
+          threadId: { type: string }
+          labelIds: { type: array, items: { type: string } }
+
+  - id: gmail-create-draft
+    name: google_workspace_gmail_create_draft
+    description: >-
+      Create a composed Gmail draft without sending. Supply text, HTML, or both, and optional
+      authorized TulipFarm File attachments. Review the draft before using gmail_send_draft.
+      Complete encoded request is limited to 10 MiB.
+    effect: create
+    identityMode: personal_required
+    credentialSlot: access_token
+    credentialInjection: *bearer
+    source:
+      type: http
+      method: POST
+      baseUrl: https://gmail.googleapis.com
+      path: /gmail/v1/users/me/drafts
+      mime: { outputPointer: /message/raw, maxBytes: 10485760 }
+    requestSchema: *composedMessage
+    response: &draftResponse
+      maxBytes: 1048576
+      schema:
+        type: object
+        required: [id, message]
+        properties:
+          id: { type: string }
+          message: { type: object }
+
+  - id: gmail-update-draft
+    name: google_workspace_gmail_update_draft
+    description: >-
+      Replace a draft's entire message with composed text/HTML and optional File attachments.
+      Read the draft first; omitted recipients, content, and attachments are not preserved.
+      This does not send. Complete encoded request is limited to 10 MiB.
+    effect: update
+    identityMode: personal_required
+    credentialSlot: access_token
+    credentialInjection: *bearer
+    source:
+      type: http
+      method: PUT
+      baseUrl: https://gmail.googleapis.com
+      path: /gmail/v1/users/me/drafts/{draft_id}
+      parameters:
+        - name: draft_id
+          in: path
+          required: true
+          schema: { type: string, minLength: 1, maxLength: 256 }
+      mime: { outputPointer: /message/raw, maxBytes: 10485760 }
+    requestSchema: *composedMessage
+    response: *draftResponse
+
+  - id: gmail-list-drafts
+    name: google_workspace_gmail_list_drafts
+    description: List Gmail draft IDs and message IDs, one bounded page at a time.
+    effect: sensitive_read
+    identityMode: personal_required
+    credentialSlot: access_token
+    credentialInjection: *bearer
+    source:
+      type: http
+      method: GET
+      baseUrl: https://gmail.googleapis.com
+      path: /gmail/v1/users/me/drafts
+      parameters:
+        - name: q
+          in: query
+          schema: { type: string, maxLength: 4096 }
+        - name: maxResults
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 500 }
+    pagination:
+      type: cursor
+      requestParameter: pageToken
+      responsePath: /nextPageToken
+      itemsPath: /drafts
+    response:
+      maxBytes: 2097152
+      schema:
+        type: object
+        properties:
+          nextPageToken: { type: string }
+          resultSizeEstimate: { type: integer }
+          drafts:
+            type: array
+            items: { type: object }
+
+  - id: gmail-get-draft
+    name: google_workspace_gmail_get_draft
+    description: >-
+      Read a draft's full MIME structure, headers, and body data before replacing or sending it.
+      Body data is Gmail base64url; this operation does not materialize attachment IDs as Files.
+    effect: sensitive_read
+    identityMode: personal_required
+    credentialSlot: access_token
+    credentialInjection: *bearer
+    source:
+      type: http
+      method: GET
+      baseUrl: https://gmail.googleapis.com
+      path: /gmail/v1/users/me/drafts/{draft_id}
+      parameters:
+        - name: draft_id
+          in: path
+          required: true
+          schema: { type: string, minLength: 1, maxLength: 256 }
+        - name: format
+          in: query
+          value: full
+          schema: { type: string }
+    response:
+      maxBytes: 10485760
+      schema:
+        type: object
+        properties:
+          id: { type: string }
+          message: { type: object }
+
+  - id: gmail-send-draft
+    name: google_workspace_gmail_send_draft
+    description: Send an existing Gmail draft by its draft ID, after reviewing its contents.
+    effect: send
+    identityMode: personal_required
+    credentialSlot: access_token
+    credentialInjection: *bearer
+    source:
+      type: http
+      method: POST
+      baseUrl: https://gmail.googleapis.com
+      path: /gmail/v1/users/me/drafts/send
+    requestSchema:
+      type: object
+      required: [id]
+      additionalProperties: false
+      properties:
+        id: { type: string, minLength: 1, maxLength: 256 }
+    response: *messageResponse

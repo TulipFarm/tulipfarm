@@ -1,5 +1,219 @@
 version: 1
 cases:
+  - name: drive-discovers-shared-drives
+    operationId: drive-list-drives
+    request: { pageSize: 10 }
+    response:
+      status: 200
+      body:
+        drives: [{ id: shared-1, name: Operations }]
+    expect:
+      request:
+        method: GET
+        url: https://www.googleapis.com/drive/v3/drives?pageSize=10&fields=nextPageToken%2Cdrives%28id%2Cname%29
+      result:
+        drives: [{ id: shared-1, name: Operations }]
+
+  - name: drive-searches-one-shared-drive
+    operationId: drive-list-shared-drive-files
+    request: { driveId: shared-1, q: "trashed = false" }
+    response:
+      status: 200
+      body:
+        incompleteSearch: false
+        files:
+          - id: shared-file
+            name: Team plan
+            driveId: shared-1
+            mimeType: application/vnd.google-apps.document
+    expect:
+      request: { method: GET }
+      result:
+        incompleteSearch: false
+        files:
+          - id: shared-file
+            name: Team plan
+            driveId: shared-1
+
+  - name: drive-refuses-incomplete-search
+    operationId: drive-list-shared-drive-files
+    request: { driveId: shared-1 }
+    response:
+      status: 200
+      body: { incompleteSearch: true, files: [] }
+    expect:
+      request: { method: GET }
+      expectedError: { phase: after_dispatch, code: invalid_output, retryable: false }
+
+  - name: drive-uploads-authorized-file
+    operationId: drive-upload-file
+    request:
+      body:
+        metadata: { name: notes.txt, parents: [shared-folder] }
+        fileId: uploaded-notes
+    response:
+      status: 200
+      body: { id: shared-upload, name: notes.txt, driveId: shared-1, size: "22" }
+    expect:
+      request: { method: POST }
+      result: { id: shared-upload, name: notes.txt, driveId: shared-1 }
+
+  - name: drive-exports-native-document
+    operationId: drive-export-file
+    request: { file_id: native-doc, mimeType: text/plain }
+    response:
+      status: 200
+      headers: { content-type: "text/plain; charset=UTF-8", content-length: "5" }
+      body: "Plan\n"
+    expect:
+      request:
+        method: GET
+        url: https://www.googleapis.com/drive/v3/files/native-doc/export?mimeType=text%2Fplain
+      result:
+        fileId: fixture-drive-exports-native-document-file
+        summary: { mediaType: text/plain, sizeBytes: 5, truncated: false }
+
+  - name: calendar-discovers-calendar-list
+    operationId: calendar-list-calendars
+    request: {}
+    response:
+      status: 200
+      body:
+        kind: calendar#calendarList
+        items:
+          - id: muskan@example.com
+            summary: Muskan Vijayvargiya
+            timeZone: Asia/Kolkata
+            accessRole: owner
+            primary: true
+    expect:
+      request:
+        method: GET
+        url: https://www.googleapis.com/calendar/v3/users/me/calendarList
+      result:
+        items: [{ id: muskan@example.com, accessRole: owner }]
+
+  - name: calendar-reads-event-details
+    operationId: calendar-get-event
+    request: { calendar_id: muskan@example.com, event_id: event123 }
+    response:
+      status: 200
+      body:
+        kind: calendar#event
+        id: event123
+        summary: Review customer plan
+        description: Discuss the quarterly plan.
+        status: confirmed
+        start: { dateTime: "2026-09-18T10:00:00+05:30", timeZone: Asia/Kolkata }
+        end: { dateTime: "2026-09-18T10:30:00+05:30", timeZone: Asia/Kolkata }
+    expect:
+      request:
+        method: GET
+        url: https://www.googleapis.com/calendar/v3/calendars/muskan%40example.com/events/event123
+      result: { id: event123, summary: Review customer plan, description: Discuss the quarterly plan. }
+
+  - name: gmail-composes-and-sends
+    operationId: gmail-compose-send-message
+    request:
+      body: { to: muskan@example.com, subject: Plan, text: Review the plan. }
+    response:
+      status: 200
+      body: { id: sent123, threadId: thread123, labelIds: [SENT] }
+    expect:
+      request:
+        method: POST
+        url: https://gmail.googleapis.com/gmail/v1/users/me/messages/send
+        headers: { content-type: application/json }
+      result: { id: sent123, labelIds: [SENT] }
+
+  - name: gmail-creates-composed-draft
+    operationId: gmail-create-draft
+    request:
+      body:
+        to: muskan@example.com
+        subject: Draft plan
+        text: Review the plan.
+        html: <p>Review the plan.</p>
+        attachments: [uploaded-notes]
+    response:
+      status: 200
+      body: { id: draft123, message: { id: msg123, threadId: thread123, labelIds: [DRAFT] } }
+    expect:
+      request:
+        method: POST
+        url: https://gmail.googleapis.com/gmail/v1/users/me/drafts
+      result: { id: draft123, message: { id: msg123 } }
+
+  - name: gmail-replaces-composed-draft
+    operationId: gmail-update-draft
+    request:
+      draft_id: draft123
+      body: { to: muskan@example.com, subject: Revised plan, html: <p>Revised plan.</p> }
+    response:
+      status: 200
+      body: { id: draft123, message: { id: msg456, threadId: thread123, labelIds: [DRAFT] } }
+    expect:
+      request:
+        method: PUT
+        url: https://gmail.googleapis.com/gmail/v1/users/me/drafts/draft123
+      result: { id: draft123, message: { id: msg456 } }
+
+  - name: gmail-lists-drafts
+    operationId: gmail-list-drafts
+    request: {}
+    response:
+      status: 200
+      body:
+        drafts: [{ id: draft123, message: { id: msg123, threadId: thread123 } }]
+        resultSizeEstimate: 1
+    expect:
+      request:
+        method: GET
+        url: https://gmail.googleapis.com/gmail/v1/users/me/drafts
+      result: { drafts: [{ id: draft123 }], resultSizeEstimate: 1 }
+
+  - name: gmail-reads-draft
+    operationId: gmail-get-draft
+    request: { draft_id: draft123 }
+    response:
+      status: 200
+      body:
+        id: draft123
+        message:
+          id: msg123
+          threadId: thread123
+          labelIds: [DRAFT]
+          payload:
+            mimeType: text/plain
+            headers: [{ name: Subject, value: Draft plan }]
+            body: { size: 6, data: UGxhbg0K }
+    expect:
+      request:
+        method: GET
+        url: https://gmail.googleapis.com/gmail/v1/users/me/drafts/draft123?format=full
+      result: { id: draft123, message: { id: msg123 } }
+
+  - name: gmail-sends-reviewed-draft
+    operationId: gmail-send-draft
+    request: { body: { id: draft123 } }
+    response:
+      status: 200
+      body: { id: msg123, threadId: thread123, labelIds: [SENT] }
+    expect:
+      request:
+        method: POST
+        url: https://gmail.googleapis.com/gmail/v1/users/me/drafts/send
+        body: { id: draft123 }
+      result: { id: msg123, labelIds: [SENT] }
+
+  - name: gmail-empty-search-omits-message-array
+    operationId: gmail-list-messages
+    request: { q: subject:missing }
+    response: { status: 200, body: { resultSizeEstimate: 0 } }
+    expect:
+      request: { method: GET }
+      result: { resultSizeEstimate: 0 }
+
   - name: identifies-connected-user
     operationId: current-user
     request: {}
@@ -378,7 +592,7 @@ cases:
     expect:
       request:
         method: GET
-        url: https://www.googleapis.com/drive/v3/files/file-blob-123?alt=media
+        url: https://www.googleapis.com/drive/v3/files/file-blob-123?supportsAllDrives=true&alt=media
         headers:
           Authorization: Bearer oim-fixture-credential
       result:
