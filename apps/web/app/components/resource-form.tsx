@@ -183,6 +183,7 @@ export function ResourceForm({
     draftSignature(fields, startingDraft.current.values, startingDraft.current.jsonText)
   );
   const [clientErrors, setClientErrors] = useState<Record<string, string>>({});
+  const nativeDateInputs = useRef<Record<string, HTMLInputElement | null>>({});
   const currentDraft = draftSignature(fields, values, jsonText);
   const currentDraftRef = useRef(currentDraft);
   currentDraftRef.current = currentDraft;
@@ -221,6 +222,14 @@ export function ResourceForm({
 
       if (readonlyImmutable) {
         if (initial?.[field.name] !== undefined) payload[field.name] = initial[field.name];
+        continue;
+      }
+
+      if (field.kind === "date" && nativeDateInputs.current[field.name]?.validity.valid === false) {
+        nextClientErrors[field.name] =
+          field.format === "date-time"
+            ? "enter a valid calendar date and time"
+            : "enter a valid calendar date";
         continue;
       }
 
@@ -286,6 +295,10 @@ export function ResourceForm({
               jsonValue={jsonText[field.name]}
               multiline={isStoredMultilineString(field, initial?.[field.name])}
               readOnly={readOnly}
+              errorId={error ? `${field.name}-error` : undefined}
+              nativeInputRef={(node) => {
+                nativeDateInputs.current[field.name] = node;
+              }}
               onValue={(v) => set(field.name, v)}
               onJson={(v) => setJsonText((prev) => ({ ...prev, [field.name]: v }))}
             />
@@ -294,7 +307,11 @@ export function ResourceForm({
                 Structured enum choices are not supported by this form.
               </p>
             ) : null}
-            {error ? <p className="text-xs text-destructive">{error}</p> : null}
+            {error ? (
+              <p id={`${field.name}-error`} className="text-xs text-destructive">
+                {error}
+              </p>
+            ) : null}
           </div>
         );
       })}
@@ -317,6 +334,8 @@ function Field({
   jsonValue,
   multiline,
   readOnly,
+  errorId,
+  nativeInputRef,
   onValue,
   onJson,
 }: {
@@ -325,6 +344,8 @@ function Field({
   jsonValue?: string;
   multiline: boolean;
   readOnly: boolean;
+  errorId?: string;
+  nativeInputRef: (node: HTMLInputElement | null) => void;
   onValue: (v: unknown) => void;
   onJson: (v: string) => void;
 }) {
@@ -408,11 +429,16 @@ function Field({
     case "date":
       return (
         <input
+          ref={nativeInputRef}
           id={field.name}
           type={field.format === "date-time" ? "datetime-local" : "date"}
           className={inputClass}
           required={field.required}
-          value={field.format === "date-time" ? toLocalInputValue(value) : String(value ?? "")}
+          defaultValue={
+            field.format === "date-time" ? toLocalInputValue(value) : String(value ?? "")
+          }
+          aria-invalid={errorId ? true : undefined}
+          aria-describedby={errorId}
           onChange={(e) =>
             onValue(field.format === "date-time" ? toRfc3339(e.target.value) : e.target.value)
           }

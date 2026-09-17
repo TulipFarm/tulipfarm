@@ -52,6 +52,18 @@ required: [title]
 if (!numericParsed.ok) throw new Error(numericParsed.error);
 const numericFields = formFields(numericParsed.schema);
 
+const calendarParsed = parseSchema(`
+type: object
+x-id-strategy: { sequence: true, field: id }
+properties:
+  id: { type: string }
+  title: { type: string }
+  dueDate: { type: string, format: date }
+required: [title]
+`);
+if (!calendarParsed.ok) throw new Error(calendarParsed.error);
+const calendarFields = formFields(calendarParsed.schema);
+
 function renderRoute(node: ReactElement, data: unknown) {
   vi.mocked(remix.useLoaderData).mockReturnValue(data);
   const Stub = createRemixStub([
@@ -131,6 +143,49 @@ test("create: a lossy integer stays exact in the input and is not written", asyn
   expect(await screen.findByText("destination: /resources/measure/MEASURE-1")).toBeInTheDocument();
 });
 
+test("create: an invalid native calendar draft makes no request before correction", async () => {
+  vi.mocked(createRecord).mockResolvedValue({
+    id: "TASK-1",
+    version: 1,
+    createdAt: "",
+    updatedAt: "",
+  });
+  renderRoute(<ResourceCreate />, {
+    type: "task",
+    fields: calendarFields,
+    schemaError: undefined,
+  });
+
+  const title = document.querySelector("input#title") as HTMLInputElement;
+  const dueDate = document.querySelector("input#dueDate") as HTMLInputElement;
+  let invalidDraft = true;
+  Object.defineProperty(dueDate, "validity", {
+    configurable: true,
+    get: () => ({ badInput: invalidDraft, valid: !invalidDraft }),
+  });
+  dueDate.dataset.nativeDraft = "31/04/2027";
+  fireEvent.change(title, { target: { value: "Calendar draft" } });
+  fireEvent.change(dueDate, { target: { value: "" } });
+
+  fireEvent.click(screen.getByRole("button", { name: "Create" }));
+
+  expect(createRecord).not.toHaveBeenCalled();
+  expect(await screen.findByText("enter a valid calendar date")).toBeVisible();
+  expect(dueDate.dataset.nativeDraft).toBe("31/04/2027");
+  expect(title.value).toBe("Calendar draft");
+
+  invalidDraft = false;
+  fireEvent.change(dueDate, { target: { value: "2028-02-29" } });
+  fireEvent.click(screen.getByRole("button", { name: "Create" }));
+
+  await waitFor(() =>
+    expect(createRecord).toHaveBeenCalledWith("task", {
+      title: "Calendar draft",
+      dueDate: "2028-02-29",
+    })
+  );
+});
+
 test("edit: rejecting a lossy integer preserves the Record version and corrected save", async () => {
   vi.mocked(updateRecord).mockResolvedValue({
     id: "MEASURE-1",
@@ -175,6 +230,57 @@ test("edit: rejecting a lossy integer preserves the Record version and corrected
     })
   );
   expect(await screen.findByText("destination: /resources/measure/MEASURE-1")).toBeInTheDocument();
+});
+
+test("edit: an invalid native calendar draft makes no request and keeps the Record version", async () => {
+  vi.mocked(updateRecord).mockResolvedValue({
+    id: "TASK-1",
+    title: "Calendar draft",
+    dueDate: "2028-02-29",
+    version: 4,
+    createdAt: "",
+    updatedAt: "",
+  });
+  renderRoute(<ResourceEdit />, {
+    type: "task",
+    id: "TASK-1",
+    record: {
+      id: "TASK-1",
+      title: "Calendar draft",
+      dueDate: "2027-02-28",
+      version: 3,
+      createdAt: "",
+      updatedAt: "",
+    },
+    fields: calendarFields,
+    schemaError: undefined,
+  });
+
+  const dueDate = document.querySelector("input#dueDate") as HTMLInputElement;
+  let invalidDraft = true;
+  Object.defineProperty(dueDate, "validity", {
+    configurable: true,
+    get: () => ({ badInput: invalidDraft, valid: !invalidDraft }),
+  });
+  dueDate.dataset.nativeDraft = "29/02/2027";
+  fireEvent.change(dueDate, { target: { value: "" } });
+
+  fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+  expect(updateRecord).not.toHaveBeenCalled();
+  expect(await screen.findByText("enter a valid calendar date")).toBeVisible();
+  expect(dueDate.dataset.nativeDraft).toBe("29/02/2027");
+
+  invalidDraft = false;
+  fireEvent.change(dueDate, { target: { value: "2028-02-29" } });
+  fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+  await waitFor(() =>
+    expect(updateRecord).toHaveBeenCalledWith("task", "TASK-1", 3, {
+      title: "Calendar draft",
+      dueDate: "2028-02-29",
+    })
+  );
 });
 
 test("create: a 422 maps the error path onto the offending field", async () => {
