@@ -710,7 +710,7 @@ describe("TurnDriver", () => {
     });
   });
 
-  it("confirms a successful mutation when its response details are blocked", async () => {
+  it("confirms a successful mutating Tool when its response details are blocked", async () => {
     let writer: TurnEventWriter | undefined;
     const { driver, events, store } = harness(
       async () => {
@@ -746,7 +746,7 @@ describe("TurnDriver", () => {
     expect(store.messages).toMatchObject([
       {
         content:
-          "A write operation completed successfully. The content_filter:email guardrail hid " +
+          "The record_create Tool completed successfully. The content_filter:email guardrail hid " +
           "the response details. Check the relevant page, or ask again without email addresses.",
       },
     ]);
@@ -801,6 +801,109 @@ describe("TurnDriver", () => {
           "Check the relevant page, or ask again without email addresses.",
       },
     ]);
+  });
+
+  it("does not turn a successful preview into a saved-write claim", async () => {
+    let writer: TurnEventWriter | undefined;
+    const { driver, store } = harness(
+      async () => {
+        if (writer === undefined) throw new Error("writer was not built before the loop ran");
+        await writer.emit(
+          "tool.call",
+          { callId: "call-1", name: "report_preview", argsDigest: "sha256:args" },
+          "tool:call:call-1"
+        );
+        await writer.emit("tool.result", { callId: "call-1", status: "ok" }, "tool:result:call-1");
+        return {
+          status: "completed",
+          output: "Previewed the report for leak@example.com.",
+          ...counters,
+        };
+      },
+      {
+        context: {
+          tools: [
+            {
+              name: "report_preview",
+              inputSchema: { type: "object" },
+              mutating: true,
+              tier: "write",
+            },
+          ],
+        },
+        onWriter: (built) => (writer = built),
+      }
+    );
+
+    await expect(driver.run(request())).resolves.toEqual({ status: "succeeded" });
+    expect(store.messages[0]?.content).toBe(
+      "The report_preview Tool completed successfully. The content_filter:email guardrail hid " +
+        "the response details. Check the relevant page, or ask again without email addresses."
+    );
+    expect(store.messages[0]?.content).not.toMatch(/\bsaved\b|\bwrite operation\b/i);
+  });
+
+  it("names only successful mutating Tools when outcomes are mixed", async () => {
+    let writer: TurnEventWriter | undefined;
+    const { driver, store } = harness(
+      async () => {
+        if (writer === undefined) throw new Error("writer was not built before the loop ran");
+        for (const [callId, name] of [
+          ["call-1", "record_create"],
+          ["call-2", "record_update"],
+          ["call-3", "record_read"],
+        ] as const) {
+          await writer.emit(
+            "tool.call",
+            { callId, name, argsDigest: `sha256:${callId}` },
+            `tool:call:${callId}`
+          );
+        }
+        await writer.emit("tool.result", { callId: "call-1", status: "ok" }, "tool:result:call-1");
+        await writer.emit(
+          "tool.result",
+          { callId: "call-2", status: "error", errorCode: "conflict" },
+          "tool:result:call-2"
+        );
+        await writer.emit("tool.result", { callId: "call-3", status: "ok" }, "tool:result:call-3");
+        return {
+          status: "completed",
+          output: "Finished processing leak@example.com.",
+          ...counters,
+        };
+      },
+      {
+        context: {
+          tools: [
+            {
+              name: "record_create",
+              inputSchema: { type: "object" },
+              mutating: true,
+              tier: "write",
+            },
+            {
+              name: "record_update",
+              inputSchema: { type: "object" },
+              mutating: true,
+              tier: "write",
+            },
+            {
+              name: "record_read",
+              inputSchema: { type: "object" },
+              mutating: false,
+              tier: "read",
+            },
+          ],
+        },
+        onWriter: (built) => (writer = built),
+      }
+    );
+
+    await expect(driver.run(request())).resolves.toEqual({ status: "succeeded" });
+    expect(store.messages[0]?.content).toContain("The record_create Tool completed successfully.");
+    expect(store.messages[0]?.content).not.toContain("record_update");
+    expect(store.messages[0]?.content).not.toContain("record_read");
+    expect(store.messages[0]?.content).not.toContain("leak@example.com");
   });
 
   it("refuses to run a turn whose evidence names a policy it is not enforcing", async () => {

@@ -493,14 +493,15 @@ export class TurnDriver {
     const mutating = new Set(
       tools.filter((tool) => tool.mutating === true).map((tool) => tool.name)
     );
-    const completedChange = events.toolCalls.some(
-      (call) => call.outcome === "ok" && mutating.has(call.name)
-    );
+    const completedTools = events.toolCalls
+      .filter((call) => call.outcome === "ok" && mutating.has(call.name))
+      .map((call) => call.name);
     return {
       ...screened,
-      text: completedChange
-        ? `A write operation completed successfully. ${block.message}`
-        : block.message,
+      text:
+        completedTools.length > 0
+          ? `${completedTools.map((name) => `The ${name} Tool completed successfully.`).join(" ")} ${block.message}`
+          : block.message,
     };
   }
 
