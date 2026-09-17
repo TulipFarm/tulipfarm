@@ -92,7 +92,10 @@ class RecordingFixtureHttp implements EgressHttpPort {
         }),
       };
     }
-    return this.response;
+    // YAML null denotes the absence of an HTTP 204 body, not a JSON null payload.
+    return this.response.status === 204 && this.response.body === null
+      ? { ...this.response, body: undefined }
+      : this.response;
   }
 }
 

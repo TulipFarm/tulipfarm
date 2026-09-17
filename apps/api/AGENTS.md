@@ -22,7 +22,7 @@ PostgreSQL persistence composition, auth, Soul Git writes, and Worker callback p
 | `src/chat/`, `src/conversations/` | Chat routes, Turn persistence, durable stream handoff. |
 | `src/runs/` | Persisted Run event SSE, cursor resume, cancellation. `authorization.ts` separates participant ownership from operator event reads; Chat cancellation never inherits a read grant. |
 | `src/runtime/` | Durable invocation callers, Routine invocation resolution, Soul write gateway composition. |
-| `src/internal/` | Service-only Worker callbacks for Context, Tools, delivery, completion, and due OIM Connection refresh. `subagent-context.ts` assembles the Conversation-less sub-agent Context; `turn-host.ts` splits `RunAuthority` (no Turn) from `TurnAuthority` (has one). `route-family.ts` registers the whole service-principal plane — put new internal families there, not in `app.ts`. |
+| `src/internal/` | Service-only Worker callbacks for Context, Tools, delivery, completion, and due OIM Connection refresh. `slack-event-routes.ts` also hosts provider-neutral canonical event dispatch with exact-Connection reauthorization. `route-family.ts` registers internal families; `turn-host.ts` separates Run and Turn authority. |
 | `src/tools/` | ToolRegistry, batch execution, truncation, declarative egress sync. |
 | `src/platform/` | Platform Tools that need the API's own services. `delegate-tool.ts` hands work to a Soul Agent (which gets a Conversation); `spawn-tool.ts` + `subagent-{run,answers}.ts` spawn an ad-hoc helper the caller defines inline, which gets none. Both park the calling Turn on a child-Run wait. |
 | `src/packs/` | Bounded, guarded Pack/catalog reads and preview-only routes; `pack_read` is API-hosted through network composition. No installer or Soul writer. |
@@ -108,6 +108,9 @@ PostgreSQL persistence composition, auth, Soul Git writes, and Worker callback p
   Guardrail that guards nothing until the next restart.
 - A Run-minting request must go through `DurableInvocationGateway.start()` with a real request
   Artifact. Never pass a `payloadRef` that names nothing.
+- Legacy webhook delivery keys deduplicate in the Run transaction, never before submission.
+- Reply success means a confirmed Effect. Preserve broker retry waits and ambiguous outcomes;
+  resumed delivery reads the completed Turn instead of executing its model or Tools again.
 - This process schedules the Curator but never runs it. `memory/curation-schedule.ts` owns the
   `memory-curation` queue name and its `0 * * * *` cron; the model call and the Memory write are the
   Worker's, because only the Worker may import `@tulipfarm/llm`.

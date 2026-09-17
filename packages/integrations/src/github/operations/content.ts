@@ -11,7 +11,7 @@ export async function readContent(
   const response = await api.call(
     {
       method: "GET",
-      path: `/repos/${repository}/contents/${path}`,
+      path: `/repos/${repository}/contents/${path.split("/").map(encodeURIComponent).join("/")}`,
       query: ref ? { ref } : undefined,
     },
     credential,
@@ -39,7 +39,7 @@ export async function listContent(
   const response = await api.call(
     {
       method: "GET",
-      path: `/repos/${repository}/contents/${path}`,
+      path: `/repos/${repository}/contents/${path.split("/").map(encodeURIComponent).join("/")}`,
       query: ref ? { ref } : undefined,
     },
     credential,

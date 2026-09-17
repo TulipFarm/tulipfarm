@@ -43,8 +43,9 @@ cases:
       body:
         fields:
           project: { key: ENG }
-          issuetype: { name: Task }
+          issuetype: { id: "10001" }
           summary: Review the launch checklist
+          customfield_10042: { id: "101" }
     response:
       status: 201
       body:
@@ -58,8 +59,9 @@ cases:
         body:
           fields:
             project: { key: ENG }
-            issuetype: { name: Task }
+            issuetype: { id: "10001" }
             summary: Review the launch checklist
+            customfield_10042: { id: "101" }
       result:
         id: "10042"
         key: ENG-42
@@ -170,13 +172,20 @@ cases:
         transitions:
           - id: "31"
             name: In Progress
+            fields:
+              resolution:
+                name: Resolution
+                required: true
+                schema: { type: resolution, system: resolution }
+                operations: [set]
+                allowedValues: [{ id: "1", name: Done }]
             to:
               id: "3"
               name: In Progress
     expect:
       request:
         method: GET
-        url: https://example.atlassian.net/rest/api/3/issue/ENG-41/transitions
+        url: https://example.atlassian.net/rest/api/3/issue/ENG-41/transitions?expand=transitions.fields
       result:
         transitions:
           - id: "31"
@@ -193,7 +202,7 @@ cases:
           priority: { id: "2" }
     response:
       status: 204
-      body: {}
+      body: null
     expect:
       request:
         method: PUT
@@ -201,7 +210,279 @@ cases:
         body:
           fields:
             priority: { id: "2" }
-      result: {}
+      result: null
+
+  - name: discovers-projects
+    operationId: list-projects
+    configuration: { jira_site: example.atlassian.net }
+    request: { action: create, startAt: 0, maxResults: 50 }
+    response:
+      status: 200
+      body:
+        startAt: 0
+        maxResults: 50
+        total: 1
+        isLast: true
+        values: [{ id: "10000", key: ENG, name: Engineering }]
+    expect:
+      request:
+        method: GET
+        url: https://example.atlassian.net/rest/api/3/project/search?action=create&startAt=0&maxResults=50
+      result:
+        startAt: 0
+        total: 1
+        values: [{ id: "10000", key: ENG, name: Engineering }]
+
+  - name: discovers-create-issue-types
+    operationId: list-create-issue-types
+    configuration: { jira_site: example.atlassian.net }
+    request: { projectIdOrKey: ENG, startAt: 0, maxResults: 50 }
+    response:
+      status: 200
+      body:
+        startAt: 0
+        maxResults: 50
+        total: 1
+        issueTypes: [{ id: "10001", name: Task, subtask: false }]
+    expect:
+      request:
+        method: GET
+        url: https://example.atlassian.net/rest/api/3/issue/createmeta/ENG/issuetypes?startAt=0&maxResults=50
+      result:
+        total: 1
+        issueTypes: [{ id: "10001", name: Task }]
+
+  - name: discovers-create-fields-first-page
+    operationId: list-create-fields
+    configuration: { jira_site: example.atlassian.net }
+    request: { projectIdOrKey: ENG, issueTypeId: "10001", startAt: 0, maxResults: 1 }
+    response:
+      status: 200
+      body:
+        startAt: 0
+        maxResults: 1
+        total: 2
+        fields:
+          - fieldId: summary
+            key: summary
+            name: Summary
+            required: true
+            schema: { type: string, system: summary }
+            operations: [set]
+            hasDefaultValue: false
+    expect:
+      request:
+        method: GET
+        url: https://example.atlassian.net/rest/api/3/issue/createmeta/ENG/issuetypes/10001?startAt=0&maxResults=1
+      result:
+        startAt: 0
+        total: 2
+        fields: [{ fieldId: summary, required: true }]
+
+  - name: discovers-required-custom-field-last-page
+    operationId: list-create-fields
+    configuration: { jira_site: example.atlassian.net }
+    request: { projectIdOrKey: ENG, issueTypeId: "10001", startAt: 1, maxResults: 1 }
+    response:
+      status: 200
+      body:
+        startAt: 1
+        maxResults: 1
+        total: 2
+        fields:
+          - fieldId: customfield_10042
+            key: customfield_10042
+            name: Cost center
+            required: true
+            schema: { type: option, custom: "com.atlassian.jira.plugin.system.customfieldtypes:select", customId: 10042 }
+            operations: [set]
+            allowedValues: [{ id: "101", value: Engineering }]
+            hasDefaultValue: false
+    expect:
+      request:
+        method: GET
+        url: https://example.atlassian.net/rest/api/3/issue/createmeta/ENG/issuetypes/10001?startAt=1&maxResults=1
+      result:
+        startAt: 1
+        total: 2
+        fields:
+          - fieldId: customfield_10042
+            required: true
+            allowedValues: [{ id: "101", value: Engineering }]
+
+  - name: discovers-editable-fields
+    operationId: get-edit-fields
+    configuration: { jira_site: example.atlassian.net }
+    request: { issueIdOrKey: ENG-41 }
+    response:
+      status: 200
+      body:
+        fields:
+          priority:
+            name: Priority
+            required: false
+            schema: { type: priority, system: priority }
+            operations: [set]
+            allowedValues: [{ id: "2", name: High }]
+    expect:
+      request:
+        method: GET
+        url: https://example.atlassian.net/rest/api/3/issue/ENG-41/editmeta
+      result:
+        fields:
+          priority:
+            operations: [set]
+            allowedValues: [{ id: "2", name: High }]
+
+  - name: lists-comments-first-page
+    operationId: list-issue-comments
+    configuration: { jira_site: example.atlassian.net }
+    request: { issueIdOrKey: ENG-41, startAt: 0, maxResults: 1 }
+    response:
+      status: 200
+      body:
+        startAt: 0
+        maxResults: 1
+        total: 2
+        comments:
+          - id: "10010"
+            body:
+              type: doc
+              version: 1
+              content: [{ type: paragraph, content: [{ type: text, text: Ready for review. }] }]
+            author: { accountId: account-redacted, displayName: Muskan Vijayvargiya }
+            created: "2026-09-17T10:00:00.000+0000"
+            visibility: { type: role, value: Developers, identifier: "10002" }
+    expect:
+      request:
+        method: GET
+        url: https://example.atlassian.net/rest/api/3/issue/ENG-41/comment?startAt=0&maxResults=1&orderBy=created
+      result:
+        startAt: 0
+        total: 2
+        comments:
+          - id: "10010"
+            visibility: { type: role, value: Developers }
+            body: { type: doc, version: 1 }
+
+  - name: lists-comments-last-page
+    operationId: list-issue-comments
+    configuration: { jira_site: example.atlassian.net }
+    request: { issueIdOrKey: ENG-41, startAt: 1, maxResults: 1 }
+    response:
+      status: 200
+      body:
+        startAt: 1
+        maxResults: 1
+        total: 2
+        comments:
+          - id: "10011"
+            body:
+              type: doc
+              version: 1
+              content: [{ type: paragraph, content: [{ type: text, text: Approved. }] }]
+            created: "2026-09-17T10:01:00.000+0000"
+    expect:
+      request:
+        method: GET
+        url: https://example.atlassian.net/rest/api/3/issue/ENG-41/comment?startAt=1&maxResults=1&orderBy=created
+      result:
+        startAt: 1
+        total: 2
+        comments: [{ id: "10011" }]
+
+  - name: lists-changelog-first-page
+    operationId: list-issue-changelog
+    configuration: { jira_site: example.atlassian.net }
+    request: { issueIdOrKey: ENG-41, startAt: 0, maxResults: 1 }
+    response:
+      status: 200
+      body:
+        startAt: 0
+        maxResults: 1
+        total: 2
+        isLast: false
+        nextPage: https://example.atlassian.net/rest/api/3/issue/ENG-41/changelog?startAt=1&maxResults=1
+        values:
+          - id: "10020"
+            author: { accountId: account-redacted }
+            created: "2026-09-17T10:00:00.000+0000"
+            items: [{ field: status, fieldId: status, fieldtype: jira, from: "1", fromString: Open, to: "3", toString: In Progress }]
+    expect:
+      request:
+        method: GET
+        url: https://example.atlassian.net/rest/api/3/issue/ENG-41/changelog?startAt=0&maxResults=1
+      result:
+        startAt: 0
+        total: 2
+        isLast: false
+        values: [{ id: "10020", items: [{ field: status, toString: In Progress }] }]
+
+  - name: lists-changelog-last-page
+    operationId: list-issue-changelog
+    configuration: { jira_site: example.atlassian.net }
+    request: { issueIdOrKey: ENG-41, startAt: 1, maxResults: 1 }
+    response:
+      status: 200
+      body:
+        startAt: 1
+        maxResults: 1
+        total: 2
+        isLast: true
+        values:
+          - id: "10021"
+            created: "2026-09-17T10:01:00.000+0000"
+            items: [{ field: status, fieldId: status, from: "3", fromString: In Progress, to: "10000", toString: Done }]
+    expect:
+      request:
+        method: GET
+        url: https://example.atlassian.net/rest/api/3/issue/ENG-41/changelog?startAt=1&maxResults=1
+      result:
+        startAt: 1
+        total: 2
+        isLast: true
+        values: [{ id: "10021", items: [{ field: status, toString: Done }] }]
+
+  - name: rejects-missing-required-field
+    operationId: create-issue
+    configuration: { jira_site: example.atlassian.net }
+    request:
+      body:
+        fields:
+          project: { key: ENG }
+          issuetype: { id: "10001" }
+          summary: Review checklist
+    response:
+      status: 400
+      body:
+        errorMessages: []
+        errors: { customfield_10042: Cost center is required. }
+    expect:
+      request:
+        method: POST
+        url: https://example.atlassian.net/rest/api/3/issue
+      expectedError:
+        phase: before_dispatch
+        code: provider_error
+        retryable: false
+
+  - name: rejects-malformed-mutation-success
+    operationId: update-issue
+    configuration: { jira_site: example.atlassian.net }
+    request:
+      issueIdOrKey: ENG-41
+      body: { fields: { priority: { id: "2" } } }
+    response:
+      status: 200
+      body: {}
+    expect:
+      request:
+        method: PUT
+        url: https://example.atlassian.net/rest/api/3/issue/ENG-41
+      expectedError:
+        phase: after_dispatch
+        code: invalid_output
+        retryable: false
 
   - name: transitions-issue
     operationId: transition-issue
@@ -212,9 +493,11 @@ cases:
       body:
         transition:
           id: "31"
+        fields:
+          resolution: { id: "1" }
     response:
       status: 204
-      body: {}
+      body: null
     expect:
       request:
         method: POST
@@ -222,4 +505,6 @@ cases:
         body:
           transition:
             id: "31"
-      result: {}
+          fields:
+            resolution: { id: "1" }
+      result: null

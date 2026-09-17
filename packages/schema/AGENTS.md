@@ -22,6 +22,7 @@ Run event/request vocabularies, canonical hashes, Secret references, and resourc
 | `src/pack.ts` | Closed, bounded Pack presets, catalog and read-only preview contracts; templates convey no authority. |
 | `src/run-events.ts` | Channel-neutral Run event types, audiences, payload schemas. |
 | `src/invocation.ts` | JSON Schemas for requests that mint Runs. |
+| `src/integration-reply.ts` | Provider reply verdicts shared by the API, Worker, and eval harness. |
 | `src/llm.ts`, `src/model-catalog.ts` | LLM config schema and ModelProfile derivation. |
 | `src/guardrails.ts` | Guardrail policy schema with strict per-stage guard unions. |
 | `src/integration-manifest.ts` | Integration manifest and egress authoring schemas. |

@@ -1,0 +1,17 @@
+{
+  "id": "l3-an-ambiguous-reply-needs-reconciliation",
+  "tier": "l3",
+  "agent": "support",
+  "integrationReply": {
+    "delivered": false,
+    "outcome": "ambiguous",
+    "code": "indeterminate"
+  },
+  "input": [{ "role": "user", "content": "Reply with: Your request is recorded." }],
+  "script": [{ "kind": "text", "text": "Your request is recorded." }],
+  "expect": [
+    { "kind": "run_status", "status": "needs_reconciliation" },
+    { "kind": "state_status", "status": "succeeded" },
+    { "kind": "run_event_emitted", "eventType": "turn.finished" }
+  ]
+}

@@ -1,6 +1,7 @@
 import type { ClaimedOutboxMessage, EventOutboxPort, OutboxFailure } from "@tulipfarm/storage";
 import { describe, expect, it } from "vitest";
-import { EventOutboxDispatcher } from "./event-dispatcher";
+import { acceptedEventHandler, EventOutboxDispatcher } from "./event-dispatcher";
+import { InternalApiClient } from "./internal/client";
 
 class FakeOutbox implements EventOutboxPort {
   readonly failures: OutboxFailure[] = [];
@@ -39,6 +40,41 @@ const MESSAGE: ClaimedOutboxMessage = {
 };
 
 describe("EventOutboxDispatcher", () => {
+  it("uses the production provider-neutral callback and retries its HTTP failure", async () => {
+    const outbox = new FakeOutbox();
+    outbox.messages.push(MESSAGE);
+    let status = 503;
+    const urls: string[] = [];
+    const client = new InternalApiClient({
+      baseUrl: "https://api.example",
+      credential: "worker-test-credential",
+      fetch: async (input) => {
+        urls.push(String(input));
+        return new Response(JSON.stringify({ outcome: "dispatched" }), {
+          status,
+          headers: { "content-type": "application/json" },
+        });
+      },
+    });
+    const dispatcher = new EventOutboxDispatcher({
+      outbox,
+      businessId: "business-1",
+      owner: "worker-1",
+      consumer: "trigger-router",
+      now: () => "2026-07-24T10:00:00.000Z",
+      handler: acceptedEventHandler(client),
+    });
+    expect((await dispatcher.dispatchBatch()).failed).toBe(1);
+    expect(outbox.completed).toEqual([]);
+    status = 200;
+    outbox.messages.push(MESSAGE);
+    expect((await dispatcher.dispatchBatch()).dispatched).toBe(1);
+    expect(urls).toEqual([
+      "https://api.example/api/v1/internal/events/inbox-1/dispatch",
+      "https://api.example/api/v1/internal/events/inbox-1/dispatch",
+    ]);
+  });
+
   it("records a receipt only after successful delivery", async () => {
     const outbox = new FakeOutbox();
     outbox.messages.push(MESSAGE);

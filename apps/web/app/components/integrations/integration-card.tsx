@@ -31,11 +31,13 @@ export function IntegrationCard({
   onUpdate,
   updating,
   isAdmin,
+  onInstall,
 }: {
   integration: IntegrationSummary;
   onUpdate: (name: string, source?: string) => void;
   updating?: boolean;
   isAdmin?: boolean;
+  onInstall?: (source: string) => void;
 }) {
   const name = displayName(integration);
   const soon = integration.availability === "coming_soon";
@@ -64,9 +66,22 @@ export function IntegrationCard({
         ) : !integration.installed ? (
           <StatusBadge label="Not installed" tone="neutral" />
         ) : (
-          <StatusBadge {...CONNECTION[integration.status]} />
+          <StatusBadge {...(integration.connectionState ?? CONNECTION[integration.status])} />
         )}
         {integration.updateAvailable && isAdmin ? <Badge>Update available</Badge> : null}
+        {!soon && !integration.installed && integration.source && isAdmin && onInstall ? (
+          <Button
+            size="sm"
+            variant="outline"
+            aria-label={`Review installation for ${name}`}
+            onClick={() => onInstall(integration.source ?? "")}
+          >
+            Review installation
+          </Button>
+        ) : null}
+        {!soon && !integration.installed && !integration.source ? (
+          <span className="text-xs text-muted-foreground">No package source available</span>
+        ) : null}
         {!soon && integration.installed ? (
           <>
             <Button asChild size="sm" variant="outline">

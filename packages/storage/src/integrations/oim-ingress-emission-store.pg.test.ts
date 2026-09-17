@@ -219,6 +219,50 @@ describe("OimIngressEmissionStore", () => {
     expect(persisted.rows[0]).toEqual({ event_count: 1, outbox_count: 1 });
   });
 
+  it("reauthorizes the exact accepted Connection identity before dispatch", async () => {
+    const delivery = await normalized(randomUUID());
+    const store = new OimIngressEmissionStore(transactions, randomUUID);
+    const canonical = {
+      ...event(delivery.id),
+      record: { type: "connection", id: CONNECTION_ID, version: "2" },
+      principal: { kind: "integration_account", externalId: "account-1" },
+      verification: { status: "verified" as const, method: "oim_ingress" },
+    };
+    await expect(store.authorizeEvent(canonical)).resolves.toBe(false);
+    await store.emitIfAuthorized({ ...emissionInput(delivery), event: canonical });
+    await expect(store.authorizeEvent(canonical)).resolves.toBe(true);
+    await expect(
+      store.authorizeEvent({
+        ...canonical,
+        principal: { kind: "user", internalId: "spoofed-user", externalId: "account-1" },
+      })
+    ).resolves.toBe(false);
+    await expect(
+      store.authorizeEvent({
+        ...canonical,
+        source: { ...canonical.source, externalTenantId: "another-tenant" },
+      })
+    ).resolves.toBe(false);
+    await expect(
+      store.authorizeEvent({
+        ...canonical,
+        record: { ...canonical.record, version: "3" },
+      })
+    ).resolves.toBe(false);
+    await database.query(
+      "UPDATE connections SET health_status = 'action_required' WHERE business_id = $1 AND id = $2",
+      [BUSINESS_ID, CONNECTION_ID]
+    );
+    await expect(store.authorizeEvent(canonical)).rejects.toThrow(
+      "ingress_connection_temporarily_unavailable"
+    );
+    await database.query(
+      "DELETE FROM connection_external_identities WHERE business_id = $1 AND connection_id = $2",
+      [BUSINESS_ID, CONNECTION_ID]
+    );
+    await expect(store.authorizeEvent(canonical)).resolves.toBe(false);
+  });
+
   it("does not insert an event after teardown has committed", async () => {
     const delivery = await normalized(randomUUID());
     await teardowns.disable(

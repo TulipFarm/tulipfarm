@@ -1,8 +1,8 @@
+import { findGitHubEntry } from "./pagination";
 import {
   type Arguments,
   type GitHubApi,
   githubEffectMarker,
-  list,
   logins,
   names,
   numberArg,
@@ -96,14 +96,13 @@ export async function findMarkedComment(
   marker: string,
   credential: string
 ): Promise<Record<string, unknown> | undefined> {
-  const response = await api.call(
-    { method: "GET", path: `/repos/${repository}/issues/${issueNumber}/comments` },
+  return findGitHubEntry(
+    api,
+    `/repos/${repository}/issues/${issueNumber}/comments`,
+    {},
     credential,
-    false
+    (comment) => String(comment.body ?? "").includes(marker)
   );
-  return list(response.body)
-    .map((entry) => record(entry))
-    .find((comment) => String(comment.body ?? "").includes(marker));
 }
 
 /** GitHub's `/issues` list endpoint also returns pull requests, but the marker is unique. */
@@ -113,18 +112,13 @@ export async function findMarkedIssue(
   marker: string,
   credential: string
 ): Promise<Record<string, unknown> | undefined> {
-  const response = await api.call(
-    {
-      method: "GET",
-      path: `/repos/${repository}/issues`,
-      query: { state: "all", per_page: "100" },
-    },
+  return findGitHubEntry(
+    api,
+    `/repos/${repository}/issues`,
+    { state: "all", sort: "created", direction: "asc" },
     credential,
-    false
+    (issue) => issue.pull_request === undefined && String(issue.body ?? "").includes(marker)
   );
-  return list(response.body)
-    .map((entry) => record(entry))
-    .find((issue) => String(issue.body ?? "").includes(marker));
 }
 
 export async function comment(

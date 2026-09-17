@@ -1,11 +1,13 @@
 import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, expect, test, vi } from "vitest";
+import { ApiError } from "~/lib/api";
 import {
   createOimConnection,
   getOimConnectionSetup,
   refreshOimConnection,
   startOimConnectionAuthorization,
+  updateOimConnectionCredentials,
 } from "~/lib/integrations";
 import { followAuthAction } from "./auth-flow";
 import { OimConnectionSetup } from "./oim-connection-setup";
@@ -21,6 +23,7 @@ vi.mock("~/lib/integrations", async (importOriginal) => ({
   getOimConnectionSetup: vi.fn(),
   refreshOimConnection: vi.fn(),
   startOimConnectionAuthorization: vi.fn(),
+  updateOimConnectionCredentials: vi.fn(),
 }));
 
 const setup = {
@@ -69,6 +72,60 @@ const setup = {
     { id: "account", title: "Authorize account", type: "oauth2" as const },
   ],
 };
+
+test("focuses a rejected replacement field and retries on the same Connection", async () => {
+  const user = userEvent.setup();
+  vi.mocked(updateOimConnectionCredentials)
+    .mockRejectedValueOnce(new ApiError(422, "Client secret is invalid.", "/values/client_secret"))
+    .mockResolvedValueOnce({ connectionId: "connection-1", verification: { status: "verified" } });
+  render(
+    <OimConnectionSetup
+      integrationKey="acme-v2"
+      connectionId="connection-1"
+      setup={{ ...setup, connectionHealth: "action_required", pendingAuthorizationStepIds: [] }}
+      onChanged={vi.fn()}
+    />
+  );
+  await user.type(screen.getByLabelText("Client secret"), "replacement");
+  await user.click(screen.getByRole("button", { name: "Save credentials and verify" }));
+  expect(await screen.findByRole("alert")).toHaveTextContent("Client secret is invalid.");
+  expect(screen.getByLabelText("Client secret")).toHaveAttribute("aria-invalid", "true");
+  expect(screen.getByLabelText("Client secret")).toHaveFocus();
+  await user.click(screen.getByRole("button", { name: "Save credentials and verify" }));
+  expect(updateOimConnectionCredentials).toHaveBeenLastCalledWith("acme-v2", "connection-1", {
+    client_secret: "replacement",
+  });
+  expect(screen.getByRole("status")).toHaveTextContent("Connection verified.");
+  expect(screen.getByLabelText("Client secret")).toHaveValue("");
+});
+
+test("does not announce or retain a stale credential repair after switching Connections", async () => {
+  const user = userEvent.setup();
+  const pending = deferred<Awaited<ReturnType<typeof updateOimConnectionCredentials>>>();
+  vi.mocked(updateOimConnectionCredentials).mockReturnValue(pending.promise);
+  const props = {
+    integrationKey: "acme-v2",
+    setup: {
+      ...setup,
+      connectionHealth: "action_required" as const,
+      pendingAuthorizationStepIds: [],
+    },
+    onChanged: vi.fn(),
+  };
+  const { rerender } = render(<OimConnectionSetup {...props} connectionId="connection-1" />);
+  await user.type(screen.getByLabelText("Client secret"), "replacement");
+  await user.click(screen.getByRole("button", { name: "Save credentials and verify" }));
+  rerender(<OimConnectionSetup {...props} connectionId="connection-2" />);
+  await act(async () =>
+    pending.resolve({
+      connectionId: "connection-1",
+      verification: { status: "verified" },
+    })
+  );
+  expect(screen.getByRole("status")).not.toHaveTextContent("Connection verified.");
+  expect(screen.getByLabelText("Client secret")).toHaveValue("");
+  expect(props.onChanged).not.toHaveBeenCalled();
+});
 
 function deferred<T>() {
   let resolvePromise: (value: T) => void = () => {};
@@ -295,21 +352,24 @@ test("keeps valid owner scope and clears incompatible owner state when scopes ch
     <OimConnectionSetup
       integrationKey="acme-v2"
       setup={{ ...setup, allowedOwnerScopes: ["team", "organization"] }}
+      teams={[{ id: "team-1", name: "Support" }]}
       onChanged={vi.fn()}
     />
   );
 
-  await user.type(screen.getByLabelText("Team ID"), "team-1");
+  await user.click(screen.getByRole("combobox", { name: "Team" }));
+  await user.keyboard("{Enter}");
 
   rerender(
     <OimConnectionSetup
       integrationKey="acme-v2"
       setup={{ ...setup, allowedOwnerScopes: ["organization", "team"] }}
+      teams={[{ id: "team-1", name: "Support" }]}
       onChanged={vi.fn()}
     />
   );
-  expect(screen.getByLabelText("Owner")).toHaveValue("team");
-  expect(screen.getByLabelText("Team ID")).toHaveValue("team-1");
+  expect(screen.getByLabelText("Owner")).toHaveValue("Team");
+  expect(screen.getByLabelText("Team")).toHaveValue("Support");
 
   rerender(
     <OimConnectionSetup
@@ -318,8 +378,8 @@ test("keeps valid owner scope and clears incompatible owner state when scopes ch
       onChanged={vi.fn()}
     />
   );
-  expect(screen.getByLabelText("Owner")).toHaveValue("organization");
-  expect(screen.queryByLabelText("Team ID")).not.toBeInTheDocument();
+  expect(screen.getByLabelText("Owner")).toHaveValue("Business");
+  expect(screen.queryByLabelText("Team")).not.toBeInTheDocument();
 
   rerender(
     <OimConnectionSetup
@@ -328,8 +388,8 @@ test("keeps valid owner scope and clears incompatible owner state when scopes ch
       onChanged={vi.fn()}
     />
   );
-  expect(screen.getByLabelText("Owner")).toHaveValue("team");
-  expect(screen.getByLabelText("Team ID")).toHaveValue("");
+  expect(screen.getByLabelText("Owner")).toHaveValue("Team");
+  expect(screen.getByLabelText("Team")).toHaveValue("");
 });
 
 test("clears transient creation state when switching to a different Connection", async () => {
@@ -375,7 +435,9 @@ test("clears transient creation state when switching to a different Connection",
   expect(
     screen.queryByRole("button", { name: "Continue with Create app" })
   ).not.toBeInTheDocument();
-  expect(screen.getByRole("status")).toBeEmptyDOMElement();
+  expect(screen.getByRole("status")).toHaveTextContent(
+    "Connection setup loaded. Finish provider authorization."
+  );
 });
 
 test("ignores a deferred create result after selecting another Connection", async () => {
@@ -419,7 +481,9 @@ test("ignores a deferred create result after selecting another Connection", asyn
     screen.getByRole("button", { name: "Continue with Authorize account" })
   ).toBeInTheDocument();
   expect(getOimConnectionSetup).not.toHaveBeenCalled();
-  expect(screen.getByRole("status")).toBeEmptyDOMElement();
+  expect(screen.getByRole("status")).toHaveTextContent(
+    "Connection setup loaded. Finish provider authorization."
+  );
 });
 
 test("ignores a deferred setup failure after selecting another Connection", async () => {
@@ -499,7 +563,9 @@ test("does not follow a deferred authorization callback after switching Connecti
 
   expect(followAuthAction).not.toHaveBeenCalled();
   expect(screen.getByRole("button", { name: "Continue with Authorize account" })).toBeEnabled();
-  expect(screen.getByRole("status")).toBeEmptyDOMElement();
+  expect(screen.getByRole("status")).toHaveTextContent(
+    "Connection setup loaded. Finish provider authorization."
+  );
 });
 
 test("announces and focuses a completed Connection creation", async () => {
@@ -711,5 +777,5 @@ test("ignores a deferred verification result after switching Connections", async
 
   expect(screen.getByRole("heading", { name: "Connection added" })).toBeInTheDocument();
   expect(screen.queryByText(/provider could not verify/i)).not.toBeInTheDocument();
-  expect(screen.getByRole("status")).toBeEmptyDOMElement();
+  expect(screen.getByRole("status")).toHaveTextContent("Connection setup loaded.");
 });

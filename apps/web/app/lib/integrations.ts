@@ -1,5 +1,6 @@
 import type { OimConnection } from "@tulipfarm/schema";
 import { apiDelete, apiGet, apiWrite } from "./api";
+import type { ConnectionPresentation } from "./integration-status";
 
 /* Catalog rows include shipped, installed, and curated-not-yet-installed integrations. */
 
@@ -33,6 +34,7 @@ export type IntegrationSummary = {
   /** How many setup steps connecting takes. Absent when nothing is installed to count. */
   setupSteps?: number;
   status: McpConnectionStatus;
+  connectionState?: ConnectionPresentation;
   errorMessage?: string;
   updateAvailable?: boolean;
 };
@@ -428,6 +430,8 @@ export type OimConnectionSummary = Pick<
 > & {
   availableCredentialSlots: string[];
   disconnectPending: boolean;
+  setupState?: "complete" | "incomplete" | "unavailable";
+  credentialFree?: boolean;
 };
 
 export type OimConnectionRefreshStep = {
@@ -538,6 +542,18 @@ export function refreshOimConnection(
     "POST",
     `/api/v1/integrations/${encodeURIComponent(name)}/connections/${encodeURIComponent(connectionId)}/refresh`,
     {}
+  );
+}
+
+export function updateOimConnectionCredentials(
+  name: string,
+  connectionId: string,
+  values: Record<string, string>
+): Promise<CreateOimConnectionResult> {
+  return apiWrite(
+    "PATCH",
+    `/api/v1/integrations/${encodeURIComponent(name)}/connections/${encodeURIComponent(connectionId)}/credentials`,
+    { values }
   );
 }
 

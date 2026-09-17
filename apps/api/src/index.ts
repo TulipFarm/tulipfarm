@@ -119,6 +119,7 @@ import {
   IngressTeardownStore,
   IntegrationStore,
   KillSwitchRepo,
+  OimIngressEmissionStore,
   OimKnowledgeCheckpointStore,
   OimKnowledgePublicationStore,
   OimReleaseTrustStore,
@@ -220,11 +221,7 @@ import { PgExternalIdentityRepo, PgExternalIdentityUnlinker } from "./identity/e
 import { reconcileSoulRoles, registerSoulRoleReconcile } from "./identity/role-reconcile";
 import { syncDeploymentRoles } from "./identity/roles";
 import { IngressIdentityResolver } from "./ingress/identity";
-import {
-  IngressDeliveriesRepo,
-  IntegrationConversationsRepo,
-  IntegrationEventsRepo,
-} from "./ingress/repo";
+import { IntegrationConversationsRepo, IntegrationEventsRepo } from "./ingress/repo";
 import { CatalogBoundOimOperationConnectionResolver } from "./integrations/catalog-bound-oim-operation-resolver";
 import { resolveSecretRef } from "./integrations/connection-env";
 import {
@@ -1298,7 +1295,6 @@ async function boot() {
     const effectRetryWaits = new DurableEffectRetryWaitHost(runWaits);
     const toolApprovals = new ToolApprovalService({ transactions: runTransactions });
     const routineApprovals = new RoutineApprovalService({ transactions: runTransactions });
-    const ingressDeliveries = new IngressDeliveriesRepo(pool);
     const integrationThreads = new IntegrationConversationsRepo(pool);
     const integrationEvents = new IntegrationEventsRepo(pool);
     const channelRunDeliveries = new ChannelRunDeliveryStore(runTransactions, () =>
@@ -2035,6 +2031,11 @@ async function boot() {
           bind: channelBind,
         }),
         events,
+        canonicalEvents: {
+          authorize: (event) =>
+            new OimIngressEmissionStore(runTransactions, randomUUID).authorizeEvent(event),
+          dispatch: (event) => eventTriggers.dispatchCanonicalEvent(event),
+        },
         eventTriggers,
         domainEvents: domainEventEmitter,
       }),
@@ -2111,7 +2112,6 @@ async function boot() {
       ingress: {
         soulLoader,
         bundled: bundledIntegrations,
-        deliveries: ingressDeliveries,
         invoke: integrationInvoker(invocations),
         resolveSecret: (value) => resolveSecretRef(value, secretsService),
       },

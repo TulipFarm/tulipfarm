@@ -398,6 +398,7 @@ export interface EvalCase {
   readonly agent: string;
   /** L3-only deterministic Routine Tool-State execution; bypasses the model and Chat Turn path. */
   readonly routine?: L3RoutineFixture;
+  readonly integrationReply?: IngressReplyResult;
   /**
    * What feeds the real Context assembler, beyond what the Eval Soul already supplies.
    *
@@ -526,3 +527,5 @@ export function readableLibrary(evalCase: EvalCase): {
   if (library.size === 0) return {};
   return { attachments: { read: async (_runId, fileId) => library.get(fileId) } };
 }
+
+import type { IngressReplyResult } from "@tulipfarm/turn-executor";

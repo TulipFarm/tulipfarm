@@ -19,7 +19,7 @@ import {
   type IntegrationEventPayload,
   MemoryArtifactStore,
 } from "@tulipfarm/storage";
-import type { ToolDef } from "@tulipfarm/tool-host";
+import type { ParkableToolCallResult, ToolDef } from "@tulipfarm/tool-host";
 import type { FastifyBaseLogger } from "fastify";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { UserDoc } from "../auth/users";
@@ -154,6 +154,7 @@ async function harness(
     envelope?: Record<string, unknown>;
     agents?: Map<string, SoulAgent>;
     triggerDispatchFails?: boolean;
+    replyResult?: ParkableToolCallResult;
   } = {}
 ): Promise<Harness> {
   const lineage = new MemoryArtifactStore();
@@ -196,7 +197,7 @@ async function harness(
         tier: "integration",
         execute: async (args: Record<string, unknown>) => {
           sent.push(args);
-          return { success: true as const, data: {} };
+          return options.replyResult ?? { success: true as const, data: {} };
         },
       } as unknown as ToolDef,
     ],
@@ -651,6 +652,39 @@ describe("IngressDeliveryHost.recordEvent", () => {
 });
 
 describe("IngressDeliveryHost.postReplyForAttempt", () => {
+  it("returns a provider refusal rather than claiming delivery succeeded", async () => {
+    const { host } = await harness({
+      replyResult: { success: false, error: { code: "unavailable", message: "provider busy" } },
+    });
+    await host.attachChat(BUSINESS_ID, RUN_ID, CHAT);
+    await expect(
+      host.postReplyForAttempt(BUSINESS_ID, RUN_ID, {
+        attempt: 1,
+        outcome: "answered",
+        binding: "default",
+      })
+    ).resolves.toEqual({ delivered: false, outcome: "retryable", code: "unavailable" });
+  });
+
+  it("returns the broker's durable retry wait to the Worker", async () => {
+    const { host } = await harness({
+      replyResult: { parked: { kind: "retry_wait", waitId: "wait-1" } },
+    });
+    await host.attachChat(BUSINESS_ID, RUN_ID, CHAT);
+    await expect(
+      host.postReplyForAttempt(BUSINESS_ID, RUN_ID, {
+        attempt: 1,
+        outcome: "answered",
+        binding: "default",
+      })
+    ).resolves.toEqual({
+      delivered: false,
+      outcome: "retryable",
+      code: "provider_retry_wait",
+      waitId: "wait-1",
+    });
+  });
+
   beforeEach(() => {
     vi.clearAllMocks();
   });
@@ -726,7 +760,7 @@ describe("IngressDeliveryHost.postReplyForAttempt", () => {
         outcome: "answered",
         binding: "default",
       })
-    ).resolves.toEqual({ delivered: false });
+    ).resolves.toEqual({ delivered: false, outcome: "failed", code: "turn_not_found" });
     expect(sent).toHaveLength(0);
   });
 });

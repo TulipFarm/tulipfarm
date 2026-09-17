@@ -182,6 +182,13 @@ copying an older package.
 
 ## Setup guide and fixtures
 
+For an HTTP operation that succeeds without a body, declare
+`response.schema: { type: "null" }`. The HTTP adapter maps a bodyless **204 only** to JSON `null`
+before normal schema validation. This is an explicit output contract, not a fallback for failed
+validation: an empty 200, an object where null is required, and a 204 under an object schema still
+fail. Keep the response byte bound. In offline fixtures, use `response: { status: 204, body: null }`
+and `expect.result: null`; YAML null represents absent wire content, not an impossible `{}` body.
+
 `setup-guide.md` explains provider-side setup, credential creation, actor and tenant distinctions,
 and the connection steps shown by TulipFarm. It must not contain a live credential.
 

@@ -18,13 +18,16 @@ import { Button } from "~/components/ui/button";
 import { Input } from "~/components/ui/input";
 import { Link } from "~/components/ui/link";
 import { ApiError } from "~/lib/api";
+import { resolveIntegrationStatus } from "~/lib/integration-status";
 import { type IntegrationSummary, listIntegrations, updateIntegration } from "~/lib/integrations";
 import { useIsAdmin } from "~/lib/use-session-user";
 
 export const meta: MetaFunction = () => [{ title: "Integrations · tulipfarm" }];
 
 export async function clientLoader() {
-  return { integrations: await listIntegrations() };
+  return {
+    integrations: await Promise.all((await listIntegrations()).map(resolveIntegrationStatus)),
+  };
 }
 
 export default function IntegrationsIndex() {
@@ -51,6 +54,7 @@ export default function IntegrationsIndex() {
   const [updatingName, setUpdatingName] = useState<string>();
   const [updateError, setUpdateError] = useState<string>();
   const [installOpen, setInstallOpen] = useState(false);
+  const [installSource, setInstallSource] = useState("");
   const [securityOpen, setSecurityOpen] = useState(false);
 
   async function handleUpdate(name: string, source?: string) {
@@ -130,7 +134,14 @@ export default function IntegrationsIndex() {
         <IntegrationOverview integrations={integrations} />
         {isAdmin ? (
           <div className="mt-3 flex flex-wrap gap-2">
-            <Button type="button" variant="outline" onClick={() => setInstallOpen(true)}>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => {
+                setInstallSource("");
+                setInstallOpen(true);
+              }}
+            >
               Install from source
             </Button>
             <Button type="button" variant="outline" onClick={() => setSecurityOpen(true)}>
@@ -248,6 +259,10 @@ export default function IntegrationsIndex() {
                 onUpdate={handleUpdate}
                 updatingName={updatingName}
                 isAdmin={isAdmin}
+                onInstall={(source) => {
+                  setInstallSource(source);
+                  setInstallOpen(true);
+                }}
               />
             ))}
           </div>
@@ -255,7 +270,9 @@ export default function IntegrationsIndex() {
         <IntegrationPanel name={viewing} onClose={closePanel} />
       </div>
       <OimReleaseInstallDialog
+        key={`${installSource}:${installOpen}`}
         open={installOpen}
+        initialSource={installSource}
         onClose={() => setInstallOpen(false)}
         onInstalled={(integrationId) => {
           setInstallOpen(false);
@@ -298,12 +315,14 @@ function Group({
   onUpdate,
   updatingName,
   isAdmin,
+  onInstall,
 }: {
   title: string;
   items: IntegrationSummary[];
   onUpdate: (name: string, source?: string) => void;
   updatingName?: string;
   isAdmin: boolean;
+  onInstall: (source: string) => void;
 }) {
   const headingId = useId();
   return (
@@ -319,6 +338,7 @@ function Group({
             onUpdate={onUpdate}
             updating={updatingName === integration.name}
             isAdmin={isAdmin}
+            onInstall={onInstall}
           />
         ))}
       </ul>

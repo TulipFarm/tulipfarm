@@ -2,7 +2,6 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react
 import { Button } from "~/components/ui/button";
 import { Field } from "~/components/ui/field";
 import { Input } from "~/components/ui/input";
-import { Select } from "~/components/ui/select";
 import { ApiError } from "~/lib/api";
 import {
   createOimConnection,
@@ -12,10 +11,15 @@ import {
   type OimConnectionVerificationError,
   refreshOimConnection,
   startOimConnectionAuthorization,
+  updateOimConnectionCredentials,
 } from "~/lib/integrations";
 import { followAuthAction } from "./auth-flow";
+import { IntegrationChoice } from "./integration-choice";
 
 function errorMessage(error: unknown): string {
+  if (error instanceof ApiError && error.status === 409) {
+    return "The Connection changed or is no longer editable. Reload its setup before retrying.";
+  }
   if (error instanceof ApiError) return error.message;
   return error instanceof Error ? error.message : "Request failed.";
 }
@@ -85,6 +89,11 @@ export function OimConnectionSetup({
   connectionId: initialConnectionId,
   onConnectionSelected,
   onChanged,
+  teams = [],
+  teamsError,
+  onAddAnother,
+  unavailable,
+  connectionLabel,
 }: {
   integrationKey: string;
   setup?: OimConnectionSetupModel;
@@ -92,6 +101,11 @@ export function OimConnectionSetup({
   connectionId?: string;
   onConnectionSelected?: (connectionId: string) => void;
   onChanged: () => void;
+  teams?: readonly { id: string; name: string }[];
+  teamsError?: string;
+  onAddAnother?: () => void;
+  unavailable?: string;
+  connectionLabel?: string;
 }) {
   const [currentSetup, setCurrentSetup] = useState(setup);
   const [connectionId, setConnectionId] = useState(initialConnectionId);
@@ -113,6 +127,7 @@ export function OimConnectionSetup({
   );
   const [verifying, setVerifying] = useState(false);
   const [error, setError] = useState<string>();
+  const [fieldError, setFieldError] = useState<{ id: string; message: string }>();
   const [setupLoadError, setSetupLoadError] = useState(setupError);
   const [status, setStatus] = useState(
     setupError
@@ -123,6 +138,7 @@ export function OimConnectionSetup({
   );
   const nextStepHeading = useRef<HTMLHeadingElement>(null);
   const formHeading = useRef<HTMLHeadingElement>(null);
+  const sectionRef = useRef<HTMLElement>(null);
   const selection = useRef({ connectionId: initialConnectionId, generation: 0 });
   const previousInitialConnectionId = useRef(initialConnectionId);
   const createRequestGeneration = useRef(0);
@@ -205,6 +221,9 @@ export function OimConnectionSetup({
           : undefined;
       verificationIssueRef.current = nextVerificationIssue;
       setConnectionId(initialConnectionId);
+      setValues({});
+      setLabel("");
+      setOwnerId("");
       setCurrentSetup(setup);
       setSubmitting(false);
       setVerifying(false);
@@ -212,13 +231,16 @@ export function OimConnectionSetup({
       setSetupLoadState(setupError ? "failed" : "idle");
       setAuthorizingStep(undefined);
       setError(undefined);
+      setFieldError(undefined);
       setSetupLoadError(setupError);
       setStatus(
         setupError
           ? "Connection setup could not load. Retry to continue."
           : nextVerificationIssue
             ? verificationStatus(nextVerificationIssue, false)
-            : ""
+            : initialConnectionId && setup
+              ? connectionLoadedStatus(setup)
+              : "Connection setup reset. Add Connection details."
       );
       return;
     }
@@ -305,6 +327,14 @@ export function OimConnectionSetup({
   }, [status, connectionId, currentSetup, setupLoadState]);
 
   useEffect(() => {
+    if (!fieldError) return;
+    const input = Array.from(sectionRef.current?.querySelectorAll("input") ?? []).find(
+      (input) => input.name === fieldError.id
+    );
+    input?.focus();
+  }, [fieldError]);
+
+  useEffect(() => {
     if (!currentSetup) {
       if (ownerScope !== undefined) setOwnerScope(undefined);
       if (ownerId) setOwnerId("");
@@ -321,6 +351,7 @@ export function OimConnectionSetup({
     const token = beginRequest(setupRequestGeneration);
     if (token.connectionId !== selectedConnectionId) return;
     setSetupLoadState("loading");
+    setStatus("Connection setup loading…");
     setSetupLoadError(undefined);
     try {
       const nextSetup = await getOimConnectionSetup(integrationKey, selectedConnectionId);
@@ -372,9 +403,14 @@ export function OimConnectionSetup({
       setError("No owner scope is available.");
       return;
     }
+    if (selectedOwnerScope === "team" && !teams.some((team) => team.id === selectedOwnerId)) {
+      setError("Choose an available Team.");
+      return;
+    }
     const token = beginRequest(createRequestGeneration);
     setSubmitting(true);
     setError(undefined);
+    setFieldError(undefined);
     try {
       const result = await createOimConnection(integrationKey, {
         label,
@@ -397,6 +433,7 @@ export function OimConnectionSetup({
         result.verification.status === "verified" ? result.connectionId : undefined;
       exactSetupConnectionId.current = undefined;
       setConnectionId(result.connectionId);
+      setValues({});
       setSubmitting(false);
       setSetupLoadError(undefined);
       if (nextVerificationIssue !== undefined) {
@@ -407,6 +444,7 @@ export function OimConnectionSetup({
     } catch (requestError) {
       if (!requestIsCurrent(token, createRequestGeneration)) return;
       setError(errorMessage(requestError));
+      captureFieldError(requestError);
       setSubmitting(false);
     }
   }
@@ -447,6 +485,63 @@ export function OimConnectionSetup({
       if (requestIsCurrent(token, verificationRequestGeneration)) {
         setVerifying(false);
       }
+    }
+  }
+
+  async function saveCredentials() {
+    if (!connectionId) return;
+    const token = beginRequest(verificationRequestGeneration);
+    setVerifying(true);
+    setError(undefined);
+    setFieldError(undefined);
+    try {
+      const replacements = Object.fromEntries(
+        Object.entries(values).filter(([, value]) => value !== "")
+      );
+      if (Object.keys(replacements).length === 0) {
+        setError("Enter at least one replacement value.");
+        return;
+      }
+      const result = await updateOimConnectionCredentials(
+        integrationKey,
+        connectionId,
+        replacements
+      );
+      if (!requestIsCurrent(token, verificationRequestGeneration)) return;
+      setValues({});
+      const issue =
+        result.verification.status === "action_required"
+          ? result.verification.error
+          : result.verification.status === "pending"
+            ? "unknown"
+            : undefined;
+      updateVerificationIssue(issue);
+      locallyVerifiedConnectionId.current =
+        result.verification.status === "verified" ? connectionId : undefined;
+      setStatus(
+        issue
+          ? verificationStatus(issue, false)
+          : result.verification.status === "verified"
+            ? "Connection verified."
+            : "Credentials saved."
+      );
+      onChanged();
+    } catch (cause) {
+      if (requestIsCurrent(token, verificationRequestGeneration)) {
+        setError(errorMessage(cause));
+        captureFieldError(cause);
+      }
+    } finally {
+      if (requestIsCurrent(token, verificationRequestGeneration)) setVerifying(false);
+    }
+  }
+
+  function captureFieldError(cause: unknown) {
+    if (cause instanceof ApiError && cause.path?.startsWith("/values/")) {
+      setFieldError({
+        id: cause.path.slice("/values/".length).replaceAll("~1", "/").replaceAll("~0", "~"),
+        message: cause.message,
+      });
     }
   }
 
@@ -493,7 +588,7 @@ export function OimConnectionSetup({
     ) ?? [];
 
   return (
-    <section className="space-y-4 rounded-lg border border-border bg-card p-4">
+    <section ref={sectionRef} className="space-y-4 rounded-lg border border-border bg-card p-4">
       <div>
         <h2 ref={formHeading} tabIndex={-1} className="text-sm font-semibold text-foreground">
           {connectionId === undefined ? "Add Connection" : "Connection setup"}
@@ -501,10 +596,24 @@ export function OimConnectionSetup({
         <p className="mt-1 text-xs text-muted-foreground">
           Add the reviewed settings, then finish any provider authorization.
         </p>
+        {connectionId && connectionLabel ? (
+          <p className="mt-1 text-sm text-foreground">Editing {connectionLabel}</p>
+        ) : null}
+        {connectionId && onAddAnother ? (
+          <Button type="button" variant="outline" className="mt-3" onClick={onAddAnother}>
+            Add another Connection
+          </Button>
+        ) : null}
       </div>
 
-      {setupLoadState === "loading" ? (
-        <h3 className="text-sm font-medium text-foreground">Loading Connection setup…</h3>
+      {unavailable ? (
+        <p role="status" className="text-sm text-muted-foreground">
+          {unavailable}
+        </p>
+      ) : setupLoadState === "loading" ? (
+        <h3 ref={nextStepHeading} tabIndex={-1} className="text-sm font-medium text-foreground">
+          Loading Connection setup…
+        </h3>
       ) : setupLoadState === "failed" || currentSetup === undefined ? (
         <div className="space-y-3">
           <h3 ref={nextStepHeading} tabIndex={-1} className="text-sm font-medium text-foreground">
@@ -545,40 +654,50 @@ export function OimConnectionSetup({
           </Field>
 
           <Field label="Owner">
-            <Select
-              name="owner-scope"
+            <IntegrationChoice
+              label="Owner"
               value={selectedOwnerScope ?? ""}
-              required
-              onChange={(event) => setOwnerScope(event.target.value as OwnerScope)}
-            >
-              {selectedOwnerScope === undefined ? (
-                <option value="" disabled>
-                  No owner scope available
-                </option>
-              ) : null}
-              {currentSetup.allowedOwnerScopes.map((scope) => (
-                <option key={scope} value={scope}>
-                  {ownerScopeLabel(scope)}
-                </option>
-              ))}
-            </Select>
+              options={currentSetup.allowedOwnerScopes.map((scope) => ({
+                value: scope,
+                label: ownerScopeLabel(scope),
+              }))}
+              onChange={(value) => {
+                const scope = currentSetup.allowedOwnerScopes.find((scope) => scope === value);
+                if (scope) {
+                  setOwnerScope(scope);
+                  setOwnerId("");
+                }
+              }}
+              disabled={submitting}
+            />
           </Field>
 
           {selectedOwnerScope === "team" ? (
-            <Field label="Team ID">
-              <Input
-                name="owner-id"
-                autoComplete="off"
+            <Field
+              label="Team"
+              help={
+                teamsError ??
+                (teams.length === 0 ? "No authorized Teams are available." : undefined)
+              }
+            >
+              <IntegrationChoice
+                label="Team"
                 value={selectedOwnerId}
-                required
-                onChange={(event) => setOwnerId(event.target.value)}
+                options={teams.map((team) => ({ value: team.id, label: team.name }))}
+                onChange={setOwnerId}
+                disabled={submitting || !!teamsError}
               />
             </Field>
           ) : null}
 
           {currentSetup.fieldSteps.flatMap((step) =>
             step.fields.map((field) => (
-              <Field key={`${step.id}:${field.id}`} label={field.label} help={field.description}>
+              <Field
+                key={`${step.id}:${field.id}`}
+                label={field.label}
+                help={field.description}
+                error={fieldError?.id === field.id ? fieldError.message : undefined}
+              >
                 <Input
                   name={field.id}
                   autoComplete="off"
@@ -594,13 +713,61 @@ export function OimConnectionSetup({
           )}
 
           <div className="sm:col-span-2">
-            <Button type="submit" disabled={submitting || selectedOwnerScope === undefined}>
-              Create Connection
+            <Button
+              type="submit"
+              disabled={
+                submitting ||
+                selectedOwnerScope === undefined ||
+                (selectedOwnerScope === "team" &&
+                  !teams.some((team) => team.id === selectedOwnerId))
+              }
+            >
+              {submitting ? "Creating…" : "Create Connection"}
             </Button>
           </div>
         </form>
       ) : (
         <div className="space-y-3">
+          {currentSetup.fieldSteps.some((step) => step.fields.length > 0) ? (
+            <form
+              className="grid gap-3 sm:grid-cols-2"
+              onSubmit={(event) => {
+                event.preventDefault();
+                void saveCredentials();
+              }}
+            >
+              <p className="text-xs text-muted-foreground sm:col-span-2">
+                Correct settings or replace credentials for this exact Connection. Leave a field
+                blank to keep its saved value. Stored secrets are never shown.
+              </p>
+              {currentSetup.fieldSteps.flatMap((step) =>
+                step.fields.map((field) => (
+                  <Field
+                    key={`${step.id}:${field.id}`}
+                    label={field.label}
+                    help={field.description}
+                    error={fieldError?.id === field.id ? fieldError.message : undefined}
+                  >
+                    <Input
+                      name={field.id}
+                      type={field.input}
+                      autoComplete="off"
+                      disabled={verifying || authorizingStep !== undefined}
+                      value={values[field.id] ?? ""}
+                      onChange={(event) =>
+                        setValues((current) => ({ ...current, [field.id]: event.target.value }))
+                      }
+                    />
+                  </Field>
+                ))
+              )}
+              <div className="sm:col-span-2">
+                <Button type="submit" disabled={verifying || authorizingStep !== undefined}>
+                  {verifying ? "Verifying…" : "Save credentials and verify"}
+                </Button>
+              </div>
+            </form>
+          ) : null}
           {pendingSteps.length > 0 ? (
             <>
               <h3
@@ -616,7 +783,7 @@ export function OimConnectionSetup({
                     key={step.id}
                     type="button"
                     variant="outline"
-                    disabled={authorizingStep !== undefined}
+                    disabled={authorizingStep !== undefined || verifying}
                     onClick={() => void authorize(step.id)}
                   >
                     {authorizingStep === step.id ? "Opening…" : `Continue with ${step.title}`}

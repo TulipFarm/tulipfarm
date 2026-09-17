@@ -626,7 +626,7 @@ const PULL_REQUEST_BODY = {
   state: "open",
   merged: false,
   html_url: "https://github.com/tulip/farm/pull/12",
-  head: { ref: "fix-crash" },
+  head: { ref: "fix-crash", label: "tulip:fix-crash", user: { login: "tulip" } },
   base: { ref: "main" },
 };
 
@@ -937,6 +937,27 @@ describe("GitHubAdapter repo push", () => {
   });
   const marker = githubEffectMarker("idem-1");
 
+  it("keeps a full bounded commit history ambiguous instead of repeating a push", async () => {
+    http.route("GET", "/repos/tulip/farm/commits", {
+      status: 200,
+      headers: {},
+      body: Array.from({ length: 100 }, () => ({ sha: "other", commit: { message: "other" } })),
+    });
+    await expect(
+      adapter.reconcile(
+        {
+          intent: pushIntent,
+          idempotencyKey: "idem-1",
+          operation: "github.repo.push.lookup",
+        },
+        CREDENTIAL
+      )
+    ).resolves.toMatchObject({ outcome: "ambiguous" });
+    expect(http.calls).toHaveLength(10);
+    await expect(dispatch(pushIntent)).rejects.toThrow();
+    expect(http.calls.some((call) => call.method !== "GET")).toBe(false);
+  });
+
   it("pushes a commit through the Git Data API, stamping the marker in the message", async () => {
     http.route("GET", "/repos/tulip/farm/commits", { status: 200, headers: {}, body: [] });
     http.route("GET", "/repos/tulip/farm/git/ref/heads/main", {
@@ -1081,11 +1102,286 @@ describe("GitHubAdapter repo push", () => {
 });
 
 describe("GitHubAdapter pull request reconciliation", () => {
-  it("confirms a pull request create by finding the open PR from head", async () => {
+  it("recovers a lost PR create response after the fork PR is closed on page two", async () => {
+    const toolIntent = intent(GITHUB_TOOL_IDS.pullRequestCreate, {
+      repository: "tulip/farm",
+      title: "Fix",
+      head: "fork:fix-crash",
+      base: "release",
+    });
+    let applied = false;
+    http.route(
+      "GET",
+      "/repos/tulip/farm/pulls",
+      (request): IntegrationHttpResponse => ({
+        status: 200,
+        headers:
+          request.query?.page === "2"
+            ? {}
+            : {
+                link: '<https://api.github.com/repos/tulip/farm/pulls?page=2>; rel="next"',
+              },
+        body:
+          request.query?.page === "2"
+            ? applied
+              ? [
+                  {
+                    ...PULL_REQUEST_BODY,
+                    number: 99,
+                    state: "closed",
+                    base: { ref: "release" },
+                    head: { ref: "fix-crash", user: { login: "fork" } },
+                    body: githubEffectMarker("idem-1"),
+                  },
+                ]
+              : []
+            : [PULL_REQUEST_BODY],
+      })
+    );
+    http.route("POST", "/repos/tulip/farm/pulls", () => {
+      applied = true;
+      throw new Error("response lost after provider commit");
+    });
+    await expect(dispatch(toolIntent)).rejects.toThrow();
+    await expect(
+      adapter.reconcile(
+        {
+          intent: toolIntent,
+          idempotencyKey: "idem-1",
+          operation: "github.pull_request.create.lookup",
+        },
+        CREDENTIAL
+      )
+    ).resolves.toMatchObject({ outcome: "confirmed", evidenceRef: "github:pull_request:99" });
+    await expect(dispatch(toolIntent)).resolves.toMatchObject({ number: 99 });
+    expect(http.calls.filter((call) => call.method === "POST")).toHaveLength(1);
+  });
+
+  it("does not identify an unmarked PR as this effect", async () => {
+    const toolIntent = intent(GITHUB_TOOL_IDS.pullRequestCreate, {
+      repository: "tulip/farm",
+      title: "Fix",
+      head: "fix-crash",
+      base: "main",
+    });
     http.route("GET", "/repos/tulip/farm/pulls", {
       status: 200,
       headers: {},
       body: [PULL_REQUEST_BODY],
+    });
+    await expect(
+      adapter.reconcile(
+        {
+          intent: toolIntent,
+          idempotencyKey: "idem-1",
+          operation: "github.pull_request.create.lookup",
+        },
+        CREDENTIAL
+      )
+    ).resolves.toMatchObject({ outcome: "not_applied" });
+  });
+
+  describe("GitHub provider recovery regressions", () => {
+    const families = [
+      {
+        tool: GITHUB_TOOL_IDS.issueComment,
+        operation: "github.issue.comment.lookup",
+        path: "/repos/tulip/farm/issues/41/comments",
+        arguments: { issueNumber: 41, body: "hello" },
+      },
+      {
+        tool: GITHUB_TOOL_IDS.pullRequestComment,
+        operation: "github.pull_request.comment.lookup",
+        path: "/repos/tulip/farm/issues/41/comments",
+        arguments: { pullNumber: 41, body: "hello" },
+      },
+      {
+        tool: GITHUB_TOOL_IDS.pullRequestReview,
+        operation: "github.pull_request.review.lookup",
+        path: "/repos/tulip/farm/pulls/41/reviews",
+        arguments: { pullNumber: 41, event: "COMMENT", body: "hello" },
+      },
+      {
+        tool: GITHUB_TOOL_IDS.issueCreate,
+        operation: "github.issue.create.lookup",
+        path: "/repos/tulip/farm/issues",
+        arguments: { title: "hello" },
+      },
+    ];
+
+    it.each(families)("recovers a lost $tool response with a page-two marker", async (family) => {
+      const toolIntent = intent(family.tool, { repository: "tulip/farm", ...family.arguments });
+      let applied = false;
+      http.route(
+        "GET",
+        family.path,
+        (request): IntegrationHttpResponse => ({
+          status: 200,
+          headers:
+            request.query?.page === "2"
+              ? {}
+              : {
+                  link: `<https://api.github.com${family.path}?page=2>; rel="next"`,
+                },
+          body:
+            request.query?.page === "2"
+              ? applied
+                ? [{ ...ISSUE_BODY, id: 900, body: githubEffectMarker("idem-1") }]
+                : []
+              : [{ ...ISSUE_BODY, id: 1, body: "unrelated" }],
+        })
+      );
+      http.route("POST", family.path, () => {
+        applied = true;
+        throw new Error("response lost after provider commit");
+      });
+      await expect(dispatch(toolIntent)).rejects.toThrow();
+      await expect(
+        adapter.reconcile(
+          {
+            intent: toolIntent,
+            idempotencyKey: "idem-1",
+            operation: family.operation,
+          },
+          CREDENTIAL
+        )
+      ).resolves.toMatchObject({ outcome: "confirmed" });
+      await expect(dispatch(toolIntent)).resolves.toBeDefined();
+      expect(http.calls.filter((call) => call.method === "POST")).toHaveLength(1);
+    });
+
+    it.each(families)("keeps bounded $tool lookups ambiguous and never writes", async (family) => {
+      const toolIntent = intent(family.tool, { repository: "tulip/farm", ...family.arguments });
+      http.route("GET", family.path, {
+        status: 200,
+        headers: { link: `<https://api.github.com${family.path}?page=2>; rel="next"` },
+        body: [{ ...ISSUE_BODY, id: 1, body: "unrelated" }],
+      });
+      await expect(
+        adapter.reconcile(
+          {
+            intent: toolIntent,
+            idempotencyKey: "idem-1",
+            operation: family.operation,
+          },
+          CREDENTIAL
+        )
+      ).resolves.toMatchObject({ outcome: "ambiguous" });
+      expect(http.calls).toHaveLength(10);
+      await expect(dispatch(toolIntent)).rejects.toThrow();
+      expect(http.calls.some((call) => call.method !== "GET")).toBe(false);
+    });
+
+    it.each(families)("proves $tool absence only after its last page", async (family) => {
+      const toolIntent = intent(family.tool, { repository: "tulip/farm", ...family.arguments });
+      http.route("GET", family.path, (request) => ({
+        status: 200,
+        headers: {},
+        body:
+          request.query?.page === "2"
+            ? []
+            : Array.from({ length: 100 }, () => ({
+                ...ISSUE_BODY,
+                body: "unrelated",
+              })),
+      }));
+      await expect(
+        adapter.reconcile(
+          {
+            intent: toolIntent,
+            idempotencyKey: "idem-1",
+            operation: family.operation,
+          },
+          CREDENTIAL
+        )
+      ).resolves.toMatchObject({ outcome: "not_applied" });
+      expect(http.calls).toHaveLength(2);
+    });
+
+    it.each(["fix-crash", "fork:fix-crash"])(
+      "matches the requested base and owner for %s",
+      async (head) => {
+        const owner = head.includes(":") ? "fork" : "tulip";
+        const correct = {
+          ...PULL_REQUEST_BODY,
+          number: 99,
+          base: { ref: "release" },
+          head: { ref: "fix-crash", label: `${owner}:fix-crash`, user: { login: owner } },
+          body: githubEffectMarker("idem-1"),
+        };
+        http.route("GET", "/repos/tulip/farm/pulls", {
+          status: 200,
+          headers: {},
+          body: [
+            PULL_REQUEST_BODY,
+            { ...correct, number: 98, head: { ref: "fix-crash", user: { login: "other" } } },
+            correct,
+          ],
+        });
+        const toolIntent = intent(GITHUB_TOOL_IDS.pullRequestCreate, {
+          repository: "tulip/farm",
+          title: "Fix crash",
+          head,
+          base: "release",
+        });
+        await expect(dispatch(toolIntent)).resolves.toMatchObject({
+          number: 99,
+          baseRef: "release",
+        });
+        await expect(
+          adapter.reconcile(
+            {
+              intent: toolIntent,
+              idempotencyKey: "idem-1",
+              operation: "github.pull_request.create.lookup",
+            },
+            CREDENTIAL
+          )
+        ).resolves.toMatchObject({ outcome: "confirmed", evidenceRef: "github:pull_request:99" });
+        expect(
+          http.calls.every(
+            (call) => call.query?.head === `${owner}:fix-crash` && call.query.base === "release"
+          )
+        ).toBe(true);
+      }
+    );
+
+    it("does not confirm another effect's PR and creates against a different base", async () => {
+      http.route("GET", "/repos/tulip/farm/pulls", {
+        status: 200,
+        headers: {},
+        body: [PULL_REQUEST_BODY],
+      });
+      http.route("POST", "/repos/tulip/farm/pulls", {
+        status: 201,
+        headers: {},
+        body: { ...PULL_REQUEST_BODY, number: 99, base: { ref: "release" } },
+      });
+      const toolIntent = intent(GITHUB_TOOL_IDS.pullRequestCreate, {
+        repository: "tulip/farm",
+        title: "Fix crash",
+        head: "fix-crash",
+        base: "release",
+      });
+      await expect(
+        adapter.reconcile(
+          {
+            intent: toolIntent,
+            idempotencyKey: "idem-1",
+            operation: "github.pull_request.create.lookup",
+          },
+          CREDENTIAL
+        )
+      ).resolves.toMatchObject({ outcome: "not_applied" });
+      await expect(dispatch(toolIntent)).resolves.toMatchObject({ number: 99, baseRef: "release" });
+      expect(http.calls.filter((call) => call.method === "POST")).toHaveLength(1);
+    });
+  });
+  it("confirms a pull request create by finding the marked PR", async () => {
+    http.route("GET", "/repos/tulip/farm/pulls", {
+      status: 200,
+      headers: {},
+      body: [{ ...PULL_REQUEST_BODY, body: githubEffectMarker("idem-1") }],
     });
     const createIntent = intent(GITHUB_TOOL_IDS.pullRequestCreate, {
       repository: "tulip/farm",

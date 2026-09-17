@@ -42,7 +42,7 @@ integrations:
     description: Read and write repositories, issues, and pull requests.
 
   - name: jira
-    packageDigest: d6eccc8f4d30c9309ceed0c700182d1ff7dafadc3b014f9ca38ed7a7c19b5ef9
+    packageDigest: 41939430897a5851511587cc646eaae27015d1e8ca5e0ba6a878a2f78b44fa0c
     title: Jira
     icon: jira
     category: productivity

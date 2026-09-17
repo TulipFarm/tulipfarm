@@ -191,6 +191,12 @@ describe("slack manifest", () => {
   /* Base-install GitHub permissions are locked; catch over-grant or under-grant drift. */
   it("requests exactly the permissions the locked App decision documents", async () => {
     const bundled = await loadBundledIntegrations(logger);
+    expect(bundled.get("github")?.manifest.capabilities).toContain(
+      "Read check run results to see whether CI passed"
+    );
+    expect(bundled.get("github")?.manifest.capabilities).not.toContain(
+      "Report check run results back onto a commit"
+    );
     const steps = resolveAuthSteps(
       bundled.get("github")?.manifest ?? { name: "", egress: { type: "none" } }
     );

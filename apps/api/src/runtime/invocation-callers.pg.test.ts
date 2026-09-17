@@ -1,4 +1,4 @@
-import { generateKeyPairSync } from "node:crypto";
+import { generateKeyPairSync, randomUUID } from "node:crypto";
 import type { PGlite } from "@electric-sql/pglite";
 import { DEPLOYMENT_BUSINESS_ID } from "@tulipfarm/constants";
 import {
@@ -19,13 +19,25 @@ import {
   createEd25519BundleSigner,
   createEd25519BundleVerifier,
   PgBundleStore,
+  type SoulLoader,
   SoulPublicationCoordinator,
   signExecutionBundle,
 } from "@tulipfarm/soul";
-import { ArtifactStore, PgSoulPublicationStore } from "@tulipfarm/storage";
+import {
+  ArtifactStore,
+  ConnectionStore,
+  EventStore,
+  OimIngressEmissionStore,
+  PgSoulPublicationStore,
+  WebhookInboxStore,
+} from "@tulipfarm/storage";
+import Fastify from "fastify";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { buildApp } from "../app";
 import { ambientTransactionPort, type Queryable, transactionPort } from "../db";
+import { registerSlackEventRoutes } from "../internal/slack-event-routes";
 import { makeMigratedPglite } from "../test/pglite";
+import { EventTriggerGateway } from "../triggers/event-dispatch";
 import {
   integrationInvoker,
   manualRoutineTrigger,
@@ -193,6 +205,282 @@ describe("non-chat invocation callers", () => {
     );
     expect(counts.rows[0]).toEqual({ runs: 1, artifacts: 1 });
   });
+
+  it("deduplicates a provider retry with changed transport headers inside Run submission", async () => {
+    const invoke = integrationInvoker(invocations);
+    await invoke({ ...SLACK_JOB, deduplicationKey: "Ev1" });
+    await invoke({
+      ...SLACK_JOB,
+      headers: { "x-slack-request-timestamp": "1785400010" },
+      deduplicationKey: "Ev1",
+    });
+    const counts = await db.query<{ runs: number }>("SELECT count(*)::int AS runs FROM runs");
+    expect(counts.rows[0]?.runs).toBe(1);
+  });
+
+  it("rolls webhook deduplication back with failed Run persistence and accepts a provider retry", async () => {
+    await db.exec(`
+      CREATE FUNCTION reject_fixture_run() RETURNS trigger LANGUAGE plpgsql AS $$
+      BEGIN RAISE EXCEPTION 'fixture database failure'; END $$;
+      CREATE TRIGGER reject_fixture_run BEFORE INSERT ON runs
+        FOR EACH ROW EXECUTE FUNCTION reject_fixture_run();
+    `);
+    const app = await buildApp({
+      ingress: {
+        bundled: new Map(),
+        invoke: integrationInvoker(invocations),
+        soulLoader: {
+          integrations: new Map([
+            [
+              "chatapp",
+              {
+                slug: "chatapp",
+                sourceIntegration: "chatapp",
+                connection: { enabled: true, env: { SECRET: "test-secret" } },
+                manifest: {
+                  name: "chatapp",
+                  ingress: {
+                    handler: "ingress.ts",
+                    webhook: {
+                      security: {
+                        type: "shared_secret",
+                        header: "x-provider-secret",
+                        secret_env: "SECRET",
+                      },
+                      dedup_header: "x-provider-delivery",
+                      context_headers: ["x-provider-attempt"],
+                    },
+                  },
+                },
+                ingressHandler: { source: "export function classify() {}", hash: "fixture" },
+              },
+            ],
+          ]),
+        } as unknown as SoulLoader,
+      },
+    });
+    const request = (attempt: string) =>
+      app.inject({
+        method: "POST",
+        url: "/api/v1/hooks/integrations/chatapp",
+        headers: {
+          "x-provider-secret": "test-secret",
+          "x-provider-delivery": "delivery-1",
+          "x-provider-attempt": attempt,
+        },
+        payload: { text: "hello" },
+      });
+    try {
+      expect((await request("1")).statusCode).toBe(500);
+      const failed = await db.query<{ receipts: number; runs: number; artifacts: number }>(`
+        SELECT (SELECT count(*) FROM durable_invocations)::int AS receipts,
+          (SELECT count(*) FROM runs)::int AS runs,
+          (SELECT count(*) FROM artifacts)::int AS artifacts
+      `);
+      expect(failed.rows[0]).toEqual({ receipts: 0, runs: 0, artifacts: 0 });
+      await db.exec("DROP TRIGGER reject_fixture_run ON runs");
+      expect((await request("2")).statusCode).toBe(200);
+      expect((await request("3")).statusCode).toBe(200);
+      const recovered = await db.query<{ receipts: number; runs: number; artifacts: number }>(`
+        SELECT (SELECT count(*) FROM durable_invocations)::int AS receipts,
+          (SELECT count(*) FROM runs)::int AS runs,
+          (SELECT count(*) FROM artifacts)::int AS artifacts
+      `);
+      expect(recovered.rows[0]).toEqual({ receipts: 1, runs: 1, artifacts: 1 });
+    } finally {
+      await app.close();
+    }
+  });
+
+  it.each(["telegram", "twilio", "slack-oim"])(
+    "dispatches accepted %s ingress through the production callback into one durable Trigger Run",
+    async (provider) => {
+      const businessId = DEPLOYMENT_BUSINESS_ID;
+      const q = db as unknown as Queryable;
+      const transactions = transactionPort(q);
+      const connections = new ConnectionStore(transactions);
+      const inbox = new WebhookInboxStore(transactions);
+      const emissions = new OimIngressEmissionStore(transactions, randomUUID);
+      const events = new EventStore(transactions, randomUUID);
+      const connectionId = randomUUID();
+      const deliveryId = randomUUID();
+      const now = new Date("2030-09-17T00:00:00.000Z");
+      await connections.put(businessId, {
+        id: connectionId,
+        integration: { id: provider, majorVersion: 1 },
+        label: provider,
+        owner: { scope: "organization" },
+        status: "active",
+        isDefault: false,
+        configuration: {},
+        agentVisibleConfiguration: [],
+        secretBindings: {},
+        health: { status: "healthy", checkedAt: now.toISOString() },
+        expiresAt: null,
+      });
+      await q.query(
+        `INSERT INTO connection_external_identities (
+          business_id, connection_id, integration_id, integration_major_version,
+          external_tenant_id, external_account_id, proof_kind, proof_digest, verified_at, verified_by
+        ) VALUES ($1, $2, $3, 1, 'tenant-1', 'account-1', 'auth', $4, now(), 'provider')`,
+        [businessId, connectionId, provider, "a".repeat(64)]
+      );
+      await inbox.recordVerified(businessId, {
+        id: deliveryId,
+        integrationId: provider,
+        integrationMajorVersion: 1,
+        connectionId,
+        externalTenantId: "tenant-1",
+        externalAccountId: "account-1",
+        deduplicationKey: deliveryId,
+        bodySha256: "b".repeat(64),
+        safeHeaders: {},
+        encryptedBody: "fixture",
+        eventType: "message.received",
+        verification: "verified",
+        authenticatedEvidenceDigest: "c".repeat(64),
+      });
+      const claimed = (await inbox.claim(1, 120, now))[0];
+      if (!claimed?.leaseExpiresAt) throw new Error("missing receipt claim");
+      await inbox.markNormalized(
+        businessId,
+        deliveryId,
+        "message.received",
+        { limit: 5 },
+        {
+          expectedState: "accepted",
+          expectedAttempts: claimed.attempts,
+          expectedLeaseExpiresAt: claimed.leaseExpiresAt,
+          now,
+        }
+      );
+      const normalized = (await inbox.claim(1, 120, now))[0];
+      if (!normalized?.leaseExpiresAt) throw new Error("missing normalized claim");
+      await emissions.emitIfAuthorized({
+        businessId,
+        deliveryId,
+        connectionId,
+        integrationId: provider,
+        integrationMajorVersion: 1,
+        externalTenantId: "tenant-1",
+        externalAccountId: "account-1",
+        expectedAttempts: normalized.attempts,
+        expectedLeaseExpiresAt: normalized.leaseExpiresAt,
+        event: {
+          eventId: randomUUID(),
+          type: "message.received",
+          version: 1,
+          businessId,
+          occurredAt: now.toISOString(),
+          receivedAt: now.toISOString(),
+          source: { provider, integrationId: provider, externalTenantId: "tenant-1", deliveryId },
+          principal: { kind: "integration_account", externalId: "account-1" },
+          record: { type: "connection", id: connectionId, version: "1" },
+          deduplicationKey: deliveryId,
+          classification: [],
+          data: { limit: 5 },
+          verification: { status: "verified", method: "oim_ingress" },
+        },
+      });
+      const messages = await events.claim({
+        businessId,
+        owner: "test-worker",
+        now: now.toISOString(),
+        leaseDurationMs: 60_000,
+        limit: 1,
+      });
+      const message = messages[0];
+      if (!message) throw new Error("accepted event did not publish outbox work");
+      let failSubmission = true;
+      const gateway = new EventTriggerGateway({
+        nextEventId: randomUUID,
+        listTriggers: async () => [
+          {
+            triggerSlug: "provider-message",
+            authoredVersion: 1,
+            lifecycle: "published",
+            type: "integration_event",
+            eventType: "message.received",
+            eventVersion: 1,
+            provider,
+            routineRef: { name: "daily-digest", version: "7" },
+            backgroundIdentity: { principalKind: "system", principalId: "trigger-runner" },
+            requireVerified: true,
+            inputMappings: { limit: "limit" },
+          },
+        ],
+        startRun: async (invocation) => {
+          if (failSubmission) throw new Error("transient submission failure");
+          return triggerRunStarter(invocations)(invocation);
+        },
+      });
+      const app = Fastify();
+      registerSlackEventRoutes(
+        app,
+        {
+          businessId,
+          events,
+          eventTriggers: gateway,
+          integrations: {
+            loadRoutingSnapshot: async () => {
+              throw new Error("Slack-only route used");
+            },
+          },
+          identity: {
+            resolve: async () => {
+              throw new Error("provider account must not become a user");
+            },
+          },
+          canonicalEvents: {
+            authorize: (event) => emissions.authorizeEvent(event),
+            dispatch: (event) => gateway.dispatchCanonicalEvent(event),
+          },
+        },
+        async (req) => {
+          req.principal = {
+            kind: "service",
+            id: "worker",
+            businessId,
+            credential: "client_secret",
+            authMethods: [],
+            authenticatedAt: now,
+          };
+        }
+      );
+      try {
+        const dispatch = () =>
+          app.inject({
+            method: "POST",
+            url: `/api/v1/internal/events/${message.inboxId}/dispatch`,
+          });
+        expect((await dispatch()).statusCode).toBe(500);
+        await events.fail(businessId, message.id, "test-worker", {
+          code: "handler_failed",
+          maxAttempts: 5,
+          quarantineOwner: "operations",
+          replayEligible: true,
+        });
+        failSubmission = false;
+        expect((await dispatch()).json()).toEqual({ outcome: "dispatched" });
+        expect((await dispatch()).json()).toEqual({ outcome: "dispatched" });
+        const runs = await db.query<{ run_source: string; identity: unknown }>(
+          "SELECT source AS run_source, identity FROM runs"
+        );
+        expect(runs.rows).toHaveLength(1);
+        expect(runs.rows[0]).toMatchObject({
+          run_source: "routine",
+          identity: { effectiveSubject: { kind: "system", id: "trigger-runner" } },
+        });
+        await q.query(
+          "UPDATE connections SET status = 'revoked' WHERE business_id = $1 AND id = $2",
+          [businessId, connectionId]
+        );
+        expect((await dispatch()).json()).toEqual({ outcome: "ignored" });
+      } finally {
+        await app.close();
+      }
+    }
+  );
 
   it("stores a Routine trigger's inputs as its request Artifact", async () => {
     const { runId } = await manualRoutineTrigger(invocations)(

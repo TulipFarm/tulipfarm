@@ -1,18 +1,14 @@
 import { AdapterDispatchError } from "@tulipfarm/tool-broker";
 import { classifyHttpFailure } from "../../http";
+import { findGitHubEntry } from "./pagination";
 import {
   type Arguments,
   filesArg,
   type GitHubApi,
   githubEffectMarker,
-  list,
   record,
   stringArg,
 } from "./shared";
-
-/** How far back `findCommitByMarker` looks for a redelivered effect's own earlier push. */
-const MARKER_SEARCH_PER_PAGE = 100;
-const MARKER_SEARCH_MAX_PAGES = 5;
 
 export function repositoryOutput(
   owner: string,
@@ -84,7 +80,6 @@ export async function createRepository(
   return repositoryOutput(owner, name, record(response.body));
 }
 
-/** Bounded marker lookup for duplicate pushes; not found means the effect likely never pushed. */
 export async function findCommitByMarker(
   api: GitHubApi,
   repository: string,
@@ -92,24 +87,13 @@ export async function findCommitByMarker(
   marker: string,
   credential: string
 ): Promise<Record<string, unknown> | undefined> {
-  for (let page = 1; page <= MARKER_SEARCH_MAX_PAGES; page += 1) {
-    const response = await api.call(
-      {
-        method: "GET",
-        path: `/repos/${repository}/commits`,
-        query: { sha: branch, per_page: String(MARKER_SEARCH_PER_PAGE), page: String(page) },
-      },
-      credential,
-      false
-    );
-    const commits = list(response.body).map((entry) => record(entry));
-    const match = commits.find((entry) =>
-      String(record(entry.commit).message ?? "").includes(marker)
-    );
-    if (match !== undefined) return match;
-    if (commits.length < MARKER_SEARCH_PER_PAGE) return undefined;
-  }
-  return undefined;
+  return findGitHubEntry(
+    api,
+    `/repos/${repository}/commits`,
+    { sha: branch },
+    credential,
+    (entry) => String(record(entry.commit).message ?? "").includes(marker)
+  );
 }
 
 export async function pushCommit(
