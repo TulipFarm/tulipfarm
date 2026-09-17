@@ -56,9 +56,10 @@ test("complete-message limits count UTF-8 bytes, never truncate, and reject one 
 });
 
 test("the pinned-source instruction is its own Markdown paragraph, not glued to the pack_read args", () => {
+  const url = "https://example.com/sales.yaml";
   const preview: PackPreview = {
     sha256: "a".repeat(64),
-    url: "https://example.com/sales.yaml",
+    url,
     pack: {
       apiVersion: "tulipfarm.ai/v1",
       kind: "Pack",
@@ -72,11 +73,11 @@ test("the pinned-source instruction is its own Markdown paragraph, not glued to 
       plan: { apiVersion: "tulipfarm.ai/v1", kind: "Plan", name: "sales", version: 1, steps: [] },
     },
   };
-  const prompt = packPlanPrompt(preview, { url: preview.url });
+  const prompt = packPlanPrompt(preview, { url });
   // A single `\n` between the JSON args and the next sentence renders as one Markdown paragraph
   // with no visual gap; only a blank line (`\n\n`) separates them into distinct paragraphs like
   // every other instruction in this message.
   expect(prompt).toContain(
-    `${JSON.stringify({ url: preview.url, expectedSha256: preview.sha256 })}\n\nIf the source hash differs`
+    `${JSON.stringify({ url, expectedSha256: preview.sha256 })}\n\nIf the source hash differs`
   );
 });
