@@ -5,7 +5,7 @@ import { Link } from "~/components/ui/link";
 import { Textarea } from "~/components/ui/textarea";
 import { UnsavedChangesDialog, useUnsavedChangesGuard } from "~/components/unsaved-changes-guard";
 import { ApiError } from "~/lib/api";
-import type { FieldDescriptor } from "~/lib/schema";
+import { enumValueLabel, type FieldDescriptor } from "~/lib/schema";
 
 /* Server validation is authoritative; client validation only checks JSON textareas parse. */
 
@@ -96,7 +96,7 @@ export function parseNumberInput(
 // Initial scalar value for a field, from the record (edit) or a kind-appropriate empty (create).
 function initialValue(field: FieldDescriptor, initial?: Record<string, unknown>): unknown {
   const v = initial?.[field.name];
-  if (v !== undefined && v !== null) return v;
+  if (v !== undefined && (v !== null || field.kind === "enum")) return v;
   if (field.kind === "enum") return undefined;
   return field.kind === "boolean" ? false : "";
 }
@@ -305,6 +305,11 @@ export function ResourceForm({
               onValue={(v) => set(field.name, v)}
               onJson={(v) => setJsonText((prev) => ({ ...prev, [field.name]: v }))}
             />
+            {field.hasUnsupportedEnumValues ? (
+              <p className="text-xs text-muted-foreground">
+                Structured enum choices are not supported by this form.
+              </p>
+            ) : null}
             {error ? (
               <p className="text-xs text-destructive" role="alert">
                 {error}
@@ -387,23 +392,36 @@ function Field({
     case "enum": {
       const enumValues = field.enumValues ?? [];
       const selectedIndex = enumValues.findIndex((option) => Object.is(option, value));
+      const hasInvalidCurrentValue = value !== undefined && selectedIndex === -1;
       return (
         <select
           id={field.name}
           className={inputClass}
           required={field.required}
-          value={selectedIndex === -1 ? "" : String(selectedIndex)}
+          value={
+            selectedIndex >= 0 ? `enum:${selectedIndex}` : hasInvalidCurrentValue ? "current" : ""
+          }
           onChange={(e) => {
-            const index = Number(e.target.value);
-            onValue(e.target.value === "" ? undefined : enumValues[index]);
+            if (e.target.value === "") {
+              onValue(undefined);
+              return;
+            }
+            if (e.target.value === "current") return;
+            const index = Number(e.target.value.replace("enum:", ""));
+            onValue(enumValues[index]);
           }}
         >
-          <option value="">-</option>
+          <option value="">{field.required ? "Select a value" : "Not set"}</option>
           {enumValues.map((opt, index) => (
-            <option key={`${typeof opt}:${String(opt)}`} value={String(index)}>
-              {String(opt)}
+            <option key={`${typeof opt}:${String(opt)}`} value={`enum:${index}`}>
+              {enumValueLabel(field, opt)}
             </option>
           ))}
+          {hasInvalidCurrentValue ? (
+            <option value="current">
+              {enumValueLabel(field, value)} (current value, not allowed)
+            </option>
+          ) : null}
         </select>
       );
     }
