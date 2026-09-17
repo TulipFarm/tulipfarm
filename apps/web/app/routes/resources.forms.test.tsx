@@ -2,7 +2,7 @@ import * as remix from "@remix-run/react";
 import { createRemixStub } from "@remix-run/testing";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import type { ReactElement } from "react";
+import { type ReactElement, useState } from "react";
 import { afterEach, expect, test, vi } from "vitest";
 import { ApiError, createRecord, updateRecord } from "~/lib/api";
 import { formFields, parseSchema } from "~/lib/schema";
@@ -714,6 +714,72 @@ test("create: an existing RFC 3339 value round-trips back into the local control
   expect((document.querySelector("input#syncedAt") as HTMLInputElement).value).toBe(
     "2026-08-29T10:15"
   );
+});
+
+test("edit: switching Records remounts date controls with the new stored value", async () => {
+  let loaderData = {
+    type: "task",
+    id: "TASK-1",
+    record: {
+      id: "TASK-1",
+      title: "First",
+      dueDate: "2027-02-28",
+      version: 1,
+      createdAt: "",
+      updatedAt: "",
+    },
+    fields: calendarFields,
+    schemaError: undefined,
+  };
+  vi.mocked(remix.useLoaderData).mockImplementation(() => loaderData);
+  function ReusableEditRoute() {
+    const [, setRevision] = useState(0);
+    return (
+      <>
+        <button
+          type="button"
+          onClick={() => {
+            loaderData = {
+              type: "task",
+              id: "TASK-2",
+              record: {
+                id: "TASK-2",
+                title: "Second",
+                dueDate: "2028-02-29",
+                version: 4,
+                createdAt: "",
+                updatedAt: "",
+              },
+              fields: calendarFields,
+              schemaError: undefined,
+            };
+            setRevision((revision) => revision + 1);
+          }}
+        >
+          Switch Record
+        </button>
+        <ResourceEdit />
+      </>
+    );
+  }
+  const Stub = createRemixStub([{ path: "/", Component: ReusableEditRoute }]);
+  render(<Stub initialEntries={["/"]} />);
+  const firstDate = document.querySelector("input#dueDate") as HTMLInputElement;
+  Object.defineProperty(firstDate, "validity", {
+    configurable: true,
+    get: () => ({ badInput: true, valid: false }),
+  });
+  firstDate.dataset.nativeDraft = "29/02/2027";
+  fireEvent.change(firstDate, { target: { value: "" } });
+  fireEvent.click(screen.getByRole("button", { name: "Save" }));
+  expect(await screen.findByText("enter a valid calendar date")).toBeVisible();
+
+  fireEvent.click(screen.getByRole("button", { name: "Switch Record" }));
+
+  expect(screen.getByRole("heading", { name: "Edit TASK-2" })).toBeVisible();
+  expect(screen.getByLabelText(/^title/)).toHaveValue("Second");
+  expect(document.querySelector("input#dueDate")).toHaveValue("2028-02-29");
+  expect(screen.queryByText("enter a valid calendar date")).not.toBeInTheDocument();
 });
 
 function dispatchUnload(): boolean {
