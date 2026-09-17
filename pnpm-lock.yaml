@@ -400,6 +400,9 @@ importers:
       '@tulipfarm/platform-tools':
         specifier: workspace:*
         version: link:../../packages/platform-tools
+      '@tulipfarm/resources':
+        specifier: workspace:*
+        version: link:../../packages/resources
       '@tulipfarm/run-kernel':
         specifier: workspace:*
         version: link:../../packages/run-kernel

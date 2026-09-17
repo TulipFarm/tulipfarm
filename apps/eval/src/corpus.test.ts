@@ -132,6 +132,15 @@ describe("loadCorpus", () => {
       outputPath: "oimManifest.metadata.name",
       value: "Acme",
     },
+    {
+      kind: "tool_result_reason_contains",
+      name: "record_delete",
+      argumentPath: "id",
+      argumentValue: "parent",
+      status: "invalid_arguments",
+      turnIndex: 3,
+      text: "blocked by",
+    },
   ])("rejects a persisted expectation on an L2 Case: $kind", async (expectation) => {
     const dir = corpusDir({
       "a.json": {

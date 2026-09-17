@@ -36,6 +36,7 @@ Only its own Cases need updating when their observable behaviour moves.
 | `src/guardrails.ts` | Runs the Eval Soul's `guardrails.yaml` through the production `TurnGuardrails`; collects refusals off the real Run events. |
 | `src/l3/` | Persisted Chat and Routine tiers on in-process PGlite; Integration authoring routes through the shared workflow, real approval wait, P09 journal, Soul writer, publisher, and next-Turn loader. |
 | `src/l3/soul-write.ts` | The `soul_write` Tool, over the real writer *and* the real publisher; `definitionMode: plan` first uses the production YAML Plan compiler. |
+| `src/l3/resource-records.ts` | Journey-persistent in-memory Record repositories; Resource authoring reloads through the real loader and mutations use `@tulipfarm/resources`. |
 | `src/l3/file-store.ts` | The one place `file_create` runs for real, so a Case can observe Chat draft versus saved File lifecycle and audience. |
 | `src/verdict.ts` | `caseVerdict`, `scoreable` — one Case collapsed into one word. Shared so the grid and a Baseline delta can never disagree. |
 | `src/baseline.ts` | `compareToBaseline` — pure. Refuses a delta across two Corpora or two models. |
@@ -73,8 +74,9 @@ before changing how a Case is scored, run or compared.** These are the ones that
   properties that live in the declaration. The resolved declaration is in `corpusHash`, so
   rewording one retires every Baseline. An unresolvable name fails the load.
 - **Stateful L3 Tools run for real,** routed by name in `routeTools`. Integration review/create/get
-  use the shared authoring workflow and durable approval/install path; `soul_write` and
-  `file_create` use the real writer and File store. Never script their successful result.
+  use the shared authoring workflow and durable approval/install path; Soul/Resource authoring,
+  Record mutations, and `file_create` use the real writer, loader, Resource service, and File store.
+  Never script their successful result.
 - **A saved generated File's audience comes from `agentRoles`, never the soul's `roles:`,** which is
   advisory and writes no `role_assignments`. Pair `generated_file_readable_by` with a
   `generated_file_not_readable_by` for a Role the Agent lacks, or the Case passes just as well

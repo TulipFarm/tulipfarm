@@ -58,6 +58,16 @@ export type Expectation =
       readonly outputPath: string;
       readonly value: unknown;
     }
+  /** L3 only. A targeted real Tool result returned a reason containing this text. */
+  | {
+      readonly kind: "tool_result_reason_contains";
+      readonly name: string;
+      readonly argumentPath: string;
+      readonly argumentValue: unknown;
+      readonly status: string;
+      readonly turnIndex?: number;
+      readonly text: string;
+    }
   /** The named Tool was denied on a call carrying this exact argument value. */
   | {
       readonly kind: "tool_denied";
@@ -189,6 +199,7 @@ const PERSISTED_KINDS: ReadonlySet<string> = new Set([
   "run_event_text_omits",
   "persisted_message_metadata_equals",
   "tool_result_field_equals",
+  "tool_result_reason_contains",
   "soul_committed",
   "soul_published",
   "generated_file_readable_by",

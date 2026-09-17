@@ -1,0 +1,177 @@
+{
+  "id": "l3-authored-restrict-policy-is-enforced-after-reload",
+  "tier": "l3",
+  "agent": "support",
+  "input": [
+    {
+      "role": "user",
+      "content": "Create a dependency-note Resource type. Each note must link to a ticket through ticketId, and deleting a ticket must be restricted while any note links to it."
+    }
+  ],
+  "tools": [
+    {
+      "name": "create_resource_type",
+      "description": "Create and publish a Resource type from a YAML JSON Schema.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "name": { "type": "string" },
+          "schema": { "type": "string" }
+        },
+        "required": ["name", "schema"],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "record_create",
+      "description": "Create a Record of a Resource type.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "type": { "type": "string" },
+          "data": { "type": "object" }
+        },
+        "required": ["type", "data"],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "record_delete",
+      "description": "Delete a Record at its current version.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "type": { "type": "string" },
+          "id": { "type": "string" },
+          "version": { "type": "number" }
+        },
+        "required": ["type", "id", "version"],
+        "additionalProperties": false
+      }
+    }
+  ],
+  "script": [
+    {
+      "kind": "tool_calls",
+      "calls": [
+        {
+          "callId": "author",
+          "name": "create_resource_type",
+          "arguments": {
+            "name": "dependency-note",
+            "schema": "title: Dependency note\ntype: object\nproperties:\n  ticketId:\n    type: string\n    x-links:\n      target: ticket\n      onDelete: restrict\n  note:\n    type: string\nrequired: [ticketId, note]\n"
+          }
+        }
+      ]
+    },
+    {
+      "kind": "text",
+      "text": "Created the dependency-note Resource type with restrict-on-delete."
+    }
+  ],
+  "journey": [
+    {
+      "input": [
+        {
+          "role": "user",
+          "content": "Create ticket T-1, then create a dependency note linked to that ticket."
+        }
+      ],
+      "script": [
+        {
+          "kind": "tool_calls",
+          "calls": [
+            {
+              "callId": "parent",
+              "name": "record_create",
+              "arguments": {
+                "type": "ticket",
+                "data": {
+                  "ticketId": "T-1",
+                  "status": "open"
+                }
+              }
+            }
+          ]
+        },
+        {
+          "kind": "tool_calls",
+          "calls": [
+            {
+              "callId": "dependent",
+              "name": "record_create",
+              "arguments": {
+                "type": "dependency-note",
+                "data": {
+                  "ticketId": "00000000-0000-4000-8000-000000000001",
+                  "note": "Keep this ticket"
+                }
+              }
+            }
+          ]
+        },
+        {
+          "kind": "text",
+          "text": "Created ticket T-1 and its dependency note."
+        }
+      ]
+    },
+    {
+      "input": [
+        {
+          "role": "user",
+          "content": "Delete ticket T-1 now."
+        }
+      ],
+      "script": [
+        {
+          "kind": "tool_calls",
+          "calls": [
+            {
+              "callId": "delete",
+              "name": "record_delete",
+              "arguments": {
+                "type": "ticket",
+                "id": "00000000-0000-4000-8000-000000000001",
+                "version": 1
+              }
+            }
+          ]
+        },
+        {
+          "kind": "text",
+          "text": "I could not delete ticket T-1 because its dependency note restricts deletion."
+        }
+      ]
+    }
+  ],
+  "expect": [
+    {
+      "kind": "soul_committed",
+      "path": "resources/dependency-note/schema.yml"
+    },
+    {
+      "kind": "tool_result_field_equals",
+      "name": "record_create",
+      "argumentPath": "type",
+      "argumentValue": "dependency-note",
+      "status": "succeeded",
+      "turnIndex": 2,
+      "outputPath": "id",
+      "value": "00000000-0000-4000-8000-000000000002"
+    },
+    {
+      "kind": "tool_result_reason_contains",
+      "name": "record_delete",
+      "argumentPath": "id",
+      "argumentValue": "00000000-0000-4000-8000-000000000001",
+      "status": "invalid_arguments",
+      "turnIndex": 3,
+      "text": "restricted delete dependencies"
+    },
+    {
+      "kind": "run_status",
+      "status": "succeeded"
+    }
+  ]
+}
