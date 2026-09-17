@@ -3507,4 +3507,9 @@ export const PG_MIGRATIONS: PgMigration[] = [
     description: "persist independently selected OIM Knowledge subscriptions",
     up: applyStatements(OIM_KNOWLEDGE_SUBSCRIPTION_STORAGE_STATEMENTS),
   },
+  {
+    version: 133,
+    description: "recover Slack leases skipped by an earlier Knowledge v132 deployment",
+    up: addSlackDeliveryLeases,
+  },
 ];

@@ -43,7 +43,7 @@ PostgreSQL persistence composition, auth, Soul Git writes, and Worker callback p
 | `src/admin/`, `src/setup/`, `src/onboarding/`, `src/system/` | Admin, setup, health. `admin/run-context.ts` projects authorized, typed related work for Run detail only. |
 | `src/system/telemetry/` | Deployment telemetry collection, admin preview/preferences, and service-only dispatch; reporter and durable state live in observability/storage. |
 | `src/pg-migrations/` | Boot-applied PostgreSQL schema migrations. |
-| `src/pg-migrations/20260917-slack-delivery-leases.ts` | Backfills recoverable leases for pre-existing Slack reply claims. |
+| `src/pg-migrations/20260917-slack-delivery-leases.ts` | Backfills recoverable Slack reply leases; v133 replays this idempotent DDL for databases that reached Knowledge v132 before Slack v125 landed. |
 | `src/test/` | API test helpers. |
 
 ## Rules
