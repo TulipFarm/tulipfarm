@@ -2393,6 +2393,22 @@ export function oimManifestIssues(manifest: OimManifest): string[] {
       }
       configurationFields.set(field.id, field.agentVisible === true);
     }
+    const configurationProducers = new Set(
+      manifest.auth.steps.flatMap((step) => {
+        const targets =
+          step.type === "fields"
+            ? step.fields.map((field) => field.target)
+            : "bindings" in step
+              ? step.bindings.map((binding) => binding.target)
+              : [];
+        return targets.flatMap((target) => (target.type === "configuration" ? [target.field] : []));
+      })
+    );
+    for (const field of manifest.auth.configurationFields ?? []) {
+      if (field.required === true && !configurationProducers.has(field.id)) {
+        issues.push(`auth: required configuration field ${field.id} has no producer`);
+      }
+    }
     const stepIds = new Set<string>();
     for (const step of manifest.auth.steps) {
       if (stepIds.has(step.id)) issues.push(`auth: step ${step.id} is declared more than once`);

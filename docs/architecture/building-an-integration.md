@@ -53,6 +53,22 @@ Authentication declares credential slots, non-secret configuration, and ordered 
 Credential values are supplied later through a connection and stored as secrets. They never belong
 in `oim.yml`, a companion, a fixture, or a tool argument.
 
+Credential ownership follows **producers**, not consumers: a fields step produces its declared
+targets; OAuth and JWT steps produce their response bindings, but consume their client or signing
+credentials. A required configuration field must have a fields or callback binding that produces
+it. Declaring a configuration field alone does not make it collectable.
+
+To correct saved input, the Connection API supports
+`PATCH /api/v1/integrations/:key/connections/:connectionId/credentials` with
+`{ "values": { "<field-id>": "<replacement>" } }`. Only declared fields-step IDs are accepted;
+omitted fields remain unchanged. The response contains only `connectionId` and `verification`,
+never stored credentials. The authorization gate is the same as starting provider authorization.
+Replacement preserves the Connection's owner and references, fences stale callbacks and refreshes,
+and invalidates earlier verification evidence. Changed fields require fresh browser authorization
+because consent can depend on configuration embedded in provider URLs and callback bindings.
+Static credentials are immediately reverified. Failed proof persists `action_required` and retires
+the previous healthy evidence; retry verifies the saved values, while another PATCH corrects them.
+
 New connectable packages use Auth 1.1 and provider verification:
 
 ```yaml

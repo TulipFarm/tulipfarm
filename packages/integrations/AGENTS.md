@@ -14,7 +14,7 @@ Owns adapter contracts, event normalization, source ACLs, sync checkpoints, and 
 | --- | --- |
 | `src/auth/` | Provider-neutral public origins and callback URL resolution. |
 | `src/authoring/` | Run-scoped Integration draft review, immutable package capture, and the P09 reviewed-Community install adapter. |
-| `src/connections/` | Exact-major Connection selection, operation Credential binding, typed provider verification, OAuth refresh, refresh queue contract, and manifestless revoke. |
+| `src/connections/` | Exact-major Connection selection, operation Credential binding, typed provider verification, field replacement and reauthorization, OAuth refresh, refresh queue contract, and manifestless revoke. |
 | `src/http.ts` | Provider-neutral HTTP port, failure classification, bounded pagination. |
 | `src/grants.ts` | Default-deny grants for concrete external targets. |
 | `src/egress/` | Manifest compiler, adapter, fetch transport, destination cage. `oim-content.ts` bounds MIME/File requests; `mime-message.ts` composes mail. `web-content.ts` renders fetched HTML to Markdown without a model. |

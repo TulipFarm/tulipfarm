@@ -12,10 +12,12 @@ import {
   type OimPackageCatalogEntry,
   type OimReleasePackage,
   OimWebhookRegistrationError,
+  oimCredentialFieldIssue,
   planWebhookRegistration,
   projectVerifiedConnectionIdentity,
   type ResolvedOimPackage,
   refreshOimConnection,
+  replaceOimCredentialFields,
   resolveOimPackage,
   revokeOimConnection,
   type VerifiedConnectionIdentityEvidence,
@@ -28,6 +30,7 @@ import type {
   PersistedConnection,
   PersistedWebhookRegistration,
   PublishConnectionAuthStep,
+  ReplaceConnectionCredentials,
   WebhookRegistrationKey,
   WebhookRegistrationTarget,
 } from "@tulipfarm/storage";
@@ -50,6 +53,7 @@ import {
 type Owner = OimConnection["owner"];
 
 interface ConnectionRepository {
+  replaceCredentials?(input: ReplaceConnectionCredentials): Promise<boolean>;
   put(businessId: string, connection: OimConnection): Promise<void>;
   findById(businessId: string, id: string): Promise<PersistedConnection | null>;
   listForIntegration(
@@ -423,13 +427,8 @@ export class OimConnectionService {
     ) {
       throw new OimConnectionRequestError(403, "forbidden");
     }
-    const missingField = (pkg.manifest.auth?.steps ?? [])
-      .filter((step) => step.type === "fields")
-      .flatMap((step) => step.fields)
-      .find((field) => field.required === true && !input.values[field.id]);
-    if (missingField !== undefined) {
-      throw new OimConnectionRequestError(400, `missing_field:${missingField.id}`);
-    }
+    const issue = oimCredentialFieldIssue(pkg.manifest, input.values);
+    if (issue !== undefined) throw new OimConnectionRequestError(400, issue);
     const created = await createOimConnection(
       {
         connections: this.deps.connections,
@@ -452,6 +451,41 @@ export class OimConnectionService {
     return {
       ...created,
       verification: await this.verifyFieldConnection(pkg, created.connectionId),
+    };
+  }
+
+  async updateCredentials(
+    key: string,
+    connectionId: string,
+    actor: ConnectionActor,
+    values: Readonly<Record<string, string>>
+  ): Promise<OimConnectionCreateResult> {
+    const { pkg, connection } = await this.connection(key, connectionId, actor);
+    await this.requireOperational(connection);
+    const issue = oimCredentialFieldIssue(pkg.manifest, values, connection);
+    if (issue !== undefined) throw new OimConnectionRequestError(400, issue);
+    if (Object.keys(values).length === 0) {
+      throw new OimConnectionRequestError(400, "credential_fields_required");
+    }
+    const replace = this.deps.connections.replaceCredentials;
+    if (replace === undefined)
+      throw new OimConnectionRequestError(502, "credential_update_unavailable");
+    const published = await replaceOimCredentialFields({
+      manifest: pkg.manifest,
+      connection,
+      values,
+      authSteps: await this.deps.authSteps.list(connection.businessId, connection.id),
+      credentials: this.deps.credentials,
+      replace: (update) => replace.call(this.deps.connections, update),
+      now: (this.deps.now ?? (() => new Date()))(),
+    });
+    if (!published) throw new OimConnectionRequestError(409, "credential_update_conflict");
+    return {
+      connectionId,
+      verification:
+        pkg.manifest.auth?.verification === undefined
+          ? { status: "not_required" }
+          : await this.verifyFieldConnection(pkg, connectionId),
     };
   }
 
@@ -803,9 +837,6 @@ export class OimConnectionService {
     connectionId: string
   ): Promise<OimConnectionCreateResult["verification"]> {
     const verification = this.deps.verification;
-    if (verification === undefined) {
-      return { status: "action_required", error: "verification_unavailable" };
-    }
     let connection: PersistedConnection | null;
     let rows: readonly ConnectionAuthStep[];
     try {
@@ -813,9 +844,23 @@ export class OimConnectionService {
       if (connection === null) {
         return { status: "action_required", error: "verification_persistence_failed" };
       }
+      if (
+        !(await this.deps.connections.markActionRequired(
+          connection.businessId,
+          connection.id,
+          connection.integration,
+          connection.owner,
+          (this.deps.now ?? (() => new Date()))().toISOString()
+        ))
+      ) {
+        return { status: "action_required", error: "verification_persistence_failed" };
+      }
       rows = await this.deps.authSteps.list(this.deps.businessId, connection.id);
     } catch {
       return { status: "action_required", error: "verification_persistence_failed" };
+    }
+    if (verification === undefined) {
+      return { status: "action_required", error: "verification_unavailable" };
     }
     if (!rows.every((row) => row.status === "active")) return { status: "pending" };
     const publicationRow = rows[0];
@@ -827,6 +872,13 @@ export class OimConnectionService {
     try {
       evidence = await verification.verify({ package: pkg, connection });
     } catch (error) {
+      await this.deps.connections.markActionRequired(
+        connection.businessId,
+        connection.id,
+        connection.integration,
+        connection.owner,
+        (this.deps.now ?? (() => new Date()))().toISOString()
+      );
       return {
         status: "action_required",
         error:
@@ -838,40 +890,8 @@ export class OimConnectionService {
 
     const identity = projectVerifiedConnectionIdentity(evidence) ?? undefined;
     try {
-      const published = await this.deps.connections.publishAuthStep({
-        businessId: connection.businessId,
-        connectionId: connection.id,
-        integration: connection.integration,
-        owner: connection.owner,
-        stepId: publicationRow.stepId,
-        expectedRevision: publicationRow.revision,
-        status: "active",
-        accessSlot: publicationRow.accessSlot,
-        accessSecretRef: publicationRow.accessSecretRef,
-        refreshSlot: publicationRow.refreshSlot,
-        refreshSecretRef: publicationRow.refreshSecretRef,
-        externalIdentity: publicationRow.externalIdentity,
-        expiresAt: publicationRow.expiresAt,
-        healthCheckedAt: (this.deps.now ?? (() => new Date()))().toISOString(),
-        configuration: {},
-        secretBindings: {},
-        ...(identity === undefined
-          ? {}
-          : {
-              verifiedIdentity: {
-                businessId: connection.businessId,
-                connectionId: connection.id,
-                integrationId: connection.integration.id,
-                integrationMajorVersion: connection.integration.majorVersion,
-                ...identity,
-                proofKind: "health" as const,
-              },
-            }),
-        verificationEvidence: evidence,
-      });
-      return published
-        ? { status: "verified" }
-        : { status: "action_required", error: "verification_persistence_failed" };
+      await verification.publish(evidence, identity);
+      return { status: "verified" };
     } catch {
       return { status: "action_required", error: "verification_persistence_failed" };
     }
