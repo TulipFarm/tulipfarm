@@ -442,6 +442,7 @@ describe("SlackDeliveryAdapter", () => {
           text: "All systems green.",
           thread_ts: "1784999999.000001",
           client_msg_id: "delivery-1",
+          metadata: { event_type: "tulipfarm_delivery", event_payload: { id: "delivery-1" } },
         },
       },
       "xoxb-leased"
@@ -482,6 +483,10 @@ describe("SlackDeliveryAdapter", () => {
           text: "hi",
           blocks,
           client_msg_id: "delivery-blocks-1",
+          metadata: {
+            event_type: "tulipfarm_delivery",
+            event_payload: { id: "delivery-blocks-1" },
+          },
         },
       },
       "xoxb-leased"
@@ -538,7 +543,7 @@ describe("SlackDeliveryAdapter", () => {
     });
     await expect(
       rateLimited.deliver({ ...attempt, text: "hello", agentDisplayName: "Agent" }, "xoxb-leased")
-    ).rejects.toEqual(new SlackDeliveryError("provider_rate_limited"));
+    ).rejects.toMatchObject({ code: "provider_rate_limited", retryable: true, retryAfterMs: 7000 });
     expect(rateLedger.failures).toContainEqual({
       status: "retry_wait",
       code: "provider_rate_limited",
@@ -558,10 +563,11 @@ describe("SlackDeliveryAdapter", () => {
         { ...attempt, idempotencyKey: "delivery-2", text: "hello", agentDisplayName: "Agent" },
         "xoxb-leased"
       )
-    ).rejects.toEqual(new SlackDeliveryError("provider_unavailable"));
+    ).rejects.toMatchObject({ code: "provider_unavailable", retryable: true });
     expect(ambiguousLedger.failures).toContainEqual({
       status: "ambiguous",
       code: "provider_unavailable",
+      retryAfterMs: 5000,
     });
   });
 

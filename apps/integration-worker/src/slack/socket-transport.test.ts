@@ -52,6 +52,61 @@ async function flush(): Promise<void> {
 }
 
 describe("SlackSocketTransport", () => {
+  it("does not open a stale socket if rotation aborts a pending connection handshake", async () => {
+    const controller = new AbortController();
+    let finish: (response: IntegrationHttpResponse) => void = () => {};
+    const pending = new Promise<IntegrationHttpResponse>((resolve) => {
+      finish = resolve;
+    });
+    const openWebSocket = vi.fn(() => new FakeWebSocket());
+    const transport = new SlackSocketTransport({
+      http: { send: () => pending },
+      appToken: "old-app",
+      onEnvelope: vi.fn(),
+      openWebSocket,
+    });
+    const connected = transport.connect(controller.signal);
+    controller.abort();
+    finish({ status: 200, headers: {}, body: { ok: true, url: "wss://fixture.invalid" } });
+    await expect(connected).rejects.toThrow();
+    expect(openWebSocket).not.toHaveBeenCalled();
+  });
+
+  it("drains accepted handlers and refuses late envelopes when an owned socket closes", async () => {
+    const controller = new AbortController();
+    const socket = new FakeWebSocket();
+    let finish: () => void = () => {};
+    const work = new Promise<void>((resolve) => {
+      finish = resolve;
+    });
+    const onEnvelope = vi.fn(async (_envelope, ack: () => Promise<void>) => {
+      await ack();
+      await work;
+    });
+    const transport = new SlackSocketTransport({
+      http: http(),
+      appToken: "old-app",
+      onEnvelope,
+      openWebSocket: () => socket,
+    });
+    const connection = await transport.connect(controller.signal);
+    const envelope = { data: JSON.stringify({ envelope_id: "E1", type: "events_api" }) };
+    socket.emit("message", envelope);
+    await flush();
+    controller.abort();
+    let drained = false;
+    const closing = connection.close().then(() => {
+      drained = true;
+    });
+    socket.emit("message", envelope);
+    await flush();
+    expect(onEnvelope).toHaveBeenCalledTimes(1);
+    expect(drained).toBe(false);
+    finish();
+    await closing;
+    expect(drained).toBe(true);
+  });
+
   it("mints the WSS URL via apps.connections.open using the app token", async () => {
     const httpPort = http();
     const sockets: FakeWebSocket[] = [];

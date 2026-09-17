@@ -80,3 +80,16 @@ that TulipFarm user.
 
 Slack approvals can also be decided from Slack when TulipFarm posts an Approve/Deny
 prompt for a parked run.
+
+## Check delayed replies after reconnecting
+
+After replacing credentials through **Integrations → slack**, allow the connection to refresh.
+TulipFarm picks up the new bot and app tokens without a worker restart and keeps pending replies.
+
+If Slack rate-limits a reply, TulipFarm waits for Slack's retry deadline and sends the original
+answer, rather than replacing it with a generic error message.
+
+If a connection drops after Slack may have accepted a message, TulipFarm checks the original
+thread for that message before recording delivery. When it cannot confirm what happened, it
+keeps checking instead of risking a duplicate post. Check the Slack thread before asking again:
+repeating your prompt starts new work.
