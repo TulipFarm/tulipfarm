@@ -13,6 +13,8 @@ function toPortRecord(record: PersistedChannelDeliveryRecord): ChannelDeliveryRe
     principalId: record.principalId,
     status: record.status,
     attempts: record.attempts,
+    ...(record.nextAttemptAt === undefined ? {} : { nextAttemptAt: record.nextAttemptAt }),
+    ...(record.updatedAt === undefined ? {} : { updatedAt: record.updatedAt }),
     ...(record.providerMessageId === undefined
       ? {}
       : { providerMessageId: record.providerMessageId }),

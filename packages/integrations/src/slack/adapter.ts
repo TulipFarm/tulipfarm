@@ -10,7 +10,11 @@ import type {
   ChannelRoutingSource,
   ChannelRunStarter,
 } from "../channels";
-import { classifyHttpFailure, type IntegrationHttpPort } from "../http";
+import {
+  classifyHttpFailure,
+  type IntegrationHttpPort,
+  type IntegrationHttpResponse,
+} from "../http";
 import { ChannelRouteDeniedError, resolveChannelRoute } from "../model";
 import { toSlackMrkdwn } from "./markdown";
 import { resolveMentionsInText, type SlackMentionResolverPort } from "./mentions";
@@ -232,12 +236,17 @@ export interface SlackDeliveryAdapterDeps {
   ledger: ChannelDeliveryLedger;
   authorization: ChannelDeliveryAuthorizationPort;
   http: IntegrationHttpPort;
+  now?: () => number;
 }
 
 export class SlackDeliveryError extends Error {
   readonly name = "SlackDeliveryError";
 
-  constructor(readonly code: string) {
+  constructor(
+    readonly code: string,
+    readonly retryable = false,
+    readonly retryAfterMs = 5000
+  ) {
     super(`slack_delivery_failed:${code}`);
   }
 }
@@ -266,17 +275,44 @@ export class SlackDeliveryAdapter {
     const begun = await this.deps.ledger.begin(attempt);
     if (begun.outcome === "duplicate") {
       if (begun.record.status === "confirmed") return begun.record;
-      throw new SlackDeliveryError("delivery_in_progress");
+      const now = this.deps.now?.() ?? Date.now();
+      if (
+        begun.record.status === "ambiguous" ||
+        (begun.record.status === "pending" &&
+          begun.record.updatedAt !== undefined &&
+          Date.parse(begun.record.updatedAt) + 60_000 <= now)
+      ) {
+        if (request.updateTs !== undefined) {
+          await this.deps.ledger.fail(attempt, {
+            status: "retry_wait",
+            code: "idempotent_update_recovery",
+            retryAfterMs: 0,
+          });
+          return this.deliver(request, credential);
+        }
+        return this.reconcile(request, credential, attempt);
+      }
+      const retryable = ["pending", "retry_wait", "ambiguous"].includes(begun.record.status);
+      throw new SlackDeliveryError(
+        "delivery_in_progress",
+        retryable,
+        begun.record.nextAttemptAt === undefined
+          ? 5000
+          : Math.max(1000, Date.parse(begun.record.nextAttemptAt) - now)
+      );
     }
 
-    const authorization = await this.deps.authorization.authorize({
-      businessId: attempt.businessId,
-      integrationId: attempt.integrationId,
-      routeId: attempt.routeId,
-      agentId: attempt.agentId,
-      principalId: attempt.principalId,
-      destination: attempt.destination,
-    });
+    let authorization: "allowed" | "revoked";
+    try {
+      authorization = await this.deps.authorization.authorize(attempt);
+    } catch {
+      await this.deps.ledger.fail(attempt, {
+        status: "retry_wait",
+        code: "authorization_unavailable",
+        retryAfterMs: 5000,
+      });
+      throw new SlackDeliveryError("authorization_unavailable", true);
+    }
     if (authorization === "revoked") {
       await this.deps.ledger.fail(attempt, {
         status: "revoked",
@@ -290,56 +326,183 @@ export class SlackDeliveryAdapter {
     }
 
     const text = toSlackMrkdwn(request.text);
-    const response = await this.deps.http.send(
-      request.updateTs === undefined
-        ? {
-            method: "POST",
-            path: "/chat.postMessage",
-            body: {
-              channel: request.destination,
-              text,
-              ...(request.threadId === undefined ? {} : { thread_ts: request.threadId }),
-              ...(request.blocks === undefined ? {} : { blocks: request.blocks }),
-              client_msg_id: request.idempotencyKey,
+    let response: IntegrationHttpResponse;
+    try {
+      response = await this.deps.http.send(
+        request.updateTs === undefined
+          ? {
+              method: "POST",
+              path: "/chat.postMessage",
+              body: {
+                channel: request.destination,
+                text,
+                ...(request.threadId === undefined ? {} : { thread_ts: request.threadId }),
+                ...(request.blocks === undefined ? {} : { blocks: request.blocks }),
+                client_msg_id: request.idempotencyKey,
+                metadata: {
+                  event_type: "tulipfarm_delivery",
+                  event_payload: { id: request.idempotencyKey },
+                },
+              },
+            }
+          : {
+              method: "POST",
+              path: "/chat.update",
+              body: {
+                channel: request.destination,
+                ts: request.updateTs,
+                text,
+                ...(request.blocks === undefined ? {} : { blocks: request.blocks }),
+              },
             },
-          }
-        : {
-            method: "POST",
-            path: "/chat.update",
-            body: {
-              channel: request.destination,
-              ts: request.updateTs,
-              text,
-              ...(request.blocks === undefined ? {} : { blocks: request.blocks }),
-            },
-          },
-      credential
+        credential
+      );
+    } catch {
+      await this.deps.ledger.fail(attempt, {
+        status: request.updateTs === undefined ? "ambiguous" : "retry_wait",
+        code: "provider_unavailable",
+        retryAfterMs: 5000,
+      });
+      throw new SlackDeliveryError("provider_unavailable", true);
+    }
+    const failure = classifyHttpFailure(
+      response,
+      true,
+      "Retry-After",
+      new Date(this.deps.now?.() ?? Date.now())
     );
-    const failure = classifyHttpFailure(response, true);
     if (failure !== null) {
-      const status =
-        failure.code === "provider_rate_limited"
-          ? "retry_wait"
-          : failure.phase === "after_dispatch"
-            ? "ambiguous"
-            : "failed";
+      const retryable = failure.retryable || failure.code === "provider_unauthorized";
+      const retryAfterMs =
+        failure.retryAfterMs ?? (failure.code === "provider_unauthorized" ? 30_000 : 5000);
+      // Slack does not promise idempotency for chat.postMessage. An uncertain write must
+      // reconcile its receipt, not trust client_msg_id to prevent a second message.
+      const status = retryable
+        ? failure.phase === "after_dispatch" && request.updateTs === undefined
+          ? "ambiguous"
+          : "retry_wait"
+        : "failed";
       await this.deps.ledger.fail(attempt, {
         status,
         code: failure.code,
-        ...(failure.retryAfterMs === undefined ? {} : { retryAfterMs: failure.retryAfterMs }),
+        ...(retryable ? { retryAfterMs } : {}),
       });
-      throw new SlackDeliveryError(failure.code);
+      throw new SlackDeliveryError(failure.code, retryable, retryAfterMs);
     }
 
     const providerMessageId = slackMessageId(response.body);
     if (providerMessageId === undefined) {
+      const body = response.body as { ok?: boolean; error?: string } | undefined;
+      const code = body?.ok === false && typeof body.error === "string" ? body.error : undefined;
+      const retryable =
+        code !== undefined &&
+        ["invalid_auth", "token_revoked", "token_expired", "not_authed", "ratelimited"].includes(
+          code
+        );
+      const permanent =
+        code !== undefined &&
+        [
+          "channel_not_found",
+          "not_in_channel",
+          "is_archived",
+          "missing_scope",
+          "msg_too_long",
+          "invalid_blocks",
+          "no_text",
+        ].includes(code);
       await this.deps.ledger.fail(attempt, {
-        status: "failed",
-        code: "provider_response_malformed",
+        status: retryable ? "retry_wait" : permanent ? "failed" : "ambiguous",
+        code: code ?? "provider_response_malformed",
+        ...(retryable ? { retryAfterMs: 30_000 } : {}),
       });
-      throw new SlackDeliveryError("provider_response_malformed");
+      throw new SlackDeliveryError(code ?? "provider_response_malformed", !permanent, 30_000);
     }
     return this.deps.ledger.complete(attempt, providerMessageId);
+  }
+
+  private async reconcile(
+    request: SlackDeliveryRequest,
+    credential: string,
+    attempt: ChannelDeliveryAttempt
+  ): Promise<ChannelDeliveryRecord> {
+    const authorized = await this.deps.authorization.authorize(attempt);
+    if (authorized !== "allowed") throw new SlackDeliveryError("integration_revoked");
+    const identity = await this.deps.http.send({ method: "POST", path: "/auth.test" }, credential);
+    const identityFailure = classifyHttpFailure(
+      identity,
+      false,
+      "Retry-After",
+      new Date(this.deps.now?.() ?? Date.now())
+    );
+    if (identityFailure !== null) {
+      throw new SlackDeliveryError(
+        identityFailure.code,
+        true,
+        identityFailure.retryAfterMs ?? 30_000
+      );
+    }
+    const identityBody = identity.body as { ok?: boolean; user_id?: string } | undefined;
+    if (identityBody?.ok !== true || typeof identityBody.user_id !== "string") {
+      throw new SlackDeliveryError("delivery_reconciliation_unavailable", true, 30_000);
+    }
+    let cursor: string | undefined;
+    for (let page = 0; page < 10; page += 1) {
+      const response = await this.deps.http.send(
+        {
+          method: "GET",
+          path:
+            request.threadId === undefined ? "/conversations.history" : "/conversations.replies",
+          query: {
+            channel: request.destination,
+            limit: "100",
+            include_all_metadata: "true",
+            ...(request.threadId === undefined ? {} : { ts: request.threadId }),
+            ...(cursor === undefined ? {} : { cursor }),
+          },
+        },
+        credential
+      );
+      const failure = classifyHttpFailure(
+        response,
+        false,
+        "Retry-After",
+        new Date(this.deps.now?.() ?? Date.now())
+      );
+      if (failure !== null) {
+        throw new SlackDeliveryError(failure.code, true, failure.retryAfterMs ?? 30_000);
+      }
+      const body = response.body as
+        | {
+            ok?: boolean;
+            messages?: {
+              ts?: string;
+              user?: string;
+              client_msg_id?: string;
+              metadata?: {
+                event_type?: string;
+                event_payload?: { id?: string };
+              };
+            }[];
+            response_metadata?: { next_cursor?: string };
+          }
+        | undefined;
+      if (body?.ok !== true || !Array.isArray(body.messages)) {
+        throw new SlackDeliveryError("delivery_reconciliation_unavailable", true, 30_000);
+      }
+      const receipt = body.messages.find(
+        (message) =>
+          message.user === identityBody.user_id &&
+          (message.client_msg_id === request.idempotencyKey ||
+            (message.metadata?.event_type === "tulipfarm_delivery" &&
+              message.metadata.event_payload?.id === request.idempotencyKey))
+      );
+      if (receipt?.ts !== undefined) {
+        return this.deps.ledger.complete(attempt, receipt.ts);
+      }
+      cursor = body.response_metadata?.next_cursor?.trim();
+      if (!cursor) break;
+    }
+    throw new SlackDeliveryError("delivery_outcome_unknown", true, 30_000);
   }
 
   /** Best-effort placeholder update; never touches the durable delivery ledger. */

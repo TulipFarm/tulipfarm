@@ -31,6 +31,7 @@ export class SlackWebApiHttp implements IntegrationHttpPort {
     try {
       response = await this.fetchImpl(url, {
         method: request.method,
+        signal: AbortSignal.timeout(15_000),
         headers: {
           authorization: `Bearer ${credential}`,
           accept: "application/json",

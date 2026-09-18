@@ -77,11 +77,13 @@ export class SlackSocketTransport {
   constructor(private readonly options: SlackSocketTransportOptions) {}
 
   async connect(signal: AbortSignal): Promise<SlackSocketConnection> {
+    signal.throwIfAborted();
     const opened = await this.options.http.send(
       { method: "POST", path: "/apps.connections.open" },
       this.options.appToken
     );
     const body = opened.body as ConnectionsOpenResponse | undefined;
+    signal.throwIfAborted();
     if (opened.status !== 200 || body?.ok !== true || typeof body.url !== "string") {
       throw new Error(
         `slack_socket_connect_failed:${typeof body?.error === "string" ? body.error : opened.status}`
@@ -94,18 +96,26 @@ export class SlackSocketTransport {
     const closed = new Promise<void>((resolve) => {
       resolveClosed = resolve;
     });
+    const inFlight = new Set<Promise<void>>();
+    let accepting = true;
 
     const onAbort = () => {
+      accepting = false;
       socket.close();
+      resolveClosed();
     };
     signal.addEventListener("abort", onAbort, { once: true });
 
     socket.addEventListener("message", (event) => {
-      this.handleMessage(socket, event.data).catch((error: unknown) => {
+      if (signal.aborted || !accepting) return;
+      const work = this.handleMessage(socket, event.data).catch((error: unknown) => {
         this.options.log?.warn("slack socket message handling failed", error);
       });
+      inFlight.add(work);
+      void work.finally(() => inFlight.delete(work));
     });
     socket.addEventListener("close", () => {
+      accepting = false;
       signal.removeEventListener("abort", onAbort);
       resolveClosed();
     });
@@ -116,7 +126,10 @@ export class SlackSocketTransport {
     return {
       closed,
       close: async () => {
+        accepting = false;
         socket.close();
+        signal.removeEventListener("abort", onAbort);
+        await Promise.allSettled(inFlight);
       },
     };
   }

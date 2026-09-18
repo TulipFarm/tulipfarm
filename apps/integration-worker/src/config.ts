@@ -1,4 +1,4 @@
-/** Migration 120 adds the durable OIM verification evidence required by this worker. */
+/** v132 adds the selected Knowledge subscriptions required by this worker. */
 export const REQUIRED_SCHEMA_VERSION = 132;
 
 export interface IntegrationWorkerConfig {

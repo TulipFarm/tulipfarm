@@ -83,7 +83,8 @@ interface SlackCredentialResponse {
 /** Starts Slack loops only when tokens are sealed; disconnected Slack returns no loops. */
 export async function createSlackChannelLoops(
   deps: SlackChannelDeps,
-  quiet = false
+  quiet = false,
+  currentCredential?: SlackCredentialResponse
 ): Promise<DrainableLoop[]> {
   const internalApi = new InternalApiClient({
     baseUrl: deps.internalApiUrl,
@@ -102,10 +103,12 @@ export async function createSlackChannelLoops(
 
   let credential: SlackCredentialResponse;
   try {
-    credential = await internalApi.require<SlackCredentialResponse>(
-      "GET",
-      "/api/v1/internal/channels/slack/credential"
-    );
+    credential =
+      currentCredential ??
+      (await internalApi.require<SlackCredentialResponse>(
+        "GET",
+        "/api/v1/internal/channels/slack/credential"
+      ));
   } catch (error) {
     if (!quiet) {
       deps.log.warn("slack credential lease failed; Slack channel disabled for this boot", error);
@@ -124,6 +127,7 @@ export async function createSlackChannelLoops(
   }
   const botToken = credential.botToken;
   const appToken = credential.appToken;
+  if (deps.signal.aborted) return [];
 
   const transactions = transactionPort(deps.pool);
   const now = () => new Date().toISOString();
@@ -306,23 +310,82 @@ export async function createSlackChannelLoops(
 
 const CREDENTIAL_POLL_INTERVAL_MS = 30_000;
 
-/** Watches for Slack connection; the wait drains and never starts loops after abort. */
+/** Owns every credential generation, draining its loops before starting the next one. */
 export function watchForSlackChannelCredential(
   deps: SlackChannelDeps,
   onReady: (loops: DrainableLoop[]) => void,
   pollIntervalMs = CREDENTIAL_POLL_INTERVAL_MS
 ): DrainableLoop {
   const settled = (async () => {
-    deps.log.info("Slack not connected yet; watching for connection in the background");
-    while (!deps.signal.aborted) {
-      const loops = await createSlackChannelLoops(deps, /* quiet */ true);
-      if (loops.length > 0) {
-        if (deps.signal.aborted) return;
-        deps.log.info("Slack connected; starting the socket + delivery-poll loops");
-        onReady(loops);
-        return;
+    const internalApi = new InternalApiClient({
+      baseUrl: deps.internalApiUrl,
+      credential: deps.internalApiCredential,
+    });
+    let active:
+      | {
+          credential: SlackCredentialResponse;
+          controller: AbortController;
+          drained: Promise<unknown>;
+        }
+      | undefined;
+    const abortActive = () => active?.controller.abort();
+    deps.signal.addEventListener("abort", abortActive, { once: true });
+    const stopActive = async () => {
+      active?.controller.abort();
+      await active?.drained;
+      active = undefined;
+    };
+    try {
+      while (!deps.signal.aborted) {
+        let credential: SlackCredentialResponse = { configured: false };
+        try {
+          credential = await internalApi.require<SlackCredentialResponse>(
+            "GET",
+            "/api/v1/internal/channels/slack/credential"
+          );
+        } catch {
+          deps.log.warn("Slack credential refresh unavailable; pausing owned loops");
+        }
+        if (deps.signal.aborted) break;
+        const configured = credential.configured && credential.botToken && credential.appToken;
+        if (
+          active !== undefined &&
+          (!configured ||
+            active.controller.signal.aborted ||
+            credential.botToken !== active.credential.botToken ||
+            credential.appToken !== active.credential.appToken)
+        ) {
+          await stopActive();
+        }
+        if (configured && active === undefined && !deps.signal.aborted) {
+          const controller = new AbortController();
+          const loops = await createSlackChannelLoops(
+            { ...deps, signal: controller.signal },
+            true,
+            credential
+          );
+          active = {
+            credential,
+            controller,
+            drained: Promise.allSettled(loops.map((loop) => loop.settled)),
+          };
+          for (const loop of loops) {
+            void loop.settled.then(
+              () => controller.abort(),
+              () => {
+                deps.log.warn(`Slack ${loop.name} stopped; refreshing owned loops`);
+                controller.abort();
+              }
+            );
+          }
+          if (deps.signal.aborted) break;
+          onReady(loops);
+        }
+        await defaultWait(pollIntervalMs, deps.signal);
       }
-      await defaultWait(pollIntervalMs, deps.signal);
+    } finally {
+      await stopActive();
+      deps.signal.removeEventListener("abort", abortActive);
     }
   })();
 
