@@ -1,5 +1,5 @@
 /** Migration 120 adds the durable OIM verification evidence required by this worker. */
-export const REQUIRED_SCHEMA_VERSION = 120;
+export const REQUIRED_SCHEMA_VERSION = 125;
 
 export interface IntegrationWorkerConfig {
   readonly databaseUrl: string;

@@ -1,4 +1,8 @@
-import type { IntegrationHttpPort, SlackDeliveryAdapter } from "@tulipfarm/integrations";
+import {
+  type IntegrationHttpPort,
+  type SlackDeliveryAdapter,
+  SlackDeliveryError,
+} from "@tulipfarm/integrations";
 import type {
   ChannelRunDeliveryStore,
   PersistedChannelRunDeliveryRecord,
@@ -74,6 +78,36 @@ async function runOneTick(deps: Parameters<typeof startDeliveryPollLoop>[1]): Pr
 }
 
 describe("startDeliveryPollLoop", () => {
+  it("retries a 429 after Retry-After without replacing the completed answer with a failure", async () => {
+    const claimed = row({ status: "delivering", leaseGeneration: 1 });
+    const retry = vi.fn();
+    const markStatus = vi.fn();
+    const deliver = vi
+      .fn()
+      .mockRejectedValue(new SlackDeliveryError("provider_rate_limited", true, 90_000));
+    await runOneTick({
+      businessId: "business-1",
+      runDeliveries: {
+        listPending: vi.fn().mockResolvedValue([row()]),
+        claim: vi.fn().mockResolvedValue(claimed),
+        retry,
+        markStatus,
+      } as unknown as ChannelRunDeliveryStore,
+      runs: {
+        find: vi.fn().mockResolvedValue(persistedRun({ status: "succeeded" })),
+      } as unknown as RunStore,
+      internalApi: {
+        require: vi.fn().mockResolvedValue({ status: "succeeded", text: "The answer is 42." }),
+      } as unknown as InternalApiClient,
+      delivery: { deliver } as unknown as SlackDeliveryAdapter,
+      credential: "xoxb-leased",
+      log: { warn: vi.fn() },
+    });
+    expect(deliver).toHaveBeenCalledTimes(1);
+    expect(retry).toHaveBeenCalledWith("business-1", "run-1", 1, 90_000);
+    expect(markStatus).not.toHaveBeenCalled();
+  });
+
   it("sets the assistant status indicator for a still-running Run", async () => {
     const listPending = vi.fn().mockResolvedValue([row({ threadId: "1785000000.0001" })]);
     const runDeliveries = {
@@ -137,7 +171,7 @@ describe("startDeliveryPollLoop", () => {
       }),
       "xoxb-leased"
     );
-    expect(runDeliveries.markStatus).toHaveBeenCalledWith("business-1", "run-1", "done");
+    expect(runDeliveries.markStatus).toHaveBeenCalledWith("business-1", "run-1", "done", undefined);
   });
 
   it("prefers reply.agentDisplayName over the raw agentId when the reply endpoint returns it", async () => {
@@ -277,7 +311,12 @@ describe("startDeliveryPollLoop", () => {
       [404]
     );
     expect(internalApi.require).not.toHaveBeenCalled();
-    expect(runDeliveries.markStatus).toHaveBeenCalledWith("business-1", "run-1", "failed");
+    expect(runDeliveries.markStatus).toHaveBeenCalledWith(
+      "business-1",
+      "run-1",
+      "failed",
+      undefined
+    );
   });
 
   it("uses the reason-specific failure copy recovered from the reply route", async () => {
@@ -346,7 +385,12 @@ describe("startDeliveryPollLoop", () => {
       }),
       "xoxb-leased"
     );
-    expect(runDeliveries.markStatus).toHaveBeenCalledWith("business-1", "run-1", "failed");
+    expect(runDeliveries.markStatus).toHaveBeenCalledWith(
+      "business-1",
+      "run-1",
+      "failed",
+      undefined
+    );
   });
 
   it("posts nothing when the Agent already answered by reacting", async () => {
@@ -385,7 +429,7 @@ describe("startDeliveryPollLoop", () => {
     });
 
     expect(deliver).not.toHaveBeenCalled();
-    expect(markStatus).toHaveBeenCalledWith("business-1", "run-1", "done");
+    expect(markStatus).toHaveBeenCalledWith("business-1", "run-1", "done", undefined);
   });
 
   it("posts nothing when a supersede took the row before the claim landed", async () => {

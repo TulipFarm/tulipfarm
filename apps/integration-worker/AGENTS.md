@@ -18,6 +18,7 @@ reconciliation, and rate limits for channel workers.
 | `src/main.ts` | Composition root: schema preflight, probes, loops, shutdown. |
 | `src/config.ts`, `src/data-dir.ts` | Env/defaults and volume-backed worker credential loading. |
 | `src/channels/` | Channel loop registration; add `DrainableLoop`s here. |
+| `src/channels/delivery-poll-loop.ts` | Leased, generation-fenced reply delivery and durable retry deadlines. |
 | `src/oim-ingress/` | OIM registration recovery, polling, websocket supervision, and durable inbox cycle. |
 | `src/oim-knowledge/` | OIM Knowledge sync registration and drainable polling loop. |
 | `src/oim-runtime.ts`, `src/oim-worker-host.ts` | Production OIM composition and internal host. |
@@ -36,6 +37,8 @@ reconciliation, and rate limits for channel workers.
   Connection, and credential lease immediately before each provider request.
 - Serve `/livez` and `/readyz`; drain cleanly on `SIGTERM`/`SIGINT`.
 - Slack Socket Mode ingress and delivery polling register loops through `src/channels/`.
+- The Slack credential watcher owns and drains all loops before replacing bot/app credentials.
+- Uncertain Slack posts reconcile provider receipts; never blindly replay `chat.postMessage`.
 - Every Slack `events_api` envelope passes `channels/mention-gate.ts` before the adapter; the gate
   is a required dispatch dependency, never an option.
 - `src/db.ts` is a deliberate local `pg` copy; apps must not import other apps.

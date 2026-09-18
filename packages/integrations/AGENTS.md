@@ -31,6 +31,8 @@ Owns adapter contracts, event normalization, source ACLs, sync checkpoints, and 
 ## Rules
 
 - Concrete transports live in `apps/integration-worker`; the broker must not import impls.
+- Slack `chat.postMessage` has no guaranteed idempotency key: reconcile uncertain writes against
+  the authenticated bot's message metadata; only confirmed receipts or safe retries advance delivery.
 - Prefer `src/egress/` over `src/<provider>/` when a manifest can express the provider.
 - Connection catalog entries carry fixed GraphQL `documents`; verification must check their byte
   digests and compile them as read-only queries before dispatch.
