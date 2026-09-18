@@ -165,6 +165,34 @@ infrastructure, and official-service endpoints stay deployment configuration, no
 settings. A locked control tells you to contact the hosting operator; a failed settings read does
 not enable editing. These checks do not enable production hosting or a managed-service connection.
 
+Business restrictions can tighten supported guardrails, the checks that limit agent behavior.
+They cannot replace hosted platform minimums with weaker settings. See
+[guardrails](/docs/administration/how-guardrails-work#platform-minimums) for the effective policy
+and the supported way to add restrictions.
+
+### What the shared release proves
+
+The API, the worker that runs scheduled and chat work, and the integration worker that handles
+third-party delivery come from one versioned public image. There is no separate cloud build.
+Use the same version and deployment settings for all three.
+
+The image checks exercise independent startup, persisted identity after restart, an isolated
+legacy-state upgrade fixture, and rejected production hosting settings. Separate assembled
+runtime tests check business changes, denied infrastructure changes, and the boundary between
+business permissions and operational credentials. Test-only hosted identity verification is
+not included as a production login path.
+
+An operational credential identifies a service performing a scoped maintenance task. It does
+not grant access to chats, records, provider secrets, or business actions. Support content
+access stays denied; there is no staff bypass or support-grant feature in this release. This
+application rule does not mean the infrastructure host cannot access stored data.
+
+Central cloud login, managed model and integration backends, temporary support grants,
+lifecycle orchestration, and migration remain separate deliverables. An image check or a
+passing test-hosted assembly is not proof that those services exist. Supported direct-provider
+credentials still use the chosen provider; a failed connection is an error, not a successful
+managed connection.
+
 ## Where to go next
 
 <Cards>

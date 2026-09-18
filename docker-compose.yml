@@ -94,6 +94,9 @@ services:
     environment:
       PORT: "8080"
       NODE_ENV: production
+      BUSINESS_ID: ${BUSINESS_ID:-tulipfarm-local}
+      RUNTIME_HOSTING_AUTHORITY: ${RUNTIME_HOSTING_AUTHORITY:-independent}
+      RUNTIME_INSTALLATION_ID: ${RUNTIME_INSTALLATION_ID:-}
       PUBLIC_URL: ${PUBLIC_URL:-http://localhost:${HOST_PORT:-8080}}
       PUBLIC_API_URL: ${PUBLIC_API_URL:-${PUBLIC_URL:-http://localhost:${HOST_PORT:-8080}}}
       PUBLIC_ORIGINS_LOCKED: ${PUBLIC_ORIGINS_LOCKED:-false}
@@ -163,6 +166,9 @@ services:
         condition: service_healthy
     environment:
       NODE_ENV: production
+      BUSINESS_ID: ${BUSINESS_ID:-tulipfarm-local}
+      RUNTIME_HOSTING_AUTHORITY: ${RUNTIME_HOSTING_AUTHORITY:-independent}
+      RUNTIME_INSTALLATION_ID: ${RUNTIME_INSTALLATION_ID:-}
       DATABASE_URL: ${DATABASE_URL:-postgresql://tulipfarm:${POSTGRES_PASSWORD:-tulipfarm}@postgres:5432/tulipfarm}
       WORKER_PORT: "4020"
       # Exactly one replica owns cron and maintenance consumers.
@@ -225,6 +231,9 @@ services:
         condition: service_healthy
     environment:
       NODE_ENV: production
+      BUSINESS_ID: ${BUSINESS_ID:-tulipfarm-local}
+      RUNTIME_HOSTING_AUTHORITY: ${RUNTIME_HOSTING_AUTHORITY:-independent}
+      RUNTIME_INSTALLATION_ID: ${RUNTIME_INSTALLATION_ID:-}
       DATABASE_URL: ${DATABASE_URL:-postgresql://tulipfarm:${POSTGRES_PASSWORD:-tulipfarm}@postgres:5432/tulipfarm}
       INTEGRATION_WORKER_PORT: "4030"
       # Same pattern as `worker`: this process calls back into the API for identity/delivery

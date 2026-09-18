@@ -50,7 +50,7 @@ persistence:
   - path: "SOUL_PATH"
     holds: "The live soul git checkout, including Resource schemas, Agents, Skills, Routines, Integrations"
   - path: "postgres data directory"
-    holds: "Every Record, Run, Turn, audit event, and vector index"
+    holds: "Every Record, Run, Turn, audit event, vector index, and runtime installation/business/hosting association"
 
 # Non-secret configuration. Every key is a real environment variable; see the reference for
 # what each does and its default. Fill the ones your deployment needs and delete the rest.

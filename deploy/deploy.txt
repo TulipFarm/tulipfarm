@@ -46,8 +46,8 @@ Durable state: every path must survive restart and upgrade:
       if lost: It holds the key that decrypts every Secret this instance stores. Losing it means losing them, because the database holds only ciphertext. Booting a fresh ENCRYPTION_KEY against a populated database refuses to start rather than silently orphaning them.
   - SOUL_PATH: holds The live soul git checkout, including Resource schemas, Agents, Skills, Routines, Integrations
       if lost: Losing it loses everything the business built, and its git history is the audit trail for who changed what.
-  - postgres data directory: holds Every Record, Run, Turn, audit event, and vector index
-      if lost: Losing it loses all business data. Restoring it without TF_DATA_DIR leaves every stored Secret undecryptable.
+  - postgres data directory: holds Every Record, Run, Turn, audit event, vector index, and runtime installation/business/hosting association
+      if lost: Losing it loses all business data. Restoring it without TF_DATA_DIR leaves every stored Secret undecryptable. Restoring only the soul does not restore installation identity; retain the matching database, business identifier, and any installation UUID assertion.
 
 ENVIRONMENT VARIABLES (full surface: 105 variables)
 ------------------------------------------------------------

@@ -13,6 +13,15 @@
 .env
 .env.*
 !.env.example
+**/.env
+**/.env.*
+**/secrets.env
+**/worker.env
+**/integration-worker.env
+**/bucket.env
+.scratch
+.worktrees
+.parity-*
 /soul
 *.log
 .absolute-work
