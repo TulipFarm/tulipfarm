@@ -49,6 +49,38 @@ describe("ChannelRunDeliveryStore", () => {
     expect(record).toMatchObject({ runId: "run-1", status: "pending" });
   });
 
+  it("recovers a crash after claim exactly at lease expiry and fences the old claimant", async () => {
+    await store.create(delivery);
+    const first = await store.claim(BUSINESS_ID, "run-1");
+    const restarted = new ChannelRunDeliveryStore(transactionPort(database), () => now);
+    now = "2026-07-26T10:00:59.999Z";
+    expect(await restarted.listPending(BUSINESS_ID)).toEqual([]);
+    expect(await restarted.claim(BUSINESS_ID, "run-1")).toBeNull();
+    now = "2026-07-26T10:01:00.000Z";
+    expect(await restarted.listPending(BUSINESS_ID)).toHaveLength(1);
+    const recovered = await restarted.claim(BUSINESS_ID, "run-1");
+    expect(recovered).toMatchObject({ status: "delivering", leaseGeneration: 2 });
+    expect(await store.claim(BUSINESS_ID, "run-1")).toBeNull();
+    await expect(
+      store.markStatus(BUSINESS_ID, "run-1", "done", first?.leaseGeneration)
+    ).rejects.toThrow("channel_run_delivery_not_found");
+    await restarted.markStatus(BUSINESS_ID, "run-1", "done", recovered?.leaseGeneration);
+    expect(await store.listPending(BUSINESS_ID)).toEqual([]);
+  });
+
+  it("persists a retry deadline across reconstruction and refuses an early claimant", async () => {
+    await store.create(delivery);
+    const claimed = await store.claim(BUSINESS_ID, "run-1");
+    await store.retry(BUSINESS_ID, "run-1", claimed?.leaseGeneration ?? 0, 90_000);
+    expect(await store.markSuperseded(BUSINESS_ID, "run-1")).toBe(false);
+    const restarted = new ChannelRunDeliveryStore(transactionPort(database), () => now);
+    now = "2026-07-26T10:01:29.999Z";
+    expect(await restarted.listPending(BUSINESS_ID)).toEqual([]);
+    expect(await restarted.claim(BUSINESS_ID, "run-1")).toBeNull();
+    now = "2026-07-26T10:01:30.000Z";
+    expect(await restarted.claim(BUSINESS_ID, "run-1")).toMatchObject({ leaseGeneration: 2 });
+  });
+
   it("lists only pending rows for the business", async () => {
     await store.create(delivery);
     await store.create({ ...delivery, businessId: "business-2", runId: "run-2" });

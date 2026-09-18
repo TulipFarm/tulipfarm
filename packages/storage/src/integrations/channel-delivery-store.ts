@@ -25,6 +25,7 @@ export interface PersistedChannelDeliveryRecord extends PersistedChannelDelivery
   providerMessageId?: string;
   errorCode?: string;
   nextAttemptAt?: string;
+  updatedAt?: string;
 }
 
 export interface PersistedChannelDeliveryFailure {
@@ -81,11 +82,12 @@ interface DeliveryRow {
   provider_message_id: string | null;
   error_code: string | null;
   next_attempt_at: Date | string | null;
+  updated_at: Date | string;
 }
 
 const DELIVERY_COLUMNS = `business_id, integration_id, route_id, idempotency_key, provider,
   destination, agent_id, principal_id, status, attempts, provider_message_id, error_code,
-  next_attempt_at`;
+  next_attempt_at, updated_at`;
 
 function timestamp(value: Date | string): string {
   return value instanceof Date ? value.toISOString() : value;
@@ -103,6 +105,7 @@ function deliveryRecord(row: DeliveryRow): PersistedChannelDeliveryRecord {
     principalId: row.principal_id,
     status: row.status,
     attempts: row.attempts,
+    updatedAt: timestamp(row.updated_at),
     ...(row.provider_message_id === null ? {} : { providerMessageId: row.provider_message_id }),
     ...(row.error_code === null ? {} : { errorCode: row.error_code }),
     ...(row.next_attempt_at === null ? {} : { nextAttemptAt: timestamp(row.next_attempt_at) }),
@@ -189,7 +192,7 @@ export class ChannelDeliveryStore {
           WHERE business_id = $1
             AND integration_id = $2
             AND idempotency_key = $3
-            AND status = 'pending'
+            AND status IN ('pending', 'ambiguous')
           RETURNING ${DELIVERY_COLUMNS}`,
         [
           attempt.businessId,
@@ -224,7 +227,7 @@ export class ChannelDeliveryStore {
           WHERE business_id = $1
             AND integration_id = $2
             AND idempotency_key = $3
-            AND status = 'pending'
+            AND status IN ('pending', 'ambiguous')
           RETURNING ${DELIVERY_COLUMNS}`,
         [
           attempt.businessId,

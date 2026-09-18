@@ -65,6 +65,8 @@ publication, approvals, integrations, events, and blob/vector/cache/queue ports.
 - Conversation Context summaries advance monotonically by source Message cursor; exact Messages
   remain the audit record and are never replaced.
 - Run concurrency and wait resolution are lock-guarded.
+- Channel Run delivery claims expire; terminal writes and retries carry their claim generation.
+  A previously claimed delivery cannot be superseded while its provider receipt is uncertain.
 - Agent-loop checkpoints replace their JSON resume state while counters only increase; unfinished
   Tool batches, terminal receipts, and cursors must round-trip unchanged across process
   reconstruction. Writes, acknowledgements, and clears are fenced by the Run's per-claim lease
