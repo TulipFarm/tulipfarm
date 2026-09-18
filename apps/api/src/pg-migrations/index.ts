@@ -87,6 +87,7 @@ import { APPROVAL_EVIDENCE_STORAGE_STATEMENTS } from "@tulipfarm/tool-host";
 import type { Queryable } from "../db";
 import { AGENT_ROLE_ID } from "../identity/roles";
 import { resourceSideEffectMigration } from "../resources/outbox";
+import { addSlackDeliveryLeases } from "./20260917-slack-delivery-leases";
 
 export interface PgMigration {
   version: number;
@@ -3494,5 +3495,10 @@ export const PG_MIGRATIONS: PgMigration[] = [
     up: async (q) => {
       await q.query("ALTER TABLE IF EXISTS conversations ADD COLUMN IF NOT EXISTS mode text");
     },
+  },
+  {
+    version: 125,
+    description: "20260917 recover leased Slack Run deliveries and persist retry deadlines",
+    up: addSlackDeliveryLeases,
   },
 ];
