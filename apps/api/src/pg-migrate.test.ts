@@ -1,140 +1,16 @@
 import type { PGlite } from "@electric-sql/pglite";
 import { DEPLOYMENT_BUSINESS_ID } from "@tulipfarm/constants";
 import { recoverQuarantinedOimRelease } from "@tulipfarm/integrations";
-import {
-  CHANNEL_RUN_DELIVERY_STORAGE_STATEMENTS,
-  OimReleaseTrustStore,
-  transactionPort,
-} from "@tulipfarm/storage";
+import { OimReleaseTrustStore, transactionPort } from "@tulipfarm/storage";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Queryable } from "./db";
 import { runPgMigrations } from "./pg-migrate";
 import { PG_MIGRATIONS } from "./pg-migrations";
-import { makePglite } from "./test/pglite";
+import { makeMigratedPglite, makePglite } from "./test/pglite";
 
-/** Each embedding table and the migration that first creates it. */
-const EMBEDDING_TABLE_ORIGINS = [
-  { table: "knowledge_chunks", dimColumn: "dim", createdAt: 1 },
-  { table: "knowledge_source_chunks", dimColumn: "dim", createdAt: 29 },
-] as const;
-
-/** Mid-history fixtures need embedding tables before v45 adds their indexes. */
-async function seedEmbeddingTablesAsOf(db: PGlite, version: number): Promise<void> {
-  await db.query("CREATE EXTENSION IF NOT EXISTS vector");
-  for (const origin of EMBEDDING_TABLE_ORIGINS.filter((o) => o.createdAt <= version)) {
-    await db.query(`CREATE TABLE IF NOT EXISTS ${origin.table} (
-      id        uuid PRIMARY KEY,
-      embedding vector,
-      ${origin.dimColumn} integer
-    )`);
-  }
-}
-
-/**
- * The `runs` FK target that migration v54 (`agent_loop_checkpoints`) references. Fixtures whose
- * floor is above v4 — where the real `runs` table is created — must stand it in, matching the real
- * `UNIQUE (business_id, id)` the foreign key points at.
- */
-async function seedRunsFkTarget(db: PGlite): Promise<void> {
-  await db.query(`CREATE TABLE IF NOT EXISTS runs (
-    id          uuid PRIMARY KEY,
-    business_id text NOT NULL DEFAULT '${DEPLOYMENT_BUSINESS_ID}',
-    bundle      jsonb NOT NULL DEFAULT '{}'::jsonb,
-    UNIQUE (business_id, id)
-  )`);
-}
-
-/**
- * The `approvals` table that migration v59 (one-use decision columns) alters. Fixtures whose
- * floor is above the baseline that creates it must stand it in.
- */
-async function seedApprovalsAlterTarget(db: PGlite): Promise<void> {
-  await db.query(`CREATE TABLE IF NOT EXISTS approvals (
-    id      uuid PRIMARY KEY,
-    kind    text NOT NULL,
-    status  text NOT NULL DEFAULT 'pending',
-    payload jsonb NOT NULL
-  )`);
-}
-
-/**
- * The `channel_bind_tokens` table that migration v17 creates and v83 later alters. Fixtures
- * whose floor is above v17 must stand it in.
- */
-async function seedChannelBindTokensAlterTarget(db: PGlite): Promise<void> {
-  await db.query(`CREATE TABLE IF NOT EXISTS channel_bind_tokens (
-    nonce_hash         text PRIMARY KEY,
-    integration_slug   text NOT NULL,
-    external_sender_id text NOT NULL,
-    issued_at          timestamptz NOT NULL,
-    expires_at         timestamptz NOT NULL,
-    consumed_at        timestamptz,
-    consumed_by        uuid
-  )`);
-}
-
-/**
- * The `conversation_turns` (v16) and `turn_completions` (v17) tables that v84 later alters.
- * Fixtures whose floor is above v17 must stand both in.
- *
- * `created_at` is here because v107 indexes it, not because v84 reads it.
- */
-async function seedTurnCompletionsAlterTarget(db: PGlite): Promise<void> {
-  await db.query(`CREATE TABLE IF NOT EXISTS conversation_turns (
-    id         uuid PRIMARY KEY,
-    created_at timestamptz
-  )`);
-  await db.query(`CREATE TABLE IF NOT EXISTS turn_completions (
-    turn_id    uuid NOT NULL REFERENCES conversation_turns(id),
-    attempt    integer NOT NULL CHECK (attempt >= 0),
-    status     text NOT NULL,
-    message_id uuid,
-    cursor     bigint NOT NULL DEFAULT 0,
-    created_at timestamptz NOT NULL,
-    PRIMARY KEY (turn_id, attempt)
-  )`);
-}
-
-async function seedOimReleaseProvenanceAlterTarget(db: PGlite): Promise<void> {
-  await db.query(`CREATE TABLE oim_installed_release_provenance (
-    business_id text NOT NULL,
-    integration_id text NOT NULL,
-    major_version integer NOT NULL,
-    version text NOT NULL,
-    package_digest text NOT NULL,
-    source text NOT NULL,
-    trust_class text NOT NULL,
-    signed_release jsonb,
-    approved_community_digest text,
-    original_requirements jsonb NOT NULL,
-    auto_patch_opt_in boolean NOT NULL DEFAULT false,
-    installed_at timestamptz NOT NULL DEFAULT now(),
-    updated_at timestamptz NOT NULL DEFAULT now(),
-    PRIMARY KEY (business_id, integration_id, major_version)
-  )`);
-}
-
-async function seedChannelRunDeliveryAlterTarget(db: PGlite): Promise<void> {
-  for (const statement of CHANNEL_RUN_DELIVERY_STORAGE_STATEMENTS) {
-    await db.query(statement);
-  }
-}
-
-async function seedKnowledgeSubscriptionSourceTarget(db: PGlite, version: number): Promise<void> {
-  await db.query(`CREATE TABLE IF NOT EXISTS knowledge_source_records (
-    business_id text NOT NULL,
-    source_id text NOT NULL,
-    integration_id text,
-    PRIMARY KEY (business_id, source_id)
-  )`);
-  await db.query(`ALTER TABLE knowledge_source_records
-    ADD COLUMN IF NOT EXISTS classification text[] NOT NULL DEFAULT '{}',
-    ADD COLUMN IF NOT EXISTS access_control_mode text,
-    ADD COLUMN IF NOT EXISTS access_control_max_age_seconds integer`);
-  if (version >= 112) {
-    await db.query(`ALTER TABLE knowledge_source_records
-      ADD COLUMN IF NOT EXISTS source_locator jsonb`);
-  }
+async function restoreHistoricalDatabase(db: PGlite, version: number): Promise<PGlite> {
+  await db.close();
+  return makeMigratedPglite(version);
 }
 
 describe("the migration ledger is append-only", () => {
@@ -166,7 +42,6 @@ describe("runPgMigrations", () => {
 
   beforeEach(async () => {
     db = await makePglite();
-    await seedChannelRunDeliveryAlterTarget(db);
   });
 
   afterEach(async () => {
@@ -174,32 +49,18 @@ describe("runPgMigrations", () => {
   });
 
   it("upgrades OIM persistence from version 111 and is then repeat-safe", async () => {
+    db = await restoreHistoricalDatabase(db, 111);
     await db.exec(`
-      CREATE TABLE integration_auth_requests (
-        state text PRIMARY KEY,
-        integration_slug text NOT NULL,
-        step_index integer NOT NULL,
-        code_verifier text,
-        created_at timestamptz NOT NULL,
-        expires_at timestamptz NOT NULL,
-        consumed_at timestamptz
+      INSERT INTO knowledge_source_records (
+        business_id, source_id, integration_id, provider, external_id, external_tenant_id,
+        owner_external_id, revision, status, verification, access_control_mode,
+        access_control_max_age_seconds, provenance_captured_at, provenance_content_hash,
+        last_synced_at, created_at, updated_at
+      ) VALUES (
+        'business-1', 'legacy-source', 'calendar', 'calendar', 'legacy-source', 'tenant-1',
+        'owner-1', '1', 'active', 'verified', 'snapshot', 3600, now(), 'hash', now(), now(), now()
       );
-      CREATE TABLE knowledge_source_records (
-        business_id text NOT NULL,
-        source_id text NOT NULL,
-        integration_id text,
-        PRIMARY KEY (business_id, source_id)
-      );
-      INSERT INTO knowledge_source_records (business_id, source_id, integration_id)
-      VALUES ('business-1', 'legacy-source', 'calendar');
-      CREATE TABLE schema_version (
-        id boolean PRIMARY KEY DEFAULT true,
-        version integer NOT NULL,
-        CONSTRAINT schema_version_single_row CHECK (id)
-      );
-      INSERT INTO schema_version (id, version) VALUES (true, 111);
     `);
-    await seedKnowledgeSubscriptionSourceTarget(db, 111);
 
     await runPgMigrations(db, undefined, () => {});
     await expect(runPgMigrations(db, undefined, () => {})).resolves.toBeUndefined();
@@ -264,33 +125,7 @@ describe("runPgMigrations", () => {
   });
 
   it("upgrades ingress lifecycle storage from version 116 and is then repeat-safe", async () => {
-    await seedOimReleaseProvenanceAlterTarget(db);
-    await seedKnowledgeSubscriptionSourceTarget(db, 116);
-    await db.exec(`
-      CREATE TABLE connections (
-        business_id text NOT NULL,
-        id text NOT NULL,
-        integration_id text NOT NULL,
-        integration_major_version integer NOT NULL,
-        status text NOT NULL,
-        health_status text NOT NULL,
-        expires_at timestamptz,
-        PRIMARY KEY (business_id, id),
-        UNIQUE (business_id, id, integration_id, integration_major_version)
-      );
-      CREATE TABLE webhook_deliveries (
-         business_id text NOT NULL
-      );
-      CREATE TABLE oim_knowledge_scan_checkpoints (
-        scan_id text
-      );
-      CREATE TABLE schema_version (
-        id boolean PRIMARY KEY DEFAULT true,
-        version integer NOT NULL,
-        CONSTRAINT schema_version_single_row CHECK (id)
-      );
-      INSERT INTO schema_version (id, version) VALUES (true, 116);
-    `);
+    db = await restoreHistoricalDatabase(db, 116);
 
     await runPgMigrations(db, undefined, NOOP_LOG);
 
@@ -344,30 +179,7 @@ describe("runPgMigrations", () => {
   });
 
   it("upgrades OIM Knowledge publication fencing from version 117 and is then repeat-safe", async () => {
-    await seedOimReleaseProvenanceAlterTarget(db);
-    await seedKnowledgeSubscriptionSourceTarget(db, 117);
-    await db.exec(`
-      CREATE TABLE connections (
-        business_id text NOT NULL,
-        id text NOT NULL,
-        integration_id text NOT NULL,
-        integration_major_version integer NOT NULL,
-        status text NOT NULL,
-        health_status text NOT NULL,
-        expires_at timestamptz,
-        PRIMARY KEY (business_id, id),
-        UNIQUE (business_id, id, integration_id, integration_major_version)
-      );
-      CREATE TABLE oim_knowledge_scan_checkpoints (
-        scan_id text
-      );
-      CREATE TABLE schema_version (
-        id boolean PRIMARY KEY DEFAULT true,
-        version integer NOT NULL,
-        CONSTRAINT schema_version_single_row CHECK (id)
-      );
-      INSERT INTO schema_version (id, version) VALUES (true, 117);
-    `);
+    db = await restoreHistoricalDatabase(db, 117);
 
     await runPgMigrations(db, undefined, () => {});
 
@@ -404,17 +216,8 @@ describe("runPgMigrations", () => {
   });
 
   it("upgrades OIM release lifecycle storage from version 118 and is then repeat-safe", async () => {
-    await seedOimReleaseProvenanceAlterTarget(db);
-    await seedKnowledgeSubscriptionSourceTarget(db, 118);
+    db = await restoreHistoricalDatabase(db, 118);
     await db.exec(`
-      CREATE TABLE connections (
-        business_id text NOT NULL,
-        id text NOT NULL,
-        integration_id text NOT NULL,
-        integration_major_version integer NOT NULL,
-        PRIMARY KEY (business_id, id),
-        UNIQUE (business_id, id, integration_id, integration_major_version)
-      );
       INSERT INTO oim_installed_release_provenance (
         business_id, integration_id, major_version, version, package_digest, source,
         trust_class, signed_release, original_requirements, auto_patch_opt_in
@@ -423,12 +226,6 @@ describe("runPgMigrations", () => {
         'https://catalog.example/calendar', 'official', '{"envelopeVersion":1}'::jsonb,
         '{"metadata":{"id":"calendar","version":"2.1.0"}}'::jsonb, true
       );
-      CREATE TABLE schema_version (
-        id boolean PRIMARY KEY DEFAULT true,
-        version integer NOT NULL,
-        CONSTRAINT schema_version_single_row CHECK (id)
-      );
-      INSERT INTO schema_version (id, version) VALUES (true, 118);
     `);
 
     await runPgMigrations(db, undefined, NOOP_LOG);
@@ -599,31 +396,15 @@ describe("runPgMigrations", () => {
   });
 
   it("adds typed OIM Connection verification evidence from version 119 without backfill", async () => {
-    await seedKnowledgeSubscriptionSourceTarget(db, 119);
+    db = await restoreHistoricalDatabase(db, 119);
     await db.exec(`
-      CREATE TABLE connections (
-        business_id text NOT NULL,
-        id text NOT NULL,
-        integration_id text NOT NULL,
-        integration_major_version integer NOT NULL,
-        configuration jsonb NOT NULL DEFAULT '{}'::jsonb,
-        secret_bindings jsonb NOT NULL DEFAULT '{}'::jsonb,
-        status text NOT NULL,
-        health_status text NOT NULL,
-        PRIMARY KEY (business_id, id),
-        UNIQUE (business_id, id, integration_id, integration_major_version)
-      );
       INSERT INTO connections (
-        business_id, id, integration_id, integration_major_version, status, health_status
+        business_id, id, integration_id, integration_major_version, status, health_status,
+        label, owner_scope, configuration, secret_bindings
       ) VALUES (
-        'business-1', 'connection-1', 'calendar', 2, 'active', 'healthy'
+        'business-1', 'connection-1', 'calendar', 2, 'active', 'healthy',
+        'Calendar', 'organization', '{}', '{}'
       );
-      CREATE TABLE schema_version (
-        id boolean PRIMARY KEY DEFAULT true,
-        version integer NOT NULL,
-        CONSTRAINT schema_version_single_row CHECK (id)
-      );
-      INSERT INTO schema_version (id, version) VALUES (true, 119);
     `);
 
     await runPgMigrations(db, undefined, NOOP_LOG);
@@ -641,38 +422,8 @@ describe("runPgMigrations", () => {
   });
 
   it("repairs Surface storage for databases that already recorded schema version 14", async () => {
-    // Stand-in for a database stopped at v14; v27 needs pgvector.
-    await db.query("CREATE EXTENSION IF NOT EXISTS vector");
-    await db.query("CREATE TABLE conversations (id uuid PRIMARY KEY)");
-    await seedEmbeddingTablesAsOf(db, 14);
-    await db.query("CREATE TABLE messages (id uuid PRIMARY KEY)");
-    await db.query("CREATE TABLE users (id uuid PRIMARY KEY, password_hash text NOT NULL)");
-    await seedRunsFkTarget(db);
-    await seedApprovalsAlterTarget(db);
-    await seedChannelBindTokensAlterTarget(db);
-    await db.query("CREATE TABLE run_events (run_id uuid NOT NULL, sequence bigint NOT NULL)");
-    await db.query(`CREATE TABLE api_clients (
-      id            uuid PRIMARY KEY,
-      owner_user_id uuid NOT NULL REFERENCES users(id)
-    )`);
-    await db.query(`CREATE TABLE external_identity_mappings (
-      provider         text NOT NULL,
-      external_subject text NOT NULL,
-      user_id          uuid NOT NULL REFERENCES users(id),
-      PRIMARY KEY (provider, external_subject)
-    )`);
-    // v26's soul_repositories FK needs a stand-in integrations table.
-    await db.query(`CREATE TABLE integrations (
-      business_id text NOT NULL,
-      id          text NOT NULL,
-      PRIMARY KEY (business_id, id)
-    )`);
-    await db.query(`CREATE TABLE schema_version (
-      id boolean PRIMARY KEY DEFAULT true,
-      version integer NOT NULL,
-      CONSTRAINT schema_version_single_row CHECK (id)
-    )`);
-    await db.query("INSERT INTO schema_version (id, version) VALUES (true, 14)");
+    db = await restoreHistoricalDatabase(db, 14);
+    await db.query("DROP TABLE surface_actions, surface_deliveries");
 
     await runPgMigrations(db, undefined, () => {});
 
@@ -808,22 +559,12 @@ describe("runPgMigrations", () => {
     });
 
     it("repairs empty partial Surface and provider-object tables", async () => {
-      await db.query(`CREATE TABLE integrations (
-        business_id text NOT NULL,
-        id text NOT NULL,
-        PRIMARY KEY (business_id, id)
-      )`);
+      db = await restoreHistoricalDatabase(db, 97);
       await db.query("CREATE TABLE channel_surface_instances (business_id text)");
       await db.query("CREATE TABLE channel_surface_publish_jobs (business_id text)");
       await db.query("CREATE TABLE slack_capability_observations (business_id text)");
       await db.query("CREATE TABLE integration_provider_objects (business_id text)");
       await db.query("CREATE TABLE integration_provider_file_uploads (business_id text)");
-      await db.query(`CREATE TABLE schema_version (
-        id boolean PRIMARY KEY DEFAULT true,
-        version integer NOT NULL,
-        CONSTRAINT schema_version_single_row CHECK (id)
-      )`);
-      await db.query("INSERT INTO schema_version (id, version) VALUES (true, 97)");
 
       await runPgMigrations(db, undefined, () => {});
 
@@ -976,61 +717,10 @@ describe("runPgMigrations", () => {
 
   describe("migration 49", () => {
     it("moves activation history off the publication sequence without losing repeat activations", async () => {
-      await db.query(`CREATE SEQUENCE soul_publication_sequence`);
-      await db.query(`CREATE TABLE soul_publications (
-        changeset_id text PRIMARY KEY,
-        business_id text NOT NULL,
-        commit_sha text NOT NULL,
-        digest text NOT NULL,
-        stage text NOT NULL,
-        publication_sequence bigint NOT NULL,
-        actor_principal_id text NOT NULL,
-        created_at timestamptz NOT NULL DEFAULT now(),
-        attempts integer NOT NULL DEFAULT 0,
-        next_attempt_at timestamptz NOT NULL DEFAULT now(),
-        failure_code text,
-        dead_lettered_at timestamptz,
-        dead_letter_reason text,
-        UNIQUE (business_id, digest),
-        UNIQUE (business_id, publication_sequence)
-      )`);
-      await db.query(`CREATE TABLE soul_execution_bundles (
-        digest text PRIMARY KEY,
-        business_id text NOT NULL,
-        changeset_id text NOT NULL,
-        commit_sha text NOT NULL,
-        bundle jsonb NOT NULL,
-        signature jsonb NOT NULL,
-        created_at timestamptz NOT NULL DEFAULT now(),
-        UNIQUE (business_id, digest)
-      )`);
-      await db.query(`CREATE TABLE soul_active_bundles (
-        business_id text PRIMARY KEY,
-        digest text NOT NULL,
-        activation_sequence bigint NOT NULL,
-        activated_at timestamptz NOT NULL DEFAULT now(),
-        activated_by_principal_id text NOT NULL
-      )`);
-      await db.query(`CREATE TABLE soul_bundle_activations (
-        business_id text NOT NULL,
-        activation_sequence bigint NOT NULL,
-        digest text NOT NULL,
-        changeset_id text NOT NULL REFERENCES soul_publications(changeset_id),
-        activated_at timestamptz NOT NULL DEFAULT now(),
-        activated_by_principal_id text NOT NULL,
-        PRIMARY KEY (business_id, activation_sequence),
-        UNIQUE (business_id, digest)
-      )`);
-      await db.query(`CREATE TABLE schema_version (
-        id boolean PRIMARY KEY DEFAULT true,
-        version integer NOT NULL,
-        CONSTRAINT schema_version_single_row CHECK (id)
-      )`);
-      await db.query("INSERT INTO schema_version (id, version) VALUES (true, 48)");
-      await seedRunsFkTarget(db);
-      await seedApprovalsAlterTarget(db);
-      await seedChannelBindTokensAlterTarget(db);
-      await seedTurnCompletionsAlterTarget(db);
+      db = await restoreHistoricalDatabase(db, 48);
+      await db.query(
+        "ALTER TABLE soul_bundle_activations ADD CONSTRAINT soul_bundle_activations_business_id_digest_key UNIQUE (business_id, digest)"
+      );
       await db.query(`INSERT INTO soul_execution_bundles (
         digest, business_id, changeset_id, commit_sha, bundle, signature
       ) VALUES (
@@ -1099,33 +789,14 @@ describe("runPgMigrations", () => {
 
   describe("migration 21", () => {
     it("backfills the Run source from the formerly overloaded Routine id", async () => {
-      // v27 needs pgvector for `knowledge_source_chunks.embedding`; baseline v1 usually creates it.
-      await db.query("CREATE EXTENSION IF NOT EXISTS vector");
-      await seedRunsFkTarget(db);
-      await seedApprovalsAlterTarget(db);
-      await seedChannelBindTokensAlterTarget(db);
-      await seedTurnCompletionsAlterTarget(db);
-      await db.query(`INSERT INTO runs (id, bundle)
-        VALUES ('00000000-0000-4000-8000-000000000001', '{"routineId":"chat"}'::jsonb)`);
-      await db.query(`CREATE TABLE schema_version (
-        id boolean PRIMARY KEY DEFAULT true,
-        version integer NOT NULL,
-        CONSTRAINT schema_version_single_row CHECK (id)
-      )`);
-      await db.query("INSERT INTO schema_version (id, version) VALUES (true, 20)");
-      await seedEmbeddingTablesAsOf(db, 20);
-      // Later migrations need the real users-table shape, even when testing v21.
-      await db.query(`CREATE TABLE users (
-        id uuid PRIMARY KEY,
-        password_hash text NOT NULL
-      )`);
-      // Minimal stand-in for the real `integrations` table (created at v11, well before this
-      // database's v20 cutoff) — v26's `soul_repositories` FK needs it to exist.
-      await db.query(`CREATE TABLE integrations (
-        business_id text NOT NULL,
-        id          text NOT NULL,
-        PRIMARY KEY (business_id, id)
-      )`);
+      db = await restoreHistoricalDatabase(db, 20);
+      await db.query("ALTER TABLE runs DROP COLUMN source");
+      await db.query(
+        `INSERT INTO runs (id, business_id, bundle, identity, created_at)
+         VALUES ('00000000-0000-4000-8000-000000000001', $1,
+                 '{"routineId":"chat"}'::jsonb, '{}', now())`,
+        [DEPLOYMENT_BUSINESS_ID]
+      );
 
       await runPgMigrations(db, undefined, () => {});
 
@@ -1143,22 +814,7 @@ describe("runPgMigrations", () => {
   describe("migration 86", () => {
     it("backfills immutable version one and creates durable blob cleanup storage", async () => {
       const fileId = "00000000-0000-4000-8000-000000000085";
-      await db.query(`CREATE TABLE files (
-        id                     uuid PRIMARY KEY,
-        business_id            text NOT NULL,
-        owner_principal_id     text NOT NULL,
-        filename               text NOT NULL,
-        media_type             text NOT NULL,
-        claimed_media_type     text NOT NULL,
-        size_bytes             bigint NOT NULL,
-        blob_key               text NOT NULL,
-        blob_hash              text NOT NULL,
-        origin                 text NOT NULL DEFAULT 'uploaded',
-        source_conversation_id uuid,
-        source_run_id          uuid,
-        knowledge_requested_at timestamptz,
-        created_at             timestamptz(3) NOT NULL DEFAULT now()
-      )`);
+      db = await restoreHistoricalDatabase(db, 85);
       await db.query(
         `INSERT INTO files
           (id, business_id, owner_principal_id, filename, media_type, claimed_media_type,
@@ -1167,12 +823,6 @@ describe("runPgMigrations", () => {
            3, 'blob-key', 'blob-hash')`,
         [fileId]
       );
-      await db.query(`CREATE TABLE schema_version (
-        id boolean PRIMARY KEY DEFAULT true,
-        version integer NOT NULL,
-        CONSTRAINT schema_version_single_row CHECK (id)
-      )`);
-      await db.query("INSERT INTO schema_version (id, version) VALUES (true, 85)");
 
       await runPgMigrations(db, undefined, NOOP_LOG);
 
@@ -1232,59 +882,7 @@ describe("runPgMigrations", () => {
 
   describe("migration 89", () => {
     it("migrates legacy groups without changing effective Role access", async () => {
-      await db.query(`CREATE TABLE principals (
-        business_id text NOT NULL,
-        id text NOT NULL,
-        kind text NOT NULL,
-        status text NOT NULL,
-        expires_at timestamptz,
-        created_at timestamptz NOT NULL DEFAULT now(),
-        updated_at timestamptz NOT NULL DEFAULT now(),
-        PRIMARY KEY (business_id, id)
-      )`);
-      await db.query(`CREATE TABLE roles (
-        business_id text NOT NULL,
-        id text NOT NULL,
-        assignable_to text[] NOT NULL,
-        expires_at timestamptz,
-        created_at timestamptz NOT NULL DEFAULT now(),
-        updated_at timestamptz NOT NULL DEFAULT now(),
-        PRIMARY KEY (business_id, id)
-      )`);
-      await db.query(`CREATE TABLE role_assignments (
-        business_id text NOT NULL,
-        principal_id text NOT NULL,
-        role_id text NOT NULL,
-        expires_at timestamptz,
-        assigned_at timestamptz NOT NULL DEFAULT now(),
-        PRIMARY KEY (business_id, principal_id, role_id),
-        FOREIGN KEY (business_id, principal_id) REFERENCES principals(business_id, id),
-        FOREIGN KEY (business_id, role_id) REFERENCES roles(business_id, id)
-      )`);
-      await db.query(`CREATE TABLE principal_groups (
-        business_id text NOT NULL,
-        id text NOT NULL,
-        expires_at timestamptz,
-        created_at timestamptz NOT NULL DEFAULT now(),
-        updated_at timestamptz NOT NULL DEFAULT now(),
-        PRIMARY KEY (business_id, id)
-      )`);
-      await db.query(`CREATE TABLE principal_group_members (
-        business_id text NOT NULL,
-        group_id text NOT NULL,
-        principal_id text NOT NULL,
-        expires_at timestamptz,
-        assigned_at timestamptz NOT NULL DEFAULT now(),
-        PRIMARY KEY (business_id, group_id, principal_id)
-      )`);
-      await db.query(`CREATE TABLE group_role_assignments (
-        business_id text NOT NULL,
-        group_id text NOT NULL,
-        role_id text NOT NULL,
-        expires_at timestamptz,
-        assigned_at timestamptz NOT NULL DEFAULT now(),
-        PRIMARY KEY (business_id, group_id, role_id)
-      )`);
+      db = await restoreHistoricalDatabase(db, 88);
       await db.query(
         `INSERT INTO principals (business_id, id, kind, status)
          VALUES ('business', 'person-1', 'user', 'active'),
@@ -1311,12 +909,6 @@ describe("runPgMigrations", () => {
          VALUES ('business', 'customer-success', 'reader', '2027-02-01'),
                 ('business', 'owners', 'owner', NULL)`
       );
-      await db.query(`CREATE TABLE schema_version (
-        id boolean PRIMARY KEY DEFAULT true,
-        version integer NOT NULL,
-        CONSTRAINT schema_version_single_row CHECK (id)
-      )`);
-      await db.query("INSERT INTO schema_version (id, version) VALUES (true, 88)");
 
       const before = await db.query<{ role_id: string }>(
         `SELECT DISTINCT held.role_id
@@ -1383,55 +975,7 @@ describe("runPgMigrations", () => {
     });
 
     it("records slug and sibling-name conflicts for the admin migration report", async () => {
-      await db.query(`CREATE TABLE principals (
-        business_id text NOT NULL,
-        id text NOT NULL,
-        kind text NOT NULL,
-        status text NOT NULL,
-        expires_at timestamptz,
-        PRIMARY KEY (business_id, id)
-      )`);
-      await db.query(`CREATE TABLE roles (
-        business_id text NOT NULL,
-        id text NOT NULL,
-        assignable_to text[] NOT NULL,
-        expires_at timestamptz,
-        created_at timestamptz NOT NULL DEFAULT now(),
-        updated_at timestamptz NOT NULL DEFAULT now(),
-        PRIMARY KEY (business_id, id)
-      )`);
-      await db.query(`CREATE TABLE role_assignments (
-        business_id text NOT NULL,
-        principal_id text NOT NULL,
-        role_id text NOT NULL,
-        expires_at timestamptz,
-        assigned_at timestamptz NOT NULL DEFAULT now(),
-        PRIMARY KEY (business_id, principal_id, role_id)
-      )`);
-      await db.query(`CREATE TABLE principal_groups (
-        business_id text NOT NULL,
-        id text NOT NULL,
-        expires_at timestamptz,
-        created_at timestamptz NOT NULL DEFAULT now(),
-        updated_at timestamptz NOT NULL DEFAULT now(),
-        PRIMARY KEY (business_id, id)
-      )`);
-      await db.query(`CREATE TABLE principal_group_members (
-        business_id text NOT NULL,
-        group_id text NOT NULL,
-        principal_id text NOT NULL,
-        expires_at timestamptz,
-        assigned_at timestamptz NOT NULL DEFAULT now(),
-        PRIMARY KEY (business_id, group_id, principal_id)
-      )`);
-      await db.query(`CREATE TABLE group_role_assignments (
-        business_id text NOT NULL,
-        group_id text NOT NULL,
-        role_id text NOT NULL,
-        expires_at timestamptz,
-        assigned_at timestamptz NOT NULL DEFAULT now(),
-        PRIMARY KEY (business_id, group_id, role_id)
-      )`);
+      db = await restoreHistoricalDatabase(db, 88);
       await db.query(
         `INSERT INTO principal_groups (business_id, id)
          VALUES
@@ -1440,12 +984,6 @@ describe("runPgMigrations", () => {
            ('business', 'Ops'),
            ('business', 'ops')`
       );
-      await db.query(`CREATE TABLE schema_version (
-        id boolean PRIMARY KEY DEFAULT true,
-        version integer NOT NULL,
-        CONSTRAINT schema_version_single_row CHECK (id)
-      )`);
-      await db.query("INSERT INTO schema_version (id, version) VALUES (true, 88)");
 
       await runPgMigrations(db, undefined, NOOP_LOG);
 
@@ -1494,22 +1032,8 @@ describe("runPgMigrations", () => {
   });
 
   describe("migration 32", () => {
-    // Fixtures stand in for every baseline table later migrations touch.
-    const seedUsers = () => db.query("CREATE TABLE users (id uuid PRIMARY KEY)");
-
     it("moves GitHub App credentials onto integration.github.* without touching ciphertext", async () => {
-      await db.query("CREATE EXTENSION IF NOT EXISTS vector");
-      await seedUsers();
-      await db.query(`CREATE TABLE secrets (
-        key             text PRIMARY KEY,
-        type            text NOT NULL,
-        encrypted_value text NOT NULL,
-        iv              text NOT NULL,
-        auth_tag        text NOT NULL,
-        dek_id          uuid,
-        created_at      timestamptz NOT NULL,
-        updated_at      timestamptz NOT NULL
-      )`);
+      db = await restoreHistoricalDatabase(db, 31);
       const seed = async (key: string, value: string) =>
         db.query(
           `INSERT INTO secrets (key, type, encrypted_value, iv, auth_tag, created_at, updated_at)
@@ -1521,17 +1045,6 @@ describe("runPgMigrations", () => {
       // Already reconnected through the new flow: the newer value must survive the rename.
       await seed("github-app-slug", "cipher-old-slug");
       await seed("integration.github.GITHUB_APP_SLUG", "cipher-new-slug");
-      await db.query(`CREATE TABLE schema_version (
-        id boolean PRIMARY KEY DEFAULT true,
-        version integer NOT NULL,
-        CONSTRAINT schema_version_single_row CHECK (id)
-      )`);
-      await db.query("INSERT INTO schema_version (id, version) VALUES (true, 31)");
-      await seedEmbeddingTablesAsOf(db, 31);
-      await seedRunsFkTarget(db);
-      await seedApprovalsAlterTarget(db);
-      await seedChannelBindTokensAlterTarget(db);
-      await seedTurnCompletionsAlterTarget(db);
 
       await runPgMigrations(db, undefined, () => {});
 
@@ -1546,19 +1059,8 @@ describe("runPgMigrations", () => {
     });
 
     it("is a no-op on a database with no secrets table", async () => {
-      await db.query("CREATE EXTENSION IF NOT EXISTS vector");
-      await seedUsers();
-      await db.query(`CREATE TABLE schema_version (
-        id boolean PRIMARY KEY DEFAULT true,
-        version integer NOT NULL,
-        CONSTRAINT schema_version_single_row CHECK (id)
-      )`);
-      await db.query("INSERT INTO schema_version (id, version) VALUES (true, 31)");
-      await seedEmbeddingTablesAsOf(db, 31);
-      await seedRunsFkTarget(db);
-      await seedApprovalsAlterTarget(db);
-      await seedChannelBindTokensAlterTarget(db);
-      await seedTurnCompletionsAlterTarget(db);
+      db = await restoreHistoricalDatabase(db, 31);
+      await db.query("DROP TABLE secrets");
 
       await expect(runPgMigrations(db, undefined, () => {})).resolves.not.toThrow();
     });
@@ -1713,7 +1215,6 @@ describe("runPgMigrations concurrency and atomicity", () => {
 
   beforeEach(async () => {
     db = await makePglite();
-    await seedChannelRunDeliveryAlterTarget(db);
   });
 
   afterEach(async () => {
@@ -1817,7 +1318,7 @@ describe("runPgMigrations concurrency and atomicity", () => {
      * `document` column that does not exist, and every user's memory would read as empty.
      */
     it("renders an existing jsonb projection into the Markdown page", async () => {
-      await runPgMigrations(db, undefined, NOOP_LOG);
+      db = await restoreHistoricalDatabase(db, 64);
       await db.query("ALTER TABLE user_memory DROP COLUMN document");
       await db.query("ALTER TABLE user_memory ADD COLUMN sections jsonb NOT NULL DEFAULT '{}'");
       await db.query("ALTER TABLE user_memory_revisions DROP COLUMN document");
@@ -1829,10 +1330,6 @@ describe("runPgMigrations concurrency and atomicity", () => {
          VALUES ('b', 'u', $1, 1, gen_random_uuid(), 'h')`,
         [JSON.stringify({ identity: "Lives in Bangalore", preferences: "Prefers ASCII diagrams" })]
       );
-      await db.query("UPDATE schema_version SET version = 64 WHERE id = true");
-      await db.query("DELETE FROM schema_migrations WHERE version >= 65");
-      await db.query("DROP TABLE IF EXISTS oim_knowledge_subscriptions");
-
       await runPgMigrations(db, undefined, NOOP_LOG);
 
       const { rows } = await db.query<{ document: string }>(
@@ -1844,10 +1341,7 @@ describe("runPgMigrations concurrency and atomicity", () => {
     });
 
     it("is a no-op on a database created after the text column shipped", async () => {
-      await runPgMigrations(db, undefined, NOOP_LOG);
-      await db.query("UPDATE schema_version SET version = 64 WHERE id = true");
-      await db.query("DELETE FROM schema_migrations WHERE version >= 65");
-      await db.query("DROP TABLE IF EXISTS oim_knowledge_subscriptions");
+      db = await restoreHistoricalDatabase(db, 64);
 
       await expect(runPgMigrations(db, undefined, NOOP_LOG)).resolves.toBeUndefined();
 
@@ -1861,7 +1355,7 @@ describe("runPgMigrations concurrency and atomicity", () => {
 
   describe("migration 91", () => {
     it("backfills business-wide and private assets without widening private content", async () => {
-      await runPgMigrations(db, undefined, NOOP_LOG);
+      db = await restoreHistoricalDatabase(db, 90);
       const privateOwner = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
       const fileId = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
       const privatePage = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
@@ -1951,15 +1445,10 @@ describe("runPgMigrations concurrency and atomicity", () => {
           JSON.stringify([{ kind: "user", id: privateOwner }]),
         ]
       );
-      await db.query("DELETE FROM asset_ownership WHERE asset_type IN ('file', 'knowledge')");
-      await db.query("UPDATE schema_version SET version = 90 WHERE id = true");
-      await db.query("DELETE FROM schema_migrations WHERE version >= 91");
-      await db.query("DROP TABLE IF EXISTS oim_knowledge_subscriptions");
-
       await runPgMigrations(db, undefined, NOOP_LOG);
-      await db.query("UPDATE schema_version SET version = 90 WHERE id = true");
-      await db.query("DELETE FROM schema_migrations WHERE version >= 91");
-      await db.query("DROP TABLE IF EXISTS oim_knowledge_subscriptions");
+      const migration = PG_MIGRATIONS.find(({ version }) => version === 91);
+      if (!migration) throw new Error("migration 91 missing");
+      await db.transaction((tx) => migration.up(tx));
       await expect(runPgMigrations(db, undefined, NOOP_LOG)).resolves.toBeUndefined();
 
       const owners = await db.query<{
@@ -2004,37 +1493,47 @@ describe("runPgMigrations concurrency and atomicity", () => {
 
   describe("migration 95", () => {
     it("adds empty labels to existing Teams", async () => {
-      await db.query(`CREATE TABLE teams (
-        business_id text NOT NULL,
-        id text NOT NULL,
-        PRIMARY KEY (business_id, id)
-      )`);
-      await db.query("INSERT INTO teams (business_id, id) VALUES ('business', 'platform')");
-      await db.query(`CREATE TABLE schema_version (
-        id boolean PRIMARY KEY DEFAULT true,
-        version integer NOT NULL,
-        CONSTRAINT schema_version_single_row CHECK (id)
-      )`);
-      await db.query("INSERT INTO schema_version (id, version) VALUES (true, 94)");
+      db = await restoreHistoricalDatabase(db, 94);
+      await db.query("ALTER TABLE teams DROP COLUMN labels");
+      await db.query(
+        `INSERT INTO teams (business_id, slug, display_name, protected)
+         VALUES ('business', 'everyone', 'Everyone', true)`
+      );
+      await db.query(
+        `INSERT INTO teams (business_id, slug, display_name, parent_team_id)
+         SELECT business_id, 'platform', 'Platform', id
+         FROM teams WHERE business_id = 'business' AND slug = 'everyone'`
+      );
 
       await runPgMigrations(db, undefined, NOOP_LOG);
 
-      const teams = await db.query<{ labels: string[] }>("SELECT labels FROM teams");
+      const teams = await db.query<{ labels: string[] }>(
+        "SELECT labels FROM teams WHERE business_id = 'business' AND slug = 'platform'"
+      );
       expect(teams.rows).toEqual([{ labels: [] }]);
     });
   });
 
   describe("migration 99", () => {
     it("marks existing confirmed effects as having no stored output evidence", async () => {
+      db = await restoreHistoricalDatabase(db, 98);
       const effectId = "11111111-1111-4111-8111-111111111111";
-      await db.query("CREATE TABLE effect_records (effect_id uuid PRIMARY KEY)");
-      await db.query("INSERT INTO effect_records (effect_id) VALUES ($1)", [effectId]);
-      await db.query(`CREATE TABLE schema_version (
-        id boolean PRIMARY KEY DEFAULT true,
-        version integer NOT NULL,
-        CONSTRAINT schema_version_single_row CHECK (id)
-      )`);
-      await db.query("INSERT INTO schema_version (id, version) VALUES (true, 98)");
+      await db.query("ALTER TABLE effect_records DROP COLUMN output, DROP COLUMN output_stored");
+      await db.query(
+        `INSERT INTO tool_intents
+           (business_id, intent_id, run_id, state_id, idempotency_key,
+            intent_digest, normalized_intent, created_at)
+         VALUES ('business', 'intent-1', $1, 'state-1', 'key-1', $2, '{}', now())`,
+        [effectId, "a".repeat(64)]
+      );
+      await db.query(
+        `INSERT INTO effect_records
+           (business_id, effect_id, intent_id, run_id, state_id, logical_effect_ordinal,
+            idempotency_key, intent_digest, guardrail_revision, state, created_at, updated_at)
+         VALUES ('business', $1, 'intent-1', $1, 'state-1', 0, 'key-1', $2,
+                 'revision-1', 'confirmed', now(), now())`,
+        [effectId, "a".repeat(64)]
+      );
 
       await runPgMigrations(db, undefined, NOOP_LOG);
 
@@ -2048,33 +1547,16 @@ describe("runPgMigrations concurrency and atomicity", () => {
 
   describe("migration 50", () => {
     it("drops the single-admin index and revokes owner authority when admin is demoted", async () => {
+      db = await restoreHistoricalDatabase(db, 49);
       const adminId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
-      await db.query(`CREATE TABLE users (
-        id            uuid PRIMARY KEY,
-        email         text NOT NULL UNIQUE,
-        password_hash text,
-        role          text NOT NULL,
-        status        text NOT NULL,
-        created_at    timestamptz NOT NULL
-      )`);
       await db.query(
-        "CREATE UNIQUE INDEX users_single_admin_idx ON users (role) WHERE role = 'admin'"
+        "CREATE UNIQUE INDEX IF NOT EXISTS users_single_admin_idx ON users (role) WHERE role = 'admin'"
       );
       await db.query(
         `INSERT INTO users (id, email, password_hash, role, status, created_at)
          VALUES ($1, 'owner@example.com', 'hash', 'admin', 'active', '2026-08-12T00:00:00Z')`,
         [adminId]
       );
-      await db.query(`CREATE TABLE schema_version (
-        id boolean PRIMARY KEY DEFAULT true,
-        version integer NOT NULL,
-        CONSTRAINT schema_version_single_row CHECK (id)
-      )`);
-      await db.query("INSERT INTO schema_version (id, version) VALUES (true, 49)");
-      await seedRunsFkTarget(db);
-      await seedApprovalsAlterTarget(db);
-      await seedChannelBindTokensAlterTarget(db);
-      await seedTurnCompletionsAlterTarget(db);
 
       await runPgMigrations(db, undefined, NOOP_LOG);
 
@@ -2199,17 +1681,7 @@ describe("runPgMigrations concurrency and atomicity", () => {
 
   describe("migration 109", () => {
     it("adds a durable high-water boundary to existing recovery cursors", async () => {
-      await db.query(`CREATE TABLE run_recovery_cursors (
-        business_id     text PRIMARY KEY,
-        last_created_at timestamptz,
-        last_run_id     uuid
-      )`);
-      await db.query(`CREATE TABLE schema_version (
-        id boolean PRIMARY KEY DEFAULT true,
-        version integer NOT NULL,
-        CONSTRAINT schema_version_single_row CHECK (id)
-      )`);
-      await db.query("INSERT INTO schema_version (id, version) VALUES (true, 108)");
+      db = await restoreHistoricalDatabase(db, 108);
 
       await runPgMigrations(db, undefined, NOOP_LOG);
 
@@ -2229,19 +1701,12 @@ describe("runPgMigrations concurrency and atomicity", () => {
 
   describe("migration 111", () => {
     it("adds a zero-based lease generation to existing Runs", async () => {
-      await db.query(`CREATE TABLE runs (
-        id uuid PRIMARY KEY,
-        business_id text NOT NULL
-      )`);
+      db = await restoreHistoricalDatabase(db, 110);
+      await db.query("ALTER TABLE runs DROP COLUMN lease_generation");
       await db.query(
-        "INSERT INTO runs (id, business_id) VALUES ('00000000-0000-4000-8000-000000000001', 'business-1')"
+        `INSERT INTO runs (id, business_id, source, bundle, identity, created_at)
+         VALUES ('00000000-0000-4000-8000-000000000001', 'business-1', 'chat', '{}', '{}', now())`
       );
-      await db.query(`CREATE TABLE schema_version (
-        id boolean PRIMARY KEY DEFAULT true,
-        version integer NOT NULL,
-        CONSTRAINT schema_version_single_row CHECK (id)
-      )`);
-      await db.query("INSERT INTO schema_version (id, version) VALUES (true, 110)");
 
       await runPgMigrations(db, undefined, NOOP_LOG);
 

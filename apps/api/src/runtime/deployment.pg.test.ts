@@ -25,10 +25,9 @@ import { LiveRouteAuthorizer } from "../authz/route-gate";
 import { transactionPort } from "../db";
 import { buildApiAuthorityLayerResolver } from "../identity/authority-layers";
 import { syncDeploymentRoles } from "../identity/roles";
-import { PG_MIGRATIONS } from "../pg-migrations";
 import { bootstrapFromEnv } from "../setup/bootstrap";
 import { PgSetupAdminCreator } from "../setup/first-admin";
-import { makeMigratedPglite, makePglite } from "../test/pglite";
+import { makeMigratedPglite } from "../test/pglite";
 import { initializeApiDeployment } from "./deployment";
 
 const businessId = DEPLOYMENT_BUSINESS_ID;
@@ -201,19 +200,8 @@ describe("durable runtime deployment startup", () => {
   });
 
   it("upgrades legacy state, preserves login and BYOK, and restarts with the same identity", async () => {
-    const db = await makePglite();
+    const db = await makeMigratedPglite(125);
     databases.push(db);
-    for (const migration of PG_MIGRATIONS.filter(({ version }) => version <= 125)) {
-      if (migration.concurrent) await migration.up(db);
-      else await db.transaction((tx) => migration.up(tx));
-    }
-    await db.exec(`
-      CREATE TABLE schema_version (
-        id boolean PRIMARY KEY DEFAULT true CHECK (id),
-        version integer NOT NULL
-      );
-      INSERT INTO schema_version (id, version) VALUES (true, 125);
-    `);
     expect(
       (
         await db.query(

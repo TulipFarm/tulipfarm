@@ -66,6 +66,9 @@ PostgreSQL persistence composition, auth, Soul Git writes, and Worker callback p
   `runPgMigrations()`. The latter replayed all migrations per test and was half the suite's
   runtime; the helper restores a per-worker snapshot instead, for the same isolation.
   `src/test/pglite-snapshot.test.ts` fails the build if the slow pair comes back.
+- Upgrade fixtures use `makeMigratedPglite(version)`, cached per version/worker from real migration
+  prefixes. Never invent or rewind schema markers on partial/latest DDL. Model historical defects
+  with explicit mutations of that snapshot; exercise one migration directly for idempotence.
 - PGlite pgvector imports changed across versions: check `@electric-sql/pglite/vector` versus
   `@electric-sql/pglite-pgvector` when bumping PGlite.
 - `apps/api/src` is capped by `scripts/control-plane-size.test.ts`: new domain logic belongs in the

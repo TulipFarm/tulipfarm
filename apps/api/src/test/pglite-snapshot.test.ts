@@ -43,4 +43,22 @@ describe("migrated PGlite snapshot", () => {
     );
     expect(users.length).toBeGreaterThan(50);
   });
+
+  it("uses historical snapshots instead of invented or rewound schema versions", () => {
+    const offenders = testFiles(SOURCE_ROOT)
+      .filter((path) => {
+        const source = readFileSync(path, "utf8");
+        return (
+          /INSERT INTO schema_version\b/.test(source) ||
+          /UPDATE schema_version SET version\s*=\s*\d/.test(source) ||
+          /PG_MIGRATIONS\.filter\([^;]*?\bversion\s*<=/.test(source)
+        );
+      })
+      .map((path) => path.slice(SOURCE_ROOT.length + 1));
+
+    expect(
+      offenders,
+      "restore makeMigratedPglite(version); mutate only the legacy defect under test"
+    ).toEqual([]);
+  });
 });
