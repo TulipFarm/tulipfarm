@@ -2,20 +2,26 @@ import { readFileSync } from "node:fs";
 import type { PGlite } from "@electric-sql/pglite";
 import {
   type ConnectionCredentialVault,
+  compileKnowledgeProfile,
   createOimFixturePaginationRuntime,
   type EgressHttpPort,
   OimIngressTeardownService,
   type OimPackageCatalogEntry,
   OimWebhookRegistrationError,
+  syncOimKnowledge,
 } from "@tulipfarm/integrations";
 import { canonicalHash, type OimConnection, type OimManifest } from "@tulipfarm/schema";
 import {
   ConnectionAuthStepStore,
+  ConnectionExternalIdentityStore,
   ConnectionStore,
   ConnectionVerificationEvidenceStore,
   IngressTeardownStore,
   type IntegrationAuthRequestDoc,
   type IntegrationAuthRequestRepo,
+  OimKnowledgeCheckpointStore,
+  OimKnowledgePublicationStore,
+  OimKnowledgeSubscriptionStore,
   type PaginatedResult,
   PollingIngressStore,
   transactionPort,
@@ -31,8 +37,10 @@ import { SESSION_COOKIE } from "../../auth/routes";
 import { MemorySessionStore } from "../../auth/session-store";
 import { createUser, type UserDoc, type UserRepo } from "../../auth/users";
 import { captureOimWebhookCleanupPackage } from "../../internal/oim-webhook-cleanup-package";
+import { PgOimKnowledgeRegistrationReader } from "../../knowledge-sources/oim-registration-reader";
 import { makeMigratedPglite } from "../../test/pglite";
 import { createOimVerificationHost } from "../oim-verification-host";
+import { IntegrationOperationsService } from "../operations/service";
 import { OimConnectionService, type OimConnectionServiceDeps } from "./service";
 
 const BUSINESS_ID = "business-1";
@@ -430,6 +438,7 @@ describe("OIM Connection routes", () => {
       userRepo,
       tokenRepo: new TokenRepoMemory(),
       oimConnections: service,
+      integrationOperations: new IntegrationOperationsService(service, db),
     });
   });
 
@@ -441,6 +450,225 @@ describe("OIM Connection routes", () => {
   const auth = (sid: string) => ({
     cookies: { [SESSION_COOKIE]: sid, [CSRF_COOKIE]: CSRF },
     headers: { [CSRF_HEADER]: CSRF },
+  });
+
+  it("explicitly refuses a package whose declared WebSocket ingress has no production transport", async () => {
+    const entry = catalogEntries[0];
+    if (!entry) throw new Error("fixture catalog missing");
+    catalogEntries[0] = {
+      ...entry,
+      manifest: {
+        ...entry.manifest,
+        ingress: {
+          kind: "websocket",
+          operationId: "read",
+          urlPointer: "/url",
+          reconnect: { maxAttempts: 3, initialDelaySeconds: 1, maxDelaySeconds: 8 },
+          deduplication: { kind: "body_pointer", bodyPointer: "/id" },
+          eventTypes: [
+            {
+              type: "message.created",
+              selector: { pointer: "/type", equals: "message" },
+              schema: { type: "object" },
+            },
+          ],
+        },
+      },
+    };
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/v1/integrations/acme-v1/connections",
+      payload: {
+        label: "Unsupported socket",
+        ownerScope: "personal",
+        values: {},
+      },
+      ...auth(memberSid),
+    });
+    expect(response.statusCode).toBe(409);
+    expect(response.json()).toEqual({ error: "oim_websocket_ingress_unsupported" });
+    expect(
+      await connections.listForIntegration(BUSINESS_ID, { id: "acme", majorVersion: 1 })
+    ).toEqual([]);
+  });
+
+  it("creates an authorized subscription on an empty database, syncs first content, and recovers after the last deletion", async () => {
+    const original = catalogEntries[0];
+    if (!original) throw new Error("fixture catalog missing");
+    const operation = original.manifest.operations[0];
+    if (!operation) throw new Error("fixture operation missing");
+    const manifest: OimManifest = {
+      ...original.manifest,
+      operations: ["list", "content", "acl"].map((id) => ({ ...operation, id, name: id })),
+      knowledge: {
+        sourceKinds: [{ id: "space", label: "Space" }],
+        list: {
+          operationId: "list",
+          scopeParameter: "space",
+          itemsPointer: "/items",
+          mapping: { itemId: "/id", revision: "/revision" },
+          cursor: { kind: "operation_pagination" },
+        },
+        content: {
+          operationId: "content",
+          itemParameter: "id",
+          mapping: { content: "/content", revision: "/revision" },
+        },
+        acl: {
+          mode: "item",
+          operationId: "acl",
+          itemParameter: "id",
+          entriesPointer: "/readers",
+          entry: { defaultKind: "user", providerUserId: "/id" },
+        },
+        deletion: { kind: "absent_from_full_list" },
+      },
+    };
+    catalogEntries[0] = { ...original, manifest };
+    await connections.put(
+      BUSINESS_ID,
+      connection("knowledge", { id: "acme", majorVersion: 1 }, memberId)
+    );
+    const reader = new PgOimKnowledgeRegistrationReader(db);
+    expect(await reader.list()).toEqual([]);
+    const url = "/api/v1/integrations/acme-v1/connections/knowledge/knowledge-subscription";
+    const payload = { sourceKindId: "space", scopes: ["selected-space"], enabled: true };
+    expect((await app.inject({ method: "PUT", url, payload, ...auth(otherSid) })).statusCode).toBe(
+      404
+    );
+    expect((await app.inject({ method: "PUT", url, payload })).statusCode).toBe(401);
+    expect(
+      (
+        await app.inject({
+          method: "PUT",
+          url,
+          payload: { ...payload, sourceKindId: "undeclared" },
+          ...auth(memberSid),
+        })
+      ).statusCode
+    ).toBe(400);
+    const created = await app.inject({ method: "PUT", url, payload, ...auth(memberSid) });
+    expect(created.statusCode).toBe(200);
+    expect(created.json()).toMatchObject({
+      ...payload,
+      classification: ["internal"],
+      lastSuccessAt: null,
+    });
+    const identity = new ConnectionExternalIdentityStore(transactionPort(db));
+    await identity.bindVerified({
+      businessId: BUSINESS_ID,
+      connectionId: "knowledge",
+      integrationId: "acme",
+      integrationMajorVersion: 1,
+      externalTenantId: "tenant",
+      externalAccountId: "account",
+      proofKind: "auth",
+      proofDigest: "a".repeat(64),
+      verifiedAt: new Date().toISOString(),
+      verifiedBy: "fixture",
+    });
+    let items = ["first"];
+    let nextId = 0;
+    const sync = async () => {
+      const selected = (await reader.list())[0];
+      if (!selected) throw new Error("selected subscription vanished");
+      const result = await syncOimKnowledge(
+        compileKnowledgeProfile(manifest),
+        {
+          connections,
+          connectionIdentities: identity,
+          checkpoints: new OimKnowledgeCheckpointStore(transactionPort(db)),
+          publications: new OimKnowledgePublicationStore(transactionPort(db)),
+          identity: {
+            resolve: async () => ({
+              principals: [{ kind: "user", id: memberId }],
+              incomplete: false,
+            }),
+          },
+          api: {
+            connection: {
+              businessId: BUSINESS_ID,
+              integrationId: "acme",
+              integrationMajorVersion: 1,
+              connectionId: "knowledge",
+              externalTenantId: "tenant",
+              externalAccountId: "account",
+            },
+            execute: async ({ operationId, parameters }) => {
+              if (operationId === "list") {
+                expect(parameters.space).toBe("selected-space");
+                return { body: { items: items.map((id) => ({ id, revision: "1" })) } };
+              }
+              if (operationId === "content")
+                return { body: { content: "Authorized provider content", revision: "1" } };
+              return { body: { readers: [{ id: memberId }] } };
+            },
+          },
+          now: () => new Date(),
+          newId: () => `sync-${++nextId}`,
+        },
+        selected
+      );
+      expect(result.failures).toEqual([]);
+      return result;
+    };
+    expect((await sync()).published).toBe(1);
+    expect(
+      (
+        await db.query(
+          "SELECT access_control_mode, classification FROM knowledge_source_records WHERE status = 'active'"
+        )
+      ).rows
+    ).toEqual([{ access_control_mode: "snapshot", classification: ["internal"] }]);
+    items = [];
+    expect((await sync()).deleted).toBe(1);
+    expect(
+      (await db.query("SELECT source_id FROM knowledge_source_records WHERE status = 'active'"))
+        .rows
+    ).toEqual([]);
+    expect((await reader.list())[0]?.scopes).toEqual(["selected-space"]);
+    items = ["future"];
+    expect((await sync()).published).toBe(1);
+    await db.query(
+      `INSERT INTO webhook_deliveries (
+        business_id, id, integration_id, integration_major_version, connection_id,
+        body_sha256, safe_headers, encrypted_body, verification, state, attempts, last_error
+      ) VALUES ($1, 'receipt', 'acme', 1, 'knowledge', $2, '{}', 'encrypted',
+                'verified', 'accepted', 2, 'provider failure: do-not-expose-provider-payload')`,
+      [BUSINESS_ID, "b".repeat(64)]
+    );
+    const read = await app.inject({
+      method: "GET",
+      url: "/api/v1/integrations/acme-v1/operations",
+      ...auth(memberSid),
+    });
+    expect(read.statusCode).toBe(200);
+    expect(read.json().connections[0].operations.sync[0].inProgress).toBe(false);
+    expect(read.json().connections[0].operations.delivery).toMatchObject({
+      pending: 1,
+      retrying: 1,
+      hasError: true,
+      dispatched: 0,
+    });
+    expect(read.body).not.toContain("secretBindings");
+    expect(read.body).not.toContain("do-not-expose-provider-payload");
+    const otherRead = await app.inject({
+      method: "GET",
+      url: "/api/v1/integrations/acme-v1/operations",
+      ...auth(otherSid),
+    });
+    expect(otherRead.json().connections).toEqual([]);
+    const disabled = await app.inject({
+      method: "PUT",
+      url,
+      payload: { ...payload, enabled: false },
+      ...auth(memberSid),
+    });
+    expect(disabled.statusCode).toBe(200);
+    expect(await reader.list()).toEqual([]);
+    expect(
+      (await new OimKnowledgeSubscriptionStore(db).list(BUSINESS_ID, "knowledge"))[0]?.scopes
+    ).toEqual(["selected-space"]);
   });
 
   function shipped(key: string): OimManifest {

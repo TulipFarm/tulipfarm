@@ -57,6 +57,7 @@ import type { IngressRoutesDeps } from "./ingress/routes";
 import type { IntegrationAuthRequestRepo } from "./integrations/auth-broker";
 import type { OimConnectionService } from "./integrations/connections/service";
 import type { GitHubInstallDeps } from "./integrations/github-install-routes";
+import type { IntegrationOperationsService } from "./integrations/operations/service";
 import type { PrincipalProviderTokenRepo } from "./integrations/principal-tokens";
 import type { OimReleaseControlPlane } from "./integrations/releases/control-plane";
 import type { OimIntegrationCatalogRoutes } from "./integrations/routes";
@@ -158,6 +159,7 @@ export interface AppOptions {
    * provider HTTP adapter, and public origins; omission leaves these routes unregistered.
    */
   oimConnections?: OimConnectionService;
+  integrationOperations?: IntegrationOperationsService;
   /** Verified OIM packages and current Connection status for the shared Integration catalog. */
   oimCatalog?: OimIntegrationCatalogRoutes;
   /** Public management routes for one fully composed OIM release control plane. */

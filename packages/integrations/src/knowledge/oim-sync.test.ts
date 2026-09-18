@@ -396,6 +396,102 @@ function deps(
 }
 
 describe("syncOimKnowledge", () => {
+  it("resolves every snapshot ACL page before publishing any principals", async () => {
+    const checkpoints = new MemoryCheckpoints();
+    const publications = new MemoryPublications();
+    const aclPages: (string | undefined)[] = [];
+    const config = plan();
+    const dependencies = deps(checkpoints, publications, async ({ operationId, pageToken }) => {
+      if (operationId === "list") return { body: { items: [{ id: "one", revision: "1" }] } };
+      if (operationId === "content") return { body: { content: "Page", revision: "1" } };
+      aclPages.push(pageToken);
+      return pageToken
+        ? { body: { readers: [{ id: "second" }] } }
+        : { body: { readers: [{ id: "first" }] }, nextPageToken: "acl-next" };
+    });
+    const resolved: string[] = [];
+    dependencies.identity.resolve = async ({ entries }) => {
+      resolved.push(...entries.flatMap((entry) => (entry.id === undefined ? [] : [entry.id])));
+      return { principals: [], incomplete: false };
+    };
+    await syncOimKnowledge(
+      { ...config, list: { ...config.list, maxPagesPerRun: 2 } },
+      dependencies,
+      options()
+    );
+    expect(aclPages).toEqual([undefined, "acl-next"]);
+    expect(resolved).toEqual(["first", "second"]);
+  });
+
+  it("refuses a snapshot ACL that exceeds the page bound instead of publishing a partial ACL", async () => {
+    const checkpoints = new MemoryCheckpoints();
+    const publications = new MemoryPublications();
+    const result = await syncOimKnowledge(
+      plan(),
+      deps(checkpoints, publications, async ({ operationId }) => {
+        if (operationId === "list") return { body: { items: [{ id: "one", revision: "1" }] } };
+        if (operationId === "content") return { body: { content: "Page", revision: "1" } };
+        return { body: { readers: [{ id: "first" }] }, nextPageToken: "more" };
+      }),
+      options()
+    );
+    expect(result.failures).toContainEqual({
+      code: "acl_failed",
+      scope: "space-1",
+      itemId: "one",
+    });
+  });
+
+  it("consumes deletion continuation before completing the checkpoint", async () => {
+    const checkpoints = new MemoryCheckpoints();
+    const publications = new MemoryPublications();
+    const config = plan({
+      deletion: {
+        kind: "operation",
+        operation: operation("deletions"),
+        itemsPointer: "/items",
+        itemIdPointer: "/id",
+      },
+    });
+    const pages: (string | undefined)[] = [];
+    const result = await syncOimKnowledge(
+      { ...config, list: { ...config.list, maxPagesPerRun: 2 } },
+      deps(checkpoints, publications, async ({ operationId, pageToken }) => {
+        if (operationId === "list") return { body: { items: [] } };
+        pages.push(pageToken);
+        return pageToken
+          ? { body: { items: [{ id: "two" }] } }
+          : { body: { items: [{ id: "one" }] }, nextPageToken: "deletion-next" };
+      }),
+      options()
+    );
+    expect(pages).toEqual([undefined, "deletion-next"]);
+    expect(result.failures).toEqual([]);
+  });
+
+  it("leaves deletion completion pending when its continuation exceeds the configured bound", async () => {
+    const checkpoints = new MemoryCheckpoints();
+    const publications = new MemoryPublications();
+    const result = await syncOimKnowledge(
+      plan({
+        deletion: {
+          kind: "operation",
+          operation: operation("deletions"),
+          itemsPointer: "/items",
+          itemIdPointer: "/id",
+        },
+      }),
+      deps(checkpoints, publications, async ({ operationId }) =>
+        operationId === "list"
+          ? { body: { items: [] } }
+          : { body: { items: [{ id: "one" }] }, nextPageToken: "more" }
+      ),
+      options()
+    );
+    expect(result.failures).toContainEqual({ code: "mapping_failed", scope: "space-1" });
+    expect(checkpoints.value?.scanId).not.toBeNull();
+    expect(result.deleted).toBe(0);
+  });
   it("fails closed before provider access when the durable Connection fence is blocked", async () => {
     const checkpoints = new MemoryCheckpoints();
     const publications = new MemoryPublications();

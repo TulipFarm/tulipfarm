@@ -16,13 +16,16 @@ import {
   OimIngressEmissionStore,
   OimKnowledgeCheckpointStore,
   OimKnowledgePublicationStore,
+  OimKnowledgeSubscriptionStore,
   PollingIngressStore,
   transactionPort,
   WebhookInboxStore,
   WebhookRegistrationStore,
 } from "@tulipfarm/storage";
 import type { Pool } from "pg";
+import type { ConsumerReadiness } from "./consumer-readiness";
 import { type OimIngressWorkerCycle, startOimIngressLoops } from "./oim-ingress/worker";
+import { runSubscribedKnowledgeSync } from "./oim-knowledge/subscribed-sync";
 import {
   type OimKnowledgeSyncRegistration,
   startOimKnowledgeSyncLoop,
@@ -80,6 +83,7 @@ interface OimStores {
   readonly emissions: OimIngressEmissionStore;
   readonly knowledgeCheckpoints: OimKnowledgeCheckpointStore;
   readonly knowledgePublications: OimKnowledgePublicationStore;
+  readonly knowledgeSubscriptions: OimKnowledgeSubscriptionStore;
 }
 
 export interface OimPollingStores {
@@ -106,6 +110,7 @@ export interface ComposeOimRuntimeOptions {
   readonly log: OimRuntimeLog;
   readonly now?: () => Date;
   readonly newId?: () => string;
+  readonly readiness?: ConsumerReadiness;
 }
 
 export async function composeOimRuntime(
@@ -120,6 +125,20 @@ export async function composeOimRuntime(
   const cycle = createOimRuntimeCycle(stores, options.host, identifiers);
   return startOimRuntime(signal, {
     ...cycle,
+    ...(options.readiness
+      ? {
+          recoverRegistrations: options.readiness.track(
+            "registrations",
+            cycle.recoverRegistrations
+          ),
+          pollConnections: options.readiness.track("polling", cycle.pollConnections),
+          drainInbox: options.readiness.track("delivery", cycle.drainInbox),
+          loadKnowledgeRegistrations: options.readiness.track(
+            "knowledge-discovery",
+            cycle.loadKnowledgeRegistrations
+          ),
+        }
+      : {}),
     assertReady: () => options.host.assertReady(),
     log: options.log,
   });
@@ -137,6 +156,7 @@ function createOimStores(pool: Pool, newId: () => string): OimStores {
     emissions: new OimIngressEmissionStore(transactions, newId),
     knowledgeCheckpoints: new OimKnowledgeCheckpointStore(transactions),
     knowledgePublications: new OimKnowledgePublicationStore(transactions),
+    knowledgeSubscriptions: new OimKnowledgeSubscriptionStore(pool),
   };
 }
 
@@ -174,10 +194,7 @@ function createOimRuntimeCycle(
       await pollOimIngress(createOimPollingDeps(stores, host, identifiers));
     },
     superviseWebsockets: async () => {
-      // Dormant until a manifest declares websocket ingress and a Connection source is resolved.
-      // The provider-neutral supervisor and its single-holder lease store are wired and tested;
-      // no provider migration ships in this change, so there is nothing to supervise yet.
-      return { supervised: 0 };
+      return { supported: false };
     },
     drainInbox: async () => {
       await drainInbox(createDeliveryDeps(stores, host, identifiers));
@@ -406,22 +423,37 @@ function createKnowledgeRegistrations(
     id: registration.id,
     sync: async () => {
       const plan = compileKnowledgeProfile(registration.manifest);
-      return syncOimKnowledge(
-        plan,
-        {
-          api: createOimKnowledgeApi(registration, plan, host),
-          checkpoints: stores.knowledgeCheckpoints,
-          publications: stores.knowledgePublications,
-          connections: stores.connections,
-          connectionIdentities: stores.identities,
-          identity: {
-            resolve: (input) => host.resolveKnowledgeIdentities(input, input.entries),
-          },
-          now: identifiers.now,
-          newId: identifiers.newId,
-        },
-        registration.options
-      );
+      const api = createOimKnowledgeApi(registration, plan, host);
+      return runSubscribedKnowledgeSync(registration.options, {
+        subscriptions: stores.knowledgeSubscriptions,
+        checkpoints: stores.knowledgeCheckpoints,
+        now: identifiers.now,
+        sync: (assertSelected) =>
+          syncOimKnowledge(
+            plan,
+            {
+              api: {
+                connection: api.connection,
+                execute: async (input) => {
+                  await assertSelected();
+                  const response = await api.execute(input);
+                  await assertSelected();
+                  return response;
+                },
+              },
+              checkpoints: stores.knowledgeCheckpoints,
+              publications: stores.knowledgePublications,
+              connections: stores.connections,
+              connectionIdentities: stores.identities,
+              identity: {
+                resolve: (input) => host.resolveKnowledgeIdentities(input, input.entries),
+              },
+              now: identifiers.now,
+              newId: identifiers.newId,
+            },
+            registration.options
+          ),
+      });
     },
   }));
 }

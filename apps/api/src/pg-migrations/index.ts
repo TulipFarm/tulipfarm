@@ -47,6 +47,7 @@ import {
   OIM_KNOWLEDGE_CHECKPOINT_STORAGE_STATEMENTS,
   OIM_KNOWLEDGE_CHECKPOINT_WATERMARK_STORAGE_STATEMENTS,
   OIM_KNOWLEDGE_PUBLICATION_FENCE_STORAGE_STATEMENTS,
+  OIM_KNOWLEDGE_SUBSCRIPTION_STORAGE_STATEMENTS,
   OIM_RATE_LIMIT_STORAGE_STATEMENTS,
   OIM_RELEASE_LIFECYCLE_STORAGE_STATEMENTS,
   OIM_RELEASE_MAINTENANCE_STORAGE_STATEMENTS,
@@ -3499,6 +3500,16 @@ export const PG_MIGRATIONS: PgMigration[] = [
   {
     version: 125,
     description: "20260917 recover leased Slack Run deliveries and persist retry deadlines",
+    up: addSlackDeliveryLeases,
+  },
+  {
+    version: 132,
+    description: "persist independently selected OIM Knowledge subscriptions",
+    up: applyStatements(OIM_KNOWLEDGE_SUBSCRIPTION_STORAGE_STATEMENTS),
+  },
+  {
+    version: 133,
+    description: "recover Slack leases skipped by an earlier Knowledge v132 deployment",
     up: addSlackDeliveryLeases,
   },
 ];
