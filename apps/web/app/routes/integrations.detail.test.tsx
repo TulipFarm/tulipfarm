@@ -4,6 +4,7 @@ import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, expect, test, vi } from "vitest";
 import { ApiError } from "~/lib/api";
+import { getIntegrationOperations, saveKnowledgeSubscription } from "~/lib/integration-operations";
 
 let admin = true;
 
@@ -21,7 +22,19 @@ beforeEach(() => {
   admin = true;
   vi.clearAllMocks();
   vi.mocked(getInstalledOimRelease).mockResolvedValue(null);
+  vi.mocked(getIntegrationOperations).mockResolvedValue({
+    sourceKinds: [],
+    liveAuthorization: false,
+    ingress: null,
+    observedAt: "2026-09-17T12:00:00Z",
+    connections: [],
+  });
 });
+
+vi.mock("~/lib/integration-operations", () => ({
+  getIntegrationOperations: vi.fn(),
+  saveKnowledgeSubscription: vi.fn(),
+}));
 
 vi.mock("~/lib/integrations", async (importOriginal) => ({
   ...(await importOriginal<typeof import("~/lib/integrations")>()),
@@ -136,6 +149,67 @@ function createdConnection() {
     verification: { status: "not_required" as const },
   };
 }
+
+test("makes Knowledge subscription setup reachable from the exact provider detail", async () => {
+  const user = userEvent.setup();
+  vi.mocked(getIntegrationOperations).mockResolvedValue({
+    sourceKinds: [{ id: "space", label: "Space" }],
+    liveAuthorization: true,
+    ingress: null,
+    observedAt: "2026-09-17T12:00:00Z",
+    connections: [
+      {
+        connectionId: "selected",
+        label: "Support",
+        authorization: "healthy",
+        disconnectPending: false,
+        subscriptions: [],
+        operations: {
+          webhook: null,
+          polling: null,
+          sync: [],
+          delivery: {
+            pending: 0,
+            retrying: 0,
+            deadLetter: 0,
+            dispatched: 0,
+            nextAttemptAt: null,
+            hasError: false,
+          },
+        },
+      },
+    ],
+  });
+  vi.mocked(saveKnowledgeSubscription).mockResolvedValue({
+    sourceKindId: "space",
+    scopes: ["support"],
+    enabled: true,
+    lastAttemptAt: null,
+    lastSuccessAt: null,
+    lastErrorCodes: [],
+  });
+  renderDetail(detail({ name: "wiki", type: "oim" }), [], "/integrations/wiki");
+  await screen.findByRole("heading", { level: 1 });
+  await waitFor(() =>
+    expect(getIntegrationOperations).toHaveBeenCalledWith("wiki", expect.any(AbortSignal))
+  );
+  await user.type(await screen.findByLabelText("Space scopes"), "support");
+  await user.click(screen.getByRole("button", { name: "Enable Knowledge sync" }));
+  await waitFor(() =>
+    expect(saveKnowledgeSubscription).toHaveBeenCalledWith("wiki", "selected", {
+      sourceKindId: "space",
+      scopes: ["support"],
+      enabled: true,
+    })
+  );
+});
+
+test("does not request OIM operational evidence for a legacy integration", async () => {
+  renderDetail(detail({ name: "github", type: "github" }));
+  await screen.findByRole("heading", { level: 1, name: "GitHub" });
+  expect(getIntegrationOperations).not.toHaveBeenCalled();
+  expect(screen.queryByRole("region", { name: "Integration operations" })).not.toBeInTheDocument();
+});
 
 test("leads with the brand name but keeps the slug visible", async () => {
   renderDetail(detail({ name: "github", title: "GitHub" }));
@@ -463,6 +537,7 @@ test("does not require a generic setup lookup after an exact transient failure",
 });
 
 test("renders an exact Connection verification repair after reload", async () => {
+  vi.mocked(getIntegrationOperations).mockReturnValueOnce(new Promise(() => {}));
   vi.mocked(getIntegration).mockResolvedValue(
     detail({ name: "acme-v2", type: "oim", title: "Acme" })
   );
@@ -495,8 +570,10 @@ test("renders an exact Connection verification repair after reload", async () =>
 
   const heading = await screen.findByRole("heading", { name: "Connection needs verification" });
   expect(screen.getByRole("button", { name: "Retry verification" })).toBeInTheDocument();
-  expect(screen.getByRole("status")).toHaveTextContent("verification needs another try");
-  expect(heading).toHaveFocus();
+  expect(
+    screen.getByText("Connection verification needs another try.", { selector: '[role="status"]' })
+  ).toBeInTheDocument();
+  await waitFor(() => expect(heading).toHaveFocus());
 });
 
 test("recovers missing generic setup with a valid scope, announcement, and focus", async () => {
@@ -528,10 +605,12 @@ test("recovers missing generic setup with a valid scope, announcement, and focus
   await user.click(await screen.findByRole("button", { name: "Retry setup" }));
 
   const heading = await screen.findByRole("heading", { name: "Add Connection" });
-  expect(screen.getByRole("status")).toHaveTextContent(
-    "Connection setup loaded. Add Connection details."
-  );
-  expect(heading).toHaveFocus();
+  expect(
+    screen.getByText("Connection setup loaded. Add Connection details.", {
+      selector: '[role="status"]',
+    })
+  ).toBeInTheDocument();
+  await waitFor(() => expect(heading).toHaveFocus());
   expect(screen.getByLabelText("Owner")).toHaveValue("Business");
 
   await user.type(screen.getByLabelText("Connection name"), "Support");
@@ -578,8 +657,10 @@ test("preserves local exact setup when route revalidation cannot reload it", asy
   await waitFor(() => expect(exactSetupAttempts).toBeGreaterThan(1));
   expect(screen.getByTestId("location-search")).toHaveTextContent("?connection=connection-1");
   expect(screen.queryByRole("button", { name: "Retry setup" })).not.toBeInTheDocument();
-  expect(screen.getByRole("status")).toHaveTextContent("Connection added.");
-  expect(completion).toHaveFocus();
+  expect(
+    screen.getByText("Connection added.", { selector: '[role="status"]' })
+  ).toBeInTheDocument();
+  await waitFor(() => expect(completion).toHaveFocus());
   expect(createOimConnection).toHaveBeenCalledTimes(1);
 });
 
@@ -649,8 +730,10 @@ test("keeps creation focus and status through the Connection query revalidation"
     expect(screen.getByTestId("location-search")).toHaveTextContent("?connection=connection-1")
   );
   await waitFor(() => expect(vi.mocked(listOimConnections).mock.calls.length).toBeGreaterThan(1));
-  expect(screen.getByRole("status")).toHaveTextContent("Connection added.");
-  expect(completion).toHaveFocus();
+  expect(
+    screen.getByText("Connection added.", { selector: '[role="status"]' })
+  ).toBeInTheDocument();
+  await waitFor(() => expect(completion).toHaveFocus());
   expect(createOimConnection).toHaveBeenCalledTimes(1);
 });
 
@@ -702,7 +785,9 @@ test("resumes the listed exact Connection and resets to a blank add-another form
   expect(await screen.findByLabelText("Connection name")).toHaveValue("");
   expect(screen.getByLabelText("API token")).toHaveValue("");
   expect(screen.getByTestId("location-search")).toHaveTextContent("");
-  expect(screen.getByRole("heading", { name: "Add Connection" })).toHaveFocus();
+  await waitFor(() =>
+    expect(screen.getByRole("heading", { name: "Add Connection" })).toHaveFocus()
+  );
   expect(createOimConnection).not.toHaveBeenCalled();
 });
 
