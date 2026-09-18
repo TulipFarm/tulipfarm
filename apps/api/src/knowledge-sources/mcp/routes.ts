@@ -60,7 +60,7 @@ export function registerMcpKnowledgeRoutes(
     requireAuth,
     requireAuthorization({
       action: "integration.accounts.write",
-      resourceType: "integration",
+      resourceType: "integration_account",
       fallback: "authenticated",
     }),
   ];
@@ -170,7 +170,7 @@ export function registerMcpKnowledgeRoutes(
         requireAuth,
         requireAuthorization({
           action: "integration.accounts.read",
-          resourceType: "integration",
+          resourceType: "integration_account",
           fallback: "authenticated",
         }),
       ],

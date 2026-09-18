@@ -201,7 +201,7 @@ describe("slack declarative auth flow", () => {
   const detail = async () => {
     const res = await app.inject({
       method: "GET",
-      url: "/api/v1/integrations/slack",
+      url: "/api/v1/integrations/native/slack",
       cookies: auth(),
     });
     expect(res.statusCode).toBe(200);
@@ -284,15 +284,12 @@ describe("slack declarative auth flow", () => {
     ]);
   });
 
-  it("advertises user-configured Knowledge setup without automatic indexing", async () => {
-    expect(await detail()).toMatchObject({
-      knowledge: {
-        mode: "user_configured",
-        automatic_indexing: false,
-        source_tools: ["slack_channel_list", "slack_message_history"],
-        write_tools: ["create_knowledge_page"],
-      },
-    });
+  it("exposes native channel setup without retired business Tools or Knowledge adapters", async () => {
+    const setup = await detail();
+    expect(setup).toMatchObject({ name: "slack", connected: false });
+    expect(setup.auth).toHaveLength(3);
+    expect(setup).not.toHaveProperty("knowledge");
+    expect(setup).not.toHaveProperty("tools");
   });
 
   it("produces every value Slack channel routing reads", async () => {

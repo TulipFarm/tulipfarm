@@ -205,7 +205,8 @@ export const MEMBER_ALLOWED_SURFACES: readonly {
   {
     type: "integration_account",
     actions: ["integration.accounts.read", "integration.accounts.write"],
-    enforcedIn: "integrations/accounts/routes.ts; integrations/accounts/oauth-routes.ts",
+    enforcedIn:
+      "integrations/accounts/routes.ts; integrations/accounts/oauth-routes.ts; knowledge-sources/mcp/routes.ts",
   },
   /** Use exact Tool-declared resource types; kind distinctions live in target ids. */
   { type: "platform.knowledge", actions: ["*"], enforcedIn: "packages/knowledge/src/tools.ts" },

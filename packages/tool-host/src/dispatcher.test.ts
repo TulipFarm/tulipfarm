@@ -851,7 +851,7 @@ describe("authorization gate", () => {
     { action: "platform.kv.read", resourceType: "platform.kv", effect: "allow" },
   ];
 
-  it("prepares exact Connection, destination, and File bindings before policy and approval", async () => {
+  it("prepares exact MCP account, destination, and File bindings before policy and approval", async () => {
     const execute = vi.fn(async () => ok({}));
     const tool = gatedTool(execute);
     const registry = new InMemoryToolCatalog();
@@ -869,20 +869,14 @@ describe("authorization gate", () => {
       arguments: { text: "hi" },
       destination: "https://api.example.com",
       fileIds: ["file-1"],
-      connection: {
-        connectionId: "connection-1",
-        integrationId: "example",
-        integrationMajorVersion: 1,
-        operationId: "send",
-        identityMode: "personal_required" as const,
-        credentialSlot: "token",
-        credentialRevision: "7",
-        manifestDigest: "a".repeat(64),
-        configurationDigest: "b".repeat(64),
-        principalKind: "user",
-        principalId: "user-1",
+      mcp: {
+        serverId: "example",
+        serverRevision: "a".repeat(64),
+        accountId: "account-1",
+        accountRevision: "7",
+        subjectId: "user-1",
+        authorizationId: "authorization-1",
       },
-      credentialRef: "secret://example/token",
       idempotencyKey: "idem-1",
     };
     const findIntent = vi.fn(async () => pinnedIntent);
@@ -971,11 +965,14 @@ describe("authorization gate", () => {
             action: definition.authorization.action,
             targetRefs: [],
             arguments: { text: "hi" },
-            integrationId: "public-api",
-            integrationMajorVersion: 1,
-            operationId: "lookup",
-            manifestDigest: "a".repeat(64),
-            configurationDigest: "b".repeat(64),
+            mcp: {
+              serverId: "public-api",
+              serverRevision: "a".repeat(64),
+              accountId: null,
+              accountRevision: "public",
+              subjectId: "user-1",
+              authorizationId: "authorization-public",
+            },
             principalKind: "user",
             principalId: "user-1",
             idempotencyKey: "idem-public",
