@@ -87,7 +87,14 @@ export function registerSecretsRoutes(
   app.put(
     "/api/v1/secrets/:key",
     {
-      preHandler: [requireAuth, requireAuthorization(SECRET_WRITE)],
+      preHandler: [
+        requireAuth,
+        async (req, reply) =>
+          requireAuthorization({
+            ...SECRET_WRITE,
+            recordId: (req.params as { key: string }).key,
+          })(req, reply),
+      ],
       schema: {
         description: "Create or update a secret (admin only).",
         tags: ["secrets"],
@@ -169,7 +176,14 @@ export function registerSecretsRoutes(
   app.delete(
     "/api/v1/secrets/:key",
     {
-      preHandler: [requireAuth, requireAuthorization(SECRET_DELETE)],
+      preHandler: [
+        requireAuth,
+        async (req, reply) =>
+          requireAuthorization({
+            ...SECRET_DELETE,
+            recordId: (req.params as { key: string }).key,
+          })(req, reply),
+      ],
       schema: {
         description: "Delete a secret (admin only). Idempotent.",
         tags: ["secrets"],

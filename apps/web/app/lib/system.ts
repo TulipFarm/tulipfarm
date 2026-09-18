@@ -17,6 +17,8 @@ export type PublicOrigins = {
   callbackUrl: string;
   source: "database" | "environment" | "default";
   locked: boolean;
+  lockReason?: "hosting_operator" | "environment" | null;
+  canWrite?: boolean;
 };
 
 export function getPublicOrigins(): Promise<PublicOrigins> {

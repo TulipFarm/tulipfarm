@@ -412,3 +412,37 @@ Before step 5's flip goes further, extend those rather than replace them.
 4. One decision function. A second implementation of the intersection is a defect.
 5. Authorization changes are themselves authorized (D8) and audited.
 6. TulipFarm ships no domain, department, role, or approval-chain content.
+
+### Runtime infrastructure ownership
+
+The approved deployment foundation adds `infrastructureOwnershipLayer` in `@tulipfarm/authz`.
+It is a ceiling, never a grant of operator access: the HTTP adapter intersects it before any
+shadow/fallback decision, and the API-hosted `LiveToolGate` intersects it with live caller and
+Agent authority. Both use `decideEffectivePermission`; no role comparison confers hosted
+infrastructure ownership. Only the initialized deployment context selects this ceiling.
+
+Hosted customer requests cannot mutate public origins, select/create a Soul repository, invoke
+explicit Git push/sync/reconfiguration, or mutate the runtime's Git and signing Secrets.
+Automatic host-owned Soul publication is unchanged, as are authorized business authoring,
+people, permissions, provider credentials, and direct model/integration choices. Independent
+control remains unchanged. Operational identities gain no additional grants.
+
+| Configuration | Effective reader and existing writer | Hosted ownership |
+| --- | --- | --- |
+| Database and blob locations | Runtime environment; `runtime-pg` and `storage/ports/blob-config` | Environment-only; no HTTP or Tool writer added. |
+| Encryption infrastructure | `secrets/keys`, runtime Secret bootstrap, Soul signing, channel binding | Environment keys stay environment-only; exact runtime signing/Git Secret keys are denied at the shared HTTP authority adapter, including metadata listing. |
+| Execution backends | API/Worker sandbox composition and runtime environment | Existing environment-only backend selection and isolation evidence remain unchanged. |
+| Official-service endpoints | Fixed release lookup; telemetry endpoint from environment | No persisted endpoint override or customer writer exists. Customer provider endpoints remain business configuration. |
+| Public web/API origins | `PublicOriginsService`, system GET/PUT/DELETE | Hosted composition requires both environment origins, ignores legacy stored overrides, and refuses writes. Web redirects/CORS and API callbacks/webhooks remain distinct. |
+| Soul storage and Git remote | API boot (`SOUL_PATH`/`SOUL_ROOT`), Soul Git routes, GitHub Soul-repository selection/create, `soul_repo_push` | Hosted boot uses environment remote/credential, not Soul or GitHub selection rows. Customer explicit Git control is denied; ordinary Soul artifact writes still publish. |
+
+Existing About and Soul panels consume derived `canWrite`/`canSync` and lock information.
+Hosted Git projection excludes the remote and credential metadata and sanitizes sync failures.
+No hosting trust object or environment credential is sent to a browser or Agent. Missing UI
+capabilities fail closed; HTTP denial remains authoritative.
+
+Acceptance covers initialized hosted/independent assemblies with the real live authorizer in
+enforcing and shadow modes, persisted post-denial values, forged HTTP bodies, protected Secrets,
+business/BYOK writes, and the real repository-push Tool through the dispatcher. The hosted
+infrastructure Eval Case uses the shipped Tool declaration and real gate, not a scripted denial.
+Changing the Corpus retires existing Baselines; a maintainer must re-promote them.

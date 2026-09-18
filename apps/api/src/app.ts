@@ -71,6 +71,10 @@ export type { AppOptions } from "./app-options";
 
 export async function buildApp(opts: AppOptions = {}) {
   const independentSetup = runtimeDeploymentAllowsIndependentSetup(opts.deployment);
+  const authorizationGate = {
+    ...opts.authorizationGate,
+    hostingAuthority: opts.deployment?.hostingAuthority ?? "independent",
+  };
   const app = Fastify({
     // enabling it never costs the operator output they had before.
     logger: opts.logSink ? { stream: createLogTeeStream(opts.logSink) } : true,
@@ -79,6 +83,8 @@ export async function buildApp(opts: AppOptions = {}) {
   });
 
   const publicOrigins = opts.publicOrigins;
+  publicOrigins?.assertDeployment(opts.deployment);
+  opts.systemRoutes?.publicOrigins?.assertDeployment(opts.deployment);
 
   const webDist = process.env.WEB_DIST;
   const serveSpa = !!webDist;
@@ -292,11 +298,8 @@ export async function buildApp(opts: AppOptions = {}) {
   }
 
   if (opts.sessionStore && opts.userRepo && opts.tokenRepo) {
-    const requireAuthorization = makeRequireAuthorization(
-      opts.routeAuthorizer,
-      opts.authorizationGate
-    );
-    const authorizationCheck = makeAuthorizationCheck(opts.routeAuthorizer, opts.authorizationGate);
+    const requireAuthorization = makeRequireAuthorization(opts.routeAuthorizer, authorizationGate);
+    const authorizationCheck = makeAuthorizationCheck(opts.routeAuthorizer, authorizationGate);
     registerAuthRoutes(app, opts.sessionStore, opts.userRepo, opts.tokenRepo, {
       rateLimiter: opts.rateLimiter,
       ...(opts.identity && { identity: opts.identity }),
@@ -412,7 +415,8 @@ export async function buildApp(opts: AppOptions = {}) {
         ...opts.systemRoutes,
       },
       requireAuth,
-      requireAuthorization
+      requireAuthorization,
+      authorizationCheck
     );
     if (opts.activityService) {
       registerActivityRoutes(app, opts.activityService, requireAuth, requireAuthorization);

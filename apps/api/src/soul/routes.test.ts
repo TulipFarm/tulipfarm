@@ -397,6 +397,10 @@ describe("soul routes", () => {
         });
         expect(res.statusCode).toBe(200);
         expect(res.json()).toEqual({
+          locked: false,
+          lockReason: null,
+          canWrite: true,
+          canSync: true,
           credentialSet: false,
           status: {
             remoteConfigured: false,
@@ -434,6 +438,10 @@ describe("soul routes", () => {
         });
         expect(res.statusCode).toBe(200);
         expect(res.json()).toEqual({
+          locked: false,
+          lockReason: null,
+          canWrite: true,
+          canSync: true,
           remoteUrl: "https://github.com/acme/soul.git",
           credentialSet: true,
           status: {

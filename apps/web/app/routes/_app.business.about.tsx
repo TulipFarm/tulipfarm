@@ -39,11 +39,21 @@ export default function BusinessAbout() {
 
   useEffect(() => {
     void checkForUpdates();
-    void getPublicOrigins().then((value) => {
-      setOrigins(value);
-      setWebOrigin(value.webOrigin);
-      setApiOrigin(value.apiOrigin === value.webOrigin ? "" : value.apiOrigin);
-    });
+    void getPublicOrigins()
+      .then((value) => {
+        setOrigins(value);
+        setWebOrigin(value.webOrigin);
+        setApiOrigin(value.apiOrigin === value.webOrigin ? "" : value.apiOrigin);
+      })
+      .catch((error: unknown) =>
+        setStatus({
+          tone: "error",
+          message:
+            error instanceof Error
+              ? error.message
+              : "Could not load public addresses. Retry this page.",
+        })
+      );
   }, [checkForUpdates]);
 
   const applyOrigins = (value: PublicOrigins) => {
@@ -99,7 +109,7 @@ export default function BusinessAbout() {
             <Input
               value={webOrigin}
               onChange={(event) => setWebOrigin(event.target.value)}
-              disabled={!isAdmin || origins?.locked || saving}
+              disabled={!isAdmin || origins?.canWrite !== true || saving}
               placeholder="https://tulip.example.com"
             />
           </Field>
@@ -113,7 +123,7 @@ export default function BusinessAbout() {
               <Input
                 value={apiOrigin}
                 onChange={(event) => setApiOrigin(event.target.value)}
-                disabled={!isAdmin || origins?.locked || saving}
+                disabled={!isAdmin || origins?.canWrite !== true || saving}
                 placeholder="Same as web address"
               />
             </Field>
@@ -124,8 +134,12 @@ export default function BusinessAbout() {
             </Field>
           ) : null}
           {origins?.locked ? (
-            <p className="text-xs text-muted-foreground">Managed by the deployment environment.</p>
-          ) : isAdmin ? (
+            <p className="text-xs text-muted-foreground">
+              {origins.lockReason === "hosting_operator"
+                ? "Managed by the hosting operator. Contact your operator to change these addresses."
+                : "Managed by the deployment environment."}
+            </p>
+          ) : isAdmin && origins?.canWrite === true ? (
             <div className="flex flex-wrap gap-2">
               <Button onClick={() => void save()} disabled={saving || !webOrigin.trim()}>
                 {saving ? "Saving…" : "Save"}

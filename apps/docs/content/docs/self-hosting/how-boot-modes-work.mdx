@@ -147,6 +147,24 @@ Hosting configuration does not relax production execution safeguards. A missing 
 execution backend does not trigger local or development execution. Existing isolation evidence,
 compute and network limits, and controlled credential delivery remain required.
 
+### Configuration ownership
+
+Independent hosting keeps local infrastructure control. **Business → About** can change public
+addresses unless `PUBLIC_ORIGINS_LOCKED=true`; **Business → Soul** can manage the configuration
+repository's remote. Purchasing model or integration access does not change that ownership.
+
+The test-hosted configuration also checks the ownership boundary: public addresses and repository
+controls are marked as managed by the hosting operator. Direct requests and Agent-invoked
+repository pushes cannot override that restriction. Saved public addresses and repository
+selections do not replace the host's environment configuration. Public web and API addresses
+remain separate; callbacks and webhooks use the API address.
+
+Business settings and supported direct model and integration credentials remain available under
+their normal permissions. Database and file-storage locations, encryption keys, execution
+infrastructure, and official-service endpoints stay deployment configuration, not new customer
+settings. A locked control tells you to contact the hosting operator; a failed settings read does
+not enable editing. These checks do not enable production hosting or a managed-service connection.
+
 ## Where to go next
 
 <Cards>

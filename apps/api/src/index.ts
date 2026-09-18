@@ -488,7 +488,9 @@ async function boot() {
       );
     const publicOrigins = new PublicOriginsService(
       new PublicOriginStore(pool),
-      deployment.businessId
+      deployment.businessId,
+      process.env,
+      deployment
     );
     await publicOrigins.initialize();
     /**
@@ -519,7 +521,14 @@ async function boot() {
     let gitRemoteUrl: string | undefined;
     let gitCredentialProvider: CredentialProvider;
 
-    if (process.env.SOUL_PATH) {
+    if (deployment.hostingAuthority === "tulipfarm") {
+      soulPath =
+        process.env.SOUL_PATH ??
+        resolveSoulPath(process.env.SOUL_ROOT as string, deployment.businessId);
+      gitRemoteUrl = process.env.SOUL_GIT_REMOTE_URL;
+      const gitCredential = process.env.SOUL_GIT_CREDENTIAL;
+      gitCredentialProvider = async () => gitCredential;
+    } else if (process.env.SOUL_PATH) {
       soulPath = process.env.SOUL_PATH;
       // Soul persists a remote (soul.yaml's gitRemoteUrl + the "soul-git-credential" secret),
       const persistedSoulConfig = await readSoulConfig(soulPath);
@@ -1678,6 +1687,7 @@ async function boot() {
         }),
         files: fileService,
         tools: buildDelegatedToolDispatch({
+          deployment,
           links: childLinks,
           catalog: delegationCatalog,
           registry: toolRegistry,

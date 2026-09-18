@@ -5,7 +5,7 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import type { AuditService } from "../audit/service";
 import { ErrorSchema } from "../auth/schemas";
 import type { UserDoc } from "../auth/users";
-import type { RequireAuthorization } from "../authz/route-gate";
+import type { AuthorizationCheck, RequireAuthorization } from "../authz/route-gate";
 import { isNewerVersion, runningVersion } from "./version";
 
 type PreHandler = (req: FastifyRequest, reply: FastifyReply) => Promise<void>;
@@ -33,13 +33,15 @@ export interface SystemRoutesDeps {
 
 const PublicOriginsSchema = {
   type: "object",
-  required: ["webOrigin", "apiOrigin", "callbackUrl", "source", "locked"],
+  required: ["webOrigin", "apiOrigin", "callbackUrl", "source", "locked", "lockReason", "canWrite"],
   properties: {
     webOrigin: { type: "string" },
     apiOrigin: { type: "string" },
     callbackUrl: { type: "string" },
     source: { type: "string", enum: ["database", "environment", "default"] },
     locked: { type: "boolean" },
+    canWrite: { type: "boolean" },
+    lockReason: { type: "string", nullable: true, enum: ["hosting_operator", "environment", null] },
   },
 };
 
@@ -48,7 +50,8 @@ export function registerSystemRoutes(
   app: FastifyInstance,
   deps: SystemRoutesDeps,
   requireAuth: PreHandler,
-  requireAuthorization: RequireAuthorization
+  requireAuthorization: RequireAuthorization,
+  authorizationCheck?: AuthorizationCheck
 ): void {
   app.get(
     "/api/v1/system/update-check",
@@ -116,6 +119,21 @@ export function registerSystemRoutes(
 
   const publicOrigins = deps.publicOrigins;
   if (!publicOrigins) return;
+  const project = async (req: FastifyRequest) => {
+    const origins = await publicOrigins.refresh();
+    return {
+      ...origins,
+      canWrite:
+        !origins.locked &&
+        req.principal !== undefined &&
+        authorizationCheck !== undefined &&
+        (await authorizationCheck(req.principal, {
+          action: "deployment.public_origins.write",
+          resourceType: "deployment.public_origins",
+          fallback: "admin",
+        })),
+    };
+  };
 
   app.get(
     "/api/v1/system/public-origins",
@@ -129,7 +147,7 @@ export function registerSystemRoutes(
         response: { 200: PublicOriginsSchema, 401: ErrorSchema },
       },
     },
-    async () => publicOrigins.refresh()
+    project
   );
 
   app.put(
@@ -169,9 +187,9 @@ export function registerSystemRoutes(
     async (req, reply) => {
       const body = req.body as { webOrigin: string; apiOrigin?: string | null };
       try {
-        const origins = await publicOrigins.save(body);
+        await publicOrigins.save(body);
         await auditPublicOriginChange(deps.audit, req, "deployment.public_origins.update");
-        return origins;
+        return project(req);
       } catch (error) {
         if (error instanceof PublicOriginError) {
           return reply
@@ -208,9 +226,9 @@ export function registerSystemRoutes(
     },
     async (req, reply) => {
       try {
-        const origins = await publicOrigins.reset();
+        await publicOrigins.reset();
         await auditPublicOriginChange(deps.audit, req, "deployment.public_origins.reset");
-        return origins;
+        return project(req);
       } catch (error) {
         if (error instanceof PublicOriginError && error.code === "environment_locked") {
           return reply.code(409).send({ error: error.message });

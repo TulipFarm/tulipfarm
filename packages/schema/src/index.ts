@@ -433,6 +433,7 @@ export {
 } from "./skill-tool-schemas";
 export type { FilesConfig, SoulConfig } from "./soul-config";
 export { FilesConfigSchema, SoulConfigSchema, validateSoulConfig } from "./soul-config";
+export { SOUL_REPO_PUSH_TOOL_DECLARATION } from "./soul-repo-tools";
 export type {
   DeprecatedGroup,
   DeprecatedGroupCreateRequest,

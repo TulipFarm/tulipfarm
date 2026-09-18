@@ -97,6 +97,8 @@ export const GUARDRAILS_DECIDED_ELSEWHERE: readonly GuardrailRule[] = [
 export class LiveToolGate implements ToolGate {
   private readonly contracts = new Map<string, PublishedToolContract | undefined>();
 
+  constructor(private readonly restrictions: readonly AuthorityLayer[] = []) {}
+
   authorize(request: ToolGateRequest): ToolPolicyOutcome {
     const { definition } = request;
     const contract = this.contractFor(definition);
@@ -150,7 +152,7 @@ export class LiveToolGate implements ToolGate {
           ];
 
     return authorizeToolIntent(intent, contract, {
-      authorityLayers: layers,
+      authorityLayers: [...this.restrictions, ...layers],
       guardrailRules: request.guardrailRules ?? GUARDRAILS_DECIDED_ELSEWHERE,
       dlpRules: request.dlpRules ?? CHAT_DLP_RULES,
       guardrailRevision: request.guardrailRevision,

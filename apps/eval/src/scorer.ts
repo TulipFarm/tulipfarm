@@ -121,6 +121,7 @@ function readPath(value: unknown, path: string): { found: boolean; value: unknow
   // Guards a malformed Expectation that reached the scorer directly: `scoreCase` must be total, and
   // splitting `undefined` here would throw where the contract promises a failed Expectation.
   if (typeof path !== "string" || path.length === 0) return { found: false, value: undefined };
+  if (path === "$") return { found: true, value };
   let current = value;
   for (const segment of path.split(".")) {
     if (current === null || typeof current !== "object") return { found: false, value: undefined };

@@ -28,6 +28,7 @@ Only its own Cases need updating when their observable behaviour moves.
 | `src/matrix.ts` | `runMatrix` — the same Corpus across several models, one Scorecard each. |
 | `src/bindings.ts` | `resolveBindings` — turns `--model sonnet,terra` into the bindings to measure. |
 | `src/scripted.ts` | `scriptedBinding` — replays each Case's `script`. Free, deterministic. |
+| `src/dispatch.ts` | Scripted results; an L2 hosting fixture uses the shipped repository-push contract and real Tool gate, never a scripted ownership verdict. |
 | `src/model.ts` | `PINNED_MODELS` and `pinnedBinding` — the real-vendor binding. The only file here that touches a credential. |
 | `src/retry.ts` | `withRetry` — transient vendor failures, retried and counted. |
 | `src/spend.ts` | `Spend` totals: tokens, dollars, and what could not be priced. |

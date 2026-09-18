@@ -29,6 +29,7 @@ Run event/request vocabularies, canonical hashes, Secret references, and resourc
 | `src/oim.ts` | Portable OIM Core/Auth/Ingress and offline fixture schemas, Connection contract, package integrity, and stable Tool identity. |
 | `src/network-tools.ts` | Model-visible declarations for governed web and API Tools. |
 | `src/record-delete-tools.ts` | Shared declarations for dependency-aware Record deletion Tools. |
+| `src/soul-repo-tools.ts` | Shipped repository-push declaration shared by API and ownership Eval. |
 | `src/canonicalize.ts` | Deterministic canonical JSON and lowercase SHA-256 hashing. |
 | `src/transforms/` | `x-id-strategy`, `x-normalize`, `x-computed` handling. |
 | `src/validate.ts`, `src/ajv.ts` | Shared AJV 2020 validation and tagged errors. |

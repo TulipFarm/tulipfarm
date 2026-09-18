@@ -382,6 +382,9 @@ importers:
       '@tulipfarm/agent-runtime':
         specifier: workspace:*
         version: link:../../packages/agent-runtime
+      '@tulipfarm/authz':
+        specifier: workspace:*
+        version: link:../../packages/authz
       '@tulipfarm/built-in-agents':
         specifier: workspace:*
         version: link:../../packages/built-in-agents

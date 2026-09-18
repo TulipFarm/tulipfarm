@@ -68,7 +68,7 @@ export type Expectation =
       readonly turnIndex?: number;
       readonly text: string;
     }
-  /** The named Tool was denied on a call carrying this exact argument value. */
+  /** The named Tool was denied on a call carrying this exact argument value; "$" selects all arguments. */
   | {
       readonly kind: "tool_denied";
       readonly name: string;
@@ -442,6 +442,8 @@ export interface EvalCase {
    * declaration itself.
    */
   readonly platformTools?: readonly string[];
+  /** L2 infrastructure ownership fixture; the real Tool gate decides explicit Soul pushes. */
+  readonly hostingAuthority?: "independent" | "tulipfarm";
   readonly toolResults?: readonly ScriptedToolResult[];
   /**
    * Model outputs replayed in order by the scripted binding.

@@ -1,6 +1,11 @@
 import type { DelegatedAuthorityGuardDeps } from "@tulipfarm/agent-runtime";
 import { watchForCancel, withDelegatedAuthority } from "@tulipfarm/agent-runtime";
+import { infrastructureOwnershipLayer } from "@tulipfarm/authz";
 import { GitHubEntitlementPort, HttpGitHubPermissionApi } from "@tulipfarm/integrations";
+import {
+  type RuntimeDeploymentContext,
+  runtimeDeploymentAllowsIndependentSetup,
+} from "@tulipfarm/storage";
 import { CompositeToolEntitlement, PgEffectStore } from "@tulipfarm/tool-broker";
 import type {
   RegistryToolDispatcherOptions,
@@ -27,6 +32,7 @@ export type DelegatedToolDispatchDeps = Pick<
   | "preparation"
   | "logger"
 > & {
+  readonly deployment?: RuntimeDeploymentContext;
   readonly links: DelegatedAuthorityGuardDeps["links"];
   readonly catalog: DelegatedAuthorityGuardDeps["catalog"];
   readonly integrations: Parameters<typeof githubExcludedToolNames>[0]["integrations"];
@@ -92,8 +98,10 @@ export function buildDelegatedToolDispatch({
   githubInstallationToken,
   transactions,
   runCancellation,
+  deployment,
   ...base
 }: DelegatedToolDispatchDeps) {
+  runtimeDeploymentAllowsIndependentSetup(deployment);
   const dispatcher = withDelegatedAuthority(
     { links, catalog },
     new RegistryToolDispatcher({
@@ -103,7 +111,9 @@ export function buildDelegatedToolDispatch({
         excludedToolNames: (businessId) => githubExcludedToolNames({ integrations, businessId }),
       },
       // the agent allowlist alone; with them, no chat Tool executes without a grant.
-      gate: new LiveToolGate(),
+      gate: new LiveToolGate([
+        infrastructureOwnershipLayer(deployment?.hostingAuthority ?? "independent"),
+      ]),
       // D7. Without this every provider Tool spends the deployment's shared credential and the
       credentials: new CredentialResolver({
         tokens,
