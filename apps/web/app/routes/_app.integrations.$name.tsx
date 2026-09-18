@@ -12,6 +12,7 @@ import { IntegrationAuthFlow, startHandoff } from "~/components/integrations/aut
 import { ComingSoonState } from "~/components/integrations/coming-soon-state";
 import { GitHubPersonalAccount } from "~/components/integrations/github-personal-account";
 import { IntegrationIcon } from "~/components/integrations/integration-icon";
+import { IntegrationOperations } from "~/components/integrations/integration-operations";
 import { OimConnectionSetup } from "~/components/integrations/oim-connection-setup";
 import { OimConnections } from "~/components/integrations/oim-connections";
 import { MarkdownView } from "~/components/markdown-view";
@@ -944,6 +945,10 @@ export default function IntegrationDetailPage() {
                 </Button>
               </section>
             ) : null}
+            <IntegrationOperations
+              key={`operations:${integration.name}`}
+              integrationKey={integration.name}
+            />
           </>
         )}
 
