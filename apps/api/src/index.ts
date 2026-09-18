@@ -239,6 +239,7 @@ import { createOimFileHost } from "./integrations/oim-file-host";
 import { refreshOimJwtAssertionStep } from "./integrations/oim-jwt";
 import { refreshOimOAuthStep } from "./integrations/oim-oauth";
 import { createOimVerificationHost } from "./integrations/oim-verification-host";
+import { IntegrationOperationsService } from "./integrations/operations/service";
 import { PgPrincipalProviderTokenRepo } from "./integrations/principal-tokens";
 import {
   liveOimPackageCatalog,
@@ -1849,6 +1850,7 @@ async function boot() {
         tokens: principalTokens,
       },
       oimConnections,
+      integrationOperations: new IntegrationOperationsService(oimConnections, pool),
       internalOimConnections: {
         refreshDue: refreshDueOimConnections,
       },

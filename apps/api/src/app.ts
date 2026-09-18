@@ -523,7 +523,8 @@ export async function buildApp(opts: AppOptions = {}) {
         requireAuth,
         requireAuthorization,
         authorizationCheck,
-        integrationAuthCallbackRegistered
+        integrationAuthCallbackRegistered,
+        opts.integrationOperations
       );
     }
     if (opts.resourceRepoFactory && opts.counterStore && opts.soulLoader) {

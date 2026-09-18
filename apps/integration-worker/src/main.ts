@@ -10,6 +10,7 @@ import {
 import { config as loadEnv } from "dotenv";
 import { watchForSlackChannelCredential } from "./channels";
 import { loadConfig, REQUIRED_SCHEMA_VERSION } from "./config";
+import { ConsumerReadiness } from "./consumer-readiness";
 import { waitForDataDirEnv } from "./data-dir";
 import { connectPg } from "./db";
 import { InternalApiClient } from "./internal/client";
@@ -103,10 +104,12 @@ export async function main(): Promise<void> {
   let serving = true;
   const controller = new AbortController();
   const loops: DrainableLoop[] = [];
+  const consumerReadiness = new ConsumerReadiness();
 
   loops.push(
     ...(await composeOimRuntime(controller.signal, {
       pool,
+      readiness: consumerReadiness,
       host: new InternalOimWorkerHost(
         new InternalApiClient({
           baseUrl: config.internalApiUrl,
@@ -136,7 +139,7 @@ export async function main(): Promise<void> {
     database: pool,
     requiredSchemaVersion: REQUIRED_SCHEMA_VERSION,
     isServing: () => serving,
-    areConsumersReady: () => true,
+    areConsumersReady: () => consumerReadiness.isReady(),
   });
 
   logger.info(`integration-worker ready: schema=${schemaVersion} port=${config.port}`);

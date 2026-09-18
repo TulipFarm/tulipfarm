@@ -378,6 +378,36 @@ function unregisterInput() {
 }
 
 describe("InternalOimWorkerHost", () => {
+  it("rejects an existing unsupported socket declaration rather than silently omitting it", async () => {
+    const fixture = host({
+      activeIntegration: {
+        slug: "acme",
+        sourceIntegration: "acme",
+        oimManifest: {
+          ...manifest,
+          ingress: {
+            kind: "websocket",
+            operationId: "list-events",
+            urlPointer: "/url",
+            eventTypes: [
+              {
+                type: "ticket.created",
+                selector: { pointer: "/type", equals: "ticket_created" },
+                schema: { type: "object" },
+              },
+            ],
+            deduplication: { kind: "body_pointer", bodyPointer: "/id" },
+            reconnect: { maxAttempts: 3, initialDelaySeconds: 1, maxDelaySeconds: 8 },
+          },
+        },
+      },
+    });
+    await expect(fixture.host.listPollingRegistrations()).rejects.toMatchObject({
+      statusCode: 409,
+      code: "oim_websocket_ingress_unsupported",
+    });
+    expect(fixture.send).not.toHaveBeenCalled();
+  });
   it("executes polling only through the exact Connection and returns bound evidence", async () => {
     const fixture = host();
 
