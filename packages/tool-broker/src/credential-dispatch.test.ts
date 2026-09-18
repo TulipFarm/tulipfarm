@@ -18,8 +18,6 @@ const EFFECT_ID = "22222222-2222-4222-8222-222222222222";
 const SECRET_REF = "secret://github";
 const OLD_SECRET = "github-old-secret";
 const ROTATED_SECRET = "github-rotated-secret";
-const SECOND_SECRET_REF = "secret://github-secondary";
-const SECOND_SECRET = "github-secondary-secret";
 
 const definition = makeContract({
   mutating: true,
@@ -84,7 +82,7 @@ describe("CredentialDispatcher", () => {
   it("leases the current Credential only inside the adapter callback", async () => {
     provider.set(SECRET_REF, ROTATED_SECRET);
     const adapter: ToolAdapter = {
-      kind: "integration",
+      kind: "native",
       dispatch: vi.fn(async (_request, credential) => {
         expect(credential).toBe(ROTATED_SECRET);
         return { providerId: "external-42" };
@@ -100,37 +98,14 @@ describe("CredentialDispatcher", () => {
     );
   });
 
-  it("leases a credential through its exact Connection scope", async () => {
-    const base = reservation();
-    const connectionEffect: ReserveEffectInput = {
-      ...base,
-      intent: {
-        ...base.intent,
-        destination: "https://api.example.com",
-        connection: {
-          connectionId: "connection-1",
-          integrationId: "weather",
-          integrationMajorVersion: 1,
-          operationId: "get-weather",
-          identityMode: "personal_required",
-          credentialSlot: "api_key",
-          credentialRevision: "1",
-          manifestDigest: "b".repeat(64),
-          configurationDigest: "c".repeat(64),
-          principalKind: "user",
-          principalId: "user-1",
-        },
-      },
-    };
-    store = new MemoryEffectStore();
-    await new EffectLedger(store).reserve(connectionEffect);
+  it("leases a native credential through its exact Tool and Run scope", async () => {
     const authorize = vi.fn(async () => ({ allowed: true as const, maxUses: 1 }));
     credentialDispatcher = new CredentialDispatcher({
       secrets: new SecretBroker({ provider, authorizer: { authorize } }),
       reauthorize,
     });
     const adapter: ToolAdapter = {
-      kind: "integration",
+      kind: "native",
       dispatch: vi.fn(async (_request, credential) => {
         expect(credential).toBe(OLD_SECRET);
         return { providerId: "external-42" };
@@ -142,84 +117,18 @@ describe("CredentialDispatcher", () => {
     });
     expect(authorize).toHaveBeenCalledWith({
       secretRef: SECRET_REF,
-      businessId: BUSINESS_ID,
-      connectionId: "connection-1",
-      credentialSlot: "api_key",
-      credentialRevision: "1",
-      integrationId: "weather",
-      integrationMajorVersion: 1,
-      operationId: "get-weather",
-      identityMode: "personal_required",
-      manifestDigest: "b".repeat(64),
-      configurationDigest: "c".repeat(64),
       toolId: definition.spec.toolId,
       targetId: "issue-42",
       runId: "11111111-1111-4111-8111-111111111111",
       stateId: "label",
       purpose: definition.spec.action,
-      principalKind: "user",
-      principalId: "user-1",
-      destination: "https://api.example.com",
-    });
-  });
-
-  it("leases two distinct Connection slots together and gives adapters the slot map", async () => {
-    const base = reservation();
-    const connection = {
-      connectionId: "connection-1",
-      integrationId: "trello",
-      integrationMajorVersion: 1,
-      operationId: "create-card",
-      identityMode: "shared_only" as const,
-      credentialSlot: "api_key",
-      credentialRevision: "1",
-      manifestDigest: "b".repeat(64),
-      configurationDigest: "c".repeat(64),
-    };
-    const connectionEffect: ReserveEffectInput = {
-      ...base,
-      intent: {
-        ...base.intent,
-        destination: "https://api.trello.com",
-        connection,
-        secondaryCredentialRef: SECOND_SECRET_REF,
-        secondaryConnection: {
-          ...connection,
-          credentialSlot: "token",
-          credentialRevision: "1",
-        },
-      },
-    };
-    store = new MemoryEffectStore();
-    await new EffectLedger(store).reserve(connectionEffect);
-    credentialDispatcher = new CredentialDispatcher({
-      secrets: new SecretBroker({
-        provider: inMemorySecretProvider({
-          [SECRET_REF]: OLD_SECRET,
-          [SECOND_SECRET_REF]: SECOND_SECRET,
-        }),
-        authorizer: { authorize: async () => ({ allowed: true, maxUses: 1 }) },
-      }),
-      reauthorize,
-    });
-    const adapter: ToolAdapter = {
-      kind: "integration",
-      dispatch: vi.fn(async (_request, credential, credentials) => {
-        expect(credential).toBe(OLD_SECRET);
-        expect(credentials).toEqual({ api_key: OLD_SECRET, token: SECOND_SECRET });
-        return { providerId: "external-42" };
-      }),
-    };
-
-    await expect(dispatcher(adapter).dispatch(BUSINESS_ID, EFFECT_ID)).resolves.toEqual({
-      providerId: "external-42",
     });
   });
 
   it("reauthorizes and leases fresh on every retry attempt", async () => {
     let calls = 0;
     const adapter: ToolAdapter = {
-      kind: "integration",
+      kind: "native",
       dispatch: vi.fn(async (_request, credential) => {
         calls += 1;
         if (calls === 1) {
@@ -239,7 +148,7 @@ describe("CredentialDispatcher", () => {
   it("denies when final authorization is no longer current", async () => {
     reauthorize.mockResolvedValue(false);
     const adapter: ToolAdapter = {
-      kind: "integration",
+      kind: "native",
       dispatch: vi.fn(async () => ({ providerId: "must-not-run" })),
     };
 
@@ -249,7 +158,7 @@ describe("CredentialDispatcher", () => {
 
   it("blocks plaintext in adapter results and persists no plaintext", async () => {
     const adapter: ToolAdapter = {
-      kind: "integration",
+      kind: "native",
       dispatch: vi.fn(async (_request, credential) => ({ providerId: credential })),
     };
 

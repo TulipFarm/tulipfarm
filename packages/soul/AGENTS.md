@@ -10,13 +10,14 @@ Loader, compiler, publisher, and git-sync engine for Soul artifacts. Root `soul/
 | --- | --- |
 | `src/index.ts` | Public exports; do not mirror the list here. |
 | `src/repo-dir.ts` | Locates the checkout for the dev-only bundled Skill/integration fallbacks. |
-| `src/soul-loader.ts`, `src/tree-reader.ts`, `src/soul-path.ts` | Disk and tree reads. |
+| `src/published-loader.ts`, `src/tree-reader.ts`, `src/soul-path.ts` | Disk and tree reads. |
 | `src/{agent,skill,model-profile}-documents.ts` | Canonical definitions projected on read from the authored file. |
 | `src/compiler.ts`, `src/bundle.ts`, `src/bundle-retention.ts`, `src/published-loader.ts` | Runtime bundles; `published-loader.ts` also reads Surface `code/` companions and re-checks their recorded hash. |
 | `src/signatures.ts`, `src/publication.ts`, `src/publisher.ts` | Publish flow. |
 | `src/routine-catalog.ts`, `src/routines/` | Routines browse model; Routine reference validation. |
 | `src/git-*`, `src/pinned-definition.ts`, `src/definition-reader.ts` | Git and pinned reads. |
 | `src/integration-*`, `src/types.ts` | Integration manifest trust/auth contracts. |
+| `src/integrations/mcp-*` | Validated `mcp.yaml` loading, revision-bound writes and enabled reviewed ToolContract contributions from committed bytes; a native channel cannot share its slug. |
 | `src/migrations/`, `src/soul-migrations.ts` | Migrations. |
 | `src/writer.ts` | `SoulWriter` — the one authored-tree write gateway. |
 | `src/resource-schema-authoring.ts` | Shared validation for Resource schema YAML before authoring. |
@@ -52,7 +53,7 @@ Loader, compiler, publisher, and git-sync engine for Soul artifacts. Root `soul/
   a Soul copy is writable through `skill_update`, which would let an Agent rewrite the rules that
   gate its own installs. Expanded on the way in, never read back out.
 - `SoulLoader` reads `agents/*/AGENT.md`, `skills/*/SKILL.md`, `resources/*/schema.yml`,
-  `routines/*/routine.yaml`, `integrations/*/manifest.yml`, root `soul.yaml`, `guardrails.yaml`;
+  `routines/*/routine.yaml`, `integrations/*/{manifest.yml,mcp.yaml}`, root `soul.yaml`, `guardrails.yaml`;
   resource schemas must pass `validateResourceSchema()` on load.
 - Bad files are logged and skipped; a declared-but-missing `egress.spec` silently drops that
   integration, so writers must copy the spec beside `manifest.yml`.
@@ -67,6 +68,12 @@ Loader, compiler, publisher, and git-sync engine for Soul artifacts. Root `soul/
   push, reload. Add no other commit helper.
 - Full-artifact replacement surfaces carry the revision they read in `expectedRevisions`; use the
   exact definition target so unrelated artifact commits do not make a valid draft stale.
+- MCP capability reviews bind the complete definition digest; callers pass that digest to the
+  definition store when replacing or removing a reviewed configuration. Failed publication is an error.
+- The MCP store reads an active-bundle view built with `mcpIntegrationsFromBundle`, never the
+  authored loader: a committed file is not active until signed bundle publication succeeds.
+- MCP ToolContracts use the schema-owned derivation in both pre-commit reference checks and
+  compilation; never discover capabilities or read the live loader while publishing.
 - `GitSyncService` stages only the paths given (`commitPaths`/`withSyncPaths`); there is no ambient
   `commit`/`withSync`, and `git add -A` is confined to scaffolding an empty repo.
 - Every commit helper must call the post-commit publication hook; publication activates one signed
@@ -79,4 +86,4 @@ Loader, compiler, publisher, and git-sync engine for Soul artifacts. Root `soul/
 - Env names: `SOUL_GIT_REMOTE_URL`, `SOUL_GIT_CREDENTIAL`; commits use bot name/email constants.
   Auth is HTTPS PAT injection only; SSH remotes are unsupported.
 - `bootSync()` must not throw; `configureRemote()` must throw so `PUT /soul/git-config` can 400.
-See [building an integration](../../docs/architecture/building-an-integration.md).
+See [dependency rules](../../docs/architecture/dependency-rules.md).

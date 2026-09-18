@@ -3,8 +3,8 @@ import type {
   KnowledgeAclSnapshot,
   KnowledgePrincipalRef,
   KnowledgeSourceRecord,
+  McpKnowledgeSourceLocator,
   MutableKnowledgeSourceStore,
-  OimKnowledgeSourceLocator,
 } from "@tulipfarm/knowledge";
 import type { Queryable } from "../db";
 
@@ -32,24 +32,48 @@ interface KnowledgeSourceRow {
   last_synced_at: Date;
 }
 
-function sourceLocatorFromRow(value: unknown): OimKnowledgeSourceLocator | undefined {
+function sourceLocatorFromRow(value: unknown): McpKnowledgeSourceLocator | undefined {
   if (typeof value !== "object" || value === null) return undefined;
   const locator = value as Record<string, unknown>;
   if (
-    locator.kind !== "oim" ||
-    typeof locator.integrationSlug !== "string" ||
+    locator.kind !== "mcp" ||
+    locator.adapter !== "github-file" ||
+    locator.visibility !== "personal" ||
     typeof locator.integrationId !== "string" ||
-    !Number.isSafeInteger(locator.integrationMajorVersion) ||
-    typeof locator.connectionId !== "string" ||
-    typeof locator.externalTenantId !== "string" ||
+    typeof locator.accountId !== "string" ||
+    typeof locator.accountRevision !== "number" ||
+    !Number.isSafeInteger(locator.accountRevision) ||
+    typeof locator.ownerUserId !== "string" ||
     typeof locator.externalAccountId !== "string" ||
-    typeof locator.sourceKindId !== "string" ||
-    typeof locator.scope !== "string" ||
-    typeof locator.itemId !== "string"
+    typeof locator.configurationRevision !== "string" ||
+    typeof locator.selectionId !== "string" ||
+    typeof locator.selectionRevision !== "string" ||
+    typeof locator.owner !== "string" ||
+    typeof locator.repo !== "string" ||
+    typeof locator.path !== "string" ||
+    typeof locator.ref !== "string" ||
+    typeof locator.sourceUrl !== "string"
   ) {
     return undefined;
   }
-  return locator as unknown as OimKnowledgeSourceLocator;
+  return {
+    kind: "mcp",
+    adapter: "github-file",
+    visibility: "personal",
+    integrationId: locator.integrationId,
+    accountId: locator.accountId,
+    accountRevision: locator.accountRevision,
+    ownerUserId: locator.ownerUserId,
+    externalAccountId: locator.externalAccountId,
+    configurationRevision: locator.configurationRevision,
+    selectionId: locator.selectionId,
+    selectionRevision: locator.selectionRevision,
+    owner: locator.owner,
+    repo: locator.repo,
+    path: locator.path,
+    ref: locator.ref,
+    sourceUrl: locator.sourceUrl,
+  };
 }
 
 function accessControlFromRow(row: KnowledgeSourceRow): KnowledgeAccessControl {
@@ -103,7 +127,10 @@ function rowToRecord(row: KnowledgeSourceRow): KnowledgeSourceRecord {
 }
 
 export class PgKnowledgeSourceStore implements MutableKnowledgeSourceStore {
-  constructor(private readonly q: Queryable) {}
+  constructor(
+    private readonly q: Queryable,
+    private readonly mcpPublication = false
+  ) {}
 
   async list(businessId: string): Promise<readonly KnowledgeSourceRecord[]> {
     const { rows } = await this.q.query(
@@ -141,8 +168,8 @@ export class PgKnowledgeSourceStore implements MutableKnowledgeSourceStore {
   }
 
   async put(record: KnowledgeSourceRecord): Promise<void> {
-    if (record.sourceLocator !== undefined) {
-      throw new Error("oim_knowledge_requires_atomic_publication");
+    if (record.sourceLocator !== undefined && !this.mcpPublication) {
+      throw new Error("mcp_knowledge_requires_atomic_publication");
     }
     const acl = record.accessControl.mode === "snapshot" ? record.acl : undefined;
     const result = await this.q.query(
@@ -175,7 +202,7 @@ export class PgKnowledgeSourceStore implements MutableKnowledgeSourceStore {
          provenance_checkpoint = EXCLUDED.provenance_checkpoint,
          last_synced_at = EXCLUDED.last_synced_at,
          updated_at = now()
-       WHERE knowledge_source_records.source_locator IS NULL
+       WHERE knowledge_source_records.source_locator IS NULL OR $22
        RETURNING source_id`,
       [
         record.sourceId,
@@ -199,8 +226,9 @@ export class PgKnowledgeSourceStore implements MutableKnowledgeSourceStore {
         record.provenance.contentHash,
         record.provenance.checkpoint ?? null,
         record.lastSyncedAt,
+        this.mcpPublication,
       ]
     );
-    if (result.rows.length !== 1) throw new Error("oim_knowledge_requires_atomic_publication");
+    if (result.rows.length !== 1) throw new Error("mcp_knowledge_requires_atomic_publication");
   }
 }

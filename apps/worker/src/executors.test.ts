@@ -78,17 +78,37 @@ class FakeRunStore implements RunLeaseStore {
 }
 
 describe("RunExecutorRegistry", () => {
-  it("routes a Run to the executor registered for its source", async () => {
-    const registry = new RunExecutorRegistry();
-    const seen: string[] = [];
-    registry.register("chat", async (run) => {
-      seen.push(run.id);
-      return { status: "succeeded" };
-    });
+  it.each(["chat", "routine", "subagent"] as const)(
+    "routes a %s Run to its registered executor",
+    async (source) => {
+      const registry = new RunExecutorRegistry();
+      const seen: string[] = [];
+      registry.register(source, async (run) => {
+        seen.push(run.id);
+        return { status: "succeeded" };
+      });
 
-    await expect(registry.execute(persistedRun())).resolves.toEqual({ status: "succeeded" });
-    expect(seen).toEqual([persistedRun().id]);
-    expect(registry.size).toBe(1);
+      await expect(registry.execute(persistedRun({ source }))).resolves.toEqual({
+        status: "succeeded",
+      });
+      expect(seen).toEqual([persistedRun().id]);
+      expect(registry.size).toBe(1);
+    }
+  );
+
+  it("does not route a retired integration source through Chat or a pinned Routine", async () => {
+    const registry = new RunExecutorRegistry();
+    let dispatched = false;
+    for (const source of ["chat", "routine", "subagent"]) {
+      registry.register(source, async () => {
+        dispatched = true;
+        return { status: "succeeded" };
+      });
+    }
+    await expect(registry.execute(persistedRun({ source: "integration" }))).rejects.toThrow(
+      'no executor registered for Run source "integration"'
+    );
+    expect(dispatched).toBe(false);
   });
 
   it("rejects a duplicate registration rather than silently replacing an executor", () => {
@@ -107,23 +127,26 @@ describe("RunExecutorRegistry", () => {
     );
   });
 
-  it("parks a Run in needs_reconciliation when no executor is registered", async () => {
-    const store = new FakeRunStore();
-    store.claimBatchResult = [persistedRun()];
-    const registry = new RunExecutorRegistry();
-    const dispatcher = new RunDispatcher({
-      leases: new RunLeaseManager(store),
-      businessId: BUSINESS_ID,
-      owner: "worker-1",
-      now: () => new Date("2026-07-24T10:00:00.000Z"),
-      handler: (run) => registry.execute(run),
-    });
+  it.each(["chat", "integration"] as const)(
+    "parks an unregistered %s Run for reconciliation",
+    async (source) => {
+      const store = new FakeRunStore();
+      store.claimBatchResult = [persistedRun({ source })];
+      const registry = new RunExecutorRegistry();
+      const dispatcher = new RunDispatcher({
+        leases: new RunLeaseManager(store),
+        businessId: BUSINESS_ID,
+        owner: "worker-1",
+        now: () => new Date("2026-07-24T10:00:00.000Z"),
+        handler: (run) => registry.execute(run),
+      });
 
-    const result = await dispatcher.dispatchBatch();
+      const result = await dispatcher.dispatchBatch();
 
-    expect(result).toMatchObject({ claimed: 1, dispatched: 0, failed: 1 });
-    expect(store.releaseCalls).toEqual([
-      expect.objectContaining({ status: "needs_reconciliation" }),
-    ]);
-  });
+      expect(result).toMatchObject({ claimed: 1, dispatched: 0, failed: 1 });
+      expect(store.releaseCalls).toEqual([
+        expect.objectContaining({ status: "needs_reconciliation" }),
+      ]);
+    }
+  );
 });

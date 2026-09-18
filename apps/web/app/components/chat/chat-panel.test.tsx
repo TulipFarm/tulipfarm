@@ -13,7 +13,10 @@ let approvals: PendingApproval[] = [];
 let approvalsLoading = false;
 let approvalsError: string | null = null;
 const refreshApprovals = vi.fn();
-vi.mock("~/lib/use-session-user", () => ({ useSessionUser: () => undefined }));
+vi.mock("~/lib/use-session-user", () => ({
+  useSessionUser: () => undefined,
+  useIsAdmin: () => false,
+}));
 vi.mock("~/lib/approvals-context", () => ({
   useApprovals: () => ({
     approvals,

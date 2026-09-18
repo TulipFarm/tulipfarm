@@ -71,7 +71,7 @@
         "idempotency": { "strategy": "provider" },
         "retry": { "maxAttempts": 2, "safeToRetry": true },
         "dryRun": false,
-        "adapter": { "kind": "integration", "ref": "eval-routine-provider" }
+        "adapter": { "kind": "native", "ref": "eval-routine-provider" }
       }
     },
     "guardrail": {

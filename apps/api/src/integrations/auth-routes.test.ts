@@ -1,4 +1,3 @@
-import { AuthBrokerError } from "@tulipfarm/integrations";
 import type {
   BundledIntegration,
   GitSyncService,
@@ -101,27 +100,25 @@ class MemoryAuthRequestRepo implements IntegrationAuthRequestRepo {
   }
 }
 
-const NOTION_MANIFEST: BundledIntegration["manifest"] = {
-  name: "notion",
+const GITHUB_MANIFEST: BundledIntegration["manifest"] = {
+  name: "github",
   egress: { type: "none" },
   auth: [
     {
       kind: "fields",
       fields: [
-        { name: "NOTION_CLIENT_ID", label: "Client ID" },
-        { name: "NOTION_CLIENT_SECRET", label: "Client Secret", secret: true },
+        { name: "GITHUB_CLIENT_ID", label: "Client ID" },
+        { name: "GITHUB_CLIENT_SECRET", label: "Client Secret", secret: true },
       ],
     },
     {
       kind: "oauth2",
-      // Notion's authorize URL takes `owner=user`, so this exchange really does return the
-      // authorizing person's own token — the declaration Slack's install step must not carry.
       personal: true,
-      authorization_url: "https://notion.test/authorize",
-      token_url: "https://notion.test/token",
-      client_id_env: "NOTION_CLIENT_ID",
-      client_secret_env: "NOTION_CLIENT_SECRET",
-      token_env: "NOTION_ACCESS_TOKEN",
+      authorization_url: "https://github.test/authorize",
+      token_url: "https://github.test/token",
+      client_id_env: "GITHUB_CLIENT_ID",
+      client_secret_env: "GITHUB_CLIENT_SECRET",
+      token_env: "GITHUB_ACCESS_TOKEN",
     },
   ],
 };
@@ -136,8 +133,6 @@ describe("integration auth routes", () => {
   let principalTokens: InMemoryPrincipalProviderTokenRepo;
   let memberSid: string;
   let fetchImpl: ReturnType<typeof vi.fn>;
-  let completeOimAuthorization: ReturnType<typeof vi.fn>;
-  let oimStates: Set<string>;
 
   beforeEach(async () => {
     const store = new MemorySessionStore();
@@ -154,14 +149,14 @@ describe("integration auth routes", () => {
 
     function reloadFromTree(): Map<string, SoulIntegration> {
       const map = new Map<string, SoulIntegration>();
-      const manifestRaw = soul.writer.read("Integration", "notion");
-      const connectionRaw = soul.writer.readCompanion("Integration", "notion", "connection.yaml");
+      const manifestRaw = soul.writer.read("Integration", "github");
+      const connectionRaw = soul.writer.readCompanion("Integration", "github", "connection.yaml");
       if (manifestRaw !== null || connectionRaw !== null) {
         const connection = connectionRaw === null ? undefined : parseYaml(connectionRaw);
-        map.set("notion", {
-          slug: "notion",
-          sourceIntegration: "notion",
-          manifest: NOTION_MANIFEST,
+        map.set("github", {
+          slug: "github",
+          sourceIntegration: "github",
+          manifest: GITHUB_MANIFEST,
           connection,
         });
       }
@@ -188,11 +183,6 @@ describe("integration auth routes", () => {
     repo = new MemoryAuthRequestRepo();
     principalTokens = new InMemoryPrincipalProviderTokenRepo();
     fetchImpl = vi.fn();
-    oimStates = new Set();
-    completeOimAuthorization = vi.fn(async () => ({
-      key: "acme-v2",
-      connectionId: "connection-1",
-    }));
 
     app = await buildApp({
       sessionStore: store,
@@ -202,19 +192,12 @@ describe("integration auth routes", () => {
       soulWriter: soul.writer,
       soulLoader,
       secretsService: secretsService as never,
-      bundledIntegrations: new Map([["notion", { manifest: NOTION_MANIFEST }]]),
+      bundledIntegrations: new Map([["github", { manifest: GITHUB_MANIFEST }]]),
       integrationAuth: {
         repo,
         fetchImpl: fetchImpl as never,
         tokens: principalTokens,
       },
-      oimConnections: {
-        completeAuthorization: completeOimAuthorization,
-        hasPendingAuthorization: async (state: string) => oimStates.has(state),
-        authorizationContext: async (state: string) =>
-          oimStates.has(state) ? { key: "acme-v2", connectionId: "connection-1" } : null,
-        authorizationWebUrl: () => "https://app.example.test",
-      } as never,
     });
   });
 
@@ -228,7 +211,7 @@ describe("integration auth routes", () => {
   const start = (step: number) =>
     app.inject({
       method: "POST",
-      url: `/api/v1/integrations/notion/auth/start/${step}`,
+      url: `/api/v1/integrations/github/auth/start/${step}`,
       cookies: auth(),
       headers,
     });
@@ -237,10 +220,10 @@ describe("integration auth routes", () => {
   async function connectFields(): Promise<void> {
     const res = await app.inject({
       method: "POST",
-      url: "/api/v1/integrations/notion/connect",
+      url: "/api/v1/integrations/github/connect",
       cookies: auth(),
       headers,
-      payload: { env: { NOTION_CLIENT_ID: "cid", NOTION_CLIENT_SECRET: "shh" } },
+      payload: { env: { GITHUB_CLIENT_ID: "cid", GITHUB_CLIENT_SECRET: "shh" } },
     });
     expect(res.statusCode).toBe(200);
   }
@@ -249,7 +232,7 @@ describe("integration auth routes", () => {
     it("returns 401 without auth", async () => {
       const res = await app.inject({
         method: "POST",
-        url: "/api/v1/integrations/notion/auth/start/0",
+        url: "/api/v1/integrations/github/auth/start/0",
       });
       expect(res.statusCode).toBe(401);
     });
@@ -260,20 +243,20 @@ describe("integration auth routes", () => {
       expect(res.json()).toEqual({
         action: "collect_fields",
         fields: [
-          { name: "NOTION_CLIENT_ID", label: "Client ID" },
-          { name: "NOTION_CLIENT_SECRET", label: "Client Secret", secret: true },
+          { name: "GITHUB_CLIENT_ID", label: "Client ID" },
+          { name: "GITHUB_CLIENT_SECRET", label: "Client Secret", secret: true },
         ],
       });
     });
 
-    it("404s for an unknown integration", async () => {
+    it("rejects non-native integrations at the route schema", async () => {
       const res = await app.inject({
         method: "POST",
         url: "/api/v1/integrations/nope/auth/start/0",
         cookies: auth(),
         headers,
       });
-      expect(res.statusCode).toBe(404);
+      expect(res.statusCode).toBe(400);
     });
 
     /** Pins user-mode connect storage to the resolver prompt that sends people to Settings. */
@@ -281,7 +264,7 @@ describe("integration auth routes", () => {
       await connectFields();
       const res = await app.inject({
         method: "POST",
-        url: "/api/v1/integrations/notion/auth/start/1",
+        url: "/api/v1/integrations/github/auth/start/1",
         cookies: auth(),
         headers,
         payload: { scope: "user" },
@@ -294,7 +277,7 @@ describe("integration auth routes", () => {
     it("refuses a business-scoped connect from a non-operator", async () => {
       const res = await app.inject({
         method: "POST",
-        url: "/api/v1/integrations/notion/auth/start/0",
+        url: "/api/v1/integrations/github/auth/start/0",
         cookies: { [SESSION_COOKIE]: memberSid, [CSRF_COOKIE]: TEST_CSRF },
         headers,
       });
@@ -305,7 +288,7 @@ describe("integration auth routes", () => {
       await connectFields();
       const res = await app.inject({
         method: "POST",
-        url: "/api/v1/integrations/notion/auth/start/1",
+        url: "/api/v1/integrations/github/auth/start/1",
         cookies: { [SESSION_COOKIE]: memberSid, [CSRF_COOKIE]: TEST_CSRF },
         headers,
         payload: { scope: "user" },
@@ -327,7 +310,7 @@ describe("integration auth routes", () => {
       const res = await start(1);
       expect(res.statusCode).toBe(200);
       const url = new URL(res.json().url);
-      expect(url.origin + url.pathname).toBe("https://notion.test/authorize");
+      expect(url.origin + url.pathname).toBe("https://github.test/authorize");
       expect(url.searchParams.get("client_id")).toBe("cid");
       expect(url.searchParams.get("redirect_uri")).toBe(
         "http://localhost:4010/api/v1/integrations/auth/callback"
@@ -337,43 +320,6 @@ describe("integration auth routes", () => {
   });
 
   describe("GET /integrations/auth/callback", () => {
-    it("dispatches OIM state from its own repository when the legacy repository differs", async () => {
-      oimStates.add("oim-state");
-      expect(repo.requests).toHaveLength(0);
-
-      const response = await app.inject({
-        method: "GET",
-        url: "/api/v1/integrations/auth/callback?state=oim-state&connectionId=forged&stepId=forged",
-      });
-
-      expect(response.statusCode).toBe(302);
-      expect(completeOimAuthorization).toHaveBeenCalledWith({
-        state: "oim-state",
-        connectionId: "forged",
-        stepId: "forged",
-      });
-      expect(response.headers.location).toBe(
-        "https://app.example.test/integrations/acme-v2?connection=connection-1&status=ok"
-      );
-    });
-
-    it("preserves the server-resolved Connection when an OIM callback fails", async () => {
-      oimStates.add("oim-state");
-      completeOimAuthorization.mockRejectedValueOnce(
-        new AuthBrokerError("exchange_failed", "provider rejected the code")
-      );
-
-      const response = await app.inject({
-        method: "GET",
-        url: "/api/v1/integrations/auth/callback?state=oim-state&connectionId=forged",
-      });
-
-      expect(response.statusCode).toBe(302);
-      expect(response.headers.location).toBe(
-        "https://app.example.test/integrations/acme-v2?status=error&reason=exchange_failed&connection=connection-1"
-      );
-    });
-
     async function startedState(): Promise<string> {
       await connectFields();
       const res = await start(1);
@@ -393,7 +339,7 @@ describe("integration auth routes", () => {
       });
       expect(res.statusCode).toBe(302);
       expect(res.headers.location).toBe(
-        "http://localhost:4000/integrations/notion?step=1&status=ok"
+        "http://localhost:4000/integrations/github?channel=1&step=1&status=ok"
       );
     });
 
@@ -409,12 +355,12 @@ describe("integration auth routes", () => {
         url: `/api/v1/integrations/auth/callback?state=${state}&code=abc`,
       });
 
-      const raw = soul.writer.readCompanion("Integration", "notion", "connection.yaml") ?? "";
+      const raw = soul.writer.readCompanion("Integration", "github", "connection.yaml") ?? "";
       // The file is committed and pushed to the user's soul git repo, so it must never hold the
       // token itself.
       expect(raw).not.toContain("tok");
       const parsed = parseYaml(raw);
-      expect(parsed.env.NOTION_ACCESS_TOKEN).toMatch(/^secret:\/\//);
+      expect(parsed.env.GITHUB_ACCESS_TOKEN).toMatch(/^secret:\/\//);
       expect([...secretsService.store.values()]).toContain("tok");
     });
 
@@ -431,10 +377,10 @@ describe("integration auth routes", () => {
       });
 
       const parsed = parseYaml(
-        soul.writer.readCompanion("Integration", "notion", "connection.yaml") ?? ""
+        soul.writer.readCompanion("Integration", "github", "connection.yaml") ?? ""
       );
-      expect(parsed.env.NOTION_CLIENT_ID).toBe("cid");
-      expect(parsed.env.NOTION_CLIENT_SECRET).toMatch(/^secret:\/\//);
+      expect(parsed.env.GITHUB_CLIENT_ID).toBe("cid");
+      expect(parsed.env.GITHUB_CLIENT_SECRET).toMatch(/^secret:\/\//);
       // The fields step already connected this integration; a later step must not undo that.
       expect(parsed.enabled).toBe(true);
     });
@@ -452,7 +398,7 @@ describe("integration auth routes", () => {
       const replay = await app.inject({ method: "GET", url });
       expect(replay.statusCode).toBe(302);
       expect(replay.headers.location).toBe(
-        "http://localhost:4000/integrations/?status=error&reason=invalid_state"
+        "http://localhost:4000/integrations/?channel=1&status=error&reason=invalid_state"
       );
       // The provider was called exactly once, so the replay bought the attacker nothing.
       expect(fetchImpl).toHaveBeenCalledTimes(1);
@@ -465,13 +411,13 @@ describe("integration auth routes", () => {
         url: `/api/v1/integrations/auth/callback?state=${state}&error=access_denied`,
       });
       expect(res.headers.location).toBe(
-        "http://localhost:4000/integrations/notion?status=error&reason=exchange_failed"
+        "http://localhost:4000/integrations/github?channel=1&status=error&reason=exchange_failed"
       );
     });
 
     it("writes nothing when the token exchange fails", async () => {
       const state = await startedState();
-      const before = soul.writer.readCompanion("Integration", "notion", "connection.yaml");
+      const before = soul.writer.readCompanion("Integration", "github", "connection.yaml");
       fetchImpl.mockResolvedValue(
         new Response(JSON.stringify({ error: "bad_verification_code" }), {
           headers: { "content-type": "application/json" },
@@ -481,7 +427,7 @@ describe("integration auth routes", () => {
         method: "GET",
         url: `/api/v1/integrations/auth/callback?state=${state}&code=abc`,
       });
-      expect(soul.writer.readCompanion("Integration", "notion", "connection.yaml")).toBe(before);
+      expect(soul.writer.readCompanion("Integration", "github", "connection.yaml")).toBe(before);
     });
   });
 });

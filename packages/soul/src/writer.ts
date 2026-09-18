@@ -20,6 +20,7 @@ import {
 import type { CommitActor, CommitApproval } from "./commit-signing";
 import type { SoulCommitResult, SoulGitStore } from "./git-store";
 import { SoulGitStoreError } from "./git-store";
+import { mcpToolContributions } from "./integrations/mcp-tool-contributions";
 import type { SoulTreeReader } from "./publication";
 import { asAuthored, type SoulSemanticIssue, SoulSemanticValidationError } from "./refs";
 import { validateSoulSemantics } from "./semantic";
@@ -191,7 +192,7 @@ export class SoulWriter {
      * can be checked before committing. Without it, a bad reference still lands in the Soul commit
      * and is only discovered later — as an opaque post-commit publication failure.
      */
-    private readonly treeReader?: Pick<SoulTreeReader, "readDefinitions">
+    private readonly treeReader?: Pick<SoulTreeReader, "readDefinitions" | "readFiles">
   ) {}
 
   /** Whether a collection artifact currently exists (its definition file is present). */
@@ -462,10 +463,8 @@ export class SoulWriter {
    * left to {@link validateSoulChangeset} — this only re-checks reference edges of files that
    * already parse, against the tree those files are about to land on.
    *
-   * Uses the same `treeReader.readDefinitions` source as {@link SoulPublisher}'s post-commit
-   * compiler, so it shares that source's blind spot: a still-legacy-format definition (`AGENT.md`,
-   * `schema.yml`, `manifest.yml`) is invisible to both. This check is exactly as accurate as the
-   * bundle compiler that would otherwise catch the same reference later — no less, no more.
+   * Uses the same committed tree and MCP contract derivation as the post-commit compiler,
+   * overlaid with the proposed writes, so a valid generated Tool reference is not rejected here.
    */
   private async checkReferences(
     files: readonly SoulFileChange[],
@@ -490,9 +489,21 @@ export class SoulWriter {
       return def === undefined || !touched.has(`${def.kind}\u0000${def.slug}`);
     });
     const proposed = parsed.flatMap((file) => (file.definition ? [file.definition.document] : []));
+    const sourceFiles = new Map(
+      (isUnbornBase(baseCommit) ? [] : ((await this.treeReader.readFiles?.(baseCommit)) ?? [])).map(
+        (file) => [file.path, file]
+      )
+    );
+    for (const file of files) {
+      if (file.operation === "delete") sourceFiles.delete(file.path);
+      else sourceFiles.set(file.path, { path: file.path, content: file.content });
+    }
+    const mcpContracts = mcpToolContributions([...sourceFiles.values()]).flatMap(
+      (contribution) => contribution.documents
+    );
 
     try {
-      validateSoulSemantics([...kept, ...proposed]);
+      validateSoulSemantics([...kept, ...proposed, ...mcpContracts]);
     } catch (error) {
       if (!(error instanceof SoulSemanticValidationError)) throw error;
       // A pre-existing definition elsewhere in the tree can already be broken (e.g. a Routine left

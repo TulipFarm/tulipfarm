@@ -16,9 +16,11 @@ and [roles and permissions](/docs/reference/roles-and-permissions) for how the c
 
 **Changes things** marks a tool that writes something. Every other tool only looks.
 
-Two groups are deliberately missing. Tools for a connected app arrive with the app, so they are
-listed per provider under [bundled integrations](/docs/reference/bundled-integrations). Tools that
-draw a reply on screen are explained in [surfaces](/docs/using-tulipfarm/surfaces).
+Reviewed MCP tools depend on the servers and accounts configured on your instance, so they are
+not a fixed catalog. See [integrations](/docs/reference/bundled-integrations) for how they differ
+from native Slack and GitHub channels. Tools that draw a reply on screen are explained in
+[surfaces](/docs/using-tulipfarm/surfaces). General-purpose network tools are omitted from this
+page; the built-in pack reader is included.
 
 ## Business data
 
@@ -51,10 +53,6 @@ Changing the soul, the git-backed definitions of what your instance is and what 
 | `create_resource_type` | Yes | Create a new resource type from a JSON Schema YAML string. |
 | `get_business_profile` | No | Read the business you work for: its name, what it does, and its website. |
 | `get_current_agent` | No | Find out which Agent you are: your name, your configured domain, and your description. |
-| `integration_draft_create` | Yes | Install the exact reviewed OIM package in the soul repo under integrations/&#60;slug&#62;. |
-| `integration_draft_review` | No | Validate and test a complete drafted OIM package, including setup-guide.md, digest-covered OpenAPI or GraphQL contracts, and passing offline fixture coverage for every operation. |
-| `integration_get` | No | Read one installed integration package and, for an OIM package, the capability review derived from it. |
-| `integration_list` | No | List the integration packages installed in the soul repo. |
 | `list_resource_types` | No | List all resource types defined in the soul repo. |
 | `resource_hooks_delete` | Yes | Remove the hooks.ts file for a resource type. |
 | `resource_hooks_get` | No | Get the hooks.ts source for a resource type, or null if none exists. |
@@ -75,6 +73,20 @@ Changing the soul, the git-backed definitions of what your instance is and what 
 | `surface_component_get` | No | Read one published business Surface component and its declarative views. |
 | `surface_component_list` | No | List published business Surface components. |
 | `surface_component_update` | Yes | Replace and revalidate an existing business Surface component, then publish it atomically to the soul repo. |
+
+## Integrations
+
+Configuring MCP servers, reviewing their capabilities, and reading their resources and prompts. An integration connects an agent to an external service.
+
+| Tool | Changes things | What it does |
+| --- | --- | --- |
+| `integration_configure` | Yes | Configure an admin-approved MCP server through the Soul. |
+| `integration_discover` | No | Discover an MCP server's Tools, resources and prompts for explicit admin review. |
+| `integration_get` | No | Read an MCP server definition and enabled capabilities. |
+| `integration_list` | No | List configured MCP servers and their reviewed capabilities. |
+| `integration_prompt_render` | No | Render a reviewed MCP prompt as untrusted source content. |
+| `integration_resource_read` | No | Read one reviewed MCP resource using the caller's selected account. |
+| `integration_review` | Yes | Enable only these exact discovered MCP capabilities after admin review. |
 
 ## The knowledge base
 
@@ -166,14 +178,6 @@ A Team is a business unit that can own Agents, Skills and Routines. This tool li
 | Tool | Changes things | What it does |
 | --- | --- | --- |
 | `team_list` | No | List the business's Teams by human-readable name, with `recommendedTeamId` naming the Team an owned asset (Agent, Skill, Routine) would be auto-assigned to if you forged one right now. |
-
-## Users
-
-Looking up people who have accounts on this instance to assign work or link records.
-
-| Tool | Changes things | What it does |
-| --- | --- | --- |
-| `user_resolve` | No | Search and resolve TulipFarm instance users by display name, email, or handle. |
 
 ## Work handed back to a person
 

@@ -18,6 +18,92 @@ function intent(filePrincipalId?: string) {
   };
 }
 
+describe("ToolIntent MCP binding", () => {
+  const binding = {
+    serverId: "github",
+    serverRevision: "a".repeat(64),
+    accountId: "account-1",
+    accountRevision: "1",
+    subjectId: "user-1",
+    authorizationId: "routine-approval-1",
+  };
+
+  it("validates and freezes the complete account and authorization binding", () => {
+    const normalized = normalizeToolIntent({ ...intent(), mcp: binding });
+    expect(normalized.mcp).toEqual(binding);
+    expect(Object.isFrozen(normalized.mcp)).toBe(true);
+    expect(() => normalizeToolIntent({ ...intent(), mcp: { serverId: "github" } })).toThrow(
+      "invalid_intent"
+    );
+  });
+
+  it.each([
+    { serverId: "other" },
+    { serverRevision: "b".repeat(64) },
+    { accountId: "account-2" },
+    { accountRevision: "2" },
+    { subjectId: "user-2" },
+    { authorizationId: "another-approval" },
+  ])("binds every MCP dimension into the shared Approval digest: %j", (change) => {
+    const original = normalizeToolIntent({ ...intent(), mcp: binding });
+    const changed = normalizeToolIntent({ ...intent(), mcp: { ...binding, ...change } });
+    expect(intentDigest(original)).toBe(approvalIntentDigest(original));
+    expect(intentDigest(changed)).not.toBe(intentDigest(original));
+    expect(intentDigest(original)).not.toBe(intentDigest(normalizeToolIntent(intent())));
+  });
+
+  it("rejects a second credential mechanism alongside an MCP account binding", () => {
+    expect(() =>
+      normalizeToolIntent({ ...intent(), mcp: binding, credentialRef: "secret://another" })
+    ).toThrow("invalid_intent");
+  });
+
+  it.each([
+    "integrationId",
+    "integrationMajorVersion",
+    "operationId",
+    "manifestDigest",
+    "configurationDigest",
+    "connection",
+    "secondaryCredentialRef",
+    "secondaryConnection",
+  ])("rejects retired authority instead of silently discarding %s", (field) => {
+    for (const mcp of [undefined, binding]) {
+      expect(() => normalizeToolIntent({ ...intent(), mcp, [field]: "retired-authority" })).toThrow(
+        "invalid_intent"
+      );
+    }
+  });
+
+  it("matches the authoritative Approval digest with all surviving authority populated", () => {
+    const populated = normalizeToolIntent({
+      ...intent("user-1"),
+      mcp: binding,
+      runStateId: "run-state-1",
+      targetRefs: [
+        { type: "message", id: "message-1" },
+        { type: "workspace", id: "workspace-1", domain: "tenant.example.com" },
+      ],
+      principalKind: "user",
+      principalId: "user-1",
+      activeSkillName: "support",
+      destination: "https://mcp.example.com",
+      fileIds: ["file-1", "file-2"],
+      agentPrincipalId: "agent-1",
+    });
+    expect(intentDigest(populated)).toBe(approvalIntentDigest(populated));
+    expect(
+      approvalIntentDigest({
+        ...populated,
+        targetRefs: populated.targetRefs.map((ref) => ({ ...ref, domain: ref.domain })),
+      })
+    ).toBe(intentDigest(populated));
+    expect(
+      intentDigest({ ...populated, targetRefs: [...populated.targetRefs].reverse() })
+    ).not.toBe(intentDigest(populated));
+  });
+});
+
 describe("ToolIntent file Principal binding", () => {
   it("normalizes and freezes the File Principal", () => {
     expect(normalizeToolIntent(intent("principal-1"))).toMatchObject({
@@ -25,114 +111,27 @@ describe("ToolIntent file Principal binding", () => {
     });
   });
 
-  describe("ToolIntent OIM binding", () => {
-    const connection = {
-      connectionId: "connection-1",
-      integrationId: "acme",
-      integrationMajorVersion: 2,
-      operationId: "send-message",
-      credentialSlot: "access_token",
-      credentialRevision: "revision-1",
-      identityMode: "shared_or_personal" as const,
-      principalKind: "user",
-      principalId: "user-1",
-      manifestDigest: "sha256:manifest",
-      configurationDigest: "sha256:configuration",
+  it.each([
+    ["destination", { destination: "https://other.example.com" }],
+    ["File IDs", { fileIds: ["file-1", "file-3"] }],
+    ["Agent Principal", { agentPrincipalId: "agent-2" }],
+  ])("binds the %s into the intent digest", (_label, patch) => {
+    const original = {
+      ...intent("user-1"),
+      destination: "https://example.com",
+      fileIds: ["file-1", "file-2"],
+      agentPrincipalId: "agent-1",
     };
+    expect(intentDigest(normalizeToolIntent(original))).not.toBe(
+      intentDigest(normalizeToolIntent({ ...original, ...patch }))
+    );
+  });
 
-    function connected(overrides: Record<string, unknown> = {}) {
-      return {
-        ...intent("user-1"),
-        destination: "https://tenant.acme.example",
-        credentialRef: "secret://credential-1",
-        connection,
-        fileIds: ["file-1", "file-2"],
-        agentPrincipalId: "agent-1",
-        ...overrides,
-      };
-    }
-
-    it("normalizes and freezes the exact Connection binding", () => {
-      expect(normalizeToolIntent(connected())).toMatchObject({
-        connection,
-        fileIds: ["file-1", "file-2"],
-        agentPrincipalId: "agent-1",
-      });
-    });
-
-    it("matches the authoritative Approval digest for every populated OIM binding", () => {
-      const populated = normalizeToolIntent(
-        connected({
-          runStateId: "run-state-1",
-          targetRefs: [
-            { type: "message", id: "message-1" },
-            { type: "workspace", id: "workspace-1", domain: "tenant.acme.example" },
-          ],
-          principalKind: "user",
-          principalId: "user-1",
-          activeSkillName: "support",
-          integrationId: "acme",
-          integrationMajorVersion: 2,
-          operationId: "send-message",
-          manifestDigest: "sha256:manifest",
-          configurationDigest: "sha256:configuration",
-          secondaryCredentialRef: "secret://credential-2",
-          secondaryConnection: {
-            ...connection,
-            connectionId: "connection-2",
-            credentialSlot: "refresh_token",
-            credentialRevision: "revision-2",
-          },
-        })
-      );
-
-      expect(intentDigest(populated)).toBe(approvalIntentDigest(populated));
-      expect(
-        approvalIntentDigest({
-          ...populated,
-          targetRefs: populated.targetRefs.map((ref) => ({
-            ...ref,
-            domain: ref.domain,
-          })),
-        })
-      ).toBe(intentDigest(populated));
-      expect(
-        intentDigest({
-          ...populated,
-          targetRefs: [...populated.targetRefs].reverse(),
-        })
-      ).not.toBe(intentDigest(populated));
-    });
-
-    it.each([
-      ["Connection", { connection: { ...connection, connectionId: "connection-2" } }],
-      ["Integration major", { connection: { ...connection, integrationMajorVersion: 3 } }],
-      ["operation", { connection: { ...connection, operationId: "delete-message" } }],
-      ["manifest", { connection: { ...connection, manifestDigest: "sha256:other-manifest" } }],
-      [
-        "configuration",
-        { connection: { ...connection, configurationDigest: "sha256:other-configuration" } },
-      ],
-      ["destination", { destination: "https://other.acme.example" }],
-      ["File IDs", { fileIds: ["file-1", "file-3"] }],
-      ["Agent Principal", { agentPrincipalId: "agent-2" }],
-    ])("binds the %s into the intent digest", (_label, patch) => {
-      expect(intentDigest(normalizeToolIntent(connected()))).not.toBe(
-        intentDigest(normalizeToolIntent(connected(patch)))
-      );
-    });
-
-    it("refuses a Connection binding without a revision-pinned Secret reference", () => {
-      expect(() => normalizeToolIntent(connected({ credentialRef: undefined }))).toThrow(
-        "invalid_intent"
-      );
-    });
-
-    it("refuses unsorted or duplicate File IDs", () => {
-      expect(() =>
-        normalizeToolIntent(connected({ fileIds: ["file-2", "file-1", "file-1"] }))
-      ).toThrow("invalid_intent");
-    });
+  it.each([
+    ["file-2", "file-1"],
+    ["file-1", "file-1"],
+  ])("refuses unsorted or duplicate File IDs: %j", (...fileIds) => {
+    expect(() => normalizeToolIntent({ ...intent(), fileIds })).toThrow("invalid_intent");
   });
 
   it("binds the File Principal into the intent digest", () => {

@@ -1,6 +1,6 @@
 /** HTTP status maps to durability here; mutating 5xx is ambiguous and must reconcile. */
 
-import { parseOimRetryAfterMs } from "./egress/oim-rate-limit-header";
+import { parseRetryAfterMs } from "./retry-after";
 
 export type IntegrationHttpMethod =
   | "GET"
@@ -69,7 +69,7 @@ export function classifyHttpFailure(
     return { phase: "before_dispatch", code: "provider_rejected", retryable: false };
   }
   if (status === 429) {
-    const delay = parseOimRetryAfterMs(response.headers, now, retryAfterHeader);
+    const delay = parseRetryAfterMs(response.headers, now, retryAfterHeader);
     return {
       phase: "before_dispatch",
       code: "provider_rate_limited",

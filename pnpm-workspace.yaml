@@ -1,7 +1,6 @@
 packages:
   - 'apps/*'
   - 'packages/*'
-  - 'standards/oim'
 allowBuilds:
   "@biomejs/biome": true
   esbuild: true

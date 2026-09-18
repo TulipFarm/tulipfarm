@@ -83,6 +83,23 @@ describe("OKF space routes", () => {
     });
   }
 
+  it("carries the persisted Page source through mentions serialization for read-only trees", async () => {
+    const id = await createSpace();
+    const authored = await writePage(id, "notes/authored", "# Authored");
+    const copied = await writePage(id, "sources/copied", "# Copied");
+    expect(authored.statusCode).toBe(201);
+    expect(copied.statusCode).toBe(201);
+    const copiedId = copied.json<{ id: string }>().id;
+    await db.query("UPDATE knowledge_pages SET source='mcp' WHERE id=$1", [copiedId]);
+    const response = await app.inject({ method: "GET", url: `${base}/pages/mentions` });
+    expect(response.statusCode).toBe(200);
+    const items = response.json<{ items: { pageId: string; source: string }[] }>().items;
+    expect(items.find((page) => page.pageId === copiedId)?.source).toBe("mcp");
+    expect(items.find((page) => page.pageId === authored.json<{ id: string }>().id)?.source).toBe(
+      "authored"
+    );
+  });
+
   it("does space CRUD with duplicate-name 409", async () => {
     const id = await createSpace();
     expect((await app.inject({ method: "GET", url: `${base}/spaces/${id}` })).statusCode).toBe(200);

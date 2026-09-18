@@ -82,7 +82,7 @@ const toolContract = {
     allowedDestinations: ["github"],
     idempotency: { strategy: "provider_key" },
     dryRun: false,
-    adapter: { kind: "integration", ref: "github" },
+    adapter: { kind: "native", ref: "github" },
   },
 };
 
@@ -231,7 +231,7 @@ describe("Routine Tool approval continuation", () => {
       tools: new BrokerRoutineToolPort({
         effects,
         approvals,
-        adapters: new Map([["github", { kind: "integration", dispatch }]]),
+        adapters: new Map([["github", { kind: "native", dispatch }]]),
         now: () => NOW,
       }),
       now: () => NOW,

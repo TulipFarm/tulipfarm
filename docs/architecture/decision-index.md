@@ -10,7 +10,6 @@ Detailed contracts:
 
 - [Boundaries and owners](boundaries.md)
 - [Dependency rules](dependency-rules.md)
-- [Building an Integration](building-an-integration.md)
 - [Governed network Tools](governed-network-tools.md)
 - [Deployment manifest](deployment-manifest.md)
 - [Sandboxed Surface code views](adr-031-sandboxed-surface-code.md)

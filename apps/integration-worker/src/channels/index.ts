@@ -189,7 +189,7 @@ export async function createSlackChannelLoops(
   });
   const deliveryAdapter = new SlackDeliveryAdapter({
     ledger: channelDeliveryLedger(deliveryStore),
-    authorization: channelDeliveryAuthorization(new IntegrationStore(transactions)),
+    authorization: channelDeliveryAuthorization(new IntegrationStore(transactions), internalApi),
     http,
   });
 
@@ -234,8 +234,26 @@ export async function createSlackChannelLoops(
     http,
     appToken,
     log: deps.log,
-    onEnvelope: (envelope, ack) =>
-      dispatchSlackEnvelope(
+    onEnvelope: async (envelope, ack) => {
+      if (
+        envelope.type === "events_api" &&
+        envelope.payload !== null &&
+        typeof envelope.payload === "object" &&
+        !Array.isArray(envelope.payload)
+      ) {
+        const payload = envelope.payload as Record<string, unknown>;
+        const event = payload.event as { type?: unknown } | undefined;
+        if (event?.type !== "app_home_opened") {
+          await reservationInternalApi.require(
+            "POST",
+            "/api/v1/internal/channels/slack/events",
+            payload
+          );
+          await ack();
+          return;
+        }
+      }
+      return dispatchSlackEnvelope(
         envelope,
         {
           businessId: deps.businessId,
@@ -269,7 +287,8 @@ export async function createSlackChannelLoops(
           log: deps.log,
         },
         ack
-      ),
+      );
+    },
     onResponseEnvelope,
   });
   const socketWorker = new SlackSocketWorker(socketTransport);

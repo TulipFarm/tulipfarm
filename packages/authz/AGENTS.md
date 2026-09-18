@@ -32,6 +32,8 @@ authority-intersection decision evidence.
   [`dependency-rules.md`](../../docs/architecture/dependency-rules.md) and
   [`boundaries.md`](../../docs/architecture/boundaries.md).
 - This package is the sole owner for authority-intersection decisions; do not reimplement them.
+- Approval digests bind the complete MCP account selection. Reserved null fields preserve
+  existing digests after retired authority fields are removed from accepted intents.
 - Team service inputs carry already-resolved company and exact-Team admin capabilities; HTTP
   authorization remains outside this package.
 - Team archive/delete delegates to the repository's atomic lifecycle transition; never add a

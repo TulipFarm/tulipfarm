@@ -190,7 +190,7 @@ describe("fetchFarm", () => {
     mocks.integrations.mockResolvedValue([
       { name: "github", type: "mcp", installed: true, status: "connected" },
       { name: "slack", type: "mcp", installed: true, status: "disconnected" },
-      { name: "confluence", type: "openapi", installed: true, status: "disconnected" },
+      { name: "confluence", type: "mcp", installed: true, status: "disconnected" },
     ]);
 
     const farm = await fetchFarm();

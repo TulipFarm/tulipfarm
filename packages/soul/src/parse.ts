@@ -22,6 +22,7 @@ import {
 } from "@tulipfarm/schema";
 import { parse as parseYaml } from "yaml";
 import type { SoulChangesetValidationIssue, SoulFileChange } from "./changeset";
+import { mcpDefinitionSlug, parseMcpSoulDefinition } from "./integrations/mcp-definition";
 
 const registry = new SchemaRegistry(DEFINITION_REGISTRATIONS);
 
@@ -221,6 +222,15 @@ export function parseSoulFile(change: SoulFileChange): ParseAttempt {
   }
 
   if (!location) return rejected("UNSUPPORTED_SOUL_PATH", change.path);
+  const mcpSlug = mcpDefinitionSlug(change.path);
+  if (mcpSlug !== null) {
+    try {
+      parseMcpSoulDefinition(change.content, mcpSlug);
+      return admitted(change.content, location, "prose");
+    } catch {
+      return rejected("SCHEMA_VALIDATION_FAILED", change.path);
+    }
+  }
 
   // A path that carries configuration must be admitted by a real contract. Silently hashing one
   // because its kind has no registered schema would let unvalidated config into the tree.

@@ -41,7 +41,7 @@ import {
 } from "@tulipfarm/schema";
 import type { BundledSkill, SoulAgent, SoulLoader } from "@tulipfarm/soul";
 import { getDefaultAssistant, resolveAgent } from "@tulipfarm/soul";
-import type { ConversationContextSummaryStore, IntegrationStore } from "@tulipfarm/storage";
+import type { ConversationContextSummaryStore } from "@tulipfarm/storage";
 import type { PresentationContext } from "@tulipfarm/surface";
 import type { RequestContext } from "@tulipfarm/tool-host";
 import type { ToolRegistry } from "../broker/tool-adapter";
@@ -68,7 +68,6 @@ import {
   surfaceRendererRegistry,
 } from "../surfaces/renderer-registry";
 import type { TeamAssetService } from "../team-assets/service";
-import { githubExcludedToolNames } from "../tools/github/visibility";
 import { ModelSelectorDeniedError, type ModelSelectorGate } from "./model-authz";
 import { resolveModelSelector } from "./model-selector";
 import type { HostedTurnContext, TurnAuthority, TurnContextResolver } from "./turn-host";
@@ -240,9 +239,6 @@ export interface ChatTurnContextResolverOptions {
   readonly channelDeliveries?: ChannelDeliveryReader;
   /** Delegation grants; a failed read refuses rather than falling back to the Agent's config. */
   readonly childLinks?: ChildLinkAncestry;
-  /** Live GitHub-install check backing per-turn tool visibility — absent only where a deployment
-   * never wired the GitHub tool family at all. */
-  readonly githubStatus?: { readonly integrations: IntegrationStore; readonly businessId: string };
   /**
    * Decides whether this turn's subject may use the model it named.
    *
@@ -376,9 +372,6 @@ export class ChatTurnContextResolver implements TurnContextResolver {
       authority,
       this.options.channelDeliveries
     );
-    const excludedTools = this.options.githubStatus
-      ? await githubExcludedToolNames(this.options.githubStatus)
-      : undefined;
     const summary = await this.options.contextSummaries?.find(
       authority.businessId,
       authority.turn.conversationId,
@@ -416,12 +409,7 @@ export class ChatTurnContextResolver implements TurnContextResolver {
 
     // Every Turn now resolves a presentation target (Channel destination, or the web chat surface
     // keyed by conversation), so the presentation Tools are offered for every channel alike.
-    const allowed = availableToolsFor(
-      this.options.toolRegistry,
-      toolAgent,
-      presentationContext,
-      excludedTools
-    );
+    const allowed = availableToolsFor(this.options.toolRegistry, toolAgent, presentationContext);
     const allowedNames = new Set(allowed.map((tool) => tool.name));
     const surfaceComponents = [...(this.options.soulLoader?.surfaceComponents.values() ?? [])];
     const toolContext: RequestContext = {

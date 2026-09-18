@@ -1,15 +1,12 @@
 import { FILE_TOOLS } from "@tulipfarm/files";
-import {
-  GITHUB_REPOSITORY_LIST_DECLARATION,
-  GITHUB_TOOL_DECLARATIONS,
-  SLACK_TOOL_DECLARATIONS,
-} from "@tulipfarm/integrations";
 import { PLATFORM_RUNTIME_TOOLS } from "@tulipfarm/platform-tools";
 import {
-  INTEGRATION_AUTHORING_TOOL_DECLARATIONS,
+  MCP_SETUP_TOOL_DECLARATIONS,
   NETWORK_TOOL_DECLARATIONS,
   PACK_READ_TOOL_DECLARATION,
+  RECORD_DELETE_TOOL_DECLARATIONS,
   SKILL_MARKETPLACE_TOOL_DECLARATIONS,
+  SOUL_REPO_PUSH_TOOL_DECLARATION,
 } from "@tulipfarm/schema";
 import { SKILL_TOOL_DECLARATION } from "@tulipfarm/soul";
 import { describe, expect, it } from "vitest";
@@ -20,14 +17,13 @@ describe("platform Tools a Case may name", () => {
     const shippedDeclarations = [
       ...PLATFORM_RUNTIME_TOOLS,
       ...FILE_TOOLS,
-      ...INTEGRATION_AUTHORING_TOOL_DECLARATIONS,
+      ...MCP_SETUP_TOOL_DECLARATIONS,
       ...SKILL_MARKETPLACE_TOOL_DECLARATIONS,
       SKILL_TOOL_DECLARATION,
-      GITHUB_REPOSITORY_LIST_DECLARATION,
-      ...GITHUB_TOOL_DECLARATIONS,
-      ...SLACK_TOOL_DECLARATIONS,
+      SOUL_REPO_PUSH_TOOL_DECLARATION,
       ...NETWORK_TOOL_DECLARATIONS,
       PACK_READ_TOOL_DECLARATION,
+      ...RECORD_DELETE_TOOL_DECLARATIONS,
     ];
 
     expect(platformToolNames()).toEqual(shippedDeclarations.map((tool) => tool.name).sort());
@@ -40,5 +36,17 @@ describe("platform Tools a Case may name", () => {
 
   it("answers with nothing for a name no Tool holds, so the loader can refuse it", () => {
     expect(resolvePlatformTool("file_invent")).toBeUndefined();
+  });
+
+  it("exposes MCP definition setup under the live Integration Tool names", () => {
+    expect(resolvePlatformTool("integration_get")?.inputSchema).toMatchObject({
+      required: ["slug"],
+      properties: { slug: { type: "string" } },
+    });
+    expect(resolvePlatformTool("integration_configure")?.inputSchema).toMatchObject({
+      required: ["slug", "configuration"],
+    });
+    expect(resolvePlatformTool("mcp_server_get")).toBeUndefined();
+    expect(resolvePlatformTool("mcp_server_configure")).toBeUndefined();
   });
 });

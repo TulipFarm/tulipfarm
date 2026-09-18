@@ -37,6 +37,8 @@ import {
   toToolDef,
 } from "@tulipfarm/tool-host";
 import { buildWorkerFileService } from "../files/service";
+import type { InternalApiClient } from "../internal/client";
+import { createWorkerMcpPageReadGate } from "../knowledge/mcp-page-gate";
 import { buildWorkerKnowledgeService } from "../knowledge/service";
 import type { SoulEmbeddings } from "./soul-embeddings";
 
@@ -75,6 +77,7 @@ export interface LocalToolHostOptions {
   /** Defaults to `randomUUID`; present so a test can make an id predictable. */
   readonly newId?: () => string;
   readonly logger?: ToolHostLogger;
+  readonly knowledgeReadClient?: Pick<InternalApiClient, "require">;
 }
 
 export interface LocalToolHost {
@@ -157,7 +160,17 @@ function hostedFamilies(options: LocalToolHostOptions): readonly HostedFamily<ne
 
   const vectorBacked: HostedFamily<KnowledgeToolContext> = {
     definitions: KNOWLEDGE_TOOLS,
-    context: (ctx) => ({ ...principal(ctx), service: knowledge, pageGate }),
+    context: (ctx) => ({
+      ...principal(ctx),
+      service: knowledge,
+      pageGate: createWorkerMcpPageReadGate(
+        pageGate,
+        options.db,
+        options.knowledgeReadClient,
+        ctx,
+        options.logger
+      ),
+    }),
   };
 
   return [

@@ -1,12 +1,11 @@
 import { randomBytes, randomUUID } from "node:crypto";
 import { describe, expect, it, vi } from "vitest";
-import { SecretBroker } from "./broker";
-import { secretStorageKey } from "./connection-secrets";
 import { encryptSecret } from "./crypto";
 import { SecretRevokedError, SecretsService, SecretUnavailableError } from "./encrypted-store";
 import type { ActiveDek } from "./key-manager";
-import { secretsServiceProvider } from "./providers";
+import { McpAccountSecrets } from "./mcp-account-secrets";
 import type { SecretDoc, SecretEnvelopeFields, SecretRepo } from "./repo";
+import { secretStorageKey } from "./secret-reference";
 
 class FakeRepo implements SecretRepo {
   readonly docs = new Map<string, SecretDoc>();
@@ -87,37 +86,29 @@ function seedLegacy(repo: FakeRepo, key: string, plaintext: string, envKey: Buff
 }
 
 describe("SecretsService", () => {
-  it("keeps its receiver when a Connection lease reads revision and plaintext", async () => {
+  it("keeps its receiver when an MCP account lease reads revision and plaintext", async () => {
     const service = new SecretsService(new FakeRepo(), makeDek());
     const secretRef = "secret://00000000-0000-4000-8000-000000000001" as const;
     const storageKey = secretStorageKey(secretRef);
-    await service.set(storageKey, "connection-secret");
-    const credentialRevision = await service.revision(storageKey);
-    if (credentialRevision === null) throw new Error("missing credential revision");
-    const broker = new SecretBroker({
-      provider: secretsServiceProvider(service),
-      authorizer: { authorize: () => ({ allowed: true }) },
-    });
-    const lease = await broker.leaseConnection({
-      scope: {
-        secretRef,
+    await service.set(storageKey, "account-secret");
+    await new McpAccountSecrets(service).use(
+      { access: secretRef },
+      {
         businessId: "business-1",
-        connectionId: "connection-1",
-        credentialSlot: "access",
-        credentialRevision,
-        toolId: "oim.calendar.v2.events.list",
-        integrationId: "calendar",
-        integrationMajorVersion: 2,
-        operationId: "events-list",
-        identityMode: "shared_only",
-        manifestDigest: "manifest-digest",
-        configurationDigest: "configuration-digest",
+        accountId: "account-1",
+        accountRevision: 1,
+        definitionDigest: "a".repeat(64),
+        principalId: "user-1",
+        destination: "https://mcp.example.test",
+        toolId: "mcp_calendar_list",
         runId: "run-1",
         purpose: "read calendar",
       },
-    });
-
-    await expect(lease.use((plaintext) => plaintext === "connection-secret")).resolves.toBe(true);
+      async () => {},
+      async (values) => {
+        expect(values.access).toBe("account-secret");
+      }
+    );
   });
 
   it("set then get returns the original plaintext (round-trip under the DEK)", async () => {

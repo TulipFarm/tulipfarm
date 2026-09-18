@@ -1,0 +1,25 @@
+{
+  "id": "l3-native-routine-changed-route-denied",
+  "tier": "l3",
+  "agent": "support",
+  "input": [
+    {
+      "role": "user",
+      "content": "Do not admit the GitHub event after its pinned Routine route approval changes."
+    }
+  ],
+  "nativeRoutine": {
+    "destination": "eval/native#42",
+    "accountId": "approved-native-account",
+    "fault": "route_changed"
+  },
+  "script": [{ "kind": "text", "text": "The changed route must be denied." }],
+  "expect": [
+    { "kind": "native_admission_equals", "path": "runCount", "value": 0 },
+    { "kind": "native_admission_equals", "path": "artifactCount", "value": 0 },
+    { "kind": "native_admission_equals", "path": "invocationCount", "value": 0 },
+    { "kind": "native_admission_equals", "path": "stateCount", "value": 0 },
+    { "kind": "native_admission_equals", "path": "inboxRunId", "value": null },
+    { "kind": "native_admission_equals", "path": "error", "value": "native_routine_route_changed" }
+  ]
+}

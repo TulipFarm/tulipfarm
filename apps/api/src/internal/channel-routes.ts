@@ -700,7 +700,9 @@ export function registerChannelInternalRoutes(
         sender: body.externalSubject,
         externalTenantId: body.externalTenantId,
       });
-      if (resolution.outcome === "unlinked") return reply.send({ outcome: "unlinked" });
+      if (resolution.outcome === "unlinked" || resolution.principalKind !== "user") {
+        return reply.send({ outcome: "unlinked" });
+      }
 
       const outcome = await deps.toolApprovals.signal({
         businessId: DEPLOYMENT_BUSINESS_ID,

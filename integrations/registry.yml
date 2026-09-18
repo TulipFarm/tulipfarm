@@ -1,20 +1,4 @@
-# Curated integration catalog — the "marketplace" an operator browses.
-#
-# Bundled integrations (a directory next to this file) are discovered automatically; an entry here
-# only adds the presentation metadata discovery cannot infer — display title, category, homepage.
-# `color` is a brand hex used only when the icon set carries no mark for the brand, so a logo-less
-# entry still reads as itself rather than as the one grey row in a coloured catalog.
-# An entry with a `source` is a curated third-party integration: nothing ships in the image, and
-# installing it clones that repo. Operators can also install any repo by URL without it being
-# listed here; this file is curation, not an allowlist.
-#
-# `availability: coming_soon` means the manifest is in the image but the connect flow is not
-# something an operator should be handed yet. The catalog lists the entry so the roadmap is
-# visible, and refuses to open it, rather than offering a setup that ends in a dead end.
-#
-# Third-party integrations must be purely declarative. A manifest that runs code — `ts-code`
-# egress, a stdio MCP server, or an `ingress.handler` — is rejected at install
-# (packages/soul/src/integration-trust.ts).
+# Presentation metadata for bundled native channels.
 
 version: 1
 
@@ -39,44 +23,4 @@ integrations:
     icon: github
     category: code
     homepage: https://github.com
-    description: Read and write repositories, issues, and pull requests.
-
-  - name: jira
-    packageDigest: 41939430897a5851511587cc646eaae27015d1e8ca5e0ba6a878a2f78b44fa0c
-    title: Jira
-    icon: jira
-    category: productivity
-    homepage: https://www.atlassian.com/software/jira
-    description: Search, create, estimate, prioritize, and transition Jira Cloud issues.
-
-  - name: linear
-    availability: coming_soon
-    title: Linear
-    icon: linear
-    category: productivity
-    homepage: https://linear.app
-    description: Read, create, update, and comment on issues with approval for changes.
-  - name: google
-    availability: coming_soon
-    title: Google Workspace
-    icon: google
-    category: productivity
-    homepage: https://workspace.google.com
-    description: Legacy Google adapter, not yet available from this catalog entry. Distinct from
-      the google-workspace OIM package and its personal OAuth Connection.
-
-  - name: confluence
-    packageDigest: c48ea1eab65b20a706f56fd8b1c7e3874dbab25688958d32fdcee8235c8d4f35
-    title: Confluence
-    icon: confluence
-    category: productivity
-    homepage: https://www.atlassian.com/software/confluence
-    description: Read Confluence Cloud spaces and pages and index them into Knowledge.
-
-  - name: telegram
-    packageDigest: cca87004f554f356b3fd91e0210643216c715f1c2079c023b58f1dc666bf597e
-    title: Telegram
-    icon: telegram
-    category: chat
-    homepage: https://telegram.org
-    description: Send messages and receive updates through a Telegram bot.
+    description: Receive repository events and deliver agent replies through your GitHub App.

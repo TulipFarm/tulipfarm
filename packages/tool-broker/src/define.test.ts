@@ -119,7 +119,7 @@ describe("toolContractSpecOf", () => {
       })
     );
 
-    expect(spec.adapter).toEqual({ kind: "integration", ref: "github" });
+    expect(spec.adapter).toEqual({ kind: "mcp", ref: "github" });
     expect(spec.requiredActions).toEqual(["issue.create"]);
     expect(spec.requiredResources).toEqual(["integration.github"]);
     expect(spec.allowedDestinations).toEqual(["api.github.com"]);

@@ -29,7 +29,7 @@ describe("classifyHttpFailure", () => {
     });
   });
 
-  it("reads an OIM-declared Retry-After HTTP-date header against the dispatch clock", () => {
+  it("reads a provider Retry-After HTTP-date header against the dispatch clock", () => {
     const failure = classifyHttpFailure(
       {
         status: 429,

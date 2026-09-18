@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { readdir, readFile } from "node:fs/promises";
 import path from "node:path";
 import type { AssembleContext, ModelMessage } from "@tulipfarm/agent-runtime";
-import { normalizeMessageContent } from "@tulipfarm/schema";
+import { MCP_SETUP_TOOL_DECLARATIONS, normalizeMessageContent } from "@tulipfarm/schema";
 import { type EvalCase, type Expectation, everyString, isBatching, isPersisted } from "./case.ts";
 import { type EvalSoul, SOUL_OWNED_CONTEXT_KEYS, soulContext } from "./eval-soul.ts";
 import { expectationShapeError, isKnownExpectationKind } from "./expectation-shape.ts";
@@ -160,6 +160,29 @@ function validate(raw: unknown, file: string): EvalCase {
   require(c.tier === "l2" ||
     c.tier ===
       "l3", `${file}: tier ${JSON.stringify(c.tier)} is not runnable; expected "l2" or "l3"`);
+  validateMcpFixture(c, file);
+  if (c.nativeRoutine !== undefined) {
+    require(c.tier === "l3" &&
+      ["routine", "mcp", "journey", "integrationReply", "fault", "doctor"].every(
+        (key) => c[key] === undefined
+      ), `${file}: "nativeRoutine" requires a standalone L3 admission fixture`);
+    require(typeof c.nativeRoutine === "object" &&
+      c.nativeRoutine !== null &&
+      !Array.isArray(c.nativeRoutine), `${file}: "nativeRoutine" must be an object`);
+    const fixture = c.nativeRoutine as Record<string, unknown>;
+    for (const field of ["destination", "accountId"]) {
+      require(typeof fixture[field] === "string" &&
+        String(fixture[field]).trim().length >
+          0, `${file}: "nativeRoutine.${field}" must be non-empty`);
+    }
+    require(fixture.fault === undefined ||
+      ["lease_lost", "route_changed", "account_revoked"].includes(
+        String(fixture.fault)
+      ), `${file}: unknown "nativeRoutine.fault"`);
+    require(["tools", "platformTools", "toolResults"].every(
+      (key) => c[key] === undefined
+    ), `${file}: native admission uses real services, not scripted Tools`);
+  }
   if (c.integrationReply !== undefined) {
     require(c.tier === "l3" &&
       c.routine === undefined &&
@@ -277,6 +300,14 @@ function validate(raw: unknown, file: string): EvalCase {
     ), `${file}: unknown expectation kind ${JSON.stringify(kind)}`);
     const shape = expectationShapeError(kind, a as Record<string, unknown>);
     require(shape === "", `${file}: ${shape}`);
+    require(kind !== "mcp_provider_call_count" ||
+      c.mcp !== undefined, `${file}: "mcp_provider_call_count" needs an MCP account fixture`);
+    require(kind !== "native_admission_equals" ||
+      c.nativeRoutine !==
+        undefined, `${file}: "native_admission_equals" needs a nativeRoutine fixture`);
+    require(c.nativeRoutine === undefined ||
+      kind ===
+        "native_admission_equals", `${file}: nativeRoutine observes admission, not Chat or State execution`);
     // Caught here rather than at scoring time: an L2 Sweep has no persisted state to read, so
     // this Case could only ever error — and it would do so after the model calls were paid for.
     require(c.tier === "l3" ||
@@ -385,6 +416,92 @@ function validate(raw: unknown, file: string): EvalCase {
           journey: parsed.journey.map((turn) => ({ ...turn, input: normalizeInput(turn.input) })),
         }),
   };
+}
+
+function validateMcpFixture(c: Record<string, unknown>, file: string): void {
+  const turns = [c, ...(Array.isArray(c.journey) ? c.journey : [])];
+  for (const turn of turns) {
+    if (typeof turn !== "object" || turn === null) continue;
+    require(!Array.isArray(turn.toolResults) ||
+      !turn.toolResults.some(
+        (result: unknown) =>
+          typeof result === "object" &&
+          result !== null &&
+          "name" in result &&
+          typeof result.name === "string" &&
+          (result.name.startsWith("mcp_") ||
+            MCP_SETUP_TOOL_DECLARATIONS.some((tool) => tool.name === result.name))
+      ), `${file}: MCP Tools must use the real domain and authority, never scripted results`);
+  }
+  const fixture = c.mcp;
+  const dynamicMcp =
+    Array.isArray(c.tools) &&
+    c.tools.some(
+      (tool) =>
+        typeof tool === "object" &&
+        tool !== null &&
+        typeof tool.name === "string" &&
+        tool.name.startsWith("mcp_")
+    );
+  require(!dynamicMcp ||
+    fixture !== undefined, `${file}: reviewed MCP Tools require an "mcp" account fixture`);
+  if (fixture === undefined) return;
+  require(c.tier === "l3" && c.routine === undefined, `${file}: "mcp" requires an L3 Chat Turn`);
+  require(typeof fixture === "object" &&
+    fixture !== null &&
+    !Array.isArray(fixture), `${file}: "mcp" must be an object`);
+  const fields = fixture as Record<string, unknown>;
+  require(fields.visibility === "private" ||
+    fields.visibility === "shared", `${file}: "mcp.visibility" must be private or shared`);
+  require(Array.isArray(fields.accounts), `${file}: "mcp.accounts" must be an array`);
+  const ids = new Set<string>();
+  const sharedIds = new Set<string>();
+  for (const value of fields.accounts) {
+    require(typeof value === "object" &&
+      value !== null &&
+      !Array.isArray(value), `${file}: every MCP account must be an object`);
+    const account = value as Record<string, unknown>;
+    require(typeof account.id === "string" &&
+      account.id.length > 0 &&
+      !ids.has(account.id), `${file}: MCP account ids must be non-empty and unique`);
+    ids.add(account.id);
+    require(account.scope === "personal" ||
+      account.scope === "shared", `${file}: MCP account scope must be personal or shared`);
+    if (account.scope === "shared") sharedIds.add(account.id);
+    require(["active", "action_required", "revoked"].includes(
+      String(account.status)
+    ), `${file}: MCP account status must be active, action_required, or revoked`);
+    require(account.isDefault === undefined ||
+      typeof account.isDefault === "boolean", `${file}: MCP account isDefault must be boolean`);
+    require(account.expiresAt === undefined ||
+      (typeof account.expiresAt === "string" &&
+        Number.isFinite(
+          Date.parse(account.expiresAt)
+        )), `${file}: MCP account expiresAt must be a timestamp`);
+  }
+  if (fields.selection !== undefined) {
+    require(typeof fields.selection === "object" &&
+      fields.selection !== null &&
+      !Array.isArray(fields.selection), `${file}: "mcp.selection" must be an object`);
+    const selection = fields.selection as Record<string, unknown>;
+    require(typeof selection.accountId === "string" &&
+      ids.has(selection.accountId) &&
+      typeof selection.sharedConsent ===
+        "boolean", `${file}: MCP selection needs a declared account and boolean sharedConsent`);
+  }
+  if (fields.sharedGrants !== undefined) {
+    require(Array.isArray(fields.sharedGrants) &&
+      fields.sharedGrants.every(
+        (id) => typeof id === "string" && sharedIds.has(id)
+      ), `${file}: "mcp.sharedGrants" must name declared shared accounts`);
+  }
+  if (fields.revokeGrantBeforeApproval !== undefined) {
+    require(typeof fields.revokeGrantBeforeApproval === "string" &&
+      Array.isArray(fields.sharedGrants) &&
+      fields.sharedGrants.includes(
+        fields.revokeGrantBeforeApproval
+      ), `${file}: "mcp.revokeGrantBeforeApproval" must name an existing shared grant`);
+  }
 }
 
 /**

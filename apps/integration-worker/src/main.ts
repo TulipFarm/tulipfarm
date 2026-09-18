@@ -10,13 +10,14 @@ import {
 import { initializeRuntimeDeployment, runtimeDeploymentConfigFromEnv } from "@tulipfarm/storage";
 import { config as loadEnv } from "dotenv";
 import { watchForSlackChannelCredential } from "./channels";
+import { startNativeEventLoop } from "./channels/event-loop";
 import { loadConfig, REQUIRED_SCHEMA_VERSION } from "./config";
 import { ConsumerReadiness } from "./consumer-readiness";
 import { waitForDataDirEnv } from "./data-dir";
-import { connectPg } from "./db";
+import { connectPg, transactionPort } from "./db";
+import { createGitHubReplyLoop } from "./github/reply-loop";
 import { InternalApiClient } from "./internal/client";
-import { composeOimRuntime } from "./oim-runtime";
-import { InternalOimWorkerHost } from "./oim-worker-host";
+import { composeMcpKnowledgeSyncLoop } from "./mcp-knowledge/compose";
 import { waitForSchemaFloor } from "./preflight";
 import { startProbeServer } from "./probe-server";
 import { type DrainableLoop, drain } from "./shutdown";
@@ -112,23 +113,35 @@ export async function main(): Promise<void> {
   const controller = new AbortController();
   const loops: DrainableLoop[] = [];
   const consumerReadiness = new ConsumerReadiness();
+  const knowledgeCycle = consumerReadiness.track("mcp-knowledge", () => Promise.resolve());
 
+  const internalApi = new InternalApiClient({
+    baseUrl: config.internalApiUrl,
+    credential: config.internalApiCredential,
+  });
   loops.push(
-    ...(await composeOimRuntime(controller.signal, {
-      pool,
+    startNativeEventLoop(controller.signal, {
+      internalApi,
       readiness: consumerReadiness,
-      host: new InternalOimWorkerHost(
-        new InternalApiClient({
-          baseUrl: config.internalApiUrl,
-          credential: config.internalApiCredential,
-        })
-      ),
-      log: {
-        info: (detail, message) => logger.info(`${message}: ${JSON.stringify(detail)}`),
-        error: (detail, message) => logger.error(message, detail),
-        warn: logger.warn,
+      log: logger,
+    }),
+    createGitHubReplyLoop(controller.signal, {
+      businessId: deployment.businessId,
+      pool,
+      internalApi,
+      log: logger,
+    }),
+    composeMcpKnowledgeSyncLoop(controller.signal, {
+      baseUrl: config.internalApiUrl,
+      credential: config.internalApiCredential,
+      db: pool,
+      transactions: transactionPort(pool),
+      businessId: deployment.businessId,
+      log: logger,
+      onCycle: () => {
+        void knowledgeCycle();
       },
-    }))
+    })
   );
 
   const slackDeps = {

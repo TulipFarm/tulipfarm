@@ -22,15 +22,13 @@ PostgreSQL persistence composition, auth, Soul Git writes, and Worker callback p
 | `src/chat/`, `src/conversations/` | Chat routes, Turn persistence, durable stream handoff. |
 | `src/runs/` | Persisted Run event SSE, cursor resume, cancellation. `authorization.ts` separates participant ownership from operator event reads; Chat cancellation never inherits a read grant. |
 | `src/runtime/` | Durable invocation callers, Routine invocation resolution, Soul write gateway composition. `deployment.ts` migrates and validates shared identity/hosting context before boot; that context gates setup and headless seeding. |
-| `src/internal/` | Service-only Worker callbacks for Context, Tools, delivery, completion, and due OIM Connection refresh. `slack-event-routes.ts` also hosts provider-neutral canonical event dispatch with exact-Connection reauthorization. `route-family.ts` registers internal families; `turn-host.ts` separates Run and Turn authority. |
-| `src/tools/` | ToolRegistry, batch execution, truncation, declarative egress sync. |
+| `src/internal/` | Service-only Worker callbacks for Context, Tools, native channel delivery and completion. `routine-mcp-tool-host.ts` binds exact published Routine/account material; `route-family.ts` registers families. |
+| `src/tools/` | ToolRegistry, batch execution, truncation and reviewed MCP Tool sync; no provider business Tool catalogs. |
 | `src/platform/` | Platform Tools that need the API's own services. `delegate-tool.ts` hands work to a Soul Agent (which gets a Conversation); `spawn-tool.ts` + `subagent-{run,answers}.ts` spawn an ad-hoc helper the caller defines inline, which gets none. Both park the calling Turn on a child-Run wait. |
 | `src/packs/` | Bounded, guarded Pack/catalog reads and preview-only routes; API-hosted `pack_read` ignores blank model source placeholders, never rewrites selected source bytes. HTTP source validation stays strict. No installer or Soul writer. |
 | `src/resources/`, `src/soul/` | Resource CRUD and Soul HTTP routes/Tools; domain logic lives in `@tulipfarm/soul`. |
-| `src/integrations/` | Manifest catalog, connect auth, install, post-connect hooks. `connections/` adapts versioned OIM Connection lifecycle, exact-Connection credential repair, and refresh scheduling to HTTP; OIM verification, continuation, Credential, and File hosts remain provider-neutral. |
-| `src/integrations/oim-ingress/` | Injectable exact-Connection webhook and registration routes. |
+| `src/integrations/` | MCP setup/review and account composition from verified active bundles; `mcp-context.ts` resolves caller lineage and destination-bound Routine grants, including native admission and pinned inbox authority. Native Slack/GitHub channel setup stays separate. |
 | `src/guardrails/` | Guardrail reload wiring and persisted policy acceptance. Hosted minimums remain in the effective service; Chat Context, Routine Agent catalog and admin reads share it. |
-| `src/integrations/operations/` | Exact-Connection operational evidence and durable selected-scope Knowledge subscription controls; never derive scheduling from indexed content. |
 | `src/knowledge/`, `src/knowledge-sources/` | Knowledge routes/Tools and ingestion API; repositories and OKF live in `@tulipfarm/knowledge`. |
 | `src/memory/`, `src/kv/`, `src/secrets/` | Memory Document composition, its read-only route and erasure; scoped KV; secret storage routes. |
 | `src/authz/` | `route-gate.ts` — sole HTTP path to `decideEffectivePermission`, including hosted infrastructure ceilings before shadow/fallback; self-governed and Team administration. |
@@ -39,7 +37,7 @@ PostgreSQL persistence composition, auth, Soul Git writes, and Worker callback p
 | `src/tasks/` | Task routes, ranking. System-created human work items — no user-facing create route. |
 | `src/kill-switches/` | Operator-armed emergency stop over mutating effects; admin-gated routes. |
 | `src/surfaces/`, `src/forms/` | Tulip Surface Protocol and form APIs. |
-| `src/ingress/`, `src/triggers/`, `src/schedule/` | Ingress, triggers, schedules. `triggers/event-dispatch.ts` is the only place an internally raised event (Record CRUD, Integration event, Routine `emit`) becomes a Run; a webhook binds in its own route instead, because its URL already names the Trigger — but that route must still run `passesTriggerContentGate`, since the URL says which Trigger, not whether the author wanted this event. |
+| `src/ingress/`, `src/triggers/`, `src/schedule/` | Channel identity and thread/event repositories, triggers and schedules. Native channel verification lives in `src/integrations/native/`; no programmable Integration ingress. `triggers/event-dispatch.ts` is the only place an internally raised event (Record CRUD, Integration event, Routine `emit`) becomes a Run; Trigger webhook routes retain their own signature and content gates. |
 | `src/admin/`, `src/setup/`, `src/onboarding/`, `src/system/` | Admin, setup, health. `admin/run-context.ts` projects authorized, typed related work for Run detail only. |
 | `src/system/telemetry/` | Deployment telemetry collection, admin preview/preferences, and service-only dispatch; reporter and durable state live in observability/storage. |
 | `src/pg-migrations/` | Boot-applied PostgreSQL schema migrations. |
@@ -97,8 +95,8 @@ PostgreSQL persistence composition, auth, Soul Git writes, and Worker callback p
   human. Never let the confirming call re-read a body — an Agent would then have benign text audited
   and different text written under the approval the report earned. `skill_create`, `skill_update`
   and `skill_install` all share this shape.
-- Third-party provider Tools come from Integration manifest `egress`, not handwritten TypeScript;
-  `tools/github/` and `tools/slack/` are exceptions.
+- Third-party provider Tools come only from reviewed MCP capabilities. Native Slack/GitHub
+  events and replies are channel plumbing, not a second business Tool catalog.
 - Every `EffectDispatcher` built here is given the `MutationKillSwitchGuard` from `src/index.ts`.
   The guard shipped inert once — present, unit-tested, and constructed nowhere — so
   `scripts/mutation-kill-switch.test.ts` now pins it installed.
@@ -130,8 +128,8 @@ PostgreSQL persistence composition, auth, Soul Git writes, and Worker callback p
   YAML compiles through `run-kernel` and uses the same authorization, publication, and Run path.
 - Schedule checkpoints follow embedded Trigger identity, never list position. Legacy checkpoints
   transfer only when their saved deduplication key identifies one schedule.
-- Integration connect flows are manifest-declared. Adding an integration must not add a bespoke
-  route; extend `packages/soul/src/types.ts` if auth step kinds are insufficient.
+- MCP setup uses the shared configuration, review and account surfaces. Native channel
+  setup retains its fixed provider verification and auth flows.
 - Integration callback origin comes from `PUBLIC_API_URL`, never request `Host`; `PUBLIC_URL` is the
   web redirect origin only.
 - `integrations/connection-writer.ts` is the only `connection.yaml` writer; it must merge, seal
@@ -141,9 +139,12 @@ PostgreSQL persistence composition, auth, Soul Git writes, and Worker callback p
   revokes Slack routing projections. Remove publishes Soul deletion before retryable secret cleanup.
 - `internal/channel-availability.ts` gates Slack message and Surface admission, recovery, and
   approval continuation from the live Soul; all hosts must preserve that gate.
-- Third-party integration installs copy only regular `manifest.yml` and `setup-guide.md`; manifests
-  must stay declarative, https-only for provider URLs, and non-executable.
+- MCP definitions persist non-secret configuration through SoulWriter and read only the verified
+  active bundle. Credentials and account grants never belong in the Soul.
+- Local MCP uses the fixed Kata runtime in production; ordinary Docker is development-only.
+  Operators provision Kata and, for network egress, `SANDBOX_RUNTIME_IMAGE`; server definitions
+  cannot choose a runtime.
 - Clone every caller-supplied Git source through `withGitSourceClone` from `@tulipfarm/integrations`
   (`src/git-source/`); do not fork SSRF policy and never return git's stderr to a caller.
 
-See [Integration authoring](../../docs/architecture/building-an-integration.md).
+See [MCP Integration services](../../packages/integrations/src/mcp/AGENTS.md).

@@ -1,0 +1,143 @@
+{
+  "id": "l3-mcp-reviewed-tool-contract-follows-publication",
+  "tier": "l3",
+  "agent": "support",
+  "platformTools": ["integration_configure", "integration_get"],
+  "input": [
+    {
+      "role": "user",
+      "content": "Call integration_configure for eval-mcp with server label Eval MCP, authentication type none, transport streamable-http, URL https://mcp.eval.example/mcp, and enabled false. Preserve this exact existing server configuration and its reviewed status Tool. I approve disabling it."
+    }
+  ],
+  "script": [
+    {
+      "kind": "tool_calls",
+      "calls": [
+        {
+          "callId": "disable",
+          "name": "integration_configure",
+          "arguments": {
+            "slug": "eval-mcp",
+            "configuration": {
+              "server": {
+                "id": "eval-mcp",
+                "label": "Eval MCP",
+                "authentication": { "type": "none" },
+                "transport": { "type": "streamable-http", "url": "https://mcp.eval.example/mcp" }
+              },
+              "enabled": false
+            }
+          }
+        }
+      ]
+    },
+    { "kind": "text", "text": "The server is disabled." }
+  ],
+  "journey": [
+    {
+      "input": [
+        {
+          "role": "user",
+          "content": "Call integration_configure again for eval-mcp using the same server id, label Eval MCP and https://mcp.eval.example/mcp streamable-http URL, now with enabled true. I approve enabling its existing reviewed status Tool."
+        }
+      ],
+      "script": [
+        {
+          "kind": "tool_calls",
+          "calls": [
+            {
+              "callId": "enable",
+              "name": "integration_configure",
+              "arguments": {
+                "slug": "eval-mcp",
+                "configuration": {
+                  "server": {
+                    "id": "eval-mcp",
+                    "label": "Eval MCP",
+                    "authentication": { "type": "none" },
+                    "transport": {
+                      "type": "streamable-http",
+                      "url": "https://mcp.eval.example/mcp"
+                    }
+                  },
+                  "enabled": true
+                }
+              }
+            }
+          ]
+        },
+        { "kind": "text", "text": "The reviewed server is enabled." }
+      ]
+    },
+    {
+      "input": [
+        {
+          "role": "user",
+          "content": "First call integration_get for eval-mcp to read its published reviewed status Tool. Then call integration_configure with the same id, label and streamable-http transport but change the URL to https://mcp.changed.example/mcp and leave enabled true. I approve the change. Do not invent a new capability review; the changed server must not retain the old Tool."
+        }
+      ],
+      "script": [
+        {
+          "kind": "tool_calls",
+          "calls": [
+            { "callId": "read", "name": "integration_get", "arguments": { "slug": "eval-mcp" } }
+          ]
+        },
+        {
+          "kind": "tool_calls",
+          "calls": [
+            {
+              "callId": "change",
+              "name": "integration_configure",
+              "arguments": {
+                "slug": "eval-mcp",
+                "configuration": {
+                  "server": {
+                    "id": "eval-mcp",
+                    "label": "Eval MCP",
+                    "authentication": { "type": "none" },
+                    "transport": {
+                      "type": "streamable-http",
+                      "url": "https://mcp.changed.example/mcp"
+                    }
+                  },
+                  "enabled": true
+                }
+              }
+            }
+          ]
+        },
+        { "kind": "text", "text": "The endpoint changed. Its capabilities need a new review." }
+      ]
+    }
+  ],
+  "expect": [
+    { "kind": "soul_committed", "path": "integrations/eval-mcp/mcp.yaml" },
+    {
+      "kind": "soul_not_published",
+      "artifact": "ToolContract:mcp-eval-mcp-status-51b1cdd4ae261c34",
+      "turnIndex": 1
+    },
+    {
+      "kind": "soul_published",
+      "artifact": "ToolContract:mcp-eval-mcp-status-51b1cdd4ae261c34",
+      "turnIndex": 2
+    },
+    {
+      "kind": "tool_result_field_equals",
+      "name": "integration_get",
+      "argumentPath": "slug",
+      "argumentValue": "eval-mcp",
+      "status": "succeeded",
+      "turnIndex": 3,
+      "outputPath": "server.reviewed.tools.0.name",
+      "value": "status"
+    },
+    {
+      "kind": "soul_not_published",
+      "artifact": "ToolContract:mcp-eval-mcp-status-51b1cdd4ae261c34",
+      "turnIndex": 3
+    },
+    { "kind": "run_status", "status": "succeeded" }
+  ]
+}

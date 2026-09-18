@@ -17,7 +17,7 @@ export async function buildIntegrationWorkerBundle(): Promise<string> {
     target: "node26",
     format: "cjs",
     outfile: BUNDLE,
-    external: ["pg"],
+    external: ["pg", "isolated-vm"],
     logLevel: "silent",
   });
   return BUNDLE;
@@ -37,7 +37,7 @@ export interface IntegrationWorkerHandle {
 export interface StartIntegrationWorkerOptions {
   readonly databaseUrl: string;
   readonly env?: Record<string, string>;
-  readonly internalApiMode?: "ready" | "missing-oim-contract";
+  readonly internalApiMode?: "ready" | "missing-native-contract";
 }
 
 export async function startIntegrationWorker(
@@ -111,35 +111,30 @@ export async function startIntegrationWorker(
 }
 
 async function startInternalApi(
-  mode: "ready" | "missing-oim-contract"
+  mode: "ready" | "missing-native-contract"
 ): Promise<{ readonly server: Server; readonly url: string }> {
   const server = createServer((request, response) => {
-    if (request.url === "/api/v1/internal/oim/worker-contract") {
-      if (mode === "missing-oim-contract") {
+    if (request.url === "/api/v1/internal/mcp-knowledge/reconcile") {
+      response.writeHead(200, { "content-type": "application/json" }).end('{"cleaned":0}');
+      return;
+    }
+    if (request.url === "/api/v1/internal/channels/events/drain") {
+      if (mode === "missing-native-contract") {
         response.writeHead(404).end();
         return;
       }
       response.writeHead(200, { "content-type": "application/json" }).end(
         JSON.stringify({
-          version: 1,
-          capabilities: [
-            "connection-bound-operations",
-            "exact-manifest-resolution",
-            "hooks",
-            "knowledge-registrations",
-            "payload-crypto",
-            "verified-provider-identity",
-            "webhook-registration",
-          ],
+          claimed: 0,
+          dispatched: 0,
+          denied: 0,
+          retrying: 0,
         })
       );
       return;
     }
-    if (
-      request.url === "/api/v1/internal/oim/polling-registrations" ||
-      request.url === "/api/v1/internal/oim/knowledge-registrations"
-    ) {
-      response.writeHead(200, { "content-type": "application/json" }).end("[]");
+    if (request.url === "/api/v1/internal/channels/slack/credential") {
+      response.writeHead(200, { "content-type": "application/json" }).end('{"configured":false}');
       return;
     }
     response.writeHead(404).end();

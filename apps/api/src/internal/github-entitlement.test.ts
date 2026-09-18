@@ -10,7 +10,6 @@ import {
 } from "@tulipfarm/integrations";
 import { NOT_APPLICABLE } from "@tulipfarm/tool-broker";
 import { describe, expect, it } from "vitest";
-import { buildGitHubTools } from "../tools/github/tools";
 
 type Permission = Awaited<ReturnType<GitHubPermissionApi["permissionFor"]>>;
 
@@ -306,28 +305,7 @@ describe("organizationsIn", () => {
   });
 });
 
-describe("agreement with the GitHub Tools' own derivation", () => {
-  it("reads the repository out of what the real Tools actually derive", () => {
-    const tools = buildGitHubTools("biz-1", {
-      installations: { list: async () => [] },
-      effects: undefined,
-    } as unknown as Parameters<typeof buildGitHubTools>[1]);
-
-    const withRepoArg = tools.filter(
-      (tool) =>
-        tool.definition !== undefined &&
-        JSON.stringify(tool.definition.inputSchema).includes('"repository"')
-    );
-    expect(withRepoArg.length).toBeGreaterThan(0);
-
-    for (const tool of withRepoArg) {
-      const derived = tool.definition?.targetsFor({ repository: "acme/api" }, undefined) ?? [];
-      const repos = repositoriesIn(derived);
-      const namesARepo = derived.some((ref) => String(ref.id ?? "").startsWith("repo:"));
-      expect(repos.length > 0).toBe(namesARepo);
-    }
-  });
-
+describe("unresolved provider targets", () => {
   it("declines to read an installation-wide target as a repository", () => {
     // `installation:*` is not a repository target.
     expect(repositoriesIn([{ type: "integration.github", id: "installation:__all__" }])).toEqual(

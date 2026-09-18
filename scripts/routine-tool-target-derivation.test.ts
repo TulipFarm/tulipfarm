@@ -111,7 +111,7 @@ function toolContract(targets: readonly Record<string, string>[] | undefined) {
       allowedDestinations: ["github"],
       idempotency: { strategy: "provider" },
       dryRun: false,
-      adapter: { kind: "integration", ref: "github" },
+      adapter: { kind: "native", ref: "github" },
       ...(targets === undefined ? {} : { targets }),
     },
   };
@@ -207,7 +207,7 @@ async function run(options: {
   const dispatch = vi.fn<ToolAdapter["dispatch"]>(async () => ({ commentId: 7 }));
   const port = new BrokerRoutineToolPort({
     effects,
-    adapters: new Map<string, ToolAdapter>([["github", { kind: "integration", dispatch }]]),
+    adapters: new Map<string, ToolAdapter>([["github", { kind: "native", dispatch }]]),
     approvals: {
       decide: async () => ({ status: "denied", reason: "approval not expected" }),
       consume: async () => false,

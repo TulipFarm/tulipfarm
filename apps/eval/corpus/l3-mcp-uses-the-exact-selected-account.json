@@ -1,0 +1,59 @@
+{
+  "id": "l3-mcp-uses-the-exact-selected-account",
+  "tier": "l3",
+  "agent": "support",
+  "mcp": {
+    "visibility": "private",
+    "accounts": [
+      { "id": "personal-default", "scope": "personal", "status": "active", "isDefault": true },
+      { "id": "personal-selected", "scope": "personal", "status": "active" }
+    ],
+    "selection": { "accountId": "personal-selected", "sharedConsent": false }
+  },
+  "input": [
+    {
+      "role": "user",
+      "content": "Call the Eval MCP status Tool with probe 'selected'. Use the account I selected in this Chat, not the default. I approve this status read."
+    }
+  ],
+  "tools": [
+    {
+      "name": "mcp_eval_mcp_status_51b1cdd4ae261c34",
+      "description": "Read the status visible to the selected account.",
+      "inputSchema": {
+        "type": "object",
+        "properties": { "probe": { "type": "string" } },
+        "required": ["probe"],
+        "additionalProperties": false
+      },
+      "mutating": false
+    }
+  ],
+  "script": [
+    {
+      "kind": "tool_calls",
+      "calls": [
+        {
+          "callId": "selected",
+          "name": "mcp_eval_mcp_status_51b1cdd4ae261c34",
+          "arguments": { "probe": "selected" }
+        }
+      ]
+    },
+    { "kind": "text", "text": "The selected account reports operational status." }
+  ],
+  "expect": [
+    { "kind": "mcp_provider_call_count", "count": 1 },
+    {
+      "kind": "tool_result_field_equals",
+      "name": "mcp_eval_mcp_status_51b1cdd4ae261c34",
+      "argumentPath": "probe",
+      "argumentValue": "selected",
+      "status": "succeeded",
+      "outputPath": "structuredContent.accountId",
+      "value": "personal-selected"
+    },
+    { "kind": "run_status", "status": "succeeded" },
+    { "kind": "turn_status", "status": "succeeded" }
+  ]
+}

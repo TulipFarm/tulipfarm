@@ -14,7 +14,8 @@ export type SecretLeaseDenialReason =
   /** The broker no longer knows this lease, as after a restart or `revokeAll`. */
   | "lease_unknown";
 
-interface SecretScopeBase {
+/** Exact lease authority; every field narrows use and `secretRef` is never the value. */
+export interface SecretScope {
   readonly secretRef: string;
   readonly toolId: string;
   readonly integrationId?: string;
@@ -27,38 +28,6 @@ interface SecretScopeBase {
   readonly destination?: string;
   readonly activeSkillName?: string;
 }
-
-/** Legacy Secret authority for platform-owned credentials that are not Connection-backed. */
-export interface LegacySecretScope extends SecretScopeBase {
-  readonly businessId?: never;
-  readonly connectionId?: never;
-  readonly credentialSlot?: never;
-  readonly credentialRevision?: never;
-  readonly integrationMajorVersion?: never;
-  readonly operationId?: never;
-  readonly identityMode?: never;
-  readonly manifestDigest?: never;
-  readonly configurationDigest?: never;
-}
-
-/** Exact authority for one credential slot on one product Connection. */
-export interface ConnectionSecretScope extends SecretScopeBase {
-  readonly secretRef: `secret://${string}`;
-  readonly businessId: string;
-  readonly connectionId: string;
-  readonly credentialSlot: string;
-  /** Secret revision approved for this exact Tool occurrence. */
-  readonly credentialRevision: string;
-  readonly integrationId: string;
-  readonly integrationMajorVersion: number;
-  readonly operationId: string;
-  readonly identityMode: "shared_only" | "personal_required" | "shared_or_personal";
-  readonly manifestDigest: string;
-  readonly configurationDigest: string;
-}
-
-/** Exact lease authority; every field narrows use and `secretRef` is never the value. */
-export type SecretScope = LegacySecretScope | ConnectionSecretScope;
 
 /** Denial evidence: a reason code plus the lease id. Never the Credential or its value. */
 export class SecretLeaseDeniedError extends Error {

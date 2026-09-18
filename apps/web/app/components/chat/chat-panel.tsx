@@ -16,6 +16,7 @@ import { CapabilityCards } from "./capability-cards";
 import { ChatDebugDrawer } from "./chat-debug-drawer";
 import { Composer } from "./composer";
 import { ChatHomeWork } from "./home-work";
+import { ChatIntegrationAccounts } from "./integration-accounts";
 import { ModeBanner } from "./mode-banner";
 import { asPickerPreset, DEFAULT_CHAT_MODEL_SELECTOR } from "./model-selector";
 import { PlanSidebar } from "./plan-sidebar";
@@ -292,6 +293,11 @@ export function ChatPanel({
           <PlanSidebar rounds={activePlan.rounds} pending={activePlan.pending} />
         ) : null}
         <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+          <ChatIntegrationAccounts
+            key={conversationId ?? "new"}
+            chatId={conversationId}
+            disabled={busy}
+          />
           {/* The restored route supplies its heading only once Messages exist. */}
           {!hasMessages && initialConversationId ? <h1 className="sr-only">Chat</h1> : null}
           {/* The top bar names the conversation, so this strip only says what it can't: which Agent is

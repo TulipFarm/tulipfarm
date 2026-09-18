@@ -1,12 +1,11 @@
 import type { DelegatedAuthorityGuardDeps } from "@tulipfarm/agent-runtime";
 import { watchForCancel, withDelegatedAuthority } from "@tulipfarm/agent-runtime";
 import { infrastructureOwnershipLayer } from "@tulipfarm/authz";
-import { GitHubEntitlementPort, HttpGitHubPermissionApi } from "@tulipfarm/integrations";
 import {
   type RuntimeDeploymentContext,
   runtimeDeploymentAllowsIndependentSetup,
 } from "@tulipfarm/storage";
-import { CompositeToolEntitlement, PgEffectStore } from "@tulipfarm/tool-broker";
+import { PgEffectStore } from "@tulipfarm/tool-broker";
 import type {
   RegistryToolDispatcherOptions,
   TurnAuthority,
@@ -15,7 +14,6 @@ import type {
 import { CredentialResolver, LiveToolGate, RegistryToolDispatcher } from "@tulipfarm/tool-host";
 import type { PrincipalProviderTokenRepo } from "../integrations/principal-tokens";
 import { hostedAgentResolver } from "../soul/agents/registry";
-import { githubExcludedToolNames } from "../tools/github/visibility";
 
 export type DelegatedToolDispatchDeps = Pick<
   RegistryToolDispatcherOptions,
@@ -35,10 +33,7 @@ export type DelegatedToolDispatchDeps = Pick<
   readonly deployment?: RuntimeDeploymentContext;
   readonly links: DelegatedAuthorityGuardDeps["links"];
   readonly catalog: DelegatedAuthorityGuardDeps["catalog"];
-  readonly integrations: Parameters<typeof githubExcludedToolNames>[0]["integrations"];
   readonly tokens: PrincipalProviderTokenRepo;
-  readonly identities: ConstructorParameters<typeof GitHubEntitlementPort>[0];
-  readonly githubInstallationToken: ConstructorParameters<typeof HttpGitHubPermissionApi>[0];
   readonly transactions: ConstructorParameters<typeof PgEffectStore>[0];
   readonly runCancellation?: RunCancellationSource;
 };
@@ -92,10 +87,7 @@ export function withRunCancellation(
 export function buildDelegatedToolDispatch({
   links,
   catalog,
-  integrations,
   tokens,
-  identities,
-  githubInstallationToken,
   transactions,
   runCancellation,
   deployment,
@@ -107,9 +99,6 @@ export function buildDelegatedToolDispatch({
     new RegistryToolDispatcher({
       ...base,
       agents: hostedAgentResolver(base.soulLoader),
-      visibility: {
-        excludedToolNames: (businessId) => githubExcludedToolNames({ integrations, businessId }),
-      },
       // the agent allowlist alone; with them, no chat Tool executes without a grant.
       gate: new LiveToolGate([
         infrastructureOwnershipLayer(deployment?.hostingAuthority ?? "independent"),
@@ -120,16 +109,6 @@ export function buildDelegatedToolDispatch({
         soulLoader: base.soulLoader,
         personalCredentialProviders: new Set(["github"]),
       }),
-      // Authority layer L5. Every GitHub Tool spends the App installation's credential, so
-      // without this the platform's answer to "may this person touch that repo" is whatever
-      entitlements: new CompositeToolEntitlement([
-        new GitHubEntitlementPort(
-          identities,
-          new HttpGitHubPermissionApi(githubInstallationToken),
-          undefined,
-          tokens
-        ),
-      ]),
       // s6-ledger. Without this a mutating platform Tool — Record CRUD, Soul Forge, memory,
       effects: new PgEffectStore(transactions),
     })

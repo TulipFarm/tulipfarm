@@ -712,6 +712,7 @@ describe("handleSlackInteractive", () => {
     const resolve = vi.fn().mockResolvedValue(principal);
     const require = vi
       .fn()
+      .mockResolvedValueOnce({ outcome: "accepted", eventId: "event-1", response: "starting" })
       .mockResolvedValueOnce({ outcome: "reserved" })
       .mockResolvedValueOnce({ attempted: 1, delivered: 1 });
 
@@ -794,25 +795,16 @@ describe("handleSlackInteractive", () => {
       }
     );
 
-    expect(start).toHaveBeenCalledWith({
-      businessId: "business-1",
-      eventId: "slack-command:T1:trigger-1",
-      integrationId: "integration-1",
-      routeId: "route-1",
-      agentId: "agent-1",
-      principal,
-      message: {
-        externalAppId: "A1",
-        channelId: "C1",
-        text: "Review the queue",
-        media: [],
-      },
-    });
-    expect(resolve).toHaveBeenCalledWith({
-      businessId: "business-1",
-      provider: "slack",
-      externalSubject: "U1",
-      externalTenantId: "T1",
+    expect(start).not.toHaveBeenCalled();
+    expect(resolve).not.toHaveBeenCalled();
+    expect(require).toHaveBeenNthCalledWith(1, "POST", "/api/v1/internal/channels/slack/commands", {
+      command: "/tulipfarm",
+      user_id: "U1",
+      channel_id: "C1",
+      team_id: "T1",
+      api_app_id: "A1",
+      trigger_id: "trigger-1",
+      text: "Review the queue",
     });
     expect(require).toHaveBeenCalledWith(
       "POST",

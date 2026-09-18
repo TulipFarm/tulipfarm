@@ -8,6 +8,7 @@ import { MarkdownView } from "~/components/markdown-view";
 import { Button } from "~/components/ui/button";
 import { Link } from "~/components/ui/link";
 import type { Backlink, KnowledgePage } from "~/lib/knowledge-api";
+import type { McpKnowledgePageSource } from "~/lib/mcp-knowledge";
 import { parseOkf } from "~/lib/okf";
 import { rewriteWikiLinks } from "~/lib/okf-listing";
 import type { PageResolver } from "~/lib/page-href";
@@ -21,6 +22,7 @@ export function PageDetail({
   deleting,
   backlinks,
   resolver,
+  source,
 }: {
   spaceId: string;
   doc: KnowledgePage;
@@ -30,8 +32,10 @@ export function PageDetail({
   deleting: boolean;
   backlinks: Backlink[];
   resolver: PageResolver;
+  source?: McpKnowledgePageSource;
 }) {
   const [historyOpen, setHistoryOpen] = useState(false);
+  const synced = doc.source === "mcp";
   const body = useMemo(
     () => rewriteWikiLinks(parseOkf(doc.content).body, spaceId, resolver),
     [doc.content, spaceId, resolver]
@@ -45,7 +49,7 @@ export function PageDetail({
           <h1 className="text-2xl font-bold tracking-tight text-foreground">{doc.title}</h1>
           <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1.5 text-xs text-muted-foreground">
             <span>
-              {doc.authorLabel ? `Updated by ${doc.authorLabel} ` : "Updated "}
+              {!synced && doc.authorLabel ? `Updated by ${doc.authorLabel} ` : "Updated "}
               {formatUpdated(doc.updatedAt)}
             </span>
             {doc.visibility && doc.visibility !== "business" ? (
@@ -54,7 +58,7 @@ export function PageDetail({
                 <VisibilityBadge visibility={doc.visibility} />
               </>
             ) : null}
-            {doc.authorKind === "agent" ? (
+            {!synced && doc.authorKind === "agent" ? (
               <>
                 <Dot />
                 <AgentAuthoredBadge authorKind={doc.authorKind} />
@@ -98,20 +102,52 @@ export function PageDetail({
           </div>
         </div>
 
-        <div className="flex shrink-0 items-center gap-2">
-          <Button asChild variant="outline" size="sm" className="cursor-pointer">
-            <Link to={editTo}>
-              <Pencil aria-hidden />
-              Edit
-            </Link>
-          </Button>
-          <MoreMenu
-            onDelete={onDelete}
-            deleting={deleting}
-            onOpenHistory={() => setHistoryOpen(true)}
-          />
-        </div>
+        {!synced && (
+          <div className="flex shrink-0 items-center gap-2">
+            <Button asChild variant="outline" size="sm" className="cursor-pointer">
+              <Link to={editTo}>
+                <Pencil aria-hidden />
+                Edit
+              </Link>
+            </Button>
+            <MoreMenu
+              onDelete={onDelete}
+              deleting={deleting}
+              onOpenHistory={() => setHistoryOpen(true)}
+            />
+          </div>
+        )}
       </header>
+
+      {synced && (
+        <aside
+          aria-label="Synced Page"
+          className="rounded-md border border-border bg-muted/40 p-3 text-sm text-muted-foreground"
+        >
+          This Page is synced from an Integration and is read-only. Edit the original source. Manage
+          the source selection and copied content in{" "}
+          <Link to="/integrations" className="underline">
+            Integrations
+          </Link>
+          . Source access is checked before this content can be used.
+          {source && (
+            <div className="mt-2 space-y-1 text-xs">
+              <p>Last synced: {new Date(source.lastSyncedAt).toLocaleString()}</p>
+              {source.stale && (
+                <p role="status">
+                  This copy is out of date because a refresh failed or is overdue. Live access is
+                  still required; content older than 24 hours is unavailable.
+                </p>
+              )}
+              {/^https?:\/\//i.test(source.sourceUrl) && (
+                <a href={source.sourceUrl} target="_blank" rel="noreferrer" className="underline">
+                  Open original source
+                </a>
+              )}
+            </div>
+          )}
+        </aside>
+      )}
 
       {body.trim() ? (
         <MarkdownView wikiLinks>{body}</MarkdownView>
@@ -119,12 +155,14 @@ export function PageDetail({
         <div className="flex flex-col items-center gap-3 rounded-sm border border-dashed border-border py-14 text-center">
           <FileText className="size-7 text-muted-foreground/40" aria-hidden />
           <p className="text-sm text-muted-foreground">This page has no content yet.</p>
-          <Button asChild variant="outline" size="sm" className="cursor-pointer">
-            <Link to={editTo}>
-              <Pencil aria-hidden />
-              Add content
-            </Link>
-          </Button>
+          {!synced && (
+            <Button asChild variant="outline" size="sm" className="cursor-pointer">
+              <Link to={editTo}>
+                <Pencil aria-hidden />
+                Add content
+              </Link>
+            </Button>
+          )}
         </div>
       )}
 
@@ -134,16 +172,18 @@ export function PageDetail({
         </div>
       ) : null}
 
-      <HistoryDrawer
-        open={historyOpen}
-        onClose={() => setHistoryOpen(false)}
-        pageId={doc.id}
-        spaceId={spaceId}
-        path={path}
-        resolver={resolver}
-        currentContent={doc.content}
-        currentUpdatedAt={doc.updatedAt}
-      />
+      {!synced && (
+        <HistoryDrawer
+          open={historyOpen}
+          onClose={() => setHistoryOpen(false)}
+          pageId={doc.id}
+          spaceId={spaceId}
+          path={path}
+          resolver={resolver}
+          currentContent={doc.content}
+          currentUpdatedAt={doc.updatedAt}
+        />
+      )}
     </div>
   );
 }

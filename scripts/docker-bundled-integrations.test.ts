@@ -1,7 +1,6 @@
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { basename, dirname, join, posix, relative } from "node:path";
 import { describe, expect, it } from "vitest";
-import { parseOimManifest } from "../packages/schema/src";
 
 function repoRoot(): string {
   let directory = __dirname;
@@ -135,26 +134,5 @@ describe("bundled integrations container packaging", () => {
         expect(ignored, `${path} must never enter the public image build`).toBe(true);
       }
     });
-  });
-
-  it("includes every companion file declared by a bundled OIM manifest", () => {
-    const packageDirectories = readdirSync(CATALOG, { withFileTypes: true }).filter((entry) =>
-      entry.isDirectory()
-    );
-    const oimDirectories = packageDirectories.filter((entry) =>
-      existsSync(join(CATALOG, entry.name, "oim.yml"))
-    );
-    expect(oimDirectories.length).toBeGreaterThan(0);
-
-    for (const directory of oimDirectories) {
-      const packageRoot = join(CATALOG, directory.name);
-      const manifest = parseOimManifest(readFileSync(join(packageRoot, "oim.yml"), "utf8"));
-      for (const file of manifest.files ?? []) {
-        expect(
-          existsSync(join(packageRoot, file.path)),
-          `${directory.name}/${file.path} is declared by oim.yml but missing`
-        ).toBe(true);
-      }
-    }
   });
 });

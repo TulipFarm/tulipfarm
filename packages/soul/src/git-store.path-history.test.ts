@@ -34,7 +34,7 @@ afterEach(() => {
 describe("SoulGitStore.lastCommitForPath", () => {
   it("returns the artifact-scoped revision instead of repository HEAD", async () => {
     const artifactRevision = commit(
-      "integrations/weather-v1/oim.yml",
+      "integrations/weather/integration.yaml",
       "kind: Integration\n",
       "install weather"
     );
@@ -46,9 +46,7 @@ describe("SoulGitStore.lastCommitForPath", () => {
     });
 
     expect(head).not.toBe(artifactRevision);
-    await expect(store.lastCommitForPath("integrations/weather-v1")).resolves.toBe(
-      artifactRevision
-    );
+    await expect(store.lastCommitForPath("integrations/weather")).resolves.toBe(artifactRevision);
     await expect(store.lastCommitForPath("integrations/missing")).resolves.toBeNull();
     await expect(store.lastCommitForPath("../outside")).resolves.toBeNull();
   });

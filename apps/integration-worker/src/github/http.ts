@@ -34,6 +34,8 @@ export class GitHubRestHttp implements IntegrationHttpPort {
 
     const response = await this.fetchImpl(url.toString(), {
       method: request.method,
+      redirect: "error",
+      signal: AbortSignal.timeout(15_000),
       headers: {
         accept: "application/vnd.github+json",
         authorization: `Bearer ${credential}`,

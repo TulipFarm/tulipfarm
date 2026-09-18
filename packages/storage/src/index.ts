@@ -6,16 +6,6 @@ export * from "./conversations/context-summary-store";
 export * from "./conversations/latest-turn";
 export * from "./events";
 export * from "./integrations";
-export {
-  OIM_KNOWLEDGE_SUBSCRIPTION_STORAGE_STATEMENTS,
-  type OimKnowledgeSubscription,
-  type OimKnowledgeSubscriptionInput,
-  OimKnowledgeSubscriptionStore,
-} from "./integrations/oim-knowledge-subscription-store";
-export {
-  type OimConnectionOperations,
-  OimOperationsStore,
-} from "./integrations/oim-operations-store";
 export * from "./kill-switches";
 export * from "./memory-curation";
 export * from "./notifications";

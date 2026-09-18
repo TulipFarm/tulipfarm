@@ -1,7 +1,7 @@
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { textContent } from "@tulipfarm/schema";
+import { MCP_SETUP_TOOL_DECLARATIONS, textContent } from "@tulipfarm/schema";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import type { EvalCase } from "./case.ts";
 import { CorpusError, corpusHash, loadCorpus, RED_TEAM_DIR } from "./corpus.ts";
@@ -70,6 +70,122 @@ describe("corpusHash", () => {
 });
 
 describe("loadCorpus", () => {
+  const nativeRoutine = { destination: "eval/native#42", accountId: "approved-native-account" };
+
+  it.each([
+    { tier: "l2" },
+    { nativeRoutine: { ...nativeRoutine, fault: "fake_success" } },
+    { nativeRoutine: { ...nativeRoutine, accountId: "" } },
+    { toolResults: [{ name: "native_admit", output: { runId: "fake" } }] },
+    { journey: [{ input: valid("next").input }] },
+  ])("rejects invalid or scripted native admission: %j", async (override) => {
+    await expect(
+      load(
+        corpusDir({
+          "native.json": {
+            ...valid("native"),
+            tier: "l3",
+            nativeRoutine,
+            expect: [{ kind: "native_admission_equals", path: "runCount", value: 1 }],
+            ...override,
+          },
+        })
+      )
+    ).rejects.toThrow(/nativeRoutine|native admission/);
+  });
+
+  it("requires a native fixture for admission Expectations", async () => {
+    await expect(
+      load(
+        corpusDir({
+          "native.json": {
+            ...valid("native"),
+            tier: "l3",
+            expect: [{ kind: "native_admission_equals", path: "runCount", value: 0 }],
+          },
+        })
+      )
+    ).rejects.toThrow(/needs a nativeRoutine fixture/);
+  });
+
+  const mcp = {
+    visibility: "private",
+    accounts: [{ id: "personal", scope: "personal", status: "active" }],
+  };
+
+  it.each([-1, 0.5])("rejects invalid MCP provider call count %s", async (count) => {
+    await expect(
+      load(
+        corpusDir({
+          "mcp.json": {
+            ...valid("mcp"),
+            tier: "l3",
+            mcp,
+            expect: [{ kind: "mcp_provider_call_count", count }],
+          },
+        })
+      )
+    ).rejects.toThrow(/non-negative integer/);
+  });
+
+  it("requires MCP host state for provider call counts", async () => {
+    await expect(
+      load(
+        corpusDir({
+          "mcp.json": {
+            ...valid("mcp"),
+            tier: "l3",
+            expect: [{ kind: "mcp_provider_call_count", count: 0 }],
+          },
+        })
+      )
+    ).rejects.toThrow(/needs an MCP account fixture/);
+  });
+
+  it("requires MCP host state to run through L3", async () => {
+    await expect(load(corpusDir({ "mcp.json": { ...valid("mcp"), mcp } }))).rejects.toThrow(
+      /"mcp" requires an L3 Chat Turn/
+    );
+  });
+
+  it.each([
+    { ...mcp, visibility: "public" },
+    { ...mcp, accounts: [...mcp.accounts, ...mcp.accounts] },
+    { ...mcp, selection: { accountId: "missing", sharedConsent: true } },
+    { ...mcp, sharedGrants: ["personal"] },
+    { ...mcp, revokeGrantBeforeApproval: "personal" },
+  ])("rejects invalid MCP fixture state: %j", async (fixture) => {
+    await expect(
+      load(
+        corpusDir({
+          "mcp.json": { ...valid("mcp"), tier: "l3", mcp: fixture },
+        })
+      )
+    ).rejects.toThrow(/MCP|mcp/);
+  });
+
+  it.each(
+    MCP_SETUP_TOOL_DECLARATIONS.flatMap(({ name }) =>
+      [false, true].map((journey) => ({ name, journey }))
+    )
+  )("rejects scripted $name results (journey=$journey)", async ({ name, journey }) => {
+    const results = [{ name, output: { allowed: true } }];
+    await expect(
+      load(
+        corpusDir({
+          "mcp.json": {
+            ...valid("mcp"),
+            tier: "l3",
+            mcp,
+            ...(journey
+              ? { journey: [{ input: valid("next").input, toolResults: results }] }
+              : { toolResults: results }),
+          },
+        })
+      )
+    ).rejects.toThrow(/never scripted results/);
+  });
+
   it("loads every Case file and sorts them by id", async () => {
     const dir = corpusDir({ "b.json": valid("beta"), "a.json": valid("alpha") });
     const corpus = await load(dir);
@@ -120,6 +236,7 @@ describe("loadCorpus", () => {
 
   it.each([
     { kind: "run_status", status: "succeeded" },
+    { kind: "soul_not_published", artifact: "ToolContract:mcp-reviewed", turnIndex: 1 },
     { kind: "run_event_text_omits", text: "hello" },
     { kind: "persisted_message_metadata_equals", path: "turnAttempt.outcome", value: "failed" },
     {
@@ -129,7 +246,7 @@ describe("loadCorpus", () => {
       argumentValue: "acme",
       status: "succeeded",
       turnIndex: 2,
-      outputPath: "oimManifest.metadata.name",
+      outputPath: "server.server.label",
       value: "Acme",
     },
     {

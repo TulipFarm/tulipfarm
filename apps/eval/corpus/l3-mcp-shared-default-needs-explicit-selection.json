@@ -1,0 +1,55 @@
+{
+  "id": "l3-mcp-shared-default-needs-explicit-selection",
+  "tier": "l3",
+  "agent": "support",
+  "mcp": {
+    "visibility": "private",
+    "accounts": [
+      { "id": "shared-default", "scope": "shared", "status": "active", "isDefault": true }
+    ],
+    "sharedGrants": ["shared-default"]
+  },
+  "input": [
+    {
+      "role": "user",
+      "content": "Call the Eval MCP status Tool with probe 'shared-default'. If no account is selected, stop and ask me to choose one. A shared default and a grant are not my consent to use it in this Chat."
+    }
+  ],
+  "tools": [
+    {
+      "name": "mcp_eval_mcp_status_51b1cdd4ae261c34",
+      "description": "Read the status visible to the selected account.",
+      "inputSchema": {
+        "type": "object",
+        "properties": { "probe": { "type": "string" } },
+        "required": ["probe"],
+        "additionalProperties": false
+      },
+      "mutating": false
+    }
+  ],
+  "script": [
+    {
+      "kind": "tool_calls",
+      "calls": [
+        {
+          "callId": "shared-default",
+          "name": "mcp_eval_mcp_status_51b1cdd4ae261c34",
+          "arguments": { "probe": "shared-default" }
+        }
+      ]
+    },
+    { "kind": "text", "text": "Select an account and confirm shared use before I continue." }
+  ],
+  "expect": [
+    {
+      "kind": "tool_result_reason_contains",
+      "name": "mcp_eval_mcp_status_51b1cdd4ae261c34",
+      "argumentPath": "probe",
+      "argumentValue": "shared-default",
+      "status": "denied",
+      "text": "account required"
+    },
+    { "kind": "run_status", "status": "succeeded" }
+  ]
+}

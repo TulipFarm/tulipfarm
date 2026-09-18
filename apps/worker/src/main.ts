@@ -44,7 +44,6 @@ import {
   ConversationContextSummaryStore,
   createBlobPort,
   EventStore,
-  IntegrationStore,
   initializeRuntimeDeployment,
   KillSwitchRepo,
   RunEventStore,
@@ -54,7 +53,6 @@ import {
   RunStateRetryStore,
   RunStore,
   runtimeDeploymentConfigFromEnv,
-  TaskRepo,
   WaitStore,
 } from "@tulipfarm/storage";
 import { PgEffectStore } from "@tulipfarm/tool-broker";
@@ -73,10 +71,7 @@ import { DeliveryTargetRegistry } from "./delivery";
 import { createEffortInference, runEventEffortPin } from "./effort-inference";
 import { acceptedEventHandler, EventOutboxDispatcher } from "./event-dispatcher";
 import { RunExecutorRegistry } from "./executors";
-import { buildWorkerFileService } from "./files/service";
-import { createHookExecutor } from "./hooks/executor";
 import { InternalApiClient } from "./internal/client";
-import { HttpDeliveryHost } from "./internal/delivery-host";
 import { HttpTurnHost } from "./internal/turn-host";
 import { SoulLlm } from "./llm";
 import { type LoopLogger, runLoop } from "./loop";
@@ -93,9 +88,7 @@ import {
 import { resolveWorkerOtlpTarget } from "./observability-config";
 import { waitForSchemaFloor } from "./preflight";
 import { startProbeServer } from "./probe-server";
-import { TaskSignalsGatherer } from "./reconcile/task-signals";
 import { DispatchRoutineActionPort } from "./routine/action-port";
-import { buildGitHubTooling } from "./routine/adapters";
 import { BundleRoutineAgentPort } from "./routine/agent-port";
 import { HttpRoutineApprovalPort } from "./routine/approval-port";
 import { HttpChildRoutinePort } from "./routine/child-routine-port";
@@ -113,16 +106,12 @@ import { createSubagentExecutor } from "./subagent/executor";
 import { buildLocalToolHost } from "./tools/local-host";
 import { RoutingToolDispatch } from "./tools/routing-dispatch";
 import { SoulEmbeddings } from "./tools/soul-embeddings";
-import { createIntegrationExecutor } from "./turn/integration-executor";
 
 /** Consumer identity recorded on every outbox receipt this process writes. */
 const OUTBOX_CONSUMER = "worker.run-dispatch";
 
 /** Chat source; channel-specific ingress derives a normal chat request before this executor. */
 const CHAT_RUN_SOURCE: RunSource = "chat";
-
-/** Integration deliveries classify first, then use the same chat executor. */
-const INTEGRATION_RUN_SOURCE: RunSource = "integration";
 
 /** Routine Runs execute only from their exact immutable bundle in this process. */
 const ROUTINE_RUN_SOURCE: RunSource = "routine";
@@ -327,6 +316,7 @@ export async function main(): Promise<void> {
     effects: recoveryEffects,
     artifacts: artifactService,
     embeddings: localEmbeddings,
+    knowledgeReadClient: internalApi,
     // `file_create` renders here, not in the API: model-authored content is untrusted input.
     blobs,
     logger,
@@ -337,13 +327,6 @@ export async function main(): Promise<void> {
   const deliveryTargets = new DeliveryTargetRegistry();
   deliveryTargets.register("event.accepted", acceptedEventHandler(internalApi));
 
-  // Installation scope only; GitHubAdapter narrows until Soul-authored AccessGrants exist.
-  const githubTooling = buildGitHubTooling({
-    businessId: deployment.businessId,
-    integrations: new IntegrationStore(transactions),
-    secrets,
-    log: logger,
-  });
   // Local sandbox images are dev-only; production fails closed until a remote backend is wired.
   const sandboxRuntimeImage =
     process.env.NODE_ENV === "production" ? undefined : process.env.SANDBOX_RUNTIME_IMAGE;
@@ -502,17 +485,6 @@ export async function main(): Promise<void> {
   );
 
   executors.register(
-    INTEGRATION_RUN_SOURCE,
-    createIntegrationExecutor({
-      deliveries: new HttpDeliveryHost(internalApi),
-      // Shared isolate; circuit breakers stay per Integration.
-      hooks: createHookExecutor(),
-      events: runEventStore,
-      turn: chatExecutor,
-    })
-  );
-
-  executors.register(
     ROUTINE_RUN_SOURCE,
     createRoutineExecutor({
       definitions: new WorkerRoutineDefinitionLoader(
@@ -537,13 +509,12 @@ export async function main(): Promise<void> {
           internalApi,
           effects: new PgEffectStore(transactions),
           approvals: new ToolApprovalService({ transactions }),
-          adapters: githubTooling.adapters,
+          adapters: new Map(),
           adaptersFor: (request) =>
             buildBundleSandboxAdapters(request, {
               artifacts: artifactService,
               ...(sandboxRuntimeImage === undefined ? {} : { runtimeImage: sandboxRuntimeImage }),
             }),
-          credentials: githubTooling.credentials,
           mutationGuard,
           parkRetry: effectRetryWaits.parkRetry,
           retryWaitStatus: effectRetryWaits.status,

@@ -1,8 +1,7 @@
 import { createHash } from "node:crypto";
 import type { DurableWaitManager, PersistedWait } from "./waits";
 
-export const EFFECT_RETRY_WAIT_SCHEMA_REF = "tulipfarm://oim/rate-retry/v1";
-export const OIM_RATE_RETRY_WAIT_SCHEMA_REF = EFFECT_RETRY_WAIT_SCHEMA_REF;
+export const EFFECT_RETRY_WAIT_SCHEMA_REF = "tulipfarm://effect/retry/v1";
 
 export interface EffectRetryWaitParkInput {
   readonly businessId: string;
@@ -38,7 +37,7 @@ export type EffectRetryWaitStatusReader = (
 ) => Promise<DurableEffectRetryWaitStatus>;
 
 export function effectRetryWaitId(effectId: string, attempt: number): string {
-  const digest = createHash("sha256").update(`oim-rate-retry:${effectId}:${attempt}`).digest("hex");
+  const digest = createHash("sha256").update(`effect-retry:${effectId}:${attempt}`).digest("hex");
   const version = `4${digest.slice(13, 16)}`;
   const variant = ((Number.parseInt(digest.slice(16, 17), 16) & 0x3) | 0x8).toString(16);
   return [
@@ -49,8 +48,6 @@ export function effectRetryWaitId(effectId: string, attempt: number): string {
     digest.slice(20, 32),
   ].join("-");
 }
-
-export const oimRateRetryWaitId = effectRetryWaitId;
 
 function matches(wait: PersistedWait, input: EffectRetryWaitParkInput): boolean {
   return (
@@ -69,7 +66,7 @@ export class DurableEffectRetryWaitHost {
     const waitId = effectRetryWaitId(input.effectId, input.attempt);
     const existing = await this.waits.find(input.businessId, waitId);
     if (existing !== null) {
-      if (!matches(existing, input)) throw new Error("oim_rate_retry_wait_conflict");
+      if (!matches(existing, input)) throw new Error("effect_retry_wait_conflict");
       return { waitId };
     }
 
@@ -81,7 +78,7 @@ export class DurableEffectRetryWaitHost {
       input.delayMs < 1 ||
       !Number.isFinite(createdAt.getTime())
     ) {
-      throw new Error("invalid_oim_rate_retry_wait");
+      throw new Error("invalid_effect_retry_wait");
     }
 
     try {
@@ -115,5 +112,3 @@ export class DurableEffectRetryWaitHost {
     return { status: "unavailable", ...details };
   };
 }
-
-export { DurableEffectRetryWaitHost as OimRateRetryWaitHost };

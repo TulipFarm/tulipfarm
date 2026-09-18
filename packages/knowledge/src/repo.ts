@@ -326,7 +326,7 @@ export class PgKnowledgePageRepo implements KnowledgePageRepo {
   async listAllSpacePages(): Promise<SpacePageRef[]> {
     const { rows } = await this.q.query(
       `SELECT p.id, p.space_id, s.name AS space_name, p.path, p.title,
-              p.author_kind, p.author_id
+              p.author_kind, p.author_id, p.source
        FROM knowledge_pages p
        JOIN knowledge_spaces s ON s.id = p.space_id
        WHERE p.space_id IS NOT NULL AND p.path IS NOT NULL AND p.active = true
@@ -340,6 +340,7 @@ export class PgKnowledgePageRepo implements KnowledgePageRepo {
         spaceName: row.space_name as string,
         path: row.path as string,
         title: row.title as string,
+        source: row.source as KnowledgeSource,
         authorKind: (row.author_kind as PageAuthorKind | null) ?? null,
         authorId: (row.author_id as string | null) ?? null,
       };
@@ -412,7 +413,7 @@ export class PgKnowledgePageRepo implements KnowledgePageRepo {
   async listRecentPages(limit: number): Promise<RecentPage[]> {
     const { rows } = await this.q.query(
       `SELECT p.id, p.space_id, s.name AS space_name, p.path, p.title, p.updated_at,
-              p.author_kind, p.author_id
+              p.author_kind, p.author_id, p.source
        FROM knowledge_pages p
        JOIN knowledge_spaces s ON s.id = p.space_id
        WHERE p.space_id IS NOT NULL AND p.path IS NOT NULL AND p.active = true
@@ -428,6 +429,7 @@ export class PgKnowledgePageRepo implements KnowledgePageRepo {
         spaceName: row.space_name as string,
         path: row.path as string,
         title: row.title as string,
+        source: row.source as KnowledgeSource,
         authorKind: (row.author_kind as PageAuthorKind | null) ?? null,
         authorId: (row.author_id as string | null) ?? null,
         updatedAt: row.updated_at as Date,

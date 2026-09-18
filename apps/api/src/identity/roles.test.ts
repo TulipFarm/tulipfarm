@@ -174,4 +174,24 @@ describe("describeDeploymentRoles", () => {
     });
     expect(decision.allowed).toBe(true);
   });
+
+  it.each([
+    ["integration", "integration.read", true],
+    ["integration", "integration.execute", true],
+    ["integration_account", "integration.accounts.read", true],
+    ["integration_account", "integration.accounts.write", true],
+    ["integration_account", "integration.accounts.manage", false],
+    ["integration", "integration.connect", false],
+    ["integration", "integration.disconnect", false],
+    ["integration", "integration.remove", false],
+  ])("gates member MCP access to %s / %s", (resourceType, action, allowed) => {
+    const memberRole = DEPLOYMENT_ROLES.find((role) => role.id === "member");
+    if (!memberRole) throw new Error("member role missing from the deployment catalog");
+    expect(
+      decideEffectivePermission([{ name: "member", grants: memberRole.grants }], {
+        action,
+        resourceType,
+      }).allowed
+    ).toBe(allowed);
+  });
 });

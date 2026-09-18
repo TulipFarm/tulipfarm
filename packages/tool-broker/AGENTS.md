@@ -20,6 +20,8 @@ credential dispatch, sandbox adaptation, and reconciliation.
 ## Rules
 - May import only `@tulipfarm/schema`, `authz`, `audit`, `secrets`, `sandbox`, `storage`, and `observability`; see [dependency rules](../../docs/architecture/dependency-rules.md).
 - Consume policy, DLP decisions, and credential leases; never reimplement or broaden them.
+- Tool intents bind either an MCP account or a native credential reference, never both; reject
+  retired Connection authority instead of dropping it during normalization.
 - Expose the Tool adapter interface that `@tulipfarm/integrations` implements; never import Integration implementations.
 - `EffectDispatcher` consults the mutation kill switch before recording an attempt, so a denied
   mutation leaves no attempt in the ledger. A dispatcher constructed without `mutationGuard` is

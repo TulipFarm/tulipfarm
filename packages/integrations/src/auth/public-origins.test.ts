@@ -1,11 +1,39 @@
 import { describe, expect, it } from "vitest";
+import { AuthBrokerError } from "./errors";
 import {
+  ingressWebhookUrl,
   normalizePublicOrigin,
   PublicOriginError,
   type PublicOriginRepository,
   PublicOriginsService,
   type StoredPublicOrigins,
 } from "./public-origins";
+
+describe("ingressWebhookUrl", () => {
+  const endpoints = {
+    apiUrl: "https://api.tulip.example.com",
+    webUrl: "https://tulip.example.com",
+    callbackUrl: "https://api.tulip.example.com/api/v1/integrations/auth/callback",
+  };
+
+  it.each(["github", "slack"])("uses the fixed native endpoint for %s", (provider) => {
+    const expected = `${endpoints.apiUrl}/api/v1/integrations/native/${provider}/events`;
+    expect(ingressWebhookUrl(endpoints, provider)).toBe(expected);
+    expect(ingressWebhookUrl({ ...endpoints, apiUrl: `${endpoints.apiUrl}///` }, provider)).toBe(
+      expected
+    );
+  });
+
+  it.each(["github-mcp", "slack-mcp", "google", "github/../slack", ""])(
+    "refuses unsupported provider %j instead of returning a retired endpoint",
+    (provider) => {
+      expect(() => ingressWebhookUrl(endpoints, provider)).toThrow(AuthBrokerError);
+      expect(() => ingressWebhookUrl(endpoints, provider)).toThrow(
+        expect.objectContaining({ reason: "unknown_step", slug: provider })
+      );
+    }
+  );
+});
 
 class MemoryPublicOrigins implements PublicOriginRepository {
   value: StoredPublicOrigins | null = null;

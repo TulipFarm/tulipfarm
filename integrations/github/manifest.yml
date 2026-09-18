@@ -1,27 +1,26 @@
 name: github
 version: "1.0.0"
-description: Let TulipFarm agents triage issues, review and merge pull requests, and commit code
-  in your GitHub repos — installed as a GitHub App scoped to the repos you choose.
+description: Receive GitHub events and deliver agent replies through a GitHub App scoped to
+  the repositories you choose.
 maintainer: TulipFarm
 icon: github
 capabilities:
-  - Triage issues — read, search, comment, label, assign, and close
-  - Review pull requests, leave reviews, and merge them
-  - Read repository files and push commits
-  - Read check run results to see whether CI passed
+  - Receive repository, issue, pull request, and check events
+  - Deliver replies on issues and pull requests
+  - Connect a selected repository as the Soul backup remote
 # Mirrors the app_manifest step's `default_permissions` below. Kept by hand because that block is
 # GitHub's own schema, which TulipFarm does not parse — `bundled-auth.test.ts` fails if the two
 # drift, so an added permission cannot ship without appearing here first.
 grants:
   - label: contents
     access: write
-    description: Read files and push commits on the repositories you select.
+    description: Read repository content and push the Soul backup to a selected repository.
   - label: issues
     access: write
-    description: Read issues and post comments, labels, and assignees.
+    description: Receive issue events and deliver replies as comments.
   - label: pull_requests
     access: write
-    description: Open, review, and merge pull requests.
+    description: Receive pull request events and deliver replies as comments.
   - label: checks
     access: read
     description: Read check run results to see whether CI passed.

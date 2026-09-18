@@ -14,20 +14,19 @@
 import { execFileSync } from "node:child_process";
 import { generateKeyPairSync } from "node:crypto";
 import type { ToolDispatchPort } from "@tulipfarm/agent-runtime";
-import type { OimReleasePackageWriter } from "@tulipfarm/integrations";
 import { compileYamlPlan, YamlPlanError } from "@tulipfarm/run-kernel";
-import { artifactDirectory } from "@tulipfarm/schema";
 import {
   authorLegacyResourceType,
   compileExecutionBundle,
   createEd25519BundleSigner,
   createEd25519BundleVerifier,
-  createGitBackedOimSoulReleasePackageWriter,
   createHmacCommitSigner,
+  createSoulMcpDefinitionStore,
   GitSoulTreeReader,
   hermeticGitEnv,
   InMemoryBundleStore,
-  type OimSoulReleasePackageWritePlan,
+  mcpIntegrationsFromBundle,
+  type RuntimeBundle,
   SoulGitStore,
   SoulPublicationCoordinator,
   SoulPublisher,
@@ -51,7 +50,8 @@ export interface SoulCommit {
 export interface SoulWriterTool {
   readonly port: ToolDispatchPort;
   readonly resourceTypes: ToolDispatchPort;
-  readonly releasePackages: OimReleasePackageWriter;
+  mcpDefinitions(): Promise<ReturnType<typeof createSoulMcpDefinitionStore>>;
+  activeBundle(): Promise<RuntimeBundle>;
   /** Commits this Trial landed, in order. Empty means the Turn changed no configuration. */
   readonly commits: readonly SoulCommit[];
   /**
@@ -69,13 +69,13 @@ export interface SoulWriterTool {
    */
   published(): Promise<readonly string[]>;
   /**
-   * Returns the fixture to the commit it was loaded at.
+   * Returns the fixture checkout and cached loader to the commit it was loaded at.
    *
    * A Soul is loaded once per Sweep and every L3 Trial commits into the same repository, so without
    * this the second Trial would start from whatever the first one wrote — and a Case asserting an
    * Agent was created would pass because a previous Case created it.
    */
-  reset(): void;
+  reset(): Promise<void>;
 }
 
 const SILENT = { debug() {}, info() {}, warn() {}, error() {} };
@@ -158,61 +158,61 @@ export function soulWriterTool(soul: EvalSoul): SoulWriterTool {
     treeReader
   );
   const actor = { principalId: "agent:eval", name: "Eval", email: "eval@tulipfarm.local" };
-  const releasePackageWriter = createGitBackedOimSoulReleasePackageWriter({
-    soulWriter: writer,
-    soulStore: store,
-    publisher,
-    actor,
-  });
-  const recordReleaseCommit = (
-    plan: OimSoulReleasePackageWritePlan,
-    receipt: { readonly revision: string }
-  ) => {
-    const directory = artifactDirectory("Integration", plan.slug);
-    commits.push({
-      sha: receipt.revision,
-      message: `Integration ${plan.slug}`,
-      paths: [
-        `${directory}/oim.yml`,
-        ...plan.snapshot.files.map((file) => `${directory}/${file.path}`),
-      ],
-    });
-  };
-  const releasePackages: OimReleasePackageWriter = {
-    prepare: (input) => releasePackageWriter.prepare(input),
-    apply: async (plan) => {
-      const typedPlan = plan as OimSoulReleasePackageWritePlan;
-      const receipt = await releasePackageWriter.apply(typedPlan);
-      recordReleaseCommit(typedPlan, receipt);
-      return receipt;
-    },
-    install: async (input) => {
-      const plan = await releasePackageWriter.prepare(input);
-      const receipt = await releasePackageWriter.apply(plan);
-      recordReleaseCommit(plan, receipt);
-      return receipt;
-    },
-    rollback: (receipt) => releasePackageWriter.rollback(receipt),
+  const activeBundle = async () => {
+    let bundle = await publications.activeBundle(EVAL_BUSINESS, verifier);
+    if (bundle === undefined) {
+      await publisher.publishCommittedTree({ commitSha: base, actor });
+      bundle = await publications.activeBundle(EVAL_BUSINESS, verifier);
+    }
+    if (bundle === undefined) throw new Error("The Eval Soul has no active verified bundle.");
+    return bundle;
   };
 
   return {
     commits,
     denials,
-    releasePackages,
+    activeBundle,
+    mcpDefinitions: async () => {
+      const bundle = await activeBundle();
+      const active = { integrations: mcpIntegrationsFromBundle(bundle) };
+      return createSoulMcpDefinitionStore({
+        loader: active,
+        businessId: EVAL_BUSINESS,
+        soulWriter: {
+          read: writer.read.bind(writer),
+          readCompanion: writer.readCompanion.bind(writer),
+          readCompanionWithBase: writer.readCompanionWithBase.bind(writer),
+          revision: writer.revision.bind(writer),
+          apply: async (changeset) => {
+            const result = await writer.apply(changeset);
+            commits.push({
+              sha: result.commitSha,
+              message: changeset.subject,
+              paths: result.paths,
+            });
+            const published = await publications.activeBundle(EVAL_BUSINESS, verifier);
+            if (published === undefined) throw new Error("MCP publication has no active bundle.");
+            active.integrations = mcpIntegrationsFromBundle(published);
+            return result;
+          },
+        },
+      });
+    },
     published: async () => {
       const bundle = await publications.activeBundle(EVAL_BUSINESS, verifier);
       if (bundle === undefined) return [];
       const artifacts = bundle.definitions.map(
         (definition) => `${definition.kind}:${definition.slug}`
       );
-      if (bundle.commitSha !== git("rev-parse", "HEAD").trim()) return artifacts;
-      const loaded = await soul.reload();
-      for (const slug of loaded.loader.integrations.keys()) artifacts.push(`Integration:${slug}`);
+      for (const slug of mcpIntegrationsFromBundle(bundle).keys()) {
+        artifacts.push(`Integration:${slug}`);
+      }
       return [...new Set(artifacts)].sort();
     },
-    reset: () => {
+    reset: async () => {
       git("reset", "--hard", base);
       git("clean", "-fd");
+      await soul.loader.load();
     },
     resourceTypes: {
       dispatch: async (call) => {

@@ -1,0 +1,25 @@
+server:
+  id: eval-mcp
+  label: Eval MCP
+  authentication:
+    type: none
+  transport:
+    type: streamable-http
+    url: https://mcp.eval.example/mcp
+enabled: true
+reviewed:
+  tools:
+    - name: status
+      description: Read the status visible to the selected account.
+      inputSchema:
+        type: object
+        properties:
+          probe:
+            type: string
+        required: [probe]
+        additionalProperties: false
+      digest: 0f86280bf1e6f679a0b1ded616502d57117cc6226b7601741384ea586343fb0b
+      mutating: false
+      requiresApproval: true
+  resources: []
+  prompts: []

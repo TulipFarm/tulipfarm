@@ -31,7 +31,7 @@ Most tool names fit a small set of jobs.
 | Coordinating work | Transfer to another agent, delegate a task to another agent, trigger a routine, or mark a **state** (one step inside a routine) or delegated task complete. |
 | Showing and asking | Present structured output, update a presentation, or ask for input when the current channel can show it. |
 | Reading the web and calling APIs | Fetch a public page, or call an HTTP or GraphQL API with a stored credential. See [reading the web and calling APIs](/docs/using-tulipfarm/read-the-web-and-call-apis). |
-| Calling integrations | Use connected apps through **integrations**, which are third-party connections described by a manifest. Built-in GitHub and Slack tools also live here. |
+| Calling integrations | Use reviewed tools from **integrations**, connections to external services through MCP. Native Slack and GitHub channels receive events and deliver replies separately. |
 | Reading turn context | Read the current time, inspect what screen you are on, validate structured data, or move within the app when a tool is browser-only. |
 
 The names above are categories, not promises that every agent can do every item. Availability and
@@ -43,19 +43,10 @@ Tool names are lower snake case: small letters joined with underscores. Examples
 `record_create`, `kv_set`, and `delegate_to_agent`. The definition layer rejects any tool name that
 is not lower snake case.
 
-Connected app tools add the app slug in front of the operation name:
-
-```text
-<normalized-integration-slug>_<egress-operation-name>
-```
-
-The slug is lowercased, punctuation becomes `_`, and the operation name is the one the connected
-app's own settings declare. You do not have to memorise this. The value of knowing it is that when
-an approval asks you about `slack_post_message`, you can read it without looking anything up.
-
-That pattern lets two connected apps publish the same operation name without colliding. When you see
-a tool name in an approval or run, the first part usually tells you the tool family, and the last
-part tells you the action.
+Connected MCP tools start with `mcp_` and include the integration and provider tool names,
+followed by a stable identifier. This lets different integrations offer similarly named
+actions without confusing them. Read the tool description and account shown in the request
+rather than treating a familiar name as proof of permission.
 
 ## Why being offered a tool is not enough
 

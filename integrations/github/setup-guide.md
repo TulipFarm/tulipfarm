@@ -1,8 +1,8 @@
 # Connect GitHub
 
-TulipFarm uses two GitHub apps with different jobs. A GitHub App gives autonomous work access to
-the repositories you select. A separate OAuth App lets each person use GitHub Tools with only
-their own GitHub permissions.
+The native GitHub channel receives events and delivers agent replies in the repositories you
+select. A separate OAuth App supports personal GitHub authorization. Third-party Agent Tools
+use an MCP server rather than this channel's GitHub App.
 
 ## 1. Create the App
 
@@ -35,36 +35,23 @@ Click **Install it on your repositories**. Creating an App grants nothing on its
 is where you choose which repos TulipFarm may read and write.
 
 Pick **All repositories** or **Only select repositories**, then confirm. TulipFarm records the
-installation and the repos it covers, and GitHub Tools become available to your agents.
+installation and the repositories it covers.
 
 After an admin completes this step, each person can select **Connect your GitHub account** on this
-page. GitHub Tools used in Chat then spend that person's OAuth credential. If they do not connect,
-the Tool refuses the call; it never falls back to the GitHub App token. Autonomous Runs with no
-person behind them continue to use the App installation.
+page to authorize their personal GitHub access. This does not connect or approve an MCP server.
 
 ## What it can do
 
-The App requests only what the agents need — see
+The App requests the permissions declared by its setup definition — see
 [the locked permission set](../../docs/architecture/github-app-manifest.md):
 
 | Permission | Level | Used for |
 |---|---|---|
-| Contents | Read and write | Read files, commit and push agent-authored changes |
-| Issues | Read and write | Search, comment, label, assign, close |
-| Pull requests | Read and write | Create, review, comment, merge |
-| Checks | Read-only | Read CI status for PR gating |
+| Contents | Read and write | Read repository content and push a configured Soul backup |
+| Issues | Read and write | Receive issue events and deliver replies |
+| Pull requests | Read and write | Receive pull request events and deliver replies |
+| Checks | Read-only | Receive and inspect check events |
 | Metadata | Read-only | Required for every GitHub App |
-
-Check runs are **read-only**: agents can inspect CI results, but cannot create or update check
-runs or publish their own results onto commits. No permission upgrade or reauthorization is
-needed for this clarification.
-
-GitHub filenames are literal paths; do not URL-encode them before asking an agent to read a file.
-For a pull request from a fork, use `owner:branch` as the head and specify the destination base.
-
-After an uncertain write, TulipFarm searches up to 10 pages of 100 entries for its effect marker.
-If that search cannot establish whether the write landed, the result stays ambiguous instead
-of automatically posting a duplicate. Inspect the provider result before starting a new action.
 
 Repository administration is deliberately **not** requested. TulipFarm asks for it separately, as
 an incremental permission update, only if you choose "create the Soul repo for me".

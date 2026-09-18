@@ -1,11 +1,11 @@
 import { describe, expect, it, vi } from "vitest";
 import type { IntegrationHttpResponse } from "../http";
+import type { EgressHttpPort, EgressHttpRequest } from "./http";
 import {
   classifyGraphqlOperation,
   normalizedPublicUrl,
   sendGovernedRequest,
 } from "./network-request";
-import type { EgressHttpPort, EgressHttpRequest } from "./openapi-adapter";
 
 describe("classifyGraphqlOperation", () => {
   it("classifies the selected operation structurally", () => {

@@ -1,7 +1,7 @@
 # Worker
 
 `@tulipfarm/worker` drives durable Run dispatch, Agent/Tool States, timers,
-reconciliation, turn execution, delivery classification, projections, and outbox delivery.
+reconciliation, turn execution, projections, and outbox delivery.
 
 ## Read on / Skip
 
@@ -21,15 +21,15 @@ reconciliation, turn execution, delivery classification, projections, and outbox
 | `src/db.ts`, `src/preflight.ts`, `src/loop.ts` | Local `pg`, schema check, backing-off loops. |
 | `src/observability.ts`, `src/observability-config.ts` | Durable AI telemetry and boot-time OTLP setup. |
 | `src/executors.ts`, `src/delivery.ts` | Run source and delivery target registries. |
-| `src/turn/` | Integration turn executor. Chat Turn execution moved to [`packages/turn-executor`](../../packages/turn-executor/AGENTS.md). |
+| [`packages/turn-executor`](../../packages/turn-executor/AGENTS.md) | Shared Chat Turn execution, also used by native channel Chat Runs. |
 | `src/routine/` | Worker adapters for the shared `run-kernel` Routine executor. |
 | `src/memory-curation/` | The hourly Curator: `run.ts` scans users with new Turns, calls the fast `memory_curator` agent and writes the rewritten Memory Document; `guards.ts` holds the pure output guards (budget classification, standing-instruction check). |
 | `src/subagent/` | Ad-hoc sub-agent Run executor: the chat executor with its Conversation swapped for an answer Artifact. |
 | `src/internal/` | HTTP ports back to `/api/v1/internal/*`; Run identity is re-derived by API. |
-| `src/job-consumers.ts` | API-scheduled pg-boss work, including OIM Connection refresh and product telemetry dispatch. |
+| `src/job-consumers.ts` | API-scheduled pg-boss maintenance, retention, indexing, and product telemetry dispatch. |
 | `src/tools/` | In-process Tool host for co-locatable families, and the routing dispatcher. |
 | `src/files/`, `src/knowledge/` | The worker's own `FileService` and `KnowledgeService`, and the `file-index` job that extracts a File's text into Knowledge. |
-| `src/hooks/` | Sandbox worker bundle for Integration delivery classification. |
+| `src/knowledge/mcp-page-gate.ts` | Source-backed Page reads call the service-only fresh MCP gate with the actual Run reader; missing callbacks deny. |
 | `src/recovery/` | Reconciliation helpers for abandoned or parked work. |
 | `test/process/` | Real bundled-worker process tests over PGlite socket. |
 | `test/e2e/` | End-to-end worker flows. |
@@ -61,13 +61,11 @@ reconciliation, turn execution, delivery classification, projections, and outbox
   executors must stop model, Tool, wait, retry, fan-out, and State progress without settling.
 - A configured Run lifetime aborts the current claim and leaves its lease for normal reclaim; it
   does not create an active-Run concurrency cap.
-- Registered Run sources are `chat`, `integration`, `routine`, and `subagent`; unknown sources
-  reconcile.
+- Registered Run sources are `chat`, `routine`, and `subagent`; retired `integration` and unknown
+  sources reconcile. Fixed native channel events mint Chat or Routine Runs through the API.
 - `maintenance-sweep` (*/5, bare pg-boss, scheduled by the API) is deterministic maintenance only:
   it reconciles Tasks and calls no model. Its queue name is a plain string shared with
   `apps/api/src/schedule/maintenance-schedule.ts` — rename both or neither.
-- The API schedules OIM Connection refresh; the Worker only consumes the shared queue and calls
-  its authenticated internal endpoint. A partial-failure result is reported, not retried.
 - `memory-curation` (hourly, same arrangement, shared with `apps/api/src/memory/curation-schedule.ts`)
   is the only model-calling maintenance. It calls a model only for users who gained a Turn since
   their watermark, so an idle hour costs nothing. An over-budget rewrite is retried exactly once and
@@ -78,7 +76,6 @@ reconciliation, turn execution, delivery classification, projections, and outbox
   or neither. Every refusal is an outcome, never a throw: a File deleted while its job queued must
   not retry forever. It reconciles after writing as well as before: until the Page exists, a
   delete, a withdrawal or a revoke has nothing to act on, so all three are re-asked once it does.
-- Integration Runs classify delivery, then hand real turns to the same chat executor as web chat.
 - Routine execution reads only the Run's exact signed bundle and immutable request Artifact.
 - Routine replay safety depends on durable occurrence keys and immutable Tool outputs. Confirmed
   legacy effects without output park; `awaiting_child` re-enters only its bound child lookup.
@@ -122,10 +119,7 @@ reconciliation, turn execution, delivery classification, projections, and outbox
 - `TurnEventWriter` is the only participant event path; keep Tool args/results out of it.
 - Guardrails arrive with Context; digest mismatch throws before the first event.
 - Blocked input/output settles with a guard reply; blocked Tool calls return denied to the model.
-- Delivery classification emits exactly one `delivery.classified` event per Run.
-- Delivery classifier isolate gets no grants; keep API and worker hook bundle basenames distinct.
-- Bind links and reply text never cross from API to worker. Reply retries reuse completed Turns
-  and stable Effects; broker timers park the Run, and ambiguous outcomes require reconciliation.
+- Native event/reply handling belongs to fixed channel services, not a Worker classifier.
 - Effort inference happens once per Run for `auto`; classifier tokens are unmetered.
 - Gate each fallback link under its own provider key. Any failed link opens immediately; an open
   primary must be skipped inside the chain, never reject before its fallback can run.
@@ -134,7 +128,7 @@ reconciliation, turn execution, delivery classification, projections, and outbox
 - May import listed `@tulipfarm/*` packages, never another app; see dependency rules below.
 - Soul access is only signed-bundle reads; never load live Soul, alias, publish, or git sync.
 - Production Routine Tools use `createRoutineToolPort` with the authenticated `InternalApiClient`
-  and the shared `DurableWaitManager`; OIM preparation/dispatch stays API-side, while retries park
+  and the shared `DurableWaitManager`; MCP preparation/dispatch stays API-side, while retries park
   durably. Its `MutationKillSwitchGuard` reads the same table as the API, so an operator's stop
   covers Worker-dispatched effects too.
 

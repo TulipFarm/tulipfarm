@@ -61,6 +61,33 @@ function jsonResponse(body: unknown, init: { status?: number } = {}): Response {
   });
 }
 
+describe("native webhook registration URLs", () => {
+  it.each(["github", "slack"])("renders the verified %s ingress endpoint", async (slug) => {
+    const action = await startAuthStep({
+      slug,
+      manifest: manifestWith([
+        {
+          kind: "app_manifest",
+          create_url: `https://${slug}.com/apps/new?state={state}`,
+          manifest_param: "manifest",
+          delivery: "form_post",
+          manifest: { hook_attributes: { url: "{webhook_url}" } },
+        },
+      ]),
+      stepIndex: 0,
+      env: {},
+      endpoints: { ...endpoints, apiUrl: `${endpoints.apiUrl}/` },
+      repo: new MemoryAuthRequestRepo(),
+    });
+    if (action.action !== "form_post") throw new Error("expected form_post");
+    expect(JSON.parse(action.value)).toEqual({
+      hook_attributes: {
+        url: `${endpoints.apiUrl}/api/v1/integrations/native/${slug}/events`,
+      },
+    });
+  });
+});
+
 describe("renderTemplate", () => {
   it("substitutes known placeholders and leaves unknown ones intact", () => {
     expect(renderTemplate("{a}/x/{b}", { a: "1" })).toBe("1/x/{b}");
@@ -263,7 +290,7 @@ describe("startAuthStep", () => {
   it("renders the issued state into both the app URL and submitted manifest", async () => {
     const repo = new MemoryAuthRequestRepo();
     const action = await startAuthStep({
-      slug: "github-v2",
+      slug: "github",
       manifest: manifestWith([
         {
           kind: "app_manifest",
@@ -277,13 +304,6 @@ describe("startAuthStep", () => {
       env: {},
       endpoints,
       repo,
-      connectionId: "connection-1",
-      oim: {
-        stepId: "app",
-        stepDigest: "step-digest",
-        manifestDigest: "manifest-digest",
-        packageDigest: "package-digest",
-      },
     });
     if (action.action !== "form_post") throw new Error("expected form_post");
 
@@ -296,12 +316,7 @@ describe("startAuthStep", () => {
     expect(action.url).not.toContain("%7Bstate%7D");
     expect(action.value).not.toContain("{state}");
     expect(repo.requests[0]).toMatchObject({
-      integrationSlug: "github-v2",
-      connectionId: "connection-1",
-      oimStepId: "app",
-      oimStepDigest: "step-digest",
-      manifestDigest: "manifest-digest",
-      packageDigest: "package-digest",
+      integrationSlug: "github",
     });
   });
 
@@ -436,7 +451,7 @@ describe("completeAuthStep", () => {
 
     await expect(
       completeAuthStep({
-        query: { state, code: "code", connectionId: "forged", stepId: "forged" },
+        query: { state, code: "code", principalId: "forged" },
         loadManifest,
         loadEnv,
         endpoints,
@@ -489,42 +504,6 @@ describe("completeAuthStep", () => {
     expect(sent.get("code")).toBe("abc");
     expect(sent.get("redirect_uri")).toBe(endpoints.callbackUrl);
     expect(sent.get("code_verifier")).toBe(repo.requests[0].codeVerifier);
-  });
-
-  it("supports an OIM PKCE public client without sending a client secret", async () => {
-    const publicManifest = manifestWith([
-      {
-        ...oauthStep,
-        client_secret_optional: true,
-        token_endpoint_auth_method: "none",
-      } as never,
-    ]);
-    const repo = new MemoryAuthRequestRepo();
-    const action = await startAuthStep({
-      slug: "public",
-      manifest: publicManifest,
-      stepIndex: 0,
-      env: { NOTION_CLIENT_ID: "cid" },
-      endpoints,
-      repo,
-    });
-    if (action.action !== "redirect") throw new Error("expected redirect");
-    let sentBody = "";
-    await completeAuthStep({
-      query: { state: repo.requests[0].state, code: "abc" },
-      loadManifest: () => publicManifest,
-      loadEnv: async () => ({ NOTION_CLIENT_ID: "cid" }),
-      endpoints,
-      repo,
-      fetchImpl: async (_url, init) => {
-        sentBody = String(init?.body);
-        return jsonResponse({ access_token: "token" });
-      },
-    });
-
-    const sent = new URLSearchParams(sentBody);
-    expect(sent.get("client_id")).toBe("cid");
-    expect(sent.has("client_secret")).toBe(false);
   });
 
   it("rejects a replayed callback", async () => {
@@ -737,7 +716,7 @@ describe("completeAuthStep", () => {
     });
   });
 
-  it("captures only declared app-manifest callback values", async () => {
+  it("does not capture credentials from a native app-manifest callback without an exchange", async () => {
     const ghManifest = manifestWith([
       {
         kind: "app_manifest",
@@ -745,8 +724,7 @@ describe("completeAuthStep", () => {
         manifest_param: "manifest",
         delivery: "form_post",
         manifest: { name: "Tulip" },
-        oim_capture: { client_id: "OIM_CLIENT_ID" },
-      } as never,
+      },
     ]);
     const repo = new MemoryAuthRequestRepo();
     await startAuthStep({
@@ -756,8 +734,6 @@ describe("completeAuthStep", () => {
       env: {},
       endpoints,
       repo,
-      connectionId: "connection-1",
-      principal: { kind: "user", id: "user-1" },
     });
     const outcome = await completeAuthStep({
       query: {
@@ -771,7 +747,7 @@ describe("completeAuthStep", () => {
       repo,
     });
 
-    expect(outcome.env).toEqual({ OIM_CLIENT_ID: "client" });
+    expect(outcome.env).toEqual({});
   });
 
   it("refuses to complete a fields step, which can never produce a callback", async () => {
@@ -969,149 +945,37 @@ describe("buildAuthorizeUrl", () => {
   });
 });
 
-describe("startAuthStep — webhook registration", () => {
-  const step = {
-    kind: "webhook" as const,
-    url: "https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/setWebhook",
-    secret_env: "TELEGRAM_WEBHOOK_SECRET",
-    body: { url: "{webhook_url}", secret_token: "{TELEGRAM_WEBHOOK_SECRET}", drop_pending: true },
-  };
-
-  function recordingFetch(response: { status?: number; body?: unknown } = {}) {
-    const calls: Array<{ url: string; init?: RequestInit }> = [];
-    const impl = (async (url: string | URL | Request, init?: RequestInit) => {
-      calls.push({ url: String(url), ...(init === undefined ? {} : { init }) });
-      return new Response(JSON.stringify(response.body ?? { ok: true }), {
-        status: response.status ?? 200,
-        headers: { "content-type": "application/json" },
-      });
-    }) as unknown as typeof globalThis.fetch;
-    return { calls, impl };
-  }
-
-  it("registers this deployment's ingress URL and mints the delivery secret", async () => {
-    const { calls, impl } = recordingFetch();
-    const action = await startAuthStep({
-      slug: "telegram",
-      manifest: manifestWith([step]),
-      stepIndex: 0,
-      env: { TELEGRAM_BOT_TOKEN: "123:AAE" },
-      endpoints,
-      repo: new MemoryAuthRequestRepo(),
-      fetchImpl: impl,
-    });
-
-    if (action.action !== "completed") throw new Error("expected completed");
-    const secret = action.env.TELEGRAM_WEBHOOK_SECRET;
-    expect(secret).toBeTruthy();
-    // Generated, not collected: an operator-chosen webhook secret is the most guessable
-    // credential in any deployment.
-    expect(secret.length).toBeGreaterThanOrEqual(32);
-
-    expect(calls[0]?.url).toBe("https://api.telegram.org/bot123:AAE/setWebhook");
-    expect(JSON.parse(String(calls[0]?.init?.body))).toEqual({
-      // Derived from the API origin, so it cannot disagree with the route that serves deliveries.
-      url: "https://api.example.com/api/v1/hooks/integrations/telegram",
-      secret_token: secret,
-      drop_pending: true,
-    });
-  });
-
-  it("does not persist state — there is no callback to come back on", async () => {
-    const repo = new MemoryAuthRequestRepo();
-    await startAuthStep({
-      slug: "telegram",
-      manifest: manifestWith([step]),
-      stepIndex: 0,
-      env: { TELEGRAM_BOT_TOKEN: "123:AAE" },
-      endpoints,
-      repo,
-      fetchImpl: recordingFetch().impl,
-    });
-    expect(repo.requests).toHaveLength(0);
-  });
-
-  it("keeps identifiers the provider returned", async () => {
-    const { impl } = recordingFetch({ body: { ok: true, result: { id: "wh_9" } } });
-    const action = await startAuthStep({
-      slug: "telegram",
-      manifest: manifestWith([{ ...step, map: { "result.id": "TELEGRAM_WEBHOOK_ID" } }]),
-      stepIndex: 0,
-      env: { TELEGRAM_BOT_TOKEN: "123:AAE" },
-      endpoints,
-      repo: new MemoryAuthRequestRepo(),
-      fetchImpl: impl,
-    });
-    if (action.action !== "completed") throw new Error("expected completed");
-    expect(action.env.TELEGRAM_WEBHOOK_ID).toBe("wh_9");
-  });
-
-  it("stores nothing when the provider rejects the registration", async () => {
-    for (const response of [{ status: 401 }, { body: { ok: false, description: "bad token" } }]) {
-      const { impl } = recordingFetch(response);
-      // Storing the secret without a registration behind it would leave the integration looking
-      // connected while every delivery bounced.
+describe("startAuthStep - retired webhook registration", () => {
+  it.each(["slack", "github", "telegram", "custom"])(
+    "refuses a webhook step for %s without a provider request or persisted state",
+    async (slug) => {
+      const fetchImpl = vi
+        .fn<typeof globalThis.fetch>()
+        .mockResolvedValue(jsonResponse({ ok: true }));
+      const repo = new MemoryAuthRequestRepo();
       await expect(
         startAuthStep({
-          slug: "telegram",
-          manifest: manifestWith([step]),
+          slug,
+          manifest: manifestWith([
+            {
+              kind: "webhook",
+              url: "https://provider.example/hooks",
+              secret_env: "WEBHOOK_SECRET",
+              body: { url: "{webhook_url}" },
+            },
+          ]),
           stepIndex: 0,
-          env: { TELEGRAM_BOT_TOKEN: "123:AAE" },
+          env: {},
           endpoints,
-          repo: new MemoryAuthRequestRepo(),
-          fetchImpl: impl,
+          repo,
+          fetchImpl,
         })
-      ).rejects.toThrow(AuthBrokerError);
+      ).rejects.toMatchObject({
+        reason: "unknown_step",
+        message: "Native channel setup does not support webhook registration steps.",
+      });
+      expect(fetchImpl).not.toHaveBeenCalled();
+      expect(repo.requests).toHaveLength(0);
     }
-  });
-
-  it("refuses when an earlier step has not supplied the credential the URL needs", async () => {
-    const { calls, impl } = recordingFetch();
-    await expect(
-      startAuthStep({
-        slug: "telegram",
-        manifest: manifestWith([step]),
-        stepIndex: 0,
-        env: {},
-        endpoints,
-        repo: new MemoryAuthRequestRepo(),
-        fetchImpl: impl,
-      })
-    ).rejects.toThrow(/unresolved placeholders/);
-    // Never send a request with `{TELEGRAM_BOT_TOKEN}` still in the path.
-    expect(calls).toHaveLength(0);
-  });
-
-  it("refuses a non-https registration URL, which would leak the secret it carries", async () => {
-    const { calls, impl } = recordingFetch();
-    await expect(
-      startAuthStep({
-        slug: "telegram",
-        manifest: manifestWith([{ ...step, url: "http://api.telegram.org/setWebhook" }]),
-        stepIndex: 0,
-        env: { TELEGRAM_BOT_TOKEN: "123:AAE" },
-        endpoints,
-        repo: new MemoryAuthRequestRepo(),
-        fetchImpl: impl,
-      })
-    ).rejects.toThrow(/https/);
-    expect(calls).toHaveLength(0);
-  });
-
-  it("never puts the credential-bearing URL in the message an operator sees", async () => {
-    const impl = (async () => {
-      throw new Error("ECONNREFUSED https://api.telegram.org/bot123:AAE/setWebhook");
-    }) as unknown as typeof globalThis.fetch;
-    await expect(
-      startAuthStep({
-        slug: "telegram",
-        manifest: manifestWith([step]),
-        stepIndex: 0,
-        env: { TELEGRAM_BOT_TOKEN: "123:AAE" },
-        endpoints,
-        repo: new MemoryAuthRequestRepo(),
-        fetchImpl: impl,
-      })
-    ).rejects.toThrow(/could not reach the provider/);
-  });
+  );
 });

@@ -119,24 +119,24 @@ describe("compileExecutionBundle", () => {
     expect(() =>
       compileExecutionBundle({
         ...request([authoredTool]),
-        files: [{ path: "integrations/weather/oim.yml", content: "user owned" }],
+        files: [{ path: "integrations/weather/integration.yaml", content: "user owned" }],
         contributions: [
           {
-            source: "bundled OIM packages",
+            source: "reviewed server Tools",
             documents: [
               def("ToolContract", "bundled-weather-read", {
                 ...toolSpec,
                 toolId: "weather.read",
               }),
             ],
-            files: [{ path: "integrations/weather/oim.yml", content: "bundled" }],
+            files: [{ path: "integrations/weather/integration.yaml", content: "bundled" }],
           },
         ],
       })
     ).toThrow("collides with an existing ToolContract identity");
   });
 
-  it("keeps a legacy Integration beside a reserved bundled OIM package", () => {
+  it("keeps a native channel beside a contributed Tool and companion", () => {
     const bundle = compileExecutionBundle({
       ...request([
         def("Integration", "slack", {
@@ -147,10 +147,10 @@ describe("compileExecutionBundle", () => {
       files: [{ path: "integrations/slack/integration.yaml", content: "legacy: true\n" }],
       contributions: [
         {
-          source: "bundled OIM packages",
+          source: "reviewed server Tools",
           documents: [
-            def("ToolContract", "slack-oim-read", {
-              toolId: "slack-oim.read",
+            def("ToolContract", "weather-read", {
+              toolId: "weather.read",
               toolVersion: "1",
               action: "read",
               inputSchema: {},
@@ -158,10 +158,10 @@ describe("compileExecutionBundle", () => {
               riskClass: "read",
               idempotency: "none",
               timeoutMs: 1_000,
-              adapter: { kind: "http", ref: "slack-oim.read" },
+              adapter: { kind: "mcp", ref: "weather.read" },
             }),
           ],
-          files: [{ path: "integrations/slack-oim/oim.yml", content: "oimVersion: '1.0'\n" }],
+          files: [{ path: "integrations/weather/setup-guide.md", content: "Reviewed setup\n" }],
         },
       ],
     });
@@ -173,7 +173,7 @@ describe("compileExecutionBundle", () => {
     ).toBe(true);
     expect(
       bundle.definitions.some(
-        (definition) => definition.kind === "ToolContract" && definition.slug === "slack-oim-read"
+        (definition) => definition.kind === "ToolContract" && definition.slug === "weather-read"
       )
     ).toBe(true);
     expect(
@@ -184,7 +184,8 @@ describe("compileExecutionBundle", () => {
     ).toBe(true);
     expect(
       bundle.assets.some(
-        (asset) => asset.ownerDefinitionId === "Integration:slack-oim" && asset.path === "oim.yml"
+        (asset) =>
+          asset.ownerDefinitionId === "Integration:weather" && asset.path === "setup-guide.md"
       )
     ).toBe(true);
   });
@@ -558,7 +559,7 @@ describe("compileExecutionBundle", () => {
           mutating: true,
           dryRun: false,
           idempotency: { strategy: "provider" },
-          adapter: { kind: "integration", ref: "github" },
+          adapter: { kind: "mcp", ref: "github" },
         }),
       ])
     );

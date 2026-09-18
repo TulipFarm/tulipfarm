@@ -35,6 +35,12 @@ export async function refusedAsFileManaged(
   reply: FastifyReply
 ): Promise<boolean> {
   const page = await service.getPage(pageId);
+  if (page?.source === "mcp") {
+    reply.code(409).send({
+      error: "Synced pages are read-only. Edit the source or write a separate note.",
+    });
+    return true;
+  }
   if (page?.source !== "file") return false;
   reply.code(409).send({
     error:

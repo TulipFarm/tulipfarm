@@ -1,11 +1,13 @@
 ---
 title: Connect GitHub
-description: Create a GitHub App in two clicks, install it into repositories, and enable soul backup.
+description: Connect a GitHub App for repository events and agent replies, choose its repository scope, and optionally configure soul backup.
 ---
 
-GitHub uses a GitHub App installation flow. After it is connected, agents can work with
-issues, pull requests, check runs, and repository contents in the repositories you grant.
-GitHub can also hold a remote backup of the soul.
+Open **Integrations** and choose the native GitHub channel. It uses a GitHub App to receive
+repository events and deliver agent replies. Agent tools for other GitHub actions use a
+separately configured MCP server.
+
+GitHub can also hold a remote backup of the soul, TulipFarm's versioned configuration store.
 
 ## Outcome
 
@@ -62,13 +64,11 @@ Creating an App grants nothing on its own. Installing it is where you choose sco
 To change which repositories are granted, use GitHub's installation settings, then reconnect
 from the integration page so TulipFarm picks up the new list.
 
-## Verify in chat
+## Keep channel and tool access separate
 
-```prompt
-List the open issues in owner/repo.
-```
-
-The repository must be included in the GitHub App installation scope.
+Installing the GitHub App does not enable MCP capabilities. Use
+[Connect an integration](/docs/administration/connect-an-integration) to configure and review a
+GitHub MCP server for agent tools.
 
 ## Use GitHub for soul backup
 

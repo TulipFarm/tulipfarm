@@ -17,6 +17,7 @@ import {
   immutableSnapshot,
   type ResolvedReference,
 } from "./bundle";
+import { mcpToolContributions } from "./integrations/mcp-tool-contributions";
 import {
   type AuthoredDefinition,
   asAuthored,
@@ -470,9 +471,10 @@ export function compileExecutionBundle(request: BundleCompileRequest): Execution
     if (toolId !== undefined) toolIds.add(toolId);
   };
   for (const file of files) filePaths.add(file.path);
-  for (const contribution of [...(request.contributions ?? [])].sort((a, b) =>
-    a.source.localeCompare(b.source)
-  )) {
+  for (const contribution of [
+    ...(request.contributions ?? []),
+    ...mcpToolContributions(files),
+  ].sort((a, b) => a.source.localeCompare(b.source))) {
     for (const document of contribution.documents) {
       registerContributionDocument(document, contribution.source);
       documents.push(document);

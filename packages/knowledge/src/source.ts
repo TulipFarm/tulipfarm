@@ -46,22 +46,26 @@ export interface KnowledgeProvenance {
   readonly checkpoint?: string;
 }
 
-export interface OimKnowledgeSourceLocator {
-  readonly kind: "oim";
-  readonly integrationSlug: string;
+export interface McpKnowledgeSourceLocator {
+  readonly kind: "mcp";
+  readonly adapter: "github-file";
   readonly integrationId: string;
-  readonly integrationMajorVersion: number;
-  readonly connectionId: string;
-  readonly externalTenantId: string;
+  readonly accountId: string;
+  readonly accountRevision: number;
+  readonly ownerUserId: string;
   readonly externalAccountId: string;
-  readonly sourceKindId: string;
-  readonly scope: string;
-  readonly itemId: string;
-  readonly fields?: Readonly<Record<string, string | number | boolean>>;
-  readonly sourceUrl?: string;
+  readonly configurationRevision: string;
+  readonly selectionId: string;
+  readonly selectionRevision: string;
+  readonly visibility: "personal";
+  readonly owner: string;
+  readonly repo: string;
+  readonly path: string;
+  readonly ref: string;
+  readonly sourceUrl: string;
 }
 
-export type KnowledgeSourceLocator = OimKnowledgeSourceLocator;
+export type KnowledgeSourceLocator = McpKnowledgeSourceLocator;
 
 export interface KnowledgeSourceRecord {
   readonly sourceId: string;

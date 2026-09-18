@@ -517,92 +517,6 @@ export const InternalTurnCompletionRecordResponseSchema = {
   },
 } as const;
 
-export const InternalDeliveryDescriptionResponseSchema = {
-  type: "object",
-  required: ["slug", "body", "headers", "classifier", "hasThreadMapping", "env"],
-  properties: {
-    slug: { type: "string" },
-    body: { type: "object", additionalProperties: true },
-    headers: { type: "object", additionalProperties: { type: "string" } },
-    classifier: {
-      type: "object",
-      required: ["source", "hash"],
-      properties: { source: { type: "string" }, hash: { type: "string" } },
-    },
-    hasThreadMapping: { type: "boolean" },
-    chatEnabled: { type: "boolean" },
-    eventsEnabled: { type: "boolean" },
-    env: { type: "object", additionalProperties: { type: "string" } },
-  },
-} as const;
-
-export const InternalDeliveryChatAttachmentBodySchema = {
-  type: "object",
-  required: ["sender", "text", "reply"],
-  additionalProperties: false,
-  properties: {
-    sender: { type: "string", minLength: 1 },
-    text: { type: "string" },
-    requireExistingThread: { type: "boolean" },
-    reply: {
-      type: "object",
-      required: ["binding"],
-      additionalProperties: false,
-      properties: {
-        binding: { type: "string", minLength: 1 },
-        vars: { type: "object", additionalProperties: { type: "string" } },
-      },
-    },
-  },
-} as const;
-
-export const InternalDeliveryChatAttachmentResponseSchema = {
-  type: "object",
-  required: ["outcome"],
-  properties: {
-    outcome: { type: "string", enum: ["attached", "unlinked", "ignored", "reply_failed"] },
-    reply: IngressReplyResultSchema,
-    turnId: { type: "string" },
-    attempt: { type: "integer" },
-    completedOutcome: { type: "string", enum: ["answered", "failed"] },
-    reason: { type: "string" },
-  },
-} as const;
-
-export const InternalDeliveryEventBodySchema = {
-  type: "object",
-  required: ["eventType"],
-  additionalProperties: false,
-  properties: {
-    eventType: { type: "string", minLength: 1 },
-    payload: { type: "object", additionalProperties: true },
-  },
-} as const;
-
-export const InternalDeliveryEventResponseSchema = {
-  type: "object",
-  required: ["outcome"],
-  properties: {
-    outcome: { type: "string", enum: ["recorded", "ignored"] },
-    eventId: { type: "string" },
-    reason: { type: "string" },
-  },
-} as const;
-
-export const InternalDeliveryReplyBodySchema = {
-  type: "object",
-  required: ["attempt", "outcome", "binding"],
-  additionalProperties: false,
-  properties: {
-    attempt: { type: "integer", minimum: 1 },
-    outcome: { type: "string", enum: ["answered", "blocked", "failed"] },
-    binding: { type: "string", minLength: 1 },
-    vars: { type: "object", additionalProperties: { type: "string" } },
-  },
-} as const;
-
-export const InternalDeliveryReplyResponseSchema = IngressReplyResultSchema;
-
 export const InternalRoutineApprovalOpenBodySchema = {
   type: "object",
   required: ["stateKey", "stateName", "wait"],
@@ -698,5 +612,3 @@ export const InternalEmitResponseSchema = {
     runId: { type: "string" },
   },
 } as const;
-
-import { IngressReplyResultSchema } from "@tulipfarm/schema";

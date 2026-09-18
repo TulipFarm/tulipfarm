@@ -1,3 +1,5 @@
+import { Type } from "@sinclair/typebox";
+
 export const PageResponseSchema = {
   type: "object",
   additionalProperties: true,
@@ -40,11 +42,21 @@ export const PageListResponseSchema = {
   required: ["items", "nextCursor"],
 } as const;
 
-export const PageMentionsResponseSchema = {
-  type: "object",
-  properties: { items: { type: "array" } },
-  required: ["items"],
-} as const;
+export const PageMentionsResponseSchema = Type.Object({
+  items: Type.Array(
+    Type.Object(
+      {
+        pageId: Type.String(),
+        spaceId: Type.String(),
+        spaceName: Type.String(),
+        path: Type.String(),
+        title: Type.String(),
+        source: Type.Optional(Type.String()),
+      },
+      { additionalProperties: true }
+    )
+  ),
+});
 
 export const EntityIdParamsSchema = {
   type: "object",

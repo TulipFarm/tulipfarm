@@ -258,6 +258,7 @@ async function pollOnce(deps: DeliveryPollLoopDeps, signal: AbortSignal): Promis
   const pending = await deps.runDeliveries.listPending(deps.businessId);
   for (const row of pending) {
     if (signal.aborted) return;
+    if (row.provider !== "slack") continue;
     try {
       await handleRow(row, deps);
     } catch (error) {

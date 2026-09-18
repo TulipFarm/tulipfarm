@@ -53,20 +53,16 @@ import type { FileKnowledgeBridge } from "./files/knowledge-bridge";
 import type { FormsRoutesDeps } from "./forms/routes";
 import type { HookIngressDeps } from "./hooks/routes";
 import type { IdentityRouteDeps } from "./identity/routes";
-import type { IngressRoutesDeps } from "./ingress/routes";
+import type { composeMcpAccounts } from "./integrations/accounts/compose";
 import type { IntegrationAuthRequestRepo } from "./integrations/auth-broker";
-import type { OimConnectionService } from "./integrations/connections/service";
 import type { GitHubInstallDeps } from "./integrations/github-install-routes";
-import type { IntegrationOperationsService } from "./integrations/operations/service";
+import type { McpIntegrationRouteDeps } from "./integrations/mcp-routes";
+import type { composeNativeChannels } from "./integrations/native/compose";
 import type { PrincipalProviderTokenRepo } from "./integrations/principal-tokens";
-import type { OimReleaseControlPlane } from "./integrations/releases/control-plane";
-import type { OimIntegrationCatalogRoutes } from "./integrations/routes";
 import type { SlackBindDeps } from "./integrations/slack-binding";
 import type { ChannelInternalRouteDeps } from "./internal/channel-routes";
-import type { InternalOimConnectionRouteDeps } from "./internal/oim-connection-routes";
-import type { InternalOimWorkerRouteDeps } from "./internal/oim-worker-routes";
 import type { InternalTurnRouteDeps } from "./internal/routes";
-import type { InternalRoutineOimToolHost } from "./internal/routine-oim-tool-host";
+import type { InternalRoutineMcpToolHost } from "./internal/routine-mcp-tool-host";
 import type { SlackEventRouteDeps } from "./internal/slack-event-routes";
 import type { SlackHomeRouteDeps } from "./internal/slack-home-routes";
 import type { KillSwitchService } from "./kill-switches/service";
@@ -74,6 +70,8 @@ import type { AuthorLabeller } from "./knowledge/author-label";
 import type { PageReadAuthorizer } from "./knowledge/page-access";
 import type { ReaderDirectory } from "./knowledge/reader-directory";
 import type { SubjectDirectory } from "./knowledge/subject-directory";
+import type { McpKnowledgeFeature } from "./knowledge-sources/mcp/compose";
+import type { McpKnowledgeRunReaderResolver } from "./knowledge-sources/mcp/routes";
 import type { ObservabilityConfig } from "./observability/config";
 import type { LogRepo } from "./observability/log-repo";
 import type { ResourceRepo } from "./observability/resource-repo";
@@ -154,19 +152,11 @@ export interface AppOptions {
      */
     tokens: PrincipalProviderTokenRepo | undefined;
   };
-  /**
-   * Versioned OIM Connection lifecycle service. P12 supplies its catalog, stores, Secret manager,
-   * provider HTTP adapter, and public origins; omission leaves these routes unregistered.
-   */
-  oimConnections?: OimConnectionService;
-  integrationOperations?: IntegrationOperationsService;
-  /** Verified OIM packages and current Connection status for the shared Integration catalog. */
-  oimCatalog?: OimIntegrationCatalogRoutes;
-  /** Public management routes for one fully composed OIM release control plane. */
-  oimReleases?: {
-    readonly controlPlane: OimReleaseControlPlane;
-    readonly businessId: string;
-  };
+  mcpIntegrations?: McpIntegrationRouteDeps;
+  mcpAccounts?: Pick<ReturnType<typeof composeMcpAccounts>, "register">;
+  mcpKnowledge?: McpKnowledgeFeature;
+  mcpKnowledgeReader?: McpKnowledgeRunReaderResolver;
+  nativeChannels?: (log: FastifyBaseLogger) => ReturnType<typeof composeNativeChannels>["routes"];
   hookExecutor?: HookExecutor;
   resourceRepoFactory?: ResourceRepoFactory;
   counterStore?: CounterStore;
@@ -244,7 +234,6 @@ export interface AppOptions {
    * Composed in `index.ts`, where the effect ledger and secrets service live; absent in tests that
    * never exercise integration Tools.
    */
-  declarativeTools?: { sync: () => number; countFor: (slug: string) => number };
   guardrailsService?: GuardrailsService;
   surfaceArtifactStore?: SurfaceArtifactStore;
   surfaceActionStore?: SurfaceActionStore;
@@ -269,7 +258,6 @@ export interface AppOptions {
   channels?(log: FastifyBaseLogger): ChannelInternalRouteDeps;
   slackHome?(log: FastifyBaseLogger): SlackHomeRouteDeps;
   slackEvents?(log: FastifyBaseLogger): SlackEventRouteDeps;
-  ingress?: IngressRoutesDeps;
   hookIngress?: HookIngressDeps;
   systemRoutes?: SystemRoutesDeps;
   productTelemetry?: ProductTelemetryReporter;
@@ -298,9 +286,7 @@ export interface AppOptions {
    * principals only; PR 4 moves the implementations into the Worker and this surface goes away.
    */
   internalTurns?: InternalTurnRouteDeps;
-  internalOimConnections?: InternalOimConnectionRouteDeps;
-  internalOimWorker?: InternalOimWorkerRouteDeps;
-  internalRoutineOim?: Pick<InternalRoutineOimToolHost, "prepare" | "dispatch">;
+  internalRoutineMcp?: Pick<InternalRoutineMcpToolHost, "prepare" | "reauthorize" | "dispatch">;
   /**
    * Datastore handle backing `/readyz`. Absent (tests, partial assemblies) means readiness reports
    * ok on process liveness alone.

@@ -1,0 +1,26 @@
+{
+  "id": "l3-native-routine-lost-inbox-lease-rolls-back",
+  "tier": "l3",
+  "agent": "support",
+  "input": [
+    {
+      "role": "user",
+      "content": "Do not leave a Run or request Artifact when the accepted GitHub event loses its inbox lease during Routine admission."
+    }
+  ],
+  "nativeRoutine": {
+    "destination": "eval/native#42",
+    "accountId": "approved-native-account",
+    "fault": "lease_lost"
+  },
+  "script": [{ "kind": "text", "text": "The lost inbox lease must roll back admission." }],
+  "expect": [
+    { "kind": "native_admission_equals", "path": "runCount", "value": 0 },
+    { "kind": "native_admission_equals", "path": "artifactCount", "value": 0 },
+    { "kind": "native_admission_equals", "path": "invocationCount", "value": 0 },
+    { "kind": "native_admission_equals", "path": "stateCount", "value": 0 },
+    { "kind": "native_admission_equals", "path": "inboxRunId", "value": null },
+    { "kind": "native_admission_equals", "path": "accountId", "value": "approved-native-account" },
+    { "kind": "native_admission_equals", "path": "error", "value": "native_delivery_lease_lost" }
+  ]
+}

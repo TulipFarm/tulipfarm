@@ -1,5 +1,5 @@
 import { KillSwitchDeniedError } from "@tulipfarm/observability";
-import type { ToolContractDefinition } from "@tulipfarm/schema";
+import type { McpExecutionBinding, ToolContractDefinition } from "@tulipfarm/schema";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ToolCatalog } from "../catalog";
 import {
@@ -46,7 +46,7 @@ const definition: ToolContractDefinition = {
     idempotency: { strategy: "provider" },
     retry: { maxAttempts: 3, safeToRetry: true },
     dryRun: false,
-    adapter: { kind: "integration", ref: "github" },
+    adapter: { kind: "native", ref: "github" },
   },
 };
 
@@ -89,7 +89,7 @@ describe("EffectDispatcher", () => {
 
   it("dispatches only after the effect and attempt are durable", async () => {
     const adapter: ToolAdapter = {
-      kind: "integration",
+      kind: "native",
       dispatch: vi.fn(async (request) => {
         expect(await store.get(BUSINESS_ID, EFFECT_ID)).toMatchObject({ state: "dispatched" });
         expect(await store.listAttempts(BUSINESS_ID, EFFECT_ID)).toHaveLength(1);
@@ -111,7 +111,7 @@ describe("EffectDispatcher", () => {
   it("retries a classified pre-dispatch failure with the same stable key and backoff", async () => {
     const keys: string[] = [];
     const adapter: ToolAdapter = {
-      kind: "integration",
+      kind: "native",
       dispatch: vi.fn(async (request) => {
         keys.push(request.idempotencyKey);
         if (keys.length === 1) {
@@ -131,7 +131,7 @@ describe("EffectDispatcher", () => {
 
   it("parks a provider Retry-After instead of sleeping or replaying in-process", async () => {
     const adapter: ToolAdapter = {
-      kind: "integration",
+      kind: "native",
       dispatch: vi.fn(async () => {
         throw new AdapterDispatchError(
           "before_dispatch",
@@ -170,7 +170,7 @@ describe("EffectDispatcher", () => {
 
   it("keeps a restarted duplicate parked until its durable retry wait is ready", async () => {
     const adapter: ToolAdapter = {
-      kind: "integration",
+      kind: "native",
       dispatch: vi
         .fn()
         .mockRejectedValueOnce(
@@ -220,7 +220,7 @@ describe("EffectDispatcher", () => {
 
   it("recovers a persisted retry wait when the process crashes before attempt completion", async () => {
     const adapter: ToolAdapter = {
-      kind: "integration",
+      kind: "native",
       dispatch: vi.fn(async () => {
         throw new AdapterDispatchError(
           "before_dispatch",
@@ -265,7 +265,7 @@ describe("EffectDispatcher", () => {
   it("does not reconcile a live dispatch but fences a stale orphan", async () => {
     await store.beginAttempt(BUSINESS_ID, EFFECT_ID, "2026-07-25T00:00:01.000Z");
     const adapter: ToolAdapter = {
-      kind: "integration",
+      kind: "native",
       dispatch: vi.fn(async () => ({ providerId: "must-not-run" })),
     };
 
@@ -295,7 +295,7 @@ describe("EffectDispatcher", () => {
 
   it("parks computed backoff when a durable retry host is available", async () => {
     const adapter: ToolAdapter = {
-      kind: "integration",
+      kind: "native",
       dispatch: vi.fn(async () => {
         throw new AdapterDispatchError("before_dispatch", "provider_unavailable", true);
       }),
@@ -323,7 +323,7 @@ describe("EffectDispatcher", () => {
       spec: { ...definition.spec, mutating: false },
     };
     const adapter: ToolAdapter = {
-      kind: "integration",
+      kind: "native",
       dispatch: vi.fn(async () => {
         throw new AdapterDispatchError(
           "before_dispatch",
@@ -349,7 +349,7 @@ describe("EffectDispatcher", () => {
     vi.useFakeTimers();
     try {
       const adapter: ToolAdapter = {
-        kind: "integration",
+        kind: "native",
         dispatch: vi
           .fn()
           .mockRejectedValueOnce(
@@ -374,7 +374,7 @@ describe("EffectDispatcher", () => {
     vi.useFakeTimers();
     try {
       const adapter: ToolAdapter = {
-        kind: "integration",
+        kind: "native",
         dispatch: vi.fn(async () => {
           throw new AdapterDispatchError("before_dispatch", "transport_unavailable", true);
         }),
@@ -398,7 +398,7 @@ describe("EffectDispatcher", () => {
 
   it("marks an uncertain mutation ambiguous and never blindly retries", async () => {
     const adapter: ToolAdapter = {
-      kind: "integration",
+      kind: "native",
       dispatch: vi.fn(async () => {
         throw new AdapterDispatchError("after_dispatch", "provider_timeout", true, "request-42");
       }),
@@ -418,7 +418,7 @@ describe("EffectDispatcher", () => {
     });
     let abortSignal: AbortSignal | undefined;
     const adapter: ToolAdapter = {
-      kind: "integration",
+      kind: "native",
       dispatch: (request) => {
         abortSignal = request.abortSignal;
         resolveStarted();
@@ -438,7 +438,7 @@ describe("EffectDispatcher", () => {
 
   it("preserves uncertainty when a mutation returns malformed success output", async () => {
     const adapter: ToolAdapter = {
-      kind: "integration",
+      kind: "native",
       dispatch: vi.fn(async () => ({ providerId: 42 })),
     };
 
@@ -456,7 +456,7 @@ describe("EffectDispatcher", () => {
 
   it("keeps malformed read output as a safe terminal failure", async () => {
     const adapter: ToolAdapter = {
-      kind: "integration",
+      kind: "native",
       dispatch: vi.fn(async () => ({ providerId: 42 })),
     };
     const readDefinition: ToolContractDefinition = {
@@ -472,7 +472,7 @@ describe("EffectDispatcher", () => {
 
   it("enforces a kill switch before creating an attempt or calling the adapter", async () => {
     const adapter: ToolAdapter = {
-      kind: "integration",
+      kind: "native",
       dispatch: vi.fn(async () => ({ providerId: "must-not-run" })),
     };
     const assertAllowed = vi.fn(async () => {
@@ -510,7 +510,7 @@ describe("EffectDispatcher", () => {
       store,
       catalog: ToolCatalog.load([definition]),
       adapters: new Map([
-        ["github", { kind: "integration" as const, dispatch: async () => ({ providerId: "ok" }) }],
+        ["github", { kind: "native" as const, dispatch: async () => ({ providerId: "ok" }) }],
       ]),
       mutationGuard: { assertAllowed },
       mutationIdentity: { integrationId: "github-app" },
@@ -523,12 +523,102 @@ describe("EffectDispatcher", () => {
     );
   });
 
+  it.each(["missing", "server", "revision"] as const)(
+    "refuses a %s MCP binding before recording an attempt",
+    async (mismatch) => {
+      const revision = "a".repeat(64);
+      const mcpStore = new MemoryEffectStore();
+      const binding: McpExecutionBinding = {
+        serverId: mismatch === "server" ? "other" : "github",
+        serverRevision: mismatch === "revision" ? "b".repeat(64) : revision,
+        accountId: "account-1",
+        accountRevision: "1",
+        subjectId: "user-1",
+        authorizationId: "approval-1",
+      };
+      await new EffectLedger(mcpStore).reserve({
+        ...reservation(),
+        intent: {
+          ...reservation().intent,
+          credentialRef: undefined,
+          toolVersion: revision,
+          ...(mismatch === "missing" ? {} : { mcp: binding }),
+        },
+      });
+      const dispatch = vi.fn(async () => ({ providerId: "ok" }));
+      const dispatcher = new EffectDispatcher({
+        store: mcpStore,
+        catalog: ToolCatalog.load([
+          {
+            ...definition,
+            spec: {
+              ...definition.spec,
+              toolVersion: revision,
+              adapter: { kind: "mcp", ref: "github" },
+            },
+          },
+        ]),
+        adapters: new Map([["github", { kind: "mcp", dispatch }]]),
+        mutationGuard: { assertAllowed: vi.fn(async () => {}) },
+      });
+      await expect(dispatcher.dispatch(BUSINESS_ID, EFFECT_ID)).rejects.toMatchObject({
+        code: "mcp_binding_mismatch",
+      });
+      expect(dispatch).not.toHaveBeenCalled();
+      expect(await mcpStore.listAttempts(BUSINESS_ID, EFFECT_ID)).toEqual([]);
+    }
+  );
+
+  it("binds the mutation kill switch to the MCP server even when a host supplies another identity", async () => {
+    const revision = "a".repeat(64);
+    const mcpStore = new MemoryEffectStore();
+    await new EffectLedger(mcpStore).reserve({
+      ...reservation(),
+      intent: {
+        ...reservation().intent,
+        credentialRef: undefined,
+        toolVersion: revision,
+        mcp: {
+          serverId: "github",
+          serverRevision: revision,
+          accountId: "account-1",
+          accountRevision: "1",
+          subjectId: "user-1",
+          authorizationId: "approval-1",
+        },
+      },
+    });
+    const assertAllowed = vi.fn(async () => {});
+    const dispatcher = new EffectDispatcher({
+      store: mcpStore,
+      catalog: ToolCatalog.load([
+        {
+          ...definition,
+          spec: {
+            ...definition.spec,
+            toolVersion: revision,
+            adapter: { kind: "mcp", ref: "github" },
+          },
+        },
+      ]),
+      adapters: new Map([
+        ["github", { kind: "mcp", dispatch: async () => ({ providerId: "ok" }) }],
+      ]),
+      mutationGuard: { assertAllowed },
+      mutationIdentity: { integrationId: "wrong-server" },
+    });
+    await dispatcher.dispatch(BUSINESS_ID, EFFECT_ID);
+    expect(assertAllowed).toHaveBeenCalledWith(
+      expect.objectContaining({ integrationId: "github" })
+    );
+  });
+
   it("names the switch reason so the denial is actionable", async () => {
     const guarded = new EffectDispatcher({
       store,
       catalog: ToolCatalog.load([definition]),
       adapters: new Map([
-        ["github", { kind: "integration" as const, dispatch: async () => ({ providerId: "no" }) }],
+        ["github", { kind: "native" as const, dispatch: async () => ({ providerId: "no" }) }],
       ]),
       mutationGuard: {
         assertAllowed: async () => {
@@ -545,14 +635,14 @@ describe("EffectDispatcher", () => {
   });
 
   it("refuses an adapter whose kind is not the one the contract declared", async () => {
-    // The contract declares `integration` and names ref `github`; a `sandbox` adapter registered
+    // The contract declares `native` and names ref `github`; a `sandbox` adapter registered
     // under that ref would otherwise be handed the contract's authority, because resolution is by
     // ref alone. Nothing is dispatched and no attempt is recorded: the call was never routable.
     const impostor: ToolAdapter = { kind: "sandbox", dispatch: vi.fn(async () => ({})) };
 
     await expect(dispatcher(impostor).dispatch(BUSINESS_ID, EFFECT_ID)).rejects.toMatchObject({
       code: "adapter_kind_mismatch",
-      detail: "integration!=sandbox",
+      detail: "native!=sandbox",
     });
     expect(impostor.dispatch).not.toHaveBeenCalled();
     expect(await store.listAttempts(BUSINESS_ID, EFFECT_ID)).toEqual([]);
@@ -564,7 +654,7 @@ describe("EffectDispatcher", () => {
     const guarded = new EffectDispatcher({
       store,
       catalog: ToolCatalog.load([definition]),
-      adapters: new Map([["github", { kind: "openapi" as const, dispatch: async () => ({}) }]]),
+      adapters: new Map([["github", { kind: "sandbox" as const, dispatch: async () => ({}) }]]),
       mutationGuard: { assertAllowed },
       now: () => "2026-07-25T00:00:01.000Z",
     });

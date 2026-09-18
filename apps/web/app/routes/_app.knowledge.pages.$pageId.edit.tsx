@@ -1,6 +1,7 @@
 import {
   type ClientLoaderFunctionArgs,
   type MetaFunction,
+  redirect,
   useLoaderData,
   useNavigate,
   useRouteError,
@@ -21,6 +22,7 @@ export async function clientLoader({ params }: ClientLoaderFunctionArgs) {
   if (!pageId) throw new ApiError(404, "missing page id");
   const doc = await getPage(pageId).catch(() => null);
   if (!doc?.active || !doc.spaceId || !doc.path) throw new ApiError(404, "page not found");
+  if (doc.source === "mcp") throw redirect(pageHref(doc.id, doc.path));
   const space = await getSpace(doc.spaceId);
   return { space, doc, path: doc.path };
 }

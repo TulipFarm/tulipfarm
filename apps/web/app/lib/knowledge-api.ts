@@ -6,7 +6,7 @@
 import { apiDelete, apiGet, apiWrite } from "./api";
 
 export type IndexingStatus = "indexed" | "lexical-only" | "pending";
-export type KnowledgeSource = "authored" | "resource" | "conversation";
+export type KnowledgeSource = "authored" | "resource" | "conversation" | "mcp";
 
 export type KnowledgePage = {
   visibility?: "business" | "own" | "inherited";
@@ -244,6 +244,7 @@ export type Backlink = {
 
 export type SpacePageRef = {
   visibility?: "business" | "own" | "inherited";
+  source?: KnowledgeSource;
   pageId: string;
   spaceId: string;
   spaceName: string;

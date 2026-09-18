@@ -16,19 +16,7 @@ import {
 } from "@tulipfarm/authz";
 import { DEPLOYMENT_BUSINESS_ID } from "@tulipfarm/constants";
 import { FileService, PgFileRepo } from "@tulipfarm/files";
-import {
-  ConnectionResolver,
-  FetchEgressHttp,
-  GuardedEgressHttp,
-  IntegrationDraftStore,
-  inspectOimReleasePackages,
-  OimIngressTeardownService,
-  oimManifestMajor,
-  PublicOriginsService,
-  resolveOimPackage,
-  splitGitSourceRef,
-  withGitSourceClone,
-} from "@tulipfarm/integrations";
+import { PublicOriginsService } from "@tulipfarm/integrations";
 import {
   buildDefaultRegistry,
   CONNECTOR_SYNC_QUEUE,
@@ -57,7 +45,6 @@ import { EmbeddingService, LlmService } from "@tulipfarm/llm";
 import { MutationKillSwitchGuard, productTelemetryPolicy } from "@tulipfarm/observability";
 import {
   ArtifactService,
-  DurableEffectRetryWaitHost,
   DurableInvocationGateway,
   DurableWaitManager,
   PgDurableInvocationStore,
@@ -66,7 +53,7 @@ import {
   RunResumeGateway,
   TypedOutputValidator,
 } from "@tulipfarm/run-kernel";
-import { canonicalHash, type OimManifest, RUN_ARTIFACT_SCHEMAS } from "@tulipfarm/schema";
+import { RUN_ARTIFACT_SCHEMAS } from "@tulipfarm/schema";
 import {
   loadEncryptionKeys,
   loadOrProvisionActiveDek,
@@ -75,10 +62,8 @@ import {
   SecretsService,
 } from "@tulipfarm/secrets";
 import { SkillBashRunner, SkillCommandRunner } from "@tulipfarm/skill-sandbox";
-import type { AuthOAuth2Step } from "@tulipfarm/soul";
 import {
   ActiveRoutineCatalog,
-  bundledIntegrationsDir,
   type CommitActor,
   type CredentialProvider,
   compileExecutionBundle,
@@ -92,10 +77,8 @@ import {
   loadIntegrationRegistry,
   PgBundleStore,
   resolveAgent,
-  resolveAuthSteps,
   resolveSoulPath,
   runSoulMigrations,
-  SoulGitStore,
   SoulLoader,
   SoulPublicationCoordinator,
   SoulPublisher,
@@ -104,27 +87,18 @@ import {
 import {
   ArtifactStore,
   BudgetStore,
-  ChannelMentionedThreadStore,
   ChannelRunDeliveryStore,
   ChildLinkAncestryStore,
   ChildLinkStore,
-  ConnectionAuthStepStore,
-  ConnectionExternalIdentityStore,
-  ConnectionStore,
-  ConnectionVerificationEvidenceStore,
   ConversationContextSummaryStore,
   createBlobPort,
   EventStore,
   ensureBundledBucket,
   ensureEmbeddingIndexes,
-  IngressTeardownStore,
   IntegrationStore,
   KillSwitchRepo,
-  OimIngressEmissionStore,
-  OimKnowledgeCheckpointStore,
-  OimKnowledgePublicationStore,
-  OimReleaseTrustStore,
-  type PersistedConnection,
+  McpAccountStore,
+  NativeChannelInboxStore,
   PgApprovalGrantRepo,
   PgAssetOwnershipRepo,
   PgGroupRepo,
@@ -134,9 +108,6 @@ import {
   PgSoulPublicationStore,
   PgTeamNotificationRepo,
   PgTeamRepo,
-  PollingIngressStore,
-  ProviderFileUploadStore,
-  ProviderObjectOwnershipStore,
   PublicOriginStore,
   RunEventStore,
   RunStore,
@@ -144,7 +115,6 @@ import {
   SoulRepositoryStore,
   TaskRepo,
   WaitStore,
-  WebhookRegistrationStore,
   writeBucketSecrets,
 } from "@tulipfarm/storage";
 import { PgEffectStore } from "@tulipfarm/tool-broker";
@@ -223,47 +193,23 @@ import { PgExternalIdentityRepo, PgExternalIdentityUnlinker } from "./identity/e
 import { reconcileSoulRoles, registerSoulRoleReconcile } from "./identity/role-reconcile";
 import { syncDeploymentRoles } from "./identity/roles";
 import { IngressIdentityResolver } from "./ingress/identity";
-import { IntegrationConversationsRepo, IntegrationEventsRepo } from "./ingress/repo";
-import { CatalogBoundOimOperationConnectionResolver } from "./integrations/catalog-bound-oim-operation-resolver";
-import { resolveSecretRef } from "./integrations/connection-env";
-import {
-  refreshExpiringOimConnections,
-  registerOimConnectionRefreshSchedule,
-} from "./integrations/connections/refresh-schedule";
-import { OimConnectionService } from "./integrations/connections/service";
-import { createBundledOimBundleContributionProvider } from "./integrations/oim-bundle-contributions";
-import { loadBundledOimCatalog, type OimPackageCatalogReader } from "./integrations/oim-catalog";
-import { oimCatalogStatus } from "./integrations/oim-catalog-status";
-import { createOimAvailableConnectionReader } from "./integrations/oim-connection-reader";
-import { createOimPaginationRuntime } from "./integrations/oim-continuation-host";
-import { createOimCredentialVault } from "./integrations/oim-credential-vault";
-import { createOimFileHost } from "./integrations/oim-file-host";
-import { refreshOimJwtAssertionStep } from "./integrations/oim-jwt";
-import { refreshOimOAuthStep } from "./integrations/oim-oauth";
-import { createOimVerificationHost } from "./integrations/oim-verification-host";
-import { IntegrationOperationsService } from "./integrations/operations/service";
+import { IntegrationConversationsRepo } from "./ingress/repo";
+import { composeMcpAccountRuntime, createMcpIntegrationFeature } from "./integrations/mcp-compose";
+import { McpHostContextResolver } from "./integrations/mcp-context";
+import { composeNativeChannels } from "./integrations/native/compose";
+import { NativeChannelError } from "./integrations/native/credentials";
 import { PgPrincipalProviderTokenRepo } from "./integrations/principal-tokens";
-import {
-  liveOimPackageCatalog,
-  synchronizeOimReleaseControlPlane,
-  synchronizeReviewedCommunityInstaller,
-} from "./integrations/releases/composition";
-import { createOimReleaseFeature, type OimReleaseFeature } from "./integrations/releases/feature";
 import { InternalChildRoutineHost } from "./internal/child-routine-host";
-import { IngressDeliveryHost } from "./internal/delivery-host";
 import { InternalEmitHost } from "./internal/emit-host";
 import { ModelSelectorGate, modelGateModeFromEnv } from "./internal/model-authz";
-import { BundleRoutineOimRegistrationReader } from "./internal/oim-registration-reader";
-import { createOimWorkerCleanupServices } from "./internal/oim-worker-cleanup";
-import { InternalOimWorkerHost } from "./internal/oim-worker-host";
 import { InternalRoutineApprovalHost } from "./internal/routine-approval-host";
 import {
-  InternalRoutineOimToolHost,
-  LiveRoutineOimAuthorizer,
-  LiveRoutineOimFileAuthorizer,
-  LiveRoutineOimRunAuthority,
-  VerifiedRoutineOimBundleReader,
-} from "./internal/routine-oim-tool-host";
+  LiveRoutineMcpAuthorizer,
+  LiveRoutineMcpRunAuthority,
+  VerifiedRoutineMcpBundleReader,
+} from "./internal/routine-mcp-authority";
+import { PgRoutineMcpDispatchFence } from "./internal/routine-mcp-dispatch-fence";
+import { InternalRoutineMcpToolHost } from "./internal/routine-mcp-tool-host";
 import {
   SlackCommandResponseService,
   SlackCommandResponseStore,
@@ -280,11 +226,12 @@ import { PageReadGate } from "./knowledge/page-access";
 import { ReaderDirectory } from "./knowledge/reader-directory";
 import { SubjectDirectory } from "./knowledge/subject-directory";
 import { PgKnowledgeIndexStore } from "./knowledge-sources/index-store";
+import { CompositeLiveSourceAuthorization } from "./knowledge-sources/live-authorization";
+import { composeMcpKnowledge, type McpKnowledgeFeature } from "./knowledge-sources/mcp/compose";
 import {
-  CompositeLiveSourceAuthorization,
-  SlackTenantLiveAuthorization,
-} from "./knowledge-sources/live-authorization";
-import { PgOimKnowledgeRegistrationReader } from "./knowledge-sources/oim-registration-reader";
+  mcpKnowledgeLiveAuthorization,
+  wrapMcpKnowledgePageReadGate,
+} from "./knowledge-sources/mcp/page-gate";
 import { retireSlackKnowledgeSyncSchedule } from "./knowledge-sources/slack-sync-schedule";
 import { PgKnowledgeSourceStore } from "./knowledge-sources/source-store";
 import { registerLlmReload } from "./llm-reload";
@@ -319,7 +266,6 @@ import { RunEventNotifyListener } from "./runs/notify-listener";
 import { initializeApiDeployment } from "./runtime/deployment";
 import {
   childRoutineTrigger,
-  integrationInvoker,
   manualRoutineTrigger,
   scheduledRoutineTrigger,
   triggerRunStarter,
@@ -385,23 +331,8 @@ import { scheduleProductTelemetry } from "./system/telemetry/schedule";
 import { TeamAssetCatalogProvider } from "./team-assets/catalog-provider";
 import { TeamAssetService } from "./team-assets/service";
 import { TeamAssetLifecycle } from "./team-assets/team-lifecycle";
-import { DeclarativeToolSync } from "./tools/declarative/sync";
-import { buildGitHubTooling } from "./tools/github/compose";
-import { buildGitHubTools } from "./tools/github/tools";
-import { githubDisabledSkillNames } from "./tools/github/visibility";
-import { buildGoogleTooling } from "./tools/google/compose";
-import { buildGoogleTools } from "./tools/google/tools";
 import { composeNetworkTools } from "./tools/network/compose";
 import { buildToolRegistry } from "./tools/setup";
-import { buildSlackTooling } from "./tools/slack/compose";
-import {
-  GovernedSlackFileUploadSource,
-  SlackExternalUploadHttp,
-  SlackIntegrationIdentityResolver,
-  SlackProviderFileUploads,
-  SlackProviderObjectOwnership,
-} from "./tools/slack/ports";
-import { buildSlackTools } from "./tools/slack/tools";
 import { EventTriggerGateway } from "./triggers/event-dispatch";
 
 config({ path: ".env.local" });
@@ -433,11 +364,6 @@ const port = Number.parseInt(process.env.PORT || "4010", 10);
 const SOUL_SYNC_COMMIT_ACTOR: CommitActor = {
   principalId: "service:tulipfarm-soul-sync",
   name: "TulipFarm Soul Sync",
-  email: "",
-};
-const OIM_RELEASE_MAINTENANCE_ACTOR: CommitActor = {
-  principalId: "service:tulipfarm-oim-release-maintenance",
-  name: "TulipFarm OIM Release Maintenance",
   email: "",
 };
 const SOUL_BUNDLE_KEY_PROVISIONING_LOCK = "tulipfarm:soul-bundle-key-provisioning";
@@ -590,7 +516,6 @@ async function boot() {
       },
       activeCommitSha: activeSoulCommitSha,
       activeBundleDigest: (businessId) => soulPublications.activeDigest(businessId),
-      contributions: createBundledOimBundleContributionProvider(bundledIntegrationsDir()),
     });
     gitSync = new GitSyncService(soulPath, gitRemoteUrl, gitCredentialProvider, console, {
       committedTreePublisher: soulPublisher,
@@ -623,8 +548,7 @@ async function boot() {
 
     const soulLoader = new SoulLoader(soulPath, console, surfaceRendererRegistry);
     await soulLoader.load();
-    let refreshOimAfterSoulReload = async (): Promise<void> => {};
-    let syncDeclarativeToolsAfterSoulReload = (): void => {};
+    let refreshMcpAfterSoulReload = async (): Promise<void> => {};
     // The single ADR-007 write gateway. Every authoring surface writes through this instance, so
     // path building, validation, atomic commit, push, catalog reload and bundle publication happen
     // in exactly one place instead of being re-implemented at each call site.
@@ -635,8 +559,7 @@ async function boot() {
       gitSync,
       reload: async () => {
         await soulLoader.load();
-        await refreshOimAfterSoulReload();
-        syncDeclarativeToolsAfterSoulReload();
+        await refreshMcpAfterSoulReload();
       },
       publisher: soulPublisher,
       treeReader: soulTreeReader,
@@ -689,13 +612,6 @@ async function boot() {
       );
     }
     const bundledIntegrations = await loadBundledIntegrations(console);
-    const bundledOimCatalog = await loadBundledOimCatalog(bundledIntegrationsDir(), {
-      requireVerification: true,
-    });
-    let oimReleaseFeature: OimReleaseFeature | undefined;
-    const oimPackageCatalog: OimPackageCatalogReader = () =>
-      oimReleaseFeature?.packages() ?? bundledOimCatalog;
-    const liveOimCatalog = liveOimPackageCatalog(oimPackageCatalog);
 
     // Per-type resource tables can't be created lazily (no `db.collection(type)`):
     await reconcileResourceTables(pool, soulLoader, console);
@@ -997,6 +913,7 @@ async function boot() {
     const knowledgeRetrieval = new PageRetrievalService(pool);
 
     const knowledgePageRepo = new PgKnowledgePageRepo(pool);
+    let mcpKnowledge: McpKnowledgeFeature | undefined;
     const knowledgeSpaceRepo = new PgKnowledgeSpaceRepo(pool);
     const knowledgeService = new KnowledgeService({
       pages: knowledgePageRepo,
@@ -1020,7 +937,12 @@ async function boot() {
         index: knowledgeIndexStore,
         ownership: knowledgeOwnership,
         live: new CompositeLiveSourceAuthorization([
-          new SlackTenantLiveAuthorization(integrationStore, secretsService, externalIdentityRepo),
+          {
+            async check(input) {
+              if (!mcpKnowledge) throw new Error("MCP Knowledge has not been composed");
+              return mcpKnowledgeLiveAuthorization(mcpKnowledge).check(input);
+            },
+          },
         ]),
         now: () => new Date(),
       },
@@ -1107,217 +1029,13 @@ async function boot() {
         },
       }),
     });
-    const oimConnectionsStore = new ConnectionStore(runTransactions);
-    const oimAuthSteps = new ConnectionAuthStepStore(runTransactions);
-    const oimIngressTeardowns = new IngressTeardownStore(runTransactions);
-    const oimPolling = new PollingIngressStore(runTransactions);
-    const oimWebhooks = new WebhookRegistrationStore(runTransactions);
-    const oimConnectionIdentities = new ConnectionExternalIdentityStore(runTransactions);
-    const oimCredentials = createOimCredentialVault(secretsService);
-    const oimPaginationRuntime = createOimPaginationRuntime({ dek: activeDek });
-    const oimHttp = new GuardedEgressHttp(new FetchEgressHttp());
-    const oimVerificationEvidence = new ConnectionVerificationEvidenceStore(runTransactions);
-    const oimVerification = createOimVerificationHost({
-      authSteps: oimAuthSteps,
-      credentials: oimCredentials,
-      http: oimHttp,
-      paginationRuntime: oimPaginationRuntime,
-    });
-    const oimAuthRequests = new PgIntegrationAuthRequestRepo(pool);
-    const integrationDrafts = new IntegrationDraftStore();
-    const installedOimReleases = new OimReleaseTrustStore(runTransactions);
-    oimReleaseFeature = createOimReleaseFeature({
-      businessId: DEPLOYMENT_BUSINESS_ID,
-      database: pool,
-      bundled: bundledOimCatalog,
-      soulIntegrations: () => soulLoader.integrations,
-      soulPackageWriter: {
-        soulWriter,
-        soulStore: new SoulGitStore(soulPath, soulCommitSigner, console),
-        publisher: soulPublisher,
-        actor: OIM_RELEASE_MAINTENANCE_ACTOR,
-      },
-      trustedCatalog: { logger: console },
-      uninstall: {
-        connections: oimConnectionsStore,
-        credentials: oimCredentials,
-        ingressTeardowns: oimIngressTeardowns,
-        polling: oimPolling,
-        webhooks: oimWebhooks,
-        knowledgePublications: new OimKnowledgePublicationStore(runTransactions),
-        knowledgeCheckpoints: new OimKnowledgeCheckpointStore(runTransactions),
-      },
-      reviewedDrafts: integrationDrafts,
-      http: oimHttp,
-      pinnedSources: {
-        inspect: (source, ref, actorId) => {
-          const { base } = splitGitSourceRef(source);
-          return withGitSourceClone(
-            `${base}#${ref}`,
-            { prefix: "oim-release-pinned-", actorId },
-            async ({ dir, ref: resolvedRef }) => ({
-              ref: resolvedRef,
-              candidates: await inspectOimReleasePackages(dir),
-            })
-          );
-        },
-      },
-      maintenanceActor: OIM_RELEASE_MAINTENANCE_ACTOR,
-    });
-    const activeOimReleases = oimReleaseFeature;
-    await activeOimReleases.refresh.boot();
-    refreshOimAfterSoulReload = activeOimReleases.refresh.soulReloaded;
-    const publicOimReleaseControlPlane = synchronizeOimReleaseControlPlane(
-      activeOimReleases.controlPlane,
-      () => syncDeclarativeToolsAfterSoulReload()
-    );
-    const reviewedCommunityInstaller = synchronizeReviewedCommunityInstaller(
-      activeOimReleases.reviewedCommunityInstaller,
-      () => syncDeclarativeToolsAfterSoulReload()
-    );
-    const oimWorkerCleanup = createOimWorkerCleanupServices({
-      database: pool,
-      connections: oimConnectionsStore,
-      authSteps: oimAuthSteps,
-      verifiedIntegrations: () => activeOimReleases.integrations().entries(),
-    });
-    const oimConnections = new OimConnectionService({
-      businessId: DEPLOYMENT_BUSINESS_ID,
-      catalog: liveOimCatalog,
-      registrationPackages: oimWorkerCleanup.registrationPackages,
-      connections: oimConnectionsStore,
-      authSteps: oimAuthSteps,
-      credentials: oimCredentials,
-      authRequests: oimAuthRequests,
-      endpoints: await publicOrigins.authEndpoints(),
-      ingress: {
-        isDisabled: (businessId, connectionId) =>
-          oimIngressTeardowns.isDisabled(businessId, connectionId),
-        requestWebhookRegistration: (key, target, now) =>
-          oimWebhooks.requestRegistration(key, target, now),
-        teardown: (key, now) =>
-          new OimIngressTeardownService(oimIngressTeardowns, oimPolling, {
-            remove: (registrationKey) => oimWebhooks.requestRemoval(registrationKey),
-          }).remove(key, now),
-      },
-      refreshOAuth: (request) => refreshOimOAuthStep(request, {}),
-      refreshJwtAssertion: (request) => refreshOimJwtAssertionStep(request, { http: oimHttp }),
-      verification: {
-        verify: (input) => oimVerification.verify(input),
-        verifyCandidate: (input) => oimVerification.verifyCandidate(input),
-        publish: (evidence, identity) =>
-          oimConnectionsStore.publishVerification(
-            evidence,
-            identity === undefined
-              ? undefined
-              : {
-                  businessId: evidence.binding.businessId,
-                  connectionId: evidence.binding.connectionId,
-                  integrationId: evidence.binding.integrationId,
-                  integrationMajorVersion: evidence.binding.integrationMajorVersion,
-                  ...identity,
-                  proofKind: "auth",
-                }
-          ),
-      },
-      verifyAuthorization: async (request) =>
-        request.manifest.auth?.verification === undefined
-          ? null
-          : {
-              credentialValues: request.candidateCredentialValues,
-              configuration: request.candidateConfiguration,
-              expiresAt: request.candidateExpiresAt,
-            },
-    });
-    const refreshDueOimConnections = () =>
-      refreshExpiringOimConnections({
-        businessId: DEPLOYMENT_BUSINESS_ID,
-        connections: oimConnectionsStore,
-        refresh: async (connection) => {
-          const catalog = oimPackageCatalog();
-          const entry = catalog.find((candidate) => {
-            const pkg = resolveOimPackage(catalog, candidate.key);
-            return (
-              pkg?.identity.id === connection.integration.id &&
-              pkg.identity.majorVersion === connection.integration.majorVersion
-            );
-          });
-          if (entry === undefined) {
-            throw new Error(
-              `no OIM package for ${connection.integration.id}@${connection.integration.majorVersion}`
-            );
-          }
-          await oimConnections.refresh(entry.key, connection.id, {
-            principalId:
-              connection.owner.scope === "personal"
-                ? connection.owner.principalId
-                : "oim-refresh-scheduler",
-            mayManageShared: true,
-          });
-        },
-      });
-    const availableOimConnections = createOimAvailableConnectionReader(
-      oimConnectionsStore,
-      oimIngressTeardowns,
-      oimPackageCatalog,
-      oimVerificationEvidence
-    );
-    const oimConnectionAccess = {
-      async canUse(
-        principal: { readonly kind: string; readonly id: string },
-        connection: PersistedConnection
-      ) {
-        if (connection.owner.scope === "organization") return true;
-        if (connection.owner.scope === "personal") {
-          return principal.kind === "user" && principal.id === connection.owner.principalId;
-        }
-        return (
-          await teamDomain.resolveMembers(connection.businessId, connection.owner.teamId)
-        ).some(
-          (member) => member.principalKind === principal.kind && member.principalId === principal.id
-        );
-      },
-    };
-    const oimOperationConnections = new CatalogBoundOimOperationConnectionResolver(
-      new ConnectionResolver(availableOimConnections, oimConnectionAccess),
-      oimAuthSteps,
-      oimPackageCatalog
-    );
-    const oimWorkerOperationConnections = new CatalogBoundOimOperationConnectionResolver(
-      new ConnectionResolver(availableOimConnections, {
-        async canUse(principal) {
-          return principal.kind === "service" && principal.id === "integration-worker";
-        },
-      }),
-      oimAuthSteps,
-      oimPackageCatalog
-    );
-    const oimFileHost = createOimFileHost({
-      files: fileService,
-      runAuthority: {
-        async authority(businessId, runId) {
-          const run = await runStore.find(businessId, runId);
-          if (
-            run === null ||
-            run.status === "succeeded" ||
-            run.status === "failed" ||
-            run.status === "cancelled"
-          ) {
-            throw new Error("run_not_active");
-          }
-          return { businessId, runId, subject: run.identity.initiator };
-        },
-      },
-      authorityLayers: authorityLayerResolver,
-    });
+    const integrationAuthRequests = new PgIntegrationAuthRequestRepo(pool);
     // registered here rather than in the Worker because its one-use resume token must never leave
     const runResume = new RunResumeGateway(runStore);
     const runWaits = new DurableWaitManager(new WaitStore(runTransactions), runResume);
-    const effectRetryWaits = new DurableEffectRetryWaitHost(runWaits);
     const toolApprovals = new ToolApprovalService({ transactions: runTransactions });
     const routineApprovals = new RoutineApprovalService({ transactions: runTransactions });
     const integrationThreads = new IntegrationConversationsRepo(pool);
-    const integrationEvents = new IntegrationEventsRepo(pool);
     const channelRunDeliveries = new ChannelRunDeliveryStore(runTransactions, () =>
       new Date().toISOString()
     );
@@ -1326,75 +1044,80 @@ async function boot() {
       store: new SlackCommandResponseStore(pool),
       secrets: secretsService,
     });
-    const channelMentionedThreads = new ChannelMentionedThreadStore(runTransactions, () =>
-      new Date().toISOString()
-    );
     const channelIntegrations = new IntegrationStore(runTransactions);
     // The bind link's HMAC key comes from the secret store, provisioned on first use — never a
     const channelBind = {
       repo: externalIdentityRepo,
       signingKey: channelBindKeyResolver(secretsService),
     };
-
-    // GitHub chat tool family: registered unconditionally (each tool's own effect dispatch fails
-    const githubTooling = buildGitHubTooling({
+    const mcpContexts: McpHostContextResolver = new McpHostContextResolver({
       businessId: DEPLOYMENT_BUSINESS_ID,
-      integrations: integrationStore,
-      secrets: async () => secretsService,
-    });
-    const githubEffects = new PgEffectStore(runTransactions);
-    const githubTools = buildGitHubTools(DEPLOYMENT_BUSINESS_ID, {
-      ...githubTooling,
-      effects: githubEffects,
-      mutationGuard,
-    });
-
-    const slackTooling = buildSlackTooling({
-      secrets: async () => secretsService,
-      channelRunDelivery: channelRunDeliveries,
-      integrationIdentity: new SlackIntegrationIdentityResolver(integrationStore),
-      ownedObjects: new SlackProviderObjectOwnership(
-        new ProviderObjectOwnershipStore(runTransactions, () => new Date().toISOString())
-      ),
-      files: new GovernedSlackFileUploadSource(runStore, fileService),
-      externalUpload: new SlackExternalUploadHttp(),
-      fileUploads: new SlackProviderFileUploads(
-        new ProviderFileUploadStore(runTransactions, () => new Date().toISOString())
+      db: pool,
+      runs: runStore,
+      conversations: conversationRepo,
+      turns: conversationStore,
+      accounts: new McpAccountStore(pool, runTransactions),
+      accountAuthority: {
+        resolve: (context) => mcpRuntime.accounts.authority.resolve(context),
+        resolveForRefresh: (context) => mcpRuntime.accounts.authority.resolveForRefresh(context),
+      },
+      nativeRoutes: new NativeChannelInboxStore(runTransactions),
+      activeBundle: activeSoulBundle,
+      bundles: new VerifiedRoutineMcpBundleReader(
+        new PgBundleStore(runTransactions),
+        soulBundleVerifier
       ),
     });
-    const slackEffects = new PgEffectStore(runTransactions);
-    const slackTools = buildSlackTools(DEPLOYMENT_BUSINESS_ID, {
-      ...slackTooling,
-      effects: slackEffects,
-      threads: integrationThreads,
-      mentionedThreads: channelMentionedThreads,
-      mutationGuard,
-    });
-
-    // Google Workspace chat tool family: registered unconditionally (like Slack); each tool's own
-    // credential lease fails closed when no Google account is connected.
-    const googleTooling = buildGoogleTooling({
-      secrets: async () => secretsService,
-      // Supplies the OAuth step + connection env so the leased access token refreshes itself before
-      // expiry. Read live from the loaded Soul so a reconnect is picked up without an API restart.
-      connection: async () => {
-        const integration = soulLoader.integrations.get("google");
-        const env = integration?.connection?.env;
-        const manifest = integration?.manifest;
-        if (env === undefined || manifest === undefined) return undefined;
-        const step = resolveAuthSteps(manifest).find(
-          (candidate): candidate is AuthOAuth2Step => candidate.kind === "oauth2"
-        );
-        return step === undefined
-          ? undefined
-          : { step, env, enabled: integration?.connection?.enabled === true };
+    const mcpRuntime = await composeMcpAccountRuntime({
+      db: pool,
+      transactions: runTransactions,
+      businessId: DEPLOYMENT_BUSINESS_ID,
+      secrets: secretsService,
+      users: userRepo,
+      teams: teamRepo,
+      authorizationCheck: makeAuthorizationCheck(routeAuthorizer, gateOptions),
+      activeBundle: activeSoulBundle,
+      publicOrigins,
+      audit: auditService,
+      contexts: mcpContexts,
+      knowledgeContext: async (caller, scope, capability) => {
+        if (!mcpKnowledge) throw new Error("MCP Knowledge has not been composed");
+        return mcpKnowledge.context(caller, scope, capability);
       },
     });
-    const googleEffects = new PgEffectStore(runTransactions);
-    const googleTools = buildGoogleTools(DEPLOYMENT_BUSINESS_ID, {
-      ...googleTooling,
-      effects: googleEffects,
-      mutationGuard,
+    const mcpAccounts = mcpRuntime.accounts;
+    mcpKnowledge = composeMcpKnowledge({
+      db: pool,
+      transactions: runTransactions,
+      businessId: DEPLOYMENT_BUSINESS_ID,
+      accounts: mcpRuntime.knowledgeAccess,
+      embeddings: embeddingService,
+    });
+    const mcpFeature = await createMcpIntegrationFeature({
+      businessId: DEPLOYMENT_BUSINESS_ID,
+      soulWriter,
+      activeBundle: activeSoulBundle,
+      accounts: mcpRuntime.access,
+      callerForRequest: mcpContexts.callerForRequest,
+      accountConfiguration: mcpRuntime.accountConfiguration,
+      callerForRun: mcpContexts.callerForRun,
+      afterDefinitionChange: mcpRuntime.refresh,
+      audit: {
+        record: async (input) => {
+          await auditService.record({
+            actorId: input.caller.principal.id,
+            runId: input.caller.runId,
+            action: `integration.mcp.${input.capability.kind}`,
+            target: `integration:${input.serverId}`,
+            decision: input.outcome === "allowed" ? "allow" : "deny",
+            reasonCodes: input.code ? [input.code] : [],
+            safeMetadata: {
+              capability: input.capability.name,
+              accountId: input.accountId ?? null,
+            },
+          });
+        },
+      },
     });
 
     const delegationConversations = new PgConversationStore(
@@ -1442,7 +1165,10 @@ async function boot() {
       process.env.NODE_ENV === "production" || process.env.SANDBOX_RUNTIME_IMAGE === undefined
         ? {}
         : { runtimeImage: process.env.SANDBOX_RUNTIME_IMAGE };
-    const knowledgePageGate = new PageReadGate(pool, DEPLOYMENT_BUSINESS_ID, knowledgeOwnership);
+    const knowledgePageGate = wrapMcpKnowledgePageReadGate(
+      new PageReadGate(pool, DEPLOYMENT_BUSINESS_ID, knowledgeOwnership),
+      mcpKnowledge
+    );
     // Refusing a taken path is the one bit the gate cannot hide, so every refused write is recorded.
     const knowledgeDenialSink = makeKnowledgeDenialSink(auditService);
     const knowledgeAuthorLabeller = new AuthorLabeller(pool);
@@ -1461,14 +1187,6 @@ async function boot() {
       soulLoader,
       authorityLayers: authorityLayerResolver,
     });
-    // The GitHub Skill documents Tools that are excluded whenever the integration is uninstalled.
-    // Hiding it on the same live check keeps `skill_list`/`skill` from advertising a workflow
-    // whose every Tool call would be refused.
-    const hiddenSkillNames = () =>
-      githubDisabledSkillNames({
-        integrations: integrationStore,
-        businessId: DEPLOYMENT_BUSINESS_ID,
-      });
     const recordAuthorizer = new LiveRecordAuthorizer(soulLoader, authorityLayerResolver);
     const toolRegistry = buildToolRegistry({
       memoryDocuments,
@@ -1525,17 +1243,8 @@ async function boot() {
             }
           ),
       },
-      integrationAuthoring: {
-        businessId: DEPLOYMENT_BUSINESS_ID,
-        drafts: integrationDrafts,
-        integrations: activeOimReleases.integrations,
-        installedGenerations: installedOimReleases,
-        installer: reviewedCommunityInstaller,
-      },
-      skillTools: { ...skillTools, hiddenSkillNames, teamAssets },
-      github: githubTools,
-      slack: slackTools,
-      google: googleTools,
+      integrationAuthoring: mcpFeature.authoring,
+      skillTools: { ...skillTools, teamAssets },
       network: networkTools,
       tasks: { businessId: DEPLOYMENT_BUSINESS_ID, tasks: taskRepo },
       platform: {
@@ -1546,7 +1255,6 @@ async function boot() {
         soulWriter,
         bundledSkills,
         disabledBundledSkills,
-        hiddenSkillNames,
         triggerRoutine: manualRoutineTrigger(invocations),
         skillCommands: new SkillCommandRunner({
           artifacts: runArtifacts,
@@ -1577,47 +1285,10 @@ async function boot() {
       },
     });
 
-    const declarativeIntegrations = () => activeOimReleases.integrations().values();
-    const internalOimWorker = new InternalOimWorkerHost({
-      integrations: () => activeOimReleases.integrations().entries(),
-      releaseDispatch: activeOimReleases.dispatch,
-      connections: Object.assign(availableOimConnections, {
-        listPollingFallbacks: () => oimConnectionsStore.listPollingFallbacks(),
-      }),
-      connectionOperations: oimWorkerOperationConnections,
-      verificationEvidence: oimVerificationEvidence,
-      secrets: secretsService,
-      http: oimHttp,
-      paginationRuntime: oimPaginationRuntime,
-      payloadKey: activeDek.key,
-      ...(hookExecutor === undefined ? {} : { hookExecutor }),
-      knowledgeRegistrations: new PgOimKnowledgeRegistrationReader(pool),
-      externalIdentities: externalIdentityRepo,
-      cleanupAuthorization: oimWorkerCleanup.cleanupAuthorization,
-      cleanupConnectionOperations: oimWorkerCleanup.cleanupConnectionOperations,
-      cleanupPackages: oimWorkerCleanup.cleanupPackages,
-    });
-    const declarativeTools = new DeclarativeToolSync({
-      registry: toolRegistry,
-      integrations: declarativeIntegrations,
-      businessId: DEPLOYMENT_BUSINESS_ID,
-      effects: slackEffects,
-      secrets: async () => secretsService,
-      // Manifests are authored from chat, so the destination is untrusted right up to the socket.
-      http: oimHttp,
-      connections: oimOperationConnections,
-      files: oimFileHost.files,
-      fileReadAuthorization: oimFileHost.fileReadAuthorization,
-      paginationRuntime: oimPaginationRuntime,
-      authorizeFiles: oimFileHost.authorizeFiles,
-      mutationGuard,
-      parkRetry: effectRetryWaits.parkRetry,
-      retryWaitStatus: effectRetryWaits.status,
-      releaseDispatch: activeOimReleases.dispatch,
-      logger: () => app.log,
-    });
-    syncDeclarativeToolsAfterSoulReload = () => {
-      declarativeTools.sync();
+    const mcpTools = mcpFeature.bindTools(toolRegistry, recoveryEffects, mutationGuard);
+    refreshMcpAfterSoulReload = async () => {
+      await mcpRuntime.refresh();
+      await mcpFeature.refresh();
     };
 
     // with, so a worker credential is a key to a Run rather than a principal of its own.
@@ -1669,7 +1340,6 @@ async function boot() {
           bundledSkills,
           channelDeliveries: channelRunDeliveries,
           childLinks,
-          githubStatus: { integrations: integrationStore, businessId: DEPLOYMENT_BUSINESS_ID },
           // Authority layers L1/L2 for the model path, off the same live resolver the Tool gate
           // uses, so `platform.model` is decided by the one decision function rather than a copy.
           // Shadow until there is evidence over real traffic: no role grants `platform.model`
@@ -1707,11 +1377,8 @@ async function boot() {
           surfaceActionStore,
           guardrails: guardrailsService,
           authorityLayers: authorityLayerResolver,
-          preparation: declarativeTools,
-          integrations: integrationStore,
+          preparation: mcpTools,
           tokens: principalTokens,
-          identities: externalIdentityRepo,
-          githubInstallationToken: githubTooling.installationToken,
           transactions: runTransactions,
           runCancellation: runCancellationSourceFor(runStore),
           logger: { error: (message, error) => app.log.error({ err: error }, message) },
@@ -1729,35 +1396,6 @@ async function boot() {
         },
       }),
       terminalTurns,
-      deliveries: (log: FastifyBaseLogger) =>
-        new IngressDeliveryHost({
-          runs: runStore,
-          artifacts: runArtifacts,
-          store: conversationStore,
-          conversations: conversationRepo,
-          threads: integrationThreads,
-          transactionScope: (transaction) => ({
-            artifacts: artifactsOver(ambientTransactionPort(transaction)),
-            conversations: new PgConversationRepo(transaction),
-            threads: new IntegrationConversationsRepo(transaction),
-          }),
-          integrationEvents,
-          soulLoader,
-          bundled: bundledIntegrations,
-          identity: new IngressIdentityResolver({
-            users: userRepo,
-            log,
-            mappings: externalIdentityRepo,
-            bind: channelBind,
-          }),
-          toolRegistry,
-          domainEvents: domainEventEmitter,
-          eventTriggers,
-          // The link is redeemed inside an authenticated web session, so it must point at the
-          bindLinkUrl: (token) =>
-            `${publicOrigins.current().webOrigin}/link-channel?token=${encodeURIComponent(token)}`,
-          log,
-        }),
       // without restarting it.
       llmConfig: () => soulLoader.llmConfig,
       pricingOverrides: () => obsConfig.pricingOverrides,
@@ -1798,34 +1436,19 @@ async function boot() {
         dispatch: (event) => eventTriggers.dispatchInternalEvent(event),
       }),
     };
-    const routineOimBundleStore = new PgBundleStore(runTransactions);
-    const internalRoutineOim = new InternalRoutineOimToolHost({
+    const internalRoutineMcp = new InternalRoutineMcpToolHost({
       businessId: DEPLOYMENT_BUSINESS_ID,
-      releaseIntegration: (manifest: OimManifest) =>
-        [...activeOimReleases.integrations().values()].find(
-          (integration) =>
-            integration.oimManifest?.metadata.id === manifest.metadata.id &&
-            oimManifestMajor(integration.oimManifest) === oimManifestMajor(manifest) &&
-            canonicalHash(integration.oimManifest) === canonicalHash(manifest)
-        ),
-      releaseDispatch: activeOimReleases.dispatch,
-      runs: new LiveRoutineOimRunAuthority(internalTurns.host, runStore),
-      bundles: new VerifiedRoutineOimBundleReader(routineOimBundleStore, soulBundleVerifier),
-      registrations: new BundleRoutineOimRegistrationReader(
-        routineOimBundleStore,
+      runs: new LiveRoutineMcpRunAuthority(internalTurns.host, runStore),
+      bundles: new VerifiedRoutineMcpBundleReader(
+        new PgBundleStore(runTransactions),
         soulBundleVerifier
       ),
-      connections: oimOperationConnections,
+      service: mcpFeature.service,
+      activeBundle: () => soulPublications.activeBundle(DEPLOYMENT_BUSINESS_ID, soulBundleVerifier),
       effects: recoveryEffects,
-      secrets: async () => secretsService,
-      http: oimHttp,
-      authorize: new LiveRoutineOimAuthorizer(authorityLayerResolver),
-      files: oimFileHost.files,
-      fileAuthorizer: new LiveRoutineOimFileAuthorizer({
-        assertAuthorized: oimFileHost.authorizeFiles,
-      }),
-      paginationRuntime: oimPaginationRuntime,
-      ...(hookExecutor === undefined ? {} : { hookExecutor }),
+      authorize: new LiveRoutineMcpAuthorizer(authorityLayerResolver),
+      mutationGuard,
+      dispatchFence: new PgRoutineMcpDispatchFence(pool),
     });
 
     const app = await buildApp({
@@ -1870,41 +1493,47 @@ async function boot() {
       },
       githubStatus: { integrations: channelIntegrations, businessId: DEPLOYMENT_BUSINESS_ID },
       integrationAuth: {
-        repo: oimAuthRequests,
+        repo: integrationAuthRequests,
         tokens: principalTokens,
       },
-      oimConnections,
-      integrationOperations: new IntegrationOperationsService(oimConnections, pool),
-      internalOimConnections: {
-        refreshDue: refreshDueOimConnections,
-      },
-      internalOimWorker,
-      internalRoutineOim,
-      oimReleases: {
-        controlPlane: publicOimReleaseControlPlane,
-        businessId: DEPLOYMENT_BUSINESS_ID,
-      },
-      oimCatalog: {
-        async packages() {
-          return activeOimReleases.packages();
-        },
-        async status(entry, principal) {
-          const pkg = resolveOimPackage([entry], entry.key);
-          if (pkg === undefined) return { connected: false, personalConnected: false };
-          const connections = await availableOimConnections.listForIntegration(
-            DEPLOYMENT_BUSINESS_ID,
-            pkg.identity
-          );
-          return oimCatalogStatus(
-            connections,
-            (pkg.manifest.auth?.credentialSlots ?? [])
-              .filter((slot) => slot.required !== false)
-              .map((slot) => slot.id),
-            principal,
-            oimConnectionAccess
-          );
-        },
-      },
+      mcpIntegrations: mcpFeature.routes,
+      mcpAccounts,
+      mcpKnowledge,
+      mcpKnowledgeReader: mcpContexts.knowledgeReaderForRun,
+      internalRoutineMcp,
+      nativeChannels: (log) =>
+        composeNativeChannels({
+          businessId: DEPLOYMENT_BUSINESS_ID,
+          transactions: runTransactions,
+          secrets: secretsService,
+          soulLoader,
+          teamAssets,
+          publicApiUrl: () => publicOrigins.current().apiOrigin,
+          authorizeRoutine: async (input) => {
+            const authority = await mcpContexts.nativeRoutineAuthority(input);
+            if (
+              !(await mcpRuntime.authorization.isActivePrincipal(
+                DEPLOYMENT_BUSINESS_ID,
+                authority.principal.id
+              ))
+            )
+              throw new NativeChannelError("native_routine_owner_inactive");
+            return authority;
+          },
+          integrations: channelIntegrations,
+          identity: new IngressIdentityResolver({
+            users: userRepo,
+            log,
+            mappings: externalIdentityRepo,
+            bind: channelBind,
+          }),
+          store: conversationStore,
+          conversations: conversationRepo,
+          threads: integrationThreads,
+          invocations,
+          runDeliveries: channelRunDeliveries,
+          log,
+        }).routes,
       hookExecutor,
       resourceRepoFactory,
       counterStore,
@@ -1951,7 +1580,6 @@ async function boot() {
       knowledgeReaderDirectory,
       knowledgeSubjectDirectory,
       toolRegistry,
-      declarativeTools,
       activityService,
       auditService,
       auditReadService,
@@ -2059,11 +1687,6 @@ async function boot() {
           bind: channelBind,
         }),
         events,
-        canonicalEvents: {
-          authorize: (event) =>
-            new OimIngressEmissionStore(runTransactions, randomUUID).authorizeEvent(event),
-          dispatch: (event) => eventTriggers.dispatchCanonicalEvent(event),
-        },
         eventTriggers,
         domainEvents: domainEventEmitter,
       }),
@@ -2139,12 +1762,6 @@ async function boot() {
           };
         },
       }),
-      ingress: {
-        soulLoader,
-        bundled: bundledIntegrations,
-        invoke: integrationInvoker(invocations),
-        resolveSecret: (value) => resolveSecretRef(value, secretsService),
-      },
       triggerInvoke: {
         resolveTrigger: (slug) => triggerDefinitions.resolveTrigger(slug),
         sink: events,
@@ -2189,11 +1806,10 @@ async function boot() {
     gitSync.on("soul.synced", () => {
       void (async () => {
         await soulLoader.reload();
-        await activeOimReleases.refresh.remoteSynced();
-        declarativeTools.sync();
+        await refreshMcpAfterSoulReload();
       })().catch((err: unknown) => {
         app.log.error(
-          `[oim] catalog refresh after soul.synced failed — ${
+          `[mcp] catalog refresh after soul.synced failed — ${
             err instanceof Error ? err.message : String(err)
           }`
         );
@@ -2201,7 +1817,7 @@ async function boot() {
     });
 
     // Init after buildApp so fallback events log through Fastify's Pino logger.
-    declarativeTools.sync();
+    await mcpFeature.refresh();
     // A malformed `soul.yaml#llm` must not take down authentication, the UI and every unrelated
     // feature. The reload path has always degraded to "LLM disabled" on exactly this error; cold
     // boot used to fall through to the boot-wide `process.exit(1)` instead.
@@ -2276,7 +1892,6 @@ async function boot() {
       },
     });
     await registerScheduleDispatch(boss, scheduleDispatcher, { log: app.log });
-    await registerOimConnectionRefreshSchedule(boss);
     await registerMaintenanceSweepSchedule(boss);
     await scheduleProductTelemetry(boss).catch(() =>
       app.log.warn("Product telemetry scheduling deferred")

@@ -31,6 +31,53 @@ const answering = (id: string, text: string, expectations: EvalCase["expect"]): 
 });
 
 describe("runSweep", () => {
+  it("restores Soul loader state between MCP Trials in one Sweep", async () => {
+    const corpus = await loadCorpus(path.join(__dirname, "../corpus"), soul);
+    const ids = [
+      "l3-mcp-reviewed-tool-contract-follows-publication",
+      "l3-mcp-revoked-grant-blocks-approved-call",
+      "l3-mcp-shared-account-requires-consent",
+      "l3-mcp-shared-consent-does-not-replace-a-grant",
+      "l3-mcp-uses-the-exact-selected-account",
+    ];
+    const cases = ids.map((id) => {
+      const evalCase = corpus.cases.find((candidate) => candidate.id === id);
+      if (evalCase === undefined) throw new Error(`Missing MCP Case ${id}`);
+      return evalCase;
+    });
+    const definition = structuredClone(soul.loader.integrations.get("eval-mcp")?.mcp);
+    const card = await runSweep({ corpus: corpusOf(cases), model: scriptedBinding() });
+    expect(card.trials.filter((trial) => !trial.passed)).toEqual([]);
+    expect(card.passed).toBe(ids.length);
+    expect(soul.loader.integrations.get("eval-mcp")?.mcp).toEqual(definition);
+  }, 60_000);
+
+  it("compacts the long-context Case and fails it when compaction is disabled", async () => {
+    const corpus = await loadCorpus(path.join(__dirname, "../corpus"), soul);
+    const evalCase = corpus.cases.find(
+      (candidate) => candidate.id === "support-compacts-long-context-before-answering"
+    );
+    if (evalCase === undefined) throw new Error("Missing long-context Case");
+    const compacted = await runSweep({
+      corpus: corpusOf([evalCase]),
+      model: scriptedBinding(),
+    });
+    expect(compacted.trials.filter((trial) => !trial.passed)).toEqual([]);
+    expect(compacted.spend.calls).toBe(3);
+    const uncompacted = await runSweep({
+      corpus: corpusOf([{ ...evalCase, contextTokenBudget: undefined }]),
+      model: scriptedBinding(),
+    });
+    expect(uncompacted.spend.calls).toBe(1);
+    expect(
+      uncompacted.trials.flatMap((trial) =>
+        trial.expectations
+          .filter((result) => !result.passed)
+          .map((result) => result.expectation.kind)
+      )
+    ).toEqual(["model_prompt_contains", "output_contains"]);
+  });
+
   it("reports a passing Case as passed", async () => {
     const corpus = corpusOf([
       answering("greets", "hello there", [{ kind: "output_contains", text: "hello" }]),

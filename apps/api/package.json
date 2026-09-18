@@ -32,6 +32,7 @@
     "@tulipfarm/knowledge": "workspace:*",
     "@tulipfarm/kv": "workspace:*",
     "@tulipfarm/llm": "workspace:*",
+    "@tulipfarm/mcp": "workspace:*",
     "@tulipfarm/memory": "workspace:*",
     "@tulipfarm/observability": "workspace:*",
     "@tulipfarm/platform-tools": "workspace:*",

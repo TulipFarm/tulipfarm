@@ -1,5 +1,6 @@
 import type { CachePort } from "@tulipfarm/storage";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+import type { LiveSourceAuthorizationPort } from "./acl";
 import { InMemoryKnowledgeIndex, type KnowledgeIndexPort } from "./indexing";
 import { buildRetrievalCacheKey, type RetrievalRequest, retrieve } from "./retrieve";
 import { InMemoryKnowledgeSourceStore, type KnowledgeSourceRecord } from "./source";
@@ -312,6 +313,37 @@ describe("retrieve", () => {
   });
 
   describe("cached results", () => {
+    it.each(["denied", "unavailable"] as const)(
+      "reauthorizes cached MCP content and withholds it when fresh access is %s",
+      async (outcome) => {
+        const { sources, index } = fixture();
+        await sources.put(
+          source("public-handbook", ["user-1"], {
+            provider: "mcp",
+            accessControl: { mode: "live", maximumAgeSeconds: 0 },
+          })
+        );
+        const check = vi.fn<LiveSourceAuthorizationPort["check"]>(async () => ({
+          allowed: true,
+          aclRevision: "live-account-revision",
+        }));
+        const deps = { sources, index, cache: new MemoryCache(), live: { check }, now };
+        expect((await retrieve(deps, request)).candidates).toHaveLength(1);
+        const firstChecks = check.mock.calls.length;
+        expect((await retrieve(deps, request)).fromCache).toBe(true);
+        expect(check.mock.calls).toHaveLength(firstChecks + 1);
+        expect(check).toHaveBeenLastCalledWith(
+          expect.objectContaining({ principals: request.principals, provider: "mcp" })
+        );
+
+        check.mockResolvedValue(outcome === "denied" ? { allowed: false } : undefined);
+        const withheld = await retrieve(deps, request);
+        expect(withheld.fromCache).toBe(false);
+        expect(withheld.candidates).toEqual([]);
+        expect(JSON.stringify(withheld)).not.toContain("public-handbook");
+      }
+    );
+
     it("serves a repeated identical request from cache", async () => {
       const { sources, index } = fixture();
       const cache = new MemoryCache();

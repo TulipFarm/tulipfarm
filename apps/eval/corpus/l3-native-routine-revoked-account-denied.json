@@ -1,0 +1,26 @@
+{
+  "id": "l3-native-routine-revoked-account-denied",
+  "tier": "l3",
+  "agent": "support",
+  "input": [
+    {
+      "role": "user",
+      "content": "Do not admit the GitHub event after the approved native account grant is revoked. Do not borrow the other default shared account."
+    }
+  ],
+  "nativeRoutine": {
+    "destination": "eval/native#42",
+    "accountId": "approved-native-account",
+    "fault": "account_revoked"
+  },
+  "script": [{ "kind": "text", "text": "The revoked account must block admission." }],
+  "expect": [
+    { "kind": "native_admission_equals", "path": "runCount", "value": 0 },
+    { "kind": "native_admission_equals", "path": "artifactCount", "value": 0 },
+    { "kind": "native_admission_equals", "path": "invocationCount", "value": 0 },
+    { "kind": "native_admission_equals", "path": "stateCount", "value": 0 },
+    { "kind": "native_admission_equals", "path": "inboxRunId", "value": null },
+    { "kind": "native_admission_equals", "path": "accountId", "value": null },
+    { "kind": "native_admission_equals", "path": "error", "value": "routine_approval_required" }
+  ]
+}

@@ -40,8 +40,9 @@ Full glossary with banned synonyms: [`metadata/terminologies.md`](metadata/termi
   Never call an instance a "resource".
 - **Routine** — a scheduled or triggered automation, built from **States**. One execution is a
   **Run**, which emits ordered **Run events**, each with an **Audience** (participant vs operator).
-- **Integration** — a connected third party, fully defined by a declarative **manifest**:
-  **egress** (what agents may do to the provider) and **ingress** (what the provider may send).
+- **Integration** — a connected third party. MCP supplies reviewed Agent Tools, resources and
+  prompts; native Slack/GitHub channels handle events and replies. Personal or shared
+  **Integration accounts** hold credentials outside the Soul.
 - **Skill** — an installable capability package. **Knowledge** — cited, ACL-preserving
   retrieval. **Memory** — scoped, versioned assertions. **Tool** — a callable an agent
   invokes, brokered with approvals. **Surface** — the channel-neutral protocol for
@@ -93,6 +94,7 @@ sibling `AGENTS.md`.
 | [`packages/llm`](packages/llm/AGENTS.md) | Provider abstraction, tiered fallback chains |
 | [`packages/secrets`](packages/secrets/AGENTS.md) | Encrypted secret storage, key rotation |
 | [`packages/integrations`](packages/integrations/AGENTS.md) | Adapter contracts, event normalization, identity mapping |
+| [`packages/mcp`](packages/mcp/AGENTS.md) | MCP protocol, bounded discovery, remote transport, isolated stdio and OAuth primitives |
 | [`packages/surface`](packages/surface/AGENTS.md) | Tulip Surface Protocol contracts, catalog, Artifacts |
 | [`packages/surface-web`](packages/surface-web/AGENTS.md) · [`-slack`](packages/surface-slack/AGENTS.md) · [`-github`](packages/surface-github/AGENTS.md) · [`-discord`](packages/surface-discord/AGENTS.md) · [`-teams`](packages/surface-teams/AGENTS.md) · [`-google-chat`](packages/surface-google-chat/AGENTS.md) · [`-telegram`](packages/surface-telegram/AGENTS.md) | Channel-native TSP renderers |
 | [`packages/sandbox`](packages/sandbox/AGENTS.md) | Isolated execution contract, backend ports |

@@ -332,12 +332,15 @@ async function runL3Trial(
         participantText: turn.participantText,
         assistantMessages: turn.assistantMessages,
         toolResults: turn.toolResults,
+        mcpProviderCallCount: turn.mcpProviderCallCount,
         soulCommits: turn.soulCommits,
         publishedArtifacts: turn.publishedArtifacts,
+        publishedArtifactsByTurn: turn.publishedArtifactsByTurn,
         generatedFiles: turn.generatedFiles,
         doctorEvents: turn.doctorEvents,
         toolDenials: turn.toolDenials,
         stateOutput: turn.stateOutput,
+        nativeAdmission: turn.nativeAdmission,
       },
     });
   } catch (cause) {

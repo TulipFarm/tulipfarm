@@ -1,3 +1,4 @@
+import { canonicalHash } from "@tulipfarm/schema";
 import { describe, expect, it } from "vitest";
 import { type ApprovalBindingInput, bindingsMatch, computeApprovalBinding } from "./binding";
 
@@ -61,29 +62,54 @@ describe("computeApprovalBinding", () => {
     ["businessId", { businessId: "business-2" }],
     ["fileIds", { fileIds: ["file-2"] }],
     ["agentPrincipalId", { agentPrincipalId: "agent-2" }],
-    [
-      "Connection",
-      {
-        connection: {
-          connectionId: "connection-2",
-          integrationId: "crm",
-          integrationMajorVersion: 2,
-          operationId: "update-contact",
-          credentialSlot: "writer",
-          identityMode: "personal_or_shared",
-          principalKind: "user",
-          principalId: "principal-1",
-          manifestDigest: "sha256:manifest",
-          configurationDigest: "sha256:configuration",
-        },
-      },
-    ],
   ])("changes the intent digest when %s changes", (_label, patch) => {
     const base = computeApprovalBinding(input());
     const changed = computeApprovalBinding(
       input({ intent: { ...input().intent, ...(patch as object) } })
     );
     expect(changed.intentDigest).not.toBe(base.intentDigest);
+  });
+
+  it.each([
+    undefined,
+    {
+      serverId: "crm",
+      serverRevision: "a".repeat(64),
+      accountId: "account-1",
+      accountRevision: "1",
+      subjectId: "user-1",
+      authorizationId: "approval-1",
+    },
+  ])("preserves the established canonical digest with MCP binding %j", (mcp) => {
+    const value = input({ intent: { ...input().intent, credentialRef: undefined, mcp } });
+    expect(computeApprovalBinding(value).intentDigest).toBe(
+      canonicalHash({
+        businessId: "business-1",
+        runStateId: null,
+        toolId: "crm.contact",
+        toolVersion: "2.1.0",
+        action: "contact.update",
+        targetRefs: [{ type: "contact", id: "c-1", domain: null }],
+        arguments: { email: "a@example.com", tier: "gold" },
+        filePrincipalId: null,
+        fileIds: null,
+        agentPrincipalId: null,
+        principalKind: null,
+        principalId: null,
+        activeSkillName: null,
+        integrationId: null,
+        integrationMajorVersion: null,
+        operationId: null,
+        manifestDigest: null,
+        configurationDigest: null,
+        destination: "crm.example.com",
+        credentialRef: null,
+        connection: null,
+        secondaryCredentialRef: null,
+        secondaryConnection: null,
+        ...(mcp === undefined ? {} : { mcp }),
+      })
+    );
   });
 
   it("changes the evidence digest when evidence changes", () => {

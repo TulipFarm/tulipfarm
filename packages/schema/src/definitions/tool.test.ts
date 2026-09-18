@@ -31,7 +31,7 @@ const minimal = {
     mutating: true,
     dryRun: true,
     idempotency: { strategy: "provider" },
-    adapter: { kind: "integration", ref: "github" },
+    adapter: { kind: "mcp", ref: "github" },
   },
 };
 
@@ -97,6 +97,16 @@ describe("ToolContract definition schema", () => {
   it("rejects an unknown adapter kind", () => {
     const doc = { ...minimal, spec: { ...minimal.spec, adapter: { kind: "ssh", ref: "box" } } };
     expect(() => registry().validate(doc)).toThrow(SchemaValidationError);
+  });
+
+  it.each(["integration", "openapi", "graphql"])("rejects the retired %s adapter kind", (kind) => {
+    const doc = { ...minimal, spec: { ...minimal.spec, adapter: { kind, ref: "github" } } };
+    expect(() => registry().validate(doc)).toThrow(SchemaValidationError);
+  });
+
+  it.each(["native", "mcp", "sandbox"])("accepts the surviving %s adapter kind", (kind) => {
+    const doc = { ...minimal, spec: { ...minimal.spec, adapter: { kind, ref: "github" } } };
+    expect(() => registry().validate(doc)).not.toThrow();
   });
 
   it("rejects a non-boolean mutating classification", () => {

@@ -1,0 +1,54 @@
+{
+  "id": "l3-mcp-shared-account-requires-consent",
+  "tier": "l3",
+  "agent": "support",
+  "mcp": {
+    "visibility": "private",
+    "accounts": [{ "id": "shared-working", "scope": "shared", "status": "active" }],
+    "sharedGrants": ["shared-working"],
+    "selection": { "accountId": "shared-working", "sharedConsent": false }
+  },
+  "input": [
+    {
+      "role": "user",
+      "content": "Call the Eval MCP status Tool with probe 'consent'. If shared-account consent is missing, stop and ask me to confirm it in the account picker."
+    }
+  ],
+  "tools": [
+    {
+      "name": "mcp_eval_mcp_status_51b1cdd4ae261c34",
+      "description": "Read the status visible to the selected account.",
+      "inputSchema": {
+        "type": "object",
+        "properties": { "probe": { "type": "string" } },
+        "required": ["probe"],
+        "additionalProperties": false
+      },
+      "mutating": false
+    }
+  ],
+  "script": [
+    {
+      "kind": "tool_calls",
+      "calls": [
+        {
+          "callId": "consent",
+          "name": "mcp_eval_mcp_status_51b1cdd4ae261c34",
+          "arguments": { "probe": "consent" }
+        }
+      ]
+    },
+    { "kind": "text", "text": "Confirm shared-account use in the account picker first." }
+  ],
+  "expect": [
+    {
+      "kind": "tool_result_reason_contains",
+      "name": "mcp_eval_mcp_status_51b1cdd4ae261c34",
+      "argumentPath": "probe",
+      "argumentValue": "consent",
+      "status": "denied",
+      "text": "shared consent required"
+    },
+    { "kind": "run_status", "status": "succeeded" }
+  ]
+}

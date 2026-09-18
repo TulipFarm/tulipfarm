@@ -54,7 +54,7 @@ describe("DurableEffectRetryWaitHost", () => {
   it("registers one deterministic durable timer and reports it ready after satisfaction", async () => {
     const waits = new MemoryRetryWaits();
     const host = new DurableEffectRetryWaitHost(waits);
-    const waitId = "8caefa9b-b742-4dbe-a971-1b494fdb9d97";
+    const waitId = "a635aaff-133a-4bb6-a9c9-39be2bcd4c32";
 
     expect(effectRetryWaitId(input.effectId, input.attempt)).toBe(waitId);
     await expect(host.parkRetry(input)).resolves.toEqual({ waitId });
@@ -86,11 +86,11 @@ describe("DurableEffectRetryWaitHost", () => {
     const host = new DurableEffectRetryWaitHost(waits);
 
     await expect(host.parkRetry({ ...input, attempt: 0 })).rejects.toThrow(
-      "invalid_oim_rate_retry_wait"
+      "invalid_effect_retry_wait"
     );
     await host.parkRetry(input);
     await expect(
       host.parkRetry({ ...input, notBefore: "2026-09-13T10:00:21.000Z" })
-    ).rejects.toThrow("oim_rate_retry_wait_conflict");
+    ).rejects.toThrow("effect_retry_wait_conflict");
   });
 });

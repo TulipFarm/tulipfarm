@@ -28,6 +28,8 @@ Vocabulary is binding: [`metadata/terminologies.md` → Offline eval](../../meta
   A guard no Agent in the fixture can reach is a guard the Corpus cannot cover.
 - **The fixture is copied to a temp git repo per load,** never read where it sits: it cannot carry
   its own `.git` inside this repository, and L3's Soul writes must not dirty the tracked fixture.
+  L3 restores both the checkout and its cached loader after each Trial; restoring files alone
+  leaves later Trials seeding accounts against the previous Trial's MCP definition.
 - **The Eval Soul's hash is folded into `corpusHash`.** A fixture edit changes half of what a Case
   measures, so it must invalidate every Baseline exactly as a Case edit does.
 - **Guards run in the turn, and are production's.** `turnGuardrails` enforces the fixture policy
@@ -44,6 +46,8 @@ Vocabulary is binding: [`metadata/terminologies.md` → Offline eval](../../meta
 - **`model_prompt_contains` reads the final L2 model request.** A Case may set
   `contextTokenBudget` to exercise the production loop's compaction seam; the summary call and the
   final answer consume that Case's script in order.
+  The budget must fit the pinned prompt, latest request, and summary reserve while remaining below
+  the full history's token estimate. Otherwise the compactor deliberately leaves history unchanged.
 - **Expectations are data, never functions.** That is what lets the Corpus be content-hashed and a
   Case be authored without writing code. Add a new `kind` to the union and handle it in `scoreCase`.
 - **A vendor failure is not a verdict.** A loop failure whose reason starts with `model_` is counted
@@ -263,6 +267,30 @@ fails. An undifferentiated `run_event_emitted guardrail.blocked` cannot express 
 test disables only `guardModel` in a scoped spy: the old final-Message guard still passes
 `output_omits`, while the leaked stream fails `run_event_text_omits`.
 
+### Native Routine admission
+
+`nativeRoutine` is a bounded L3 admission fixture, separate from Chat and Routine execution.
+It starts with a real claimed native inbox event and calls `admitNativeRoutine`, the same
+production function `NativeChannelService` calls after its installation check. The real
+`DurableInvocationGateway`, `PgDurableInvocationStore`, `ArtifactStore`, and
+`NativeChannelInboxStore` create and correlate the Run in one transaction.
+
+The fixture writes and publishes its Routine through the Soul writer, resolves its pin from the
+verified active bundle, and seeds an exact shared-account Routine grant. Live admission uses
+`McpAccountAuthority.resolve`, not a scripted authorization result. A second, unapproved default
+account makes substitution observable. The fixture covers admission and account-domain checks;
+HTTP signature checks and the API host-context resolver remain API test scope.
+
+`native_admission_equals` reads persisted Run, State, request Artifact, invocation, and inbox
+evidence. Approved admission must preserve the exact destination, account, owner, and inbox
+identity evidence. Changed routes and revoked account grants must leave no Run. The lease fault
+changes the real inbox fence **after** the gateway inserts the Run, so only a shared transaction
+can leave no Run, State, Artifact, or invocation. A regression probe restores the old separate
+start/bind sequence and requires these same Expectations to detect its orphan Run.
+
+These Cases and their resolved Soul inputs change `corpusHash`; existing Baselines must be
+re-promoted by a maintainer. The fixture does not promote or rewrite Baselines.
+
 ### Generated File lifecycle
 
 `file_create` joins `soul_write` as a Tool L3 **runs for real**, because Chat versus Routine
@@ -310,6 +338,65 @@ refusal — is carried far more cheaply by an L2 Case.
 Each Trial gets a fresh clone of a memoised migrated snapshot, and the Eval Soul is
 `git reset --hard`-ed back to its load-time commit in a `finally` — otherwise a Case that writes
 a Soul artifact would be visible to every Case scored after it.
+
+### MCP Integrations
+
+MCP setup replaces package authoring and OpenAPI import. The setup journey calls the production
+MCP domain over `createSoulMcpDefinitionStore`, the real `SoulWriter`, and the real publisher.
+It uses the shipped `integration_configure` / `integration_get` declarations shared with API
+registration in `@tulipfarm/schema`, including their `slug` argument and `{ server }` result.
+All seven shared setup Tools route through the real MCP service at L3, including discovery,
+review, resource reads, and prompt rendering; none may use a scripted successful result.
+`mcp_provider_call_count` observes actual `tools/call` requests in the external transport fixture.
+Successful account Cases require one request; privacy and revocation Cases require zero plus
+their distinct account-policy denial. Fault probes must exercise the injected account defect and
+fail that named denial Expectation. Independent approval and replay guards remain active: a later
+refusal may prevent a provider call, but must not count as the expected account-policy refusal.
+Its follow-up rebuilds the MCP definition store from the verified active bundle using
+`mcpIntegrationsFromBundle`, never the authored `SoulLoader`. `soul_published` reads the signed
+active bundle's MCP assets, not the current checkout or the model's answer. A committed but
+missing next-Turn definition therefore fails even when publication succeeded.
+
+The optional L3 `mcp` fixture supplies durable account state and the host's Chat visibility.
+Accounts, grants, and selections are seeded through `McpAccountStore` in the Trial's PGlite.
+`McpAccountAuthority` decides selection, current access, consent, expiry, and private use;
+the normal Tool host decides permissions and action Approval. Consent and Approval remain
+separate. The production MCP client and SDK use an in-process fake HTTP provider with one status
+Tool. Only external responses are replaced. That provider does not deny requests or choose accounts:
+it reports the identity it actually received.
+
+The account Cases measure the real dispatch result, not scripted prose: exact selection over
+a different default, ambiguous selection, an expired personal account alongside a working shared
+account, missing shared consent, consent without a current grant, an authorized shared call,
+and refusal to disclose personal results in a shared Chat. Scripted MCP Tool results are refused,
+including in follow-up Turns. The provider's reviewed metadata lives in the tracked Eval Soul,
+so discovery drift and fixture edits cannot silently preserve the Corpus identity.
+
+Additional Cases cover personal defaults ahead of shared defaults, no implicit shared selection,
+and a shared grant revoked while action Approval is pending. `revokeGrantBeforeApproval` removes
+the existing grant through the real repository before signaling the production approval wait;
+the resumed dispatch must recheck access and refuse without switching accounts.
+
+`src/l3/tier.test.ts` includes deliberate regression probes: lose the active-bundle store's
+newly published MCP definition, suppress grant revocation, or misclassify shared Chat as private.
+The corresponding real-result Expectation must fail while the same scripted model prose remains
+unchanged, then pass when production behavior is restored. A separate positive probe removes
+the authored loader's definition and proves it cannot affect active MCP reads.
+These probes do not substitute for running the unmodified Cases.
+
+The L2 prompt Case requires MCP-only business actions while preserving ordinary web research.
+The expired-account Case offers `web_fetch` and refuses alternate network probes after denial.
+
+`l3-mcp-reviewed-tool-contract-follows-publication` disables a reviewed server, enables it on the
+next Turn, then changes its endpoint without a new review. It observes no ToolContract, a published
+ToolContract, and no ToolContract respectively. `soul_published` and `soul_not_published` accept
+one-based `turnIndex`; each snapshot is read from the verified active bundle after that Turn,
+never inferred from a configuration flag. A missing Turn observation fails even an absence check.
+
+This cutover changes both Case data and the Eval Soul, so it changes `corpusHash` and retires
+existing Baselines for both Corpora. Do not edit or auto-promote those Baselines. Route wiring,
+OAuth browser flows, real provider compatibility, and Knowledge sync remain the owning packages'
+checks; these Cases do not claim to measure them.
 
 ## Running against a real model
 

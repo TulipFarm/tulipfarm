@@ -7,7 +7,7 @@
  * connected provider because we hold the bytes and the ACL ourselves, so its readership is read
  * live from our own tables instead of being snapshotted from somebody else's.
  */
-export type KnowledgeSource = "authored" | "resource" | "conversation" | "file";
+export type KnowledgeSource = "authored" | "resource" | "conversation" | "file" | "mcp";
 
 /**
  * Who wrote a Page. Null on Pages that predate authorship being recorded — deliberately not
@@ -81,6 +81,7 @@ export interface SpacePageRef {
   spaceName: string;
   path: string;
   title: string;
+  source?: KnowledgeSource;
   /** Carried here so the label travels with the Page into every listing, not just the Page view. */
   authorKind?: PageAuthorKind | null;
   authorId?: string | null;

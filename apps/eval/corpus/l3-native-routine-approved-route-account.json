@@ -1,0 +1,62 @@
+{
+  "id": "l3-native-routine-approved-route-account",
+  "tier": "l3",
+  "agent": "support",
+  "input": [
+    {
+      "role": "user",
+      "content": "Admit the accepted GitHub issue event only for the approved eval/native#42 destination and approved-native-account."
+    }
+  ],
+  "nativeRoutine": {
+    "destination": "eval/native#42",
+    "accountId": "approved-native-account"
+  },
+  "script": [{ "kind": "text", "text": "Native Routine admission is checked from persistence." }],
+  "expect": [
+    { "kind": "native_admission_equals", "path": "runCount", "value": 1 },
+    { "kind": "native_admission_equals", "path": "artifactCount", "value": 1 },
+    { "kind": "native_admission_equals", "path": "invocationCount", "value": 1 },
+    { "kind": "native_admission_equals", "path": "stateCount", "value": 1 },
+    { "kind": "native_admission_equals", "path": "run.source", "value": "routine" },
+    { "kind": "native_admission_equals", "path": "run.status", "value": "queued" },
+    {
+      "kind": "native_admission_equals",
+      "path": "run.bundle.routineId",
+      "value": "eb8b34d6-a1b9-45e1-b51f-22a30749e042"
+    },
+    {
+      "kind": "native_admission_equals",
+      "path": "run.identity.initiator",
+      "value": { "kind": "integration", "id": "github" }
+    },
+    {
+      "kind": "native_admission_equals",
+      "path": "run.identity.effectiveSubject",
+      "value": { "kind": "user", "id": "eval" }
+    },
+    {
+      "kind": "native_admission_equals",
+      "path": "run.identity.guardrailContextRef",
+      "value": "native-channel-inbox:eval-native-event"
+    },
+    {
+      "kind": "native_admission_equals",
+      "path": "request.inputs.nativeChannel.destination",
+      "value": "eval/native#42"
+    },
+    {
+      "kind": "native_admission_equals",
+      "path": "request.inputs.nativeChannel.eventType",
+      "value": "issues.opened"
+    },
+    { "kind": "native_admission_equals", "path": "accountId", "value": "approved-native-account" },
+    {
+      "kind": "native_admission_equals",
+      "path": "request.slug",
+      "value": "eval-native-review"
+    },
+    { "kind": "native_admission_equals", "path": "inboxCorrelated", "value": true },
+    { "kind": "native_admission_equals", "path": "error", "value": null }
+  ]
+}

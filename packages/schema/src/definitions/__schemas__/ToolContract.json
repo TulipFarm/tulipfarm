@@ -110,10 +110,7 @@
             "kind": {
               "enum": [
                 "native",
-                "integration",
                 "mcp",
-                "openapi",
-                "graphql",
                 "sandbox"
               ],
               "type": "string"

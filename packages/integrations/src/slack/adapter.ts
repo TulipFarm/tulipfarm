@@ -169,7 +169,7 @@ export class SlackChannelAdapter {
       externalSubject: inbound.principal.externalId,
       externalTenantId: inbound.source.externalTenantId,
     });
-    if (principal === undefined) {
+    if (principal === undefined || principal.kind !== "user") {
       await ack();
       return { outcome: "denied", reason: "external_identity_unmapped" };
     }
@@ -189,6 +189,7 @@ export class SlackChannelAdapter {
         ...(inbound.data.threadId === undefined ? {} : { threadId: inbound.data.threadId }),
         eventType: "message",
         principal,
+        grantPrincipals: principal.grantPrincipals,
         action: "channels.message.receive",
         targetType: "slack.channel",
       });
@@ -262,6 +263,7 @@ export class SlackDeliveryAdapter {
   constructor(private readonly deps: SlackDeliveryAdapterDeps) {}
 
   async deliver(request: SlackDeliveryRequest, credential: string): Promise<ChannelDeliveryRecord> {
+    if (request.provider !== "slack") throw new SlackDeliveryError("provider_mismatch");
     const attempt: ChannelDeliveryAttempt = {
       businessId: request.businessId,
       integrationId: request.integrationId,

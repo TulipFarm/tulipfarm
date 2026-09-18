@@ -1,10 +1,6 @@
-import { randomUUID } from "node:crypto";
 import { PrincipalDeniedError } from "@tulipfarm/authz";
-import type { ChatIngressConfig } from "@tulipfarm/soul";
-import type { ChatAutonomy } from "@tulipfarm/tool-host";
 import type { FastifyBaseLogger } from "fastify";
 import type { IngressUserLookup, UserDoc } from "../auth/users";
-import type { ToolRegistry } from "../broker/tool-adapter";
 import {
   type ChannelBindDeps,
   type IssuedChannelBind,
@@ -18,7 +14,6 @@ import {
   resolveExternalSender,
 } from "../identity/external-links";
 import { assertUserAuthenticatable } from "../identity/principal";
-import { executeToolBinding, extractFromToolResult } from "./bindings";
 
 /** Resolves channel senders; unknown senders never invoke an Agent. */
 export type ChannelSenderResolution =
@@ -86,10 +81,6 @@ export class IngressIdentityResolver {
     slug: string;
     sender: string;
     externalTenantId?: string;
-    identity?: ChatIngressConfig["identity"];
-    registry?: ToolRegistry;
-    /** The routed Agent's autonomy ceiling; the identity binding runs no higher than it. */
-    autonomy?: ChatAutonomy;
     /** Where the sender messaged from, so a bind offer can be replied to once confirmed. */
     channelId?: string;
     threadId?: string;
@@ -102,18 +93,6 @@ export class IngressIdentityResolver {
         opts.sender,
         opts.externalTenantId,
         linked.verifiedVia
-      );
-    }
-
-    const claimed = await this.claimByManifestEmail(opts);
-    // Always guest-grade: the row this just wrote is `manifest_email` by construction.
-    if (claimed) {
-      return senderAuthority(
-        claimed,
-        opts.slug,
-        opts.sender,
-        opts.externalTenantId,
-        "manifest_email"
       );
     }
 
@@ -149,8 +128,6 @@ export class IngressIdentityResolver {
 
     const user = await this.deps.users.findById(resolved.userId);
     if (!user) {
-      // The account was deleted out from under the mapping. Falling through re-derives the link
-      // from the manifest rather than acting for a user who no longer exists.
       this.deps.log.warn({ slug, sender }, "channel mapping names a user that no longer exists");
       return null;
     }
@@ -167,70 +144,6 @@ export class IngressIdentityResolver {
     return { user, ...(resolved.verifiedVia ? { verifiedVia: resolved.verifiedVia } : {}) };
   }
 
-  /** Step 2 — persist the manifest identity binding when it names a known account. */
-  private async claimByManifestEmail(opts: {
-    slug: string;
-    sender: string;
-    externalTenantId?: string;
-    identity?: ChatIngressConfig["identity"];
-    registry?: ToolRegistry;
-    autonomy?: ChatAutonomy;
-  }): Promise<UserDoc | null> {
-    const { slug, sender, identity, registry } = opts;
-    if (!identity || !registry) return null;
-
-    let matched: UserDoc | null = null;
-    try {
-      // A fresh toolCallId every time, unlike a reply: the Effect store replays a duplicate
-      // reservation, so a stable id here would answer every future lookup with the email this
-      // sender had the first time they spoke — surviving any later change on the provider side.
-      const result = await executeToolBinding(
-        registry,
-        slug,
-        identity,
-        { sender },
-        { runId: `ingress-identity:${slug}`, toolCallId: randomUUID(), autonomy: opts.autonomy }
-      );
-      if (result.success) {
-        const email = extractFromToolResult(result.data, identity.email_path);
-        if (typeof email === "string" && email) {
-          matched = await this.deps.users.findByEmail(email);
-        }
-      } else {
-        this.deps.log.warn(
-          { slug, sender, error: result.error },
-          "ingress identity binding failed; denying external actor"
-        );
-      }
-    } catch (err) {
-      this.deps.log.warn(
-        { err, slug, sender },
-        "ingress identity binding threw; denying external actor"
-      );
-    }
-    if (!matched) return null;
-
-    const now = (this.deps.now ?? (() => new Date()))();
-    try {
-      assertUserAuthenticatable(matched, now);
-    } catch (err) {
-      if (err instanceof PrincipalDeniedError) return null;
-      throw err;
-    }
-
-    await this.deps.mappings?.upsertMapping({
-      provider: slug,
-      externalSubject: sender,
-      ...(opts.externalTenantId === undefined ? {} : { externalTenantId: opts.externalTenantId }),
-      userId: matched._id,
-      verifiedAt: now,
-      expiresAt: null,
-      verifiedVia: "manifest_email",
-    });
-    return matched;
-  }
-
-  /** Step 3 — what an unlinked sender is given instead of an answer. */
   private async offerBind(
     slug: string,
     sender: string,

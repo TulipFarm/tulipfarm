@@ -293,12 +293,10 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - uses: ./.github/actions/setup
-      - name: Validate schema and OIM fixtures
+      - name: Validate schema fixtures
         run: |
           set -o pipefail
           pnpm --filter @tulipfarm/schema test 2>&1 | tee schema-fixtures.log
-          pnpm --filter @oim-standard/conformance test 2>&1 | tee -a schema-fixtures.log
-          pnpm exec tsx scripts/oim-standard-check.ts 2>&1 | tee -a schema-fixtures.log
       - name: Job summary
         if: always()
         env:

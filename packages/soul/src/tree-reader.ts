@@ -12,6 +12,7 @@ import { parse as parseYaml } from "yaml";
 import { agentDocumentFromLegacy, defaultModelProfile } from "./agent-documents";
 import type { BundleSourceFile } from "./compiler";
 import { hermeticGitEnv } from "./git-env";
+import { mcpDefinitionSlug, parseMcpSoulDefinition } from "./integrations/mcp-definition";
 import { modelProfileDocuments } from "./model-profile-documents";
 import { parseSoulFile } from "./parse";
 import type { SoulTreeReader } from "./publication";
@@ -160,7 +161,10 @@ export class GitSoulTreeReader implements SoulTreeReader {
       // A projected Agent declares its legacy AGENT.md as its instructions companion, and the
       // compiler refuses a declared companion that is not among the bundle's source files.
       if (!isBundledSourceFilePath(path) && agentDefinitionAt(path)?.legacy !== true) continue;
-      files.push({ path, content: await this.content(commitSha, path) });
+      const content = await this.content(commitSha, path);
+      const mcpSlug = mcpDefinitionSlug(path);
+      if (mcpSlug !== null) parseMcpSoulDefinition(content, mcpSlug);
+      files.push({ path, content });
     }
     return files;
   }

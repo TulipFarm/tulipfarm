@@ -22,7 +22,7 @@ export function makeContract(overrides: Partial<ToolContractSpec> = {}): ToolCon
       mutating: false,
       idempotency: { strategy: "none" },
       dryRun: false,
-      adapter: { kind: "integration", ref: "github" },
+      adapter: { kind: "native", ref: "github" },
       ...overrides,
     },
   };

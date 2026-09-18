@@ -56,14 +56,11 @@ RUN TF_VERSION=$(node -p "require('./package.json').version") \
 RUN pnpm --filter @tulipfarm/worker exec esbuild src/main.ts \
   --bundle --platform=node --target=node26 --format=cjs --outfile=dist/worker.cjs \
   --external:pg --external:pg-boss --external:isolated-vm \
-  --external:@anthropic-ai/claude-agent-sdk --external:@openai/codex \
-  && pnpm --filter @tulipfarm/worker exec esbuild src/hooks/ingress-hook-worker.ts \
-  --bundle --platform=node --target=node26 --format=cjs --outfile=dist/ingress-hook-worker.cjs \
-  --external:isolated-vm
+  --external:@anthropic-ai/claude-agent-sdk --external:@openai/codex
 # Integration ingress and delivery share the release artifact with the API and durable worker.
 RUN pnpm --filter @tulipfarm/integration-worker exec esbuild src/main.ts \
   --bundle --platform=node --target=node26 --format=cjs --outfile=dist/integration-worker.cjs \
-  --external:pg
+  --external:pg --external:isolated-vm
 # Prod-only dependency closure (drops dev deps, resolves transitive deps flat).
 RUN pnpm --filter @tulipfarm/api deploy --prod --legacy /deploy
 # The claude-code Subscription Provider spawns a native `claude` binary that ships in an optional,
@@ -114,9 +111,6 @@ COPY --from=builder --chown=node:0 /app/apps/api/dist/hook-worker.cjs ./hook-wor
 # Durable worker entrypoint. Not the image CMD — compose runs it as its own service off this
 # same image, so the API and the worker can never drift out of schema agreement.
 COPY --from=builder --chown=node:0 /app/apps/worker/dist/worker.cjs ./worker.cjs
-# The worker's own hook sandbox entrypoint. Deliberately a different basename from the API's: both
-# land in this directory, and sharing one would hand an Integration's classifier the API's grant.
-COPY --from=builder --chown=node:0 /app/apps/worker/dist/ingress-hook-worker.cjs ./ingress-hook-worker.cjs
 # Integration worker entrypoint. Not the image CMD — compose runs it as its own service off this
 # same image, mirroring how `worker.cjs` is run.
 COPY --from=builder --chown=node:0 /app/apps/integration-worker/dist/integration-worker.cjs ./integration-worker.cjs

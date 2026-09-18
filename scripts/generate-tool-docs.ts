@@ -7,10 +7,9 @@
  * hand: names, summaries, mutation flags and the grouping all come from `buildToolRegistry`, and
  * the sections are the same authorization areas the access screen groups by.
  *
- * Integration Tools (GitHub, Slack, Google, network) are excluded by construction — they are
- * arguments to `buildToolRegistry` and are simply not passed here — because they exist only once an
- * operator connects that provider, so no fixed list is true of every instance. The Pack reader
- * is included separately: it is network-hosted but does not need a provider connection.
+ * Reviewed MCP Tools are registered separately at runtime, so no fixed list is true of every
+ * instance. MCP setup Tools are included. General network Tools are omitted; the Pack reader
+ * is included separately because it does not need an Integration account.
  */
 
 import { writeFileSync } from "node:fs";
@@ -49,6 +48,12 @@ const SECTIONS: readonly Section[] = [
       "Changing the soul, the git-backed definitions of what your instance is and what it can do.",
   },
   {
+    area: "integration",
+    heading: "Integrations",
+    intro:
+      "Configuring MCP servers, reviewing their capabilities, and reading their resources and prompts. An integration connects an agent to an external service.",
+  },
+  {
     area: "knowledge",
     heading: "The knowledge base",
     intro: "Searching, reading and writing the cited pages agents answer from.",
@@ -83,11 +88,6 @@ const SECTIONS: readonly Section[] = [
     heading: "Teams",
     intro:
       "A Team is a business unit that can own Agents, Skills and Routines. This tool lists the Teams available for that ownership.",
-  },
-  {
-    area: "user",
-    heading: "Users",
-    intro: "Looking up people who have accounts on this instance to assign work or link records.",
   },
   {
     area: "task",
@@ -152,7 +152,7 @@ export function toDocsWords(value: string): string {
   return DOCS_WORDS.reduce((text, [pattern, word]) => text.replace(pattern, word), value);
 }
 
-/** Every non-integration Tool the API registers, with the area its authorization declares. */
+/** Built-in Tools, including MCP setup, with the area their authorization declares. */
 export function collectTools(): CatalogTool[] {
   // Handlers close over these; the catalog reads declarations only, so mere presence is enough to
   // make each family register.
@@ -246,9 +246,11 @@ and [roles and permissions](/docs/reference/roles-and-permissions) for how the c
 
 **Changes things** marks a tool that writes something. Every other tool only looks.
 
-Two groups are deliberately missing. Tools for a connected app arrive with the app, so they are
-listed per provider under [bundled integrations](/docs/reference/bundled-integrations). Tools that
-draw a reply on screen are explained in [surfaces](/docs/using-tulipfarm/surfaces).
+Reviewed MCP tools depend on the servers and accounts configured on your instance, so they are
+not a fixed catalog. See [integrations](/docs/reference/bundled-integrations) for how they differ
+from native Slack and GitHub channels. Tools that draw a reply on screen are explained in
+[surfaces](/docs/using-tulipfarm/surfaces). General-purpose network tools are omitted from this
+page; the built-in pack reader is included.
 
 ${sections.join("\n")}
 ## Where your own list lives

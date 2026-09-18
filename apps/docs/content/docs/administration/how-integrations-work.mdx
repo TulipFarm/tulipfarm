@@ -1,112 +1,56 @@
 ---
 title: Integrations
-description: Learn how integrations connect TulipFarm to external services, limit agent actions, verify credentials, and protect secrets.
+description: Understand the difference between MCP agent tools and native chat channels, and how reviewed capabilities limit external access.
 ---
 
-Integrations connect TulipFarm to external systems. TulipFarm includes a catalog of bundled
-integrations. Each one appears in the integrations UI with the setup and provider actions declared
-by its package. Secrets stay in the secrets store; the integration definition stays in the soul.
+Open **Integrations** to see connections to external services. An integration gives TulipFarm
+a defined way to use an external service; it does not give every agent unrestricted access.
 
-You are not limited to those. Ask in chat to build an integration from a provider's public
-documentation. TulipFarm reviews the exact manifest and companion files before publishing them,
-and an integration package cannot run code. See
-[Connect an integration](/docs/administration/connect-an-integration#add-a-missing-provider).
+## Agent tools use MCP
 
-## Package trust
+MCP, the Model Context Protocol, lets a server offer tools, resources, and prompts.
+A **tool** performs an action. A **resource** returns information. A **prompt** supplies a
+template. MCP resources are not TulipFarm records.
 
-Installing from a source begins with inspection. TulipFarm resolves the source to an exact ref,
-calculates the package digest, and shows the capabilities, effects, provider destinations,
-authorization requirements, and incoming data before installation.
+Discovering a capability does not authorize it. TulipFarm keeps a reviewed selection, and
+checks that a capability still matches that review before using it. A changed server
+configuration requires a new review.
 
-An **Official** package has a signature that the server verified with an active public release
-trust root configured on this TulipFarm instance. The label describes local signature trust. It is
-not a global endorsement by TulipFarm.
+The server's own description is not a permission grant. Calling a tool still passes through
+TulipFarm's access and approval controls.
 
-A **Community** package is installed only after someone approves the exact reviewed digest and the
-capabilities, destinations, and effects shown for it. If the source changes after review, that
-approval does not cover the new bytes.
+## Definitions and credentials stay separate
 
-## Package maintenance
+The soul is TulipFarm's versioned configuration store. It holds non-secret definitions, not
+provider passwords or tokens. Credentials belong in the encrypted secrets store, not in
+agent instructions or chat messages.
 
-Package security settings hold public keys for release and revocation signatures. They can also
-point to a signed, credential-free HTTPS revocation feed. Maintenance reads that feed, records
-valid revocations, and checks for eligible updates.
+An integration account connects one provider identity to an integration. A **personal
+account** belongs to one user. A **shared account** is explicitly granted for use by users,
+teams, or a routine, which is a scheduled or triggered automation.
 
-Automatic updates are limited to patch releases of Official packages that have opted in. Each
-candidate still has to match the signed identity, source, ref, version, and digest and pass the
-package checks. Community packages always require a new review and approval.
+Private chat uses your selected personal account, or your personal default when no account
+has been selected yet. It never silently switches to a shared account. Using a shared
+account in chat requires both permission and your explicit selection and consent. Changing
+your default does not replace an account already selected for an existing chat.
 
-## Connection verification
+Scheduled work uses an explicitly approved account and the routine configuration that was
+approved with it. A shared account is not a universal token that every agent may use.
+Changing the account or the routine's approved instructions or output destinations can
+require new approval. Personal credentials cannot be used to send data into shared
+Slack or GitHub conversations.
 
-A **Connection** is one configured provider account or workspace for an integration. Some packages
-declare a provider verification step and some do not. When verification is required, the
-Connection cannot be used until successful evidence is saved.
+Disconnecting or revoking access does not cause a fallback to another identity.
 
-**Retry verification** repeats the package's declared check. It does not turn a network failure
-into proof that the credentials work: an unavailable provider leaves verification incomplete, and
-a provider rejection requires corrected or reconnected credentials.
+## Chat channels are separate
 
-## Removal
+Native Slack and GitHub channels receive provider events and deliver agent replies.
+They do not expose a second way to add third-party agent tools.
 
-Removing a source-installed package targets its exact installed generation. TulipFarm fences new
-traffic, drains active work, removes remote subscriptions and Connections, clears package-owned
-state, and then removes the package.
+Slack users link their Slack identity to a TulipFarm account. GitHub event delivery uses the
+GitHub App installed for your deployment. These channel paths keep their own provider
+verification and delivery controls.
 
-If provider cleanup is still pending, the package stays unavailable and the UI offers **Retry
-removal** for that same installation. Cleanup from an older generation cannot remove a newer one.
-
-## GitHub
-
-The GitHub integration is installed as a GitHub App scoped to the organizations and repositories you
-choose. It lets agents list repositories, read and search issues and pull requests, comment, label,
-assign, close, create pull requests, review, merge, read check runs, push content, and read or list
-repository content.
-
-GitHub also powers soul backup to a GitHub repository through the soul repo routes. The integration
-renders through `@tulipfarm/surface-github` for comments and Check runs.
-
-Use [Connect GitHub](/docs/administration/connect-github) for setup.
-
-## Slack
-
-The Slack integration lets users talk to TulipFarm agents from Slack through Socket Mode: direct
-messages, channel messages, and app mentions. Slack routes can bind a channel, or a default catch-
-all, to an agent so different channels reach different business specialists.
-
-Slack users must link their Slack account to a TulipFarm user through the single-use channel-link
-flow. Approval prompts can be answered in Slack, and surface interactions resolve back into the same
-TulipFarm interaction contract used by the web app. Slack knowledge sync keeps a durable per-channel
-cursor.
-
-Use [Connect Slack](/docs/administration/connect-slack) for setup.
-
-## Google Workspace
-
-The Google Workspace integration is one Google sign-in that spans Gmail, Calendar, Drive, and Docs.
-Agents can search, read, and draft Gmail; list, create, update, and delete Calendar events; search
-Drive; and read, create, and append Google Docs. A single OAuth connection carries the scopes for
-all four services, and each tool fails closed when no Google account is connected.
-
-Access follows the connected account's own Google permissions, so an agent reaches only what that
-account can. Use [Connect Google Workspace](/docs/administration/connect-an-integration) for setup.
-
-## Jira
-
-The Jira integration lets agents search Jira Cloud issues with JQL, read issue details and changelogs,
-list priorities and transitions, create and update issues, and move issues through workflow transitions
-after approval. It uses an Atlassian OAuth access token and Cloud ID that you connect through
-**Integrations → Jira**.
-
-## Linear
-
-The Linear integration lets agents list teams and issues, read issue details, and (after approval), create or update issues and add comments. It uses a scoped Linear API key that you connect through
-**Integrations → Linear**.
-
-Each action is fixed by the integration. Agents provide issue details such as an ID or title, but
-cannot choose an API address or send their own query.
-
-## Current limits
-
-Per-Agent tool restriction is not yet available. Once an integration is connected, its eligible
-tools are broadly available to agents on turns with the right authority. Do not rely on per-Agent
-integration allowlists today.
+- [Connect Slack](/docs/administration/connect-slack)
+- [Connect GitHub](/docs/administration/connect-github)
+- [Connect an integration](/docs/administration/connect-an-integration)

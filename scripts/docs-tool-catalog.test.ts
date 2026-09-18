@@ -1,6 +1,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { describe, expect, it } from "vitest";
+import { INTEGRATION_AUTHORING_TOOLS } from "../apps/api/src/soul/integrations/tools";
 import {
   collectTools,
   escapeCell,
@@ -52,13 +53,29 @@ describe("tool catalog page", () => {
     });
   });
 
-  it("keeps integration and rendering Tools off the page", () => {
+  it("includes every MCP setup Tool from the production registry", () => {
+    const names = collectTools()
+      .filter((tool) => tool.area === "integration")
+      .map((tool) => tool.name)
+      .sort();
+    expect(names).toEqual(INTEGRATION_AUTHORING_TOOLS.map((tool) => tool.name).sort());
+    expect(names.length).toBeGreaterThan(0);
+  });
+
+  it("renders each collected Tool exactly once", () => {
+    const tools = collectTools();
+    const names = [...renderPage(tools).matchAll(/^\| `([^`]+)` \|/gm)].map((match) => match[1]);
+    expect(names.sort()).toEqual(tools.map((tool) => tool.name).sort());
+    expect(new Set(names).size).toBe(names.length);
+  });
+
+  it("keeps dynamic MCP and rendering Tools off the page", () => {
     const names = new Set(collectTools().map((tool) => tool.name));
     for (const excluded of ["present", "request_input", "update_presentation"]) {
       expect(names.has(excluded), `${excluded} belongs to the surfaces page`).toBe(false);
     }
     for (const name of names) {
-      expect(name.startsWith("github_") || name.startsWith("slack_")).toBe(false);
+      expect(name.startsWith("mcp_")).toBe(false);
     }
   });
 });

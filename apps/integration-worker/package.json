@@ -5,10 +5,13 @@
   "dependencies": {
     "@tulipfarm/constants": "workspace:*",
     "@tulipfarm/integrations": "workspace:*",
+    "@tulipfarm/knowledge": "workspace:*",
+    "@tulipfarm/mcp": "workspace:*",
     "@tulipfarm/observability": "workspace:*",
     "@tulipfarm/schema": "workspace:*",
     "@tulipfarm/storage": "workspace:*",
     "dotenv": "^17.4.2",
+    "isolated-vm": "^7.0.1",
     "pg": "^8.23.0"
   },
   "scripts": {

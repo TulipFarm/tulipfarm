@@ -1,59 +1,74 @@
 ---
-title: Bundled integrations
-description: How bundled integrations appear in the catalog, verify provider access, and limit the actions available to agents.
+title: Integration catalog
+description: Find available MCP servers and native Slack and GitHub channels, and understand why a catalog listing does not grant access.
 ---
 
-An integration is a connected third party. Bundled integrations arrive with every instance, ready
-to connect. You do not install them. You connect one by giving TulipFarm the credentials and setup
-values its provider requires.
+An integration connects TulipFarm to an external service. Open **Integrations** to see the
+options available in your release.
 
-None of them are connected by default. Nothing leaves your instance until you connect one.
+## MCP servers
 
-## Find what is bundled
+Third-party agent tools use MCP, the Model Context Protocol. A server can offer tools,
+information called resources, and templates called prompts. Review the capabilities you
+want to allow rather than treating a catalog listing as permission to use everything.
 
-Open **Integrations** to see the catalog shipped by your release. Each card describes the provider
-and opens its current setup steps. The catalog is the source of truth because providers and their
-available operations can change between releases.
+The catalog is setup guidance, not a guarantee that every server feature works with
+TulipFarm. Discovery does not enable capabilities, and changing a server's configuration
+requires a new review.
 
-Some integrations expose provider actions to agents. Others also receive provider events, publish
-provider content into knowledge, or let people talk to agents from another service. The detail page
-shows the capabilities of that exact package.
+## Supported server connections
 
-## Connect one
+Remote servers must offer Streamable HTTP over HTTPS. A website address or an older
+standalone SSE endpoint is not a substitute for the server's MCP endpoint.
 
-The setup screen walks you through the steps declared by the integration. A step can ask for
-non-secret settings, encrypted credentials, or an OAuth sign-in.
+{/* tf-claim kind=path-exists value="packages/schema/src/mcp.ts" */}
 
-When a bundled package declares provider verification, the Connection remains unavailable until
-TulipFarm saves successful verification evidence. **Retry verification** repeats that declared
-check. An unavailable provider leaves the result incomplete; it is not proof that the credentials
-work. A provider rejection requires corrected or reconnected credentials.
+The supported protocol revisions are `2025-11-25`, `2025-06-18`, and `2025-03-26`.
+Unsupported revisions are refused. This is not a claim of support for a 2026 protocol revision
+or every optional MCP feature. Server requests for sampling, roots, or elicitation are not
+enabled.
 
-Credentials are stored encrypted in the secrets store. They are not written to the soul or shown
-to an agent.
+Local servers use an isolated standard-input/output connection. They need a container image
+pinned by digest, an executable inside that image, and an explicit list of outbound hosts.
+They do not inherit the host environment or run directly on the host. The container backend
+shipped for development is not a production isolation guarantee. Production uses the
+Kata Containers runtime, `io.containerd.kata.v2`, and refuses to fall back to an ordinary
+container. The host must have a working Docker and Kata installation with the required
+virtualization support; installing TulipFarm alone does not install that host runtime.
 
-## What agents can do
+See the upstream [Kata Docker setup guide](https://github.com/kata-containers/kata-containers/blob/main/docs/how-to/how-to-use-kata-with-docker.md)
+for supported host and runtime requirements. If the host cannot provide this isolation,
+use a remote HTTPS MCP server instead.
 
-Every integration is defined by a manifest. The manifest declares **egress**, what agents may do to
-the provider, and **ingress**, what the provider may send to TulipFarm.
+Token entry and browser sign-in use the secure account controls in **Integrations**. Do not
+put credentials in a server address, chat message, or agent instructions. Successful sign-in
+or discovery is not proof that a provider action, reply, or Knowledge sync has been tested.
 
-Each provider action becomes a separate tool with a fixed destination, input shape, output shape,
-and effect such as read, create, update, or delete. An agent cannot choose an undeclared provider
-address or call an operation that is absent from the manifest. Actions that require approval still
-pause for approval.
+## Knowledge sync
 
-## Add a provider that is missing
+Connecting an MCP server does not automatically make it a Knowledge source. Knowledge sync
+currently supports only the pinned local GitHub server profile and a personal token account.
+Choose **Set up GitHub Knowledge (local)** in the GitHub catalog entry to prefill that
+profile. The separate **Set up GitHub** option uses the remote server.
+Its reviewed, read-only `get_me` and `get_file_contents` tools must be available without a
+per-call approval. Other server builds, hosted GitHub, Slack, Drive, and Notion are not
+supported Knowledge profiles.
 
-Ask in chat to build an integration from the provider's public documentation. TulipFarm reviews
-and tests the exact package before asking you to approve publication. Published packages appear in
-the same catalog as bundled integrations.
+{/* tf-claim kind=path-exists value="apps/api/src/integrations/accounts/knowledge.ts" */}
 
-Existing reviewed packages can also be installed from **Integrations → Install from source**.
-Before installation, the screen shows the resolved ref, exact digest, capabilities, effects,
-destinations, authorization requirements, and incoming data. See
-[Connect an integration](/docs/administration/connect-an-integration#install-from-a-source).
+Synced pages remain read-only and private to the account owner. Reading a saved copy still
+requires a fresh successful source access check. Losing access or disconnecting removes the
+synced copy without deleting separately authored notes.
+
+## Native chat channels
+
+Slack and GitHub channels ship with TulipFarm. They receive events and deliver replies.
+Connecting a channel is separate from connecting an MCP server for agent tools.
+
+## Setup guides
 
 <Cards>
-  <Card title="Connect an integration" href="/docs/administration/connect-an-integration" description="The step-by-step for connecting one." />
-  <Card title="How integrations work" href="/docs/administration/how-integrations-work" description="Manifests, egress, ingress, and identity." />
+  <Card title="Connect an integration" href="/docs/administration/connect-an-integration" description="Choose a server and review its capabilities." />
+  <Card title="Connect Slack" href="/docs/administration/connect-slack" description="Use agents from Slack." />
+  <Card title="Connect GitHub" href="/docs/administration/connect-github" description="Connect a GitHub App for events and replies." />
 </Cards>

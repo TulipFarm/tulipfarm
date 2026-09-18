@@ -25,8 +25,12 @@ Run event/request vocabularies, canonical hashes, Secret references, and resourc
 | `src/integration-reply.ts` | Provider reply verdicts shared by the API, Worker, and eval harness. |
 | `src/llm.ts`, `src/model-catalog.ts` | LLM config schema and ModelProfile derivation. |
 | `src/guardrails.ts` | Guardrail policy schema with strict per-stage guard unions. |
-| `src/integration-manifest.ts` | Integration manifest and egress authoring schemas. |
-| `src/oim.ts` | Portable OIM profiles, fixtures, required configuration producers, Connection contract, package integrity, and stable Tool identity. Core 1.4 gates bounded MIME JSON and typed multipart/related requests. |
+| `src/integration-manifest.ts` | Bundled native channel manifest validation. |
+| `src/mcp.ts`, `src/integration-account.ts` | MCP server definitions, reviewed capabilities and exact account/consent/grant contracts. |
+| `src/mcp-knowledge.ts` | Explicit MCP Knowledge source configuration and visibility. |
+| `src/mcp-knowledge-profile.ts` | Pure canonical pinned GitHub Knowledge image/revision and personal local setup preset; shared by catalog and Knowledge. |
+| `src/mcp-tool-contract.ts` | Pure deterministic MCP Tool names and contracts shared by live registration and Soul publication. |
+| `src/mcp-definition-tools.ts` | Shipped MCP setup and resource/prompt declarations shared by API registration and eval. |
 | `src/network-tools.ts` | Model-visible declarations for governed web and API Tools. |
 | `src/record-delete-tools.ts` | Shared declarations for dependency-aware Record deletion Tools. |
 | `src/soul-repo-tools.ts` | Shipped repository-push declaration shared by API and ownership Eval. |
@@ -37,6 +41,8 @@ Run event/request vocabularies, canonical hashes, Secret references, and resourc
 ## Rules
 
 - Every schema is TypeBox; every validated type is derived with `Static<>`. Never hand-write both.
+- MCP Tool contracts classify provider content as `source_content`; hosts derive their DLP
+  declarations from the canonical contract rather than inventing another data class.
 - `definitionSchema()` rejects plain JSON Schema literals. Do not defeat that with casts.
 - Optional fields use `Type.Optional(...)`; never hand-write `required` arrays.
 - Use `Type.Unsafe<T>` only for shapes TypeBox cannot express; derive `T` from the same constants.

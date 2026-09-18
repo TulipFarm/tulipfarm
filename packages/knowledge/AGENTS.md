@@ -12,6 +12,7 @@ propagation. This is the sole accountable owner for source ACL enforcement.
 | Path | Owns |
 | --- | --- |
 | `src/source.ts`, `src/acl.ts`, `src/subject.ts` | Source records/store, the `decideKnowledgeAccess` gate, and the Page/Source subject projections. |
+| `src/mcp/` | Public `@tulipfarm/knowledge/mcp` entry: selected-file sync, checkpoints, account reads, live gates and cleanup without LLM backends. Contract in `src/mcp/README.md`. |
 | `src/ownership.ts` | Projects shared Team ownership and shares into the existing Knowledge ACL. |
 | `src/indexing.ts`, `src/retrieve.ts` | Authorized indexing and authorize -> rank -> re-check. |
 | `src/graph-expand.ts` | Bounded hop walk over `knowledge_links` and the banded hop-decay score. |
@@ -32,6 +33,8 @@ propagation. This is the sole accountable owner for source ACL enforcement.
 - Repositories take a `Queryable` from `@tulipfarm/storage`; they never open their own pool. The
   PGlite-backed repository tests stay in `apps/api`, which owns the migrations that build the
   tables under test.
+- `PgKnowledgeChunkRepo` takes an optional transaction port. Inside a caller-owned transaction,
+  pass `ambientTransactionPort(tx)` so index replacement shares its commit, rollback and fences.
 - Authorize before ranking or candidate exposure, never after. Default-deny every ACL path; live
   checks never fall back to cached ACLs.
 - Authored Pages are Sources whose provider is TulipFarm. `pageSubject()`/`sourceSubject()` project
