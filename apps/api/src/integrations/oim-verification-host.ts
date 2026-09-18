@@ -56,23 +56,7 @@ function credentialTargets(step: OimAuth["steps"][number]): readonly string[] {
         field.target.type === "credential" ? [field.target.slot] : []
       );
     case "oauth2":
-      return [
-        step.clientId.slot,
-        ...(step.clientSecret === undefined ? [] : [step.clientSecret.slot]),
-        ...step.bindings.flatMap((binding) =>
-          binding.target.type === "credential" ? [binding.target.slot] : []
-        ),
-      ];
     case "jwt_assertion":
-      return [
-        step.privateKey.slot,
-        ...(step.issuer.type === "credential" ? [step.issuer.slot] : []),
-        ...(step.subject?.type === "credential" ? [step.subject.slot] : []),
-        ...(step.installationId?.type === "credential" ? [step.installationId.slot] : []),
-        ...step.bindings.flatMap((binding) =>
-          binding.target.type === "credential" ? [binding.target.slot] : []
-        ),
-      ];
     case "app_manifest":
     case "install":
       return step.bindings.flatMap((binding) =>

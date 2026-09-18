@@ -6,8 +6,9 @@ maintainer: TulipFarm
 icon: linear
 capabilities:
   - List teams and issues available to the connected Linear API key
+  - Discover workflow states and active team members before changing status or assignee
   - Read individual issues before changing them
-  - Create, update, and comment on issues after approval
+  - Create issues, update status, assignee, priority or estimate, and comment after approval
 grants:
   - label: Linear teams and issues
     access: read
@@ -28,25 +29,30 @@ egress:
   operations:
     - name: list_teams
       description: List Linear teams available to this integration. Use this before creating an
-        issue when you do not know the exact team ID.
+        issue when you do not know the exact team ID. Page with first (1–50) and after until
+        hasNextPage is false; one page is not the full team list.
       operation: ListTeams
       document: |
-        query ListTeams {
-          teams {
+        query ListTeams($first: Int!, $after: String) {
+          teams(first: $first, after: $after) {
             nodes { id name key }
+            pageInfo { hasNextPage endCursor }
           }
         }
       variables_schema:
         type: object
         additionalProperties: false
-        properties: {}
+        required: [first]
+        properties:
+          first: { type: integer, minimum: 1, maximum: 50 }
+          after: { type: string, maxLength: 4096 }
     - name: list_issues
-      description: List Linear issues visible to this integration. Use the returned IDs before
+      description: List Linear issues visible to this integration, newest activity first. Use the returned IDs before
         reading, updating, or commenting on a specific issue.
       operation: ListIssues
       document: |
         query ListIssues($first: Int!, $after: String) {
-          issues(first: $first, after: $after) {
+          issues(first: $first, after: $after, orderBy: updatedAt) {
             nodes { id identifier title description url updatedAt state { id name } team { id name key } }
             pageInfo { hasNextPage endCursor }
           }
@@ -57,7 +63,7 @@ egress:
         required: [first]
         properties:
           first: { type: integer, minimum: 1, maximum: 50 }
-          after: { type: string }
+          after: { type: string, maxLength: 4096 }
     - name: read_issue
       description: Read one Linear issue by its ID or identifier. Use this before changing an issue
         so the requested edit is based on its current title, description, state, and team.
@@ -65,7 +71,8 @@ egress:
       document: |
         query ReadIssue($id: String!) {
           issue(id: $id) {
-            id identifier title description url updatedAt
+            id identifier title description url updatedAt priority estimate
+            assignee { id name }
             state { id name }
             team { id name key }
           }
@@ -96,14 +103,16 @@ egress:
           title: { type: string, minLength: 1 }
           description: { type: string }
     - name: update_issue
-      description: Update an existing Linear issue title or description. Read the issue first; this
-        changes Linear and requires approval.
+      description: Update an issue's title, description, status, assignee, priority or estimate.
+        Read the issue first. Discover stateId with list_team_states and assigneeId with
+        list_team_members for its team. Omit unchanged fields; null clears assigneeId or estimate.
+        Priority is 0 none, 1 urgent, 2 high, 3 normal, 4 low. Requires approval.
       operation: UpdateIssue
       document: |
-        mutation UpdateIssue($id: String!, $title: String, $description: String) {
-          issueUpdate(id: $id, input: { title: $title, description: $description }) {
+        mutation UpdateIssue($id: String!, $title: String, $description: String, $stateId: String, $assigneeId: String, $priority: Float, $estimate: Float) {
+          issueUpdate(id: $id, input: { title: $title, description: $description, stateId: $stateId, assigneeId: $assigneeId, priority: $priority, estimate: $estimate }) {
             success
-            issue { id identifier title description url state { id name } }
+            issue { id identifier title description url priority estimate assignee { id name } state { id name } }
           }
         }
       variables_schema:
@@ -114,6 +123,54 @@ egress:
           id: { type: string, minLength: 1 }
           title: { type: string, minLength: 1 }
           description: { type: string }
+          stateId: { type: string, minLength: 1, maxLength: 128 }
+          assigneeId: { type: ["string", "null"], minLength: 1, maxLength: 128 }
+          priority: { type: integer, minimum: 0, maximum: 4 }
+          estimate: { type: ["number", "null"], minimum: 0 }
+    - name: list_team_states
+      description: Discover workflow state IDs for an issue's team before changing status.
+        Page with first (1–50) and after until hasNextPage is false.
+      operation: ListTeamStates
+      document: |
+        query ListTeamStates($teamId: String!, $first: Int!, $after: String) {
+          team(id: $teamId) {
+            id
+            states(first: $first, after: $after) {
+              nodes { id name type position }
+              pageInfo { hasNextPage endCursor }
+            }
+          }
+        }
+      variables_schema:
+        type: object
+        additionalProperties: false
+        required: [teamId, first]
+        properties:
+          teamId: { type: string, minLength: 1, maxLength: 128 }
+          first: { type: integer, minimum: 1, maximum: 50 }
+          after: { type: string, maxLength: 4096 }
+    - name: list_team_members
+      description: Discover member IDs and active status for an issue's team before assigning it.
+        Page with first (1–50) and after until hasNextPage is false. Do not assign inactive members.
+      operation: ListTeamMembers
+      document: |
+        query ListTeamMembers($teamId: String!, $first: Int!, $after: String) {
+          team(id: $teamId) {
+            id
+            members(first: $first, after: $after) {
+              nodes { id name displayName active }
+              pageInfo { hasNextPage endCursor }
+            }
+          }
+        }
+      variables_schema:
+        type: object
+        additionalProperties: false
+        required: [teamId, first]
+        properties:
+          teamId: { type: string, minLength: 1, maxLength: 128 }
+          first: { type: integer, minimum: 1, maximum: 50 }
+          after: { type: string, maxLength: 4096 }
     - name: create_comment
       description: Add one comment to a Linear issue. Read the issue first to verify its ID and
         context; this changes Linear and requires approval.

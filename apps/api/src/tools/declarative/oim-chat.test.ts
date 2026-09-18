@@ -438,54 +438,74 @@ describe("OIM Chat dispatch safety", () => {
     expect(secretSource.resolveCurrent).not.toHaveBeenCalled();
   });
 
-  it("denies exact nested multipart File IDs before approval, lease, stream, or effect", async () => {
-    const multipart = multipartManifest();
-    const http = new RecordingHttp();
-    const secretSource = secrets({
-      "00000000-0000-4000-8000-000000000001": "first-token",
-    });
-    const effects = new MemoryEffectStore();
-    const authorizeFiles = vi.fn(async () => {
-      throw new Error("file denied");
-    });
-    const tooling = buildDeclarativeTools([integration(multipart)], {
-      businessId: BUSINESS_ID,
-      releaseDispatch: passthroughReleaseDispatch,
-      effects,
-      secrets: secretSource.service,
-      http,
-      connections: connectionResolver(() => [
-        connection("connection-1", true, "secret://00000000-0000-4000-8000-000000000001"),
-      ]),
-      authorizeFiles,
-    });
-    const registry = new InMemoryToolCatalog();
-    for (const tool of tooling.tools) registry.register(tool);
-    const dispatcher = new RegistryToolDispatcher({
-      registry,
-      artifacts: { read: async () => ({ content: {} }) } as never,
-      preparation: tooling.preparation,
-    });
+  it.each(["multipart", "mime"] as const)(
+    "denies exact %s File IDs before approval, lease, stream, or effect",
+    async (encoding) => {
+      const multipart = multipartManifest();
+      if (encoding === "mime") {
+        multipart.profiles.core = "1.4";
+        const operation = multipart.operations[0];
+        if (operation?.source.type !== "http") throw new Error("invalid fixture");
+        delete operation.source.multipart;
+        delete operation.source.contentType;
+        operation.source.mime = { outputPointer: "/raw", maxBytes: 1024 };
+        operation.requestSchema = {
+          type: "object",
+          required: ["attachments"],
+          properties: { attachments: { type: "array", items: { type: "string" } } },
+          additionalProperties: false,
+        };
+      }
+      const http = new RecordingHttp();
+      const secretSource = secrets({
+        "00000000-0000-4000-8000-000000000001": "first-token",
+      });
+      const effects = new MemoryEffectStore();
+      const authorizeFiles = vi.fn(async () => {
+        throw new Error("file denied");
+      });
+      const tooling = buildDeclarativeTools([integration(multipart)], {
+        businessId: BUSINESS_ID,
+        releaseDispatch: passthroughReleaseDispatch,
+        effects,
+        secrets: secretSource.service,
+        http,
+        connections: connectionResolver(() => [
+          connection("connection-1", true, "secret://00000000-0000-4000-8000-000000000001"),
+        ]),
+        authorizeFiles,
+      });
+      const registry = new InMemoryToolCatalog();
+      for (const tool of tooling.tools) registry.register(tool);
+      const dispatcher = new RegistryToolDispatcher({
+        registry,
+        artifacts: { read: async () => ({ content: {} }) } as never,
+        preparation: tooling.preparation,
+      });
 
-    await expect(
-      dispatcher.dispatch(AUTHORITY, {
-        callId: "call-3",
-        name: "acme_send_message",
-        arguments: {
-          body: {
-            uploads: [{ fileId: "file-b" }, { fileId: "file-a" }],
+      await expect(
+        dispatcher.dispatch(AUTHORITY, {
+          callId: "call-3",
+          name: "acme_send_message",
+          arguments: {
+            body:
+              encoding === "mime"
+                ? { attachments: ["file-b", "file-a"] }
+                : {
+                    uploads: [{ fileId: "file-b" }, { fileId: "file-a" }],
+                  },
           },
-        },
-      })
-    ).resolves.toMatchObject({ status: "denied" });
-    expect(authorizeFiles).toHaveBeenCalledWith(
-      expect.objectContaining({ fileIds: ["file-a", "file-b"] })
-    );
-    expect(await effects.list(BUSINESS_ID)).toEqual([]);
-    expect(http.sent).toEqual([]);
-    expect(secretSource.revision).not.toHaveBeenCalled();
-    expect(secretSource.resolveCurrent).not.toHaveBeenCalled();
-  });
+        })
+      ).resolves.toMatchObject({ status: "denied" });
+      expect(authorizeFiles).toHaveBeenCalledWith(
+        expect.objectContaining({ fileIds: ["file-a", "file-b"] })
+      );
+      expect(await effects.list(BUSINESS_ID)).toEqual([]);
+      expect(http.sent).toEqual([]);
+      expect(secretSource.revision).not.toHaveBeenCalled();
+      expect(secretSource.resolveCurrent).not.toHaveBeenCalled();
+    }
+  );
 
   it("denies a changed Connection configuration before effect or credential use", async () => {
     const configured = manifest();

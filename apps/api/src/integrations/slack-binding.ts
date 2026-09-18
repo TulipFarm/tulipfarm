@@ -112,11 +112,11 @@ async function resolveSlackIntegration(
   }
 }
 
-/** Best-effort default Slack binding; route listing surfaces bad-token failures later. */
+/** Idempotent default Slack binding; failed verification must fail the connect request. */
 export async function ensureDefaultSlackRoute(deps: SlackBindDeps): Promise<void> {
   const verify = deps.verifyBotToken ?? verifySlackBotToken;
   const resolved = await resolveSlackIntegration(deps, verify);
-  if (!resolved.ok) return;
+  if (!resolved.ok) throw new Error(resolved.error);
   const { appRowId, integrationId, verified } = resolved;
   const routeId = `slack:${verified.appId}:${verified.teamId}:route:default`;
 

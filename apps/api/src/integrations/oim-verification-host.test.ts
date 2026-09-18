@@ -220,6 +220,42 @@ class FacebookHttp implements EgressHttpPort {
 }
 
 describe("createOimVerificationHost", () => {
+  it("still rejects two actual producers for a verified credential", async () => {
+    const duplicate = structuredClone(manifest);
+    duplicate.auth?.steps.push({
+      id: "other-producer",
+      title: "Other producer",
+      type: "fields",
+      fields: [
+        {
+          id: "other_token",
+          label: "Other token",
+          input: "password",
+          target: { type: "credential", slot: "user_token" },
+        },
+      ],
+    });
+    const http = new FacebookHttp();
+    const host = createOimVerificationHost({
+      authSteps: { list: async () => [authStep] },
+      credentials: { read: async () => "fixture" },
+      http,
+      paginationRuntime: createOimFixturePaginationRuntime(),
+    });
+    await expect(
+      host.verify({
+        package: {
+          key: "facebook-v2",
+          manifest: duplicate,
+          packageDigest: "a".repeat(64),
+          identity: { id: "facebook", majorVersion: 2 },
+        },
+        connection,
+      })
+    ).rejects.toThrow("verification_credential_step_ambiguous:user_token");
+    expect(http.sent).toHaveLength(0);
+  });
+
   it("verifies every credential slot and walks all membership pages", async () => {
     const http = new FacebookHttp();
     const host = createOimVerificationHost({

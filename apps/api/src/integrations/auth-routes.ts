@@ -294,14 +294,14 @@ export function registerIntegrationAuthRoutes(
         // Server-side env is sealed and never returned in the response body.
         if (action.action === "completed") {
           if (Object.keys(action.env).length > 0) {
-            const { connectedNow } = await mergeConnectionEnv(deps, {
+            const { enabled } = await mergeConnectionEnv(deps, {
               slug: name,
               manifest,
               patch: action.env,
               commitMessage: `soul: integration ${name} auth step ${step}`,
               actor: commitActorFromRequest(req),
             });
-            if (connectedNow) await deps.onConnected?.(name);
+            if (enabled) await deps.onConnected?.(name);
           }
           return { action: "completed" };
         }
@@ -356,13 +356,22 @@ export function registerIntegrationAuthRoutes(
           externalSubject,
         });
       } else if (manifest && Object.keys(outcome.env).length > 0) {
-        const { connectedNow } = await mergeConnectionEnv(deps, {
+        const { enabled } = await mergeConnectionEnv(deps, {
           slug: outcome.slug,
           manifest,
           patch: outcome.env,
           commitMessage: `soul: integration ${outcome.slug} auth step ${outcome.stepIndex}`,
         });
-        if (connectedNow) await deps.onConnected?.(outcome.slug);
+        if (enabled) {
+          try {
+            await deps.onConnected?.(outcome.slug);
+          } catch {
+            return reply.redirect(
+              `${outcome.webUrl}/integrations/${outcome.slug}?status=error&reason=post_connect_failed`,
+              302
+            );
+          }
+        }
       }
       return reply.redirect(
         `${outcome.webUrl}/integrations/${outcome.slug}?step=${outcome.stepIndex}&status=ok`,

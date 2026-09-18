@@ -1,4 +1,10 @@
-# Connect Google Workspace
+# Legacy Google adapter
+
+The curated `google` entry is **Coming soon**, not the production-active `google-workspace` OIM
+package. Existing code-backed Tools do not prove this entry can be connected through normal
+catalog setup. For the OIM package's declared Tools, permissions, review gates, transfer limits,
+and remaining event/Knowledge gaps, use `integrations/google-workspace/setup-guide.md`.
+The instructions below describe the legacy adapter only.
 
 One sign-in covers Gmail, Calendar, Drive, and Docs. Connecting is two screens, the same shape as
 Slack: paste an OAuth client once, then click **Sign in with Google**. Signing in stores a
