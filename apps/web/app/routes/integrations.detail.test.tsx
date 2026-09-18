@@ -551,7 +551,7 @@ test("renders an exact Connection verification repair after reload", async () =>
   const heading = await screen.findByRole("heading", { name: "Connection needs verification" });
   expect(screen.getByRole("button", { name: "Retry verification" })).toBeInTheDocument();
   expect(screen.getByRole("status")).toHaveTextContent("verification needs another try");
-  expect(heading).toHaveFocus();
+  await waitFor(() => expect(heading).toHaveFocus());
 });
 
 test("recovers missing generic setup with a valid scope, announcement, and focus", async () => {
@@ -586,7 +586,7 @@ test("recovers missing generic setup with a valid scope, announcement, and focus
   expect(screen.getByRole("status")).toHaveTextContent(
     "Connection setup loaded. Add Connection details."
   );
-  expect(heading).toHaveFocus();
+  await waitFor(() => expect(heading).toHaveFocus());
   expect(screen.getByLabelText("Owner")).toHaveValue("Business");
 
   await user.type(screen.getByLabelText("Connection name"), "Support");
@@ -634,7 +634,7 @@ test("preserves local exact setup when route revalidation cannot reload it", asy
   expect(screen.getByTestId("location-search")).toHaveTextContent("?connection=connection-1");
   expect(screen.queryByRole("button", { name: "Retry setup" })).not.toBeInTheDocument();
   expect(screen.getByRole("status")).toHaveTextContent("Connection added.");
-  expect(completion).toHaveFocus();
+  await waitFor(() => expect(completion).toHaveFocus());
   expect(createOimConnection).toHaveBeenCalledTimes(1);
 });
 
@@ -705,7 +705,7 @@ test("keeps creation focus and status through the Connection query revalidation"
   );
   await waitFor(() => expect(vi.mocked(listOimConnections).mock.calls.length).toBeGreaterThan(1));
   expect(screen.getByRole("status")).toHaveTextContent("Connection added.");
-  expect(completion).toHaveFocus();
+  await waitFor(() => expect(completion).toHaveFocus());
   expect(createOimConnection).toHaveBeenCalledTimes(1);
 });
 
@@ -757,7 +757,9 @@ test("resumes the listed exact Connection and resets to a blank add-another form
   expect(await screen.findByLabelText("Connection name")).toHaveValue("");
   expect(screen.getByLabelText("API token")).toHaveValue("");
   expect(screen.getByTestId("location-search")).toHaveTextContent("");
-  expect(screen.getByRole("heading", { name: "Add Connection" })).toHaveFocus();
+  await waitFor(() =>
+    expect(screen.getByRole("heading", { name: "Add Connection" })).toHaveFocus()
+  );
   expect(createOimConnection).not.toHaveBeenCalled();
 });
 
