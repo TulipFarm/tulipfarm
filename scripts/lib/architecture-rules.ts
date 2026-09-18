@@ -132,6 +132,7 @@ export const ARCHITECTURE_CONFIG: ArchitectureConfig = {
     secrets: ["schema", "authz", "audit", "storage", "observability"],
     "run-kernel": ["schema", "audit", "storage", "observability"],
     sandbox: ["schema", "authz", "audit", "storage", "observability"],
+    mcp: ["schema", "sandbox"],
     "tool-broker": ["schema", "authz", "audit", "secrets", "sandbox", "storage", "observability"],
     knowledge: [
       "schema",

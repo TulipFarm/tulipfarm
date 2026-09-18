@@ -37,6 +37,7 @@ An omitted edge is forbidden.
 | `packages/secrets` | `packages/schema`, `packages/authz`, `packages/audit`, `packages/storage`, `packages/observability` |
 | `packages/run-kernel` | `packages/schema`, `packages/audit`, `packages/storage`, `packages/observability` |
 | `packages/sandbox` | `packages/schema`, `packages/authz`, `packages/audit`, `packages/storage`, `packages/observability` |
+| `packages/mcp` | `packages/schema`, `packages/sandbox` |
 | `packages/tool-broker` | `packages/schema`, `packages/authz`, `packages/audit`, `packages/secrets`, `packages/sandbox`, `packages/storage`, `packages/observability` |
 | `packages/skill-sandbox` | `packages/schema`, `packages/soul`, `packages/run-kernel`, `packages/sandbox`, `packages/tool-broker` |
 | `packages/knowledge` | `packages/schema`, `packages/authz`, `packages/audit`, `packages/storage`, `packages/observability`, `packages/constants`, `packages/llm`, `packages/tool-host` |

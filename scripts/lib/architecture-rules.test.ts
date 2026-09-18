@@ -143,6 +143,10 @@ describe("ARCHITECTURE_CONFIG", () => {
     expect(ARCHITECTURE_CONFIG.allowlist.observability).toEqual([]);
   });
 
+  it("limits MCP to schema contracts and isolated execution", () => {
+    expect(ARCHITECTURE_CONFIG.allowlist.mcp).toEqual(["schema", "sandbox"]);
+  });
+
   it("encodes the soul allowlist from the contract", () => {
     expect(new Set(ARCHITECTURE_CONFIG.allowlist.soul)).toEqual(
       new Set(["schema", "authz", "audit", "storage", "observability", "surface"])

@@ -172,6 +172,26 @@ export {
   validateLlmConfig,
 } from "./llm";
 export {
+  MCP_SUPPORTED_PROTOCOL_VERSIONS,
+  McpAuthenticationSchema,
+  type McpCapabilityReview,
+  McpCapabilityReviewSchema,
+  type McpConfigure,
+  McpConfigureSchema,
+  type McpIdentity,
+  McpIdentitySchema,
+  type McpIntegrationDefinition,
+  McpIntegrationDefinitionSchema,
+  McpPromptReviewSchema,
+  McpResourceReviewSchema,
+  type McpServerDefinition,
+  McpServerDefinitionSchema,
+  McpToolReviewSchema,
+  type McpTransport,
+  McpTransportSchema,
+  validateMcpIntegrationDefinition,
+} from "./mcp";
+export {
   emptyMemorySections,
   isMemorySectionKey,
   MEMORY_SECTION_HEADINGS,
