@@ -96,6 +96,7 @@ sibling `AGENTS.md`.
 | [`packages/surface`](packages/surface/AGENTS.md) | Tulip Surface Protocol contracts, catalog, Artifacts |
 | [`packages/surface-web`](packages/surface-web/AGENTS.md) · [`-slack`](packages/surface-slack/AGENTS.md) · [`-github`](packages/surface-github/AGENTS.md) · [`-discord`](packages/surface-discord/AGENTS.md) · [`-teams`](packages/surface-teams/AGENTS.md) · [`-google-chat`](packages/surface-google-chat/AGENTS.md) · [`-telegram`](packages/surface-telegram/AGENTS.md) | Channel-native TSP renderers |
 | [`packages/sandbox`](packages/sandbox/AGENTS.md) | Isolated execution contract, backend ports |
+| [`packages/mcp`](packages/mcp/AGENTS.md) | Identity-bound MCP protocol, bounded discovery, HTTP/OAuth and isolated stdio |
 | [`packages/observability`](packages/observability/AGENTS.md) | OTel conventions, metrics, health/readiness, redaction |
 | [`packages/editor`](packages/editor/AGENTS.md) | Shared rich-text editor |
 | [`packages/testkit`](packages/testkit/AGENTS.md) | Shared test fixtures and helpers |
