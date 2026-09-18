@@ -44,6 +44,18 @@ describe("assembleSystemPrompt — blocks", () => {
     expect(out).not.toContain("## Untrusted content");
   });
 
+  it("requires MCP business actions without disabling ordinary web research", () => {
+    const out = assembleSystemPrompt(baseCtx());
+
+    expect(out).toContain("Third-party business actions use reviewed MCP Tools only.");
+    expect(out).toContain("Shared accounts require current access and explicit consent");
+    expect(out).toContain("Keep personal account output in a private Chat.");
+    expect(out).toContain("Never switch accounts, ask for a secret, use raw HTTP");
+    expect(out).toContain("Generic network Tools remain available for ordinary web search");
+    expect(out).not.toContain("a user-supplied credential in secrets");
+    expect(out).not.toContain("is the ordinary path, not a workaround");
+  });
+
   it("omits the platform block only when skipPlatformPrompt is set", () => {
     const out = assembleSystemPrompt(baseCtx({ skipPlatformPrompt: true, personality: "sales" }));
 

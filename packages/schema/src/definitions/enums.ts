@@ -60,18 +60,10 @@ export type ToolIdempotencyStrategy = (typeof TOOL_IDEMPOTENCY_STRATEGIES)[numbe
  * kind is not the kind of the adapter its ref resolves to, so an unserved kind is a Tool that
  * validates at install and can never dispatch.
  *
- * `native` is served by the Tool host rather than the effect plane; `mcp` is emitted by the import
- * proposal path and has no adapter yet. Both are pinned as declaration-only by
+ * `native` is served by the Tool host rather than the effect plane and is declaration-only in
  * `scripts/adapter-kind-dispatch.test.ts`, which fails the build on a new unserved kind.
  */
-export const TOOL_ADAPTER_KINDS = [
-  "native",
-  "integration",
-  "mcp",
-  "openapi",
-  "graphql",
-  "sandbox",
-] as const;
+export const TOOL_ADAPTER_KINDS = ["native", "mcp", "sandbox"] as const;
 export type ToolAdapterKind = (typeof TOOL_ADAPTER_KINDS)[number];
 
 /** Reasoning/effort level requested from a model (SPEC §17). */

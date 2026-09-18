@@ -1,10 +1,8 @@
-import {
-  type ChannelIdentityPort,
-  ChannelRouteDeniedError,
-  type ChannelRoutingSource,
-  type ChannelRunStarter,
-  type IntegrationHttpPort,
-  resolveChannelRoute,
+import type {
+  ChannelIdentityPort,
+  ChannelRoutingSource,
+  ChannelRunStarter,
+  IntegrationHttpPort,
 } from "@tulipfarm/integrations";
 import { type InternalApiClient, InternalApiError } from "../internal/client";
 
@@ -611,55 +609,24 @@ export async function reserveSlackSlashCommand(
     );
   }
 
-  try {
-    const principal = await deps.identities.resolve({
-      businessId: deps.businessId,
-      provider: deps.provider,
-      externalSubject: userId,
-      externalTenantId,
-    });
-    if (principal === undefined) {
-      return reserveSlackCommandResponse(
-        { externalTenantId, triggerId, responseUrl, response: "unlinked" },
-        deps
-      );
-    }
-    const snapshot = await deps.routing.load({
-      businessId: deps.businessId,
-      provider: deps.provider,
-      externalTenantId,
-    });
-    const route = resolveChannelRoute(snapshot, {
-      businessId: deps.businessId,
-      provider: deps.provider,
-      externalTenantId,
-      externalAppId,
-      channelId,
-      eventType: "message",
-      principal,
-      action: "channels.message.receive",
-      targetType: "slack.channel",
-    });
-    await deps.runs.start({
-      businessId: deps.businessId,
-      eventId: `slack-command:${externalTenantId}:${triggerId}`,
-      integrationId: route.integrationId,
-      routeId: route.routeId,
-      agentId: route.agentId,
-      principal,
-      message: { externalAppId, channelId, text, media: [] },
-    });
-    return reserveSlackCommandResponse(
-      { externalTenantId, triggerId, responseUrl, response: "starting" },
-      deps
-    );
-  } catch (error) {
-    if (!(error instanceof ChannelRouteDeniedError)) throw error;
-    return reserveSlackCommandResponse(
-      { externalTenantId, triggerId, responseUrl, response: "denied" },
-      deps
-    );
+  const accepted = await deps.internalApi.require<{
+    response: "starting" | "unlinked" | "denied";
+  }>("POST", "/api/v1/internal/channels/slack/commands", {
+    command: "/tulipfarm",
+    user_id: userId,
+    channel_id: channelId,
+    team_id: externalTenantId,
+    api_app_id: externalAppId,
+    trigger_id: triggerId,
+    text,
+  });
+  if (!["starting", "unlinked", "denied"].includes(accepted.response)) {
+    throw new Error("native_slack_command_response_invalid");
   }
+  return reserveSlackCommandResponse(
+    { externalTenantId, triggerId, responseUrl, response: accepted.response },
+    deps
+  );
 }
 
 export async function handleSlackSlashCommand(

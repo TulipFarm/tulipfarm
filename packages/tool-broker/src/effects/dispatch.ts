@@ -94,6 +94,7 @@ export type ToolDispatchErrorCode =
   | "contract_not_found"
   | "adapter_not_found"
   | "adapter_kind_mismatch"
+  | "mcp_binding_mismatch"
   | "dispatch_failed"
   | "dispatch_in_progress"
   | "ambiguous"
@@ -239,6 +240,13 @@ export class EffectDispatcher {
         `${contract.adapter.kind}!=${adapter.kind}`
       );
     }
+    if (
+      contract.adapter.kind === "mcp" &&
+      (effect.intent.mcp?.serverId !== contract.adapter.ref ||
+        effect.intent.mcp?.serverRevision !== effect.intent.toolVersion)
+    ) {
+      throw new ToolDispatchError("mcp_binding_mismatch", effectId);
+    }
     effect = await this.recoverInterruptedDispatch(businessId, effect, contract);
     await this.assertRetryReady(businessId, effect);
     const validateOutput = ajv.compile(contract.outputSchema);
@@ -256,6 +264,7 @@ export class EffectDispatcher {
           destination: effect.intent.destination,
           dataClasses: contract.dataClasses,
           ...this.deps.mutationIdentity,
+          ...(effect.intent.mcp === undefined ? {} : { integrationId: effect.intent.mcp.serverId }),
         });
       } catch (error) {
         // Any guard failure denies, but the operator still needs to know which switch stopped them.

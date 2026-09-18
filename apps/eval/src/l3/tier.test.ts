@@ -1,6 +1,7 @@
 import { execFileSync } from "node:child_process";
 import path from "node:path";
 import type { ModelInvocationResult, ModelStreamChunk } from "@tulipfarm/agent-runtime";
+import { McpAccountAuthority, mcpCapabilityDigest, mcpToolName } from "@tulipfarm/integrations";
 import {
   contentText,
   type GuardrailDefinition,
@@ -8,6 +9,9 @@ import {
   type ToolContractDefinition,
   textContent,
 } from "@tulipfarm/schema";
+import * as soulRuntime from "@tulipfarm/soul";
+import { SoulLoader } from "@tulipfarm/soul";
+import { McpAccountStore } from "@tulipfarm/storage";
 import { TurnGuardrails } from "@tulipfarm/turn-executor";
 import { describe, expect, it, vi } from "vitest";
 import type { EvalCase } from "../case.ts";
@@ -19,6 +23,7 @@ import { scriptedBinding } from "../scripted.ts";
 import { NO_SPEND } from "../spend.ts";
 import { openEvalDatabase } from "./database.ts";
 import { FILE_CREATE_TOOL } from "./file-store.ts";
+import { EVAL_MCP_SERVER, EVAL_MCP_STATUS } from "./mcp-provider.ts";
 import { SOUL_WRITE_TOOL } from "./soul-write.ts";
 import { foldJourney, type PersistedTurn, runPersistedTurn } from "./tier.ts";
 
@@ -65,7 +70,7 @@ const ROUTINE_TOOL_CONTRACT: ToolContractDefinition = {
     idempotency: { strategy: "provider" },
     retry: { maxAttempts: 2, safeToRetry: true },
     dryRun: false,
-    adapter: { kind: "integration", ref: "eval-routine-provider" },
+    adapter: { kind: "native", ref: "eval-routine-provider" },
   },
 } as ToolContractDefinition;
 
@@ -615,14 +620,14 @@ describe("a journey", () => {
   );
 
   it(
-    "parks publication for approval before installing and reading it on the next Turn",
+    "publishes MCP configuration and reads it through a fresh loader on the next Turn",
     async () => {
       soul ??= await loadEvalSoul();
       const corpus = await loadCorpus(path.join(__dirname, "../../corpus"), soul);
       const evalCase = corpus.cases.find(
-        (candidate) => candidate.id === "l3-a-published-integration-is-visible-next-turn"
+        (candidate) => candidate.id === "l3-a-configured-mcp-server-is-visible-next-turn"
       );
-      if (evalCase === undefined) throw new Error("Integration authoring journey Case is missing");
+      if (evalCase === undefined) throw new Error("MCP setup journey Case is missing");
       const database = await openEvalDatabase();
 
       try {
@@ -635,16 +640,9 @@ describe("a journey", () => {
         const waits = await database.query(
           "SELECT kind, status FROM run_waits WHERE kind = 'approval'"
         );
-        const operations = await database.query(
-          "SELECT phase, package_snapshot FROM oim_release_install_operations"
-        );
-
         expect(waits.rows).toEqual([{ kind: "approval", status: "satisfied" }]);
-        expect(operations.rows).toHaveLength(1);
-        expect(operations.rows[0]?.phase).toBe("completed");
-        expect(operations.rows[0]?.package_snapshot).toBeDefined();
         expect(turn.soulCommits.flatMap((commit) => commit.paths)).toContain(
-          "integrations/journey-acme/oim.yml"
+          "integrations/journey-acme/mcp.yaml"
         );
         expect(turn.publishedArtifacts).toContain("Integration:journey-acme");
         expect(
@@ -656,17 +654,245 @@ describe("a journey", () => {
               (result.arguments as { slug?: unknown }).slug === "journey-acme"
           )?.output
         ).toMatchObject({
-          oimManifest: { metadata: { name: "Journey Acme" } },
+          server: { server: { label: "Journey Acme" } },
         });
         expect(turn.toolCalls.map((call) => call.name)).toEqual([
-          "integration_draft_review",
-          "integration_draft_create",
-          "integration_draft_create",
+          "integration_configure",
+          "integration_configure",
           "integration_get",
         ]);
       } finally {
         await database.close();
       }
+    },
+    TIMEOUT
+  );
+});
+
+describe("MCP domain and authority Cases", () => {
+  async function loadMcpCase(id: string) {
+    soul ??= await loadEvalSoul();
+    const corpus = await loadCorpus(path.join(__dirname, "../../corpus"), soul);
+    const evalCase = corpus.cases.find((candidate) => candidate.id === id);
+    if (evalCase === undefined) throw new Error(`Missing MCP Case ${id}`);
+    return evalCase;
+  }
+
+  function score(evalCase: EvalCase, turn: PersistedTurn) {
+    return scoreCase(evalCase.expect, {
+      systemPrompt: turn.systemPrompt,
+      toolCalls: turn.toolCalls,
+      output: turn.answer === null ? undefined : { kind: "text", text: turn.answer },
+      status: turn.runStatus,
+      guardrails: turn.guardrails,
+      persisted: turn,
+    });
+  }
+
+  it("pins the fake provider metadata to the real loaded capability review", async () => {
+    const evalCase = await loadMcpCase("l3-mcp-uses-the-exact-selected-account");
+    const reviewed = soul.loader.integrations.get(EVAL_MCP_SERVER)?.mcp?.reviewed.tools[0];
+    expect(reviewed?.digest).toBe(
+      mcpCapabilityDigest({
+        ...EVAL_MCP_STATUS,
+        kind: "tool",
+        identity: {
+          serverId: EVAL_MCP_SERVER,
+          accountId: "personal",
+          subjectId: "eval",
+          configurationRevision: "fixture",
+        },
+      })
+    );
+    expect(evalCase.tools).toEqual([
+      {
+        name: mcpToolName(EVAL_MCP_SERVER, EVAL_MCP_STATUS.name),
+        description: EVAL_MCP_STATUS.description,
+        inputSchema: EVAL_MCP_STATUS.inputSchema,
+        mutating: reviewed?.mutating,
+      },
+    ]);
+    expect(reviewed?.requiresApproval).toBe(true);
+  });
+
+  it.each([
+    "l3-mcp-uses-the-exact-selected-account",
+    "l3-mcp-ambiguous-accounts-require-selection",
+    "l3-mcp-expired-personal-never-falls-back",
+    "l3-mcp-shared-account-requires-consent",
+    "l3-mcp-consented-shared-account-can-call",
+    "l3-mcp-personal-account-cannot-enter-shared-chat",
+    "l3-mcp-shared-consent-does-not-replace-a-grant",
+    "l3-mcp-prefers-personal-default",
+    "l3-mcp-shared-default-needs-explicit-selection",
+    "l3-mcp-revoked-grant-blocks-approved-call",
+    "l3-mcp-reviewed-tool-contract-follows-publication",
+  ])(
+    "scores real dispatch results, not model prose: %s",
+    async (id) => {
+      const evalCase = await loadMcpCase(id);
+      const turn = await runPersistedTurn({ evalCase, soul, binding: scriptedBinding() });
+      expect(
+        score(evalCase, turn).filter((result) => !result.passed),
+        JSON.stringify(turn.toolResults, null, 2)
+      ).toEqual([]);
+      expect(turn.toolResults.length).toBeGreaterThan(0);
+    },
+    TIMEOUT
+  );
+
+  it(
+    "reads the active bundle even when the authored loader loses the MCP definition",
+    async () => {
+      const evalCase = await loadMcpCase("l3-a-configured-mcp-server-is-visible-next-turn");
+      const original = SoulLoader.prototype.load;
+      const broken = vi.spyOn(SoulLoader.prototype, "load").mockImplementation(async function (
+        this: SoulLoader
+      ) {
+        await original.call(this);
+        this.integrations.delete("journey-acme");
+      });
+      try {
+        const turn = await runPersistedTurn({ evalCase, soul, binding: scriptedBinding() });
+        expect(turn.soulCommits.flatMap((commit) => commit.paths)).toContain(
+          "integrations/journey-acme/mcp.yaml"
+        );
+        expect(turn.publishedArtifacts).toContain("Integration:journey-acme");
+        expect(score(evalCase, turn).filter((result) => !result.passed)).toEqual([]);
+      } finally {
+        broken.mockRestore();
+      }
+      const turn = await runPersistedTurn({ evalCase, soul, binding: scriptedBinding() });
+      expect(score(evalCase, turn).filter((result) => !result.passed)).toEqual([]);
+    },
+    TIMEOUT
+  );
+
+  it(
+    "fails the journey when the active-bundle store loses the published definition",
+    async () => {
+      const evalCase = await loadMcpCase("l3-a-configured-mcp-server-is-visible-next-turn");
+      const original = soulRuntime.createSoulMcpDefinitionStore;
+      const broken = vi
+        .spyOn(soulRuntime, "createSoulMcpDefinitionStore")
+        .mockImplementation((options) => {
+          const store = original(options);
+          return {
+            ...store,
+            get: (id) => (id === "journey-acme" ? undefined : store.get(id)),
+          };
+        });
+      try {
+        const turn = await runPersistedTurn({ evalCase, soul, binding: scriptedBinding() });
+        expect(turn.publishedArtifacts).toContain("Integration:journey-acme");
+        expect(
+          score(evalCase, turn)
+            .filter((result) => !result.passed)
+            .map((result) => result.expectation.kind)
+        ).toContain("tool_result_field_equals");
+      } finally {
+        broken.mockRestore();
+      }
+      const turn = await runPersistedTurn({ evalCase, soul, binding: scriptedBinding() });
+      expect(score(evalCase, turn).filter((result) => !result.passed)).toEqual([]);
+    },
+    TIMEOUT
+  );
+
+  it(
+    "fails the publication journey when the compiler omits reviewed MCP Tool contracts",
+    async () => {
+      const evalCase = await loadMcpCase("l3-mcp-reviewed-tool-contract-follows-publication");
+      const original = soulRuntime.compileExecutionBundle;
+      const broken = vi
+        .spyOn(soulRuntime, "compileExecutionBundle")
+        .mockImplementation((request) => {
+          const bundle = original(request);
+          return {
+            ...bundle,
+            definitions: bundle.definitions.filter(
+              (definition) => definition.slug !== "mcp-eval-mcp-status-51b1cdd4ae261c34"
+            ),
+          };
+        });
+      try {
+        const turn = await runPersistedTurn({ evalCase, soul, binding: scriptedBinding() });
+        expect(
+          score(evalCase, turn)
+            .filter((result) => !result.passed)
+            .map((result) => result.expectation.kind)
+        ).toContain("soul_published");
+      } finally {
+        broken.mockRestore();
+      }
+      const turn = await runPersistedTurn({ evalCase, soul, binding: scriptedBinding() });
+      expect(score(evalCase, turn).filter((result) => !result.passed)).toEqual([]);
+    },
+    TIMEOUT
+  );
+
+  it(
+    "fails the revocation Case when the pending grant removal is lost",
+    async () => {
+      const evalCase = await loadMcpCase("l3-mcp-revoked-grant-blocks-approved-call");
+      const broken = vi.spyOn(McpAccountStore.prototype, "revokeGrant").mockResolvedValue();
+      try {
+        const turn = await runPersistedTurn({ evalCase, soul, binding: scriptedBinding() });
+        const evidence = JSON.stringify(
+          { toolResults: turn.toolResults, providerCalls: turn.mcpProviderCallCount },
+          null,
+          2
+        );
+        expect(broken, evidence).toHaveBeenCalledWith("eval", "shared-working", "user", "eval");
+        expect(
+          score(evalCase, turn)
+            .filter((result) => !result.passed)
+            .map((result) => result.expectation.kind),
+          evidence
+        ).toContain("tool_result_reason_contains");
+      } finally {
+        broken.mockRestore();
+      }
+      const turn = await runPersistedTurn({ evalCase, soul, binding: scriptedBinding() });
+      expect(score(evalCase, turn).filter((result) => !result.passed)).toEqual([]);
+    },
+    TIMEOUT
+  );
+
+  it(
+    "fails the privacy Case when shared Chat is incorrectly admitted as private",
+    async () => {
+      const evalCase = await loadMcpCase("l3-mcp-personal-account-cannot-enter-shared-chat");
+      const original = McpAccountAuthority.prototype.resolve;
+      const broken = vi
+        .spyOn(McpAccountAuthority.prototype, "resolve")
+        .mockImplementation(function (this: McpAccountAuthority, context) {
+          return original.call(
+            this,
+            context.kind === "chat" ? { ...context, visibility: "private" } : context
+          );
+        });
+      try {
+        const turn = await runPersistedTurn({ evalCase, soul, binding: scriptedBinding() });
+        const evidence = JSON.stringify(
+          { toolResults: turn.toolResults, providerCalls: turn.mcpProviderCallCount },
+          null,
+          2
+        );
+        expect(broken, evidence).toHaveBeenCalledWith(
+          expect.objectContaining({ kind: "chat", visibility: "shared" })
+        );
+        expect(
+          score(evalCase, turn)
+            .filter((result) => !result.passed)
+            .map((result) => result.expectation.kind),
+          evidence
+        ).toContain("tool_result_reason_contains");
+      } finally {
+        broken.mockRestore();
+      }
+      const turn = await runPersistedTurn({ evalCase, soul, binding: scriptedBinding() });
+      expect(score(evalCase, turn).filter((result) => !result.passed)).toEqual([]);
     },
     TIMEOUT
   );

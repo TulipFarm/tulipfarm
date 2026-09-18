@@ -1,4 +1,4 @@
-import { OIM_CONNECTION_REFRESH_QUEUE } from "@tulipfarm/integrations";
+import { PRODUCT_TELEMETRY_QUEUE } from "@tulipfarm/observability";
 import type { PgBoss } from "pg-boss";
 import { describe, expect, it, vi } from "vitest";
 import type { Queryable } from "./db";
@@ -209,13 +209,11 @@ describe("startJobConsumers", () => {
     expect(boss.createQueue).not.toHaveBeenCalledWith(MAINTENANCE_SWEEP_QUEUE);
   });
 
-  it("refreshes due OIM Connections and fails only when the API request fails", async () => {
+  it("dispatches product telemetry and propagates API request failures", async () => {
     const require = vi
       .fn()
-      .mockResolvedValueOnce({ examined: 5, refreshed: 2, failed: 3 })
+      .mockResolvedValueOnce(undefined)
       .mockRejectedValueOnce(new Error("POST failed with 503"));
-    const error = vi.fn();
-    const info = vi.fn();
     const boss = {
       start: vi.fn(async () => {}),
       createQueue: vi.fn(async () => {}),
@@ -229,21 +227,15 @@ describe("startJobConsumers", () => {
       database: { query: vi.fn(async () => ({ rows: [] })) } as Queryable,
       boss: boss as unknown as PgBoss,
       internalApi: { require } as unknown as InternalApiClient,
-      log: { error, info },
     });
 
-    expect(boss.createQueue).toHaveBeenCalledWith(OIM_CONNECTION_REFRESH_QUEUE);
-    const handler = boss.work.mock.calls.find(
-      ([queue]) => queue === OIM_CONNECTION_REFRESH_QUEUE
-    )?.[1];
+    expect(boss.createQueue.mock.calls).toHaveLength(3);
+    expect(boss.createQueue).toHaveBeenCalledWith(PRODUCT_TELEMETRY_QUEUE);
+    const handler = boss.work.mock.calls.find(([queue]) => queue === PRODUCT_TELEMETRY_QUEUE)?.[1];
     await expect(handler?.([])).resolves.toBeUndefined();
-    expect(require).toHaveBeenCalledWith("POST", "/api/v1/internal/oim/connections/refresh-due");
-    expect(error).toHaveBeenCalledWith("oim-connection-refresh examined=5 refreshed=2 failed=3");
+    expect(require).toHaveBeenCalledWith("POST", "/api/v1/internal/system/telemetry/dispatch");
 
     await expect(handler?.([])).rejects.toThrow("POST failed with 503");
-    expect(error).toHaveBeenCalledWith(
-      expect.stringContaining(`queue handler threw queue=${OIM_CONNECTION_REFRESH_QUEUE}`)
-    );
   });
 });
 

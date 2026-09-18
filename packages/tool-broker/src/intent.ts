@@ -1,24 +1,12 @@
 import { approvalIntentDigest } from "@tulipfarm/authz";
-import type { OimOperation } from "@tulipfarm/schema";
+import { ajv, type McpExecutionBinding, McpExecutionBindingSchema } from "@tulipfarm/schema";
+
+const isMcpBinding = ajv.compile<McpExecutionBinding>(McpExecutionBindingSchema);
 
 export interface ToolTargetRef {
   readonly type: string;
   readonly id: string;
   readonly domain?: string;
-}
-
-export interface ToolConnectionBinding {
-  readonly connectionId: string;
-  readonly integrationId: string;
-  readonly integrationMajorVersion: number;
-  readonly operationId: string;
-  readonly credentialSlot?: string;
-  readonly credentialRevision?: string;
-  readonly identityMode: OimOperation["identityMode"];
-  readonly principalKind?: string;
-  readonly principalId?: string;
-  readonly manifestDigest: string;
-  readonly configurationDigest: string;
 }
 
 export interface ToolIntent {
@@ -42,16 +30,9 @@ export interface ToolIntent {
   readonly principalKind?: string;
   readonly principalId?: string;
   readonly activeSkillName?: string;
-  readonly integrationId?: string;
-  readonly integrationMajorVersion?: number;
-  readonly operationId?: string;
-  readonly manifestDigest?: string;
-  readonly configurationDigest?: string;
   readonly destination?: string;
   readonly credentialRef?: string;
-  readonly connection?: ToolConnectionBinding;
-  readonly secondaryCredentialRef?: string;
-  readonly secondaryConnection?: ToolConnectionBinding;
+  readonly mcp?: McpExecutionBinding;
   readonly idempotencyKey: string;
 }
 
@@ -80,27 +61,16 @@ function optionalString(value: unknown): value is string | undefined {
   return value === undefined || nonEmptyString(value);
 }
 
-function connectionBinding(value: unknown): value is ToolConnectionBinding | undefined {
-  if (value === undefined) return true;
-  if (
-    !record(value) ||
-    !nonEmptyString(value.connectionId) ||
-    !nonEmptyString(value.integrationId) ||
-    !Number.isInteger(value.integrationMajorVersion) ||
-    (value.integrationMajorVersion as number) < 1 ||
-    !nonEmptyString(value.operationId) ||
-    !optionalString(value.credentialSlot) ||
-    !optionalString(value.credentialRevision) ||
-    !nonEmptyString(value.identityMode) ||
-    !optionalString(value.principalKind) ||
-    !optionalString(value.principalId) ||
-    !nonEmptyString(value.manifestDigest) ||
-    !nonEmptyString(value.configurationDigest)
-  ) {
-    return false;
-  }
-  return (value.principalKind === undefined) === (value.principalId === undefined);
-}
+const RETIRED_INTENT_FIELDS = [
+  "integrationId",
+  "integrationMajorVersion",
+  "operationId",
+  "manifestDigest",
+  "configurationDigest",
+  "connection",
+  "secondaryCredentialRef",
+  "secondaryConnection",
+] as const;
 
 function fileIds(value: unknown): value is readonly string[] | undefined {
   if (value === undefined) return true;
@@ -127,48 +97,11 @@ export function normalizeToolIntent(input: unknown): ToolIntent {
     !optionalString(input.principalId) ||
     (input.principalKind === undefined) !== (input.principalId === undefined) ||
     !optionalString(input.activeSkillName) ||
-    !optionalString(input.integrationId) ||
-    !optionalString(input.operationId) ||
-    !optionalString(input.manifestDigest) ||
-    !optionalString(input.configurationDigest) ||
-    (input.integrationMajorVersion !== undefined &&
-      (!Number.isInteger(input.integrationMajorVersion) ||
-        (input.integrationMajorVersion as number) < 1)) ||
-    [
-      input.integrationId,
-      input.integrationMajorVersion,
-      input.operationId,
-      input.manifestDigest,
-      input.configurationDigest,
-    ].some((value) => value !== undefined) !==
-      [
-        input.integrationId,
-        input.integrationMajorVersion,
-        input.operationId,
-        input.manifestDigest,
-        input.configurationDigest,
-      ].every((value) => value !== undefined) ||
+    RETIRED_INTENT_FIELDS.some((field) => input[field] !== undefined) ||
     !optionalString(input.destination) ||
     !optionalString(input.credentialRef) ||
-    !optionalString(input.secondaryCredentialRef) ||
-    !connectionBinding(input.connection) ||
-    !connectionBinding(input.secondaryConnection) ||
-    (input.connection?.credentialSlot !== undefined &&
-      (input.connection.credentialRevision === undefined ||
-        input.credentialRef === undefined ||
-        !input.credentialRef.startsWith("secret://") ||
-        input.destination === undefined)) ||
-    (input.connection !== undefined &&
-      input.connection.credentialSlot === undefined &&
-      (input.connection?.credentialRevision !== undefined || input.credentialRef !== undefined)) ||
-    ((input.secondaryCredentialRef !== undefined || input.secondaryConnection !== undefined) &&
-      (input.credentialRef === undefined || input.connection === undefined)) ||
-    (input.secondaryConnection !== undefined &&
-      (input.secondaryCredentialRef === undefined ||
-        input.secondaryConnection.credentialSlot === undefined ||
-        input.secondaryConnection.credentialRevision === undefined ||
-        !input.secondaryCredentialRef.startsWith("secret://") ||
-        input.destination === undefined)) ||
+    (input.mcp !== undefined && !isMcpBinding(input.mcp)) ||
+    (input.mcp !== undefined && input.credentialRef !== undefined) ||
     !nonEmptyString(input.idempotencyKey)
   ) {
     throw new ToolIntentError("invalid_intent");
@@ -210,24 +143,9 @@ export function normalizeToolIntent(input: unknown): ToolIntent {
     ...(input.principalKind === undefined ? {} : { principalKind: input.principalKind }),
     ...(input.principalId === undefined ? {} : { principalId: input.principalId }),
     ...(input.activeSkillName === undefined ? {} : { activeSkillName: input.activeSkillName }),
-    ...(input.integrationId === undefined ? {} : { integrationId: input.integrationId }),
-    ...(input.integrationMajorVersion === undefined
-      ? {}
-      : { integrationMajorVersion: input.integrationMajorVersion as number }),
-    ...(input.operationId === undefined ? {} : { operationId: input.operationId }),
-    ...(input.manifestDigest === undefined ? {} : { manifestDigest: input.manifestDigest }),
-    ...(input.configurationDigest === undefined
-      ? {}
-      : { configurationDigest: input.configurationDigest }),
     destination: input.destination,
     credentialRef: input.credentialRef,
-    ...(input.connection === undefined
-      ? {}
-      : { connection: Object.freeze({ ...input.connection }) }),
-    secondaryCredentialRef: input.secondaryCredentialRef,
-    ...(input.secondaryConnection === undefined
-      ? {}
-      : { secondaryConnection: Object.freeze({ ...input.secondaryConnection }) }),
+    ...(input.mcp === undefined ? {} : { mcp: Object.freeze({ ...input.mcp }) }),
     idempotencyKey: input.idempotencyKey,
   };
   intentDigest(intent);

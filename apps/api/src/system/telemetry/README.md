@@ -6,7 +6,7 @@ The Worker consumes the scheduled tick and calls the authenticated dispatcher.
 
 ## Files
 
-- `compose.ts` adapts current Soul, user, connection and public-origin readers.
+- `compose.ts` adapts current Soul, user, native installation and public-origin readers.
 - `routes.ts` declares administrator preferences and service-only dispatch.
 - `schedule.ts` publishes a five-minute pg-boss tick in production.
 - `routes.test.ts` verifies administrator gates, candidate preview and saved levels.
@@ -55,6 +55,8 @@ Network errors never expose payloads, credentials or endpoint error details in l
 Counts use loaded resource types, user agents and routines.
 Available bundled Skills use the same enabled overlay as the product UI.
 Seeded bundled names are excluded from user Skill counts and names.
-Integration providers combine active OIM Connections, enabled legacy connections,
-and live GitHub installation state; the manifest catalog is never counted.
+Integration providers combine enabled MCP definitions, enabled native Slack connections,
+and live GitHub installation state. Disabled MCP definitions, retired provider connections,
+and catalog-only entries are not counted. MCP endpoint URLs, labels and account details are
+not added to telemetry; the existing provider names and aggregate count fields are unchanged.
 Inventories are sorted, deduplicated and truncated to the event byte ceiling.

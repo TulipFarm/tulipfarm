@@ -1,55 +1,17 @@
-import type { EgressHttpPort, EgressHttpRequest } from "@tulipfarm/integrations";
-import { ajv, ToolContractDefinitionSchema } from "@tulipfarm/schema";
-import type { SecretsService } from "@tulipfarm/secrets";
-import type { IntegrationManifest, SoulIntegration } from "@tulipfarm/soul";
-import type { ChannelMentionedThreadStore } from "@tulipfarm/storage";
 import {
-  type CredentialDispatcher,
-  MemoryEffectStore,
-  type ToolAdapter,
-  toolContractSpecOf,
-} from "@tulipfarm/tool-broker";
+  ajv,
+  MCP_SETUP_TOOL_DECLARATIONS,
+  mcpToolContract,
+  ToolContractDefinitionSchema,
+} from "@tulipfarm/schema";
+import { toolContractSpecOf } from "@tulipfarm/tool-broker";
 import type { ParkableToolDef, ToolDef } from "@tulipfarm/tool-host";
 import { CHAT_DLP_RULES } from "@tulipfarm/tool-host";
 import { describe, expect, it } from "vitest";
 import { DEPLOYMENT_ROLES } from "../identity/roles";
-import type { IntegrationConversationsRepo } from "../ingress/repo";
-import { buildDeclarativeTools } from "./declarative/tools";
-import type { GitHubInstallationDirectory } from "./github/installation";
-import { buildGitHubTools } from "./github/tools";
-import { buildGoogleTools } from "./google/tools";
 import { buildToolRegistry } from "./setup";
-import { buildSlackTools } from "./slack/tools";
 
 const validateDefinition = ajv.compile(ToolContractDefinitionSchema);
-const BUSINESS_ID = "contract-projection-business";
-
-const SPEC = {
-  openapi: "3.0.3",
-  servers: [{ url: "https://api.acme.test/v1" }],
-  paths: {
-    "/search": {
-      post: {
-        operationId: "search",
-        requestBody: {
-          required: true,
-          content: { "application/json": { schema: { type: "object" } } },
-        },
-        responses: { "200": { content: { "application/json": { schema: { type: "object" } } } } },
-      },
-    },
-    "/pages/{page_id}": {
-      get: {
-        operationId: "getPage",
-        parameters: [{ name: "page_id", in: "path", required: true, schema: { type: "string" } }],
-        responses: { "200": { content: { "application/json": { schema: { type: "object" } } } } },
-      },
-    },
-  },
-};
-
-const SEARCH_OP = { operation: "search", name: "search_docs", description: "Search Acme docs." };
-const READ_OP = { operation: "getPage", name: "read_page", description: "Read one page." };
 
 interface LabeledDefinition {
   readonly family: string;
@@ -58,15 +20,6 @@ interface LabeledDefinition {
 
 function throwOnExecute(): never {
   throw new Error("contract projection must not execute Tools");
-}
-
-function inert<T>(): T {
-  return new Proxy(
-    {},
-    {
-      get: () => () => throwOnExecute(),
-    }
-  ) as T;
 }
 
 function definitionsFrom(
@@ -86,105 +39,17 @@ function localDefinitions(): readonly LabeledDefinition[] {
     buildToolRegistry({
       memoryDocuments: stub,
       kv: stub,
+      files: stub,
       knowledge: stub,
       resources: stub,
       resourceTypes: stub,
       agentTools: stub,
+      integrationAuthoring: stub,
       skillTools: stub,
       surfaceComponents: stub,
       platform: stub,
     }).getAll()
   );
-}
-
-function githubDefinitions(): readonly LabeledDefinition[] {
-  return definitionsFrom(
-    "github",
-    buildGitHubTools(BUSINESS_ID, {
-      effects: new MemoryEffectStore(),
-      adapters: new Map<string, ToolAdapter>(),
-      credentials: inert<CredentialDispatcher>(),
-      installations: inert<GitHubInstallationDirectory>(),
-    })
-  );
-}
-
-function slackDefinitions(): readonly LabeledDefinition[] {
-  return definitionsFrom(
-    "slack",
-    buildSlackTools(BUSINESS_ID, {
-      effects: new MemoryEffectStore(),
-      adapters: new Map<string, ToolAdapter>(),
-      credentials: inert<CredentialDispatcher>(),
-      threads: inert<IntegrationConversationsRepo>(),
-      mentionedThreads: inert<ChannelMentionedThreadStore>(),
-    })
-  );
-}
-
-function googleDefinitions(): readonly LabeledDefinition[] {
-  return definitionsFrom(
-    "google",
-    buildGoogleTools(BUSINESS_ID, {
-      effects: new MemoryEffectStore(),
-      adapters: new Map<string, ToolAdapter>(),
-      credentials: inert<CredentialDispatcher>(),
-    })
-  );
-}
-
-function integration(egress: IntegrationManifest["egress"]): SoulIntegration {
-  return {
-    slug: "google-docs",
-    sourceIntegration: "google-docs",
-    manifest: {
-      name: "google-docs",
-      version: "1.0.0",
-      description: "",
-      egress,
-    } as IntegrationManifest,
-    egressSpec: SPEC,
-  };
-}
-
-function openApiEgress(): IntegrationManifest["egress"] {
-  return {
-    type: "openapi",
-    spec: "spec.json",
-    operations: [SEARCH_OP, READ_OP],
-    auth: { token_env: "GOOGLE_DOCS_ACCESS_TOKEN" },
-  };
-}
-
-class RecordingHttp implements EgressHttpPort {
-  readonly sent: EgressHttpRequest[] = [];
-
-  async send(request: EgressHttpRequest) {
-    this.sent.push(request);
-    return { status: 200, headers: {}, body: { ok: true } };
-  }
-}
-
-function secretsStub(): () => Promise<SecretsService> {
-  const service = {
-    get: async () => "unused",
-  };
-  return async () => service as unknown as SecretsService;
-}
-
-function declarativeDefinitions(): readonly LabeledDefinition[] {
-  const { tools, problems } = buildDeclarativeTools([integration(openApiEgress())], {
-    businessId: BUSINESS_ID,
-    effects: new MemoryEffectStore(),
-    secrets: secretsStub(),
-    http: new RecordingHttp(),
-  });
-
-  if (problems.length > 0) {
-    throw new Error(`declarative fixture failed to publish: ${problems.join("; ")}`);
-  }
-
-  return definitionsFrom("declarative", tools);
 }
 
 const PROBE_ARGUMENTS: readonly unknown[] = [
@@ -201,13 +66,7 @@ const PROBE_ARGUMENTS: readonly unknown[] = [
 ];
 
 function allDefinitions(): readonly LabeledDefinition[] {
-  return [
-    ...localDefinitions(),
-    ...githubDefinitions(),
-    ...slackDefinitions(),
-    ...googleDefinitions(),
-    ...declarativeDefinitions(),
-  ];
+  return localDefinitions();
 }
 
 function sameStrings(left: readonly string[], right: readonly string[]): boolean {
@@ -215,17 +74,48 @@ function sameStrings(left: readonly string[], right: readonly string[]): boolean
 }
 
 describe("published contract projection", () => {
-  it("draws its corpus from every Tool family, in-house and imported alike", () => {
-    const counts = new Map<string, number>();
-    for (const { family } of allDefinitions()) {
-      counts.set(family, (counts.get(family) ?? 0) + 1);
+  it("registers the exact shared MCP setup declarations used by eval", () => {
+    const registered = localDefinitions();
+    for (const declaration of MCP_SETUP_TOOL_DECLARATIONS) {
+      const tool = registered.find(({ definition }) => definition.name === declaration.name);
+      expect(tool?.definition).toMatchObject({
+        name: declaration.name,
+        description: declaration.description,
+        mutating: declaration.mutating,
+      });
+      expect(tool?.definition.inputSchema).toEqual(declaration.inputSchema);
     }
+  });
 
-    for (const family of ["local", "github", "slack", "declarative"]) {
-      expect
-        .soft(counts.get(family) ?? 0, `${family} contributed no definitions`)
-        .toBeGreaterThan(0);
-    }
+  it("includes platform Tools and current MCP setup declarations", () => {
+    const names = allDefinitions().map(({ definition }) => definition.name);
+    expect(names).toEqual(
+      expect.arrayContaining([
+        "soul_repo_push",
+        "record_create",
+        "file_read",
+        "integration_configure",
+        "integration_discover",
+        "integration_review",
+        "integration_resource_read",
+        "integration_prompt_render",
+      ])
+    );
+  });
+
+  it.each([false, true])("accepts current MCP contracts with mutating=%s", (mutating) => {
+    const contract = mcpToolContract("fitness-server", "a".repeat(64), {
+      name: mutating ? "update" : "read",
+      inputSchema: { type: "object", additionalProperties: false },
+      mutating,
+      requiresApproval: mutating,
+    });
+
+    expect(validateDefinition(contract)).toBe(true);
+    expect(contract.spec.adapter).toEqual({ kind: "mcp", ref: "fitness-server" });
+    expect(contract.spec.targets).toEqual([{ type: "integration", id: "fitness-server" }]);
+    expect(contract.spec.action).toBe(mutating ? "integration.execute" : "integration.read");
+    expect(contract.spec.retry).toEqual({ maxAttempts: 1, safeToRetry: false });
   });
 
   it("projects every registered Tool into a spec the ToolContract schema accepts", () => {
@@ -259,14 +149,12 @@ describe("published contract projection", () => {
 
   it("projects each Tool's declared authorization actions", () => {
     const incoherent: string[] = [];
-    const declarativeActions: string[] = [];
 
     for (const { family, definition } of allDefinitions()) {
       const declared = definition.authorization.action;
       const declaredRequired = definition.authorization.requiredActions ?? [declared];
       const projected = toolContractSpecOf(definition);
       const requiredActions = projected.requiredActions ?? [];
-      if (family === "declarative") declarativeActions.push(declared);
 
       if (projected.action !== declared) {
         incoherent.push(`${family}/${definition.name}: action ${projected.action} !== ${declared}`);
@@ -282,7 +170,6 @@ describe("published contract projection", () => {
     }
 
     expect(incoherent).toEqual([]);
-    expect(declarativeActions.sort()).toEqual(["google_docs.read_page", "google_docs.search_docs"]);
   });
 });
 
@@ -293,17 +180,14 @@ describe("every Tool's authority is expressible as a grant", () => {
     )
   );
 
-  // Reshaping the business (Agents, Routines, Skills, Surface Components) or reaching a connected
-  // third party (Slack, Google) needs an explicit Team-level grant; a Team with no grants must not
+  // Reshaping the business (Agents, Routines, Skills, Surface Components) needs an explicit
+  // Team-level grant; a Team with no grants must not
   // give its members default access, so these resources carry no built-in Role allow (#access-audit).
   const OPERATOR_AUTHORED_RESOURCES = new Set([
-    "integration.google-docs",
     "soul.agent",
     "soul.routine",
     "soul.skill",
     "soul.surface_component",
-    "integration.slack",
-    "integration.google",
   ]);
 
   it("declares no resource that no built-in Role can grant", () => {

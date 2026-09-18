@@ -1,8 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import { DEPLOYMENT_BUSINESS_ID } from "@tulipfarm/constants";
 import type { DurableInvocationGateway, RunInvocation } from "@tulipfarm/run-kernel";
-import { INTEGRATION_REQUEST_SCHEMA_REF, MANUAL_REQUEST_SCHEMA_REF } from "@tulipfarm/schema";
-import type { IngressJobPayload } from "../ingress/routes";
+import { MANUAL_REQUEST_SCHEMA_REF } from "@tulipfarm/schema";
 
 /** Content-addressed idempotency for callers without a client key. */
 function digest(value: unknown): string {
@@ -46,35 +45,6 @@ export function manualRoutineTrigger(invocations: DurableInvocationGateway) {
           : `${identity.kind}:${identity.id}:${slug}:${digest({ idempotencyKey })}`,
     });
     return { runId: result.runId };
-  };
-}
-
-/** Starts a verified delivery Run; stores the raw envelope and attributes it to the Integration. */
-export function integrationInvoker(invocations: DurableInvocationGateway) {
-  return async (job: IngressJobPayload): Promise<void> => {
-    // An Integration whose manifest declares no `context_headers` arrives with `headers` explicitly
-    // `undefined`, and canonicalization rejects a key JSON would erase rather than hash something
-    // the payload does not say. Omit the key: delivery is unchanged, and a manifest with
-    // no context headers cannot fail its Artifact.
-    const payload = {
-      slug: job.slug,
-      body: job.body,
-      ...(job.headers === undefined ? {} : { headers: job.headers }),
-    };
-    await invocations.start({
-      source: "integration",
-      runSource: "integration",
-      businessId: DEPLOYMENT_BUSINESS_ID,
-      initiator: { kind: "integration", id: job.slug },
-      effectiveSubject: { kind: "integration", id: job.slug },
-      definitionRef: `published:integration:${job.slug}`,
-      payload,
-      payloadSchemaRef: INTEGRATION_REQUEST_SCHEMA_REF,
-      idempotencyKey:
-        job.deduplicationKey === undefined
-          ? digest(payload)
-          : digest({ slug: job.slug, delivery: job.deduplicationKey }),
-    });
   };
 }
 

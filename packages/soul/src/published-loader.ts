@@ -5,7 +5,6 @@ import {
   DEFINITION_REGISTRATIONS,
   isRecord,
   parseFrontmatter,
-  parseOimManifest,
   type ResourceDefinition,
   type RoleDefinition,
   SchemaRegistry,
@@ -25,6 +24,7 @@ import { parse as parseYaml } from "yaml";
 import { agentIdOf } from "./agents/agent-id";
 import { readFrontmatterArtifact, resolveDefinition } from "./definition-reader";
 import { validateAuthSteps, validateIngressContextEnv } from "./integration-auth";
+import { MCP_DEFINITION_FILE, parseMcpSoulDefinition } from "./integrations/mcp-definition";
 import { readContainedFile } from "./safe-fs";
 import type {
   IntegrationConnection,
@@ -406,76 +406,21 @@ export class SoulLoader {
     const slugs = await subdirs(join(this.soulPath, "integrations"));
     for (const slug of slugs) {
       const dir = join(this.soulPath, "integrations", slug);
-      // manifest.yml is the V2 format; manifest.json is no longer supported
       const manifestPath = join(dir, "manifest.yml");
-      const oimPath = join(dir, "oim.yml");
       try {
-        // An Open Integration Manifest is a whole declaration on its own, so it is read before the
-        // legacy manifest and refuses to coexist with one: two declarations would give two answers
-        // about what a single Tool may do.
-        if (await fileExists(this.soulPath, oimPath)) {
-          if (await fileExists(this.soulPath, manifestPath)) {
-            throw new Error("declares both oim.yml and manifest.yml; keep exactly one");
+        const mcpPath = join(dir, MCP_DEFINITION_FILE);
+        if (await fileExists(this.soulPath, mcpPath)) {
+          if (
+            slug === "slack" ||
+            slug === "github" ||
+            (await fileExists(this.soulPath, manifestPath)) ||
+            (await fileExists(this.soulPath, join(dir, "integration.yaml"))) ||
+            (await fileExists(this.soulPath, join(dir, "connection.yaml")))
+          ) {
+            throw new Error("MCP and native channel definitions must use different slugs");
           }
-          const oimManifest = parseOimManifest(await readContainedFile(this.soulPath, oimPath));
-          let oimConnection: IntegrationConnection | undefined;
-          try {
-            oimConnection = (parseYaml(
-              await readContainedFile(this.soulPath, join(dir, "connection.yaml"))
-            ) ?? {}) as IntegrationConnection;
-          } catch {
-            // connection.yaml is optional — installed but not yet connected.
-          }
-          let oimSetupGuide: string | undefined;
-          try {
-            oimSetupGuide = await readContainedFile(this.soulPath, join(dir, "setup-guide.md"));
-          } catch {
-            // setup-guide.md is optional
-          }
-          // The Knowledge guide is what tells a platform Agent how this provider sequences its
-          // reads and what a sensible scope is. Loading it here keeps the Agent from having to
-          // reach into the soul repo to answer a question the Integration already answered.
-          let knowledgeGuide: string | undefined;
-          const guideFile = oimManifest.knowledge?.guideFile;
-          if (guideFile !== undefined) {
-            try {
-              knowledgeGuide = await readContainedFile(this.soulPath, join(dir, guideFile));
-            } catch {
-              // A declared guide that cannot be read is guidance missing, never a failed install.
-            }
-          }
-          // A GraphQL operation's document is the entire call, so its Tool cannot be compiled
-          // without the companion text. Read here rather than at compile time so a package with a
-          // missing document fails to install rather than failing on the first Agent call.
-          const oimDocuments: Record<string, string> = {};
-          const oimOpenApiDocuments: Record<string, unknown> = {};
-          const oimFixtures: Record<string, string> = {};
-          const oimPackageFiles: Record<string, string> = {};
-          for (const file of oimManifest.files ?? []) {
-            const source = await readContainedFile(this.soulPath, join(dir, file.path));
-            oimPackageFiles[file.path] = source;
-            if (file.role === "openapi") {
-              oimOpenApiDocuments[file.path] = parseYaml(source);
-            }
-            if (file.role === "graphql") {
-              oimDocuments[file.path] = source;
-            }
-            if (file.role === "fixture") {
-              oimFixtures[file.path] = source;
-            }
-          }
-          map.set(slug, {
-            slug,
-            sourceIntegration: oimManifest.metadata.id,
-            oimManifest,
-            ...(Object.keys(oimDocuments).length === 0 ? {} : { oimDocuments }),
-            ...(Object.keys(oimOpenApiDocuments).length === 0 ? {} : { oimOpenApiDocuments }),
-            ...(Object.keys(oimFixtures).length === 0 ? {} : { oimFixtures }),
-            ...(Object.keys(oimPackageFiles).length === 0 ? {} : { oimPackageFiles }),
-            ...(oimConnection === undefined ? {} : { connection: oimConnection }),
-            ...(oimSetupGuide === undefined ? {} : { setupGuide: oimSetupGuide }),
-            ...(knowledgeGuide === undefined ? {} : { knowledgeGuide }),
-          });
+          const mcp = parseMcpSoulDefinition(await readContainedFile(this.soulPath, mcpPath), slug);
+          map.set(slug, { slug, sourceIntegration: mcp.server.id, mcp });
           continue;
         }
         // Bundled integrations are code-owned: Soul holds connection.yaml only, no manifest.yml

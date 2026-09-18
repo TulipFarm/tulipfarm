@@ -2,9 +2,9 @@ import { randomUUID } from "node:crypto";
 import { Readable } from "node:stream";
 import { Agent, fetch as undiciFetch } from "undici";
 import type { IntegrationHttpResponse } from "../http";
-import type { EgressHttpPort, EgressHttpRequest, EgressMultipartPart } from "./openapi-adapter";
+import type { EgressHttpPort, EgressHttpRequest, EgressMultipartPart } from "./http";
 
-/** Manifest OpenAPI transport; applies no auth and maps network faults to 503. */
+/** Guarded HTTP transport; applies no auth and maps network faults to 503. */
 
 /**
  * Third-party endpoints may stall; never let a socket pin a Run.

@@ -1,146 +1,99 @@
 ---
 title: Connect an integration
-description: Install a bundled or reviewed integration, connect its credentials, verify provider access, and disconnect it safely.
+description: Choose an MCP server or a native chat channel, review what it exposes, and keep credentials separate from agent instructions.
 ---
 
-Open **Integrations** to connect a bundled
-[integration](/docs/administration/how-integrations-work) or install a reviewed package from a
-source repository. An integration gives agents a fixed set of actions in an external service.
+Open **Integrations** to configure an integration, a connection to an external service.
+Third-party agent tools use MCP, the protocol that lets TulipFarm ask an external server to
+perform a specific action or return information.
 
-## Outcome
+## Choose a server
 
-At the end, the integration's credentials are stored as secrets and it shows as connected.
+Use a server offered by the provider or one your organization operates. Check its destination,
+sign-in requirements, and available capabilities before connecting it. Appearing in a catalog
+does not give a server access to your data or authorize its tools.
 
-Bundled integrations need no installation step. They ship with TulipFarm and are present the
-first time you open the page.
+Provider API documentation and OpenAPI files cannot be imported as agent tools. A provider
+without a suitable MCP server is not available through that route.
 
-## Choose the integration
+## Save the server
 
-<Steps>
-  <Step>
-    Open **Integrations**. The page lists everything available in one catalog, with the ones
-    you have already connected grouped first.
-  </Step>
-  <Step>
-    Choose the service you want to connect.
-  </Step>
-</Steps>
+Select **Add MCP server**, then enter an **Integration ID** and **Display name**. The ID stays
+in links and cannot be changed after creation.
 
-Use the dedicated guides for provider-specific setup:
+Choose the **Server transport**:
 
-- [Connect GitHub](/docs/administration/connect-github)
+- **Remote HTTPS URL** asks for the provider's **Remote MCP URL**, not its website address.
+  Do not put tokens in the URL.
+- **Local isolated server** asks for a **Pinned container image**, an **Executable path**
+  inside that container, and any arguments. Set **Allowed outbound hosts** to the hostnames
+  the server needs. An empty list denies outbound network access.
+
+Select **Add server**. New servers start disabled. Local servers require an isolation
+backend that your deployment supports; they never fall back to running directly on the host.
+
+## Connect an account
+
+Choose the server's authentication method before discovery: no authentication, token entry,
+or browser sign-in. For a local token-based server, declare the credential environment
+variables its provider requires, such as `GITHUB_PERSONAL_ACCESS_TOKEN`. Enter their values
+only in the account controls, never in the server arguments.
+
+Under **Accounts**, select **Connect another account** and give it an **Account label**.
+A personal account uses your provider identity. A shared account uses a separate identity
+that can be granted to other users, teams, or scheduled automations. Shared accounts are
+available only when the server allows them; they are not an automatic fallback.
+
+For token authentication, enter the requested credentials in the secure fields. For browser
+sign-in, follow the provider's authorization page. A server that needs no authentication
+does not need an account.
+
+If the provider requires an existing OAuth app, select **Use an existing OAuth app** and
+enter its client ID, authentication method, and any required client secret. Select
+**Save OAuth account**, then use **Copy callback URL** on the account card. Register that
+exact URL with the provider before selecting **Connect account**. If the server's
+authentication configuration changes, create a new account rather than reusing an old
+app's credentials against the changed destination.
+
+## Review capabilities
+
+Open **Approved capabilities** and select **Discover capabilities**. Discovery lists what
+the server offers; it does not enable those capabilities. Select the specific tools, resources,
+and prompts you want to allow, then choose **Save approved capabilities**. A resource is
+information returned by the server. A prompt is a template the server provides.
+
+When using a shared account for setup, explicitly select it in the setup account picker
+before discovery. The same account is used when saving the review. This selection permits
+setup and review, not personal use of the shared account or shared content previews.
+
+Under **Server**, select **Edit server**, turn on **Enable this MCP server**, and select
+**Save server** when you are ready to use it. Enabling the server does not grant account
+access or approve additional capabilities.
+
+Changing the server configuration clears its previous capability review. Review the new
+capabilities before using that configuration. A server cannot silently add tools to an existing
+review.
+
+## Set up GitHub Knowledge
+
+For read-only copies of GitHub files in Knowledge, choose **Set up GitHub Knowledge (local)**
+from the GitHub catalog entry. It prefills the supported local server rather than the remote
+GitHub server. The host still needs the isolation support described in the
+[integration catalog](/docs/reference/bundled-integrations#supported-server-connections).
+
+Save the server, connect a personal token account, and review `get_me` and `get_file_contents`
+as read-only tools without per-call approval. Enable the server, then open
+**Manage Knowledge sync** to select the files to sync. The preset does not approve tools
+or grant account access for you. Shared accounts and the remote GitHub server are not
+supported for Knowledge sync.
+
+## Connect a chat channel
+
+Slack and GitHub chat channels have separate setup. Their event delivery and agent replies do
+not depend on an MCP server.
+
 - [Connect Slack](/docs/administration/connect-slack)
+- [Connect GitHub](/docs/administration/connect-github)
 
-## Add a missing provider
-
-If no suitable package exists yet, open **Chat** and ask to build an integration from the
-provider's public documentation. The integration forge prepares its manifest and companion files,
-runs offline checks, and presents the exact files for approval before publishing.
-
-<Steps>
-  <Step>
-    Describe the small set of provider actions you need.
-  </Step>
-  <Step>
-    The integration forge reads the provider's public documentation and prepares the manifest,
-    setup guide, API contract, and offline checks.
-  </Step>
-  <Step>
-    Review the exact destinations, credentials, and provider actions it presents. Publishing
-    requires approval of those exact reviewed files.
-  </Step>
-  <Step>
-    Approve publication. The integration then appears in **Integrations** and connects like a
-    bundled integration.
-  </Step>
-</Steps>
-
-Publishing writes only the manifest and the companion files it declares to the soul. It never runs
-code from the provider or its documentation.
-
-## Install from a source
-
-An integration source is a repository containing one or more declarative packages. Installing a
-package does not run code from that repository.
-
-<Steps>
-  <Step>
-    Open **Integrations** and select **Install from source**.
-  </Step>
-  <Step>
-    Enter the package source URL and select **Inspect source**.
-  </Step>
-  <Step>
-    Review the resolved source ref and package digest. The digest identifies the exact package
-    bytes. Also review its capabilities, effects, provider destinations, authorization fields, and
-    incoming data.
-  </Step>
-  <Step>
-    Choose how TulipFarm should verify trust:
-
-    - **Verify as Official on the server before installation** requires a valid package signature
-      from an active public release trust root configured on this instance. **Official** does not
-      mean that TulipFarm globally endorses the package.
-    - **Install as a reviewed Community package** requires approval of the capabilities,
-      destinations, effects, and exact digest shown on the screen.
-  </Step>
-  <Step>
-    Select **Install**. If installation fails, **Retry same package** retries the same reviewed ref,
-    selection, and digest instead of inspecting new source bytes.
-  </Step>
-</Steps>
-
-## Manage package security
-
-Open **Integrations**, then select **Package security**.
-
-- **Public trust roots** hold public keys for release or revocation signatures. Private signing
-  keys remain with the publisher. Disabling a root stops new signatures using that key from
-  verifying.
-- **Signed revocation feed** accepts a credential-free HTTPS feed. TulipFarm reads it only when
-  maintenance runs.
-- **Run maintenance** checks the signed feed and applies eligible patch releases only to Official
-  packages that have automatic patches enabled.
-
-Community packages never update automatically. Open an Official integration and enable
-**Automatically install verified patch releases** if you want maintenance to apply eligible
-patches for that package.
-
-## Connect credentials
-
-After installation, open the integration detail page. TulipFarm shows the setup steps from the
-integration manifest. Secret fields are encrypted in the secrets store. Other setup values stay
-with the connection.
-
-For Slack, this is the Socket Mode app token, bot token, and team id. For GitHub, the
-flow is GitHub App installation rather than a pasted OAuth token. For Google Workspace, it is an
-OAuth sign-in that authorizes the Gmail, Calendar, Drive, and Docs scopes.
-
-Some packages declare a provider verification step. When they do, the Connection remains
-unavailable until TulipFarm saves successful verification evidence. **Retry verification** runs
-that declared check again. A temporarily unavailable check means the result is unknown, not that
-the provider accepted the credentials. If the provider rejects them, correct or reconnect the
-credentials before retrying.
-
-## Verify
-
-Return to **Integrations** and confirm the Connection is available. This confirms that required
-setup and declared verification completed; it does not promise that every later provider request
-will succeed.
-
-## Disconnect
-
-Open the integration detail page, find the connection, and select **Disconnect**. The connection
-becomes unavailable at once. If the provider needs remote cleanup, the page shows
-**Disconnecting** until that cleanup succeeds.
-
-## Remove an installed package
-
-Open the integration detail page, open its actions menu, and select **Remove integration**.
-TulipFarm removes the exact installed generation: it first stops new traffic, waits for active
-work, cleans up provider subscriptions and Connections, then removes package-owned state and the
-published package.
-
-If cleanup cannot finish, the package stays fenced and the page shows **Removal needs another
-try**. Select **Retry removal** to resume cleanup for that exact installation. A newer installation
-cannot be removed by an older pending cleanup.
+Use [How integrations work](/docs/administration/how-integrations-work) to understand the
+difference between an agent tool and a chat channel.

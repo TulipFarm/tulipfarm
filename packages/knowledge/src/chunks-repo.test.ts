@@ -1,5 +1,5 @@
-import type { Queryable } from "@tulipfarm/storage";
-import { describe, expect, it } from "vitest";
+import { ambientTransactionPort, type Queryable, withTransaction } from "@tulipfarm/storage";
+import { describe, expect, it, vi } from "vitest";
 import { PgKnowledgeChunkRepo, toPrefixTsQuery } from "./chunks-repo";
 
 /** Records every statement so a test can assert on the SQL and the bound parameters. */
@@ -13,6 +13,51 @@ function recordingQueryable(): Queryable & { calls: { sql: string; params: unkno
     },
   } as unknown as Queryable & { calls: { sql: string; params: unknown[] }[] };
 }
+
+describe("PgKnowledgeChunkRepo transaction ownership", () => {
+  it("opens and commits its own transaction for a standalone pg Pool", async () => {
+    const client = { ...recordingQueryable(), release: vi.fn() };
+    const pool = { ...recordingQueryable(), connect: vi.fn(async () => client) };
+    await new PgKnowledgeChunkRepo(pool).replaceForPage("page", []);
+    expect(pool.connect).toHaveBeenCalledOnce();
+    expect(client.calls.map(({ sql }) => sql)).toEqual([
+      "BEGIN",
+      "SELECT id FROM knowledge_pages WHERE id = $1 FOR UPDATE",
+      "DELETE FROM knowledge_chunks WHERE page_id = $1",
+      "COMMIT",
+    ]);
+    expect(client.release).toHaveBeenCalledOnce();
+  });
+
+  it("leaves commit and rollback to the enclosing pg lease transaction", async () => {
+    const client = { ...recordingQueryable(), release: vi.fn() };
+    const pool = { ...recordingQueryable(), connect: vi.fn(async () => client) };
+    await expect(
+      withTransaction(pool, async (tx) => {
+        await new PgKnowledgeChunkRepo(tx, ambientTransactionPort(tx)).replaceForPage("page", [
+          {
+            chunkIndex: 0,
+            content: "New generation",
+            contentHash: "hash",
+            embedding: null,
+            model: null,
+            dim: null,
+          },
+        ]);
+        throw new Error("lease fence lost");
+      })
+    ).rejects.toThrow("lease fence lost");
+    expect(pool.connect).toHaveBeenCalledOnce();
+    expect(client.calls.map(({ sql }) => sql.trim().split(/\s+/)[0])).toEqual([
+      "BEGIN",
+      "SELECT",
+      "DELETE",
+      "INSERT",
+      "ROLLBACK",
+    ]);
+    expect(client.release).toHaveBeenCalledOnce();
+  });
+});
 
 describe("toPrefixTsQuery", () => {
   it("turns each alphanumeric term into a prefix term", () => {

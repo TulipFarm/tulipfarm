@@ -109,16 +109,22 @@ describe("decideSourceAccess", () => {
 
     it("allows when the provider confirms access at read time", async () => {
       const locator = {
-        kind: "oim" as const,
-        integrationSlug: "wiki-install",
+        kind: "mcp" as const,
+        adapter: "github-file" as const,
         integrationId: "wiki",
-        integrationMajorVersion: 2,
-        connectionId: "connection-1",
-        externalTenantId: "tenant-1",
+        accountId: "account-1",
+        accountRevision: 1,
+        ownerUserId: "user-1",
         externalAccountId: "account-1",
-        sourceKindId: "page",
-        scope: "space-1",
-        itemId: "file-1",
+        configurationRevision: "config-1",
+        selectionId: "selection-1",
+        selectionRevision: "selection-rev-1",
+        visibility: "personal" as const,
+        owner: "example",
+        repo: "docs",
+        path: "README.md",
+        ref: "refs/heads/main",
+        sourceUrl: "https://github.com/example/docs/blob/main/README.md",
       };
       let checkedLocator: unknown;
       const port: LiveSourceAuthorizationPort = {

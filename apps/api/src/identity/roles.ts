@@ -7,7 +7,6 @@ import {
   surfaceGrants,
 } from "@tulipfarm/authz";
 import { DEPLOYMENT_BUSINESS_ID } from "@tulipfarm/constants";
-import { GITHUB_TOOL_IDS } from "@tulipfarm/integrations";
 import type { GrantRecord, RoleRecord, RoleRepo } from "@tulipfarm/storage";
 
 /** Mirrors live role gates; update this catalog whenever route or Tool gates change. */
@@ -17,37 +16,24 @@ export const ADMIN_ONLY_SURFACES: readonly {
   readonly enforcedIn: string;
 }[] = [
   { type: "secret", actions: ["secret.write", "secret.delete"], enforcedIn: "secrets/routes.ts" },
-  /** Business integration credential changes are admin-only; they affect every Agent. */
   {
     type: "integration",
     actions: ["integration.connect", "integration.disconnect", "integration.remove"],
     enforcedIn: "integrations/routes.ts",
   },
   {
-    type: "integration_connection",
-    actions: ["integration_connection.manage_shared"],
-    enforcedIn: "integrations/connections/routes.ts",
+    type: "integration_account",
+    actions: ["integration.accounts.manage"],
+    enforcedIn: "integrations/accounts/routes.ts",
   },
-  /** Shared credentials and provider writes require an explicit Team-level grant. */
   {
     type: "integration.github",
     actions: [
       "integration.github.installation.disconnect",
       "integration.github.soul_repo.connect",
       "integration.github.soul_repo.create",
-      GITHUB_TOOL_IDS.issueCreate,
-      GITHUB_TOOL_IDS.issueComment,
-      GITHUB_TOOL_IDS.issueLabel,
-      GITHUB_TOOL_IDS.issueAssign,
-      GITHUB_TOOL_IDS.issueClose,
-      GITHUB_TOOL_IDS.pullRequestCreate,
-      GITHUB_TOOL_IDS.pullRequestComment,
-      GITHUB_TOOL_IDS.pullRequestReview,
-      GITHUB_TOOL_IDS.pullRequestMerge,
-      GITHUB_TOOL_IDS.repoPush,
-      GITHUB_TOOL_IDS.repositoryCreate,
     ],
-    enforcedIn: "integrations/github-install-routes.ts; tools/github/tools.ts",
+    enforcedIn: "integrations/github-install-routes.ts",
   },
   {
     type: "identity",
@@ -198,7 +184,7 @@ export const MEMBER_ALLOWED_SURFACES: readonly {
   {
     type: "platform.file",
     actions: ["file.list", "file.read", "file.create"],
-    enforcedIn: "packages/files/src/tools.ts; integrations/oim-file-host.ts",
+    enforcedIn: "packages/files/src/tools.ts",
   },
   {
     type: "identity",
@@ -211,16 +197,16 @@ export const MEMBER_ALLOWED_SURFACES: readonly {
     ],
     enforcedIn: "identity/routes.ts",
   },
-  /** Catalog browsing only; deployment-wide provider credentials stay in admin surfaces. */
   {
     type: "integration",
-    actions: ["integration.read"],
-    enforcedIn: "integrations/routes.ts",
+    actions: ["integration.read", "integration.execute"],
+    enforcedIn: "integrations/mcp-routes.ts; packages/integrations/src/mcp/tool-contract.ts",
   },
   {
-    type: "integration_connection",
-    actions: ["integration_connection.authorize", "integration_connection.manage"],
-    enforcedIn: "integrations/auth-routes.ts; integrations/connections/routes.ts",
+    type: "integration_account",
+    actions: ["integration.accounts.read", "integration.accounts.write"],
+    enforcedIn:
+      "integrations/accounts/routes.ts; integrations/accounts/oauth-routes.ts; knowledge-sources/mcp/routes.ts",
   },
   /** Use exact Tool-declared resource types; kind distinctions live in target ids. */
   { type: "platform.knowledge", actions: ["*"], enforcedIn: "packages/knowledge/src/tools.ts" },
@@ -304,16 +290,6 @@ export const MEMBER_ALLOWED_SURFACES: readonly {
   { type: "platform.state", actions: ["*"], enforcedIn: "platform/tools.ts" },
   { type: "platform.task", actions: ["*"], enforcedIn: "platform/tools.ts" },
   { type: "platform.time", actions: ["*"], enforcedIn: "platform/tools.ts" },
-  /**
-   * Catalog browsing only. Provider Tool access (Slack send, GitHub write, Google) requires an
-   * explicit Team-level grant (#access-audit) — a Team with no grants must give its members no
-   * reach into connected third parties.
-   */
-  {
-    type: "integration.github",
-    actions: ["integration.github.read", "github.repository.list"],
-    enforcedIn: "tools/github/tools.ts",
-  },
   /** Explicit vocabulary counterpart; authority already comes from the wildcard grant. */
   {
     type: "record",
@@ -332,12 +308,6 @@ export const OWNER_SCOPED_SURFACES: readonly {
     type: "api_token",
     conditions: { subject: "other_user" },
     enforcedIn: "auth/routes/tokens.ts",
-  },
-  /** User-scope integration auth is self-service; business-scope auth is admin-only. */
-  {
-    type: "integration_connection",
-    conditions: { scope: "business" },
-    enforcedIn: "integrations/auth-routes.ts",
   },
 ];
 

@@ -1,3 +1,5 @@
+import { GITHUB_KNOWLEDGE_PRESET, type McpServerDefinition } from "@tulipfarm/schema";
+
 export interface McpCatalogEntry {
   readonly id: string;
   readonly name: string;
@@ -8,6 +10,7 @@ export interface McpCatalogEntry {
   readonly setup: readonly string[];
   readonly limitations: readonly string[];
   readonly knowledgeSync: "excluded" | "requires-reviewed-adapter";
+  readonly localPreset?: McpServerDefinition;
 }
 
 /** Publisher-verified candidates; connecting still requires admin approval and live discovery. */
@@ -21,13 +24,18 @@ export const MCP_CATALOG: readonly McpCatalogEntry[] = [
     authentication: ["oauth", "token"],
     setup: [
       "Use a GitHub personal access token or register a GitHub OAuth/GitHub App for this deployment.",
-      "For isolated local stdio, pin ghcr.io/github/github-mcp-server by image digest and supply GITHUB_PERSONAL_ACCESS_TOKEN through a credential lease.",
+      "For Knowledge sync, choose GitHub Knowledge (local) to prefill the exact supported pinned image, executable, arguments and GitHub API egress.",
+      "The local preset requires an isolated runtime; production needs operator-configured Kata VM isolation on supported Linux/KVM, with no ordinary-container fallback.",
+      "Connect your own personal token account using GITHUB_PERSONAL_ACCESS_TOKEN. Shared accounts and the remote GitHub server are not eligible for Knowledge sync.",
+      "Discover and explicitly review get_me and get_file_contents as non-mutating Tools without per-call approval, then enable the server. The preset approves nothing.",
+      "Under the personal account, open Manage Knowledge sync and select explicit .md or .txt paths on refs/heads/... branches.",
     ],
     limitations: [
       "Scopes and server configuration determine the available Tools, resources, and prompts.",
       "GitHub Enterprise Server needs a local server.",
     ],
     knowledgeSync: "requires-reviewed-adapter",
+    localPreset: GITHUB_KNOWLEDGE_PRESET,
   },
   {
     id: "slack",

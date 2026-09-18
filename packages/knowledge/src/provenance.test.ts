@@ -1,4 +1,5 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+import type { LiveSourceAuthorizationPort } from "./acl";
 import { authorizeSynthesis } from "./provenance";
 import type { KnowledgeSourceRecord } from "./source";
 import { InMemoryKnowledgeSourceStore } from "./source";
@@ -34,6 +35,30 @@ const principals = [{ kind: "user", id: "user-1" }];
 const request = { businessId: "biz-1", principals };
 
 describe("authorizeSynthesis", () => {
+  it("requires a fresh MCP source check before reusing an already authorized citation", async () => {
+    const sources = new InMemoryKnowledgeSourceStore([
+      source({
+        provider: "mcp",
+        accessControl: { mode: "live", maximumAgeSeconds: 0 },
+      }),
+    ]);
+    const check = vi.fn<LiveSourceAuthorizationPort["check"]>(async () => ({
+      allowed: true,
+      aclRevision: "live-account-revision",
+    }));
+    const cited = {
+      ...request,
+      citations: [{ sourceId: "handbook", revision: "3", aclRevision: "live-account-revision" }],
+    };
+    expect((await authorizeSynthesis({ sources, live: { check } }, cited, NOW)).allowed).toBe(true);
+    check.mockResolvedValue({ allowed: false });
+    expect(await authorizeSynthesis({ sources, live: { check } }, cited, NOW)).toEqual({
+      allowed: false,
+      reason: "live_check_denied",
+    });
+    expect(check).toHaveBeenCalledTimes(2);
+  });
+
   it("allows a conclusion when every supporting source still authorizes", async () => {
     const sources = new InMemoryKnowledgeSourceStore([
       source(),

@@ -6,12 +6,12 @@
   "scripts": {
     "lint": "biome check --no-errors-on-unmatched .",
     "test": "vitest run --passWithNoTests",
-    "test:live-providers": "vitest run src/egress/oim-live-provider-smoke.test.ts",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "@sinclair/typebox": "^0.34.52",
     "@tulipfarm/authz": "workspace:*",
+    "@tulipfarm/mcp": "workspace:*",
     "@tulipfarm/schema": "workspace:*",
     "@tulipfarm/storage": "workspace:*",
     "@tulipfarm/tool-broker": "workspace:*",

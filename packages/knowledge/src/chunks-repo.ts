@@ -3,7 +3,8 @@ import {
   dimLiteral,
   embeddingDistanceSql,
   type Queryable,
-  withTransaction,
+  type TransactionPort,
+  transactionPort,
 } from "@tulipfarm/storage";
 import type {
   ChunkInput,
@@ -110,7 +111,10 @@ export interface KnowledgeChunkRepo {
 }
 
 export class PgKnowledgeChunkRepo implements KnowledgeChunkRepo {
-  constructor(private readonly q: Queryable) {}
+  constructor(
+    private readonly q: Queryable,
+    private readonly transactions: TransactionPort = transactionPort(q)
+  ) {}
 
   async deleteByPage(pageId: string): Promise<void> {
     await this.q.query("DELETE FROM knowledge_chunks WHERE page_id = $1", [pageId]);
@@ -121,7 +125,7 @@ export class PgKnowledgeChunkRepo implements KnowledgeChunkRepo {
   }
 
   async replaceForPage(pageId: string, chunks: ChunkInput[]): Promise<void> {
-    await withTransaction(this.q, async (tx) => {
+    await this.transactions.withTransaction(async (tx) => {
       // Lock the parent so concurrent reindexes for this page cannot interleave generations.
       await tx.query("SELECT id FROM knowledge_pages WHERE id = $1 FOR UPDATE", [pageId]);
       await tx.query("DELETE FROM knowledge_chunks WHERE page_id = $1", [pageId]);

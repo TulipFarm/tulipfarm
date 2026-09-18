@@ -1,3 +1,5 @@
+import { AuthBrokerError } from "./errors";
+
 export const INTEGRATION_AUTH_CALLBACK_PATH = "/api/v1/integrations/auth/callback";
 
 export interface AuthEndpoints {
@@ -25,7 +27,14 @@ export function integrationAuthEndpointVars(
 }
 
 export function ingressWebhookUrl(endpoints: AuthEndpoints, slug: string): string {
-  return `${endpoints.apiUrl.replace(/\/+$/, "")}/api/v1/hooks/integrations/${slug}`;
+  if (slug !== "github" && slug !== "slack") {
+    throw new AuthBrokerError(
+      "unknown_step",
+      "Native webhook setup is available only for Slack and GitHub.",
+      slug
+    );
+  }
+  return `${endpoints.apiUrl.replace(/\/+$/, "")}/api/v1/integrations/native/${slug}/events`;
 }
 
 export interface StoredPublicOrigins {

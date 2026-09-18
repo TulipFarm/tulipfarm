@@ -48,11 +48,8 @@ import {
   type GeneratedFile,
   seedAgentRoles,
 } from "./file-store.ts";
-import {
-  createEvalIntegrationAuthoringState,
-  type EvalIntegrationAuthoringState,
-  evalIntegrationAuthoring,
-} from "./integration-authoring.ts";
+import { createEvalMcpState, type EvalMcpState, evalMcpTools } from "./mcp.ts";
+import { runNativeRoutineAdmission } from "./native-routine.ts";
 import {
   createEvalResourceRecordState,
   type EvalResourceRecordState,
@@ -115,10 +112,12 @@ export interface PersistedTurn {
   readonly toolCalls: readonly ToolCall[];
   /** Results returned by real Tool implementations, including approval-resume redispatches. */
   readonly toolResults: readonly ToolResult[];
+  readonly mcpProviderCallCount?: number;
   /** Commits the Turn landed in the Eval Soul's real git repository. */
   readonly soulCommits: readonly SoulCommit[];
   /** Artifacts the active Soul publication serves once the Turn settled, written `Kind:slug`. */
   readonly publishedArtifacts: readonly string[];
+  readonly publishedArtifactsByTurn?: readonly (readonly string[])[];
   /** Files the Turn generated, each with the audience `FileService` gave it. */
   readonly generatedFiles: readonly GeneratedFile[];
   /** What the Soul Doctor's sweep did to the Soul this Turn left behind. */
@@ -138,6 +137,7 @@ export interface PersistedTurn {
   readonly spend: Spend;
   /** Exact immutable output for the bounded L3 Routine Tool State fixture. */
   readonly stateOutput?: unknown;
+  readonly nativeAdmission?: unknown;
 }
 
 export interface L3Options {
@@ -226,6 +226,7 @@ async function readBack(
   observed: {
     toolCalls: readonly ToolCall[];
     toolResults: readonly ToolResult[];
+    mcpProviderCallCount: number;
     soulCommits: readonly SoulCommit[];
     publishedArtifacts: readonly string[];
     generatedFiles: readonly GeneratedFile[];
@@ -292,6 +293,7 @@ async function readBack(
     spend: observed.spend,
     toolCalls: observed.toolCalls,
     toolResults: observed.toolResults,
+    mcpProviderCallCount: observed.mcpProviderCallCount,
     soulCommits: observed.soulCommits,
     publishedArtifacts: observed.publishedArtifacts,
     generatedFiles: observed.generatedFiles,
@@ -316,7 +318,7 @@ async function runOneTurn(
     soul: EvalSoul;
     soulWrites: SoulWriterTool;
     files: EvalFileStore;
-    integrationAuthoring: EvalIntegrationAuthoringState;
+    mcp: EvalMcpState;
     resourceRecords: EvalResourceRecordState;
     /**
      * The Run the File store should stamp on what this Turn generates.
@@ -333,6 +335,7 @@ async function runOneTurn(
   }
 ): Promise<PersistedTurn> {
   const { database, conversationId, soul, soulWrites, files } = shared;
+  const providerCallsBefore = shared.mcp.providerToolCalls;
   const runId = randomUUID();
   const turnId = randomUUID();
   shared.activeRun.id = runId;
@@ -369,15 +372,15 @@ async function runOneTurn(
     // The File store is shared across a journey for the same reason, so its `generated` accumulate
     // and only this Turn's slice belongs to this Turn.
     const generatedBefore = files.generated.length;
-    const integrationAuthoring = evalIntegrationAuthoring({
-      database,
+    const mcp = await evalMcpTools({
       soul,
       soulWrites,
-      state: shared.integrationAuthoring,
+      state: shared.mcp,
       runId,
       turnId,
       conversationId,
       agentId: options.evalCase.agent,
+      fixture: options.evalCase.mcp,
     });
     const resourceRecords = evalResourceRecords(shared.resourceRecords, soul);
     const usesResourceFixture = options.evalCase.tools?.some(
@@ -396,9 +399,7 @@ async function runOneTurn(
               [RECORD_DELETE_TOOL]: resourceRecords,
             }
           : {}),
-        integration_draft_review: integrationAuthoring.port,
-        integration_draft_create: integrationAuthoring.port,
-        integration_get: integrationAuthoring.port,
+        ...Object.fromEntries(mcp.names.map((name) => [name, mcp.port])),
       },
       toolResults,
       shared.turnIndex
@@ -486,7 +487,7 @@ async function runOneTurn(
       waits:
         options.evalCase.fault === "model_after_checkpoint"
           ? { register: async ({ approvalId }) => ({ waitId: `eval:${approvalId}` }) }
-          : integrationAuthoring.waits,
+          : mcp.waits,
       checkpoints,
       model: metered,
       log: { warn: () => {} },
@@ -550,7 +551,7 @@ async function runOneTurn(
       run = await claimRun();
       outcome = await executor(run);
       await settleRun(run, outcome);
-    } else if (outcome.status === "waiting" && (await integrationAuthoring.approvePending(runId))) {
+    } else if (outcome.status === "waiting" && (await mcp.approvePending(runId))) {
       receipt = undefined;
       run = await claimRun();
       outcome = await executor(run);
@@ -565,6 +566,7 @@ async function runOneTurn(
     return await readBack(database, runId, turnId, {
       toolCalls: [...scripted.calls],
       toolResults,
+      mcpProviderCallCount: shared.mcp.providerToolCalls - providerCallsBefore,
       soulCommits: soulWrites.commits.slice(committedBefore),
       publishedArtifacts: await soulWrites.published(),
       generatedFiles: files.generated.slice(generatedBefore),
@@ -635,6 +637,7 @@ export function foldJourney(turns: readonly PersistedTurn[]): PersistedTurn {
   };
   return {
     ...last,
+    publishedArtifactsByTurn: turns.map((turn) => turn.publishedArtifacts),
     runStatus: firstBad("runStatus"),
     stateStatus: firstBad("stateStatus"),
     turnStatus: firstBad("turnStatus"),
@@ -643,6 +646,9 @@ export function foldJourney(turns: readonly PersistedTurn[]): PersistedTurn {
     guardrails: turns.flatMap((turn) => turn.guardrails),
     toolCalls: turns.flatMap((turn) => turn.toolCalls),
     toolResults: turns.flatMap((turn) => turn.toolResults),
+    mcpProviderCallCount: turns.every((turn) => turn.mcpProviderCallCount !== undefined)
+      ? turns.reduce((count, turn) => count + (turn.mcpProviderCallCount ?? 0), 0)
+      : undefined,
     soulCommits: turns.flatMap((turn) => turn.soulCommits),
     generatedFiles: turns.flatMap((turn) => turn.generatedFiles),
     toolDenials: turns.flatMap((turn) => turn.toolDenials),
@@ -655,6 +661,40 @@ export function foldJourney(turns: readonly PersistedTurn[]): PersistedTurn {
  * Runs a Case's Turn, then each Turn of its journey, against one Conversation and one database.
  */
 export async function runPersistedTurn(options: L3Options): Promise<PersistedTurn> {
+  if (options.evalCase.nativeRoutine !== undefined) {
+    const database = options.database ?? (await openEvalDatabase());
+    try {
+      const nativeAdmission = await runNativeRoutineAdmission(
+        database,
+        options.soul,
+        options.evalCase.nativeRoutine
+      );
+      return {
+        runStatus: nativeAdmission.run?.status ?? "not_created",
+        stateStatus:
+          typeof nativeAdmission.stateStatus === "string"
+            ? nativeAdmission.stateStatus
+            : "not_created",
+        turnStatus: null,
+        answer: null,
+        assistantMessages: [],
+        events: [],
+        participantText: "",
+        guardrails: [],
+        toolCalls: [],
+        toolResults: [],
+        soulCommits: [],
+        publishedArtifacts: [],
+        generatedFiles: [],
+        toolDenials: [],
+        systemPrompt: "",
+        spend: NO_SPEND,
+        nativeAdmission,
+      };
+    } finally {
+      if (options.database === undefined) await database.close();
+    }
+  }
   if (options.evalCase.routine !== undefined) {
     const result = await runL3Routine(options.evalCase.routine);
     return {
@@ -703,7 +743,12 @@ export async function runPersistedTurn(options: L3Options): Promise<PersistedTur
       agentId: options.evalCase.agent,
       runId: () => activeRun.id,
     });
-    const integrationAuthoring = await createEvalIntegrationAuthoringState(database);
+    const mcp = await createEvalMcpState(
+      database,
+      options.soul,
+      conversationId,
+      options.evalCase.mcp
+    );
     const resourceRecords = createEvalResourceRecordState();
     const first = await runOneTurn(options, {
       database,
@@ -711,14 +756,16 @@ export async function runPersistedTurn(options: L3Options): Promise<PersistedTur
       soul: options.soul,
       soulWrites,
       files,
-      integrationAuthoring,
+      mcp,
       resourceRecords,
       activeRun,
       turnIndex: 1,
       submit: options.evalCase.input,
     });
     const journey = options.evalCase.journey ?? [];
-    if (journey.length === 0) return first;
+    if (journey.length === 0) {
+      return { ...first, publishedArtifactsByTurn: [first.publishedArtifacts] };
+    }
 
     const turns: PersistedTurn[] = [first];
     for (const [index, turn] of journey.entries()) {
@@ -735,7 +782,7 @@ export async function runPersistedTurn(options: L3Options): Promise<PersistedTur
             soul,
             soulWrites,
             files,
-            integrationAuthoring,
+            mcp,
             resourceRecords,
             activeRun,
             turnIndex: index + 2,
@@ -751,7 +798,7 @@ export async function runPersistedTurn(options: L3Options): Promise<PersistedTur
     // The reset shells out to git and can throw; the database must be closed regardless, or a
     // Sweep leaks one PGlite instance per Trial for the rest of the run.
     try {
-      soulWrites?.reset();
+      await soulWrites?.reset();
     } finally {
       if (owned) await database.close();
     }

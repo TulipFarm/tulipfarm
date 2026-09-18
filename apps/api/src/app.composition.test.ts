@@ -138,28 +138,29 @@ describe("production app composition", () => {
     ).toEqual([]);
   });
 
-  it("composes Routine OIM from the signed Run bundle", () => {
-    expect(indexSource).toContain("const internalRoutineOim = new InternalRoutineOimToolHost({");
-    expect(indexSource).toContain("new LiveRoutineOimRunAuthority(internalTurns.host, runStore)");
-    expect(indexSource).toContain("new VerifiedRoutineOimBundleReader(");
-    expect(indexSource).toContain("new BundleRoutineOimRegistrationReader(");
-    expect(indexSource).toContain("connections: oimOperationConnections");
+  it("composes Routine MCP from the signed Run bundle with live authority and a dispatch fence", () => {
+    expect(indexSource).toContain("const internalRoutineMcp = new InternalRoutineMcpToolHost({");
+    expect(indexSource).toContain("new LiveRoutineMcpRunAuthority(internalTurns.host, runStore)");
+    expect(indexSource).toContain("new VerifiedRoutineMcpBundleReader(");
+    expect(indexSource).toContain("service: mcpFeature.service");
     expect(indexSource).toContain("effects: recoveryEffects");
-    expect(indexSource).toContain("new LiveRoutineOimFileAuthorizer(");
-    expect(indexSource).toContain("...(hookExecutor === undefined ? {} : { hookExecutor })");
-    expect(composed).toContain("internalRoutineOim");
+    expect(indexSource).toContain("new LiveRoutineMcpAuthorizer(authorityLayerResolver)");
+    expect(indexSource).toContain("dispatchFence: new PgRoutineMcpDispatchFence(pool)");
+    expect(composed).toContain("internalRoutineMcp");
     expect(internalRouteFamilySource).toContain(
-      "registerRoutineOimToolRoutes(app, opts.internalRoutineOim, [requireAuth, requireService])"
+      "registerRoutineMcpToolRoutes(app, opts.internalRoutineMcp, [requireAuth, requireService])"
     );
   });
 
-  it("binds Chat, Routine, and Worker Connection resolution to the live OIM catalog", () => {
-    expect(indexSource).toContain("oimReleaseFeature?.packages() ?? bundledOimCatalog");
-    expect(indexSource).toContain(
-      "const liveOimCatalog = liveOimPackageCatalog(oimPackageCatalog)"
-    );
-    expect(indexSource.match(/new CatalogBoundOimOperationConnectionResolver\(/g)).toHaveLength(2);
-    expect(indexSource).toContain("connections: oimOperationConnections");
-    expect(indexSource).toContain("connectionOperations: oimWorkerOperationConnections");
+  it("binds Chat and Routine account resolution to the governed MCP runtime", () => {
+    expect(indexSource).toContain("new McpHostContextResolver({");
+    expect(indexSource).toContain("await composeMcpAccountRuntime({");
+    expect(indexSource).toContain("callerForRequest: mcpContexts.callerForRequest");
+    expect(indexSource).toContain("callerForRun: mcpContexts.callerForRun");
+    expect(indexSource).toContain("preparation: mcpTools");
+    expect(indexSource).toContain("await mcpRuntime.refresh()");
+    expect(indexSource).toContain("await mcpFeature.refresh()");
+    expect(composed).toContain("mcpAccounts");
+    expect(composed).toContain("mcpIntegrations");
   });
 });

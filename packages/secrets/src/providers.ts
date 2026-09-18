@@ -1,8 +1,8 @@
 /** Secret providers keep legacy freshness policy and expose uncached reads for pinned leases. */
 
-import { secretStorageKey } from "./connection-secrets";
 import type { SecretsService } from "./encrypted-store";
 import { SecretUnavailableError } from "./encrypted-store";
+import { secretStorageKey } from "./secret-reference";
 
 export interface ResolvedSecret {
   readonly value: string;
@@ -13,9 +13,9 @@ export interface ResolvedSecret {
 export interface SecretProvider {
   /** Plaintext using the provider's normal cache/freshness policy. */
   resolveCurrent(secretRef: string): Promise<ResolvedSecret | null>;
-  /** Durable plaintext bypassing caches. Required for revision-pinned Connection leases. */
+  /** Durable plaintext bypassing caches for revision-pinned MCP account use. */
   resolveUncached?(secretRef: string): Promise<ResolvedSecret | null>;
-  /** Durable revision without plaintext. Required for Connection leases. */
+  /** Durable revision without plaintext for MCP account reauthorization. */
   currentVersion?(secretRef: string): Promise<string | null>;
 }
 
@@ -66,7 +66,7 @@ export function inMemorySecretProvider(
   };
 }
 
-/** Preserves legacy cache semantics while exposing uncached reads for Connection leases. */
+/** Preserves ordinary cache semantics while exposing uncached reads for MCP account leases. */
 export function secretsServiceProvider(
   service: Pick<SecretsService, "get"> &
     Partial<Pick<SecretsService, "resolveCurrent" | "revision">>

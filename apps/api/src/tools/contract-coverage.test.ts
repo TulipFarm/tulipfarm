@@ -1,47 +1,17 @@
 /** Ratchet: every registered Tool must declare authority or the build fails. */
 
-import {
-  type EgressHttpPort,
-  GITHUB_TOOL_CONTRACTS,
-  GOOGLE_TOOL_CONTRACTS,
-  SLACK_TOOL_CONTRACTS,
-} from "@tulipfarm/integrations";
-import type { SecretsService } from "@tulipfarm/secrets";
-import type { Logger, SoulIntegration } from "@tulipfarm/soul";
-import type { ChannelMentionedThreadStore } from "@tulipfarm/storage";
-import {
-  type CredentialDispatcher,
-  MemoryEffectStore,
-  RESOURCE_NAME_PATTERN,
-  type ToolAdapter,
-} from "@tulipfarm/tool-broker";
-import type { ParkableToolDef, ToolDef } from "@tulipfarm/tool-host";
+import { RESOURCE_NAME_PATTERN } from "@tulipfarm/tool-broker";
+import type { ParkableToolDef } from "@tulipfarm/tool-host";
 import { ledgerOwnsCall, toToolDef } from "@tulipfarm/tool-host";
 import { describe, expect, it } from "vitest";
-import type { ToolRegistry } from "../broker/tool-adapter";
-import type { IntegrationConversationsRepo } from "../ingress/repo";
 import { packReadTool } from "../packs/tool";
-import { DeclarativeToolSync } from "./declarative/sync";
-import { declarativeToolName } from "./declarative/tools";
-import type { GitHubInstallationDirectory } from "./github/installation";
-import { buildGitHubTools, GITHUB_REPOSITORY_LIST_TOOL_NAME } from "./github/tools";
-import { buildGoogleTools } from "./google/tools";
 import { NETWORK_TOOLS } from "./network/tools";
 import { buildToolRegistry } from "./setup";
-import { buildSlackTools } from "./slack/tools";
 
 type RegistryServices = Parameters<typeof buildToolRegistry>[0];
 
-const BUSINESS_ID = "fitness-check-business";
 const RESOURCE_GRAMMAR = new RegExp(RESOURCE_NAME_PATTERN);
 const INVALID_REF_FRAGMENTS = ["undefined", "null"] as const;
-// A synthetic manifest-driven integration exercises the declarative sync path without depending on
-// any shipped integration, so removing a bundled provider cannot silently drop this coverage.
-const DECLARATIVE_FITNESS_SLUG = "fitness-docs";
-const DECLARATIVE_READ_DOCUMENT_TOOL_NAME = declarativeToolName(
-  DECLARATIVE_FITNESS_SLUG,
-  "read_document"
-);
 
 const ALWAYS_ON_TOOL_NAMES = [
   "get_client_context",
@@ -117,10 +87,13 @@ const EXPECTED_FAMILY_TOOL_NAMES = [
   {
     family: "integration-authoring",
     names: [
-      "integration_draft_create",
-      "integration_draft_review",
+      "integration_configure",
+      "integration_discover",
       "integration_get",
       "integration_list",
+      "integration_prompt_render",
+      "integration_resource_read",
+      "integration_review",
     ],
   },
   {
@@ -172,87 +145,11 @@ const EXPECTED_FAMILY_TOOL_NAMES = [
     ],
   },
   { family: "network", names: ["api_request", "pack_read", "web_fetch"] },
-  {
-    family: "github",
-    names: [
-      "github_check_run_read",
-      "github_content_list",
-      "github_content_read",
-      "github_issue_assign",
-      "github_issue_close",
-      "github_issue_comment",
-      "github_issue_create",
-      "github_issue_label",
-      "github_issue_read",
-      "github_issue_search",
-      "github_pull_request_comment",
-      "github_pull_request_create",
-      "github_pull_request_merge",
-      "github_pull_request_read",
-      "github_pull_request_review",
-      "github_pull_request_search",
-      "github_repo_push",
-      "github_repository_create",
-      "github_repository_list",
-    ],
-  },
-  {
-    family: "slack",
-    names: [
-      "send_slack_message",
-      "slack_acknowledge",
-      "slack_bookmark_manage",
-      "slack_channel_list",
-      "slack_conversation_get",
-      "slack_file_info",
-      "slack_file_upload",
-      "slack_message_delete",
-      "slack_message_history",
-      "slack_message_update",
-      "slack_pin_manage",
-      "slack_reaction_remove",
-      "slack_user_lookup",
-    ],
-  },
-  {
-    family: "google",
-    names: [
-      "calendar_create_event",
-      "calendar_delete_event",
-      "calendar_list_events",
-      "calendar_update_event",
-      "docs_append",
-      "docs_create",
-      "docs_read",
-      "drive_search",
-      "gmail_draft",
-      "gmail_read",
-      "gmail_search",
-    ],
-  },
-  {
-    family: `declarative/${DECLARATIVE_FITNESS_SLUG}`,
-    names: [DECLARATIVE_READ_DOCUMENT_TOOL_NAME],
-  },
 ] as const;
 
 const EXPECTED_TOTAL_TOOL_COUNT =
   ALWAYS_ON_TOOL_NAMES.length +
   EXPECTED_FAMILY_TOOL_NAMES.reduce((sum, family) => sum + family.names.length, 0);
-
-const EXPECTED_CREDENTIAL_MODES_BY_PROVIDER = {
-  github: "user_preferred",
-  google: "service",
-  [DECLARATIVE_FITNESS_SLUG]: "service",
-  slack: "service",
-} as const;
-
-const PUBLISHED_DESTINATIONS_BY_ACTION = new Map(
-  [...GITHUB_TOOL_CONTRACTS, ...SLACK_TOOL_CONTRACTS, ...GOOGLE_TOOL_CONTRACTS].map((contract) => [
-    contract.spec.action,
-    contract.spec.allowedDestinations,
-  ])
-);
 
 const WRONG_TYPED_VALUES = [
   { label: "string", value: "wrong" },
@@ -293,108 +190,16 @@ function stubbedCoreServices(): RegistryServices {
   };
 }
 
-function buildGitHubFitnessTools(): readonly ToolDef[] {
-  return buildGitHubTools(BUSINESS_ID, {
-    effects: new MemoryEffectStore(),
-    adapters: new Map<string, ToolAdapter>(),
-    credentials: inert<CredentialDispatcher>(),
-    installations: inert<GitHubInstallationDirectory>(),
-  });
-}
-
-function buildSlackFitnessTools(): readonly ToolDef[] {
-  return buildSlackTools(BUSINESS_ID, {
-    effects: new MemoryEffectStore(),
-    adapters: new Map<string, ToolAdapter>(),
-    credentials: inert<CredentialDispatcher>(),
-    threads: inert<IntegrationConversationsRepo>(),
-    mentionedThreads: inert<ChannelMentionedThreadStore>(),
-  });
-}
-
-function buildGoogleFitnessTools(): readonly ToolDef[] {
-  return buildGoogleTools(BUSINESS_ID, {
-    effects: new MemoryEffectStore(),
-    adapters: new Map<string, ToolAdapter>(),
-    credentials: inert<CredentialDispatcher>(),
-  });
-}
-
-const DECLARATIVE_FITNESS_SPEC = {
-  openapi: "3.0.3",
-  servers: [{ url: "https://api.fitness-docs.test/v1" }],
-  paths: {
-    "/documents/{document_id}": {
-      get: {
-        operationId: "readDocument",
-        parameters: [
-          { name: "document_id", in: "path", required: true, schema: { type: "string" } },
-        ],
-        responses: { "200": { content: { "application/json": { schema: { type: "object" } } } } },
-      },
-    },
-  },
-};
-
-/** An inline manifest-driven integration, so the declarative sync path is covered on its own terms. */
-function buildDeclarativeFitnessIntegration(): SoulIntegration {
-  return {
-    slug: DECLARATIVE_FITNESS_SLUG,
-    sourceIntegration: DECLARATIVE_FITNESS_SLUG,
-    manifest: {
-      name: DECLARATIVE_FITNESS_SLUG,
-      version: "1.0.0",
-      description: "",
-      egress: {
-        type: "openapi",
-        spec: "spec.json",
-        operations: [
-          { operation: "readDocument", name: "read_document", description: "Read one document." },
-        ],
-        auth: { token_env: "FITNESS_DOCS_TOKEN" },
-      },
-    } as SoulIntegration["manifest"],
-    connection: { enabled: true, env: {} },
-    egressSpec: DECLARATIVE_FITNESS_SPEC,
-  };
-}
-
-interface CoveredTools {
-  readonly tools: readonly ParkableToolDef[];
-  readonly declarativeCount: number;
-  readonly declarativeProblems: readonly string[];
-}
-
 /** Builds the production registry with stubs so service-gated Tool families are still covered. */
-function registerAllFamilies(): CoveredTools {
+function registerAllFamilies(): readonly ParkableToolDef[] {
   const registry = buildToolRegistry({
     ...stubbedCoreServices(),
-    github: buildGitHubFitnessTools(),
-    slack: buildSlackFitnessTools(),
-    google: buildGoogleFitnessTools(),
     network: [...NETWORK_TOOLS, packReadTool].map((definition) =>
       toToolDef(definition, () => inert<never>())
     ),
   });
 
-  const declarativeProblems: string[] = [];
-  const logger: Logger = {
-    info: () => undefined,
-    warn: () => undefined,
-    error: (message) => declarativeProblems.push(message),
-  };
-  const sync = new DeclarativeToolSync({
-    registry: registry as ToolRegistry,
-    integrations: () => [buildDeclarativeFitnessIntegration()],
-    businessId: BUSINESS_ID,
-    effects: new MemoryEffectStore(),
-    secrets: async () => inert<SecretsService>(),
-    http: inert<EgressHttpPort>(),
-    logger: () => logger,
-  });
-  const declarativeCount = sync.sync();
-
-  return { tools: registry.getAll(), declarativeCount, declarativeProblems };
+  return registry.getAll();
 }
 
 function sortedToolNames(tools: readonly ParkableToolDef[]): readonly string[] {
@@ -496,32 +301,8 @@ function targetRefProblem(ref: unknown): string | undefined {
   return undefined;
 }
 
-function sameStrings(left: readonly string[], right: readonly string[]): boolean {
-  return left.length === right.length && left.every((value, index) => value === right[index]);
-}
-
-function sortedStrings(values: readonly string[]): readonly string[] {
-  return [...values].sort();
-}
-
-function expectedCredentialModeFor(provider: string): string | undefined {
-  switch (provider) {
-    case "github":
-      return EXPECTED_CREDENTIAL_MODES_BY_PROVIDER.github;
-    case "google":
-      return EXPECTED_CREDENTIAL_MODES_BY_PROVIDER.google;
-    case DECLARATIVE_FITNESS_SLUG:
-      return EXPECTED_CREDENTIAL_MODES_BY_PROVIDER[DECLARATIVE_FITNESS_SLUG];
-    case "slack":
-      return EXPECTED_CREDENTIAL_MODES_BY_PROVIDER.slack;
-    default:
-      return undefined;
-  }
-}
-
 describe("tool contract coverage", () => {
-  const coverage = registerAllFamilies();
-  const tools = coverage.tools;
+  const tools = registerAllFamilies();
   const toolNames = new Set(tools.map((tool) => tool.name));
 
   it("registers the full tool surface by family", () => {
@@ -529,8 +310,6 @@ describe("tool contract coverage", () => {
       (name, index, names) => index > 0 && names[index - 1] === name
     );
     expect(duplicateNames, "duplicate Tool registrations").toEqual([]);
-    expect(coverage.declarativeProblems, "declarative Tool fixture failed to publish").toEqual([]);
-    expect(coverage.declarativeCount, "declarative fixture published Tool count").toBe(1);
 
     for (const name of ALWAYS_ON_TOOL_NAMES) {
       expect(toolNames.has(name), `always-on Tool missing: ${name}`).toBe(true);
@@ -588,10 +367,6 @@ describe("tool contract coverage", () => {
     });
     expect(reachesSharing.map((tool) => tool.name)).toEqual([]);
 
-    // `navigate_to` sends a person to an app path; it cannot call the API. Everything else that
-    // holds a URL takes it from an Integration manifest, which is authored per provider and can
-    // only name that provider's host. Neither can reach a first-party route, and this asserts the
-    // property that makes that true rather than re-listing the routes.
     const firstPartyCallers = tools.filter((tool) =>
       [JSON.stringify(tool.inputSchema), tool.description].join(" ").includes("/api/v1/files")
     );
@@ -662,23 +437,6 @@ describe("tool contract coverage", () => {
     expect(offenders).toEqual([]);
   });
 
-  it("keeps integration destinations aligned with their published contracts", () => {
-    const offenders = tools.flatMap((tool) => {
-      const definition = tool.definition;
-      if (definition === undefined) return [];
-      const expected = PUBLISHED_DESTINATIONS_BY_ACTION.get(definition.authorization.action);
-      if (expected === undefined) return [];
-      const actual = definition.authorization.allowedDestinations ?? [];
-      return sameStrings(sortedStrings(actual), sortedStrings(expected))
-        ? []
-        : [
-            `${tool.name}: destinations ${JSON.stringify(actual)} do not match contract ` +
-              JSON.stringify(expected),
-          ];
-    });
-    expect(offenders).toEqual([]);
-  });
-
   it("leaves no mutating Tool without an idempotency story", () => {
     // A mutating Tool that cannot absorb a duplicate delivery cannot be safely dispatched: the
     // dispatcher cannot distinguish a lost response from a lost request.
@@ -706,24 +464,6 @@ describe("tool contract coverage", () => {
       })
       .map((tool) => tool.name);
     expect(unowned).toEqual([]);
-  });
-
-  it("uses the expected credential mode for every provider-backed Tool", () => {
-    const offenders = tools.flatMap((tool) => {
-      const definition = tool.definition;
-      if (definition?.provider === undefined) return [];
-      const expected =
-        tool.name === GITHUB_REPOSITORY_LIST_TOOL_NAME
-          ? "service"
-          : expectedCredentialModeFor(definition.provider);
-      if (expected === undefined) {
-        return [`${tool.name}: provider ${definition.provider} has no expected credential mode`];
-      }
-      return definition.credentialMode === expected
-        ? []
-        : [`${tool.name}: credentialMode ${definition.credentialMode} should be ${expected}`];
-    });
-    expect(offenders).toEqual([]);
   });
 
   it("keeps target derivation total and well-formed across every Tool", () => {
@@ -758,27 +498,6 @@ describe("tool contract coverage", () => {
       }
     }
 
-    expect(offenders).toEqual([]);
-  });
-
-  it("keeps GitHub searches on one explicit repository target", () => {
-    const offenders = tools
-      .filter(
-        (tool) => tool.name === "github_issue_search" || tool.name === "github_pull_request_search"
-      )
-      .flatMap((tool) => {
-        const targets = tool.definition?.targetsFor({ repository: "acme/api" }) ?? [];
-        const schema = record(tool.inputSchema);
-        const required = schema?.required;
-        const properties = record(schema?.properties);
-        return targets.length === 1 &&
-          targetRefProblem(targets[0]) === undefined &&
-          Array.isArray(required) &&
-          required.includes("repository") &&
-          properties?.repositories === undefined
-          ? []
-          : [`${tool.name}: search must require one repository and derive one target`];
-      });
     expect(offenders).toEqual([]);
   });
 });

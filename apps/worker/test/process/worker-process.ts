@@ -6,32 +6,19 @@ import { freePort } from "./free-port";
 
 const APP_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 const BUNDLE = resolve(APP_ROOT, "dist/worker.cjs");
-const HOOK_BUNDLE = resolve(APP_ROOT, "dist/ingress-hook-worker.cjs");
 
-/** Bundles Dockerfile-equivalent worker and hook artifacts; keep `external` in sync. */
+/** Bundles the Dockerfile-equivalent worker artifact; keep `external` in sync. */
 export async function buildWorkerBundle(): Promise<string> {
-  await Promise.all([
-    build({
-      entryPoints: [resolve(APP_ROOT, "src/main.ts")],
-      bundle: true,
-      platform: "node",
-      target: "node26",
-      format: "cjs",
-      outfile: BUNDLE,
-      external: ["pg", "pg-boss", "isolated-vm", "@anthropic-ai/claude-agent-sdk", "@openai/codex"],
-      logLevel: "silent",
-    }),
-    build({
-      entryPoints: [resolve(APP_ROOT, "src/hooks/ingress-hook-worker.ts")],
-      bundle: true,
-      platform: "node",
-      target: "node26",
-      format: "cjs",
-      outfile: HOOK_BUNDLE,
-      external: ["isolated-vm"],
-      logLevel: "silent",
-    }),
-  ]);
+  await build({
+    entryPoints: [resolve(APP_ROOT, "src/main.ts")],
+    bundle: true,
+    platform: "node",
+    target: "node26",
+    format: "cjs",
+    outfile: BUNDLE,
+    external: ["pg", "pg-boss", "isolated-vm", "@anthropic-ai/claude-agent-sdk", "@openai/codex"],
+    logLevel: "silent",
+  });
   return BUNDLE;
 }
 

@@ -1,12 +1,10 @@
 import { PGlite } from "@electric-sql/pglite";
 import { PGLiteSocketServer } from "@electric-sql/pglite-socket";
 import {
-  CONNECTION_STORAGE_STATEMENTS,
-  OIM_INGRESS_EMISSION_STORAGE_STATEMENTS,
+  CHANNEL_RUN_DELIVERY_STORAGE_STATEMENTS,
+  MCP_KNOWLEDGE_STORAGE_STATEMENTS,
   RUNTIME_HOSTING_STORAGE_STATEMENTS,
   RUNTIME_IDENTITY_STORAGE_STATEMENTS,
-  WEBHOOK_INBOX_STORAGE_STATEMENTS,
-  WEBHOOK_REGISTRATION_STORAGE_STATEMENTS,
 } from "@tulipfarm/storage";
 import { freePort } from "./free-port";
 
@@ -20,15 +18,12 @@ export interface ScratchDatabase {
   stop(): Promise<void>;
 }
 
-/** Boots scratch Postgres with only `schema_version`; the API owns migrations. */
 export async function startScratchDatabase(schemaVersion: number): Promise<ScratchDatabase> {
   const database = await PGlite.create();
 
   for (const statement of [
-    ...CONNECTION_STORAGE_STATEMENTS,
-    ...WEBHOOK_INBOX_STORAGE_STATEMENTS,
-    ...OIM_INGRESS_EMISSION_STORAGE_STATEMENTS,
-    ...WEBHOOK_REGISTRATION_STORAGE_STATEMENTS,
+    ...CHANNEL_RUN_DELIVERY_STORAGE_STATEMENTS,
+    ...MCP_KNOWLEDGE_STORAGE_STATEMENTS,
     ...RUNTIME_IDENTITY_STORAGE_STATEMENTS,
     ...RUNTIME_HOSTING_STORAGE_STATEMENTS,
   ]) {

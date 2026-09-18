@@ -381,6 +381,9 @@ const writePage = defineApiTool<KnowledgeToolContext>({
       // governs the precision `PUT /pages/:id` edit surface, which is a different, stricter
       // authority than overwriting-by-path here.
       const existing = await ctx.service.getPageByPath(a.spaceId, a.path);
+      if (existing?.source === "mcp") {
+        return err("write_denied", "Synced pages are read-only. Write a separate note.");
+      }
       if (existing && !(await mayReadPage(ctx, existing._id))) {
         return refuse("page");
       }

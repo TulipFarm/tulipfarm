@@ -27,6 +27,7 @@ import {
   type SubjectDirectory,
   unrestrictPage,
 } from "~/lib/knowledge-api";
+import { getMcpKnowledgePageSource } from "~/lib/mcp-knowledge";
 import { buildPageResolver, pageHref, pageSlug } from "~/lib/page-href";
 
 export const meta: MetaFunction = () => [{ title: "Page · Knowledge · tulipfarm" }];
@@ -44,6 +45,7 @@ export async function clientLoader({ params }: ClientLoaderFunctionArgs) {
   // /knowledge/pages/<id>/<slug>. (No redirect when the path slugifies to empty.)
   const slug = pageSlug(doc.path);
   if (slug && (params["*"] ?? "") !== slug) throw redirect(pageHref(doc.id, doc.path));
+  const source = doc.source === "mcp" ? await getMcpKnowledgePageSource(doc.id) : undefined;
   const [space, backlinks, pages] = await Promise.all([
     getSpace(doc.spaceId),
     getBacklinks(pageId)
@@ -51,11 +53,11 @@ export async function clientLoader({ params }: ClientLoaderFunctionArgs) {
       .catch(() => []),
     listAllPages().then((r) => r.items),
   ]);
-  return { doc, path: doc.path, space, backlinks, pages };
+  return { doc, path: doc.path, space, backlinks, pages, source };
 }
 
 export default function PageDetailRoute() {
-  const { doc, path, space, backlinks, pages } = useLoaderData<typeof clientLoader>();
+  const { doc, path, space, backlinks, pages, source } = useLoaderData<typeof clientLoader>();
   const navigate = useNavigate();
   const [deleting, setDeleting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -118,12 +120,14 @@ export default function PageDetailRoute() {
           ))}
         </nav>
         {error ? <p className="text-sm text-destructive">error: {error}</p> : null}
-        <div className="flex justify-end">
-          <Button type="button" variant="ghost" onClick={() => void openShare()}>
-            <Users aria-hidden className="size-4" /> Who can read this
-          </Button>
-        </div>
-        {visibility && directory ? (
+        {doc.source !== "mcp" && (
+          <div className="flex justify-end">
+            <Button type="button" variant="ghost" onClick={() => void openShare()}>
+              <Users aria-hidden className="size-4" /> Who can read this
+            </Button>
+          </div>
+        )}
+        {doc.source !== "mcp" && visibility && directory ? (
           <RestrictDialog
             open={sharing}
             subjectLabel={doc.title}
@@ -143,6 +147,7 @@ export default function PageDetailRoute() {
         <PageDetail
           spaceId={space.id}
           doc={doc}
+          source={source}
           path={path}
           editTo={`/knowledge/pages/${encodeURIComponent(doc.id)}/edit`}
           onDelete={onDelete}

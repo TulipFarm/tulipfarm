@@ -1,7 +1,5 @@
 import type { PGlite } from "@electric-sql/pglite";
 import { DEPLOYMENT_BUSINESS_ID } from "@tulipfarm/constants";
-import { recoverQuarantinedOimRelease } from "@tulipfarm/integrations";
-import { OimReleaseTrustStore, transactionPort } from "@tulipfarm/storage";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Queryable } from "./db";
 import { runPgMigrations } from "./pg-migrate";
@@ -46,6 +44,30 @@ describe("runPgMigrations", () => {
 
   afterEach(async () => {
     await db.close();
+  });
+
+  it("upgrades MCP runtime storage from version 137 without replaying historical migrations", async () => {
+    db = await restoreHistoricalDatabase(db, 137);
+    await runPgMigrations(db, undefined, () => {});
+    const tables = [
+      "mcp_execution_authorizations",
+      "mcp_knowledge_selections",
+      "mcp_knowledge_source_links",
+      "mcp_oauth_attempts",
+      "mcp_oauth_refresh_claims",
+      "native_channel_inbox",
+      "native_channel_routine_routes",
+    ];
+    const result = await db.query<{ table_name: string }>(
+      `SELECT table_name FROM information_schema.tables
+       WHERE table_schema = 'public' AND table_name = ANY($1::text[])
+       ORDER BY table_name`,
+      [tables]
+    );
+    expect(result.rows.map((row) => row.table_name)).toEqual(tables);
+    const { queryable, statements } = watch(db);
+    await runPgMigrations(queryable, undefined, NOOP_LOG);
+    expect(statements.filter((statement) => statement === "BEGIN")).toHaveLength(0);
   });
 
   it("upgrades OIM persistence from version 111 and is then repeat-safe", async () => {
@@ -311,61 +333,6 @@ describe("runPgMigrations", () => {
          AND major_version = 2
     `);
     expect(lifecycle.rows).toEqual([]);
-
-    const trustStore = new OimReleaseTrustStore(transactionPort(db));
-    await expect(
-      recoverQuarantinedOimRelease(
-        {
-          businessId: "business-1",
-          integrationId: "calendar",
-          majorVersion: 2,
-          source: "https://catalog.example/calendar",
-          sourceRef: "commit-calendar",
-          candidatePath: "packages/calendar",
-          slug: "calendar-v2",
-        },
-        {
-          provenance: {
-            findQuarantined: (businessId, integrationId, majorVersion) =>
-              trustStore.findQuarantinedProvenance(businessId, integrationId, majorVersion),
-            recover: (input) => trustStore.recoverQuarantinedProvenance(input),
-          },
-          inspectSource: async () => ({
-            integrationId: "calendar",
-            version: "2.1.0",
-            majorVersion: 2,
-            packageDigest: "a".repeat(64),
-            resolvedRef: "commit-calendar",
-          }),
-          inspectSoulArtifact: async () => ({
-            integrationId: "calendar",
-            version: "2.1.0",
-            majorVersion: 2,
-            packageDigest: "a".repeat(64),
-            soulRevision: "soul-calendar",
-          }),
-        }
-      )
-    ).resolves.toMatchObject({ installationId: expect.any(String) });
-    await expect(
-      db.query(
-        `SELECT recovery_state, slug, source_ref, candidate_path, soul_revision
-           FROM oim_installed_release_provenance
-          WHERE business_id = 'business-1'
-            AND integration_id = 'calendar'
-            AND major_version = 2`
-      )
-    ).resolves.toMatchObject({
-      rows: [
-        {
-          recovery_state: "verified",
-          slug: "calendar-v2",
-          source_ref: "commit-calendar",
-          candidate_path: "packages/calendar",
-          soul_revision: "soul-calendar",
-        },
-      ],
-    });
 
     const journalSlug = await db.query<{ column_name: string }>(`
       SELECT column_name

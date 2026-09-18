@@ -55,49 +55,6 @@ export {
   SlackCapabilityObservationStore,
 } from "./channel-surface-store";
 export type {
-  ConnectionAuthStep,
-  ConnectionAuthStepStatus,
-  PutConnectionAuthStep,
-  UpdateConnectionAuthStep,
-  UpdateConnectionAuthStepHealth,
-} from "./connection-auth-step-store";
-export {
-  CONNECTION_AUTH_STEP_STORAGE_STATEMENTS,
-  ConnectionAuthStepStore,
-} from "./connection-auth-step-store";
-export type { ReplaceConnectionCredentials } from "./connection-credential-update";
-export type {
-  BindVerifiedConnectionExternalIdentity,
-  ConnectionIdentityProofKind,
-  VerifiedConnectionExternalIdentity,
-} from "./connection-external-identity-store";
-export {
-  bindVerifiedConnectionExternalIdentity,
-  CONNECTION_EXTERNAL_IDENTITY_STORAGE_STATEMENTS,
-  ConnectionExternalIdentityConflictError,
-  ConnectionExternalIdentityStore,
-  clearVerifiedConnectionExternalIdentity,
-} from "./connection-external-identity-store";
-export type {
-  ConnectionAuthStepFence,
-  PersistedConnection,
-  PublishConnectionAuthStep,
-} from "./connection-store";
-export {
-  CONNECTION_STORAGE_STATEMENTS,
-  ConnectionIdentityConflictError,
-  ConnectionStore,
-} from "./connection-store";
-export {
-  CONNECTION_VERIFICATION_EVIDENCE_STORAGE_STATEMENTS,
-  ConnectionVerificationEvidenceStore,
-  publishConnectionVerificationEvidence,
-} from "./connection-verification-evidence-store";
-export {
-  INGRESS_TEARDOWN_STORAGE_STATEMENTS,
-  IngressTeardownStore,
-} from "./ingress-teardown-store";
-export type {
   IntegrationProjectionStatus,
   PersistedChannelRoute,
   PersistedIntegration,
@@ -109,120 +66,33 @@ export {
   INTEGRATION_STORAGE_STATEMENTS,
   IntegrationStore,
 } from "./integration-store";
-export type {
-  OimIngressEmissionInput,
-  OimIngressEmissionResult,
-} from "./oim-ingress-emission-store";
+export { MCP_ACCOUNT_STORAGE_STATEMENTS, McpAccountStore } from "./mcp-account-store";
 export {
-  OIM_INGRESS_EMISSION_STORAGE_STATEMENTS,
-  OimIngressEmissionStore,
-} from "./oim-ingress-emission-store";
-export type {
-  OimKnowledgeCheckpoint,
-  OimKnowledgeCheckpointKey,
-} from "./oim-knowledge-checkpoint-store";
+  MCP_EXECUTION_AUTHORIZATION_STORAGE_STATEMENTS,
+  McpExecutionAuthorizationStore,
+} from "./mcp-execution-authorization-store";
 export {
-  OIM_KNOWLEDGE_CHECKPOINT_STORAGE_STATEMENTS,
-  OIM_KNOWLEDGE_CHECKPOINT_WATERMARK_STORAGE_STATEMENTS,
-  OimKnowledgeCheckpointStore,
-} from "./oim-knowledge-checkpoint-store";
-export type {
-  DeleteOimKnowledgeSource,
-  OimKnowledgeChunkPublication,
-  OimKnowledgeConnectionFenceClaim,
-  OimKnowledgeConnectionFenceScope,
-  OimKnowledgePublicationClaim,
-  OimKnowledgeSourcePublication,
-  PublishOimKnowledgeRevision,
-  QuarantineInvalidOimKnowledgeConnection,
-} from "./oim-knowledge-publication-store";
+  MCP_KNOWLEDGE_STORAGE_STATEMENTS,
+  type McpKnowledgeClaim,
+  McpKnowledgeFenceError,
+  type McpKnowledgeSourceLink,
+  McpKnowledgeStore,
+  type McpKnowledgeStoredSelection,
+} from "./mcp-knowledge-store";
 export {
-  OIM_KNOWLEDGE_PUBLICATION_FENCE_STORAGE_STATEMENTS,
-  OimKnowledgePublicationStore,
-} from "./oim-knowledge-publication-store";
-export type {
-  AdmitOimRateLimitInput,
-  ImposeOimRateLimitCooldownInput,
-  OimRateLimitAdmission,
-  OimRateLimitQuota,
-  OimRateLimitStoreScope,
-} from "./oim-rate-limit-store";
+  MCP_OAUTH_STORAGE_STATEMENTS,
+  type McpOAuthAttempt,
+  type McpOAuthBinding,
+  type McpOAuthRefreshClaim,
+  McpOAuthStore,
+} from "./mcp-oauth-store";
 export {
-  OIM_RATE_LIMIT_STORAGE_STATEMENTS,
-  OimRateLimitStore,
-} from "./oim-rate-limit-store";
-export type {
-  AcquireOimReleaseDispatchLeaseInput,
-  OimReleaseDispatchLease,
-} from "./oim-release-dispatch-store";
-export { OimReleaseDispatchLeaseStore } from "./oim-release-dispatch-store";
-export type {
-  OimReleaseInstallStorageScope,
-  OimReleaseSession,
-  OimReleaseSessionSource,
-  OimReleaseStorageScope,
-} from "./oim-release-lifecycle-store";
-export {
-  OIM_RELEASE_LIFECYCLE_STORAGE_STATEMENTS,
-  OimReleaseLifecycleStore,
-} from "./oim-release-lifecycle-store";
-export type {
-  BeginOimReleaseOperationInput,
-  OimReleaseExpectedGeneration,
-  OimReleaseOperation,
-  OimReleaseOperationKind,
-  OimReleaseOperationPhase,
-} from "./oim-release-operation-store";
-export { OimReleaseOperationStore } from "./oim-release-operation-store";
-export type { OimReleaseStorageDatabase } from "./oim-release-storage";
-export { createOimReleaseStorage } from "./oim-release-storage";
-export type {
-  AddOimTrustRootInput,
-  CompareAndSwapInstalledOimReleaseProvenanceInput,
-  CompareAndSwapInstalledOimReleaseProvenanceResult,
-  InstalledOimReleaseProvenance,
-  OimAuthoredDraftReleaseSourceProvenance,
-  OimInstalledReleaseTrustClass,
-  OimKnownSignedReleaseIdentity,
-  OimReleaseSourceProvenance,
-  OimRevocationFeed,
-  OimTrustRoot,
-  OimTrustRootPurpose,
-  PersistedInstalledOimReleaseProvenance,
-  PutInstalledOimReleaseProvenanceInput,
-  QuarantinedOimReleaseProvenance,
-  RecordOimKnownSignedReleaseInput,
-  RecoverQuarantinedOimReleaseInput,
-  SetOimRevocationFeedInput,
-  UpdateRestoredOimReleaseSoulRevisionInput,
-} from "./oim-release-trust-store";
-export {
-  OIM_RELEASE_MAINTENANCE_STORAGE_STATEMENTS,
-  OIM_RELEASE_TRUST_STORAGE_STATEMENTS,
-  OimReleaseTrustStore,
-  OimTrustRootConflictError,
-} from "./oim-release-trust-store";
-export type {
-  OimReleaseStorageTarget,
-  OimReleaseStorageUninstallJournal,
-  OimReleaseStorageUninstallRetry,
-  OimReleaseStorageUninstallStage,
-  OimReleaseStorageUninstallStep,
-} from "./oim-release-uninstall-store";
-export { OimReleaseUninstallJournalStore } from "./oim-release-uninstall-store";
-export type { PollingIngressLease } from "./polling-ingress-store";
-export {
-  POLLING_INGRESS_STORAGE_STATEMENTS,
-  PollingIngressStore,
-} from "./polling-ingress-store";
-export type {
-  ProviderFileUploadPhase,
-  ProviderFileUploadRecord,
-} from "./provider-file-upload-store";
-export {
-  PROVIDER_FILE_UPLOAD_STORAGE_STATEMENTS,
-  ProviderFileUploadStore,
-} from "./provider-file-upload-store";
+  NATIVE_CHANNEL_INBOX_STORAGE_STATEMENTS,
+  type NativeChannelInboxInput,
+  type NativeChannelInboxRecord,
+  NativeChannelInboxStore,
+  type NativeChannelRoutineRoute,
+} from "./native-channel-inbox-store";
 export type {
   ProviderOwnedObjectKey,
   ProviderOwnedObjectType,
@@ -237,38 +107,3 @@ export {
   SOUL_REPOSITORY_STORAGE_STATEMENTS,
   SoulRepositoryStore,
 } from "./soul-repository-store";
-export type {
-  PersistedWebhookDelivery,
-  RecordedDelivery,
-  VerifiedWebhookDeliveryInput,
-  WebhookDeliveryInput,
-  WebhookDeliveryState,
-} from "./webhook-inbox-store";
-export {
-  RawPayloadDiscardedError,
-  WEBHOOK_INBOX_STORAGE_STATEMENTS,
-  WebhookDeduplicationConflictError,
-  WebhookInboxStore,
-} from "./webhook-inbox-store";
-export type {
-  ActiveWebhookRegistration,
-  CompleteWebhookRegistrationResult,
-  OimWebhookCleanupPackageSnapshot,
-  PersistedWebhookRegistration,
-  PersistedWebhookRegistrationAttempt,
-  WebhookRegistrationAttemptClaim,
-  WebhookRegistrationAttemptState,
-  WebhookRegistrationClaim,
-  WebhookRegistrationKey,
-  WebhookRegistrationRenewal,
-  WebhookRegistrationState,
-  WebhookRegistrationTarget,
-} from "./webhook-registration-store";
-export {
-  WEBHOOK_REGISTRATION_STORAGE_STATEMENTS,
-  WebhookRegistrationStore,
-} from "./webhook-registration-store";
-export {
-  WEBSOCKET_INGRESS_SUPERVISOR_STORAGE_STATEMENTS,
-  WebsocketIngressSupervisorStore,
-} from "./websocket-ingress-supervisor-store";

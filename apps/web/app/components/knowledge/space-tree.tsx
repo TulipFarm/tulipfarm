@@ -307,11 +307,11 @@ function PageRow({
             {node.label}
           </button>
         )}
-        <AgentAuthoredBadge authorKind={ref?.authorKind} compact />
+        {ref?.source !== "mcp" && <AgentAuthoredBadge authorKind={ref?.authorKind} compact />}
         {ref?.visibility && ref.visibility !== "business" ? (
           <VisibilityBadge visibility={ref.visibility} compact />
         ) : null}
-        {ref ? (
+        {ref && ref.source !== "mcp" ? (
           <MoveControl
             pageId={ref.pageId}
             pageTitle={node.label}
@@ -319,14 +319,16 @@ function PageRow({
             onMoved={() => window.dispatchEvent(new Event("okf:space-changed"))}
           />
         ) : null}
-        <Link
-          to={`${base}/pages/new?parent=${enc(node.path)}`}
-          title="New sub-page"
-          aria-label={`New page under ${node.label}`}
-          className="flex size-11 shrink-0 cursor-pointer items-center justify-center rounded-sm text-muted-foreground hover:bg-accent hover:text-foreground sm:size-6"
-        >
-          <Plus className="size-3" aria-hidden />
-        </Link>
+        {ref?.source !== "mcp" && (
+          <Link
+            to={`${base}/pages/new?parent=${enc(node.path)}`}
+            title="New sub-page"
+            aria-label={`New page under ${node.label}`}
+            className="flex size-11 shrink-0 cursor-pointer items-center justify-center rounded-sm text-muted-foreground hover:bg-accent hover:text-foreground sm:size-6"
+          >
+            <Plus className="size-3" aria-hidden />
+          </Link>
+        )}
       </div>
       {node.hasChildren && open ? (
         <Dir

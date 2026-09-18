@@ -1,152 +1,143 @@
 import {
-  createIntegrationAuthoringWorkflow,
-  INTEGRATION_AUTHORING_TOOL_POLICIES,
-  type InstalledIntegrationGeneration,
-  type IntegrationAuthoringInvocation,
-  type IntegrationDraftConnectionTestResult,
-  type IntegrationDraftStore,
-  type ReviewedCommunityIntegrationInstaller,
+  type McpCaller,
+  type McpCapabilityReview,
+  type McpConfigure,
+  McpIntegrationError,
+  type McpIntegrationService,
 } from "@tulipfarm/integrations";
-import { INTEGRATION_AUTHORING_TOOL_DECLARATIONS, type OimManifest } from "@tulipfarm/schema";
-import type { SoulIntegration } from "@tulipfarm/soul";
-import { type ApiToolDefinition, defineApiTool, type RequestContext } from "@tulipfarm/tool-host";
-
-export type {
-  IntegrationDraftConnectionTestResult,
-  ReviewedCommunityIntegrationInstaller,
-} from "@tulipfarm/integrations";
+import { McpError } from "@tulipfarm/mcp";
+import {
+  ajv,
+  INTEGRATION_CONFIGURE_TOOL_DECLARATION,
+  INTEGRATION_DISCOVER_TOOL_DECLARATION,
+  INTEGRATION_GET_TOOL_DECLARATION,
+  INTEGRATION_LIST_TOOL_DECLARATION,
+  INTEGRATION_PROMPT_RENDER_TOOL_DECLARATION,
+  INTEGRATION_RESOURCE_READ_TOOL_DECLARATION,
+  INTEGRATION_REVIEW_TOOL_DECLARATION,
+  type McpSetupToolDeclaration,
+} from "@tulipfarm/schema";
+import { type CommitActor, isSoulWriteError } from "@tulipfarm/soul";
+import {
+  type ApiToolDefinition,
+  defineApiTool,
+  err,
+  ok,
+  type RequestContext,
+  type ToolCallResult,
+} from "@tulipfarm/tool-host";
 
 export interface IntegrationAuthoringToolContext {
-  readonly businessId: string;
-  readonly drafts: IntegrationDraftStore;
-  readonly integrations: () => ReadonlyMap<string, SoulIntegration>;
-  readonly installedGenerations: {
-    findInstalledGeneration(
-      businessId: string,
-      integrationId: string,
-      majorVersion: number
-    ): Promise<InstalledIntegrationGeneration | null>;
-  };
+  readonly service: McpIntegrationService<CommitActor>;
+  readonly caller: (request: RequestContext) => Promise<McpCaller>;
   readonly requestContext: RequestContext;
-  readonly installer?: ReviewedCommunityIntegrationInstaller;
-  readonly connectionTester?: {
-    test(input: {
-      readonly manifest: OimManifest;
-      readonly companions: ReadonlyMap<string, string>;
-      readonly connectionId: string;
-      readonly requestContext: RequestContext;
-    }): Promise<IntegrationDraftConnectionTestResult>;
-  };
 }
 
-const SOUL_INTEGRATION_TARGET = "soul.integration";
-const [reviewDeclaration, createDeclaration, getDeclaration, listDeclaration] =
-  INTEGRATION_AUTHORING_TOOL_DECLARATIONS;
-
-function stringArg(args: unknown, key: string): string | undefined {
-  if (args === null || typeof args !== "object" || Array.isArray(args)) return undefined;
-  const value = (args as Record<string, unknown>)[key];
-  return typeof value === "string" && value.length > 0 ? value : undefined;
+function actor(context: IntegrationAuthoringToolContext): CommitActor {
+  if (!context.requestContext.actor) {
+    throw new McpIntegrationError("forbidden", "An authenticated Soul author is required.");
+  }
+  return context.requestContext.actor;
 }
 
-function integrationTargets(args: unknown) {
-  const slug = stringArg(args, "slug");
-  return slug === undefined ? [] : [{ type: SOUL_INTEGRATION_TARGET, id: slug }];
-}
-
-function requestPrincipal(requestContext: RequestContext): {
-  readonly kind: string;
-  readonly id: string;
-} {
-  return requestContext.subject ?? { kind: "user", id: requestContext.userId };
-}
-
-function workflow(context: IntegrationAuthoringToolContext) {
-  const connectionTester = context.connectionTester;
-  return createIntegrationAuthoringWorkflow<RequestContext>({
-    drafts: context.drafts,
-    integrations: context.integrations,
-    installedGenerations: context.installedGenerations,
-    ...(context.installer === undefined ? {} : { installer: context.installer }),
-    ...(connectionTester === undefined
-      ? {}
-      : {
-          connectionTester: {
-            test: ({ connectionContext, ...input }) =>
-              connectionTester.test({ ...input, requestContext: connectionContext }),
-          },
-        }),
+function definition<T>(
+  declaration: McpSetupToolDeclaration,
+  run: (input: T, context: IntegrationAuthoringToolContext) => Promise<unknown>
+): ApiToolDefinition<IntegrationAuthoringToolContext> {
+  const { name, description, inputSchema, mutating } = declaration;
+  const validate = ajv.compile<T>(inputSchema);
+  return defineApiTool({
+    name,
+    description,
+    inputSchema,
+    mutating,
+    tier: "system",
+    requiresApproval: mutating,
+    requiresAmbient: ["soul"],
+    authorization: {
+      action: mutating ? "integration.connect" : "integration.read",
+      resources: ["integration"],
+      dataClasses: ["soul_definition"],
+    },
+    async handler(args, context): Promise<ToolCallResult> {
+      if (!validate(args)) return err("validation_error", "The Integration arguments are invalid.");
+      try {
+        return ok(await run(args, context));
+      } catch (error) {
+        if (error instanceof McpIntegrationError) {
+          const accountAction = [
+            "selection_required",
+            "consent_required",
+            "reconnect_required",
+          ].includes(error.code);
+          return err(
+            accountAction
+              ? "credential_required"
+              : error.code === "not_found"
+                ? "not_found"
+                : "write_denied",
+            `${error.code}: ${error.message}`,
+            accountAction ? "/integrations" : undefined
+          );
+        }
+        if (error instanceof McpError) return err("unavailable", error.message);
+        if (isSoulWriteError(error)) return err("write_denied", error.message);
+        throw error;
+      }
+    },
   });
 }
 
-function invocation(
-  context: IntegrationAuthoringToolContext
-): IntegrationAuthoringInvocation<RequestContext> {
-  return {
-    businessId: context.businessId,
-    principal: requestPrincipal(context.requestContext),
-    ...(context.requestContext.actor === undefined ? {} : { actor: context.requestContext.actor }),
-    ...(context.requestContext.runId === undefined ? {} : { runId: context.requestContext.runId }),
-    ...(context.requestContext.toolCallId === undefined
-      ? {}
-      : { toolCallId: context.requestContext.toolCallId }),
-    connectionContext: context.requestContext,
-  };
-}
-
-const review = defineApiTool<IntegrationAuthoringToolContext>({
-  ...reviewDeclaration,
-  tier: "system",
-  authorization: {
-    action: INTEGRATION_AUTHORING_TOOL_POLICIES.integration_draft_review.action,
-    resources: [SOUL_INTEGRATION_TARGET],
-    dataClasses: ["soul_definition"],
-  },
-  requiresApproval: INTEGRATION_AUTHORING_TOOL_POLICIES.integration_draft_review.requiresApproval,
-  handler: (args, context) => workflow(context).review(args, invocation(context)),
-});
-
-const create = defineApiTool<IntegrationAuthoringToolContext>({
-  ...createDeclaration,
-  tier: "system",
-  authorization: {
-    action: INTEGRATION_AUTHORING_TOOL_POLICIES.integration_draft_create.action,
-    resources: [SOUL_INTEGRATION_TARGET],
-    targets: integrationTargets,
-    dataClasses: ["soul_definition"],
-  },
-  requiresApproval: INTEGRATION_AUTHORING_TOOL_POLICIES.integration_draft_create.requiresApproval,
-  handler: (args, context) => workflow(context).create(args, invocation(context)),
-});
-
-const getIntegration = defineApiTool<IntegrationAuthoringToolContext>({
-  ...getDeclaration,
-  tier: "system",
-  authorization: {
-    action: INTEGRATION_AUTHORING_TOOL_POLICIES.integration_get.action,
-    resources: [SOUL_INTEGRATION_TARGET],
-    targets: integrationTargets,
-    dataClasses: ["soul_definition"],
-  },
-  requiresApproval: INTEGRATION_AUTHORING_TOOL_POLICIES.integration_get.requiresApproval,
-  handler: (args, context) => workflow(context).get(args),
-});
-
-const listIntegrations = defineApiTool<IntegrationAuthoringToolContext>({
-  ...listDeclaration,
-  tier: "system",
-  authorization: {
-    action: INTEGRATION_AUTHORING_TOOL_POLICIES.integration_list.action,
-    resources: [SOUL_INTEGRATION_TARGET],
-    dataClasses: ["soul_definition"],
-  },
-  requiresApproval: INTEGRATION_AUTHORING_TOOL_POLICIES.integration_list.requiresApproval,
-  handler: (_args, context) => workflow(context).list(),
-});
-
-export const INTEGRATION_AUTHORING_TOOLS: ApiToolDefinition<IntegrationAuthoringToolContext>[] = [
-  review,
-  create,
-  getIntegration,
-  listIntegrations,
-];
+export const INTEGRATION_AUTHORING_TOOLS = [
+  definition<Record<string, never>>(INTEGRATION_LIST_TOOL_DECLARATION, async (_input, context) => ({
+    servers: context.service.list(),
+  })),
+  definition<{ slug: string }>(INTEGRATION_GET_TOOL_DECLARATION, async (input, context) => ({
+    server: context.service.get(input.slug),
+  })),
+  definition<{ slug: string; configuration: McpConfigure }>(
+    INTEGRATION_CONFIGURE_TOOL_DECLARATION,
+    async (input, context) => ({
+      server: await context.service.configure(input.slug, input.configuration, actor(context)),
+    })
+  ),
+  definition<{ slug: string }>(INTEGRATION_DISCOVER_TOOL_DECLARATION, async (input, context) => ({
+    capabilities: await context.service.discover(
+      input.slug,
+      await context.caller(context.requestContext),
+      context.requestContext.abortSignal
+    ),
+  })),
+  definition<{ slug: string; capabilities: McpCapabilityReview }>(
+    INTEGRATION_REVIEW_TOOL_DECLARATION,
+    async (input, context) => ({
+      server: await context.service.review(
+        input.slug,
+        input.capabilities,
+        await context.caller(context.requestContext),
+        actor(context)
+      ),
+    })
+  ),
+  definition<{ slug: string; uri: string }>(
+    INTEGRATION_RESOURCE_READ_TOOL_DECLARATION,
+    async (input, context) =>
+      context.service.readResource(
+        input.slug,
+        await context.caller(context.requestContext),
+        input.uri,
+        context.requestContext.abortSignal
+      )
+  ),
+  definition<{ slug: string; name: string; arguments?: Record<string, string> }>(
+    INTEGRATION_PROMPT_RENDER_TOOL_DECLARATION,
+    async (input, context) =>
+      context.service.renderPrompt(
+        input.slug,
+        await context.caller(context.requestContext),
+        input.name,
+        input.arguments ?? {},
+        context.requestContext.abortSignal
+      )
+  ),
+] satisfies ApiToolDefinition<IntegrationAuthoringToolContext>[];

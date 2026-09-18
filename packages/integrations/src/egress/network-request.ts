@@ -1,6 +1,6 @@
 import type { IntegrationHttpMethod, IntegrationHttpResponse } from "../http";
 import { assertPublicEgressUrl } from "./destination";
-import type { EgressHttpPort } from "./openapi-adapter";
+import type { EgressHttpPort } from "./http";
 
 export const NETWORK_READ_METHODS = new Set(["GET", "HEAD", "OPTIONS"]);
 export const NETWORK_REDIRECT_STATUSES = new Set([301, 302, 303, 307, 308]);

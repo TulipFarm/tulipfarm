@@ -463,11 +463,12 @@ describe("github declarative auth flow", () => {
 
     const detail = await app.inject({
       method: "GET",
-      url: "/api/v1/integrations/github",
+      url: "/api/v1/integrations/native/github",
       cookies: auth(),
     });
     expect(detail.statusCode).toBe(200);
-    expect(detail.json()).toMatchObject({ personalConnected: true });
+    expect(detail.json()).toMatchObject({ name: "github", connected: true });
+    expect(detail.json().auth).toContainEqual(expect.objectContaining({ personal: true }));
   });
 
   it("lets the signed-in user disconnect only their personal GitHub credential", async () => {

@@ -1,0 +1,53 @@
+{
+  "id": "l3-mcp-shared-consent-does-not-replace-a-grant",
+  "tier": "l3",
+  "agent": "support",
+  "mcp": {
+    "visibility": "private",
+    "accounts": [{ "id": "shared-working", "scope": "shared", "status": "active" }],
+    "selection": { "accountId": "shared-working", "sharedConsent": true }
+  },
+  "input": [
+    {
+      "role": "user",
+      "content": "Call the Eval MCP status Tool with probe 'grant'. If I lack current shared-account access, stop even though I consented before."
+    }
+  ],
+  "tools": [
+    {
+      "name": "mcp_eval_mcp_status_51b1cdd4ae261c34",
+      "description": "Read the status visible to the selected account.",
+      "inputSchema": {
+        "type": "object",
+        "properties": { "probe": { "type": "string" } },
+        "required": ["probe"],
+        "additionalProperties": false
+      },
+      "mutating": false
+    }
+  ],
+  "script": [
+    {
+      "kind": "tool_calls",
+      "calls": [
+        {
+          "callId": "grant",
+          "name": "mcp_eval_mcp_status_51b1cdd4ae261c34",
+          "arguments": { "probe": "grant" }
+        }
+      ]
+    },
+    { "kind": "text", "text": "An administrator must grant shared-account access first." }
+  ],
+  "expect": [
+    {
+      "kind": "tool_result_reason_contains",
+      "name": "mcp_eval_mcp_status_51b1cdd4ae261c34",
+      "argumentPath": "probe",
+      "argumentValue": "grant",
+      "status": "denied",
+      "text": "account access denied"
+    },
+    { "kind": "run_status", "status": "succeeded" }
+  ]
+}

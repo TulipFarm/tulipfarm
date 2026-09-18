@@ -35,7 +35,7 @@ const contract: ToolContractDefinition = {
     allowedDestinations: ["github.com"],
     idempotency: { strategy: "provider" },
     dryRun: false,
-    adapter: { kind: "integration", ref: "github" },
+    adapter: { kind: "native", ref: "github" },
   },
 };
 

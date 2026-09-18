@@ -39,7 +39,7 @@ const originalDefinition: ToolContractDefinition = {
     retry: { maxAttempts: 1, safeToRetry: false },
     compensation: { operation: "issue.unlabel", reconciliation: "issue.lookup-label" },
     dryRun: false,
-    adapter: { kind: "integration", ref: "github" },
+    adapter: { kind: "native", ref: "github" },
   },
 };
 

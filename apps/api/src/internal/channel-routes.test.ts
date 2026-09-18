@@ -1104,7 +1104,19 @@ describe("/api/v1/internal/channels", () => {
         },
       });
       expect(res.statusCode).toBe(200);
-      expect(res.json()).toEqual({ outcome: "forbidden" });
+      expect(res.json()).toEqual({ outcome: "unlinked" });
+      const proven = await app.inject({
+        method: "POST",
+        url: `/api/v1/internal/channels/approvals/${approvalId}/decide`,
+        headers: asWorker(),
+        payload: {
+          provider: "slack",
+          externalSubject: "U-LINKED",
+          externalTenantId: "T1",
+          decision: "approved",
+        },
+      });
+      expect(proven.json()).toEqual({ outcome: "resumed" });
     });
   });
 

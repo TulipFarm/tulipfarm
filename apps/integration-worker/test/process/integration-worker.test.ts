@@ -27,7 +27,7 @@ afterEach(async () => {
 
 async function bootIntegrationWorker(options: {
   schemaVersion?: number;
-  internalApiMode?: "ready" | "missing-oim-contract";
+  internalApiMode?: "ready" | "missing-native-contract";
 }): Promise<IntegrationWorkerHandle> {
   scratch = await startScratchDatabase(options.schemaVersion ?? REQUIRED_SCHEMA_VERSION);
   const handle = await startIntegrationWorker({
@@ -157,12 +157,15 @@ describe("integration worker process", () => {
   );
 
   it(
-    "fails startup when the required OIM worker contract is unavailable",
+    "stays unready when native event dispatch is unavailable",
     async () => {
-      const handle = await bootIntegrationWorker({ internalApiMode: "missing-oim-contract" });
-
-      await expect(handle.exited).resolves.toBe(1);
-      expect(handle.output()).toContain("GET /api/v1/internal/oim/worker-contract failed with 404");
+      const handle = await bootIntegrationWorker({ internalApiMode: "missing-native-contract" });
+      await expect
+        .poll(() => handle.output(), { timeout: 20_000 })
+        .toContain("integration-worker ready:");
+      expect((await handle.probe("/livez")).status).toBe(200);
+      expect((await handle.probe("/readyz")).status).toBe(503);
+      expect(handle.output()).toContain("Native channel event dispatch unavailable");
     },
     TIMEOUT
   );

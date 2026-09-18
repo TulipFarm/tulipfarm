@@ -1,6 +1,6 @@
 /** Approval binding is three safe digests; only evidence order is normalized. */
 
-import { canonicalHash } from "@tulipfarm/schema";
+import { canonicalHash, type McpExecutionBinding } from "@tulipfarm/schema";
 
 /** The canonical Tool intent fields an Approval is bound to (SPEC §11.1 `ToolIntent`). */
 export interface ApprovalIntent {
@@ -21,28 +21,9 @@ export interface ApprovalIntent {
   readonly principalKind?: string;
   readonly principalId?: string;
   readonly activeSkillName?: string;
-  readonly integrationId?: string;
-  readonly integrationMajorVersion?: number;
-  readonly operationId?: string;
-  readonly manifestDigest?: string;
-  readonly configurationDigest?: string;
   readonly destination?: string;
   readonly credentialRef?: string;
-  readonly connection?: {
-    readonly connectionId: string;
-    readonly integrationId: string;
-    readonly integrationMajorVersion: number;
-    readonly operationId: string;
-    readonly credentialSlot?: string;
-    readonly credentialRevision?: string;
-    readonly identityMode: string;
-    readonly principalKind?: string;
-    readonly principalId?: string;
-    readonly manifestDigest: string;
-    readonly configurationDigest: string;
-  };
-  readonly secondaryCredentialRef?: string;
-  readonly secondaryConnection?: ApprovalIntent["connection"];
+  readonly mcp?: McpExecutionBinding;
 }
 
 export interface ApprovalBindingInput {
@@ -78,16 +59,18 @@ export function approvalIntentDigest(intent: ApprovalIntent): string {
     principalKind: intent.principalKind ?? null,
     principalId: intent.principalId ?? null,
     activeSkillName: intent.activeSkillName ?? null,
-    integrationId: intent.integrationId ?? null,
-    integrationMajorVersion: intent.integrationMajorVersion ?? null,
-    operationId: intent.operationId ?? null,
-    manifestDigest: intent.manifestDigest ?? null,
-    configurationDigest: intent.configurationDigest ?? null,
+    // Reserved nulls preserve existing native and MCP Approval digests without accepting OIM input.
+    integrationId: null,
+    integrationMajorVersion: null,
+    operationId: null,
+    manifestDigest: null,
+    configurationDigest: null,
     destination: intent.destination ?? null,
     credentialRef: intent.credentialRef ?? null,
-    connection: intent.connection ?? null,
-    secondaryCredentialRef: intent.secondaryCredentialRef ?? null,
-    secondaryConnection: intent.secondaryConnection ?? null,
+    connection: null,
+    secondaryCredentialRef: null,
+    secondaryConnection: null,
+    ...(intent.mcp === undefined ? {} : { mcp: intent.mcp }),
   });
 }
 

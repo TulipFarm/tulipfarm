@@ -118,7 +118,6 @@ describe("loadBundledSkills", () => {
     ]);
     for (const name of [
       "agent-forge",
-      "integration-forge",
       "onboarding",
       "resource-forge",
       "routine-forge",

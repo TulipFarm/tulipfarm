@@ -1,0 +1,100 @@
+{
+  "id": "l3-a-configured-mcp-server-is-visible-next-turn",
+  "tier": "l3",
+  "agent": "support",
+  "input": [
+    {
+      "role": "user",
+      "content": "Call integration_configure to save a disabled MCP server with id journey-acme, label Journey Acme, and streamable-http endpoint https://mcp.acme.example/mcp. I approve saving this exact configuration. Do not enable or invent any capabilities."
+    }
+  ],
+  "platformTools": ["integration_configure", "integration_get"],
+  "script": [
+    {
+      "kind": "tool_calls",
+      "calls": [
+        {
+          "callId": "configure",
+          "name": "integration_configure",
+          "arguments": {
+            "slug": "journey-acme",
+            "configuration": {
+              "server": {
+                "id": "journey-acme",
+                "label": "Journey Acme",
+                "transport": {
+                  "type": "streamable-http",
+                  "url": "https://mcp.acme.example/mcp"
+                }
+              },
+              "enabled": false
+            }
+          }
+        }
+      ]
+    },
+    { "kind": "text", "text": "Saved Journey Acme without enabling capabilities." }
+  ],
+  "journey": [
+    {
+      "input": [
+        {
+          "role": "user",
+          "content": "Call integration_get for journey-acme and read back the saved server name and enabled state."
+        }
+      ],
+      "script": [
+        {
+          "kind": "tool_calls",
+          "calls": [
+            {
+              "callId": "get",
+              "name": "integration_get",
+              "arguments": { "slug": "journey-acme" }
+            }
+          ]
+        },
+        { "kind": "text", "text": "Journey Acme is saved and disabled." }
+      ]
+    }
+  ],
+  "expect": [
+    {
+      "kind": "tool_call_order",
+      "names": ["integration_configure", "integration_get"]
+    },
+    { "kind": "soul_committed", "path": "integrations/journey-acme/mcp.yaml" },
+    { "kind": "soul_published", "artifact": "Integration:journey-acme" },
+    {
+      "kind": "tool_result_field_equals",
+      "name": "integration_get",
+      "argumentPath": "slug",
+      "argumentValue": "journey-acme",
+      "status": "succeeded",
+      "turnIndex": 2,
+      "outputPath": "server.server.label",
+      "value": "Journey Acme"
+    },
+    {
+      "kind": "tool_result_field_equals",
+      "name": "integration_get",
+      "argumentPath": "slug",
+      "argumentValue": "journey-acme",
+      "status": "succeeded",
+      "turnIndex": 2,
+      "outputPath": "server.enabled",
+      "value": false
+    },
+    {
+      "kind": "tool_result_field_equals",
+      "name": "integration_get",
+      "argumentPath": "slug",
+      "argumentValue": "journey-acme",
+      "status": "succeeded",
+      "turnIndex": 2,
+      "outputPath": "server.reviewed.tools",
+      "value": []
+    },
+    { "kind": "run_status", "status": "succeeded" }
+  ]
+}

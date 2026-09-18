@@ -74,9 +74,11 @@ export interface Observation {
 
 /** The durable half of a Turn, as the L3 tier read it back out of the database. */
 export interface PersistedState {
+  readonly mcpProviderCallCount?: number;
   readonly runStatus: string;
   readonly stateStatus: string;
   readonly stateOutput?: unknown;
+  readonly nativeAdmission?: unknown;
   readonly turnStatus: string | null;
   readonly events: readonly string[];
   /** Concatenated durable participant text.delta payloads; absent means not observed. */
@@ -89,6 +91,7 @@ export interface PersistedState {
   readonly soulCommits: readonly { readonly message: string; readonly paths: readonly string[] }[];
   /** Artifacts the active Soul publication serves, written `Kind:slug`. */
   readonly publishedArtifacts: readonly string[];
+  readonly publishedArtifactsByTurn?: readonly (readonly string[])[];
   /** Results returned by real L3 Tool dispatches, including retries after an approval wait. */
   readonly toolResults?: readonly {
     readonly name: string;
@@ -252,6 +255,15 @@ function notPersisted(kind: string): { passed: boolean; detail: string } {
 
 function evaluate(a: Expectation, obs: Observation): { passed: boolean; detail: string } {
   switch (a.kind) {
+    case "mcp_provider_call_count": {
+      const actual = obs.persisted?.mcpProviderCallCount;
+      return actual === a.count && actual !== undefined
+        ? { passed: true, detail: `MCP provider received ${actual} tools/call requests` }
+        : {
+            passed: false,
+            detail: `MCP provider call count was ${actual ?? "<not observed>"}, expected ${a.count}`,
+          };
+    }
     case "run_status":
     case "state_status":
     case "turn_status": {
@@ -268,15 +280,20 @@ function evaluate(a: Expectation, obs: Observation): { passed: boolean; detail: 
         : { passed: false, detail: `${a.kind} is ${actual}, expected ${a.status}` };
     }
 
+    case "native_admission_equals":
     case "state_output_equals": {
       const persisted = obs.persisted;
       if (persisted === undefined) return notPersisted(a.kind);
-      const actual = readPath(persisted.stateOutput, a.path);
+      const actual = readPath(
+        a.kind === "native_admission_equals" ? persisted.nativeAdmission : persisted.stateOutput,
+        a.path
+      );
+      const label = a.kind === "native_admission_equals" ? "Native admission" : "State output";
       return actual.found && equal(actual.value, a.value)
-        ? { passed: true, detail: `State output ${a.path} equals the expected value` }
+        ? { passed: true, detail: `${label} ${a.path} equals the expected value` }
         : {
             passed: false,
-            detail: `State output ${a.path} was ${
+            detail: `${label} ${a.path} was ${
               actual.found ? JSON.stringify(actual.value) : "<missing>"
             }, expected ${JSON.stringify(a.value)}`,
           };
@@ -353,17 +370,30 @@ function evaluate(a: Expectation, obs: Observation): { passed: boolean; detail: 
           };
     }
 
-    case "soul_published": {
+    case "soul_published":
+    case "soul_not_published": {
       const persisted = obs.persisted;
       if (persisted === undefined) return notPersisted(a.kind);
-      return persisted.publishedArtifacts.includes(a.artifact)
-        ? { passed: true, detail: `${a.artifact} is in the active Soul publication` }
+      const artifacts =
+        a.turnIndex === undefined
+          ? persisted.publishedArtifacts
+          : persisted.publishedArtifactsByTurn?.[a.turnIndex - 1];
+      if (artifacts === undefined) {
+        return {
+          passed: false,
+          detail: `No active Soul publication observed for Turn ${a.turnIndex}`,
+        };
+      }
+      const want = a.kind === "soul_published";
+      return artifacts.includes(a.artifact) === want
+        ? {
+            passed: true,
+            detail: `${a.artifact} is ${want ? "present" : "absent"} in the active Soul publication`,
+          }
         : {
             passed: false,
-            detail: `${a.artifact} is not published; the active bundle serves ${
-              persisted.publishedArtifacts.length === 0
-                ? "nothing"
-                : persisted.publishedArtifacts.join(", ")
+            detail: `${a.artifact} should be ${want ? "present" : "absent"}; the active bundle serves ${
+              artifacts.length === 0 ? "nothing" : artifacts.join(", ")
             }`,
           };
     }
@@ -929,6 +959,7 @@ const SEAM_TOOL: Readonly<Record<string, string>> = {
   soul_committed: "soul_write",
   // Same seam: nothing can be published that the model never asked to be written.
   soul_published: "soul_write",
+  soul_not_published: "soul_write",
   // Same shape: there is no audience to read until the model has actually written a document.
   generated_file_readable_by: "file_create",
   generated_file_not_readable_by: "file_create",
@@ -985,7 +1016,13 @@ export function seamUnreached(
   }
   for (const e of scored) {
     const tool = SEAM_TOOL[e.expectation.kind];
-    if (tool !== undefined && !toolCalls.some((c) => c.name === tool)) return tool;
+    if (
+      tool !== undefined &&
+      !toolCalls.some(
+        (c) => c.name === tool || (tool === "soul_write" && c.name === "integration_configure")
+      )
+    )
+      return tool;
   }
   return undefined;
 }

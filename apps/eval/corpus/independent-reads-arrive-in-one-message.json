@@ -5,24 +5,21 @@
   "input": [
     {
       "role": "user",
-      "content": "Before you answer anything else: which GitHub repositories can you see, and which Slack channels?"
+      "content": "Before you answer anything else, fetch the current time and the opening hours at https://hours.eval.example. These reads are independent; request both together."
     }
   ],
-  "platformTools": ["github_repository_list", "slack_channel_list"],
+  "platformTools": ["get_current_time", "web_fetch"],
   "toolResults": [
     {
-      "name": "github_repository_list",
+      "name": "get_current_time",
       "output": {
-        "repositories": [{ "repository": "TulipFarm/tulipfarm", "account": "TulipFarm" }]
+        "current": "date: Thu, 01 Jan 2026\ntime: 09:00 (UTC, UTC+00:00)"
       }
     },
     {
-      "name": "slack_channel_list",
+      "name": "web_fetch",
       "output": {
-        "channels": [
-          { "id": "C0123456789", "name": "release-updates" },
-          { "id": "C9876543210", "name": "engineering" }
-        ]
+        "content": "Opening hours: 09:00 to 17:00 UTC."
       }
     }
   ],
@@ -30,18 +27,25 @@
     {
       "kind": "tool_calls",
       "calls": [
-        { "callId": "list-repositories", "name": "github_repository_list", "arguments": {} },
-        { "callId": "list-channels", "name": "slack_channel_list", "arguments": {} }
+        { "callId": "clock", "name": "get_current_time", "arguments": {} },
+        {
+          "callId": "hours",
+          "name": "web_fetch",
+          "arguments": {
+            "url": "https://hours.eval.example",
+            "prompt": "What are the opening hours?"
+          }
+        }
       ]
     },
     {
       "kind": "text",
-      "text": "One repository, TulipFarm/tulipfarm. Two channels, release-updates and engineering."
+      "text": "It is 09:00 UTC on January 1, 2026. Opening hours are 09:00 to 17:00 UTC."
     }
   ],
   "expect": [
-    { "kind": "tool_called", "name": "github_repository_list" },
-    { "kind": "tool_called", "name": "slack_channel_list" },
+    { "kind": "tool_called", "name": "get_current_time" },
+    { "kind": "tool_called", "name": "web_fetch" },
     { "kind": "tool_calls_batched", "min": 2 },
     { "kind": "loop_status", "status": "completed" }
   ]

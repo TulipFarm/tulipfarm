@@ -8,6 +8,7 @@ import fastifyStatic from "@fastify/static";
 import swagger from "@fastify/swagger";
 import scalar from "@scalar/fastify-api-reference";
 import { BUSINESS_PRINCIPAL_ID } from "@tulipfarm/files";
+import { McpKnowledgeError } from "@tulipfarm/knowledge";
 import { acceptedInputModalities, type LlmConfig } from "@tulipfarm/schema";
 import { runtimeDeploymentAllowsIndependentSetup } from "@tulipfarm/storage";
 import { SURFACE_SANDBOX_CSP, SURFACE_SANDBOX_PATH } from "@tulipfarm/surface";
@@ -30,13 +31,13 @@ import { registerFeedbackRoutes } from "./feedback/routes";
 import { registerFileRoutes } from "./files/routes";
 import { registerFormRoutes } from "./forms/routes";
 import { registerHookIngressRoutes } from "./hooks/routes";
-import { registerIngressRoutes } from "./ingress/routes";
-import { registerOimConnectionFeature } from "./integrations/connections/compose";
 import { registerGitHubInstallRoutes } from "./integrations/github-install-routes";
+import { registerNativeChannelRoutes } from "./integrations/native/routes";
 import { registerInternalRouteFamily } from "./internal/route-family";
 import { registerKillSwitchRoutes } from "./kill-switches/routes";
 import { registerKnowledgeRoutes } from "./knowledge/routes";
 import { registerSubjectRoutes } from "./knowledge/subject-directory";
+import { registerMcpKnowledgeRoutes } from "./knowledge-sources/mcp/routes";
 import { registerKvRoutes } from "./kv/routes";
 import { registerMemoryDocumentRoute } from "./memory/document-routes";
 import { createLogTeeStream } from "./observability/log-stream";
@@ -283,12 +284,6 @@ export async function buildApp(opts: AppOptions = {}) {
     configuration: { spec: { url: "/api/v1/openapi.json" } },
   });
 
-  // its own per-integration HMAC verification and must work without session deps (mirrors the
-  // routines webhook posture — no session auth, no CSRF).
-  if (opts.ingress) {
-    await registerIngressRoutes(app, opts.ingress);
-  }
-
   // verification and must work without any session dependency.
   if (opts.hookIngress) {
     await registerHookIngressRoutes(app, {
@@ -461,13 +456,7 @@ export async function buildApp(opts: AppOptions = {}) {
         opts.resourceRepo
       );
     }
-    const integrationAuthCallbackRegistered = registerSoulRouteFamily(
-      app,
-      opts,
-      requireAuth,
-      requireAuthorization,
-      authorizationCheck
-    );
+    registerSoulRouteFamily(app, opts, requireAuth, requireAuthorization, authorizationCheck);
     if (opts.fileService) {
       registerFileRoutes(
         app,
@@ -525,16 +514,26 @@ export async function buildApp(opts: AppOptions = {}) {
         requireAuthorization,
       });
     }
-    if (opts.oimConnections) {
-      registerOimConnectionFeature(
+    opts.mcpAccounts?.register(app, requireAuth, requireAuthorization);
+    if (opts.mcpKnowledge) {
+      registerMcpKnowledgeRoutes(
         app,
-        opts.oimConnections,
+        {
+          knowledge: opts.mcpKnowledge,
+          readerUserId: async (request) => {
+            if (request.principal?.kind !== "user") {
+              throw new McpKnowledgeError("identity_mismatch");
+            }
+            return request.principal.id;
+          },
+        },
         requireAuth,
-        requireAuthorization,
-        authorizationCheck,
-        integrationAuthCallbackRegistered,
-        opts.integrationOperations
+        requireAuthorization
       );
+    }
+    const nativeChannels = opts.nativeChannels?.(app.log);
+    if (nativeChannels) {
+      registerNativeChannelRoutes(app, nativeChannels, requireAuth, requireAuthorization);
     }
     if (opts.resourceRepoFactory && opts.counterStore && opts.soulLoader) {
       registerResourceRoutes(
@@ -634,7 +633,7 @@ export async function buildApp(opts: AppOptions = {}) {
     if (opts.runEvents) {
       registerRunEventRoutes(app, opts.runEvents, requireAuth, opts.rateLimiter);
     }
-    registerInternalRouteFamily(app, opts, requireAuth);
+    registerInternalRouteFamily(app, { ...opts, nativeChannels }, requireAuth);
     if (opts.runReplay) {
       registerRunReplayRoutes(app, opts.runReplay, requireAuth, opts.rateLimiter);
     }

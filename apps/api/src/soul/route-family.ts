@@ -6,9 +6,8 @@ import { buildCapabilityCatalog } from "../authz/capabilities";
 import type { AuthorizationCheck, RequireAuthorization } from "../authz/route-gate";
 import { registerIntegrationAuthRoutes } from "../integrations/auth-routes";
 import { ensureGitHubInstallation } from "../integrations/github-install";
-import { registerIntegrationMarketplaceRoutes } from "../integrations/marketplace-routes";
-import { registerOimReleaseRoutes } from "../integrations/releases/routes";
-import { registerIntegrationRoutes } from "../integrations/routes";
+import { registerMcpIntegrationRoutes } from "../integrations/mcp-routes";
+import { registerNativeIntegrationRoutes } from "../integrations/routes";
 import {
   ensureDefaultSlackRoute,
   registerSlackBindRoute,
@@ -39,35 +38,10 @@ export function registerSoulRouteFamily(
 ): boolean {
   let integrationAuthCallbackRegistered = false;
   const publicOrigins = opts.publicOrigins;
+  if (opts.mcpIntegrations) {
+    registerMcpIntegrationRoutes(app, opts.mcpIntegrations, requireAuth, requireAuthorization);
+  }
   if (opts.gitSync && opts.soulWriter) {
-    if (opts.oimReleases) {
-      const authorized =
-        (
-          action: "integration.read" | "integration.connect" | "integration.remove",
-          fallback: "authenticated" | "admin"
-        ): PreHandler =>
-        async (request, reply) => {
-          await requireAuth(request, reply);
-          if (reply.sent) return;
-          await requireAuthorization({
-            action,
-            resourceType: "integration",
-            fallback,
-          })(request, reply);
-        };
-      registerOimReleaseRoutes(
-        app,
-        opts.oimReleases.controlPlane,
-        {
-          read: authorized("integration.read", "authenticated"),
-          install: authorized("integration.connect", "admin"),
-          uninstall: authorized("integration.remove", "admin"),
-          trust: authorized("integration.remove", "admin"),
-          maintenance: authorized("integration.remove", "admin"),
-        },
-        opts.oimReleases.businessId
-      );
-    }
     registerSoulRoutes(
       app,
       opts.gitSync,
@@ -119,8 +93,6 @@ export function registerSoulRouteFamily(
             }
           : undefined;
         const onConnected = async (name: string) => {
-          // below cannot leave an integration connected but toolless.
-          opts.declarativeTools?.sync();
           if (name === "slack" && slackBindDeps) {
             await ensureDefaultSlackRoute(slackBindDeps);
           }
@@ -143,46 +115,32 @@ export function registerSoulRouteFamily(
             }
           }
         };
-        registerIntegrationRoutes(
+        registerNativeIntegrationRoutes(
           app,
-          opts.soulLoader,
-          opts.soulWriter,
-          opts.secretsService,
-          opts.bundledIntegrations ?? new Map(),
-          requireAuth,
-          requireAuthorization,
-          onConnected,
-          opts.githubInstall
-            ? {
-                integrations: opts.githubInstall.integrations,
-                businessId: opts.githubInstall.businessId,
-              }
-            : undefined,
-          opts.declarativeTools,
-          opts.auditService,
-          opts.integrationAuth?.tokens,
-          opts.oimCatalog,
-          async (name) => {
-            const projection = name === "slack" ? opts.slackBind : undefined;
-            if (!projection) return;
-            const snapshot = await projection.integrations.loadProviderSnapshot(
-              projection.businessId,
-              name
-            );
-            for (const integration of snapshot.integrations) {
-              await projection.integrations.revokeIntegration(
+          {
+            soulLoader: opts.soulLoader,
+            soulWriter: opts.soulWriter,
+            secrets: opts.secretsService,
+            bundled: opts.bundledIntegrations ?? new Map(),
+            audit: opts.auditService,
+            onConnected,
+            onDisconnected: async (name) => {
+              const projection = name === "slack" ? opts.slackBind : undefined;
+              if (!projection) return;
+              const snapshot = await projection.integrations.loadProviderSnapshot(
                 projection.businessId,
-                integration.id
+                name
               );
-            }
-          }
-        );
-        registerIntegrationMarketplaceRoutes(
-          app,
-          opts.soulLoader,
-          opts.soulWriter,
-          opts.bundledIntegrations ?? new Map(),
-          requireAuth
+              for (const integration of snapshot.integrations) {
+                await projection.integrations.revokeIntegration(
+                  projection.businessId,
+                  integration.id
+                );
+              }
+            },
+          },
+          requireAuth,
+          requireAuthorization
         );
         if (slackBindDeps) {
           registerSlackBindRoute(app, slackBindDeps);
@@ -202,7 +160,6 @@ export function registerSoulRouteFamily(
               fetchImpl: opts.integrationAuth.fetchImpl,
               onConnected,
               tokens: opts.integrationAuth.tokens,
-              oimConnections: opts.oimConnections,
             },
             requireAuth,
             authorizationCheck

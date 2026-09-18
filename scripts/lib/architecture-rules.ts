@@ -170,7 +170,7 @@ export const ARCHITECTURE_CONFIG: ArchitectureConfig = {
     "surface-web": ["surface"],
     "surface-slack": ["surface"],
     "surface-github": ["surface"],
-    integrations: ["schema", "authz", "audit", "tool-broker", "storage", "observability"],
+    integrations: ["schema", "authz", "audit", "tool-broker", "storage", "observability", "mcp"],
     "agent-runtime": [
       "schema",
       "authz",
@@ -201,6 +201,7 @@ export const ARCHITECTURE_CONFIG: ArchitectureConfig = {
     // shared, non-sensitive deployment defaults (e.g. the business scope) that the API and the
     // worker must agree on and cannot share any other way.
     api: [
+      "mcp",
       "schema",
       "soul",
       "constants",
@@ -262,6 +263,8 @@ export const ARCHITECTURE_CONFIG: ArchitectureConfig = {
       "model-adapter",
     ],
     "integration-worker": [
+      "mcp",
+      "knowledge",
       "schema",
       "authz",
       "audit",
@@ -302,6 +305,8 @@ export const ARCHITECTURE_CONFIG: ArchitectureConfig = {
     // to catch. `tool-broker` likewise keeps effect, Approval, retry, and replay behavior on the
     // production path instead of copying it into the L3 harness.
     eval: [
+      "integrations",
+      "mcp",
       "agent-runtime",
       "turn-executor",
       "model-adapter",

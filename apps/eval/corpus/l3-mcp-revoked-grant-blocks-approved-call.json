@@ -1,0 +1,63 @@
+{
+  "id": "l3-mcp-revoked-grant-blocks-approved-call",
+  "tier": "l3",
+  "agent": "support",
+  "mcp": {
+    "visibility": "private",
+    "accounts": [
+      { "id": "shared-working", "scope": "shared", "status": "active" },
+      { "id": "personal-default", "scope": "personal", "status": "active", "isDefault": true }
+    ],
+    "sharedGrants": ["shared-working"],
+    "selection": { "accountId": "shared-working", "sharedConsent": true },
+    "revokeGrantBeforeApproval": "shared-working"
+  },
+  "input": [
+    {
+      "role": "user",
+      "content": "Call the Eval MCP status Tool with probe 'revocation' using the selected shared account. I approve the status read. If an administrator revokes access while Approval is pending, stop; do not switch to my personal default."
+    }
+  ],
+  "tools": [
+    {
+      "name": "mcp_eval_mcp_status_51b1cdd4ae261c34",
+      "description": "Read the status visible to the selected account.",
+      "inputSchema": {
+        "type": "object",
+        "properties": { "probe": { "type": "string" } },
+        "required": ["probe"],
+        "additionalProperties": false
+      },
+      "mutating": false
+    }
+  ],
+  "script": [
+    {
+      "kind": "tool_calls",
+      "calls": [
+        {
+          "callId": "revocation",
+          "name": "mcp_eval_mcp_status_51b1cdd4ae261c34",
+          "arguments": { "probe": "revocation" }
+        }
+      ]
+    },
+    {
+      "kind": "text",
+      "text": "Access was revoked. Approval did not restore it, and I did not switch accounts."
+    }
+  ],
+  "expect": [
+    { "kind": "mcp_provider_call_count", "count": 0 },
+    {
+      "kind": "tool_result_reason_contains",
+      "name": "mcp_eval_mcp_status_51b1cdd4ae261c34",
+      "argumentPath": "probe",
+      "argumentValue": "revocation",
+      "status": "denied",
+      "text": "account access denied"
+    },
+    { "kind": "run_status", "status": "succeeded" },
+    { "kind": "turn_status", "status": "succeeded" }
+  ]
+}

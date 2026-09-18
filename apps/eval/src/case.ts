@@ -96,6 +96,8 @@ export type Expectation =
   | { readonly kind: "output_field_equals"; readonly path: string; readonly value: unknown }
   | { readonly kind: "loop_status"; readonly status: string }
   | { readonly kind: "tool_call_count"; readonly count: number }
+  /** L3 only. Actual MCP tools/call requests observed at the external provider transport. */
+  | { readonly kind: "mcp_provider_call_count"; readonly count: number }
   /**
    * At least one assistant message asked for this many Tool calls at once.
    *
@@ -140,6 +142,7 @@ export type Expectation =
   | { readonly kind: "state_status"; readonly status: string }
   /** L3 Routine only. A persisted Tool State output contains this exact value at the path. */
   | { readonly kind: "state_output_equals"; readonly path: string; readonly value: unknown }
+  | { readonly kind: "native_admission_equals"; readonly path: string; readonly value: unknown }
   /** L3 only. The Turn was completed, and with this verdict. */
   | { readonly kind: "turn_status"; readonly status: string }
   /** L3 only. This Run event type was appended durably. L2 stubs the event port, so this is the
@@ -162,7 +165,11 @@ export type Expectation =
    * active publication. Pair it with `soul_committed` — a write that commits and never activates
    * passes the commit Expectation while remaining invisible to every user.
    */
-  | { readonly kind: "soul_published"; readonly artifact: string }
+  | {
+      readonly kind: "soul_published" | "soul_not_published";
+      readonly artifact: string;
+      readonly turnIndex?: number;
+    }
   /**
    * L3 only. A File the Turn generated is readable by this grantee, written `kind:id`.
    *
@@ -194,6 +201,8 @@ const PERSISTED_KINDS: ReadonlySet<string> = new Set([
   "run_status",
   "state_status",
   "state_output_equals",
+  "native_admission_equals",
+  "mcp_provider_call_count",
   "turn_status",
   "run_event_emitted",
   "run_event_text_omits",
@@ -202,6 +211,7 @@ const PERSISTED_KINDS: ReadonlySet<string> = new Set([
   "tool_result_reason_contains",
   "soul_committed",
   "soul_published",
+  "soul_not_published",
   "generated_file_readable_by",
   "generated_file_not_readable_by",
   "generated_file_draft_created",
@@ -295,6 +305,30 @@ export interface L3RoutineFixture {
   readonly providerSteps: readonly RoutineProviderStep[];
   readonly approval?: "approved";
   readonly crashAfter?: "effect_confirmed" | "state_succeeded";
+}
+
+/** Offline account state; authority decisions still belong to the production MCP host. */
+export interface L3McpFixture {
+  readonly visibility: "private" | "shared";
+  readonly accounts: readonly {
+    readonly id: string;
+    readonly scope: "personal" | "shared";
+    readonly status: "active" | "action_required" | "revoked";
+    readonly isDefault?: boolean;
+    readonly expiresAt?: string;
+  }[];
+  readonly selection?: {
+    readonly accountId: string;
+    readonly sharedConsent: boolean;
+  };
+  readonly sharedGrants?: readonly string[];
+  readonly revokeGrantBeforeApproval?: string;
+}
+
+export interface L3NativeRoutineFixture {
+  readonly destination: string;
+  readonly accountId: string;
+  readonly fault?: "lease_lost" | "route_changed" | "account_revoked";
 }
 
 /**
@@ -400,6 +434,8 @@ export interface EvalCase {
   readonly agent: string;
   /** L3-only deterministic Routine Tool-State execution; bypasses the model and Chat Turn path. */
   readonly routine?: L3RoutineFixture;
+  readonly mcp?: L3McpFixture;
+  readonly nativeRoutine?: L3NativeRoutineFixture;
   readonly integrationReply?: IngressReplyResult;
   /**
    * What feeds the real Context assembler, beyond what the Eval Soul already supplies.

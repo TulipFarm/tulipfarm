@@ -39,12 +39,4 @@ export class ProductTelemetryStore implements ProductTelemetryStateStore {
       return value;
     });
   }
-
-  async connectedProviders(businessId: string): Promise<string[]> {
-    const result = await this.queryable.query<{ integration_id: string }>(
-      `SELECT DISTINCT integration_id FROM connections WHERE business_id = $1 AND status = 'active' ORDER BY integration_id`,
-      [businessId]
-    );
-    return result.rows.map((row) => row.integration_id);
-  }
 }

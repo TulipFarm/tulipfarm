@@ -11,7 +11,9 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { canonicalHash, type McpIntegrationDefinition, mcpToolContract } from "@tulipfarm/schema";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { stringify } from "yaml";
 import type { CommitActor, CommitSigner } from "./commit-signing";
 import { SoulGitStore } from "./git-store";
 import { GitSoulTreeReader } from "./tree-reader";
@@ -287,6 +289,70 @@ describe("SoulWriter.apply — validation gate", () => {
 });
 
 describe("SoulWriter.apply — cross-definition reference checking", () => {
+  it.each(["committed", "same changeset"] as const)(
+    "resolves reviewed MCP Tool references from the %s snapshot",
+    async (source) => {
+      const integration: McpIntegrationDefinition = {
+        server: {
+          id: "weather",
+          label: "Weather",
+          transport: { type: "streamable-http", url: "https://weather.example.com/mcp" },
+        },
+        enabled: true,
+        reviewed: {
+          tools: [
+            {
+              name: "read-weather",
+              inputSchema: { type: "object" },
+              digest: "a".repeat(64),
+              mutating: false,
+              requiresApproval: false,
+            },
+          ],
+          resources: [],
+          prompts: [],
+        },
+      };
+      const reviewed = integration.reviewed.tools[0];
+      if (!reviewed) throw new Error("reviewed Tool fixture missing");
+      const tool = mcpToolContract("weather", canonicalHash(integration), reviewed);
+      const configuration: SoulWrite = {
+        op: "put",
+        target: { kind: "Integration", slug: "weather", companion: "mcp.yaml" },
+        content: stringify(integration),
+      };
+      if (source === "committed") await apply([configuration]);
+      const withTreeReader = new SoulWriter(
+        store,
+        logger,
+        undefined,
+        undefined,
+        undefined,
+        new GitSoulTreeReader(soulPath)
+      );
+      await expect(
+        withTreeReader.apply({
+          subject: "soul: add MCP routine",
+          source: "api",
+          actor: ACTOR,
+          businessId: "biz-1",
+          changes: [
+            ...(source === "same changeset" ? [configuration] : []),
+            {
+              op: "put",
+              target: { kind: "Routine", slug: "weather" },
+              content: routineDoc("weather", tool.metadata.slug)
+                .replace("type: agent", "type: tool\n      action: integration.read")
+                .replace("agentRef:", "toolRef:"),
+            },
+          ],
+        })
+      ).resolves.toMatchObject({
+        paths: expect.arrayContaining(["routines/weather/routine.yaml"]),
+      });
+    }
+  );
+
   it("rejects a Routine whose agentRef names an Agent that does not exist", async () => {
     const withTreeReader = new SoulWriter(
       store,

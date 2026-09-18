@@ -62,15 +62,17 @@ export function composeProductTelemetry(deps: TelemetryComposition): ProductTele
       };
     },
     snapshot: async () => {
-      const activeOim = await store.connectedProviders(deps.businessId);
-      const connected = new Set(activeOim);
+      const connected = new Set<string>();
       for (const [name, integration] of deps.soulLoader.integrations) {
-        if (!integration.oimManifest && integration.connection?.enabled === true)
+        if (
+          integration.mcp?.enabled === true ||
+          ((name === "slack" || name === "github") && integration.connection?.enabled === true)
+        )
           connected.add(name);
       }
       if (await isGitHubInstalled({ integrations: deps.integrations, businessId: deps.businessId }))
         connected.add("github");
-      else if (!activeOim.includes("github")) connected.delete("github");
+      else connected.delete("github");
 
       const providers = [...connected];
       const bundled = deps.bundledSkillNames();

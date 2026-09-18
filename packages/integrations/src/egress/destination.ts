@@ -1,7 +1,7 @@
 import { lookup } from "node:dns/promises";
 import { isIP } from "node:net";
 import type { IntegrationHttpResponse } from "../http";
-import type { EgressHttpPort, EgressHttpRequest } from "./openapi-adapter";
+import type { EgressHttpPort, EgressHttpRequest } from "./http";
 
 /**
  * Destination cage for manifest egress. A manifest is authored by an Agent from chat, so its

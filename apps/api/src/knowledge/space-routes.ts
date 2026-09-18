@@ -280,6 +280,10 @@ export function registerSpaceRoutes({
       const existing = await service.getPageByPath(spaceId, b.path);
       if (existing && !(await gate.canRead(req.user?._id, existing._id)))
         return refuseWrite(req, reply, "knowledge.page.author", "page");
+      if (existing?.source === "mcp")
+        return reply
+          .code(409)
+          .send({ error: "Synced pages are read-only. Write a separate note." });
       const res = await service.writePage({
         spaceId,
         path: b.path,

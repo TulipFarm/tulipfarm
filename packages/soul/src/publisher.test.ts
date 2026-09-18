@@ -196,9 +196,9 @@ describe("SoulPublisher", () => {
       businessId: BUSINESS,
       contributions: async () => [
         {
-          source: "bundled OIM packages",
+          source: "bundled native channels",
           documents: [],
-          files: [{ path: "integrations/weather/oim.yml", content: manifest }],
+          files: [{ path: "integrations/github/manifest.yml", content: manifest }],
         },
       ],
     });
@@ -212,10 +212,10 @@ describe("SoulPublisher", () => {
     if (first === undefined || second === undefined)
       throw new Error("publications were not recorded");
     expect(first.bundle.assets).toEqual([
-      expect.objectContaining({ path: "oim.yml", content: "version: one\n" }),
+      expect.objectContaining({ path: "manifest.yml", content: "version: one\n" }),
     ]);
     expect(second.bundle.assets).toEqual([
-      expect.objectContaining({ path: "oim.yml", content: "version: two\n" }),
+      expect.objectContaining({ path: "manifest.yml", content: "version: two\n" }),
     ]);
     expect(second.digest).not.toBe(first.digest);
     expect(second.bundle.commitSha).toBe(first.bundle.commitSha);
@@ -423,9 +423,9 @@ describe("SoulPublisher.reconcile", () => {
       businessId: BUSINESS,
       contributions: async () => [
         {
-          source: "bundled OIM packages",
+          source: "bundled native channels",
           documents: [],
-          files: [{ path: "integrations/weather/oim.yml", content }],
+          files: [{ path: "integrations/github/manifest.yml", content }],
         },
       ],
       gitState: {

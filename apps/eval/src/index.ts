@@ -1,5 +1,5 @@
 export { resolveBindings } from "./bindings.ts";
-export type { EvalCase, Expectation, ScriptedToolResult } from "./case.ts";
+export type { EvalCase, Expectation, L3McpFixture, ScriptedToolResult } from "./case.ts";
 export { LOOP_LIMITS } from "./case.ts";
 export type { Corpus } from "./corpus.ts";
 export { CorpusError, corpusHash, loadCorpus } from "./corpus.ts";

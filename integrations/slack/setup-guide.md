@@ -15,27 +15,12 @@ state identifies Slack and the setup step when the provider returns.
 4. Save the fields, then select **Authorize on Slack**. Approve the workspace install. TulipFarm
    receives the bot token and Team ID from Slack; you do not copy either value by hand.
 
-## Set up Slack as a Knowledge source
+## Channel access
 
-Connecting Slack does not index any message. TulipFarm does not crawl channel history or start a
-background Slack indexer.
+The native Slack connection receives messages and delivers agent replies. It does not add
+third-party agent Tools, and Slack content is not supported for Knowledge sync.
 
-After Slack is connected, select **Set up in Chat** on this Integration page. Chat will ask you to
-choose:
-
-1. The public channels to read. The bot must already be a member of each channel.
-2. The schedule for your Routine.
-3. What should become Knowledge, such as decisions, policies, or weekly summaries.
-
-Review the plan before approving it. The resulting Agent or Routine is stored in the Soul. It uses
-`slack_channel_list` to find joined channels, `slack_message_history` to read one bounded page, and
-`create_knowledge_page` to save reviewed content. The Routine must store the newest processed Slack
-timestamp and pass it as `oldest` on its next Run. `nextCursor` is only for finishing the current
-bounded scan.
-
-`slack_message_history` refuses private channels and DMs. This is deliberate: pages created by
-`create_knowledge_page` are shared across the business, so private Slack content must not be copied
-into them.
+## Manual Slack app setup
 
 If you'd rather build the app manually instead of importing a manifest: enable Socket Mode
 (Settings → Socket Mode) to mint the app-level token, turn on Agents & AI Apps

@@ -1,14 +1,11 @@
 /** Secret Broker leases plaintext only inside an authorized, bounded, in-memory callback. */
 
 import {
-  type ConnectionSecretScope,
-  type LegacySecretScope,
   type ScopedSecretCallback,
   SecretLeakError,
   SecretLease,
   type SecretLeaseDenialReason,
   SecretLeaseDeniedError,
-  SecretLeaseSet,
   type SecretScope,
 } from "./lease";
 import type { SecretProvider } from "./providers";
@@ -58,25 +55,14 @@ export interface SecretBrokerDeps {
 }
 
 export interface SecretLeaseRequest {
-  readonly scope: LegacySecretScope;
+  readonly scope: SecretScope;
   readonly ttlMs?: number;
   /** Redemptions this lease permits. Defaults to one, so a replayed lease is denied. */
   readonly maxUses?: number;
 }
 
-export interface ConnectionSecretLeaseRequest extends Omit<SecretLeaseRequest, "scope"> {
-  readonly scope: ConnectionSecretScope;
-}
-
-export type ConnectionSecretLeaseSetRequest = Readonly<
-  Record<string, ConnectionSecretLeaseRequest>
->;
-
-type AnySecretLeaseRequest = SecretLeaseRequest | ConnectionSecretLeaseRequest;
-
 interface LeaseRecord {
   readonly scope: SecretScope;
-  readonly secretVersion?: string;
   readonly expiresAt: number;
   readonly maxUses: number;
   uses: number;
@@ -94,17 +80,8 @@ function snapshotScope(scope: SecretScope): SecretScope {
 function sameScope(a: SecretScope, b: SecretScope): boolean {
   return (
     a.secretRef === b.secretRef &&
-    a.businessId === b.businessId &&
-    a.connectionId === b.connectionId &&
-    a.credentialSlot === b.credentialSlot &&
-    a.credentialRevision === b.credentialRevision &&
     a.toolId === b.toolId &&
     a.integrationId === b.integrationId &&
-    a.integrationMajorVersion === b.integrationMajorVersion &&
-    a.operationId === b.operationId &&
-    a.identityMode === b.identityMode &&
-    a.manifestDigest === b.manifestDigest &&
-    a.configurationDigest === b.configurationDigest &&
     a.targetId === b.targetId &&
     a.runId === b.runId &&
     a.stateId === b.stateId &&
@@ -141,70 +118,12 @@ export class SecretBroker {
     return this.issue(request);
   }
 
-  /** Issues a Connection lease only when a durable Secret revision can be pinned. */
-  async leaseConnection(request: ConnectionSecretLeaseRequest): Promise<SecretLease> {
-    return this.issue(request, true);
-  }
-
-  /** Issues one lease per credential slot and revokes partial acquisition on failure. */
-  async leaseConnectionSet(requests: ConnectionSecretLeaseSetRequest): Promise<SecretLeaseSet> {
-    const entries = Object.entries(requests);
-    if (entries.length === 0) {
-      throw new SecretLeaseDeniedError(
-        "not_authorized",
-        "a Connection credential set cannot be empty"
-      );
-    }
-    const leases: Record<string, SecretLease> = {};
-    try {
-      for (const [slot, request] of entries) {
-        if (slot !== request.scope.credentialSlot || leases[slot] !== undefined) {
-          throw new SecretLeaseDeniedError(
-            "not_authorized",
-            "Connection credential set slot does not match its scope"
-          );
-        }
-        leases[slot] = await this.leaseConnection(request);
-      }
-    } catch (error) {
-      for (const lease of Object.values(leases)) this.revokeLease(lease.leaseId);
-      throw error;
-    }
-    return new SecretLeaseSet(Object.freeze(leases));
-  }
-
-  private async issue(
-    request: AnySecretLeaseRequest,
-    requireVersion = false
-  ): Promise<SecretLease> {
+  private async issue(request: SecretLeaseRequest): Promise<SecretLease> {
     const leaseId = `lease-${++this.counter}`;
     const scope = snapshotScope(request.scope);
     const decision = await this.authorize(scope);
     if (!decision.allowed) {
       this.deny(leaseId, scope, decision.reason ?? "not_authorized", "lease is not authorized");
-    }
-
-    let secretVersion: string | undefined;
-    if (requireVersion) {
-      if (
-        this.provider.currentVersion === undefined ||
-        this.provider.resolveUncached === undefined
-      ) {
-        this.deny(
-          leaseId,
-          scope,
-          "not_authorized",
-          "Connection Secret provider cannot prove the current credential revision"
-        );
-      }
-      const resolvedVersion = await this.provider.currentVersion(scope.secretRef);
-      if (resolvedVersion === null) {
-        this.deny(leaseId, scope, "revoked", "Connection credential is not usable");
-      }
-      if ("credentialRevision" in scope && resolvedVersion !== scope.credentialRevision) {
-        this.deny(leaseId, scope, "revoked", "Connection credential revision changed");
-      }
-      secretVersion = resolvedVersion;
     }
 
     const ttlMs = Math.min(
@@ -219,7 +138,6 @@ export class SecretBroker {
       maxUses,
       uses: 0,
       revoked: false,
-      ...(secretVersion === undefined ? {} : { secretVersion }),
     });
     this.emit({
       type: "secret.lease.issued",
@@ -241,15 +159,6 @@ export class SecretBroker {
   revokeSecret(secretRef: string): void {
     for (const record of this.leases.values()) {
       if (record.scope.secretRef === secretRef) {
-        record.revoked = true;
-      }
-    }
-  }
-
-  /** Revokes every lease issued through one Connection. */
-  revokeConnection(connectionId: string): void {
-    for (const record of this.leases.values()) {
-      if (record.scope.connectionId === connectionId) {
         record.revoked = true;
       }
     }
@@ -308,24 +217,12 @@ export class SecretBroker {
       );
     }
 
-    const resolved =
-      record.secretVersion === undefined
-        ? await this.provider.resolveCurrent(record.scope.secretRef)
-        : await this.resolveConnectionSecret(leaseId, record);
+    const resolved = await this.provider.resolveCurrent(record.scope.secretRef);
     if (!resolved) {
       record.revoked = true;
       this.deny(leaseId, record.scope, "revoked", `the Credential for lease ${leaseId} is revoked`);
     }
 
-    if (record.secretVersion !== undefined && resolved.version !== record.secretVersion) {
-      record.revoked = true;
-      this.deny(
-        leaseId,
-        record.scope,
-        "revoked",
-        `the Credential for lease ${leaseId} was rotated`
-      );
-    }
     const currentDecision = await this.authorize(record.scope);
     if (!currentDecision.allowed) {
       this.deny(
@@ -364,22 +261,6 @@ export class SecretBroker {
     } catch {
       return { allowed: false, reason: "not_authorized" };
     }
-  }
-
-  private async resolveConnectionSecret(
-    leaseId: string,
-    record: LeaseRecord
-  ): Promise<Awaited<ReturnType<SecretProvider["resolveCurrent"]>>> {
-    if (this.provider.resolveUncached === undefined) {
-      record.revoked = true;
-      this.deny(
-        leaseId,
-        record.scope,
-        "revoked",
-        `the Credential for lease ${leaseId} cannot be resolved safely`
-      );
-    }
-    return this.provider.resolveUncached(record.scope.secretRef);
   }
 
   private deny(

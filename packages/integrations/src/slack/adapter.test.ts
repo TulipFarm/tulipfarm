@@ -109,6 +109,24 @@ function event(): SlackEventEnvelope {
 }
 
 describe("SlackChannelAdapter", () => {
+  it("denies a guest mapping rather than borrowing another user's authority", async () => {
+    const start = vi.fn();
+    const ack = vi.fn();
+    const adapter = new SlackChannelAdapter({
+      inbound: { accept: async () => ({ outcome: "accepted" }) },
+      identities: { resolve: async () => ({ kind: "guest", id: "guest-1" }) },
+      routing: { load: async () => routing() },
+      runs: { start },
+      now: () => "2026-07-26T10:00:00.000Z",
+    });
+    expect(await adapter.receive(BUSINESS_ID, event(), ack)).toEqual({
+      outcome: "denied",
+      reason: "external_identity_unmapped",
+    });
+    expect(start).not.toHaveBeenCalled();
+    expect(ack).toHaveBeenCalledOnce();
+  });
+
   it("persists before ack, then starts a Run as the mapped external principal", async () => {
     const order: string[] = [];
     let persisted: ChannelInboundEvent | undefined;

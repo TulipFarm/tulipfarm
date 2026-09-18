@@ -222,29 +222,26 @@ describe("role catalog fitness", () => {
 
   it("catalogs every action a narrowed member surface could reach", () => {
     const adminByType = new Map(ADMIN_ONLY_SURFACES.map((s) => [s.type, s.actions]));
-    const allTypes = [
-      ...new Set([...adminByType.keys(), ...MEMBER_ALLOWED_SURFACES.map((s) => s.type)]),
-    ];
     const narrowed = MEMBER_ALLOWED_SURFACES.filter(
       (surface) => adminByType.has(surface.type) && !surface.actions.includes("*")
     );
     const declared = sourceFiles()
-      .flatMap((path) => [
-        ...readFileSync(resolveCitation(path), "utf8").matchAll(/action: "([a-z0-9_.]+)"/g),
-      ])
-      .map((match) => match[1])
-      .filter((action): action is string => action !== undefined);
-
-    // A dotted action belongs to the longest type that prefixes it, so `integration.github.*`
-    // is never mistaken for an uncatalogued action of the shorter `integration` surface.
-    const ownerType = (action: string): string | undefined =>
-      allTypes
-        .filter((type) => action.startsWith(`${type}.`))
-        .sort((a, b) => b.length - a.length)[0];
+      .flatMap((path) =>
+        authorizationObjects(withoutComments(readFileSync(resolveCitation(path), "utf8")))
+      )
+      .flatMap((block) => {
+        const action = block.match(/\baction:\s*"([a-z0-9_.]+)"/)?.[1];
+        const resourceType = block.match(
+          /\b(?:resourceType:\s*|resources:\s*\[\s*)"([a-z0-9_.]+)"/
+        )?.[1];
+        return action && resourceType ? [{ action, resourceType }] : [];
+      });
 
     const uncatalogued = narrowed.flatMap((surface) => {
       const known = new Set([...surface.actions, ...(adminByType.get(surface.type) ?? [])]);
-      return declared.filter((action) => ownerType(action) === surface.type && !known.has(action));
+      return declared
+        .filter(({ action, resourceType }) => resourceType === surface.type && !known.has(action))
+        .map(({ action }) => action);
     });
 
     expect(

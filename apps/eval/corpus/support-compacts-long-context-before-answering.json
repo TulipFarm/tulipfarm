@@ -2,7 +2,7 @@
   "id": "support-compacts-long-context-before-answering",
   "tier": "l2",
   "agent": "support",
-  "contextTokenBudget": 2600,
+  "contextTokenBudget": 2800,
   "input": [
     {
       "role": "user",

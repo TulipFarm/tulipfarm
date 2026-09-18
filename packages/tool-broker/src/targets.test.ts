@@ -24,7 +24,7 @@ function contract(spec: Record<string, unknown>): PublishedToolContract {
       mutating: true,
       dryRun: false,
       idempotency: { strategy: "provider" },
-      adapter: { kind: "integration", ref: "github" },
+      adapter: { kind: "native", ref: "github" },
       ...spec,
       // biome-ignore lint/suspicious/noExplicitAny: authored fixture, shaped like a Soul document.
     } as any,

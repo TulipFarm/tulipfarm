@@ -181,7 +181,7 @@ export class PgKnowledgeSubjectStore implements KnowledgeSubjectStore {
     const { rows } = await this.q.query(
       `SELECT p.id, p.space_id, p.business_id, p.version, p.acl_revision, p.active, p.path
          FROM knowledge_pages p
-        WHERE p.business_id = $1`,
+        WHERE p.business_id = $1 AND p.source <> 'mcp'`,
       [businessId]
     );
     if (rows.length === 0) return [];
@@ -255,7 +255,7 @@ export class PgKnowledgeSubjectStore implements KnowledgeSubjectStore {
     const { rows } = await this.q.query(
       `SELECT p.id, p.space_id, p.business_id, p.version, p.acl_revision, p.active, p.path
          FROM knowledge_pages p
-        WHERE p.business_id = $1 AND p.id::text = ANY($2::text[])`,
+        WHERE p.business_id = $1 AND p.source <> 'mcp' AND p.id::text = ANY($2::text[])`,
       [businessId, [...subjectIds]]
     );
     if (rows.length === 0) return [];

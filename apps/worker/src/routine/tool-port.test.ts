@@ -20,7 +20,6 @@ import {
 } from "@tulipfarm/tool-broker";
 import type { ToolApprovalPort } from "@tulipfarm/tool-host";
 import { beforeEach, describe, expect, it, type Mock, vi } from "vitest";
-import { GITHUB_INSTALLATION_SECRET_REF, githubInstallationSecretRef } from "./github-credentials";
 import { BrokerRoutineToolPort, type RoutineToolRequest } from "./tool-port";
 
 const BUSINESS_ID = "biz-1";
@@ -67,7 +66,7 @@ function contract(overrides: Partial<ToolContractDefinition["spec"]> = {}): Tool
       allowedDestinations: ["github"],
       idempotency: { strategy: "provider_key" },
       dryRun: false,
-      adapter: { kind: "integration", ref: "github" },
+      adapter: { kind: "native", ref: "github" },
       ...overrides,
     },
   } as ToolContractDefinition;
@@ -149,7 +148,7 @@ beforeEach(() => {
   dispatch = vi.fn<ToolAdapter["dispatch"]>(async (_request: ToolAdapterRequest) => ({
     commentId: 12,
   }));
-  adapters = new Map<string, ToolAdapter>([["github", { kind: "integration" as const, dispatch }]]);
+  adapters = new Map<string, ToolAdapter>([["github", { kind: "native" as const, dispatch }]]);
   decide = vi.fn<ToolApprovalPort["decide"]>();
   consume = vi.fn<ToolApprovalPort["consume"]>();
   findIntent = vi.fn(async () => (await effects.get(BUSINESS_ID, PLAN.effectId))?.intent);
@@ -180,7 +179,7 @@ describe("BrokerRoutineToolPort", () => {
   it("resolves bundle-scoped adapters from the exact Routine request", async () => {
     const adaptersFor = vi.fn(
       (_input: RoutineToolRequest): ReadonlyMap<string, ToolAdapter> =>
-        new Map([["github", { kind: "integration" as const, dispatch }]])
+        new Map([["github", { kind: "native" as const, dispatch }]])
     );
     const dynamic = new BrokerRoutineToolPort({
       effects,
@@ -396,60 +395,48 @@ describe("BrokerRoutineToolPort", () => {
     expect(dispatch).not.toHaveBeenCalled();
   });
 
-  it("binds the prepared OIM Connection, destination, and Files before approval", async () => {
-    decide.mockResolvedValue({ status: "pending", approvalId: "approval-oim" });
+  it("binds the prepared MCP account and authorization before approval", async () => {
+    decide.mockResolvedValue({ status: "pending", approvalId: "approval-mcp" });
     const remoteDispatch = vi.fn(async () => ({ messageId: "msg-1" }));
-    const oim = {
+    const binding = {
+      serverId: "acme",
+      serverRevision: "a".repeat(64),
+      accountId: "account-1",
+      accountRevision: "1",
+      subjectId: REQUESTER_PRINCIPAL_ID.slice("user:".length),
+      authorizationId: "routine-grant-1",
+    };
+    const mcp = {
+      revalidate: vi.fn(async () => ({ kind: "allowed" as const })),
       prepare: vi.fn(async () => ({
         kind: "ready" as const,
         arguments: { body: { upload: "file-1" } },
-        adapterRef: "oim-acme",
-        adapter: { kind: "native" as const, dispatch: remoteDispatch },
+        adapterRef: "acme",
+        adapter: { kind: "mcp" as const, dispatch: remoteDispatch },
         hostCredentials: true as const,
-        filePrincipalId: REQUESTER_PRINCIPAL_ID.slice("user:".length),
-        fileIds: ["file-1"],
-        integrationId: "acme",
-        integrationMajorVersion: 2,
-        operationId: "send_message",
-        manifestDigest: "m".repeat(64),
-        configurationDigest: "f".repeat(64),
+        mcp: binding,
         destination: "https://api.acme.test",
-        credentialRef: "secret://connections/connection-1/token",
-        connection: {
-          connectionId: "connection-1",
-          integrationId: "acme",
-          integrationMajorVersion: 2,
-          operationId: "send_message",
-          credentialSlot: "token",
-          credentialRevision: "revision-1",
-          identityMode: "shared_only" as const,
-          principalKind: "user",
-          principalId: REQUESTER_PRINCIPAL_ID.slice("user:".length),
-          manifestDigest: "m".repeat(64),
-          configurationDigest: "f".repeat(64),
-        },
       })),
     };
-    const oimPlan = {
+    const mcpPlan = {
       ...PLAN,
-      toolRef: { name: "oim.acme.v2.send_message", version: "2.0.0" },
+      toolRef: { name: "mcp_acme_send_message", version: binding.serverRevision },
       action: "message.send",
       destination: undefined,
       arguments: {
-        connection_id: "connection-1",
         body: { upload: "file-1" },
       },
     };
     const gated = request({
-      plan: oimPlan,
+      plan: mcpPlan,
       bundle: bundle([
         {
           kind: "ToolContract",
           document: contract({
-            toolId: oimPlan.toolRef.name,
-            toolVersion: oimPlan.toolRef.version,
-            action: oimPlan.action,
-            adapter: { kind: "native", ref: "oim-acme" },
+            toolId: mcpPlan.toolRef.name,
+            toolVersion: mcpPlan.toolRef.version,
+            action: mcpPlan.action,
+            adapter: { kind: "mcp", ref: "acme" },
             allowedDestinations: ["https://api.acme.test"],
             inputSchema: { type: "object" },
           }),
@@ -459,13 +446,13 @@ describe("BrokerRoutineToolPort", () => {
           document: guardrail([
             {
               ...ALLOW_COMMENT,
-              actions: [oimPlan.action],
+              actions: [mcpPlan.action],
               destinations: ["https://api.acme.test"],
             },
             {
               id: "approve-message",
               type: "approval",
-              actions: [oimPlan.action],
+              actions: [mcpPlan.action],
               category: "highRiskAction",
               minimumApprovers: 1,
               separationOfDuties: false,
@@ -480,20 +467,14 @@ describe("BrokerRoutineToolPort", () => {
         effects,
         adapters: new Map(),
         approvals: { decide, consume, findIntent },
-        oim,
+        mcp,
       }).execute(gated)
-    ).resolves.toMatchObject({ kind: "awaiting_approval", approvalId: "approval-oim" });
+    ).resolves.toMatchObject({ kind: "awaiting_approval", approvalId: "approval-mcp" });
 
     expect(decide.mock.calls[0]?.[0].intent).toMatchObject({
       arguments: { body: { upload: "file-1" } },
-      fileIds: ["file-1"],
       destination: "https://api.acme.test",
-      integrationId: "acme",
-      operationId: "send_message",
-      connection: {
-        connectionId: "connection-1",
-        credentialRevision: "revision-1",
-      },
+      mcp: binding,
     });
     expect(await effects.get(BUSINESS_ID, PLAN.effectId)).toBeUndefined();
     expect(remoteDispatch).not.toHaveBeenCalled();
@@ -510,7 +491,7 @@ describe("BrokerRoutineToolPort", () => {
     const parkRetry = vi.fn(async () => ({ waitId: "retry-wait-1" }));
     const subject = new BrokerRoutineToolPort({
       effects,
-      adapters: new Map([["github", { kind: "integration" as const, dispatch: retryingDispatch }]]),
+      adapters: new Map([["github", { kind: "native" as const, dispatch: retryingDispatch }]]),
       approvals: { decide, consume, findIntent },
       parkRetry,
       retryWaitStatus: async () => ({
@@ -1111,8 +1092,7 @@ describe("BrokerRoutineToolPort contract-declared targets", () => {
   });
 });
 
-/** Bare GitHub refs must be narrowed before reservation, so effect and credential agree. */
-describe("BrokerRoutineToolPort GitHub credential scoping", () => {
+describe("BrokerRoutineToolPort explicit credential references", () => {
   async function reservedIntent(plan: ToolDispatchPlan) {
     const port = new BrokerRoutineToolPort({
       effects,
@@ -1125,53 +1105,12 @@ describe("BrokerRoutineToolPort GitHub credential scoping", () => {
     return effect.intent;
   }
 
-  it("scopes an authored bare ref to the repository the arguments name", async () => {
+  it("preserves the authored reference without inventing provider credentials", async () => {
     const intent = await reservedIntent({
       ...PLAN,
       arguments: { repository: "tulip/farm", body: "hello" },
-      credentialRef: GITHUB_INSTALLATION_SECRET_REF,
+      credentialRef: "secret://00000000-0000-4000-8000-000000000001",
     });
-    expect(intent.credentialRef).toBe(
-      githubInstallationSecretRef({ kind: "repository", repository: "tulip/farm" })
-    );
-  });
-
-  it("scopes to the account when only an owner is named", async () => {
-    const intent = await reservedIntent({
-      ...PLAN,
-      arguments: { owner: "tulip", name: "new-repo" },
-      credentialRef: GITHUB_INSTALLATION_SECRET_REF,
-    });
-    expect(intent.credentialRef).toBe(
-      githubInstallationSecretRef({ kind: "account", owner: "tulip" })
-    );
-  });
-
-  it("leaves an already-scoped authored ref alone", async () => {
-    const authored = githubInstallationSecretRef({ kind: "account", owner: "acme" });
-    const intent = await reservedIntent({
-      ...PLAN,
-      arguments: { repository: "tulip/farm", body: "hello" },
-      credentialRef: authored,
-    });
-    expect(intent.credentialRef).toBe(authored);
-  });
-
-  it("leaves a non-GitHub ref alone", async () => {
-    const intent = await reservedIntent({
-      ...PLAN,
-      arguments: { repository: "tulip/farm", body: "hello" },
-      credentialRef: "secret://integrations/slack/bot-token",
-    });
-    expect(intent.credentialRef).toBe("secret://integrations/slack/bot-token");
-  });
-
-  it("leaves the bare ref alone when the arguments name no installation", async () => {
-    const intent = await reservedIntent({
-      ...PLAN,
-      arguments: { body: "hello" },
-      credentialRef: GITHUB_INSTALLATION_SECRET_REF,
-    });
-    expect(intent.credentialRef).toBe(GITHUB_INSTALLATION_SECRET_REF);
+    expect(intent.credentialRef).toBe("secret://00000000-0000-4000-8000-000000000001");
   });
 });

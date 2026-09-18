@@ -250,16 +250,9 @@ describe("GitSoulTreeReader", () => {
 
   it("reads registry-declared companion files for all bundled definition kinds", async () => {
     await writeFixture("agents/ada/instructions.md", "Help the operator.\n");
-    await writeFixture("integrations/shopify/oim.yml", "kind: Integration\n");
-    await writeFixture(
-      "integrations/shopify/operations/list-products.graphql",
-      "query ListProducts { products { id } }\n"
-    );
-    await writeFixture(
-      "integrations/shopify/hooks/normalize.mjs",
-      "export function normalize() {}\n"
-    );
-    await writeFixture("integrations/shopify/connection.yaml", "enabled: true\n");
+    await writeFixture("integrations/github/setup-guide.md", "Connect your GitHub App.\n");
+    await writeFixture("integrations/github/ingress.ts", "export function normalize() {}\n");
+    await writeFixture("integrations/github/connection.yaml", "enabled: true\n");
     await writeFixture("resources/customer/hooks.ts", "export const hooks = {};\n");
     await writeFixture("skills/triage/SKILL.md", "Classify support issues.\n");
     const git = simpleGit(TMP);
@@ -271,9 +264,8 @@ describe("GitSoulTreeReader", () => {
 
     expect(files.map((file) => file.path)).toEqual([
       "agents/ada/instructions.md",
-      "integrations/shopify/hooks/normalize.mjs",
-      "integrations/shopify/oim.yml",
-      "integrations/shopify/operations/list-products.graphql",
+      "integrations/github/ingress.ts",
+      "integrations/github/setup-guide.md",
       "resources/customer/hooks.ts",
       "skills/triage/SKILL.md",
     ]);

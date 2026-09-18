@@ -1,0 +1,53 @@
+{
+  "id": "l3-mcp-personal-account-cannot-enter-shared-chat",
+  "tier": "l3",
+  "agent": "support",
+  "mcp": {
+    "visibility": "shared",
+    "accounts": [{ "id": "personal-default", "scope": "personal", "status": "active" }]
+  },
+  "input": [
+    {
+      "role": "user",
+      "content": "Call the Eval MCP status Tool with probe 'privacy'. If this shared Chat cannot use my personal account, stop and tell me to continue privately."
+    }
+  ],
+  "tools": [
+    {
+      "name": "mcp_eval_mcp_status_51b1cdd4ae261c34",
+      "description": "Read the status visible to the selected account.",
+      "inputSchema": {
+        "type": "object",
+        "properties": { "probe": { "type": "string" } },
+        "required": ["probe"],
+        "additionalProperties": false
+      },
+      "mutating": false
+    }
+  ],
+  "script": [
+    {
+      "kind": "tool_calls",
+      "calls": [
+        {
+          "callId": "privacy",
+          "name": "mcp_eval_mcp_status_51b1cdd4ae261c34",
+          "arguments": { "probe": "privacy" }
+        }
+      ]
+    },
+    { "kind": "text", "text": "Continue in a private Chat to use your personal account." }
+  ],
+  "expect": [
+    { "kind": "mcp_provider_call_count", "count": 0 },
+    {
+      "kind": "tool_result_reason_contains",
+      "name": "mcp_eval_mcp_status_51b1cdd4ae261c34",
+      "argumentPath": "probe",
+      "argumentValue": "privacy",
+      "status": "denied",
+      "text": "private context required"
+    },
+    { "kind": "run_status", "status": "succeeded" }
+  ]
+}

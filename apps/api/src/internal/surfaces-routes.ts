@@ -11,12 +11,19 @@ import type { ChatTurnPrincipal } from "../conversations/chat-turns";
 import { chatConversationService } from "../conversations/chat-turns";
 import type { ConversationStore } from "../conversations/service";
 import type { IngressIdentityResolver } from "../ingress/identity";
+import { NativeChannelError } from "../integrations/native/credentials";
+import { nativeRouteError } from "../integrations/native/routes";
+import type { NativeChannelService } from "../integrations/native/service";
 import type { PendingSurfaceAction, SurfaceActionStore } from "../surfaces/action-store";
 import { isChannelEnabled } from "./channel-availability";
 
 type PreHandler = (req: FastifyRequest, reply: FastifyReply) => Promise<void>;
 
 export interface SurfaceInternalRouteDeps {
+  readonly nativeChannels?: Pick<
+    NativeChannelService,
+    "acceptSurfaceInteraction" | "authorizeSurfaceInteraction"
+  >;
   readonly soulLoader?: SoulLoader;
   readonly identity: IngressIdentityResolver;
   readonly actions: SurfaceActionStore;
@@ -46,6 +53,15 @@ async function processSurfaceInteraction(
       handle: work.handle.handle,
       interactionId: work.interactionId,
     });
+    return "processed";
+  }
+  if (deps.nativeChannels) {
+    await deps.nativeChannels.authorizeSurfaceInteraction(
+      runId,
+      work.interactionId,
+      work.principal
+    );
+    await deps.actions.complete({ handle: work.handle.handle, interactionId: work.interactionId });
     return "processed";
   }
 
@@ -153,6 +169,8 @@ export function registerSurfaceInternalRoutes(
           },
           401: ErrorSchema,
           403: ErrorSchema,
+          409: ErrorSchema,
+          503: ErrorSchema,
         },
       },
     },
@@ -173,7 +191,7 @@ export function registerSurfaceInternalRoutes(
         sender: body.externalSubject,
         externalTenantId: body.externalTenantId,
       });
-      if (resolution.outcome === "unlinked") {
+      if (resolution.outcome === "unlinked" || resolution.principalKind !== "user") {
         return reply.code(400).send({
           error: "Sender is not linked to a Tulip principal.",
           code: "wrong_principal",
@@ -201,6 +219,28 @@ export function registerSurfaceInternalRoutes(
       if (result.outcome !== "completed") {
         const { conversationId, runId } = result.handle;
         if (conversationId !== null && runId !== null) {
+          if (deps.nativeChannels) {
+            try {
+              await deps.nativeChannels.acceptSurfaceInteraction({
+                sourceRunId: runId,
+                interactionId: result.interaction.id,
+                provider: body.provider,
+                externalSubject: body.externalSubject,
+                externalTenantId: body.externalTenantId,
+                principalId: resolution.principalId,
+                content: surfaceInteractionAnswer(result.interaction.input),
+              });
+            } catch (error) {
+              if (error instanceof NativeChannelError && error.status !== 503) {
+                return reply.code(400).send({
+                  error: "Surface interaction was rejected.",
+                  code: error.status === 400 ? "invalid_input" : "wrong_principal",
+                });
+              }
+              return nativeRouteError(error, reply);
+            }
+            return reply.send(result.interaction);
+          }
           const delivery = await deps.runDeliveries.find(DEPLOYMENT_BUSINESS_ID, runId);
           if (delivery === null) throw new Error("surface_source_delivery_missing");
           const principal: ChatTurnPrincipal = {
@@ -263,6 +303,8 @@ export function registerSurfaceInternalRoutes(
           401: ErrorSchema,
           403: ErrorSchema,
           404: ErrorSchema,
+          409: ErrorSchema,
+          503: ErrorSchema,
         },
       },
     },
@@ -275,7 +317,11 @@ export function registerSurfaceInternalRoutes(
       if (!isChannelEnabled(deps.soulLoader, work.handle.target.channel)) {
         return reply.code(403).send({ error: "Channel is disconnected" });
       }
-      return reply.send({ outcome: await processSurfaceInteraction(work, deps) });
+      try {
+        return reply.send({ outcome: await processSurfaceInteraction(work, deps) });
+      } catch (error) {
+        return nativeRouteError(error, reply);
+      }
     }
   );
 

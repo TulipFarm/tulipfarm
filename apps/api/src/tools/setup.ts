@@ -53,12 +53,6 @@ export function buildToolRegistry(services: {
   platform?: PlatformToolContext;
   /** `task_create`/`task_close`; absent leaves both unregistered. */
   tasks?: TaskToolContext;
-  /** GitHub ToolDefs; registered when composed, with live install visibility gated per turn. */
-  github?: readonly ToolDef[];
-  /** Slack chat ToolDefs from `tools/slack/tools.ts`. */
-  slack?: readonly ToolDef[];
-  /** Google Workspace chat ToolDefs from `tools/google/tools.ts`. */
-  google?: readonly ToolDef[];
   /** Governed public web and structured API ToolDefs. */
   network?: readonly ToolDef[];
 }): ToolRegistry {
@@ -198,12 +192,7 @@ export function buildToolRegistry(services: {
     registry.register(tool);
   }
 
-  for (const tool of [
-    ...(services.github ?? []),
-    ...(services.slack ?? []),
-    ...(services.google ?? []),
-    ...(services.network ?? []),
-  ]) {
+  for (const tool of services.network ?? []) {
     registry.register(tool);
   }
 

@@ -14,7 +14,6 @@ import type {
   AuthFieldsStep,
   AuthOAuth2Step,
   AuthStep,
-  AuthWebhookStep,
   IntegrationManifest,
   RequiredEnvVar,
 } from "@tulipfarm/soul";
@@ -61,15 +60,6 @@ export interface StartAuthStepInput {
   principal?: { readonly kind: string; readonly id: string };
   /** Target org login for an `app_manifest` step; ignored by steps with no `create_url_for_org`. */
   org?: string;
-  /** The OIM Connection this authorization belongs to; absent for a legacy connection.yaml flow. */
-  connectionId?: string;
-  /** Server-held package identity that the callback must re-check before any provider request. */
-  oim?: {
-    readonly stepId: string;
-    readonly stepDigest: string;
-    readonly manifestDigest: string;
-    readonly packageDigest: string;
-  };
 }
 
 function stepAt(manifest: IntegrationManifest, index: number): AuthStep {
@@ -95,11 +85,6 @@ async function issueState(input: StartAuthStepInput, codeVerifier: string | null
     ),
     consumedAt: null,
     principal: input.principal ?? null,
-    connectionId: input.connectionId ?? null,
-    oimStepId: input.oim?.stepId ?? null,
-    oimStepDigest: input.oim?.stepDigest ?? null,
-    manifestDigest: input.oim?.manifestDigest ?? null,
-    packageDigest: input.oim?.packageDigest ?? null,
   });
   return state;
 }
@@ -124,76 +109,6 @@ export function buildAuthorizeUrl(
 
 export { ingressWebhookUrl } from "@tulipfarm/integrations";
 
-/**
- * Webhook steps mint the delivery secret, register the hook, and keep returned ids.
- * Non-2xx or `{ ok: false }` writes no env, avoiding half-connected integrations.
- */
-async function registerWebhook(
-  step: AuthWebhookStep,
-  input: StartAuthStepInput
-): Promise<Record<string, string>> {
-  const produced: Record<string, string> = {};
-  if (step.secret_env) produced[step.secret_env] = randomBytes(32).toString("base64url");
-
-  const vars = {
-    ...integrationAuthEndpointVars(input.endpoints, input.env),
-    ...produced,
-    webhook_url: ingressWebhookUrl(input.endpoints, input.slug),
-  };
-
-  const url = renderTemplate(step.url, vars);
-  if (!url.startsWith("https://")) {
-    // Templated env cannot make credential-bearing webhook calls plaintext or file URLs.
-    throw new AuthBrokerError("exchange_failed", "webhook registration url must be https");
-  }
-  if (/\{[A-Za-z0-9_.]+\}/.test(url)) {
-    throw new AuthBrokerError(
-      "missing_credentials",
-      "webhook registration url has unresolved placeholders; an earlier step must supply them"
-    );
-  }
-
-  let response: Response;
-  try {
-    response = await (input.fetchImpl ?? globalThis.fetch)(url, {
-      method: step.method ?? "POST",
-      headers: { accept: "application/json", "content-type": "application/json" },
-      body: JSON.stringify(renderDeep(step.body ?? {}, vars)),
-    });
-  } catch {
-    // The URL may embed the credential, so it must never reach the message an operator sees.
-    throw new AuthBrokerError(
-      "exchange_failed",
-      "webhook registration could not reach the provider"
-    );
-  }
-
-  const parsed = await readJsonBody(response);
-  if (!response.ok || parsed.ok === false) {
-    throw new AuthBrokerError(
-      "exchange_failed",
-      `webhook registration was rejected (${response.status})`
-    );
-  }
-
-  for (const [path, envName] of Object.entries(step.map ?? {})) {
-    const value = asIntegrationEnvValue(readPath(parsed, path));
-    if (value !== undefined) produced[envName] = value;
-  }
-  return produced;
-}
-
-/** A provider that answers with something other than JSON has still answered; treat it as empty. */
-async function readJsonBody(response: Response): Promise<Record<string, unknown>> {
-  try {
-    const parsed: unknown = await response.json();
-    return typeof parsed === "object" && parsed !== null ? (parsed as Record<string, unknown>) : {};
-  } catch {
-    // A non-JSON provider response is still an answer; treat the body as empty.
-    return {};
-  }
-}
-
 /** Names the `fields` step that owns a missing oauth2 credential, instead of its raw env var. */
 function missingCredentialsMessage(input: StartAuthStepInput, step: AuthOAuth2Step): string {
   const owner = resolveAuthSteps(input.manifest).find(
@@ -211,11 +126,7 @@ export async function startAuthStep(input: StartAuthStepInput): Promise<AuthStar
   const step = stepAt(input.manifest, input.stepIndex);
 
   // Personal credentials must come from personal steps; grant type alone is insufficient.
-  if (
-    input.principal !== undefined &&
-    input.connectionId === undefined &&
-    !isPersonalCredentialStep(step)
-  ) {
+  if (input.principal !== undefined && !isPersonalCredentialStep(step)) {
     throw new AuthBrokerError(
       "unknown_step",
       `step ${input.stepIndex} cannot issue a personal credential; only an oauth2 authorization_code step declaring \`personal: true\` can`
@@ -229,10 +140,6 @@ export async function startAuthStep(input: StartAuthStepInput): Promise<AuthStar
     case "app_manifest": {
       const state = await issueState(input, null);
       const org = input.org?.trim();
-      // `{webhook_url}` is available here too (not just to a `webhook` step) so a provider
-      // manifest that registers its own hook inline — GitHub's `hook_attributes.url` — can point
-      // at this deployment's real ingress route instead of a hand-typed path that can drift from
-      // it (see apps/api/src/ingress/routes.ts's actual route pattern).
       const vars = {
         ...integrationAuthEndpointVars(input.endpoints, input.env),
         webhook_url: ingressWebhookUrl(input.endpoints, input.slug),
@@ -258,7 +165,10 @@ export async function startAuthStep(input: StartAuthStepInput): Promise<AuthStar
     }
 
     case "webhook":
-      return { action: "completed", env: await registerWebhook(step, input) };
+      throw new AuthBrokerError(
+        "unknown_step",
+        "Native channel setup does not support webhook registration steps."
+      );
 
     case "oauth2": {
       const clientId = input.env[step.client_id_env];
@@ -285,8 +195,8 @@ export async function startAuthStep(input: StartAuthStepInput): Promise<AuthStar
 
 export interface CompleteAuthStepInput {
   query: Record<string, string>;
-  loadManifest: (slug: string, connectionId?: string | null) => IntegrationManifest | undefined;
-  loadEnv: (slug: string, connectionId?: string | null) => Promise<Record<string, string>>;
+  loadManifest: (slug: string) => IntegrationManifest | undefined;
+  loadEnv: (slug: string) => Promise<Record<string, string>>;
   validateRequest?: (request: IntegrationAuthRequestDoc) => Promise<void> | void;
   endpoints: AuthEndpoints;
   repo: IntegrationAuthRequestRepo;
@@ -302,47 +212,22 @@ export interface AuthStepOutcome {
   env: Record<string, string>;
   principal?: { readonly kind: string; readonly id: string };
   oauth2Step?: AuthOAuth2Step;
-  connectionId?: string;
-}
-
-interface AuthAppManifestCapture {
-  readonly oim_capture?: Readonly<Record<string, string>>;
-}
-
-interface OptionalClientSecretStep {
-  readonly client_secret_optional?: boolean;
-  readonly token_endpoint_auth_method?: "none" | "client_secret_post" | "client_secret_basic";
 }
 
 function oauthClientAuthentication(
-  step: AuthOAuth2Step,
   clientId: string | undefined,
   clientSecret: string | undefined,
   missingMessage: string
-): { readonly body: Record<string, string>; readonly authorization?: string } {
-  const declared = (step as OptionalClientSecretStep).token_endpoint_auth_method;
-  const method =
-    declared ??
-    ((step as OptionalClientSecretStep).client_secret_optional === true
-      ? "none"
-      : "client_secret_post");
+): Record<string, string> {
   if (!clientId) throw new AuthBrokerError("missing_credentials", missingMessage);
-  if (method === "none") return { body: { client_id: clientId } };
   if (!clientSecret) throw new AuthBrokerError("missing_credentials", missingMessage);
-  if (method === "client_secret_basic") {
-    return {
-      body: {},
-      authorization: `Basic ${Buffer.from(`${clientId}:${clientSecret}`).toString("base64")}`,
-    };
-  }
-  return { body: { client_id: clientId, client_secret: clientSecret } };
+  return { client_id: clientId, client_secret: clientSecret };
 }
 
 async function postForm(
   fetchImpl: typeof globalThis.fetch,
   url: string,
-  body: Record<string, string>,
-  authorization?: string
+  body: Record<string, string>
 ): Promise<Record<string, unknown>> {
   let response: Response;
   try {
@@ -351,7 +236,6 @@ async function postForm(
       headers: {
         accept: "application/json",
         "content-type": "application/x-www-form-urlencoded",
-        ...(authorization === undefined ? {} : { authorization }),
       },
       body: new URLSearchParams(body).toString(),
     });
@@ -420,7 +304,7 @@ export async function completeAuthStep(input: CompleteAuthStepInput): Promise<Au
   }
 
   await input.validateRequest?.(request);
-  const manifest = input.loadManifest(request.integrationSlug, request.connectionId);
+  const manifest = input.loadManifest(request.integrationSlug);
   if (!manifest) {
     throw new AuthBrokerError("unknown_step", `integration not found: ${request.integrationSlug}`);
   }
@@ -431,7 +315,6 @@ export async function completeAuthStep(input: CompleteAuthStepInput): Promise<Au
     stepIndex: request.stepIndex,
     webUrl: request.webUrl ?? input.endpoints.webUrl,
     ...(request.principal === null ? {} : { principal: request.principal }),
-    ...(request.connectionId ? { connectionId: request.connectionId } : {}),
   };
 
   try {
@@ -475,13 +358,7 @@ async function completeStep(ctx: {
 
     case "app_manifest": {
       if (!step.exchange) {
-        const capture = (step as AuthAppManifestCapture).oim_capture ?? {};
-        const env: Record<string, string> = {};
-        for (const [param, envName] of Object.entries(capture)) {
-          const value = input.query[param];
-          if (value !== undefined) env[envName] = value;
-        }
-        return { ...outcome, env };
+        return { ...outcome, env: {} };
       }
       const code = input.query.code;
       if (!code) throw new AuthBrokerError("exchange_failed", "callback carried no code");
@@ -507,11 +384,10 @@ async function completeStep(ctx: {
     case "oauth2": {
       const code = input.query.code;
       if (!code) throw new AuthBrokerError("exchange_failed", "callback carried no code");
-      const env = await input.loadEnv(request.integrationSlug, request.connectionId);
+      const env = await input.loadEnv(request.integrationSlug);
       const clientId = env[step.client_id_env];
       const clientSecret = env[step.client_secret_env];
       const clientAuthentication = oauthClientAuthentication(
-        step,
         clientId,
         clientSecret,
         "client credentials are not configured"
@@ -520,15 +396,10 @@ async function completeStep(ctx: {
         grant_type: "authorization_code",
         code,
         redirect_uri: request.callbackUrl ?? input.endpoints.callbackUrl,
-        ...clientAuthentication.body,
+        ...clientAuthentication,
       };
       if (request.codeVerifier) body.code_verifier = request.codeVerifier;
-      const response = await postForm(
-        fetchImpl,
-        step.token_url,
-        body,
-        clientAuthentication.authorization
-      );
+      const response = await postForm(fetchImpl, step.token_url, body);
       return { ...outcome, oauth2Step: step, env: mapTokenResponse(step, response, now) };
     }
   }
@@ -562,7 +433,6 @@ export async function refreshOAuth2Credentials(
   const clientId = env[step.client_id_env];
   const clientSecret = env[step.client_secret_env];
   const clientAuthentication = oauthClientAuthentication(
-    step,
     clientId,
     clientSecret,
     "refresh requires stored app credentials"
@@ -570,13 +440,12 @@ export async function refreshOAuth2Credentials(
   const body: Record<string, string> = {
     grant_type: "refresh_token",
     refresh_token: refreshToken,
-    ...clientAuthentication.body,
+    ...clientAuthentication,
   };
   const response = await postForm(
     options.fetchImpl ?? globalThis.fetch,
     step.refresh_url ?? step.token_url,
-    body,
-    clientAuthentication.authorization
+    body
   );
   // Preserve stored refresh tokens when providers do not rotate them.
   const mapped = mapTokenResponse(step, response, options.now ?? new Date());

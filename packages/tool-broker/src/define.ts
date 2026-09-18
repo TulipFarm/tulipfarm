@@ -396,7 +396,7 @@ export function toolContractSpecOf<Ctx, Result>(
       ? {}
       : { compensation: { ...definition.compensation } }),
     adapter: {
-      kind: definition.provider === undefined ? "native" : "integration",
+      kind: definition.provider === undefined ? "native" : "mcp",
       ref: definition.provider ?? definition.name,
     },
   };

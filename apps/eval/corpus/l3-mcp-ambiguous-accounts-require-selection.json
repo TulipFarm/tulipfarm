@@ -1,0 +1,55 @@
+{
+  "id": "l3-mcp-ambiguous-accounts-require-selection",
+  "tier": "l3",
+  "agent": "support",
+  "mcp": {
+    "visibility": "private",
+    "accounts": [
+      { "id": "personal-a", "scope": "personal", "status": "active" },
+      { "id": "personal-b", "scope": "personal", "status": "active" }
+    ]
+  },
+  "input": [
+    {
+      "role": "user",
+      "content": "Call the Eval MCP status Tool with probe 'ambiguous'. If an account choice is required, stop and tell me."
+    }
+  ],
+  "tools": [
+    {
+      "name": "mcp_eval_mcp_status_51b1cdd4ae261c34",
+      "description": "Read the status visible to the selected account.",
+      "inputSchema": {
+        "type": "object",
+        "properties": { "probe": { "type": "string" } },
+        "required": ["probe"],
+        "additionalProperties": false
+      },
+      "mutating": false
+    }
+  ],
+  "script": [
+    {
+      "kind": "tool_calls",
+      "calls": [
+        {
+          "callId": "ambiguous",
+          "name": "mcp_eval_mcp_status_51b1cdd4ae261c34",
+          "arguments": { "probe": "ambiguous" }
+        }
+      ]
+    },
+    { "kind": "text", "text": "Select an account before I can read its status." }
+  ],
+  "expect": [
+    {
+      "kind": "tool_result_reason_contains",
+      "name": "mcp_eval_mcp_status_51b1cdd4ae261c34",
+      "argumentPath": "probe",
+      "argumentValue": "ambiguous",
+      "status": "denied",
+      "text": "account selection required"
+    },
+    { "kind": "run_status", "status": "succeeded" }
+  ]
+}

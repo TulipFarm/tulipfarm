@@ -33,6 +33,25 @@ export interface EmittedProvenance {
   readonly checkpoint?: string;
 }
 
+export interface EmittedMcpSourceLocator {
+  readonly kind: "mcp";
+  readonly adapter: "github-file";
+  readonly integrationId: string;
+  readonly accountId: string;
+  readonly accountRevision: number;
+  readonly ownerUserId: string;
+  readonly externalAccountId: string;
+  readonly configurationRevision: string;
+  readonly selectionId: string;
+  readonly selectionRevision: string;
+  readonly visibility: "personal";
+  readonly owner: string;
+  readonly repo: string;
+  readonly path: string;
+  readonly ref: string;
+  readonly sourceUrl: string;
+}
+
 export interface KnowledgeSourceEmission {
   readonly sourceId: string;
   readonly businessId: string;
@@ -41,6 +60,7 @@ export interface KnowledgeSourceEmission {
   readonly externalId: string;
   readonly externalTenantId: string;
   readonly ownerExternalId: string;
+  readonly sourceLocator?: EmittedMcpSourceLocator;
   readonly revision: string;
   readonly classification: readonly string[];
   readonly status: EmittedSourceStatus;

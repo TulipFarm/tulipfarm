@@ -10,6 +10,7 @@ import {
   ajv,
   canonicalHash,
   type GuardrailDefinition,
+  type McpExecutionBinding,
   type ToolContractDefinition,
 } from "@tulipfarm/schema";
 import { ToolBroker } from "./broker";
@@ -102,8 +103,7 @@ export interface RoutineToolPort {
   replaySettled(request: RoutineToolRequest): Promise<RoutineToolOutcome>;
 }
 
-export type RoutineOimPreparation =
-  | { readonly kind: "unmanaged" }
+export type RoutineMcpPreparation =
   | { readonly kind: "failed"; readonly reason: string }
   | { readonly kind: "unavailable"; readonly reason: string }
   | {
@@ -112,23 +112,20 @@ export type RoutineOimPreparation =
       readonly adapterRef: string;
       readonly adapter: ToolAdapter;
       readonly hostCredentials: true;
-      readonly filePrincipalId?: string;
-      readonly fileIds?: readonly string[];
-      readonly agentPrincipalId?: string;
-      readonly integrationId: string;
-      readonly integrationMajorVersion: number;
-      readonly operationId: string;
-      readonly manifestDigest: string;
-      readonly configurationDigest: string;
+      readonly mcp: McpExecutionBinding;
       readonly destination?: string;
-      readonly credentialRef?: string;
-      readonly connection?: ToolIntent["connection"];
-      readonly secondaryCredentialRef?: string;
-      readonly secondaryConnection?: ToolIntent["secondaryConnection"];
     };
 
-export interface RoutineOimPreparationPort {
-  prepare(request: RoutineToolRequest, pinnedIntent?: ToolIntent): Promise<RoutineOimPreparation>;
+export type RoutineMcpAuthorization =
+  | { readonly kind: "allowed" }
+  | { readonly kind: "failed" | "unavailable"; readonly reason: string };
+
+export interface RoutineMcpPreparationPort {
+  prepare(request: RoutineToolRequest, pinnedIntent?: ToolIntent): Promise<RoutineMcpPreparation>;
+  revalidate(
+    request: RoutineToolRequest,
+    binding: McpExecutionBinding
+  ): Promise<RoutineMcpAuthorization>;
 }
 
 export interface RoutineToolApprovalPort {
@@ -173,8 +170,8 @@ export interface BrokerRoutineToolPortOptions {
   /** Bundle-scoped adapters are built only from the Run's verified immutable package. */
   readonly adaptersFor?: (request: RoutineToolRequest) => ReadonlyMap<string, ToolAdapter>;
   readonly credentialsFor?: (request: RoutineToolRequest) => CredentialDispatcher | undefined;
-  /** OIM resolution stays API-side; only immutable bindings and a remote adapter cross back. */
-  readonly oim?: RoutineOimPreparationPort;
+  /** Account resolution stays API-side; only immutable bindings and a remote adapter cross back. */
+  readonly mcp?: RoutineMcpPreparationPort;
   /** Provider retries must park on the Run's durable wait store. */
   readonly parkRetry?: EffectRetryParker;
   readonly retryWaitStatus?: EffectRetryWaitReader;
@@ -182,7 +179,7 @@ export interface BrokerRoutineToolPortOptions {
   readonly mutationGuard?: MutationGuard;
   /** Preserves the caller's ownership-loss semantics without importing the Run kernel. */
   readonly assertActive: (signal: AbortSignal | undefined) => void;
-  /** Host-specific legacy Credential scoping. OIM Credentials are resolved by the API host. */
+  /** Host-specific platform Credential scoping; MCP accounts are resolved by the API host. */
   readonly credentialRefFor?: (request: RoutineToolRequest) => string | undefined;
   readonly now?: () => Date;
 }
@@ -196,12 +193,12 @@ function definitionsOf<T>(bundle: RoutineToolBundle, kind: string): T[] {
 function intentOf(
   request: RoutineToolRequest,
   targetRefs: readonly ToolTargetRef[],
-  prepared: Extract<RoutineOimPreparation, { readonly kind: "ready" }> | undefined,
+  prepared: Extract<RoutineMcpPreparation, { readonly kind: "ready" }> | undefined,
   credentialRefFor: ((request: RoutineToolRequest) => string | undefined) | undefined
 ): ToolIntent {
   const { plan } = request;
   const credentialRef =
-    prepared?.credentialRef ?? credentialRefFor?.(request) ?? plan.credentialRef;
+    prepared === undefined ? (credentialRefFor?.(request) ?? plan.credentialRef) : undefined;
   const separator = request.requesterPrincipalId.indexOf(":");
   const principalKind =
     separator < 1 ? undefined : request.requesterPrincipalId.slice(0, separator);
@@ -224,33 +221,11 @@ function intentOf(
           principalId,
           ...(principalKind === "agent" ? { agentPrincipalId: principalId } : {}),
         }),
-    ...(prepared?.filePrincipalId === undefined
-      ? {}
-      : { filePrincipalId: prepared.filePrincipalId }),
-    ...(prepared?.fileIds === undefined ? {} : { fileIds: prepared.fileIds }),
-    ...(prepared?.agentPrincipalId === undefined
-      ? {}
-      : { agentPrincipalId: prepared.agentPrincipalId }),
-    ...(prepared === undefined
-      ? {}
-      : {
-          integrationId: prepared.integrationId,
-          integrationMajorVersion: prepared.integrationMajorVersion,
-          operationId: prepared.operationId,
-          manifestDigest: prepared.manifestDigest,
-          configurationDigest: prepared.configurationDigest,
-        }),
+    ...(prepared === undefined ? {} : { mcp: prepared.mcp }),
     ...((prepared?.destination ?? plan.destination) === undefined
       ? {}
       : { destination: prepared?.destination ?? plan.destination }),
     ...(credentialRef === undefined ? {} : { credentialRef }),
-    ...(prepared?.connection === undefined ? {} : { connection: prepared.connection }),
-    ...(prepared?.secondaryCredentialRef === undefined
-      ? {}
-      : { secondaryCredentialRef: prepared.secondaryCredentialRef }),
-    ...(prepared?.secondaryConnection === undefined
-      ? {}
-      : { secondaryConnection: prepared.secondaryConnection }),
     idempotencyKey: plan.idempotencyKey,
   };
 }
@@ -284,14 +259,6 @@ function replayed(effect: EffectRecord): RoutineToolOutcome {
 }
 
 function requestMatchesEffect(request: RoutineToolRequest, effect: EffectRecord): boolean {
-  const planArguments =
-    effect.intent.integrationId === undefined
-      ? request.plan.arguments
-      : splitConnectionArgument(request.plan.arguments).providerArguments;
-  const requestedConnectionId =
-    effect.intent.integrationId === undefined
-      ? undefined
-      : splitConnectionArgument(request.plan.arguments).connectionId;
   return (
     effect.businessId === request.businessId &&
     effect.runId === request.runId &&
@@ -301,28 +268,9 @@ function requestMatchesEffect(request: RoutineToolRequest, effect: EffectRecord)
     effect.intent.toolId === request.plan.toolRef.name &&
     effect.intent.toolVersion === request.plan.toolRef.version &&
     effect.intent.action === request.plan.action &&
-    canonicalHash(effect.intent.arguments) === canonicalHash(planArguments) &&
-    (requestedConnectionId === undefined ||
-      requestedConnectionId === effect.intent.connection?.connectionId) &&
+    canonicalHash(effect.intent.arguments) === canonicalHash(request.plan.arguments) &&
     `${effect.intent.principalKind}:${effect.intent.principalId}` === request.requesterPrincipalId
   );
-}
-
-function splitConnectionArgument(arguments_: unknown): {
-  readonly connectionId?: string;
-  readonly providerArguments: unknown;
-} {
-  if (arguments_ === null || typeof arguments_ !== "object" || Array.isArray(arguments_)) {
-    return { providerArguments: arguments_ };
-  }
-  const { connection_id: connectionId, ...providerArguments } = arguments_ as Record<
-    string,
-    unknown
-  >;
-  return {
-    ...(typeof connectionId === "string" && connectionId.length > 0 ? { connectionId } : {}),
-    providerArguments,
-  };
 }
 
 export class BrokerRoutineToolPort implements RoutineToolPort {
@@ -368,12 +316,15 @@ export class BrokerRoutineToolPort implements RoutineToolPort {
     }
 
     const contract = catalog.get(request.plan.toolRef.name, request.plan.toolRef.version);
-    let prepared: Extract<RoutineOimPreparation, { readonly kind: "ready" }> | undefined;
-    if (contract?.adapter.ref.startsWith("oim-")) {
-      if (this.options.oim === undefined) {
-        return { kind: "unavailable", reason: "oim_host_unavailable" };
+    let prepared: Extract<RoutineMcpPreparation, { readonly kind: "ready" }> | undefined;
+    if (contract?.adapter.kind === "mcp") {
+      if (this.options.mcp === undefined) {
+        return { kind: "unavailable", reason: "mcp_host_unavailable" };
       }
-      const resolution = await this.options.oim.prepare(request, existing?.intent);
+      if (request.plan.credentialRef !== undefined) {
+        return { kind: "failed", reason: "mcp_account_binding_required" };
+      }
+      const resolution = await this.options.mcp.prepare(request, existing?.intent);
       this.options.assertActive(request.signal);
       if (resolution.kind === "failed" || resolution.kind === "unavailable") return resolution;
       if (resolution.kind === "ready") {
@@ -528,6 +479,14 @@ export class BrokerRoutineToolPort implements RoutineToolPort {
     if (!requestMatchesEffect(request, existing)) {
       return { kind: "unavailable", reason: "effect_binding_mismatch" };
     }
+    if (existing.intent.mcp !== undefined) {
+      if (this.options.mcp === undefined) {
+        return { kind: "unavailable", reason: "mcp_host_unavailable" };
+      }
+      const authorization = await this.options.mcp.revalidate(request, existing.intent.mcp);
+      this.options.assertActive(request.signal);
+      if (authorization.kind !== "allowed") return authorization;
+    }
     if (existing.approvalId !== undefined) {
       const approvedIntent = await this.options.approvals.findIntent?.({
         runId: request.runId,
@@ -597,7 +556,7 @@ export class BrokerRoutineToolPort implements RoutineToolPort {
   private async dispatchEffect(
     request: RoutineToolRequest,
     catalog: ToolCatalog,
-    prepared: Extract<RoutineOimPreparation, { readonly kind: "ready" }> | undefined
+    prepared: Extract<RoutineMcpPreparation, { readonly kind: "ready" }> | undefined
   ): Promise<RoutineToolOutcome> {
     const adapters = new Map(this.options.adapters);
     for (const [ref, adapter] of this.options.adaptersFor?.(request) ?? []) {

@@ -84,6 +84,7 @@ const EXPECTATION_FIELDS: Record<string, readonly [string, FieldType][]> = {
   ],
   loop_status: [["status", "string"]],
   tool_call_count: [["count", "number"]],
+  mcp_provider_call_count: [["count", "number"]],
   tool_calls_batched: [["min", "number"]],
   tool_batch_replayed: [],
   guardrail_blocked: [
@@ -102,6 +103,10 @@ const EXPECTATION_FIELDS: Record<string, readonly [string, FieldType][]> = {
     ["path", "string"],
     ["value", "any"],
   ],
+  native_admission_equals: [
+    ["path", "string"],
+    ["value", "any"],
+  ],
   turn_status: [["status", "string"]],
   run_event_emitted: [["eventType", "string"]],
   run_event_text_omits: [["text", "string"]],
@@ -111,6 +116,7 @@ const EXPECTATION_FIELDS: Record<string, readonly [string, FieldType][]> = {
   ],
   soul_committed: [["path", "string"]],
   soul_published: [["artifact", "string"]],
+  soul_not_published: [["artifact", "string"]],
   generated_file_readable_by: [["grantee", "string"]],
   generated_file_not_readable_by: [["grantee", "string"]],
   generated_file_draft_created: [],
@@ -158,6 +164,12 @@ export function expectationShapeError(kind: string, record: Record<string, unkno
     if (!fieldOk(record[field], type)) {
       return `expectation "${kind}" needs a ${describeField(type)} field "${field}"`;
     }
+    if (
+      kind === "mcp_provider_call_count" &&
+      (!Number.isInteger(record.count) || Number(record.count) < 0)
+    ) {
+      return `expectation "${kind}" needs "count" to be a non-negative integer`;
+    }
   }
   // A grantee is written as one string, so a typo produces a grantee nothing ever matches. That is
   // silent for `generated_file_readable_by` — it fails, and someone investigates — but
@@ -180,7 +192,10 @@ export function expectationShapeError(kind: string, record: Record<string, unkno
     return `expectation "tool_batch_replayed" derives call ids from the model-produced batch`;
   }
   if (
-    (kind === "tool_result_field_equals" || kind === "tool_result_reason_contains") &&
+    (kind === "tool_result_field_equals" ||
+      kind === "tool_result_reason_contains" ||
+      kind === "soul_published" ||
+      kind === "soul_not_published") &&
     record.turnIndex !== undefined &&
     (!Number.isInteger(record.turnIndex) || Number(record.turnIndex) < 1)
   ) {

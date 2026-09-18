@@ -1,5 +1,5 @@
-/** Migration 135 pins hosting authority, after the v133 Slack lease repair. */
-export const REQUIRED_SCHEMA_VERSION = 135;
+/** Native ingress and MCP Knowledge consumers require the durable stores added in migration 138. */
+export const REQUIRED_SCHEMA_VERSION = 138;
 
 export interface IntegrationWorkerConfig {
   readonly databaseUrl: string;

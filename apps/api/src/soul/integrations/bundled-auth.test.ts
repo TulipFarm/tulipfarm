@@ -191,12 +191,11 @@ describe("slack manifest", () => {
   /* Base-install GitHub permissions are locked; catch over-grant or under-grant drift. */
   it("requests exactly the permissions the locked App decision documents", async () => {
     const bundled = await loadBundledIntegrations(logger);
-    expect(bundled.get("github")?.manifest.capabilities).toContain(
-      "Read check run results to see whether CI passed"
-    );
-    expect(bundled.get("github")?.manifest.capabilities).not.toContain(
-      "Report check run results back onto a commit"
-    );
+    expect(bundled.get("github")?.manifest.capabilities).toEqual([
+      "Receive repository, issue, pull request, and check events",
+      "Deliver replies on issues and pull requests",
+      "Connect a selected repository as the Soul backup remote",
+    ]);
     const steps = resolveAuthSteps(
       bundled.get("github")?.manifest ?? { name: "", egress: { type: "none" } }
     );
@@ -295,10 +294,6 @@ describe("slack manifest", () => {
   });
 
   it("registers the App's webhook at this deployment's real ingress route", async () => {
-    // Regression: hook_attributes.url used to be hand-typed as
-    // `{api_url}/api/v1/integrations/github/webhook`, which resolved to a URL that was never a
-    // registered route (the real one is `/api/v1/hooks/integrations/:name`). GitHub delivered to
-    // it and got 404 forever — this is what `{webhook_url}` now prevents from drifting again.
     const bundled = await loadBundledIntegrations(logger);
     const manifest = bundled.get("github")?.manifest;
     if (!manifest) throw new Error("github is not bundled");
@@ -314,7 +309,16 @@ describe("slack manifest", () => {
     if (action.action !== "form_post") throw new Error("expected form_post");
     const submitted = JSON.parse(action.value) as { hook_attributes: { url: string } };
     expect(submitted.hook_attributes.url).toBe(
-      `${endpoints.apiUrl}/api/v1/hooks/integrations/github`
+      `${endpoints.apiUrl}/api/v1/integrations/native/github/events`
     );
+  });
+
+  it.each(["slack", "github"])("uses only supported native auth steps for %s", async (slug) => {
+    const bundled = await loadBundledIntegrations(logger);
+    const manifest = bundled.get(slug)?.manifest;
+    if (!manifest) throw new Error(`${slug} is not bundled`);
+    for (const step of resolveAuthSteps(manifest)) {
+      expect(["fields", "app_manifest", "install", "oauth2"]).toContain(step.kind);
+    }
   });
 });

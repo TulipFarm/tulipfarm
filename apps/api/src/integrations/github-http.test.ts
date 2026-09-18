@@ -1,83 +1,55 @@
-import { GITHUB_TOOL_IDS, GitHubAdapter } from "@tulipfarm/integrations";
 import { describe, expect, it, vi } from "vitest";
 import { GitHubInstallHttp } from "./github-http";
 
-describe("GitHub content URLs", () => {
-  it.each([GITHUB_TOOL_IDS.contentRead, GITHUB_TOOL_IDS.contentList])(
-    "%s preserves slashes and literal reserved bytes through the real transport",
-    async (action) => {
-      const path = "docs #?/literal%23%2F/notes#2026?.md";
-      const fetch = vi.fn<typeof globalThis.fetch>().mockResolvedValue(
-        new Response(JSON.stringify(action === GITHUB_TOOL_IDS.contentRead ? { path } : []), {
-          status: 200,
-        })
+describe("GitHub native transport", () => {
+  it("preserves encoded path segments and literal query values", async () => {
+    const path = "docs #?/literal%23%2F/notes#2026?.md";
+    const fetch = vi
+      .fn<typeof globalThis.fetch>()
+      .mockResolvedValue(new Response(JSON.stringify({ path }), { status: 200 }));
+    const http = new GitHubInstallHttp({ fetch });
+    await http.send(
+      {
+        method: "GET",
+        path: `/repos/tulip/farm/contents/${path.split("/").map(encodeURIComponent).join("/")}`,
+        query: { ref: "feature/#?%" },
+      },
+      "fixture-token"
+    );
+    const url = new URL(String(fetch.mock.calls[0]?.[0]));
+    expect(url.pathname).toBe(
+      "/repos/tulip/farm/contents/docs%20%23%3F/literal%2523%252F/notes%232026%3F.md"
+    );
+    expect(url.hash).toBe("");
+    expect([...url.searchParams]).toEqual([["ref", "feature/#?%"]]);
+    expect(url.pathname.split("/").slice(5).map(decodeURIComponent).join("/")).toBe(path);
+  });
+
+  it("sends a native installation-token request with its exact repository scope", async () => {
+    const fetch = vi
+      .fn<typeof globalThis.fetch>()
+      .mockResolvedValue(
+        new Response(JSON.stringify({ token: "installation-token" }), { status: 201 })
       );
-      const adapter = new GitHubAdapter({
-        http: new GitHubInstallHttp({ fetch }),
-        now: () => new Date("2026-09-17"),
-        context: {
-          resolve: async () => ({
-            integrationId: "github",
-            installation: {
-              businessId: "business",
-              integrationId: "github",
-              installationId: "1",
-              accountLogin: "tulip",
-              repositories: ["tulip/farm"],
-              permissions: { contents: "read" },
-            },
-            principals: [{ kind: "agent", id: "agent" }],
-            grants: [
-              {
-                apiVersion: "tulipfarm.ai/v1",
-                kind: "AccessGrant",
-                metadata: {
-                  id: "grant",
-                  slug: "github-read",
-                  schemaVersion: 1,
-                  authoredVersion: 1,
-                  lifecycle: "active",
-                },
-                spec: {
-                  integrationId: "github",
-                  principals: [{ kind: "agent", id: "agent" }],
-                  actions: [action],
-                  externalTargets: [{ type: "github.repository", ids: ["tulip/farm"] }],
-                  delegable: false,
-                },
-              },
-            ],
-          }),
+    const body = { repositories: ["farm"], permissions: { issues: "write" } };
+    const result = await new GitHubInstallHttp({ fetch }).send(
+      { method: "POST", path: "/app/installations/42/access_tokens", body },
+      "app-jwt"
+    );
+    expect(fetch).toHaveBeenCalledWith(
+      "https://api.github.com/app/installations/42/access_tokens",
+      {
+        method: "POST",
+        headers: {
+          accept: "application/vnd.github+json",
+          authorization: "Bearer app-jwt",
+          "x-github-api-version": "2022-11-28",
+          "content-type": "application/json",
         },
-      });
-      await adapter.dispatch(
-        {
-          intent: {
-            intentId: "intent",
-            businessId: "business",
-            runId: "run",
-            stateId: "read",
-            toolId: action,
-            toolVersion: "1.0.0",
-            action,
-            targetRefs: [],
-            arguments: { repository: "tulip/farm", path, ref: "feature/#?%" },
-            destination: "github",
-            credentialRef: "secret://fixture",
-            idempotencyKey: "key",
-          },
-          idempotencyKey: "key",
-          attempt: 1,
-        },
-        "fixture-token"
-      );
-      const url = new URL(String(fetch.mock.calls[0]?.[0]));
-      expect(url.pathname).toBe(
-        "/repos/tulip/farm/contents/docs%20%23%3F/literal%2523%252F/notes%232026%3F.md"
-      );
-      expect(url.hash).toBe("");
-      expect([...url.searchParams]).toEqual([["ref", "feature/#?%"]]);
-      expect(url.pathname.split("/").slice(5).map(decodeURIComponent).join("/")).toBe(path);
-    }
-  );
+        body: JSON.stringify(body),
+      }
+    );
+    expect(result.status).toBe(201);
+    expect(result.body).toEqual({ token: "installation-token" });
+  });
 });

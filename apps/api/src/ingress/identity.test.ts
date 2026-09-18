@@ -1,10 +1,7 @@
-import type { ToolDef } from "@tulipfarm/tool-host";
 import { describe, expect, it, vi } from "vitest";
 import type { IngressUserLookup, UserDoc } from "../auth/users";
-import type { ToolRegistry } from "../broker/tool-adapter";
 import type { ChannelBindDeps } from "../identity/channel-link";
 import { MemoryExternalIdentityRepo } from "../identity/fakes";
-import { declarativeToolName } from "../tools/declarative/tools";
 import { IngressIdentityResolver } from "./identity";
 
 const alice: UserDoc = {
@@ -26,12 +23,6 @@ const admin: UserDoc = {
   createdAt: new Date(),
 };
 
-const IDENTITY = {
-  tool: "get_user_profile",
-  args: { user_id: "{sender}" },
-  email_path: "profile.email",
-};
-
 function makeUsers(overrides: Partial<IngressUserLookup> = {}): IngressUserLookup {
   return {
     findByEmail: async (email: string) => (email === alice.email ? alice : null),
@@ -39,18 +30,6 @@ function makeUsers(overrides: Partial<IngressUserLookup> = {}): IngressUserLooku
     findFirstAdmin: async () => admin,
     ...overrides,
   };
-}
-
-function makeRegistry(execute: ToolDef["execute"]): ToolRegistry {
-  return {
-    getAll: () => [
-      {
-        name: declarativeToolName("chatapp", "get_user_profile"),
-        tier: "integration",
-        execute,
-      } as ToolDef,
-    ],
-  } as unknown as ToolRegistry;
 }
 
 function makeLog() {
@@ -79,16 +58,8 @@ function harness(
   return { resolver, mappings, log: log as unknown as { warn: ReturnType<typeof vi.fn> } };
 }
 
-const profileTool = (email: string) =>
-  vi.fn(async (_args: unknown) => ({
-    success: true as const,
-    data: { content: [{ type: "text", text: JSON.stringify({ profile: { email } }) }] },
-  }));
-
 describe("IngressIdentityResolver", () => {
-  it("honours an existing mapping without re-deriving identity from the channel", async () => {
-    // The manifest binding is the *slow* path. Once a sender is verified, asking the integration
-    // again on every message would make our authority a copy of theirs.
+  it("honours an existing proven mapping", async () => {
     const { resolver, mappings } = harness();
     await mappings.upsertMapping({
       provider: "chatapp",
@@ -98,13 +69,9 @@ describe("IngressIdentityResolver", () => {
       expiresAt: null,
       verifiedVia: "bind_link",
     });
-    const execute = profileTool("alice@example.com");
-
     const result = await resolver.resolve({
       slug: "chatapp",
       sender: "EXT1",
-      identity: IDENTITY,
-      registry: makeRegistry(execute),
     });
 
     expect(result).toEqual({
@@ -114,80 +81,25 @@ describe("IngressIdentityResolver", () => {
       principalId: alice._id,
       principalRef: `user:${alice._id}`,
     });
-    expect(execute).not.toHaveBeenCalled();
   });
 
-  it("auto-links through the manifest binding and persists the mapping it derived", async () => {
-    // Persisting is what makes the link survive a restart — and what makes it auditable.
-    const { resolver, mappings } = harness();
-    const execute = profileTool("alice@example.com");
-
-    const result = await resolver.resolve({
-      slug: "chatapp",
-      sender: "EXT1",
-      identity: IDENTITY,
-      registry: makeRegistry(execute),
-    });
-
-    expect(result).toMatchObject({ outcome: "linked", user: alice });
-    expect(execute).toHaveBeenCalledWith({ user_id: "EXT1" }, expect.anything());
-    expect(await mappings.findMapping("chatapp", "EXT1")).toMatchObject({
-      userId: alice._id,
-      verifiedVia: "manifest_email",
-    });
-  });
-
-  it("asks the integration once, because the second message reads the row the first wrote", async () => {
-    const { resolver } = harness();
-    const execute = profileTool("alice@example.com");
-    const opts = {
-      slug: "chatapp",
-      sender: "EXT1",
-      identity: IDENTITY,
-      registry: makeRegistry(execute),
-    };
-
-    await resolver.resolve(opts);
-    await resolver.resolve(opts);
-
-    expect(execute).toHaveBeenCalledTimes(1);
-  });
-
-  it("refuses a sender whose verified email matches no account, and offers a bind link", async () => {
-    const { resolver, mappings } = harness();
+  it("offers an unlinked sender a bind link without inferring an account from email", async () => {
+    const findByEmail = vi.fn(async () => alice);
+    const { resolver, mappings } = harness({ users: { findByEmail } });
 
     const result = await resolver.resolve({
       slug: "chatapp",
       sender: "EXT2",
-      identity: IDENTITY,
-      registry: makeRegistry(profileTool("stranger@example.com")),
     });
 
     expect(result.outcome).toBe("unlinked");
     expect(result).toMatchObject({ bindOffer: { token: expect.any(String) } });
     // Nothing was written: an offer is not a link.
     expect(await mappings.findMapping("chatapp", "EXT2")).toBeNull();
+    expect(findByEmail).not.toHaveBeenCalled();
   });
 
-  it("refuses when the identity binding fails, rather than guessing who the sender is", async () => {
-    const { resolver, log } = harness();
-    const execute = async () => ({
-      success: false as const,
-      error: { code: "internal_error" as const, message: "boom" },
-    });
-
-    const result = await resolver.resolve({
-      slug: "chatapp",
-      sender: "EXT3",
-      identity: IDENTITY,
-      registry: makeRegistry(execute),
-    });
-
-    expect(result.outcome).toBe("unlinked");
-    expect(log.warn).toHaveBeenCalled();
-  });
-
-  it("refuses when no identity binding is declared at all", async () => {
+  it("refuses an unknown sender", async () => {
     const { resolver } = harness();
 
     const result = await resolver.resolve({ slug: "chatapp", sender: "EXT4" });
@@ -275,21 +187,6 @@ describe("IngressIdentityResolver sender authority", () => {
     expect(result.user).toBe(alice);
     expect(result.principalId).not.toBe(alice._id);
     expect(result.principalRef).not.toBe(`user:${alice._id}`);
-    expect(result.principalRef).toBe("guest:chatapp:EXT1");
-  });
-
-  it("gives a sender auto-linked through the manifest binding only guest authority", async () => {
-    const { resolver } = harness();
-
-    const result = await resolver.resolve({
-      slug: "chatapp",
-      sender: "EXT1",
-      identity: IDENTITY,
-      registry: makeRegistry(profileTool("alice@example.com")),
-    });
-
-    if (result.outcome !== "linked") throw new Error("expected a linked sender");
-    expect(result.user).toBe(alice);
     expect(result.principalRef).toBe("guest:chatapp:EXT1");
   });
 

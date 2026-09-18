@@ -21,7 +21,7 @@ describe("createRoutineToolPort", () => {
     expect(source).not.toContain("new BrokerRoutineToolPort({");
   });
 
-  it("builds the production Broker with mandatory remote OIM and durable retry seams", () => {
+  it("builds the production Broker with mandatory remote MCP and durable retry seams", () => {
     const internalApi = new InternalApiClient({
       baseUrl: "http://api:4010",
       credential: "tfc_client.secret",

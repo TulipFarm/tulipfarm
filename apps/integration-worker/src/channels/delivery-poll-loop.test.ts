@@ -78,6 +78,25 @@ async function runOneTick(deps: Parameters<typeof startDeliveryPollLoop>[1]): Pr
 }
 
 describe("startDeliveryPollLoop", () => {
+  it("never claims another provider's reply with Slack credentials", async () => {
+    const claim = vi.fn();
+    const find = vi.fn();
+    await runOneTick({
+      businessId: "business-1",
+      runDeliveries: {
+        listPending: vi.fn().mockResolvedValue([row({ provider: "github" })]),
+        claim,
+      } as unknown as ChannelRunDeliveryStore,
+      runs: { find } as unknown as RunStore,
+      internalApi: {} as InternalApiClient,
+      delivery: {} as SlackDeliveryAdapter,
+      credential: "slack-only",
+      log: { warn: vi.fn() },
+    });
+    expect(claim).not.toHaveBeenCalled();
+    expect(find).not.toHaveBeenCalled();
+  });
+
   it("retries a 429 after Retry-After without replacing the completed answer with a failure", async () => {
     const claimed = row({ status: "delivering", leaseGeneration: 1 });
     const retry = vi.fn();

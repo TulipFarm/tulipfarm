@@ -13,6 +13,7 @@ import {
   CHAT_REQUEST_SCHEMA_REF,
   canonicalHash,
   INVOCATION_REQUEST_SCHEMAS,
+  mcpToolName,
 } from "@tulipfarm/schema";
 import { ArtifactStore, RunStore, type TransactionPort, WaitStore } from "@tulipfarm/storage";
 import { normalizeToolIntent } from "@tulipfarm/tool-broker";
@@ -261,49 +262,41 @@ describe("tool approvals as durable waits", () => {
 
   it("reloads the exact prepared Tool intent after the approval service restarts", async () => {
     const runId = await startRunningRun();
+    const toolName = mcpToolName("acme", "send");
+    const args = { body: { fileId: "file-1" } };
+    const mcp = {
+      serverId: "acme",
+      serverRevision: "a".repeat(64),
+      accountId: "account-1",
+      accountRevision: "7",
+      subjectId: "user-1",
+      authorizationId: "account-authorization-1",
+    };
     const intent = normalizeToolIntent({
       intentId: "intent-1",
       businessId: DEPLOYMENT_BUSINESS_ID,
       runId,
       stateId: "chat:call-1",
-      toolId: "oim.acme.v1.send",
-      toolVersion: "1",
-      action: "acme.send",
-      targetRefs: [{ type: "platform.file", id: "file-1" }],
-      arguments: { body: { fileId: "file-1" } },
+      toolId: toolName,
+      toolVersion: mcp.serverRevision,
+      action: "integration.execute",
+      targetRefs: [{ type: "integration", id: mcp.serverId }],
+      arguments: args,
       filePrincipalId: "user-1",
       fileIds: ["file-1"],
       agentPrincipalId: "agent-1",
       principalKind: "user",
       principalId: "user-1",
-      integrationId: "acme",
-      integrationMajorVersion: 1,
-      operationId: "send",
-      manifestDigest: "a".repeat(64),
-      configurationDigest: "b".repeat(64),
       destination: "https://api.acme.test",
-      credentialRef: "secret://00000000-0000-4000-8000-000000000001",
-      connection: {
-        connectionId: "connection-1",
-        integrationId: "acme",
-        integrationMajorVersion: 1,
-        operationId: "send",
-        credentialSlot: "token",
-        credentialRevision: "7",
-        identityMode: "personal_required",
-        principalKind: "user",
-        principalId: "user-1",
-        manifestDigest: "a".repeat(64),
-        configurationDigest: "b".repeat(64),
-      },
+      mcp,
       idempotencyKey: "idempotency-1",
     });
     await approvals.decide({
       businessId: DEPLOYMENT_BUSINESS_ID,
       runId,
       toolCallId: "call-1",
-      toolName: "acme_send",
-      args: { body: { fileId: "file-1" }, connection_id: "connection-1" },
+      toolName,
+      args,
       requesterPrincipalId: "user:user-1",
       demand: {
         demandedBy: "guardrail_rule",
@@ -318,16 +311,16 @@ describe("tool approvals as durable waits", () => {
       restarted.findIntent({
         runId,
         toolCallId: "call-1",
-        toolName: "acme_send",
-        args: { body: { fileId: "file-1" }, connection_id: "connection-1" },
+        toolName,
+        args,
       })
     ).resolves.toEqual(intent);
     const changedIntent = await restarted.decide({
       businessId: DEPLOYMENT_BUSINESS_ID,
       runId,
       toolCallId: "call-1",
-      toolName: "acme_send",
-      args: { body: { fileId: "file-1" }, connection_id: "connection-1" },
+      toolName,
+      args,
       requesterPrincipalId: "user:user-1",
       demand: {
         demandedBy: "guardrail_rule",

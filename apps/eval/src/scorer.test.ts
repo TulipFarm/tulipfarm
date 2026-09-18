@@ -15,6 +15,71 @@ const base: Observation = {
 
 const only = (a: Expectation, obs: Observation = base) => scoreCase([a], obs)[0];
 
+describe("MCP provider call counts", () => {
+  const observed = (mcpProviderCallCount?: number): Observation => ({
+    ...base,
+    persisted: {
+      runStatus: "succeeded",
+      stateStatus: "succeeded",
+      turnStatus: "succeeded",
+      events: [],
+      soulCommits: [],
+      publishedArtifacts: [],
+      generatedFiles: [],
+      mcpProviderCallCount,
+    },
+  });
+
+  it("does not mistake an unobserved provider for zero calls", () => {
+    expect(only({ kind: "mcp_provider_call_count", count: 0 }, observed()).passed).toBe(false);
+    expect(only({ kind: "mcp_provider_call_count", count: 0 }, observed(0)).passed).toBe(true);
+  });
+
+  it("requires the exact number of external tools/call requests", () => {
+    expect(only({ kind: "mcp_provider_call_count", count: 1 }, observed(1)).passed).toBe(true);
+    expect(only({ kind: "mcp_provider_call_count", count: 1 }, observed(0)).passed).toBe(false);
+    expect(only({ kind: "mcp_provider_call_count", count: 0 }, observed(1)).passed).toBe(false);
+    expect(only({ kind: "mcp_provider_call_count", count: 1 }, observed(2)).passed).toBe(false);
+  });
+});
+
+describe("native admission Expectations", () => {
+  const expectation: Expectation = {
+    kind: "native_admission_equals",
+    path: "runCount",
+    value: 0,
+  };
+  const persisted = {
+    runStatus: "not_created",
+    stateStatus: "not_created",
+    turnStatus: null,
+    events: [],
+    soulCommits: [],
+    publishedArtifacts: [],
+    generatedFiles: [],
+  };
+
+  it("fails closed when admission was not observed", () => {
+    expect(only(expectation).passed).toBe(false);
+    expect(only(expectation, { ...base, persisted }).passed).toBe(false);
+  });
+
+  it("distinguishes rollback from an orphan Run", () => {
+    expect(
+      only(expectation, {
+        ...base,
+        persisted: { ...persisted, nativeAdmission: { runCount: 0 } },
+      }).passed
+    ).toBe(true);
+    expect(
+      only(expectation, {
+        ...base,
+        persisted: { ...persisted, nativeAdmission: { runCount: 1 } },
+      }).passed
+    ).toBe(false);
+  });
+});
+
 describe("prompt expectations", () => {
   it("passes when the assembled prompt contains the text", () => {
     expect(only({ kind: "prompt_contains", text: "Never guess a status." }).passed).toBe(true);
@@ -169,7 +234,7 @@ describe("real Tool result expectations", () => {
     argumentValue: "journey-acme",
     status: "succeeded",
     turnIndex: 2,
-    outputPath: "oimManifest.metadata.name",
+    outputPath: "server.server.label",
     value: "Journey Acme",
   };
   const observed = (
@@ -185,7 +250,7 @@ describe("real Tool result expectations", () => {
       soulCommits: [
         {
           message: "Integration journey-acme",
-          paths: ["integrations/journey-acme/oim.yml"],
+          paths: ["integrations/journey-acme/mcp.yaml"],
         },
       ],
       publishedArtifacts: ["Integration:journey-acme"],
@@ -212,7 +277,7 @@ describe("real Tool result expectations", () => {
     result(turnIndex, {
       status: "succeeded",
       output: {
-        oimManifest: { metadata: { name: "Journey Acme" } },
+        server: { server: { label: "Journey Acme" } },
       },
     });
 
@@ -251,7 +316,7 @@ describe("real Tool result expectations", () => {
         ...result(2, {
           status: "succeeded",
           output: {
-            oimManifest: { metadata: { name: "Old Journey Acme" } },
+            server: { server: { label: "Old Journey Acme" } },
           },
         }),
       ],
@@ -927,6 +992,48 @@ describe("what the active Soul publication serves", () => {
     );
     expect(result?.passed).toBe(false);
     expect(result?.detail).toContain("Agent:support");
+  });
+
+  it("scores publication and withdrawal against the requested Turn, not the final bundle", () => {
+    const observation = withPublication([]);
+    const persisted = observation.persisted;
+    if (persisted === undefined) throw new Error("Missing publication fixture");
+    const artifact = "ToolContract:mcp-reviewed";
+    const observed = {
+      ...observation,
+      persisted: { ...persisted, publishedArtifactsByTurn: [[], [artifact], []] },
+    };
+    expect(only({ kind: "soul_not_published", artifact, turnIndex: 1 }, observed).passed).toBe(
+      true
+    );
+    expect(only({ kind: "soul_published", artifact, turnIndex: 2 }, observed).passed).toBe(true);
+    expect(only({ kind: "soul_not_published", artifact, turnIndex: 2 }, observed).passed).toBe(
+      false
+    );
+    expect(only({ kind: "soul_not_published", artifact, turnIndex: 3 }, observed).passed).toBe(
+      true
+    );
+  });
+
+  it("fails an absence check when its publication snapshot was never observed", () => {
+    expect(
+      only(
+        {
+          kind: "soul_not_published",
+          artifact: "ToolContract:mcp-reviewed",
+          turnIndex: 2,
+        },
+        withPublication([])
+      ).passed
+    ).toBe(false);
+  });
+
+  it("does not mark a failed MCP publication as an unreached Soul writer", () => {
+    const scored = scoreCase(
+      [{ kind: "soul_published", artifact: "ToolContract:mcp-reviewed" }],
+      withPublication([])
+    );
+    expect(seamUnreached(scored, [{ name: "integration_configure" }])).toBeUndefined();
   });
 });
 

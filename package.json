@@ -32,7 +32,6 @@
     "architecture:test": "vitest run scripts/*.test.ts scripts/lib test/security",
     "docs:test": "vitest run scripts/site-url.test.ts scripts/docs-fitness.test.ts scripts/docs-control-evidence.test.ts scripts/docs-tool-catalog.test.ts scripts/docs-plan-schema.test.ts scripts/docs-pack-schema.test.ts scripts/deploy-prompt.test.ts scripts/deploy-wizard.test.ts",
     "test:e2e:browser": "node scripts/test/browser-smoke.mjs",
-    "test:oim-live-providers": "pnpm --filter @tulipfarm/integrations test:live-providers",
     "lint": "turbo lint",
     "typecheck": "turbo typecheck && pnpm typecheck:e2e",
     "typecheck:e2e": "tsc -p scripts/test/tsconfig.json",

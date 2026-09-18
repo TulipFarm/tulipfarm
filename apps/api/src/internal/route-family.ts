@@ -1,16 +1,19 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import type { AppOptions } from "../app";
+import { registerMcpKnowledgeWorkerRoutes } from "../knowledge-sources/mcp/routes";
 import { registerInternalProductTelemetryRoutes } from "../system/telemetry/routes";
 import { registerChannelInternalRoutes } from "./channel-routes";
-import { registerInternalOimConnectionRoutes } from "./oim-connection-routes";
-import { registerInternalOimWorkerRoutes } from "./oim-worker-routes";
+import { registerNativeChannelInternalRoutes } from "./native-channel-routes";
 import { registerInternalTurnRoutes } from "./routes";
-import { registerRoutineOimToolRoutes } from "./routine-oim-tool-routes";
+import { registerRoutineMcpToolRoutes } from "./routine-mcp-tool-routes";
 import { registerSlackEventRoutes } from "./slack-event-routes";
 import { registerSlackHomeRoutes } from "./slack-home-routes";
 import { registerSurfaceInternalRoutes } from "./surfaces-routes";
 
 type PreHandler = (req: FastifyRequest, reply: FastifyReply) => Promise<void>;
+type InternalRouteOptions = Omit<AppOptions, "nativeChannels"> & {
+  readonly nativeChannels?: ReturnType<NonNullable<AppOptions["nativeChannels"]>>;
+};
 
 /**
  * The service-principal plane: everything the Worker and the channel adapters call back into
@@ -19,27 +22,43 @@ type PreHandler = (req: FastifyRequest, reply: FastifyReply) => Promise<void>;
  */
 export function registerInternalRouteFamily(
   app: FastifyInstance,
-  opts: AppOptions,
+  opts: InternalRouteOptions,
   requireAuth: PreHandler
 ): void {
+  const nativeChannels = opts.nativeChannels?.service;
+  if (nativeChannels) {
+    registerNativeChannelInternalRoutes(app, nativeChannels, requireAuth);
+  }
   if (opts.productTelemetry)
     registerInternalProductTelemetryRoutes(app, opts.productTelemetry, requireAuth);
   if (opts.internalTurns) {
     registerInternalTurnRoutes(app, opts.internalTurns, requireAuth);
   }
-  if (opts.internalOimConnections) {
-    registerInternalOimConnectionRoutes(app, opts.internalOimConnections, requireAuth);
-  }
-  if (opts.internalOimWorker) {
-    registerInternalOimWorkerRoutes(app, opts.internalOimWorker, requireAuth);
-  }
-  if (opts.internalRoutineOim) {
+  if (opts.internalRoutineMcp) {
     const requireService: PreHandler = async (request, reply) => {
       if (request.principal?.kind !== "service") {
-        await reply.code(403).send({ error: "Routine OIM routes are service-only" });
+        await reply.code(403).send({ error: "Routine MCP routes are service-only" });
       }
     };
-    registerRoutineOimToolRoutes(app, opts.internalRoutineOim, [requireAuth, requireService]);
+    registerRoutineMcpToolRoutes(app, opts.internalRoutineMcp, [requireAuth, requireService]);
+  }
+  if (opts.mcpKnowledge) {
+    registerMcpKnowledgeWorkerRoutes(
+      app,
+      opts.mcpKnowledge,
+      async (request, reply) => {
+        await requireAuth(request, reply);
+        if (reply.sent) return;
+        if (request.principal?.kind !== "service") {
+          await reply.code(403).send({ error: "Knowledge Worker routes are service-only" });
+        }
+      },
+      async (runId) => {
+        if (!opts.mcpKnowledgeReader)
+          throw new Error("MCP Knowledge Run reader resolution is not configured");
+        return opts.mcpKnowledgeReader(runId);
+      }
+    );
   }
   if (opts.channels) {
     const channelDeps = opts.channels(app.log);
@@ -54,6 +73,7 @@ export function registerInternalRouteFamily(
           store: channelDeps.store,
           invocations: channelDeps.invocations,
           runDeliveries: channelDeps.runDeliveries,
+          ...(nativeChannels ? { nativeChannels } : {}),
           ...(opts.guardrailsService ? { guardrails: opts.guardrailsService } : {}),
         },
         requireAuth

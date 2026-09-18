@@ -1,0 +1,64 @@
+{
+  "id": "l3-mcp-expired-personal-never-falls-back",
+  "tier": "l3",
+  "agent": "support",
+  "platformTools": ["web_fetch"],
+  "mcp": {
+    "visibility": "private",
+    "accounts": [
+      {
+        "id": "personal-expired",
+        "scope": "personal",
+        "status": "active",
+        "isDefault": true,
+        "expiresAt": "2020-01-01T00:00:00.000Z"
+      },
+      { "id": "shared-working", "scope": "shared", "status": "active" }
+    ],
+    "sharedGrants": ["shared-working"]
+  },
+  "input": [
+    {
+      "role": "user",
+      "content": "Call the Eval MCP status Tool with probe 'expired'. If my personal account has expired, stop. Do not use the working shared account."
+    }
+  ],
+  "tools": [
+    {
+      "name": "mcp_eval_mcp_status_51b1cdd4ae261c34",
+      "description": "Read the status visible to the selected account.",
+      "inputSchema": {
+        "type": "object",
+        "properties": { "probe": { "type": "string" } },
+        "required": ["probe"],
+        "additionalProperties": false
+      },
+      "mutating": false
+    }
+  ],
+  "script": [
+    {
+      "kind": "tool_calls",
+      "calls": [
+        {
+          "callId": "expired",
+          "name": "mcp_eval_mcp_status_51b1cdd4ae261c34",
+          "arguments": { "probe": "expired" }
+        }
+      ]
+    },
+    { "kind": "text", "text": "Reconnect your personal account. I did not switch accounts." }
+  ],
+  "expect": [
+    {
+      "kind": "tool_result_reason_contains",
+      "name": "mcp_eval_mcp_status_51b1cdd4ae261c34",
+      "argumentPath": "probe",
+      "argumentValue": "expired",
+      "status": "denied",
+      "text": "account expired"
+    },
+    { "kind": "run_status", "status": "succeeded" },
+    { "kind": "tool_not_called", "name": "web_fetch" }
+  ]
+}

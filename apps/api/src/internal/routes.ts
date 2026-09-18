@@ -2,13 +2,12 @@ import { Readable } from "node:stream";
 import type { ModelFailureDiagnostic } from "@tulipfarm/agent-runtime";
 import { DEPLOYMENT_BUSINESS_ID } from "@tulipfarm/constants";
 import type { ParticipantToolCall } from "@tulipfarm/schema";
-import type { FastifyBaseLogger, FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
+import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { ErrorSchema } from "../auth/schemas";
 import type { TerminalTurnSettler } from "../conversations/terminal-turns";
 import type { ObservabilityConfig } from "../observability/config";
 import * as ChildRoutineHost from "./child-routine-host";
 import { registerChildRoutineRoutes } from "./child-routine-routes";
-import * as DeliveryHost from "./delivery-host";
 import * as EmitHost from "./emit-host";
 import { registerEmitRoutes } from "./emit-routes";
 import * as RoutineApprovalHost from "./routine-approval-host";
@@ -24,13 +23,6 @@ const DENIAL_STATUS: Readonly<Record<TurnHost.TurnAuthorityDenial, number>> = {
   turn_not_found: 404,
   agent_not_found: 404,
   agent_use_denied: 403,
-};
-
-const DELIVERY_DENIAL_STATUS: Readonly<Record<DeliveryHost.DeliveryDenial, number>> = {
-  run_not_found: 404,
-  run_not_running: 409,
-  not_a_delivery: 400,
-  integration_unavailable: 409,
 };
 
 const ROUTINE_APPROVAL_DENIAL_STATUS: Readonly<
@@ -60,7 +52,6 @@ const EMIT_DENIAL_STATUS: Readonly<Record<EmitHost.EmitDenial, number>> = {
 export interface InternalTurnRouteDeps {
   readonly host: TurnHost.InternalTurnHost;
   readonly terminalTurns?: Pick<TerminalTurnSettler, "reconcileRun">;
-  deliveries?(log: FastifyBaseLogger): DeliveryHost.IngressDeliveryHost;
   llmConfig(): unknown;
   pricingOverrides(): Record<string, { in: number; out: number }>;
   observabilityConfig?(): ObservabilityConfig | undefined;
@@ -126,10 +117,6 @@ export function registerInternalTurnRoutes(
       }
       if (error instanceof EmitHost.EmitDeniedError) {
         await reply.code(EMIT_DENIAL_STATUS[error.code]).send({ error: error.code });
-        return undefined;
-      }
-      if (error instanceof DeliveryHost.DeliveryDeniedError) {
-        await reply.code(DELIVERY_DENIAL_STATUS[error.code]).send({ error: error.code });
         return undefined;
       }
       throw error;
@@ -603,130 +590,4 @@ export function registerInternalTurnRoutes(
   registerRoutineApprovalRoutes(app, deps.routineApprovals, preHandler, guard);
   registerChildRoutineRoutes(app, deps.childRoutines, preHandler, guard);
   registerEmitRoutes(app, deps.emissions, preHandler, guard);
-
-  const deliveries = deps.deliveries?.(app.log);
-  if (deliveries === undefined) return;
-
-  app.get(
-    "/api/v1/internal/deliveries/:runId",
-    {
-      preHandler,
-      schema: {
-        description: "Read the delivery payload, classifier, and mapping state.",
-        tags: ["internal"],
-        security: [{ bearerToken: [] }],
-        params: InternalSchemas.InternalRunParamsSchema,
-        response: {
-          200: InternalSchemas.InternalDeliveryDescriptionResponseSchema,
-          400: ErrorSchema,
-          401: ErrorSchema,
-          403: ErrorSchema,
-          404: ErrorSchema,
-          409: ErrorSchema,
-        },
-      },
-    },
-    async (req, reply) => {
-      const { runId } = req.params as { runId: string };
-      const described = await guard(reply, () =>
-        deliveries.describe(DEPLOYMENT_BUSINESS_ID, runId)
-      );
-      if (described !== undefined) return reply.send(described);
-    }
-  );
-
-  app.post(
-    "/api/v1/internal/deliveries/:runId/chat",
-    {
-      preHandler,
-      schema: {
-        description: "Attach a Chat Turn to a delivery Run.",
-        tags: ["internal"],
-        security: [{ bearerToken: [] }],
-        params: InternalSchemas.InternalRunParamsSchema,
-        body: InternalSchemas.InternalDeliveryChatAttachmentBodySchema,
-        response: {
-          200: InternalSchemas.InternalDeliveryChatAttachmentResponseSchema,
-          400: ErrorSchema,
-          401: ErrorSchema,
-          403: ErrorSchema,
-          404: ErrorSchema,
-          409: ErrorSchema,
-        },
-      },
-    },
-    async (req, reply) => {
-      const { runId } = req.params as { runId: string };
-      const body = req.body as Parameters<DeliveryHost.IngressDeliveryHost["attachChat"]>[2];
-      const attached = await guard(reply, () =>
-        deliveries.attachChat(DEPLOYMENT_BUSINESS_ID, runId, body)
-      );
-      if (attached !== undefined) return reply.send(attached);
-    }
-  );
-
-  app.post(
-    "/api/v1/internal/deliveries/:runId/events",
-    {
-      preHandler,
-      schema: {
-        description: "Record a classified delivery event if the manifest allows it.",
-        tags: ["internal"],
-        security: [{ bearerToken: [] }],
-        params: InternalSchemas.InternalRunParamsSchema,
-        body: InternalSchemas.InternalDeliveryEventBodySchema,
-        response: {
-          200: InternalSchemas.InternalDeliveryEventResponseSchema,
-          400: ErrorSchema,
-          401: ErrorSchema,
-          403: ErrorSchema,
-          404: ErrorSchema,
-          409: ErrorSchema,
-        },
-      },
-    },
-    async (req, reply) => {
-      const { runId } = req.params as { runId: string };
-      const body = req.body as { eventType: string; payload?: Record<string, unknown> };
-      const recorded = await guard(reply, () =>
-        deliveries.recordEvent(DEPLOYMENT_BUSINESS_ID, runId, body)
-      );
-      if (recorded !== undefined) return reply.send(recorded);
-    }
-  );
-
-  app.post(
-    "/api/v1/internal/deliveries/:runId/reply",
-    {
-      preHandler,
-      schema: {
-        description: "Post a completed attempt's reply back to the channel.",
-        tags: ["internal"],
-        security: [{ bearerToken: [] }],
-        params: InternalSchemas.InternalRunParamsSchema,
-        body: InternalSchemas.InternalDeliveryReplyBodySchema,
-        response: {
-          200: InternalSchemas.InternalDeliveryReplyResponseSchema,
-          400: ErrorSchema,
-          401: ErrorSchema,
-          403: ErrorSchema,
-          404: ErrorSchema,
-          409: ErrorSchema,
-        },
-      },
-    },
-    async (req, reply) => {
-      const { runId } = req.params as { runId: string };
-      const body = req.body as {
-        attempt: number;
-        outcome: DeliveryHost.ReplyOutcome;
-        binding: string;
-        vars?: Record<string, string>;
-      };
-      const posted = await guard(reply, () =>
-        deliveries.postReplyForAttempt(DEPLOYMENT_BUSINESS_ID, runId, body)
-      );
-      if (posted !== undefined) return reply.send(posted);
-    }
-  );
 }

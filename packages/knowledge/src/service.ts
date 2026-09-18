@@ -199,6 +199,7 @@ export class KnowledgeService {
   ): Promise<WriteOutcome<KnowledgePage>> {
     const existing = await this.deps.pages.getById(id);
     if (!existing) return { ok: false, reason: "not_found" };
+    if (existing.source === "mcp") return { ok: false, reason: "conflict" };
 
     const content = input.content ?? existing.content;
     const next: KnowledgePage = {

@@ -6,13 +6,8 @@ import { describe, expect, it } from "vitest";
  * Fitness function for adapter-kind dispatch — the rule that a Tool reaches the backend its
  * contract declared, and no other.
  *
- * `ToolContractSpec.adapter.kind` shipped as decoration. `EffectDispatcher` resolved adapters by
- * `adapter.ref` alone, so a contract could declare one backend, name a ref registered to another,
- * and be handed that backend's authority; the declarative path made it concrete by constructing an
- * `OpenApiToolAdapter` for every compiled Tool whatever its kind said. The schema meanwhile
- * offered kinds no adapter served, so a manifest could bind to a backend that did not exist.
- *
- * This test fails the build when any of those three return: an adapter that does not declare its
+ * Resolving adapters by `adapter.ref` alone could hand a contract another backend's authority.
+ * This test fails the build for an adapter that does not declare its
  * kind, a dispatcher that does not compare the two, or a new kind with neither an implementation
  * nor an explicit reason to be declaration-only.
  */
@@ -33,8 +28,7 @@ const SCANNED_ROOTS = ["apps", "packages"];
 const SKIPPED = /\.test\.ts$|\.d\.ts$|node_modules|__fixtures__|\/test\/|\/dist\//;
 
 const DISPATCH_FILE = "packages/tool-broker/src/effects/dispatch.ts";
-const KINDS_FILE = "packages/schema/src/definitions/common.ts";
-const DECLARATIVE_FILE = "apps/api/src/tools/declarative/tools.ts";
+const KINDS_FILE = "packages/schema/src/definitions/enums.ts";
 
 /**
  * Kinds a contract may declare that the effect plane deliberately does not serve, each with the
@@ -43,7 +37,6 @@ const DECLARATIVE_FILE = "apps/api/src/tools/declarative/tools.ts";
  */
 const DECLARATION_ONLY: Readonly<Record<string, string>> = {
   native: "served by the Tool host in packages/tool-host, which never reaches EffectDispatcher",
-  mcp: "emitted by importMcpAsProposal for operator review; no adapter is registered yet",
 };
 
 function sourceFiles(): string[] {
@@ -98,14 +91,9 @@ describe("adapter-kind dispatch", () => {
   it("finds the adapter implementations it is meant to be guarding", () => {
     // A scanner that silently matches nothing would pass every assertion below.
     const implementations = adapterImplementations();
-    expect(implementations.length).toBeGreaterThanOrEqual(5);
+    expect(implementations.length).toBeGreaterThanOrEqual(2);
     expect(implementations.map((entry) => entry.className)).toEqual(
-      expect.arrayContaining([
-        "OpenApiToolAdapter",
-        "GitHubAdapter",
-        "SlackToolAdapter",
-        "SandboxToolAdapter",
-      ])
+      expect.arrayContaining(["HttpRoutineMcpAdapter", "SandboxToolAdapter"])
     );
   });
 
@@ -159,12 +147,5 @@ describe("adapter-kind dispatch", () => {
     const attemptAt = source.indexOf("beginAttempt");
     expect(mismatchAt).toBeGreaterThan(-1);
     expect(attemptAt).toBeGreaterThan(mismatchAt);
-  });
-
-  it("keeps the declarative composition root choosing its adapter by the declared kind", () => {
-    const source = read(DECLARATIVE_FILE);
-    expect(source).toContain("switch (tool.contract.spec.adapter.kind)");
-    // An unserved kind must register nothing rather than fall back to a backend it did not declare.
-    expect(source).toMatch(/default:\s*\n\s*return undefined;/);
   });
 });

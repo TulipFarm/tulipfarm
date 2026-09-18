@@ -20,13 +20,14 @@ import {
   FILE_STORAGE_STATEMENTS,
   FILE_VERSION_STATEMENTS,
 } from "@tulipfarm/files";
+import { INVOCATION_STORAGE_STATEMENTS } from "@tulipfarm/run-kernel";
 import {
+  ARTIFACT_STORAGE_STATEMENTS,
   AUTHORIZATION_STORAGE_STATEMENTS,
   BUDGET_STORAGE_STATEMENTS,
   BudgetStore,
-  OIM_RELEASE_LIFECYCLE_STORAGE_STATEMENTS,
-  OIM_RELEASE_MAINTENANCE_STORAGE_STATEMENTS,
-  OIM_RELEASE_TRUST_STORAGE_STATEMENTS,
+  MCP_ACCOUNT_STORAGE_STATEMENTS,
+  NATIVE_CHANNEL_INBOX_STORAGE_STATEMENTS,
   type Queryable,
   RUN_EVENT_STORAGE_STATEMENTS,
   RUN_STORAGE_STATEMENTS,
@@ -110,6 +111,9 @@ async function migratedSnapshot(): Promise<Blob | File> {
     const database = await PGlite.create();
     for (const statement of [
       ...RUN_STORAGE_STATEMENTS,
+      ...ARTIFACT_STORAGE_STATEMENTS,
+      ...INVOCATION_STORAGE_STATEMENTS,
+      ...NATIVE_CHANNEL_INBOX_STORAGE_STATEMENTS,
       ...WAIT_STORAGE_STATEMENTS,
       ...RUN_EVENT_STORAGE_STATEMENTS,
       ...BUDGET_STORAGE_STATEMENTS,
@@ -121,9 +125,7 @@ async function migratedSnapshot(): Promise<Blob | File> {
       // are rows: `role_assignments` against a registered Principal. Seeding the answer instead
       // would measure this app's idea of who holds what rather than the product's.
       ...AUTHORIZATION_STORAGE_STATEMENTS,
-      ...OIM_RELEASE_TRUST_STORAGE_STATEMENTS,
-      ...OIM_RELEASE_MAINTENANCE_STORAGE_STATEMENTS,
-      ...OIM_RELEASE_LIFECYCLE_STORAGE_STATEMENTS,
+      ...MCP_ACCOUNT_STORAGE_STATEMENTS,
       // Applied in the order the API's migration ledger applies them: the later three are ALTERs
       // against the first, and `origin` is NOT NULL on every row `create` writes.
       ...FILE_STORAGE_STATEMENTS,

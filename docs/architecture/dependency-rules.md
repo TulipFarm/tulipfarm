@@ -51,7 +51,7 @@ An omitted edge is forbidden.
 | `packages/surface-web` | `packages/surface` |
 | `packages/surface-slack` | `packages/surface` |
 | `packages/surface-github` | `packages/surface` |
-| `packages/integrations` | `packages/schema`, `packages/authz`, `packages/audit`, `packages/tool-broker`, `packages/storage`, `packages/observability` |
+| `packages/integrations` | `packages/schema`, `packages/authz`, `packages/audit`, `packages/tool-broker`, `packages/storage`, `packages/observability`, `packages/mcp` |
 | `packages/agent-runtime` | `packages/schema`, `packages/authz`, `packages/audit`, `packages/run-kernel`, `packages/tool-broker`, `packages/knowledge`, `packages/memory`, `packages/observability` |
 | `packages/turn-executor` | `packages/schema`, `packages/run-kernel`, `packages/agent-runtime`, `packages/storage` |
 | `packages/model-adapter` | `packages/agent-runtime`, `packages/llm` |
@@ -73,11 +73,11 @@ code must not import it or execute Turns.
 
 | Consumer | May import from |
 | --- | --- |
-| `apps/api` | `schema`, `soul`, `skill-sandbox`, `constants`, `files`, `authz`, `audit`, `secrets`, `run-kernel`, `tool-broker`, `agent-runtime`, `knowledge`, `memory`, `surface`, `surface-web`, `surface-slack`, `surface-github`, `sandbox`, `integrations`, `storage`, `observability`, `tool-host`, `kv`, `platform-tools`, `built-in-agents`, `resources` |
+| `apps/api` | `schema`, `soul`, `skill-sandbox`, `constants`, `files`, `authz`, `audit`, `secrets`, `run-kernel`, `tool-broker`, `agent-runtime`, `knowledge`, `memory`, `surface`, `surface-web`, `surface-slack`, `surface-github`, `sandbox`, `integrations`, `mcp`, `storage`, `observability`, `tool-host`, `kv`, `platform-tools`, `built-in-agents`, `resources` |
 | `apps/worker` | `schema`, `constants`, `skill-sandbox`, `authz`, `audit`, `secrets`, `soul`, `run-kernel`, `tool-broker`, `agent-runtime`, `knowledge`, `memory`, `surface`, `integrations`, `sandbox`, `storage`, `observability`, `tool-host`, `kv`, `platform-tools`, `built-in-agents`, `files`, `turn-executor`, `model-adapter` |
-| `apps/integration-worker` | `schema`, `authz`, `audit`, `run-kernel`, `tool-broker`, `integrations`, `storage`, `observability` |
+| `apps/integration-worker` | `schema`, `authz`, `audit`, `run-kernel`, `tool-broker`, `integrations`, `mcp`, `knowledge`, `storage`, `observability` |
 | `apps/web` | `schema`, `files`, `surface`, `surface-web`, `surface-slack`, `surface-github`, and presentation-only packages such as `ui`/`editor` |
-| `apps/eval` | `agent-runtime`, `turn-executor`, `model-adapter`, `llm`, `schema`, `secrets`, `soul`, `storage`, `run-kernel`, `tool-broker`, `tool-host`, `files` |
+| `apps/eval` | `agent-runtime`, `turn-executor`, `model-adapter`, `llm`, `schema`, `secrets`, `soul`, `storage`, `run-kernel`, `tool-broker`, `tool-host`, `files`, `integrations`, `mcp` |
 
 `packages/constants` is a dependency-free leaf holding non-sensitive deployment defaults. The API
 and the worker must resolve the same business scope or the worker claims nothing, and an app may

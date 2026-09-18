@@ -105,7 +105,6 @@ export type {
 } from "./entitlement";
 export { CompositeToolEntitlement, NOT_APPLICABLE } from "./entitlement";
 export type {
-  ToolConnectionBinding,
   ToolIntent,
   ToolIntentErrorCode,
   ToolTargetRef,
@@ -115,8 +114,9 @@ export type { ToolRiskAssessment, ToolRiskContext, ToolRiskLevel } from "./risk"
 export { assessToolRisk } from "./risk";
 export type {
   BrokerRoutineToolPortOptions,
-  RoutineOimPreparation,
-  RoutineOimPreparationPort,
+  RoutineMcpAuthorization,
+  RoutineMcpPreparation,
+  RoutineMcpPreparationPort,
   RoutineToolApprovalPort,
   RoutineToolBundle,
   RoutineToolDispatchPlan,
