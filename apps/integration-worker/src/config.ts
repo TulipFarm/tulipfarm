@@ -1,5 +1,5 @@
-/** v132 adds the selected Knowledge subscriptions required by this worker. */
-export const REQUIRED_SCHEMA_VERSION = 132;
+/** v133 repairs Slack lease columns when Knowledge v132 was deployed first. */
+export const REQUIRED_SCHEMA_VERSION = 133;
 
 export interface IntegrationWorkerConfig {
   readonly databaseUrl: string;
