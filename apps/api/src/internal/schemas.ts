@@ -112,6 +112,14 @@ export const InternalRunAgentToolsResponseSchema = {
   type: "object",
   required: ["tools"],
   properties: {
+    guardrails: {
+      type: "object",
+      required: ["policy", "digest"],
+      properties: {
+        policy: { type: "object", additionalProperties: true },
+        digest: { type: "string" },
+      },
+    },
     tools: {
       type: "array",
       items: {

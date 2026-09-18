@@ -6,6 +6,7 @@ import { makeToolBlocklistGuard, type ToolCallInput } from "./guards/tool-blockl
 import { makeUntrustedContentGuard, type ToolResultInput } from "./guards/untrusted-content";
 import type { Guard, GuardContext, StageResult } from "./pipeline";
 import { runStage } from "./pipeline";
+import { intersectGuardrails } from "./platform-policy";
 
 type ServiceLogger = { warn: (obj: unknown, msg?: string) => void };
 
@@ -32,6 +33,7 @@ export function resolveGuardrailsConfig(
 
 /** Owns the four guard stages; invalid or absent config falls back to defaults. */
 export class GuardrailsService {
+  private readonly platformPolicy?: GuardrailsConfig;
   private log: ServiceLogger = NOOP_LOGGER;
   private input: Guard<string>[] = [];
   private toolCall: Guard<ToolCallInput>[] = [];
@@ -39,6 +41,22 @@ export class GuardrailsService {
   private output: Guard<string>[] = [];
   private configValue: GuardrailsConfig = DEFAULT_GUARDRAILS;
   private revisionValue = canonicalHash(DEFAULT_GUARDRAILS);
+  private sourceValue: "custom" | "default" = "default";
+
+  constructor(platformPolicy?: GuardrailsConfig) {
+    this.platformPolicy =
+      platformPolicy === undefined
+        ? undefined
+        : structuredClone(validateGuardrailsConfig(platformPolicy));
+  }
+
+  get platformConstrained(): boolean {
+    return this.platformPolicy !== undefined;
+  }
+
+  get source(): "custom" | "default" {
+    return this.sourceValue;
+  }
 
   get revision(): string {
     return this.revisionValue;
@@ -51,7 +69,9 @@ export class GuardrailsService {
 
   init(raw: Record<string, unknown> | null, log: ServiceLogger): void {
     this.log = log;
-    const { config: cfg } = resolveGuardrailsConfig(raw, log);
+    const { config, source } = resolveGuardrailsConfig(raw, log);
+    const cfg =
+      this.platformPolicy === undefined ? config : intersectGuardrails(this.platformPolicy, config);
 
     const input = (cfg.input ?? []).map((c) => makePromptInjectionGuard(c));
     const toolCall = (cfg["tool-call"] ?? []).map((c) => makeToolBlocklistGuard(c));
@@ -63,6 +83,7 @@ export class GuardrailsService {
     this.toolResult = toolResult;
     this.output = output;
     this.configValue = cfg;
+    this.sourceValue = source;
     this.revisionValue = canonicalHash(cfg);
   }
 

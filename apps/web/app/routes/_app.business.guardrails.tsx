@@ -67,7 +67,7 @@ export default function BusinessGuardrails() {
       {error ? <FormStatus tone="error">{error}</FormStatus> : null}
       <Panel
         title="Guardrails"
-        description={`${model.source === "default" ? "Built-in defaults are active." : "Custom Soul policy is active."} Revision ${shortRevision(model.revision)}.`}
+        description={`${model.platformConstrained ? "Platform minimums and business restrictions are active together. Add stricter guardrails through Chat; platform protections cannot be disabled." : model.source === "default" ? "Built-in defaults are active." : "Custom Soul policy is active."} Revision ${shortRevision(model.revision)}.`}
         actions={
           <Button asChild size="sm">
             <Link to={`/?draft=${encodeURIComponent(ADD_GUARDRAIL_DRAFT)}`}>Add guardrail</Link>
@@ -105,8 +105,14 @@ export default function BusinessGuardrails() {
                     ) : null}
                   </div>
                   <Badge variant={off ? "neutral" : "success"}>{off ? "Off" : "On"}</Badge>
-                  <Badge variant="neutral">{item.source === "default" ? "Built-in" : "Soul"}</Badge>
-                  {item.source === "custom" ? (
+                  <Badge variant="neutral">
+                    {model.platformConstrained
+                      ? "Effective"
+                      : item.source === "default"
+                        ? "Built-in"
+                        : "Soul"}
+                  </Badge>
+                  {item.source === "custom" && !model.platformConstrained ? (
                     <Button
                       variant="outline"
                       size="sm"

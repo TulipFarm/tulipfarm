@@ -29,7 +29,7 @@ PostgreSQL persistence composition, auth, Soul Git writes, and Worker callback p
 | `src/resources/`, `src/soul/` | Resource CRUD and Soul HTTP routes/Tools; domain logic lives in `@tulipfarm/soul`. |
 | `src/integrations/` | Manifest catalog, connect auth, install, post-connect hooks. `connections/` adapts versioned OIM Connection lifecycle, exact-Connection credential repair, and refresh scheduling to HTTP; OIM verification, continuation, Credential, and File hosts remain provider-neutral. |
 | `src/integrations/oim-ingress/` | Injectable exact-Connection webhook and registration routes. |
-| `src/guardrails/` | Guardrail config loading and `soul.synced` reload wiring only. |
+| `src/guardrails/` | Guardrail reload wiring and persisted policy acceptance. Hosted minimums remain in the effective service; Chat Context, Routine Agent catalog and admin reads share it. |
 | `src/knowledge/`, `src/knowledge-sources/` | Knowledge routes/Tools and ingestion API; repositories and OKF live in `@tulipfarm/knowledge`. |
 | `src/memory/`, `src/kv/`, `src/secrets/` | Memory Document composition, its read-only route and erasure; scoped KV; secret storage routes. |
 | `src/authz/` | `route-gate.ts` — sole HTTP path to `decideEffectivePermission`, including hosted infrastructure ceilings before shadow/fallback; self-governed and Team administration. |

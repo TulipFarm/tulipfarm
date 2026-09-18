@@ -108,6 +108,7 @@ export interface TeamMigrationReportReadModel {
 }
 
 export interface GuardrailsReadModel {
+  readonly platformConstrained?: boolean;
   readonly revision: string;
   readonly source: "custom" | "default";
   readonly items: readonly {

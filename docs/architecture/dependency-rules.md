@@ -66,6 +66,10 @@ performs no writes or execution; the API publishes the compiled Routine through 
 
 ## Application import allowlist
 
+API safety acceptance tests may import `turn-executor` as a development dependency to exercise
+the Worker's actual policy enforcement against an API-authored persisted policy. Runtime API
+code must not import it or execute Turns.
+
 | Consumer | May import from |
 | --- | --- |
 | `apps/api` | `schema`, `soul`, `skill-sandbox`, `constants`, `files`, `authz`, `audit`, `secrets`, `run-kernel`, `tool-broker`, `agent-runtime`, `knowledge`, `memory`, `surface`, `surface-web`, `surface-slack`, `surface-github`, `sandbox`, `integrations`, `storage`, `observability`, `tool-host`, `kv`, `platform-tools`, `built-in-agents`, `resources` |

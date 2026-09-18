@@ -1,4 +1,9 @@
-import type { GuardContext, ToolDispatchPort } from "@tulipfarm/agent-runtime";
+import {
+  type GuardContext,
+  GuardrailsService,
+  platformGuardrailsFor,
+  type ToolDispatchPort,
+} from "@tulipfarm/agent-runtime";
 import { canonicalHash, type MessageContent, validateGuardrailsConfig } from "@tulipfarm/schema";
 import {
   type GuardedContent,
@@ -36,12 +41,26 @@ const SILENT = { warn: () => {} };
  * is wiring: the policy comes from `guardrails.yaml`, the digest is computed exactly as
  * `turn-context.ts` computes it, and the refusals are read back off the real Run events.
  */
-export function turnGuardrails(soul: EvalSoul, conversationId: string): EvalGuardrails {
+export function effectiveEvalGuardrails(
+  soul: EvalSoul,
+  hostingAuthority: "independent" | "tulipfarm" = "independent"
+) {
   const raw = soul.loader.guardrailsConfig;
   // Production falls back to the default policy when a Soul ships none. The Eval Soul must not:
   // a Case measuring a guardrail would then quietly measure a policy the fixture never declared.
   if (raw === null) throw new Error("Eval Soul declares no guardrails.yaml — nothing to measure");
-  const policy = validateGuardrailsConfig(raw);
+  validateGuardrailsConfig(raw);
+  const service = new GuardrailsService(platformGuardrailsFor(hostingAuthority));
+  service.init(raw, SILENT);
+  return service.config;
+}
+
+export function turnGuardrails(
+  soul: EvalSoul,
+  conversationId: string,
+  hostingAuthority?: "independent" | "tulipfarm"
+): EvalGuardrails {
+  const policy = effectiveEvalGuardrails(soul, hostingAuthority);
   const digest = canonicalHash(policy);
   const decisions: GuardrailDecision[] = [];
 

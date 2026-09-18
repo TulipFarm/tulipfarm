@@ -570,6 +570,7 @@ export async function main(): Promise<void> {
         new BundleRoutineAgentPort({
           tools: observedToolDispatch,
           catalog: (runId, agentName) => turnHost.agentTools(runId, agentName),
+          guardrailPolicy: (runId, agentName) => turnHost.agentGuardrails(runId, agentName),
           // Chain, routing event, and budget are already selected/opened by the Routine port.
           model: ({ models, routing, budgetLimits, businessId, runId, turnId }) =>
             new LlmModelPort({

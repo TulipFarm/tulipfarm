@@ -6,6 +6,7 @@ import {
   createSubagentSpawning,
   delegationCatalogOf,
   GuardrailsService,
+  platformGuardrailsFor,
 } from "@tulipfarm/agent-runtime";
 import {
   AssetOwnershipAccessService,
@@ -810,7 +811,9 @@ async function boot() {
         : createHookExecutor(process.env.DATABASE_URL as string, runtimePoolOptions());
 
     const llmService = new LlmService();
-    const guardrailsService = new GuardrailsService();
+    const guardrailsService = new GuardrailsService(
+      platformGuardrailsFor(deployment.hostingAuthority)
+    );
     const conversationRepo = new PgConversationRepo(pool);
     const messageRepo = new PgMessageRepo(pool);
     const feedbackRepo = new FeedbackRepo(pool);
@@ -1619,6 +1622,7 @@ async function boot() {
     // with, so a worker credential is a key to a Run rather than a principal of its own.
     const internalTurns = {
       host: new InternalTurnHost({
+        guardrails: guardrailsService,
         runs: runStore,
         store: conversationStore,
         events: runEventStore,
@@ -2095,7 +2099,9 @@ async function boot() {
           llmProbe(llmService, { reachability: modelReachability(llmService) }),
           embeddingsProbe(embeddingService),
         ],
-        guardrailsConfig: () => soulLoader.guardrailsConfig,
+        guardrailsConfig: () => guardrailsService.config,
+        platformConstrained: () => guardrailsService.platformConstrained,
+        guardrailsSource: () => guardrailsService.source,
         teamMigrationReport: async (businessId) => {
           const present = await pool.query<{ exists: boolean }>(
             "SELECT to_regclass('public.team_migration_report') IS NOT NULL AS exists"

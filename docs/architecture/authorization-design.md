@@ -13,6 +13,20 @@ Soul artifacts, Secrets, business settings, Integrations, and Resource Records.
 [ADR-032](adr-032-operational-authority.md) extends this model with an immutable operational
 credential ceiling and exact installation-scoped grants. It adds no support-content authority.
 
+The runtime safety foundation adds no authority path. `guardrail_forge` keeps its existing live
+Tool gate and additive Soul write contract; unsupported HTTP changesets remain refused. Hosted
+`GuardrailsService` composition intersects the runtime-owned default policy with the business
+policy at all four existing stages. No customer policy replaces the platform floor. Admin reads,
+Chat Context, and Routine Agent execution consume this effective policy, with the existing
+per-execution snapshot and `soul.synced` reload semantics.
+
+Existing safety controls remain separate: live grants intersect through `decideEffectivePermission`;
+Routine `permissionCeiling` only narrows Tool risk; authored authorization Guardrails compile only
+supported exact constraints; mutation kill switches remain effect-plane stops; sandbox production
+attestation, isolation, egress, and credential delivery remain operator-controlled. None is a spend
+entitlement. Unsupported arbitrary safety settings are not accepted by `guardrail_forge`, and no
+new override language or platform-policy editor is introduced.
+
 This document exists because the [decision index](decision-index.md) change-control clause requires
 a reviewed ADR before any change that "adds an authority/write/effect path". It extends ADR-009
 (effective authority is an intersection), ADR-010 (Skills never grant Tools), and ADR-011 (one

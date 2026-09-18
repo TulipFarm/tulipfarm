@@ -37,6 +37,8 @@ reconciliation, turn execution, delivery classification, projections, and outbox
 ## Rules
 
 - Composition-only: wire `@tulipfarm/*` packages; do not reimplement package-owned logic.
+- Routine Agent States fetch live Guardrails with Run/Agent authority; validate the policy digest
+  and never fall back to defaults on a failed API read.
 - Requires `DATABASE_URL`, `INTERNAL_API_URL`, and a real minted `WORKER_API_CREDENTIAL`.
 - In containers, `data-dir.ts` may read `worker.env`/`secrets.env`; env wins, nothing is invented.
 - The placeholder API credential boots but makes chat silently park at `needs_reconciliation`.
@@ -91,7 +93,8 @@ reconciliation, turn execution, delivery classification, projections, and outbox
 - Routine `agent` States use the authored Agent version, same AgentLoop, and pinned Context.
 - Routine Agent States run the same Tool loop as Chat: the catalog comes from the control plane
   (`GET /internal/runs/:runId/agent-tools`), so a Routine never sees a wider set than the same
-  Agent sees in a conversation. They still use deployment default guardrails and record null output.
+  Agent sees in a conversation. The live effective policy covers input, Tool calls, Tool results,
+  and output; Tool tier restrictions use the catalog's tier, never one supplied by the model.
 - Agent `instructions.md` is a Soul companion hash, not bundled prompt text; use personality.
 - Approval resume tokens never cross to the worker; replay by wait id and State occurrence.
 - Tools hosted in `src/tools/` must clear `localDispatchRefusal`; boot fails rather than weaken it.

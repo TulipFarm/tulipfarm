@@ -285,6 +285,9 @@ importers:
       '@tulipfarm/tsconfig':
         specifier: workspace:*
         version: link:../../packages/tsconfig
+      '@tulipfarm/turn-executor':
+        specifier: workspace:*
+        version: link:../../packages/turn-executor
       '@types/node':
         specifier: ^26.2.0
         version: 26.2.0

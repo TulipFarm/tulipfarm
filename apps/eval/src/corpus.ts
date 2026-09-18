@@ -149,6 +149,10 @@ function validate(raw: unknown, file: string): EvalCase {
           typeof result === "object" && result !== null && result.name === "soul_repo_push"
       ), `${file}: soul_repo_push ownership must use the real gate, not a scripted result`);
   }
+  require(c.safetyHostingAuthority === undefined ||
+    c.safetyHostingAuthority === "independent" ||
+    c.safetyHostingAuthority ===
+      "tulipfarm", `${file}: safetyHostingAuthority must be independent or tulipfarm`);
   for (const field of ["id", "agent"] as const) {
     require(typeof c[field] === "string" &&
       (c[field] as string).length > 0, `${file}: missing required field "${field}"`);

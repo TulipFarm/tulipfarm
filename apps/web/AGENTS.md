@@ -16,6 +16,7 @@ data loading, schema-driven resource UI, and browser rendering of Surface Artifa
 | --- | --- |
 | `app/root.tsx`, `app/app.css`, `app/tokens.css` | Document shell, no-flash theme script, fonts, HydrateFallback; Tailwind v4 OKLCH `[data-theme]` tokens. |
 | `app/routes/` | Remix SPA routes under `_app`; Chat is `/`. |
+| `app/routes/_app.business.guardrails.tsx` | Effective Guardrails; platform-constrained policy permits additive Chat authoring, never a disable control. |
 | `app/components/activity/` | Filters, timeline, detail panel for the merged Activity feed. |
 | `app/components/runs/` | Run outcomes, persisted State results, authorized related-work links, server-granted controls, and expandable evidence. |
 | `app/components/settings/` | Panels for `_app.settings.*`; the Memory panel is read-only; `telemetry-level.tsx` shares setup/settings reporting choices. |

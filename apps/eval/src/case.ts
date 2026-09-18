@@ -389,6 +389,8 @@ export function synthesizeAttachment(file: CaseAttachment): CaseAttachment & { d
 
 export interface EvalCase {
   readonly id: string;
+  /** Offline safety composition only; never supplies runtime identity or hosted trust. */
+  readonly safetyHostingAuthority?: "independent" | "tulipfarm";
   /**
    * `l2` drives the Agent loop directly; `l3` drives the product's own Chat executor against a real
    * database. Nearly all the signal is at L2, and L3 is deliberately small — it exists to prove the
