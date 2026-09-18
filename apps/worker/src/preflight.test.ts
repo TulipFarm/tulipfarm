@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { REQUIRED_SCHEMA_VERSION } from "./config";
 import type { Queryable } from "./db";
 import { assertSchemaFloor, PreflightError, waitForSchemaFloor } from "./preflight";
 
@@ -12,6 +13,15 @@ function stubDatabase(result: Record<string, unknown>[] | Error): Queryable {
 }
 
 describe("assertSchemaFloor", () => {
+  it("waits for the operational principal schema before the Worker can start", async () => {
+    await expect(
+      assertSchemaFloor(stubDatabase([{ version: 127 }]), REQUIRED_SCHEMA_VERSION)
+    ).rejects.toThrow("requires 128");
+    await expect(
+      assertSchemaFloor(stubDatabase([{ version: 128 }]), REQUIRED_SCHEMA_VERSION)
+    ).resolves.toBe(128);
+  });
+
   it("returns the version when the database is at or above the floor", async () => {
     await expect(assertSchemaFloor(stubDatabase([{ version: 15 }]), 15)).resolves.toBe(15);
     await expect(assertSchemaFloor(stubDatabase([{ version: 21 }]), 15)).resolves.toBe(21);
