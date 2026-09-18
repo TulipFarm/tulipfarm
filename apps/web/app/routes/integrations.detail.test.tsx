@@ -573,7 +573,7 @@ test("renders an exact Connection verification repair after reload", async () =>
   expect(
     screen.getByText("Connection verification needs another try.", { selector: '[role="status"]' })
   ).toBeInTheDocument();
-  expect(heading).toHaveFocus();
+  await waitFor(() => expect(heading).toHaveFocus());
 });
 
 test("recovers missing generic setup with a valid scope, announcement, and focus", async () => {
@@ -610,7 +610,7 @@ test("recovers missing generic setup with a valid scope, announcement, and focus
       selector: '[role="status"]',
     })
   ).toBeInTheDocument();
-  expect(heading).toHaveFocus();
+  await waitFor(() => expect(heading).toHaveFocus());
   expect(screen.getByLabelText("Owner")).toHaveValue("Business");
 
   await user.type(screen.getByLabelText("Connection name"), "Support");
@@ -660,7 +660,7 @@ test("preserves local exact setup when route revalidation cannot reload it", asy
   expect(
     screen.getByText("Connection added.", { selector: '[role="status"]' })
   ).toBeInTheDocument();
-  expect(completion).toHaveFocus();
+  await waitFor(() => expect(completion).toHaveFocus());
   expect(createOimConnection).toHaveBeenCalledTimes(1);
 });
 
@@ -733,7 +733,7 @@ test("keeps creation focus and status through the Connection query revalidation"
   expect(
     screen.getByText("Connection added.", { selector: '[role="status"]' })
   ).toBeInTheDocument();
-  expect(completion).toHaveFocus();
+  await waitFor(() => expect(completion).toHaveFocus());
   expect(createOimConnection).toHaveBeenCalledTimes(1);
 });
 
@@ -785,7 +785,9 @@ test("resumes the listed exact Connection and resets to a blank add-another form
   expect(await screen.findByLabelText("Connection name")).toHaveValue("");
   expect(screen.getByLabelText("API token")).toHaveValue("");
   expect(screen.getByTestId("location-search")).toHaveTextContent("");
-  expect(screen.getByRole("heading", { name: "Add Connection" })).toHaveFocus();
+  await waitFor(() =>
+    expect(screen.getByRole("heading", { name: "Add Connection" })).toHaveFocus()
+  );
   expect(createOimConnection).not.toHaveBeenCalled();
 });
 
