@@ -138,7 +138,7 @@ describe("secure OIM continuation state", () => {
         {},
         runtime
       )
-    ).resolves.toBeUndefined();
+    ).rejects.toMatchObject({ code: "pagination_bound_exceeded" });
     await expect(
       nextPageToken(
         bounded,
@@ -147,7 +147,7 @@ describe("secure OIM continuation state", () => {
         {},
         runtime
       )
-    ).resolves.toBeUndefined();
+    ).rejects.toMatchObject({ code: "pagination_bound_exceeded" });
   });
 
   it("stops exactly at aggregate item, byte, and duration bounds", async () => {
@@ -165,7 +165,7 @@ describe("secure OIM continuation state", () => {
         {},
         runtime
       )
-    ).resolves.toBeUndefined();
+    ).rejects.toMatchObject({ code: "pagination_bound_exceeded" });
 
     const body = { results: [], nextCursor: "page-2" };
     const byteBounded = {
@@ -183,7 +183,7 @@ describe("secure OIM continuation state", () => {
         {},
         runtime
       )
-    ).resolves.toBeUndefined();
+    ).rejects.toMatchObject({ code: "pagination_bound_exceeded" });
 
     const durationBounded = context();
     const durationSession = await prepareOimPagination(durationBounded, undefined, runtime);
@@ -196,6 +196,6 @@ describe("secure OIM continuation state", () => {
         {},
         runtime
       )
-    ).resolves.toBeUndefined();
+    ).rejects.toMatchObject({ code: "pagination_bound_exceeded" });
   });
 });

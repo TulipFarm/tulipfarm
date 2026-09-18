@@ -64,6 +64,7 @@ export {
   CONNECTION_AUTH_STEP_STORAGE_STATEMENTS,
   ConnectionAuthStepStore,
 } from "./connection-auth-step-store";
+export type { ReplaceConnectionCredentials } from "./connection-credential-update";
 export type {
   BindVerifiedConnectionExternalIdentity,
   ConnectionIdentityProofKind,

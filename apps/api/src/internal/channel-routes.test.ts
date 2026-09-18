@@ -3,6 +3,7 @@ import type { PGlite } from "@electric-sql/pglite";
 import { DEPLOYMENT_BUSINESS_ID } from "@tulipfarm/constants";
 import { DurableInvocationGateway, TypedOutputValidator } from "@tulipfarm/run-kernel";
 import { INVOCATION_REQUEST_SCHEMAS, textContent } from "@tulipfarm/schema";
+import type { SoulIntegration, SoulLoader } from "@tulipfarm/soul";
 import { ChannelRunDeliveryStore, RunStore } from "@tulipfarm/storage";
 import { createSurfaceArtifact } from "@tulipfarm/surface";
 import { ToolApprovalService } from "@tulipfarm/tool-host";
@@ -79,8 +80,13 @@ describe("/api/v1/internal/channels", () => {
   let reserveCommandResponse: ReturnType<typeof vi.fn>;
   let processCommandResponses: ReturnType<typeof vi.fn>;
   let admin: UserDoc;
+  let soulLoader: SoulLoader;
 
   beforeEach(async () => {
+    soulLoader = {
+      agents: new Map(),
+      integrations: new Map([["slack", { connection: { enabled: true } } as SoulIntegration]]),
+    } as SoulLoader;
     db = await makeMigratedPglite();
     const transactions = transactionPort(db as unknown as Queryable);
 
@@ -153,6 +159,7 @@ describe("/api/v1/internal/channels", () => {
       identity: { apiClientRepo },
       toolApprovals,
       channels: () => ({
+        soulLoader,
         store,
         invocations: new DurableInvocationGateway({
           store: {
@@ -193,6 +200,24 @@ describe("/api/v1/internal/channels", () => {
   });
 
   const asWorker = () => ({ authorization: `Bearer ${workerCredential}` });
+
+  it("refuses a Slack approval continuation after disconnect", async () => {
+    soulLoader.integrations.clear();
+    const signal = vi.spyOn(toolApprovals, "signal");
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/v1/internal/channels/approvals/approval-1/decide",
+      headers: asWorker(),
+      payload: {
+        provider: "slack",
+        externalSubject: "U-LINKED",
+        externalTenantId: "T1",
+        decision: "approved",
+      },
+    });
+    expect(res.statusCode).toBe(403);
+    expect(signal).not.toHaveBeenCalled();
+  });
 
   describe("POST /identity/resolve", () => {
     it("resolves a linked sender to its own principal", async () => {
@@ -334,6 +359,7 @@ describe("/api/v1/internal/channels", () => {
           identity: { apiClientRepo },
           toolApprovals,
           channels: () => ({
+            soulLoader,
             store,
             invocations: new DurableInvocationGateway({
               store: { persist: async (record) => ({ outcome: "started", runId: record.runId }) },
@@ -415,6 +441,18 @@ describe("/api/v1/internal/channels", () => {
       agentId: "assistant",
       principal: { kind: "user" as const, id: slackUser._id },
       message: { externalAppId: "A1", channelId: "C1", threadId: "1720000000.000100", text: "hi" },
+    });
+
+    it("refuses Run admission after Slack is disabled despite an existing route", async () => {
+      soulLoader.integrations.set("slack", { connection: { enabled: false } } as SoulIntegration);
+      const res = await app.inject({
+        method: "POST",
+        url: "/api/v1/internal/channels/runs",
+        headers: asWorker(),
+        payload: runBody(),
+      });
+      expect(res.statusCode).toBe(403);
+      expect(store.turns).toHaveLength(0);
     });
 
     it("mints a Run, a Conversation, and the delivery correlation row", async () => {
@@ -618,6 +656,7 @@ describe("/api/v1/internal/channels", () => {
         identity: { apiClientRepo },
         toolApprovals,
         channels: () => ({
+          soulLoader,
           store,
           invocations: new DurableInvocationGateway({
             store: { persist: async (record) => ({ outcome: "started", runId: record.runId }) },
@@ -1123,41 +1162,44 @@ describe("/api/v1/internal/channels", () => {
         ["integration.slack.SLACK_BOT_TOKEN", "xoxb-secret"],
         ["integration.slack.SLACK_APP_TOKEN", "xapp-secret"],
       ]);
-      const withSecrets = await buildApp({
-        sessionStore: new MemorySessionStore(),
-        userRepo: new PgUserRepo(db as unknown as Queryable),
-        tokenRepo: new FakeTokenRepo(),
-        identity: { apiClientRepo },
-        toolApprovals,
-        channels: () => ({
-          store,
-          invocations: new DurableInvocationGateway({
-            store: { persist: async (record) => ({ outcome: "started", runId: record.runId }) },
-            validator: new TypedOutputValidator(INVOCATION_REQUEST_SCHEMAS),
-            nextId: () => randomUUID(),
-          }),
-          conversations: new PgConversationRepo(db as unknown as Queryable),
-          threads: new IntegrationConversationsRepo(db as unknown as Queryable),
-          identity: new IngressIdentityResolver({
-            users: makeUsers([slackUser]),
-            log: { warn: () => {}, error: () => {}, info: () => {}, debug: () => {} } as never,
-            mappings,
-          }),
-          runDeliveries: new ChannelRunDeliveryStore(
-            transactionPort(db as unknown as Queryable),
-            () => new Date().toISOString()
-          ),
+      const createHost = () =>
+        buildApp({
+          sessionStore: new MemorySessionStore(),
+          userRepo: new PgUserRepo(db as unknown as Queryable),
+          tokenRepo: new FakeTokenRepo(),
+          identity: { apiClientRepo },
           toolApprovals,
-          secrets: {
-            get: async (key: string) => {
-              const value = secretValues.get(key);
-              if (value === undefined) throw new Error(`no secret for ${key}`);
-              return value;
+          channels: () => ({
+            soulLoader,
+            store,
+            invocations: new DurableInvocationGateway({
+              store: { persist: async (record) => ({ outcome: "started", runId: record.runId }) },
+              validator: new TypedOutputValidator(INVOCATION_REQUEST_SCHEMAS),
+              nextId: () => randomUUID(),
+            }),
+            conversations: new PgConversationRepo(db as unknown as Queryable),
+            threads: new IntegrationConversationsRepo(db as unknown as Queryable),
+            identity: new IngressIdentityResolver({
+              users: makeUsers([slackUser]),
+              log: { warn: () => {}, error: () => {}, info: () => {}, debug: () => {} } as never,
+              mappings,
+            }),
+            runDeliveries: new ChannelRunDeliveryStore(
+              transactionPort(db as unknown as Queryable),
+              () => new Date().toISOString()
+            ),
+            toolApprovals,
+            secrets: {
+              get: async (key: string) => {
+                const value = secretValues.get(key);
+                if (value === undefined) throw new Error(`no secret for ${key}`);
+                return value;
+              },
             },
-          },
-          bindLinkUrl: (token) => `http://localhost:4000/link-channel?token=${token}`,
-        }),
-      });
+            bindLinkUrl: (token) => `http://localhost:4000/link-channel?token=${token}`,
+          }),
+        });
+      const withSecrets = await createHost();
       try {
         const res = await withSecrets.inject({
           method: "GET",
@@ -1170,6 +1212,25 @@ describe("/api/v1/internal/channels", () => {
           botToken: "xoxb-secret",
           appToken: "xapp-secret",
         });
+        soulLoader.integrations.set("slack", { connection: { enabled: false } } as SoulIntegration);
+        const disabled = await withSecrets.inject({
+          method: "GET",
+          url: "/api/v1/internal/channels/slack/credential",
+          headers: asWorker(),
+        });
+        expect(disabled.json()).toEqual({ configured: false });
+        expect(secretValues.size).toBe(2);
+        const restarted = await createHost();
+        try {
+          const lease = await restarted.inject({
+            method: "GET",
+            url: "/api/v1/internal/channels/slack/credential",
+            headers: asWorker(),
+          });
+          expect(lease.json()).toEqual({ configured: false });
+        } finally {
+          await restarted.close();
+        }
       } finally {
         await withSecrets.close();
       }

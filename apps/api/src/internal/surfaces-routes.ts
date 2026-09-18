@@ -2,6 +2,7 @@ import type { GuardrailsService } from "@tulipfarm/agent-runtime";
 import { DEPLOYMENT_BUSINESS_ID } from "@tulipfarm/constants";
 import type { DurableInvocationGateway } from "@tulipfarm/run-kernel";
 import { contentText } from "@tulipfarm/schema";
+import type { SoulLoader } from "@tulipfarm/soul";
 import type { ChannelRunDeliveryStore } from "@tulipfarm/storage";
 import { SurfaceInteractionSchema } from "@tulipfarm/surface";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
@@ -11,10 +12,12 @@ import { chatConversationService } from "../conversations/chat-turns";
 import type { ConversationStore } from "../conversations/service";
 import type { IngressIdentityResolver } from "../ingress/identity";
 import type { PendingSurfaceAction, SurfaceActionStore } from "../surfaces/action-store";
+import { isChannelEnabled } from "./channel-availability";
 
 type PreHandler = (req: FastifyRequest, reply: FastifyReply) => Promise<void>;
 
 export interface SurfaceInternalRouteDeps {
+  readonly soulLoader?: SoulLoader;
   readonly identity: IngressIdentityResolver;
   readonly actions: SurfaceActionStore;
   readonly guardrails?: GuardrailsService;
@@ -161,6 +164,9 @@ export function registerSurfaceInternalRoutes(
         externalTenantId?: string;
         input: Readonly<Record<string, unknown>>;
       };
+      if (!isChannelEnabled(deps.soulLoader, body.provider)) {
+        return reply.code(403).send({ error: "Channel is disconnected" });
+      }
 
       const resolution = await deps.identity.resolve({
         slug: body.provider,
@@ -266,6 +272,9 @@ export function registerSurfaceInternalRoutes(
       if (work === undefined) {
         return reply.code(404).send({ error: "Surface interaction reservation not found." });
       }
+      if (!isChannelEnabled(deps.soulLoader, work.handle.target.channel)) {
+        return reply.code(403).send({ error: "Channel is disconnected" });
+      }
       return reply.send({ outcome: await processSurfaceInteraction(work, deps) });
     }
   );
@@ -297,6 +306,7 @@ export function registerSurfaceInternalRoutes(
       const pending = await deps.actions.listPending(new Date(Date.now() - 3_000), 20);
       let processed = 0;
       for (const work of pending) {
+        if (!isChannelEnabled(deps.soulLoader, work.handle.target.channel)) continue;
         try {
           await processSurfaceInteraction(work, deps);
           processed += 1;

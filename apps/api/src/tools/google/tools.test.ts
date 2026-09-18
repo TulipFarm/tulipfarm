@@ -2,8 +2,9 @@ import type { IntegrationHttpRequest } from "@tulipfarm/integrations";
 import type { SecretsService } from "@tulipfarm/secrets";
 import { MemoryEffectStore } from "@tulipfarm/tool-broker";
 import type { RequestContext } from "@tulipfarm/tool-host";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { buildGoogleTooling } from "./compose";
+import type { GoogleConnection } from "./credentials";
 import { buildGoogleTools } from "./tools";
 
 const BUSINESS_ID = "biz-google";
@@ -40,6 +41,45 @@ function toolsWith(http: {
 }
 
 describe("buildGoogleTools", () => {
+  it("blocks an already registered Tool after disconnect and after a fresh host starts", async () => {
+    let enabled = true;
+    const send = vi.fn().mockResolvedValue({ status: 200, headers: {}, body: { messages: [] } });
+    const createTools = () =>
+      buildGoogleTools(BUSINESS_ID, {
+        ...buildGoogleTooling({
+          secrets: fakeSecretsService(),
+          connection: async (): Promise<GoogleConnection> => ({
+            enabled,
+            step: {
+              kind: "oauth2",
+              token_url: "https://oauth2.googleapis.com/token",
+              client_id_env: "GOOGLE_CLIENT_ID",
+              client_secret_env: "GOOGLE_CLIENT_SECRET",
+              token_env: "GOOGLE_ACCESS_TOKEN",
+              scopes: [],
+            },
+            env: {
+              GOOGLE_ACCESS_TOKEN: ACCESS_TOKEN,
+              GOOGLE_ACCESS_TOKEN_EXPIRES_AT: "2099-01-01T00:00:00Z",
+            },
+          }),
+          http: (() => ({ send })) as never,
+        }),
+        effects: new MemoryEffectStore(),
+      });
+    const invoke = async (tools: ReturnType<typeof createTools>, callId: string) => {
+      const tool = tools.find((candidate) => candidate.name === "gmail_search");
+      if (!tool) throw new Error("gmail_search not registered");
+      return tool.execute({ query: "is:unread" }, context({ toolCallId: callId }));
+    };
+    const tools = createTools();
+    expect((await invoke(tools, "before")).success).toBe(true);
+    enabled = false;
+    expect((await invoke(tools, "after")).success).toBe(false);
+    expect((await invoke(createTools(), "restart")).success).toBe(false);
+    expect(send).toHaveBeenCalledTimes(1);
+  });
+
   it("derives egress destinations and mutating flags from the published contracts", () => {
     const tools = toolsWith({ async send() {} });
     const draft = tools.find((tool) => tool.name === "gmail_draft");

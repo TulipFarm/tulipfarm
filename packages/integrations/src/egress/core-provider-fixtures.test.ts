@@ -13,6 +13,8 @@ const coreProviderOperations = {
     "read-issue",
     "create-issue",
     "update-issue",
+    "list-team-states",
+    "list-team-members",
     "create-comment",
   ],
   shopify: [

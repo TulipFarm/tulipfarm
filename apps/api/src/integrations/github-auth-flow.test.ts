@@ -100,7 +100,12 @@ class FakeIntegrationStore {
     this.apps.push(app);
   }
   async putIntegration(integration: Record<string, unknown>) {
+    this.integrations = this.integrations.filter((row) => row.id !== integration.id);
     this.integrations.push(integration);
+  }
+  async revokeIntegration(_businessId: string, id: string) {
+    const row = this.integrations.find((integration) => integration.id === id);
+    if (row) row.status = "revoked";
   }
   async putAccessGrant(grant: Record<string, unknown>) {
     this.accessGrants.push(grant);
@@ -208,13 +213,13 @@ describe("github declarative auth flow", () => {
         soulRepositories: new FakeSoulRepositoryStore() as never,
         http: {
           send: async (req: IntegrationHttpRequest) => {
-            if (req.path === "/app/installations/99") {
+            if (/^\/app\/installations\/\d+$/.test(req.path)) {
               return {
                 status: 200,
                 body: { account: { login: "acme-corp" }, permissions: { issues: "write" } },
               };
             }
-            if (req.path === "/app/installations/99/access_tokens") {
+            if (/^\/app\/installations\/\d+\/access_tokens$/.test(req.path)) {
               return { status: 201, body: { token: "ghs_x", expires_at: "2026-08-06T13:00:00Z" } };
             }
             if (req.path === "/installation/repositories") {
@@ -359,6 +364,57 @@ describe("github declarative auth flow", () => {
     });
   });
 
+  it.each(["99", "100"])(
+    "registers installation %s while the Soul connection is enabled",
+    async (installationId) => {
+      await createApp();
+      await installOnRepos();
+      const disconnected = await app.inject({
+        method: "POST",
+        url: "/api/v1/integrations/github/installations/99/disconnect",
+        cookies: auth(),
+        headers,
+      });
+      expect(disconnected.statusCode).toBe(200);
+      expect(store.integrations[0]?.status).toBe("revoked");
+      expect(soulLoader.integrations.get("github")?.connection?.enabled).toBe(true);
+      const started = await startStep(2);
+      const state = new URL(started.json().url).searchParams.get("state");
+      const res = await app.inject({
+        method: "GET",
+        url: `/api/v1/integrations/auth/callback?state=${state}&installation_id=${installationId}`,
+      });
+      expect(res.headers.location).toContain("status=ok");
+      expect(
+        store.integrations.find((row) => row.externalTenantId === installationId)?.status
+      ).toBe("active");
+      expect(store.integrations).toHaveLength(installationId === "99" ? 1 : 2);
+    }
+  );
+
+  it("reports registration failure and lets an empty connect retry repair it", async () => {
+    await createApp();
+    await installOnRepos();
+    const put = vi
+      .spyOn(store, "putIntegration")
+      .mockRejectedValueOnce(new Error("db unavailable"));
+    const started = await startStep(2);
+    const state = new URL(started.json().url).searchParams.get("state");
+    const res = await app.inject({
+      method: "GET",
+      url: `/api/v1/integrations/auth/callback?state=${state}&installation_id=99`,
+    });
+    expect(res.headers.location).toContain("status=error");
+    const retried = await app.inject({
+      method: "POST",
+      url: "/api/v1/integrations/github/connect",
+      cookies: auth(),
+      headers,
+      payload: { env: {} },
+    });
+    expect(retried.statusCode).toBe(200);
+    expect(put).toHaveBeenCalledTimes(2);
+  });
   it("never writes an App credential to the git-tracked connection file", async () => {
     await createApp();
     await installOnRepos();

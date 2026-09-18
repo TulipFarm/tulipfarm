@@ -1365,7 +1365,9 @@ async function boot() {
         const step = resolveAuthSteps(manifest).find(
           (candidate): candidate is AuthOAuth2Step => candidate.kind === "oauth2"
         );
-        return step === undefined ? undefined : { step, env };
+        return step === undefined
+          ? undefined
+          : { step, env, enabled: integration?.connection?.enabled === true };
       },
     });
     const googleEffects = new PgEffectStore(runTransactions);
