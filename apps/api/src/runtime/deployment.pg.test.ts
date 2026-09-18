@@ -203,7 +203,7 @@ describe("durable runtime deployment startup", () => {
   it("upgrades legacy state, preserves login and BYOK, and restarts with the same identity", async () => {
     const db = await makePglite();
     databases.push(db);
-    for (const migration of PG_MIGRATIONS.filter(({ version }) => version <= 124)) {
+    for (const migration of PG_MIGRATIONS.filter(({ version }) => version <= 125)) {
       if (migration.concurrent) await migration.up(db);
       else await db.transaction((tx) => migration.up(tx));
     }
@@ -212,7 +212,7 @@ describe("durable runtime deployment startup", () => {
         id boolean PRIMARY KEY DEFAULT true CHECK (id),
         version integer NOT NULL
       );
-      INSERT INTO schema_version (id, version) VALUES (true, 124);
+      INSERT INTO schema_version (id, version) VALUES (true, 125);
     `);
     expect(
       (

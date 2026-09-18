@@ -1,6 +1,9 @@
+import { readFileSync } from "node:fs";
 import type { PGlite } from "@electric-sql/pglite";
 import {
   type ConnectionCredentialVault,
+  createOimFixturePaginationRuntime,
+  type EgressHttpPort,
   OimIngressTeardownService,
   type OimPackageCatalogEntry,
   OimWebhookRegistrationError,
@@ -9,6 +12,7 @@ import { canonicalHash, type OimConnection, type OimManifest } from "@tulipfarm/
 import {
   ConnectionAuthStepStore,
   ConnectionStore,
+  ConnectionVerificationEvidenceStore,
   IngressTeardownStore,
   type IntegrationAuthRequestDoc,
   type IntegrationAuthRequestRepo,
@@ -19,6 +23,7 @@ import {
 } from "@tulipfarm/storage";
 import type { FastifyInstance } from "fastify";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { parse } from "yaml";
 import { buildApp } from "../../app";
 import type { TokenDoc, TokenRepo } from "../../auth/api-tokens";
 import { CSRF_COOKIE, CSRF_HEADER } from "../../auth/csrf";
@@ -27,6 +32,7 @@ import { MemorySessionStore } from "../../auth/session-store";
 import { createUser, type UserDoc, type UserRepo } from "../../auth/users";
 import { captureOimWebhookCleanupPackage } from "../../internal/oim-webhook-cleanup-package";
 import { makeMigratedPglite } from "../../test/pglite";
+import { createOimVerificationHost } from "../oim-verification-host";
 import { OimConnectionService, type OimConnectionServiceDeps } from "./service";
 
 const BUSINESS_ID = "business-1";
@@ -271,6 +277,9 @@ describe("OIM Connection routes", () => {
   let catalogEntries: OimPackageCatalogEntry[];
   let failWebhookCleanup: boolean;
   let registrationPackagesAvailable: boolean;
+  let http: EgressHttpPort;
+  let providerCalls: number;
+  let beforeCredentialCreate: (plaintext: string) => Promise<void>;
 
   beforeEach(async () => {
     db = await makeMigratedPglite();
@@ -281,6 +290,18 @@ describe("OIM Connection routes", () => {
     catalogEntries = [...catalog()];
     failWebhookCleanup = false;
     registrationPackagesAvailable = true;
+    providerCalls = 0;
+    beforeCredentialCreate = async () => {};
+    http = {
+      async send() {
+        providerCalls += 1;
+        return {
+          status: 200,
+          headers: {},
+          body: { accountId: "jira-user", displayName: "Muskan Vijayvargiya", active: true },
+        };
+      },
+    };
     const sessionStore = new MemorySessionStore();
     const userRepo = new UserRepoMemory();
     const member = await createUser(userRepo, "member@example.com", "pass", "member");
@@ -321,6 +342,7 @@ describe("OIM Connection routes", () => {
 
     const credentials: ConnectionCredentialVault = {
       async create(_integrationId, _slot, plaintext) {
+        await beforeCredentialCreate(plaintext);
         const reference =
           `secret://00000000-0000-4000-8000-${String(nextSecret++).padStart(12, "0")}` as const;
         credentialValues.set(reference, plaintext);
@@ -357,6 +379,23 @@ describe("OIM Connection routes", () => {
       connections,
       authSteps,
       credentials,
+      verification: {
+        ...createOimVerificationHost({
+          authSteps,
+          credentials,
+          http: { send: (request) => http.send(request) },
+          paginationRuntime: createOimFixturePaginationRuntime(),
+        }),
+        publish: (evidence) => connections.publishVerification(evidence),
+      },
+      fetchImpl: async () =>
+        Response.json({
+          access_token: "fixture-access",
+          refresh_token: "fixture-refresh",
+          app_id: "A123",
+          team: { id: "T123" },
+          token_type: "Bearer",
+        }),
       authRequests,
       endpoints: {
         callbackUrl: "https://api.example.test/api/v1/integrations/auth/callback",
@@ -402,6 +441,340 @@ describe("OIM Connection routes", () => {
   const auth = (sid: string) => ({
     cookies: { [SESSION_COOKIE]: sid, [CSRF_COOKIE]: CSRF },
     headers: { [CSRF_HEADER]: CSRF },
+  });
+
+  function shipped(key: string): OimManifest {
+    const manifest = parse(
+      readFileSync(`../../integrations/${key}/oim.yml`, "utf8")
+    ) as OimManifest;
+    catalogEntries.push({ key, manifest });
+    return manifest;
+  }
+
+  it.each(["google-workspace", "slack-oim", "linkedin", "reddit", "x"])(
+    "completes shipped %s OAuth through the production verification host",
+    async (key) => {
+      const manifest = shipped(key);
+      http = {
+        async send() {
+          providerCalls += 1;
+          return {
+            status: 200,
+            headers: {},
+            body:
+              key === "google-workspace" || key === "linkedin"
+                ? { sub: "google-user" }
+                : key === "reddit"
+                  ? { id: "reddit-user", name: "muskan" }
+                  : key === "x"
+                    ? { data: { id: "x-user", username: "muskan", name: "Muskan Vijayvargiya" } }
+                    : { ok: true, user_id: "U123", bot_id: "B123", team_id: "T123" },
+          };
+        },
+      };
+      const created = await app.inject({
+        method: "POST",
+        url: `/api/v1/integrations/${key}/connections`,
+        ...auth(memberSid),
+        payload: {
+          label: key,
+          ownerScope: "personal",
+          values: {
+            client_id: "fixture-client",
+            client_secret: "fixture-secret",
+            ...(key === "reddit" ? { user_agent: "web:fixture:1.0 (by /u/muskan)" } : {}),
+          },
+        },
+      });
+      expect(created.statusCode).toBe(201);
+      expect(created.json().verification.status).toBe("pending");
+      const id = created.json().connectionId;
+      const step = manifest.auth?.steps.find((step) => step.type === "oauth2");
+      const started = await app.inject({
+        method: "POST",
+        url: `/api/v1/integrations/${key}/connections/${id}/auth/${step?.id}`,
+        ...auth(memberSid),
+      });
+      expect(started.statusCode).toBe(200);
+      const state = new URL(started.json().url).searchParams.get("state");
+      const callback = await app.inject({
+        method: "GET",
+        url: `/api/v1/integrations/auth/callback?state=${state}&code=fixture-code`,
+      });
+      expect(callback.statusCode).toBe(302);
+      expect(callback.headers.location).not.toContain("status=error");
+      expect(providerCalls).toBe(1);
+      expect((await connections.findById(BUSINESS_ID, id))?.health.status).toBe("healthy");
+      if (key === "google-workspace") {
+        const connected = await connections.findById(BUSINESS_ID, id);
+        const evidenceStore = new ConnectionVerificationEvidenceStore(transactionPort(db));
+        const evidence = await evidenceStore.findCurrentForConnection(
+          BUSINESS_ID,
+          id,
+          canonicalHash(manifest)
+        );
+        expect(evidence?.binding.authSteps.map((row) => row.stepId)).toEqual([
+          "oauth_client",
+          "user_consent",
+        ]);
+        const repaired = await app.inject({
+          method: "PATCH",
+          url: `/api/v1/integrations/${key}/connections/${id}/credentials`,
+          ...auth(memberSid),
+          payload: { values: { client_secret: "replacement-client-secret" } },
+        });
+        expect(repaired.json()).toEqual({ connectionId: id, verification: { status: "pending" } });
+        const updated = await connections.findById(BUSINESS_ID, id);
+        expect(updated?.secretBindings.access_token).toBeUndefined();
+        expect(updated?.secretBindings.refresh_token).toBeUndefined();
+        expect(credentialValues.has(connected?.secretBindings.access_token ?? "")).toBe(false);
+        expect(
+          await evidenceStore.findCurrentForConnection(BUSINESS_ID, id, canonicalHash(manifest))
+        ).toBeNull();
+      }
+    }
+  );
+
+  it("persists shipped Jira healthy → failed proof → recovered evidence", async () => {
+    const manifest = shipped("jira");
+    const created = await app.inject({
+      method: "POST",
+      url: "/api/v1/integrations/jira/connections",
+      ...auth(memberSid),
+      payload: {
+        label: "Jira",
+        ownerScope: "personal",
+        values: { jira_site: "acme.atlassian.net", api_credential: "fixture:token" },
+      },
+    });
+    expect(created.statusCode).toBe(201);
+    expect(created.json().verification.status).toBe("verified");
+    const id = created.json().connectionId;
+    const evidence = new ConnectionVerificationEvidenceStore(transactionPort(db));
+    const currentEvidence = () =>
+      evidence.findCurrentForConnection(BUSINESS_ID, id, canonicalHash(manifest));
+    expect(await currentEvidence()).not.toBeNull();
+    http = {
+      async send() {
+        return {
+          status: 200,
+          headers: {},
+          body: { accountId: "jira-user", displayName: "Muskan Vijayvargiya", active: false },
+        };
+      },
+    };
+    const refresh = () =>
+      app.inject({
+        method: "POST",
+        url: `/api/v1/integrations/jira/connections/${id}/refresh`,
+        ...auth(memberSid),
+      });
+    expect((await refresh()).json().health).toBe("action_required");
+    expect((await connections.findById(BUSINESS_ID, id))?.health.status).toBe("action_required");
+    expect(await currentEvidence()).toBeNull();
+    http = {
+      async send() {
+        return {
+          status: 200,
+          headers: {},
+          body: { accountId: "jira-user", displayName: "Muskan Vijayvargiya", active: true },
+        };
+      },
+    };
+    expect((await refresh()).json().health).toBe("healthy");
+    expect(await currentEvidence()).not.toBeNull();
+  });
+
+  it("corrects the exact Jira credential without readback or owner changes", async () => {
+    shipped("jira");
+    http = {
+      async send(request) {
+        const valid =
+          request.headers?.Authorization ===
+          `Basic ${Buffer.from("fixture:correct").toString("base64")}`;
+        return {
+          status: 200,
+          headers: {},
+          body: valid
+            ? { accountId: "jira-user", displayName: "Muskan Vijayvargiya", active: true }
+            : { active: false },
+        };
+      },
+    };
+    const created = await app.inject({
+      method: "POST",
+      url: "/api/v1/integrations/jira/connections",
+      ...auth(memberSid),
+      payload: {
+        label: "Jira",
+        ownerScope: "personal",
+        values: { jira_site: "acme.atlassian.net", api_credential: "fixture:typo" },
+      },
+    });
+    const id = created.json().connectionId;
+    const before = await connections.findById(BUSINESS_ID, id);
+    const replaced = await app.inject({
+      method: "PATCH",
+      url: `/api/v1/integrations/jira/connections/${id}/credentials`,
+      ...auth(memberSid),
+      payload: { values: { api_credential: "fixture:correct" } },
+    });
+    expect(replaced.statusCode).toBe(200);
+    expect(replaced.json()).toEqual({ connectionId: id, verification: { status: "verified" } });
+    const after = await connections.findById(BUSINESS_ID, id);
+    expect(after?.owner).toEqual(before?.owner);
+    expect(after?.id).toBe(before?.id);
+    expect(after?.configuration).toEqual(before?.configuration);
+    expect(credentialValues.has(before?.secretBindings.api_credential ?? "")).toBe(false);
+  });
+
+  it("rejects unknown, callback-only and non-string fields, unauthorized owners and inactive Connections", async () => {
+    shipped("google-workspace");
+    const created = await app.inject({
+      method: "POST",
+      url: "/api/v1/integrations/google-workspace/connections",
+      ...auth(memberSid),
+      payload: {
+        label: "Google",
+        ownerScope: "personal",
+        values: { client_id: "fixture-client", client_secret: "fixture-secret" },
+      },
+    });
+    const id = created.json().connectionId;
+    const url = `/api/v1/integrations/google-workspace/connections/${id}/credentials`;
+    const before = await connections.findById(BUSINESS_ID, id);
+    for (const values of [
+      { unknown: "value" },
+      { access_token: "forged" },
+      { client_id: {} },
+      { client_id: "" },
+      {},
+    ]) {
+      expect(
+        (await app.inject({ method: "PATCH", url, ...auth(memberSid), payload: { values } }))
+          .statusCode
+      ).toBe(400);
+    }
+    expect(
+      (
+        await app.inject({
+          method: "PATCH",
+          url,
+          ...auth(otherSid),
+          payload: { values: { client_id: "other" } },
+        })
+      ).statusCode
+    ).toBe(404);
+    expect(
+      (await app.inject({ method: "PATCH", url, payload: { values: { client_id: "other" } } }))
+        .statusCode
+    ).toBe(401);
+    expect(
+      (
+        await app.inject({
+          method: "PATCH",
+          url,
+          cookies: { [SESSION_COOKIE]: memberSid },
+          payload: { values: { client_id: "other" } },
+        })
+      ).statusCode
+    ).toBe(403);
+    expect((await connections.findById(BUSINESS_ID, id))?.secretBindings).toEqual(
+      before?.secretBindings
+    );
+    await connections.fenceRevocation(BUSINESS_ID, id);
+    expect(
+      (
+        await app.inject({
+          method: "PATCH",
+          url,
+          ...auth(memberSid),
+          payload: { values: { client_id: "other" } },
+        })
+      ).statusCode
+    ).toBe(409);
+  });
+
+  it("fences stale OAuth callbacks when application credentials are corrected", async () => {
+    shipped("google-workspace");
+    const created = await app.inject({
+      method: "POST",
+      url: "/api/v1/integrations/google-workspace/connections",
+      ...auth(memberSid),
+      payload: {
+        label: "Google",
+        ownerScope: "personal",
+        values: { client_id: "fixture-client", client_secret: "fixture-secret" },
+      },
+    });
+    const id = created.json().connectionId;
+    const started = await app.inject({
+      method: "POST",
+      url: `/api/v1/integrations/google-workspace/connections/${id}/auth/user_consent`,
+      ...auth(memberSid),
+    });
+    const state = new URL(started.json().url).searchParams.get("state");
+    const repaired = await app.inject({
+      method: "PATCH",
+      url: `/api/v1/integrations/google-workspace/connections/${id}/credentials`,
+      ...auth(memberSid),
+      payload: { values: { client_secret: "fixture-corrected" } },
+    });
+    expect(repaired.json()).toEqual({ connectionId: id, verification: { status: "pending" } });
+    const callback = await app.inject({
+      method: "GET",
+      url: `/api/v1/integrations/auth/callback?state=${state}&code=stale-code`,
+    });
+    expect(callback.statusCode).toBe(302);
+    expect(callback.headers.location).toContain("status=error");
+    expect(
+      (await connections.findById(BUSINESS_ID, id))?.secretBindings.access_token
+    ).toBeUndefined();
+    expect(providerCalls).toBe(0);
+  });
+
+  it("returns a conflict and discards staged secrets when concurrent correction wins", async () => {
+    shipped("jira");
+    const created = await app.inject({
+      method: "POST",
+      url: "/api/v1/integrations/jira/connections",
+      ...auth(memberSid),
+      payload: {
+        label: "Jira",
+        ownerScope: "personal",
+        values: { jira_site: "acme.atlassian.net", api_credential: "fixture:original" },
+      },
+    });
+    const id = created.json().connectionId;
+    let notifyStaged = () => {};
+    const staged = new Promise<void>((resolve) => {
+      notifyStaged = resolve;
+    });
+    let releaseStaged = () => {};
+    const release = new Promise<void>((resolve) => {
+      releaseStaged = resolve;
+    });
+    beforeCredentialCreate = async (plaintext) => {
+      if (plaintext === "fixture:loser") {
+        notifyStaged();
+        await release;
+      }
+    };
+    const update = (value: string) =>
+      app.inject({
+        method: "PATCH",
+        url: `/api/v1/integrations/jira/connections/${id}/credentials`,
+        ...auth(memberSid),
+        payload: { values: { api_credential: value } },
+      });
+    const loser = update("fixture:loser").then((response) => response);
+    await staged;
+    const winner = await update("fixture:winner");
+    releaseStaged();
+    expect(winner.statusCode).toBe(200);
+    expect((await loser).statusCode).toBe(409);
+    expect([...credentialValues.values()]).not.toContain("fixture:loser");
+    expect([...credentialValues.values()]).toContain("fixture:winner");
   });
 
   it("resolves the catalog key to its exact Integration id and major", async () => {

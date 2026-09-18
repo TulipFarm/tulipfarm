@@ -33,6 +33,7 @@ export type {
 export {
   CHANNEL_RUN_DELIVERY_ACKNOWLEDGE_STATEMENTS,
   CHANNEL_RUN_DELIVERY_APPROVAL_COLUMNS_STATEMENTS,
+  CHANNEL_RUN_DELIVERY_LEASE_STATEMENTS,
   CHANNEL_RUN_DELIVERY_STORAGE_STATEMENTS,
   ChannelRunDeliveryStore,
 } from "./channel-run-delivery-store";
@@ -64,6 +65,7 @@ export {
   CONNECTION_AUTH_STEP_STORAGE_STATEMENTS,
   ConnectionAuthStepStore,
 } from "./connection-auth-step-store";
+export type { ReplaceConnectionCredentials } from "./connection-credential-update";
 export type {
   BindVerifiedConnectionExternalIdentity,
   ConnectionIdentityProofKind,

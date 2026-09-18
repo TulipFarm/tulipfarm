@@ -68,6 +68,13 @@ function manifest(overrides: {
               required: true,
               target: { type: "credential", slot: "token" },
             },
+            ...(overrides.configurationFields ?? []).map((field) => ({
+              id: field.id,
+              label: field.label,
+              input: "text",
+              required: field.required,
+              target: { type: "configuration", field: field.id },
+            })),
           ],
         },
       ],

@@ -1,5 +1,5 @@
-/** Migration 126 pins hosting authority alongside the shared runtime identity. */
-export const REQUIRED_SCHEMA_VERSION = 126;
+/** Migration 127 pins hosting authority alongside the shared runtime identity. */
+export const REQUIRED_SCHEMA_VERSION = 127;
 
 export interface IntegrationWorkerConfig {
   readonly databaseUrl: string;

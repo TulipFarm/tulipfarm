@@ -53,6 +53,22 @@ Authentication declares credential slots, non-secret configuration, and ordered 
 Credential values are supplied later through a connection and stored as secrets. They never belong
 in `oim.yml`, a companion, a fixture, or a tool argument.
 
+Credential ownership follows **producers**, not consumers: a fields step produces its declared
+targets; OAuth and JWT steps produce their response bindings, but consume their client or signing
+credentials. A required configuration field must have a fields or callback binding that produces
+it. Declaring a configuration field alone does not make it collectable.
+
+To correct saved input, the Connection API supports
+`PATCH /api/v1/integrations/:key/connections/:connectionId/credentials` with
+`{ "values": { "<field-id>": "<replacement>" } }`. Only declared fields-step IDs are accepted;
+omitted fields remain unchanged. The response contains only `connectionId` and `verification`,
+never stored credentials. The authorization gate is the same as starting provider authorization.
+Replacement preserves the Connection's owner and references, fences stale callbacks and refreshes,
+and invalidates earlier verification evidence. Changed fields require fresh browser authorization
+because consent can depend on configuration embedded in provider URLs and callback bindings.
+Static credentials are immediately reverified. Failed proof persists `action_required` and retires
+the previous healthy evidence; retry verifies the saved values, while another PATCH corrects them.
+
 New connectable packages use Auth 1.1 and provider verification:
 
 ```yaml
@@ -151,6 +167,39 @@ Never expose a generic URL, OpenAPI operation id, GraphQL document, or query str
 File inputs carry a TulipFarm File id. The host checks ownership and streams the stored bytes to the
 declared destination. Binary responses are written through the File host; they are not embedded in
 model output.
+
+### Bounded MIME and related multipart requests (Core 1.4)
+
+For a JSON API that accepts a base64url RFC 5322 message, declare
+`source.mime: { outputPointer: /raw, maxBytes: 10485760 }`. A nested pointer such as `/message/raw`
+wraps the encoded message in nested JSON objects. This replaces the entire outgoing JSON body;
+it is not a general-purpose transform or a template evaluator.
+
+The Tool's closed `requestSchema` must describe `body.to`, `subject`, optional `cc`/`bcc`, at
+least one of `text`/`html`, and optional `attachments` (up to ten TulipFarm File IDs). Recipients
+are ASCII mailbox lists. Headers reject control characters and are capped at 900 UTF-8 bytes.
+Subjects are Unicode encoded-words; body alternatives and attachments use MIME base64 before
+the enclosing message is base64url-encoded. `maxBytes` bounds the final JSON bytes, not merely
+the source File. Legacy pre-encoded APIs may continue to declare ordinary JSON operations.
+
+For metadata plus bytes, use `source.contentType: multipart` with
+`source.multipart.subtype: related`, `maxBytes` (at most 10 MiB), and ordered `parts`. A field
+part may declare `mediaType: application/json; charset=UTF-8`; its `pointer` selects metadata in the input body
+and its `maxBytes` bounds that field. File parts select existing File IDs. The host buffers and
+bounds combined part content before network dispatch, sends a generated boundary and typed parts,
+and omits form-data disposition headers for `related`. Buffered parts supply the exact transport
+`Content-Length`, including framing. The cap covers part content, not the small
+host-generated framing. Ordinary multipart/form-data declarations retain their existing behavior.
+
+Both encodings use the same exact File-ID extraction for Chat and Routine approval bindings.
+The host must authorize the Run's File targets before the File port checks the effective user's
+live File ACL. An absent authorizer denies attachments; no provider-specific credential, File, or
+HTTP bypass is permitted.
+
+Pagination is not a completeness guarantee. When a provider still declares another page at the
+host's aggregate ceiling, the call fails with `pagination_bound_exceeded` instead of silently
+removing the continuation. Narrow the query. Provider-specific incomplete-result flags should
+also be constrained in the response schema before a partial page can appear successful.
 
 ## Events and knowledge
 

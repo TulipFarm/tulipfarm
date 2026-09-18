@@ -4,6 +4,7 @@ import { Type } from "@sinclair/typebox";
 import { DEPLOYMENT_BUSINESS_ID } from "@tulipfarm/constants";
 import { DurableInvocationGateway, TypedOutputValidator } from "@tulipfarm/run-kernel";
 import { INVOCATION_REQUEST_SCHEMAS, textContent } from "@tulipfarm/schema";
+import type { SoulIntegration, SoulLoader } from "@tulipfarm/soul";
 import { ChannelRunDeliveryStore } from "@tulipfarm/storage";
 import { createSurfaceArtifact } from "@tulipfarm/surface";
 import { ToolApprovalService } from "@tulipfarm/tool-host";
@@ -73,8 +74,13 @@ describe("POST /api/v1/internal/surfaces/interactions", () => {
   let runDeliveries: ChannelRunDeliveryStore;
   let failFollowUpDeliveryOnce: boolean;
   let followUpDeliveryAttempts: number;
+  let soulLoader: SoulLoader;
 
   beforeEach(async () => {
+    soulLoader = {
+      agents: new Map(),
+      integrations: new Map([["slack", { connection: { enabled: true } } as SoulIntegration]]),
+    } as SoulLoader;
     db = await makeMigratedPglite();
     const transactions = transactionPort(db as unknown as Queryable);
 
@@ -140,6 +146,7 @@ describe("POST /api/v1/internal/surfaces/interactions", () => {
       identity: { apiClientRepo },
       toolApprovals,
       channels: () => ({
+        soulLoader,
         store: conversationStore,
         invocations: new DurableInvocationGateway({
           store: {
@@ -232,6 +239,25 @@ describe("POST /api/v1/internal/surfaces/interactions", () => {
     const body = res.json();
     expect(body.artifactId).toBe("artifact-1");
     expect(body.principal).toBe(slackUser._id);
+  });
+
+  it("refuses Slack Surface admission after disconnect", async () => {
+    const handle = await mintHandle();
+    soulLoader.integrations.clear();
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/v1/internal/surfaces/interactions",
+      headers: asWorker(),
+      payload: {
+        handle: handle.handle,
+        provider: "slack",
+        externalSubject: "U-LINKED",
+        externalTenantId: "T1",
+        input: {},
+      },
+    });
+    expect(res.statusCode).toBe(403);
+    expect(conversationStore.turns).toHaveLength(0);
   });
 
   it("rejects a Slack interaction without tenant scope", async () => {
@@ -484,6 +510,23 @@ describe("POST /api/v1/internal/surfaces/interactions", () => {
     });
     expect(reserved.statusCode).toBe(200);
     expect(conversationStore.turns[0]?.runId).toBeNull();
+
+    const connected = soulLoader.integrations.get("slack");
+    soulLoader.integrations.clear();
+    const disabledProcess = await app.inject({
+      method: "POST",
+      url: `/api/v1/internal/surfaces/interactions/${reserved.json().id}/process`,
+      headers: asWorker(),
+    });
+    expect(disabledProcess.statusCode).toBe(403);
+    const disabledRecovery = await app.inject({
+      method: "POST",
+      url: "/api/v1/internal/surfaces/interactions/recover",
+      headers: asWorker(),
+    });
+    expect(disabledRecovery.json()).toEqual({ attempted: 1, processed: 0 });
+    expect(conversationStore.turns[0]?.runId).toBeNull();
+    if (connected) soulLoader.integrations.set("slack", connected);
 
     const recovered = await app.inject({
       method: "POST",

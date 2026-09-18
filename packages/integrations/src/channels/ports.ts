@@ -110,6 +110,8 @@ export interface ChannelDeliveryRecord extends ChannelDeliveryAttempt {
   status: ChannelDeliveryStatus;
   attempts: number;
   providerMessageId?: string;
+  nextAttemptAt?: string;
+  updatedAt?: string;
 }
 
 export interface ChannelDeliveryLedger {

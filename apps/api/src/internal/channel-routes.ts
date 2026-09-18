@@ -20,6 +20,7 @@ import type { IntegrationConversationsRepo } from "../ingress/repo";
 import { integrationSecretKey } from "../integrations/connection-env";
 import type { SurfaceActionStore } from "../surfaces/action-store";
 import type { SurfaceArtifactStore } from "../surfaces/artifact-store";
+import { isChannelEnabled } from "./channel-availability";
 import * as ChannelSchemas from "./channel-schemas";
 import * as InternalSchemas from "./schemas";
 import type { SlackCommandResponseService } from "./slack-command-response";
@@ -47,7 +48,7 @@ export interface ChannelInternalRouteDeps {
   /** Resolves fixed sealed Slack app/bot token keys; omitted routes report unconfigured. */
   readonly secrets?: ChannelCredentialSecretStore;
   readonly commandResponses?: SlackCommandResponseService;
-  /** Resolves an Agent label for `.../reply`'s `agentDisplayName`. */
+  /** Live channel enablement and Agent labels; absent Soul denies Slack admission/credentials. */
   readonly soulLoader?: SoulLoader;
   /**
    * Stops the Run a newer message in the same thread has taken over. Omitted leaves every message
@@ -215,6 +216,10 @@ export function registerChannelInternalRoutes(
     }
   };
   const preHandler = [requireAuth, requireService];
+  const slackEnabled = () => isChannelEnabled(deps.soulLoader, "slack");
+  const requireSlackEnabled: PreHandler = async (_req, reply) => {
+    if (!slackEnabled()) await reply.code(403).send({ error: "Slack is disconnected" });
+  };
   const newId = deps.newId ?? randomUUID;
 
   app.post(
@@ -240,6 +245,9 @@ export function registerChannelInternalRoutes(
         externalSubject: string;
         externalTenantId?: string;
       };
+      if (provider === "slack" && !slackEnabled()) {
+        return reply.code(403).send({ error: "Slack is disconnected" });
+      }
       const resolution = await deps.identity.resolve({
         slug: provider,
         sender: externalSubject,
@@ -280,6 +288,9 @@ export function registerChannelInternalRoutes(
         channelId: string;
         threadId?: string;
       };
+      if (provider === "slack" && !slackEnabled()) {
+        return reply.send({ outcome: "unconfigured" });
+      }
       const resolution = await deps.identity.resolve({
         slug: provider,
         sender: externalSubject,
@@ -373,6 +384,9 @@ export function registerChannelInternalRoutes(
         principal: { kind: "user" | "guest"; id: string };
         message: ChannelMessageBody;
       };
+      if (body.provider === "slack" && !slackEnabled()) {
+        return reply.code(403).send({ error: "Slack is disconnected" });
+      }
       const businessId = DEPLOYMENT_BUSINESS_ID;
       const threadKey = externalThreadKey(body.provider, body.message);
 
@@ -580,7 +594,7 @@ export function registerChannelInternalRoutes(
       },
     },
     async (_req, reply) => {
-      if (deps.secrets === undefined) return reply.send({ configured: false });
+      if (!slackEnabled() || deps.secrets === undefined) return reply.send({ configured: false });
       const [botToken, appToken] = await Promise.all([
         deps.secrets.get(integrationSecretKey("slack", "SLACK_BOT_TOKEN")).catch(() => undefined),
         deps.secrets.get(integrationSecretKey("slack", "SLACK_APP_TOKEN")).catch(() => undefined),
@@ -595,7 +609,7 @@ export function registerChannelInternalRoutes(
   app.post(
     "/api/v1/internal/channels/slack/command-responses",
     {
-      preHandler,
+      preHandler: [...preHandler, requireSlackEnabled],
       schema: {
         description:
           "Seal a Slack slash-command response URL and reserve one retryable ephemeral delivery.",
@@ -626,7 +640,7 @@ export function registerChannelInternalRoutes(
   app.post(
     "/api/v1/internal/channels/slack/command-responses/process",
     {
-      preHandler,
+      preHandler: [...preHandler, requireSlackEnabled],
       schema: {
         description: "Deliver due Slack slash-command responses from encrypted response URLs.",
         tags: ["internal"],
@@ -677,6 +691,9 @@ export function registerChannelInternalRoutes(
         externalTenantId?: string;
         decision: "approved" | "denied";
       };
+      if (!isChannelEnabled(deps.soulLoader, body.provider)) {
+        return reply.code(403).send({ error: "Channel is disconnected" });
+      }
 
       const resolution = await deps.identity.resolve({
         slug: body.provider,

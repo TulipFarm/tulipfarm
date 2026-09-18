@@ -161,7 +161,21 @@ export function registerSoulRouteFamily(
           opts.declarativeTools,
           opts.auditService,
           opts.integrationAuth?.tokens,
-          opts.oimCatalog
+          opts.oimCatalog,
+          async (name) => {
+            const projection = name === "slack" ? opts.slackBind : undefined;
+            if (!projection) return;
+            const snapshot = await projection.integrations.loadProviderSnapshot(
+              projection.businessId,
+              name
+            );
+            for (const integration of snapshot.integrations) {
+              await projection.integrations.revokeIntegration(
+                projection.businessId,
+                integration.id
+              );
+            }
+          }
         );
         registerIntegrationMarketplaceRoutes(
           app,

@@ -1,7 +1,7 @@
-import { ajv, CHAT_REQUEST_SCHEMA, PACK_MAX_BYTES } from "@tulipfarm/schema";
+import { ajv, CHAT_REQUEST_SCHEMA, PACK_MAX_BYTES, type PackPreview } from "@tulipfarm/schema";
 import { beforeEach, expect, test, vi } from "vitest";
 import { ApiError, apiGet, apiWrite } from "./api";
-import { listPacks, packChatLaunchError, previewPack } from "./packs";
+import { listPacks, packChatLaunchError, packPlanPrompt, previewPack } from "./packs";
 
 vi.mock("./api", async (importOriginal) => ({
   ...(await importOriginal<typeof import("./api")>()),
@@ -53,4 +53,31 @@ test("complete-message limits count UTF-8 bytes, never truncate, and reject one 
   expect(new TextEncoder().encode(boundary).byteLength).toBe(PACK_MAX_BYTES);
   expect(packChatLaunchError(boundary)).toBeNull();
   expect(packChatLaunchError(`${boundary}x`)).toContain("Nothing has been sent or omitted");
+});
+
+test("the pinned-source instruction is its own Markdown paragraph, not glued to the pack_read args", () => {
+  const url = "https://example.com/sales.yaml";
+  const preview: PackPreview = {
+    sha256: "a".repeat(64),
+    url,
+    pack: {
+      apiVersion: "tulipfarm.ai/v1",
+      kind: "Pack",
+      name: "sales",
+      title: "Sales essentials",
+      description: "Track customers and follow up.",
+      category: "Sales",
+      version: 1,
+      requirements: [],
+      artifacts: [],
+      plan: { apiVersion: "tulipfarm.ai/v1", kind: "Plan", name: "sales", version: 1, steps: [] },
+    },
+  };
+  const prompt = packPlanPrompt(preview, { url });
+  // A single `\n` between the JSON args and the next sentence renders as one Markdown paragraph
+  // with no visual gap; only a blank line (`\n\n`) separates them into distinct paragraphs like
+  // every other instruction in this message.
+  expect(prompt).toContain(
+    `${JSON.stringify({ url, expectedSha256: preview.sha256 })}\n\nIf the source hash differs`
+  );
 });

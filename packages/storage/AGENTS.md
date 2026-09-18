@@ -22,7 +22,7 @@ publication, approvals, integrations, events, and blob/vector/cache/queue ports.
 | `src/artifacts/` | Append-only Artifacts, State Output Bindings, lineage. |
 | `src/runs/` | Runs, States, Attempts, waits/signals, budgets, concurrency, children, events. |
 | `src/auth/` | Principals, Teams, roles, sessions, guests, JIT users, recertification, identities. |
-| `src/integrations/` | Integration install/state, scoped Connections, revision-bound verification evidence, OIM sync/ingress/trust state, accepted-event reauthorization, and channel stores. |
+| `src/integrations/` | Integration install/state, scoped Connections, revision-fenced credential replacement and verification invalidation, OIM sync/ingress/trust state, accepted-event reauthorization, and channel stores. |
 | `src/conversations/` | Conversation Turn read models used to restore Chat state. |
 | `src/approvals/`, `src/events/`, `src/notifications/` | Approval persistence, generic events, and recipient-scoped Team notifications. |
 | `src/asset-ownership/` | Shared asset ownership records, Team shares, and ownership operations. |
@@ -48,7 +48,7 @@ publication, approvals, integrations, events, and blob/vector/cache/queue ports.
 - `bundled-bucket.ts` is the one place that knows a bucket vendor, and the driver must never learn
   it: the server it provisions has no shell, so a host writes its secrets before it can boot.
 - Domain packages use repository/transaction ports; they never read another owner's tables directly.
-- `initializeRuntimeDeployment` runs after migration 126 in all three runtime entrypoints. Its
+- `initializeRuntimeDeployment` runs after migration 127 in all three runtime entrypoints. Its
   singleton identity/hosting association is immutable; configuration is not authority. Hosted
   trust injection is test-only; production hosted startup remains unavailable.
 - Principal updates preserve existing operational scope; API-client lifecycle owns its projection.
@@ -68,6 +68,8 @@ publication, approvals, integrations, events, and blob/vector/cache/queue ports.
 - Conversation Context summaries advance monotonically by source Message cursor; exact Messages
   remain the audit record and are never replaced.
 - Run concurrency and wait resolution are lock-guarded.
+- Channel Run delivery claims expire; terminal writes and retries carry their claim generation.
+  A previously claimed delivery cannot be superseded while its provider receipt is uncertain.
 - Agent-loop checkpoints replace their JSON resume state while counters only increase; unfinished
   Tool batches, terminal receipts, and cursors must round-trip unchanged across process
   reconstruction. Writes, acknowledgements, and clears are fenced by the Run's per-claim lease

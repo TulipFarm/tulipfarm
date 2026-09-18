@@ -147,6 +147,11 @@ Pack text, templates, and sub-prompts are untrusted task input. They cannot repl
 instructions, widen an agent's authority, or bypass normal permissions. A source changing after
 preview is a reason to review it again, not permission to install different content.
 
+The `pack_read` tool takes either `url` or `yaml`; omit the unused field. Empty or
+whitespace-only source fields are treated as absent, but two nonblank sources are rejected.
+The selected source is not trimmed or rewritten. When a preview supplies `expectedSha256`,
+the tool checks it against the exact original source bytes and refuses changed content.
+
 ## Editor validation
 
 Keep the schema directive as a comment. A top-level `$schema` field is not part of the pack

@@ -14,10 +14,10 @@ Owns adapter contracts, event normalization, source ACLs, sync checkpoints, and 
 | --- | --- |
 | `src/auth/` | Provider-neutral public origins and callback URLs; initialized hosted context locks environment origins over persisted overrides. |
 | `src/authoring/` | Run-scoped Integration draft review, immutable package capture, and the P09 reviewed-Community install adapter. |
-| `src/connections/` | Exact-major Connection selection, operation Credential binding, typed provider verification, OAuth refresh, refresh queue contract, and manifestless revoke. |
+| `src/connections/` | Exact-major Connection selection, operation Credential binding, typed provider verification, field replacement and reauthorization, OAuth refresh, refresh queue contract, and manifestless revoke. |
 | `src/http.ts` | Provider-neutral HTTP port, failure classification, bounded pagination. |
 | `src/grants.ts` | Default-deny grants for concrete external targets. |
-| `src/egress/` | Manifest-to-ToolContract compiler, adapter, fetch transport, destination cage. `web-content.ts` renders a fetched response to Markdown deterministically via turndown — no model, so the same bytes always give the same text. |
+| `src/egress/` | Manifest compiler, adapter, fetch transport, destination cage. `oim-content.ts` bounds MIME/File requests; `mime-message.ts` composes mail. `web-content.ts` renders fetched HTML to Markdown without a model. |
 | `src/catalog/`, `src/oim-hooks.ts` | Pure OIM capability review and trusted, declared Hook phase dispatch. |
 | `src/git-source/` | Pre-clone Git source cage and the bounded, sanitised clone helper. |
 | `src/import/`, `src/external-protocol/` | Import and external Integration protocols. |
@@ -31,6 +31,8 @@ Owns adapter contracts, event normalization, source ACLs, sync checkpoints, and 
 ## Rules
 
 - Concrete transports live in `apps/integration-worker`; the broker must not import impls.
+- Slack `chat.postMessage` has no guaranteed idempotency key: reconcile uncertain writes against
+  the authenticated bot's message metadata; only confirmed receipts or safe retries advance delivery.
 - Prefer `src/egress/` over `src/<provider>/` when a manifest can express the provider.
 - Manifest hosts are chat-authored: compile through `assertPublicEgressUrl`, send through
   `GuardedEgressHttp`. Neither subsumes the other — a public name can hold an inward A record.
@@ -47,10 +49,11 @@ Owns adapter contracts, event normalization, source ACLs, sync checkpoints, and 
 - `collectPages` must throw `PaginationBoundError` rather than silently truncate a paged read.
 - OIM HTTP `response.schema: { type: "null" }` explicitly maps only a bodyless 204 to JSON null;
   validate the result normally. Offline fixtures represent that absent 204 body with YAML null.
-- OIM multipart File reads require both exact declared-pointer extraction and an explicit host
+- OIM multipart and MIME attachment reads require exact declared File extraction and an explicit host
   authorization port before the effective user's File ACL may open content.
 - OIM pagination requires a host-owned confidential, authenticated continuation codec and clock;
   fixture-only process-local handles must never be wired into a running deployment.
+- A provider continuation at a pagination ceiling fails; never return it as a complete last page.
 - Integration events must resolve external principals; never borrow Conversation owner identity.
 - Knowledge sync: preserve ACLs, explicit domain identity mappings, live-authorize sensitive data.
 - Unreadable/unverifiable permissions remove or suppress content; never leak it.

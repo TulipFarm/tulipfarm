@@ -89,6 +89,7 @@ import { APPROVAL_EVIDENCE_STORAGE_STATEMENTS } from "@tulipfarm/tool-host";
 import type { Queryable } from "../db";
 import { AGENT_ROLE_ID } from "../identity/roles";
 import { resourceSideEffectMigration } from "../resources/outbox";
+import { addSlackDeliveryLeases } from "./20260917-slack-delivery-leases";
 import { OPERATIONAL_PRINCIPAL_STATEMENTS } from "./operational-principals";
 
 export interface PgMigration {
@@ -3500,16 +3501,21 @@ export const PG_MIGRATIONS: PgMigration[] = [
   },
   {
     version: 125,
+    description: "20260917 recover leased Slack Run deliveries and persist retry deadlines",
+    up: addSlackDeliveryLeases,
+  },
+  {
+    version: 126,
     description: "durable runtime installation identity distinct from local business identity",
     up: applyStatements(RUNTIME_IDENTITY_STORAGE_STATEMENTS),
   },
   {
-    version: 126,
+    version: 127,
     description: "pin runtime hosting authority independently of process configuration",
     up: applyStatements(RUNTIME_HOSTING_STORAGE_STATEMENTS),
   },
   {
-    version: 127,
+    version: 128,
     description: "immutable operational API client scope and live principal lifecycle",
     up: applyStatements(OPERATIONAL_PRINCIPAL_STATEMENTS),
   },

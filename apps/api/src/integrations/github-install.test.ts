@@ -180,17 +180,19 @@ describe("ensureGitHubInstallation", () => {
     });
   });
 
-  it("does nothing when the App is not configured", async () => {
+  it("refuses registration when the App is not configured", async () => {
     const log = { warn: vi.fn() };
-    await ensureGitHubInstallation(
-      deps(
-        fakeHttp(() => {
-          throw new Error("GitHub must not be called without credentials");
-        }),
-        log
-      ),
-      "99"
-    );
+    await expect(
+      ensureGitHubInstallation(
+        deps(
+          fakeHttp(() => {
+            throw new Error("GitHub must not be called without credentials");
+          }),
+          log
+        ),
+        "99"
+      )
+    ).rejects.toThrow("GitHub App credentials are not configured");
 
     expect(integrations.integrations).toHaveLength(0);
     expect(log.warn).toHaveBeenCalledWith(
@@ -198,18 +200,18 @@ describe("ensureGitHubInstallation", () => {
     );
   });
 
-  it("swallows a GitHub failure so a connected App is not reported as an error", async () => {
-    // This runs after the credentials are already committed; throwing here would show the operator
-    // a failure page for an App that is, in fact, connected.
+  it("surfaces a GitHub registration failure after credentials are stored", async () => {
     await configureApp();
     const log = { warn: vi.fn() };
-    await ensureGitHubInstallation(
-      deps(
-        fakeHttp(() => ({ status: 503, body: {} })),
-        log
-      ),
-      "99"
-    );
+    await expect(
+      ensureGitHubInstallation(
+        deps(
+          fakeHttp(() => ({ status: 503, body: {} })),
+          log
+        ),
+        "99"
+      )
+    ).rejects.toThrow("installation lookup returned 503");
 
     expect(integrations.integrations).toHaveLength(0);
     expect(log.warn).toHaveBeenCalledWith(
