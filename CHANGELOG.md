@@ -1,5 +1,31 @@
 # Changelog
 
+## [0.18.35](https://github.com/TulipFarm/tulipfarm/compare/v0.18.34...v0.18.35) (2026-09-18)
+
+### Features
+
+* **packs:** redesign gallery with integration ideas ([#1024](https://github.com/TulipFarm/tulipfarm/issues/1024)) ([b40fe3a](https://github.com/TulipFarm/tulipfarm/commit/b40fe3a223ed01fd179bd900c2bb52e946ef679f))
+
+### Bug Fixes
+
+* **github:** reconcile paged effects and exact pull requests ([#1011](https://github.com/TulipFarm/tulipfarm/issues/1011)) ([7150e22](https://github.com/TulipFarm/tulipfarm/commit/7150e2211bd116d25b3f507f8a930bb984fcce4f))
+* **integrations:** complete bounded Google Workspace tools ([#1016](https://github.com/TulipFarm/tulipfarm/issues/1016)) ([059b269](https://github.com/TulipFarm/tulipfarm/commit/059b269c881ee28d2ec86ff604f17a3228666ed0))
+* **integrations:** enforce legacy connection lifecycle ([#1018](https://github.com/TulipFarm/tulipfarm/issues/1018)) ([a87a908](https://github.com/TulipFarm/tulipfarm/commit/a87a908e7f18c44d44ee9c9481931f84512ac399))
+* **integrations:** expose operations and Knowledge controls ([#1021](https://github.com/TulipFarm/tulipfarm/issues/1021)) ([dca6b0a](https://github.com/TulipFarm/tulipfarm/commit/dca6b0aea3498e6ac774a2fafe903288da6364f2))
+* **integrations:** preserve event dispatch and reply outcomes ([#1017](https://github.com/TulipFarm/tulipfarm/issues/1017)) ([ea89961](https://github.com/TulipFarm/tulipfarm/commit/ea899612250969647af1d4074900f4a625af4a8f))
+* **integrations:** repair cross-branch schema upgrades ([#1022](https://github.com/TulipFarm/tulipfarm/issues/1022)) ([2ca75c0](https://github.com/TulipFarm/tulipfarm/commit/2ca75c028528e3933d55993bcc8418b356022d47))
+* **integrations:** repair OIM credentials and verification ([#1012](https://github.com/TulipFarm/tulipfarm/issues/1012)) ([72f8bfd](https://github.com/TulipFarm/tulipfarm/commit/72f8bfd9d33784e6ebf641b3827684c0c653012e))
+* **integrations:** restore truthful connection setup and recovery ([#1014](https://github.com/TulipFarm/tulipfarm/issues/1014)) ([53d80a0](https://github.com/TulipFarm/tulipfarm/commit/53d80a0f5b8d556af2ad2af1c8c9c9af0e36cfdd))
+* **jira:** accept no-content success and discover issue metadata ([#1013](https://github.com/TulipFarm/tulipfarm/issues/1013)) ([6f8a337](https://github.com/TulipFarm/tulipfarm/commit/6f8a33788f5112bfb825ec2ffebcc1b05feaab66))
+* **linear:** complete issue workflows without bypassing activation ([#1015](https://github.com/TulipFarm/tulipfarm/issues/1015)) ([b684c01](https://github.com/TulipFarm/tulipfarm/commit/b684c01d96044c5997e1ca6a774894ad85670cc6))
+* **packs:** ignore blank unused source fields ([#1009](https://github.com/TulipFarm/tulipfarm/issues/1009)) ([8204853](https://github.com/TulipFarm/tulipfarm/commit/820485351135d7ed3934a89946893f8ce61fc027))
+* **slack:** recover leased replies and refresh live credentials ([#1020](https://github.com/TulipFarm/tulipfarm/issues/1020)) ([029e351](https://github.com/TulipFarm/tulipfarm/commit/029e351e50ba93191d99ec55fdd20bd465e5ec85))
+
+### Documentation
+
+* **qa:** expand the Resources acceptance playbook ([#1007](https://github.com/TulipFarm/tulipfarm/issues/1007)) ([bee5f1b](https://github.com/TulipFarm/tulipfarm/commit/bee5f1b52bbf17e402e96b7f107763c02b42716c))
+* **qa:** refresh integration acceptance coverage ([#1010](https://github.com/TulipFarm/tulipfarm/issues/1010)) ([551c10f](https://github.com/TulipFarm/tulipfarm/commit/551c10f425cefc2078a5315834927deb9efab548))
+
 ## [0.18.34](https://github.com/TulipFarm/tulipfarm/compare/v0.18.33...v0.18.34) (2026-09-17)
 
 ### Features
