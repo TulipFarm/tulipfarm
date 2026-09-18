@@ -386,7 +386,7 @@ test("create: a 422 maps the error path onto the offending field", async () => {
   expect(error).toHaveAttribute("id");
   expect(title).toHaveAttribute("aria-invalid", "true");
   expect(title).toHaveAttribute("aria-describedby", error.id);
-  expect(title).toHaveFocus();
+  await waitFor(() => expect(title).toHaveFocus());
   expect(screen.getAllByRole("alert")).toHaveLength(1);
   expect(screen.getByRole("alert")).toHaveTextContent(/1 field needs attention/i);
   expect(createRecord).toHaveBeenCalledOnce();
@@ -420,7 +420,7 @@ test.each([
   expect(error).toHaveAttribute("id");
   expect(metadata).toHaveAttribute("aria-invalid", "true");
   expect(metadata).toHaveAttribute("aria-describedby", error.id);
-  expect(metadata).toHaveFocus();
+  await waitFor(() => expect(metadata).toHaveFocus());
   expect(screen.getAllByRole("alert")).toHaveLength(1);
   expect(metadata.value).toBe('{"address":{"city":"London","postcode":123}}');
   expect(screen.queryByText(/^destination:/)).not.toBeInTheDocument();
@@ -495,7 +495,7 @@ test("edit: a 409 surfaces the version-conflict banner and does not navigate", a
 
   const alert = await screen.findByRole("alert");
   expect(alert).toHaveTextContent(/changed since you loaded it/);
-  expect(alert).toHaveFocus();
+  await waitFor(() => expect(alert).toHaveFocus());
   expect(screen.queryByText(/^destination:/)).not.toBeInTheDocument();
 });
 
