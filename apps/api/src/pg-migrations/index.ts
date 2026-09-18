@@ -47,6 +47,7 @@ import {
   OIM_KNOWLEDGE_CHECKPOINT_STORAGE_STATEMENTS,
   OIM_KNOWLEDGE_CHECKPOINT_WATERMARK_STORAGE_STATEMENTS,
   OIM_KNOWLEDGE_PUBLICATION_FENCE_STORAGE_STATEMENTS,
+  OIM_KNOWLEDGE_SUBSCRIPTION_STORAGE_STATEMENTS,
   OIM_RATE_LIMIT_STORAGE_STATEMENTS,
   OIM_RELEASE_LIFECYCLE_STORAGE_STATEMENTS,
   OIM_RELEASE_MAINTENANCE_STORAGE_STATEMENTS,
@@ -3505,17 +3506,27 @@ export const PG_MIGRATIONS: PgMigration[] = [
     up: addSlackDeliveryLeases,
   },
   {
-    version: 126,
+    version: 132,
+    description: "persist independently selected OIM Knowledge subscriptions",
+    up: applyStatements(OIM_KNOWLEDGE_SUBSCRIPTION_STORAGE_STATEMENTS),
+  },
+  {
+    version: 133,
+    description: "recover Slack leases skipped by an earlier Knowledge v132 deployment",
+    up: addSlackDeliveryLeases,
+  },
+  {
+    version: 134,
     description: "durable runtime installation identity distinct from local business identity",
     up: applyStatements(RUNTIME_IDENTITY_STORAGE_STATEMENTS),
   },
   {
-    version: 127,
+    version: 135,
     description: "pin runtime hosting authority independently of process configuration",
     up: applyStatements(RUNTIME_HOSTING_STORAGE_STATEMENTS),
   },
   {
-    version: 128,
+    version: 136,
     description: "immutable operational API client scope and live principal lifecycle",
     up: applyStatements(OPERATIONAL_PRINCIPAL_STATEMENTS),
   },

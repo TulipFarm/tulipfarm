@@ -148,7 +148,7 @@ runtime_prepare_legacy_fixture() {
   log "preparing isolated pre-foundation database fixture (not a supported downgrade)…"
   compose stop app worker integration-worker
   [ "$(compose exec -T postgres psql -U tulipfarm -d tulipfarm -At \
-    -c "SELECT version FROM schema_version")" = 128 ] \
+    -c "SELECT version FROM schema_version")" = 136 ] \
     || fail "update the isolated legacy fixture for this candidate's migration boundary"
   compose exec -T postgres psql -U tulipfarm -d tulipfarm -v ON_ERROR_STOP=1 <<'SQL'
 BEGIN;
@@ -157,8 +157,8 @@ DROP TRIGGER api_clients_sync_operational_principal ON api_clients;
 DROP FUNCTION sync_operational_client_principal();
 ALTER TABLE api_clients DROP COLUMN operational_scope;
 ALTER TABLE principals DROP COLUMN operational_scope;
-DELETE FROM schema_migrations WHERE version IN (126, 127, 128);
-UPDATE schema_version SET version = 125;
+DELETE FROM schema_migrations WHERE version IN (134, 135, 136);
+UPDATE schema_version SET version = 133;
 COMMIT;
 SQL
   compose rm -f app worker integration-worker >/dev/null

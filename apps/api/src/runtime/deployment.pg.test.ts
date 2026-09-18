@@ -200,7 +200,7 @@ describe("durable runtime deployment startup", () => {
   });
 
   it("upgrades legacy state, preserves login and BYOK, and restarts with the same identity", async () => {
-    const db = await makeMigratedPglite(125);
+    const db = await makeMigratedPglite(133);
     databases.push(db);
     expect(
       (

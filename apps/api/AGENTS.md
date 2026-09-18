@@ -30,6 +30,7 @@ PostgreSQL persistence composition, auth, Soul Git writes, and Worker callback p
 | `src/integrations/` | Manifest catalog, connect auth, install, post-connect hooks. `connections/` adapts versioned OIM Connection lifecycle, exact-Connection credential repair, and refresh scheduling to HTTP; OIM verification, continuation, Credential, and File hosts remain provider-neutral. |
 | `src/integrations/oim-ingress/` | Injectable exact-Connection webhook and registration routes. |
 | `src/guardrails/` | Guardrail reload wiring and persisted policy acceptance. Hosted minimums remain in the effective service; Chat Context, Routine Agent catalog and admin reads share it. |
+| `src/integrations/operations/` | Exact-Connection operational evidence and durable selected-scope Knowledge subscription controls; never derive scheduling from indexed content. |
 | `src/knowledge/`, `src/knowledge-sources/` | Knowledge routes/Tools and ingestion API; repositories and OKF live in `@tulipfarm/knowledge`. |
 | `src/memory/`, `src/kv/`, `src/secrets/` | Memory Document composition, its read-only route and erasure; scoped KV; secret storage routes. |
 | `src/authz/` | `route-gate.ts` — sole HTTP path to `decideEffectivePermission`, including hosted infrastructure ceilings before shadow/fallback; self-governed and Team administration. |
@@ -42,7 +43,7 @@ PostgreSQL persistence composition, auth, Soul Git writes, and Worker callback p
 | `src/admin/`, `src/setup/`, `src/onboarding/`, `src/system/` | Admin, setup, health. `admin/run-context.ts` projects authorized, typed related work for Run detail only. |
 | `src/system/telemetry/` | Deployment telemetry collection, admin preview/preferences, and service-only dispatch; reporter and durable state live in observability/storage. |
 | `src/pg-migrations/` | Boot-applied PostgreSQL schema migrations. |
-| `src/pg-migrations/20260917-slack-delivery-leases.ts` | Backfills recoverable leases for pre-existing Slack reply claims. |
+| `src/pg-migrations/20260917-slack-delivery-leases.ts` | Backfills recoverable Slack reply leases; v133 replays this idempotent DDL for databases that reached Knowledge v132 before Slack v125 landed. |
 | `src/test/` | API test helpers. |
 
 ## Rules

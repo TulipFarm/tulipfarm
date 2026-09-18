@@ -23,6 +23,7 @@ publication, approvals, integrations, events, and blob/vector/cache/queue ports.
 | `src/runs/` | Runs, States, Attempts, waits/signals, budgets, concurrency, children, events. |
 | `src/auth/` | Principals, Teams, roles, sessions, guests, JIT users, recertification, identities. |
 | `src/integrations/` | Integration install/state, scoped Connections, revision-fenced credential replacement and verification invalidation, OIM sync/ingress/trust state, accepted-event reauthorization, and channel stores. |
+| `src/integrations/oim-{knowledge-subscription,operations}-store.ts` | Independent selected scopes and authorization-scoped operational projections; no secret values or provider payloads in diagnostics. |
 | `src/conversations/` | Conversation Turn read models used to restore Chat state. |
 | `src/approvals/`, `src/events/`, `src/notifications/` | Approval persistence, generic events, and recipient-scoped Team notifications. |
 | `src/asset-ownership/` | Shared asset ownership records, Team shares, and ownership operations. |
@@ -48,7 +49,7 @@ publication, approvals, integrations, events, and blob/vector/cache/queue ports.
 - `bundled-bucket.ts` is the one place that knows a bucket vendor, and the driver must never learn
   it: the server it provisions has no shell, so a host writes its secrets before it can boot.
 - Domain packages use repository/transaction ports; they never read another owner's tables directly.
-- `initializeRuntimeDeployment` runs after migration 127 in all three runtime entrypoints. Its
+- `initializeRuntimeDeployment` runs after migration 135 in all three runtime entrypoints. Its
   singleton identity/hosting association is immutable; configuration is not authority. Hosted
   trust injection is test-only; production hosted startup remains unavailable.
 - Principal updates preserve existing operational scope; API-client lifecycle owns its projection.

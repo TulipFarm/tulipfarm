@@ -86,8 +86,8 @@ describe("historical PGlite snapshots", () => {
   });
 
   it("keeps neighboring versions in separate snapshots", async () => {
-    const before = await database(125);
-    const after = await database(126);
+    const before = await database(133);
+    const after = await database(134);
     const query = "SELECT to_regclass('deployment_runtime_identity') IS NOT NULL AS present";
     expect((await before.query(query)).rows).toEqual([{ present: false }]);
     expect((await after.query(query)).rows).toEqual([{ present: true }]);

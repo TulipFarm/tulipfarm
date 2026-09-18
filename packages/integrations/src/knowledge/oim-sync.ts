@@ -684,6 +684,30 @@ type AclOutcome =
     }
   | { readonly kind: "failed"; readonly failure: "acl_failed" };
 
+async function readCompletePages(
+  deps: OimKnowledgeSyncDeps,
+  operationId: string,
+  parameters: Readonly<Record<string, unknown>>,
+  maximumPages: number
+): Promise<readonly unknown[]> {
+  const bodies: unknown[] = [];
+  const continuations = new Set<string>();
+  let pageToken: string | undefined;
+  for (let page = 0; page < maximumPages; page += 1) {
+    const result = await deps.api.execute({
+      operationId,
+      parameters,
+      ...(pageToken === undefined ? {} : { pageToken }),
+    });
+    bodies.push(result.body);
+    if (result.nextPageToken === undefined) return bodies;
+    if (continuations.has(result.nextPageToken)) throw new Error("pagination_cycle");
+    continuations.add(result.nextPageToken);
+    pageToken = result.nextPageToken;
+  }
+  throw new Error("pagination_bound_exceeded");
+}
+
 async function readAcl(
   plan: KnowledgeProfilePlan,
   deps: OimKnowledgeSyncDeps,
@@ -702,17 +726,23 @@ async function readAcl(
     parameters[plan.acl.parameter] = plan.acl.mode === "item" ? target.itemId : target.scope;
   }
   try {
-    const { body } = await deps.api.execute({
-      operationId: plan.acl.operation.id,
+    const bodies = await readCompletePages(
+      deps,
+      plan.acl.operation.id,
       parameters,
-    });
-    const mapped = mapAclEntries(plan, body);
-    if (mapped.status !== "verified") return { kind: "failed", failure: "acl_failed" };
+      plan.list.maxPagesPerRun
+    );
+    const entries: ProviderAclEntry[] = [];
+    for (const body of bodies) {
+      const mapped = mapAclEntries(plan, body);
+      if (mapped.status !== "verified") return { kind: "failed", failure: "acl_failed" };
+      entries.push(...mapped.entries);
+    }
     const resolved = await deps.identity.resolve({
       ...connectionScope(plan, options),
       externalTenantId: identity.externalTenantId,
       externalAccountId: identity.externalAccountId,
-      entries: mapped.entries,
+      entries,
     });
     if (resolved.incomplete) return { kind: "failed", failure: "acl_failed" };
     return { kind: "verified", principals: resolved.principals };
@@ -977,24 +1007,28 @@ async function deletionCandidates(
   if (plan.deletion.scopeParameter !== undefined) {
     parameters[plan.deletion.scopeParameter] = scope;
   }
-  let body: unknown;
+  let bodies: readonly unknown[];
   try {
-    ({ body } = await deps.api.execute({
-      operationId: plan.deletion.operation.id,
+    bodies = await readCompletePages(
+      deps,
+      plan.deletion.operation.id,
       parameters,
-    }));
+      plan.list.maxPagesPerRun
+    );
   } catch {
     return undefined;
   }
-  const items = readPointer(body, plan.deletion.itemsPointer);
-  if (!Array.isArray(items)) return undefined;
   const ids: string[] = [];
-  for (const item of items) {
-    const value = readPointer(item, plan.deletion.itemIdPointer);
-    if (typeof value !== "string" && typeof value !== "number") return undefined;
-    ids.push(String(value));
+  for (const body of bodies) {
+    const items = readPointer(body, plan.deletion.itemsPointer);
+    if (!Array.isArray(items)) return undefined;
+    for (const item of items) {
+      const value = readPointer(item, plan.deletion.itemIdPointer);
+      if (typeof value !== "string" && typeof value !== "number") return undefined;
+      ids.push(String(value));
+    }
   }
-  return ids;
+  return [...new Set(ids)];
 }
 
 async function finishDeletions(

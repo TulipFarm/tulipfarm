@@ -1,5 +1,5 @@
-/** Migration 127 pins hosting authority alongside the shared runtime identity. */
-export const REQUIRED_SCHEMA_VERSION = 127;
+/** Migration 135 pins hosting authority, after the v133 Slack lease repair. */
+export const REQUIRED_SCHEMA_VERSION = 135;
 
 export interface IntegrationWorkerConfig {
   readonly databaseUrl: string;

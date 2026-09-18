@@ -15,11 +15,11 @@ function stubDatabase(result: Record<string, unknown>[] | Error): Queryable {
 describe("assertSchemaFloor", () => {
   it("waits for the operational principal schema before the Worker can start", async () => {
     await expect(
-      assertSchemaFloor(stubDatabase([{ version: 127 }]), REQUIRED_SCHEMA_VERSION)
-    ).rejects.toThrow("requires 128");
+      assertSchemaFloor(stubDatabase([{ version: 135 }]), REQUIRED_SCHEMA_VERSION)
+    ).rejects.toThrow("requires 136");
     await expect(
-      assertSchemaFloor(stubDatabase([{ version: 128 }]), REQUIRED_SCHEMA_VERSION)
-    ).resolves.toBe(128);
+      assertSchemaFloor(stubDatabase([{ version: 136 }]), REQUIRED_SCHEMA_VERSION)
+    ).resolves.toBe(136);
   });
 
   it("returns the version when the database is at or above the floor", async () => {

@@ -406,6 +406,19 @@ export class OimConnectionService {
     return (await this.connection(key, connectionId, actor)).connection;
   }
 
+  operationsCapabilities(key: string) {
+    const manifest = this.package(key).manifest;
+    return {
+      sourceKinds: (manifest.knowledge?.sourceKinds ?? []).map(({ id, label, description }) => ({
+        id,
+        label,
+        description,
+      })),
+      liveAuthorization: manifest.knowledge?.liveAuthorization !== undefined,
+      ingress: manifest.ingress?.kind ?? null,
+    };
+  }
+
   isDisconnecting(connectionId: string): Promise<boolean> {
     return this.deps.ingress.isDisabled(this.deps.businessId, connectionId);
   }
@@ -421,6 +434,9 @@ export class OimConnectionService {
     }
   ): Promise<OimConnectionCreateResult> {
     const pkg = this.package(key);
+    if (pkg.manifest.ingress?.kind === "websocket") {
+      throw new OimConnectionRequestError(409, "oim_websocket_ingress_unsupported");
+    }
     if (
       (input.owner.scope === "personal" && input.owner.principalId !== actor.principalId) ||
       (input.owner.scope !== "personal" && !actor.mayManageShared)

@@ -14,10 +14,10 @@ import { DEPLOYMENT_BUSINESS_ID } from "@tulipfarm/constants";
  * 118: OIM Knowledge publication and cursor progress are fenced.
  * 119: OIM release provenance, lifecycle, and operation journals are durable.
  * 120: OIM Connection verification evidence is persisted for safe dispatch.
- * 127: Persisted hosting authority prevents a worker silently reverting to independent hosting.
- * 128: Live Tool authorization reads the immutable operational principal scope.
+ * 135: Persisted hosting authority prevents a worker silently reverting to independent hosting.
+ * 136: Live Tool authorization reads the immutable operational principal scope.
  */
-export const REQUIRED_SCHEMA_VERSION = 128;
+export const REQUIRED_SCHEMA_VERSION = 136;
 
 export interface WorkerConfig {
   readonly databaseUrl: string;

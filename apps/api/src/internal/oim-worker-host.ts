@@ -476,6 +476,9 @@ export class InternalOimWorkerHost implements InternalOimWorkerRouteDeps {
             candidate.manifest.metadata.id === connection.integration.id &&
             manifestMajor(candidate.manifest) === connection.integration.majorVersion
         );
+        if (pkg?.manifest.ingress?.kind === "websocket") {
+          throw new InternalOimWorkerRouteError(409, "oim_websocket_ingress_unsupported");
+        }
         if (pkg?.manifest.ingress?.kind !== "polling") return null;
         const current = await this.deps.connections.findById(connection.businessId, connection.id);
         if (current === null) return null;

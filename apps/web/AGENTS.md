@@ -29,6 +29,7 @@ data loading, schema-driven resource UI, and browser rendering of Surface Artifa
 | `app/routes/_app.packs*`, `app/components/packs/`, `app/lib/packs.ts` | Pack gallery/import and focused preview; category icons/data colors and curated optional integration ideas never imply requirements or connection state. Plan-mode handoff preserves URL + hash or complete YAML; never installs directly. |
 | `app/components/routines/` | Catalog, row, canvas, run/dry-run, effects and bounds panels for `/routines`. |
 | `app/components/integrations/` | Provider rows, `?view=` preview, reviewed install, and exact-Connection setup/credential repair. `integration-choice.tsx` wraps themed closed choices; `app/lib/integration-status.ts` projects shared usability from Connection health and exact setup reads. |
+| `app/components/integrations/integration-operations.tsx`, `app/lib/integration-operations.ts` | `IntegrationOperations({ integrationKey })`: authorized operational evidence and selected-scope Knowledge subscription controls. |
 | `app/components/ui/` | Vendored shadcn primitives for this app only, plus `combobox.tsx` — hand-rolled, because `cmdk` forces its own input `id` and breaks `<label htmlFor>`. `select.tsx` is a thin native `<select>` wrapper; deprecated (see Rules), kept only until its 16 existing callers migrate. |
 | `app/lib/api.ts` | API client with cookies, CSRF header, optional bearer token, `ApiError`. |
 | `app/lib/schema.ts` | JSON-Schema field detection, list/detail/form metadata, value rendering, shared formatters. |
