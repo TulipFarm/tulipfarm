@@ -57,6 +57,11 @@ references by tag.
 Compose file uses that one value for `app`, `worker`, and `integration-worker`, keeping the
 API and workers in schema agreement.
 
+The Compose file also forwards `BUSINESS_ID`, `RUNTIME_HOSTING_AUTHORITY`, and
+`RUNTIME_INSTALLATION_ID` to each process. Keep the existing business identifier. Leave the
+hosting setting and installation assertion unset for the normal independent path; the database
+holds the installation identity. Keep that database across restarts and upgrades.
+
 **Coolify / Portainer / Dokploy:** redeploy the resource or update the stack with *re-pull
 image* enabled.
 
@@ -74,6 +79,14 @@ So:
   to "fix" it.
 - If `worker` or `integration-worker` refuses its schema floor after an update, inspect
   `app` logs first; a worker cannot repair a migration that never completed.
+- An older database without installation metadata gains a durable installation identity.
+  Its local business identifier does not change. A conflicting configured identifier stops
+  startup; restore matching configuration rather than deleting identity metadata.
+
+All runtime processes must use the same image version and deployment settings. This is not a
+rolling-upgrade or zero-downtime guarantee. Moving between hosting providers, transferring
+business ownership, and moving between independent and TulipFarm hosting are not supported
+migration paths in this release.
 
 Verify afterwards:
 

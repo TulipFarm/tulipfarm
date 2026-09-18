@@ -3,6 +3,10 @@ import type { ProductTelemetryLevel, ProductTelemetryReporter } from "@tulipfarm
 import { validateSoulConfig } from "@tulipfarm/schema";
 import type { SecretsService } from "@tulipfarm/secrets";
 import { mergeLlmConfigIntoSoulYaml, type SoulWriter } from "@tulipfarm/soul";
+import {
+  type RuntimeDeploymentContext,
+  runtimeDeploymentAllowsIndependentSetup,
+} from "@tulipfarm/storage";
 import { parse } from "yaml";
 import { createUser, normalizeEmail, type UserRepo } from "../auth/users";
 import { SYSTEM_SOUL_COMMIT_ACTOR } from "../runtime/soul-writer";
@@ -11,6 +15,7 @@ import { isProductionMode } from "./service";
 import { mergeSoulConfig } from "./soul-config";
 
 export interface BootstrapDeps {
+  deployment?: RuntimeDeploymentContext;
   productTelemetry?: ProductTelemetryReporter;
   telemetryDefault?: ProductTelemetryLevel;
   userRepo: UserRepo;
@@ -65,6 +70,7 @@ function skipAdminBootstrap(): boolean {
 //
 // After seeding, marks setupComplete=true in soul.yaml so the wizard never shows.
 export async function bootstrapFromEnv(deps: BootstrapDeps): Promise<void> {
+  if (!runtimeDeploymentAllowsIndependentSetup(deps.deployment)) return;
   if (skipAdminBootstrap()) {
     // Fail loud rather than silently downgrading a headless production deployment into one that
     // waits for a human at a browser wizard nobody is watching.

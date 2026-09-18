@@ -1,8 +1,14 @@
 import { randomUUID } from "node:crypto";
-import type { ModelFailureDiagnostic, ModelRequirementsPolicy } from "@tulipfarm/agent-runtime";
+import {
+  DEFAULT_GUARDRAILS,
+  type GuardrailsService,
+  type ModelFailureDiagnostic,
+  type ModelRequirementsPolicy,
+} from "@tulipfarm/agent-runtime";
 import { readTurnAttachment, type TurnAttachmentStore } from "@tulipfarm/files";
 import { type InvocationPrincipal, SUBAGENT_RUN_SOURCE } from "@tulipfarm/run-kernel";
 import {
+  canonicalHash,
   contentText,
   type EffortPreset,
   type EffortRung,
@@ -311,6 +317,7 @@ export interface InternalTurnHostOptions {
    * visibility rules, so a Routine can never see a wider catalog than the same Agent sees in Chat.
    */
   readonly agentTools?: (agentName: string | undefined) => readonly HostedAgentTool[];
+  readonly guardrails?: Pick<GuardrailsService, "config" | "revision">;
   /**
    * Serves the bytes of a File this Turn attached. Absent leaves Turns attachment-free.
    *
@@ -410,6 +417,13 @@ export class InternalTurnHost {
   ): Promise<readonly HostedAgentTool[]> {
     const authority = await this.authority(businessId, runId, claimedAgentName);
     return this.options.agentTools?.(authority.agent?.name) ?? [];
+  }
+
+  get guardrailPolicy() {
+    return {
+      policy: this.options.guardrails?.config ?? DEFAULT_GUARDRAILS,
+      digest: this.options.guardrails?.revision ?? canonicalHash(DEFAULT_GUARDRAILS),
+    };
   }
 
   async describeTurn(businessId: string, runId: string): Promise<HostedTurnIdentity> {

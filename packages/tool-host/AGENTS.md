@@ -22,7 +22,7 @@ Individual Tool families (`packages/kv`, `apps/api/src/tools/**`), the model-fac
 | `src/define.ts` | `defineApiTool` / `defineParkableApiTool` / `toToolDef` — declaration plus bound context |
 | `src/dispatcher.ts` | `RegistryToolDispatcher`: authorize → credential → entitlement → replay → approve → execute |
 | `src/timeout.ts`, `src/execution.ts` | Deadline and abort delivery; the attempt loop and effect settlement |
-| `src/gate.ts` | `LiveToolGate`, autonomy mapping, agent authority layer, DLP rules |
+| `src/gate.ts` | `LiveToolGate`, injected immutable restriction layers, autonomy mapping, Agent authority, DLP |
 | `src/authority-layers.ts` | Live direct and inherited Team authority; opt-in legacy fallback. |
 | `src/eligibility.ts` | `localDispatchRefusal` — which Tools a non-control-plane process may run |
 | `src/capability-restrictions.ts` | An Agent's authored restrictions, decided at offer and at dispatch |
@@ -51,6 +51,8 @@ Individual Tool families (`packages/kv`, `apps/api/src/tools/**`), the model-fac
 - **`eligibility.ts` fails closed.** A process without a live Soul, a renderer registry or
   provider credential leases must not authorize a Tool that needs them. Widening the rule needs a
   reason why the weaker check is still the same check.
+- Live Principal resolution retains an operational client's immutable non-content ceiling, so
+  role assignment, Team inheritance and Tool dispatch cannot widen it (ADR-032).
 - **`ToolApprovalPort` exposes `decide` and `consume` only.** `consume` spends the one-use decision
   at the dispatch that executes it (I-13); `registerWait` mints a one-use resume token and must
   stay in the control plane — see `apps/worker/AGENTS.md`.

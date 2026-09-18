@@ -13,6 +13,8 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 BOOT_LABEL="parity"
 # shellcheck source=scripts/test/lib/boot-harness.sh
 . "${REPO_ROOT}/scripts/test/lib/boot-harness.sh"
+# shellcheck source=scripts/test/lib/runtime-foundation.sh
+. "${REPO_ROOT}/scripts/test/lib/runtime-foundation.sh"
 
 IMAGE="ghcr.io/tulipfarm/tulipfarm:ci"
 PORT="${TF_PORT:-8098}"
@@ -33,10 +35,11 @@ boot_capture_logs() {
 boot_teardown() {
   [ -f "${TEST_DIR}/docker-compose.yml" ] || return 0
   log "tearing down stack…"
-  compose down -v >/dev/null 2>&1
+  compose down -v --remove-orphans >/dev/null 2>&1
 }
 
-boot_make_workspace
+BOOT_WORKDIR="${REPO_ROOT}/.parity-$$"
+mkdir "$BOOT_WORKDIR"
 TEST_DIR="$BOOT_WORKDIR"
 boot_install_cleanup_trap
 
@@ -58,10 +61,16 @@ fi
 unset COMPOSE_FILE COMPOSE_PROFILES CORS_ORIGIN DATABASE_URL ENCRYPTION_KEY
 unset JWT_SECRET POSTGRES_PASSWORD PUBLIC_API_URL PUBLIC_URL SETUP_MODE WEBHOOK_SIGNING_SECRET
 unset WORKER_API_CREDENTIAL
+unset BUSINESS_ID RUNTIME_HOSTING_AUTHORITY RUNTIME_INSTALLATION_ID
+
+runtime_assert_artifact
 
 log "booting with no .env…"
 test ! -f "${TEST_DIR}/.env"
 compose up -d --wait --wait-timeout 180 --pull missing
+identity_before="$(runtime_identity)"
+runtime_assert_agreement "$identity_before"
+runtime_assert_public_projection
 
 log "asserting /readyz and /livez on :${PORT}…"
 boot_wait_for_http "http://localhost:${PORT}/readyz"
@@ -112,6 +121,23 @@ secrets_after="$(compose exec -T app cat /data/secrets.env)"
 # A second key would leave every file already stored unreachable by the running instance.
 [ "$bucket_before" = "$(compose exec -T app cat /data/bucket.env)" ] \
   || fail "bucket.env was re-provisioned across restart"
+runtime_assert_agreement "$identity_before"
+
+runtime_assert_fail_closed
+runtime_assert_agreement "$identity_before"
+
+business_state_before="$(compose exec -T postgres psql -U tulipfarm -d tulipfarm -At \
+  -c "SELECT business_id || '|' || id FROM principals ORDER BY business_id, id")"
+runtime_prepare_legacy_fixture
+compose up -d --wait --wait-timeout 180 --pull missing
+legacy_identity="$(runtime_identity)"
+runtime_assert_agreement "$legacy_identity"
+[ "$business_state_before" = "$(compose exec -T postgres psql -U tulipfarm -d tulipfarm -At \
+  -c "SELECT business_id || '|' || id FROM principals ORDER BY business_id, id")" ] \
+  || fail "legacy business principals changed during the foundation upgrade"
+compose down
+compose up -d --wait --wait-timeout 180 --pull missing
+runtime_assert_agreement "$legacy_identity"
 
 log "asserting key-loss guard refuses to orphan encrypted secrets…"
 compose down
@@ -140,4 +166,4 @@ boot_wait_for_http "http://localhost:${PORT}/health"
 compose exec -T app sh -c '! test -f /data/secrets.env' \
   || fail "configured boot wrote /data/secrets.env"
 
-log "PASS — zero-env, key-loss guard, and configured stack all passed"
+log "PASS — shared production image, identity restart/legacy upgrade, hosted refusal, key-loss guard, and configured stack"

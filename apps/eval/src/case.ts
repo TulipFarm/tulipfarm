@@ -68,7 +68,7 @@ export type Expectation =
       readonly turnIndex?: number;
       readonly text: string;
     }
-  /** The named Tool was denied on a call carrying this exact argument value. */
+  /** The named Tool was denied on a call carrying this exact argument value; "$" selects all arguments. */
   | {
       readonly kind: "tool_denied";
       readonly name: string;
@@ -389,6 +389,8 @@ export function synthesizeAttachment(file: CaseAttachment): CaseAttachment & { d
 
 export interface EvalCase {
   readonly id: string;
+  /** Offline safety composition only; never supplies runtime identity or hosted trust. */
+  readonly safetyHostingAuthority?: "independent" | "tulipfarm";
   /**
    * `l2` drives the Agent loop directly; `l3` drives the product's own Chat executor against a real
    * database. Nearly all the signal is at L2, and L3 is deliberately small — it exists to prove the
@@ -442,6 +444,8 @@ export interface EvalCase {
    * declaration itself.
    */
   readonly platformTools?: readonly string[];
+  /** L2 infrastructure ownership fixture; the real Tool gate decides explicit Soul pushes. */
+  readonly hostingAuthority?: "independent" | "tulipfarm";
   readonly toolResults?: readonly ScriptedToolResult[];
   /**
    * Model outputs replayed in order by the scripted binding.

@@ -1,6 +1,12 @@
 /** The HTTP adapter for `decideEffectivePermission` (authorization-design D4). */
 
-import { type AuthorityLayer, decideEffectivePermission } from "@tulipfarm/authz";
+import {
+  type AuthorityLayer,
+  decideEffectivePermission,
+  type HostingAuthority,
+  INFRASTRUCTURE_OWNERSHIP_MESSAGE,
+  infrastructureOwnershipLayer,
+} from "@tulipfarm/authz";
 import type { FastifyReply, FastifyRequest } from "fastify";
 import type { AuthorityPrincipal } from "../identity/authority-layers";
 import { callerAuthorityPrincipal } from "../identity/authority-layers";
@@ -84,6 +90,7 @@ export interface AuthorizationDivergence {
 }
 
 export interface AuthorizationGateOptions {
+  readonly hostingAuthority?: HostingAuthority;
   readonly mode?: AuthorizationMode;
   readonly observe?: (divergence: AuthorizationDivergence) => void;
 }
@@ -148,7 +155,13 @@ export function makeRequireAuthorization(
       return;
     }
     if (!(await check(principal, authorization))) {
-      await reply.code(403).send({ error: "forbidden" });
+      const infrastructureDenied = !decideEffectivePermission(
+        [infrastructureOwnershipLayer(options?.hostingAuthority ?? "independent")],
+        authorization
+      ).allowed;
+      await reply.code(403).send({
+        error: infrastructureDenied ? INFRASTRUCTURE_OWNERSHIP_MESSAGE : "forbidden",
+      });
     }
   };
 }
@@ -165,8 +178,16 @@ export function makeAuthorizationCheck(
   const mode = options?.mode ?? "enforcing";
   const observe = options?.observe;
   return async (principal, authorization) => {
+    if (
+      !decideEffectivePermission(
+        [infrastructureOwnershipLayer(options?.hostingAuthority ?? "independent")],
+        authorization
+      ).allowed
+    )
+      return false;
     const fallbackAllowed =
-      authorization.fallback === "authenticated" || isDeploymentAdmin(principal);
+      !principal.operationalScope &&
+      (authorization.fallback === "authenticated" || isDeploymentAdmin(principal));
     if (authorizer === undefined) {
       return fallbackAllowed;
     }
@@ -202,6 +223,6 @@ export function makeAuthorizationCheck(
     if (engineAllowed !== fallbackAllowed) {
       record(engineAllowed);
     }
-    return mode === "shadow" ? fallbackAllowed : engineAllowed;
+    return mode === "shadow" && !principal.operationalScope ? fallbackAllowed : engineAllowed;
   };
 }

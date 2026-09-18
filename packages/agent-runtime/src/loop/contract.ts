@@ -20,6 +20,7 @@ export interface AgentLoopLimits {
 
 export interface ExposedTool {
   readonly name: string;
+  readonly tier?: string;
   readonly description?: string;
   readonly inputSchema: Readonly<Record<string, unknown>>;
   /** Only non-mutating Tools may dispatch concurrently; absent means sequential. */

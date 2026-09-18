@@ -29,7 +29,7 @@ publication, approvals, integrations, events, and blob/vector/cache/queue ports.
 | `src/asset-ownership/` | Shared asset ownership records, Team shares, and ownership operations. |
 | `src/kill-switches/` | Durable mutation kill switches backing the effect-plane emergency stop. |
 | `src/memory-curation/` | The Curator's read side: which users gained a Turn since their watermark, the window of what those users typed (`role='user'` messages only), and the watermark itself. |
-| `src/system/` | Deployment-local public origins and durable product telemetry identity/preferences/report state; neither travels with Soul. |
+| `src/system/` | Shared validated runtime deployment context and immutable installation/business association; separate public origins and product telemetry state. None travels with Soul. |
 | `src/pagination.ts`, `src/vector-search.ts` | Cursor paging and pgvector index/distance SQL shared by every repository. |
 
 ## Rules
@@ -49,6 +49,10 @@ publication, approvals, integrations, events, and blob/vector/cache/queue ports.
 - `bundled-bucket.ts` is the one place that knows a bucket vendor, and the driver must never learn
   it: the server it provisions has no shell, so a host writes its secrets before it can boot.
 - Domain packages use repository/transaction ports; they never read another owner's tables directly.
+- `initializeRuntimeDeployment` runs after migration 135 in all three runtime entrypoints. Its
+  singleton identity/hosting association is immutable; configuration is not authority. Hosted
+  trust injection is test-only; production hosted startup remains unavailable.
+- Principal updates preserve existing operational scope; API-client lifecycle owns its projection.
 - Team lifecycle and Team-linked asset writes share the locked `teams` row; keep checks and the
   lifecycle mutation in one transaction.
 - If a storage rule repeats schema/Soul contracts, derive or reference the owner instead of copying.

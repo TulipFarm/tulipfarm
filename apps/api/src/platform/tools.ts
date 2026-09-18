@@ -9,7 +9,7 @@ import type {
 import { DEPLOYMENT_BUSINESS_ID } from "@tulipfarm/constants";
 import { PLATFORM_RUNTIME_TOOLS } from "@tulipfarm/platform-tools";
 import { compileYamlPlan, YamlPlanError } from "@tulipfarm/run-kernel";
-import { ajv, type definitions } from "@tulipfarm/schema";
+import { ajv, type definitions, SOUL_REPO_PUSH_TOOL_DECLARATION } from "@tulipfarm/schema";
 import {
   type CommandRefusalReason,
   SkillBashRunError,
@@ -1056,27 +1056,16 @@ export const routineDeleteTool = defineApiTool<PlatformToolContext>({
   },
 });
 
-const SOUL_REPO_PUSH_SCHEMA: Record<string, unknown> = {
-  type: "object",
-  additionalProperties: false,
-  properties: {},
-};
-const validateSoulRepoPush = ajv.compile(SOUL_REPO_PUSH_SCHEMA);
+const validateSoulRepoPush = ajv.compile(SOUL_REPO_PUSH_TOOL_DECLARATION.inputSchema);
 
 export const soulRepoPushTool = defineApiTool<PlatformToolContext>({
-  name: "soul_repo_push",
+  ...SOUL_REPO_PUSH_TOOL_DECLARATION,
   requiresAmbient: ["soul"],
-  description:
-    "Push committed soul changes to the configured git remote. Returns { pushed: false } when no remote is configured (local-only mode).",
-  mutating: true,
   tier: "platform",
-  inputSchema: SOUL_REPO_PUSH_SCHEMA,
   authorization: {
-    action: "platform.soul_repo.push",
-    resources: ["soul.repo"],
+    ...SOUL_REPO_PUSH_TOOL_DECLARATION.authorization,
     // Push publishes the whole repo state, so narrow artifact grants cannot apply.
     targets: wholeSoulRepoTarget,
-    dataClasses: ["soul_definition"],
   },
   handler: async (args, ctx) => {
     if (!validateSoulRepoPush(args))

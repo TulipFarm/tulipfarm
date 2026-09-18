@@ -87,6 +87,11 @@ export type { AutonomyLevel, TaintLevel } from "./guardrails/risk";
 export { autonomyWithin, taintWithin } from "./guardrails/risk";
 export type { Guest, GuestDenialReason, GuestStatus } from "./guests";
 export { assertGuestActive, GuestDeniedError, guestGrants } from "./guests";
+export {
+  type HostingAuthority,
+  INFRASTRUCTURE_OWNERSHIP_MESSAGE,
+  infrastructureOwnershipLayer,
+} from "./infrastructure";
 export type { JitDenialReason, JitGrantRequest } from "./jit";
 export { assertJitGrantIssuable, JitDeniedError } from "./jit";
 export type {
@@ -99,6 +104,13 @@ export {
   sessionNavigationCapabilities,
   withSessionNav,
 } from "./navigation";
+export type { OperationalScope } from "./operational";
+export {
+  narrowOperationalGrants,
+  OPERATIONAL_UPDATE_READ,
+  operationalScopeMatches,
+  operationalUpdateRequest,
+} from "./operational";
 export type {
   IdentityPort,
   IdentityResolution,

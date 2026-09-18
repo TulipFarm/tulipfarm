@@ -134,6 +134,25 @@ function require(condition: boolean, message: string): asserts condition {
 function validate(raw: unknown, file: string): EvalCase {
   require(typeof raw === "object" && raw !== null, `${file}: expected a JSON object`);
   const c = raw as Record<string, unknown>;
+  if (c.hostingAuthority !== undefined) {
+    require(c.tier === "l2" &&
+      (c.hostingAuthority === "independent" ||
+        c.hostingAuthority ===
+          "tulipfarm"), `${file}: hostingAuthority requires an L2 independent or tulipfarm fixture`);
+    require(Array.isArray(c.platformTools) &&
+      c.platformTools.includes(
+        "soul_repo_push"
+      ), `${file}: hostingAuthority requires the shipped soul_repo_push Tool`);
+    require(!Array.isArray(c.toolResults) ||
+      !c.toolResults.some(
+        (result) =>
+          typeof result === "object" && result !== null && result.name === "soul_repo_push"
+      ), `${file}: soul_repo_push ownership must use the real gate, not a scripted result`);
+  }
+  require(c.safetyHostingAuthority === undefined ||
+    c.safetyHostingAuthority === "independent" ||
+    c.safetyHostingAuthority ===
+      "tulipfarm", `${file}: safetyHostingAuthority must be independent or tulipfarm`);
   for (const field of ["id", "agent"] as const) {
     require(typeof c[field] === "string" &&
       (c[field] as string).length > 0, `${file}: missing required field "${field}"`);

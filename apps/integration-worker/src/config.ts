@@ -1,5 +1,5 @@
-/** v133 repairs Slack lease columns when Knowledge v132 was deployed first. */
-export const REQUIRED_SCHEMA_VERSION = 133;
+/** Migration 135 pins hosting authority, after the v133 Slack lease repair. */
+export const REQUIRED_SCHEMA_VERSION = 135;
 
 export interface IntegrationWorkerConfig {
   readonly databaseUrl: string;
@@ -49,7 +49,7 @@ export function loadConfig(env: Env = process.env): IntegrationWorkerConfig {
     databaseUrl: requireString(env, "DATABASE_URL"),
     port: positiveInt(env, "INTEGRATION_WORKER_PORT", 4030),
     drainTimeoutMs: positiveInt(env, "INTEGRATION_WORKER_DRAIN_TIMEOUT_MS", 15_000),
-    businessId: env.BUSINESS_ID?.trim() || "tulipfarm-local",
+    businessId: env.BUSINESS_ID ?? "tulipfarm-local",
     internalApiUrl: stripTrailingSlashes(requireString(env, "INTERNAL_API_URL")),
     internalApiCredential: requireString(env, "INTEGRATION_WORKER_API_CREDENTIAL"),
   };

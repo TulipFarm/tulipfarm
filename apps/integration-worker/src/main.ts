@@ -7,6 +7,7 @@ import {
   processResourceProbe,
   ResourceSampler,
 } from "@tulipfarm/observability";
+import { initializeRuntimeDeployment, runtimeDeploymentConfigFromEnv } from "@tulipfarm/storage";
 import { config as loadEnv } from "dotenv";
 import { watchForSlackChannelCredential } from "./channels";
 import { loadConfig, REQUIRED_SCHEMA_VERSION } from "./config";
@@ -86,6 +87,12 @@ export async function main(): Promise<void> {
     },
   });
 
+  const deployment = await initializeRuntimeDeployment(
+    pool,
+    runtimeDeploymentConfigFromEnv(config.businessId)
+  );
+  logger.info(`Runtime installation ${deployment.installationId} (${deployment.hostingAuthority})`);
+
   // Do not gate on `log_event`: missing telemetry degrades to stderr, not boot failure.
   logSink = new BatchingLogSink({
     service: "integration-worker",
@@ -125,7 +132,7 @@ export async function main(): Promise<void> {
   );
 
   const slackDeps = {
-    businessId: config.businessId,
+    businessId: deployment.businessId,
     pool,
     internalApiUrl: config.internalApiUrl,
     internalApiCredential: config.internalApiCredential,

@@ -1,25 +1,35 @@
 ---
 title: Guardrails
-description: Input, tool-call, and output guard stages that wrap every turn.
+description: See which safety checks are active, add stricter restrictions through chat, and understand how platform minimums stay enforced.
 ---
 
-Guardrails are policy checks around every turn. They are enforced in the worker, so a Slack turn and
-a web turn pass through the same stages before model input, tool dispatch, and answer persistence.
+Open **Business → Guardrails** to see the effective safety policy. A guardrail is a check that
+limits what an agent can receive, do, or answer. An agent is a configured assistant; each request
+it answers is a turn.
 
-## Three stages
+Select **Add guardrail** to describe a restriction in chat. Supported additions include blocking
+tools (actions an agent can call) by name or category, screening suspicious instructions more
+strictly, and blocking sensitive information in replies. Existing checks stay in place when a
+new check is added. Removal and replacement through the changeset API are not supported.
 
-| Stage | runs when |
+## When checks run
+
+The worker, which executes agent work, enforces the same checks for web chat, connected channels,
+and agent steps in routines (automations).
+
+| Stage | Runs when |
 | --- | --- |
 | **input** | Before the model sees the user's message |
 | **tool-call** | Before a tool call is dispatched |
+| **tool-result** | Before content returned by a tool reaches the model |
 | **output** | Before the assistant answer is persisted |
 
 A guard returns `pass`, `transform`, or `block`. Transforms feed the changed value to the next guard
 in the same stage. The first block short-circuits that stage. Input and output blocks answer with
 the guard's message; tool-call blocks return a denial the model can read while the turn continues.
 
-Each guard is bounded by a five-second timeout. A timeout or thrown error is treated as pass and
-logged, so a slow or broken guard cannot stall the turn.
+Checks have a timeout. Failed checks follow their configured failure behavior; the tool-result
+check blocks on failure rather than passing untrusted content to the model.
 
 ## Built-in guards
 
@@ -29,15 +39,27 @@ The shipped guards are pattern-based and do not call an LLM:
 | --- | --- | --- |
 | `prompt_injection` | input | Blocks common instruction-override phrases. |
 | `tool_blocklist` | tool-call | Blocks configured tool names, wildcard matches, or tool categories. |
+| `untrusted_content` | tool-result | Blocks instruction-override attempts in returned content. |
 | `content_filter` | output | Blocks configured sensitive patterns such as credit cards, SSNs, API keys, or email. |
 
 ## Policy source
 
-Policy lives in `soul/guardrails.yaml`. The API validates it, ships the resolved policy and digest
-with the turn context, and the worker compiles the same policy before executing. An absent or
-invalid config falls back to `DEFAULT_GUARDRAILS`, so the system fails safe and never runs
-unguarded.
+Chat saves business restrictions in the Soul, the versioned store of business configuration.
+The API reloads the saved checks and supplies the effective policy to the worker. New turns and
+new routine agent executions receive that policy; an already-running execution keeps its policy.
+Missing or invalid business configuration falls back to built-in defaults.
 
-Admins can view the policy in **Operate → Business → Guardrails** at `/business/guardrails`.
-Changes are proposed through
-`POST /api/v1/guardrails/changesets`; the read model is `GET /api/v1/guardrails`.
+## Platform minimums
+
+The hosted-runtime foundation keeps built-in platform protections separate from business
+configuration. Both sets of checks must pass. A weaker business setting cannot disable platform
+checks: an empty blocklist does not permit a tool the platform blocks, and lower sensitivity does
+not replace the platform's screening.
+
+Where platform minimums apply, the page identifies the effective restrictions and does not offer
+disable controls. Use **Add guardrail** to tighten supported checks. Arbitrary policy types,
+execution backends, and isolation settings are not guardrail overrides.
+
+Independent hosting retains its existing policy control. Connecting an optional paid service
+does not change hosting authority or weaken execution isolation. The hosted identity protocol is
+not available in this release; these safeguards do not enable production cloud onboarding.

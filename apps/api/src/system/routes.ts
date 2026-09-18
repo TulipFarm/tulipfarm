@@ -1,10 +1,11 @@
+import { OPERATIONAL_UPDATE_READ } from "@tulipfarm/authz";
 import { PublicOriginError, type PublicOriginsService } from "@tulipfarm/integrations";
 import type { KvService } from "@tulipfarm/kv";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import type { AuditService } from "../audit/service";
 import { ErrorSchema } from "../auth/schemas";
 import type { UserDoc } from "../auth/users";
-import type { RequireAuthorization } from "../authz/route-gate";
+import type { AuthorizationCheck, RequireAuthorization } from "../authz/route-gate";
 import { isNewerVersion, runningVersion } from "./version";
 
 type PreHandler = (req: FastifyRequest, reply: FastifyReply) => Promise<void>;
@@ -32,13 +33,15 @@ export interface SystemRoutesDeps {
 
 const PublicOriginsSchema = {
   type: "object",
-  required: ["webOrigin", "apiOrigin", "callbackUrl", "source", "locked"],
+  required: ["webOrigin", "apiOrigin", "callbackUrl", "source", "locked", "lockReason", "canWrite"],
   properties: {
     webOrigin: { type: "string" },
     apiOrigin: { type: "string" },
     callbackUrl: { type: "string" },
     source: { type: "string", enum: ["database", "environment", "default"] },
     locked: { type: "boolean" },
+    canWrite: { type: "boolean" },
+    lockReason: { type: "string", nullable: true, enum: ["hosting_operator", "environment", null] },
   },
 };
 
@@ -47,12 +50,14 @@ export function registerSystemRoutes(
   app: FastifyInstance,
   deps: SystemRoutesDeps,
   requireAuth: PreHandler,
-  requireAuthorization: RequireAuthorization
+  requireAuthorization: RequireAuthorization,
+  authorizationCheck?: AuthorizationCheck
 ): void {
   app.get(
     "/api/v1/system/update-check",
     {
       preHandler: requireAuth,
+      config: { operationalAction: OPERATIONAL_UPDATE_READ.action },
       schema: {
         description:
           "Report the running TulipFarm version and whether a newer stable release exists " +
@@ -71,11 +76,13 @@ export function registerSystemRoutes(
             },
           },
           401: ErrorSchema,
+          403: ErrorSchema,
         },
       },
     },
     async (req) => {
-      const version = runningVersion();
+      const running = runningVersion();
+      const version = releaseVersion(running) ?? (running === "latest" ? "latest" : "dev");
       const cached = await readCache(deps);
       if (cached) {
         return {
@@ -94,10 +101,10 @@ export function registerSystemRoutes(
         });
         if (res.ok) {
           const data = (await res.json()) as { tag_name?: unknown };
-          latest = typeof data.tag_name === "string" ? data.tag_name.replace(/^v/, "") : null;
+          latest = releaseVersion(data?.tag_name);
         }
-      } catch (err) {
-        req.log.warn({ err }, "update check: GitHub releases lookup failed");
+      } catch {
+        req.log.warn({ event: "system.update_check.unavailable" }, "release lookup unavailable");
       }
       const checkedAt = new Date().toISOString();
       await writeCache(deps, { latest, checkedAt });
@@ -112,6 +119,21 @@ export function registerSystemRoutes(
 
   const publicOrigins = deps.publicOrigins;
   if (!publicOrigins) return;
+  const project = async (req: FastifyRequest) => {
+    const origins = await publicOrigins.refresh();
+    return {
+      ...origins,
+      canWrite:
+        !origins.locked &&
+        req.principal !== undefined &&
+        authorizationCheck !== undefined &&
+        (await authorizationCheck(req.principal, {
+          action: "deployment.public_origins.write",
+          resourceType: "deployment.public_origins",
+          fallback: "admin",
+        })),
+    };
+  };
 
   app.get(
     "/api/v1/system/public-origins",
@@ -125,7 +147,7 @@ export function registerSystemRoutes(
         response: { 200: PublicOriginsSchema, 401: ErrorSchema },
       },
     },
-    async () => publicOrigins.refresh()
+    project
   );
 
   app.put(
@@ -165,9 +187,9 @@ export function registerSystemRoutes(
     async (req, reply) => {
       const body = req.body as { webOrigin: string; apiOrigin?: string | null };
       try {
-        const origins = await publicOrigins.save(body);
+        await publicOrigins.save(body);
         await auditPublicOriginChange(deps.audit, req, "deployment.public_origins.update");
-        return origins;
+        return project(req);
       } catch (error) {
         if (error instanceof PublicOriginError) {
           return reply
@@ -204,9 +226,9 @@ export function registerSystemRoutes(
     },
     async (req, reply) => {
       try {
-        const origins = await publicOrigins.reset();
+        await publicOrigins.reset();
         await auditPublicOriginChange(deps.audit, req, "deployment.public_origins.reset");
-        return origins;
+        return project(req);
       } catch (error) {
         if (error instanceof PublicOriginError && error.code === "environment_locked") {
           return reply.code(409).send({ error: error.message });
@@ -231,19 +253,36 @@ async function auditPublicOriginChange(
 
 async function readCache(deps: SystemRoutesDeps): Promise<CachedRelease | null> {
   if (!deps.kv) return null;
-  const entry = await deps.kv.get("system", undefined, KV_NAMESPACE, KV_KEY);
-  const value = entry?.value as CachedRelease | undefined;
-  return value && typeof value.checkedAt === "string" ? value : null;
+  try {
+    const entry = await deps.kv.get("system", undefined, KV_NAMESPACE, KV_KEY);
+    const value = entry?.value as CachedRelease | undefined;
+    if (!value || typeof value.checkedAt !== "string") return null;
+    const checkedAt = new Date(value.checkedAt);
+    if (!Number.isFinite(checkedAt.getTime())) return null;
+    return { latest: releaseVersion(value.latest), checkedAt: checkedAt.toISOString() };
+  } catch {
+    return null;
+  }
 }
 
 async function writeCache(deps: SystemRoutesDeps, value: CachedRelease): Promise<void> {
   if (!deps.kv) return;
-  await deps.kv.set(
-    "system",
-    undefined,
-    KV_NAMESPACE,
-    KV_KEY,
-    value,
-    new Date(Date.now() + CACHE_TTL_MS)
-  );
+  try {
+    await deps.kv.set(
+      "system",
+      undefined,
+      KV_NAMESPACE,
+      KV_KEY,
+      value,
+      new Date(Date.now() + CACHE_TTL_MS)
+    );
+  } catch {
+    // An optional update-notice cache must not expose storage errors or fail the request.
+  }
+}
+
+function releaseVersion(value: unknown): string | null {
+  return typeof value === "string" && /^v?\d{1,9}\.\d{1,9}\.\d{1,9}$/.test(value)
+    ? value.replace(/^v/, "")
+    : null;
 }

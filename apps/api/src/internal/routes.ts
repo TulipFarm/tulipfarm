@@ -410,7 +410,7 @@ export function registerInternalTurnRoutes(
       const tools = await guard(reply, () =>
         deps.host.agentTools(DEPLOYMENT_BUSINESS_ID, runId, agent)
       );
-      if (tools !== undefined) return reply.send({ tools });
+      if (tools !== undefined) return reply.send({ tools, guardrails: deps.host.guardrailPolicy });
     }
   );
 

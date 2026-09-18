@@ -1,3 +1,4 @@
+import { INFRASTRUCTURE_OWNERSHIP_MESSAGE } from "@tulipfarm/authz";
 import { DEPLOYMENT_BUSINESS_ID } from "@tulipfarm/constants";
 import { CURRENCY_CODES, isCurrencyCode } from "@tulipfarm/schema";
 import type { SecretsService } from "@tulipfarm/secrets";
@@ -10,11 +11,12 @@ import {
   UnsafePathError,
   walkTree,
 } from "@tulipfarm/soul";
+import type { RuntimeDeploymentContext } from "@tulipfarm/storage";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import type { AuditService } from "../audit/service";
 import { makeSoulAuditWriter, redactRemoteUrl } from "../audit/soul-write";
 import { ErrorSchema } from "../auth/schemas";
-import type { RequireAuthorization } from "../authz/route-gate";
+import type { AuthorizationCheck, RequireAuthorization } from "../authz/route-gate";
 import { mergeSoulConfig, readSoulConfig, SOUL_GIT_CREDENTIAL_KEY } from "../setup/soul-config";
 import { commitActorFromRequest } from "./commit-actor";
 
@@ -46,7 +48,9 @@ export function registerSoulRoutes(
   secretsService?: SecretsService,
   // Optional: record direct Soul config writes as audit evidence. The git-remote route below is
   // the sharpest of these — it decides where the whole business's Soul repository is pushed.
-  audit?: AuditService
+  audit?: AuditService,
+  deployment?: RuntimeDeploymentContext,
+  authorizationCheck?: AuthorizationCheck
 ): void {
   const auditWrite = makeSoulAuditWriter(audit);
   // Recursive node schema for the soul tree response (self-referencing children).
@@ -84,6 +88,7 @@ export function registerSoulRoutes(
             required: ["pushed"],
           },
           401: ErrorSchema,
+          403: ErrorSchema,
         },
       },
     },
@@ -356,6 +361,10 @@ export function registerSoulRoutes(
             properties: {
               remoteUrl: { type: "string" },
               credentialSet: { type: "boolean" },
+              locked: { type: "boolean" },
+              lockReason: { type: "string", nullable: true },
+              canWrite: { type: "boolean" },
+              canSync: { type: "boolean" },
               status: {
                 type: "object",
                 properties: {
@@ -376,27 +385,44 @@ export function registerSoulRoutes(
                 ],
               },
             },
-            required: ["credentialSet", "status"],
+            required: ["credentialSet", "status", "locked", "lockReason", "canWrite", "canSync"],
           },
           401: ErrorSchema,
         },
       },
     },
-    async (_req, reply) => {
+    async (req, reply) => {
+      const locked = deployment?.hostingAuthority === "tulipfarm";
+      const allowed = async (action: string) =>
+        !locked &&
+        req.principal !== undefined &&
+        authorizationCheck !== undefined &&
+        (await authorizationCheck(req.principal, {
+          action,
+          resourceType: "soul.git_config",
+          fallback: "admin",
+        }));
       const [config, secrets, status] = await Promise.all([
         readSoulConfig(gitSync.path),
         secretsService.list(),
         gitSync.getStatus(),
       ]);
       return reply.send({
-        remoteUrl: config.gitRemoteUrl,
-        credentialSet: secrets.some((s) => s.key === SOUL_GIT_CREDENTIAL_KEY),
+        remoteUrl: locked ? undefined : config.gitRemoteUrl,
+        credentialSet: !locked && secrets.some((s) => s.key === SOUL_GIT_CREDENTIAL_KEY),
+        locked,
+        lockReason: locked ? INFRASTRUCTURE_OWNERSHIP_MESSAGE : null,
+        canWrite: await allowed("soul.git_config.write"),
+        canSync: await allowed("soul.git_config.sync"),
         status: {
           remoteConfigured: status.remoteConfigured,
           ahead: status.ahead,
           behind: status.behind,
           headSha: status.headSha,
-          lastSyncError: status.lastSyncError,
+          lastSyncError:
+            locked && status.lastSyncError
+              ? "Repository sync failed. Contact your hosting operator."
+              : status.lastSyncError,
           lastSyncAt: status.lastSyncAt,
         },
       });
@@ -422,6 +448,7 @@ export function registerSoulRoutes(
           204: { type: "null" },
           400: ErrorSchema,
           401: ErrorSchema,
+          403: ErrorSchema,
         },
       },
     },
@@ -468,6 +495,7 @@ export function registerSoulRoutes(
           409: ErrorSchema,
           422: ErrorSchema,
           500: ErrorSchema,
+          403: ErrorSchema,
         },
       },
     },

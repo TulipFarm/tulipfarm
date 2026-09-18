@@ -11,6 +11,7 @@ export type GuardrailItem = {
 };
 
 export type GuardrailsModel = {
+  platformConstrained?: boolean;
   revision: string;
   source: "custom" | "default";
   items: GuardrailItem[];

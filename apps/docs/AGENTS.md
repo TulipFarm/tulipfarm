@@ -23,6 +23,7 @@ it needs, never the one whose topic it resembles.
 | --- | --- |
 | `content/docs/index.mdx` | The three-track chooser. Every reader lands here. |
 | `content/docs/self-hosting/` | Running the server: install, deploy, TLS, backup, upgrade. |
+| `content/docs/self-hosting/how-boot-modes-work.mdx` | Independent setup, durable runtime identity, fail-closed hosted limits, and configuration ownership. |
 | `content/docs/administration/` | Configuring the instance: models, credentials, people, integrations. |
 | `content/docs/using-tulipfarm/` | Building and running work by chat. No admin access, ever. |
 | `content/docs/reference/`, `content/docs/security/` | Shared lookup: env vars, commands, API, roles, security. |

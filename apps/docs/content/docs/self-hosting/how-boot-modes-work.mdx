@@ -3,11 +3,14 @@ title: How boot modes work
 description: How a fresh TulipFarm instance decides whether to open the setup wizard, seed itself from the environment, or do neither.
 ---
 
-When TulipFarm starts for the very first time, it has to answer one question: **does an admin
+On an independently hosted installation, TulipFarm first asks: **does an admin
 already exist?**
 
 Everything on this page follows from that. There are two ways an instance gets its first admin, and
 the instance chooses between them by itself.
+
+Independent hosting is the default. Explicit TulipFarm-hosted configuration is checked before
+either setup path can open, as described below.
 
 ## The decision
 
@@ -87,6 +90,108 @@ configuration, not your data.
 
 This is the single most important thing to understand before you design a backup:
 [back up and restore](/docs/self-hosting/back-up-and-restore) covers what to actually copy.
+
+## Installation identity
+
+Before either setup path opens, TulipFarm records a runtime-installation identity in PostgreSQL.
+It identifies this installation, not the business's users or their permissions. The API and both
+workers read the same identity on every start; restarting or upgrading does not replace it.
+
+The local business identifier, `BUSINESS_ID`, remains separate. Existing installations keep
+their business identifier, accounts, memberships, and history. Two installations using the
+default `tulipfarm-local` business identifier still receive different installation identities.
+Neither identifier proves global customer ownership or grants access to managed services.
+
+Independent hosting remains the default. This identity adds no cloud login or managed-service
+dependency to startup, local login, or supported direct-provider credentials. It does not enroll
+the installation in a service, grant remote administration, or provide a migration feature.
+
+Normally, leave `RUNTIME_INSTALLATION_ID` unset or empty. If supplied to the API and workers, it
+must be a UUID matching the stored identity; on an uninitialized database it establishes that identity.
+A conflicting installation or business identifier stops startup rather than replacing the
+stored association. Restore the matching configuration and database instead of deleting the
+identity row.
+
+Runtime identity is separate from the anonymous identifier used for product telemetry. This
+does not change the [telemetry policy](/docs/security/telemetry).
+
+## Explicit hosted configuration
+
+`RUNTIME_HOSTING_AUTHORITY` identifies who hosts the installation. Leave it unset or empty, or
+use `independent`, for supported self-hosting. The value `tulipfarm` explicitly requests TulipFarm
+hosting; it does not enroll a business, establish customer ownership, or grant service access.
+Any other non-empty value is a configuration error, not a request for the default.
+
+**Production TulipFarm-hosted startup is unavailable in this release.** The authenticated
+enrollment and login protocol has not shipped. Selecting `tulipfarm` therefore stops startup,
+even with a valid installation UUID. There is no environment switch that supplies trusted
+identity verification.
+
+The API and both workers validate the same stored installation, business, and hosting
+association before serving requests or starting work. Existing databases retain independent
+hosting when upgraded. A conflicting hosting setting cannot change that association. Failed
+startup exits without a ready HTTP listener; it does not expose the first-admin wizard, seed
+an independent admin account, or start worker loops.
+
+For supported self-hosting, correct an accidental hosted setting to `independent` consistently
+on all three processes. For a stored-identity conflict, restore the matching configuration and
+database. Do not delete the identity row or change identifiers to bypass the refusal.
+
+Conformance tests can explicitly inject test-only identity verification. A successful
+test-hosted assembly keeps independent setup closed, while readiness still checks its database.
+That result proves the startup contract, not production hosting, enrollment, login, or outage
+recovery. Tests distinguish invalid local configuration from unavailable identity verification;
+this release defines no remote-outage or cached-login policy.
+
+Hosting configuration does not relax production execution safeguards. A missing or failing
+execution backend does not trigger local or development execution. Existing isolation evidence,
+compute and network limits, and controlled credential delivery remain required.
+
+### Configuration ownership
+
+Independent hosting keeps local infrastructure control. **Business → About** can change public
+addresses unless `PUBLIC_ORIGINS_LOCKED=true`; **Business → Soul** can manage the configuration
+repository's remote. Purchasing model or integration access does not change that ownership.
+
+The test-hosted configuration also checks the ownership boundary: public addresses and repository
+controls are marked as managed by the hosting operator. Direct requests and Agent-invoked
+repository pushes cannot override that restriction. Saved public addresses and repository
+selections do not replace the host's environment configuration. Public web and API addresses
+remain separate; callbacks and webhooks use the API address.
+
+Business settings and supported direct model and integration credentials remain available under
+their normal permissions. Database and file-storage locations, encryption keys, execution
+infrastructure, and official-service endpoints stay deployment configuration, not new customer
+settings. A locked control tells you to contact the hosting operator; a failed settings read does
+not enable editing. These checks do not enable production hosting or a managed-service connection.
+
+Business restrictions can tighten supported guardrails, the checks that limit agent behavior.
+They cannot replace hosted platform minimums with weaker settings. See
+[guardrails](/docs/administration/how-guardrails-work#platform-minimums) for the effective policy
+and the supported way to add restrictions.
+
+### What the shared release proves
+
+The API, the worker that runs scheduled and chat work, and the integration worker that handles
+third-party delivery come from one versioned public image. There is no separate cloud build.
+Use the same version and deployment settings for all three.
+
+The image checks exercise independent startup, persisted identity after restart, an isolated
+legacy-state upgrade fixture, and rejected production hosting settings. Separate assembled
+runtime tests check business changes, denied infrastructure changes, and the boundary between
+business permissions and operational credentials. Test-only hosted identity verification is
+not included as a production login path.
+
+An operational credential identifies a service performing a scoped maintenance task. It does
+not grant access to chats, records, provider secrets, or business actions. Support content
+access stays denied; there is no staff bypass or support-grant feature in this release. This
+application rule does not mean the infrastructure host cannot access stored data.
+
+Central cloud login, managed model and integration backends, temporary support grants,
+lifecycle orchestration, and migration remain separate deliverables. An image check or a
+passing test-hosted assembly is not proof that those services exist. Supported direct-provider
+credentials still use the chosen provider; a failed connection is an error, not a successful
+managed connection.
 
 ## Where to go next
 

@@ -7,6 +7,7 @@ import type {
 } from "@tulipfarm/agent-runtime";
 import { extractText } from "@tulipfarm/files";
 import { RunInterruptedError } from "@tulipfarm/run-kernel";
+import { canonicalHash, validateGuardrailsConfig } from "@tulipfarm/schema";
 import { MARKETPLACE_SKILL_TOOL_TIMEOUTS_MS, type TurnAuthority } from "@tulipfarm/tool-host";
 import type {
   AssistantMessageWriteResult,
@@ -233,6 +234,20 @@ export class HttpTurnHost
       `/api/v1/internal/runs/${encodeURIComponent(runId)}/agent-tools${suffix}`
     );
     return body.tools;
+  }
+
+  async agentGuardrails(runId: string, agentName: string): Promise<Record<string, unknown>> {
+    const body = await this.client.require<{
+      guardrails: { policy: Record<string, unknown>; digest: string };
+    }>(
+      "GET",
+      `/api/v1/internal/runs/${encodeURIComponent(runId)}/agent-tools?agent=${encodeURIComponent(agentName)}`
+    );
+    const policy = validateGuardrailsConfig(body.guardrails?.policy);
+    if (canonicalHash(policy) !== body.guardrails.digest) {
+      throw new Error("Routine guardrail policy digest mismatch");
+    }
+    return policy;
   }
 
   async dispatch(request: ToolDispatchRequest): Promise<ToolDispatchResult> {

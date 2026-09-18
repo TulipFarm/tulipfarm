@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1
-# Single TulipFarm app image: Fastify serves the API + the built
-# web SPA + in-process pg-boss workers. Multi-arch (amd64/arm64). Postgres-only.
+# One versioned runtime image: API + built web SPA, durable worker, and integration worker
+# run as separate processes from the same artifact. Multi-arch (amd64/arm64). Postgres-only.
 #
 # Slim runtime: the API + workspace TS packages are esbuild-bundled into one
 # server.cjs (no tsx, no source), and only the prod dependency closure (via
@@ -60,9 +60,7 @@ RUN pnpm --filter @tulipfarm/worker exec esbuild src/main.ts \
   && pnpm --filter @tulipfarm/worker exec esbuild src/hooks/ingress-hook-worker.ts \
   --bundle --platform=node --target=node26 --format=cjs --outfile=dist/ingress-hook-worker.cjs \
   --external:isolated-vm
-# The integration worker: a third long-running entrypoint off the same image. Boot skeleton only
-# today — no consumer loop is registered yet — but ships alongside the API and worker so schema
-# agreement is never a deploy-ordering problem.
+# Integration ingress and delivery share the release artifact with the API and durable worker.
 RUN pnpm --filter @tulipfarm/integration-worker exec esbuild src/main.ts \
   --bundle --platform=node --target=node26 --format=cjs --outfile=dist/integration-worker.cjs \
   --external:pg

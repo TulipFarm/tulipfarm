@@ -31,4 +31,5 @@ export {
   ProductTelemetryStore,
 } from "./system/product-telemetry-store";
 export * from "./system/public-origin-store";
+export * from "./system/runtime-deployment";
 export * from "./tasks";

@@ -75,7 +75,9 @@ export function registerSoulRouteFamily(
       requireAuth,
       requireAuthorization,
       opts.secretsService,
-      opts.auditService
+      opts.auditService,
+      opts.deployment,
+      authorizationCheck
     );
     if (opts.soulLoader && opts.soulWriter) {
       registerResourceTypeRoutes(

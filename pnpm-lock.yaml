@@ -285,6 +285,9 @@ importers:
       '@tulipfarm/tsconfig':
         specifier: workspace:*
         version: link:../../packages/tsconfig
+      '@tulipfarm/turn-executor':
+        specifier: workspace:*
+        version: link:../../packages/turn-executor
       '@types/node':
         specifier: ^26.2.0
         version: 26.2.0
@@ -382,6 +385,9 @@ importers:
       '@tulipfarm/agent-runtime':
         specifier: workspace:*
         version: link:../../packages/agent-runtime
+      '@tulipfarm/authz':
+        specifier: workspace:*
+        version: link:../../packages/authz
       '@tulipfarm/built-in-agents':
         specifier: workspace:*
         version: link:../../packages/built-in-agents

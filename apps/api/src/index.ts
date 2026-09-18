@@ -6,6 +6,7 @@ import {
   createSubagentSpawning,
   delegationCatalogOf,
   GuardrailsService,
+  platformGuardrailsFor,
 } from "@tulipfarm/agent-runtime";
 import {
   AssetOwnershipAccessService,
@@ -139,6 +140,7 @@ import {
   PublicOriginStore,
   RunEventStore,
   RunStore,
+  runtimeDeploymentConfigFromEnv,
   SoulRepositoryStore,
   TaskRepo,
   WaitStore,
@@ -301,7 +303,6 @@ import { registerSpendAlertSchedule, SPEND_ALERT_QUEUE } from "./observability/s
 import { createObservabilityTelemetryPort } from "./observability/telemetry-port";
 import { OtlpTracesExporter } from "./observability/traces";
 import { PackService } from "./packs/service";
-import { runPgMigrations } from "./pg-migrate";
 import { createAgentDelegation, startChildConversation } from "./platform/delegation";
 import { subagentAnswers } from "./platform/subagent-answers";
 import { startSubagentRun } from "./platform/subagent-run";
@@ -315,6 +316,7 @@ import { ResourceSchemaCompatibilityService } from "./resources/schema-compatibi
 import { runAuthorizers } from "./runs/authorization";
 import { runCanceller } from "./runs/cancel";
 import { RunEventNotifyListener } from "./runs/notify-listener";
+import { initializeApiDeployment } from "./runtime/deployment";
 import {
   childRoutineTrigger,
   integrationInvoker,
@@ -464,7 +466,13 @@ async function boot() {
     // a deployment whose file store never came up should say so, not serve requests that fail.
     await ensureBundledBucket({ dataDir: resolveDataDir() ?? process.cwd() });
     const migrationPool = await connectPg();
-    await runPgMigrations(migrationPool);
+    const deployment = await initializeApiDeployment(
+      migrationPool,
+      runtimeDeploymentConfigFromEnv(DEPLOYMENT_BUSINESS_ID)
+    );
+    console.info(
+      `Runtime installation ${deployment.installationId} (${deployment.hostingAuthority})`
+    );
     // After migrations, on the owner pool (which has no statement timeout): an ANN index left
     // invalid by an interrupted build is invisible to the planner but still costs every write.
     await ensureEmbeddingIndexes(migrationPool, (msg) => console.log(msg));
@@ -482,7 +490,9 @@ async function boot() {
       );
     const publicOrigins = new PublicOriginsService(
       new PublicOriginStore(pool),
-      DEPLOYMENT_BUSINESS_ID
+      deployment.businessId,
+      process.env,
+      deployment
     );
     await publicOrigins.initialize();
     /**
@@ -513,7 +523,14 @@ async function boot() {
     let gitRemoteUrl: string | undefined;
     let gitCredentialProvider: CredentialProvider;
 
-    if (process.env.SOUL_PATH) {
+    if (deployment.hostingAuthority === "tulipfarm") {
+      soulPath =
+        process.env.SOUL_PATH ??
+        resolveSoulPath(process.env.SOUL_ROOT as string, deployment.businessId);
+      gitRemoteUrl = process.env.SOUL_GIT_REMOTE_URL;
+      const gitCredential = process.env.SOUL_GIT_CREDENTIAL;
+      gitCredentialProvider = async () => gitCredential;
+    } else if (process.env.SOUL_PATH) {
       soulPath = process.env.SOUL_PATH;
       // Soul persists a remote (soul.yaml's gitRemoteUrl + the "soul-git-credential" secret),
       const persistedSoulConfig = await readSoulConfig(soulPath);
@@ -643,6 +660,7 @@ async function boot() {
       .initialize()
       .catch(() => console.warn("Product telemetry initialization deferred"));
     await bootstrapFromEnv({
+      deployment,
       productTelemetry,
       telemetryDefault: productTelemetryPolicy(process.env).maxLevel,
       userRepo,
@@ -794,7 +812,9 @@ async function boot() {
         : createHookExecutor(process.env.DATABASE_URL as string, runtimePoolOptions());
 
     const llmService = new LlmService();
-    const guardrailsService = new GuardrailsService();
+    const guardrailsService = new GuardrailsService(
+      platformGuardrailsFor(deployment.hostingAuthority)
+    );
     const conversationRepo = new PgConversationRepo(pool);
     const messageRepo = new PgMessageRepo(pool);
     const feedbackRepo = new FeedbackRepo(pool);
@@ -1603,6 +1623,7 @@ async function boot() {
     // with, so a worker credential is a key to a Run rather than a principal of its own.
     const internalTurns = {
       host: new InternalTurnHost({
+        guardrails: guardrailsService,
         runs: runStore,
         store: conversationStore,
         events: runEventStore,
@@ -1673,6 +1694,7 @@ async function boot() {
         }),
         files: fileService,
         tools: buildDelegatedToolDispatch({
+          deployment,
           links: childLinks,
           catalog: delegationCatalog,
           registry: toolRegistry,
@@ -1810,6 +1832,7 @@ async function boot() {
       productTelemetry,
       publicOrigins,
       readiness: pool,
+      deployment,
       logSink,
       logRepo,
       resourceRepo: new PgResourceRepo(pool),
@@ -1823,6 +1846,7 @@ async function boot() {
       tokenRepo,
       identity: {
         apiClientRepo,
+        deployment,
         externalIdentityRepo,
         externalIdentityUnlinker,
         channelBind,
@@ -2077,7 +2101,9 @@ async function boot() {
           llmProbe(llmService, { reachability: modelReachability(llmService) }),
           embeddingsProbe(embeddingService),
         ],
-        guardrailsConfig: () => soulLoader.guardrailsConfig,
+        guardrailsConfig: () => guardrailsService.config,
+        platformConstrained: () => guardrailsService.platformConstrained,
+        guardrailsSource: () => guardrailsService.source,
         teamMigrationReport: async (businessId) => {
           const present = await pool.query<{ exists: boolean }>(
             "SELECT to_regclass('public.team_migration_report') IS NOT NULL AS exists"

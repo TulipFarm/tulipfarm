@@ -67,3 +67,26 @@ test("keeps the create path available beside configured guardrails", async () =>
   expect(screen.getByText(/Custom Soul policy is active/)).toBeInTheDocument();
   expect(screen.getByRole("link", { name: "Add guardrail" })).toBeInTheDocument();
 });
+
+test("explains hosted minimums without offering a weakening control", async () => {
+  vi.mocked(getGuardrails).mockResolvedValue({
+    revision: "hosted123",
+    source: "custom",
+    platformConstrained: true,
+    items: [
+      {
+        id: "tool-call:0:tool_blocklist",
+        name: "tool_blocklist",
+        scope: "tool-call",
+        source: "custom",
+        policy: { guard: "tool_blocklist", block: ["run_command", "record_delete"] },
+      },
+    ],
+  });
+  renderPage();
+  expect(
+    await screen.findByText(/Platform minimums and business restrictions/)
+  ).toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: "Turn off" })).not.toBeInTheDocument();
+  expect(screen.getByRole("link", { name: "Add guardrail" })).toBeInTheDocument();
+});

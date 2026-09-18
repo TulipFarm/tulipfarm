@@ -186,6 +186,7 @@ export const MEMBER_ALLOWED_SURFACES: readonly {
   readonly enforcedIn: string;
 }[] = [
   { type: "activity", actions: ["*"], enforcedIn: "activity/routes.ts" },
+  { type: "deployment", actions: ["deployment.update.read"], enforcedIn: "system/routes.ts" },
   { type: "approval", actions: ["*"], enforcedIn: "approvals/routes.ts" },
   { type: "api_token", actions: ["*"], enforcedIn: "auth/routes/tokens.ts" },
   { type: "auth_session", actions: ["*"], enforcedIn: "auth/routes.ts; identity/routes.ts" },

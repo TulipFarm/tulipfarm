@@ -74,12 +74,15 @@ function setSessionCookies(
 // so the web client can rely on an explicit 200 rather than treating 404 as "not needed".
 export function registerSetupStatusRoute(
   app: FastifyInstance,
-  deps: Pick<SetupDeps, "userRepo" | "soulPath"> & { rateLimiter?: RateLimiter }
+  deps: Pick<SetupDeps, "userRepo" | "soulPath"> & {
+    rateLimiter?: RateLimiter;
+    independentSetup?: boolean;
+  }
 ): void {
   const { userRepo, soulPath, rateLimiter } = deps;
   // Latches once the answer can no longer change, so a settled instance costs neither a soul read
   // nor a user count.
-  let done = false;
+  let done = deps.independentSetup === false;
   const limit = rateLimiter
     ? makeRateLimitHook(rateLimiter, (req) => `rl:setup:${req.ip}`, 30, 60_000)
     : undefined;

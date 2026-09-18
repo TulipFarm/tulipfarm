@@ -41,6 +41,8 @@ type RuntimeOperationalDeps = {
   runCommands?: Pick<RuntimeRunCommandService, "execute">;
   healthProbes: readonly HealthProbe[];
   guardrailsConfig(): unknown;
+  platformConstrained?(): boolean;
+  guardrailsSource?(): "custom" | "default";
   teamMigrationReport?(businessId: string): Promise<TeamMigrationReportReadModel>;
   /** Decides operator authority; absent falls back to deployment admin. */
   authorizationCheck?: AuthorizationCheck;
@@ -287,13 +289,18 @@ export function createRuntimeOperationalApi(deps: RuntimeOperationalDeps): Opera
       const { config, source } = resolveGuardrailsConfig(
         typeof raw === "object" && raw !== null ? (raw as Record<string, unknown>) : null
       );
-      return { revision: canonicalHash(config), source, items: guardrailItems(config, source) };
+      return {
+        revision: canonicalHash(config),
+        source: deps.guardrailsSource?.() ?? source,
+        platformConstrained: deps.platformConstrained?.() ?? false,
+        items: guardrailItems(config, deps.guardrailsSource?.() ?? source),
+      };
     },
 
     async proposeGuardrailChangeset() {
       return notImplemented(
         "Guardrail authoring",
-        "Soul writes do not route through the changeset gateway yet"
+        "removal and replacement are unsupported; use guardrail_forge in Chat to add restrictions. Platform minimums cannot be overridden"
       );
     },
 

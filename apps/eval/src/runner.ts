@@ -363,7 +363,7 @@ async function runTrial(
   if (evalCase.tier === "l3") return await runL3Trial(evalCase, soul, binding, trial, judge);
   const vacuous = evalCase.expect.length === 0;
   const tools = toolDispatcher(evalCase);
-  const guards = turnGuardrails(soul, `${evalCase.id}#${trial}`);
+  const guards = turnGuardrails(soul, `${evalCase.id}#${trial}`, evalCase.safetyHostingAuthority);
   let lastOutput: ModelOutput | undefined;
   const attached = (evalCase.attachments ?? []).map(synthesizeAttachment);
   const declaredFiles = [

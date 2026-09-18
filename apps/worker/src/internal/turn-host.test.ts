@@ -1,4 +1,5 @@
 import { RunInterruptedError } from "@tulipfarm/run-kernel";
+import { canonicalHash } from "@tulipfarm/schema";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { InternalApiClient, InternalApiError } from "./client";
 import { HttpTurnHost } from "./turn-host";
@@ -59,6 +60,24 @@ function delayedResponse(delayMs: number, response: Response) {
 }
 
 describe("HttpTurnHost", () => {
+  it("fetches the API's live policy for the exact Run and Agent", async () => {
+    const policy = { "tool-call": [{ guard: "tool_blocklist", block: ["kv_set"] }] };
+    const { turns, urls } = host(() =>
+      json({ tools: [], guardrails: { policy, digest: canonicalHash(policy) } })
+    );
+    expect(await turns.agentGuardrails("run-1", "triage")).toEqual(policy);
+    expect(urls).toEqual(["http://api:4010/api/v1/internal/runs/run-1/agent-tools?agent=triage"]);
+  });
+
+  it.each([
+    { tools: [] },
+    { guardrails: { policy: {}, digest: "wrong" } },
+    { guardrails: { policy: { input: [{ guard: "disabled" }] }, digest: "wrong" } },
+  ])("refuses missing, inconsistent or unsupported live policy", async (response) => {
+    const { turns } = host(() => json(response));
+    await expect(turns.agentGuardrails("run-1", "triage")).rejects.toThrow();
+  });
+
   afterEach(() => {
     vi.useRealTimers();
     vi.restoreAllMocks();

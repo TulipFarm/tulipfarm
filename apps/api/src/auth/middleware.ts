@@ -1,5 +1,7 @@
-import { PrincipalDeniedError } from "@tulipfarm/authz";
+import { type OperationalScope, PrincipalDeniedError } from "@tulipfarm/authz";
 import type { FastifyReply, FastifyRequest } from "fastify";
+import { authorizeOperationalRequest } from "../authz/operational";
+import type { RouteAuthorizer } from "../authz/route-gate";
 import {
   API_CLIENT_TOKEN_PREFIX,
   type ApiClientRepo,
@@ -38,6 +40,8 @@ export interface RequireAuthDeps {
   userRepo: UserRepo;
   tokenRepo: TokenRepo;
   apiClientRepo?: ApiClientRepo;
+  deployment?: OperationalScope;
+  routeAuthorizer?: RouteAuthorizer;
 }
 
 function denialFromPrincipalError(error: unknown): AuthDenialReason | null {
@@ -82,7 +86,12 @@ export function makeRequireAuth(deps: RequireAuthDeps) {
 
       if (rawToken.startsWith(API_CLIENT_TOKEN_PREFIX)) {
         if (!apiClientRepo) return deny("unknown_client");
-        const client = await authenticateApiClient(apiClientRepo, rawToken);
+        let client: Awaited<ReturnType<typeof authenticateApiClient>>;
+        try {
+          client = await authenticateApiClient(apiClientRepo, rawToken);
+        } catch {
+          return deny("unknown_client");
+        }
         if (!client) return deny("unknown_client");
         try {
           assertApiClientAuthenticatable(client);
@@ -92,6 +101,17 @@ export function makeRequireAuth(deps: RequireAuthDeps) {
           return deny(reason);
         }
         req.principal = apiClientPrincipal(client);
+        if (
+          client.operationalScope &&
+          !(await authorizeOperationalRequest(
+            req,
+            req.principal,
+            deps.deployment,
+            deps.routeAuthorizer
+          ))
+        ) {
+          return reply.code(403).send({ error: "forbidden" });
+        }
         return;
       }
 

@@ -41,6 +41,10 @@ export type SoulGitStatus = {
 };
 
 export type SoulGitConfig = {
+  locked?: boolean;
+  lockReason?: string | null;
+  canWrite?: boolean;
+  canSync?: boolean;
   remoteUrl?: string;
   credentialSet: boolean;
   status: SoulGitStatus;

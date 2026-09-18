@@ -282,6 +282,7 @@ export const AdminGuardrailsResponseSchema = {
   additionalProperties: false,
   required: ["revision", "source", "items"],
   properties: {
+    platformConstrained: { type: "boolean" },
     revision: { type: "string" },
     source: { type: "string", enum: ["custom", "default"] },
     items: {

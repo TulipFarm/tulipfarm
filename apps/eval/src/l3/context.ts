@@ -11,11 +11,12 @@
  */
 
 import { assembleSystemPrompt } from "@tulipfarm/agent-runtime";
-import { canonicalHash, textContent, validateGuardrailsConfig } from "@tulipfarm/schema";
+import { canonicalHash, textContent } from "@tulipfarm/schema";
 import type { ResolvedTurnContext, TurnContextPort } from "@tulipfarm/turn-executor";
 import type { EvalCase } from "../case.ts";
 import { LOOP_LIMITS } from "../case.ts";
 import { type EvalSoul, soulContext } from "../eval-soul.ts";
+import { effectiveEvalGuardrails } from "../guardrails.ts";
 import { exposedToolsFor } from "../platform-tools.ts";
 
 export interface EvalTurnContextOptions {
@@ -30,9 +31,7 @@ export interface EvalTurnContext extends TurnContextPort {
 
 export function evalTurnContext(options: EvalTurnContextOptions): EvalTurnContext {
   const { evalCase, soul } = options;
-  const raw = soul.loader.guardrailsConfig;
-  if (raw === null) throw new Error("Eval Soul declares no guardrails.yaml — nothing to measure");
-  const policy = validateGuardrailsConfig(raw);
+  const policy = effectiveEvalGuardrails(soul, evalCase.safetyHostingAuthority);
 
   const systemPrompt = assembleSystemPrompt({
     ...soulContext(soul, evalCase.agent),

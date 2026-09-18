@@ -9,6 +9,7 @@ import swagger from "@fastify/swagger";
 import scalar from "@scalar/fastify-api-reference";
 import { BUSINESS_PRINCIPAL_ID } from "@tulipfarm/files";
 import { acceptedInputModalities, type LlmConfig } from "@tulipfarm/schema";
+import { runtimeDeploymentAllowsIndependentSetup } from "@tulipfarm/storage";
 import { SURFACE_SANDBOX_CSP, SURFACE_SANDBOX_PATH } from "@tulipfarm/surface";
 import Fastify, { type FastifyReply, type FastifyRequest } from "fastify";
 import { registerActivityRoutes } from "./activity/routes";
@@ -69,6 +70,11 @@ import { registerTriggerRoutes } from "./triggers/routes";
 export type { AppOptions } from "./app-options";
 
 export async function buildApp(opts: AppOptions = {}) {
+  const independentSetup = runtimeDeploymentAllowsIndependentSetup(opts.deployment);
+  const authorizationGate = {
+    ...opts.authorizationGate,
+    hostingAuthority: opts.deployment?.hostingAuthority ?? "independent",
+  };
   const app = Fastify({
     // enabling it never costs the operator output they had before.
     logger: opts.logSink ? { stream: createLogTeeStream(opts.logSink) } : true,
@@ -77,6 +83,8 @@ export async function buildApp(opts: AppOptions = {}) {
   });
 
   const publicOrigins = opts.publicOrigins;
+  publicOrigins?.assertDeployment(opts.deployment);
+  opts.systemRoutes?.publicOrigins?.assertDeployment(opts.deployment);
 
   const webDist = process.env.WEB_DIST;
   const serveSpa = !!webDist;
@@ -290,11 +298,8 @@ export async function buildApp(opts: AppOptions = {}) {
   }
 
   if (opts.sessionStore && opts.userRepo && opts.tokenRepo) {
-    const requireAuthorization = makeRequireAuthorization(
-      opts.routeAuthorizer,
-      opts.authorizationGate
-    );
-    const authorizationCheck = makeAuthorizationCheck(opts.routeAuthorizer, opts.authorizationGate);
+    const requireAuthorization = makeRequireAuthorization(opts.routeAuthorizer, authorizationGate);
+    const authorizationCheck = makeAuthorizationCheck(opts.routeAuthorizer, authorizationGate);
     registerAuthRoutes(app, opts.sessionStore, opts.userRepo, opts.tokenRepo, {
       rateLimiter: opts.rateLimiter,
       ...(opts.identity && { identity: opts.identity }),
@@ -314,6 +319,8 @@ export async function buildApp(opts: AppOptions = {}) {
       userRepo: opts.userRepo,
       tokenRepo: opts.tokenRepo,
       ...(opts.identity?.apiClientRepo && { apiClientRepo: opts.identity.apiClientRepo }),
+      deployment: opts.identity?.deployment,
+      routeAuthorizer: opts.routeAuthorizer,
     });
     registerPackRoutes(app, opts.packs ?? new PackService(), requireAuth, requireAuthorization);
     // Headless boot omits wizard routes (404), but status stays reachable.
@@ -323,9 +330,10 @@ export async function buildApp(opts: AppOptions = {}) {
         userRepo: opts.userRepo,
         soulPath,
         rateLimiter: opts.rateLimiter,
+        independentSetup,
       });
     }
-    if (!isHeadlessBoot() && opts.secretsService && opts.gitSync && soulPath) {
+    if (independentSetup && !isHeadlessBoot() && opts.secretsService && opts.gitSync && soulPath) {
       registerSetupRoutes(app, {
         requireAuthorization,
         productTelemetry: opts.productTelemetry,
@@ -407,7 +415,8 @@ export async function buildApp(opts: AppOptions = {}) {
         ...opts.systemRoutes,
       },
       requireAuth,
-      requireAuthorization
+      requireAuthorization,
+      authorizationCheck
     );
     if (opts.activityService) {
       registerActivityRoutes(app, opts.activityService, requireAuth, requireAuthorization);

@@ -123,8 +123,8 @@ describe("Team API", () => {
     return response.json() as { id: string; revision: number };
   }
 
-  beforeEach(async () => {
-    db = await makeMigratedPglite();
+  async function initializeApp(database: PGlite, seedLegacyGroups?: () => Promise<void>) {
+    db = database;
     const transactions = transactionPort(db);
     teams = new PgTeamRepo(transactions);
     roles = new PgRoleRepo(transactions);
@@ -138,6 +138,16 @@ describe("Team API", () => {
     adminId = (await createUser(users, "admin@example.com", PASSWORD, "admin"))._id;
     teamAdminId = (await createUser(users, "lead@example.com", PASSWORD, "member"))._id;
     memberId = (await createUser(users, "member@example.com", PASSWORD, "member"))._id;
+    if (seedLegacyGroups) {
+      await seedLegacyGroups();
+      await runPgMigrations(
+        db,
+        (code) => {
+          throw new Error(`migration exited with ${code}`);
+        },
+        () => {}
+      );
+    }
     await principals.put({
       id: "agent-one",
       businessId: DEPLOYMENT_BUSINESS_ID,
@@ -229,6 +239,10 @@ describe("Team API", () => {
     admin = await login("admin@example.com");
     teamAdmin = await login("lead@example.com");
     member = await login("member@example.com");
+  }
+
+  beforeEach(async () => {
+    await initializeApp(await makeMigratedPglite());
   });
 
   afterEach(async () => {
@@ -1453,35 +1467,29 @@ describe("Team API", () => {
   });
 
   it("revokes migrated group authority when the member is removed through the Team API", async () => {
-    const groups = new PgGroupRepo(transactionPort(db));
-    await roles.putRole({
-      id: "legacy-reader",
-      businessId: DEPLOYMENT_BUSINESS_ID,
-      assignableTo: ["user"],
-      parentRoleIds: [],
-      grants: [{ action: "legacy.read", resourceType: "legacy-record", effect: "allow" }],
+    await app.close();
+    await db.close();
+    await initializeApp(await makeMigratedPglite(88), async () => {
+      const groups = new PgGroupRepo(transactionPort(db));
+      await roles.putRole({
+        id: "legacy-reader",
+        businessId: DEPLOYMENT_BUSINESS_ID,
+        assignableTo: ["user"],
+        parentRoleIds: [],
+        grants: [{ action: "legacy.read", resourceType: "legacy-record", effect: "allow" }],
+      });
+      await groups.putGroup({ businessId: DEPLOYMENT_BUSINESS_ID, id: "legacy-readers" });
+      await groups.addMember({
+        businessId: DEPLOYMENT_BUSINESS_ID,
+        groupId: "legacy-readers",
+        principalId: memberId,
+      });
+      await groups.assignRole({
+        businessId: DEPLOYMENT_BUSINESS_ID,
+        groupId: "legacy-readers",
+        roleId: "legacy-reader",
+      });
     });
-    await groups.putGroup({ businessId: DEPLOYMENT_BUSINESS_ID, id: "legacy-readers" });
-    await groups.addMember({
-      businessId: DEPLOYMENT_BUSINESS_ID,
-      groupId: "legacy-readers",
-      principalId: memberId,
-    });
-    await groups.assignRole({
-      businessId: DEPLOYMENT_BUSINESS_ID,
-      groupId: "legacy-readers",
-      roleId: "legacy-reader",
-    });
-    await db.query("UPDATE schema_version SET version = 87 WHERE id = true");
-    await db.query("DELETE FROM schema_migrations WHERE version >= 88");
-    await db.query("DROP TABLE IF EXISTS oim_knowledge_subscriptions");
-    await runPgMigrations(
-      db,
-      (code) => {
-        throw new Error(`migration exited with ${code}`);
-      },
-      () => {}
-    );
 
     const migratedTeamId = await teams.resolveLegacyGroupId(
       DEPLOYMENT_BUSINESS_ID,

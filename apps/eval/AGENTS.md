@@ -28,12 +28,13 @@ Only its own Cases need updating when their observable behaviour moves.
 | `src/matrix.ts` | `runMatrix` — the same Corpus across several models, one Scorecard each. |
 | `src/bindings.ts` | `resolveBindings` — turns `--model sonnet,terra` into the bindings to measure. |
 | `src/scripted.ts` | `scriptedBinding` — replays each Case's `script`. Free, deterministic. |
+| `src/dispatch.ts` | Scripted results; an L2 hosting fixture uses the shipped repository-push contract and real Tool gate, never a scripted ownership verdict. |
 | `src/model.ts` | `PINNED_MODELS` and `pinnedBinding` — the real-vendor binding. The only file here that touches a credential. |
 | `src/retry.ts` | `withRetry` — transient vendor failures, retried and counted. |
 | `src/spend.ts` | `Spend` totals: tokens, dollars, and what could not be priced. |
 | `soul/` | The **Eval Soul**: the frozen fixture business every Case is measured against. Ordinary tracked files. |
 | `src/eval-soul.ts` | `loadEvalSoul` — copies the fixture to a throwaway git repo and reads it with the real `SoulLoader`; `soulContext` maps an Agent into the assembler. |
-| `src/guardrails.ts` | Runs the Eval Soul's `guardrails.yaml` through the production `TurnGuardrails`; collects refusals off the real Run events. |
+| `src/guardrails.ts` | Runs the Eval Soul's policy through production `GuardrailsService` and `TurnGuardrails`; `safetyHostingAuthority` selects offline platform minimums, never runtime identity trust. |
 | `src/l3/` | Persisted Chat and Routine tiers on in-process PGlite; Integration authoring routes through the shared workflow, real approval wait, P09 journal, Soul writer, publisher, and next-Turn loader. |
 | `src/l3/tier.ts` | `integrationReply` Cases apply production reply settlement after a real completed Chat Turn; provider transports remain API test scope. |
 | `src/l3/soul-write.ts` | The `soul_write` Tool, over the real writer *and* the real publisher; `definitionMode: plan` first uses the production YAML Plan compiler. |

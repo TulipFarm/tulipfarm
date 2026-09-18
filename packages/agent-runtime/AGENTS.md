@@ -44,6 +44,8 @@ orchestration. It owns prompt assembly and runtime control, not model providers.
   timestamps into prompts. Drop over-budget blocks whole, never partially.
 - Guardrails compile supplied config only; never fetch Soul. Invalid or absent config becomes
   `DEFAULT_GUARDRAILS`, and digest checks depend on `config` returning the validated policy.
+- `guardrails/platform-policy.ts` intersects hosted runtime-owned minimums with business checks;
+  reloads must retain the constructor's platform policy and transport the effective digest.
 - If `ModelPort.stream` exists, a missing `completed` chunk fails the turn. `AgentLoopEvent`
   carries model text only; Tool args/output stay with `ToolDispatchPort`.
 - Persist each iteration before its model request and each model-produced Tool batch before its

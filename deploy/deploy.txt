@@ -46,10 +46,10 @@ Durable state: every path must survive restart and upgrade:
       if lost: It holds the key that decrypts every Secret this instance stores. Losing it means losing them, because the database holds only ciphertext. Booting a fresh ENCRYPTION_KEY against a populated database refuses to start rather than silently orphaning them.
   - SOUL_PATH: holds The live soul git checkout, including Resource schemas, Agents, Skills, Routines, Integrations
       if lost: Losing it loses everything the business built, and its git history is the audit trail for who changed what.
-  - postgres data directory: holds Every Record, Run, Turn, audit event, and vector index
-      if lost: Losing it loses all business data. Restoring it without TF_DATA_DIR leaves every stored Secret undecryptable.
+  - postgres data directory: holds Every Record, Run, Turn, audit event, vector index, and runtime installation/business/hosting association
+      if lost: Losing it loses all business data. Restoring it without TF_DATA_DIR leaves every stored Secret undecryptable. Restoring only the soul does not restore installation identity; retain the matching database, business identifier, and any installation UUID assertion.
 
-ENVIRONMENT VARIABLES (full surface: 103 variables)
+ENVIRONMENT VARIABLES (full surface: 105 variables)
 ------------------------------------------------------------
 Zone tells you whether you may change a variable:
   set-these       normal configuration; change it to suit the deployment
@@ -238,9 +238,19 @@ honour it is already a mistake.
     if set wrong: Allowing a prompt makes a failed sync hang forever instead of failing, because nothing is attached to answer it.
   BUSINESS_ID
     zone: installer-sets | required: no | consumers: app, worker, integration-worker
-    does: Deployment business id, used in constants and per-business soul paths.
+    does: Local business identifier, distinct from the durable runtime-installation identity.
     default: tulipfarm-local
-    if set wrong: Changing it on an existing install orphans that install's soul checkout.
+    if set wrong: Keep the existing value across upgrades and use it in all three runtime processes. A mismatch with the persisted runtime association refuses startup.
+  RUNTIME_INSTALLATION_ID
+    zone: installer-sets | required: no | consumers: app, worker, integration-worker
+    does: Optional UUID assertion for this runtime installation. Normally omitted or empty; PostgreSQL generates and persists an identity shared by the API and both workers.
+    default: none
+    if set wrong: Must match the stored identity once initialized; conflicts refuse startup without overwriting it. On a new database it establishes the identity. It grants no service access or customer ownership and is separate from the anonymous product telemetry identifier.
+  RUNTIME_HOSTING_AUTHORITY
+    zone: installer-sets | required: no | consumers: app, worker, integration-worker
+    does: Explicit hosting selection, shared by the API and both workers. Leave unset or empty, or use `independent`, for supported self-hosting.
+    default: independent
+    if set wrong: Unknown non-empty values fail startup. `tulipfarm` requires an installation UUID and trusted hosted identity verification, which is unavailable in production in this release; it never falls back to independent setup. A stored hosting association cannot be replaced by changing this value. See [boot modes](/docs/self-hosting/how-boot-modes-work#explicit-hosted-configuration).
   SOUL_BUNDLE_RETENTION_DAYS
     zone: set-these | required: no | consumers: app
     does: How long an unreferenced published execution bundle is kept before the nightly sweep may delete it. The floor is 7.

@@ -10,7 +10,7 @@ import { useIsAdmin } from "~/lib/use-session-user";
 
 function errorMessage(err: unknown): string {
   if (err instanceof ApiError) {
-    if (err.status === 403) return "Only an admin can change the git remote.";
+    if (err.status === 403) return err.message;
     return friendlyGitError(err.message);
   }
   return err instanceof Error ? friendlyGitError(err.message) : "request failed";
@@ -56,7 +56,9 @@ export function SoulGitConfigPanel({
   onSaved: () => void;
 }) {
   const isAdmin = useIsAdmin();
-  const [editing, setEditing] = useState(isAdmin && !config.remoteUrl);
+  const canWrite = isAdmin && config.canWrite === true && !config.locked;
+  const canSync = isAdmin && config.canSync === true && !config.locked;
+  const [editing, setEditing] = useState(canWrite && !config.remoteUrl);
   const [remoteUrl, setRemoteUrl] = useState(config.remoteUrl ?? "");
   const [credential, setCredential] = useState("");
   const [busy, setBusy] = useState(false);
@@ -114,7 +116,7 @@ export function SoulGitConfigPanel({
         <StatusBadge label={status.text} tone={status.tone} />
         {!editing ? (
           <div className="ml-auto flex items-center gap-1">
-            {config.remoteUrl ? (
+            {config.remoteUrl && canSync ? (
               <Button
                 type="button"
                 variant="ghost"
@@ -126,7 +128,7 @@ export function SoulGitConfigPanel({
                 {syncing ? "Syncing…" : "Sync now"}
               </Button>
             ) : null}
-            {isAdmin ? (
+            {canWrite ? (
               <Button
                 type="button"
                 variant="ghost"
@@ -141,7 +143,11 @@ export function SoulGitConfigPanel({
         ) : null}
       </div>
 
-      {!editing ? (
+      {config.locked ? (
+        <p className="border-t border-border px-3 py-2 text-xs text-muted-foreground">
+          {config.lockReason}
+        </p>
+      ) : !editing ? (
         <>
           {config.remoteUrl ? (
             <p className="truncate border-t border-border px-3 py-2 font-mono text-xs text-muted-foreground">

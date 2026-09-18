@@ -42,7 +42,7 @@ import { canonicalHash, canonicalize, configuredModelRef, textContent } from "@t
 import type { RuntimeBundle } from "@tulipfarm/soul";
 import type { RunStore } from "@tulipfarm/storage";
 import type { RunEventAppendPort } from "@tulipfarm/turn-executor";
-import { announceToolCalls, TurnEventWriter } from "@tulipfarm/turn-executor";
+import { announceToolCalls, TurnEventWriter, TurnGuardrails } from "@tulipfarm/turn-executor";
 import { type ModelBudgetEvidence, openModelProfileRunBudget } from "../model-budget";
 
 /** Routine Agent authority: read pinned bundles, run chat-equivalent guards, expose no Tools. */
@@ -117,6 +117,7 @@ export interface BundleRoutineAgentPortOptions {
    * catalog it invented would not be the one the same Agent gets in Chat.
    */
   readonly catalog?: (runId: string, agentName: string) => Promise<readonly ExposedTool[]>;
+  readonly guardrailPolicy?: (runId: string, agentName: string) => Promise<Record<string, unknown>>;
   readonly events: RunEventAppendPort;
   readonly budgets: RunBudgetStore;
   readonly runs: Pick<RunStore, "find">;
@@ -340,7 +341,13 @@ export class BundleRoutineAgentPort implements RoutineAgentPort {
 
     // Record the digest of the guard policy this service actually compiled and ran.
     const guardrails = new GuardrailsService();
-    guardrails.init(null, this.options.log);
+    guardrails.init(
+      this.options.guardrailPolicy
+        ? await this.options.guardrailPolicy(request.runId, plan.agentRef.name)
+        : null,
+      this.options.log
+    );
+    assertRunActive(request.signal);
     // Routine States have no participant; guards see the Run as the whole identity.
     const guardContext: GuardContext = {
       userId: SERVICE_PRINCIPAL,
@@ -462,6 +469,13 @@ export class BundleRoutineAgentPort implements RoutineAgentPort {
 
     const exposed = await this.exposedTools(request, plan.agentRef.name);
     assertRunActive(request.signal);
+    const toolGuardrails = new TurnGuardrails(this.options.log);
+    toolGuardrails.configure({
+      policy: guardrails.config,
+      digest: guardrails.revision,
+      context: guardContext,
+      toolTiers: new Map(exposed.map((tool) => [tool.name, tool.tier ?? ""])),
+    });
     const calledToolNames = new Set<string>();
     const loop = new AgentLoop({
       model: this.options.model({
@@ -475,7 +489,10 @@ export class BundleRoutineAgentPort implements RoutineAgentPort {
       tools:
         exposed.length === 0
           ? NO_TOOLS
-          : this.toolPort(plan.agentRef.name, events, calledToolNames),
+          : toolGuardrails.guard(
+              this.toolPort(plan.agentRef.name, events, calledToolNames),
+              events
+            ),
       checkpoints,
       events,
       budget: this.budget(request),

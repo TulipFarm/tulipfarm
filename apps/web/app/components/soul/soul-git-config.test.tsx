@@ -24,7 +24,9 @@ function status(overrides: Partial<SoulGitStatus> = {}): SoulGitStatus {
 }
 
 function renderPanel(config: SoulGitConfig) {
-  return render(<SoulGitConfigPanel config={config} onSaved={() => {}} />);
+  return render(
+    <SoulGitConfigPanel config={{ canWrite: true, canSync: true, ...config }} onSaved={() => {}} />
+  );
 }
 
 beforeEach(() => {
@@ -103,7 +105,27 @@ test("keeps the status visible while an admin edits a configured remote", async 
   });
 
   await user.click(screen.getByRole("button", { name: "Edit" }));
-
   expect(screen.getByText("Edit git remote")).toBeTruthy();
   expect(screen.getByText("1 ahead")).toBeTruthy();
+});
+
+test("uses server ownership capabilities instead of an administrator role", () => {
+  renderPanel({
+    locked: true,
+    canWrite: false,
+    canSync: false,
+    lockReason: "Managed by the hosting operator. Contact your operator.",
+    credentialSet: false,
+    status: status(),
+  });
+  expect(screen.getByText(/Managed by the hosting operator/)).toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: "Edit" })).not.toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: "Sync now" })).not.toBeInTheDocument();
+  expect(screen.queryByText("Connect a git remote")).not.toBeInTheDocument();
+});
+
+test("does not offer changes without server capabilities", () => {
+  renderPanel({ canWrite: undefined, canSync: undefined, credentialSet: false, status: status() });
+  expect(screen.queryByRole("button", { name: "Edit" })).not.toBeInTheDocument();
+  expect(screen.queryByText("Connect a git remote")).not.toBeInTheDocument();
 });

@@ -65,6 +65,8 @@ import {
   RUN_RECOVERY_CURSOR_CYCLE_STORAGE_STATEMENTS,
   RUN_RECOVERY_CURSOR_STORAGE_STATEMENTS,
   RUN_STORAGE_STATEMENTS,
+  RUNTIME_HOSTING_STORAGE_STATEMENTS,
+  RUNTIME_IDENTITY_STORAGE_STATEMENTS,
   SOUL_DOCTOR_STORAGE_STATEMENTS,
   SOUL_PUBLICATION_STORAGE_STATEMENTS,
   SOUL_REPOSITORY_STORAGE_STATEMENTS,
@@ -89,6 +91,7 @@ import type { Queryable } from "../db";
 import { AGENT_ROLE_ID } from "../identity/roles";
 import { resourceSideEffectMigration } from "../resources/outbox";
 import { addSlackDeliveryLeases } from "./20260917-slack-delivery-leases";
+import { OPERATIONAL_PRINCIPAL_STATEMENTS } from "./operational-principals";
 
 export interface PgMigration {
   version: number;
@@ -3511,5 +3514,20 @@ export const PG_MIGRATIONS: PgMigration[] = [
     version: 133,
     description: "recover Slack leases skipped by an earlier Knowledge v132 deployment",
     up: addSlackDeliveryLeases,
+  },
+  {
+    version: 134,
+    description: "durable runtime installation identity distinct from local business identity",
+    up: applyStatements(RUNTIME_IDENTITY_STORAGE_STATEMENTS),
+  },
+  {
+    version: 135,
+    description: "pin runtime hosting authority independently of process configuration",
+    up: applyStatements(RUNTIME_HOSTING_STORAGE_STATEMENTS),
+  },
+  {
+    version: 136,
+    description: "immutable operational API client scope and live principal lifecycle",
+    up: applyStatements(OPERATIONAL_PRINCIPAL_STATEMENTS),
   },
 ];

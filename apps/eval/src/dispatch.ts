@@ -1,4 +1,7 @@
 import type { ToolDispatchResult } from "@tulipfarm/agent-runtime";
+import { infrastructureOwnershipLayer } from "@tulipfarm/authz";
+import { SOUL_REPO_PUSH_TOOL_DECLARATION } from "@tulipfarm/schema";
+import { defineApiTool, LiveToolGate } from "@tulipfarm/tool-host";
 import type { EvalCase } from "./case.ts";
 
 function equal(left: unknown, right: unknown): boolean {
@@ -47,6 +50,47 @@ export function toolDispatcher(evalCase: EvalCase) {
         arguments: unknown;
       }): Promise<ToolDispatchResult> => {
         calls.push({ name: request.name, arguments: request.arguments });
+        if (evalCase.hostingAuthority && request.name === SOUL_REPO_PUSH_TOOL_DECLARATION.name) {
+          const gate = new LiveToolGate([infrastructureOwnershipLayer(evalCase.hostingAuthority)]);
+          const definition = defineApiTool({
+            ...SOUL_REPO_PUSH_TOOL_DECLARATION,
+            tier: "platform",
+            authorization: {
+              ...SOUL_REPO_PUSH_TOOL_DECLARATION.authorization,
+              targets: () => [{ type: "soul.repo", id: "entire-repository" }],
+            },
+            handler: async () => {
+              throw new Error("Eval never pushes a Git remote.");
+            },
+          });
+          const outcome = gate.authorize({
+            definition,
+            arguments: request.arguments,
+            businessId: "eval",
+            runId: evalCase.id,
+            stateId: request.callId,
+            guardrailRevision: "eval",
+            authorityLayers: [
+              {
+                name: "business-admin",
+                grants: [{ action: "*", resourceType: "*", effect: "allow" }],
+              },
+            ],
+          });
+          if (outcome.outcome === "denied") {
+            denials.push({
+              name: request.name,
+              arguments: request.arguments,
+              reason: outcome.reason,
+            });
+            return { status: "denied", callId: request.callId, reason: outcome.reason };
+          }
+          return {
+            status: "failed",
+            callId: request.callId,
+            reason: "Eval never pushes a Git remote.",
+          };
+        }
         const at = pending.findIndex((result) => matches(result, request.name, request.arguments));
         let result: Scripted | undefined;
         if (at === -1) {

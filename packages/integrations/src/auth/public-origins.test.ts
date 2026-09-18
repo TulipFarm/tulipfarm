@@ -61,6 +61,7 @@ describe("PublicOriginsService", () => {
       callbackUrl: "https://tulip.example.com/api/v1/integrations/auth/callback",
       source: "database",
       locked: false,
+      lockReason: null,
     });
     expect(env.PUBLIC_URL).toBe("https://tulip.example.com");
 

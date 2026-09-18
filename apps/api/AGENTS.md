@@ -21,7 +21,7 @@ PostgreSQL persistence composition, auth, Soul Git writes, and Worker callback p
 | [`src/identity/`](src/identity/AGENTS.md) | Principals, OIDC, step-up, API clients. |
 | `src/chat/`, `src/conversations/` | Chat routes, Turn persistence, durable stream handoff. |
 | `src/runs/` | Persisted Run event SSE, cursor resume, cancellation. `authorization.ts` separates participant ownership from operator event reads; Chat cancellation never inherits a read grant. |
-| `src/runtime/` | Durable invocation callers, Routine invocation resolution, Soul write gateway composition. |
+| `src/runtime/` | Durable invocation callers, Routine invocation resolution, Soul write gateway composition. `deployment.ts` migrates and validates shared identity/hosting context before boot; that context gates setup and headless seeding. |
 | `src/internal/` | Service-only Worker callbacks for Context, Tools, delivery, completion, and due OIM Connection refresh. `slack-event-routes.ts` also hosts provider-neutral canonical event dispatch with exact-Connection reauthorization. `route-family.ts` registers internal families; `turn-host.ts` separates Run and Turn authority. |
 | `src/tools/` | ToolRegistry, batch execution, truncation, declarative egress sync. |
 | `src/platform/` | Platform Tools that need the API's own services. `delegate-tool.ts` hands work to a Soul Agent (which gets a Conversation); `spawn-tool.ts` + `subagent-{run,answers}.ts` spawn an ad-hoc helper the caller defines inline, which gets none. Both park the calling Turn on a child-Run wait. |
@@ -29,11 +29,11 @@ PostgreSQL persistence composition, auth, Soul Git writes, and Worker callback p
 | `src/resources/`, `src/soul/` | Resource CRUD and Soul HTTP routes/Tools; domain logic lives in `@tulipfarm/soul`. |
 | `src/integrations/` | Manifest catalog, connect auth, install, post-connect hooks. `connections/` adapts versioned OIM Connection lifecycle, exact-Connection credential repair, and refresh scheduling to HTTP; OIM verification, continuation, Credential, and File hosts remain provider-neutral. |
 | `src/integrations/oim-ingress/` | Injectable exact-Connection webhook and registration routes. |
+| `src/guardrails/` | Guardrail reload wiring and persisted policy acceptance. Hosted minimums remain in the effective service; Chat Context, Routine Agent catalog and admin reads share it. |
 | `src/integrations/operations/` | Exact-Connection operational evidence and durable selected-scope Knowledge subscription controls; never derive scheduling from indexed content. |
-| `src/guardrails/` | Guardrail config loading and `soul.synced` reload wiring only. |
 | `src/knowledge/`, `src/knowledge-sources/` | Knowledge routes/Tools and ingestion API; repositories and OKF live in `@tulipfarm/knowledge`. |
 | `src/memory/`, `src/kv/`, `src/secrets/` | Memory Document composition, its read-only route and erasure; scoped KV; secret storage routes. |
-| `src/authz/` | `route-gate.ts` — the sole HTTP path to `decideEffectivePermission`; self-governed and Team administration routes. |
+| `src/authz/` | `route-gate.ts` — sole HTTP path to `decideEffectivePermission`, including hosted infrastructure ceilings before shadow/fallback; self-governed and Team administration. |
 | `src/team-assets/` | Team asset catalog, ownership access projection, and Approval orchestration for all five owned asset types. |
 | `src/approvals/`, `src/broker/` | Approval routes and Tool effect dispatch composition. |
 | `src/tasks/` | Task routes, ranking. System-created human work items — no user-facing create route. |
@@ -67,6 +67,9 @@ PostgreSQL persistence composition, auth, Soul Git writes, and Worker callback p
   `runPgMigrations()`. The latter replayed all migrations per test and was half the suite's
   runtime; the helper restores a per-worker snapshot instead, for the same isolation.
   `src/test/pglite-snapshot.test.ts` fails the build if the slow pair comes back.
+- Upgrade fixtures use `makeMigratedPglite(version)`, cached per version/worker from real migration
+  prefixes. Never invent or rewind schema markers on partial/latest DDL. Model historical defects
+  with explicit mutations of that snapshot; exercise one migration directly for idempotence.
 - PGlite pgvector imports changed across versions: check `@electric-sql/pglite/vector` versus
   `@electric-sql/pglite-pgvector` when bumping PGlite.
 - `apps/api/src` is capped by `scripts/control-plane-size.test.ts`: new domain logic belongs in the

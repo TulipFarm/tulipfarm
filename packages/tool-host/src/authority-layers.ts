@@ -5,6 +5,7 @@ import {
   assertPrincipalAuthenticatable,
   assertRoleAssignable,
   collectRoleGrantEntries,
+  narrowOperationalGrants,
   type Principal,
   type Role,
   resolveTeamAuthority,
@@ -205,7 +206,9 @@ export class LiveAuthorityLayerResolver {
     if (
       durablePrincipal === undefined ||
       durablePrincipal.businessId !== principal.businessId ||
-      durablePrincipal.kind !== principal.kind
+      durablePrincipal.kind !== principal.kind ||
+      (durablePrincipal.operationalScope !== undefined &&
+        durablePrincipal.operationalScope.businessId !== principal.businessId)
     ) {
       return emptyDiagnosis(name, "no-such-principal");
     }
@@ -326,10 +329,13 @@ export class LiveAuthorityLayerResolver {
           ),
         ...(teamAuthority?.evidence ?? []),
       ];
-      const grants = uniqueGrants([
+      const heldGrants = uniqueGrants([
         ...directEntries.map((entry) => entry.grant),
         ...(teamAuthority?.grants ?? []),
       ]);
+      const grants = durablePrincipal.operationalScope
+        ? narrowOperationalGrants(heldGrants, durablePrincipal.operationalScope)
+        : heldGrants;
       const unresolvedRoleIds = teamAuthority?.unresolvedRoleIds ?? [];
       if (unresolvedRoleIds.length > 0) {
         return {

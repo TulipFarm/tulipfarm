@@ -65,10 +65,11 @@ state:
     consequence: Losing it loses everything the business built, and its git history is the audit
       trail for who changed what.
   - path: postgres data directory
-    holds: Every Record, Run, Turn, audit event, and vector index
+    holds: Every Record, Run, Turn, audit event, vector index, and runtime installation/business/hosting association
     durability: Must survive restart and upgrade
     consequence: Losing it loses all business data. Restoring it without TF_DATA_DIR leaves every
-      stored Secret undecryptable.
+      stored Secret undecryptable. Restoring only the soul does not restore installation identity;
+      retain the matching database, business identifier, and any installation UUID assertion.
 
 env:
   # ---------------------------------------------------------------- required boot configuration
@@ -335,8 +336,29 @@ env:
     zone: installer-sets
     consumers: [app, worker, integration-worker]
     default: tulipfarm-local
-    description: Deployment business id, used in constants and per-business soul paths.
-    consequence: Changing it on an existing install orphans that install's soul checkout.
+    description: Local business identifier, distinct from the durable runtime-installation identity.
+    consequence: Keep the existing value across upgrades and use it in all three runtime processes.
+      A mismatch with the persisted runtime association refuses startup.
+  - name: RUNTIME_INSTALLATION_ID
+    group: Soul and git
+    zone: installer-sets
+    consumers: [app, worker, integration-worker]
+    description: Optional UUID assertion for this runtime installation. Normally omitted or empty;
+      PostgreSQL generates and persists an identity shared by the API and both workers.
+    consequence: Must match the stored identity once initialized; conflicts refuse startup without
+      overwriting it. On a new database it establishes the identity. It grants no service access
+      or customer ownership and is separate from the anonymous product telemetry identifier.
+  - name: RUNTIME_HOSTING_AUTHORITY
+    group: Soul and git
+    zone: installer-sets
+    consumers: [app, worker, integration-worker]
+    default: independent
+    description: Explicit hosting selection, shared by the API and both workers.
+      Leave unset or empty, or use `independent`, for supported self-hosting.
+    consequence: Unknown non-empty values fail startup. `tulipfarm` requires an installation UUID
+      and trusted hosted identity verification, which is unavailable in production in this release;
+      it never falls back to independent setup. A stored hosting association cannot be replaced
+      by changing this value. See [boot modes](/docs/self-hosting/how-boot-modes-work#explicit-hosted-configuration).
   - name: SOUL_BUNDLE_RETENTION_DAYS
     group: Soul and git
     zone: set-these

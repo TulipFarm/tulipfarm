@@ -92,6 +92,7 @@ export const ApiClientCreateBodySchema = {
   properties: {
     name: { type: "string", minLength: 1 },
     expiresAt: { type: "string", format: "date-time" },
+    operational: { type: "boolean" },
   },
 } as const;
 
@@ -113,6 +114,7 @@ export const ApiClientCreateRouteSchema = {
     400: ErrorSchema,
     401: ErrorSchema,
     403: ErrorSchema,
+    503: ErrorSchema,
   },
 } as const;
 

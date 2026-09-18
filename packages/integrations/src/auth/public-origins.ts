@@ -41,6 +41,7 @@ export interface PublicOrigins {
   readonly callbackUrl: string;
   readonly source: PublicOriginSource;
   readonly locked: boolean;
+  readonly lockReason: "hosting_operator" | "environment" | null;
 }
 
 export interface PublicOriginRepository {
@@ -85,7 +86,7 @@ export function normalizePublicOrigin(value: string): string {
   return url.origin;
 }
 
-function fromEnvironment(env: NodeJS.ProcessEnv): Omit<PublicOrigins, "locked"> {
+function fromEnvironment(env: NodeJS.ProcessEnv): Omit<PublicOrigins, "locked" | "lockReason"> {
   const webConfigured = env.PUBLIC_URL?.trim();
   const apiConfigured = env.PUBLIC_API_URL?.trim();
   const webOrigin = (webConfigured ?? "http://localhost:4000").replace(/\/+$/, "");
@@ -106,16 +107,36 @@ function fromEnvironment(env: NodeJS.ProcessEnv): Omit<PublicOrigins, "locked"> 
 export class PublicOriginsService {
   private readonly baseEnvironment: NodeJS.ProcessEnv;
   private readonly locked: boolean;
+  private readonly lockReason: PublicOrigins["lockReason"];
   private resolved: PublicOrigins;
 
   constructor(
     private readonly repository: PublicOriginRepository,
     private readonly businessId: string,
-    private readonly runtimeEnvironment: NodeJS.ProcessEnv = process.env
+    private readonly runtimeEnvironment: NodeJS.ProcessEnv = process.env,
+    deployment?: RuntimeDeploymentContext
   ) {
     this.baseEnvironment = { ...runtimeEnvironment };
-    this.locked = runtimeEnvironment.PUBLIC_ORIGINS_LOCKED === "true";
-    this.resolved = { ...fromEnvironment(this.baseEnvironment), locked: this.locked };
+    const hosted = deployment ? !runtimeDeploymentAllowsIndependentSetup(deployment) : false;
+    if (hosted) {
+      this.baseEnvironment.PUBLIC_URL = normalizePublicOrigin(runtimeEnvironment.PUBLIC_URL ?? "");
+      this.baseEnvironment.PUBLIC_API_URL = normalizePublicOrigin(
+        runtimeEnvironment.PUBLIC_API_URL ?? ""
+      );
+    }
+    this.lockReason = hosted
+      ? "hosting_operator"
+      : runtimeEnvironment.PUBLIC_ORIGINS_LOCKED === "true"
+        ? "environment"
+        : null;
+    this.locked = this.lockReason !== null;
+    this.resolved = this.fromEnvironment();
+  }
+
+  assertDeployment(deployment?: RuntimeDeploymentContext): void {
+    if (deployment?.hostingAuthority === "tulipfarm" && this.lockReason !== "hosting_operator") {
+      throw new Error("Hosted public origins must be composed with the initialized deployment.");
+    }
   }
 
   async initialize(): Promise<void> {
@@ -137,9 +158,7 @@ export class PublicOriginsService {
 
   async refresh(): Promise<PublicOrigins> {
     const stored = this.locked ? null : await this.repository.get(this.businessId);
-    this.resolved = stored
-      ? this.fromStored(stored)
-      : { ...fromEnvironment(this.baseEnvironment), locked: this.locked };
+    this.resolved = stored ? this.fromStored(stored) : this.fromEnvironment();
     this.applyRuntimeEnvironment();
     return this.resolved;
   }
@@ -157,7 +176,7 @@ export class PublicOriginsService {
   async reset(): Promise<PublicOrigins> {
     this.assertWritable();
     await this.repository.delete(this.businessId);
-    this.resolved = { ...fromEnvironment(this.baseEnvironment), locked: this.locked };
+    this.resolved = this.fromEnvironment();
     this.applyRuntimeEnvironment();
     return this.resolved;
   }
@@ -170,6 +189,15 @@ export class PublicOriginsService {
       callbackUrl: `${apiOrigin}${INTEGRATION_AUTH_CALLBACK_PATH}`,
       source: "database",
       locked: this.locked,
+      lockReason: this.lockReason,
+    };
+  }
+
+  private fromEnvironment(): PublicOrigins {
+    return {
+      ...fromEnvironment(this.baseEnvironment),
+      locked: this.locked,
+      lockReason: this.lockReason,
     };
   }
 
@@ -177,7 +205,9 @@ export class PublicOriginsService {
     if (this.locked) {
       throw new PublicOriginError(
         "environment_locked",
-        "Public addresses are managed by this deployment's environment."
+        this.lockReason === "hosting_operator"
+          ? INFRASTRUCTURE_OWNERSHIP_MESSAGE
+          : "Public addresses are managed by this deployment's environment."
       );
     }
   }
@@ -187,3 +217,9 @@ export class PublicOriginsService {
     this.runtimeEnvironment.PUBLIC_API_URL = this.resolved.apiOrigin;
   }
 }
+
+import { INFRASTRUCTURE_OWNERSHIP_MESSAGE } from "@tulipfarm/authz";
+import {
+  type RuntimeDeploymentContext,
+  runtimeDeploymentAllowsIndependentSetup,
+} from "@tulipfarm/storage";
