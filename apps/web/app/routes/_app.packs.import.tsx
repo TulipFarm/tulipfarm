@@ -1,5 +1,6 @@
 import type { MetaFunction } from "@remix-run/react";
 import { type FormEvent, useRef, useState } from "react";
+import { ArrowLeft, Code2, Link2, Upload } from "~/components/icons";
 import { PackPreviewPanel } from "~/components/packs/pack-preview";
 import { PageShell } from "~/components/page-shell";
 import { Button } from "~/components/ui/button";
@@ -69,38 +70,52 @@ export default function ImportPack() {
       title="Import Pack"
       actions={
         <Button asChild variant="outline">
-          <Link to="/packs">Browse Packs</Link>
+          <Link to="/packs">
+            <ArrowLeft />
+            Browse Packs
+          </Link>
         </Button>
       }
     >
-      <p className="max-w-2xl text-sm text-muted-foreground">
-        Preview a Pack from an HTTPS URL or paste its complete YAML. The agent will adapt it to your
-        existing business in Plan mode. You review and confirm the adapted plan before any changes.
-      </p>
-      <form onSubmit={submit} className="max-w-3xl space-y-4">
+      <div className="flex max-w-3xl items-start gap-4 rounded-xl bg-card p-5">
+        <span className="rounded-lg border bg-background p-2.5 text-muted-foreground">
+          <Upload className="size-5" />
+        </span>
+        <div className="space-y-2">
+          <h2 className="text-lg font-semibold">Bring your own starting point</h2>
+          <p className="max-w-2xl text-sm text-muted-foreground">
+            Preview a Pack from an HTTPS URL or paste its complete YAML. The agent will adapt it to
+            your existing business in Plan mode. You review and confirm the adapted plan before any
+            changes.
+          </p>
+        </div>
+      </div>
+      <form onSubmit={submit} className="max-w-3xl space-y-4 rounded-xl border p-5">
         <fieldset disabled={pending} className="space-y-4">
           <legend className="sr-only">Pack source</legend>
           <fieldset aria-label="Source format" className="flex gap-2">
             <Button
               type="button"
-              variant={inputKind === "url" ? "default" : "outline"}
+              variant={inputKind === "url" ? "secondary" : "ghost"}
               aria-pressed={inputKind === "url"}
               onClick={() => {
                 setInputKind("url");
                 resetPreview();
               }}
             >
+              <Link2 />
               HTTPS URL
             </Button>
             <Button
               type="button"
-              variant={inputKind === "yaml" ? "default" : "outline"}
+              variant={inputKind === "yaml" ? "secondary" : "ghost"}
               aria-pressed={inputKind === "yaml"}
               onClick={() => {
                 setInputKind("yaml");
                 resetPreview();
               }}
             >
+              <Code2 />
               Paste YAML
             </Button>
           </fieldset>
