@@ -1036,8 +1036,32 @@ business has done or capabilities it can install. Marketplace browsing uses comp
 real audit flow; declared reach links back to the assets that use it.
 
 **Provider rows, not a grid of large cards.** Keep the logo, name, short description, connection
-state and actions aligned in one quiet list below the banner. Hairlines separate rows; do not add
-a filled, rounded container around each provider. On narrow screens, actions wrap below the name.
+state and actions aligned in compact rows below the banner, with two columns when there is room.
+Hairlines separate rows; do not add a filled, rounded container around each provider. On narrow
+screens, actions wrap below the name.
+
+Use one primary **Connect** or **Manage** action per provider. Setup and management open in a
+right-side sheet, keeping the catalog in place. Put account instructions and a brief access
+summary inside the sheet, not under each catalog row. Hosting and per-Tool controls belong under
+Advanced settings; capability examples never imply approved access.
+
+For a known provider, start with the required credentials or sign-in, not a naming/configuration
+form. Supply provider and first-account names automatically; keep optional naming out of the
+primary path. Offer only supported sign-in methods. Opening or cancelling a sheet must not save
+anything. A saved definition is not a connected account: connection actions reflect account state,
+while Enabled/Disabled remains a separate operational state.
+
+Basic setup is one explicit Connect action, progress and a ready state, not a mandatory
+discover/review/enable wizard. Briefly disclose the initial access and approval defaults before
+submission. Per-Tool selection is optional advanced administration, not a prerequisite for use.
+Keep existing custom limits unchanged and never silently approve later capability additions.
+Do not infer that an old empty policy was never reviewed. If its history is ambiguous, offer one
+clearly named standard-access choice with explicit policy-change consent, not a forced Tool
+checklist or a silent reset.
+An already-authorized but unfinished account gets one Finish connecting action without credential
+re-entry. A failed token check needs an accurate error and an obvious same-account recovery action;
+never label a pending token account as browser sign-in. Account management, optional Knowledge sync
+and technical detail remain secondary.
 
 **One logo treatment for every entry.** The logo is the only place provider colour is allowed to land —
 the tile behind it is the same neutral surface at every tier, whether the mark is a vendored

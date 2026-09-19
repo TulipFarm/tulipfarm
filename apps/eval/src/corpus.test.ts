@@ -113,6 +113,34 @@ describe("loadCorpus", () => {
     accounts: [{ id: "personal", scope: "personal", status: "active" }],
   };
 
+  it.each([0, -1, 0.5, "2", null])("rejects invalid Run event count %s", async (count) => {
+    await expect(
+      load(
+        corpusDir({
+          "approvals.json": {
+            ...valid("approvals"),
+            tier: "l3",
+            expect: [{ kind: "run_event_emitted", eventType: "approval.requested", count }],
+          },
+        })
+      )
+    ).rejects.toThrow(/positive integer/);
+  });
+
+  it("accepts an exact count for durable Run events", async () => {
+    await expect(
+      load(
+        corpusDir({
+          "approvals.json": {
+            ...valid("approvals"),
+            tier: "l3",
+            expect: [{ kind: "run_event_emitted", eventType: "approval.requested", count: 2 }],
+          },
+        })
+      )
+    ).resolves.toBeDefined();
+  });
+
   it.each([-1, 0.5])("rejects invalid MCP provider call count %s", async (count) => {
     await expect(
       load(

@@ -28,12 +28,34 @@ test("preserves a child route's not-found Response instead of reporting it as a 
 });
 
 test("still reports a real API outage as a transport failure", () => {
-  renderError(new Error("network down"));
+  renderError(new ApiError(0, "network down"));
 
   expect(screen.getByText(/error: /)).toBeInTheDocument();
   expect(
     screen.getByText("The API could not be reached. Check that it is running on :4010.")
   ).toBeInTheDocument();
+});
+
+test.each([
+  new Error('Module "node:crypto" has been externalized for browser compatibility.'),
+  new TypeError("Cannot read properties of undefined"),
+  new SyntaxError("Unexpected token"),
+])("does not blame the API for a JavaScript error: %s", (error) => {
+  renderError(error);
+
+  expect(screen.getByText(`error: ${error.message}`)).toBeInTheDocument();
+  expect(screen.queryByText(/The API/)).not.toBeInTheDocument();
+  expect(screen.getByText("This page could not be loaded. Try reloading it.")).toBeInTheDocument();
+});
+
+test.each([
+  new Response("Forbidden", { status: 403, statusText: "Forbidden" }),
+  { status: 403, statusText: "Forbidden", data: "Forbidden", internal: false },
+])("preserves route response status without claiming a transport failure", (error) => {
+  renderError(error);
+
+  expect(screen.getByText(/error: 403/)).toBeInTheDocument();
+  expect(screen.queryByText(/could not be reached/)).not.toBeInTheDocument();
 });
 
 test("still reports a typed ApiError with its status", () => {

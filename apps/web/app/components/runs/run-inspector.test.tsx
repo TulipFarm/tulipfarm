@@ -23,6 +23,47 @@ const run: OperationalRun = {
 };
 
 describe("RunInspector", () => {
+  it("shows the latest effect attempt inside the existing Effects disclosure", async () => {
+    render(
+      <RunInspector
+        run={{
+          ...run,
+          effects: [
+            {
+              effectId: "effect-1",
+              stateId: "chat:call-1",
+              state: "ambiguous",
+              updatedAt: "2026-09-19T05:33:22.420Z",
+              latestAttempt: {
+                state: "ambiguous",
+                errorCode: "mcp_tool_access_denied",
+                reason:
+                  "Provider reported denied access. Check this account's repository or resource permissions.",
+                startedAt: "2026-09-19T05:33:14.000Z",
+                finishedAt: "2026-09-19T05:33:22.420Z",
+              },
+            },
+          ],
+        }}
+        onCommand={vi.fn()}
+      />
+    );
+    await userEvent.click(screen.getByText("Effects (1)"));
+    expect(screen.getByText("Latest attempt")).toBeVisible();
+    expect(screen.getByText("mcp_tool_access_denied", { exact: true })).toBeVisible();
+    expect(
+      screen.getByText(
+        "Provider reported denied access. Check this account's repository or resource permissions.",
+        { exact: true }
+      )
+    ).toBeVisible();
+    expect(screen.getByText("2026-09-19T05:33:14.000Z", { exact: true })).toBeVisible();
+    expect(screen.getAllByText("2026-09-19T05:33:22.420Z", { exact: true })).toHaveLength(2);
+    expect(screen.getByText("Effects evidence JSON").closest("details")).not.toHaveAttribute(
+      "open"
+    );
+  });
+
   it("renders the authorized Run evidence model", () => {
     render(<RunInspector run={run} onCommand={vi.fn()} />);
     expect(screen.getByText("classify")).toBeInTheDocument();

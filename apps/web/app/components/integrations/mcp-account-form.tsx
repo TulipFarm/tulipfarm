@@ -22,7 +22,7 @@ export function McpCredentialFields({
         <McpField
           key={slot}
           label={slot === "accessToken" ? "Access token" : slot}
-          hint="Stored encrypted. Never sent to the Agent or read back in the UI."
+          hint="Stored encrypted. Never shown to agents or read back here."
         >
           <Input
             type="password"
@@ -44,23 +44,38 @@ export function McpAccountForm({
   requiredSlots,
   sharedAllowed,
   onChanged,
+  defaultLabel,
+  requiresOAuthApp = false,
+  prepare,
+  onFailure,
+  connect,
+  consent,
+  standardAccess,
 }: {
   integrationKey: string;
   authentication: McpAccountCreate["authentication"];
   requiredSlots: readonly string[];
   sharedAllowed: boolean;
   onChanged: () => void;
+  defaultLabel?: string;
+  requiresOAuthApp?: boolean;
+  prepare?: () => Promise<string>;
+  onFailure?: (error: unknown) => void;
+  connect?: (input: McpAccountCreate) => Promise<unknown>;
+  consent?: string;
+  standardAccess?: { consent: string; connect: (input: McpAccountCreate) => Promise<unknown> };
 }) {
   const isAdmin = useIsAdmin();
-  const [label, setLabel] = useState("");
+  const [label, setLabel] = useState(defaultLabel ?? "");
   const [scope, setScope] = useState<McpAccountCreate["scope"]>("personal");
   const [isDefault, setIsDefault] = useState(false);
   const [values, setValues] = useState<Record<string, string>>({});
-  const [existingOAuthApp, setExistingOAuthApp] = useState(false);
+  const [existingOAuthApp, setExistingOAuthApp] = useState(requiresOAuthApp);
   const [clientId, setClientId] = useState("");
   const [clientSecret, setClientSecret] = useState("");
-  const [tokenEndpointAuthMethod, setTokenEndpointAuthMethod] =
-    useState<NonNullable<McpAccountCreate["oauthClient"]>["tokenEndpointAuthMethod"]>("none");
+  const [tokenEndpointAuthMethod, setTokenEndpointAuthMethod] = useState<
+    NonNullable<McpAccountCreate["oauthClient"]>["tokenEndpointAuthMethod"]
+  >(requiresOAuthApp ? "client_secret_post" : "none");
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<unknown>();
   const [notice, setNotice] = useState("");
@@ -71,10 +86,12 @@ export function McpAccountForm({
         event.preventDefault();
         setPending(true);
         setError(undefined);
+        onFailure?.(undefined);
         setNotice("");
+        let accountAttempted = false;
         try {
-          const account = await createMcpAccount(integrationKey, {
-            label: label.trim(),
+          const input: McpAccountCreate = {
+            label: (label.trim() || defaultLabel || "").slice(0, 128),
             scope,
             authentication,
             ...(authentication === "oauth" ? {} : { isDefault }),
@@ -88,18 +105,31 @@ export function McpAccountForm({
                   },
                 }
               : {}),
-          });
+          };
+          if (connect) {
+            const submitter = "submitter" in event.nativeEvent ? event.nativeEvent.submitter : null;
+            if (
+              standardAccess &&
+              submitter instanceof HTMLButtonElement &&
+              submitter.value === "use_standard_access"
+            )
+              await standardAccess.connect(input);
+            else await connect(input);
+            return;
+          }
+          const key = prepare ? await prepare() : integrationKey;
+          accountAttempted = true;
+          const account = await createMcpAccount(key, input);
           setValues({});
           setClientSecret("");
-          setLabel("");
-          onChanged();
+          setLabel(defaultLabel ?? "");
           if (authentication === "oauth") {
             if (existingOAuthApp) {
               setNotice(
                 "Account saved. Register the OAuth callback URL shown on its account card with your provider, then choose Connect account."
               );
             } else {
-              await startMcpAccountOAuth(integrationKey, account.id);
+              await startMcpAccountOAuth(key, account.id);
             }
           } else {
             setNotice(
@@ -108,9 +138,11 @@ export function McpAccountForm({
                 : "Account saved. Further setup is required."
             );
           }
+          onChanged();
         } catch (cause) {
           setError(cause);
-          onChanged();
+          onFailure?.(cause);
+          if (accountAttempted) onChanged();
         } finally {
           setValues({});
           setClientSecret("");
@@ -118,28 +150,29 @@ export function McpAccountForm({
         }
       }}
     >
-      <h4 className="text-sm font-medium">Connect another account</h4>
-      <McpError error={error} />
+      {!onFailure && <McpError error={error} />}
       <fieldset disabled={pending} className="space-y-3">
-        <McpField
-          label="Account label"
-          hint="Choose a label that identifies this exact account in Chat."
-        >
-          <Input
-            required
-            maxLength={128}
-            value={label}
-            onChange={(event) => setLabel(event.target.value)}
-          />
-        </McpField>
+        {!defaultLabel && (
+          <McpField
+            label="Account name"
+            hint="Use a name you will recognize in Chat, such as your provider username or work account."
+          >
+            <Input
+              required
+              maxLength={128}
+              value={label}
+              onChange={(event) => setLabel(event.target.value)}
+            />
+          </McpField>
+        )}
         {isAdmin && sharedAllowed ? (
-          <McpField label="Account ownership">
+          <McpField label="Who can use this account?">
             <IntegrationChoice
-              label="Account ownership"
+              label="Who can use this account?"
               value={scope}
               options={[
-                { value: "personal", label: "Personal — only your identity" },
-                { value: "shared", label: "Shared — admin-managed access" },
+                { value: "personal", label: "Personal — just you" },
+                { value: "shared", label: "Shared — people you grant access to" },
               ]}
               onChange={(value) => {
                 if (value === "personal" || value === "shared") setScope(value);
@@ -149,28 +182,28 @@ export function McpAccountForm({
         ) : null}
         <p className="text-xs text-muted-foreground">
           {scope === "personal"
-            ? "Personal by default. Use only in private Chat or owner-private Routines. Shared channels cannot use your personal credentials."
-            : "Shared accounts need explicit grants and provider permission. Creating this account grants no one access."}
+            ? "Personal · only you, in private Chat and your private Routines."
+            : "Shared · Creating it grants no one access. Grant access after connecting; your provider must permit shared use."}
         </p>
-        {!sharedAllowed && (
-          <p className="text-xs text-muted-foreground">
-            Shared accounts are not supported for this server.
-          </p>
-        )}
         {authentication === "token" && (
-          <McpCredentialFields slots={requiredSlots} values={values} onChange={setValues} />
+          <div className="space-y-3">
+            <McpCredentialFields slots={requiredSlots} values={values} onChange={setValues} />
+          </div>
         )}
         {authentication === "oauth" && (
           <div className="space-y-3">
             <p className="text-xs text-muted-foreground">
-              TulipFarm completes authorization on the server; no tokens appear in this form or its
-              URL. Existing OAuth apps are saved first so you can register the callback URL before
-              sign-in.
+              {requiresOAuthApp
+                ? "Enter your provider app details to get its callback URL, then sign in."
+                : "Continue to your provider to sign in and choose permissions."}
             </p>
             <details
+              open={requiresOAuthApp || undefined}
               onToggle={(event) => {
-                setExistingOAuthApp(event.currentTarget.open);
-                if (!event.currentTarget.open) setClientSecret("");
+                if (!requiresOAuthApp) {
+                  setExistingOAuthApp(event.currentTarget.open);
+                  if (!event.currentTarget.open) setClientSecret("");
+                }
               }}
             >
               <summary className="cursor-pointer text-sm font-medium">
@@ -179,9 +212,8 @@ export function McpAccountForm({
               {existingOAuthApp && (
                 <div className="mt-3 space-y-3">
                   <p className="text-xs text-muted-foreground">
-                    Use your provider's registered client settings. Without these settings,
-                    TulipFarm attempts dynamic client registration only when the provider supports
-                    it. Client secrets are encrypted and never read back.
+                    Register an app in your provider's developer settings. After saving, copy the
+                    callback URL into that app before signing in.
                   </p>
                   <McpField label="OAuth client ID">
                     <Input
@@ -235,38 +267,66 @@ export function McpAccountForm({
         )}
         {authentication === "none" && (
           <p className="text-xs text-muted-foreground">
-            This server requires no external credential. Its capabilities still need admin approval
-            and account-use authorization.
+            No provider password is needed. An admin must still review access, and agents can use
+            only an authorized account.
           </p>
         )}
-        {authentication !== "oauth" ? (
-          <label className="flex items-center gap-2 text-sm">
-            <input
-              type="checkbox"
-              checked={isDefault}
-              onChange={(event) => setIsDefault(event.target.checked)}
-            />
-            Default for new account selections
-          </label>
-        ) : (
+        <details className="space-y-2">
+          <summary className="cursor-pointer text-xs font-medium">Account preferences</summary>
+          {defaultLabel && (
+            <McpField
+              label="Account name"
+              hint="Optional: choose a name to recognize this account in Chat."
+            >
+              <Input
+                maxLength={128}
+                value={label}
+                onChange={(event) => setLabel(event.target.value)}
+              />
+            </McpField>
+          )}
+          {!connect && authentication !== "oauth" ? (
+            <label className="flex items-center gap-2 text-sm">
+              <input
+                type="checkbox"
+                checked={isDefault}
+                onChange={(event) => setIsDefault(event.target.checked)}
+              />
+              Default for new account selections
+            </label>
+          ) : !connect ? (
+            <p className="text-xs text-muted-foreground">
+              After sign-in succeeds, use Make default on the connected account if needed.
+            </p>
+          ) : null}
           <p className="text-xs text-muted-foreground">
-            After sign-in succeeds, use Make default on the connected account if needed.
+            Changing a default does not change accounts already selected by a Chat or Routine.
           </p>
-        )}
-        <p className="text-xs text-muted-foreground">
-          Changing a default does not change accounts already selected by a Chat or Routine.
-        </p>
-        <Button type="submit">
+        </details>
+        {consent && <p className="text-xs text-muted-foreground">{consent}</p>}
+        <Button type="submit" variant={standardAccess ? "outline" : "default"}>
           {pending
             ? existingOAuthApp && authentication === "oauth"
               ? "Saving..."
               : "Connecting..."
-            : authentication === "oauth"
-              ? existingOAuthApp
-                ? "Save OAuth account"
-                : "Connect with browser sign-in"
-              : "Connect account"}
+            : connect
+              ? standardAccess
+                ? "Keep existing access and connect"
+                : "Connect"
+              : authentication === "oauth"
+                ? existingOAuthApp
+                  ? "Save OAuth account"
+                  : "Sign in with provider"
+                : "Connect account"}
         </Button>
+        {standardAccess && (
+          <div className="space-y-2">
+            <p className="text-xs text-muted-foreground">{standardAccess.consent}</p>
+            <Button type="submit" value="use_standard_access">
+              Use standard access and connect
+            </Button>
+          </div>
+        )}
       </fieldset>
       {notice && (
         <p role="status" className="text-xs text-muted-foreground">

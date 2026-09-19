@@ -25,7 +25,7 @@ export function ErrorState({
   message?: string;
 }) {
   const isAuth = status === 401;
-  const isTransportError = status === undefined;
+  const isTransportError = status === 0;
   return (
     <Frame section={section}>
       <p className="text-destructive">
@@ -37,7 +37,9 @@ export function ErrorState({
           ? "Sign in, or set VITE_API_TOKEN in apps/web/.env.local to authenticate this session."
           : isTransportError
             ? "The API could not be reached. Check that it is running on :4010."
-            : "The API responded, but could not complete this request."}
+            : status !== undefined
+              ? "The API responded, but could not complete this request."
+              : "This page could not be loaded. Try reloading it."}
       </p>
     </Frame>
   );

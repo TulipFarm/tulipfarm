@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import type { ConversationMessage } from "~/lib/conversations";
 import { messagesToTimeline } from "./hydrate";
+import { chatReducer, initialChatState } from "./reducer";
+import { createRunEventMapper } from "./sse-client";
 
 describe("messagesToTimeline", () => {
   it("replays the persisted participant event order, plan, citations, Surface revision, and receipt", () => {
@@ -465,6 +467,107 @@ describe("messagesToTimeline", () => {
       ],
     });
   });
+
+  it.each(["ok", "error", undefined] as const)(
+    "keeps a recorded %s result settled when reloading a second approval and finishing",
+    (outcome) => {
+      const resultPreview = { json: '{"receipt":"saved-call-1"}' };
+      const messages = messagesToTimeline([
+        {
+          _id: "attempt",
+          conversationId: "conversation",
+          role: "assistant",
+          content: "",
+          metadata: {
+            events: [
+              {
+                sequence: 1,
+                eventType: "tool.call",
+                payload: { callId: "call-1", name: "github.get_me" },
+              },
+              {
+                sequence: 2,
+                eventType: "approval.requested",
+                payload: { callId: "call-1", intentId: "approval-1", waitId: "wait-1" },
+              },
+              {
+                sequence: 3,
+                eventType: "tool.result",
+                payload: {
+                  callId: "call-1",
+                  ...(outcome === undefined ? {} : { status: outcome }),
+                  resultPreview,
+                },
+              },
+              {
+                sequence: 4,
+                eventType: "tool.call",
+                payload: { callId: "call-2", name: "github.search_repositories" },
+              },
+              {
+                sequence: 5,
+                eventType: "approval.requested",
+                payload: { callId: "call-2", intentId: "approval-2", waitId: "wait-2" },
+              },
+            ],
+            turnAttempt: {
+              runId: "run-1",
+              attempt: 1,
+              cursor: 5,
+              outcome: "waiting",
+              complete: false,
+              wait: {
+                kind: "approval",
+                waitId: "wait-2",
+                approvalId: "approval-2",
+                callId: "call-2",
+              },
+            },
+          },
+          createdAt: "2026-01-01T00:00:00.000Z",
+        },
+      ]);
+      expect(messages[0]?.parts).toMatchObject([
+        { kind: "tool", toolCallId: "call-1", status: "done", resultPreview },
+        {
+          kind: "tool",
+          toolCallId: "call-2",
+          status: "running",
+          approval: { approvalId: "approval-2", status: "pending" },
+        },
+      ]);
+      expect(
+        messages[0]?.parts.filter((part) => part.kind === "tool" && part.status === "done")
+      ).toHaveLength(1);
+
+      const mapEvent = createRunEventMapper();
+      let state = { ...initialChatState, messages };
+      for (const frame of [
+        {
+          seq: 6,
+          type: "tool.result",
+          data: { callId: "call-2", status: "ok" },
+        },
+        {
+          seq: 7,
+          type: "turn.finished",
+          data: { status: "succeeded", messageId: "attempt" },
+        },
+      ]) {
+        for (const event of mapEvent(frame)) state = chatReducer(state, event);
+      }
+      expect(state.status).toBe("idle");
+      expect(state.messages).toHaveLength(1);
+      expect(state.messages[0]?.sealed).toBe(true);
+      expect(state.messages[0]?.parts).toMatchObject([
+        { kind: "tool", toolCallId: "call-1", status: "done", resultPreview },
+        { kind: "tool", toolCallId: "call-2", status: "done" },
+      ]);
+      expect(
+        state.messages[0]?.parts.filter((part) => part.kind === "tool" && part.status === "done")
+      ).toHaveLength(2);
+    }
+  );
 
   it.each(["failed", "cancelled"] as const)(
     "marks an outcome-less Tool from a completed %s attempt as interrupted",

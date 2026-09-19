@@ -1,3 +1,77 @@
+import { Type } from "@sinclair/typebox";
+import { MCP_TOOL_ERROR_REASONS } from "@tulipfarm/integrations";
+
+/** Adapter error codes are not trusted text; only reviewed machine codes may be disclosed. */
+export const ADMIN_EFFECT_ERROR_CODES = [
+  ...Object.keys(MCP_TOOL_ERROR_REASONS),
+  "access_denied",
+  "adapter_error",
+  "authentication_required",
+  "cancelled",
+  "capability_changed",
+  "closed",
+  "consent_required",
+  "disabled",
+  "discovery_limit",
+  "dispatch_cancelled",
+  "forbidden",
+  "identity_mismatch",
+  "invalid_arguments",
+  "invalid_configuration",
+  "invalid_definition",
+  "invalid_output",
+  "invalid_response",
+  "mcp_request_failed",
+  "mcp_tool_failed",
+  "not_connected",
+  "not_found",
+  "protocol_failure",
+  "provider_retry_wait",
+  "provider_timeout",
+  "reconnect_required",
+  "response_limit",
+  "review_required",
+  "selection_required",
+  "timeout",
+  "transport_failure",
+  "unavailable",
+  "unclassified_error",
+  "unsupported",
+  "unsupported_backend",
+  "unsupported_capability",
+  "unsupported_protocol",
+] as const;
+
+export const AdminEffectAttemptSchema = Type.Object(
+  {
+    state: Type.Union(
+      ["prepared", "dispatched", "confirmed", "failed", "ambiguous"].map((state) =>
+        Type.Literal(state)
+      )
+    ),
+    errorCode: Type.Optional(
+      Type.Union(ADMIN_EFFECT_ERROR_CODES.map((code) => Type.Literal(code)))
+    ),
+    reason: Type.Optional(
+      Type.Union(Object.values(MCP_TOOL_ERROR_REASONS).map((reason) => Type.Literal(reason)))
+    ),
+    startedAt: Type.String({ format: "date-time" }),
+    finishedAt: Type.Optional(Type.String({ format: "date-time" })),
+  },
+  { additionalProperties: false }
+);
+
+export const AdminRunEffectSchema = Type.Object(
+  {
+    effectId: Type.String(),
+    stateId: Type.String(),
+    state: Type.String(),
+    updatedAt: Type.String({ format: "date-time" }),
+    latestAttempt: Type.Optional(AdminEffectAttemptSchema),
+  },
+  { additionalProperties: false }
+);
+
 export const AdminIdParamsSchema = {
   type: "object",
   additionalProperties: false,
@@ -115,7 +189,7 @@ export const AdminRunSchema = {
         },
       },
     },
-    effects: { type: "array", items: { type: "object", additionalProperties: true } },
+    effects: { type: "array", items: AdminRunEffectSchema },
     waits: { type: "array", items: { type: "object", additionalProperties: true } },
     guardrailDecisions: {
       type: "array",

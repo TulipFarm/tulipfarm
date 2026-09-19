@@ -194,6 +194,7 @@ import { reconcileSoulRoles, registerSoulRoleReconcile } from "./identity/role-r
 import { syncDeploymentRoles } from "./identity/roles";
 import { IngressIdentityResolver } from "./ingress/identity";
 import { IntegrationConversationsRepo } from "./ingress/repo";
+import { composeMcpSetup } from "./integrations/accounts/setup-compose";
 import { composeMcpAccountRuntime, createMcpIntegrationFeature } from "./integrations/mcp-compose";
 import { McpHostContextResolver } from "./integrations/mcp-context";
 import { composeNativeChannels } from "./integrations/native/compose";
@@ -1102,6 +1103,16 @@ async function boot() {
       accountConfiguration: mcpRuntime.accountConfiguration,
       callerForRun: mcpContexts.callerForRun,
       afterDefinitionChange: mcpRuntime.refresh,
+      setup: (service) =>
+        composeMcpSetup({
+          db: pool,
+          businessId: DEPLOYMENT_BUSINESS_ID,
+          service,
+          accounts: mcpAccounts,
+          audit: auditService,
+          users: userRepo,
+          authorizationCheck: makeAuthorizationCheck(routeAuthorizer, gateOptions),
+        }),
       audit: {
         record: async (input) => {
           await auditService.record({

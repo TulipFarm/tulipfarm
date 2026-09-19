@@ -11,6 +11,29 @@ vi.mock("~/lib/mcp-integrations", () => ({
 }));
 beforeEach(() => vi.clearAllMocks());
 
+test("empty discovery presents one result instead of empty category headings", async () => {
+  vi.mocked(discoverMcpCapabilities).mockResolvedValue({ tools: [], resources: [], prompts: [] });
+  render(<McpCapabilities definition={definition} isAdmin onChanged={vi.fn()} />);
+  await userEvent.click(screen.getByRole("button", { name: "Discover available access" }));
+  expect(await screen.findByRole("status")).toHaveTextContent(
+    "No Tools, resources or prompts were found for this account."
+  );
+  expect(screen.queryByRole("heading")).not.toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Save approved access" })).toBeVisible();
+  expect(reviewMcpCapabilities).not.toHaveBeenCalled();
+});
+
+test("discovery only shows categories containing available items", async () => {
+  vi.mocked(discoverMcpCapabilities).mockResolvedValue({ ...discovered, tools: [] });
+  render(<McpCapabilities definition={definition} isAdmin onChanged={vi.fn()} />);
+  await userEvent.click(screen.getByRole("button", { name: "Discover available access" }));
+  expect(
+    await screen.findByRole("heading", { name: "Resources — content agents can read" })
+  ).toBeVisible();
+  expect(screen.queryByRole("heading", { name: /^Tools —/ })).not.toBeInTheDocument();
+  expect(screen.queryByRole("heading", { name: /^Prompts —/ })).not.toBeInTheDocument();
+});
+
 const definition: McpIntegrationDefinition = {
   server: {
     id: "support",
@@ -37,12 +60,39 @@ const discovered = {
 test("discovery does not approve new capabilities", async () => {
   vi.mocked(discoverMcpCapabilities).mockResolvedValue(discovered);
   render(<McpCapabilities definition={definition} isAdmin onChanged={vi.fn()} />);
-  await userEvent.click(screen.getByRole("button", { name: "Discover capabilities" }));
+  await userEvent.click(screen.getByRole("button", { name: "Discover available access" }));
   expect(
     await screen.findByRole("checkbox", { name: "Approve tools: close_ticket" })
   ).not.toBeChecked();
   expect(screen.getByRole("checkbox", { name: "Approve resources: Handbook" })).not.toBeChecked();
   expect(reviewMcpCapabilities).not.toHaveBeenCalled();
+  expect(screen.getByText(/Discovery complete. Nothing new is approved yet/)).toBeVisible();
+});
+
+test("Tool action policy stays visible while raw inputs are disclosed separately", async () => {
+  vi.mocked(discoverMcpCapabilities).mockResolvedValue(discovered);
+  vi.mocked(reviewMcpCapabilities).mockResolvedValue(definition);
+  render(<McpCapabilities definition={definition} isAdmin onChanged={vi.fn()} />);
+  await userEvent.click(screen.getByRole("button", { name: "Discover available access" }));
+  await userEvent.click(
+    await screen.findByRole("checkbox", { name: "Approve tools: close_ticket" })
+  );
+  expect(screen.getByText("May change external data. Requires action approval.")).toBeVisible();
+  expect(screen.getByText("{}")).not.toBeVisible();
+  await userEvent.click(
+    screen.getByRole("checkbox", { name: "Changes external data: close_ticket" })
+  );
+  await userEvent.click(screen.getByRole("checkbox", { name: "Require approval: close_ticket" }));
+  await userEvent.click(screen.getByRole("button", { name: "Save approved access" }));
+  expect(reviewMcpCapabilities).toHaveBeenCalledWith(
+    "support",
+    {
+      tools: [{ ...discovered.tools[0], mutating: false, requiresApproval: false }],
+      resources: [],
+      prompts: [],
+    },
+    undefined
+  );
 });
 
 test("saves only capabilities explicitly selected by the admin", async () => {
@@ -53,11 +103,11 @@ test("saves only capabilities explicitly selected by the admin", async () => {
   });
   const changed = vi.fn();
   render(<McpCapabilities definition={definition} isAdmin onChanged={changed} />);
-  await userEvent.click(screen.getByRole("button", { name: "Discover capabilities" }));
+  await userEvent.click(screen.getByRole("button", { name: "Discover available access" }));
   await userEvent.click(
     await screen.findByRole("checkbox", { name: "Approve resources: Handbook" })
   );
-  await userEvent.click(screen.getByRole("button", { name: "Save approved capabilities" }));
+  await userEvent.click(screen.getByRole("button", { name: "Save approved access" }));
   expect(reviewMcpCapabilities).toHaveBeenCalledWith(
     "support",
     {
@@ -80,7 +130,9 @@ test("members can see approved capabilities but cannot expand them", () => {
   );
   expect(screen.getByText("close_ticket")).toBeInTheDocument();
   expect(screen.queryByRole("checkbox")).not.toBeInTheDocument();
-  expect(screen.queryByRole("button", { name: "Discover capabilities" })).not.toBeInTheDocument();
+  expect(
+    screen.queryByRole("button", { name: "Discover available access" })
+  ).not.toBeInTheDocument();
 });
 
 test("discovery and review preserve the same explicitly selected Chat account context", async () => {
@@ -94,9 +146,9 @@ test("discovery and review preserve the same explicitly selected Chat account co
       onChanged={vi.fn()}
     />
   );
-  await userEvent.click(screen.getByRole("button", { name: "Discover capabilities" }));
+  await userEvent.click(screen.getByRole("button", { name: "Discover available access" }));
   await screen.findByRole("checkbox", { name: "Approve resources: Handbook" });
-  await userEvent.click(screen.getByRole("button", { name: "Save approved capabilities" }));
+  await userEvent.click(screen.getByRole("button", { name: "Save approved access" }));
   expect(discoverMcpCapabilities).toHaveBeenCalledWith("support", { chatId: "shared-chat" });
   expect(reviewMcpCapabilities).toHaveBeenCalledWith(
     "support",
@@ -122,11 +174,11 @@ test("rediscovery preserves the admin policy for an unchanged approved Tool", as
       onChanged={vi.fn()}
     />
   );
-  await userEvent.click(screen.getByRole("button", { name: "Discover capabilities" }));
+  await userEvent.click(screen.getByRole("button", { name: "Discover available access" }));
   await userEvent.click(
     await screen.findByRole("checkbox", { name: "Approve resources: Handbook" })
   );
-  await userEvent.click(screen.getByRole("button", { name: "Save approved capabilities" }));
+  await userEvent.click(screen.getByRole("button", { name: "Save approved access" }));
   expect(reviewMcpCapabilities).toHaveBeenCalledWith(
     "support",
     {
@@ -149,9 +201,9 @@ test("discovery and review keep the same explicit admin account outside Chat", a
       onChanged={vi.fn()}
     />
   );
-  await userEvent.click(screen.getByRole("button", { name: "Discover capabilities" }));
+  await userEvent.click(screen.getByRole("button", { name: "Discover available access" }));
   await screen.findByRole("checkbox", { name: "Approve resources: Handbook" });
-  await userEvent.click(screen.getByRole("button", { name: "Save approved capabilities" }));
+  await userEvent.click(screen.getByRole("button", { name: "Save approved access" }));
   expect(discoverMcpCapabilities).toHaveBeenCalledWith("support", { accountId: "shared-exact" });
   expect(reviewMcpCapabilities).toHaveBeenCalledWith(
     "support",

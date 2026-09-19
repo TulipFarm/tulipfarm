@@ -27,6 +27,7 @@ export {
   type McpOAuthVault,
   summarizeMcpAccount,
 } from "./accounts";
+export { type McpSetupRepository, McpSetupService } from "./accounts/setup";
 export type { AuthBrokerDenialReason } from "./auth/errors";
 export { AuthBrokerError } from "./auth/errors";
 export type {
@@ -264,6 +265,7 @@ export {
   mcpToolContract,
   mcpToolName,
 } from "./mcp";
+export { classifyMcpToolError, MCP_TOOL_ERROR_REASONS } from "./mcp/tool-error";
 export type {
   ChannelApp,
   ChannelIntegration,

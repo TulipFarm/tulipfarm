@@ -80,7 +80,66 @@ afterEach(() => {
   vi.clearAllMocks();
 });
 
-const meta = { type: "user-provided" as const, createdAt: "x", updatedAt: "y" };
+const meta = {
+  type: "user-provided" as const,
+  createdAt: "2026-09-18T08:00:00.000Z",
+  updatedAt: "2026-09-19T07:00:00.000Z",
+};
+
+test("shows integration credentials by account with their credential update time", () => {
+  renderWithData(<BusinessSecrets />, {
+    secrets: [
+      {
+        key: "00000000-0000-4000-8000-000000000001",
+        ...meta,
+        integration: {
+          key: "github-mcp",
+          label: "GitHub",
+          accountId: "my-github",
+          accountLabel: "My GitHub",
+          scope: "personal",
+          field: "accessToken",
+        },
+      },
+      { key: "custom-key", ...meta },
+    ],
+    providers: PROVIDERS,
+    config: {},
+  });
+  const integration = screen.getByText("My GitHub").closest("li");
+  expect(integration).not.toBeNull();
+  if (!integration) throw new Error("Missing integration credential row");
+  expect(within(integration).getByText("GitHub")).toBeInTheDocument();
+  expect(within(integration).getByText("Personal")).toBeInTheDocument();
+  expect(within(integration).getByText("Access token")).toBeInTheDocument();
+  expect(within(integration).getByRole("link", { name: "Manage GitHub" })).toHaveAttribute(
+    "href",
+    "/integrations/github-mcp?account=my-github"
+  );
+  expect(within(integration).queryByRole("button", { name: /delete/i })).toBeNull();
+  expect(screen.queryByText("00000000-0000-4000-8000-000000000001")).toBeNull();
+  expect(integration.querySelector("time")).toHaveAttribute("datetime", meta.updatedAt);
+  expect(screen.getByText("custom-key").closest("li")?.querySelector("time")).toHaveAttribute(
+    "datetime",
+    meta.updatedAt
+  );
+});
+
+test("shows the latest provider update and each stored field's exact update time", async () => {
+  const older = "2026-09-18T09:00:00.000Z";
+  renderWithData(<BusinessSecrets />, {
+    secrets: [
+      { key: "azure-openai-api-key", ...meta, updatedAt: older },
+      { key: "azure-openai-resource-name", ...meta },
+    ],
+    providers: PROVIDERS,
+    config: {},
+  });
+  const row = screen.getByRole("button", { name: "Edit Azure Foundry" }).closest("li");
+  expect(row?.querySelector("time")).toHaveAttribute("datetime", meta.updatedAt);
+  await userEvent.click(screen.getByRole("button", { name: "Edit Azure Foundry" }));
+  expect(row?.querySelector(`time[datetime="${older}"]`)).toBeInTheDocument();
+});
 
 test("prefills a custom Credential requested by a denied Tool", () => {
   renderWithData(

@@ -5,6 +5,7 @@ import type {
   McpServerDefinition,
 } from "@tulipfarm/schema";
 import { apiDelete, apiGet, apiWrite } from "./api";
+import type { McpAccountConfiguration } from "./mcp-accounts";
 
 export interface McpCatalogEntry {
   readonly id: string;
@@ -13,6 +14,7 @@ export interface McpCatalogEntry {
   readonly url: string;
   readonly publisherEvidence: string;
   readonly authentication: readonly ("oauth" | "token")[];
+  readonly requiresOAuthApp?: boolean;
   readonly setup: readonly string[];
   readonly limitations: readonly string[];
   readonly knowledgeSync: "excluded" | "requires-reviewed-adapter";
@@ -27,6 +29,21 @@ export const mcpPath = (id: string) => `/api/v1/integrations/${encodeURIComponen
 
 export async function listMcpCatalog(): Promise<McpCatalogEntry[]> {
   return (await apiGet<{ entries: McpCatalogEntry[] }>("/api/v1/integrations/catalog")).entries;
+}
+
+export interface McpCatalogSetup {
+  server: McpServerDefinition;
+  configuration: McpAccountConfiguration;
+  requiresOAuthApp: boolean;
+}
+
+export function getMcpCatalogSetup(
+  id: string,
+  authentication: "token" | "oauth"
+): Promise<McpCatalogSetup> {
+  return apiGet(
+    `/api/v1/integrations/catalog/${encodeURIComponent(id)}/setup?authentication=${authentication}`
+  );
 }
 
 export async function listMcpIntegrations(): Promise<McpIntegrationDefinition[]> {

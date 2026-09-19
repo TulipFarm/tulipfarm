@@ -348,7 +348,7 @@ registration in `@tulipfarm/schema`, including their `slug` argument and `{ serv
 All seven shared setup Tools route through the real MCP service at L3, including discovery,
 review, resource reads, and prompt rendering; none may use a scripted successful result.
 `mcp_provider_call_count` observes actual `tools/call` requests in the external transport fixture.
-Successful account Cases require one request; privacy and revocation Cases require zero plus
+Successful single-call account Cases require one request; privacy and revocation Cases require zero plus
 their distinct account-policy denial. Fault probes must exercise the injected account defect and
 fail that named denial Expectation. Independent approval and replay guards remain active: a later
 refusal may prevent a provider call, but must not count as the expected account-policy refusal.
@@ -376,6 +376,12 @@ Additional Cases cover personal defaults ahead of shared defaults, no implicit s
 and a shared grant revoked while action Approval is pending. `revokeGrantBeforeApproval` removes
 the existing grant through the real repository before signaling the production approval wait;
 the resumed dispatch must recheck access and refuse without switching accounts.
+
+The sequential-approval Case requires two distinct durable `approval.requested` events and two
+provider calls in one Turn. `run_event_emitted` accepts an optional positive integer `count` for
+an exact count; without it, the Expectation still checks presence only. L3 resumes each pending
+MCP approval within the Turn's Tool-call limit, so a missing second event cannot hide behind a
+successful first call.
 
 `src/l3/tier.test.ts` includes deliberate regression probes: lose the active-bundle store's
 newly published MCP definition, suppress grant revocation, or misclassify shared Chat as private.

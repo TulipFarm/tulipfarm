@@ -12,11 +12,13 @@ export interface SoulCatalogueEntry {
  * Where an Integration stands relative to this business's Soul: already connected, listed in the
  * marketplace and installable, or listed but not yet open for installs.
  */
-export type IntegrationCatalogueStatus = "connected" | "available" | "coming_soon";
+export type IntegrationCatalogueStatus = "connected" | "configured" | "available" | "coming_soon";
 
 /** A catalogued Integration also carries whether it is connected here yet. */
 export interface IntegrationCatalogueEntry extends SoulCatalogueEntry {
   status: IntegrationCatalogueStatus;
+  kind?: "mcp" | "native_channel";
+  access?: McpSetupAccess;
 }
 
 /** L1 Soul catalog. Reached through `agent_list` / `skill_list` / `list_resource_types`. */
@@ -74,13 +76,27 @@ export function buildSoulCatalogue(
     }))
     .sort(byName);
 
-  const connectedIntegrations = values(soulLoader?.integrations)
-    .filter((i) => i.manifest !== undefined)
-    .map((i) => ({
-      name: i.slug,
-      description: asDesc(i.manifest?.description),
-      status: "connected" as const,
-    }));
+  const connectedIntegrations: IntegrationCatalogueEntry[] = values(soulLoader?.integrations)
+    .filter((i) => i.mcp !== undefined || i.manifest !== undefined || i.connection !== undefined)
+    .map(
+      (i): IntegrationCatalogueEntry =>
+        i.mcp
+          ? {
+              name: i.slug,
+              description: i.mcp.server.label,
+              status: "configured",
+              kind: "mcp",
+              access: describeMcpAccess(i.mcp),
+            }
+          : {
+              name: i.slug,
+              description: asDesc(i.manifest?.description),
+              status: i.manifest ? "connected" : "configured",
+              ...(i.slug === "github" || i.slug === "slack"
+                ? { kind: "native_channel" as const }
+                : {}),
+            }
+    );
   const connectedNames = new Set(connectedIntegrations.map((i) => i.name));
 
   /*
@@ -93,9 +109,15 @@ export function buildSoulCatalogue(
       name: entry.name,
       description: asDesc(entry.description),
       status: entry.availability,
+      ...(entry.name === "github" || entry.name === "slack"
+        ? { kind: "native_channel" as const }
+        : {}),
     }));
 
   const integrations = [...connectedIntegrations, ...marketplaceIntegrations].sort(byName);
 
   return { agents, skills, resourceTypes, routines, integrations };
 }
+
+import type { McpSetupAccess } from "@tulipfarm/schema";
+import { describeMcpAccess } from "@tulipfarm/schema/mcp-access";

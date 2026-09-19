@@ -19,6 +19,7 @@ const entry: McpCatalogEntry = {
 
 function mount(isAdmin: boolean, configured = false) {
   const setup = vi.fn();
+  const manage = vi.fn();
   const Stub = createRemixStub([
     {
       path: "/",
@@ -41,35 +42,55 @@ function mount(isAdmin: boolean, configured = false) {
               : []
           }
           isAdmin={isAdmin}
+          connections={{
+            "slack-mcp": {
+              accounts: [],
+              configuration: {
+                authentication: "oauth",
+                requiredSlots: [],
+                sharedAllowed: false,
+                definitionDigest: "current",
+              },
+              error: null,
+            },
+          }}
           onSetup={setup}
+          onManage={manage}
         />
       ),
     },
   ]);
   render(<Stub />);
-  return setup;
+  return { setup, manage };
 }
 
-test("official catalog setup is explicit and excludes Slack Knowledge sync", async () => {
-  const setup = mount(true);
-  await userEvent.click(await screen.findByText("Setup and compatibility"));
-  expect(screen.getByText("Knowledge sync is excluded for this provider.")).toBeVisible();
+test("the catalog has one clear Connect action without inline setup instructions", async () => {
+  const { setup } = mount(true);
+  expect(await screen.findByRole("heading", { name: "Integrations", level: 2 })).toBeVisible();
+  expect(screen.queryByText("Official MCP servers")).not.toBeInTheDocument();
+  expect(screen.queryByText("Before you connect")).not.toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Connect Slack" })).toHaveTextContent(/^Connect$/);
   expect(setup).not.toHaveBeenCalled();
-  await userEvent.click(screen.getByRole("button", { name: "Set up Slack" }));
+  await userEvent.click(screen.getByRole("button", { name: "Connect Slack" }));
   expect(setup).toHaveBeenCalledWith(entry);
 });
 
-test("configured catalog entries route to management instead of overwriting settings", async () => {
-  mount(true, true);
-  expect(await screen.findByRole("link", { name: "Manage Slack" })).toHaveAttribute(
-    "href",
-    "/integrations/slack-mcp"
+test("unconnected catalog entries resume their existing definition without overwriting settings", async () => {
+  const { manage, setup } = mount(true, true);
+  const button = await screen.findByRole("button", { name: "Connect Slack" });
+  expect(button).toHaveTextContent(/^Connect$/);
+  await userEvent.click(button);
+  expect(manage).toHaveBeenCalledWith(
+    expect.objectContaining({ server: expect.objectContaining({ id: "slack-mcp" }) }),
+    entry
   );
-  expect(screen.queryByRole("button", { name: "Set up Slack" })).not.toBeInTheDocument();
+  expect(setup).not.toHaveBeenCalled();
+  expect(screen.queryByRole("button", { name: "Manage Slack" })).not.toBeInTheDocument();
 });
 
-test("members can read setup limitations without gaining server configuration controls", async () => {
-  mount(false);
-  expect(await screen.findByText("An admin can add this server")).toBeInTheDocument();
-  expect(screen.queryByRole("button", { name: "Set up Slack" })).not.toBeInTheDocument();
+test("members can open provider information while the catalog explains admin setup", async () => {
+  const { setup } = mount(false);
+  expect(await screen.findByText("An admin needs to finish setup.")).toBeInTheDocument();
+  await userEvent.click(screen.getByRole("button", { name: "Connect Slack" }));
+  expect(setup).toHaveBeenCalledWith(entry);
 });

@@ -3,9 +3,11 @@ import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { McpAccountSummary } from "@tulipfarm/schema";
 import { beforeEach, expect, test, vi } from "vitest";
+import { githubEligibilityFixture } from "~/components/integrations/mcp-setup.fixtures";
 import { getGitHubStatus, getIntegration, listSlackRoutes } from "~/lib/integrations";
 import { createMcpAccount, getMcpAccountConfiguration, listMcpAccounts } from "~/lib/mcp-accounts";
 import { getMcpIntegration } from "~/lib/mcp-integrations";
+import { getMcpSetupEligibility, listMcpSetups, startMcpSetup } from "~/lib/mcp-setup";
 import IntegrationDetailPage, { clientLoader } from "./_app.integrations.$name";
 
 vi.mock("~/lib/integrations", async (original) => ({
@@ -20,9 +22,22 @@ vi.mock("~/lib/mcp-accounts", () => ({
   createMcpAccount: vi.fn(),
 }));
 vi.mock("~/lib/mcp-integrations", () => ({ getMcpIntegration: vi.fn() }));
+vi.mock("~/lib/mcp-setup", async (original) => ({
+  ...(await original<typeof import("~/lib/mcp-setup")>()),
+  startMcpSetup: vi.fn(),
+  listMcpSetups: vi.fn(),
+  getMcpSetupEligibility: vi.fn(),
+}));
 
 beforeEach(() => {
   vi.clearAllMocks();
+  vi.mocked(listMcpSetups).mockResolvedValue([]);
+  vi.mocked(getMcpSetupEligibility).mockResolvedValue({
+    ...githubEligibilityFixture,
+    policy: "preserve",
+    publishedReady: true,
+    canConfigure: false,
+  });
   vi.mocked(getMcpAccountConfiguration).mockResolvedValue({
     authentication: "token",
     requiredSlots: ["accessToken"],
@@ -56,6 +71,20 @@ test("native GitHub callback URLs retain channel setup and expose status failure
   expect(result.routesError).toBe("Channel status unavailable.");
   expect(result.integration.name).toBe("github");
   expect(listSlackRoutes).not.toHaveBeenCalled();
+});
+
+test("the direct route fails closed on eligibility errors and retries without a setup write", async () => {
+  vi.mocked(listMcpAccounts).mockResolvedValue([]);
+  vi.mocked(getMcpSetupEligibility).mockRejectedValueOnce(new Error("Current policy unavailable"));
+  mountMcpRoute();
+  expect(await screen.findByRole("alert")).toHaveTextContent("Current policy unavailable");
+  expect(screen.queryByLabelText("Access token")).not.toBeInTheDocument();
+  expect(screen.queryByText("Ready to use")).not.toBeInTheDocument();
+  await userEvent.click(screen.getByRole("button", { name: "Reload setup permissions" }));
+  expect(await screen.findByLabelText("Access token")).toBeVisible();
+  expect(getMcpSetupEligibility).toHaveBeenCalledTimes(2);
+  expect(startMcpSetup).not.toHaveBeenCalled();
+  expect(createMcpAccount).not.toHaveBeenCalled();
 });
 
 test("the GitHub MCP ID loads MCP management without using native channel APIs", async () => {
@@ -97,8 +126,13 @@ function mountMcpRoute() {
       transport: { type: "streamable-http", url: "https://mcp.example.com/" },
       authentication: { type: "token", sharedAllowed: false },
     },
-    enabled: false,
-    reviewed: { tools: [], resources: [], prompts: [] },
+    enabled: true,
+    reviewPolicy: "custom",
+    reviewed: {
+      tools: [],
+      resources: [{ name: "Handbook", uri: "docs://handbook", digest: "digest" }],
+      prompts: [],
+    },
   });
   vi.mocked(listMcpAccounts).mockResolvedValue([]);
   const Stub = createRemixStub([
@@ -135,25 +169,29 @@ test("the mounted detail route loads canonical account metadata and submits a pe
     createdAt: "2026-09-18T00:00:00Z",
     updatedAt: "2026-09-18T00:00:00Z",
   };
-  vi.mocked(createMcpAccount).mockImplementation(async () => {
+  vi.mocked(startMcpSetup).mockImplementation(async (id) => {
     vi.mocked(listMcpAccounts).mockResolvedValue([account]);
-    return account;
+    return { id, integrationKey: "support", accountId: account.id, status: "done" };
   });
   mountMcpRoute();
-  await userEvent.type(await screen.findByLabelText("Account label"), "My account");
+  await userEvent.click(await screen.findByText("Account preferences"));
+  await userEvent.clear(screen.getByLabelText("Account name"));
+  await userEvent.type(screen.getByLabelText("Account name"), "My account");
   expect(getMcpAccountConfiguration).toHaveBeenCalledWith("support");
   expect(screen.getByLabelText("Access token")).toHaveAttribute("type", "password");
   await userEvent.type(screen.getByLabelText("Access token"), "fake-test-token");
-  await userEvent.click(screen.getByRole("button", { name: "Connect account" }));
-  expect(createMcpAccount).toHaveBeenCalledWith("support", {
-    label: "My account",
-    scope: "personal",
-    authentication: "token",
-    isDefault: false,
+  await userEvent.click(screen.getByRole("button", { name: "Connect" }));
+  expect(startMcpSetup).toHaveBeenCalledWith(expect.any(String), {
+    integrationKey: "support",
+    definitionRevision: githubEligibilityFixture.definitionRevision,
+    account: { label: "My account", scope: "personal", authentication: "token" },
     values: { accessToken: "fake-test-token" },
+    initializePolicy: false,
   });
-  expect(await screen.findByText("My account")).toBeInTheDocument();
-  expect(screen.getByLabelText("Access token")).toHaveValue("");
+  expect(await screen.findByText("Connected")).toBeInTheDocument();
+  expect(createMcpAccount).not.toHaveBeenCalled();
+  expect(screen.queryByDisplayValue("fake-test-token")).not.toBeInTheDocument();
+  expect(screen.queryByLabelText("Access token")).not.toBeInTheDocument();
 });
 
 test("the mounted route fails closed when canonical credential metadata is unavailable", async () => {

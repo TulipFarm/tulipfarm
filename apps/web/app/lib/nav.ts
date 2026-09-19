@@ -141,7 +141,8 @@ export const SETTINGS_GROUPS: NavGroup[] = [
         to: "/business/secrets",
         label: "Secrets",
         icon: KeyRound,
-        description: "Provider credentials and custom secrets. Values are never shown again.",
+        description:
+          "Provider, integration and custom credentials with their last updated time. Values stay hidden.",
       },
       {
         to: "/integrations",

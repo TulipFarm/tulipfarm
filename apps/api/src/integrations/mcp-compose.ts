@@ -36,6 +36,7 @@ import type { AuditService } from "../audit/service";
 import type { ToolRegistry } from "../broker/tool-adapter";
 import type { IntegrationAuthoringToolContext } from "../soul/integrations/tools";
 import { McpToolSync, type McpToolSyncDeps } from "../tools/mcp/sync";
+import { createMcpAccountAudit } from "./accounts/audit";
 import { composeMcpAccounts, type McpAccountFeatureDeps } from "./accounts/compose";
 import { createMcpRuntimeAccounts } from "./accounts/runtime";
 import type { McpHostContextResolver } from "./mcp-context";
@@ -101,6 +102,7 @@ export async function composeMcpAccountRuntime(
   const accounts = composeMcpAccounts({
     ...deps,
     definition,
+    integrationLabel: (key) => integration(key)?.server.label ?? key,
     guardedFetch,
     localBackend,
     environment,
@@ -145,15 +147,7 @@ export async function composeMcpAccountRuntime(
         return { kind: subject.kind, id: subject.id };
       throw new McpAccountAccessError("account_access_denied");
     },
-    audit: async (event) => {
-      await deps.audit.record({
-        actorId: event.principalId,
-        action: event.action,
-        target: `integration-account:${event.accountId}`,
-        reasonCodes: event.code ? [event.code] : [],
-        safeMetadata: { accountRevision: event.revision, subject: event.subject },
-      });
-    },
+    audit: createMcpAccountAudit(deps.audit),
   });
   const authorization = accounts.authorization;
   const access = createMcpRuntimeAccounts({
@@ -225,6 +219,9 @@ export interface McpIntegrationFeatureDeps {
   readonly accountConfiguration?: McpIntegrationRouteDeps["accountConfiguration"];
   readonly callerForRun: McpToolSyncDeps["callerForRun"];
   readonly afterDefinitionChange?: () => Promise<void>;
+  readonly setup?: (
+    service: McpIntegrationService<CommitActor>
+  ) => NonNullable<McpIntegrationRouteDeps["setup"]>;
 }
 
 export async function createMcpIntegrationFeature(deps: McpIntegrationFeatureDeps) {
@@ -253,6 +250,11 @@ export async function createMcpIntegrationFeature(deps: McpIntegrationFeatureDep
         await refresh();
         await deps.afterDefinitionChange?.();
       },
+      resumePut: async (definition, actor, revision) => {
+        await definitions.resumePut(definition, actor, revision);
+        await refresh();
+        await deps.afterDefinitionChange?.();
+      },
       remove: async (id, actor, revision) => {
         await definitions.remove(id, actor, revision);
         await refresh();
@@ -277,6 +279,7 @@ export async function createMcpIntegrationFeature(deps: McpIntegrationFeatureDep
     catalog: MCP_CATALOG.map((entry) => ({ ...entry })),
     caller: deps.callerForRequest,
     accountConfiguration: deps.accountConfiguration,
+    ...(deps.setup ? { setup: deps.setup(service) } : {}),
   };
   return {
     service,

@@ -7,8 +7,10 @@ import {
   useRouteError,
   useSearchParams,
 } from "@remix-run/react";
-import type { McpAccountSummary, McpIntegrationDefinition } from "@tulipfarm/schema";
-import { mcpError } from "~/components/integrations/mcp-form";
+import {
+  loadMcpIntegrationData,
+  type McpIntegrationData,
+} from "~/components/integrations/mcp-integration-data";
 import { McpServerDetail } from "~/components/integrations/mcp-server-detail";
 import { NativeChannelDetail } from "~/components/integrations/native-channel-detail";
 import { ErrorState, NotFoundState } from "~/components/states";
@@ -20,22 +22,11 @@ import {
   type IntegrationDetail,
   listSlackRoutes,
 } from "~/lib/integrations";
-import {
-  getMcpAccountConfiguration,
-  listMcpAccounts,
-  type McpAccountConfiguration,
-} from "~/lib/mcp-accounts";
-import { getMcpIntegration } from "~/lib/mcp-integrations";
 
 export const meta: MetaFunction = () => [{ title: "Integration · tulipfarm" }];
 
 type IntegrationDetailData =
-  | {
-      kind: "mcp";
-      definition: McpIntegrationDefinition;
-      accounts: { items: McpAccountSummary[]; error: string | null };
-      configuration: { value: McpAccountConfiguration | null; error: string | null };
-    }
+  | ({ kind: "mcp" } & McpIntegrationData)
   | {
       kind: "channel";
       integration: IntegrationDetail;
@@ -54,22 +45,7 @@ export async function clientLoader({
     name !== "github" &&
     new URL(request.url).searchParams.get("channel") !== "1"
   ) {
-    const [definition, accounts, configuration] = await Promise.all([
-      getMcpIntegration(name),
-      listMcpAccounts(name)
-        .then((items) => ({ items, error: null }))
-        .catch((error: unknown) => ({
-          items: [],
-          error: mcpError(error),
-        })),
-      getMcpAccountConfiguration(name)
-        .then((value) => ({ value, error: null }))
-        .catch((error: unknown) => ({
-          value: null,
-          error: mcpError(error),
-        })),
-    ]);
-    return { kind: "mcp" as const, definition, accounts, configuration };
+    return { kind: "mcp" as const, ...(await loadMcpIntegrationData(name)) };
   }
   if (name !== "slack" && name !== "github") throw new ApiError(404, "Channel not found.");
   const integration = await getIntegration(name);
@@ -92,21 +68,28 @@ export default function IntegrationDetailPage() {
   if (data.kind === "mcp")
     return (
       <McpServerDetail
-        key={data.definition.server.id}
+        key={`${data.definition.server.id}:${params.get("account") ?? ""}`}
         definition={data.definition}
         accounts={data.accounts.items}
         accountsError={data.accounts.error ?? undefined}
         accountConfiguration={data.configuration.value ?? undefined}
         configurationError={data.configuration.error ?? undefined}
+        eligibility={data.eligibility.value ?? undefined}
+        eligibilityError={data.eligibility.error ?? undefined}
+        refreshing={revalidator.state === "loading"}
+        callbackAccountId={params.get("account") ?? undefined}
         callbackStatus={
           params.get("status") === "connected" &&
           data.accounts.items.some(
             (account) => account.id === params.get("account") && account.status === "active"
           )
             ? "Account sign-in completed."
-            : params.get("status") === "error"
-              ? "Account authorization did not complete. Start the connection again."
-              : undefined
+            : undefined
+        }
+        callbackError={
+          params.get("status") === "error"
+            ? "Provider sign-in did not complete. Continue sign-in on your saved account below."
+            : undefined
         }
         onChanged={() => revalidator.revalidate()}
         onRemoved={() => navigate("/integrations")}

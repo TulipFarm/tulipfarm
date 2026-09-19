@@ -4,6 +4,7 @@
  * first non-user event arrives).
  */
 
+import { isRecord } from "@tulipfarm/schema/guards";
 import { sourcesFromToolPreview, sourcesFromToolResult } from "~/lib/chat/citations";
 import type {
   ApprovalState,
@@ -187,6 +188,13 @@ export function chatReducer(state: ChatState, event: ChatEvent): ChatState {
     case "tool-result": {
       const { messages, target } = ensureAssistant(state.messages);
       const resultMeta = event.data.meta;
+      const resultStatus = isRecord(event.data.result) ? event.data.result.status : undefined;
+      const outcome =
+        resultMeta?.errorCode !== undefined
+          ? "error"
+          : resultStatus === "ok" || resultStatus === "error"
+            ? resultStatus
+            : undefined;
       const exists = target.parts.some(
         (part) => part.kind === "tool" && part.toolCallId === event.data.toolCallId
       );
@@ -209,7 +217,7 @@ export function chatReducer(state: ChatState, event: ChatEvent): ChatState {
         status: "done",
         ...(event.data.preview === undefined ? {} : { resultPreview: event.data.preview }),
         ...(resultMeta === undefined ? {} : { meta: { ...p.meta, ...resultMeta } }),
-        ...(resultMeta?.errorCode === undefined ? {} : { outcome: "error" as const }),
+        ...(outcome === undefined ? {} : { outcome }),
       }));
       const sources = [
         ...sourcesFromToolResult(event.data.result),

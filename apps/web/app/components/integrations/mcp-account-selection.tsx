@@ -5,8 +5,32 @@ import { Link } from "~/components/ui/link";
 import { IntegrationChoice } from "./integration-choice";
 import { McpError } from "./mcp-form";
 
-export function accountLabel(account: McpAccountSummary): string {
-  return `${account.label} · ${account.owner.scope} · ${account.id}`;
+export function accountName(
+  account: McpAccountSummary,
+  accounts: readonly McpAccountSummary[] = []
+): string {
+  const duplicates = accounts.filter(
+    (other) =>
+      other.id !== account.id &&
+      other.label === account.label &&
+      other.owner.scope === account.owner.scope
+  );
+  if (duplicates.length === 0) return account.label;
+  const added = new Date(account.createdAt).toLocaleString(undefined, {
+    dateStyle: "medium",
+    timeStyle: "medium",
+  });
+  const sameTime = duplicates.some(
+    (other) => Date.parse(other.createdAt) === Date.parse(account.createdAt)
+  );
+  return `${account.label} · Added ${added}${sameTime ? ` · ${account.id}` : ""}`;
+}
+
+export function accountLabel(
+  account: McpAccountSummary,
+  accounts: readonly McpAccountSummary[] = []
+): string {
+  return `${accountName(account, accounts)} · ${account.owner.scope === "personal" ? "Personal" : "Shared"}`;
 }
 
 export function McpAccountSelection({
@@ -55,21 +79,23 @@ export function McpAccountSelection({
       <div className="flex flex-wrap items-baseline justify-between gap-2">
         <p className="text-xs font-medium">{integrationLabel}</p>
         <Link
-          to={`/integrations/${encodeURIComponent(integrationKey)}`}
+          to={`/integrations/${encodeURIComponent(integrationKey)}${current ? `?account=${encodeURIComponent(current.id)}` : ""}`}
           className="text-xs text-brand hover:underline"
         >
           Manage accounts
         </Link>
       </div>
       <p className="break-words text-xs text-muted-foreground">
-        {current ? `Selected: ${accountLabel(current)}` : "No account selected for this Chat."}
+        {current
+          ? `Selected: ${accountLabel(current, accounts)}`
+          : "No account selected for this Chat."}
       </p>
       {current &&
         (current.status !== "active" ||
           (current.expiresAt && Date.parse(current.expiresAt) <= Date.now())) && (
           <p role="alert" className="text-xs text-destructive">
-            The selected account needs repair. MCP actions stop; a shared account will not be
-            substituted.
+            The selected account needs attention. Integration actions stop; a shared account will
+            not be substituted.
           </p>
         )}
       <McpError error={error} />
@@ -80,7 +106,7 @@ export function McpAccountSelection({
             value={draft ?? selection?.id ?? ""}
             options={choices.map((account) => ({
               value: account.id,
-              label: accountLabel(account),
+              label: accountLabel(account, accounts),
             }))}
             disabled={disabled || pending}
             onChange={(id) => {

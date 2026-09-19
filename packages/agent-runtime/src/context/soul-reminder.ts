@@ -1,4 +1,5 @@
 import { type AuthorityLayer, decideEffectivePermission } from "@tulipfarm/authz";
+import type { McpSetupAccess } from "@tulipfarm/schema";
 import { MAX_CUSTOM_INSTRUCTIONS_CHARS } from "./assemble";
 
 /**
@@ -29,7 +30,9 @@ export interface SoulReminderEntry {
  * integration existed and invent a raw API-key path instead.
  */
 export interface SoulReminderIntegrationEntry extends SoulReminderEntry {
-  readonly status: "connected" | "available" | "coming_soon";
+  readonly status: "connected" | "configured" | "available" | "coming_soon";
+  readonly kind?: "mcp" | "native_channel";
+  readonly access?: McpSetupAccess;
 }
 
 /** Who the business is, as `soul.yaml` states it. Every field is optional and often unset. */
@@ -400,6 +403,7 @@ const INTEGRATION_STATUS_LABEL: Record<
   string
 > = {
   available: "not connected — set up from the Integrations page",
+  configured: "configured",
   coming_soon: "coming soon, not yet available to connect",
 };
 
@@ -419,8 +423,19 @@ function renderIntegrationsSection(entries: readonly SoulReminderIntegrationEntr
       ? EMPTY_SECTION
       : entries
           .map((entry) => {
-            const name = line(entry.name);
+            const name = `${line(entry.name)}${entry.kind === "native_channel" ? " (native channel)" : entry.kind === "mcp" ? " (MCP)" : ""}`;
             const description = line(entry.description);
+            if (entry.kind === "mcp") {
+              const access = entry.access;
+              const policy = !access
+                ? "access not confirmed"
+                : !access.enabled
+                  ? "disabled"
+                  : access.state !== "allowed"
+                    ? "no Tools or content allowed"
+                    : `${access.tools} Tools, ${access.resources} resources, ${access.prompts} prompts allowed by saved policy`;
+              return `${name}: configured; ${policy}; account authorization is checked per Chat${description ? ` — ${description}` : ""}`;
+            }
             const label =
               entry.status === "connected" ? undefined : INTEGRATION_STATUS_LABEL[entry.status];
             const detail = [label, description]

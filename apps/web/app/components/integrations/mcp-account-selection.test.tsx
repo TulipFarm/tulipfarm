@@ -3,7 +3,7 @@ import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { McpAccountSelectionRequest, McpAccountSummary } from "@tulipfarm/schema";
 import { expect, test, vi } from "vitest";
-import { McpAccountSelection } from "./mcp-account-selection";
+import { accountLabel, McpAccountSelection } from "./mcp-account-selection";
 
 const account: McpAccountSummary = {
   id: "shared-account",
@@ -85,4 +85,23 @@ test("keeps selection failures visible instead of reporting local success", asyn
     "Shared account permission was revoked."
   );
   expect(screen.getByText("No account selected for this Chat.")).toBeInTheDocument();
+});
+
+test("distinguishes same-name accounts by creation time without changing their saved names", () => {
+  const older = { ...account, label: "GitHub account" };
+  const newer = { ...older, id: "new-account", createdAt: "2026-09-19T07:00:00Z" };
+  expect(accountLabel(older, [older, newer])).toContain("Added");
+  expect(accountLabel(older, [older, newer])).not.toBe(accountLabel(newer, [older, newer]));
+  expect(accountLabel(older, [older, newer])).not.toContain(older.id);
+  expect(older.label).toBe("GitHub account");
+});
+
+test("Manage accounts links to the exact selected identity without selecting another one", () => {
+  const save = vi.fn<SelectAccount>();
+  mount(save, [account], account);
+  expect(screen.getByRole("link", { name: "Manage accounts" })).toHaveAttribute(
+    "href",
+    "/integrations/support?account=shared-account"
+  );
+  expect(save).not.toHaveBeenCalled();
 });

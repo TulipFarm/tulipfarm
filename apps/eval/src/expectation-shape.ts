@@ -160,6 +160,13 @@ function fieldOk(value: unknown, type: FieldType): boolean {
  * which is the only part of the error an author can act on quickly.
  */
 export function expectationShapeError(kind: string, record: Record<string, unknown>): string {
+  if (
+    kind === "run_event_emitted" &&
+    record.count !== undefined &&
+    (!Number.isInteger(record.count) || Number(record.count) < 1)
+  ) {
+    return `expectation "${kind}" needs "count" to be a positive integer`;
+  }
   for (const [field, type] of EXPECTATION_FIELDS[kind] ?? []) {
     if (!fieldOk(record[field], type)) {
       return `expectation "${kind}" needs a ${describeField(type)} field "${field}"`;

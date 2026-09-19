@@ -1,9 +1,8 @@
 import type { EventEmitter } from "node:events";
-import { Type } from "@sinclair/typebox";
 import { type FileService, isAttachmentRefusal, resolveAttachments } from "@tulipfarm/files";
 import type { LlmService } from "@tulipfarm/llm";
 import type { DurableInvocationGateway } from "@tulipfarm/run-kernel";
-import { ajv, ConversationModeSchema } from "@tulipfarm/schema";
+import { ajv, CONVERSATION_MODES } from "@tulipfarm/schema";
 import type { SoulLoader } from "@tulipfarm/soul";
 import { DEFAULT_ASSISTANT_ID, resolveAgent } from "@tulipfarm/soul";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
@@ -170,12 +169,14 @@ export function registerChatRoutes(
           type: "object",
           properties: { "idempotency-key": { type: "string", minLength: 1, maxLength: 200 } },
         },
-        body: Type.Intersect([
-          Type.Unsafe(ChatBodySchema),
-          Type.Object({
-            mode: Type.Optional(Type.Union([ConversationModeSchema, Type.Null()])),
-          }),
-        ]),
+        body: {
+          ...ChatBodySchema,
+          properties: {
+            ...ChatBodySchema.properties,
+            // Enum-only validation prevents Fastify from coercing invalid values into a mode.
+            mode: { enum: [...CONVERSATION_MODES, null] },
+          },
+        },
         response: {
           400: ErrorSchema,
           401: ErrorSchema,
@@ -193,7 +194,13 @@ export function registerChatRoutes(
       if (!(principal && user)) {
         return reply.code(401).send({ error: "unauthorized" });
       }
-      const body = req.body as ChatBody;
+      const { mode: requestedMode, ...input } = req.body as Omit<ChatBody, "mode"> & {
+        mode?: ChatBody["mode"] | null;
+      };
+      const body: ChatBody = {
+        ...input,
+        ...(requestedMode == null ? {} : { mode: requestedMode }),
+      };
       const idempotencyHeader = req.headers["idempotency-key"];
       // Without a client key, idempotency is only within this delivered request.
       const clientKey =

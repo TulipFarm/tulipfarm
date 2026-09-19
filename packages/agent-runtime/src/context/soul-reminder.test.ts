@@ -26,6 +26,27 @@ const UNRESTRICTED: AuthorityLayer = {
   grants: [{ action: "*", resourceType: "*", effect: "allow" }],
 };
 
+it("distinguishes configured MCP access from native channel connection and Chat identity", () => {
+  const reminder = renderSoulReminder(
+    catalogue({
+      integrations: [
+        { name: "github", description: "", kind: "native_channel", status: "available" },
+        {
+          name: "github-mcp",
+          description: "GitHub",
+          kind: "mcp",
+          status: "configured",
+          access: { state: "preserved_empty", enabled: true, tools: 0, resources: 0, prompts: 0 },
+        },
+      ],
+    })
+  );
+  expect(reminder).toContain("github (native channel): not connected");
+  expect(reminder).toContain("github-mcp (MCP): configured; no Tools or content allowed");
+  expect(reminder).toContain("account authorization is checked per Chat");
+  expect(reminder).not.toContain("github-mcp: not connected");
+});
+
 describe("filterSoulCatalogue", () => {
   it("keeps an artifact the subject may reach through any one of its actions", () => {
     const readOnly: AuthorityLayer = {

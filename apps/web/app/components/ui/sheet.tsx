@@ -1,5 +1,5 @@
 import type * as React from "react";
-import { useEffect, useRef } from "react";
+import { useEffect, useId, useRef } from "react";
 import { X } from "~/components/icons";
 import { cn } from "~/lib/utils";
 
@@ -21,6 +21,7 @@ export function Sheet({
   className?: string;
 }) {
   const ref = useRef<HTMLDialogElement>(null);
+  const titleId = useId();
 
   // Drive open/close from props; guard against redundant calls. Fall back to the `open` attribute in
   // environments without showModal (jsdom).
@@ -85,6 +86,7 @@ export function Sheet({
     // biome-ignore lint/a11y/useKeyWithClickEvents: <dialog> handles keyboard dismissal natively via Escape (cancel → close event)
     <dialog
       ref={ref}
+      aria-labelledby={titleId}
       onClick={onBackdropClick}
       className={cn(
         "tf-sheet my-0 mr-0 ml-auto h-dvh max-h-dvh w-full max-w-md rounded-none border-border border-l bg-card p-0 text-foreground shadow-lg",
@@ -93,7 +95,9 @@ export function Sheet({
     >
       <div className="flex h-full flex-col">
         <div className="flex shrink-0 items-center justify-between gap-2 border-border border-b px-4 py-3">
-          <h2 className="min-w-0 truncate text-sm font-medium text-foreground">{title}</h2>
+          <h2 id={titleId} className="min-w-0 truncate text-sm font-medium text-foreground">
+            {title}
+          </h2>
           <div className="flex shrink-0 items-center gap-1">
             {headerActions}
             <button

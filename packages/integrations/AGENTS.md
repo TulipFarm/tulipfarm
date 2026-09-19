@@ -14,7 +14,7 @@ Owns adapter contracts, event normalization, source ACLs, sync checkpoints, and 
 | --- | --- |
 | `src/auth/` | Provider-neutral public origins and callback URLs; initialized hosted context locks environment origins over persisted overrides. |
 | `src/mcp/` | Server configuration, reviewed capabilities, account-access ports, governed Tool contracts, and DNS-pinned streaming HTTP transport. |
-| `src/accounts/` | Exact MCP account authority, lifecycle, browser OAuth, refresh and revocation. |
+| `src/accounts/` | Exact MCP account authority, lifecycle, browser OAuth, refresh and revocation; `setup.ts` durably connects and publishes a frozen initial policy. |
 | `src/http.ts` | Provider-neutral HTTP port, failure classification, bounded pagination. |
 | `src/grants.ts` | Default-deny grants for concrete external targets. |
 | `src/egress/` | Fetch transport, destination cage, governed HTTP requests and HTML-to-Markdown rendering. |
@@ -32,6 +32,11 @@ Owns adapter contracts, event normalization, source ACLs, sync checkpoints, and 
 - Slack `chat.postMessage` has no guaranteed idempotency key: reconcile uncertain writes against
   the authenticated bot's message metadata; only confirmed receipts or safe retries advance delivery.
 - Third-party Agent Tools use MCP; native channel delivery is not an alternate Tool catalog.
+- Setup consent is principal/account-bound. Initial policy is conservative and frozen; custom
+  and previously initialized policies never broaden on resume. Members cannot publish policy.
+- Legacy empty reviews need distinct revision-bound standard-access consent; catalog identity is
+  not provenance. Provider authentication failures permit same-ID repair only before freezing.
+- Preserving legacy access preserves its provenance. Published setup is not proof of allowed capabilities; return the saved access outcome separately.
 - Validate destinations through `assertPublicEgressUrl`, send through
   `GuardedEgressHttp`. Neither subsumes the other — a public name can hold an inward A record.
 - `GuardedEgressHttp` passes validated DNS answers to `FetchEgressHttp`, which pins the connection;

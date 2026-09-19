@@ -68,9 +68,22 @@ export class McpAccountLifecycle {
     businessId: string,
     integrationKey: string,
     principalId: string,
-    input: McpAccountCreate
+    input: McpAccountCreate,
+    accountId: string = randomUUID()
   ): Promise<McpAccountSummary> {
     const definition = await this.deps.definition(integrationKey);
+    const existing = await this.deps.accounts.get(businessId, accountId);
+    if (existing) {
+      if (
+        existing.integrationKey !== integrationKey ||
+        existing.authentication !== input.authentication ||
+        existing.owner.scope !== input.scope ||
+        existing.definitionDigest !== definition.definitionDigest
+      )
+        throw new McpAccountAccessError("conflict");
+      await this.deps.authority.assertManage(existing, principalId);
+      return summarizeMcpAccount(existing);
+    }
     if (definition.authentication !== input.authentication) {
       throw new McpAccountLifecycleError("authentication_mismatch");
     }
@@ -91,7 +104,7 @@ export class McpAccountLifecycle {
     }
     const at = this.now();
     const account: McpAccount = {
-      id: randomUUID(),
+      id: accountId,
       businessId,
       integrationKey,
       definitionDigest: definition.definitionDigest,

@@ -81,6 +81,20 @@ describe("McpAccountStore", () => {
     );
   });
 
+  it("finds only accounts bound to the requested secret keys for metadata authorization", async () => {
+    await store.save(account("mine"));
+    await store.save(
+      account("other", {
+        secretBindings: { accessToken: "secret://00000000-0000-4000-8000-000000000002" },
+      })
+    );
+    expect(
+      (await store.findBySecretKeys(["00000000-0000-4000-8000-000000000001"])).map((a) => a.id)
+    ).toEqual(["mine"]);
+    expect(await store.findBySecretKeys([])).toEqual([]);
+    expect(await store.findBySecretKeys(["not-stored"])).toEqual([]);
+  });
+
   it("moves the default atomically without changing an existing Chat selection", async () => {
     await store.save(account("first"));
     await store.save(account("second"));

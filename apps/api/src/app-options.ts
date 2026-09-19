@@ -153,7 +153,7 @@ export interface AppOptions {
     tokens: PrincipalProviderTokenRepo | undefined;
   };
   mcpIntegrations?: McpIntegrationRouteDeps;
-  mcpAccounts?: Pick<ReturnType<typeof composeMcpAccounts>, "register">;
+  mcpAccounts?: Pick<ReturnType<typeof composeMcpAccounts>, "register" | "secretMetadata">;
   mcpKnowledge?: McpKnowledgeFeature;
   mcpKnowledgeReader?: McpKnowledgeRunReaderResolver;
   nativeChannels?: (log: FastifyBaseLogger) => ReturnType<typeof composeNativeChannels>["routes"];

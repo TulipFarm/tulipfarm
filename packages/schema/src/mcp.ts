@@ -127,6 +127,9 @@ export const McpIntegrationDefinitionSchema = Type.Object(
     server: McpServerDefinitionSchema,
     enabled: Type.Boolean(),
     reviewed: McpCapabilityReviewSchema,
+    reviewPolicy: Type.Optional(
+      Type.Union([Type.Literal("uninitialized"), Type.Literal("initial"), Type.Literal("custom")])
+    ),
   },
   { additionalProperties: false }
 );

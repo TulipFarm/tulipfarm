@@ -16,6 +16,7 @@ data loading, schema-driven resource UI, and browser rendering of Surface Artifa
 | --- | --- |
 | `app/root.tsx`, `app/app.css`, `app/tokens.css` | Document shell, no-flash theme script, fonts, HydrateFallback; Tailwind v4 OKLCH `[data-theme]` tokens. |
 | `app/routes/` | Remix SPA routes under `_app`; Chat is `/`. |
+| `app/routes/_app.business.secrets.tsx` | Credential labels, account creation and Secret update times; Manage links select the exact account in Integrations, never raw-key controls. |
 | `app/routes/_app.business.guardrails.tsx` | Effective Guardrails; platform-constrained policy permits additive Chat authoring, never a disable control. |
 | `app/components/activity/` | Filters, timeline, detail panel for the merged Activity feed. |
 | `app/components/runs/` | Run outcomes, persisted State results, authorized related-work links, server-granted controls, and expandable evidence. |
@@ -28,13 +29,19 @@ data loading, schema-driven resource UI, and browser rendering of Surface Artifa
 | `app/components/resources/` | Stat strip, catalog table, schema summary for `/resources`. |
 | `app/routes/_app.packs*`, `app/components/packs/`, `app/lib/packs.ts` | Pack gallery/import and focused preview; category icons/data colors and curated optional integration ideas never imply requirements or connection state. Plan-mode handoff preserves URL + hash or complete YAML; never installs directly. |
 | `app/components/routines/` | Catalog, row, canvas, run/dry-run, effects and bounds panels for `/routines`. |
-| `app/components/integrations/` | Official MCP catalog and API-provided local Knowledge preset, remote/isolated server setup, account lifecycle/grants, reviewed capabilities and content previews; `?channel=1` selects native Slack/GitHub setup. Credentials only use password inputs. |
+| `app/components/integrations/` | Provider catalog, one-action Connect/Finish and local Knowledge preset; per-capability controls are optional Advanced settings. Initial consent requires approval for every Tool call; existing restrictions never expand implicitly. `?channel=1` selects native Slack/GitHub setup. Credentials only use password inputs. |
+| `app/components/integrations/brand-logo.tsx`, `integration-icon.tsx` | Local provider marks shared by the banner, catalog and channels; no logo CDN or browser dependency on the server icon registry. |
+| `app/components/integrations/mcp-integration-panel.tsx`, `mcp-integration-data.ts` | Shared sheet/direct-page loading with trusted account metadata and server-authoritative setup eligibility. Read full definition revision before account fields; errors fail closed. Never infer initialization/readiness from empty/enabled flags or provider URLs; ambiguous legacy-empty policy is preserved. |
+| `app/components/integrations/mcp-provider-setup.tsx`, `mcp-connection-state.ts` | Read-only trusted catalog previews; explicit credentials-first submission starts durable server setup. Personal connection state is independent of enablement; shared visibility is never personal consent. |
+| `app/components/integrations/mcp-account-row.tsx`, `mcp-account-selection.tsx` | Visible same-account token replacement and creation-time disambiguation; adding another account never replaces credentials or switches existing Chat identity. |
+| `app/lib/mcp-setup.ts`, `app/components/integrations/use-mcp-setup.ts`, `mcp-setup-progress.tsx` | Stable operation IDs, read-only restoration and explicit resume. Starts carry observed eligibility revision; stale previews need reload. Eligible legacy-empty standard access needs distinct recorded consent in a fresh operation, never amended via resume. OAuth returns restore server intent; viewing never authorizes writes. Never orchestrate configure/discover/review/enable in the browser. |
+| `app/components/integrations/provider-guide.ts`, `integration-setup-guide.tsx` | Browser-safe provider guidance and capability categories; only live discovery and review establish usable Tools. |
 | `app/lib/mcp-integrations.ts`, `app/lib/mcp-accounts.ts`, `app/lib/mcp-knowledge.ts` | Typed server/account/Knowledge clients; page previews are personal-only, admin shared discovery is explicit, and neither substitutes Chat consent or capability review. |
 | `app/components/integrations/mcp-oauth-setup.tsx` | Server-provided callback URL and explicit sign-in; registered OAuth accounts are saved before callback registration, never infer callback hosts or read back secrets. |
 | `app/lib/native-channels.ts`, `app/components/integrations/native-*routes.tsx` | Admin-only Slack/GitHub human-message routes and approved Routine event bindings, exact destinations and linked-user grants; separate from MCP accounts. |
-| `app/components/chat/integration-accounts.tsx` | Exact persisted Chat account identity and explicit shared-use confirmation; local selection never grants authority or substitutes another account. |
+| `app/components/chat/integration-accounts.tsx` | Exact persisted Chat account identity, allowed-access summary and explicit shared-use confirmation; per-item review stays advanced. Selection never grants authority or substitutes another account. |
 | `app/components/ui/` | Vendored shadcn primitives for this app only, plus `combobox.tsx` — hand-rolled, because `cmdk` forces its own input `id` and breaks `<label htmlFor>`. `select.tsx` is a thin native `<select>` wrapper; deprecated (see Rules), kept only until its 16 existing callers migrate. |
-| `app/lib/api.ts` | API client with cookies, CSRF header, optional bearer token, `ApiError`. |
+| `app/lib/api.ts`, `app/components/states.tsx` | Cookie/CSRF API client and error presentation; `ApiError.status` is HTTP status or `0` for a failed fetch, never inferred from an untyped exception. |
 | `app/lib/schema.ts` | JSON-Schema field detection, list/detail/form metadata, value rendering, shared formatters. |
 | `app/lib/resource-catalog.ts` | Joins types with record totals; derives the two-way link graph. |
 | `app/lib/routines/` | `graph.ts` projects the canvas, `facts.ts` derives every stated fact, `dry-run.ts` drives `analyze`. |
@@ -47,6 +54,8 @@ data loading, schema-driven resource UI, and browser rendering of Surface Artifa
 | `app/lib/kill-switches.ts` | Emergency-stop client; scope picker comes from the API's enforceable list. |
 | `vite.config.ts`, `vitest.config.ts`, `components.json` | SPA Remix/Vite, jsdom Vitest, shadcn. |
 | `scripts/` | Post-build steps, in order: app-shell modulepreload injection, CSP hashing, precompression. |
+| `scripts/browser-imports.mjs` | `test:browser-imports`: isolated Vite + Chromium checks real Resources/Pack helper imports; CI Build runs it without an API or Soul. |
+| `scripts/browser-integration-setup.mjs`, `integration-setup-fixture.tsx` | `test:browser-integration-setup`: real-component Connect/Finish/retry, empty policy, unpublished/failed eligibility and stale-revision checks, desktop/mobile and both themes; API calls intercepted, external destinations blocked. |
 
 ## Rules
 
@@ -128,6 +137,7 @@ data loading, schema-driven resource UI, and browser rendering of Surface Artifa
   `status === "connected"`. DEV-only `?mock=N` draws `app/lib/farm.mock.ts`.
 - Vitest uses `vitest.config.ts` (`@vitejs/plugin-react` + jsdom), never the Remix Vite plugin;
   routing primitives need `createRemixStub`. Broad failures usually mean `~/` alias resolution.
+- Browser values from `@tulipfarm/schema` use public safe leaves (`/ajv`, `/pack-contract`), never its Node-bearing root barrel. Root `import type` is safe.
 - Production serves `build/client/` with a history-API fallback to `/index.html`; `pnpm build`
   writes the `.br`/`.gz` siblings `@fastify/static` serves via `preCompressed`, so order any new
   build step after `remix vite:build`. `HydrateFallback` is prerendered into `index.html` — keep it

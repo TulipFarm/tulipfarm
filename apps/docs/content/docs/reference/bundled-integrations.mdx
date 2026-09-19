@@ -9,12 +9,13 @@ options available in your release.
 ## MCP servers
 
 Third-party agent tools use MCP, the Model Context Protocol. A server can offer tools,
-information called resources, and templates called prompts. Review the capabilities you
-want to allow rather than treating a catalog listing as permission to use everything.
+information called resources, and templates called prompts. A catalog listing does not grant
+access. Explicit initial connection saves the current capabilities with approval required for
+every Tool call; optional per-item limits belong in **Advanced settings**.
 
 The catalog is setup guidance, not a guarantee that every server feature works with
-TulipFarm. Discovery does not enable capabilities, and changing a server's configuration
-requires a new review.
+TulipFarm. Discovery alone does not enable capabilities. Existing custom restrictions stay
+unchanged, and new or changed capabilities require explicit review before use.
 
 ## Supported server connections
 
@@ -48,8 +49,9 @@ or discovery is not proof that a provider action, reply, or Knowledge sync has b
 
 Connecting an MCP server does not automatically make it a Knowledge source. Knowledge sync
 currently supports only the pinned local GitHub server profile and a personal token account.
-Choose **Set up GitHub Knowledge (local)** in the GitHub catalog entry to prefill that
-profile. The separate **Set up GitHub** option uses the remote server.
+Open the GitHub panel's **Optional Knowledge sync** and choose
+**Set up GitHub Knowledge (local)** to prefill that profile. The ordinary GitHub setup
+uses the remote server.
 Its reviewed, read-only `get_me` and `get_file_contents` tools must be available without a
 per-call approval. Other server builds, hosted GitHub, Slack, Drive, and Notion are not
 supported Knowledge profiles.
@@ -68,7 +70,7 @@ Connecting a channel is separate from connecting an MCP server for agent tools.
 ## Setup guides
 
 <Cards>
-  <Card title="Connect an integration" href="/docs/administration/connect-an-integration" description="Choose a server and review its capabilities." />
+  <Card title="Connect an integration" href="/docs/administration/connect-an-integration" description="Connect an account and adjust optional access limits." />
   <Card title="Connect Slack" href="/docs/administration/connect-slack" description="Use agents from Slack." />
   <Card title="Connect GitHub" href="/docs/administration/connect-github" description="Connect a GitHub App for events and replies." />
 </Cards>

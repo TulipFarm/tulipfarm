@@ -70,8 +70,11 @@ Loader, compiler, publisher, and git-sync engine for Soul artifacts. Root `soul/
   exact definition target so unrelated artifact commits do not make a valid draft stale.
 - MCP capability reviews bind the complete definition digest; callers pass that digest to the
   definition store when replacing or removing a reviewed configuration. Failed publication is an error.
+- Setup retries may republish an exact committed target without a new Git diff; changed authored
+  bytes still conflict. A no-op commit alone never proves a retried setup became active.
 - The MCP store reads an active-bundle view built with `mcpIntegrationsFromBundle`, never the
   authored loader: a committed file is not active until signed bundle publication succeeds.
+- The catalogue separates configured MCP access from native channel connection status; neither proves a Chat account is authorized.
 - MCP ToolContracts use the schema-owned derivation in both pre-commit reference checks and
   compilation; never discover capabilities or read the live loader while publishing.
 - `GitSyncService` stages only the paths given (`commitPaths`/`withSyncPaths`); there is no ambient

@@ -8,6 +8,7 @@ import { Badge } from "~/components/ui/badge";
 import { Button } from "~/components/ui/button";
 import { Field } from "~/components/ui/field";
 import { Input } from "~/components/ui/input";
+import { Link } from "~/components/ui/link";
 import { ConfirmModal } from "~/components/ui/modal";
 import { Panel, PanelEmpty } from "~/components/ui/panel";
 import { Select } from "~/components/ui/select";
@@ -26,6 +27,29 @@ import { cn } from "~/lib/utils";
 const CUSTOM = "__custom__";
 
 type ProviderField = LlmProviderInfo["fields"][number];
+
+function SecretUpdatedAt({ value }: { value: string }) {
+  return (
+    <span className="block text-xs font-normal text-muted-foreground">
+      Last updated{" "}
+      <time dateTime={value}>
+        {new Date(value).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "long" })}
+      </time>
+    </span>
+  );
+}
+
+function credentialFieldLabel(field: string): string {
+  const labels: Record<string, string> = {
+    accessToken: "Access token",
+    refreshToken: "Refresh token",
+    clientSecret: "Client secret",
+    clientId: "Client ID",
+    oauthClientSecret: "Sign-in client secret",
+    oauth: "Sign-in credentials",
+  };
+  return labels[field] ?? field.replaceAll("_", " ");
+}
 
 export async function clientLoader() {
   const [secrets, providers, config] = await Promise.all([
@@ -51,6 +75,7 @@ export default function BusinessSecrets() {
   const [searchParams] = useSearchParams();
   const requestedKey = searchParams.get("required")?.match(/^[A-Z][A-Z0-9_]{0,127}$/)?.[0];
   const storedKeys = useMemo(() => new Set(secrets.map((s) => s.key)), [secrets]);
+  const secretsByKey = useMemo(() => new Map(secrets.map((s) => [s.key, s])), [secrets]);
   const requestedProvider = providers.find((provider) =>
     provider.fields.some((field) => field.key === requestedKey)
   );
@@ -88,7 +113,8 @@ export default function BusinessSecrets() {
     }))
     .filter((g) => g.keys.length > 0);
   const ownedKeys = new Set(providers.flatMap((p) => p.fields.map((f) => f.key)));
-  const customSecrets = secrets.filter((s) => !ownedKeys.has(s.key));
+  const integrationSecrets = secrets.filter((s) => s.integration !== undefined);
+  const customSecrets = secrets.filter((s) => !ownedKeys.has(s.key) && !s.integration);
 
   const typed = (key: string) => (values[key] ?? "").trim().length > 0;
   const filled = (key: string) => typed(key) || storedKeys.has(key);
@@ -172,12 +198,18 @@ export default function BusinessSecrets() {
         description="A value is written once and never read back. To rotate one, enter the new value. There is nothing to reveal."
         flush
       >
-        {providerGroups.length === 0 && customSecrets.length === 0 ? (
+        {providerGroups.length === 0 &&
+        integrationSecrets.length === 0 &&
+        customSecrets.length === 0 ? (
           <PanelEmpty>Nothing stored yet.</PanelEmpty>
         ) : (
           <ul>
             {providerGroups.map((g) => {
               const open = openId === g.provider.id;
+              const updatedAt = g.keys.reduce((latest, key) => {
+                const updated = secretsByKey.get(key)?.updatedAt ?? "";
+                return updated > latest ? updated : latest;
+              }, "");
               return (
                 <li key={g.provider.id} className="border-b border-border last:border-b-0">
                   <div className="flex items-center gap-3 px-4 py-3">
@@ -200,8 +232,11 @@ export default function BusinessSecrets() {
                           open && "rotate-90"
                         )}
                       />
-                      <span className="truncate text-sm font-medium text-foreground">
-                        {g.provider.label}
+                      <span className="min-w-0 flex-1">
+                        <span className="block truncate text-sm font-medium text-foreground">
+                          {g.provider.label}
+                        </span>
+                        <SecretUpdatedAt value={updatedAt} />
                       </span>
                       <Badge variant="success">
                         {g.keys.length} {g.keys.length === 1 ? "field" : "fields"}
@@ -226,7 +261,15 @@ export default function BusinessSecrets() {
 
                   {open ? (
                     <div className="space-y-4 border-t border-border bg-muted/20 px-4 py-4">
-                      {g.provider.fields.map((f) => renderField(f, g.provider.label))}
+                      {g.provider.fields.map((f) => {
+                        const secret = secretsByKey.get(f.key);
+                        return (
+                          <div key={f.key} className="space-y-1">
+                            {renderField(f, g.provider.label)}
+                            {secret ? <SecretUpdatedAt value={secret.updatedAt} /> : null}
+                          </div>
+                        );
+                      })}
                       <div className="flex justify-end">
                         <Button
                           size="sm"
@@ -242,14 +285,58 @@ export default function BusinessSecrets() {
               );
             })}
 
+            {integrationSecrets.map((secret) => {
+              const integration = secret.integration;
+              if (!integration) return null;
+              return (
+                <li
+                  key={secret.key}
+                  className="flex flex-wrap items-center gap-3 border-b border-border px-4 py-3 last:border-b-0"
+                >
+                  <div className="min-w-0 flex-1 basis-48 space-y-1">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="text-sm font-medium text-foreground">
+                        {integration.label}
+                      </span>
+                      <Badge>{integration.scope === "personal" ? "Personal" : "Shared"}</Badge>
+                    </div>
+                    <div className="flex flex-wrap gap-x-2 text-xs text-muted-foreground">
+                      <span>{integration.accountLabel}</span>
+                      {integration.accountCreatedAt && (
+                        <span>
+                          Account added{" "}
+                          {new Date(integration.accountCreatedAt).toLocaleString(undefined, {
+                            dateStyle: "medium",
+                            timeStyle: "medium",
+                          })}
+                        </span>
+                      )}
+                      <span>{credentialFieldLabel(integration.field)}</span>
+                    </div>
+                    <SecretUpdatedAt value={secret.updatedAt} />
+                  </div>
+                  <Link
+                    to={`/integrations/${encodeURIComponent(integration.key)}${integration.accountId ? `?account=${encodeURIComponent(integration.accountId)}` : "?channel=1"}`}
+                    className="text-sm font-medium underline underline-offset-4"
+                    aria-label={`Manage ${integration.label}`}
+                  >
+                    Manage
+                  </Link>
+                </li>
+              );
+            })}
+
             {customSecrets.map((secret) => (
               <li
                 key={secret.key}
                 className="flex items-center gap-3 border-b border-border px-4 py-3 last:border-b-0"
               >
-                <span className="min-w-0 flex-1 truncate font-mono text-sm text-foreground">
-                  {secret.key}
-                </span>
+                <div className="min-w-0 flex-1 space-y-1">
+                  <span className="block truncate font-mono text-sm text-foreground">
+                    {secret.key}
+                  </span>
+                  <SecretUpdatedAt value={secret.updatedAt} />
+                </div>
                 <Badge>{secret.type === "auto-generated" ? "Generated" : "Custom"}</Badge>
                 <Button
                   variant="ghost"

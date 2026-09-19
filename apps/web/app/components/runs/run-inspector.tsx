@@ -111,6 +111,14 @@ function EvidenceList({
           {items.map((item, index) => (
             <li key={`${title}-${index}`} className="min-w-0 py-2 text-xs">
               <ReadableValue value={item} />
+              {title === "Effects" &&
+              item.latestAttempt !== null &&
+              typeof item.latestAttempt === "object" ? (
+                <div className="mt-3 min-w-0">
+                  <p className="mb-1 font-medium">Latest attempt</p>
+                  <ReadableValue value={item.latestAttempt} />
+                </div>
+              ) : null}
               <JsonDetails title={`${title} evidence JSON`} value={item} />
             </li>
           ))}

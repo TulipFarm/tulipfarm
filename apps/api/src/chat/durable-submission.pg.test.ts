@@ -16,6 +16,7 @@ import {
 } from "@tulipfarm/run-kernel";
 import {
   CHAT_REQUEST_SCHEMA_REF,
+  CONVERSATION_MODES,
   canonicalHash,
   INVOCATION_REQUEST_SCHEMAS,
   PACK_MAX_BYTES,
@@ -334,6 +335,59 @@ describe("durable chat submission over HTTP", () => {
     );
     return result.rows[0]?.count ?? 0;
   }
+
+  it.each([null, undefined, ...CONVERSATION_MODES])(
+    "persists one greeting Run with normalized mode %s",
+    async (mode) => {
+      autoCompleteRuns = true;
+      const message = { role: "user", content: "hey" };
+      const response = await postChat(sid, {
+        body: { message, ...(mode === undefined ? {} : { mode }) },
+      });
+
+      expect(response.statusCode).toBe(200);
+      expect(await count("runs")).toBe(1);
+      expect(await count("conversation_turns")).toBe(1);
+      expect(await count("messages", "WHERE role = 'user'")).toBe(1);
+      const expected = {
+        message,
+        conversationId: response.headers["x-conversation-id"],
+        agentId: DEFAULT_ASSISTANT_ID,
+        ...(mode == null ? {} : { mode }),
+      };
+      const artifacts = await db.query<{ content: Record<string, unknown> }>(
+        "SELECT content FROM artifacts"
+      );
+      expect(artifacts.rows).toHaveLength(1);
+      expect(artifacts.rows[0]?.content).toEqual(expected);
+      const messages = await db.query<{ metadata: { turnRequest: Record<string, unknown> } }>(
+        "SELECT metadata FROM messages WHERE role = 'user'"
+      );
+      expect(messages.rows[0]?.metadata.turnRequest).toEqual({ version: 1, ...expected });
+      if (mode == null) {
+        expect(artifacts.rows[0]?.content).not.toHaveProperty("mode");
+        expect(messages.rows[0]?.metadata.turnRequest).not.toHaveProperty("mode");
+      }
+    }
+  );
+
+  it.each(["invalid", "", false, true, 0, 1, {}, [], ["plan"]].map((mode) => ({ mode })))(
+    "rejects invalid HTTP mode $mode before submitting a Run",
+    async ({ mode }) => {
+      autoCompleteRuns = true;
+      const response = await postChat(sid, {
+        body: { message: { role: "user", content: "hey" }, mode },
+      });
+
+      expect(response.statusCode).toBe(400);
+      expect(response.json()).toMatchObject({ code: "FST_ERR_VALIDATION" });
+      expect(await count("conversations")).toBe(0);
+      expect(await count("runs")).toBe(0);
+      expect(await count("conversation_turns")).toBe(0);
+      expect(await count("messages")).toBe(0);
+      expect(await count("artifacts")).toBe(0);
+    }
+  );
 
   it("refuses a turn over budget before it mints anything", async () => {
     withinBudget = false;

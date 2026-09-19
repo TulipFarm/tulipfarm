@@ -98,6 +98,8 @@ export interface SoulWriteRequest {
   readonly expectedBaseCommit?: string;
   /** The Approval decision that authorized this write, when the change required one. */
   readonly approval?: CommitApproval;
+  /** Retry activation of exact already-committed bytes after a failed publication. */
+  readonly republish?: boolean;
 }
 
 export interface SoulWriteResult {
@@ -287,7 +289,12 @@ export class SoulWriter {
     }
 
     const pushed = await this.publish(changeset.id);
-    const publication = await this.publishBundle(result, request.actor, changeset.id);
+    const publication = await this.publishBundle(
+      result,
+      request.actor,
+      changeset.id,
+      request.republish
+    );
     await this.refresh(changeset.id);
     return {
       commitSha: result.commitSha,
@@ -543,9 +550,10 @@ export class SoulWriter {
   private async publishBundle(
     result: SoulCommitResult,
     actor: CommitActor,
-    changesetId: string
+    changesetId: string,
+    republish = false
   ): Promise<BundlePublicationOutcome> {
-    if (result.filesChanged === 0) return { published: true };
+    if (result.filesChanged === 0 && !republish) return { published: true };
     if (this.publisher === undefined) {
       return {
         published: false,

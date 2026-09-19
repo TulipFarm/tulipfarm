@@ -23,6 +23,8 @@ folded into `ModelUsage`.
 
 - **Stay pure.** Anything that needs a credential, a network call or a clock belongs in a caller.
   Two hosts depend on this staying free of them: the Worker and `apps/eval`.
+- **Preserve raw Tool schemas.** `toToolSet` sets `strict: false` so provider defaults cannot
+  make optional fields required. Broker validation still enforces the original contract.
 - **Cache and reasoning token counts are a breakdown, never an addend.** `cacheReadTokens`,
   `cacheWriteTokens` and `reasoningTokens` are already inside `inputTokens`/`outputTokens`. Adding
   them again double-counts spend.

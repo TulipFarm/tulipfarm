@@ -12,7 +12,7 @@ Identity-bound MCP client, bounded discovery, Streamable HTTP, and isolated stdi
 | `src/transports.ts` | SDK boundary, HTTP credential injection, bounded stdio framing. |
 | `src/local.ts` | Development containers and production Kata VM streaming, with the same egress and process limits. |
 | `src/oauth.ts` | Guarded SDK OAuth primitives; the host persists state and credentials. |
-| `src/catalog.ts` | Verified publisher setup metadata and Schema-owned local Knowledge preset, never capability authority. |
+| `src/catalog.ts` | Verified publisher setup metadata, supported authentication and registered OAuth app prerequisites, plus the Schema-owned local Knowledge preset; never capability authority. |
 | `src/errors.ts` | Safe typed failures; no raw server/credential exception messages. |
 
 ## Rules

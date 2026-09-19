@@ -6,6 +6,7 @@ export * from "./conversations/context-summary-store";
 export * from "./conversations/latest-turn";
 export * from "./events";
 export * from "./integrations";
+export { MCP_SETUP_STORAGE_STATEMENTS, McpSetupStore } from "./integrations/mcp-setup-store";
 export * from "./kill-switches";
 export * from "./memory-curation";
 export * from "./notifications";

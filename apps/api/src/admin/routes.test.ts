@@ -1,4 +1,5 @@
 import { AssetOwnershipError } from "@tulipfarm/authz";
+import { MCP_TOOL_ERROR_REASONS } from "@tulipfarm/integrations";
 import Fastify from "fastify";
 import { describe, expect, it, vi } from "vitest";
 import type { RequestPrincipal } from "../identity/principal";
@@ -145,6 +146,80 @@ async function harness(
 }
 
 describe("operational API", () => {
+  it("serializes only the declared latest effect attempt fields", async () => {
+    const latestAttempt = {
+      state: "ambiguous",
+      errorCode: "mcp_tool_access_denied",
+      reason: MCP_TOOL_ERROR_REASONS.mcp_tool_access_denied,
+      startedAt: "2026-09-19T05:33:14.000Z",
+      finishedAt: "2026-09-19T05:33:22.420Z",
+    };
+    const effect = {
+      effectId: "effect-1",
+      stateId: "chat:call-1",
+      state: "ambiguous",
+      updatedAt: latestAttempt.finishedAt,
+    };
+    const app = await harness({
+      getRun: async () => ({
+        ...run,
+        effects: [
+          {
+            ...effect,
+            arguments: { secret: "must-not-leak" },
+            output: "must-not-leak",
+            latestAttempt: {
+              ...latestAttempt,
+              providerRequestId: "must-not-leak",
+              rawError: "must-not-leak",
+              credentials: "must-not-leak",
+            },
+          },
+        ],
+      }),
+    });
+    try {
+      const response = await app.inject("/api/v1/runs/run-1");
+      expect(response.statusCode).toBe(200);
+      expect(response.json().run.effects).toEqual([{ ...effect, latestAttempt }]);
+      expect(response.body).not.toContain("must-not-leak");
+    } finally {
+      await app.close();
+    }
+  });
+
+  it.each([{ errorCode: "private-unreviewed-code" }, { reason: "private-provider-response" }])(
+    "rejects unreviewed attempt evidence at serialization (%#)",
+    async (unreviewed) => {
+      const app = await harness({
+        getRun: async () => ({
+          ...run,
+          effects: [
+            {
+              effectId: "effect-1",
+              stateId: "chat:call-1",
+              state: "ambiguous",
+              updatedAt: "2026-09-19T05:33:22.420Z",
+              latestAttempt: {
+                state: "ambiguous",
+                errorCode: "mcp_tool_failed",
+                startedAt: "2026-09-19T05:33:14.000Z",
+                ...unreviewed,
+              },
+            },
+          ],
+        }),
+      });
+      try {
+        const response = await app.inject("/api/v1/runs/run-1");
+        expect(response.statusCode).toBe(500);
+        expect(response.body).not.toContain("private");
+      } finally {
+        await app.close();
+      }
+    }
+  );
+
   it("serializes typed authorized context only on Run detail", async () => {
     const context = {
       sourceChat: { id: "chat-1", title: "Customer research" },

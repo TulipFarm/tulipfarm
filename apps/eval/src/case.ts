@@ -147,7 +147,11 @@ export type Expectation =
   | { readonly kind: "turn_status"; readonly status: string }
   /** L3 only. This Run event type was appended durably. L2 stubs the event port, so this is the
    *  only place a Turn that stopped emitting its events can be caught. */
-  | { readonly kind: "run_event_emitted"; readonly eventType: string }
+  | {
+      readonly kind: "run_event_emitted";
+      readonly eventType: string;
+      readonly count?: number;
+    }
   /** L3 only. Concatenated durable participant text.delta payloads omit this grounded text. */
   | { readonly kind: "run_event_text_omits"; readonly text: string; readonly ungrounded?: string }
   /** L3 only. Assistant Message metadata read back from persistence has this field and value. */

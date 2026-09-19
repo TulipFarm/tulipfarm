@@ -77,6 +77,21 @@ export class McpAccountStore {
     return rows.map((row) => validateMcpAccount(row.document));
   }
 
+  /** Internal lookup only; callers must authorize each account before exposing metadata. */
+  async findBySecretKeys(keys: readonly string[]): Promise<McpAccount[]> {
+    if (keys.length === 0) return [];
+    const { rows } = await this.db.query<{ document: unknown }>(
+      `SELECT document FROM mcp_accounts
+       WHERE EXISTS (
+         SELECT 1 FROM jsonb_each_text(document->'secretBindings') AS binding
+         WHERE binding.value = ANY($1::text[])
+       )
+       ORDER BY business_id, id`,
+      [keys.map((key) => `secret://${key}`)]
+    );
+    return rows.map((row) => validateMcpAccount(row.document));
+  }
+
   async save(account: McpAccount, expectedRevision?: number): Promise<boolean> {
     validateMcpAccount(account);
     const { rows } = await this.db.query<{ id: string }>(

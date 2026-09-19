@@ -1,5 +1,6 @@
 import { Type } from "@sinclair/typebox";
 import {
+  accountDefinitionForIntegration,
   McpAccountAccessError,
   type McpCaller,
   type McpCapabilityReview,
@@ -9,18 +10,38 @@ import {
   McpIntegrationDefinitionSchema,
   McpIntegrationError,
   type McpIntegrationService,
+  type McpSetupService,
 } from "@tulipfarm/integrations";
 import { McpError } from "@tulipfarm/mcp";
+import { type McpServerDefinition, McpServerDefinitionSchema } from "@tulipfarm/schema";
 import { type CommitActor, isSoulWriteError, soulWriteHttpError } from "@tulipfarm/soul";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { ErrorSchema } from "../auth/schemas";
 import type { RequireAuthorization } from "../authz/route-gate";
 import { commitActorFromRequest } from "../soul/commit-actor";
+import { registerMcpSetupRoutes } from "./accounts/setup-routes";
 
 type PreHandler = (request: FastifyRequest, reply: FastifyReply) => Promise<void>;
 
 const params = Type.Object({ slug: Type.String({ pattern: "^[a-z][a-z0-9-]{0,63}$" }) });
 const serverResponse = Type.Object({ server: McpIntegrationDefinitionSchema });
+const accountConfigurationSchema = Type.Object(
+  {
+    authentication: Type.Union([
+      Type.Literal("none"),
+      Type.Literal("token"),
+      Type.Literal("oauth"),
+    ]),
+    requiredSlots: Type.Array(Type.String()),
+    sharedAllowed: Type.Boolean(),
+    definitionDigest: Type.String(),
+    supportedAuthentication: Type.Optional(
+      Type.Array(Type.Union([Type.Literal("none"), Type.Literal("token"), Type.Literal("oauth")]))
+    ),
+    requiresOAuthApp: Type.Optional(Type.Boolean()),
+  },
+  { additionalProperties: false }
+);
 const chatId = Type.Optional(Type.String({ minLength: 1, maxLength: 256 }));
 const accountId = Type.Optional(Type.String({ minLength: 1, maxLength: 256 }));
 const readBody = Type.Object(
@@ -55,6 +76,7 @@ const failures = {
 };
 
 export interface McpIntegrationRouteDeps {
+  readonly setup?: McpSetupService<CommitActor>;
   readonly service: McpIntegrationService<CommitActor>;
   readonly catalog: readonly Record<string, unknown>[];
   readonly caller: (request: FastifyRequest, chatId?: string) => Promise<McpCaller>;
@@ -121,6 +143,7 @@ export function registerMcpIntegrationRoutes(
   requireAuth: PreHandler,
   requireAuthorization: RequireAuthorization
 ): void {
+  if (deps.setup) registerMcpSetupRoutes(app, deps.setup, requireAuth, requireAuthorization);
   async function callerForAccount(
     request: FastifyRequest,
     selection: { readonly chatId?: string; readonly accountId?: string }
@@ -149,6 +172,61 @@ export function registerMcpIntegrationRoutes(
       fallback: "admin",
     }),
   ];
+  app.get<{ Params: { slug: string }; Querystring: { authentication: "token" | "oauth" } }>(
+    "/api/v1/integrations/catalog/:slug/setup",
+    {
+      preHandler: read,
+      schema: {
+        ...common,
+        description: "Preview trusted provider setup requirements without persisting anything.",
+        params,
+        querystring: Type.Object(
+          { authentication: Type.Union([Type.Literal("token"), Type.Literal("oauth")]) },
+          { additionalProperties: false }
+        ),
+        response: {
+          200: Type.Object({
+            server: McpServerDefinitionSchema,
+            configuration: accountConfigurationSchema,
+            requiresOAuthApp: Type.Boolean(),
+          }),
+          ...failures,
+        },
+      },
+    },
+    (request, reply) =>
+      respond(reply, async () => {
+        const entry = deps.catalog.find((entry) => entry.id === request.params.slug);
+        if (!entry) throw new McpIntegrationError("not_found", "Provider not found.");
+        if (
+          !Array.isArray(entry.authentication) ||
+          !entry.authentication.includes(request.query.authentication) ||
+          typeof entry.name !== "string" ||
+          typeof entry.url !== "string"
+        ) {
+          throw new McpIntegrationError(
+            "invalid_definition",
+            "Unsupported provider sign-in method."
+          );
+        }
+        const id = request.params.slug;
+        const server: McpServerDefinition = {
+          id: id === "github" || id === "slack" ? `${id}-mcp` : id,
+          label: entry.name,
+          transport: { type: "streamable-http", url: entry.url },
+          authentication: { type: request.query.authentication, sharedAllowed: false },
+        };
+        return {
+          server,
+          configuration: accountDefinitionForIntegration({
+            server,
+            enabled: false,
+            reviewed: { tools: [], resources: [], prompts: [] },
+          }),
+          requiresOAuthApp: entry.requiresOAuthApp === true,
+        };
+      })
+  );
   app.get<{ Params: { slug: string } }>(
     "/api/v1/integrations/:slug/accounts/configuration",
     {
@@ -158,18 +236,7 @@ export function registerMcpIntegrationRoutes(
         description: "Read non-secret account setup requirements from the active MCP definition.",
         params,
         response: {
-          200: Type.Object(
-            {
-              authentication: Type.Union([
-                Type.Literal("none"),
-                Type.Literal("token"),
-                Type.Literal("oauth"),
-              ]),
-              requiredSlots: Type.Array(Type.String()),
-              sharedAllowed: Type.Boolean(),
-            },
-            { additionalProperties: false }
-          ),
+          200: accountConfigurationSchema,
           ...failures,
         },
       },
@@ -184,10 +251,23 @@ export function registerMcpIntegrationRoutes(
           );
         }
         const configuration = await deps.accountConfiguration(request.params.slug);
+        const definition = deps.service.get(request.params.slug);
+        const provider = deps.catalog.find(
+          (entry) =>
+            definition.server.transport.type === "streamable-http" &&
+            definition.server.transport.url === entry.url
+        );
         return {
           authentication: configuration.authentication,
           requiredSlots: [...configuration.requiredSlots],
           sharedAllowed: configuration.sharedAllowed,
+          definitionDigest: accountDefinitionForIntegration(definition).definitionDigest,
+          ...(provider
+            ? {
+                supportedAuthentication: provider.authentication,
+                requiresOAuthApp: provider.requiresOAuthApp === true,
+              }
+            : {}),
         };
       })
   );
@@ -246,13 +326,30 @@ export function registerMcpIntegrationRoutes(
       },
     },
     async (request, reply) =>
-      respond(reply, async () => ({
-        server: await deps.service.configure(
-          request.params.slug,
-          request.body,
-          commitActorFromRequest(request)
-        ),
-      }))
+      respond(reply, async () => {
+        const { server } = request.body;
+        const provider = deps.catalog.find(
+          (entry) =>
+            server.transport.type === "streamable-http" && server.transport.url === entry.url
+        );
+        if (
+          provider &&
+          Array.isArray(provider.authentication) &&
+          !provider.authentication.includes(server.authentication?.type ?? "token")
+        ) {
+          throw new McpIntegrationError(
+            "invalid_definition",
+            "Unsupported provider sign-in method."
+          );
+        }
+        return {
+          server: await deps.service.configure(
+            request.params.slug,
+            request.body,
+            commitActorFromRequest(request)
+          ),
+        };
+      })
   );
   app.delete<{ Params: { slug: string } }>(
     "/api/v1/integrations/:slug",

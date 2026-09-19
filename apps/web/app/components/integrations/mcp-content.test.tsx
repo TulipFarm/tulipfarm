@@ -31,9 +31,13 @@ test("resource reads use the saved Chat account context, not an arbitrary creden
   expect(readMcpResource).not.toHaveBeenCalled();
   await userEvent.click(screen.getByRole("button", { name: "Read resource" }));
   expect(readMcpResource).toHaveBeenCalledWith("support", "docs://handbook", { chatId: "chat-1" });
-  expect(await screen.findByRole("region", { name: "MCP content preview" })).toHaveTextContent(
-    "Handbook contents"
-  );
+  expect(
+    await screen.findByRole("region", { name: "Integration content preview" })
+  ).toHaveTextContent("Handbook contents");
+  expect(screen.getByText("Handbook contents")).toBeVisible();
+  expect(screen.getByText(/"contents":/)).not.toBeVisible();
+  await userEvent.click(screen.getByText("Technical details · Provider response"));
+  expect(screen.getByText(/"contents":/)).toBeVisible();
 });
 
 test("prompt previews collect declared arguments without automatically running instructions", async () => {
@@ -75,5 +79,7 @@ test("failed live authorization shows an error without stale content", async () 
   await userEvent.click(await screen.findByRole("option", { name: /Handbook/ }));
   await userEvent.click(screen.getByRole("button", { name: "Read resource" }));
   expect(await screen.findByRole("alert")).toHaveTextContent("Source access was revoked.");
-  expect(screen.queryByRole("region", { name: "MCP content preview" })).not.toBeInTheDocument();
+  expect(
+    screen.queryByRole("region", { name: "Integration content preview" })
+  ).not.toBeInTheDocument();
 });

@@ -16,6 +16,9 @@ export type McpAccountConfiguration = {
   authentication: McpAccountCreate["authentication"];
   requiredSlots: string[];
   sharedAllowed: boolean;
+  definitionDigest?: string;
+  supportedAuthentication?: ("none" | "token" | "oauth")[];
+  requiresOAuthApp?: boolean;
 };
 
 export function getMcpAccountConfiguration(key: string): Promise<McpAccountConfiguration> {

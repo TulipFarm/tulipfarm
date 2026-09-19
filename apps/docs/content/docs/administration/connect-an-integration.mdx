@@ -1,95 +1,157 @@
 ---
 title: Connect an integration
-description: Choose an MCP server or a native chat channel, review what it exposes, and keep credentials separate from agent instructions.
+description: Connect an account from another service with a simple setup flow, keep personal and shared access separate, and adjust limits when needed.
 ---
 
-Open **Integrations** to configure an integration, a connection to an external service.
-Third-party agent tools use MCP, the protocol that lets TulipFarm ask an external server to
-perform a specific action or return information.
+Open **Integrations** and choose the service you want agents to use. An integration lets
+agents work with that service through an account you connect and access you approve.
 
-## Choose a server
+## Choose an integration
 
-Use a server offered by the provider or one your organization operates. Check its destination,
-sign-in requirements, and available capabilities before connecting it. Appearing in a catalog
-does not give a server access to your data or authorize its tools.
+Select **Connect** beside a provider, or **Manage** to manage an account you have connected.
+A panel opens from the right without leaving the catalog. It shows the provider and the
+account details you need.
+Open **Setup help** for the provider's instructions and requirements.
+For a listed provider, TulipFarm supplies its name and connection settings.
+You do not need to name the integration or your first account.
 
-Provider API documentation and OpenAPI files cannot be imported as agent tools. A provider
-without a suitable MCP server is not available through that route.
+Follow the account instructions in the panel:
 
-## Save the server
+- **Access token** uses a secret key supplied by the provider. Paste it into the secure field
+  and select **Connect**.
+- **Browser sign-in** uses the provider's authorization flow after you select **Connect**.
+  Some providers require an app to be registered first.
 
-Select **Add MCP server**, then enter an **Integration ID** and **Display name**. The ID stays
-in links and cannot be changed after creation.
+Only sign-in methods supported by that provider are offered. Opening or cancelling the panel
+does not save an integration or account.
 
-Choose the **Server transport**:
+On first setup, connecting checks the account, saves the provider's current capabilities and
+enables the integration. You do not need to discover or select each Tool. A Tool is an action
+an agent can call. The initial setup requires approval for every Tool call.
 
-- **Remote HTTPS URL** asks for the provider's **Remote MCP URL**, not its website address.
-  Do not put tokens in the URL.
-- **Local isolated server** asks for a **Pinned container image**, an **Executable path**
-  inside that container, and any arguments. Set **Allowed outbound hosts** to the hostnames
-  the server needs. An empty list denies outbound network access.
+Existing custom limits stay unchanged. A provider cannot silently add new capabilities to the
+saved access. Use **Advanced settings** only when you want to change those limits.
 
-Select **Add server**. New servers start disabled. Local servers require an isolation
-backend that your deployment supports; they never fall back to running directly on the host.
+## Add another provider
+
+Select **Add integration**, enter a **Name**, and paste the **Integration URL** supplied by
+the provider. This must be its MCP address, not its website or API documentation. MCP is the
+protocol TulipFarm uses to discover and call a provider's tools. Never put an access token
+in the URL.
+
+Choose the provider's sign-in method, then select **Continue** to save the setup and connect
+an account. **No sign-in** is only for services that require no credentials.
+
+**Advanced settings** contains hosting details and the automatically chosen **Integration ID**.
+The ID stays in links and cannot be changed after creation.
+
+Use **Where it runs → On your infrastructure** only when the required isolated runtime is ready.
+The image, executable, arguments and permitted network destinations belong here, not in agent
+instructions. For token-based local integrations, enter only the **Required secret names**;
+their values belong to the account. An empty outbound-host list denies network access.
 
 ## Connect an account
 
-Choose the server's authentication method before discovery: no authentication, token entry,
-or browser sign-in. For a local token-based server, declare the credential environment
-variables its provider requires, such as `GITHUB_PERSONAL_ACCESS_TOKEN`. Enter their values
-only in the account controls, never in the server arguments.
-
-Under **Accounts**, select **Connect another account** and give it an **Account label**.
+Follow the provider's sign-in instructions.
+The account name is filled in for you; change it only if you need to distinguish accounts.
+If an account is already connected, **Add another account** creates a separate connection with a
+different suggested name. It does not replace the first account's token or switch an existing Chat.
 A personal account uses your provider identity. A shared account uses a separate identity
 that can be granted to other users, teams, or scheduled automations. Shared accounts are
-available only when the server allows them; they are not an automatic fallback.
+available only when the integration allows them; they are not an automatic fallback.
 
-For token authentication, enter the requested credentials in the secure fields. For browser
-sign-in, follow the provider's authorization page. A server that needs no authentication
-does not need an account.
+For an access token, enter it in the secure field and select **Connect**.
+For browser sign-in, select **Connect** and follow the provider's authorization
+page. An integration that needs no sign-in does not need an account.
 
 If the provider requires an existing OAuth app, select **Use an existing OAuth app** and
 enter its client ID, authentication method, and any required client secret. Select
-**Save OAuth account**, then use **Copy callback URL** on the account card. Register that
-exact URL with the provider before selecting **Connect account**. If the server's
-authentication configuration changes, create a new account rather than reusing an old
+**Connect**, then use **Copy callback URL** in the saved account's setup. Register that
+exact URL with the provider before continuing sign-in. If the integration's
+sign-in settings change, create a new account rather than reusing an old
 app's credentials against the changed destination.
 
-## Review capabilities
+## Replace an account's token
 
-Open **Approved capabilities** and select **Discover capabilities**. Discovery lists what
-the server offers; it does not enable those capabilities. Select the specific tools, resources,
-and prompts you want to allow, then choose **Save approved capabilities**. A resource is
-information returned by the server. A prompt is a template the server provides.
+Open **Manage** for the integration. If several accounts exist, use **Account to manage** to
+choose the one you mean. Accounts with the same name show when they were added so you can tell
+them apart.
+
+Choose **Replace token**, enter the new value, then choose **Save replacement credentials**.
+This updates that same account rather than creating another. The replacement is checked before
+the account is shown as connected. Previous consent and access grants must be reviewed again.
+
+The **Manage** link beside a credential in **Secrets** opens its exact account.
+Existing Chats keep their selected account; they do not silently switch to a newer one.
+
+## Recover an unfinished connection
+
+An error can leave an account saved with setup still incomplete. Return to that account rather
+than adding another one. If the account is already connected, select **Finish connecting**.
+You do not need to enter the token again just to finish access setup.
+
+An older setup with empty access settings may offer **Use standard access and connect**.
+This explicitly replaces that empty policy with the provider's current capabilities and the
+standard approval defaults. Ordinary connection does not reset existing custom limits.
+
+If the screen asks you to correct credentials, enter the token in its recovery form. TulipFarm
+uses the same account; it never reads the saved token back into the form. An incomplete setup
+does not, by itself, mean the provider rejected your token.
+
+For browser sign-in, finish the authorization for that account. If an existing OAuth app needs
+a callback URL, register the exact URL shown before continuing.
+
+Follow the saved setup's retry action if checking access or publishing the configuration failed.
+An account can be connected while its saved settings allow no actions or content. The panel
+shows this separately from **Ready to use**. If standard access is not offered, select
+**Edit allowed access** to review and explicitly save changes; reconnecting does not reset limits.
+If setup found no capabilities, check the account's permissions with the provider before
+reviewing available access.
+
+## Adjust access limits
+
+This is optional. Open **Advanced settings** to inspect or restrict the saved access.
+Detailed controls cover Tools, resources and prompts. A resource is information returned by the
+provider. A prompt is a template the provider supplies.
+
+Use the advanced discovery and review controls to change the allowed items. Discovery alone
+does not approve newly offered capabilities. Save the review explicitly when you want to
+change access; connecting another account does not replace your custom choices.
 
 When using a shared account for setup, explicitly select it in the setup account picker
-before discovery. The same account is used when saving the review. This selection permits
+before checking available access. The same account is used when saving the review. This selection permits
 setup and review, not personal use of the shared account or shared content previews.
 
-Under **Server**, select **Edit server**, turn on **Enable this MCP server**, and select
-**Save server** when you are ready to use it. Enabling the server does not grant account
-access or approve additional capabilities.
+## Keep personal and shared access separate
 
-Changing the server configuration clears its previous capability review. Review the new
-capabilities before using that configuration. A server cannot silently add tools to an existing
-review.
+Basic setup does not grant anyone a shared account or choose an account for a Chat.
+Each person connects their own account unless shared access has been explicitly granted.
+Connecting a personal account cannot change the instance's integration policy without
+configuration authority.
+
+Open **Integration settings** only when you need to change the setup. Changing these settings
+can invalidate saved access. Review affected capabilities in **Advanced settings** before
+using the new configuration. Disabling an integration and disconnecting an account remain
+separate actions.
 
 ## Set up GitHub Knowledge
 
-For read-only copies of GitHub files in Knowledge, choose **Set up GitHub Knowledge (local)**
-from the GitHub catalog entry. It prefills the supported local server rather than the remote
-GitHub server. The host still needs the isolation support described in the
+For read-only copies of GitHub files in Knowledge, open the GitHub panel, expand
+**Optional Knowledge sync**, and choose **Set up GitHub Knowledge (local)**.
+It prefills the supported local setup rather than the hosted GitHub integration.
+The host still needs the isolation support described in the
 [integration catalog](/docs/reference/bundled-integrations#supported-server-connections).
 
-Save the server, connect a personal token account, and review `get_me` and `get_file_contents`
-as read-only tools without per-call approval. Enable the server, then open
-**Manage Knowledge sync** to select the files to sync. The preset does not approve tools
-or grant account access for you. Shared accounts and the remote GitHub server are not
-supported for Knowledge sync.
+Continue with the prefilled setup and connect a personal token account. In **Advanced settings**,
+review `get_me` and `get_file_contents` as read-only tools without per-call approval, then open
+**Manage Knowledge sync** to select the files to sync. This sync needs those explicit read-only
+settings; the basic approval-required defaults are not sufficient. Shared accounts and the
+remote GitHub server are not supported for Knowledge sync.
 
 ## Connect a chat channel
 
-Slack and GitHub chat channels have separate setup. Their event delivery and agent replies do
+Use **Messages and events** on the Integrations page for Slack and GitHub channel setup.
+Their event delivery and agent replies do
 not depend on an MCP server.
 
 - [Connect Slack](/docs/administration/connect-slack)

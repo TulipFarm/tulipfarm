@@ -1,6 +1,6 @@
 /* Schema transforms already ran server-side; this module only derives presentation fields. */
 
-import { isValidCalendarDate } from "@tulipfarm/schema";
+import { isValidCalendarDate } from "@tulipfarm/schema/ajv";
 import { parse as parseYaml } from "yaml";
 
 // Names the API attaches to every record on top of the schema's own properties.

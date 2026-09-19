@@ -22,7 +22,7 @@ publication, approvals, integrations, events, and blob/vector/cache/queue ports.
 | `src/artifacts/` | Append-only Artifacts, State Output Bindings, lineage. |
 | `src/runs/` | Runs, States, Attempts, waits/signals, budgets, concurrency, children, events. |
 | `src/auth/` | Principals, Teams, roles, sessions, guests, JIT users, recertification, identities. |
-| `src/integrations/` | MCP accounts, grants, durable execution authorizations, OAuth fencing, Knowledge selections and fixed native channel stores. |
+| `src/integrations/` | MCP accounts, grants, durable execution authorizations, fenced nonsecret setup operations, OAuth fencing, Knowledge selections and fixed native channel stores. |
 | `src/conversations/` | Conversation Turn read models used to restore Chat state. |
 | `src/approvals/`, `src/events/`, `src/notifications/` | Approval persistence, generic events, and recipient-scoped Team notifications. |
 | `src/asset-ownership/` | Shared asset ownership records, Team shares, and ownership operations. |
@@ -53,6 +53,7 @@ publication, approvals, integrations, events, and blob/vector/cache/queue ports.
   trust injection is test-only; production hosted startup remains unavailable.
 - Principal updates preserve existing operational scope; API-client lifecycle owns its projection.
 - MCP execution authorization records are immutable; retries recover host context and reauthorize live grants rather than treating a stored binding as permission.
+- MCP account Secret-key lookups are internal only; callers must authorize account metadata before exposing it.
 - Team lifecycle and Team-linked asset writes share the locked `teams` row; keep checks and the
   lifecycle mutation in one transaction.
 - If a storage rule repeats schema/Soul contracts, derive or reference the owner instead of copying.

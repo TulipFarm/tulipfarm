@@ -3,13 +3,14 @@ import type { SecretDoc, SecretEnvelopeFields, SecretMeta, SecretRepo } from "@t
 import { SecretsService } from "@tulipfarm/secrets";
 import type { PaginatedResult } from "@tulipfarm/storage";
 import type { FastifyInstance } from "fastify";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { buildApp } from "../app";
 import type { TokenDoc, TokenRepo } from "../auth/api-tokens";
 import { CSRF_COOKIE, CSRF_HEADER } from "../auth/csrf";
 import { SESSION_COOKIE } from "../auth/routes";
 import { MemorySessionStore } from "../auth/session-store";
 import { createUser, type UserDoc, type UserRepo } from "../auth/users";
+import type { createIntegrationSecretMetadata } from "../integrations/accounts/secret-metadata";
 
 const TEST_CSRF = "a".repeat(64);
 
@@ -114,12 +115,14 @@ describe("secrets routes", () => {
   let secretRepo: FakeSecretRepo;
   let adminSid: string;
   let memberSid: string;
+  const secretMetadata = vi.fn<ReturnType<typeof createIntegrationSecretMetadata>>();
 
   beforeEach(async () => {
     store = new MemorySessionStore();
     userRepo = new FakeUserRepo();
     tokenRepo = new FakeTokenRepo();
     secretRepo = new FakeSecretRepo();
+    secretMetadata.mockReset().mockResolvedValue(new Map());
 
     const admin = await createUser(userRepo, "admin@example.com", "pass", "admin");
     const member = await createUser(userRepo, "member@example.com", "pass", "member");
@@ -130,7 +133,13 @@ describe("secrets routes", () => {
       dekId: randomUUID(),
       key: randomBytes(32),
     });
-    app = await buildApp({ sessionStore: store, userRepo, tokenRepo, secretsService });
+    app = await buildApp({
+      sessionStore: store,
+      userRepo,
+      tokenRepo,
+      secretsService,
+      mcpAccounts: { register() {}, secretMetadata },
+    });
   });
 
   afterEach(async () => {
@@ -193,6 +202,73 @@ describe("secrets routes", () => {
       });
       expect(res.statusCode).toBe(200);
       expect(res.json()).toEqual({ secrets: [] });
+      expect(secretMetadata).toHaveBeenCalledWith([], expect.objectContaining({ kind: "user" }));
+    });
+
+    it("returns safe integration labels and the Secret timestamp, hiding inaccessible account keys", async () => {
+      for (const key of ["my-token", "other-token"]) {
+        await secretRepo.upsert(key, {
+          encryptedValue: "never-return-ciphertext",
+          iv: "iv",
+          authTag: "tag",
+          type: "user-provided",
+        });
+      }
+      const integration = {
+        key: "github-mcp",
+        label: "GitHub",
+        accountId: "my-account",
+        accountLabel: "My GitHub",
+        scope: "personal" as const,
+        field: "accessToken",
+      };
+      secretMetadata.mockResolvedValue(
+        new Map([
+          ["my-token", integration],
+          ["other-token", null],
+        ])
+      );
+      const res = await app.inject({
+        method: "GET",
+        url: "/api/v1/secrets/status",
+        cookies: { [SESSION_COOKIE]: adminSid },
+      });
+      expect(res.statusCode).toBe(200);
+      expect(res.json().secrets).toEqual([
+        {
+          key: "my-token",
+          type: "user-provided",
+          createdAt: secretRepo.docs.get("my-token")?.createdAt.toISOString(),
+          updatedAt: secretRepo.docs.get("my-token")?.updatedAt.toISOString(),
+          integration,
+        },
+      ]);
+      expect(res.body).not.toContain("never-return-ciphertext");
+      expect(res.body).not.toContain("other-token");
+    });
+
+    it("identifies native channel credentials without treating generated keys as integrations", async () => {
+      for (const key of ["integration.github.GITHUB_APP_PRIVATE_KEY", "channel-bind.signing-key"]) {
+        await secretRepo.upsert(key, {
+          encryptedValue: "encrypted",
+          iv: "iv",
+          authTag: "tag",
+          type: "user-provided",
+        });
+      }
+      const res = await app.inject({
+        method: "GET",
+        url: "/api/v1/secrets/status",
+        cookies: { [SESSION_COOKIE]: adminSid },
+      });
+      expect(res.json().secrets[0].integration).toEqual({
+        key: "github",
+        label: "GitHub App",
+        accountLabel: "Channel credentials",
+        scope: "shared",
+        field: "Private key (PEM)",
+      });
+      expect(res.json().secrets[1]).not.toHaveProperty("integration");
     });
   });
 

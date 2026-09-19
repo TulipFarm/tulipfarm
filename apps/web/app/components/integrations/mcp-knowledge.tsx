@@ -21,7 +21,7 @@ const emptyFile = (): DraftFile => ({
 
 function knowledgeMessage(code: string): string {
   const messages: Record<string, string> = {
-    unsupported_source: "This server does not support this Knowledge source.",
+    unsupported_source: "This integration does not support this Knowledge source.",
     unsupported_shared_sync: "Shared Knowledge sync is not supported for this source.",
     invalid_selection: "Check the repository, file path, and full branch reference.",
     identity_mismatch: "The account identity changed. Reconnect and review the source selection.",
@@ -185,8 +185,8 @@ export function McpKnowledge({ account }: { account: McpAccountSummary }) {
               <fieldset disabled={pending} className="space-y-3">
                 <p className="text-xs text-muted-foreground">
                   Select .md or .txt files on a branch, using its full reference such as
-                  refs/heads/main. The current source adapter requires a supported pinned local
-                  GitHub MCP server.
+                  refs/heads/main. This requires the supported self-hosted GitHub integration,
+                  configured by your operator.
                 </p>
                 {files.map((file, index) => (
                   <fieldset key={file.id} className="space-y-2 rounded-md border border-border p-3">

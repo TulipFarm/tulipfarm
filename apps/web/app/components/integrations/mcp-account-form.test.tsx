@@ -40,7 +40,7 @@ test("personal token account uses masked inputs and clears the secret after pers
       onChanged={changed}
     />
   );
-  await userEvent.type(screen.getByLabelText("Account label"), "My account");
+  await userEvent.type(screen.getByLabelText("Account name"), "My account");
   const token = screen.getByLabelText("Access token");
   expect(token).toHaveAttribute("type", "password");
   await userEvent.type(token, "test-secret-value");
@@ -55,7 +55,9 @@ test("personal token account uses masked inputs and clears the secret after pers
   expect(token).toHaveValue("");
   expect(screen.queryByText("test-secret-value")).not.toBeInTheDocument();
   expect(changed).toHaveBeenCalledOnce();
-  expect(screen.queryByRole("combobox", { name: "Account ownership" })).not.toBeInTheDocument();
+  expect(
+    screen.queryByRole("combobox", { name: "Who can use this account?" })
+  ).not.toBeInTheDocument();
 });
 
 test("OAuth creates the exact pending account before a backend sign-in redirect", async () => {
@@ -74,8 +76,8 @@ test("OAuth creates the exact pending account before a backend sign-in redirect"
       onChanged={vi.fn()}
     />
   );
-  await userEvent.type(screen.getByLabelText("Account label"), "My account");
-  await userEvent.click(screen.getByRole("button", { name: "Connect with browser sign-in" }));
+  await userEvent.type(screen.getByLabelText("Account name"), "My account");
+  await userEvent.click(screen.getByRole("button", { name: "Sign in with provider" }));
   expect(createMcpAccount).toHaveBeenCalledWith("support", {
     label: "My account",
     scope: "personal",
@@ -95,12 +97,45 @@ test("a rejected credential never produces a connected notice", async () => {
       onChanged={vi.fn()}
     />
   );
-  await userEvent.type(screen.getByLabelText("Account label"), "My account");
+  await userEvent.type(screen.getByLabelText("Account name"), "My account");
   await userEvent.type(screen.getByLabelText("Access token"), "invalid");
   await userEvent.click(screen.getByRole("button", { name: "Connect account" }));
   expect(await screen.findByRole("alert")).toHaveTextContent("Credential verification failed.");
   expect(screen.queryByText("Account connected.")).not.toBeInTheDocument();
   expect(screen.getByLabelText("Access token")).toHaveValue("");
+});
+
+test("shared account creation remains an explicit admin choice and grants no implicit access", async () => {
+  admin = true;
+  vi.mocked(createMcpAccount).mockResolvedValue({ ...account, owner: { scope: "shared" } });
+  render(
+    <McpAccountForm
+      integrationKey="support"
+      authentication="token"
+      requiredSlots={["accessToken"]}
+      sharedAllowed
+      onChanged={vi.fn()}
+    />
+  );
+  expect(screen.getByRole("combobox", { name: "Who can use this account?" })).toHaveValue(
+    "Personal — just you"
+  );
+  await userEvent.click(screen.getByRole("combobox", { name: "Who can use this account?" }));
+  await userEvent.click(
+    await screen.findByRole("option", { name: "Shared — people you grant access to" })
+  );
+  expect(screen.getByText(/Creating it grants no one access/)).toBeVisible();
+  expect(createMcpAccount).not.toHaveBeenCalled();
+  await userEvent.type(screen.getByLabelText("Account name"), "Shared support");
+  await userEvent.type(screen.getByLabelText("Access token"), "fake-shared-token");
+  await userEvent.click(screen.getByRole("button", { name: "Connect account" }));
+  expect(createMcpAccount).toHaveBeenCalledExactlyOnceWith("support", {
+    label: "Shared support",
+    scope: "shared",
+    authentication: "token",
+    isDefault: false,
+    values: { accessToken: "fake-shared-token" },
+  });
 });
 
 test("a registered OAuth app sends its secret only in account creation and clears it afterward", async () => {
@@ -119,7 +154,7 @@ test("a registered OAuth app sends its secret only in account creation and clear
       onChanged={vi.fn()}
     />
   );
-  await userEvent.type(screen.getByLabelText("Account label"), "My account");
+  await userEvent.type(screen.getByLabelText("Account name"), "My account");
   await userEvent.click(screen.getByText("Use an existing OAuth app"));
   await userEvent.type(await screen.findByLabelText("OAuth client ID"), "registered-client");
   await userEvent.click(screen.getByRole("combobox", { name: "Token endpoint authentication" }));
