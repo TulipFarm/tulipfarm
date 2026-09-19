@@ -28,6 +28,8 @@ PostgreSQL persistence composition, auth, Soul Git writes, and Worker callback p
 | `src/packs/` | Bounded, guarded Pack/catalog reads and preview-only routes; API-hosted `pack_read` ignores blank model source placeholders, never rewrites selected source bytes. HTTP source validation stays strict. No installer or Soul writer. |
 | `src/resources/`, `src/soul/` | Resource CRUD and Soul HTTP routes/Tools; domain logic lives in `@tulipfarm/soul`. |
 | `src/integrations/` | MCP setup/review and account composition from verified active bundles; `mcp-context.ts` resolves caller lineage and destination-bound Routine grants, including native admission and pinned inbox authority. Native Slack/GitHub channel setup stays separate. |
+| `src/integrations/mcp-routes.ts` | Catalog-candidate setup previews derive account fields without persistence; saved account requirements include the current definition digest. |
+| `src/integrations/accounts/setup-{routes,compose}.ts` | Durable explicit Connect/Finish operations, read-only progress, original-consent OAuth resume and live configuration authority. |
 | `src/guardrails/` | Guardrail reload wiring and persisted policy acceptance. Hosted minimums remain in the effective service; Chat Context, Routine Agent catalog and admin reads share it. |
 | `src/knowledge/`, `src/knowledge-sources/` | Knowledge routes/Tools and ingestion API; repositories and OKF live in `@tulipfarm/knowledge`. |
 | `src/files/knowledge-bridge.ts` | Owner-requested File indexing/refresh, atomic receipt+queue acceptance and authorized status reconciliation from durable queue failures. |
@@ -40,8 +42,10 @@ PostgreSQL persistence composition, auth, Soul Git writes, and Worker callback p
 | `src/surfaces/`, `src/forms/` | Tulip Surface Protocol and form APIs. |
 | `src/ingress/`, `src/triggers/`, `src/schedule/` | Channel identity and thread/event repositories, triggers and schedules. Native channel verification lives in `src/integrations/native/`; no programmable Integration ingress. `triggers/event-dispatch.ts` is the only place an internally raised event (Record CRUD, Integration event, Routine `emit`) becomes a Run; Trigger webhook routes retain their own signature and content gates. |
 | `src/admin/`, `src/setup/`, `src/onboarding/`, `src/system/` | Admin, setup, health. `admin/run-context.ts` projects authorized, typed related work for Run detail only. |
+| `src/admin/run-reader.ts`, `src/admin/schemas.ts` | Operator Run effect evidence includes only the latest attempt's state, allowlisted error code, fixed provider explanation and timestamps; unknown codes are redacted. |
 | `src/system/telemetry/` | Deployment telemetry collection, admin preview/preferences, and service-only dispatch; reporter and durable state live in observability/storage. |
 | `src/pg-migrations/` | Boot-applied PostgreSQL schema migrations. |
+| `src/pg-migrations/runtime-legacy-fixture.test.ts` | Pins the Compose upgrade fixture and v140 recovery of checkouts that used v139 for MCP setup before File Knowledge receipts shipped. |
 | `src/pg-migrations/20260917-slack-delivery-leases.ts` | Backfills recoverable Slack reply leases; v133 replays this idempotent DDL for databases that reached Knowledge v132 before Slack v125 landed. |
 | `src/test/` | API test helpers. |
 

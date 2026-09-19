@@ -724,6 +724,7 @@ describe("MCP domain and authority Cases", () => {
     "l3-mcp-personal-account-cannot-enter-shared-chat",
     "l3-mcp-shared-consent-does-not-replace-a-grant",
     "l3-mcp-prefers-personal-default",
+    "l3-mcp-every-approval-is-visible",
     "l3-mcp-shared-default-needs-explicit-selection",
     "l3-mcp-revoked-grant-blocks-approved-call",
     "l3-mcp-reviewed-tool-contract-follows-publication",

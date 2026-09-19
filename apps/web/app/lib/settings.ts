@@ -176,6 +176,15 @@ export type SecretMeta = {
   type: "user-provided" | "auto-generated";
   createdAt: string;
   updatedAt: string;
+  integration?: {
+    key: string;
+    label: string;
+    accountId?: string;
+    accountLabel: string;
+    accountCreatedAt?: string;
+    scope: "personal" | "shared";
+    field: string;
+  };
 };
 
 export async function listSecrets(): Promise<SecretMeta[]> {

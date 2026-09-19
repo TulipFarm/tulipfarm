@@ -1,20 +1,21 @@
 import { type Static, Type } from "@sinclair/typebox";
 import { DEFINITION_API_VERSION, SLUG_PATTERN } from "./definitions/enums";
+import {
+  PACK_CATALOG_MAX_ENTRIES,
+  PACK_CATEGORIES,
+  PACK_MAX_ARTIFACTS,
+  PACK_MAX_BYTES,
+} from "./pack-contract";
 import { PlanDefinitionSchema } from "./plan";
 import { SchemaRegistry, type ValidatedSchemaDocument } from "./registry";
 
-export const PACK_MAX_BYTES = 128 * 1024;
-export const PACK_READ_MAX_RESULT_CHARS = 38_000;
-export const PACK_MAX_ARTIFACTS = 64;
-export const PACK_CATALOG_MAX_ENTRIES = 100;
-export const PACK_CATEGORIES = [
-  "Sales",
-  "IT Ops",
-  "Marketing",
-  "Document Ops",
-  "Support",
-  "Engineering",
-] as const;
+export {
+  PACK_CATALOG_MAX_ENTRIES,
+  PACK_CATEGORIES,
+  PACK_MAX_ARTIFACTS,
+  PACK_MAX_BYTES,
+  PACK_READ_MAX_RESULT_CHARS,
+} from "./pack-contract";
 
 const slug = Type.String({ pattern: SLUG_PATTERN, minLength: 1, maxLength: 128 });
 const category = Type.Unsafe<(typeof PACK_CATEGORIES)[number]>({

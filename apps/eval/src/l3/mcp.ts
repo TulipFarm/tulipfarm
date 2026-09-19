@@ -20,13 +20,14 @@ import {
   McpConfigureSchema,
   type McpExecutionBinding,
 } from "@tulipfarm/schema";
-import { normalizeToolIntent, PgEffectStore } from "@tulipfarm/tool-broker";
+import { PgEffectStore } from "@tulipfarm/tool-broker";
 import {
   defineApiTool,
   err,
   InMemoryToolCatalog,
   LiveToolGate,
   ok,
+  prepareMcpToolCall,
   RegistryToolDispatcher,
   type RequestContext,
   ToolApprovalService,
@@ -317,26 +318,7 @@ export async function evalMcpTools(options: {
           if (!(error instanceof McpIntegrationError)) throw error;
           throw new ToolPreparationDeniedError(error.message);
         }
-        const identity = canonicalHash([input.runId, input.toolCallId, input.tool.name]);
-        return {
-          definition,
-          intent: normalizeToolIntent({
-            intentId: identity,
-            businessId: input.businessId,
-            runId: input.runId,
-            stateId: `chat:${input.toolCallId}`,
-            runStateId: input.stateId,
-            toolId: input.tool.name,
-            toolVersion: definition.version,
-            action: definition.authorization.action,
-            targetRefs: [{ type: "integration", id: tool.serverId }],
-            arguments: input.arguments,
-            principalKind: input.subject.kind,
-            principalId: input.subject.id,
-            mcp: binding,
-            idempotencyKey: identity,
-          }),
-        };
+        return prepareMcpToolCall(input, definition, binding);
       },
     },
   });

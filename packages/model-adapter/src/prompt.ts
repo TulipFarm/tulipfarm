@@ -321,6 +321,8 @@ export function toToolSet(
       tool({
         ...(definition.description === undefined ? {} : { description: definition.description }),
         inputSchema: jsonSchema(definition.inputSchema as Parameters<typeof jsonSchema>[0]),
+        // Responses defaults can make optional fields required when strict is omitted.
+        strict: false,
       }),
     ])
   );

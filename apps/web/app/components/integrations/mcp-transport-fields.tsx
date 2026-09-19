@@ -38,7 +38,7 @@ export function transportInput(draft: TransportDraft): McpTransport {
       )
     ) {
       throw new Error(
-        "Use an HTTPS MCP URL without credentials or a fragment. Add tokens under Accounts."
+        "Use an HTTPS integration URL without credentials or a fragment. Add access tokens when connecting an account."
       );
     }
     return { type: "streamable-http", url: url.toString() };
@@ -69,20 +69,22 @@ export function McpTransportFields({
   value,
   onChange,
   disabled,
+  showUrl = true,
 }: {
   value: TransportDraft;
   onChange: (value: TransportDraft) => void;
   disabled?: boolean;
+  showUrl?: boolean;
 }) {
   return (
     <fieldset disabled={disabled} className="space-y-3">
-      <McpField label="Server transport">
+      <McpField label="Where it runs">
         <IntegrationChoice
-          label="Server transport"
+          label="Where it runs"
           value={value.type}
           options={[
-            { value: "streamable-http", label: "Remote HTTPS URL" },
-            { value: "stdio", label: "Local isolated server" },
+            { value: "streamable-http", label: "Hosted by the provider" },
+            { value: "stdio", label: "On your infrastructure" },
           ]}
           onChange={(type) => {
             if (type === "streamable-http" || type === "stdio") onChange({ ...value, type });
@@ -90,18 +92,20 @@ export function McpTransportFields({
         />
       </McpField>
       {value.type === "streamable-http" ? (
-        <McpField
-          label="Remote MCP URL"
-          hint="The server's MCP endpoint, not its website. Do not include tokens in this URL."
-        >
-          <Input
-            type="url"
-            required
-            value={value.url}
-            onChange={(event) => onChange({ ...value, url: event.target.value })}
-            placeholder="https://mcp.example.com/mcp"
-          />
-        </McpField>
+        showUrl && (
+          <McpField
+            label="Integration URL"
+            hint="The MCP address supplied by the provider, not its website. Never include an access token."
+          >
+            <Input
+              type="url"
+              required
+              value={value.url}
+              onChange={(event) => onChange({ ...value, url: event.target.value })}
+              placeholder="https://mcp.example.com/mcp"
+            />
+          </McpField>
+        )
       ) : (
         <>
           <p className="text-xs text-muted-foreground">

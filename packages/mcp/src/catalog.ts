@@ -7,6 +7,7 @@ export interface McpCatalogEntry {
   readonly url: string;
   readonly publisherEvidence: string;
   readonly authentication: readonly ("oauth" | "token")[];
+  readonly requiresOAuthApp?: boolean;
   readonly setup: readonly string[];
   readonly limitations: readonly string[];
   readonly knowledgeSync: "excluded" | "requires-reviewed-adapter";
@@ -22,6 +23,7 @@ export const MCP_CATALOG: readonly McpCatalogEntry[] = [
     url: "https://api.githubcopilot.com/mcp/",
     publisherEvidence: "https://github.com/github/github-mcp-server",
     authentication: ["oauth", "token"],
+    requiresOAuthApp: true,
     setup: [
       "Use a GitHub personal access token or register a GitHub OAuth/GitHub App for this deployment.",
       "For Knowledge sync, choose GitHub Knowledge (local) to prefill the exact supported pinned image, executable, arguments and GitHub API egress.",
@@ -44,6 +46,7 @@ export const MCP_CATALOG: readonly McpCatalogEntry[] = [
     url: "https://mcp.slack.com/mcp",
     publisherEvidence: "https://docs.slack.dev/ai/slack-mcp-server/",
     authentication: ["oauth"],
+    requiresOAuthApp: true,
     setup: [
       "Register an eligible internal or Marketplace/directory-published Slack app with a fixed client ID and secret.",
       "Authorize user scopes; bot credentials are not MCP user credentials.",
@@ -63,6 +66,7 @@ export const MCP_CATALOG: readonly McpCatalogEntry[] = [
     publisherEvidence:
       "https://developers.google.com/workspace/drive/api/guides/configure-mcp-server",
     authentication: ["oauth"],
+    requiresOAuthApp: true,
     setup: [
       "Enable drive.googleapis.com and drivemcp.googleapis.com in a Google Cloud project.",
       "Configure OAuth consent and client credentials with drive.readonly or drive.file scope.",

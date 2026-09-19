@@ -385,7 +385,7 @@ export class TurnDriver {
       await events.emit(
         "approval.requested",
         { waitId: result.waitId, intentId: result.approvalId, callId: result.callId },
-        "approval"
+        `approval:${result.approvalId}`
       );
       assertRunActive(request.signal);
       const current = await this.checkpoint(request, events, "waiting", {

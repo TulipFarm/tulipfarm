@@ -15,6 +15,48 @@ const base: Observation = {
 
 const only = (a: Expectation, obs: Observation = base) => scoreCase([a], obs)[0];
 
+describe("durable Run event counts", () => {
+  const observed = (events: string[]): Observation => ({
+    ...base,
+    persisted: {
+      runStatus: "succeeded",
+      stateStatus: "succeeded",
+      turnStatus: "succeeded",
+      events,
+      soulCommits: [],
+      publishedArtifacts: [],
+      generatedFiles: [],
+    },
+  });
+  const expectation = {
+    kind: "run_event_emitted" as const,
+    eventType: "approval.requested",
+    count: 2,
+  };
+
+  it("requires every distinct approval to reach the durable event stream", () => {
+    expect(only(expectation, observed(["approval.requested"])).passed).toBe(false);
+    expect(only(expectation, observed(["approval.requested", "approval.requested"])).passed).toBe(
+      true
+    );
+    expect(
+      only(
+        expectation,
+        observed(["approval.requested", "approval.requested", "approval.requested"])
+      ).passed
+    ).toBe(false);
+    expect(only(expectation).passed).toBe(false);
+  });
+
+  it("keeps presence-only Expectations unchanged when count is omitted", () => {
+    const presence = { kind: "run_event_emitted" as const, eventType: "approval.requested" };
+    expect(only(presence, observed([])).passed).toBe(false);
+    expect(only(presence, observed(["approval.requested", "approval.requested"])).passed).toBe(
+      true
+    );
+  });
+});
+
 describe("MCP provider call counts", () => {
   const observed = (mcpProviderCallCount?: number): Observation => ({
     ...base,

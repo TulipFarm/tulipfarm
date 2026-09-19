@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import {
+  classifyMcpToolError,
   type McpCaller,
   type McpExecutionBinding,
   McpIntegrationError,
@@ -20,12 +21,12 @@ import {
   type ToolAdapterRequest,
   ToolCatalog,
   ToolDispatchError,
-  type ToolIntent,
 } from "@tulipfarm/tool-broker";
 import {
   defineApiTool,
   err,
   ok,
+  prepareMcpToolCall,
   type RequestContext,
   type ToolCallPreparationPort,
   type ToolDef,
@@ -35,7 +36,6 @@ import {
 import type { ToolRegistry } from "../../broker/tool-adapter";
 
 type Preparation = Parameters<ToolCallPreparationPort["prepare"]>[0];
-type McpIntent = ToolIntent & { readonly mcp: McpExecutionBinding };
 
 function record(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value);
@@ -187,7 +187,7 @@ export class McpToolSync implements ToolCallPreparationPort {
                         if (output.isError) {
                           throw new AdapterDispatchError(
                             "after_dispatch",
-                            "mcp_tool_failed",
+                            classifyMcpToolError(output),
                             false
                           );
                         }
@@ -285,31 +285,6 @@ export class McpToolSync implements ToolCallPreparationPort {
     if (binding.serverRevision !== entry.revision) {
       throw new ToolPreparationDeniedError("MCP server changed. Refresh available Tools.");
     }
-    const intent: McpIntent = {
-      intentId: uuid("mcp-intent", input.runId, input.toolCallId, input.tool.name),
-      businessId: input.businessId,
-      runId: input.runId,
-      stateId: `mcp:${input.toolCallId}`,
-      runStateId: input.stateId,
-      toolId: input.tool.name,
-      toolVersion: definition.version,
-      action: definition.authorization.action,
-      targetRefs: definition.targetsFor(input.arguments),
-      arguments: input.arguments,
-      principalKind: input.subject.kind,
-      principalId: input.subject.id,
-      ...(input.agent.principalId === undefined
-        ? {}
-        : { agentPrincipalId: input.agent.principalId }),
-      ...(input.activeSkillName === undefined ? {} : { activeSkillName: input.activeSkillName }),
-      mcp: binding,
-      idempotencyKey: uuid("mcp-idempotency", input.runId, input.toolCallId, input.tool.name),
-    };
-    if (input.pinnedIntent && canonicalHash(input.pinnedIntent) !== canonicalHash(intent)) {
-      throw new ToolPreparationDeniedError(
-        "The approved MCP account, capability or arguments changed."
-      );
-    }
-    return { intent, definition };
+    return prepareMcpToolCall(input, definition, binding);
   }
 }

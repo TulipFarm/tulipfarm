@@ -12,9 +12,11 @@
     "./currencies": "./src/currencies.ts",
     "./guards": "./src/guards.ts",
     "./llm": "./src/llm.ts",
+    "./mcp-access": "./src/mcp-access.ts",
     "./message-content": "./src/message-content.ts",
     "./model-catalog": "./src/model-catalog.ts",
-    "./oim": "./src/oim.ts"
+    "./oim": "./src/oim.ts",
+    "./pack-contract": "./src/pack-contract.ts"
   },
   "scripts": {
     "lint": "biome check --no-errors-on-unmatched .",

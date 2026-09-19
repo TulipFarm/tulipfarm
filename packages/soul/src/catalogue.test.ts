@@ -66,6 +66,43 @@ function fakeLoader(
 }
 
 describe("buildSoulCatalogue", () => {
+  it("projects MCP configuration separately from native channels without claiming account access", () => {
+    const cat = buildSoulCatalogue(
+      fakeLoader({
+        integrations: [
+          {
+            slug: "github-mcp",
+            sourceIntegration: "github-mcp",
+            mcp: {
+              server: {
+                id: "github-mcp",
+                label: "GitHub",
+                transport: {
+                  type: "streamable-http",
+                  url: "https://mcp.example.com/",
+                },
+              },
+              enabled: true,
+              reviewPolicy: "custom",
+              reviewed: { tools: [], resources: [], prompts: [] },
+            },
+          },
+        ],
+      }),
+      new Map([["github", registryEntry("github", "available")]])
+    );
+    expect(cat.integrations).toContainEqual({
+      name: "github-mcp",
+      description: "GitHub",
+      status: "configured",
+      kind: "mcp",
+      access: { state: "preserved_empty", enabled: true, tools: 0, resources: 0, prompts: 0 },
+    });
+    expect(cat.integrations.find((entry) => entry.name === "github")).toMatchObject({
+      status: "available",
+      kind: "native_channel",
+    });
+  });
   it("projects every section sorted by name, with the platform agents first-class", () => {
     const cat = buildSoulCatalogue(
       fakeLoader({
@@ -134,7 +171,9 @@ describe("buildSoulCatalogue", () => {
 
   it("marks a connected Integration's status without a registry", () => {
     const cat = buildSoulCatalogue(fakeLoader({ integrations: [integration("slack", "Chat")] }));
-    expect(cat.integrations).toEqual([{ name: "slack", description: "Chat", status: "connected" }]);
+    expect(cat.integrations).toEqual([
+      { name: "slack", description: "Chat", status: "connected", kind: "native_channel" },
+    ]);
   });
 
   // This is the fix for #663: an Agent that only ever saw connected Integrations claimed a
@@ -149,7 +188,12 @@ describe("buildSoulCatalogue", () => {
         ])
       );
       expect(cat.integrations).toEqual([
-        { name: "github", description: "Code hosting", status: "available" },
+        {
+          name: "github",
+          description: "Code hosting",
+          status: "available",
+          kind: "native_channel",
+        },
         { name: "linear", description: "Issue tracking", status: "coming_soon" },
       ]);
     });
@@ -160,7 +204,12 @@ describe("buildSoulCatalogue", () => {
         new Map([["github", registryEntry("github", "available", "Marketplace description")]])
       );
       expect(cat.integrations).toEqual([
-        { name: "github", description: "Connected description", status: "connected" },
+        {
+          name: "github",
+          description: "Connected description",
+          status: "connected",
+          kind: "native_channel",
+        },
       ]);
     });
   });

@@ -42,6 +42,7 @@ import {
   MCP_EXECUTION_AUTHORIZATION_STORAGE_STATEMENTS,
   MCP_KNOWLEDGE_STORAGE_STATEMENTS,
   MCP_OAUTH_STORAGE_STATEMENTS,
+  MCP_SETUP_STORAGE_STATEMENTS,
   MEMORY_CURATION_STORAGE_STATEMENTS,
   NATIVE_CHANNEL_INBOX_STORAGE_STATEMENTS,
   PRODUCT_TELEMETRY_STORAGE_STATEMENTS,
@@ -3557,5 +3558,14 @@ export const PG_MIGRATIONS: PgMigration[] = [
     version: 139,
     description: "per-version File Knowledge refresh receipts and publication fencing",
     up: applyStatements(FILE_KNOWLEDGE_REQUEST_STATEMENTS),
+  },
+  {
+    version: 140,
+    description: "durable identity-bound MCP setup consent and frozen capability snapshots",
+    up: applyStatements([
+      // Unmerged MCP checkouts used v139 before File Knowledge receipts shipped there.
+      ...FILE_KNOWLEDGE_REQUEST_STATEMENTS,
+      ...MCP_SETUP_STORAGE_STATEMENTS,
+    ]),
   },
 ];

@@ -28,6 +28,7 @@ Individual Tool families (`packages/kv`, `apps/api/src/tools/**`), the model-fac
 | `src/capability-restrictions.ts` | An Agent's authored restrictions, decided at offer and at dispatch |
 | `src/catalog.ts` | `ToolCatalog` port, `InMemoryToolCatalog`, per-agent visibility |
 | `src/ports.ts` | Injected capabilities: surfaces, agents, visibility, approvals, guardrails |
+| `src/mcp-preparation.ts` | Shared production/eval MCP call identity, frozen account intent and approval-resume checks. |
 | `src/authority.ts` | `TurnAuthority` — what one Run may do, taken from the Run, plus the Agent |
 | `src/approvals/` | `ApprovalsRepo` and `ToolApprovalService` |
 | `src/credential-mode.ts` | Personal vs service credential resolution |

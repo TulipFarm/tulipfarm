@@ -16,6 +16,7 @@ Protocol transports remain in `@tulipfarm/mcp`; account authority remains in `..
 | `ports.ts` | Injected Soul store, account authority, protocol session and audit boundaries. |
 | `service.ts` | Discovery, explicit review, revision checks and authorized disclosure. |
 | `tool-contract.ts` | Re-exports shared schema-owned Tool derivation so live registration and published contracts have identical IDs and revisions. |
+| `tool-error.ts` | Bounded provider-error classification and fixed operator explanations; advisory only, never effect or retry policy. |
 | `transport.ts` | Host fetch with validated, pinned DNS answers for streaming remote MCP traffic. |
 | `errors.ts` | Safe, distinct setup, consent, selection and access failures. |
 

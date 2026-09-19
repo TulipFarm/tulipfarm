@@ -100,14 +100,38 @@ describe("IntegrationIcon", () => {
     }
   });
 
-  test("still uses the monochrome glyph for a brand with no vendored mark", () => {
-    // GitHub's own logo is monochrome, so the Simple Icons path is the real mark, not a fallback.
+  test("still uses the supplied glyph for a brand with no vendored mark", () => {
     const { container } = render(
-      <IntegrationIcon label="GitHub" iconSlug="github" iconPath="M12 0z" iconColor="181717" />
+      <IntegrationIcon
+        label="Custom provider"
+        iconSlug="custom"
+        iconPath="M12 0z"
+        iconColor="181717"
+      />
     );
     expect(container.querySelector("path")?.getAttribute("d")).toBe("M12 0z");
     expect(container.querySelector("svg")?.getAttribute("class")).toContain(
       "text-[var(--integration-ink)]"
     );
+  });
+
+  test.each(["github", "slack", "google-drive", "notion", "linear"])(
+    "renders a local %s logo without API-supplied glyphs",
+    (slug) => {
+      const { container } = render(<IntegrationIcon label={slug} iconSlug={slug} />);
+      expect(container.querySelector("svg path")).not.toBeNull();
+      expect(container.querySelector("img")).toBeNull();
+      expect(screen.queryByText(monogram(slug))).not.toBeInTheDocument();
+    }
+  );
+
+  test("uses the full-colour Drive mark for both catalog and manifest slugs", () => {
+    const catalog = render(<IntegrationIcon label="Google Drive" iconSlug="google-drive" />);
+    const manifest = render(<IntegrationIcon label="Google Drive" iconSlug="googledrive" />);
+    const fills = [...catalog.container.querySelectorAll("path")].map((p) =>
+      p.getAttribute("fill")
+    );
+    expect(fills).toEqual(["#F4B400", "#0F9D58", "#4285F4"]);
+    expect(catalog.container.innerHTML).toBe(manifest.container.innerHTML);
   });
 });

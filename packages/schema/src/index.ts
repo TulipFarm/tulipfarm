@@ -242,6 +242,22 @@ export {
   GITHUB_KNOWLEDGE_SERVER_REVISION,
 } from "./mcp-knowledge-profile";
 export {
+  type McpSetupAccess,
+  McpSetupAccessSchema,
+  McpSetupAccountSchema,
+  type McpSetupCredentials,
+  McpSetupCredentialsSchema,
+  type McpSetupEligibility,
+  McpSetupEligibilitySchema,
+  type McpSetupOperation,
+  McpSetupOperationSchema,
+  type McpSetupStart,
+  McpSetupStartSchema,
+  type McpSetupStatus,
+  McpSetupStatusSchema,
+  validateMcpSetupOperation,
+} from "./mcp-setup";
+export {
   type McpReviewedTool,
   mcpToolContract,
   mcpToolName,

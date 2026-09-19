@@ -44,6 +44,7 @@
     { "kind": "text", "text": "Your personal default account reports operational status." }
   ],
   "expect": [
+    { "kind": "run_event_emitted", "eventType": "approval.requested" },
     { "kind": "mcp_provider_call_count", "count": 1 },
     {
       "kind": "tool_result_field_equals",

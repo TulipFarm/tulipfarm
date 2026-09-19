@@ -17,6 +17,14 @@
   "expect": [
     {
       "kind": "prompt_contains",
+      "text": "A configured MCP integration with no allowed Tools is access-restricted, not proof that its account is disconnected."
+    },
+    {
+      "kind": "prompt_contains",
+      "text": "Native channel connection status does not describe MCP account access."
+    },
+    {
+      "kind": "prompt_contains",
       "text": "Third-party business actions use reviewed MCP Tools only."
     },
     {

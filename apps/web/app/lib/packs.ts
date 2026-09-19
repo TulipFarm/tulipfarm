@@ -4,11 +4,11 @@ import {
   type PackCatalogEntry,
   type PackPreview,
   type PackReadInput,
-} from "@tulipfarm/schema";
+} from "@tulipfarm/schema/pack-contract";
 import { apiGet, apiWrite, shareInFlight } from "./api";
 
-export type { PackPreview } from "@tulipfarm/schema";
-export { PACK_CATEGORIES } from "@tulipfarm/schema";
+export type { PackPreview } from "@tulipfarm/schema/pack-contract";
+export { PACK_CATEGORIES } from "@tulipfarm/schema/pack-contract";
 export type PackSummary = PackCatalogEntry;
 
 export type PackSource = { url: string; yaml?: never } | { yaml: string; url?: never };

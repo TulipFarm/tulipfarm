@@ -102,6 +102,7 @@ export {
   MARKETPLACE_SKILL_TOOLS,
   type MarketplaceSkillToolContext,
 } from "./marketplace-skills";
+export { prepareMcpToolCall } from "./mcp-preparation";
 export type {
   AgentResolver,
   ChannelDeliveryReader,

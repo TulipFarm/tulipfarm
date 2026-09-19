@@ -13,11 +13,13 @@ export function McpCapabilities({
   isAdmin,
   onChanged,
   context,
+  onReviewed,
 }: {
   definition: McpIntegrationDefinition;
   isAdmin: boolean;
   onChanged: () => void;
   context?: McpRequestContext;
+  onReviewed?: (hasAccess: boolean) => void;
 }) {
   const [discovered, setDiscovered] = useState<McpCapabilityReview>();
   const [selected, setSelected] = useState<McpCapabilityReview>(definition.reviewed);
@@ -25,6 +27,9 @@ export function McpCapabilities({
   const [error, setError] = useState<unknown>();
   const [notice, setNotice] = useState("");
   const capabilities = discovered ?? definition.reviewed;
+  const availableKinds = (["tools", "resources", "prompts"] as const).filter(
+    (kind) => capabilities[kind].length > 0
+  );
 
   async function discover() {
     setPending(true);
@@ -52,7 +57,9 @@ export function McpCapabilities({
         ),
       });
       setNotice(
-        "Discovery complete. New and changed capabilities remain unapproved until you save."
+        next.tools.length + next.resources.length + next.prompts.length > 0
+          ? "Discovery complete. Nothing new is approved yet. Select what agents may use, then save your review."
+          : ""
       );
     } catch (cause) {
       setError(cause);
@@ -64,23 +71,35 @@ export function McpCapabilities({
   return (
     <div className="space-y-3">
       <p className="text-xs text-muted-foreground">
-        Server descriptions and read-only hints do not grant authority. New capabilities stay
-        disabled until an admin reviews them.
+        Discover access, then select what agents may use. Nothing new is approved until an admin
+        saves the review.
       </p>
       <McpError error={error} />
       {isAdmin && (
-        <Button variant="outline" disabled={pending} onClick={() => void discover()}>
-          {pending ? "Working..." : "Discover capabilities"}
+        <Button
+          variant={discovered ? "outline" : "default"}
+          disabled={pending}
+          onClick={() => void discover()}
+        >
+          {pending ? "Working..." : "Discover available access"}
         </Button>
       )}
-      {(["tools", "resources", "prompts"] as const).map((kind) => (
+      {availableKinds.length === 0 && (
+        <p role={discovered ? "status" : undefined} className="text-xs text-muted-foreground">
+          {discovered
+            ? "No Tools, resources or prompts were found for this account. Check its provider permissions if you expected access."
+            : "No access has been approved yet."}
+        </p>
+      )}
+      {availableKinds.map((kind) => (
         <section key={kind} className="space-y-2">
-          <h4 className="text-sm font-medium capitalize">{kind}</h4>
-          {capabilities[kind].length === 0 && (
-            <p className="text-xs text-muted-foreground">
-              {discovered ? "None reported by this server." : "None approved."}
-            </p>
-          )}
+          <h4 className="text-sm font-medium">
+            {kind === "tools"
+              ? "Tools — actions agents can take"
+              : kind === "resources"
+                ? "Resources — content agents can read"
+                : "Prompts — instructions agents can retrieve"}
+          </h4>
           <ul className="divide-y divide-border">
             {capabilities[kind].map((item) => {
               const key = "uri" in item ? item.uri : item.name;
@@ -140,26 +159,42 @@ export function McpCapabilities({
                     ) : null}
                     <span className="min-w-0 break-words">
                       <span className="font-medium">{item.name}</span>
-                      {"uri" in item && (
-                        <span className="block text-xs text-muted-foreground">{item.uri}</span>
-                      )}
+                    </span>
+                    <span className="ml-auto shrink-0 text-xs text-muted-foreground">
+                      {discovered
+                        ? checked
+                          ? "Selected for approval"
+                          : "Not selected"
+                        : "Approved"}
                     </span>
                   </div>
                   {"inputSchema" in item && (
-                    <details className="text-xs text-muted-foreground">
-                      <summary className="cursor-pointer">Tool inputs and policy</summary>
-                      <p>{item.description}</p>
-                      <p>
+                    <div className="space-y-2 text-xs text-muted-foreground">
+                      {item.description && <p>{item.description}</p>}
+                      <p className="font-medium">
                         {(toolPolicy?.mutating ?? item.mutating)
                           ? "May change external data."
-                          : "Reviewed as read-only."}{" "}
+                          : "Read-only."}{" "}
                         {(toolPolicy?.requiresApproval ?? item.requiresApproval)
-                          ? "Approval required."
-                          : "No additional approval."}
+                          ? "Requires action approval."
+                          : "No additional action approval."}
                       </p>
-                      <pre className="mt-2 max-h-48 overflow-auto rounded-md bg-muted p-2">
-                        {JSON.stringify(item.inputSchema, null, 2)}
-                      </pre>
+                      <details>
+                        <summary className="cursor-pointer">
+                          Technical details · Tool inputs
+                        </summary>
+                        <pre className="mt-2 max-h-48 overflow-auto rounded-md bg-muted p-2">
+                          {JSON.stringify(item.inputSchema, null, 2)}
+                        </pre>
+                      </details>
+                    </div>
+                  )}
+                  {"uri" in item && (
+                    <details className="text-xs text-muted-foreground">
+                      <summary className="cursor-pointer">
+                        Technical details · Resource address
+                      </summary>
+                      <p className="break-all">{item.uri}</p>
                     </details>
                   )}
                   {"inputSchema" in item && isAdmin && discovered && checked && (
@@ -224,8 +259,9 @@ export function McpCapabilities({
             try {
               await reviewMcpCapabilities(definition.server.id, selected, context);
               setDiscovered(undefined);
-              setNotice("Capability review saved.");
+              setNotice("Access review saved. Only your approved selection is available.");
               onChanged();
+              onReviewed?.(Object.values(selected).some((items) => items.length > 0));
             } catch (cause) {
               setError(cause);
             } finally {
@@ -233,7 +269,7 @@ export function McpCapabilities({
             }
           }}
         >
-          Save approved capabilities
+          Save approved access
         </Button>
       )}
       {notice && (

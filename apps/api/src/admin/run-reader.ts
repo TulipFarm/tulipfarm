@@ -1,3 +1,4 @@
+import { MCP_TOOL_ERROR_REASONS } from "@tulipfarm/integrations";
 import type {
   BudgetStore,
   PersistedBudget,
@@ -10,6 +11,12 @@ import { DISPATCH_HANDLER_ERROR_REF, DISPATCH_LEASE_EXPIRED_REF } from "@tulipfa
 import type { EffectStore } from "@tulipfarm/tool-broker";
 import type { RunCosts } from "../observability/repo";
 import type { RunBudgetReadModel, RunReadModel, RunStateReadModel } from "./routes";
+import { ADMIN_EFFECT_ERROR_CODES } from "./schemas";
+
+const safeEffectErrorCodes: ReadonlySet<string> = new Set(ADMIN_EFFECT_ERROR_CODES);
+const effectErrorReasons: ReadonlyMap<string, string> = new Map(
+  Object.entries(MCP_TOOL_ERROR_REASONS)
+);
 
 /** Zero for a list page, where per-Run cost is not worth one query per row. */
 const NO_COSTS: RunCosts = { amountUsd: 0, modelTokens: 0 };
@@ -109,7 +116,7 @@ export function createRunReader(
    * costs then read zero, which is what the inspector reported unconditionally before.
    */
   costs?: Pick<ObsCostReader, "costsForRun">,
-  effects?: Pick<EffectStore, "list">
+  effects?: Pick<EffectStore, "listByRun" | "listAttempts">
 ): RunReader {
   return {
     async list(businessId, options) {
@@ -133,19 +140,43 @@ export function createRunReader(
         runs.countStateAttempts(businessId, runId),
         runs.listLineage(businessId, runId),
         costs?.costsForRun(runId) ?? Promise.resolve(NO_COSTS),
-        effects?.list(businessId) ?? Promise.resolve([]),
+        effects?.listByRun(businessId, runId) ?? Promise.resolve([]),
       ]);
+      const effectEvidence = await Promise.all(
+        storedEffects
+          .filter((effect) => effect.businessId === businessId && effect.runId === runId)
+          .map(async (effect) => {
+            const latest = (await effects?.listAttempts(businessId, effect.effectId))?.at(-1);
+            const reason = latest?.errorCode && effectErrorReasons.get(latest.errorCode);
+            return {
+              effectId: effect.effectId,
+              stateId: effect.stateId,
+              state: effect.state,
+              updatedAt: effect.updatedAt,
+              ...(latest === undefined
+                ? {}
+                : {
+                    latestAttempt: {
+                      state: latest.state,
+                      ...(reason ? { reason } : {}),
+                      ...(latest.errorCode === undefined
+                        ? {}
+                        : {
+                            errorCode: safeEffectErrorCodes.has(latest.errorCode)
+                              ? latest.errorCode
+                              : "unclassified_error",
+                          }),
+                      startedAt: latest.startedAt,
+                      ...(latest.finishedAt === undefined ? {} : { finishedAt: latest.finishedAt }),
+                    },
+                  }),
+            };
+          })
+      );
       return runReadModel(
         run,
         states.map((state) => stateReadModel(state, attempts.get(state.key) ?? 0)),
-        storedEffects
-          .filter((effect) => effect.runId === runId)
-          .map((effect) => ({
-            effectId: effect.effectId,
-            stateId: effect.stateId,
-            state: effect.state,
-            updatedAt: effect.updatedAt,
-          })),
+        effectEvidence,
         lineage.map(lineageReadModel),
         spend
       );

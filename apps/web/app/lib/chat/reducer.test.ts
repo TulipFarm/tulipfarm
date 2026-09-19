@@ -137,6 +137,26 @@ describe("terminal Tool closure", () => {
     });
   }
 
+  test.each([
+    { result: { status: "ok" }, meta: undefined, outcome: "ok" },
+    { result: { status: "error" }, meta: undefined, outcome: "error" },
+    { result: {}, meta: { errorCode: "write_failed" }, outcome: "error" },
+    { result: { status: "unknown" }, meta: undefined, outcome: undefined },
+    { result: null, meta: undefined, outcome: undefined },
+  ])("records only evidenced Tool outcomes: $result, $meta", ({ result, meta, outcome }) => {
+    const state = chatReducer(runningToolState(), {
+      type: "tool-result",
+      data: { toolCallId: "call-1", toolName: "record_create", result, meta },
+    });
+    const part = state.messages[0]?.parts[0];
+    expect(part).toMatchObject({ kind: "tool", status: "done", result });
+    if (outcome === undefined) {
+      expect(part).not.toHaveProperty("outcome");
+    } else {
+      expect(part).toMatchObject({ outcome });
+    }
+  });
+
   test("marks an outcome-less Tool interrupted when the server closes the Turn", () => {
     const state = chatReducer(runningToolState(), {
       type: "finish",

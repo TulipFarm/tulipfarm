@@ -355,6 +355,7 @@ export async function buildApp(opts: AppOptions = {}) {
         requireAuthorization,
         authorizationCheck,
         {
+          integrationMetadata: opts.mcpAccounts?.secretMetadata,
           onSecretDeleted:
             opts.soulLoader && opts.soulWriter && opts.llmService
               ? makeLlmCascadeOnSecretDelete(

@@ -7,12 +7,30 @@ import { IntegrationChoice } from "./integration-choice";
 import { McpError, McpField } from "./mcp-form";
 import { McpTransportFields, transportDraft, transportInput } from "./mcp-transport-fields";
 
+function availableId(name: string, existingIds: readonly string[]): string {
+  let base = name
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-|-$/g, "");
+  if (!/^[a-z]/.test(base)) base = `integration-${base}`;
+  if (base === "github" || base === "slack") base = `${base}-mcp`;
+  base = base.slice(0, 60).replace(/-$/, "");
+  let candidate = base;
+  let suffix = 2;
+  while (existingIds.includes(candidate)) {
+    const ending = `-${suffix++}`;
+    candidate = `${base.slice(0, 64 - ending.length)}${ending}`;
+  }
+  return candidate;
+}
+
 export function McpServerForm({
   initial,
   suggestion,
   onSaved,
   onCancel,
   existingIds = [],
+  supportedAuthentication,
 }: {
   initial?: McpIntegrationDefinition;
   suggestion?: {
@@ -22,13 +40,17 @@ export function McpServerForm({
     authentication?: McpAccountCreate["authentication"];
     environment?: readonly string[];
     sharedAllowed?: boolean;
+    authenticationMethods?: readonly McpAccountCreate["authentication"][];
   };
   onSaved: (server: McpIntegrationDefinition) => void;
   onCancel?: () => void;
   existingIds?: readonly string[];
+  supportedAuthentication?: readonly McpAccountCreate["authentication"][];
 }) {
-  const [id, setId] = useState(initial?.server.id ?? suggestion?.id ?? "");
+  const [idOverride, setId] = useState(initial?.server.id ?? suggestion?.id);
   const [label, setLabel] = useState(initial?.server.label ?? suggestion?.label ?? "");
+  const id = idOverride ?? availableId(label, existingIds);
+  const [advanced, setAdvanced] = useState(false);
   const [transport, setTransport] = useState(
     transportDraft(initial?.server.transport ?? suggestion?.transport)
   );
@@ -52,6 +74,20 @@ export function McpServerForm({
   }
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<unknown>();
+  const methods =
+    supportedAuthentication ??
+    suggestion?.authenticationMethods ??
+    (suggestion?.authentication ? [suggestion.authentication] : undefined);
+  const nameField = (
+    <McpField label="Name">
+      <Input
+        required
+        maxLength={256}
+        value={label}
+        onChange={(event) => setLabel(event.target.value)}
+      />
+    </McpField>
+  );
   return (
     <form
       className="max-w-xl space-y-4"
@@ -60,14 +96,25 @@ export function McpServerForm({
         setError(undefined);
         setPending(true);
         try {
+          if (methods && !methods.includes(authentication)) {
+            throw new Error("Choose a sign-in method supported by this provider.");
+          }
           if (id === "slack" || id === "github") {
+            setAdvanced(true);
             throw new Error(
-              "Slack and GitHub are reserved native channel IDs. Use slack-mcp or github-mcp for an MCP server."
+              "This ID is reserved for channel setup. Choose another Integration ID in Advanced settings."
+            );
+          }
+          if (!/^[a-z][a-z0-9-]{0,63}$/.test(id)) {
+            setAdvanced(true);
+            throw new Error(
+              "Use an Integration ID with lowercase letters, numbers and hyphens, starting with a letter."
             );
           }
           if (!initial && existingIds.includes(id)) {
+            setAdvanced(true);
             throw new Error(
-              "An Integration already uses this ID. Choose a different ID or edit the existing server."
+              "An integration already uses this ID. Choose another in Advanced settings, or manage the existing integration."
             );
           }
           const environmentNames = [
@@ -79,7 +126,10 @@ export function McpServerForm({
             ),
           ];
           if (transport.type === "stdio" && authentication === "oauth") {
-            throw new Error("Browser sign-in is only supported for remote MCP servers.");
+            setAdvanced(true);
+            throw new Error(
+              "Provider sign-in is only available for online integrations. Choose an access token for a self-hosted integration."
+            );
           }
           if (
             transport.type === "stdio" &&
@@ -88,8 +138,9 @@ export function McpServerForm({
               environmentNames.length > 32 ||
               environmentNames.some((name) => !/^[A-Za-z][A-Za-z0-9_]{0,63}$/.test(name)))
           ) {
+            setAdvanced(true);
             throw new Error(
-              "Enter up to 32 credential environment names, one name per line, starting with a letter. Do not enter secret values here."
+              "Check the required secret names in Advanced settings. Enter up to 32 names, one per line, starting with a letter. Add their values when you connect an account."
             );
           }
           const server = await configureMcpIntegration(id, {
@@ -117,99 +168,140 @@ export function McpServerForm({
     >
       <McpError error={error} />
       <fieldset disabled={pending} className="space-y-4">
-        <McpField
-          label="Integration ID"
-          hint="Lowercase letters, digits and hyphens. github and slack are reserved for native channels; use github-mcp or slack-mcp for MCP. This ID stays in links and Routine bindings."
-        >
-          <Input
-            required
-            pattern={"[a-z][a-z0-9\\-]{0,63}"}
-            maxLength={64}
-            value={id}
-            disabled={!!initial}
-            onChange={(event) => setId(event.target.value)}
-          />
-        </McpField>
-        <McpField label="Display name">
-          <Input
-            required
-            maxLength={256}
-            value={label}
-            onChange={(event) => setLabel(event.target.value)}
-          />
-        </McpField>
-        <McpTransportFields value={transport} onChange={setTransport} />
-        <McpField label="Account authentication">
+        {!initial && (
+          <p className="text-sm text-muted-foreground">
+            {suggestion
+              ? `Add ${suggestion.label} to TulipFarm.`
+              : "Add an integration from your provider."}{" "}
+            Next, you’ll connect an account and choose what agents can do. Nothing is enabled yet.
+          </p>
+        )}
+        {(!suggestion || initial) && nameField}
+        {!initial && !suggestion && transport.type === "streamable-http" && (
+          <McpField
+            label="Integration URL"
+            hint="Paste the MCP address supplied by your provider, not its website address. Never include an access token."
+          >
+            <Input
+              type="url"
+              required
+              value={transport.url}
+              placeholder="https://provider.example.com/mcp"
+              onChange={(event) => setTransport({ ...transport, url: event.target.value })}
+            />
+          </McpField>
+        )}
+        <McpField label="Sign-in method">
           <IntegrationChoice
-            label="Account authentication"
+            label="Sign-in method"
             value={authentication}
             options={[
-              { value: "token", label: "Token" },
+              { value: "token", label: "Access token" },
               ...(transport.type === "streamable-http"
-                ? [{ value: "oauth", label: "Browser sign-in (OAuth)" }]
+                ? [{ value: "oauth", label: "Sign in with provider" }]
                 : []),
-              { value: "none", label: "No credentials" },
-            ]}
+              { value: "none", label: "No sign-in" },
+            ].filter(({ value }) => !methods || methods.some((method) => method === value))}
             onChange={(value) => {
               if (value === "token" || value === "oauth" || value === "none")
                 setAuthentication(value);
             }}
           />
         </McpField>
-        {authentication === "token" && transport.type === "streamable-http" && (
+        {authentication === "token" && (
           <p className="text-xs text-muted-foreground">
-            Each account supplies its own access token. Remote requests use Bearer authentication.
-            Token values are collected under Accounts, never in this server definition.
+            An access token is a secret key from your provider. You’ll enter it in the next step,
+            when you connect your account.
           </p>
         )}
-        {authentication === "token" && transport.type === "stdio" && (
-          <McpField
-            label="Credential environment names"
-            hint="Names only, one per line, such as GITHUB_PERSONAL_ACCESS_TOKEN. Each account supplies its own encrypted values."
-          >
-            <textarea
-              required
-              className="min-h-20 rounded-md border border-input bg-background p-2 text-sm"
-              value={environment}
-              onChange={(event) => setEnvironment(event.target.value)}
+        {authentication === "oauth" && (
+          <p className="text-xs text-muted-foreground">
+            You’ll sign in on the provider’s website. Some providers first require your admin to
+            register an app.
+          </p>
+        )}
+        {transport.type === "stdio" && (
+          <p className="text-xs text-muted-foreground">
+            This integration runs on your infrastructure. Ask the person who runs TulipFarm to
+            prepare its isolated runtime before connecting.
+          </p>
+        )}
+        <details
+          open={advanced}
+          onToggle={(event) => setAdvanced(event.currentTarget.open)}
+          className="border-t border-border pt-3"
+        >
+          <summary className="w-fit cursor-pointer text-sm font-medium">Advanced settings</summary>
+          <div className="mt-4 space-y-4">
+            {suggestion && !initial && nameField}
+            <McpField
+              label="Integration ID"
+              hint="Used in links and automations. We choose this for you; it cannot be changed after setup."
+            >
+              <Input
+                maxLength={64}
+                value={id}
+                disabled={!!initial}
+                onChange={(event) => setId(event.target.value)}
+              />
+            </McpField>
+            <McpTransportFields
+              value={transport}
+              onChange={setTransport}
+              showUrl={!!initial || !!suggestion}
             />
-          </McpField>
-        )}
-        {authentication === "oauth" && transport.type === "stdio" && (
-          <p role="alert" className="text-sm text-destructive">
-            Choose token or no credentials for an isolated local server.
-          </p>
-        )}
-        <label className="flex items-center gap-2 text-sm">
-          <input
-            type="checkbox"
-            checked={!slackServer && sharedAllowed}
-            disabled={slackServer}
-            onChange={(event) => setSharedAllowed(event.target.checked)}
-          />
-          Permit admin-managed shared accounts
-        </label>
-        <p className="text-xs text-muted-foreground">
-          {slackServer
-            ? "Slack MCP requires personal user authorization. Shared accounts are not allowed."
-            : "Enable only when the provider permits shared credentials. Shared accounts still require explicit user, Team or Routine grants."}
-        </p>
-        <label className="flex items-center gap-2 text-sm">
-          <input
-            type="checkbox"
-            checked={enabled}
-            onChange={(event) => setEnabled(event.target.checked)}
-          />
-          Enable this MCP server
-        </label>
-        <p className="text-xs text-muted-foreground">
-          Enabling a server does not approve its capabilities or grant account access. Discover and
-          explicitly approve Tools, resources and prompts. Changing server settings clears its
-          capability review.
-        </p>
+            {authentication === "token" && transport.type === "stdio" && (
+              <McpField
+                label="Required secret names"
+                hint="Names only, one per line, such as GITHUB_PERSONAL_ACCESS_TOKEN. Each account supplies its own encrypted values."
+              >
+                <textarea
+                  className="min-h-20 rounded-md border border-input bg-background p-2 text-sm"
+                  value={environment}
+                  onChange={(event) => setEnvironment(event.target.value)}
+                />
+              </McpField>
+            )}
+            {authentication === "oauth" && transport.type === "stdio" && (
+              <p role="alert" className="text-sm text-destructive">
+                Choose an access token or no sign-in for a self-hosted integration.
+              </p>
+            )}
+            <label className="flex items-center gap-2 text-sm">
+              <input
+                type="checkbox"
+                checked={!slackServer && sharedAllowed}
+                disabled={slackServer}
+                onChange={(event) => setSharedAllowed(event.target.checked)}
+              />
+              Allow shared accounts
+            </label>
+            <p className="text-xs text-muted-foreground">
+              {slackServer
+                ? "Slack requires each person to sign in with their own account. Shared accounts are not allowed."
+                : "Only allow this if your provider permits shared credentials. An admin must still choose who can use each shared account, including scheduled Routines."}
+            </p>
+            {initial && (
+              <>
+                <label className="flex items-center gap-2 text-sm">
+                  <input
+                    type="checkbox"
+                    checked={enabled}
+                    onChange={(event) => setEnabled(event.target.checked)}
+                  />
+                  Integration enabled
+                </label>
+                <p className="text-xs text-muted-foreground">
+                  Enabling does not grant account access or approve Tools. Review access separately.
+                  Changing integration settings clears the previous access review.
+                </p>
+              </>
+            )}
+          </div>
+        </details>
         <div className="flex gap-2">
           <Button type="submit">
-            {pending ? "Saving..." : initial ? "Save server" : "Add server"}
+            {pending ? "Saving..." : initial ? "Save settings" : "Continue"}
           </Button>
           {onCancel && (
             <Button type="button" variant="outline" onClick={onCancel}>

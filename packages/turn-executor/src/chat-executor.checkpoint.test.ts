@@ -14,7 +14,7 @@ import { describe, expect, it } from "vitest";
 import { type ChatExecutorHost, createChatExecutor } from "./chat-executor";
 import type { TurnCompletionRecord, TurnCompletionStore } from "./conversation-turn";
 import type { ResolvedTurnContext, TurnContextPort } from "./driver";
-import type { RunEventAppendPort } from "./run-events";
+import type { AppendedRunEvent, RunEventAppendPort, TurnAttemptHistory } from "./run-events";
 
 // This proves the wiring, not the loop: an approval park re-enters the same Run through a *second*
 // executor call, and the advertised one-Tool ceiling must still hold. It holds only because the
@@ -211,5 +211,175 @@ describe("createChatExecutor durable loop counters", () => {
 
     expect(checkpoints.generations.length).toBeGreaterThan(0);
     expect(new Set(checkpoints.generations)).toEqual(new Set([RUN.leaseGeneration]));
+  });
+});
+
+describe("createChatExecutor sequential approvals", () => {
+  it("publishes each approval once and preserves both results across executor recovery", async () => {
+    const checkpoints = new InMemoryLoopCheckpointStore();
+    const rows = new Map<string, AppendedRunEvent>();
+    const approved = new Set<string>();
+    const providerCalls: string[] = [];
+    const modelRequests: ModelInvocationRequest[] = [];
+    const waits: string[] = [];
+    let history: TurnAttemptHistory | undefined;
+    let state = CLAIMED_STATE;
+    let completion: TurnCompletionRecord | undefined;
+    const tools = ["github.get_me", "github.search_repositories"].map((name) => ({
+      name,
+      inputSchema: { type: "object" },
+      mutating: false,
+      tier: "standard" as const,
+    }));
+    const proposals: ModelInvocationResult[] = tools.map((tool, index) => ({
+      requestId: "req",
+      output: {
+        kind: "tool_calls",
+        calls: [{ callId: `call-${index + 1}`, name: tool.name, arguments: {} }],
+      },
+      usage: { inputTokens: 5, outputTokens: 5 },
+    }));
+    const host: ChatExecutorHost & TurnCompletionStore & ToolDispatchPort = {
+      findTurn: async () => ({
+        turnId: "turn-1",
+        conversationId: "conv-1",
+        attempt: 1,
+        ...(history === undefined ? {} : { history }),
+      }),
+      findCompletion: async () => completion,
+      appendAssistantMessage: async (input) => {
+        const metadata = input.metadata;
+        if (metadata === undefined) throw new Error("attempt history missing");
+        history = {
+          text: input.content,
+          toolCalls: metadata.toolCalls ?? [],
+          surfaces: metadata.surfaces ?? [],
+          events: metadata.events,
+          ...metadata.turnAttempt,
+        };
+        return { status: "recorded", messageId: "message-1" };
+      },
+      completeTurn: async (input) => {
+        completion = {
+          turnId: input.turnId,
+          attempt: input.attempt,
+          status: input.status,
+          messageId: input.messageId,
+        };
+        return { status: "recorded" };
+      },
+      dispatch: async (input) => {
+        if (!approved.has(input.callId)) {
+          return {
+            status: "awaiting_approval",
+            callId: input.callId,
+            approvalId: `approval-${input.callId}`,
+          };
+        }
+        providerCalls.push(input.callId);
+        return {
+          status: "succeeded",
+          callId: input.callId,
+          output: { receipt: `saved-${input.callId}` },
+        };
+      },
+    };
+    const events: RunEventAppendPort = {
+      append: async (input) => {
+        const existing = rows.get(input.idempotencyKey);
+        if (existing !== undefined) return existing;
+        const row = {
+          sequence: rows.size + 1,
+          eventType: input.eventType,
+          payload: input.payload,
+        };
+        rows.set(input.idempotencyKey, row);
+        return row;
+      },
+    };
+    const pass = () =>
+      createChatExecutor({
+        host,
+        context: {
+          resolve: async () => ({
+            ...CONTEXT,
+            tools,
+            limits: { ...CONTEXT.limits, maxToolCalls: 2 },
+          }),
+        },
+        runs: { find: async () => RUN, findState: async () => state },
+        events,
+        budgets: {
+          open: async () => {},
+          consume: async () => ({
+            outcome: "unbounded",
+            consumed: 0,
+            limit: null,
+            exhaustionPolicy: null,
+          }),
+        },
+        transitions: { transition: async () => {} },
+        waits: {
+          register: async (input) => {
+            waits.push(input.approvalId);
+            return { waitId: `wait-${input.approvalId}` };
+          },
+        },
+        checkpoints,
+        model: {
+          invoke: async (request) => {
+            const result = proposals[modelRequests.length] ?? text("Both reads completed.");
+            modelRequests.push(request);
+            return { ...result, requestId: request.requestId };
+          },
+        },
+        log: { warn: () => {} },
+      })(RUN);
+    const approvalEvents = () =>
+      [...rows.values()].filter((event) => event.eventType === "approval.requested");
+
+    await expect(pass()).resolves.toEqual({ status: "waiting" });
+    expect(approvalEvents()).toHaveLength(1);
+    state = WAITING_STATE;
+    await expect(pass()).resolves.toEqual({ status: "waiting" });
+    expect(approvalEvents()).toHaveLength(1);
+    expect(providerCalls).toEqual([]);
+    expect(modelRequests).toHaveLength(1);
+
+    approved.add("call-1");
+    await expect(pass()).resolves.toEqual({ status: "waiting" });
+    expect(providerCalls).toEqual(["call-1"]);
+    expect(history?.wait).toMatchObject({
+      kind: "approval",
+      approvalId: "approval-call-2",
+      callId: "call-2",
+    });
+    expect(history?.toolCalls).toMatchObject([
+      { callId: "call-1", outcome: "ok" },
+      { callId: "call-2" },
+    ]);
+
+    approved.add("call-2");
+    await expect(pass()).resolves.toEqual({ status: "succeeded" });
+    expect(providerCalls).toEqual(["call-1", "call-2"]);
+    expect(modelRequests).toHaveLength(3);
+    expect(JSON.stringify(modelRequests.at(-1)?.messages)).toContain("saved-call-1");
+    expect(JSON.stringify(modelRequests.at(-1)?.messages)).toContain("saved-call-2");
+    expect(history?.toolCalls).toMatchObject([
+      { callId: "call-1", outcome: "ok" },
+      { callId: "call-2", outcome: "ok" },
+    ]);
+    expect(history?.complete).toBe(true);
+    expect(completion?.status).toBe("succeeded");
+    expect(waits).toEqual(["approval-call-1", "approval-call-1", "approval-call-2"]);
+    expect(approvalEvents().map((event) => event.payload?.intentId)).toEqual([
+      "approval-call-1",
+      "approval-call-2",
+    ]);
+    expect(
+      history?.events
+        ?.filter((event) => event.eventType === "approval.requested")
+        .map((event) => event.payload.intentId)
+    ).toEqual(["approval-call-1", "approval-call-2"]);
   });
 });

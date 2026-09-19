@@ -57,11 +57,19 @@ function mount(chatId: string | undefined = "chat-1") {
 test("shows the exact persisted shared identity without asking for consent again", async () => {
   vi.mocked(getMcpChatAccount).mockResolvedValue(account);
   mount();
-  expect(
-    await screen.findByText(/Support: Support shared · shared · shared-exact-id/)
-  ).toBeInTheDocument();
+  expect(await screen.findByText(/Support: Support shared · Shared/)).toBeInTheDocument();
   expect(selectMcpChatAccount).not.toHaveBeenCalled();
   expect(screen.queryByRole("button", { name: "Confirm shared account" })).not.toBeInTheDocument();
+  expect(screen.getByText(/No access allowed/)).toBeVisible();
+  await userEvent.click(screen.getByText("Integration accounts"));
+  expect(screen.getByRole("combobox", { name: "Support account" })).toHaveValue(
+    "Support shared · Shared"
+  );
+  expect(screen.getByRole("link", { name: "Manage integration access" })).toHaveAttribute(
+    "href",
+    "/integrations/support?account=shared-exact-id"
+  );
+  expect(screen.queryByText("Review capabilities with this Chat account")).not.toBeInTheDocument();
 });
 
 test("failed personal access never silently falls back to a shared account", async () => {

@@ -38,6 +38,7 @@ Only its own Cases need updating when their observable behaviour moves.
 | `src/eval-soul.ts` | `loadEvalSoul` — copies the fixture to a throwaway git repo and reads it with the real `SoulLoader`; `soulContext` maps an Agent into the assembler. |
 | `src/guardrails.ts` | Runs the Eval Soul's policy through production `GuardrailsService` and `TurnGuardrails`; `safetyHostingAuthority` selects offline platform minimums, never runtime identity trust. |
 | `src/l3/` | Persisted Chat and Routine tiers on in-process PGlite; MCP uses the production domain, account authority, Tool host, approval wait, Soul writer, publisher, and verified active-bundle loader. |
+| `src/l3/mcp.ts` | MCP fixtures use `tool-host`'s production `prepareMcpToolCall`; never reconstruct approval intents in eval. |
 | `src/l3/mcp-accounts.ts`, `src/l3/mcp-provider.ts` | Seed account state through the real repository; replace only the external MCP provider, never account policy or Soul writes. |
 | `src/l3/native-routine.ts` | Native Routine admission through the shared production service path, real invocation gateway, account authority, verified Soul bundle, and transactional inbox/Run/Artifact stores. |
 | `src/l3/tier.ts` | `integrationReply` Cases apply production reply settlement after a real completed Chat Turn; provider transports remain API test scope. |
@@ -90,6 +91,8 @@ before changing how a Case is scored, run or compared.** These are the ones that
   MCP reads must use `mcpIntegrationsFromBundle`, never authored-loader state.
 - `mcp_provider_call_count` counts actual external `tools/call` requests, not dispatcher attempts
   or model claims. Missing observations fail even when the expected count is zero.
+- `run_event_emitted.count` pins an exact positive event count; repeated approvals must emit
+  distinct durable events, not merely complete two provider calls.
 - `nativeRoutine` starts from a persisted, claimed native inbox event, not an HTTP webhook.
   `native_admission_equals` observes admission rows and real account resolution, never model text.
   Its lease fault changes the inbox fence after Run insertion to prove the shared transaction rolls back.

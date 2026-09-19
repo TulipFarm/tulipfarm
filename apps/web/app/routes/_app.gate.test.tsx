@@ -86,7 +86,7 @@ test("rethrows a non-401 session failure instead of masking it as a login bounce
 });
 
 test("renders an API recovery state instead of Remix's raw Application Error", () => {
-  vi.mocked(remix.useRouteError).mockReturnValue(new TypeError("Failed to fetch"));
+  vi.mocked(remix.useRouteError).mockReturnValue(new ApiError(0, "Failed to fetch"));
 
   render(<ErrorBoundary />);
 

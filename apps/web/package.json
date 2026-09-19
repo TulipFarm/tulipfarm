@@ -8,6 +8,8 @@
     "dev": "node scripts/build-surface-sandbox.mjs && remix vite:dev",
     "lint": "biome check --no-errors-on-unmatched .",
     "test": "vitest run",
+    "test:browser-imports": "node scripts/browser-imports.mjs",
+    "test:browser-integration-setup": "node scripts/browser-integration-setup.mjs",
     "test:browser:documents": "playwright test --config scripts/browser/playwright.config.ts",
     "typecheck": "tsc --noEmit"
   },

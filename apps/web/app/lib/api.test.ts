@@ -1,6 +1,11 @@
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import {
   ApiError,
+  apiCommand,
+  apiDelete,
+  apiGet,
+  apiSend,
+  apiWrite,
   CATALOG_TTL_MS,
   createRecord,
   createResourceType,
@@ -9,6 +14,7 @@ import {
   listRecords,
   listResourceTypes,
   login,
+  logout,
   updateRecord,
 } from "~/lib/api";
 
@@ -34,6 +40,41 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.unstubAllGlobals();
+});
+
+test.each([
+  () => apiGet("/api/v1/example"),
+  () => apiWrite("POST", "/api/v1/example", {}),
+  () => apiCommand("/api/v1/example", {}, "request-id"),
+  () => apiSend("PUT", "/api/v1/example", {}),
+  () => apiDelete("/api/v1/example"),
+  () => login("admin@tulipfarm.dev", "password"),
+  () => logout(),
+])("marks a rejected API fetch as a transport error", async (request) => {
+  vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new TypeError("Failed to fetch")));
+
+  await expect(request()).rejects.toMatchObject({
+    name: "ApiError",
+    status: 0,
+    message: "Failed to fetch",
+  });
+});
+
+test("does not turn response parsing errors into transport errors", async () => {
+  const error = new SyntaxError("Invalid JSON");
+  vi.stubGlobal(
+    "fetch",
+    vi.fn().mockResolvedValue({ ok: true, json: () => Promise.reject(error) })
+  );
+
+  await expect(apiGet("/api/v1/example")).rejects.toBe(error);
+});
+
+test("does not turn an aborted request into an API outage", async () => {
+  const error = new DOMException("Cancelled", "AbortError");
+  vi.stubGlobal("fetch", vi.fn().mockRejectedValue(error));
+
+  await expect(apiGet("/api/v1/example")).rejects.toBe(error);
 });
 
 test("attaches credentials:include and NO Authorization header when no token is set", async () => {

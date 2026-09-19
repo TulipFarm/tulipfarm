@@ -9,9 +9,10 @@ export function mcpError(error: unknown): string {
       selection_required: "Choose an exact account in a private Chat before continuing.",
       consent_required: "Confirm the shared account in a private Chat before continuing.",
       reconnect_required: "Reconnect this exact account before continuing.",
-      review_required: "An admin must discover and approve this capability before use.",
-      disabled: "This MCP server is disabled. Ask an admin to enable it.",
-      unavailable: "This server cannot run on the current host. Check its setup and runtime.",
+      review_required: "An admin needs to review and allow this feature before you can use it.",
+      disabled: "This integration is disabled. Ask an admin to enable it.",
+      unavailable:
+        "This integration cannot run here yet. Ask your admin to check its hosting setup.",
       native_installation_not_active:
         "Reconnect this provider workspace or GitHub App installation.",
       native_destination_invalid:
@@ -35,15 +36,14 @@ export function mcpError(error: unknown): string {
       knowledge_approval_required: "Knowledge sync needs a separate current approval.",
       account_binding_changed: "This account changed. Review and select it again.",
       definition_changed:
-        "The server configuration changed. Create a new account for its current settings; the old account's credentials cannot be reused.",
+        "The integration settings changed. Add a new account for the new settings; the old account's credentials cannot be reused.",
       principal_inactive: "Your account is inactive. Ask an administrator for access.",
       invalid_credentials: "Provide all required credential fields.",
       unsupported_account_mode:
-        "This server does not support shared accounts. Connect a personal account.",
-      authentication_mismatch:
-        "This authentication method does not match the server configuration.",
+        "This integration does not support shared accounts. Connect your personal account.",
+      authentication_mismatch: "This sign-in method does not match the integration settings.",
       probe_failed:
-        "The server could not verify this account. Check its credentials and connection.",
+        "We could not verify this account with the provider. Check its sign-in details and try again.",
       oauth_required: "Use browser sign-in to connect this account.",
       oauth_failed: "Provider authorization did not complete. Start browser sign-in again.",
       default_requires_active_account: "Connect this account before making it the default.",

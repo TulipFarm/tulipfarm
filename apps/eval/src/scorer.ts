@@ -311,6 +311,13 @@ function evaluate(a: Expectation, obs: Observation): { passed: boolean; detail: 
     case "run_event_emitted": {
       const persisted = obs.persisted;
       if (persisted === undefined) return notPersisted(a.kind);
+      if (a.count !== undefined) {
+        const count = persisted.events.filter((eventType) => eventType === a.eventType).length;
+        return {
+          passed: count === a.count,
+          detail: `${a.eventType} was appended ${count} times, expected ${a.count}`,
+        };
+      }
       return persisted.events.includes(a.eventType)
         ? { passed: true, detail: `${a.eventType} was appended` }
         : {

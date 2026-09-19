@@ -42,7 +42,11 @@ export function createSoulMcpDefinitionStore(options: SoulMcpDefinitionStoreOpti
     return { kind: "Integration", slug: id, companion: MCP_DEFINITION_FILE };
   }
 
-  async function readForWrite(id: string, expectedRevision?: string | null) {
+  async function readForWrite(
+    id: string,
+    expectedRevision?: string | null,
+    desiredRevision?: string
+  ) {
     const writeTarget = target(id);
     const before = await soulWriter.revision(writeTarget);
     const snapshot = await soulWriter.readCompanionWithBase("Integration", id, MCP_DEFINITION_FILE);
@@ -53,7 +57,10 @@ export function createSoulMcpDefinitionStore(options: SoulMcpDefinitionStoreOpti
     const current = snapshot.content === null ? null : parseMcpSoulDefinition(snapshot.content, id);
     if (
       expectedRevision !== undefined &&
-      (current === null ? null : canonicalHash(current)) !== expectedRevision
+      (current === null ? null : canonicalHash(current)) !== expectedRevision &&
+      (desiredRevision === undefined ||
+        current === null ||
+        canonicalHash(current) !== desiredRevision)
     ) {
       throw new SoulWriteError("CONFLICT", "MCP configuration changed since it was reviewed");
     }
@@ -73,11 +80,16 @@ export function createSoulMcpDefinitionStore(options: SoulMcpDefinitionStoreOpti
     async put(
       input: McpIntegrationDefinition,
       actor: CommitActor,
-      expectedRevision?: string | null
+      expectedRevision?: string | null,
+      resume = false
     ): Promise<void> {
       const definition = validateMcpIntegrationDefinition(input);
       const id = definition.server.id;
-      const { snapshot, revision, writeTarget } = await readForWrite(id, expectedRevision);
+      const { snapshot, revision, writeTarget } = await readForWrite(
+        id,
+        expectedRevision,
+        resume ? canonicalHash(definition) : undefined
+      );
       if (
         id === "slack" ||
         id === "github" ||
@@ -92,12 +104,20 @@ export function createSoulMcpDefinitionStore(options: SoulMcpDefinitionStoreOpti
         source: "api",
         actor,
         businessId,
+        ...(resume ? { republish: true } : {}),
         ...(revision === null || snapshot.content === null
           ? { expectedBaseCommit: snapshot.baseCommit }
           : { expectedRevisions: [{ target: writeTarget, revision }] }),
         changes: [{ op: "put", target: writeTarget, content: stringifyYaml(definition) }],
       });
       requirePublished(result);
+    },
+    async resumePut(
+      input: McpIntegrationDefinition,
+      actor: CommitActor,
+      expectedRevision: string | null
+    ) {
+      await this.put(input, actor, expectedRevision, true);
     },
     async remove(id: string, actor: CommitActor, expectedRevision?: string | null): Promise<void> {
       const { current, revision, snapshot, writeTarget } = await readForWrite(id, expectedRevision);

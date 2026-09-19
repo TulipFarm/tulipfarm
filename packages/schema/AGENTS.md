@@ -20,6 +20,7 @@ Run event/request vocabularies, canonical hashes, Secret references, and resourc
 | `src/registry.ts` | Strict `apiVersion`/`kind` dispatch and fail-closed YAML parsing. |
 | `src/plan.ts` | Closed YAML Plan shape and limits; dependency semantics belong to Run kernel. |
 | `src/pack.ts` | Closed, bounded Pack presets, catalog and read-only preview contracts; templates convey no authority. |
+| `src/pack-contract.ts` | Browser-safe `@tulipfarm/schema/pack-contract` constants and type-only Pack exports; no registry at runtime. |
 | `src/run-events.ts` | Channel-neutral Run event types, audiences, payload schemas. |
 | `src/invocation.ts` | JSON Schemas for requests that mint Runs. |
 | `src/integration-reply.ts` | Provider reply verdicts shared by the API, Worker, and eval harness. |
@@ -27,6 +28,8 @@ Run event/request vocabularies, canonical hashes, Secret references, and resourc
 | `src/guardrails.ts` | Guardrail policy schema with strict per-stage guard unions. |
 | `src/integration-manifest.ts` | Bundled native channel manifest validation. |
 | `src/mcp.ts`, `src/integration-account.ts` | MCP server definitions, reviewed capabilities and exact account/consent/grant contracts. |
+| `src/mcp-setup.ts` | Durable setup intent, nonsecret progress and transient credential request contracts; reviewed policy provenance lives in `mcp.ts`. |
+| `src/mcp-access.ts` | Browser-safe saved-access summary; capability counts never imply account authentication or effective Turn authority. |
 | `src/mcp-knowledge.ts` | Explicit MCP Knowledge source configuration and visibility. |
 | `src/mcp-knowledge-profile.ts` | Pure canonical pinned GitHub Knowledge image/revision and personal local setup preset; shared by catalog and Knowledge. |
 | `src/mcp-tool-contract.ts` | Pure deterministic MCP Tool names and contracts shared by live registration and Soul publication. |
@@ -41,6 +44,7 @@ Run event/request vocabularies, canonical hashes, Secret references, and resourc
 ## Rules
 
 - Every schema is TypeBox; every validated type is derived with `Static<>`. Never hand-write both.
+- Browser runtime imports use safe public leaves (`/ajv`, `/pack-contract`), not the root barrel, which loads the Node-only registry.
 - MCP Tool contracts classify provider content as `source_content`; hosts derive their DLP
   declarations from the canonical contract rather than inventing another data class.
 - `definitionSchema()` rejects plain JSON Schema literals. Do not defeat that with casts.

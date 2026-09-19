@@ -5,6 +5,7 @@ import {
   McpIntegrationError,
   McpIntegrationService,
   type McpSession,
+  type McpSetupService,
 } from "@tulipfarm/integrations";
 import { GITHUB_KNOWLEDGE_IMAGE } from "@tulipfarm/knowledge";
 import { MCP_CATALOG, type McpCatalogEntry } from "@tulipfarm/mcp";
@@ -62,7 +63,8 @@ class Tokens implements TokenRepo {
 
 async function setup(
   role: "admin" | "member" = "admin",
-  accountConfiguration?: McpIntegrationRouteDeps["accountConfiguration"]
+  accountConfiguration?: McpIntegrationRouteDeps["accountConfiguration"],
+  setupService?: McpIntegrationRouteDeps["setup"]
 ) {
   const userRepo = new Users();
   const user = await createUser(userRepo, "muskan@example.com", "test-password", role);
@@ -106,6 +108,7 @@ async function setup(
       catalog: MCP_CATALOG.map((entry) => ({ ...entry })),
       caller,
       accountConfiguration,
+      setup: setupService,
     },
   });
   const headers = {
@@ -125,6 +128,259 @@ const configure = {
 };
 
 describe("MCP Integration routes", () => {
+  it("exposes authenticated durable setup writes and read-only caller-scoped status without credentials", async () => {
+    const id = "00000000-0000-4000-8000-000000000001";
+    const accountId = "00000000-0000-4000-8000-000000000002";
+    const status = { id, integrationKey: "github-mcp", accountId, status: "done" };
+    const startSetup = vi.fn(async () => status);
+    const resumeSetup = vi.fn(async () => status);
+    const readStatus = vi.fn(async () => status);
+    const listOperations = vi.fn(async () => [status]);
+    const eligibility = {
+      definitionRevision: "a".repeat(64),
+      policy: "initialize",
+      publishedReady: false,
+      canConfigure: true,
+      canUseStandardAccess: false,
+    };
+    const readEligibility = vi.fn(async () => eligibility);
+    const setupService = {
+      start: startSetup,
+      resume: resumeSetup,
+      status: readStatus,
+      list: listOperations,
+      eligibility: readEligibility,
+    } as unknown as McpSetupService<CommitActor>;
+    const { app, headers } = await setup("admin", undefined, setupService);
+    try {
+      const path = `/api/v1/integration-setups/${id}`;
+      const preview = await app.inject({
+        method: "GET",
+        url: "/api/v1/integrations/github-mcp/setup",
+        headers,
+      });
+      expect(preview.statusCode).toBe(200);
+      expect(preview.json()).toEqual(eligibility);
+      expect(readEligibility).toHaveBeenCalledWith(
+        expect.any(String),
+        expect.any(String),
+        "github-mcp"
+      );
+      expect(startSetup).not.toHaveBeenCalled();
+      expect(resumeSetup).not.toHaveBeenCalled();
+      expect((await app.inject({ method: "GET", url: path })).statusCode).toBe(401);
+      const body = { integrationKey: "github-mcp", accountId, initializePolicy: true };
+      expect(
+        (
+          await app.inject({
+            method: "POST",
+            url: path,
+            headers: { cookie: headers.cookie },
+            payload: body,
+          })
+        ).statusCode
+      ).toBe(403);
+      expect(startSetup).not.toHaveBeenCalled();
+      const started = await app.inject({ method: "POST", url: path, headers, payload: body });
+      expect(started.statusCode).toBe(200);
+      expect(started.json()).toEqual(status);
+      expect(started.headers["cache-control"]).toBe("no-store");
+      expect(startSetup).toHaveBeenCalledWith(
+        expect.any(String),
+        expect.any(String),
+        id,
+        body,
+        expect.objectContaining({ principalId: expect.any(String) })
+      );
+      const repaired = await app.inject({
+        method: "POST",
+        url: `${path}/resume`,
+        headers,
+        payload: { values: { accessToken: "synthetic-token" } },
+      });
+      expect(repaired.statusCode).toBe(200);
+      expect(repaired.body).not.toContain("synthetic-token");
+      expect(resumeSetup).toHaveBeenCalledWith(
+        expect.any(String),
+        expect.any(String),
+        id,
+        { values: { accessToken: "synthetic-token" } },
+        expect.anything()
+      );
+      expect((await app.inject({ method: "GET", url: path, headers })).json()).toEqual(status);
+      expect(
+        (
+          await app.inject({
+            method: "GET",
+            url: `/api/v1/integration-setups?integrationKey=github-mcp&accountId=${accountId}`,
+            headers,
+          })
+        ).json()
+      ).toEqual({ operations: [status] });
+      expect(startSetup).toHaveBeenCalledOnce();
+      expect(resumeSetup).toHaveBeenCalledOnce();
+      expect(listOperations).toHaveBeenCalledWith(
+        expect.any(String),
+        expect.any(String),
+        "github-mcp",
+        accountId
+      );
+      expect(
+        (
+          await app.inject({
+            method: "POST",
+            url: path,
+            headers,
+            payload: { integrationKey: "github-mcp" },
+          })
+        ).statusCode
+      ).toBe(400);
+      expect(
+        (
+          await app.inject({
+            method: "POST",
+            url: "/api/v1/integration-setups/not-a-uuid",
+            headers,
+            payload: body,
+          })
+        ).statusCode
+      ).toBe(400);
+      const consentId = "00000000-0000-4000-8000-000000000003";
+      const consent = {
+        ...body,
+        definitionRevision: eligibility.definitionRevision,
+        legacyEmptyPolicyConsent: "use_standard_access",
+      };
+      startSetup.mockResolvedValueOnce({ ...status, id: consentId });
+      expect(
+        (
+          await app.inject({
+            method: "POST",
+            url: `/api/v1/integration-setups/${consentId}`,
+            headers,
+            payload: consent,
+          })
+        ).statusCode
+      ).toBe(200);
+      expect(startSetup).toHaveBeenLastCalledWith(
+        expect.any(String),
+        expect.any(String),
+        consentId,
+        consent,
+        expect.anything()
+      );
+      expect(
+        (
+          await app.inject({
+            method: "POST",
+            url: `/api/v1/integration-setups/${consentId}`,
+            headers,
+            payload: { ...consent, legacyEmptyPolicyConsent: "anything-else" },
+          })
+        ).statusCode
+      ).toBe(400);
+    } finally {
+      await app.close();
+    }
+  });
+  it.each([
+    ["github", "token", ["accessToken"], true],
+    ["github", "oauth", [], true],
+    ["slack", "oauth", [], true],
+    ["google-drive", "oauth", [], true],
+    ["notion", "oauth", [], false],
+    ["linear", "token", ["accessToken"], false],
+    ["linear", "oauth", [], false],
+  ])(
+    "previews %s %s requirements from the canonical account helper",
+    async (id, authentication, requiredSlots, requiresOAuthApp) => {
+      const { app, headers, put } = await setup("member");
+      try {
+        const response = await app.inject({
+          method: "GET",
+          url: `/api/v1/integrations/catalog/${id}/setup?authentication=${authentication}`,
+          headers,
+        });
+        expect(response.statusCode).toBe(200);
+        expect(response.json()).toMatchObject({
+          configuration: {
+            authentication,
+            requiredSlots,
+            sharedAllowed: false,
+            definitionDigest: expect.stringMatching(/^[a-f0-9]{64}$/),
+          },
+          requiresOAuthApp,
+        });
+        expect(put).not.toHaveBeenCalled();
+      } finally {
+        await app.close();
+      }
+    }
+  );
+
+  it("rejects unsupported provider authentication without blocking custom authless servers", async () => {
+    const { app, headers, put } = await setup();
+    try {
+      const unsupported = await app.inject({
+        method: "PUT",
+        url: "/api/v1/integrations/slack-mcp",
+        headers,
+        payload: {
+          server: {
+            id: "slack-mcp",
+            label: "Slack",
+            transport: { type: "streamable-http", url: "https://mcp.slack.com/mcp" },
+            authentication: { type: "none" },
+          },
+          enabled: false,
+        },
+      });
+      expect(unsupported.statusCode).toBe(422);
+      expect(put).not.toHaveBeenCalled();
+      const custom = await app.inject({
+        method: "PUT",
+        url: "/api/v1/integrations/example",
+        headers,
+        payload: {
+          ...configure,
+          server: { ...configure.server, authentication: { type: "none" } },
+        },
+      });
+      expect(custom.statusCode).toBe(200);
+    } finally {
+      await app.close();
+    }
+  });
+
+  it("previews trusted provider account fields without saving a definition", async () => {
+    const { app, headers, put } = await setup("member");
+    try {
+      const response = await app.inject({
+        method: "GET",
+        url: "/api/v1/integrations/catalog/github/setup?authentication=token",
+        headers,
+      });
+      expect(response.statusCode).toBe(200);
+      expect(response.json()).toMatchObject({
+        server: {
+          id: "github-mcp",
+          label: "GitHub",
+          authentication: { type: "token", sharedAllowed: false },
+        },
+        configuration: { authentication: "token", requiredSlots: ["accessToken"] },
+      });
+      const unsupported = await app.inject({
+        method: "GET",
+        url: "/api/v1/integrations/catalog/slack/setup?authentication=token",
+        headers,
+      });
+      expect(unsupported.statusCode).toBe(422);
+      expect(put).not.toHaveBeenCalled();
+    } finally {
+      await app.close();
+    }
+  });
+
   it("serializes the canonical local Knowledge preset without granting or configuring anything", async () => {
     const { app, headers, put } = await setup("member");
     try {
@@ -342,6 +598,7 @@ describe("MCP Integration routes", () => {
         authentication: "token",
         requiredSlots: ["accessToken"],
         sharedAllowed: false,
+        definitionDigest: expect.stringMatching(/^[a-f0-9]{64}$/),
       });
       expect(metadata).toHaveBeenCalledWith("example");
     } finally {
@@ -419,7 +676,9 @@ describe("MCP Integration routes", () => {
         payload: configure,
       });
       expect(response.statusCode).toBe(200);
-      expect(response.json()).toEqual({ server: { ...configure, reviewed: emptyMcpReview() } });
+      expect(response.json()).toEqual({
+        server: { ...configure, reviewed: emptyMcpReview(), reviewPolicy: "uninitialized" },
+      });
       expect(put).toHaveBeenCalledOnce();
       const listed = await app.inject({ method: "GET", url: "/api/v1/integrations", headers });
       expect(listed.json().servers).toHaveLength(1);

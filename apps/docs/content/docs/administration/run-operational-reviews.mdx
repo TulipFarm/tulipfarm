@@ -59,6 +59,11 @@ stuck, costly, failed, or waiting unexpectedly, open the inspector and review:
 - lineage
 - model cost and token count
 
+Expand **Run details → Effects → Latest attempt** to see a saved attempt's state, timestamps,
+and safe error code. Recognized provider errors include a short explanation, not the provider's
+raw response. "Not found or inaccessible" does not prove a resource is absent. An ambiguous
+effect means its outcome is uncertain; an error explanation does not make it safe to retry.
+
 Use server-authorized controls only when needed: **pause**, **resume**, **retry**,
 **reconcile**, or **cancel**. See [Watch a run](/docs/using-tulipfarm/watch-a-run) for the control
 flow.

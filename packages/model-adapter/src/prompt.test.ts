@@ -1,12 +1,161 @@
 import type { ResolvedAttachment } from "@tulipfarm/agent-runtime";
+import { createModel } from "@tulipfarm/llm";
 import { textContent } from "@tulipfarm/schema";
-import { describe, expect, it } from "vitest";
+import { generateText } from "ai";
+import { describe, expect, it, vi } from "vitest";
 import {
   assertModelOutputComplete,
   splitPrompt,
   stablePrefixChars,
+  toToolSet,
   withCacheBreakpoint,
 } from "./prompt";
+
+describe("toToolSet", () => {
+  const definitions = [
+    {
+      name: "add_issue_comment",
+      description: "Add a comment or reaction.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          owner: { type: "string" },
+          repo: { type: "string" },
+          issue_number: { type: "integer", minimum: 1 },
+          body: { type: "string" },
+          comment_id: { type: "integer", minimum: 1 },
+          reaction: { type: "string", enum: ["+1", "-1", "heart"] },
+        },
+        required: ["owner", "repo", "issue_number"],
+      },
+    },
+    {
+      name: "issue_write",
+      inputSchema: {
+        type: "object",
+        properties: {
+          method: { type: "string", enum: ["create", "update"] },
+          owner: { type: "string" },
+          repo: { type: "string" },
+          title: { type: "string" },
+          body: { type: "string" },
+          issue_number: { type: "integer", minimum: 1 },
+        },
+        required: ["method", "owner", "repo"],
+      },
+    },
+    {
+      name: "save_draft",
+      description: "Save an authored draft.",
+      inputSchema: {
+        type: "object",
+        additionalProperties: false,
+        properties: {
+          title: { type: "string" },
+          summary: { type: ["string", "null"] },
+          metadata: {
+            type: "object",
+            properties: {
+              source: { type: "string" },
+              note: { type: ["string", "null"] },
+              labels: { type: "array", items: { type: "string" } },
+            },
+            required: ["source"],
+          },
+          sections: {
+            type: "array",
+            items: {
+              type: "object",
+              additionalProperties: false,
+              properties: {
+                text: { type: "string" },
+                caption: { type: "string" },
+              },
+              required: ["text"],
+            },
+          },
+        },
+        required: ["title", "summary"],
+      },
+    },
+  ];
+
+  it("opts out of provider strict normalization for every raw JSON-schema contract", () => {
+    const tools = toToolSet(definitions);
+
+    for (const definition of definitions) {
+      const sdkTool = tools[definition.name];
+      expect(sdkTool?.strict).toBe(false);
+      expect(sdkTool?.description).toBe(definition.description);
+      expect(sdkTool?.inputSchema).toMatchObject({ jsonSchema: definition.inputSchema });
+    }
+  });
+
+  it("sends explicit strict:false and unchanged schemas through the SDK to Azure Responses", async () => {
+    const originalDefinitions = structuredClone(definitions);
+    const fetch = vi.fn<typeof globalThis.fetch>().mockResolvedValue(
+      Response.json({
+        id: "resp_test",
+        object: "response",
+        created_at: 0,
+        model: "gpt-5.6-terra",
+        status: "completed",
+        output: [
+          {
+            id: "msg_test",
+            type: "message",
+            role: "assistant",
+            status: "completed",
+            content: [{ type: "output_text", text: "Done.", annotations: [] }],
+          },
+        ],
+        usage: { input_tokens: 1, output_tokens: 1, total_tokens: 2 },
+      })
+    );
+    vi.stubGlobal("fetch", fetch);
+
+    try {
+      const model = await createModel(
+        {
+          provider: "azure",
+          model: "gpt-5.6-terra",
+          api_key_ref: "test-key",
+          resource_name: "test-resource",
+          base_url: "https://test-resource.openai.azure.com/openai",
+        },
+        { get: vi.fn().mockResolvedValue("test-key") } as unknown as Parameters<
+          typeof createModel
+        >[1]
+      );
+      const result = await generateText({
+        model,
+        prompt: "Describe these tools without calling them.",
+        tools: toToolSet(definitions),
+        maxRetries: 0,
+      });
+
+      expect(result.text).toBe("Done.");
+      expect(fetch).toHaveBeenCalledTimes(1);
+      const [url, init] = fetch.mock.calls[0] ?? [];
+      expect(String(url)).toContain("/responses");
+      expect(init?.method).toBe("POST");
+      expect(typeof init?.body).toBe("string");
+      const request = JSON.parse(String(init?.body));
+      expect(request.tools).toEqual(
+        originalDefinitions.map((definition) => ({
+          type: "function",
+          name: definition.name,
+          ...(definition.description === undefined ? {} : { description: definition.description }),
+          parameters: definition.inputSchema,
+          strict: false,
+        }))
+      );
+      expect(definitions).toEqual(originalDefinitions);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+});
 
 const png: ResolvedAttachment = {
   fileId: "file-1",

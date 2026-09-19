@@ -3,22 +3,22 @@ import { IntegrationIcon } from "./integration-icon";
 
 const EXAMPLES = [
   {
-    names: ["jira", "linear"],
-    fallback: "jira",
+    names: ["linear"],
+    fallback: "linear",
     label: "Updated 23 tasks after the last run",
-    position: "sm:right-[8%] sm:top-[12%]",
+    position: "xl:right-[8%] xl:top-[15%]",
   },
   {
     names: ["github"],
     fallback: "github",
     label: "Reviewed 14 pull requests before merge",
-    position: "sm:bottom-[12%] sm:left-[20%]",
+    position: "xl:bottom-[16%] xl:left-[5%]",
   },
   {
     names: ["slack"],
     fallback: "slack",
     label: "Sent 8 updates to team channels",
-    position: "sm:-right-16 sm:bottom-[24%]",
+    position: "xl:right-[3%] xl:bottom-[12%]",
   },
 ] as const;
 
@@ -26,7 +26,7 @@ export function IntegrationOverview({ integrations }: { integrations: Integratio
   return (
     <section
       aria-label="Integration capability examples"
-      className="relative flex min-h-56 flex-col gap-3 overflow-hidden rounded-2xl bg-[var(--integration-banner)] px-4 pb-5 pt-14 text-[var(--integration-banner-foreground)] sm:block sm:p-0"
+      className="relative flex min-h-56 flex-col items-start gap-3 overflow-hidden rounded-2xl bg-[var(--integration-banner)] px-4 pb-5 pt-14 text-[var(--integration-banner-foreground)] xl:block xl:p-0"
     >
       <p className="absolute left-5 top-4 z-10 text-xs font-medium">Example activity</p>
       <div aria-hidden className="pointer-events-none">
@@ -43,7 +43,7 @@ export function IntegrationOverview({ integrations }: { integrations: Integratio
         return (
           <div
             key={example.fallback}
-            className={`integration-capability-bubble relative z-10 flex max-w-full items-center gap-3 rounded-full border border-white/70 bg-white/45 py-2.5 pl-2.5 pr-5 backdrop-blur-sm sm:absolute sm:max-w-none ${example.position}`}
+            className={`integration-capability-bubble relative z-10 flex max-w-full items-center gap-3 rounded-full border border-white/70 bg-white/45 py-2.5 pl-2.5 pr-5 backdrop-blur-sm xl:absolute xl:max-w-[46%] ${example.position}`}
             style={{ animationDelay: `${index * -1.7}s` }}
           >
             <IntegrationIcon
@@ -54,9 +54,7 @@ export function IntegrationOverview({ integrations }: { integrations: Integratio
               size="md"
               className="shrink-0 rounded-full"
             />
-            <span className="min-w-0 text-sm font-medium sm:whitespace-nowrap">
-              {example.label}
-            </span>
+            <span className="min-w-0 text-sm font-medium">{example.label}</span>
           </div>
         );
       })}

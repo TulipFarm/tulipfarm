@@ -32,7 +32,7 @@ import {
   RunStoreStateTransitions,
   settleIntegrationReply,
 } from "@tulipfarm/turn-executor";
-import type { EvalCase, JourneyTurn } from "../case.ts";
+import { type EvalCase, type JourneyTurn, LOOP_LIMITS } from "../case.ts";
 import { toolDispatcher } from "../dispatch.ts";
 import type { EvalSoul } from "../eval-soul.ts";
 import type { GuardrailDecision } from "../guardrails.ts";
@@ -588,11 +588,17 @@ async function runOneTurn(
       run = await claimRun();
       outcome = await executor(run);
       await settleRun(run, outcome);
-    } else if (outcome.status === "waiting" && (await mcp.approvePending(runId))) {
-      receipt = undefined;
-      run = await claimRun();
-      outcome = await executor(run);
-      await settleRun(run, outcome);
+    } else {
+      for (let resumes = 0; outcome.status === "waiting"; resumes += 1) {
+        if (resumes >= LOOP_LIMITS.maxToolCalls) {
+          throw new Error("L3 exceeded the Turn's Tool approval limit");
+        }
+        if (!(await mcp.approvePending(runId))) break;
+        receipt = undefined;
+        run = await claimRun();
+        outcome = await executor(run);
+        await settleRun(run, outcome);
+      }
     }
 
     const doctorEvents =

@@ -12,9 +12,17 @@ MCP, the Model Context Protocol, lets a server offer tools, resources, and promp
 A **tool** performs an action. A **resource** returns information. A **prompt** supplies a
 template. MCP resources are not TulipFarm records.
 
-Discovering a capability does not authorize it. TulipFarm keeps a reviewed selection, and
-checks that a capability still matches that review before using it. A changed server
-configuration requires a new review.
+Basic setup saves the provider's current capabilities when you explicitly connect and enables
+the integration with approval required for every Tool call. You do not select each Tool during
+setup. Optional per-item limits live in **Advanced settings**.
+
+TulipFarm checks capabilities against that saved selection before use. Existing custom limits
+stay unchanged, and later additions or changed capabilities are not silently approved.
+Discovery outside the initial connection flow does not itself authorize anything.
+
+A connected account and allowed access are separate. An account can be connected while the
+saved limits allow no tools or content. In that state, agents cannot use the integration;
+reconnecting the account does not remove those limits.
 
 The server's own description is not a permission grant. Calling a tool still passes through
 TulipFarm's access and approval controls.

@@ -215,6 +215,12 @@ jobs:
         run: |
           set -o pipefail
           pnpm exec turbo build --filter='!@tulipfarm/docs' --filter='!@tulipfarm/www' 2>&1 | tee build.log
+      - name: Install Chromium for browser import regression
+        run: pnpm exec playwright install --with-deps chromium
+      - name: Check Vite browser imports
+        run: |
+          set -o pipefail
+          pnpm --filter @tulipfarm/web test:browser-imports 2>&1 | tee -a build.log
       - name: Job summary
         if: always()
         env:

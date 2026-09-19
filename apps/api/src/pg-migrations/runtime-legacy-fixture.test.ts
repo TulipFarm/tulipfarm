@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
+import { MCP_SETUP_STORAGE_STATEMENTS } from "@tulipfarm/storage";
 import { describe, expect, it, vi } from "vitest";
 import { runPgMigrations } from "../pg-migrate";
 import { makeMigratedPglite } from "../test/pglite";
@@ -15,6 +16,31 @@ const columns = `SELECT table_name, column_name, data_type, is_nullable, column_
   ORDER BY table_name, column_name`;
 
 describe("Compose legacy upgrade fixture", () => {
+  it("preserves MCP setup data when an unmerged checkout used Knowledge's migration number", async () => {
+    const db = await makeMigratedPglite(139);
+    try {
+      await db.exec("DROP TABLE file_knowledge_requests");
+      for (const statement of MCP_SETUP_STORAGE_STATEMENTS) await db.exec(statement);
+      await db.exec(`INSERT INTO mcp_setup_operations
+        (business_id, id, principal_id, integration_key, document)
+        VALUES ('business', 'setup', 'user', 'github', '{"marker":"preserved"}')`);
+      const exit = vi.fn();
+      await runPgMigrations(db, exit, () => {});
+      expect(exit).not.toHaveBeenCalled();
+      expect(
+        (await db.query("SELECT to_regclass('file_knowledge_requests') IS NOT NULL AS present"))
+          .rows
+      ).toEqual([{ present: true }]);
+      expect((await db.query("SELECT document FROM mcp_setup_operations")).rows).toEqual([
+        { document: { marker: "preserved" } },
+      ]);
+      await runPgMigrations(db, exit, () => {});
+      expect(exit).not.toHaveBeenCalled();
+    } finally {
+      await db.close();
+    }
+  });
+
   it("matches the real v133 schema before upgrading the current candidate", async () => {
     const version = Math.max(...PG_MIGRATIONS.map((migration) => migration.version));
     expect(script).toContain(`"SELECT version FROM schema_version")" = ${version} ]`);

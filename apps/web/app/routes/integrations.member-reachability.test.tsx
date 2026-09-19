@@ -48,6 +48,7 @@ test.each<{ entry: "settings" | "chat"; authentication: "token" | "oauth" }>([
         authentication: { type: authentication, sharedAllowed: true },
       },
       enabled: true,
+      reviewPolicy: "custom",
       reviewed: { tools: [], resources: [], prompts: [] },
     };
     const account: McpAccountSummary = {
@@ -80,7 +81,16 @@ test.each<{ entry: "settings" | "chat"; authentication: "token" | "oauth" }>([
         if (path === "/api/v1/auth/session") return response({ user: member });
         if (path === "/api/v1/integrations") return response({ servers: [definition] });
         if (path === "/api/v1/integrations/catalog") return response({ entries: [] });
+        if (path === "/api/v1/integration-setups") return response({ operations: [] });
         if (path === "/api/v1/integrations/support") return response({ server: definition });
+        if (path === "/api/v1/integrations/support/setup")
+          return response({
+            definitionRevision: "c".repeat(64),
+            policy: "preserve",
+            publishedReady: true,
+            canConfigure: false,
+            canUseStandardAccess: false,
+          });
         if (path === "/api/v1/integrations/support/accounts")
           return response(created ? [account] : []);
         if (path === "/api/v1/integrations/support/accounts/configuration")
@@ -88,6 +98,7 @@ test.each<{ entry: "settings" | "chat"; authentication: "token" | "oauth" }>([
             authentication,
             requiredSlots: authentication === "token" ? ["accessToken"] : [],
             sharedAllowed: true,
+            definitionDigest: "a".repeat(64),
           });
         if (path === "/api/v1/integrations/support/accounts/my-account/oauth/configuration")
           return response({ callbackUrl });
@@ -104,9 +115,14 @@ test.each<{ entry: "settings" | "chat"; authentication: "token" | "oauth" }>([
             manifest: {},
           });
       }
-      if (method === "POST" && path === "/api/v1/integrations/support/accounts") {
+      if (method === "POST" && /^\/api\/v1\/integration-setups\/[^/]+$/.test(path)) {
         created = true;
-        return response(account, 201);
+        return response({
+          id: path.split("/").at(-1),
+          integrationKey: "support",
+          accountId: account.id,
+          status: authentication === "oauth" ? "needs_sign_in" : "done",
+        });
       }
       if (
         method === "POST" &&
@@ -146,50 +162,72 @@ test.each<{ entry: "settings" | "chat"; authentication: "token" | "oauth" }>([
     ]);
     render(<Stub initialEntries={[entry === "settings" ? "/settings" : "/chat/chat-1"]} />);
     if (entry === "settings") {
-      const manage = await screen.findByRole("link", { name: "Manage Support" });
-      expect(screen.queryByRole("button", { name: "Add MCP server" })).not.toBeInTheDocument();
+      const manage = await screen.findByRole("button", { name: "Connect Support" });
+      expect(screen.queryByRole("button", { name: "Add integration" })).not.toBeInTheDocument();
       await userEvent.click(manage);
+      expect(await screen.findByRole("dialog", { name: "Connect Support" })).toBeVisible();
+      expect(screen.getByRole("button", { name: "Connect Support" })).toBeInTheDocument();
     } else {
       await userEvent.click(await screen.findByText("Integration accounts"));
       await userEvent.click(screen.getByRole("link", { name: "Manage accounts" }));
     }
 
-    await userEvent.type(await screen.findByLabelText("Account label"), "My support");
-    expect(screen.queryByRole("button", { name: "Edit server" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Discover capabilities" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Remove server" })).not.toBeInTheDocument();
-    expect(screen.queryByLabelText("Account ownership")).not.toBeInTheDocument();
+    await userEvent.click(await screen.findByText("Account preferences"));
+    await userEvent.clear(screen.getByLabelText("Account name"));
+    await userEvent.type(screen.getByLabelText("Account name"), "My support");
+    await userEvent.click(screen.getByText("Advanced settings"));
+    expect(screen.queryByRole("button", { name: "Edit settings" })).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Discover available access" })
+    ).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Remove integration" })).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Who can use this account?")).not.toBeInTheDocument();
     expect(screen.queryByLabelText("Enabled")).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: /^(Enable|Disable) integration$/ })
+    ).not.toBeInTheDocument();
     expect(screen.queryByText("Manage shared access")).not.toBeInTheDocument();
 
     if (authentication === "token") {
       await userEvent.type(screen.getByLabelText("Access token"), "fake-member-token");
-      await userEvent.click(screen.getByRole("button", { name: "Connect account" }));
+      await userEvent.click(screen.getByRole("button", { name: "Connect" }));
     } else {
       await userEvent.click(screen.getByText("Use an existing OAuth app"));
       await userEvent.type(await screen.findByLabelText("OAuth client ID"), "registered-client");
-      await userEvent.click(screen.getByRole("button", { name: "Save OAuth account" }));
+      await userEvent.click(screen.getByRole("button", { name: "Connect" }));
     }
     await waitFor(() =>
       expect(fetchMock).toHaveBeenCalledWith(
-        `${API_BASE}/api/v1/integrations/support/accounts`,
+        expect.stringMatching(/\/api\/v1\/integration-setups\/[^/]+$/),
         expect.objectContaining({
           method: "POST",
           credentials: "include",
-          body: JSON.stringify({
-            label: "My support",
-            scope: "personal",
-            authentication,
-            ...(authentication === "token"
-              ? { isDefault: false, values: { accessToken: "fake-member-token" } }
-              : {
-                  oauthClient: { clientId: "registered-client", tokenEndpointAuthMethod: "none" },
-                }),
-          }),
         })
       )
     );
-    expect(await screen.findByText("My support")).toBeInTheDocument();
+    const submitted = fetchMock.mock.calls.find(
+      ([url, init]) =>
+        /\/api\/v1\/integration-setups\/[^/]+$/.test(String(url)) && init?.method === "POST"
+    )?.[1];
+    expect(JSON.parse(String(submitted?.body))).toEqual({
+      integrationKey: "support",
+      definitionRevision: "c".repeat(64),
+      account: {
+        label: "My support",
+        scope: "personal",
+        authentication,
+        ...(authentication === "oauth"
+          ? {
+              oauthClient: { clientId: "registered-client", tokenEndpointAuthMethod: "none" },
+            }
+          : {}),
+      },
+      ...(authentication === "token" ? { values: { accessToken: "fake-member-token" } } : {}),
+      initializePolicy: false,
+    });
+    if (authentication === "token") {
+      await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent(/^Connected$/));
+    }
     if (authentication === "oauth") {
       expect(await screen.findByLabelText("OAuth callback URL")).toHaveValue(callbackUrl);
       await userEvent.click(screen.getByRole("button", { name: "Connect account" }));

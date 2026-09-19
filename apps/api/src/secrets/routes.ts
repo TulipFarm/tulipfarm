@@ -1,10 +1,12 @@
 import { CODEX_AUTH_SECRET_KEY, parseCodexAuth } from "@tulipfarm/llm";
 import type { SecretsService, SecretType } from "@tulipfarm/secrets";
-import { InvalidSecretKeyError } from "@tulipfarm/secrets";
+import { INTEGRATION_APPS, InvalidSecretKeyError } from "@tulipfarm/secrets";
 import type { CommitActor } from "@tulipfarm/soul";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { ErrorSchema } from "../auth/schemas";
 import type { AuthorizationCheck, RequireAuthorization } from "../authz/route-gate";
+import type { RequestPrincipal } from "../identity/principal";
+import type { IntegrationSecretMetadata } from "../integrations/accounts/secret-metadata";
 import { commitActorFromRequest } from "../soul/commit-actor";
 
 type PreHandler = (req: FastifyRequest, reply: FastifyReply) => Promise<void>;
@@ -16,6 +18,20 @@ const SecretMetaSchema = {
     type: { type: "string", enum: ["user-provided", "auto-generated"] },
     createdAt: { type: "string", format: "date-time" },
     updatedAt: { type: "string", format: "date-time" },
+    integration: {
+      type: "object",
+      additionalProperties: false,
+      properties: {
+        key: { type: "string" },
+        label: { type: "string" },
+        accountId: { type: "string" },
+        accountLabel: { type: "string" },
+        accountCreatedAt: { type: "string", format: "date-time" },
+        scope: { type: "string", enum: ["personal", "shared"] },
+        field: { type: "string" },
+      },
+      required: ["key", "label", "accountLabel", "scope", "field"],
+    },
   },
   required: ["key", "type", "createdAt", "updatedAt"],
 } as const;
@@ -39,6 +55,10 @@ export function registerSecretsRoutes(
   requireAuthorization: RequireAuthorization,
   authorizationCheck: AuthorizationCheck,
   opts?: {
+    integrationMetadata?: (
+      keys: readonly string[],
+      principal: RequestPrincipal
+    ) => Promise<ReadonlyMap<string, IntegrationSecretMetadata | null>>;
     /** Called after a successful delete; errors are caught and logged — never surface to the caller. */
     onSecretDeleted?: (key: string, actor: CommitActor) => Promise<void>;
     /** Called after a successful create/update; errors are caught and logged — never surface to the caller. */
@@ -80,7 +100,31 @@ export function registerSecretsRoutes(
         });
         if (allowed) visible.push(secret);
       }
-      return reply.send({ secrets: visible });
+      const metadata = await opts?.integrationMetadata?.(
+        visible.map((secret) => secret.key),
+        principal
+      );
+      return reply.send({
+        secrets: visible.flatMap((secret) => {
+          const integration = metadata?.get(secret.key);
+          if (integration === null) return [];
+          const native = /^integration\.(github|slack)\.(.+)$/.exec(secret.key);
+          const nativeApp = INTEGRATION_APPS.find((app) => app.id === native?.[1]);
+          const owner: IntegrationSecretMetadata | undefined =
+            integration ??
+            (native
+              ? {
+                  key: native[1],
+                  label: nativeApp?.label ?? "Slack",
+                  accountLabel: "Channel credentials",
+                  scope: "shared",
+                  field:
+                    nativeApp?.fields.find((field) => field.key === secret.key)?.label ?? native[2],
+                }
+              : undefined);
+          return [{ ...secret, ...(owner ? { integration: owner } : {}) }];
+        }),
+      });
     }
   );
 

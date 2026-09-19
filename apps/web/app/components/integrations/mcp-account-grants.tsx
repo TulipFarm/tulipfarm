@@ -48,7 +48,10 @@ export function McpAccountGrants({ account }: { account: McpAccountSummary }) {
           subjects: {
             user: users
               .filter((user) => user.status === "active")
-              .map((user) => ({ id: user.id, label: `${user.name ?? user.email} · ${user.id}` })),
+              .map((user) => ({
+                id: user.id,
+                label: user.name ? `${user.name} · ${user.email}` : user.email,
+              })),
             team: teams.teams
               .filter((team) => team.status === "active")
               .map((team) => ({ id: team.id, label: `${team.displayName} · ${team.slug}` })),
@@ -86,10 +89,11 @@ export function McpAccountGrants({ account }: { account: McpAccountSummary }) {
   const selected = data?.subjects[kind].find((subject) => subject.id === subjectId);
   return (
     <div className="space-y-3 rounded-md border border-border p-3">
-      <h4 className="text-sm font-medium">Shared account grants</h4>
+      <h4 className="text-sm font-medium">Who can use this shared account?</h4>
       <p className="text-xs text-muted-foreground">
-        User and Team grants allow interactive use. Each Routine needs separate approval bound to
-        its current instructions, Agent, Tools, account and output destination. Material edits
+        Grant people or Teams access to choose this account in Chat. They must still confirm shared
+        use, and Tool permissions still apply. Each Routine needs separate approval bound to its
+        current instructions, Agent, Tools, account and output destination. Material edits
         invalidate that approval.
       </p>
       <McpError error={error} />
@@ -100,7 +104,7 @@ export function McpAccountGrants({ account }: { account: McpAccountSummary }) {
           </Button>
         ) : (
           <p role="status" className="text-xs text-muted-foreground">
-            Loading grants and eligible subjects...
+            Loading access and available people, Teams and Routines...
           </p>
         )
       ) : (
@@ -179,7 +183,9 @@ export function McpAccountGrants({ account }: { account: McpAccountSummary }) {
             })}
           </ul>
           {data.grants.length === 0 && (
-            <p className="text-xs text-muted-foreground">No shared-use grants.</p>
+            <p className="text-xs text-muted-foreground">
+              No one has been granted shared access yet.
+            </p>
           )}
           <form
             className="max-w-xl space-y-3"

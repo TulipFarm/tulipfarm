@@ -21,6 +21,7 @@ import { createMcpAccountOAuthProtocol } from "./oauth-protocol";
 import { registerMcpOAuthRoutes } from "./oauth-routes";
 import { createMcpAccountProbe, type McpAccountProbeDefinition } from "./probe";
 import { type McpAccountRoutesDeps, registerMcpAccountRoutes } from "./routes";
+import { createIntegrationSecretMetadata } from "./secret-metadata";
 
 export interface McpAccountFeatureDeps {
   readonly db: Queryable;
@@ -31,6 +32,7 @@ export interface McpAccountFeatureDeps {
   readonly teams: Pick<TeamRepo, "getTeam" | "getMembership">;
   readonly authorizationCheck: AuthorizationCheck;
   readonly definition: (key: string) => Promise<McpAccountProbeDefinition>;
+  readonly integrationLabel?: (key: string) => string;
   readonly guardedFetch: (url: string | URL, init?: RequestInit) => Promise<Response>;
   readonly localBackend?: (
     environment: Readonly<Record<string, string>>
@@ -113,6 +115,11 @@ export function composeMcpAccounts(deps: McpAccountFeatureDeps) {
     secrets,
     lifecycle,
     oauth,
+    secretMetadata: createIntegrationSecretMetadata({
+      accounts,
+      authority,
+      integrationLabel: deps.integrationLabel ?? ((key) => key),
+    }),
     register(
       app: FastifyInstance,
       requireAuth: (request: FastifyRequest, reply: FastifyReply) => Promise<void>,

@@ -5,7 +5,7 @@ import {
   type McpResourceHandle,
   type McpToolHandle,
 } from "@tulipfarm/mcp";
-import { ajv, canonicalHash } from "@tulipfarm/schema";
+import { ajv, canonicalHash, validateMcpIntegrationDefinition } from "@tulipfarm/schema";
 import { McpAccountAccessError } from "../accounts/authority";
 import {
   emptyMcpReview,
@@ -109,6 +109,13 @@ export class McpIntegrationService<Actor> {
     const definition: McpIntegrationDefinition = {
       ...input,
       reviewed: unchanged ? previous.reviewed : emptyMcpReview(),
+      ...(previous?.reviewPolicy
+        ? { reviewPolicy: previous.reviewPolicy }
+        : previous && Object.values(previous.reviewed).some((items) => items.length > 0)
+          ? { reviewPolicy: "custom" as const }
+          : !previous
+            ? { reviewPolicy: "uninitialized" as const }
+            : {}),
     };
     await this.definitions.put(definition, actor, previous ? mcpServerRevision(previous) : null);
     return definition;
@@ -181,9 +188,37 @@ export class McpIntegrationService<Actor> {
         "Server configuration changed during review."
       );
     }
-    const updated = { ...definition, reviewed: review };
+    const updated = { ...definition, reviewed: review, reviewPolicy: "custom" as const };
     await this.definitions.put(updated, actor, mcpServerRevision(definition));
     return updated;
+  }
+
+  async publishSetup(
+    definition: McpIntegrationDefinition,
+    expectedRevision: string | null,
+    actor: Actor
+  ): Promise<void> {
+    validateMcpIntegrationDefinition(definition);
+    for (const tool of definition.reviewed.tools) {
+      try {
+        ajv.compile(tool.inputSchema);
+      } catch {
+        throw new McpIntegrationError(
+          "unsupported",
+          "A discovered Tool has an unsupported input schema."
+        );
+      }
+    }
+    const put =
+      this.definitions.resumePut?.bind(this.definitions) ??
+      this.definitions.put.bind(this.definitions);
+    await put(definition, actor, expectedRevision);
+    if (mcpServerRevision(this.get(definition.server.id)) !== mcpServerRevision(definition)) {
+      throw new McpIntegrationError(
+        "unavailable",
+        "Integration publication has not become active."
+      );
+    }
   }
 
   async bind(

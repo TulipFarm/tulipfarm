@@ -11,6 +11,15 @@ function giveTheSheetARect() {
   return dialog;
 }
 
+it("uses its visible title as the accessible dialog name", () => {
+  render(
+    <Sheet open onClose={vi.fn()} title="Connect GitHub">
+      <p>Account setup</p>
+    </Sheet>
+  );
+  expect(screen.getByRole("dialog", { name: "Connect GitHub" })).toHaveClass("tf-sheet");
+});
+
 it("closes when the click lands on the backdrop", async () => {
   const onClose = vi.fn();
   render(

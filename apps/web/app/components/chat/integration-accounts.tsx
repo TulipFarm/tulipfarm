@@ -1,10 +1,13 @@
 import type { McpAccountSummary, McpIntegrationDefinition } from "@tulipfarm/schema";
+import { describeMcpAccess } from "@tulipfarm/schema/mcp-access";
 import { useEffect, useState } from "react";
+import { mcpAccessMessage } from "~/components/integrations/mcp-access-message";
 import { accountLabel, McpAccountSelection } from "~/components/integrations/mcp-account-selection";
 import { McpCapabilities } from "~/components/integrations/mcp-capabilities";
 import { McpContent } from "~/components/integrations/mcp-content";
 import { McpError, mcpError } from "~/components/integrations/mcp-form";
 import { Button } from "~/components/ui/button";
+import { Link } from "~/components/ui/link";
 import { getMcpChatAccount, listMcpAccounts, selectMcpChatAccount } from "~/lib/mcp-accounts";
 import { listMcpIntegrations } from "~/lib/mcp-integrations";
 import { useIsAdmin } from "~/lib/use-session-user";
@@ -115,11 +118,14 @@ export function ChatIntegrationAccounts({
               <span key={row.key} className="ml-2 inline-block break-all">
                 {row.label}:{" "}
                 {row.selected
-                  ? accountLabel(row.selected)
+                  ? accountLabel(row.selected, row.accounts)
                   : row.error
                     ? "Action required"
                     : "Selection required"}
                 {!row.definition.enabled ? " · Server disabled" : ""}
+                {row.definition.enabled && describeMcpAccess(row.definition).state !== "allowed"
+                  ? " · No access allowed"
+                  : ""}
               </span>
             ))}
           </summary>
@@ -135,6 +141,19 @@ export function ChatIntegrationAccounts({
                     {mcpError(row.error)}
                   </p>
                 ) : null}
+                {row.selected && !row.error && (
+                  <div className="space-y-1 text-xs">
+                    <p className="text-muted-foreground">
+                      {mcpAccessMessage(describeMcpAccess(row.definition))}
+                    </p>
+                    <Link
+                      to={`/integrations/${encodeURIComponent(row.key)}?account=${encodeURIComponent(row.selected.id)}`}
+                      className="underline"
+                    >
+                      Manage integration access
+                    </Link>
+                  </div>
+                )}
                 <McpAccountSelection
                   integrationKey={row.key}
                   integrationLabel={row.label}
@@ -174,7 +193,7 @@ export function ChatIntegrationAccounts({
                 {isAdmin && row.selected && !row.error && (
                   <details>
                     <summary className="cursor-pointer text-xs font-medium">
-                      Review capabilities with this Chat account
+                      Advanced access settings
                     </summary>
                     <fieldset disabled={disabled} className="mt-3">
                       <McpCapabilities

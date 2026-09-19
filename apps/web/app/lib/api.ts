@@ -5,6 +5,7 @@ import { randomUUID } from "./uuid";
 export const API_BASE = import.meta.env.VITE_API_URL ?? "http://localhost:4010";
 
 export class ApiError extends Error {
+  /** HTTP status, or 0 when the API fetch failed before receiving a response. */
   readonly status: number;
   // JSON Pointer to the offending field on a 422 (`{path}` from the API), so forms can map a
   // validation failure back onto the input that caused it. Undefined for non-validation errors.
@@ -20,6 +21,20 @@ export class ApiError extends Error {
     this.status = status;
     this.path = path;
     this.code = code;
+  }
+}
+
+async function fetchApi(url: string, init: RequestInit): Promise<Response> {
+  try {
+    return await fetch(url, init);
+  } catch (error) {
+    if (
+      init.signal?.aborted ||
+      ((error instanceof Error || error instanceof DOMException) && error.name === "AbortError")
+    ) {
+      throw error;
+    }
+    throw new ApiError(0, error instanceof Error ? error.message : "API request failed");
   }
 }
 
@@ -122,7 +137,7 @@ export async function apiGet<T>(path: string, init?: Pick<RequestInit, "signal">
   const headers: Record<string, string> = { Accept: "application/json" };
   applyAuth(headers);
 
-  const res = await fetch(`${API_BASE}${path}`, {
+  const res = await fetchApi(`${API_BASE}${path}`, {
     credentials: "include",
     headers,
     signal: init?.signal,
@@ -142,7 +157,7 @@ export async function apiWrite<T>(
   const headers = mutationHeaders();
   if (ifMatch !== undefined) headers["If-Match"] = `"${ifMatch}"`;
 
-  const res = await fetch(`${API_BASE}${path}`, {
+  const res = await fetchApi(`${API_BASE}${path}`, {
     method,
     credentials: "include",
     headers,
@@ -160,7 +175,7 @@ export async function apiCommand<T>(
 ): Promise<T> {
   const headers = mutationHeaders();
   headers["Idempotency-Key"] = idempotencyKey;
-  const res = await fetch(`${API_BASE}${path}`, {
+  const res = await fetchApi(`${API_BASE}${path}`, {
     method: "POST",
     credentials: "include",
     headers,
@@ -181,7 +196,7 @@ export async function apiSend(
   const headers = mutationHeaders();
   if (ifMatch !== undefined) headers["If-Match"] = `"${ifMatch}"`;
 
-  const res = await fetch(`${API_BASE}${path}`, {
+  const res = await fetchApi(`${API_BASE}${path}`, {
     method,
     credentials: "include",
     headers,
@@ -200,7 +215,7 @@ export async function apiDelete(path: string, ifMatch?: number): Promise<void> {
   if (csrf) headers["x-csrf-token"] = csrf;
   if (ifMatch !== undefined) headers["If-Match"] = `"${ifMatch}"`;
 
-  const res = await fetch(`${API_BASE}${path}`, {
+  const res = await fetchApi(`${API_BASE}${path}`, {
     method: "DELETE",
     credentials: "include",
     headers,
@@ -353,7 +368,7 @@ export async function changePassword(
 // exempts these paths for that reason (see `auth/csrf.ts`). Bodies carry the credential, so a
 // token never reaches a query string.
 async function postPreSession<T>(path: string, body: unknown): Promise<T> {
-  const res = await fetch(`${API_BASE}${path}`, {
+  const res = await fetchApi(`${API_BASE}${path}`, {
     method: "POST",
     credentials: "include",
     headers: { Accept: "application/json", "Content-Type": "application/json" },
@@ -380,7 +395,7 @@ export async function acceptInvite(token: string, password: string): Promise<Ses
 
 // Destroy the session + clear the cookie. Best-effort: ignores the response (logout is idempotent).
 export async function logout(): Promise<void> {
-  await fetch(`${API_BASE}/api/v1/auth/logout`, {
+  await fetchApi(`${API_BASE}/api/v1/auth/logout`, {
     method: "POST",
     credentials: "include",
     headers: mutationHeaders(),

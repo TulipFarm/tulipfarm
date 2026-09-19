@@ -471,7 +471,7 @@ export function messagesToTimeline(
           if (part.status === "running") part.status = "interrupted";
           if (part.approval?.status === "pending") delete part.approval;
         }
-      } else if (turnAttempt !== undefined) {
+      } else if (turnAttempt !== undefined && orderedParts === undefined) {
         for (const part of message.parts) {
           if (part.kind === "tool" && part.outcome === undefined) part.status = "running";
         }

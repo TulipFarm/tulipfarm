@@ -49,6 +49,11 @@ export interface McpDefinitionStore<Actor> {
     actor: Actor,
     expectedRevision?: string | null
   ): Promise<void>;
+  resumePut?(
+    definition: McpIntegrationDefinition,
+    actor: Actor,
+    expectedRevision: string | null
+  ): Promise<void>;
   remove(id: string, actor: Actor, expectedRevision?: string | null): Promise<void>;
 }
 
