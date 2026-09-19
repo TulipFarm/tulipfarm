@@ -1,0 +1,4 @@
+interface:
+  display_name: "TulipFarm Marketing"
+  short_description: "Design and write TulipFarm's public landing pages"
+  default_prompt: "Use $tulipfarm-marketing to design or update this TulipFarm landing page."

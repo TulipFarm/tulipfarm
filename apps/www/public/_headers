@@ -1,0 +1,28 @@
+# Distribution stays at the marketing origin, with inspectable UTF-8 bytes.
+/install.sh
+  Content-Type: text/plain; charset=utf-8
+
+/uninstall.sh
+  Content-Type: text/plain; charset=utf-8
+
+/install.ps1
+  Content-Type: text/plain; charset=utf-8
+
+/docker-compose.yml
+  Content-Type: text/plain; charset=utf-8
+
+/env.example
+  Content-Type: text/plain; charset=utf-8
+
+/deploy.txt
+  Content-Type: text/plain; charset=utf-8
+
+/kubernetes-values.yaml
+  Content-Type: text/plain; charset=utf-8
+
+/azure-containerapp.yaml
+  Content-Type: text/plain; charset=utf-8
+
+/schemas/*
+  Content-Type: application/json; charset=utf-8
+  Access-Control-Allow-Origin: *

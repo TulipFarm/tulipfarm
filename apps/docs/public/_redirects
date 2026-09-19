@@ -1,0 +1,15 @@
+# Documentation has no second marketing homepage.
+/ /docs 301
+
+# One owner for deployment and distribution, even on the documentation domain.
+/deploy https://tulipfarm.site/deploy 301
+/deploy/ https://tulipfarm.site/deploy 301
+/install.sh https://tulipfarm.site/install.sh 301
+/uninstall.sh https://tulipfarm.site/uninstall.sh 301
+/install.ps1 https://tulipfarm.site/install.ps1 301
+/docker-compose.yml https://tulipfarm.site/docker-compose.yml 301
+/env.example https://tulipfarm.site/env.example 301
+/deploy.txt https://tulipfarm.site/deploy.txt 301
+/kubernetes-values.yaml https://tulipfarm.site/kubernetes-values.yaml 301
+/azure-containerapp.yaml https://tulipfarm.site/azure-containerapp.yaml 301
+/schemas/* https://tulipfarm.site/schemas/:splat 301

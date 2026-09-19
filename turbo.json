@@ -8,6 +8,37 @@
     "scripts/uninstall.sh"
   ],
   "tasks": {
+    "@tulipfarm/docs#build": {
+      "dependsOn": ["^build"],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "$TURBO_ROOT$/deploy/contract.yml",
+        "$TURBO_ROOT$/deploy/targets/*/manifest.yml",
+        "$TURBO_ROOT$/scripts/public-site/**",
+        "$TURBO_ROOT$/scripts/generate-tool-docs.ts",
+        "$TURBO_ROOT$/packages/tool-host/src/**",
+        "$TURBO_ROOT$/packages/constants/src/site.ts",
+        "$TURBO_ROOT$/packages/deploy-render/src/**",
+        "$TURBO_ROOT$/packages/schema/src/**",
+        "$TURBO_ROOT$/packages/tsconfig/*.json"
+      ],
+      "outputs": [".next/**", "!.next/cache/**", "out/**"]
+    },
+    "@tulipfarm/www#build": {
+      "dependsOn": ["^build"],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "$TURBO_ROOT$/deploy/**",
+        "$TURBO_ROOT$/scripts/public-site/**",
+        "$TURBO_ROOT$/packages/constants/src/site.ts",
+        "$TURBO_ROOT$/packages/deploy-render/src/**",
+        "$TURBO_ROOT$/packages/schema/src/**",
+        "$TURBO_ROOT$/packages/surface/src/**",
+        "$TURBO_ROOT$/packages/surface-web/src/**",
+        "$TURBO_ROOT$/packages/tsconfig/*.json"
+      ],
+      "outputs": [".next/**", "!.next/cache/**", "out/**"]
+    },
     "build": {
       "dependsOn": ["^build"],
       "outputs": ["dist/**", "build/**", ".next/**", "!.next/cache/**", "out/**"]

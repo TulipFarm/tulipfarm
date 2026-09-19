@@ -1,0 +1,10 @@
+# Keep documentation pathnames; fragments are carried by the browser across the redirect.
+/docs https://docs.tulipfarm.site/docs 301
+/docs.html https://docs.tulipfarm.site/docs 301
+/docs/* https://docs.tulipfarm.site/docs/:splat 301
+/api/search https://docs.tulipfarm.site/api/search 301
+/api/search/* https://docs.tulipfarm.site/api/search/:splat 301
+/og/docs/* https://docs.tulipfarm.site/og/docs/:splat 301
+/llms.txt https://docs.tulipfarm.site/llms.txt 301
+/llms-full.txt https://docs.tulipfarm.site/llms-full.txt 301
+/llms.mdx/* https://docs.tulipfarm.site/llms.mdx/:splat 301

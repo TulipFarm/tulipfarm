@@ -1,11 +1,11 @@
 import type { MetadataRoute } from "next";
-import { SITE_URL } from "@/lib/shared";
+import { DOCS_URL } from "@/lib/shared";
 
 export const dynamic = "force-static";
 
 export default function robots(): MetadataRoute.Robots {
   return {
     rules: { userAgent: "*", allow: "/" },
-    sitemap: `${SITE_URL}/sitemap.xml`,
+    sitemap: `${DOCS_URL}/sitemap.xml`,
   };
 }

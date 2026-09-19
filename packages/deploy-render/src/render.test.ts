@@ -115,7 +115,7 @@ describe("renderDeploymentSurfaces", () => {
       );
       expect(
         onDisk,
-        `${artifact.target}/${artifact.filename} is stale. Run: pnpm --filter @tulipfarm/docs exec tsx scripts/generate-deploy-docs.ts`
+        `${artifact.target}/${artifact.filename} is stale. Run: pnpm --filter @tulipfarm/www exec tsx scripts/generate-deploy-assets.ts`
       ).toBe(artifact.content);
     }
   });

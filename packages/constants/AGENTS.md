@@ -12,7 +12,7 @@ Shared, environment-aware, non-sensitive constants and process-wide defaults.
 | Path | Owns |
 | --- | --- |
 | `src/index.ts` | Bot git identity, `DEPLOYMENT_BUSINESS_ID`, and public exports. |
-| `src/site.ts` | Browser-safe `@tulipfarm/constants/site` subpath: canonical public site and Pack catalog URLs; no environment reads or imports. |
+| `src/site.ts` | Import-free browser-safe `@tulipfarm/constants/site`: marketing/distribution `SITE_URL`, documentation `DOCS_URL`, and Pack catalog URL. |
 | `src/pg-pool.ts` | Shared `pg` pool limits and timeout defaults. |
 
 ## Rules

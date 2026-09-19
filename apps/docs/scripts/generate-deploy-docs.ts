@@ -7,57 +7,21 @@
  * this script does every read and every write.
  */
 
-import { mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
-import { dirname, join, resolve } from "node:path";
-import { fileURLToPath, pathToFileURL } from "node:url";
-import {
-  type DeploymentRenderInput,
-  renderDeploymentSurfaces,
-  type TargetSource,
-} from "@tulipfarm/deploy-render";
-import { SITE_URL } from "../lib/shared";
+import { mkdirSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { pathToFileURL } from "node:url";
+import { renderDeploymentSurfaces } from "@tulipfarm/deploy-render";
+import { collectDeploymentInput, REPO_ROOT } from "../../../scripts/public-site/deployment-input";
 
-const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
-const DEPLOY_DIR = join(REPO_ROOT, "deploy");
 const CONTENT_DIR = join(REPO_ROOT, "apps/docs/content/docs");
-/** Published byte-identical from the repo root by sync-public-assets.mjs, served at /deploy.txt. */
-const PROMPT_FILE = join(DEPLOY_DIR, "deploy.txt");
-
-/** Read the manifest directory from disk into the pure renderer's input, targets sorted by slug. */
-export function collectDeploymentInput(): DeploymentRenderInput {
-  const targetsDir = join(DEPLOY_DIR, "targets");
-  const targets: TargetSource[] = readdirSync(targetsDir, { withFileTypes: true })
-    .filter((entry) => entry.isDirectory())
-    .map((entry) => entry.name)
-    .sort()
-    .map((slug) => ({
-      slug,
-      source: readFileSync(join(targetsDir, slug, "manifest.yml"), "utf8"),
-    }));
-  return {
-    contract: readFileSync(join(DEPLOY_DIR, "contract.yml"), "utf8"),
-    targets,
-  };
-}
 
 export function generateDeployDocs(): number {
-  const { pages, prompt, artifacts } = renderDeploymentSurfaces(collectDeploymentInput());
+  const { pages } = renderDeploymentSurfaces(collectDeploymentInput());
   for (const page of pages) {
     const destination = join(CONTENT_DIR, page.path);
     mkdirSync(dirname(destination), { recursive: true });
     writeFileSync(destination, page.content);
   }
-  // A generated artifact has no published source to reference, so it is written here beside its
-  // target manifest and served from there. A referenced artifact is left untouched — it is already
-  // published byte-identical.
-  for (const artifact of artifacts) {
-    if (!("content" in artifact)) continue;
-    const destination = join(DEPLOY_DIR, "targets", artifact.target, artifact.filename);
-    writeFileSync(destination, artifact.content.replaceAll("{{SITE_URL}}", SITE_URL));
-  }
-  // The renderer stays domain-free; the site URL is resolved here, the same way the MDX pipeline
-  // resolves `{{SITE_URL}}` at build, so deploy.txt serves absolute links to an LLM with no site.
-  writeFileSync(PROMPT_FILE, prompt.replaceAll("{{SITE_URL}}", SITE_URL));
   return pages.length;
 }
 

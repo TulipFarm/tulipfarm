@@ -1,27 +1,12 @@
-# Cloudflare Pages header rules. Serve the install assets as plain text so a browser
-# renders them for inspection instead of downloading them — people should be able to read
-# a script before piping it to a shell.
+/api/search
+  Content-Type: application/json; charset=utf-8
+  Access-Control-Allow-Origin: *
 
-/install.sh
+/llms.txt
   Content-Type: text/plain; charset=utf-8
 
-/uninstall.sh
+/llms-full.txt
   Content-Type: text/plain; charset=utf-8
 
-/install.ps1
-  Content-Type: text/plain; charset=utf-8
-
-/docker-compose.yml
-  Content-Type: text/plain; charset=utf-8
-
-/env.example
-  Content-Type: text/plain; charset=utf-8
-
-/deploy.txt
-  Content-Type: text/plain; charset=utf-8
-
-/kubernetes-values.yaml
-  Content-Type: text/plain; charset=utf-8
-
-/azure-containerapp.yaml
-  Content-Type: text/plain; charset=utf-8
+/llms.mdx/*
+  Content-Type: text/markdown; charset=utf-8

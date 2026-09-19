@@ -124,6 +124,8 @@ export const ARCHITECTURE_CONFIG: ArchitectureConfig = {
     // Foundations — no TulipFarm runtime package.
     schema: [],
     observability: [],
+    constants: [],
+    "deploy-render": ["schema"],
     // Storage/authz sit directly on the foundations.
     storage: ["schema", "observability", "surface"],
     authz: ["schema", "observability"],
@@ -280,6 +282,8 @@ export const ARCHITECTURE_CONFIG: ArchitectureConfig = {
     ],
     // `apps/web` uses shared wire schemas and presentation-only packages.
     web: ["files", "schema", "surface", "surface-web", "surface-slack", "surface-github", "editor"],
+    docs: ["constants", "deploy-render"],
+    www: ["constants", "deploy-render", "schema", "surface", "surface-web"],
     // `apps/eval` drives the real Agent loop and Context assembler against a versioned Corpus.
     // It is an app, not a package, because a package may not import from `apps/*` and the L3
     // tier has to reach the same executor a real turn runs through.

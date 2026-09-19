@@ -2,8 +2,8 @@ import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { SITE_URL } from "../apps/docs/lib/shared";
-import { PUBLIC_ASSETS } from "../apps/docs/scripts/sync-public-assets.mjs";
+import { PUBLIC_ASSETS } from "../apps/www/scripts/sync-public-assets.mjs";
+import { DOCS_URL, SITE_URL } from "../packages/constants/src/site";
 
 function repoRoot(): string {
   let directory = __dirname;
@@ -49,6 +49,7 @@ describe("site URL stays in one place", () => {
       "README.md",
       "apps/docs/README.md",
       "apps/docs/AGENTS.md",
+      "apps/www/README.md",
       "scripts/install.sh",
       "scripts/uninstall.sh",
       "scripts/install.ps1",
@@ -88,7 +89,7 @@ describe("published install assets", () => {
     // Without an explicit rule Cloudflare Pages guesses from the extension: a .yaml or an
     // extensionless script downloads instead of rendering, and a .txt without a charset can
     // be decoded as ISO-8859-1, which mojibakes the em-dashes in deploy.txt.
-    const rules = readFileSync(join(ROOT, "apps/docs/public/_headers"), "utf8");
+    const rules = readFileSync(join(ROOT, "apps/www/public/_headers"), "utf8");
     for (const served of Object.keys(PUBLIC_ASSETS)) {
       expect(rules, `/${served} has no Content-Type rule in public/_headers`).toContain(
         `/${served}\n  Content-Type: text/plain; charset=utf-8`
@@ -100,11 +101,36 @@ describe("published install assets", () => {
     // A static export writes an RSC payload beside every route as `<route>.txt`. The `/deploy`
     // wizard therefore emits `out/deploy.txt`, which overwrote the published `/deploy.txt`
     // prompt with React flight data until the build re-copied the assets last.
-    const build = JSON.parse(readFileSync(join(ROOT, "apps/docs/package.json"), "utf8")).scripts
+    const build = JSON.parse(readFileSync(join(ROOT, "apps/www/package.json"), "utf8")).scripts
       .build;
     const afterNextBuild = build.slice(build.indexOf("next build"));
     expect(afterNextBuild, "sync-public-assets must run again after next build").toContain(
       "sync-public-assets.mjs --out"
     );
+  });
+});
+
+describe("public site ownership", () => {
+  it("redirects legacy reading surfaces permanently to the documentation origin", () => {
+    const rules = readFileSync(join(ROOT, "apps/www/public/_redirects"), "utf8");
+    for (const path of ["/docs", "/api/search", "/llms.txt", "/llms-full.txt"]) {
+      expect(rules).toContain(`${path} ${DOCS_URL}${path} 301`);
+    }
+    for (const path of ["/docs", "/og/docs", "/llms.mdx"]) {
+      expect(rules).toContain(`${path}/* ${DOCS_URL}${path}/:splat 301`);
+    }
+    expect(rules).toContain(`/docs.html ${DOCS_URL}/docs 301`);
+    expect(rules).not.toMatch(/^\/\*\s/m);
+  });
+
+  it("leads the docs root to its index without redirecting documentation back to marketing", () => {
+    const rules = readFileSync(join(ROOT, "apps/docs/public/_redirects"), "utf8");
+    expect(rules).toMatch(/^\/ \/docs 301$/m);
+    expect(rules).not.toMatch(/^\/docs(?:\/|\s)/m);
+    expect(rules).not.toMatch(/^\/\*\s/m);
+    for (const path of Object.keys(PUBLIC_ASSETS)) {
+      expect(rules).toContain(`/${path} ${SITE_URL}/${path} 301`);
+    }
+    expect(rules).toContain(`/schemas/* ${SITE_URL}/schemas/:splat 301`);
   });
 });
