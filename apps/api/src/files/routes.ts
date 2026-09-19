@@ -117,6 +117,10 @@ async function sendPage(
       ? await deps.knowledge.indexedIds(result.files.map((file) => file.id))
       : undefined;
   const ownerNames = await resolveOwnerNames(result.files, deps.principalNames);
+  const knowledgeReceipts =
+    deps.knowledge && result.shareCounts
+      ? await deps.knowledge.receipts(result.files.map((file) => file.id))
+      : undefined;
   // Returns the reply rather than resolving `undefined`: an async handler that resolves undefined
   // after calling `reply.send()` leaves Fastify unsure whether the reply was handled, and once the
   // payload is large enough for compression to turn it into a stream that ambiguity truncates the
@@ -126,6 +130,7 @@ async function sendPage(
       ...result,
       ownerNames,
       ...(knowledgeIds === undefined ? {} : { knowledgeIds }),
+      ...(knowledgeReceipts === undefined ? {} : { knowledgeReceipts }),
     })
   );
 }
@@ -892,8 +897,8 @@ export function registerFileRoutes(
           id,
           principal.id,
           expectedRevision,
-          async () => {
-            await deps.knowledge?.remove(id);
+          async (tx) => {
+            await deps.knowledge?.remove(id, tx);
           },
           ownershipOperationId
         );
@@ -1134,13 +1139,16 @@ export function registerFileRoutes(
           : undefined;
         const inKnowledge =
           deps.knowledge && owned ? await deps.knowledge.isIndexed(id) : undefined;
+        const knowledgeReceipt =
+          deps.knowledge && owned ? (await deps.knowledge.receipts([id])).get(id) : undefined;
         return reply.send(
           serializeFile(
             file,
             shareCount,
             inKnowledge,
             (await deps.principalNames([file.ownerPrincipalId])).get(file.ownerPrincipalId) ?? null,
-            owned
+            owned,
+            knowledgeReceipt
           )
         );
       } catch (error) {

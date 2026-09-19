@@ -8,7 +8,8 @@
  * absence must be impossible rather than merely unlikely.
  */
 
-import { describe, expect, it } from "vitest";
+import { FileError, FileKnowledgeIndexRepo, renderDocument } from "@tulipfarm/files";
+import { describe, expect, it, vi } from "vitest";
 import { FILE_SPACE_NAME, type FileIndexDeps, handleFileIndexJob } from "./file-index";
 
 const JOB = {
@@ -51,17 +52,22 @@ function deps(
     deps: {
       files: {
         read: async () => {
-          if (overrides.missing) throw new Error("not_found");
+          if (overrides.missing) throw new FileError("not_found", "File not found");
           return {
             id: JOB.fileId,
             filename: "handbook.txt",
             mediaType: overrides.mediaType ?? "text/plain",
             currentVersionId: JOB.versionId,
+            archivedAt: null,
             knowledgeRequestedAt: overrides.requested === false ? null : new Date(),
           } as never;
         },
         knowledgeRequested: async () => overrides.stillRequested !== false,
-        content: async () => ({ body: bytes(overrides.text ?? "refunds take 14 days") }) as never,
+        content: async () =>
+          ({
+            file: { currentVersionId: JOB.versionId },
+            body: bytes(overrides.text ?? "refunds take 14 days"),
+          }) as never,
         readers: async () => {
           const first = overrides.readers ?? [{ kind: "user" as const, id: "owner" }];
           if (calls.readers++ === 0 || overrides.readersAfter === undefined) return first;
@@ -88,7 +94,114 @@ function deps(
   };
 }
 
+describe("refresh publication receipts", () => {
+  const job = { ...JOB, requestId: "request-1" };
+  const claim = { ...job, attempt: 1 };
+
+  function refresh(overrides: Parameters<typeof deps>[0] = {}) {
+    const base = deps(overrides);
+    const requests = new FileKnowledgeIndexRepo({
+      query: async () => {
+        throw new Error("unexpected database access");
+      },
+    });
+    vi.spyOn(requests, "claim").mockResolvedValue(claim);
+    const settle = vi.spyOn(requests, "settle").mockResolvedValue();
+    const publish = vi.fn(async () => ({ pageId: "page-1", truncated: false }));
+    return {
+      ...base,
+      requests,
+      publish,
+      settle,
+      deps: { ...base.deps, publication: { requests, publish } } satisfies FileIndexDeps,
+    };
+  }
+
+  it("publishes only through the atomic current-request gate", async () => {
+    const h = refresh();
+    expect(await handleFileIndexJob(job, h.deps)).toEqual({
+      kind: "indexed",
+      pageId: "page-1",
+      truncated: false,
+    });
+    expect(h.publish).toHaveBeenCalledWith(claim, {
+      text: "refunds take 14 days",
+      truncated: false,
+      spaceId: "space-1",
+    });
+    expect(h.ingested).toHaveLength(0);
+    expect(h.settle).not.toHaveBeenCalled();
+  });
+
+  it("preserves the previous Page on an empty conversion and records refusal", async () => {
+    const h = refresh({ text: " " });
+    expect(await handleFileIndexJob(job, h.deps)).toEqual({
+      kind: "skipped",
+      reason: "no_text",
+    });
+    expect(h.deleted).toHaveLength(0);
+    expect(h.publish).not.toHaveBeenCalled();
+    expect(h.settle).toHaveBeenCalledWith(claim, "refused", "no_text");
+  });
+
+  it("records a queued retry before exhaustion and a terminal failure afterwards", async () => {
+    const h = refresh();
+    h.publish.mockRejectedValue(new Error("database unavailable"));
+    await expect(handleFileIndexJob(job, h.deps, undefined, false)).rejects.toThrow(
+      "database unavailable"
+    );
+    expect(h.settle).toHaveBeenLastCalledWith(claim, "queued", "retry_pending");
+    await expect(handleFileIndexJob(job, h.deps, undefined, true)).rejects.toThrow(
+      "database unavailable"
+    );
+    expect(h.settle).toHaveBeenLastCalledWith(claim, "failed", "index_failed");
+    expect(h.deleted).toHaveLength(0);
+  });
+
+  it("does not extract or publish when a newer request already owns the File", async () => {
+    const h = refresh();
+    vi.mocked(h.requests.claim).mockResolvedValue(null);
+    const content = vi.spyOn(h.deps.files, "content");
+    expect(await handleFileIndexJob(job, h.deps)).toEqual({
+      kind: "skipped",
+      reason: "changed",
+    });
+    expect(content).not.toHaveBeenCalled();
+    expect(h.publish).not.toHaveBeenCalled();
+  });
+
+  it("does not mistake an operational read failure for a deleted File", async () => {
+    const h = refresh();
+    vi.spyOn(h.deps.files, "read").mockRejectedValue(new Error("database unavailable"));
+    await expect(handleFileIndexJob(job, h.deps)).rejects.toThrow("database unavailable");
+    expect(h.settle).toHaveBeenCalledWith(claim, "failed", "index_failed");
+  });
+});
+
 describe("indexing a File", () => {
+  it("indexes DOCX content beyond the old preview ceiling with the live File readers", async () => {
+    const document = await renderDocument({
+      format: "docx",
+      content: `${Array.from({ length: 405 }, (_, index) => `Paragraph ${index}.`).join("\n\n")}\n\nRenewal approval lasts 83 days.`,
+    });
+    const { deps: original, ingested } = deps({ mediaType: document.mediaType });
+    const d: FileIndexDeps = {
+      ...original,
+      files: {
+        ...original.files,
+        content: async () =>
+          ({
+            body: (async function* () {
+              yield document.bytes;
+            })(),
+          }) as never,
+      },
+    };
+    expect(await handleFileIndexJob(JOB, d)).toMatchObject({ kind: "indexed", truncated: false });
+    expect(ingested[0]?.content).toContain("Renewal approval lasts 83 days.");
+    expect(ingested[0]?.readers).toEqual([{ kind: "user", id: "owner" }]);
+  });
+
   it("indexes the extracted text under the File's own readers", async () => {
     const { deps: d, ingested } = deps({ readers: [{ kind: "user", id: "owner" }] });
     const outcome = await handleFileIndexJob(JOB, d);
@@ -207,7 +320,7 @@ describe("where an indexed File lands", () => {
       files: {
         ...d.files,
         readers: async () => {
-          if (seen++ > 0) throw new Error("not_found");
+          if (seen++ > 0) throw new FileError("not_found", "File not found");
           return [{ kind: "user" as const, id: "owner" }];
         },
       },
@@ -227,7 +340,7 @@ describe("where an indexed File lands", () => {
       files: {
         ...d.files,
         read: async (...args: Parameters<FileIndexDeps["files"]["read"]>) => {
-          if (reads++ > 0) throw new Error("not_found");
+          if (reads++ > 0) throw new FileError("not_found", "File not found");
           return d.files.read(...args);
         },
       },
@@ -250,7 +363,7 @@ describe("where an indexed File lands", () => {
           reads += 1;
           // 1: the opening read. 2: the post-ingest recheck, which reports a newer version and so
           // sends the job round again. 3: the recursion's opening read, by which point it is gone.
-          if (reads >= 3) throw new Error("not_found");
+          if (reads >= 3) throw new FileError("not_found", "File not found");
           const file = await d.files.read(...args);
           return reads === 2 ? ({ ...file, currentVersionId: "version-2" } as never) : file;
         },

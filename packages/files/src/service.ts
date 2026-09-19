@@ -14,7 +14,7 @@
  */
 
 import type { TeamAssetAccessLevel, TeamAssetOwner } from "@tulipfarm/schema";
-import type { BlobPort, BlobRef } from "@tulipfarm/storage";
+import type { BlobPort, BlobRef, Queryable } from "@tulipfarm/storage";
 import { generatedAudience, roleGrantees } from "./audience";
 import { boundStoredImage, type ImageBoundPolicy } from "./bound";
 import { normalizeFilename } from "./filename";
@@ -996,7 +996,7 @@ export class FileService {
     id: string,
     ownerPrincipalId: string
   ): Promise<readonly FileReader[]> {
-    await this.readActiveAsEditor(businessId, id, ownerPrincipalId);
+    await this.readActiveAsOwner(businessId, id, ownerPrincipalId);
     await this.deps.repo.setKnowledgeRequested(businessId, id, new Date());
     return await this.readers(businessId, id, ownerPrincipalId);
   }
@@ -1010,10 +1010,11 @@ export class FileService {
   async clearKnowledgeRequest(
     businessId: string,
     id: string,
-    ownerPrincipalId: string
+    ownerPrincipalId: string,
+    afterWithdraw?: (tx: Queryable) => Promise<void>
   ): Promise<void> {
-    await this.readActiveAsEditor(businessId, id, ownerPrincipalId);
-    await this.deps.repo.setKnowledgeRequested(businessId, id, null);
+    await this.readActiveAsOwner(businessId, id, ownerPrincipalId);
+    await this.deps.repo.setKnowledgeRequested(businessId, id, null, afterWithdraw);
   }
 
   /** Whether the owner's request to index this File still stands, for the job that acts on it. */
@@ -1119,7 +1120,7 @@ export class FileService {
     id: string,
     ownerPrincipalId: string,
     expectedRevision: number,
-    beforeArchive?: () => Promise<void>,
+    beforeArchive?: (tx: Queryable) => Promise<void>,
     ownershipOperationId?: string
   ): Promise<FileRecord> {
     const file = await this.readAsOwner(businessId, id, ownerPrincipalId);
@@ -1135,8 +1136,13 @@ export class FileService {
         ownershipOperationId
       );
     }
-    await beforeArchive?.();
-    const archived = await this.deps.repo.setArchived(businessId, id, expectedRevision, true);
+    const archived = await this.deps.repo.setArchived(
+      businessId,
+      id,
+      expectedRevision,
+      true,
+      beforeArchive
+    );
     if (archived !== null) return archived;
     throw new FileError("conflict", "the File changed before it could be archived");
   }

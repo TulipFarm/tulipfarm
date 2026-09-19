@@ -29,6 +29,10 @@ reconciliation, turn execution, projections, and outbox delivery.
 | `src/job-consumers.ts` | API-scheduled pg-boss maintenance, retention, indexing, and product telemetry dispatch. |
 | `src/tools/` | In-process Tool host for co-locatable families, and the routing dispatcher. |
 | `src/files/`, `src/knowledge/` | The worker's own `FileService` and `KnowledgeService`, and the `file-index` job that extracts a File's text into Knowledge. |
+| `src/knowledge/file-index-publication.ts` | Refresh publication: lock the current File/request/attempt and ownership, then atomically replace Page/search data and settle the receipt. |
+| `@tulipfarm/files` document runner | DOCX/XLSX/PPTX conversion in a private native child; shutdown awaits termination/reaping, Run and Tool aborts propagate to extraction. |
+| `src/knowledge/office-file-index.test.ts` | Real independent Office fixtures prove late worksheet values and labeled speaker notes reach Knowledge with File readers. |
+| `src/internal/attachment-refusal.test.ts` | Real extraction through Chat execution: ordinary refusal completes a participant reply; native infrastructure faults remain distinct. |
 | `src/knowledge/mcp-page-gate.ts` | Source-backed Page reads call the service-only fresh MCP gate with the actual Run reader; missing callbacks deny. |
 | `src/recovery/` | Reconciliation helpers for abandoned or parked work. |
 | `test/process/` | Real bundled-worker process tests over PGlite socket. |
@@ -76,6 +80,8 @@ reconciliation, turn execution, projections, and outbox delivery.
   or neither. Every refusal is an outcome, never a throw: a File deleted while its job queued must
   not retry forever. It reconciles after writing as well as before: until the Page exists, a
   delete, a withdrawal or a revoke has nothing to act on, so all three are re-asked once it does.
+  Production File indexing always wires the receipt publication port. Refusals preserve the prior
+  same-version result; retryable faults stay queued until the last attempt records failure.
 - Routine execution reads only the Run's exact signed bundle and immutable request Artifact.
 - Routine replay safety depends on durable occurrence keys and immutable Tool outputs. Confirmed
   legacy effects without output park; `awaiting_child` re-enters only its bound child lookup.

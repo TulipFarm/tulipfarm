@@ -17,6 +17,7 @@ import { buildWorkerFileService } from "./files/service";
 import type { InternalApiClient } from "./internal/client";
 import type { HttpTurnHost } from "./internal/turn-host";
 import { startJobConsumers } from "./job-consumers";
+import { buildFileIndexPublication } from "./knowledge/file-index-publication";
 import { buildWorkerKnowledgeService } from "./knowledge/service";
 import { runMemoryCuration } from "./memory-curation/run";
 import { TaskSignalsGatherer } from "./reconcile/task-signals";
@@ -66,6 +67,11 @@ export function startMaintenanceConsumers(o: MaintenanceConsumerOptions): Promis
     // services are the same ones the hosted Tools use, so an indexed passage and a passage read
     // in chat can never disagree about who may see it.
     fileIndex: {
+      publication: buildFileIndexPublication({
+        db: o.pool,
+        blobs: o.blobs,
+        embeddings: o.embeddings,
+      }),
       files: buildWorkerFileService({ db: o.pool, transactions: o.transactions, blobs: o.blobs }),
       knowledge: buildWorkerKnowledgeService({
         db: o.pool,

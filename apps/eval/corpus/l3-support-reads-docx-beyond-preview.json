@@ -1,0 +1,45 @@
+{
+  "id": "l3-support-reads-docx-beyond-preview",
+  "tier": "l3",
+  "agent": "support",
+  "input": [
+    {
+      "role": "user",
+      "content": [
+        {
+          "type": "text",
+          "text": "Read the attached warranty policy and tell me the claim window stated at the end."
+        },
+        {
+          "type": "file",
+          "fileId": "file-long-warranty",
+          "mediaType": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+          "name": "warranty-policy.docx"
+        }
+      ]
+    }
+  ],
+  "attachments": [
+    {
+      "fileId": "file-long-warranty",
+      "mediaType": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      "name": "warranty-policy.docx",
+      "content": "Warranty claims must be filed within 73 days of delivery.",
+      "docx": { "precedingParagraphs": 400 }
+    }
+  ],
+  "script": [
+    { "kind": "text", "text": "Warranty claims must be filed within 73 days of delivery." }
+  ],
+  "expect": [
+    {
+      "kind": "provider_prompt_contains",
+      "text": "Warranty claims must be filed within 73 days of delivery."
+    },
+    { "kind": "provider_prompt_omits_file", "fileId": "file-long-warranty" },
+    { "kind": "output_contains", "text": "73 days" },
+    { "kind": "run_status", "status": "succeeded" },
+    { "kind": "turn_status", "status": "succeeded" },
+    { "kind": "loop_status", "status": "completed" }
+  ]
+}

@@ -235,22 +235,31 @@ export async function startJobConsumers(options: JobConsumerOptions): Promise<Pg
   if (options.fileIndex) {
     const fileIndex = options.fileIndex;
     await boss.createQueue(FILE_INDEX_QUEUE);
-    await boss.work<FileIndexJob>(FILE_INDEX_QUEUE, async (jobs) => {
-      try {
-        for (const job of jobs) {
-          const outcome = await handleFileIndexJob(job.data, fileIndex);
-          // A skip is reported rather than thrown. Every reason for one is a fact about the File a
-          // retry cannot change, so failing the job would only re-read the same bytes three times
-          // before giving up, and say nothing about why to whoever asked for the indexing.
-          if (outcome.kind === "skipped") {
-            options.log?.info?.(`file ${job.data.fileId} not indexed: ${outcome.reason}`);
+    await boss.work<FileIndexJob, void, { includeMetadata: true }>(
+      FILE_INDEX_QUEUE,
+      { includeMetadata: true },
+      async (jobs) => {
+        try {
+          for (const job of jobs) {
+            const outcome = await handleFileIndexJob(
+              job.data.requestId ? job.data : { ...job.data, legacyJobId: job.id },
+              fileIndex,
+              undefined,
+              job.retryCount >= job.retryLimit
+            );
+            // A skip is reported rather than thrown. Every reason for one is a fact about the File a
+            // retry cannot change, so failing the job would only re-read the same bytes three times
+            // before giving up, and say nothing about why to whoever asked for the indexing.
+            if (outcome.kind === "skipped") {
+              options.log?.info?.(`file ${job.data.fileId} not indexed: ${outcome.reason}`);
+            }
           }
+        } catch (error) {
+          logHandlerThrew(options.log, FILE_INDEX_QUEUE, error);
+          throw error;
         }
-      } catch (error) {
-        logHandlerThrew(options.log, FILE_INDEX_QUEUE, error);
-        throw error;
       }
-    });
+    );
     logSubscribed(options.log, FILE_INDEX_QUEUE);
   }
 

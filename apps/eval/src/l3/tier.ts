@@ -23,7 +23,7 @@ import {
   type ModelUsage,
   type ToolDispatchPort,
 } from "@tulipfarm/agent-runtime";
-import { assertModelOutputComplete } from "@tulipfarm/model-adapter";
+import { assertModelOutputComplete, splitPrompt } from "@tulipfarm/model-adapter";
 import { INVOKE_STATE_KEY } from "@tulipfarm/run-kernel";
 import {
   createChatExecutor,
@@ -36,8 +36,15 @@ import type { EvalCase, JourneyTurn } from "../case.ts";
 import { toolDispatcher } from "../dispatch.ts";
 import type { EvalSoul } from "../eval-soul.ts";
 import type { GuardrailDecision } from "../guardrails.ts";
+import {
+  observePdfInputs,
+  observeProviderPromptFiles,
+  observeProviderPromptText,
+} from "../provider-prompt.ts";
 import type { ModelBinding } from "../runner.ts";
+import type { Observation } from "../scorer.ts";
 import { addSpend, mergeSpend, NO_SPEND, type Spend } from "../spend.ts";
+import { evalAttachments } from "./attachments.ts";
 import { evalTurnContext } from "./context.ts";
 import { type EvalDatabase, openEvalDatabase } from "./database.ts";
 import { type DoctorEvent, runDoctor } from "./doctor.ts";
@@ -126,6 +133,10 @@ export interface PersistedTurn {
   readonly toolDenials: readonly { readonly name: string; readonly reason: string }[];
   /** The prompt the real Context assembler produced, so `prompt_contains` works at L3 too. */
   readonly systemPrompt: string;
+  readonly providerPromptText?: string;
+  readonly modelCallCount?: number;
+  readonly providerPromptFiles?: Observation["providerPromptFiles"];
+  readonly pdfInputs?: Observation["pdfInputs"];
   /**
    * What the Turn billed the seat.
    *
@@ -233,6 +244,10 @@ async function readBack(
     doctorEvents: readonly DoctorEvent[];
     toolDenials: readonly { readonly name: string; readonly reason: string }[];
     systemPrompt: string;
+    providerPromptText?: string;
+    modelCallCount: number;
+    providerPromptFiles: Observation["providerPromptFiles"];
+    pdfInputs: Observation["pdfInputs"];
     spend: Spend;
   }
 ): Promise<PersistedTurn> {
@@ -300,6 +315,10 @@ async function readBack(
     doctorEvents: observed.doctorEvents,
     toolDenials: observed.toolDenials,
     systemPrompt: observed.systemPrompt,
+    providerPromptText: observed.providerPromptText,
+    modelCallCount: observed.modelCallCount,
+    providerPromptFiles: observed.providerPromptFiles,
+    pdfInputs: observed.pdfInputs,
   };
 }
 
@@ -386,6 +405,7 @@ async function runOneTurn(
     const usesResourceFixture = options.evalCase.tools?.some(
       (tool) => tool.name === CREATE_RESOURCE_TYPE_TOOL
     );
+    const attachments = evalAttachments(options.evalCase);
     const toolResults: ToolResult[] = [];
     const tools = routeTools(
       scripted,
@@ -393,6 +413,7 @@ async function runOneTurn(
         [CREATE_RESOURCE_TYPE_TOOL]: soulWrites.resourceTypes,
         [SOUL_WRITE_TOOL]: soulWrites.port,
         [FILE_CREATE_TOOL]: files.port,
+        ...(attachments.tools === undefined ? {} : { file_read: attachments.tools }),
         ...(usesResourceFixture
           ? {
               [RECORD_CREATE_TOOL]: resourceRecords,
@@ -408,6 +429,19 @@ async function runOneTurn(
     // only seam where an L3 Turn's usage can be observed at all.
     let spend = NO_SPEND;
     const port = options.binding.create(options.evalCase);
+    let providerPromptText: string | undefined;
+    let modelCallCount = 0;
+    const providerPromptFiles: NonNullable<Observation["providerPromptFiles"]>[number][] = [];
+    const pdfInputs: NonNullable<Observation["pdfInputs"]>[number][] = [];
+    const observeRequest = (request: Parameters<ModelPort["invoke"]>[0]) => {
+      modelCallCount += 1;
+      pdfInputs.push(...observePdfInputs(request.attachments));
+      const converted = splitPrompt(request.messages, request.attachments);
+      providerPromptText ??= observeProviderPromptText(converted.messages, converted.instructions);
+      providerPromptFiles.push(
+        ...observeProviderPromptFiles(converted.messages, attachments.declared)
+      );
+    };
     const stream = port.stream?.bind(port);
     let resumed = false;
     const checkModelFault = () => {
@@ -451,6 +485,7 @@ async function runOneTurn(
       latestModelCallReceipt: () => receipt,
       invoke: async (request) => {
         checkModelFault();
+        observeRequest(request);
         const result = await port.invoke(request);
         recordUsage(result.usage);
         recordReceipt(result.usage);
@@ -462,6 +497,7 @@ async function runOneTurn(
         : {
             async *stream(request) {
               checkModelFault();
+              observeRequest(request);
               for await (const chunk of stream(request)) {
                 if (chunk.kind === "completed") {
                   recordUsage(chunk.result.usage);
@@ -490,6 +526,7 @@ async function runOneTurn(
           : mcp.waits,
       checkpoints,
       model: metered,
+      attachments: attachments.port,
       log: { warn: () => {} },
     });
 
@@ -575,6 +612,10 @@ async function runOneTurn(
         .slice(deniedBefore)
         .map((reason) => ({ name: SOUL_WRITE_TOOL, reason })),
       systemPrompt: context.systemPrompt,
+      providerPromptText,
+      modelCallCount,
+      providerPromptFiles,
+      pdfInputs,
       spend,
     });
   }
@@ -637,6 +678,16 @@ export function foldJourney(turns: readonly PersistedTurn[]): PersistedTurn {
   };
   return {
     ...last,
+    providerPromptText: turns[0]?.providerPromptText,
+    modelCallCount: turns.every((turn) => turn.modelCallCount !== undefined)
+      ? turns.reduce((count, turn) => count + (turn.modelCallCount ?? 0), 0)
+      : undefined,
+    providerPromptFiles: turns.every((turn) => turn.providerPromptFiles !== undefined)
+      ? turns.flatMap((turn) => turn.providerPromptFiles ?? [])
+      : undefined,
+    pdfInputs: turns.every((turn) => turn.pdfInputs !== undefined)
+      ? turns.flatMap((turn) => turn.pdfInputs ?? [])
+      : undefined,
     publishedArtifactsByTurn: turns.map((turn) => turn.publishedArtifacts),
     runStatus: firstBad("runStatus"),
     stateStatus: firstBad("stateStatus"),

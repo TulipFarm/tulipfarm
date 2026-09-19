@@ -250,6 +250,32 @@ export interface LibraryFile extends UploadedFile {
    * it is a fact about what the owner decided, not about the File as a reader sees it.
    */
   readonly inKnowledge?: boolean | null;
+  readonly knowledgeRequested?: boolean | null;
+  readonly knowledgeReceipt?: FileKnowledgeReceipt | null;
+}
+
+export interface FileKnowledgeReceipt {
+  readonly requestId: string;
+  readonly fileId: string;
+  readonly versionId: string;
+  readonly converterRevision: string;
+  readonly status: "queued" | "processing" | "succeeded" | "refused" | "failed";
+  readonly requestedAt: string;
+  readonly completedAt: string | null;
+  readonly reason: string | null;
+  readonly indexedAt: string | null;
+  readonly indexedConverterRevision: string | null;
+  readonly truncated: boolean;
+}
+
+export function isKnowledgePending(file: LibraryFile): boolean {
+  return (
+    file.knowledgeReceipt?.status === "queued" || file.knowledgeReceipt?.status === "processing"
+  );
+}
+
+export function isKnowledgeRequested(file: LibraryFile): boolean {
+  return file.knowledgeRequested ?? file.inKnowledge ?? false;
 }
 
 export interface FileFolder {

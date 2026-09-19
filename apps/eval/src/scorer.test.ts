@@ -81,6 +81,38 @@ describe("native admission Expectations", () => {
 });
 
 describe("prompt expectations", () => {
+  it("requires every observed PDF input to preserve dimensions, text policy, and accounting", () => {
+    const expectation: Expectation = {
+      kind: "pdf_input_accounted",
+      fileId: "scan",
+      pages: [{ width: 1224, height: 1584 }],
+      text: "absent",
+      minimumTokens: 2586,
+    };
+    const input = {
+      fileId: "scan",
+      pages: [{ width: 1224, height: 1584 }],
+      textPresent: false,
+      estimatedTokens: 2586,
+    };
+    expect(only(expectation).passed).toBe(false);
+    expect(only(expectation, { ...base, pdfInputs: [] }).passed).toBe(false);
+    expect(only(expectation, { ...base, pdfInputs: [input] }).passed).toBe(true);
+    for (const changed of [
+      { ...input, pages: undefined },
+      { ...input, textPresent: true },
+      { ...input, estimatedTokens: 0 },
+      { ...input, estimatedTokens: Number.POSITIVE_INFINITY },
+    ]) {
+      expect(only(expectation, { ...base, pdfInputs: [input, changed] }).passed).toBe(false);
+    }
+  });
+  it("requires observed zero model calls, not missing usage or a successful refusal answer", () => {
+    expect(only({ kind: "model_not_called" }).passed).toBe(false);
+    expect(only({ kind: "model_not_called" }, { ...base, modelCallCount: 0 }).passed).toBe(true);
+    expect(only({ kind: "model_not_called" }, { ...base, modelCallCount: 1 }).passed).toBe(false);
+  });
+
   it("passes when the assembled prompt contains the text", () => {
     expect(only({ kind: "prompt_contains", text: "Never guess a status." }).passed).toBe(true);
   });

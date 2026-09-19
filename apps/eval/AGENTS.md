@@ -22,6 +22,8 @@ Only its own Cases need updating when their observable behaviour moves.
 | Path | Owns |
 | --- | --- |
 | `src/case.ts` | `EvalCase`, the `Expectation` union, loop limits. The vocabulary everything else reads. |
+| `src/docx-fixture.ts` | Independent synthetic OOXML bytes; Case content follows a bounded paragraph prefix. |
+| `CaseAttachment.xlsx` · `.pptx` | Shared independent Office fixtures: grounded content follows 200+ rows or lives only in speaker notes; real L3 provider-prompt Expectations must fail when extraction drops it. |
 | `src/corpus.ts` | Loading and validating `corpus/*.json`; `corpusHash` — the content hash. |
 | `src/scorer.ts` | `scoreCase` — pure and total. No I/O, no model, no clock. |
 | `src/runner.ts` | `runSweep` and `ModelBinding` — **the single seam this framework adds.** |
@@ -42,6 +44,8 @@ Only its own Cases need updating when their observable behaviour moves.
 | `src/l3/soul-write.ts` | The `soul_write` Tool, over the real writer *and* the real publisher; `definitionMode: plan` first uses the production YAML Plan compiler. |
 | `src/l3/resource-records.ts` | Journey-persistent in-memory Record repositories; Resource authoring reloads through the real loader and mutations use `@tulipfarm/resources`. |
 | `src/l3/file-store.ts` | The one place `file_create` runs for real, so a Case can observe Chat draft versus saved File lifecycle and audience. |
+| `src/l3/attachments.ts` | Shared extraction, typed Office refusals, and real Turn-driver screening over Case bytes. |
+| `CaseAttachment.pdf` · `src/l3/pdf-*.test.ts` | Real PDF fixtures and visual accounting; readable fixtures execute `file_read` before any declared defective-version replacement. |
 | `src/verdict.ts` | `caseVerdict`, `scoreable` — one Case collapsed into one word. Shared so the grid and a Baseline delta can never disagree. |
 | `src/baseline.ts` | `compareToBaseline` — pure. Refuses a delta across two Corpora or two models. |
 | `src/artifact.ts` | `ScorecardArtifact` read/write, `harnessVersion`, `baselinePath`. The durable form. |
@@ -107,6 +111,12 @@ before changing how a Case is scored, run or compared.** These are the ones that
 - **Persisted Message Expectations read `eval_messages`, never Run events or recomputed history.**
   Failure Cases must create their evidence through scripted model and Tool rounds before the fault.
 - **Provider File Expectations read `splitPrompt` binary parts against immutable Case Files.**
+- `provider_prompt_contains` reads the first `splitPrompt` projection, excluding assistant Messages.
+  DOCX fixtures require a single L3 Chat Turn; text fixtures ground their final paragraph in `content`.
+- `model_not_called` requires an observed zero invocation count, not missing usage. DOCX refusal
+  variants contain real defective archives, never scripted parser verdicts or invented content.
+- PDF Cases compare original binary bytes and all page estimates. A readable PDF's `replaceAfterRead`
+  changes fixture storage after the real Tool succeeds; never script that Tool's result.
 - **Checkpoint replay is one L2 fault seam.** It crashes after the first Tool result and retries the
   same input; do not turn it into a general workflow fixture.
 - This workspace is CJS-by-default — no `import.meta`.

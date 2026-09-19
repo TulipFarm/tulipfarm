@@ -1,10 +1,11 @@
 import type { ClientLoaderFunctionArgs, MetaFunction } from "@remix-run/react";
 import { useLoaderData, useNavigate, useRouteError } from "@remix-run/react";
 import { isExtractableMediaType } from "@tulipfarm/files/limits";
-import { type ReactNode, useRef, useState } from "react";
+import { type ReactNode, useEffect, useRef, useState } from "react";
 import { DownloadButton } from "~/components/files/file-list";
 import { FilePreviewPanel } from "~/components/files/file-preview";
 import { ShareDialog } from "~/components/files/file-share";
+import { KnowledgeStatus, useKnowledgePolling } from "~/components/files/knowledge-status";
 import {
   BookOpen,
   FileClock,
@@ -32,6 +33,8 @@ import {
   fetchFileVersionObjectUrl,
   fetchFileVersions,
   formatFileSize,
+  isKnowledgePending,
+  isKnowledgeRequested,
   type LibraryFile,
   removeFileFromKnowledge,
   replaceFile,
@@ -51,6 +54,10 @@ export async function clientLoader({ params }: ClientLoaderFunctionArgs) {
 
 export default function FileDetailRoute() {
   const loaded = useLoaderData<typeof clientLoader>();
+  return <FileDetail key={`${loaded.file.id}:${loaded.file.revision}`} loaded={loaded} />;
+}
+
+function FileDetail({ loaded }: { readonly loaded: Awaited<ReturnType<typeof clientLoader>> }) {
   const navigate = useNavigate();
   const [file, setFile] = useState<LibraryFile>(loaded.file);
   const [versions, setVersions] = useState<readonly FileVersion[]>(loaded.versions);
@@ -60,95 +67,128 @@ export default function FileDetailRoute() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const replacementRef = useRef<HTMLInputElement | null>(null);
+  const busyRef = useRef(false);
+  const lifetime = useRef<AbortController | null>(null);
+  useEffect(() => {
+    const controller = new AbortController();
+    lifetime.current = controller;
+    return () => controller.abort();
+  }, []);
 
   const owned = file.canManage ?? false;
   const archived = file.archivedAt != null;
   const indexable = isExtractableMediaType(file.mediaType);
+  const requested = isKnowledgeRequested(file);
+  const pending = isKnowledgePending(file);
+  const cancelPolling = useKnowledgePolling([file], setFile, setError, busy);
 
-  async function refreshVersions() {
-    if (!owned) return;
-    setVersions(await fetchFileVersions(file.id));
-  }
-
-  async function toggleKnowledge() {
+  async function mutate(
+    action: () => Promise<LibraryFile> | Promise<void>,
+    failure: string,
+    reloadVersions = false,
+    invalidateKnowledge = false
+  ) {
+    if (busyRef.current || !owned) return;
+    busyRef.current = true;
+    cancelPolling();
     setBusy(true);
     setError(null);
-    const adding = !file.inKnowledge;
-    setFile((current) => ({ ...current, inKnowledge: adding }));
+    const signal = lifetime.current?.signal;
     try {
-      if (adding) await addFileToKnowledge(file.id);
-      else await removeFileFromKnowledge(file.id);
-    } catch (err) {
-      setFile((current) => ({ ...current, inKnowledge: !adding }));
-      setError(err instanceof Error ? err.message : "Knowledge could not be changed.");
+      const changed = await action();
+      if (signal?.aborted) return;
+      if (invalidateKnowledge) {
+        setFile({
+          ...(changed ?? file),
+          canManage: file.canManage,
+          inKnowledge: null,
+          knowledgeRequested: null,
+          knowledgeReceipt: null,
+        });
+        if (reloadVersions) setVersions([]);
+      } else {
+        setFile((current) => ({ ...current, knowledgeReceipt: null }));
+      }
+      try {
+        const next = await fetchFile(file.id, signal);
+        if (signal?.aborted) return;
+        setFile(next);
+        if (reloadVersions && next.canManage) {
+          const nextVersions = await fetchFileVersions(file.id);
+          if (!signal?.aborted) setVersions(nextVersions);
+        }
+      } catch {
+        if (!signal?.aborted) {
+          setError(
+            "File metadata could not be loaded. Reload the page to check the latest result."
+          );
+        }
+      }
+    } catch {
+      if (!signal?.aborted) setError(failure);
     } finally {
-      setBusy(false);
+      if (!signal?.aborted) {
+        busyRef.current = false;
+        setBusy(false);
+      }
     }
+  }
+
+  async function toggleKnowledge(refresh = false) {
+    if (archived || !indexable || (refresh && (!requested || pending))) return;
+    await mutate(
+      () =>
+        refresh || !requested ? addFileToKnowledge(file.id) : removeFileFromKnowledge(file.id),
+      "Knowledge could not be changed. Try again.",
+      false,
+      !refresh && requested
+    );
   }
 
   async function replaceContent(replacement: File) {
-    setBusy(true);
-    setError(null);
-    try {
-      const changed = await replaceFile(file.id, file.revision ?? 1, replacement);
-      setFile((current) => ({
-        ...changed,
-        sharedWithCount: current.sharedWithCount,
-        inKnowledge: current.inKnowledge,
-      }));
-      await refreshVersions();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "That file could not be replaced.");
-    } finally {
-      setBusy(false);
-    }
+    await mutate(
+      () => replaceFile(file.id, file.revision ?? 1, replacement),
+      "That file could not be replaced.",
+      true,
+      true
+    );
   }
 
   async function restoreVersion(version: FileVersion) {
-    setBusy(true);
-    setError(null);
-    try {
-      const changed = await restoreFileVersion(file.id, version.id, file.revision ?? 1);
-      setFile((current) => ({
-        ...changed,
-        sharedWithCount: current.sharedWithCount,
-        inKnowledge: current.inKnowledge,
-      }));
-      await refreshVersions();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "That version could not be restored.");
-    } finally {
-      setBusy(false);
-    }
+    await mutate(
+      () => restoreFileVersion(file.id, version.id, file.revision ?? 1),
+      "That version could not be restored.",
+      true,
+      true
+    );
   }
 
   async function changeArchiveState() {
-    setBusy(true);
-    setError(null);
-    try {
-      const changed = archived
-        ? await restoreArchivedFile(file.id, file.revision ?? 1)
-        : await archiveFile(file.id, file.revision ?? 1);
-      setFile((current) => ({
-        ...changed,
-        sharedWithCount: current.sharedWithCount,
-        inKnowledge: archived ? current.inKnowledge : false,
-      }));
-      setConfirmingArchive(false);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "The archive state could not be changed.");
-    } finally {
-      setBusy(false);
-    }
+    await mutate(
+      () =>
+        archived
+          ? restoreArchivedFile(file.id, file.revision ?? 1)
+          : archiveFile(file.id, file.revision ?? 1),
+      "The archive state could not be changed.",
+      false,
+      true
+    );
+    if (!lifetime.current?.signal.aborted) setConfirmingArchive(false);
   }
 
   async function destroy() {
+    if (busyRef.current) return;
+    busyRef.current = true;
+    cancelPolling();
     setBusy(true);
     setError(null);
     try {
       await deleteFile(file.id, file.revision ?? 1);
+      if (lifetime.current?.signal.aborted) return;
       navigate("/files", { replace: true });
     } catch (err) {
+      if (lifetime.current?.signal.aborted) return;
+      busyRef.current = false;
       setError(err instanceof Error ? err.message : "That file could not be deleted.");
       setBusy(false);
     }
@@ -201,6 +241,7 @@ export default function FileDetailRoute() {
 
         <div className="flex min-w-0 flex-col gap-5">
           <Panel title="File details">
+            <KnowledgeStatus file={file} />
             <dl className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-4 gap-y-2 text-sm">
               <Metadata label="Owner" value={owned ? "You" : file.owner} />
               <Metadata
@@ -278,7 +319,19 @@ export default function FileDetailRoute() {
                         onClick={() => void toggleKnowledge()}
                       >
                         <BookOpen aria-hidden />
-                        {file.inKnowledge ? "Remove from Knowledge" : "Add to Knowledge"}
+                        {requested ? "Remove from Knowledge" : "Add to Knowledge"}
+                      </Button>
+                    ) : null}
+                    {indexable && requested ? (
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        disabled={busy || pending}
+                        onClick={() => void toggleKnowledge(true)}
+                      >
+                        <RotateCcw aria-hidden />
+                        Refresh Knowledge
                       </Button>
                     ) : null}
                     <Button
@@ -404,7 +457,10 @@ export default function FileDetailRoute() {
         </Panel>
       ) : null}
 
-      <ShareDialog file={sharing ? file : null} onClose={() => setSharing(false)} />
+      <ShareDialog
+        file={sharing && owned && !archived ? file : null}
+        onClose={() => setSharing(false)}
+      />
       <ConfirmModal
         open={confirmingArchive}
         onClose={() => setConfirmingArchive(false)}

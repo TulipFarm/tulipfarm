@@ -1,0 +1,47 @@
+{
+  "id": "l3-over-limit-docx-completes-with-refusal",
+  "tier": "l3",
+  "agent": "support",
+  "input": [
+    {
+      "role": "user",
+      "content": [
+        { "type": "text", "text": "Read the attached warranty policy." },
+        {
+          "type": "file",
+          "fileId": "file-policy",
+          "mediaType": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+          "name": "policy.docx"
+        }
+      ]
+    }
+  ],
+  "attachments": [
+    {
+      "fileId": "file-policy",
+      "mediaType": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      "name": "policy.docx",
+      "docx": { "variant": "entry-limit" }
+    }
+  ],
+  "script": [],
+  "expect": [
+    { "kind": "model_not_called" },
+    { "kind": "provider_prompt_omits_file", "fileId": "file-policy" },
+    {
+      "kind": "output_contains",
+      "text": "exceeds the document processing limits",
+      "ungrounded": "Checks the deterministic participant refusal for a real 513-entry OOXML archive exceeding the 512-entry limit, not model recall."
+    },
+    {
+      "kind": "output_contains",
+      "text": "Upload a smaller document.",
+      "ungrounded": "Checks actionable recovery wording produced by the Turn driver without a model call."
+    },
+    { "kind": "run_status", "status": "succeeded" },
+    { "kind": "state_status", "status": "succeeded" },
+    { "kind": "turn_status", "status": "succeeded" },
+    { "kind": "run_event_emitted", "eventType": "text.delta" },
+    { "kind": "loop_status", "status": "completed" }
+  ]
+}

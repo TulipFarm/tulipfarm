@@ -55,6 +55,8 @@ publication, approvals, integrations, events, and blob/vector/cache/queue ports.
 - MCP execution authorization records are immutable; retries recover host context and reauthorize live grants rather than treating a stored binding as permission.
 - Team lifecycle and Team-linked asset writes share the locked `teams` row; keep checks and the
   lifecycle mutation in one transaction.
+- `PgAssetOwnershipRepo.withLockedOwnership` holds the canonical ownership row while File
+  Knowledge publication reads its live grants; use an ambient transaction to share its commit.
 - If a storage rule repeats schema/Soul contracts, derive or reference the owner instead of copying.
 - `actor_principal_id` is required for every Soul publication; no anonymous publish paths except
   migrations that carry old local rows forward.

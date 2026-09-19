@@ -16,7 +16,24 @@ export async function buildWorkerBundle(): Promise<string> {
     target: "node26",
     format: "cjs",
     outfile: BUNDLE,
-    external: ["pg", "pg-boss", "isolated-vm", "@anthropic-ai/claude-agent-sdk", "@openai/codex"],
+    external: [
+      "pg",
+      "pg-boss",
+      "isolated-vm",
+      "@anthropic-ai/claude-agent-sdk",
+      "@openai/codex",
+      "@firecrawl/anydoc",
+    ],
+    logLevel: "silent",
+  });
+  await build({
+    entryPoints: [resolve(APP_ROOT, "../../packages/files/src/document-child.ts")],
+    bundle: true,
+    platform: "node",
+    target: "node26",
+    format: "cjs",
+    outfile: resolve(APP_ROOT, "dist/document-child.cjs"),
+    external: ["@firecrawl/anydoc"],
     logLevel: "silent",
   });
   return BUNDLE;

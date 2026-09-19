@@ -759,6 +759,17 @@ export class PgAssetOwnershipRepo implements AssetOwnershipRepo {
     );
   }
 
+  async withLockedOwnership<T>(
+    businessId: string,
+    assetType: TeamAssetType,
+    assetId: string,
+    operation: (ownership: AssetOwnershipRecord | undefined) => Promise<T>
+  ): Promise<T> {
+    return this.transactions.withTransaction(async (tx) =>
+      operation(await this.getInTransaction(tx, businessId, assetType, assetId, true))
+    );
+  }
+
   async put(record: AssetOwnershipRecord, expectedRevision: number): Promise<void> {
     const updated = await this.transactions.withTransaction(async (tx) => {
       const result = await tx.query(

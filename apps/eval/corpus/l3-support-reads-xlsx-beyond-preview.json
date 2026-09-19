@@ -1,0 +1,40 @@
+{
+  "id": "l3-support-reads-xlsx-beyond-preview",
+  "tier": "l3",
+  "agent": "support",
+  "input": [
+    {
+      "role": "user",
+      "content": [
+        {
+          "type": "text",
+          "text": "Read the attached inventory workbook and tell me how many tulips are in the reserve lot."
+        },
+        {
+          "type": "file",
+          "fileId": "file-reserve-inventory",
+          "mediaType": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+          "name": "inventory.xlsx"
+        }
+      ]
+    }
+  ],
+  "attachments": [
+    {
+      "fileId": "file-reserve-inventory",
+      "mediaType": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      "name": "inventory.xlsx",
+      "content": "Reserve lot contains 731 tulips.",
+      "xlsx": { "precedingRows": 220 }
+    }
+  ],
+  "script": [{ "kind": "text", "text": "Reserve lot contains 731 tulips." }],
+  "expect": [
+    { "kind": "provider_prompt_contains", "text": "Reserve lot contains 731 tulips." },
+    { "kind": "provider_prompt_omits_file", "fileId": "file-reserve-inventory" },
+    { "kind": "output_contains", "text": "731 tulips" },
+    { "kind": "run_status", "status": "succeeded" },
+    { "kind": "turn_status", "status": "succeeded" },
+    { "kind": "loop_status", "status": "completed" }
+  ]
+}

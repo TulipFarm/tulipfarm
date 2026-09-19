@@ -1,0 +1,51 @@
+{
+  "id": "l3-mixed-pdf-refuses-partial-text",
+  "tier": "l3",
+  "agent": "support",
+  "input": [
+    {
+      "role": "user",
+      "content": [
+        {
+          "type": "text",
+          "text": "Inspect both pages of the PDF visually; a text-only summary would omit the scanned page."
+        },
+        {
+          "type": "file",
+          "fileId": "pdf-mixed",
+          "mediaType": "application/pdf",
+          "name": "mixed.pdf"
+        }
+      ]
+    }
+  ],
+  "attachments": [
+    {
+      "fileId": "pdf-mixed",
+      "mediaType": "application/pdf",
+      "name": "mixed.pdf",
+      "content": "Page one is only part of this document.",
+      "pdf": { "variant": "mixed" }
+    }
+  ],
+  "script": [
+    {
+      "kind": "text",
+      "text": "I will use both PDF pages rather than treat its partial text layer as complete."
+    }
+  ],
+  "expect": [
+    { "kind": "provider_prompt_file_exact", "fileId": "pdf-mixed", "part": "file" },
+    {
+      "kind": "pdf_input_accounted",
+      "fileId": "pdf-mixed",
+      "pages": [{ "width": 1224, "height": 1584 }, { "width": 840, "height": 1188 }],
+      "text": "absent",
+      "minimumTokens": 3917
+    },
+    { "kind": "run_status", "status": "succeeded" },
+    { "kind": "state_status", "status": "succeeded" },
+    { "kind": "turn_status", "status": "succeeded" },
+    { "kind": "loop_status", "status": "completed" }
+  ]
+}

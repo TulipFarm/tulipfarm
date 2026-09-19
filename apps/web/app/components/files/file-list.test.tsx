@@ -23,6 +23,7 @@ function libraryFile(overrides: Partial<LibraryFile> = {}): LibraryFile {
     currentVersionId: "version_2",
     archivedAt: null,
     owner: "user_1",
+    canManage: overrides.owner === undefined || overrides.owner === "user_1",
     ownerName: "Muskan Vijayvargiya",
     folderId: null,
     origin: "uploaded",
@@ -144,6 +145,43 @@ describe("FileList", () => {
     expect(screen.queryByRole("menuitem", { name: "Share" })).toBeNull();
     expect(screen.queryByRole("menuitem", { name: "Move to trash" })).toBeNull();
     expect(screen.queryByRole("menuitem", { name: "Delete permanently" })).toBeNull();
+  });
+
+  it("offers opted-in owners a separate Refresh Knowledge action", async () => {
+    const onRefreshKnowledge = vi.fn();
+    renderList([libraryFile({ knowledgeRequested: true })], {
+      onKnowledge: vi.fn(),
+      onRefreshKnowledge,
+    });
+    await userEvent.click(screen.getByRole("button", { name: "Actions for report.pdf" }));
+    expect(screen.getByRole("menuitem", { name: "Remove from Knowledge" })).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("menuitem", { name: "Refresh Knowledge" }));
+    expect(onRefreshKnowledge).toHaveBeenCalledWith(expect.objectContaining({ id: "file_1" }));
+  });
+
+  it.each([
+    { canManage: false },
+    { owner: "user_2", canManage: false },
+    { archivedAt: "2026-09-19T00:00:00.000Z" },
+    { knowledgeRequested: false },
+    { mediaType: "image/png" },
+  ])("does not offer refresh for ineligible Files: %j", async (overrides) => {
+    renderList([libraryFile({ knowledgeRequested: true, ...overrides })], {
+      onRefreshKnowledge: vi.fn(),
+    });
+    await userEvent.click(screen.getByRole("button", { name: "Actions for report.pdf" }));
+    expect(screen.queryByRole("menuitem", { name: "Refresh Knowledge" })).toBeNull();
+  });
+
+  it("disables Knowledge actions while a request is in flight", async () => {
+    renderList([libraryFile({ inKnowledge: true })], {
+      onKnowledge: vi.fn(),
+      onRefreshKnowledge: vi.fn(),
+      knowledgeBusy: true,
+    });
+    await userEvent.click(screen.getByRole("button", { name: "Actions for report.pdf" }));
+    expect(screen.getByRole("menuitem", { name: "Refresh Knowledge" })).toBeDisabled();
+    expect(screen.getByRole("menuitem", { name: "Remove from Knowledge" })).toBeDisabled();
   });
 });
 

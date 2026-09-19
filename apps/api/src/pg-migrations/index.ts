@@ -2,6 +2,7 @@ import { DEPLOYMENT_BUSINESS_ID } from "@tulipfarm/constants";
 import {
   FILE_DRAFT_STATEMENTS,
   FILE_FOLDER_STATEMENTS,
+  FILE_KNOWLEDGE_REQUEST_STATEMENTS,
   FILE_KNOWLEDGE_STATEMENTS,
   FILE_ORIGIN_STATEMENTS,
   FILE_SHARE_STATEMENTS,
@@ -3551,5 +3552,10 @@ export const PG_MIGRATIONS: PgMigration[] = [
       ...MCP_KNOWLEDGE_STORAGE_STATEMENTS,
       ...NATIVE_CHANNEL_INBOX_STORAGE_STATEMENTS,
     ]),
+  },
+  {
+    version: 139,
+    description: "per-version File Knowledge refresh receipts and publication fencing",
+    up: applyStatements(FILE_KNOWLEDGE_REQUEST_STATEMENTS),
   },
 ];

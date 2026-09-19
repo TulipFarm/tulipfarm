@@ -1,4 +1,6 @@
 import { describe, expect, it } from "vitest";
+import { DOCX_MEDIA_TYPE } from "./document-preview";
+import { docxParagraph, externalDocx, semanticDocx } from "./docx-fixture.test-support";
 import { extractText, MAX_EXTRACTED_CHARS } from "./extract";
 import { isExtractableMediaType } from "./limits";
 import { renderDocument } from "./render";
@@ -11,6 +13,81 @@ async function pdfOf(content: string, title?: string): Promise<Uint8Array> {
 }
 
 describe("extractText", () => {
+  it("reads externally produced DOCX structure and footnotes without consuming source bytes", async () => {
+    const bytes = semanticDocx();
+    const before = new Uint8Array(bytes);
+    const result = await extractText(DOCX_MEDIA_TYPE, bytes);
+    expect(bytes).toEqual(before);
+    expect(result.kind).toBe("text");
+    if (result.kind !== "text") throw new Error("Expected DOCX text");
+    expect(result.truncated).toBe(false);
+    const ordered = [
+      "Approval handbook",
+      '5 < 6 & "quoted"',
+      "Review the proposal",
+      "Confirm the budget",
+      "Pune",
+      "Approval policy",
+      "Footnote",
+      "approval expires after 47 days",
+    ];
+    let position = -1;
+    for (const fact of ordered) {
+      const next = result.text.indexOf(fact);
+      expect(next, fact).toBeGreaterThan(position);
+      position = next;
+    }
+    expect(result.text).toMatch(/\n {2}[-•] Confirm the budget/);
+  });
+
+  it("includes a grounded fact past the old 400-block and 200-row preview ceilings", async () => {
+    const paragraphs = Array.from({ length: 401 }, (_, index) =>
+      docxParagraph(`Paragraph ${index}`)
+    ).join("");
+    const rows = Array.from(
+      { length: 201 },
+      (_, index) =>
+        `<w:tr><w:tc>${docxParagraph(index === 200 ? "Late table fact: code 7391." : `Row ${index}`)}</w:tc></w:tr>`
+    ).join("");
+    const result = await extractText(
+      DOCX_MEDIA_TYPE,
+      externalDocx(
+        `${paragraphs}${docxParagraph("Late paragraph fact: renewal is 83 days.")}<w:tbl><w:tblGrid><w:gridCol w:w="2000"/></w:tblGrid>${rows}</w:tbl>`
+      )
+    );
+    expect(result).toMatchObject({ kind: "text", truncated: false });
+    if (result.kind !== "text") throw new Error("Expected DOCX text");
+    expect(result.text).toContain("renewal is 83 days");
+    expect(result.text).toContain("code 7391");
+  });
+
+  it("applies only the requested character cap, including its exact boundary", async () => {
+    const bytes = externalDocx(docxParagraph("abcde"));
+    expect(await extractText(DOCX_MEDIA_TYPE, bytes, { maxChars: 5 })).toEqual({
+      kind: "text",
+      text: "abcde",
+      truncated: false,
+    });
+    expect(await extractText(DOCX_MEDIA_TYPE, bytes, { maxChars: 4 })).toEqual({
+      kind: "text",
+      text: "abcd",
+      truncated: true,
+    });
+    const long = await extractText(
+      DOCX_MEDIA_TYPE,
+      externalDocx(docxParagraph("x".repeat(MAX_EXTRACTED_CHARS + 1)))
+    );
+    expect(long).toMatchObject({ kind: "text", truncated: true });
+    if (long.kind === "text") expect(long.text).toHaveLength(MAX_EXTRACTED_CHARS);
+  });
+
+  it("returns ordinary DOCX refusals without a legacy conversion fallback", async () => {
+    expect(await extractText(DOCX_MEDIA_TYPE, utf8("not a ZIP"))).toEqual({
+      kind: "refused",
+      reason: "unreadable",
+    });
+  });
+
   it("returns a textual File verbatim", async () => {
     const result = await extractText("text/plain", utf8("the quick brown fox"));
 
@@ -101,15 +178,13 @@ describe("extractText", () => {
     expect(result).toEqual({ kind: "refused", reason: "unreadable" });
   });
 
-  it("collapses the incidental whitespace a text layer arrives with", async () => {
+  it("reads the words of a rendered PDF without a legacy text extractor", async () => {
     const bytes = await pdfOf("One two three four five six seven eight nine ten.");
 
     const result = await extractText("application/pdf", bytes);
 
     const text = (result as { text: string }).text;
-    expect(text).not.toMatch(/ {2}/);
-    expect(text).not.toMatch(/\n{3}/);
-    expect(text.trim()).toBe(text);
+    expect(text).toContain("One two three");
   });
 
   it("caps a PDF as well, so one upload cannot dominate the index", async () => {

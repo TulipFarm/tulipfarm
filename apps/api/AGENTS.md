@@ -30,6 +30,7 @@ PostgreSQL persistence composition, auth, Soul Git writes, and Worker callback p
 | `src/integrations/` | MCP setup/review and account composition from verified active bundles; `mcp-context.ts` resolves caller lineage and destination-bound Routine grants, including native admission and pinned inbox authority. Native Slack/GitHub channel setup stays separate. |
 | `src/guardrails/` | Guardrail reload wiring and persisted policy acceptance. Hosted minimums remain in the effective service; Chat Context, Routine Agent catalog and admin reads share it. |
 | `src/knowledge/`, `src/knowledge-sources/` | Knowledge routes/Tools and ingestion API; repositories and OKF live in `@tulipfarm/knowledge`. |
+| `src/files/knowledge-bridge.ts` | Owner-requested File indexing/refresh, atomic receipt+queue acceptance and authorized status reconciliation from durable queue failures. |
 | `src/memory/`, `src/kv/`, `src/secrets/` | Memory Document composition, its read-only route and erasure; scoped KV; secret storage routes. |
 | `src/authz/` | `route-gate.ts` — sole HTTP path to `decideEffectivePermission`, including hosted infrastructure ceilings before shadow/fallback; self-governed and Team administration. |
 | `src/team-assets/` | Team asset catalog, ownership access projection, and Approval orchestration for all five owned asset types. |
