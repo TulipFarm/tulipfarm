@@ -2,8 +2,14 @@ import { createHash } from "node:crypto";
 import { readdir, readFile } from "node:fs/promises";
 import path from "node:path";
 import type { AssembleContext, ModelMessage } from "@tulipfarm/agent-runtime";
-import { MCP_SETUP_TOOL_DECLARATIONS, normalizeMessageContent } from "@tulipfarm/schema";
+import { PPTX_MEDIA_TYPE, XLSX_MEDIA_TYPE } from "@tulipfarm/files/document-preview";
+import {
+  contentText,
+  MCP_SETUP_TOOL_DECLARATIONS,
+  normalizeMessageContent,
+} from "@tulipfarm/schema";
 import { type EvalCase, type Expectation, everyString, isBatching, isPersisted } from "./case.ts";
+import { DOCX_MEDIA_TYPE } from "./docx-fixture.ts";
 import { type EvalSoul, SOUL_OWNED_CONTEXT_KEYS, soulContext } from "./eval-soul.ts";
 import { expectationShapeError, isKnownExpectationKind } from "./expectation-shape.ts";
 import { platformToolNames, resolvePlatformTool } from "./platform-tools.ts";
@@ -320,9 +326,7 @@ function validate(raw: unknown, file: string): EvalCase {
       !isBatching(a as Expectation), `${file}: expectation "${kind}" reads how the model grouped ` +
       `its Tool calls, which only tier "l2" observes; move this Case to tier "l2"`);
     require(c.tier !== "l3" ||
-      (kind !== "provider_prompt_file_exact" &&
-        kind !== "provider_prompt_omits_file" &&
-        kind !== "model_prompt_contains" &&
+      (kind !== "model_prompt_contains" &&
         kind !== "tool_batch_replayed" &&
         kind !== "tool_denied"), `${file}: expectation "${kind}" reads an L2-only runtime seam; ` +
       `move this Case to tier "l2"`);
@@ -555,6 +559,103 @@ function validateAttachments(c: Record<string, unknown>, file: string): void {
         (typeof a.content === "string" &&
           a.content.length >
             0), `${file}: a ${key} entry's "content" must be a non-empty string when declared`);
+      require([a.docx, a.xlsx, a.pptx, a.pdf].filter((value) => value !== undefined).length <=
+        1, `${file}: a File may declare only one document fixture`);
+      if (a.pdf !== undefined) {
+        require(c.tier === "l3" &&
+          c.journey === undefined &&
+          c.routine === undefined &&
+          c.nativeRoutine === undefined, `${file}: "pdf" fixtures need a single L3 Chat Turn`);
+        require(a.mediaType === "application/pdf" &&
+          typeof a.pdf === "object" &&
+          a.pdf !== null &&
+          !Array.isArray(a.pdf), `${file}: invalid PDF fixture`);
+        const pdf = a.pdf as Record<string, unknown>;
+        require(Object.keys(pdf).every((key) => key === "variant" || key === "replaceAfterRead") &&
+          typeof pdf.variant === "string" &&
+          ["text", "scan", "mixed", "encrypted", "malformed", "layout"].includes(
+            pdf.variant
+          ), `${file}: invalid PDF fixture variant`);
+        if (pdf.replaceAfterRead !== undefined) {
+          require(key === "readable" &&
+            pdf.variant === "scan" &&
+            (pdf.replaceAfterRead === "malformed" ||
+              pdf.replaceAfterRead ===
+                "encrypted"), `${file}: PDF replacement needs a readable scan and a malformed/encrypted replacement`);
+        }
+        if (key === "readable") {
+          require(((c.platformTools ?? []) as string[]).includes(
+            "file_read"
+          ), `${file}: readable PDF fixtures need the platform file_read Tool`);
+          require(!((c.toolResults ?? []) as { name: string }[]).some(
+            (tool) => tool.name === "file_read"
+          ), `${file}: readable PDF fixtures execute file_read, never script its result`);
+        }
+        const carriesText = ["text", "mixed", "layout"].includes(pdf.variant as string);
+        require(carriesText
+          ? typeof a.content === "string"
+          : a.content ===
+              undefined, `${file}: PDF text/mixed/layout fixtures require content; refusal fixtures forbid it`);
+        require(a.content === undefined ||
+          /^[\x20-\x7e\n\r\t]*$/.test(
+            a.content as string
+          ), `${file}: PDF fixture content must be ASCII`);
+      }
+      for (const [format, mediaType] of [
+        ["xlsx", XLSX_MEDIA_TYPE],
+        ["pptx", PPTX_MEDIA_TYPE],
+      ] as const) {
+        const fixture = a[format];
+        if (fixture === undefined) continue;
+        require(c.tier === "l3" &&
+          key === "attachments" &&
+          c.journey === undefined &&
+          c.routine === undefined &&
+          c.nativeRoutine ===
+            undefined, `${file}: "${format}" fixtures need single-turn L3 attachments`);
+        require(a.mediaType === mediaType &&
+          typeof a.content ===
+            "string", `${file}: "${format}" fixtures need their matching mediaType and grounded content`);
+        require(typeof fixture === "object" &&
+          fixture !== null &&
+          !Array.isArray(fixture), `${file}: "${format}" must be an object`);
+        const fields = fixture as Record<string, unknown>;
+        require(Object.keys(fields).length === 1 &&
+          (format === "xlsx"
+            ? typeof fields.precedingRows === "number" &&
+              Number.isInteger(fields.precedingRows) &&
+              fields.precedingRows >= 0 &&
+              fields.precedingRows <= 1000
+            : fields.speakerNotes === true), `${file}: invalid "${format}" fixture fields`);
+      }
+      if (a.docx !== undefined) {
+        require(c.tier === "l3" &&
+          key === "attachments", `${file}: "docx" fixtures need tier "l3" attachments`);
+        require(c.journey === undefined &&
+          c.routine === undefined &&
+          c.nativeRoutine === undefined, `${file}: "docx" fixtures need a single Chat Turn`);
+        require(a.mediaType === DOCX_MEDIA_TYPE, `${file}: "docx" fixtures need DOCX mediaType`);
+        require(typeof a.docx === "object" &&
+          a.docx !== null &&
+          !Array.isArray(a.docx), `${file}: "docx" must be an object`);
+        const docx = a.docx as Record<string, unknown>;
+        if ("variant" in docx) {
+          require(Object.keys(docx).length === 1 &&
+            typeof docx.variant === "string" &&
+            ["malformed", "empty", "entry-limit"].includes(docx.variant) &&
+            a.content ===
+              undefined, `${file}: "docx.variant" must be malformed, empty, or entry-limit, with no content or other fixture fields`);
+        } else {
+          require(typeof a.content === "string", `${file}: paragraph "docx" fixtures need content`);
+          require(Object.keys(docx).length === 1 &&
+            typeof docx.precedingParagraphs === "number" &&
+            Number.isInteger(docx.precedingParagraphs) &&
+            docx.precedingParagraphs >= 0 &&
+            docx.precedingParagraphs <=
+              1000, `${file}: "docx.precedingParagraphs" must be an integer from 0 to 1000 and the only fixture field`);
+        }
+      }
+      require(!ids.has(a.fileId as string), `${file}: duplicate ${key} File id "${a.fileId}"`);
       ids.add(a.fileId as string);
     }
     return ids;
@@ -600,7 +701,40 @@ function validateAttachments(c: Record<string, unknown>, file: string): void {
       `"content" — the model would never receive the attack, so the Case would pass by vacuity`);
   }
 
-  for (const a of (c.expect ?? []) as { kind: string; fileId?: string }[]) {
+  for (const a of (c.expect ?? []) as {
+    kind: string;
+    fileId?: string;
+    pages?: unknown;
+    minimumTokens?: number;
+  }[]) {
+    if (a.kind === "pdf_input_accounted") {
+      require(c.tier === "l3" &&
+        (declared.has(a.fileId ?? "") ||
+          readable.has(
+            a.fileId ?? ""
+          )), `${file}: "pdf_input_accounted" requires a declared L3 File`);
+      const pdfFiles = [
+        ...((c.attachments ?? []) as { fileId: string; mediaType: string }[]),
+        ...((c.readable ?? []) as { fileId: string; mediaType: string }[]),
+      ];
+      require(pdfFiles.some(
+        (attachment) => attachment.fileId === a.fileId && attachment.mediaType === "application/pdf"
+      ), `${file}: "pdf_input_accounted" requires PDF mediaType`);
+      require(Array.isArray(a.pages) &&
+        a.pages.length > 0 &&
+        a.pages.every(
+          (page) =>
+            typeof page === "object" &&
+            page !== null &&
+            Number.isSafeInteger(page.width) &&
+            page.width > 0 &&
+            Number.isSafeInteger(page.height) &&
+            page.height > 0
+        ), `${file}: "pdf_input_accounted" requires positive integer page dimensions`);
+      require(typeof a.minimumTokens === "number" &&
+        Number.isSafeInteger(a.minimumTokens) &&
+        a.minimumTokens > 0, `${file}: "pdf_input_accounted" requires a positive token estimate`);
+    }
     if (a.kind === "prompt_attaches") {
       require(declared.has(a.fileId ?? "") ||
         readable.has(
@@ -685,7 +819,11 @@ function validateRedTeam(raw: unknown, file: string): void {
  * Deliberately excludes `script`. The scripted binding's output is the fake model's own words, and
  * an expectation grounded only in those is checking the script against itself.
  */
-function givenToModel(c: EvalCase, fromSoul: Partial<AssembleContext>): string {
+function givenToModel(
+  c: EvalCase,
+  fromSoul: Partial<AssembleContext>,
+  firstProviderRequest = false
+): string {
   const found: string[] = [];
   const walk = (value: unknown): void => {
     if (typeof value === "string") found.push(value);
@@ -695,16 +833,26 @@ function givenToModel(c: EvalCase, fromSoul: Partial<AssembleContext>): string {
   };
   walk(fromSoul);
   walk(c.context);
-  walk(c.input);
-  walk(c.toolResults ?? []);
+  walk(
+    firstProviderRequest
+      ? c.input
+          .filter((message) => message.role !== "assistant")
+          .map((message) => contentText(message.content))
+      : c.input
+  );
+  if (!firstProviderRequest) walk(c.toolResults ?? []);
   // A File's bytes are handed to the model as surely as a Tool result is, so a fact stated only
   // inside one is grounded. Only `content`: an id or a filename is metadata, not something the
   // model could have read the answer out of.
-  for (const each of [...(c.attachments ?? []), ...(c.readable ?? [])]) walk(each.content);
+  for (const each of [
+    ...(c.attachments ?? []),
+    ...(firstProviderRequest ? [] : (c.readable ?? [])),
+  ])
+    walk(each.content);
   // A shipped Tool's description reaches the model verbatim, so text quoted from it is grounded.
   for (const name of c.platformTools ?? []) walk(resolvePlatformTool(name)?.description);
   // A journey's later Turns are handed to the model too, so a fact stated only there is grounded.
-  for (const turn of c.journey ?? []) {
+  for (const turn of firstProviderRequest ? [] : (c.journey ?? [])) {
     walk(turn.input);
     walk(turn.toolResults ?? []);
   }
@@ -729,15 +877,22 @@ function givenToModel(c: EvalCase, fromSoul: Partial<AssembleContext>): string {
  */
 function requireGrounded(c: EvalCase, file: string, fromSoul: Partial<AssembleContext>): void {
   const given = givenToModel(c, fromSoul);
+  const providerGiven = givenToModel(c, fromSoul, true);
   for (const e of c.expect) {
     if (
       e.kind !== "output_contains" &&
       e.kind !== "output_matches" &&
       e.kind !== "output_omits" &&
+      e.kind !== "provider_prompt_contains" &&
       e.kind !== "run_event_text_omits"
     )
       continue;
-    if (typeof e.ungrounded === "string" && e.ungrounded.length > 0) continue;
+    if (
+      e.kind !== "provider_prompt_contains" &&
+      typeof e.ungrounded === "string" &&
+      e.ungrounded.length > 0
+    )
+      continue;
     const needle = e.kind === "output_matches" ? e.pattern : e.text;
     let grounded: boolean;
     // Matched exactly as the scorer will match it, or a Case could be refused as ungrounded and
@@ -749,7 +904,8 @@ function requireGrounded(c: EvalCase, file: string, fromSoul: Partial<AssembleCo
         // An uncompilable pattern is the scorer's failure to report, not this check's.
         continue;
       }
-    } else grounded = given.toLowerCase().includes(needle.toLowerCase());
+    } else if (e.kind === "provider_prompt_contains") grounded = providerGiven.includes(needle);
+    else grounded = given.toLowerCase().includes(needle.toLowerCase());
 
     const why =
       e.kind === "output_omits" || e.kind === "run_event_text_omits"

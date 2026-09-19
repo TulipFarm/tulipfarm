@@ -60,6 +60,43 @@ the level the receipt says was actually applied. It is always the participant's 
 never silently upgrades a turn. See [Model routing](/docs/administration/how-model-routing-works) for how presets resolve,
 and [Configure LLM providers](/docs/administration/configure-llm-providers) for the admin side.
 
+## Reading attachments
+
+Use **Attach files** in the chat composer to upload a document or choose a file you already
+have access to. Include the question you want answered when you send the message.
+
+Word documents, spreadsheets, presentations and text-based PDFs are converted locally for the
+agent to read. You do not need an external conversion account. The extracted content still goes
+to the configured model provider when the agent uses it to answer your question.
+
+Opening a Word document or presentation keeps its rich viewer. If that viewer cannot display the
+file, a text-and-table preview can show its readable content instead. Spreadsheets use a grid
+preview. A limited-preview notice means the display has been shortened; extraction does not
+stop at that display limit. Agent reads have their own content limits.
+
+Spreadsheet reading follows the visible sheets, rows and columns. Hidden content is omitted.
+Dates, percentages and currency use stored display values. Formulas use their saved results;
+reading a spreadsheet does not recalculate it or provide raw values for numerical analysis.
+Keep the original workbook when you need to check a calculation.
+
+Presentation reading includes labelled speaker notes. Its text preview follows the readable
+content, not the layout of each slide, and does not assign slide numbers to ordinary headings.
+
+PDFs keep their existing viewer. A model that can read PDF pages still receives the original PDF,
+not a replacement made from its extracted text. If a PDF needs OCR, which reads text from images,
+it is not added to knowledge as a successful partial text result. A compatible model can still
+inspect a readable PDF's pages in chat. Password-protected or unreadable PDFs need a readable
+replacement.
+
+Conversion is a best-effort reading, not a promise that every part of the source was recovered.
+Download the original when you need to check layout or missing content. A document that cannot
+be read produces an error rather than being treated as an empty document. There is no automatic
+OCR service to read text from scans.
+
+The agent can read only files you can read. Attaching a file does not automatically add it to
+[knowledge](/docs/using-tulipfarm/knowledge), the searchable pages agents use across chats.
+Adding a file to knowledge is a separate action by its owner.
+
 ## Planning work
 
 Plan mode organizes work into rounds and asks for confirmation before execution. It also

@@ -10,7 +10,7 @@
  * `@tulipfarm/knowledge` may not import each other, and only an app sees both.
  */
 
-import type { FileReader } from "@tulipfarm/files";
+import { FileKnowledgeIndexRepo, type FileReader } from "@tulipfarm/files";
 import type { KnowledgeAclRepo, KnowledgeChunkRepo, KnowledgePageRepo } from "@tulipfarm/knowledge";
 import {
   PgKnowledgeAclRepo,
@@ -19,6 +19,7 @@ import {
   type RestrictionSubject,
   setPageRestriction,
 } from "@tulipfarm/knowledge";
+import { ambientTransactionPort, type Queryable } from "@tulipfarm/storage";
 
 /** Must match `FILE_INDEX_QUEUE` in `apps/worker/src/knowledge/file-index.ts`. */
 export const FILE_INDEX_QUEUE = "file-index";
@@ -30,8 +31,15 @@ export interface FileIndexEnqueuer {
   send(
     name: string,
     data: object,
-    options?: { singletonKey?: string; retryLimit?: number; retryBackoff?: boolean }
+    options?: {
+      id?: string;
+      singletonKey?: string;
+      retryLimit?: number;
+      retryBackoff?: boolean;
+      db?: { executeSql(text: string, values?: unknown[]): ReturnType<Queryable["query"]> };
+    }
   ): Promise<string | null>;
+  getJobById?(name: string, id: string): Promise<{ state: string } | null>;
 }
 
 export interface FileKnowledgeBridgeDeps {
@@ -46,6 +54,7 @@ export interface FileKnowledgeBridgeDeps {
   /** Absent leaves indexing unavailable rather than silently synchronous. */
   readonly enqueue?: FileIndexEnqueuer;
   readonly businessId: string;
+  readonly requests: FileKnowledgeIndexRepo;
 }
 
 /**
@@ -77,12 +86,46 @@ export class FileKnowledgeBridge {
   ): Promise<boolean> {
     const enqueue = this.deps.enqueue;
     if (enqueue === undefined) return false;
-    await enqueue.send(
-      FILE_INDEX_QUEUE,
+    await this.receipts([fileId]);
+    await this.deps.requests.request(
       { fileId, versionId, businessId: this.deps.businessId, ownerPrincipalId },
-      { singletonKey: `file:${fileId}:${versionId}`, retryLimit: 3, retryBackoff: true }
+      async (tx, receipt) => {
+        const queued = await enqueue.send(
+          FILE_INDEX_QUEUE,
+          {
+            fileId,
+            versionId,
+            businessId: this.deps.businessId,
+            ownerPrincipalId,
+            requestId: receipt.requestId,
+          },
+          {
+            id: receipt.requestId,
+            singletonKey: `file:${receipt.requestId}`,
+            retryLimit: 3,
+            retryBackoff: true,
+            db: { executeSql: (text, values) => tx.query(text, values) },
+          }
+        );
+        if (queued === null) throw new Error("File Knowledge request was not queued");
+      }
     );
     return true;
+  }
+
+  async receipts(fileIds: readonly string[]) {
+    const receipts = await this.deps.requests.current(this.deps.businessId, fileIds);
+    const queue = this.deps.enqueue;
+    if (!queue?.getJobById) return receipts;
+    let reconciled = false;
+    for (const receipt of receipts.values()) {
+      if (receipt.status !== "queued" && receipt.status !== "processing") continue;
+      const job = await queue.getJobById(FILE_INDEX_QUEUE, receipt.requestId);
+      if (job !== null && job.state !== "failed" && job.state !== "cancelled") continue;
+      await this.deps.requests.settleExhausted(this.deps.businessId, receipt);
+      reconciled = true;
+    }
+    return reconciled ? this.deps.requests.current(this.deps.businessId, fileIds) : receipts;
   }
 
   /** Which of these Files have a Page. The batch form, so a listing costs one query. */
@@ -102,11 +145,13 @@ export class FileKnowledgeBridge {
    * delete is what every other Page removal uses, so retrieval stops returning it here rather than
    * on a sweep that might not run.
    */
-  async remove(fileId: string): Promise<boolean> {
-    const page = await this.deps.pages.getBySource(FILE_KNOWLEDGE_SOURCE, fileId);
+  async remove(fileId: string, tx?: Queryable): Promise<boolean> {
+    const pages = tx ? new PgKnowledgePageRepo(tx) : this.deps.pages;
+    const chunks = tx ? new PgKnowledgeChunkRepo(tx, ambientTransactionPort(tx)) : this.deps.chunks;
+    const page = await pages.getBySource(FILE_KNOWLEDGE_SOURCE, fileId);
     if (page === null) return false;
-    const deleted = await this.deps.pages.softDelete(page._id);
-    if (deleted) await this.deps.chunks.deleteByPage(page._id);
+    const deleted = await pages.softDelete(page._id);
+    if (deleted) await chunks.deleteByPage(page._id);
     return deleted;
   }
 
@@ -153,5 +198,6 @@ export function buildFileKnowledgeBridge(
     chunks: new PgKnowledgeChunkRepo(pool),
     enqueue,
     businessId,
+    requests: new FileKnowledgeIndexRepo(pool),
   });
 }

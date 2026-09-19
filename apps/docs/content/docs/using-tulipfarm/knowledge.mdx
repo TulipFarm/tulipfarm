@@ -46,6 +46,25 @@ failure (a policy page that quietly went stale two years ago) is visible rather 
 
 Agents can write pages too, so a thing an agent learns once can become a page everyone reads.
 
+## Refreshing content from a file
+
+Uploading or attaching a file does not add it to knowledge. **Add to Knowledge** is a separate
+choice in **Files**, available only to the file's owner. Its searchable content keeps the
+file's access rules; adding it does not make a private file public.
+
+After a document-reading upgrade, an older indexed file may still have its previous extracted
+content. Open that file and choose **Refresh Knowledge** to read its current version again.
+You do not need to upload it again. An upgrade does not refresh every file automatically.
+
+Queued means the request was accepted, not that the content is ready. Processing means it is
+being read. A completed refresh replaces the previous searchable result. If reading is refused
+or the refresh fails, the status explains what happened. A previous result from the same file
+version stays available while a refresh waits or fails, and is labelled as the previous result.
+
+Refresh does not change who can read the file. Removing it from knowledge stops retrieval;
+replacing, archiving or deleting it prevents older queued work from restoring its old content.
+The original file remains separate from the text used for search.
+
 ## Where to go next
 
 <Cards>

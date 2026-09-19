@@ -1,0 +1,47 @@
+{
+  "id": "l3-text-pdf-retains-vision",
+  "tier": "l3",
+  "agent": "support",
+  "input": [
+    {
+      "role": "user",
+      "content": [
+        {
+          "type": "text",
+          "text": "Read the attached warranty PDF and tell me its warranty duration."
+        },
+        {
+          "type": "file",
+          "fileId": "pdf-policy",
+          "mediaType": "application/pdf",
+          "name": "policy.pdf"
+        }
+      ]
+    }
+  ],
+  "attachments": [
+    {
+      "fileId": "pdf-policy",
+      "mediaType": "application/pdf",
+      "name": "policy.pdf",
+      "content": "The warranty lasts 47 days.",
+      "pdf": { "variant": "text" }
+    }
+  ],
+  "script": [{ "kind": "text", "text": "The warranty lasts 47 days." }],
+  "expect": [
+    { "kind": "provider_prompt_file_exact", "fileId": "pdf-policy", "part": "file" },
+    {
+      "kind": "pdf_input_accounted",
+      "fileId": "pdf-policy",
+      "pages": [{ "width": 1224, "height": 1584 }],
+      "text": "present",
+      "minimumTokens": 2586
+    },
+    { "kind": "output_contains", "text": "47 days" },
+    { "kind": "run_status", "status": "succeeded" },
+    { "kind": "state_status", "status": "succeeded" },
+    { "kind": "turn_status", "status": "succeeded" },
+    { "kind": "loop_status", "status": "completed" }
+  ]
+}

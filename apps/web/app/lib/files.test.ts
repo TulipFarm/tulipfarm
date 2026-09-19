@@ -1,10 +1,13 @@
 import { afterEach, describe, expect, test, vi } from "vitest";
 import {
+  addFileToKnowledge,
   archiveFile,
   deleteFile,
   deleteFileFolder,
   fetchArchivedFiles,
+  fetchFile,
   fetchFileVersions,
+  removeFileFromKnowledge,
   replaceFile,
   uploadFile,
 } from "./files";
@@ -102,6 +105,44 @@ test("an upload can use a renamed filename without changing the selected bytes",
 });
 
 describe("Files lifecycle client", () => {
+  test("Knowledge acceptance uses the existing route and does not claim publication", async () => {
+    const fetch = vi.fn().mockResolvedValue(new Response(null, { status: 202 }));
+    vi.stubGlobal("fetch", fetch);
+
+    await expect(addFileToKnowledge("file/1")).resolves.toBeUndefined();
+    expect(fetch).toHaveBeenCalledWith(
+      expect.stringContaining("/api/v1/files/file%2F1/knowledge"),
+      expect.objectContaining({ method: "POST", credentials: "include" })
+    );
+  });
+
+  test("Knowledge removal still accepts an empty 204", async () => {
+    const fetch = vi.fn().mockResolvedValue(new Response(null, { status: 204 }));
+    vi.stubGlobal("fetch", fetch);
+    await expect(removeFileFromKnowledge("file_1")).resolves.toBeUndefined();
+    expect(fetch).toHaveBeenCalledWith(
+      expect.stringContaining("/files/file_1/knowledge"),
+      expect.objectContaining({ method: "DELETE" })
+    );
+  });
+
+  test("metadata reads preserve authorized receipts and accept cancellation", async () => {
+    const metadata = {
+      id: "file_1",
+      inKnowledge: true,
+      knowledgeRequested: true,
+      knowledgeReceipt: { status: "refused", reason: "needs_ocr" },
+    };
+    const fetch = vi.fn().mockResolvedValue(new Response(JSON.stringify(metadata)));
+    vi.stubGlobal("fetch", fetch);
+    const controller = new AbortController();
+    await expect(fetchFile("file_1", controller.signal)).resolves.toEqual(metadata);
+    expect(fetch).toHaveBeenCalledWith(
+      expect.stringContaining("/files/file_1"),
+      expect.objectContaining({ credentials: "include", signal: controller.signal })
+    );
+  });
+
   test("deletes a folder without declaring a JSON body it does not send", async () => {
     // Fastify rejects an empty body typed as JSON before the route runs, and that 400 is
     // indistinguishable from the folder-is-not-empty 400 the caller reports to the person.

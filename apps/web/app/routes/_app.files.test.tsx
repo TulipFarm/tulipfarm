@@ -3,7 +3,7 @@ import { fireEvent, render, screen, waitFor, within } from "@testing-library/rea
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { FileTypeIcon, fileTypeIconName, fileTypeLabel } from "~/components/files/file-type-icon";
-import type { FileFolder, FilePage, LibraryFile } from "~/lib/files";
+import type { FileFolder, FileKnowledgeReceipt, FilePage, LibraryFile } from "~/lib/files";
 import FilesIndex from "./_app.files";
 
 const fetchFiles = vi.fn<() => Promise<FilePage>>();
@@ -20,6 +20,9 @@ const createFileFolder = vi.fn();
 const moveFile = vi.fn();
 const renameFileFolder = vi.fn();
 const deleteFileFolder = vi.fn();
+const fetchFile = vi.fn();
+const addFileToKnowledge = vi.fn();
+const removeFileFromKnowledge = vi.fn();
 
 vi.mock("~/lib/files", async (importOriginal) => ({
   ...(await importOriginal<typeof import("~/lib/files")>()),
@@ -38,6 +41,9 @@ vi.mock("~/lib/files", async (importOriginal) => ({
   moveFile: (...args: unknown[]) => moveFile(...args),
   renameFileFolder: (...args: unknown[]) => renameFileFolder(...args),
   deleteFileFolder: (...args: unknown[]) => deleteFileFolder(...args),
+  fetchFile: (...args: unknown[]) => fetchFile(...args),
+  addFileToKnowledge: (...args: unknown[]) => addFileToKnowledge(...args),
+  removeFileFromKnowledge: (...args: unknown[]) => removeFileFromKnowledge(...args),
 }));
 
 function file(id: string, filename: string, overrides: Partial<LibraryFile> = {}): LibraryFile {
@@ -52,12 +58,30 @@ function file(id: string, filename: string, overrides: Partial<LibraryFile> = {}
     currentVersionId: id,
     archivedAt: null,
     owner: "user_1",
+    canManage: overrides.owner === undefined || overrides.owner === "user_1",
     origin: "uploaded",
     sourceChatId: null,
     sourceRunId: null,
     sharedWithCount: 0,
     inKnowledge: false,
     folderId: null,
+    ...overrides,
+  };
+}
+
+function receipt(overrides: Partial<FileKnowledgeReceipt> = {}): FileKnowledgeReceipt {
+  return {
+    requestId: "request_1",
+    fileId: "mine",
+    versionId: "mine",
+    converterRevision: "anydoc-2",
+    status: "queued",
+    requestedAt: "2026-09-19T00:00:00.000Z",
+    completedAt: null,
+    reason: null,
+    indexedAt: null,
+    indexedConverterRevision: null,
+    truncated: false,
     ...overrides,
   };
 }
@@ -108,6 +132,13 @@ describe("Files library", () => {
     );
     deleteFile.mockResolvedValue(undefined);
     shareFile.mockResolvedValue(undefined);
+    fetchFile
+      .mockReset()
+      .mockImplementation(async (id: string) =>
+        file(id, `${id}.pdf`, id === "mine" ? { archivedAt: "2026-02-01T00:00:00.000Z" } : {})
+      );
+    addFileToKnowledge.mockReset().mockResolvedValue(undefined);
+    removeFileFromKnowledge.mockReset().mockResolvedValue(undefined);
     fetchFileFolders.mockResolvedValue([]);
     createFileFolder.mockResolvedValue({
       id: "folder-1",
@@ -149,6 +180,54 @@ describe("Files library", () => {
       .getAllByRole("button", { name: /^Preview / })
       .map((button) => button.getAttribute("aria-label"));
     expect(names).toEqual(["Preview shared.pdf", "Preview mine.pdf"]);
+  });
+
+  it("shows Add acceptance as queued and permits removal of pending opt-in", async () => {
+    fetchFile.mockResolvedValue(
+      file("mine", "mine.pdf", {
+        knowledgeRequested: true,
+        knowledgeReceipt: receipt(),
+      })
+    );
+    renderRoute({ mine: [file("mine", "mine.pdf")] });
+    await userEvent.click(await screen.findByRole("button", { name: "Actions for mine.pdf" }));
+    await userEvent.click(screen.getByRole("menuitem", { name: "Add to Knowledge" }));
+    expect(await screen.findByText("Knowledge queued")).toBeInTheDocument();
+    expect(within(screen.getByRole("table")).queryByText("In Knowledge")).toBeNull();
+    await userEvent.click(screen.getByRole("button", { name: "Actions for mine.pdf" }));
+    expect(screen.getByRole("menuitem", { name: "Refresh Knowledge" })).toBeDisabled();
+    fetchFile.mockResolvedValue(file("mine", "mine.pdf", { knowledgeRequested: false }));
+    await userEvent.click(screen.getByRole("menuitem", { name: "Remove from Knowledge" }));
+    await waitFor(() => expect(screen.queryByText("Knowledge queued")).toBeNull());
+    expect(removeFileFromKnowledge).toHaveBeenCalledWith("mine");
+  });
+
+  it("refreshes existing Knowledge and shows failed processing with its previous result", async () => {
+    fetchFile.mockResolvedValue(
+      file("mine", "mine.pdf", {
+        inKnowledge: true,
+        knowledgeRequested: true,
+        knowledgeReceipt: receipt({ status: "failed", reason: "converter_unavailable" }),
+      })
+    );
+    renderRoute({ mine: [file("mine", "mine.pdf", { inKnowledge: true })] });
+    await userEvent.click(await screen.findByRole("button", { name: "Actions for mine.pdf" }));
+    await userEvent.click(screen.getByRole("menuitem", { name: "Refresh Knowledge" }));
+    expect(await screen.findByText("Knowledge failed")).toBeInTheDocument();
+    expect(screen.getByText("Previous Knowledge result is still available.")).toBeInTheDocument();
+    expect(within(screen.getByRole("table")).getByText("In Knowledge")).toBeInTheDocument();
+    expect(addFileToKnowledge).toHaveBeenCalledWith("mine");
+  });
+
+  it("reports post-acceptance metadata errors without optimistic publication", async () => {
+    fetchFile.mockRejectedValue(new Error("VENDOR_DETAIL"));
+    renderRoute({ mine: [file("mine", "mine.pdf")] });
+    await userEvent.click(await screen.findByRole("button", { name: "Actions for mine.pdf" }));
+    await userEvent.click(screen.getByRole("menuitem", { name: "Add to Knowledge" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("metadata could not be loaded");
+    expect(within(screen.getByRole("table")).queryByText("In Knowledge")).toBeNull();
+    expect(screen.queryByText("Knowledge completed")).toBeNull();
+    expect(screen.queryByText(/VENDOR_DETAIL/)).toBeNull();
   });
 
   it.each([
@@ -403,6 +482,7 @@ describe("Files library", () => {
   });
 
   it("creates folders, opens them, and moves owned Files into them", async () => {
+    fetchFile.mockResolvedValue(file("mine", "mine.pdf", { folderId: "folder-1", revision: 2 }));
     const user = userEvent.setup();
     renderRoute({ mine: [file("mine", "mine.pdf")] });
 

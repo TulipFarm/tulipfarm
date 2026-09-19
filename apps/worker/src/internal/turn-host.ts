@@ -5,13 +5,15 @@ import type {
   ToolDispatchRequest,
   ToolDispatchResult,
 } from "@tulipfarm/agent-runtime";
-import { extractText } from "@tulipfarm/files";
+import { DocumentRefusedError, extractText } from "@tulipfarm/files";
+import { isOfficePreviewable } from "@tulipfarm/files/office-preview";
 import { RunInterruptedError } from "@tulipfarm/run-kernel";
 import { canonicalHash, validateGuardrailsConfig } from "@tulipfarm/schema";
 import { MARKETPLACE_SKILL_TOOL_TIMEOUTS_MS, type TurnAuthority } from "@tulipfarm/tool-host";
 import type {
   AssistantMessageWriteResult,
   ResolvedTurnContext,
+  TurnAttachmentInspection,
   TurnAttachmentPort,
   TurnAttemptHistory,
   TurnAttemptMessageMetadata,
@@ -197,15 +199,36 @@ export class HttpTurnHost
    * product does with an upload, and the Worker is the process that is allowed to be crashed by
    * one. It also keeps a PDF engine out of the control plane.
    *
-   * A File with no readable text is screened as nothing rather than refused: an image is
-   * unreadable to a text guard by nature, and refusing it would ban vision rather than screen it.
+   * Readable scans keep their vision path; malformed or encrypted PDFs do not. Ordinary document
+   * refusals complete as participant replies, while converter infrastructure failures still throw.
    */
-  async extract(mediaType: string, bytes: Uint8Array): Promise<string | undefined> {
-    return (await this.inspect(mediaType, bytes)).text;
+  async extract(
+    mediaType: string,
+    bytes: Uint8Array,
+    signal?: AbortSignal
+  ): Promise<string | undefined> {
+    const inspected = await this.inspect(mediaType, bytes, signal);
+    if (inspected.refusal !== undefined) throw new DocumentRefusedError(inspected.refusal);
+    return inspected.text;
   }
 
-  async inspect(mediaType: string, bytes: Uint8Array) {
-    const extracted = await extractText(mediaType, bytes);
+  async inspect(
+    mediaType: string,
+    bytes: Uint8Array,
+    signal?: AbortSignal
+  ): Promise<TurnAttachmentInspection> {
+    const extracted = await extractText(mediaType, bytes, { signal });
+    if (extracted.kind === "refused") {
+      const readablePdf =
+        mediaType === "application/pdf" &&
+        extracted.visual?.kind === "pdf" &&
+        (extracted.reason === "needs_ocr" || extracted.reason === "no_text_layer");
+      if (isOfficePreviewable(mediaType) || (mediaType === "application/pdf" && !readablePdf)) {
+        if (extracted.reason === "image_not_extractable")
+          throw new Error("Invalid document refusal");
+        return { refusal: extracted.reason };
+      }
+    }
     return {
       ...(extracted.kind === "text" ? { text: extracted.text } : {}),
       ...(extracted.visual === undefined ? {} : { visual: extracted.visual }),

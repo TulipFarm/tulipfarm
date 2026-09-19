@@ -31,7 +31,8 @@ export function registerFileKnowledgeRoutes(
           "making a document retrievable is a different act from attaching it to one Chat. " +
           "Answers 202 because the text is extracted outside this process. A type that carries " +
           "no text at all, an image among them, is refused here with 415; a scan with no text " +
-          "layer can only be discovered later, and is accepted and then indexed as nothing.",
+          "layer can only be discovered later. The File metadata carries a durable outcome. " +
+          "An already opted-in File is refreshed without removing its previous same-version result.",
         tags: ["files"],
         security: [{ sessionCookie: [] }, { bearerToken: [] }],
         params: { type: "object", required: ["id"], properties: { id: { type: "string" } } },
@@ -39,6 +40,7 @@ export function registerFileKnowledgeRoutes(
           202: { type: "null" },
           401: ErrorSchema,
           404: ErrorSchema,
+          409: ErrorSchema,
           415: ErrorSchema,
           501: ErrorSchema,
         },
@@ -56,6 +58,10 @@ export function registerFileKnowledgeRoutes(
         // Owner-only: `read` refuses a caller who is not the owner or a sharee, and the owner
         // check below refuses the rest, both with the 404 a File that does not exist would answer.
         const file = await deps.files.read(DEPLOYMENT_BUSINESS_ID, id, principal.id);
+        if (!(await deps.files.canManage(DEPLOYMENT_BUSINESS_ID, id, principal.id))) {
+          reply.code(404).send({ error: "File not found" });
+          return;
+        }
         // Refused here rather than swallowed by the worker. The type is knowable now, and a 202
         // for a File that can never be indexed would leave the library showing "in knowledge" for
         // something no Agent will ever retrieve — which for an image, the commonest upload in a
@@ -88,7 +94,7 @@ export function registerFileKnowledgeRoutes(
         tags: ["files"],
         security: [{ sessionCookie: [] }, { bearerToken: [] }],
         params: { type: "object", required: ["id"], properties: { id: { type: "string" } } },
-        response: { 204: { type: "null" }, 401: ErrorSchema, 404: ErrorSchema },
+        response: { 204: { type: "null" }, 401: ErrorSchema, 404: ErrorSchema, 409: ErrorSchema },
       },
     },
     async (req, reply) => {
@@ -97,8 +103,14 @@ export function registerFileKnowledgeRoutes(
       try {
         // The opt-in is withdrawn before the Page goes, so an index job still in flight stops
         // rather than re-creating what this call just removed.
-        await deps.files.clearKnowledgeRequest(DEPLOYMENT_BUSINESS_ID, id, principal.id);
-        await deps.knowledge?.remove(id);
+        await deps.files.clearKnowledgeRequest(
+          DEPLOYMENT_BUSINESS_ID,
+          id,
+          principal.id,
+          async (tx) => {
+            await deps.knowledge?.remove(id, tx);
+          }
+        );
         reply.code(204).send();
       } catch (error) {
         reject(reply, error);

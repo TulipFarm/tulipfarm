@@ -13,13 +13,13 @@ function stubDatabase(result: Record<string, unknown>[] | Error): Queryable {
 }
 
 describe("assertSchemaFloor", () => {
-  it("waits for durable MCP authority before the Worker can start", async () => {
-    await expect(
-      assertSchemaFloor(stubDatabase([{ version: 137 }]), REQUIRED_SCHEMA_VERSION)
-    ).rejects.toThrow("requires 138");
+  it("waits for File Knowledge request receipts before the Worker can start", async () => {
     await expect(
       assertSchemaFloor(stubDatabase([{ version: 138 }]), REQUIRED_SCHEMA_VERSION)
-    ).resolves.toBe(138);
+    ).rejects.toThrow("requires 139");
+    await expect(
+      assertSchemaFloor(stubDatabase([{ version: 139 }]), REQUIRED_SCHEMA_VERSION)
+    ).resolves.toBe(139);
   });
 
   it("returns the version when the database is at or above the floor", async () => {

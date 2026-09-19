@@ -10,6 +10,8 @@ export {
   type ImageBoundPolicy,
 } from "./bound";
 export { type ImageSize, imageSize } from "./dimensions";
+export { DocumentRefusedError } from "./document-preview";
+export { DocumentConversionError, shutdownDocumentConversions } from "./document-runner";
 export {
   type ExtractedText,
   type ExtractionRefusal,
@@ -43,6 +45,16 @@ export {
   serializeFileVersion,
   serializeShare,
 } from "./http";
+export {
+  FILE_CONVERTER_REVISION,
+  FILE_KNOWLEDGE_REQUEST_STATEMENTS,
+  FILE_KNOWLEDGE_STATUSES,
+  type FileKnowledgeClaim,
+  FileKnowledgeIndexRepo,
+  type FileKnowledgeReceipt,
+  type FileKnowledgeRequest,
+  type FileKnowledgeStatus,
+} from "./knowledge-index";
 export {
   ALLOWED_MEDIA_TYPES,
   type AllowedMediaType,

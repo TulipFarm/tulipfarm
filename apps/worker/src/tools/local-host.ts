@@ -148,6 +148,7 @@ function hostedFamilies(options: LocalToolHostOptions): readonly HostedFamily<ne
     context: (ctx) => ({
       businessId: DEPLOYMENT_BUSINESS_ID,
       principalId: ctx.userId,
+      abortSignal: ctx.abortSignal,
       ...(ctx.subject === undefined ? {} : { principalKind: ctx.subject.kind }),
       ...(ctx.agentId === undefined ? {} : { agentId: ctx.agentId }),
       // Recorded on a File this Run authors; it never widens what the Run may read.

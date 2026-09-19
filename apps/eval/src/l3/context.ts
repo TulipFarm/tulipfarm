@@ -51,6 +51,15 @@ export function evalTurnContext(options: EvalTurnContextOptions): EvalTurnContex
     tools: exposedToolsFor(evalCase).map((tool) => ({ ...tool, tier: "untiered" })),
     limits: LOOP_LIMITS,
     compacted: false,
+    ...(evalCase.attachments === undefined
+      ? {}
+      : {
+          attachments: evalCase.attachments.map(({ fileId, mediaType, name }) => ({
+            fileId,
+            mediaType,
+            name,
+          })),
+        }),
   };
 
   return {

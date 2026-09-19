@@ -1,0 +1,52 @@
+{
+  "id": "l3-reread-scanned-pdf-retains-vision",
+  "tier": "l3",
+  "agent": "support",
+  "input": [
+    {
+      "role": "user",
+      "content": "Use file_read to inspect scan.pdf visually, without inventing a text layer."
+    }
+  ],
+  "readable": [
+    {
+      "fileId": "pdf-scan",
+      "mediaType": "application/pdf",
+      "name": "scan.pdf",
+      "pdf": { "variant": "scan" }
+    }
+  ],
+  "platformTools": ["file_read"],
+  "script": [
+    {
+      "kind": "tool_calls",
+      "calls": [
+        { "callId": "read-pdf", "name": "file_read", "arguments": { "fileId": "pdf-scan" } }
+      ]
+    },
+    { "kind": "text", "text": "The PDF is available for visual inspection." }
+  ],
+  "expect": [
+    {
+      "kind": "tool_result_field_equals",
+      "name": "file_read",
+      "argumentPath": "fileId",
+      "argumentValue": "pdf-scan",
+      "status": "succeeded",
+      "outputPath": "textRefusal",
+      "value": "needs_ocr"
+    },
+    { "kind": "provider_prompt_file_exact", "fileId": "pdf-scan", "part": "file" },
+    {
+      "kind": "pdf_input_accounted",
+      "fileId": "pdf-scan",
+      "pages": [{ "width": 1224, "height": 1584 }],
+      "text": "absent",
+      "minimumTokens": 2586
+    },
+    { "kind": "run_status", "status": "succeeded" },
+    { "kind": "state_status", "status": "succeeded" },
+    { "kind": "turn_status", "status": "succeeded" },
+    { "kind": "loop_status", "status": "completed" }
+  ]
+}

@@ -8,8 +8,20 @@
  * embeddings it needs, and a staging hop would only mean the text crossed a boundary twice.
  */
 
-import type { FileReader } from "@tulipfarm/files";
-import { extractText, type FileService, isExtractableMediaType } from "@tulipfarm/files";
+import type {
+  ExtractionRefusal,
+  FileKnowledgeClaim,
+  FileKnowledgeIndexRepo,
+  FileReader,
+} from "@tulipfarm/files";
+
+import {
+  DocumentConversionError,
+  extractText,
+  FileError,
+  type FileService,
+  isExtractableMediaType,
+} from "@tulipfarm/files";
 import type { KnowledgeService } from "@tulipfarm/knowledge";
 
 /** Must match `FILE_INDEX_QUEUE` in `apps/api/src/files/knowledge-bridge.ts`. */
@@ -28,6 +40,8 @@ export interface FileIndexJob {
   readonly businessId: string;
   /** The File's owner, and the only Principal permitted to have asked for this. */
   readonly ownerPrincipalId: string;
+  readonly requestId?: string;
+  readonly legacyJobId?: string;
 }
 
 /** Why a File was not indexed. Every one is an ordinary outcome, so none of them throws. */
@@ -35,7 +49,13 @@ export type FileIndexOutcome =
   | { readonly kind: "indexed"; readonly pageId: string; readonly truncated: boolean }
   | {
       readonly kind: "skipped";
-      readonly reason: "gone" | "no_text" | "unsupported_media_type" | "no_space" | "withdrawn";
+      readonly reason:
+        | ExtractionRefusal
+        | "gone"
+        | "no_text"
+        | "no_space"
+        | "withdrawn"
+        | "changed";
     };
 
 export interface FileIndexDeps {
@@ -44,6 +64,13 @@ export interface FileIndexDeps {
     KnowledgeService,
     "ingestSource" | "createSpace" | "findSpaceByName" | "setPageRestriction" | "deletePage"
   >;
+  readonly publication?: {
+    readonly requests: FileKnowledgeIndexRepo;
+    publish(
+      claim: FileKnowledgeClaim,
+      input: { text: string; truncated: boolean; spaceId: string }
+    ): Promise<{ pageId: string; truncated: boolean } | null>;
+  };
 }
 
 /** The Space every indexed File lands in. Created on first use; never restricted. */
@@ -96,7 +123,42 @@ async function collect(body: AsyncIterable<Uint8Array>): Promise<Uint8Array> {
 export async function handleFileIndexJob(
   job: FileIndexJob,
   deps: FileIndexDeps,
-  existingPageId?: string
+  existingPageId?: string,
+  lastAttempt = true
+): Promise<FileIndexOutcome> {
+  const publication = deps.publication;
+  if (!publication) return indexFile(job, deps, existingPageId);
+  const claim = await publication.requests.claim(job);
+  if (!claim) return { kind: "skipped", reason: "changed" };
+  try {
+    const outcome = await indexFile(job, deps, undefined, claim);
+    if (outcome.kind === "skipped") {
+      await publication.requests.settle(claim, "refused", outcome.reason);
+    }
+    return outcome;
+  } catch (error) {
+    if (error instanceof FileError && error.reason === "not_found") {
+      await publication.requests.settle(claim, "refused", "gone");
+      return { kind: "skipped", reason: "gone" };
+    }
+    await publication.requests.settle(
+      claim,
+      lastAttempt ? "failed" : "queued",
+      lastAttempt
+        ? error instanceof DocumentConversionError
+          ? "converter_unavailable"
+          : "index_failed"
+        : "retry_pending"
+    );
+    throw error;
+  }
+}
+
+async function indexFile(
+  job: FileIndexJob,
+  deps: FileIndexDeps,
+  existingPageId?: string,
+  claim?: FileKnowledgeClaim
 ): Promise<FileIndexOutcome> {
   // Every exit below has to take the Page a previous pass wrote with it. This function calls
   // itself when the File changed underneath the first pass, handing the recursion the Page it had
@@ -112,7 +174,8 @@ export async function handleFileIndexJob(
   let file: Awaited<ReturnType<FileService["read"]>>;
   try {
     file = await deps.files.read(job.businessId, job.fileId, job.ownerPrincipalId);
-  } catch {
+  } catch (error) {
+    if (!(error instanceof FileError && error.reason === "not_found")) throw error;
     // Destroyed, or no longer this Principal's to index, between enqueue and now. Both are
     // ordinary races and neither is worth a retry: the File this job named is not indexable.
     return await stop("gone");
@@ -122,6 +185,9 @@ export async function handleFileIndexJob(
   // work, and again after the write, because only the second check can catch a withdrawal that
   // lands while the bytes are being parsed.
   if (file.knowledgeRequestedAt === null) return await stop("withdrawn");
+  if (claim && (file.archivedAt !== null || file.currentVersionId !== job.versionId)) {
+    return await stop("changed");
+  }
   const currentJob =
     file.currentVersionId === job.versionId ? job : { ...job, versionId: file.currentVersionId };
 
@@ -131,9 +197,14 @@ export async function handleFileIndexJob(
     return await stop("unsupported_media_type");
   }
 
-  const { body } = await deps.files.content(job.businessId, job.fileId, job.ownerPrincipalId);
+  const content = await deps.files.content(job.businessId, job.fileId, job.ownerPrincipalId);
+  if (claim && content.file.currentVersionId !== job.versionId) return await stop("changed");
+  const { body } = content;
   const extracted = await extractText(file.mediaType, await collect(body));
-  if (extracted.kind === "refused" || extracted.text.trim().length === 0) {
+  if (extracted.kind === "refused") {
+    return await stop(claim ? extracted.reason : "no_text");
+  }
+  if (extracted.text.trim().length === 0) {
     return await stop("no_text");
   }
 
@@ -142,6 +213,15 @@ export async function handleFileIndexJob(
 
   const spaceId = await fileSpaceId(deps.knowledge);
   if (spaceId === null) return await stop("no_space");
+
+  if (claim && deps.publication) {
+    const published = await deps.publication.publish(claim, {
+      text: extracted.text,
+      truncated: extracted.truncated,
+      spaceId,
+    });
+    return published ? { kind: "indexed", ...published } : { kind: "skipped", reason: "changed" };
+  }
 
   const page = await deps.knowledge.ingestSource({
     source: "file",
@@ -169,7 +249,8 @@ export async function handleFileIndexJob(
       currentJob.fileId,
       currentJob.ownerPrincipalId
     );
-  } catch {
+  } catch (error) {
+    if (!(error instanceof FileError && error.reason === "not_found")) throw error;
     // This read is itself an authorization check, so a File destroyed at exactly this moment makes
     // it throw. Letting that propagate would fail the job with the Page already written, and every
     // retry stops at the read above this one — leaving the destroyed File retrievable forever.
@@ -210,7 +291,8 @@ async function settle(
       return { kind: "skipped", reason: "withdrawn" };
     }
     current = await deps.files.readers(job.businessId, job.fileId, job.ownerPrincipalId);
-  } catch {
+  } catch (error) {
+    if (!(error instanceof FileError && error.reason === "not_found")) throw error;
     await withdraw(deps, pageId);
     return { kind: "skipped", reason: "gone" };
   }

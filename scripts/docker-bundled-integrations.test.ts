@@ -75,6 +75,41 @@ describe("bundled integrations container packaging", () => {
   describe("shared runtime container packaging", () => {
     const dockerfile = readFileSync(join(ROOT, "Dockerfile"), "utf8");
     const compose = readFileSync(join(ROOT, "docker-compose.yml"), "utf8");
+    it("retains and exercises the private native document child after production pruning", () => {
+      expect(dockerfile).toContain("--external:@firecrawl/anydoc");
+      expect(dockerfile).toContain("../../packages/files/src/document-child.ts");
+      expect(dockerfile).toContain("cd /deploy && node check-document-runtime.mjs");
+      expect(dockerfile.indexOf("cd /deploy && node check-document-runtime.mjs")).toBeGreaterThan(
+        dockerfile.indexOf("deploy --prod --legacy /deploy")
+      );
+      expect(dockerfile).toContain(
+        "COPY --from=builder --chown=node:0 /app/apps/api/dist/document-child.cjs ./document-child.cjs"
+      );
+      const runtime = dockerfile.split("FROM node:26.5.0-slim AS runtime")[1];
+      expect(runtime).toContain(
+        "RUN --network=none --mount=type=bind,from=builder,source=/deploy/check-document-runtime.mjs,target=/app/check-document-runtime.mjs"
+      );
+      expect(runtime.indexOf("node check-document-runtime.mjs")).toBeGreaterThan(
+        runtime.indexOf("USER node")
+      );
+    });
+
+    it("requires all four real conversions, PDF Markdown, OCR refusal, and page dimensions", () => {
+      const smoke = readFileSync(join(ROOT, "scripts/check-document-runtime.mjs"), "utf8");
+      expect(smoke).toContain('fromFiles("@firecrawl/anydoc/package.json").version, "0.2.4"');
+      expect(smoke).toContain(
+        `fromNative.resolve(\`@firecrawl/anydoc-\${process.platform}-\${process.arch}\${libc}\`)`
+      );
+      expect(smoke).toContain('for (const format of ["docx", "xlsx", "pptx", "pdf"])');
+      expect(smoke).toContain("await convert(format, fixtures[format])");
+      expect(smoke).toContain("assert.ok(outcome.text.includes(marker)");
+      expect(smoke).toContain("assert.match(outcome.text, /^#{1,6} Packaged handbook");
+      expect(smoke).toContain("assert.deepEqual(outcome.visual, visual)");
+      expect(smoke).toContain("assert.deepEqual(capped,");
+      expect(smoke).toContain('assert.deepEqual(await convert("pdf", pdfFixture(true)),');
+      expect(smoke).toContain('reason: "needs_ocr"');
+      expect(smoke).toContain("pages: [{ width: 1224, height: 1584 }]");
+    });
 
     it("ships all production entrypoints in the same public image", () => {
       const runtime = dockerfile.split("FROM node:26.5.0-slim AS runtime")[1];

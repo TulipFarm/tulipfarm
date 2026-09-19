@@ -16,7 +16,12 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { PGlite } from "@electric-sql/pglite";
 import { DEPLOYMENT_BUSINESS_ID } from "@tulipfarm/constants";
-import { FileService, PgFileRepo } from "@tulipfarm/files";
+import {
+  FileKnowledgeIndexRepo,
+  type FileKnowledgeRequest,
+  FileService,
+  PgFileRepo,
+} from "@tulipfarm/files";
 import {
   KnowledgeService,
   PageRetrievalService,
@@ -97,6 +102,7 @@ interface Harness {
   chunks: PgKnowledgeChunkRepo;
   gate: PageReadGate;
   sent: Enqueued[];
+  queueStates: Map<string, string>;
   ownerSid: string;
   ownerId: string;
   readerSid: string;
@@ -146,6 +152,7 @@ async function harness(
   });
 
   const sent: Enqueued[] = [];
+  const queueStates = new Map<string, string>();
   const app = await buildApp({
     sessionStore,
     userRepo,
@@ -161,12 +168,19 @@ async function harness(
         acl,
         chunks,
         enqueue: {
-          async send(name, data) {
+          async send(name, data, options) {
             sent.push({ name, data });
-            return randomUUID();
+            const id = options?.id ?? randomUUID();
+            queueStates.set(id, "created");
+            return id;
+          },
+          async getJobById(_name, id) {
+            const state = queueStates.get(id);
+            return state ? { state } : null;
           },
         },
         businessId: DEPLOYMENT_BUSINESS_ID,
+        requests: new FileKnowledgeIndexRepo(db),
       })
     ),
   });
@@ -180,6 +194,7 @@ async function harness(
     chunks,
     gate: new PageReadGate(db),
     sent,
+    queueStates,
     ownerSid: await sessionStore.create(owner._id),
     ownerId: owner._id,
     readerSid: await sessionStore.create(reader._id),
@@ -286,6 +301,116 @@ describe("files in knowledge", () => {
     expect(h.sent).toEqual([
       { name: FILE_INDEX_QUEUE, data: expect.objectContaining({ fileId: id }) },
     ]);
+    const metadata = await h.app.inject({
+      method: "GET",
+      url: `/api/v1/files/${id}`,
+      cookies,
+    });
+    expect(metadata.json()).toMatchObject({
+      inKnowledge: false,
+      knowledgeRequested: true,
+      knowledgeReceipt: { status: "queued", fileId: id },
+    });
+  });
+
+  it("deduplicates queued refresh clicks and keeps the previous result readable", async () => {
+    const id = await uploadText();
+    const owner = auth(h.ownerSid);
+    const pageId = await indexAs(id);
+    for (let click = 0; click < 2; click++) {
+      expect(
+        (
+          await h.app.inject({
+            method: "POST",
+            url: `/api/v1/files/${id}/knowledge`,
+            ...owner,
+          })
+        ).statusCode
+      ).toBe(202);
+    }
+    expect(h.sent).toHaveLength(1);
+    expect(await readable(h.ownerId, [pageId])).toEqual([pageId]);
+    const metadata = await h.app.inject({
+      method: "GET",
+      url: `/api/v1/files/${id}`,
+      cookies: owner.cookies,
+    });
+    expect(metadata.json()).toMatchObject({
+      inKnowledge: true,
+      knowledgeRequested: true,
+      knowledgeReceipt: { status: "queued", completedAt: null },
+    });
+  });
+
+  it("keeps refusal separate from the previous published result", async () => {
+    const id = await uploadText();
+    const owner = auth(h.ownerSid);
+    const pageId = await indexAs(id);
+    await h.app.inject({ method: "POST", url: `/api/v1/files/${id}/knowledge`, ...owner });
+    const requests = new FileKnowledgeIndexRepo(h.db);
+    const claim = await requests.claim(h.sent[0]?.data as FileKnowledgeRequest);
+    if (!claim) throw new Error("request not claimable");
+    await requests.settle(claim, "refused", "unreadable");
+    const metadata = await h.app.inject({
+      method: "GET",
+      url: `/api/v1/files/${id}`,
+      cookies: owner.cookies,
+    });
+
+    expect(metadata.json()).toMatchObject({
+      inKnowledge: true,
+      knowledgeReceipt: { status: "refused", reason: "unreadable" },
+    });
+    expect(await readable(h.ownerId, [pageId])).toEqual([pageId]);
+  });
+
+  it.each(["failed", "missing"])("settles a %s queue job after a Worker crash", async (state) => {
+    const id = await uploadText();
+    const owner = auth(h.ownerSid);
+    await h.app.inject({ method: "POST", url: `/api/v1/files/${id}/knowledge`, ...owner });
+    const job = h.sent[0]?.data as FileKnowledgeRequest;
+    const requests = new FileKnowledgeIndexRepo(h.db);
+    expect(await requests.claim(job)).not.toBeNull();
+    if (!job.requestId) throw new Error("request identity missing");
+    if (state === "missing") h.queueStates.delete(job.requestId);
+    else h.queueStates.set(job.requestId, state);
+    const metadata = await h.app.inject({
+      method: "GET",
+      url: `/api/v1/files/${id}`,
+      cookies: owner.cookies,
+    });
+    expect(metadata.json()).toMatchObject({
+      inKnowledge: false,
+      knowledgeReceipt: { status: "failed", reason: "index_failed" },
+    });
+  });
+
+  it("does not expose receipts or refresh authority to a shared reader", async () => {
+    const id = await uploadText();
+    const owner = auth(h.ownerSid);
+    await h.app.inject({ method: "POST", url: `/api/v1/files/${id}/knowledge`, ...owner });
+    await h.files.share(DEPLOYMENT_BUSINESS_ID, id, h.ownerId, {
+      kind: "user",
+      id: h.readerId,
+    });
+    const metadata = await h.app.inject({
+      method: "GET",
+      url: `/api/v1/files/${id}`,
+      cookies: auth(h.readerSid).cookies,
+    });
+    expect(metadata.statusCode).toBe(200);
+    expect(metadata.json()).toMatchObject({
+      knowledgeReceipt: null,
+      knowledgeRequested: null,
+      inKnowledge: null,
+    });
+    const refreshed = await h.app.inject({
+      method: "POST",
+      url: `/api/v1/files/${id}/knowledge`,
+      ...auth(h.readerSid),
+    });
+    expect(refreshed.statusCode).toBe(404);
+    expect(h.sent).toHaveLength(1);
   });
 
   it("refuses a type that carries no text, rather than accepting it and indexing nothing", async () => {

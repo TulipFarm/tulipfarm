@@ -448,7 +448,8 @@ class MemoryFileRepo implements FileRepo {
     businessId: string,
     id: string,
     expectedRevision: number,
-    archived: boolean
+    archived: boolean,
+    beforeArchive?: Parameters<FileRepo["setArchived"]>[4]
   ): Promise<FileRecord | null> {
     const index = this.rows.findIndex(
       (row) =>
@@ -459,6 +460,12 @@ class MemoryFileRepo implements FileRepo {
     );
     const current = this.rows[index];
     if (current === undefined) return null;
+    if (archived)
+      await beforeArchive?.({
+        query: async () => {
+          throw new Error("unexpected query in in-memory File fixture");
+        },
+      });
     const updated = {
       ...current,
       archivedAt: archived ? new Date() : null,

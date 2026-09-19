@@ -1,0 +1,40 @@
+{
+  "id": "l3-support-reads-pptx-speaker-notes",
+  "tier": "l3",
+  "agent": "support",
+  "input": [
+    {
+      "role": "user",
+      "content": [
+        {
+          "type": "text",
+          "text": "Read the briefing's speaker notes and tell me when approval expires."
+        },
+        {
+          "type": "file",
+          "fileId": "file-approval-briefing",
+          "mediaType": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+          "name": "briefing.pptx"
+        }
+      ]
+    }
+  ],
+  "attachments": [
+    {
+      "fileId": "file-approval-briefing",
+      "mediaType": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+      "name": "briefing.pptx",
+      "content": "Speaker-only approval expires after 47 days.",
+      "pptx": { "speakerNotes": true }
+    }
+  ],
+  "script": [{ "kind": "text", "text": "The speaker notes say approval expires after 47 days." }],
+  "expect": [
+    { "kind": "provider_prompt_contains", "text": "Speaker-only approval expires after 47 days." },
+    { "kind": "provider_prompt_omits_file", "fileId": "file-approval-briefing" },
+    { "kind": "output_contains", "text": "47 days" },
+    { "kind": "run_status", "status": "succeeded" },
+    { "kind": "turn_status", "status": "succeeded" },
+    { "kind": "loop_status", "status": "completed" }
+  ]
+}

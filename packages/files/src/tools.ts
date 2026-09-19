@@ -4,6 +4,7 @@ import { extractText } from "./extract";
 import {
   DEFAULT_FILE_LIST_LIMIT,
   isExtractableMediaType,
+  isTextualMediaType,
   MAX_FILE_BYTES,
   MAX_FILE_LIST_LIMIT,
   MAX_FILE_READ_CHARS,
@@ -20,6 +21,7 @@ import { FileError, type FileService } from "./service";
  * Reading and writing are asymmetric on purpose — see {@link FileToolContext.agentId}.
  */
 export interface FileToolContext {
+  readonly abortSignal?: AbortSignal;
   readonly businessId: string;
   readonly principalId: string;
   /** The Run subject kind; only a real user can be a direct File share recipient. */
@@ -160,13 +162,19 @@ function describe(file: FileRecord, source: "mine" | "shared"): Record<string, u
  * exists to prevent. Four bytes per character is UTF-8's worst case, so this can only ever
  * over-read, never truncate something the cap would have kept.
  */
-async function readCapped(body: AsyncIterable<Uint8Array>, ceiling: number): Promise<Uint8Array> {
+async function readCapped(
+  body: AsyncIterable<Uint8Array>,
+  ceiling: number,
+  complete: boolean
+): Promise<Uint8Array | undefined> {
   const chunks: Uint8Array[] = [];
   let total = 0;
   for await (const chunk of body) {
-    chunks.push(chunk);
-    total += chunk.length;
-    if (total >= ceiling) break;
+    if (complete && total + chunk.length > ceiling) return undefined;
+    const part = complete ? chunk : chunk.subarray(0, ceiling - total);
+    chunks.push(part);
+    total += part.length;
+    if (!complete && total >= ceiling) break;
   }
   const out = new Uint8Array(total);
   let offset = 0;
@@ -218,7 +226,7 @@ export const fileListTool = defineApiTool<FileToolContext>({
 export const fileReadTool = defineApiTool<FileToolContext>({
   name: "file_read",
   description:
-    "Read one File by id. A text File comes back as content, capped at " +
+    "Read one File by id. Text and readable Office documents come back as content, capped at " +
     `${MAX_FILE_READ_CHARS} characters. An image or a PDF cannot be returned as text, so it is ` +
     "attached to this Turn instead and you will see the document itself on your next step — " +
     `answer from it then. ${GUIDANCE}`,
@@ -260,17 +268,26 @@ export const fileReadTool = defineApiTool<FileToolContext>({
 
     if (!isExtractableMediaType(file.mediaType)) return ok(attached);
 
-    // A PDF is only worth reading whole because its cross-reference table is at the end; a
-    // text File is not, so it keeps the smaller ceiling it always had.
-    const ceiling = file.mediaType === "application/pdf" ? MAX_FILE_BYTES : MAX_FILE_READ_CHARS * 4;
+    const complete = !isTextualMediaType(file.mediaType);
+    const ceiling = complete ? MAX_FILE_BYTES : MAX_FILE_READ_CHARS * 4;
     const { body } = await ctx.service.content(ctx.businessId, fileId, ctx.principalId);
-    const extracted = await extractText(file.mediaType, await readCapped(body, ceiling), {
+    const bytes = await readCapped(body, ceiling, complete);
+    if (bytes === undefined) return err("oversize_value", "File exceeds the 25 MiB read limit.");
+    const extracted = await extractText(file.mediaType, bytes, {
       maxChars: MAX_FILE_READ_CHARS,
+      signal: ctx.abortSignal,
     });
 
-    // A scan carries no text layer, so falling back to the attachment is what lets the model see
-    // the pages instead of being told the document is empty.
-    if (extracted.kind === "refused") return ok(attached);
+    if (extracted.kind === "refused") {
+      if (
+        file.mediaType === "application/pdf" &&
+        extracted.visual?.kind === "pdf" &&
+        (extracted.reason === "needs_ocr" || extracted.reason === "no_text_layer")
+      ) {
+        return ok({ ...attached, textRefusal: extracted.reason });
+      }
+      return err("validation_error", `Cannot read this File: ${extracted.reason}.`);
+    }
 
     return ok({
       ...identity,
