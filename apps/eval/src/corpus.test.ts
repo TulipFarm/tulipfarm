@@ -5,6 +5,7 @@ import { MCP_SETUP_TOOL_DECLARATIONS, textContent } from "@tulipfarm/schema";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import type { EvalCase } from "./case.ts";
 import { CorpusError, corpusHash, loadCorpus, RED_TEAM_DIR } from "./corpus.ts";
+import { DOCX_MEDIA_TYPE } from "./docx-fixture.ts";
 import { type EvalSoul, loadEvalSoul, SOUL_OWNED_CONTEXT_KEYS } from "./eval-soul.ts";
 
 let soul: EvalSoul;
@@ -70,6 +71,87 @@ describe("corpusHash", () => {
 });
 
 describe("loadCorpus", () => {
+  it.each([
+    { pdf: { variant: "unknown" } },
+    { pdf: { variant: "scan", replaceAfterRead: "encrypted" } },
+    { pdf: { variant: "scan", unknownField: true } },
+    { pdf: { variant: "scan" }, content: "invented scanned text" },
+    { pdf: { variant: "text" } },
+    { pdf: { variant: "text" }, content: "non-ASCII café" },
+    { pdf: { variant: "scan" }, mediaType: "text/plain" },
+  ])("rejects ungrounded or mismatched PDF fixture declarations: %j", async (override) => {
+    const attachment = {
+      fileId: "pdf",
+      mediaType: "application/pdf",
+      name: "scan.pdf",
+      ...override,
+    };
+    await expect(
+      load(
+        corpusDir({
+          "pdf.json": {
+            ...valid("pdf"),
+            tier: "l3",
+            input: [
+              {
+                role: "user",
+                content: [
+                  { type: "file", fileId: "pdf", mediaType: "application/pdf", name: "scan.pdf" },
+                ],
+              },
+            ],
+            attachments: [attachment],
+          },
+        })
+      )
+    ).rejects.toThrow(/PDF|pdf/);
+  });
+
+  it.each([
+    { pages: [] },
+    { pages: [{ width: -1, height: 20 }] },
+    { pages: [{ width: 10.5, height: 20 }] },
+    { minimumTokens: 0 },
+    { fileId: "undeclared" },
+  ])("rejects unobservable or invalid PDF accounting Expectations: %j", async (override) => {
+    await expect(
+      load(
+        corpusDir({
+          "pdf.json": {
+            ...valid("pdf"),
+            tier: "l3",
+            input: [
+              {
+                role: "user",
+                content: [
+                  { type: "file", fileId: "pdf", mediaType: "application/pdf", name: "scan.pdf" },
+                ],
+              },
+            ],
+            attachments: [
+              {
+                fileId: "pdf",
+                mediaType: "application/pdf",
+                name: "scan.pdf",
+                pdf: { variant: "scan" },
+              },
+            ],
+            expect: [
+              {
+                kind: "pdf_input_accounted",
+                fileId: "pdf",
+                pages: [{ width: 1224, height: 1584 }],
+                text: "absent",
+                minimumTokens: 2586,
+                ...override,
+              },
+            ],
+          },
+        })
+      )
+    ).rejects.toThrow(/pdf_input_accounted/);
+  });
+
   const nativeRoutine = { destination: "eval/native#42", accountId: "approved-native-account" };
 
   it.each([
@@ -321,24 +403,210 @@ describe("loadCorpus", () => {
     await expect(load(dir)).rejects.toThrow(/only tier "l2" observes/);
   });
 
-  it.each([
-    "provider_prompt_file_exact",
-    "provider_prompt_omits_file",
-    "tool_batch_replayed",
-    "tool_denied",
-  ])("rejects the L2-only %s expectation on an L3 Case", async (kind) => {
-    const expectation =
-      kind === "provider_prompt_file_exact"
-        ? { kind, fileId: "file-1", part: "file" }
-        : kind === "provider_prompt_omits_file"
-          ? { kind, fileId: "file-1" }
-          : kind === "tool_denied"
-            ? { kind, name: "file_read", path: "fileId", value: "file-1" }
-            : { kind };
-    const dir = corpusDir({
-      "a.json": { ...valid("alpha"), tier: "l3", expect: [expectation] },
+  it.each(["tool_batch_replayed", "tool_denied"])(
+    "rejects the L2-only %s expectation on an L3 Case",
+    async (kind) => {
+      const expectation =
+        kind === "tool_denied"
+          ? { kind, name: "file_read", path: "fileId", value: "file-1" }
+          : { kind };
+      const dir = corpusDir({
+        "a.json": { ...valid("alpha"), tier: "l3", expect: [expectation] },
+      });
+      await expect(load(dir)).rejects.toThrow(/L2-only runtime seam/);
+    }
+  );
+
+  describe("DOCX attachment fixtures", () => {
+    const attachment = {
+      fileId: "file-policy",
+      mediaType: DOCX_MEDIA_TYPE,
+      name: "policy.docx",
+      content: "Claims close after 73 days.",
+      docx: { precedingParagraphs: 400 },
+    };
+    const fixture = (file: Record<string, unknown> = attachment) => ({
+      ...valid("docx"),
+      tier: "l3",
+      input: [
+        {
+          role: "user",
+          content: [
+            { type: "text", text: "Read this policy." },
+            {
+              type: "file",
+              fileId: attachment.fileId,
+              mediaType: attachment.mediaType,
+              name: attachment.name,
+            },
+          ],
+        },
+      ],
+      attachments: [file],
+      script: [{ kind: "text", text: "Claims close after 73 days." }],
+      expect: [
+        { kind: "provider_prompt_contains", text: attachment.content },
+        { kind: "provider_prompt_omits_file", fileId: attachment.fileId },
+        { kind: "output_contains", text: "73 days" },
+      ],
     });
-    await expect(load(dir)).rejects.toThrow(/L2-only runtime seam/);
+
+    it("grounds provider text and model output in the generated document, not its metadata", async () => {
+      const corpus = await load(corpusDir({ "docx.json": fixture() }));
+      expect(corpus.cases[0]?.attachments?.[0]?.docx).toEqual({ precedingParagraphs: 400 });
+      const changed = fixture({ ...attachment, docx: { precedingParagraphs: 399 } });
+      const other = await load(corpusDir({ "docx.json": changed }));
+      expect(other.hash).not.toBe(corpus.hash);
+    });
+
+    it.each([
+      [
+        "xlsx",
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        { precedingRows: 220 },
+      ],
+      [
+        "pptx",
+        "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+        { speakerNotes: true },
+      ],
+    ] as const)(
+      "accepts grounded %s fixtures and rejects ambiguous formats or fixture controls",
+      async (format, mediaType, options) => {
+        const file = { ...attachment, docx: undefined, mediaType, [format]: options };
+        await expect(load(corpusDir({ "docx.json": fixture(file) }))).resolves.toBeDefined();
+        for (const override of [
+          { content: undefined },
+          { mediaType: DOCX_MEDIA_TYPE },
+          { docx: attachment.docx },
+          { [format]: { ...options, scriptedText: "Claim window" } },
+          { [format]: format === "xlsx" ? { precedingRows: 1001 } : { speakerNotes: false } },
+        ]) {
+          await expect(
+            load(corpusDir({ "docx.json": fixture({ ...file, ...override }) }))
+          ).rejects.toThrow(/fixture|content|mediaType/);
+        }
+      }
+    );
+
+    it.each([
+      { content: undefined },
+      { content: "" },
+      { mediaType: "text/plain" },
+      { docx: null },
+      { docx: [] },
+      { docx: {} },
+      { docx: { precedingParagraphs: -1 } },
+      { docx: { precedingParagraphs: 1001 } },
+      { docx: { precedingParagraphs: 0.5 } },
+      { docx: { precedingParagraphs: "400" } },
+      { docx: { precedingParagraphs: 400, scriptedExtraction: "73 days" } },
+      { content: undefined, docx: { variant: "unknown" } },
+      { content: undefined, docx: { variant: ["empty"] } },
+      { content: undefined, docx: { variant: null } },
+      { content: undefined, docx: { variant: "empty", precedingParagraphs: 0 } },
+      { docx: { variant: "malformed" } },
+    ])("refuses malformed DOCX fixture contracts: %j", async (override) => {
+      await expect(
+        load(
+          corpusDir({
+            "docx.json": fixture({ ...attachment, ...override }),
+          })
+        )
+      ).rejects.toThrow(/docx|content/);
+    });
+
+    it.each([0, 1000])("accepts the paragraph bound %i", async (precedingParagraphs) => {
+      await expect(
+        load(
+          corpusDir({
+            "docx.json": fixture({ ...attachment, docx: { precedingParagraphs } }),
+          })
+        )
+      ).resolves.toBeDefined();
+    });
+
+    it.each(["malformed", "empty", "entry-limit"])(
+      "accepts a bounded real %s document without fake grounding content",
+      async (variant) => {
+        const caseWithRefusal = {
+          ...fixture({ ...attachment, content: undefined, docx: { variant } }),
+          script: [],
+          expect: [
+            { kind: "model_not_called" },
+            { kind: "provider_prompt_omits_file", fileId: attachment.fileId },
+            { kind: "run_status", status: "succeeded" },
+          ],
+        };
+        await expect(load(corpusDir({ "docx.json": caseWithRefusal }))).resolves.toBeDefined();
+      }
+    );
+
+    it.each([
+      { tier: "l2" },
+      { attachments: undefined, readable: [attachment] },
+      { attachments: [attachment, attachment] },
+      { journey: [{ input: valid("next").input, script: [{ kind: "text", text: "done" }] }] },
+    ])(
+      "refuses fixture placement the real extraction seam cannot observe: %j",
+      async (override) => {
+        await expect(
+          load(
+            corpusDir({
+              "docx.json": { ...fixture(), ...override },
+            })
+          )
+        ).rejects.toThrow(/docx|duplicate/);
+      }
+    );
+
+    it("refuses grounding provider text in the script or a filename", async () => {
+      for (const content of ["Unrelated policy.", undefined]) {
+        await expect(
+          load(
+            corpusDir({
+              "docx.json": fixture({
+                ...attachment,
+                docx: undefined,
+                content,
+                name: attachment.content,
+              }),
+            })
+          )
+        ).rejects.toThrow(/provider_prompt_contains.*appears nowhere/);
+      }
+    });
+
+    it("refuses grounding first-provider text in assistant history or a future Tool result", async () => {
+      const bare = fixture({ ...attachment, docx: undefined, content: "Unrelated policy." });
+      for (const override of [
+        { input: [{ role: "assistant", content: attachment.content }, ...bare.input] },
+        { toolResults: [{ name: "lookup", output: { text: attachment.content } }] },
+        {
+          input: [
+            {
+              role: "user",
+              content: [
+                {
+                  type: "file",
+                  fileId: attachment.fileId,
+                  mediaType: DOCX_MEDIA_TYPE,
+                  name: attachment.content,
+                },
+              ],
+            },
+          ],
+        },
+      ]) {
+        await expect(
+          load(
+            corpusDir({
+              "docx.json": { ...bare, ...override },
+            })
+          )
+        ).rejects.toThrow(/provider_prompt_contains.*appears nowhere/);
+      }
+    });
   });
 
   it("rejects provider File expectations that name no declared File", async () => {

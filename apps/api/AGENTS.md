@@ -32,6 +32,7 @@ PostgreSQL persistence composition, auth, Soul Git writes, and Worker callback p
 | `src/integrations/accounts/setup-{routes,compose}.ts` | Durable explicit Connect/Finish operations, read-only progress, original-consent OAuth resume and live configuration authority. |
 | `src/guardrails/` | Guardrail reload wiring and persisted policy acceptance. Hosted minimums remain in the effective service; Chat Context, Routine Agent catalog and admin reads share it. |
 | `src/knowledge/`, `src/knowledge-sources/` | Knowledge routes/Tools and ingestion API; repositories and OKF live in `@tulipfarm/knowledge`. |
+| `src/files/knowledge-bridge.ts` | Owner-requested File indexing/refresh, atomic receipt+queue acceptance and authorized status reconciliation from durable queue failures. |
 | `src/memory/`, `src/kv/`, `src/secrets/` | Memory Document composition, its read-only route and erasure; scoped KV; secret storage routes. |
 | `src/authz/` | `route-gate.ts` — sole HTTP path to `decideEffectivePermission`, including hosted infrastructure ceilings before shadow/fallback; self-governed and Team administration. |
 | `src/team-assets/` | Team asset catalog, ownership access projection, and Approval orchestration for all five owned asset types. |
@@ -44,6 +45,7 @@ PostgreSQL persistence composition, auth, Soul Git writes, and Worker callback p
 | `src/admin/run-reader.ts`, `src/admin/schemas.ts` | Operator Run effect evidence includes only the latest attempt's state, allowlisted error code, fixed provider explanation and timestamps; unknown codes are redacted. |
 | `src/system/telemetry/` | Deployment telemetry collection, admin preview/preferences, and service-only dispatch; reporter and durable state live in observability/storage. |
 | `src/pg-migrations/` | Boot-applied PostgreSQL schema migrations. |
+| `src/pg-migrations/runtime-legacy-fixture.test.ts` | Pins the Compose upgrade fixture and v140 recovery of checkouts that used v139 for MCP setup before File Knowledge receipts shipped. |
 | `src/pg-migrations/20260917-slack-delivery-leases.ts` | Backfills recoverable Slack reply leases; v133 replays this idempotent DDL for databases that reached Knowledge v132 before Slack v125 landed. |
 | `src/test/` | API test helpers. |
 

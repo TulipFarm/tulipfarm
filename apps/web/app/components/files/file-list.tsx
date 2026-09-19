@@ -4,7 +4,6 @@ import { createPortal } from "react-dom";
 import {
   BookOpen,
   Download,
-  FileX2,
   FolderInput,
   MoreHorizontal,
   Paperclip,
@@ -16,14 +15,23 @@ import { Avatar } from "~/components/ui/avatar";
 import { Badge } from "~/components/ui/badge";
 import { Button } from "~/components/ui/button";
 import { Tooltip } from "~/components/ui/tooltip";
-import { fetchFileObjectUrl, formatFileSize, type LibraryFile } from "~/lib/files";
+import {
+  fetchFileObjectUrl,
+  formatFileSize,
+  isKnowledgePending,
+  isKnowledgeRequested,
+  type LibraryFile,
+} from "~/lib/files";
 import { FileTypeIcon } from "./file-type-icon";
+import { KnowledgeStatus } from "./knowledge-status";
 
 export interface FileListActions {
   readonly onPreview?: (file: LibraryFile) => void;
   readonly onAttach?: (file: LibraryFile) => void;
   readonly onShare?: (file: LibraryFile) => void;
   readonly onKnowledge?: (file: LibraryFile) => void;
+  readonly onRefreshKnowledge?: (file: LibraryFile) => void;
+  readonly knowledgeBusy?: boolean;
   readonly onArchive?: (file: LibraryFile) => void;
   readonly onMove?: (file: LibraryFile) => void;
   readonly onRestore?: (file: LibraryFile) => void;
@@ -138,6 +146,7 @@ function FileRow({
             ) : null}
           </span>
         </button>
+        <KnowledgeStatus file={file} />
       </td>
       <td className="max-w-48 px-3 py-2 text-xs text-muted-foreground">
         <Tooltip content={ownerName}>
@@ -181,7 +190,7 @@ function FileRow({
         </button>
       </td>
       <td className="px-3 py-1.5">
-        <FileActionsMenu file={file} owned={owned} {...actions} />
+        <FileActionsMenu file={file} owned={file.canManage ?? false} {...actions} />
       </td>
     </tr>
   );
@@ -193,6 +202,8 @@ function FileActionsMenu({
   onAttach,
   onShare,
   onKnowledge,
+  onRefreshKnowledge,
+  knowledgeBusy,
   onArchive,
   onMove,
   onRestore,
@@ -203,6 +214,7 @@ function FileActionsMenu({
 } & FileListActions) {
   const archived = file.archivedAt != null;
   const indexable = isExtractableMediaType(file.mediaType);
+  const requested = isKnowledgeRequested(file);
   const [open, setOpen] = useState(false);
   const [rect, setRect] = useState<DOMRect | null>(null);
   const [downloadFailed, setDownloadFailed] = useState(false);
@@ -256,7 +268,7 @@ function FileActionsMenu({
   }
 
   const itemClass =
-    "flex w-full items-center gap-2 rounded-sm px-2.5 py-2 text-left text-sm text-foreground transition-colors hover:bg-secondary";
+    "flex w-full items-center gap-2 rounded-sm px-2.5 py-2 text-left text-sm text-foreground transition-colors hover:bg-secondary disabled:opacity-50";
 
   return (
     <div className="flex justify-end">
@@ -313,10 +325,23 @@ function FileActionsMenu({
                   type="button"
                   role="menuitem"
                   className={itemClass}
+                  disabled={knowledgeBusy}
                   onClick={choose(onKnowledge)}
                 >
                   <BookOpen className="size-4" aria-hidden />
-                  {file.inKnowledge ? "Remove from Knowledge" : "Add to Knowledge"}
+                  {requested ? "Remove from Knowledge" : "Add to Knowledge"}
+                </button>
+              ) : null}
+              {onRefreshKnowledge && owned && indexable && requested && !archived ? (
+                <button
+                  type="button"
+                  role="menuitem"
+                  className={itemClass}
+                  disabled={knowledgeBusy || isKnowledgePending(file)}
+                  onClick={choose(onRefreshKnowledge)}
+                >
+                  <RotateCcw className="size-4" aria-hidden />
+                  Refresh Knowledge
                 </button>
               ) : null}
               <button type="button" role="menuitem" className={itemClass} onClick={download}>

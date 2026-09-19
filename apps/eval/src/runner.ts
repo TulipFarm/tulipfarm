@@ -29,7 +29,7 @@ import { runPersistedTurn } from "./l3/tier.ts";
 import { measureNoise, type NoiseFloor } from "./noise.ts";
 import { exposedToolsFor } from "./platform-tools.ts";
 import type { SweepProgress } from "./progress.ts";
-import { observeProviderPromptFiles } from "./provider-prompt.ts";
+import { observeProviderPromptFiles, observeProviderPromptText } from "./provider-prompt.ts";
 import { guardUnexercised } from "./red-team.ts";
 import { measureResistance, type ResistanceRate } from "./resistance.ts";
 import { DEFAULT_RETRY, type RetryPolicy, withRetry } from "./retry.ts";
@@ -321,6 +321,10 @@ async function runL3Trial(
     });
     return await scored(evalCase, trial, vacuous, turn.spend, 0, turn.guardrails, judge, {
       systemPrompt: turn.systemPrompt,
+      providerPromptText: turn.providerPromptText,
+      modelCallCount: turn.modelCallCount,
+      providerPromptFiles: turn.providerPromptFiles,
+      pdfInputs: turn.pdfInputs,
       toolCalls: turn.toolCalls,
       output: turn.answer === null ? undefined : { kind: "text", text: turn.answer },
       status: turn.runStatus === "succeeded" ? "completed" : turn.runStatus,
@@ -401,6 +405,7 @@ async function runTrial(
   // should have. A Case asserting confinement has to read the same traversal that sends the bytes.
   const attachedFileIds = new Set<string>();
   const providerFiles: NonNullable<Observation["providerPromptFiles"]>[number][] = [];
+  let providerPromptText: string | undefined;
   // Counted here rather than off the loop's results because only this seam sees a model response
   // whole: by the time the loop has dispatched them, four calls from one message and four calls
   // from four messages are the same flat list.
@@ -416,6 +421,7 @@ async function runTrial(
       modelCalls += 1;
       modelPrompts.push(request.messages.map((message) => contentText(message.content)).join("\n"));
       const converted = splitPrompt(request.messages, request.attachments);
+      providerPromptText ??= observeProviderPromptText(converted.messages, converted.instructions);
       for (const id of converted.attached) {
         attachedFileIds.add(id);
       }
@@ -481,6 +487,7 @@ async function runTrial(
         status: "completed",
         attachedFileIds: [...attachedFileIds],
         providerPromptFiles: providerFiles,
+        modelCallCount: modelCalls,
         ...(replay === undefined ? {} : { checkpointReplay: replay.observation() }),
       });
     }
@@ -521,7 +528,9 @@ async function runTrial(
       systemPrompt,
       attachedFileIds: [...attachedFileIds],
       providerPromptFiles: providerFiles,
+      modelCallCount: modelCalls,
       ...(modelPrompts.at(-1) === undefined ? {} : { modelPrompt: modelPrompts.at(-1) }),
+      ...(providerPromptText === undefined ? {} : { providerPromptText }),
       toolCalls: tools.calls,
       toolDenials: tools.denials,
       toolCallBatches,

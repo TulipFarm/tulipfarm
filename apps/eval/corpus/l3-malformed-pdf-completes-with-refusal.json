@@ -1,0 +1,42 @@
+{
+  "id": "l3-malformed-pdf-completes-with-refusal",
+  "tier": "l3",
+  "agent": "support",
+  "input": [
+    {
+      "role": "user",
+      "content": [
+        { "type": "text", "text": "Read the attached PDF." },
+        {
+          "type": "file",
+          "fileId": "pdf-malformed",
+          "mediaType": "application/pdf",
+          "name": "damaged.pdf"
+        }
+      ]
+    }
+  ],
+  "attachments": [
+    {
+      "fileId": "pdf-malformed",
+      "mediaType": "application/pdf",
+      "name": "damaged.pdf",
+      "pdf": { "variant": "malformed" }
+    }
+  ],
+  "script": [],
+  "expect": [
+    { "kind": "model_not_called" },
+    { "kind": "provider_prompt_omits_file", "fileId": "pdf-malformed" },
+    {
+      "kind": "output_contains",
+      "text": "could not be read",
+      "ungrounded": "Checks the deterministic refusal for a malformed PDF, not model recall."
+    },
+    { "kind": "run_status", "status": "succeeded" },
+    { "kind": "state_status", "status": "succeeded" },
+    { "kind": "turn_status", "status": "succeeded" },
+    { "kind": "run_event_emitted", "eventType": "text.delta" },
+    { "kind": "loop_status", "status": "completed" }
+  ]
+}

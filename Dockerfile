@@ -46,7 +46,7 @@ RUN TF_VERSION=$(node -p "require('./package.json').version") \
   --define:__TULIPFARM_VERSION__="\"$TF_VERSION\"" \
   --external:isolated-vm --external:@node-rs/argon2 --external:pg --external:pg-boss \
   --external:@scalar/fastify-api-reference --external:@anthropic-ai/claude-agent-sdk \
-  --external:@openai/codex --external:esbuild \
+  --external:@openai/codex --external:esbuild --external:@firecrawl/anydoc \
   && pnpm --filter @tulipfarm/api exec esbuild src/hooks/hook-worker.ts \
   --bundle --platform=node --target=node26 --format=cjs --outfile=dist/hook-worker.cjs \
   --external:isolated-vm --external:pg
@@ -56,13 +56,21 @@ RUN TF_VERSION=$(node -p "require('./package.json').version") \
 RUN pnpm --filter @tulipfarm/worker exec esbuild src/main.ts \
   --bundle --platform=node --target=node26 --format=cjs --outfile=dist/worker.cjs \
   --external:pg --external:pg-boss --external:isolated-vm \
-  --external:@anthropic-ai/claude-agent-sdk --external:@openai/codex
+  --external:@anthropic-ai/claude-agent-sdk --external:@openai/codex --external:@firecrawl/anydoc
+RUN pnpm --filter @tulipfarm/api exec esbuild ../../packages/files/src/document-child.ts \
+  --bundle --platform=node --target=node26 --format=cjs --outfile=dist/document-child.cjs \
+  --external:@firecrawl/anydoc
 # Integration ingress and delivery share the release artifact with the API and durable worker.
 RUN pnpm --filter @tulipfarm/integration-worker exec esbuild src/main.ts \
   --bundle --platform=node --target=node26 --format=cjs --outfile=dist/integration-worker.cjs \
   --external:pg --external:isolated-vm
 # Prod-only dependency closure (drops dev deps, resolves transitive deps flat).
 RUN pnpm --filter @tulipfarm/api deploy --prod --legacy /deploy
+# The child resolves the native dependency from Files, not an accidentally hoisted dev dependency.
+# Run actual conversion after pruning, with the exact entrypoint and binary shipped to this arch.
+COPY scripts/check-document-runtime.mjs /deploy/check-document-runtime.mjs
+RUN --network=none cp /app/apps/api/dist/document-child.cjs /deploy/document-child.cjs \
+  && cd /deploy && node check-document-runtime.mjs
 # The claude-code Subscription Provider spawns a native `claude` binary that ships in an optional,
 # per-platform package (@anthropic-ai/claude-agent-sdk-linux-{x64,arm64}) — there is no
 # node_modules/.bin/claude, and pnpm keeps it under .pnpm rather than hoisting it. `--prod` prunes
@@ -111,6 +119,7 @@ COPY --from=builder --chown=node:0 /app/apps/api/dist/hook-worker.cjs ./hook-wor
 # Durable worker entrypoint. Not the image CMD — compose runs it as its own service off this
 # same image, so the API and the worker can never drift out of schema agreement.
 COPY --from=builder --chown=node:0 /app/apps/worker/dist/worker.cjs ./worker.cjs
+COPY --from=builder --chown=node:0 /app/apps/api/dist/document-child.cjs ./document-child.cjs
 # Integration worker entrypoint. Not the image CMD — compose runs it as its own service off this
 # same image, mirroring how `worker.cjs` is run.
 COPY --from=builder --chown=node:0 /app/apps/integration-worker/dist/integration-worker.cjs ./integration-worker.cjs
@@ -140,5 +149,7 @@ RUN mkdir -p /opt/tulipfarm/soul /data \
   && chown -R node:0 /opt/tulipfarm /data \
   && chmod -R g=u /opt/tulipfarm /data
 USER node
+RUN --network=none --mount=type=bind,from=builder,source=/deploy/check-document-runtime.mjs,target=/app/check-document-runtime.mjs \
+  node check-document-runtime.mjs
 EXPOSE 8080
 CMD ["node", "server.cjs"]

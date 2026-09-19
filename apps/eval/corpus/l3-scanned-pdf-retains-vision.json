@@ -1,0 +1,45 @@
+{
+  "id": "l3-scanned-pdf-retains-vision",
+  "tier": "l3",
+  "agent": "support",
+  "input": [
+    {
+      "role": "user",
+      "content": [
+        {
+          "type": "text",
+          "text": "Inspect the attached PDF visually. Do not invent text that is not on its pages."
+        },
+        { "type": "file", "fileId": "pdf-scan", "mediaType": "application/pdf", "name": "scan.pdf" }
+      ]
+    }
+  ],
+  "attachments": [
+    {
+      "fileId": "pdf-scan",
+      "mediaType": "application/pdf",
+      "name": "scan.pdf",
+      "pdf": { "variant": "scan" }
+    }
+  ],
+  "script": [
+    {
+      "kind": "text",
+      "text": "I can inspect the PDF visually, without claiming an extracted text layer."
+    }
+  ],
+  "expect": [
+    { "kind": "provider_prompt_file_exact", "fileId": "pdf-scan", "part": "file" },
+    {
+      "kind": "pdf_input_accounted",
+      "fileId": "pdf-scan",
+      "pages": [{ "width": 1224, "height": 1584 }],
+      "text": "absent",
+      "minimumTokens": 2586
+    },
+    { "kind": "run_status", "status": "succeeded" },
+    { "kind": "state_status", "status": "succeeded" },
+    { "kind": "turn_status", "status": "succeeded" },
+    { "kind": "loop_status", "status": "completed" }
+  ]
+}

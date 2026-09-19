@@ -171,6 +171,31 @@ const pdf: ResolvedAttachment = {
   data: new Uint8Array([4, 5, 6]),
 };
 
+describe("PDFs retain provider-native vision", () => {
+  it.each([undefined, "# Warranty\n\n47 days."])(
+    "sends original PDF bytes whether extracted text is %s",
+    (text) => {
+      const before = pdf.data.slice();
+      const file: ResolvedAttachment = {
+        ...pdf,
+        text,
+        visual: { kind: "pdf", pages: [{ width: 1224, height: 1584 }] },
+      };
+      const projected = splitPrompt([{ role: "user", content: [filePart(file)] }], [file]);
+      expect(projected.messages).toEqual([
+        {
+          role: "user",
+          content: [
+            { type: "file", data: before, mediaType: "application/pdf", filename: file.name },
+          ],
+        },
+      ]);
+      expect(file.data).toEqual(before);
+      expect(projected.attached).toEqual([file.fileId]);
+    }
+  );
+});
+
 describe("assertModelOutputComplete", () => {
   const usage = { inputTokens: 11, outputTokens: 4 };
 
@@ -271,6 +296,23 @@ describe("splitPrompt — attached files", () => {
     expect(messages[0]?.content).toEqual([
       { type: "text", text: "orders.csv:\n\nregion,revenue\nPune,4200" },
     ]);
+  });
+
+  it("never emits an Office binary part when extraction did not yield text", () => {
+    const document: ResolvedAttachment = {
+      fileId: "docx-1",
+      mediaType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      name: "broken.docx",
+      data: new Uint8Array([1, 2, 3]),
+    };
+    expect(() =>
+      splitPrompt([{ role: "user", content: [filePart(document)] }], [document])
+    ).toThrow("Office File requires extracted text");
+    const extracted = { ...document, text: "Approval expires after 47 days." };
+    expect(
+      splitPrompt([{ role: "user", content: [filePart(extracted)] }], [extracted]).messages[0]
+        ?.content
+    ).toEqual([{ type: "text", text: "broken.docx:\n\nApproval expires after 47 days." }]);
   });
 
   it("still sends a PDF as a file part even though its text was extracted", () => {

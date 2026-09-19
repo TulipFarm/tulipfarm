@@ -31,6 +31,15 @@ export interface Observation {
   }[];
   /** Text in the final request handed to the model after loop-owned Context compaction. */
   readonly modelPrompt?: string;
+  /** Text from the first provider-projected request, excluding assistant Messages. */
+  readonly providerPromptText?: string;
+  readonly modelCallCount?: number;
+  readonly pdfInputs?: readonly {
+    readonly fileId: string;
+    readonly pages?: readonly { readonly width: number; readonly height: number }[];
+    readonly textPresent: boolean;
+    readonly estimatedTokens: number;
+  }[];
   readonly toolCalls: readonly { readonly name: string; readonly arguments: unknown }[];
   /** L2 scripted denials, including the arguments whose authorization was refused. */
   readonly toolDenials?: readonly {
@@ -502,6 +511,42 @@ function evaluate(a: Expectation, obs: Observation): { passed: boolean; detail: 
       return obs.modelPrompt.includes(a.text)
         ? { passed: true, detail: "present in the final model request" }
         : { passed: false, detail: `final model request does not contain ${show(a.text)}` };
+
+    case "provider_prompt_contains":
+      if (obs.providerPromptText === undefined) {
+        return { passed: false, detail: "the provider prompt was not observed" };
+      }
+      return obs.providerPromptText.includes(a.text)
+        ? { passed: true, detail: "present in the first provider request" }
+        : { passed: false, detail: `provider prompt does not contain ${show(a.text)}` };
+
+    case "model_not_called":
+      if (obs.modelCallCount === undefined) {
+        return { passed: false, detail: "model calls were not observed" };
+      }
+      return obs.modelCallCount === 0
+        ? { passed: true, detail: "no model call was made" }
+        : { passed: false, detail: `model was called ${obs.modelCallCount} time(s)` };
+
+    case "pdf_input_accounted": {
+      const inputs = obs.pdfInputs?.filter((input) => input.fileId === a.fileId);
+      if (inputs === undefined || inputs.length === 0) {
+        return { passed: false, detail: "no real PDF model input was observed" };
+      }
+      const passed = inputs.every(
+        (input) =>
+          JSON.stringify(input.pages) === JSON.stringify(a.pages) &&
+          input.textPresent === (a.text === "present") &&
+          Number.isFinite(input.estimatedTokens) &&
+          input.estimatedTokens >= a.minimumTokens
+      );
+      return {
+        passed,
+        detail: passed
+          ? "every PDF model input retained its pages, text policy, and visual token estimate"
+          : "PDF page dimensions, text policy, or visual accounting changed",
+      };
+    }
 
     case "prompt_attaches":
     case "prompt_omits_attachment": {
@@ -992,6 +1037,7 @@ const SEAM_INDEPENDENT: ReadonlySet<string> = new Set([
   "guardrail_blocked",
   "guardrail_allowed",
   "tool_not_called",
+  "model_not_called",
 ]);
 
 /**

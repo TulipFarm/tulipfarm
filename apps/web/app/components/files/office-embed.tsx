@@ -1,10 +1,8 @@
 /**
  * Rendering a Word or PowerPoint file as the document it is, rather than as an outline of its text.
  *
- * `office-preview.ts` recovers the words and their structure, which is the right answer for a model
- * and a readable answer for a person, but it deliberately throws away layout — so a deck arrives as
- * a stack of titles and bullets. This renders the real thing: fonts, sizes, colours, tables, images
- * and slide geometry.
+ * Semantic previews recover words and structure but omit layout. This preserves the rich local
+ * rendering path: fonts, sizes, colours, tables, images and slide geometry.
  *
  * It runs entirely in the tab. That is the only option that fits a self-hosted instance: a hosted
  * viewer such as Google's `gview` or Office Online is *their* server fetching a URL, so it needs the
@@ -113,7 +111,11 @@ export function OfficeEmbed({
 
   return (
     <div className={cn("overflow-auto bg-muted/30", className)}>
-      {!ready && <p className="px-6 py-6 text-sm text-muted-foreground">Rendering document…</p>}
+      {!ready && (
+        <p role="status" className="px-6 py-6 text-sm text-muted-foreground">
+          Rendering document…
+        </p>
+      )}
       {/* Never `display: none` while rendering: the presentation renderer measures this element to
           size its slides, and a hidden element reports zero width, so it would fall back to a
           guess and lay the whole deck out at the wrong scale.

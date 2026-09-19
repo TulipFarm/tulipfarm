@@ -18,8 +18,12 @@ an **Artifact** is a different entity, in `packages/storage`.
 | `src/limits.ts` | Byte/count caps, type allowlist, textual split, read caps, `BUSINESS_PRINCIPAL_ID` |
 | `src/sniff.ts` · `src/filename.ts` | Magic-byte `resolveMediaType`; safe-to-store filenames |
 | `src/dimensions.ts` · `src/bound.ts` | Header-only pixel size; `boundImage` refuse-or-downscale |
-| `src/extract.ts` | File text plus image/PDF dimensions used for model-input accounting. Lazy-loads the PDF parser. |
-| `src/office-preview.ts` · `src/delimited-preview.ts` | Reading OOXML and separated-value files back into `PreviewBlock`s for the viewer |
+| `src/extract.ts` | Shared text extraction; PDFs and Office formats use the bounded local child, including PDF dimensions. |
+| `src/document-preview.ts` | Browser-safe DOCX/XLSX/PPTX format gate, rejecting archive preflight, shared semantics including table headers/spans and speaker-note labels; callers opt into display limits. |
+| `src/document-runner.ts` · `src/document-child.ts` | Private local AnyDoc child: two active, 32 pending, 10-second deadline; terminate and reap on abort/shutdown. |
+| `test-fixtures/pdf` | Test-only package subpath for independent real text, image-page, mixed, malformed, and password-encrypted PDF fixtures; never import from production code. |
+| `src/office-preview.ts` · `src/delimited-preview.ts` | Shared semantic display types/caps and the unchanged CSV grid reader; no handwritten OOXML readers |
+| `test-fixtures/office` · `src/office-fixture.test-support.ts` | Test-only package subpath for independent XLSX/PPTX OOXML fixtures shared with browser, Knowledge and real-Turn tests; never import from production code. |
 | `src/render.ts` | Markdown → PDF, safe structured-text validation/serialization, pass-through formats, and render bounds |
 | `src/turn-attachments.ts` | Which Files a Turn may send, and the two-gate read of their bytes |
 | `src/tools.ts` | `file_list` / `file_read` / `file_create` — the whole Agent-facing surface |
@@ -27,13 +31,14 @@ an **Artifact** is a different entity, in `packages/storage`.
 | `src/audience.ts` | Who may read a File an Agent just wrote: the requester, plus the Agent's Roles |
 | `src/service.ts` | Upload/generate/replace, archive/restore/delete, authorized reads and sharing |
 | `src/http.ts` | `FILE_WIRE_SCHEMA`, `serializeFile`, refusal statuses, download headers |
+| `src/knowledge-index.ts` | Per-version Knowledge request receipts, transaction-coupled enqueue and request/attempt-fenced publication; no Knowledge dependency. |
 
 ## Rules
 
 - **Extraction must not consume its caller's bytes.** The same `Uint8Array` is screened here and
   then attached to a model request, and pdf.js takes ownership of any array it is handed, leaving
-  the caller a detached, zero-length buffer. `extractPdf` copies before parsing for exactly this
-  reason. Any future parser added to `extract.ts` gets the same treatment.
+  the caller a detached, zero-length buffer. The child's PDF metadata helper copies before parsing.
+  Every converter must preserve this boundary.
 
 - `extract.ts` is the only place that decides what a File's text is. `file_read` and Knowledge
   indexing both go through it, because a passage shown in chat that search cannot find looks like
@@ -42,9 +47,17 @@ an **Artifact** is a different entity, in `packages/storage`.
   returns *is* how the File reaches the model, so anything on the upload allowlist that yields no
   text here cannot be asked about at all.
 
-- **Office text is read with the viewer's parser.** `extractOffice` calls `previewOffice`, so a
-  `.docx` says the same thing to a model as it shows a person, and it inherits that module's
-  zip-bomb bounds. Keep `isExtractableMediaType` in step with what `extract.ts` actually handles —
+- **DOCX/XLSX/PPTX use local AnyDoc 0.2.4 in the Worker-owned child, never the API.** It rejects archives
+  over 25 MiB input, 32 MiB actual expansion or 512 entries before native conversion. Browser WASM
+  uses the same semantic projection, but its 400-block/200-row display caps never limit extraction.
+  The default extraction/Tool caps remain 200,000/32,000 characters; `truncated` means our cap,
+  not converter completeness. XLSX reads visible, stored formatted values and cached formulas,
+  not recalculated or hidden cells. PPTX block quotes are speaker notes, not slide boundaries.
+  PDF uses AnyDoc Markdown with explicit OCR rejection; unpdf supplies only dimensions inside the
+  same bounded child. Readable scan/mixed PDFs retain binary vision but never partial extracted
+  text. Encrypted/malformed PDFs cannot become successful binary attachments.
+  Operational child failures throw; ordinary document refusals are values, never Office binary
+  attachment successes. Keep `isExtractableMediaType` in step with what `extract.ts` handles —
   the browser reads it to decide whether to offer "add to knowledge".
 
 - **A CSV is a grid, not text.** `delimited-preview.ts` parses separated values into the same
@@ -58,6 +71,9 @@ an **Artifact** is a different entity, in `packages/storage`.
   is the only thing that sees both. `knowledge_requested_at` is the durable half of that opt-in:
   indexing runs on a queue, so a Page's existence cannot answer "is this wanted" during the window
   before the worker writes one. Set it before enqueueing and clear it before removing a Page.
+  Refresh receipts identify the File Version, request and converter revision. Queue insertion and
+  receipt creation commit together; only the current request attempt may publish. File shares,
+  archive and publication serialize on the File row; withdrawal invalidates pending receipts.
 
 - **Upload order is load-bearing**: authorize → reject on declared length → stream → sniff → reject
   → bound → write the row. Reordering costs a storage write per rejected upload, or admits a

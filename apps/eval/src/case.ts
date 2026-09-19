@@ -4,7 +4,17 @@ import type {
   ModelMessage,
   ModelOutput,
 } from "@tulipfarm/agent-runtime";
+import { externalPdf, type PdfFixtureVariant } from "@tulipfarm/files/test-fixtures/pdf";
 import type { GuardrailDefinition, routine, ToolContractDefinition } from "@tulipfarm/schema";
+import {
+  externalPptx,
+  externalXlsx,
+} from "../../../packages/files/src/office-fixture.test-support.ts";
+import {
+  type DocxFixture,
+  synthesizeDocxFixture,
+  synthesizeDocxRefusalFixture,
+} from "./docx-fixture.ts";
 import type { RedTeam } from "./red-team.ts";
 
 /**
@@ -20,7 +30,7 @@ export type Expectation =
   | { readonly kind: "prompt_attaches"; readonly fileId: string }
   | { readonly kind: "prompt_omits_attachment"; readonly fileId: string }
   /**
-   * L2 only. The model adapter's provider-facing prompt carries this File with byte-for-byte
+   * The model adapter's provider-facing prompt carries this File with byte-for-byte
    * identity and the declared media metadata.
    */
   | {
@@ -28,8 +38,20 @@ export type Expectation =
       readonly fileId: string;
       readonly part: "file" | "image";
     }
-  /** L2 only. No provider-facing binary part came from this declared File. */
+  /** No provider-facing binary part came from this declared File. */
   | { readonly kind: "provider_prompt_omits_file"; readonly fileId: string }
+  /** Real L3 model input retains every PDF page and rejects partial text after an OCR refusal. */
+  | {
+      readonly kind: "pdf_input_accounted";
+      readonly fileId: string;
+      readonly pages: readonly { readonly width: number; readonly height: number }[];
+      readonly text: "present" | "absent";
+      readonly minimumTokens: number;
+    }
+  /** Grounded text in the first provider request, excluding assistant Messages. */
+  | { readonly kind: "provider_prompt_contains"; readonly text: string }
+  /** The model invocation boundary was observed but never called. */
+  | { readonly kind: "model_not_called" }
   /** L2 only. The final model request contains model-facing Context after loop compaction. */
   | { readonly kind: "model_prompt_contains"; readonly text: string }
   | { readonly kind: "prompt_omits"; readonly text: string }
@@ -362,13 +384,22 @@ export interface CaseAttachment {
   readonly mediaType: string;
   readonly name: string;
   /**
-   * The File's actual bytes, as text.
+   * The File's content, encoded as text or placed inside a declared PDF/Office fixture.
    *
    * Only needed when the Case turns on what is *inside* the File — a red-team payload hidden in an
    * attachment, say. Without it the bytes are a deterministic stand-in, which is enough for a Case
    * that only asserts a File reached the prompt, and cheaper to review.
    */
   readonly content?: string;
+  /** L3 attachment only: real OOXML text or a bounded, reproducible defective document. */
+  readonly docx?: DocxFixture;
+  readonly xlsx?: { readonly precedingRows: number };
+  readonly pptx?: { readonly speakerNotes: true };
+  readonly pdf?: {
+    readonly variant: PdfFixtureVariant;
+    /** A readable scan is replaced only after the real file_read Tool authorizes attachment. */
+    readonly replaceAfterRead?: "malformed" | "encrypted";
+  };
 }
 
 function escapePdfText(text: string): string {
@@ -414,10 +445,29 @@ function synthesizePdf(text: string): Uint8Array {
  * real bytes in the Corpus would cost review effort for no signal — so those get a stand-in
  * derived from the id, keeping a Sweep reproducible. A Case that declares `content` gets exactly
  * that, because an attack the model never receives would make the Case pass by vacuity. A
- * `content` declared under `mediaType: "application/pdf"` gets that text wrapped in a real PDF
- * rather than sent raw, because a real model parses the bytes as a document, not as text.
+ * `content` declared under `mediaType: "application/pdf"` gets a real PDF; a `docx` fixture puts
+ * it after the configured paragraph prefix inside OOXML. XLSX places it after the requested rows;
+ * PPTX places it only in speaker notes. Binary fixtures are never UTF-8 stand-ins.
  */
 export function synthesizeAttachment(file: CaseAttachment): CaseAttachment & { data: Uint8Array } {
+  if (file.pdf !== undefined) {
+    return { ...file, data: externalPdf(file.pdf.variant, file.content ?? "") };
+  }
+  if (file.xlsx !== undefined && file.content !== undefined) {
+    return { ...file, data: externalXlsx(file.content, file.xlsx.precedingRows) };
+  }
+  if (file.pptx !== undefined && file.content !== undefined) {
+    return { ...file, data: externalPptx(file.content) };
+  }
+  if (file.docx !== undefined && "variant" in file.docx) {
+    return { ...file, data: synthesizeDocxRefusalFixture(file.docx.variant) };
+  }
+  if (file.docx !== undefined && file.content !== undefined) {
+    return {
+      ...file,
+      data: synthesizeDocxFixture(file.content, file.docx.precedingParagraphs),
+    };
+  }
   if (file.content !== undefined && file.mediaType === "application/pdf") {
     return { ...file, data: synthesizePdf(file.content) };
   }

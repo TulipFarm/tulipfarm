@@ -4,6 +4,39 @@ import type { Observation } from "./scorer.ts";
 type DeclaredFile = CaseAttachment & { readonly data: Uint8Array };
 type ProviderFile = NonNullable<Observation["providerPromptFiles"]>[number];
 
+export function observePdfInputs(
+  attachments: readonly ResolvedAttachment[] = []
+): NonNullable<Observation["pdfInputs"]> {
+  return attachments
+    .filter((file) => file.mediaType === "application/pdf")
+    .map((file) => ({
+      fileId: file.fileId,
+      ...(file.visual?.kind === "pdf"
+        ? {
+            pages: file.visual.pages.map(({ width, height }) => ({ width, height })),
+          }
+        : {}),
+      textPresent: file.text !== undefined && file.text.length > 0,
+      estimatedTokens: estimateAttachmentTokens(file),
+    }));
+}
+
+export function observeProviderPromptText(
+  messages: readonly { readonly role: string; readonly content: unknown }[],
+  instructions: readonly { readonly role: string; readonly content: unknown }[] = []
+): string {
+  return [...instructions, ...messages]
+    .filter((message) => message.role !== "assistant")
+    .flatMap((message) => {
+      if (typeof message.content === "string") return [message.content];
+      if (!Array.isArray(message.content)) return [];
+      return message.content.flatMap((part: { type?: string; text?: string }) =>
+        part.type === "text" && typeof part.text === "string" ? [part.text] : []
+      );
+    })
+    .join("\n");
+}
+
 function bytes(value: unknown): Uint8Array | undefined {
   if (value instanceof Uint8Array) return value;
   if (value instanceof ArrayBuffer) return new Uint8Array(value);
@@ -91,3 +124,5 @@ export function observeProviderPromptFiles(
   }
   return observed;
 }
+
+import { estimateAttachmentTokens, type ResolvedAttachment } from "@tulipfarm/agent-runtime";

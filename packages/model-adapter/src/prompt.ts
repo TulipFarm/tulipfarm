@@ -236,7 +236,7 @@ function userParts(
  *
  * Routed by what a provider can actually read, not by the File's modality. Images and PDFs are
  * accepted as binary; every other media type is refused as a file part, so a document that has
- * text is sent as text and only a document with none is left to try its luck as a file.
+ * text is sent as text. Office documents without text are refused before provider invocation.
  */
 function filePartFor(
   file: ResolvedAttachment,
@@ -247,6 +247,9 @@ function filePartFor(
   }
   const text = providerAttachmentText(file);
   if (text !== undefined) return { type: "text", text };
+  if (file.mediaType.startsWith("application/vnd.openxmlformats-officedocument.")) {
+    throw new Error("Office File requires extracted text before model attachment.");
+  }
   return { type: "file", data: file.data, mediaType: file.mediaType, filename: file.name };
 }
 

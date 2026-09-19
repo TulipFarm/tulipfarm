@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { join } from "node:path";
 import { createContextCompactor, createToolResultDistiller } from "@tulipfarm/built-in-agents";
+import { shutdownDocumentConversions } from "@tulipfarm/files";
 import {
   BatchingLogSink,
   describeError,
@@ -728,6 +729,8 @@ export async function main(): Promise<void> {
     serving = false;
     consumersReady = false;
     logger.info(`worker draining (${reason})`);
+    controller.abort();
+    await shutdownDocumentConversions();
 
     // Release the port before the drain so immediate restarts avoid EADDRINUSE.
     await new Promise<void>((resolve) => probeServer.close(() => resolve()));

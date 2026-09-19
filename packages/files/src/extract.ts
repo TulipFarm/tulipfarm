@@ -14,8 +14,8 @@
  */
 
 import { type ImageSize, imageSize } from "./dimensions";
+import { type DocumentRefusal, documentFormat } from "./document-preview";
 import { isImageMediaType, isTextualMediaType } from "./limits";
-import { isOfficePreviewable, type PreviewBlock, previewOffice } from "./office-preview";
 
 export type ExtractedVisual =
   | { readonly kind: "image"; readonly width: number; readonly height: number }
@@ -42,7 +42,7 @@ export type ExtractionRefusal =
   /** A PDF with no text layer — a scan, or pages of pure artwork — or an empty Office document. */
   | "no_text_layer"
   /** A PDF or Office package that would not parse. Corrupt, encrypted, or not really one. */
-  | "unreadable";
+  | DocumentRefusal;
 
 export interface ExtractedText {
   readonly kind: "text";
@@ -72,6 +72,7 @@ export const MAX_EXTRACTED_CHARS = 200_000;
 export interface ExtractOptions {
   /** Cap the returned text. Defaults to `MAX_EXTRACTED_CHARS`. */
   readonly maxChars?: number;
+  readonly signal?: AbortSignal;
 }
 
 /**
@@ -85,7 +86,8 @@ export async function extractText(
   bytes: Uint8Array,
   options: ExtractOptions = {}
 ): Promise<ExtractionResult> {
-  const maxChars = options.maxChars ?? MAX_EXTRACTED_CHARS;
+  const maxChars = Math.min(options.maxChars ?? MAX_EXTRACTED_CHARS, MAX_EXTRACTED_CHARS);
+  if (!Number.isInteger(maxChars) || maxChars < 0) throw new RangeError("Invalid extraction cap");
 
   if (isTextualMediaType(mediaType)) {
     return capped(new TextDecoder().decode(bytes), maxChars);
@@ -99,98 +101,19 @@ export async function extractText(
     };
   }
   if (mediaType === "application/pdf") {
-    return await extractPdf(bytes, maxChars);
+    const { convertDocument } = await import("./document-runner.js");
+    return convertDocument("pdf", bytes, maxChars, options.signal);
   }
-  if (isOfficePreviewable(mediaType)) {
-    return extractOffice(bytes, mediaType, maxChars);
+  const format = documentFormat(mediaType);
+  if (format !== null) {
+    const { convertDocument } = await import("./document-runner.js");
+    return convertDocument(format, bytes, maxChars, options.signal);
   }
   return { kind: "refused", reason: "unsupported_media_type" };
-}
-
-/**
- * Office text, read with the same parser the viewer uses.
- *
- * Reusing `previewOffice` keeps one definition of what a `.docx` says, and inherits its zip-bomb
- * bounds. Layout is dropped on purpose: a model is being told what the document says, and a table
- * flattened to tab-separated cells reads as a table to one without inventing a rendering.
- */
-function extractOffice(bytes: Uint8Array, mediaType: string, maxChars: number): ExtractionResult {
-  let blocks: readonly PreviewBlock[];
-  try {
-    blocks = previewOffice(bytes, mediaType);
-  } catch {
-    return { kind: "refused", reason: "unreadable" };
-  }
-
-  const normalized = normalizeWhitespace(blocks.map(officeBlockText).join("\n"));
-  if (normalized.length === 0) return { kind: "refused", reason: "no_text_layer" };
-  return capped(normalized, maxChars);
-}
-
-function officeBlockText(block: PreviewBlock): string {
-  if (block.kind === "table") return block.rows.map((row) => row.join("\t")).join("\n");
-  if (block.kind === "sheet") {
-    return [block.name, ...block.rows.map((row) => row.join("\t"))].join("\n");
-  }
-  if (block.kind === "slide") return [block.title, ...block.bullets].join("\n");
-  return block.text;
-}
-
-/** Whether `extractText` could return text for a type, without reading any bytes to find out. */
-
-async function extractPdf(bytes: Uint8Array, maxChars: number): Promise<ExtractionResult> {
-  let text: string;
-  let pages: ImageSize[];
-  try {
-    const { extractText: extractPdfText, getDocumentProxy } = await import("unpdf");
-    // Silent: a malformed File is an expected outcome here, and pdf.js otherwise writes its
-    // recovery warnings to stderr, where they read as faults in the Worker rather than as facts
-    // about someone's upload.
-    // A copy, because pdf.js takes ownership of the array it is given and detaches its buffer.
-    // The caller still needs these bytes: the same PDF is screened here and then sent to a model.
-    const document = await getDocumentProxy(new Uint8Array(bytes), { verbosity: 0 });
-    const extracted = await extractPdfText(document, { mergePages: true });
-    text = Array.isArray(extracted.text) ? extracted.text.join("\n") : extracted.text;
-    pages = [];
-    for (let index = 1; index <= document.numPages; index += 1) {
-      const page = await document.getPage(index);
-      // Providers rasterize PDF pages before metering them. A 2× viewport is a conservative
-      // 144-DPI proxy; exact billing remains provider-owned.
-      const viewport = page.getViewport({ scale: 2 });
-      pages.push({ width: Math.ceil(viewport.width), height: Math.ceil(viewport.height) });
-    }
-  } catch {
-    // The bytes are the untrusted input here, so a parser failure describes the File rather than
-    // the system: encrypted, truncated or simply not a PDF all arrive as the same refusal.
-    return { kind: "refused", reason: "unreadable" };
-  }
-
-  const normalized = normalizeWhitespace(text);
-  const visual = { kind: "pdf" as const, pages };
-  if (normalized.length === 0) {
-    return { kind: "refused", reason: "no_text_layer", visual };
-  }
-  return { ...capped(normalized, maxChars), visual };
 }
 
 function capped(text: string, maxChars: number): ExtractedText {
   return text.length > maxChars
     ? { kind: "text", text: text.slice(0, maxChars), truncated: true }
     : { kind: "text", text, truncated: false };
-}
-
-/**
- * Collapse the whitespace a PDF text layer arrives with.
- *
- * Page extraction emits a lot of incidental spacing — line breaks mid-sentence, runs of spaces
- * standing in for layout. Left alone it survives into chunk boundaries and embeddings, where it is
- * noise that shifts what a passage matches.
- */
-function normalizeWhitespace(text: string): string {
-  return text
-    .replace(/\r\n?/g, "\n")
-    .replace(/[ \t]+/g, " ")
-    .replace(/ ?\n ?/g, "\n")
-    .replace(/\n{3,}/g, "\n\n")
-    .trim();
 }

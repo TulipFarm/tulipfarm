@@ -1,9 +1,11 @@
 import { isDelimitedPreviewable, previewDelimited } from "@tulipfarm/files/delimited-preview";
+import { documentFormat } from "@tulipfarm/files/document-preview";
 import type { PreviewBlock } from "@tulipfarm/files/office-preview";
-import { isOfficePreviewable, previewOffice } from "@tulipfarm/files/office-preview";
-import { useEffect, useRef, useState } from "react";
+import { isOfficePreviewable } from "@tulipfarm/files/office-preview";
+import { useEffect, useState } from "react";
 import { fetchFileBytes } from "~/lib/files";
 import { cn } from "~/lib/utils";
+import { DocumentSemanticPreview } from "./docx-semantic-preview";
 import { isRichEmbeddable, OfficeEmbed } from "./office-embed";
 
 /** The text formats a viewer shows as text rather than handing to a download. */
@@ -30,6 +32,7 @@ type Loaded =
   | { readonly kind: "failed"; readonly reason: string }
   | { readonly kind: "text"; readonly text: string }
   | { readonly kind: "rich"; readonly bytes: Uint8Array }
+  | { readonly kind: "semantic"; readonly bytes: Uint8Array }
   | { readonly kind: "blocks"; readonly blocks: readonly PreviewBlock[] };
 
 /**
@@ -60,7 +63,7 @@ function useDocument(file: { id: string; mediaType: string } | null): Loaded {
             setState({ kind: "rich", bytes });
             return;
           }
-          setState({ kind: "blocks", blocks: previewOffice(bytes, mediaType) });
+          setState({ kind: "semantic", bytes });
           return;
         }
         // A CSV is a spreadsheet stored as text: it reads as a grid, not as comma-separated lines.
@@ -96,20 +99,30 @@ export function DocumentView({
   readonly file: { id: string; filename: string; mediaType: string };
   readonly className?: string;
 }) {
+  return (
+    <SelectedDocument key={`${file.id}:${file.mediaType}`} file={file} className={className} />
+  );
+}
+
+function SelectedDocument({
+  file,
+  className,
+}: {
+  readonly file: { id: string; filename: string; mediaType: string };
+  readonly className?: string;
+}) {
   const state = useDocument(file);
-  // Reset per File, so a document the renderer refused does not condemn the next one to the outline.
   const [refusedRichRender, setRefusedRichRender] = useState(false);
-  const previousFileId = useRef(file.id);
-  if (previousFileId.current !== file.id) {
-    previousFileId.current = file.id;
-    setRefusedRichRender(false);
-  }
 
   if (state.kind === "loading") {
     return <Centered className={className}>Loading…</Centered>;
   }
   if (state.kind === "failed") {
-    return <Centered className={className}>{state.reason}</Centered>;
+    return (
+      <Centered className={className} role="alert">
+        {state.reason}
+      </Centered>
+    );
   }
   if (state.kind === "text") {
     return (
@@ -130,7 +143,13 @@ export function DocumentView({
       />
     );
   }
-  const blocks = state.kind === "rich" ? outlineOf(state.bytes, file.mediaType) : state.blocks;
+  if (state.kind === "rich" || state.kind === "semantic") {
+    const format = documentFormat(file.mediaType);
+    return format === null ? null : (
+      <DocumentSemanticPreview bytes={state.bytes} format={format} className={className} />
+    );
+  }
+  const blocks = state.blocks;
   if (blocks.length === 0) {
     return <Centered className={className}>This document has no readable content.</Centered>;
   }
@@ -197,31 +216,20 @@ function groupIntoPages(blocks: readonly PreviewBlock[]): readonly PageGroup[] {
   return groups;
 }
 
-/**
- * The outline a document falls back to, or nothing when it cannot be parsed either.
- *
- * This runs during render, on the path taken after a full-fidelity renderer has already refused the
- * file, so a parse failure here would take the whole viewer down with it over a File the reader can
- * still perfectly well download.
- */
-function outlineOf(bytes: Uint8Array, mediaType: string): readonly PreviewBlock[] {
-  try {
-    return previewOffice(bytes, mediaType);
-  } catch {
-    return [];
-  }
-}
-
 function Centered({
   children,
   className,
+  role = "status",
 }: {
   readonly children: React.ReactNode;
   readonly className?: string;
+  readonly role?: "status" | "alert";
 }) {
   return (
     <div className={cn("flex items-center justify-center", className)}>
-      <p className="text-sm text-muted-foreground">{children}</p>
+      <p role={role} className="text-sm text-muted-foreground">
+        {children}
+      </p>
     </div>
   );
 }

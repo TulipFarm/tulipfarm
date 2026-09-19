@@ -42,6 +42,8 @@ folded into `ModelUsage`.
   path deliberately, because providers read one better than its flattened text layer. Never
   decode bytes here to get that text — `packages/files/src/extract.ts` owns what a File says, and
   it arrives already extracted on `ResolvedAttachment.text`.
+  Office attachments without extracted text fail before SDK projection; never retry those as an
+  unsupported binary file part.
 - **Image tokens are already inside `inputTokens`.** No provider breaks them out and the SDK
   exposes no field for them, so there is nothing to add — and adding an estimate would charge the
   same tokens twice.

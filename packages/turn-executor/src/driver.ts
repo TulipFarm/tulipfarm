@@ -81,6 +81,26 @@ export interface TurnContextPort {
   resolve(request: TurnRequest): Promise<ResolvedTurnContext>;
 }
 
+export type TurnAttachmentRefusal =
+  | "unreadable"
+  | "encrypted"
+  | "resource_limit"
+  | "no_text_layer"
+  | "needs_ocr"
+  | "unsupported_media_type";
+
+export type TurnAttachmentInspection =
+  | {
+      readonly text?: string;
+      readonly visual?: AttachmentVisual;
+      readonly refusal?: never;
+    }
+  | {
+      readonly refusal: TurnAttachmentRefusal;
+      readonly text?: never;
+      readonly visual?: AttachmentVisual;
+    };
+
 /**
  * Fetches the bytes of one File the resolved Context named, and reads what it says.
  *
@@ -103,18 +123,37 @@ export interface TurnAttachmentPort {
    * `undefined` means this File offers a text guard nothing to read, as an image or a scan does.
    * It never means screening was skipped.
    */
-  extract(mediaType: string, bytes: Uint8Array): Promise<string | undefined>;
-  /** Text plus content-derived visual dimensions for model Context and budget estimates. */
+  extract(mediaType: string, bytes: Uint8Array, signal?: AbortSignal): Promise<string | undefined>;
+  /** Ordinary refusals are terminal participant outcomes; operational failures still throw. */
   inspect?(
     mediaType: string,
-    bytes: Uint8Array
-  ): Promise<{ readonly text?: string; readonly visual?: AttachmentVisual }>;
+    bytes: Uint8Array,
+    signal?: AbortSignal
+  ): Promise<TurnAttachmentInspection>;
 }
 
 /** A fetched File paired with the text the guards screen for it, if it offered any. */
 interface ScreenableAttachment {
   readonly file: ResolvedAttachment;
   readonly text?: string;
+  readonly refusal?: TurnAttachmentRefusal;
+}
+
+function attachmentRefusalMessage(name: string, refusal: TurnAttachmentRefusal): string {
+  const filename = name
+    .slice(0, 160)
+    .replace(/[\p{Cc}\p{Cf}]/gu, " ")
+    .replace(/[\\`*_{}[\]()<>!|]/g, "\\$&");
+  const reasons: Record<TurnAttachmentRefusal, string> = {
+    unreadable: "could not be read. It may be damaged or not a valid document. Upload a new copy.",
+    encrypted: "is password-protected. Upload an unlocked copy.",
+    resource_limit: "exceeds the document processing limits. Upload a smaller document.",
+    no_text_layer: "has no readable text. Upload a document containing text.",
+    needs_ocr:
+      "needs OCR before it can be read. OCR is not enabled here; upload a text-based document.",
+    unsupported_media_type: "is not supported for text extraction. Upload a supported document.",
+  };
+  return `The file "${filename}" ${reasons[refusal]}`;
 }
 
 export interface TurnDriverOptions {
@@ -224,7 +263,7 @@ export class TurnDriver {
     // Bytes are fetched before the guard runs because nothing can screen text it has not read.
     // This costs no vendor call: the Files come from this deployment, so a refused Turn still
     // reaches no provider, which is the property the guard-first ordering exists to protect.
-    const resolved = await this.resolveAttachments(request.runId, context);
+    const resolved = await this.resolveAttachments(request.runId, context, request.signal);
     assertRunActive(request.signal);
 
     // Input guard runs before model/tool work; a block settles the State with the guard reply.
@@ -235,6 +274,20 @@ export class TurnDriver {
         request,
         events,
         await this.options.states.settle(stateRequest, guarded.message),
+        spend,
+        context.tools
+      );
+    }
+
+    const refused = resolved.find((attachment) => attachment.refusal !== undefined);
+    if (refused?.refusal !== undefined) {
+      return this.complete(
+        request,
+        events,
+        await this.options.states.settle(
+          stateRequest,
+          attachmentRefusalMessage(refused.file.name, refused.refusal)
+        ),
         spend,
         context.tools
       );
@@ -362,7 +415,8 @@ export class TurnDriver {
    */
   private async resolveAttachments(
     runId: string,
-    context: ResolvedTurnContext
+    context: ResolvedTurnContext,
+    signal?: AbortSignal
   ): Promise<ScreenableAttachment[]> {
     const port = this.options.attachments;
     const refs = context.attachments ?? [];
@@ -373,10 +427,10 @@ export class TurnDriver {
         const data = await port.read(runId, ref.fileId);
         if (data === undefined) return undefined;
         // Extracted as the type the Context authorized, not as whatever the bytes claim to be.
-        const resolvedInspection =
+        const resolvedInspection: TurnAttachmentInspection =
           port.inspect === undefined
-            ? { text: await port.extract(ref.mediaType, data) }
-            : await port.inspect(ref.mediaType, data);
+            ? { text: await port.extract(ref.mediaType, data, signal) }
+            : await port.inspect(ref.mediaType, data, signal);
         return {
           file: {
             ...ref,
@@ -387,6 +441,9 @@ export class TurnDriver {
               : { visual: resolvedInspection.visual }),
           },
           ...(resolvedInspection.text === undefined ? {} : { text: resolvedInspection.text }),
+          ...(resolvedInspection.refusal === undefined
+            ? {}
+            : { refusal: resolvedInspection.refusal }),
         };
       })
     );

@@ -21,6 +21,17 @@ export const FILE_READ_TOOL = "file_read";
  */
 export const MAX_REREAD_FILES = 4;
 
+export class RereadRefusedError extends Error {
+  constructor(readonly reason: string) {
+    super(
+      reason === "encrypted"
+        ? "A re-read file is password-protected. Upload an unlocked copy."
+        : "A re-read file could not be read. It may have changed since it was requested. Upload a readable copy."
+    );
+    this.name = "RereadRefusedError";
+  }
+}
+
 /** One File an Agent asked to see again, named but not yet fetched. */
 export interface RereadFile {
   readonly fileId: string;
@@ -74,14 +85,16 @@ export async function resolveIterationAttachments(
   attached: readonly ResolvedAttachment[],
   reread: readonly RereadFile[],
   port: LoopAttachmentPort | undefined,
-  runId: string
+  runId: string,
+  signal?: AbortSignal
 ): Promise<readonly ResolvedAttachment[]> {
   if (port === undefined || reread.length === 0) return attached;
   const fetched = await Promise.all(
     reread.map(async (file) => {
       const data = await port.read(runId, file.fileId);
       if (data === undefined) return undefined;
-      const inspection = await port.inspect?.(file.mediaType, data);
+      const inspection = await port.inspect?.(file.mediaType, data, signal);
+      if (inspection?.refusal !== undefined) throw new RereadRefusedError(inspection.refusal);
       return {
         ...file,
         data,

@@ -208,7 +208,7 @@ export class AgentStateRunner {
     }
   }
 
-  /** Settles guardrail-decided States through the same `running → succeeded` path. */
+  /** Settles pre-model refusals through the same `running → succeeded` path as guard replies. */
   async settle(
     request: AgentStateRequest,
     output: unknown

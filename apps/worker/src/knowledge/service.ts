@@ -55,7 +55,7 @@ export function buildWorkerKnowledgeService(
   const knowledgeOwnership = new KnowledgeOwnershipProjector(ownershipRepo, ownership);
   return new KnowledgeService({
     pages: new PgKnowledgePageRepo(options.db),
-    chunks: new PgKnowledgeChunkRepo(options.db),
+    chunks: new PgKnowledgeChunkRepo(options.db, options.transactions),
     revisions: new PgKnowledgeRevisionRepo(options.db),
     spaces: new PgKnowledgeSpaceRepo(options.db),
     links: new PgKnowledgeLinksRepo(options.db),
