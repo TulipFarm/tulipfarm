@@ -65,9 +65,6 @@ function tiers(quick: Providers): NonNullable<LlmConfig["tiers"]> {
 }
 
 describe("defaultModelProfile", () => {
-  // `spec.modelProfile` is required, so a Soul with no derived profile must project no Agent at
-  // all — naming one anyway would make every Agent an unresolved reference and fail publication of
-  // the whole tree, which is the state a freshly scaffolded Soul is in.
   it("names no profile when the Soul configures no LLM", () => {
     expect(defaultModelProfile(undefined)).toBeUndefined();
     expect(defaultModelProfile({})).toBeUndefined();

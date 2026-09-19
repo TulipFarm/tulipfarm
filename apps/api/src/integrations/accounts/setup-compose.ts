@@ -16,6 +16,7 @@ export function composeMcpSetup(deps: {
   audit: AuditService;
   users: Pick<UserRepo, "findById">;
   authorizationCheck: AuthorizationCheck;
+  log: { error: (metadata: Record<string, string>, message: string) => void };
 }) {
   return new McpSetupService({
     operations: new McpSetupStore(deps.db),
@@ -23,6 +24,8 @@ export function composeMcpSetup(deps: {
     accounts: deps.accounts.accounts,
     lifecycle: deps.accounts.lifecycle,
     catalog: MCP_CATALOG,
+    onUnexpectedFailure: (failure) =>
+      deps.log.error({ event: "integration.setup.failed", ...failure }, "MCP setup failed"),
     isActive: (businessId, principalId) =>
       deps.accounts.authorization.isActivePrincipal(businessId, principalId),
     canConfigure: async (businessId, principalId) => {

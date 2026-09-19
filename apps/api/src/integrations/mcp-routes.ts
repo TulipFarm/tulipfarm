@@ -117,7 +117,7 @@ async function respond(reply: FastifyReply, operation: () => Promise<unknown>) {
                 error.code === "disabled" ||
                 error.code === "review_required"
               ? 403
-              : error.code === "unavailable"
+              : error.code === "unavailable" || error.code === "publication_failed"
                 ? 503
                 : 422;
       return reply

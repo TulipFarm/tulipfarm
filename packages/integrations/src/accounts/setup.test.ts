@@ -8,6 +8,7 @@ import type {
   McpSetupStart,
 } from "@tulipfarm/schema";
 import { describe, expect, it, vi } from "vitest";
+import { McpIntegrationError } from "../mcp/errors";
 import type { McpDefinitionStore, McpSession } from "../mcp/ports";
 import { McpIntegrationService, mcpServerRevision } from "../mcp/service";
 import { McpAccountAuthority, type McpAccountRepository } from "./authority";
@@ -121,7 +122,7 @@ function fixture(initial?: McpIntegrationDefinition) {
       authored.set(next.server.id, structuredClone(next));
       if (failPublication) {
         failPublication = false;
-        throw new Error("Publication failed after commit");
+        throw new McpIntegrationError("publication_failed", "Publication failed after commit");
       }
       definitions.set(next.server.id, structuredClone(next));
     }
@@ -211,6 +212,7 @@ function fixture(initial?: McpIntegrationDefinition) {
   });
   const operations = new Operations();
   const audit = vi.fn(async () => {});
+  const onUnexpectedFailure = vi.fn();
   const setup = new McpSetupService({
     operations,
     integrations,
@@ -218,6 +220,7 @@ function fixture(initial?: McpIntegrationDefinition) {
     lifecycle,
     catalog: MCP_CATALOG,
     audit,
+    onUnexpectedFailure,
     isActive: async () => active,
     canConfigure: async () => admin,
   });
@@ -237,6 +240,7 @@ function fixture(initial?: McpIntegrationDefinition) {
     probe,
     writeSecrets,
     audit,
+    onUnexpectedFailure,
     setAdmin: (value: boolean) => {
       admin = value;
     },
@@ -733,7 +737,10 @@ describe("durable MCP setup", () => {
       { ...existingStart, integrationKey: "github-mcp" },
       "actor"
     );
-    expect(first.status).toBe("retry");
+    expect(first).toMatchObject({ status: "retry", error: "publication_failed" });
+    expect(await f.setup.status("business", "user", "operation")).toEqual(first);
+    expect(f.operations.rows.get("operation")?.error).toBe("publication_failed");
+    expect(f.onUnexpectedFailure).not.toHaveBeenCalled();
     expect(f.integrations.get("github-mcp").enabled).toBe(false);
     f.discovery.tools.push({ ...f.tool, name: "new-admin-tool" });
     expect((await f.setup.resume("business", "user", "operation", {}, "actor")).status).toBe(
@@ -743,6 +750,21 @@ describe("durable MCP setup", () => {
     expect(f.integrations.get("github-mcp").reviewed.tools.map((tool) => tool.name)).toEqual([
       "search",
     ]);
+    expect(f.operations.rows.get("operation")).not.toHaveProperty("error");
+  });
+  it("reports unexpected failures using only bounded metadata and keeps details out of saved status", async () => {
+    const f = fixture();
+    f.publish.mockRejectedValueOnce(new Error("private-agent synthetic-credential"));
+    const first = await f.setup.start("business", "user", "operation", start, "actor");
+    expect(first).toMatchObject({ status: "retry", error: "setup_failed" });
+    expect(await f.setup.status("business", "user", "operation")).toEqual(first);
+    expect(f.onUnexpectedFailure).toHaveBeenCalledExactlyOnceWith({
+      businessId: "business",
+      setupId: "operation",
+      code: "setup_failed",
+    });
+    expect(JSON.stringify(f.operations.rows.get("operation"))).not.toContain("private-agent");
+    expect(JSON.stringify(f.onUnexpectedFailure.mock.calls)).not.toContain("synthetic-credential");
   });
   it("recovers a definition committed but not published before account creation", async () => {
     const f = fixture();

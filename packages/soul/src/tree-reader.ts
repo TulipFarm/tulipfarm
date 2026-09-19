@@ -100,7 +100,6 @@ export class GitSoulTreeReader implements SoulTreeReader {
     const paths = await this.paths(commitSha);
     const llm = await this.llmConfig(commitSha, paths);
     if (llm !== undefined) definitions.push(...modelProfileDocuments(llm));
-    // No configured LLM means no ModelProfile to reference, so Agents stay unprojected.
     const modelProfile = defaultModelProfile(llm);
 
     // A canonical `agent.yaml` supersedes the legacy file beside it; projecting both would put two
@@ -121,15 +120,12 @@ export class GitSoulTreeReader implements SoulTreeReader {
         definitions.push(parsed.parsed.definition.document);
         continue;
       }
-      // A Skill projects without a ModelProfile — it names no model — so it is resolved before the
-      // Agent projection's guard rather than after it.
       const skill = definitionAt(path, "Skill");
       if (skill !== null) {
         const projected = skillDocumentFromMarkdown(skill.slug, content, basename(path));
         if (projected !== undefined) definitions.push(projected);
         continue;
       }
-      if (modelProfile === undefined) continue;
       const agent = agentDefinitionAt(path);
       if (agent === null || !agent.legacy || canonicalAgents.has(agent.slug)) continue;
       const projected = agentDocumentFromLegacy(agent.slug, content, modelProfile, basename(path));

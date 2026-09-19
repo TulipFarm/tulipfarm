@@ -25,7 +25,7 @@ const AGENT_FRONTMATTER_ALLOWLIST = [
   "evaluationSuite",
 ] as const;
 
-const AGENT_REQUIRED_FIELDS = ["owner", "modelProfile", "autonomy", "trustTier"] as const;
+const AGENT_REQUIRED_FIELDS = ["owner", "autonomy", "trustTier"] as const;
 
 /** Convert legacy Agent files into proposed canonical files; never writes or publishes. */
 export function convertLegacyAgent(agent: SoulAgent): ConversionResult {
@@ -49,7 +49,7 @@ export function convertLegacyAgent(agent: SoulAgent): ConversionResult {
   if (mapped.personality !== undefined) spec.personality = mapped.personality;
   if (mapped.roles !== undefined) spec.roles = mapped.roles;
   if (mapped.permissionCeiling !== undefined) spec.permissionCeiling = mapped.permissionCeiling;
-  spec.modelProfile = mapped.modelProfile;
+  if (mapped.modelProfile !== undefined) spec.modelProfile = mapped.modelProfile;
   if (mapped.skills !== undefined) spec.skills = mapped.skills;
   if (mapped.allowedTools !== undefined) spec.allowedTools = mapped.allowedTools;
   spec.autonomy = mapped.autonomy;

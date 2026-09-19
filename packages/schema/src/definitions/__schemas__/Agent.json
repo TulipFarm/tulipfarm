@@ -330,7 +330,6 @@
       "required": [
         "owner",
         "instructions",
-        "modelProfile",
         "autonomy",
         "trustTier"
       ],

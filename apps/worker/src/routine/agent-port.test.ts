@@ -318,6 +318,24 @@ describe("BundleRoutineAgentPort", () => {
     expect(appended[1]?.payload).toMatchObject({ modelProfileId: "fast" });
   });
 
+  it("parks an Agent without model configuration instead of selecting another model", async () => {
+    const unconfigured = agent();
+    delete unconfigured.spec.modelProfile;
+    const result = await port().execute(
+      request({
+        bundle: bundle([
+          { kind: "Agent", slug: "triage", document: unconfigured },
+          { kind: "ModelProfile", slug: "fast", document: profile() },
+        ]),
+      })
+    );
+
+    expect(result).toEqual({ kind: "unavailable", reason: "model_not_configured" });
+    expect(invoke).not.toHaveBeenCalled();
+    expect(modelSelections).toEqual([]);
+    expect(openedBudgets).toEqual([]);
+  });
+
   it("fences every Routine Agent checkpoint with the active Run claim", async () => {
     class FenceRecordingStore extends InMemoryLoopCheckpointStore {
       readonly generations: number[] = [];

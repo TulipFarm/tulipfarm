@@ -5,6 +5,7 @@ import { Input } from "~/components/ui/input";
 import { Link } from "~/components/ui/link";
 import { listMcpAccounts, type McpAccountConfiguration } from "~/lib/mcp-accounts";
 import type { McpSetupOperation } from "~/lib/mcp-setup";
+import { useIsAdmin } from "~/lib/use-session-user";
 import { mcpAccessMessage } from "./mcp-access-message";
 import { McpCredentialFields } from "./mcp-account-form";
 import { McpError, McpField } from "./mcp-form";
@@ -30,6 +31,7 @@ export function McpSetupProgress({
   onRestart?: () => void;
   standardAccess?: { consent: string; connect: () => void };
 }) {
+  const isAdmin = useIsAdmin();
   const [values, setValues] = useState<Record<string, string>>({});
   const [clientSecret, setClientSecret] = useState("");
   const { operation, pending, uncertain, error } = setup;
@@ -50,6 +52,8 @@ export function McpSetupProgress({
     account.definitionDigest !== configuration.definitionDigest;
   const explanations: Record<string, string> = {
     setup_failed: "TulipFarm could not finish setup. Your saved progress is kept; try again.",
+    publication_failed:
+      "TulipFarm could not activate the integration settings. Your saved setup is kept.",
     account_binding_changed:
       "This account changed after setup began. Continue with its current settings instead of retrying the old approval.",
     definition_changed:
@@ -137,6 +141,27 @@ export function McpSetupProgress({
               Done
             </Button>
           )}
+        </>
+      ) : failureCode === "publication_failed" ? (
+        <>
+          <p className="text-sm font-medium">Workspace settings need attention</p>
+          <p className="text-xs text-muted-foreground">
+            This does not mean your provider credentials are wrong.{" "}
+            {isAdmin
+              ? "Check Operations and Activity for the publication problem. Resolve it, then retry this saved setup."
+              : "Ask an admin to check Operations and Activity for the publication problem. Once it is resolved, retry this saved setup."}
+          </p>
+          {isAdmin && (
+            <div className="flex flex-wrap gap-2">
+              <Button asChild variant="outline">
+                <Link to="/operations">Open Operations</Link>
+              </Button>
+              <Button asChild variant="outline">
+                <Link to="/business/activities">Open Activity</Link>
+              </Button>
+            </div>
+          )}
+          <Button onClick={() => void setup.resume()}>Retry saved setup</Button>
         </>
       ) : failureCode === "account_unavailable" ? (
         <>

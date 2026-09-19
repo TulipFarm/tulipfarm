@@ -49,6 +49,8 @@ Run event/request vocabularies, canonical hashes, Secret references, and resourc
   declarations from the canonical contract rather than inventing another data class.
 - `definitionSchema()` rejects plain JSON Schema literals. Do not defeat that with casts.
 - Optional fields use `Type.Optional(...)`; never hand-write `required` arrays.
+- Agent `modelProfile` is optional for unconfigured instances; execution must refuse an absent
+  binding, while publication preserves Agents and their Routine references.
 - Use `Type.Unsafe<T>` only for shapes TypeBox cannot express; derive `T` from the same constants.
 - For enum wire shape, prefer `Type.Unsafe<T>({ type: "string", enum: [...] })`; `Type.Union`
   emits `anyOf`, which is a different contract.

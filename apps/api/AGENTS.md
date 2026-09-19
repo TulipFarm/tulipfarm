@@ -145,7 +145,8 @@ PostgreSQL persistence composition, auth, Soul Git writes, and Worker callback p
 - `internal/channel-availability.ts` gates Slack message and Surface admission, recovery, and
   approval continuation from the live Soul; all hosts must preserve that gate.
 - MCP definitions persist non-secret configuration through SoulWriter and read only the verified
-  active bundle. Credentials and account grants never belong in the Soul.
+  active bundle. `mcp-compose.ts` translates publication failures into safe Integration errors;
+  setup logs only bounded failure metadata. Credentials and account grants never belong in the Soul.
 - Local MCP uses the fixed Kata runtime in production; ordinary Docker is development-only.
   Operators provision Kata and, for network egress, `SANDBOX_RUNTIME_IMAGE`; server definitions
   cannot choose a runtime.

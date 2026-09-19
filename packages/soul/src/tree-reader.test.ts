@@ -9,6 +9,9 @@ import {
 import simpleGit from "simple-git";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { stringify as stringifyYaml } from "yaml";
+import { computeBundleDigest, createRuntimeBundle } from "./bundle";
+import { compileExecutionBundle } from "./compiler";
+import { mcpIntegrationsFromBundle } from "./integrations/mcp-definition";
 import { GitSoulTreeReader, isBundledDefinitionPath } from "./tree-reader";
 
 const TMP = join(import.meta.dirname, "__tree_reader_tmp__");
@@ -29,7 +32,6 @@ async function writeFixture(path: string, content: string): Promise<void> {
   await writeFile(fullPath, content, "utf8");
 }
 
-/** The smallest `soul.yaml` that derives a ModelProfile, which an Agent projection requires. */
 async function writeConfiguredLlm(): Promise<void> {
   await writeFixture(
     "soul.yaml",
@@ -307,17 +309,108 @@ describe("GitSoulTreeReader", () => {
     expect(JSON.stringify(documents)).not.toContain("stale");
   });
 
-  // A Routine `agentRef` resolves against this source, and the compiled bundle is built from it.
-  // While `AGENT.md` contributed nothing, no Agent the product can create could ever be named by a
-  // Routine — the reference failed validation and the Worker had no Agent to run.
-  it("projects no Agent while the Soul configures no LLM to reference", async () => {
+  it("keeps an Agent without inventing a model when no LLM is configured", async () => {
     await writeFixture("agents/joke-bot/AGENT.md", "---\nlabel: Joke Bot\n---\nBody\n");
     const git = simpleGit(TMP);
     await git.add("-A");
     await git.commit("test fixture");
     const sha = await git.revparse(["HEAD"]);
 
-    expect(await new GitSoulTreeReader(TMP).readDefinitions(sha.trim())).toEqual([]);
+    const documents = await new GitSoulTreeReader(TMP).readDefinitions(sha.trim());
+    expect(documents.map(documentSubject)).toEqual(["Agent:joke-bot"]);
+    expect(documents[0]?.spec).not.toHaveProperty("modelProfile");
+  });
+
+  it("publishes an Integration beside existing Routines after removing the model configuration", async () => {
+    await writeConfiguredLlm();
+    await writeFixture(
+      "agents/briefing/AGENT.md",
+      "---\nlabel: Briefing\n---\nWrite a briefing.\n"
+    );
+    await writeFixture(
+      "routines/daily-briefing/routine.yaml",
+      stringifyYaml({
+        apiVersion: "tulipfarm.ai/v1",
+        kind: "Routine",
+        metadata: {
+          id: "11111111-1111-1111-1111-111111111111",
+          slug: "daily-briefing",
+          schemaVersion: 1,
+          authoredVersion: 1,
+          lifecycle: "published",
+        },
+        spec: {
+          owner: "ops",
+          start: "brief",
+          states: [
+            {
+              name: "brief",
+              type: "agent",
+              agentRef: { name: "briefing", version: "1" },
+              input: {},
+              end: true,
+            },
+          ],
+        },
+      })
+    );
+    const git = simpleGit(TMP);
+    await git.add("-A");
+    await git.commit("configured Routine");
+    const reader = new GitSoulTreeReader(TMP);
+    const compile = async () => {
+      const commitSha = (await git.revparse(["HEAD"])).trim();
+      const bundle = compileExecutionBundle({
+        businessId: "business",
+        changesetId: commitSha,
+        commitSha,
+        documents: await reader.readDefinitions(commitSha),
+        files: await reader.readFiles(commitSha),
+      });
+      return createRuntimeBundle(bundle, computeBundleDigest(bundle));
+    };
+    expect((await compile()).get("Agent", "briefing")?.document.spec).toHaveProperty(
+      "modelProfile",
+      "balanced"
+    );
+
+    await writeFixture("soul.yaml", "{}\n");
+    await writeFixture(
+      "integrations/github-mcp/mcp.yaml",
+      stringifyYaml({
+        server: {
+          id: "github-mcp",
+          label: "GitHub",
+          transport: { type: "streamable-http", url: "https://api.githubcopilot.com/mcp/" },
+          authentication: { type: "token", sharedAllowed: false },
+        },
+        enabled: false,
+        reviewPolicy: "uninitialized",
+        reviewed: { tools: [], resources: [], prompts: [] },
+      })
+    );
+    await git.add("-A");
+    await git.commit("remove model configuration and configure GitHub");
+
+    const unconfigured = await compile();
+    expect(mcpIntegrationsFromBundle(unconfigured).has("github-mcp")).toBe(true);
+    expect(unconfigured.get("Agent", "briefing")?.document.spec).not.toHaveProperty("modelProfile");
+    expect(unconfigured.get("Routine", "daily-briefing")?.references).toEqual([
+      expect.objectContaining({ kind: "Agent", slug: "briefing", authoredVersion: 1 }),
+    ]);
+    expect(unconfigured.definitions.some((definition) => definition.kind === "ModelProfile")).toBe(
+      false
+    );
+
+    await writeConfiguredLlm();
+    await git.add("soul.yaml");
+    await git.commit("restore model configuration");
+    const restored = await compile();
+    expect(restored.get("Agent", "briefing")?.document.spec).toHaveProperty(
+      "modelProfile",
+      "balanced"
+    );
+    expect(mcpIntegrationsFromBundle(restored).has("github-mcp")).toBe(true);
   });
 
   it("projects a legacy AGENT.md into a canonical Agent definition", async () => {

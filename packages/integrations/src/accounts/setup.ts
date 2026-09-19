@@ -41,6 +41,11 @@ export class McpSetupService<Actor> {
       isActive: (businessId: string, principalId: string) => Promise<boolean>;
       canConfigure: (businessId: string, principalId: string) => Promise<boolean>;
       audit: (operation: McpSetupOperation, action: string) => Promise<void>;
+      onUnexpectedFailure?: (failure: {
+        businessId: string;
+        setupId: string;
+        code: "setup_failed";
+      }) => void;
     }
   ) {}
 
@@ -511,6 +516,9 @@ export class McpSetupService<Actor> {
         error instanceof McpIntegrationError
           ? error.code
           : "setup_failed";
+      if (code === "setup_failed") {
+        this.deps.onUnexpectedFailure?.({ businessId, setupId: id, code });
+      }
       const account =
         code === "reconnect_required" && !operation.snapshot && operation.accountId
           ? await this.deps.accounts.get(businessId, operation.accountId)

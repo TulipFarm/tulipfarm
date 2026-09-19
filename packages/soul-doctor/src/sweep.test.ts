@@ -167,6 +167,10 @@ describe("sweepSoul", () => {
     expect(report.escalated).toBe(1);
     expect(h.settled).toContainEqual({ fingerprint: expect.any(String), state: "open" });
     expect(h.escalations[0]?.because).toContain("provider timed out");
+    expect(h.events.at(-1)).toMatchObject({
+      kind: "escalated",
+      because: expect.stringContaining("provider timed out"),
+    });
   });
 
   it("costs nothing but the queries when the instance is healthy", async () => {

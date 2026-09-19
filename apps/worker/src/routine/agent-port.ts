@@ -338,6 +338,13 @@ export class BundleRoutineAgentPort implements RoutineAgentPort {
     if (authoredVersion !== Number(plan.agentRef.version)) {
       return { kind: "unavailable", reason: "agent_version_mismatch" };
     }
+    if (agent.spec.modelProfile === undefined) {
+      this.options.log.warn(
+        { runId: request.runId, agentId: plan.agentRef.name },
+        "routine Agent has no model configured"
+      );
+      return { kind: "unavailable", reason: "model_not_configured" };
+    }
 
     // Record the digest of the guard policy this service actually compiled and ran.
     const guardrails = new GuardrailsService();

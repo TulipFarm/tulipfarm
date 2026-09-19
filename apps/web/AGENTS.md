@@ -24,6 +24,7 @@ data loading, schema-driven resource UI, and browser rendering of Surface Artifa
 | `app/components/farm/`, `app/lib/farm.ts` | `/farm` tulip canvas, season/legend strips, crop metadata, its parallel Soul read. |
 | `app/components/page-shell.tsx`, `app/lib/page-chrome-context.tsx` | The one page frame; publishes its title and portals actions into the shell's single chrome bar. |
 | `app/components/app-sidebar.tsx`, `app/components/sidebar-command.tsx` | The shell's one nav column and its ⌘K/`/` destination finder. |
+| `app/components/shell/model-configuration-warning.tsx` | Admin-only, bounded model-config checks and the shell's missing-model warning; never reads admin config for nonadmins or treats request failure as missing config. |
 | `app/components/agents/` | Roster list, row, capability panel, and starters for `/agents`. |
 | `app/components/skills/` | Catalog, reach badge, capability/package/audience panels, marketplace browser. |
 | `app/components/resources/` | Stat strip, catalog table, schema summary for `/resources`. |

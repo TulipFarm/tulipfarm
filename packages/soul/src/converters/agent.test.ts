@@ -93,6 +93,16 @@ describe("convertLegacyAgent", () => {
     expect(result.warnings).toContainEqual({ code: "MISSING_REQUIRED_FIELD", field: "owner" });
   });
 
+  it("converts an Agent without a model binding without inventing a default", () => {
+    const { modelProfile: _profile, ...frontmatter } = validLegacy.frontmatter;
+    const result = convertLegacyAgent({ ...validLegacy, frontmatter });
+
+    expect(result.warnings).toEqual([]);
+    expect(registry.validateYaml(agentYaml(result)).document.spec).not.toHaveProperty(
+      "modelProfile"
+    );
+  });
+
   it("is idempotent: same legacy input yields byte-identical files and warnings", () => {
     const first = convertLegacyAgent(validLegacy);
     const second = convertLegacyAgent(validLegacy);

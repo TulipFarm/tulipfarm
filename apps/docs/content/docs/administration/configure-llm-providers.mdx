@@ -127,3 +127,14 @@ fallback.
 If there is no `soul.yaml#llm` configuration, LLM features are disabled. The app does not invent a
 model or silently call an unconfigured provider.
 </Callout>
+
+## Restore missing model configuration
+
+If removing a provider leaves no chat model configured, the app shows a warning with a link to
+**Models**. Add a provider and choose a chat model, then use **Test connection** to check its
+credentials. The warning checks saved configuration; it does not test whether a provider is
+reachable.
+
+Existing agents and routines stay saved without a model. Steps that need an agent cannot run
+until a model is configured, but you can still connect integrations such as GitHub. Connecting an
+integration does not require a model provider.
