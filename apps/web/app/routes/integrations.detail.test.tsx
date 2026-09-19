@@ -1,5 +1,5 @@
 import { createRemixStub } from "@remix-run/testing";
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { McpAccountSummary } from "@tulipfarm/schema";
 import { beforeEach, expect, test, vi } from "vitest";
@@ -188,7 +188,7 @@ test("the mounted detail route loads canonical account metadata and submits a pe
     values: { accessToken: "fake-test-token" },
     initializePolicy: false,
   });
-  expect(await screen.findByText("Connected")).toBeInTheDocument();
+  await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent(/^Connected$/));
   expect(createMcpAccount).not.toHaveBeenCalled();
   expect(screen.queryByDisplayValue("fake-test-token")).not.toBeInTheDocument();
   expect(screen.queryByLabelText("Access token")).not.toBeInTheDocument();
