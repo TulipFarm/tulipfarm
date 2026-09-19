@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.18.37](https://github.com/TulipFarm/tulipfarm/compare/v0.18.36...v0.18.37) (2026-09-19)
+
+### Bug Fixes
+
+* **docs:** serve documentation from the domain root ([#1054](https://github.com/TulipFarm/tulipfarm/issues/1054)) ([d1a90d3](https://github.com/TulipFarm/tulipfarm/commit/d1a90d3d54510fe4a89274e591551e99f7d8230b))
+* **integrations:** decouple GitHub setup from model readiness ([#1055](https://github.com/TulipFarm/tulipfarm/issues/1055)) ([45be091](https://github.com/TulipFarm/tulipfarm/commit/45be0918647214f4079ee179ba2cd8f4dc58d777))
+
 ## [0.18.36](https://github.com/TulipFarm/tulipfarm/compare/v0.18.35...v0.18.36) (2026-09-19)
 
 ### Features
