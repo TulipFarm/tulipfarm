@@ -138,6 +138,16 @@ describe("HttpTurnHost", () => {
     });
   });
 
+  it("reports an ordinary DOCX refusal before a provider can receive Office binary bytes", async () => {
+    const { turns } = host(() => json({}));
+    await expect(
+      turns.inspect(
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        new Uint8Array([1, 2, 3])
+      )
+    ).resolves.toEqual({ refusal: "unreadable" });
+  });
+
   it("names the Turn a Run answers", async () => {
     const { turns } = host(() =>
       json({ turnId: "turn-1", conversationId: "conversation-1", attempt: 2 })

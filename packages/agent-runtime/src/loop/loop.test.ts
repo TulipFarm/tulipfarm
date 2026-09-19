@@ -2578,6 +2578,42 @@ describe("AgentLoop re-reading a File mid-Turn", () => {
     { callId: "call-1", name: "file_read", arguments: { fileId: "file-1" } },
   ]);
 
+  it("ends with an ordinary refusal before another model call when the current File is unreadable", async () => {
+    const model = attachmentRecordingModel(readCall, textResult("must not reach the provider"));
+    const outcome = await loop({
+      model,
+      tools: dispatcher(attachedFile("file-1")),
+      attachments: {
+        read: async () => new Uint8Array([1]),
+        inspect: async () => ({ refusal: "encrypted" as const }),
+      },
+    }).run(input({ tools: [{ name: "file_read", inputSchema: { type: "object" } }] }));
+    expect(model.attachmentsByRequest).toEqual([[]]);
+    expect(outcome).toMatchObject({
+      status: "completed",
+      output: expect.stringContaining("Upload an unlocked copy"),
+      toolCalls: 1,
+    });
+  });
+
+  it("does not mislabel a reread converter outage as an ordinary document refusal", async () => {
+    const model = attachmentRecordingModel(readCall, textResult("must not reach the provider"));
+    const failure = new Error("native converter unavailable");
+    await expect(
+      loop({
+        model,
+        tools: dispatcher(attachedFile("file-1")),
+        attachments: {
+          read: async () => new Uint8Array([1]),
+          inspect: async () => {
+            throw failure;
+          },
+        },
+      }).run(input({ tools: [{ name: "file_read", inputSchema: { type: "object" } }] }))
+    ).rejects.toBe(failure);
+    expect(model.attachmentsByRequest).toEqual([[]]);
+  });
+
   it("puts a re-read File in front of the model on the next step", async () => {
     // The whole point of sending a File only on the Turn it was attached to: an Agent that needs
     // it three Turns later gets it back, so the saving is a saving rather than forgetting.

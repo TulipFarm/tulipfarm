@@ -276,7 +276,8 @@ export interface FileRepo {
     businessId: string,
     id: string,
     expectedRevision: number,
-    archived: boolean
+    archived: boolean,
+    beforeArchive?: (tx: Queryable) => Promise<void>
   ): Promise<FileRecord | null>;
   deleteArchived(
     businessId: string,
@@ -289,7 +290,12 @@ export interface FileRepo {
    * Written before the job is enqueued and cleared before a Page is removed, so that the worker
    * has something to re-read that outlives the queue message.
    */
-  setKnowledgeRequested(businessId: string, id: string, at: Date | null): Promise<void>;
+  setKnowledgeRequested(
+    businessId: string,
+    id: string,
+    at: Date | null,
+    afterWithdraw?: (tx: Queryable) => Promise<void>
+  ): Promise<void>;
   /**
    * Which of `ids` this Principal may currently read, as owner or as a share recipient.
    *
@@ -1194,6 +1200,7 @@ export class PgFileRepo implements FileRepo {
           version.id,
         ]
       );
+      await this.invalidateOlderKnowledge(tx, version.businessId, version.fileId, version.id);
       return toRecord(updated.rows[0] as Record<string, unknown>);
     });
   }
@@ -1256,27 +1263,61 @@ export class PgFileRepo implements FileRepo {
           version.id,
         ]
       );
+      await this.invalidateOlderKnowledge(tx, version.businessId, version.fileId, version.id);
       return toRecord(updated.rows[0] as Record<string, unknown>);
     });
+  }
+
+  private async invalidateOlderKnowledge(
+    tx: Queryable,
+    businessId: string,
+    fileId: string,
+    versionId: string
+  ): Promise<void> {
+    await tx.query(
+      `UPDATE file_knowledge_requests SET status = 'refused', reason = 'changed', completed_at = now()
+       WHERE business_id = $1 AND file_id = $2 AND version_id <> $3
+         AND status IN ('queued','processing')`,
+      [businessId, fileId, versionId]
+    );
   }
 
   async setArchived(
     businessId: string,
     id: string,
     expectedRevision: number,
-    archived: boolean
+    archived: boolean,
+    beforeArchive?: (tx: Queryable) => Promise<void>
   ): Promise<FileRecord | null> {
-    const result = await this.db.query(
-      `UPDATE files
+    return this.transaction(async (tx) => {
+      const locked = await tx.query(
+        `SELECT id FROM files WHERE business_id = $1 AND id = $2 AND revision = $3
+         AND (($4 AND archived_at IS NULL) OR (NOT $4 AND archived_at IS NOT NULL))
+         FOR UPDATE`,
+        [businessId, id, expectedRevision, archived]
+      );
+      if (locked.rows.length === 0) return null;
+      if (archived) await beforeArchive?.(tx);
+      const result = await tx.query(
+        `UPDATE files
        SET archived_at = CASE WHEN $4 THEN now() ELSE NULL END,
            revision = revision + 1
        WHERE business_id = $1 AND id = $2 AND revision = $3
          AND (($4 AND archived_at IS NULL) OR (NOT $4 AND archived_at IS NOT NULL))
        RETURNING *`,
-      [businessId, id, expectedRevision, archived]
-    );
-    const row = result.rows[0] as Record<string, unknown> | undefined;
-    return row === undefined ? null : toRecord(row);
+        [businessId, id, expectedRevision, archived]
+      );
+      const row = result.rows[0] as Record<string, unknown> | undefined;
+      if (row !== undefined && archived) {
+        await tx.query(
+          `UPDATE file_knowledge_requests SET status = 'refused', reason = 'archived',
+             completed_at = now(), indexed_at = NULL, indexed_converter_revision = NULL
+           WHERE business_id = $1 AND file_id = $2`,
+          [businessId, id]
+        );
+      }
+      return row === undefined ? null : toRecord(row);
+    });
   }
 
   async anyReferencesBlob(hash: string): Promise<boolean> {
@@ -1318,12 +1359,29 @@ export class PgFileRepo implements FileRepo {
     });
   }
 
-  async setKnowledgeRequested(businessId: string, id: string, at: Date | null): Promise<void> {
-    await this.db.query(
-      `UPDATE files SET knowledge_requested_at = $3
-       WHERE business_id = $1 AND id = $2 AND archived_at IS NULL`,
-      [businessId, id, at]
-    );
+  async setKnowledgeRequested(
+    businessId: string,
+    id: string,
+    at: Date | null,
+    afterWithdraw?: (tx: Queryable) => Promise<void>
+  ): Promise<void> {
+    await this.transaction(async (tx) => {
+      await tx.query(
+        `UPDATE files SET knowledge_requested_at =
+           CASE WHEN $3::timestamptz IS NULL THEN NULL ELSE COALESCE(knowledge_requested_at, $3) END
+         WHERE business_id = $1 AND id = $2 AND archived_at IS NULL`,
+        [businessId, id, at]
+      );
+      if (at === null) {
+        await tx.query(
+          `UPDATE file_knowledge_requests SET status = 'refused', reason = 'withdrawn',
+             completed_at = now(), indexed_at = NULL, indexed_converter_revision = NULL
+           WHERE business_id = $1 AND file_id = $2`,
+          [businessId, id]
+        );
+        await afterWithdraw?.(tx);
+      }
+    });
   }
 
   async readableIds(
@@ -1372,28 +1430,40 @@ export class PgFileRepo implements FileRepo {
     grantee: FileGrantee,
     grantedBy: string
   ): Promise<void> {
-    await this.db.query(
-      `INSERT INTO file_shares (business_id, file_id, grantee_kind, grantee_id, granted_by)
+    await this.transaction(async (tx) => {
+      await tx.query("SELECT id FROM files WHERE business_id = $1 AND id = $2 FOR UPDATE", [
+        businessId,
+        fileId,
+      ]);
+      await tx.query(
+        `INSERT INTO file_shares (business_id, file_id, grantee_kind, grantee_id, granted_by)
        SELECT $1, $2, $3, $4, $5
        FROM files
        WHERE business_id = $1 AND id = $2 AND archived_at IS NULL
        ON CONFLICT (file_id, grantee_kind, grantee_id) DO NOTHING`,
-      [businessId, fileId, grantee.kind, grantee.id, grantedBy]
-    );
+        [businessId, fileId, grantee.kind, grantee.id, grantedBy]
+      );
+    });
   }
 
   async unshare(businessId: string, fileId: string, grantee: FileGrantee): Promise<boolean> {
-    const result = await this.db.query(
-      `DELETE FROM file_shares
+    return this.transaction(async (tx) => {
+      await tx.query("SELECT id FROM files WHERE business_id = $1 AND id = $2 FOR UPDATE", [
+        businessId,
+        fileId,
+      ]);
+      const result = await tx.query(
+        `DELETE FROM file_shares
        WHERE business_id = $1 AND file_id = $2 AND grantee_kind = $3 AND grantee_id = $4
          AND EXISTS (
            SELECT 1 FROM files
            WHERE business_id = $1 AND id = $2 AND archived_at IS NULL
          )
        RETURNING file_id`,
-      [businessId, fileId, grantee.kind, grantee.id]
-    );
-    return result.rows.length > 0;
+        [businessId, fileId, grantee.kind, grantee.id]
+      );
+      return result.rows.length > 0;
+    });
   }
 
   async countShares(businessId: string, fileIds: readonly string[]): Promise<Map<string, number>> {

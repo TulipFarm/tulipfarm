@@ -47,6 +47,11 @@ Run event emission, Tool-call announcement or preview, or the ports a Turn host 
   extracted text are **block-only** — a redaction cannot be applied to bytes already on their way to
   the model, and rewriting a name would change which File the part refers to. `read` keeps a
   bytes-only shape on purpose, so the same object still satisfies `LoopAttachmentPort`.
+  Forward the Run's AbortSignal to `extract`/`inspect` so a stopped Run terminates native document
+  work, not merely its waiting promise.
+  `inspect` returns ordinary attachment refusals as `TurnAttachmentInspection.refusal`, not
+  exceptions. The driver screens names, then completes a durable participant reply without a model
+  call; operational failures still throw and retain the reconciliation path.
 - **A Turn that stops to ask still persists a Message.** `input_required` once completed with
   `messageId: null`, so the prose, the Tool steps and the question the reader was looking at
   survived only on the wire — a reload emptied the reply. `ConversationTurnCompleter.persistReply`

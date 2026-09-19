@@ -992,7 +992,7 @@ describe("TurnDriver — attached Files", () => {
 
     await driver.run(request());
 
-    expect(inspect).toHaveBeenCalledWith("application/pdf", new Uint8Array([1, 2, 3]));
+    expect(inspect).toHaveBeenCalledWith("application/pdf", new Uint8Array([1, 2, 3]), undefined);
     expect(extract).not.toHaveBeenCalled();
     expect(seen).toEqual([]);
     expect(store.messages[0]?.content).toBe("This request was blocked by a safety guardrail.");

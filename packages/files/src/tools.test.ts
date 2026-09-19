@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
+import { DOCX_MEDIA_TYPE, PPTX_MEDIA_TYPE, XLSX_MEDIA_TYPE } from "./document-preview";
+import { docxParagraph, externalDocx } from "./docx-fixture.test-support";
 import { BUSINESS_PRINCIPAL_ID, MAX_FILE_READ_CHARS } from "./limits";
+import { externalPptx, externalXlsx } from "./office-fixture.test-support";
+import { externalPdf } from "./pdf-fixture.test-support";
 import { MAX_RENDER_INPUT_CHARS, RenderError } from "./render";
 import type { FileRecord } from "./repo";
 import { FileError, type GenerateDraftRequest, type GenerateRequest } from "./service";
@@ -34,7 +38,7 @@ function record(overrides: Partial<FileRecord> = {}): FileRecord {
 }
 
 /** A File library reduced to what the Tools touch, with the same 404-for-both refusal. */
-function library(files: readonly FileRecord[], bodies: Record<string, string> = {}) {
+function library(files: readonly FileRecord[], bodies: Record<string, string | Uint8Array> = {}) {
   const readable = (id: string, principalId: string): FileRecord | undefined =>
     files.find((file) => file.id === id && file.ownerPrincipalId === principalId);
   return {
@@ -51,7 +55,7 @@ function library(files: readonly FileRecord[], bodies: Record<string, string> = 
       return {
         file: found,
         body: (async function* () {
-          yield new TextEncoder().encode(text);
+          yield typeof text === "string" ? new TextEncoder().encode(text) : text;
         })(),
       };
     },
@@ -196,6 +200,116 @@ describe("file_list", () => {
 });
 
 describe("file_read", () => {
+  it.each([
+    [
+      DOCX_MEDIA_TYPE,
+      () =>
+        externalDocx(
+          docxParagraph("The approval code is 7391."),
+          { "word/media/padding.bin": new Uint8Array(140_000) },
+          0
+        ),
+    ],
+    [
+      XLSX_MEDIA_TYPE,
+      () =>
+        externalXlsx(
+          "The approval code is 7391.",
+          220,
+          { "xl/media/padding.bin": new Uint8Array(140_000) },
+          0
+        ),
+    ],
+    [
+      PPTX_MEDIA_TYPE,
+      () =>
+        externalPptx(
+          "The approval code is 7391.",
+          { "ppt/media/padding.bin": new Uint8Array(140_000) },
+          0
+        ),
+    ],
+  ] as const)(
+    "buffers the complete authorized Office archive beyond the text-byte ceiling (%s)",
+    async (mediaType, make) => {
+      const archive = make();
+      expect(archive.byteLength).toBeGreaterThan(MAX_FILE_READ_CHARS * 4);
+      const file = record({
+        mediaType,
+        filename: "external.docx",
+        sizeBytes: archive.byteLength,
+      });
+      const service = library([file]);
+      let readBytes = 0;
+      const result = data(
+        await fileReadTool.handler(
+          { fileId: file.id },
+          context({
+            ...service,
+            content: async (...args: Parameters<typeof service.content>) => {
+              await service.read(...args);
+              return {
+                file,
+                body: (async function* () {
+                  for (let offset = 0; offset < archive.length; offset += 16_384) {
+                    const chunk = archive.subarray(offset, offset + 16_384);
+                    readBytes += chunk.length;
+                    yield chunk;
+                  }
+                })(),
+              };
+            },
+          })
+        )
+      );
+      expect(readBytes).toBe(archive.length);
+      expect(result).toMatchObject({
+        kind: "text",
+        text: expect.stringContaining("The approval code is 7391."),
+        truncated: false,
+      });
+      expect(result.attached).toBeUndefined();
+    }
+  );
+
+  it("returns an actionable Office refusal instead of an unsupported binary attachment", async () => {
+    const file = record({ mediaType: DOCX_MEDIA_TYPE, filename: "broken.docx" });
+    const result = await fileReadTool.handler({ fileId: file.id }, context(library([file])));
+    expect(result).toMatchObject({
+      success: false,
+      error: { code: "validation_error", message: expect.stringContaining("unreadable") },
+    });
+  });
+
+  it("caps converted DOCX Tool output at 32,000 characters, independently of archive size", async () => {
+    const archive = externalDocx(docxParagraph("x".repeat(MAX_FILE_READ_CHARS + 1)));
+    const file = record({
+      mediaType: DOCX_MEDIA_TYPE,
+      filename: "long.docx",
+      sizeBytes: archive.length,
+    });
+    const result = data(
+      await fileReadTool.handler(
+        { fileId: file.id },
+        context({
+          ...library([file]),
+          content: async () => ({
+            file,
+            body: (async function* () {
+              yield archive;
+            })(),
+          }),
+        })
+      )
+    );
+    expect(result).toMatchObject({
+      kind: "text",
+      truncated: true,
+      maxChars: MAX_FILE_READ_CHARS,
+    });
+    expect(result.text).toHaveLength(MAX_FILE_READ_CHARS);
+  });
+
   it("hands back a text File's content so a follow-up can be answered from it", async () => {
     const file = record({ id: "aaaaaaaa-1111-4111-8111-111111111111", filename: "policy.md" });
     const service = library([file], { [file.id]: "Refunds are issued within 14 days." });
@@ -214,20 +328,55 @@ describe("file_read", () => {
     expect(result.maxChars).toBe(MAX_FILE_READ_CHARS);
   });
 
-  it("attaches a PDF instead of pretending it is text", async () => {
+  it("attaches a readable scan instead of pretending it has text", async () => {
     const file = record({
       id: "aaaaaaaa-1111-4111-8111-111111111111",
       filename: "audit.pdf",
       mediaType: "application/pdf",
     });
-    const result = data(await fileReadTool.handler({ fileId: file.id }, context(library([file]))));
+    const result = data(
+      await fileReadTool.handler(
+        { fileId: file.id },
+        context(library([file], { [file.id]: externalPdf("scan") }))
+      )
+    );
     expect(result).toMatchObject({
       kind: "attached",
       attached: true,
       mediaType: "application/pdf",
       filename: "audit.pdf",
+      textRefusal: "needs_ocr",
     });
     expect(result.text).toBeUndefined();
+  });
+
+  it.each(["malformed", "encrypted"] as const)("does not attach a %s PDF", async (variant) => {
+    const file = record({ mediaType: "application/pdf", filename: "report.pdf" });
+    const result = await fileReadTool.handler(
+      { fileId: file.id },
+      context(library([file], { [file.id]: externalPdf(variant) }))
+    );
+    expect(result).toMatchObject({ success: false, error: { code: "validation_error" } });
+  });
+
+  it("returns PDF Markdown under the File Tool cap and attaches a mixed PDF without partial text", async () => {
+    const file = record({ mediaType: "application/pdf", filename: "report.pdf" });
+    const mixed = data(
+      await fileReadTool.handler(
+        { fileId: file.id },
+        context(library([file], { [file.id]: externalPdf("mixed") }))
+      )
+    );
+    expect(mixed).toMatchObject({ kind: "attached", textRefusal: "needs_ocr" });
+    expect(mixed).not.toHaveProperty("text");
+    const text = data(
+      await fileReadTool.handler(
+        { fileId: file.id },
+        context(library([file], { [file.id]: externalPdf("text", "alpha ".repeat(6000)) }))
+      )
+    );
+    expect(text).toMatchObject({ kind: "text", truncated: true, maxChars: MAX_FILE_READ_CHARS });
+    expect(text.text).toHaveLength(MAX_FILE_READ_CHARS);
   });
 
   it("attaches an image rather than decoding bytes into mojibake", async () => {

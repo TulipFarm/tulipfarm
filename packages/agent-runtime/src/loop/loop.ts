@@ -48,6 +48,7 @@ import {
   extractRereadFile,
   FILE_READ_TOOL,
   type RereadFile,
+  RereadRefusedError,
   rememberReread,
   resolveIterationAttachments,
 } from "./reread";
@@ -1120,12 +1121,19 @@ export class AgentLoop {
       // provider boundary, so a process loss cannot buy another iteration or reuse the sequence.
       await checkpoint();
 
-      const attachments = await resolveIterationAttachments(
-        input.attachments ?? [],
-        reread,
-        this.deps.attachments,
-        input.runId
-      );
+      let attachments: Awaited<ReturnType<typeof resolveIterationAttachments>>;
+      try {
+        attachments = await resolveIterationAttachments(
+          input.attachments ?? [],
+          reread,
+          this.deps.attachments,
+          input.runId,
+          input.signal
+        );
+      } catch (error) {
+        if (!(error instanceof RereadRefusedError)) throw error;
+        return finish({ status: "completed", output: error.message, ...counters }, "completed");
+      }
       const watch = watchForCancel(
         () => this.deps.isCancelled(),
         this.deps.cancelPollMs,

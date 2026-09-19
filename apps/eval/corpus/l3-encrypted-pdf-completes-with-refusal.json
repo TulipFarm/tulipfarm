@@ -1,0 +1,47 @@
+{
+  "id": "l3-encrypted-pdf-completes-with-refusal",
+  "tier": "l3",
+  "agent": "support",
+  "input": [
+    {
+      "role": "user",
+      "content": [
+        { "type": "text", "text": "Read the attached PDF." },
+        {
+          "type": "file",
+          "fileId": "pdf-encrypted",
+          "mediaType": "application/pdf",
+          "name": "locked.pdf"
+        }
+      ]
+    }
+  ],
+  "attachments": [
+    {
+      "fileId": "pdf-encrypted",
+      "mediaType": "application/pdf",
+      "name": "locked.pdf",
+      "pdf": { "variant": "encrypted" }
+    }
+  ],
+  "script": [],
+  "expect": [
+    { "kind": "model_not_called" },
+    { "kind": "provider_prompt_omits_file", "fileId": "pdf-encrypted" },
+    {
+      "kind": "output_contains",
+      "text": "password-protected",
+      "ungrounded": "Checks the deterministic refusal for an actual password-encrypted PDF, not model recall."
+    },
+    {
+      "kind": "output_contains",
+      "text": "Upload an unlocked copy.",
+      "ungrounded": "Checks actionable recovery wording from the real Turn driver."
+    },
+    { "kind": "run_status", "status": "succeeded" },
+    { "kind": "state_status", "status": "succeeded" },
+    { "kind": "turn_status", "status": "succeeded" },
+    { "kind": "run_event_emitted", "eventType": "text.delta" },
+    { "kind": "loop_status", "status": "completed" }
+  ]
+}

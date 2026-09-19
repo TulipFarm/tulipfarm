@@ -63,3 +63,6 @@ orchestration. It owns prompt assembly and runtime control, not model providers.
   *every* iteration, because that fetch is the authorization check — a revoked share has to stop
   the File on the next step, which no cached copy could do. The set is capped and held as names,
   so a resumed Turn re-authorizes rather than replaying a stale copy.
+- Re-read inspection refusals settle without another model call; unlike revoked access, an
+  unreadable replacement is an explicit participant refusal. Converter infrastructure errors still
+  propagate for reconciliation. Readable scanned PDFs retain their binary bytes and page estimates.

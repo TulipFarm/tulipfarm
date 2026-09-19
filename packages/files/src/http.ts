@@ -6,6 +6,7 @@
  * beside the rules that produced them rather than in whichever app happens to serve them.
  */
 
+import { FILE_KNOWLEDGE_STATUSES, type FileKnowledgeReceipt } from "./knowledge-index";
 import { isInlineRenderable } from "./limits";
 import {
   FILE_GRANTEE_KINDS,
@@ -64,6 +65,37 @@ export const FILE_WIRE_SCHEMA = {
      */
     sharedWithCount: { type: "integer", nullable: true },
     inKnowledge: { type: "boolean", nullable: true },
+    knowledgeRequested: { type: "boolean", nullable: true },
+    knowledgeReceipt: {
+      type: "object",
+      nullable: true,
+      required: [
+        "requestId",
+        "fileId",
+        "versionId",
+        "converterRevision",
+        "status",
+        "requestedAt",
+        "completedAt",
+        "reason",
+        "indexedAt",
+        "indexedConverterRevision",
+        "truncated",
+      ],
+      properties: {
+        requestId: { type: "string" },
+        fileId: { type: "string" },
+        versionId: { type: "string" },
+        converterRevision: { type: "string" },
+        status: { type: "string", enum: [...FILE_KNOWLEDGE_STATUSES] },
+        requestedAt: { type: "string" },
+        completedAt: { type: "string", nullable: true },
+        reason: { type: "string", nullable: true },
+        indexedAt: { type: "string", nullable: true },
+        indexedConverterRevision: { type: "string", nullable: true },
+        truncated: { type: "boolean" },
+      },
+    },
     /**
      * Whether the caller may share, replace, archive or delete this File.
      *
@@ -198,7 +230,8 @@ export function serializeFile(
   sharedWithCount?: number,
   inKnowledge?: boolean,
   ownerName?: string | null,
-  canManage?: boolean
+  canManage?: boolean,
+  knowledgeReceipt?: FileKnowledgeReceipt
 ) {
   return {
     id: file.id,
@@ -218,6 +251,8 @@ export function serializeFile(
     sourceRunId: file.sourceRunId,
     sharedWithCount: sharedWithCount ?? null,
     inKnowledge: inKnowledge ?? null,
+    knowledgeRequested: inKnowledge === undefined ? null : file.knowledgeRequestedAt !== null,
+    knowledgeReceipt: knowledgeReceipt ?? null,
     canManage: canManage ?? null,
   };
 }
@@ -246,6 +281,7 @@ export function serializeFilePage(page: {
   shareCounts?: Map<string, number>;
   knowledgeIds?: ReadonlySet<string>;
   ownerNames?: ReadonlyMap<string, string | null>;
+  knowledgeReceipts?: ReadonlyMap<string, FileKnowledgeReceipt>;
 }) {
   return {
     files: page.files.map((file) =>
@@ -253,7 +289,9 @@ export function serializeFilePage(page: {
         file,
         page.shareCounts ? (page.shareCounts.get(file.id) ?? 0) : undefined,
         page.knowledgeIds ? page.knowledgeIds.has(file.id) : undefined,
-        page.ownerNames?.get(file.ownerPrincipalId)
+        page.ownerNames?.get(file.ownerPrincipalId),
+        undefined,
+        page.knowledgeReceipts?.get(file.id)
       )
     ),
     nextCursor: page.nextCursor,

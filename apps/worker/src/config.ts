@@ -14,7 +14,7 @@ import { DEPLOYMENT_BUSINESS_ID } from "@tulipfarm/constants";
  * 136: Live Tool authorization reads the immutable operational principal scope.
  * 138: MCP dispatch recovers durable account authority and native channel destinations.
  */
-export const REQUIRED_SCHEMA_VERSION = 138;
+export const REQUIRED_SCHEMA_VERSION = 139;
 
 export interface WorkerConfig {
   readonly databaseUrl: string;

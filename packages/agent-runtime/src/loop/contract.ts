@@ -355,8 +355,12 @@ export interface LoopAttachmentPort {
   read(runId: string, fileId: string): Promise<Uint8Array | undefined>;
   inspect?(
     mediaType: string,
-    bytes: Uint8Array
-  ): Promise<{ readonly text?: string; readonly visual?: AttachmentVisual }>;
+    bytes: Uint8Array,
+    signal?: AbortSignal
+  ): Promise<
+    | { readonly text?: string; readonly visual?: AttachmentVisual; readonly refusal?: never }
+    | { readonly refusal: string; readonly text?: never; readonly visual?: AttachmentVisual }
+  >;
 }
 
 export interface AgentLoopDependencies {

@@ -1,0 +1,46 @@
+{
+  "id": "l3-reread-pdf-refuses-malformed-replacement",
+  "tier": "l3",
+  "agent": "support",
+  "input": [
+    {
+      "role": "user",
+      "content": "Use file_read to inspect the current scan.pdf File. Stop if its current version cannot be read."
+    }
+  ],
+  "readable": [
+    {
+      "fileId": "pdf-replaced",
+      "mediaType": "application/pdf",
+      "name": "scan.pdf",
+      "pdf": { "variant": "scan", "replaceAfterRead": "malformed" }
+    }
+  ],
+  "platformTools": ["file_read"],
+  "script": [
+    {
+      "kind": "tool_calls",
+      "calls": [
+        { "callId": "read-pdf", "name": "file_read", "arguments": { "fileId": "pdf-replaced" } }
+      ]
+    },
+    { "kind": "text", "text": "The current PDF reached this model call." }
+  ],
+  "expect": [
+    {
+      "kind": "tool_result_field_equals",
+      "name": "file_read",
+      "argumentPath": "fileId",
+      "argumentValue": "pdf-replaced",
+      "status": "succeeded",
+      "outputPath": "attached",
+      "value": true
+    },
+    { "kind": "provider_prompt_omits_file", "fileId": "pdf-replaced" },
+    { "kind": "tool_call_count", "count": 1 },
+    { "kind": "run_status", "status": "succeeded" },
+    { "kind": "state_status", "status": "succeeded" },
+    { "kind": "turn_status", "status": "succeeded" },
+    { "kind": "loop_status", "status": "completed" }
+  ]
+}

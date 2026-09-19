@@ -145,6 +145,9 @@ Vocabulary is binding: [`metadata/terminologies.md` → Offline eval](../../meta
   filename and SDK part kind. `provider_prompt_omits_file` names a File that was either attached or
   explicitly requested through `file_read`; an unattributed provider-native part also fails it, so
   leaked bytes cannot disappear merely because runtime attachments omitted their source.
+- **`provider_prompt_contains` reads the first converted provider request, not model prose.**
+  It requires grounded text and excludes assistant Messages. Both tiers observe the production
+  `splitPrompt` projection; L3 records streaming and non-streaming requests identically.
 - **`tool_batch_replayed` belongs only to the fixed checkpoint fault fixture.** The fixture crashes
   after the first Tool result, retries the same loop input, and compares resumed dispatches with
   the call ids the model actually produced. A model that never makes a multi-call batch leaves the
@@ -266,6 +269,48 @@ fails. An undifferentiated `run_event_emitted guardrail.blocked` cannot express 
 `l3-payment-receipt-never-streams-a-card-number` covers this in the red-team Corpus. Its regression
 test disables only `guardModel` in a scoped spy: the old final-Message guard still passes
 `output_omits`, while the leaked stream fails `run_event_text_omits`.
+
+### Attached Word documents
+
+`l3-support-reads-docx-beyond-preview` puts its grounded claim-window fact in paragraph 401 of a
+real synthetic DOCX. Its `attachments` entry declares `content` and
+`docx: { "precedingParagraphs": 400 }`. The independent fixture writer creates a deterministic
+OOXML archive without using TulipFarm's document writer. The loader requires DOCX media type,
+nonempty content, and an integer prefix from 0 to 1000; this fixture is limited to a single
+L3 Chat Turn, not a journey, Routine, or scripted `file_read`.
+
+The L3 attachment port resolves those bytes and calls the shared `extractText`. The production
+Turn driver screens the result through input Guardrails, then the production prompt splitter
+projects DOCX content as provider text. `provider_prompt_contains` checks the late fact there;
+`provider_prompt_omits_file` rejects an unsupported Office binary part. The model's scripted
+answer cannot satisfy either observation. Ordinary PDF attachment and read-back Cases retain
+their existing fixture behavior.
+
+`src/l3/attachments.test.ts` deliberately removes the late fact **after real extraction**, keeping
+the same script: the provider-text Expectation must fail even while the output Expectation
+passes, then pass with extraction restored. The unmodified Case also fails against the former
+400-block extractor. Another probe puts a known injection after paragraph 400 and requires the
+real input Guardrail to stop it before any provider request.
+
+Three terminal-refusal Cases use `docx: { "variant": "malformed" | "empty" | "entry-limit" }`.
+They generate a truncated OOXML archive, a valid empty document, and a 513-entry archive
+respectively. These variants forbid `content`: inventing document text would falsely ground a
+Case about a document that cannot be read. Each reaches the shared extractor with actual bytes.
+The L3 inspector returns typed ordinary refusals, matching the production host; infrastructure
+errors still throw. The real Turn driver screens filenames before persisting an actionable
+participant reply and completing the State, Turn, and Run.
+
+`model_not_called` measures the invocation boundary directly, including streaming, rather than
+inferring zero calls from missing usage. These Cases have empty scripts and assert that boundary,
+provider binary omission, persisted refusal wording, participant text publication, and successful
+terminal lifecycle. Their wording Expectations explicitly declare the normal `ungrounded`
+exception for deterministic refusal messages, not claims that an unreadable document supplied
+those words. A regression probe restores the old throwing inspector and requires the malformed
+Case to fail, then restores typed refusals and requires all three Cases to pass. A separate probe
+ensures a malicious filename is screened even when extraction refuses.
+
+These Cases change `corpusHash` and retire existing capability Baselines. A maintainer must
+re-promote against the new Corpus; this change does not modify or promote Baseline files.
 
 ### Native Routine admission
 

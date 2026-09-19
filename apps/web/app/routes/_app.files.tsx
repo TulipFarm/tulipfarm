@@ -5,6 +5,7 @@ import { FileList } from "~/components/files/file-list";
 import { FilePreview } from "~/components/files/file-preview";
 import { ShareDialog } from "~/components/files/file-share";
 import { FileUploadDialog } from "~/components/files/file-upload-dialog";
+import { useKnowledgePolling } from "~/components/files/knowledge-status";
 import { ChevronRight, Folder, Pencil, Plus, Search, Trash2, Upload } from "~/components/icons";
 import { PageShell } from "~/components/page-shell";
 import { ErrorState } from "~/components/states";
@@ -21,9 +22,12 @@ import {
   deleteFileFolder,
   type FileFolder,
   fetchArchivedFiles,
+  fetchFile,
   fetchFileFolders,
   fetchFiles,
   fetchSharedWithMe,
+  isKnowledgePending,
+  isKnowledgeRequested,
   type LibraryFile,
   moveFile,
   removeFileFromKnowledge,
@@ -115,7 +119,15 @@ export default function FilesIndex() {
   const [moving, setMoving] = useState<LibraryFile | null>(null);
   const [autoPages, setAutoPages] = useState(0);
   const searchRequest = useRef(0);
+  const mutationLock = useRef(false);
+  const lifetime = useRef<AbortController | null>(null);
   const searchId = useId();
+
+  useEffect(() => {
+    const controller = new AbortController();
+    lifetime.current = controller;
+    return () => controller.abort();
+  }, []);
 
   useEffect(() => {
     const trimmed = query.trim();
@@ -205,6 +217,14 @@ export default function FilesIndex() {
     currentFolderId,
   ]);
 
+  const cancelPolling = useKnowledgePolling(
+    files,
+    updateFile,
+    setError,
+    indexing !== null || mutating,
+    `${tab}:${query}:${currentFolderId}`
+  );
+
   async function removeFolder(folder: FileFolder) {
     setFolderError(null);
     try {
@@ -260,6 +280,10 @@ export default function FilesIndex() {
     setSearchResults(
       (current) => current?.map((file) => (file.id === next.id ? next : file)) ?? null
     );
+    setPreviewing((current) => (current?.id === next.id ? next : current));
+    setSharing((current) =>
+      current?.id === next.id ? (next.canManage && !next.archivedAt ? next : null) : current
+    );
   }
 
   async function loadMore() {
@@ -297,29 +321,61 @@ export default function FilesIndex() {
     }
   }
 
-  async function toggleKnowledge(file: LibraryFile): Promise<void> {
-    if (indexing !== null) return;
-    const adding = !file.inKnowledge;
+  async function toggleKnowledge(file: LibraryFile, refresh = false): Promise<void> {
+    if (mutationLock.current || !file.canManage || file.archivedAt) return;
+    if (refresh && (!isKnowledgeRequested(file) || isKnowledgePending(file))) return;
+    mutationLock.current = true;
+    cancelPolling();
+    const adding = refresh || !isKnowledgeRequested(file);
     setIndexing(file.id);
     setError(null);
-    updateFile({ ...file, inKnowledge: adding });
+    const signal = lifetime.current?.signal;
     try {
       if (adding) await addFileToKnowledge(file.id);
       else await removeFileFromKnowledge(file.id);
-    } catch (err) {
-      updateFile({ ...file, inKnowledge: !adding });
-      setError(err instanceof Error ? err.message : "That file could not be changed.");
+      if (signal?.aborted) return;
+      updateFile({
+        ...file,
+        inKnowledge: adding ? file.inKnowledge : null,
+        knowledgeRequested: null,
+        knowledgeReceipt: null,
+      });
+      try {
+        const next = await fetchFile(file.id, signal);
+        if (!signal?.aborted) updateFile(next);
+      } catch {
+        if (!signal?.aborted) {
+          setError(
+            "File metadata could not be loaded. Reload the page to check the latest result."
+          );
+        }
+      }
+    } catch {
+      if (!signal?.aborted) setError("Knowledge could not be changed. Try again.");
     } finally {
-      setIndexing(null);
+      if (!signal?.aborted) {
+        mutationLock.current = false;
+        setIndexing(null);
+      }
     }
   }
 
   async function confirmArchive() {
-    if (!archiving) return;
+    if (!archiving || mutationLock.current) return;
+    mutationLock.current = true;
+    cancelPolling();
     setMutating(true);
     setError(null);
     try {
-      const archived = await archiveFile(archiving.id, archiving.revision ?? 1);
+      const changed = await archiveFile(archiving.id, archiving.revision ?? 1);
+      if (lifetime.current?.signal.aborted) return;
+      const archived = {
+        ...changed,
+        canManage: archiving.canManage,
+        inKnowledge: null,
+        knowledgeRequested: null,
+        knowledgeReceipt: null,
+      };
       setSources((current) => ({
         mine: current.mine.filter((file) => file.id !== archiving.id),
         shared: current.shared,
@@ -327,36 +383,55 @@ export default function FilesIndex() {
       }));
       setSearchResults((current) => current?.filter((file) => file.id !== archiving.id) ?? null);
       setArchiving(null);
+      setPreviewing(null);
+      await reloadMetadata(archiving.id);
     } catch (err) {
       setError(err instanceof Error ? err.message : "That file could not be moved to the trash.");
     } finally {
+      mutationLock.current = false;
       setMutating(false);
     }
   }
 
   async function restore(file: LibraryFile) {
+    if (mutationLock.current) return;
+    mutationLock.current = true;
+    cancelPolling();
     setMutating(true);
     setError(null);
     try {
-      const restored = await restoreArchivedFile(file.id, file.revision ?? 1);
+      const changed = await restoreArchivedFile(file.id, file.revision ?? 1);
+      if (lifetime.current?.signal.aborted) return;
+      const restored = {
+        ...changed,
+        canManage: file.canManage,
+        inKnowledge: null,
+        knowledgeRequested: null,
+        knowledgeReceipt: null,
+      };
       setSources((current) => ({
         mine: mergeFiles([restored], current.mine),
         shared: current.shared,
         archived: current.archived.filter((entry) => entry.id !== file.id),
       }));
+      await reloadMetadata(file.id);
     } catch (err) {
       setError(err instanceof Error ? err.message : "That file could not be restored.");
     } finally {
+      mutationLock.current = false;
       setMutating(false);
     }
   }
 
   async function confirmDelete() {
-    if (!deleting) return;
+    if (!deleting || mutationLock.current) return;
+    mutationLock.current = true;
+    cancelPolling();
     setMutating(true);
     setError(null);
     try {
       await deleteFile(deleting.id, deleting.revision ?? 1);
+      if (lifetime.current?.signal.aborted) return;
       setSources((current) => ({
         ...current,
         archived: current.archived.filter((file) => file.id !== deleting.id),
@@ -365,7 +440,19 @@ export default function FilesIndex() {
     } catch (err) {
       setError(err instanceof Error ? err.message : "That file could not be deleted.");
     } finally {
+      mutationLock.current = false;
       setMutating(false);
+    }
+  }
+
+  async function reloadMetadata(fileId: string) {
+    try {
+      const next = await fetchFile(fileId, lifetime.current?.signal);
+      if (!lifetime.current?.signal.aborted) updateFile(next);
+    } catch {
+      if (!lifetime.current?.signal.aborted) {
+        setError("File metadata could not be loaded. Reload the page to check the latest result.");
+      }
     }
   }
 
@@ -564,6 +651,8 @@ export default function FilesIndex() {
             onAttach={(file) => navigate(`/?attach=${encodeURIComponent(file.id)}`)}
             onShare={setSharing}
             onKnowledge={(file) => void toggleKnowledge(file)}
+            onRefreshKnowledge={(file) => void toggleKnowledge(file, true)}
+            knowledgeBusy={indexing !== null || mutating}
             onArchive={setArchiving}
             onMove={setMoving}
             onRestore={(file) => void restore(file)}
@@ -622,10 +711,20 @@ export default function FilesIndex() {
         folders={folders}
         onClose={() => setMoving(null)}
         onMove={async (folderId) => {
-          if (!moving) return;
-          const moved = await moveFile(moving.id, folderId, moving.revision ?? 1);
-          updateFile(moved);
-          setMoving(null);
+          if (!moving || mutationLock.current) return;
+          mutationLock.current = true;
+          cancelPolling();
+          setMutating(true);
+          try {
+            const moved = await moveFile(moving.id, folderId, moving.revision ?? 1);
+            if (lifetime.current?.signal.aborted) return;
+            updateFile({ ...moving, ...moved });
+            setMoving(null);
+            await reloadMetadata(moving.id);
+          } finally {
+            mutationLock.current = false;
+            setMutating(false);
+          }
         }}
       />
       <ShareDialog file={sharing} onClose={() => setSharing(null)} />

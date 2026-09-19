@@ -35,10 +35,12 @@ data loading, schema-driven resource UI, and browser rendering of Surface Artifa
 | `app/components/chat/integration-accounts.tsx` | Exact persisted Chat account identity and explicit shared-use confirmation; local selection never grants authority or substitutes another account. |
 | `app/components/ui/` | Vendored shadcn primitives for this app only, plus `combobox.tsx` — hand-rolled, because `cmdk` forces its own input `id` and breaks `<label htmlFor>`. `select.tsx` is a thin native `<select>` wrapper; deprecated (see Rules), kept only until its 16 existing callers migrate. |
 | `app/lib/api.ts` | API client with cookies, CSRF header, optional bearer token, `ApiError`. |
+| `app/components/files/knowledge-status.tsx` | File Knowledge request states and previous-result labels; 202 acceptance never means indexed content. |
 | `app/lib/schema.ts` | JSON-Schema field detection, list/detail/form metadata, value rendering, shared formatters. |
 | `app/lib/resource-catalog.ts` | Joins types with record totals; derives the two-way link graph. |
 | `app/lib/routines/` | `graph.ts` projects the canvas, `facts.ts` derives every stated fact, `dry-run.ts` drives `analyze`. |
 | `app/lib/chat/`, `app/lib/surface/` | Chat SSE types/parser/reducer; Surface Protocol browser integration. |
+| `app/components/files/docx-preview*`, `docx-semantic-preview.tsx` | Shared local Office semantic preview: XLSX grids plus DOCX/PPTX fallback, cancellable dedicated WASM Worker, safe React rendering. |
 | `app/lib/chat/launch.ts` | Typed history-state handoff for a one-shot first Chat message; no source bodies in query strings. |
 | `app/lib/agents.ts`, `app/lib/skills.ts` | Typed API wrappers; `agent-capabilities.ts` and `skill-facts.ts` derive reach, capability facts, and grouping from declared frontmatter. |
 | `app/lib/activity-feed.ts` | Interleaves the Activity log and Runs feeds into one newest-first timeline. |
@@ -47,6 +49,7 @@ data loading, schema-driven resource UI, and browser rendering of Surface Artifa
 | `app/lib/kill-switches.ts` | Emergency-stop client; scope picker comes from the API's enforceable list. |
 | `vite.config.ts`, `vitest.config.ts`, `components.json` | SPA Remix/Vite, jsdom Vitest, shadcn. |
 | `scripts/` | Post-build steps, in order: app-shell modulepreload injection, CSP hashing, precompression. |
+| `scripts/browser/` | Isolated Playwright checks of the actual built Office worker/WASM under production CSP; independent synthetic DOCX/XLSX/PPTX, no running instance or DB. |
 
 ## Rules
 
@@ -56,7 +59,10 @@ data loading, schema-driven resource UI, and browser rendering of Surface Artifa
   the work after `setState`. Read the current value from a ref when the decision needs it.
 
 - **Documents render in the tab, never through a hosted viewer.** `files/office-embed.tsx` draws
-  `.docx`/`.pptx` at full fidelity (lazily imported, falling back to `office-preview`'s outline).
+  `.docx`/`.pptx` with the existing rich viewers (lazily imported). Word falls back to local
+  AnyDoc WASM in a terminable Worker, as does PowerPoint. XLSX uses that same semantic grid path.
+  Bounded semantic previews are not page-faithful or full extraction; never render their
+  external assets/links as fetching elements or transfer the caller's original bytes.
   A hosted viewer — `gview`, Office Online — cannot reach a self-hosted instance, needs the File
   publicly downloadable, and ships private documents off the box. See that file's TSDoc.
 
