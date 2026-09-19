@@ -9,7 +9,8 @@
     "./office-preview": "./src/office-preview.ts",
     "./document-preview": "./src/document-preview.ts",
     "./delimited-preview": "./src/delimited-preview.ts",
-    "./test-fixtures/pdf": "./src/pdf-fixture.test-support.ts"
+    "./test-fixtures/pdf": "./src/pdf-fixture.test-support.ts",
+    "./test-fixtures/office": "./src/office-fixture.test-support.ts"
   },
   "scripts": {
     "lint": "biome check --no-errors-on-unmatched .",

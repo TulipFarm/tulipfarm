@@ -1,11 +1,7 @@
 import { PPTX_MEDIA_TYPE, XLSX_MEDIA_TYPE } from "@tulipfarm/files/document-preview";
+import { externalPptx, externalXlsx } from "@tulipfarm/files/test-fixtures/office";
 import { describe, expect, it, vi } from "vitest";
 import { type FileIndexDeps, handleFileIndexJob } from "./file-index";
-
-const { externalPptx, externalXlsx }: Record<"externalPptx" | "externalXlsx", () => Uint8Array> =
-  await import(
-    new URL("../../../../packages/files/src/office-fixture.test-support.ts", import.meta.url).href
-  );
 
 const job = {
   fileId: "office-file",

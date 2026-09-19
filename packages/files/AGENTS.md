@@ -23,7 +23,7 @@ an **Artifact** is a different entity, in `packages/storage`.
 | `src/document-runner.ts` · `src/document-child.ts` | Private local AnyDoc child: two active, 32 pending, 10-second deadline; terminate and reap on abort/shutdown. |
 | `test-fixtures/pdf` | Test-only package subpath for independent real text, image-page, mixed, malformed, and password-encrypted PDF fixtures; never import from production code. |
 | `src/office-preview.ts` · `src/delimited-preview.ts` | Shared semantic display types/caps and the unchanged CSV grid reader; no handwritten OOXML readers |
-| `src/office-fixture.test-support.ts` | Independent XLSX/PPTX OOXML fixtures shared with browser, Knowledge and real-Turn tests |
+| `test-fixtures/office` · `src/office-fixture.test-support.ts` | Test-only package subpath for independent XLSX/PPTX OOXML fixtures shared with browser, Knowledge and real-Turn tests; never import from production code. |
 | `src/render.ts` | Markdown → PDF, safe structured-text validation/serialization, pass-through formats, and render bounds |
 | `src/turn-attachments.ts` | Which Files a Turn may send, and the two-gate read of their bytes |
 | `src/tools.ts` | `file_list` / `file_read` / `file_create` — the whole Agent-facing surface |
