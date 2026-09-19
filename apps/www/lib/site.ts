@@ -7,6 +7,6 @@ export const siteHeadline = "Your business. Built in chat.";
 export const siteDescription =
   "Build your business operations through chat, then let agents run the work. Self-hosted, with your infrastructure and model providers.";
 
-export function docsUrl(path = "/docs"): string {
+export function docsUrl(path = "/"): string {
   return new URL(path, DOCS_URL).href;
 }

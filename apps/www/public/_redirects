@@ -1,7 +1,7 @@
-# Keep documentation pathnames; fragments are carried by the browser across the redirect.
-/docs https://docs.tulipfarm.site/docs 301
-/docs.html https://docs.tulipfarm.site/docs 301
-/docs/* https://docs.tulipfarm.site/docs/:splat 301
+# Reading pages lose /docs; browsers retain fragments and machine paths stay unchanged.
+/docs https://docs.tulipfarm.site/ 301
+/docs.html https://docs.tulipfarm.site/ 301
+/docs/* https://docs.tulipfarm.site/:splat 301
 /api/search https://docs.tulipfarm.site/api/search 301
 /api/search/* https://docs.tulipfarm.site/api/search/:splat 301
 /og/docs/* https://docs.tulipfarm.site/og/docs/:splat 301

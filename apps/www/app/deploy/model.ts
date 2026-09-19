@@ -140,7 +140,7 @@ export function stepAnchor(title: string): string {
 
 /** The generated self-hosting page for a target, optionally deep-linked to one step's full prose. */
 export function targetDocHref(target: WizardTarget, step?: WizardStep): string {
-  const base = `${DOCS_URL}/docs/self-hosting/${target.name}`;
+  const base = `${DOCS_URL}/self-hosting/${target.name}`;
   return step ? `${base}#${stepAnchor(step.title)}` : base;
 }
 

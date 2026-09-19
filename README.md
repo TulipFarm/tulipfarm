@@ -17,7 +17,7 @@
 </p>
 
 <p align="center">
-  <a href="https://docs.tulipfarm.site/docs">Documentation</a> ·
+  <a href="https://docs.tulipfarm.site/">Documentation</a> ·
   <a href="#install-self-host">Install</a> ·
   <a href="#features">Features</a> ·
   <a href="#architecture">Architecture</a> ·
@@ -34,7 +34,7 @@ not configure it by editing files or writing code.
 It runs entirely on your own infrastructure, against your own model provider keys. Agents send business data only through authorized actions. The instance also sends a one-time
 bootstrap report and optional daily product telemetry. Choose the sharing level during setup
 or in Settings → Telemetry; Level 0 keeps only the mandatory bootstrap report. See
-[product telemetry](https://docs.tulipfarm.site/docs/security/telemetry) for the exact categories.
+[product telemetry](https://docs.tulipfarm.site/security/telemetry) for the exact categories.
 
 ## Features
 
@@ -52,8 +52,8 @@ Once a model is configured, everything below is created by asking for it in chat
 - **Integrations** — reach your agents where work already happens: GitHub, Slack, and Google
   Workspace ship in the box, and any provider can be added as a manifest.
 
-See the [full documentation](https://docs.tulipfarm.site/docs) for a guided tour, or
-[Using TulipFarm](https://docs.tulipfarm.site/docs/using-tulipfarm) for how these fit together.
+See the [full documentation](https://docs.tulipfarm.site/) for a guided tour, or
+[Using TulipFarm](https://docs.tulipfarm.site/using-tulipfarm) for how these fit together.
 
 ## Architecture
 
@@ -103,7 +103,7 @@ Verifies WSL2 + a distro, then runs the Linux installer inside WSL.
 Overrides (env vars): `TF_VERSION` (image tag, default `latest`), `TF_PORT` (default
 `8080`), `TF_INSTALL_DIR` (default `/opt/tulipfarm`), `TF_RUNTIME` (`docker`|`podman`),
 `TF_BASE_URL`/`TF_REF`. See the
-[installation guide](https://docs.tulipfarm.site/docs/self-hosting/install) for every option.
+[installation guide](https://docs.tulipfarm.site/self-hosting/install) for every option.
 An explicit `TF_PORT` also moves an existing install to that host port without rotating
 its generated secrets.
 
@@ -123,7 +123,7 @@ command, or `docker compose pull && docker compose up -d && docker image prune -
 trailing prune reclaims the image the update replaced; skipping it leaves an orphaned
 ~1.8 GB on disk every time. Database migrations run automatically on boot; there are **no
 down-migrations**, so back up before updating. See the
-[update guide](https://docs.tulipfarm.site/docs/self-hosting/updating) for the full procedure and
+[update guide](https://docs.tulipfarm.site/self-hosting/updating) for the full procedure and
 every deployment target.
 
 **Uninstall permanently** (deletes the database, soul, secrets, backups, volumes, and
@@ -131,7 +131,7 @@ TulipFarm images after a typed confirmation):
 ```bash
 curl -fsSL https://tulipfarm.site/uninstall.sh | bash
 ```
-See the [uninstall guide](https://docs.tulipfarm.site/docs/self-hosting/uninstall) before running it.
+See the [uninstall guide](https://docs.tulipfarm.site/self-hosting/uninstall) before running it.
 
 > You never need to clone this repository to run TulipFarm — every path above pulls a
 > published image. The source tree here is for contributors — see
@@ -147,7 +147,7 @@ See the [uninstall guide](https://docs.tulipfarm.site/docs/self-hosting/uninstal
 - Secrets (integration credentials, API keys) are stored encrypted and only decrypted
   immediately before an authorized use — see
   [`packages/secrets`](packages/secrets/AGENTS.md) and the
-  [security docs](https://docs.tulipfarm.site/docs/security).
+  [security docs](https://docs.tulipfarm.site/security).
 - Found a vulnerability? See [SECURITY.md](SECURITY.md) — please don't file a public issue.
 
 ## Contributing

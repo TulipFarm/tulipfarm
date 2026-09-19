@@ -8,14 +8,14 @@ export const metadata: Metadata = {
   title: { template: `%s | ${appName}`, default: appName },
 };
 
-export default function Layout({ children }: LayoutProps<"/docs">) {
+export default function Layout({ children }: LayoutProps<"/">) {
   return (
     <DocsLayout
       tree={source.getPageTree()}
       {...baseOptions()}
       links={[
         { text: "Website", url: SITE_URL, external: true },
-        { text: "install", url: "/docs/self-hosting/install" },
+        { text: "install", url: "/self-hosting/install" },
       ]}
       sidebar={{
         footer: (

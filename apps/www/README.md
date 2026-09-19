@@ -1,7 +1,7 @@
 # @tulipfarm/www
 
 TulipFarm's static public website at **https://tulipfarm.site**. Documentation is a separate
-application at **https://docs.tulipfarm.site/docs**. This application owns the homepage, prepared
+application at **https://docs.tulipfarm.site/**. This application owns the homepage, prepared
 browser-only examples, `/deploy`, installer downloads, deployment assets, and published schemas.
 No running product instance, database, model credentials, or Next.js server is needed.
 
@@ -89,10 +89,13 @@ Copies are byte-identical to their sources. `.env.example` is served as `env.exa
 Pages does not serve dot-prefixed files. `_headers` keeps scripts and deployment text readable as
 UTF-8 and schemas as JSON. Do not move downloads to the documentation origin or retype their contents.
 
-`public/_redirects` permanently redirects `/docs` and its suffixes, `/api/search`, `/og/docs/*`,
-`/llms.txt`, `/llms-full.txt`, and `/llms.mdx/*` to the documentation origin. The path suffix is
-retained. Browser fragments are inherited when the redirect target has no fragment, preserving
-bookmarks to headings. Unknown paths are not rewritten to the homepage.
+`public/_redirects` permanently redirects legacy `/docs` and `/docs.html` to the documentation
+origin's `/`, and `/docs/*` to `/*` there. Reading links use `/self-hosting/...`,
+`/administration/...`, `/using-tulipfarm/...`, `/reference/...`, and `/security/...` without a
+`/docs` prefix. `/api/search`, `/og/docs/*`, `/llms.txt`, `/llms-full.txt`, and `/llms.mdx/*`
+redirect to the documentation origin with their paths unchanged. Browser fragments are inherited
+when the redirect target has no fragment, preserving bookmarks to headings. Unknown paths are not
+rewritten to the homepage.
 
 ## Cloudflare Pages
 

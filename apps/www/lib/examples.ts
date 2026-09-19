@@ -39,7 +39,7 @@ export const customerExample: BusinessExample = {
   request:
     "Build a customer tracker with company, contact, status, and next action. Add a sample customer so I can see how it works.",
   resultNote: "Your fields. Your records. On your infrastructure.",
-  docsPath: "/docs/using-tulipfarm/resources",
+  docsPath: "/using-tulipfarm/resources",
   steps: [
     {
       label: "Describe",
@@ -99,7 +99,7 @@ export const supportExample: BusinessExample = {
   request:
     "Create a ticket tracker, then a support agent that can read and update tickets. It should leave refunds for a person to review.",
   resultNote: "Refund decisions stay with your team.",
-  docsPath: "/docs/using-tulipfarm/agents",
+  docsPath: "/using-tulipfarm/agents",
   steps: [
     {
       label: "Describe",
@@ -154,7 +154,7 @@ const routineExample: BusinessExample = {
   request:
     "Create a daily routine that asks our support agent to review open tickets and summarize what needs attention.",
   resultNote: "Review the summary. Inspect the run.",
-  docsPath: "/docs/using-tulipfarm/routines",
+  docsPath: "/using-tulipfarm/routines",
   steps: [
     {
       label: "Describe",

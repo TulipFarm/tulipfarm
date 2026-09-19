@@ -71,10 +71,10 @@ Seeding is idempotent. Once any user exists it does nothing, so re-running your 
 <Callout type="info">
   Headless seeding handles API-key providers only. A Claude or ChatGPT subscription needs an
   interactive browser sign-in, so those are configured afterwards. See
-  [run on a subscription](/docs/administration/run-on-a-subscription).
+  [run on a subscription](/administration/run-on-a-subscription).
 </Callout>
 
-The step-by-step is in [headless setup](/docs/self-hosting/headless).
+The step-by-step is in [headless setup](/self-hosting/headless).
 
 ## Why the marker lives in two places
 
@@ -89,7 +89,7 @@ secrets, and identity are all lost, **even if the soul survives perfectly**. The
 configuration, not your data.
 
 This is the single most important thing to understand before you design a backup:
-[back up and restore](/docs/self-hosting/back-up-and-restore) covers what to actually copy.
+[back up and restore](/self-hosting/back-up-and-restore) covers what to actually copy.
 
 ## Installation identity
 
@@ -113,7 +113,7 @@ stored association. Restore the matching configuration and database instead of d
 identity row.
 
 Runtime identity is separate from the anonymous identifier used for product telemetry. This
-does not change the [telemetry policy](/docs/security/telemetry).
+does not change the [telemetry policy](/security/telemetry).
 
 ## Explicit hosted configuration
 
@@ -167,7 +167,7 @@ not enable editing. These checks do not enable production hosting or a managed-s
 
 Business restrictions can tighten supported guardrails, the checks that limit agent behavior.
 They cannot replace hosted platform minimums with weaker settings. See
-[guardrails](/docs/administration/how-guardrails-work#platform-minimums) for the effective policy
+[guardrails](/administration/how-guardrails-work#platform-minimums) for the effective policy
 and the supported way to add restrictions.
 
 ### What the shared release proves
@@ -198,12 +198,12 @@ managed connection.
 <Cards>
   <Card
     title="First-run setup"
-    href="/docs/administration/first-run-setup"
+    href="/administration/first-run-setup"
     description="What you actually click through on a fresh instance."
   />
   <Card
     title="Headless setup"
-    href="/docs/self-hosting/headless"
+    href="/self-hosting/headless"
     description="The environment variables, and what a full seed needs."
   />
 </Cards>

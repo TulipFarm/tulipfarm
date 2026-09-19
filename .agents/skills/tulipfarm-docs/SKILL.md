@@ -33,7 +33,7 @@ came for.
 
 - **No page under `using-tulipfarm/` may require admin access.** Check the capability against
   `apps/api/src/identity/roles.ts` — `ADMIN_ONLY_SURFACES` versus `MEMBER_ALLOWED_SURFACES`.
-- Never name the reader. No "if you are an admin", no "for business owners". The `/docs` chooser
+- Never name the reader. No "if you are an admin", no "for business owners". The documentation index
   sorts people; prose does not.
 - Never tell a reader to hand-edit the Soul — no `mkdir`, `cat > schema.yml`, git commands or
   restarts. If the product path cannot do it, that is a product gap, not a docs workaround.

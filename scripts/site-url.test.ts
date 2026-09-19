@@ -113,20 +113,23 @@ describe("published install assets", () => {
 describe("public site ownership", () => {
   it("redirects legacy reading surfaces permanently to the documentation origin", () => {
     const rules = readFileSync(join(ROOT, "apps/www/public/_redirects"), "utf8");
-    for (const path of ["/docs", "/api/search", "/llms.txt", "/llms-full.txt"]) {
+    for (const path of ["/api/search", "/llms.txt", "/llms-full.txt"]) {
       expect(rules).toContain(`${path} ${DOCS_URL}${path} 301`);
     }
-    for (const path of ["/docs", "/og/docs", "/llms.mdx"]) {
+    for (const path of ["/api/search", "/og/docs", "/llms.mdx"]) {
       expect(rules).toContain(`${path}/* ${DOCS_URL}${path}/:splat 301`);
     }
-    expect(rules).toContain(`/docs.html ${DOCS_URL}/docs 301`);
+    expect(rules).toContain(`/docs ${DOCS_URL}/ 301`);
+    expect(rules).toContain(`/docs.html ${DOCS_URL}/ 301`);
+    expect(rules).toContain(`/docs/* ${DOCS_URL}/:splat 301`);
     expect(rules).not.toMatch(/^\/\*\s/m);
   });
 
-  it("leads the docs root to its index without redirecting documentation back to marketing", () => {
+  it("removes the legacy docs prefix without redirecting reading pages back to marketing", () => {
     const rules = readFileSync(join(ROOT, "apps/docs/public/_redirects"), "utf8");
-    expect(rules).toMatch(/^\/ \/docs 301$/m);
-    expect(rules).not.toMatch(/^\/docs(?:\/|\s)/m);
+    expect(rules).toMatch(/^\/docs \/ 301$/m);
+    expect(rules).toMatch(/^\/docs\/\* \/:splat 301$/m);
+    expect(rules).not.toMatch(/^\/\s/m);
     expect(rules).not.toMatch(/^\/\*\s/m);
     for (const path of Object.keys(PUBLIC_ASSETS)) {
       expect(rules).toContain(`/${path} ${SITE_URL}/${path} 301`);

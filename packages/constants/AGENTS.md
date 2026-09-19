@@ -19,4 +19,5 @@ Shared, environment-aware, non-sensitive constants and process-wide defaults.
 
 - Env-aware constants follow `export const X = process.env.X ?? "<default>";`.
 - No secrets here. This package holds build-visible, non-sensitive defaults only.
+- `DOCS_URL` serves reading pages at `/`, without a `/docs` prefix; machine and image paths stay unchanged.
 - `DEPLOYMENT_BUSINESS_ID` must stay shared by API and worker; an app may not import another app.

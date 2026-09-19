@@ -7,12 +7,12 @@ TulipFarm can run on a **Claude Pro/Max** or **ChatGPT Plus/Pro/Business** plan 
 with no LLM API key and no per-token bill. Instead of calling a hosted endpoint, TulipFarm spawns
 the vendor's coding-agent CLI and uses it as a model.
 
-Like [Configure LLM providers](/docs/administration/configure-llm-providers), this is UI-first rather than
+Like [Configure LLM providers](/administration/configure-llm-providers), this is UI-first rather than
 prompt-first: provider credentials are set by admins in **Operate**, not by chat. The one difference
 is that the credential is **minted in a terminal** rather than copied from a billing dashboard.
 
 For what these providers are and how they behave at routing time, see
-[Model routing](/docs/administration/how-model-routing-works#subscription-providers).
+[Model routing](/administration/how-model-routing-works#subscription-providers).
 
 ## Before you start
 
@@ -106,7 +106,7 @@ Then ask for something that needs a tool, so you can confirm the governance path
 Create a customer record for Acme Corp with the email ops@acme.example.
 ```
 
-An [approval](/docs/using-tulipfarm/approvals)-gated tool must still park the turn and wait for a human.
+An [approval](/using-tulipfarm/approvals)-gated tool must still park the turn and wait for a human.
 If it does, the tool Broker is running the effect, which is the point: the CLI itself never
 executes a tool, it only proposes them.
 
@@ -125,7 +125,7 @@ the file again.
 key.
 
 <Callout type="info">
-Subscription providers cannot be seeded by [headless bootstrap](/docs/administration/first-run-setup#headless-mode).
+Subscription providers cannot be seeded by [headless bootstrap](/administration/first-run-setup#headless-mode).
 `LLM_PROVIDER` accepts `anthropic` and `openai` only, because minting a plan credential needs an
 interactive browser sign-in. Configure them in the wizard or in **Operate → Business → Secrets**.
 </Callout>

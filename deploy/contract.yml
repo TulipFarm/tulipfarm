@@ -358,7 +358,7 @@ env:
     consequence: Unknown non-empty values fail startup. `tulipfarm` requires an installation UUID
       and trusted hosted identity verification, which is unavailable in production in this release;
       it never falls back to independent setup. A stored hosting association cannot be replaced
-      by changing this value. See [boot modes](/docs/self-hosting/how-boot-modes-work#explicit-hosted-configuration).
+      by changing this value. See [boot modes](/self-hosting/how-boot-modes-work#explicit-hosted-configuration).
   - name: SOUL_BUNDLE_RETENTION_DAYS
     group: Soul and git
     zone: set-these

@@ -51,14 +51,14 @@ source files, passwords, API keys, and Integration credentials. Custom names and
 repository paths can still identify business activities.
 
 Product telemetry is separate from the logs and traces available in
-[observability](/docs/administration/observability). It does not forward those logs or traces.
+[observability](/administration/observability). It does not forward those logs or traces.
 
 ## Deployment controls
 
 `TULIPFARM_TELEMETRY_LEVEL` sets the maximum sharing level allowed by the deployment. A value of
 `0` permits only bootstrap reporting; settings cannot raise the level above this maximum.
 `TULIPFARM_TELEMETRY_URL` selects the HTTPS collector endpoint. See the
-[environment variable reference](/docs/reference/environment-variables).
+[environment variable reference](/reference/environment-variables).
 
 Reporting runs through the maintenance Worker. Custom deployments need at least one Worker
 with `WORKER_MAINTENANCE=true`; the provided Compose deployment enables it.

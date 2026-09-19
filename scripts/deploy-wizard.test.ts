@@ -217,10 +217,11 @@ describe("deploy wizard — the static-hosting guarantees", () => {
 
   it("links full guides and step anchors directly to the documentation origin", () => {
     for (const target of model.targets) {
-      expect(targetDocHref(target)).toBe(`${DOCS_URL}/docs/self-hosting/${target.name}`);
+      expect(targetDocHref(target)).toBe(`${DOCS_URL}/self-hosting/${target.name}`);
       for (const step of target.steps) {
         const url = new URL(targetDocHref(target, step));
         expect(url.origin).toBe(DOCS_URL);
+        expect(url.pathname).toBe(`/self-hosting/${target.name}`);
         expect(url.hash.length).toBeGreaterThan(1);
       }
     }

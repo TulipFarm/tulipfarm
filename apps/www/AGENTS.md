@@ -44,6 +44,7 @@ for Cloudflare Pages, not a Next.js server or Worker.
 - Setup controls stay disabled before hydration. Static recovery links and the copyable prompt
   remain readable without scripts; clipboard failures show a visible manual-copy instruction.
 - Use relative website navigation and absolute docs links. Installers stay on the website origin.
+- Reading links start at the docs origin's `/`, not `/docs`; keep `/llms.mdx/docs/*` and `/og/docs/*` stable.
 - Import icons through `components/icons.tsx`, using individual `reicon-react/icons/*` entrypoints.
 
 See [README](README.md) for Cloudflare Pages build and cutover requirements.

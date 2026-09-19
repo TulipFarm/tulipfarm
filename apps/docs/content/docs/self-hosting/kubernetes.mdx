@@ -40,7 +40,7 @@ curl -fsSLO {{SITE_URL}}/kubernetes-values.yaml
 
 > **Verify.** `kubernetes-values.yaml` is now in the working directory.
 
-If that check fails, see [what to do next](/docs/self-hosting/when-install-fails#download).
+If that check fails, see [what to do next](/self-hosting/when-install-fails#download).
 
 ## Create a namespace
 
@@ -68,7 +68,7 @@ kubectl -n tulipfarm create secret generic tulipfarm-database \
 
 A cluster rarely wants a bundled database, which is why the generated values default
 `dependencies.postgres.external` to `true`. Full extension and permission detail:
-[Use a managed database](/docs/self-hosting/managed-database).
+[Use a managed database](/self-hosting/managed-database).
 
 > **Verify.** `kubectl -n tulipfarm get secret tulipfarm-database` succeeds, expect the DATABASE_URL secret exists.
 
@@ -87,7 +87,7 @@ kubectl -n tulipfarm create secret generic tulipfarm-database \
 ```
 
 The provider-by-provider extension notes live in
-[Use a managed database](/docs/self-hosting/managed-database).
+[Use a managed database](/self-hosting/managed-database).
 
 > **Verify.** `kubectl -n tulipfarm get secret tulipfarm-database` succeeds, expect the DATABASE_URL secret exists.
 
@@ -200,7 +200,7 @@ kubectl -n tulipfarm rollout status deployment/app --timeout=600s
 
 > **Verify.** `kubectl -n tulipfarm rollout status deployment/app --timeout=600s` succeeds, expect the app deployment finishes rolling out.
 
-If that check fails, see [what to do next](/docs/self-hosting/when-install-fails#readyz).
+If that check fails, see [what to do next](/self-hosting/when-install-fails#readyz).
 
 ## Confirm the app is ready
 
@@ -213,7 +213,7 @@ kubectl -n tulipfarm port-forward svc/app 8080:8080 &
 
 > **Verify.** `http://localhost:8080/readyz` answers `200` within 300s.
 
-If that check fails, see [what to do next](/docs/self-hosting/when-install-fails#readyz).
+If that check fails, see [what to do next](/self-hosting/when-install-fails#readyz).
 
 ## Expose the app through Ingress
 
@@ -236,7 +236,7 @@ the address at boot; you can change it later under **Business → About** withou
 ## Seed the first admin without a browser
 
 Most cluster workflows have no browser at first boot. Use
-[headless seeding](/docs/self-hosting/headless): set `ADMIN_EMAIL`, `ADMIN_PASSWORD`, and
+[headless seeding](/self-hosting/headless): set `ADMIN_EMAIL`, `ADMIN_PASSWORD`, and
 `LLM_API_KEY` together on `app`, and the instance seeds itself and skips the setup wizard.
 
 > **Check.** You can sign in with the ADMIN_EMAIL and ADMIN_PASSWORD you seeded, with no wizard shown.
@@ -251,7 +251,7 @@ Three things must survive a cluster rebuild, and restoring only one is not enoug
 - **The soul** at `SOUL_PATH` stores your entire configuration, unless it is mirrored to a git
   remote with `SOUL_GIT_REMOTE_URL`.
 
-See [Updating and rollback](/docs/self-hosting/updating) before your first upgrade.
+See [Updating and rollback](/self-hosting/updating) before your first upgrade.
 
 > **Check.** A restore drill brings the instance back with its secrets decryptable, with the database, encryption key, and soul all restored together.
 
@@ -259,7 +259,7 @@ See [Updating and rollback](/docs/self-hosting/updating) before your first upgra
 
 Pin one image tag in `image.tag`; do not track a moving tag in a cluster. Migrations apply
 automatically on boot and there are **no down-migrations**. Read
-[Updating and rollback](/docs/self-hosting/updating) before your first upgrade.
+[Updating and rollback](/self-hosting/updating) before your first upgrade.
 
 ```bash
 helm upgrade tulipfarm ./your-chart -n tulipfarm -f kubernetes-values.yaml
@@ -271,4 +271,4 @@ kubectl -n tulipfarm rollout status deployment/app --timeout=600s
 
 > **Verify.** `kubectl -n tulipfarm rollout status deployment/app --timeout=600s` succeeds, expect the app deployment finishes rolling out.
 
-If that check fails, see [what to do next](/docs/self-hosting/when-install-fails#readyz).
+If that check fails, see [what to do next](/self-hosting/when-install-fails#readyz).

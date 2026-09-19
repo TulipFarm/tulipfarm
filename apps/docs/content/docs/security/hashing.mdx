@@ -8,7 +8,7 @@ import { Callout } from "fumadocs-ui/components/callout";
 Some secrets never need to be read back. The instance only has to check whether a value
 matches. Those are **hashed**: transformed one-way so the original cannot be recovered,
 even by TulipFarm. The rule is simple. A value that must be used again, like an LLM
-provider key, is [encrypted](/docs/security/encryption); a value that only has to be
+provider key, is [encrypted](/security/encryption); a value that only has to be
 verified, like a login password or an API token, is hashed.
 
 Two things are hashed: user passwords and the API tokens TulipFarm issues.
@@ -54,6 +54,6 @@ These three are easy to confuse. Each breaks predictability for a different oper
 
 TulipFarm applies the IV and the salt automatically. The pepper is the one you opt into.
 
-To create or revoke a token, see [Issue an API token](/docs/using-tulipfarm/issue-an-api-token). For
+To create or revoke a token, see [Issue an API token](/using-tulipfarm/issue-an-api-token). For
 the variables TulipFarm reads, including `API_TOKEN_PEPPER`, see
-[Environment variables](/docs/reference/environment-variables).
+[Environment variables](/reference/environment-variables).

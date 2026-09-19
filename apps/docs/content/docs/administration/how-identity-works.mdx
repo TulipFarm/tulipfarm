@@ -22,7 +22,7 @@ Users can create personal bearer tokens through `POST /api/v1/auth/tokens` and m
 `GET /api/v1/auth/tokens` and `DELETE /api/v1/auth/tokens/{id}`. Token values have the `tulip_`
 prefix and are returned only at creation time. They act as the user who created them.
 
-See [Issue an API token](/docs/using-tulipfarm/issue-an-api-token) for the task flow.
+See [Issue an API token](/using-tulipfarm/issue-an-api-token) for the task flow.
 
 ## Machine identities
 
@@ -71,7 +71,7 @@ This is how you give temporary access without leaving a permanent hole behind.
 An **operational API client** is a machine identity restricted to non-content server checks.
 Creating a client with `operational: true` binds it to the current business and server
 installation. That binding grants nothing by itself: a matching, explicitly scoped permission
-is still required. See the [API client reference](/docs/reference/roles-and-permissions#api-clients).
+is still required. See the [API client reference](/reference/roles-and-permissions#api-clients).
 
 Operational credentials cannot become a user session, use internal worker callbacks, read chats
 or records, export credentials, or invoke business actions. Ordinary workers keep their separate
@@ -94,7 +94,7 @@ Three things follow, and all three are enforced:
 - A guest is also refused if its **sponsor** is no longer active. When someone leaves, the guests
   they vouched for stop working. You do not have to hunt them down.
 
-See [roles and permissions](/docs/reference/roles-and-permissions) for the neutral reference.
+See [roles and permissions](/reference/roles-and-permissions) for the neutral reference.
 
 ## Linking Slack identities
 

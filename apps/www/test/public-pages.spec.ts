@@ -136,7 +136,7 @@ for (const scripts of ["disabled", "failed"] as const) {
       ).toBeVisible();
       await expect(
         page.getByRole("link", { name: "Read the setup docs", exact: true })
-      ).toHaveAttribute("href", `${DOCS_URL}/docs/self-hosting`);
+      ).toHaveAttribute("href", `${DOCS_URL}/self-hosting`);
       await expect(page.locator("#assistant-setup pre")).toContainText(`${SITE_URL}/deploy.txt`);
       await expect(
         page.getByRole("link", { name: "Read the deployment guide", exact: true })
@@ -173,7 +173,7 @@ test("provides a real 404 with useful exits and consistent share metadata", asyn
   );
   await expect(page.getByRole("main").getByRole("link", { name: "Read the docs" })).toHaveAttribute(
     "href",
-    `${DOCS_URL}/docs`
+    `${DOCS_URL}/`
   );
   await page.getByRole("main").getByRole("link", { name: "Go home" }).click();
   await expect(page.locator('meta[property="og:title"]')).toHaveAttribute(
